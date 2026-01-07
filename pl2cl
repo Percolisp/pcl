@@ -1,0 +1,38 @@
+#!/usr/bin/env perl
+
+# pl2cl - Convert Perl expressions to Common Lisp
+# Usage: pl2cl <file.pl>
+#    or: echo '$x = 1' | pl2cl
+
+use v5.30;
+use strict;
+use warnings;
+
+use lib ".";
+use Pl::Parser;
+
+my $code;
+
+if (@ARGV && -f $ARGV[0]) {
+  # Read from file
+  print Pl::Parser->parse_file($ARGV[0]);
+}
+elsif (@ARGV) {
+  # Treat arguments as code
+  $code = join(' ', @ARGV);
+  print Pl::Parser->parse_code($code);
+}
+elsif (!-t STDIN) {
+  # Read from stdin
+  local $/;
+  $code = <STDIN>;
+  print Pl::Parser->parse_code($code);
+}
+else {
+  say "Usage: pl2cl <file.pl>";
+  say "   or: pl2cl '\$x = 1;'";
+  say "   or: echo '\$x = 1;' | pl2cl";
+  exit 1;
+}
+
+print "\n";
