@@ -69,7 +69,7 @@ diag "-------- Signatures with defaults:";
 {
     my $sig = parse_sig('($x, $y = $x * 2)');
     is($sig->{min_params}, 1, 'Complex default: min_params = 1');
-    is($sig->{params}[1]{default_cl}, '(pcl:pl-* $x 2)', 'Complex default compiled');
+    is($sig->{params}[1]{default_cl}, '(pl-* $x 2)', 'Complex default compiled');
 }
 
 

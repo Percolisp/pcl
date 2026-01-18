@@ -22,9 +22,10 @@
    ;; Math
    #:pl-sin #:pl-cos #:pl-atan2 #:pl-exp #:pl-log #:pl-sqrt #:pl-rand #:pl-srand
    ;; String
-   #:pl-. #:pl-str-x #:pl-length #:pl-substr #:pl-lc #:pl-uc
+   #:pl-. #:pl-str-x #:pl-length #:pl-substr #:pl-lc #:pl-uc #:pl-fc
    #:pl-chomp #:pl-chop #:pl-index #:pl-rindex #:pl-string_concat
    #:pl-chr #:pl-ord #:pl-hex #:pl-oct #:pl-lcfirst #:pl-ucfirst #:pl-sprintf #:pl-printf
+   #:pl-quotemeta #:pl-pos
    ;; Assignment
    #:pl-setf #:pl-my #:pl-incf #:pl-decf
    #:pl-pre++ #:pl-post++ #:pl-pre-- #:pl-post--
@@ -54,6 +55,8 @@
    #:pl-return #:pl-last #:pl-next #:pl-redo
    ;; I/O
    #:pl-print #:pl-say #:pl-warn #:pl-die
+   ;; Exception handling
+   #:pl-eval #:pl-eval-block #:pl-exception #:pl-exception-object
    ;; File I/O
    #:pl-open #:pl-close #:pl-eof #:pl-tell #:pl-seek
    #:pl-binmode #:pl-read #:pl-sysread #:pl-syswrite
@@ -68,26 +71,79 @@
    #:pl-exit #:pl-system #:pl-backtick
    ;; Environment
    #:%ENV #:pl-env-get #:pl-env-set
+   ;; Module system
+   #:@INC #:%INC #:@ARGV #:pl-use #:pl-require
    ;; Functions
-   #:pl-backslash #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray
+   #:pl-backslash #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray #:pl-caller
    #:pl-grep #:pl-map #:pl-sort #:pl-reverse
    #:pl-join #:pl-split #:pl-funcall-ref
    ;; Dereferencing (sigil cast operations)
    #:pl-cast-@ #:pl-cast-% #:pl-cast-$
    ;; OO
    #:pl-bless #:pl-get-class #:pl-method-call #:pl-resolve-invocant
+   #:pl-super-call #:perl-pkg-to-clos-class #:clos-class-to-pkg
+   #:pl-can #:pl-isa
    ;; Regex
    #:pl-=~ #:pl-!~ #:pl-subst #:pl-tr #:pl-regex
    ;; Capture groups
    #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
    ;; Special variables
-   #:$$))
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"|
+   ;; END blocks
+   #:*end-blocks*
+   ;; Compile-time definition macros (for BEGIN block support)
+   #:pl-sub #:pl-our #:pl-my))
 
 (in-package :pcl)
+
+;;; ============================================================
+;;; Compile-Time Definition Macros
+;;; ============================================================
+;;; These macros wrap definitions in eval-when to make them available
+;;; at compile time. This matches Perl's semantics where subs and
+;;; package variables are defined as they are parsed, allowing BEGIN
+;;; blocks to call subs defined before them in source order.
+
+;;; pl-sub: Define a Perl subroutine.
+;;; Uses eval-when so the function exists at compile time, allowing
+;;; BEGIN blocks to call subs defined before them in source order.
+;;; This matches Perl's semantics where subs are compiled immediately.
+(defmacro pl-sub (name params &body body)
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (defun ,name ,params ,@body)))
+
+;;; pl-our: Declare a package variable (Perl's 'our').
+;;; Declaration happens at compile time (visible to BEGIN blocks).
+;;; Initialization (if any) happens at runtime (after all BEGIN blocks).
+;;; This matches Perl where 'our $x = 1' declares at compile, assigns at runtime.
+(defmacro pl-our (name &optional (init nil init-supplied-p))
+  (if init-supplied-p
+      `(progn
+         (eval-when (:compile-toplevel :load-toplevel :execute)
+           (defvar ,name))
+         (setf ,name ,init))
+      `(eval-when (:compile-toplevel :load-toplevel :execute)
+         (defvar ,name))))
+
+;;; pl-my: Declare a lexical variable at file scope (Perl's top-level 'my').
+;;; Same semantics as pl-our: declaration at compile time, init at runtime.
+;;; Note: Inside subs, 'my' uses regular let bindings, not this macro.
+(defmacro pl-my (name &optional (init nil init-supplied-p))
+  (if init-supplied-p
+      `(progn
+         (eval-when (:compile-toplevel :load-toplevel :execute)
+           (defvar ,name))
+         (setf ,name ,init))
+      `(eval-when (:compile-toplevel :load-toplevel :execute)
+         (defvar ,name))))
 
 ;;; Forward declarations to avoid style warnings
 (declaim (ftype (function (t) t) to-number to-string unbox pl-get-stream))
 (defvar *pl-undef* :undef "Perl's undef value")
+
+;;; Forward declaration for %INC table (full definition in Module System section)
+(defvar *pl-inc-table* (make-hash-table :test 'equal)
+  "Perl %INC - tracks loaded modules (forward declaration)")
 
 ;;; Regex capture group variables ($1, $2, ... $9)
 (defvar $1 nil "Regex capture group 1")
@@ -103,8 +159,63 @@
 ;;; Process ID ($$)
 (defvar $$ (sb-posix:getpid) "Process ID")
 
+;;; Child exit status ($?)
+(defvar $? 0 "Child process exit status from last system/backtick")
+
+;;; Input line number ($.)
+(defvar |$.| 0 "Input line number of last filehandle read")
+
+;;; Program name ($0)
+(defvar $0 (or (car sb-ext:*posix-argv*) "perl") "Program name")
+
+;;; Eval error ($@)
+(defvar $@ "" "Error from last eval")
+
+;;; OS name ($^O)
+(defvar |$^O|
+  #+linux "linux"
+  #+darwin "darwin"
+  #+windows "MSWin32"
+  #-(or linux darwin windows) "unknown"
+  "Operating system name")
+
+;;; Perl version ($^V) - we report as PCL
+(defvar |$^V| "v5.30.0" "Perl version (compatibility)")
+
+;;; Taint mode flag (${^TAINT}) - always off in transpiled code
+(defvar |${^TAINT}| nil "Taint mode is not enabled")
+
+;;; Input record separator ($/)
+(defvar |$/| (string #\Newline) "Input record separator")
+
+;;; Output record separator ($\)
+(defvar |$\\| "" "Output record separator")
+
+;;; List separator ($")
+(defvar |$"| " " "List separator for array interpolation")
+
+;;; System error ($!) - returns errno as string
+(defun pl-errno-string ()
+  "Return the current system error message (like Perl's $!)"
+  (let ((errno (sb-alien:get-errno)))
+    (if (zerop errno)
+        ""
+        (or (sb-int:strerror errno)
+            (format nil "Unknown error ~D" errno)))))
+
 ;;; Wantarray context variable
 (defvar *wantarray* nil "True when list context is expected")
+
+;;; END blocks - executed in reverse order at program exit
+(defvar *end-blocks* nil "List of END block thunks to execute at exit")
+
+;; Register exit hook to run END blocks
+(pushnew (lambda ()
+           (dolist (fn *end-blocks*)
+             (handler-case (funcall fn)
+               (error (e)
+                 (format *error-output* "Error in END block: ~A~%" e)))))
+         sb-ext:*exit-hooks*)
 
 ;;; ============================================================
 ;;; Value Boxing - All Perl scalars are boxed for reference support
@@ -445,6 +556,11 @@
   "Perl uc - uppercase"
   (string-upcase (to-string str)))
 
+(defun pl-fc (str)
+  "Perl fc - fold case for case-insensitive comparison.
+   Uses string-downcase as approximation (full Unicode folding would need ICU)."
+  (string-downcase (to-string str)))
+
 (defun pl-chomp (var)
   "Perl chomp - remove trailing newline, modifies variable in place.
    Returns number of characters removed."
@@ -531,6 +647,28 @@
     (if (> (length s) 0)
         (concatenate 'string (string-upcase (subseq s 0 1)) (subseq s 1))
         s)))
+
+(defun pl-quotemeta (str)
+  "Perl quotemeta - escape regex metacharacters"
+  (cl-ppcre:quote-meta-chars (to-string str)))
+
+;;; Match position tracking for pos()
+(defvar *pl-match-pos* (make-hash-table :test 'eq)
+  "Hash table mapping boxed strings to their match positions")
+
+(defun pl-pos (var &optional new-pos)
+  "Perl pos - get/set match position for /g regex.
+   With one arg, returns current position (or nil).
+   With two args, sets position and returns new-pos."
+  (if new-pos
+      ;; Setter: pos($str) = N
+      (if (pl-box-p var)
+          (setf (gethash var *pl-match-pos*) (truncate (to-number new-pos)))
+          new-pos)
+      ;; Getter: pos($str)
+      (if (pl-box-p var)
+          (gethash var *pl-match-pos*)
+          nil)))
 
 (defun pl-sprintf (fmt &rest args)
   "Perl sprintf - formatted string"
@@ -619,6 +757,45 @@
 (defmacro pl-setf (place value)
   "Perl assignment - sets value inside box, auto-declares if needed"
   (cond
+    ;; Array variable (symbol starting with @)
+    ((and (symbolp place)
+          (char= (char (symbol-name place) 0) #\@))
+     ;; Populate array from list/vector - clear and refill
+     (let ((val (gensym "VAL")))
+       `(let ((,val ,value))
+          (unless (boundp ',place)
+            (proclaim '(special ,place))
+            (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
+          ;; Clear array and populate from source
+          (setf (fill-pointer ,place) 0)
+          (cond
+            ((vectorp ,val)
+             (loop for item across ,val
+                   do (vector-push-extend item ,place)))
+            ((listp ,val)
+             (loop for item in ,val
+                   do (vector-push-extend item ,place))))
+          ,place)))
+    ;; Hash variable (symbol starting with %)
+    ((and (symbolp place)
+          (char= (char (symbol-name place) 0) #\%))
+     ;; Populate hash from list/hash
+     (let ((val (gensym "VAL")))
+       `(let ((,val ,value))
+          (unless (boundp ',place)
+            (proclaim '(special ,place))
+            (setf (symbol-value ',place) (make-hash-table :test 'equal)))
+          ;; Clear and populate hash
+          (clrhash ,place)
+          (cond
+            ((hash-table-p ,val)
+             ;; Copy from another hash
+             (maphash (lambda (k v) (setf (gethash k ,place) v)) ,val))
+            ((vectorp ,val)
+             ;; Populate from key-value pairs in vector
+             (loop for i from 0 below (length ,val) by 2
+                   do (setf (gethash (aref ,val i) ,place) (aref ,val (1+ i))))))
+          ,place)))
     ;; Simple scalar variable
     ((symbolp place)
      ;; Check if value is a reference (pl-backslash)
@@ -665,6 +842,27 @@
             (proclaim '(special ,arr))
             (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
           (setf (pl-aref ,arr ,idx) ,val))))
+    ;; Nested hash access - autovivification
+    ;; (pl-gethash (pl-gethash ... ) key) = value
+    ((and (listp place)
+          (eq (car place) 'pl-gethash)
+          (listp (cadr place))
+          (eq (car (cadr place)) 'pl-gethash))
+     (let ((outer-key (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-set ,(cadr place) ,outer-key ,val))))
+    ;; Array element in hash chain - autovivification
+    ;; (pl-aref (pl-gethash ... ) idx) = value
+    ((and (listp place)
+          (eq (car place) 'pl-aref)
+          (listp (cadr place))
+          (eq (car (cadr place)) 'pl-gethash))
+     (let ((hash-chain (cadr place))
+           (idx (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-aref-set ,hash-chain ,idx ,val))))
     ;; Array/hash ref access and scalar deref - use CL setf
     ((and (listp place)
           (member (car place) '(pl-aref-deref pl-gethash-deref pl-$)))
@@ -673,6 +871,24 @@
     ((and (listp place)
           (member (car place) '(pl-aref pl-gethash)))
      `(setf ,place ,value))
+    ;; List assignment: (vector $a $b $c) = @_ or similar
+    ;; Each element gets assigned from corresponding position in RHS
+    ;; If RHS is not a vector, treat it as a single-element list
+    ((and (listp place) (eq (car place) 'vector))
+     (let ((vars (cdr place))
+           (src (gensym "SRC"))
+           (src-vec (gensym "SRC-VEC")))
+       `(let* ((,src ,value)
+               ;; Convert non-vectors to single-element vector
+               ;; Strings are NOT treated as arrays here (unlike pl-aref for element access)
+               (,src-vec (if (and (vectorp ,src) (not (stringp ,src)))
+                             ,src
+                             (vector ,src))))
+          ,@(loop for var in vars
+                  for i from 0
+                  collect `(box-set ,var (if (< ,i (length ,src-vec))
+                                             (aref ,src-vec ,i)
+                                             *pl-undef*))))))
     ;; Other complex place (fallback)
     (t `(box-set ,place ,value))))
 
@@ -996,18 +1212,21 @@
 
 (defun pl-aref (arr idx)
   "Perl array access (supports negative indices, works on vectors and lists)"
-  (let* ((a (if (pl-box-p arr) (pl-box-value arr) arr))  ; Unbox if needed
-         (i (truncate (to-number idx)))
-         (len (cond ((vectorp a) (length a))
-                    ((listp a) (length a))
-                    (t 0)))
-         (actual-idx (if (< i 0) (+ len i) i)))
-    (cond
-      ((and (vectorp a) (>= actual-idx 0) (< actual-idx len))
-       (aref a actual-idx))
-      ((and (listp a) (>= actual-idx 0) (< actual-idx len))
-       (nth actual-idx a))
-      (t *pl-undef*))))
+  (let* ((a (if (pl-box-p arr) (pl-box-value arr) arr)))  ; Unbox if needed
+    ;; If array is undef (from failed hash lookup etc), return undef
+    (when (eq a *pl-undef*)
+      (return-from pl-aref *pl-undef*))
+    (let* ((i (truncate (to-number idx)))
+           (len (cond ((vectorp a) (length a))
+                      ((listp a) (length a))
+                      (t 0)))
+           (actual-idx (if (< i 0) (+ len i) i)))
+      (cond
+        ((and (vectorp a) (>= actual-idx 0) (< actual-idx len))
+         (aref a actual-idx))
+        ((and (listp a) (>= actual-idx 0) (< actual-idx len))
+         (nth actual-idx a))
+        (t *pl-undef*)))))
 
 (defun (setf pl-aref) (value arr idx)
   "Setf expander for pl-aref - allows assignment to array elements (vectors and lists)"
@@ -1095,23 +1314,164 @@
 ;;; ============================================================
 
 (defun pl-gethash (hash key)
-  "Perl hash access. Special handling for %ENV."
+  "Perl hash access. Special handling for %ENV and %INC."
   (let* ((h (if (pl-box-p hash) (pl-box-value hash) hash))
          (k (to-string key)))
-    ;; Check for %ENV marker
-    (if (eq h '%ENV-MARKER%)
-        (or (sb-posix:getenv k) *pl-undef*)
-        (multiple-value-bind (val found) (gethash k h)
-          (if found val *pl-undef*)))))
+    ;; If hash is undef (from failed lookup), return undef
+    (when (eq h *pl-undef*)
+      (return-from pl-gethash *pl-undef*))
+    ;; Check for special markers
+    (cond
+      ((eq h '%ENV-MARKER%)
+       (or (sb-posix:getenv k) *pl-undef*))
+      ((eq h '%INC-MARKER%)
+       (multiple-value-bind (val found) (gethash k *pl-inc-table*)
+         (if found val *pl-undef*)))
+      (t
+       (multiple-value-bind (val found) (gethash k h)
+         (if found val *pl-undef*))))))
 
 (defun (setf pl-gethash) (value hash key)
   "Setf expander for pl-gethash - allows assignment to hash elements.
-   Special handling for %ENV."
+   Special handling for %ENV and %INC."
   (let* ((h (if (pl-box-p hash) (pl-box-value hash) hash))
          (k (to-string key)))
-    (if (eq h '%ENV-MARKER%)
-        (progn (sb-posix:setenv k (to-string value) 1) value)
-        (setf (gethash k h) value))))
+    (cond
+      ((eq h '%ENV-MARKER%)
+       (sb-posix:setenv k (to-string value) 1)
+       value)
+      ((eq h '%INC-MARKER%)
+       (setf (gethash k *pl-inc-table*) value))
+      (t
+       (setf (gethash k h) value)))))
+
+(defun pl-autoviv-gethash (hash key)
+  "Get hash value, autovivifying to empty hash if missing or :UNDEF."
+  (let* ((h (if (pl-box-p hash) (pl-box-value hash) hash))
+         (k (to-string key)))
+    (multiple-value-bind (val found) (gethash k h)
+      (if (and found (hash-table-p val))
+          val
+          ;; Autovivify: create new hash and store it
+          (let ((new-hash (make-hash-table :test 'equal)))
+            (setf (gethash k h) new-hash)
+            new-hash)))))
+
+(defun pl-autoviv-gethash-for-array (hash key)
+  "Get hash value, autovivifying to empty array if missing."
+  (let* ((h (if (pl-box-p hash) (pl-box-value hash) hash))
+         (k (to-string key)))
+    (multiple-value-bind (val found) (gethash k h)
+      (if (and found (vectorp val))
+          val
+          ;; Autovivify: create new array and store it
+          (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+            (setf (gethash k h) new-arr)
+            new-arr)))))
+
+(defun pl-autoviv-aref-for-hash (arr idx)
+  "Get array element, autovivifying to empty hash if missing."
+  (let* ((a (if (pl-box-p arr) (pl-box-value arr) arr))
+         (i (truncate idx)))
+    ;; Extend array if needed
+    (when (>= i (length a))
+      (loop for j from (length a) to i
+            do (vector-push-extend *pl-undef* a)))
+    (let ((val (aref a i)))
+      (if (hash-table-p val)
+          val
+          ;; Autovivify: create new hash and store it
+          (let ((new-hash (make-hash-table :test 'equal)))
+            (setf (aref a i) new-hash)
+            new-hash)))))
+
+(defun pl-autoviv-aref-for-array (arr idx)
+  "Get array element, autovivifying to empty array if missing."
+  (let* ((a (if (pl-box-p arr) (pl-box-value arr) arr))
+         (i (truncate idx)))
+    ;; Extend array if needed
+    (when (>= i (length a))
+      (loop for j from (length a) to i
+            do (vector-push-extend *pl-undef* a)))
+    (let ((val (aref a i)))
+      (if (vectorp val)
+          val
+          ;; Autovivify: create new array and store it
+          (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+            (setf (aref a i) new-arr)
+            new-arr)))))
+
+(defun pl-array-set (arr idx value)
+  "Set array element, extending array if needed."
+  (let* ((a (if (pl-box-p arr) (pl-box-value arr) arr))
+         (i (truncate idx)))
+    ;; Extend array if needed
+    (when (>= i (length a))
+      (loop for j from (length a) to i
+            do (vector-push-extend *pl-undef* a)))
+    (setf (aref a i) value)))
+
+(defmacro pl-autoviv-set (inner-hash-form outer-key value)
+  "Set value with autovivification for nested hash access.
+   inner-hash-form is (pl-gethash hash inner-key) or deeper.
+   Expands to code that ensures intermediate hashes exist."
+  (let ((val-var (gensym "VAL"))
+        (hash-var (gensym "HASH")))
+    `(let ((,val-var ,value)
+           (,hash-var ,(expand-autoviv inner-hash-form)))
+       (setf (gethash (to-string ,outer-key) ,hash-var) ,val-var))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun expand-autoviv (form)
+    "Compile-time helper to expand nested gethash into autovivifying code.
+     Creates hashes at each level (for hash access chain)."
+    (cond
+      ;; (pl-gethash inner key) - autovivify to hash
+      ((and (listp form) (eq (car form) 'pl-gethash))
+       (let ((inner (cadr form))
+             (key (caddr form)))
+         (if (or (and (listp inner) (eq (car inner) 'pl-gethash))
+                 (and (listp inner) (eq (car inner) 'pl-aref)))
+             ;; Nested: recursively expand, then autoviv this level
+             `(pl-autoviv-gethash ,(expand-autoviv inner) ,key)
+             ;; Base case: inner is actual hash
+             `(pl-autoviv-gethash ,inner ,key))))
+      ;; (pl-aref inner idx) - intermediate array, this slot yields hash
+      ((and (listp form) (eq (car form) 'pl-aref))
+       (let ((inner (cadr form))
+             (idx (caddr form)))
+         `(pl-autoviv-aref-for-hash ,(expand-autoviv-for-array inner) ,idx)))
+      ;; Not a recognized form
+      (t form)))
+
+  (defun expand-autoviv-for-array (form)
+    "Expand form knowing result must be an array."
+    (cond
+      ;; (pl-gethash inner key) - this slot yields array
+      ((and (listp form) (eq (car form) 'pl-gethash))
+       (let ((inner (cadr form))
+             (key (caddr form)))
+         (if (or (and (listp inner) (eq (car inner) 'pl-gethash))
+                 (and (listp inner) (eq (car inner) 'pl-aref)))
+             `(pl-autoviv-gethash-for-array ,(expand-autoviv inner) ,key)
+             `(pl-autoviv-gethash-for-array ,inner ,key))))
+      ;; (pl-aref inner idx) - this slot yields array
+      ((and (listp form) (eq (car form) 'pl-aref))
+       (let ((inner (cadr form))
+             (idx (caddr form)))
+         `(pl-autoviv-aref-for-array ,(expand-autoviv-for-array inner) ,idx)))
+      ;; Not a recognized form
+      (t form))))
+
+(defmacro pl-autoviv-aref-set (hash-chain idx value)
+  "Set array element in a hash chain with autovivification.
+   hash-chain is like (pl-gethash ... key) and should yield an array.
+   Expands to code that ensures intermediate structures exist."
+  (let ((val-var (gensym "VAL"))
+        (arr-var (gensym "ARR")))
+    `(let ((,val-var ,value)
+           (,arr-var ,(expand-autoviv-for-array hash-chain)))
+       (pl-array-set ,arr-var ,idx ,val-var))))
 
 (defun pl-gethash-deref (ref key)
   "Perl hash ref access $ref->{key} - unbox the reference first"
@@ -1170,6 +1530,13 @@
   (let ((k (to-string key)))
     (prog1 (gethash k hash *pl-undef*)
       (remhash k hash))))
+
+(defun pl-stash (pkg-name)
+  "Return package stash (symbol table) as a hash.
+   This is a simplified stub - full implementation would mirror Perl's stash."
+  (declare (ignore pkg-name))
+  ;; Return an empty hash for now - stash manipulation is rarely essential
+  (make-hash-table :test 'equal))
 
 ;;; ============================================================
 ;;; Control Flow
@@ -1335,9 +1702,72 @@
   (apply #'pl-print (append args (list #\Newline)))
   (force-output *error-output*))
 
+;;; Exception condition for object-based die
+;;; When Perl dies with a blessed reference, we preserve it in $@
+(define-condition pl-exception (error)
+  ((object :initarg :object :reader pl-exception-object))
+  (:report (lambda (c s)
+             (format s "~A" (pl-exception-object c)))))
+
 (defun pl-die (&rest args)
-  "Perl die"
-  (error (apply #'pl-. args)))
+  "Perl die - throw an exception.
+   If given a single blessed reference, throw it as an exception object.
+   Otherwise, concatenate args as error string."
+  (if (and (= (length args) 1)
+           (let ((obj (car args)))
+             ;; Check if it's a blessed hash or blessed box
+             (or (and (hash-table-p obj) (gethash :__class__ obj))
+                 (and (pl-box-p obj)
+                      (let ((inner (pl-box-value obj)))
+                        (or (pl-box-class obj)
+                            (and (hash-table-p inner) (gethash :__class__ inner))))))))
+      ;; Object exception - preserve for $@
+      (error 'pl-exception :object (car args))
+      ;; String exception
+      (error (apply #'pl-. args))))
+
+;;; pl-eval (string eval) - simplified version
+;;; Full string eval would need transpiler at runtime.
+;;; This stub handles simple cases like version string evaluation.
+(defun pl-eval (string)
+  "Simplified Perl eval(string) - handles simple numeric expressions.
+   Full implementation would need runtime transpiler."
+  (let ((s (to-string (unbox string))))
+    (handler-case
+        (progn
+          (setf $@ "")
+          ;; Try to parse as number (handles version strings like '1.50')
+          (let ((n (parse-number s)))
+            (if n n s)))
+      (error (e)
+        (setf $@ (format nil "~A" e))
+        nil))))
+
+(defun parse-number (s)
+  "Try to parse string as number, return nil if not a number."
+  (handler-case
+      (let ((val (read-from-string s)))
+        (if (numberp val) val nil))
+    (error () nil)))
+
+;;; pl-eval-block: Execute code catching errors (Perl's eval { })
+;;; Sets $@ to error message on failure, empty string on success.
+;;; Returns nil on error, block result on success.
+(defmacro pl-eval-block (&body body)
+  "Perl eval { } - execute body catching errors.
+   Sets $@ to error/exception on failure, empty string on success.
+   Returns result of body on success, nil on failure."
+  `(handler-case
+       (prog1 (progn ,@body)
+         (setf $@ ""))
+     (pl-exception (e)
+       ;; Object exception - preserve the object in $@
+       (setf $@ (pl-exception-object e))
+       nil)
+     (error (e)
+       ;; String exception - convert to string
+       (setf $@ (format nil "~A" e))
+       nil)))
 
 ;;; ============================================================
 ;;; File I/O Functions
@@ -1774,6 +2204,202 @@
 (defvar %ENV '%ENV-MARKER% "Marker for environment hash access")
 
 ;;; ============================================================
+;;; Module System (%INC, @INC, use/require)
+;;; ============================================================
+
+;; %INC: hash of loaded modules (key: relative path, value: absolute path)
+;; Note: *pl-inc-table* is forward-declared near top of file
+(defvar %INC '%INC-MARKER% "Marker for %INC hash access")
+
+;; @INC: module search paths (initialized by pl2cl from Perl's @INC)
+(defvar @INC (make-array 0 :adjustable t :fill-pointer 0)
+  "Perl @INC - module search paths")
+
+;; @ARGV: command line arguments (excluding program name $0)
+(defvar @ARGV
+  (let ((args (cdr sb-ext:*posix-argv*)))  ; skip program name
+    (if args
+        (make-array (length args)
+                    :adjustable t
+                    :fill-pointer (length args)
+                    :initial-contents args)
+        (make-array 0 :adjustable t :fill-pointer 0)))
+  "Perl @ARGV - command line arguments")
+
+;; Cache configuration
+(defparameter *pcl-cache-dir*
+  (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
+  "Directory for cached compiled modules")
+(defparameter *pcl-cache-max-age* (* 7 24 60 60)
+  "Max cache age in seconds (default: 1 week)")
+(defparameter *pcl-skip-cache* nil
+  "When true, bypass cache (set by --no-cache or PCL_NO_CACHE)")
+(defparameter *pcl-cache-fasl* t
+  "When true, cache compiled FASL; when nil, cache .lisp for debugging")
+(defparameter *pcl-pl2cl-path* nil
+  "Path to pl2cl script (set at load time)")
+
+;; Track modules currently being loaded (for circular dependency detection)
+(defvar *pl-loading-modules* nil
+  "Stack of modules currently being loaded")
+
+;;; --- Module Path Utilities ---
+
+(defun pl-module-to-path (module-name)
+  "Convert Perl module name to relative path.
+   Foo::Bar => Foo/Bar.pm
+   Foo/Bar.pm => Foo/Bar.pm (unchanged)"
+  (let ((name (to-string module-name)))
+    (if (search ".pm" name)
+        name
+        (concatenate 'string
+                     (substitute #\/ #\: name)
+                     ".pm"))))
+
+(defun pl-find-module-in-inc (rel-path)
+  "Search @INC for module file, return absolute path or nil."
+  (loop for dir across @INC
+        ;; Ensure dir ends with / so merge-pathnames treats it as directory
+        for dir-str = (let ((s (if (stringp dir) dir (namestring dir))))
+                        (if (and (> (length s) 0)
+                                 (char/= (char s (1- (length s))) #\/))
+                            (concatenate 'string s "/")
+                            s))
+        for full-path = (merge-pathnames rel-path (pathname dir-str))
+        when (probe-file full-path)
+          return (namestring (truename full-path))))
+
+;;; --- Cache Management ---
+
+(defun pl-ensure-cache-dir ()
+  "Create cache directory if it doesn't exist."
+  (ensure-directories-exist *pcl-cache-dir*))
+
+(defun pl-compute-cache-path (source-path &optional lisp-p)
+  "Compute cache path for a source file using hash of absolute path.
+   LISP-P: if true, return .lisp path; else .fasl"
+  (let* ((abs-path (namestring (truename source-path)))
+         (hash (sxhash abs-path))
+         (ext (if lisp-p ".lisp" ".fasl")))
+    (pl-ensure-cache-dir)
+    (merge-pathnames (format nil "~16,'0X~A" (logand hash #xFFFFFFFFFFFFFFFF) ext)
+                     *pcl-cache-dir*)))
+
+(defun pl-cache-valid-p (source-path cache-path)
+  "Check if cached file is valid: exists, newer than source, not expired."
+  (when *pcl-skip-cache*
+    (return-from pl-cache-valid-p nil))
+  (when (not (probe-file cache-path))
+    (return-from pl-cache-valid-p nil))
+  (let* ((source-mtime (file-write-date source-path))
+         (cache-mtime (file-write-date cache-path))
+         (cache-age (- (get-universal-time) cache-mtime)))
+    (and (> cache-mtime source-mtime)
+         (< cache-age *pcl-cache-max-age*))))
+
+(defun pl-cleanup-old-cache ()
+  "Remove cache files older than max age."
+  (let ((cutoff (- (get-universal-time) *pcl-cache-max-age*)))
+    (dolist (file (directory (merge-pathnames "*.*" *pcl-cache-dir*)))
+      (when (< (file-write-date file) cutoff)
+        (ignore-errors (delete-file file))))))
+
+;;; --- Module Transpilation ---
+
+(defun pl-transpile-file (source-path)
+  "Transpile a Perl file to Common Lisp code by calling pl2cl.
+   Uses --module flag to skip preamble (for dynamic module loading).
+   Returns the transpiled code as a string, or nil on failure."
+  (unless *pcl-pl2cl-path*
+    (error "pl2cl path not set - cannot transpile ~A" source-path))
+  (let ((output (make-array 0 :element-type 'character
+                              :adjustable t :fill-pointer 0)))
+    (with-output-to-string (s output)
+      (let ((proc (sb-ext:run-program
+                   "perl"
+                   (list (namestring *pcl-pl2cl-path*)
+                         "--module"  ; Skip preamble for module loading
+                         (namestring source-path))
+                   :output s
+                   :error *error-output*
+                   :wait t
+                   :search t)))
+        (unless (zerop (sb-ext:process-exit-code proc))
+          (return-from pl-transpile-file nil))))
+    (when (> (length output) 0)
+      output)))
+
+;;; --- Module Loading ---
+
+(defun pl-load-module-cached (source-path)
+  "Load a Perl module with caching. Returns t on success."
+  (pl-ensure-cache-dir)
+  (let ((cache-path (pl-compute-cache-path source-path (not *pcl-cache-fasl*))))
+    (cond
+      ;; Cache hit
+      ((pl-cache-valid-p source-path cache-path)
+       (load cache-path)
+       t)
+      ;; Cache miss - transpile and cache
+      (t
+       (let ((lisp-code (pl-transpile-file source-path)))
+         (unless lisp-code
+           (error "Failed to transpile ~A" source-path))
+         (if *pcl-cache-fasl*
+             ;; FASL mode: write temp .lisp, compile to .fasl
+             (let ((temp-lisp (pl-compute-cache-path source-path t)))
+               (with-open-file (out temp-lisp
+                                    :direction :output
+                                    :if-exists :supersede)
+                 (write-string lisp-code out))
+               (let ((fasl-path (compile-file temp-lisp :output-file cache-path
+                                              :print nil :verbose nil)))
+                 (ignore-errors (delete-file temp-lisp))
+                 (unless fasl-path
+                   (error "compile-file failed for ~A" temp-lisp))
+                 (pl-cleanup-old-cache)
+                 (load fasl-path)
+                 t))
+             ;; Lisp mode: just cache .lisp
+             (progn
+               (with-open-file (out cache-path
+                                    :direction :output
+                                    :if-exists :supersede)
+                 (write-string lisp-code out))
+               (pl-cleanup-old-cache)
+               (load cache-path)
+               t)))))))
+
+(defun pl-use (module-name &key imports)
+  "Perl use - load module at compile time and import symbols.
+   MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
+   IMPORTS: list of symbols to import (not yet implemented)"
+  (declare (ignore imports)) ; TODO: implement Exporter
+  (let ((rel-path (pl-module-to-path module-name)))
+    ;; Already loaded?
+    (when (gethash rel-path *pl-inc-table*)
+      (return-from pl-use t))
+    ;; Circular dependency?
+    (when (member rel-path *pl-loading-modules* :test #'string=)
+      (warn "Circular dependency detected: ~A" rel-path)
+      (return-from pl-use t))
+    ;; Find module in @INC
+    (let ((abs-path (pl-find-module-in-inc rel-path)))
+      (unless abs-path
+        (error "Can't locate ~A in @INC (@INC contains: ~{~A~^ ~})"
+               rel-path (coerce @INC 'list)))
+      ;; Load with circular detection
+      (let ((*pl-loading-modules* (cons rel-path *pl-loading-modules*)))
+        (pl-load-module-cached abs-path))
+      ;; Update %INC
+      (setf (gethash rel-path *pl-inc-table*) abs-path)
+      t)))
+
+(defun pl-require (module-name)
+  "Perl require - load module at runtime (no imports)."
+  (pl-use module-name))
+
+;;; ============================================================
 ;;; List Functions
 ;;; ============================================================
 
@@ -1886,8 +2512,8 @@
       ((pl-box-p inner) "SCALAR")
       ;; Hash reference
       ((hash-table-p inner) "HASH")
-      ;; Array reference (list or vector)
-      ((or (listp inner) (vectorp inner)) "ARRAY")
+      ;; Array reference (list or vector, but NOT strings)
+      ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
       ((functionp inner) "CODE")
       ;; Not a reference
@@ -1908,6 +2534,43 @@
 (defun pl-wantarray ()
   "Perl wantarray"
   *wantarray*)
+
+(defun pl-caller (&optional (level 0))
+  "Perl caller - return information about the calling subroutine.
+   In scalar context, returns package name.
+   In list context, returns (package filename line subroutine).
+   Uses SBCL's backtrace facilities for stack introspection."
+  (let ((frame-info nil)
+        (current-level 0)
+        (target-level (+ level 2)))  ; Skip pl-caller itself and its caller
+    ;; Walk the backtrace to find the target frame
+    (sb-debug:map-backtrace
+     (lambda (frame)
+       (when (= current-level target-level)
+         (let* ((debug-fun (sb-di:frame-debug-fun frame))
+                (name (sb-di:debug-fun-name debug-fun))
+                (code-loc (sb-di:frame-code-location frame)))
+           (setf frame-info
+                 (list "main"  ; Package (simplified - always "main" for now)
+                       (or (ignore-errors
+                             (sb-di:debug-source-namestring
+                              (sb-di:code-location-debug-source code-loc)))
+                           "-")  ; Filename
+                       (or (ignore-errors
+                             (sb-di:code-location-toplevel-form-offset code-loc))
+                           0)  ; Line number approximation
+                       (if (and name (symbolp name))
+                           (symbol-name name)
+                           (format nil "~A" name))))))  ; Subroutine name
+       (incf current-level)
+       ;; Return nil to continue, non-nil would stop
+       nil))
+    ;; Return results
+    (if frame-info
+        (if *wantarray*
+            (values-list frame-info)
+            (first frame-info))  ; Scalar context: just package
+        nil)))  ; Past end of stack
 
 ;;; ============================================================
 ;;; OO Support
@@ -1961,20 +2624,161 @@
         name)))
 
 (defun pl-method-call (obj method &rest args)
-  "Perl method call - looks up pl-METHOD function in object's package and calls it"
+  "Perl method call - looks up pl-METHOD function in object's package and walks MRO for inheritance"
   (let* ((method-name (to-string method))
          (class-name (pl-get-class obj)))
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
-    ;; Find the package for this class
-    (let ((pkg (find-package (string-upcase class-name))))
-      (unless pkg
-        (error "Package ~A not found for method call" class-name))
-      ;; Look up pl-METHOD in that package (pl- prefix avoids CL conflicts)
-      (let ((fn (find-symbol (string-upcase (format nil "PL-~A" method-name)) pkg)))
-        (if (and fn (fboundp fn))
-            (apply fn obj args)
-            (error "Can't locate method ~A in package ~A" method-name class-name))))))
+
+    ;; Try to find CLOS class for MRO-based lookup
+    (let* ((clos-class-name (perl-pkg-to-clos-class class-name))
+           (clos-class (find-class (intern (string-upcase clos-class-name) :pcl) nil)))
+
+      (if clos-class
+          ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
+          (let ((mro (sb-mop:class-precedence-list clos-class)))
+            (dolist (cls mro)
+              (let* ((cls-sym-name (symbol-name (class-name cls)))
+                     ;; Convert CLOS class name back to CL package name
+                     (pkg-name (clos-class-to-pkg cls-sym-name))
+                     (pkg (find-package pkg-name)))
+                (when pkg
+                  (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) pkg)))
+                    (when (and fn (fboundp fn))
+                      (return-from pl-method-call (apply fn obj args)))))))
+            ;; Not found in any class in MRO
+            (error "Can't locate method ~A via package ~A" method-name class-name))
+
+          ;; No CLOS class - fall back to single-class lookup (legacy behavior)
+          (let ((pkg (find-package (string-upcase class-name))))
+            (unless pkg
+              (error "Package ~A not found for method call" class-name))
+            (let ((fn (find-symbol (string-upcase (format nil "PL-~A" method-name)) pkg)))
+              (if (and fn (fboundp fn))
+                  (apply fn obj args)
+                  (error "Can't locate method ~A in package ~A" method-name class-name))))))))
+
+;;; Package name conversion utilities for inheritance
+(defun perl-pkg-to-clos-class (name)
+  "Convert Perl package name to CLOS class name: Foo::Bar -> foo-bar"
+  (string-downcase (substitute #\- #\: name)))
+
+(defun clos-class-to-pkg (cls-name)
+  "Convert CLOS class name back to CL package name for lookup.
+   foo-bar -> FOO-BAR (works because we use pipe-quoted or simple package names)"
+  ;; For now, just upcase - the CL package name matches the Perl name
+  ;; If Perl package is Foo::Bar, CL package is |Foo::Bar| or Foo-Bar
+  ;; We try both strategies
+  (let* ((upcase-name (string-upcase cls-name))
+         ;; Try direct mapping first (for simple package names)
+         (pkg (find-package upcase-name)))
+    (if pkg
+        upcase-name
+        ;; Try converting - to :: for nested packages
+        (let ((perl-style (substitute #\: #\- upcase-name)))
+          perl-style))))
+
+;;; SUPER:: method calls
+(defun pl-super-call (obj method current-class &rest args)
+  "Call method starting from parent of current-class in MRO (for SUPER:: calls)"
+  (let* ((method-name (to-string method))
+         (clos-class-name (perl-pkg-to-clos-class current-class))
+         (clos-class (find-class (intern (string-upcase clos-class-name) :pcl) nil)))
+
+    (unless clos-class
+      (error "Can't find class ~A for SUPER:: call" current-class))
+
+    ;; Get MRO and skip current class
+    (let* ((mro (sb-mop:class-precedence-list clos-class))
+           (parent-mro (cdr mro)))  ;; Skip current class
+
+      (dolist (cls parent-mro)
+        (let* ((cls-sym-name (symbol-name (class-name cls)))
+               (pkg-name (clos-class-to-pkg cls-sym-name))
+               (pkg (find-package pkg-name)))
+          (when pkg
+            (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) pkg)))
+              (when (and fn (fboundp fn))
+                (return-from pl-super-call (apply fn obj args)))))))
+
+      (error "No SUPER::~A found from ~A" method-name current-class))))
+
+;;; can() and isa() methods - available on all objects (UNIVERSAL package)
+(defun pl-can (invocant method-name)
+  "Perl can() - check if object/class can perform a method.
+   Returns the code reference if method exists, nil otherwise.
+   Uses C3 MRO to check inheritance chain."
+  (let* ((method-str (to-string method-name))
+         (class-name (cond
+                       ((stringp invocant) invocant)
+                       ((pl-box-p invocant) (pl-get-class invocant))
+                       ((hash-table-p invocant) (gethash :__class__ invocant))
+                       (t nil))))
+    (unless class-name
+      (return-from pl-can nil))
+
+    ;; Try to find CLOS class for MRO-based lookup
+    ;; Classes are defined in packages named after the Perl package (e.g., Dog::dog)
+    (let* ((clos-class-name (perl-pkg-to-clos-class class-name))
+           (pkg (find-package (string-upcase class-name)))
+           (clos-class (when pkg
+                         (find-class (intern (string-upcase clos-class-name) pkg) nil))))
+
+      (if clos-class
+          ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
+          (let ((mro (sb-mop:class-precedence-list clos-class)))
+            (dolist (cls mro)
+              (let* ((cls-sym-name (symbol-name (class-name cls)))
+                     (pkg-name (clos-class-to-pkg cls-sym-name))
+                     (pkg (find-package pkg-name)))
+                (when pkg
+                  (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg)))
+                    (when (and fn (fboundp fn))
+                      (return-from pl-can (symbol-function fn)))))))
+            nil)  ; Not found in any class in MRO
+
+          ;; No CLOS class - fall back to single-class lookup
+          (let ((pkg (find-package (string-upcase class-name))))
+            (when pkg
+              (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg)))
+                (if (and fn (fboundp fn))
+                    (symbol-function fn)
+                    nil))))))))
+
+(defun pl-isa (invocant class-name)
+  "Perl isa() - check if object is-a class.
+   Uses C3 MRO to check inheritance chain.
+   Returns t if invocant is-a class-name, nil otherwise."
+  (let* ((check-class (to-string class-name))
+         (obj-class (cond
+                      ((stringp invocant) invocant)
+                      ((pl-box-p invocant) (pl-get-class invocant))
+                      ((hash-table-p invocant) (gethash :__class__ invocant))
+                      (t nil))))
+    (unless obj-class
+      (return-from pl-isa nil))
+
+    ;; Exact match
+    (when (string-equal obj-class check-class)
+      (return-from pl-isa t))
+
+    ;; Try to find CLOS class for MRO-based lookup
+    ;; Classes are defined in packages named after the Perl package (e.g., Dog::dog)
+    (let* ((clos-class-name (perl-pkg-to-clos-class obj-class))
+           (pkg (find-package (string-upcase obj-class)))
+           (clos-class (when pkg
+                         (find-class (intern (string-upcase clos-class-name) pkg) nil))))
+
+      (when clos-class
+        ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
+        (let ((mro (sb-mop:class-precedence-list clos-class)))
+          (dolist (cls mro)
+            (let* ((cls-sym-name (symbol-name (class-name cls)))
+                   (pkg-name (clos-class-to-pkg cls-sym-name)))
+              (when (string-equal pkg-name check-class)
+                (return-from pl-isa t))))))
+
+      nil)))
 
 ;;; ============================================================
 ;;; Regex Support (using CL-PPCRE)
@@ -2006,14 +2810,40 @@
                (setf (getf result mod) t)))
     result))
 
+(defun get-closing-delim (open-delim)
+  "Get the closing delimiter for paired delimiters like (), [], {}, <>"
+  (case open-delim
+    (#\( #\))
+    (#\[ #\])
+    (#\{ #\})
+    (#\< #\>)
+    (t open-delim)))  ; Non-paired delimiters use same char
+
 (defun pl-regex (pattern-string)
   "Parse /pattern/modifiers and return a regex-match struct.
-   Pattern-string is like '/foo/i' or 'm/bar/g'"
+   Pattern-string is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'"
   (let* ((str (to-string pattern-string))
          (first-char (char str 0))
          (start-delim (if (char= first-char #\m) 1 0))
-         (delim (char str start-delim))
-         (end-delim (position delim str :start (1+ start-delim) :from-end t))
+         (open-delim (char str start-delim))
+         (close-delim (get-closing-delim open-delim))
+         (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
+         (pattern (subseq str (1+ start-delim) end-delim))
+         (modifiers (if (< end-delim (1- (length str)))
+                        (subseq str (1+ end-delim))
+                        "")))
+    (make-pl-regex-match :pattern pattern
+                         :modifiers (parse-regex-modifiers modifiers))))
+
+(defun pl-qr (pattern-string)
+  "Parse qr/pattern/modifiers and return a compiled regex (regex-match struct).
+   Pattern-string is like 'qr/foo/i' or 'qr{pattern}i'"
+  (let* ((str (to-string pattern-string))
+         ;; Skip past 'qr' prefix
+         (start-delim 2)
+         (open-delim (char str start-delim))
+         (close-delim (get-closing-delim open-delim))
+         (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
          (pattern (subseq str (1+ start-delim) end-delim))
          (modifiers (if (< end-delim (1- (length str)))
                         (subseq str (1+ end-delim))
@@ -2077,7 +2907,9 @@
         (setf $9 (subseq str (aref reg-starts 8) (aref reg-ends 8)))))))
 
 (defun do-regex-match (string op)
-  "Perform regex match, return t if matched, nil otherwise.
+  "Perform regex match.
+   In scalar context: return t if matched, nil otherwise.
+   In list context (*wantarray* t): return vector of captures, or nil if no match.
    Also sets capture group variables $1, $2, ... $9.
    Note: In Perl, captures are only updated on successful match."
   (let* ((str (to-string (unbox string)))
@@ -2093,7 +2925,17 @@
               ;; Clear and set capture groups only on success
               (clear-capture-groups)
               (set-capture-groups str reg-starts reg-ends)
-              t)))
+              ;; In list context, return captures as vector
+              (if *wantarray*
+                  (let* ((num-groups (length reg-starts))
+                         (captures (make-array num-groups :adjustable t :fill-pointer t)))
+                    (dotimes (i num-groups)
+                      (setf (aref captures i)
+                            (if (and (aref reg-starts i) (aref reg-ends i))
+                                (subseq str (aref reg-starts i) (aref reg-ends i))
+                                nil)))
+                    captures)
+                  t))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))
@@ -2269,5 +3111,12 @@
 ;;; ============================================================
 ;;; Package initialization
 ;;; ============================================================
+
+;; Export all pl- symbols so they're accessible from other packages
+;; This includes all functions, macros, and variables with pl- prefix
+(do-symbols (sym (find-package :pcl))
+  (when (and (>= (length (symbol-name sym)) 3)
+             (string= "PL-" (subseq (symbol-name sym) 0 3)))
+    (export sym :pcl)))
 
 (format t "PCL Runtime loaded~%")

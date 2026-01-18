@@ -45,8 +45,31 @@ has environment => (
   is        => 'lazy',
 );
 
+# @INC paths for module lookup (transpile-time)
+has inc_paths => (
+  is        => 'rw',
+  default   => sub { [@INC] },  # Start with Perl's @INC
+);
+
+# Track modules currently being parsed (cycle detection)
+has _parsing_modules => (
+  is        => 'rw',
+  default   => sub { {} },
+);
+
+
+# Flag to suppress output emission (for prototype-only parsing)
+has collect_prototypes_only => (
+  is        => 'rw',
+  default   => 0,
+);
+
+
 sub _build_environment {
-  return Pl::Environment->new();
+  my $self = shift;
+  return Pl::Environment->new(
+    source_file => $self->has_filename ? $self->filename : '-',
+  );
 }
 
 
@@ -83,9 +106,110 @@ sub parse {
 
   $self->_process_children($doc);
 
+  # Insert pre-declarations for referenced but undeclared packages
+  $self->_insert_package_predeclarations();
+
+  # Insert forward declarations for subs
+  $self->_insert_sub_forward_declarations();
+
   return join("\n", @{$self->output});
 }
 
+# Insert forward declarations for subs defined in each package
+# Perl subs can be called before they're defined (Perl resolves names at runtime).
+# But Common Lisp resolves function names at load time for top-level code.
+# Forward declarations ensure subs are defined before any top-level code runs.
+sub _insert_sub_forward_declarations {
+  my $self = shift;
+
+  # Skip if we're just collecting prototypes
+  return if $self->collect_prototypes_only;
+
+  my $subs = $self->environment->get_declared_subs();
+  return unless @$subs;
+
+  # Group subs by package
+  my %by_package;
+  for my $sub (@$subs) {
+    push @{$by_package{$sub->{package}}}, $sub->{name};
+  }
+
+  # Find (in-package ...) lines and insert forward decls after them
+  my $output = $self->output;
+  my @insertions;  # [ [position, lines_to_insert], ... ]
+
+  for my $i (0 .. $#$output) {
+    my $line = $output->[$i];
+    if ($line =~ /^\(in-package\s+:([^\)]+)\)/) {
+      my $pkg_spec = $1;
+      # Extract package name: :pcl -> pcl, :|Foo::Bar| -> Foo::Bar
+      my $pkg_name = $pkg_spec;
+      $pkg_name =~ s/^\|//;
+      $pkg_name =~ s/\|$//;
+
+      # 'pcl' package corresponds to 'main' in Perl
+      $pkg_name = 'main' if $pkg_name eq 'pcl';
+
+      if (my $sub_names = $by_package{$pkg_name}) {
+        my @decls;
+        push @decls, ";; Forward declarations: Perl subs can be called before definition,";
+        push @decls, ";; but top-level Lisp code executes immediately. Declare stubs now.";
+        # Deduplicate sub names
+        my %seen;
+        for my $name (sort grep { !$seen{$_}++ } @$sub_names) {
+          push @decls, "(unless (fboundp 'pl-$name) (defun pl-$name (&rest args) (declare (ignore args)) nil))";
+        }
+        push @decls, "";
+        push @insertions, [$i + 1, \@decls];
+        # Mark this package as done so we don't emit again
+        delete $by_package{$pkg_name};
+      }
+    }
+  }
+
+  # Insert in reverse order so positions remain valid
+  for my $ins (reverse @insertions) {
+    my ($pos, $lines) = @$ins;
+    splice @$output, $pos, 0, @$lines;
+  }
+}
+
+# Insert defpackage forms for packages referenced but not declared
+# This enables dynamic require inside functions to work
+sub _insert_package_predeclarations {
+  my $self = shift;
+
+  # Skip if we're just collecting prototypes
+  return if $self->collect_prototypes_only;
+
+  my $pkgs = $self->environment->get_undeclared_packages();
+  return unless @$pkgs;
+
+  my @predecls;
+  for my $pkg (@$pkgs) {
+    my $cl_pkg = $pkg =~ /::/ ? ":|$pkg|" : ":$pkg";
+    push @predecls, ";; Pre-declare package for dynamic loading";
+    push @predecls, "(defpackage $cl_pkg (:use :cl :pcl))";
+    push @predecls, "";
+  }
+
+  # Insert after line 1 (after "in-package :pcl" and blank line)
+  splice @{$self->output}, 2, 0, @predecls;
+}
+
+
+# Transform package-qualified variable names for CL
+# $Pkg::Var -> Pkg::$Var, $Pkg::Sub::Var -> |Pkg::Sub|::$Var
+sub _transform_pkg_var {
+  my ($self, $var) = @_;
+  # Handle package-qualified variables: $Pkg::var -> Pkg::$var
+  if ($var =~ /^([\$\@\%])(.+)::([^:]+)$/) {
+    my ($sigil, $pkg, $name) = ($1, $2, $3);
+    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+    return "${cl_pkg}::${sigil}${name}";
+  }
+  return $var;
+}
 
 # Process children of a PPI node (Document or Block)
 sub _process_children {
@@ -144,6 +268,20 @@ sub _process_element {
   elsif ($ref eq 'PPI::Statement::Include') {
     # use/require
     $self->_process_include_statement($element);
+  }
+  elsif ($ref eq 'PPI::Statement::Scheduled') {
+    # BEGIN, END, CHECK, INIT blocks
+    $self->_process_scheduled_block($element);
+  }
+  elsif ($ref eq 'PPI::Statement::End') {
+    # __END__ - stop processing (ignore everything after)
+    $self->_emit(";; __END__");
+    return;
+  }
+  elsif ($ref eq 'PPI::Statement::Data') {
+    # __DATA__ - stop processing (DATA filehandle not yet supported)
+    $self->_emit(";; __DATA__ (DATA filehandle not implemented)");
+    return;
   }
   elsif ($ref =~ /^PPI::Statement/) {
     # Other statement types - treat as expression for now
@@ -231,8 +369,33 @@ sub _process_variable_statement {
 
   return unless @parts;
 
+  # Check declarator type
+  my $declarator = '';
+  if (ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content =~ /^(my|our|state|local)$/) {
+    $declarator = $1;
+  }
+
+  # Handle 'our' declarations - package variables
+  if ($declarator eq 'our') {
+    $self->_process_our_declaration($stmt, \@parts, $perl_code);
+    return;
+  }
+
+  # Handle 'local' declarations - dynamic scoping
+  if ($declarator eq 'local') {
+    $self->_process_local_declaration($stmt, \@parts, $perl_code);
+    return;
+  }
+
+  # Handle top-level 'my' declarations - need pl-my for BEGIN block visibility
+  # Inside subs, my uses regular let bindings (handled elsewhere)
+  if ($declarator eq 'my' && $self->environment->in_subroutine == 0) {
+    $self->_process_my_toplevel_declaration($stmt, \@parts, $perl_code);
+    return;
+  }
+
   # Check if this is a state declaration inside a sub
-  my $is_state = (ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'state');
+  my $is_state = ($declarator eq 'state');
   my $state_vars = $self->{_current_state_vars} // {};
 
   if ($is_state && %$state_vars) {
@@ -261,6 +424,383 @@ sub _process_variable_statement {
 
   $self->_emit(";; $perl_code");
   $self->_emit($cl_code) if defined $cl_code;
+  $self->_emit("");
+}
+
+# Process 'our' variable declaration - package-level variable
+sub _process_our_declaration {
+  my $self = shift;
+  my $stmt = shift;
+  my $parts = shift;
+  my $perl_code = shift;
+
+  my $pkg = $self->environment->current_package;
+
+  # Find variable(s) and optional initializer
+  my @vars;
+  my $init_idx = -1;
+
+  for my $i (0 .. $#$parts) {
+    my $p = $parts->[$i];
+    my $ref = ref($p);
+
+    if ($ref eq 'PPI::Token::Symbol') {
+      push @vars, $p->content;
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      # List declaration: our ($x, $y)
+      push @vars, $self->_find_symbols_in_list($p);
+    }
+    elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
+      $init_idx = $i;
+      last;
+    }
+  }
+
+  return unless @vars;
+
+  # Register in environment
+  for my $var (@vars) {
+    $self->environment->add_our_variable($pkg, $var);
+  }
+
+  # Special handling for @ISA - inheritance declaration
+  if (@vars == 1 && $vars[0] eq '@ISA' && $init_idx >= 0) {
+    $self->_process_isa_declaration($stmt, $parts, $init_idx, $perl_code);
+    return;
+  }
+
+  $self->_emit(";; $perl_code");
+
+  # Wrap defvar in eval-when so variables exist at compile time for BEGIN blocks.
+  # Separate declaration (compile-time) from initialization (runtime) to match Perl:
+  # 'our $x = 1; BEGIN { $x = 2 }' → at runtime $x becomes 1 (init overwrites BEGIN)
+
+  if ($init_idx >= 0) {
+    # Has initializer - parse the RHS
+    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
+    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+
+    if (@vars == 1) {
+      # Single variable: our $x = value, our @arr = (), our %hash = ()
+      my $var = $vars[0];
+      my $sigil = substr($var, 0, 1);
+
+      # Check for empty list initializer ()
+      my $is_empty_list = (@rhs_parts == 1 &&
+                           ref($rhs_parts[0]) eq 'PPI::Structure::List' &&
+                           $self->_is_empty_structure($rhs_parts[0]));
+
+      if ($sigil eq '@') {
+        # Array: declare at compile time, initialize at runtime
+        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+        unless ($is_empty_list) {
+          my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+          # Use pl-setf to properly populate array from list
+          $self->_emit("(pl-setf $var $init_cl)");
+        }
+      }
+      elsif ($sigil eq '%') {
+        # Hash: declare at compile time, initialize at runtime
+        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+        unless ($is_empty_list) {
+          my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+          # Use pl-setf to properly populate hash from list
+          $self->_emit("(pl-setf $var $init_cl)");
+        }
+      }
+      else {
+        # Scalar: declare with nil box at compile time, set value at runtime
+        my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("  (defvar $var (make-pl-box nil)))");
+        $self->_emit("(setf (pl-box-value $var) $init_cl)");
+      }
+    }
+    else {
+      # Multiple variables: our ($x, $y) = (1, 2)
+      # First declare all at compile time, then assign at runtime
+      for my $var (@vars) {
+        my $sigil = substr($var, 0, 1);
+        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        if ($sigil eq '@') {
+          $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+        } elsif ($sigil eq '%') {
+          $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+        } else {
+          $self->_emit("  (defvar $var (make-pl-box nil)))");
+        }
+      }
+      # Now do the assignment at runtime
+      my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+      my $vars_vector = "(vector " . join(" ", @vars) . ")";
+      $self->_emit("(pl-setf $vars_vector $init_cl)");
+    }
+  }
+  else {
+    # Bare declaration: our $x; or our @arr; or our %hash;
+    # Just declare at compile time, no runtime init
+    for my $var (@vars) {
+      my $sigil = substr($var, 0, 1);
+      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      if ($sigil eq '@') {
+        $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+      } elsif ($sigil eq '%') {
+        $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+      } else {
+        $self->_emit("  (defvar $var (make-pl-box nil)))");
+      }
+    }
+  }
+
+  $self->_emit("");
+}
+
+# Process top-level 'my' declaration - lexical at file scope
+# Uses eval-when for BEGIN block visibility: declaration at compile time,
+# initialization at runtime. Inside subs, 'my' uses regular let bindings.
+sub _process_my_toplevel_declaration {
+  my $self = shift;
+  my $stmt = shift;
+  my $parts = shift;
+  my $perl_code = shift;
+
+  # Find variable(s) and optional initializer
+  my @vars;
+  my $init_idx = -1;
+
+  for my $i (0 .. $#$parts) {
+    my $p = $parts->[$i];
+    my $ref = ref($p);
+
+    if ($ref eq 'PPI::Token::Symbol') {
+      push @vars, $p->content;
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      # List declaration: my ($x, $y)
+      push @vars, $self->_find_symbols_in_list($p);
+    }
+    elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
+      $init_idx = $i;
+      last;
+    }
+  }
+
+  return unless @vars;
+
+  $self->_emit(";; $perl_code");
+
+  # Emit compile-time declaration for all variables
+  for my $var (@vars) {
+    my $sigil = substr($var, 0, 1);
+    $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+    if ($sigil eq '@') {
+      $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+    } elsif ($sigil eq '%') {
+      $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+    } else {
+      $self->_emit("  (defvar $var (make-pl-box nil)))");
+    }
+  }
+
+  # Handle initialization at runtime
+  if ($init_idx >= 0) {
+    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
+    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+
+    # Check for empty list initializer ()
+    my $is_empty_list = (@rhs_parts == 1 &&
+                         ref($rhs_parts[0]) eq 'PPI::Structure::List' &&
+                         $self->_is_empty_structure($rhs_parts[0]));
+
+    unless ($is_empty_list) {
+      if (@vars == 1) {
+        my $var = $vars[0];
+        my $sigil = substr($var, 0, 1);
+
+        if ($sigil eq '$') {
+          # Scalar: parse RHS and use box-set to properly unbox source
+          my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+          $self->_emit("(box-set $var $init_cl)");
+        } else {
+          # Array/hash: parse full statement through expression parser for proper list context
+          # This generates (pl-setf @arr (vector ...)) or (pl-setf %h (pl-hash ...))
+          my $cl_code = $self->_parse_expression($parts, $stmt);
+          $self->_emit($cl_code) if defined $cl_code;
+        }
+      } else {
+        # Multiple variables: parse full statement through expression parser
+        my $cl_code = $self->_parse_expression($parts, $stmt);
+        $self->_emit($cl_code) if defined $cl_code;
+      }
+    }
+  }
+
+  $self->_emit("");
+}
+
+# Helper to check if a PPI structure is empty (for () detection)
+sub _is_empty_structure {
+  my ($self, $struct) = @_;
+  my @children = $struct->children;
+  # Filter out whitespace
+  @children = grep { ref($_) ne 'PPI::Token::Whitespace' } @children;
+  return @children == 0;
+}
+
+# Process @ISA declaration - emit CLOS class with parents for MRO
+sub _process_isa_declaration {
+  my ($self, $stmt, $parts, $init_idx, $perl_code) = @_;
+
+  my $pkg = $self->environment->current_package;
+
+  # Extract parent class names from RHS
+  my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
+  @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+
+  my @parents = $self->_extract_parent_classes(\@rhs_parts);
+
+  $self->_emit(";; $perl_code");
+
+  if (@parents) {
+    # Emit CLOS class with parent classes for MRO tracking
+    my $cl_class = $self->_pkg_to_clos_class($pkg);
+    my $parents_cl = join(' ', map { $self->_pkg_to_clos_class($_) } @parents);
+
+    # Store parent list in environment for later use
+    $self->environment->set_isa($pkg, \@parents);
+
+    # Redefine the CLOS class with parents (overwrites the empty one from preamble)
+    $self->_emit(";; Redefine CLOS class with parents for MRO");
+    $self->_emit("(defclass $cl_class ($parents_cl) ())");
+  }
+
+  # Also emit the standard array initialization for @ISA
+  # This keeps @ISA available as an array at runtime
+  $self->_emit("(defvar \@ISA (make-array 0 :adjustable t :fill-pointer 0))");
+  for my $parent (@parents) {
+    $self->_emit("(pl-push \@ISA \"$parent\")");
+  }
+
+  $self->_emit("");
+}
+
+# Extract parent class names from an @ISA initializer expression
+# Handles: qw(Parent1 Parent2), ('Parent1', 'Parent2'), ("Parent")
+sub _extract_parent_classes {
+  my ($self, $parts) = @_;
+  my @parents;
+
+  for my $part (@$parts) {
+    my $ref = ref($part);
+
+    if ($ref eq 'PPI::Token::QuoteLike::Words') {
+      # qw(Parent1 Parent2)
+      my $content = $part->content;
+      $content =~ s/^qw\s*[\(\[\{<]//;
+      $content =~ s/[\)\]\}>]$//;
+      push @parents, split(/\s+/, $content);
+    }
+    elsif ($ref eq 'PPI::Token::Quote::Single'
+	   || $ref eq 'PPI::Token::Quote::Double') {
+      # 'Parent' or "Parent"
+      push @parents, $part->string;
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      # (list) - recurse into children
+      for my $child ($part->schildren) {
+        if ($child->isa('PPI::Statement::Expression')) {
+          push @parents, $self->_extract_parent_classes([$child->schildren]);
+        }
+        elsif ($child->isa('PPI::Token::Quote')) {
+          push @parents, $child->string;
+        }
+      }
+    }
+  }
+
+  return grep { defined $_ && $_ ne '' } @parents;
+}
+
+# Process 'local' variable declaration - dynamic scoping
+# Emits a (let ...) that stays open until block end
+sub _process_local_declaration {
+  my $self = shift;
+  my $stmt = shift;
+  my $parts = shift;
+  my $perl_code = shift;
+
+  # Find variable and optional initializer
+  my @vars;
+  my $init_idx = -1;
+
+  for my $i (0 .. $#$parts) {
+    my $p = $parts->[$i];
+    my $ref = ref($p);
+
+    if ($ref eq 'PPI::Token::Symbol') {
+      push @vars, $self->_transform_pkg_var($p->content);
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      push @vars, map { $self->_transform_pkg_var($_) } $self->_find_symbols_in_list($p);
+    }
+    elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
+      $init_idx = $i;
+      last;
+    }
+  }
+
+  return unless @vars;
+
+  $self->_emit(";; $perl_code");
+
+  # Build let bindings
+  my @bindings;
+  if ($init_idx >= 0 && @vars == 1) {
+    # local $x = value
+    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
+    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+    my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+
+    my $var = $vars[0];
+    my $sigil = substr($var, 0, 1);
+
+    if ($sigil eq '@') {
+      push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
+    }
+    elsif ($sigil eq '%') {
+      push @bindings, "($var (make-hash-table :test 'equal))";
+    }
+    else {
+      push @bindings, "($var (make-pl-box $init_cl))";
+    }
+  }
+  else {
+    # Bare local or multiple vars - just shadow with nil/empty
+    for my $var (@vars) {
+      my $sigil = substr($var, 0, 1);
+      if ($sigil eq '@') {
+        push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
+      }
+      elsif ($sigil eq '%') {
+        push @bindings, "($var (make-hash-table :test 'equal))";
+      }
+      else {
+        push @bindings, "($var (make-pl-box nil))";
+      }
+    }
+  }
+
+  my $bindings_str = join("\n        ", @bindings);
+  $self->_emit("(let ($bindings_str)");
+  $self->indent_level($self->indent_level + 1);
+
+  # Track that we have an open let that needs closing
+  $self->{_local_let_depth} //= 0;
+  $self->{_local_let_depth}++;
+
   $self->_emit("");
 }
 
@@ -504,12 +1044,24 @@ sub _process_block {
   # Enter new scope for filehandles
   $self->environment->push_scope();
 
+  # Track local let depth at block start
+  my $start_depth = $self->{_local_let_depth} // 0;
+
   for my $child ($block->children) {
     my $ref = ref($child);
     next if $ref eq 'PPI::Token::Whitespace';
     next if $ref eq 'PPI::Token::Comment';
 
     $self->_process_element($child);
+  }
+
+  # Close any let forms opened by local declarations in this block
+  my $end_depth = $self->{_local_let_depth} // 0;
+  while ($end_depth > $start_depth) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")  ;; end local");
+    $self->{_local_let_depth}--;
+    $end_depth--;
   }
 
   # Leave scope - removes filehandles added in this block
@@ -520,9 +1072,10 @@ sub _process_block {
 # Counter for anonymous block functions
 my $anon_block_counter = 0;
 
-# Parse a block as a named function for grep/map/sort/eval/sub blocks
+# Parse a block as a named function for eval/sub blocks
 # Returns the generated function name
-# $params is arrayref: ['$_'] for grep/map, ['$a','$b'] for sort, [] for eval/sub
+# $params is arrayref: [] for eval/sub
+# Note: grep/map/sort now use parse_block_to_cl_string with inline lambdas
 sub parse_block_as_function {
   my $self   = shift;
   my $block  = shift;  # PPI::Structure::Block
@@ -563,6 +1116,50 @@ sub parse_block_as_function {
   $self->_emit("");  # Blank line after function
 
   return $func_name;
+}
+
+# Parse a block and return its body as CL code string (for inline lambdas)
+# Returns the CL code string for the block body
+sub parse_block_to_cl_string {
+  my $self   = shift;
+  my $block  = shift;  # PPI::Structure::Block
+
+  # Save current output and indent, collect to temporary output
+  my $saved_output = $self->output;
+  my $saved_indent = $self->indent_level;
+  $self->output([]);
+  $self->indent_level(1);  # Start with some indent for readability
+
+  # Enter new scope for filehandles
+  $self->environment->push_scope();
+
+  # Process block contents
+  my $has_content = 0;
+  for my $child ($block->children) {
+    my $ref = ref($child);
+    next if $ref eq 'PPI::Token::Whitespace';
+    next if $ref eq 'PPI::Token::Comment';
+
+    $self->_process_element($child);
+    $has_content = 1;
+  }
+
+  # Leave scope
+  $self->environment->pop_scope();
+
+  # Collect the body lines
+  my @body_lines = @{$self->output};
+
+  # Restore original output
+  $self->output($saved_output);
+  $self->indent_level($saved_indent);
+
+  # Return body as string (or "nil" if empty)
+  if (@body_lines) {
+    return join("\n", @body_lines);
+  } else {
+    return "nil";
+  }
 }
 
 
@@ -970,7 +1567,9 @@ sub _process_sub_statement {
   $self->_emit(";; $perl_code");
 
   # Parse prototype/signature
-  my $sig_info = { params => [], min_params => 0, is_proto => 0 };
+  # Default: -1 means "unknown/list" - sub takes any number of args
+  # Only explicit prototypes/signatures set specific min_params
+  my $sig_info = { params => [], min_params => -1, is_proto => 0 };
   if ($prototype) {
     $sig_info = $self->parse_prototype_or_signature($prototype, $stmt);
   }
@@ -978,6 +1577,9 @@ sub _process_sub_statement {
   # Store in environment for later use by PExpr
   if ($name) {
     $self->environment->add_prototype($name, $sig_info);
+    # Also record for forward declarations
+    my $pkg = $self->environment->current_package();
+    $self->environment->add_declared_sub($name, $pkg);
   }
 
   # Build parameter list for defun
@@ -1070,8 +1672,9 @@ sub _process_sub_statement {
   }
 
   # User-defined subs get pl- prefix to avoid conflicts with CL built-ins
+  # Use pl-sub macro to wrap in eval-when for BEGIN block visibility
   # Wrap body in (block nil ...) so pl-return works
-  $self->_emit("(defun pl-$name ($params_cl)");
+  $self->_emit("(pl-sub pl-$name ($params_cl)");
   $self->indent_level($self->indent_level + 1);
 
   # If using %_args, convert to @_ vector
@@ -1082,6 +1685,9 @@ sub _process_sub_statement {
 
   $self->_emit("(block nil");
   $self->indent_level($self->indent_level + 1);
+
+  # Track that we're inside a subroutine (for shift/pop @_ vs @ARGV)
+  $self->environment->in_subroutine($self->environment->in_subroutine + 1);
 
   if ($block) {
     # Wrap sub body with let for local variable declarations
@@ -1094,6 +1700,9 @@ sub _process_sub_statement {
   else {
     $self->_emit("nil");
   }
+
+  # Leaving subroutine
+  $self->environment->in_subroutine($self->environment->in_subroutine - 1);
 
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close block
@@ -1148,7 +1757,8 @@ sub _process_package_statement {
     $self->environment->pop_package();
     # Switch back to previous package
     my $prev_pkg = $self->environment->current_package();
-    $self->_emit("(in-package :$prev_pkg)");
+    my $cl_prev  = $prev_pkg =~ /::/ ? ":|$prev_pkg|" : ":$prev_pkg";
+    $self->_emit("(in-package $cl_prev)");
     $self->_emit(";;; end package $pkg_name");
     $self->_emit("");
   }
@@ -1163,15 +1773,35 @@ sub _process_package_statement {
 
 
 # Emit CL package preamble (defpackage + in-package)
+# Uses pipe-quoting for package names with :: (e.g., :|Foo::Bar|)
+# Also emits a CLOS class for MRO tracking (inheritance)
 sub _emit_package_preamble {
   my $self     = shift;
   my $pkg_name = shift;
 
+  # Use pipe-quoted symbol if name contains ::
+  my $cl_pkg = $pkg_name =~ /::/ ? ":|$pkg_name|" : ":$pkg_name";
+
   $self->_emit(";;; package $pkg_name");
-  $self->_emit("(defpackage :$pkg_name");
+  $self->_emit("(defpackage $cl_pkg");
   $self->_emit("  (:use :cl :pcl))");
-  $self->_emit("(in-package :$pkg_name)");
+  $self->_emit("(in-package $cl_pkg)");
+
+  # Emit a CLOS class for this package (for MRO tracking)
+  # Class name: lowercase with :: → -  (e.g., Foo::Bar → foo-bar)
+  my $cl_class = $self->_pkg_to_clos_class($pkg_name);
+  $self->_emit(";; CLOS class for MRO");
+  $self->_emit("(defclass $cl_class () ())");
   $self->_emit("");
+}
+
+# Convert Perl package name to CLOS class name
+# Foo::Bar -> foo-bar
+sub _pkg_to_clos_class {
+  my ($self, $pkg) = @_;
+  my $class = lc($pkg);
+  $class =~ s/::/-/g;
+  return $class;
 }
 
 
@@ -1199,17 +1829,345 @@ sub _process_include_statement {
   my $perl_code = $stmt->content;
   $perl_code =~ s/;\s*$//;
 
-  # Check if this is 'use constant'
+  my $type = $stmt->type // 'use';    # 'use', 'require', 'no'
   my $module = $stmt->module // '';
+
+  # Handle 'use constant' specially
   if ($module eq 'constant') {
     $self->_process_use_constant($stmt, $perl_code);
     return;
   }
 
-  # Other includes - not yet implemented
-  $self->_emit(";; $perl_code");
-  $self->_emit(";; (include handling not yet implemented)");
+  # Handle 'no' statements (turn off pragma - no CL equivalent)
+  if ($type eq 'no') {
+    $self->_emit(";; $perl_code (no-op)");
+    $self->_emit("");
+    return;
+  }
+
+  # Handle version declarations (use v5.30, use 5.030, etc.)
+  if ($perl_code =~ /^use\s+v?5[\d.]+$/ || $module eq '') {
+    $self->_emit(";; $perl_code (pragma)");
+    $self->_emit("");
+    return;
+  }
+
+  # Handle pragmas - emit as comment (no CL equivalent)
+  if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter)$/) {
+    $self->_emit(";; $perl_code (pragma)");
+    $self->_emit("");
+    return;
+  }
+
+  # Handle 'use lib' - modify @INC
+  if ($module eq 'lib') {
+    $self->_process_use_lib($stmt, $perl_code);
+    return;
+  }
+
+  # General use/require
+  # Wrap in eval-when so they execute at compile time (needed for FASL caching)
+  if ($type eq 'use') {
+    my @imports = $self->_parse_use_import_list($stmt);
+
+    # Extract prototypes from module at transpile time
+    # This allows prototypes in other files to work..
+    my $module_env = $self->_extract_module_prototypes($module);
+    if ($module_env) {
+      $self->_merge_module_prototypes($module_env, \@imports);
+    }
+
+    $self->_emit(";; $perl_code");
+    if (@imports) {
+      my $list = join(' ', map { qq{"$_"} } @imports);
+      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("  (pl-use \"$module\" :imports '($list)))");
+    } else {
+      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("  (pl-use \"$module\"))");
+    }
+  }
+  elsif ($type eq 'require') {
+    $self->_emit(";; $perl_code");
+    $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+    $self->_emit("  (pl-require \"$module\"))");
+  }
+  else {
+    # Unknown type
+    $self->_emit(";; $perl_code");
+    $self->_emit(";; (include type '$type' not yet implemented)");
+  }
   $self->_emit("");
+}
+
+
+# Process scheduled blocks: BEGIN, END, CHECK, INIT
+sub _process_scheduled_block {
+  my $self = shift;
+  my $stmt = shift;
+
+  my $type = $stmt->type;  # 'BEGIN', 'END', 'CHECK', 'INIT', 'UNITCHECK'
+  my $perl_code = $stmt->content;
+  $perl_code =~ s/\n.*//s;  # First line only for comment
+
+  # Find the block
+  my ($block) = grep { $_->isa('PPI::Structure::Block') } $stmt->schildren;
+  unless ($block) {
+    $self->_emit(";; $type { } (no block found)");
+    return;
+  }
+
+  if ($type eq 'BEGIN') {
+    # BEGIN blocks execute at compile time (or during interpretation).
+    # NOT at :load-toplevel - BEGIN should only run once, not again when loading fasl.
+    # Subs and variables before this BEGIN are wrapped in eval-when
+    # (via pl-sub/pl-our/pl-my macros), making them visible to BEGIN.
+    $self->_emit(";; $perl_code");
+    $self->_emit("(eval-when (:compile-toplevel :execute)");
+    $self->indent_level($self->indent_level + 1);
+
+    # Process block contents
+    $self->_process_children($block);
+
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
+    $self->_emit("");
+  }
+  elsif ($type eq 'END') {
+    # END blocks execute at program exit, in reverse order
+    # Push a lambda to *end-blocks* (push gives LIFO = correct reverse order)
+    $self->_emit(";; $perl_code");
+    $self->_emit("(push (lambda ()");
+    $self->indent_level($self->indent_level + 2);
+
+    # Process block contents
+    $self->_process_children($block);
+
+    $self->indent_level($self->indent_level - 2);
+    $self->_emit("  ) *end-blocks*)");
+    $self->_emit("");
+  }
+  elsif ($type eq 'CHECK' || $type eq 'UNITCHECK') {
+    # CHECK runs after compile, before execute - use load-toplevel only
+    $self->_emit(";; $perl_code");
+    $self->_emit("(eval-when (:load-toplevel)");
+    $self->indent_level($self->indent_level + 1);
+
+    $self->_process_children($block);
+
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
+    $self->_emit("");
+  }
+  elsif ($type eq 'INIT') {
+    # INIT runs just before main code starts
+    # In CL, code at toplevel runs in order, so just emit normally
+    $self->_emit(";; $perl_code (runs at load time, before main)");
+
+    $self->_process_children($block);
+
+    $self->_emit("");
+  }
+  else {
+    $self->_emit(";; $type { } (unrecognized scheduled block)");
+  }
+}
+
+
+# Process 'use lib' statements
+sub _process_use_lib {
+  my ($self, $stmt, $perl_code) = @_;
+
+  $self->_emit(";; $perl_code");
+  $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+
+  # Extract path arguments from the statement
+  for my $child ($stmt->schildren) {
+    if ($child->isa('PPI::Token::Quote')) {
+      my $path = $child->string;
+      $self->_emit("  (pl-unshift \@INC \"$path\")");
+    }
+    elsif ($child->isa('PPI::Token::QuoteLike::Words')) {
+      # qw(path1 path2)
+      my $content = $child->content;
+      $content =~ s/^qw\s*[\(\[\{<]//;
+      $content =~ s/[\)\]\}>]$//;
+      for my $path (split /\s+/, $content) {
+        $self->_emit("  (pl-unshift \@INC \"$path\")") if $path;
+      }
+    }
+  }
+  $self->_emit(")");  # Close eval-when
+  $self->_emit("");
+
+  # Also add to transpiler's inc_paths for module finding
+  for my $child ($stmt->schildren) {
+    if ($child->isa('PPI::Token::Quote')) {
+      unshift @{$self->inc_paths}, $child->string;
+    }
+    elsif ($child->isa('PPI::Token::QuoteLike::Words')) {
+      my $content = $child->content;
+      $content =~ s/^qw\s*[\(\[\{<]//;
+      $content =~ s/[\)\]\}>]$//;
+      for my $path (split /\s+/, $content) {
+        unshift @{$self->inc_paths}, $path if $path;
+      }
+    }
+  }
+}
+
+
+# Find a module file in @INC paths
+# Returns the path to the .pm file, or undef if not found
+sub _find_module_file {
+  my ($self, $module) = @_;
+
+  # Convert Module::Name to Module/Name.pm
+  my $file = $module;
+  $file =~ s/::/\//g;
+  $file .= '.pm';
+
+  for my $inc (@{$self->inc_paths}) {
+    my $path = "$inc/$file";
+    return $path if -f $path;
+  }
+
+  return undef;
+}
+
+
+# Extract prototypes from a module by parsing it at transpile time.
+# Returns the Environment from parsing, or undef on failure.
+#
+# NOTE: This is RECURSIVE. When the module being parsed contains 'use'
+# statements, those trigger _extract_module_prototypes() calls for their
+# modules, and so on. The _parsing_modules hash (shared across all
+# recursive calls) prevents infinite loops from circular dependencies.
+# Results are memoized in a state hash to avoid re-parsing modules.
+sub _extract_module_prototypes {
+  my ($self, $module) = @_;
+
+  # Memoization cache (persists across all calls)
+  state $cache = {};
+
+  # Return cached result if already parsed
+  return $cache->{$module} if exists $cache->{$module};
+
+  # Skip known core modules that don't have prototypes affecting codegen
+  if ($module =~ /^(Test2?::|Carp|Scalar::Util|List::Util|Config|Time::HiRes|
+                    XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
+                    utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
+    return $cache->{$module} = undef;
+  }
+
+  # Cycle detection
+  return undef if $self->_parsing_modules->{$module};
+  local $self->_parsing_modules->{$module} = 1;
+
+  my $module_path = $self->_find_module_file($module);
+  return $cache->{$module} = undef unless $module_path;
+
+  my $doc = PPI::Document->new($module_path);
+  return $cache->{$module} = undef unless $doc;
+
+  my $module_env = Pl::Environment->new();
+
+  my $module_parser = Pl::Parser->new(
+    filename                => $module_path,
+    environment             => $module_env,
+    inc_paths               => $self->inc_paths,
+    _parsing_modules        => $self->_parsing_modules,
+    collect_prototypes_only => 1,
+  );
+
+  # parse() may recursively call _extract_module_prototypes() for any
+  # 'use' statements found in the module
+  eval { $module_parser->parse($doc) };
+  if ($@) {
+    warn "Failed to extract prototypes from $module: $@";
+    return $cache->{$module} = undef;
+  }
+
+  return $cache->{$module} = $module_env;
+}
+
+
+# Merge prototypes from another environment (only exported ones)
+sub _merge_module_prototypes {
+  my ($self, $module_env, $imports) = @_;
+
+  # If specific imports requested, only import those
+  if ($imports && @$imports) {
+    for my $name (@$imports) {
+      my $proto = $module_env->get_prototype($name);
+      if ($proto) {
+        $self->environment->add_prototype($name, $proto);
+      }
+    }
+    return;
+  }
+
+  # Otherwise import @EXPORT (we'd need to track this in Environment)
+  # For now, import all prototypes that affect code generation:
+  # - has_block_arg: requires &{} wrapping
+  # - reference params (\@, \%, \$): require auto-boxing
+  # This is a simplification - full implementation would track @EXPORT
+  for my $name (keys %{$module_env->prototypes}) {
+    my $proto = $module_env->get_prototype($name);
+    next unless $proto;
+
+    # Check if this prototype affects code generation
+    my $needs_import = 0;
+    $needs_import = 1 if $proto->{has_block_arg};
+
+    # Check for reference parameters
+    if ($proto->{params} && @{$proto->{params}}) {
+      for my $param (@{$proto->{params}}) {
+        if ($param->{name} && $param->{name} =~ /^\\/) {
+          $needs_import = 1;
+          last;
+        }
+      }
+    }
+
+    if ($needs_import) {
+      $self->environment->add_prototype($name, $proto);
+    }
+  }
+}
+
+
+# Parse import list from use statement (e.g., qw(foo bar) or ('foo', 'bar'))
+sub _parse_use_import_list {
+  my ($self, $stmt) = @_;
+  my @imports;
+
+  for my $child ($stmt->schildren) {
+    if ($child->isa('PPI::Token::QuoteLike::Words')) {
+      # qw(foo bar baz)
+      my $content = $child->content;
+      $content =~ s/^qw\s*[\(\[\{<]//;
+      $content =~ s/[\)\]\}>]$//;
+      push @imports, split /\s+/, $content;
+    }
+    elsif ($child->isa('PPI::Structure::List')) {
+      # ('foo', 'bar') import list
+      for my $item ($child->schildren) {
+        if ($item->isa('PPI::Statement::Expression')) {
+          for my $expr_child ($item->schildren) {
+            if ($expr_child->isa('PPI::Token::Quote')) {
+              push @imports, $expr_child->string;
+            }
+          }
+        }
+        elsif ($item->isa('PPI::Token::Quote')) {
+          push @imports, $item->string;
+        }
+      }
+    }
+  }
+
+  return grep { defined $_ && $_ ne '' } @imports;
 }
 
 
@@ -1324,7 +2282,8 @@ sub _emit_constant {
   my $cl_value = $self->_compile_constant_value($value_parts);
 
   # Emit as a function (Perl implements constants as subs)
-  $self->_emit("(defun pl-$name () $cl_value)");
+  # Use pl-sub for compile-time visibility (BEGIN blocks can use constants)
+  $self->_emit("(pl-sub pl-$name () $cl_value)");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
   $self->environment->add_prototype($name, {
@@ -1439,17 +2398,38 @@ sub _emit {
   my $self = shift;
   my $line = shift;
 
+  # Don't emit if we're just extracting prototypes
+  return if $self->collect_prototypes_only;
+
   my $indent = "  " x $self->indent_level;
   push @{$self->output}, $indent . $line;
 }
 
 
 # Convenience class methods
+#
+# These use two-pass parsing:
+# 1. First pass with collect_prototypes_only => 1 to find all 'use' statements
+#    and extract prototypes from them (recursively). This ensures prototypes
+#    are known even if 'use' appears after code that calls the imported subs.
+# 2. Second pass for real transpilation, with prototypes already in environment.
+
 sub parse_file {
   my $class    = shift;
   my $filename = shift;
 
-  my $parser = $class->new(filename => $filename);
+  # First pass: collect prototypes from all 'use'd modules
+  my $proto_parser = $class->new(
+    filename                => $filename,
+    collect_prototypes_only => 1,
+  );
+  $proto_parser->parse;
+
+  # Second pass: transpile with prototypes already known
+  my $parser = $class->new(
+    filename    => $filename,
+    environment => $proto_parser->environment,
+  );
   return $parser->parse;
 }
 
@@ -1458,7 +2438,18 @@ sub parse_code {
   my $class = shift;
   my $code  = shift;
 
-  my $parser = $class->new(code => $code);
+  # First pass: collect prototypes
+  my $proto_parser = $class->new(
+    code                    => $code,
+    collect_prototypes_only => 1,
+  );
+  $proto_parser->parse;
+
+  # Second pass: transpile with prototypes already known
+  my $parser = $class->new(
+    code        => $code,
+    environment => $proto_parser->environment,
+  );
   return $parser->parse;
 }
 
@@ -1539,10 +2530,15 @@ sub _parse_old_prototype {
     }
   }
 
+  # Check if prototype has & (block argument)
+  my $has_block_arg = ($proto_str =~ /&/);
+
   return {
-    params     => \@params,
-    min_params => $min_params,
-    is_proto   => 1,
+    params        => \@params,
+    min_params    => $min_params,
+    is_proto      => 1,
+    has_block_arg => $has_block_arg,
+    proto_string  => $proto_str,
   };
 }
 

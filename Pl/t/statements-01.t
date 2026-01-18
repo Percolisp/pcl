@@ -54,11 +54,11 @@ diag "";
 diag "-------- C-style for loops:";
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '(pl-for ((pcl:pl-setf $i 0))',
+                '(pl-for ((pl-setf $i 0))',
                 'C-style for: init');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '((pcl:pl-< $i 10))',
+                '((pl-< $i 10))',
                 'C-style for: condition');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
@@ -66,7 +66,7 @@ output_contains('for (my $i = 0; $i < 10; $i++) { }',
                 'C-style for: increment');
 
 output_contains('for ($i = 0; $i <= $max; $i += 2) { }',
-                '(pl-for ((pcl:pl-setf $i 0))',
+                '(pl-for ((pl-setf $i 0))',
                 'C-style for without my');
 
 output_contains('for (;;) { last; }',

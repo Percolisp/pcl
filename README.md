@@ -89,6 +89,14 @@ $ echo 'my $x = 1 + 2; print $x;' | ./pl2cl
 (pl-print $x)
 ```
 
+The idea is to make a simple compiler that can make pure Perl run in
+other environments, as a basis for continuing work. The "simple" part
+might be failing.
+
+It has just reached the phase of using simple CPAN code for compiling
+and running, to shake out errors. Hopefully it will reach alpha stage
+in a few weeks.
+
 ### Running Tests
 
 ```bash
@@ -99,7 +107,7 @@ prove Pl/t/
 prove -v Pl/t/codegen-01.t
 ```
 
-## Architecture
+### Architecture
 
 ```
 Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp

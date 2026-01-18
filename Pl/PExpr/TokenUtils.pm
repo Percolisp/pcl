@@ -14,9 +14,8 @@ sub is_atomic {
       if $self->is_string($stmt) || $self->is_number($stmt)
       || $self->is_var($stmt);
 
-  # s/// and tr/// are atomic tokens
-  return 1 if ref($stmt) eq 'PPI::Token::Regexp::Substitute';
-  return 1 if ref($stmt) eq 'PPI::Token::Regexp::Transliterate';
+  # Note: s/// and tr/// are NOT atomic - they need a target ($_)
+  # They're handled by is_regexp() and wrapped with '$_ =~' if standalone
 
   # $#arr - array last index
   return 1 if ref($stmt) eq 'PPI::Token::ArrayIndex';
@@ -28,8 +27,9 @@ sub is_regexp {
   my $self      = shift;
   my $stmt      = shift;
 
-  return 1 # , $stmt->content)
-      if ref($stmt) =~ /PPI::Token::Regexp::Match/;
+  # Match, Substitute (s///), or Transliterate (tr///, y///)
+  return 1
+      if ref($stmt) =~ /PPI::Token::Regexp::(Match|Substitute|Transliterate)/;
 
   return undef;
 }

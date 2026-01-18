@@ -233,6 +233,11 @@ has known_no_of_params => (
   is        => 'ro',
   default   => sub {
     return {
+      # Special compile-time tokens (zero-arg constants)
+      '__FILE__' => 0,
+      '__LINE__' => 0,
+      '__PACKAGE__' => 0,
+
       open       => [2,   3],
       close      => 1,
       pos        => [0,   1],
@@ -261,6 +266,7 @@ has known_no_of_params => (
       oct        => [1,  -2],
       ord        => [1,  -2],
       pack       => 2,
+      quotemeta  => [1,  -2],
       reverse    => [-1, -2],
       rindex     => [2,   3],
       sprintf    => -11,        # One parameter as default, before a list.

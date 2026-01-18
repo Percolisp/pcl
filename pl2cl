@@ -1,24 +1,206 @@
 #!/usr/bin/env perl
 
 # pl2cl - Convert Perl expressions to Common Lisp
-# Usage: pl2cl <file.pl>
+# Usage: pl2cl [options] <file.pl>
 #    or: echo '$x = 1' | pl2cl
+#
+# Modes:
+#   (default)      Transpile to stdout
+#   --bundle       Compile to single .fasl with all dependencies
+#   --executable   Create standalone executable
 
 use v5.30;
 use strict;
 use warnings;
+use Getopt::Long;
+use File::Spec;
+use File::Basename;
+use Cwd qw(abs_path);
 
 use lib ".";
 use Pl::Parser;
 
+# Parse command line options
+my $no_cache = $ENV{PCL_NO_CACHE} // 0;
+my $cache_lisp = 0;
+my $is_module = 0;      # When true, skip preamble (for dynamic module loading)
+my $bundle_mode = 0;    # Compile to single .fasl
+my $executable_mode = 0; # Create standalone executable
+my $output_file;        # Output file for bundle/executable
+# my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
+
+GetOptions(
+  'no-cache'     => \$no_cache,
+  'cache-lisp'   => \$cache_lisp,
+  'module'       => \$is_module,
+  'bundle'       => \$bundle_mode,
+  'executable'   => \$executable_mode,
+  'output|o=s'   => \$output_file,
+  # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
+) or die "Usage: pl2cl [options] <file.pl>\n";
+
+# Get path to this script for runtime to use
+my $script_path = abs_path($0);
+
+# Get Perl's @INC (filter to existing directories)
+my @perl_inc = grep { $_ && -d $_ } @INC;
+
+# Build preamble to inject after (in-package :pcl)
+sub build_preamble {
+  my ($source_file) = @_;
+  my @lines;
+
+  # Set pl2cl path for dynamic requires
+  push @lines, "(setf pcl::*pcl-pl2cl-path* #P\"$script_path\")";
+
+  # Cache settings
+  push @lines, "(setf pcl::*pcl-skip-cache* t)" if $no_cache;
+  push @lines, "(setf pcl::*pcl-cache-fasl* nil)" if $cache_lisp;
+
+  # Initialize @INC from Perl's @INC
+  push @lines, ";; Initialize \@INC from Perl";
+  push @lines, "(setf pcl::\@INC (make-array 0 :adjustable t :fill-pointer 0))";
+
+  # Add source file directory first (like Perl does)
+  if ($source_file && -f $source_file) {
+    my $source_dir = File::Spec->rel2abs(
+      (File::Spec->splitpath($source_file))[1] || '.'
+    );
+    push @lines, "(vector-push-extend \"$source_dir\" pcl::\@INC)";
+  }
+
+  # Add current directory
+  push @lines, "(vector-push-extend \".\" pcl::\@INC)";
+
+  # Add Perl's @INC paths
+  for my $path (@perl_inc) {
+    # Escape backslashes and quotes
+    $path =~ s/\\/\\\\/g;
+    $path =~ s/"/\\"/g;
+    push @lines, "(vector-push-extend \"$path\" pcl::\@INC)";
+  }
+
+  return join("\n", @lines);
+}
+
+# Get runtime content for bundling
+sub get_runtime_content {
+  my $script_dir = dirname(abs_path($0));
+  my $runtime_path = "$script_dir/cl/pcl-runtime.lisp";
+
+  open my $fh, '<', $runtime_path
+    or die "Cannot read runtime: $runtime_path: $!";
+  local $/;
+  my $content = <$fh>;
+  close $fh;
+
+  return $content;
+}
+
+# Bundle mode: compile main file + all dependencies into single output
+sub do_bundle {
+  my ($source_file, $output_file, $executable) = @_;
+
+  # Default output name
+  unless ($output_file) {
+    my $base = basename($source_file, '.pl', '.pm');
+    $output_file = $executable ? $base : "$base.fasl";
+  }
+
+  my $lisp_file = "$output_file.lisp";
+
+  say STDERR "Bundling: $source_file -> $output_file";
+
+  # Transpile the main file (this recursively processes dependencies)
+  my $transpiled = Pl::Parser->parse_file($source_file);
+
+  # Inject preamble
+  my $preamble = build_preamble($source_file);
+  $transpiled =~ s/(\(in-package :pcl\))/$1\n$preamble/;
+
+  # Build the bundle
+  open my $out, '>', $lisp_file
+    or die "Cannot write $lisp_file: $!";
+
+  # 1. Runtime first
+  print $out ";; === PCL Runtime ===\n";
+  print $out get_runtime_content();
+  print $out "\n\n";
+
+  # 2. Transpiled code (includes all dependencies via 'use')
+  print $out ";; === Transpiled: $source_file ===\n";
+  print $out $transpiled;
+  print $out "\n";
+
+  close $out;
+
+  say STDERR "  Written: $lisp_file";
+
+  if ($executable) {
+    # Create standalone executable
+    my $save_code = qq{
+      (load "$lisp_file")
+      (sb-ext:save-lisp-and-die "$output_file"
+        :toplevel (lambda ()
+                    (handler-case
+                      (sb-ext:exit :code 0)
+                      (error (e)
+                        (format *error-output* "Error: ~A~%" e)
+                        (sb-ext:exit :code 1))))
+        :executable t)
+    };
+
+    say STDERR "  Creating executable...";
+    system('sbcl', '--noinform', '--non-interactive',
+           '--eval', $save_code);
+
+    if ($? == 0) {
+      say STDERR "  Created: $output_file";
+      # Clean up intermediate file
+      unlink $lisp_file;
+    } else {
+      die "Failed to create executable (sbcl exit code: $?)\n";
+    }
+  } else {
+    # Compile to FASL - load the file first (which loads ASDF/cl-ppcre), then compile
+    say STDERR "  Compiling to FASL...";
+    system('sbcl', '--noinform', '--non-interactive',
+           '--load', $lisp_file,
+           '--eval', qq{(compile-file "$lisp_file" :output-file "$output_file")},
+           '--eval', '(sb-ext:exit)');
+
+    if ($? == 0) {
+      say STDERR "  Created: $output_file";
+    } else {
+      die "Failed to compile (sbcl exit code: $?)\n";
+    }
+  }
+}
+
 my $code;
+my $source_file;
+
+# Handle bundle/executable modes
+if ($bundle_mode || $executable_mode) {
+  die "Bundle/executable mode requires a source file\n" unless @ARGV && -f $ARGV[0];
+  do_bundle($ARGV[0], $output_file, $executable_mode);
+  exit 0;
+}
 
 if (@ARGV && -f $ARGV[0]) {
-  # Read from file
-  print Pl::Parser->parse_file($ARGV[0]);
+  $source_file = $ARGV[0];
+  my $output = Pl::Parser->parse_file($source_file);
+
+  # Inject preamble after (in-package :pcl) - but not for modules
+  unless ($is_module) {
+    my $preamble = build_preamble($source_file);
+    $output =~ s/(\(in-package :pcl\))/$1\n$preamble/;
+  }
+
+  print $output;
 }
 elsif (@ARGV) {
-  # Treat arguments as code
+  # Treat arguments as code (no @INC init needed for one-liners)
   $code = join(' ', @ARGV);
   print Pl::Parser->parse_code($code);
 }
@@ -26,12 +208,28 @@ elsif (!-t STDIN) {
   # Read from stdin
   local $/;
   $code = <STDIN>;
-  print Pl::Parser->parse_code($code);
+  my $output = Pl::Parser->parse_code($code);
+
+  # Still inject preamble for stdin input
+  my $preamble = build_preamble(undef);
+  $output =~ s/(\(in-package :pcl\))/$1\n$preamble/;
+
+  print $output;
 }
 else {
-  say "Usage: pl2cl <file.pl>";
+  say "Usage: pl2cl [options] <file.pl>";
   say "   or: pl2cl '\$x = 1;'";
   say "   or: echo '\$x = 1;' | pl2cl";
+  say "";
+  say "Modes:";
+  say "  (default)       Transpile to stdout";
+  say "  --bundle        Compile to single .fasl with runtime + all dependencies";
+  say "  --executable    Create standalone executable (bonus feature!)";
+  say "";
+  say "Options:";
+  say "  -o, --output    Output file (default: <input>.fasl or <input>)";
+  say "  --no-cache      Disable module caching (also: PCL_NO_CACHE=1)";
+  say "  --cache-lisp    Cache .lisp instead of .fasl (for debugging)";
   exit 1;
 }
 

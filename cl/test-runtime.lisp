@@ -1,6 +1,6 @@
 ;;;; PCL Runtime Tests
 
-(load "pcl-runtime.lisp")
+(load (merge-pathnames "pcl-runtime.lisp" *load-pathname*))
 (in-package :pcl)
 
 (defmacro test (name expr expected)
@@ -26,7 +26,7 @@
 ;;; Strings
 (format t "~%--- Strings ---~%")
 (test "pl-. concat" (pl-. "hello" " " "world") "hello world")
-(test "pl-x repeat" (pl-x "ab" 3) "ababab")
+(test "pl-str-x repeat" (pl-str-x "ab" 3) "ababab")
 (test "pl-length" (pl-length "hello") 5)
 (test "pl-substr 2-arg" (pl-substr "hello" 1) "ello")
 (test "pl-substr 3-arg" (pl-substr "hello" 1 3) "ell")
@@ -47,16 +47,16 @@
 
 ;;; String comparison
 (format t "~%--- String Comparison ---~%")
-(test "pl-eq true" (pl-eq "hello" "hello") t)
-(test "pl-eq false" (pl-eq "hello" "world") nil)
-(test "pl-ne" (pl-ne "a" "b") t)
-(test "pl-lt" (pl-lt "a" "b") t)
-(test "pl-cmp" (pl-cmp "a" "b") -1)
+(test "pl-str-eq true" (pl-str-eq "hello" "hello") t)
+(test "pl-str-eq false" (pl-str-eq "hello" "world") nil)
+(test "pl-str-ne" (pl-str-ne "a" "b") t)
+(test "pl-str-lt" (pl-str-lt "a" "b") t)
+(test "pl-str-cmp" (pl-str-cmp "a" "b") -1)
 
 ;;; Logical
 (format t "~%--- Logical ---~%")
-(test "pl-!" (pl-! nil) t)
-(test "pl-! true" (pl-! t) nil)
+(test "pl-!" (pl-! nil) 1)       ; Perl returns 1 for true
+(test "pl-! true" (pl-! t) "")   ; Perl returns "" for false
 (test "pl-true-p 0" (pl-true-p 0) nil)
 (test "pl-true-p 1" (pl-true-p 1) t)
 (test "pl-true-p empty" (pl-true-p "") nil)
@@ -100,6 +100,53 @@
 (format t "~%--- I/O ---~%")
 (format t "pl-say test: ")
 (pl-say "Hello from PCL!")
+
+;;; OO - bless, ref, can, isa
+(format t "~%--- OO (bless, ref, can, isa) ---~%")
+
+;; Setup: Create a class hierarchy like the transpiler generates
+;; Animal -> Dog (in PCL package with lowercase CLOS class names)
+
+;; Create Animal package and class
+(defpackage :Animal (:use :cl :pcl))
+(in-package :Animal)
+(defclass animal () ())
+(sb-mop:finalize-inheritance (find-class 'animal))
+(defun pl-speak (self) (declare (ignore self)) "generic sound")
+(in-package :pcl)
+
+;; Create Dog package and class inheriting from Animal
+(defpackage :Dog (:use :cl :pcl))
+(in-package :Dog)
+(defclass dog (animal::animal) ())
+(sb-mop:finalize-inheritance (find-class 'dog))
+(defun pl-speak (self) (declare (ignore self)) "woof")
+(defun pl-fetch (self) (declare (ignore self)) "fetching!")
+(in-package :pcl)
+
+;; Test bless and ref
+(let ((obj (pl-bless (pl-hash "name" "Fido") "Dog")))
+  (test "pl-bless creates object" (hash-table-p obj) t)
+  (test "pl-ref returns class" (pl-ref obj) "Dog")
+  (test "pl-ref on unblessed" (pl-ref (pl-hash)) "HASH")
+  (test "pl-ref on string" (pl-ref "hello") ""))
+
+;; Test can() - method existence checking
+(let ((dog (pl-bless (pl-hash) "Dog")))
+  (test "can() finds method" (not (null (pl-can dog "speak"))) t)
+  (test "can() finds inherited" (not (null (pl-can dog "speak"))) t)
+  (test "can() returns nil for missing" (pl-can dog "nonexistent") nil)
+  (test "can() on Dog for fetch" (not (null (pl-can dog "fetch"))) t))
+
+;; Test isa() - inheritance checking
+(let ((dog (pl-bless (pl-hash) "Dog")))
+  (test "isa() own class" (pl-isa dog "Dog") t)
+  (test "isa() parent class" (pl-isa dog "Animal") t)
+  (test "isa() unrelated class" (pl-isa dog "Cat") nil))
+
+;; Test can/isa with string (class method style)
+(test "isa class method" (pl-isa "Dog" "Animal") t)
+(test "can class method" (not (null (pl-can "Dog" "speak"))) t)
 
 ;;; Summary
 (format t "~%=== Tests Complete ===~%")

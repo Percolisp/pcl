@@ -645,6 +645,22 @@ sub parse {
       return $id;
     }
 
+    # - - - Compiled regex qr//
+    if (ref($e1) eq 'PPI::Token::QuoteLike::Regexp') {
+      say "parse(): Found qr// regex"                if 1 & DEBUG;
+      my $id = $self->make_node($e1);
+      say "parse(): Made qr node $id"                if 1 & DEBUG;
+      return $id;
+    }
+
+    # - - - Heredoc <<'EOF' or <<"EOF" or <<EOF
+    if (ref($e1) eq 'PPI::Token::HereDoc') {
+      say "parse(): Found heredoc"                   if 1 & DEBUG;
+      my $id = $self->make_node($e1);
+      say "parse(): Made heredoc node $id"           if 1 & DEBUG;
+      return $id;
+    }
+
     # - - - What else can it be?? :-)
     die "Handle single node of unknown type. Dump:\n" . dump($e1);
   }
@@ -830,6 +846,22 @@ sub parse {
 
         $e->[$i-1] = $node;
         splice @$e, $i, 2;  # Remove -> and method name
+        $i--;
+        next;
+      } elsif (!$self->is_internal_node_type($nxt)
+               && $nxt->content() =~ /^\$/) {
+        # Case 1D: X->$foo (variable method name, no parentheses)
+        # Method call with method name in a variable, no arguments
+        # e.g., $obj->$method or $_[0]->$probe
+        my $pre_id = $self->parse([$pre]);
+        my $meth_id = $self->parse([$nxt]);  # Variable containing method name
+
+        my($node, $id) = $self->make_node_insert('methodcall');
+        $self->add_child_to_node($id, $pre_id);  # Object
+        $self->add_child_to_node($id, $meth_id); # Method (name in $variable)
+
+        $e->[$i-1] = $node;
+        splice @$e, $i, 2;  # Remove -> and $variable
         $i--;
         next;
       } else {
@@ -1021,7 +1053,7 @@ sub parse {
 
       # Ugly. Set flag for parsing this, so it doesn't add '$_ =~' to regexp:
       my $match_op = ($op_name eq '=~' || $op_name eq '!~');
-      if ($match_op && ref($post) =~ /Regexp::Match/) {
+      if ($match_op && ref($post) =~ /PPI::Token::Regexp/) {
         $post->{_has_match_context}++;
       }
       my $id_aft= $self->parse([$post]);
@@ -1267,10 +1299,19 @@ sub handle_subcalls {
     # Handle grep/map { BLOCK } LIST pattern
     # Uses Parser.pm callback for multi-statement blocks
     # Also handles: sub { ... } (anonymous subs)
+    # Also handles: any function with & prototype (e.g., try { } from Try::Tiny)
     if (ref($next) eq 'PPI::Structure::Block') {
       my $func_name = $now->content();
+
+      # Check if this function has & prototype (block arg)
+      my $has_block_proto = 0;
+      if ($self->environment) {
+        my $proto = $self->environment->get_prototype($func_name);
+        $has_block_proto = $proto && $proto->{has_block_arg};
+      }
+
       if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
-          || $func_name eq 'eval') {
+          || $func_name eq 'eval' || $has_block_proto) {
 
         # Create funcall with block as first param
         my($top_node, $top_id) = $self->make_node_insert('funcall');
@@ -1282,15 +1323,29 @@ sub handle_subcalls {
           # Determine parameters based on function type
           my $params = ($func_name eq 'sort') ? ['$a', '$b']
                      : ($func_name eq 'eval') ? []
-                     : ['$_'];  # grep, map
+                     : ($func_name eq 'grep' || $func_name eq 'map') ? ['$_']
+                     : [];  # Other & prototype functions: no implicit params
 
-          # Parse block as a named function and get its name
-          my $block_func_name = $self->parser->parse_block_as_function($next, $params);
+          # For grep/map/sort, use inline lambda (cleaner, avoids emission issues)
+          # For eval and other blocks, use named function (may need to be called separately)
+          if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort') {
+            # Parse block body as CL string
+            my $body_cl = $self->parser->parse_block_to_cl_string($next);
 
-          # Create a func_ref node that holds the function name
-          my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-          $ref_node->{func_name} = $block_func_name;
-          $self->add_child_to_node($top_id, $ref_id);
+            # Create inline_lambda node
+            my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
+            $lambda_node->{params} = $params;
+            $lambda_node->{body_cl} = $body_cl;
+            $self->add_child_to_node($top_id, $lambda_id);
+          } else {
+            # Parse block as a named function and get its name
+            my $block_func_name = $self->parser->parse_block_as_function($next, $params);
+
+            # Create a func_ref node that holds the function name
+            my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
+            $ref_node->{func_name} = $block_func_name;
+            $self->add_child_to_node($top_id, $ref_id);
+          }
         } else {
           # Fallback: parse block as expression (single statement only)
           my @block_children = $next->children();
@@ -1487,9 +1542,10 @@ sub handle_subcalls {
     }
 
     # If can be zero-param, check if next token is an operator
+    # (but NOT a Cast token like @, $, %, etc. which are deref operators for arguments)
     if ($is_zero_param && $i + 1 < scalar(@$e)) {
       my $next = $e->[$i + 1];
-      if ($self->is_token_operator($next)) {
+      if ($self->is_token_operator($next) && ref($next) ne 'PPI::Token::Cast') {
         # Function followed by operator - treat as zero params
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $node_id = $self->make_node($now);
@@ -1695,13 +1751,19 @@ sub add_implicit_default_param {
   # First child is the function name, rest are parameters
   my $param_count = scalar(@$children) - 1;
 
-  # If no parameters provided, add implicit $_ or @_
+  # If no parameters provided, add implicit $_ or @_/@ARGV
   if ($param_count == 0) {
     my $default_var;
     if ($has_array_default) {
-      # @_ in subs, @ARGV in main (but we don't distinguish at parse time)
-      $default_var = '@_';
-      say "add_implicit_default_param: Adding \@_ to $func_name" if 8 & DEBUG;
+      # @_ in subs, @ARGV in main
+      my $in_sub = $self->has_environment && $self->environment->in_subroutine > 0;
+      if ($in_sub) {
+        $default_var = '@_';
+        say "add_implicit_default_param: Adding \@_ to $func_name (in sub)" if 8 & DEBUG;
+      } else {
+        $default_var = '@ARGV';
+        say "add_implicit_default_param: Adding \@ARGV to $func_name (at top level)" if 8 & DEBUG;
+      }
     } else {
       $default_var = '$_';
       say "add_implicit_default_param: Adding \$_ to $func_name" if 8 & DEBUG;
@@ -2233,6 +2295,10 @@ sub cleanup_for_parsing {
   # TODO: File bug report with PPI project.
   @no_ws = $self->_fix_ppi_negative_number_bug(\@no_ws);
 
+  # PPI BUG WORKAROUND: PPI parses "word :" in ternary as Label instead of
+  # Word + Operator. Split labels back into their components when preceded by "?".
+  @no_ws = $self->_fix_ppi_ternary_label_bug(\@no_ws);
+
   for(my $i=0; $i < scalar(@no_ws); $i++) {
     my $part    = $no_ws[$i];
 
@@ -2317,6 +2383,52 @@ sub _fix_ppi_negative_number_bug {
           next;
         }
       }
+    }
+
+    push @result, $token;
+  }
+
+  return @result;
+}
+
+
+# PPI BUG WORKAROUND: In ternary expressions like "cond ? foo : bar",
+# PPI sometimes parses "foo :" as a Label instead of Word + Operator.
+# This happens when there's a space before the colon.
+# We detect Labels that follow "?" and split them back into Word + ":".
+sub _fix_ppi_ternary_label_bug {
+  my $self   = shift;
+  my $tokens = shift;
+
+  my @result;
+  my $seen_question = 0;
+
+  for (my $i = 0; $i < @$tokens; $i++) {
+    my $token = $tokens->[$i];
+
+    # Track if we've seen a ? (ternary operator)
+    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq '?') {
+      $seen_question = 1;
+    }
+
+    # Check if this is a Label after a ? (likely part of ternary)
+    if (ref($token) eq 'PPI::Token::Label' && $seen_question) {
+      my $content = $token->content;
+      # Label content is like "word :" or "word:" - extract the word
+      if ($content =~ /^(\w+)\s*:\s*$/) {
+        my $word = $1;
+        # Split into Word and : operator
+        my $word_token  = bless { content => $word }, 'PPI::Token::Word';
+        my $colon_token = bless { content => ':' }, 'PPI::Token::Operator';
+        push @result, $word_token, $colon_token;
+        $seen_question = 0;  # Reset after finding the colon
+        next;
+      }
+    }
+
+    # Reset seen_question after we've processed a complete ternary
+    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq ':') {
+      $seen_question = 0;
     }
 
     push @result, $token;

@@ -65,6 +65,7 @@ sub _build_handlers {
     'backtick'      => \&gen_backtick,
     'anon_sub'      => \&gen_anon_sub,
     'func_ref'      => \&gen_func_ref,
+    'inline_lambda' => \&gen_inline_lambda,
     'string_concat' => \&gen_string_concat,
   };
 }
@@ -99,7 +100,7 @@ my %OP_EXCEPTIONS = (
   # They can't be in OP_EXCEPTIONS because % is also the modulo operator
 
   # Operators with names that could conflict with user subs
-  # (these are valid Perl identifiers, so users could define sub x, sub eq, etc.)
+  # (these are valid Perl identifiers, so code can define sub x, sub eq, etc.)
   'x'   => 'pl-str-x',
   'x='  => 'pl-str-x=',
   'lt'  => 'pl-str-lt',
@@ -121,14 +122,20 @@ sub cl_name {
   my $self      = shift;
   my $perl_name = shift;
 
+  # Guard against undefined input
+  return 'pl-UNDEFINED' unless defined $perl_name && length($perl_name);
+
   # Check for operator exceptions first
   return $OP_EXCEPTIONS{$perl_name} if exists $OP_EXCEPTIONS{$perl_name};
 
-  # Check for package-qualified name (Foo::bar)
+  # Check for package-qualified name (Foo::bar or Foo::Bar::baz)
   if ($perl_name =~ /^(.+)::(.+)$/) {
     my ($pkg, $func) = ($1, $2);
-    # Use CL's package::symbol syntax with pl- prefix
-    return "${pkg}::pl-${func}";
+    # Record package reference for pre-declaration
+    $self->environment->add_referenced_package($pkg) if $self->environment;
+    # Use pipe-quoting if package contains :: (e.g., |Foo::Bar|::pl-func)
+    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+    return "${cl_pkg}::pl-${func}";
   }
 
   # All functions (built-in and user-defined) get pl- prefix
@@ -209,9 +216,70 @@ sub gen_leaf {
 
   my $ref  = ref($node);
 
-  # Variable ($x, @arr, %hash)
+  # Variable (like $x, @arr, %hash)
   if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
-    return $node->content();
+    my $content = $node->content() // '';
+    # Handle magic variables
+    if ($content eq '$!') {
+      return '(pl-errno-string)';  # errno as string
+    }
+    if ($content eq '$?') {
+      return '$?';  # child exit status (defvar in runtime)
+    }
+    if ($content eq '$.') {
+      return '|$.|';  # input line number (defvar in runtime)
+    }
+    if ($content eq '$0') {
+      return '$0';  # program name (defvar in runtime)
+    }
+    if ($content eq '$@') {
+      return '$@';  # eval error (defvar in runtime)
+    }
+    if ($content eq '$^O') {
+      return '|$^O|';  # OS name (defvar in runtime)
+    }
+    if ($content eq '$^V') {
+      return '|$^V|';  # Perl version string (defvar in runtime)
+    }
+    if ($content eq '$/') {
+      return '|$/|';  # input record separator (defvar in runtime)
+    }
+    if ($content eq '$\\') {
+      return '|$\\|';  # output record separator (defvar in runtime)
+    }
+    if ($content eq '$"') {
+      return '|$"|';  # list separator (defvar in runtime)
+    }
+    # Handle package-qualified variables: $Pkg::var -> Pkg::$var
+    # Perl: $Config::debug  ->  CL: Config::$debug
+    # Note: Use [^:]+ at the end to avoid matching stash refs like $Pkg::Sub::
+    if ($content =~ /^([\$\@\%])(.+)::([^:]+)$/) {
+      my ($sigil, $pkg, $name) = ($1, $2, $3);
+      # Track referenced package
+      $self->environment->add_referenced_package($pkg) if $self->environment;
+      # Use pipe quoting for nested packages
+      my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+      return "${cl_pkg}::${sigil}${name}";
+    }
+    # Handle package-qualified typeglobs: *Pkg::var -> |Pkg|::*var
+    # Perl: *Scalar::Util::refaddr  ->  CL: |Scalar::Util|::*refaddr
+    if ($content =~ /^\*(.+)::([^:]+)$/) {
+      my ($pkg, $name) = ($1, $2);
+      # Track referenced package
+      $self->environment->add_referenced_package($pkg) if $self->environment;
+      # Use pipe quoting for package (which may contain ::)
+      my $cl_pkg = "|$pkg|";
+      return "${cl_pkg}::*${name}";
+    }
+    # Handle package stash access: $Pkg::Sub:: or %Pkg::Sub::
+    # Perl: $YAML::Tiny:: or %YAML::Tiny:: -> CL: (pl-stash "YAML::Tiny")
+    if ($content =~ /^([\$\%])(.+)::$/) {
+      my ($sigil, $pkg) = ($1, $2);
+      # Track referenced package
+      $self->environment->add_referenced_package($pkg) if $self->environment;
+      return "(pl-stash \"$pkg\")";
+    }
+    return $content;
   }
 
   # Array last index ($#arr)
@@ -227,6 +295,28 @@ sub gen_leaf {
     return $node->content();
   }
 
+  # Compiled regex qr// (check before Quote to avoid catching QuoteLike::Regexp)
+  if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
+    my $content = $node->content();
+    # Escape backslashes and double quotes for CL string literal
+    $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
+    return qq{(pcl::pl-qr "$content")};
+  }
+
+  # Heredoc <<'EOF' or <<"EOF" or <<EOF
+  if ($ref eq 'PPI::Token::HereDoc') {
+    # PPI::Token::HereDoc has heredoc() method to get the content lines
+    my @lines = $node->heredoc();
+    my $content = join('', @lines);
+    # Escape backslashes and double quotes for CL string literal
+    $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
+    # Remove trailing newline if present (heredocs include it)
+    chomp $content;
+    return qq{"$content"};
+  }
+
   # String literals
   if ($ref =~ /^PPI::Token::Quote/) {
     my $content = $node->content();
@@ -236,7 +326,18 @@ sub gen_leaf {
 
   # Bareword (function name, etc.)
   if ($ref eq 'PPI::Token::Word') {
-    return $node->content();
+    my $content = $node->can('content') ? ($node->content() // '') : '';
+    # Handle __FILE__ and __LINE__ compile-time tokens
+    if ($content eq '__FILE__') {
+      my $source_file = $self->environment ? $self->environment->source_file : '-';
+      $source_file //= '-';
+      return qq{"$source_file"};
+    }
+    if ($content eq '__LINE__') {
+      my $line = $node->line_number // 0;
+      return $line;
+    }
+    return $content;
   }
 
   # Operator token (used as child of prefix_op, etc.)
@@ -257,8 +358,9 @@ sub gen_leaf {
   # Match regex m// or //
   if ($ref =~ /^PPI::Token::Regexp/) {
     my $content = $node->content();
-    # Escape backslashes for CL string literal
+    # Escape backslashes and double quotes for CL string literal
     $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
     return qq{(pl-regex "$content")};
   }
 
@@ -285,34 +387,82 @@ sub gen_binary_op {
 
   my $cl_op = $self->cl_op_name($op);
   my $left  = $self->gen_node($kids->[0]);
+
+  # Special case: hash assignment with list
+  # %h = () or %h = (a => 1) should use (pl-hash ...), not (vector ...)
+  if ($op eq '=' && $left =~ /^%/) {
+    my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($rhs_node)) {
+      my $rhs_type = $rhs_node->{type};
+      if ($rhs_type eq 'tree_val' || $rhs_type eq 'progn') {
+        my $rhs_kids = $self->expr_o->get_node_children($kids->[1]);
+        if (@$rhs_kids == 0) {
+          # Empty hash
+          return "($cl_op $left (pl-hash))";
+        } else {
+          # Hash with initial values - generate (pl-hash k1 v1 k2 v2 ...)
+          my @parts = map { $self->gen_node($_) } @$rhs_kids;
+          my $hash_init = "(pl-hash " . join(" ", @parts) . ")";
+          return "($cl_op $left $hash_init)";
+        }
+      }
+    }
+  }
+
   my $right = $self->gen_node($kids->[1]);
+
+  # Special case: typeglob assignment with function reference
+  # *freeze = \&Dump  →  (setf (symbol-function 'pl-freeze) #'pl-Dump)
+  if ($op eq '=' && $left =~ /^\*(\w+)$/) {
+    my $glob_name = $1;
+    if ($right =~ /^#'/) {
+      my $cl_func_name = $self->cl_name($glob_name);
+      return "(setf (symbol-function '$cl_func_name) $right)";
+    }
+  }
 
   return "($cl_op $left $right)";
 }
 
-# Generate CL name for an OPERATOR (always qualified with pcl:)
+# Generate CL name for an OPERATOR
+# No prefix needed - pcl is in use list of all generated packages
 sub cl_op_name {
   my $self = shift;
   my $op   = shift;
 
-  # Check for operator exceptions first - add pcl: prefix
+  # Check for operator exceptions first
   if (exists $OP_EXCEPTIONS{$op}) {
-    return "pcl:" . $OP_EXCEPTIONS{$op};
+    return $OP_EXCEPTIONS{$op};
   }
 
-  # Operators always use pcl: prefix
-  return "pcl:pl-$op";
+  return "pl-$op";
 }
 
 
 # String concatenation with multiple parts
+# Handles array interpolation: "@arr" joins elements with $" (default: space)
 sub gen_string_concat {
   my $self    = shift;
   my $node    = shift;
   my $node_id = shift;
   my $kids    = shift;
 
-  my @parts = map { $self->gen_node($_) } @$kids;
+  my @parts;
+  for my $kid_id (@$kids) {
+    my $kid_node = $self->expr_o->get_a_node($kid_id);
+    my $generated = $self->gen_node($kid_id) // '';
+
+    # Check if this is an array variable (@arr) - needs to be joined
+    my $kid_content = (ref($kid_node) eq 'PPI::Token::Symbol' && $kid_node->can('content'))
+                      ? ($kid_node->content() // '') : '';
+    if ($kid_content =~ /^@/) {
+      # In Perl, "@arr" in string interpolation joins with $" (default space)
+      # Use |$"| which is the CL variable for Perl's $" list separator
+      push @parts, '(pl-join |$"| ' . $generated . ')';
+    } else {
+      push @parts, $generated;
+    }
+  }
   return "(pl-string_concat " . join(" ", @parts) . ")";
 }
 
@@ -323,6 +473,31 @@ sub gen_funcall {
   my $node    = shift;
   my $node_id = shift;
   my $kids    = shift;
+
+  # Check for __FILE__ and __LINE__ as zero-arg "functions"
+  # (Parser wraps them in funcall when followed by operators)
+  if (@$kids == 1) {
+    my $func_node = $self->expr_o->get_a_node($kids->[0]);
+    if (ref($func_node) eq 'PPI::Token::Word' && $func_node->can('content')) {
+      my $content = $func_node->content() // '';
+      if ($content eq '__FILE__') {
+        my $source_file = $self->environment
+	    ? $self->environment->source_file : '-';
+        $source_file //= '-';
+        return qq{"$source_file"};
+      }
+      if ($content eq '__LINE__') {
+        my $line = $func_node->line_number // 0;
+        return $line;
+      }
+      if ($content eq '__PACKAGE__') {
+        my $pkg = $self->environment
+	    ? $self->environment->current_package : 'main';
+        $pkg //= 'main';
+        return qq{"$pkg"};
+      }
+    }
+  }
 
   # First child is function name
   my $func_name = $self->gen_node($kids->[0]);
@@ -345,10 +520,82 @@ sub gen_funcall {
     }
   }
 
+  # Special handling for eval { } blocks
+  # eval { block } catches exceptions and sets $@
+  if ($func_name eq 'eval' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node)) {
+      if ($arg_node->{type} eq 'anon_sub') {
+        # eval { block } with inline anon_sub - generate pl-eval-block with body
+        my $block_kids = $self->expr_o->get_node_children($kids->[1]);
+        my @body_parts;
+        for my $kid_id (@$block_kids) {
+          push @body_parts, $self->gen_node($kid_id);
+        }
+        my $body = join(' ', @body_parts);
+        return "(pl-eval-block $body)";
+      }
+      elsif ($arg_node->{type} eq 'func_ref') {
+        # eval { block } with named function (from Parser callback)
+        # Generate pl-eval-block that calls the function
+        my $func_ref = $self->gen_node($kids->[1]);
+        return "(pl-eval-block (funcall $func_ref))";
+      }
+    }
+  }
+
+  # Special handling for grep/map expression form (without block)
+  # grep EXPR, LIST  →  (pl-grep (lambda ($_) EXPR) LIST)
+  # The EXPR typically uses $_ which should be the lambda parameter
+  if (($func_name eq 'grep' || $func_name eq 'map') && @$kids >= 2) {
+    my $first_arg_node = $self->expr_o->get_a_node($kids->[1]);
+    my $is_lambda_form = $self->expr_o->is_internal_node_type($first_arg_node) &&
+                         ($first_arg_node->{type} eq 'inline_lambda' ||
+                          $first_arg_node->{type} eq 'func_ref' ||
+                          $first_arg_node->{type} eq 'anon_sub');
+
+    if (!$is_lambda_form) {
+      # Expression form: wrap first arg in lambda
+      my $expr_cl = $self->gen_node($kids->[1]);
+      my @rest_args;
+      for my $i (2 .. $#$kids) {
+        push @rest_args, $self->gen_node($kids->[$i]);
+      }
+      my $list_str = join(' ', @rest_args);
+      return "($cl_func (lambda (\$_) $expr_cl) $list_str)";
+    }
+  }
+
+  # Check for reference prototype that requires auto-boxing
+  my $proto = $self->environment ? $self->environment->get_prototype($func_name) : undef;
+  my @ref_params;
+  if ($proto && $proto->{is_proto} && $proto->{params}) {
+    @ref_params = map { $_->{name} } @{$proto->{params}};
+  }
+
   # Rest are arguments
   my @args;
   for my $i (1 .. $#$kids) {
-    push @args, $self->gen_node($kids->[$i]);
+    my $arg = $self->gen_node($kids->[$i]);
+
+    # Check if this position has a reference prototype (\@, \%, \$)
+    my $param_idx = $i - 1;  # 0-based index for params
+    if ($param_idx < @ref_params) {
+      my $param_type = $ref_params[$param_idx];
+      if ($param_type =~ /^\\([@%\$])$/) {
+        my $expected_sigil = $1;
+        # Check if arg is an unref'd array/hash/scalar that needs wrapping
+        my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
+        if (ref($arg_node) eq 'PPI::Token::Symbol') {
+          my $arg_sigil = substr($arg_node->content(), 0, 1);
+          # If arg sigil matches expected and it's not already a reference
+          if ($arg_sigil eq $expected_sigil) {
+            $arg = "(pl-backslash $arg)";
+          }
+        }
+      }
+    }
+    push @args, $arg;
   }
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
@@ -408,7 +655,14 @@ sub gen_methodcall {
     $obj = $self->gen_node($kids->[0]);
   }
 
+  my $method_node = $self->expr_o->get_a_node($kids->[1]);
   my $method  = $self->gen_node($kids->[1]);
+
+  # Check if method name is a variable (dynamic method call)
+  my $is_dynamic_method = 0;
+  if (ref($method_node) eq 'PPI::Token::Symbol' && $method_node->content() =~ /^\$/) {
+    $is_dynamic_method = 1;
+  }
 
   # Rest are arguments
   my @args;
@@ -417,7 +671,21 @@ sub gen_methodcall {
   }
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
-  my $call = "(pl-method-call $obj '$method$args_str)";
+
+  # Check for SUPER:: method call
+  my $call;
+  if ($method =~ /^SUPER::(.+)$/) {
+    my $real_method = $1;
+    # Need current package for SUPER:: lookup
+    my $current_pkg = $self->environment ? $self->environment->current_package : 'main';
+    $call = "(pl-super-call $obj '$real_method \"$current_pkg\"$args_str)";
+  } elsif ($is_dynamic_method) {
+    # Dynamic method call: $obj->$method_var
+    # Method name is in a variable, pass the variable value
+    $call = "(pl-method-call $obj $method$args_str)";
+  } else {
+    $call = "(pl-method-call $obj '$method$args_str)";
+  }
 
   # Wrap in dynamic wantarray binding for list context
   my $ctx = $self->expr_o->get_node_context($node_id);
@@ -463,7 +731,30 @@ sub gen_ternary {
   my $node_id = shift;
   my $kids    = shift;
 
-  my $cond  = $self->gen_node($kids->[0]);
+  # Check if condition is wantarray - if so, the 'then' branch should be in list context
+  my $cond_node = $self->expr_o->get_a_node($kids->[0]);
+  my $is_wantarray_cond = 0;
+
+  if ($self->expr_o->is_internal_node_type($cond_node) &&
+      $cond_node->{type} eq 'funcall') {
+    my $cond_kids = $self->expr_o->get_node_children($kids->[0]);
+    if (@$cond_kids) {
+      my $func_node = $self->expr_o->get_a_node($cond_kids->[0]);
+      if (!$self->expr_o->is_internal_node_type($func_node) &&
+          $func_node->can('content') &&
+          $func_node->content eq 'wantarray') {
+        $is_wantarray_cond = 1;
+      }
+    }
+  }
+
+  my $cond = $self->gen_node($kids->[0]);
+
+  # If condition is wantarray, set list context on 'then' branch
+  if ($is_wantarray_cond) {
+    $self->expr_o->set_node_context($kids->[1], 1);  # LIST_CTX = 1
+  }
+
   my $then  = $self->gen_node($kids->[1]);
   my $else  = $self->gen_node($kids->[2]);
 
@@ -481,6 +772,18 @@ sub gen_prefix_op {
   # First child is the operator, second is the operand
   my $op_node = $self->expr_o->get_a_node($kids->[0]);
   my $op      = $op_node->content();
+
+  # Special case: \&func (reference to function)
+  if ($op eq '\\') {
+    my $operand_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($operand_node) eq 'PPI::Token::Symbol' &&
+        $operand_node->content() =~ /^&(.+)$/) {
+      my $func_name = $1;
+      my $cl_func = $self->cl_name($func_name);
+      return "#'$cl_func";
+    }
+  }
+
   my $operand = $self->gen_node($kids->[1]);
 
   # Get CL name for the operator
@@ -717,9 +1020,21 @@ sub gen_tree_val {
   my $node_id = shift;
   my $kids    = shift;
 
-  # If single child, just return it
+  my $ctx = $self->expr_o->get_node_context($node_id);
+
+  # If single child in scalar context, just return it
+  # But in list context, we need (vector $x) for proper list assignment
   if (scalar(@$kids) == 1) {
-    return $self->gen_node($kids->[0]);
+    my $child = $self->gen_node($kids->[0]);
+    if ($ctx == 1) {  # LIST_CTX = 1
+      # Special case: regex match already returns captures in list context
+      # Don't wrap in vector, just ensure *wantarray* is set
+      if ($child =~ /\(pl-=~\s/) {
+        return "(let ((*wantarray* t)) $child)";
+      }
+      return "(vector $child)";
+    }
+    return $child;
   }
 
   # Multiple values
@@ -732,7 +1047,6 @@ sub gen_tree_val {
 
   # In list context, generate a vector instead of progn
   # This handles: @a = (1, 2, 3), foreach (1, 2, 3), etc.
-  my $ctx = $self->expr_o->get_node_context($node_id);
   if ($ctx == 1) {  # LIST_CTX = 1
     return "(vector $forms_str)";
   }
@@ -825,6 +1139,20 @@ sub gen_func_ref {
 
   my $func_name = $node->{func_name};
   return "#'$func_name";
+}
+
+# Generate inline lambda for grep/map/sort blocks
+# Output: (lambda (params) body)
+sub gen_inline_lambda {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  my $params = join(' ', @{$node->{params} // []});
+  my $body = $node->{body_cl} // 'nil';
+
+  return "(lambda ($params)\n$body)";
 }
 
 

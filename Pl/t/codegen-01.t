@@ -81,72 +81,72 @@ test_codegen('"hello"', '"hello"', 'String literal');
 diag "";
 diag "-------- Arithmetic operators:";
 
-test_codegen('$x + $y', '(pcl:pl-+ $x $y)', 'Addition');
-test_codegen('$x - $y', '(pcl:pl-- $x $y)', 'Subtraction');
-test_codegen('$x * $y', '(pcl:pl-* $x $y)', 'Multiplication');
-test_codegen('$x / $y', '(pcl:pl-/ $x $y)', 'Division');
-test_codegen('$x % $y', '(pcl:pl-% $x $y)', 'Modulo');
-test_codegen('$x ** $y', '(pcl:pl-** $x $y)', 'Exponentiation');
+test_codegen('$x + $y', '(pl-+ $x $y)', 'Addition');
+test_codegen('$x - $y', '(pl-- $x $y)', 'Subtraction');
+test_codegen('$x * $y', '(pl-* $x $y)', 'Multiplication');
+test_codegen('$x / $y', '(pl-/ $x $y)', 'Division');
+test_codegen('$x % $y', '(pl-% $x $y)', 'Modulo');
+test_codegen('$x ** $y', '(pl-** $x $y)', 'Exponentiation');
 
 
 # ============================================================
 diag "";
 diag "-------- String operators:";
 
-test_codegen('$x . $y', '(pcl:pl-. $x $y)', 'String concatenation');
-test_codegen('$x x 3', '(pcl:pl-str-x $x 3)', 'String repetition');
+test_codegen('$x . $y', '(pl-. $x $y)', 'String concatenation');
+test_codegen('$x x 3', '(pl-str-x $x 3)', 'String repetition');
 
 
 # ============================================================
 diag "";
 diag "-------- Comparison operators (numeric):";
 
-test_codegen('$x == $y', '(pcl:pl-== $x $y)', 'Numeric equality');
-test_codegen('$x != $y', '(pcl:pl-!= $x $y)', 'Numeric inequality');
-test_codegen('$x < $y', '(pcl:pl-< $x $y)', 'Less than');
-test_codegen('$x > $y', '(pcl:pl-> $x $y)', 'Greater than');
-test_codegen('$x <= $y', '(pcl:pl-<= $x $y)', 'Less than or equal');
-test_codegen('$x >= $y', '(pcl:pl->= $x $y)', 'Greater than or equal');
-test_codegen('$x <=> $y', '(pcl:pl-<=> $x $y)', 'Spaceship');
+test_codegen('$x == $y', '(pl-== $x $y)', 'Numeric equality');
+test_codegen('$x != $y', '(pl-!= $x $y)', 'Numeric inequality');
+test_codegen('$x < $y', '(pl-< $x $y)', 'Less than');
+test_codegen('$x > $y', '(pl-> $x $y)', 'Greater than');
+test_codegen('$x <= $y', '(pl-<= $x $y)', 'Less than or equal');
+test_codegen('$x >= $y', '(pl->= $x $y)', 'Greater than or equal');
+test_codegen('$x <=> $y', '(pl-<=> $x $y)', 'Spaceship');
 
 
 # ============================================================
 diag "";
 diag "-------- Comparison operators (string):";
 
-test_codegen('$x eq $y', '(pcl:pl-str-eq $x $y)', 'String equality');
-test_codegen('$x ne $y', '(pcl:pl-str-ne $x $y)', 'String inequality');
-test_codegen('$x lt $y', '(pcl:pl-str-lt $x $y)', 'String less than');
-test_codegen('$x gt $y', '(pcl:pl-str-gt $x $y)', 'String greater than');
+test_codegen('$x eq $y', '(pl-str-eq $x $y)', 'String equality');
+test_codegen('$x ne $y', '(pl-str-ne $x $y)', 'String inequality');
+test_codegen('$x lt $y', '(pl-str-lt $x $y)', 'String less than');
+test_codegen('$x gt $y', '(pl-str-gt $x $y)', 'String greater than');
 
 
 # ============================================================
 diag "";
 diag "-------- Logical operators:";
 
-test_codegen('$x && $y', '(pcl:pl-&& $x $y)', 'Logical AND (&&)');
-test_codegen('$x || $y', '(pcl:pl-|| $x $y)', 'Logical OR (||)');
-test_codegen('$x // $y', '(pcl:pl-// $x $y)', 'Defined-or');
-test_codegen('$x and $y', '(pcl:pl-and $x $y)', 'Logical and');
-test_codegen('$x or $y', '(pcl:pl-or $x $y)', 'Logical or');
+test_codegen('$x && $y', '(pl-&& $x $y)', 'Logical AND (&&)');
+test_codegen('$x || $y', '(pl-|| $x $y)', 'Logical OR (||)');
+test_codegen('$x // $y', '(pl-// $x $y)', 'Defined-or');
+test_codegen('$x and $y', '(pl-and $x $y)', 'Logical and');
+test_codegen('$x or $y', '(pl-or $x $y)', 'Logical or');
 
 
 # ============================================================
 diag "";
 diag "-------- Bitwise operators (with exceptions):";
 
-test_codegen('$x & $y', '(pcl:pl-bit-and $x $y)', 'Bitwise AND');
-test_codegen('$x | $y', '(pcl:pl-bit-or $x $y)', 'Bitwise OR');
-test_codegen('$x ^ $y', '(pcl:pl-bit-xor $x $y)', 'Bitwise XOR');
+test_codegen('$x & $y', '(pl-bit-and $x $y)', 'Bitwise AND');
+test_codegen('$x | $y', '(pl-bit-or $x $y)', 'Bitwise OR');
+test_codegen('$x ^ $y', '(pl-bit-xor $x $y)', 'Bitwise XOR');
 
 
 # ============================================================
 diag "";
 diag "-------- Assignment:";
 
-test_codegen('$x = $y', '(pcl:pl-setf $x $y)', 'Simple assignment');
-test_codegen('$x += 5', '(pcl:pl-incf $x 5)', 'Add-assign');
-test_codegen('$x -= 5', '(pcl:pl-decf $x 5)', 'Subtract-assign');
+test_codegen('$x = $y', '(pl-setf $x $y)', 'Simple assignment');
+test_codegen('$x += 5', '(pl-incf $x 5)', 'Add-assign');
+test_codegen('$x -= 5', '(pl-decf $x 5)', 'Subtract-assign');
 
 
 # ============================================================
@@ -224,15 +224,15 @@ diag "";
 diag "-------- Complex expressions:";
 
 test_codegen('$x + $y * $z',
-             '(pcl:pl-+ $x (pcl:pl-* $y $z))',
+             '(pl-+ $x (pl-* $y $z))',
              'Operator precedence');
 
 test_codegen('($x + $y) * $z',
-             '(pcl:pl-* (pcl:pl-+ $x $y) $z)',
+             '(pl-* (pl-+ $x $y) $z)',
              'Parenthesized expression');
 
 test_codegen('$foo + (my $x = 1)',
-             '(pcl:pl-+ $foo (pcl:pl-setf $x 1))',
+             '(pl-+ $foo (pl-setf $x 1))',
              'Inline my declaration in parens');
 
 
@@ -241,19 +241,19 @@ diag "";
 diag "-------- Assignment to array/hash elements:";
 
 test_codegen('$arr[0] = 5',
-             '(pcl:pl-setf (pl-aref @arr 0) 5)',
+             '(pl-setf (pl-aref @arr 0) 5)',
              'Assign to array element');
 
 test_codegen('$hash{key} = "value"',
-             '(pcl:pl-setf (pl-gethash %hash "key") "value")',
+             '(pl-setf (pl-gethash %hash "key") "value")',
              'Assign to hash element');
 
 test_codegen('$arr[$i] = $x + 1',
-             '(pcl:pl-setf (pl-aref @arr $i) (pcl:pl-+ $x 1))',
+             '(pl-setf (pl-aref @arr $i) (pl-+ $x 1))',
              'Assign expression to array element');
 
 test_codegen('$hash{$key} = $val',
-             '(pcl:pl-setf (pl-gethash %hash $key) $val)',
+             '(pl-setf (pl-gethash %hash $key) $val)',
              'Assign with variable key');
 
 
@@ -291,19 +291,19 @@ diag "";
 diag "-------- Assignment to dereferenced values:";
 
 test_codegen('$ref->[0] = 5',
-             '(pcl:pl-setf (pl-aref-deref $ref 0) 5)',
+             '(pl-setf (pl-aref-deref $ref 0) 5)',
              'Assign to array ref element');
 
 test_codegen('$ref->{key} = "value"',
-             '(pcl:pl-setf (pl-gethash-deref $ref "key") "value")',
+             '(pl-setf (pl-gethash-deref $ref "key") "value")',
              'Assign to hash ref element');
 
 test_codegen('$data->[0][1] = $x',
-             '(pcl:pl-setf (pl-aref (pl-aref-deref $data 0) 1) $x)',
+             '(pl-setf (pl-aref (pl-aref-deref $data 0) 1) $x)',
              'Assign to nested array ref');
 
 test_codegen('$cfg->{a}{b} = 100',
-             '(pcl:pl-setf (pl-gethash (pl-gethash-deref $cfg "a") "b") 100)',
+             '(pl-setf (pl-gethash (pl-gethash-deref $cfg "a") "b") 100)',
              'Assign to nested hash ref');
 
 
@@ -312,23 +312,23 @@ diag "";
 diag "-------- Mixed complex expressions:";
 
 test_codegen('$x = $arr[0] + $hash{key}',
-             '(pcl:pl-setf $x (pcl:pl-+ (pl-aref @arr 0) (pl-gethash %hash "key")))',
+             '(pl-setf $x (pl-+ (pl-aref @arr 0) (pl-gethash %hash "key")))',
              'Sum of array and hash values');
 
 test_codegen('$result = $obj->method($arr[0])',
-             '(pcl:pl-setf $result (pl-method-call $obj \'method (pl-aref @arr 0)))',
+             '(pl-setf $result (pl-method-call $obj \'method (pl-aref @arr 0)))',
              'Method call with array element arg');
 
 test_codegen('$total = $prices->[$i] * $qty->{$item}',
-             '(pcl:pl-setf $total (pcl:pl-* (pl-aref-deref $prices $i) (pl-gethash-deref $qty $item)))',
+             '(pl-setf $total (pl-* (pl-aref-deref $prices $i) (pl-gethash-deref $qty $item)))',
              'Multiply two dereferenced values');
 
 test_codegen('$hash{$arr[0]} = $ref->{key}',
-             '(pcl:pl-setf (pl-gethash %hash (pl-aref @arr 0)) (pl-gethash-deref $ref "key"))',
+             '(pl-setf (pl-gethash %hash (pl-aref @arr 0)) (pl-gethash-deref $ref "key"))',
              'Complex LHS and RHS');
 
 test_codegen('$x++ + $y--',
-             '(pcl:pl-+ (pl-post++ $x) (pl-post-- $y))',
+             '(pl-+ (pl-post++ $x) (pl-post-- $y))',
              'Post-increment and decrement in expression');
 
 test_codegen('++$arr[0]',
@@ -341,27 +341,27 @@ diag "";
 diag "-------- Compound assignment operators:";
 
 test_codegen('$x *= 2',
-             '(pcl:pl-*= $x 2)',
+             '(pl-*= $x 2)',
              'Multiply-assign');
 
 test_codegen('$x /= 2',
-             '(pcl:pl-/= $x 2)',
+             '(pl-/= $x 2)',
              'Divide-assign');
 
 test_codegen('$str .= "suffix"',
-             '(pcl:pl-.= $str "suffix")',
+             '(pl-.= $str "suffix")',
              'Concat-assign');
 
 test_codegen('$x ||= 10',
-             '(pcl:pl-or-assign $x 10)',
+             '(pl-or-assign $x 10)',
              'Or-assign');
 
 test_codegen('$x //= "default"',
-             '(pcl:pl-//= $x "default")',
+             '(pl-//= $x "default")',
              'Defined-or-assign');
 
 test_codegen('$arr[0] += 5',
-             '(pcl:pl-incf (pl-aref @arr 0) 5)',
+             '(pl-incf (pl-aref @arr 0) 5)',
              'Add-assign to array element');
 
 
@@ -370,11 +370,11 @@ diag "";
 diag "-------- More precedence tests:";
 
 test_codegen('$a && $b || $c',
-             '(pcl:pl-|| (pcl:pl-&& $a $b) $c)',
+             '(pl-|| (pl-&& $a $b) $c)',
              'AND has higher precedence than OR');
 
 test_codegen('$a || $b && $c',
-             '(pcl:pl-|| $a (pcl:pl-&& $b $c))',
+             '(pl-|| $a (pl-&& $b $c))',
              'AND binds tighter');
 
 test_codegen('$a ? $b : $c ? $d : $e',
@@ -382,7 +382,7 @@ test_codegen('$a ? $b : $c ? $d : $e',
              'Nested ternary (right-associative)');
 
 test_codegen('$x = $a ? $b : $c',
-             '(pcl:pl-setf $x (pl-if $a $b $c))',
+             '(pl-setf $x (pl-if $a $b $c))',
              'Assignment with ternary (assignment has lower precedence)');
 
 
@@ -391,11 +391,11 @@ diag "";
 diag "-------- Indentation tests:";
 
 test_codegen('$x + $y',
-             '  (pcl:pl-+ $x $y)',
+             '  (pl-+ $x $y)',
              'Indent level 1 (2 spaces)', 1);
 
 test_codegen('$arr[0] = 5',
-             '    (pcl:pl-setf (pl-aref @arr 0) 5)',
+             '    (pl-setf (pl-aref @arr 0) 5)',
              'Indent level 2 (4 spaces)', 2);
 
 test_codegen('$x',

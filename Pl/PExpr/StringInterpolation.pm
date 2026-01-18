@@ -86,12 +86,18 @@ sub parse_interpolated_string {
   if (@parts == 0) {
     return $self->make_string_literal_node($parser, "");
   }
-  
-  # If only one part and it's already a string literal, return it directly
+
+  # If only one part, check if it's a simple string literal
+  # Array variables need string_concat wrapper for proper join handling
   if (@parts == 1) {
-    return $parts[0];
+    my $part_node = $parser->get_a_node($parts[0]);
+    # Only return directly if it's a string literal, not an @array
+    if (ref($part_node) ne 'PPI::Token::Symbol' || $part_node->content() !~ /^@/) {
+      return $parts[0];
+    }
+    # Fall through to create string_concat for array variables
   }
-  
+
   # Build string_concat node with all parts
   my ($concat_node, $concat_id) = $parser->make_node_insert('string_concat');
   # Add the original string to the node:
@@ -136,6 +142,29 @@ sub parse_interpolated_variable {
     my $after = substr($content, $pos + 2, 1);
     if ($after eq '' || $after !~ /\w/) {
       my $var_token = PPI::Token::Symbol->new('$$');
+      my $var_id = $parser->make_node($var_token);
+      return ($var_id, $pos + 2);
+    }
+  }
+
+  # Handle magic variables starting with $
+  if ($sigil eq '$') {
+    my $next_char = substr($content, $pos + 1, 1);
+
+    # Handle caret variables FIRST: $^O, $^V, $^W, $^X, etc.
+    # (must check before single-punct to avoid matching just $^)
+    if ($next_char eq '^' && substr($content, $pos + 2, 1) =~ /^[A-Z]$/) {
+      my $caret_letter = substr($content, $pos + 2, 1);
+      my $var_token = PPI::Token::Magic->new('$^' . $caret_letter);
+      my $var_id = $parser->make_node($var_token);
+      return ($var_id, $pos + 3);
+    }
+
+    # Handle single-punctuation magic variables: $! $? $. $@ $/ $\ $& $' $` $+
+    # $; $, $| $: $% $= $- $< $> $( $) $[ $] $~ $"
+    # Note: $^ alone (format top name) is rare, skip it to avoid ambiguity
+    if ($next_char =~ /^[!\?\.\@\/\\&\'\`\+;\,\|:\%=\-<>\(\)\[\]~"]$/) {
+      my $var_token = PPI::Token::Magic->new('$' . $next_char);
       my $var_id = $parser->make_node($var_token);
       return ($var_id, $pos + 2);
     }
@@ -262,8 +291,10 @@ sub parse_array_subscript {
     my $var_id = $parser->make_node($var_token);
     return ($var_id, $bracket_start);
   }
-  
-  my @parts = $stmts[0]->children();
+
+  # Clone parts to preserve content after $doc goes out of scope
+  # (PPI tokens lose content when their parent document is garbage collected)
+  my @parts = map { $_->clone() } $stmts[0]->children();
   my $index_id = $parser->parse(\@parts);
   
   # Create array access node
@@ -336,8 +367,9 @@ sub parse_hash_subscript {
       my $var_id = $parser->make_node($var_token);
       return ($var_id, $brace_start);
     }
-    
-    my @parts = $stmts[0]->children();
+
+    # Clone parts to preserve content after $doc goes out of scope
+    my @parts = map { $_->clone() } $stmts[0]->children();
     $key_id = $parser->parse(\@parts);
   }
   
