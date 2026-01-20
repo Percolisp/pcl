@@ -130,6 +130,57 @@ Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
 - [Moo](https://metacpan.org/pod/Moo) - Object system
 - [SBCL](http://www.sbcl.org/) - For running transpiler tests (optional)
 
+## Installation
+
+### Ubuntu/Debian
+
+```bash
+# Perl dependencies
+sudo apt install perl cpanminus
+cpanm PPI Moo Test::More
+
+# Common Lisp (for running transpiled code)
+sudo apt install sbcl libpcre3-dev build-essential
+
+# Install Quicklisp (CL package manager)
+curl -O https://beta.quicklisp.org/quicklisp.lisp
+sbcl --load quicklisp.lisp \
+     --eval '(quicklisp-quickstart:install)' \
+     --eval '(ql:add-to-init-file)' \
+     --quit
+
+# Install CL dependencies (run once in SBCL)
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+```
+
+### macOS
+
+```bash
+# Perl dependencies
+cpanm PPI Moo Test::More
+
+# Common Lisp
+brew install sbcl pcre
+
+# Install Quicklisp and cl-ppcre (same as above)
+curl -O https://beta.quicklisp.org/quicklisp.lisp
+sbcl --load quicklisp.lisp \
+     --eval '(quicklisp-quickstart:install)' \
+     --eval '(ql:add-to-init-file)' \
+     --quit
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+```
+
+### Verify Installation
+
+```bash
+# Run tests
+prove Pl/t/
+
+# Quick transpile test
+echo 'print "Hello World\n";' | ./pl2cl
+```
+
 ## Status
 
 **Pl::PExpr**: Beta level expression parser

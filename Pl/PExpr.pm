@@ -31,45 +31,7 @@ use constant {
 use Exporter 'import';
 our @EXPORT_OK = qw(SCALAR_CTX LIST_CTX VOID_CTX);
 
-# Expects a statement/expression in PPI.
-
-# Keep configuration for a scope. Keep code that should be added after
-# scope.
-
-# XXXX Postfix 'if' will look like a word. What more cases do we need
-#      to recognize?? That should be recognized before calling this.
-#      p-fix 'if' isn't expr, must be full statement. But is expr in PPI.
-
-# XXXX This also need to keep track ofcontexts, scalar och list!
-#      All calls get that as an extra parameter? Also, need to keep
-#      stack for uses of caller().
-
-# XXXX Handle default $_. (Just add automagic param for chomp etc?)
-#      Mark ops which can take that default $_ in op list??
-#      So needs to support varying no of params for ops.
-
-# XXXX Logic here for @_? Or do in destination?
-
-# XXXX Range '..'.
-
-# XXXX ':?'
-
-# XXXX &sub(), &$subref(), ref to the running sub with __SUB__->().
-#      Note that &foo(...) ignores prototype checks! Page 326.
-
-# XXXX Tests for 'isa'.
-
-# XXXX Reread about prototypes.
-
-# XXXX 'grep { ... } <expr>' etc.
-
 # XXXX Unary ops have a different prio compared to list ops, se page 106.
-
-# XXXX Assignments '+=', '-=', '*=', '**=', etc.
-
-# XXXX Does the '//' op work, like '$x // $y'?
-
-# State like use v5.20, known cases with subs + parameter specs, etc.
 
 # XXXX From 5.36 can do sub foo :lvalue ($x, $y = 1, @z) { .... }
 #      https://perldoc.perl.org/perlsub#Signatures
@@ -89,33 +51,16 @@ sub SET_DEBUG { $DEBUG_VAL = shift; }
 
 
 
-# Functions with known number of parameters (and types).
-# Should also have declarations.
-
-# XXXX Also need to rething subs with declared prototypes etc. (Does
-#      constants for e.g. tcp/ip integratiion need special handling??)
-
-# XXXX Need to be extensible, for Prototypes.
-
-# XXXXX Need to flag for if it returns different in scalar/list contexts.
-
-# XXXXX Would it be shorter to list all funs not defaulting to $_?
-
-# -1 means list. -1x means x parameters before a list.
-# -2 means use $_ as default.
-
-# perldoc perlfun:
-
-
 # Expression:
 has e => (
   is        => 'ro',
   required  => 0,
 );
 
-# Parts get GC:ed, if there are no references to the PPI object!
-# So keep the PPI::Document alive to prevent tokens from becoming empty.
-# (This is probably only a problem when writing tests.)
+# Parts of PPI get GC:ed, if there are no references to the PPI
+# object!  So keep the PPI::Document alive to prevent tokens from
+# becoming empty.  (This is probably only a problem when writing
+# tests.)
 has full_PPI => (
   is        => 'ro',
   required  => 0,
@@ -140,7 +85,7 @@ has declarations => (
 );
 
 # String interpolation handler
-has string_interpolator => (
+has str_interpol => (
   is       => 'ro',
   default  => sub { Pl::PExpr::StringInterpolation->new() },
 );
@@ -228,14 +173,8 @@ sub parse_expr_to_tree {
   # Handle declarators (my, our, state, local)
   @exprs = $self->extract_declarations(\@exprs);
 
-  # XXXX Get list of filehandles? Of subs with know no of params?
-  #      Can prototypes get FH as params? If so, add proto for open/close/etc
-
   # XXXX Clear any stored temporary stuff??
   # Clear node tree here?
-
-  # XXXX Find any postfix 'if' before calling this?
-
   my $root_id   = $self->parse(\@exprs);
   # say "--------- Root id: $root_id"   if 1 & DEBUG;
   $self->set_top_node_id($root_id);
@@ -408,10 +347,6 @@ sub extract_declarations {
 
 # ----------------------------------------------------------------------
 
-# XXXX Replace comparing ->{type} to 'progn', 'funcall', etc... :-(
-# XXXX Handle chained ops.
-# XXXX Handle ?:.
-
 sub parse {
   my $self      = shift;
   my $e         = shift // $self->e;
@@ -471,7 +406,7 @@ sub parse {
       if ($str_type && $str_type == 2) {
         # String needs interpolation
         say "parse(): String needs interpolation"      if 1 & DEBUG;
-        return $self->string_interpolator->parse_interpolated_string($self,$e1);
+        return $self->str_interpol->parse_interpolated_string($self, $e1);
       }
       
       # Simple atomic value
@@ -608,7 +543,8 @@ sub parse {
       # Check if interpolation is needed (has $ or @)
       if ($cmd =~ /[\$\@]/) {
         say "parse(): Backtick needs interpolation"  if 1 & DEBUG;
-        $cmd_id = $self->string_interpolator->parse_interpolated_string($self, $str_token);
+        $cmd_id = $self->str_interpol->parse_interpolated_string($self,
+								 $str_token);
       } else {
         $cmd_id = $self->make_node($str_token);
       }
@@ -811,7 +747,7 @@ sub parse {
         my $pst_id  = $nxt->{id};
         $self->prepend_child_to_node($pst_id, $pre_id);
         splice @$e, $i-1, 2;
-        $i--;  # Adjust for removed elements so we recheck for following subscript
+        $i--;  # Adjust for removed elements so recheck for following subscript
         next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/
@@ -941,12 +877,6 @@ sub parse {
 
 
   # - - - handle ops:
-
-  # XXXX Can a code block be declared as a parameter in an expr,
-  #      except for prototype declarations?? Read up if we can get
-  #      that.  Note that a 'sub { ... } returns a 'CODE'. There are
-  #      no operations on that.
-  #      Like: foobar(4, sub { ... }, 5);
 
   # Loop, replacing highest precedence 'op' with small tree:
   while(1) {
@@ -1081,12 +1011,13 @@ sub parse {
         die "Ternary operator: Found '?' but no matching ':'\n" . dump($e);
       }
 
-      # Find condition start: scan backwards from ? to find lower-prec operator or ':'
+      # Find cond start: scan backwards from ? to find lower-prec op or ':'
       my $cond_start = 0;
       for (my $i = $hi_ix - 1; $i >= 0; $i--) {
         my $info = $self->op_info($e->[$i]);
         if ($info && $info->{prec} <= $ternary_prec) {
-          # Stop at lower-prec operators OR at ':' (which marks outer ternary boundary)
+          # Stop at lower-precedence operators OR at ':' (which marks
+          # outer ternary boundary)
           $cond_start = $i + 1;
           last;
         }
@@ -1102,7 +1033,8 @@ sub parse {
         }
       }
 
-      say "Ternary: cond_start=$cond_start, ?=$hi_ix, :=$colon_pos, false_end=$false_end"
+      say "Ternary: cond_start=$cond_start, ?=$hi_ix, :=$colon_pos, ",
+	  "false_end=$false_end"
           if 2 & DEBUG;
 
       # Extract the three parts
@@ -1173,7 +1105,7 @@ sub parse {
 
     }
 
-    die "Yabba dabba doh! op=" . dump($op) . " info=" . dump($op_info);
+    die "Unknown. Bug. op=" . dump($op) . " info=" . dump($op_info);
   }
 
   if (scalar(@$e) == 1 && $self->is_internal_node_type($e->[0])) {
@@ -1185,12 +1117,7 @@ sub parse {
     return $self->make_node($e->[0]);
   }
 
-  die "Fell through. Missing case: " . dump($e);
-
-
-  # XXXX There is an extra object over old parenthese exprs We could
-  #      remove that? E.g. 5 * (4 + 7)
-  #      Is there an extra level also for progn?
+  die "Bug. Fell through. Missing case: " . dump($e);
 }
 
 
@@ -1257,26 +1184,11 @@ sub parse_list {
 # This replaces all sub calls in an expression.
 # It use known number of parameters for subs and priorities.
 
-# XXXXX This needs to handle `open FH, ... and ... <FH> ...`??
-# Both so doesn't try to define FH as a sub when declaring/closing it
-# in open/close and also when referencing it.
-
-# XXXXX Need to look at sub name, parameters are different for
-# different subs (Prototypes and built in).
-
-# XXXXX Now it is:
-#        foo
-#   par1  par2  par3 ...
-# That looks bad with empty param list. Instead generate this:
-#         funcall
-#   foo     par1 par2 par3 ...
 sub handle_subcalls {
   my $self      = shift;
   my $e         = shift;
 
   say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
-  # XXXX Special case for open/close/<FH>/etc, so knows next param is a FH.
-  #      Declare that in sub specs above?? That would be the easy way.
 
   # - - - Handle: `fun(...)`:
   # (Yes, loops to all but last.)
@@ -1290,11 +1202,6 @@ sub handle_subcalls {
     say "handle_subcalls() Look for subname(..), was word. Is next list ",
         ($self->is_list($next) ? "Yes" : "No"), ". Dump:", dump $next
         if 8 & DEBUG;
-
-    # XXXX Here, handle subs that have known params, also 0 (default to $_.)??
-    # e.g.  foo xxx, yyy, chdir z, u, v;
-    #  pars:    ___  ___  _______  _  _
-    #            1    2      3     3  4.
 
     # Handle grep/map { BLOCK } LIST pattern
     # Uses Parser.pm callback for multi-statement blocks
@@ -1412,7 +1319,8 @@ sub handle_subcalls {
     next
         if !$self->is_list($next);
 
-    # - - - Special handling for open: register bareword filehandle BEFORE parsing args
+    # - - - open
+    # Special handling: register bareword filehandle BEFORE parsing args
     my $func_name = $now->can('content') ? $now->content() : '';
     if ($func_name eq 'open' && $self->has_environment) {
       # Peek at first argument - if it's a bareword, register it as filehandle
@@ -1454,6 +1362,7 @@ sub handle_subcalls {
     splice @$e, $i+1, 1;        # Remove parameters.
   }
   say "---- handle_subcalls: Before main loop. Has ", dump $e   if 8 & DEBUG;
+
   # - - - Look for remaining funcalls without () around parameters:
   my $last_low_prio_op;       # Store index to lower prio op than ","
   for(my $i=scalar(@$e)-1; $i >= 0; $i--) {
@@ -1476,7 +1385,7 @@ sub handle_subcalls {
     next unless $self->is_word($now);
     my $sub_name = $now->content;
 
-    # - - - Skip if this word is followed by -> (class method call like Foo->new)
+    # - - - Skip if this word is followed by -> (class method call; Foo->new)
     # The word is a class/package name, not a function call
     if ($i + 1 < scalar(@$e)) {
       my $next_elem = $e->[$i + 1];
@@ -1519,8 +1428,6 @@ sub handle_subcalls {
     # - - - Does it have zero parameters:
     # Simple case, e.g. time(), wantarray().
 
-    # XXXX Should return list of possible no of  parameters.
-    #      Update this.
     my $no_pars = $self->no_params_of_sub($sub_name);
 
     # Check if function takes 0 params, or can default to $_ or @_
