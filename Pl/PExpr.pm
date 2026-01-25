@@ -1,5 +1,9 @@
 package Pl::PExpr;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -494,27 +498,71 @@ sub parse {
     }
 
 
-    # - - - Readline operator <FH> or <$fh>?
+    # - - - Readline operator <FH> or <$fh>, or file glob <*.txt>?
     if (ref($e1) eq 'PPI::Token::QuoteLike::Readline') {
-      say "parse(): Found readline operator"         if 1 & DEBUG;
+      say "parse(): Found readline/glob operator"    if 1 & DEBUG;
       my $content = $e1->content;
-      # Extract the filehandle from <...>
+      # Extract the content from <...>
       $content =~ /^<(.*)>$/;
-      my $fh_name = $1;
+      my $inner = $1;
+
+      # Distinguish between readline and file glob:
+      # - Glob: contains *, ?, [, ], {, } or looks like a path with /
+      # - Readline: bareword filehandle (STDIN), variable ($fh), or empty
+      my $is_glob = 0;
+      if (defined $inner && $inner ne '') {
+        # Check for glob metacharacters or path-like content
+        if ($inner =~ /[\*\?\[\]\{\}]/ ||           # glob metacharacters
+            ($inner =~ /\// && $inner !~ /^\$/)) {  # path with / (not variable)
+          $is_glob = 1;
+        }
+      }
+
+      if ($is_glob) {
+        # File glob: <*.txt>, </path/*.log>, etc.
+        say "parse(): Treating as file glob"         if 1 & DEBUG;
+        my ($node, $node_id) = $self->make_node_insert('glob');
+
+        # Store the pattern - handle interpolation if contains $var
+        if ($inner =~ /[\$\@]/) {
+          # Contains variable - needs interpolation at runtime
+          # Create a fake double-quoted string token for the interpolation parser
+          my $fake_str = PPI::Token::Quote::Double->new(qq{"$inner"});
+          my $interp_id = $self->str_interpol->parse_interpolated_string($self, $fake_str);
+          # The interpolation returns a string_concat node, add its children
+          my $interp_node = $self->get_a_node($interp_id);
+          if ($self->is_internal_node_type($interp_node) && $interp_node->{type} eq 'string_concat') {
+            my $interp_kids = $self->get_node_children($interp_id);
+            for my $part_id (@$interp_kids) {
+              $self->add_child_to_node($node_id, $part_id);
+            }
+          } else {
+            $self->add_child_to_node($node_id, $interp_id);
+          }
+        } else {
+          # Static pattern - store as literal string
+          my $str_token = PPI::Token::Quote::Double->new(qq{"$inner"});
+          my $str_id = $self->make_node($str_token);
+          $self->add_child_to_node($node_id, $str_id);
+        }
+
+        say "parse(): Made glob node $node_id"       if 1 & DEBUG;
+        return $node_id;
+      }
 
       # Create a readline node with the filehandle
       my ($node, $node_id) = $self->make_node_insert('readline');
 
-      if (defined $fh_name && $fh_name ne '') {
+      if (defined $inner && $inner ne '') {
         # Has a filehandle - could be bareword (STDIN) or variable ($fh)
-        if ($fh_name =~ /^\$/) {
+        if ($inner =~ /^\$/) {
           # Variable filehandle like $fh
-          my $sym_token = PPI::Token::Symbol->new($fh_name);
+          my $sym_token = PPI::Token::Symbol->new($inner);
           my $fh_id = $self->make_node($sym_token);
           $self->add_child_to_node($node_id, $fh_id);
         } else {
           # Bareword filehandle like STDIN, FH
-          my $word_token = PPI::Token::Word->new($fh_name);
+          my $word_token = PPI::Token::Word->new($inner);
           my $fh_id = $self->make_node($word_token);
           $self->add_child_to_node($node_id, $fh_id);
         }
@@ -1343,6 +1391,21 @@ sub handle_subcalls {
       }
     }
 
+    # Special handling for split with regex pattern: mark regex before parsing
+    if ($func_name eq 'split') {
+      my @list_children = $next->children();
+      for my $child (@list_children) {
+        my @check = ref($child) eq 'PPI::Statement::Expression'
+                  ? $child->children() : ($child);
+        for my $item (@check) {
+          if (ref($item) =~ /^PPI::Token::Regexp/) {
+            $item->{_has_match_context} = 1;
+            last;
+          }
+        }
+      }
+    }
+
     # Replace the two items in expr with a subtree:
     my($top_node, $top_id) = $self->make_node_insert('funcall');
 
@@ -1352,6 +1415,27 @@ sub handle_subcalls {
     $self->add_child_to_node($top_id, $node_id);
     for my $c_id (@$c_ids) {
       $self->add_child_to_node($top_id, $c_id);
+    }
+
+    # Special handling for split: ensure pattern and string are always provided
+    # split()        -> split(" ", $_)
+    # split(/pat/)   -> split(/pat/, $_)
+    if ($func_name eq 'split') {
+      my $arg_count = scalar(@$c_ids);
+      if ($arg_count == 0) {
+        # No args: add " " pattern and $_
+        my $space = PPI::Token::Quote::Double->new('" "');
+        my $space_id = $self->make_node($space);
+        $self->add_child_to_node($top_id, $space_id);
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      } elsif ($arg_count == 1) {
+        # One arg (pattern): add $_
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      }
     }
 
     # Add implicit $_ if function defaults to it
@@ -1524,12 +1608,23 @@ sub handle_subcalls {
         }
     }
 
-    # Functions taking 1 param also need Cast+Symbol handling (e.g., shift @$arr)
-    # Check if this is a 1-param function with Cast+Symbol as argument
+    # Functions taking EXACTLY 1 param need Cast+Symbol handling (e.g., shift @$arr)
+    # Check if this is a strictly 1-param function with Cast+Symbol as argument
+    # NOTE: Don't apply this to functions with variable params like bless([1,2])
+    #       as they may take more arguments after the Cast+Symbol
     if (defined $no_pars && $end_pars > $i + 1) {
-      my $is_single_param = ($no_pars == 1)
-                         || (ref($no_pars) eq 'ARRAY' && grep { $_ == 1 } @$no_pars);
-      if ($is_single_param) {
+      # Only limit to single term if function takes EXACTLY 1 param (max is 1)
+      my $is_strictly_single = 0;
+      if ($no_pars == 1) {
+        $is_strictly_single = 1;
+      } elsif (ref($no_pars) eq 'ARRAY') {
+        # For array specs, only if max is 1 (all values are 1 or less)
+        # Skip negative values (defaults like -2, -3) when finding max
+        my @positive = grep { $_ > 0 } @$no_pars;
+        my $max = @positive ? (sort { $b <=> $a } @positive)[0] : 0;
+        $is_strictly_single = ($max == 1);
+      }
+      if ($is_strictly_single) {
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
           # Cast followed by Symbol is a single dereference term
@@ -1599,9 +1694,25 @@ sub handle_subcalls {
     # split /pattern/, LIST - the regex should not be wrapped with $_ =~
     if ($sub_name eq 'split' && $i + 1 <= $end_pars) {
       my $maybe_regex = $e->[$i + 1];
+      # Direct regex: split /pattern/
       if (ref($maybe_regex) =~ /^PPI::Token::Regexp/) {
-        # Mark regex as having match context so it's not wrapped with $_ =~
         $maybe_regex->{_has_match_context} = 1;
+      }
+      # Regex in parentheses: split(/pattern/)
+      elsif (ref($maybe_regex) eq 'PPI::Structure::List') {
+        # Look inside the list for the regex
+        my @list_children = $maybe_regex->children();
+        for my $child (@list_children) {
+          # May be wrapped in PPI::Statement::Expression
+          my @check = ref($child) eq 'PPI::Statement::Expression'
+                    ? $child->children() : ($child);
+          for my $item (@check) {
+            if (ref($item) =~ /^PPI::Token::Regexp/) {
+              $item->{_has_match_context} = 1;
+              last;
+            }
+          }
+        }
       }
     }
 
@@ -1618,12 +1729,29 @@ sub handle_subcalls {
     }
     for my $c_id (@$c_ids) {
       $self->add_child_to_node($top_id, $c_id);
-      # $self->add_child_to_node($node_id, $c_id);
+    }
+
+    # Special handling for split: ensure pattern and string are always provided
+    if ($sub_name eq 'split') {
+      my $arg_count = scalar(@$c_ids);
+      if ($arg_count == 0) {
+        # No args: add " " pattern and $_
+        my $space = PPI::Token::Quote::Double->new('" "');
+        my $space_id = $self->make_node($space);
+        $self->add_child_to_node($top_id, $space_id);
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      } elsif ($arg_count == 1) {
+        # One arg (pattern): add $_
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      }
     }
 
     # Add implicit $_ if function defaults to it
-    my $func_name = $e->[$i]->content() if $e->[$i]->can('content');
-    $self->add_implicit_default_param($func_name, $top_id);
+    $self->add_implicit_default_param($sub_name, $top_id);
 
     $e->[$i]    = $top_node; # $self->make_subtree_item($node_id, 'funcall');
 
@@ -1833,10 +1961,28 @@ sub child_context {
             if $child_index == 2;
       }
 
+      # join forces list context on all arguments after separator
+      if ($func_name && $func_name eq 'join') {
+        return LIST_CTX
+            if $child_index >= 2;  # All arguments after function name and separator
+      }
+
+      # Functions that always take lists
+      if ($func_name && $func_name =~ /^(push|unshift|splice|reverse)$/) {
+        return LIST_CTX
+            if $child_index >= 2;  # List argument(s)
+      }
+
       # print/say force list context on all arguments
       if ($func_name && $func_name =~ /^(print|say)$/) {
         return LIST_CTX
             if $child_index > 0;  # All arguments after function name
+      }
+
+      # scalar forces scalar context on its argument
+      if ($func_name && $func_name eq 'scalar') {
+        return SCALAR_CTX
+            if $child_index >= 1;  # Argument is scalar context
       }
     }
     # progn (comma operator) forces list context
@@ -2206,6 +2352,10 @@ sub cleanup_for_parsing {
   # Word + Operator. Split labels back into their components when preceded by "?".
   @no_ws = $self->_fix_ppi_ternary_label_bug(\@no_ws);
 
+  # PPI BUG WORKAROUND: After blocks, PPI parses <*.txt> as separate tokens
+  # instead of a glob. Reconstruct glob tokens from < PATTERN > sequences.
+  @no_ws = $self->_fix_ppi_glob_after_block(\@no_ws);
+
   for(my $i=0; $i < scalar(@no_ws); $i++) {
     my $part    = $no_ws[$i];
 
@@ -2339,6 +2489,82 @@ sub _fix_ppi_ternary_label_bug {
     }
 
     push @result, $token;
+  }
+
+  return @result;
+}
+
+
+# PPI BUG WORKAROUND: After a block (e.g., grep { } or map { }), PPI fails to
+# recognize <*.txt> as a file glob (PPI::Token::QuoteLike::Readline). Instead,
+# it parses it as separate tokens: < (operator), * (operator), . (operator),
+# txt (word), > (operator).
+#
+# This happens because PPI's tokenizer doesn't have enough context after a
+# closing brace to know that < starts a glob rather than a comparison operator.
+#
+# Example: "grep { /a/ } <*.txt>" is misparsed as:
+#   grep, {/a/}, <, *, ., txt, >
+# Instead of:
+#   grep, {/a/}, <*.txt>
+#
+# This workaround detects sequences like < TOKENS > that look like glob patterns
+# and reconstructs them into a single PPI::Token::QuoteLike::Readline token.
+sub _fix_ppi_glob_after_block {
+  my $self   = shift;
+  my $tokens = shift;
+
+  my @result;
+  my $i = 0;
+
+  while ($i < @$tokens) {
+    my $token = $tokens->[$i];
+
+    # Look for < that might start a broken glob
+    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq '<') {
+      # Scan ahead to find matching > and check if it looks like a glob
+      my $j = $i + 1;
+      my $glob_content = '';
+      my $has_glob_chars = 0;
+      my $found_close = 0;
+
+      while ($j < @$tokens) {
+        my $t = $tokens->[$j];
+        my $c = $t->can('content') ? $t->content : '';
+
+        # Found closing >
+        if (ref($t) eq 'PPI::Token::Operator' && $c eq '>') {
+          $found_close = 1;
+          last;
+        }
+
+        # Accumulate content
+        $glob_content .= $c;
+
+        # Check for glob metacharacters
+        $has_glob_chars = 1 if $c =~ /[\*\?\[\]]/;
+
+        # Stop if we hit something that can't be part of a glob
+        last if ref($t) eq 'PPI::Token::Operator' && $c =~ /^(==|!=|<=|>=|<=>|&&|\|\|)$/;
+        last if ref($t) eq 'PPI::Structure::List';  # Parentheses
+
+        $j++;
+      }
+
+      # If we found a valid-looking glob pattern, reconstruct it
+      if ($found_close && $has_glob_chars && $glob_content ne '') {
+        # Create a proper glob token
+        my $glob_token = bless {
+          content => "<$glob_content>"
+        }, 'PPI::Token::QuoteLike::Readline';
+        push @result, $glob_token;
+        $i = $j + 1;  # Skip past all the consumed tokens
+        next;
+      }
+    }
+
+    push @result, $token;
+    $i++;
   }
 
   return @result;

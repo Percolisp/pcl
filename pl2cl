@@ -1,5 +1,9 @@
 #!/usr/bin/env perl
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 # pl2cl - Convert Perl expressions to Common Lisp
 # Usage: pl2cl [options] <file.pl>
 #    or: echo '$x = 1' | pl2cl

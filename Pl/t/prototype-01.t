@@ -321,9 +321,9 @@ diag "-------- Complex Prototype Patterns:";
   ok($proto, 'all_refs prototype extracted');
   is($proto->{proto_string}, '\$\@\%', 'all_refs proto_string preserved');
   is(scalar @{$proto->{params}}, 3, 'all_refs has 3 params');
-  is($proto->{params}[0]{name}, '\$', 'first param is \$');
-  is($proto->{params}[1]{name}, '\@', 'second param is \@');
-  is($proto->{params}[2]{name}, '\%', 'third param is \%');
+  is($proto->{params}[0]{proto_type}, '\$', 'first param is \$');
+  is($proto->{params}[1]{proto_type}, '\@', 'second param is \@');
+  is($proto->{params}[2]{proto_type}, '\%', 'third param is \%');
 }
 
 # Test optional reference params
@@ -340,7 +340,7 @@ diag "-------- Complex Prototype Patterns:";
   my $env = get_prototype_info('sub glob_ref(\*) { }');
   my $proto = $env->get_prototype('glob_ref');
   ok($proto, 'glob_ref prototype extracted');
-  is($proto->{params}[0]{name}, '\*', 'glob_ref has \* param');
+  is($proto->{params}[0]{proto_type}, '\*', 'glob_ref has \* param');
 }
 
 # Test complex mixed prototype
@@ -349,11 +349,11 @@ diag "-------- Complex Prototype Patterns:";
   my $proto = $env->get_prototype('complex');
   ok($proto, 'complex prototype extracted');
   is($proto->{min_params}, 5, 'complex has 5 required params');
-  is($proto->{params}[0]{name}, '$', 'param 0 is $');
-  is($proto->{params}[1]{name}, '\@', 'param 1 is \@');
-  is($proto->{params}[2]{name}, '$', 'param 2 is $');
-  is($proto->{params}[3]{name}, '$', 'param 3 is $');
-  is($proto->{params}[4]{name}, '\%', 'param 4 is \%');
+  is($proto->{params}[0]{proto_type}, '$', 'param 0 is $');
+  is($proto->{params}[1]{proto_type}, '\@', 'param 1 is \@');
+  is($proto->{params}[2]{proto_type}, '$', 'param 2 is $');
+  is($proto->{params}[3]{proto_type}, '$', 'param 3 is $');
+  is($proto->{params}[4]{proto_type}, '\%', 'param 4 is \%');
 }
 
 # Test underscore prototype (_)
@@ -361,7 +361,7 @@ diag "-------- Complex Prototype Patterns:";
   my $env = get_prototype_info('sub with_underscore(_) { }');
   my $proto = $env->get_prototype('with_underscore');
   ok($proto, 'with_underscore prototype extracted');
-  is($proto->{params}[0]{name}, '_', 'underscore param recognized');
+  is($proto->{params}[0]{proto_type}, '_', 'underscore param recognized');
 }
 
 # Test empty prototype ()
@@ -434,7 +434,7 @@ END_MODULE
   my $proto = $env->get_prototype('modify_array');
   ok($proto, 'modify_array prototype imported');
   is($proto->{proto_string}, '\@', 'modify_array has \@ prototype');
-  ok($proto->{params}[0]{name} eq '\@', 'modify_array param is \@');
+  ok($proto->{params}[0]{proto_type} eq '\@', 'modify_array param is \@');
 
   # Check modify_hash prototype
   $proto = $env->get_prototype('modify_hash');
@@ -664,6 +664,59 @@ END_PERL
   # (The backslash is part of the call, not auto-added)
   unlike($cl, qr/pl-backslash \(pl-backslash/,
          'Explicit reference is not double-wrapped');
+}
+
+
+# ============================================================
+diag "";
+diag "-------- Unique Parameter Names (Issue: duplicate \$ params):";
+
+# Test that $$$ generates unique parameter names, not ($ $ $)
+{
+  my $code = 'sub takes_three($$$) { my ($p1,$p2,$p3)=@_; }';
+  my $env = Pl::Environment->new();
+  my $parser = Pl::Parser->new(
+    code        => $code,
+    environment => $env,
+  );
+  $parser->parse();
+  my $cl = join("\n", @{$parser->output});
+
+  # Should NOT have duplicate param names like ($ $ $)
+  unlike($cl, qr/\(pl-sub pl-takes_three \(\$ \$ \$\)/,
+         'Prototype $$$ does not generate duplicate $ param names');
+
+  # Old-style prototypes use &rest %_args (body accesses @_)
+  like($cl, qr/\(pl-sub pl-takes_three \(&rest %_args\)/,
+       'Prototype $$$ uses &rest pattern for @_ access');
+
+  # The proto_type should preserve original
+  my $proto = $env->get_prototype('takes_three');
+  is($proto->{params}[0]{proto_type}, '$', 'param 0 proto_type is $');
+  is($proto->{params}[1]{proto_type}, '$', 'param 1 proto_type is $');
+  is($proto->{params}[2]{proto_type}, '$', 'param 2 proto_type is $');
+}
+
+# Test * (typeglob) prototype is NOT skipped
+{
+  my $code = 'sub with_glob(*@) { }';
+  my $env = Pl::Environment->new();
+  my $parser = Pl::Parser->new(
+    code        => $code,
+    environment => $env,
+  );
+  $parser->parse();
+  my $cl = join("\n", @{$parser->output});
+
+  # Should have parameters for both * and @
+  my $proto = $env->get_prototype('with_glob');
+  is(scalar @{$proto->{params}}, 2, '*@ has 2 params');
+  is($proto->{params}[0]{proto_type}, '*', 'first param proto_type is *');
+  is($proto->{params}[1]{proto_type}, '@', 'second param proto_type is @');
+
+  # Old-style prototypes use &rest (body accesses @_)
+  like($cl, qr/\(pl-sub pl-with_glob \(&rest %_args\)/,
+       '*@ prototype uses &rest pattern for @_ access');
 }
 
 

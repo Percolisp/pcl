@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 21;
+use Test::More tests => 23;
 BEGIN { use_ok('Pl::Parser') };
 BEGIN { use_ok('Pl::Environment') };
 
@@ -134,6 +134,26 @@ package MyClass {
     like($result, qr/;;; package MyClass/, 'Full class: package start');
     like($result, qr/\(pl-sub pl-new/, 'Full class: constructor defined');
     like($result, qr/;;; end package MyClass/, 'Full class: package end');
+}
+
+
+# ========================================
+diag "";
+diag "-------- Regression tests (session 3):";
+
+# Regression: bless with bareword class ending in ::
+# Was parsing as two separate expressions instead of one bless call
+output_contains('bless \$x, o::',
+                '(pl-bless (pl-backslash $x) "o")',
+                'Regression: bless with o:: bareword class');
+
+# Regression: bless with shift (funcall with args, not simple bareword)
+# Was defaulting to "main" because shift funcall has 2 children
+{
+    my $code = 'sub new { bless {}, shift; }';
+    my $result = parse_code($code);
+    like($result, qr/\(pl-bless \(pl-hash \) \(pl-shift/,
+         'Regression: bless {}, shift generates shift call');
 }
 
 

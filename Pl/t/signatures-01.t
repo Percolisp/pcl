@@ -117,8 +117,8 @@ diag "-------- Old-style prototypes:";
 {
     my $sig = parse_sig('(\@$)');
     is($sig->{is_proto}, 1, 'Ref proto: is_proto = 1');
-    is($sig->{params}[0]{name}, '\@', 'Array ref sigil');
-    is($sig->{params}[1]{name}, '$', 'Scalar sigil');
+    is($sig->{params}[0]{proto_type}, '\@', 'Array ref sigil');
+    is($sig->{params}[1]{proto_type}, '$', 'Scalar sigil');
 }
 
 

@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 27;
+use Test::More tests => 31;
 BEGIN { use_ok('Pl::Parser') };
 
 
@@ -155,6 +155,33 @@ package Outer {
     like($result, qr/;;; end package Middle/, '3-level: end Middle');
     like($result, qr/;;; end package Outer/, '3-level: end Outer');
 }
+
+
+# ========================================
+diag "";
+diag "-------- Regression tests (session 3):";
+
+# Regression: foreach with range operator
+# Range was returning list but foreach expects vector
+output_contains('foreach my $i (0..5) { print $i; }',
+                '(pl-foreach ($i (pl-.. 0 5))',
+                'Regression: foreach with range operator');
+
+# Regression: push with @array argument should flatten
+# Was not flattening second array
+output_contains('push @x, @y;',
+                '(pl-push @x (pl-flatten @y))',
+                'Regression: push @x, @y flattens @y');
+
+# Regression: push with anonymous array should NOT flatten
+output_contains('push @x, [1, 2, 3];',
+                '(pl-push @x (pl-array-init 1 2 3))',
+                'Regression: push @x, [1,2,3] does not flatten');
+
+# Regression: push with array deref should flatten
+output_contains('push @x, @{$ref};',
+                '(pl-push @x (pl-flatten (pl-cast-@ $ref)))',
+                'Regression: push @x, @{$ref} flattens deref');
 
 
 done_testing();

@@ -1,5 +1,9 @@
 package Pl::Parser;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -115,6 +119,24 @@ sub parse {
   return join("\n", @{$self->output});
 }
 
+# Transform Perl qualified sub name to CL format
+# Perl: A::DESTROY -> CL: A::pl-DESTROY
+# Perl: Hash::Util::func -> CL: |Hash::Util|::pl-func
+# Perl: Class::DESTROY -> CL: |Class|::pl-DESTROY (avoid CL conflict)
+# Perl: simple_sub -> CL: pl-simple_sub
+sub _qualified_sub_to_cl {
+  my ($self, $name) = @_;
+  if ($name =~ /^(.+)::([^:]+)$/) {
+    my ($pkg, $bare) = ($1, $2);
+    # Pipe-quote if contains :: or conflicts with CL symbols
+    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' ||
+                  lc($pkg) eq 'method' || lc($pkg) eq 'function')
+                 ? "|$pkg|" : $pkg;
+    return "${cl_pkg}::pl-$bare";
+  }
+  return "pl-$name";
+}
+
 # Insert forward declarations for subs defined in each package
 # Perl subs can be called before they're defined (Perl resolves names at runtime).
 # But Common Lisp resolves function names at load time for top-level code.
@@ -128,10 +150,19 @@ sub _insert_sub_forward_declarations {
   my $subs = $self->environment->get_declared_subs();
   return unless @$subs;
 
+  # Collect packages that need to be pre-declared for qualified subs
+  my %needed_packages;
+
   # Group subs by package
   my %by_package;
   for my $sub (@$subs) {
-    push @{$by_package{$sub->{package}}}, $sub->{name};
+    my $name = $sub->{name};
+    # Check if sub name is qualified (e.g., A::DESTROY)
+    if ($name =~ /^(.+)::([^:]+)$/) {
+      my $sub_pkg = $1;
+      $needed_packages{$sub_pkg} = 1;
+    }
+    push @{$by_package{$sub->{package}}}, $name;
   }
 
   # Find (in-package ...) lines and insert forward decls after them
@@ -152,12 +183,25 @@ sub _insert_sub_forward_declarations {
 
       if (my $sub_names = $by_package{$pkg_name}) {
         my @decls;
+
+        # First, declare any packages needed for qualified sub names
+        # Pipe-quote if contains :: or conflicts with CL symbols
+        for my $pkg (sort keys %needed_packages) {
+          my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' ||
+                        lc($pkg) eq 'method' || lc($pkg) eq 'function')
+                       ? ":|$pkg|" : ":$pkg";
+          push @decls, "(defpackage $cl_pkg (:use :cl :pcl))";
+        }
+        # Clear so we don't emit again
+        %needed_packages = ();
+
         push @decls, ";; Forward declarations: Perl subs can be called before definition,";
         push @decls, ";; but top-level Lisp code executes immediately. Declare stubs now.";
         # Deduplicate sub names
         my %seen;
         for my $name (sort grep { !$seen{$_}++ } @$sub_names) {
-          push @decls, "(unless (fboundp 'pl-$name) (defun pl-$name (&rest args) (declare (ignore args)) nil))";
+          my $cl_name = $self->_qualified_sub_to_cl($name);
+          push @decls, "(unless (fboundp '$cl_name) (defun $cl_name (&rest args) (declare (ignore args)) nil))";
         }
         push @decls, "";
         push @insertions, [$i + 1, \@decls];
@@ -187,7 +231,10 @@ sub _insert_package_predeclarations {
 
   my @predecls;
   for my $pkg (@$pkgs) {
-    my $cl_pkg = $pkg =~ /::/ ? ":|$pkg|" : ":$pkg";
+    # Pipe-quote if contains :: or conflicts with CL symbols
+    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' ||
+                  lc($pkg) eq 'method' || lc($pkg) eq 'function')
+                 ? ":|$pkg|" : ":$pkg";
     push @predecls, ";; Pre-declare package for dynamic loading";
     push @predecls, "(defpackage $cl_pkg (:use :cl :pcl))";
     push @predecls, "";
@@ -1590,8 +1637,9 @@ sub _process_sub_statement {
   for my $param (@{$sig_info->{params}}) {
     my $pname = $param->{name};
 
-    # For old-style prototypes, skip non-variable sigils
-    next if $sig_info->{is_proto} && $pname !~ /^[\$\@\%]/;
+    # For old-style prototypes, skip ALL params - body uses @_ directly
+    # (We still store proto_type for auto-boxing at call sites)
+    next if $sig_info->{is_proto};
 
     if (defined $param->{default_cl}) {
       # Parameter with default goes to &optional
@@ -1674,7 +1722,9 @@ sub _process_sub_statement {
   # User-defined subs get pl- prefix to avoid conflicts with CL built-ins
   # Use pl-sub macro to wrap in eval-when for BEGIN block visibility
   # Wrap body in (block nil ...) so pl-return works
-  $self->_emit("(pl-sub pl-$name ($params_cl)");
+  # Handle qualified names: A::foo -> A::pl-foo (not pl-A::foo)
+  my $cl_sub_name = $self->_qualified_sub_to_cl($name);
+  $self->_emit("(pl-sub $cl_sub_name ($params_cl)");
   $self->indent_level($self->indent_level + 1);
 
   # If using %_args, convert to @_ vector
@@ -1773,14 +1823,16 @@ sub _process_package_statement {
 
 
 # Emit CL package preamble (defpackage + in-package)
-# Uses pipe-quoting for package names with :: (e.g., :|Foo::Bar|)
+# Uses pipe-quoting for package names with :: or that conflict with CL symbols
 # Also emits a CLOS class for MRO tracking (inheritance)
 sub _emit_package_preamble {
   my $self     = shift;
   my $pkg_name = shift;
 
-  # Use pipe-quoted symbol if name contains ::
-  my $cl_pkg = $pkg_name =~ /::/ ? ":|$pkg_name|" : ":$pkg_name";
+  # Pipe-quote if contains :: or conflicts with CL symbols
+  my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' ||
+                lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
+               ? ":|$pkg_name|" : ":$pkg_name";
 
   $self->_emit(";;; package $pkg_name");
   $self->_emit("(defpackage $cl_pkg");
@@ -1788,7 +1840,6 @@ sub _emit_package_preamble {
   $self->_emit("(in-package $cl_pkg)");
 
   # Emit a CLOS class for this package (for MRO tracking)
-  # Class name: lowercase with :: → -  (e.g., Foo::Bar → foo-bar)
   my $cl_class = $self->_pkg_to_clos_class($pkg_name);
   $self->_emit(";; CLOS class for MRO");
   $self->_emit("(defclass $cl_class () ())");
@@ -1797,10 +1848,16 @@ sub _emit_package_preamble {
 
 # Convert Perl package name to CLOS class name
 # Foo::Bar -> foo-bar
+# Pipe-quote names that might conflict with CL symbols (e.g., class, method)
 sub _pkg_to_clos_class {
   my ($self, $pkg) = @_;
   my $class = lc($pkg);
   $class =~ s/::/-/g;
+  # Pipe-quote to avoid CL symbol conflicts (especially 'class')
+  if ($class eq 'class' || $class eq 'method' || $class eq 'function' ||
+      $class eq 'standard-class' || $class eq 'standard-object') {
+    return "|$class|";
+  }
   return $class;
 }
 
@@ -2120,10 +2177,11 @@ sub _merge_module_prototypes {
     my $needs_import = 0;
     $needs_import = 1 if $proto->{has_block_arg};
 
-    # Check for reference parameters
+    # Check for reference parameters (proto_type starts with \)
     if ($proto->{params} && @{$proto->{params}}) {
       for my $param (@{$proto->{params}}) {
-        if ($param->{name} && $param->{name} =~ /^\\/) {
+        my $ptype = $param->{proto_type} // $param->{name};
+        if ($ptype && $ptype =~ /^\\/) {
           $needs_import = 1;
           last;
         }
@@ -2283,7 +2341,8 @@ sub _emit_constant {
 
   # Emit as a function (Perl implements constants as subs)
   # Use pl-sub for compile-time visibility (BEGIN blocks can use constants)
-  $self->_emit("(pl-sub pl-$name () $cl_value)");
+  my $cl_sub_name = $self->_qualified_sub_to_cl($name);
+  $self->_emit("(pl-sub $cl_sub_name () $cl_value)");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
   $self->environment->add_prototype($name, {
@@ -2500,6 +2559,7 @@ sub _parse_old_prototype {
   my @params;
   my $min_params = 0;
   my $in_optional = 0;
+  my $param_idx = 0;  # Counter for unique parameter names
 
   # Split into characters, handling backslash escapes
   my $i = 0;
@@ -2515,12 +2575,24 @@ sub _parse_old_prototype {
     elsif ($char eq '\\') {
       # Reference type: \@, \$, \%, \*
       my $next = substr($proto_str, $i + 1, 1);
-      push @params, { name => "\\$next", default_cl => undef };
+      my $name = '$_proto_arg' . $param_idx++;
+      push @params, {
+        name => $name,
+        default_cl => undef,
+        proto_type => "\\$next"  # Preserve original for auto-boxing
+      };
       $min_params++ unless $in_optional;
       $i += 2;
     }
     elsif ($char =~ /[\$\@\%\&\*_]/) {
-      push @params, { name => $char, default_cl => undef };
+      # Generate unique name with appropriate sigil
+      my $sigil = ($char eq '@' || $char eq '%') ? $char : '$';
+      my $name = $sigil . '_proto_arg' . $param_idx++;
+      push @params, {
+        name => $name,
+        default_cl => undef,
+        proto_type => $char  # Preserve original for special handling
+      };
       $min_params++ unless $in_optional || $char eq '@' || $char eq '%';
       $i++;
     }

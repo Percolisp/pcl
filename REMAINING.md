@@ -1,6 +1,6 @@
 # PCL - Remaining Work and Limitations
 
-**Current Status:** 43 test files, 2085 tests passing
+**Current Status:** 44 test files, 2136 tests passing
 
 ---
 
@@ -11,7 +11,10 @@
 - Correct operator precedence (92 levels)
 - Ternary `? :`
 - Range operator `..`
-- String repetition `x`
+- String repetition `$s x 3`
+- List repetition `(@a) x 3`, `(1,2) x 3`
+- Number literals: hex `0xFF`, binary `0b1010`, octal `0777`, underscores `1_000_000`
+- Named unary operators (`chr`, `ord`, `length`, etc.) bind correctly vs binary operators
 
 ### Control Flow
 - `if`/`elsif`/`else`/`unless`
@@ -37,6 +40,7 @@
 ### File I/O
 - `open`, `close`, `print`, `say` to filehandles
 - `<FH>` readline / diamond operator
+- `<*.txt>` file glob with wildcards (`*`, `?`, `[ab]`, etc.)
 - `eof`, `tell`, `seek`
 - `unlink`, `rename`, `chmod`
 - `chdir`, `mkdir`, `rmdir`, `getcwd`
@@ -96,6 +100,8 @@
 - `state` variables (inside subs)
 - String interpolation (including `$arr[0]`, `$hash{key}` in strings)
 - Heredocs (`<<EOF`, `<<'EOF'`, `<<"EOF"`)
+- `BEGIN { }` blocks (compile-time execution)
+- `END { }` blocks (exit-time execution)
 - Comments preserved in output
 
 ---
@@ -115,7 +121,7 @@ $^V     # ✓ Implemented - Perl version (returns "v5.30.0")
 $@      # ✓ Implemented - set by eval { } on error, cleared on success
 $?      # Declared - not set by system()/backticks yet
 $.      # Declared - not set by readline yet (needs per-FH tracking)
-$/      # Declared - readline doesn't use it yet
+$/      # Declared - readline/chomp don't use custom $/ values yet
 $\      # Declared - print doesn't append it yet
 $"      # ✓ Implemented - array interpolation uses it for join
 @_      # works in subs; shift/pop default to @_ in subs, @ARGV at top level
@@ -168,7 +174,8 @@ wait()           # NOT implemented - use sb-posix:wait
 #### Misc
 ```perl
 goto LABEL       # NOT implemented
-BEGIN/END blocks # NOT implemented - use eval-when / sb-ext:*exit-hooks*
+BEGIN { }        # ✓ Implemented - runs at compile time, can access subs/vars defined before
+END { }          # ✓ Implemented - runs at exit (sb-ext:*exit-hooks*)
 do FILENAME      # NOT implemented
 wantarray        # Works, but no void context (returns nil for both scalar and void)
 defined()        # Works, but not for all edge cases
@@ -224,12 +231,12 @@ Moo, Moose, Class::Accessor, and many others depend on this.
 
 **Note:** See `MOO_MOOSE_DESIGN.md` for a plan to support Moo/Moose by recognizing their usage patterns and emitting CLOS equivalents instead of transpiling the modules directly.
 
-**4. `BEGIN` Blocks** - Compile-time execution:
+**4. `BEGIN` Blocks** - Compile-time execution (✓ basic support):
 ```perl
-BEGIN { $VERSION = '1.0' }          # Compile-time setup
-BEGIN { extends 'Parent' }          # OO configuration
+BEGIN { $VERSION = '1.0' }          # ✓ Compile-time setup - WORKS
+BEGIN { extends 'Parent' }          # OO configuration - may need symbol table ops
 ```
-Many modules configure themselves at compile time.
+Simple BEGIN blocks work. BEGIN blocks that require symbol table manipulation or dynamic module loading during transpilation are more complex.
 
 ### What Should Work
 
@@ -334,9 +341,11 @@ The XS bridge would allow using XS modules by embedding a Perl interpreter, but 
 
 The expression parser (PExpr.pm) handles most Perl syntax. Known gaps:
 
-1. **Glob `<*.txt>`**: File glob NOT implemented (only `<FH>` readline)
+1. **Glob `<*.txt>`**: ✓ Implemented - file pattern expansion with wildcards (`*`, `?`, `[ab]`)
 2. **Indirect filehandle**: `print {$fh} "text"` not fully supported (use `print $fh "text"`)
 3. **Symbolic sub refs**: `&{"$pkg::$name"}()` not implemented
+4. **`q()` quoting**: Single-quoted `q(...)` syntax not yet recognized
+5. **Control char escapes**: `\cA`, `\c@` etc. not yet handled in strings
 
 ### Prototype Limitations
 
@@ -346,9 +355,9 @@ The expression parser (PExpr.pm) handles most Perl syntax. Known gaps:
 sub foo($x, $y = 10, @rest) { }    # ✓ Full support with defaults
 
 # Old-style prototypes - parsed and functional
-sub bar($$) { }                     # ✓ Parsed, param count tracked
+sub bar($$) { }                     # ✓ Parsed, unique internal names, body uses @_
 sub baz($;$) { }                    # ✓ Optional params after ;
-sub qux(\@$) { }                    # ✓ Reference sigils parsed
+sub qux(\@$) { }                    # ✓ Reference sigils parsed, auto-boxing works
 
 # Block prototypes (&) - ✓ WORKS
 sub wrapper (&) { }
@@ -374,7 +383,28 @@ myprint STDERR "msg";      # Does NOT parse bareword filehandle specially
 sub takes_two($$) { }
 takes_two(1, 2, 3);        # Compiles - extra args NOT rejected
 takes_two(1);              # Compiles - missing args NOT detected
+
 ```
+
+---
+
+## Code Generation Gaps
+
+### `exists` and `delete` need special handling
+
+Currently `exists $h{key}` generates:
+```lisp
+(pl-exists (pl-gethash %h "key"))  ; WRONG - evaluates access first
+```
+
+Should generate:
+```lisp
+(pl-exists %h "key")  ; CORRECT - passes hash and key separately
+```
+
+Same issue affects `delete $h{key}` and array variants `exists $a[0]`, `delete $a[0]`.
+
+**Fix needed in:** `Pl/ExprToCL.pm` - add special handling in `gen_funcall` for `exists` and `delete` to extract hash/array and key/index from the child node instead of evaluating it.
 
 ---
 
@@ -385,6 +415,48 @@ The CL runtime (pcl-runtime.lisp) is missing:
 1. **`e` modifier**: `s/pat/code/e` - deferred to P5 (self-hosting)
 2. **Localization**: UTF-8 case folding, locale-aware sorting
 3. **Tied variables**: Not planned
+4. **Custom `$/`**: `chomp` always removes `\n`, ignores `$/` value. Perl's `chomp` with `$/ = "oo"` would remove "oo" from "foo" → "f". Test simplified in `perl-tests/chop.t` to avoid this.
+
+---
+
+## Perl's Own Test Suite
+
+Tests from Perl's source distribution (`t/` directory) are being used to verify PCL.
+See `PERL_TESTS_STATUS.md` for complete status of all 41 copied test files.
+
+**Passing completely:**
+- `t/base/if.t`, `t/base/while.t` - basic control flow
+- `t/op/bool.t`, `t/op/cond.t` - boolean/ternary operations
+
+**Partial success:**
+- `t/op/ord.t` - 30/38 (fails on codepoints > 0x10FFFF, beyond Unicode range)
+- `t/op/repeat.t` - 35/50 (edge cases with variable repeat counts on LHS)
+- `t/opbasic/arith.t` - 16/183 (fails on float literals like `1e999`)
+- `t/op/auto.t` - 30/47 (++/-- mostly works, fails on `++($x = "99")`)
+- `t/op/chop.t` - 10/? (blocked by `$/` custom line separator)
+- `t/op/chr.t` - 9/45 (blocked by `use bytes` pragma)
+- `t/op/split.t` - partial (split in scalar context returns array not count)
+- `t/op/join.t` - 6/43 (blocked by `main::var` package access)
+
+**Blocking issues:**
+- Many tests require `Config.pm` which is an XS module
+- `print $x eq "y" ? ...` misparses `$x` as filehandle (ambiguous indirect syntax)
+
+**Bugs found from testing:**
+- ~~`&subname` call: generates symbol instead of funcall~~ - FIXED (session 3)
+- ~~`push(@x, @x)`: second array not flattened~~ - FIXED (session 3)
+- ~~`delete $a[idx]`: generates wrong code~~ - FIXED (session 3)
+- ~~`sub Pkg::name`: qualified sub doesn't create package first~~ - FIXED (session 2)
+- ~~`foreach $i (0..255)`: range returns list, foreach expects vector~~ - FIXED (session 3)
+- `++($x = "99")`: pre-increment on assignment fails (setf returns value not box)
+- Deep recursion on some complex concatenation expressions
+- ~~`chop($x, @arr)`: chop/chomp with multiple args crashes~~ - FIXED (session 2)
+- ~~`chr(-1)`: crashes on negative values~~ - FIXED (session 2)
+- `split()` in scalar context: returns array instead of count
+- `$o::var` / `$a::var` / `main::var`: qualified vars don't create package first (Package PL-O/PL-A/MAIN does not exist)
+- `Hash::Util::...`: generates "too many colons" in package name
+- `$` as package prefix: wantarray.t generates `Package $` error
+- ~~`bless \$x, o::`: comma not consumed as argument separator~~ - FIXED (session 3)
 
 ---
 

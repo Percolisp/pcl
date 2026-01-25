@@ -13,7 +13,7 @@ use Data::Dump qw/dump/;
 use PPI;
 use PPI::Dumper;
 
-use Test::More tests => 103;
+use Test::More tests => 114;
 
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
@@ -75,6 +75,17 @@ test_codegen('@arr', '@arr', 'Array variable');
 test_codegen('%hash', '%hash', 'Hash variable');
 test_codegen('42', '42', 'Number literal');
 test_codegen('"hello"', '"hello"', 'String literal');
+
+# ============================================================
+diag "";
+diag "-------- Number literal formats:";
+
+test_codegen('0x1234', '#x1234', 'Hex literal');
+test_codegen('0b1010', '#b1010', 'Binary literal');
+test_codegen('0777', '#o777', 'Octal literal');
+test_codegen('1_000_000', '1000000', 'Underscored decimal');
+test_codegen('0xFF_FF', '#xFFFF', 'Underscored hex');
+test_codegen('0b1111_0000', '#b11110000', 'Underscored binary');
 
 
 # ============================================================
@@ -207,7 +218,7 @@ test_codegen('@hash{"a","b"}', '(pl-hslice @hash "a" "b")', 'Hash slice');
 diag "";
 diag "-------- Initializers:";
 
-test_codegen('[1, 2, 3]', '(make-array 3 :adjustable t :fill-pointer t :initial-contents (list 1 2 3))', 'Array initializer');
+test_codegen('[1, 2, 3]', '(pl-array-init 1 2 3)', 'Array initializer');
 test_codegen('{a => 1, b => 2}', '(pl-hash "a" 1 "b" 2)', 'Hash initializer');
 
 
@@ -438,6 +449,37 @@ test_codegen('say STDERR $msg',
 test_codegen('print STDERR "a", $b, "c"',
              "(pl-print :fh 'STDERR \"a\" \$b \"c\")",
              'print with filehandle and mixed args');
+
+
+diag "";
+diag "-------- Regression tests (session 3):";
+
+# Regression: &subname should generate function call
+# Was outputting literal &foo which is invalid CL
+test_codegen('&foo',
+             '(pl-foo)',
+             'Regression: &subname generates funcall');
+
+# Regression: delete $a[idx] should use pl-delete-array
+# Was passing value instead of array+index
+test_codegen('delete $a[1]',
+             '(pl-delete-array @a 1)',
+             'Regression: delete $a[idx] uses array function');
+
+# Hash delete passes hash and key separately (not the value)
+test_codegen('delete $h{key}',
+             '(pl-delete %h "key")',
+             'Regression: delete $h{key} passes hash and key separately');
+
+# exists $a[idx] should use pl-exists-array
+test_codegen('exists $a[1]',
+             '(pl-exists-array @a 1)',
+             'Regression: exists $a[idx] uses array function');
+
+# exists $h{key} should use pl-exists with hash and key
+test_codegen('exists $h{key}',
+             '(pl-exists %h "key")',
+             'Regression: exists $h{key} passes hash and key separately');
 
 
 diag "";

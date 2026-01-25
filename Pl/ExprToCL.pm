@@ -1,5 +1,9 @@
 package Pl::ExprToCL;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -62,6 +66,7 @@ sub _build_handlers {
     'tree_val'      => \&gen_tree_val,
     'filehandle'    => \&gen_filehandle,
     'readline'      => \&gen_readline,
+    'glob'          => \&gen_glob,
     'backtick'      => \&gen_backtick,
     'anon_sub'      => \&gen_anon_sub,
     'func_ref'      => \&gen_func_ref,
@@ -180,7 +185,7 @@ sub gen_node {
   # (Binary ops are stored as operator tokens, not PPIreference)
   if (ref($node) eq 'PPI::Token::Operator' && @$kids) {
     my $op = $node->content();
-    return $self->gen_binary_op($op, $kids);
+    return $self->gen_binary_op($op, $kids, $node_id);
   }
 
   # Leaf node (PPI token)
@@ -205,7 +210,7 @@ sub gen_internal_node {
   }
 
   # Assume it's a binary operator (operators stored with operator as type)
-  return $self->gen_binary_op($type, $kids);
+  return $self->gen_binary_op($type, $kids, $node_id);
 }
 
 
@@ -279,6 +284,14 @@ sub gen_leaf {
       $self->environment->add_referenced_package($pkg) if $self->environment;
       return "(pl-stash \"$pkg\")";
     }
+    # Handle &subname - call subroutine
+    # &foo -> (pl-foo) - calls without passing @_ through
+    # Note: &foo(@args) would be handled as funcall, not here
+    if ($content =~ /^&(.+)$/) {
+      my $func_name = $1;
+      my $cl_func = $self->cl_name($func_name);
+      return "($cl_func)";
+    }
     return $content;
   }
 
@@ -290,9 +303,37 @@ sub gen_leaf {
     return "(pl-array-last-index $content)";
   }
 
-  # Number literal
-  if ($ref eq 'PPI::Token::Number') {
-    return $node->content();
+  # Number literal - convert Perl format to CL format
+  # (includes subclasses: ::Hex, ::Binary, ::Octal, ::Float, ::Exp)
+  if ($ref =~ /^PPI::Token::Number/) {
+    my $num = $node->content();
+    # Hex: 0x1234 or 0X1234 -> #x1234
+    if ($num =~ /^0[xX]([0-9a-fA-F_]+)$/) {
+      my $hex = $1;
+      $hex =~ s/_//g;  # Remove underscores
+      return "#x$hex";
+    }
+    # Binary: 0b1010 or 0B1010 -> #b1010
+    if ($num =~ /^0[bB]([01_]+)$/) {
+      my $bin = $1;
+      $bin =~ s/_//g;
+      return "#b$bin";
+    }
+    # Octal: 0o777 or 0O777 -> #o777 (Perl 5.34+ syntax)
+    if ($num =~ /^0[oO]([0-7_]+)$/) {
+      my $oct = $1;
+      $oct =~ s/_//g;
+      return "#o$oct";
+    }
+    # Legacy octal: 0777 (but not 0 alone) -> #o777
+    if ($num =~ /^0([0-7_]+)$/ && $num ne '0') {
+      my $oct = $1;
+      $oct =~ s/_//g;
+      return "#o$oct";
+    }
+    # Remove underscores from regular numbers (Perl allows 1_000_000)
+    $num =~ s/_//g;
+    return $num;
   }
 
   # Compiled regex qr// (check before Quote to avoid catching QuoteLike::Regexp)
@@ -381,11 +422,27 @@ sub gen_leaf {
 # Binary operator: (pcl:pl-OP left right)
 # Operators always use pcl: prefix to avoid conflicts with user-defined subs
 sub gen_binary_op {
-  my $self = shift;
-  my $op   = shift;
-  my $kids = shift;
+  my $self    = shift;
+  my $op      = shift;
+  my $kids    = shift;
+  my $node_id = shift;  # Optional: for context-dependent operators like 'x'
 
   my $cl_op = $self->cl_op_name($op);
+
+  # Special case: 'x' operator - use list repeat when LHS is parenthesized and in list context
+  if ($op eq 'x' && defined $node_id) {
+    my $lhs_node = $self->expr_o->get_a_node($kids->[0]);
+    my $lhs_is_paren = $self->expr_o->is_internal_node_type($lhs_node) &&
+                       ($lhs_node->{type} eq 'tree_val' || $lhs_node->{type} eq 'progn');
+    my $ctx = $self->expr_o->get_node_context($node_id);
+    if ($lhs_is_paren && $ctx == 1) {  # LIST_CTX = 1
+      # List repeat: (@x) x 4 in list context
+      my $left  = $self->gen_node($kids->[0]);
+      my $right = $self->gen_node($kids->[1]);
+      return "(pl-list-x $left $right)";
+    }
+  }
+
   my $left  = $self->gen_node($kids->[0]);
 
   # Special case: hash assignment with list
@@ -566,11 +623,162 @@ sub gen_funcall {
     }
   }
 
+  # Special handling for bless(REF, CLASSNAME)
+  # The classname can be a bareword like MyClass or o:: which should be a string
+  if ($func_name eq 'bless' && @$kids >= 2) {
+    my $ref_arg = $self->gen_node($kids->[1]);
+    my $class_arg = '"main"';  # Default class is caller's package
+
+    if (@$kids >= 3) {
+      my $class_node = $self->expr_o->get_a_node($kids->[2]);
+      my $is_bareword = 0;
+
+      # Check if it's a bareword (funcall with single word child that's just a Word)
+      if ($self->expr_o->is_internal_node_type($class_node) &&
+          $class_node->{type} eq 'funcall') {
+        my $class_kids = $self->expr_o->get_node_children($kids->[2]);
+        # Bareword funcalls have exactly 1 child (the word itself, no arguments)
+        if (@$class_kids == 1) {
+          my $word_node = $self->expr_o->get_a_node($class_kids->[0]);
+          if (ref($word_node) eq 'PPI::Token::Word') {
+            my $classname = $word_node->content();
+            # Handle special tokens: __PACKAGE__, __FILE__, __LINE__
+            if ($classname eq '__PACKAGE__') {
+              my $pkg = $self->environment
+                  ? $self->environment->current_package : 'main';
+              $pkg //= 'main';
+              $class_arg = qq{"$pkg"};
+              $is_bareword = 1;
+            } else {
+              # Regular bareword class name - remove trailing :: if present (o:: -> o)
+              $classname =~ s/::$//;
+              $class_arg = qq{"$classname"};
+              $is_bareword = 1;
+            }
+          }
+        }
+      }
+
+      # Not a bareword - generate normally (could be string, shift, or other expression)
+      if (!$is_bareword) {
+        $class_arg = $self->gen_node($kids->[2]);
+      }
+    }
+    return "(pl-bless $ref_arg $class_arg)";
+  }
+
+  # Special handling for push/unshift: flatten @array arguments
+  # In Perl, push(@x, @y) flattens @y, but push(@x, [1,2,3]) doesn't flatten the anon array
+  # We detect @-sigiled expressions at code-gen time and wrap them with pl-flatten
+  if (($func_name eq 'push' || $func_name eq 'unshift') && @$kids >= 2) {
+    my $target = $self->gen_node($kids->[1]);  # First arg is target array
+    my @items;
+    for my $i (2 .. $#$kids) {
+      my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
+      my $arg = $self->gen_node($kids->[$i]);
+      my $should_flatten = 0;
+
+      # Check if this is an @-sigiled variable (e.g., @arr)
+      if (ref($arg_node) eq 'PPI::Token::Symbol') {
+        my $sigil = substr($arg_node->content(), 0, 1);
+        $should_flatten = 1 if $sigil eq '@';
+      }
+      # Check if this is an array deref (e.g., @$ref, @{expr})
+      # These are prefix_op nodes with @ Cast as first child
+      elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+             $arg_node->{type} eq 'prefix_op') {
+        my $arg_kids = $self->expr_o->get_node_children($kids->[$i]);
+        if (@$arg_kids >= 1) {
+          my $cast_node = $self->expr_o->get_a_node($arg_kids->[0]);
+          if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '@') {
+            $should_flatten = 1;
+          }
+        }
+      }
+
+      if ($should_flatten) {
+        # Wrap with pl-flatten to expand array elements
+        $arg = "(pl-flatten $arg)";
+      }
+      push @items, $arg;
+    }
+    my $items_str = @items ? ' ' . join(' ', @items) : '';
+    return "($cl_func $target$items_str)";
+  }
+
+  # Special handling for delete on arrays: delete $a[idx]
+  # Need to pass array and index separately, not the dereferenced value
+  if ($func_name eq 'delete' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      # Array access: delete $a[idx] -> (pl-delete-array @arr idx)
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        my $arr = $self->gen_node($arg_kids->[0]);
+        # Convert $a to @a for array
+        if (ref($arr_node) eq 'PPI::Token::Symbol' && $arr =~ /^\$/) {
+          $arr =~ s/^\$/\@/;
+        }
+        my $idx = $self->gen_node($arg_kids->[1]);
+        return "(pl-delete-array $arr $idx)";
+      }
+    }
+    # Hash access: delete $h{key} -> (pl-delete %h key)
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        my $hash = $self->gen_node($arg_kids->[0]);
+        # Convert $h to %h for hash
+        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\$/) {
+          $hash =~ s/^\$/\%/;
+        }
+        my $key = $self->gen_node($arg_kids->[1]);
+        return "(pl-delete $hash $key)";
+      }
+    }
+  }
+
+  # Special handling for exists on arrays and hashes
+  # Need to pass container and key/index separately
+  if ($func_name eq 'exists' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node)) {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        if ($arg_node->{type} eq 'a_acc') {
+          # Array access: exists $a[idx] -> (pl-exists-array @arr idx)
+          my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
+          my $arr = $self->gen_node($arg_kids->[0]);
+          if (ref($arr_node) eq 'PPI::Token::Symbol' && $arr =~ /^\$/) {
+            $arr =~ s/^\$/\@/;
+          }
+          my $idx = $self->gen_node($arg_kids->[1]);
+          return "(pl-exists-array $arr $idx)";
+        }
+        elsif ($arg_node->{type} eq 'h_acc') {
+          # Hash access: exists $h{key} -> (pl-exists %h key)
+          my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
+          my $hash = $self->gen_node($arg_kids->[0]);
+          if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\$/) {
+            $hash =~ s/^\$/\%/;
+          }
+          my $key = $self->gen_node($arg_kids->[1]);
+          return "(pl-exists $hash $key)";
+        }
+      }
+    }
+  }
+
   # Check for reference prototype that requires auto-boxing
   my $proto = $self->environment ? $self->environment->get_prototype($func_name) : undef;
   my @ref_params;
   if ($proto && $proto->{is_proto} && $proto->{params}) {
-    @ref_params = map { $_->{name} } @{$proto->{params}};
+    # Use proto_type for auto-boxing checks (contains original like \@, \%, $, etc.)
+    @ref_params = map { $_->{proto_type} // $_->{name} } @{$proto->{params}};
   }
 
   # Rest are arguments
@@ -947,7 +1155,8 @@ sub gen_hash_slice {
 }
 
 
-# Array initializer: (list ...)
+# Array initializer: (pl-array-init ...)
+# Uses pl-array-init to flatten nested arrays (handles [(@x) x 2] etc.)
 sub gen_array_init {
   my $self    = shift;
   my $node    = shift;
@@ -959,12 +1168,10 @@ sub gen_array_init {
     push @elements, $self->gen_node($kid_id);
   }
 
-  # Generate an adjustable vector for Perl array semantics
-  # This allows push, pop, shift, unshift to work correctly
+  # Use pl-array-init which flattens nested arrays
   if (@elements) {
     my $elem_str = join(' ', @elements);
-    return "(make-array " . scalar(@elements) .
-           " :adjustable t :fill-pointer t :initial-contents (list $elem_str))";
+    return "(pl-array-init $elem_str)";
   } else {
     return "(make-array 0 :adjustable t :fill-pointer 0)";
   }
@@ -1094,6 +1301,80 @@ sub gen_readline {
   }
   # Empty <> reads from ARGV or STDIN
   return "(pl-readline)";
+}
+
+
+# Generate file glob <*.txt> or <$pattern>
+# Handles negated character classes [!x] by generating grep filter,
+# since SBCL's pathname wildcards don't support negation properly.
+sub gen_glob {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  # Glob has a pattern child (string or interpolated)
+  my $pattern_str;
+  my $call;
+
+  if (@$kids == 1) {
+    $pattern_str = $self->gen_node($kids->[0]);
+    $call = "(pl-glob $pattern_str)";
+  } elsif (@$kids > 1) {
+    # Interpolated pattern - concatenate parts
+    my @parts = map { $self->gen_node($_) } @$kids;
+    my $concat = "(pl-. " . join(' ', @parts) . ")";
+    $pattern_str = $concat;
+    $call = "(pl-glob $concat)";
+  } else {
+    $pattern_str = '"*"';
+    $call = "(pl-glob)";
+  }
+
+  # Check for negated character class [!...] or [^...] in literal patterns
+  # For these, generate a glob + filter since SBCL doesn't handle negation
+  my $needs_filter = 0;
+  my $negated_chars = '';
+  my $modified_pattern = $pattern_str;
+
+  if ($pattern_str =~ /^"([^"]*)"$/) {
+    my $pat = $1;
+    # Look for [!chars] or [^chars] - negated character class
+    if ($pat =~ /\[([!\^])([^\]]+)\]/) {
+      $needs_filter = 1;
+      my $neg_marker = $1;
+      $negated_chars = $2;
+      # Replace negated class with ? wildcard for the glob
+      my $simple_pat = $pat;
+      $simple_pat =~ s/\[[!\^][^\]]+\]/?/g;
+      $modified_pattern = qq{"$simple_pat"};
+      $call = "(pl-glob $modified_pattern)";
+    }
+  }
+
+  # Wrap in dynamic wantarray binding for list context
+  my $ctx = $self->expr_o->get_node_context($node_id);
+  my $is_list_ctx = ($ctx == 1);  # LIST_CTX = 1
+
+  if ($needs_filter) {
+    # Generate: (remove-if (lambda (f) (find (char basename 0) "negated")) (pl-glob pattern))
+    # More Perl-like: filter files where the matched char is NOT in the negated set
+    # Extract just the filename part for matching
+    my $filter = qq{(remove-if (lambda (--f--) }
+               . qq{(let ((--name-- (file-namestring (pathname --f--)))) }
+               . qq{(and (> (length --name--) 0) }
+               . qq{(find (char --name-- 0) "$negated_chars")))) }
+               . qq{$call)};
+    if ($is_list_ctx) {
+      return "(let ((*wantarray* t)) $filter)";
+    }
+    return $filter;
+  }
+
+  if ($is_list_ctx) {
+    return "(let ((*wantarray* t)) $call)";
+  }
+  return $call;
 }
 
 

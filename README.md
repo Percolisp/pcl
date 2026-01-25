@@ -128,7 +128,8 @@ Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
 - Perl 5.30+
 - [PPI](https://metacpan.org/pod/PPI) - Perl parser
 - [Moo](https://metacpan.org/pod/Moo) - Object system
-- [SBCL](http://www.sbcl.org/) - For running transpiler tests (optional)
+- [SBCL](http://www.sbcl.org/) 2.0+ - For running transpiled code (optional but recommended)
+- [cl-ppcre](https://edicl.github.io/cl-ppcre/) - Perl-compatible regex for Common Lisp
 
 ## Installation
 
@@ -140,16 +141,16 @@ sudo apt install perl cpanminus
 cpanm PPI Moo Test::More
 
 # Common Lisp (for running transpiled code)
-sudo apt install sbcl libpcre3-dev build-essential
+sudo apt install sbcl
 
-# Install Quicklisp (CL package manager)
+# Install Quicklisp (CL package manager) - REQUIRED for cl-ppcre
 curl -O https://beta.quicklisp.org/quicklisp.lisp
 sbcl --load quicklisp.lisp \
      --eval '(quicklisp-quickstart:install)' \
      --eval '(ql:add-to-init-file)' \
      --quit
 
-# Install CL dependencies (run once in SBCL)
+# Install cl-ppcre (Perl-compatible regex library)
 sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 ```
 
@@ -160,7 +161,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 cpanm PPI Moo Test::More
 
 # Common Lisp
-brew install sbcl pcre
+brew install sbcl
 
 # Install Quicklisp and cl-ppcre (same as above)
 curl -O https://beta.quicklisp.org/quicklisp.lisp
@@ -180,6 +181,60 @@ prove Pl/t/
 # Quick transpile test
 echo 'print "Hello World\n";' | ./pl2cl
 ```
+
+## Troubleshooting
+
+### `sb-debug:map-backtrace` error on older SBCL
+
+If you see an error like:
+```
+The function SB-DEBUG:MAP-BACKTRACE is undefined
+```
+
+Your SBCL version is too old. The `caller()` function requires SBCL 2.0+. Options:
+
+1. **Upgrade SBCL** (recommended):
+   ```bash
+   # Ubuntu - add SBCL PPA for newer version
+   sudo add-apt-repository ppa:plt/racket  # or build from source
+
+   # Or download directly from sbcl.org
+   ```
+
+2. **Comment out `pl-caller`** in `cl/pcl-runtime.lisp` if you don't need `caller()`:
+   ```lisp
+   ;; Find the pl-caller defun and replace with a stub:
+   (defun pl-caller (&optional level)
+     (declare (ignore level))
+     *pl-undef*)
+   ```
+
+### cl-ppcre not found
+
+If SBCL can't find cl-ppcre:
+```
+Component "cl-ppcre" not found
+```
+
+Make sure Quicklisp is installed and initialized:
+```bash
+# Check if ~/.sbclrc loads quicklisp
+grep quicklisp ~/.sbclrc
+
+# If not, re-run quicklisp setup
+sbcl --load ~/quicklisp/setup.lisp \
+     --eval '(ql:add-to-init-file)' \
+     --quit
+
+# Then install cl-ppcre
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+```
+
+### Tests hang or timeout
+
+Some tests execute generated Lisp code. If SBCL is very slow or tests hang:
+- Check available memory (SBCL can be memory-hungry)
+- Try running individual test files: `prove -v Pl/t/codegen-01.t`
 
 ## Status
 

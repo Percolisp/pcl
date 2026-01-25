@@ -1,5 +1,9 @@
 package Pl::PExpr::Config;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -64,15 +68,47 @@ has prefix => (
 
 # Named unary operators - these take ONE term only, with high precedence.
 # e.g., "defined $x && $y" parses as "(defined $x) && $y", not "defined($x && $y)"
+# From perldoc perlop: these bind tighter than binary operators
 has named_unary => (
   is        => 'ro',
   default   => sub {
     return {
+      # Core named unary
       'defined' => 1,
       'ref'     => 1,
       'scalar'  => 1,
       'exists'  => 1,
       'delete'  => 1,
+      # String functions
+      'chr'     => 1,
+      'ord'     => 1,
+      'length'  => 1,
+      'lc'      => 1,
+      'uc'      => 1,
+      'fc'      => 1,
+      'lcfirst' => 1,
+      'ucfirst' => 1,
+      'quotemeta' => 1,
+      'hex'     => 1,
+      'oct'     => 1,
+      # Math functions
+      'abs'     => 1,
+      'int'     => 1,
+      'sqrt'    => 1,
+      'sin'     => 1,
+      'cos'     => 1,
+      'exp'     => 1,
+      'log'     => 1,
+      'rand'    => 1,
+      'srand'   => 1,
+      # File tests (single arg)
+      'readlink' => 1,
+      'stat'    => 1,
+      'lstat'   => 1,
+      # Misc
+      'caller'  => 1,
+      'wantarray' => 1,
+      'prototype' => 1,
     };
   },
 );

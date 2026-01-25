@@ -121,6 +121,12 @@ test_transpile("grep: simple block", 'my @a = (1, 2, 3, 4, 5); my @b = grep { $_
 test_transpile("grep: multi-statement block", 'my @a = (1, 2, 3, 4, 5); my @b = grep { my $x = $_; $x > 2 } @a; print join(",", @b), "\n";');
 test_transpile("sort: numeric block", 'my @a = (3, 1, 4, 1, 5); my @b = sort { $a <=> $b } @a; print join(",", @b), "\n";');
 
+# List flattening - Perl flattens arrays when building lists
+test_transpile("list flatten: arrays", 'my @a = (1, 2); my @b = (3, 4); my @c = (@a, @b); print join(",", @c), "\n";');
+test_transpile("list flatten: mixed", 'my @a = (1, 2); my @c = (@a, "foo", 42); print join(",", @c), "\n";');
+test_transpile("list flatten: nested", 'my @a = (1); my @b = (2, 3); my @c = (@a, @b, 4); print join(",", @c), "\n";');
+test_transpile("list flatten: empty", 'my @a = (); my @b = (1, 2); my @c = (@a, @b); print join(",", @c), "\n";');
+
 # TODO: File I/O tests - requires filehandle symbol quoting in code generator
 # Currently filehandle symbols (FH, $fh) aren't quoted, causing CL eval errors
 # test_transpile("file: write", '
