@@ -721,10 +721,18 @@ sub parse {
         && $term->start() eq '['
         && $i > 0
         && $self->is_internal_node_type($e->[$i-1]);
+    # KV slice: %hash{keys} - PPI parses this as Symbol '%h' + Block '{keys}'
+    my $is_kv_slice_block = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i > 0
+        && !$self->is_internal_node_type($e->[$i-1])
+        && $self->is_var($e->[$i-1])
+        && $e->[$i-1]->content() =~ /^%/;
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
-        && !$is_constructor_subscript;
+        && !$is_constructor_subscript
+        && !$is_kv_slice_block;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -897,6 +905,38 @@ sub parse {
       splice @$e, $i, 1;
 
       $i--;                     # ??
+      next;
+    }
+
+    # Handle KV slice: %hash{keys} - PPI gives Symbol '%h' + Block '{keys}'
+    # (unlike @h{keys} which gives Subscript)
+    if (ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && !$self->is_internal_node_type($pre)
+        && $self->is_var($pre)
+        && $pre->content() =~ /^%/) {
+      my $pre_id = $self->parse([$pre]);
+      my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
+
+      my @ix    = $term->children();
+      my $ix_id = $self->parse(\@ix);
+
+      $self->add_child_to_node($id, $pre_id);
+
+      # Flatten progn children (comma-separated keys)
+      my $n = $self->get_a_node($ix_id);
+      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+        my $kids = $self->get_node_children($ix_id);
+        for my $param_id (@$kids) {
+          $self->add_child_to_node($id, $param_id);
+        }
+      } else {
+        $self->add_child_to_node($id, $ix_id);
+      }
+
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;
+      $i--;
       next;
     }
 
@@ -1487,18 +1527,30 @@ sub handle_subcalls {
       }
     }
 
-    # - - - Skip if this is a filehandle for print/say:
-    # print STDERR "hello" - STDERR is a filehandle, not a function
-    if ($i > 0) {
+    # - - - Skip if this is a bareword filehandle for a function with * prototype:
+    # open FH, ...; print STDERR "hello" - FH/STDERR are filehandles, not functions
+    # Functions like open, close have * as first param prototype.
+    # print/say/printf are handled specially (no prototype) but also take filehandles.
+    if ($i > 0 && $sub_name =~ /^[A-Z][A-Z0-9_]*$/) {
       my $prev = $e->[$i - 1];
       if ($self->is_word($prev)) {
         my $prev_name = $prev->content;
-        if ($prev_name eq 'print' || $prev_name eq 'say') {
-          # Check if this looks like a filehandle (uppercase bareword)
-          if ($sub_name =~ /^[A-Z][A-Z0-9_]*$/) {
-            next;  # Skip - will be handled when processing print/say
+        my $is_fh_func = 0;
+
+        # print/say/printf have special handling, not prototypes
+        if ($prev_name eq 'print' || $prev_name eq 'say' || $prev_name eq 'printf') {
+          $is_fh_func = 1;
+        }
+        # Check if previous function takes * (filehandle) as first param
+        elsif ($self->has_environment) {
+          my $proto = $self->environment->get_prototype($prev_name);
+          if ($proto && $proto->{is_proto} && @{$proto->{params}}) {
+            my $first_param_type = $proto->{params}[0]{proto_type} // '';
+            $is_fh_func = 1 if $first_param_type eq '*';
           }
         }
+
+        next if $is_fh_func;  # Skip - will be handled when processing the function
       }
     }
 
@@ -1567,7 +1619,7 @@ sub handle_subcalls {
         # Cast tokens (@, $, %, &, *) are always unary deref operators
         my $is_cast = ref($next) eq 'PPI::Token::Cast';
         # Operators that can be unary prefix: + - ! ~ \ not
-        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not', '++', '--');
         my $is_unary = $is_cast || $can_be_unary_op{$next_op};
         if (!$is_unary) {
           # Binary-only operator - treat bareword as zero-arg function
@@ -1600,6 +1652,11 @@ sub handle_subcalls {
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
                 # Symbol + Subscript is one term (e.g., $h{key}, $a[0])
                 $end_pars = $i + 2;
+            } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
+                     && $after_symbol->start() eq '{'
+                     && $next_term->content() =~ /^%/) {
+                # %hash + Block is one term (KV slice: %h{keys})
+                $end_pars = $i + 2;
             } else {
                 $end_pars = $i + 1;
             }
@@ -1624,11 +1681,35 @@ sub handle_subcalls {
         my $max = @positive ? (sort { $b <=> $a } @positive)[0] : 0;
         $is_strictly_single = ($max == 1);
       }
-      if ($is_strictly_single) {
+      if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary)) {
+        # Only apply for non-named-unary 1-param functions
+        # Named unary already handled above with proper term detection
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
           # Cast followed by Symbol is a single dereference term
           $end_pars = $i + 2;
+        } elsif (ref($next_term) eq 'PPI::Token::Symbol') {
+          # Symbol (like %hash, @arr, $var) - check for subscript/block chain
+          if ($i + 2 <= $end_pars) {
+            my $after = $e->[$i + 2];
+            if (ref($after) eq 'PPI::Structure::Subscript') {
+              # Symbol + Subscript is one term (e.g., keys $h{key})
+              $end_pars = $i + 2;
+            } elsif (ref($after) eq 'PPI::Structure::Block'
+                     && $after->start() eq '{'
+                     && $next_term->content() =~ /^%/) {
+              # %hash + Block is one term (KV slice: %h{keys})
+              $end_pars = $i + 2;
+            } else {
+              # Just the symbol (e.g., keys %hash, values @arr)
+              $end_pars = $i + 1;
+            }
+          } else {
+            $end_pars = $i + 1;
+          }
+        } elsif ($self->is_internal_node_type($next_term)) {
+          # Already-parsed node (e.g., from previous handle_subcalls)
+          $end_pars = $i + 1;
         }
       }
     }
@@ -1637,56 +1718,79 @@ sub handle_subcalls {
     # print FILEHANDLE LIST  (no comma between filehandle and list)
     # print $fh LIST         (variable filehandle)
     my $filehandle_id;
-    if (($sub_name eq 'print' || $sub_name eq 'say') && $i + 1 <= $end_pars) {
+    if (($sub_name eq 'print' || $sub_name eq 'say' || $sub_name eq 'printf') && $i + 1 <= $end_pars) {
       my $maybe_fh = $e->[$i + 1];
       my $is_fh = 0;
 
+      # Track filehandle expression end position (for multi-token expressions)
+      my $fh_end = $i + 1;  # Start at first token after print/say
+
       # Check for uppercase bareword (STDERR, STDOUT, FH, etc.)
-      # Note: is_word() returns 1/undef, not content - use ->content
       if ($self->is_word($maybe_fh)) {
         my $fh_name = $maybe_fh->content;
         if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
           $is_fh = 1;
         }
       }
-      # Check for variable filehandle ($fh)
-      # For variable filehandles, there MUST be more content after them
-      # print $fh "hello" - $fh is filehandle (more content after)
-      # print $x          - $x is the thing to print (nothing after)
-      # print $d->method() - $d is object, NOT filehandle (-> follows)
-      # print $h{k}->method() - hash access, NOT filehandle ({} follows)
-      elsif (ref($maybe_fh) eq 'PPI::Token::Symbol') {
-        # Only treat as filehandle if there's more content after
-        # AND that content is not a method call (->) or subscript ({}[])
-        if ($i + 2 <= $end_pars) {
-          my $after_var = $e->[$i + 2];
-          # If next element is -> it's a method call, not filehandle
-          my $is_arrow = $after_var
-            && ref($after_var) eq 'PPI::Token::Operator'
-            && $after_var->content eq '->';
-          # If next element is {} or [] it's a subscript, not filehandle
-          my $is_subscript = $after_var
-            && ref($after_var) =~ /^PPI::Structure::/;
-          $is_fh = 1 unless ($is_arrow || $is_subscript);
+      # Check for block filehandle syntax: print {$expr} LIST
+      elsif (ref($maybe_fh) eq 'PPI::Structure::Block') {
+        $is_fh = 1;
+        # Block is always a filehandle - contents will be parsed below
+      }
+      # Check for variable filehandle: print $scalar TERM
+      # Only SIMPLE scalars can be filehandles (not $hash{key}, $arr[0])
+      # Complex expressions need block form: print {$expr} LIST
+      elsif (ref($maybe_fh) eq 'PPI::Token::Symbol'
+             && $maybe_fh->content =~ /^\$/) {
+        if ($fh_end + 1 <= $end_pars) {
+          my $after = $e->[$fh_end + 1];
+          $is_fh = $self->_is_print_term_start($after);
         }
+        # Nothing follows → it's an argument, not a filehandle
       }
 
       if ($is_fh) {
-        # Check next element is NOT a comma (filehandle syntax has no comma)
-        my $after_fh = $e->[$i + 2] if $i + 2 <= $end_pars;
-        my $is_comma = $after_fh
-          && ref($after_fh) eq 'PPI::Token::Operator'
-          && $after_fh->content eq ',';
-        if (!$is_comma) {
-          # It's a filehandle - create node and remove from param list
-          my($fh_node, $fh_id) = $self->make_node_insert('filehandle');
+        my($fh_node, $fh_id) = $self->make_node_insert('filehandle');
+
+        # Handle block syntax: parse block contents
+        if (ref($maybe_fh) eq 'PPI::Structure::Block') {
+          my @block_children = $maybe_fh->children();
+          # Filter to just the expression (skip whitespace)
+          @block_children = grep { ref($_) !~ /Whitespace/ } @block_children;
+          # Unwrap PPI::Statement if present
+          if (@block_children == 1 && ref($block_children[0]) eq 'PPI::Statement') {
+            my @stmt_children = $block_children[0]->children();
+            @stmt_children = grep { ref($_) !~ /Whitespace/ } @stmt_children;
+            @block_children = @stmt_children if @stmt_children;
+          }
+          # Check if single bareword is a known filehandle
+          if (@block_children == 1 && $self->is_word($block_children[0])) {
+            my $name = $block_children[0]->content;
+            if ($self->has_environment && $self->environment->is_filehandle($name)) {
+              # Known filehandle - treat as bareword (don't parse as funcall)
+              my $fh_name_id = $self->make_node($block_children[0]);
+              $self->add_child_to_node($fh_id, $fh_name_id);
+            } else {
+              # Not a known filehandle - parse it (might be a sub call)
+              my $fh_expr_id = $self->parse(\@block_children);
+              $self->add_child_to_node($fh_id, $fh_expr_id);
+            }
+          } elsif (@block_children) {
+            # Complex expression - parse it
+            my $fh_expr_id = $self->parse(\@block_children);
+            $self->add_child_to_node($fh_id, $fh_expr_id);
+          }
+        }
+        # Handle simple variable or bareword: just make node from token
+        else {
           my $fh_name_id = $self->make_node($maybe_fh);
           $self->add_child_to_node($fh_id, $fh_name_id);
-          $filehandle_id = $fh_id;
-          # Remove filehandle from expression list
-          splice @$e, $i + 1, 1;
-          $end_pars--;
         }
+
+        $filehandle_id = $fh_id;
+        # Remove the filehandle token from expression list
+        splice @$e, $i + 1, 1;
+        $end_pars -= 1;
       }
     }
 
@@ -1720,6 +1824,36 @@ sub handle_subcalls {
     my($top_node, $top_id) = $self->make_node_insert('funcall');
     my $c_ids   = $self->parse_list($e, $i+1, $end_pars);
     my $node_id = $self->make_node($e->[$i]);
+
+    # - - - Post-process for * (filehandle) prototype:
+    # If first arg is a zero-param funcall of uppercase bareword, it's a filehandle
+    if (@$c_ids && $self->has_environment) {
+      my $proto = $self->environment->get_prototype($sub_name);
+      if ($proto && $proto->{is_proto} && @{$proto->{params}}) {
+        my $first_param_type = $proto->{params}[0]{proto_type} // '';
+        if ($first_param_type eq '*') {
+          my $first_arg_id = $c_ids->[0];
+          my $first_arg = $self->get_a_node($first_arg_id);
+          # Check if it's a funcall (zero-param bareword becomes funcall)
+          if ($self->is_internal_node_type($first_arg) && $first_arg->{type} eq 'funcall') {
+            my $arg_kids = $self->get_node_children($first_arg_id);
+            # Zero-param funcall has exactly 1 child (the function name)
+            if (@$arg_kids == 1) {
+              my $name_node = $self->get_a_node($arg_kids->[0]);
+              if (ref($name_node) eq 'PPI::Token::Word') {
+                my $name = $name_node->content;
+                if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+                  # It's a bareword filehandle - replace funcall with just the word node
+                  $c_ids->[0] = $arg_kids->[0];
+                  # Register as filehandle
+                  $self->environment->add_filehandle($name);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
 
     $self->add_child_to_node($top_id, $node_id);
     # Add filehandle as first parameter if present
@@ -1885,6 +2019,30 @@ sub is_op_prefix {
   return $prefix->{lc $name};
 }
 
+# After "print $var TOKEN", determine if TOKEN starts a new term
+# (making $var a filehandle) or is an operator (making $var an argument).
+sub _is_print_term_start {
+  my ($self, $token) = @_;
+  my $ref = ref($token);
+
+  # Binary operators → $var is part of an expression, NOT a filehandle
+  # Exception: ! and ~ are unary-only and always start a new term
+  if ($ref eq 'PPI::Token::Operator') {
+    my $op = $token->content;
+    return 1 if $op eq '!' || $op eq '~' || $op eq 'not';
+    return 0;  # All others: , . + - * / == && || etc.
+  }
+
+  # Subscript {key}/[idx] means it's $var{key} or $var[idx], NOT a filehandle
+  return 0 if $ref eq 'PPI::Structure::Subscript';
+
+  # Everything else IS a term start:
+  #   Symbol ($x, @arr), Magic ($_), Quote ("str"), Number (42),
+  #   Cast (\, @{), Word (func), Regexp (/pat/), HereDoc (<<EOF),
+  #   QuoteLike (qw()), Structure::List ((expr)), Constructor ([]),
+  #   and already-parsed internal nodes
+  return 1;
+}
 
 
 # ----------------------------------------------------------------------
@@ -1899,21 +2057,29 @@ sub annotate_contexts {
   my $node_id       = shift;
   my $context       = shift // SCALAR_CTX;
 
-  say "annotate_contexts: node $node_id, context ",
-      $self->context_name($context)
-      if 16 & DEBUG;
+  # Use iterative approach with explicit stack to avoid deep recursion
+  # warnings on long expression chains (e.g., many concatenations)
+  my @stack = ([$node_id, $context]);
 
-  # Store context on this node
-  $self->set_node_context($node_id, $context);
+  while (@stack) {
+    my ($current_id, $current_ctx) = @{pop @stack};
 
-  my $node          = $self->get_a_node($node_id);
-  my $children      = $self->get_node_children($node_id);
+    say "annotate_contexts: node $current_id, context ",
+        $self->context_name($current_ctx)
+        if 16 & DEBUG;
 
-  # Determine context for each child
-  for my $i (0 .. $#{$children}) {
-    my $child_id    = $children->[$i];
-    my $child_ctx   = $self->child_context($node, $node_id, $i, $context);
-    $self->annotate_contexts($child_id, $child_ctx);
+    # Store context on this node
+    $self->set_node_context($current_id, $current_ctx);
+
+    my $node     = $self->get_a_node($current_id);
+    my $children = $self->get_node_children($current_id);
+
+    # Push children onto stack in reverse order (so first child is processed first)
+    for my $i (reverse 0 .. $#{$children}) {
+      my $child_id  = $children->[$i];
+      my $child_ctx = $self->child_context($node, $current_id, $i, $current_ctx);
+      push @stack, [$child_id, $child_ctx];
+    }
   }
 }
 
@@ -2011,7 +2177,7 @@ sub child_context {
       my $children  = $self->get_node_children($parent_id);
       my $lhs_id    = $children->[0];
       my $lhs       = $self->get_a_node($lhs_id);
-      
+
       if ($child_index == 0) {
         # LHS: context based on lvalue type
         return $self->lvalue_context($lhs);
@@ -2019,6 +2185,13 @@ sub child_context {
         # RHS: context based on what LHS expects
         return $self->assignment_rhs_context($lhs, $lhs_id);
       }
+    }
+
+    # String concatenation always forces scalar context on both operands.
+    # Without this, parens inside concat inherit list context from outer
+    # constructs (e.g. [...]) and produce unwanted (vector ...) wrappers.
+    if ($op eq '.' || $op eq '.=') {
+      return SCALAR_CTX;
     }
   }
 
@@ -2047,7 +2220,7 @@ sub lvalue_context {
     return LIST_CTX if $type =~ /^(a_ref_acc|a_acc|slice_a_acc)$/;
     
     # Hash operations return list context
-    return LIST_CTX if $type =~ /^(h_ref_acc|h_acc|slice_h_acc)$/;
+    return LIST_CTX if $type =~ /^(h_ref_acc|h_acc|slice_h_acc|kv_slice_h_acc)$/;
     
     # List of lvalues: ($a, $b, $c)
     return LIST_CTX if $type eq 'progn' || $type eq 'tree_val';

@@ -13,10 +13,11 @@ use Data::Dump qw/dump/;
 use PPI;
 use PPI::Dumper;
 
-use Test::More tests => 114;
+use Test::More tests => 144;
 
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
+BEGIN { use_ok('Pl::Environment') };
 
 
 # Helper: parse Perl expression and generate CL code
@@ -26,7 +27,8 @@ sub perl_to_cl {
 
   my $doc     = PPI::Document->new(\$code);
   my $expr    = _get_ppi_part($doc);
-  my $expr_o  = Pl::PExpr->new(e => $expr, full_PPI => $doc);
+  my $env     = Pl::Environment->new();
+  my $expr_o  = Pl::PExpr->new(e => $expr, full_PPI => $doc, environment => $env);
   my $node_id = $expr_o->parse_expr_to_tree($expr);
 
   my $gen     = Pl::ExprToCL->new(expr_o => $expr_o, indent_level => $indent);
@@ -211,15 +213,15 @@ diag "";
 diag "-------- Slices:";
 
 test_codegen('@arr[1,2,3]', '(pl-aslice @arr 1 2 3)', 'Array slice');
-test_codegen('@hash{"a","b"}', '(pl-hslice @hash "a" "b")', 'Hash slice');
+test_codegen('@hash{"a","b"}', '(pl-hslice %hash "a" "b")', 'Hash slice');
 
 
 # ============================================================
 diag "";
 diag "-------- Initializers:";
 
-test_codegen('[1, 2, 3]', '(pl-array-init 1 2 3)', 'Array initializer');
-test_codegen('{a => 1, b => 2}', '(pl-hash "a" 1 "b" 2)', 'Hash initializer');
+test_codegen('[1, 2, 3]', '(make-pl-box (pl-array-init 1 2 3))', 'Array initializer (boxed ref)');
+test_codegen('{a => 1, b => 2}', '(make-pl-box (pl-hash "a" 1 "b" 2))', 'Hash initializer (boxed ref)');
 
 
 # ============================================================
@@ -343,8 +345,8 @@ test_codegen('$x++ + $y--',
              'Post-increment and decrement in expression');
 
 test_codegen('++$arr[0]',
-             '(pl-pre++ (pl-aref @arr 0))',
-             'Pre-increment array element');
+             '(pl-pre++ (pl-aref-box @arr 0))',
+             'Pre-increment array element (l-value context)');
 
 
 # ============================================================
@@ -481,6 +483,147 @@ test_codegen('exists $h{key}',
              '(pl-exists %h "key")',
              'Regression: exists $h{key} passes hash and key separately');
 
+
+diag "";
+diag "-------- Regression tests (session 5):";
+
+# Hash slice delete: delete @hash{keys} -> pl-delete-hash-slice with %hash
+test_codegen('delete @foo{4,5}',
+             '(pl-delete-hash-slice %foo 4 5)',
+             'Regression: delete hash slice uses %hash and slice function');
+
+# Array slice delete: delete @arr[indices] -> pl-delete-array-slice
+test_codegen('delete @arr[1,2,3]',
+             '(pl-delete-array-slice @arr 1 2 3)',
+             'Regression: delete array slice uses slice function');
+
+# Hash slice: @hash{keys} accesses %hash, not @hash
+test_codegen('@hash{"a","b"}',
+             '(pl-hslice %hash "a" "b")',
+             'Regression: hash slice @h{} uses %hash sigil');
+
+# Block filehandle syntax: print {$expr} LIST
+test_codegen('print {$fh} "text"',
+             '(pl-print :fh $fh "text")',
+             'print with block filehandle - simple var');
+
+test_codegen('print {STDERR} "text"',
+             "(pl-print :fh 'STDERR \"text\")",
+             'print with block filehandle - bareword');
+
+test_codegen('print {$hash{key}} "text"',
+             '(pl-print :fh (pl-gethash %hash "key") "text")',
+             'print with block filehandle - hash access');
+
+# Variable filehandle: $scalar followed by a term = filehandle
+test_codegen('print $fh $data',
+             '(pl-print :fh $fh $data)',
+             'print with variable filehandle - scalar arg');
+
+test_codegen('say $fh @arr',
+             '(pl-say :fh $fh @arr)',
+             'say with variable filehandle - array arg');
+
+test_codegen('print $fh "hello"',
+             '(pl-print :fh $fh "hello")',
+             'print with variable filehandle - string arg');
+
+test_codegen('printf $fh "%s", $x',
+             '(pl-printf :fh $fh "%s" $x)',
+             'printf with variable filehandle');
+
+# NOT a filehandle: binary operator after $fh
+test_codegen('print $fh . "bar"',
+             '(pl-print (pl-. $fh "bar"))',
+             'print NOT filehandle - concat operator');
+
+test_codegen('print $fh + 1',
+             '(pl-print (pl-+ $fh 1))',
+             'print NOT filehandle - addition');
+
+# NOT a filehandle: comma after $fh
+test_codegen('print $fh, "hello"',
+             '(pl-print $fh "hello")',
+             'print NOT filehandle - comma separates args');
+
+# NOT a filehandle: nothing after $fh
+test_codegen('print $fh',
+             '(pl-print $fh)',
+             'print NOT filehandle - no args after');
+
+
+diag "";
+diag "-------- KV slice:";
+
+test_codegen('my @kv = %h{"a","b"}',
+             '(pl-setf @kv (pl-kv-hslice %h "a" "b"))',
+             'KV hash slice %h{keys}');
+
+test_codegen('delete %h{"a","c"}',
+             '(pl-delete-kv-hash-slice %h "a" "c")',
+             'delete KV hash slice');
+
+diag "";
+diag "-------- split scalar context:";
+
+test_codegen('my $n = split(/,/, $str)',
+             '(pl-setf $n (length (pl-split (pl-regex "/,/") $str)))',
+             'split in scalar context returns length');
+
+diag "";
+diag "-------- q{} and qq{} string quoting:";
+
+test_codegen('q{hello world}',
+             '"hello world"',
+             'q{} literal string');
+
+test_codegen('q(paren text)',
+             '"paren text"',
+             'q() literal string');
+
+test_codegen('q[bracket text]',
+             '"bracket text"',
+             'q[] literal string');
+
+test_codegen('q/slash text/',
+             '"slash text"',
+             'q// literal string');
+
+test_codegen('qq{hello $name}',
+             '(pl-string_concat "hello " $name)',
+             'qq{} interpolated string');
+
+test_codegen('qq/hello $name/',
+             '(pl-string_concat "hello " $name)',
+             'qq// interpolated string');
+
+# $#array lvalue
+test_codegen('--$#ary',
+             '(pl-set-array-length @ary (1- (pl-array-last-index @ary)))',
+             '$#array lvalue - pre-decrement');
+
+test_codegen('++$#ary',
+             '(pl-set-array-length @ary (1+ (pl-array-last-index @ary)))',
+             '$#array lvalue - pre-increment');
+
+test_codegen('$#ary = 5',
+             '(pl-set-array-length @ary 5)',
+             '$#array lvalue - assignment');
+
+test_codegen('$#ary++',
+             '(let ((_prev (pl-array-last-index @ary))) (pl-set-array-length @ary (1+ _prev)) _prev)',
+             '$#array lvalue - post-increment');
+
+diag "";
+diag "-------- Unary minus on bareword:";
+
+test_codegen('-bareword',
+             '"-bareword"',
+             'unary minus on bareword produces string');
+
+test_codegen('-SomeWord',
+             '"-SomeWord"',
+             'unary minus on capitalized bareword produces string');
 
 diag "";
 diag "All tests completed!";

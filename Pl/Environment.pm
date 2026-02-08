@@ -62,8 +62,43 @@ Signature info includes:
 
 has prototypes => (
     is => 'rw',
-    default => sub { {} },
+    default => sub { _builtin_prototypes() },
 );
+
+# Built-in function prototypes for functions that take bareword filehandles.
+# The '*' prototype means "accepts bareword as filehandle".
+# NOTE: We don't set min_params here - that's handled by Config.pm's known_no_of_params.
+# These prototypes only provide the '*' type info for post-processing bareword filehandles.
+sub _builtin_prototypes {
+    return {
+        # File I/O - these take filehandle as first arg
+        'open'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'close'     => { params => [{proto_type => '*'}], is_proto => 1 },
+        'binmode'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'eof'       => { params => [{proto_type => '*'}], is_proto => 1 },
+        'tell'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'seek'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'truncate'  => { params => [{proto_type => '*'}], is_proto => 1 },
+        'flock'     => { params => [{proto_type => '*'}], is_proto => 1 },
+        'read'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'sysread'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'syswrite'  => { params => [{proto_type => '*'}], is_proto => 1 },
+        'sysseek'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'fileno'    => { params => [{proto_type => '*'}], is_proto => 1 },
+        'getc'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'stat'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'lstat'     => { params => [{proto_type => '*'}], is_proto => 1 },
+        # Directory operations
+        'opendir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'readdir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'closedir'  => { params => [{proto_type => '*'}], is_proto => 1 },
+        'rewinddir' => { params => [{proto_type => '*'}], is_proto => 1 },
+        'seekdir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'telldir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        # Note: print/say/printf are NOT included here - they have special handling
+        # in PExpr.pm that deals with their complex filehandle detection logic.
+    };
+}
 
 =head2 filehandles
 

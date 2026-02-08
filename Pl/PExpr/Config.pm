@@ -107,6 +107,7 @@ has named_unary => (
       'lstat'   => 1,
       # Misc
       'caller'  => 1,
+      'do'      => 1,
       'wantarray' => 1,
       'prototype' => 1,
     };
@@ -274,10 +275,10 @@ has known_no_of_params => (
       '__LINE__' => 0,
       '__PACKAGE__' => 0,
 
-      open       => [2,   3],
-      close      => 1,
-      pos        => [0,   1],
-      grep       => 2,
+      open       => [1, 2, 3, -1],  # 1-arg reopen, 2-arg mode+file, 3-arg, 4+ for pipe
+      close      => [0, 1],         # close or close FH
+      pos        => [0, 1, -2],  # pos or pos SCALAR (defaults to $_)
+      grep       => -12,        # grep BLOCK|EXPR, LIST (1 before list)
       time       => 0,
       localtime  => [0,   1],
       gmtime     => [0,   1],
@@ -301,7 +302,7 @@ has known_no_of_params => (
       length     => [1,  -2],
       oct        => [1,  -2],
       ord        => [1,  -2],
-      pack       => 2,
+      pack       => -11,            # pack TEMPLATE, LIST (1 before list)
       quotemeta  => [1,  -2],
       reverse    => [-1, -2],
       rindex     => [2,   3],
@@ -330,7 +331,7 @@ has known_no_of_params => (
       pop        => [1,  -3],   # pop ARRAY or pop (defaults to @_/@ARGV)
       push       => -12,        # push ARRAY, LIST (2+ args, first is array)
       unshift    => -12,        # unshift ARRAY, LIST
-      splice     => [2, 3, 4, -1],  # splice ARRAY, OFFSET, LENGTH, LIST
+      splice     => [1, 2, 3, 4, -1],  # splice ARRAY [, OFFSET [, LENGTH [, LIST]]]
 
       # Functions for list data
       # "grep", "join", "map", "qw//", "reverse", "sort", "unpack"
@@ -385,6 +386,7 @@ has known_no_of_params => (
       # Functions for fixed-length data or records
       # "pack", "read", "syscall", "sysread", "sysseek", "syswrite",
       # "unpack", "vec"
+      unpack     => [1, 2, -2], # unpack TEMPLATE [, EXPR] defaults to $_
 
       # ...Etc...
 
@@ -417,10 +419,11 @@ has known_no_of_params => (
       wantarray  => 0,          # wantarray() - check calling context
       caller     => [0, 1],     # caller() or caller(LEVEL)
       defined    => [1, -2],    # defined(EXPR) or defined
-      undef      => 0,          # undef - returns undefined value
+      prototype  => [0, 1],     # prototype or prototype FUNCTION
+      undef      => [0, 1],     # undef or undef EXPR (undefines variable)
 
       # List/hash functions (in runtime but need specs)
-      split      => [1, 2, 3],  # split /PATTERN/, EXPR, LIMIT
+      split      => [0, 1, 2, 3, -2],  # split [/PATTERN/ [, EXPR [, LIMIT]]] defaults to $_
       join       => -12,        # join EXPR, LIST (1 before list)
       keys       => 1,          # keys HASH
       values     => 1,          # values HASH
@@ -435,6 +438,9 @@ has known_no_of_params => (
       warn       => -1,         # warn LIST
       exit       => [0, 1],     # exit or exit EXPR
       system     => -1,         # system CMD or system PROG, ARGS
+      do         => 1,          # do BLOCK or do FILE (always 1 arg)
+      eval       => [0, 1, -2], # eval EXPR or eval BLOCK or eval (defaults to $_)
+      require    => [0, 1],     # require or require VERSION or require MODULE
 
       # Misc
       sleep      => [0, 1],     # sleep or sleep EXPR

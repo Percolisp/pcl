@@ -45,6 +45,10 @@ sub is_string {
   return 1 # , $stmt->content)
       if ref($stmt) =~ /PPI::Token::Quote::Single/;
 
+  # q{...} - literal quoting, no interpolation (like single-quoted)
+  return 1
+      if ref($stmt) eq 'PPI::Token::Quote::Literal';
+
   if (ref($stmt) =~ /PPI::Token::Quote::Double/) {
     # Check if interpolation is needed
     my $content = $stmt->content();

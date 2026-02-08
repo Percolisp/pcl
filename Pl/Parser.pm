@@ -12,6 +12,9 @@ use Moo;
 
 use PPI;
 use Data::Dump qw/dump/;
+use File::Basename;
+use File::Spec;
+use Cwd qw(abs_path);
 
 use Pl::PExpr;
 use Pl::ExprToCL;
@@ -50,9 +53,11 @@ has environment => (
 );
 
 # @INC paths for module lookup (transpile-time)
+# Computed at compile time: project_root/lib + Perl's @INC
+my $_pcl_lib_dir = File::Spec->catdir(dirname(dirname(abs_path(__FILE__))), 'lib');
 has inc_paths => (
   is        => 'rw',
-  default   => sub { [@INC] },  # Start with Perl's @INC
+  default   => sub { [$_pcl_lib_dir, @INC] },  # Include project lib/ + Perl's @INC
 );
 
 # Track modules currently being parsed (cycle detection)
@@ -116,6 +121,9 @@ sub parse {
   # Insert forward declarations for subs
   $self->_insert_sub_forward_declarations();
 
+  # Insert forward declarations for undeclared package variables
+  $self->_insert_variable_forward_declarations();
+
   return join("\n", @{$self->output});
 }
 
@@ -126,10 +134,13 @@ sub parse {
 # Perl: simple_sub -> CL: pl-simple_sub
 sub _qualified_sub_to_cl {
   my ($self, $name) = @_;
+  # Perl allows ' as package separator (old style): BASEOBJ'doit == BASEOBJ::doit
+  # Convert to :: before processing
+  $name =~ s/'/::/g;
   if ($name =~ /^(.+)::([^:]+)$/) {
     my ($pkg, $bare) = ($1, $2);
     # Pipe-quote if contains :: or conflicts with CL symbols
-    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' ||
+    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
                   lc($pkg) eq 'method' || lc($pkg) eq 'function')
                  ? "|$pkg|" : $pkg;
     return "${cl_pkg}::pl-$bare";
@@ -157,6 +168,8 @@ sub _insert_sub_forward_declarations {
   my %by_package;
   for my $sub (@$subs) {
     my $name = $sub->{name};
+    # Normalize Perl's old-style ' package separator to ::
+    $name =~ s/'/::/g;
     # Check if sub name is qualified (e.g., A::DESTROY)
     if ($name =~ /^(.+)::([^:]+)$/) {
       my $sub_pkg = $1;
@@ -218,6 +231,106 @@ sub _insert_sub_forward_declarations {
   }
 }
 
+# Insert defvar for package variables used without my/our declaration.
+# In Perl, package globals auto-vivify as undef. In CL, unbound symbols crash.
+# We scan the generated output for variable references, subtract those already
+# declared (defvar) or locally bound (let/foreach), and emit defvar for the rest.
+sub _insert_variable_forward_declarations {
+  my $self = shift;
+
+  return if $self->collect_prototypes_only;
+
+  my $output = $self->output;
+
+  # Variables defined in the pcl runtime (inherited via :use :pcl)
+  my %runtime_vars = map { $_ => 1 } qw(
+    $_ @_ %_args @ARGV @INC %ENV %INC
+    $1 $2 $3 $4 $5 $6 $7 $8 $9
+  );
+
+  my %declared;    # variables with defvar
+  my %let_bound;   # variables bound by let/let*/foreach
+  my %referenced;  # all variable references
+
+  for my $line (@$output) {
+    # Skip comment lines
+    next if $line =~ /^\s*;;/;
+
+    # Collect defvar'd variables: (defvar $var ...)
+    if ($line =~ /\(defvar\s+([\$\@\%][a-zA-Z_]\w*)\b/) {
+      $declared{$1} = 1;
+    }
+
+    # Collect let/let*-bound variables.
+    # Generated patterns:  (let (($x (make-pl-box nil)) (@arr ...) (%h ...))
+    # Each binding is ($var init), so match ( followed by variable followed by space
+    if ($line =~ /\(let\*?\s+\(/) {
+      while ($line =~ /\(([\$\@\%][a-zA-Z_]\w*)\s+/g) {
+        $let_bound{$1} = 1;
+      }
+    }
+
+    # Collect foreach-bound variables: (pl-foreach ($i ...)
+    if ($line =~ /\(pl-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
+      $let_bound{$1} = 1;
+    }
+
+    # Collect all variable references (identifiers starting with sigil)
+    while ($line =~ /([\$\@\%][a-zA-Z_]\w*)/g) {
+      my $var = $1;
+      next if $var =~ /::/;  # skip package-qualified
+      $referenced{$var} = 1;
+    }
+  }
+
+  # Undeclared = referenced - declared - let_bound - runtime
+  my @undeclared;
+  for my $var (sort keys %referenced) {
+    next if $declared{$var};
+    next if $let_bound{$var};
+    next if $runtime_vars{$var};
+    push @undeclared, $var;
+  }
+
+  return unless @undeclared;
+
+  # Find insertion point: after the first (in-package ...) line.
+  # When pl2cl adds a preamble with (in-package :main), it goes between
+  # (in-package :pcl) and our code, so these defvars end up in the right package.
+  my $insert_pos;
+  for my $i (0 .. $#$output) {
+    if ($output->[$i] =~ /^\(in-package\s+/) {
+      $insert_pos = $i + 1;
+      last;
+    }
+  }
+  return unless defined $insert_pos;
+
+  # Skip past sub forward declarations and blank lines
+  while ($insert_pos < @$output &&
+         ($output->[$insert_pos] =~ /^\(unless\s|^;; Forward|^;; but top|^\s*$/)) {
+    $insert_pos++;
+  }
+
+  # Build declarations
+  my @decls;
+  push @decls, ";; Forward declarations for package variables used without my/our.";
+  push @decls, ";; Perl globals auto-vivify as undef; CL needs defvar to avoid crashes.";
+  for my $var (@undeclared) {
+    my $sigil = substr($var, 0, 1);
+    if ($sigil eq '$') {
+      push @decls, "(defvar $var (make-pl-box nil))";
+    } elsif ($sigil eq '@') {
+      push @decls, "(defvar $var (make-array 0 :adjustable t :fill-pointer 0))";
+    } elsif ($sigil eq '%') {
+      push @decls, "(defvar $var (make-hash-table :test 'equal))";
+    }
+  }
+  push @decls, "";
+
+  splice @$output, $insert_pos, 0, @decls;
+}
+
 # Insert defpackage forms for packages referenced but not declared
 # This enables dynamic require inside functions to work
 sub _insert_package_predeclarations {
@@ -232,7 +345,7 @@ sub _insert_package_predeclarations {
   my @predecls;
   for my $pkg (@$pkgs) {
     # Pipe-quote if contains :: or conflicts with CL symbols
-    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' ||
+    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
                   lc($pkg) eq 'method' || lc($pkg) eq 'function')
                  ? ":|$pkg|" : ":$pkg";
     push @predecls, ";; Pre-declare package for dynamic loading";
@@ -247,11 +360,15 @@ sub _insert_package_predeclarations {
 
 # Transform package-qualified variable names for CL
 # $Pkg::Var -> Pkg::$Var, $Pkg::Sub::Var -> |Pkg::Sub|::$Var
+# Also: $::var -> main::$var (empty package = main)
 sub _transform_pkg_var {
   my ($self, $var) = @_;
   # Handle package-qualified variables: $Pkg::var -> Pkg::$var
-  if ($var =~ /^([\$\@\%])(.+)::([^:]+)$/) {
+  # Note: Use (.*) not (.+) to allow empty package (main shorthand)
+  if ($var =~ /^([\$\@\%])(.*)::([^:]+)$/) {
     my ($sigil, $pkg, $name) = ($1, $2, $3);
+    # Empty package means main (e.g., $::foo = $main::foo)
+    $pkg = 'main' if $pkg eq '';
     my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
     return "${cl_pkg}::${sigil}${name}";
   }
@@ -263,11 +380,98 @@ sub _process_children {
   my $self     = shift;
   my $parent   = shift;
 
-  for my $child ($parent->children) {
+  my @children = $parent->children;
+  my %skip;
+
+  for my $i (0 .. $#children) {
+    next if $skip{$i};
+    my $child = $children[$i];
+
+    # Lookahead: bare block compound statement followed by continue { }
+    if (ref($child) eq 'PPI::Statement::Compound') {
+      my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
+      if ($continue) {
+        $self->_process_compound_statement($child, $continue);
+        $self->_process_trailing_tokens($trailing) if $trailing && @$trailing;
+        next;
+      }
+    }
+
     $self->_process_element($child);
   }
 }
 
+# Look ahead for a continue { } statement after a bare block compound statement.
+# PPI splits "{ ... } continue { ... }" into two sibling statements for bare blocks.
+# PPI may also include trailing statements in the continue PPI::Statement.
+# Returns ($continue_block, \@trailing_children) if found, () otherwise.
+sub _find_continue_sibling {
+  my ($self, $children, $i, $skip) = @_;
+
+  my $child = $children->[$i];
+
+  # Check if this is a bare block (first significant child is a Block, not a keyword)
+  my $is_bare_block = 0;
+  for my $cc ($child->children) {
+    my $ref = ref($cc);
+    next if $ref eq 'PPI::Token::Whitespace';
+    next if $ref eq 'PPI::Token::Label';
+    if ($ref eq 'PPI::Structure::Block') {
+      $is_bare_block = 1;
+    }
+    last;
+  }
+  return () unless $is_bare_block;
+
+  # Look ahead for continue { } as next non-whitespace sibling
+  for my $j ($i+1 .. $#$children) {
+    my $sibling = $children->[$j];
+    next if ref($sibling) eq 'PPI::Token::Whitespace';
+    if (ref($sibling) eq 'PPI::Statement') {
+      my @sib_kids = $sibling->children;
+      my $k = 0;
+      $k++ while $k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Token::Whitespace';
+      if ($k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Token::Word'
+          && $sib_kids[$k]->content eq 'continue') {
+        my $cont_idx = $k;
+        $k++;
+        $k++ while $k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Token::Whitespace';
+        if ($k <= $#sib_kids && ref($sib_kids[$k]) eq 'PPI::Structure::Block') {
+          my $continue_block = $sib_kids[$k];
+          # Collect trailing children after the continue block (PPI quirk:
+          # PPI may include subsequent statements in the same PPI::Statement)
+          my @trailing;
+          for my $t ($k+1 .. $#sib_kids) {
+            push @trailing, $sib_kids[$t];
+          }
+          $skip->{$j} = 1;
+          return ($continue_block, \@trailing);
+        }
+      }
+    }
+    last;  # Only check immediate next non-whitespace sibling
+  }
+  return ();
+}
+
+# Process trailing PPI tokens that were orphaned when a continue { } statement
+# was consumed by the bare block lookahead. PPI may include subsequent code
+# (e.g., "$ok = 1;") in the same PPI::Statement as the continue block.
+sub _process_trailing_tokens {
+  my ($self, $trailing) = @_;
+
+  # Filter out whitespace-only trailing content
+  my @significant = grep { ref($_) ne 'PPI::Token::Whitespace' } @$trailing;
+  return unless @significant;
+
+  # Create a synthetic PPI::Statement containing the trailing tokens
+  # and process it as an expression statement
+  my $synth = PPI::Statement->new();
+  for my $token (@$trailing) {
+    $synth->add_element($token->clone());
+  }
+  $self->_process_expression_statement($synth);
+}
 
 # Process a single PPI element
 sub _process_element {
@@ -360,6 +564,19 @@ sub _process_expression_statement {
 
   return unless @parts;
 
+  # Special case: "import PACKAGE" is syntactic sugar for "PACKAGE->import()"
+  # PPI parses this as two barewords, so we detect and convert it
+  # Use funcall+intern to avoid read-time package dependency
+  if (@parts == 2
+      && ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'import'
+      && ref($parts[1]) eq 'PPI::Token::Word') {
+    my $pkg = $parts[1]->content;
+    $self->_emit(";; $perl_code");
+    $self->_emit("(funcall (intern \"PL-IMPORT\" :$pkg))");
+    $self->_emit("");
+    return;
+  }
+
   # Check for statement modifiers: EXPR if/unless/while/until/for COND
   my $modifier_idx = -1;
   my $modifier;
@@ -383,8 +600,18 @@ sub _process_expression_statement {
     my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt);
     my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
 
-    # Generate: (pl-if/unless/while cond expr)
-    $cl_code = "(pl-$modifier $cond_cl $expr_cl)";
+    # Generate appropriate control structure
+    # Note: 'for' and 'foreach' modifiers use pl-foreach (iterate over list),
+    # not pl-for (C-style for loop)
+    my $cl_modifier = $modifier;
+    if ($modifier eq 'for' || $modifier eq 'foreach') {
+      $cl_modifier = 'foreach';
+      # For foreach modifier, need ($_ list) syntax
+      $cl_code = "(pl-foreach (\$_ $cond_cl) $expr_cl)";
+    }
+    else {
+      $cl_code = "(pl-$cl_modifier $cond_cl $expr_cl)";
+    }
   }
   else {
     # No modifier - parse normally
@@ -544,6 +771,11 @@ sub _process_our_declaration {
         $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         unless ($is_empty_list) {
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+          # Convert progn to pl-array-init for array initialization
+          # This matches what ExprToCL does for @array = (...) assignments
+          if ($init_cl =~ /^\(progn\s+(.+)\)$/) {
+            $init_cl = "(pl-array-init $1)";
+          }
           # Use pl-setf to properly populate array from list
           $self->_emit("(pl-setf $var $init_cl)");
         }
@@ -554,6 +786,11 @@ sub _process_our_declaration {
         $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
         unless ($is_empty_list) {
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+          # Convert progn to pl-hash for hash initialization
+          # This matches what ExprToCL does for %hash = (...) assignments
+          if ($init_cl =~ /^\(progn\s+(.+)\)$/) {
+            $init_cl = "(pl-hash $1)";
+          }
           # Use pl-setf to properly populate hash from list
           $self->_emit("(pl-setf $var $init_cl)");
         }
@@ -907,6 +1144,7 @@ sub _process_state_declaration {
 sub _process_compound_statement {
   my $self = shift;
   my $stmt = shift;
+  my $external_continue = shift;  # Optional: continue block from sibling lookahead
 
   # Get the first keyword to determine statement type
   # Also detect any label (LABEL:) before the keyword
@@ -926,12 +1164,33 @@ sub _process_compound_statement {
     }
     elsif ($ref eq 'PPI::Structure::Block' && !$first_block) {
       $first_block = $child;
+      last;  # Found the block - don't scan further (avoid picking up 'continue' as first_word)
     }
   }
 
   if (!$first_word && $first_block) {
-    # Bare block: { ... }
-    $self->_process_bare_block($first_block);
+    # Bare block: { ... } possibly with continue { ... }
+    # Scan remaining children for continue block (when PPI keeps it as child)
+    my $continue_block = $external_continue;  # May have been found by sibling lookahead
+    my $found_continue = 0;
+    for my $child ($stmt->children) {
+      my $ref = ref($child);
+      if ($ref eq 'PPI::Token::Word' && $child->content eq 'continue') {
+        $found_continue = 1;
+      }
+      elsif ($ref eq 'PPI::Structure::Block' && $found_continue) {
+        $continue_block = $child;
+        last;
+      }
+    }
+    $self->_process_bare_block($first_block, $label, $continue_block);
+  }
+  elsif (!$first_word) {
+    # Neither block nor keyword found - emit as comment
+    my $perl_code = $stmt->content;
+    $perl_code =~ s/\n/ /g;
+    $self->_emit(";; COMPOUND (unknown) not handled: $perl_code");
+    $self->_emit("");
   }
   elsif ($first_word eq 'if' || $first_word eq 'unless') {
     $self->_process_if_statement($stmt, $first_word);
@@ -953,17 +1212,75 @@ sub _process_compound_statement {
 }
 
 
-# Process a bare block: { ... }
+# Process a bare block: { ... } possibly with continue { ... }
 sub _process_bare_block {
   my $self  = shift;
   my $block = shift;
+  my $label = shift;  # Optional label (e.g., TEST1: { ... })
+  my $continue_block = shift;  # Optional continue block
 
   $self->_emit(";; { ... }");
-  $self->_emit("(progn");
-  $self->indent_level($self->indent_level + 1);
-  $self->_process_block($block);
-  $self->indent_level($self->indent_level - 1);
-  $self->_emit(")");
+  if ($label) {
+    # Labeled bare block: use (block LABEL ...)
+    # In Perl, a bare block is a single-iteration loop - last/next/redo all work.
+    # With continue: wrap tagbody in catch for labeled next, then run continue after
+    $self->_emit("(block $label");
+    $self->indent_level($self->indent_level + 1);
+    if ($continue_block) {
+      # Use pcl:: prefix to match the package used by pl-next macro's throw
+      $self->_emit("(catch 'pcl::NEXT-$label");
+      $self->indent_level($self->indent_level + 1);
+    }
+    $self->_emit("(tagbody");
+    $self->indent_level($self->indent_level + 1);
+    $self->_emit(":redo");
+    # Use pcl:: prefix to match the package used by pl-redo macro's throw
+    $self->_emit("(catch 'pcl::REDO-$label");
+    $self->indent_level($self->indent_level + 1);
+    $self->_emit("(progn");
+    $self->indent_level($self->indent_level + 1);
+    $self->_process_block($block);
+    $self->_emit("(go :next)))");  # close progn + catch'REDO + tagbody... no:
+    # Actually: close progn ), close catch ), NOT tagbody
+    $self->indent_level($self->indent_level - 2);
+    # Back to tagbody content level
+    $self->_emit("(go :redo)");
+    $self->_emit(":next)");  # close tagbody
+    $self->indent_level($self->indent_level - 1);
+    if ($continue_block) {
+      $self->_emit(")");  # close catch for NEXT
+      $self->indent_level($self->indent_level - 1);
+    }
+    if ($continue_block) {
+      $self->_emit("(progn");
+      $self->indent_level($self->indent_level + 1);
+      $self->_process_block($continue_block);
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");
+    }
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
+  } else {
+    # Unlabeled bare block: (block nil (tagbody :redo ... :next))
+    # Supports redo, next, last without labels
+    # Continue block runs after tagbody (after next/normal exit, not after last)
+    $self->_emit("(block nil");
+    $self->indent_level($self->indent_level + 1);
+    $self->_emit("(tagbody :redo");
+    $self->indent_level($self->indent_level + 1);
+    $self->_process_block($block);
+    $self->_emit(":next)");
+    $self->indent_level($self->indent_level - 1);
+    if ($continue_block) {
+      $self->_emit("(progn");
+      $self->indent_level($self->indent_level + 1);
+      $self->_process_block($continue_block);
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");
+    }
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
+  }
   $self->_emit("");
 }
 
@@ -1094,10 +1411,24 @@ sub _process_block {
   # Track local let depth at block start
   my $start_depth = $self->{_local_let_depth} // 0;
 
-  for my $child ($block->children) {
+  my @children = $block->children;
+  my %skip;
+  for my $i (0 .. $#children) {
+    next if $skip{$i};
+    my $child = $children[$i];
     my $ref = ref($child);
     next if $ref eq 'PPI::Token::Whitespace';
     next if $ref eq 'PPI::Token::Comment';
+
+    # Lookahead: bare block followed by continue { } as sibling
+    if ($ref eq 'PPI::Statement::Compound') {
+      my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
+      if ($continue) {
+        $self->_process_compound_statement($child, $continue);
+        $self->_process_trailing_tokens($trailing) if $trailing && @$trailing;
+        next;
+      }
+    }
 
     $self->_process_element($child);
   }
@@ -1371,16 +1702,25 @@ sub _process_while_statement {
   $perl_code =~ s/\n/ /g;
   $self->_emit(";; $perl_code");
 
-  # Find condition and block
-  my ($cond, $block);
+  # Find condition, block, and optional continue block
+  my ($cond, $block, $continue_block);
+  my $found_body = 0;
+  my $found_continue = 0;
   for my $child ($stmt->children) {
     my $ref = ref($child);
     if ($ref eq 'PPI::Structure::Condition') {
       $cond = $child;
     }
     elsif ($ref eq 'PPI::Structure::Block') {
-      $block = $child;
-      last;  # Take first block only
+      if (!$found_body) {
+        $block = $child;
+        $found_body = 1;
+      } elsif ($found_continue) {
+        $continue_block = $child;
+      }
+    }
+    elsif ($ref eq 'PPI::Token::Word' && $child->content eq 'continue') {
+      $found_continue = 1;
     }
   }
 
@@ -1401,6 +1741,13 @@ sub _process_while_statement {
     $self->_emit("(pl-while $cond_cl$label_arg");
     $self->indent_level($self->indent_level + 1);
     $self->_process_block($block) if $block;
+    if ($continue_block) {
+      $self->_emit(":continue (progn");
+      $self->indent_level($self->indent_level + 1);
+      $self->_process_block($continue_block);
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");
+    }
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");
   });
@@ -1420,9 +1767,11 @@ sub _process_for_statement {
   $perl_code =~ s/\n/ /g;
   $self->_emit(";; $perl_code");
 
-  # Check for C-style for vs foreach style
+  # Check for C-style for vs foreach style, and detect continue block
   my $c_style_for;
   my $block;
+  my $continue_block;
+  my $found_continue = 0;
 
   for my $child ($stmt->children) {
     my $ref = ref($child);
@@ -1430,7 +1779,14 @@ sub _process_for_statement {
       $c_style_for = $child;
     }
     elsif ($ref eq 'PPI::Structure::Block') {
-      $block = $child;
+      if ($found_continue) {
+        $continue_block = $child;
+      } elsif (!$block || $c_style_for) {
+        $block = $child;
+      }
+    }
+    elsif ($ref eq 'PPI::Token::Word' && $child->content eq 'continue') {
+      $found_continue = 1;
     }
   }
 
@@ -1438,7 +1794,7 @@ sub _process_for_statement {
     $self->_process_c_style_for($c_style_for, $block, $stmt, $label);
   }
   else {
-    $self->_process_foreach_loop($stmt, $block, $label);
+    $self->_process_foreach_loop($stmt, $block, $label, $continue_block);
   }
 }
 
@@ -1525,6 +1881,7 @@ sub _process_foreach_loop {
   my $stmt  = shift;
   my $block = shift;
   my $label = shift;  # Optional loop label
+  my $continue_block = shift;  # Optional continue block
 
   my $loop_var;
   my @list_parts;
@@ -1574,6 +1931,13 @@ sub _process_foreach_loop {
   $self->_emit("(pl-foreach ($loop_var $list_cl)$label_arg");
   $self->indent_level($self->indent_level + 1);
   $self->_process_block($block) if $block;
+  if ($continue_block) {
+    $self->_emit(":continue (progn");
+    $self->indent_level($self->indent_level + 1);
+    $self->_process_block($continue_block);
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
+  }
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");
   $self->_emit("");
@@ -1830,7 +2194,7 @@ sub _emit_package_preamble {
   my $pkg_name = shift;
 
   # Pipe-quote if contains :: or conflicts with CL symbols
-  my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' ||
+  my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' || lc($pkg_name) eq 'error' ||
                 lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
                ? ":|$pkg_name|" : ":$pkg_name";
 
@@ -1853,8 +2217,9 @@ sub _pkg_to_clos_class {
   my ($self, $pkg) = @_;
   my $class = lc($pkg);
   $class =~ s/::/-/g;
-  # Pipe-quote to avoid CL symbol conflicts (especially 'class')
+  # Pipe-quote to avoid CL symbol conflicts (especially 'class', 'error')
   if ($class eq 'class' || $class eq 'method' || $class eq 'function' ||
+      $class eq 'error' || $class eq 'warning' || $class eq 'condition' ||
       $class eq 'standard-class' || $class eq 'standard-object') {
     return "|$class|";
   }
@@ -1903,14 +2268,70 @@ sub _process_include_statement {
   }
 
   # Handle version declarations (use v5.30, use 5.030, etc.)
-  if ($perl_code =~ /^use\s+v?5[\d.]+$/ || $module eq '') {
+  if ($perl_code =~ /^use\s+v?5[\d.]+$/) {
+    $self->_emit(";; $perl_code (pragma)");
+    $self->_emit("");
+    return;
+  }
+
+  # Handle require with path expression (e.g., require "./test.pl", require $path,
+  # require $path . "/" . $file)
+  # PPI returns empty module for these - we need to parse the expression
+  if ($module eq '' && $type eq 'require') {
+    # Collect all tokens after 'require' (excluding whitespace at start/end and semicolon)
+    my @tokens;
+    my $found_require = 0;
+    for my $child ($stmt->children) {
+      if ($child->isa('PPI::Token::Word') && $child->content eq 'require') {
+        $found_require = 1;
+        next;
+      }
+      next unless $found_require;
+      next if $child->isa('PPI::Token::Structure');  # Skip semicolon
+      push @tokens, $child;
+    }
+
+    # Skip leading/trailing whitespace
+    shift @tokens while @tokens && $tokens[0]->isa('PPI::Token::Whitespace');
+    pop @tokens while @tokens && $tokens[-1]->isa('PPI::Token::Whitespace');
+
+    if (@tokens) {
+      # Check if it's a simple string literal (compile-time)
+      if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
+        my $path = $tokens[0]->string;
+        $self->_emit(";; $perl_code");
+        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("  (pl-require-file \"$path\"))");
+        $self->_emit("");
+        return;
+      }
+
+      # Otherwise, parse as expression (runtime)
+      # Use the parser's _parse_expression method
+      my $expr_cl = $self->_parse_expression(\@tokens);
+      if ($expr_cl) {
+        $self->_emit(";; $perl_code");
+        $self->_emit("(pl-require-file $expr_cl)");
+        $self->_emit("");
+        return;
+      }
+    }
+
+    # Fallback
+    $self->_emit(";; $perl_code (require without path)");
+    $self->_emit("");
+    return;
+  }
+
+  # Handle use with empty module (version pragmas handled above)
+  if ($module eq '') {
     $self->_emit(";; $perl_code (pragma)");
     $self->_emit("");
     return;
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter)$/) {
+  if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter|bytes|locale)$/) {
     $self->_emit(";; $perl_code (pragma)");
     $self->_emit("");
     return;
@@ -2111,7 +2532,7 @@ sub _extract_module_prototypes {
   return $cache->{$module} if exists $cache->{$module};
 
   # Skip known core modules that don't have prototypes affecting codegen
-  if ($module =~ /^(Test2?::|Carp|Scalar::Util|List::Util|Config|Time::HiRes|
+  if ($module =~ /^(Test2?::|Carp|Scalar::Util|List::Util|Time::HiRes|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;

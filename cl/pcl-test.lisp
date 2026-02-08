@@ -19,11 +19,21 @@
           pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
           pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT))
 
+;;; Helper: unbox a value for display
+(defun test-display-value (x)
+  (cond
+    ((null x) nil)
+    ((pl-box-p x) (let ((v (pl-box-value x)))
+                    (if (eq v *pl-undef*) nil (to-string x))))
+    ((eq x *pl-undef*) nil)
+    (t x)))
+
 ;;; Helper: format a value for display
 (defun test-quote-value (x)
-  (if (null x)
-      "undef"
-      (format nil "'~A'" x)))
+  (let ((v (test-display-value x)))
+    (if (null v)
+        "undef"
+        (format nil "'~A'" v))))
 
 ;;; Helper: comment lines
 (defun test-comment (&rest args)
@@ -76,11 +86,12 @@
 ;;; Core: _ok(pass, name, @diag)
 (defun test-ok (pass name &rest diag)
   (incf *test-count*)
-  (let ((out (if name
+  (let* ((display-name (test-display-value name))
+         (out (if display-name
                  (format nil "~A ~A - ~A"
                          (if pass "ok" "not ok")
                          *test-count*
-                         name)
+                         display-name)
                  (format nil "~A ~A"
                          (if pass "ok" "not ok")
                          *test-count*))))
@@ -96,11 +107,17 @@
 (defun pl-ok (test &optional name)
   (test-ok (pl-true-p test) name))
 
+;;; Helper: check if value represents Perl undef
+(defun test-undef-p (x)
+  (or (null x)
+      (eq x *pl-undef*)
+      (and (pl-box-p x) (eq (pl-box-value x) *pl-undef*))))
+
 ;;; is(got, expected, name)
 (defun pl-is (got expected &optional name)
   (let ((pass (cond
-                ((and (null got) (null expected)) t)
-                ((or (null got) (null expected)) nil)
+                ((and (test-undef-p got) (test-undef-p expected)) t)
+                ((or (test-undef-p got) (test-undef-p expected)) nil)
                 (t (equal (to-string got) (to-string expected))))))
     (if pass
         (test-ok t name)
@@ -111,8 +128,8 @@
 ;;; isnt(got, expected, name)
 (defun pl-isnt (got expected &optional name)
   (let ((pass (cond
-                ((and (null got) (null expected)) nil)
-                ((or (null got) (null expected)) t)
+                ((and (test-undef-p got) (test-undef-p expected)) nil)
+                ((or (test-undef-p got) (test-undef-p expected)) t)
                 (t (not (equal (to-string got) (to-string expected)))))))
     (if pass
         (test-ok t name)
@@ -147,29 +164,29 @@
   (let ((pass
           (cond
             ((equal op "==")
-             (and got expected (= (to-number got) (to-number expected))))
+             (= (to-number got) (to-number expected)))
             ((equal op "!=")
-             (and got expected (/= (to-number got) (to-number expected))))
+             (/= (to-number got) (to-number expected)))
             ((equal op "<")
-             (and got expected (< (to-number got) (to-number expected))))
+             (< (to-number got) (to-number expected)))
             ((equal op ">")
-             (and got expected (> (to-number got) (to-number expected))))
+             (> (to-number got) (to-number expected)))
             ((equal op "<=")
-             (and got expected (<= (to-number got) (to-number expected))))
+             (<= (to-number got) (to-number expected)))
             ((equal op ">=")
-             (and got expected (>= (to-number got) (to-number expected))))
+             (>= (to-number got) (to-number expected)))
             ((equal op "eq")
-             (and got expected (equal (to-string got) (to-string expected))))
+             (equal (to-string got) (to-string expected)))
             ((equal op "ne")
-             (and got expected (not (equal (to-string got) (to-string expected)))))
+             (not (equal (to-string got) (to-string expected))))
             ((equal op "lt")
-             (and got expected (string< (to-string got) (to-string expected))))
+             (string< (to-string got) (to-string expected)))
             ((equal op "gt")
-             (and got expected (string> (to-string got) (to-string expected))))
+             (string> (to-string got) (to-string expected)))
             ((equal op "le")
-             (and got expected (string<= (to-string got) (to-string expected))))
+             (string<= (to-string got) (to-string expected)))
             ((equal op "ge")
-             (and got expected (string>= (to-string got) (to-string expected))))
+             (string>= (to-string got) (to-string expected)))
             (t
              (format t "# Unknown operator '~A'~%" op)
              nil))))

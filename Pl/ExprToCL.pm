@@ -39,6 +39,14 @@ has indent_str => (
   default  => '  ',
 );
 
+# L-value context tracking for array/hash element access
+# When true, array/hash access should return boxes instead of values
+has lvalue_context => (
+  is       => 'rw',
+  default  => 0,
+);
+
+
 has handlers => (
   is      => 'ro',
   lazy    => 1,
@@ -60,6 +68,7 @@ sub _build_handlers {
     'h_ref_acc'     => \&gen_hash_ref_access,
     'slice_a_acc'   => \&gen_array_slice,
     'slice_h_acc'   => \&gen_hash_slice,
+    'kv_slice_h_acc' => \&gen_kv_hash_slice,
     'arr_init'      => \&gen_array_init,
     'hash_init'     => \&gen_hash_init,
     'progn'         => \&gen_progn,
@@ -257,9 +266,12 @@ sub gen_leaf {
     }
     # Handle package-qualified variables: $Pkg::var -> Pkg::$var
     # Perl: $Config::debug  ->  CL: Config::$debug
+    # Also: $::foo means $main::foo (empty package = main)
     # Note: Use [^:]+ at the end to avoid matching stash refs like $Pkg::Sub::
-    if ($content =~ /^([\$\@\%])(.+)::([^:]+)$/) {
+    if ($content =~ /^([\$\@\%])(.*)::([^:]+)$/) {
       my ($sigil, $pkg, $name) = ($1, $2, $3);
+      # Empty package means main (e.g., $::foo = $main::foo)
+      $pkg = 'main' if $pkg eq '';
       # Track referenced package
       $self->environment->add_referenced_package($pkg) if $self->environment;
       # Use pipe quoting for nested packages
@@ -268,8 +280,11 @@ sub gen_leaf {
     }
     # Handle package-qualified typeglobs: *Pkg::var -> |Pkg|::*var
     # Perl: *Scalar::Util::refaddr  ->  CL: |Scalar::Util|::*refaddr
-    if ($content =~ /^\*(.+)::([^:]+)$/) {
+    # Also: *::foo means *main::foo (empty package = main)
+    if ($content =~ /^\*(.*)::([^:]+)$/) {
       my ($pkg, $name) = ($1, $2);
+      # Empty package means main (e.g., *::foo = *main::foo)
+      $pkg = 'main' if $pkg eq '';
       # Track referenced package
       $self->environment->add_referenced_package($pkg) if $self->environment;
       # Use pipe quoting for package (which may contain ::)
@@ -278,8 +293,11 @@ sub gen_leaf {
     }
     # Handle package stash access: $Pkg::Sub:: or %Pkg::Sub::
     # Perl: $YAML::Tiny:: or %YAML::Tiny:: -> CL: (pl-stash "YAML::Tiny")
-    if ($content =~ /^([\$\%])(.+)::$/) {
+    # Also: $:: or %:: means main stash
+    if ($content =~ /^([\$\%])(.*)::$/) {
       my ($sigil, $pkg) = ($1, $2);
+      # Empty package means main (e.g., $:: = main stash)
+      $pkg = 'main' if $pkg eq '';
       # Track referenced package
       $self->environment->add_referenced_package($pkg) if $self->environment;
       return "(pl-stash \"$pkg\")";
@@ -468,6 +486,18 @@ sub gen_binary_op {
 
   my $right = $self->gen_node($kids->[1]);
 
+  # Special case: keys(%h) = N is hash pre-sizing - no-op in CL
+  # CL hash tables auto-resize, so just evaluate the RHS for side effects
+  if ($op eq '=' && $left =~ /^\(pl-keys /) {
+    return "$right";
+  }
+
+  # Special case: $#arr = N  →  (pl-set-array-length @arr N)
+  if ($op eq '=' && $left =~ /^\(pl-array-last-index (.+)\)$/) {
+    my $arr = $1;
+    return "(pl-set-array-length $arr $right)";
+  }
+
   # Special case: typeglob assignment with function reference
   # *freeze = \&Dump  →  (setf (symbol-function 'pl-freeze) #'pl-Dump)
   if ($op eq '=' && $left =~ /^\*(\w+)$/) {
@@ -553,6 +583,11 @@ sub gen_funcall {
         $pkg //= 'main';
         return qq{"$pkg"};
       }
+      # Perl: -bareword produces string "-bareword"
+      # PPI tokenizes this as a single PPI::Token::Word
+      if ($content =~ /^-[A-Za-z_]\w*$/) {
+        return qq{"$content"};
+      }
     }
   }
 
@@ -560,8 +595,8 @@ sub gen_funcall {
   my $func_name = $self->gen_node($kids->[0]);
   my $cl_func   = $self->cl_name($func_name);
 
-  # Special handling for next/last with label argument
-  if (($func_name eq 'next' || $func_name eq 'last') && @$kids == 2) {
+  # Special handling for next/last/redo with label argument
+  if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo') && @$kids == 2) {
     # Check if the argument is a bareword label (funcall with single word child)
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
     if ($self->expr_o->is_internal_node_type($arg_node) &&
@@ -740,6 +775,53 @@ sub gen_funcall {
         return "(pl-delete $hash $key)";
       }
     }
+    # Hash slice: delete @foo{4,5} -> (pl-delete-hash-slice %hash key1 key2 ...)
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'slice_h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        my $hash = $self->gen_node($arg_kids->[0]);
+        # Convert @ to % for hash access (@ is context sigil, % is container sigil)
+        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\@/) {
+          $hash =~ s/^\@/\%/;
+        }
+        my @keys;
+        for my $i (1 .. $#$arg_kids) {
+          push @keys, $self->gen_node($arg_kids->[$i]);
+        }
+        my $keys_str = join(' ', @keys);
+        return "(pl-delete-hash-slice $hash $keys_str)";
+      }
+    }
+    # Array slice: delete @arr[1,2,3] -> (pl-delete-array-slice @arr idx1 idx2 ...)
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'slice_a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my @indices;
+        for my $i (1 .. $#$arg_kids) {
+          push @indices, $self->gen_node($arg_kids->[$i]);
+        }
+        my $idx_str = join(' ', @indices);
+        return "(pl-delete-array-slice $arr $idx_str)";
+      }
+    }
+    # KV slice delete: delete %foo{6,7} -> (pl-delete-kv-hash-slice %hash key1 key2 ...)
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'kv_slice_h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my @keys;
+        for my $i (1 .. $#$arg_kids) {
+          push @keys, $self->gen_node($arg_kids->[$i]);
+        }
+        my $keys_str = join(' ', @keys);
+        return "(pl-delete-kv-hash-slice $hash $keys_str)";
+      }
+    }
   }
 
   # Special handling for exists on arrays and hashes
@@ -781,10 +863,18 @@ sub gen_funcall {
     @ref_params = map { $_->{proto_type} // $_->{name} } @{$proto->{params}};
   }
 
+  # Functions that modify their arguments (need l-value access to array/hash elements)
+  my %lvalue_funcs = map { $_ => 1 } qw(chop chomp);
+  my $needs_lvalue = $lvalue_funcs{$func_name} // 0;
+
   # Rest are arguments
   my @args;
   for my $i (1 .. $#$kids) {
+    # Set l-value context for functions that modify their arguments
+    my $saved_lvalue = $self->lvalue_context;
+    $self->lvalue_context(1) if $needs_lvalue;
     my $arg = $self->gen_node($kids->[$i]);
+    $self->lvalue_context($saved_lvalue);
 
     # Check if this position has a reference prototype (\@, \%, \$)
     my $param_idx = $i - 1;  # 0-based index for params
@@ -814,6 +904,12 @@ sub gen_funcall {
   if ($ctx == 1) {  # LIST_CTX = 1
     return "(let ((*wantarray* t)) $call)";
   }
+
+  # split in scalar context returns number of fields
+  if ($func_name eq 'split' && $ctx == 0) {
+    return "(length $call)";
+  }
+
   return $call;
 }
 
@@ -992,13 +1088,26 @@ sub gen_prefix_op {
     }
   }
 
+
+  # ++, --, and \ need l-value context for array/hash elements
+  # \ needs l-value to get a reference to the box, not a copy of the value
+  my $needs_lvalue = ($op eq '++' || $op eq '--' || $op eq '\\');
+  my $saved_lvalue = $self->lvalue_context;
+  $self->lvalue_context(1) if $needs_lvalue;
   my $operand = $self->gen_node($kids->[1]);
+  $self->lvalue_context($saved_lvalue);
 
   # Get CL name for the operator
   my $cl_op = $self->cl_name($op);
 
   # For ++ and --, distinguish prefix from postfix
   if ($op eq '++' || $op eq '--') {
+    # Special case: $#array lvalue - emit setter form
+    if ($operand =~ /^\(pl-array-last-index (.+)\)$/) {
+      my $arr = $1;
+      my $delta_op = ($op eq '++') ? '1+' : '1-';
+      return "(pl-set-array-length $arr ($delta_op (pl-array-last-index $arr)))";
+    }
     $cl_op = "pl-pre" . $op;
   }
   # Sigil cast operators (dereference) - use pl-cast-X
@@ -1022,14 +1131,26 @@ sub gen_postfix_op {
     return $self->gen_chained_comparison($kids);
   }
 
-  # Normal postfix: first child is operand, second is operator
-  my $operand = $self->gen_node($kids->[0]);
+  # Get operator first to check if we need l-value context
   my $op_node = $self->expr_o->get_a_node($kids->[1]);
   my $op      = $op_node->content();
+
+  # ++ and -- modify their operand, need l-value context for array/hash elements
+  my $needs_lvalue = ($op eq '++' || $op eq '--');
+  my $saved_lvalue = $self->lvalue_context;
+  $self->lvalue_context(1) if $needs_lvalue;
+  my $operand = $self->gen_node($kids->[0]);
+  $self->lvalue_context($saved_lvalue);
 
   # For ++ and --, use pl-post++ / pl-post-- naming
   my $cl_op;
   if ($op eq '++' || $op eq '--') {
+    # Special case: $#array lvalue - emit setter form (return old value)
+    if ($operand =~ /^\(pl-array-last-index (.+)\)$/) {
+      my $arr = $1;
+      my $delta_op = ($op eq '++') ? '1+' : '1-';
+      return "(let ((_prev (pl-array-last-index $arr))) (pl-set-array-length $arr ($delta_op _prev)) _prev)";
+    }
     $cl_op = "pl-post" . $op;
   } else {
     $cl_op = $self->cl_name($op) . '-post';
@@ -1055,7 +1176,7 @@ sub gen_chained_comparison {
 }
 
 
-# Array access: (pl-aref arr idx)
+# Array access: (pl-aref arr idx) or (pl-aref-box arr idx) in l-value context
 # In Perl, $arr[0] accesses @arr, so we convert $sigil to @sigil
 sub gen_array_access {
   my $self    = shift;
@@ -1067,13 +1188,16 @@ sub gen_array_access {
   my $idx = $self->gen_node($kids->[1]);
 
   # Convert $varname to @varname (Perl $arr[i] accesses @arr)
-  $arr =~ s/^\$/@/;
+  # Handle both plain $arr and package-qualified Pkg::$arr
+  $arr =~ s/(^|::)\$/$1@/;
 
-  return "(pl-aref $arr $idx)";
+  # Use pl-aref-box in l-value context for modifying operations
+  my $func = $self->lvalue_context ? 'pl-aref-box' : 'pl-aref';
+  return "($func $arr $idx)";
 }
 
 
-# Hash access: (pl-gethash hash key)
+# Hash access: (pl-gethash hash key) or (pl-gethash-box hash key) in l-value context
 # In Perl, $hash{key} accesses %hash, so we convert $sigil to %sigil
 sub gen_hash_access {
   my $self    = shift;
@@ -1085,9 +1209,12 @@ sub gen_hash_access {
   my $key  = $self->gen_node($kids->[1]);
 
   # Convert $varname to %varname (Perl $hash{k} accesses %hash)
-  $hash =~ s/^\$/%/;
+  # Handle both plain $hash and package-qualified Pkg::$hash
+  $hash =~ s/(^|::)\$/$1%/;
 
-  return "(pl-gethash $hash $key)";
+  # Use pl-gethash-box in l-value context for modifying operations
+  my $func = $self->lvalue_context ? 'pl-gethash-box' : 'pl-gethash';
+  return "($func $hash $key)";
 }
 
 
@@ -1138,7 +1265,30 @@ sub gen_array_slice {
 
 
 # Hash slice: (pl-hslice hash key1 key2 ...)
+# Note: @foo{keys} accesses %foo, so we convert @ sigil to %
 sub gen_hash_slice {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  my $hash_node = $self->expr_o->get_a_node($kids->[0]);
+  my $hash = $self->gen_node($kids->[0]);
+  # Convert @ to % for hash access (@ is context sigil, % is container sigil)
+  if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\@/) {
+    $hash =~ s/^\@/\%/;
+  }
+  my @keys;
+  for my $i (1 .. $#$kids) {
+    push @keys, $self->gen_node($kids->[$i]);
+  }
+
+  my $key_str = join(' ', @keys);
+  return "(pl-hslice $hash $key_str)";
+}
+
+# KV hash slice: %hash{keys} - returns key-value pairs
+sub gen_kv_hash_slice {
   my $self    = shift;
   my $node    = shift;
   my $node_id = shift;
@@ -1151,7 +1301,7 @@ sub gen_hash_slice {
   }
 
   my $key_str = join(' ', @keys);
-  return "(pl-hslice $hash $key_str)";
+  return "(pl-kv-hslice $hash $key_str)";
 }
 
 
@@ -1169,11 +1319,14 @@ sub gen_array_init {
   }
 
   # Use pl-array-init which flattens nested arrays
+  # Wrap in make-pl-box because [...] creates a REFERENCE to an anonymous array
+  # (a scalar value), not the array itself. Without boxing, pl-setf @arr
+  # would flatten the inner array instead of storing it as a reference.
   if (@elements) {
     my $elem_str = join(' ', @elements);
-    return "(pl-array-init $elem_str)";
+    return "(make-pl-box (pl-array-init $elem_str))";
   } else {
-    return "(make-array 0 :adjustable t :fill-pointer 0)";
+    return "(make-pl-box (make-array 0 :adjustable t :fill-pointer 0))";
   }
 }
 
@@ -1191,7 +1344,8 @@ sub gen_hash_init {
   }
 
   my $pairs_str = join(' ', @pairs);
-  return "(pl-hash $pairs_str)";
+  # Wrap in make-pl-box because {...} creates a REFERENCE to an anonymous hash
+  return "(make-pl-box (pl-hash $pairs_str))";
 }
 
 
@@ -1512,9 +1666,31 @@ sub convert_perl_string {
     $content = $1;
   }
   elsif ($str =~ /^qq\{(.*)\}$/s || $str =~ /^qq\((.*)\)$/s ||
-         $str =~ /^qq\[(.*)\]$/s || $str =~ /^qq(.)(.*)\1$/s) {
-    # qq{} style
-    $content = $1 // $2;
+         $str =~ /^qq\[(.*)\]$/s) {
+    # qq{}, qq(), qq[] style
+    $content = $1;
+  }
+  elsif ($str =~ /^qq(.)(.*)\1$/s) {
+    # qq/.../  style - content is in $2
+    $content = $2;
+  }
+  elsif ($str =~ /^q\{(.*)\}$/s || $str =~ /^q\((.*)\)$/s ||
+         $str =~ /^q\[(.*)\]$/s) {
+    # q{}, q(), q[] style - like single-quoted, no interpolation
+    $content = $1;
+    $content =~ s/\\\\/\\/g;    # only \\ is special in q{}
+    # For CL, escape backslashes and quotes
+    $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
+    return qq{"$content"};
+  }
+  elsif ($str =~ /^q(.)(.*)\1$/s) {
+    # q/.../ style - content is in $2
+    $content = $2;
+    $content =~ s/\\\\/\\/g;
+    $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
+    return qq{"$content"};
   }
   else {
     # Unknown format, return as-is
@@ -1529,6 +1705,8 @@ sub convert_perl_string {
   $content =~ s/\\a/\a/g;      # bell
   $content =~ s/\\e/\e/g;      # escape
   $content =~ s/\\f/\f/g;      # form feed
+  # \cX - control character (chr(ord(uc(X)) ^ 64))
+  $content =~ s/\\c(.)/ chr(ord(uc($1)) ^ 64) /ge;
   $content =~ s/\\"/"/g;       # escaped quote
   $content =~ s/\\\$/\$/g;     # escaped dollar
   $content =~ s/\\\@/\@/g;     # escaped at

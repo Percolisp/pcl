@@ -1,6 +1,6 @@
 # PCL - Remaining Work and Limitations
 
-**Current Status:** 44 test files, 2136 tests passing
+**Current Status:** 44 test files, 2259 PCL tests passing. Perl op/ tests: ~937+ passing across 103 files.
 
 ---
 
@@ -121,9 +121,9 @@ $^V     # ✓ Implemented - Perl version (returns "v5.30.0")
 $@      # ✓ Implemented - set by eval { } on error, cleared on success
 $?      # Declared - not set by system()/backticks yet
 $.      # Declared - not set by readline yet (needs per-FH tracking)
-$/      # Declared - readline/chomp don't use custom $/ values yet
-$\      # Declared - print doesn't append it yet
-$"      # ✓ Implemented - array interpolation uses it for join
+$/      # ✓ Implemented - boxed, readline respects it (newline/undef/paragraph/custom)
+$\      # ✓ Implemented - boxed, print appends it
+$"      # ✓ Implemented - boxed, array interpolation uses it for join
 @_      # works in subs; shift/pop default to @_ in subs, @ARGV at top level
 @ARGV   # ✓ Implemented - command line arguments
 ```
@@ -342,7 +342,7 @@ The XS bridge would allow using XS modules by embedding a Perl interpreter, but 
 The expression parser (PExpr.pm) handles most Perl syntax. Known gaps:
 
 1. **Glob `<*.txt>`**: ✓ Implemented - file pattern expansion with wildcards (`*`, `?`, `[ab]`)
-2. **Indirect filehandle**: `print {$fh} "text"` not fully supported (use `print $fh "text"`)
+2. **Indirect filehandle**: ✓ Implemented - `print {$fh} "text"`, `print $fh "text"`, `print STDERR "text"` all work
 3. **Symbolic sub refs**: `&{"$pkg::$name"}()` not implemented
 4. **`q()` quoting**: Single-quoted `q(...)` syntax not yet recognized
 5. **Control char escapes**: `\cA`, `\c@` etc. not yet handled in strings
@@ -390,21 +390,15 @@ takes_two(1);              # Compiles - missing args NOT detected
 
 ## Code Generation Gaps
 
-### `exists` and `delete` need special handling
+### ~~`exists` and `delete` need special handling~~ - FIXED (sessions 3-5)
 
-Currently `exists $h{key}` generates:
-```lisp
-(pl-exists (pl-gethash %h "key"))  ; WRONG - evaluates access first
-```
-
-Should generate:
-```lisp
-(pl-exists %h "key")  ; CORRECT - passes hash and key separately
-```
-
-Same issue affects `delete $h{key}` and array variants `exists $a[0]`, `delete $a[0]`.
-
-**Fix needed in:** `Pl/ExprToCL.pm` - add special handling in `gen_funcall` for `exists` and `delete` to extract hash/array and key/index from the child node instead of evaluating it.
+All variants now work:
+- `exists $h{key}` → `(pl-exists %h "key")`
+- `delete $h{key}` → `(pl-delete %h "key")`
+- `exists $a[0]` → `(pl-exists-array @a 0)`
+- `delete $a[0]` → `(pl-delete-array @a 0)`
+- `delete @h{k1,k2}` → `(pl-delete-hash-slice %h "k1" "k2")`
+- `delete @a[1,2]` → `(pl-delete-array-slice @a 1 2)`
 
 ---
 
@@ -415,48 +409,41 @@ The CL runtime (pcl-runtime.lisp) is missing:
 1. **`e` modifier**: `s/pat/code/e` - deferred to P5 (self-hosting)
 2. **Localization**: UTF-8 case folding, locale-aware sorting
 3. **Tied variables**: Not planned
-4. **Custom `$/`**: `chomp` always removes `\n`, ignores `$/` value. Perl's `chomp` with `$/ = "oo"` would remove "oo" from "foo" → "f". Test simplified in `perl-tests/chop.t` to avoid this.
 
 ---
 
 ## Perl's Own Test Suite
 
 Tests from Perl's source distribution (`t/` directory) are being used to verify PCL.
-See `PERL_TESTS_STATUS.md` for complete status of all 41 copied test files.
 
-**Passing completely:**
-- `t/base/if.t`, `t/base/while.t` - basic control flow
-- `t/op/bool.t`, `t/op/cond.t` - boolean/ternary operations
+**~937+ tests passing** across 103 test files, **16 fully passing** (append, arith, array, bool, cond, defined, defins, delete, dor, if, isa, join, kvaslice, loopctl, sleep, while).
 
-**Partial success:**
-- `t/op/ord.t` - 30/38 (fails on codepoints > 0x10FFFF, beyond Unicode range)
-- `t/op/repeat.t` - 35/50 (edge cases with variable repeat counts on LHS)
-- `t/opbasic/arith.t` - 16/183 (fails on float literals like `1e999`)
-- `t/op/auto.t` - 30/47 (++/-- mostly works, fails on `++($x = "99")`)
-- `t/op/chop.t` - 10/? (blocked by `$/` custom line separator)
-- `t/op/chr.t` - 9/45 (blocked by `use bytes` pragma)
-- `t/op/split.t` - partial (split in scalar context returns array not count)
-- `t/op/join.t` - 6/43 (blocked by `main::var` package access)
+**Top partial results:** pow 75/77, oct 72/79, num 46/46, split 45/64, list 38/55, auto 38/39, study 35/43, repeat 35/36, chars 31/32, ord 31/36, chop 27/28, exp 24/32, negate 24/24, infnan 19/25.
 
-**Blocking issues:**
-- Many tests require `Config.pm` which is an XS module
-- `print $x eq "y" ? ...` misparses `$x` as filehandle (ambiguous indirect syntax)
 
-**Bugs found from testing:**
-- ~~`&subname` call: generates symbol instead of funcall~~ - FIXED (session 3)
-- ~~`push(@x, @x)`: second array not flattened~~ - FIXED (session 3)
-- ~~`delete $a[idx]`: generates wrong code~~ - FIXED (session 3)
-- ~~`sub Pkg::name`: qualified sub doesn't create package first~~ - FIXED (session 2)
-- ~~`foreach $i (0..255)`: range returns list, foreach expects vector~~ - FIXED (session 3)
-- `++($x = "99")`: pre-increment on assignment fails (setf returns value not box)
-- Deep recursion on some complex concatenation expressions
-- ~~`chop($x, @arr)`: chop/chomp with multiple args crashes~~ - FIXED (session 2)
-- ~~`chr(-1)`: crashes on negative values~~ - FIXED (session 2)
-- `split()` in scalar context: returns array instead of count
-- `$o::var` / `$a::var` / `main::var`: qualified vars don't create package first (Package PL-O/PL-A/MAIN does not exist)
-- `Hash::Util::...`: generates "too many colons" in package name
-- `$` as package prefix: wantarray.t generates `Package $` error
-- ~~`bless \$x, o::`: comma not consumed as argument separator~~ - FIXED (session 3)
+**Key blocking issues** (in priority order):
+1. **wantarray context** — returns void instead of scalar in expressions (wantarray.t 14/28 failures)
+2. **String escapes** — `\Q\E`, `\U`, `\L`, `\u`, `\l`, `\F`, `\x{}`, `\o{}` (lc.t 45 failures, qq.t 30 failures)
+3. **Transpile failures** — unbalanced parens in codegen (5+ files: anonsub, concat2, die_exit, recurse, splice)
+4. **sprintf** — missing %g, %e, %a, %x, %o, %b format specifiers
+5. **eval/die** — $@ propagation, die with objects, closure capture
+6. **Missing builtins** — pack, tie, pos, prototype, UTF8::native_to_unicode
+
+**Bugs found from Perl test suite (prioritized):**
+
+### Fixed bugs (for reference)
+- ~~`&subname` call~~ - FIXED (session 3)
+- ~~`push(@x, @x)` array flattening~~ - FIXED (session 3)
+- ~~`delete $a[idx]`~~ - FIXED (session 3)
+- ~~`sub Pkg::name`~~ - FIXED (session 2)
+- ~~`foreach $i (0..255)` range/vector mismatch~~ - FIXED (session 3)
+- ~~`++($x = "99")` pre-increment on assignment~~ - FIXED (session 9, l-value boxing)
+- ~~`chop($x, @arr)` multi-arg~~ - FIXED (session 2)
+- ~~`chr(-1)` crash~~ - FIXED (session 2)
+- ~~`split()` in scalar context~~ - FIXED (session 11)
+- ~~`bless \$x, o::` comma parsing~~ - FIXED (session 3)
+- ~~KV slice `%h{keys}` and `delete %h{keys}`~~ - FIXED (session 11)
+- ~~`undef @array` / `undef %hash`~~ - FIXED (session 11)
 
 ---
 

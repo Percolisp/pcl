@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 31;
+use Test::More tests => 39;
 BEGIN { use_ok('Pl::Parser') };
 
 
@@ -175,7 +175,7 @@ output_contains('push @x, @y;',
 
 # Regression: push with anonymous array should NOT flatten
 output_contains('push @x, [1, 2, 3];',
-                '(pl-push @x (pl-array-init 1 2 3))',
+                '(pl-push @x (make-pl-box (pl-array-init 1 2 3)))',
                 'Regression: push @x, [1,2,3] does not flatten');
 
 # Regression: push with array deref should flatten
@@ -183,5 +183,55 @@ output_contains('push @x, @{$ref};',
                 '(pl-push @x (pl-flatten (pl-cast-@ $ref)))',
                 'Regression: push @x, @{$ref} flattens deref');
 
+
+# ========================================
+diag "";
+diag "-------- Regression tests (session 5):";
+
+# Regression: for/foreach statement modifier should use pl-foreach, not pl-for
+# "EXPR for LIST" is foreach, not C-style for
+output_contains('push @foo, $_ for 1..3;',
+                '(pl-foreach ($_ (pl-.. 1 3)) (pl-push @foo $_))',
+                'Regression: for statement modifier uses pl-foreach');
+
+# Regression: our %hash = (...) should generate pl-hash, not progn
+output_contains('our %h = (a => 1, b => 2);',
+                '(pl-setf %h (pl-hash "a" 1 "b" 2))',
+                'Regression: our %hash initialization uses pl-hash');
+
+
+# -------- continue blocks --------
+
+# Regression: while loop with continue block
+output_contains('while ($x) { $a = 1; } continue { $b = 2; }',
+                ':continue',
+                'while loop with continue generates :continue');
+
+# Regression: redo LABEL generates pl-redo with label argument
+output_contains('redo OUTER;',
+                '(pl-redo OUTER)',
+                'redo LABEL generates pl-redo with label');
+
+# Regression: bare block continue - PPI puts continue as sibling statement
+# Parser must detect and consume the continue sibling
+output_contains('{ next; } continue { $ok = 1; }',
+                '(progn',
+                'bare block continue from PPI sibling generates continue code');
+
+# Regression: labeled bare block with continue - PPI keeps continue as child
+output_contains('LABEL: { next LABEL; } continue { $ok = 1; }',
+                "pcl::NEXT-LABEL",
+                'labeled bare block continue uses pcl:: qualified catch tag');
+
+# Regression: labeled bare block with redo catch tag
+output_contains('LABEL: { redo LABEL; }',
+                "pcl::REDO-LABEL",
+                'labeled bare block has pcl:: qualified redo catch tag');
+
+# Regression: bare block continue - trailing tokens after continue block
+# PPI merges "$ok = 1;" into the continue statement
+output_contains('{ next; } continue { $a = 1; } $ok = 1;',
+                '(pl-setf $ok 1)',
+                'trailing code after bare block continue is preserved');
 
 done_testing();

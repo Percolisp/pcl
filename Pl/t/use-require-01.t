@@ -57,6 +57,36 @@ note "-------- Transpilation Tests:";
   like($result, qr/\(pl-require "Foo::Bar"\)/, 'require generates pl-require');
 }
 
+# Test: require with literal path string generates pl-require-file
+{
+  my $result = Pl::Parser->parse_code('require "./test.pl";');
+  like($result, qr/pl-require-file.*test\.pl/, 'require with path generates pl-require-file');
+}
+
+# Test: require with single-quoted path
+{
+  my $result = Pl::Parser->parse_code("require './lib/helper.pl';");
+  like($result, qr/pl-require-file.*lib.helper\.pl/, 'require with single-quoted path');
+}
+
+# Test: require with absolute path
+{
+  my $result = Pl::Parser->parse_code('require "/usr/lib/foo.pl";');
+  like($result, qr/pl-require-file.*\/usr\/lib\/foo\.pl/, 'require with absolute path');
+}
+
+# Test: require with variable
+{
+  my $result = Pl::Parser->parse_code('require $path;');
+  like($result, qr/pl-require-file \$path/, 'require with variable');
+}
+
+# Test: require with expression (concatenation)
+{
+  my $result = Pl::Parser->parse_code('require $dir . "/" . $file;');
+  like($result, qr/pl-require-file.*pl-\..*\$dir.*\$file/, 'require with expression');
+}
+
 # Test: use lib modifies @INC
 {
   my $result = Pl::Parser->parse_code('use lib "mylib";');
@@ -518,6 +548,72 @@ say FalseRet::val();
 });
 
   like($output, qr/it works/, 'module returning 0 still works');
+}
+
+# ============================================================
+# Exporter Tests (symbol import from @EXPORT)
+# ============================================================
+
+note "-------- Exporter Tests:";
+
+# Test: Module with @EXPORT - symbols are imported
+{
+  my $mod = File::Spec->catfile($tempdir, "Exportable.pm");
+  open my $fh, '>', $mod or die;
+  print $fh <<'EOF';
+package Exportable;
+our @EXPORT = qw(%data get_value);
+our %data = (key1 => 100, key2 => 200);
+sub get_value { return 42; }
+1;
+EOF
+  close $fh;
+
+  my $output = run_pl(qq{
+use lib "$tempdir";
+use Exportable;
+say \$data{key1};
+say get_value();
+});
+
+  like($output, qr/100/, 'Exporter: hash from @EXPORT is accessible');
+  like($output, qr/42/, 'Exporter: function from @EXPORT is accessible');
+}
+
+# Test: Config module import (uses our lib/Config.pm)
+{
+  my $output = run_pl(q{
+use Config;
+say $Config{ivsize};
+say $Config{osname};
+});
+
+  like($output, qr/8/, 'Config: ivsize imported and accessible');
+  like($output, qr/linux/, 'Config: osname imported and accessible');
+}
+
+# Test: Qualified access still works alongside import
+{
+  my $mod = File::Spec->catfile($tempdir, "Dual.pm");
+  open my $fh, '>', $mod or die;
+  print $fh <<'EOF';
+package Dual;
+our @EXPORT = qw($var);
+our $var = "exported";
+our $other = "not exported";
+1;
+EOF
+  close $fh;
+
+  my $output = run_pl(qq{
+use lib "$tempdir";
+use Dual;
+say \$var;
+say \$Dual::other;
+});
+
+  like($output, qr/exported/, 'Exporter: imported symbol works');
+  like($output, qr/not exported/, 'Exporter: qualified access to non-exported works');
 }
 
 done_testing();

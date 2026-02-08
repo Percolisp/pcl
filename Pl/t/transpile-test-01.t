@@ -127,6 +127,168 @@ test_transpile("list flatten: mixed", 'my @a = (1, 2); my @c = (@a, "foo", 42); 
 test_transpile("list flatten: nested", 'my @a = (1); my @b = (2, 3); my @c = (@a, @b, 4); print join(",", @c), "\n";');
 test_transpile("list flatten: empty", 'my @a = (); my @b = (1, 2); my @c = (@a, @b); print join(",", @c), "\n";');
 
+# L-value assignment tests (box-set returns box for modification)
+# These test that assignment returns something modifiable
+
+# Basic pre/post increment on assignment result
+test_transpile("lvalue: pre-increment on assign", 'my $x; print ++($x = 5), "\n"; print $x, "\n";');
+test_transpile("lvalue: post-increment on assign", 'my $x; print (($x = 5)++), "\n"; print $x, "\n";');
+test_transpile("lvalue: pre-decrement on assign", 'my $x; print --($x = 5), "\n"; print $x, "\n";');
+test_transpile("lvalue: post-decrement on assign", 'my $x; print (($x = 5)--), "\n"; print $x, "\n";');
+
+# Increment/decrement through zero and negative
+test_transpile("lvalue: pre-decrement to negative", 'my $x; print --($x = 0), "\n";');
+test_transpile("lvalue: post-decrement to negative", 'my $x; print (($x = 1)--), "\n"; print $x, "\n";');
+
+# Multiple increments chained
+test_transpile("lvalue: double pre-increment", 'my $x; ++($x = 5); print ++$x, "\n";');
+test_transpile("lvalue: pre-increment then post", 'my $x; ++($x = 5); print $x++, "\n"; print $x, "\n";');
+
+# Nested assignment as l-value
+test_transpile("lvalue: nested assign pre-inc", 'my ($x, $y); print ++($x = ($y = 5)), "\n"; print "$x $y\n";');
+test_transpile("lvalue: nested assign post-inc", 'my ($x, $y); print (($x = ($y = 10))++), "\n"; print "$x $y\n";');
+
+# Assignment in larger expression
+test_transpile("lvalue: inc assign in expr", 'my $x; my $r = 10 + ++($x = 5); print "$r $x\n";');
+test_transpile("lvalue: post-inc assign in expr", 'my $x; my $r = 10 + (($x = 5)++); print "$r $x\n";');
+
+# Multiple variables modified
+test_transpile("lvalue: multiple assigns inc", 'my ($a, $b); ++($a = 1); ++($b = 2); print "$a $b\n";');
+
+# String increment (Perl magical ++)
+test_transpile("lvalue: string pre-increment", 'my $x; print ++($x = "aa"), "\n";');
+test_transpile("lvalue: string post-increment", 'my $x; print (($x = "zz")++), "\n"; print $x, "\n";');
+
+# chop/chomp on assignment result
+test_transpile("lvalue: chop on assign", 'my $x; chop($x = "hello"); print $x, "\n";');
+test_transpile("lvalue: chomp on assign", 'my $x; chomp($x = "line\n"); print $x, "\n";');
+test_transpile("lvalue: chop return value", 'my $x; print chop($x = "hi"), "\n"; print $x, "\n";');
+test_transpile("lvalue: chomp return value", 'my $x; print chomp($x = "end\n"), "\n"; print $x, "\n";');
+
+# Edge case: assign 0 (falsy value)
+test_transpile("lvalue: inc on zero assign", 'my $x; print ++($x = 0), "\n";');
+test_transpile("lvalue: dec on zero assign", 'my $x; print --($x = 0), "\n";');
+
+# Edge case: assign empty string
+test_transpile("lvalue: chop empty assign", 'my $x; chop($x = "a"); print length($x), "\n";');
+
+# Compound: assignment result used immediately and modified
+test_transpile("lvalue: use and modify", 'my $x; my $y = ($x = 5); ++$x; print "$x $y\n";');
+
+# L-value tests for ARRAY elements
+test_transpile("lvalue array: post-increment element", 'my @a = (1, 2, 3); $a[1]++; print $a[1], "\n";');
+test_transpile("lvalue array: pre-increment element", 'my @a = (10, 20, 30); my $v = ++$a[0]; print $v, "\n";');
+test_transpile("lvalue array: post-decrement element", 'my @a = (5, 6, 7); print $a[2]--, "\n"; print $a[2], "\n";');
+test_transpile("lvalue array: pre-decrement element", 'my @a = (100); my $v = --$a[0]; print $v, "\n";');
+test_transpile("lvalue array: chop element", 'my @a = ("hello", "world"); chop($a[0]); print $a[0], "\n";');
+test_transpile("lvalue array: chomp element", 'my @a = ("line\n"); chomp($a[0]); print $a[0], "X\n";');
+test_transpile("lvalue array: chop on assign to element", 'my @a; chop($a[0] = "test"); print $a[0], "\n";');
+test_transpile("lvalue array: inc then read", 'my @a = (0); $a[0]++; $a[0]++; print $a[0], "\n";');
+test_transpile("lvalue array: negative index inc", 'my @a = (1, 2, 3); $a[-1]++; print $a[2], "\n";');
+
+# L-value tests for HASH elements
+test_transpile("lvalue hash: post-increment element", 'my %h = (x => 5); $h{x}++; print $h{x}, "\n";');
+test_transpile("lvalue hash: pre-increment element", 'my %h = (n => 10); my $v = ++$h{n}; print $v, "\n";');
+test_transpile("lvalue hash: post-decrement element", 'my %h = (v => 100); print $h{v}--, "\n"; print $h{v}, "\n";');
+test_transpile("lvalue hash: pre-decrement element", 'my %h = (k => 50); my $v = --$h{k}; print $v, "\n";');
+test_transpile("lvalue hash: chop element", 'my %h = (s => "abcd"); chop($h{s}); print $h{s}, "\n";');
+test_transpile("lvalue hash: chomp element", 'my %h = (line => "text\n"); chomp($h{line}); print $h{line}, "X\n";');
+test_transpile("lvalue hash: chop on assign to element", 'my %h; chop($h{new} = "foo"); print $h{new}, "\n";');
+test_transpile("lvalue hash: inc then read", 'my %h = (c => 0); $h{c}++; $h{c}++; $h{c}++; print $h{c}, "\n";');
+test_transpile("lvalue hash: string key inc", 'my %h; $h{"key"}++; print $h{key}, "\n";');
+
+# Mixed array/hash l-value operations
+test_transpile("lvalue mixed: array and hash inc", 'my @a = (1); my %h = (x => 2); $a[0]++; $h{x}++; print $a[0], " ", $h{x}, "\n";');
+test_transpile("lvalue mixed: chop both", 'my @a = ("ab"); my %h = (k => "cd"); chop($a[0]); chop($h{k}); print $a[0], $h{k}, "\n";');
+
+# L-value corner cases
+test_transpile("lvalue corner: inc on undef array elem", 'my @a; $a[0]++; print defined($a[0]) ? $a[0] : "undef", "\n";');
+test_transpile("lvalue corner: inc on undef hash elem", 'my %h; $h{x}++; print defined($h{x}) ? $h{x} : "undef", "\n";');
+test_transpile("lvalue corner: chop empty string in array", 'my @a = (""); chop($a[0]); print length($a[0]), "\n";');
+test_transpile("lvalue corner: multiple elem inc", 'my @a = (1, 2, 3); $a[0]++; $a[1]++; $a[2]++; print join(",", @a), "\n";');
+
+# L-value: pre-increment on assignment to array/hash element
+test_transpile("lvalue: pre-inc on array elem assign", 'my @a; my $r = ++($a[0] = 5); print "$r $a[0]\n";');
+test_transpile("lvalue: post-inc on array elem assign", 'my @a; my $r = ($a[0] = 5)++; print "$r $a[0]\n";');
+test_transpile("lvalue: pre-inc on hash elem assign", 'my %h; my $r = ++($h{k} = 10); print "$r $h{k}\n";');
+test_transpile("lvalue: post-inc on hash elem assign", 'my %h; my $r = ($h{k} = 10)++; print "$r $h{k}\n";');
+test_transpile("lvalue: chop on array elem assign", 'my @a; chop($a[0] = "hello"); print "$a[0]\n";');
+test_transpile("lvalue: chop on hash elem assign", 'my %h; chop($h{k} = "world"); print "$h{k}\n";');
+
+# split in scalar context returns count
+test_transpile("split: scalar context", '
+  my $str = "a,b,c,d";
+  my $n = split(/,/, $str);
+  print $n, "\n";
+');
+
+# string ranges
+test_transpile("range: multi-char string", '
+  print join(",", "aa".."af"), "\n";
+');
+
+test_transpile("range: string wrap-around", '
+  print join(",", "x".."ad"), "\n";
+');
+
+# KV slice
+test_transpile("kv slice: access and delete", '
+  my %h = (a => 1, b => 2, c => 3);
+  my @kv = %h{"a","c"};
+  print join(",", @kv), "\n";
+  my @del = delete %h{"a"};
+  print join(",", @del), "\n";
+  print join(",", sort keys %h), "\n";
+');
+
+# $#array lvalue
+test_transpile('$#array: pre-decrement shrinks', '
+  my @ary = (1,2,3,4,5);
+  --$#ary;
+  print scalar @ary, "\n";
+  print $ary[-1], "\n";
+');
+
+test_transpile('$#array: assignment grows', '
+  my @ary = (1,2,3);
+  $#ary = 5;
+  print scalar @ary, "\n";
+  print $ary[0], "\n";
+');
+
+test_transpile('$#array: assignment shrinks', '
+  my @ary = (1,2,3,4,5);
+  $#ary = 1;
+  print scalar @ary, "\n";
+  print $ary[0], "\n";
+  print $ary[1], "\n";
+');
+
+test_transpile('$#array: post-increment', '
+  my @ary = (1,2,3);
+  my $old = $#ary++;
+  print $old, "\n";
+  print scalar @ary, "\n";
+');
+
+# Numeric formatting: trailing decimal point fix
+test_transpile("float: integer-valued float stringifies without dot", '
+  print 0.0 + 0, "\n";
+  print 1.0 + 0, "\n";
+  print 100.0 + 0, "\n";
+  print -10.0 + 0, "\n";
+');
+
+# Numeric formatting: small numbers use exponential
+test_transpile("float: Inf/NaN stringify", '
+  my $inf = "Inf" + 0;
+  my $ninf = "-Inf" + 0;
+  my $nan = "NaN" + 0;
+  print $inf, "\n";
+  print $ninf, "\n";
+  print $nan, "\n";
+');
+
 # TODO: File I/O tests - requires filehandle symbol quoting in code generator
 # Currently filehandle symbols (FH, $fh) aren't quoted, causing CL eval errors
 # test_transpile("file: write", '
