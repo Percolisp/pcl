@@ -21,7 +21,8 @@ use File::Spec;
 use File::Basename;
 use Cwd qw(abs_path);
 
-use lib ".";
+# Find Pl::Parser relative to this script, not cwd
+use lib dirname(abs_path($0));
 use Pl::Parser;
 
 # Parse command line options
@@ -76,6 +77,12 @@ sub build_preamble {
   # Add current directory
   push @lines, "(vector-push-extend \".\" pcl::\@INC)";
 
+  # Add PCL's lib/ directory (for our stub modules like Config.pm)
+  my $pcl_lib = dirname($script_path) . "/lib";
+  if (-d $pcl_lib) {
+    push @lines, "(vector-push-extend \"$pcl_lib\" pcl::\@INC)";
+  }
+
   # Add Perl's @INC paths
   for my $path (@perl_inc) {
     # Escape backslashes and quotes
@@ -83,6 +90,12 @@ sub build_preamble {
     $path =~ s/"/\\"/g;
     push @lines, "(vector-push-extend \"$path\" pcl::\@INC)";
   }
+
+  # Switch to main package for user code (Perl's default package)
+  # main uses :cl and :pcl so runtime functions are accessible
+  push @lines, ";; Switch to main package (Perl's default for code without 'package' statement)";
+  push @lines, "(defpackage :main (:use :cl :pcl))";
+  push @lines, "(in-package :main)";
 
   return join("\n", @lines);
 }
