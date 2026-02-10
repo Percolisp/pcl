@@ -255,6 +255,9 @@ sub gen_leaf {
     if ($content eq '$^V') {
       return '|$^V|';  # Perl version string (defvar in runtime)
     }
+    if ($content eq '$^X') {
+      return '|$^X|';  # Perl executable path (defvar in runtime)
+    }
     if ($content eq '$/') {
       return '|$/|';  # input record separator (defvar in runtime)
     }
@@ -263,6 +266,15 @@ sub gen_leaf {
     }
     if ($content eq '$"') {
       return '|$"|';  # list separator (defvar in runtime)
+    }
+    if ($content eq '$|') {
+      return '|$\||';  # output autoflush (defvar in runtime)
+    }
+    if ($content eq '$;') {
+      return '|$;|';  # subscript separator (defvar in runtime)
+    }
+    if ($content eq '$,') {
+      return '|$,|';  # output field separator (defvar in runtime)
     }
     # Handle package-qualified variables: $Pkg::var -> Pkg::$var
     # Perl: $Config::debug  ->  CL: Config::$debug

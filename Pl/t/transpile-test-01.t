@@ -298,4 +298,37 @@ test_transpile("float: Inf/NaN stringify", '
 #   print "wrote file\n";
 # ');
 
+# --- splice tests ---
+test_transpile("splice: remove from end", '
+  my @a = (1, 2, 3, 4, 5);
+  my @removed = splice(@a, 3);
+  print join(",", @removed), "\n";
+  print join(",", @a), "\n";
+', "4,5\n1,2,3\n");
+
+test_transpile("splice: remove middle", '
+  my @a = (1, 2, 3, 4, 5);
+  my @removed = splice(@a, 1, 2);
+  print join(",", @removed), "\n";
+  print join(",", @a), "\n";
+', "2,3\n1,4,5\n");
+
+test_transpile("splice: replace elements", '
+  my @a = (1, 2, 3, 4, 5);
+  splice(@a, 1, 2, 10, 20, 30);
+  print join(",", @a), "\n";
+', "1,10,20,30,4,5\n");
+
+test_transpile("splice: insert without removing", '
+  my @a = (1, 2, 3);
+  splice(@a, 1, 0, 10, 20);
+  print join(",", @a), "\n";
+', "1,10,20,2,3\n");
+
+# --- $| pipe-quoting test ---
+test_transpile("autoflush variable", '
+  $| = 1;
+  print "ok\n";
+', "ok\n");
+
 done_testing();

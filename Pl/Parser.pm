@@ -597,6 +597,14 @@ sub _process_expression_statement {
     my @expr_parts = @parts[0 .. $modifier_idx - 1];
     my @cond_parts = @parts[$modifier_idx + 1 .. $#parts];
 
+    # Unwrap PPI::Structure::Condition to get the inner expression children.
+    # PPI wraps postfix-if conditions in Condition nodes: `if ($x > 1)` → Condition(...)
+    if (@cond_parts == 1 && ref($cond_parts[0]) eq 'PPI::Structure::Condition') {
+      @cond_parts = grep {
+        ref($_) ne 'PPI::Token::Whitespace'
+      } $cond_parts[0]->children;
+    }
+
     my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt);
     my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
 

@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 39;
+use Test::More tests => 41;
 BEGIN { use_ok('Pl::Parser') };
 
 
@@ -233,5 +233,15 @@ output_contains('LABEL: { redo LABEL; }',
 output_contains('{ next; } continue { $a = 1; } $ok = 1;',
                 '(pl-setf $ok 1)',
                 'trailing code after bare block continue is preserved');
+
+# Regression: postfix-if with PPI::Structure::Condition (parenthesized condition)
+# PPI wraps `if (COND)` as Structure::Condition, which must be unwrapped in Parser.pm
+output_contains('return gcd($_[0] - $_[1]) if ($_[0] > $_[1]);',
+                'pl-if',
+                'postfix-if with parenthesized condition generates pl-if');
+
+output_contains('return gcd($_[0] - $_[1]) if ($_[0] > $_[1]);',
+                'pl-return',
+                'postfix-if with return generates pl-return in body');
 
 done_testing();

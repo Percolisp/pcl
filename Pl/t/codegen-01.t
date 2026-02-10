@@ -13,7 +13,7 @@ use Data::Dump qw/dump/;
 use PPI;
 use PPI::Dumper;
 
-use Test::More tests => 144;
+use Test::More tests => 148;
 
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
@@ -624,6 +624,23 @@ test_codegen('-bareword',
 test_codegen('-SomeWord',
              '"-SomeWord"',
              'unary minus on capitalized bareword produces string');
+
+# --- CL reader safety: pipe-quoting special variables ---
+test_codegen('$| = 1',
+             '(pl-setf |$\\|| 1)',
+             '$| (autoflush) is pipe-quoted for CL reader safety');
+
+test_codegen('$; eq "x"',
+             '(pl-str-eq |$;| "x")',
+             '$; (subscript separator) is pipe-quoted');
+
+test_codegen('$, = ","',
+             '(pl-setf |$,| ",")',
+             '$, (output field separator) is pipe-quoted');
+
+test_codegen('$^X',
+             '|$^X|',
+             '$^X (Perl executable path) is pipe-quoted');
 
 diag "";
 diag "All tests completed!";

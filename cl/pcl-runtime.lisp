@@ -102,7 +102,7 @@
    ;; Capture groups
    #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,|
    ;; Context
    #:*wantarray*
    ;; END blocks
@@ -198,6 +198,9 @@
 ;;; Perl version ($^V) - we report as PCL
 (defvar |$^V| "v5.30.0" "Perl version (compatibility)")
 
+;;; Perl executable path ($^X) - use sbcl since we're transpiled
+(defvar |$^X| (or (car sb-ext:*posix-argv*) "sbcl") "Perl executable path")
+
 ;;; Taint mode flag (${^TAINT}) - always off in transpiled code
 (defvar |${^TAINT}| nil "Taint mode is not enabled")
 
@@ -271,6 +274,12 @@
 (defvar |$\\| (make-pl-box "") "Output record separator")
 ;;; List separator ($")
 (defvar |$"| (make-pl-box " ") "List separator for array interpolation")
+;;; Output autoflush ($|)
+(defvar |$\|| (make-pl-box 0) "Output autoflush flag")
+;;; Subscript separator ($;)
+(defvar |$;| (make-pl-box (string (code-char #x1C))) "Subscript separator (default SUBSEP)")
+;;; Output field separator ($,)
+(defvar |$,| (make-pl-box "") "Output field separator for print")
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -2173,6 +2182,54 @@
             for item in flat-items
             do (setf (aref arr i) (make-pl-box item)))
       (length arr))))
+
+(defun pl-splice (arr &optional (offset 0) (length nil length-p) &rest replacements)
+  "Perl splice: remove and/or replace elements in an array.
+   Returns removed elements as a vector."
+  (let* ((a (if (pl-box-p arr) (pl-box-value arr) arr))
+         (alen (length a))
+         ;; Handle negative offset
+         (off (if (< offset 0) (max 0 (+ alen offset)) (min offset alen)))
+         ;; Default length = remove everything from offset
+         (len (if length-p (min (max length 0) (- alen off)) (- alen off)))
+         ;; Collect removed elements (unboxed)
+         (removed (make-array len :adjustable t :fill-pointer len)))
+    ;; Copy removed elements
+    (loop for i from 0 below len
+          do (setf (aref removed i)
+                   (let ((elem (aref a (+ off i))))
+                     (if (pl-box-p elem) (pl-box-value elem) elem))))
+    ;; Flatten replacement items (arrays get flattened in Perl)
+    (let ((flat-rep nil))
+      (dolist (r replacements)
+        (let ((v (if (pl-box-p r) (pl-box-value r) r)))
+          (if (and (vectorp v) (not (stringp v)))
+              (loop for el across v
+                    do (push (if (pl-box-p el) (pl-box-value el) el) flat-rep))
+              (push v flat-rep))))
+      (setf flat-rep (nreverse flat-rep))
+      (let* ((nrep (list-length flat-rep))
+             (new-len (+ off nrep (- alen off len)))
+             (old-len alen))
+        ;; Resize array
+        (if (> new-len old-len)
+            ;; Growing: extend first, then shift right
+            (progn
+              (loop repeat (- new-len old-len)
+                    do (vector-push-extend (make-pl-box nil) a))
+              ;; Shift tail elements right
+              (loop for i from (1- new-len) downto (+ off nrep)
+                    do (setf (aref a i) (aref a (- i (- nrep len))))))
+            ;; Shrinking or same: shift left, then shrink
+            (progn
+              (loop for i from (+ off nrep) below new-len
+                    do (setf (aref a i) (aref a (+ i (- len nrep)))))
+              (setf (fill-pointer a) new-len)))
+        ;; Insert replacements
+        (loop for i from off
+              for v in flat-rep
+              do (setf (aref a i) (make-pl-box v)))))
+    removed))
 
 ;;; ============================================================
 ;;; Data Structures - Hashes
