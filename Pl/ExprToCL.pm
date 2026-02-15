@@ -143,6 +143,7 @@ my %SPECIAL_VARS = (
   '$|'  => '|$\||',
   '$;'  => '|$;|',
   '$,'  => '|$,|',
+  '$]'  => '|$]|',
 );
 
 # Generate CL operator/function name from Perl name
@@ -311,32 +312,46 @@ sub gen_leaf {
   }
 
   # Number literal - convert Perl format to CL format
-  # (includes subclasses: ::Hex, ::Binary, ::Octal, ::Float, ::Exp)
+  # (includes subclasses: ::Hex, ::Binary, ::Octal, ::Float, ::Exp, ::Version)
   if ($ref =~ /^PPI::Token::Number/) {
     my $num = $node->content();
-    # Hex: 0x1234 or 0X1234 -> #x1234
-    if ($num =~ /^0[xX]([0-9a-fA-F_]+)$/) {
-      my $hex = $1;
+
+    # Version strings: v1.20.300 -> string of chr values
+    if ($num =~ /^v(\d[\d.]*)$/) {
+      my @parts = split /\./, $1;
+      my $str = join('', map { chr($_) } @parts);
+      # Escape for CL string literal
+      $str =~ s/\\/\\\\/g;
+      $str =~ s/"/\\"/g;
+      # For non-printable chars, use CL character escapes or just embed
+      # Convert to a runtime call for safety with high codepoints
+      my $args = join(' ', @parts);
+      return "(pl-version-string $args)";
+    }
+
+    # Hex: 0x1234 or 0X1234 -> #x1234 (with optional leading -)
+    if ($num =~ /^(-?)0[xX]([0-9a-fA-F_]+)$/) {
+      my ($sign, $hex) = ($1, $2);
       $hex =~ s/_//g;  # Remove underscores
-      return "#x$hex";
+      return $sign ? "(- #x$hex)" : "#x$hex";
     }
-    # Binary: 0b1010 or 0B1010 -> #b1010
-    if ($num =~ /^0[bB]([01_]+)$/) {
-      my $bin = $1;
+    # Binary: 0b1010 or 0B1010 -> #b1010 (with optional leading -)
+    if ($num =~ /^(-?)0[bB]([01_]+)$/) {
+      my ($sign, $bin) = ($1, $2);
       $bin =~ s/_//g;
-      return "#b$bin";
+      return $sign ? "(- #b$bin)" : "#b$bin";
     }
-    # Octal: 0o777 or 0O777 -> #o777 (Perl 5.34+ syntax)
-    if ($num =~ /^0[oO]([0-7_]+)$/) {
-      my $oct = $1;
+    # Octal: 0o777 or 0O777 -> #o777 (Perl 5.34+ syntax, with optional leading -)
+    if ($num =~ /^(-?)0[oO]([0-7_]+)$/) {
+      my ($sign, $oct) = ($1, $2);
       $oct =~ s/_//g;
-      return "#o$oct";
+      return $sign ? "(- #o$oct)" : "#o$oct";
     }
-    # Legacy octal: 0777 (but not 0 alone) -> #o777
-    if ($num =~ /^0([0-7_]+)$/ && $num ne '0') {
-      my $oct = $1;
+    # Legacy octal: 0777 (but not 0 alone) -> #o777 (with optional leading -)
+    if ($num =~ /^(-?)0([0-7_]+)$/ && $num ne '0') {
+      my ($sign, $oct) = ($1, $2);
       $oct =~ s/_//g;
-      return "#o$oct";
+      return $sign ? "(- #o$oct)" : "#o$oct";
     }
     # Remove underscores from regular numbers (Perl allows 1_000_000)
     $num =~ s/_//g;

@@ -215,4 +215,15 @@ test_transpile("lvalue: post-inc on hash elem assign", 'my %h; my $r = ($h{k} = 
 test_transpile("lvalue: chop on array elem assign", 'my @a; chop($a[0] = "hello"); print "$a[0]\n";');
 test_transpile("lvalue: chop on hash elem assign", 'my %h; chop($h{k} = "world"); print "$h{k}\n";');
 
+# Negative hex/binary/octal literals
+test_transpile("negative hex literal", 'print -0x10, "\n";');
+test_transpile("negative binary literal", 'print -0b1010, "\n";');
+test_transpile("negative octal literal", 'print -0777, "\n";');
+
+# Version strings
+test_transpile("version string ord", 'my @a = map {ord} split //, v65.66.67; print join(",", @a), "\n";');
+
+# $] Perl version variable
+test_transpile('$] version variable', 'print defined($]) ? "ok\n" : "not ok\n";');
+
 done_testing();

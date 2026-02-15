@@ -29,6 +29,7 @@
    #:pl-. #:pl-str-x #:pl-list-x #:pl-length #:pl-substr #:pl-lc #:pl-uc #:pl-fc
    #:pl-chomp #:pl-chop #:pl-index #:pl-rindex #:pl-string-concat
    #:pl-chr #:pl-ord #:pl-hex #:pl-oct #:pl-lcfirst #:pl-ucfirst #:pl-sprintf #:pl-printf
+   #:pl-version-string
    #:pl-quotemeta #:pl-pos
    ;; Assignment
    #:pl-setf #:pl-my #:pl-incf #:pl-decf
@@ -102,7 +103,7 @@
    ;; Capture groups
    #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    ;; Context
    #:*wantarray*
    ;; END blocks
@@ -289,6 +290,8 @@
 (defvar |$;| (make-pl-box (string (code-char #x1C))) "Subscript separator (default SUBSEP)")
 ;;; Output field separator ($,)
 (defvar |$,| (make-pl-box "") "Output field separator for print")
+;;; Perl version number ($])
+(defvar |$]| (make-pl-box "5.030000") "Perl version number")
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -1022,6 +1025,17 @@
                              nil))
                 (pos (search sub s :from-end t :end2 end-pos)))
            (or pos -1))))))
+
+(defun pl-version-string (&rest code-points)
+  "Build a Perl version string (v1.20.300) from integer code points.
+   Each code point becomes a character in the resulting string."
+  (coerce (mapcar (lambda (n)
+                    (let ((c (truncate (if (typep n 'number) n (to-number n)))))
+                      (if (or (< c 0) (> c #x10FFFF))
+                          #\REPLACEMENT_CHARACTER
+                          (code-char c))))
+                  code-points)
+          'string))
 
 (defun pl-chr (n)
   "Perl chr - character from code point.
@@ -5111,6 +5125,15 @@
 (defun pl-upgrade (str) (declare (ignore str)) 1)
 (defun pl-downgrade (str) (declare (ignore str)) 1)
 (defun pl-is_utf8 (str) (declare (ignore str)) 1)
+(in-package :pcl)
+
+;; warnings module stub - needed because modules like Carp.pm check $warnings::VERSION
+(defpackage :warnings (:use :cl :pcl))
+(in-package :warnings)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar $VERSION (make-pl-box "1.50")))
+(defun pl-unimport (&rest args) (declare (ignore args)) nil)
+(defun pl-import (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 
 ;; POSIX module stubs

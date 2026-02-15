@@ -240,7 +240,7 @@ Some tests execute generated Lisp code. If SBCL is very slow or tests hang:
 
 **Pl::PExpr**: Beta level expression parser
 
-**PCL transpiler**: Prototype - handles expressions, control flow, subroutines, OO basics. See `CLAUDE.md` for detailed implementation status.
+**PCL transpiler**: Prototype - handles expressions, control flow, subroutines, OO basics. It is starting to look more like a compiler now.
 
 My Common Lisp experience is from long ago, that part is exclusively Claude.
 

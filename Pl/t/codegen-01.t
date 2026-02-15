@@ -13,7 +13,7 @@ use Data::Dump qw/dump/;
 use PPI;
 use PPI::Dumper;
 
-use Test::More tests => 148;
+use Test::More tests => 155;
 
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
@@ -641,6 +641,38 @@ test_codegen('$, = ","',
 test_codegen('$^X',
              '|$^X|',
              '$^X (Perl executable path) is pipe-quoted');
+
+# Negative hex/binary/octal literals
+test_codegen('-0x80001218',
+             '(- #x80001218)',
+             'negative hex literal emits (- #x...)');
+
+test_codegen('-0b1010',
+             '(- #b1010)',
+             'negative binary literal emits (- #b...)');
+
+test_codegen('-0777',
+             '(- #o777)',
+             'negative octal literal emits (- #o...)');
+
+# Version strings
+test_codegen('v1.20.300',
+             '(pl-version-string 1 20 300)',
+             'version string v1.20.300 emits pl-version-string call');
+
+# $] special variable
+test_codegen('$]',
+             '|$]|',
+             '$] (Perl version) is pipe-quoted');
+
+# Positive hex still works
+test_codegen('0xFF',
+             '#xFF',
+             'positive hex literal still works');
+
+test_codegen('0b1010',
+             '#b1010',
+             'positive binary literal still works');
 
 diag "";
 diag "All tests completed!";
