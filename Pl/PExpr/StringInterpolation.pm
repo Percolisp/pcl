@@ -53,37 +53,89 @@ sub parse_interpolated_string {
   
   my @parts;
   my $pos = 0;
-  
-  # Process the string character by character, looking for variables
+
+  # Stack for case-changing escapes: each entry is { mode => 'U'|'L'|'Q'|'F', parts => [...] }
+  my @case_stack;
+  # Target list: either the top of the case stack or @parts
+  my $cur_parts = \@parts;
+  # Pending single-char transform: 'u' or 'l' (applies to next part only)
+  my $pending_char_transform;
+
+  # Process the string, looking for variables and case-changing escapes
   while ($pos < length($content)) {
-    # Find next variable or end of string
-    if ($content =~ /\G(.*?)(?:([\$\@])|$)/gc) {
+    # Find next variable, case escape, or end of string
+    if ($content =~ /\G(.*?)(?:([\$\@])|\\([ULulQFE])|$)/gc) {
       my $literal = $1;
       my $sigil = $2;
-      
+      my $case_cmd = $3;
+
       # Add literal part if not empty
       if (length($literal) > 0) {
-        # Unescape common escape sequences
         $literal = $self->unescape_string($literal);
-        push @parts, $self->make_string_literal_node($parser, $literal);
+        my $lit_id = $self->make_string_literal_node($parser, $literal);
+        if ($pending_char_transform) {
+          $lit_id = $self->_wrap_case_func($parser,
+            $pending_char_transform eq 'u' ? 'ucfirst' : 'lcfirst', $lit_id);
+          $pending_char_transform = undef;
+        }
+        push @$cur_parts, $lit_id;
       }
-      
+
+      # Handle case-changing escape
+      if (defined $case_cmd) {
+        if ($case_cmd eq 'E') {
+          # Close the current case group
+          if (@case_stack) {
+            my $group = pop @case_stack;
+            $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
+            # Wrap group's parts in the appropriate function
+            my $wrapped = $self->_wrap_case_group($parser, $group);
+            if ($pending_char_transform) {
+              $wrapped = $self->_wrap_case_func($parser,
+                $pending_char_transform eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
+              $pending_char_transform = undef;
+            }
+            push @$cur_parts, $wrapped;
+          }
+        } elsif ($case_cmd eq 'u' || $case_cmd eq 'l') {
+          $pending_char_transform = $case_cmd;
+        } else {
+          # \U, \L, \Q, \F — push a new group
+          my $new_parts = [];
+          push @case_stack, { mode => $case_cmd, parts => $new_parts };
+          $cur_parts = $new_parts;
+        }
+        next;
+      }
+
       last unless defined $sigil;
-      
+
       # Parse the variable starting at current position
       my $var_start = pos($content);
       my ($var_node_id, $new_pos) = $self->parse_interpolated_variable(
           $parser, \$content, $var_start - 1
       );
-      
+
       if (defined $var_node_id) {
-        push @parts, $var_node_id;
+        if ($pending_char_transform) {
+          $var_node_id = $self->_wrap_case_func($parser,
+            $pending_char_transform eq 'u' ? 'ucfirst' : 'lcfirst', $var_node_id);
+          $pending_char_transform = undef;
+        }
+        push @$cur_parts, $var_node_id;
         pos($content) = $new_pos;
       } else {
-        # Failed to parse variable, treat $ or @ as literal
-        push @parts, $self->make_string_literal_node($parser, $sigil);
+        push @$cur_parts, $self->make_string_literal_node($parser, $sigil);
       }
     }
+  }
+
+  # Close any unclosed case groups (implicit \E at end of string)
+  while (@case_stack) {
+    my $group = pop @case_stack;
+    $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
+    my $wrapped = $self->_wrap_case_group($parser, $group);
+    push @$cur_parts, $wrapped;
   }
   
   # If no parts, return empty string
@@ -233,17 +285,28 @@ sub parse_braced_expression {
   
   my $expr_str = substr($content, $brace_start, $i - $brace_start - 1);
   say "parse_braced_expression: expr_str: '$expr_str'" if $parser->DEBUG & 32;
-  
-  # Parse the expression using PPI
+
+  # ${identifier} is equivalent to $identifier — create Symbol token directly
+  # (We can't use PPI::Document->new here because the document would be GC'd
+  # when this function returns, invalidating the token's content.)
+  if ($expr_str =~ /^[a-zA-Z_]\w*$/) {
+    my $sym = PPI::Token::Symbol->new('$' . $expr_str);
+    my $expr_id = $parser->make_node($sym);
+    return ($expr_id, $i);
+  }
+
+  # Complex expression (e.g., ${$ref}) — parse via PPI but keep doc alive
   my $doc = PPI::Document->new(\$expr_str);
+  $self->{_ppi_docs} //= [];
+  push @{$self->{_ppi_docs}}, $doc;  # prevent GC
   my @stmts = $doc->children();
   if (@stmts == 0) {
     return (undef, $pos);
   }
-  
+
   my @parts = $stmts[0]->children();
   my $expr_id = $parser->parse(\@parts);
-  
+
   return ($expr_id, $i);
 }
 
@@ -408,18 +471,66 @@ sub make_string_literal_node {
 sub unescape_string {
   my $self      = shift;
   my $str       = shift;
-  
-  # Handle common escape sequences
-  $str =~ s/\\n/\n/g;
-  $str =~ s/\\t/\t/g;
-  $str =~ s/\\r/\r/g;
-  $str =~ s/\\\$/\$/g;
-  $str =~ s/\\\@/\@/g;
-  $str =~ s/\\\\/\\/g;
-  $str =~ s/\\"/"/g;
-  
+
+  # Single-pass escape processing (reuses _process_dq_escape from ExprToCL)
+  $str =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
+    Pl::ExprToCL::_process_dq_escape($1)
+  !ge;
+
   return $str;
 }
 
+
+# Wrap a single node in a case-changing function call (ucfirst, lcfirst, etc.)
+sub _wrap_case_func {
+  my ($self, $parser, $func_name, $node_id) = @_;
+
+  # Create: (pl-ucfirst ...) or (pl-lcfirst ...)
+  my $func_token = PPI::Token::Word->new($func_name);
+  my ($funcall_node, $funcall_id) = $parser->make_node_insert('funcall');
+  my $name_id = $parser->make_node($func_token);
+  $parser->add_child_to_node($funcall_id, $name_id);
+  $parser->add_child_to_node($funcall_id, $node_id);
+
+  return $funcall_id;
+}
+
+# Wrap a case group's parts in the appropriate function
+# Group: { mode => 'U'|'L'|'Q'|'F', parts => [...] }
+sub _wrap_case_group {
+  my ($self, $parser, $group) = @_;
+
+  my $mode = $group->{mode};
+  my $parts = $group->{parts};
+
+  # Map mode to function name
+  my %mode_func = (
+    'U' => 'uc',
+    'L' => 'lc',
+    'F' => 'fc',
+    'Q' => 'quotemeta',
+  );
+  my $func_name = $mode_func{$mode} // 'uc';
+
+  # If no parts, return empty string
+  if (@$parts == 0) {
+    return $self->make_string_literal_node($parser, "");
+  }
+
+  # Build the content node: single part or string_concat of multiple parts
+  my $content_id;
+  if (@$parts == 1) {
+    $content_id = $parts->[0];
+  } else {
+    my ($concat_node, $concat_id) = $parser->make_node_insert('string_concat');
+    for my $part_id (@$parts) {
+      $parser->add_child_to_node($concat_id, $part_id);
+    }
+    $content_id = $concat_id;
+  }
+
+  # Wrap in function call
+  return $self->_wrap_case_func($parser, $func_name, $content_id);
+}
 
 1;

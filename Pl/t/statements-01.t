@@ -54,7 +54,7 @@ diag "";
 diag "-------- C-style for loops:";
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '(pl-for ((pl-setf $i 0))',
+                '(pl-for ((pl-scalar-= $i 0))',
                 'C-style for: init');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
@@ -66,7 +66,7 @@ output_contains('for (my $i = 0; $i < 10; $i++) { }',
                 'C-style for: increment');
 
 output_contains('for ($i = 0; $i <= $max; $i += 2) { }',
-                '(pl-for ((pl-setf $i 0))',
+                '(pl-for ((pl-scalar-= $i 0))',
                 'C-style for without my');
 
 output_contains('for (;;) { last; }',
@@ -196,7 +196,7 @@ output_contains('push @foo, $_ for 1..3;',
 
 # Regression: our %hash = (...) should generate pl-hash, not progn
 output_contains('our %h = (a => 1, b => 2);',
-                '(pl-setf %h (pl-hash "a" 1 "b" 2))',
+                '(pl-hash-= %h (pl-hash "a" 1 "b" 2))',
                 'Regression: our %hash initialization uses pl-hash');
 
 
@@ -231,7 +231,7 @@ output_contains('LABEL: { redo LABEL; }',
 # Regression: bare block continue - trailing tokens after continue block
 # PPI merges "$ok = 1;" into the continue statement
 output_contains('{ next; } continue { $a = 1; } $ok = 1;',
-                '(pl-setf $ok 1)',
+                '(pl-scalar-= $ok 1)',
                 'trailing code after bare block continue is preserved');
 
 # Regression: postfix-if with PPI::Structure::Condition (parenthesized condition)

@@ -45,25 +45,27 @@
 
 ;;; plan(N) or plan(tests => N) or plan('no_plan')
 (defun pl-plan (&rest args)
-  (cond
-    ;; plan(N)
-    ((and (= (length args) 1) (numberp (first args)))
-     (setf *test-planned* (first args))
-     (format t "1..~A~%" *test-planned*))
-    ;; plan('no_plan')
-    ((and (= (length args) 1) (equal (first args) "no_plan"))
-     (setf *test-no-plan* t))
-    ;; plan(tests => N)
-    ((>= (length args) 2)
-     (let ((tests-value nil))
-       (loop for i from 0 below (length args) by 2
-             for key = (nth i args)
-             for val = (nth (1+ i) args)
-             do (when (equal key "tests")
-                  (setf tests-value val)))
-       (when tests-value
-         (setf *test-planned* tests-value)
-         (format t "1..~A~%" *test-planned*))))))
+  ;; Unbox all args (test scripts pass boxed values)
+  (let ((args (mapcar #'unbox args)))
+    (cond
+      ;; plan(N)
+      ((and (= (length args) 1) (numberp (first args)))
+       (setf *test-planned* (first args))
+       (format t "1..~A~%" *test-planned*))
+      ;; plan('no_plan')
+      ((and (= (length args) 1) (equal (first args) "no_plan"))
+       (setf *test-no-plan* t))
+      ;; plan(tests => N)
+      ((>= (length args) 2)
+       (let ((tests-value nil))
+         (loop for i from 0 below (length args) by 2
+               for key = (nth i args)
+               for val = (nth (1+ i) args)
+               do (when (equal key "tests")
+                    (setf tests-value val)))
+         (when tests-value
+           (setf *test-planned* tests-value)
+           (format t "1..~A~%" *test-planned*)))))))
 
 ;;; done_testing() or done_testing(N)
 (defun pl-done_testing (&optional n)
@@ -140,7 +142,9 @@
 ;;; like(got, regex, name)
 (defun pl-like (got regex &optional name)
   (let* ((got-str (if got (to-string got) ""))
-         (regex-str (to-string regex))
+         (regex-str (if (pl-regex-match-p regex)
+                        (pl-regex-match-pattern regex)
+                        (to-string regex)))
          (pass (if (ppcre:scan regex-str got-str) t nil)))
     (if pass
         (test-ok t name)
@@ -151,7 +155,9 @@
 ;;; unlike(got, regex, name)
 (defun pl-unlike (got regex &optional name)
   (let* ((got-str (if got (to-string got) ""))
-         (regex-str (to-string regex))
+         (regex-str (if (pl-regex-match-p regex)
+                        (pl-regex-match-pattern regex)
+                        (to-string regex)))
          (pass (if (ppcre:scan regex-str got-str) nil t)))
     (if pass
         (test-ok t name)

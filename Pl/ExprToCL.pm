@@ -126,6 +126,24 @@ my %OP_EXCEPTIONS = (
   'cmp' => 'pl-str-cmp',
 );
 
+# Magic/special variables that need specific CL output
+# Maps Perl variable name to its CL representation
+my %SPECIAL_VARS = (
+  '$!'  => '(pl-errno-string)',
+  '$?'  => '$?',
+  '$.'  => '|$.|',
+  '$0'  => '$0',
+  '$@'  => '$@',
+  '$^O' => '|$^O|',
+  '$^V' => '|$^V|',
+  '$^X' => '|$^X|',
+  '$/'  => '|$/|',
+  '$\\' => '|$\\|',
+  '$"'  => '|$"|',
+  '$|'  => '|$\||',
+  '$;'  => '|$;|',
+  '$,'  => '|$,|',
+);
 
 # Generate CL operator/function name from Perl name
 # - Package-qualified names (Foo::bar) → Foo:bar (CL package syntax)
@@ -233,49 +251,8 @@ sub gen_leaf {
   # Variable (like $x, @arr, %hash)
   if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
     my $content = $node->content() // '';
-    # Handle magic variables
-    if ($content eq '$!') {
-      return '(pl-errno-string)';  # errno as string
-    }
-    if ($content eq '$?') {
-      return '$?';  # child exit status (defvar in runtime)
-    }
-    if ($content eq '$.') {
-      return '|$.|';  # input line number (defvar in runtime)
-    }
-    if ($content eq '$0') {
-      return '$0';  # program name (defvar in runtime)
-    }
-    if ($content eq '$@') {
-      return '$@';  # eval error (defvar in runtime)
-    }
-    if ($content eq '$^O') {
-      return '|$^O|';  # OS name (defvar in runtime)
-    }
-    if ($content eq '$^V') {
-      return '|$^V|';  # Perl version string (defvar in runtime)
-    }
-    if ($content eq '$^X') {
-      return '|$^X|';  # Perl executable path (defvar in runtime)
-    }
-    if ($content eq '$/') {
-      return '|$/|';  # input record separator (defvar in runtime)
-    }
-    if ($content eq '$\\') {
-      return '|$\\|';  # output record separator (defvar in runtime)
-    }
-    if ($content eq '$"') {
-      return '|$"|';  # list separator (defvar in runtime)
-    }
-    if ($content eq '$|') {
-      return '|$\||';  # output autoflush (defvar in runtime)
-    }
-    if ($content eq '$;') {
-      return '|$;|';  # subscript separator (defvar in runtime)
-    }
-    if ($content eq '$,') {
-      return '|$,|';  # output field separator (defvar in runtime)
-    }
+    # Handle magic/special variables via dispatch table
+    return $SPECIAL_VARS{$content} if exists $SPECIAL_VARS{$content};
     # Handle package-qualified variables: $Pkg::var -> Pkg::$var
     # Perl: $Config::debug  ->  CL: Config::$debug
     # Also: $::foo means $main::foo (empty package = main)
@@ -485,12 +462,12 @@ sub gen_binary_op {
         my $rhs_kids = $self->expr_o->get_node_children($kids->[1]);
         if (@$rhs_kids == 0) {
           # Empty hash
-          return "($cl_op $left (pl-hash))";
+          return "(pl-hash-= $left (pl-hash))";
         } else {
           # Hash with initial values - generate (pl-hash k1 v1 k2 v2 ...)
           my @parts = map { $self->gen_node($_) } @$rhs_kids;
           my $hash_init = "(pl-hash " . join(" ", @parts) . ")";
-          return "($cl_op $left $hash_init)";
+          return "(pl-hash-= $left $hash_init)";
         }
       }
     }
@@ -518,6 +495,20 @@ sub gen_binary_op {
       my $cl_func_name = $self->cl_name($glob_name);
       return "(setf (symbol-function '$cl_func_name) $right)";
     }
+  }
+
+  # For assignment, dispatch to type-specific forms based on LHS sigil
+  if ($op eq '=') {
+    if ($left =~ /^\(vector /) {
+      return "(pl-list-= $left $right)";
+    } elsif ($left =~ /^[\@]/) {
+      return "(pl-array-= $left $right)";
+    } elsif ($left =~ /^%/) {
+      return "(pl-hash-= $left $right)";
+    } elsif ($left =~ /^\$/) {
+      return "(pl-scalar-= $left $right)";
+    }
+    # Element access, slices, etc. - keep using pl-setf
   }
 
   return "($cl_op $left $right)";
@@ -562,7 +553,7 @@ sub gen_string_concat {
       push @parts, $generated;
     }
   }
-  return "(pl-string_concat " . join(" ", @parts) . ")";
+  return "(pl-string-concat " . join(" ", @parts) . ")";
 }
 
 
@@ -1653,6 +1644,131 @@ sub gen_transliteration {
 }
 
 
+# Helper: \x{HHHH} - parse hex with spaces/underscores, convert to chr
+# Rules: spaces stripped, leading underscores stripped,
+# single underscores between digits ok, double underscores stop parsing
+sub _hex_brace_escape {
+  my $inner = shift;
+  $inner =~ s/\s//g;   # strip spaces
+  $inner =~ s/^_+//;   # strip leading underscores
+  return chr(0) if $inner eq '';  # \x{} = chr(0)
+  # Parse: hex digits with optional single underscores between them
+  my $hex = '';
+  while ($inner =~ /\G([0-9A-Fa-f]+)(_(?=[0-9A-Fa-f]))?/gc) {
+    $hex .= $1;
+  }
+  return chr(0) if $hex eq '';
+  return chr(hex($hex));
+}
+
+# Helper: \o{OOO} - parse octal with spaces/underscores, convert to chr
+sub _octal_brace_escape {
+  my $inner = shift;
+  $inner =~ s/\s//g;  # strip spaces
+  return chr(0) if $inner eq '';
+  # Parse: octal digits with optional single underscores between them
+  my $oct = '';
+  while ($inner =~ /\G([0-7]+)(_(?=[0-7]))?/gc) {
+    $oct .= $1;
+  }
+  return chr(0) if $oct eq '';
+  return chr(oct($oct));
+}
+
+# Single-pass escape sequence processor for double-quoted strings
+# Handles all \X sequences including unknown ones (\. → .)
+sub _process_dq_escape {
+  my $esc = shift;
+  return "\n" if $esc eq 'n';
+  return "\t" if $esc eq 't';
+  return "\r" if $esc eq 'r';
+  return "\a" if $esc eq 'a';
+  return "\e" if $esc eq 'e';
+  return "\f" if $esc eq 'f';
+  return "\$" if $esc eq '$';
+  return '@'  if $esc eq '@';
+  return '"'  if $esc eq '"';
+  return "\\" if $esc eq '\\';
+  # \cX - control character
+  if ($esc =~ /^c(.)$/) {
+    return chr(ord(uc($1)) ^ 64);
+  }
+  # \x{HHHH} - hex with braces
+  if ($esc =~ /^x\{([^}]*)\}$/) {
+    return _hex_brace_escape($1);
+  }
+  # \xHH - hex 1-2 digits
+  if ($esc =~ /^x([0-9A-Fa-f]{1,2})$/) {
+    return chr(hex($1));
+  }
+  # \x alone - chr(0)
+  return chr(0) if $esc eq 'x';
+  # \o{OOO} - octal with braces
+  if ($esc =~ /^o\{([^}]*)\}$/) {
+    return _octal_brace_escape($1);
+  }
+  # \NNN - octal digits
+  if ($esc =~ /^([0-7]{1,3})$/) {
+    return chr(oct($1));
+  }
+  # Case-changing escapes: preserve as markers for _apply_case_escapes
+  if ($esc =~ /^[ULulQFE]$/) {
+    return "\\$esc";  # keep as \U, \L, etc. for later processing
+  }
+  # Unknown escape: \X → X (Perl drops the backslash)
+  return $esc;
+}
+
+# Apply \U, \L, \u, \l, \Q, \F ... \E case transformations to a string
+# These are processed after escape sequences, on the final text
+sub _apply_case_escapes {
+  my $str = shift;
+  # Quick check: if no case escapes, return unchanged
+  return $str unless $str =~ /\\/;
+
+  my $result = '';
+  my @modes;  # stack of active modes
+
+  while ($str =~ /\G(.*?)\\([ULulQFE])/gc) {
+    my ($text, $cmd) = ($1, $2);
+    # Apply current mode to the text before this escape
+    $result .= _apply_mode(\@modes, $text);
+
+    if ($cmd eq 'E') {
+      pop @modes if @modes;
+    } elsif ($cmd eq 'u' || $cmd eq 'l') {
+      # Single-char transforms: apply to next char only
+      # Grab one char after the escape
+      if ($str =~ /\G(.)/gc) {
+        my $ch = $1;
+        $ch = $cmd eq 'u' ? uc($ch) : lc($ch);
+        $result .= _apply_mode(\@modes, $ch);
+      }
+    } else {
+      # \U, \L, \Q, \F — push mode, affects until \E
+      push @modes, $cmd;
+    }
+  }
+  # Remaining text after last escape
+  my $rest = substr($str, pos($str) // 0);
+  $result .= _apply_mode(\@modes, $rest);
+
+  return $result;
+}
+
+# Apply the current mode stack to a piece of text
+sub _apply_mode {
+  my ($modes, $text) = @_;
+  return $text unless @$modes && length($text);
+  for my $mode (@$modes) {
+    if ($mode eq 'U') { $text = uc($text); }
+    elsif ($mode eq 'L') { $text = lc($text); }
+    elsif ($mode eq 'F') { $text = lc($text); }  # fc ≈ lc for ASCII
+    elsif ($mode eq 'Q') { $text = quotemeta($text); }
+  }
+  return $text;
+}
+
 # Convert Perl string with escapes to CL string
 # Perl "\n" -> actual newline in CL string
 sub convert_perl_string {
@@ -1709,20 +1825,13 @@ sub convert_perl_string {
     return $str;
   }
 
-  # Process Perl escape sequences
-  $content =~ s/\\n/\n/g;      # newline
-  $content =~ s/\\t/\t/g;      # tab
-  $content =~ s/\\r/\r/g;      # carriage return
-  $content =~ s/\\0/\0/g;      # null
-  $content =~ s/\\a/\a/g;      # bell
-  $content =~ s/\\e/\e/g;      # escape
-  $content =~ s/\\f/\f/g;      # form feed
-  # \cX - control character (chr(ord(uc(X)) ^ 64))
-  $content =~ s/\\c(.)/ chr(ord(uc($1)) ^ 64) /ge;
-  $content =~ s/\\"/"/g;       # escaped quote
-  $content =~ s/\\\$/\$/g;     # escaped dollar
-  $content =~ s/\\\@/\@/g;     # escaped at
-  $content =~ s/\\\\/\\/g;     # escaped backslash (must be last)
+  # Process Perl escape sequences in single pass to handle \\ correctly
+  $content =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
+    _process_dq_escape($1)
+  !ge;
+
+  # Apply \U, \L, \u, \l, \Q, \F ... \E transformations (non-interpolated strings)
+  $content = _apply_case_escapes($content);
 
   # Now escape for CL output: backslashes and quotes
   $content =~ s/\\/\\\\/g;

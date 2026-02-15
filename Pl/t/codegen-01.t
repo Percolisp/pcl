@@ -157,7 +157,7 @@ test_codegen('$x ^ $y', '(pl-bit-xor $x $y)', 'Bitwise XOR');
 diag "";
 diag "-------- Assignment:";
 
-test_codegen('$x = $y', '(pl-setf $x $y)', 'Simple assignment');
+test_codegen('$x = $y', '(pl-scalar-= $x $y)', 'Simple assignment');
 test_codegen('$x += 5', '(pl-incf $x 5)', 'Add-assign');
 test_codegen('$x -= 5', '(pl-decf $x 5)', 'Subtract-assign');
 
@@ -245,7 +245,7 @@ test_codegen('($x + $y) * $z',
              'Parenthesized expression');
 
 test_codegen('$foo + (my $x = 1)',
-             '(pl-+ $foo (pl-setf $x 1))',
+             '(pl-+ $foo (pl-scalar-= $x 1))',
              'Inline my declaration in parens');
 
 
@@ -325,15 +325,15 @@ diag "";
 diag "-------- Mixed complex expressions:";
 
 test_codegen('$x = $arr[0] + $hash{key}',
-             '(pl-setf $x (pl-+ (pl-aref @arr 0) (pl-gethash %hash "key")))',
+             '(pl-scalar-= $x (pl-+ (pl-aref @arr 0) (pl-gethash %hash "key")))',
              'Sum of array and hash values');
 
 test_codegen('$result = $obj->method($arr[0])',
-             '(pl-setf $result (pl-method-call $obj \'method (pl-aref @arr 0)))',
+             '(pl-scalar-= $result (pl-method-call $obj \'method (pl-aref @arr 0)))',
              'Method call with array element arg');
 
 test_codegen('$total = $prices->[$i] * $qty->{$item}',
-             '(pl-setf $total (pl-* (pl-aref-deref $prices $i) (pl-gethash-deref $qty $item)))',
+             '(pl-scalar-= $total (pl-* (pl-aref-deref $prices $i) (pl-gethash-deref $qty $item)))',
              'Multiply two dereferenced values');
 
 test_codegen('$hash{$arr[0]} = $ref->{key}',
@@ -395,7 +395,7 @@ test_codegen('$a ? $b : $c ? $d : $e',
              'Nested ternary (right-associative)');
 
 test_codegen('$x = $a ? $b : $c',
-             '(pl-setf $x (pl-if $a $b $c))',
+             '(pl-scalar-= $x (pl-if $a $b $c))',
              'Assignment with ternary (assignment has lower precedence)');
 
 
@@ -556,7 +556,7 @@ diag "";
 diag "-------- KV slice:";
 
 test_codegen('my @kv = %h{"a","b"}',
-             '(pl-setf @kv (pl-kv-hslice %h "a" "b"))',
+             '(pl-array-= @kv (pl-kv-hslice %h "a" "b"))',
              'KV hash slice %h{keys}');
 
 test_codegen('delete %h{"a","c"}',
@@ -567,7 +567,7 @@ diag "";
 diag "-------- split scalar context:";
 
 test_codegen('my $n = split(/,/, $str)',
-             '(pl-setf $n (length (pl-split (pl-regex "/,/") $str)))',
+             '(pl-scalar-= $n (length (pl-split (pl-regex "/,/") $str)))',
              'split in scalar context returns length');
 
 diag "";
@@ -590,11 +590,11 @@ test_codegen('q/slash text/',
              'q// literal string');
 
 test_codegen('qq{hello $name}',
-             '(pl-string_concat "hello " $name)',
+             '(pl-string-concat "hello " $name)',
              'qq{} interpolated string');
 
 test_codegen('qq/hello $name/',
-             '(pl-string_concat "hello " $name)',
+             '(pl-string-concat "hello " $name)',
              'qq// interpolated string');
 
 # $#array lvalue

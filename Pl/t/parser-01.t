@@ -8,7 +8,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 12;
+use Test::More tests => 11;
 
 BEGIN { use_ok('Pl::Parser') };
 
@@ -19,7 +19,7 @@ BEGIN { use_ok('Pl::Parser') };
   my $result = Pl::Parser->parse_code($code);
 
   like($result, qr/;; \$x = 10/, 'Comment shows Perl code');
-  like($result, qr/pl-setf \$x 10/, 'Generated CL code');
+  like($result, qr/pl-scalar-= \$x 10/, 'Generated CL code');
 }
 
 
@@ -33,12 +33,12 @@ END
 
   my $result = Pl::Parser->parse_code($code);
 
-  like($result, qr/pl-setf \$x 1/, 'First statement');
-  like($result, qr/pl-setf \$z.*pl-\+/, 'Third statement with addition');
+  like($result, qr/pl-scalar-= \$x 1/, 'First statement');
+  like($result, qr/pl-scalar-= \$z.*pl-\+/, 'Third statement with addition');
 }
 
 
-# Test 3: Forward declarations for subs in main package
+# Test 3: Sub bodies are moved to forward-declaration positions
 {
   my $code = <<'END';
 sub greet { return "hello"; }
@@ -47,13 +47,14 @@ END
 
   my $result = Pl::Parser->parse_code($code);
 
-  like($result, qr/Forward declarations:/, 'Forward declaration comment emitted');
-  like($result, qr/\(unless \(fboundp 'pl-greet\)/, 'Forward declaration uses fboundp guard');
-  like($result, qr/\(defun pl-greet \(&rest args\)/, 'Forward declaration is a stub defun');
+  # Sub body should appear (moved to top), before the call
+  like($result, qr/\(pl-sub pl-greet\b/, 'Sub body is present in output');
+  # The sub body should appear before the call to greet()
+  like($result, qr/pl-sub pl-greet.*\(pl-greet\)/s, 'Sub definition appears before call');
 }
 
 
-# Test 4: Forward declarations for subs in a package
+# Test 4: Sub body moved after in-package in package context
 {
   my $code = <<'END';
 package MyClass;
@@ -63,15 +64,15 @@ END
 
   my $result = Pl::Parser->parse_code($code);
 
-  # Forward decl should appear after (in-package :MyClass)
-  like($result, qr/\(in-package :MyClass\)\n;; Forward declarations:/,
-       'Forward declarations appear after in-package');
-  like($result, qr/\(unless \(fboundp 'pl-do_setup\)/,
-       'Forward declaration for package sub');
+  # Sub body should appear in MyClass section, before the runtime call
+  like($result, qr/\(in-package :MyClass\).*\(pl-sub pl-do_setup\b.*\(pl-do_setup\)/s,
+       'Sub body appears in MyClass section before call');
+  like($result, qr/\(pl-sub pl-do_setup\b/,
+       'pl-sub for package sub');
 }
 
 
-# Test 5: Multiple subs in same package get deduplicated forward declarations
+# Test 5: Multiple subs in same package - all present
 {
   my $code = <<'END';
 sub foo { }
@@ -81,10 +82,13 @@ END
 
   my $result = Pl::Parser->parse_code($code);
 
-  # Should only have one forward decl for foo, even if sub defined twice
-  my @foo_decls = ($result =~ /\(unless \(fboundp 'pl-foo\)/g);
-  is(scalar @foo_decls, 1, 'Duplicate sub names are deduplicated in forward declarations');
-  like($result, qr/\(unless \(fboundp 'pl-bar\)/, 'Forward declaration for bar');
+  # Both foo and bar should have pl-sub definitions
+  my @foo_defs = ($result =~ /\(pl-sub pl-foo\b/g);
+  # The second definition of foo overwrites the first in Perl, but our
+  # output may have both since PPI sees them as separate statements.
+  # Just verify at least one is present.
+  ok(scalar @foo_defs >= 1, 'Sub foo definition is present');
+  like($result, qr/\(pl-sub pl-bar\b/, 'Sub bar definition is present');
 }
 
 

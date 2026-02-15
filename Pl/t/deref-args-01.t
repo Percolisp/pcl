@@ -107,7 +107,7 @@ sub parse_stmt_and_gen {
 
 {
   my $cl = parse_and_gen('"value is $arr[0]"');
-  like($cl, qr/pl-string_concat.*"value is ".*pl-aref.*\@arr.*0/,
+  like($cl, qr/pl-string-concat.*"value is ".*pl-aref.*\@arr.*0/,
        'String interpolation with $arr[0]');
 }
 
@@ -134,7 +134,7 @@ sub parse_stmt_and_gen {
 
 {
   my $cl = parse_and_gen('"value is $hash{key}"');
-  like($cl, qr/pl-string_concat.*"value is ".*pl-gethash.*%hash.*"key"/,
+  like($cl, qr/pl-string-concat.*"value is ".*pl-gethash.*%hash.*"key"/,
        'String interpolation with $hash{key}');
 }
 
@@ -155,7 +155,7 @@ sub parse_stmt_and_gen {
 
 {
   my $cl = parse_and_gen('"line $. of $file: $lines[$i]"');
-  like($cl, qr/pl-string_concat/,
+  like($cl, qr/pl-string-concat/,
        'Complex interpolation with multiple vars');
   like($cl, qr/\|\$\.\|/,
        'Complex interpolation: $. magic variable');
@@ -165,7 +165,7 @@ sub parse_stmt_and_gen {
 
 {
   my $cl = parse_and_gen('"error at $file:$line"');
-  like($cl, qr/pl-string_concat.*\$file.*\$line/,
+  like($cl, qr/pl-string-concat.*\$file.*\$line/,
        'Simple variable interpolation');
 }
 
@@ -187,7 +187,7 @@ sub parse_stmt_and_gen {
 # Escaped characters in string with interpolation
 {
   my $cl = parse_and_gen('"value: $x\\n"');
-  like($cl, qr/pl-string_concat/, 'String with variable and escape');
+  like($cl, qr/pl-string-concat/, 'String with variable and escape');
 }
 
 # ----------------------------------------------------------------------

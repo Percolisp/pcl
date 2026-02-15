@@ -148,7 +148,7 @@ test_codegen('$str =~ tr/a-z/A-Z/',
              '$str =~ tr///');
 
 test_codegen('$count = ($str =~ tr/x//)',
-             '(pl-setf $count (pl-=~ $str (pl-tr "x" "")))',
+             '(pl-scalar-= $count (pl-=~ $str (pl-tr "x" "")))',
              'Count chars with tr///');
 
 

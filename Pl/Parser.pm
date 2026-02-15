@@ -148,10 +148,19 @@ sub _qualified_sub_to_cl {
   return "pl-$name";
 }
 
-# Insert forward declarations for subs defined in each package
-# Perl subs can be called before they're defined (Perl resolves names at runtime).
-# But Common Lisp resolves function names at load time for top-level code.
-# Forward declarations ensure subs are defined before any top-level code runs.
+# Insert forward declarations and reorder compile-time forms before runtime.
+#
+# Two-phase approach:
+#   Phase 1: Extract defvar blocks, emit defpackage/stubs after each in-package
+#   Phase 2: Within each package section, reorder compile-time forms (subs,
+#            eval-when, defclass, etc.) before runtime forms, preserving source
+#            order within each group.
+#
+# This ensures:
+#   - defvar proclamations precede defun (so `local` creates dynamic bindings)
+#   - `use` imports are processed before sub definitions that reference them
+#     (avoids CL symbol conflicts from premature interning)
+#   - Sub definitions appear before runtime top-level calls
 sub _insert_sub_forward_declarations {
   my $self = shift;
 
@@ -159,7 +168,13 @@ sub _insert_sub_forward_declarations {
   return if $self->collect_prototypes_only;
 
   my $subs = $self->environment->get_declared_subs();
-  return unless @$subs;
+
+  # Phase 1 requires declared subs; Phase 2 runs unconditionally
+  # (use constant generates pl-sub without registering as declared sub)
+  unless (@$subs) {
+    $self->_reorder_compile_runtime_forms();
+    return;
+  }
 
   # Collect packages that need to be pre-declared for qualified subs
   my %needed_packages;
@@ -178,8 +193,74 @@ sub _insert_sub_forward_declarations {
     push @{$by_package{$sub->{package}}}, $name;
   }
 
-  # Find (in-package ...) lines and insert forward decls after them
   my $output = $self->output;
+
+  # --- Phase 1: Extract defvars, determine stubs, scan for needed packages ---
+
+  # Find top-level pl-sub names (to determine which subs need stubs)
+  my %top_level_subs;  # "pkg::cl_name" => 1
+  {
+    my $cur_pkg = 'pcl';
+    for my $i (0 .. $#$output) {
+      my $line = $output->[$i];
+      if ($line =~ /^\(in-package\s+:([^\)]+)\)/) {
+        $cur_pkg = $1;
+        $cur_pkg =~ s/^\|//;
+        $cur_pkg =~ s/\|$//;
+      }
+      if ($line =~ /^\(pl-sub\s+(\S+)\s/) {
+        $top_level_subs{"$cur_pkg\::$1"} = 1;
+      }
+    }
+  }
+
+  # Scan full output for package references that need pre-declaration.
+  # When a form references a package (e.g., TestMod::pl-get_value), the
+  # package must exist before the CL reader encounters it.
+  for my $line (@$output) {
+    # Simple package: TestMod::pl-get_value
+    while ($line =~ /\b([A-Z][A-Za-z0-9_]+)::/g) {
+      my $pkg = $1;
+      next if $pkg eq 'PCL';
+      $needed_packages{$pkg} = 1;
+    }
+    # Pipe-quoted package: |Foo::Bar|::pl-something
+    while ($line =~ /\|([^|]+)\|::/g) {
+      my $pkg = $1;
+      $needed_packages{$pkg} = 1;
+    }
+  }
+
+  # Extract (eval-when ... (defvar ...)) blocks from the output.
+  # CL's defvar proclaims a variable as "special" (dynamically scoped).
+  # This proclamation must happen BEFORE any defun that uses `let` to bind
+  # the variable, otherwise `let` creates a lexical (not dynamic) binding,
+  # breaking Perl's `local` dynamic scoping semantics.
+  my %defvar_blocks;  # cl_pkg_name => [ lines... ]
+  {
+    my $dvpkg = 'pcl';
+    my @dv_removals;  # [ [start, end], ... ]
+    for my $j (0 .. $#$output) {
+      if ($output->[$j] =~ /^\(in-package\s+:([^\)]+)\)/) {
+        $dvpkg = $1;
+        $dvpkg =~ s/^\|//;
+        $dvpkg =~ s/\|$//;
+      }
+      # Match 2-line eval-when/defvar blocks
+      if ($output->[$j] =~ /^\(eval-when\s+\(:compile-toplevel/ &&
+          $j + 1 <= $#$output &&
+          $output->[$j + 1] =~ /^\s+\(defvar\s/) {
+        push @{$defvar_blocks{$dvpkg}}, $output->[$j], $output->[$j + 1];
+        push @dv_removals, [$j, $j + 1];
+      }
+    }
+    # Remove in reverse order
+    for my $r (reverse @dv_removals) {
+      splice @$output, $r->[0], $r->[1] - $r->[0] + 1;
+    }
+  }
+
+  # Find (in-package ...) lines and insert defvars + defpackages + stubs
   my @insertions;  # [ [position, lines_to_insert], ... ]
 
   for my $i (0 .. $#$output) {
@@ -187,14 +268,18 @@ sub _insert_sub_forward_declarations {
     if ($line =~ /^\(in-package\s+:([^\)]+)\)/) {
       my $pkg_spec = $1;
       # Extract package name: :pcl -> pcl, :|Foo::Bar| -> Foo::Bar
-      my $pkg_name = $pkg_spec;
-      $pkg_name =~ s/^\|//;
-      $pkg_name =~ s/\|$//;
+      my $cl_pkg_name = $pkg_spec;
+      $cl_pkg_name =~ s/^\|//;
+      $cl_pkg_name =~ s/\|$//;
 
-      # 'pcl' package corresponds to 'main' in Perl
-      $pkg_name = 'main' if $pkg_name eq 'pcl';
+      # Map CL package to Perl package for by_package lookup
+      my $pkg_name = $cl_pkg_name eq 'pcl' ? 'main' : $cl_pkg_name;
 
-      if (my $sub_names = $by_package{$pkg_name}) {
+      # We insert if there are subs OR defvars for this package
+      my $sub_names = $by_package{$pkg_name};
+      my $defvars = delete $defvar_blocks{$cl_pkg_name};
+
+      if ($sub_names || $defvars) {
         my @decls;
 
         # First, declare any packages needed for qualified sub names
@@ -208,18 +293,36 @@ sub _insert_sub_forward_declarations {
         # Clear so we don't emit again
         %needed_packages = ();
 
-        push @decls, ";; Forward declarations: Perl subs can be called before definition,";
-        push @decls, ";; but top-level Lisp code executes immediately. Declare stubs now.";
-        # Deduplicate sub names
-        my %seen;
-        for my $name (sort grep { !$seen{$_}++ } @$sub_names) {
-          my $cl_name = $self->_qualified_sub_to_cl($name);
-          push @decls, "(unless (fboundp '$cl_name) (defun $cl_name (&rest args) (declare (ignore args)) nil))";
+        # Insert defvar declarations so variables are proclaimed special
+        # before any let bindings in subs
+        if ($defvars) {
+          push @decls, @$defvars;
         }
+
+        # Emit stubs only for subs NOT found at top level (nested subs).
+        # Top-level subs will be reordered before runtime code by Phase 2.
+        if ($sub_names) {
+          my %seen;
+          my @unique_names = sort grep { !$seen{$_}++ } @$sub_names;
+
+          my @stubs;
+          for my $name (@unique_names) {
+            my $cl_name = $self->_qualified_sub_to_cl($name);
+            my $body_key = "$cl_pkg_name\::$cl_name";
+            unless ($top_level_subs{$body_key}) {
+              push @stubs, $cl_name;
+            }
+          }
+          if (@stubs) {
+            for my $cl_name (@stubs) {
+              push @decls, "(pl-declare-sub $cl_name)";
+            }
+          }
+          delete $by_package{$pkg_name};
+        }
+
         push @decls, "";
         push @insertions, [$i + 1, \@decls];
-        # Mark this package as done so we don't emit again
-        delete $by_package{$pkg_name};
       }
     }
   }
@@ -229,7 +332,201 @@ sub _insert_sub_forward_declarations {
     my ($pos, $lines) = @$ins;
     splice @$output, $pos, 0, @$lines;
   }
+
+  # --- Phase 2: Reorder compile-time forms before runtime forms ---
+  # Within each package section, move compile-time forms (subs, eval-when,
+  # defclass, etc.) before runtime forms, preserving source order within
+  # each group. This ensures `use` imports are processed before sub defs
+  # that reference imported functions, while still keeping subs before
+  # runtime top-level calls.
+  $self->_reorder_compile_runtime_forms();
 }
+
+
+# Reorder output lines so compile-time forms appear before runtime forms
+# within each package section, preserving source order within each group.
+sub _reorder_compile_runtime_forms {
+  my $self = shift;
+  my $output = $self->output;
+
+  # Find package section boundaries (in-package lines)
+  my @section_starts;
+  for my $i (0 .. $#$output) {
+    if ($output->[$i] =~ /^\(in-package\s/) {
+      push @section_starts, $i;
+    }
+  }
+
+  return unless @section_starts;
+
+  # Process all sections. The pcl section contains user code when no
+  # preamble is present (parse_code), and pl2cl injects its preamble
+  # after parsing, so we must reorder the pcl section too.
+  for my $s (0 .. $#section_starts) {
+    my $start = $section_starts[$s] + 1;  # skip in-package line itself
+    my $end = ($s < $#section_starts)
+            ? $section_starts[$s + 1] - 1
+            : $#$output;
+
+    next if $start > $end;
+
+    # Parse section into chunks (comment + form + trailing blanks)
+    my @chunks = _parse_output_chunks($output, $start, $end);
+
+    # Classify and partition into compile-time vs runtime
+    my (@compile_time, @runtime);
+    for my $chunk (@chunks) {
+      if ($chunk->{first_form} eq '') {
+        # Blank/comment-only chunk: attach to whichever group has items,
+        # defaulting to compile_time (preamble)
+        if (@runtime) {
+          push @runtime, $chunk;
+        } else {
+          push @compile_time, $chunk;
+        }
+      } elsif (_is_compile_time_form($chunk)) {
+        push @compile_time, $chunk;
+      } else {
+        push @runtime, $chunk;
+      }
+    }
+
+    # Skip if no reordering needed
+    next unless @compile_time && @runtime;
+
+    # Check if already in correct order (compile-time all before runtime)
+    my $last_ct_line = 0;
+    my $first_rt_line = $end + 1;
+    for my $chunk (@compile_time) {
+      my $pos = $chunk->{start_pos};
+      $last_ct_line = $pos if $pos > $last_ct_line;
+    }
+    for my $chunk (@runtime) {
+      my $pos = $chunk->{start_pos};
+      $first_rt_line = $pos if $pos < $first_rt_line;
+    }
+    next if $last_ct_line < $first_rt_line;
+
+    # Reassemble: compile-time chunks first, then runtime chunks
+    my @new_lines;
+    for my $chunk (@compile_time, @runtime) {
+      push @new_lines, @{$chunk->{lines}};
+    }
+
+    # Replace section in output
+    my $old_len = $end - $start + 1;
+    splice @$output, $start, $old_len, @new_lines;
+
+    # Update section_starts for subsequent sections
+    my $delta = scalar(@new_lines) - $old_len;
+    for my $j ($s + 1 .. $#section_starts) {
+      $section_starts[$j] += $delta;
+    }
+  }
+}
+
+
+# Parse output lines[$start..$end] into chunks.
+# Each chunk = { lines => [...], first_form => "...", start_pos => N }
+# A chunk is: optional leading blanks/comments + paren-balanced form + trailing blanks
+sub _parse_output_chunks {
+  my ($output, $start, $end) = @_;
+  my @chunks;
+  my $i = $start;
+
+  while ($i <= $end) {
+    my @chunk_lines;
+    my $first_form = '';
+    my $chunk_start = $i;
+
+    # Collect leading blank and comment lines
+    while ($i <= $end && ($output->[$i] =~ /^\s*$/ || $output->[$i] =~ /^;;/)) {
+      push @chunk_lines, $output->[$i];
+      $i++;
+    }
+
+    # If no form follows, save comments/blanks as a chunk
+    if ($i > $end) {
+      push @chunks, { lines => \@chunk_lines, first_form => '', start_pos => $chunk_start }
+        if @chunk_lines;
+      last;
+    }
+
+    # Collect the paren-balanced form
+    $first_form = $output->[$i];
+    my $depth = 0;
+    while ($i <= $end) {
+      my $line = $output->[$i];
+      push @chunk_lines, $line;
+
+      my $clean = $line;
+      $clean =~ s/;.*//;         # strip comments
+      $clean =~ s/"[^"]*"//g;    # strip strings (simple)
+      $depth += ($clean =~ tr/(//);
+      $depth -= ($clean =~ tr/)//);
+
+      $i++;
+      last if $depth <= 0;
+    }
+
+    # Collect trailing blank lines
+    while ($i <= $end && $output->[$i] =~ /^\s*$/) {
+      push @chunk_lines, $output->[$i];
+      $i++;
+    }
+
+    push @chunks, { lines => \@chunk_lines, first_form => $first_form, start_pos => $chunk_start };
+  }
+
+  return @chunks;
+}
+
+
+# Classify whether a chunk is a compile-time form.
+# Compile-time forms include sub definitions, use/require (eval-when with
+# :load-toplevel), defpackage, defclass, forward stubs, and END block
+# registrations. BEGIN blocks (eval-when WITHOUT :load-toplevel) stay in
+# source order — they should run sequentially in interpreted mode.
+sub _is_compile_time_form {
+  my ($chunk) = @_;
+  my $line = $chunk->{first_form};
+  return 0 unless $line;
+
+  # Direct compile-time forms
+  return 1 if $line =~ /^\(pl-sub\s/;
+
+  # eval-when: only reorder use/defvar (has :load-toplevel).
+  # BEGIN blocks use (:compile-toplevel :execute) without :load-toplevel
+  # and should stay in source order for interpreted mode.
+  # Bare `require './file.pl'` also gets eval-when :load-toplevel but must
+  # stay in source order (e.g., chdir before require).
+  if ($line =~ /^\(eval-when\s/) {
+    return 0 unless $line =~ /:load-toplevel/;
+    # Bare require with file path — keep in source order
+    for my $l (@{$chunk->{lines}}) {
+      return 0 if $l =~ /\bpl-require-file\b/;
+    }
+    return 1;
+  }
+
+  return 1 if $line =~ /^\(defpackage\s/;
+  return 1 if $line =~ /^\(in-package\s/;
+  return 1 if $line =~ /^\(defclass\s/;
+  return 1 if $line =~ /^\(defconstant\s/;
+  return 1 if $line =~ /^\(pl-declare-sub\s/;
+  return 1 if $line =~ /^\(unless\s+\(fboundp\s/;
+  return 1 if $line =~ /^\(push \(lambda/;   # END blocks
+
+  # let-wrapped subs (state variable closures)
+  if ($line =~ /^\(let[\s*]/) {
+    for my $l (@{$chunk->{lines}}) {
+      return 1 if $l =~ /\(pl-sub\s/;
+    }
+  }
+
+  return 0;
+}
+
 
 # Insert defvar for package variables used without my/our declaration.
 # In Perl, package globals auto-vivify as undef. In CL, unbound symbols crash.
@@ -784,8 +1081,8 @@ sub _process_our_declaration {
           if ($init_cl =~ /^\(progn\s+(.+)\)$/) {
             $init_cl = "(pl-array-init $1)";
           }
-          # Use pl-setf to properly populate array from list
-          $self->_emit("(pl-setf $var $init_cl)");
+          # Use pl-array-= to properly populate array from list
+          $self->_emit("(pl-array-= $var $init_cl)");
         }
       }
       elsif ($sigil eq '%') {
@@ -799,8 +1096,8 @@ sub _process_our_declaration {
           if ($init_cl =~ /^\(progn\s+(.+)\)$/) {
             $init_cl = "(pl-hash $1)";
           }
-          # Use pl-setf to properly populate hash from list
-          $self->_emit("(pl-setf $var $init_cl)");
+          # Use pl-hash-= to properly populate hash from list
+          $self->_emit("(pl-hash-= $var $init_cl)");
         }
       }
       else {
@@ -828,7 +1125,7 @@ sub _process_our_declaration {
       # Now do the assignment at runtime
       my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
       my $vars_vector = "(vector " . join(" ", @vars) . ")";
-      $self->_emit("(pl-setf $vars_vector $init_cl)");
+      $self->_emit("(pl-list-= $vars_vector $init_cl)");
     }
   }
   else {
@@ -918,7 +1215,7 @@ sub _process_my_toplevel_declaration {
           $self->_emit("(box-set $var $init_cl)");
         } else {
           # Array/hash: parse full statement through expression parser for proper list context
-          # This generates (pl-setf @arr (vector ...)) or (pl-setf %h (pl-hash ...))
+          # This generates (pl-array-= @arr (vector ...)) or (pl-hash-= %h (pl-hash ...))
           my $cl_code = $self->_parse_expression($parts, $stmt);
           $self->_emit($cl_code) if defined $cl_code;
         }
@@ -2339,7 +2636,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter|bytes|locale)$/) {
+  if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter|bytes|locale|integer)$/) {
     $self->_emit(";; $perl_code (pragma)");
     $self->_emit("");
     return;
