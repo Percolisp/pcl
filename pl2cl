@@ -21,6 +21,10 @@ use File::Spec;
 use File::Basename;
 use Cwd qw(abs_path);
 
+# Output UTF-8 so non-ASCII chars (from \xNN escapes) are valid for SBCL's reader
+binmode(STDOUT, ":utf8");
+binmode(STDERR, ":utf8");
+
 # Find Pl::Parser relative to this script, not cwd
 use lib dirname(abs_path($0));
 use Pl::Parser;

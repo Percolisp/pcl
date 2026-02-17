@@ -546,37 +546,58 @@ sub _insert_variable_forward_declarations {
   );
 
   my %declared;    # variables with defvar
-  my %let_bound;   # variables bound by let/let*/foreach
-  my %referenced;  # all variable references
+  my %let_bound;   # variables bound by let/let*/foreach at FILE scope only
+  my %referenced;  # all variable references at FILE scope only
+
+  # Track nesting inside sub definitions.
+  # We only care about let_bound/referenced at file scope (sub_depth == 0),
+  # because 'my $a' inside a sub should NOT prevent defvar for file-scope $a.
+  my $sub_depth = 0;
 
   for my $line (@$output) {
     # Skip comment lines
     next if $line =~ /^\s*;;/;
 
-    # Collect defvar'd variables: (defvar $var ...)
-    if ($line =~ /\(defvar\s+([\$\@\%][a-zA-Z_]\w*)\b/) {
-      $declared{$1} = 1;
+    # Track entry/exit of sub definitions
+    # (pl-sub name (...) and (defun name (...) open a sub scope
+    if ($line =~ /^\(pl-sub\s|^\(defun\s/) {
+      $sub_depth++;
     }
 
-    # Collect let/let*-bound variables.
-    # Generated patterns:  (let (($x (make-pl-box nil)) (@arr ...) (%h ...))
-    # Each binding is ($var init), so match ( followed by variable followed by space
-    if ($line =~ /\(let\*?\s+\(/) {
-      while ($line =~ /\(([\$\@\%][a-zA-Z_]\w*)\s+/g) {
+    # Only track declarations, let_bound, and references at file scope.
+    # A defvar inside a sub/eval block is NOT available at the point
+    # where top-level code first references the variable.
+    if ($sub_depth == 0) {
+      # Collect defvar'd variables: (defvar $var ...)
+      if ($line =~ /\(defvar\s+([\$\@\%][a-zA-Z_]\w*)\b/) {
+        $declared{$1} = 1;
+      }
+      # Collect let/let*-bound variables.
+      # Generated patterns:  (let (($x (make-pl-box nil)) (@arr ...) (%h ...))
+      # Each binding is ($var init), so match ( followed by variable followed by space
+      if ($line =~ /\(let\*?\s+\(/) {
+        while ($line =~ /\(([\$\@\%][a-zA-Z_]\w*)\s+/g) {
+          $let_bound{$1} = 1;
+        }
+      }
+
+      # Collect foreach-bound variables: (pl-foreach ($i ...)
+      if ($line =~ /\(pl-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
         $let_bound{$1} = 1;
+      }
+
+      # Collect all variable references (identifiers starting with sigil)
+      while ($line =~ /([\$\@\%][a-zA-Z_]\w*)/g) {
+        my $var = $1;
+        next if $var =~ /::/;  # skip package-qualified
+        $referenced{$var} = 1;
       }
     }
 
-    # Collect foreach-bound variables: (pl-foreach ($i ...)
-    if ($line =~ /\(pl-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
-      $let_bound{$1} = 1;
-    }
-
-    # Collect all variable references (identifiers starting with sigil)
-    while ($line =~ /([\$\@\%][a-zA-Z_]\w*)/g) {
-      my $var = $1;
-      next if $var =~ /::/;  # skip package-qualified
-      $referenced{$var} = 1;
+    # Track closing of sub definitions by counting parens
+    # A line starting with ) at indent 0 closes a top-level form
+    if ($sub_depth > 0 && $line =~ /^\)/) {
+      $sub_depth--;
     }
   }
 
@@ -2565,8 +2586,12 @@ sub _process_include_statement {
     return;
   }
 
-  # Handle 'no' statements (turn off pragma - no CL equivalent)
+  # Handle 'no' statements
   if ($type eq 'no') {
+    # 'no integer' - turn off integer pragma in current scope
+    if ($module eq 'integer') {
+      $self->environment->set_pragma('use_integer', 0);
+    }
     $self->_emit(";; $perl_code (no-op)");
     $self->_emit("");
     return;
@@ -2637,6 +2662,10 @@ sub _process_include_statement {
 
   # Handle pragmas - emit as comment (no CL equivalent)
   if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter|bytes|locale|integer)$/) {
+    # 'use integer' - enable integer pragma in current scope
+    if ($module eq 'integer') {
+      $self->environment->set_pragma('use_integer', 1);
+    }
     $self->_emit(";; $perl_code (pragma)");
     $self->_emit("");
     return;

@@ -226,4 +226,28 @@ test_transpile("version string ord", 'my @a = map {ord} split //, v65.66.67; pri
 # $] Perl version variable
 test_transpile('$] version variable', 'print defined($]) ? "ok\n" : "not ok\n";');
 
+# use integer pragma — integer arithmetic
+test_transpile("use integer: division truncates", '{ use integer; print 7/2, "\n"; }');
+test_transpile("use integer: modulo uses rem", '{ use integer; print -7%3, "\n"; }');
+test_transpile("use integer: addition truncates operands", '{ use integer; print 1.9+2.9, "\n"; }');
+test_transpile("use integer: multiply truncates operands", '{ use integer; print 1.9*3.9, "\n"; }');
+test_transpile("use integer: scope ends at block exit",
+    '{ use integer; print 7/2, "\n"; } my $x = 7.0/2; print $x, "\n";');
+
+# use integer: no integer inside use integer block restores float behavior
+test_transpile("use integer: no integer restores float division",
+    '{ use integer; print 7/2, "\n"; { no integer; my $x = 7.0/2; print $x, "\n"; } print 7/2, "\n"; }');
+test_transpile("use integer: no integer restores float modulo",
+    '{ use integer; print -7%3, "\n"; { no integer; print -7%3, "\n"; } print -7%3, "\n"; }');
+
+# Undeclared variable forward declarations
+test_transpile("defvar: global var gets defvar despite my in sub",
+    'sub foo { my($a) = @_; $a } $a = 42; print $a, "\n";');
+test_transpile("defvar: var assigned inside sub visible at file scope",
+    'sub foo { $x = "hello"; } foo(); print $x, "\n";');
+test_transpile("defvar: multiple globals with my of same name in sub",
+    'sub foo { my $a = 1; my $b = 2; } $a = 10; $b = 20; print $a + $b, "\n";');
+test_transpile("defvar: global modified by sub",
+    'sub set_it { $val = 99; } set_it(); print $val, "\n";');
+
 done_testing();

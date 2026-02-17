@@ -526,6 +526,23 @@ sub gen_binary_op {
     # Element access, slices, etc. - keep using pl-setf
   }
 
+  # 'use integer' pragma: truncate operands first, then operate.
+  # Perl's 'use integer' truncates BOTH operands before the operation.
+  # Uses pl-int (exported, does truncate(to-number(val))) to stay in pcl namespace.
+  if ($self->environment && $self->environment->has_pragma('use_integer')) {
+    if ($op eq '/') {
+      return "(truncate (pl-int $left) (pl-int $right))";
+    } elsif ($op eq '%') {
+      return "(rem (pl-int $left) (pl-int $right))";
+    } elsif ($op eq '+') {
+      return "(+ (pl-int $left) (pl-int $right))";
+    } elsif ($op eq '-') {
+      return "(- (pl-int $left) (pl-int $right))";
+    } elsif ($op eq '*') {
+      return "(* (pl-int $left) (pl-int $right))";
+    }
+  }
+
   return "($cl_op $left $right)";
 }
 

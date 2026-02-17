@@ -145,6 +145,31 @@ has scope_level => (
     default => 0,
 );
 
+=head2 scope_stack
+
+Array of scope frames for tracking pragmas and variable declarations.
+Each frame is { pragmas => {}, declared_vars => {} }.
+Pragmas are inherited from parent on push_scope; declared_vars start fresh.
+
+=cut
+
+has scope_stack => (
+    is => 'rw',
+    default => sub { [{ pragmas => {}, declared_vars => {} }] },
+);
+
+=head2 undeclared_vars
+
+Accumulates variables that need file-level defvar (referenced but not
+declared in any enclosing scope). Built during code generation.
+
+=cut
+
+has undeclared_vars => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 =head2 in_subroutine
 
 Counter tracking subroutine nesting depth. 0 = top level, >0 = inside sub.
@@ -385,6 +410,13 @@ Enters a new scope level. Called when entering a block.
 sub push_scope {
     my $self = shift;
     $self->scope_level($self->scope_level + 1);
+
+    # Push new scope frame: inherit pragmas from parent, fresh declared_vars
+    my $parent = $self->scope_stack->[-1];
+    push @{$self->scope_stack}, {
+        pragmas      => { %{$parent->{pragmas}} },
+        declared_vars => {},
+    };
 }
 
 =head2 pop_scope()
@@ -411,8 +443,90 @@ sub pop_scope {
         }
     }
 
+    # Pop scope frame (never pop below initial frame)
+    pop @{$self->scope_stack} if @{$self->scope_stack} > 1;
+
     # Decrease scope level (but never below 0)
     $self->scope_level($level - 1) if $level > 0;
+}
+
+=head2 set_pragma($name, $val)
+
+Sets a pragma on the current scope frame.
+
+    $env->set_pragma('use_integer', 1);
+
+=cut
+
+sub set_pragma {
+    my ($self, $name, $val) = @_;
+    $self->scope_stack->[-1]{pragmas}{$name} = $val;
+}
+
+=head2 has_pragma($name)
+
+Returns the value of a pragma in the current scope, or undef if not set.
+
+    if ($env->has_pragma('use_integer')) { ... }
+
+=cut
+
+sub has_pragma {
+    my ($self, $name) = @_;
+    return $self->scope_stack->[-1]{pragmas}{$name};
+}
+
+=head2 declare_var($name)
+
+Records a variable declaration (my/our/local/state) in the current scope frame.
+
+    $env->declare_var('$x');
+
+=cut
+
+sub declare_var {
+    my ($self, $name) = @_;
+    $self->scope_stack->[-1]{declared_vars}{$name} = 1;
+}
+
+=head2 is_var_declared($name)
+
+Checks if a variable is declared in any enclosing scope (innermost to outermost).
+
+    if ($env->is_var_declared('$x')) { ... }
+
+=cut
+
+sub is_var_declared {
+    my ($self, $name) = @_;
+    for my $frame (reverse @{$self->scope_stack}) {
+        return 1 if $frame->{declared_vars}{$name};
+    }
+    return 0;
+}
+
+=head2 add_undeclared_var($name)
+
+Adds a variable to the set needing file-level defvar.
+
+    $env->add_undeclared_var('$x');
+
+=cut
+
+sub add_undeclared_var {
+    my ($self, $name) = @_;
+    $self->undeclared_vars->{$name} = 1;
+}
+
+=head2 get_undeclared_vars()
+
+Returns sorted list of variables needing file-level defvar.
+
+=cut
+
+sub get_undeclared_vars {
+    my $self = shift;
+    return [sort keys %{$self->undeclared_vars}];
 }
 
 =head2 is_lvalue_sub($name)
