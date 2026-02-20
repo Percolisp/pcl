@@ -250,4 +250,29 @@ test_transpile("defvar: multiple globals with my of same name in sub",
 test_transpile("defvar: global modified by sub",
     'sub set_it { $val = 99; } set_it(); print $val, "\n";');
 
+# quotemeta: ASCII non-word chars are escaped
+test_transpile("quotemeta ASCII",
+    'print quotemeta(":"), "\n"; print quotemeta("a"), "\n";');
+# quotemeta: Unicode letters (>= 128) are NOT escaped (length stays 1)
+test_transpile("quotemeta Unicode letter not escaped",
+    'use utf8; my $s = "\x{100}"; print length(quotemeta($s)), "\n";');  # Ā -> length 1
+# quotemeta: Unicode non-word chars (>= 128) ARE escaped (length becomes 2)
+test_transpile("quotemeta Unicode symbol escaped",
+    'use utf8; my $s = "\x{263a}"; print length(quotemeta($s)), "\n";');  # \☺ length=2
+
+# Case escapes: \u\L interplay (single-char overrides group transform for first char)
+test_transpile("case escape \\u\\L",
+    'print "\u\LpERL", "\n";');   # -> Perl
+test_transpile("case escape \\L\\u",
+    'print "\L\upERL", "\n";');   # -> Perl
+test_transpile("case escape \\U\\l",
+    'print "\U\lPerl", "\n";');   # -> pERL
+# Case escapes: nested \\U\\L with \\E closes both
+test_transpile("case escape nested \\U\\L\\E",
+    'print "a\UbB\LcC\EdD", "\n";');  # aABBccdD minus the 'a' outer = aBBccdD
+
+# \\$var interpolation: \\ before variable gives literal backslash + var value
+test_transpile("double-backslash interpolation",
+    'my $x = "foo"; print "\\$x\n";');   # \foo
+
 done_testing();

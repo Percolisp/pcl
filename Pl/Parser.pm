@@ -1552,6 +1552,11 @@ sub _process_bare_block {
     # With continue: wrap tagbody in catch for labeled next, then run continue after
     $self->_emit("(block $label");
     $self->indent_level($self->indent_level + 1);
+    # Wrap contents in LAST-LABEL catch so pl-last-dynamic can throw to exit the block.
+    # Mirrors how pl-next/pl-redo use throw for dynamic (cross-function) labeled exits.
+    # e.g. Test::More's skip() calls (last SKIP) from inside a called function.
+    $self->_emit("(catch 'pcl::LAST-$label");
+    $self->indent_level($self->indent_level + 1);
     if ($continue_block) {
       # Use pcl:: prefix to match the package used by pl-next macro's throw
       $self->_emit("(catch 'pcl::NEXT-$label");
@@ -1584,6 +1589,8 @@ sub _process_bare_block {
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
     }
+    $self->_emit(")");  # close LAST-LABEL catch
+    $self->indent_level($self->indent_level - 1);
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");
   } else {

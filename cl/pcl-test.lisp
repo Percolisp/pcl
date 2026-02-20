@@ -211,10 +211,13 @@
   (test-ok nil name))
 
 ;;; skip(reason, count)
+;;; Prints skip lines then throws to exit the SKIP: { } labeled block.
+;;; This mirrors Perl's Test::More which calls (last SKIP) from inside skip().
 (defun pl-skip (reason &optional (count 1))
   (dotimes (i count)
     (incf *test-count*)
-    (format t "ok ~A # skip ~A~%" *test-count* reason)))
+    (format t "ok ~A # skip ~A~%" *test-count* reason))
+  (pcl:pl-last-dynamic "SKIP"))
 
 ;;; diag(msg)
 (defun pl-diag (&rest args)
@@ -249,5 +252,11 @@
         (when *test-no-plan*
           (format t "1..~A~%" *test-count*)))
       sb-ext:*exit-hooks*)
+
+;;; Stubs for common test-infrastructure functions that may not be loaded yet.
+;;; These are typically provided by loc_tools.pl or similar helpers.
+;;; Exported from :pcl so user packages that (:use :pcl) get the default.
+(export '(pl-locales_enabled))
+(defun pl-locales_enabled (&rest args) (declare (ignore args)) 0)
 
 (format t "# PCL Test library loaded~%")

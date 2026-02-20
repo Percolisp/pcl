@@ -191,4 +191,63 @@ if (my ($p, $q) = (5, 10) and 1) { }
 print "after:$p,$q\n";
 ');
 
+# ============ LABELED BLOCK EXIT (last LABEL) ============
+
+test_transpile("last LABEL exits bare block", '
+my $x = 0;
+SKIP: { last SKIP; $x = 1; }
+print "$x\n";
+');
+
+test_transpile("last LABEL with other label name", '
+my $x = 0;
+OUTER: { last OUTER; $x = 1; }
+print "$x\n";
+');
+
+test_transpile("SKIP block: code after last LABEL does not run", '
+my @ran;
+SKIP: {
+  last SKIP;
+  push @ran, "inner";
+}
+push @ran, "after";
+print join(",", @ran), "\n";
+');
+
+# ============ CONTROL CHARACTER ESCAPE \cX ============
+
+test_transpile("control char \\c@ is chr(0)", '
+my $c = "\c@";
+print ord($c), "\n";
+');
+
+test_transpile("control char \\c? is chr(127)", '
+my $c = "\c?";
+print ord($c), "\n";
+');
+
+test_transpile("control char \\cA-\\cZ range", '
+print ord("\cA"), " ", ord("\cZ"), "\n";
+');
+
+test_transpile("control char \\c@ in string concat", '
+my $s = "a\c@b";
+print length($s), "\n";
+');
+
+# \&funcname - references to named subs
+test_transpile("funcref: \\&foo stored and called",
+    'sub foo { print "hello\n"; } my $r = \&foo; $r->();');
+
+test_transpile("funcref: \\&foo called with args",
+    'sub add { my ($a, $b) = @_; print $a + $b, "\n"; } my $r = \&add; $r->(3, 4);');
+
+test_transpile("funcref: \\&foo ref()",
+    'sub foo {} my $r = \&foo; print ref($r), "\n";');
+
+# &funcname(args) - explicit call with & sigil
+test_transpile("amp call: &foo(args)",
+    'sub double { my ($n) = @_; print $n * 2, "\n"; } &double(7);');
+
 done_testing();

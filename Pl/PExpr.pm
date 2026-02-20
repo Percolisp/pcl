@@ -366,6 +366,12 @@ sub parse {
   say "parse: //////  After calling handle_subcalls, in param:"  if 1 & DEBUG;
   say dump($e)      if 1 & DEBUG;
 
+  # Empty expression: () or empty list — generate an empty progn node.
+  # In list context this becomes (vector), in scalar context (progn).
+  if (scalar(@$e) == 0) {
+    my ($node, $id) = $self->make_node_insert('progn');
+    return $id;
+  }
 
   # - - - Handle just one item:
   if (scalar(@$e) == 1) {
@@ -1284,6 +1290,26 @@ sub handle_subcalls {
     my $now     = $e->[$i];
     my $next    = $e->[$i+1];
     say "handle_subcalls: Look for subname(..) in:\n", dump $now  if 8 & DEBUG;
+
+    # Handle &funcname( list ) - direct function call with & sigil
+    # e.g., &foo(1, 2) -> (pl-foo 1 2), &Pkg::foo(1,2) -> (Pkg::pl-foo 1 2)
+    if (ref($now) eq 'PPI::Token::Symbol'
+        && $now->content() =~ /^&(.+)$/
+        && $self->is_list($next)) {
+      my $func_name = $1;
+      my $word_token = PPI::Token::Word->new($func_name);
+      my($top_node, $top_id) = $self->make_node_insert('funcall');
+      my $c_ids = $self->make_nodes_from_list($next);
+      my $node_id = $self->make_node($word_token);
+      $self->add_child_to_node($top_id, $node_id);
+      for my $c_id (@$c_ids) {
+        $self->add_child_to_node($top_id, $c_id);
+      }
+      splice @$e, $i, 2;
+      $e->[$i] = $top_node;
+      next;
+    }
+
     next
         if !$self->is_word($now); # Only want function calls.
 
@@ -2814,8 +2840,16 @@ sub parse_comma_separated_list {
     }
   }
 
-  push @out, $present
-      if scalar @$present;
+  if (scalar @$present) {
+    # Skip empty () — a single empty Structure::List contributes nothing to a list.
+    # e.g. unshift(@a, ()) or push(@a, ()) should pass no extra arguments.
+    my @non_ws = grep { ref($_) !~ /::Whitespace$/ } @$present;
+    unless (scalar(@non_ws) == 1
+            && ref($non_ws[0]) eq 'PPI::Structure::List'
+            && !scalar($non_ws[0]->children())) {
+      push @out, $present;
+    }
+  }
 
   return \@out;
 }

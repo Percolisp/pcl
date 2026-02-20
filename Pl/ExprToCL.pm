@@ -1149,6 +1149,12 @@ sub gen_prefix_op {
   elsif ($op eq '@' || $op eq '%' || $op eq '$') {
     $cl_op = "pl-cast-$op";
   }
+  # & Cast: &{expr} or &$var - dynamic coderef by name
+  # \&{expr} becomes (pl-backslash (pl-get-coderef expr)), which returns the
+  # function directly (pl-backslash passes through non-box values).
+  elsif ($op eq '&') {
+    return "(pl-get-coderef $operand)";
+  }
 
   return "($cl_op $operand)";
 }
@@ -1758,32 +1764,50 @@ sub _apply_case_escapes {
   # Quick check: if no case escapes, return unchanged
   return $str unless $str =~ /\\/;
 
-  my $result = '';
-  my @modes;  # stack of active modes
+  my $result  = '';
+  my @modes   = ();  # stack: 'U', 'L', 'Q', 'F'
+  my $pending = undef;  # 'u' or 'l' — single-char transform for next char
 
-  while ($str =~ /\G(.*?)\\([ULulQFE])/gc) {
-    my ($text, $cmd) = ($1, $2);
-    # Apply current mode to the text before this escape
-    $result .= _apply_mode(\@modes, $text);
-
-    if ($cmd eq 'E') {
-      pop @modes if @modes;
-    } elsif ($cmd eq 'u' || $cmd eq 'l') {
-      # Single-char transforms: apply to next char only
-      # Grab one char after the escape
-      if ($str =~ /\G(.)/gc) {
-        my $ch = $1;
-        $ch = $cmd eq 'u' ? uc($ch) : lc($ch);
-        $result .= _apply_mode(\@modes, $ch);
+  while (length $str) {
+    if ($str =~ s/^\\([ULulQFE])//) {
+      my $cmd = $1;
+      if ($cmd eq 'E') {
+        # \E cancels any pending single-char transform
+        $pending = undef;
+        # Pop the innermost mode.  If it was U or L, also remove all other
+        # U/L modes (they're mutually exclusive case transforms).
+        if (@modes) {
+          my $popped = pop @modes;
+          if ($popped eq 'U' || $popped eq 'L') {
+            @modes = grep { $_ ne 'U' && $_ ne 'L' } @modes;
+          }
+        }
+      } elsif ($cmd eq 'u' || $cmd eq 'l') {
+        $pending = $cmd;
+      } else {
+        # \U, \L, \Q, \F — push onto mode stack
+        push @modes, $cmd;
+      }
+    } elsif ($str =~ s/^((?:[^\\]|\\(?![ULulQFE]))+)//) {
+      # Consume a run of literal text (non-case-escape content).
+      # \\(?![ULulQFE]) matches \ not followed by a case-escape char,
+      # including a lone trailing backslash at end-of-string.
+      my $text = $1;
+      if ($pending && length $text) {
+        # The pending \u/\l applies to the FIRST character only,
+        # overriding the current mode stack for that one char.
+        my $first = $pending eq 'u' ? uc(substr($text, 0, 1))
+                                    : lc(substr($text, 0, 1));
+        $pending = undef;
+        $result .= $first;
+        $result .= _apply_mode(\@modes, substr($text, 1)) if length($text) > 1;
+      } else {
+        $result .= _apply_mode(\@modes, $text);
       }
     } else {
-      # \U, \L, \Q, \F — push mode, affects until \E
-      push @modes, $cmd;
+      last;  # shouldn't happen
     }
   }
-  # Remaining text after last escape
-  my $rest = substr($str, pos($str) // 0);
-  $result .= _apply_mode(\@modes, $rest);
 
   return $result;
 }

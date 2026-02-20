@@ -64,7 +64,7 @@ sub parse_interpolated_string {
   # Process the string, looking for variables and case-changing escapes
   while ($pos < length($content)) {
     # Find next variable, case escape, or end of string
-    if ($content =~ /\G(.*?)(?:([\$\@])|\\([ULulQFE])|$)/gc) {
+    if ($content =~ /\G((?:[^\$\@\\]|\\(?:c.?|[^ULulQFEc]))*?)(?:([\$\@])|\\([ULulQFE])|$)/gc) {
       my $literal = $1;
       my $sigil = $2;
       my $case_cmd = $3;
@@ -97,6 +97,8 @@ sub parse_interpolated_string {
             }
             push @$cur_parts, $wrapped;
           }
+          # \E also cancels any pending \u or \l with no content
+          $pending_char_transform = undef;
         } elsif ($case_cmd eq 'u' || $case_cmd eq 'l') {
           $pending_char_transform = $case_cmd;
         } else {
@@ -458,11 +460,20 @@ sub make_string_literal_node {
   my $self      = shift;
   my $parser    = shift;
   my $str       = shift;
-  
+
+  # The content is already decoded (actual chars).  Re-encode as a valid
+  # Perl double-quoted string literal so convert_perl_string will handle it.
+  my $encoded = $str;
+  $encoded =~ s/\\/\\\\/g;   # \ -> \\
+  $encoded =~ s/"/\\"/g;     # " -> \"
+  $encoded =~ s/\n/\\n/g;    # real newline -> \n sequence
+  $encoded =~ s/\r/\\r/g;
+  $encoded =~ s/\t/\\t/g;
+
   # Create a PPI string token
-  my $str_token = PPI::Token::Quote::Double->new('"' . $str . '"');
+  my $str_token = PPI::Token::Quote::Double->new('"' . $encoded . '"');
   $str_token->{separator} = '"';
-  
+
   return $parser->make_node($str_token);
 }
 

@@ -57,8 +57,11 @@ sub is_string {
     $inner =~ s/^"//;
     $inner =~ s/"$//;
 
-    # Return 2 if interpolation needed, 1 if plain string
-    if ($inner =~ /(?<!\\)[\$\@]/) {
+    # Return 2 if interpolation needed, 1 if plain string.
+    # Strip \\ pairs first so \\$var is seen as interpolatable
+    # (two backslashes = one literal backslash, $ is still a variable).
+    (my $tmp = $inner) =~ s/\\\\/\x00\x00/g;
+    if ($tmp =~ /(?<!\\)[\$\@]/) {
       return 2;  # Needs interpolation
     }
     return 1; # Plain double-quoted string
@@ -73,7 +76,8 @@ sub is_string {
     $content =~ s/.$//;
 
     # Return 2 if interpolation needed, 1 if plain
-    if ($content =~ /(?<!\\)[\$\@]/) {
+    (my $tmp = $content) =~ s/\\\\/\x00\x00/g;
+    if ($tmp =~ /(?<!\\)[\$\@]/) {
       return 2;  # Needs interpolation
     }
     return 1;
