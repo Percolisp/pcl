@@ -89,6 +89,14 @@ $ echo 'my $x = 1 + 2; print $x;' | ./pl2cl
 (pl-print $x)
 ```
 
+The idea is to make a simple compiler that can make pure Perl run in
+other environments, as a basis for continuing work. The "simple" part
+might be failing.
+
+It has just reached the phase of using simple CPAN code for compiling
+and running, to shake out errors. Hopefully it will reach alpha stage
+in a few weeks.
+
 ### Running Tests
 
 ```bash
@@ -99,7 +107,7 @@ prove Pl/t/
 prove -v Pl/t/codegen-01.t
 ```
 
-## Architecture
+### Architecture
 
 ```
 Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
@@ -120,7 +128,132 @@ Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
 - Perl 5.30+
 - [PPI](https://metacpan.org/pod/PPI) - Perl parser
 - [Moo](https://metacpan.org/pod/Moo) - Object system
-- [SBCL](http://www.sbcl.org/) - For running transpiler tests (optional)
+- [SBCL](http://www.sbcl.org/) 2.2+ - For running transpiled code (optional but recommended)
+- [cl-ppcre](https://edicl.github.io/cl-ppcre/) - Perl-compatible regex for Common Lisp
+
+## Installation
+
+### Ubuntu/Debian
+
+```bash
+# Perl dependencies
+sudo apt install perl cpanminus
+cpanm PPI Moo Test::More
+
+# Common Lisp (for running transpiled code)
+# NOTE: Ubuntu/Debian apt has SBCL 2.1.x which is too old (need 2.2+)
+# Either install from source or use a newer package:
+
+# Option 1: Build SBCL from source (recommended)
+wget https://sourceforge.net/projects/sbcl/files/sbcl/2.4.0/sbcl-2.4.0-source.tar.bz2
+tar xf sbcl-2.4.0-source.tar.bz2
+cd sbcl-2.4.0
+sudo apt install sbcl  # temporary bootstrap compiler
+sh make.sh
+sudo sh install.sh
+cd ..
+
+# Option 2: Use apt version with workaround (see Troubleshooting below)
+# sudo apt install sbcl
+
+# Install Quicklisp (CL package manager) - REQUIRED for cl-ppcre
+curl -O https://beta.quicklisp.org/quicklisp.lisp
+sbcl --load quicklisp.lisp \
+     --eval '(quicklisp-quickstart:install)' \
+     --eval '(ql:add-to-init-file)' \
+     --quit
+
+# Install cl-ppcre (Perl-compatible regex library)
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+```
+
+### macOS
+
+```bash
+# Perl dependencies
+cpanm PPI Moo Test::More
+
+# Common Lisp
+brew install sbcl
+
+# Install Quicklisp and cl-ppcre (same as above)
+curl -O https://beta.quicklisp.org/quicklisp.lisp
+sbcl --load quicklisp.lisp \
+     --eval '(quicklisp-quickstart:install)' \
+     --eval '(ql:add-to-init-file)' \
+     --quit
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+```
+
+### Verify Installation
+
+```bash
+# Run tests
+prove Pl/t/
+
+# Quick transpile test
+echo 'print "Hello World\n";' | ./pl2cl
+```
+
+## Troubleshooting
+
+### `sb-debug:map-backtrace` error on older SBCL
+
+If you see an error like:
+```
+The symbol "MAP-BACKTRACE" is not external in the SB-DEBUG package.
+```
+
+Your SBCL version is too old. The `caller()` function requires SBCL 2.2+.
+Ubuntu/Debian apt typically has SBCL 2.1.x which won't work.
+
+**Options:**
+
+1. **Build SBCL from source** (recommended):
+   ```bash
+   wget https://sourceforge.net/projects/sbcl/files/sbcl/2.4.0/sbcl-2.4.0-source.tar.bz2
+   tar xf sbcl-2.4.0-source.tar.bz2
+   cd sbcl-2.4.0
+   sh make.sh
+   sudo sh install.sh
+   ```
+
+2. **Stub out `pl-caller`** if you don't need `caller()`:
+
+   Edit `cl/pcl-runtime.lisp`, find the `pl-caller` function (around line 3280),
+   and replace it with:
+   ```lisp
+   (defun pl-caller (&optional level)
+     (declare (ignore level))
+     *pl-undef*)
+   ```
+
+### cl-ppcre not found
+
+If SBCL can't find cl-ppcre:
+```
+Component "cl-ppcre" not found
+```
+
+Make sure Quicklisp is installed and initialized:
+```bash
+# Check if ~/.sbclrc loads quicklisp
+grep quicklisp ~/.sbclrc
+
+# If not, re-run quicklisp setup
+sbcl --load ~/quicklisp/setup.lisp \
+     --eval '(ql:add-to-init-file)' \
+     --quit
+
+# Then install cl-ppcre
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+```
+
+### Tests hang or timeout
+
+Some tests execute generated Lisp code. If SBCL is very slow or tests hang:
+- Check available memory (SBCL can be memory-hungry)
+- Try running individual test files: `prove -v Pl/t/codegen-01.t`
 
 ## Status
 

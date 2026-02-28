@@ -85,14 +85,14 @@
 (pl-setf $s (pl-context_sub))
 
 ;; print "sub scalar: $s\n"
-(pl-print (pl-string_concat "sub scalar: " $s "
+(pl-print (pl-string-concat "sub scalar: " $s "
 "))
 
 ;; my @a = context_sub()
 (pl-setf @a (let ((*wantarray* t)) (pl-context_sub)))
 
 ;; print "sub list: @a\n"
-(pl-print (pl-string_concat "sub list: " @a "
+(pl-print (pl-string-concat "sub list: " @a "
 "))
 
 ;; my $obj = Ctx->new()
@@ -102,13 +102,13 @@
 (pl-setf $ms (pl-method-call $obj 'context_method))
 
 ;; print "method scalar: $ms\n"
-(pl-print (pl-string_concat "method scalar: " $ms "
+(pl-print (pl-string-concat "method scalar: " $ms "
 "))
 
 ;; my @ma = $obj->context_method()
 (pl-setf @ma (let ((*wantarray* t)) (pl-method-call $obj 'context_method)))
 
 ;; print "method list: @ma\n"
-(pl-print (pl-string_concat "method list: " @ma "
+(pl-print (pl-string-concat "method list: " @ma "
 "))
 

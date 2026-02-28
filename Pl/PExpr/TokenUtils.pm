@@ -1,5 +1,9 @@
 package Pl::PExpr::TokenUtils;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -14,9 +18,8 @@ sub is_atomic {
       if $self->is_string($stmt) || $self->is_number($stmt)
       || $self->is_var($stmt);
 
-  # s/// and tr/// are atomic tokens
-  return 1 if ref($stmt) eq 'PPI::Token::Regexp::Substitute';
-  return 1 if ref($stmt) eq 'PPI::Token::Regexp::Transliterate';
+  # Note: s/// and tr/// are NOT atomic - they need a target ($_)
+  # They're handled by is_regexp() and wrapped with '$_ =~' if standalone
 
   # $#arr - array last index
   return 1 if ref($stmt) eq 'PPI::Token::ArrayIndex';
@@ -28,8 +31,9 @@ sub is_regexp {
   my $self      = shift;
   my $stmt      = shift;
 
-  return 1 # , $stmt->content)
-      if ref($stmt) =~ /PPI::Token::Regexp::Match/;
+  # Match, Substitute (s///), or Transliterate (tr///, y///)
+  return 1
+      if ref($stmt) =~ /PPI::Token::Regexp::(Match|Substitute|Transliterate)/;
 
   return undef;
 }
@@ -41,6 +45,10 @@ sub is_string {
   return 1 # , $stmt->content)
       if ref($stmt) =~ /PPI::Token::Quote::Single/;
 
+  # q{...} - literal quoting, no interpolation (like single-quoted)
+  return 1
+      if ref($stmt) eq 'PPI::Token::Quote::Literal';
+
   if (ref($stmt) =~ /PPI::Token::Quote::Double/) {
     # Check if interpolation is needed
     my $content = $stmt->content();
@@ -49,8 +57,11 @@ sub is_string {
     $inner =~ s/^"//;
     $inner =~ s/"$//;
 
-    # Return 2 if interpolation needed, 1 if plain string
-    if ($inner =~ /(?<!\\)[\$\@]/) {
+    # Return 2 if interpolation needed, 1 if plain string.
+    # Strip \\ pairs first so \\$var is seen as interpolatable
+    # (two backslashes = one literal backslash, $ is still a variable).
+    (my $tmp = $inner) =~ s/\\\\/\x00\x00/g;
+    if ($tmp =~ /(?<!\\)[\$\@]/) {
       return 2;  # Needs interpolation
     }
     return 1; # Plain double-quoted string
@@ -65,7 +76,8 @@ sub is_string {
     $content =~ s/.$//;
 
     # Return 2 if interpolation needed, 1 if plain
-    if ($content =~ /(?<!\\)[\$\@]/) {
+    (my $tmp = $content) =~ s/\\\\/\x00\x00/g;
+    if ($tmp =~ /(?<!\\)[\$\@]/) {
       return 2;  # Needs interpolation
     }
     return 1;

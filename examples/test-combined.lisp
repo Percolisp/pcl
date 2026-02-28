@@ -31,7 +31,7 @@
 (pl-setf $b 3)
 
 ;; say "a=$a b=$b"
-(pl-say (pl-string_concat "a=" $a " b=" $b))
+(pl-say (pl-string-concat "a=" $a " b=" $b))
 
 ;; say "a+b=" . ($a + $b)
 (pl-say (pl-. "a+b=" (pl-+ $a $b)))
@@ -124,31 +124,31 @@
 (pl-setf $n 5)
 
 ;; say "n=$n"
-(pl-say (pl-string_concat "n=" $n))
+(pl-say (pl-string-concat "n=" $n))
 
 ;; $n++
 (pl-++-post $n)
 
 ;; say "n++=$n"
-(pl-say (pl-string_concat "n++=" $n))
+(pl-say (pl-string-concat "n++=" $n))
 
 ;; $n--
 (pl----post $n)
 
 ;; say "n--=$n"
-(pl-say (pl-string_concat "n--=" $n))
+(pl-say (pl-string-concat "n--=" $n))
 
 ;; $n += 10
 (pl-incf $n 10)
 
 ;; say "n+=10=$n"
-(pl-say (pl-string_concat "n+=10=" $n))
+(pl-say (pl-string-concat "n+=10=" $n))
 
 ;; $n -= 3
 (pl-decf $n 3)
 
 ;; say "n-=3=$n"
-(pl-say (pl-string_concat "n-=3=" $n))
+(pl-say (pl-string-concat "n-=3=" $n))
 
 ;; say ""
 (pl-say "")
@@ -222,7 +222,7 @@
 ;; while ($i < 3) {     say "i=$i";     $i++; }
 (pl-while (pl-< $i 3)
   ;; say "i=$i"
-    (pl-say (pl-string_concat "i=" $i))
+    (pl-say (pl-string-concat "i=" $i))
   
   ;; $i++
     (pl-++-post $i)
@@ -240,7 +240,7 @@
         ((pl-< $j 3))
         ((pl-++-post $j))
   ;; say "j=$j"
-    (pl-say (pl-string_concat "j=" $j))
+    (pl-say (pl-string-concat "j=" $j))
   
 )
 
@@ -264,7 +264,7 @@
 ;; foreach my $item (@items) {     say "item=$item"; }
 (pl-foreach ($item @items)
   ;; say "item=$item"
-    (pl-say (pl-string_concat "item=" $item))
+    (pl-say (pl-string-concat "item=" $item))
   
 )
 
@@ -287,7 +287,7 @@
 (defun pl-greet ($name)
   (block nil
     ;; return "Hello, $name!"
-        (pl-return (pl-string_concat "Hello, " $name "!"))
+        (pl-return (pl-string-concat "Hello, " $name "!"))
     
   )
 )
@@ -366,13 +366,13 @@
 (pl-setf $popped (pl-pop @arr))
 
 ;; say "popped=$popped"
-(pl-say (pl-string_concat "popped=" $popped))
+(pl-say (pl-string-concat "popped=" $popped))
 
 ;; my $shifted = shift @arr
 (pl-setf $shifted (pl-shift @arr))
 
 ;; say "shifted=$shifted"
-(pl-say (pl-string_concat "shifted=" $shifted))
+(pl-say (pl-string-concat "shifted=" $shifted))
 
 ;; unshift @arr, 0
 (pl-unshift @arr 0)
@@ -422,7 +422,7 @@
 (pl-setf $ref (pl-backslash $val))
 
 ;; say "val=$val"
-(pl-say (pl-string_concat "val=" $val))
+(pl-say (pl-string-concat "val=" $val))
 
 ;; say "deref=" . $$ref
 (pl-say (pl-. "deref=" (pl-$ $ref)))
@@ -431,7 +431,7 @@
 (pl-setf (pl-$ $ref) 100)
 
 ;; say "after mod, val=$val"
-(pl-say (pl-string_concat "after mod, val=" $val))
+(pl-say (pl-string-concat "after mod, val=" $val))
 
 ;; my $aref = [1, 2, 3]
 (pl-setf $aref (list 1 2 3))

@@ -1,5 +1,9 @@
 package Pl::PExpr::Config;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -64,15 +68,49 @@ has prefix => (
 
 # Named unary operators - these take ONE term only, with high precedence.
 # e.g., "defined $x && $y" parses as "(defined $x) && $y", not "defined($x && $y)"
+# From perldoc perlop: these bind tighter than binary operators
 has named_unary => (
   is        => 'ro',
   default   => sub {
     return {
+      # Core named unary
       'defined' => 1,
       'ref'     => 1,
       'scalar'  => 1,
       'exists'  => 1,
       'delete'  => 1,
+      # String functions
+      'chr'     => 1,
+      'ord'     => 1,
+      'length'  => 1,
+      'lc'      => 1,
+      'uc'      => 1,
+      'fc'      => 1,
+      'lcfirst' => 1,
+      'ucfirst' => 1,
+      'quotemeta' => 1,
+      'hex'     => 1,
+      'oct'     => 1,
+      # Math functions
+      'abs'     => 1,
+      'int'     => 1,
+      'sqrt'    => 1,
+      'sin'     => 1,
+      'cos'     => 1,
+      'exp'     => 1,
+      'log'     => 1,
+      'rand'    => 1,
+      'srand'   => 1,
+      # File tests (single arg)
+      'readlink' => 1,
+      'stat'    => 1,
+      'lstat'   => 1,
+      # Misc
+      'caller'  => 1,
+      'do'      => 1,
+      'eval'    => 1,
+      'wantarray' => 1,
+      'prototype' => 1,
     };
   },
 );
@@ -163,10 +201,10 @@ has precedences => (
         'le'  => { assoc => 'r', no => 2, prec => 40, chained => 1 },
         'ge'  => { assoc => 'r', no => 2, prec => 40, chained => 1 },
 
-        '=='  => { assoc => 'l', no => 2, prec => 30 }, # These are non assoc,
-        '!='  => { assoc => 'l', no => 2, prec => 30 }, # leave as 'l'. Should
-        'eq'  => { assoc => 'l', no => 2, prec => 30 }, # work.
-        'ne'  => { assoc => 'l', no => 2, prec => 30 },
+        '=='  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
+        '!='  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
+        'eq'  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
+        'ne'  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
         '<=>' => { assoc => 'l', no => 2, prec => 30 },
         'cmp' => { assoc => 'l', no => 2, prec => 30 },
 
@@ -233,10 +271,15 @@ has known_no_of_params => (
   is        => 'ro',
   default   => sub {
     return {
-      open       => [2,   3],
-      close      => 1,
-      pos        => [0,   1],
-      grep       => 2,
+      # Special compile-time tokens (zero-arg constants)
+      '__FILE__' => 0,
+      '__LINE__' => 0,
+      '__PACKAGE__' => 0,
+
+      open       => [1, 2, 3, -1],  # 1-arg reopen, 2-arg mode+file, 3-arg, 4+ for pipe
+      close      => [0, 1],         # close or close FH
+      pos        => [0, 1, -2],  # pos or pos SCALAR (defaults to $_)
+      grep       => -12,        # grep BLOCK|EXPR, LIST (1 before list)
       time       => 0,
       localtime  => [0,   1],
       gmtime     => [0,   1],
@@ -260,7 +303,8 @@ has known_no_of_params => (
       length     => [1,  -2],
       oct        => [1,  -2],
       ord        => [1,  -2],
-      pack       => 2,
+      pack       => -11,            # pack TEMPLATE, LIST (1 before list)
+      quotemeta  => [1,  -2],
       reverse    => [-1, -2],
       rindex     => [2,   3],
       sprintf    => -11,        # One parameter as default, before a list.
@@ -288,7 +332,7 @@ has known_no_of_params => (
       pop        => [1,  -3],   # pop ARRAY or pop (defaults to @_/@ARGV)
       push       => -12,        # push ARRAY, LIST (2+ args, first is array)
       unshift    => -12,        # unshift ARRAY, LIST
-      splice     => [2, 3, 4, -1],  # splice ARRAY, OFFSET, LENGTH, LIST
+      splice     => [1, 2, 3, 4, -1],  # splice ARRAY [, OFFSET [, LENGTH [, LIST]]]
 
       # Functions for list data
       # "grep", "join", "map", "qw//", "reverse", "sort", "unpack"
@@ -343,6 +387,7 @@ has known_no_of_params => (
       # Functions for fixed-length data or records
       # "pack", "read", "syscall", "sysread", "sysseek", "syswrite",
       # "unpack", "vec"
+      unpack     => [1, 2, -2], # unpack TEMPLATE [, EXPR] defaults to $_
 
       # ...Etc...
 
@@ -375,10 +420,11 @@ has known_no_of_params => (
       wantarray  => 0,          # wantarray() - check calling context
       caller     => [0, 1],     # caller() or caller(LEVEL)
       defined    => [1, -2],    # defined(EXPR) or defined
-      undef      => 0,          # undef - returns undefined value
+      prototype  => [0, 1],     # prototype or prototype FUNCTION
+      undef      => [0, 1],     # undef or undef EXPR (undefines variable)
 
       # List/hash functions (in runtime but need specs)
-      split      => [1, 2, 3],  # split /PATTERN/, EXPR, LIMIT
+      split      => [0, 1, 2, 3, -2],  # split [/PATTERN/ [, EXPR [, LIMIT]]] defaults to $_
       join       => -12,        # join EXPR, LIST (1 before list)
       keys       => 1,          # keys HASH
       values     => 1,          # values HASH
@@ -393,6 +439,9 @@ has known_no_of_params => (
       warn       => -1,         # warn LIST
       exit       => [0, 1],     # exit or exit EXPR
       system     => -1,         # system CMD or system PROG, ARGS
+      do         => 1,          # do BLOCK or do FILE (always 1 arg)
+      eval       => [0, 1, -2], # eval EXPR or eval BLOCK or eval (defaults to $_)
+      require    => [0, 1],     # require or require VERSION or require MODULE
 
       # Misc
       sleep      => [0, 1],     # sleep or sleep EXPR

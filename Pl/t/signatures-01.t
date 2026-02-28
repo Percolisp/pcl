@@ -69,7 +69,7 @@ diag "-------- Signatures with defaults:";
 {
     my $sig = parse_sig('($x, $y = $x * 2)');
     is($sig->{min_params}, 1, 'Complex default: min_params = 1');
-    is($sig->{params}[1]{default_cl}, '(pcl:pl-* $x 2)', 'Complex default compiled');
+    is($sig->{params}[1]{default_cl}, '(pl-* $x 2)', 'Complex default compiled');
 }
 
 
@@ -117,8 +117,8 @@ diag "-------- Old-style prototypes:";
 {
     my $sig = parse_sig('(\@$)');
     is($sig->{is_proto}, 1, 'Ref proto: is_proto = 1');
-    is($sig->{params}[0]{name}, '\@', 'Array ref sigil');
-    is($sig->{params}[1]{name}, '$', 'Scalar sigil');
+    is($sig->{params}[0]{proto_type}, '\@', 'Array ref sigil');
+    is($sig->{params}[1]{proto_type}, '$', 'Scalar sigil');
 }
 
 

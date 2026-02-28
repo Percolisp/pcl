@@ -46,13 +46,13 @@
 (pl-setf (pl-$ $ref) 100)
 
 ;; say "after $$ref=100, x=" . $x
-(pl-say (pl-. (pl-string_concat "after " "$") $x))
+(pl-say (pl-. (pl-string-concat "after " "$") $x))
 
 ;; $$ref += 5
 (pl-incf (pl-$ $ref) 5)
 
 ;; say "after $$ref+=5, x=" . $x
-(pl-say (pl-. (pl-string_concat "after " "$") $x))
+(pl-say (pl-. (pl-string-concat "after " "$") $x))
 
 ;; say ""
 (pl-say "")

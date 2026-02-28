@@ -1,0 +1,126 @@
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 425.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 430.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 434.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 286.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 291.
+Use of uninitialized value $perl_name in exists at Pl/ExprToCL.pm line 125.
+Use of uninitialized value $perl_name in pattern match (m//) at Pl/ExprToCL.pm line 128.
+Use of uninitialized value $perl_name in concatenation (.) or string at Pl/ExprToCL.pm line 138.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 465.
+Use of uninitialized value $name in hash element at Pl/Environment.pm line 237.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 425.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 430.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 434.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 286.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 291.
+Use of uninitialized value $perl_name in exists at Pl/ExprToCL.pm line 125.
+Use of uninitialized value $perl_name in pattern match (m//) at Pl/ExprToCL.pm line 128.
+Use of uninitialized value $perl_name in concatenation (.) or string at Pl/ExprToCL.pm line 138.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 465.
+Use of uninitialized value $name in hash element at Pl/Environment.pm line 237.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 219.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 222.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 225.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 228.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 231.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 234.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 237.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 240.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 243.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 246.
+Use of uninitialized value $content in pattern match (m//) at Pl/ExprToCL.pm line 251.
+Use of uninitialized value $key in concatenation (.) or string at Pl/ExprToCL.pm line 765.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in concatenation (.) or string at Pl/Parser.pm line 815.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in concatenation (.) or string at Pl/Parser.pm line 815.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 425.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 430.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 434.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 286.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 291.
+Use of uninitialized value $perl_name in exists at Pl/ExprToCL.pm line 125.
+Use of uninitialized value $perl_name in pattern match (m//) at Pl/ExprToCL.pm line 128.
+Use of uninitialized value $perl_name in concatenation (.) or string at Pl/ExprToCL.pm line 138.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 465.
+Use of uninitialized value $name in hash element at Pl/Environment.pm line 237.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 425.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 430.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 434.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 286.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 291.
+Use of uninitialized value $perl_name in exists at Pl/ExprToCL.pm line 125.
+Use of uninitialized value $perl_name in pattern match (m//) at Pl/ExprToCL.pm line 128.
+Use of uninitialized value $perl_name in concatenation (.) or string at Pl/ExprToCL.pm line 138.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 447.
+Use of uninitialized value $func_name in string eq at Pl/ExprToCL.pm line 465.
+Use of uninitialized value $name in hash element at Pl/Environment.pm line 237.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 219.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 222.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 225.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 228.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 231.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 234.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 237.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 240.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 243.
+Use of uninitialized value $content in string eq at Pl/ExprToCL.pm line 246.
+Use of uninitialized value $content in pattern match (m//) at Pl/ExprToCL.pm line 251.
+Use of uninitialized value $key in concatenation (.) or string at Pl/ExprToCL.pm line 765.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in concatenation (.) or string at Pl/Parser.pm line 815.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 802.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 805.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in string eq at Pl/Parser.pm line 808.
+Use of uninitialized value $first_word in concatenation (.) or string at Pl/Parser.pm line 815.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.
+Use of uninitialized value $idx in concatenation (.) or string at Pl/ExprToCL.pm line 747.

@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 21;
+use Test::More tests => 23;
 BEGIN { use_ok('Pl::Parser') };
 BEGIN { use_ok('Pl::Environment') };
 
@@ -42,7 +42,7 @@ output_contains('bless({}, "MyClass");',
                 'bless recognized as function');
 
 output_contains('my $obj = bless {}, "MyClass";',
-                '(pcl:pl-setf $obj (pl-bless',
+                '(box-set $obj (pl-bless',
                 'bless in assignment');
 
 output_contains('bless $ref, "Class";',
@@ -59,7 +59,7 @@ output_contains('ref($obj);',
                 'ref function');
 
 output_contains('my $type = ref($x);',
-                '(pcl:pl-setf $type (pl-ref $x))',
+                '(box-set $type (pl-ref $x))',
                 'ref in assignment');
 
 
@@ -68,11 +68,11 @@ diag "";
 diag "-------- Constructor pattern:";
 
 output_contains('sub new { bless {}, shift; }',
-                '(defun pl-new',
-                'Constructor generates defun');
+                '(pl-sub pl-new',
+                'Constructor generates pl-sub');
 
 output_contains('sub new { bless {}, shift; }',
-                '(pl-bless (pl-hash ) (pl-shift @_))',
+                '(pl-bless (make-pl-box (pl-hash )) (pl-shift @_))',
                 'Constructor bless pattern');
 
 
@@ -132,8 +132,28 @@ package MyClass {
 };
     my $result = parse_code($code);
     like($result, qr/;;; package MyClass/, 'Full class: package start');
-    like($result, qr/\(defun pl-new/, 'Full class: constructor defined');
+    like($result, qr/\(pl-sub pl-new/, 'Full class: constructor defined');
     like($result, qr/;;; end package MyClass/, 'Full class: package end');
+}
+
+
+# ========================================
+diag "";
+diag "-------- Regression tests (session 3):";
+
+# Regression: bless with bareword class ending in ::
+# Was parsing as two separate expressions instead of one bless call
+output_contains('bless \$x, o::',
+                '(pl-bless (pl-backslash $x) "o")',
+                'Regression: bless with o:: bareword class');
+
+# Regression: bless with shift (funcall with args, not simple bareword)
+# Was defaulting to "main" because shift funcall has 2 children
+{
+    my $code = 'sub new { bless {}, shift; }';
+    my $result = parse_code($code);
+    like($result, qr/\(pl-bless \(make-pl-box \(pl-hash \)\) \(pl-shift/,
+         'Regression: bless {}, shift generates shift call');
 }
 
 

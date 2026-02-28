@@ -1,5 +1,9 @@
 package Pl::Environment;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -58,8 +62,43 @@ Signature info includes:
 
 has prototypes => (
     is => 'rw',
-    default => sub { {} },
+    default => sub { _builtin_prototypes() },
 );
+
+# Built-in function prototypes for functions that take bareword filehandles.
+# The '*' prototype means "accepts bareword as filehandle".
+# NOTE: We don't set min_params here - that's handled by Config.pm's known_no_of_params.
+# These prototypes only provide the '*' type info for post-processing bareword filehandles.
+sub _builtin_prototypes {
+    return {
+        # File I/O - these take filehandle as first arg
+        'open'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'close'     => { params => [{proto_type => '*'}], is_proto => 1 },
+        'binmode'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'eof'       => { params => [{proto_type => '*'}], is_proto => 1 },
+        'tell'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'seek'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'truncate'  => { params => [{proto_type => '*'}], is_proto => 1 },
+        'flock'     => { params => [{proto_type => '*'}], is_proto => 1 },
+        'read'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'sysread'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'syswrite'  => { params => [{proto_type => '*'}], is_proto => 1 },
+        'sysseek'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'fileno'    => { params => [{proto_type => '*'}], is_proto => 1 },
+        'getc'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'stat'      => { params => [{proto_type => '*'}], is_proto => 1 },
+        'lstat'     => { params => [{proto_type => '*'}], is_proto => 1 },
+        # Directory operations
+        'opendir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'readdir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'closedir'  => { params => [{proto_type => '*'}], is_proto => 1 },
+        'rewinddir' => { params => [{proto_type => '*'}], is_proto => 1 },
+        'seekdir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        'telldir'   => { params => [{proto_type => '*'}], is_proto => 1 },
+        # Note: print/say/printf are NOT included here - they have special handling
+        # in PExpr.pm that deals with their complex filehandle detection logic.
+    };
+}
 
 =head2 filehandles
 
@@ -102,6 +141,43 @@ Current scope nesting level. Starts at 0.
 =cut
 
 has scope_level => (
+    is => 'rw',
+    default => 0,
+);
+
+=head2 scope_stack
+
+Array of scope frames for tracking pragmas and variable declarations.
+Each frame is { pragmas => {}, declared_vars => {} }.
+Pragmas are inherited from parent on push_scope; declared_vars start fresh.
+
+=cut
+
+has scope_stack => (
+    is => 'rw',
+    default => sub { [{ pragmas => {}, declared_vars => {} }] },
+);
+
+=head2 undeclared_vars
+
+Accumulates variables that need file-level defvar (referenced but not
+declared in any enclosing scope). Built during code generation.
+
+=cut
+
+has undeclared_vars => (
+    is => 'rw',
+    default => sub { {} },
+);
+
+=head2 in_subroutine
+
+Counter tracking subroutine nesting depth. 0 = top level, >0 = inside sub.
+Used to determine whether shift/pop should default to @_ or @ARGV.
+
+=cut
+
+has in_subroutine => (
     is => 'rw',
     default => 0,
 );
@@ -153,6 +229,72 @@ Used to distinguish class names from function calls in method calls:
 has known_packages => (
     is => 'rw',
     default => sub { {} },
+);
+
+=head2 referenced_packages
+
+Hash of package names referenced in code (e.g., from Foo::bar() calls).
+Used to pre-declare packages that might not be defined until runtime.
+
+=cut
+
+has referenced_packages => (
+    is => 'rw',
+    default => sub { {} },
+);
+
+=head2 our_variables
+
+Hash of package variables declared with 'our'.
+Keys are "Package::$varname", values are 1.
+
+    our_variables => { 'Counter::$count' => 1 }
+
+=cut
+
+has our_variables => (
+    is => 'rw',
+    default => sub { {} },
+);
+
+=head2 isa_declarations
+
+Hash of @ISA declarations per package.
+Keys are package names, values are arrayrefs of parent package names.
+
+    isa_declarations => { 'Child' => ['Parent1', 'Parent2'] }
+
+=cut
+
+has isa_declarations => (
+    is => 'rw',
+    default => sub { {} },
+);
+
+=head2 declared_subs
+
+Array of subs declared in this file, with their package names.
+Each entry is { name => 'subname', package => 'PackageName' }.
+Used to emit forward declarations so top-level code can call subs
+defined later in the file.
+
+=cut
+
+has declared_subs => (
+    is => 'rw',
+    default => sub { [] },
+);
+
+=head2 source_file
+
+The source filename being parsed. Used for __FILE__ token expansion.
+Defaults to '-' (stdin) if not set.
+
+=cut
+
+has source_file => (
+    is => 'rw',
+    default => '-',
 );
 
 =head1 METHODS
@@ -268,6 +410,13 @@ Enters a new scope level. Called when entering a block.
 sub push_scope {
     my $self = shift;
     $self->scope_level($self->scope_level + 1);
+
+    # Push new scope frame: inherit pragmas from parent, fresh declared_vars
+    my $parent = $self->scope_stack->[-1];
+    push @{$self->scope_stack}, {
+        pragmas      => { %{$parent->{pragmas}} },
+        declared_vars => {},
+    };
 }
 
 =head2 pop_scope()
@@ -294,8 +443,90 @@ sub pop_scope {
         }
     }
 
+    # Pop scope frame (never pop below initial frame)
+    pop @{$self->scope_stack} if @{$self->scope_stack} > 1;
+
     # Decrease scope level (but never below 0)
     $self->scope_level($level - 1) if $level > 0;
+}
+
+=head2 set_pragma($name, $val)
+
+Sets a pragma on the current scope frame.
+
+    $env->set_pragma('use_integer', 1);
+
+=cut
+
+sub set_pragma {
+    my ($self, $name, $val) = @_;
+    $self->scope_stack->[-1]{pragmas}{$name} = $val;
+}
+
+=head2 has_pragma($name)
+
+Returns the value of a pragma in the current scope, or undef if not set.
+
+    if ($env->has_pragma('use_integer')) { ... }
+
+=cut
+
+sub has_pragma {
+    my ($self, $name) = @_;
+    return $self->scope_stack->[-1]{pragmas}{$name};
+}
+
+=head2 declare_var($name)
+
+Records a variable declaration (my/our/local/state) in the current scope frame.
+
+    $env->declare_var('$x');
+
+=cut
+
+sub declare_var {
+    my ($self, $name) = @_;
+    $self->scope_stack->[-1]{declared_vars}{$name} = 1;
+}
+
+=head2 is_var_declared($name)
+
+Checks if a variable is declared in any enclosing scope (innermost to outermost).
+
+    if ($env->is_var_declared('$x')) { ... }
+
+=cut
+
+sub is_var_declared {
+    my ($self, $name) = @_;
+    for my $frame (reverse @{$self->scope_stack}) {
+        return 1 if $frame->{declared_vars}{$name};
+    }
+    return 0;
+}
+
+=head2 add_undeclared_var($name)
+
+Adds a variable to the set needing file-level defvar.
+
+    $env->add_undeclared_var('$x');
+
+=cut
+
+sub add_undeclared_var {
+    my ($self, $name) = @_;
+    $self->undeclared_vars->{$name} = 1;
+}
+
+=head2 get_undeclared_vars()
+
+Returns sorted list of variables needing file-level defvar.
+
+=cut
+
+sub get_undeclared_vars {
+    my $self = shift;
+    return [sort keys %{$self->undeclared_vars}];
 }
 
 =head2 is_lvalue_sub($name)
@@ -396,6 +627,114 @@ sub is_package {
     my $self = shift;
     my $name = shift;
     return exists $self->known_packages->{$name};
+}
+
+=head2 add_referenced_package($name)
+
+Records that a package is referenced in code (e.g., via Foo::bar() call).
+Only records if the package is not already declared via known_packages.
+
+=cut
+
+sub add_referenced_package {
+    my $self = shift;
+    my $name = shift;
+    return if exists $self->known_packages->{$name};
+    $self->referenced_packages->{$name} = 1;
+}
+
+=head2 get_undeclared_packages()
+
+Returns list of packages that are referenced but not declared.
+Used to emit pre-declarations at the top of generated code.
+
+=cut
+
+sub get_undeclared_packages {
+    my $self = shift;
+    my @pkgs = grep { !exists $self->known_packages->{$_} }
+               keys %{$self->referenced_packages};
+    return [sort @pkgs];
+}
+
+=head2 add_our_variable($pkg, $var)
+
+Records that a variable was declared with 'our' in the given package.
+
+    $env->add_our_variable('Counter', '$count');
+
+=cut
+
+sub add_our_variable {
+    my ($self, $pkg, $var) = @_;
+    $self->our_variables->{"${pkg}::${var}"} = 1;
+}
+
+=head2 is_our_variable($pkg, $var)
+
+Returns true if $var was declared with 'our' in $pkg.
+
+    if ($env->is_our_variable('Counter', '$count')) { ... }
+
+=cut
+
+sub is_our_variable {
+    my ($self, $pkg, $var) = @_;
+    return exists $self->our_variables->{"${pkg}::${var}"};
+}
+
+=head2 set_isa($pkg, \@parents)
+
+Records the @ISA declaration for a package.
+
+    $env->set_isa('Child', ['Parent1', 'Parent2']);
+
+=cut
+
+sub set_isa {
+    my ($self, $pkg, $parents) = @_;
+    $self->isa_declarations->{$pkg} = $parents;
+}
+
+=head2 get_isa($pkg)
+
+Returns the @ISA for a package, or empty arrayref if not set.
+
+    my $parents = $env->get_isa('Child');  # ['Parent1', 'Parent2']
+
+=cut
+
+sub get_isa {
+    my ($self, $pkg) = @_;
+    return $self->isa_declarations->{$pkg} // [];
+}
+
+=head2 add_declared_sub($name, $package)
+
+Records that a sub was declared in the given package.
+Used to emit forward declarations.
+
+    $env->add_declared_sub('greet', 'main');
+
+=cut
+
+sub add_declared_sub {
+    my ($self, $name, $package) = @_;
+    push @{$self->declared_subs}, { name => $name, package => $package };
+}
+
+=head2 get_declared_subs()
+
+Returns arrayref of all declared subs with their packages.
+
+    my $subs = $env->get_declared_subs();
+    # [ { name => 'foo', package => 'main' }, { name => 'bar', package => 'MyClass' } ]
+
+=cut
+
+sub get_declared_subs {
+    my $self = shift;
+    return $self->declared_subs;
 }
 
 =head2 merge($other_env)

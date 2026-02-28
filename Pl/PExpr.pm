@@ -1,5 +1,9 @@
 package Pl::PExpr;
 
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 use v5.30;
 use strict;
 use warnings;
@@ -31,45 +35,7 @@ use constant {
 use Exporter 'import';
 our @EXPORT_OK = qw(SCALAR_CTX LIST_CTX VOID_CTX);
 
-# Expects a statement/expression in PPI.
-
-# Keep configuration for a scope. Keep code that should be added after
-# scope.
-
-# XXXX Postfix 'if' will look like a word. What more cases do we need
-#      to recognize?? That should be recognized before calling this.
-#      p-fix 'if' isn't expr, must be full statement. But is expr in PPI.
-
-# XXXX This also need to keep track ofcontexts, scalar och list!
-#      All calls get that as an extra parameter? Also, need to keep
-#      stack for uses of caller().
-
-# XXXX Handle default $_. (Just add automagic param for chomp etc?)
-#      Mark ops which can take that default $_ in op list??
-#      So needs to support varying no of params for ops.
-
-# XXXX Logic here for @_? Or do in destination?
-
-# XXXX Range '..'.
-
-# XXXX ':?'
-
-# XXXX &sub(), &$subref(), ref to the running sub with __SUB__->().
-#      Note that &foo(...) ignores prototype checks! Page 326.
-
-# XXXX Tests for 'isa'.
-
-# XXXX Reread about prototypes.
-
-# XXXX 'grep { ... } <expr>' etc.
-
 # XXXX Unary ops have a different prio compared to list ops, se page 106.
-
-# XXXX Assignments '+=', '-=', '*=', '**=', etc.
-
-# XXXX Does the '//' op work, like '$x // $y'?
-
-# State like use v5.20, known cases with subs + parameter specs, etc.
 
 # XXXX From 5.36 can do sub foo :lvalue ($x, $y = 1, @z) { .... }
 #      https://perldoc.perl.org/perlsub#Signatures
@@ -89,33 +55,16 @@ sub SET_DEBUG { $DEBUG_VAL = shift; }
 
 
 
-# Functions with known number of parameters (and types).
-# Should also have declarations.
-
-# XXXX Also need to rething subs with declared prototypes etc. (Does
-#      constants for e.g. tcp/ip integratiion need special handling??)
-
-# XXXX Need to be extensible, for Prototypes.
-
-# XXXXX Need to flag for if it returns different in scalar/list contexts.
-
-# XXXXX Would it be shorter to list all funs not defaulting to $_?
-
-# -1 means list. -1x means x parameters before a list.
-# -2 means use $_ as default.
-
-# perldoc perlfun:
-
-
 # Expression:
 has e => (
   is        => 'ro',
   required  => 0,
 );
 
-# Parts get GC:ed, if there are no references to the PPI object!
-# So keep the PPI::Document alive to prevent tokens from becoming empty.
-# (This is probably only a problem when writing tests.)
+# Parts of PPI get GC:ed, if there are no references to the PPI
+# object!  So keep the PPI::Document alive to prevent tokens from
+# becoming empty.  (This is probably only a problem when writing
+# tests.)
 has full_PPI => (
   is        => 'ro',
   required  => 0,
@@ -140,7 +89,7 @@ has declarations => (
 );
 
 # String interpolation handler
-has string_interpolator => (
+has str_interpol => (
   is       => 'ro',
   default  => sub { Pl::PExpr::StringInterpolation->new() },
 );
@@ -228,14 +177,8 @@ sub parse_expr_to_tree {
   # Handle declarators (my, our, state, local)
   @exprs = $self->extract_declarations(\@exprs);
 
-  # XXXX Get list of filehandles? Of subs with know no of params?
-  #      Can prototypes get FH as params? If so, add proto for open/close/etc
-
   # XXXX Clear any stored temporary stuff??
   # Clear node tree here?
-
-  # XXXX Find any postfix 'if' before calling this?
-
   my $root_id   = $self->parse(\@exprs);
   # say "--------- Root id: $root_id"   if 1 & DEBUG;
   $self->set_top_node_id($root_id);
@@ -408,10 +351,6 @@ sub extract_declarations {
 
 # ----------------------------------------------------------------------
 
-# XXXX Replace comparing ->{type} to 'progn', 'funcall', etc... :-(
-# XXXX Handle chained ops.
-# XXXX Handle ?:.
-
 sub parse {
   my $self      = shift;
   my $e         = shift // $self->e;
@@ -427,6 +366,12 @@ sub parse {
   say "parse: //////  After calling handle_subcalls, in param:"  if 1 & DEBUG;
   say dump($e)      if 1 & DEBUG;
 
+  # Empty expression: () or empty list — generate an empty progn node.
+  # In list context this becomes (vector), in scalar context (progn).
+  if (scalar(@$e) == 0) {
+    my ($node, $id) = $self->make_node_insert('progn');
+    return $id;
+  }
 
   # - - - Handle just one item:
   if (scalar(@$e) == 1) {
@@ -471,7 +416,7 @@ sub parse {
       if ($str_type && $str_type == 2) {
         # String needs interpolation
         say "parse(): String needs interpolation"      if 1 & DEBUG;
-        return $self->string_interpolator->parse_interpolated_string($self,$e1);
+        return $self->str_interpol->parse_interpolated_string($self, $e1);
       }
       
       # Simple atomic value
@@ -559,27 +504,71 @@ sub parse {
     }
 
 
-    # - - - Readline operator <FH> or <$fh>?
+    # - - - Readline operator <FH> or <$fh>, or file glob <*.txt>?
     if (ref($e1) eq 'PPI::Token::QuoteLike::Readline') {
-      say "parse(): Found readline operator"         if 1 & DEBUG;
+      say "parse(): Found readline/glob operator"    if 1 & DEBUG;
       my $content = $e1->content;
-      # Extract the filehandle from <...>
+      # Extract the content from <...>
       $content =~ /^<(.*)>$/;
-      my $fh_name = $1;
+      my $inner = $1;
+
+      # Distinguish between readline and file glob:
+      # - Glob: contains *, ?, [, ], {, } or looks like a path with /
+      # - Readline: bareword filehandle (STDIN), variable ($fh), or empty
+      my $is_glob = 0;
+      if (defined $inner && $inner ne '') {
+        # Check for glob metacharacters or path-like content
+        if ($inner =~ /[\*\?\[\]\{\}]/ ||           # glob metacharacters
+            ($inner =~ /\// && $inner !~ /^\$/)) {  # path with / (not variable)
+          $is_glob = 1;
+        }
+      }
+
+      if ($is_glob) {
+        # File glob: <*.txt>, </path/*.log>, etc.
+        say "parse(): Treating as file glob"         if 1 & DEBUG;
+        my ($node, $node_id) = $self->make_node_insert('glob');
+
+        # Store the pattern - handle interpolation if contains $var
+        if ($inner =~ /[\$\@]/) {
+          # Contains variable - needs interpolation at runtime
+          # Create a fake double-quoted string token for the interpolation parser
+          my $fake_str = PPI::Token::Quote::Double->new(qq{"$inner"});
+          my $interp_id = $self->str_interpol->parse_interpolated_string($self, $fake_str);
+          # The interpolation returns a string_concat node, add its children
+          my $interp_node = $self->get_a_node($interp_id);
+          if ($self->is_internal_node_type($interp_node) && $interp_node->{type} eq 'string_concat') {
+            my $interp_kids = $self->get_node_children($interp_id);
+            for my $part_id (@$interp_kids) {
+              $self->add_child_to_node($node_id, $part_id);
+            }
+          } else {
+            $self->add_child_to_node($node_id, $interp_id);
+          }
+        } else {
+          # Static pattern - store as literal string
+          my $str_token = PPI::Token::Quote::Double->new(qq{"$inner"});
+          my $str_id = $self->make_node($str_token);
+          $self->add_child_to_node($node_id, $str_id);
+        }
+
+        say "parse(): Made glob node $node_id"       if 1 & DEBUG;
+        return $node_id;
+      }
 
       # Create a readline node with the filehandle
       my ($node, $node_id) = $self->make_node_insert('readline');
 
-      if (defined $fh_name && $fh_name ne '') {
+      if (defined $inner && $inner ne '') {
         # Has a filehandle - could be bareword (STDIN) or variable ($fh)
-        if ($fh_name =~ /^\$/) {
+        if ($inner =~ /^\$/) {
           # Variable filehandle like $fh
-          my $sym_token = PPI::Token::Symbol->new($fh_name);
+          my $sym_token = PPI::Token::Symbol->new($inner);
           my $fh_id = $self->make_node($sym_token);
           $self->add_child_to_node($node_id, $fh_id);
         } else {
           # Bareword filehandle like STDIN, FH
-          my $word_token = PPI::Token::Word->new($fh_name);
+          my $word_token = PPI::Token::Word->new($inner);
           my $fh_id = $self->make_node($word_token);
           $self->add_child_to_node($node_id, $fh_id);
         }
@@ -608,7 +597,8 @@ sub parse {
       # Check if interpolation is needed (has $ or @)
       if ($cmd =~ /[\$\@]/) {
         say "parse(): Backtick needs interpolation"  if 1 & DEBUG;
-        $cmd_id = $self->string_interpolator->parse_interpolated_string($self, $str_token);
+        $cmd_id = $self->str_interpol->parse_interpolated_string($self,
+								 $str_token);
       } else {
         $cmd_id = $self->make_node($str_token);
       }
@@ -645,7 +635,24 @@ sub parse {
       return $id;
     }
 
+    # - - - Compiled regex qr//
+    if (ref($e1) eq 'PPI::Token::QuoteLike::Regexp') {
+      say "parse(): Found qr// regex"                if 1 & DEBUG;
+      my $id = $self->make_node($e1);
+      say "parse(): Made qr node $id"                if 1 & DEBUG;
+      return $id;
+    }
+
+    # - - - Heredoc <<'EOF' or <<"EOF" or <<EOF
+    if (ref($e1) eq 'PPI::Token::HereDoc') {
+      say "parse(): Found heredoc"                   if 1 & DEBUG;
+      my $id = $self->make_node($e1);
+      say "parse(): Made heredoc node $id"           if 1 & DEBUG;
+      return $id;
+    }
+
     # - - - What else can it be?? :-)
+    warn "Handle single node of unknown type: ref='" . ref($e1) . "'\n";
     die "Handle single node of unknown type. Dump:\n" . dump($e1);
   }
 
@@ -721,10 +728,18 @@ sub parse {
         && $term->start() eq '['
         && $i > 0
         && $self->is_internal_node_type($e->[$i-1]);
+    # KV slice: %hash{keys} - PPI parses this as Symbol '%h' + Block '{keys}'
+    my $is_kv_slice_block = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i > 0
+        && !$self->is_internal_node_type($e->[$i-1])
+        && $self->is_var($e->[$i-1])
+        && $e->[$i-1]->content() =~ /^%/;
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
-        && !$is_constructor_subscript;
+        && !$is_constructor_subscript
+        && !$is_kv_slice_block;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -795,7 +810,7 @@ sub parse {
         my $pst_id  = $nxt->{id};
         $self->prepend_child_to_node($pst_id, $pre_id);
         splice @$e, $i-1, 2;
-        $i--;  # Adjust for removed elements so we recheck for following subscript
+        $i--;  # Adjust for removed elements so recheck for following subscript
         next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/
@@ -832,6 +847,22 @@ sub parse {
         splice @$e, $i, 2;  # Remove -> and method name
         $i--;
         next;
+      } elsif (!$self->is_internal_node_type($nxt)
+               && $nxt->content() =~ /^\$/) {
+        # Case 1D: X->$foo (variable method name, no parentheses)
+        # Method call with method name in a variable, no arguments
+        # e.g., $obj->$method or $_[0]->$probe
+        my $pre_id = $self->parse([$pre]);
+        my $meth_id = $self->parse([$nxt]);  # Variable containing method name
+
+        my($node, $id) = $self->make_node_insert('methodcall');
+        $self->add_child_to_node($id, $pre_id);  # Object
+        $self->add_child_to_node($id, $meth_id); # Method (name in $variable)
+
+        $e->[$i-1] = $node;
+        splice @$e, $i, 2;  # Remove -> and $variable
+        $i--;
+        next;
       } else {
         say "??? Term:", dump($term), "\nNext is:", dump $nxt;
         say " Next 2:", dump $nxt_2;
@@ -848,6 +879,17 @@ sub parse {
       # If it was X->[] or X->{}:
       if ($is_reference) {
         $type   = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
+      } elsif ($self->is_var($pre_n)
+               && $pre_n->content() =~ /^\$/) {
+        # Check for $$scalar[n] or $$scalar{key} pattern:
+        # If the element before $pre is a Cast '$', this is $$scalar[n]
+        # (equivalent to $scalar->[n]) — use ref access.
+        my $cast_before = ($i >= 2) ? $e->[$i-2] : undef;
+        if ($cast_before
+            && ref($cast_before) eq 'PPI::Token::Cast'
+            && $cast_before->content() eq '$') {
+          $type = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
+        }
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^@/) {
         $type   = "slice_$type";
@@ -884,6 +926,38 @@ sub parse {
       next;
     }
 
+    # Handle KV slice: %hash{keys} - PPI gives Symbol '%h' + Block '{keys}'
+    # (unlike @h{keys} which gives Subscript)
+    if (ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && !$self->is_internal_node_type($pre)
+        && $self->is_var($pre)
+        && $pre->content() =~ /^%/) {
+      my $pre_id = $self->parse([$pre]);
+      my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
+
+      my @ix    = $term->children();
+      my $ix_id = $self->parse(\@ix);
+
+      $self->add_child_to_node($id, $pre_id);
+
+      # Flatten progn children (comma-separated keys)
+      my $n = $self->get_a_node($ix_id);
+      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+        my $kids = $self->get_node_children($ix_id);
+        for my $param_id (@$kids) {
+          $self->add_child_to_node($id, $param_id);
+        }
+      } else {
+        $self->add_child_to_node($id, $ix_id);
+      }
+
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;
+      $i--;
+      next;
+    }
+
     # Handle Constructor [ ] after funcall/methodcall - PPI uses Constructor
     # instead of Subscript when subscript follows a method call
     # e.g., $obj->method()[$i] has [$i] as Constructor, not Subscript
@@ -909,12 +983,6 @@ sub parse {
 
 
   # - - - handle ops:
-
-  # XXXX Can a code block be declared as a parameter in an expr,
-  #      except for prototype declarations?? Read up if we can get
-  #      that.  Note that a 'sub { ... } returns a 'CODE'. There are
-  #      no operations on that.
-  #      Like: foobar(4, sub { ... }, 5);
 
   # Loop, replacing highest precedence 'op' with small tree:
   while(1) {
@@ -975,40 +1043,40 @@ sub parse {
     # Create the tree:
     my $no_pars = $op_info->{no};
 
-    # Handle chained compared:
-    if ($self->op_is_chained($op_info) && $hi_ix >= 3) {
-      # The chained ops are specified as "r" associative, so we will
-      # get the last of the chain here.
-      # t1 op t2 op t3, like "17 <= $foo <= 42".
-      my $prev_2= $e->[$hi_ix-2];
-      my $info_2= $self->op_info($prev_2);
+    # Handle chained comparison (e.g. 1 < $x < 10, or a == b != c == d):
+    # With assoc='r', hi_ix is the rightmost chained op.  Scan left to find
+    # the leftmost chained op in this run, then build a single flat chain node
+    # covering all N terms and N-1 operators.
+    if ($self->op_is_chained($op_info)) {
+      my $left = $hi_ix;
+      while ($left >= 2) {
+        my $prev_op   = $e->[$left - 2];
+        my $prev_info = $self->op_info($prev_op);
+        last unless defined $prev_info && $self->op_is_chained($prev_info);
+        $left -= 2;
+      }
 
-      if (defined $info_2 && $self->op_is_chained($info_2)) {
-        # Chained.
-        my $prev_3 = $e->[$hi_ix-3];            # 1st term is 3 back from op
-        my $id_3   = $self->parse([$prev_3]);
-
-        my $id_op2 = $self->make_node($prev_2); # 1st op is 2 back.
-
-        my $prev   = $e->[$hi_ix-1];            # Prev is 2nd term.
-        my $id_prev= $self->parse([$prev]);
-
-        my $id_op  = $self->make_node($op);     # The 1st op is at ix.
-
-        my $post   = $e->[$hi_ix+1];            # Prev is 2nd term.
-        my $id_post= $self->parse([$post]);
+      if ($left < $hi_ix) {
+        # Chain of 2+ operators spanning positions $left-1 .. $hi_ix+1.
+        # Positions alternate: term at even offset, op at odd offset from $left-1.
+        my @chain_kids;
+        for my $pos (($left - 1) .. ($hi_ix + 1)) {
+          my $offset = $pos - ($left - 1);
+          if ($offset % 2 == 0) {
+            push @chain_kids, $self->parse([$e->[$pos]]);   # term
+          } else {
+            push @chain_kids, $self->make_node($e->[$pos]); # op
+          }
+        }
 
         my($top_node, $top_id) = $self->make_node_insert('postfix_op');
-        $self->add_child_to_node($top_id, $id_3);    # First term in chain
-        $self->add_child_to_node($top_id, $id_op2);  # First op in chain
-        $self->add_child_to_node($top_id, $id_prev); # Second term in chain
-        $self->add_child_to_node($top_id, $id_op);   # Second op in chain
-        $self->add_child_to_node($top_id, $id_post); # Third term in chain
+        $self->add_child_to_node($top_id, $_) for @chain_kids;
 
-        $e->[$hi_ix-3] = $top_node;
-        splice @$e, $hi_ix-2, 4;
+        $e->[$left - 1] = $top_node;
+        splice @$e, $left, ($hi_ix + 1) - $left + 1;
         next;
       }
+      # else: single isolated chained op — fall through to binary node
     }
 
 # say dump $e; say "---"; say dump $op_info; say dump $self->node_tree; exit 0;
@@ -1021,7 +1089,7 @@ sub parse {
 
       # Ugly. Set flag for parsing this, so it doesn't add '$_ =~' to regexp:
       my $match_op = ($op_name eq '=~' || $op_name eq '!~');
-      if ($match_op && ref($post) =~ /Regexp::Match/) {
+      if ($match_op && ref($post) =~ /PPI::Token::Regexp/) {
         $post->{_has_match_context}++;
       }
       my $id_aft= $self->parse([$post]);
@@ -1049,12 +1117,13 @@ sub parse {
         die "Ternary operator: Found '?' but no matching ':'\n" . dump($e);
       }
 
-      # Find condition start: scan backwards from ? to find lower-prec operator or ':'
+      # Find cond start: scan backwards from ? to find lower-prec op or ':'
       my $cond_start = 0;
       for (my $i = $hi_ix - 1; $i >= 0; $i--) {
         my $info = $self->op_info($e->[$i]);
         if ($info && $info->{prec} <= $ternary_prec) {
-          # Stop at lower-prec operators OR at ':' (which marks outer ternary boundary)
+          # Stop at lower-precedence operators OR at ':' (which marks
+          # outer ternary boundary)
           $cond_start = $i + 1;
           last;
         }
@@ -1070,7 +1139,8 @@ sub parse {
         }
       }
 
-      say "Ternary: cond_start=$cond_start, ?=$hi_ix, :=$colon_pos, false_end=$false_end"
+      say "Ternary: cond_start=$cond_start, ?=$hi_ix, :=$colon_pos, ",
+	  "false_end=$false_end"
           if 2 & DEBUG;
 
       # Extract the three parts
@@ -1141,7 +1211,7 @@ sub parse {
 
     }
 
-    die "Yabba dabba doh! op=" . dump($op) . " info=" . dump($op_info);
+    die "Unknown. Bug. op=" . dump($op) . " info=" . dump($op_info);
   }
 
   if (scalar(@$e) == 1 && $self->is_internal_node_type($e->[0])) {
@@ -1153,12 +1223,7 @@ sub parse {
     return $self->make_node($e->[0]);
   }
 
-  die "Fell through. Missing case: " . dump($e);
-
-
-  # XXXX There is an extra object over old parenthese exprs We could
-  #      remove that? E.g. 5 * (4 + 7)
-  #      Is there an extra level also for progn?
+  die "Bug. Fell through. Missing case: " . dump($e);
 }
 
 
@@ -1225,26 +1290,11 @@ sub parse_list {
 # This replaces all sub calls in an expression.
 # It use known number of parameters for subs and priorities.
 
-# XXXXX This needs to handle `open FH, ... and ... <FH> ...`??
-# Both so doesn't try to define FH as a sub when declaring/closing it
-# in open/close and also when referencing it.
-
-# XXXXX Need to look at sub name, parameters are different for
-# different subs (Prototypes and built in).
-
-# XXXXX Now it is:
-#        foo
-#   par1  par2  par3 ...
-# That looks bad with empty param list. Instead generate this:
-#         funcall
-#   foo     par1 par2 par3 ...
 sub handle_subcalls {
   my $self      = shift;
   my $e         = shift;
 
   say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
-  # XXXX Special case for open/close/<FH>/etc, so knows next param is a FH.
-  #      Declare that in sub specs above?? That would be the easy way.
 
   # - - - Handle: `fun(...)`:
   # (Yes, loops to all but last.)
@@ -1252,6 +1302,26 @@ sub handle_subcalls {
     my $now     = $e->[$i];
     my $next    = $e->[$i+1];
     say "handle_subcalls: Look for subname(..) in:\n", dump $now  if 8 & DEBUG;
+
+    # Handle &funcname( list ) - direct function call with & sigil
+    # e.g., &foo(1, 2) -> (pl-foo 1 2), &Pkg::foo(1,2) -> (Pkg::pl-foo 1 2)
+    if (ref($now) eq 'PPI::Token::Symbol'
+        && $now->content() =~ /^&(.+)$/
+        && $self->is_list($next)) {
+      my $func_name = $1;
+      my $word_token = PPI::Token::Word->new($func_name);
+      my($top_node, $top_id) = $self->make_node_insert('funcall');
+      my $c_ids = $self->make_nodes_from_list($next);
+      my $node_id = $self->make_node($word_token);
+      $self->add_child_to_node($top_id, $node_id);
+      for my $c_id (@$c_ids) {
+        $self->add_child_to_node($top_id, $c_id);
+      }
+      splice @$e, $i, 2;
+      $e->[$i] = $top_node;
+      next;
+    }
+
     next
         if !$self->is_word($now); # Only want function calls.
 
@@ -1259,18 +1329,22 @@ sub handle_subcalls {
         ($self->is_list($next) ? "Yes" : "No"), ". Dump:", dump $next
         if 8 & DEBUG;
 
-    # XXXX Here, handle subs that have known params, also 0 (default to $_.)??
-    # e.g.  foo xxx, yyy, chdir z, u, v;
-    #  pars:    ___  ___  _______  _  _
-    #            1    2      3     3  4.
-
     # Handle grep/map { BLOCK } LIST pattern
     # Uses Parser.pm callback for multi-statement blocks
     # Also handles: sub { ... } (anonymous subs)
+    # Also handles: any function with & prototype (e.g., try { } from Try::Tiny)
     if (ref($next) eq 'PPI::Structure::Block') {
       my $func_name = $now->content();
+
+      # Check if this function has & prototype (block arg)
+      my $has_block_proto = 0;
+      if ($self->environment) {
+        my $proto = $self->environment->get_prototype($func_name);
+        $has_block_proto = $proto && $proto->{has_block_arg};
+      }
+
       if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
-          || $func_name eq 'eval') {
+          || $func_name eq 'eval' || $has_block_proto) {
 
         # Create funcall with block as first param
         my($top_node, $top_id) = $self->make_node_insert('funcall');
@@ -1282,15 +1356,29 @@ sub handle_subcalls {
           # Determine parameters based on function type
           my $params = ($func_name eq 'sort') ? ['$a', '$b']
                      : ($func_name eq 'eval') ? []
-                     : ['$_'];  # grep, map
+                     : ($func_name eq 'grep' || $func_name eq 'map') ? ['$_']
+                     : [];  # Other & prototype functions: no implicit params
 
-          # Parse block as a named function and get its name
-          my $block_func_name = $self->parser->parse_block_as_function($next, $params);
+          # For grep/map/sort, use inline lambda (cleaner, avoids emission issues)
+          # For eval and other blocks, use named function (may need to be called separately)
+          if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort') {
+            # Parse block body as CL string
+            my $body_cl = $self->parser->parse_block_to_cl_string($next);
 
-          # Create a func_ref node that holds the function name
-          my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-          $ref_node->{func_name} = $block_func_name;
-          $self->add_child_to_node($top_id, $ref_id);
+            # Create inline_lambda node
+            my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
+            $lambda_node->{params} = $params;
+            $lambda_node->{body_cl} = $body_cl;
+            $self->add_child_to_node($top_id, $lambda_id);
+          } else {
+            # Parse block as a named function and get its name
+            my $block_func_name = $self->parser->parse_block_as_function($next, $params);
+
+            # Create a func_ref node that holds the function name
+            my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
+            $ref_node->{func_name} = $block_func_name;
+            $self->add_child_to_node($top_id, $ref_id);
+          }
         } else {
           # Fallback: parse block as expression (single statement only)
           my @block_children = $next->children();
@@ -1303,9 +1391,9 @@ sub handle_subcalls {
           $self->add_child_to_node($top_id, $sub_id);
         }
 
-        # Parse remaining elements as the list to process
-        # Note: parse as a whole expression since $arr[0]->method is one expression
-        if ($i + 2 < scalar(@$e)) {
+        # For grep/map/sort: parse remaining elements as the list to process.
+        # For eval: the block is the only argument; don't consume what follows.
+        if ($func_name ne 'eval' && $i + 2 < scalar(@$e)) {
           my @rest = @$e[$i + 2 .. $#$e];
           my $rest_list = $self->cleanup_for_parsing(\@rest);
           # Parse rest as comma-separated list (usually just one element)
@@ -1313,12 +1401,13 @@ sub handle_subcalls {
           for my $rest_id (@$rest_ids) {
             $self->add_child_to_node($top_id, $rest_id);
           }
-          # Remove all processed elements
+          # Remove all processed elements and replace start with result node
           splice @$e, $i, scalar(@$e) - $i;
+          $e->[$i] = $top_node;
         } else {
-          splice @$e, $i, 2;
+          # Replace eval+block (2 elements) with result node in-place
+          splice @$e, $i, 2, $top_node;
         }
-        $e->[$i] = $top_node;
         next;
       }
 
@@ -1357,7 +1446,8 @@ sub handle_subcalls {
     next
         if !$self->is_list($next);
 
-    # - - - Special handling for open: register bareword filehandle BEFORE parsing args
+    # - - - open
+    # Special handling: register bareword filehandle BEFORE parsing args
     my $func_name = $now->can('content') ? $now->content() : '';
     if ($func_name eq 'open' && $self->has_environment) {
       # Peek at first argument - if it's a bareword, register it as filehandle
@@ -1380,6 +1470,21 @@ sub handle_subcalls {
       }
     }
 
+    # Special handling for split with regex pattern: mark regex before parsing
+    if ($func_name eq 'split') {
+      my @list_children = $next->children();
+      for my $child (@list_children) {
+        my @check = ref($child) eq 'PPI::Statement::Expression'
+                  ? $child->children() : ($child);
+        for my $item (@check) {
+          if (ref($item) =~ /^PPI::Token::Regexp/) {
+            $item->{_has_match_context} = 1;
+            last;
+          }
+        }
+      }
+    }
+
     # Replace the two items in expr with a subtree:
     my($top_node, $top_id) = $self->make_node_insert('funcall');
 
@@ -1391,6 +1496,27 @@ sub handle_subcalls {
       $self->add_child_to_node($top_id, $c_id);
     }
 
+    # Special handling for split: ensure pattern and string are always provided
+    # split()        -> split(" ", $_)
+    # split(/pat/)   -> split(/pat/, $_)
+    if ($func_name eq 'split') {
+      my $arg_count = scalar(@$c_ids);
+      if ($arg_count == 0) {
+        # No args: add " " pattern and $_
+        my $space = PPI::Token::Quote::Double->new('" "');
+        my $space_id = $self->make_node($space);
+        $self->add_child_to_node($top_id, $space_id);
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      } elsif ($arg_count == 1) {
+        # One arg (pattern): add $_
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      }
+    }
+
     # Add implicit $_ if function defaults to it
     $self->add_implicit_default_param($func_name, $top_id);
 
@@ -1399,6 +1525,7 @@ sub handle_subcalls {
     splice @$e, $i+1, 1;        # Remove parameters.
   }
   say "---- handle_subcalls: Before main loop. Has ", dump $e   if 8 & DEBUG;
+
   # - - - Look for remaining funcalls without () around parameters:
   my $last_low_prio_op;       # Store index to lower prio op than ","
   for(my $i=scalar(@$e)-1; $i >= 0; $i--) {
@@ -1421,7 +1548,7 @@ sub handle_subcalls {
     next unless $self->is_word($now);
     my $sub_name = $now->content;
 
-    # - - - Skip if this word is followed by -> (class method call like Foo->new)
+    # - - - Skip if this word is followed by -> (class method call; Foo->new)
     # The word is a class/package name, not a function call
     if ($i + 1 < scalar(@$e)) {
       my $next_elem = $e->[$i + 1];
@@ -1439,18 +1566,30 @@ sub handle_subcalls {
       }
     }
 
-    # - - - Skip if this is a filehandle for print/say:
-    # print STDERR "hello" - STDERR is a filehandle, not a function
-    if ($i > 0) {
+    # - - - Skip if this is a bareword filehandle for a function with * prototype:
+    # open FH, ...; print STDERR "hello" - FH/STDERR are filehandles, not functions
+    # Functions like open, close have * as first param prototype.
+    # print/say/printf are handled specially (no prototype) but also take filehandles.
+    if ($i > 0 && $sub_name =~ /^[A-Z][A-Z0-9_]*$/) {
       my $prev = $e->[$i - 1];
       if ($self->is_word($prev)) {
         my $prev_name = $prev->content;
-        if ($prev_name eq 'print' || $prev_name eq 'say') {
-          # Check if this looks like a filehandle (uppercase bareword)
-          if ($sub_name =~ /^[A-Z][A-Z0-9_]*$/) {
-            next;  # Skip - will be handled when processing print/say
+        my $is_fh_func = 0;
+
+        # print/say/printf have special handling, not prototypes
+        if ($prev_name eq 'print' || $prev_name eq 'say' || $prev_name eq 'printf') {
+          $is_fh_func = 1;
+        }
+        # Check if previous function takes * (filehandle) as first param
+        elsif ($self->has_environment) {
+          my $proto = $self->environment->get_prototype($prev_name);
+          if ($proto && $proto->{is_proto} && @{$proto->{params}}) {
+            my $first_param_type = $proto->{params}[0]{proto_type} // '';
+            $is_fh_func = 1 if $first_param_type eq '*';
           }
         }
+
+        next if $is_fh_func;  # Skip - will be handled when processing the function
       }
     }
 
@@ -1464,8 +1603,6 @@ sub handle_subcalls {
     # - - - Does it have zero parameters:
     # Simple case, e.g. time(), wantarray().
 
-    # XXXX Should return list of possible no of  parameters.
-    #      Update this.
     my $no_pars = $self->no_params_of_sub($sub_name);
 
     # Check if function takes 0 params, or can default to $_ or @_
@@ -1487,9 +1624,10 @@ sub handle_subcalls {
     }
 
     # If can be zero-param, check if next token is an operator
+    # (but NOT a Cast token like @, $, %, etc. which are deref operators for arguments)
     if ($is_zero_param && $i + 1 < scalar(@$e)) {
       my $next = $e->[$i + 1];
-      if ($self->is_token_operator($next)) {
+      if ($self->is_token_operator($next) && ref($next) ne 'PPI::Token::Cast') {
         # Function followed by operator - treat as zero params
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $node_id = $self->make_node($now);
@@ -1520,7 +1658,7 @@ sub handle_subcalls {
         # Cast tokens (@, $, %, &, *) are always unary deref operators
         my $is_cast = ref($next) eq 'PPI::Token::Cast';
         # Operators that can be unary prefix: + - ! ~ \ not
-        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not', '++', '--');
         my $is_unary = $is_cast || $can_be_unary_op{$next_op};
         if (!$is_unary) {
           # Binary-only operator - treat bareword as zero-arg function
@@ -1553,6 +1691,11 @@ sub handle_subcalls {
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
                 # Symbol + Subscript is one term (e.g., $h{key}, $a[0])
                 $end_pars = $i + 2;
+            } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
+                     && $after_symbol->start() eq '{'
+                     && $next_term->content() =~ /^%/) {
+                # %hash + Block is one term (KV slice: %h{keys})
+                $end_pars = $i + 2;
             } else {
                 $end_pars = $i + 1;
             }
@@ -1561,16 +1704,51 @@ sub handle_subcalls {
         }
     }
 
-    # Functions taking 1 param also need Cast+Symbol handling (e.g., shift @$arr)
-    # Check if this is a 1-param function with Cast+Symbol as argument
+    # Functions taking EXACTLY 1 param need Cast+Symbol handling (e.g., shift @$arr)
+    # Check if this is a strictly 1-param function with Cast+Symbol as argument
+    # NOTE: Don't apply this to functions with variable params like bless([1,2])
+    #       as they may take more arguments after the Cast+Symbol
     if (defined $no_pars && $end_pars > $i + 1) {
-      my $is_single_param = ($no_pars == 1)
-                         || (ref($no_pars) eq 'ARRAY' && grep { $_ == 1 } @$no_pars);
-      if ($is_single_param) {
+      # Only limit to single term if function takes EXACTLY 1 param (max is 1)
+      my $is_strictly_single = 0;
+      if ($no_pars == 1) {
+        $is_strictly_single = 1;
+      } elsif (ref($no_pars) eq 'ARRAY') {
+        # For array specs, only if max is 1 (all values are 1 or less)
+        # Skip negative values (defaults like -2, -3) when finding max
+        my @positive = grep { $_ > 0 } @$no_pars;
+        my $max = @positive ? (sort { $b <=> $a } @positive)[0] : 0;
+        $is_strictly_single = ($max == 1);
+      }
+      if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary)) {
+        # Only apply for non-named-unary 1-param functions
+        # Named unary already handled above with proper term detection
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
           # Cast followed by Symbol is a single dereference term
           $end_pars = $i + 2;
+        } elsif (ref($next_term) eq 'PPI::Token::Symbol') {
+          # Symbol (like %hash, @arr, $var) - check for subscript/block chain
+          if ($i + 2 <= $end_pars) {
+            my $after = $e->[$i + 2];
+            if (ref($after) eq 'PPI::Structure::Subscript') {
+              # Symbol + Subscript is one term (e.g., keys $h{key})
+              $end_pars = $i + 2;
+            } elsif (ref($after) eq 'PPI::Structure::Block'
+                     && $after->start() eq '{'
+                     && $next_term->content() =~ /^%/) {
+              # %hash + Block is one term (KV slice: %h{keys})
+              $end_pars = $i + 2;
+            } else {
+              # Just the symbol (e.g., keys %hash, values @arr)
+              $end_pars = $i + 1;
+            }
+          } else {
+            $end_pars = $i + 1;
+          }
+        } elsif ($self->is_internal_node_type($next_term)) {
+          # Already-parsed node (e.g., from previous handle_subcalls)
+          $end_pars = $i + 1;
         }
       }
     }
@@ -1579,56 +1757,79 @@ sub handle_subcalls {
     # print FILEHANDLE LIST  (no comma between filehandle and list)
     # print $fh LIST         (variable filehandle)
     my $filehandle_id;
-    if (($sub_name eq 'print' || $sub_name eq 'say') && $i + 1 <= $end_pars) {
+    if (($sub_name eq 'print' || $sub_name eq 'say' || $sub_name eq 'printf') && $i + 1 <= $end_pars) {
       my $maybe_fh = $e->[$i + 1];
       my $is_fh = 0;
 
+      # Track filehandle expression end position (for multi-token expressions)
+      my $fh_end = $i + 1;  # Start at first token after print/say
+
       # Check for uppercase bareword (STDERR, STDOUT, FH, etc.)
-      # Note: is_word() returns 1/undef, not content - use ->content
       if ($self->is_word($maybe_fh)) {
         my $fh_name = $maybe_fh->content;
         if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
           $is_fh = 1;
         }
       }
-      # Check for variable filehandle ($fh)
-      # For variable filehandles, there MUST be more content after them
-      # print $fh "hello" - $fh is filehandle (more content after)
-      # print $x          - $x is the thing to print (nothing after)
-      # print $d->method() - $d is object, NOT filehandle (-> follows)
-      # print $h{k}->method() - hash access, NOT filehandle ({} follows)
-      elsif (ref($maybe_fh) eq 'PPI::Token::Symbol') {
-        # Only treat as filehandle if there's more content after
-        # AND that content is not a method call (->) or subscript ({}[])
-        if ($i + 2 <= $end_pars) {
-          my $after_var = $e->[$i + 2];
-          # If next element is -> it's a method call, not filehandle
-          my $is_arrow = $after_var
-            && ref($after_var) eq 'PPI::Token::Operator'
-            && $after_var->content eq '->';
-          # If next element is {} or [] it's a subscript, not filehandle
-          my $is_subscript = $after_var
-            && ref($after_var) =~ /^PPI::Structure::/;
-          $is_fh = 1 unless ($is_arrow || $is_subscript);
+      # Check for block filehandle syntax: print {$expr} LIST
+      elsif (ref($maybe_fh) eq 'PPI::Structure::Block') {
+        $is_fh = 1;
+        # Block is always a filehandle - contents will be parsed below
+      }
+      # Check for variable filehandle: print $scalar TERM
+      # Only SIMPLE scalars can be filehandles (not $hash{key}, $arr[0])
+      # Complex expressions need block form: print {$expr} LIST
+      elsif (ref($maybe_fh) eq 'PPI::Token::Symbol'
+             && $maybe_fh->content =~ /^\$/) {
+        if ($fh_end + 1 <= $end_pars) {
+          my $after = $e->[$fh_end + 1];
+          $is_fh = $self->_is_print_term_start($after);
         }
+        # Nothing follows → it's an argument, not a filehandle
       }
 
       if ($is_fh) {
-        # Check next element is NOT a comma (filehandle syntax has no comma)
-        my $after_fh = $e->[$i + 2] if $i + 2 <= $end_pars;
-        my $is_comma = $after_fh
-          && ref($after_fh) eq 'PPI::Token::Operator'
-          && $after_fh->content eq ',';
-        if (!$is_comma) {
-          # It's a filehandle - create node and remove from param list
-          my($fh_node, $fh_id) = $self->make_node_insert('filehandle');
+        my($fh_node, $fh_id) = $self->make_node_insert('filehandle');
+
+        # Handle block syntax: parse block contents
+        if (ref($maybe_fh) eq 'PPI::Structure::Block') {
+          my @block_children = $maybe_fh->children();
+          # Filter to just the expression (skip whitespace)
+          @block_children = grep { ref($_) !~ /Whitespace/ } @block_children;
+          # Unwrap PPI::Statement if present
+          if (@block_children == 1 && ref($block_children[0]) eq 'PPI::Statement') {
+            my @stmt_children = $block_children[0]->children();
+            @stmt_children = grep { ref($_) !~ /Whitespace/ } @stmt_children;
+            @block_children = @stmt_children if @stmt_children;
+          }
+          # Check if single bareword is a known filehandle
+          if (@block_children == 1 && $self->is_word($block_children[0])) {
+            my $name = $block_children[0]->content;
+            if ($self->has_environment && $self->environment->is_filehandle($name)) {
+              # Known filehandle - treat as bareword (don't parse as funcall)
+              my $fh_name_id = $self->make_node($block_children[0]);
+              $self->add_child_to_node($fh_id, $fh_name_id);
+            } else {
+              # Not a known filehandle - parse it (might be a sub call)
+              my $fh_expr_id = $self->parse(\@block_children);
+              $self->add_child_to_node($fh_id, $fh_expr_id);
+            }
+          } elsif (@block_children) {
+            # Complex expression - parse it
+            my $fh_expr_id = $self->parse(\@block_children);
+            $self->add_child_to_node($fh_id, $fh_expr_id);
+          }
+        }
+        # Handle simple variable or bareword: just make node from token
+        else {
           my $fh_name_id = $self->make_node($maybe_fh);
           $self->add_child_to_node($fh_id, $fh_name_id);
-          $filehandle_id = $fh_id;
-          # Remove filehandle from expression list
-          splice @$e, $i + 1, 1;
-          $end_pars--;
         }
+
+        $filehandle_id = $fh_id;
+        # Remove the filehandle token from expression list
+        splice @$e, $i + 1, 1;
+        $end_pars -= 1;
       }
     }
 
@@ -1636,9 +1837,25 @@ sub handle_subcalls {
     # split /pattern/, LIST - the regex should not be wrapped with $_ =~
     if ($sub_name eq 'split' && $i + 1 <= $end_pars) {
       my $maybe_regex = $e->[$i + 1];
+      # Direct regex: split /pattern/
       if (ref($maybe_regex) =~ /^PPI::Token::Regexp/) {
-        # Mark regex as having match context so it's not wrapped with $_ =~
         $maybe_regex->{_has_match_context} = 1;
+      }
+      # Regex in parentheses: split(/pattern/)
+      elsif (ref($maybe_regex) eq 'PPI::Structure::List') {
+        # Look inside the list for the regex
+        my @list_children = $maybe_regex->children();
+        for my $child (@list_children) {
+          # May be wrapped in PPI::Statement::Expression
+          my @check = ref($child) eq 'PPI::Statement::Expression'
+                    ? $child->children() : ($child);
+          for my $item (@check) {
+            if (ref($item) =~ /^PPI::Token::Regexp/) {
+              $item->{_has_match_context} = 1;
+              last;
+            }
+          }
+        }
       }
     }
 
@@ -1646,6 +1863,36 @@ sub handle_subcalls {
     my($top_node, $top_id) = $self->make_node_insert('funcall');
     my $c_ids   = $self->parse_list($e, $i+1, $end_pars);
     my $node_id = $self->make_node($e->[$i]);
+
+    # - - - Post-process for * (filehandle) prototype:
+    # If first arg is a zero-param funcall of uppercase bareword, it's a filehandle
+    if (@$c_ids && $self->has_environment) {
+      my $proto = $self->environment->get_prototype($sub_name);
+      if ($proto && $proto->{is_proto} && @{$proto->{params}}) {
+        my $first_param_type = $proto->{params}[0]{proto_type} // '';
+        if ($first_param_type eq '*') {
+          my $first_arg_id = $c_ids->[0];
+          my $first_arg = $self->get_a_node($first_arg_id);
+          # Check if it's a funcall (zero-param bareword becomes funcall)
+          if ($self->is_internal_node_type($first_arg) && $first_arg->{type} eq 'funcall') {
+            my $arg_kids = $self->get_node_children($first_arg_id);
+            # Zero-param funcall has exactly 1 child (the function name)
+            if (@$arg_kids == 1) {
+              my $name_node = $self->get_a_node($arg_kids->[0]);
+              if (ref($name_node) eq 'PPI::Token::Word') {
+                my $name = $name_node->content;
+                if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+                  # It's a bareword filehandle - replace funcall with just the word node
+                  $c_ids->[0] = $arg_kids->[0];
+                  # Register as filehandle
+                  $self->environment->add_filehandle($name);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
 
     $self->add_child_to_node($top_id, $node_id);
     # Add filehandle as first parameter if present
@@ -1655,12 +1902,29 @@ sub handle_subcalls {
     }
     for my $c_id (@$c_ids) {
       $self->add_child_to_node($top_id, $c_id);
-      # $self->add_child_to_node($node_id, $c_id);
+    }
+
+    # Special handling for split: ensure pattern and string are always provided
+    if ($sub_name eq 'split') {
+      my $arg_count = scalar(@$c_ids);
+      if ($arg_count == 0) {
+        # No args: add " " pattern and $_
+        my $space = PPI::Token::Quote::Double->new('" "');
+        my $space_id = $self->make_node($space);
+        $self->add_child_to_node($top_id, $space_id);
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      } elsif ($arg_count == 1) {
+        # One arg (pattern): add $_
+        my $underscore = PPI::Token::Symbol->new('$_');
+        my $underscore_id = $self->make_node($underscore);
+        $self->add_child_to_node($top_id, $underscore_id);
+      }
     }
 
     # Add implicit $_ if function defaults to it
-    my $func_name = $e->[$i]->content() if $e->[$i]->can('content');
-    $self->add_implicit_default_param($func_name, $top_id);
+    $self->add_implicit_default_param($sub_name, $top_id);
 
     $e->[$i]    = $top_node; # $self->make_subtree_item($node_id, 'funcall');
 
@@ -1695,13 +1959,19 @@ sub add_implicit_default_param {
   # First child is the function name, rest are parameters
   my $param_count = scalar(@$children) - 1;
 
-  # If no parameters provided, add implicit $_ or @_
+  # If no parameters provided, add implicit $_ or @_/@ARGV
   if ($param_count == 0) {
     my $default_var;
     if ($has_array_default) {
-      # @_ in subs, @ARGV in main (but we don't distinguish at parse time)
-      $default_var = '@_';
-      say "add_implicit_default_param: Adding \@_ to $func_name" if 8 & DEBUG;
+      # @_ in subs, @ARGV in main
+      my $in_sub = $self->has_environment && $self->environment->in_subroutine > 0;
+      if ($in_sub) {
+        $default_var = '@_';
+        say "add_implicit_default_param: Adding \@_ to $func_name (in sub)" if 8 & DEBUG;
+      } else {
+        $default_var = '@ARGV';
+        say "add_implicit_default_param: Adding \@ARGV to $func_name (at top level)" if 8 & DEBUG;
+      }
     } else {
       $default_var = '$_';
       say "add_implicit_default_param: Adding \$_ to $func_name" if 8 & DEBUG;
@@ -1788,6 +2058,30 @@ sub is_op_prefix {
   return $prefix->{lc $name};
 }
 
+# After "print $var TOKEN", determine if TOKEN starts a new term
+# (making $var a filehandle) or is an operator (making $var an argument).
+sub _is_print_term_start {
+  my ($self, $token) = @_;
+  my $ref = ref($token);
+
+  # Binary operators → $var is part of an expression, NOT a filehandle
+  # Exception: ! and ~ are unary-only and always start a new term
+  if ($ref eq 'PPI::Token::Operator') {
+    my $op = $token->content;
+    return 1 if $op eq '!' || $op eq '~' || $op eq 'not';
+    return 0;  # All others: , . + - * / == && || etc.
+  }
+
+  # Subscript {key}/[idx] means it's $var{key} or $var[idx], NOT a filehandle
+  return 0 if $ref eq 'PPI::Structure::Subscript';
+
+  # Everything else IS a term start:
+  #   Symbol ($x, @arr), Magic ($_), Quote ("str"), Number (42),
+  #   Cast (\, @{), Word (func), Regexp (/pat/), HereDoc (<<EOF),
+  #   QuoteLike (qw()), Structure::List ((expr)), Constructor ([]),
+  #   and already-parsed internal nodes
+  return 1;
+}
 
 
 # ----------------------------------------------------------------------
@@ -1802,21 +2096,29 @@ sub annotate_contexts {
   my $node_id       = shift;
   my $context       = shift // SCALAR_CTX;
 
-  say "annotate_contexts: node $node_id, context ",
-      $self->context_name($context)
-      if 16 & DEBUG;
+  # Use iterative approach with explicit stack to avoid deep recursion
+  # warnings on long expression chains (e.g., many concatenations)
+  my @stack = ([$node_id, $context]);
 
-  # Store context on this node
-  $self->set_node_context($node_id, $context);
+  while (@stack) {
+    my ($current_id, $current_ctx) = @{pop @stack};
 
-  my $node          = $self->get_a_node($node_id);
-  my $children      = $self->get_node_children($node_id);
+    say "annotate_contexts: node $current_id, context ",
+        $self->context_name($current_ctx)
+        if 16 & DEBUG;
 
-  # Determine context for each child
-  for my $i (0 .. $#{$children}) {
-    my $child_id    = $children->[$i];
-    my $child_ctx   = $self->child_context($node, $node_id, $i, $context);
-    $self->annotate_contexts($child_id, $child_ctx);
+    # Store context on this node
+    $self->set_node_context($current_id, $current_ctx);
+
+    my $node     = $self->get_a_node($current_id);
+    my $children = $self->get_node_children($current_id);
+
+    # Push children onto stack in reverse order (so first child is processed first)
+    for my $i (reverse 0 .. $#{$children}) {
+      my $child_id  = $children->[$i];
+      my $child_ctx = $self->child_context($node, $current_id, $i, $current_ctx);
+      push @stack, [$child_id, $child_ctx];
+    }
   }
 }
 
@@ -1864,10 +2166,28 @@ sub child_context {
             if $child_index == 2;
       }
 
+      # join forces list context on all arguments after separator
+      if ($func_name && $func_name eq 'join') {
+        return LIST_CTX
+            if $child_index >= 2;  # All arguments after function name and separator
+      }
+
+      # Functions that always take lists
+      if ($func_name && $func_name =~ /^(push|unshift|splice|reverse)$/) {
+        return LIST_CTX
+            if $child_index >= 2;  # List argument(s)
+      }
+
       # print/say force list context on all arguments
       if ($func_name && $func_name =~ /^(print|say)$/) {
         return LIST_CTX
             if $child_index > 0;  # All arguments after function name
+      }
+
+      # scalar forces scalar context on its argument
+      if ($func_name && $func_name eq 'scalar') {
+        return SCALAR_CTX
+            if $child_index >= 1;  # Argument is scalar context
       }
     }
     # progn (comma operator) forces list context
@@ -1885,6 +2205,29 @@ sub child_context {
       return SCALAR_CTX if $child_index == 0;  # Condition
       return $parent_ctx;  # True/false branches inherit
     }
+
+    # Prefix operators: child[0]=op token, child[1]=operand.
+    # Boolean/arithmetic ops force scalar context on their operand.
+    # Without this, !!($a && $b) inside join() produces (vector ...) wrapper.
+    if ($type eq 'prefix_op' && $child_index == 1) {
+      my $children  = $self->get_node_children($parent_id);
+      my $op_node   = $self->get_a_node($children->[0]);
+      my $op        = $op_node->can('content') ? $op_node->content() : '';
+      if ($op =~ /^(!|not|~|\\|[+\-])$/) {
+        return SCALAR_CTX;
+      }
+    }
+
+    # Chained comparison (postfix_op with 5+ alternating term/op children).
+    # e.g. $a == $b != $c  =>  ['postfix_op', $a, '==', $b, '!=', $c]
+    # Term children (even indices 0,2,4,...) are comparison operands —
+    # they must be scalar even when pl-chain-cmp appears inside join().
+    if ($type eq 'postfix_op') {
+      my $children = $self->get_node_children($parent_id);
+      if (scalar(@$children) >= 5 && scalar(@$children) % 2 == 1) {
+        return SCALAR_CTX if $child_index % 2 == 0;  # term child
+      }
+    }
   }
 
   # - - - Token operator nodes
@@ -1896,7 +2239,7 @@ sub child_context {
       my $children  = $self->get_node_children($parent_id);
       my $lhs_id    = $children->[0];
       my $lhs       = $self->get_a_node($lhs_id);
-      
+
       if ($child_index == 0) {
         # LHS: context based on lvalue type
         return $self->lvalue_context($lhs);
@@ -1904,6 +2247,36 @@ sub child_context {
         # RHS: context based on what LHS expects
         return $self->assignment_rhs_context($lhs, $lhs_id);
       }
+    }
+
+    # String concatenation always forces scalar context on both operands.
+    # Without this, parens inside concat inherit list context from outer
+    # constructs (e.g. [...]) and produce unwanted (vector ...) wrappers.
+    if ($op eq '.' || $op eq '.=') {
+      return SCALAR_CTX;
+    }
+
+    # Logical NOT always forces scalar context: !expr, not expr.
+    # !!($a && $b) passed as join() arg must not produce (vector ...) wrapper.
+    if ($op eq '!' || $op eq 'not') {
+      return SCALAR_CTX;
+    }
+
+    # Logical AND/OR force scalar context on their operands.
+    # These operators return one of their operands, not a list.
+    if ($op eq '&&' || $op eq '||' || $op eq '//'
+        || $op eq 'and' || $op eq 'or' || $op eq 'xor') {
+      return SCALAR_CTX;
+    }
+
+    # Comparison operators always produce scalar results.
+    if ($op =~ /^(==|!=|<|>|<=|>=|eq|ne|lt|gt|le|ge|<=>|cmp)$/) {
+      return SCALAR_CTX;
+    }
+
+    # Arithmetic operators produce scalar results.
+    if ($op =~ /^([+\-*\/%]|\*\*|x)$/) {
+      return SCALAR_CTX;
     }
   }
 
@@ -1932,7 +2305,7 @@ sub lvalue_context {
     return LIST_CTX if $type =~ /^(a_ref_acc|a_acc|slice_a_acc)$/;
     
     # Hash operations return list context
-    return LIST_CTX if $type =~ /^(h_ref_acc|h_acc|slice_h_acc)$/;
+    return LIST_CTX if $type =~ /^(h_ref_acc|h_acc|slice_h_acc|kv_slice_h_acc)$/;
     
     # List of lvalues: ($a, $b, $c)
     return LIST_CTX if $type eq 'progn' || $type eq 'tree_val';
@@ -2233,6 +2606,14 @@ sub cleanup_for_parsing {
   # TODO: File bug report with PPI project.
   @no_ws = $self->_fix_ppi_negative_number_bug(\@no_ws);
 
+  # PPI BUG WORKAROUND: PPI parses "word :" in ternary as Label instead of
+  # Word + Operator. Split labels back into their components when preceded by "?".
+  @no_ws = $self->_fix_ppi_ternary_label_bug(\@no_ws);
+
+  # PPI BUG WORKAROUND: After blocks, PPI parses <*.txt> as separate tokens
+  # instead of a glob. Reconstruct glob tokens from < PATTERN > sequences.
+  @no_ws = $self->_fix_ppi_glob_after_block(\@no_ws);
+
   for(my $i=0; $i < scalar(@no_ws); $i++) {
     my $part    = $no_ws[$i];
 
@@ -2291,13 +2672,20 @@ sub _fix_ppi_negative_number_bug {
     if (ref($token) eq 'PPI::Token::Number' && $token->content =~ /^-(.+)$/) {
       my $positive_part = $1;
 
+      # ** has higher precedence than unary minus in Perl.
+      # If a negative literal is followed by **, always split: -3**2 = -(3**2).
+      my $next_is_pow = ($i + 1 < @$tokens &&
+                         ref($tokens->[$i+1]) eq 'PPI::Token::Operator' &&
+                         $tokens->[$i+1]->content eq '**');
+
       # Check if previous token ends an expression (where subtraction makes sense)
+      my $is_expr_end = 0;
       if ($i > 0) {
         my $prev = $result[-1];  # Use result array since we may have inserted
         my $prev_ref = ref($prev);
 
         # Expression-ending tokens: ) ] } or symbols/words/numbers
-        my $is_expr_end = (
+        $is_expr_end = (
           $prev_ref eq 'PPI::Structure::List'        ||  # (...)
           $prev_ref eq 'PPI::Structure::Subscript'   ||  # [...]
           $prev_ref eq 'PPI::Structure::Block'       ||  # {...}
@@ -2308,18 +2696,145 @@ sub _fix_ppi_negative_number_bug {
           $prev_ref eq 'PPI::Token::Quote::Single'   ||  # 'string'
           $prev_ref =~ /^PPI::Token::Quote/               # other quotes
         );
+      }
 
-        if ($is_expr_end) {
-          # Split into minus operator and positive number
-          my $minus_op = bless { content => '-' }, 'PPI::Token::Operator';
-          my $pos_num  = bless { content => $positive_part }, 'PPI::Token::Number';
-          push @result, $minus_op, $pos_num;
-          next;
-        }
+      if ($is_expr_end || $next_is_pow) {
+        # Split into minus operator and positive number
+        my $minus_op = bless { content => '-' }, 'PPI::Token::Operator';
+        my $pos_num  = bless { content => $positive_part }, 'PPI::Token::Number';
+        push @result, $minus_op, $pos_num;
+        next;
       }
     }
 
     push @result, $token;
+  }
+
+  return @result;
+}
+
+
+# PPI BUG WORKAROUND: In ternary expressions like "cond ? foo : bar",
+# PPI sometimes parses "foo :" as a Label instead of Word + Operator.
+# This happens when there's a space before the colon.
+# We detect Labels that follow "?" and split them back into Word + ":".
+sub _fix_ppi_ternary_label_bug {
+  my $self   = shift;
+  my $tokens = shift;
+
+  my @result;
+  my $seen_question = 0;
+
+  for (my $i = 0; $i < @$tokens; $i++) {
+    my $token = $tokens->[$i];
+
+    # Track if we've seen a ? (ternary operator)
+    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq '?') {
+      $seen_question = 1;
+    }
+
+    # Check if this is a Label after a ? (likely part of ternary)
+    if (ref($token) eq 'PPI::Token::Label' && $seen_question) {
+      my $content = $token->content;
+      # Label content is like "word :" or "word:" - extract the word
+      if ($content =~ /^(\w+)\s*:\s*$/) {
+        my $word = $1;
+        # Split into Word and : operator
+        my $word_token  = bless { content => $word }, 'PPI::Token::Word';
+        my $colon_token = bless { content => ':' }, 'PPI::Token::Operator';
+        push @result, $word_token, $colon_token;
+        $seen_question = 0;  # Reset after finding the colon
+        next;
+      }
+    }
+
+    # Reset seen_question after we've processed a complete ternary
+    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq ':') {
+      $seen_question = 0;
+    }
+
+    push @result, $token;
+  }
+
+  return @result;
+}
+
+
+# PPI BUG WORKAROUND: After a block (e.g., grep { } or map { }), PPI fails to
+# recognize <*.txt> as a file glob (PPI::Token::QuoteLike::Readline). Instead,
+# it parses it as separate tokens: < (operator), * (operator), . (operator),
+# txt (word), > (operator).
+#
+# This happens because PPI's tokenizer doesn't have enough context after a
+# closing brace to know that < starts a glob rather than a comparison operator.
+#
+# Example: "grep { /a/ } <*.txt>" is misparsed as:
+#   grep, {/a/}, <, *, ., txt, >
+# Instead of:
+#   grep, {/a/}, <*.txt>
+#
+# This workaround detects sequences like < TOKENS > that look like glob patterns
+# and reconstructs them into a single PPI::Token::QuoteLike::Readline token.
+sub _fix_ppi_glob_after_block {
+  my $self   = shift;
+  my $tokens = shift;
+
+  my @result;
+  my $i = 0;
+
+  while ($i < @$tokens) {
+    my $token = $tokens->[$i];
+
+    # Look for < that might start a broken glob
+    if (ref($token) eq 'PPI::Token::Operator' && $token->content eq '<') {
+      # Scan ahead to find matching > and check if it looks like a glob
+      my $j = $i + 1;
+      my $glob_content = '';
+      my $has_glob_chars = 0;
+      my $found_close = 0;
+
+      while ($j < @$tokens) {
+        my $t = $tokens->[$j];
+        my $c = $t->can('content') ? $t->content : '';
+
+        # Found closing >
+        if (ref($t) eq 'PPI::Token::Operator' && $c eq '>') {
+          $found_close = 1;
+          last;
+        }
+
+        # Accumulate content
+        $glob_content .= $c;
+
+        # Check for glob metacharacters — only count actual token content,
+        # NOT the content of structure nodes (PPI::Structure::Subscript [1]
+        # contains '[1]' which would falsely match \[ or \]).
+        $has_glob_chars = 1
+            if ref($t) !~ /^PPI::Structure/
+            && $c =~ /[\*\?\[\]]/;
+
+        # Stop if we hit something that can't be part of a glob
+        last if ref($t) eq 'PPI::Token::Operator' && $c =~ /^(==|!=|<=|>=|<=>|&&|\|\|)$/;
+        last if ref($t) eq 'PPI::Token::Operator' && $c eq '->'; # $ref->[n] not a glob
+        last if ref($t) eq 'PPI::Structure::List';  # Parentheses
+
+        $j++;
+      }
+
+      # If we found a valid-looking glob pattern, reconstruct it
+      if ($found_close && $has_glob_chars && $glob_content ne '') {
+        # Create a proper glob token
+        my $glob_token = bless {
+          content => "<$glob_content>"
+        }, 'PPI::Token::QuoteLike::Readline';
+        push @result, $glob_token;
+        $i = $j + 1;  # Skip past all the consumed tokens
+        next;
+      }
+    }
+
+    push @result, $token;
+    $i++;
   }
 
   return @result;
@@ -2396,8 +2911,16 @@ sub parse_comma_separated_list {
     }
   }
 
-  push @out, $present
-      if scalar @$present;
+  if (scalar @$present) {
+    # Skip empty () — a single empty Structure::List contributes nothing to a list.
+    # e.g. unshift(@a, ()) or push(@a, ()) should pass no extra arguments.
+    my @non_ws = grep { ref($_) !~ /::Whitespace$/ } @$present;
+    unless (scalar(@non_ws) == 1
+            && ref($non_ws[0]) eq 'PPI::Structure::List'
+            && !scalar($non_ws[0]->children())) {
+      push @out, $present;
+    }
+  }
 
   return \@out;
 }
