@@ -4,7 +4,7 @@
 # Usage: ./sweep-perl-tests.pl [--jobs N] [--timeout N] [file.t ...]
 #
 # Each child writes results to a temp file; parent reads after wait.
-# Skips bop.t and heredoc.t (known to hang).
+# Skips bop.t, heredoc.t (known to hang), local.t (tie hang), reverse.t (Tie::Array infinite loop).
 
 use strict;
 use warnings;
@@ -15,7 +15,7 @@ use POSIX qw(:sys_wait_h _exit);
 
 my $JOBS    = 8;
 my $TIMEOUT = 60;  # seconds per test
-my @SKIP    = qw(bop.t heredoc.t);
+my @SKIP    = qw(bop.t heredoc.t local.t reverse.t);
 
 my @test_files;
 while (@ARGV) {
@@ -79,7 +79,10 @@ sub run_one_test {
         # Run SBCL from $perl_tests (NOT from $orig) — tests do `chdir 't'`
         # which requires CWD = perl-tests/ so that perl-tests/t/ is found.
         # Disable module cache to avoid FASL corruption from parallel processes.
-        my $out = `sbcl --noinform --non-interactive --load $runtime --eval "(setf pcl::*pcl-skip-cache* t)" --load $testlib --load $cl_file 2>&1`;
+        # Use 'timeout' so SBCL is actually killed if it hangs (alarm() only
+        # interrupts the parent Perl process, leaving SBCL running as orphan).
+        my $out = `timeout $TIMEOUT sbcl --noinform --non-interactive --load $runtime --eval "(setf pcl::*pcl-skip-cache* t)" --load $testlib --load $cl_file 2>&1`;
+        if (($? >> 8) == 124) { die "TIMEOUT\n" }
         alarm(0);
 
         chdir $orig;

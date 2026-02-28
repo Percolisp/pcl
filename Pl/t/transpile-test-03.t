@@ -250,4 +250,82 @@ test_transpile("funcref: \\&foo ref()",
 test_transpile("amp call: &foo(args)",
     'sub double { my ($n) = @_; print $n * 2, "\n"; } &double(7);');
 
+# ============ BARE BLOCK PACKAGE SCOPING ============
+
+# Bare blocks with package declarations must not leak *package* after the block.
+# Before fix: (in-package :Foo) inside block leaked, causing subsequent
+# top-level forms to read symbols in wrong package.
+
+test_transpile("bare block package: __PACKAGE__ reverts after block", '
+{ package Foo; }
+print __PACKAGE__, "\n";
+');
+
+test_transpile("bare block package: my var visible outside block, in correct pkg", '
+{ package Foo; my $x = 1; }
+our $y = 2;
+print $y, "\n";
+');
+
+test_transpile("bare block package: multiple packages in one block", '
+{ package P1; package P2; }
+print __PACKAGE__, "\n";
+');
+
+test_transpile("bare block package: outer package preserved after inner block", '
+package Bar;
+{ package Foo; }
+print __PACKAGE__, "\n";
+');
+
+# ============ exists &sub / defined &sub ============
+
+# Forward declaration only — exists is true, defined is false
+test_transpile("exists &sub — forward declared only", '
+sub t1;
+my $e = exists &t1 ? "yes" : "no";
+print $e, "\n";
+');
+
+test_transpile("defined &sub — forward declared only (not defined)", '
+sub t1;
+my $d = defined &t1 ? "yes" : "no";
+print $d, "\n";
+');
+
+# Full definition — exists and defined both true
+test_transpile("exists &sub — with body", '
+sub t5 { 1; }
+my $e = exists &t5 ? "yes" : "no";
+print $e, "\n";
+');
+
+test_transpile("defined &sub — with body", '
+sub t5 { 1; }
+my $d = defined &t5 ? "yes" : "no";
+print $d, "\n";
+');
+
+# ============ PACKAGE IN BARE BLOCK (task #79) ============
+
+# Sub defined inside bare block with inline package change
+# must end up in the correct CL package, not :main
+test_transpile("bare block pkg: sub defined in inner package exists", '
+{ package P1; sub tmc { 1; } }
+my $e = exists &P1::tmc ? "yes" : "no";
+print $e, "\n";
+');
+
+test_transpile("bare block pkg: sub defined in inner package is callable", '
+{ package P1; sub tmc { 42; } }
+print P1::tmc(), "\n";
+');
+
+test_transpile("bare block pkg: multiple packages in block", '
+{ package P1; sub p1_sub { 1; } package P2; sub p2_sub { 2; } }
+my $e1 = exists &P1::p1_sub ? "y" : "n";
+my $e2 = exists &P2::p2_sub ? "y" : "n";
+print "$e1 $e2\n";
+');
+
 done_testing();

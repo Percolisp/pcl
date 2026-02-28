@@ -52,12 +52,11 @@ sub _build_ppi_doc {
 }
 ```
 
-### 1.3 `sprintf` positional arguments — ~47 tests (medium)
+### ~~1.3 `sprintf` positional arguments~~ DONE (sprintf2.t: 65/66)
 
-**File:** `cl/pcl-runtime.lisp`, `pl-sprintf`
-
-`%1$s`, `%2$s`, `%NNN$s` format specifiers reorder arguments by position.
-Currently unimplemented. Tests 25–66 in sprintf2.t all fail.
+`%N$s` positional specifiers implemented in `pl-sprintf` (pcl-runtime.lisp).
+sprintf2.t: 65/66 — only test 65 ("expected warnings") still fails, which
+needs `$SIG{__WARN__}` (item 1.4), not a sprintf issue.
 
 ### 1.4 `$SIG{__WARN__}` and `$SIG{__DIE__}` — ~50 tests (medium)
 
@@ -96,12 +95,12 @@ individual elements when building `@_`, matching Perl semantics.
 `sort.t` still times out due to `use Tie::Array` causing infinite loop (known
 issue, separate from recursion depth).
 
-### 1.7 Typeglobs — ~30 tests (significant but well-defined)
+### ~~1.7 Typeglobs~~ DONE (auto.t: 42/47)
 
-auto.t, anonsub.t, sort.t use `*FOO` for aliasing and filehandles.
-A typeglob is a hash of slots: `SCALAR`, `ARRAY`, `HASH`, `CODE`, `IO`.
-A minimal implementation that handles the common cases (aliasing a scalar,
-exporting a function) would unblock most tests.
+Implemented: `pl-glob` struct with `SCALAR`/`ARRAY`/`HASH`/`CODE`/`IO` slots,
+`*foo` codegen, aliasing (`*x = \$y`, `*x = \@y`, `*x = \&f`), `*{expr}`.
+auto.t: 42/47 — 5 remaining failures are arithmetic on glob copies (`$x++`/`$x--`
+on a typeglob, very obscure). Core aliasing and filehandle use cases work.
 
 ### 1.8 `use bytes` pragma — ~10 tests (easy)
 
@@ -266,7 +265,7 @@ subprocess, gets CL back, and evaluates it in the current package context.
 
 - oct.t tests 78-79 (wide char in eval)
 - state.t tests that use `eval 'CORE::state...'`
-- Parts of cmpchain.t, switch.t (given/when uses string eval internally)
+- Parts of cmpchain.t (switch.t is moot — given/when removed in Perl 5.38)
 - Any test using `eval` to test syntax errors
 
 ---
@@ -293,11 +292,11 @@ internals that have no sensible transpiler target.
 |-------|--------|--------|------|
 | 1.1 eval named-unary | 1 line, Config.pm | Trivial | ~243 |
 | 1.2 PPI fallback | ~20 lines, Parser.pm | Half day | ~490 |
-| 1.3 sprintf positional | runtime work | 1 day | ~47 |
+| ~~1.3 sprintf positional~~ | DONE — sprintf2.t 65/66 | — | ~47 |
 | 1.4 $SIG handlers | runtime work | 1 day | ~50 |
 | 1.5 Missing functions | runtime stubs | 1 day | ~60 |
 | ~~1.6 Stack size~~ | DONE — array flattening bug | — | recurse.t 28/28 |
-| 1.7 Typeglobs | significant | Several days | ~30 |
+| ~~1.7 Typeglobs~~ | DONE — auto.t 42/47 | — | ~30 |
 | 1.8 use bytes | runtime + parser | Half day | ~10 |
 | **Phase 1 total** | | ~2 weeks | **~960** |
 | 2. Lexical closures | Parser.pm refactor | 1-2 weeks | ~100+ |

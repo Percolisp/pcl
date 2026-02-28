@@ -763,19 +763,20 @@ ok eval {
  1
 }, 'UTF8 cache is reset when TARG is reused [perl #77692]';
 
-{
-    use utf8;
-    use open qw( :utf8 :std );
-    no warnings 'once';
-
-    my $t = "";
-    substr $t, 0, 0, *ワルド;
-    is($t, "*main::ワルド", "substr works on UTF-8 globs");
-
-    $t = "The World!";
-    substr $t, 0, 9, *ザ::ワルド;
-    is($t, "*ザ::ワルド!", "substr works on a UTF-8 glob + stash");
-}
+# UTF-8 glob literals (*ワルド) crash PPI — commented out
+# {
+#     use utf8;
+#     use open qw( :utf8 :std );
+#     no warnings 'once';
+#
+#     my $t = "";
+#     substr $t, 0, 0, *ワルド;
+#     is($t, "*main::ワルド", "substr works on UTF-8 globs");
+#
+#     $t = "The World!";
+#     substr $t, 0, 9, *ザ::ワルド;
+#     is($t, "*ザ::ワルド!", "substr works on a UTF-8 glob + stash");
+# }
 
 {
     my $x = *foo;

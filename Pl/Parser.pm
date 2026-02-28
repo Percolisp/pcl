@@ -225,9 +225,9 @@ sub _assemble_output {
   for my $section (@{$self->_sections}) {
     for my $bucket (qw(preamble declarations definitions runtime)) {
       for my $line (@{$section->{$bucket}}) {
-        while ($line =~ /\b([A-Z][A-Za-z0-9_]*)::/g) {
+        while ($line =~ /\b([A-Za-z][A-Za-z0-9_]*)::/g) {
           my $pkg = $1;
-          next if $pkg eq 'PCL';
+          next if lc($pkg) eq 'pcl';  # our runtime package
           $needed_packages{$pkg} = 1 unless $declared_pkgs{$pkg};
         }
         while ($line =~ /\|([^|]+)\|::/g) {
@@ -1052,6 +1052,53 @@ sub _process_local_declaration {
   my $parts = shift;
   my $perl_code = shift;
 
+  # Handle local *foo and local *foo = RHS (typeglob localization)
+  # Use pl-local-glob which saves/restores all slots via unwind-protect.
+  # @parts includes the 'local' keyword as first element — skip it.
+  my @non_ws = grep {
+    my $r = ref($_);
+    $r ne 'PPI::Token::Whitespace'
+    && !($r eq 'PPI::Token::Word' && $_->content eq 'local')
+  } @$parts;
+  if (@non_ws && ref($non_ws[0]) eq 'PPI::Token::Symbol'
+      && $non_ws[0]->content =~ /^\*(.+)$/) {
+    my $glob_content = $non_ws[0]->content;  # e.g. "*foo" or "*Pkg::foo"
+    my ($pkg, $name);
+    if ($glob_content =~ /^\*(.*)::([^:]+)$/) {
+      ($pkg, $name) = ($1 || 'main', $2);
+    } else {
+      $glob_content =~ /^\*(\w+)$/;
+      $name = $1;
+      $pkg  = $self->environment ? $self->environment->current_package : 'main';
+      $pkg //= 'main';
+    }
+    $self->_emit(";; $perl_code");
+    # Find initializer (after '=')
+    my $has_init = grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq '=' } @non_ws;
+    if ($has_init) {
+      my @rhs_parts;
+      my $past_eq = 0;
+      for my $p (@non_ws) {
+        if (!$past_eq && ref($p) eq 'PPI::Token::Operator' && $p->content eq '=') {
+          $past_eq = 1;
+          next;
+        }
+        push @rhs_parts, $p if $past_eq;
+      }
+      my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+      $self->_emit("(pl-local-glob \"$pkg\" \"$name\"");
+      $self->indent_level($self->indent_level + 1);
+      $self->_emit("(pl-glob-assign \"$pkg\" \"$name\" $rhs_cl)");
+    } else {
+      $self->_emit("(pl-local-glob \"$pkg\" \"$name\"");
+      $self->indent_level($self->indent_level + 1);
+    }
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+    $self->_emit("");
+    return;
+  }
+
   # Find variable and optional initializer
   my @vars;
   my $init_idx = -1;
@@ -1270,6 +1317,12 @@ sub _process_bare_block {
 
   $self->_emit(";; { ... }");
 
+  # Wrap in *package* save/restore so that any (in-package ...) calls inside
+  # the block don't leak *package* to subsequent top-level forms after the block.
+  # This is a no-op when no package changes happen inside.
+  $self->_emit("(let ((*package* *package*))");
+  $self->indent_level($self->indent_level + 1);
+
   # Wrap the entire bare block in a let for any my-declarations inside it.
   # Each bare block is its own lexical scope in Perl, so inner my-vars must
   # NOT be hoisted to the enclosing sub's let (see _find_all_declarations which
@@ -1281,6 +1334,9 @@ sub _process_bare_block {
   # to a different CL package section. The closers and post-block code
   # must go to the same section as the block opening.
   my $saved_section = $self->_cur_section;
+  # Save the transpile-time package stack so __PACKAGE__ and variable name
+  # generation see the correct package after the block exits.
+  my $saved_pkg_stack = [@{$self->environment->package_stack}];
 
   if ($label) {
     # Labeled bare block: use (block LABEL ...)
@@ -1310,6 +1366,7 @@ sub _process_bare_block {
     $self->_process_block($block);
     $self->_block_depth($self->_block_depth - 1);
     $self->_cur_section($saved_section);
+    $self->environment->package_stack($saved_pkg_stack);
     $self->_emit("(go :next)))");  # close progn + catch'REDO + tagbody... no:
     # Actually: close progn ), close catch ), NOT tagbody
     $self->indent_level($self->indent_level - 2);
@@ -1344,6 +1401,7 @@ sub _process_bare_block {
     $self->_process_block($block);
     $self->_block_depth($self->_block_depth - 1);
     $self->_cur_section($saved_section);
+    $self->environment->package_stack($saved_pkg_stack);
     $self->_emit(":next)");
     $self->indent_level($self->indent_level - 1);
     if ($continue_block) {
@@ -1358,6 +1416,9 @@ sub _process_bare_block {
   }
 
   }); # end _with_declarations
+
+  $self->indent_level($self->indent_level - 1);
+  $self->_emit(")");  # close (let ((*package* *package*)) ...)
   $self->_emit("");
 }
 
@@ -2222,13 +2283,35 @@ sub _process_sub_statement {
   # Use pl-sub macro to wrap in eval-when for BEGIN block visibility
   # Wrap body in (block nil ...) so pl-return works
   # Handle qualified names: A::foo -> A::pl-foo (not pl-A::foo)
-  my $cl_sub_name = $self->_qualified_sub_to_cl($name);
+
+  # When inside a bare block (block_depth > 0), a simple 'package Foo;'
+  # changes the environment's package stack but NOT the CL section.
+  # The sub must carry a fully-qualified name so SBCL interns it in the
+  # correct CL package at read time, regardless of *package*.
+  my $effective_name = $name;
+  if ($name && $name !~ /::/ && $self->_block_depth > 0) {
+    my $pkg = $self->environment->current_package();
+    $effective_name = "$pkg\::$name" if $pkg ne 'main';
+  }
+  my $cl_sub_name = $self->_qualified_sub_to_cl($effective_name);
 
   # Nested named subs (inside another sub) get a pl-declare-sub stub in
   # the declarations bucket so the name is known before the enclosing sub.
   if ($name && $self->environment->in_subroutine > 0) {
     push @{$self->_sections->[$self->_cur_section]{declarations}},
          "(pl-declare-sub $cl_sub_name)";
+  }
+
+  # Forward declaration: sub name; or sub name ($); or sub name : attrs;
+  # Emit pl-declare-sub instead of a full pl-sub with nil body.
+  # Nested subs already had pl-declare-sub pushed to declarations above.
+  unless ($block) {
+    unless ($name && $self->environment->in_subroutine > 0) {
+      $self->_emit("(pl-declare-sub $cl_sub_name)");
+      $self->_emit("");
+    }
+    $self->_cur_bucket($old_bucket);
+    return;
   }
 
   $self->_emit("(pl-sub $cl_sub_name ($params_cl)");

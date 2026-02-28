@@ -15,7 +15,7 @@ use Pl::Parser;
 my $sbcl_version = `sbcl --version 2>/dev/null`;
 plan skip_all => "SBCL not available" unless $sbcl_version;
 
-plan tests => 16;
+plan tests => 22;
 
 # Helper to run Perl code
 sub run_perl {
@@ -187,6 +187,47 @@ my %h = ();
 $h{foo}{bar}[5] = 1;
 my $val = $h{bar}{foo}[1];
 print defined($val) ? "defined" : "undef";
+');
+
+diag "";
+diag "-------- Autovivification through undef refs:";
+
+test_transpile("hashref autoviv: undef scalar -> hashref on assignment", '
+my $ref;
+$ref->{key} = "val";
+print $ref->{key};
+');
+
+test_transpile("arrayref autoviv: undef scalar -> arrayref on assignment", '
+my $ref;
+$ref->[0] = "elem";
+print $ref->[0];
+');
+
+test_transpile("nested ref autoviv: undef -> hashref -> arrayref", '
+my $ref;
+$ref->{A}[0] = "nested";
+print $ref->{A}[0];
+');
+
+test_transpile("nested ref autoviv: write then read", '
+my $ref;
+$ref->{x}[2] = 99;
+print defined($ref->{x}[2]) ? "ok" : "undef";
+');
+
+test_transpile("nested hash ref with two keys", '
+my $ref;
+$ref->{a} = 1;
+$ref->{b} = 2;
+print $ref->{a}, "-", $ref->{b};
+');
+
+test_transpile("array of hashrefs via autoviv", '
+my $ref;
+$ref->[0]{name} = "alice";
+$ref->[1]{name} = "bob";
+print $ref->[0]{name}, "-", $ref->[1]{name};
 ');
 
 done_testing();

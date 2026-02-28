@@ -53,6 +53,7 @@
    #:pl-bit-and #:pl-bit-or #:pl-bit-xor #:pl-bit-not #:pl-<< #:pl->>
    ;; Data structures
    #:pl-aref #:pl-aref-box #:pl-aref-deref #:pl-gethash #:pl-gethash-box #:pl-gethash-deref
+   #:pl-ensure-hashref #:pl-ensure-arrayref
    #:pl-aslice #:pl-hslice #:pl-kv-hslice
    #:pl-hash #:pl-array-init #:pl-array-last-index #:pl-set-array-length
    #:pl-push #:pl-pop #:pl-shift #:pl-unshift #:pl-splice #:pl-flatten #:pl-flatten-args
@@ -91,6 +92,11 @@
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:pl-use #:pl-require #:pl-require-file
    ;; Functions
    #:pl-backslash #:pl-get-coderef #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray #:pl-caller
+   ;; Typeglob support
+   #:pl-typeglob #:pl-typeglob-p #:make-pl-typeglob
+   #:pl-typeglob-package #:pl-typeglob-name
+   #:pl-make-typeglob #:pl-glob-assign #:pl-glob-copy
+   #:pl-glob-slot #:pl-glob-undef-name #:pl-local-glob
    #:pl-grep #:pl-map #:pl-sort #:pl-reverse
    #:pl-join #:pl-split #:pl-funcall-ref
    ;; Dereferencing (sigil cast operations)
@@ -111,6 +117,11 @@
    #:*pcl-sub-call-depth*
    ;; END blocks
    #:*end-blocks*
+   ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
+   #:pl-sub-exists #:pl-sub-defined #:pl-undef-sub
+   #:pl-coderef-exists-p #:pl-coderef-defined-p
+   ;; Tie/untie/tied stubs
+   #:pl-tie #:pl-untie #:pl-tied
    ;; Compile-time definition macros (for BEGIN block support)
    #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
    ;; Assignment forms (distinct from pl-setf for clarity)
@@ -136,8 +147,10 @@
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
 ;;; This matches Perl's semantics where subs are compiled immediately.
+;;; Marks the symbol as :defined in *pl-declared-subs* for defined &sub support.
 (defmacro pl-sub (name params &body body)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (setf (gethash ',name *pl-declared-subs*) :defined)
      (defun ,name ,params
        (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
          ,@body))))
@@ -145,9 +158,13 @@
 ;;; pl-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
 ;;; Only creates the stub if the function isn't already defined.
+;;; Marks the symbol as :stub in *pl-declared-subs* for exists &sub support.
 (defmacro pl-declare-sub (name)
-  `(unless (fboundp ',name)
-     (defun ,name (&rest args) (declare (ignore args)) nil)))
+  `(progn
+     (unless (gethash ',name *pl-declared-subs*)
+       (setf (gethash ',name *pl-declared-subs*) :stub))
+     (unless (fboundp ',name)
+       (defun ,name (&rest args) (declare (ignore args)) nil))))
 
 ;;; pl-our: Declare a package variable (Perl's 'our').
 ;;; Declaration happens at compile time (visible to BEGIN blocks).
@@ -181,6 +198,12 @@
 ;;; Forward declaration for %INC table (full definition in Module System section)
 (defvar *pl-inc-table* (make-hash-table :test 'equal)
   "Perl %INC - tracks loaded modules (forward declaration)")
+
+;;; Sub declaration/definition tracking for exists &sub / defined &sub
+;;; Maps CL function symbol → :stub (declared only), :defined (has body),
+;;; or :was-defined (was defined, now undef'd).
+(defvar *pl-declared-subs* (make-hash-table :test 'eq)
+  "Perl sub existence tracking for exists &sub and defined &sub")
 
 ;;; @_ - Perl's subroutine arguments array. Must be declared special so that
 ;;; let-bindings in pl-sub are dynamic (not lexical), allowing callbacks and
@@ -439,6 +462,7 @@
                    ((eq v t) 1)  ; CL's T from comparisons - Perl true is 1
                    ((stringp v) (parse-perl-number v))
                    ((pl-box-p v) 0)  ; reference as number
+                   ((pl-typeglob-p v) 0)  ; typeglob as number
                    (t 0))))
           (setf (pl-box-nv box) n
                 (pl-box-nv-ok box) t)
@@ -498,6 +522,9 @@
     ((pl-box-p v) (format nil "SCALAR(0x~X)" (object-address v)))
     ((hash-table-p v) (format nil "HASH(0x~X)" (object-address v)))
     ((vectorp v) (format nil "ARRAY(0x~X)" (object-address v)))
+    ((pl-typeglob-p v) (format nil "*~A::~A"
+                               (package-name (pl-typeglob-package v))
+                               (pl-typeglob-name v)))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
@@ -575,7 +602,11 @@
       ((hash-table-p val)
        (clrhash val))
       ((pl-box-p val)
-       (box-set val *pl-undef*))))
+       (box-set val *pl-undef*))
+      ;; undef *foo — clear all typeglob slots
+      ((pl-typeglob-p val)
+       (pl-glob-undef-name (package-name (pl-typeglob-package val))
+                           (pl-typeglob-name val)))))
   *pl-undef*)
 
 (defun pl-defined (val)
@@ -1875,6 +1906,38 @@
            (val (gensym "VAL")))
        `(let ((,val ,value))
           (pl-autoviv-aref-set ,hash-chain ,idx ,val))))
+    ;; Array element via hash-ref deref - autovivification
+    ;; (pl-aref (pl-gethash-deref $ref key) idx) = value  ($ref->{key}[idx])
+    ((and (listp place)
+          (eq (car place) 'pl-aref)
+          (listp (cadr place))
+          (eq (car (cadr place)) 'pl-gethash-deref))
+     (let ((hash-chain (cadr place))
+           (idx (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-aref-set ,hash-chain ,idx ,val))))
+    ;; Array element via array-ref deref - autovivification
+    ;; (pl-aref (pl-aref-deref $ref i) idx) = value  ($ref->[i][idx])
+    ((and (listp place)
+          (eq (car place) 'pl-aref)
+          (listp (cadr place))
+          (eq (car (cadr place)) 'pl-aref-deref))
+     (let ((hash-chain (cadr place))
+           (idx (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-aref-set ,hash-chain ,idx ,val))))
+    ;; Hash element via hash-ref deref chain - autovivification
+    ;; (pl-gethash (pl-gethash-deref $ref key) key2) = value  ($ref->{key}{key2})
+    ((and (listp place)
+          (eq (car place) 'pl-gethash)
+          (listp (cadr place))
+          (member (car (cadr place)) '(pl-gethash-deref pl-aref-deref)))
+     (let ((outer-key (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-set ,(cadr place) ,outer-key ,val))))
     ;; Array/hash ref access and scalar deref - use CL setf
     ((and (listp place)
           (member (car place) '(pl-aref-deref pl-gethash-deref pl-$)))
@@ -2449,8 +2512,8 @@
   (if (pl-true-p a) "" 1))
 
 (defun pl-not (a)
-  "Perl logical NOT (low precedence)"
-  (if (pl-true-p a) nil t))
+  "Perl logical NOT (low precedence) - same return values as pl-!"
+  (if (pl-true-p a) "" 1))
 
 (defmacro pl-and (a b)
   "Perl 'and' operator"
@@ -2838,6 +2901,28 @@
             (setf (gethash k h) box)
             box)))))
 
+(defun pl-ensure-hashref (ref)
+  "Ensure ref (a pl-box) contains a hash table.
+   If ref contains nil or undef, autovivify: create a hash table and store it in the box.
+   Returns the raw hash table (not boxed). Used by autovivification macros."
+  (let ((h (unbox ref)))
+    (if (or (null h) (eq h *pl-undef*))
+        (let ((new-hash (make-hash-table :test 'equal)))
+          (box-set ref new-hash)
+          new-hash)
+        h)))
+
+(defun pl-ensure-arrayref (ref)
+  "Ensure ref (a pl-box) contains an adjustable vector.
+   If ref contains nil or undef, autovivify: create a vector and store it in the box.
+   Returns the raw vector (not boxed). Used by autovivification macros."
+  (let ((a (unbox ref)))
+    (if (or (null a) (eq a *pl-undef*))
+        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+          (box-set ref new-arr)
+          new-arr)
+        a)))
+
 (defun pl-autoviv-gethash (hash key)
   "Get hash value, autovivifying to empty hash if missing or :UNDEF.
    Handles boxes in hash values."
@@ -2934,44 +3019,58 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun expand-autoviv (form)
-    "Compile-time helper to expand nested gethash into autovivifying code.
-     Creates hashes at each level (for hash access chain)."
+    "Compile-time helper to expand nested hash/array access into autovivifying code.
+     The result of this form must be a hash table (inner yields hash).
+     Handles pl-gethash, pl-aref, pl-gethash-deref, pl-aref-deref chains."
     (cond
-      ;; (pl-gethash inner key) - autovivify to hash
+      ;; (pl-gethash inner key) - autovivify intermediate, this slot yields hash
       ((and (listp form) (eq (car form) 'pl-gethash))
        (let ((inner (cadr form))
              (key (caddr form)))
-         (if (or (and (listp inner) (eq (car inner) 'pl-gethash))
-                 (and (listp inner) (eq (car inner) 'pl-aref)))
-             ;; Nested: recursively expand, then autoviv this level
-             `(pl-autoviv-gethash ,(expand-autoviv inner) ,key)
-             ;; Base case: inner is actual hash
-             `(pl-autoviv-gethash ,inner ,key))))
+         `(pl-autoviv-gethash ,(expand-autoviv inner) ,key)))
       ;; (pl-aref inner idx) - intermediate array, this slot yields hash
       ((and (listp form) (eq (car form) 'pl-aref))
        (let ((inner (cadr form))
              (idx (caddr form)))
          `(pl-autoviv-aref-for-hash ,(expand-autoviv-for-array inner) ,idx)))
-      ;; Not a recognized form
+      ;; (pl-gethash-deref $ref key) - autovivify $ref to hashref, slot yields hash
+      ((and (listp form) (eq (car form) 'pl-gethash-deref))
+       (let ((ref (cadr form))
+             (key (caddr form)))
+         `(pl-autoviv-gethash (pl-ensure-hashref ,ref) ,key)))
+      ;; (pl-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields hash
+      ((and (listp form) (eq (car form) 'pl-aref-deref))
+       (let ((ref (cadr form))
+             (idx (caddr form)))
+         `(pl-autoviv-aref-for-hash (pl-ensure-arrayref ,ref) ,idx)))
+      ;; Base case: form is a plain hash container
       (t form)))
 
   (defun expand-autoviv-for-array (form)
-    "Expand form knowing result must be an array."
+    "Compile-time helper: the result of this form must be an array.
+     Handles pl-gethash, pl-aref, pl-gethash-deref, pl-aref-deref chains."
     (cond
       ;; (pl-gethash inner key) - this slot yields array
       ((and (listp form) (eq (car form) 'pl-gethash))
        (let ((inner (cadr form))
              (key (caddr form)))
-         (if (or (and (listp inner) (eq (car inner) 'pl-gethash))
-                 (and (listp inner) (eq (car inner) 'pl-aref)))
-             `(pl-autoviv-gethash-for-array ,(expand-autoviv inner) ,key)
-             `(pl-autoviv-gethash-for-array ,inner ,key))))
+         `(pl-autoviv-gethash-for-array ,(expand-autoviv inner) ,key)))
       ;; (pl-aref inner idx) - this slot yields array
       ((and (listp form) (eq (car form) 'pl-aref))
        (let ((inner (cadr form))
              (idx (caddr form)))
          `(pl-autoviv-aref-for-array ,(expand-autoviv-for-array inner) ,idx)))
-      ;; Not a recognized form
+      ;; (pl-gethash-deref $ref key) - autovivify $ref to hashref, slot yields array
+      ((and (listp form) (eq (car form) 'pl-gethash-deref))
+       (let ((ref (cadr form))
+             (key (caddr form)))
+         `(pl-autoviv-gethash-for-array (pl-ensure-hashref ,ref) ,key)))
+      ;; (pl-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields array
+      ((and (listp form) (eq (car form) 'pl-aref-deref))
+       (let ((ref (cadr form))
+             (idx (caddr form)))
+         `(pl-autoviv-aref-for-array (pl-ensure-arrayref ,ref) ,idx)))
+      ;; Base case: form is a plain array container
       (t form))))
 
 (defmacro pl-autoviv-aref-set (hash-chain idx value)
@@ -2989,12 +3088,12 @@
   (pl-gethash (unbox ref) key))
 
 (defun (setf pl-gethash-deref) (value ref key)
-  "Setf expander for pl-gethash-deref - unbox the reference first"
-  (setf (pl-gethash (unbox ref) key) value))
+  "Setf expander for pl-gethash-deref - autovivify ref to hash if undef, then set key"
+  (setf (pl-gethash (pl-ensure-hashref ref) key) value))
 
 (defun (setf pl-aref-deref) (value ref idx)
-  "Setf expander for pl-aref-deref - unbox the reference first"
-  (setf (pl-aref (unbox ref) idx) value))
+  "Setf expander for pl-aref-deref - autovivify ref to array if undef, then set element"
+  (setf (pl-aref (pl-ensure-arrayref ref) idx) value))
 
 (defun pl-aslice (arr &rest indices)
   "Perl array slice @arr[indices] - returns vector of values.
@@ -3082,6 +3181,7 @@
 (defun pl-each (hash)
   "Perl each function - returns next (key, value) pair from hash.
    Returns an empty list when exhausted. Resets on first call after exhaustion."
+  (unless (hash-table-p hash) (return-from pl-each (vector)))
   (let ((remaining (gethash hash *hash-iterators*)))
     ;; If no iterator exists or previous was exhausted, start fresh
     (when (null remaining)
@@ -3102,6 +3202,8 @@
 
 (defun pl-keys (hash)
   "Perl keys function - also resets the each() iterator"
+  (unless (hash-table-p hash)
+    (return-from pl-keys (make-array 0 :adjustable t :fill-pointer 0)))
   ;; Reset each() iterator
   (remhash hash *hash-iterators*)
   (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
@@ -3113,6 +3215,8 @@
 
 (defun pl-values (hash)
   "Perl values function - returns unboxed values"
+  (unless (hash-table-p hash)
+    (return-from pl-values (make-array 0 :adjustable t :fill-pointer 0)))
   (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
     (maphash (lambda (k v)
                (declare (ignore k))
@@ -4787,6 +4891,8 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
       ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
       ((functionp inner) "CODE")
+      ;; Typeglob reference
+      ((pl-typeglob-p inner) "GLOB")
       ;; Not a reference
       (t ""))))
 
@@ -4794,6 +4900,251 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun pl-reftype (val)
   "Alias for pl-ref"
   (pl-ref val))
+
+;;; ============================================================
+;;; Typeglob Support
+;;; ============================================================
+;;; A Perl typeglob *foo is a named symbol table entry with slots for
+;;; SCALAR, ARRAY, HASH, CODE, IO. The pl-typeglob struct is just a
+;;; label (package + name); slot values live in the CL symbol table.
+
+(defstruct (pl-typeglob (:constructor make-pl-typeglob (package name)))
+  package   ; CL package object
+  name)     ; upcased Perl name string, e.g. "FOO"
+
+(defun pl-make-typeglob (pkg-str name-str)
+  "Create a typeglob object for *Pkg::Name."
+  (let ((pkg (or (find-package (string-upcase pkg-str))
+                 ;; Package may not exist yet; create it lazily
+                 (make-package (string-upcase pkg-str) :use '(:cl :pcl)))))
+    (make-pl-typeglob pkg (string-upcase name-str))))
+
+(defun pl-glob-assign (pkg-str name-str rhs)
+  "Assign RHS to the appropriate slot of typeglob *pkg::name.
+   Dispatch is by type of the unwrapped RHS value."
+  (let* ((pkg   (or (find-package (string-upcase pkg-str))
+                    (make-package (string-upcase pkg-str) :use '(:cl :pcl))))
+         (uname (string-upcase name-str))
+         ;; Unwrap one box level to see what was referenced
+         (inner (if (pl-box-p rhs) (unbox rhs) rhs)))
+    (cond
+      ;; *foo = *bar — full glob copy
+      ((pl-typeglob-p rhs)   (pl-glob-copy pkg uname rhs))
+      ((pl-typeglob-p inner) (pl-glob-copy pkg uname inner))
+
+      ;; *foo = \&sub or *foo = sub{} — CODE slot
+      ((functionp inner)
+       (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
+             inner))
+
+      ;; *foo = \$scalar — SCALAR slot (inner is the pl-box = the variable itself)
+      ((pl-box-p inner)
+       (setf (symbol-value (intern (concatenate 'string "$" uname) pkg))
+             inner))
+
+      ;; *foo = \@array — ARRAY slot (inner is the adjustable vector)
+      ((and (vectorp inner) (adjustable-array-p inner))
+       (setf (symbol-value (intern (concatenate 'string "@" uname) pkg))
+             inner))
+
+      ;; *foo = \%hash — HASH slot (inner is the hash-table)
+      ((hash-table-p inner)
+       (setf (symbol-value (intern (concatenate 'string "%" uname) pkg))
+             inner))
+
+      ;; *foo = undef — no-op
+      ((or (null inner) (eq inner *pl-undef*)) nil)
+
+      ;; Fallback: try as CODE if rhs is directly a function
+      ((functionp rhs)
+       (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
+             rhs)))))
+
+(defun pl-glob-copy (dst-pkg dst-uname src-glob)
+  "Copy all slots from src-glob into dst (pkg, uname)."
+  (let ((sp (pl-typeglob-package src-glob))
+        (sn (pl-typeglob-name src-glob)))
+    ;; CODE
+    (let ((src-sym (intern (concatenate 'string "PL-" sn) sp)))
+      (when (fboundp src-sym)
+        (setf (fdefinition (intern (concatenate 'string "PL-" dst-uname) dst-pkg))
+              (fdefinition src-sym))))
+    ;; SCALAR
+    (let ((src-sym (intern (concatenate 'string "$" sn) sp)))
+      (when (boundp src-sym)
+        (setf (symbol-value (intern (concatenate 'string "$" dst-uname) dst-pkg))
+              (symbol-value src-sym))))
+    ;; ARRAY
+    (let ((src-sym (intern (concatenate 'string "@" sn) sp)))
+      (when (boundp src-sym)
+        (setf (symbol-value (intern (concatenate 'string "@" dst-uname) dst-pkg))
+              (symbol-value src-sym))))
+    ;; HASH
+    (let ((src-sym (intern (concatenate 'string "%" sn) sp)))
+      (when (boundp src-sym)
+        (setf (symbol-value (intern (concatenate 'string "%" dst-uname) dst-pkg))
+              (symbol-value src-sym))))))
+
+(defun pl-glob-undef-name (pkg-str name-str)
+  "undef *foo — clear all slots."
+  (let* ((pkg   (find-package (string-upcase pkg-str)))
+         (uname (string-upcase name-str)))
+    (when pkg
+      (let ((sym (intern (concatenate 'string "PL-" uname) pkg)))
+        (when (fboundp sym) (fmakunbound sym)))
+      (dolist (prefix (list "$" "@" "%"))
+        (let ((sym (intern (concatenate 'string prefix uname) pkg)))
+          (when (boundp sym)
+            (set sym (cond ((string= prefix "$")
+                            (make-pl-box *pl-undef*))
+                           ((string= prefix "@")
+                            (make-array 0 :adjustable t :fill-pointer 0))
+                           (t (make-hash-table :test 'equal))))))))))
+
+(defun pl-glob-slot (glob slot)
+  "Read *foo{SLOT}."
+  (let* ((pkg    (pl-typeglob-package glob))
+         (uname  (pl-typeglob-name glob))
+         (slot-s (string-upcase (stringify-value slot))))
+    (cond
+      ((string= slot-s "CODE")
+       (let ((sym (intern (concatenate 'string "PL-" uname) pkg)))
+         (when (fboundp sym) (make-pl-box (fdefinition sym)))))
+      ((string= slot-s "SCALAR")
+       (let ((sym (intern (concatenate 'string "$" uname) pkg)))
+         (when (boundp sym) (make-pl-box (symbol-value sym)))))
+      ((string= slot-s "ARRAY")
+       (let ((sym (intern (concatenate 'string "@" uname) pkg)))
+         (when (boundp sym) (symbol-value sym))))
+      ((string= slot-s "HASH")
+       (let ((sym (intern (concatenate 'string "%" uname) pkg)))
+         (when (boundp sym) (symbol-value sym))))
+      ((string= slot-s "NAME")    (make-pl-box (pl-typeglob-name glob)))
+      ((string= slot-s "PACKAGE") (make-pl-box (package-name (pl-typeglob-package glob))))
+      ((string= slot-s "GLOB")    glob)
+      (t *pl-undef*))))
+
+(defmacro pl-local-glob (pkg-str name-str &body body)
+  "Save all slots of *pkg::name, execute body, restore on exit."
+  (let ((pkg-var       (gensym "PKG"))
+        (uname-var     (gensym "UNAME"))
+        (saved-had-code (gensym "HAD-CODE"))
+        (saved-code    (gensym "SAVED-CODE"))
+        (saved-scalar  (gensym "SAVED-SCALAR"))
+        (saved-array   (gensym "SAVED-ARRAY"))
+        (saved-hash    (gensym "SAVED-HASH")))
+    `(let* ((,pkg-var   (or (find-package (string-upcase ,pkg-str))
+                            (make-package (string-upcase ,pkg-str) :use '(:cl :pcl))))
+            (,uname-var (string-upcase ,name-str))
+            (code-sym   (intern (concatenate 'string "PL-"  ,uname-var) ,pkg-var))
+            (scalar-sym (intern (concatenate 'string "$"    ,uname-var) ,pkg-var))
+            (array-sym  (intern (concatenate 'string "@"    ,uname-var) ,pkg-var))
+            (hash-sym   (intern (concatenate 'string "%"    ,uname-var) ,pkg-var))
+            (,saved-had-code (fboundp code-sym))
+            (,saved-code     (when ,saved-had-code (fdefinition code-sym)))
+            (,saved-scalar   (when (boundp scalar-sym) (symbol-value scalar-sym)))
+            (,saved-array    (when (boundp array-sym)  (symbol-value array-sym)))
+            (,saved-hash     (when (boundp hash-sym)   (symbol-value hash-sym))))
+       (unwind-protect (progn ,@body)
+         (if ,saved-had-code
+             (setf (fdefinition code-sym) ,saved-code)
+             (when (fboundp code-sym) (fmakunbound code-sym)))
+         (when ,saved-scalar (setf (symbol-value scalar-sym) ,saved-scalar))
+         (when ,saved-array  (setf (symbol-value array-sym)  ,saved-array))
+         (when ,saved-hash   (setf (symbol-value hash-sym)   ,saved-hash))))))
+
+;;; ============================================================
+;;; Subroutine Reflection (exists &sub, defined &sub, undef &sub)
+;;; ============================================================
+
+(defun pl-sub-exists (pkg-str name-str)
+  "Perl exists &funcname — true if sub has been declared or defined."
+  (let* ((pkg (find-package (string-upcase pkg-str)))
+         (sym (when pkg
+                (find-symbol (concatenate 'string "PL-"
+                                          (string-upcase name-str))
+                             pkg))))
+    (if (and sym
+             (or (gethash sym *pl-declared-subs*)
+                 (fboundp sym)))
+        (make-pl-box 1)
+        (make-pl-box nil))))
+
+(defun pl-sub-defined (pkg-str name-str)
+  "Perl defined &funcname — true only if sub has an actual body (not a stub)."
+  (let* ((pkg (find-package (string-upcase pkg-str)))
+         (sym (when pkg
+                (find-symbol (concatenate 'string "PL-"
+                                          (string-upcase name-str))
+                             pkg))))
+    (if (and sym
+             (eq (gethash sym *pl-declared-subs*) :defined))
+        (make-pl-box 1)
+        (make-pl-box nil))))
+
+(defun pl-undef-sub (pkg-str name-str)
+  "Perl undef &funcname — remove sub body; sub still 'exists' afterward."
+  (let* ((pkg (find-package (string-upcase pkg-str)))
+         (sym (when pkg
+                (find-symbol (concatenate 'string "PL-"
+                                          (string-upcase name-str))
+                             pkg))))
+    (when sym
+      (when (fboundp sym) (fmakunbound sym))
+      ;; Keep entry so exists &sub still returns true
+      (setf (gethash sym *pl-declared-subs*) :was-defined)))
+  *pl-undef*)
+
+(defun pl-coderef-exists-p (coderef)
+  "Perl exists &{$coderef} — true if coderef points to a declared or defined sub."
+  (let ((v (unbox coderef)))
+    (unless (functionp v) (return-from pl-coderef-exists-p (make-pl-box nil)))
+    ;; Get the function's name symbol (SBCL-specific)
+    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
+           (status (and (symbolp fname) (gethash fname *pl-declared-subs*))))
+      (if status
+          (make-pl-box 1)
+          ;; Fallback: any non-nil function object "exists"
+          (make-pl-box 1)))))
+
+(defun pl-coderef-defined-p (coderef)
+  "Perl defined &{$coderef} — true only if coderef points to a sub with a body."
+  (let ((v (unbox coderef)))
+    (unless (functionp v) (return-from pl-coderef-defined-p (make-pl-box nil)))
+    ;; Get the function's name symbol (SBCL-specific)
+    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
+           (status (and (symbolp fname) (gethash fname *pl-declared-subs*))))
+      (if (eq status :defined)
+          (make-pl-box 1)
+          (make-pl-box nil)))))
+
+;;; ============================================================
+;;; Tie / Untie / Tied — stub implementations
+;;; ============================================================
+;;; Perl's tie mechanism binds a variable to an object implementing
+;;; a class interface (TIESCALAR, TIEARRAY, etc.).  Full tie support
+;;; requires intercepting every read/write of the variable, which
+;;; needs compiler-level hooks that PCL does not yet have.
+;;; These stubs allow code that calls tie/untie/tied to run without
+;;; crashing.  tied() returns undef (variable is not tied), untie()
+;;; returns 1 (success), tie() warns and returns undef.
+
+(defun pl-tie (var classname &rest args)
+  "Perl tie - stub (not implemented)"
+  (declare (ignore var classname args))
+  (format *error-output*
+          "# PCL: tie not implemented~%")
+  *pl-undef*)
+
+(defun pl-untie (var)
+  "Perl untie - stub (not implemented, reports success)"
+  (declare (ignore var))
+  (make-pl-box 1))
+
+(defun pl-tied (var)
+  "Perl tied - stub (always returns undef: variable is not tied)"
+  (declare (ignore var))
+  *pl-undef*)
 
 (defun pl-scalar (&rest args)
   "Perl scalar function - returns length for arrays, value for scalars.

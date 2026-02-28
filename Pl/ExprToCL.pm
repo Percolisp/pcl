@@ -179,6 +179,22 @@ sub cl_name {
 }
 
 
+# Helper: split a bare function name (from &funcname or &Pkg::funcname)
+# into (package_string, plain_name_string).
+# Used by exists/defined/undef &funcname codegen.
+sub _split_func_sym {
+  my ($self, $func_sym) = @_;
+  my ($pkg, $name);
+  if ($func_sym =~ /^(.+)::([^:]+)$/) {
+    ($pkg, $name) = ($1, $2);
+  } else {
+    $pkg  = $self->environment ? ($self->environment->current_package // 'main') : 'main';
+    $name = $func_sym;
+  }
+  return ($pkg, $name);
+}
+
+
 # Get context keyword for a node (:scalar or :list)
 sub get_context_keyword {
   my $self    = shift;
@@ -271,18 +287,20 @@ sub gen_leaf {
       my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
       return "${cl_pkg}::${sigil}${name}";
     }
-    # Handle package-qualified typeglobs: *Pkg::var -> |Pkg|::*var
-    # Perl: *Scalar::Util::refaddr  ->  CL: |Scalar::Util|::*refaddr
+    # Handle package-qualified typeglobs: *Pkg::foo -> (pl-make-typeglob "Pkg" "foo")
     # Also: *::foo means *main::foo (empty package = main)
     if ($content =~ /^\*(.*)::([^:]+)$/) {
       my ($pkg, $name) = ($1, $2);
-      # Empty package means main (e.g., *::foo = *main::foo)
       $pkg = 'main' if $pkg eq '';
-      # Track referenced package
       $self->environment->add_referenced_package($pkg) if $self->environment;
-      # Use pipe quoting for package (which may contain ::)
-      my $cl_pkg = "|$pkg|";
-      return "${cl_pkg}::*${name}";
+      return "(pl-make-typeglob \"$pkg\" \"$name\")";
+    }
+    # Handle simple typeglob: *foo -> (pl-make-typeglob "current-pkg" "foo")
+    if ($content =~ /^\*(\w+)$/) {
+      my $name = $1;
+      my $pkg  = $self->environment ? $self->environment->current_package : 'main';
+      $pkg //= 'main';
+      return "(pl-make-typeglob \"$pkg\" \"$name\")";
     }
     # Handle package stash access: $Pkg::Sub:: or %Pkg::Sub::
     # Perl: $YAML::Tiny:: or %YAML::Tiny:: -> CL: (pl-stash "YAML::Tiny")
@@ -505,14 +523,11 @@ sub gen_binary_op {
     return "(pl-set-array-length $arr $right)";
   }
 
-  # Special case: typeglob assignment with function reference
-  # *freeze = \&Dump  →  (setf (symbol-function 'pl-freeze) #'pl-Dump)
-  if ($op eq '=' && $left =~ /^\*(\w+)$/) {
-    my $glob_name = $1;
-    if ($right =~ /^#'/) {
-      my $cl_func_name = $self->cl_name($glob_name);
-      return "(setf (symbol-function '$cl_func_name) $right)";
-    }
+  # Typeglob assignment: *foo = RHS  →  (pl-glob-assign "pkg" "name" rhs)
+  # Runtime dispatch to the appropriate slot based on RHS type.
+  if ($op eq '=' && $left =~ /^\(pl-make-typeglob "([^"]+)" "([^"]+)"\)$/) {
+    my ($pkg, $name) = ($1, $2);
+    return "(pl-glob-assign \"$pkg\" \"$name\" $right)";
   }
 
   # For assignment, dispatch to type-specific forms based on LHS sigil
@@ -866,6 +881,26 @@ sub gen_funcall {
   # Need to pass container and key/index separately
   if ($func_name eq 'exists' && @$kids == 2) {
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    # exists &funcname — subroutine existence check
+    if (ref($arg_node) eq 'PPI::Token::Symbol') {
+      my $sym = $arg_node->content();
+      if ($sym =~ /^&(.+)$/) {
+        my ($pkg, $name) = $self->_split_func_sym($1);
+        return "(pl-sub-exists \"$pkg\" \"$name\")";
+      }
+    }
+    # exists &{$coderef} — coderef existence check (prefix_op with & cast)
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'prefix_op') {
+      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids2 >= 2) {
+        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
+        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
+          my $inner = $self->gen_node($arg_kids2->[1]);
+          return "(pl-coderef-exists-p $inner)";
+        }
+      }
+    }
     if ($self->expr_o->is_internal_node_type($arg_node)) {
       my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
       if (@$arg_kids >= 2) {
@@ -893,6 +928,42 @@ sub gen_funcall {
     }
   }
 
+  # defined &funcname — subroutine defined check
+  if ($func_name eq 'defined' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($arg_node) eq 'PPI::Token::Symbol') {
+      my $sym = $arg_node->content();
+      if ($sym =~ /^&(.+)$/) {
+        my ($pkg, $name) = $self->_split_func_sym($1);
+        return "(pl-sub-defined \"$pkg\" \"$name\")";
+      }
+    }
+    # defined &{$coderef} — coderef defined check (prefix_op with & cast)
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'prefix_op') {
+      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids2 >= 2) {
+        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
+        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
+          my $inner = $self->gen_node($arg_kids2->[1]);
+          return "(pl-coderef-defined-p $inner)";
+        }
+      }
+    }
+  }
+
+  # undef &funcname — undefine a sub (keeps it in exists table)
+  if ($func_name eq 'undef' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($arg_node) eq 'PPI::Token::Symbol') {
+      my $sym = $arg_node->content();
+      if ($sym =~ /^&(.+)$/) {
+        my ($pkg, $name) = $self->_split_func_sym($1);
+        return "(pl-undef-sub \"$pkg\" \"$name\")";
+      }
+    }
+  }
+
   # Check for reference prototype that requires auto-boxing
   my $proto = $self->environment ? $self->environment->get_prototype($func_name) : undef;
   my @ref_params;
@@ -902,7 +973,8 @@ sub gen_funcall {
   }
 
   # Functions that modify their arguments (need l-value access to array/hash elements)
-  my %lvalue_funcs = map { $_ => 1 } qw(chop chomp);
+  # undef $hash{k} / undef $arr[i] must receive the box, not the unboxed value
+  my %lvalue_funcs = map { $_ => 1 } qw(chop chomp undef);
   my $needs_lvalue = $lvalue_funcs{$func_name} // 0;
 
   # Rest are arguments
