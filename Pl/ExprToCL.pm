@@ -715,7 +715,8 @@ sub gen_funcall {
   # The classname can be a bareword like MyClass or o:: which should be a string
   if ($func_name eq 'bless' && @$kids >= 2) {
     my $ref_arg = $self->gen_node($kids->[1]);
-    my $class_arg = '"main"';  # Default class is caller's package
+    my $cur_pkg = $self->environment ? $self->environment->current_package : 'main';
+    my $class_arg = "\"$cur_pkg\"";  # Default class is the package at point of bless call
 
     if (@$kids >= 3) {
       my $class_node = $self->expr_o->get_a_node($kids->[2]);

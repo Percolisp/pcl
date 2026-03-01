@@ -542,14 +542,19 @@ sub _process_element {
     # BEGIN, END, CHECK, INIT blocks
     $self->_process_scheduled_block($element);
   }
-  elsif ($ref eq 'PPI::Statement::End') {
-    # __END__ - stop processing (ignore everything after)
-    $self->_emit(";; __END__");
-    return;
-  }
-  elsif ($ref eq 'PPI::Statement::Data') {
-    # __DATA__ - stop processing (DATA filehandle not yet supported)
-    $self->_emit(";; __DATA__ (DATA filehandle not implemented)");
+  elsif ($ref eq 'PPI::Statement::End' || $ref eq 'PPI::Statement::Data') {
+    # __END__ / __DATA__ — register DATA filehandle with embedded text
+    my ($data_tok) = grep { ref($_) eq 'PPI::Token::Data'
+                            || ref($_) eq 'PPI::Token::End' }
+                           $element->children;
+    my $data = $data_tok ? $data_tok->content : '';
+    $data =~ s/\\/\\\\/g;
+    $data =~ s/"/\\"/g;
+    $self->_with_bucket('preamble', sub {
+      $self->_emit(";; $ref — register DATA filehandle");
+      $self->_emit("(setf (gethash 'DATA *pl-filehandles*)");
+      $self->_emit("  (make-string-input-stream \"$data\"))");
+    });
     return;
   }
   elsif ($ref =~ /^PPI::Statement/) {
@@ -2609,6 +2614,16 @@ sub _process_include_statement {
     return;
   }
 
+  # require inside a sub body must stay inline (not hoisted) so that:
+  # 1. eval { require Foo } can catch load failures properly
+  # 2. Perl semantics: require inside a sub runs at call time, not compile time
+  if ($type eq 'require' && $self->environment->in_subroutine > 0) {
+    $self->_emit(";; $perl_code");
+    $self->_emit("(pl-require \"$module\")");
+    $self->_emit("");
+    return;
+  }
+
   # General use/require — emit to definitions bucket (before runtime code)
   $self->_with_bucket('definitions', sub {
     if ($type eq 'use') {
@@ -3204,7 +3219,7 @@ sub _parse_expression_internal {
     my $error = $@;
     $error =~ s/ at \/.*//s;  # Remove file/line info
     $error =~ s/\n.*//s;      # First line only
-    return (";; PARSE ERROR: $error", []);
+    return ("(progn ;; PARSE ERROR: $error\n nil)", []);
   }
 
   return ($result // ";; (no output)", \@decls);

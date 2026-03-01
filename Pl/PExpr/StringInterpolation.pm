@@ -63,8 +63,10 @@ sub parse_interpolated_string {
 
   # Process the string, looking for variables and case-changing escapes
   while ($pos < length($content)) {
-    # Find next variable, case escape, or end of string
-    if ($content =~ /\G((?:[^\$\@\\]|\\(?:c.?|[^ULulQFEc]))*?)(?:([\$\@])|\\([ULulQFE])|$)/gc) {
+    # Find next variable, case escape, or end of string.
+    # Use \z (absolute end) not $ (which stops before a final \n) so that
+    # a literal newline at the end of the string is captured as a literal part.
+    if ($content =~ /\G((?:[^\$\@\\]|\\(?:c.?|[^ULulQFEc]))*?)(?:([\$\@])|\\([ULulQFE])|\z)/gc) {
       my $literal = $1;
       my $sigil = $2;
       my $case_cmd = $3;

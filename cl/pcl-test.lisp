@@ -17,7 +17,8 @@
 ;;; Export test functions
 (export '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
           pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
-          pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT))
+          pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
+          pl-eq_array))
 
 ;;; Helper: unbox a value for display
 (defun test-display-value (x)
@@ -201,6 +202,17 @@
         (test-ok nil name
                  (format nil "     got: ~A" (test-quote-value got))
                  (format nil "expected: ~A ~A" op (test-quote-value expected))))))
+
+;;; eq_array(\@a, \@b) - compare two array refs for element-wise equality
+(defun pl-eq_array (a b)
+  (let ((av (if (pl-box-p a) (pl-box-value a) a))
+        (bv (if (pl-box-p b) (pl-box-value b) b)))
+    (let ((av (if (vectorp av) av (make-array 0)))
+          (bv (if (vectorp bv) bv (make-array 0))))
+      (when (= (length av) (length bv))
+        (every (lambda (x y)
+                 (equal (to-string x) (to-string y)))
+               av bv)))))
 
 ;;; pass(name)
 (defun pl-pass (&optional name)

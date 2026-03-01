@@ -2821,9 +2821,18 @@ sub _fix_ppi_glob_after_block {
         $j++;
       }
 
-      # If we found a valid-looking glob pattern, reconstruct it
-      if ($found_close && $has_glob_chars && $glob_content ne '') {
-        # Create a proper glob token
+      # Also detect bare filehandle readline: < BAREWORD > when not preceded
+      # by a value token (symbol/number/string/structure) — those indicate < is
+      # the less-than operator, not the readline diamond.
+      my $is_bare_fh = ($glob_content =~ /^[A-Za-z_][A-Za-z0-9_:]*$/);
+      my $prev = @result ? $result[-1] : undef;
+      my $prev_is_value = $prev && (
+          ref($prev) =~ /^PPI::Token::(Symbol|Number|Quote)/ ||
+          ref($prev) =~ /^PPI::Structure/);
+
+      # If we found a valid-looking glob pattern or bare filehandle, reconstruct it
+      if ($found_close && ($has_glob_chars || ($is_bare_fh && !$prev_is_value)) && $glob_content ne '') {
+        # Create a proper readline token
         my $glob_token = bless {
           content => "<$glob_content>"
         }, 'PPI::Token::QuoteLike::Readline';
