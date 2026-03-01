@@ -80,7 +80,7 @@ I am Rex and I bark
 
 **Beta.** The test suite runs 2462 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own internal test suite (`t/op/`, `t/base/`, etc.) passes ~3100 tests.
 
-Known gaps: string `eval`, some `local` forms, XS/C extensions.
+Known gaps: string `eval`, some `local` forms, XS/C extensions, closures are half done.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 
