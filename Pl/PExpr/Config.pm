@@ -108,6 +108,7 @@ has named_unary => (
       # Misc
       'caller'  => 1,
       'do'      => 1,
+      'eval'    => 1,
       'wantarray' => 1,
       'prototype' => 1,
     };
@@ -200,10 +201,10 @@ has precedences => (
         'le'  => { assoc => 'r', no => 2, prec => 40, chained => 1 },
         'ge'  => { assoc => 'r', no => 2, prec => 40, chained => 1 },
 
-        '=='  => { assoc => 'l', no => 2, prec => 30 }, # These are non assoc,
-        '!='  => { assoc => 'l', no => 2, prec => 30 }, # leave as 'l'. Should
-        'eq'  => { assoc => 'l', no => 2, prec => 30 }, # work.
-        'ne'  => { assoc => 'l', no => 2, prec => 30 },
+        '=='  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
+        '!='  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
+        'eq'  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
+        'ne'  => { assoc => 'r', no => 2, prec => 30, chained => 1 },
         '<=>' => { assoc => 'l', no => 2, prec => 30 },
         'cmp' => { assoc => 'l', no => 2, prec => 30 },
 

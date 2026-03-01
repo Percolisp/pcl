@@ -54,7 +54,7 @@ diag "";
 diag "-------- C-style for loops:";
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '(pl-for ((pl-scalar-= $i 0))',
+                '(pl-for ((pl-my-= $i 0))',
                 'C-style for: init');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',

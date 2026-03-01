@@ -53,9 +53,10 @@
    #:pl-bit-and #:pl-bit-or #:pl-bit-xor #:pl-bit-not #:pl-<< #:pl->>
    ;; Data structures
    #:pl-aref #:pl-aref-box #:pl-aref-deref #:pl-gethash #:pl-gethash-box #:pl-gethash-deref
+   #:pl-ensure-hashref #:pl-ensure-arrayref
    #:pl-aslice #:pl-hslice #:pl-kv-hslice
    #:pl-hash #:pl-array-init #:pl-array-last-index #:pl-set-array-length
-   #:pl-push #:pl-pop #:pl-shift #:pl-unshift #:pl-splice #:pl-flatten
+   #:pl-push #:pl-pop #:pl-shift #:pl-unshift #:pl-splice #:pl-flatten #:pl-flatten-args
    #:pl-keys #:pl-values #:pl-each #:pl-exists #:pl-exists-array #:pl-delete #:pl-delete-array
    #:pl-delete-hash-slice #:pl-delete-kv-hash-slice #:pl-delete-array-slice
    ;; Control flow
@@ -69,12 +70,12 @@
    ;; Exception handling
    #:pl-eval #:pl-eval-block #:pl-exception #:pl-exception-object
    ;; File I/O
-   #:pl-open #:pl-close #:pl-eof #:pl-tell #:pl-seek
+   #:pl-open #:pl-close #:pl-eof #:pl-tell #:pl-seek #:pl-pipe #:pl-select
    #:pl-binmode #:pl-read #:pl-sysread #:pl-syswrite
    #:pl-truncate #:pl-stat #:pl-lstat
    ;; File test operators
    #:pl--e #:pl--d #:pl--f #:pl--r #:pl--w #:pl--x #:pl--s #:pl--z
-   #:pl-unlink #:pl-fileno #:pl-getc #:pl-readline
+   #:pl-unlink #:pl-fileno #:pl-getc #:pl-readline #:*pl-filehandles*
    ;; Directory I/O
    #:pl-opendir #:pl-readdir #:pl-closedir #:pl-rewinddir
    ;; File glob
@@ -88,9 +89,14 @@
    ;; Environment
    #:%ENV #:pl-env-get #:pl-env-set
    ;; Module system
-   #:@INC #:%INC #:@ARGV #:pl-use #:pl-require #:pl-require-file
+   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:pl-use #:pl-require #:pl-require-file
    ;; Functions
    #:pl-backslash #:pl-get-coderef #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray #:pl-caller
+   ;; Typeglob support
+   #:pl-typeglob #:pl-typeglob-p #:make-pl-typeglob
+   #:pl-typeglob-package #:pl-typeglob-name
+   #:pl-make-typeglob #:pl-glob-assign #:pl-glob-copy
+   #:pl-glob-slot #:pl-glob-undef-name #:pl-local-glob
    #:pl-grep #:pl-map #:pl-sort #:pl-reverse
    #:pl-join #:pl-split #:pl-funcall-ref
    ;; Dereferencing (sigil cast operations)
@@ -107,12 +113,23 @@
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    ;; Context
    #:*wantarray*
+   ;; Call depth tracking (for pl-caller at top level)
+   #:*pcl-sub-call-depth*
    ;; END blocks
    #:*end-blocks*
+   ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
+   #:pl-sub-exists #:pl-sub-defined #:pl-undef-sub
+   #:pl-coderef-exists-p #:pl-coderef-defined-p
+   ;; Tie/untie/tied
+   #:pl-tie-proxy #:make-pl-tie-proxy #:pl-tie-proxy-p
+   #:pl-tie-proxy-tie-obj #:pl-tie-proxy-saved-value
+   #:pl-tie #:pl-untie #:pl-tied
    ;; Compile-time definition macros (for BEGIN block support)
    #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
    ;; Assignment forms (distinct from pl-setf for clarity)
-   #:pl-scalar-= #:pl-array-= #:pl-hash-= #:pl-list-=))
+   #:pl-scalar-= #:pl-array-= #:pl-hash-= #:pl-list-=
+   ;; Lexical 'my' variable assignment (no auto-declare side-effect)
+   #:pl-my-=))
 
 (in-package :pcl)
 
@@ -124,20 +141,32 @@
 ;;; package variables are defined as they are parsed, allowing BEGIN
 ;;; blocks to call subs defined before them in source order.
 
+;;; Tracks how many PCL user subs deep we are (0 = top level).
+;;; Used by pl-caller to distinguish "called from a sub" vs "top level".
+(defvar *pcl-sub-call-depth* 0)
+
 ;;; pl-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
 ;;; This matches Perl's semantics where subs are compiled immediately.
+;;; Marks the symbol as :defined in *pl-declared-subs* for defined &sub support.
 (defmacro pl-sub (name params &body body)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
-     (defun ,name ,params ,@body)))
+     (setf (gethash ',name *pl-declared-subs*) :defined)
+     (defun ,name ,params
+       (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
+         ,@body))))
 
 ;;; pl-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
 ;;; Only creates the stub if the function isn't already defined.
+;;; Marks the symbol as :stub in *pl-declared-subs* for exists &sub support.
 (defmacro pl-declare-sub (name)
-  `(unless (fboundp ',name)
-     (defun ,name (&rest args) (declare (ignore args)) nil)))
+  `(progn
+     (unless (gethash ',name *pl-declared-subs*)
+       (setf (gethash ',name *pl-declared-subs*) :stub))
+     (unless (fboundp ',name)
+       (defun ,name (&rest args) (declare (ignore args)) nil))))
 
 ;;; pl-our: Declare a package variable (Perl's 'our').
 ;;; Declaration happens at compile time (visible to BEGIN blocks).
@@ -172,6 +201,18 @@
 (defvar *pl-inc-table* (make-hash-table :test 'equal)
   "Perl %INC - tracks loaded modules (forward declaration)")
 
+;;; Sub declaration/definition tracking for exists &sub / defined &sub
+;;; Maps CL function symbol → :stub (declared only), :defined (has body),
+;;; or :was-defined (was defined, now undef'd).
+(defvar *pl-declared-subs* (make-hash-table :test 'eq)
+  "Perl sub existence tracking for exists &sub and defined &sub")
+
+;;; @_ - Perl's subroutine arguments array. Must be declared special so that
+;;; let-bindings in pl-sub are dynamic (not lexical), allowing callbacks and
+;;; closures like $SIG{__WARN__} handlers to access the caller's @_ via dynamic scope.
+(defvar @_ (make-array 0 :adjustable t :fill-pointer 0)
+  "Perl @_ - current subroutine arguments")
+
 ;;; Regex capture group variables ($1, $2, ... $9)
 (defvar $1 nil "Regex capture group 1")
 (defvar $2 nil "Regex capture group 2")
@@ -195,8 +236,7 @@
 ;;; Program name ($0)
 (defvar $0 (or (car sb-ext:*posix-argv*) "perl") "Program name")
 
-;;; Eval error ($@)
-(defvar $@ "" "Error from last eval")
+;;; Eval error ($@) - defined later after make-pl-box (see Boxed special variables section)
 
 ;;; OS name ($^O)
 (defvar |$^O|
@@ -266,10 +306,26 @@
       (string (setf (pl-box-sv box) value (pl-box-sv-ok box) t)))
     box))
 
+;;; ============================================================
+;;; Tie proxy — stored inside a pl-box when the variable is tied
+;;; ============================================================
+;;; When tie() is called on a scalar, the box's value slot is replaced
+;;; with a pl-tie-proxy.  unbox() calls FETCH; box-set() calls STORE.
+;;; The saved-value is restored when untie() is called.
+
+(defstruct pl-tie-proxy
+  "Holds the tie object and the pre-tie value for a tied scalar."
+  tie-obj       ; object returned by TIESCALAR/TIEARRAY/TIEHASH
+  saved-value)  ; pl-box-value before tie was installed (restored on untie)
+
 (defun unbox (val)
-  "Extract value from a box, or return val if not boxed"
+  "Extract value from a box, or return val if not boxed.
+   If the box contains a pl-tie-proxy, dispatches to FETCH."
   (if (pl-box-p val)
-      (pl-box-value val)
+      (let ((v (pl-box-value val)))
+        (if (pl-tie-proxy-p v)
+            (unbox (pl-method-call (pl-tie-proxy-tie-obj v) "FETCH"))
+            v))
       val))
 
 (defun ensure-boxed (val)
@@ -279,6 +335,8 @@
       (make-pl-box val)))
 
 ;;; Boxed special variables (must be after make-pl-box definition)
+;;; Eval error ($@) - pl-box so it can hold references (e.g. $@ = [])
+(defvar $@ (make-pl-box "") "Error from last eval")
 ;;; Input record separator ($/)
 (defvar |$/| (make-pl-box (string #\Newline)) "Input record separator")
 ;;; Output record separator ($\)
@@ -313,9 +371,16 @@
    If value is a box containing a primitive, unbox it (Perl copy semantics).
    If value is a box containing another box (reference), preserve it.
    If value is a blessed box, copy the class to target box.
-   If box is not a PL-BOX (e.g. *pl-undef*), silently ignore (Perl: undef = val is no-op)."
+   If box is not a PL-BOX (e.g. *pl-undef*), silently ignore (Perl: undef = val is no-op).
+   If box is tied (contains a pl-tie-proxy), routes through STORE."
   (unless (pl-box-p box)
     (return-from box-set value))
+  ;; Tied variable: delegate to STORE
+  (let ((current (pl-box-value box)))
+    (when (pl-tie-proxy-p current)
+      (return-from box-set
+        (pl-method-call (pl-tie-proxy-tie-obj current) "STORE"
+                        (if (pl-box-p value) (unbox value) value)))))
   (let ((v (if (pl-box-p value)
                (let ((inner (pl-box-value value)))
                  ;; If inner is a box, this is a reference - preserve it
@@ -411,7 +476,12 @@
   0)
 
 (defun box-nv (box)
-  "Get numeric value from box with lazy caching"
+  "Get numeric value from box with lazy caching.
+   Tied variables: bypass cache and call FETCH."
+  (let ((inner (pl-box-value box)))
+    (when (pl-tie-proxy-p inner)
+      (return-from box-nv
+        (to-number (pl-method-call (pl-tie-proxy-tie-obj inner) "FETCH")))))
   (if (pl-box-nv-ok box)
       (pl-box-nv box)
       (let ((v (pl-box-value box)))
@@ -422,6 +492,7 @@
                    ((eq v t) 1)  ; CL's T from comparisons - Perl true is 1
                    ((stringp v) (parse-perl-number v))
                    ((pl-box-p v) 0)  ; reference as number
+                   ((pl-typeglob-p v) 0)  ; typeglob as number
                    (t 0))))
           (setf (pl-box-nv box) n
                 (pl-box-nv-ok box) t)
@@ -481,6 +552,9 @@
     ((pl-box-p v) (format nil "SCALAR(0x~X)" (object-address v)))
     ((hash-table-p v) (format nil "HASH(0x~X)" (object-address v)))
     ((vectorp v) (format nil "ARRAY(0x~X)" (object-address v)))
+    ((pl-typeglob-p v) (format nil "*~A::~A"
+                               (package-name (pl-typeglob-package v))
+                               (pl-typeglob-name v)))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
@@ -488,7 +562,12 @@
     (t (format nil "~A" v))))
 
 (defun box-sv (box)
-  "Get string value from box with lazy caching"
+  "Get string value from box with lazy caching.
+   Tied variables: bypass cache and call FETCH."
+  (let ((inner (pl-box-value box)))
+    (when (pl-tie-proxy-p inner)
+      (return-from box-sv
+        (to-string (pl-method-call (pl-tie-proxy-tie-obj inner) "FETCH")))))
   (if (pl-box-sv-ok box)
       (pl-box-sv box)
       (let* ((inner (pl-box-value box))
@@ -558,7 +637,11 @@
       ((hash-table-p val)
        (clrhash val))
       ((pl-box-p val)
-       (box-set val *pl-undef*))))
+       (box-set val *pl-undef*))
+      ;; undef *foo — clear all typeglob slots
+      ((pl-typeglob-p val)
+       (pl-glob-undef-name (package-name (pl-typeglob-package val))
+                           (pl-typeglob-name val)))))
   *pl-undef*)
 
 (defun pl-defined (val)
@@ -569,7 +652,7 @@
          (not (eq v *pl-undef*)))))
 
 (defun pl-true-p (val)
-  "Perl truthiness: false if undef, 0, empty string, or nil - auto-unboxes"
+  "Perl truthiness: false if undef, 0, empty string, empty list, or nil"
   (let ((v (unbox val)))
     (cond
       ((eq v *pl-undef*) nil)
@@ -577,6 +660,8 @@
       ((and (numberp v) (zerop v)) nil)
       ((and (stringp v) (string= v "")) nil)
       ((and (stringp v) (string= v "0")) nil)
+      ;; Empty vector (empty list in list context) is false
+      ((and (vectorp v) (not (stringp v)) (zerop (length v))) nil)
       (t t))))
 
 ;;; ============================================================
@@ -604,7 +689,9 @@
               (cond
                 ((char= ch #\-) (concatenate 'string "+" (subseq val 1)))
                 ((char= ch #\+) (concatenate 'string "-" (subseq val 1)))
-                ((or (alpha-char-p ch) (char= ch #\_))
+                ;; Perl string negation only for ASCII alpha/underscore
+                ;; Non-ASCII alphabetic chars (e.g. Ā) negate numerically to 0
+                ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
                  (concatenate 'string "-" val))
                 ;; Starts with digit but not a pure number (e.g. "12foo")
                 ;; Perl negates numerically using leading portion
@@ -733,6 +820,8 @@
         ;; CL's T from comparison operators - Perl true numifies to 1
         ((eq val t) 1)
         ((stringp val) (parse-perl-number val))
+        ;; Adjustable vector = Perl @array in scalar context → array length
+        ((and (vectorp val) (adjustable-array-p val)) (length val))
         (t 0))))
 
 ;;; ============================================================
@@ -997,12 +1086,22 @@
 
 (defun pl-index (str substr &optional start)
   "Perl index - find substring.
-   Negative start position is treated as 0."
+   Negative start position is treated as 0.
+   For empty substring, start is clamped to string length.
+   For non-empty substring, start beyond string length returns -1."
   (let* ((s (to-string str))
          (sub (to-string substr))
+         (slen (length s))
          (start-pos (if start (max 0 (truncate (to-number start))) 0)))
-    (let ((pos (search sub s :start2 start-pos)))
-      (or pos -1))))
+    (cond
+      ;; Empty substring: return min(start, length) - Perl clamps to end
+      ((zerop (length sub))
+       (min start-pos slen))
+      ;; Start beyond string length: not found
+      ((> start-pos slen) -1)
+      (t
+       (let ((pos (search sub s :start2 start-pos)))
+         (or pos -1))))))
 
 (defun pl-rindex (str substr &optional start)
   "Perl rindex - find substring from end.
@@ -1057,28 +1156,36 @@
   "Remove underscores from a numeric string (Perl allows _ as visual separator)"
   (remove #\_ s))
 
+(defun %check-wide-chars (s fname)
+  "Signal error if string contains wide characters (code point > 255)."
+  (loop for c across s
+        when (> (char-code c) 255)
+        do (error "Wide character in ~A" fname)))
+
 (defun pl-hex (str)
   "Perl hex - convert hex string to number.
    Accepts: '0xCAFE', '0XCAFE', 'xCAFE', 'XCAFE', 'CAFE', 'ca_fe'"
-  (let* ((s (string-trim '(#\Space #\Tab) (to-string str)))
-         (s (cond
-              ;; Strip 0x/0X prefix
-              ((and (>= (length s) 2)
-                    (char= (char s 0) #\0)
-                    (member (char s 1) '(#\x #\X)))
-               (subseq s 2))
-              ;; Strip bare x/X prefix
-              ((and (>= (length s) 1)
-                    (member (char s 0) '(#\x #\X)))
-               (subseq s 1))
-              (t s))))
-    (or (parse-integer (%strip-underscores s) :radix 16 :junk-allowed t) 0)))
+  (let* ((s (string-trim '(#\Space #\Tab) (to-string str))))
+    (%check-wide-chars s "hex")
+    (let ((s (cond
+               ;; Strip 0x/0X prefix
+               ((and (>= (length s) 2)
+                     (char= (char s 0) #\0)
+                     (member (char s 1) '(#\x #\X)))
+                (subseq s 2))
+               ;; Strip bare x/X prefix
+               ((and (>= (length s) 1)
+                     (member (char s 0) '(#\x #\X)))
+                (subseq s 1))
+               (t s))))
+      (or (parse-integer (%strip-underscores s) :radix 16 :junk-allowed t) 0))))
 
 (defun pl-oct (str)
   "Perl oct - convert octal/hex/binary string to number.
    Recognizes prefixes: 0x/0X (hex), 0b/0B (binary), 0o/0O (octal), 0 (octal).
    Also handles bare x/X, b/B, o/O prefixes."
   (let ((s (string-trim '(#\Space #\Tab) (to-string str))))
+    (%check-wide-chars s "oct")
     (cond
       ;; 0x / 0X -> hex
       ((and (>= (length s) 2) (char= (char s 0) #\0)
@@ -1447,11 +1554,22 @@
       (otherwise
        (values (format nil "%~A" type-char) arg-idx)))))
 
+(defvar *pl-sprintf-caller* "sprintf"
+  "Name of the calling function (sprintf or printf) for error messages.")
+
 (defun pl-sprintf (fmt &rest args)
   "Perl sprintf - full format string parser.
    Supports: %d %i %u %o %x %X %b %B %e %E %f %F %g %G %s %c %%
    Flags: - + 0 space #
-   Width and precision: literal or * (from args)"
+   Width and precision: literal or * (from args)
+   Positional: %N$type selects argument N (1-based)"
+  ;; Flatten any vector args: splice/map/grep in list context returns a vector
+  ;; which Perl flattens into argument lists.
+  (let ((args (loop for arg in args
+                    nconcing (let ((v (unbox arg)))
+                               (if (and (vectorp v) (not (stringp v)))
+                                   (coerce v 'list)
+                                   (list arg))))))
   (let ((fmt-str (to-string fmt)))
     (with-output-to-string (out)
       (let ((i 0)
@@ -1467,10 +1585,26 @@
                         ;; %%
                         (progn (write-char #\% out) (incf i 2))
                         ;; Parse format specifier: %[flags][width][.precision][size]type
+                        ;; Also handles positional: %N$type (1-based arg index)
                         (let ((j (1+ i))
                               (flags "")
                               (width nil)
-                              (precision nil))
+                              (precision nil)
+                              (positional-idx nil))
+                          ;; Check for N$ positional specifier before flags
+                          (let ((peek j) (peek-n 0) (peek-has-digit nil))
+                            (loop while (and (< peek len) (digit-char-p (char fmt-str peek)))
+                                  do (setf peek-n (+ (* peek-n 10)
+                                                     (digit-char-p (char fmt-str peek))))
+                                     (setf peek-has-digit t)
+                                     (incf peek))
+                            (when (and peek-has-digit (< peek len)
+                                       (char= (char fmt-str peek) #\$))
+                              (when (> peek-n 2147483647)
+                                (error "Integer overflow in format string for ~A ~A"
+                                       *pl-sprintf-caller* fmt-str))
+                              (setf positional-idx (1- peek-n))
+                              (setf j (1+ peek))))
                           ;; Parse flags
                           (loop while (and (< j len) (find (char fmt-str j) "-+ 0#"))
                                 do (setf flags (concatenate 'string flags
@@ -1491,7 +1625,11 @@
                                      do (setf w (+ (* w 10) (digit-char-p (char fmt-str j))))
                                         (setf has-digit t)
                                         (incf j))
-                               (when has-digit (setf width w)))))
+                               (when has-digit
+                                 (when (> w 2147483647)
+                                   (error "Integer overflow in format string for ~A ~A"
+                                          *pl-sprintf-caller* fmt-str))
+                                 (setf width w)))))
                           ;; Parse precision
                           (when (and (< j len) (char= (char fmt-str j) #\.))
                             (incf j)
@@ -1514,11 +1652,16 @@
                           (if (< j len)
                               (let ((type-char (char fmt-str j)))
                                 (incf j) ; consume the type char
-                                (multiple-value-bind (result new-arg-idx)
-                                    (sprintf-one type-char flags width precision args arg-idx)
-                                  (write-string result out)
-                                  (setf arg-idx new-arg-idx)
-                                  (setf i j)))
+                                ;; For positional %N$type, use the fixed index;
+                                ;; for sequential, use arg-idx and advance it.
+                                (let ((call-idx (if positional-idx
+                                                    positional-idx
+                                                    arg-idx)))
+                                  (multiple-value-bind (result new-arg-idx)
+                                      (sprintf-one type-char flags width precision args call-idx)
+                                    (write-string result out)
+                                    (setf arg-idx (if positional-idx arg-idx new-arg-idx))
+                                    (setf i j))))
                               ;; No type char found, output literally
                               (progn
                                 (write-string (subseq fmt-str i j) out)
@@ -1526,7 +1669,7 @@
                 ;; Regular character
                 (progn
                   (write-char c out)
-                  (incf i)))))))))
+                  (incf i))))))))))  ; extra ) closes outer (let ((args ...)))
 
 (defun pl-printf (&rest args)
   "Perl printf - formatted print (with optional filehandle)"
@@ -1540,7 +1683,8 @@
     ;; First remaining arg is format, rest are format args
     (setf fmt (first args))
     (setf fmt-args (rest args))
-    (princ (apply #'pl-sprintf fmt fmt-args) fh)
+    (let ((*pl-sprintf-caller* "printf"))
+      (princ (apply #'pl-sprintf fmt fmt-args) fh))
     1))
 
 ;;; ============================================================
@@ -1556,15 +1700,20 @@
    Reference values (pl-backslash) are stored as box-in-box."
   ;; Check if value is a reference (pl-backslash)
   (if (and (listp value) (eq (car value) 'pl-backslash))
-      ;; Reference assignment - store box directly, don't unbox
-      (let ((val (gensym "VAL")))
+      ;; Reference assignment - store box directly, don't unbox.
+      ;; Must still route through STORE for tied variables.
+      (let ((val (gensym "VAL"))
+            (cur (gensym "CUR")))
         `(let ((,val ,value))
            (unless (boundp ',place)
              (proclaim '(special ,place))
              (setf (symbol-value ',place) (make-pl-box nil)))
-           (setf (pl-box-value ,place) ,val
-                 (pl-box-nv-ok ,place) nil
-                 (pl-box-sv-ok ,place) nil)
+           (let ((,cur (pl-box-value ,place)))
+             (if (pl-tie-proxy-p ,cur)
+                 (pl-method-call (pl-tie-proxy-tie-obj ,cur) "STORE" ,val)
+                 (setf (pl-box-value ,place) ,val
+                       (pl-box-nv-ok ,place) nil
+                       (pl-box-sv-ok ,place) nil)))
            ,val))
       ;; Normal assignment - use box-set which unboxes
       (let ((val (gensym "VAL")))
@@ -1573,6 +1722,13 @@
              (proclaim '(special ,place))
              (setf (symbol-value ',place) (make-pl-box nil)))
            (box-set ,place ,val)))))
+
+(defmacro pl-my-= (place value)
+  "Assign to a lexically-bound 'my' variable. Unlike pl-scalar-=, does not
+   auto-declare the variable as special — the enclosing let binding (emitted by
+   _with_declarations in Parser.pm) already handles scoping. This makes the
+   assignment intent explicit for other compiler backends reading the IR."
+  `(box-set ,place ,value))
 
 (defmacro pl-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
@@ -1603,7 +1759,11 @@
                            do (if (and (vectorp item) (not (stringp item)))
                                   (add-items item)
                                   (let ((v (unbox item)))
-                                    (vector-push-extend (make-pl-box v) ,place))))))))
+                                    (vector-push-extend (make-pl-box v) ,place)))))
+                    ;; Scalar (number, pl-box, nil=undef) - wrap in a single-element array
+                    (t
+                     (when src
+                       (vector-push-extend (make-pl-box (unbox src)) ,place))))))
          (add-items ,val))
        ,place)))
 
@@ -1629,17 +1789,58 @@
                 do (setf (gethash (to-string (aref ,val i)) ,place) (make-pl-box unboxed)))))
        ,place)))
 
+;; Flatten a Perl-style value (vector/list/hash/scalar) to a flat vector
+;; for use in list-assignment RHS. Hash tables expand to key-value pairs;
+;; nested vectors are flattened (like pl-array-= does).
+(defun %pl-flatten-list (src)
+  (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+    (labels ((add (item)
+               (cond
+                 ((hash-table-p item)
+                  (maphash (lambda (k v)
+                             (vector-push-extend (make-pl-box k) result)
+                             (vector-push-extend (if (pl-box-p v) v (make-pl-box v)) result))
+                           item))
+                 ((and (vectorp item) (not (stringp item)))
+                  (loop for x across item do (add x)))
+                 ((listp item)
+                  (loop for x in item do (add x)))
+                 (t
+                  ;; Snapshot the value that box-set will store, not the box
+                  ;; itself.  This prevents aliasing when the same boxes appear
+                  ;; on both sides, e.g. ($a,$b) = ($b,$a).  box-set logic:
+                  ;;   - pl-box with non-box inner → store inner (copy semantics)
+                  ;;   - pl-box with box inner (reference) → store outer box
+                  ;;   - non-box → store as-is
+                  (vector-push-extend
+                   (if (pl-box-p item)
+                       (let ((inner (pl-box-value item)))
+                         (if (pl-box-p inner) item inner))
+                       item)
+                   result)))))
+      (add src))
+    result))
+
 (defmacro pl-list-= (place value)
   "List destructuring assignment: (pl-list-= (vector $a $b) expr).
    Each LHS element gets assigned from corresponding RHS position.
-   Handles undef skip markers and nested lvalues."
+   Handles undef skip markers, arrays, hashes, and nested lvalues."
   (let ((vars (cdr place))
         (src (gensym "SRC"))
         (src-vec (gensym "SRC-VEC")))
     (let ((forms nil)
-          (static-idx 0))
+          (static-idx 0)
+          (greedy-done nil))
       (dolist (var vars)
         (cond
+          ;; Already consumed by greedy (array/hash) — subsequent vars get undef
+          (greedy-done
+           (push `(progn
+                    (unless (boundp ',var)
+                      (proclaim '(special ,var))
+                      (setf (symbol-value ',var) (make-pl-box nil)))
+                    (box-set ,var *pl-undef*))
+                 forms))
           ;; Skip marker: (pl-list-x ... N)
           ((and (listp var)
                 (symbolp (car var))
@@ -1652,6 +1853,18 @@
                     (symbolp (car var))
                     (string= (symbol-name (car var)) "PL-UNDEF")))
            (incf static-idx 1))
+          ;; Array variable (@arr) - absorbs remaining elements
+          ((and (symbolp var)
+                (char= (char (symbol-name var) 0) #\@))
+           (let ((idx static-idx))
+             (push `(pl-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
+           (setf greedy-done t))
+          ;; Hash variable (%hash) - absorbs remaining elements in pairs
+          ((and (symbolp var)
+                (char= (char (symbol-name var) 0) #\%))
+           (let ((idx static-idx))
+             (push `(pl-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
+           (setf greedy-done t))
           ;; Scalar variable - auto-declare and assign
           ((symbolp var)
            (push `(progn
@@ -1671,17 +1884,7 @@
                  forms)
            (incf static-idx 1))))
       `(let* ((,src ,value)
-              (,src-vec (cond
-                          ((hash-table-p ,src)
-                           (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
-                             (maphash (lambda (k v)
-                                        (vector-push-extend k result)
-                                        (vector-push-extend (unbox v) result))
-                                      ,src)
-                             result))
-                          ((listp ,src) (coerce ,src 'vector))
-                          ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                          (t (vector ,src)))))
+              (,src-vec (%pl-flatten-list ,src)))
          ,@(nreverse forms)))))
 
 ;; pl-setf dispatches to the appropriate assignment form based on place type.
@@ -1745,9 +1948,41 @@
            (val (gensym "VAL")))
        `(let ((,val ,value))
           (pl-autoviv-aref-set ,hash-chain ,idx ,val))))
+    ;; Array element via hash-ref deref - autovivification
+    ;; (pl-aref (pl-gethash-deref $ref key) idx) = value  ($ref->{key}[idx])
+    ((and (listp place)
+          (eq (car place) 'pl-aref)
+          (listp (cadr place))
+          (eq (car (cadr place)) 'pl-gethash-deref))
+     (let ((hash-chain (cadr place))
+           (idx (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-aref-set ,hash-chain ,idx ,val))))
+    ;; Array element via array-ref deref - autovivification
+    ;; (pl-aref (pl-aref-deref $ref i) idx) = value  ($ref->[i][idx])
+    ((and (listp place)
+          (eq (car place) 'pl-aref)
+          (listp (cadr place))
+          (eq (car (cadr place)) 'pl-aref-deref))
+     (let ((hash-chain (cadr place))
+           (idx (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-aref-set ,hash-chain ,idx ,val))))
+    ;; Hash element via hash-ref deref chain - autovivification
+    ;; (pl-gethash (pl-gethash-deref $ref key) key2) = value  ($ref->{key}{key2})
+    ((and (listp place)
+          (eq (car place) 'pl-gethash)
+          (listp (cadr place))
+          (member (car (cadr place)) '(pl-gethash-deref pl-aref-deref)))
+     (let ((outer-key (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (pl-autoviv-set ,(cadr place) ,outer-key ,val))))
     ;; Array/hash ref access and scalar deref - use CL setf
     ((and (listp place)
-          (member (car place) '(pl-aref-deref pl-gethash-deref pl-$)))
+          (member (car place) '(pl-aref-deref pl-gethash-deref pl-$ pl-cast-$)))
      `(setf ,place ,value))
     ;; Array/hash access with complex expression (not simple symbol) - use CL setf
     ((and (listp place)
@@ -1883,19 +2118,19 @@
 (defmacro pl-incf (place &optional (delta 1))
   "Perl += - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
-           (member (car place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$)))
-      ;; Hash/array element or deref - use incf
+           (member (car place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref)))
+      ;; Hash/array element - use incf (these return raw values, not boxes)
       `(incf ,place (to-number ,delta))
-      ;; Boxed scalar
+      ;; Boxed scalar or scalar deref (pl-$ / pl-cast-$): read numerically, write back
       `(box-set ,place (+ (to-number ,place) (to-number ,delta)))))
 
 (defmacro pl-decf (place &optional (delta 1))
   "Perl -= - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
-           (member (car place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$)))
-      ;; Hash/array element or deref - use decf
+           (member (car place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref)))
+      ;; Hash/array element - use decf (these return raw values, not boxes)
       `(decf ,place (to-number ,delta))
-      ;; Boxed scalar
+      ;; Boxed scalar or scalar deref (pl-$ / pl-cast-$): read numerically, write back
       `(box-set ,place (- (to-number ,place) (to-number ,delta)))))
 
 (defun magical-string-increment (s)
@@ -1972,7 +2207,7 @@
             (box-set ,box (perl-increment ,box)))))
       ;; Traditional setf-able places (pl-aref, pl-gethash, etc)
       ((and (listp real-place)
-            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$)))
+            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$ pl-cast-$)))
        (let ((tmp (gensym "TMP")))
          `(let ((,tmp (perl-increment ,real-place)))
             (setf ,real-place ,tmp)
@@ -1999,7 +2234,7 @@
           ,old))
       ;; Traditional setf-able places (pl-aref, pl-gethash, etc)
       ((and (listp real-place)
-            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$)))
+            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$ pl-cast-$)))
        `(let ((,old ,real-place))
           (setf ,real-place (perl-increment ,real-place))
           ,old))
@@ -2025,7 +2260,7 @@
             (box-set ,box (1- (to-number ,box))))))
       ;; Traditional setf-able places (pl-aref, pl-gethash, etc)
       ((and (listp real-place)
-            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$)))
+            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$ pl-cast-$)))
        `(decf ,real-place))
       ;; Boxed scalar
       (t `(box-set ,real-place (1- (to-number ,real-place)))))))
@@ -2048,7 +2283,7 @@
           ,old))
       ;; Traditional setf-able places (pl-aref, pl-gethash, etc)
       ((and (listp real-place)
-            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$)))
+            (member (car real-place) '(pl-gethash pl-aref pl-gethash-deref pl-aref-deref pl-$ pl-cast-$)))
        `(let ((,old ,real-place))
           (decf ,real-place)
           ,old))
@@ -2269,17 +2504,34 @@
                  op)))
     (intern (format nil "PL-~A" sym) :pcl)))
 
-(defmacro pl-chain-cmp (t1 op1 t2 op2 t3)
-  "Chained comparison: $x < $y < $z evaluates each term once.
-   Returns true if both comparisons are true."
+(defun chain-cmp-expand (prev ops-and-terms)
+  "Recursively expand a chained comparison.
+   prev: symbol holding the already-evaluated left value.
+   ops-and-terms: (op1 t2 op2 t3 ...) — alternating quoted ops and terms."
+  (let ((op   (first ops-and-terms))
+        (term (second ops-and-terms))
+        (rest (cddr ops-and-terms)))
+    (if (null rest)
+        ;; Base case: final comparison — evaluate both sides
+        `(,(cmp-op-to-fn op) ,prev ,term)
+        ;; Recursive: bind next term, short-circuit if this cmp fails
+        (let ((g (gensym "T")))
+          `(let ((,g ,term))
+             (if (pl-true-p (,(cmp-op-to-fn op) ,prev ,g))
+                 ,(chain-cmp-expand g rest)
+                 ""))))))
+
+(defmacro pl-chain-cmp (first-term &rest ops-and-terms)
+  "Chained comparison: a op1 b op2 c [op3 d ...].
+   Evaluates each term exactly once with short-circuit semantics:
+   if any comparison is false, remaining terms are not evaluated."
   (let ((g1 (gensym "T1"))
-        (g2 (gensym "T2"))
-        (g3 (gensym "T3")))
-    `(let ((,g1 ,t1)
-           (,g2 ,t2)
-           (,g3 ,t3))
-       (and (,(cmp-op-to-fn op1) ,g1 ,g2)
-            (,(cmp-op-to-fn op2) ,g2 ,g3)))))
+        (g2 (gensym "T2")))
+    `(let ((,g1 ,first-term)
+           (,g2 ,(second ops-and-terms)))
+       (if (pl-true-p (,(cmp-op-to-fn (first ops-and-terms)) ,g1 ,g2))
+           ,(chain-cmp-expand g2 (cddr ops-and-terms))
+           ""))))
 
 ;;; ============================================================
 ;;; Logical Operators
@@ -2302,8 +2554,8 @@
   (if (pl-true-p a) "" 1))
 
 (defun pl-not (a)
-  "Perl logical NOT (low precedence)"
-  (if (pl-true-p a) nil t))
+  "Perl logical NOT (low precedence) - same return values as pl-!"
+  (if (pl-true-p a) "" 1))
 
 (defmacro pl-and (a b)
   "Perl 'and' operator"
@@ -2464,6 +2716,19 @@
       ;; Complex place
       `(pl-push-impl ,arr ,@items)))
 
+(defun pl-flatten-args (args)
+  "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors.
+   This implements Perl's array flattening semantics: foo(@arr) passes
+   @arr's elements as individual arguments, not as a single vector."
+  (let ((result (make-array (length args) :adjustable t :fill-pointer 0)))
+    (dolist (arg args)
+      (if (and (vectorp arg) (not (stringp arg)))
+          ;; Raw vector = array passed in list context: spread its elements
+          (loop for elem across arg do (vector-push-extend elem result))
+          ;; Scalar (pl-box, string, number, etc.): keep as-is
+          (vector-push-extend arg result)))
+    result))
+
 ;; Marker struct for flattened arrays in push/unshift
 (defstruct pl-flatten-marker
   "Marker indicating an array should be flattened when pushed/unshifted"
@@ -2493,16 +2758,14 @@
   (length arr))
 
 (defun pl-pop (arr)
-  "Perl pop - removes from end, returns the VALUE (unboxed)"
+  "Perl pop - removes from end, returns the element as-is (preserving references)."
   (if (and (vectorp arr) (> (length arr) 0))
-      (let ((elem (vector-pop arr)))
-        ;; Unbox if element is a box
-        (unbox elem))
+      (vector-pop arr)
       *pl-undef*))
 
 (defun pl-shift (arr)
-  "Perl shift - removes from front. Works with vectors and lists.
-   Returns the VALUE (unboxed)."
+  "Perl shift - removes from front, returns the element as-is (preserving references).
+   Like pl-aref, does NOT unbox: box-set handles plain vs reference boxes correctly."
   (cond
     ((and (vectorp arr) (> (length arr) 0))
      (let ((first (aref arr 0)))
@@ -2510,12 +2773,9 @@
        (loop for i from 0 below (1- (length arr))
              do (setf (aref arr i) (aref arr (1+ i))))
        (vector-pop arr)
-       ;; Unbox if element is a box
-       (unbox first)))
+       first))
     ((consp arr)
-     ;; For lists (like @_ from &rest), just return car (unboxed)
-     (let ((first (car arr)))
-       (unbox first)))
+     (car arr))
     (t *pl-undef*)))
 
 (defun pl-unshift (arr &rest items)
@@ -2545,15 +2805,32 @@
             do (setf (aref arr i) (make-pl-box item)))
       (length arr))))
 
-(defun pl-splice (arr &optional (offset 0) (length nil length-p) &rest replacements)
+(defmacro pl-splice (arr &rest args)
+  "Perl splice - auto-declares array if unbound (handles @Foo::ISA etc.)"
+  (if (symbolp arr)
+      `(progn
+         (unless (boundp ',arr)
+           (proclaim '(special ,arr))
+           (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
+         (pl-splice-impl ,arr ,@args))
+      `(pl-splice-impl ,arr ,@args)))
+
+(defun pl-splice-impl (arr &optional (offset 0) (length nil length-p) &rest replacements)
   "Perl splice: remove and/or replace elements in an array.
    Returns removed elements as a vector."
   (let* ((a (unbox arr))
          (alen (length a))
+         (offset (truncate (to-number offset)))
          ;; Handle negative offset
          (off (if (< offset 0) (max 0 (+ alen offset)) (min offset alen)))
          ;; Default length = remove everything from offset
-         (len (if length-p (min (max length 0) (- alen off)) (- alen off)))
+         ;; Negative length means "leave that many elements at the end"
+         (len (if length-p
+                  (let ((l (truncate (to-number length))))
+                    (if (< l 0)
+                        (max 0 (+ (- alen off) l))
+                        (min l (- alen off))))
+                  (- alen off)))
          ;; Collect removed elements (unboxed)
          (removed (make-array len :adjustable t :fill-pointer len)))
     ;; Copy removed elements
@@ -2661,6 +2938,28 @@
             (setf (gethash k h) box)
             box)))))
 
+(defun pl-ensure-hashref (ref)
+  "Ensure ref (a pl-box) contains a hash table.
+   If ref contains nil or undef, autovivify: create a hash table and store it in the box.
+   Returns the raw hash table (not boxed). Used by autovivification macros."
+  (let ((h (unbox ref)))
+    (if (or (null h) (eq h *pl-undef*))
+        (let ((new-hash (make-hash-table :test 'equal)))
+          (box-set ref new-hash)
+          new-hash)
+        h)))
+
+(defun pl-ensure-arrayref (ref)
+  "Ensure ref (a pl-box) contains an adjustable vector.
+   If ref contains nil or undef, autovivify: create a vector and store it in the box.
+   Returns the raw vector (not boxed). Used by autovivification macros."
+  (let ((a (unbox ref)))
+    (if (or (null a) (eq a *pl-undef*))
+        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+          (box-set ref new-arr)
+          new-arr)
+        a)))
+
 (defun pl-autoviv-gethash (hash key)
   "Get hash value, autovivifying to empty hash if missing or :UNDEF.
    Handles boxes in hash values."
@@ -2757,44 +3056,58 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun expand-autoviv (form)
-    "Compile-time helper to expand nested gethash into autovivifying code.
-     Creates hashes at each level (for hash access chain)."
+    "Compile-time helper to expand nested hash/array access into autovivifying code.
+     The result of this form must be a hash table (inner yields hash).
+     Handles pl-gethash, pl-aref, pl-gethash-deref, pl-aref-deref chains."
     (cond
-      ;; (pl-gethash inner key) - autovivify to hash
+      ;; (pl-gethash inner key) - autovivify intermediate, this slot yields hash
       ((and (listp form) (eq (car form) 'pl-gethash))
        (let ((inner (cadr form))
              (key (caddr form)))
-         (if (or (and (listp inner) (eq (car inner) 'pl-gethash))
-                 (and (listp inner) (eq (car inner) 'pl-aref)))
-             ;; Nested: recursively expand, then autoviv this level
-             `(pl-autoviv-gethash ,(expand-autoviv inner) ,key)
-             ;; Base case: inner is actual hash
-             `(pl-autoviv-gethash ,inner ,key))))
+         `(pl-autoviv-gethash ,(expand-autoviv inner) ,key)))
       ;; (pl-aref inner idx) - intermediate array, this slot yields hash
       ((and (listp form) (eq (car form) 'pl-aref))
        (let ((inner (cadr form))
              (idx (caddr form)))
          `(pl-autoviv-aref-for-hash ,(expand-autoviv-for-array inner) ,idx)))
-      ;; Not a recognized form
+      ;; (pl-gethash-deref $ref key) - autovivify $ref to hashref, slot yields hash
+      ((and (listp form) (eq (car form) 'pl-gethash-deref))
+       (let ((ref (cadr form))
+             (key (caddr form)))
+         `(pl-autoviv-gethash (pl-ensure-hashref ,ref) ,key)))
+      ;; (pl-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields hash
+      ((and (listp form) (eq (car form) 'pl-aref-deref))
+       (let ((ref (cadr form))
+             (idx (caddr form)))
+         `(pl-autoviv-aref-for-hash (pl-ensure-arrayref ,ref) ,idx)))
+      ;; Base case: form is a plain hash container
       (t form)))
 
   (defun expand-autoviv-for-array (form)
-    "Expand form knowing result must be an array."
+    "Compile-time helper: the result of this form must be an array.
+     Handles pl-gethash, pl-aref, pl-gethash-deref, pl-aref-deref chains."
     (cond
       ;; (pl-gethash inner key) - this slot yields array
       ((and (listp form) (eq (car form) 'pl-gethash))
        (let ((inner (cadr form))
              (key (caddr form)))
-         (if (or (and (listp inner) (eq (car inner) 'pl-gethash))
-                 (and (listp inner) (eq (car inner) 'pl-aref)))
-             `(pl-autoviv-gethash-for-array ,(expand-autoviv inner) ,key)
-             `(pl-autoviv-gethash-for-array ,inner ,key))))
+         `(pl-autoviv-gethash-for-array ,(expand-autoviv inner) ,key)))
       ;; (pl-aref inner idx) - this slot yields array
       ((and (listp form) (eq (car form) 'pl-aref))
        (let ((inner (cadr form))
              (idx (caddr form)))
          `(pl-autoviv-aref-for-array ,(expand-autoviv-for-array inner) ,idx)))
-      ;; Not a recognized form
+      ;; (pl-gethash-deref $ref key) - autovivify $ref to hashref, slot yields array
+      ((and (listp form) (eq (car form) 'pl-gethash-deref))
+       (let ((ref (cadr form))
+             (key (caddr form)))
+         `(pl-autoviv-gethash-for-array (pl-ensure-hashref ,ref) ,key)))
+      ;; (pl-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields array
+      ((and (listp form) (eq (car form) 'pl-aref-deref))
+       (let ((ref (cadr form))
+             (idx (caddr form)))
+         `(pl-autoviv-aref-for-array (pl-ensure-arrayref ,ref) ,idx)))
+      ;; Base case: form is a plain array container
       (t form))))
 
 (defmacro pl-autoviv-aref-set (hash-chain idx value)
@@ -2812,12 +3125,12 @@
   (pl-gethash (unbox ref) key))
 
 (defun (setf pl-gethash-deref) (value ref key)
-  "Setf expander for pl-gethash-deref - unbox the reference first"
-  (setf (pl-gethash (unbox ref) key) value))
+  "Setf expander for pl-gethash-deref - autovivify ref to hash if undef, then set key"
+  (setf (pl-gethash (pl-ensure-hashref ref) key) value))
 
 (defun (setf pl-aref-deref) (value ref idx)
-  "Setf expander for pl-aref-deref - unbox the reference first"
-  (setf (pl-aref (unbox ref) idx) value))
+  "Setf expander for pl-aref-deref - autovivify ref to array if undef, then set element"
+  (setf (pl-aref (pl-ensure-arrayref ref) idx) value))
 
 (defun pl-aslice (arr &rest indices)
   "Perl array slice @arr[indices] - returns vector of values.
@@ -2901,48 +3214,97 @@
 
 ;; Hash iterator state for each() - maps hash-table to list of remaining keys
 (defvar *hash-iterators* (make-hash-table :test 'eq))
+;; Array iterator state for each() - maps array (by eq) to next index (integer)
+;; No entry = fresh start (index 0). Entry = n (array length) = exhausted sentinel.
+(defvar *array-iterators* (make-hash-table :test 'eq))
 
-(defun pl-each (hash)
-  "Perl each function - returns next (key, value) pair from hash.
-   Returns an empty list when exhausted. Resets on first call after exhaustion."
-  (let ((remaining (gethash hash *hash-iterators*)))
-    ;; If no iterator exists or previous was exhausted, start fresh
-    (when (null remaining)
-      (let ((keys nil))
-        (maphash (lambda (k v) (declare (ignore v)) (push k keys)) hash)
-        (setf remaining (nreverse keys))
-        (setf (gethash hash *hash-iterators*) remaining)))
-    ;; If still empty (hash has no keys), return empty list
-    (if (null remaining)
-        (vector)
-        (let* ((key (car remaining))
-               (val (gethash key hash)))
-          (setf (gethash hash *hash-iterators*) (cdr remaining))
-          ;; When iterator is exhausted, remove entry so next call starts fresh
-          (when (null (cdr remaining))
-            (remhash hash *hash-iterators*))
-          (vector key (unbox val))))))
+(defun pl-each (collection)
+  "Perl each function - returns next (key, value) pair from hash or (index, value) from array.
+   Returns an empty vector when exhausted (list context) or *pl-undef* (scalar context).
+   Automatically resets after returning the exhausted sentinel."
+  (cond
+    ;; Array case: raw CL vector (not a string)
+    ((and (vectorp collection) (not (stringp collection)))
+     (let* ((n   (length collection))
+            (i   (or (gethash collection *array-iterators*) 0)))
+       (if (>= i n)
+           ;; Exhausted sentinel or empty array: reset and return empty/undef
+           (progn
+             (remhash collection *array-iterators*)
+             (if *wantarray* (vector) *pl-undef*))
+           (let ((val (aref collection i)))
+             ;; Advance: set end-sentinel if this is the last element
+             (if (>= (1+ i) n)
+                 (setf (gethash collection *array-iterators*) n)
+                 (setf (gethash collection *array-iterators*) (1+ i)))
+             (if *wantarray*
+                 (vector i (unbox val))
+                 i)))))
+    ;; Hash case
+    ((hash-table-p collection)
+     (let ((remaining (gethash collection *hash-iterators*)))
+       ;; If no iterator exists or previous was exhausted, start fresh
+       (when (null remaining)
+         (let ((keys nil))
+           (maphash (lambda (k v) (declare (ignore v)) (push k keys)) collection)
+           (setf remaining (nreverse keys))
+           (setf (gethash collection *hash-iterators*) remaining)))
+       ;; If still empty (hash has no keys), return empty list
+       (if (null remaining)
+           (vector)
+           (let* ((key (car remaining))
+                  (val (gethash key collection)))
+             (setf (gethash collection *hash-iterators*) (cdr remaining))
+             ;; When iterator is exhausted, remove entry so next call starts fresh
+             (when (null (cdr remaining))
+               (remhash collection *hash-iterators*))
+             (vector key (unbox val))))))
+    ;; Neither — return empty
+    (t (vector))))
 
-(defun pl-keys (hash)
+(defun pl-keys (collection)
   "Perl keys function - also resets the each() iterator"
-  ;; Reset each() iterator
-  (remhash hash *hash-iterators*)
-  (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
-    (maphash (lambda (k v)
-               (declare (ignore v))
-               (vector-push-extend k result))
-             hash)
-    result))
+  (cond
+    ;; Array case: return 0..n-1 and reset array iterator
+    ((and (vectorp collection) (not (stringp collection)))
+     (remhash collection *array-iterators*)
+     (let* ((n (length collection))
+            (result (make-array n :adjustable t :fill-pointer n)))
+       (dotimes (i n) (setf (aref result i) i))
+       result))
+    ;; Hash case
+    ((hash-table-p collection)
+     (remhash collection *hash-iterators*)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (maphash (lambda (k v)
+                  (declare (ignore v))
+                  (vector-push-extend k result))
+                collection)
+       result))
+    ;; Neither
+    (t (make-array 0 :adjustable t :fill-pointer 0))))
 
-(defun pl-values (hash)
-  "Perl values function - returns unboxed values"
-  (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
-    (maphash (lambda (k v)
-               (declare (ignore k))
-               ;; Unbox values stored in boxes
-               (vector-push-extend (unbox v) result))
-             hash)
-    result))
+(defun pl-values (collection)
+  "Perl values function - returns unboxed values, also resets each() iterator"
+  (cond
+    ;; Array case: return elements and reset array iterator
+    ((and (vectorp collection) (not (stringp collection)))
+     (remhash collection *array-iterators*)
+     (let* ((n (length collection))
+            (result (make-array n :adjustable t :fill-pointer n)))
+       (dotimes (i n) (setf (aref result i) (unbox (aref collection i))))
+       result))
+    ;; Hash case
+    ((hash-table-p collection)
+     (remhash collection *hash-iterators*)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (maphash (lambda (k v)
+                  (declare (ignore k))
+                  (vector-push-extend (unbox v) result))
+                collection)
+       result))
+    ;; Neither
+    (t (make-array 0 :adjustable t :fill-pointer 0))))
 
 (defun pl-exists (hash key)
   "Perl exists function"
@@ -3084,7 +3446,7 @@
   "Perl until loop"
   `(pl-while (pl-! ,condition) ,@body))
 
-(defmacro pl-for ((init) (test) (&optional step) &rest body-and-keys)
+(defmacro pl-for ((&optional init) (test) (&optional step) &rest body-and-keys)
   "Perl C-style for loop with optional :label."
   (multiple-value-bind (label _continue body) (parse-loop-keys body-and-keys)
     (declare (ignore _continue))
@@ -3103,6 +3465,22 @@
     ((listp val) (coerce val 'vector))
     (t (vector val))))
 
+(defun %pl-flatten-for-list (raw)
+  "Flatten a value for use as a foreach/map/grep list.
+   - pl-box wrapping a vector (@array passed directly) -> iterate over elements
+   - Raw CL vector from (vector ...) -> each slot may be an @array; flatten one level
+   - Scalar -> single-element vector"
+  (let ((val (unbox raw)))
+    (cond
+      ((not (and (vectorp val) (not (stringp val))))
+       (vector raw))
+      ((pl-box-p raw)
+       ;; @array box: elements are the list directly
+       val)
+      (t
+       ;; (vector ...) form: each slot might be a scalar or @array — collect+flatten
+       (apply #'%pl-collect-list (coerce val 'list))))))
+
 (defmacro pl-foreach ((var list) &rest body-and-keys)
   "Perl foreach loop with optional :label and :continue."
   (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
@@ -3113,7 +3491,7 @@
       `(block ,block-name
          (let* ((*wantarray* t)
                 (,raw ,list)
-                (,vec (ensure-vector (unbox ,raw))))
+                (,vec (%pl-flatten-for-list ,raw)))
            (loop for ,item across ,vec
                  do (let ((,var ,item))
                       ,(make-loop-iteration-body label body)
@@ -3134,12 +3512,17 @@
 
 (defmacro pl-return (&rest values)
   "Perl return - returns single value or list depending on args.
+   In list context (*wantarray* t): returns a vector of all values.
+   In scalar context: returns the last value (Perl semantics).
    Unboxes simple scalars but keeps references intact."
   (if (null values)
       `(return-from nil nil)
       (if (= (length values) 1)
           `(return-from nil (pl-return-value ,(car values)))
-          `(return-from nil (mapcar #'pl-return-value (list ,@values))))))
+          `(return-from nil
+             (if *wantarray*
+                 (vector ,@(mapcar (lambda (v) `(pl-return-value ,v)) values))
+                 (pl-return-value ,(car (last values))))))))
 
 (defmacro pl-last (&optional label)
   "Perl last (break) - optionally with label to exit specific loop"
@@ -3201,10 +3584,77 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
     (terpri fh)
     t))
 
+(defun pl-warn-is-reference (val)
+  "Check if val is a Perl reference (hash, array ref, blessed object, etc.)"
+  (or (hash-table-p val)
+      (and (vectorp val) (not (stringp val)))
+      (and (pl-box-p val)
+           (let ((v (pl-box-value val)))
+             (or (hash-table-p v)
+                 (and (vectorp v) (not (stringp v)))
+                 (pl-box-class val))))))
+
+(defun pl-warn-build-message (args)
+  "Build warn message string per Perl semantics:
+   - Non-scalar (ref): return as-is
+   - Scalar with trailing newline: use as-is
+   - Scalar without trailing newline: append 'at FILE line N.'
+   - Empty string or no args: use $@ if set, else 'Warning: something's wrong'"
+  (let* ((empty-or-no-args
+          (or (null args)
+              (and (= (length args) 1)
+                   (let ((a (car args)))
+                     (string= (to-string (unbox a)) ""))))))
+    (cond
+      ;; No args or empty string: use $@ or default message
+      (empty-or-no-args
+       (let ((err $@))
+         (cond
+           ;; $@ is a reference → pass it as the warning object
+           ((pl-warn-is-reference err)
+            err)
+           ;; $@ is a non-empty string → append "...caught at"
+           ;; $@ already ends with \n (Perl convention), so just concatenate
+           ((and (stringp (to-string (unbox err)))
+                 (> (length (to-string (unbox err))) 0))
+            (format nil "~A~A~A~%" (to-string (unbox err))
+                    #\Tab "...caught at unknown line 0."))
+           ;; No $@ → default warning
+           (t (format nil "Warning: something's wrong at unknown line 0.~%")))))
+      ;; Single ref arg: return as-is
+      ((and (= (length args) 1) (pl-warn-is-reference (car args)))
+       (car args))
+      ;; Otherwise: stringify and append location if needed
+      (t
+       (let ((s (if (= (length args) 1)
+                    (to-string (unbox (car args)))
+                    (apply #'pl-. args))))
+         (if (and (> (length s) 0)
+                  (char= (char s (1- (length s))) #\Newline))
+             s
+             (format nil "~A at unknown line 0.~%" s)))))))
+
 (defun pl-warn (&rest args)
-  "Perl warn"
-  (apply #'pl-print (append args (list #\Newline)))
-  (force-output *error-output*))
+  "Perl warn - respects $SIG{__WARN__} handler."
+  (let* ((msg (pl-warn-build-message args))
+         (handler (gethash "__WARN__" %SIG)))
+    (cond
+      ;; Custom handler: call with @_ = (message)
+      ;; Perl anon subs compiled by PCL take no CL args; they access @_ dynamically
+      ((and handler (functionp (unbox handler)))
+       (let* ((boxed (if (pl-box-p msg) msg (make-pl-box msg)))
+              (@_ (make-array 1 :adjustable t :fill-pointer 1
+                                :initial-contents (list boxed))))
+         (funcall (unbox handler))))
+      ;; "IGNORE": suppress warning
+      ((and handler (stringp (unbox handler))
+            (string= (unbox handler) "IGNORE"))
+       nil)
+      ;; Default: print to *error-output*
+      (t
+       (let ((s (if (pl-box-p msg) (to-string (unbox msg)) (format nil "~A" msg))))
+         (write-string s *error-output*)
+         (force-output *error-output*))))))
 
 ;;; Exception condition for object-based die
 ;;; When Perl dies with a blessed reference, we preserve it in $@
@@ -3245,12 +3695,12 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((s (to-string (unbox string))))
     (handler-case
         (progn
-          (setf $@ "")
+          (box-set $@ "")
           ;; Try to parse as number (handles version strings like '1.50')
           (let ((n (parse-number s)))
             (if n n s)))
       (error (e)
-        (setf $@ (format nil "~A" e))
+        (box-set $@ (format nil "~A" e))
         nil))))
 
 (defun parse-number (s)
@@ -3269,14 +3719,14 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
    Returns result of body on success, nil on failure."
   `(handler-case
        (prog1 (progn ,@body)
-         (setf $@ ""))
+         (box-set $@ ""))
      (pl-exception (e)
        ;; Object exception - preserve the object in $@
-       (setf $@ (pl-exception-object e))
+       (box-set $@ (pl-exception-object e))
        nil)
      (error (e)
        ;; String exception - convert to string
-       (setf $@ (format nil "~A" e))
+       (box-set $@ (format nil "~A" e))
        nil)))
 
 ;;; ============================================================
@@ -3292,12 +3742,14 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 (setf (gethash 'STDERR *pl-filehandles*) *error-output*)
 
 (defun pl-get-stream (fh)
-  "Get CL stream from Perl filehandle (symbol or stream)"
+  "Get CL stream from Perl filehandle (symbol, box, or stream)"
   (cond
     ((streamp fh) fh)
     ((symbolp fh) (gethash fh *pl-filehandles*))
-    ((pl-box-p fh) (pl-box-value fh))
-    (t fh)))
+    ((pl-box-p fh)
+     (let ((v (pl-box-value fh)))
+       (if (streamp v) v nil)))   ; only return if it IS a stream
+    (t nil)))
 
 (defun %pl-open-parse-2arg (expr)
   "Parse a 2-arg open expression into (mode . filename).
@@ -3349,46 +3801,75 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
               (warn "Unknown open mode: ~A" mode-str)
               nil))))
     (when stream
-      (setf (gethash fh *pl-filehandles*) stream))
+      (cond
+        ((pl-box-p fh) (box-set fh stream))
+        (t             (setf (gethash fh *pl-filehandles*) stream))))
     (if stream t nil)))
 
 (defmacro pl-open (fh mode &optional filename)
   "Perl open - open file with given mode.
    2-arg: (pl-open FH expr) - mode is parsed from expr
-   3-arg: (pl-open FH mode filename)"
+   3-arg: (pl-open FH mode filename)
+   Bareword FH is quoted; lexical $fh is passed as evaluated box."
   (if filename
-      `(%pl-open-impl ',fh ,mode ,filename)
+      `(%pl-open-impl (%pl-fh-arg ,fh) ,mode ,filename)
       `(let ((%parsed (%pl-open-parse-2arg ,mode)))
-         (%pl-open-impl ',fh (car %parsed) (cdr %parsed)))))
+         (%pl-open-impl (%pl-fh-arg ,fh) (car %parsed) (cdr %parsed)))))
 
 (defun %pl-close-impl (fh)
   "Implementation of Perl close"
-  (let ((stream (pl-get-stream fh)))
-    (when stream
-      (close stream)
-      (remhash fh *pl-filehandles*)
-      t)))
+  (cond
+    ((pl-box-p fh)
+     (let ((stream (pl-box-value fh)))
+       (when (streamp stream)
+         (close stream)
+         (box-set fh *pl-undef*)
+         t)))
+    (t
+     (let ((stream (pl-get-stream fh)))
+       (when stream
+         (close stream)
+         (remhash fh *pl-filehandles*)
+         t)))))
 
 (defmacro pl-close (fh)
-  "Perl close - close filehandle"
-  `(%pl-close-impl ',fh))
+  "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box."
+  `(%pl-close-impl (%pl-fh-arg ,fh)))
 
-(defun pl-eof (&optional fh)
-  "Perl eof - check end of file"
+(defun %pl-eof-impl (&optional fh)
+  "Perl eof implementation — fh must already be a symbol or stream"
   (let ((stream (if fh (pl-get-stream fh) *standard-input*)))
     (if stream
         (let ((ch (peek-char nil stream nil :eof)))
           (if (eq ch :eof) t nil))
         t)))
 
-(defun pl-tell (&optional fh)
+(defmacro pl-eof (&rest args)
+  "Perl eof - check end of file. Bareword filehandle is auto-quoted."
+  (if args
+      `(%pl-eof-impl (%pl-fh-arg ,(car args)))
+      `(%pl-eof-impl)))
+
+;; Helper used by filehandle macros: if FH-FORM is a plain symbol (no sigil)
+;; it is a bareword filehandle — quote it.  Otherwise pass through as-is.
+(defmacro %pl-fh-arg (fh-form)
+  (if (and (symbolp fh-form)
+           (let ((name (symbol-name fh-form)))
+             (and (plusp (length name))
+                  (not (member (char name 0) '(#\$ #\@ #\% #\*))))))
+      `',(intern (symbol-name fh-form))
+      fh-form))
+
+(defun %pl-tell-impl (&optional fh)
   "Perl tell - return current file position"
   (let ((stream (if fh (pl-get-stream fh) *standard-input*)))
-    (if stream
-        (file-position stream)
-        -1)))
+    (if stream (file-position stream) -1)))
 
-(defun pl-seek (fh pos whence)
+(defmacro pl-tell (&rest args)
+  "Perl tell — bareword filehandle is auto-quoted."
+  (if args `(%pl-tell-impl (%pl-fh-arg ,(car args))) `(%pl-tell-impl)))
+
+(defun %pl-seek-impl (fh pos whence)
   "Perl seek - seek to position. Whence: 0=start, 1=current, 2=end"
   (let ((stream (pl-get-stream fh))
         (position (to-number pos))
@@ -3402,27 +3883,45 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                 (t position))))
         (file-position stream new-pos)))))
 
-(defun pl-binmode (fh &optional encoding)
+(defmacro pl-seek (fh &rest args)
+  "Perl seek — bareword filehandle is auto-quoted."
+  `(%pl-seek-impl (%pl-fh-arg ,fh) ,@args))
+
+(defun %pl-binmode-impl (fh &optional encoding)
   "Perl binmode - set binary mode or encoding (stub)"
   (declare (ignore fh encoding))
-  ;; CL handles this differently - just return true
   t)
 
-(defun pl-read (fh buf len &optional offset)
-  "Perl read - read bytes into buffer"
+(defmacro pl-binmode (fh &rest args)
+  "Perl binmode — bareword filehandle is auto-quoted."
+  `(%pl-binmode-impl (%pl-fh-arg ,fh) ,@args))
+
+(defun %pl-read-impl (fh buf len &optional offset)
+  "Perl read - read bytes into buffer. Returns nil on stream error."
   (declare (ignore buf offset))  ; Buffer semantics differ in CL
-  (let ((stream (pl-get-stream fh))
-        (n (to-number len)))
-    (when stream
-      (let ((result (make-string n)))
-        (read-sequence result stream)
-        result))))
+  (handler-case
+    (let ((stream (pl-get-stream fh))
+          (n (to-number len)))
+      (when stream
+        (let ((result (make-string n)))
+          (read-sequence result stream)
+          result)))
+    (error () nil)))
 
-(defun pl-sysread (fh buf len)
-  "Perl sysread - low-level read (same as read for now)"
-  (pl-read fh buf len))
+(defmacro pl-read (fh &rest args)
+  "Perl read — bareword filehandle is auto-quoted."
+  `(%pl-read-impl (%pl-fh-arg ,fh) ,@args))
 
-(defun pl-syswrite (fh data &optional len)
+(defun %pl-sysread-impl (fh buf len)
+  "Perl sysread - low-level read (same as read for now). Returns nil on error."
+  (handler-case (%pl-read-impl fh buf len)
+    (error () nil)))
+
+(defmacro pl-sysread (fh &rest args)
+  "Perl sysread — bareword filehandle is auto-quoted."
+  `(%pl-sysread-impl (%pl-fh-arg ,fh) ,@args))
+
+(defun %pl-syswrite-impl (fh data &optional len)
   "Perl syswrite - write data to filehandle"
   (let ((stream (pl-get-stream fh))
         (str (to-string data)))
@@ -3431,6 +3930,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
           (write-string (subseq str 0 (min (to-number len) (length str))) stream)
           (write-string str stream))
       (length str))))
+
+(defmacro pl-syswrite (fh &rest args)
+  "Perl syswrite — bareword filehandle is auto-quoted."
+  `(%pl-syswrite-impl (%pl-fh-arg ,fh) ,@args))
 
 (defun pl-truncate (fh-or-file size)
   "Perl truncate - truncate file (limited support)"
@@ -3551,7 +4054,7 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
           (incf count))))
     count))
 
-(defun pl-fileno (fh)
+(defun %pl-fileno-impl (fh)
   "Perl fileno - get file descriptor number"
   (let ((stream (pl-get-stream fh)))
     (cond
@@ -3560,14 +4063,22 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
       ((eq stream *error-output*) 2)
       (t -1))))  ; CL doesn't expose fd numbers portably
 
-(defun pl-getc (&optional fh)
+(defmacro pl-fileno (fh)
+  "Perl fileno — bareword filehandle is auto-quoted."
+  `(%pl-fileno-impl (%pl-fh-arg ,fh)))
+
+(defun %pl-getc-impl (&optional fh)
   "Perl getc - read single character"
   (let ((stream (if fh (pl-get-stream fh) *standard-input*)))
     (when stream
       (let ((ch (read-char stream nil nil)))
         (if ch (string ch) nil)))))
 
-(defun pl-readline (&optional fh)
+(defmacro pl-getc (&rest args)
+  "Perl getc — bareword filehandle is auto-quoted."
+  (if args `(%pl-getc-impl (%pl-fh-arg ,(car args))) `(%pl-getc-impl)))
+
+(defun %pl-readline-impl (&optional fh)
   "Perl readline / diamond operator <FH> - read a record from filehandle.
    Respects $/ (input record separator):
      default newline = line mode, undef = slurp, \"\" = paragraph, other = custom separator.
@@ -3633,6 +4144,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                    do (loop-finish))
            (if (zerop (length result)) nil (coerce result 'string))))))))
 
+(defmacro pl-readline (&rest args)
+  "Perl readline / <FH> — pass args through; code-gen already quotes barewords."
+  `(%pl-readline-impl ,@args))
+
 ;;; ============================================================
 ;;; Directory I/O Functions
 ;;; ============================================================
@@ -3640,7 +4155,7 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; Directory handle storage
 (defvar *pl-dirhandles* (make-hash-table :test 'eq))
 
-(defun pl-opendir (dh dir)
+(defun %pl-opendir-impl (dh dir)
   "Perl opendir - open directory for reading"
   (let ((dir-str (to-string dir)))
     (when (probe-file dir-str)
@@ -3653,7 +4168,11 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                     (cons 0 (mapcar #'file-namestring entries)))))
         t))))
 
-(defun pl-readdir (dh)
+(defmacro pl-opendir (dh &rest args)
+  "Perl opendir — bareword dirhandle is auto-quoted."
+  `(%pl-opendir-impl (%pl-fh-arg ,dh) ,@args))
+
+(defun %pl-readdir-impl (dh)
   "Perl readdir - read next directory entry"
   (let ((handle (if (symbolp dh)
                     (gethash dh *pl-dirhandles*)
@@ -3667,13 +4186,21 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
               (nth idx entries))
             nil)))))
 
-(defun pl-closedir (dh)
+(defmacro pl-readdir (dh)
+  "Perl readdir — bareword dirhandle is auto-quoted."
+  `(%pl-readdir-impl (%pl-fh-arg ,dh)))
+
+(defun %pl-closedir-impl (dh)
   "Perl closedir - close directory handle"
   (when (symbolp dh)
     (remhash dh *pl-dirhandles*))
   t)
 
-(defun pl-rewinddir (dh)
+(defmacro pl-closedir (dh)
+  "Perl closedir — bareword dirhandle is auto-quoted."
+  `(%pl-closedir-impl (%pl-fh-arg ,dh)))
+
+(defun %pl-rewinddir-impl (dh)
   "Perl rewinddir - reset directory to beginning"
   (let ((handle (if (symbolp dh)
                     (gethash dh *pl-dirhandles*)
@@ -3681,6 +4208,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
     (when handle
       (setf (car handle) 0))
     t))
+
+(defmacro pl-rewinddir (dh)
+  "Perl rewinddir — bareword dirhandle is auto-quoted."
+  `(%pl-rewinddir-impl (%pl-fh-arg ,dh)))
 
 ;;; ============================================================
 ;;; File Glob
@@ -3967,6 +4498,16 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; Process Control
 ;;; ============================================================
 
+(defun pl-pipe (read-fh write-fh)
+  "Perl pipe - create pipe pair (not implemented, returns nil)"
+  (declare (ignore read-fh write-fh))
+  nil)
+
+(defun pl-select (&optional fh)
+  "Perl select - set default output filehandle (stub, returns previous handle)"
+  (declare (ignore fh))
+  nil)
+
 (defun pl-exit (&optional code)
   "Perl exit - terminate program with exit code."
   (sb-ext:exit :code (if code (truncate (to-number code)) 0)))
@@ -4038,6 +4579,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; %INC: hash of loaded modules (key: relative path, value: absolute path)
 ;; Note: *pl-inc-table* is forward-declared near top of file
 (defvar %INC '%INC-MARKER% "Marker for %INC hash access")
+
+;; %SIG: signal/exception handler hash
+;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
+(defvar %SIG (make-hash-table :test 'equal) "Perl %SIG - signal handlers")
 
 ;; @INC: module search paths (initialized by pl2cl from Perl's @INC)
 (defvar @INC (make-array 0 :adjustable t :fill-pointer 0)
@@ -4244,10 +4789,17 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
         (dolist (sym-name imports)
           (pl-import-perl-symbol sym-name pkg to-pkg))))))
 
+(defparameter *pl-xs-only-modules*
+  '("XSLoader" "DynaLoader" "Carp::Heavy")
+  "Modules that use XS/C code and cannot be transpiled. Skip loading them.")
+
 (defun pl-use (module-name &key imports)
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
    IMPORTS: list of symbols to import (nil = use @EXPORT, empty list = no imports)"
+  ;; Skip XS-only modules that cannot be transpiled
+  (when (member module-name *pl-xs-only-modules* :test #'string=)
+    (return-from pl-use t))
   (let ((rel-path (pl-module-to-path module-name))
         (caller-pkg *package*))
     ;; Already loaded?
@@ -4304,21 +4856,35 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; List Functions
 ;;; ============================================================
 
-(defun pl-grep (fn list)
-  "Perl grep - fn receives item as $_ parameter"
-  (let* ((arr (unbox list))
+(defun %pl-collect-list (&rest items)
+  "Collect &rest args into a flat vector.
+   Pl-boxes wrapping vectors (@arrays) are flattened into individual elements.
+   Used by pl-map and pl-grep to handle both (fn @arr) and (fn a b c) forms."
+  (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+    (dolist (item items)
+      (let ((val (unbox item)))
+        (if (and (vectorp val) (not (stringp val)))
+            (loop for x across val do (vector-push-extend x result))
+            (vector-push-extend item result))))
+    result))
+
+(defun pl-grep (fn &rest items)
+  "Perl grep - fn receives item as $_ parameter.
+   Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
+  (let* ((arr (apply #'%pl-collect-list items))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     (loop for item across arr
-          when (pl-true-p (funcall fn item))
+          when (pl-true-p (let ((*wantarray* nil)) (funcall fn item)))
           do (vector-push-extend item result))
     result))
 
-(defun pl-map (fn list)
-  "Perl map - fn receives item as $_ parameter"
-  (let* ((arr (unbox list))
+(defun pl-map (fn &rest items)
+  "Perl map - fn receives item as $_ parameter.
+   Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
+  (let* ((arr (apply #'%pl-collect-list items))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     (loop for item across arr
-          do (vector-push-extend (funcall fn item) result))
+          do (vector-push-extend (let ((*wantarray* nil)) (funcall fn item)) result))
     result))
 
 (defun pl-sort (list-or-fn &optional list)
@@ -4335,9 +4901,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
         (sort result (lambda (a b)
                        (string< (to-string a) (to-string b)))))))
 
-(defun pl-reverse (seq)
-  "Perl reverse"
-  (reverse (unbox seq)))
+(defun pl-reverse (&rest items)
+  "Perl reverse - accepts single @array or multiple elements."
+  (let ((arr (apply #'%pl-collect-list items)))
+    (reverse arr)))
 
 (defun pl-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
@@ -4365,6 +4932,8 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
          (keep-trailing (and limit-num (/= limit-num 0)))
          (max-fields (if (and limit-num (> limit-num 0)) limit-num nil))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
+    ;; Empty input string always gives empty result (no fields)
+    (unless (zerop (length s))
     (cond
       ;; Regex pattern from pl-regex
       ((pl-regex-match-p pattern)
@@ -4375,12 +4944,34 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                                  (keep-trailing 1000000)     ; limit < 0, keep trailing
                                  (t 0)))                     ; no limit, remove trailing
               (parts (if (zerop (length pat))
-                         ;; Empty regex: split into characters
-                         (map 'list #'string s)
-                         ;; Use CL-PPCRE split
-                         (cl-ppcre:split pat s :limit ppcre-limit :with-registers-p nil))))
+                         ;; Empty regex: split into characters with limit handling.
+                         ;; Perl also matches at the end (giving trailing ""), so:
+                         ;; - limit<0 (keep-trailing): all chars + ""
+                         ;; - limit>0 and >= str len: all chars + ""
+                         ;; - limit>0 and < str len: first (limit-1) chars + rest
+                         ;; - no limit: just chars
+                         (let* ((n (length s))
+                                (chars (loop for c across s collect (string c))))
+                           (cond
+                             ((and max-fields (<= max-fields n))
+                              ;; Split at most max-fields: first (max-fields-1) chars
+                              ;; individually, remainder as one final field
+                              (append (subseq chars 0 (1- max-fields))
+                                      (list (subseq s (1- max-fields)))))
+                             (keep-trailing
+                              ;; No binding limit (or limit > n): all chars + trailing ""
+                              (append chars (list "")))
+                             (t
+                              ;; No limit: just individual chars
+                              chars)))
+                         ;; Non-empty pattern: use CL-PPCRE split
+                         (handler-case
+                           (cl-ppcre:split pat s :limit ppcre-limit :with-registers-p nil)
+                           (cl-ppcre:ppcre-syntax-error (e)
+                             (warn "Regex syntax error in split: ~A" e)
+                             (list s))))))
          (dolist (p parts)
-           (vector-push-extend p result))))
+           (vector-push-extend (or p *pl-undef*) result))))
       ;; Special whitespace splitting: " " splits on runs of whitespace
       ((and (stringp pattern) (string= pattern " "))
        (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
@@ -4418,7 +5009,8 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                        (setf start (+ pos pat-len)))
                      (progn
                        (vector-push-extend (subseq s start) result)
-                       (return)))))))))
+                       (return))))))))) ; end cond
+    ) ; end unless (zerop (length s))
     ;; Remove trailing empty fields unless limit specified
     (unless keep-trailing
       (loop while (and (> (length result) 0)
@@ -4487,6 +5079,25 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
         (pl-box-value inner)
         inner)))
 
+(defun (setf pl-cast-$) (new-value val)
+  "Perl scalar dereference assignment ${$ref} = val - set value in referenced box.
+   Handles two shapes:
+   - val wraps a box wrapping a box (normal scalar ref: val->ref->target):
+     set the target box's value.
+   - val wraps a non-box (blessed scalar arg in tie STORE: val IS the container):
+     set val's own value directly."
+  (let ((inner (unbox val)))
+    (if (pl-box-p inner)
+        ;; val is a reference box; inner is the referenced box or value
+        (let ((target (pl-box-value inner)))
+          (if (pl-box-p target)
+              (box-set target new-value)    ; normal scalar ref: set the target
+              (box-set inner new-value)))   ; inner is the scalar container
+        ;; val itself is the scalar container (blessed scalar in tie methods)
+        (if (pl-box-p val)
+            (box-set val new-value)
+            (error "Cannot dereference non-reference: ~A" inner)))))
+
 (defun pl-ref (val)
   "Perl ref() function - get reference type or class name if blessed.
    Returns empty string for non-references."
@@ -4506,6 +5117,8 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
       ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
       ((functionp inner) "CODE")
+      ;; Typeglob reference
+      ((pl-typeglob-p inner) "GLOB")
       ;; Not a reference
       (t ""))))
 
@@ -4513,6 +5126,276 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun pl-reftype (val)
   "Alias for pl-ref"
   (pl-ref val))
+
+;;; ============================================================
+;;; Typeglob Support
+;;; ============================================================
+;;; A Perl typeglob *foo is a named symbol table entry with slots for
+;;; SCALAR, ARRAY, HASH, CODE, IO. The pl-typeglob struct is just a
+;;; label (package + name); slot values live in the CL symbol table.
+
+(defstruct (pl-typeglob (:constructor make-pl-typeglob (package name)))
+  package   ; CL package object
+  name)     ; upcased Perl name string, e.g. "FOO"
+
+(defun pl-make-typeglob (pkg-str name-str)
+  "Create a typeglob object for *Pkg::Name."
+  (let ((pkg (or (find-package (string-upcase pkg-str))
+                 ;; Package may not exist yet; create it lazily
+                 (make-package (string-upcase pkg-str) :use '(:cl :pcl)))))
+    (make-pl-typeglob pkg (string-upcase name-str))))
+
+(defun pl-glob-assign (pkg-str name-str rhs)
+  "Assign RHS to the appropriate slot of typeglob *pkg::name.
+   Dispatch is by type of the unwrapped RHS value."
+  (let* ((pkg   (or (find-package (string-upcase pkg-str))
+                    (make-package (string-upcase pkg-str) :use '(:cl :pcl))))
+         (uname (string-upcase name-str))
+         ;; Unwrap one box level to see what was referenced
+         (inner (if (pl-box-p rhs) (unbox rhs) rhs)))
+    (cond
+      ;; *foo = *bar — full glob copy
+      ((pl-typeglob-p rhs)   (pl-glob-copy pkg uname rhs))
+      ((pl-typeglob-p inner) (pl-glob-copy pkg uname inner))
+
+      ;; *foo = \&sub or *foo = sub{} — CODE slot
+      ((functionp inner)
+       (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
+             inner))
+
+      ;; *foo = \$scalar — SCALAR slot (inner is the pl-box = the variable itself)
+      ((pl-box-p inner)
+       (setf (symbol-value (intern (concatenate 'string "$" uname) pkg))
+             inner))
+
+      ;; *foo = \@array — ARRAY slot (inner is the adjustable vector)
+      ((and (vectorp inner) (adjustable-array-p inner))
+       (setf (symbol-value (intern (concatenate 'string "@" uname) pkg))
+             inner))
+
+      ;; *foo = \%hash — HASH slot (inner is the hash-table)
+      ((hash-table-p inner)
+       (setf (symbol-value (intern (concatenate 'string "%" uname) pkg))
+             inner))
+
+      ;; *foo = undef — no-op
+      ((or (null inner) (eq inner *pl-undef*)) nil)
+
+      ;; Fallback: try as CODE if rhs is directly a function
+      ((functionp rhs)
+       (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
+             rhs)))))
+
+(defun pl-glob-copy (dst-pkg dst-uname src-glob)
+  "Copy all slots from src-glob into dst (pkg, uname)."
+  (let ((sp (pl-typeglob-package src-glob))
+        (sn (pl-typeglob-name src-glob)))
+    ;; CODE
+    (let ((src-sym (intern (concatenate 'string "PL-" sn) sp)))
+      (when (fboundp src-sym)
+        (setf (fdefinition (intern (concatenate 'string "PL-" dst-uname) dst-pkg))
+              (fdefinition src-sym))))
+    ;; SCALAR
+    (let ((src-sym (intern (concatenate 'string "$" sn) sp)))
+      (when (boundp src-sym)
+        (setf (symbol-value (intern (concatenate 'string "$" dst-uname) dst-pkg))
+              (symbol-value src-sym))))
+    ;; ARRAY
+    (let ((src-sym (intern (concatenate 'string "@" sn) sp)))
+      (when (boundp src-sym)
+        (setf (symbol-value (intern (concatenate 'string "@" dst-uname) dst-pkg))
+              (symbol-value src-sym))))
+    ;; HASH
+    (let ((src-sym (intern (concatenate 'string "%" sn) sp)))
+      (when (boundp src-sym)
+        (setf (symbol-value (intern (concatenate 'string "%" dst-uname) dst-pkg))
+              (symbol-value src-sym))))))
+
+(defun pl-glob-undef-name (pkg-str name-str)
+  "undef *foo — clear all slots."
+  (let* ((pkg   (find-package (string-upcase pkg-str)))
+         (uname (string-upcase name-str)))
+    (when pkg
+      (let ((sym (intern (concatenate 'string "PL-" uname) pkg)))
+        (when (fboundp sym) (fmakunbound sym)))
+      (dolist (prefix (list "$" "@" "%"))
+        (let ((sym (intern (concatenate 'string prefix uname) pkg)))
+          (when (boundp sym)
+            (set sym (cond ((string= prefix "$")
+                            (make-pl-box *pl-undef*))
+                           ((string= prefix "@")
+                            (make-array 0 :adjustable t :fill-pointer 0))
+                           (t (make-hash-table :test 'equal))))))))))
+
+(defun pl-glob-slot (glob slot)
+  "Read *foo{SLOT}."
+  (let* ((pkg    (pl-typeglob-package glob))
+         (uname  (pl-typeglob-name glob))
+         (slot-s (string-upcase (stringify-value slot))))
+    (cond
+      ((string= slot-s "CODE")
+       (let ((sym (intern (concatenate 'string "PL-" uname) pkg)))
+         (when (fboundp sym) (make-pl-box (fdefinition sym)))))
+      ((string= slot-s "SCALAR")
+       (let ((sym (intern (concatenate 'string "$" uname) pkg)))
+         (when (boundp sym) (make-pl-box (symbol-value sym)))))
+      ((string= slot-s "ARRAY")
+       (let ((sym (intern (concatenate 'string "@" uname) pkg)))
+         (when (boundp sym) (symbol-value sym))))
+      ((string= slot-s "HASH")
+       (let ((sym (intern (concatenate 'string "%" uname) pkg)))
+         (when (boundp sym) (symbol-value sym))))
+      ((string= slot-s "NAME")    (make-pl-box (pl-typeglob-name glob)))
+      ((string= slot-s "PACKAGE") (make-pl-box (package-name (pl-typeglob-package glob))))
+      ((string= slot-s "GLOB")    glob)
+      (t *pl-undef*))))
+
+(defmacro pl-local-glob (pkg-str name-str &body body)
+  "Save all slots of *pkg::name, execute body, restore on exit."
+  (let ((pkg-var       (gensym "PKG"))
+        (uname-var     (gensym "UNAME"))
+        (saved-had-code (gensym "HAD-CODE"))
+        (saved-code    (gensym "SAVED-CODE"))
+        (saved-scalar  (gensym "SAVED-SCALAR"))
+        (saved-array   (gensym "SAVED-ARRAY"))
+        (saved-hash    (gensym "SAVED-HASH")))
+    `(let* ((,pkg-var   (or (find-package (string-upcase ,pkg-str))
+                            (make-package (string-upcase ,pkg-str) :use '(:cl :pcl))))
+            (,uname-var (string-upcase ,name-str))
+            (code-sym   (intern (concatenate 'string "PL-"  ,uname-var) ,pkg-var))
+            (scalar-sym (intern (concatenate 'string "$"    ,uname-var) ,pkg-var))
+            (array-sym  (intern (concatenate 'string "@"    ,uname-var) ,pkg-var))
+            (hash-sym   (intern (concatenate 'string "%"    ,uname-var) ,pkg-var))
+            (,saved-had-code (fboundp code-sym))
+            (,saved-code     (when ,saved-had-code (fdefinition code-sym)))
+            (,saved-scalar   (when (boundp scalar-sym) (symbol-value scalar-sym)))
+            (,saved-array    (when (boundp array-sym)  (symbol-value array-sym)))
+            (,saved-hash     (when (boundp hash-sym)   (symbol-value hash-sym))))
+       (unwind-protect (progn ,@body)
+         (if ,saved-had-code
+             (setf (fdefinition code-sym) ,saved-code)
+             (when (fboundp code-sym) (fmakunbound code-sym)))
+         (when ,saved-scalar (setf (symbol-value scalar-sym) ,saved-scalar))
+         (when ,saved-array  (setf (symbol-value array-sym)  ,saved-array))
+         (when ,saved-hash   (setf (symbol-value hash-sym)   ,saved-hash))))))
+
+;;; ============================================================
+;;; Subroutine Reflection (exists &sub, defined &sub, undef &sub)
+;;; ============================================================
+
+(defun pl-sub-exists (pkg-str name-str)
+  "Perl exists &funcname — true if sub has been declared or defined."
+  (let* ((pkg (find-package (string-upcase pkg-str)))
+         (sym (when pkg
+                (find-symbol (concatenate 'string "PL-"
+                                          (string-upcase name-str))
+                             pkg))))
+    (if (and sym
+             (or (gethash sym *pl-declared-subs*)
+                 (fboundp sym)))
+        (make-pl-box 1)
+        (make-pl-box nil))))
+
+(defun pl-sub-defined (pkg-str name-str)
+  "Perl defined &funcname — true only if sub has an actual body (not a stub)."
+  (let* ((pkg (find-package (string-upcase pkg-str)))
+         (sym (when pkg
+                (find-symbol (concatenate 'string "PL-"
+                                          (string-upcase name-str))
+                             pkg))))
+    (if (and sym
+             (eq (gethash sym *pl-declared-subs*) :defined))
+        (make-pl-box 1)
+        (make-pl-box nil))))
+
+(defun pl-undef-sub (pkg-str name-str)
+  "Perl undef &funcname — remove sub body; sub still 'exists' afterward."
+  (let* ((pkg (find-package (string-upcase pkg-str)))
+         (sym (when pkg
+                (find-symbol (concatenate 'string "PL-"
+                                          (string-upcase name-str))
+                             pkg))))
+    (when sym
+      (when (fboundp sym) (fmakunbound sym))
+      ;; Keep entry so exists &sub still returns true
+      (setf (gethash sym *pl-declared-subs*) :was-defined)))
+  *pl-undef*)
+
+(defun pl-coderef-exists-p (coderef)
+  "Perl exists &{$coderef} — true if coderef points to a declared or defined sub."
+  (let ((v (unbox coderef)))
+    (unless (functionp v) (return-from pl-coderef-exists-p (make-pl-box nil)))
+    ;; Get the function's name symbol (SBCL-specific)
+    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
+           (status (and (symbolp fname) (gethash fname *pl-declared-subs*))))
+      (if status
+          (make-pl-box 1)
+          ;; Fallback: any non-nil function object "exists"
+          (make-pl-box 1)))))
+
+(defun pl-coderef-defined-p (coderef)
+  "Perl defined &{$coderef} — true only if coderef points to a sub with a body."
+  (let ((v (unbox coderef)))
+    (unless (functionp v) (return-from pl-coderef-defined-p (make-pl-box nil)))
+    ;; Get the function's name symbol (SBCL-specific)
+    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
+           (status (and (symbolp fname) (gethash fname *pl-declared-subs*))))
+      (if (eq status :defined)
+          (make-pl-box 1)
+          (make-pl-box nil)))))
+
+;;; ============================================================
+;;; Tie / Untie / Tied — scalar implementation
+;;; ============================================================
+;;; tie() installs a pl-tie-proxy into the box's value slot.
+;;; unbox() intercepts reads (FETCH); box-set() intercepts writes (STORE).
+;;; Phase 1: scalars only.  Arrays/hashes require boxing those types first.
+
+(defun pl-tie (box classname &rest args)
+  "Perl tie - bind a scalar variable to a class implementing TIESCALAR.
+   Dispatches to TIEARRAY or TIEHASH when box holds a vector or hash-table
+   (future: requires array/hash boxing for full correctness).
+   Falls back gracefully if the tie class or method is not available."
+  (unless (pl-box-p box)
+    (return-from pl-tie *pl-undef*))
+  (let* ((current (pl-box-value box))
+         (constructor (cond
+                        ((and (vectorp current) (not (stringp current))) "TIEARRAY")
+                        ((hash-table-p current) "TIEHASH")
+                        (t "TIESCALAR")))
+         (tie-result (handler-case
+                         (apply #'pl-method-call classname constructor args)
+                       (error (e)
+                         (warn "PCL: tie ~A->~A failed: ~A" classname constructor e)
+                         (return-from pl-tie *pl-undef*))))
+         (proxy (make-pl-tie-proxy :tie-obj tie-result
+                                   :saved-value current)))
+    (setf (pl-box-value box) proxy
+          (pl-box-sv-ok box) nil
+          (pl-box-nv-ok box) nil)
+    tie-result))
+
+(defun pl-untie (box)
+  "Perl untie - remove tie from variable, restoring its pre-tie value.
+   Calls UNTIE on the tie object if the method exists."
+  (when (pl-box-p box)
+    (let ((v (pl-box-value box)))
+      (when (pl-tie-proxy-p v)
+        (ignore-errors
+          (pl-method-call (pl-tie-proxy-tie-obj v) "UNTIE"))
+        (setf (pl-box-value box) (pl-tie-proxy-saved-value v)
+              (pl-box-sv-ok box) nil
+              (pl-box-nv-ok box) nil))))
+  (make-pl-box 1))
+
+(defun pl-tied (box)
+  "Perl tied() - returns the tie object if box is tied, undef otherwise."
+  (if (pl-box-p box)
+      (let ((v (pl-box-value box)))
+        (if (pl-tie-proxy-p v)
+            (pl-tie-proxy-tie-obj v)
+            *pl-undef*))
+      *pl-undef*))
 
 (defun pl-scalar (&rest args)
   "Perl scalar function - returns length for arrays, value for scalars.
@@ -4535,7 +5418,11 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl caller - return information about the calling subroutine.
    In scalar context, returns package name.
    In list context, returns (package filename line subroutine).
-   Uses SBCL's backtrace facilities for stack introspection."
+   Returns nil when called from the top level (not inside any PCL sub)."
+  ;; At top level (depth 0), caller() always returns undef/nil in Perl.
+  ;; This is the common case: 'run_tests() unless caller' at top level.
+  (when (zerop *pcl-sub-call-depth*)
+    (return-from pl-caller nil))
   (let ((frame-info nil)
         (current-level 0)
         (target-level (+ level 2)))  ; Skip pl-caller itself and its caller
@@ -4774,6 +5661,23 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                    (pkg-name (clos-class-to-pkg cls-sym-name)))
               (when (string-equal pkg-name check-class)
                 (return-from pl-isa t))))))
+
+      ;; Fallback: walk runtime @ISA for dynamically modified inheritance
+      (labels ((walk-isa (class-str visited)
+                 (when (member class-str visited :test #'equal)
+                   (return-from walk-isa nil))
+                 (let* ((pkg-sym (find-package (string-upcase class-str)))
+                        (isa-sym (when pkg-sym
+                                   (find-symbol "@ISA" pkg-sym)))
+                        (isa-val (when (and isa-sym (boundp isa-sym))
+                                   (symbol-value isa-sym))))
+                   (when (and isa-val (vectorp isa-val))
+                     (loop for parent across isa-val
+                           for parent-str = (to-string parent)
+                           do (when (or (string-equal parent-str check-class)
+                                        (walk-isa parent-str (cons class-str visited)))
+                                (return-from pl-isa t)))))))
+        (walk-isa obj-class nil))
 
       nil)))
 
@@ -5165,14 +6069,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; Stub packages for common Perl modules
 ;;; ============================================================
 
-;; utf8 module - on non-EBCDIC systems, uni_to_native/native_to_uni are identity
+;; utf8 module stub - on non-EBCDIC systems, uni_to_native/native_to_uni are identity.
+;; These are exported from :pcl (via pcl-test.lisp) and inherited by :utf8 via (:use :pcl).
 (defpackage :utf8 (:use :cl :pcl))
 (in-package :utf8)
-(defun pl-uni_to_native (n) (unbox n))
-(defun pl-native_to_uni (n) (unbox n))
-;; Full names as generated by transpiler
-(defun pl-unicode_to_native (n) (unbox n))
-(defun pl-native_to_unicode (n) (unbox n))
 (defun pl-encode (str) (declare (ignore str)) 1)
 (defun pl-decode (str) (declare (ignore str)) 1)
 (defun pl-upgrade (str) (declare (ignore str)) 1)
@@ -5194,6 +6094,38 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 (in-package :|POSIX|)
 (defun pl-WIFEXITED (status) (= (logand (unbox status) #xff) 0))
 (defun pl-WEXITSTATUS (status) (ash (logand (unbox status) #xff00) -8))
+(in-package :pcl)
+
+;; Internals module stubs (CL case-folds Internals → INTERNALS)
+(defpackage :INTERNALS (:use :cl :pcl))
+(in-package :INTERNALS)
+;; Returns 0 — PCL is not a reference-counted stack build
+(defun pl-stack_refcounted () (make-pl-box 0))
+(in-package :pcl)
+
+;; DynaLoader/XSLoader stubs
+;; These modules load C shared libraries via XS — not supported in PCL.
+;; pl-use skips loading their .pm files (see *pl-xs-only-modules*).
+;; We provide stub packages so calls to their functions are harmless no-ops.
+;;
+;; Note: PCL mistranslates defined(&foo) as (pl-defined (pl-foo)) — calling
+;; the function instead of using fboundp. Stubs ensure those calls don't crash.
+(defpackage :DynaLoader (:use :cl :pcl))
+(in-package :DynaLoader)
+(defun pl-boot_DynaLoader (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_error (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_load_flags (&rest args) (declare (ignore args)) (make-pl-box 0))
+(defun pl-bootstrap (&rest args) (declare (ignore args)) nil)
+(defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_load_file (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_find_symbol (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_undef_symbols (&rest args) (declare (ignore args)) nil)
+
+(defpackage :XSLoader (:use :cl :pcl))
+(in-package :XSLoader)
+;; XSLoader::load('Module', $version) — no-op, XS cannot be loaded by PCL
+(defun pl-load (&rest args) (declare (ignore args)) nil)
+(defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 
 (format t "PCL Runtime loaded~%")

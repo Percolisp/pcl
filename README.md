@@ -1,250 +1,90 @@
-# Pl::PExpr - Expression Parser for PPI
+# PCL — Perl to Common Lisp Transpiler
 
-**Pl::PExpr** is an expression parser that extends [PPI](https://metacpan.org/pod/PPI). It takes PPI token arrays and produces an Abstract Syntax Tree (AST) suitable for code generation, with proper operator precedence and context annotation.
+**PCL** converts Perl source code to Common Lisp, aiming for enough compatibility to run real CPAN modules. It parses Perl with [PPI](https://metacpan.org/pod/PPI), builds an AST with proper operator precedence, and generates readable CL code.
 
-## Motivation
+There are two motivations. The first is simply running Perl code in a Common Lisp environment. The second is that the generated CL serves as a **portable intermediate representation**: Common Lisp is high-level enough to express Perl semantics cleanly, yet is easy to parse — lowering the threshold for compiling Perl to new platforms.
 
-PPI parses Perl source code into tokens and basic structure, but doesn't build an expression tree with operator precedence. Pl::PExpr fills this gap, making it possible to:
+```bash
+$ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --load /dev/stdin
+2, 4, 6, 8, 10
+```
 
-- Generate code for other languages from Perl expressions
-- Analyze expression structure with proper precedence
-- Track scalar vs list context through expressions
+## What Works
 
-This distribution includes **PCL** (Perl to Common Lisp), a prototype transpiler that demonstrates using Pl::PExpr for code generation. The tests transpile Perl code, execute it in both Perl and SBCL, and compare output.
+- **Operators** — all 92 Perl precedence levels, chained comparisons, string ops
+- **Control flow** — `if/elsif/unless`, `while/until`, `for/foreach`, loop labels, `next/last/redo`
+- **Subroutines** — signatures, defaults, prototypes, closures, `wantarray`
+- **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors
+- **OO** — `bless`, method calls, `@ISA`, C3 MRO, multiple inheritance, `SUPER::`
+- **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `chomp/chop`, `length/substr/index`, `each/keys/values` (hashes and arrays), `open/close/readline`, `die/eval`, `tie/untie`, regex `m//`/`s///`/`tr///`, and more
+- **Filehandles** — bareword (`F`) and lexical (`my $fh`) handles, `__DATA__`/`__END__`
+- **Packages** — `package Foo { }` block scoping, `use constant`, `BEGIN`, `use`/`require`
+- **Special vars** — `$_`, `@_`, `$!`, `$/`, `$\`, `$,`, `$"`, `$0`, `@INC`, `%ENV`, …
+- **Regex** — full `m//`/`s///`/`tr///` with modifiers, named captures, `$1`…
 
 ## Quick Start
 
-```perl
-use Pl::PExpr;
-use PPI;
-
-# Parse an expression
-my $doc    = PPI::Document->new(\'$x + $y * 2');
-my @tokens = $doc->children->[0]->children;
-
-my $parser = Pl::PExpr->new(
-    e        => \@tokens,
-    full_PPI => $doc,
-);
-
-my ($root_id, $declarations) = $parser->parse_expr_to_tree();
-
-# Access the AST
-my $tree      = $parser->node_tree;
-my $root_node = $tree->node_data($root_id);
-my $children  = $tree->children_ids($root_id);
-```
-
-## What Pl::PExpr Handles
-
-- **Operator precedence** - all 92 Perl precedence levels
-- **All operators** - arithmetic, logical, string, bitwise, ternary `?:`
-- **Function and method calls** - `foo($x)`, `$obj->method()`, `Class->new()`
-- **Array and hash access** - `$a[0]`, `$h{key}`, slices, nested access
-- **References and dereferences** - `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`
-- **String interpolation** - `"Hello $name"`, `"Value: @{[$x+1]}"`
-- **Anonymous subs** - `sub { ... }`
-- **Variable declarations** - `my`, `our`, `state`, `local`
-- **Context annotation** - scalar vs list context tracking
-- **Regex** - `m//`, `s///`, `tr///` with modifiers
-- **Diamond operator** - `<FH>`, `<$fh>`
-
-## Example: Parse Tree
-
 ```bash
-$ perl examples/parse_expr.pl '$a + $b * $c'
-AST for: $a + $b * $c
-----------------------------------------
-[4] binop(+)
-  [0] Token::Symbol: $a
-  [3] binop(*)
-    [1] Token::Symbol: $b
-    [2] Token::Symbol: $c
+# Dependencies: Perl 5.30+, PPI, Moo, SBCL, cl-ppcre (via Quicklisp)
+cpanm PPI Moo
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+
+# Transpile and run
+echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --load /dev/stdin
+
+# Run test suite (51 files, 2462 tests)
+prove -j8 Pl/t/
 ```
 
-```bash
-$ perl examples/parse_expr.pl '$obj->foo->bar($x)'
-AST for: $obj->foo->bar($x)
-----------------------------------------
-[0] methodcall
-  [5] methodcall
-    [3] Token::Symbol: $obj
-    [4] Token::Word: foo
-  [2] Token::Word: bar
-  [1] Token::Symbol: $x
-```
-
-## PCL Transpiler (Prototype)
-
-The distribution includes a working Perl-to-Common-Lisp transpiler:
-
-```bash
-$ echo 'my $x = 1 + 2; print $x;' | ./pl2cl
-(in-package :pcl)
-
-;; my $x = 1 + 2
-(pl-setf $x (pl-+ 1 2))
-
-;; print $x
-(pl-print $x)
-```
-
-The idea is to make a simple compiler that can make pure Perl run in
-other environments, as a basis for continuing work. The "simple" part
-might be failing.
-
-It has just reached the phase of using simple CPAN code for compiling
-and running, to shake out errors. Hopefully it will reach alpha stage
-in a few weeks.
-
-### Running Tests
-
-```bash
-# Run all tests (requires SBCL for CL execution tests)
-prove Pl/t/
-
-# Run a specific test
-prove -v Pl/t/codegen-01.t
-```
-
-### Architecture
+## Architecture
 
 ```
 Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
-                         ↓
-               Pl::Environment (constants, prototypes)
+                                                            ↓
+                                                   pcl-runtime.lisp
+                                                (Perl semantics in CL)
 ```
 
 | Module | Purpose |
 |--------|---------|
-| `Pl/PExpr.pm` | Expression parser - **the main module** |
 | `Pl/Parser.pm` | Statement-level parser |
-| `Pl/ExprToCL.pm` | Code generator (Perl AST → CL) |
-| `Pl/Environment.pm` | Tracks constants, prototypes, packages |
-| `Pl/OpcodeTree.pm` | AST node storage |
+| `Pl/PExpr.pm` | Expression parser, operator precedence |
+| `Pl/ExprToCL.pm` | Code generator |
+| `cl/pcl-runtime.lisp` | Runtime library (~6000 lines of CL) |
 
-## Dependencies
+Generated code is intentionally readable — Perl variables keep their sigils (`$x`, `@array`, `%hash`), and functions map to `pl-` prefixed names (`pl-print`, `pl-push`, …).
 
-- Perl 5.30+
-- [PPI](https://metacpan.org/pod/PPI) - Perl parser
-- [Moo](https://metacpan.org/pod/Moo) - Object system
-- [SBCL](http://www.sbcl.org/) 2.0+ - For running transpiled code (optional but recommended)
-- [cl-ppcre](https://edicl.github.io/cl-ppcre/) - Perl-compatible regex for Common Lisp
+## Example
 
-## Installation
+```perl
+# input.pl
+package Animal;
+sub new { bless { name => $_[1] }, $_[0] }
+sub speak { "I am " . $_[0]->{name} }
 
-### Ubuntu/Debian
+package Dog;
+our @ISA = ('Animal');
+sub speak { $_[0]->SUPER::speak() . " and I bark" }
+
+package main;
+my $d = Dog->new("Rex");
+print $d->speak(), "\n";
+```
 
 ```bash
-# Perl dependencies
-sudo apt install perl cpanminus
-cpanm PPI Moo Test::More
-
-# Common Lisp (for running transpiled code)
-sudo apt install sbcl
-
-# Install Quicklisp (CL package manager) - REQUIRED for cl-ppcre
-curl -O https://beta.quicklisp.org/quicklisp.lisp
-sbcl --load quicklisp.lisp \
-     --eval '(quicklisp-quickstart:install)' \
-     --eval '(ql:add-to-init-file)' \
-     --quit
-
-# Install cl-ppcre (Perl-compatible regex library)
-sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+$ ./pl2cl input.pl | sbcl --load cl/pcl-runtime.lisp --load /dev/stdin
+I am Rex and I bark
 ```
-
-### macOS
-
-```bash
-# Perl dependencies
-cpanm PPI Moo Test::More
-
-# Common Lisp
-brew install sbcl
-
-# Install Quicklisp and cl-ppcre (same as above)
-curl -O https://beta.quicklisp.org/quicklisp.lisp
-sbcl --load quicklisp.lisp \
-     --eval '(quicklisp-quickstart:install)' \
-     --eval '(ql:add-to-init-file)' \
-     --quit
-sbcl --eval '(ql:quickload :cl-ppcre)' --quit
-```
-
-### Verify Installation
-
-```bash
-# Run tests
-prove Pl/t/
-
-# Quick transpile test
-echo 'print "Hello World\n";' | ./pl2cl
-```
-
-## Troubleshooting
-
-### `sb-debug:map-backtrace` error on older SBCL
-
-If you see an error like:
-```
-The function SB-DEBUG:MAP-BACKTRACE is undefined
-```
-
-Your SBCL version is too old. The `caller()` function requires SBCL 2.0+. Options:
-
-1. **Upgrade SBCL** (recommended):
-   ```bash
-   # Ubuntu - add SBCL PPA for newer version
-   sudo add-apt-repository ppa:plt/racket  # or build from source
-
-   # Or download directly from sbcl.org
-   ```
-
-2. **Comment out `pl-caller`** in `cl/pcl-runtime.lisp` if you don't need `caller()`:
-   ```lisp
-   ;; Find the pl-caller defun and replace with a stub:
-   (defun pl-caller (&optional level)
-     (declare (ignore level))
-     *pl-undef*)
-   ```
-
-### cl-ppcre not found
-
-If SBCL can't find cl-ppcre:
-```
-Component "cl-ppcre" not found
-```
-
-Make sure Quicklisp is installed and initialized:
-```bash
-# Check if ~/.sbclrc loads quicklisp
-grep quicklisp ~/.sbclrc
-
-# If not, re-run quicklisp setup
-sbcl --load ~/quicklisp/setup.lisp \
-     --eval '(ql:add-to-init-file)' \
-     --quit
-
-# Then install cl-ppcre
-sbcl --eval '(ql:quickload :cl-ppcre)' --quit
-```
-
-### Tests hang or timeout
-
-Some tests execute generated Lisp code. If SBCL is very slow or tests hang:
-- Check available memory (SBCL can be memory-hungry)
-- Try running individual test files: `prove -v Pl/t/codegen-01.t`
 
 ## Status
 
-**Pl::PExpr**: Beta level expression parser
+**Beta.** The test suite runs 2462 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own internal test suite (`t/op/`, `t/base/`, etc.) passes ~3100 tests.
 
-**PCL transpiler**: Prototype - handles expressions, control flow, subroutines, OO basics. It is starting to look more like a compiler now.
+Known gaps: string `eval`, some `local` forms, XS/C extensions.
 
-My Common Lisp experience is from long ago, that part is exclusively Claude.
+My Common Lisp experience is from long ago — that part is exclusively Claude.
 
-(If this doesn't get shot down too hard, I'll put it on CPAN later.)
+*(If this doesn't get shot down too hard, I'll put it on CPAN later.)*
 
 ## License
 

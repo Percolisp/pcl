@@ -17,7 +17,8 @@
 ;;; Export test functions
 (export '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
           pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
-          pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT))
+          pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
+          pl-eq_array))
 
 ;;; Helper: unbox a value for display
 (defun test-display-value (x)
@@ -202,6 +203,17 @@
                  (format nil "     got: ~A" (test-quote-value got))
                  (format nil "expected: ~A ~A" op (test-quote-value expected))))))
 
+;;; eq_array(\@a, \@b) - compare two array refs for element-wise equality
+(defun pl-eq_array (a b)
+  (let ((av (if (pl-box-p a) (pl-box-value a) a))
+        (bv (if (pl-box-p b) (pl-box-value b) b)))
+    (let ((av (if (vectorp av) av (make-array 0)))
+          (bv (if (vectorp bv) bv (make-array 0))))
+      (when (= (length av) (length bv))
+        (every (lambda (x y)
+                 (equal (to-string x) (to-string y)))
+               av bv)))))
+
 ;;; pass(name)
 (defun pl-pass (&optional name)
   (test-ok t name))
@@ -214,10 +226,12 @@
 ;;; Prints skip lines then throws to exit the SKIP: { } labeled block.
 ;;; This mirrors Perl's Test::More which calls (last SKIP) from inside skip().
 (defun pl-skip (reason &optional (count 1))
-  (dotimes (i count)
-    (incf *test-count*)
-    (format t "ok ~A # skip ~A~%" *test-count* reason))
-  (pcl:pl-last-dynamic "SKIP"))
+  (let ((n (truncate (to-number count)))
+        (r (to-string (unbox reason))))
+    (dotimes (i n)
+      (incf *test-count*)
+      (format t "ok ~A # skip ~A~%" *test-count* r)))
+  (pl-last-dynamic "SKIP"))
 
 ;;; diag(msg)
 (defun pl-diag (&rest args)
@@ -258,5 +272,26 @@
 ;;; Exported from :pcl so user packages that (:use :pcl) get the default.
 (export '(pl-locales_enabled))
 (defun pl-locales_enabled (&rest args) (declare (ignore args)) 0)
+
+;;; _diag: helper used in some Perl core tests (e.g. index.t) to print
+;;; diagnostic info on failure. Defined in Perl's lib/Test/More.pm as
+;;; a simple alias for diag(). We stub it here to prevent crashes when
+;;; a test fails and calls _diag.
+(export '(pl-_diag))
+(defun pl-_diag (&rest args)
+  (apply #'pl-diag args))
+
+;;; charset_tools.pl stubs — identity functions on non-EBCDIC platforms.
+;;; Perl test files require './charset_tools.pl' to get these, but since
+;;; BEGIN-block require doesn't reliably define functions at the right time,
+;;; we provide them here (test-only; not in the production runtime).
+(export '(pl-uni_to_native pl-native_to_uni pl-unicode_to_native pl-native_to_unicode
+          pl-byte_utf8a_to_utf8n pl-utf8_to_byte))
+(defun pl-uni_to_native (n) (pcl:unbox n))
+(defun pl-native_to_uni (n) (pcl:unbox n))
+(defun pl-unicode_to_native (n) (pcl:unbox n))
+(defun pl-native_to_unicode (n) (pcl:unbox n))
+(defun pl-byte_utf8a_to_utf8n (n) (pcl:unbox n))
+(defun pl-utf8_to_byte (n) (pcl:unbox n))
 
 (format t "# PCL Test library loaded~%")

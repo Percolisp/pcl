@@ -63,8 +63,10 @@ sub parse_interpolated_string {
 
   # Process the string, looking for variables and case-changing escapes
   while ($pos < length($content)) {
-    # Find next variable, case escape, or end of string
-    if ($content =~ /\G((?:[^\$\@\\]|\\(?:c.?|[^ULulQFEc]))*?)(?:([\$\@])|\\([ULulQFE])|$)/gc) {
+    # Find next variable, case escape, or end of string.
+    # Use \z (absolute end) not $ (which stops before a final \n) so that
+    # a literal newline at the end of the string is captured as a literal part.
+    if ($content =~ /\G((?:[^\$\@\\]|\\(?:c.?|[^ULulQFEc]))*?)(?:([\$\@])|\\([ULulQFE])|\z)/gc) {
       my $literal = $1;
       my $sigil = $2;
       my $case_cmd = $3;
@@ -216,6 +218,40 @@ sub parse_interpolated_variable {
       my $var_token = PPI::Token::Magic->new('$^' . $caret_letter);
       my $var_id = $parser->make_node($var_token);
       return ($var_id, $pos + 3);
+    }
+
+    # Handle $#array (last index of @array) and $#{array} braced form
+    if ($next_char eq '#') {
+      # $#{expr} braced form
+      if (substr($content, $pos + 2, 1) eq '{') {
+        # Parse the braced content as an array name
+        my $brace_start = $pos + 3;
+        my $depth = 1;
+        my $i = $brace_start;
+        while ($i < length($content) && $depth > 0) {
+          my $ch = substr($content, $i, 1);
+          $depth++ if $ch eq '{';
+          $depth-- if $ch eq '}';
+          $i++;
+        }
+        if ($depth == 0) {
+          my $arr_name = substr($content, $brace_start, $i - $brace_start - 1);
+          if ($arr_name =~ /^\w+$/) {
+            my $var_token = PPI::Token::ArrayIndex->new('$#{' . $arr_name . '}');
+            my $var_id = $parser->make_node($var_token);
+            return ($var_id, $i);
+          }
+        }
+      }
+      # $#array bare form
+      pos($content) = $pos + 2;
+      if ($content =~ /\G(\w+)/gc) {
+        my $arr_name = $1;
+        my $var_token = PPI::Token::ArrayIndex->new('$#' . $arr_name);
+        my $var_id = $parser->make_node($var_token);
+        return ($var_id, pos($content));
+      }
+      # Standalone $# (deprecated output number format) — treat as literal
     }
 
     # Handle single-punctuation magic variables: $! $? $. $@ $/ $\ $& $' $` $+

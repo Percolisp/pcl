@@ -652,6 +652,7 @@ sub parse {
     }
 
     # - - - What else can it be?? :-)
+    warn "Handle single node of unknown type: ref='" . ref($e1) . "'\n";
     die "Handle single node of unknown type. Dump:\n" . dump($e1);
   }
 
@@ -879,6 +880,17 @@ sub parse {
       if ($is_reference) {
         $type   = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
       } elsif ($self->is_var($pre_n)
+               && $pre_n->content() =~ /^\$/) {
+        # Check for $$scalar[n] or $$scalar{key} pattern:
+        # If the element before $pre is a Cast '$', this is $$scalar[n]
+        # (equivalent to $scalar->[n]) — use ref access.
+        my $cast_before = ($i >= 2) ? $e->[$i-2] : undef;
+        if ($cast_before
+            && ref($cast_before) eq 'PPI::Token::Cast'
+            && $cast_before->content() eq '$') {
+          $type = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
+        }
+      } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^@/) {
         $type   = "slice_$type";
       }
@@ -1031,40 +1043,40 @@ sub parse {
     # Create the tree:
     my $no_pars = $op_info->{no};
 
-    # Handle chained compared:
-    if ($self->op_is_chained($op_info) && $hi_ix >= 3) {
-      # The chained ops are specified as "r" associative, so we will
-      # get the last of the chain here.
-      # t1 op t2 op t3, like "17 <= $foo <= 42".
-      my $prev_2= $e->[$hi_ix-2];
-      my $info_2= $self->op_info($prev_2);
+    # Handle chained comparison (e.g. 1 < $x < 10, or a == b != c == d):
+    # With assoc='r', hi_ix is the rightmost chained op.  Scan left to find
+    # the leftmost chained op in this run, then build a single flat chain node
+    # covering all N terms and N-1 operators.
+    if ($self->op_is_chained($op_info)) {
+      my $left = $hi_ix;
+      while ($left >= 2) {
+        my $prev_op   = $e->[$left - 2];
+        my $prev_info = $self->op_info($prev_op);
+        last unless defined $prev_info && $self->op_is_chained($prev_info);
+        $left -= 2;
+      }
 
-      if (defined $info_2 && $self->op_is_chained($info_2)) {
-        # Chained.
-        my $prev_3 = $e->[$hi_ix-3];            # 1st term is 3 back from op
-        my $id_3   = $self->parse([$prev_3]);
-
-        my $id_op2 = $self->make_node($prev_2); # 1st op is 2 back.
-
-        my $prev   = $e->[$hi_ix-1];            # Prev is 2nd term.
-        my $id_prev= $self->parse([$prev]);
-
-        my $id_op  = $self->make_node($op);     # The 1st op is at ix.
-
-        my $post   = $e->[$hi_ix+1];            # Prev is 2nd term.
-        my $id_post= $self->parse([$post]);
+      if ($left < $hi_ix) {
+        # Chain of 2+ operators spanning positions $left-1 .. $hi_ix+1.
+        # Positions alternate: term at even offset, op at odd offset from $left-1.
+        my @chain_kids;
+        for my $pos (($left - 1) .. ($hi_ix + 1)) {
+          my $offset = $pos - ($left - 1);
+          if ($offset % 2 == 0) {
+            push @chain_kids, $self->parse([$e->[$pos]]);   # term
+          } else {
+            push @chain_kids, $self->make_node($e->[$pos]); # op
+          }
+        }
 
         my($top_node, $top_id) = $self->make_node_insert('postfix_op');
-        $self->add_child_to_node($top_id, $id_3);    # First term in chain
-        $self->add_child_to_node($top_id, $id_op2);  # First op in chain
-        $self->add_child_to_node($top_id, $id_prev); # Second term in chain
-        $self->add_child_to_node($top_id, $id_op);   # Second op in chain
-        $self->add_child_to_node($top_id, $id_post); # Third term in chain
+        $self->add_child_to_node($top_id, $_) for @chain_kids;
 
-        $e->[$hi_ix-3] = $top_node;
-        splice @$e, $hi_ix-2, 4;
+        $e->[$left - 1] = $top_node;
+        splice @$e, $left, ($hi_ix + 1) - $left + 1;
         next;
       }
+      # else: single isolated chained op — fall through to binary node
     }
 
 # say dump $e; say "---"; say dump $op_info; say dump $self->node_tree; exit 0;
@@ -1379,9 +1391,9 @@ sub handle_subcalls {
           $self->add_child_to_node($top_id, $sub_id);
         }
 
-        # Parse remaining elements as the list to process
-        # Note: parse as a whole expression since $arr[0]->method is one expression
-        if ($i + 2 < scalar(@$e)) {
+        # For grep/map/sort: parse remaining elements as the list to process.
+        # For eval: the block is the only argument; don't consume what follows.
+        if ($func_name ne 'eval' && $i + 2 < scalar(@$e)) {
           my @rest = @$e[$i + 2 .. $#$e];
           my $rest_list = $self->cleanup_for_parsing(\@rest);
           # Parse rest as comma-separated list (usually just one element)
@@ -1389,12 +1401,13 @@ sub handle_subcalls {
           for my $rest_id (@$rest_ids) {
             $self->add_child_to_node($top_id, $rest_id);
           }
-          # Remove all processed elements
+          # Remove all processed elements and replace start with result node
           splice @$e, $i, scalar(@$e) - $i;
+          $e->[$i] = $top_node;
         } else {
-          splice @$e, $i, 2;
+          # Replace eval+block (2 elements) with result node in-place
+          splice @$e, $i, 2, $top_node;
         }
-        $e->[$i] = $top_node;
         next;
       }
 
@@ -2192,6 +2205,29 @@ sub child_context {
       return SCALAR_CTX if $child_index == 0;  # Condition
       return $parent_ctx;  # True/false branches inherit
     }
+
+    # Prefix operators: child[0]=op token, child[1]=operand.
+    # Boolean/arithmetic ops force scalar context on their operand.
+    # Without this, !!($a && $b) inside join() produces (vector ...) wrapper.
+    if ($type eq 'prefix_op' && $child_index == 1) {
+      my $children  = $self->get_node_children($parent_id);
+      my $op_node   = $self->get_a_node($children->[0]);
+      my $op        = $op_node->can('content') ? $op_node->content() : '';
+      if ($op =~ /^(!|not|~|\\|[+\-])$/) {
+        return SCALAR_CTX;
+      }
+    }
+
+    # Chained comparison (postfix_op with 5+ alternating term/op children).
+    # e.g. $a == $b != $c  =>  ['postfix_op', $a, '==', $b, '!=', $c]
+    # Term children (even indices 0,2,4,...) are comparison operands —
+    # they must be scalar even when pl-chain-cmp appears inside join().
+    if ($type eq 'postfix_op') {
+      my $children = $self->get_node_children($parent_id);
+      if (scalar(@$children) >= 5 && scalar(@$children) % 2 == 1) {
+        return SCALAR_CTX if $child_index % 2 == 0;  # term child
+      }
+    }
   }
 
   # - - - Token operator nodes
@@ -2217,6 +2253,29 @@ sub child_context {
     # Without this, parens inside concat inherit list context from outer
     # constructs (e.g. [...]) and produce unwanted (vector ...) wrappers.
     if ($op eq '.' || $op eq '.=') {
+      return SCALAR_CTX;
+    }
+
+    # Logical NOT always forces scalar context: !expr, not expr.
+    # !!($a && $b) passed as join() arg must not produce (vector ...) wrapper.
+    if ($op eq '!' || $op eq 'not') {
+      return SCALAR_CTX;
+    }
+
+    # Logical AND/OR force scalar context on their operands.
+    # These operators return one of their operands, not a list.
+    if ($op eq '&&' || $op eq '||' || $op eq '//'
+        || $op eq 'and' || $op eq 'or' || $op eq 'xor') {
+      return SCALAR_CTX;
+    }
+
+    # Comparison operators always produce scalar results.
+    if ($op =~ /^(==|!=|<|>|<=|>=|eq|ne|lt|gt|le|ge|<=>|cmp)$/) {
+      return SCALAR_CTX;
+    }
+
+    # Arithmetic operators produce scalar results.
+    if ($op =~ /^([+\-*\/%]|\*\*|x)$/) {
       return SCALAR_CTX;
     }
   }
@@ -2613,13 +2672,20 @@ sub _fix_ppi_negative_number_bug {
     if (ref($token) eq 'PPI::Token::Number' && $token->content =~ /^-(.+)$/) {
       my $positive_part = $1;
 
+      # ** has higher precedence than unary minus in Perl.
+      # If a negative literal is followed by **, always split: -3**2 = -(3**2).
+      my $next_is_pow = ($i + 1 < @$tokens &&
+                         ref($tokens->[$i+1]) eq 'PPI::Token::Operator' &&
+                         $tokens->[$i+1]->content eq '**');
+
       # Check if previous token ends an expression (where subtraction makes sense)
+      my $is_expr_end = 0;
       if ($i > 0) {
         my $prev = $result[-1];  # Use result array since we may have inserted
         my $prev_ref = ref($prev);
 
         # Expression-ending tokens: ) ] } or symbols/words/numbers
-        my $is_expr_end = (
+        $is_expr_end = (
           $prev_ref eq 'PPI::Structure::List'        ||  # (...)
           $prev_ref eq 'PPI::Structure::Subscript'   ||  # [...]
           $prev_ref eq 'PPI::Structure::Block'       ||  # {...}
@@ -2630,14 +2696,14 @@ sub _fix_ppi_negative_number_bug {
           $prev_ref eq 'PPI::Token::Quote::Single'   ||  # 'string'
           $prev_ref =~ /^PPI::Token::Quote/               # other quotes
         );
+      }
 
-        if ($is_expr_end) {
-          # Split into minus operator and positive number
-          my $minus_op = bless { content => '-' }, 'PPI::Token::Operator';
-          my $pos_num  = bless { content => $positive_part }, 'PPI::Token::Number';
-          push @result, $minus_op, $pos_num;
-          next;
-        }
+      if ($is_expr_end || $next_is_pow) {
+        # Split into minus operator and positive number
+        my $minus_op = bless { content => '-' }, 'PPI::Token::Operator';
+        my $pos_num  = bless { content => $positive_part }, 'PPI::Token::Number';
+        push @result, $minus_op, $pos_num;
+        next;
       }
     }
 
@@ -2740,19 +2806,33 @@ sub _fix_ppi_glob_after_block {
         # Accumulate content
         $glob_content .= $c;
 
-        # Check for glob metacharacters
-        $has_glob_chars = 1 if $c =~ /[\*\?\[\]]/;
+        # Check for glob metacharacters — only count actual token content,
+        # NOT the content of structure nodes (PPI::Structure::Subscript [1]
+        # contains '[1]' which would falsely match \[ or \]).
+        $has_glob_chars = 1
+            if ref($t) !~ /^PPI::Structure/
+            && $c =~ /[\*\?\[\]]/;
 
         # Stop if we hit something that can't be part of a glob
         last if ref($t) eq 'PPI::Token::Operator' && $c =~ /^(==|!=|<=|>=|<=>|&&|\|\|)$/;
+        last if ref($t) eq 'PPI::Token::Operator' && $c eq '->'; # $ref->[n] not a glob
         last if ref($t) eq 'PPI::Structure::List';  # Parentheses
 
         $j++;
       }
 
-      # If we found a valid-looking glob pattern, reconstruct it
-      if ($found_close && $has_glob_chars && $glob_content ne '') {
-        # Create a proper glob token
+      # Also detect bare filehandle readline: < BAREWORD > when not preceded
+      # by a value token (symbol/number/string/structure) — those indicate < is
+      # the less-than operator, not the readline diamond.
+      my $is_bare_fh = ($glob_content =~ /^[A-Za-z_][A-Za-z0-9_:]*$/);
+      my $prev = @result ? $result[-1] : undef;
+      my $prev_is_value = $prev && (
+          ref($prev) =~ /^PPI::Token::(Symbol|Number|Quote)/ ||
+          ref($prev) =~ /^PPI::Structure/);
+
+      # If we found a valid-looking glob pattern or bare filehandle, reconstruct it
+      if ($found_close && ($has_glob_chars || ($is_bare_fh && !$prev_is_value)) && $glob_content ne '') {
+        # Create a proper readline token
         my $glob_token = bless {
           content => "<$glob_content>"
         }, 'PPI::Token::QuoteLike::Readline';

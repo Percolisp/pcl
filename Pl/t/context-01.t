@@ -84,8 +84,10 @@ test_node_ctxt($expr_o, $kids->[1], SCALAR_CTX, "Right op + inherits scalar");
 test_node_ctxt($expr_o, $node_id, LIST_CTX, "Top-level + in list context");
 
 $kids = $expr_o->get_node_children($node_id);
-test_node_ctxt($expr_o, $kids->[0], LIST_CTX, "Left op + inherits list");
-test_node_ctxt($expr_o, $kids->[1], LIST_CTX, "Right op + inherits list");
+# Arithmetic operators always evaluate operands in scalar context (Perl semantics).
+# Even if + appears inside join(), $x and $y are scalar-context operands.
+test_node_ctxt($expr_o, $kids->[0], SCALAR_CTX, "Left op + forces scalar on operand");
+test_node_ctxt($expr_o, $kids->[1], SCALAR_CTX, "Right op + forces scalar on operand");
 
 
 diag "";

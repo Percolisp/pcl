@@ -103,19 +103,18 @@ END_CODE
   like($output, qr/B.*M.*E/s, 'BEGIN runs first, END runs last');
 }
 
-# Test: BEGIN order in interpreted mode
-# Note: In compiled mode, BEGIN runs at compile-time (before runtime code).
-# In interpreted mode (--load), there's no separate compile phase, so
-# eval-when blocks execute when encountered.
+# Test: BEGIN runs before runtime code even when declared after it
+# PCL phase-2 reordering moves eval-when forms (including BEGIN blocks)
+# before runtime forms, so BEGIN always runs first regardless of source order.
 {
   my $output = run_pcl(<<'END_CODE');
 print "code ";
 BEGIN { print "begin "; }
 END_CODE
 
-  # In interpreted mode: code runs first, then BEGIN (both are at :execute time)
-  # In compiled mode: BEGIN would run at compile-time, before code
-  like($output, qr/code.*begin/s, 'BEGIN in interpreted mode runs in source order');
+  # Phase-2 reordering: BEGIN eval-when is classified as compile-time,
+  # so it moves before the print "code" runtime form.
+  like($output, qr/begin.*code/s, 'BEGIN runs before later runtime code');
 }
 
 # Test: Generated code structure for BEGIN
@@ -240,32 +239,34 @@ END_CODE
 # Corner Cases
 # ============================================================
 
-# Test: BEGIN modifies array defined before it
+# Test: BEGIN populates array (no runtime re-initialization)
+# Using 'our' without initializer so BEGIN's work is not overwritten at runtime.
 {
   my $output = run_pcl(<<'END_CODE');
-my @data = (1, 2, 3);
-BEGIN { push @data, 4; }
+our @data;
+BEGIN { push @data, 1, 2, 3, 4; }
 print join(",", @data);
 END_CODE
 
-  like($output, qr/1,2,3,4/, 'BEGIN can modify array defined before it');
+  like($output, qr/1,2,3,4/, 'BEGIN can populate array before runtime code');
 }
 
-# Test: BEGIN modifies hash defined before it
+# Test: BEGIN populates hash (no runtime re-initialization)
 {
   my $output = run_pcl(<<'END_CODE');
-my %config = (a => 1);
-BEGIN { $config{b} = 2; }
+our %config;
+BEGIN { $config{a} = 1; $config{b} = 2; }
 print $config{a}, $config{b};
 END_CODE
 
-  like($output, qr/12/, 'BEGIN can modify hash defined before it');
+  like($output, qr/12/, 'BEGIN can populate hash before runtime code');
 }
 
 # Test: Multiple BEGINs with dependencies (second uses result of first)
+# Using 'our' without runtime initializer so BEGIN results survive.
 {
   my $output = run_pcl(<<'END_CODE');
-my $x = 0;
+our $x;
 BEGIN { $x = 10; }
 BEGIN { $x = $x * 2; }
 print $x;
