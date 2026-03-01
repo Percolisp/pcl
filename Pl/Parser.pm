@@ -989,7 +989,15 @@ sub _process_isa_declaration {
   if (@parents) {
     # Emit CLOS class with parent classes for MRO tracking
     my $cl_class = $self->_pkg_to_clos_class($pkg);
-    my $parents_cl = join(' ', map { $self->_pkg_to_clos_class($_) } @parents);
+    # Package-qualify parent class symbols so they resolve correctly regardless
+    # of which CL package the defclass is emitted in.
+    # Animal -> Animal::animal (reads as ANIMAL::ANIMAL)
+    # Foo::Bar -> |Foo::Bar|::foo--bar (pipe-quoting preserves :: in pkg name)
+    my $parents_cl = join(' ', map {
+      my $cls = $self->_pkg_to_clos_class($_);
+      my $pkg_prefix = ($_ =~ /::/) ? "|$_|" : $_;
+      "$pkg_prefix\:\:$cls"
+    } @parents);
 
     # Store parent list in environment for later use
     $self->environment->set_isa($pkg, \@parents);

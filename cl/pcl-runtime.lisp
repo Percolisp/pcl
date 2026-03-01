@@ -5516,11 +5516,13 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 
     ;; Try to find CLOS class for MRO-based lookup
     (let* ((clos-class-name (perl-pkg-to-clos-class class-name))
-           (clos-class (find-class (intern (string-upcase clos-class-name) :pcl) nil)))
+           (pkg (find-package (string-upcase class-name)))
+           (clos-class (when pkg (find-class (intern (string-upcase clos-class-name) pkg) nil))))
 
       (if clos-class
           ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
-          (let ((mro (sb-mop:class-precedence-list clos-class)))
+          (let ((mro (progn (sb-mop:finalize-inheritance clos-class)
+                            (sb-mop:class-precedence-list clos-class))))
             (dolist (cls mro)
               (let* ((cls-sym-name (symbol-name (class-name cls)))
                      ;; Convert CLOS class name back to CL package name
@@ -5567,13 +5569,15 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
   "Call method starting from parent of current-class in MRO (for SUPER:: calls)"
   (let* ((method-name (to-string method))
          (clos-class-name (perl-pkg-to-clos-class current-class))
-         (clos-class (find-class (intern (string-upcase clos-class-name) :pcl) nil)))
+         (pkg (find-package (string-upcase current-class)))
+         (clos-class (when pkg (find-class (intern (string-upcase clos-class-name) pkg) nil))))
 
     (unless clos-class
       (error "Can't find class ~A for SUPER:: call" current-class))
 
     ;; Get MRO and skip current class
-    (let* ((mro (sb-mop:class-precedence-list clos-class))
+    (let* ((mro (progn (sb-mop:finalize-inheritance clos-class)
+                       (sb-mop:class-precedence-list clos-class)))
            (parent-mro (cdr mro)))  ;; Skip current class
 
       (dolist (cls parent-mro)
