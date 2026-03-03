@@ -200,6 +200,9 @@ When resuming work:
 
 ## TODOs
 
+### Chained Method Calls
+`$obj->method1()->method2()` fails — the parser emits a PARSE ERROR for the second `->` when the left-hand side is a method call result (not a simple variable). Example: `B->new()->name()`. Workaround: assign to a temp variable first. Needs investigation in `Pl/PExpr.pm` where postfix `->` is handled after a complete expression.
+
 ### Perl's Own Test Suite
 Extract tests from Perl's source distribution (`t/` directory) to verify PCL.
 Perl uses these to verify new Perl builds work correctly - they cover edge cases

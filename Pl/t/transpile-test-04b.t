@@ -408,4 +408,63 @@ my $msg = "user:$user";
 if ($msg =~ /^user:/) { print "ok\n"; } else { print "fail\n"; }
 ');
 
+# ============ OO: INHERITANCE (runtime execution) ============
+
+test_transpile("OO: basic method inheritance", '
+package Animal;
+sub new { bless { name => $_[1] }, $_[0] }
+sub speak { "I am " . $_[0]->{name} }
+
+package Dog;
+our @ISA = ("Animal");
+sub speak { $_[0]->SUPER::speak() . " and I bark" }
+
+package main;
+my $d = Dog->new("Rex");
+print $d->speak(), "\n";
+');
+
+test_transpile("OO: inherited method called directly", '
+package Base;
+sub new { bless {}, $_[0] }
+sub greet { "hello from base" }
+
+package Child;
+our @ISA = ("Base");
+
+package main;
+my $c = Child->new();
+print $c->greet(), "\n";
+');
+
+test_transpile("OO: SUPER:: call", '
+package A;
+sub new { bless {}, $_[0] }
+sub name { "A" }
+
+package B;
+our @ISA = ("A");
+sub name { "B+" . $_[0]->SUPER::name() }
+
+package main;
+my $b = B->new();
+print $b->name(), "\n";
+');
+
+test_transpile("OO: multiple inheritance", '
+package X;
+sub new { bless {}, $_[0] }
+sub hello { "X" }
+
+package Y;
+sub world { "Y" }
+
+package Z;
+our @ISA = ("X", "Y");
+
+package main;
+my $z = Z->new();
+print $z->hello(), $z->world(), "\n";
+');
+
 done_testing();

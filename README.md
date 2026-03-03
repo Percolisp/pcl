@@ -5,7 +5,7 @@
 There are two motivations. The first is simply running Perl code in a Common Lisp environment. The second is that the generated CL serves as a **portable intermediate representation**: Common Lisp is high-level enough to express Perl semantics cleanly, yet is easy to parse — lowering the threshold for compiling Perl to new platforms.
 
 ```bash
-$ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --load /dev/stdin
+$ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
 2, 4, 6, 8, 10
 ```
 
@@ -30,7 +30,7 @@ cpanm PPI Moo
 sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 
 # Transpile and run
-echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --load /dev/stdin
+echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
 # Run test suite (51 files, 2462 tests)
 prove -j8 Pl/t/
@@ -72,7 +72,7 @@ print $d->speak(), "\n";
 ```
 
 ```bash
-$ ./pl2cl input.pl | sbcl --load cl/pcl-runtime.lisp --load /dev/stdin
+$ ./pl2cl input.pl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
 I am Rex and I bark
 ```
 
