@@ -2,20 +2,20 @@
 
 ## Current State
 
-**2889 / ~3329 tests passing (~87%)**
+**5422 / 6316 tests passing (~86%)**
+*(session 61 sweep, 2026-03-03, `--jobs 2 --timeout 60`, 98 files + 4 skipped)*
 
-The remaining 440 failures split into two categories: gruntwork (known
-bugs, missing functions, parse edge cases) and two architectural problems
-that require deeper changes. This plan covers both.
+Note: `-j8` sweep gives artificially low counts (~2168) due to SBCL FASL race
+conditions when 8 parallel processes share the cache. Always use `--jobs 2`
+(or 1) for accurate counts.
+
+PCL suite: **51 files, 2467 tests**, all passing.
 
 ---
 
-## Phase 1: Gruntwork (~87% → ~92%)
+## Phase 1: Gruntwork
 
-These are independent, can be done in any order, no architectural risk.
-Listed by estimated tests gained.
-
-### ~~1.1 `eval` as named unary — ~243 tests (trivial)~~ DONE
+### ~~1.1 `eval` as named unary~~ DONE
 
 Already in `Pl/PExpr/Config.pm` `%named_unary` at line 111.
 
@@ -68,32 +68,19 @@ needs `$SIG{__WARN__}` (item 1.4), not a sprintf issue.
 - Wrap `pl-die` similarly for `__DIE__`
 - Handler receives the message string as argument
 
-### 1.5 Missing functions — ~60 tests (medium)
+### ~~1.5 Missing functions~~ MOSTLY DONE
 
-- **`tie`/`untie` stubs** — return a "not implemented" value rather than
-  crashing. join.t, hash.t would partially pass.
-- **`prototype()`** — return `undef` for unknown subs; signatures.t
-  uses it as a guard.
-- **`each()` on arrays** — currently only works on hashes. Returns
-  `(index, value)` pairs, resets at end.
-- **`exists &sub`** — exists_sub.t. Check `fboundp` for the CL symbol.
+- ~~**`tie`/`untie`**~~ DONE (session 56) — 15/15 tie-01.t pass
+- ~~**`each()` on arrays**~~ DONE (session 60) — returns `(index, value)` pairs
+- ~~**`exists &sub`**~~ DONE (session ~54) — checks `fboundp` for CL symbol
+- **`prototype()`** — NOT done. Return `undef` for unknown subs; signatures.t uses it as a guard.
 
 ### ~~1.6 Stack overflow~~ DONE (recurse.t: 28/28)
 
-**Root cause was NOT stack size** — it was array argument flattening.
+Root cause was NOT stack size — it was array argument flattening.
+`pl-flatten-args` added to runtime; `Parser.pm` uses it for `@_` binding.
 
-`foo(@arr)` in Perl passes `@arr` elements individually. PCL was passing the
-raw CL vector as a single argument. So `get_list1(@_)` inside `get_first1`
-passed the entire `@_` vector as one argument; `get_list1` then saw a truthy
-vector where it expected `0` (falsy), and the termination check never fired.
-
-**Fix:** Added `pl-flatten-args` to `cl/pcl-runtime.lisp` (exported). Changed
-`Parser.pm` line 2462 to use `(pl-flatten-args %_args)` instead of
-`make-array ... :initial-contents`. This spreads raw vectors (arrays) into
-individual elements when building `@_`, matching Perl semantics.
-
-`sort.t` still times out due to `use Tie::Array` causing infinite loop (known
-issue, separate from recursion depth).
+`sort.t` still times out due to `use Tie::Array` infinite loop (separate issue).
 
 ### ~~1.7 Typeglobs~~ DONE (auto.t: 42/47)
 
@@ -108,113 +95,87 @@ chr.t, concat.t. Inside a `use bytes` scope, string operations work on
 bytes not characters. Implement as a dynamic variable `*use-bytes*` and
 guard string functions that care.
 
+### ~~1.9 `__DATA__` / `__END__`~~ DONE (session 58)
+
+Parser.pm extracts embedded text and emits `(setf (gethash 'DATA *pl-filehandles*) ...)`.
+`*pl-filehandles*` exported from `:pcl`.
+
+### ~~1.10 Lexical filehandles~~ DONE (session 59)
+
+`pl-open`, `pl-close`, `pl-eof` use `%pl-fh-arg` macro to handle both bareword
+and `my $fh` forms. `pl-get-stream` checks for actual stream in box.
+
 ---
 
-## Phase 2: Lexical Closures (~92% → ~95%)
+## Phase 2: Lexical Closures
 
-### Status: IMPLEMENTED (session 46)
+### Status: MOSTLY DONE — one key issue remains
 
-Core `let`-wrapping is done. Basic closures (like `make_counter`) work.
-See remaining issues at the bottom of this section.
+Basic `let`-wrapping for `my` vars is complete (session 46).
+`state` variable infrastructure is done (session 61).
 
-### The Problem
+**Remaining: `defun` → `lambda` for anonymous subs**
 
-PCL compiles all variables as `defvar` (CL special/dynamic variables).
-Dynamic variables are not captured by closures — each `defun`/`lambda`
-sees the current dynamic binding, not the one at the time of closure
-creation.
+Each `sub { ... }` expression currently generates:
+```lisp
+(defun --anon-block-N-- (&rest %_args) ...)
+...
+#'--anon-block-N--
+```
+
+`defun` creates a **global** function. All invocations of the enclosing
+function share the same `--anon-block-N--` definition, so the generator
+pattern is broken:
 
 ```perl
 sub make_counter {
-    my $count = 0;
-    return sub { $count++ };   # must capture $count lexically
+    return sub { state $n = 0; $n++ };  # all instances share one defun
 }
+my $c1 = make_counter();
+my $c2 = make_counter();  # $c2 is the SAME function as $c1
 ```
 
-### The Fix (Implemented)
+**Fix:** Generate `(lambda (&rest %_args) ...)` directly instead of a named
+`defun`. The lambda IS the value — no `#'name` indirection needed.
 
-**Approach used: hoist-all**, not per-statement nesting. `_with_declarations`
-pre-scans a block for all `my` declarations, then emits a single `let`
-wrapping all of them at once, with the whole block body inside:
+**Files to change:**
+- `Pl/Parser.pm` `parse_block_as_function`: return a lambda form string
+  instead of emitting a `defun` and returning a name
+- `Pl/PExpr.pm` line ~1419: caller currently wraps the name in `#'name`;
+  with lambda it uses the form directly
+- The outer state `let` already wraps before the `defun` emit — with lambda
+  it wraps the `lambda` form instead, which is correct
 
-```lisp
-(pl-sub pl-make_counter ()
-  (let (($count (make-pl-box nil)))
-    (box-set $count 0)
-    (defun --anon-block-1-- ()
-      (block nil (pl-post++ $count)))
-    (pl-return #'--anon-block-1--)))
-```
+This also fixes the between-file name collision issue (session 46, pitfall #6).
 
-This is simpler than per-statement nesting and equally correct for
-closure capture. CL lambda/defun inside a `let` closes over the binding.
+### Previously discovered pitfalls (all fixed)
 
-### What stays the same
+**1.** `next`/`last`/`redo`/labels are safe through `let` — CL's non-local
+exits propagate through `let` without restriction.
 
-- `our $x` → `defvar` (unchanged)
-- Package variables `$Foo::x` → `defvar` (unchanged)
-- File-scope `my $x` → `eval-when` + `defvar` (unchanged; BEGIN visibility)
-- `local $x` → dynamic save/restore (unchanged; needs special scope)
+**2.** `continue` blocks see `my` vars — `_process_bare_block` wraps both
+main body and `continue` block inside the same `_with_declarations`.
 
-### Discovered pitfalls (session 46)
+**3.** `(block nil)` missing from `parse_block_as_function` — fixed.
+`defun` creates `(block func-name)` not `(block nil)`.
 
-**1. `next`/`last`/`redo`/labels are safe through `let`.**
-CL's `go`, `return-from`, and `throw` all propagate through `let` forms
-without restriction. No changes needed.
+**4.** if/while/for body blocks lacked `_with_declarations` — fixed.
 
-**2. `continue` blocks see `my` vars — handled.**
-`_process_bare_block` wraps both main body and `continue` block inside
-the same `_with_declarations` callback, so the `let` covers both.
+**5.** `pl-scalar-=` poisoned lexical bindings via `(proclaim '(special $x))`
+— fixed. `_emit` replaces assignments to let-bound vars with `(box-set ...)`.
 
-**3. `(block nil)` missing from `parse_block_as_function` — FIXED.**
-`defun` creates `(block func-name)`, not `(block nil)`. So `(pl-return ...)`
-→ `(return-from nil ...)` inside an anonymous sub crashed with
-"attempt to RETURN-FROM a block that no longer exists" when the closure
-was called after the enclosing function returned. Fix: wrap body in
-`(block nil ...)` inside `parse_block_as_function`. Also increment
-`in_subroutine` so `my` vars inside the anon sub use `let`, not `defvar`.
+**6.** `defun` for anonymous subs is global — NOT YET FIXED. See above.
 
-**4. if/while/for body blocks lacked `_with_declarations` — FIXED.**
-`_generate_if_clauses`, `_process_while_statement`, `_process_c_style_for`,
-and `_process_foreach_loop` all called `_process_block` directly without
-wrapping the body in `_with_declarations`. `my` vars inside those blocks
-became implicit globals (SBCL auto-created special vars, warning "undefined
-variable"). Now each body block is wrapped in `_with_declarations`.
+### `state` variables (session 61)
 
-**5. `pl-scalar-=` poisons lexical bindings — FIXED.**
-This was the subtlest bug. `pl-scalar-=` has auto-declaration logic:
-```lisp
-(unless (boundp '$x)
-  (proclaim '(special $x))          ; ← the poison
-  (setf (symbol-value '$x) nil-box))
-```
-When a `let`-bound `$x` is assigned for the first time, `(boundp '$x)`
-returns NIL (no special binding), so `(proclaim '(special $x))` runs.
-This marks `$x` globally special for ALL future compilations. The next
-time the same code is compiled (e.g. the file is reloaded, or a second
-caller's code is compiled), the `let (($x ...))` creates a DYNAMIC
-binding instead of a lexical one — and closures cannot capture dynamic
-bindings.
+Infrastructure done:
+- Named subs: `$state__subname__varname__N` unique names, outer `let` wraps `pl-sub`
+- Anonymous subs: same, with `$state__anon__varname__N`
+- Package-level `state`: routed to `_process_my_toplevel_declaration` (same as `my`)
+- Forward-decl scanner: `__` separators prevent false `$state` defvar
 
-Fix: `_with_declarations` now tracks the current set of let-bound vars
-in `$self->{_let_bound_vars}`. `_emit` replaces `(pl-scalar-= $var ...)`
-with `(box-set $var ...)` for those vars, bypassing the auto-declaration.
-
-**6. `defun` for anonymous subs is a global name, not a unique closure.**
-Each `sub { ... }` expression in a given function generates a `defun`
-with a name like `--anon-block-2--`. If two different Perl subs each
-contain `sub { ... }`, the second `defun` silently overwrites the first.
-This means code like:
-```perl
-my $f = make_foo();
-my $g = make_foo();  # overwrites --anon-block-2-- !
-$f->();              # calls the overwritten version
-```
-is broken for multiple instances. The counter resets per transpiler run so
-within one file the names are unique, but between files loaded in the same
-SBCL image they collide. Long-term fix: use `lambda` for anonymous subs
-instead of `defun`, or make the names truly unique (e.g. with a gensym).
-This is a separate issue from basic closure capture.
+Still broken: generator pattern (multiple instances sharing one defun) —
+same root cause as the `defun` → `lambda` issue above.
 
 ---
 
@@ -265,7 +226,7 @@ subprocess, gets CL back, and evaluates it in the current package context.
 
 - oct.t tests 78-79 (wide char in eval)
 - state.t tests that use `eval 'CORE::state...'`
-- Parts of cmpchain.t (switch.t is moot — given/when removed in Perl 5.38)
+- Parts of cmpchain.t
 - Any test using `eval` to test syntax errors
 
 ---
@@ -286,21 +247,28 @@ internals that have no sensible transpiler target.
 
 ---
 
-## Summary Timeline
+## Summary
 
-| Phase | Change | Effort | Gain |
-|-------|--------|--------|------|
-| 1.1 eval named-unary | 1 line, Config.pm | Trivial | ~243 |
-| 1.2 PPI fallback | ~20 lines, Parser.pm | Half day | ~490 |
-| ~~1.3 sprintf positional~~ | DONE — sprintf2.t 65/66 | — | ~47 |
-| 1.4 $SIG handlers | runtime work | 1 day | ~50 |
-| 1.5 Missing functions | runtime stubs | 1 day | ~60 |
-| ~~1.6 Stack size~~ | DONE — array flattening bug | — | recurse.t 28/28 |
-| ~~1.7 Typeglobs~~ | DONE — auto.t 42/47 | — | ~30 |
-| 1.8 use bytes | runtime + parser | Half day | ~10 |
-| **Phase 1 total** | | ~2 weeks | **~960** |
-| 2. Lexical closures | Parser.pm refactor | 1-2 weeks | ~100+ |
-| 3. String eval | runtime subprocess | 1 week | ~50+ |
-| **Total** | | **~4-5 weeks** | **~1110** |
+| Item | Status | Tests gained |
+|------|--------|-------------|
+| 1.1 eval named-unary | ✅ DONE | ~243 |
+| 1.2 PPI fallback | ❌ TODO | ~490 |
+| 1.3 sprintf positional | ✅ DONE | ~47 |
+| 1.4 $SIG handlers | ❌ TODO | ~50 |
+| 1.5 Missing functions | ✅ MOSTLY DONE | ~60 |
+| 1.6 Stack size (array flatten) | ✅ DONE | recurse.t 28/28 |
+| 1.7 Typeglobs | ✅ DONE | ~30 |
+| 1.8 use bytes | ❌ TODO | ~10 |
+| 1.9 __DATA__/__END__ | ✅ DONE | ~5 |
+| 1.10 Lexical filehandles | ✅ DONE | ~10 |
+| 2. anon sub → lambda | ❌ TODO | ~100+ |
+| 2. state var infrastructure | ✅ DONE | partial |
+| 3. String eval | ❌ TODO | ~50+ |
 
-**Projected final: ~4000/~4000 (~98%)**
+**Remaining high-value items:**
+1. `defun` → `lambda` for anonymous subs (fixes closures + state generators)
+2. PPI parse fallback (easy win, ~490 tests)
+3. $SIG handlers (warn.t, die.t)
+4. String eval (Phase 3)
+
+**Projected final: ~98%**

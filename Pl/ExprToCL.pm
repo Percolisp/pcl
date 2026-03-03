@@ -321,6 +321,11 @@ sub gen_leaf {
       my $cl_func = $self->cl_name($func_name);
       return "($cl_func)";
     }
+    # Check if this var is a state variable that was renamed
+    if ($self->environment) {
+      my $renames = $self->environment->state_var_renames;
+      return $renames->{$content} if $renames && exists $renames->{$content};
+    }
     return $content;
   }
 

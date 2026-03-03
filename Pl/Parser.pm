@@ -703,6 +703,12 @@ sub _process_variable_statement {
   my $is_state = ($declarator eq 'state');
   my $state_vars = $self->{_current_state_vars} // {};
 
+  # Package-level state is the same as package-level my (runs once at load time)
+  if ($is_state && $self->environment->in_subroutine == 0) {
+    $self->_process_my_toplevel_declaration($stmt, \@parts, $perl_code);
+    return;
+  }
+
   if ($is_state && %$state_vars) {
     # State declaration inside a sub - generate init guard
     $self->_process_state_declaration($stmt, \@parts, $perl_code);
@@ -1235,12 +1241,14 @@ sub _process_state_declaration {
 
   $self->_emit(";; $perl_code");
 
-  # Generate init guard for each state variable
+  # Generate init guard for each state variable, using the unique CL name.
+  my $renames = $self->environment->state_var_renames // {};
   for my $var (@vars) {
-    my $init_flag = "$var--init";
+    my $cl_var   = $renames->{$var} // $var;
+    my $init_flag = "${cl_var}__init";
     $self->_emit("(unless $init_flag");
     $self->indent_level($self->indent_level + 1);
-    $self->_emit("(setf $var (ensure-boxed $init_cl))");
+    $self->_emit("(setf $cl_var (ensure-boxed $init_cl))");
     $self->_emit("(setf $init_flag t))");
     $self->indent_level($self->indent_level - 1);
   }
@@ -1605,24 +1613,64 @@ sub _process_block {
 # Counter for anonymous block functions
 my $anon_block_counter = 0;
 
+# Counter for unique state variable names
+my $state_var_counter = 0;
+
 # Parse a block as a named function for eval/sub blocks
 # Returns the generated function name
 # $params is arrayref: [] for eval/sub
+# $is_anon_sub: 1 for sub{} anonymous subs (adds &rest %_args + @_ binding)
 # Note: grep/map/sort now use parse_block_to_cl_string with inline lambdas
 sub parse_block_as_function {
-  my $self   = shift;
-  my $block  = shift;  # PPI::Structure::Block
-  my $params = shift // [];  # Parameter names
+  my $self        = shift;
+  my $block       = shift;  # PPI::Structure::Block
+  my $params      = shift // [];  # Parameter names
+  my $is_anon_sub = shift // 0;   # 1 = anonymous sub (receives call args via @_)
 
   # Generate unique function name
   my $func_name = sprintf("--anon-block-%d--", ++$anon_block_counter);
 
-  # Build parameter list
-  my $params_cl = join(' ', @$params);
+  # For anonymous subs, detect state variables and wrap in outer let.
+  # This mirrors the logic in _process_sub_statement for named subs.
+  my %state_renames;
+  my %anon_state_vars_set;
+  if ($is_anon_sub && $block) {
+    my @all_decls = @{$self->_find_all_declarations($block)};
+    my %seen;
+    my @state_vars = grep { !$seen{$_}++ }
+                     map  { $_->{var} }
+                     grep { $_->{type} eq 'state' } @all_decls;
+    if (@state_vars) {
+      %anon_state_vars_set = map { $_ => 1 } @state_vars;
+      my @bindings;
+      for my $var (@state_vars) {
+        my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+        $bare //= $var; $sigil //= '$';
+        my $bare_slug = $bare; $bare_slug =~ s/[^a-zA-Z0-9]/_/g;
+        my $unique = sprintf("%sstate__anon__%s__%d",
+                             $sigil, $bare_slug, ++$state_var_counter);
+        $state_renames{$var} = $unique;
+        push @bindings, "($unique nil)";
+        push @bindings, "(${unique}__init nil)";
+      }
+      $self->_emit("(let (" . join(" ", @bindings) . ")");
+      $self->indent_level($self->indent_level + 1);
+    }
+  }
+
+  # Anonymous subs accept arguments like named subs: (&rest %_args)
+  # with @_ bound inside the body via pl-flatten-args.
+  my $params_cl = $is_anon_sub ? '&rest %_args' : join(' ', @$params);
 
   # Emit the function definition
   $self->_emit("(defun $func_name ($params_cl)");
   $self->indent_level($self->indent_level + 1);
+
+  if ($is_anon_sub) {
+    $self->_emit("(let ((\@_ (pl-flatten-args %_args)))");
+    $self->indent_level($self->indent_level + 1);
+  }
+
   $self->_emit("(block nil");
   $self->indent_level($self->indent_level + 1);
 
@@ -1631,19 +1679,27 @@ sub parse_block_as_function {
   $self->environment->push_scope();
   $self->environment->in_subroutine($self->environment->in_subroutine + 1);
 
-  # Wrap body in let for any 'my' declarations, then process contents
-  $self->_with_declarations($block, sub {
-    my $has_content = 0;
-    for my $child ($block->children) {
-      my $ref = ref($child);
-      next if $ref eq 'PPI::Token::Whitespace';
-      next if $ref eq 'PPI::Token::Comment';
+  # Wrap body in let for any 'my' declarations, then process contents.
+  # For anon subs with state vars, set the rename map so _process_state_declaration
+  # uses the unique CL names, and set _current_state_vars so it triggers.
+  {
+    local $self->{_current_state_vars} = \%anon_state_vars_set;
+    my $saved_renames = $self->environment->state_var_renames;
+    $self->environment->state_var_renames(\%state_renames) if %state_renames;
+    $self->_with_declarations($block, sub {
+      my $has_content = 0;
+      for my $child ($block->children) {
+        my $ref = ref($child);
+        next if $ref eq 'PPI::Token::Whitespace';
+        next if $ref eq 'PPI::Token::Comment';
 
-      $self->_process_element($child);
-      $has_content = 1;
-    }
-    $self->_emit("nil") unless $has_content;
-  });
+        $self->_process_element($child);
+        $has_content = 1;
+      }
+      $self->_emit("nil") unless $has_content;
+    });
+    $self->environment->state_var_renames($saved_renames);
+  }
 
   $self->environment->in_subroutine($self->environment->in_subroutine - 1);
 
@@ -1652,8 +1708,21 @@ sub parse_block_as_function {
 
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close block nil
+
+  if ($is_anon_sub) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");  # close let @_
+  }
+
   $self->indent_level($self->indent_level - 1);
-  $self->_emit(")");
+  $self->_emit(")");  # close defun
+
+  # Close outer state let if we opened one
+  if (%state_renames) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");  # close state let
+  }
+
   $self->_emit("");  # Blank line after function
 
   return $func_name;
@@ -2173,12 +2242,13 @@ sub _process_sub_statement {
     }
   }
 
-  # At file scope, route all sub-definition output to the definitions bucket
-  # so sub bodies appear before runtime top-level calls in assembled output.
-  # Inside subs (in_subroutine > 0), nested named subs emit in-place
-  # (already in whatever bucket the enclosing sub is using).
+  # At file scope, route named sub definitions to the declarations bucket.
+  # declarations is assembled before definitions (BEGIN blocks, use/require),
+  # which matches Perl: all named subs are compiled before any BEGIN runs,
+  # so \&foo inside BEGIN can always find the sub already defined.
+  # Inside subs (in_subroutine > 0), nested named subs emit in-place.
   my $old_bucket = $self->_cur_bucket;
-  $self->_cur_bucket('definitions') if $self->environment->in_subroutine == 0;
+  $self->_cur_bucket('declarations') if $self->environment->in_subroutine == 0;
 
   # Emit Perl code as comment
   my $perl_code = $stmt->content;
@@ -2280,13 +2350,25 @@ sub _process_sub_statement {
                   grep { $_->{type} eq 'state' } @all_decls;
   }
 
-  # If we have state vars, wrap defun in a let for persistent storage
+  # If we have state vars, wrap defun in a let for persistent storage.
+  # Use unique CL names ($state--subname--varname--N) to avoid colliding with
+  # any defvar declarations at file scope, which would make the symbol SPECIAL
+  # and turn the lexical let into a dynamic binding that evaporates after load.
+  my %state_renames;
   if (@state_vars) {
-    # Create bindings: ($var nil) ($var--init nil) for each state var
+    my $sub_slug = $name ? $name : 'anon';
+    $sub_slug =~ s/[^a-zA-Z0-9]/-/g;
     my @bindings;
     for my $var (@state_vars) {
-      push @bindings, "($var nil)";
-      push @bindings, "($var--init nil)";
+      # Strip sigil for the slug part, keep sigil for the CL name
+      my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+      $bare //= $var; $sigil //= '$';
+      my $bare_slug = $bare; $bare_slug =~ s/[^a-zA-Z0-9]/-/g;
+      my $unique = sprintf("%sstate__%s__%s__%d",
+                           $sigil, $sub_slug, $bare_slug, ++$state_var_counter);
+      $state_renames{$var} = $unique;
+      push @bindings, "($unique nil)";
+      push @bindings, "(${unique}__init nil)";
     }
     $self->_emit("(let (" . join(" ", @bindings) . ")");
     $self->indent_level($self->indent_level + 1);
@@ -2308,21 +2390,20 @@ sub _process_sub_statement {
   }
   my $cl_sub_name = $self->_qualified_sub_to_cl($effective_name);
 
-  # Nested named subs (inside another sub) get a pl-declare-sub stub in
-  # the declarations bucket so the name is known before the enclosing sub.
-  if ($name && $self->environment->in_subroutine > 0) {
+  # All named subs get a pl-declare-sub stub in the declarations bucket.
+  # This ensures forward references (e.g. \&foo in a BEGIN block before
+  # 'sub foo {}' in source) always resolve, regardless of source order.
+  # The declarations bucket is assembled before definitions in the output.
+  # pl-declare-sub is idempotent: it only creates the stub if the real
+  # definition hasn't loaded yet.
+  if ($name) {
     push @{$self->_sections->[$self->_cur_section]{declarations}},
          "(pl-declare-sub $cl_sub_name)";
   }
 
   # Forward declaration: sub name; or sub name ($); or sub name : attrs;
-  # Emit pl-declare-sub instead of a full pl-sub with nil body.
-  # Nested subs already had pl-declare-sub pushed to declarations above.
+  # The pl-declare-sub stub in declarations is sufficient; nothing more needed.
   unless ($block) {
-    unless ($name && $self->environment->in_subroutine > 0) {
-      $self->_emit("(pl-declare-sub $cl_sub_name)");
-      $self->_emit("");
-    }
     $self->_cur_bucket($old_bucket);
     return;
   }
@@ -2343,12 +2424,16 @@ sub _process_sub_statement {
   $self->environment->in_subroutine($self->environment->in_subroutine + 1);
 
   if ($block) {
-    # Wrap sub body with let for local variable declarations
-    # Pass state_vars so _with_declarations knows to skip them
+    # Wrap sub body with let for local variable declarations.
+    # Pass state_vars so _with_declarations knows to skip them.
+    # Also set rename map in environment so ExprToCL remaps $x -> $state--sub--x--N.
     local $self->{_current_state_vars} = { map { $_ => 1 } @state_vars };
+    my $saved_renames = $self->environment->state_var_renames;
+    $self->environment->state_var_renames(\%state_renames) if %state_renames;
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     });
+    $self->environment->state_var_renames($saved_renames);
   }
   else {
     $self->_emit("nil");

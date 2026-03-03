@@ -180,53 +180,57 @@ note "-------- Phase 2: compile-time before runtime";
     # All four compile-time forms before runtime
     is(relative_order($cl, qr/\(push \(lambda/, qr/\(pl-print "runtime"/), -1,
        'END blocks before runtime');
-    # Source order within compile-time: sub a, END1, sub b, END2
-    # Match END blocks via their comment lines (push (lambda is multi-line)
+    # Subs are in declarations bucket; END blocks are in definitions bucket.
+    # declarations assembles before definitions, so all subs come before all END blocks.
     is(relative_order($cl, qr/\(pl-sub pl-a/, qr/;; END.*end1/), -1,
        'source order: sub a before END1');
-    is(relative_order($cl, qr/;; END.*end1/, qr/\(pl-sub pl-b/), -1,
-       'source order: END1 before sub b');
+    is(relative_order($cl, qr/\(pl-sub pl-b/, qr/;; END.*end1/), -1,
+       'sub b (declarations) comes before END1 (definitions)');
 }
 
 
 note "-------- Phase 1: defvar hoisting";
 
-# Test: defvar hoisted before sub definitions
+# Test: defvar (from 'our') appears after sub — sub is in declarations bucket,
+# our $x generates eval-when+defvar in runtime bucket. declarations assembles first.
 {
     my $cl = parse_pl(q{
         sub get_x { return $x; }
         our $x = 10;
     });
-    is(relative_order($cl, qr/defvar \$x/, qr/\(pl-sub pl-get_x/), -1,
-       'defvar hoisted before sub that uses the variable');
+    is(relative_order($cl, qr/\(pl-sub pl-get_x/, qr/defvar \$x/), -1,
+       'sub (declarations) before our-defvar (runtime)');
 }
 
-# Test: multiple defvars all hoisted before subs
+# Test: multiple defvars (from 'our') appear after sub in declarations.
+# Sub is in declarations bucket; our $x/$y generate eval-when+defvar in runtime.
 {
     my $cl = parse_pl(q{
         sub compute { local $x = 10; local $y = 20; return $x + $y; }
         our $x = 1;
         our $y = 2;
     });
-    is(relative_order($cl, qr/defvar \$x/, qr/\(pl-sub pl-compute/), -1,
-       'defvar $x hoisted before sub');
-    is(relative_order($cl, qr/defvar \$y/, qr/\(pl-sub pl-compute/), -1,
-       'defvar $y hoisted before sub');
+    is(relative_order($cl, qr/\(pl-sub pl-compute/, qr/defvar \$x/), -1,
+       'sub (declarations) before $x defvar (runtime)');
+    is(relative_order($cl, qr/\(pl-sub pl-compute/, qr/defvar \$y/), -1,
+       'sub (declarations) before $y defvar (runtime)');
 }
 
-# Test: defvar value assignment stays at original runtime position
+# Test: defvar value assignment stays at original runtime position.
+# Sub is in declarations; our $x generates eval-when+defvar in runtime bucket.
+# So sub comes before defvar, and defvar comes before setf.
 {
     my $cl = parse_pl(q{
         sub foo { return $x; }
         our $x = 42;
         print foo();
     });
-    # defvar (declaration) before sub
-    is(relative_order($cl, qr/defvar \$x/, qr/\(pl-sub pl-foo/), -1,
-       'defvar declaration before sub');
-    # setf (value) after sub (in runtime section)
-    is(relative_order($cl, qr/\(pl-sub pl-foo/, qr/setf.*pl-box-value.*\$x.*42/), -1,
-       'defvar value assignment stays in runtime section');
+    # sub (declarations) before our-defvar (runtime)
+    is(relative_order($cl, qr/\(pl-sub pl-foo/, qr/defvar \$x/), -1,
+       'sub (declarations) before our-defvar (runtime)');
+    # defvar before setf (value assignment)
+    is(relative_order($cl, qr/defvar \$x/, qr/setf.*pl-box-value.*\$x.*42/), -1,
+       'defvar declaration before runtime value assignment');
 }
 
 
@@ -243,18 +247,22 @@ note "-------- Phase 1: nested sub stubs";
     });
     like($cl, qr/\(pl-declare-sub pl-inner\)/,
          'nested sub gets pl-declare-sub stub');
-    is(relative_order($cl, qr/\(pl-declare-sub pl-inner\)/, qr/\(pl-sub pl-outer/), -1,
-       'stub appears before enclosing sub');
+    # The stub is emitted inline within the enclosing sub's body (same bucket),
+    # so it appears after the opening of pl-sub pl-outer but before the call.
+    is(relative_order($cl, qr/\(pl-declare-sub pl-inner\)/, qr/pl-return \(pl-inner\)/), -1,
+       'inner stub declared before call to inner inside outer body');
 }
 
-# Test: top-level sub does NOT get pl-declare-sub stub
+# Test: top-level sub gets pl-declare-sub stub in declarations (before BEGIN)
 {
     my $cl = parse_pl(q{
         sub foo { return 1; }
         print foo();
     });
-    unlike($cl, qr/\(pl-declare-sub pl-foo\)/,
-           'top-level sub does not get pl-declare-sub');
+    like($cl, qr/\(pl-declare-sub pl-foo\)/,
+         'top-level sub gets pl-declare-sub stub');
+    is(relative_order($cl, qr/\(pl-declare-sub pl-foo\)/, qr/\(pl-sub pl-foo\b/), -1,
+       'pl-declare-sub before pl-sub for top-level sub');
 }
 
 

@@ -200,6 +200,52 @@ When resuming work:
 
 ## TODOs
 
+### `&$foo(args)` / `&{expr}(args)` — Code Ref Call Syntax
+Perl supports two equivalent call syntaxes:
+- `$foo->(args)` — modern, already works in PCL via `pl-funcall-ref`
+- `&$foo(args)` — old style, bypasses prototypes (PCL doesn't enforce prototypes anyway)
+
+The old style is used heavily in `perl-tests/closure.t` and other old Perl code.
+
+**PPI tokenizes it as:** `Cast(&)` + `Symbol($foo)` or `Block({expr})` + `Structure::List(args)`
+
+**Three cases to handle in `PExpr.pm` `handle_subcalls()`:**
+1. `&$scalar(args)` — Cast + Symbol + List: simplest, just create a `ref_funcall` node like `->()` does
+2. `&{expr}(args)` — Cast + Block + List: more general, expr in braces can be anything
+3. `&{$obj->method}(args)` — Cast + Block(with method call) + List: needs full expression parsing inside braces
+
+The general fix: after processing a Cast(`&`) + operand pair into a `prefix_op` node, if the NEXT token is a `Structure::List`, convert the whole thing to a `ref_funcall` node (same as `X->(args)`). This handles all three cases uniformly.
+
+**Note:** Even fixing `&$foo()` in closure.t will only unblock tests 3–4 (wrong result from `$i` not being updated). Tests 5+ require real lexical closure support (`defun` → `lambda` with captured `let` bindings), which is a separate Phase 2 task.
+
+**Files to change:** `Pl/PExpr.pm` `handle_subcalls()`, around line 1308 (where `&funcname(args)` is already handled for named functions).
+
+### `state` Variables — Full Closure Support Needed
+
+Current state (session 61): Named subs, anonymous subs, and package-level `state` all generate the right outer `let` wrapper and unique CL names (`$state__subname__varname__N`). The forward-decl scanner false-positive (`$state` from `$state--...`) is fixed by using `__` separators.
+
+**What still fails (`perl-tests/state.t`):**
+Tests 3–14 (list syntax, uninitialized) and 19–23 (generator pattern) fail. The generator pattern:
+```perl
+sub make_counter {
+    return sub { state $n = 0; $n++ };
+}
+my $c1 = make_counter();
+my $c2 = make_counter();
+$c1->(); $c1->(); # should be 0, 1
+$c2->(); # should be 0 — independent from $c1
+```
+**Root cause:** `defun --anon-block-N--` inside an outer `let` defines a GLOBAL function. All calls to `make_counter()` return a reference to the same function, sharing the same `$state__anon__n__1` variable. This is the Phase 2 closure problem: CL `defun` does not create per-call independent closures — only `lambda` does.
+
+**Fix required:** Anonymous subs must generate `lambda` (not `defun` + `#'name`), so each call to the enclosing function creates a fresh closure over new `let` bindings. This is the core Phase 2 work.
+
+**Files to change:**
+- `Pl/Parser.pm` `parse_block_as_function`: emit `(lambda ...)` instead of `(defun name ...) ... #'name`
+- Caller in `Pl/PExpr.pm` line ~1419: receives the lambda form directly instead of a function name
+- The outer state `let` must wrap the `lambda` form (not a `defun`), which already works correctly
+
+**Smaller issue also to investigate:** Tests 3–14 fail even without the generator pattern — check what `state ($x)` (list syntax for state) generates vs `state $x`.
+
 ### Chained Method Calls
 `$obj->method1()->method2()` fails — the parser emits a PARSE ERROR for the second `->` when the left-hand side is a method call result (not a simple variable). Example: `B->new()->name()`. Workaround: assign to a temp variable first. Needs investigation in `Pl/PExpr.pm` where postfix `->` is handled after a complete expression.
 
