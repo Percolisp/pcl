@@ -297,6 +297,11 @@ has source_file => (
     default => '-',
 );
 
+has state_var_renames => (
+    is      => 'rw',
+    default => sub { {} },
+);
+
 =head1 METHODS
 
 =head2 get_prototype($name)

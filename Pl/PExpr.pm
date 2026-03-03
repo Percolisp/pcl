@@ -1415,8 +1415,8 @@ sub handle_subcalls {
       if ($func_name eq 'sub') {
         # Use parser callback if available (handles multi-statement blocks)
         if ($self->has_parser) {
-          # Anonymous subs take no implicit parameters
-          my $block_func_name = $self->parser->parse_block_as_function($next, []);
+          # Anonymous subs receive call arguments via @_ (like named subs)
+          my $block_func_name = $self->parser->parse_block_as_function($next, [], 1);
 
           # Create a func_ref node that holds the function name
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
