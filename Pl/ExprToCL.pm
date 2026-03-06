@@ -1737,6 +1737,7 @@ sub gen_func_ref {
   my $node_id = shift;
   my $kids    = shift;
 
+  return $node->{raw_lambda} if $node->{raw_lambda};
   my $func_name = $node->{func_name};
   return "#'$func_name";
 }

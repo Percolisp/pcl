@@ -176,6 +176,7 @@ When resuming work:
 - `docs/declaration-ordering.md` - Perl vs CL compile/load phases, defvar/defun ordering, local/dynamic scoping
 - `docs/wantarray-context.md` - Wantarray/context system (DO NOT implement without explicit user request)
 - `docs/ppi-glob-disambiguation.md` - **HIGH PRIORITY BUG**: PPI misreads `< expr >` as glob, silently drops statements
+- `docs/closure-lexical-scoping.md` - **NEXT TODO**: Why `defvar` breaks closures, plan for `$x__lex__N` renaming
 
 ## Dependencies
 
@@ -204,31 +205,38 @@ When resuming work:
 `&$scalar(args)` and `&{expr}(args)` now generate `(pl-funcall-ref ...)` correctly.
 `grep.t` fully passing (7/7). `closure.t` tests 1-7 pass; tests 8+ need Phase 2 closures.
 
-### `state` Variables — Full Closure Support Needed
+### Phase 2 Closures — `defvar` + `let` = dynamic binding problem ⬅ NEXT TODO
 
-Current state (session 61): Named subs, anonymous subs, and package-level `state` all generate the right outer `let` wrapper and unique CL names (`$state__subname__varname__N`). The forward-decl scanner false-positive (`$state` from `$state--...`) is fixed by using `__` separators.
+**Status (session 62):** Anonymous subs now generate `(lambda ...)` instead of `(defun NAME ...) #'NAME`.
+Simple closures work. But `sub bar { my $i = shift; sub { $i } }` still fails because
+`$i` is `defvar`'d (SPECIAL) from the package-level `my $i`, so `let (($i ...))` inside `bar`
+creates a DYNAMIC binding that unwinds when `bar` returns — the lambda sees the wrong value.
 
-**What still fails (`perl-tests/state.t`):**
-Tests 3–14 (list syntax, uninitialized) and 19–23 (generator pattern) fail. The generator pattern:
-```perl
-sub make_counter {
-    return sub { state $n = 0; $n++ };
-}
-my $c1 = make_counter();
-my $c2 = make_counter();
-$c1->(); $c1->(); # should be 0, 1
-$c2->(); # should be 0 — independent from $c1
-```
-**Root cause:** `defun --anon-block-N--` inside an outer `let` defines a GLOBAL function. All calls to `make_counter()` return a reference to the same function, sharing the same `$state__anon__n__1` variable. This is the Phase 2 closure problem: CL `defun` does not create per-call independent closures — only `lambda` does.
+**Root cause:** `defvar` makes a CL symbol globally SPECIAL. All `let` bindings of that symbol
+(even deep inside named subs) create dynamic bindings. CL has no "global lexical" declaration.
 
-**Fix required:** Anonymous subs must generate `lambda` (not `defun` + `#'name`), so each call to the enclosing function creates a fresh closure over new `let` bindings. This is the core Phase 2 work.
+**Fix:** For `my` vars declared inside subroutines (`in_subroutine > 0`), use unique CL symbol
+names (`$i__lex__N`) that are never `defvar`'d. Since they're not special, `let` creates lexical
+bindings — lambdas capture the correct per-call copy.
+
+**Implementation plan:** See `docs/closure-lexical-scoping.md` for the full plan.
+Short version:
+1. `_with_declarations` (Parser.pm): when `in_sub > 0`, rename `my $x → $x__lex__N` via
+   `$lex_var_counter` (already declared). Update rename map (`state_var_renames`) so ExprToCL
+   emits the unique name. Track unique names in `_let_bound_vars` too.
+2. `_process_variable_statement` (Parser.pm): for `my $var = EXPR` where `$var` is being newly
+   declared, parse only the **RHS tokens** with the outer rename for `$var` temporarily active
+   (prevents `my $i = $i` self-assignment). Emit `(pl-my-= UNIQUE_NAME RHS_CL)` manually.
+
+**Key difficulty:** Can't suppress rename for just the RHS of a full expression parse.
+Solution: extract RHS tokens from `@parts` (tokens after `=`), parse them separately.
 
 **Files to change:**
-- `Pl/Parser.pm` `parse_block_as_function`: emit `(lambda ...)` instead of `(defun name ...) ... #'name`
-- Caller in `Pl/PExpr.pm` line ~1419: receives the lambda form directly instead of a function name
-- The outer state `let` must wrap the `lambda` form (not a `defun`), which already works correctly
+- `Pl/Parser.pm`: `_with_declarations` + `_process_variable_statement`
+- Nothing else (ExprToCL already checks `state_var_renames`; PExpr already uses it)
 
-**Smaller issue also to investigate:** Tests 3–14 fail even without the generator pattern — check what `state ($x)` (list syntax for state) generates vs `state $x`.
+**Expected impact:** Fixes `closure.t` tests 8+ (currently 38/50 pass) and the generator
+pattern in `state.t` tests 19–23.
 
 ### `map({key=>$_}, LIST)` — Hash Constructor Block in Paren-Form Map ✅ DONE (session 62)
 `_block_is_hash_constructor()` added to PExpr.pm; `parse_hash_block_to_cl_string()` added to Parser.pm.

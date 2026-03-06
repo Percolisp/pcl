@@ -1617,19 +1617,40 @@ my $anon_block_counter = 0;
 # Counter for unique state variable names
 my $state_var_counter = 0;
 
+# Counter for unique lexical variable names (used in symbol-macrolet inside subs)
+my $lex_var_counter = 0;
+
 # Parse a block as a named function for eval/sub blocks
 # Returns the generated function name
 # $params is arrayref: [] for eval/sub
 # $is_anon_sub: 1 for sub{} anonymous subs (adds &rest %_args + @_ binding)
+# $return_lambda: 1 = return a (lambda ...) CL string instead of emitting (defun ...)
 # Note: grep/map/sort now use parse_block_to_cl_string with inline lambdas
 sub parse_block_as_function {
-  my $self        = shift;
-  my $block       = shift;  # PPI::Structure::Block
-  my $params      = shift // [];  # Parameter names
-  my $is_anon_sub = shift // 0;   # 1 = anonymous sub (receives call args via @_)
+  my $self          = shift;
+  my $block         = shift;  # PPI::Structure::Block
+  my $params        = shift // [];  # Parameter names
+  my $is_anon_sub   = shift // 0;   # 1 = anonymous sub (receives call args via @_)
+  my $return_lambda = shift // 0;   # 1 = return lambda string, don't emit defun
 
-  # Generate unique function name
+  # Generate unique function name (used only for defun path)
   my $func_name = sprintf("--anon-block-%d--", ++$anon_block_counter);
+
+  # For $return_lambda: redirect all _emit calls to a temp section so we
+  # can collect the output as a string to return inline.
+  my ($saved_sections, $saved_cur_section, $saved_cur_bucket, $saved_indent);
+  if ($return_lambda) {
+    $saved_sections    = $self->_sections;
+    $saved_cur_section = $self->_cur_section;
+    $saved_cur_bucket  = $self->_cur_bucket;
+    $saved_indent      = $self->indent_level;
+    $self->_sections([{
+      pkg => '_lambda_', preamble => [], declarations => [], definitions => [], runtime => [],
+    }]);
+    $self->_cur_section(0);
+    $self->_cur_bucket('runtime');
+    $self->indent_level(0);
+  }
 
   # For anonymous subs, detect state variables and wrap in outer let.
   # This mirrors the logic in _process_sub_statement for named subs.
@@ -1664,7 +1685,11 @@ sub parse_block_as_function {
   my $params_cl = $is_anon_sub ? '&rest %_args' : join(' ', @$params);
 
   # Emit the function definition
-  $self->_emit("(defun $func_name ($params_cl)");
+  if ($return_lambda) {
+    $self->_emit("(lambda ($params_cl)");
+  } else {
+    $self->_emit("(defun $func_name ($params_cl)");
+  }
   $self->indent_level($self->indent_level + 1);
 
   if ($is_anon_sub) {
@@ -1716,12 +1741,28 @@ sub parse_block_as_function {
   }
 
   $self->indent_level($self->indent_level - 1);
-  $self->_emit(")");  # close defun
+  $self->_emit(")");  # close defun/lambda
 
   # Close outer state let if we opened one
   if (%state_renames) {
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");  # close state let
+  }
+
+  if ($return_lambda) {
+    # Collect all emitted lines from temp section and return as lambda string
+    my $temp = $self->_sections->[0];
+    my @lines = (
+      @{$temp->{preamble}},
+      @{$temp->{declarations}},
+      @{$temp->{definitions}},
+      @{$temp->{runtime}},
+    );
+    $self->_sections($saved_sections);
+    $self->_cur_section($saved_cur_section);
+    $self->_cur_bucket($saved_cur_bucket);
+    $self->indent_level($saved_indent);
+    return @lines ? join("\n", @lines) : "(lambda () nil)";
   }
 
   $self->_emit("");  # Blank line after function

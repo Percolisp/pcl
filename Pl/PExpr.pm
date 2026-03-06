@@ -1531,11 +1531,11 @@ sub handle_subcalls {
         # Use parser callback if available (handles multi-statement blocks)
         if ($self->has_parser) {
           # Anonymous subs receive call arguments via @_ (like named subs)
-          my $block_func_name = $self->parser->parse_block_as_function($next, [], 1);
+          my $lambda_str = $self->parser->parse_block_as_function($next, [], 1, 1);
 
-          # Create a func_ref node that holds the function name
+          # Create a func_ref node that holds the lambda string inline
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-          $ref_node->{func_name} = $block_func_name;
+          $ref_node->{raw_lambda} = $lambda_str;
 
           # Replace sub { } with the function reference
           splice @$e, $i, 2;
