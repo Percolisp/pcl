@@ -200,25 +200,9 @@ When resuming work:
 
 ## TODOs
 
-### `&$foo(args)` / `&{expr}(args)` — Code Ref Call Syntax
-Perl supports two equivalent call syntaxes:
-- `$foo->(args)` — modern, already works in PCL via `pl-funcall-ref`
-- `&$foo(args)` — old style, bypasses prototypes (PCL doesn't enforce prototypes anyway)
-
-The old style is used heavily in `perl-tests/closure.t` and other old Perl code.
-
-**PPI tokenizes it as:** `Cast(&)` + `Symbol($foo)` or `Block({expr})` + `Structure::List(args)`
-
-**Three cases to handle in `PExpr.pm` `handle_subcalls()`:**
-1. `&$scalar(args)` — Cast + Symbol + List: simplest, just create a `ref_funcall` node like `->()` does
-2. `&{expr}(args)` — Cast + Block + List: more general, expr in braces can be anything
-3. `&{$obj->method}(args)` — Cast + Block(with method call) + List: needs full expression parsing inside braces
-
-The general fix: after processing a Cast(`&`) + operand pair into a `prefix_op` node, if the NEXT token is a `Structure::List`, convert the whole thing to a `ref_funcall` node (same as `X->(args)`). This handles all three cases uniformly.
-
-**Note:** Even fixing `&$foo()` in closure.t will only unblock tests 3–4 (wrong result from `$i` not being updated). Tests 5+ require real lexical closure support (`defun` → `lambda` with captured `let` bindings), which is a separate Phase 2 task.
-
-**Files to change:** `Pl/PExpr.pm` `handle_subcalls()`, around line 1308 (where `&funcname(args)` is already handled for named functions).
+### `&$foo(args)` / `&{expr}(args)` — Code Ref Call Syntax ✅ DONE (session 62)
+`&$scalar(args)` and `&{expr}(args)` now generate `(pl-funcall-ref ...)` correctly.
+`grep.t` fully passing (7/7). `closure.t` tests 1-7 pass; tests 8+ need Phase 2 closures.
 
 ### `state` Variables — Full Closure Support Needed
 
@@ -245,6 +229,11 @@ $c2->(); # should be 0 — independent from $c1
 - The outer state `let` must wrap the `lambda` form (not a `defun`), which already works correctly
 
 **Smaller issue also to investigate:** Tests 3–14 fail even without the generator pattern — check what `state ($x)` (list syntax for state) generates vs `state $x`.
+
+### `map({key=>$_}, LIST)` — Hash Constructor Block in Paren-Form Map ✅ DONE (session 62)
+`_block_is_hash_constructor()` added to PExpr.pm; `parse_hash_block_to_cl_string()` added to Parser.pm.
+Both paren-form and block-form map/grep/sort now generate correct `(make-pl-box (pl-hash ...))`.
+`grep.t` fully passing (7/7).
 
 ### Chained Method Calls
 `$obj->method1()->method2()` fails — the parser emits a PARSE ERROR for the second `->` when the left-hand side is a method call result (not a simple variable). Example: `B->new()->name()`. Workaround: assign to a temp variable first. Needs investigation in `Pl/PExpr.pm` where postfix `->` is handled after a complete expression.

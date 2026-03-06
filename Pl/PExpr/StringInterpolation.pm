@@ -254,6 +254,28 @@ sub parse_interpolated_variable {
       # Standalone $# (deprecated output number format) — treat as literal
     }
 
+    # Handle $::varname (main package) — must check before $: magic var
+    # e.g. "$::tests[1]" means $main::tests[1], NOT $: followed by :tests[1]
+    if ($sigil eq '$' && $next_char eq ':' && substr($content, $pos + 2, 1) eq ':') {
+      pos($content) = $pos + 3;
+      if ($content =~ /\G(\w+)/gc) {
+        my $var_name = $1;
+        my $full_var = '$::' . $var_name;
+        my $end_pos = pos($content);
+        if (substr($content, $end_pos, 1) eq '[') {
+          return $self->parse_array_subscript($parser, $content_ref, $pos, $full_var);
+        }
+        elsif (substr($content, $end_pos, 1) eq '{') {
+          return $self->parse_hash_subscript($parser, $content_ref, $pos, $full_var);
+        }
+        my $var_token = PPI::Token::Symbol->new($full_var);
+        my $var_id = $parser->make_node($var_token);
+        return ($var_id, $end_pos);
+      }
+      # $:: alone — treat as literal (main stash, not a simple variable)
+      return (undef, $pos);
+    }
+
     # Handle single-punctuation magic variables: $! $? $. $@ $/ $\ $& $' $` $+
     # $; $, $| $: $% $= $- $< $> $( $) $[ $] $~ $"
     # Note: $^ alone (format top name) is rare, skip it to avoid ambiguity
@@ -264,9 +286,18 @@ sub parse_interpolated_variable {
     }
   }
 
-  # Handle simple variable name: $var or @var
+  # Handle simple variable name: $var or @var, including package-qualified $Pkg::var
   if ($content =~ /\G[\$\@](\w+)/gc) {
     my $var_name = $1;
+    # Extend for package-qualified names: $Pkg::bar or $Pkg::Sub::bar
+    while (substr($content, pos($content), 2) eq '::') {
+      pos($content) += 2;
+      if ($content =~ /\G(\w+)/gc) {
+        $var_name .= '::' . $1;
+      } else {
+        last;
+      }
+    }
     my $full_var = "$sigil$var_name";
     my $end_pos = pos($content);
     

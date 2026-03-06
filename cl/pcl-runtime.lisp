@@ -111,6 +111,7 @@
    #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^|
    ;; Context
    #:*wantarray*
    ;; Call depth tracking (for pl-caller at top level)
@@ -351,6 +352,15 @@
 (defvar |$,| (make-pl-box "") "Output field separator for print")
 ;;; Perl version number ($])
 (defvar |$]| (make-pl-box "5.030000") "Perl version number")
+;;; Format/write special variables (rarely used in modern code)
+(defvar |$~| (make-pl-box "") "FORMAT_NAME - name of current report format for write")
+(defvar |$=| (make-pl-box 60) "FORMAT_LINES_PER_PAGE - page length for write")
+(defvar |$-| (make-pl-box 0) "FORMAT_LINES_LEFT - lines left on page for write")
+(defvar |$%| (make-pl-box 0) "FORMAT_PAGE_NUMBER - current page number for write")
+(defvar |$:| (make-pl-box " \n-") "FORMAT_LINE_BREAK_CHARACTERS - word-break chars for write")
+(defvar |$^L| (make-pl-box (string #\Page)) "FORMAT_FORMFEED - formfeed char for write")
+(defvar |$^A| (make-pl-box "") "ACCUMULATOR - for formline/write output")
+(defvar |$^| (make-pl-box "") "FORMAT_TOP_NAME - top-of-page format name")
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -3242,23 +3252,26 @@
                  i)))))
     ;; Hash case
     ((hash-table-p collection)
-     (let ((remaining (gethash collection *hash-iterators*)))
-       ;; If no iterator exists or previous was exhausted, start fresh
-       (when (null remaining)
+     (multiple-value-bind (remaining exists-p)
+         (gethash collection *hash-iterators*)
+       ;; If not started yet, initialize iterator with all keys
+       (unless exists-p
          (let ((keys nil))
            (maphash (lambda (k v) (declare (ignore v)) (push k keys)) collection)
            (setf remaining (nreverse keys))
            (setf (gethash collection *hash-iterators*) remaining)))
-       ;; If still empty (hash has no keys), return empty list
+       ;; If remaining is empty, return exhaustion sentinel and reset iterator
        (if (null remaining)
-           (vector)
+           (progn
+             (remhash collection *hash-iterators*)
+             (if *wantarray* (vector) *pl-undef*))
+           ;; Return next key/val pair
            (let* ((key (car remaining))
                   (val (gethash key collection)))
              (setf (gethash collection *hash-iterators*) (cdr remaining))
-             ;; When iterator is exhausted, remove entry so next call starts fresh
-             (when (null (cdr remaining))
-               (remhash collection *hash-iterators*))
-             (vector key (unbox val))))))
+             (if *wantarray*
+                 (vector key (unbox val))
+                 (make-pl-box key))))))
     ;; Neither — return empty
     (t (vector))))
 
@@ -6090,6 +6103,23 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar $VERSION (make-pl-box "1.50")))
 (defun pl-unimport (&rest args) (declare (ignore args)) nil)
+(defun pl-import (&rest args) (declare (ignore args)) nil)
+(in-package :pcl)
+
+;; Carp module stub - Carp loads utf8 which causes infinite loops in PCL
+;; Stub out the most commonly used functions so code that 'use Carp' works
+(defpackage :|Carp| (:use :cl :pcl))
+(in-package :|Carp|)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar $VERSION (make-pl-box "1.50")))
+(defun pl-croak (&rest args)
+  (error "Carp::croak: ~a" (if args (to-string (car args)) "")))
+(defun pl-confess (&rest args)
+  (error "Carp::confess: ~a" (if args (to-string (car args)) "")))
+(defun pl-carp (&rest args)
+  (format *error-output* "~a~%" (if args (to-string (car args)) "")))
+(defun pl-cluck (&rest args)
+  (format *error-output* "~a~%" (if args (to-string (car args)) "")))
 (defun pl-import (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 

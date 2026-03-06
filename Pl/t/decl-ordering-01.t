@@ -691,14 +691,16 @@ note "-------- Runtime: edge cases in ordering";
 }
 
 # Test: use IS still hoisted (compile-time)
+# use Carp is now a no-op pragma (Carp hangs when loaded via PCL's module chain)
+# Use a non-pragma module to verify use is still hoisted
 {
     my $cl = parse_pl(q{
         $x = 1;
-        use Carp;
+        use MIME::Base64;
         $y = 2;
     });
     # use should come before the runtime setf
-    is(relative_order($cl, qr/pl-use.*Carp/, qr/pl-scalar-=.*\$y/), -1,
+    is(relative_order($cl, qr/pl-use.*MIME/, qr/pl-scalar-=.*\$y/), -1,
        'use is still hoisted as compile-time');
 }
 

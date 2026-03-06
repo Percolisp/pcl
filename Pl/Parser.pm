@@ -288,6 +288,7 @@ sub _insert_variable_forward_declarations {
   my %runtime_vars = map { $_ => 1 } qw(
     $_ @_ %_args @ARGV @INC %ENV %INC %SIG $@
     $1 $2 $3 $4 $5 $6 $7 $8 $9
+    $0 $$ $?
   );
 
   my %declared;    # variables with defvar
@@ -1788,6 +1789,41 @@ sub parse_block_to_cl_string {
 }
 
 
+# Parse a block that contains hash key-value pairs: {key => val, ...}
+# Used for map({key=>$_}, LIST) where the block is a hash constructor.
+# Returns CL string: "(make-pl-box (pl-hash key val ...))"
+sub parse_hash_block_to_cl_string {
+  my $self  = shift;
+  my $block = shift;  # PPI::Structure::Block
+
+  my @raw = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@raw == 1 && $raw[0]->isa('PPI::Statement')) {
+    @raw = grep { ref($_) !~ /Whitespace|Comment/ } $raw[0]->children();
+  }
+
+  my $result;
+  eval {
+    my $expr_o = Pl::PExpr->new(
+      e           => \@raw,
+      environment => $self->environment,
+      parser      => $self,
+    );
+    my $pair_ids = $expr_o->parse_list(\@raw);
+    my ($top_node, $top_id) = $expr_o->make_node_insert('hash_init');
+    for my $id (@$pair_ids) {
+      $expr_o->add_child_to_node($top_id, $id);
+    }
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => 0,
+    );
+    $result = $gen->generate($top_id);
+  };
+  return $result // '(make-pl-box (pl-hash))';
+}
+
+
 # Find all variable declarations recursively in a PPI element
 # Returns arrayref of { type => 'my'|'our'|..., var => '$x' }
 sub _find_all_declarations {
@@ -2656,6 +2692,15 @@ sub _process_include_statement {
     pop @tokens while @tokens && $tokens[-1]->isa('PPI::Token::Whitespace');
 
     if (@tokens) {
+      # Check if it's a version number (require 5.007, require v5.10, etc.) - no-op
+      if (@tokens == 1 && ($tokens[0]->isa('PPI::Token::Number')
+                           || ($tokens[0]->isa('PPI::Token::Word')
+                               && $tokens[0]->content =~ /^v\d/))) {
+        $self->_emit(";; $perl_code (version requirement, no-op)");
+        $self->_emit("");
+        return;
+      }
+
       # Check if it's a simple string literal (compile-time)
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
         my $path = $tokens[0]->string;
@@ -2691,7 +2736,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter|bytes|locale|integer)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);

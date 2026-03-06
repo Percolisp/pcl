@@ -144,6 +144,15 @@ my %SPECIAL_VARS = (
   '$;'  => '|$;|',
   '$,'  => '|$,|',
   '$]'  => '|$]|',
+  # Format/write special variables (rarely used; declare to prevent CL read errors)
+  '$~'  => '|$~|',    # FORMAT_NAME
+  '$='  => '|$=|',    # FORMAT_LINES_PER_PAGE
+  '$-'  => '|$-|',    # FORMAT_LINES_LEFT
+  '$%'  => '|$%|',    # FORMAT_PAGE_NUMBER
+  '$:'  => '|$:|',    # FORMAT_LINE_BREAK_CHARACTERS
+  '$^L' => '|$^L|',   # FORMAT_FORMFEED
+  '$^A' => '|$^A|',   # ACCUMULATOR (for formline/write)
+  '$^'  => '|$^|',    # FORMAT_TOP_NAME
 );
 
 # Generate CL operator/function name from Perl name
@@ -666,6 +675,30 @@ sub gen_funcall {
           my $label = $label_node->content();
           return "($cl_func $label)";
         }
+      }
+    }
+  }
+
+  # Special handling for do { } blocks - evaluates block inline, returns last value
+  if ($func_name eq 'do' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node)) {
+      if ($arg_node->{type} eq 'func_ref') {
+        my $func_ref = $self->gen_node($kids->[1]);
+        return "(funcall $func_ref)";
+      }
+      elsif ($arg_node->{type} eq 'anon_sub') {
+        my $block_kids = $self->expr_o->get_node_children($kids->[1]);
+        my @body_parts;
+        for my $kid_id (@$block_kids) {
+          push @body_parts, $self->gen_node($kid_id);
+        }
+        return "(progn " . join(' ', @body_parts) . ")";
+      }
+      elsif ($arg_node->{type} eq 'inline_lambda') {
+        # do { BLOCK } parsed as inline_lambda - just call it
+        my $body = $arg_node->{body_cl} // 'nil';
+        return "(progn $body)";
       }
     }
   }

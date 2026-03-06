@@ -311,4 +311,38 @@ my $str = "hello world";
 if ($str =~ /\s/) { print "yes\n"; } else { print "no\n"; }
 ');
 
+test_transpile("&\$scalar() — code ref call via & sigil", '
+my $foo = sub { return 42 };
+my $x = &$foo();
+print $x, "\n";
+');
+
+test_transpile("&\$scalar(args) — code ref call with args", '
+my $foo = sub { return $_[0] + 1 };
+my $x = &$foo(5);
+print $x, "\n";
+');
+
+test_transpile("&{\$arr[N]}() — code ref call from array element", '
+my @subs;
+$subs[0] = sub { return 7 };
+my $x = &{$subs[0]}();
+print $x, "\n";
+');
+
+test_transpile("&\$foo() inside print args", '
+my $foo = sub { return "hi" };
+print(&$foo(), "\n");
+');
+
+test_transpile("map({key=>\$_}, LIST) — hash constructor in paren-form map", '
+my @res = map({a => $_}, ("chobb"));
+print $res[0]->{a}, "\n";
+');
+
+test_transpile("map {key=>\$_}, LIST — hash constructor in block-form map", '
+my @res = (map {a => $_}, ("chobb"));
+print $res[0]->{a}, "\n";
+');
+
 done_testing();
