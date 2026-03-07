@@ -1364,6 +1364,16 @@ sub gen_array_access {
   # Handle both plain $arr and package-qualified Pkg::$arr
   $arr =~ s/(^|::)\$/$1@/;
 
+  # Numeric-named arrays like @0, @1 are not valid Perl identifiers.
+  # $0[n] parses as @0[n] but @0 is never a real variable; return undef.
+  return '(pl-undef)' if $arr =~ /^@\d+$/;
+
+  # Apply rename map for @varname (closure/state variable captures)
+  if ($self->environment) {
+    my $renames = $self->environment->state_var_renames;
+    $arr = $renames->{$arr} if $renames && exists $renames->{$arr};
+  }
+
   # Use pl-aref-box in l-value context for modifying operations
   my $func = $self->lvalue_context ? 'pl-aref-box' : 'pl-aref';
   return "($func $arr $idx)";
@@ -1384,6 +1394,12 @@ sub gen_hash_access {
   # Convert $varname to %varname (Perl $hash{k} accesses %hash)
   # Handle both plain $hash and package-qualified Pkg::$hash
   $hash =~ s/(^|::)\$/$1%/;
+
+  # Apply rename map for %varname (closure/state variable captures)
+  if ($self->environment) {
+    my $renames = $self->environment->state_var_renames;
+    $hash = $renames->{$hash} if $renames && exists $renames->{$hash};
+  }
 
   # Use pl-gethash-box in l-value context for modifying operations
   my $func = $self->lvalue_context ? 'pl-gethash-box' : 'pl-gethash';

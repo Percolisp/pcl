@@ -46,7 +46,7 @@ our %Config = (
     # Platform
     osname    => 'linux',
     archname  => 'x86_64-linux',
-    osvers    => '6.0.0',
+    osvers    => '6.17.0-8-generic',
     myuname   => 'linux pcl 6.0.0 x86_64',
 
     # Features - what PCL/SBCL supports

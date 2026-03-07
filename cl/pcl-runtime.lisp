@@ -2431,11 +2431,19 @@
   (let ((s (unbox start))
         (e (unbox end)))
     (cond
-      ;; Both are numbers (or numeric strings)
-      ((and (or (numberp s) (and (stringp s) (ppcre:scan "^-?\\d+$" s)))
-            (or (numberp e) (and (stringp e) (ppcre:scan "^-?\\d+$" e))))
+      ;; Both are numbers (or numeric strings, including floats like "2.18")
+      ;; Zero-padded strings like "00", "01" are excluded — they use string range.
+      ((and (or (numberp s)
+                (and (stringp s)
+                     (not (and (> (length s) 1) (char= (char s 0) #\0)))
+                     (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" s)))
+            (or (numberp e)
+                (and (stringp e)
+                     (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" e))))
        (let ((ns (truncate (to-number s)))
              (ne (truncate (to-number e))))
+         (when (> (- ne ns) 100000000)
+           (error "Integer overflow in range (~A .. ~A): range too large" ns ne))
          (if (<= ns ne)
              (coerce (loop for i from ns to ne collect i) 'vector)
              (make-array 0))))
@@ -2453,6 +2461,8 @@
                (vector-push-extend current result)
                (when (string= current e) (return))
                (setf current (magical-string-increment current))
+               ;; If magical-string-increment returned a number (non-alpha carry), stop
+               (unless (stringp current) (return))
                (when (> (length current) max-len) (return)))
              result)))
       ;; Fallback: treat as numbers
@@ -2729,16 +2739,25 @@
       `(pl-push-impl ,arr ,@items)))
 
 (defun pl-flatten-args (args)
-  "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors.
-   This implements Perl's array flattening semantics: foo(@arr) passes
-   @arr's elements as individual arguments, not as a single vector."
+  "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
+   This implements Perl's argument flattening: foo(@arr) and foo(%hash) spread their
+   elements as individual arguments."
   (let ((result (make-array (length args) :adjustable t :fill-pointer 0)))
     (dolist (arg args)
-      (if (and (vectorp arg) (not (stringp arg)))
-          ;; Raw vector = array passed in list context: spread its elements
-          (loop for elem across arg do (vector-push-extend elem result))
-          ;; Scalar (pl-box, string, number, etc.): keep as-is
-          (vector-push-extend arg result)))
+      (cond
+        ((and (vectorp arg) (not (stringp arg)))
+         ;; Raw vector = array passed in list context: spread its elements
+         (loop for elem across arg do (vector-push-extend elem result)))
+        ((and (hash-table-p arg) (not (gethash :__class__ arg)))
+         ;; Hash in argument context: spread to alternating key-value pairs.
+         ;; But NOT blessed objects (which have :__class__) — those stay as-is.
+         (maphash (lambda (k v)
+                    (vector-push-extend (make-pl-box k) result)
+                    (vector-push-extend (if (pl-box-p v) v (make-pl-box v)) result))
+                  arg))
+        (t
+         ;; Scalar (pl-box, string, number, etc.): keep as-is
+         (vector-push-extend arg result))))
     result))
 
 ;; Marker struct for flattened arrays in push/unshift
@@ -4904,12 +4923,18 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
    With comparator fn, fn receives $a and $b and returns negative if a < b."
   (if list
       ;; Called with comparator: (pl-sort fn list)
-      (let ((fn list-or-fn)
-            (result (copy-seq (unbox list))))
+      (let* ((raw (unbox list))
+             (result (if (or (eq raw *pl-undef*) (null raw))
+                         (make-array 0)
+                         (copy-seq raw)))
+             (fn list-or-fn))
         (sort result (lambda (a b)
                        (< (funcall fn a b) 0))))
       ;; Called without comparator: (pl-sort list) - default string sort
-      (let ((result (copy-seq (unbox list-or-fn))))
+      (let* ((raw (unbox list-or-fn))
+             (result (if (or (eq raw *pl-undef*) (null raw))
+                         (make-array 0)
+                         (copy-seq raw))))
         (sort result (lambda (a b)
                        (string< (to-string a) (to-string b)))))))
 

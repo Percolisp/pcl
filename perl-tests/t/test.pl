@@ -106,6 +106,41 @@ sub watchdog {
     # No-op - PCL doesn't support alarm signals
 }
 
+# eq_hash - compare two hash refs for equality (from Perl's internal test.pl)
+sub eq_hash {
+    my ($a, $b) = @_;
+    return 0 unless ref($a) eq 'HASH' && ref($b) eq 'HASH';
+    my %seen;
+    for my $k (keys %$a) {
+        return 0 unless exists $b->{$k};
+        if (defined($a->{$k}) && defined($b->{$k})) {
+            return 0 unless $a->{$k} eq $b->{$k};
+        } else {
+            return 0 unless !defined($a->{$k}) && !defined($b->{$k});
+        }
+        $seen{$k} = 1;
+    }
+    for my $k (keys %$b) {
+        return 0 unless $seen{$k};
+    }
+    return 1;
+}
+
+# eq_array - compare two array refs for equality
+sub eq_array {
+    my ($a, $b) = @_;
+    return 0 unless ref($a) eq 'ARRAY' && ref($b) eq 'ARRAY';
+    return 0 unless @$a == @$b;
+    for my $i (0..$#$a) {
+        if (defined($a->[$i]) && defined($b->[$i])) {
+            return 0 unless $a->[$i] eq $b->[$i];
+        } else {
+            return 0 unless !defined($a->[$i]) && !defined($b->[$i]);
+        }
+    }
+    return 1;
+}
+
 # within - check if got is within range of expect (used by pow.t etc.)
 sub within {
     my ($got, $expect, $range, $test) = @_;

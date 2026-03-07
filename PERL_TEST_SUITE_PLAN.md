@@ -431,3 +431,26 @@ internals that have no sensible transpiler target.
 8. String eval (Phase 3)
 
 **Projected final: ~98%**
+
+## TODO: Errno.pm / Config.pm osvers mismatch
+`do.t` crashes because `use Errno qw(ENOENT EISDIR)` loads Errno.pm, which checks
+`"$Config{archname}-$Config{osvers}" eq "x86_64-linux-6.17.0-8-generic"`.
+PCL's stub `lib/Config.pm` has `osvers => '6.0.0'` - should be `'6.17.0-8-generic'`.
+Options:
+1. Update Config.pm stub to match current Perl's osvers (simple, but brittle on OS upgrades)
+2. Stub Errno.pm in PCL's `lib/` with hardcoded Linux errno constants
+3. Add `Errno` to the pragma skip list + emit constants from Parser.pm
+The stale FASL cache for Errno was also causing crashes (separate issue, cleared).
+
+## TODO: Package-qualified variable declarations ($Pkg::var)
+
+When `$Dog::VERSION` is accessed from within `:main` without a prior `package Dog;`
+block, PCL emits `(defpackage :Dog ...)` but the `(defvar $VERSION ...)` runs in the
+wrong package, leaving `DOG::$VERSION` unbound at runtime.
+
+Fix: when generating `Pkg::$var`, also emit a `(defvar Pkg::$var (make-pl-box nil))`
+in the preamble bucket (guarded so it doesn't clobber existing values). Alternatively,
+track all `$Pkg::var` accesses in a first pass and forward-declare them.
+
+Affected: for.t (crash after test 133), and any test that pokes `$Pkg::var` without
+an explicit `package Pkg;` block.
