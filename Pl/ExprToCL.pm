@@ -153,6 +153,9 @@ my %SPECIAL_VARS = (
   '$^L' => '|$^L|',   # FORMAT_FORMFEED
   '$^A' => '|$^A|',   # ACCUMULATOR (for formline/write)
   '$^'  => '|$^|',    # FORMAT_TOP_NAME
+  # ${^...} caret variables — stub implementations (return undef)
+  '${^WARNING_BITS}' => '*pl-undef*',   # warning bits bitmask (Perl internal)
+  '${^LAST_FH}'      => '*pl-undef*',   # last filehandle used (Perl internal)
 );
 
 # Generate CL operator/function name from Perl name
@@ -334,6 +337,11 @@ sub gen_leaf {
     if ($self->environment) {
       my $renames = $self->environment->state_var_renames;
       return $renames->{$content} if $renames && exists $renames->{$content};
+    }
+    # Unknown ${^...} caret variables — die so missing cases surface clearly.
+    if ($content =~ /^\$\{\^/) {
+      my $line = eval { $node->line_number } // '?';
+      die "PCL: unsupported special variable '$content' at line $line\n";
     }
     return $content;
   }
@@ -1759,6 +1767,7 @@ sub gen_inline_lambda {
 
 # Generate substitution s///
 # Output: (pl-subst "pattern" "replacement" :g :i ...)
+#         (pl-subst "pattern" (lambda () <cl-expr>) :g :e ...)  when /e
 sub gen_substitution {
   my $self = shift;
   my $node = shift;
@@ -1767,19 +1776,59 @@ sub gen_substitution {
   my $subst = $node->get_substitute_string;
   my $mods  = $node->get_modifiers;
 
-  # Escape backslashes and quotes for CL string literal
+  # Escape backslashes and quotes in pattern for CL string literal
   $match =~ s/\\/\\\\/g;
   $match =~ s/"/\\"/g;
-  $subst =~ s/\\/\\\\/g;
-  $subst =~ s/"/\\"/g;
 
   my @mod_strs;
   for my $mod (sort keys %$mods) {
     push @mod_strs, ":$mod";
   }
-
   my $mods_str = @mod_strs ? ' ' . join(' ', @mod_strs) : '';
+
+  # s///e: replacement is Perl code — parse it and wrap in a lambda
+  if ($mods->{e}) {
+    my $cl_expr = $self->_compile_subst_e_expr($subst);
+    return qq{(pl-subst "$match" (lambda () $cl_expr)$mods_str)};
+  }
+
+  # Normal case: escape replacement for CL string literal
+  $subst =~ s/\\/\\\\/g;
+  $subst =~ s/"/\\"/g;
   return qq{(pl-subst "$match" "$subst"$mods_str)};
+}
+
+# Parse a s///e replacement string as Perl and return CL code
+sub _compile_subst_e_expr {
+  my $self = shift;
+  my $expr = shift;
+
+  my $result = 'nil';
+  eval {
+    require PPI::Document;
+    require Pl::PExpr;
+    my $doc   = PPI::Document->new(\$expr);
+    my @stmts = $doc->children;
+    return unless @stmts;
+    my @parts = grep { ref($_) ne 'PPI::Token::Whitespace' } $stmts[0]->children;
+    return unless @parts;
+    my $expr_o = Pl::PExpr->new(
+      e        => \@parts,
+      full_PPI => $doc,
+      ($self->environment ? (environment => $self->environment) : ()),
+    );
+    my $node_id = $expr_o->parse_expr_to_tree(\@parts);
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => $self->indent_level,
+    );
+    $result = $gen->generate($node_id);
+  };
+  if ($@) {
+    warn "Failed to compile s///e expression '$expr': $@";
+  }
+  return $result;
 }
 
 

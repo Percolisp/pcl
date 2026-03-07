@@ -90,7 +90,26 @@ The root cause:
 ; Lambda called later: sees package-level $i, not the per-call copy
 ```
 
-## Plan for Next Session: Unique Names for Subroutine `my` Vars
+## Fix 2: Unique Lex Names for Captured `my` Vars (DONE, Session 63)
+
+### Summary
+
+`_vars_referenced_in_closures` scans any element tree for `sub` keywords and collects
+all symbols inside those sub-blocks. `_with_declarations` calls this when `in_subroutine > 0`
+and renames captured `my` vars to `$i__lex__N`. The unique names are never `defvar`'d,
+so `let` creates LEXICAL bindings. Lambdas capture the correct per-call copy.
+
+`_process_variable_statement` splits parsing of `my $var = EXPR` when `$var` is renamed:
+the RHS is parsed with the old rename temporarily removed (so `my $i = $i + 1` sees the
+outer `$i`), then emits `(pl-my-= $i__lex__N RHS_CL)` directly.
+
+**KEY BUG**: PPI's `find` returns `0` (not `undef`) when nothing found. Must use `|| []`
+not `// []` when deferencing the result.
+
+**Result:** `closure.t` 38→42/50. `make_counter`, `bar(4)->()`, mutable closures all work.
+Remaining 8 failures = `for my $n (0..4) { sub { $n } }` (foreach variable capture = out-of-scope).
+
+## Plan for Next Session: Unique Names for Subroutine `my` Vars (SUPERSEDED — DONE)
 
 ### The Fix
 

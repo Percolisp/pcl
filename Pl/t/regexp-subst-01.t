@@ -97,7 +97,7 @@ test_codegen('s/pat/rep/x',
              's///x extended (implicit $_)');
 
 test_codegen('s/pat/rep/gimsxe',
-             '(pl-=~ $_ (pl-subst "pat" "rep" :e :g :i :m :s :x))',
+             '(pl-=~ $_ (pl-subst "pat" (lambda () (pl-rep)) :e :g :i :m :s :x))',
              's/// all common modifiers (implicit $_)');
 
 

@@ -2,14 +2,14 @@
 
 ## Current State
 
-**5422 / 6316 tests passing (~86%)**
-*(session 61 sweep, 2026-03-03, `--jobs 2 --timeout 60`, 98 files + 4 skipped)*
+**5497 / ~6393 tests passing (~86%)**
+*(session 63 sweep, 2026-03-07, `--jobs 1 --timeout 60`, 98 files + 4 skipped)*
 
 Note: `-j8` sweep gives artificially low counts (~2168) due to SBCL FASL race
-conditions when 8 parallel processes share the cache. Always use `--jobs 2`
-(or 1) for accurate counts.
+conditions when 8 parallel processes share the cache. Always use `--jobs 1`
+(or 2) for accurate counts.
 
-PCL suite: **51 files, 2467 tests**, all passing.
+PCL suite: **52 files, 2481 tests**, all passing.
 
 ---
 
@@ -107,75 +107,198 @@ and `my $fh` forms. `pl-get-stream` checks for actual stream in box.
 
 ---
 
-## Phase 2: Lexical Closures
+## Phase 2: Lexical Closures ✅ DONE (sessions 61–63)
 
-### Status: MOSTLY DONE — one key issue remains
+### Status: COMPLETE
 
-Basic `let`-wrapping for `my` vars is complete (session 46).
-`state` variable infrastructure is done (session 61).
+All three sub-items done:
 
-**Remaining: `defun` → `lambda` for anonymous subs**
+**`defun` → `lambda`** (session 62): `parse_block_as_function` accepts a
+`$return_lambda` flag. When set, redirects `_emit` to a temp section, emits
+`(lambda ...)` instead of `(defun ...)`, returns the string inline.
+`gen_func_ref` in ExprToCL.pm uses `raw_lambda` directly. Each call to the
+enclosing function creates a fresh closure.
 
-Each `sub { ... }` expression currently generates:
-```lisp
-(defun --anon-block-N-- (&rest %_args) ...)
-...
-#'--anon-block-N--
-```
+**`state` variable infrastructure** (session 61): unique CL names
+`$state__subname__varname__N` prevent symbol collision with `defvar`.
+Package-level `state` routes to `_process_my_toplevel_declaration`.
 
-`defun` creates a **global** function. All invocations of the enclosing
-function share the same `--anon-block-N--` definition, so the generator
-pattern is broken:
+**Lexical `my` var renaming** (session 63): `_vars_referenced_in_closures`
+detects which `my` vars are captured by nested `sub {}`. Those vars are
+renamed to `$var__lex__N` in `_with_declarations` — fresh symbols, never
+`defvar`'d, so `let` creates LEXICAL bindings. Lambdas capture the correct
+per-call copy. `_process_variable_statement` splits RHS parsing for renamed
+vars to handle `my $i = $i + 1` shadowing correctly.
 
-```perl
-sub make_counter {
-    return sub { state $n = 0; $n++ };  # all instances share one defun
-}
-my $c1 = make_counter();
-my $c2 = make_counter();  # $c2 is the SAME function as $c1
-```
-
-**Fix:** Generate `(lambda (&rest %_args) ...)` directly instead of a named
-`defun`. The lambda IS the value — no `#'name` indirection needed.
-
-**Files to change:**
-- `Pl/Parser.pm` `parse_block_as_function`: return a lambda form string
-  instead of emitting a `defun` and returning a name
-- `Pl/PExpr.pm` line ~1419: caller currently wraps the name in `#'name`;
-  with lambda it uses the form directly
-- The outer state `let` already wraps before the `defun` emit — with lambda
-  it wraps the `lambda` form instead, which is correct
-
-This also fixes the between-file name collision issue (session 46, pitfall #6).
+**Result:** `closure.t` 28→42/50. Remaining 8 = foreach loop variable
+capture (`for my $n (...) { sub { $n } }`) — needs `pl-foreach` macro
+changes per iteration, out of scope for now.
 
 ### Previously discovered pitfalls (all fixed)
 
-**1.** `next`/`last`/`redo`/labels are safe through `let` — CL's non-local
-exits propagate through `let` without restriction.
+**1.** `next`/`last`/`redo`/labels are safe through `let`.
 
-**2.** `continue` blocks see `my` vars — `_process_bare_block` wraps both
-main body and `continue` block inside the same `_with_declarations`.
+**2.** `continue` blocks see `my` vars — same `_with_declarations` scope.
 
-**3.** `(block nil)` missing from `parse_block_as_function` — fixed.
-`defun` creates `(block func-name)` not `(block nil)`.
+**3.** `(block nil)` in `parse_block_as_function` — fixed.
 
-**4.** if/while/for body blocks lacked `_with_declarations` — fixed.
+**4.** if/while/for body blocks have `_with_declarations` — fixed.
 
-**5.** `pl-scalar-=` poisoned lexical bindings via `(proclaim '(special $x))`
-— fixed. `_emit` replaces assignments to let-bound vars with `(box-set ...)`.
+**5.** `pl-scalar-=` poisoned lexical bindings — fixed via `pl-my-=` / `_let_bound_vars`.
 
-**6.** `defun` for anonymous subs is global — NOT YET FIXED. See above.
+**6.** `defun` for anonymous subs is global — FIXED (session 62, lambda).
 
-### `state` variables (session 61)
+**7.** PPI `find` returns `0` not `undef` when nothing found — use `|| []` not `// []`.
 
-Infrastructure done:
-- Named subs: `$state__subname__varname__N` unique names, outer `let` wraps `pl-sub`
-- Anonymous subs: same, with `$state__anon__varname__N`
-- Package-level `state`: routed to `_process_my_toplevel_declaration` (same as `my`)
-- Forward-decl scanner: `__` separators prevent false `$state` defvar
+---
 
-Still broken: generator pattern (multiple instances sharing one defun) —
-same root cause as the `defun` → `lambda` issue above.
+---
+
+## Phase 2.5: Known Gaps (Before Phase 3)
+
+Items discovered or left over after Phase 2 that need attention before
+string eval is worth implementing. Ordered roughly by number of tests affected.
+
+### A. Tie::Array / Tie::Hash Infinite Loop (~200+ tests, 4 files blocked)
+
+`sort.t`, `reverse.t`, `local.t`, `kvaslice.t`, `kvhslice.t` all hang or crash
+when they `require Tie::Array` or `require Tie::Hash`. PCL's module loader enters
+an infinite recursion or binding-stack exhaustion. All four files are in the skip list.
+
+**Root cause:** Unknown — needs investigation. Possibly a circular dependency
+in how PCL resolves and evaluates the module, or `defpackage` for a package that
+already exists is re-running initialisation. Fixing this alone unblocks 4 skipped
+files and likely adds 200+ tests.
+
+**Files:** `Pl/Parser.pm` `_process_use_statement`, `cl/pcl-runtime.lisp`
+`pl-require-file` / `pl-use`.
+
+### B. PPI Parse Fallback (~490 tests) — *carry-over from §1.2*
+
+`for.t` (line 767: `for ${*$f} (5,11,33)`) and `substr.t` (line 772:
+`substr $t, 0, 0, *ワルド`) cause PPI to return `undef` for the entire file.
+All tests before the bad line are reachable if PCL truncates and re-parses.
+Already designed in §1.2 above.
+
+### C. Implicit Returns / Bare-`if` Return Value (widespread)
+
+Perl: *"The return value of a subroutine is the value of the last expression
+evaluated."* For `sub { if(COND) { BODY } }` with no `else`, if COND is false
+then COND itself is the last thing evaluated — so the sub returns that false value,
+not `undef`/nil.
+
+```perl
+sub x { if(0)   { 5 } }   # returns 0, not undef
+sub x { if("")  { 5 } }   # returns "", not undef
+sub x { if($n)  { 5 } }   # returns $n when false
+```
+
+Current codegen: `(pl-if cond (progn body))` → NIL on the false branch. Wrong.
+
+**Fix:** When a bare `(pl-if COND BODY)` (no else) is the tail expression of a
+block, evaluate COND once and return it on the false branch:
+```lisp
+(let ((--c-- COND)) (if --c-- (progn BODY) --c--))
+```
+This requires knowing which `if` is in tail position. See `docs/rewrite-patterns.md`
+for a tree-annotation approach.
+
+**Files:** `Pl/Parser.pm` `_process_if_statement` (or a tail-position pass).
+
+### D. `$SIG{__WARN__}` / `$SIG{__DIE__}` Handlers (~50 tests) — *carry-over from §1.4*
+
+`warn.t` and `die.t` fail because handlers in `%SIG` are never called.
+Already designed in §1.4 above.
+
+### E. `hashassign.t` — Mass Hash Assignment Edge Cases (partial pass)
+
+Only ~28/309 pass (session 57 data — may have changed). Most failures are likely
+edge cases in how hash slices, list-context assignments, and multi-key hashes are
+generated. Needs investigation: run a sample of failing tests to find the common pattern.
+
+### F. `index.t` — String Index / Rindex (partial pass)
+
+Only ~1/415 pass (session 57 data — may have changed). Something fundamental is
+broken in `pl-index` or `pl-rindex` for the common cases. Needs a quick manual test
+to identify the root cause — likely a boxed-value issue or off-by-one in the return value.
+
+### M. Complete-Failure Files (0 pass — Easy Wins)
+
+Session 63 sweep identified files where every test fails. These are small and may
+have a single root-cause fix each:
+
+- **`pos.t`** (0/17): `pos()` function not implemented. `pos($str)` returns the
+  current `\G` position after a `m//g` match, or `undef` if none. Need to track
+  match position in `pl-pos` and `pl-reset-pos`. Runtime addition + codegen.
+
+- **`flip.t`** (0/3): flip-flop operator `..` / `...` in scalar (boolean) context.
+  In list context `1..5` works; in scalar (boolean) context `if ($. == 1 .. $. == 5)`
+  is a stateful flip-flop that toggles on/off. Completely different semantics.
+  Need a `pl-flip-flop` macro with per-instance state.
+
+- **`caller.t`** (0/1): `pl-caller` IS implemented (uses `sb-debug:map-backtrace`
+  in pcl-runtime.lisp) but crashes because `${^WARNING_BITS}` (a special variable
+  not in `%SPECIAL_VARS`) caused an UNBOUND-VARIABLE at runtime. Now that unknown
+  `${^...}` variables die at transpile time, the sweep will show a cleaner
+  TRANSPILE_FAIL. Fix: add `${^WARNING_BITS}` to `%SPECIAL_VARS` (as empty string
+  or `*pl-undef*`); also fix `pl-caller` filename return value (currently returns 0).
+
+- **`args.t`** (0/4): Unknown — needs investigation. Likely `@_` aliasing
+  (Perl `@_` elements are aliases to the caller's args; modifying `$_[0]` modifies
+  the caller's variable). PCL doesn't implement this aliasing.
+
+- **`concat2.t`** (0/3): Unknown — needs investigation. May be related to
+  string repetition `x=` or some concat edge case not in `concat.t`.
+
+Note: `kvhslice.t` (0/3) and `substr.t` (0/1) are already covered:
+`kvhslice.t` by §A (Tie::Hash loader hang), `substr.t` by §B (PPI fallback).
+
+### G. Chained Method Calls
+
+`$obj->method1()->method2()` — parser emits a PARSE ERROR for the second `->`
+when the LHS is a method call result rather than a plain variable or scalar dereference.
+Common pattern in fluent APIs and test setup code.
+
+**Fix:** In `Pl/PExpr.pm`, allow postfix `->` after any complete expression node,
+not just after Symbol / subscript tokens.
+
+### H. `bop.t` and `heredoc.t` Hangs (unknown count, both skipped)
+
+Root causes unclear. Need investigation:
+- `bop.t`: bitwise string operations (`vec`, bitwise `&`/`|` on strings)?
+  Or some specific op triggering an infinite loop in PCL?
+- `heredoc.t`: indented heredocs (`<<~`)? Multi-line interpolation edge case?
+
+Remove from skip list after identifying and fixing the hang.
+
+### I. `use bytes` Pragma (~10 tests) — *carry-over from §1.8*
+
+`chr.t`, `concat.t` — already documented in §1.8 above.
+
+### J. Foreach Loop Variable Capture in Closures (8 tests)
+
+`for my $n (0..4) { $foo[$n] = sub { $n } }` — all closures share the final
+value of `$n` because `pl-foreach` uses a single mutated binding. Closures capture
+the binding cell, not a per-iteration copy.
+
+**Fix:** `pl-foreach` macro wraps each iteration body in a fresh `let` that
+copies the loop variable, giving each closure its own independent binding.
+
+**Files:** `cl/pcl-runtime.lisp` `pl-foreach` macro.
+
+### K. Named Inner Sub Closures
+
+`sub outer { my $x = 1; sub inner { $x } }` — `inner` is emitted as a global
+`pl-sub`, not a closure. The `__lex__` renaming fix from session 63 only helps
+anonymous subs (lambdas). Named inner subs still `defun` into the package.
+
+**Fix:** Detect that a named inner sub references outer-scope lexical vars;
+generate a closure stored in a package variable instead of a bare `pl-sub`.
+Low priority — uncommon in CPAN code vs anonymous subs.
+
+### L. `prototype()` Function (small)
+
+Return `undef` for unknown/non-existent subs. Already noted in §1.5 — still needed.
 
 ---
 
@@ -261,14 +384,36 @@ internals that have no sensible transpiler target.
 | 1.8 use bytes | ❌ TODO | ~10 |
 | 1.9 __DATA__/__END__ | ✅ DONE | ~5 |
 | 1.10 Lexical filehandles | ✅ DONE | ~10 |
-| 2. anon sub → lambda | ❌ TODO | ~100+ |
-| 2. state var infrastructure | ✅ DONE | partial |
+| 2. anon sub → lambda | ✅ DONE (session 62) | ~100+ |
+| 2. state var infrastructure | ✅ DONE (session 61) | partial |
+| 2. lexical my-var renaming | ✅ DONE (session 63) | closure.t +4 |
+| 2.5A Tie module loader hang | ❌ TODO | ~200+ |
+| 2.5B PPI fallback | ❌ TODO | (see 1.2) |
+| 2.5C Implicit returns / bare-if | ❌ TODO | widespread |
+| 2.5D $SIG handlers | ❌ TODO | (see 1.4) |
+| 2.5E hashassign.t mass failures | ❌ TODO | ~280 |
+| 2.5F index.t / rindex | ❌ TODO | ~414 |
+| 2.5G Chained method calls | ❌ TODO | ~30-50 |
+| 2.5H bop.t / heredoc.t hangs | ❌ TODO | unknown |
+| 2.5I use bytes | ❌ TODO | (see 1.8) |
+| 2.5J foreach var capture | ❌ TODO | 8 |
+| 2.5K Named inner sub closures | ❌ TODO | small |
+| 2.5L prototype() function | ❌ TODO | small |
+| 2.5M pos.t (pos() function) | ❌ TODO | 17 |
+| 2.5M flip.t (flip-flop ..) | ❌ TODO | 3 |
+| 2.5M caller.t (caller()) | ❌ TODO | 1 |
+| 2.5M args.t (@_ aliasing?) | ❌ TODO | 4 |
+| 2.5M concat2.t | ❌ TODO | 3 |
 | 3. String eval | ❌ TODO | ~50+ |
 
-**Remaining high-value items:**
-1. `defun` → `lambda` for anonymous subs (fixes closures + state generators)
-2. PPI parse fallback (easy win, ~490 tests)
-3. $SIG handlers (warn.t, die.t)
-4. String eval (Phase 3)
+**Remaining high-value items (Phase 2.5, in priority order):**
+1. Tie::Array/Tie::Hash module loader hang (~200+ tests, 4 blocked files)
+2. PPI parse fallback (~490 tests: for.t, substr.t)
+3. Implicit returns / bare-if return value (widespread)
+4. `index.t` / `hashassign.t` — likely easy root causes, many tests
+5. Complete-failure files (§M): `pos.t` (17), `args.t` (4), `concat2.t` (3), `flip.t` (3), `caller.t` (1)
+6. $SIG handlers (warn.t, die.t ~50 tests)
+7. Chained method calls, bop.t/heredoc.t hangs
+8. String eval (Phase 3)
 
 **Projected final: ~98%**

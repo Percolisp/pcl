@@ -372,6 +372,10 @@
       ((pl-box-p val) nil)
       (t (to-string val)))))
 
+;;; Match position tracking for pos() — must precede box-set which uses it
+(defvar *pl-match-pos* (make-hash-table :test 'eq)
+  "Hash table mapping boxed strings to their /g match positions")
+
 ;;; ------------------------------------------------------------
 ;;; Box accessors with lazy caching
 ;;; ------------------------------------------------------------
@@ -399,6 +403,8 @@
     (setf (pl-box-value box) v
           (pl-box-nv-ok box) nil
           (pl-box-sv-ok box) nil)
+    ;; Perl: assigning to a scalar resets pos()
+    (remhash box *pl-match-pos*)
     ;; Preserve class from blessed boxes
     (when (and (pl-box-p value) (pl-box-class value))
       (setf (pl-box-class box) (pl-box-class value)))
@@ -1251,10 +1257,6 @@
                                   (not (alphanumericp c)))))
                  (when escapep (write-char #\\ out))
                  (write-char c out))))))
-
-;;; Match position tracking for pos()
-(defvar *pl-match-pos* (make-hash-table :test 'eq)
-  "Hash table mapping boxed strings to their match positions")
 
 (defun pl-pos (var &optional new-pos)
   "Perl pos - get/set match position for /g regex.
@@ -3506,7 +3508,7 @@
                 (,raw ,list)
                 (,vec (%pl-flatten-for-list ,raw)))
            (loop for ,item across ,vec
-                 do (let ((,var ,item))
+                 do (let ((,var (ensure-boxed ,item)))
                       ,(make-loop-iteration-body label body)
                       ,@(when continue-form (list continue-form)))
                  ,@(when label `(finally (return-from ,block-name nil)))))))))
@@ -3652,13 +3654,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
   (let* ((msg (pl-warn-build-message args))
          (handler (gethash "__WARN__" %SIG)))
     (cond
-      ;; Custom handler: call with @_ = (message)
-      ;; Perl anon subs compiled by PCL take no CL args; they access @_ dynamically
+      ;; Custom handler: call with message as argument ($_[0])
       ((and handler (functionp (unbox handler)))
-       (let* ((boxed (if (pl-box-p msg) msg (make-pl-box msg)))
-              (@_ (make-array 1 :adjustable t :fill-pointer 1
-                                :initial-contents (list boxed))))
-         (funcall (unbox handler))))
+       (let ((boxed (if (pl-box-p msg) msg (make-pl-box msg))))
+         (funcall (unbox handler) boxed)))
       ;; "IGNORE": suppress warning
       ((and handler (stringp (unbox handler))
             (string= (unbox handler) "IGNORE"))
@@ -5773,7 +5772,9 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
   "Create a substitution operation s///
    Modifiers are keywords like :g :i :s :m :x :e"
   (make-pl-subst-op :pattern (to-string pattern)
-                    :replacement (to-string replacement)
+                    :replacement (if (functionp replacement)
+                                     replacement
+                                     (to-string replacement))
                     :modifiers modifiers))
 
 (defun pl-tr (from to &rest modifiers)
@@ -5829,31 +5830,68 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
    In scalar context: return t if matched, nil otherwise.
    In list context (*wantarray* t): return vector of captures, or nil if no match.
    Also sets capture group variables $1, $2, ... $9.
-   Note: In Perl, captures are only updated on successful match."
+   Note: In Perl, captures are only updated on successful match.
+   /g in scalar context: iterates over matches, tracking pos in *pl-match-pos*.
+   /g in list context: returns all matches at once (no pos tracking).
+   /gc: keeps pos on failure instead of resetting it."
   (let* ((str (to-string (unbox string)))
          (pattern (pl-regex-match-pattern op))
          (modifiers (pl-regex-match-modifiers op))
-         (options (build-ppcre-options modifiers)))
+         (options (build-ppcre-options modifiers))
+         (global-p (getf modifiers :g))
+         (cont-p (getf modifiers :c)))
     (handler-case
         (let ((scanner (apply #'cl-ppcre:create-scanner pattern options)))
-          (multiple-value-bind (match-start match-end reg-starts reg-ends)
-              (cl-ppcre:scan scanner str)
-            (declare (ignore match-end))
-            (when match-start
-              ;; Clear and set capture groups only on success
-              (clear-capture-groups)
-              (set-capture-groups str reg-starts reg-ends)
-              ;; In list context, return captures as vector
-              (if *wantarray*
-                  (let* ((num-groups (length reg-starts))
-                         (captures (make-array num-groups :adjustable t :fill-pointer t)))
-                    (dotimes (i num-groups)
-                      (setf (aref captures i)
-                            (if (and (aref reg-starts i) (aref reg-ends i))
-                                (subseq str (aref reg-starts i) (aref reg-ends i))
-                                nil)))
-                    captures)
-                  t))))
+          (cond
+            ;; /g in list context: return all matches at once, no pos tracking
+            ((and global-p *wantarray*)
+             (let ((all-results nil))
+               (cl-ppcre:do-scans (ms me rs re scanner str)
+                 (if (> (length rs) 0)
+                     (dotimes (i (length rs))
+                       (push (if (and (aref rs i) (aref re i))
+                                 (subseq str (aref rs i) (aref re i))
+                                 nil)
+                             all-results))
+                     (push (subseq str ms me) all-results)))
+               (let* ((items (nreverse all-results))
+                      (result (make-array (length items) :adjustable t :fill-pointer t)))
+                 (loop for item in items for i from 0 do (setf (aref result i) item))
+                 (when items (clear-capture-groups))
+                 result)))
+            ;; /g in scalar context: iterate from current pos
+            ((and global-p (not *wantarray*))
+             (let ((start (or (gethash string *pl-match-pos*) 0)))
+               (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                   (cl-ppcre:scan scanner str :start start)
+                 (if match-start
+                     (progn
+                       (setf (gethash string *pl-match-pos*) match-end)
+                       (clear-capture-groups)
+                       (set-capture-groups str reg-starts reg-ends)
+                       t)
+                     (progn
+                       (unless cont-p
+                         (remhash string *pl-match-pos*))
+                       nil)))))
+            ;; No /g: single match
+            (t
+             (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                 (cl-ppcre:scan scanner str)
+               (declare (ignore match-end))
+               (when match-start
+                 (clear-capture-groups)
+                 (set-capture-groups str reg-starts reg-ends)
+                 (if *wantarray*
+                     (let* ((num-groups (length reg-starts))
+                            (captures (make-array num-groups :adjustable t :fill-pointer t)))
+                       (dotimes (i num-groups)
+                         (setf (aref captures i)
+                               (if (and (aref reg-starts i) (aref reg-ends i))
+                                   (subseq str (aref reg-starts i) (aref reg-ends i))
+                                   nil)))
+                       captures)
+                     t))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))
@@ -5884,8 +5922,12 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
    Also sets capture groups $1, $2, ... from the match."
   (let* ((str (to-string (unbox string-box)))
          (pattern (pl-subst-op-pattern op))
-         (replacement (perl-to-ppcre-replacement (pl-subst-op-replacement op)))
+         (raw-replacement (pl-subst-op-replacement op))
          (modifiers (pl-subst-op-modifiers op))
+         (eval-p (member :e modifiers))
+         (replacement (unless eval-p
+                        (perl-to-ppcre-replacement (if (stringp raw-replacement)
+                                                       raw-replacement ""))))
          (global-p (member :g modifiers))
          (case-insensitive (member :i modifiers))
          (single-line (member :s modifiers))
@@ -5897,23 +5939,45 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                (scanner (apply #'cl-ppcre:create-scanner pattern options))
                (count 0)
                (result nil))
-          ;; First, set capture groups from the match
-          (multiple-value-bind (match-start match-end reg-starts reg-ends)
-              (cl-ppcre:scan scanner str)
-            (declare (ignore match-end))
-            (when match-start
-              (clear-capture-groups)
-              (set-capture-groups str reg-starts reg-ends)))
-          ;; Perform the substitution
-          (setf result (if global-p
-                           (cl-ppcre:regex-replace-all scanner str replacement)
-                           (cl-ppcre:regex-replace scanner str replacement)))
-          ;; Count replacements
-          (when (stringp result)
-            (if global-p
-                (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
-                (when (cl-ppcre:scan scanner str)
-                  (setf count 1))))
+          (if eval-p
+              ;; s///e: call lambda per match, setting $1..$9 from capture groups
+              ;; :simple-calls t → function receives (match g1 g2 ...) as strings
+              (let ((rep-fn (lambda (whole-match &rest groups)
+                              (declare (ignore whole-match))
+                              (incf count)
+                              (clear-capture-groups)
+                              (when (>= (length groups) 1) (setf $1 (or (nth 0 groups) *pl-undef*)))
+                              (when (>= (length groups) 2) (setf $2 (or (nth 1 groups) *pl-undef*)))
+                              (when (>= (length groups) 3) (setf $3 (or (nth 2 groups) *pl-undef*)))
+                              (when (>= (length groups) 4) (setf $4 (or (nth 3 groups) *pl-undef*)))
+                              (when (>= (length groups) 5) (setf $5 (or (nth 4 groups) *pl-undef*)))
+                              (when (>= (length groups) 6) (setf $6 (or (nth 5 groups) *pl-undef*)))
+                              (when (>= (length groups) 7) (setf $7 (or (nth 6 groups) *pl-undef*)))
+                              (when (>= (length groups) 8) (setf $8 (or (nth 7 groups) *pl-undef*)))
+                              (when (>= (length groups) 9) (setf $9 (or (nth 8 groups) *pl-undef*)))
+                              (to-string (funcall raw-replacement)))))
+                (setf result (if global-p
+                                 (cl-ppcre:regex-replace-all scanner str rep-fn :simple-calls t)
+                                 (cl-ppcre:regex-replace scanner str rep-fn :simple-calls t))))
+              ;; Normal s///: string replacement
+              (progn
+                ;; First, set capture groups from the match
+                (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                    (cl-ppcre:scan scanner str)
+                  (declare (ignore match-end))
+                  (when match-start
+                    (clear-capture-groups)
+                    (set-capture-groups str reg-starts reg-ends)))
+                ;; Perform the substitution
+                (setf result (if global-p
+                                 (cl-ppcre:regex-replace-all scanner str replacement)
+                                 (cl-ppcre:regex-replace scanner str replacement)))
+                ;; Count replacements
+                (when (stringp result)
+                  (if global-p
+                      (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
+                      (when (cl-ppcre:scan scanner str)
+                        (setf count 1))))))
           ;; Update the boxed string (and invalidate caches)
           (when (stringp result)
             (if (pl-box-p string-box)

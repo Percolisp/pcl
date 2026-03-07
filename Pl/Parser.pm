@@ -731,6 +731,57 @@ sub _process_variable_statement {
     return;
   }
 
+  # Special case: scalar 'my $var = EXPR' inside a sub where $var was renamed by
+  # _with_declarations (captured by a closure). Parse only the RHS with the rename
+  # for $var temporarily absent so that '$var' in the RHS refers to the outer scope.
+  # This handles 'my $i = $i + 1' shadowing correctly (outer $i → 5, not the new lex box).
+  if ($declarator eq 'my' && $self->environment->in_subroutine > 0) {
+    my $scope_renames = $self->{_current_scope_new_renames} // {};
+
+    # Find the declared scalar variable (skip if list declaration)
+    my $var_name;
+    for my $p (@parts) {
+      my $ref = ref($p);
+      last if $ref eq 'PPI::Structure::List';  # list decl — handled below
+      if ($ref eq 'PPI::Token::Symbol') { $var_name = $p->content; last; }
+    }
+
+    if (defined $var_name && exists $scope_renames->{$var_name}) {
+      # Find '=' and split into RHS tokens
+      my $eq_idx = -1;
+      for my $i (0 .. $#parts) {
+        if (ref($parts[$i]) eq 'PPI::Token::Operator' && $parts[$i]->content eq '=') {
+          $eq_idx = $i; last;
+        }
+      }
+      if ($eq_idx >= 0) {
+        my @rhs_parts = @parts[$eq_idx + 1 .. $#parts];
+        my $new_name  = $scope_renames->{$var_name};
+
+        # Temporarily remove new rename so RHS sees the outer/old binding for $var_name
+        my $old_rn      = $self->{_current_scope_old_renames} // {};
+        my $env_renames = $self->environment->state_var_renames // {};
+        my %temp = %$env_renames;
+        if (defined $old_rn->{$var_name}) {
+          $temp{$var_name} = $old_rn->{$var_name};
+        } else {
+          delete $temp{$var_name};
+        }
+        $self->environment->state_var_renames(\%temp);
+
+        my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt);
+
+        # Re-apply new rename
+        $self->environment->state_var_renames($env_renames);
+
+        $self->_emit(";; $perl_code");
+        $self->_emit("(pl-my-= $new_name $rhs_cl)") if defined $rhs_cl && $rhs_cl ne '';
+        $self->_emit("");
+        return;
+      }
+    }
+  }
+
   # Parse with PExpr (handles declarator extraction)
   my $cl_code = $self->_parse_expression(\@parts, $stmt);
 
@@ -1861,6 +1912,7 @@ sub parse_hash_block_to_cl_string {
     );
     $result = $gen->generate($top_id);
   };
+  die $@ if $@ && $@ =~ /^PCL:/;
   return $result // '(make-pl-box (pl-hash))';
 }
 
@@ -1940,6 +1992,31 @@ sub _find_symbols_in_list {
   return @vars;
 }
 
+# Return a hashref of all symbol names referenced inside any nested 'sub { }' blocks
+# found within $elements. These are the variables "captured" by closures.
+# Only direct PPI children's sub-blocks are searched; the caller intersects
+# the result with _find_all_declarations to know which to rename.
+sub _vars_referenced_in_closures {
+  my ($self, $elements) = @_;
+  my @elems = ref($elements) eq 'ARRAY' ? @$elements : ($elements);
+  my %captured;
+  for my $elem (@elems) {
+    next unless ref($elem) && $elem->can('find');
+    my $sub_kws = $elem->find(
+      sub { $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }
+    ) || [];   # PPI returns 0 (not undef) when nothing found — use || not //
+    for my $kw (@$sub_kws) {
+      # Walk forward to find the block (skipping name/prototypes for named inner subs)
+      my $sib = $kw->next_sibling;
+      $sib = $sib->next_sibling while $sib && !$sib->isa('PPI::Structure::Block');
+      next unless $sib;
+      my $syms = $sib->find('PPI::Token::Symbol') || [];  # same: || not //
+      $captured{$_->content} = 1 for @$syms;
+    }
+  }
+  return \%captured;
+}
+
 # Common helper: wrap emitted code with let for any 'my' declarations
 # Usage: $self->_with_declarations($ppi_elements, sub { ... emit code ... });
 # $ppi_elements can be a single PPI element or arrayref of elements to scan
@@ -1964,25 +2041,67 @@ sub _with_declarations {
                 map { $_->{var} }
                 grep { $_->{type} eq 'my' } @all_decls;
 
+  # When inside a subroutine, rename 'my' vars that are captured by nested closures.
+  # Fresh names (e.g. $i__lex__3) are never defvar'd, so the CL 'let' creates a
+  # LEXICAL binding. Lambdas then capture the correct per-call copy, not a dynamic ref.
+  my %new_renames;  # original perl name → unique CL name
+  my %old_renames;  # original perl name → previous rename entry (undef if absent)
+  if (@my_vars && $self->environment->in_subroutine > 0) {
+    my $captured  = $self->_vars_referenced_in_closures($elements);
+    my $existing  = $self->environment->state_var_renames // {};
+    for my $var (@my_vars) {
+      next unless $captured->{$var};
+      my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+      $sigil //= '$'; $bare //= $var;
+      (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+      my $unique = sprintf('%s%s__lex__%d', $sigil, $slug, ++$lex_var_counter);
+      $new_renames{$var} = $unique;
+      $old_renames{$var} = $existing->{$var};  # undef if no prior rename
+    }
+  }
+
   # Wrap in let if we have declarations
   if (@my_vars) {
+    # Build let bindings using the (possibly renamed) CL variable names
     my $bindings = join(" ", map {
-      my $sigil = substr($_, 0, 1);
+      my $let_var = $new_renames{$_} // $_;
+      my $sigil = substr($let_var, 0, 1);
       my $init = $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                : $sigil eq '%' ? "(make-hash-table :test #'equal)"
                :                 '(make-pl-box nil)';
-      "($_ $init)"
+      "($let_var $init)"
     } @my_vars);
     $self->_emit("(let ($bindings)");
     $self->indent_level($self->indent_level + 1);
 
-    # Track these vars as let-bound so _emit replaces pl-scalar-= with box-set,
-    # preventing (proclaim 'special) side-effects that would convert future let
-    # bindings from lexical to dynamic (breaking closure capture).
+    # Track renamed/original vars as let-bound so _emit replaces pl-scalar-= with
+    # pl-my-= (box-set), preventing the proclaim-special side-effect that would
+    # turn future let bindings from lexical to dynamic and break closure capture.
     my $old_let_vars = $self->{_let_bound_vars};
-    $self->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @my_vars };
+    my @bound_names = map { $new_renames{$_} // $_ } @my_vars;
+    $self->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @bound_names };
+
+    # Apply new renames to environment so ExprToCL emits the unique CL names.
+    # Also expose them via _current_scope_new_renames for _process_variable_statement
+    # to split RHS parsing (handles 'my $i = $i + 1' shadowing correctly).
+    my $saved_env_renames;
+    my $saved_scope_renames = $self->{_current_scope_new_renames};
+    if (%new_renames) {
+      $saved_env_renames = $self->environment->state_var_renames // {};
+      my %merged = (%$saved_env_renames, %new_renames);
+      $self->environment->state_var_renames(\%merged);
+      $self->{_current_scope_new_renames} = \%new_renames;
+      $self->{_current_scope_old_renames} = \%old_renames;
+    }
 
     $emit_body->();
+
+    # Restore rename map
+    if (%new_renames) {
+      $self->environment->state_var_renames($saved_env_renames);
+      $self->{_current_scope_new_renames} = $saved_scope_renames;
+      delete $self->{_current_scope_old_renames};
+    }
 
     $self->{_let_bound_vars} = $old_let_vars;
     $self->indent_level($self->indent_level - 1);
@@ -3341,6 +3460,7 @@ sub _compile_constant_value {
     $result = $gen->generate($node_id);
   };
 
+  die $@ if $@ && $@ =~ /^PCL:/;
   return $result // '0';  # Fallback
 }
 
@@ -3396,6 +3516,8 @@ sub _parse_expression_internal {
 
   if ($@) {
     my $error = $@;
+    # Hard errors (e.g. unsupported features) must propagate — don't swallow.
+    die $error if $error =~ /^PCL:/;
     $error =~ s/ at \/.*//s;  # Remove file/line info
     $error =~ s/\n.*//s;      # First line only
     return ("(progn ;; PARSE ERROR: $error\n nil)", []);
@@ -3707,6 +3829,7 @@ sub _compile_default_expr {
   };
 
   if ($@) {
+    die $@ if $@ =~ /^PCL:/;
     warn "Failed to compile default expression '$expr': $@";
     return undef;
   }

@@ -144,7 +144,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **46 test files, 2306 tests**
+- **52 test files, 2481 tests**
 - **All passing**
 - **Runtime: ~2 min with `prove -j8`** (each test spawns a new SBCL process)
 
@@ -205,38 +205,19 @@ When resuming work:
 `&$scalar(args)` and `&{expr}(args)` now generate `(pl-funcall-ref ...)` correctly.
 `grep.t` fully passing (7/7). `closure.t` tests 1-7 pass; tests 8+ need Phase 2 closures.
 
-### Phase 2 Closures — `defvar` + `let` = dynamic binding problem ⬅ NEXT TODO
+### Phase 2 Closures — `defvar` + `let` = dynamic binding problem ✅ DONE (session 63)
 
-**Status (session 62):** Anonymous subs now generate `(lambda ...)` instead of `(defun NAME ...) #'NAME`.
-Simple closures work. But `sub bar { my $i = shift; sub { $i } }` still fails because
-`$i` is `defvar`'d (SPECIAL) from the package-level `my $i`, so `let (($i ...))` inside `bar`
-creates a DYNAMIC binding that unwinds when `bar` returns — the lambda sees the wrong value.
+**Status (session 63):** `_vars_referenced_in_closures` added to Parser.pm. `_with_declarations`
+now renames captured `my` vars to `$i__lex__N` when `in_subroutine > 0`. `_process_variable_statement`
+splits RHS parsing for renamed vars (handles `my $i = $i + 1` shadowing). `closure.t` 38→42/50.
 
-**Root cause:** `defvar` makes a CL symbol globally SPECIAL. All `let` bindings of that symbol
-(even deep inside named subs) create dynamic bindings. CL has no "global lexical" declaration.
+**Remaining 8 failures** = `for my $n (0..4) { sub { $n } }` (foreach loop variable capture).
+This requires `pl-foreach` macro changes to create a new binding per iteration — out of scope for now.
 
-**Fix:** For `my` vars declared inside subroutines (`in_subroutine > 0`), use unique CL symbol
-names (`$i__lex__N`) that are never `defvar`'d. Since they're not special, `let` creates lexical
-bindings — lambdas capture the correct per-call copy.
+**KEY BUG to remember:** PPI's `find` returns `0` (not `undef`) when nothing found.
+Always use `|| []` not `// []` when dereferencing results of `$elem->find(...)`.
 
-**Implementation plan:** See `docs/closure-lexical-scoping.md` for the full plan.
-Short version:
-1. `_with_declarations` (Parser.pm): when `in_sub > 0`, rename `my $x → $x__lex__N` via
-   `$lex_var_counter` (already declared). Update rename map (`state_var_renames`) so ExprToCL
-   emits the unique name. Track unique names in `_let_bound_vars` too.
-2. `_process_variable_statement` (Parser.pm): for `my $var = EXPR` where `$var` is being newly
-   declared, parse only the **RHS tokens** with the outer rename for `$var` temporarily active
-   (prevents `my $i = $i` self-assignment). Emit `(pl-my-= UNIQUE_NAME RHS_CL)` manually.
-
-**Key difficulty:** Can't suppress rename for just the RHS of a full expression parse.
-Solution: extract RHS tokens from `@parts` (tokens after `=`), parse them separately.
-
-**Files to change:**
-- `Pl/Parser.pm`: `_with_declarations` + `_process_variable_statement`
-- Nothing else (ExprToCL already checks `state_var_renames`; PExpr already uses it)
-
-**Expected impact:** Fixes `closure.t` tests 8+ (currently 38/50 pass) and the generator
-pattern in `state.t` tests 19–23.
+**New test:** `Pl/t/closure-01.t` (8 tests, all passing).
 
 ### `map({key=>$_}, LIST)` — Hash Constructor Block in Paren-Form Map ✅ DONE (session 62)
 `_block_is_hash_constructor()` added to PExpr.pm; `parse_hash_block_to_cl_string()` added to Parser.pm.
