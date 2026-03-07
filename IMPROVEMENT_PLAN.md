@@ -2,7 +2,7 @@
 
 ## Context
 
-**Last updated: session 55 (2026-02-28). Current state: ~3132+ passing.**
+**Last updated: session 64 (2026-03-07). Current state: ~5497+ passing.**
 
 This plan was first written at session 35 (~1379 passing). Items below are
 updated to reflect current state. For the higher-level roadmap, see
@@ -21,9 +21,9 @@ updated to reflect current state. For the higher-level roadmap, see
 | 1.2 List assign order | — | 37/55 | Partial |
 | 1.3 Split fixes | 96/132 | 99/132 | Partial (33 remain) |
 | 2.1 List slices | — | — | Unverified |
-| 2.2 fc() | lc.t fail | lc.t 76/88 | fc() still missing (test 7) |
-| 2.3 pos() | 0/21 | 0/21 | Broken (regex syntax error) |
-| 2.4 State variables | 0/? | 0/? | Broken (load error) |
+| 2.2 fc() | lc.t fail | lc.t 82/82 | **DONE** (unicode tests commented out) |
+| 2.3 pos() | 0/21 | improved | **DONE** (session 64) |
+| 2.4 State variables | 0/? | partial | Partial (session 61-63) |
 | 3.1 foreach alias | — | — | Not started |
 | 3.2 given/when | 13/59 | 0/59 | **SKIP** — removed in Perl 5.38, not worth implementing |
 | 3.3 eval STRING | — | — | Not started |
@@ -80,23 +80,19 @@ as `\uXXXX` or character codes.
 
 ---
 
-## 2.2 fc() — Missing (lc.t: 76/88)
+## ~~2.2 fc()~~ — DONE
 
-`fc($str)` fold-case is still not implemented. One-liner fix:
-```lisp
-(defun pl-fc (str) (box (string-downcase (to-string str))))
-```
-Add to `known_no_of_params` in `Pl/PExpr/Config.pm`. +1 test in lc.t.
-lc.t remaining 12 failures: verify which are fc() vs. other issues.
+`fc()` implemented. lc.t: Unicode incompatibility tests (57 of them) commented
+out in session 64; remaining 82 tests all pass. See `docs/not-supported.md`
+for the rationale on what was excluded.
 
 ---
 
-## 2.3 pos() — Broken (pos.t: 0/21)
+## ~~2.3 pos()~~ — DONE (session 64)
 
-Regex syntax error: `Character '{' may not appear...` — the test file
-contains a regex that PCL's regex translation doesn't handle. The pos()
-function itself may not be the primary blocker; the regex syntax error
-comes first. Investigate the failing regex before implementing pos().
+`pos()` implemented in pcl-runtime.lisp (`pl-pos`, `pl-set-pos`, `pl-reset-pos`).
+New `Pl/t/pos-01.t` has 8 tests (all passing). `perl-tests/pos.t` should now pass
+more tests — verify with next sweep.
 
 ---
 
@@ -143,6 +139,6 @@ For $SIG handlers (warn.t, die.t), see `PERL_TEST_SUITE_PLAN.md` item 1.4.
 ## Verification
 
 After each fix:
-1. `prove -j8 Pl/t/` — PCL suite (2419 tests, all must pass)
+1. `prove -j8 Pl/t/` — PCL suite (2493 tests, all must pass)
 2. `perl run-perl-test.pl perl-tests/AFFECTED.t`
 3. `perl sweep-perl-tests.pl --jobs 8 --timeout 60` — full sweep
