@@ -91,7 +91,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:pl-use #:pl-require #:pl-require-file
    ;; Functions
-   #:pl-backslash #:pl-get-coderef #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray #:pl-caller
+   #:pl-backslash #:pl-get-coderef #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray #:pl-caller #:pl-prototype
    ;; Typeglob support
    #:pl-typeglob #:pl-typeglob-p #:make-pl-typeglob
    #:pl-typeglob-package #:pl-typeglob-name
@@ -126,7 +126,7 @@
    #:pl-tie-proxy-tie-obj #:pl-tie-proxy-saved-value
    #:pl-tie #:pl-untie #:pl-tied
    ;; Compile-time definition macros (for BEGIN block support)
-   #:pl-defpackage #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
+   #:pl-defpackage #:pl-sub #:pl-declare-sub #:pl-our #:pl-my #:pl-eval-direct
    ;; Assignment forms (distinct from pl-setf for clarity)
    #:pl-scalar-= #:pl-array-= #:pl-hash-= #:pl-list-=
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -141,6 +141,12 @@
 ;;; at compile time. This matches Perl's semantics where subs and
 ;;; package variables are defined as they are parsed, allowing BEGIN
 ;;; blocks to call subs defined before them in source order.
+
+;;; pl-eval-direct: shorthand for (eval-when (:compile-toplevel :load-toplevel :execute) ...).
+;;; Used throughout generated code to make definitions visible at all compilation phases.
+(defmacro pl-eval-direct (&body body)
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     ,@body))
 
 ;;; Tracks how many PCL user subs deep we are (0 = top level).
 ;;; Used by pl-caller to distinguish "called from a sub" vs "top level".
@@ -3669,6 +3675,7 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
            (let ((v (pl-box-value val)))
              (or (hash-table-p v)
                  (and (vectorp v) (not (stringp v)))
+                 (pl-box-p v)         ; variable box wrapping a reference box
                  (pl-box-class val))))))
 
 (defun pl-warn-build-message (args)
@@ -5558,6 +5565,13 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
             (values-list frame-info)
             (first frame-info))  ; Scalar context: just package
         nil)))  ; Past end of stack
+
+(defun pl-prototype (&optional ref)
+  "Perl prototype() - returns the prototype string of a function, or undef.
+   PCL does not track Perl prototypes, so this always returns undef.
+   This is sufficient for the common guard pattern: 'if (defined prototype(...))'."
+  (declare (ignore ref))
+  *pl-undef*)
 
 ;;; ============================================================
 ;;; OO Support
