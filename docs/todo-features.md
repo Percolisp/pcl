@@ -59,16 +59,12 @@ This requires annotating which `if` is in tail position.  See
 
 ---
 
-### `hashassign.t` mass failures  (~280 tests)
+### ~~`hashassign.t` mass failures~~  ✅ DONE (session 71)
 
-**What's broken:** Crash at test 33 ("direct list assignment to hash")
-with `SIMPLE-PROGRAM-ERROR: invalid number of arguments: 1`.  Tests 1–32
-now pass (session 68 fixed the `\@arr` boxing).  The remaining failure
-appears to be a function called with the wrong arity — needs investigation
-on what test 33 does.
-
-**Fix area:** `cl/pcl-runtime.lisp` hash assignment path; likely
-`pl-list-=` or hash-construction from a flat list.
+All 309 tests in `hashassign.t` now pass.  Fixed by the `pl-bless` scalar
+ref fix (class set on wrapper box, not on pointed-to variable) and the
+`%pl-flatten-list` fix (blessed non-hash boxes preserved through list
+assignment).
 
 *(PERL_TEST_SUITE_PLAN.md §E)*
 
@@ -105,24 +101,19 @@ requires CL condition restarts.
 
 ---
 
-### Inline `package Pkg {}` inside a subroutine body  (index.t, substr.t, ~unknown)
+### ~~Inline `package Pkg {}` inside a subroutine body~~  ✅ DONE (session 72)
 
-**What's broken:** When an inline package block appears inside a function
-body, PCL's hoisting logic misplaces code that follows it:
+**Root cause:** `_process_package_statement` called `_emit_package_preamble`
+for block-form packages unconditionally, opening a new section and leaving
+subsequent code in that new top-level section (not inside the function body).
 
-```perl
-sub run_tests {
-    {
-        package MyTie { sub STORE { ... } };
-        my $x;          # ← ends up OUTSIDE run_tests() in generated CL
-        tie $x, "MyTie";
-    }
-}
-```
+**Fix:** When `in_subroutine > 0`, emit the package setup inline (no new
+section, no `(in-package ...)`). Temporarily increment `_block_depth` so
+`_process_sub_statement` emits fully-qualified names like `|Point|::pl-new`
+instead of `pl-new`. The `pl-sub` macro's `(symbol-package ',name)` dispatch
+correctly interns the symbol in the right package.
 
-**Fix area:** `Pl/Parser.pm` `_process_package_block` — when
-`in_subroutine > 0`, inline packages must be emitted in-place, not
-hoisted.
+**Result:** `index.t` 0→518 tests passing. `substr.t` also unblocked.
 
 *(PERL_TEST_SUITE_PLAN.md §N)*
 
@@ -176,30 +167,33 @@ scope, only package vars).
 
 ---
 
-### Chained method calls: `$obj->m1()->m2()`  (~30–50 tests)
+### ~~Chained method calls: `$obj->m1()->m2()`~~ ✅ DONE (session 70)
 
-**What's broken:** The parser emits a PARSE ERROR for the second `->` when
-the LHS is a method call result rather than a plain variable.  Example:
-`B->new()->name()` fails.
+**Root cause:** In `Pl/PExpr.pm` `handle_subcalls`, `print/say/printf` with
+an uppercase bareword next token treated it as a filehandle unconditionally.
+So `print B->new()->name()` had `B` spliced out as a filehandle, leaving
+`-> new () -> name ()` with `->` at position 0 → parse error.
 
-**Fix area:** `Pl/PExpr.pm` — allow postfix `->` after any complete
-expression node, not only after `Symbol` / subscript tokens.
+**Fix (1 line):** Before marking an uppercase bareword as a filehandle,
+check if the token AFTER it is `->`. If so, it's a class method invocant
+(`B->new()`), not a filehandle. Skip the filehandle treatment.
+
+**Regression tests:** `Pl/t/transpile-test-03.t` tests 40–42.
 
 *(PERL_TEST_SUITE_PLAN.md §G)*
 
 ---
 
-### Foreach loop variable capture in closures  (8 tests)
+### ~~Foreach loop variable capture in closures~~ ✅ DONE (session 70)
 
-**What's broken:** `for my $n (0..4) { $foo[$n] = sub { $n } }` — all
-closures share the final value of `$n` because `pl-foreach` uses a single
-mutated binding.
+The actual root cause was NOT in `pl-foreach` — the `let` per iteration
+was already fresh. The bug was in `Parser.pm` `_with_declarations`:
 
-**Fix:** `pl-foreach` macro wraps each iteration body in a fresh `let`
-that copies the loop variable, giving each closure its own independent
-binding.
+1. `in_subroutine > 0` guard prevented closure-var renaming at package level.
+2. `_process_variable_statement` routed package-level `my` to `_process_my_toplevel_declaration` before the rename path.
+3. `_vars_referenced_in_closures` scanned named subs as if they were closures, causing over-renaming.
 
-**Fix area:** `cl/pcl-runtime.lisp` `pl-foreach` macro.
+All three fixed. `closure.t` now 50/50.
 
 *(PERL_TEST_SUITE_PLAN.md §J)*
 
@@ -389,26 +383,22 @@ the error.
 
 ---
 
-## Number formatting edge cases  (exp.t, infnan.t, num.t, negate.t)
+## ~~Number formatting edge cases~~  ✅ DONE
 
-### Trailing decimal point in float-to-string
+### ~~Trailing decimal point in float-to-string~~ ✅ DONE
 
-**What's broken:** SBCL's `format nil "~F"` sometimes produces `"1."` or
-`"0."` instead of `"1"` or `"0"`.  Perl never produces trailing decimal
-points.
+`stringify-value` in `cl/pcl-runtime.lisp` already does
+`(string-right-trim "." (string-right-trim "0" s))` (line ~576).
+Trailing `.` is stripped; `"1."` → `"1"`.
 
-**Fix:** Post-process `to-string` output: strip a trailing `.` if present
-and no fractional part follows.
+### ~~Inf / NaN string representations~~ ✅ DONE
 
-### Inf / NaN string representations
-
-**What's broken:** Perl stringifies IEEE infinities as `"Inf"` / `"-Inf"`
-and NaN as `"NaN"`.  SBCL prints `"infinity"` / `"NaN"`.
-
-**Fix:** In `to-string`, detect SBCL's `float-infinity-p` /
-`float-nan-p` and return Perl-compatible strings.
-
-**Fix area:** `cl/pcl-runtime.lisp` `to-string` / `box-sv`.
+`stringify-value` already handles this (lines ~565–567):
+```lisp
+#+sbcl ((sb-ext:float-infinity-p v) (if (plusp v) "Inf" "-Inf"))
+#+sbcl ((sb-ext:float-nan-p v) "NaN")
+```
+Both fixes were present before this todo entry was written.
 
 ---
 
@@ -418,14 +408,11 @@ and NaN as `"NaN"`.  SBCL prints `"infinity"` / `"NaN"`.
 |---------|---------------|------|----------|
 | Tie::Array/Tie::Hash loader hang | ~200+ | 1 | §A |
 | Implicit returns / bare-if | widespread | 1 | §C |
-| hashassign.t crash (test 33+) | ~280 | 1 | §E |
 | index.t / rindex | ~414 | 1 | §F |
 | $SIG{__DIE__} handler | ~50 | 1 | §D/1.4 |
-| Inline package inside function | index.t, substr.t | 1 | §N |
+| ~~Inline package inside function~~ | ✅ DONE (session 72) | — | §N |
 | $Pkg::var forward decls | for.t, others | 1 | — |
 | String eval | ~50 | 2 | Phase 3 |
-| Chained method calls | ~30–50 | 2 | §G |
-| Foreach closure var capture | 8 | 2 | §J |
 | bop.t hang | unknown | 2 | §H |
 | heredoc.t hang | unknown | 2 | §H |
 | use bytes | ~10 | 2 | §I/1.8 |
@@ -438,5 +425,8 @@ and NaN as `"NaN"`.  SBCL prints `"infinity"` / `"NaN"`.
 | s///r non-destructive | small | 3 | — |
 | qr// first-class objects | small | 3 | — |
 | DESTROY finalizers | rare | 3 | — |
-| concat2.t root cause | 3 | 3 | §M |
-| Trailing decimal / Inf/NaN fmt | ~30 | 2 | — |
+| concat2.t (overload + magic vars) | 3 | 3 | §M |
+| ~~hashassign.t crash~~ | ✅ DONE (session 71) | — | §E |
+| ~~Chained method calls~~ | ✅ DONE (session 70) | — | §G |
+| ~~Foreach closure var capture~~ | ✅ DONE (session 70) | — | §J |
+| ~~Trailing decimal / Inf/NaN fmt~~ | ✅ DONE | — | — |

@@ -727,9 +727,21 @@ sub _process_variable_statement {
 
   # Handle top-level 'my' declarations - need pl-my for BEGIN block visibility
   # Inside subs, my uses regular let bindings (handled elsewhere)
+  # Exception: if the var was renamed by _with_declarations (closure capture at pkg level),
+  # skip _process_my_toplevel_declaration and fall through to the rename handling below.
   if ($declarator eq 'my' && $self->environment->in_subroutine == 0) {
-    $self->_process_my_toplevel_declaration($stmt, \@parts, $perl_code);
-    return;
+    my $scope_renames = $self->{_current_scope_new_renames} // {};
+    my $var_for_check;
+    for my $p (@parts) {
+      my $ref = ref($p);
+      last if $ref eq 'PPI::Structure::List';
+      if ($ref eq 'PPI::Token::Symbol') { $var_for_check = $p->content; last; }
+    }
+    unless (defined $var_for_check && exists $scope_renames->{$var_for_check}) {
+      $self->_process_my_toplevel_declaration($stmt, \@parts, $perl_code);
+      return;
+    }
+    # Fall through: this var was renamed for closure capture — handle via rename path
   }
 
   # Check if this is a state declaration inside a sub
@@ -767,7 +779,7 @@ sub _process_variable_statement {
   # _with_declarations (captured by a closure). Parse only the RHS with the rename
   # for $var temporarily absent so that '$var' in the RHS refers to the outer scope.
   # This handles 'my $i = $i + 1' shadowing correctly (outer $i → 5, not the new lex box).
-  if ($declarator eq 'my' && $self->environment->in_subroutine > 0) {
+  if ($declarator eq 'my') {
     my $scope_renames = $self->{_current_scope_new_renames} // {};
 
     # Find the declared scalar variable (skip if list declaration)
@@ -890,7 +902,7 @@ sub _process_our_declaration {
       if ($sigil eq '@') {
         # Array: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(pl-eval-direct");
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         });
         unless ($is_empty_list) {
@@ -904,7 +916,7 @@ sub _process_our_declaration {
       elsif ($sigil eq '%') {
         # Hash: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(pl-eval-direct");
           $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
         });
         unless ($is_empty_list) {
@@ -919,7 +931,7 @@ sub _process_our_declaration {
         # Scalar: declare with nil box at compile time, set value at runtime
         my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(pl-eval-direct");
           $self->_emit("  (defvar $var (make-pl-box nil)))");
         });
         $self->_emit("(setf (pl-box-value $var) $init_cl)");
@@ -931,7 +943,7 @@ sub _process_our_declaration {
       $self->_with_bucket('declarations', sub {
         for my $var (@vars) {
           my $sigil = substr($var, 0, 1);
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(pl-eval-direct");
           if ($sigil eq '@') {
             $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
           } elsif ($sigil eq '%') {
@@ -952,7 +964,7 @@ sub _process_our_declaration {
     $self->_with_bucket('declarations', sub {
       for my $var (@vars) {
         my $sigil = substr($var, 0, 1);
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(pl-eval-direct");
         if ($sigil eq '@') {
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         } elsif ($sigil eq '%') {
@@ -1004,7 +1016,7 @@ sub _process_my_toplevel_declaration {
     $self->_emit(";; $perl_code");
     for my $var (@vars) {
       my $sigil = substr($var, 0, 1);
-      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("(pl-eval-direct");
       if ($sigil eq '@') {
         $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
       } elsif ($sigil eq '%') {
@@ -2038,7 +2050,14 @@ sub _vars_referenced_in_closures {
       sub { $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }
     ) || [];   # PPI returns 0 (not undef) when nothing found — use || not //
     for my $kw (@$sub_kws) {
-      # Walk forward to find the block (skipping name/prototypes for named inner subs)
+      # Skip NAMED subs (sub foo { ... }) — they are global defuns, not closures.
+      # Only anonymous subs (sub { ... }) capture variables from the enclosing scope.
+      # To detect named subs: the first non-whitespace sibling after 'sub' is a Word (the name).
+      my $first = $kw->next_sibling;
+      $first = $first->next_sibling while $first && $first->isa('PPI::Token::Whitespace');
+      next if $first && $first->isa('PPI::Token::Word');  # named sub — skip
+
+      # Walk forward to find the block (skipping prototypes/attributes for anon subs)
       my $sib = $kw->next_sibling;
       $sib = $sib->next_sibling while $sib && !$sib->isa('PPI::Structure::Block');
       next unless $sib;
@@ -2078,7 +2097,7 @@ sub _with_declarations {
   # LEXICAL binding. Lambdas then capture the correct per-call copy, not a dynamic ref.
   my %new_renames;  # original perl name → unique CL name
   my %old_renames;  # original perl name → previous rename entry (undef if absent)
-  if (@my_vars && $self->environment->in_subroutine > 0) {
+  if (@my_vars) {
     my $captured  = $self->_vars_referenced_in_closures($elements);
     my $existing  = $self->environment->state_var_renames // {};
     for my $var (@my_vars) {
@@ -2658,9 +2677,13 @@ sub _process_sub_statement {
     local $self->{_current_state_vars} = { map { $_ => 1 } @state_vars };
     my $saved_renames = $self->environment->state_var_renames;
     $self->environment->state_var_renames(\%state_renames) if %state_renames;
+    # Save package stack: inline 'package NAME;' inside a sub body must not leak
+    my $saved_pkg_stack = [@{$self->environment->package_stack}];
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     });
+    # Restore package stack in case of inline package switches inside the sub
+    $self->environment->package_stack($saved_pkg_stack);
     $self->environment->state_var_renames($saved_renames);
   }
   else {
@@ -2715,32 +2738,81 @@ sub _process_package_statement {
 
   if ($block) {
     # Block form: push package, process block, pop
-    $self->_emit_package_preamble($pkg_name);
-    $self->environment->push_package($pkg_name);
+    if ($self->environment->in_subroutine > 0) {
+      # Inside a function body: emit package setup INLINE (no new section, no
+      # in-package).  Using (in-package ...) here would change the CL reader's
+      # package context for the rest of the file, corrupting all subsequent code.
+      # Instead we:
+      #   1. Emit (pl-defpackage) and (defclass) inline.
+      #   2. Temporarily increment _block_depth so _process_sub_statement emits
+      #      fully-qualified names like |Point|::pl-new (not just pl-new).
+      #      pl-sub already handles qualified names via symbol-package.
+      #   3. At runtime (when the enclosing function is called) the eval-when
+      #      :execute semantics kick in and the package + methods are created in
+      #      the right order within the same call.
+      my $saved_pkg_stack = [@{$self->environment->package_stack}];
 
-    # Process the block contents
-    for my $child ($block->schildren) {
-      $self->_process_element($child);
-    }
+      my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' ||
+                    lc($pkg_name) eq 'error' || lc($pkg_name) eq 'method' ||
+                    lc($pkg_name) eq 'function')
+                   ? ":|$pkg_name|" : ":$pkg_name";
+      my $cl_class = $self->_pkg_to_clos_class($pkg_name);
 
-    $self->environment->pop_package();
-    # Switch back to previous package: open a new section with in-package in preamble
-    my $prev_pkg = $self->environment->current_package();
-    my $cl_prev  = $prev_pkg =~ /::/ ? ":|$prev_pkg|" : ":$prev_pkg";
-    $self->_open_section($prev_pkg);
-    $self->_cur_bucket('runtime');
-    $self->_with_bucket('preamble', sub {
-      $self->_emit("(in-package $cl_prev)");
-      $self->_emit(";;; end package $pkg_name");
+      $self->_emit(";;; inline package $pkg_name");
+      $self->_emit("(pl-defpackage $cl_pkg)");
+      $self->_emit(";; CLOS class for MRO");
+      $self->_emit("(defclass $cl_class () ())");
       $self->_emit("");
-    });
+
+      $self->environment->push_package($pkg_name);
+      # Increment _block_depth so sub names become fully qualified (e.g. |Point|::pl-new)
+      $self->_block_depth($self->_block_depth + 1);
+
+      for my $child ($block->schildren) {
+        $self->_process_element($child);
+      }
+
+      $self->_block_depth($self->_block_depth - 1);
+      $self->environment->pop_package();
+      $self->environment->package_stack($saved_pkg_stack);
+    }
+    else {
+      # Top-level block form: push package, process block, pop
+      $self->_emit_package_preamble($pkg_name);
+      $self->environment->push_package($pkg_name);
+
+      # Process the block contents
+      for my $child ($block->schildren) {
+        $self->_process_element($child);
+      }
+
+      $self->environment->pop_package();
+      # Switch back to previous package: open a new section with in-package in preamble
+      my $prev_pkg = $self->environment->current_package();
+      my $cl_prev  = $prev_pkg =~ /::/ ? ":|$prev_pkg|" : ":$prev_pkg";
+      $self->_open_section($prev_pkg);
+      $self->_cur_bucket('runtime');
+      $self->_with_bucket('preamble', sub {
+        $self->_emit("(in-package $cl_prev)");
+        $self->_emit(";;; end package $pkg_name");
+        $self->_emit("");
+      });
+    }
   }
   else {
     # Simple form: package Foo;
     # This changes the current package until another package declaration
-    $self->_emit_package_preamble($pkg_name);
-    $self->environment->push_package($pkg_name);
-    # Note: no pop - package remains active until next package declaration
+    if ($self->environment->in_subroutine > 0) {
+      # Inside a sub body: just update the environment.
+      # Do NOT emit (in-package) or open a new section — that would break the
+      # SBCL reader's package context and corrupt the section/bucket structure.
+      # The environment's current_package is used by codegen (e.g. 1-arg bless).
+      $self->environment->push_package($pkg_name);
+    } else {
+      $self->_emit_package_preamble($pkg_name);
+      $self->environment->push_package($pkg_name);
+      # Note: no pop - package remains active until next package declaration
+    }
   }
 }
 
@@ -2895,7 +2967,7 @@ sub _process_include_statement {
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
         my $path = $tokens[0]->string;
         $self->_emit(";; $perl_code");
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(pl-eval-direct");
         $self->_emit("  (pl-require-file \"$path\"))");
         $self->_emit("");
         return;
@@ -2967,16 +3039,16 @@ sub _process_include_statement {
       $self->_emit(";; $perl_code");
       if (@imports) {
         my $list = join(' ', map { qq{"$_"} } @imports);
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(pl-eval-direct");
         $self->_emit("  (pl-use \"$module\" :imports '($list)))");
       } else {
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(pl-eval-direct");
         $self->_emit("  (pl-use \"$module\"))");
       }
     }
     elsif ($type eq 'require') {
       $self->_emit(";; $perl_code");
-      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("(pl-eval-direct");
       $self->_emit("  (pl-require \"$module\"))");
     }
     else {
@@ -3063,7 +3135,7 @@ sub _process_use_lib {
   # so it appears before any 'require' or 'use' in the same section
   $self->_with_bucket('definitions', sub {
     $self->_emit(";; $perl_code");
-    $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+    $self->_emit("(pl-eval-direct");
 
     # Extract path arguments from the statement
     for my $child ($stmt->schildren) {
@@ -3317,7 +3389,7 @@ sub _process_use_vars {
       my $init = $sigil eq '$' ? '(make-pl-box nil)'
                : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                :                 '(make-hash-table :test #\'equal)';
-      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("(pl-eval-direct");
       $self->_emit("  (defvar $cl_var $init))");
     }
     $self->_emit("");

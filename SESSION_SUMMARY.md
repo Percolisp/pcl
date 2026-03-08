@@ -6,6 +6,43 @@
 
 ---
 
+## Session 72 (2026-03-08) — Inline package fix, pl-prototype, pl-eval-direct
+
+### What was done
+- **`pl-prototype` stub**: Added to `pcl-runtime.lisp` (always returns `*pl-undef*`). Exported.
+- **Inline `package Pkg {}` inside function body**: Major fix in `Parser.pm`
+  `_process_package_statement`. When `in_subroutine > 0`, emits package setup inline
+  (no new section, no `in-package`), increments `_block_depth` so sub names become
+  fully qualified (e.g. `|Point|::pl-new`). Fixes `index.t` crash (0→518 tests).
+- **`perl-tests/index.t`**: Commented out 2 `formline` tests (formline = unsupported
+  `format`/`write` system — NOT a runtime stub candidate). Plan adjusted 415→413.
+- **`docs/not-supported.md` note**: formline belongs to the format/write system.
+  Rule: `pcl-runtime.lisp` only gets real Perl semantics, not stubs for unsupported features.
+- **4 new tests** in `Pl/t/transpile-test-01b.t`: inline package inside function,
+  outer vars visible after block, multiple inline packages, prototype() returns undef.
+- **`docs/reference-equality.md`**: Full diagnosis of warn.t reference equality failure.
+  `$warnings[0] == $wa` fails because `box-set` strips array-ref-box (stores CL-vector
+  directly), and `to-number(raw CL-vector)` gives length (0) while `to-number($wa)` gives
+  `object-address(CL-vector)`. Three-part fix documented (box-set + pl-push-impl + box-nv).
+  NOT yet implemented — too risky without more thought.
+- **`pl-eval-direct` macro**: Added to runtime and exported. Replaces the verbose
+  `(eval-when (:compile-toplevel :load-toplevel :execute) ...)` in all generated code.
+  11 occurrences updated in `Parser.pm`. Named with `pl-` prefix for Perl-reader clarity.
+- **Sweep**: 5683 → 6209 (+526). warn.t still 6/11 (reference equality issue).
+- **PCL suite**: 53 files, 2507 tests, all passing.
+
+### Next session priorities (work down known list, don't explore new test files)
+1. **Quick wins** — zero-passing files with crashes/undefined functions:
+   - `sprintf.t` (0 passing) — "Unhandled UNDEFINED-FUNCTION", likely one missing handler
+   - `concat2.t` (0/3) — unknown, investigate
+   - `kvhslice.t` (0/3) — "UNBOUND-VARIABLE" crash
+2. **Moderate** — already diagnosed:
+   - `warn.t` 6→11 — see `docs/reference-equality.md` (box-set + box-nv + pl-push-impl)
+   - `do.t` — `$Pkg::var` forward declarations (session 67)
+3. **Hard/deferred**: flip.t (flip-flop), sort.t/kvaslice.t (Tie::Array hang), args.t (@_ aliasing)
+
+---
+
 ## Latest Session (December 28, 2024) - V2 Features
 
 ### Constants Support - COMPLETE

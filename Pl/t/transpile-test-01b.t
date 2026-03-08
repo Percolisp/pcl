@@ -337,4 +337,46 @@ test_transpile("\\Q in interpolated string", '
   my $x = "hi.*"; print "\Q$x\E\n";
 ', "hi\\.\\*\n");
 
+# Inline package block inside a function body (regression: section restore fix)
+test_transpile("inline package inside function body", '
+sub run {
+    package Point {
+        sub new { bless { x => $_[1], y => $_[2] }, $_[0] }
+        sub x   { $_[0]->{x} }
+    };
+    my $p = Point->new(3, 4);
+    print $p->x(), "\n";
+    print "after\n";
+}
+run();
+', "3\nafter\n");
+
+# Inline package: local variable from outer scope visible after the block
+test_transpile("inline package: outer vars visible after block", '
+sub run {
+    my $val = 42;
+    package Dummy { sub noop { 1 } };
+    print $val, "\n";
+}
+run();
+', "42\n");
+
+# Multiple inline packages in the same function
+test_transpile("multiple inline packages in function", '
+sub run {
+    package Dog { sub speak { "woof" } };
+    package Cat { sub speak { "meow" } };
+    print Dog::speak(), "\n";
+    print Cat::speak(), "\n";
+}
+run();
+', "woof\nmeow\n");
+
+# prototype() always returns undef (stub)
+test_transpile("prototype() returns undef", '
+  sub foo { }
+  my $p = prototype(\&foo);
+  print defined($p) ? "defined" : "undef", "\n";
+', "undef\n");
+
 done_testing();

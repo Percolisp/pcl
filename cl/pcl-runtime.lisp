@@ -91,7 +91,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:pl-use #:pl-require #:pl-require-file
    ;; Functions
-   #:pl-backslash #:pl-get-coderef #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray #:pl-caller
+   #:pl-backslash #:pl-get-coderef #:pl-ref #:pl-reftype #:pl-scalar #:pl-wantarray #:pl-caller #:pl-prototype
    ;; Typeglob support
    #:pl-typeglob #:pl-typeglob-p #:make-pl-typeglob
    #:pl-typeglob-package #:pl-typeglob-name
@@ -126,7 +126,7 @@
    #:pl-tie-proxy-tie-obj #:pl-tie-proxy-saved-value
    #:pl-tie #:pl-untie #:pl-tied
    ;; Compile-time definition macros (for BEGIN block support)
-   #:pl-defpackage #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
+   #:pl-defpackage #:pl-sub #:pl-declare-sub #:pl-our #:pl-my #:pl-eval-direct
    ;; Assignment forms (distinct from pl-setf for clarity)
    #:pl-scalar-= #:pl-array-= #:pl-hash-= #:pl-list-=
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -141,6 +141,12 @@
 ;;; at compile time. This matches Perl's semantics where subs and
 ;;; package variables are defined as they are parsed, allowing BEGIN
 ;;; blocks to call subs defined before them in source order.
+
+;;; pl-eval-direct: shorthand for (eval-when (:compile-toplevel :load-toplevel :execute) ...).
+;;; Used throughout generated code to make definitions visible at all compilation phases.
+(defmacro pl-eval-direct (&body body)
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     ,@body))
 
 ;;; Tracks how many PCL user subs deep we are (0 = top level).
 ;;; Used by pl-caller to distinguish "called from a sub" vs "top level".
@@ -539,7 +545,10 @@
                    ((null v) 0)
                    ((eq v t) 1)  ; CL's T from comparisons - Perl true is 1
                    ((stringp v) (parse-perl-number v))
-                   ((pl-box-p v) 0)  ; reference as number
+                   ((pl-box-p v) (object-address v))  ; reference/blessed scalar ref: address
+                   ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
+                   ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
+                   ((functionp v) (object-address v))  ; code ref: address
                    ((pl-typeglob-p v) 0)  ; typeglob as number
                    (t 0))))
           (setf (pl-box-nv box) n
@@ -597,12 +606,14 @@
                     ;; Fallback: just strip trailing zeros and dot
                     (string-right-trim "." (string-right-trim "0" s)))))))))
     ((numberp v) (write-to-string v))
-    ((pl-box-p v) (format nil "SCALAR(0x~X)" (object-address v)))
-    ((hash-table-p v) (format nil "HASH(0x~X)" (object-address v)))
-    ((vectorp v) (format nil "ARRAY(0x~X)" (object-address v)))
+    ((pl-box-p v) (format nil "SCALAR(0x~(~X~))" (object-address v)))
+    ((hash-table-p v) (format nil "HASH(0x~(~X~))" (object-address v)))
+    ((vectorp v) (format nil "ARRAY(0x~(~X~))" (object-address v)))
     ((pl-typeglob-p v) (format nil "*~A::~A"
                                (package-name (pl-typeglob-package v))
                                (pl-typeglob-name v)))
+    ;; Code reference - stringify as CODE(0xADDR) like Perl
+    ((functionp v) (format nil "CODE(0x~(~X~))" (object-address v)))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
@@ -1855,11 +1866,14 @@
                   ;; on both sides, e.g. ($a,$b) = ($b,$a).  box-set logic:
                   ;;   - pl-box with non-box inner → store inner (copy semantics)
                   ;;   - pl-box with box inner (reference) → store outer box
+                  ;;   - pl-box with class set (blessed non-hash) → preserve box (bless semantics)
                   ;;   - non-box → store as-is
                   (vector-push-extend
                    (if (pl-box-p item)
                        (let ((inner (pl-box-value item)))
-                         (if (pl-box-p inner) item inner))
+                         (if (or (pl-box-p inner) (pl-box-class item))
+                             item   ; reference or blessed: preserve the box
+                             inner))  ; plain scalar: snapshot value
                        item)
                    result)))))
       (add src))
@@ -3661,6 +3675,7 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
            (let ((v (pl-box-value val)))
              (or (hash-table-p v)
                  (and (vectorp v) (not (stringp v)))
+                 (pl-box-p v)         ; variable box wrapping a reference box
                  (pl-box-class val))))))
 
 (defun pl-warn-build-message (args)
@@ -5100,7 +5115,12 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun pl-funcall-ref (ref &rest args)
   "Call a code reference"
-  (apply (unbox ref) args))
+  (let ((fn (unbox ref)))
+    ;; Double-unbox: blessed coderefs are stored as box(inner-box(lambda, class="E"))
+    ;; after pl-bless wraps raw functions. One unbox gives the inner-box, not the fn.
+    (when (pl-box-p fn)
+      (setf fn (pl-box-value fn)))
+    (apply fn args)))
 
 ;;; ============================================================
 ;;; Type Functions
@@ -5546,6 +5566,13 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
             (first frame-info))  ; Scalar context: just package
         nil)))  ; Past end of stack
 
+(defun pl-prototype (&optional ref)
+  "Perl prototype() - returns the prototype string of a function, or undef.
+   PCL does not track Perl prototypes, so this always returns undef.
+   This is sufficient for the common guard pattern: 'if (defined prototype(...))'."
+  (declare (ignore ref))
+  *pl-undef*)
+
 ;;; ============================================================
 ;;; OO Support
 ;;; ============================================================
@@ -5563,11 +5590,19 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
        ;; Also set on box if ref is a box (so box-set can copy it)
        (when (pl-box-p ref) (setf (pl-box-class ref) class-name)))
       ((pl-box-p inner)
-       ;; Scalar reference - store on the inner box
-       (setf (pl-box-class inner) class-name))
+       ;; Scalar reference: ref is the wrapper box (from pl-backslash), inner is the
+       ;; variable box it points to. Bless sets the class on the wrapper (the reference
+       ;; itself), NOT on what it points to. Then box-set will copy the class to the
+       ;; variable that holds the blessed ref.
+       (when (pl-box-p ref) (setf (pl-box-class ref) class-name)))
       (t
        ;; Array, code, or other ref type - store class on the box
-       (when (pl-box-p ref) (setf (pl-box-class ref) class-name)))))
+       (if (pl-box-p ref)
+           (setf (pl-box-class ref) class-name)
+           ;; ref is a raw function (e.g. anonymous sub from codegen). Wrap it in
+           ;; a new box with the class set so box-set can propagate the class to
+           ;; the variable box (box-set copies class from value-box to target-box).
+           (return-from pl-bless (make-pl-box ref class-name))))))
   ref)
 
 (defun pl-get-class (obj)
