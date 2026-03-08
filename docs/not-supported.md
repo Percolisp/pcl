@@ -124,3 +124,241 @@ implementing a deleted construct would add complexity for zero practical gain.
 **Affected tests:** `perl-tests/switch.t` — entire file skipped.  The
 `~~` operator is also excluded from `perl-tests/cmpchain.t` (the few tests
 that used it are commented out).
+
+---
+
+## `@_` argument aliasing
+
+**Perl behaviour:** Elements of `@_` are aliases to the caller's actual
+arguments.  `$_[0] = 42` modifies the caller's variable in place.  This
+is how many Perl idioms pass by reference without explicit `\`.
+
+**PCL behaviour:** PCL copies arguments into `@_` via `pl-flatten-args`.
+Modifications to `$_[0]` do not propagate back to the caller.
+
+**Rationale:** CL function arguments are values, not aliases.  Implementing
+Perl-style pass-by-alias would require wrapping every argument in a
+mutable cell and teaching the caller to read it back — a pervasive change
+with high cost and low gain for CPAN code (most modules don't use this
+trick).
+
+**Affected tests:** `perl-tests/args.t` (all 4 tests).
+
+---
+
+## Regex code blocks: `(?{code})` and `(??{code})`
+
+**Perl behaviour:** `(?{code})` runs arbitrary Perl code during pattern
+matching; `(??{code})` evaluates code and uses the result as a sub-pattern.
+Both allow the regex engine to call back into Perl mid-match.
+
+**PCL behaviour:** Not implemented.  CL-PPCRE does not expose a hook for
+embedded Perl-side callbacks during scanning.
+
+**Rationale:** These features require deep integration between the regex
+engine and the Perl interpreter.  They are rarely used in CPAN modules and
+have no clean mapping to CL-PPCRE's interface.
+
+**Affected tests:** `perl-tests/study.t` (tests using `(?{...})`).
+
+---
+
+## `format` / `write` report formatting
+
+**Perl behaviour:** The `format` keyword defines a report template;
+`write()` fills it in and sends it to a filehandle.  `$^A` accumulates
+the formatted text.
+
+**PCL behaviour:** Not implemented.  `format` blocks are not parsed or
+emitted.
+
+**Rationale:** Perl's report-formatting system is essentially unused in
+modern CPAN code.  No maintained module targets it.
+
+**Affected tests:** None in `perl-tests/` (no format.t in the suite).
+
+---
+
+## `Internals::*` C-level introspection
+
+**Perl behaviour:** `Internals::SvREADONLY($ref, 1)` marks a scalar
+read-only; `Internals::SvREFCNT($ref)` returns the reference count of an
+SV.  These are direct windows into Perl's C-level runtime.
+
+**PCL behaviour:** Not implemented.  CL's garbage collector and box model
+have no equivalent reference-count or read-only flag concept.
+
+**Rationale:** Application code does not use `Internals::*`; only Perl's
+own test suite and low-level XS modules call it.  Faking it would require
+a per-box read-only flag and reference counting, with no benefit for
+running CPAN modules.
+
+**Affected tests:** `perl-tests/undef.t` (read-only checks),
+`perl-tests/unshift.t` (read-only constant checks).
+
+---
+
+## `local` on hash/array elements and typeglobs
+
+**Perl behaviour:** `local $hash{key}` and `local @arr[1,2]` temporarily
+localize individual hash/array slots and restore them on scope exit.
+`local *FOO` temporarily replaces an entire symbol-table entry (all of
+`$FOO`, `@FOO`, `%FOO`, `&FOO`, `*FOO`) and restores it on scope exit.
+
+**PCL behaviour:**
+- `local $scalar` and `local @array` and `local %hash` — **supported**.
+- `local $hash{key}`, `local @arr[N]`, `local @hash{@keys}` — **not supported**.
+- `local *GLOB` — **not supported**.
+
+**Rationale:** Element-level localization requires wrapping each slot
+access in a save/restore protocol on top of CL dynamic binding, which
+doesn't compose cleanly.  Typeglob localization similarly needs snapshot /
+restore of all five slots in a PCL glob struct.  Both are deferred (see
+`docs/todo-features.md`).
+
+**Affected tests:** `perl-tests/local.t` (Tie::Array dependency causes a
+separate hang that also blocks this file).
+
+---
+
+## Hex floating-point literals (`0x1.8p+1`)
+
+**Perl behaviour:** Perl 5.22+ accepts C99-style hex float literals:
+`0x1.8p+1` means `1.5 * 2^1 = 3.0`.
+
+**PCL behaviour:** PPI does not tokenize hex floats as a single literal;
+the source reaches PCL in a broken form.
+
+**Rationale:** Hex floats are a niche syntax used almost exclusively in
+low-level numerical code that also depends on XS.  Not worth a custom PPI
+workaround.
+
+**Affected tests:** `perl-tests/hexfp.t` — entire file skipped (PPI parse
+error).
+
+---
+
+## DynaLoader / XS binary extensions
+
+**Perl behaviour:** `DynaLoader` loads compiled `.so`/`.dll` extension
+modules at runtime.  Most POSIX, POSIX-adjacent, and performance-sensitive
+CPAN modules use XS.
+
+**PCL behaviour:** PCL can only load pure-Perl modules.  Any `require` or
+`use` that ultimately calls `DynaLoader::bootstrap` fails or is silently
+skipped by the stub.
+
+**Rationale:** XS bridge support is a planned future phase (see
+`XS_BRIDGE_DESIGN.md`).  Until then, POSIX and other XS modules must be
+stubbed in `lib/` by hand.
+
+**Affected tests:** `perl-tests/chdir.t` (uses POSIX).
+
+---
+
+## Regex encoding modifiers (`/a`, `/d`, `/l`, `/u`)
+
+**Perl behaviour:** Perl 5.14+ added regex modifiers that select which
+Unicode semantics to use:
+- `/a` — ASCII-only matching for `\d`, `\s`, `\w`, `\b`.
+- `/d` — "default" Unicode-degraded behaviour (Perl 5.6 compat).
+- `/l` — locale-dependent character class matching.
+- `/u` — full Unicode semantics (the default on `use utf8` source).
+
+**PCL behaviour:** These modifiers are accepted in the source but silently
+ignored.  CL-PPCRE always uses Unicode semantics (roughly equivalent to
+`/u`).
+
+**Rationale:** The difference between `/a` and `/u` matters for
+`\d`/`\s`/`\w` on non-ASCII text, which is uncommon in real CPAN code.
+Emulating `/l` (locale) would require calling SBCL locale-aware functions,
+which is not worth the complexity.
+
+**Affected tests:** Various regex tests that use `/a` for strict ASCII
+matching.
+
+---
+
+## `reset()` for one-match `?pattern?` and named captures
+
+**Perl behaviour:** `reset()` clears all `?pattern?` patterns so they can
+match again, and optionally resets package variables whose names start with
+a given letter.  `reset` with no argument inside a `while` loop is
+sometimes used to clear `%+` named-capture variables.
+
+**PCL behaviour:** `pl-reset` is not implemented.  `?pattern?` (one-match
+patterns) are also not implemented — they are parsed identically to
+`/pattern/`.
+
+**Rationale:** `?pattern?` was deprecated in Perl 5.22 and removed in
+Perl 5.38.  `reset()` for variables is an obscure feature not used in
+modern CPAN code.
+
+**Affected tests:** `perl-tests/reset.t` (most tests pass via other means;
+the `reset` / `?pat?` tests fail).
+
+---
+
+## `__SUB__` (current sub reference)
+
+**Perl behaviour:** `use feature 'current_sub'; __SUB__` returns a
+reference to the currently executing subroutine, enabling anonymous subs
+to recurse without a named variable.
+
+**PCL behaviour:** Not implemented.  `__SUB__` is not recognized as a
+keyword.
+
+**Rationale:** The same effect can be achieved with a named sub or by
+capturing `$self = \&{__SUB__}` before Perl 5.16.  Uncommon in CPAN code;
+implementing it would need a dynamic `*current-sub*` variable threaded
+through every function call.
+
+**Affected tests:** None in `perl-tests/` (no dedicated test file).
+
+---
+
+## `use integer` — large shift / overflow edge cases
+
+**Perl behaviour:** Under `use integer`, very large shift amounts (e.g.
+`4 << 2147483648`) yield `0`; right-shifting a negative number yields `-1`
+(arithmetic shift fill).  These are defined by C's signed-integer
+semantics.
+
+**PCL behaviour:** `use integer` arithmetic is partially implemented, but
+extreme shift counts and the exact overflow behaviour for
+`IV_MIN << 0`-style corner cases differ between SBCL and Perl's C runtime.
+
+**Rationale:** These are C-ABI details of the Perl interpreter, not
+semantics that CPAN code relies on.  The common integer arithmetic cases
+(`+`, `-`, `*`, `int(/)`) work correctly.
+
+**Affected tests:** `perl-tests/bop.t` (large-shift and `use integer`
+edge-case tests); the file also hangs for an unrelated reason (see
+`docs/todo-features.md`).
+
+---
+
+## Lvalue subroutines
+
+**Perl behaviour:** A sub marked `: lvalue` can appear on the left-hand
+side of an assignment.  The sub must return a reference to a writable
+location; Perl then stores the assigned value there.
+
+```perl
+sub field : lvalue { $obj->{field} }
+field() = 42;           # modifies $obj->{field}
+```
+
+The built-in `substr` also acts as an lvalue: `substr($s, 0, 4) = "new"`.
+
+**PCL behaviour:** The `: lvalue` attribute is not implemented.  `substr`
+on the left-hand side of an assignment is also not supported.
+
+**Rationale:** Implementing lvalue subs requires an "lvalue context"
+that propagates through the call, returns a settable location, and then
+performs the store — a fundamentally different calling convention from
+normal subs.  No maintained CPAN module in scope requires custom lvalue
+subs.  The `substr`-as-lvalue form can always be rewritten as
+`substr($s, 0, 4, "new")` (four-argument form), which PCL does support.
+
+**Affected tests:** `perl-tests/aassign.t` (a few tests use lvalue subs).

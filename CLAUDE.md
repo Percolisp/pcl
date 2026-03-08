@@ -177,6 +177,8 @@ When resuming work:
 - `docs/wantarray-context.md` - Wantarray/context system (DO NOT implement without explicit user request)
 - `docs/ppi-glob-disambiguation.md` - **HIGH PRIORITY BUG**: PPI misreads `< expr >` as glob, silently drops statements
 - `docs/closure-lexical-scoping.md` - **NEXT TODO**: Why `defvar` breaks closures, plan for `$x__lex__N` renaming
+- `docs/todo-features.md` - **Features left to implement** (tiered, with test counts and fix areas)
+- `docs/not-supported.md` - **Deliberate non-support** (design decisions: `@_` aliasing, Unicode limits, etc.)
 
 ## Dependencies
 
