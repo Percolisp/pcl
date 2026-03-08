@@ -65,7 +65,7 @@ sub run_one_test {
         my ($err_fh, $err_file) = tempfile(SUFFIX => '.err', DIR => $tmpdir, UNLINK => 0);
         close $err_fh;
 
-        my $cl_code = `perl -I$project_root $pl2cl --no-cache $name 2>$err_file`;
+        my $cl_code = `perl -I$project_root $pl2cl --no-cache --lenient-ppi $name 2>$err_file`;
         if ($? != 0) {
             my $err = do { local $/; open(my $f, '<', $err_file) or die; <$f> };
             chdir $orig; alarm(0);

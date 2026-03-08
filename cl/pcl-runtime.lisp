@@ -126,7 +126,7 @@
    #:pl-tie-proxy-tie-obj #:pl-tie-proxy-saved-value
    #:pl-tie #:pl-untie #:pl-tied
    ;; Compile-time definition macros (for BEGIN block support)
-   #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
+   #:pl-defpackage #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
    ;; Assignment forms (distinct from pl-setf for clarity)
    #:pl-scalar-= #:pl-array-= #:pl-hash-= #:pl-list-=
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -146,17 +146,49 @@
 ;;; Used by pl-caller to distinguish "called from a sub" vs "top level".
 (defvar *pcl-sub-call-depth* 0)
 
+;;; pl-defpackage: Create/update a Perl package namespace.
+;;; Wraps defpackage in eval-when so it runs at compile time (needed so that
+;;; subsequent in-package forms can find the package during compile-file), and
+;;; in handler-bind to suppress SBCL's "package at variance" warnings that fire
+;;; when pl-sub's compile-time shadow calls have already added symbols to the
+;;; shadow list before defpackage re-evaluates at load time.
+(defmacro pl-defpackage (name &rest options)
+  "Create/update a Perl package. Defaults to (:use :cl :pcl) when no options given."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (handler-bind ((warning #'muffle-warning))
+       (defpackage ,name ,@(or options '((:use :cl :pcl)))))))
+
 ;;; pl-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
 ;;; This matches Perl's semantics where subs are compiled immediately.
 ;;; Marks the symbol as :defined in *pl-declared-subs* for defined &sub support.
+;;;
+;;; IMPORTANT: We shadow the name before defining to create a package-local
+;;; symbol.  Without this, user-defined methods whose names match PCL built-ins
+;;; (e.g. sub PUSH / sub SHIFT) would redefine the global pcl:pl-push etc.
+;;; because packages (:use :pcl) inherit those symbols.  By shadowing first we
+;;; create a fresh local symbol; the body's built-in calls (pl-shift @_) were
+;;; already resolved at READ time to pcl::PL-SHIFT and are unaffected.
 (defmacro pl-sub (name params &body body)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
-     (setf (gethash ',name *pl-declared-subs*) :defined)
-     (defun ,name ,params
-       (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
-         ,@body))))
+     ;; Use the symbol's own package (e.g. P1 for P1::pl-tmc) so that
+     ;; package-qualified subs are defined in the right package regardless of
+     ;; the current *package*.  Fall back to *package* for unqualified names.
+     (let* ((target-pkg (or (symbol-package ',name) *package*))
+            (sym-name   (symbol-name ',name)))
+       ;; Shadow to prevent user methods from clobbering pcl:: built-ins with
+       ;; the same name (e.g. PUSH/SHIFT in Tie::Array).  The handler-bind
+       ;; muffles SBCL's "package at variance" warning that fires when defpackage
+       ;; is later re-evaluated and sees the extra shadow.
+       (handler-bind ((warning #'muffle-warning))
+         (shadow sym-name target-pkg))
+       (let ((local-sym (intern sym-name target-pkg)))
+         (setf (gethash local-sym *pl-declared-subs*) :defined)
+         (setf (symbol-function local-sym)
+               (lambda ,params
+                 (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
+                   ,@body)))))))
 
 ;;; pl-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
@@ -2702,10 +2734,13 @@
   (pl-aref (unbox ref) idx))
 
 (defun pl-array-last-index (arr)
-  "Perl $#arr - last index"
-  (if (vectorp arr)
-      (1- (length arr))
-      -1))
+  "Perl $#arr - last index. Accepts raw vectors (@arr) or boxed array refs ($aref).
+   Handles both single-boxed (old autovivified) and double-boxed (pl-backslash) refs."
+  (let* ((v (unbox arr))
+         (v (if (pl-box-p v) (unbox v) v)))
+    (if (vectorp v)
+        (1- (length v))
+        -1)))
 
 (defun pl-set-array-length (arr new-last-index)
   "Set array length by setting $#array. Perl semantics:
@@ -4744,7 +4779,11 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
     (cond
       ;; Cache hit
       ((pl-cache-valid-p source-path cache-path)
-       (load cache-path)
+       ;; Muffle "package at variance" warnings: pl-sub's eval-when :compile-toplevel
+       ;; shadow calls run during compile-file, then defpackage re-runs at load time
+       ;; and sees the extra shadow — harmless but noisy.
+       (handler-bind ((warning #'muffle-warning))
+         (load cache-path))
        t)
       ;; Cache miss - transpile and cache
       (t
@@ -4758,13 +4797,16 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                                     :direction :output
                                     :if-exists :supersede)
                  (write-string lisp-code out))
-               (let ((fasl-path (compile-file temp-lisp :output-file cache-path
-                                              :print nil :verbose nil)))
+               ;; Muffle package-at-variance warnings during compile+load
+               (let ((fasl-path (handler-bind ((warning #'muffle-warning))
+                                  (compile-file temp-lisp :output-file cache-path
+                                                :print nil :verbose nil))))
                  (ignore-errors (delete-file temp-lisp))
                  (unless fasl-path
                    (error "compile-file failed for ~A" temp-lisp))
                  (pl-cleanup-old-cache)
-                 (load fasl-path)
+                 (handler-bind ((warning #'muffle-warning))
+                   (load fasl-path))
                  t))
              ;; Lisp mode: just cache .lisp
              (progn
@@ -4773,7 +4815,8 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                                     :if-exists :supersede)
                  (write-string lisp-code out))
                (pl-cleanup-old-cache)
-               (load cache-path)
+               (handler-bind ((warning #'muffle-warning))
+                 (load cache-path))
                t)))))))
 
 (defun pl-find-module-package (module-name)
@@ -5065,13 +5108,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun pl-backslash (val)
   "Perl reference operator \\$x - returns a box containing the referenced value.
-   For scalars (boxes), returns a box containing the box (creating a reference).
-   For arrays/hashes, returns them directly as they're already references."
-  (if (pl-box-p val)
-      ;; Scalar: create a reference by wrapping in another box
-      (make-pl-box val)
-      ;; Array/hash: already a reference type
-      val))
+   For scalars (boxes): returns a box containing the box (reference to scalar).
+   For arrays/hashes: wraps in a box so pl-flatten-args won't spread it as @arr.
+   This makes \\@arr and \\%hash opaque references, not spreadable containers."
+  (make-pl-box val))
 
 (defun pl-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
@@ -5100,12 +5140,18 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                (and (fboundp sym) (symbol-function sym)))))))))
 
 (defun pl-cast-@ (val)
-  "Perl array dereference @{$ref} - unbox to get the array"
-  (unbox val))
+  "Perl array dereference @{$ref} - unbox to get the array.
+   Handles both old format (box containing vector) and new format
+   (box containing box containing vector, from pl-backslash)."
+  (let ((v (unbox val)))
+    (if (pl-box-p v) (unbox v) v)))
 
 (defun pl-cast-% (val)
-  "Perl hash dereference %{$ref} - unbox to get the hash"
-  (unbox val))
+  "Perl hash dereference %{$ref} - unbox to get the hash.
+   Handles both old format (box containing hash) and new format
+   (box containing box containing hash, from pl-backslash)."
+  (let ((v (unbox val)))
+    (if (pl-box-p v) (unbox v) v)))
 
 (defun pl-cast-$ (val)
   "Perl scalar dereference ${$ref} - get value from reference.
@@ -5146,11 +5192,19 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
        (pl-box-class val))
       ((and (hash-table-p inner) (gethash :__class__ inner))
        (gethash :__class__ inner))
-      ;; Scalar reference (box containing box)
-      ((pl-box-p inner) "SCALAR")
-      ;; Hash reference
+      ;; Reference box: inner is a pl-box - check what it wraps (ARRAY/HASH/SCALAR)
+      ((pl-box-p inner)
+       (let ((inner2 (pl-box-value inner)))
+         (cond
+           ;; Array reference: box containing vector (from pl-backslash @arr)
+           ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
+           ;; Hash reference: box containing hash-table (from pl-backslash %hash)
+           ((hash-table-p inner2) "HASH")
+           ;; Scalar reference: box containing box (from pl-backslash $x)
+           (t "SCALAR"))))
+      ;; Old-format hash reference (autovivified, single-boxed)
       ((hash-table-p inner) "HASH")
-      ;; Array reference (list or vector, but NOT strings)
+      ;; Old-format array reference (autovivified, single-boxed)
       ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
       ((functionp inner) "CODE")
@@ -5567,7 +5621,11 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                      (pkg (find-package pkg-name)))
                 (when pkg
                   (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) pkg)))
-                    (when (and fn (fboundp fn))
+                    ;; Only dispatch to methods LOCAL to this class package.
+                    ;; Inherited symbols (e.g. pcl:pl-push) must be ignored so
+                    ;; that a class without a PUSH method doesn't accidentally
+                    ;; call the pcl built-in instead of signalling "no method".
+                    (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                       (return-from pl-method-call (apply fn obj args)))))))
             ;; Not found in any class in MRO
             (error "Can't locate method ~A via package ~A" method-name class-name))
@@ -5577,7 +5635,7 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
             (unless pkg
               (error "Package ~A not found for method call" class-name))
             (let ((fn (find-symbol (string-upcase (format nil "PL-~A" method-name)) pkg)))
-              (if (and fn (fboundp fn))
+              (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                   (apply fn obj args)
                   (error "Can't locate method ~A in package ~A" method-name class-name))))))))
 

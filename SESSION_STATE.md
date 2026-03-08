@@ -1,97 +1,88 @@
-# Session State - 2026-02-22 (Session 44)
+# Session State - Session 69
 
----
+## What Was Done
 
-## Session 44: Quick-win bug fixes (COMPLETE)
+### 1. Documentation: `docs/todo-features.md` and `docs/not-supported.md`
+(Carried over from previous session — already committed in 6275e0e)
+- Created `docs/todo-features.md`: 25 items in 3 tiers with test counts and fix areas
+- Expanded `docs/not-supported.md`: 11 new sections
+- Moved "Lvalue subs" from TODO to not-supported
+- Fixed `caller()` entry: it IS implementable (only the "at FILE line N" suffix is not)
 
-### Summary
-Fixed a set of small, targeted bugs across the Perl test suite.
-PCL suite: 2402 tests, all passing ✓
+### 2. CL Package Namespace Fix (the Tie::Array/Hash hang root cause)
 
-### New Fully-Passing Tests
-- **negate.t**: 24/24 ✓ (was 23/24)
-- **pow.t**: 268/268 ✓ (was 75/77)
+**Root cause:** User-defined Perl methods (e.g. `sub PUSH`, `sub SHIFT`) in packages
+like `Tie::Array` map to `PL-PUSH`/`PL-SHIFT` in CL. These packages `(:use :pcl)`,
+so `defun PL-PUSH` in `|Tie::Array|` would redefine the globally-shared `pcl:PL-PUSH`
+symbol, causing infinite recursion.
 
-### Improved Tests
-- **lc.t**: 76/88 (was 55/56)
-- **list.t**: 37/55 (was 36/55)
-- **oct.t**: 77/79 (unchanged — 2 failures need real string eval)
+**Fix (three parts):**
 
----
-
-## Changes Made
-
-### 1. `perl-tests/t/test.pl` — Added `within()` helper
-Used by pow.t and potentially others. Checks if a value is within a
-range of an expected value.
-
-### 2. `cl/pcl-runtime.lisp` — Non-ASCII string negation fix
-`pl--` used CL's `alpha-char-p` which returns true for Unicode alphabetic
-chars like Ā. Perl's string negation (`-"foo"` → `"-foo"`) only applies
-to ASCII `[A-Za-z_]`. Fixed by adding `(< (char-code ch) 128)` guard.
-
-### 3. `cl/pcl-runtime.lisp` — Wide character detection in oct/hex
-Added `%check-wide-chars` helper, called from `pl-oct` and `pl-hex`.
-Errors with "Wide character in oct/hex" when string contains code point > 255.
-(Tests 78-79 in oct.t still fail because they go through string `eval` which
-is a stub and doesn't execute the code.)
-
-### 4. `cl/pcl-runtime.lisp` — `pl-uni_to_native` moved to PCL package
-Was defined locally in UTF8 package, so MAIN couldn't see it. Moved to
-PCL package (exported in defpackage :export list), and removed the
-duplicate from UTF8 (which now inherits it via `(:use :pcl)`). Fixes
-lc.t which calls `uni_to_native()` imported from charset_tools.pl.
-
-### 5. `Pl/PExpr.pm` — `-N**exp` precedence fix
-In Perl, `**` has higher precedence than unary minus, so `-3**2 = -(3**2) = -9`.
-But PPI merges `-3` into a single negative number token in some contexts (like
-after `(`). `_fix_ppi_negative_number_bug` already split negative numbers after
-expression-ending tokens; extended it to ALSO split when a negative literal is
-immediately followed by `**`.
-
-### 6. `cl/pcl-runtime.lisp` — `pl-array-=` scalar case
-`@arr = scalar_expr` was silently producing an empty array because the
-`add-items` function in `pl-array-=` had no case for plain scalars/numbers.
-Added `(t (when src (vector-push-extend (make-pl-box (unbox src)) ,place)))`.
-
----
-
-## list.t Remaining Failures (18 of 55)
-
-### Tests 30-38: `do { if-elsif-else }` returning list
-```perl
-($a, $b, $c) = do {
-    if ($x == 0) { ('a','b','c'); }
-    elsif ($x == 1) { ('d','e','f'); }
-    else { ('g','h','i'); }
-};
+#### A. `pl-sub` macro — use symbol's own package, not `*package*`
+`pl-sub` previously called `(shadow sym-name *package*)`. For package-qualified
+names like `(pl-sub P1::pl-tmc ...)`, `*package*` was `main` — creating
+`MAIN::PL-TMC` instead of `P1::PL-TMC`. Fixed with:
+```lisp
+(let* ((target-pkg (or (symbol-package ',name) *package*))
+       (sym-name   (symbol-name ',name)))
+  (shadow sym-name target-pkg)
+  (setf (symbol-function (intern sym-name target-pkg)) (lambda ...)))
 ```
-Generates PARSE ERROR: "Handle single node of unknown type."
-The `do { }` block with embedded if/elsif/else isn't being parsed correctly.
 
-### Test 39: `||` with list on RHS
-```perl
-@a = ($x == 12345 || (1,2,3));
+#### B. `pl-method-call` — only dispatch to locally-defined methods
+Added `(eq (symbol-package fn) pkg)` check in both the MRO path and fallback
+path, so inherited `:pcl` built-ins (e.g. `pcl:pl-push`) are skipped when looking
+up user-defined methods.
+
+#### C. `pl-load-module-cached` — muffle warnings during module loading
+Wrapped all `compile-file` and `load` calls with `(handler-bind ((warning #'muffle-warning)) ...)`.
+
+### 3. `pl-defpackage` macro — clean package declaration
+
+**Problem:** SBCL emits "package at variance" warnings when `defpackage` re-evaluates
+and finds extra shadow symbols (added by `pl-sub`'s `eval-when :compile-toplevel`
+shadow call during `compile-file`). Simple `handler-bind` around `defpackage`
+prevented compile-time package creation, breaking `in-package`.
+
+**Fix:** New `pl-defpackage` macro in `cl/pcl-runtime.lisp`:
+```lisp
+(defmacro pl-defpackage (name &rest options)
+  "Create/update a Perl package. Defaults to (:use :cl :pcl) when no options given."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (handler-bind ((warning #'muffle-warning))
+       (defpackage ,name ,@(or options '((:use :cl :pcl)))))))
 ```
-Generated: `(pl-array-= @a (vector (pl-|| (pl-== $x 12345) (progn 1 2 3))))`
-The `(1,2,3)` inside `||` becomes `(progn 1 2 3)` which evaluates to `3`.
-Should be `(vector 1 2 3)` so the whole list is returned when `||` takes its RHS.
-This is a list context propagation issue.
 
-### Test 8: Chained list assignment
-```perl
-($a, $b) = ($b, $a) = ($a, $b);
-```
-Complex right-to-left chained assignment.
+- `eval-when :compile-toplevel` ensures the package is created during `compile-file`
+  processing, so subsequent `in-package` forms can find it
+- `handler-bind` suppresses the "package at variance" warning
+- Defaults to `(:use :cl :pcl)` so callsites can just write `(pl-defpackage :Foo)`
 
-### Tests 48-55: List slice issues
-Need investigation.
+**Used in:** `Parser.pm` `_emit_package_preamble` (both block-depth and normal paths),
+`pl2cl` main package setup.
+
+**Note:** Pre-declared package preambles (before `(in-package :pcl)`) still use plain
+`defpackage` — they're in `cl-user` context where `pcl:pl-defpackage` isn't accessible,
+and they don't need warning suppression (no prior shadow calls at that point).
+
+### 4. Result
+- All 2493 PCL tests pass
+- Tie::Array/Hash loading no longer hangs (binding stack exhaustion → now a
+  different error: infinite recursion in sort.t's Tie::StdArray usage — separate issue)
+- "package at variance" warnings eliminated from generated code
 
 ---
 
-## Next Steps
+## Where We Stopped
 
-1. **list.t tests 30-38**: Fix `do { if-elsif-else }` block parse error
-2. **list.t test 39**: Fix `(list) || (list)` — list context propagation through `||`
-3. **list.t tests 48-55**: Investigate slice failures
-4. **Continue session 43 high-value list**: local.t (41 fails), array.t (49 fails), switch.t (44 fails)
+`sort.t` still has binding stack exhaustion. The module loads now (no more
+"compile-file failed" error) but something in Tie::StdArray causes infinite recursion.
+Tie::StdArray's `PUSH`/`SHIFT`/`UNSHIFT` methods call `$self->SPLICE(...)` which
+calls more Tie methods — there may be a circular dispatch or missing base implementation.
+
+---
+
+## PCL Suite Status
+- **53 files, 2493 tests, all passing**
+- Perl sweep (session 66): 5624 passing — fixes this session should improve this
+

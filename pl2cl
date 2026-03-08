@@ -36,6 +36,7 @@ my $is_module = 0;      # When true, skip preamble (for dynamic module loading)
 my $bundle_mode = 0;    # Compile to single .fasl
 my $executable_mode = 0; # Create standalone executable
 my $output_file;        # Output file for bundle/executable
+my $lenient_ppi = 0;    # DEBUG: truncate at first PPI-unparseable line (test runner only)
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
 GetOptions(
@@ -45,6 +46,7 @@ GetOptions(
   'bundle'       => \$bundle_mode,
   'executable'   => \$executable_mode,
   'output|o=s'   => \$output_file,
+  'lenient-ppi'  => \$lenient_ppi,   # DEBUG: for test runner use only
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or die "Usage: pl2cl [options] <file.pl>\n";
 
@@ -98,7 +100,7 @@ sub build_preamble {
   # Switch to main package for user code (Perl's default package)
   # main uses :cl and :pcl so runtime functions are accessible
   push @lines, ";; Switch to main package (Perl's default for code without 'package' statement)";
-  push @lines, "(defpackage :main (:use :cl :pcl))";
+  push @lines, "(pl-defpackage :main)";
   push @lines, "(in-package :main)";
 
   return join("\n", @lines);
@@ -210,7 +212,8 @@ if ($bundle_mode || $executable_mode) {
 
 if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
-  my $output = Pl::Parser->parse_file($source_file);
+  my $output = Pl::Parser->parse_file($source_file,
+    ($lenient_ppi ? (lenient_ppi => 1) : ()));
 
   # Inject preamble after (in-package :pcl) - but not for modules
   unless ($is_module) {

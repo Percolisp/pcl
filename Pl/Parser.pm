@@ -93,6 +93,15 @@ has collect_prototypes_only => (
   default   => 0,
 );
 
+# DEBUG/TEST FLAG: When set, truncate file at first PPI-unparseable line
+# instead of dying. Used by run-perl-test.pl and sweep-perl-tests.pl to get
+# partial results from files with one exotic line PPI can't handle.
+# Do NOT enable in production — silently dropping code is dangerous.
+has lenient_ppi => (
+  is        => 'ro',
+  default   => 0,
+);
+
 
 sub _build_environment {
   my $self = shift;
@@ -107,18 +116,41 @@ sub _build_ppi_doc {
 
   if ($self->has_filename) {
     my $doc = PPI::Document->new($self->filename);
-    die "Failed to parse file: " . $self->filename unless $doc;
-    return $doc;
+    return $doc if $doc;
+    die "Failed to parse file: " . $self->filename unless $self->lenient_ppi;
+    open(my $fh, '<', $self->filename)
+      or die "Failed to parse file (and can't re-read): " . $self->filename;
+    my $src = do { local $/; <$fh> };
+    close $fh;
+    return $self->_ppi_with_fallback($src);
   }
   elsif ($self->has_code) {
     my $code = $self->code;
     my $doc = PPI::Document->new(\$code);
-    die "Failed to parse code" unless $doc;
-    return $doc;
+    return $doc if $doc;
+    die "Failed to parse code" unless $self->lenient_ppi;
+    return $self->_ppi_with_fallback($code);
   }
   else {
     die "Must provide either 'filename' or 'code'";
   }
+}
+
+# DEBUG/TEST: binary-search for the first line PPI can't parse, truncate there.
+# Only called when lenient_ppi is set.
+sub _ppi_with_fallback {
+  my ($self, $src) = @_;
+  my @lines = split /\n/, $src;
+  my ($lo, $hi) = (0, $#lines);
+  while ($lo < $hi) {
+    my $mid = int(($lo + $hi) / 2);
+    my $partial = join("\n", @lines[0..$mid]);
+    if (PPI::Document->new(\$partial)) { $lo = $mid + 1; }
+    else                               { $hi = $mid;     }
+  }
+  warn "PCL [lenient-ppi]: truncating at line $lo due to PPI parse failure\n";
+  my $partial = join("\n", @lines[0..($lo-1)]);
+  return PPI::Document->new(\$partial);
 }
 
 
@@ -2732,8 +2764,7 @@ sub _emit_package_preamble {
     # Opening a new section here would place its preamble/declarations outside
     # the block in the linear assembly, causing scope and symbol-table confusion.
     $self->_emit(";;; package $pkg_name");
-    $self->_emit("(defpackage $cl_pkg");
-    $self->_emit("  (:use :cl :pcl))");
+    $self->_emit("(pl-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
@@ -2747,8 +2778,7 @@ sub _emit_package_preamble {
 
   $self->_with_bucket('preamble', sub {
     $self->_emit(";;; package $pkg_name");
-    $self->_emit("(defpackage $cl_pkg");
-    $self->_emit("  (:use :cl :pcl))");
+    $self->_emit("(pl-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
@@ -3566,11 +3596,13 @@ sub _emit {
 sub parse_file {
   my $class    = shift;
   my $filename = shift;
+  my %opts     = @_;
 
   # First pass: collect prototypes from all 'use'd modules
   my $proto_parser = $class->new(
     filename                => $filename,
     collect_prototypes_only => 1,
+    %opts,
   );
   $proto_parser->parse;
 
@@ -3578,6 +3610,7 @@ sub parse_file {
   my $parser = $class->new(
     filename    => $filename,
     environment => $proto_parser->environment,
+    %opts,
   );
   return $parser->parse;
 }
@@ -3586,11 +3619,13 @@ sub parse_file {
 sub parse_code {
   my $class = shift;
   my $code  = shift;
+  my %opts  = @_;
 
   # First pass: collect prototypes
   my $proto_parser = $class->new(
     code                    => $code,
     collect_prototypes_only => 1,
+    %opts,
   );
   $proto_parser->parse;
 
@@ -3598,6 +3633,7 @@ sub parse_code {
   my $parser = $class->new(
     code        => $code,
     environment => $proto_parser->environment,
+    %opts,
   );
   return $parser->parse;
 }

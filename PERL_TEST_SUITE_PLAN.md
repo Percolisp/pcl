@@ -187,12 +187,16 @@ files and likely adds 200+ tests.
 **Files:** `Pl/Parser.pm` `_process_use_statement`, `cl/pcl-runtime.lisp`
 `pl-require-file` / `pl-use`.
 
-### B. PPI Parse Fallback (~490 tests) — *carry-over from §1.2*
+### B. PPI Parse Fallback — ✅ DONE (session 68)
 
-`for.t` (line 767: `for ${*$f} (5,11,33)`) and `substr.t` (line 772:
-`substr $t, 0, 0, *ワルド`) cause PPI to return `undef` for the entire file.
-All tests before the bad line are reachable if PCL truncates and re-parses.
-Already designed in §1.2 above.
+Implemented as a debug/test flag `--lenient-ppi` on `pl2cl`. When set, `Pl::Parser`
+binary-searches for the first unparseable line and truncates there, emitting a warning.
+**Not enabled by default** (silent truncation is dangerous in production).
+`run-perl-test.pl` and `sweep-perl-tests.pl` now pass `--lenient-ppi` automatically.
+
+- `for.t`: 0 → 125 tests passing (truncates at line 767: `for ${*$f} (5,11,33)`)
+- `substr.t`: the bad line (`substr $t, 0, 0, *ワルド`) was already commented out;
+  `substr.t` crashes for a different reason (see §N below).
 
 ### C. Implicit Returns / Bare-`if` Return Value (widespread)
 
@@ -264,8 +268,45 @@ have a single root-cause fix each:
 - **`concat2.t`** (0/3): Unknown — needs investigation. May be related to
   string repetition `x=` or some concat edge case not in `concat.t`.
 
-Note: `kvhslice.t` (0/3) and `substr.t` (0/1) are already covered:
-`kvhslice.t` by §A (Tie::Hash loader hang), `substr.t` by §B (PPI fallback).
+Note: `kvhslice.t` (0/3) is covered by §A (Tie::Hash loader hang).
+
+### N. Inline `package Pkg { }` Inside a Function Body (~unknown tests)
+
+When Perl code has an inline package block **inside a subroutine or bare block**,
+PCL's hoisting logic misplaces the code that follows the package block:
+
+```perl
+sub run_tests {
+    {
+        my $store = 100;
+        package MyTie {        # ← inline package (valid Perl)
+            sub STORE { ... }
+        };
+        my $x;                 # ← these end up OUTSIDE run_tests() in generated CL
+        tie $x, "MyTie";
+        ok(!$store, '...');
+    }
+}
+```
+
+Generated CL places `(pl-tie $x "MyTie")` at the top level (outside the function),
+where `$x` is unbound. The `(in-package :main)` emitted after the inline package
+closes also shifts the CL reader's package for subsequent forms.
+
+**Known affected files:** `index.t` (crashes at `$X is unbound`), `substr.t`
+(crashes with `MAIN::PL-A_3363 is undefined` — named sub defined inside a bare
+block becomes unreachable after a `package` hoisting).
+
+**Root cause:** `_process_package_block` (or the sub-hoisting reorder pass) emits
+an `(in-package :main)` after the inline package closes, and the content that
+originally followed the package block inside the function has already been
+surgically removed from the function body and re-emitted at the top level.
+
+**Fix area:** `Pl/Parser.pm`, specifically the inline-package handling inside
+`_process_bare_block` / `_process_package_block`. When `in_subroutine > 0`,
+inline package definitions should be emitted in-place (not hoisted), or the
+hoisting must preserve the surrounding context and re-enter the function body
+for the continuation.
 
 ### G. Chained Method Calls
 
@@ -402,7 +443,7 @@ internals that have no sensible transpiler target.
 | 2. state var infrastructure | ✅ DONE (session 61) | partial |
 | 2. lexical my-var renaming | ✅ DONE (session 63) | closure.t +4 |
 | 2.5A Tie module loader hang | ❌ TODO | ~200+ |
-| 2.5B PPI fallback | ❌ TODO | (see 1.2) |
+| 2.5B PPI fallback (--lenient-ppi) | ✅ DONE (session 68) | for.t 0→125 |
 | 2.5C Implicit returns / bare-if | ❌ TODO | widespread |
 | 2.5D $SIG handlers | ❌ TODO | (see 1.4) |
 | 2.5E hashassign.t mass failures | ❌ TODO | ~280 |
@@ -418,17 +459,19 @@ internals that have no sensible transpiler target.
 | 2.5M caller.t (caller()) | ❌ TODO | 1 |
 | 2.5M args.t (@_ aliasing?) | ❌ TODO | 4 |
 | 2.5M concat2.t | ❌ TODO | 3 |
+| 2.5N inline package inside function | ❌ TODO | index.t, substr.t, others |
 | 3. String eval | ❌ TODO | ~50+ |
 
 **Remaining high-value items (Phase 2.5, in priority order):**
 1. Tie::Array/Tie::Hash module loader hang (~200+ tests, 4 blocked files)
-2. PPI parse fallback (~490 tests: for.t, substr.t)
+2. ~~PPI parse fallback~~ ✅ DONE (session 68) — `--lenient-ppi` flag; for.t 0→125
 3. Implicit returns / bare-if return value (widespread)
 4. `index.t` / `hashassign.t` — likely easy root causes, many tests
-5. Complete-failure files (§M): `pos.t` (17), `args.t` (4), `concat2.t` (3), `flip.t` (3), `caller.t` (1)
-6. $SIG handlers (warn.t, die.t ~50 tests)
-7. Chained method calls, bop.t/heredoc.t hangs
-8. String eval (Phase 3)
+5. Inline `package Pkg {}` inside function body (§N) — index.t, substr.t crash
+6. Complete-failure files (§M): `args.t` (4), `concat2.t` (3), `flip.t` (3), `caller.t` (1)
+7. $SIG handlers (warn.t, die.t ~50 tests)
+8. Chained method calls, bop.t/heredoc.t hangs
+9. String eval (Phase 3)
 
 **Projected final: ~98%**
 

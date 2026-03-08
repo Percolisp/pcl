@@ -50,7 +50,7 @@ print "=== Working in $perl_tests_dir ===\n";
 # Capture stderr separately to avoid mixing warnings into generated CL code
 my ($err_fh, $err_file) = tempfile(SUFFIX => '.err', UNLINK => 1);
 close $err_fh;
-my $cl_code = `perl -I$project_root $pl2cl --no-cache $test_basename 2>$err_file`;
+my $cl_code = `perl -I$project_root $pl2cl --no-cache --lenient-ppi $test_basename 2>$err_file`;
 
 if ($? != 0) {
     my $errmsg = do { local $/; open my $f, '<', $err_file; $f ? <$f> : '' };
