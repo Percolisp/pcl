@@ -32,7 +32,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run test suite (51 files, 2467 tests)
+# Run test suite (53 files, 2507 tests)
 prove -j8 Pl/t/
 ```
 
@@ -78,13 +78,13 @@ I am Rex and I bark
 
 ## Status
 
-**Beta.** The test suite runs 2467 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own internal test suite (`t/op/`, `t/base/`, etc.) passes ~5400 / ~6300 tests (~86%).
+**Beta.** The test suite runs 2507 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own internal test suite (`t/op/`, `t/base/`, etc.) passes ~6200 / ~7600 tests (~82%).
 
-Known gaps: anonymous sub closures (generator pattern), string `eval`, some `local` forms, XS/C extensions.
+Known gaps: `state` variable generator pattern, string `eval`, some `local` forms, XS/C extensions. Right now the bugs are shaken out by running Perl's internal tests, it is slow going.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 
-*(If this doesn't get shot down too hard, I'll put it on CPAN later.)*
+*(I'll put it on CPAN later, when it is closer to ready.)*
 
 ## License
 
