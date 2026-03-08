@@ -93,6 +93,15 @@ has collect_prototypes_only => (
   default   => 0,
 );
 
+# DEBUG/TEST FLAG: When set, truncate file at first PPI-unparseable line
+# instead of dying. Used by run-perl-test.pl and sweep-perl-tests.pl to get
+# partial results from files with one exotic line PPI can't handle.
+# Do NOT enable in production — silently dropping code is dangerous.
+has lenient_ppi => (
+  is        => 'ro',
+  default   => 0,
+);
+
 
 sub _build_environment {
   my $self = shift;
@@ -107,18 +116,41 @@ sub _build_ppi_doc {
 
   if ($self->has_filename) {
     my $doc = PPI::Document->new($self->filename);
-    die "Failed to parse file: " . $self->filename unless $doc;
-    return $doc;
+    return $doc if $doc;
+    die "Failed to parse file: " . $self->filename unless $self->lenient_ppi;
+    open(my $fh, '<', $self->filename)
+      or die "Failed to parse file (and can't re-read): " . $self->filename;
+    my $src = do { local $/; <$fh> };
+    close $fh;
+    return $self->_ppi_with_fallback($src);
   }
   elsif ($self->has_code) {
     my $code = $self->code;
     my $doc = PPI::Document->new(\$code);
-    die "Failed to parse code" unless $doc;
-    return $doc;
+    return $doc if $doc;
+    die "Failed to parse code" unless $self->lenient_ppi;
+    return $self->_ppi_with_fallback($code);
   }
   else {
     die "Must provide either 'filename' or 'code'";
   }
+}
+
+# DEBUG/TEST: binary-search for the first line PPI can't parse, truncate there.
+# Only called when lenient_ppi is set.
+sub _ppi_with_fallback {
+  my ($self, $src) = @_;
+  my @lines = split /\n/, $src;
+  my ($lo, $hi) = (0, $#lines);
+  while ($lo < $hi) {
+    my $mid = int(($lo + $hi) / 2);
+    my $partial = join("\n", @lines[0..$mid]);
+    if (PPI::Document->new(\$partial)) { $lo = $mid + 1; }
+    else                               { $hi = $mid;     }
+  }
+  warn "PCL [lenient-ppi]: truncating at line $lo due to PPI parse failure\n";
+  my $partial = join("\n", @lines[0..($lo-1)]);
+  return PPI::Document->new(\$partial);
 }
 
 
@@ -288,6 +320,7 @@ sub _insert_variable_forward_declarations {
   my %runtime_vars = map { $_ => 1 } qw(
     $_ @_ %_args @ARGV @INC %ENV %INC %SIG $@
     $1 $2 $3 $4 $5 $6 $7 $8 $9
+    $0 $$ $?
   );
 
   my %declared;    # variables with defvar
@@ -694,9 +727,21 @@ sub _process_variable_statement {
 
   # Handle top-level 'my' declarations - need pl-my for BEGIN block visibility
   # Inside subs, my uses regular let bindings (handled elsewhere)
+  # Exception: if the var was renamed by _with_declarations (closure capture at pkg level),
+  # skip _process_my_toplevel_declaration and fall through to the rename handling below.
   if ($declarator eq 'my' && $self->environment->in_subroutine == 0) {
-    $self->_process_my_toplevel_declaration($stmt, \@parts, $perl_code);
-    return;
+    my $scope_renames = $self->{_current_scope_new_renames} // {};
+    my $var_for_check;
+    for my $p (@parts) {
+      my $ref = ref($p);
+      last if $ref eq 'PPI::Structure::List';
+      if ($ref eq 'PPI::Token::Symbol') { $var_for_check = $p->content; last; }
+    }
+    unless (defined $var_for_check && exists $scope_renames->{$var_for_check}) {
+      $self->_process_my_toplevel_declaration($stmt, \@parts, $perl_code);
+      return;
+    }
+    # Fall through: this var was renamed for closure capture — handle via rename path
   }
 
   # Check if this is a state declaration inside a sub
@@ -728,6 +773,57 @@ sub _process_variable_statement {
     $self->_emit(";; $perl_code (bare declaration)");
     $self->_emit("");
     return;
+  }
+
+  # Special case: scalar 'my $var = EXPR' inside a sub where $var was renamed by
+  # _with_declarations (captured by a closure). Parse only the RHS with the rename
+  # for $var temporarily absent so that '$var' in the RHS refers to the outer scope.
+  # This handles 'my $i = $i + 1' shadowing correctly (outer $i → 5, not the new lex box).
+  if ($declarator eq 'my') {
+    my $scope_renames = $self->{_current_scope_new_renames} // {};
+
+    # Find the declared scalar variable (skip if list declaration)
+    my $var_name;
+    for my $p (@parts) {
+      my $ref = ref($p);
+      last if $ref eq 'PPI::Structure::List';  # list decl — handled below
+      if ($ref eq 'PPI::Token::Symbol') { $var_name = $p->content; last; }
+    }
+
+    if (defined $var_name && exists $scope_renames->{$var_name}) {
+      # Find '=' and split into RHS tokens
+      my $eq_idx = -1;
+      for my $i (0 .. $#parts) {
+        if (ref($parts[$i]) eq 'PPI::Token::Operator' && $parts[$i]->content eq '=') {
+          $eq_idx = $i; last;
+        }
+      }
+      if ($eq_idx >= 0) {
+        my @rhs_parts = @parts[$eq_idx + 1 .. $#parts];
+        my $new_name  = $scope_renames->{$var_name};
+
+        # Temporarily remove new rename so RHS sees the outer/old binding for $var_name
+        my $old_rn      = $self->{_current_scope_old_renames} // {};
+        my $env_renames = $self->environment->state_var_renames // {};
+        my %temp = %$env_renames;
+        if (defined $old_rn->{$var_name}) {
+          $temp{$var_name} = $old_rn->{$var_name};
+        } else {
+          delete $temp{$var_name};
+        }
+        $self->environment->state_var_renames(\%temp);
+
+        my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt);
+
+        # Re-apply new rename
+        $self->environment->state_var_renames($env_renames);
+
+        $self->_emit(";; $perl_code");
+        $self->_emit("(pl-my-= $new_name $rhs_cl)") if defined $rhs_cl && $rhs_cl ne '';
+        $self->_emit("");
+        return;
+      }
+    }
   }
 
   # Parse with PExpr (handles declarator extraction)
@@ -1616,19 +1712,40 @@ my $anon_block_counter = 0;
 # Counter for unique state variable names
 my $state_var_counter = 0;
 
+# Counter for unique lexical variable names (used in symbol-macrolet inside subs)
+my $lex_var_counter = 0;
+
 # Parse a block as a named function for eval/sub blocks
 # Returns the generated function name
 # $params is arrayref: [] for eval/sub
 # $is_anon_sub: 1 for sub{} anonymous subs (adds &rest %_args + @_ binding)
+# $return_lambda: 1 = return a (lambda ...) CL string instead of emitting (defun ...)
 # Note: grep/map/sort now use parse_block_to_cl_string with inline lambdas
 sub parse_block_as_function {
-  my $self        = shift;
-  my $block       = shift;  # PPI::Structure::Block
-  my $params      = shift // [];  # Parameter names
-  my $is_anon_sub = shift // 0;   # 1 = anonymous sub (receives call args via @_)
+  my $self          = shift;
+  my $block         = shift;  # PPI::Structure::Block
+  my $params        = shift // [];  # Parameter names
+  my $is_anon_sub   = shift // 0;   # 1 = anonymous sub (receives call args via @_)
+  my $return_lambda = shift // 0;   # 1 = return lambda string, don't emit defun
 
-  # Generate unique function name
+  # Generate unique function name (used only for defun path)
   my $func_name = sprintf("--anon-block-%d--", ++$anon_block_counter);
+
+  # For $return_lambda: redirect all _emit calls to a temp section so we
+  # can collect the output as a string to return inline.
+  my ($saved_sections, $saved_cur_section, $saved_cur_bucket, $saved_indent);
+  if ($return_lambda) {
+    $saved_sections    = $self->_sections;
+    $saved_cur_section = $self->_cur_section;
+    $saved_cur_bucket  = $self->_cur_bucket;
+    $saved_indent      = $self->indent_level;
+    $self->_sections([{
+      pkg => '_lambda_', preamble => [], declarations => [], definitions => [], runtime => [],
+    }]);
+    $self->_cur_section(0);
+    $self->_cur_bucket('runtime');
+    $self->indent_level(0);
+  }
 
   # For anonymous subs, detect state variables and wrap in outer let.
   # This mirrors the logic in _process_sub_statement for named subs.
@@ -1663,7 +1780,11 @@ sub parse_block_as_function {
   my $params_cl = $is_anon_sub ? '&rest %_args' : join(' ', @$params);
 
   # Emit the function definition
-  $self->_emit("(defun $func_name ($params_cl)");
+  if ($return_lambda) {
+    $self->_emit("(lambda ($params_cl)");
+  } else {
+    $self->_emit("(defun $func_name ($params_cl)");
+  }
   $self->indent_level($self->indent_level + 1);
 
   if ($is_anon_sub) {
@@ -1715,12 +1836,28 @@ sub parse_block_as_function {
   }
 
   $self->indent_level($self->indent_level - 1);
-  $self->_emit(")");  # close defun
+  $self->_emit(")");  # close defun/lambda
 
   # Close outer state let if we opened one
   if (%state_renames) {
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");  # close state let
+  }
+
+  if ($return_lambda) {
+    # Collect all emitted lines from temp section and return as lambda string
+    my $temp = $self->_sections->[0];
+    my @lines = (
+      @{$temp->{preamble}},
+      @{$temp->{declarations}},
+      @{$temp->{definitions}},
+      @{$temp->{runtime}},
+    );
+    $self->_sections($saved_sections);
+    $self->_cur_section($saved_cur_section);
+    $self->_cur_bucket($saved_cur_bucket);
+    $self->indent_level($saved_indent);
+    return @lines ? join("\n", @lines) : "(lambda () nil)";
   }
 
   $self->_emit("");  # Blank line after function
@@ -1785,6 +1922,42 @@ sub parse_block_to_cl_string {
   } else {
     return "nil";
   }
+}
+
+
+# Parse a block that contains hash key-value pairs: {key => val, ...}
+# Used for map({key=>$_}, LIST) where the block is a hash constructor.
+# Returns CL string: "(make-pl-box (pl-hash key val ...))"
+sub parse_hash_block_to_cl_string {
+  my $self  = shift;
+  my $block = shift;  # PPI::Structure::Block
+
+  my @raw = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@raw == 1 && $raw[0]->isa('PPI::Statement')) {
+    @raw = grep { ref($_) !~ /Whitespace|Comment/ } $raw[0]->children();
+  }
+
+  my $result;
+  eval {
+    my $expr_o = Pl::PExpr->new(
+      e           => \@raw,
+      environment => $self->environment,
+      parser      => $self,
+    );
+    my $pair_ids = $expr_o->parse_list(\@raw);
+    my ($top_node, $top_id) = $expr_o->make_node_insert('hash_init');
+    for my $id (@$pair_ids) {
+      $expr_o->add_child_to_node($top_id, $id);
+    }
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => 0,
+    );
+    $result = $gen->generate($top_id);
+  };
+  die $@ if $@ && $@ =~ /^PCL:/;
+  return $result // '(make-pl-box (pl-hash))';
 }
 
 
@@ -1863,6 +2036,38 @@ sub _find_symbols_in_list {
   return @vars;
 }
 
+# Return a hashref of all symbol names referenced inside any nested 'sub { }' blocks
+# found within $elements. These are the variables "captured" by closures.
+# Only direct PPI children's sub-blocks are searched; the caller intersects
+# the result with _find_all_declarations to know which to rename.
+sub _vars_referenced_in_closures {
+  my ($self, $elements) = @_;
+  my @elems = ref($elements) eq 'ARRAY' ? @$elements : ($elements);
+  my %captured;
+  for my $elem (@elems) {
+    next unless ref($elem) && $elem->can('find');
+    my $sub_kws = $elem->find(
+      sub { $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }
+    ) || [];   # PPI returns 0 (not undef) when nothing found — use || not //
+    for my $kw (@$sub_kws) {
+      # Skip NAMED subs (sub foo { ... }) — they are global defuns, not closures.
+      # Only anonymous subs (sub { ... }) capture variables from the enclosing scope.
+      # To detect named subs: the first non-whitespace sibling after 'sub' is a Word (the name).
+      my $first = $kw->next_sibling;
+      $first = $first->next_sibling while $first && $first->isa('PPI::Token::Whitespace');
+      next if $first && $first->isa('PPI::Token::Word');  # named sub — skip
+
+      # Walk forward to find the block (skipping prototypes/attributes for anon subs)
+      my $sib = $kw->next_sibling;
+      $sib = $sib->next_sibling while $sib && !$sib->isa('PPI::Structure::Block');
+      next unless $sib;
+      my $syms = $sib->find('PPI::Token::Symbol') || [];  # same: || not //
+      $captured{$_->content} = 1 for @$syms;
+    }
+  }
+  return \%captured;
+}
+
 # Common helper: wrap emitted code with let for any 'my' declarations
 # Usage: $self->_with_declarations($ppi_elements, sub { ... emit code ... });
 # $ppi_elements can be a single PPI element or arrayref of elements to scan
@@ -1887,25 +2092,67 @@ sub _with_declarations {
                 map { $_->{var} }
                 grep { $_->{type} eq 'my' } @all_decls;
 
+  # When inside a subroutine, rename 'my' vars that are captured by nested closures.
+  # Fresh names (e.g. $i__lex__3) are never defvar'd, so the CL 'let' creates a
+  # LEXICAL binding. Lambdas then capture the correct per-call copy, not a dynamic ref.
+  my %new_renames;  # original perl name → unique CL name
+  my %old_renames;  # original perl name → previous rename entry (undef if absent)
+  if (@my_vars) {
+    my $captured  = $self->_vars_referenced_in_closures($elements);
+    my $existing  = $self->environment->state_var_renames // {};
+    for my $var (@my_vars) {
+      next unless $captured->{$var};
+      my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+      $sigil //= '$'; $bare //= $var;
+      (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+      my $unique = sprintf('%s%s__lex__%d', $sigil, $slug, ++$lex_var_counter);
+      $new_renames{$var} = $unique;
+      $old_renames{$var} = $existing->{$var};  # undef if no prior rename
+    }
+  }
+
   # Wrap in let if we have declarations
   if (@my_vars) {
+    # Build let bindings using the (possibly renamed) CL variable names
     my $bindings = join(" ", map {
-      my $sigil = substr($_, 0, 1);
+      my $let_var = $new_renames{$_} // $_;
+      my $sigil = substr($let_var, 0, 1);
       my $init = $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                : $sigil eq '%' ? "(make-hash-table :test #'equal)"
                :                 '(make-pl-box nil)';
-      "($_ $init)"
+      "($let_var $init)"
     } @my_vars);
     $self->_emit("(let ($bindings)");
     $self->indent_level($self->indent_level + 1);
 
-    # Track these vars as let-bound so _emit replaces pl-scalar-= with box-set,
-    # preventing (proclaim 'special) side-effects that would convert future let
-    # bindings from lexical to dynamic (breaking closure capture).
+    # Track renamed/original vars as let-bound so _emit replaces pl-scalar-= with
+    # pl-my-= (box-set), preventing the proclaim-special side-effect that would
+    # turn future let bindings from lexical to dynamic and break closure capture.
     my $old_let_vars = $self->{_let_bound_vars};
-    $self->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @my_vars };
+    my @bound_names = map { $new_renames{$_} // $_ } @my_vars;
+    $self->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @bound_names };
+
+    # Apply new renames to environment so ExprToCL emits the unique CL names.
+    # Also expose them via _current_scope_new_renames for _process_variable_statement
+    # to split RHS parsing (handles 'my $i = $i + 1' shadowing correctly).
+    my $saved_env_renames;
+    my $saved_scope_renames = $self->{_current_scope_new_renames};
+    if (%new_renames) {
+      $saved_env_renames = $self->environment->state_var_renames // {};
+      my %merged = (%$saved_env_renames, %new_renames);
+      $self->environment->state_var_renames(\%merged);
+      $self->{_current_scope_new_renames} = \%new_renames;
+      $self->{_current_scope_old_renames} = \%old_renames;
+    }
 
     $emit_body->();
+
+    # Restore rename map
+    if (%new_renames) {
+      $self->environment->state_var_renames($saved_env_renames);
+      $self->{_current_scope_new_renames} = $saved_scope_renames;
+      delete $self->{_current_scope_old_renames};
+    }
 
     $self->{_let_bound_vars} = $old_let_vars;
     $self->indent_level($self->indent_level - 1);
@@ -2430,9 +2677,13 @@ sub _process_sub_statement {
     local $self->{_current_state_vars} = { map { $_ => 1 } @state_vars };
     my $saved_renames = $self->environment->state_var_renames;
     $self->environment->state_var_renames(\%state_renames) if %state_renames;
+    # Save package stack: inline 'package NAME;' inside a sub body must not leak
+    my $saved_pkg_stack = [@{$self->environment->package_stack}];
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     });
+    # Restore package stack in case of inline package switches inside the sub
+    $self->environment->package_stack($saved_pkg_stack);
     $self->environment->state_var_renames($saved_renames);
   }
   else {
@@ -2510,9 +2761,17 @@ sub _process_package_statement {
   else {
     # Simple form: package Foo;
     # This changes the current package until another package declaration
-    $self->_emit_package_preamble($pkg_name);
-    $self->environment->push_package($pkg_name);
-    # Note: no pop - package remains active until next package declaration
+    if ($self->environment->in_subroutine > 0) {
+      # Inside a sub body: just update the environment.
+      # Do NOT emit (in-package) or open a new section — that would break the
+      # SBCL reader's package context and corrupt the section/bucket structure.
+      # The environment's current_package is used by codegen (e.g. 1-arg bless).
+      $self->environment->push_package($pkg_name);
+    } else {
+      $self->_emit_package_preamble($pkg_name);
+      $self->environment->push_package($pkg_name);
+      # Note: no pop - package remains active until next package declaration
+    }
   }
 }
 
@@ -2536,8 +2795,7 @@ sub _emit_package_preamble {
     # Opening a new section here would place its preamble/declarations outside
     # the block in the linear assembly, causing scope and symbol-table confusion.
     $self->_emit(";;; package $pkg_name");
-    $self->_emit("(defpackage $cl_pkg");
-    $self->_emit("  (:use :cl :pcl))");
+    $self->_emit("(pl-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
@@ -2551,8 +2809,7 @@ sub _emit_package_preamble {
 
   $self->_with_bucket('preamble', sub {
     $self->_emit(";;; package $pkg_name");
-    $self->_emit("(defpackage $cl_pkg");
-    $self->_emit("  (:use :cl :pcl))");
+    $self->_emit("(pl-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
@@ -2656,6 +2913,15 @@ sub _process_include_statement {
     pop @tokens while @tokens && $tokens[-1]->isa('PPI::Token::Whitespace');
 
     if (@tokens) {
+      # Check if it's a version number (require 5.007, require v5.10, etc.) - no-op
+      if (@tokens == 1 && ($tokens[0]->isa('PPI::Token::Number')
+                           || ($tokens[0]->isa('PPI::Token::Word')
+                               && $tokens[0]->content =~ /^v\d/))) {
+        $self->_emit(";; $perl_code (version requirement, no-op)");
+        $self->_emit("");
+        return;
+      }
+
       # Check if it's a simple string literal (compile-time)
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
         my $path = $tokens[0]->string;
@@ -2691,7 +2957,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|feature|utf8|open|parent|base|Exporter|bytes|locale|integer)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
@@ -3255,6 +3521,7 @@ sub _compile_constant_value {
     $result = $gen->generate($node_id);
   };
 
+  die $@ if $@ && $@ =~ /^PCL:/;
   return $result // '0';  # Fallback
 }
 
@@ -3310,6 +3577,8 @@ sub _parse_expression_internal {
 
   if ($@) {
     my $error = $@;
+    # Hard errors (e.g. unsupported features) must propagate — don't swallow.
+    die $error if $error =~ /^PCL:/;
     $error =~ s/ at \/.*//s;  # Remove file/line info
     $error =~ s/\n.*//s;      # First line only
     return ("(progn ;; PARSE ERROR: $error\n nil)", []);
@@ -3358,11 +3627,13 @@ sub _emit {
 sub parse_file {
   my $class    = shift;
   my $filename = shift;
+  my %opts     = @_;
 
   # First pass: collect prototypes from all 'use'd modules
   my $proto_parser = $class->new(
     filename                => $filename,
     collect_prototypes_only => 1,
+    %opts,
   );
   $proto_parser->parse;
 
@@ -3370,6 +3641,7 @@ sub parse_file {
   my $parser = $class->new(
     filename    => $filename,
     environment => $proto_parser->environment,
+    %opts,
   );
   return $parser->parse;
 }
@@ -3378,11 +3650,13 @@ sub parse_file {
 sub parse_code {
   my $class = shift;
   my $code  = shift;
+  my %opts  = @_;
 
   # First pass: collect prototypes
   my $proto_parser = $class->new(
     code                    => $code,
     collect_prototypes_only => 1,
+    %opts,
   );
   $proto_parser->parse;
 
@@ -3390,6 +3664,7 @@ sub parse_code {
   my $parser = $class->new(
     code        => $code,
     environment => $proto_parser->environment,
+    %opts,
   );
   return $parser->parse;
 }
@@ -3621,6 +3896,7 @@ sub _compile_default_expr {
   };
 
   if ($@) {
+    die $@ if $@ =~ /^PCL:/;
     warn "Failed to compile default expression '$expr': $@";
     return undef;
   }

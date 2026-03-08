@@ -1286,6 +1286,21 @@ sub parse_list {
   return \@node_ids;
 }
 
+# Returns true if a PPI::Structure::Block looks like a hash constructor:
+# first significant token is a bareword followed by =>
+# e.g., {a => $_, b => $x}
+sub _block_is_hash_constructor {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return @ch >= 2
+      && ref($ch[0]) eq 'PPI::Token::Word'
+      && ref($ch[1]) eq 'PPI::Token::Operator'
+      && $ch[1]->content() eq '=>';
+}
+
 
 # This replaces all sub calls in an expression.
 # It use known number of parameters for subs and priorities.
@@ -1322,12 +1337,110 @@ sub handle_subcalls {
       next;
     }
 
+    # Handle &$scalar(args) and &{expr}(args) — code ref call via & sigil
+    # e.g., &$foo(1, 2)      -> (pl-funcall-ref $foo 1 2)
+    # e.g., &{$arr[0]}(args) -> (pl-funcall-ref ($arr[0]) args...)
+    if (ref($now) eq 'PPI::Token::Cast' && $now->content() eq '&'
+        && $i + 2 < scalar(@$e) && $self->is_list($e->[$i+2])) {
+      my $operand = $next;
+      my $list    = $e->[$i+2];
+      my $ref_id;
+      if (ref($operand) eq 'PPI::Token::Symbol' && $operand->content() =~ /^\$/) {
+        # &$scalar(args)
+        $ref_id = $self->parse([$operand]);
+      } elsif (ref($operand) eq 'PPI::Structure::Block') {
+        # &{expr}(args) — parse the expression inside the braces
+        my @blk_ch = grep { ref($_) !~ /Whitespace/ } $operand->children();
+        if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
+          @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
+        }
+        $ref_id = @blk_ch ? $self->parse(\@blk_ch) : undef;
+      }
+      if (defined $ref_id) {
+        my($top_node, $top_id) = $self->make_node_insert('ref_funcall');
+        $self->add_child_to_node($top_id, $ref_id);
+        my $c_ids = $self->make_nodes_from_list($list);
+        for my $c_id (@$c_ids) {
+          $self->add_child_to_node($top_id, $c_id);
+        }
+        # 4-arg splice: replace 3 elements (Cast+Symbol+List) with 1 node,
+        # preserving any elements after $i+2 (e.g. comma and more args).
+        splice @$e, $i, 3, $top_node;
+        next;
+      }
+    }
+
     next
         if !$self->is_word($now); # Only want function calls.
 
     say "handle_subcalls() Look for subname(..), was word. Is next list ",
         ($self->is_list($next) ? "Yes" : "No"), ". Dump:", dump $next
         if 8 & DEBUG;
+
+    # Handle grep/map( { BLOCK } LIST ) — paren form
+    # e.g., map({$_} @list) — PPI gives Structure::List wrapping a Statement
+    #   Structure::List → Statement → [Block, rest...]
+    if ($self->is_list($next)) {
+      my $func_name = $now->content();
+      if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort') {
+        # PPI wraps the list content in a Statement — unwrap it
+        my @outer_ch = grep { ref($_) !~ /Whitespace/ } $next->children();
+        my @inner_ch;
+        if (@outer_ch == 1 && $outer_ch[0]->isa('PPI::Statement')) {
+          @inner_ch = grep { ref($_) !~ /Whitespace/ } $outer_ch[0]->children();
+        } else {
+          @inner_ch = @outer_ch;
+        }
+        if (@inner_ch && ref($inner_ch[0]) eq 'PPI::Structure::Block') {
+          my $block = $inner_ch[0];
+          # Rest: children after the block, strip leading comma
+          my @rest_ch = @inner_ch[1..$#inner_ch];
+          @rest_ch = grep { !(ref($_) eq 'PPI::Token::Operator' && $_->content eq ',') } @rest_ch;
+          # If rest is a single Structure::List, expand its children
+          if (@rest_ch == 1 && ref($rest_ch[0]) eq 'PPI::Structure::List') {
+            @rest_ch = grep { ref($_) !~ /Whitespace/ } $rest_ch[0]->children();
+            # Unwrap inner Statement if present
+            if (@rest_ch == 1 && $rest_ch[0]->isa('PPI::Statement')) {
+              @rest_ch = grep { ref($_) !~ /Whitespace/ } $rest_ch[0]->children();
+            }
+          }
+
+          my($top_node, $top_id) = $self->make_node_insert('funcall');
+          my $node_id = $self->make_node($now);
+          $self->add_child_to_node($top_id, $node_id);
+
+          if ($self->has_parser) {
+            my $params = ($func_name eq 'sort') ? ['$a', '$b'] : ['$_'];
+            my $body_cl = _block_is_hash_constructor($block)
+              ? $self->parser->parse_hash_block_to_cl_string($block)
+              : $self->parser->parse_block_to_cl_string($block);
+            my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
+            $lambda_node->{params} = $params;
+            $lambda_node->{body_cl} = $body_cl;
+            $self->add_child_to_node($top_id, $lambda_id);
+          } else {
+            my @bc = $block->children();
+            my $be = $self->cleanup_for_parsing(\@bc);
+            my $bid = $self->parse($be);
+            my($sub_node, $sub_id) = $self->make_node_insert('anon_sub');
+            $self->add_child_to_node($sub_id, $bid);
+            $self->add_child_to_node($top_id, $sub_id);
+          }
+
+          if (@rest_ch) {
+            my $rest_expr = $self->cleanup_for_parsing(\@rest_ch);
+            my $rest_ids  = $self->parse_list($rest_expr);
+            for my $rid (@$rest_ids) {
+              $self->add_child_to_node($top_id, $rid);
+            }
+          }
+
+          splice @$e, $i, 2;
+          $e->[$i] = $top_node;
+          next;
+        }
+      }
+    }
 
     # Handle grep/map { BLOCK } LIST pattern
     # Uses Parser.pm callback for multi-statement blocks
@@ -1344,7 +1457,7 @@ sub handle_subcalls {
       }
 
       if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
-          || $func_name eq 'eval' || $has_block_proto) {
+          || $func_name eq 'eval' || $func_name eq 'do' || $has_block_proto) {
 
         # Create funcall with block as first param
         my($top_node, $top_id) = $self->make_node_insert('funcall');
@@ -1363,7 +1476,9 @@ sub handle_subcalls {
           # For eval and other blocks, use named function (may need to be called separately)
           if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort') {
             # Parse block body as CL string
-            my $body_cl = $self->parser->parse_block_to_cl_string($next);
+            my $body_cl = _block_is_hash_constructor($next)
+              ? $self->parser->parse_hash_block_to_cl_string($next)
+              : $self->parser->parse_block_to_cl_string($next);
 
             # Create inline_lambda node
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
@@ -1392,8 +1507,8 @@ sub handle_subcalls {
         }
 
         # For grep/map/sort: parse remaining elements as the list to process.
-        # For eval: the block is the only argument; don't consume what follows.
-        if ($func_name ne 'eval' && $i + 2 < scalar(@$e)) {
+        # For eval/do: the block is the only argument; don't consume what follows.
+        if ($func_name ne 'eval' && $func_name ne 'do' && $i + 2 < scalar(@$e)) {
           my @rest = @$e[$i + 2 .. $#$e];
           my $rest_list = $self->cleanup_for_parsing(\@rest);
           # Parse rest as comma-separated list (usually just one element)
@@ -1416,15 +1531,14 @@ sub handle_subcalls {
         # Use parser callback if available (handles multi-statement blocks)
         if ($self->has_parser) {
           # Anonymous subs receive call arguments via @_ (like named subs)
-          my $block_func_name = $self->parser->parse_block_as_function($next, [], 1);
+          my $lambda_str = $self->parser->parse_block_as_function($next, [], 1, 1);
 
-          # Create a func_ref node that holds the function name
+          # Create a func_ref node that holds the lambda string inline
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-          $ref_node->{func_name} = $block_func_name;
+          $ref_node->{raw_lambda} = $lambda_str;
 
-          # Replace sub { } with the function reference
-          splice @$e, $i, 2;
-          $e->[$i] = $ref_node;
+          # Replace sub { } with the function reference (4-arg splice preserves comma)
+          splice @$e, $i, 2, $ref_node;
         } else {
           # Fallback: parse block as expression (single statement only)
           my @block_children = $next->children();
@@ -1435,9 +1549,8 @@ sub handle_subcalls {
           my($sub_node, $sub_id) = $self->make_node_insert('anon_sub');
           $self->add_child_to_node($sub_id, $block_id);
 
-          # Replace sub { } with the anon_sub
-          splice @$e, $i, 2;
-          $e->[$i] = $sub_node;
+          # Replace sub { } with the anon_sub (4-arg splice preserves comma)
+          splice @$e, $i, 2, $sub_node;
         }
         next;
       }
@@ -1768,7 +1881,9 @@ sub handle_subcalls {
       if ($self->is_word($maybe_fh)) {
         my $fh_name = $maybe_fh->content;
         if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
-          $is_fh = 1;
+          # Not a filehandle if followed by -> (class method call: Foo->bar())
+          my $after_fh = $e->[$fh_end + 1];
+          $is_fh = 1 unless $after_fh && $self->is_arrow_op($after_fh);
         }
       }
       # Check for block filehandle syntax: print {$expr} LIST

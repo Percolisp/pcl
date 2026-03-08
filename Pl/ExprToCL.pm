@@ -144,6 +144,18 @@ my %SPECIAL_VARS = (
   '$;'  => '|$;|',
   '$,'  => '|$,|',
   '$]'  => '|$]|',
+  # Format/write special variables (rarely used; declare to prevent CL read errors)
+  '$~'  => '|$~|',    # FORMAT_NAME
+  '$='  => '|$=|',    # FORMAT_LINES_PER_PAGE
+  '$-'  => '|$-|',    # FORMAT_LINES_LEFT
+  '$%'  => '|$%|',    # FORMAT_PAGE_NUMBER
+  '$:'  => '|$:|',    # FORMAT_LINE_BREAK_CHARACTERS
+  '$^L' => '|$^L|',   # FORMAT_FORMFEED
+  '$^A' => '|$^A|',   # ACCUMULATOR (for formline/write)
+  '$^'  => '|$^|',    # FORMAT_TOP_NAME
+  # ${^...} caret variables — stub implementations (return undef)
+  '${^WARNING_BITS}' => '*pl-undef*',   # warning bits bitmask (Perl internal)
+  '${^LAST_FH}'      => '*pl-undef*',   # last filehandle used (Perl internal)
 );
 
 # Generate CL operator/function name from Perl name
@@ -325,6 +337,11 @@ sub gen_leaf {
     if ($self->environment) {
       my $renames = $self->environment->state_var_renames;
       return $renames->{$content} if $renames && exists $renames->{$content};
+    }
+    # Unknown ${^...} caret variables — die so missing cases surface clearly.
+    if ($content =~ /^\$\{\^/) {
+      my $line = eval { $node->line_number } // '?';
+      die "PCL: unsupported special variable '$content' at line $line\n";
     }
     return $content;
   }
@@ -666,6 +683,30 @@ sub gen_funcall {
           my $label = $label_node->content();
           return "($cl_func $label)";
         }
+      }
+    }
+  }
+
+  # Special handling for do { } blocks - evaluates block inline, returns last value
+  if ($func_name eq 'do' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node)) {
+      if ($arg_node->{type} eq 'func_ref') {
+        my $func_ref = $self->gen_node($kids->[1]);
+        return "(funcall $func_ref)";
+      }
+      elsif ($arg_node->{type} eq 'anon_sub') {
+        my $block_kids = $self->expr_o->get_node_children($kids->[1]);
+        my @body_parts;
+        for my $kid_id (@$block_kids) {
+          push @body_parts, $self->gen_node($kid_id);
+        }
+        return "(progn " . join(' ', @body_parts) . ")";
+      }
+      elsif ($arg_node->{type} eq 'inline_lambda') {
+        # do { BLOCK } parsed as inline_lambda - just call it
+        my $body = $arg_node->{body_cl} // 'nil';
+        return "(progn $body)";
       }
     }
   }
@@ -1323,6 +1364,16 @@ sub gen_array_access {
   # Handle both plain $arr and package-qualified Pkg::$arr
   $arr =~ s/(^|::)\$/$1@/;
 
+  # Numeric-named arrays like @0, @1 are not valid Perl identifiers.
+  # $0[n] parses as @0[n] but @0 is never a real variable; return undef.
+  return '(pl-undef)' if $arr =~ /^@\d+$/;
+
+  # Apply rename map for @varname (closure/state variable captures)
+  if ($self->environment) {
+    my $renames = $self->environment->state_var_renames;
+    $arr = $renames->{$arr} if $renames && exists $renames->{$arr};
+  }
+
   # Use pl-aref-box in l-value context for modifying operations
   my $func = $self->lvalue_context ? 'pl-aref-box' : 'pl-aref';
   return "($func $arr $idx)";
@@ -1343,6 +1394,12 @@ sub gen_hash_access {
   # Convert $varname to %varname (Perl $hash{k} accesses %hash)
   # Handle both plain $hash and package-qualified Pkg::$hash
   $hash =~ s/(^|::)\$/$1%/;
+
+  # Apply rename map for %varname (closure/state variable captures)
+  if ($self->environment) {
+    my $renames = $self->environment->state_var_renames;
+    $hash = $renames->{$hash} if $renames && exists $renames->{$hash};
+  }
 
   # Use pl-gethash-box in l-value context for modifying operations
   my $func = $self->lvalue_context ? 'pl-gethash-box' : 'pl-gethash';
@@ -1704,6 +1761,7 @@ sub gen_func_ref {
   my $node_id = shift;
   my $kids    = shift;
 
+  return $node->{raw_lambda} if $node->{raw_lambda};
   my $func_name = $node->{func_name};
   return "#'$func_name";
 }
@@ -1725,6 +1783,7 @@ sub gen_inline_lambda {
 
 # Generate substitution s///
 # Output: (pl-subst "pattern" "replacement" :g :i ...)
+#         (pl-subst "pattern" (lambda () <cl-expr>) :g :e ...)  when /e
 sub gen_substitution {
   my $self = shift;
   my $node = shift;
@@ -1733,19 +1792,59 @@ sub gen_substitution {
   my $subst = $node->get_substitute_string;
   my $mods  = $node->get_modifiers;
 
-  # Escape backslashes and quotes for CL string literal
+  # Escape backslashes and quotes in pattern for CL string literal
   $match =~ s/\\/\\\\/g;
   $match =~ s/"/\\"/g;
-  $subst =~ s/\\/\\\\/g;
-  $subst =~ s/"/\\"/g;
 
   my @mod_strs;
   for my $mod (sort keys %$mods) {
     push @mod_strs, ":$mod";
   }
-
   my $mods_str = @mod_strs ? ' ' . join(' ', @mod_strs) : '';
+
+  # s///e: replacement is Perl code — parse it and wrap in a lambda
+  if ($mods->{e}) {
+    my $cl_expr = $self->_compile_subst_e_expr($subst);
+    return qq{(pl-subst "$match" (lambda () $cl_expr)$mods_str)};
+  }
+
+  # Normal case: escape replacement for CL string literal
+  $subst =~ s/\\/\\\\/g;
+  $subst =~ s/"/\\"/g;
   return qq{(pl-subst "$match" "$subst"$mods_str)};
+}
+
+# Parse a s///e replacement string as Perl and return CL code
+sub _compile_subst_e_expr {
+  my $self = shift;
+  my $expr = shift;
+
+  my $result = 'nil';
+  eval {
+    require PPI::Document;
+    require Pl::PExpr;
+    my $doc   = PPI::Document->new(\$expr);
+    my @stmts = $doc->children;
+    return unless @stmts;
+    my @parts = grep { ref($_) ne 'PPI::Token::Whitespace' } $stmts[0]->children;
+    return unless @parts;
+    my $expr_o = Pl::PExpr->new(
+      e        => \@parts,
+      full_PPI => $doc,
+      ($self->environment ? (environment => $self->environment) : ()),
+    );
+    my $node_id = $expr_o->parse_expr_to_tree(\@parts);
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => $self->indent_level,
+    );
+    $result = $gen->generate($node_id);
+  };
+  if ($@) {
+    warn "Failed to compile s///e expression '$expr': $@";
+  }
+  return $result;
 }
 
 

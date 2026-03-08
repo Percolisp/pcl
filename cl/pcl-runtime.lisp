@@ -111,6 +111,7 @@
    #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^|
    ;; Context
    #:*wantarray*
    ;; Call depth tracking (for pl-caller at top level)
@@ -125,7 +126,7 @@
    #:pl-tie-proxy-tie-obj #:pl-tie-proxy-saved-value
    #:pl-tie #:pl-untie #:pl-tied
    ;; Compile-time definition macros (for BEGIN block support)
-   #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
+   #:pl-defpackage #:pl-sub #:pl-declare-sub #:pl-our #:pl-my
    ;; Assignment forms (distinct from pl-setf for clarity)
    #:pl-scalar-= #:pl-array-= #:pl-hash-= #:pl-list-=
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -145,17 +146,49 @@
 ;;; Used by pl-caller to distinguish "called from a sub" vs "top level".
 (defvar *pcl-sub-call-depth* 0)
 
+;;; pl-defpackage: Create/update a Perl package namespace.
+;;; Wraps defpackage in eval-when so it runs at compile time (needed so that
+;;; subsequent in-package forms can find the package during compile-file), and
+;;; in handler-bind to suppress SBCL's "package at variance" warnings that fire
+;;; when pl-sub's compile-time shadow calls have already added symbols to the
+;;; shadow list before defpackage re-evaluates at load time.
+(defmacro pl-defpackage (name &rest options)
+  "Create/update a Perl package. Defaults to (:use :cl :pcl) when no options given."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (handler-bind ((warning #'muffle-warning))
+       (defpackage ,name ,@(or options '((:use :cl :pcl)))))))
+
 ;;; pl-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
 ;;; This matches Perl's semantics where subs are compiled immediately.
 ;;; Marks the symbol as :defined in *pl-declared-subs* for defined &sub support.
+;;;
+;;; IMPORTANT: We shadow the name before defining to create a package-local
+;;; symbol.  Without this, user-defined methods whose names match PCL built-ins
+;;; (e.g. sub PUSH / sub SHIFT) would redefine the global pcl:pl-push etc.
+;;; because packages (:use :pcl) inherit those symbols.  By shadowing first we
+;;; create a fresh local symbol; the body's built-in calls (pl-shift @_) were
+;;; already resolved at READ time to pcl::PL-SHIFT and are unaffected.
 (defmacro pl-sub (name params &body body)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
-     (setf (gethash ',name *pl-declared-subs*) :defined)
-     (defun ,name ,params
-       (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
-         ,@body))))
+     ;; Use the symbol's own package (e.g. P1 for P1::pl-tmc) so that
+     ;; package-qualified subs are defined in the right package regardless of
+     ;; the current *package*.  Fall back to *package* for unqualified names.
+     (let* ((target-pkg (or (symbol-package ',name) *package*))
+            (sym-name   (symbol-name ',name)))
+       ;; Shadow to prevent user methods from clobbering pcl:: built-ins with
+       ;; the same name (e.g. PUSH/SHIFT in Tie::Array).  The handler-bind
+       ;; muffles SBCL's "package at variance" warning that fires when defpackage
+       ;; is later re-evaluated and sees the extra shadow.
+       (handler-bind ((warning #'muffle-warning))
+         (shadow sym-name target-pkg))
+       (let ((local-sym (intern sym-name target-pkg)))
+         (setf (gethash local-sym *pl-declared-subs*) :defined)
+         (setf (symbol-function local-sym)
+               (lambda ,params
+                 (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
+                   ,@body)))))))
 
 ;;; pl-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
@@ -351,6 +384,15 @@
 (defvar |$,| (make-pl-box "") "Output field separator for print")
 ;;; Perl version number ($])
 (defvar |$]| (make-pl-box "5.030000") "Perl version number")
+;;; Format/write special variables (rarely used in modern code)
+(defvar |$~| (make-pl-box "") "FORMAT_NAME - name of current report format for write")
+(defvar |$=| (make-pl-box 60) "FORMAT_LINES_PER_PAGE - page length for write")
+(defvar |$-| (make-pl-box 0) "FORMAT_LINES_LEFT - lines left on page for write")
+(defvar |$%| (make-pl-box 0) "FORMAT_PAGE_NUMBER - current page number for write")
+(defvar |$:| (make-pl-box " \n-") "FORMAT_LINE_BREAK_CHARACTERS - word-break chars for write")
+(defvar |$^L| (make-pl-box (string #\Page)) "FORMAT_FORMFEED - formfeed char for write")
+(defvar |$^A| (make-pl-box "") "ACCUMULATOR - for formline/write output")
+(defvar |$^| (make-pl-box "") "FORMAT_TOP_NAME - top-of-page format name")
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -361,6 +403,10 @@
       ;; $/ = \N (reference to number) means record mode — chomp does nothing
       ((pl-box-p val) nil)
       (t (to-string val)))))
+
+;;; Match position tracking for pos() — must precede box-set which uses it
+(defvar *pl-match-pos* (make-hash-table :test 'eq)
+  "Hash table mapping boxed strings to their /g match positions")
 
 ;;; ------------------------------------------------------------
 ;;; Box accessors with lazy caching
@@ -389,6 +435,8 @@
     (setf (pl-box-value box) v
           (pl-box-nv-ok box) nil
           (pl-box-sv-ok box) nil)
+    ;; Perl: assigning to a scalar resets pos()
+    (remhash box *pl-match-pos*)
     ;; Preserve class from blessed boxes
     (when (and (pl-box-p value) (pl-box-class value))
       (setf (pl-box-class box) (pl-box-class value)))
@@ -491,7 +539,10 @@
                    ((null v) 0)
                    ((eq v t) 1)  ; CL's T from comparisons - Perl true is 1
                    ((stringp v) (parse-perl-number v))
-                   ((pl-box-p v) 0)  ; reference as number
+                   ((pl-box-p v) (object-address v))  ; reference/blessed scalar ref: address
+                   ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
+                   ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
+                   ((functionp v) (object-address v))  ; code ref: address
                    ((pl-typeglob-p v) 0)  ; typeglob as number
                    (t 0))))
           (setf (pl-box-nv box) n
@@ -549,12 +600,14 @@
                     ;; Fallback: just strip trailing zeros and dot
                     (string-right-trim "." (string-right-trim "0" s)))))))))
     ((numberp v) (write-to-string v))
-    ((pl-box-p v) (format nil "SCALAR(0x~X)" (object-address v)))
-    ((hash-table-p v) (format nil "HASH(0x~X)" (object-address v)))
-    ((vectorp v) (format nil "ARRAY(0x~X)" (object-address v)))
+    ((pl-box-p v) (format nil "SCALAR(0x~(~X~))" (object-address v)))
+    ((hash-table-p v) (format nil "HASH(0x~(~X~))" (object-address v)))
+    ((vectorp v) (format nil "ARRAY(0x~(~X~))" (object-address v)))
     ((pl-typeglob-p v) (format nil "*~A::~A"
                                (package-name (pl-typeglob-package v))
                                (pl-typeglob-name v)))
+    ;; Code reference - stringify as CODE(0xADDR) like Perl
+    ((functionp v) (format nil "CODE(0x~(~X~))" (object-address v)))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
@@ -1242,10 +1295,6 @@
                  (when escapep (write-char #\\ out))
                  (write-char c out))))))
 
-;;; Match position tracking for pos()
-(defvar *pl-match-pos* (make-hash-table :test 'eq)
-  "Hash table mapping boxed strings to their match positions")
-
 (defun pl-pos (var &optional new-pos)
   "Perl pos - get/set match position for /g regex.
    With one arg, returns current position (or nil).
@@ -1811,11 +1860,14 @@
                   ;; on both sides, e.g. ($a,$b) = ($b,$a).  box-set logic:
                   ;;   - pl-box with non-box inner → store inner (copy semantics)
                   ;;   - pl-box with box inner (reference) → store outer box
+                  ;;   - pl-box with class set (blessed non-hash) → preserve box (bless semantics)
                   ;;   - non-box → store as-is
                   (vector-push-extend
                    (if (pl-box-p item)
                        (let ((inner (pl-box-value item)))
-                         (if (pl-box-p inner) item inner))
+                         (if (or (pl-box-p inner) (pl-box-class item))
+                             item   ; reference or blessed: preserve the box
+                             inner))  ; plain scalar: snapshot value
                        item)
                    result)))))
       (add src))
@@ -2419,11 +2471,19 @@
   (let ((s (unbox start))
         (e (unbox end)))
     (cond
-      ;; Both are numbers (or numeric strings)
-      ((and (or (numberp s) (and (stringp s) (ppcre:scan "^-?\\d+$" s)))
-            (or (numberp e) (and (stringp e) (ppcre:scan "^-?\\d+$" e))))
+      ;; Both are numbers (or numeric strings, including floats like "2.18")
+      ;; Zero-padded strings like "00", "01" are excluded — they use string range.
+      ((and (or (numberp s)
+                (and (stringp s)
+                     (not (and (> (length s) 1) (char= (char s 0) #\0)))
+                     (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" s)))
+            (or (numberp e)
+                (and (stringp e)
+                     (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" e))))
        (let ((ns (truncate (to-number s)))
              (ne (truncate (to-number e))))
+         (when (> (- ne ns) 100000000)
+           (error "Integer overflow in range (~A .. ~A): range too large" ns ne))
          (if (<= ns ne)
              (coerce (loop for i from ns to ne collect i) 'vector)
              (make-array 0))))
@@ -2441,6 +2501,8 @@
                (vector-push-extend current result)
                (when (string= current e) (return))
                (setf current (magical-string-increment current))
+               ;; If magical-string-increment returned a number (non-alpha carry), stop
+               (unless (stringp current) (return))
                (when (> (length current) max-len) (return)))
              result)))
       ;; Fallback: treat as numbers
@@ -2680,10 +2742,13 @@
   (pl-aref (unbox ref) idx))
 
 (defun pl-array-last-index (arr)
-  "Perl $#arr - last index"
-  (if (vectorp arr)
-      (1- (length arr))
-      -1))
+  "Perl $#arr - last index. Accepts raw vectors (@arr) or boxed array refs ($aref).
+   Handles both single-boxed (old autovivified) and double-boxed (pl-backslash) refs."
+  (let* ((v (unbox arr))
+         (v (if (pl-box-p v) (unbox v) v)))
+    (if (vectorp v)
+        (1- (length v))
+        -1)))
 
 (defun pl-set-array-length (arr new-last-index)
   "Set array length by setting $#array. Perl semantics:
@@ -2717,16 +2782,25 @@
       `(pl-push-impl ,arr ,@items)))
 
 (defun pl-flatten-args (args)
-  "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors.
-   This implements Perl's array flattening semantics: foo(@arr) passes
-   @arr's elements as individual arguments, not as a single vector."
+  "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
+   This implements Perl's argument flattening: foo(@arr) and foo(%hash) spread their
+   elements as individual arguments."
   (let ((result (make-array (length args) :adjustable t :fill-pointer 0)))
     (dolist (arg args)
-      (if (and (vectorp arg) (not (stringp arg)))
-          ;; Raw vector = array passed in list context: spread its elements
-          (loop for elem across arg do (vector-push-extend elem result))
-          ;; Scalar (pl-box, string, number, etc.): keep as-is
-          (vector-push-extend arg result)))
+      (cond
+        ((and (vectorp arg) (not (stringp arg)))
+         ;; Raw vector = array passed in list context: spread its elements
+         (loop for elem across arg do (vector-push-extend elem result)))
+        ((and (hash-table-p arg) (not (gethash :__class__ arg)))
+         ;; Hash in argument context: spread to alternating key-value pairs.
+         ;; But NOT blessed objects (which have :__class__) — those stay as-is.
+         (maphash (lambda (k v)
+                    (vector-push-extend (make-pl-box k) result)
+                    (vector-push-extend (if (pl-box-p v) v (make-pl-box v)) result))
+                  arg))
+        (t
+         ;; Scalar (pl-box, string, number, etc.): keep as-is
+         (vector-push-extend arg result))))
     result))
 
 ;; Marker struct for flattened arrays in push/unshift
@@ -3242,23 +3316,26 @@
                  i)))))
     ;; Hash case
     ((hash-table-p collection)
-     (let ((remaining (gethash collection *hash-iterators*)))
-       ;; If no iterator exists or previous was exhausted, start fresh
-       (when (null remaining)
+     (multiple-value-bind (remaining exists-p)
+         (gethash collection *hash-iterators*)
+       ;; If not started yet, initialize iterator with all keys
+       (unless exists-p
          (let ((keys nil))
            (maphash (lambda (k v) (declare (ignore v)) (push k keys)) collection)
            (setf remaining (nreverse keys))
            (setf (gethash collection *hash-iterators*) remaining)))
-       ;; If still empty (hash has no keys), return empty list
+       ;; If remaining is empty, return exhaustion sentinel and reset iterator
        (if (null remaining)
-           (vector)
+           (progn
+             (remhash collection *hash-iterators*)
+             (if *wantarray* (vector) *pl-undef*))
+           ;; Return next key/val pair
            (let* ((key (car remaining))
                   (val (gethash key collection)))
              (setf (gethash collection *hash-iterators*) (cdr remaining))
-             ;; When iterator is exhausted, remove entry so next call starts fresh
-             (when (null (cdr remaining))
-               (remhash collection *hash-iterators*))
-             (vector key (unbox val))))))
+             (if *wantarray*
+                 (vector key (unbox val))
+                 (make-pl-box key))))))
     ;; Neither — return empty
     (t (vector))))
 
@@ -3493,7 +3570,7 @@
                 (,raw ,list)
                 (,vec (%pl-flatten-for-list ,raw)))
            (loop for ,item across ,vec
-                 do (let ((,var ,item))
+                 do (let ((,var (ensure-boxed ,item)))
                       ,(make-loop-iteration-body label body)
                       ,@(when continue-form (list continue-form)))
                  ,@(when label `(finally (return-from ,block-name nil)))))))))
@@ -3639,13 +3716,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
   (let* ((msg (pl-warn-build-message args))
          (handler (gethash "__WARN__" %SIG)))
     (cond
-      ;; Custom handler: call with @_ = (message)
-      ;; Perl anon subs compiled by PCL take no CL args; they access @_ dynamically
+      ;; Custom handler: call with message as argument ($_[0])
       ((and handler (functionp (unbox handler)))
-       (let* ((boxed (if (pl-box-p msg) msg (make-pl-box msg)))
-              (@_ (make-array 1 :adjustable t :fill-pointer 1
-                                :initial-contents (list boxed))))
-         (funcall (unbox handler))))
+       (let ((boxed (if (pl-box-p msg) msg (make-pl-box msg))))
+         (funcall (unbox handler) boxed)))
       ;; "IGNORE": suppress warning
       ((and handler (stringp (unbox handler))
             (string= (unbox handler) "IGNORE"))
@@ -4713,7 +4787,11 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
     (cond
       ;; Cache hit
       ((pl-cache-valid-p source-path cache-path)
-       (load cache-path)
+       ;; Muffle "package at variance" warnings: pl-sub's eval-when :compile-toplevel
+       ;; shadow calls run during compile-file, then defpackage re-runs at load time
+       ;; and sees the extra shadow — harmless but noisy.
+       (handler-bind ((warning #'muffle-warning))
+         (load cache-path))
        t)
       ;; Cache miss - transpile and cache
       (t
@@ -4727,13 +4805,16 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                                     :direction :output
                                     :if-exists :supersede)
                  (write-string lisp-code out))
-               (let ((fasl-path (compile-file temp-lisp :output-file cache-path
-                                              :print nil :verbose nil)))
+               ;; Muffle package-at-variance warnings during compile+load
+               (let ((fasl-path (handler-bind ((warning #'muffle-warning))
+                                  (compile-file temp-lisp :output-file cache-path
+                                                :print nil :verbose nil))))
                  (ignore-errors (delete-file temp-lisp))
                  (unless fasl-path
                    (error "compile-file failed for ~A" temp-lisp))
                  (pl-cleanup-old-cache)
-                 (load fasl-path)
+                 (handler-bind ((warning #'muffle-warning))
+                   (load fasl-path))
                  t))
              ;; Lisp mode: just cache .lisp
              (progn
@@ -4742,7 +4823,8 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                                     :if-exists :supersede)
                  (write-string lisp-code out))
                (pl-cleanup-old-cache)
-               (load cache-path)
+               (handler-bind ((warning #'muffle-warning))
+                 (load cache-path))
                t)))))))
 
 (defun pl-find-module-package (module-name)
@@ -4892,12 +4974,18 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
    With comparator fn, fn receives $a and $b and returns negative if a < b."
   (if list
       ;; Called with comparator: (pl-sort fn list)
-      (let ((fn list-or-fn)
-            (result (copy-seq (unbox list))))
+      (let* ((raw (unbox list))
+             (result (if (or (eq raw *pl-undef*) (null raw))
+                         (make-array 0)
+                         (copy-seq raw)))
+             (fn list-or-fn))
         (sort result (lambda (a b)
                        (< (funcall fn a b) 0))))
       ;; Called without comparator: (pl-sort list) - default string sort
-      (let ((result (copy-seq (unbox list-or-fn))))
+      (let* ((raw (unbox list-or-fn))
+             (result (if (or (eq raw *pl-undef*) (null raw))
+                         (make-array 0)
+                         (copy-seq raw))))
         (sort result (lambda (a b)
                        (string< (to-string a) (to-string b)))))))
 
@@ -5020,7 +5108,12 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun pl-funcall-ref (ref &rest args)
   "Call a code reference"
-  (apply (unbox ref) args))
+  (let ((fn (unbox ref)))
+    ;; Double-unbox: blessed coderefs are stored as box(inner-box(lambda, class="E"))
+    ;; after pl-bless wraps raw functions. One unbox gives the inner-box, not the fn.
+    (when (pl-box-p fn)
+      (setf fn (pl-box-value fn)))
+    (apply fn args)))
 
 ;;; ============================================================
 ;;; Type Functions
@@ -5028,13 +5121,10 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun pl-backslash (val)
   "Perl reference operator \\$x - returns a box containing the referenced value.
-   For scalars (boxes), returns a box containing the box (creating a reference).
-   For arrays/hashes, returns them directly as they're already references."
-  (if (pl-box-p val)
-      ;; Scalar: create a reference by wrapping in another box
-      (make-pl-box val)
-      ;; Array/hash: already a reference type
-      val))
+   For scalars (boxes): returns a box containing the box (reference to scalar).
+   For arrays/hashes: wraps in a box so pl-flatten-args won't spread it as @arr.
+   This makes \\@arr and \\%hash opaque references, not spreadable containers."
+  (make-pl-box val))
 
 (defun pl-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
@@ -5063,12 +5153,18 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                (and (fboundp sym) (symbol-function sym)))))))))
 
 (defun pl-cast-@ (val)
-  "Perl array dereference @{$ref} - unbox to get the array"
-  (unbox val))
+  "Perl array dereference @{$ref} - unbox to get the array.
+   Handles both old format (box containing vector) and new format
+   (box containing box containing vector, from pl-backslash)."
+  (let ((v (unbox val)))
+    (if (pl-box-p v) (unbox v) v)))
 
 (defun pl-cast-% (val)
-  "Perl hash dereference %{$ref} - unbox to get the hash"
-  (unbox val))
+  "Perl hash dereference %{$ref} - unbox to get the hash.
+   Handles both old format (box containing hash) and new format
+   (box containing box containing hash, from pl-backslash)."
+  (let ((v (unbox val)))
+    (if (pl-box-p v) (unbox v) v)))
 
 (defun pl-cast-$ (val)
   "Perl scalar dereference ${$ref} - get value from reference.
@@ -5109,11 +5205,19 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
        (pl-box-class val))
       ((and (hash-table-p inner) (gethash :__class__ inner))
        (gethash :__class__ inner))
-      ;; Scalar reference (box containing box)
-      ((pl-box-p inner) "SCALAR")
-      ;; Hash reference
+      ;; Reference box: inner is a pl-box - check what it wraps (ARRAY/HASH/SCALAR)
+      ((pl-box-p inner)
+       (let ((inner2 (pl-box-value inner)))
+         (cond
+           ;; Array reference: box containing vector (from pl-backslash @arr)
+           ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
+           ;; Hash reference: box containing hash-table (from pl-backslash %hash)
+           ((hash-table-p inner2) "HASH")
+           ;; Scalar reference: box containing box (from pl-backslash $x)
+           (t "SCALAR"))))
+      ;; Old-format hash reference (autovivified, single-boxed)
       ((hash-table-p inner) "HASH")
-      ;; Array reference (list or vector, but NOT strings)
+      ;; Old-format array reference (autovivified, single-boxed)
       ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
       ((functionp inner) "CODE")
@@ -5472,11 +5576,19 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
        ;; Also set on box if ref is a box (so box-set can copy it)
        (when (pl-box-p ref) (setf (pl-box-class ref) class-name)))
       ((pl-box-p inner)
-       ;; Scalar reference - store on the inner box
-       (setf (pl-box-class inner) class-name))
+       ;; Scalar reference: ref is the wrapper box (from pl-backslash), inner is the
+       ;; variable box it points to. Bless sets the class on the wrapper (the reference
+       ;; itself), NOT on what it points to. Then box-set will copy the class to the
+       ;; variable that holds the blessed ref.
+       (when (pl-box-p ref) (setf (pl-box-class ref) class-name)))
       (t
        ;; Array, code, or other ref type - store class on the box
-       (when (pl-box-p ref) (setf (pl-box-class ref) class-name)))))
+       (if (pl-box-p ref)
+           (setf (pl-box-class ref) class-name)
+           ;; ref is a raw function (e.g. anonymous sub from codegen). Wrap it in
+           ;; a new box with the class set so box-set can propagate the class to
+           ;; the variable box (box-set copies class from value-box to target-box).
+           (return-from pl-bless (make-pl-box ref class-name))))))
   ref)
 
 (defun pl-get-class (obj)
@@ -5530,7 +5642,11 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                      (pkg (find-package pkg-name)))
                 (when pkg
                   (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) pkg)))
-                    (when (and fn (fboundp fn))
+                    ;; Only dispatch to methods LOCAL to this class package.
+                    ;; Inherited symbols (e.g. pcl:pl-push) must be ignored so
+                    ;; that a class without a PUSH method doesn't accidentally
+                    ;; call the pcl built-in instead of signalling "no method".
+                    (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                       (return-from pl-method-call (apply fn obj args)))))))
             ;; Not found in any class in MRO
             (error "Can't locate method ~A via package ~A" method-name class-name))
@@ -5540,7 +5656,7 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
             (unless pkg
               (error "Package ~A not found for method call" class-name))
             (let ((fn (find-symbol (string-upcase (format nil "PL-~A" method-name)) pkg)))
-              (if (and fn (fboundp fn))
+              (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                   (apply fn obj args)
                   (error "Can't locate method ~A in package ~A" method-name class-name))))))))
 
@@ -5760,7 +5876,9 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
   "Create a substitution operation s///
    Modifiers are keywords like :g :i :s :m :x :e"
   (make-pl-subst-op :pattern (to-string pattern)
-                    :replacement (to-string replacement)
+                    :replacement (if (functionp replacement)
+                                     replacement
+                                     (to-string replacement))
                     :modifiers modifiers))
 
 (defun pl-tr (from to &rest modifiers)
@@ -5816,31 +5934,68 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
    In scalar context: return t if matched, nil otherwise.
    In list context (*wantarray* t): return vector of captures, or nil if no match.
    Also sets capture group variables $1, $2, ... $9.
-   Note: In Perl, captures are only updated on successful match."
+   Note: In Perl, captures are only updated on successful match.
+   /g in scalar context: iterates over matches, tracking pos in *pl-match-pos*.
+   /g in list context: returns all matches at once (no pos tracking).
+   /gc: keeps pos on failure instead of resetting it."
   (let* ((str (to-string (unbox string)))
          (pattern (pl-regex-match-pattern op))
          (modifiers (pl-regex-match-modifiers op))
-         (options (build-ppcre-options modifiers)))
+         (options (build-ppcre-options modifiers))
+         (global-p (getf modifiers :g))
+         (cont-p (getf modifiers :c)))
     (handler-case
         (let ((scanner (apply #'cl-ppcre:create-scanner pattern options)))
-          (multiple-value-bind (match-start match-end reg-starts reg-ends)
-              (cl-ppcre:scan scanner str)
-            (declare (ignore match-end))
-            (when match-start
-              ;; Clear and set capture groups only on success
-              (clear-capture-groups)
-              (set-capture-groups str reg-starts reg-ends)
-              ;; In list context, return captures as vector
-              (if *wantarray*
-                  (let* ((num-groups (length reg-starts))
-                         (captures (make-array num-groups :adjustable t :fill-pointer t)))
-                    (dotimes (i num-groups)
-                      (setf (aref captures i)
-                            (if (and (aref reg-starts i) (aref reg-ends i))
-                                (subseq str (aref reg-starts i) (aref reg-ends i))
-                                nil)))
-                    captures)
-                  t))))
+          (cond
+            ;; /g in list context: return all matches at once, no pos tracking
+            ((and global-p *wantarray*)
+             (let ((all-results nil))
+               (cl-ppcre:do-scans (ms me rs re scanner str)
+                 (if (> (length rs) 0)
+                     (dotimes (i (length rs))
+                       (push (if (and (aref rs i) (aref re i))
+                                 (subseq str (aref rs i) (aref re i))
+                                 nil)
+                             all-results))
+                     (push (subseq str ms me) all-results)))
+               (let* ((items (nreverse all-results))
+                      (result (make-array (length items) :adjustable t :fill-pointer t)))
+                 (loop for item in items for i from 0 do (setf (aref result i) item))
+                 (when items (clear-capture-groups))
+                 result)))
+            ;; /g in scalar context: iterate from current pos
+            ((and global-p (not *wantarray*))
+             (let ((start (or (gethash string *pl-match-pos*) 0)))
+               (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                   (cl-ppcre:scan scanner str :start start)
+                 (if match-start
+                     (progn
+                       (setf (gethash string *pl-match-pos*) match-end)
+                       (clear-capture-groups)
+                       (set-capture-groups str reg-starts reg-ends)
+                       t)
+                     (progn
+                       (unless cont-p
+                         (remhash string *pl-match-pos*))
+                       nil)))))
+            ;; No /g: single match
+            (t
+             (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                 (cl-ppcre:scan scanner str)
+               (declare (ignore match-end))
+               (when match-start
+                 (clear-capture-groups)
+                 (set-capture-groups str reg-starts reg-ends)
+                 (if *wantarray*
+                     (let* ((num-groups (length reg-starts))
+                            (captures (make-array num-groups :adjustable t :fill-pointer t)))
+                       (dotimes (i num-groups)
+                         (setf (aref captures i)
+                               (if (and (aref reg-starts i) (aref reg-ends i))
+                                   (subseq str (aref reg-starts i) (aref reg-ends i))
+                                   nil)))
+                       captures)
+                     t))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))
@@ -5871,8 +6026,12 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
    Also sets capture groups $1, $2, ... from the match."
   (let* ((str (to-string (unbox string-box)))
          (pattern (pl-subst-op-pattern op))
-         (replacement (perl-to-ppcre-replacement (pl-subst-op-replacement op)))
+         (raw-replacement (pl-subst-op-replacement op))
          (modifiers (pl-subst-op-modifiers op))
+         (eval-p (member :e modifiers))
+         (replacement (unless eval-p
+                        (perl-to-ppcre-replacement (if (stringp raw-replacement)
+                                                       raw-replacement ""))))
          (global-p (member :g modifiers))
          (case-insensitive (member :i modifiers))
          (single-line (member :s modifiers))
@@ -5884,23 +6043,45 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
                (scanner (apply #'cl-ppcre:create-scanner pattern options))
                (count 0)
                (result nil))
-          ;; First, set capture groups from the match
-          (multiple-value-bind (match-start match-end reg-starts reg-ends)
-              (cl-ppcre:scan scanner str)
-            (declare (ignore match-end))
-            (when match-start
-              (clear-capture-groups)
-              (set-capture-groups str reg-starts reg-ends)))
-          ;; Perform the substitution
-          (setf result (if global-p
-                           (cl-ppcre:regex-replace-all scanner str replacement)
-                           (cl-ppcre:regex-replace scanner str replacement)))
-          ;; Count replacements
-          (when (stringp result)
-            (if global-p
-                (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
-                (when (cl-ppcre:scan scanner str)
-                  (setf count 1))))
+          (if eval-p
+              ;; s///e: call lambda per match, setting $1..$9 from capture groups
+              ;; :simple-calls t → function receives (match g1 g2 ...) as strings
+              (let ((rep-fn (lambda (whole-match &rest groups)
+                              (declare (ignore whole-match))
+                              (incf count)
+                              (clear-capture-groups)
+                              (when (>= (length groups) 1) (setf $1 (or (nth 0 groups) *pl-undef*)))
+                              (when (>= (length groups) 2) (setf $2 (or (nth 1 groups) *pl-undef*)))
+                              (when (>= (length groups) 3) (setf $3 (or (nth 2 groups) *pl-undef*)))
+                              (when (>= (length groups) 4) (setf $4 (or (nth 3 groups) *pl-undef*)))
+                              (when (>= (length groups) 5) (setf $5 (or (nth 4 groups) *pl-undef*)))
+                              (when (>= (length groups) 6) (setf $6 (or (nth 5 groups) *pl-undef*)))
+                              (when (>= (length groups) 7) (setf $7 (or (nth 6 groups) *pl-undef*)))
+                              (when (>= (length groups) 8) (setf $8 (or (nth 7 groups) *pl-undef*)))
+                              (when (>= (length groups) 9) (setf $9 (or (nth 8 groups) *pl-undef*)))
+                              (to-string (funcall raw-replacement)))))
+                (setf result (if global-p
+                                 (cl-ppcre:regex-replace-all scanner str rep-fn :simple-calls t)
+                                 (cl-ppcre:regex-replace scanner str rep-fn :simple-calls t))))
+              ;; Normal s///: string replacement
+              (progn
+                ;; First, set capture groups from the match
+                (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                    (cl-ppcre:scan scanner str)
+                  (declare (ignore match-end))
+                  (when match-start
+                    (clear-capture-groups)
+                    (set-capture-groups str reg-starts reg-ends)))
+                ;; Perform the substitution
+                (setf result (if global-p
+                                 (cl-ppcre:regex-replace-all scanner str replacement)
+                                 (cl-ppcre:regex-replace scanner str replacement)))
+                ;; Count replacements
+                (when (stringp result)
+                  (if global-p
+                      (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
+                      (when (cl-ppcre:scan scanner str)
+                        (setf count 1))))))
           ;; Update the boxed string (and invalidate caches)
           (when (stringp result)
             (if (pl-box-p string-box)
@@ -6090,6 +6271,23 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar $VERSION (make-pl-box "1.50")))
 (defun pl-unimport (&rest args) (declare (ignore args)) nil)
+(defun pl-import (&rest args) (declare (ignore args)) nil)
+(in-package :pcl)
+
+;; Carp module stub - Carp loads utf8 which causes infinite loops in PCL
+;; Stub out the most commonly used functions so code that 'use Carp' works
+(defpackage :|Carp| (:use :cl :pcl))
+(in-package :|Carp|)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar $VERSION (make-pl-box "1.50")))
+(defun pl-croak (&rest args)
+  (error "Carp::croak: ~a" (if args (to-string (car args)) "")))
+(defun pl-confess (&rest args)
+  (error "Carp::confess: ~a" (if args (to-string (car args)) "")))
+(defun pl-carp (&rest args)
+  (format *error-output* "~a~%" (if args (to-string (car args)) "")))
+(defun pl-cluck (&rest args)
+  (format *error-output* "~a~%" (if args (to-string (car args)) "")))
 (defun pl-import (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 
