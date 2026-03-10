@@ -202,4 +202,33 @@ sub foo {
 print foo(42)->(), "\n";
 ', "42\n");
 
+# ============ TEST 13: package-level foreach closure capture ============
+# Regression test for the in_subroutine == 0 case: my $i inside a for loop
+# at package level, captured by a closure, must get a fresh binding per iteration.
+
+test_io("package-level foreach: each closure captures its own \$i", '
+my @foo;
+for (qw(0 1 2 3 4)) {
+    my $i = $_;
+    $foo[$_] = sub { $i };
+}
+print $foo[0]->(), "\n";
+print $foo[2]->(), "\n";
+print $foo[4]->(), "\n";
+', "0\n2\n4\n");
+
+test_io("package-level foreach: mutable captured \$i per iteration", '
+my @foo;
+for (qw(0 1 2 3 4)) {
+    my $i = $_;
+    $foo[$_] = sub { $i = shift if @_; $i };
+}
+# Mutate via each closure independently
+$foo[0]->(40);
+$foo[4]->(99);
+print $foo[0]->(), "\n";
+print $foo[4]->(), "\n";
+print $foo[2]->(), "\n";
+', "40\n99\n2\n");
+
 done_testing();

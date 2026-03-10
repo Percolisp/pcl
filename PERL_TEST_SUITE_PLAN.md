@@ -451,7 +451,7 @@ internals that have no sensible transpiler target.
 | 2.5G Chained method calls | ❌ TODO | ~30-50 |
 | 2.5H bop.t / heredoc.t hangs | ❌ TODO | unknown |
 | 2.5I use bytes | ❌ TODO | (see 1.8) |
-| 2.5J foreach var capture | ❌ TODO | 8 |
+| 2.5J foreach var capture | ✅ DONE (session 70) | 8 |
 | 2.5K Named inner sub closures | ❌ TODO | small |
 | 2.5L prototype() function | ❌ TODO | small |
 | 2.5M pos.t (pos() function) | ✅ DONE (session 64) | 17 |

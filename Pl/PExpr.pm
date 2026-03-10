@@ -1537,9 +1537,8 @@ sub handle_subcalls {
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
           $ref_node->{raw_lambda} = $lambda_str;
 
-          # Replace sub { } with the function reference
-          splice @$e, $i, 2;
-          $e->[$i] = $ref_node;
+          # Replace sub { } with the function reference (4-arg splice preserves comma)
+          splice @$e, $i, 2, $ref_node;
         } else {
           # Fallback: parse block as expression (single statement only)
           my @block_children = $next->children();
@@ -1550,9 +1549,8 @@ sub handle_subcalls {
           my($sub_node, $sub_id) = $self->make_node_insert('anon_sub');
           $self->add_child_to_node($sub_id, $block_id);
 
-          # Replace sub { } with the anon_sub
-          splice @$e, $i, 2;
-          $e->[$i] = $sub_node;
+          # Replace sub { } with the anon_sub (4-arg splice preserves comma)
+          splice @$e, $i, 2, $sub_node;
         }
         next;
       }
@@ -1883,7 +1881,9 @@ sub handle_subcalls {
       if ($self->is_word($maybe_fh)) {
         my $fh_name = $maybe_fh->content;
         if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
-          $is_fh = 1;
+          # Not a filehandle if followed by -> (class method call: Foo->bar())
+          my $after_fh = $e->[$fh_end + 1];
+          $is_fh = 1 unless $after_fh && $self->is_arrow_op($after_fh);
         }
       }
       # Check for block filehandle syntax: print {$expr} LIST

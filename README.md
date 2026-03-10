@@ -80,11 +80,11 @@ I am Rex and I bark
 
 **Beta.** The test suite runs 2507 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own internal test suite (`t/op/`, `t/base/`, etc.) passes ~6200 / ~7600 tests (~82%).
 
-Known gaps: `state` variable generator pattern, string `eval`, some `local` forms, XS/C extensions.
+Known gaps: `state` variable generator pattern, string `eval`, some `local` forms, XS/C extensions. Right now the bugs are shaken out by running Perl's internal tests, it is slow going.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 
-*(If this doesn't get shot down too hard, I'll put it on CPAN later.)*
+*(I'll put it on CPAN later, when it is closer to ready.)*
 
 ## License
 

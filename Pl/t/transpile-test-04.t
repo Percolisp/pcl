@@ -345,4 +345,20 @@ my @res = (map {a => $_}, ("chobb"));
 print $res[0]->{a}, "\n";
 ');
 
+test_transpile("map fat-comma returns key-value pairs", '
+my @pairs = map { $_ => uc $_ } "a".."c";
+print join(":", @pairs), "\n";
+', "a:A:b:B:c:C\n");
+
+test_transpile("map fat-comma builds hash", '
+my %h = map { $_ => uc $_ } "a".."c";
+print $h{b}, "\n";
+', "B\n");
+
+test_transpile("map simple block returns one element per input", '
+my @r = map { $_ } ("yoyodyne");
+print scalar(@r), "\n";
+print $r[0], "\n";
+', "1\nyoyodyne\n");
+
 done_testing();

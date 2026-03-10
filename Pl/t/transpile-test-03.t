@@ -328,4 +328,63 @@ my $e2 = exists &P2::p2_sub ? "y" : "n";
 print "$e1 $e2\n";
 ');
 
+# Regression: print UPPERCASE->chain() — uppercase/single-letter class name
+# was mistakenly consumed as a print filehandle, leaving -> at position 0.
+test_transpile("chained method: uppercase class name not treated as filehandle", '
+package B; sub new { bless {v => $_[1]}, $_[0] } sub val { $_[0]->{v} }
+package main;
+print B->new("ok")->val(), "\n";
+', "ok\n");
+
+test_transpile("chained method: ALLCAPS class name not treated as filehandle", '
+package DB; sub new { bless {}, $_[0] } sub ping { "pong" }
+package main;
+print DB->new()->ping(), "\n";
+', "pong\n");
+
+test_transpile("chained method: real filehandle still works", '
+print STDOUT "yes\n";
+', "yes\n");
+
+# Regression: bless sub { ... }, "Class" — anonymous sub in arg position
+# splice bug in PExpr.pm was eating the comma after sub { }, causing parse error.
+test_transpile("bless: anon sub blessed into class", '
+my $e1 = bless sub { 42 }, "E";
+print ref($e1), "\n";
+');
+
+test_transpile("bless: anon sub called after bless", '
+my $e1 = bless sub { return "hello" }, "E";
+print $e1->(), "\n";
+');
+
+# Regression: package NAME; inside a sub body must not open a new CL section.
+# Previously, package _foo; inside sub broke the section/bucket structure and
+# caused all subsequent top-level code to be emitted inside the sub body.
+test_transpile("package inside sub: inline switch does not leak", '
+sub make_foo {
+    package Foo;
+    return bless {}, "Foo";
+}
+my $f = make_foo();
+print ref($f), "\n";
+print "ok\n";
+');
+
+# Regression: ref() on blessed array/scalar refs passed through function args
+# %pl-flatten-list was stripping the class by extracting the inner value.
+test_transpile("bless: ref() on blessed array survives function call", '
+my $b = bless [], "MyArr";
+sub check_ref { my ($x) = @_; print ref($x), "\n"; }
+check_ref($b);
+');
+
+test_transpile("bless: ref() on blessed scalar survives function call", '
+my $tmp = "hello";
+my $s = \$tmp;
+my $b = bless $s, "MyScl";
+sub check_ref2 { my ($x) = @_; print ref($x), "\n"; }
+check_ref2($b);
+');
+
 done_testing();

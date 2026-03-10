@@ -907,7 +907,8 @@ sub _process_our_declaration {
         });
         unless ($is_empty_list) {
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-          if ($init_cl =~ /^\(progn\s+(.+)\)$/) {
+          if ($init_cl =~ /^\(progn\s+(.+)\)$/s ||
+              $init_cl =~ /^\(if \*wantarray\* \(vector\s+(.+)\) \(progn .+\)\)$/s) {
             $init_cl = "(pl-array-init $1)";
           }
           $self->_emit("(pl-array-= $var $init_cl)");
@@ -921,7 +922,8 @@ sub _process_our_declaration {
         });
         unless ($is_empty_list) {
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-          if ($init_cl =~ /^\(progn\s+(.+)\)$/) {
+          if ($init_cl =~ /^\(progn\s+(.+)\)$/s ||
+              $init_cl =~ /^\(if \*wantarray\* \(vector\s+(.+)\) \(progn .+\)\)$/s) {
             $init_cl = "(pl-hash $1)";
           }
           $self->_emit("(pl-hash-= $var $init_cl)");
