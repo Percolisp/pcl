@@ -11,6 +11,7 @@ use warnings;
 use Moo;
 
 use Scalar::Util qw/looks_like_number/;
+use Pl::PExpr qw(SCALAR_CTX LIST_CTX);
 
 # Code generator that transforms Pl::PExpr AST into Common Lisp code.
 # Follows conventions from CODEGEN_DESIGN.md:
@@ -1557,6 +1558,12 @@ sub gen_progn {
   my $ctx = $self->expr_o->get_node_context($node_id);
   if ($ctx == 1) {  # LIST_CTX = 1
     return "(vector $forms_str)";
+  }
+
+  # In unknown context with multiple forms, check wantarray at runtime.
+  # This handles: map { $_ => uc $_ } where the block runs in list context.
+  if (@forms > 1 && $ctx == SCALAR_CTX) {
+    return "(if *wantarray* (vector $forms_str) (progn $forms_str))";
   }
 
   return "(progn $forms_str)";
