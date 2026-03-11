@@ -4809,22 +4809,32 @@ Used e.g. by pl-skip to implement Test::More's skip() which calls (last SKIP)."
          (unless lisp-code
            (error "Failed to transpile ~A" source-path))
          (if *pcl-cache-fasl*
-             ;; FASL mode: write temp .lisp, compile to .fasl
-             (let ((temp-lisp (pl-compute-cache-path source-path t)))
+             ;; FASL mode: compile to PID-unique temp files, then rename
+             ;; atomically to cache-path.  Multiple parallel workers may race
+             ;; here; rename(2) is atomic within a filesystem so the last
+             ;; writer wins but the file is always consistent.
+             (let* ((pid       (sb-posix:getpid))
+                    (base-name (pathname-name cache-path))
+                    (pid-name  (format nil "~A-~A" base-name pid))
+                    (temp-lisp (make-pathname :defaults cache-path
+                                             :name pid-name :type "lisp"))
+                    (temp-fasl (make-pathname :defaults cache-path
+                                             :name pid-name :type "fasl")))
                (with-open-file (out temp-lisp
                                     :direction :output
                                     :if-exists :supersede)
                  (write-string lisp-code out))
-               ;; Muffle package-at-variance warnings during compile+load
-               (let ((fasl-path (handler-bind ((warning #'muffle-warning))
-                                  (compile-file temp-lisp :output-file cache-path
-                                                :print nil :verbose nil))))
+               (let ((compiled (handler-bind ((warning #'muffle-warning))
+                                 (compile-file temp-lisp :output-file temp-fasl
+                                               :print nil :verbose nil))))
                  (ignore-errors (delete-file temp-lisp))
-                 (unless fasl-path
+                 (unless compiled
                    (error "compile-file failed for ~A" temp-lisp))
+                 ;; Atomic replace: safe even if another worker beat us here.
+                 (rename-file temp-fasl cache-path)
                  (pl-cleanup-old-cache)
                  (handler-bind ((warning #'muffle-warning))
-                   (load fasl-path))
+                   (load cache-path))
                  t))
              ;; Lisp mode: just cache .lisp
              (progn
