@@ -100,7 +100,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-hslice last last-dynamic lc
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
-  mkdir my my-= next not oct open opendir or or-assign ord our pipe pop pos post++ post-- pre++
+  mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
   rename require require-file reset resolve-invocant return reverse rewinddir rindex rmdir say
   scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split
@@ -108,7 +108,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   string-concat study sub sub-defined sub-exists subst substr super-call sysread system syswrite
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
-  unlink unshift untie until use values vec version-string wantarray warn while xor ||
+  unlink unpack unshift untie until use values vec version-string wantarray warn while xor ||
 );
 
 # Only exceptions that need different CL names than p-<perl-op>

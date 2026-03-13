@@ -85,7 +85,7 @@
    ;; Time functions
    #:p-time #:p-times #:p-sleep #:p-study #:p-reset #:p-vec #:p-localtime #:p-gmtime
    ;; Process control
-   #:p-exit #:p-system #:p-backtick #:p-errno-string
+   #:p-exit #:p-system #:p-backtick #:p-errno-string #:p-stash
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
@@ -97,6 +97,7 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob
+   #:p-pack #:p-unpack
    #:p-grep #:p-map #:p-sort #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
@@ -108,7 +109,7 @@
    ;; Regex
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex
    ;; Capture groups
-   #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
+   #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^|
@@ -262,6 +263,9 @@
 (defvar $7 nil "Regex capture group 7")
 (defvar $8 nil "Regex capture group 8")
 (defvar $9 nil "Regex capture group 9")
+
+;;; Default variable ($_) - implicit loop variable and default for many operations
+(defvar $_ nil "Perl's $_ - default variable")
 
 ;;; Process ID ($$)
 (defvar $$ (sb-posix:getpid) "Process ID")

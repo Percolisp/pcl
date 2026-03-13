@@ -2236,6 +2236,18 @@ sub _process_while_statement {
   my $cond_cl = $cond ? $self->_parse_condition($cond) : "t";
   $cond_cl //= "t";
 
+  # while (<FH>) with no explicit assignment → implicitly assign to $_
+  # PPI: condition has a single Expression containing a single QuoteLike::Readline
+  if ($cond && $cond_cl =~ /^\(p-readline\b/) {
+    my @non_ws = grep { !ref($_) || ref($_) ne 'PPI::Token::Whitespace' } $cond->children;
+    if (@non_ws == 1 && ref($non_ws[0]) eq 'PPI::Statement::Expression') {
+      my @expr_ch = grep { ref($_) ne 'PPI::Token::Whitespace' } $non_ws[0]->children;
+      if (@expr_ch == 1 && ref($expr_ch[0]) eq 'PPI::Token::QuoteLike::Readline') {
+        $cond_cl = "(p-setf \$_ $cond_cl)";
+      }
+    }
+  }
+
   # Handle 'until' by negating
   if ($keyword eq 'until') {
     $cond_cl = "(p-not $cond_cl)";
@@ -3000,7 +3012,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re|version)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
