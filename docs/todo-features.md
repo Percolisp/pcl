@@ -18,8 +18,10 @@ Cross-references to `PERL_TEST_SUITE_PLAN.md` sections are in parentheses.
 or binding-stack exhaustion.  The process hangs rather than failing
 cleanly.
 
-**Blocked files:** `sort.t`, `reverse.t`, `local.t`, `kvaslice.t`,
-`kvhslice.t`.
+**Blocked files:** `sort.t`, `reverse.t`, `local.t`, `kvaslice.t`.
+
+*(Note: `kvhslice.t` was previously listed here but is now **fully passing**
+after the session 73 map fat-comma / `pl-hash-=` flattening fix.)*
 
 **Fix area:** `Pl/Parser.pm` `_process_use_statement` / `pl-require-file`
 in `cl/pcl-runtime.lisp`.  Likely a circular dependency or re-running
@@ -56,6 +58,22 @@ This requires annotating which `if` is in tail position.  See
 **Fix area:** `Pl/Parser.pm` `_process_if_statement`.
 
 *(PERL_TEST_SUITE_PLAN.md §C)*
+
+---
+
+### ~~`kvhslice.t` / `map { k => v }` fat-comma~~  ✅ DONE (session 73)
+
+`kvhslice.t` (3/3) now fully passes.  Root cause: `map { $_ => uc $_ }` was
+not returning key-value pairs because comma expressions in function bodies
+only returned the last value (scalar `progn` semantics).
+
+**Two-part fix:**
+1. `gen_progn` (ExprToCL.pm): SCALAR_CTX with ≥2 forms now generates
+   `(if *wantarray* (vector ...) (progn ...))` for runtime list/scalar dispatch.
+2. `pl-map` runtime: runs block in list context, flattens per-iteration
+   vector results into the output.
+3. `pl-hash-=` now uses `%pl-flatten-list` before iterating key-value pairs,
+   handling nested vectors and odd-length inputs without crashing.
 
 ---
 
@@ -406,7 +424,7 @@ Both fixes were present before this todo entry was written.
 
 | Feature | Tests affected | Tier | Plan ref |
 |---------|---------------|------|----------|
-| Tie::Array/Tie::Hash loader hang | ~200+ | 1 | §A |
+| Tie::Array/Tie::Hash loader hang | ~200+ (kvaslice, sort, reverse, local) | 1 | §A |
 | Implicit returns / bare-if | widespread | 1 | §C |
 | index.t / rindex | ~414 | 1 | §F |
 | $SIG{__DIE__} handler | ~50 | 1 | §D/1.4 |
@@ -426,6 +444,7 @@ Both fixes were present before this todo entry was written.
 | qr// first-class objects | small | 3 | — |
 | DESTROY finalizers | rare | 3 | — |
 | concat2.t (overload + magic vars) | 3 | 3 | §M |
+| ~~kvhslice.t / map fat-comma~~ | ✅ DONE (session 73) | — | — |
 | ~~hashassign.t crash~~ | ✅ DONE (session 71) | — | §E |
 | ~~Chained method calls~~ | ✅ DONE (session 70) | — | §G |
 | ~~Foreach closure var capture~~ | ✅ DONE (session 70) | — | §J |

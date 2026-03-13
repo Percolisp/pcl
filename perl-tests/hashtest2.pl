@@ -1,0 +1,12 @@
+use strict;
+my @comma = ("key", "value");
+my %comma = @comma;
+my @temp = %comma;
+my $r1 = \@comma;
+my $r2 = \@temp;
+print "ref(r1)=", ref($r1), "\n";
+print "ref(r2)=", ref($r2), "\n";
+print "r1 len=", scalar(@$r1), "\n";
+print "r2 len=", scalar(@$r2), "\n";
+print "r1[0]=", $r1->[0] // "undef", "\n";
+print "r2[0]=", $r2->[0] // "undef", "\n";

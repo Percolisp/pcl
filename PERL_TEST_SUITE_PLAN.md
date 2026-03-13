@@ -2,15 +2,28 @@
 
 ## Current State
 
-**5497+ / ~6393 tests passing (~86%+)**
-*(session 63 sweep, 2026-03-07, `--jobs 1 --timeout 60`, 98 files + 4 skipped)*
-*(session 64: lc.t cleanup frees ~57 false-failures; no new sweep run yet)*
+**6227 / ~7630 tests passing (~82%)**
+*(session 73 sweep, 2026-03-10, `--jobs 1 --timeout 60`, 98 files + 4 skipped)*
 
-Note: `-j8` sweep gives artificially low counts (~2168) due to SBCL FASL race
+Note: `-j8` sweep gives artificially low counts due to SBCL FASL race
 conditions when 8 parallel processes share the cache. Always use `--jobs 1`
 (or 2) for accurate counts.
 
-PCL suite: **53 files, 2493 tests**, all passing.
+PCL suite: **53 files, 2510 tests**, all passing.
+Fully passing (35): arith, arith2, assignwarn, blocks, bool, closure, cmpchain,
+cond, defined, defins, die, dor, exp, grep, hashassign, if, int, isa, kvhslice,
+lc, loopctl, lop, my, not, num, or, pow, push, qq, recurse, sleep, sub, translate,
+unshift, while.
+
+### Session 73 changes (2026-03-10)
+- **`map { $_ => uc $_ }` key-value pairs**: Two-part fix:
+  1. `gen_progn` (ExprToCL.pm): SCALAR_CTX with ≥2 forms → `(if *wantarray* (vector ...) (progn ...))`.
+  2. `pl-map` runtime: runs block in list context, flattens per-iteration vector results.
+- **`pl-hash-=` robustness**: now uses `%pl-flatten-list` before key-value iteration.
+  Handles nested vectors and odd-length inputs (no crash on 3-element vector from `(f())[i,j,k,l]`).
+- **`kvhslice.t`**: now fully passing (3/3). Was 0/3 before.
+- **`aassign.t`**: 80/160 → 95/187 (no mid-file crash; post-test crash is irrelevant).
+- Sweep: 6209 → 6227 (+18).
 
 ### Session 64 changes (2026-03-07)
 - **`s///e` modifier**: ExprToCL.pm parses replacement via PPI, emits `(lambda () ...)`.
@@ -175,9 +188,12 @@ string eval is worth implementing. Ordered roughly by number of tests affected.
 
 ### A. Tie::Array / Tie::Hash Infinite Loop (~200+ tests, 4 files blocked)
 
-`sort.t`, `reverse.t`, `local.t`, `kvaslice.t`, `kvhslice.t` all hang or crash
-when they `require Tie::Array` or `require Tie::Hash`. PCL's module loader enters
-an infinite recursion or binding-stack exhaustion. All four files are in the skip list.
+`sort.t`, `reverse.t`, `local.t`, `kvaslice.t` hang or crash when they
+`require Tie::Array` or `require Tie::Hash`. PCL's module loader enters
+an infinite recursion or binding-stack exhaustion. These files are in the skip list.
+
+*(Note: `kvhslice.t` was previously listed here but is now **fully passing** after
+the session 73 map fat-comma / `pl-hash-=` fix — it turned out not to need Tie::Hash.)*
 
 **Root cause:** Unknown — needs investigation. Possibly a circular dependency
 in how PCL resolves and evaluates the module, or `defpackage` for a package that
@@ -268,7 +284,7 @@ have a single root-cause fix each:
 - **`concat2.t`** (0/3): Unknown — needs investigation. May be related to
   string repetition `x=` or some concat edge case not in `concat.t`.
 
-Note: `kvhslice.t` (0/3) is covered by §A (Tie::Hash loader hang).
+Note: `kvhslice.t` is now **fully passing** (session 73 — map fat-comma fix, not Tie::Hash).
 
 ### N. Inline `package Pkg { }` Inside a Function Body (~unknown tests)
 
@@ -442,7 +458,7 @@ internals that have no sensible transpiler target.
 | 2. anon sub → lambda | ✅ DONE (session 62) | ~100+ |
 | 2. state var infrastructure | ✅ DONE (session 61) | partial |
 | 2. lexical my-var renaming | ✅ DONE (session 63) | closure.t +4 |
-| 2.5A Tie module loader hang | ❌ TODO | ~200+ |
+| 2.5A Tie module loader hang | ❌ TODO | ~200+ (kvaslice, sort, reverse, local) |
 | 2.5B PPI fallback (--lenient-ppi) | ✅ DONE (session 68) | for.t 0→125 |
 | 2.5C Implicit returns / bare-if | ❌ TODO | widespread |
 | 2.5D $SIG handlers | ❌ TODO | (see 1.4) |
@@ -460,13 +476,14 @@ internals that have no sensible transpiler target.
 | 2.5M args.t (@_ aliasing?) | ❌ TODO | 4 |
 | 2.5M concat2.t | ❌ TODO | 3 |
 | 2.5N inline package inside function | ❌ TODO | index.t, substr.t, others |
+| 2.5T map fat-comma / pl-hash-= | ✅ DONE (session 73) | kvhslice.t +3, aassign.t +15 |
 | 3. String eval | ❌ TODO | ~50+ |
 
 **Remaining high-value items (Phase 2.5, in priority order):**
-1. Tie::Array/Tie::Hash module loader hang (~200+ tests, 4 blocked files)
+1. Tie::Array/Tie::Hash module loader hang (~200+ tests, 4 blocked files: kvaslice, sort, reverse, local)
 2. ~~PPI parse fallback~~ ✅ DONE (session 68) — `--lenient-ppi` flag; for.t 0→125
 3. Implicit returns / bare-if return value (widespread)
-4. `index.t` / `hashassign.t` — likely easy root causes, many tests
+4. `index.t` — many tests, likely easy root cause
 5. Inline `package Pkg {}` inside function body (§N) — index.t, substr.t crash
 6. Complete-failure files (§M): `args.t` (4), `concat2.t` (3), `flip.t` (3), `caller.t` (1)
 7. $SIG handlers (warn.t, die.t ~50 tests)

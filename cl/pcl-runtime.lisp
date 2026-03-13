@@ -2669,12 +2669,16 @@
   (logand (lognot (truncate (to-number a))) #xFFFFFFFFFFFFFFFF))
 
 (defun pl-<< (a b)
-  "Perl left shift"
-  (ash (truncate (to-number a)) (truncate (to-number b))))
+  "Perl left shift — clamp shift count to prevent SBCL bignum explosion"
+  (let ((av (truncate (to-number a)))
+        (bv (truncate (to-number b))))
+    (if (>= (abs bv) 64) 0 (ash av bv))))
 
 (defun pl->> (a b)
-  "Perl right shift"
-  (ash (truncate (to-number a)) (- (truncate (to-number b)))))
+  "Perl right shift — clamp shift count to prevent SBCL bignum explosion"
+  (let ((av (truncate (to-number a)))
+        (bv (truncate (to-number b))))
+    (if (>= (abs bv) 64) 0 (ash av (- bv)))))
 
 ;;; ============================================================
 ;;; Data Structures - Arrays
