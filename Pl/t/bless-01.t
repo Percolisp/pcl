@@ -38,15 +38,15 @@ diag "";
 diag "-------- Basic bless:";
 
 output_contains('bless({}, "MyClass");',
-                '(pl-bless',
+                '(p-bless',
                 'bless recognized as function');
 
 output_contains('my $obj = bless {}, "MyClass";',
-                '(box-set $obj (pl-bless',
+                '(box-set $obj (p-bless',
                 'bless in assignment');
 
 output_contains('bless $ref, "Class";',
-                '(pl-bless $ref "Class")',
+                '(p-bless $ref "Class")',
                 'bless with variable');
 
 
@@ -55,11 +55,11 @@ diag "";
 diag "-------- ref function:";
 
 output_contains('ref($obj);',
-                '(pl-ref $obj)',
+                '(p-ref $obj)',
                 'ref function');
 
 output_contains('my $type = ref($x);',
-                '(box-set $type (pl-ref $x))',
+                '(box-set $type (p-ref $x))',
                 'ref in assignment');
 
 
@@ -68,11 +68,11 @@ diag "";
 diag "-------- Constructor pattern:";
 
 output_contains('sub new { bless {}, shift; }',
-                '(pl-sub pl-new',
-                'Constructor generates pl-sub');
+                '(p-sub pl-new',
+                'Constructor generates p-sub');
 
 output_contains('sub new { bless {}, shift; }',
-                '(pl-bless (make-pl-box (pl-hash )) (pl-shift @_))',
+                '(p-bless (make-p-box (p-hash )) (p-shift @_))',
                 'Constructor bless pattern');
 
 
@@ -132,7 +132,7 @@ package MyClass {
 };
     my $result = parse_code($code);
     like($result, qr/;;; package MyClass/, 'Full class: package start');
-    like($result, qr/\(pl-sub pl-new/, 'Full class: constructor defined');
+    like($result, qr/\(p-sub pl-new/, 'Full class: constructor defined');
     like($result, qr/;;; end package MyClass/, 'Full class: package end');
 }
 
@@ -144,7 +144,7 @@ diag "-------- Regression tests (session 3):";
 # Regression: bless with bareword class ending in ::
 # Was parsing as two separate expressions instead of one bless call
 output_contains('bless \$x, o::',
-                '(pl-bless (pl-backslash $x) "o")',
+                '(p-bless (p-backslash $x) "o")',
                 'Regression: bless with o:: bareword class');
 
 # Regression: bless with shift (funcall with args, not simple bareword)
@@ -152,7 +152,7 @@ output_contains('bless \$x, o::',
 {
     my $code = 'sub new { bless {}, shift; }';
     my $result = parse_code($code);
-    like($result, qr/\(pl-bless \(make-pl-box \(pl-hash \)\) \(pl-shift/,
+    like($result, qr/\(p-bless \(make-p-box \(p-hash \)\) \(p-shift/,
          'Regression: bless {}, shift generates shift call');
 }
 

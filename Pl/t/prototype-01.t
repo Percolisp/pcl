@@ -475,11 +475,11 @@ END_MODULE
   $parser->parse();
   my $cl = join("\n", @{$parser->output});
 
-  like($cl, qr/pl-modify_array \(pl-backslash \@arr\)/,
+  like($cl, qr/pl-modify_array \(p-backslash \@arr\)/,
        'modify_array call auto-boxes array from imported module');
-  like($cl, qr/pl-modify_hash \(pl-backslash %hash\)/,
+  like($cl, qr/pl-modify_hash \(p-backslash %hash\)/,
        'modify_hash call auto-boxes hash from imported module');
-  like($cl, qr/pl-modify_scalar \(pl-backslash \$scalar\)/,
+  like($cl, qr/pl-modify_scalar \(p-backslash \$scalar\)/,
        'modify_scalar call auto-boxes scalar from imported module');
 }
 
@@ -502,7 +502,7 @@ END_MODULE
   $parser->parse();
   my $cl = join("\n", @{$parser->output});
 
-  like($cl, qr/pl-mixed_refs "pre" \(pl-backslash \@data\) \(pl-backslash %info\) "post"/,
+  like($cl, qr/pl-mixed_refs "pre" \(p-backslash \@data\) \(p-backslash %info\) "post"/,
        'mixed_refs auto-boxes only reference params (positions 2 and 3)');
 }
 
@@ -541,7 +541,7 @@ diag "-------- Prototype Override and Shadowing:";
   is($proto->{proto_string}, '\$', 'Local prototype overrides imported');
 
   # Call should auto-box scalar, not array
-  like($cl, qr/pl-modify_array \(pl-backslash \$s\)/,
+  like($cl, qr/pl-modify_array \(p-backslash \$s\)/,
        'Call uses local prototype, not imported');
 }
 
@@ -563,7 +563,7 @@ END_PERL
 
   # When called before definition, prototype isn't known yet
   # so no auto-boxing should happen
-  unlike($cl, qr/early_call \(pl-backslash/,
+  unlike($cl, qr/early_call \(p-backslash/,
          'Call before prototype definition does not auto-box');
 }
 
@@ -575,7 +575,7 @@ takes_array_ref([1, 2, 3]);  # Anonymous array ref, not @array
 END_PERL
 
   # Anonymous array ref should not be wrapped
-  unlike($cl, qr/pl-backslash \(vector/,
+  unlike($cl, qr/p-backslash \(vector/,
          'Anonymous array ref is not auto-boxed');
 }
 
@@ -588,7 +588,7 @@ takes_scalar_ref(get_scalar());
 END_PERL
 
   # Function call result should not be auto-boxed
-  unlike($cl, qr/pl-backslash \(pl-get_scalar/,
+  unlike($cl, qr/p-backslash \(p-get_scalar/,
          'Function call result is not auto-boxed');
 }
 
@@ -608,7 +608,7 @@ my @arr = (1, 2, 3);
 ref_array(@arr);
 END_PERL
 
-  like($cl, qr/pl-backslash \@arr/, '\@ prototype auto-boxes array arg');
+  like($cl, qr/p-backslash \@arr/, '\@ prototype auto-boxes array arg');
 }
 
 # Test \% prototype auto-boxes hash argument
@@ -621,7 +621,7 @@ my %h = (a => 1);
 ref_hash(%h);
 END_PERL
 
-  like($cl, qr/pl-backslash %h/, '\% prototype auto-boxes hash arg');
+  like($cl, qr/p-backslash %h/, '\% prototype auto-boxes hash arg');
 }
 
 # Test \$ prototype auto-boxes scalar argument
@@ -634,7 +634,7 @@ my $s = "test";
 ref_scalar($s);
 END_PERL
 
-  like($cl, qr/pl-backslash \$s/, '\$ prototype auto-boxes scalar arg');
+  like($cl, qr/p-backslash \$s/, '\$ prototype auto-boxes scalar arg');
 }
 
 # Test mixed prototype with reference
@@ -648,7 +648,7 @@ mixed_ref(1, @data, 2);
 END_PERL
 
   # Only @data (second arg) should be auto-boxed
-  like($cl, qr/pl-mixed_ref 1 \(pl-backslash \@data\) 2/,
+  like($cl, qr/pl-mixed_ref 1 \(p-backslash \@data\) 2/,
        'Mixed prototype auto-boxes only the reference param');
 }
 
@@ -662,7 +662,7 @@ END_PERL
 
   # When explicitly passing \@arr, it should not be wrapped again
   # (The backslash is part of the call, not auto-added)
-  unlike($cl, qr/pl-backslash \(pl-backslash/,
+  unlike($cl, qr/p-backslash \(p-backslash/,
          'Explicit reference is not double-wrapped');
 }
 
@@ -683,11 +683,11 @@ diag "-------- Unique Parameter Names (Issue: duplicate \$ params):";
   my $cl = join("\n", @{$parser->output});
 
   # Should NOT have duplicate param names like ($ $ $)
-  unlike($cl, qr/\(pl-sub pl-takes_three \(\$ \$ \$\)/,
+  unlike($cl, qr/\(p-sub pl-takes_three \(\$ \$ \$\)/,
          'Prototype $$$ does not generate duplicate $ param names');
 
   # Old-style prototypes use &rest %_args (body accesses @_)
-  like($cl, qr/\(pl-sub pl-takes_three \(&rest %_args\)/,
+  like($cl, qr/\(p-sub pl-takes_three \(&rest %_args\)/,
        'Prototype $$$ uses &rest pattern for @_ access');
 
   # The proto_type should preserve original
@@ -715,7 +715,7 @@ diag "-------- Unique Parameter Names (Issue: duplicate \$ params):";
   is($proto->{params}[1]{proto_type}, '@', 'second param proto_type is @');
 
   # Old-style prototypes use &rest (body accesses @_)
-  like($cl, qr/\(pl-sub pl-with_glob \(&rest %_args\)/,
+  like($cl, qr/\(p-sub pl-with_glob \(&rest %_args\)/,
        '*@ prototype uses &rest pattern for @_ access');
 }
 

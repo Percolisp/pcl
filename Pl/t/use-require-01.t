@@ -39,65 +39,65 @@ note "-------- Transpilation Tests:";
   like($result, qr/;; use v5\.30 \(pragma\)/, 'use v5.30 is pragma comment');
 }
 
-# Test: use Module generates pl-use
+# Test: use Module generates p-use
 {
   my $result = Pl::Parser->parse_code('use Foo::Bar;');
-  like($result, qr/\(pl-use "Foo::Bar"\)/, 'use Module generates pl-use');
+  like($result, qr/\(p-use "Foo::Bar"\)/, 'use Module generates p-use');
 }
 
 # Test: use Module with qw() imports
 {
   my $result = Pl::Parser->parse_code('use Foo qw(bar baz);');
-  like($result, qr/pl-use "Foo" :imports '\("bar" "baz"\)/, 'use with qw() imports');
+  like($result, qr/p-use "Foo" :imports '\("bar" "baz"\)/, 'use with qw() imports');
 }
 
-# Test: require generates pl-require
+# Test: require generates p-require
 {
   my $result = Pl::Parser->parse_code('require Foo::Bar;');
-  like($result, qr/\(pl-require "Foo::Bar"\)/, 'require generates pl-require');
+  like($result, qr/\(p-require "Foo::Bar"\)/, 'require generates p-require');
 }
 
-# Test: require with literal path string generates pl-require-file
+# Test: require with literal path string generates p-require-file
 {
   my $result = Pl::Parser->parse_code('require "./test.pl";');
-  like($result, qr/pl-require-file.*test\.pl/, 'require with path generates pl-require-file');
+  like($result, qr/p-require-file.*test\.pl/, 'require with path generates p-require-file');
 }
 
 # Test: require with single-quoted path
 {
   my $result = Pl::Parser->parse_code("require './lib/helper.pl';");
-  like($result, qr/pl-require-file.*lib.helper\.pl/, 'require with single-quoted path');
+  like($result, qr/p-require-file.*lib.helper\.pl/, 'require with single-quoted path');
 }
 
 # Test: require with absolute path
 {
   my $result = Pl::Parser->parse_code('require "/usr/lib/foo.pl";');
-  like($result, qr/pl-require-file.*\/usr\/lib\/foo\.pl/, 'require with absolute path');
+  like($result, qr/p-require-file.*\/usr\/lib\/foo\.pl/, 'require with absolute path');
 }
 
 # Test: require with variable
 {
   my $result = Pl::Parser->parse_code('require $path;');
-  like($result, qr/pl-require-file \$path/, 'require with variable');
+  like($result, qr/p-require-file \$path/, 'require with variable');
 }
 
 # Test: require with expression (concatenation)
 {
   my $result = Pl::Parser->parse_code('require $dir . "/" . $file;');
-  like($result, qr/pl-require-file.*pl-\..*\$dir.*\$file/, 'require with expression');
+  like($result, qr/p-require-file.*p-\..*\$dir.*\$file/, 'require with expression');
 }
 
 # Test: use lib modifies @INC
 {
   my $result = Pl::Parser->parse_code('use lib "mylib";');
-  like($result, qr/pl-unshift \@INC "mylib"/, 'use lib modifies @INC');
+  like($result, qr/p-unshift \@INC "mylib"/, 'use lib modifies @INC');
 }
 
 # Test: use lib with multiple paths via qw()
 {
   my $result = Pl::Parser->parse_code('use lib qw(lib1 lib2);');
-  like($result, qr/pl-unshift \@INC "lib1"/, 'use lib qw() - first path');
-  like($result, qr/pl-unshift \@INC "lib2"/, 'use lib qw() - second path');
+  like($result, qr/p-unshift \@INC "lib1"/, 'use lib qw() - first path');
+  like($result, qr/p-unshift \@INC "lib2"/, 'use lib qw() - second path');
 }
 
 # Test: no strict becomes no-op comment

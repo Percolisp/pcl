@@ -93,8 +93,8 @@ note "-------- Phase 2: compile-time before runtime";
         print foo();
         sub foo { return 42; }
     });
-    is(relative_order($cl, qr/\(pl-sub pl-foo/, qr/\(pl-print/), -1,
-       'forward call: pl-sub before pl-print');
+    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/\(p-print/), -1,
+       'forward call: p-sub before p-print');
 }
 
 # Test: interleaved subs and runtime — all subs moved before all runtime
@@ -105,14 +105,14 @@ note "-------- Phase 2: compile-time before runtime";
         sub b { return a() + 1; }
         print "y";
     });
-    is(relative_order($cl, qr/\(pl-sub pl-b/, qr/\(pl-print "x"/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-b/, qr/\(p-print "x"/), -1,
        'interleaved: sub b before first runtime print');
-    is(relative_order($cl, qr/\(pl-sub pl-a/, qr/\(pl-sub pl-b/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-a/, qr/\(p-sub pl-b/), -1,
        'interleaved: source order preserved — sub a before sub b');
 }
 
 # Test: use constant interleaved with runtime (only constants, no regular subs)
-# This is the key corner case: use constant generates pl-sub but doesn't register
+# This is the key corner case: use constant generates p-sub but doesn't register
 # as a declared sub, so Phase 2 must still run.
 {
     my $cl = parse_pl(q{
@@ -121,9 +121,9 @@ note "-------- Phase 2: compile-time before runtime";
         use constant B => 2;
         print $x + B;
     });
-    is(relative_order($cl, qr/\(pl-sub pl-B/, qr/\(pl-scalar-= \$x/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-B/, qr/\(p-scalar-= \$x/), -1,
        'use constant only: constant B reordered before runtime $x assignment');
-    is(relative_order($cl, qr/\(pl-sub pl-A/, qr/\(pl-sub pl-B/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-A/, qr/\(p-sub pl-B/), -1,
        'use constant only: source order preserved — A before B');
 }
 
@@ -136,11 +136,11 @@ note "-------- Phase 2: compile-time before runtime";
         sub compute { return $x * SCALE + OFFSET; }
         print compute();
     });
-    is(relative_order($cl, qr/\(pl-sub pl-OFFSET/, qr/\(pl-scalar-= \$x/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-OFFSET/, qr/\(p-scalar-= \$x/), -1,
        'mixed constant+sub: OFFSET before runtime');
-    is(relative_order($cl, qr/\(pl-sub pl-compute/, qr/\(pl-scalar-= \$x/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-compute/, qr/\(p-scalar-= \$x/), -1,
        'mixed constant+sub: compute before runtime');
-    is(relative_order($cl, qr/\(pl-sub pl-SCALE/, qr/\(pl-sub pl-OFFSET/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-SCALE/, qr/\(p-sub pl-OFFSET/), -1,
        'mixed constant+sub: source order SCALE before OFFSET');
 }
 
@@ -151,7 +151,7 @@ note "-------- Phase 2: compile-time before runtime";
         print "runtime";
         END { print "end"; }
     });
-    is(relative_order($cl, qr/\(push \(lambda/, qr/\(pl-print "runtime"/), -1,
+    is(relative_order($cl, qr/\(push \(lambda/, qr/\(p-print "runtime"/), -1,
        'END block reordered before runtime');
 }
 
@@ -164,7 +164,7 @@ note "-------- Phase 2: compile-time before runtime";
     });
     # my $x = foo() at file scope generates defvar + box-set
     # The box-set should be AFTER the sub (in runtime section)
-    is(relative_order($cl, qr/\(pl-sub pl-foo/, qr/\(box-set \$x/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/\(box-set \$x/), -1,
        'my $x (box-set) stays in runtime, after compile-time sub');
 }
 
@@ -178,13 +178,13 @@ note "-------- Phase 2: compile-time before runtime";
         print "runtime";
     });
     # All four compile-time forms before runtime
-    is(relative_order($cl, qr/\(push \(lambda/, qr/\(pl-print "runtime"/), -1,
+    is(relative_order($cl, qr/\(push \(lambda/, qr/\(p-print "runtime"/), -1,
        'END blocks before runtime');
     # Subs are in declarations bucket; END blocks are in definitions bucket.
     # declarations assembles before definitions, so all subs come before all END blocks.
-    is(relative_order($cl, qr/\(pl-sub pl-a/, qr/;; END.*end1/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-a/, qr/;; END.*end1/), -1,
        'source order: sub a before END1');
-    is(relative_order($cl, qr/\(pl-sub pl-b/, qr/;; END.*end1/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-b/, qr/;; END.*end1/), -1,
        'sub b (declarations) comes before END1 (definitions)');
 }
 
@@ -198,7 +198,7 @@ note "-------- Phase 1: defvar hoisting";
         sub get_x { return $x; }
         our $x = 10;
     });
-    is(relative_order($cl, qr/\(pl-sub pl-get_x/, qr/defvar \$x/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-get_x/, qr/defvar \$x/), -1,
        'sub (declarations) before our-defvar (runtime)');
 }
 
@@ -210,9 +210,9 @@ note "-------- Phase 1: defvar hoisting";
         our $x = 1;
         our $y = 2;
     });
-    is(relative_order($cl, qr/\(pl-sub pl-compute/, qr/defvar \$x/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-compute/, qr/defvar \$x/), -1,
        'sub (declarations) before $x defvar (runtime)');
-    is(relative_order($cl, qr/\(pl-sub pl-compute/, qr/defvar \$y/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-compute/, qr/defvar \$y/), -1,
        'sub (declarations) before $y defvar (runtime)');
 }
 
@@ -226,17 +226,17 @@ note "-------- Phase 1: defvar hoisting";
         print foo();
     });
     # sub (declarations) before our-defvar (runtime)
-    is(relative_order($cl, qr/\(pl-sub pl-foo/, qr/defvar \$x/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/defvar \$x/), -1,
        'sub (declarations) before our-defvar (runtime)');
     # defvar before setf (value assignment)
-    is(relative_order($cl, qr/defvar \$x/, qr/setf.*pl-box-value.*\$x.*42/), -1,
+    is(relative_order($cl, qr/defvar \$x/, qr/setf.*p-box-value.*\$x.*42/), -1,
        'defvar declaration before runtime value assignment');
 }
 
 
 note "-------- Phase 1: nested sub stubs";
 
-# Test: nested sub (inside another sub) gets pl-declare-sub stub
+# Test: nested sub (inside another sub) gets p-declare-sub stub
 {
     my $cl = parse_pl(q{
         sub outer {
@@ -245,24 +245,24 @@ note "-------- Phase 1: nested sub stubs";
         }
         print outer();
     });
-    like($cl, qr/\(pl-declare-sub pl-inner\)/,
-         'nested sub gets pl-declare-sub stub');
+    like($cl, qr/\(p-declare-sub pl-inner\)/,
+         'nested sub gets p-declare-sub stub');
     # The stub is emitted inline within the enclosing sub's body (same bucket),
-    # so it appears after the opening of pl-sub pl-outer but before the call.
-    is(relative_order($cl, qr/\(pl-declare-sub pl-inner\)/, qr/pl-return \(pl-inner\)/), -1,
+    # so it appears after the opening of p-sub pl-outer but before the call.
+    is(relative_order($cl, qr/\(p-declare-sub pl-inner\)/, qr/p-return \(pl-inner\)/), -1,
        'inner stub declared before call to inner inside outer body');
 }
 
-# Test: top-level sub gets pl-declare-sub stub in declarations (before BEGIN)
+# Test: top-level sub gets p-declare-sub stub in declarations (before BEGIN)
 {
     my $cl = parse_pl(q{
         sub foo { return 1; }
         print foo();
     });
-    like($cl, qr/\(pl-declare-sub pl-foo\)/,
-         'top-level sub gets pl-declare-sub stub');
-    is(relative_order($cl, qr/\(pl-declare-sub pl-foo\)/, qr/\(pl-sub pl-foo\b/), -1,
-       'pl-declare-sub before pl-sub for top-level sub');
+    like($cl, qr/\(p-declare-sub pl-foo\)/,
+         'top-level sub gets p-declare-sub stub');
+    is(relative_order($cl, qr/\(p-declare-sub pl-foo\)/, qr/\(p-sub pl-foo\b/), -1,
+       'p-declare-sub before p-sub for top-level sub');
 }
 
 
@@ -304,10 +304,10 @@ note "-------- Multi-package sections";
         sub b_func { return 2; }
     });
     # In A section: sub before runtime
-    is(relative_order($cl, qr/\(pl-sub pl-a_func/, qr/pl-print "a-runtime"/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-a_func/, qr/p-print "a-runtime"/), -1,
        'package A: sub before runtime');
     # In B section: sub before runtime
-    is(relative_order($cl, qr/\(pl-sub pl-b_func/, qr/pl-print "b-runtime"/), -1,
+    is(relative_order($cl, qr/\(p-sub pl-b_func/, qr/p-print "b-runtime"/), -1,
        'package B: sub before runtime');
 }
 
@@ -339,8 +339,8 @@ note "-------- Multi-package sections";
     # After the second in-package :A, sub should come before print
     my ($found_sub, $found_print) = (0, 0);
     for my $i ($second_a_start .. $#lines) {
-        $found_sub   = $i if !$found_sub   && $lines[$i] =~ /pl-sub pl-second/;
-        $found_print = $i if !$found_print && $lines[$i] =~ /pl-print "second-run"/;
+        $found_sub   = $i if !$found_sub   && $lines[$i] =~ /p-sub pl-second/;
+        $found_print = $i if !$found_print && $lines[$i] =~ /p-print "second-run"/;
     }
     ok($found_sub && $found_print && $found_sub < $found_print,
        'second A section: sub second before "second-run"');
@@ -686,7 +686,7 @@ note "-------- Runtime: edge cases in ordering";
         print "hello";
     });
     # require should come AFTER chdir, not be hoisted before it
-    is(relative_order($cl, qr/pl-chdir/, qr/pl-require-file/), -1,
+    is(relative_order($cl, qr/p-chdir/, qr/p-require-file/), -1,
        'bare require stays after chdir (not hoisted as compile-time)');
 }
 
@@ -700,7 +700,7 @@ note "-------- Runtime: edge cases in ordering";
         $y = 2;
     });
     # use should come before the runtime setf
-    is(relative_order($cl, qr/pl-use.*MIME/, qr/pl-scalar-=.*\$y/), -1,
+    is(relative_order($cl, qr/p-use.*MIME/, qr/p-scalar-=.*\$y/), -1,
        'use is still hoisted as compile-time');
 }
 

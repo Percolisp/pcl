@@ -37,15 +37,15 @@ diag "";
 diag "-------- foreach loops:";
 
 output_contains('for my $x (@array) { }',
-                '(pl-foreach ($x @array)',
+                '(p-foreach ($x @array)',
                 'foreach with variable');
 
 output_contains('foreach (@list) { print $_; }',
-                '(pl-foreach ($_ @list)',
+                '(p-foreach ($_ @list)',
                 'foreach without variable uses $_');
 
 output_contains('for $item (1, 2, 3) { }',
-                '(pl-foreach ($item',
+                '(p-foreach ($item',
                 'foreach with list literal');
 
 
@@ -54,23 +54,23 @@ diag "";
 diag "-------- C-style for loops:";
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '(pl-for ((pl-my-= $i 0))',
+                '(p-for ((p-my-= $i 0))',
                 'C-style for: init');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '((pl-< $i 10))',
+                '((p-< $i 10))',
                 'C-style for: condition');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '((pl-post++ $i))',
+                '((p-post++ $i))',
                 'C-style for: increment');
 
 output_contains('for ($i = 0; $i <= $max; $i += 2) { }',
-                '(pl-for ((pl-scalar-= $i 0))',
+                '(p-for ((p-scalar-= $i 0))',
                 'C-style for without my');
 
 output_contains('for (;;) { last; }',
-                '(pl-for ()',
+                '(p-for ()',
                 'C-style infinite loop');
 
 
@@ -79,23 +79,23 @@ diag "";
 diag "-------- print statements:";
 
 output_contains('print "hello";',
-                '(pl-print "hello")',
+                '(p-print "hello")',
                 'print string');
 
 output_contains('print $x;',
-                '(pl-print $x)',
+                '(p-print $x)',
                 'print variable');
 
 output_contains('print $x, $y;',
-                '(pl-print $x $y)',
+                '(p-print $x $y)',
                 'print multiple args');
 
 output_contains('print STDERR "error";',
-                "(pl-print :fh 'STDERR \"error\")",
+                "(p-print :fh 'STDERR \"error\")",
                 'print to bareword filehandle');
 
 output_contains('print $fh "data";',
-                '(pl-print :fh $fh "data")',
+                '(p-print :fh $fh "data")',
                 'print to variable filehandle');
 
 
@@ -104,15 +104,15 @@ diag "";
 diag "-------- say statements:";
 
 output_contains('say "hello";',
-                '(pl-say "hello")',
+                '(p-say "hello")',
                 'say string');
 
 output_contains('say $x;',
-                '(pl-say $x)',
+                '(p-say $x)',
                 'say variable');
 
 output_contains('say STDOUT "output";',
-                "(pl-say :fh 'STDOUT \"output\")",
+                "(p-say :fh 'STDOUT \"output\")",
                 'say to filehandle');
 
 
@@ -122,14 +122,14 @@ diag "-------- Combined for + print:";
 
 {
     my $result = parse_code('for my $x (@items) { print $x; }');
-    like($result, qr/pl-foreach/, 'foreach with print: loop');
-    like($result, qr/\(pl-print \$x\)/, 'foreach with print: print inside');
+    like($result, qr/p-foreach/, 'foreach with print: loop');
+    like($result, qr/\(p-print \$x\)/, 'foreach with print: print inside');
 }
 
 {
     my $result = parse_code('for (my $i = 0; $i < 10; $i++) { say $i; }');
-    like($result, qr/pl-for/, 'C-style for with say: loop');
-    like($result, qr/\(pl-say \$i\)/, 'C-style for with say: say inside');
+    like($result, qr/p-for/, 'C-style for with say: loop');
+    like($result, qr/\(p-say \$i\)/, 'C-style for with say: say inside');
 }
 
 
@@ -164,23 +164,23 @@ diag "-------- Regression tests (session 3):";
 # Regression: foreach with range operator
 # Range was returning list but foreach expects vector
 output_contains('foreach my $i (0..5) { print $i; }',
-                '(pl-foreach ($i (pl-.. 0 5))',
+                '(p-foreach ($i (p-.. 0 5))',
                 'Regression: foreach with range operator');
 
 # Regression: push with @array argument should flatten
 # Was not flattening second array
 output_contains('push @x, @y;',
-                '(pl-push @x (pl-flatten @y))',
+                '(p-push @x (p-flatten @y))',
                 'Regression: push @x, @y flattens @y');
 
 # Regression: push with anonymous array should NOT flatten
 output_contains('push @x, [1, 2, 3];',
-                '(pl-push @x (make-pl-box (pl-array-init 1 2 3)))',
+                '(p-push @x (make-p-box (p-array-init 1 2 3)))',
                 'Regression: push @x, [1,2,3] does not flatten');
 
 # Regression: push with array deref should flatten
 output_contains('push @x, @{$ref};',
-                '(pl-push @x (pl-flatten (pl-cast-@ $ref)))',
+                '(p-push @x (p-flatten (p-cast-@ $ref)))',
                 'Regression: push @x, @{$ref} flattens deref');
 
 
@@ -188,16 +188,16 @@ output_contains('push @x, @{$ref};',
 diag "";
 diag "-------- Regression tests (session 5):";
 
-# Regression: for/foreach statement modifier should use pl-foreach, not pl-for
+# Regression: for/foreach statement modifier should use p-foreach, not p-for
 # "EXPR for LIST" is foreach, not C-style for
 output_contains('push @foo, $_ for 1..3;',
-                '(pl-foreach ($_ (pl-.. 1 3)) (pl-push @foo $_))',
-                'Regression: for statement modifier uses pl-foreach');
+                '(p-foreach ($_ (p-.. 1 3)) (p-push @foo $_))',
+                'Regression: for statement modifier uses p-foreach');
 
-# Regression: our %hash = (...) should generate pl-hash, not progn
+# Regression: our %hash = (...) should generate p-hash, not progn
 output_contains('our %h = (a => 1, b => 2);',
-                '(pl-hash-= %h (pl-hash "a" 1 "b" 2))',
-                'Regression: our %hash initialization uses pl-hash');
+                '(p-hash-= %h (p-hash "a" 1 "b" 2))',
+                'Regression: our %hash initialization uses p-hash');
 
 
 # -------- continue blocks --------
@@ -207,10 +207,10 @@ output_contains('while ($x) { $a = 1; } continue { $b = 2; }',
                 ':continue',
                 'while loop with continue generates :continue');
 
-# Regression: redo LABEL generates pl-redo with label argument
+# Regression: redo LABEL generates p-redo with label argument
 output_contains('redo OUTER;',
-                '(pl-redo OUTER)',
-                'redo LABEL generates pl-redo with label');
+                '(p-redo OUTER)',
+                'redo LABEL generates p-redo with label');
 
 # Regression: bare block continue - PPI puts continue as sibling statement
 # Parser must detect and consume the continue sibling
@@ -231,17 +231,17 @@ output_contains('LABEL: { redo LABEL; }',
 # Regression: bare block continue - trailing tokens after continue block
 # PPI merges "$ok = 1;" into the continue statement
 output_contains('{ next; } continue { $a = 1; } $ok = 1;',
-                '(pl-scalar-= $ok 1)',
+                '(p-scalar-= $ok 1)',
                 'trailing code after bare block continue is preserved');
 
 # Regression: postfix-if with PPI::Structure::Condition (parenthesized condition)
 # PPI wraps `if (COND)` as Structure::Condition, which must be unwrapped in Parser.pm
 output_contains('return gcd($_[0] - $_[1]) if ($_[0] > $_[1]);',
-                'pl-if',
-                'postfix-if with parenthesized condition generates pl-if');
+                'p-if',
+                'postfix-if with parenthesized condition generates p-if');
 
 output_contains('return gcd($_[0] - $_[1]) if ($_[0] > $_[1]);',
-                'pl-return',
-                'postfix-if with return generates pl-return in body');
+                'p-return',
+                'postfix-if with return generates p-return in body');
 
 done_testing();

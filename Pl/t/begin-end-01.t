@@ -159,7 +159,7 @@ END_CODE
 }
 
 # Test: BEGIN can call subs defined before it
-# This works because subs are wrapped in eval-when via pl-sub macro
+# This works because subs are wrapped in eval-when via p-sub macro
 {
   my $output = run_pcl(<<'END_CODE');
 sub greet { print "hello "; }
@@ -220,7 +220,7 @@ END_CODE
   like($output, qr/inner-outer/, 'BEGIN can use nested sub calls');
 }
 
-# Test: Generated code for pl-sub uses eval-when
+# Test: Generated code for p-sub uses eval-when
 {
   my $code = 'sub foo { 1 }';
   my ($fh, $pl_file) = tempfile(SUFFIX => '.pl');
@@ -229,8 +229,8 @@ END_CODE
 
   my $cl_code = `$pl2cl $pl_file 2>&1`;
 
-  like($cl_code, qr/pl-sub.*pl-foo/s,
-       'sub generates pl-sub macro call');
+  like($cl_code, qr/p-sub.*pl-foo/s,
+       'sub generates p-sub macro call');
 
   unlink $pl_file;
 }

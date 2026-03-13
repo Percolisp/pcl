@@ -346,7 +346,7 @@ sub _insert_variable_forward_declarations {
     next if $line =~ /^\s*;;/;
 
     # Track entry/exit of sub definitions
-    if ($line =~ /^\(pl-sub\s|^\(defun\s/) {
+    if ($line =~ /^\(p-sub\s|^\(defun\s/) {
       $sub_depth++;
     }
 
@@ -362,7 +362,7 @@ sub _insert_variable_forward_declarations {
         }
       }
       # Collect foreach-bound variables
-      if ($line =~ /\(pl-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
+      if ($line =~ /\(p-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
         $let_bound{$1} = 1;
       }
       # Collect all variable references
@@ -398,7 +398,7 @@ sub _insert_variable_forward_declarations {
   for my $var (@undeclared) {
     my $sigil = substr($var, 0, 1);
     if ($sigil eq '$') {
-      push @$decls, "(defvar $var (make-pl-box nil))";
+      push @$decls, "(defvar $var (make-p-box nil))";
     } elsif ($sigil eq '@') {
       push @$decls, "(defvar $var (make-array 0 :adjustable t :fill-pointer 0))";
     } elsif ($sigil eq '%') {
@@ -585,7 +585,7 @@ sub _process_element {
     $data =~ s/"/\\"/g;
     $self->_with_bucket('preamble', sub {
       $self->_emit(";; $ref — register DATA filehandle");
-      $self->_emit("(setf (gethash 'DATA *pl-filehandles*)");
+      $self->_emit("(setf (gethash 'DATA *p-filehandles*)");
       $self->_emit("  (make-string-input-stream \"$data\"))");
     });
     return;
@@ -665,16 +665,16 @@ sub _process_expression_statement {
     my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
 
     # Generate appropriate control structure
-    # Note: 'for' and 'foreach' modifiers use pl-foreach (iterate over list),
-    # not pl-for (C-style for loop)
+    # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
+    # not p-for (C-style for loop)
     my $cl_modifier = $modifier;
     if ($modifier eq 'for' || $modifier eq 'foreach') {
       $cl_modifier = 'foreach';
       # For foreach modifier, need ($_ list) syntax
-      $cl_code = "(pl-foreach (\$_ $cond_cl) $expr_cl)";
+      $cl_code = "(p-foreach (\$_ $cond_cl) $expr_cl)";
     }
     else {
-      $cl_code = "(pl-$cl_modifier $cond_cl $expr_cl)";
+      $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
     }
   }
   else {
@@ -725,7 +725,7 @@ sub _process_variable_statement {
     return;
   }
 
-  # Handle top-level 'my' declarations - need pl-my for BEGIN block visibility
+  # Handle top-level 'my' declarations - need p-my for BEGIN block visibility
   # Inside subs, my uses regular let bindings (handled elsewhere)
   # Exception: if the var was renamed by _with_declarations (closure capture at pkg level),
   # skip _process_my_toplevel_declaration and fall through to the rename handling below.
@@ -819,7 +819,7 @@ sub _process_variable_statement {
         $self->environment->state_var_renames($env_renames);
 
         $self->_emit(";; $perl_code");
-        $self->_emit("(pl-my-= $new_name $rhs_cl)") if defined $rhs_cl && $rhs_cl ne '';
+        $self->_emit("(p-my-= $new_name $rhs_cl)") if defined $rhs_cl && $rhs_cl ne '';
         $self->_emit("");
         return;
       }
@@ -902,41 +902,41 @@ sub _process_our_declaration {
       if ($sigil eq '@') {
         # Array: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(pl-eval-direct");
+          $self->_emit("(p-eval-direct");
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         });
         unless ($is_empty_list) {
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
           if ($init_cl =~ /^\(progn\s+(.+)\)$/s ||
               $init_cl =~ /^\(if \*wantarray\* \(vector\s+(.+)\) \(progn .+\)\)$/s) {
-            $init_cl = "(pl-array-init $1)";
+            $init_cl = "(p-array-init $1)";
           }
-          $self->_emit("(pl-array-= $var $init_cl)");
+          $self->_emit("(p-array-= $var $init_cl)");
         }
       }
       elsif ($sigil eq '%') {
         # Hash: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(pl-eval-direct");
+          $self->_emit("(p-eval-direct");
           $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
         });
         unless ($is_empty_list) {
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
           if ($init_cl =~ /^\(progn\s+(.+)\)$/s ||
               $init_cl =~ /^\(if \*wantarray\* \(vector\s+(.+)\) \(progn .+\)\)$/s) {
-            $init_cl = "(pl-hash $1)";
+            $init_cl = "(p-hash $1)";
           }
-          $self->_emit("(pl-hash-= $var $init_cl)");
+          $self->_emit("(p-hash-= $var $init_cl)");
         }
       }
       else {
         # Scalar: declare with nil box at compile time, set value at runtime
         my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(pl-eval-direct");
-          $self->_emit("  (defvar $var (make-pl-box nil)))");
+          $self->_emit("(p-eval-direct");
+          $self->_emit("  (defvar $var (make-p-box nil)))");
         });
-        $self->_emit("(setf (pl-box-value $var) $init_cl)");
+        $self->_emit("(setf (p-box-value $var) $init_cl)");
       }
     }
     else {
@@ -945,20 +945,20 @@ sub _process_our_declaration {
       $self->_with_bucket('declarations', sub {
         for my $var (@vars) {
           my $sigil = substr($var, 0, 1);
-          $self->_emit("(pl-eval-direct");
+          $self->_emit("(p-eval-direct");
           if ($sigil eq '@') {
             $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
           } elsif ($sigil eq '%') {
             $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
           } else {
-            $self->_emit("  (defvar $var (make-pl-box nil)))");
+            $self->_emit("  (defvar $var (make-p-box nil)))");
           }
         }
       });
       # Now do the assignment at runtime
       my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
       my $vars_vector = "(vector " . join(" ", @vars) . ")";
-      $self->_emit("(pl-list-= $vars_vector $init_cl)");
+      $self->_emit("(p-list-= $vars_vector $init_cl)");
     }
   }
   else {
@@ -966,13 +966,13 @@ sub _process_our_declaration {
     $self->_with_bucket('declarations', sub {
       for my $var (@vars) {
         my $sigil = substr($var, 0, 1);
-        $self->_emit("(pl-eval-direct");
+        $self->_emit("(p-eval-direct");
         if ($sigil eq '@') {
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         } elsif ($sigil eq '%') {
           $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
         } else {
-          $self->_emit("  (defvar $var (make-pl-box nil)))");
+          $self->_emit("  (defvar $var (make-p-box nil)))");
         }
       }
     });
@@ -1018,13 +1018,13 @@ sub _process_my_toplevel_declaration {
     $self->_emit(";; $perl_code");
     for my $var (@vars) {
       my $sigil = substr($var, 0, 1);
-      $self->_emit("(pl-eval-direct");
+      $self->_emit("(p-eval-direct");
       if ($sigil eq '@') {
         $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
       } elsif ($sigil eq '%') {
         $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
       } else {
-        $self->_emit("  (defvar $var (make-pl-box nil)))");
+        $self->_emit("  (defvar $var (make-p-box nil)))");
       }
     }
   });
@@ -1050,7 +1050,7 @@ sub _process_my_toplevel_declaration {
           $self->_emit("(box-set $var $init_cl)");
         } else {
           # Array/hash: parse full statement through expression parser for proper list context
-          # This generates (pl-array-= @arr (vector ...)) or (pl-hash-= %h (pl-hash ...))
+          # This generates (p-array-= @arr (vector ...)) or (p-hash-= %h (p-hash ...))
           my $cl_code = $self->_parse_expression($parts, $stmt);
           $self->_emit($cl_code) if defined $cl_code;
         }
@@ -1118,7 +1118,7 @@ sub _process_isa_declaration {
     $self->_emit("(defvar \@ISA (make-array 0 :adjustable t :fill-pointer 0))");
   });
   for my $parent (@parents) {
-    $self->_emit("(pl-push \@ISA \"$parent\")");
+    $self->_emit("(p-push \@ISA \"$parent\")");
   }
 
   $self->_emit("");
@@ -1170,7 +1170,7 @@ sub _process_local_declaration {
   my $perl_code = shift;
 
   # Handle local *foo and local *foo = RHS (typeglob localization)
-  # Use pl-local-glob which saves/restores all slots via unwind-protect.
+  # Use p-local-glob which saves/restores all slots via unwind-protect.
   # @parts includes the 'local' keyword as first element — skip it.
   my @non_ws = grep {
     my $r = ref($_);
@@ -1203,11 +1203,11 @@ sub _process_local_declaration {
         push @rhs_parts, $p if $past_eq;
       }
       my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-      $self->_emit("(pl-local-glob \"$pkg\" \"$name\"");
+      $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
       $self->indent_level($self->indent_level + 1);
-      $self->_emit("(pl-glob-assign \"$pkg\" \"$name\" $rhs_cl)");
+      $self->_emit("(p-glob-assign \"$pkg\" \"$name\" $rhs_cl)");
     } else {
-      $self->_emit("(pl-local-glob \"$pkg\" \"$name\"");
+      $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
       $self->indent_level($self->indent_level + 1);
     }
     $self->{_local_let_depth} //= 0;
@@ -1258,7 +1258,7 @@ sub _process_local_declaration {
       push @bindings, "($var (make-hash-table :test 'equal))";
     }
     else {
-      push @bindings, "($var (make-pl-box $init_cl))";
+      push @bindings, "($var (make-p-box $init_cl))";
     }
   }
   else {
@@ -1272,7 +1272,7 @@ sub _process_local_declaration {
         push @bindings, "($var (make-hash-table :test 'equal))";
       }
       else {
-        push @bindings, "($var (make-pl-box nil))";
+        push @bindings, "($var (make-p-box nil))";
       }
     }
   }
@@ -1291,11 +1291,11 @@ sub _process_local_declaration {
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
     my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-    # RHS must be a vector for pl-list-= to distribute values.
+    # RHS must be a vector for p-list-= to distribute values.
     # Comma expressions parse as (progn ...) in default context — convert to (vector ...).
     $rhs_cl =~ s/\A\s*\(progn /\(vector /;
     my $lhs_cl = "(vector " . join(" ", @vars) . ")";
-    $self->_emit("(pl-list-= $lhs_cl $rhs_cl)");
+    $self->_emit("(p-list-= $lhs_cl $rhs_cl)");
   }
 
   $self->_emit("");
@@ -1463,20 +1463,20 @@ sub _process_bare_block {
     # With continue: wrap tagbody in catch for labeled next, then run continue after
     $self->_emit("(block $label");
     $self->indent_level($self->indent_level + 1);
-    # Wrap contents in LAST-LABEL catch so pl-last-dynamic can throw to exit the block.
-    # Mirrors how pl-next/pl-redo use throw for dynamic (cross-function) labeled exits.
+    # Wrap contents in LAST-LABEL catch so p-last-dynamic can throw to exit the block.
+    # Mirrors how p-next/p-redo use throw for dynamic (cross-function) labeled exits.
     # e.g. Test::More's skip() calls (last SKIP) from inside a called function.
     $self->_emit("(catch 'pcl::LAST-$label");
     $self->indent_level($self->indent_level + 1);
     if ($continue_block) {
-      # Use pcl:: prefix to match the package used by pl-next macro's throw
+      # Use pcl:: prefix to match the package used by p-next macro's throw
       $self->_emit("(catch 'pcl::NEXT-$label");
       $self->indent_level($self->indent_level + 1);
     }
     $self->_emit("(tagbody");
     $self->indent_level($self->indent_level + 1);
     $self->_emit(":redo");
-    # Use pcl:: prefix to match the package used by pl-redo macro's throw
+    # Use pcl:: prefix to match the package used by p-redo macro's throw
     $self->_emit("(catch 'pcl::REDO-$label");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(progn");
@@ -1617,10 +1617,10 @@ sub _generate_if_clauses {
 
   # Handle 'unless' by negating
   if ($first->{type} eq 'unless') {
-    $cond_cl = "(pl-not $cond_cl)";
+    $cond_cl = "(p-not $cond_cl)";
   }
 
-  $self->_emit("(pl-if $cond_cl");
+  $self->_emit("(p-if $cond_cl");
   $self->indent_level($self->indent_level + 1);
 
   # Then block
@@ -1778,7 +1778,7 @@ sub parse_block_as_function {
   }
 
   # Anonymous subs accept arguments like named subs: (&rest %_args)
-  # with @_ bound inside the body via pl-flatten-args.
+  # with @_ bound inside the body via p-flatten-args.
   my $params_cl = $is_anon_sub ? '&rest %_args' : join(' ', @$params);
 
   # Emit the function definition
@@ -1790,7 +1790,7 @@ sub parse_block_as_function {
   $self->indent_level($self->indent_level + 1);
 
   if ($is_anon_sub) {
-    $self->_emit("(let ((\@_ (pl-flatten-args %_args)))");
+    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
     $self->indent_level($self->indent_level + 1);
   }
 
@@ -1929,7 +1929,7 @@ sub parse_block_to_cl_string {
 
 # Parse a block that contains hash key-value pairs: {key => val, ...}
 # Used for map({key=>$_}, LIST) where the block is a hash constructor.
-# Returns CL string: "(make-pl-box (pl-hash key val ...))"
+# Returns CL string: "(make-p-box (p-hash key val ...))"
 sub parse_hash_block_to_cl_string {
   my $self  = shift;
   my $block = shift;  # PPI::Structure::Block
@@ -1959,7 +1959,7 @@ sub parse_hash_block_to_cl_string {
     $result = $gen->generate($top_id);
   };
   die $@ if $@ && $@ =~ /^PCL:/;
-  return $result // '(make-pl-box (pl-hash))';
+  return $result // '(make-p-box (p-hash))';
 }
 
 
@@ -2121,14 +2121,14 @@ sub _with_declarations {
       my $sigil = substr($let_var, 0, 1);
       my $init = $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                : $sigil eq '%' ? "(make-hash-table :test #'equal)"
-               :                 '(make-pl-box nil)';
+               :                 '(make-p-box nil)';
       "($let_var $init)"
     } @my_vars);
     $self->_emit("(let ($bindings)");
     $self->indent_level($self->indent_level + 1);
 
-    # Track renamed/original vars as let-bound so _emit replaces pl-scalar-= with
-    # pl-my-= (box-set), preventing the proclaim-special side-effect that would
+    # Track renamed/original vars as let-bound so _emit replaces p-scalar-= with
+    # p-my-= (box-set), preventing the proclaim-special side-effect that would
     # turn future let bindings from lexical to dynamic and break closure capture.
     my $old_let_vars = $self->{_let_bound_vars};
     my @bound_names = map { $new_renames{$_} // $_ } @my_vars;
@@ -2238,7 +2238,7 @@ sub _process_while_statement {
 
   # Handle 'until' by negating
   if ($keyword eq 'until') {
-    $cond_cl = "(pl-not $cond_cl)";
+    $cond_cl = "(p-not $cond_cl)";
   }
 
   # Build the loop form with optional label
@@ -2246,7 +2246,7 @@ sub _process_while_statement {
 
   # Use common helper to wrap with declarations
   $self->_with_declarations($cond, sub {
-    $self->_emit("(pl-while $cond_cl$label_arg");
+    $self->_emit("(p-while $cond_cl$label_arg");
     $self->indent_level($self->indent_level + 1);
     if ($block) {
       $self->_with_declarations($block, sub {
@@ -2374,7 +2374,7 @@ sub _process_c_style_for {
   # Use common helper - scan init and condition for declarations
   my @decl_sources = grep { defined } @statements[0..1];
   $self->_with_declarations(\@decl_sources, sub {
-    $self->_emit("(pl-for ($init_cl)");
+    $self->_emit("(p-for ($init_cl)");
     $self->_emit("        ($cond_cl)");
     $self->_emit("        ($incr_cl)$label_arg");
     $self->indent_level($self->indent_level + 1);
@@ -2444,7 +2444,7 @@ sub _process_foreach_loop {
   # Build label argument if present
   my $label_arg = $label ? " :label $label" : "";
 
-  $self->_emit("(pl-foreach ($loop_var $list_cl)$label_arg");
+  $self->_emit("(p-foreach ($loop_var $list_cl)$label_arg");
   $self->indent_level($self->indent_level + 1);
   if ($block) {
     $self->_with_declarations($block, sub {
@@ -2623,10 +2623,10 @@ sub _process_sub_statement {
     $self->indent_level($self->indent_level + 1);
   }
 
-  # User-defined subs get pl- prefix to avoid conflicts with CL built-ins
-  # Use pl-sub macro to wrap in eval-when for BEGIN block visibility
-  # Wrap body in (block nil ...) so pl-return works
-  # Handle qualified names: A::foo -> A::pl-foo (not pl-A::foo)
+  # User-defined subs get p- prefix to avoid conflicts with CL built-ins
+  # Use p-sub macro to wrap in eval-when for BEGIN block visibility
+  # Wrap body in (block nil ...) so p-return works
+  # Handle qualified names: A::foo -> A::p-foo (not p-A::foo)
 
   # When inside a bare block (block_depth > 0), a simple 'package Foo;'
   # changes the environment's package stack but NOT the CL section.
@@ -2639,30 +2639,30 @@ sub _process_sub_statement {
   }
   my $cl_sub_name = $self->_qualified_sub_to_cl($effective_name);
 
-  # All named subs get a pl-declare-sub stub in the declarations bucket.
+  # All named subs get a p-declare-sub stub in the declarations bucket.
   # This ensures forward references (e.g. \&foo in a BEGIN block before
   # 'sub foo {}' in source) always resolve, regardless of source order.
   # The declarations bucket is assembled before definitions in the output.
-  # pl-declare-sub is idempotent: it only creates the stub if the real
+  # p-declare-sub is idempotent: it only creates the stub if the real
   # definition hasn't loaded yet.
   if ($name) {
     push @{$self->_sections->[$self->_cur_section]{declarations}},
-         "(pl-declare-sub $cl_sub_name)";
+         "(p-declare-sub $cl_sub_name)";
   }
 
   # Forward declaration: sub name; or sub name ($); or sub name : attrs;
-  # The pl-declare-sub stub in declarations is sufficient; nothing more needed.
+  # The p-declare-sub stub in declarations is sufficient; nothing more needed.
   unless ($block) {
     $self->_cur_bucket($old_bucket);
     return;
   }
 
-  $self->_emit("(pl-sub $cl_sub_name ($params_cl)");
+  $self->_emit("(p-sub $cl_sub_name ($params_cl)");
   $self->indent_level($self->indent_level + 1);
 
   # If using %_args, convert to @_ vector
   if ($needs_args_conversion) {
-    $self->_emit("(let ((\@_ (pl-flatten-args %_args)))");
+    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
     $self->indent_level($self->indent_level + 1);
   }
 
@@ -2745,10 +2745,10 @@ sub _process_package_statement {
       # in-package).  Using (in-package ...) here would change the CL reader's
       # package context for the rest of the file, corrupting all subsequent code.
       # Instead we:
-      #   1. Emit (pl-defpackage) and (defclass) inline.
+      #   1. Emit (p-defpackage) and (defclass) inline.
       #   2. Temporarily increment _block_depth so _process_sub_statement emits
-      #      fully-qualified names like |Point|::pl-new (not just pl-new).
-      #      pl-sub already handles qualified names via symbol-package.
+      #      fully-qualified names like |Point|::p-new (not just p-new).
+      #      p-sub already handles qualified names via symbol-package.
       #   3. At runtime (when the enclosing function is called) the eval-when
       #      :execute semantics kick in and the package + methods are created in
       #      the right order within the same call.
@@ -2761,13 +2761,13 @@ sub _process_package_statement {
       my $cl_class = $self->_pkg_to_clos_class($pkg_name);
 
       $self->_emit(";;; inline package $pkg_name");
-      $self->_emit("(pl-defpackage $cl_pkg)");
+      $self->_emit("(p-defpackage $cl_pkg)");
       $self->_emit(";; CLOS class for MRO");
       $self->_emit("(defclass $cl_class () ())");
       $self->_emit("");
 
       $self->environment->push_package($pkg_name);
-      # Increment _block_depth so sub names become fully qualified (e.g. |Point|::pl-new)
+      # Increment _block_depth so sub names become fully qualified (e.g. |Point|::p-new)
       $self->_block_depth($self->_block_depth + 1);
 
       for my $child ($block->schildren) {
@@ -2838,7 +2838,7 @@ sub _emit_package_preamble {
     # Opening a new section here would place its preamble/declarations outside
     # the block in the linear assembly, causing scope and symbol-table confusion.
     $self->_emit(";;; package $pkg_name");
-    $self->_emit("(pl-defpackage $cl_pkg)");
+    $self->_emit("(p-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
@@ -2852,7 +2852,7 @@ sub _emit_package_preamble {
 
   $self->_with_bucket('preamble', sub {
     $self->_emit(";;; package $pkg_name");
-    $self->_emit("(pl-defpackage $cl_pkg)");
+    $self->_emit("(p-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
@@ -2879,17 +2879,17 @@ sub _pkg_to_clos_class {
 
 # PCL runtime symbols that might conflict with user sub names
 my %PCL_SYMBOLS = map { $_ => 1 } qw(
-  pl-x pl-y pl-print pl-say pl-length pl-push pl-pop pl-shift pl-unshift
-  pl-keys pl-values pl-exists pl-delete pl-sort pl-reverse pl-map pl-grep
-  pl-join pl-split pl-ref pl-bless pl-die pl-warn pl-open pl-close
-  pl-read pl-write pl-int pl-abs pl-substr pl-index pl-lc pl-uc
+  p-x p-y p-print p-say p-length p-push p-pop p-shift p-unshift
+  p-keys p-values p-exists p-delete p-sort p-reverse p-map p-grep
+  p-join p-split p-ref p-bless p-die p-warn p-open p-close
+  p-read p-write p-int p-abs p-substr p-index p-lc p-uc
 );
 
 # Check if a sub name conflicts with PCL runtime
 sub _is_pcl_symbol {
   my $self = shift;
   my $name = shift;
-  return exists $PCL_SYMBOLS{"pl-$name"};
+  return exists $PCL_SYMBOLS{"p-$name"};
 }
 
 
@@ -2969,8 +2969,8 @@ sub _process_include_statement {
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
         my $path = $tokens[0]->string;
         $self->_emit(";; $perl_code");
-        $self->_emit("(pl-eval-direct");
-        $self->_emit("  (pl-require-file \"$path\"))");
+        $self->_emit("(p-eval-direct");
+        $self->_emit("  (p-require-file \"$path\"))");
         $self->_emit("");
         return;
       }
@@ -2980,7 +2980,7 @@ sub _process_include_statement {
       my $expr_cl = $self->_parse_expression(\@tokens);
       if ($expr_cl) {
         $self->_emit(";; $perl_code");
-        $self->_emit("(pl-require-file $expr_cl)");
+        $self->_emit("(p-require-file $expr_cl)");
         $self->_emit("");
         return;
       }
@@ -3021,7 +3021,7 @@ sub _process_include_statement {
   # 2. Perl semantics: require inside a sub runs at call time, not compile time
   if ($type eq 'require' && $self->environment->in_subroutine > 0) {
     $self->_emit(";; $perl_code");
-    $self->_emit("(pl-require \"$module\")");
+    $self->_emit("(p-require \"$module\")");
     $self->_emit("");
     return;
   }
@@ -3041,17 +3041,17 @@ sub _process_include_statement {
       $self->_emit(";; $perl_code");
       if (@imports) {
         my $list = join(' ', map { qq{"$_"} } @imports);
-        $self->_emit("(pl-eval-direct");
-        $self->_emit("  (pl-use \"$module\" :imports '($list)))");
+        $self->_emit("(p-eval-direct");
+        $self->_emit("  (p-use \"$module\" :imports '($list)))");
       } else {
-        $self->_emit("(pl-eval-direct");
-        $self->_emit("  (pl-use \"$module\"))");
+        $self->_emit("(p-eval-direct");
+        $self->_emit("  (p-use \"$module\"))");
       }
     }
     elsif ($type eq 'require') {
       $self->_emit(";; $perl_code");
-      $self->_emit("(pl-eval-direct");
-      $self->_emit("  (pl-require \"$module\"))");
+      $self->_emit("(p-eval-direct");
+      $self->_emit("  (p-require \"$module\"))");
     }
     else {
       # Unknown type
@@ -3137,13 +3137,13 @@ sub _process_use_lib {
   # so it appears before any 'require' or 'use' in the same section
   $self->_with_bucket('definitions', sub {
     $self->_emit(";; $perl_code");
-    $self->_emit("(pl-eval-direct");
+    $self->_emit("(p-eval-direct");
 
     # Extract path arguments from the statement
     for my $child ($stmt->schildren) {
       if ($child->isa('PPI::Token::Quote')) {
         my $path = $child->string;
-        $self->_emit("  (pl-unshift \@INC \"$path\")");
+        $self->_emit("  (p-unshift \@INC \"$path\")");
       }
       elsif ($child->isa('PPI::Token::QuoteLike::Words')) {
         # qw(path1 path2)
@@ -3151,7 +3151,7 @@ sub _process_use_lib {
         $content =~ s/^qw\s*[\(\[\{<]//;
         $content =~ s/[\)\]\}>]$//;
         for my $path (split /\s+/, $content) {
-          $self->_emit("  (pl-unshift \@INC \"$path\")") if $path;
+          $self->_emit("  (p-unshift \@INC \"$path\")") if $path;
         }
       }
     }
@@ -3388,10 +3388,10 @@ sub _process_use_vars {
       } else {
         $cl_var = "\%$name";
       }
-      my $init = $sigil eq '$' ? '(make-pl-box nil)'
+      my $init = $sigil eq '$' ? '(make-p-box nil)'
                : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                :                 '(make-hash-table :test #\'equal)';
-      $self->_emit("(pl-eval-direct");
+      $self->_emit("(p-eval-direct");
       $self->_emit("  (defvar $cl_var $init))");
     }
     $self->_emit("");
@@ -3516,9 +3516,9 @@ sub _emit_constant {
   my $cl_value = $self->_compile_constant_value($value_parts);
 
   # Emit as a function (Perl implements constants as subs)
-  # Use pl-sub for compile-time visibility (BEGIN blocks can use constants)
+  # Use p-sub for compile-time visibility (BEGIN blocks can use constants)
   my $cl_sub_name = $self->_qualified_sub_to_cl($name);
-  $self->_emit("(pl-sub $cl_sub_name () $cl_value)");
+  $self->_emit("(p-sub $cl_sub_name () $cl_value)");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
   $self->environment->add_prototype($name, {
@@ -3639,17 +3639,17 @@ sub _emit {
   # Don't emit if we're just extracting prototypes
   return if $self->collect_prototypes_only;
 
-  # For let-bound 'my' variables, replace (pl-scalar-= $var ...) with
-  # (pl-my-= $var ...) to avoid pl-scalar-='s (proclaim 'special) side-effect.
+  # For let-bound 'my' variables, replace (p-scalar-= $var ...) with
+  # (p-my-= $var ...) to avoid p-scalar-='s (proclaim 'special) side-effect.
   # proclaim at runtime contaminates future compilations: the next time code
   # using the same name is compiled, the let creates a dynamic binding instead
   # of a lexical one, breaking closure capture.
-  # pl-my-= is a semantic macro (expands to box-set) that expresses intent for
+  # p-my-= is a semantic macro (expands to box-set) that expresses intent for
   # other compiler backends reading the generated IR.
   if ($line && $self->{_let_bound_vars}) {
     for my $var (keys %{$self->{_let_bound_vars}}) {
-      my $pat = quotemeta("(pl-scalar-= $var");
-      $line =~ s/$pat(?=[\s)])/(pl-my-= $var/g;
+      my $pat = quotemeta("(p-scalar-= $var");
+      $line =~ s/$pat(?=[\s)])/(p-my-= $var/g;
     }
   }
 

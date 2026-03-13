@@ -62,7 +62,7 @@ sub run_pcl {
 
   my $cl = `$pl2cl $pl_file 2>&1`;
 
-  like($cl, qr/pl-glob.*"\*\.txt"/, 'glob <*.txt> generates pl-glob call');
+  like($cl, qr/p-glob.*"\*\.txt"/, 'glob <*.txt> generates p-glob call');
 
   unlink $pl_file;
 }
@@ -76,7 +76,7 @@ sub run_pcl {
 
   my $cl = `$pl2cl $pl_file 2>&1`;
 
-  like($cl, qr/pl-glob.*"\/tmp\/\*\.log"/, 'glob </tmp/*.log> generates pl-glob with path');
+  like($cl, qr/p-glob.*"\/tmp\/\*\.log"/, 'glob </tmp/*.log> generates p-glob with path');
 
   unlink $pl_file;
 }
@@ -90,8 +90,8 @@ sub run_pcl {
 
   my $cl = `$pl2cl $pl_file 2>&1`;
 
-  like($cl, qr/pl-readline/, '<STDIN> still generates pl-readline');
-  unlike($cl, qr/pl-glob/, '<STDIN> does NOT generate pl-glob');
+  like($cl, qr/p-readline/, '<STDIN> still generates p-readline');
+  unlike($cl, qr/p-glob/, '<STDIN> does NOT generate p-glob');
 
   unlink $pl_file;
 }
@@ -105,8 +105,8 @@ sub run_pcl {
 
   my $cl = `$pl2cl $pl_file 2>&1`;
 
-  like($cl, qr/pl-readline.*\$fh/, '<$fh> generates pl-readline');
-  unlike($cl, qr/pl-glob/, '<$fh> does NOT generate pl-glob');
+  like($cl, qr/p-readline.*\$fh/, '<$fh> generates p-readline');
+  unlike($cl, qr/p-glob/, '<$fh> does NOT generate p-glob');
 
   unlink $pl_file;
 }
@@ -202,8 +202,8 @@ END_CODE
 
   my $cl = `$pl2cl $pl_file 2>&1`;
 
-  like($cl, qr/pl-readline.*STDIN/, 'STDIN recognized as readline');
-  like($cl, qr/pl-glob.*\*\.pm/, '*.pm recognized as glob');
+  like($cl, qr/p-readline.*STDIN/, 'STDIN recognized as readline');
+  like($cl, qr/p-glob.*\*\.pm/, '*.pm recognized as glob');
 
   unlink $pl_file;
 }
@@ -217,8 +217,8 @@ END_CODE
 
   my $cl = `$pl2cl $pl_file 2>&1`;
 
-  like($cl, qr/pl-readline\)/, 'empty <> is readline');
-  unlike($cl, qr/pl-glob/, 'empty <> is NOT glob');
+  like($cl, qr/p-readline\)/, 'empty <> is readline');
+  unlike($cl, qr/p-glob/, 'empty <> is NOT glob');
 
   unlink $pl_file;
 }
@@ -264,7 +264,7 @@ END_CODE
 
   my $cl = `$pl2cl $pl_file 2>&1`;
 
-  like($cl, qr/pl-glob.*"\*\.txt"/, 'glob() function generates pl-glob call');
+  like($cl, qr/p-glob.*"\*\.txt"/, 'glob() function generates p-glob call');
 
   unlink $pl_file;
 }
@@ -371,7 +371,7 @@ END_CODE
   like($output, qr/1/, 'glob result can be filtered with grep');
 }
 
-# Test: Character range in brackets (now expanded by pl-glob)
+# Test: Character range in brackets (now expanded by p-glob)
 {
   # Create c.txt for this test
   open my $fh, '>', "$tmpdir/c.txt" or die $!;

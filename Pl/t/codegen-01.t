@@ -94,99 +94,99 @@ test_codegen('0b1111_0000', '#b11110000', 'Underscored binary');
 diag "";
 diag "-------- Arithmetic operators:";
 
-test_codegen('$x + $y', '(pl-+ $x $y)', 'Addition');
-test_codegen('$x - $y', '(pl-- $x $y)', 'Subtraction');
-test_codegen('$x * $y', '(pl-* $x $y)', 'Multiplication');
-test_codegen('$x / $y', '(pl-/ $x $y)', 'Division');
-test_codegen('$x % $y', '(pl-% $x $y)', 'Modulo');
-test_codegen('$x ** $y', '(pl-** $x $y)', 'Exponentiation');
+test_codegen('$x + $y', '(p-+ $x $y)', 'Addition');
+test_codegen('$x - $y', '(p-- $x $y)', 'Subtraction');
+test_codegen('$x * $y', '(p-* $x $y)', 'Multiplication');
+test_codegen('$x / $y', '(p-/ $x $y)', 'Division');
+test_codegen('$x % $y', '(p-% $x $y)', 'Modulo');
+test_codegen('$x ** $y', '(p-** $x $y)', 'Exponentiation');
 
 
 # ============================================================
 diag "";
 diag "-------- String operators:";
 
-test_codegen('$x . $y', '(pl-. $x $y)', 'String concatenation');
-test_codegen('$x x 3', '(pl-str-x $x 3)', 'String repetition');
+test_codegen('$x . $y', '(p-. $x $y)', 'String concatenation');
+test_codegen('$x x 3', '(p-str-x $x 3)', 'String repetition');
 
 
 # ============================================================
 diag "";
 diag "-------- Comparison operators (numeric):";
 
-test_codegen('$x == $y', '(pl-== $x $y)', 'Numeric equality');
-test_codegen('$x != $y', '(pl-!= $x $y)', 'Numeric inequality');
-test_codegen('$x < $y', '(pl-< $x $y)', 'Less than');
-test_codegen('$x > $y', '(pl-> $x $y)', 'Greater than');
-test_codegen('$x <= $y', '(pl-<= $x $y)', 'Less than or equal');
-test_codegen('$x >= $y', '(pl->= $x $y)', 'Greater than or equal');
-test_codegen('$x <=> $y', '(pl-<=> $x $y)', 'Spaceship');
+test_codegen('$x == $y', '(p-== $x $y)', 'Numeric equality');
+test_codegen('$x != $y', '(p-!= $x $y)', 'Numeric inequality');
+test_codegen('$x < $y', '(p-< $x $y)', 'Less than');
+test_codegen('$x > $y', '(p-> $x $y)', 'Greater than');
+test_codegen('$x <= $y', '(p-<= $x $y)', 'Less than or equal');
+test_codegen('$x >= $y', '(p->= $x $y)', 'Greater than or equal');
+test_codegen('$x <=> $y', '(p-<=> $x $y)', 'Spaceship');
 
 
 # ============================================================
 diag "";
 diag "-------- Comparison operators (string):";
 
-test_codegen('$x eq $y', '(pl-str-eq $x $y)', 'String equality');
-test_codegen('$x ne $y', '(pl-str-ne $x $y)', 'String inequality');
-test_codegen('$x lt $y', '(pl-str-lt $x $y)', 'String less than');
-test_codegen('$x gt $y', '(pl-str-gt $x $y)', 'String greater than');
+test_codegen('$x eq $y', '(p-str-eq $x $y)', 'String equality');
+test_codegen('$x ne $y', '(p-str-ne $x $y)', 'String inequality');
+test_codegen('$x lt $y', '(p-str-lt $x $y)', 'String less than');
+test_codegen('$x gt $y', '(p-str-gt $x $y)', 'String greater than');
 
 
 # ============================================================
 diag "";
 diag "-------- Logical operators:";
 
-test_codegen('$x && $y', '(pl-&& $x $y)', 'Logical AND (&&)');
-test_codegen('$x || $y', '(pl-|| $x $y)', 'Logical OR (||)');
-test_codegen('$x // $y', '(pl-// $x $y)', 'Defined-or');
-test_codegen('$x and $y', '(pl-and $x $y)', 'Logical and');
-test_codegen('$x or $y', '(pl-or $x $y)', 'Logical or');
+test_codegen('$x && $y', '(p-&& $x $y)', 'Logical AND (&&)');
+test_codegen('$x || $y', '(p-|| $x $y)', 'Logical OR (||)');
+test_codegen('$x // $y', '(p-// $x $y)', 'Defined-or');
+test_codegen('$x and $y', '(p-and $x $y)', 'Logical and');
+test_codegen('$x or $y', '(p-or $x $y)', 'Logical or');
 
 
 # ============================================================
 diag "";
 diag "-------- Bitwise operators (with exceptions):";
 
-test_codegen('$x & $y', '(pl-bit-and $x $y)', 'Bitwise AND');
-test_codegen('$x | $y', '(pl-bit-or $x $y)', 'Bitwise OR');
-test_codegen('$x ^ $y', '(pl-bit-xor $x $y)', 'Bitwise XOR');
+test_codegen('$x & $y', '(p-bit-and $x $y)', 'Bitwise AND');
+test_codegen('$x | $y', '(p-bit-or $x $y)', 'Bitwise OR');
+test_codegen('$x ^ $y', '(p-bit-xor $x $y)', 'Bitwise XOR');
 
 
 # ============================================================
 diag "";
 diag "-------- Assignment:";
 
-test_codegen('$x = $y', '(pl-scalar-= $x $y)', 'Simple assignment');
-test_codegen('$x += 5', '(pl-incf $x 5)', 'Add-assign');
-test_codegen('$x -= 5', '(pl-decf $x 5)', 'Subtract-assign');
+test_codegen('$x = $y', '(p-scalar-= $x $y)', 'Simple assignment');
+test_codegen('$x += 5', '(p-incf $x 5)', 'Add-assign');
+test_codegen('$x -= 5', '(p-decf $x 5)', 'Subtract-assign');
 
 
 # ============================================================
 diag "";
 diag "-------- Prefix/postfix operators:";
 
-test_codegen('!$x', '(pl-! $x)', 'Logical not');
-test_codegen('++$x', '(pl-pre++ $x)', 'Pre-increment');
-test_codegen('--$x', '(pl-pre-- $x)', 'Pre-decrement');
-test_codegen('$x++', '(pl-post++ $x)', 'Post-increment');
-test_codegen('$x--', '(pl-post-- $x)', 'Post-decrement');
+test_codegen('!$x', '(p-! $x)', 'Logical not');
+test_codegen('++$x', '(p-pre++ $x)', 'Pre-increment');
+test_codegen('--$x', '(p-pre-- $x)', 'Pre-decrement');
+test_codegen('$x++', '(p-post++ $x)', 'Post-increment');
+test_codegen('$x--', '(p-post-- $x)', 'Post-decrement');
 
 
 # ============================================================
 diag "";
 diag "-------- File test operators:";
 
-test_codegen('-f $file', '(pl--f $file)', 'File test -f');
-test_codegen('-e $path', '(pl--e $path)', 'File test -e');
-test_codegen('-d $dir', '(pl--d $dir)', 'File test -d');
+test_codegen('-f $file', '(p--f $file)', 'File test -f');
+test_codegen('-e $path', '(p--e $path)', 'File test -e');
+test_codegen('-d $dir', '(p--d $dir)', 'File test -d');
 
 
 # ============================================================
 diag "";
 diag "-------- Ternary operator:";
 
-test_codegen('$x ? $y : $z', '(pl-if $x $y $z)', 'Simple ternary');
+test_codegen('$x ? $y : $z', '(p-if $x $y $z)', 'Simple ternary');
 
 
 # ============================================================
@@ -202,34 +202,34 @@ test_codegen('foo($x, $y)', '(pl-foo $x $y)', 'Function call two args');
 diag "";
 diag "-------- Array/hash access:";
 
-test_codegen('$arr[0]', '(pl-aref @arr 0)', 'Array access');
-test_codegen('$hash{key}', '(pl-gethash %hash "key")', 'Hash access');
-test_codegen('$ref->[0]', '(pl-aref-deref $ref 0)', 'Array ref access');
-test_codegen('$ref->{key}', '(pl-gethash-deref $ref "key")', 'Hash ref access');
+test_codegen('$arr[0]', '(p-aref @arr 0)', 'Array access');
+test_codegen('$hash{key}', '(p-gethash %hash "key")', 'Hash access');
+test_codegen('$ref->[0]', '(p-aref-deref $ref 0)', 'Array ref access');
+test_codegen('$ref->{key}', '(p-gethash-deref $ref "key")', 'Hash ref access');
 
 
 # ============================================================
 diag "";
 diag "-------- Slices:";
 
-test_codegen('@arr[1,2,3]', '(pl-aslice @arr 1 2 3)', 'Array slice');
-test_codegen('@hash{"a","b"}', '(pl-hslice %hash "a" "b")', 'Hash slice');
+test_codegen('@arr[1,2,3]', '(p-aslice @arr 1 2 3)', 'Array slice');
+test_codegen('@hash{"a","b"}', '(p-hslice %hash "a" "b")', 'Hash slice');
 
 
 # ============================================================
 diag "";
 diag "-------- Initializers:";
 
-test_codegen('[1, 2, 3]', '(make-pl-box (pl-array-init 1 2 3))', 'Array initializer (boxed ref)');
-test_codegen('{a => 1, b => 2}', '(make-pl-box (pl-hash "a" 1 "b" 2))', 'Hash initializer (boxed ref)');
+test_codegen('[1, 2, 3]', '(make-p-box (p-array-init 1 2 3))', 'Array initializer (boxed ref)');
+test_codegen('{a => 1, b => 2}', '(make-p-box (p-hash "a" 1 "b" 2))', 'Hash initializer (boxed ref)');
 
 
 # ============================================================
 diag "";
 diag "-------- Method calls:";
 
-test_codegen('$obj->method()', '(pl-method-call $obj \'method)', 'Method call no args');
-test_codegen('$obj->method($x)', '(pl-method-call $obj \'method $x)', 'Method call with arg');
+test_codegen('$obj->method()', '(p-method-call $obj \'method)', 'Method call no args');
+test_codegen('$obj->method($x)', '(p-method-call $obj \'method $x)', 'Method call with arg');
 
 
 # ============================================================
@@ -237,15 +237,15 @@ diag "";
 diag "-------- Complex expressions:";
 
 test_codegen('$x + $y * $z',
-             '(pl-+ $x (pl-* $y $z))',
+             '(p-+ $x (p-* $y $z))',
              'Operator precedence');
 
 test_codegen('($x + $y) * $z',
-             '(pl-* (pl-+ $x $y) $z)',
+             '(p-* (p-+ $x $y) $z)',
              'Parenthesized expression');
 
 test_codegen('$foo + (my $x = 1)',
-             '(pl-+ $foo (pl-scalar-= $x 1))',
+             '(p-+ $foo (p-scalar-= $x 1))',
              'Inline my declaration in parens');
 
 
@@ -254,19 +254,19 @@ diag "";
 diag "-------- Assignment to array/hash elements:";
 
 test_codegen('$arr[0] = 5',
-             '(pl-setf (pl-aref @arr 0) 5)',
+             '(p-setf (p-aref @arr 0) 5)',
              'Assign to array element');
 
 test_codegen('$hash{key} = "value"',
-             '(pl-setf (pl-gethash %hash "key") "value")',
+             '(p-setf (p-gethash %hash "key") "value")',
              'Assign to hash element');
 
 test_codegen('$arr[$i] = $x + 1',
-             '(pl-setf (pl-aref @arr $i) (pl-+ $x 1))',
+             '(p-setf (p-aref @arr $i) (p-+ $x 1))',
              'Assign expression to array element');
 
 test_codegen('$hash{$key} = $val',
-             '(pl-setf (pl-gethash %hash $key) $val)',
+             '(p-setf (p-gethash %hash $key) $val)',
              'Assign with variable key');
 
 
@@ -275,27 +275,27 @@ diag "";
 diag "-------- Chained array/hash references:";
 
 test_codegen('$ref->[0][1]',
-             '(pl-aref (pl-aref-deref $ref 0) 1)',
+             '(p-aref (p-aref-deref $ref 0) 1)',
              'Chained array refs');
 
 test_codegen('$ref->{a}{b}',
-             '(pl-gethash (pl-gethash-deref $ref "a") "b")',
+             '(p-gethash (p-gethash-deref $ref "a") "b")',
              'Chained hash refs');
 
 test_codegen('$ref->[0]{key}',
-             '(pl-gethash (pl-aref-deref $ref 0) "key")',
+             '(p-gethash (p-aref-deref $ref 0) "key")',
              'Array ref then hash access');
 
 test_codegen('$ref->{key}[0]',
-             '(pl-aref (pl-gethash-deref $ref "key") 0)',
+             '(p-aref (p-gethash-deref $ref "key") 0)',
              'Hash ref then array access');
 
 test_codegen('$data->[0][1][2]',
-             '(pl-aref (pl-aref (pl-aref-deref $data 0) 1) 2)',
+             '(p-aref (p-aref (p-aref-deref $data 0) 1) 2)',
              'Triple nested array refs');
 
 test_codegen('$config->{db}{host}{port}',
-             '(pl-gethash (pl-gethash (pl-gethash-deref $config "db") "host") "port")',
+             '(p-gethash (p-gethash (p-gethash-deref $config "db") "host") "port")',
              'Triple nested hash refs');
 
 
@@ -304,19 +304,19 @@ diag "";
 diag "-------- Assignment to dereferenced values:";
 
 test_codegen('$ref->[0] = 5',
-             '(pl-setf (pl-aref-deref $ref 0) 5)',
+             '(p-setf (p-aref-deref $ref 0) 5)',
              'Assign to array ref element');
 
 test_codegen('$ref->{key} = "value"',
-             '(pl-setf (pl-gethash-deref $ref "key") "value")',
+             '(p-setf (p-gethash-deref $ref "key") "value")',
              'Assign to hash ref element');
 
 test_codegen('$data->[0][1] = $x',
-             '(pl-setf (pl-aref (pl-aref-deref $data 0) 1) $x)',
+             '(p-setf (p-aref (p-aref-deref $data 0) 1) $x)',
              'Assign to nested array ref');
 
 test_codegen('$cfg->{a}{b} = 100',
-             '(pl-setf (pl-gethash (pl-gethash-deref $cfg "a") "b") 100)',
+             '(p-setf (p-gethash (p-gethash-deref $cfg "a") "b") 100)',
              'Assign to nested hash ref');
 
 
@@ -325,27 +325,27 @@ diag "";
 diag "-------- Mixed complex expressions:";
 
 test_codegen('$x = $arr[0] + $hash{key}',
-             '(pl-scalar-= $x (pl-+ (pl-aref @arr 0) (pl-gethash %hash "key")))',
+             '(p-scalar-= $x (p-+ (p-aref @arr 0) (p-gethash %hash "key")))',
              'Sum of array and hash values');
 
 test_codegen('$result = $obj->method($arr[0])',
-             '(pl-scalar-= $result (pl-method-call $obj \'method (pl-aref @arr 0)))',
+             '(p-scalar-= $result (p-method-call $obj \'method (p-aref @arr 0)))',
              'Method call with array element arg');
 
 test_codegen('$total = $prices->[$i] * $qty->{$item}',
-             '(pl-scalar-= $total (pl-* (pl-aref-deref $prices $i) (pl-gethash-deref $qty $item)))',
+             '(p-scalar-= $total (p-* (p-aref-deref $prices $i) (p-gethash-deref $qty $item)))',
              'Multiply two dereferenced values');
 
 test_codegen('$hash{$arr[0]} = $ref->{key}',
-             '(pl-setf (pl-gethash %hash (pl-aref @arr 0)) (pl-gethash-deref $ref "key"))',
+             '(p-setf (p-gethash %hash (p-aref @arr 0)) (p-gethash-deref $ref "key"))',
              'Complex LHS and RHS');
 
 test_codegen('$x++ + $y--',
-             '(pl-+ (pl-post++ $x) (pl-post-- $y))',
+             '(p-+ (p-post++ $x) (p-post-- $y))',
              'Post-increment and decrement in expression');
 
 test_codegen('++$arr[0]',
-             '(pl-pre++ (pl-aref-box @arr 0))',
+             '(p-pre++ (p-aref-box @arr 0))',
              'Pre-increment array element (l-value context)');
 
 
@@ -354,27 +354,27 @@ diag "";
 diag "-------- Compound assignment operators:";
 
 test_codegen('$x *= 2',
-             '(pl-*= $x 2)',
+             '(p-*= $x 2)',
              'Multiply-assign');
 
 test_codegen('$x /= 2',
-             '(pl-/= $x 2)',
+             '(p-/= $x 2)',
              'Divide-assign');
 
 test_codegen('$str .= "suffix"',
-             '(pl-.= $str "suffix")',
+             '(p-.= $str "suffix")',
              'Concat-assign');
 
 test_codegen('$x ||= 10',
-             '(pl-or-assign $x 10)',
+             '(p-or-assign $x 10)',
              'Or-assign');
 
 test_codegen('$x //= "default"',
-             '(pl-//= $x "default")',
+             '(p-//= $x "default")',
              'Defined-or-assign');
 
 test_codegen('$arr[0] += 5',
-             '(pl-incf (pl-aref @arr 0) 5)',
+             '(p-incf (p-aref @arr 0) 5)',
              'Add-assign to array element');
 
 
@@ -383,19 +383,19 @@ diag "";
 diag "-------- More precedence tests:";
 
 test_codegen('$a && $b || $c',
-             '(pl-|| (pl-&& $a $b) $c)',
+             '(p-|| (p-&& $a $b) $c)',
              'AND has higher precedence than OR');
 
 test_codegen('$a || $b && $c',
-             '(pl-|| $a (pl-&& $b $c))',
+             '(p-|| $a (p-&& $b $c))',
              'AND binds tighter');
 
 test_codegen('$a ? $b : $c ? $d : $e',
-             '(pl-if $a $b (pl-if $c $d $e))',
+             '(p-if $a $b (p-if $c $d $e))',
              'Nested ternary (right-associative)');
 
 test_codegen('$x = $a ? $b : $c',
-             '(pl-scalar-= $x (pl-if $a $b $c))',
+             '(p-scalar-= $x (p-if $a $b $c))',
              'Assignment with ternary (assignment has lower precedence)');
 
 
@@ -404,11 +404,11 @@ diag "";
 diag "-------- Indentation tests:";
 
 test_codegen('$x + $y',
-             '  (pl-+ $x $y)',
+             '  (p-+ $x $y)',
              'Indent level 1 (2 spaces)', 1);
 
 test_codegen('$arr[0] = 5',
-             '    (pl-setf (pl-aref @arr 0) 5)',
+             '    (p-setf (p-aref @arr 0) 5)',
              'Indent level 2 (4 spaces)', 2);
 
 test_codegen('$x',
@@ -421,35 +421,35 @@ diag "";
 diag "-------- Print/say with filehandles:";
 
 test_codegen('print "hello"',
-             '(pl-print "hello")',
+             '(p-print "hello")',
              'print without filehandle');
 
 test_codegen('print STDERR "error"',
-             "(pl-print :fh 'STDERR \"error\")",
+             "(p-print :fh 'STDERR \"error\")",
              'print with STDERR filehandle');
 
 test_codegen('print STDOUT "out"',
-             "(pl-print :fh 'STDOUT \"out\")",
+             "(p-print :fh 'STDOUT \"out\")",
              'print with STDOUT filehandle');
 
 test_codegen('print $fh "data"',
-             '(pl-print :fh $fh "data")',
+             '(p-print :fh $fh "data")',
              'print with variable filehandle');
 
 test_codegen('print STDERR "Some", "thing\n"',
-             "(pl-print :fh 'STDERR \"Some\" \"thing\n\")",
+             "(p-print :fh 'STDERR \"Some\" \"thing\n\")",
              'print with filehandle and multiple args');
 
 test_codegen('say "hello"',
-             '(pl-say "hello")',
+             '(p-say "hello")',
              'say without filehandle');
 
 test_codegen('say STDERR $msg',
-             "(pl-say :fh 'STDERR \$msg)",
+             "(p-say :fh 'STDERR \$msg)",
              'say with filehandle');
 
 test_codegen('print STDERR "a", $b, "c"',
-             "(pl-print :fh 'STDERR \"a\" \$b \"c\")",
+             "(p-print :fh 'STDERR \"a\" \$b \"c\")",
              'print with filehandle and mixed args');
 
 
@@ -462,93 +462,93 @@ test_codegen('&foo',
              '(pl-foo)',
              'Regression: &subname generates funcall');
 
-# Regression: delete $a[idx] should use pl-delete-array
+# Regression: delete $a[idx] should use p-delete-array
 # Was passing value instead of array+index
 test_codegen('delete $a[1]',
-             '(pl-delete-array @a 1)',
+             '(p-delete-array @a 1)',
              'Regression: delete $a[idx] uses array function');
 
 # Hash delete passes hash and key separately (not the value)
 test_codegen('delete $h{key}',
-             '(pl-delete %h "key")',
+             '(p-delete %h "key")',
              'Regression: delete $h{key} passes hash and key separately');
 
-# exists $a[idx] should use pl-exists-array
+# exists $a[idx] should use p-exists-array
 test_codegen('exists $a[1]',
-             '(pl-exists-array @a 1)',
+             '(p-exists-array @a 1)',
              'Regression: exists $a[idx] uses array function');
 
-# exists $h{key} should use pl-exists with hash and key
+# exists $h{key} should use p-exists with hash and key
 test_codegen('exists $h{key}',
-             '(pl-exists %h "key")',
+             '(p-exists %h "key")',
              'Regression: exists $h{key} passes hash and key separately');
 
 
 diag "";
 diag "-------- Regression tests (session 5):";
 
-# Hash slice delete: delete @hash{keys} -> pl-delete-hash-slice with %hash
+# Hash slice delete: delete @hash{keys} -> p-delete-hash-slice with %hash
 test_codegen('delete @foo{4,5}',
-             '(pl-delete-hash-slice %foo 4 5)',
+             '(p-delete-hash-slice %foo 4 5)',
              'Regression: delete hash slice uses %hash and slice function');
 
-# Array slice delete: delete @arr[indices] -> pl-delete-array-slice
+# Array slice delete: delete @arr[indices] -> p-delete-array-slice
 test_codegen('delete @arr[1,2,3]',
-             '(pl-delete-array-slice @arr 1 2 3)',
+             '(p-delete-array-slice @arr 1 2 3)',
              'Regression: delete array slice uses slice function');
 
 # Hash slice: @hash{keys} accesses %hash, not @hash
 test_codegen('@hash{"a","b"}',
-             '(pl-hslice %hash "a" "b")',
+             '(p-hslice %hash "a" "b")',
              'Regression: hash slice @h{} uses %hash sigil');
 
 # Block filehandle syntax: print {$expr} LIST
 test_codegen('print {$fh} "text"',
-             '(pl-print :fh $fh "text")',
+             '(p-print :fh $fh "text")',
              'print with block filehandle - simple var');
 
 test_codegen('print {STDERR} "text"',
-             "(pl-print :fh 'STDERR \"text\")",
+             "(p-print :fh 'STDERR \"text\")",
              'print with block filehandle - bareword');
 
 test_codegen('print {$hash{key}} "text"',
-             '(pl-print :fh (pl-gethash %hash "key") "text")',
+             '(p-print :fh (p-gethash %hash "key") "text")',
              'print with block filehandle - hash access');
 
 # Variable filehandle: $scalar followed by a term = filehandle
 test_codegen('print $fh $data',
-             '(pl-print :fh $fh $data)',
+             '(p-print :fh $fh $data)',
              'print with variable filehandle - scalar arg');
 
 test_codegen('say $fh @arr',
-             '(pl-say :fh $fh @arr)',
+             '(p-say :fh $fh @arr)',
              'say with variable filehandle - array arg');
 
 test_codegen('print $fh "hello"',
-             '(pl-print :fh $fh "hello")',
+             '(p-print :fh $fh "hello")',
              'print with variable filehandle - string arg');
 
 test_codegen('printf $fh "%s", $x',
-             '(pl-printf :fh $fh "%s" $x)',
+             '(p-printf :fh $fh "%s" $x)',
              'printf with variable filehandle');
 
 # NOT a filehandle: binary operator after $fh
 test_codegen('print $fh . "bar"',
-             '(pl-print (pl-. $fh "bar"))',
+             '(p-print (p-. $fh "bar"))',
              'print NOT filehandle - concat operator');
 
 test_codegen('print $fh + 1',
-             '(pl-print (pl-+ $fh 1))',
+             '(p-print (p-+ $fh 1))',
              'print NOT filehandle - addition');
 
 # NOT a filehandle: comma after $fh
 test_codegen('print $fh, "hello"',
-             '(pl-print $fh "hello")',
+             '(p-print $fh "hello")',
              'print NOT filehandle - comma separates args');
 
 # NOT a filehandle: nothing after $fh
 test_codegen('print $fh',
-             '(pl-print $fh)',
+             '(p-print $fh)',
              'print NOT filehandle - no args after');
 
 
@@ -556,18 +556,18 @@ diag "";
 diag "-------- KV slice:";
 
 test_codegen('my @kv = %h{"a","b"}',
-             '(pl-array-= @kv (pl-kv-hslice %h "a" "b"))',
+             '(p-array-= @kv (p-kv-hslice %h "a" "b"))',
              'KV hash slice %h{keys}');
 
 test_codegen('delete %h{"a","c"}',
-             '(pl-delete-kv-hash-slice %h "a" "c")',
+             '(p-delete-kv-hash-slice %h "a" "c")',
              'delete KV hash slice');
 
 diag "";
 diag "-------- split scalar context:";
 
 test_codegen('my $n = split(/,/, $str)',
-             '(pl-scalar-= $n (length (pl-split (pl-regex "/,/") $str)))',
+             '(p-scalar-= $n (length (p-split (p-regex "/,/") $str)))',
              'split in scalar context returns length');
 
 diag "";
@@ -590,28 +590,28 @@ test_codegen('q/slash text/',
              'q// literal string');
 
 test_codegen('qq{hello $name}',
-             '(pl-string-concat "hello " $name)',
+             '(p-string-concat "hello " $name)',
              'qq{} interpolated string');
 
 test_codegen('qq/hello $name/',
-             '(pl-string-concat "hello " $name)',
+             '(p-string-concat "hello " $name)',
              'qq// interpolated string');
 
 # $#array lvalue
 test_codegen('--$#ary',
-             '(pl-set-array-length @ary (1- (pl-array-last-index @ary)))',
+             '(p-set-array-length @ary (1- (p-array-last-index @ary)))',
              '$#array lvalue - pre-decrement');
 
 test_codegen('++$#ary',
-             '(pl-set-array-length @ary (1+ (pl-array-last-index @ary)))',
+             '(p-set-array-length @ary (1+ (p-array-last-index @ary)))',
              '$#array lvalue - pre-increment');
 
 test_codegen('$#ary = 5',
-             '(pl-set-array-length @ary 5)',
+             '(p-set-array-length @ary 5)',
              '$#array lvalue - assignment');
 
 test_codegen('$#ary++',
-             '(let ((_prev (pl-array-last-index @ary))) (pl-set-array-length @ary (1+ _prev)) _prev)',
+             '(let ((_prev (p-array-last-index @ary))) (p-set-array-length @ary (1+ _prev)) _prev)',
              '$#array lvalue - post-increment');
 
 diag "";
@@ -627,15 +627,15 @@ test_codegen('-SomeWord',
 
 # --- CL reader safety: pipe-quoting special variables ---
 test_codegen('$| = 1',
-             '(pl-setf |$\\|| 1)',
+             '(p-setf |$\\|| 1)',
              '$| (autoflush) is pipe-quoted for CL reader safety');
 
 test_codegen('$; eq "x"',
-             '(pl-str-eq |$;| "x")',
+             '(p-str-eq |$;| "x")',
              '$; (subscript separator) is pipe-quoted');
 
 test_codegen('$, = ","',
-             '(pl-setf |$,| ",")',
+             '(p-setf |$,| ",")',
              '$, (output field separator) is pipe-quoted');
 
 test_codegen('$^X',
@@ -657,8 +657,8 @@ test_codegen('-0777',
 
 # Version strings
 test_codegen('v1.20.300',
-             '(pl-version-string 1 20 300)',
-             'version string v1.20.300 emits pl-version-string call');
+             '(p-version-string 1 20 300)',
+             'version string v1.20.300 emits p-version-string call');
 
 # $] special variable
 test_codegen('$]',

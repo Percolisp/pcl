@@ -61,7 +61,7 @@ diag '-------- __FILE__ Token:';
 {
     my $parser = Pl::Parser->new(code => 'print "File: " . __FILE__;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-\.\s+"File: "\s+"-"/, '__FILE__ can be concatenated');
+    like($output, qr/p-\.\s+"File: "\s+"-"/, '__FILE__ can be concatenated');
 }
 
 diag '-------- __LINE__ Token:';
@@ -70,7 +70,7 @@ diag '-------- __LINE__ Token:';
 {
     my $parser = Pl::Parser->new(code => 'print __LINE__;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-print\s+1/, '__LINE__ returns line number');
+    like($output, qr/p-print\s+1/, '__LINE__ returns line number');
 }
 
 # Test 5: __LINE__ preserves actual line number
@@ -78,7 +78,7 @@ diag '-------- __LINE__ Token:';
     my $code = "# comment\nprint __LINE__;\n";  # __LINE__ on line 2
     my $parser = Pl::Parser->new(code => $code);
     my $output = get_generated_code($parser);
-    like($output, qr/pl-print\s+2/, '__LINE__ reflects actual source line');
+    like($output, qr/p-print\s+2/, '__LINE__ reflects actual source line');
 }
 
 # Test 6: __LINE__ in expression
@@ -94,9 +94,9 @@ diag '-------- __LINE__ Token:';
     my $parser = Pl::Parser->new(code => $code);
     my @output = $parser->parse();
     my $text = join("\n", @output);
-    like($text, qr/pl-print\s+1/, 'First __LINE__ is 1');
-    like($text, qr/pl-print\s+2/, 'Second __LINE__ is 2');
-    like($text, qr/pl-print\s+3/, 'Third __LINE__ is 3');
+    like($text, qr/p-print\s+1/, 'First __LINE__ is 1');
+    like($text, qr/p-print\s+2/, 'Second __LINE__ is 2');
+    like($text, qr/p-print\s+3/, 'Third __LINE__ is 3');
 }
 
 diag '-------- __FILE__ and __LINE__ Together:';
@@ -112,7 +112,7 @@ diag '-------- __FILE__ and __LINE__ Together:';
 {
     my $parser = Pl::Parser->new(code => 'die "Error at " . __FILE__ . ":" . __LINE__ if $err;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-die.*pl-\.\s+.*"-".*":".*1/s, '__FILE__ and __LINE__ work in die message');
+    like($output, qr/p-die.*p-\.\s+.*"-".*":".*1/s, '__FILE__ and __LINE__ work in die message');
 }
 
 diag '-------- Runtime Execution:';
@@ -175,7 +175,7 @@ diag '-------- Edge Cases:';
 {
     my $parser = Pl::Parser->new(code => 'my $line = __LINE__ + 1;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-\+\s+\d+\s+1/, '__LINE__ works in arithmetic');
+    like($output, qr/p-\+\s+\d+\s+1/, '__LINE__ works in arithmetic');
 }
 
 diag '-------- __PACKAGE__ Token:';
@@ -219,14 +219,14 @@ diag '-------- __PACKAGE__ Token:';
 {
     my $parser = Pl::Parser->new(code => 'package MyClass; sub new { bless {}, __PACKAGE__ }');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-bless.*"MyClass"/, '__PACKAGE__ works in bless');
+    like($output, qr/p-bless.*"MyClass"/, '__PACKAGE__ works in bless');
 }
 
 # Test 22: __PACKAGE__ in arithmetic (concatenation)
 {
     my $parser = Pl::Parser->new(code => 'package Foo; my $s = __PACKAGE__ . "::method";');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-\.\s+"Foo"\s+"::method"/, '__PACKAGE__ works in concatenation');
+    like($output, qr/p-\.\s+"Foo"\s+"::method"/, '__PACKAGE__ works in concatenation');
 }
 
 # Test 23: Multiple packages - __PACKAGE__ tracks correctly

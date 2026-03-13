@@ -44,7 +44,7 @@ END_PERL
 
   like($cl, qr/defclass child \(Parent::parent\)/, '@ISA qw() generates CLOS class with parent');
   like($cl, qr/defvar \@ISA/, '@ISA array is still created');
-  like($cl, qr/pl-push \@ISA "Parent"/, 'Parent pushed to @ISA array');
+  like($cl, qr/p-push \@ISA "Parent"/, 'Parent pushed to @ISA array');
 }
 
 # Test @ISA with list syntax
@@ -99,8 +99,8 @@ sub greet {
 }
 END_PERL
 
-  like($cl, qr/pl-super-call/, 'SUPER:: generates pl-super-call');
-  like($cl, qr/pl-super-call .* 'greet "Child"/, 'SUPER:: call includes current package name');
+  like($cl, qr/p-super-call/, 'SUPER:: generates p-super-call');
+  like($cl, qr/p-super-call .* 'greet "Child"/, 'SUPER:: call includes current package name');
 }
 
 # Test SUPER:: with arguments
@@ -115,7 +115,7 @@ sub process {
 }
 END_PERL
 
-  like($cl, qr/pl-super-call .* 'process "Child"/, 'SUPER:: with args generates correct call');
+  like($cl, qr/p-super-call .* 'process "Child"/, 'SUPER:: with args generates correct call');
 }
 
 
@@ -145,8 +145,8 @@ my $obj = Dog->new();
 $obj->speak();
 END_PERL
 
-  like($cl, qr/pl-method-call/, 'Regular method call generates pl-method-call');
-  unlike($cl, qr/pl-super-call/, 'Regular method call does not generate pl-super-call');
+  like($cl, qr/p-method-call/, 'Regular method call generates p-method-call');
+  unlike($cl, qr/p-super-call/, 'Regular method call does not generate p-super-call');
 }
 
 
@@ -259,9 +259,9 @@ my $msg = $c->greet();
 END_PERL
 
   # Check SUPER:: call is generated
-  like($cl, qr/pl-super-call/, 'SUPER:: in override generates pl-super-call');
+  like($cl, qr/p-super-call/, 'SUPER:: in override generates p-super-call');
   # Check it references the correct method
-  like($cl, qr/pl-super-call .* 'greet/, 'SUPER::greet references greet method');
+  like($cl, qr/p-super-call .* 'greet/, 'SUPER::greet references greet method');
 }
 
 
@@ -308,7 +308,7 @@ sub process {
 END_PERL
 
   like($cl, qr/defclass my-deep-child \(\|My::Deep::Parent\|::my-deep-parent\)/, 'Nested package inheritance');
-  like($cl, qr/pl-super-call .* 'process "My::Deep::Child"/, 'SUPER:: in nested package uses full package name');
+  like($cl, qr/p-super-call .* 'process "My::Deep::Child"/, 'SUPER:: in nested package uses full package name');
 }
 
 
@@ -331,10 +331,10 @@ sub combined {
 END_PERL
 
   # Should have two SUPER:: calls
-  my @matches = ($cl =~ /pl-super-call/g);
+  my @matches = ($cl =~ /p-super-call/g);
   is(scalar @matches, 2, 'Multiple SUPER:: calls in one method');
-  like($cl, qr/pl-super-call .* 'method_a/, 'First SUPER:: call to method_a');
-  like($cl, qr/pl-super-call .* 'method_b/, 'Second SUPER:: call to method_b');
+  like($cl, qr/p-super-call .* 'method_a/, 'First SUPER:: call to method_a');
+  like($cl, qr/p-super-call .* 'method_b/, 'Second SUPER:: call to method_b');
 }
 
 
@@ -368,8 +368,8 @@ END_PERL
 
   # Child should not have its own new, but call should work via inheritance
   like($cl, qr/defclass child \(Parent::parent\)/, 'Child inherits from Parent');
-  # The method call Child->new() should use pl-method-call
-  like($cl, qr/pl-method-call.*"Child".*'new/s, 'Child->new() generates method call');
+  # The method call Child->new() should use p-method-call
+  like($cl, qr/p-method-call.*"Child".*'new/s, 'Child->new() generates method call');
 }
 
 
@@ -397,7 +397,7 @@ sub new {
 }
 END_PERL
 
-  like($cl, qr/pl-super-call .* 'new "Child"/, 'SUPER::new in constructor override');
+  like($cl, qr/p-super-call .* 'new "Child"/, 'SUPER::new in constructor override');
 }
 
 
@@ -431,8 +431,8 @@ END_PERL
   like($cl, qr/defclass child \(Parent::parent\)/, 'Child inherits Parent');
 
   # Check SUPER:: calls reference correct packages
-  like($cl, qr/pl-super-call .* 'greet "Parent"/, 'Parent SUPER:: uses "Parent"');
-  like($cl, qr/pl-super-call .* 'greet "Child"/, 'Child SUPER:: uses "Child"');
+  like($cl, qr/p-super-call .* 'greet "Parent"/, 'Parent SUPER:: uses "Parent"');
+  like($cl, qr/p-super-call .* 'greet "Child"/, 'Child SUPER:: uses "Child"');
 }
 
 
@@ -486,9 +486,9 @@ my $obj = Child->new();
 $obj->instance_method();
 END_PERL
 
-  # Both should generate pl-method-call
-  like($cl, qr/pl-method-call.*"Child".*'class_method/s, 'Class method call on Child');
-  like($cl, qr/pl-method-call.*\$obj.*'instance_method/s, 'Instance method call');
+  # Both should generate p-method-call
+  like($cl, qr/p-method-call.*"Child".*'class_method/s, 'Class method call on Child');
+  like($cl, qr/p-method-call.*\$obj.*'instance_method/s, 'Instance method call');
 }
 
 
@@ -523,7 +523,7 @@ my $b = ExtendedBuilder->new()->add("x")->add_twice("y");
 END_PERL
 
   # Check chained method calls
-  like($cl, qr/pl-method-call.*pl-method-call/s, 'Chained method calls present');
+  like($cl, qr/p-method-call.*p-method-call/s, 'Chained method calls present');
   like($cl, qr/defclass extendedbuilder \(Builder::builder\)/, 'ExtendedBuilder inherits Builder');
 }
 
@@ -564,11 +564,11 @@ sub pass_through {
 }
 END_PERL
 
-  like($cl, qr/pl-super-call .* 'no_args "Child"\)/, 'SUPER:: with no args');
-  like($cl, qr/pl-super-call .* 'with_scalar "Child" \$x/, 'SUPER:: with scalar arg');
-  like($cl, qr/pl-super-call .* 'with_list "Child" \@items/, 'SUPER:: with list arg');
-  like($cl, qr/pl-super-call .* 'with_hash "Child" %opts/, 'SUPER:: with hash arg');
-  like($cl, qr/pl-super-call .* 'pass_through "Child" \@_/, 'SUPER:: with @_ pass-through');
+  like($cl, qr/p-super-call .* 'no_args "Child"\)/, 'SUPER:: with no args');
+  like($cl, qr/p-super-call .* 'with_scalar "Child" \$x/, 'SUPER:: with scalar arg');
+  like($cl, qr/p-super-call .* 'with_list "Child" \@items/, 'SUPER:: with list arg');
+  like($cl, qr/p-super-call .* 'with_hash "Child" %opts/, 'SUPER:: with hash arg');
+  like($cl, qr/p-super-call .* 'pass_through "Child" \@_/, 'SUPER:: with @_ pass-through');
 }
 
 
@@ -661,7 +661,7 @@ END_PERL
 
   like($cl, qr/defclass extended \(Base::base\)/, 'Extended inherits Base');
   # Two SUPER::name calls (getter and setter paths)
-  my @super_calls = ($cl =~ /pl-super-call[^)]+name/g);
+  my @super_calls = ($cl =~ /p-super-call[^)]+name/g);
   is(scalar @super_calls, 2, 'Two SUPER::name calls (getter and setter)');
 }
 
@@ -686,7 +686,7 @@ package Child {
 }
 END_PERL
 
-  like($cl, qr/pl-super-call .* 'greet "Child"/, 'SUPER:: works in block-scoped package');
+  like($cl, qr/p-super-call .* 'greet "Child"/, 'SUPER:: works in block-scoped package');
 }
 
 
@@ -772,7 +772,7 @@ sub _private { "derived private" }
 END_PERL
 
   # Both _private methods should be defined
-  like($cl, qr/pl-sub pl-_private/, '_private method defined');
+  like($cl, qr/p-sub pl-_private/, '_private method defined');
   like($cl, qr/defclass derived \(Base::base\)/, 'Derived inherits Base');
 }
 
@@ -796,9 +796,9 @@ sub process {
 END_PERL
 
   # Should have both regular method calls and SUPER::
-  like($cl, qr/pl-method-call .* 'prepare/, 'Regular method call before SUPER::');
-  like($cl, qr/pl-super-call .* 'process/, 'SUPER:: call in middle');
-  like($cl, qr/pl-method-call .* 'finalize/, 'Regular method call after SUPER::');
+  like($cl, qr/p-method-call .* 'prepare/, 'Regular method call before SUPER::');
+  like($cl, qr/p-super-call .* 'process/, 'SUPER:: call in middle');
+  like($cl, qr/p-method-call .* 'finalize/, 'Regular method call after SUPER::');
 }
 
 
@@ -819,7 +819,7 @@ if ($obj->can("foo")) {
 }
 END_PERL
 
-  like($cl, qr/pl-method-call .* 'can/, 'can() generates method call');
+  like($cl, qr/p-method-call .* 'can/, 'can() generates method call');
 }
 
 # Test can() with string argument
@@ -828,7 +828,7 @@ END_PERL
 my $method = $obj->can("process");
 END_PERL
 
-  like($cl, qr/pl-method-call .* 'can "process"/, 'can() with string arg');
+  like($cl, qr/p-method-call .* 'can "process"/, 'can() with string arg');
 }
 
 # Test can() as class method
@@ -839,7 +839,7 @@ if (MyClass->can("new")) {
 }
 END_PERL
 
-  like($cl, qr/pl-method-call.*"MyClass".*'can/s, 'Class->can() syntax');
+  like($cl, qr/p-method-call.*"MyClass".*'can/s, 'Class->can() syntax');
 }
 
 
@@ -860,7 +860,7 @@ if ($dog->isa("Animal")) {
 }
 END_PERL
 
-  like($cl, qr/pl-method-call .* 'isa "Animal"/, 'isa() generates method call with class name');
+  like($cl, qr/p-method-call .* 'isa "Animal"/, 'isa() generates method call with class name');
 }
 
 # Test isa() with inheritance check
@@ -871,7 +871,7 @@ if ($obj->isa("Parent")) {
 }
 END_PERL
 
-  like($cl, qr/pl-method-call .* 'isa "Parent"/, 'isa() with parent class');
+  like($cl, qr/p-method-call .* 'isa "Parent"/, 'isa() with parent class');
 }
 
 # Test isa() as class method
@@ -882,7 +882,7 @@ if (Child->isa("Parent")) {
 }
 END_PERL
 
-  like($cl, qr/pl-method-call.*"Child".*'isa/s, 'Class->isa() syntax');
+  like($cl, qr/p-method-call.*"Child".*'isa/s, 'Class->isa() syntax');
 }
 
 
@@ -907,8 +907,8 @@ if ($h->isa("Handler") && $h->can("extra")) {
 }
 END_PERL
 
-  like($cl, qr/pl-method-call .* 'isa "Handler"/, 'isa() in combined check');
-  like($cl, qr/pl-method-call .* 'can "extra"/, 'can() in combined check');
+  like($cl, qr/p-method-call .* 'isa "Handler"/, 'isa() in combined check');
+  like($cl, qr/p-method-call .* 'can "extra"/, 'can() in combined check');
 }
 
 

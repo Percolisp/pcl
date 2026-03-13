@@ -35,21 +35,21 @@ sub get_generated_code {
 {
     my $parser = Pl::Parser->new(code => 'my $x = fc("HELLO");');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-fc.*"HELLO"/, 'fc("HELLO") generates pl-fc');
+    like($output, qr/p-fc.*"HELLO"/, 'fc("HELLO") generates p-fc');
 }
 
 # Test 2: fc with variable
 {
     my $parser = Pl::Parser->new(code => 'my $s = "Test"; my $x = fc($s);');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-fc.*\$s/, 'fc($s) generates pl-fc with variable');
+    like($output, qr/p-fc.*\$s/, 'fc($s) generates p-fc with variable');
 }
 
 # Test 3: fc with $_
 {
     my $parser = Pl::Parser->new(code => '$_ = "TEST"; my $x = fc;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-fc.*\$_/, 'fc defaults to $_');
+    like($output, qr/p-fc.*\$_/, 'fc defaults to $_');
 }
 
 # ============================================
@@ -60,14 +60,14 @@ sub get_generated_code {
 {
     my $parser = Pl::Parser->new(code => 'my $msg = "Error: $!";');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-errno-string/, '$! interpolates in strings');
+    like($output, qr/p-errno-string/, '$! interpolates in strings');
 }
 
 # Test 5: $! standalone
 {
     my $parser = Pl::Parser->new(code => 'my $e = $!;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-errno-string/, '$! standalone generates pl-errno-string');
+    like($output, qr/p-errno-string/, '$! standalone generates p-errno-string');
 }
 
 # ============================================
@@ -146,21 +146,21 @@ sub get_generated_code {
 {
     my $parser = Pl::Parser->new(code => 'my $pkg = caller();');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-caller/, 'caller() generates pl-caller');
+    like($output, qr/p-caller/, 'caller() generates p-caller');
 }
 
 # Test 15: caller() with level argument
 {
     my $parser = Pl::Parser->new(code => 'my $pkg = caller(1);');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-caller\s+1/, 'caller(1) generates pl-caller with argument');
+    like($output, qr/p-caller\s+1/, 'caller(1) generates p-caller with argument');
 }
 
 # Test 16: caller() in list context
 {
     my $parser = Pl::Parser->new(code => 'my ($pkg, $file, $line) = caller();');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-caller/, 'caller() in list context');
+    like($output, qr/p-caller/, 'caller() in list context');
 }
 
 # ============================================
@@ -236,7 +236,7 @@ sub get_generated_code {
 {
     my $parser = Pl::Parser->new(code => 'open(my $fh, "<", "file") or die "Cannot open: $!";');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-errno-string/, '$! in die message interpolates');
+    like($output, qr/p-errno-string/, '$! in die message interpolates');
 }
 
 done_testing(25);

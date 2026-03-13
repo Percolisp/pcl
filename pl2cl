@@ -100,7 +100,7 @@ sub build_preamble {
   # Switch to main package for user code (Perl's default package)
   # main uses :cl and :pcl so runtime functions are accessible
   push @lines, ";; Switch to main package (Perl's default for code without 'package' statement)";
-  push @lines, "(pl-defpackage :main)";
+  push @lines, "(p-defpackage :main)";
   push @lines, "(in-package :main)";
 
   return join("\n", @lines);

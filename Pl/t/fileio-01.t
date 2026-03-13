@@ -77,33 +77,33 @@ diag "";
 diag "-------- open function (3-arg):";
 
 test_codegen('open($fh, "<", $file)',
-            '(pl-open $fh "<" $file)',
+            '(p-open $fh "<" $file)',
             'open 3-arg read');
 
 test_codegen('open($fh, ">", $file)',
-            '(pl-open $fh ">" $file)',
+            '(p-open $fh ">" $file)',
             'open 3-arg write');
 
 test_codegen('open($fh, ">>", $file)',
-            '(pl-open $fh ">>" $file)',
+            '(p-open $fh ">>" $file)',
             'open 3-arg append');
 
 # Note: open(my $fh, ...) has complex parsing where 'my' affects the whole expression
 # Using variable instead for cleaner test
 test_codegen('open($fh, "<", "data.txt")',
-            '(pl-open $fh "<" "data.txt")',
+            '(p-open $fh "<" "data.txt")',
             'open with string filename');
 
 test_codegen('open($fh, "+<", $file)',
-            '(pl-open $fh "+<" $file)',
+            '(p-open $fh "+<" $file)',
             'open 3-arg read-write');
 
 test_codegen('open($fh, "|-", "cmd")',
-            '(pl-open $fh "|-" "cmd")',
+            '(p-open $fh "|-" "cmd")',
             'open pipe to command');
 
 test_codegen('open($fh, "-|", "cmd")',
-            '(pl-open $fh "-|" "cmd")',
+            '(p-open $fh "-|" "cmd")',
             'open pipe from command');
 
 
@@ -113,12 +113,12 @@ diag "-------- open with bareword filehandle:";
 
 # First call registers FH in environment
 test_codegen('open(FH, ">", "out.txt")',
-            '(pl-open FH ">" "out.txt")',
+            '(p-open FH ">" "out.txt")',
             'open registers bareword filehandle');
 
 # Now FH is known
 test_codegen('close(FH)',
-            '(pl-close FH)',
+            '(p-close FH)',
             'close uses registered filehandle');
 
 
@@ -127,7 +127,7 @@ diag "";
 diag "-------- close function:";
 
 test_codegen('close($fh)',
-            '(pl-close $fh)',
+            '(p-close $fh)',
             'close variable filehandle');
 
 
@@ -136,11 +136,11 @@ diag "";
 diag "-------- eof function:";
 
 test_codegen('eof($fh)',
-            '(pl-eof $fh)',
+            '(p-eof $fh)',
             'eof with filehandle');
 
 test_codegen('eof()',
-            '(pl-eof)',
+            '(p-eof)',
             'eof without args');
 
 
@@ -149,11 +149,11 @@ diag "";
 diag "-------- tell function:";
 
 test_codegen('tell($fh)',
-            '(pl-tell $fh)',
+            '(p-tell $fh)',
             'tell with filehandle');
 
 test_codegen('tell()',
-            '(pl-tell)',
+            '(p-tell)',
             'tell without args');
 
 
@@ -162,16 +162,16 @@ diag "";
 diag "-------- seek function:";
 
 test_codegen('seek($fh, 0, 0)',
-            '(pl-seek $fh 0 0)',
+            '(p-seek $fh 0 0)',
             'seek to beginning');
 
 test_codegen('seek($fh, $pos, 1)',
-            '(pl-seek $fh $pos 1)',
+            '(p-seek $fh $pos 1)',
             'seek relative');
 
-# Note: -10 is a negative number literal, not (pl-- 10)
+# Note: -10 is a negative number literal, not (p-- 10)
 test_codegen('seek($fh, -10, 2)',
-            '(pl-seek $fh -10 2)',
+            '(p-seek $fh -10 2)',
             'seek from end');
 
 
@@ -180,15 +180,15 @@ diag "";
 diag "-------- binmode function:";
 
 test_codegen('binmode($fh)',
-            '(pl-binmode $fh)',
+            '(p-binmode $fh)',
             'binmode basic');
 
 test_codegen('binmode($fh, ":utf8")',
-            '(pl-binmode $fh ":utf8")',
+            '(p-binmode $fh ":utf8")',
             'binmode with encoding');
 
 test_codegen('binmode($fh, ":raw")',
-            '(pl-binmode $fh ":raw")',
+            '(p-binmode $fh ":raw")',
             'binmode raw');
 
 
@@ -197,11 +197,11 @@ diag "";
 diag "-------- read function:";
 
 test_codegen('read($fh, $buf, 1024)',
-            '(pl-read $fh $buf 1024)',
+            '(p-read $fh $buf 1024)',
             'read bytes');
 
 test_codegen('read($fh, $buf, $len, $offset)',
-            '(pl-read $fh $buf $len $offset)',
+            '(p-read $fh $buf $len $offset)',
             'read with offset');
 
 
@@ -210,15 +210,15 @@ diag "";
 diag "-------- sysread/syswrite:";
 
 test_codegen('sysread($fh, $buf, 1024)',
-            '(pl-sysread $fh $buf 1024)',
+            '(p-sysread $fh $buf 1024)',
             'sysread');
 
 test_codegen('syswrite($fh, $data)',
-            '(pl-syswrite $fh $data)',
+            '(p-syswrite $fh $data)',
             'syswrite');
 
 test_codegen('syswrite($fh, $data, $len)',
-            '(pl-syswrite $fh $data $len)',
+            '(p-syswrite $fh $data $len)',
             'syswrite with length');
 
 
@@ -227,11 +227,11 @@ diag "";
 diag "-------- truncate function:";
 
 test_codegen('truncate($fh, $size)',
-            '(pl-truncate $fh $size)',
+            '(p-truncate $fh $size)',
             'truncate filehandle');
 
 test_codegen('truncate($file, 0)',
-            '(pl-truncate $file 0)',
+            '(p-truncate $file 0)',
             'truncate by filename');
 
 
@@ -240,15 +240,15 @@ diag "";
 diag "-------- stat/lstat functions:";
 
 test_codegen('stat($file)',
-            '(pl-stat $file)',
+            '(p-stat $file)',
             'stat file');
 
 test_codegen('stat($fh)',
-            '(pl-stat $fh)',
+            '(p-stat $fh)',
             'stat filehandle');
 
 test_codegen('lstat($file)',
-            '(pl-lstat $file)',
+            '(p-lstat $file)',
             'lstat file');
 
 
@@ -257,7 +257,7 @@ diag "";
 diag "-------- fileno function:";
 
 test_codegen('fileno($fh)',
-            '(pl-fileno $fh)',
+            '(p-fileno $fh)',
             'fileno');
 
 
@@ -266,11 +266,11 @@ diag "";
 diag "-------- getc function:";
 
 test_codegen('getc($fh)',
-            '(pl-getc $fh)',
+            '(p-getc $fh)',
             'getc with filehandle');
 
 test_codegen('getc()',
-            '(pl-getc)',
+            '(p-getc)',
             'getc from STDIN');
 
 
@@ -279,19 +279,19 @@ diag "";
 diag "-------- Directory operations:";
 
 test_codegen('opendir($dh, $dir)',
-            '(pl-opendir $dh $dir)',
+            '(p-opendir $dh $dir)',
             'opendir');
 
 test_codegen('readdir($dh)',
-            '(pl-readdir $dh)',
+            '(p-readdir $dh)',
             'readdir');
 
 test_codegen('closedir($dh)',
-            '(pl-closedir $dh)',
+            '(p-closedir $dh)',
             'closedir');
 
 test_codegen('rewinddir($dh)',
-            '(pl-rewinddir $dh)',
+            '(p-rewinddir $dh)',
             'rewinddir');
 
 

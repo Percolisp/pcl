@@ -58,21 +58,21 @@ diag "-------- shift/pop at top level (should use \@ARGV):";
 {
     my $parser = Pl::Parser->new(code => 'my $arg = shift;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-shift\s+\@ARGV/, 'shift at top level uses @ARGV');
+    like($output, qr/p-shift\s+\@ARGV/, 'shift at top level uses @ARGV');
 }
 
 # Test 5: pop at top level defaults to @ARGV
 {
     my $parser = Pl::Parser->new(code => 'my $last = pop;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-pop\s+\@ARGV/, 'pop at top level uses @ARGV');
+    like($output, qr/p-pop\s+\@ARGV/, 'pop at top level uses @ARGV');
 }
 
 # Test 6: Multiple shifts at top level
 {
     my $parser = Pl::Parser->new(code => 'my $a = shift; my $b = shift;');
     my $output = get_generated_code($parser);
-    my @matches = ($output =~ /pl-shift\s+\@ARGV/g);
+    my @matches = ($output =~ /p-shift\s+\@ARGV/g);
     is(scalar @matches, 2, 'Multiple shifts at top level all use @ARGV');
 }
 
@@ -83,21 +83,21 @@ diag "-------- shift/pop inside subs (should use \@_):";
 {
     my $parser = Pl::Parser->new(code => 'sub foo { my $x = shift; }');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-shift\s+\@_/, 'shift inside sub uses @_');
+    like($output, qr/p-shift\s+\@_/, 'shift inside sub uses @_');
 }
 
 # Test 8: pop inside sub defaults to @_
 {
     my $parser = Pl::Parser->new(code => 'sub foo { my $x = pop; }');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-pop\s+\@_/, 'pop inside sub uses @_');
+    like($output, qr/p-pop\s+\@_/, 'pop inside sub uses @_');
 }
 
 # Test 9: shift used in typical constructor pattern
 {
     my $parser = Pl::Parser->new(code => 'sub new { my $class = shift; bless {}, $class; }');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-shift\s+\@_/, 'shift in constructor uses @_');
+    like($output, qr/p-shift\s+\@_/, 'shift in constructor uses @_');
 }
 
 # Test 10: Nested subs both use @_
@@ -111,7 +111,7 @@ diag "-------- shift/pop inside subs (should use \@_):";
         }
     ');
     my $output = get_generated_code($parser);
-    my @matches = ($output =~ /pl-shift\s+\@_/g);
+    my @matches = ($output =~ /p-shift\s+\@_/g);
     is(scalar @matches, 2, 'Both nested subs use @_');
 }
 
@@ -125,22 +125,22 @@ diag "-------- Mixed context:";
         sub process { my $x = shift; }
     ');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-shift\s+\@ARGV/, 'Top level shift uses @ARGV');
-    like($output, qr/pl-shift\s+\@_/, 'Sub shift uses @_');
+    like($output, qr/p-shift\s+\@ARGV/, 'Top level shift uses @ARGV');
+    like($output, qr/p-shift\s+\@_/, 'Sub shift uses @_');
 }
 
 # Test 12: Explicit @ARGV in sub (should stay @ARGV)
 {
     my $parser = Pl::Parser->new(code => 'sub foo { my $x = shift @ARGV; }');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-shift\s+\@ARGV/, 'Explicit shift @ARGV in sub stays @ARGV');
+    like($output, qr/p-shift\s+\@ARGV/, 'Explicit shift @ARGV in sub stays @ARGV');
 }
 
 # Test 13: Explicit @_ at top level (should stay @_)
 {
     my $parser = Pl::Parser->new(code => 'my $x = shift @_;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-shift\s+\@_/, 'Explicit shift @_ at top level stays @_');
+    like($output, qr/p-shift\s+\@_/, 'Explicit shift @_ at top level stays @_');
 }
 
 diag "";
