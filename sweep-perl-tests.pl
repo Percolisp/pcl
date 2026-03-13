@@ -4,7 +4,8 @@
 # Usage: ./sweep-perl-tests.pl [--jobs N] [--timeout N] [file.t ...]
 #
 # Each child writes results to a temp file; parent reads after wait.
-# Skips bop.t, heredoc.t (known to hang), local.t (tie hang), reverse.t (Tie::Array infinite loop).
+# Skips bop.t, heredoc.t (known to hang).
+# local.t and reverse.t were previously skipped (Tie::Array hang) but now run.
 
 use strict;
 use warnings;
@@ -15,7 +16,7 @@ use POSIX qw(:sys_wait_h _exit);
 
 my $JOBS    = 8;
 my $TIMEOUT = 60;  # seconds per test
-my @SKIP    = qw(bop.t heredoc.t local.t reverse.t);
+my @SKIP    = qw(bop.t heredoc.t);
 
 my @test_files;
 while (@ARGV) {

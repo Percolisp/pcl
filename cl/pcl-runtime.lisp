@@ -85,7 +85,7 @@
    ;; Time functions
    #:p-time #:p-times #:p-sleep #:p-study #:p-reset #:p-vec #:p-localtime #:p-gmtime
    ;; Process control
-   #:p-exit #:p-system #:p-backtick
+   #:p-exit #:p-system #:p-backtick #:p-errno-string
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
