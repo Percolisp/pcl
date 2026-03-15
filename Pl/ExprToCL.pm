@@ -2097,6 +2097,10 @@ sub _process_dq_escape {
   if ($esc =~ /^o\{([^}]*)\}$/) {
     return _octal_brace_escape($1);
   }
+  # \N{U+HHHH} - named Unicode character by code point
+  if ($esc =~ /^N\{U\+([0-9A-Fa-f]+)\}$/) {
+    return chr(hex($1));
+  }
   # \NNN - octal digits
   if ($esc =~ /^([0-7]{1,3})$/) {
     return chr(oct($1));
@@ -2234,7 +2238,7 @@ sub convert_perl_string {
   }
 
   # Process Perl escape sequences in single pass to handle \\ correctly
-  $content =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
+  $content =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
     _process_dq_escape($1)
   !ge;
 
