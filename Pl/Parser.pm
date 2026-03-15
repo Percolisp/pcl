@@ -1228,7 +1228,8 @@ sub _process_local_declaration {
       push @vars, $self->_transform_pkg_var($p->content);
     }
     elsif ($ref eq 'PPI::Structure::List') {
-      push @vars, map { $self->_transform_pkg_var($_) } $self->_find_symbols_in_list($p);
+      # Use undef-aware extraction so local(undef, $a, undef, $b) keeps skip markers
+      push @vars, $self->_find_symbols_and_undefs_in_list($p);
     }
     elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
       $init_idx = $i;
@@ -1262,8 +1263,10 @@ sub _process_local_declaration {
     }
   }
   else {
-    # Bare local or multiple vars - just shadow with nil/empty
+    # Bare local or multiple vars - just shadow with nil/empty.
+    # Skip undef markers (they are skip slots, not real variables).
     for my $var (@vars) {
+      next if $var eq '(p-undef)';  # undef slot: no binding needed
       my $sigil = substr($var, 0, 1);
       if ($sigil eq '@') {
         push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
@@ -1287,13 +1290,14 @@ sub _process_local_declaration {
 
   # For multi-var local with initializer: local($a, $b) = @_
   # The let bindings start empty; emit the assignment as first body form.
+  # Include undef markers in the LHS vector so p-list-= can skip them.
   if ($init_idx >= 0 && @vars > 1) {
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
     my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-    # RHS must be a vector for p-list-= to distribute values.
-    # Comma expressions parse as (progn ...) in default context — convert to (vector ...).
-    $rhs_cl =~ s/\A\s*\(progn /\(vector /;
+    # RHS must be evaluated in list context so list-producing expressions
+    # (qw(), function calls, etc.) return vectors. Wrap in let wantarray=t.
+    $rhs_cl = "(let ((*wantarray* t)) $rhs_cl)";
     my $lhs_cl = "(vector " . join(" ", @vars) . ")";
     $self->_emit("(p-list-= $lhs_cl $rhs_cl)");
   }
@@ -2032,6 +2036,29 @@ sub _find_symbols_in_list {
     }
     elsif ($ref && $child->can('children')) {
       push @vars, $self->_find_symbols_in_list($child);
+    }
+  }
+
+  return @vars;
+}
+
+# Like _find_symbols_in_list but also includes undef placeholders.
+# Used by local() to preserve undef skip slots in list assignment.
+sub _find_symbols_and_undefs_in_list {
+  my $self = shift;
+  my $list = shift;
+  my @vars;
+
+  for my $child ($list->children) {
+    my $ref = ref($child);
+    if ($ref eq 'PPI::Token::Symbol') {
+      push @vars, $self->_transform_pkg_var($child->content);
+    }
+    elsif ($ref eq 'PPI::Token::Word' && $child->content eq 'undef') {
+      push @vars, '(p-undef)';  # skip marker for p-list-=
+    }
+    elsif ($ref && $child->can('children')) {
+      push @vars, $self->_find_symbols_and_undefs_in_list($child);
     }
   }
 

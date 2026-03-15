@@ -151,7 +151,7 @@ is($_, "Z");
 @ary = split(/.?/,  '',-1);
 $cnt = split(/.?/,  '',-1);
 is($cnt, scalar(@ary));
-
+print STDERR "# PROGRESS: 20%\n";
 
 # Are /^/m patterns scanned?
 $_ = join '|', split(/^a/m, "a b a\na d a", 20);
@@ -302,6 +302,7 @@ is($cnt, scalar(@ary));
     ok($a eq "\x20" && $b eq "\x{100}" && $c eq "\x20");
 }
 
+print STDERR "# PROGRESS: 40%\n";
 {
     # 20001205.014 (#4844)
 
@@ -458,6 +459,7 @@ is($cnt, scalar(@ary));
     $cond= 1;
     @results= split $cond ? " " : qr/ /, $expr;
     is @results, 2, 'split($cond ? " " : qr/ /, $expr) works as expected (like " ")';
+print STDERR "# PROGRESS: 60%\n";
 
     $expr = ' a b c ';
     @results = split /\s/, $expr;
@@ -609,6 +611,7 @@ is "@a", '1 2 3', 'assignment to split-to-array (stacked)';
     is "@lex",   "a b c d e", "array split: list cx lex: inner";
     is "@outer", "a b c d e", "array split: list cx lex: outer";
 
+print STDERR "# PROGRESS: 80%\n";
     $outer = (@pkg = split /:/, $s);
     is "@pkg",   "a b c d e", "array split: scalar cx pkg inner";
     is $outer,   5,           "array split: scalar cx pkg outer";

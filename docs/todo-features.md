@@ -449,3 +449,31 @@ Both fixes were present before this todo entry was written.
 | ~~Chained method calls~~ | ✅ DONE (session 70) | — | §G |
 | ~~Foreach closure var capture~~ | ✅ DONE (session 70) | — | §J |
 | ~~Trailing decimal / Inf/NaN fmt~~ | ✅ DONE | — | — |
+
+---
+
+## Known Warnings / Minor Bugs
+
+### `indent_level` going negative — "Negative repeat count does nothing"
+
+**Symptom:** During transpilation of some inputs, Perl prints:
+```
+Negative repeat count does nothing at Pl/Parser.pm line 3695.
+Negative repeat count does nothing at Pl/ExprToCL.pm line 253.
+```
+Both lines are `"  " x $self->indent_level` (Parser) and
+`$self->indent_str x $self->indent_level` (ExprToCL).
+
+**Root cause:** `indent_level` is being decremented below zero somewhere in
+the parser or code generator — a block-close decrements without a matching
+open, or `indent_level` is not properly scoped/saved across recursive calls.
+
+**Impact:** Cosmetic only — the warning fires but does not affect the generated
+CL (the `x` operator silently produces `""` for negative counts).  Still, it
+indicates an indent-tracking accounting error that should be fixed.
+
+**Fix area:** Find every `$self->indent_level($self->indent_level - 1)` (or
+equivalent decrement) in `Pl/Parser.pm` and `Pl/ExprToCL.pm` and ensure it
+is guarded so `indent_level` never goes below 0.  Also audit calls to
+`parse_block_to_cl_string` and similar recursive helpers that save/restore
+indent state.

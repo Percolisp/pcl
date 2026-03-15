@@ -1092,6 +1092,15 @@ sub parse {
       if ($match_op && ref($post) =~ /PPI::Token::Regexp/) {
         $post->{_has_match_context}++;
       }
+
+      # Special case for 'isa': RHS bareword class name must stay as a bareword,
+      # not be treated as a function call by handle_subcalls inside parse().
+      # Convert it to a string token so parse() doesn't call it.
+      if ($op_name eq 'isa' && ref($post) eq 'PPI::Token::Word') {
+        my $class_name = $post->content();
+        $post = PPI::Token::Quote::Single->new("'$class_name'");
+      }
+
       my $id_aft= $self->parse([$post]);
 
       say "=========   OP replace 2 params for ", $op->content(),
@@ -1472,9 +1481,12 @@ sub handle_subcalls {
                      : ($func_name eq 'grep' || $func_name eq 'map') ? ['$_']
                      : [];  # Other & prototype functions: no implicit params
 
-          # For grep/map/sort, use inline lambda (cleaner, avoids emission issues)
-          # For eval and other blocks, use named function (may need to be called separately)
-          if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort') {
+          # For grep/map/sort/eval, use inline lambda (cleaner, avoids emission issues)
+          # eval { } in expression context must use inline form — defun side-effect would
+          # corrupt the surrounding p-if argument list (e.g. eval{} inside elsif condition).
+          # For other blocks, use named function (may need to be called separately)
+          if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
+              || $func_name eq 'eval') {
             # Parse block body as CL string
             my $body_cl = _block_is_hash_constructor($next)
               ? $self->parser->parse_hash_block_to_cl_string($next)
@@ -1660,6 +1672,19 @@ sub handle_subcalls {
     # Note: is_word() returns 1 if word, undef otherwise (NOT the word content)
     next unless $self->is_word($now);
     my $sub_name = $now->content;
+
+    # - - - Skip if this word is a binary operator (e.g. 'isa')
+    # These are recognized by is_token_operator and handled in the binary op parser.
+    next if $self->is_token_operator($now);
+
+    # - - - Skip if preceded by a word-form binary operator (e.g. 'isa')
+    # e.g. '$obj isa BaseClass' — BaseClass is a class name bareword, not a function call
+    if ($i > 0) {
+      my $prev_elem = $e->[$i - 1];
+      if (ref($prev_elem) eq 'PPI::Token::Word' && $self->is_token_operator($prev_elem)) {
+        next;  # Skip - RHS of a word-form binary operator, not a function name
+      }
+    }
 
     # - - - Skip if this word is followed by -> (class method call; Foo->new)
     # The word is a class/package name, not a function call

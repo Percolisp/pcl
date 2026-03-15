@@ -362,3 +362,48 @@ subs.  The `substr`-as-lvalue form can always be rewritten as
 `substr($s, 0, 4, "new")` (four-argument form), which PCL does support.
 
 **Affected tests:** `perl-tests/aassign.t` (a few tests use lvalue subs).
+
+---
+
+## `prototype()` does not return prototype strings
+
+**Perl behaviour:** `prototype(\&foo)` returns the prototype string for `&foo`
+(e.g. `"\$a"` for `sub foo ($a) { }` without `use feature 'signatures'`), or
+`undef` if the sub has no prototype.
+
+**PCL behaviour:** `prototype()` always returns `undef`.  The behavioral
+distinction is handled correctly: without `use feature 'signatures'`, `($a)` in
+a sub definition is ignored as a parameter binding (the body's `$a` refers to
+the outer scope, matching Perl's prototype semantics); with the pragma, `$a` is
+bound as a signature parameter.  Only the `prototype()` introspection value is
+missing.
+
+**Rationale:** Storing prototype strings requires tracking them at parse time and
+threading them through to a runtime lookup table.  No maintained CPAN module
+calls `prototype()` on its own functions — it's used only for introspection
+tools and test infrastructure.
+
+**Affected tests:** `perl-tests/signatures.t` test checking `prototype(\&t000) eq '"\$a"'`
+(commented out).
+
+---
+
+## Error compatibility for invalid Perl input
+
+**Perl behaviour:** Perl validates code at compile time and produces specific error
+messages (e.g., "Illegal declaration of anonymous subroutine", "syntax error") for
+certain invalid constructs.
+
+**PCL behaviour:** PCL's goal is to run valid CPAN code, not to validate or reject
+invalid Perl.  When given invalid Perl, PCL may silently accept it, produce different
+output, or simply ignore the erroneous construct — but it will not produce the same
+error message that Perl would.
+
+**Rationale:** PCL is a transpiler for functioning Perl code, not a linter or
+Perl-compatible compiler.  Implementing Perl's full error-detection logic would
+require replicating large parts of Perl's parser and semantic analysis, with no
+benefit for running CPAN modules (which are valid Perl by definition).
+
+**Affected tests:** `perl-tests/anonsub.t` tests 1–5 (invalid anonymous sub syntax);
+`perl-tests/signatures.t` tests for syntax errors when `use feature 'signatures'`
+is not in effect (commented out).

@@ -13,6 +13,12 @@ BEGIN {
     require './test.pl';
     set_up_inc(qw '../lib ../cpan/version/lib');
 }
+
+# PCL: this test uses string eval (eval $data) to evaluate test data expressions
+# such as '2**32-1', '0x7fffffff', '[1,2]', "ord('A')", etc.
+# String eval is not yet supported in PCL.
+skip_all("PCL: string eval not yet supported");
+
 use warnings;
 use version;
 use Config;

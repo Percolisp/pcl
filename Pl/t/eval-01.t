@@ -87,10 +87,10 @@ output_contains('my $result = eval { 42 };',
 diag "";
 diag "-------- eval { } with multiple statements:";
 
-# Multi-statement blocks are parsed as separate functions
+# Multi-statement blocks are inlined directly in p-eval-block (no funcall)
 output_matches('eval { my $x = 1; $x + 1 };',
-               qr/p-eval-block.*funcall/s,
-               'eval with multiple statements uses funcall pattern');
+               qr/p-eval-block/s,
+               'eval with multiple statements generates p-eval-block');
 
 
 # ========================================

@@ -274,6 +274,12 @@ sub gen_node {
     return $self->gen_binary_op($op, $kids, $node_id);
   }
 
+  # Word-form binary operators (e.g. 'isa') with children
+  if (ref($node) eq 'PPI::Token::Word' && @$kids) {
+    my $op = $node->content();
+    return $self->gen_binary_op($op, $kids, $node_id);
+  }
+
   # Leaf node (PPI token)
   return $self->gen_leaf($node);
 }
@@ -301,6 +307,72 @@ sub gen_internal_node {
 
 
 # Generate code for leaf nodes (literals, variables)
+# Parse a regex token content into (pattern_content, flags).
+# Works for /pat/flags, m/pat/flags, m{pat}flags, qr/pat/flags, qr{pat}flags, etc.
+# $is_qr: 1 if token starts with 'qr', 0 otherwise.
+sub _parse_regex_content {
+  my ($content, $is_qr) = @_;
+  my $prefix_len = $is_qr ? 2 : 0;
+  $prefix_len++ if !$is_qr && $content =~ /^m/;
+  my $open_ch = substr($content, $prefix_len, 1);
+  my %pairs = ('{' => '}', '(' => ')', '[' => ']', '<' => '>');
+  my $close_ch = $pairs{$open_ch} // $open_ch;
+  my $end_pos = rindex($content, $close_ch);
+  my $pattern = substr($content, $prefix_len + 1, $end_pos - $prefix_len - 1);
+  my $flags = substr($content, $end_pos + 1);
+  return ($pattern, $flags);
+}
+
+# Check if a raw regex pattern content has unescaped $var or @var interpolation.
+sub _has_regex_interpolation {
+  my ($pattern) = @_;
+  return $pattern =~ /(?<!\\)\$[a-zA-Z_{]|(?<!\\)\@[a-zA-Z_{]/;
+}
+
+# Build a CL expression that evaluates to the interpolated pattern string.
+# Handles $scalar_var (simple scalar variables).
+sub _gen_interp_regex_pattern {
+  my ($pattern) = @_;
+  my @parts;
+  my $literal = '';
+  my $i = 0;
+  while ($i < length($pattern)) {
+    my $c = substr($pattern, $i, 1);
+    if ($c eq '\\') {
+      $literal .= substr($pattern, $i, 2);
+      $i += 2;
+    } elsif ($c eq '$' && substr($pattern, $i) =~ /^\$\{([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\}/) {
+      my $varname = $1;
+      if (length($literal)) {
+        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+        push @parts, qq{"$esc"};
+        $literal = '';
+      }
+      push @parts, "\$$varname";
+      $i += 3 + length($varname);
+    } elsif ($c eq '$' && substr($pattern, $i) =~ /^\$([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)/) {
+      my $varname = $1;
+      if (length($literal)) {
+        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+        push @parts, qq{"$esc"};
+        $literal = '';
+      }
+      push @parts, "\$$varname";
+      $i += 1 + length($varname);
+    } else {
+      $literal .= $c;
+      $i++;
+    }
+  }
+  if (length($literal)) {
+    (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+    push @parts, qq{"$esc"};
+  }
+  return @parts == 0 ? '""'
+       : @parts == 1 ? $parts[0]
+       : "(p-string-concat " . join(" ", @parts) . ")";
+}
+
 sub gen_leaf {
   my $self = shift;
   my $node = shift;
@@ -431,7 +503,12 @@ sub gen_leaf {
   # Compiled regex qr// (check before Quote to avoid catching QuoteLike::Regexp)
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
     my $content = $node->content();
-    # Escape backslashes and double quotes for CL string literal
+    my ($pattern, $flags) = _parse_regex_content($content, 1);
+    if (_has_regex_interpolation($pattern)) {
+      my $pat_expr = _gen_interp_regex_pattern($pattern);
+      (my $esc_flags = $flags) =~ s/"/\\"/g;
+      return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
+    }
     $content =~ s/\\/\\\\/g;
     $content =~ s/"/\\"/g;
     return qq{(pcl::p-qr "$content")};
@@ -491,7 +568,12 @@ sub gen_leaf {
   # Match regex m// or //
   if ($ref =~ /^PPI::Token::Regexp/) {
     my $content = $node->content();
-    # Escape backslashes and double quotes for CL string literal
+    my ($pattern, $flags) = _parse_regex_content($content, 0);
+    if (_has_regex_interpolation($pattern)) {
+      my $pat_expr = _gen_interp_regex_pattern($pattern);
+      (my $esc_flags = $flags) =~ s/"/\\"/g;
+      return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
+    }
     $content =~ s/\\/\\\\/g;
     $content =~ s/"/\\"/g;
     return qq{(p-regex "$content")};
@@ -536,6 +618,20 @@ sub gen_binary_op {
   }
 
   my $left  = $self->gen_node($kids->[0]);
+
+  # Special case: isa operator - RHS bareword must be a string
+  if ($op eq 'isa') {
+    my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
+    my $right;
+    if (ref($rhs_node) eq 'PPI::Token::Word' && !$self->expr_o->get_node_children($kids->[1])) {
+      # Bareword class name → quoted string
+      my $class_name = $rhs_node->content();
+      $right = qq{"$class_name"};
+    } else {
+      $right = $self->gen_node($kids->[1]);
+    }
+    return "(p-isa $left $right)";
+  }
 
   # Special case: hash assignment with list
   # %h = () or %h = (a => 1) should use (p-hash ...), not (vector ...)
@@ -751,6 +847,11 @@ sub gen_funcall {
           push @body_parts, $self->gen_node($kid_id);
         }
         my $body = join(' ', @body_parts);
+        return "(p-eval-block $body)";
+      }
+      elsif ($arg_node->{type} eq 'inline_lambda') {
+        # eval { block } parsed as inline_lambda (avoids defun side-effect)
+        my $body = $arg_node->{body_cl} // 'nil';
         return "(p-eval-block $body)";
       }
       elsif ($arg_node->{type} eq 'func_ref') {
@@ -1572,6 +1673,8 @@ sub gen_progn {
   my $node_id = shift;
   my $kids    = shift;
 
+  my $ctx = $self->expr_o->get_node_context($node_id);
+
   my @forms;
   for my $kid_id (@$kids) {
     push @forms, $self->gen_node($kid_id);
@@ -1580,19 +1683,45 @@ sub gen_progn {
   my $forms_str = join(' ', @forms);
 
   # In list context, generate a vector instead of progn
-  # This handles: foreach (1,2,3), @a = (1,2,3), etc.
-  my $ctx = $self->expr_o->get_node_context($node_id);
+  # This handles: @a = (1,2,3), etc.
   if ($ctx == 1) {  # LIST_CTX = 1
     return "(vector $forms_str)";
   }
 
   # In unknown context with multiple forms, check wantarray at runtime.
-  # This handles: map { $_ => uc $_ } where the block runs in list context.
+  # Wrap @array items with (p-flatten ...) so %p-collect-list in
+  # %p-flatten-for-list can spread @arrays while keeping arrayrefs as scalars.
   if (@forms > 1 && $ctx == SCALAR_CTX) {
-    return "(if *wantarray* (vector $forms_str) (progn $forms_str))";
+    my @flat_forms;
+    for my $i (0 .. $#$kids) {
+      my $form = $forms[$i];
+      my $kid_node = $self->expr_o->get_a_node($kids->[$i]);
+      if ($self->_is_array_expr_node($kid_node, $kids->[$i])) {
+        $form = "(p-flatten $form)";
+      }
+      push @flat_forms, $form;
+    }
+    my $flat_str = join(' ', @flat_forms);
+    return "(if *wantarray* (vector $flat_str) (progn $forms_str))";
   }
 
   return "(progn $forms_str)";
+}
+
+# Helper: true if a node represents an @array (should flatten in list context).
+sub _is_array_expr_node {
+  my ($self, $node, $node_id) = @_;
+  if (ref($node) eq 'PPI::Token::Symbol') {
+    return substr($node->content(), 0, 1) eq '@';
+  }
+  if ($self->expr_o->is_internal_node_type($node) && $node->{type} eq 'prefix_op') {
+    my $kids = $self->expr_o->get_node_children($node_id);
+    if (@$kids >= 1) {
+      my $cast = $self->expr_o->get_a_node($kids->[0]);
+      return ref($cast) eq 'PPI::Token::Cast' && $cast->content() eq '@';
+    }
+  }
+  return 0;
 }
 
 
@@ -2073,8 +2202,8 @@ sub convert_perl_string {
     $content = $1;
   }
   elsif ($str =~ /^qq\s*\{(.*)\}$/s || $str =~ /^qq\s*\((.*)\)$/s ||
-         $str =~ /^qq\s*\[(.*)\]$/s) {
-    # qq{}, qq(), qq[] style (optional whitespace between qq and delimiter)
+         $str =~ /^qq\s*\[(.*)\]$/s || $str =~ /^qq\s*<(.*)>$/s) {
+    # qq{}, qq(), qq[], qq<> style (optional whitespace between qq and delimiter)
     $content = $1;
   }
   elsif ($str =~ /^qq(.)(.*)\1$/s) {
@@ -2082,8 +2211,8 @@ sub convert_perl_string {
     $content = $2;
   }
   elsif ($str =~ /^q\s*\{(.*)\}$/s || $str =~ /^q\s*\((.*)\)$/s ||
-         $str =~ /^q\s*\[(.*)\]$/s) {
-    # q{}, q(), q[] style - like single-quoted, no interpolation (optional whitespace)
+         $str =~ /^q\s*\[(.*)\]$/s || $str =~ /^q\s*<(.*)>$/s) {
+    # q{}, q(), q[], q<> style - like single-quoted, no interpolation (optional whitespace)
     $content = $1;
     $content =~ s/\\\\/\\/g;    # only \\ is special in q{}
     # For CL, escape backslashes and quotes

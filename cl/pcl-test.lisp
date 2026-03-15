@@ -116,12 +116,28 @@
       (eq x *p-undef*)
       (and (p-box-p x) (eq (p-box-value x) *p-undef*))))
 
+;;; Helper: apply scalar context to a value (matches Test::More's $$ prototype behavior).
+;;; When Test::More functions like is($$;$) receive an array, Perl forces scalar context,
+;;; giving the element count. PCL can't enforce prototypes, so we do it here instead.
+(defun test-to-scalar (x)
+  (handler-case
+    (let ((is-vec (and (vectorp x) (not (stringp x)))))
+      (if (and is-vec (adjustable-array-p x))
+          (make-p-box (length x))
+          x))
+    (error (e)
+      (format t "### test-to-scalar ERROR: ~A~%" e)
+      (force-output)
+      x)))
+
 ;;; is(got, expected, name)
 (defun pl-is (got expected &optional name)
-  (let ((pass (cond
-                ((and (test-undef-p got) (test-undef-p expected)) t)
-                ((or (test-undef-p got) (test-undef-p expected)) nil)
-                (t (equal (to-string got) (to-string expected))))))
+  (let* ((got (test-to-scalar got))
+         (expected (test-to-scalar expected))
+         (pass (cond
+                 ((and (test-undef-p got) (test-undef-p expected)) t)
+                 ((or (test-undef-p got) (test-undef-p expected)) nil)
+                 (t (equal (to-string got) (to-string expected))))))
     (if pass
         (test-ok t name)
         (test-ok nil name
@@ -130,10 +146,12 @@
 
 ;;; isnt(got, expected, name)
 (defun pl-isnt (got expected &optional name)
-  (let ((pass (cond
-                ((and (test-undef-p got) (test-undef-p expected)) nil)
-                ((or (test-undef-p got) (test-undef-p expected)) t)
-                (t (not (equal (to-string got) (to-string expected)))))))
+  (let* ((got (test-to-scalar got))
+         (expected (test-to-scalar expected))
+         (pass (cond
+                 ((and (test-undef-p got) (test-undef-p expected)) nil)
+                 ((or (test-undef-p got) (test-undef-p expected)) t)
+                 (t (not (equal (to-string got) (to-string expected)))))))
     (if pass
         (test-ok t name)
         (test-ok nil name
@@ -142,7 +160,8 @@
 
 ;;; like(got, regex, name)
 (defun pl-like (got regex &optional name)
-  (let* ((got-str (if got (to-string got) ""))
+  (let* ((got (test-to-scalar got))
+         (got-str (if got (to-string got) ""))
          (regex-str (if (p-regex-match-p regex)
                         (p-regex-match-pattern regex)
                         (to-string regex)))
@@ -155,7 +174,8 @@
 
 ;;; unlike(got, regex, name)
 (defun pl-unlike (got regex &optional name)
-  (let* ((got-str (if got (to-string got) ""))
+  (let* ((got (test-to-scalar got))
+         (got-str (if got (to-string got) ""))
          (regex-str (if (p-regex-match-p regex)
                         (p-regex-match-pattern regex)
                         (to-string regex)))
@@ -168,7 +188,9 @@
 
 ;;; cmp_ok(got, op, expected, name)
 (defun pl-cmp_ok (got op expected &optional name)
-  (let ((pass
+  (let* ((got (test-to-scalar got))
+         (expected (test-to-scalar expected))
+         (pass
           (cond
             ((equal op "==")
              (= (to-number got) (to-number expected)))

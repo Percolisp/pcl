@@ -107,7 +107,7 @@
    #:p-super-call #:perl-pkg-to-clos-class #:clos-class-to-pkg
    #:p-can #:p-isa
    ;; Regex
-   #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex
+   #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
    ;; Special variables
@@ -264,8 +264,7 @@
 (defvar $8 nil "Regex capture group 8")
 (defvar $9 nil "Regex capture group 9")
 
-;;; Default variable ($_) - implicit loop variable and default for many operations
-(defvar $_ nil "Perl's $_ - default variable")
+;;; Default variable ($_) - defined later after make-p-box (see Boxed special variables section)
 
 ;;; Process ID ($$)
 (defvar $$ (sb-posix:getpid) "Process ID")
@@ -378,6 +377,8 @@
       (make-p-box val)))
 
 ;;; Boxed special variables (must be after make-p-box definition)
+;;; Default variable ($_) - p-box so p-scalar-= / box-set work correctly
+(defvar $_ (make-p-box nil) "Perl's $_ - default variable")
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
 (defvar $@ (make-p-box "") "Error from last eval")
 ;;; Input record separator ($/)
@@ -1352,12 +1353,15 @@
     (concatenate 'string prefix digits)))
 
 (defun sprintf-format-float-f (num precision)
-  "Format float as fixed-point with given precision (default 6)."
+  "Format float as fixed-point with given precision (default 6).
+   Precision 0 means no decimal point (Perl: sprintf '%.0f', 0 => '0', not '0.')."
   (let* ((prec (or precision 6))
          ;; Use CL format with precision - works correctly with any float type
-         (s (format nil "~,vF" prec (abs num))))
-    ;; CL may produce leading spaces; trim them
-    (string-left-trim " " s)))
+         (s (string-left-trim " " (format nil "~,vF" prec (abs num)))))
+    ;; CL produces trailing "." when prec=0 (e.g. "0."); Perl never does
+    (if (zerop prec)
+        (string-right-trim "." s)
+        s)))
 
 (defun sprintf-format-float-e (num precision upper-case-p)
   "Format float as exponential notation with given precision (default 6)."
@@ -1912,11 +1916,18 @@
                 (string= (symbol-name (car var)) "P-LIST-X")
                 (numberp (caddr var)))
            (incf static-idx (caddr var)))
-          ;; Skip single undef placeholder
+          ;; Skip single undef placeholder: (p-undef), *p-undef*, or
+          ;; (let ((*wantarray* t)) (p-undef)) wrapper from wantarray context
           ((or (eq var '*p-undef*)
                (and (listp var)
                     (symbolp (car var))
-                    (string= (symbol-name (car var)) "P-UNDEF")))
+                    (string= (symbol-name (car var)) "P-UNDEF"))
+               (and (listp var)
+                    (eq (car var) 'let)
+                    (= (length var) 3)
+                    (listp (third var))
+                    (symbolp (car (third var)))
+                    (string= (symbol-name (car (third var))) "P-UNDEF")))
            (incf static-idx 1))
           ;; Array variable (@arr) - absorbs remaining elements
           ((and (symbolp var)
@@ -3296,9 +3307,9 @@
                   (loop for item in e
                         for val = (unbox item)
                         do (vector-push-extend (make-p-box val) result)))
-                 ;; Scalar value - wrap in box
+                 ;; Scalar value - unbox first (avoids double-boxing Perl vars), then wrap
                  (t
-                  (vector-push-extend (make-p-box e) result)))))
+                  (vector-push-extend (make-p-box (unbox e)) result)))))
       (dolist (elem elements)
         (add-element elem)))
     result))
@@ -3560,20 +3571,37 @@
     (t (vector val))))
 
 (defun %p-flatten-for-list (raw)
-  "Flatten a value for use as a foreach/map/grep list.
+  "Flatten a value for use as a foreach list.
    - p-box wrapping a vector (@array passed directly) -> iterate over elements
-   - Raw CL vector from (vector ...) -> each slot may be an @array; flatten one level
+   - Raw CL vector from codegen (vector ...) -> p-flatten-markers are spread,
+     everything else (p-box scalars/refs, raw scalars) kept as-is
    - Scalar -> single-element vector"
   (let ((val (unbox raw)))
     (cond
       ((not (and (vectorp val) (not (stringp val))))
        (vector raw))
       ((p-box-p raw)
-       ;; @array box: elements are the list directly
+       ;; @array box passed as a single list expression — iterate its elements directly
        val)
       (t
-       ;; (vector ...) form: each slot might be a scalar or @array — collect+flatten
-       (apply #'%p-collect-list (coerce val 'list))))))
+       ;; CL vector from codegen (vector ...): items are scalars, p-flatten-markers,
+       ;; or raw CL vectors (function return values).
+       ;; p-flatten-markers (from @array items in foreach list) are spread.
+       ;; p-box items (arrayrefs, scalar refs) are kept as scalars.
+       ;; Raw CL vectors (from keys/values/grep etc.) are spread.
+       (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+         (loop for item across val do
+           (cond
+             ((p-flatten-marker-p item)
+              (let ((src (p-flatten-marker-array item)))
+                (when (and (vectorp src) (not (stringp src)))
+                  (loop for x across src do (vector-push-extend x result)))))
+             ((and (not (p-box-p item)) (vectorp item) (not (stringp item)))
+              ;; Raw CL vector from function return (keys, grep, etc.) — spread
+              (loop for x across item do (vector-push-extend x result)))
+             (t
+              (vector-push-extend item result))))
+         result)))))
 
 (defmacro p-foreach ((var list) &rest body-and-keys)
   "Perl foreach loop with optional :label and :continue."
@@ -4508,6 +4536,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    OFFSET is the element index, BITS is element size (1, 2, 4, 8, 16, 32).
    Returns the numeric value at that position."
   (let* ((s (to-string str))
+         (offset (truncate (to-number offset)))
+         (bits   (truncate (to-number bits)))
          (byte-offset (floor (* offset bits) 8))
          (bit-offset (mod (* offset bits) 8)))
     (cond
@@ -5049,6 +5079,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Note: pattern and str are NOT optional here - PExpr.pm adds defaults
    (pattern=' ', str=$_) at parse time so codegen always provides both."
   (let* ((s (to-string str))
+         ;; Unbox pattern (may be stored in a variable as a p-box)
+         (pattern (if (p-box-p pattern) (p-box-value pattern) pattern))
          (limit-num (if limit (truncate (to-number limit)) nil))
          (keep-trailing (and limit-num (/= limit-num 0)))
          (max-fields (if (and limit-num (> limit-num 0)) limit-num nil))
@@ -5056,9 +5088,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; Empty input string always gives empty result (no fields)
     (unless (zerop (length s))
     (cond
-      ;; Regex pattern from p-regex
+      ;; Regex pattern from p-regex or p-qr (possibly stored in variable)
       ((p-regex-match-p pattern)
-       (let* ((pat (p-regex-match-pattern pattern))
+       (let* ((raw-pat (p-regex-match-pattern pattern))
+              (modifiers (p-regex-match-modifiers pattern))
+              (ppcre-options (build-ppcre-options modifiers))
+              ;; Perl special case: split /^/ is treated as split /^/m
+              (pat (if (and (string= raw-pat "^") (not (getf modifiers :m)))
+                       "(?m)^"
+                       raw-pat))
               ;; CL-PPCRE: 0 removes trailing empty, large number keeps them
               ;; Perl: limit=0/nil removes, limit<0 keeps, limit>0 is max fields
               (ppcre-limit (cond (max-fields max-fields)    ; limit > 0
@@ -5086,8 +5124,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                               ;; No limit: just individual chars
                               chars)))
                          ;; Non-empty pattern: use CL-PPCRE split
+                         ;; Must create scanner first to apply modifiers (m, i, s, x)
+                         ;; since cl-ppcre:split doesn't accept modifier keywords directly.
+                         ;; Use :with-registers-p t so capture groups in pattern
+                         ;; are included in results (Perl behavior)
                          (handler-case
-                           (cl-ppcre:split pat s :limit ppcre-limit :with-registers-p nil)
+                           (let ((scanner (apply #'cl-ppcre:create-scanner pat ppcre-options)))
+                             (cl-ppcre:split scanner s :limit ppcre-limit :with-registers-p t))
                            (cl-ppcre:ppcre-syntax-error (e)
                              (warn "Regex syntax error in split: ~A" e)
                              (list s))))))
@@ -5688,17 +5731,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                     ;; call the pcl built-in instead of signalling "no method".
                     (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                       (return-from p-method-call (apply fn obj args)))))))
-            ;; Not found in any class in MRO
-            (error "Can't locate method ~A via package ~A" method-name class-name))
+            ;; Not found in any class in MRO - try UNIVERSAL fallbacks
+            (cond
+              ((string-equal method-name "isa") (apply #'p-isa obj args))
+              ((string-equal method-name "can") (apply #'p-can obj args))
+              (t (error "Can't locate method ~A via package ~A" method-name class-name))))
 
           ;; No CLOS class - fall back to single-class lookup (legacy behavior)
           (let ((pkg (find-package (string-upcase class-name))))
             (unless pkg
               (error "Package ~A not found for method call" class-name))
             (let ((fn (find-symbol (string-upcase (format nil "PL-~A" method-name)) pkg)))
-              (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
-                  (apply fn obj args)
-                  (error "Can't locate method ~A in package ~A" method-name class-name))))))))
+              (cond
+                ((and fn (eq (symbol-package fn) pkg) (fboundp fn))
+                 (apply fn obj args))
+                ;; UNIVERSAL fallbacks for isa, can
+                ((string-equal method-name "isa") (apply #'p-isa obj args))
+                ((string-equal method-name "can") (apply #'p-can obj args))
+                (t (error "Can't locate method ~A in package ~A" method-name class-name)))))))))
 
 ;;; Package name conversion utilities for inheritance
 (defun perl-pkg-to-clos-class (name)
@@ -5802,6 +5852,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (unless obj-class
       (return-from p-isa nil))
 
+    ;; If the object's class defines a custom isa() method (PL-ISA), call it.
+    ;; Perl's infix isa operator delegates to ->isa if the class overrides it.
+    (let* ((pkg (find-package (string-upcase obj-class)))
+           (custom-isa (when pkg (find-symbol "PL-ISA" pkg))))
+      (when (and custom-isa (eq (symbol-package custom-isa) pkg) (fboundp custom-isa))
+        (return-from p-isa (funcall custom-isa invocant check-class))))
+
     ;; Exact match
     (when (string-equal obj-class check-class)
       (return-from p-isa t))
@@ -5815,12 +5872,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
       (when clos-class
         ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
-        (let ((mro (sb-mop:class-precedence-list clos-class)))
-          (dolist (cls mro)
-            (let* ((cls-sym-name (symbol-name (class-name cls)))
-                   (pkg-name (clos-class-to-pkg cls-sym-name)))
-              (when (string-equal pkg-name check-class)
-                (return-from p-isa t))))))
+        ;; The class may not be finalized yet (no instances created), so handle that.
+        (handler-case
+          (sb-mop:finalize-inheritance clos-class)
+          (error () nil))
+        (handler-case
+          (let ((mro (sb-mop:class-precedence-list clos-class)))
+            (dolist (cls mro)
+              (let* ((cls-sym-name (symbol-name (class-name cls)))
+                     (pkg-name (clos-class-to-pkg cls-sym-name)))
+                (when (string-equal pkg-name check-class)
+                  (return-from p-isa t)))))
+          (unbound-slot () nil)))
 
       ;; Fallback: walk runtime @ISA for dynamically modified inheritance
       (labels ((walk-isa (class-str visited)
@@ -5880,6 +5943,26 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (#\< #\>)
     (t open-delim)))  ; Non-paired delimiters use same char
 
+(defun perl-regex-to-ppcre (pattern)
+  "Convert Perl regex escape sequences to cl-ppcre compatible form.
+   cl-ppcre does not handle \\x{HHHH} (Perl hex escapes with braces).
+   Convert \\x{HHHH} to the literal Unicode character.
+   Also strips (?{...}) and (??{...}) code blocks (not supported by cl-ppcre
+   and cause infinite loops)."
+  ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these
+  (let* ((pat (cl-ppcre:regex-replace-all "\\(\\?\\?\\{[^}]*\\}\\)" pattern ""))
+         (pat (cl-ppcre:regex-replace-all "\\(\\?\\{[^}]*\\}\\)" pat "")))
+    (cl-ppcre:regex-replace-all
+      "\\\\x\\{([0-9a-fA-F]+)\\}"
+      pat
+      (lambda (match register)
+        (declare (ignore match))
+        (let ((code (parse-integer register :radix 16)))
+          (if (< code char-code-limit)
+              (string (code-char code))
+              (string #\?)))) ; fallback for out-of-range
+      :simple-calls t)))
+
 (defun p-regex (pattern-string)
   "Parse /pattern/modifiers and return a regex-match struct.
    Pattern-string is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'"
@@ -5889,12 +5972,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (open-delim (char str start-delim))
          (close-delim (get-closing-delim open-delim))
          (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
-         (pattern (subseq str (1+ start-delim) end-delim))
+         (pattern (perl-regex-to-ppcre (subseq str (1+ start-delim) end-delim)))
          (modifiers (if (< end-delim (1- (length str)))
                         (subseq str (1+ end-delim))
                         "")))
     (make-p-regex-match :pattern pattern
                          :modifiers (parse-regex-modifiers modifiers))))
+
+(defun p-regex-from-parts (pattern modifiers)
+  "Build a regex from a runtime-interpolated pattern string and modifier string.
+   Used when the regex contains variable interpolation (e.g. /$x/ or qr/$x/)."
+  (make-p-regex-match :pattern (perl-regex-to-ppcre (to-string pattern))
+                       :modifiers (parse-regex-modifiers (to-string modifiers))))
 
 (defun p-qr (pattern-string)
   "Parse qr/pattern/modifiers and return a compiled regex (regex-match struct).
@@ -5905,7 +5994,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (open-delim (char str start-delim))
          (close-delim (get-closing-delim open-delim))
          (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
-         (pattern (subseq str (1+ start-delim) end-delim))
+         (pattern (perl-regex-to-ppcre (subseq str (1+ start-delim) end-delim)))
          (modifiers (if (< end-delim (1- (length str)))
                         (subseq str (1+ end-delim))
                         "")))
@@ -6295,14 +6384,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; ============================================================
 
 ;; utf8 module stub - on non-EBCDIC systems, uni_to_native/native_to_uni are identity.
-;; These are exported from :pcl (via pcl-test.lisp) and inherited by :utf8 via (:use :pcl).
+;; Note: PCL generates pl- prefix for user function calls (e.g. utf8::upgrade → utf8::pl-upgrade),
+;; so stubs in user-accessible packages must use pl- prefix (not p- which is for pcl builtins).
 (defpackage :utf8 (:use :cl :pcl))
 (in-package :utf8)
-(defun p-encode (str) (declare (ignore str)) 1)
-(defun p-decode (str) (declare (ignore str)) 1)
-(defun p-upgrade (str) (declare (ignore str)) 1)
-(defun p-downgrade (str) (declare (ignore str)) 1)
-(defun p-is_utf8 (str) (declare (ignore str)) 1)
+(defun pl-encode (str) (declare (ignore str)) 1)
+(defun pl-decode (str) (declare (ignore str)) 1)
+(defun pl-upgrade (str) (declare (ignore str)) 1)
+(defun pl-downgrade (str) (declare (ignore str)) 1)
+(defun pl-is_utf8 (str) (declare (ignore str)) 1)
 (in-package :pcl)
 
 ;; warnings module stub - needed because modules like Carp.pm check $warnings::VERSION
@@ -6310,8 +6400,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (in-package :warnings)
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar $VERSION (make-p-box "1.50")))
-(defun p-unimport (&rest args) (declare (ignore args)) nil)
-(defun p-import (&rest args) (declare (ignore args)) nil)
+(defun pl-unimport (&rest args) (declare (ignore args)) nil)
+(defun pl-import (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 
 ;; Carp module stub - Carp loads utf8 which causes infinite loops in PCL
@@ -6320,29 +6410,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (in-package :|Carp|)
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar $VERSION (make-p-box "1.50")))
-(defun p-croak (&rest args)
+(defun pl-croak (&rest args)
   (error "Carp::croak: ~a" (if args (to-string (car args)) "")))
-(defun p-confess (&rest args)
+(defun pl-confess (&rest args)
   (error "Carp::confess: ~a" (if args (to-string (car args)) "")))
-(defun p-carp (&rest args)
+(defun pl-carp (&rest args)
   (format *error-output* "~a~%" (if args (to-string (car args)) "")))
-(defun p-cluck (&rest args)
+(defun pl-cluck (&rest args)
   (format *error-output* "~a~%" (if args (to-string (car args)) "")))
-(defun p-import (&rest args) (declare (ignore args)) nil)
+(defun pl-import (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 
 ;; POSIX module stubs
 (defpackage :|POSIX| (:use :cl :pcl))
 (in-package :|POSIX|)
-(defun p-WIFEXITED (status) (= (logand (unbox status) #xff) 0))
-(defun p-WEXITSTATUS (status) (ash (logand (unbox status) #xff00) -8))
+(defun pl-WIFEXITED (status) (= (logand (unbox status) #xff) 0))
+(defun pl-WEXITSTATUS (status) (ash (logand (unbox status) #xff00) -8))
 (in-package :pcl)
 
 ;; Internals module stubs (CL case-folds Internals → INTERNALS)
 (defpackage :INTERNALS (:use :cl :pcl))
 (in-package :INTERNALS)
 ;; Returns 0 — PCL is not a reference-counted stack build
-(defun p-stack_refcounted () (make-p-box 0))
+(defun pl-stack_refcounted () (make-p-box 0))
 (in-package :pcl)
 
 ;; DynaLoader/XSLoader stubs
@@ -6354,20 +6444,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; the function instead of using fboundp. Stubs ensure those calls don't crash.
 (defpackage :DynaLoader (:use :cl :pcl))
 (in-package :DynaLoader)
-(defun p-boot_DynaLoader (&rest args) (declare (ignore args)) nil)
-(defun p-dl_error (&rest args) (declare (ignore args)) nil)
-(defun p-dl_load_flags (&rest args) (declare (ignore args)) (make-p-box 0))
-(defun p-bootstrap (&rest args) (declare (ignore args)) nil)
-(defun p-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
-(defun p-dl_load_file (&rest args) (declare (ignore args)) nil)
-(defun p-dl_find_symbol (&rest args) (declare (ignore args)) nil)
-(defun p-dl_undef_symbols (&rest args) (declare (ignore args)) nil)
+(defun pl-boot_DynaLoader (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_error (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_load_flags (&rest args) (declare (ignore args)) (make-p-box 0))
+(defun pl-bootstrap (&rest args) (declare (ignore args)) nil)
+(defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_load_file (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_find_symbol (&rest args) (declare (ignore args)) nil)
+(defun pl-dl_undef_symbols (&rest args) (declare (ignore args)) nil)
 
 (defpackage :XSLoader (:use :cl :pcl))
 (in-package :XSLoader)
 ;; XSLoader::load('Module', $version) — no-op, XS cannot be loaded by PCL
-(defun p-load (&rest args) (declare (ignore args)) nil)
-(defun p-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
+(defun pl-load (&rest args) (declare (ignore args)) nil)
+(defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 
 (format t "PCL Runtime loaded~%")
