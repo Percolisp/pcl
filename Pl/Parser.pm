@@ -43,6 +43,7 @@ has indent_level => (
   default   => 0,
 );
 
+
 has output => (
   is        => 'rw',
   default   => sub { [] },
@@ -1814,16 +1815,7 @@ sub parse_block_as_function {
     my $saved_renames = $self->environment->state_var_renames;
     $self->environment->state_var_renames(\%state_renames) if %state_renames;
     $self->_with_declarations($block, sub {
-      my $has_content = 0;
-      for my $child ($block->children) {
-        my $ref = ref($child);
-        next if $ref eq 'PPI::Token::Whitespace';
-        next if $ref eq 'PPI::Token::Comment';
-
-        $self->_process_element($child);
-        $has_content = 1;
-      }
-      $self->_emit("nil") unless $has_content;
+      $self->_process_block($block);
     });
     $self->environment->state_var_renames($saved_renames);
   }

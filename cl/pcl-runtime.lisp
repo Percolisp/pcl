@@ -2390,7 +2390,9 @@
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign)"
-  `(box-set ,place (concatenate 'string (to-string ,place) (to-string ,value))))
+  (let ((g (gensym "PLACE")))
+    `(let ((,g ,place))
+       (box-set ,g (concatenate 'string (to-string ,g) (to-string ,value))))))
 
 (defmacro p-str-x= (place value)
   "Perl x= (repeat-assign)"
@@ -3545,7 +3547,9 @@
          (loop while (p-true-p ,condition)
                do ,(make-loop-iteration-body label body)
                   ,@(when continue-form (list continue-form))
-               ,@(when label `(finally (return-from ,block-name nil))))))))
+               ,@(if label
+                     `(finally (return-from ,block-name ""))
+                     `(finally (return ""))))))))
 
 (defmacro p-until (condition &body body)
   "Perl until loop"
@@ -3561,7 +3565,9 @@
          (loop while (p-true-p ,test)
                do ,(make-loop-iteration-body label body)
                   ,@(when step (list step))
-               ,@(when label `(finally (return-from ,block-name nil))))))))
+               ,@(if label
+                     `(finally (return-from ,block-name ""))
+                     `(finally (return ""))))))))
 
 (defun ensure-vector (val)
   "Ensure value is a vector for iteration. Non-vectors become single-element vectors."
@@ -3618,7 +3624,9 @@
                  do (let ((,var (ensure-boxed ,item)))
                       ,(make-loop-iteration-body label body)
                       ,@(when continue-form (list continue-form)))
-                 ,@(when label `(finally (return-from ,block-name nil)))))))))
+                 ,@(if label
+                       `(finally (return-from ,block-name ""))
+                       `(finally (return "")))))))))
 
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
