@@ -179,6 +179,7 @@ When resuming work:
 - `docs/closure-lexical-scoping.md` - **NEXT TODO**: Why `defvar` breaks closures, plan for `$x__lex__N` renaming
 - `docs/todo-features.md` - **Features left to implement** (tiered, with test counts and fix areas)
 - `docs/not-supported.md` - **Deliberate non-support** (design decisions: `@_` aliasing, Unicode limits, etc.)
+- `docs/v1-implementation-plan.md` - **V1 feature plan** (prioritized, with full implementation details for each item including `local $hash{key}`, bare-if return, string eval, etc.)
 
 ## Dependencies
 

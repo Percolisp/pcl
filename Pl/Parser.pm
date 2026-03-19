@@ -427,6 +427,55 @@ sub _transform_pkg_var {
   return $var;
 }
 
+# Extract individual key/index token groups from a PPI::Structure::Subscript,
+# splitting on top-level comma operators.
+# Returns a list of arrayrefs, one per key/index expression.
+sub _subscript_key_groups {
+  my ($self, $sub) = @_;
+
+  # Flatten subscript children: unwrap Statement::Expression wrappers
+  my @tokens;
+  for my $child ($sub->children()) {
+    next if ref($child) eq 'PPI::Token::Whitespace';
+    if (ref($child) =~ /^PPI::Statement/) {
+      for my $gc ($child->children()) {
+        next if ref($gc) eq 'PPI::Token::Whitespace';
+        push @tokens, $gc;
+      }
+    } else {
+      push @tokens, $child;
+    }
+  }
+
+  # Split on top-level comma (simple split; does not handle nested commas)
+  my @groups;
+  my @current;
+  for my $tok (@tokens) {
+    if (ref($tok) eq 'PPI::Token::Operator' && $tok->content eq ',') {
+      push @groups, [@current] if @current;
+      @current = ();
+    } else {
+      push @current, $tok;
+    }
+  }
+  push @groups, [@current] if @current;
+  return @groups;
+}
+
+# Parse one key group to a CL expression string.
+# For hash subscripts ({...}), auto-quote single bareword tokens (Perl hash key rule).
+sub _subscript_key_expr {
+  my ($self, $group, $open, $stmt) = @_;
+  if ($open eq '{' && @$group == 1 && ref($group->[0]) eq 'PPI::Token::Word') {
+    my $word = $group->[0]->content;
+    # Only auto-quote if it's not a keyword
+    unless ($word =~ /^(?:if|unless|while|until|for|foreach|sub|my|our|local|state|undef|defined|not|and|or)$/) {
+      return "\"$word\"";
+    }
+  }
+  return $self->_parse_expression($group, $stmt) // 'nil';
+}
+
 # Process children of a PPI node (Document or Block)
 sub _process_children {
   my $self     = shift;
@@ -1213,6 +1262,78 @@ sub _process_local_declaration {
     return;
   }
 
+  # ── Handle local $hash{key}, local @arr[N], local @hash{@keys}, local @arr[N,M]
+  # PPI gives: Symbol("$hash") + Structure::Subscript("{key}")
+  if (@non_ws >= 2
+      && ref($non_ws[0]) eq 'PPI::Token::Symbol'
+      && ref($non_ws[1]) eq 'PPI::Structure::Subscript') {
+
+    my $sym   = $non_ws[0]->content;           # e.g. "$hash", "@arr"
+    my $sub   = $non_ws[1];
+    my $open  = $sub->start()->content();       # '{' or '['
+    my $sigil = substr($sym, 0, 1);             # '$' (single) or '@' (slice)
+    my $base  = substr($sym, 1);               # "hash" or "arr"
+
+    # The CL variable: hash subscripts access %hash, array subscripts access @arr
+    my $new_sigil = ($open eq '{') ? '%' : '@';
+    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+
+    # Extract individual key/index expressions from the subscript
+    my @key_groups = $self->_subscript_key_groups($sub);
+    if (@key_groups) {
+      # Check for initializer (= expr) after the subscript
+      my ($has_init, @rhs_parts);
+      for my $i (2 .. $#non_ws) {
+        if (ref($non_ws[$i]) eq 'PPI::Token::Operator' && $non_ws[$i]->content eq '=') {
+          $has_init = 1;
+          @rhs_parts = @non_ws[($i + 1) .. $#non_ws];
+          last;
+        }
+      }
+      my $init_cl = $has_init ? ($self->_parse_expression(\@rhs_parts, $stmt) // 'nil') : undef;
+
+      $self->_emit(";; $perl_code");
+
+      # Parse all key CL expressions up front (need them for both macro open and init)
+      my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt) } @key_groups;
+
+      # Choose the macro based on subscript type
+      my $macro = ($open eq '{') ? 'p-local-hash-elem' : 'p-local-array-elem';
+
+      # Emit one macro call per key (nested open forms, closed by _process_block)
+      for my $key_cl (@key_cls) {
+        $self->_emit("($macro $cl_var $key_cl");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth}++;
+      }
+
+      # Emit initializer as first body form if present
+      if (defined $init_cl) {
+        if (@key_cls == 1) {
+          # Single element with initializer
+          my $key_cl = $key_cls[0];
+          if ($open eq '{') {
+            $self->_emit("(p-setf (p-gethash $cl_var $key_cl) $init_cl)");
+          } else {
+            $self->_emit("(p-setf (p-aref $cl_var $key_cl) $init_cl)");
+          }
+        } else {
+          # Slice with initializer: force list context so (10,20) becomes a vector
+          my $keys_str = join(' ', @key_cls);
+          if ($open eq '{') {
+            $self->_emit("(let ((*wantarray* t)) (p-setf (p-hslice $cl_var $keys_str) $init_cl))");
+          } else {
+            $self->_emit("(let ((*wantarray* t)) (p-setf (p-aslice $cl_var $keys_str) $init_cl))");
+          }
+        }
+      }
+
+      $self->_emit("");
+      return;
+    }
+  }
+
   # Find variable and optional initializer
   my @vars;
   my $init_idx = -1;
@@ -1870,6 +1991,7 @@ sub parse_block_to_cl_string {
   my $saved_cur_section = $self->_cur_section;
   my $saved_cur_bucket  = $self->_cur_bucket;
   my $saved_indent      = $self->indent_level;
+  my $saved_local_depth = $self->{_local_let_depth} // 0;
 
   $self->_sections([{
     pkg => '_temp_', preamble => [], declarations => [], definitions => [], runtime => [],
@@ -1891,6 +2013,17 @@ sub parse_block_to_cl_string {
     $self->_process_element($child);
     $has_content = 1;
   }
+
+  # Close any local forms opened inside this block (e.g. local $h{key})
+  # Same logic as _process_block, but emitting into the temp section.
+  my $end_depth = $self->{_local_let_depth} // 0;
+  while ($end_depth > $saved_local_depth) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
+    $self->{_local_let_depth}--;
+    $end_depth--;
+  }
+  $self->{_local_let_depth} = $saved_local_depth;
 
   # Leave scope
   $self->environment->pop_scope();

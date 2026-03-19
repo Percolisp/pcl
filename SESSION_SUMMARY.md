@@ -1,8 +1,68 @@
 # Perl Expression Parser - Development Session Summary
 
 **Project:** Pl::PExpr - Perl to Common Lisp Expression Parser
-**Last Updated:** 2026-03-18
+**Last Updated:** 2026-03-19
 **Status:** V2 - Constants and OO Support Added
+
+---
+
+## Session 84 (2026-03-19) — delete/exists array fixes, range edge cases, misc fixes, chained-subscript delete
+
+### What was done
+
+- **`++("99a")` → 100 (numeric)**: Fixed `perl-increment` in `pcl-runtime.lisp`. Root cause:
+  `(every alphanumericp v)` matched "99a" (all chars alphanumeric). Fixed by checking
+  `^[a-zA-Z]*[0-9]*$` pattern — letters then optional digits, not mixed (digits then letter).
+
+- **`splice` scalar context**: Fixed `p-splice-impl` to check `*wantarray*`. In scalar context,
+  returns last removed element; in list context, returns the full removed vector.
+
+- **`p-..` range operator**: Complete rewrite to handle:
+  - `"*x".."az"` → `("*x")`: if start is not all-alphanumeric, return just start (no magical incr)
+  - `"".."B"` → `("")`: empty string as start returns single-element list with ""
+  - `undef.."B"` → `("")`: undef treated as "" for string ranges
+  - `"B"..""` → `()`: non-alpha start with shorter end → empty
+  - `undef..undef` → `("")`: both undef → single ""
+
+- **Array `delete`/`exists` semantics**: Fixed `p-delete-array`, `p-exists-array`, `p-aref`:
+  - `p-delete-array`: now stores `nil` (not `*p-undef*`) as "deleted" marker
+  - `p-exists-array`: checks `p-box-p` (boxed = exists, nil = deleted, `*p-undef*` = assigned undef but exists)
+  - `p-aref`: returns `*p-undef*` for `nil` elements (deleted)
+
+- **Chained subscript in `delete`/`exists`** (PExpr.pm fix): `delete $refhash{"top"}{"bar"}` was
+  parsed as `h_acc(delete($refhash{"top"}), "bar")` — wrong! Root cause: named unary handler only
+  consumed `Symbol + one Subscript`, leaving `{"bar"}` to be applied to the result of `delete`.
+  Fix: extended `$end_pars` loop to consume ALL consecutive `PPI::Structure::Subscript`s after
+  `Symbol + first Subscript`. Now generates `(p-delete (p-gethash %refhash "top") "bar")`.
+
+- **New test files**:
+  - `Pl/t/misc-fixes-01.t` (12 tests): `++("99a")`, `++("99\0a")`, `splice` scalar context
+  - `Pl/t/range-01.t` (12 tests): `"*x".."az"`, undef/empty string ranges
+  - `Pl/t/delete-01.t` (8 tests): array delete/exists semantics, hashref chain delete
+
+- **PCL suite: 60 files, 2590 tests, all passing**
+- **Perl test suite: 4869 passing, 962 failing — 41 fully-passing, 16 zero-passing, 2 skipped**
+
+### Files modified this session
+- `cl/pcl-runtime.lisp` — `perl-increment` pattern fix, `p-splice-impl` scalar context, `p-..` rewrite, `p-delete-array`/`p-exists-array`/`p-aref` nil-marker fix
+- `Pl/PExpr.pm` — named unary handler: consume all chained Subscripts (not just one)
+- `Pl/t/misc-fixes-01.t` — new file (12 tests)
+- `Pl/t/range-01.t` — new file (12 tests)
+- `Pl/t/delete-01.t` — new file (8 tests)
+
+### Working tree state
+**Uncommitted changes** from sessions 82+83+84. All changes are in:
+- `cl/pcl-runtime.lisp`
+- `Pl/ExprToCL.pm`
+- `Pl/PExpr.pm`
+- `Pl/Parser.pm`
+- New test files: `split-01.t`, `vec-01.t`, `repeat-01.t`, `misc-fixes-01.t`, `range-01.t`, `delete-01.t`
+
+### Next session priorities
+1. **`split.t` test 73** — `split(/$x/, ...)` regex variable interpolation (1 test, easy fix)
+2. **kvaslice.t repeated keys** — `%arr{@keys}` with repeated keys (tests 2-7)
+3. **`exists $h{a}{b}`** — same chained-subscript issue as delete (now fixed in parser, but needs runtime check — `p-exists` on a nested hash ref)
+4. **caller.t** — investigate UNBOUND-VARIABLE at startup
 
 ---
 

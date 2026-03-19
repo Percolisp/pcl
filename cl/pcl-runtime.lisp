@@ -97,6 +97,7 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob
+   #:p-local-hash-elem #:p-local-array-elem
    #:p-pack #:p-unpack
    #:p-grep #:p-map #:p-sort #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
@@ -2755,8 +2756,8 @@
       (cond
         ((and (vectorp a) (>= actual-idx 0) (< actual-idx len))
          (let ((elem (aref a actual-idx)))
-           ;; Unbox if stored as a box (l-value semantics)
-           (unbox elem)))
+           ;; nil means deleted element — return undef
+           (if (null elem) *p-undef* (unbox elem))))
         ((and (listp a) (>= actual-idx 0) (< actual-idx len))
          (let ((elem (nth actual-idx a)))
            (unbox elem)))
@@ -3476,26 +3477,31 @@
 
 (defun p-delete-array (arr idx)
   "Perl delete function for arrays.
-   Sets element to undef and returns the old value (unboxed).
+   Sets element to nil (deleted marker) and returns the old value.
+   nil as array element means 'deleted/non-existent' (distinct from undef).
    Unlike hash delete, this doesn't shrink the array."
-  (let* ((i (truncate (to-number idx)))
-         (old-val (if (and (>= i 0) (< i (length arr)))
-                      (let ((elem (aref arr i)))
-                        (unbox elem))
+  (let* ((a (unbox arr))
+         (i (truncate (to-number idx)))
+         (len (if (vectorp a) (length a) 0))
+         (actual-idx (if (< i 0) (+ len i) i))
+         (old-val (if (and (>= actual-idx 0) (< actual-idx len))
+                      (let ((elem (aref a actual-idx)))
+                        (if (p-box-p elem) (p-box-value elem) *p-undef*))
                       *p-undef*)))
-    (when (and (>= i 0) (< i (length arr)))
-      ;; Set box to undef, or replace with undef box
-      (let ((elem (aref arr i)))
-        (if (p-box-p elem)
-            (setf (p-box-value elem) *p-undef*)
-            (setf (aref arr i) (make-p-box *p-undef*)))))
+    (when (and (vectorp a) (>= actual-idx 0) (< actual-idx len))
+      ;; Set element to nil — the "deleted" marker
+      (setf (aref a actual-idx) nil))
     old-val))
 
 (defun p-exists-array (arr idx)
   "Perl exists function for arrays.
-   Returns true if the element exists (index is within bounds and was assigned)."
-  (let ((i (truncate (to-number idx))))
-    (and (>= i 0) (< i (length arr)))))
+   Returns true only if element is within bounds AND is a box (assigned, not deleted)."
+  (let* ((a (unbox arr))
+         (i (truncate (to-number idx)))
+         (len (if (vectorp a) (length a) 0))
+         (actual-idx (if (< i 0) (+ len i) i)))
+    (and (vectorp a) (>= actual-idx 0) (< actual-idx len)
+         (p-box-p (aref a actual-idx)))))
 
 (defun p-delete-hash-slice (hash &rest keys)
   "Perl delete for hash slices: delete @hash{k1, k2, ...}
@@ -5563,6 +5569,59 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (when ,saved-scalar (setf (symbol-value scalar-sym) ,saved-scalar))
          (when ,saved-array  (setf (symbol-value array-sym)  ,saved-array))
          (when ,saved-hash   (setf (symbol-value hash-sym)   ,saved-hash))))))
+
+(defmacro p-local-hash-elem (hash-var key-form &body body)
+  "Save/restore one hash entry. Like Perl's local $hash{key}.
+   Installs a fresh undef box at the key so the body can set it freely.
+   On exit (normal or non-local), restores the original box, or removes
+   the key entirely if it did not exist before the local."
+  (let ((kv     (gensym "KEY"))
+        (old-ex (gensym "OLD-EXISTS"))
+        (old-bx (gensym "OLD-BOX")))
+    `(let* ((,kv     (to-string ,key-form))
+            (,old-ex (nth-value 1 (gethash ,kv ,hash-var)))
+            (,old-bx (gethash ,kv ,hash-var)))
+       ;; Install a fresh undef box so assignments inside the scope
+       ;; do not clobber the saved box (which (setf p-gethash) reuses in-place).
+       (setf (gethash ,kv ,hash-var) (make-p-box nil))
+       (unwind-protect
+           (progn ,@body)
+         ;; Restore on any exit path
+         (if ,old-ex
+             (setf (gethash ,kv ,hash-var) ,old-bx)
+             (remhash ,kv ,hash-var))))))
+
+(defmacro p-local-array-elem (arr-var idx-form &body body)
+  "Save/restore one array element. Like Perl's local $arr[N].
+   Extends the array if needed and installs a fresh undef box.
+   On exit, restores the original box (or marks the element deleted if
+   it was beyond the original array length)."
+  (let ((iv       (gensym "IDX"))
+        (orig-len (gensym "ORIG-LEN"))
+        (old-ex   (gensym "OLD-EXISTS"))
+        (old-bx   (gensym "OLD-BOX")))
+    `(let* ((,iv       (let ((i (truncate (to-number ,idx-form))))
+                         (if (< i 0) (max 0 (+ (length ,arr-var) i)) i)))
+            (,orig-len (length ,arr-var))
+            (,old-ex   (< ,iv ,orig-len))
+            (,old-bx   (when ,old-ex (aref ,arr-var ,iv))))
+       ;; Extend array if needed and install fresh undef box
+       (when (>= ,iv (length ,arr-var))
+         (dotimes (n (1+ (- ,iv (length ,arr-var))))
+           (vector-push-extend (make-p-box *p-undef*) ,arr-var)))
+       (setf (aref ,arr-var ,iv) (make-p-box nil))
+       (unwind-protect
+           (progn ,@body)
+         ;; Restore on any exit path
+         (if ,old-ex
+             ;; Element existed: put original box back
+             (setf (aref ,arr-var ,iv) ,old-bx)
+             ;; Element did not exist: mark as deleted, shrink array if extended
+             (progn
+               (when (< ,iv (length ,arr-var))
+                 (setf (aref ,arr-var ,iv) nil))  ; nil = deleted marker
+               (when (> (length ,arr-var) ,orig-len)
+                 (setf (fill-pointer ,arr-var) ,orig-len))))))))
 
 ;;; ============================================================
 ;;; Subroutine Reflection (exists &sub, defined &sub, undef &sub)

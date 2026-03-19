@@ -1841,8 +1841,13 @@ sub handle_subcalls {
             # Check if symbol is followed by subscript (hash/array access)
             my $after_symbol = $e->[$i + 2];
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
-                # Symbol + Subscript is one term (e.g., $h{key}, $a[0])
+                # Symbol + Subscript chain: consume all chained subscripts
+                # (e.g., $h{a}{b}[c] — all subscripts belong to the lvalue)
                 $end_pars = $i + 2;
+                while ($end_pars + 1 < scalar(@$e)
+                       && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
+                    $end_pars++;
+                }
             } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
                      && $after_symbol->start() eq '{'
                      && $next_term->content() =~ /^%/) {
