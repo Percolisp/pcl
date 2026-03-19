@@ -1,12 +1,109 @@
 # Perl Expression Parser - Development Session Summary
 
 **Project:** Pl::PExpr - Perl to Common Lisp Expression Parser
-**Last Updated:** December 28, 2024
+**Last Updated:** 2026-03-18
 **Status:** V2 - Constants and OO Support Added
 
 ---
 
-## Session 72 (2026-03-08) — Inline package fix, pl-prototype, pl-eval-direct
+## Session 82 (2026-03-18) — %p-flatten-list array ref fix; split/vec test files
+
+### What was done
+
+- **Fixed `%p-flatten-list` in `pcl-runtime.lisp`**: Array refs and hash refs in list assignment
+  RHS were incorrectly unwrapped. When `%p-flatten-list` encountered `box(vector)` (an array ref),
+  it extracted the inner vector, then `box-set` saw a raw adjustable vector and converted it to
+  its length (scalar context). Fix: added checks `(and (vectorp inner) (not (stringp inner)))`
+  and `(hash-table-p inner)` to preserve the box (reference) intact.
+  Root bug: `($fmt, $args, $exp) = @$_` where `$args = [42]` — `$args` was getting `1` instead
+  of the array ref, so `@$args` in sprintf returned count instead of contents.
+  **Fixes `transpile-test-05.t` tests 4 and 6** (sprintf with array ref args).
+
+- **`Pl/t/split-01.t`** (15 tests) and **`Pl/t/vec-01.t`** (17 tests) — new test files, all pass.
+  Cover split edge cases and vec lvalue operations.
+
+- **Hash ref slice `@{$h}{qw(...)}`** — Already FIXED in prior session's code (PExpr.pm).
+  `split-01.t` tests 5-7 pass (hashref slice, `@$_{qw(...)}`, etc.).
+
+- **PCL suite: 56 files, 2548 tests, all passing**
+- **Perl test suite: 4877 passing, 992 failing (improved from 4834/1039)**
+  - Newly fully passing: `anonsub.t`, `assignwarn.t`, `blocks.t`
+  - `vec.t`: 30/38 passing (up from 11/38)
+
+### Files modified this session
+- `cl/pcl-runtime.lisp` — `%p-flatten-list` box preservation fix (line ~1893)
+- `Pl/t/split-01.t` — new file (15 tests)
+- `Pl/t/vec-01.t` — new file (17 tests)
+
+### Next session priorities
+1. **Implement `p-unpack`** (currently stub returning empty array):
+   - vec.t tests 4, 11 fail: `unpack('C', $s)` returns 0 instead of byte value
+   - Need: `C` (unsigned char), `c`, `A`/`a`, `n`/`N`/`v`/`V`, `H`/`h`, `x`/`X`
+   - Also needed for pack.t (zero-passing)
+2. **`each.t`** — 13/21 passing, 8 failures, `UNDEFINED-FUNCTION` crash
+3. **`hash.t`** — 1/6 passing, `UNDEFINED-FUNCTION` crash
+4. **`split.t` test 73** — `split(/$x/, ...)` regex variable interpolation
+
+---
+
+## Session 81 (2026-03-16) — Hash ref slice fix (in progress)
+
+### What was done (partial session — ended early)
+
+- **Continuing session 80 fixes** — picking up `@{$h}{qw(...)}` hash ref slice
+- **Found a critical bug in session 80's partial fix** (PExpr.pm lines 896-911):
+  The `elsif` added to handle Cast '@' before a Block+Subscript is **unreachable dead code**.
+  It checks `$pre_n->content() =~ /^\$/` but the `elsif` at line 882 already matches that
+  condition first. The Cast '@' detection must be merged into the existing `elsif` at line 882.
+- **Session ended before fix was completed**. See "Next session priorities" below.
+
+### Next session priorities
+1. **Fix hash ref slice `@{$h}{qw(...)}`** in `Pl/PExpr.pm`:
+   - In the `elsif ($self->is_var($pre_n) && $pre_n->content() =~ /^\$/)` block (line 882),
+     add an `elsif` inside: after checking Cast '$', also check Cast '@':
+     ```perl
+     } elsif ($cast_before
+              && ref($cast_before) eq 'PPI::Token::Cast'
+              && $cast_before->content() eq '@'
+              && !$self->is_arr_braces($term)) {
+       $type = "slice_h_acc";
+     }
+     ```
+   - Also remove the now-dead `elsif` at lines 896-911.
+   - Then at the node splice (lines 937-942), remove the Cast '@' for `slice_h_acc`:
+     ```perl
+     if ($type eq "slice_h_acc" && $i >= 2
+         && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+         && $e->[$i-2]->content() eq '@') {
+       $e->[$i-1] = $node;
+       splice @$e, $i, 1;    # Remove Subscript at $i
+       splice @$e, $i-2, 1;  # Remove Cast '@' at $i-2 (now $i-2 after prev splice shrinks)
+       $i -= 2;
+     } else {
+       $e->[$i-1] = $node;
+       splice @$e, $i, 1;
+       $i--;
+     }
+     next;
+     ```
+     BUT wait: after `$e->[$i-1] = $node` and before any splice:
+     - e[i-2] = Cast '@', e[i-1] = node, e[i] = Subscript
+     After `splice @$e, $i, 1`: removes Subscript, e[i-2] = Cast '@', e[i-1] = node
+     After `splice @$e, $i-2, 1`: removes Cast '@', node shifts to e[i-2]
+     So `$i -= 2` is correct (outer loop will `$i++`, landing at i-1 which is next element).
+   - Then also delete the dead `elsif` block at lines 893-911 (the old unreachable code).
+   - Tests to verify: `prove -v Pl/t/split-01.t` (tests 5,6,7 should pass)
+2. **Run full test suites** after fix:
+   - `prove -j8 Pl/t/`
+   - `perl sweep-perl-tests.pl --jobs 8`
+
+### Files modified this session
+- `Pl/PExpr.pm` — dead-code `elsif` added in session 80 (needs cleanup/fix)
+- No other changes made this session
+
+---
+
+## Session 80 (2026-03-15) — indent_level fix, loop return "", for.t/concat.t/quotemeta.t
 
 ### What was done
 - **`pl-prototype` stub**: Added to `pcl-runtime.lisp` (always returns `*pl-undef*`). Exported.

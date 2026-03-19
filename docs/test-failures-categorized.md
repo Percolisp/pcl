@@ -1,7 +1,7 @@
 # Perl op/ Test Suite — Categorized Failure Analysis
 
-Last updated: 2026-03-15 (session 80)
-Sweep total: **4834 passing, 1039 failing** across 100 files (+2 skipped).
+Last updated: 2026-03-19 (session 83)
+Sweep total: **4879 passing, 990 failing** across 100 files (+2 skipped).
 Note: drop from ~8451 (session 77) is mainly sprintf.t losing ~2830 tests via `skip_all`.
 
 ---
@@ -11,8 +11,12 @@ Note: drop from ~8451 (session 77) is mainly sprintf.t losing ~2830 tests via `s
 anonsub.t, append.t, arith.t, arith2.t, assignwarn.t, blocks.t, bool.t,
 closure.t, cmpchain.t, concat.t, cond.t, defined.t, defins.t, die.t, dor.t,
 exp.t, for.t, grep.t, hashassign.t, if.t, int.t, isa.t, kvhslice.t, lc.t,
-lex.t, loopctl.t, lop.t, my.t, not.t, num.t, or.t, pow.t, push.t, qq.t,
+loopctl.t, lop.t, my.t, not.t, num.t, or.t, pow.t, push.t, qq.t,
 quotemeta.t, recurse.t, sleep.t, study.t, sub.t, translate.t, unshift.t, while.t
+
+*Note: lex.t was listed as passing (1/1) in session 80 but now shows 1/2 + crash:
+test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key}`
+(PCL-specific: `%ENV` stored as marker, not hash-table).*
 
 ---
 
@@ -70,7 +74,7 @@ quotemeta.t, recurse.t, sleep.t, study.t, sub.t, translate.t, unshift.t, while.t
 - **Fix**: 3-part fix: box-set preserve ref-boxes + pl-push-impl + box-nv. HIGH RISK.
 - **Complexity**: Hard (box-set is central runtime, regression risk)
 
-### do.t — 25/52 (27 failures)
+### do.t — 33/19 (19 failures) [improved from session 80]
 - **Tests 9-10**: `do { 1 if $zok }` — bare-if implicit return (condition false → return condition value not nil)
 - **Tests 12-51**: `return do { }` receiving caller context — all wantarray/context issues (deferred)
 - **Tests 32+**: Various wantarray/context semantics
@@ -100,10 +104,10 @@ quotemeta.t, recurse.t, sleep.t, study.t, sub.t, translate.t, unshift.t, while.t
 - **Root cause**: `p-pos` implementation incomplete; lvalue semantics not supported
 - **Complexity**: Medium-Hard
 
-### vec.t — 6/23 (17 failures after crash)
-- **Root cause**: TYPE-ERROR — vec() implementation issue or string/integer type mismatch
-- **Investigation needed**: Run and check specific error
-- **Complexity**: Unknown
+### vec.t — 30/38 (8 failures) [session 82 improved]
+- Session 82 implemented `vec` lvalue assignment (full `Pl/t/vec-01.t` 17/17 passing)
+- **Remaining 8 failures**: TYPE-ERROR on some bit-width edge cases, likely `vec` with large-bit patterns
+- **Complexity**: Medium
 
 ### ref.t — 3/7 then crashes
 - **Tests 1,3,5,7**: `local(*foo) = *bar` — typeglob localization (not-supported)
@@ -113,12 +117,19 @@ quotemeta.t, recurse.t, sleep.t, study.t, sub.t, translate.t, unshift.t, while.t
 
 ### ~~anonsub.t~~ — **FULLY PASSING** (session 80)
 
-### ~~lex.t~~ — **FULLY PASSING** (session 80)
+### lex.t — 1/2 + crash (regressed from session 80)
+- Test 1: heredoc `<<''` — still passing
+- Test 2: interpolating heredoc `<<""` with `$yow` — fails (prints literal `$yow`)
+- Crash at test 41: `delete $ENV{PERL_UNICODE}` — `%ENV` stored as `%ENV-MARKER%` (PCL special var), not a real hash-table; `p-delete` fails on it
+- **Complexity**: Medium
 
-### hash.t — 1/5 (4 failures) — needs investigation
-- **Error**: UNDEFINED-FUNCTION crash after test 1
-- **Root cause**: Unknown — investigate next session
-- **Complexity**: Unknown
+### hash.t — 1/6 + crash [session 83 characterized]
+- Test 1 passes: `fbm scalar can be inserted into a hash`
+- Tests 2,5,6: need DESTROY (object finalizers — not implemented)
+- Test 3: `ref hash keys are not stringified` — ref type mismatch
+- Test 4: undef hash key handling
+- **Crash**: `MAIN::PL-GUARD is undefined` — `guard` sub defined inside a package block, called from outer scope; package/function scope issue
+- **Complexity**: Hard (DESTROY not implemented, PL-GUARD package issue)
 
 ### signatures.t — 0/0 (skip_all) — uses string eval
 - `eval "..."` in test data — commented out with `skip_all`
@@ -132,8 +143,11 @@ quotemeta.t, recurse.t, sleep.t, study.t, sub.t, translate.t, unshift.t, while.t
 
 ### ~~concat.t~~ — **FULLY PASSING** (session 80)
 
-### length.t — partial
-- **Investigation needed**: Check current status
+### length.t — 23/21 (21 failures) [session 83 characterized]
+- **Failing tests 7-20**: All use `use bytes` + `pack("U",...)` — `pack` not fully implemented, `use bytes` not supported
+- **Tests 26-40**: Tied scalar, overloaded reference length — requires `Tie::StdScalar` and `use overload`
+- **Root cause**: `use bytes` (not-supported) + `pack "U"` format + Tie/overload
+- **Complexity**: Blocked by not-supported features
 
 ### list.t — 37/55 (18 failures)
 - **Tests 30-38**: `do { if-elsif-else }` returning list (wantarray context)
@@ -145,13 +159,80 @@ quotemeta.t, recurse.t, sleep.t, study.t, sub.t, translate.t, unshift.t, while.t
 
 ---
 
-## Files Not Yet Characterized (need investigation next session before working on them)
+## Newly Characterized Files (session 83)
+
+### repeat.t — 43/5 (5 failures) [improved from 39/9 in session 80]
+- **Fixed (session 83)**: `(@x,1) x N`, `($a,$b) x N`, `(split) x N` — list repetition LHS context fix
+- **Fixed (session 83)**: `() = LIST` goatse operator — `p-list-=` now returns count
+- **Remaining 5 failures**:
+  - Tests 37-38: lvalue `x` on LHS of list assignment (`($x)xCONST = @rhs`) — hard
+  - Test 43: `(...)x...` in void context via tied var — complex
+  - Tests 46-47: `@_` aliasing (documented not-supported)
+- **Complexity**: Remaining are hard/not-supported
+
+### infnan.t — 127/177 (177 failures)
+- Tests 21, 25: `sprintf "%a"` hex float format — not implemented
+- Tests 45-55: `chr(Inf)` error message — SBCL gives different message than Perl
+- Tests 56-177: `pack` with Inf/NaN — pack not implemented; expected failures
+
+### range.t — 106/31 (31 failures)
+- Test 4: `($a, @bcd[0..2], $e) = (...)` — array slice on LHS of list assignment (not supported)
+- Tests 44-48: `[0]` vs `[]` — likely array/list slice index handling
+- Tests 53-57, 62-65: String range edge cases
+- Test 78: Large integer upper bound rejection
+- **Complexity**: Medium-Hard; some blocked by list-lvalue limitations
+
+### chr.t — 13/29 (29 failures)
+- Tests 6,11-15: Latin-1 chars chr(128..255) — Unicode/byte encoding mismatch
+- Tests 14-15: `chr $tied` — tied variable (Tie::StdScalar not found)
+- Tests 18-19: `chr "-1"` wrap — semantics differ from chr(-1)
+- Tests 22-42: Various Unicode chr edge cases
+- **Complexity**: Medium; some Unicode encoding, some Tie
+
+### kvaslice.t — 10/19 (19 failures)
+- Previously "fully passing" (3/3) in session 73, but file gained more tests
+- Tests 2-7: Repeated keys, last element in scalar context
+- Tests 17-21: Error handling (die on invalid lvalue, warning on scalar context)
+- Tests 26-29: `keys %array[ix]` forbidden — error detection (not-supported per not-supported.md)
+- **Complexity**: Medium for repeated keys; error detection is hard
+
+## Files Not Yet Characterized (need investigation before working on them)
 
 Run `perl run-perl-test.pl perl-tests/FILE.t 2>&1 | head -20` first:
 
-- hash.t (UNDEFINED-FUNCTION crash after test 1), vec.t (11/38 — unknown root cause), length.t
 - caller.t (unbound var crash — what var?), pack.t (what function?)
 - grent.t (what function?), sort.t (TYPE-ERROR — what type?)
+
+---
+
+## Investigation History — Session 83 (2026-03-19)
+
+### What Was Fixed
+- **List repetition LHS context** (`ExprToCL.pm`): When `(LIST) x N` is detected as list-x:
+  - `set_node_context(lhs_node, LIST_CTX)` before generating (already existed)
+  - NEW: `gen_tree_val` single-child in LIST_CTX now sets child's context to LIST_CTX too,
+    so `(split(...)) x N` generates `(vector (p-split ...))` not `(vector (length (p-split ...)))`
+  - NEW: `gen_progn` in LIST_CTX sets each child to LIST_CTX before generating
+  - Fixes: `(@x,1) x N`, `($a,$b) x N`, `(split(...)) x N` list repetition
+- **`p-list-=` returns RHS count** (`pcl-runtime.lisp`): Added `(make-p-box (length src-vec))`
+  at end of macro. Fixes goatse operator `my $n = () = LIST` giving element count.
+- **New test file** `Pl/t/repeat-01.t` (10 tests, all passing)
+- **Session 82 fixes** (uncommitted): vec lvalue assignment, split-01.t, vec-01.t
+
+### What Was Characterized (not fixed)
+- `repeat.t` remaining 5: lvalue `x`, tied var, `@_` aliasing
+- `infnan.t` 177 failures: pack/unpack, `%a` format, chr message — all expected
+- `range.t` 31 failures: array slice lvalue, string range edge cases
+- `chr.t` 29 failures: Latin-1 Unicode, tied, wrap semantics
+- `kvaslice.t` 19 failures: file gained tests; error detection not-supported
+- `length.t` 21 failures: `use bytes` + `pack "U"` — not-supported
+- `hash.t` crash: DESTROY + `PL-GUARD` package scope issue
+- `lex.t` regression: `<<""` interpolating heredoc, `%ENV` as special marker
+
+### Sweep Result
+- **Before**: 4827 passing, 985 failing (session 80/82 uncommitted state)
+- **After**: 4879 passing, 990 failing (+52 passes; failure count up slightly because
+  more tests now run in previously-crashing files)
 
 ---
 
@@ -229,17 +310,20 @@ Files I ran `perl run-perl-test.pl` on:
 
 ### High ROI, Doable Next Session
 
-1. **hash.t**: UNDEFINED-FUNCTION crash after test 1 — investigate
-2. **vec.t**: 11/38 — investigate root cause
-3. **split.t test 73**: `split(/$x/, ...)` — regex variable interpolation in `p-regex`/codegen
-4. **caller.t**: UNBOUND-VARIABLE at startup — investigate `$Pkg::var` forward decl issue
+1. **split.t test 73**: `split(/$x/, ...)` — `/$x/` compiled as literal, not interpolated.
+   Fix: In `gen_leaf` for `PPI::Token::Regexp::Match`, when pattern contains `$var`,
+   generate dynamic regex using `(p-regex (format nil "~A" $var))` or similar.
+2. **kvaslice.t repeated keys** (tests 2-7): `%arr{@keys}` with repeated keys should
+   repeat values; test 3 `last element in scalar context` — investigate.
+3. **caller.t**: UNBOUND-VARIABLE at startup — investigate `$Pkg::var` forward decl issue
+4. **range.t** test 4: `($a, @arr[0..2], $e) = (...)` — list assignment to array slice
 
 ### Medium ROI, Multiple Sessions
 
-4. **do.t tests 9-10**: bare-if implicit return (condition false → return condition value)
-5. **context.t tests 7-8**: BEGIN inside anon sub generates wrong eval-when position
-6. **warn.t tests 3,6,9-11**: reference equality (HIGH RISK to box-set)
-7. **sort.t**: investigate TYPE-ERROR after Tie fix
+5. **do.t tests 9-10**: bare-if implicit return (condition false → return condition value)
+6. **context.t tests 7-8**: BEGIN inside anon sub generates wrong eval-when position
+7. **warn.t tests 3,6,9-11**: reference equality (HIGH RISK to box-set)
+8. **sort.t**: investigate TYPE-ERROR after Tie fix
 
 ### Low ROI or Blocked
 
@@ -247,3 +331,5 @@ Files I ran `perl run-perl-test.pl` on:
 - **ref.t**: local(*glob) — documented not-supported
 - **chdir.t**, **each.t**: XS/DynaLoader dependency
 - **die_exit.t**, **print.t**: subprocess tests — cannot run in PCL
+- **hash.t**: needs DESTROY (finalizers) — hard/deferred
+- **length.t**, **chr.t**: use bytes / Unicode encoding — documented limitations

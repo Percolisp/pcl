@@ -852,7 +852,7 @@ sub _process_our_declaration {
     my $p = $parts->[$i];
     my $ref = ref($p);
 
-    if ($ref eq 'PPI::Token::Symbol') {
+    if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
       push @vars, $p->content;
     }
     elsif ($ref eq 'PPI::Structure::List') {
@@ -907,12 +907,10 @@ sub _process_our_declaration {
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         });
         unless ($is_empty_list) {
-          my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-          if ($init_cl =~ /^\(progn\s+(.+)\)$/s ||
-              $init_cl =~ /^\(if \*wantarray\* \(vector\s+(.+)\) \(progn .+\)\)$/s) {
-            $init_cl = "(p-array-init $1)";
-          }
-          $self->_emit("(p-array-= $var $init_cl)");
+          # Parse full statement so PExpr sees '@arr = ...' and propagates
+          # LIST context to the RHS (e.g. split() gets LIST_CTX, not SCALAR_CTX)
+          my $cl_code = $self->_parse_expression($parts, $stmt);
+          $self->_emit($cl_code) if defined $cl_code;
         }
       }
       elsif ($sigil eq '%') {
@@ -922,12 +920,10 @@ sub _process_our_declaration {
           $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
         });
         unless ($is_empty_list) {
-          my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-          if ($init_cl =~ /^\(progn\s+(.+)\)$/s ||
-              $init_cl =~ /^\(if \*wantarray\* \(vector\s+(.+)\) \(progn .+\)\)$/s) {
-            $init_cl = "(p-hash $1)";
-          }
-          $self->_emit("(p-hash-= $var $init_cl)");
+          # Parse full statement so PExpr sees '%hash = ...' and propagates
+          # LIST context to the RHS
+          my $cl_code = $self->_parse_expression($parts, $stmt);
+          $self->_emit($cl_code) if defined $cl_code;
         }
       }
       else {
@@ -999,7 +995,7 @@ sub _process_my_toplevel_declaration {
     my $p = $parts->[$i];
     my $ref = ref($p);
 
-    if ($ref eq 'PPI::Token::Symbol') {
+    if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
       push @vars, $p->content;
     }
     elsif ($ref eq 'PPI::Structure::List') {
@@ -1225,7 +1221,7 @@ sub _process_local_declaration {
     my $p = $parts->[$i];
     my $ref = ref($p);
 
-    if ($ref eq 'PPI::Token::Symbol') {
+    if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
       push @vars, $self->_transform_pkg_var($p->content);
     }
     elsif ($ref eq 'PPI::Structure::List') {

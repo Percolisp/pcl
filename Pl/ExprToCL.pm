@@ -610,7 +610,9 @@ sub gen_binary_op {
                        ($lhs_node->{type} eq 'tree_val' || $lhs_node->{type} eq 'progn');
     my $ctx = $self->expr_o->get_node_context($node_id);
     if ($lhs_is_paren && $ctx == 1) {  # LIST_CTX = 1
-      # List repeat: (@x) x 4 in list context
+      # List repeat: (@x,1) x 4 — force LHS to list context so
+      # gen_progn returns (vector ...) not (progn ...) / scalar last-val
+      $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
       my $left  = $self->gen_node($kids->[0]);
       my $right = $self->gen_node($kids->[1]);
       return "(p-list-x $left $right)";
@@ -1184,15 +1186,18 @@ sub gen_funcall {
   my $args_str = @args ? ' ' . join(' ', @args) : '';
   my $call = "($cl_func$args_str)";
 
-  # Wrap in dynamic wantarray binding for list context
   my $ctx = $self->expr_o->get_node_context($node_id);
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(let ((*wantarray* t)) $call)";
+
+  # split: p-split always returns a vector; no *wantarray* wrapper needed.
+  # Arguments must NOT be evaluated in list context (e.g. =~ as pattern arg
+  # would return captures vector instead of 1/0 if *wantarray* is t).
+  if ($func_name eq 'split') {
+    return $ctx == 0 ? "(length $call)" : $call;
   }
 
-  # split in scalar context returns number of fields
-  if ($func_name eq 'split' && $ctx == 0) {
-    return "(length $call)";
+  # Wrap in dynamic wantarray binding for list context
+  if ($ctx == 1) {  # LIST_CTX = 1
+    return "(let ((*wantarray* t)) $call)";
   }
 
   return $call;
@@ -1675,6 +1680,14 @@ sub gen_progn {
 
   my $ctx = $self->expr_o->get_node_context($node_id);
 
+  # In list context, each child element also contributes in list context
+  # so that split() returns a list (not count), @arr expands, etc.
+  if ($ctx == 1) {  # LIST_CTX = 1
+    for my $kid_id (@$kids) {
+      $self->expr_o->set_node_context($kid_id, 1);
+    }
+  }
+
   my @forms;
   for my $kid_id (@$kids) {
     push @forms, $self->gen_node($kid_id);
@@ -1737,6 +1750,10 @@ sub gen_tree_val {
   # If single child in scalar context, just return it
   # But in list context, we need (vector $x) for proper list assignment
   if (scalar(@$kids) == 1) {
+    # In list context, propagate to child so split/funcs return lists not scalars
+    if ($ctx == 1) {  # LIST_CTX = 1
+      $self->expr_o->set_node_context($kids->[0], 1);
+    }
     my $child = $self->gen_node($kids->[0]);
     if ($ctx == 1) {  # LIST_CTX = 1
       # Special case: regex match already returns captures in list context

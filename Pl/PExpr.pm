@@ -881,14 +881,19 @@ sub parse {
         $type   = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^\$/) {
-        # Check for $$scalar[n] or $$scalar{key} pattern:
-        # If the element before $pre is a Cast '$', this is $$scalar[n]
-        # (equivalent to $scalar->[n]) — use ref access.
+        # Check for $$scalar[n] / $$scalar{key} (Cast '$') or
+        # @{$hashref}{keys} / @$scalar{keys} (Cast '@') patterns.
         my $cast_before = ($i >= 2) ? $e->[$i-2] : undef;
         if ($cast_before
             && ref($cast_before) eq 'PPI::Token::Cast'
             && $cast_before->content() eq '$') {
+          # $$scalar[n] or $$scalar{key} — dereference ref
           $type = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
+        } elsif ($cast_before
+                 && ref($cast_before) eq 'PPI::Token::Cast'
+                 && $cast_before->content() eq '@') {
+          # @{$hashref}{keys} or @$scalar{keys} — hash ref slice
+          $type = "slice_h_acc";
         }
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^@/) {
@@ -918,11 +923,20 @@ sub parse {
         $self->add_child_to_node($id, $ix_id);
       }
 
-      # XXXX Remove extra in #e and replace with array access:
-      $e->[$i-1]= $node;
-      splice @$e, $i, 1;
+      # Replace $pre with the new node, remove the subscript term.
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;         # Remove $term (subscript)
 
-      $i--;                     # ??
+      if ($type eq 'slice_h_acc'
+          && $i >= 2
+          && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+          && $e->[$i-2]->content() eq '@') {
+        # Also remove the Cast '@' that precedes the hashref
+        splice @$e, $i-2, 1;
+        $i -= 2;
+      } else {
+        $i--;
+      }
       next;
     }
 

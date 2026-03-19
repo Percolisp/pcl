@@ -83,7 +83,7 @@
    ;; File/Directory operations
    #:p-chdir #:p-set_up_inc #:p-mkdir #:p-rmdir #:p-getcwd #:p-cwd #:p-rename #:p-chmod
    ;; Time functions
-   #:p-time #:p-times #:p-sleep #:p-study #:p-reset #:p-vec #:p-localtime #:p-gmtime
+   #:p-time #:p-times #:p-sleep #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
    #:p-exit #:p-system #:p-backtick #:p-errno-string #:p-stash
    ;; Environment
@@ -443,6 +443,14 @@
                  ;; If inner is a box, this is a reference - preserve it
                  (if (p-box-p inner) value inner))
                value)))
+    ;; Perl: @arr in scalar context gives element count.
+    ;; A raw adjustable vector (bare @arr, not wrapped in make-p-box) in a scalar assignment
+    ;; becomes the count. But (make-p-box arr) = array ref must stay as-is.
+    (when (and (not (p-box-p value))   ; unwrapped raw vector only
+               (vectorp v)
+               (not (stringp v))
+               (adjustable-array-p v))
+      (setf v (length v)))
     (setf (p-box-value box) v
           (p-box-nv-ok box) nil
           (p-box-sv-ok box) nil)
@@ -1878,11 +1886,15 @@
                   ;;   - p-box with non-box inner → store inner (copy semantics)
                   ;;   - p-box with box inner (reference) → store outer box
                   ;;   - p-box with class set (blessed non-hash) → preserve box (bless semantics)
+                  ;;   - p-box with vector/hash inner (array/hash ref) → preserve the box
                   ;;   - non-box → store as-is
                   (vector-push-extend
                    (if (p-box-p item)
                        (let ((inner (p-box-value item)))
-                         (if (or (p-box-p inner) (p-box-class item))
+                         (if (or (p-box-p inner)
+                                 (p-box-class item)
+                                 (and (vectorp inner) (not (stringp inner)))  ; array ref
+                                 (hash-table-p inner))  ; hash ref
                              item   ; reference or blessed: preserve the box
                              inner))  ; plain scalar: snapshot value
                        item)
@@ -1961,7 +1973,9 @@
            (incf static-idx 1))))
       `(let* ((,src ,value)
               (,src-vec (%p-flatten-list ,src)))
-         ,@(nreverse forms)))))
+         ,@(nreverse forms)
+         ;; Return RHS count (scalar context: () = LIST gives count of LIST)
+         (make-p-box (length ,src-vec))))))
 
 ;; p-setf dispatches to the appropriate assignment form based on place type.
 ;; For element access (p-aref, p-gethash, etc.), uses CL's setf mechanism.
@@ -2180,6 +2194,12 @@
                                  (aref ,src-vec i)
                                  *p-undef*)))
               ,src-vec))))
+    ;; vec as lvalue: (p-setf (p-vec str offset bits) val) -> (p-vec-set str offset bits val)
+    ((and (listp place) (eq (car place) 'p-vec))
+     (let ((str-place (cadr place))
+           (offset    (caddr place))
+           (bits      (cadddr place)))
+       `(p-vec-set ,str-place ,offset ,bits ,value)))
     ;; substr as lvalue: (p-setf (p-substr str start len) val) -> (p-substr str start len val)
     ((and (listp place) (eq (car place) 'p-substr))
      (let ((args (cdr place)))
@@ -2259,10 +2279,11 @@
     (cond
       ;; If it's already a number, just add 1
       ((numberp v) (1+ v))
-      ;; If it's a string that looks alphanumeric, use magical increment
+      ;; If it's a string matching /^[a-zA-Z]*[0-9]*$/ (letters then optional digits),
+      ;; use magical string increment. Strings like "99a" (digits then letter) do NOT match.
       ((and (stringp v)
             (> (length v) 0)
-            (every (lambda (c) (alphanumericp c)) v))
+            (cl-ppcre:scan "^[a-zA-Z]*[0-9]*$" v))
        (magical-string-increment v))
       ;; Otherwise convert to number and increment
       (t (1+ (to-number v))))))
@@ -2496,48 +2517,66 @@
    (magical string increment: 'aa'..'zz', 'A'..'ZZ', etc.)"
   (let ((s (unbox start))
         (e (unbox end)))
-    (cond
-      ;; Both are numbers (or numeric strings, including floats like "2.18")
-      ;; Zero-padded strings like "00", "01" are excluded — they use string range.
-      ((and (or (numberp s)
-                (and (stringp s)
-                     (not (and (> (length s) 1) (char= (char s 0) #\0)))
-                     (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" s)))
-            (or (numberp e)
-                (and (stringp e)
-                     (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" e))))
-       (let ((ns (truncate (to-number s)))
-             (ne (truncate (to-number e))))
-         (when (> (- ne ns) 100000000)
-           (error "Integer overflow in range (~A .. ~A): range too large" ns ne))
-         (if (<= ns ne)
-             (coerce (loop for i from ns to ne collect i) 'vector)
-             (make-array 0))))
-      ;; String range (single or multi-character) using magical increment
-      ((and (stringp s) (stringp e)
-            (> (length s) 0) (> (length e) 0))
-       (if (> (length s) (length e))
-           ;; Start longer than end: empty
-           (make-array 0)
-           ;; Use magical string increment
-           (let ((result (make-array 0 :adjustable t :fill-pointer 0))
-                 (current (copy-seq s))
-                 (max-len (length e)))
-             (loop
-               (vector-push-extend current result)
-               (when (string= current e) (return))
-               (setf current (magical-string-increment current))
-               ;; If magical-string-increment returned a number (non-alpha carry), stop
-               (unless (stringp current) (return))
-               (when (> (length current) max-len) (return)))
-             result)))
-      ;; Fallback: treat as numbers
-      (t
-       (let ((ns (truncate (to-number s)))
-             (ne (truncate (to-number e))))
-         (if (<= ns ne)
-             (coerce (loop for i from ns to ne collect i) 'vector)
-             (make-array 0)))))))
+    (let* (;; Treat *p-undef* as undef (nil) for range logic
+           (s-undef (or (null s) (eq s *p-undef*)))
+           (e-undef (or (null e) (eq e *p-undef*)))
+           ;; Is value a numeric-like thing for range? (number or non-zero-padded numeric string)
+           (s-num-p (or (numberp s)
+                        (and (stringp s)
+                             (not (and (> (length s) 1) (char= (char s 0) #\0)))
+                             (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" s))))
+           (e-num-p (or (numberp e)
+                        (and (stringp e)
+                             (not (and (> (length e) 1) (char= (char e 0) #\0)))
+                             (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" e))))
+           ;; Use string range when at least one side is a genuine non-numeric string,
+           ;; or both are undef (undef..undef). Excludes undef+numeric (→ fallback numeric).
+           (use-string-range
+            (and (or s-undef (stringp s))
+                 (or e-undef (stringp e))
+                 (or (and (stringp s) (not s-num-p))    ; s is a non-numeric string
+                     (and (stringp e) (not e-num-p))    ; e is a non-numeric string
+                     (and s-undef e-undef)))))           ; undef..undef
+      (cond
+        ;; Numeric range: both operands are numeric (number or numeric string)
+        ((and s-num-p e-num-p)
+         (let ((ns (truncate (to-number s)))
+               (ne (truncate (to-number e))))
+           (when (> (- ne ns) 100000000)
+             (error "Integer overflow in range (~A .. ~A): range too large" ns ne))
+           (if (<= ns ne)
+               (coerce (loop for i from ns to ne collect i) 'vector)
+               (make-array 0))))
+        ;; String range: undef→"", handle magical vs non-magical starts
+        (use-string-range
+         (let* ((sv (if s-undef "" s))
+                (ev (if e-undef "" e)))
+           (if (and (> (length sv) 0) (ppcre:scan "^[a-zA-Z0-9]+$" sv))
+               ;; Magical string range (all alphanumeric start)
+               (if (> (length sv) (length ev))
+                   (make-array 0)
+                   (let ((result (make-array 0 :adjustable t :fill-pointer 0))
+                         (current (copy-seq sv))
+                         (max-len (length ev)))
+                     (loop
+                       (vector-push-extend current result)
+                       (when (string= current ev) (return))
+                       (setf current (magical-string-increment current))
+                       ;; If magical-string-increment returned a number, stop
+                       (unless (stringp current) (return))
+                       (when (> (length current) max-len) (return)))
+                     result))
+               ;; Non-magical or empty start: return (sv) if sv <= ev, else empty
+               (if (string<= sv ev)
+                   (vector sv)
+                   (make-array 0)))))
+        ;; Fallback: treat as numbers (handles undef+number, etc.)
+        (t
+         (let ((ns (truncate (to-number s)))
+               (ne (truncate (to-number e))))
+           (if (<= ns ne)
+               (coerce (loop for i from ns to ne collect i) 'vector)
+               (make-array 0))))))))
 
 (defun p-... (start end)
   "Perl three-dot range operator ... - same as .. in list context."
@@ -2972,7 +3011,11 @@
         (loop for i from off
               for v in flat-rep
               do (setf (aref a i) (make-p-box v)))))
-    removed))
+    (if *wantarray*
+        removed
+        (if (> (length removed) 0)
+            (aref removed (1- (length removed)))
+            *p-undef*))))
 
 ;;; ============================================================
 ;;; Data Structures - Hashes
@@ -3060,7 +3103,8 @@
   (let ((a (unbox ref)))
     (if (or (null a) (eq a *p-undef*))
         (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-          (box-set ref new-arr)
+          ;; Wrap in make-p-box so box-set does not treat it as scalar-context @arr.
+          (box-set ref (make-p-box new-arr))
           new-arr)
         a)))
 
@@ -3252,9 +3296,10 @@
 
 (defun p-hslice (hash &rest keys)
   "Perl hash slice @hash{keys} - returns vector of values.
-   Handles individual keys, lists, and vectors (from range operator)."
+   Handles individual keys, lists, and vectors (from range operator).
+   Strings are vectors in CL but must not be expanded into characters."
   (let ((flat-keys (loop for key in keys
-                         if (vectorp key)
+                         if (and (vectorp key) (not (stringp key)))
                            append (coerce key 'list)
                          else if (and (listp key) (not (null key)))
                            append key
@@ -3266,9 +3311,10 @@
 
 (defun p-kv-hslice (hash &rest keys)
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
-   Handles individual keys, lists, and vectors (from range operator)."
+   Handles individual keys, lists, and vectors (from range operator).
+   Strings are vectors in CL but must not be expanded into characters."
   (let ((flat-keys (loop for key in keys
-                         if (vectorp key)
+                         if (and (vectorp key) (not (stringp key)))
                            append (coerce key 'list)
                          else if (and (listp key) (not (null key)))
                            append key
@@ -4545,8 +4591,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Returns the numeric value at that position."
   (let* ((s (to-string str))
          (offset (truncate (to-number offset)))
-         (bits   (truncate (to-number bits)))
-         (byte-offset (floor (* offset bits) 8))
+         (bits   (truncate (to-number bits))))
+    (unless (member bits '(1 2 4 8 16 32))
+      (p-die (format nil "Illegal number of bits in vec")))
+  (let* ((byte-offset (floor (* offset bits) 8))
          (bit-offset (mod (* offset bits) 8)))
     (cond
       ;; Beyond string length - return 0
@@ -4554,25 +4602,74 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; 8-bit aligned access (common case)
       ((and (= bits 8) (= bit-offset 0))
        (char-code (char s byte-offset)))
-      ;; 16-bit access (little-endian)
+      ;; 16-bit access (big-endian / network byte order)
       ((and (= bits 16) (= bit-offset 0))
-       (let ((lo (if (< byte-offset (length s)) (char-code (char s byte-offset)) 0))
-             (hi (if (< (1+ byte-offset) (length s)) (char-code (char s (1+ byte-offset))) 0)))
-         (+ lo (ash hi 8))))
-      ;; 32-bit access (little-endian)
+       (let ((b0 (if (< byte-offset (length s)) (char-code (char s byte-offset)) 0))
+             (b1 (if (< (1+ byte-offset) (length s)) (char-code (char s (1+ byte-offset))) 0)))
+         (+ (ash b0 8) b1)))
+      ;; 32-bit access (big-endian / network byte order)
       ((and (= bits 32) (= bit-offset 0))
        (let ((b0 (if (< byte-offset (length s)) (char-code (char s byte-offset)) 0))
              (b1 (if (< (+ 1 byte-offset) (length s)) (char-code (char s (+ 1 byte-offset))) 0))
              (b2 (if (< (+ 2 byte-offset) (length s)) (char-code (char s (+ 2 byte-offset))) 0))
              (b3 (if (< (+ 3 byte-offset) (length s)) (char-code (char s (+ 3 byte-offset))) 0)))
-         (+ b0 (ash b1 8) (ash b2 16) (ash b3 24))))
+         (+ (ash b0 24) (ash b1 16) (ash b2 8) b3)))
       ;; Sub-byte access (1, 2, 4 bits)
       ((and (<= bits 8) (< byte-offset (length s)))
        (let* ((byte-val (char-code (char s byte-offset)))
               (mask (1- (ash 1 bits))))
          (logand (ash byte-val (- bit-offset)) mask)))
       ;; Default
-      (t 0))))
+      (t 0)))))
+
+(defun p-vec-set (str-box offset bits value)
+  "Perl vec lvalue - set element in string-as-bit-vector.
+   BITS must be 1, 2, 4, 8, 16, or 32. Negative OFFSET dies. Modifies str-box."
+  (let* ((offset (truncate (to-number offset)))
+         (bits   (truncate (to-number bits)))
+         (val    (truncate (to-number value))))
+    (unless (member bits '(1 2 4 8 16 32))
+      (p-die "Illegal number of bits in vec"))
+    (when (< offset 0)
+      (p-die "Negative offset to vec in lvalue context"))
+    (let* ((byte-offset   (floor (* offset bits) 8))
+           (bit-offset    (mod (* offset bits) 8))
+           (needed-bytes  (+ byte-offset (ceiling bits 8)))
+           (s             (to-string str-box))
+           ;; Extend string if needed (fill with NUL bytes)
+           (s-ext (if (< (length s) needed-bytes)
+                      (concatenate 'string s
+                                   (make-string (- needed-bytes (length s))
+                                                :initial-element #\Nul))
+                      (copy-seq s))))
+      (cond
+        ;; 8-bit aligned
+        ((and (= bits 8) (= bit-offset 0))
+         (setf (char s-ext byte-offset) (code-char (logand val 255))))
+        ;; 16-bit aligned (big-endian, Perl stores MSB first)
+        ((and (= bits 16) (= bit-offset 0))
+         (setf (char s-ext byte-offset)       (code-char (logand (ash val -8) 255))
+               (char s-ext (1+ byte-offset))  (code-char (logand val 255))))
+        ;; 32-bit aligned (big-endian)
+        ((and (= bits 32) (= bit-offset 0))
+         (setf (char s-ext byte-offset)       (code-char (logand (ash val -24) 255))
+               (char s-ext (+ byte-offset 1)) (code-char (logand (ash val -16) 255))
+               (char s-ext (+ byte-offset 2)) (code-char (logand (ash val -8)  255))
+               (char s-ext (+ byte-offset 3)) (code-char (logand val           255))))
+        ;; Sub-byte access (1, 2, 4 bits)
+        ((<= bits 8)
+         (let* ((mask     (1- (ash 1 bits)))
+                (byte-val (char-code (char s-ext byte-offset)))
+                (new-byte (logior (logand byte-val (lognot (logand 255 (ash mask bit-offset))))
+                                  (logand 255 (ash (logand val mask) bit-offset)))))
+           (setf (char s-ext byte-offset) (code-char new-byte)))))
+      ;; Write modified string back to the box
+      (when (p-box-p str-box)
+        (setf (p-box-value str-box) s-ext
+              (p-box-sv str-box)    s-ext
+              (p-box-sv-ok str-box) t
+              (p-box-nv-ok str-box) nil))
+      val)))
 
 (defun p-localtime (&optional time)
   "Perl localtime - convert time to local time components.
