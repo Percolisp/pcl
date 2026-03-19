@@ -39,15 +39,15 @@ diag "";
 diag "-------- Single constant declaration:";
 
 output_contains('use constant PI => 3.14159;',
-                '(pl-sub pl-PI () 3.14159)',
-                'Single constant: pl-sub generated');
+                '(p-sub pl-PI () 3.14159)',
+                'Single constant: p-sub generated');
 
 output_contains('use constant NAME => "hello";',
-                '(pl-sub pl-NAME () "hello")',
+                '(p-sub pl-NAME () "hello")',
                 'String constant');
 
 output_contains('use constant TWO_PI => 2 * 3.14159;',
-                '(pl-sub pl-TWO_PI () (pl-* 2 3.14159))',
+                '(p-sub pl-TWO_PI () (p-* 2 3.14159))',
                 'Expression constant');
 
 
@@ -57,15 +57,15 @@ diag "-------- Hash-style constant declaration:";
 
 {
     my $result = parse_code('use constant { A => 1, B => 2 };');
-    like($result, qr/\(pl-sub pl-A \(\) 1\)/, 'Hash-style: A defined');
-    like($result, qr/\(pl-sub pl-B \(\) 2\)/, 'Hash-style: B defined');
+    like($result, qr/\(p-sub pl-A \(\) 1\)/, 'Hash-style: A defined');
+    like($result, qr/\(p-sub pl-B \(\) 2\)/, 'Hash-style: B defined');
 }
 
 {
     my $result = parse_code('use constant { WIDTH => 100, HEIGHT => 200, DEPTH => 50 };');
-    like($result, qr/\(pl-sub pl-WIDTH \(\) 100\)/, 'Hash-style: WIDTH defined');
-    like($result, qr/\(pl-sub pl-HEIGHT \(\) 200\)/, 'Hash-style: HEIGHT defined');
-    like($result, qr/\(pl-sub pl-DEPTH \(\) 50\)/, 'Hash-style: DEPTH defined');
+    like($result, qr/\(p-sub pl-WIDTH \(\) 100\)/, 'Hash-style: WIDTH defined');
+    like($result, qr/\(p-sub pl-HEIGHT \(\) 200\)/, 'Hash-style: HEIGHT defined');
+    like($result, qr/\(p-sub pl-DEPTH \(\) 50\)/, 'Hash-style: DEPTH defined');
 }
 
 
@@ -81,12 +81,12 @@ my $x = PI;',
 
 output_contains('use constant PI => 3.14;
 my $area = PI * $r * $r;',
-                '(box-set $area (pl-* (pl-* (pl-PI) $r) $r))',
+                '(box-set $area (p-* (p-* (pl-PI) $r) $r))',
                 'Constant in arithmetic');
 
 output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
-                '(box-set $size (pl-* (pl-WIDTH) (pl-HEIGHT)))',
+                '(box-set $size (p-* (pl-WIDTH) (pl-HEIGHT)))',
                 'Multiple constants in expression');
 
 

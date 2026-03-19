@@ -24,9 +24,9 @@
 (defun test-display-value (x)
   (cond
     ((null x) nil)
-    ((pl-box-p x) (let ((v (pl-box-value x)))
-                    (if (eq v *pl-undef*) nil (to-string x))))
-    ((eq x *pl-undef*) nil)
+    ((p-box-p x) (let ((v (p-box-value x)))
+                    (if (eq v *p-undef*) nil (to-string x))))
+    ((eq x *p-undef*) nil)
     (t x)))
 
 ;;; Helper: format a value for display
@@ -38,7 +38,7 @@
 
 ;;; Helper: comment lines
 (defun test-comment (&rest args)
-  (dolist (line (apply #'pl-. args))
+  (dolist (line (apply #'p-. args))
     (if (and (> (length (to-string line)) 0)
              (char= (char (to-string line) 0) #\#))
         (format t "~A~%" line)
@@ -108,20 +108,36 @@
 
 ;;; ok(test, name)
 (defun pl-ok (test &optional name)
-  (test-ok (pl-true-p test) name))
+  (test-ok (p-true-p test) name))
 
 ;;; Helper: check if value represents Perl undef
 (defun test-undef-p (x)
   (or (null x)
-      (eq x *pl-undef*)
-      (and (pl-box-p x) (eq (pl-box-value x) *pl-undef*))))
+      (eq x *p-undef*)
+      (and (p-box-p x) (eq (p-box-value x) *p-undef*))))
+
+;;; Helper: apply scalar context to a value (matches Test::More's $$ prototype behavior).
+;;; When Test::More functions like is($$;$) receive an array, Perl forces scalar context,
+;;; giving the element count. PCL can't enforce prototypes, so we do it here instead.
+(defun test-to-scalar (x)
+  (handler-case
+    (let ((is-vec (and (vectorp x) (not (stringp x)))))
+      (if (and is-vec (adjustable-array-p x))
+          (make-p-box (length x))
+          x))
+    (error (e)
+      (format t "### test-to-scalar ERROR: ~A~%" e)
+      (force-output)
+      x)))
 
 ;;; is(got, expected, name)
 (defun pl-is (got expected &optional name)
-  (let ((pass (cond
-                ((and (test-undef-p got) (test-undef-p expected)) t)
-                ((or (test-undef-p got) (test-undef-p expected)) nil)
-                (t (equal (to-string got) (to-string expected))))))
+  (let* ((got (test-to-scalar got))
+         (expected (test-to-scalar expected))
+         (pass (cond
+                 ((and (test-undef-p got) (test-undef-p expected)) t)
+                 ((or (test-undef-p got) (test-undef-p expected)) nil)
+                 (t (equal (to-string got) (to-string expected))))))
     (if pass
         (test-ok t name)
         (test-ok nil name
@@ -130,10 +146,12 @@
 
 ;;; isnt(got, expected, name)
 (defun pl-isnt (got expected &optional name)
-  (let ((pass (cond
-                ((and (test-undef-p got) (test-undef-p expected)) nil)
-                ((or (test-undef-p got) (test-undef-p expected)) t)
-                (t (not (equal (to-string got) (to-string expected)))))))
+  (let* ((got (test-to-scalar got))
+         (expected (test-to-scalar expected))
+         (pass (cond
+                 ((and (test-undef-p got) (test-undef-p expected)) nil)
+                 ((or (test-undef-p got) (test-undef-p expected)) t)
+                 (t (not (equal (to-string got) (to-string expected)))))))
     (if pass
         (test-ok t name)
         (test-ok nil name
@@ -142,9 +160,10 @@
 
 ;;; like(got, regex, name)
 (defun pl-like (got regex &optional name)
-  (let* ((got-str (if got (to-string got) ""))
-         (regex-str (if (pl-regex-match-p regex)
-                        (pl-regex-match-pattern regex)
+  (let* ((got (test-to-scalar got))
+         (got-str (if got (to-string got) ""))
+         (regex-str (if (p-regex-match-p regex)
+                        (p-regex-match-pattern regex)
                         (to-string regex)))
          (pass (if (ppcre:scan regex-str got-str) t nil)))
     (if pass
@@ -155,9 +174,10 @@
 
 ;;; unlike(got, regex, name)
 (defun pl-unlike (got regex &optional name)
-  (let* ((got-str (if got (to-string got) ""))
-         (regex-str (if (pl-regex-match-p regex)
-                        (pl-regex-match-pattern regex)
+  (let* ((got (test-to-scalar got))
+         (got-str (if got (to-string got) ""))
+         (regex-str (if (p-regex-match-p regex)
+                        (p-regex-match-pattern regex)
                         (to-string regex)))
          (pass (if (ppcre:scan regex-str got-str) nil t)))
     (if pass
@@ -168,7 +188,9 @@
 
 ;;; cmp_ok(got, op, expected, name)
 (defun pl-cmp_ok (got op expected &optional name)
-  (let ((pass
+  (let* ((got (test-to-scalar got))
+         (expected (test-to-scalar expected))
+         (pass
           (cond
             ((equal op "==")
              (= (to-number got) (to-number expected)))
@@ -205,8 +227,8 @@
 
 ;;; eq_array(\@a, \@b) - compare two array refs for element-wise equality
 (defun pl-eq_array (a b)
-  (let ((av (if (pl-box-p a) (pl-box-value a) a))
-        (bv (if (pl-box-p b) (pl-box-value b) b)))
+  (let ((av (if (p-box-p a) (p-box-value a) a))
+        (bv (if (p-box-p b) (p-box-value b) b)))
     (let ((av (if (vectorp av) av (make-array 0)))
           (bv (if (vectorp bv) bv (make-array 0))))
       (when (= (length av) (length bv))
@@ -231,7 +253,7 @@
     (dotimes (i n)
       (incf *test-count*)
       (format t "ok ~A # skip ~A~%" *test-count* r)))
-  (pl-last-dynamic "SKIP"))
+  (p-last-dynamic "SKIP"))
 
 ;;; diag(msg)
 (defun pl-diag (&rest args)

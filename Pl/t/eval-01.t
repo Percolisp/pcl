@@ -49,15 +49,15 @@ diag "";
 diag "-------- Basic eval { } block:";
 
 output_contains('eval { 1 };',
-                'pl-eval-block',
-                'eval block generates pl-eval-block');
+                'p-eval-block',
+                'eval block generates p-eval-block');
 
 output_contains('eval { die "oops" };',
-                'pl-eval-block',
-                'eval with die generates pl-eval-block');
+                'p-eval-block',
+                'eval with die generates p-eval-block');
 
 output_contains('eval { die "oops" };',
-                'pl-die',
+                'p-die',
                 'die inside eval block');
 
 
@@ -66,7 +66,7 @@ diag "";
 diag "-------- $@ error variable:";
 
 output_contains('print $@;',
-                '(pl-print $@)',
+                '(p-print $@)',
                 '$@ used as variable');
 
 output_contains('if ($@) { print "error" }',
@@ -79,7 +79,7 @@ diag "";
 diag "-------- eval { } return value:";
 
 output_contains('my $result = eval { 42 };',
-                'pl-eval-block',
+                'p-eval-block',
                 'eval block in assignment');
 
 
@@ -87,10 +87,10 @@ output_contains('my $result = eval { 42 };',
 diag "";
 diag "-------- eval { } with multiple statements:";
 
-# Multi-statement blocks are parsed as separate functions
+# Multi-statement blocks are inlined directly in p-eval-block (no funcall)
 output_matches('eval { my $x = 1; $x + 1 };',
-               qr/pl-eval-block.*funcall/s,
-               'eval with multiple statements uses funcall pattern');
+               qr/p-eval-block/s,
+               'eval with multiple statements generates p-eval-block');
 
 
 # ========================================
@@ -98,7 +98,7 @@ diag "";
 diag "-------- Nested eval blocks:";
 
 output_matches('eval { eval { die "inner" }; print $@ };',
-               qr/pl-eval-block.*pl-eval-block/s,
+               qr/p-eval-block.*p-eval-block/s,
                'nested eval blocks');
 
 
@@ -107,7 +107,7 @@ diag "";
 diag "-------- eval with exception objects:";
 
 output_contains('eval { die $exception };',
-                '(pl-die $exception)',
+                '(p-die $exception)',
                 'die with variable exception object');
 
 
@@ -116,5 +116,5 @@ diag "";
 diag "-------- eval combined with control flow:";
 
 output_matches('if (eval { dangerous() }) { ok() }',
-               qr/pl-if.*pl-eval-block/s,
+               qr/p-if.*p-eval-block/s,
                'eval in condition');

@@ -50,14 +50,14 @@ say "# -------- 'our' Transpilation Tests:";
 {
     my $cl = parse_pl('our $count = 0;');
     like($cl, qr/defvar \$count/, 'our $x = val generates defvar');
-    like($cl, qr/setf.*pl-box-value.*\$count.*0/s, 'our with value generates setf for init');
+    like($cl, qr/setf.*p-box-value.*\$count.*0/s, 'our with value generates setf for init');
 }
 
 # Test: bare our $x
 {
     my $cl = parse_pl('our $flag;');
     like($cl, qr/defvar \$flag/, 'bare our generates defvar');
-    like($cl, qr/make-pl-box nil/, 'bare our initializes to nil');
+    like($cl, qr/make-p-box nil/, 'bare our initializes to nil');
 }
 
 # Test: our with list
@@ -242,14 +242,14 @@ say "# -------- 'local' Transpilation Tests:";
 {
     my $cl = parse_pl('local $x = 20;');
     like($cl, qr/\(let \(\(\$x/, 'local generates let binding');
-    like($cl, qr/make-pl-box\s+20/, 'local wraps value in make-pl-box');
+    like($cl, qr/make-p-box\s+20/, 'local wraps value in make-p-box');
 }
 
 # Test: bare local $x generates let with nil
 {
     my $cl = parse_pl('local $x;');
     like($cl, qr/\(let \(\(\$x/, 'bare local generates let');
-    like($cl, qr/make-pl-box nil/, 'bare local initializes to nil');
+    like($cl, qr/make-p-box nil/, 'bare local initializes to nil');
 }
 
 say "# -------- 'local' Runtime Tests:";

@@ -182,6 +182,13 @@ sub is_token_operator {
     return $stmt->content();
   }
 
+  # Handle word-form binary operators (PPI::Token::Word)
+  # PPI tokenizes 'isa' as a Word, not an Operator.
+  if (ref($stmt) eq 'PPI::Token::Word') {
+    my $word = $stmt->content();
+    return $word if $word eq 'isa';
+  }
+
   return undef;
 }
 

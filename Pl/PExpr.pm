@@ -881,14 +881,19 @@ sub parse {
         $type   = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^\$/) {
-        # Check for $$scalar[n] or $$scalar{key} pattern:
-        # If the element before $pre is a Cast '$', this is $$scalar[n]
-        # (equivalent to $scalar->[n]) — use ref access.
+        # Check for $$scalar[n] / $$scalar{key} (Cast '$') or
+        # @{$hashref}{keys} / @$scalar{keys} (Cast '@') patterns.
         my $cast_before = ($i >= 2) ? $e->[$i-2] : undef;
         if ($cast_before
             && ref($cast_before) eq 'PPI::Token::Cast'
             && $cast_before->content() eq '$') {
+          # $$scalar[n] or $$scalar{key} — dereference ref
           $type = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
+        } elsif ($cast_before
+                 && ref($cast_before) eq 'PPI::Token::Cast'
+                 && $cast_before->content() eq '@') {
+          # @{$hashref}{keys} or @$scalar{keys} — hash ref slice
+          $type = "slice_h_acc";
         }
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^@/) {
@@ -918,11 +923,20 @@ sub parse {
         $self->add_child_to_node($id, $ix_id);
       }
 
-      # XXXX Remove extra in #e and replace with array access:
-      $e->[$i-1]= $node;
-      splice @$e, $i, 1;
+      # Replace $pre with the new node, remove the subscript term.
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;         # Remove $term (subscript)
 
-      $i--;                     # ??
+      if ($type eq 'slice_h_acc'
+          && $i >= 2
+          && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+          && $e->[$i-2]->content() eq '@') {
+        # Also remove the Cast '@' that precedes the hashref
+        splice @$e, $i-2, 1;
+        $i -= 2;
+      } else {
+        $i--;
+      }
       next;
     }
 
@@ -1092,6 +1106,15 @@ sub parse {
       if ($match_op && ref($post) =~ /PPI::Token::Regexp/) {
         $post->{_has_match_context}++;
       }
+
+      # Special case for 'isa': RHS bareword class name must stay as a bareword,
+      # not be treated as a function call by handle_subcalls inside parse().
+      # Convert it to a string token so parse() doesn't call it.
+      if ($op_name eq 'isa' && ref($post) eq 'PPI::Token::Word') {
+        my $class_name = $post->content();
+        $post = PPI::Token::Quote::Single->new("'$class_name'");
+      }
+
       my $id_aft= $self->parse([$post]);
 
       say "=========   OP replace 2 params for ", $op->content(),
@@ -1472,9 +1495,12 @@ sub handle_subcalls {
                      : ($func_name eq 'grep' || $func_name eq 'map') ? ['$_']
                      : [];  # Other & prototype functions: no implicit params
 
-          # For grep/map/sort, use inline lambda (cleaner, avoids emission issues)
-          # For eval and other blocks, use named function (may need to be called separately)
-          if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort') {
+          # For grep/map/sort/eval, use inline lambda (cleaner, avoids emission issues)
+          # eval { } in expression context must use inline form — defun side-effect would
+          # corrupt the surrounding p-if argument list (e.g. eval{} inside elsif condition).
+          # For other blocks, use named function (may need to be called separately)
+          if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
+              || $func_name eq 'eval') {
             # Parse block body as CL string
             my $body_cl = _block_is_hash_constructor($next)
               ? $self->parser->parse_hash_block_to_cl_string($next)
@@ -1661,6 +1687,19 @@ sub handle_subcalls {
     next unless $self->is_word($now);
     my $sub_name = $now->content;
 
+    # - - - Skip if this word is a binary operator (e.g. 'isa')
+    # These are recognized by is_token_operator and handled in the binary op parser.
+    next if $self->is_token_operator($now);
+
+    # - - - Skip if preceded by a word-form binary operator (e.g. 'isa')
+    # e.g. '$obj isa BaseClass' — BaseClass is a class name bareword, not a function call
+    if ($i > 0) {
+      my $prev_elem = $e->[$i - 1];
+      if (ref($prev_elem) eq 'PPI::Token::Word' && $self->is_token_operator($prev_elem)) {
+        next;  # Skip - RHS of a word-form binary operator, not a function name
+      }
+    }
+
     # - - - Skip if this word is followed by -> (class method call; Foo->new)
     # The word is a class/package name, not a function call
     if ($i + 1 < scalar(@$e)) {
@@ -1802,8 +1841,13 @@ sub handle_subcalls {
             # Check if symbol is followed by subscript (hash/array access)
             my $after_symbol = $e->[$i + 2];
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
-                # Symbol + Subscript is one term (e.g., $h{key}, $a[0])
+                # Symbol + Subscript chain: consume all chained subscripts
+                # (e.g., $h{a}{b}[c] — all subscripts belong to the lvalue)
                 $end_pars = $i + 2;
+                while ($end_pars + 1 < scalar(@$e)
+                       && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
+                    $end_pars++;
+                }
             } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
                      && $after_symbol->start() eq '{'
                      && $next_term->content() =~ /^%/) {

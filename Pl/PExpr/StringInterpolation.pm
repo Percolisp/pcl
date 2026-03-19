@@ -551,7 +551,7 @@ sub unescape_string {
   my $str       = shift;
 
   # Single-pass escape processing (reuses _process_dq_escape from ExprToCL)
-  $str =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
+  $str =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
     Pl::ExprToCL::_process_dq_escape($1)
   !ge;
 

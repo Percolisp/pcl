@@ -199,13 +199,13 @@ say "# -------- \$_ Transpilation:";
 # Test: $_ generates correct CL code
 {
     my $cl = parse_pl('$_ = "hello"; say length;');
-    like($cl, qr/pl-length \$_/, 'length() transpiles with $_ parameter');
+    like($cl, qr/p-length \$_/, 'length() transpiles with $_ parameter');
 }
 
 # Test: foreach loop generates $_ binding
 {
     my $cl = parse_pl('foreach (1,2,3) { say $_; }');
-    like($cl, qr/pl-foreach \(\$_/, 'foreach without var uses $_ as loop var');
+    like($cl, qr/p-foreach \(\$_/, 'foreach without var uses $_ as loop var');
 }
 
 done_testing();

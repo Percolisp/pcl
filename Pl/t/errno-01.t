@@ -42,32 +42,32 @@ sub run_lisp {
 
 diag '-------- $! (errno) Variable:';
 
-# Test 1: $! generates pl-errno-string call
+# Test 1: $! generates p-errno-string call
 {
     my $parser = Pl::Parser->new(code => 'my $e = $!;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-errno-string/, '$! generates pl-errno-string call');
+    like($output, qr/p-errno-string/, '$! generates p-errno-string call');
 }
 
 # Test 2: $! in print statement
 {
     my $parser = Pl::Parser->new(code => 'print $!;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-print.*pl-errno-string/, '$! works in print');
+    like($output, qr/p-print.*p-errno-string/, '$! works in print');
 }
 
 # Test 3: $! in concatenation
 {
     my $parser = Pl::Parser->new(code => 'my $msg = "Error: " . $!;');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-\.\s+"Error: "\s+\(pl-errno-string\)/, '$! works in concatenation');
+    like($output, qr/p-\.\s+"Error: "\s+\(p-errno-string\)/, '$! works in concatenation');
 }
 
 # Test 4: $! in die statement with string interpolation
 {
     my $parser = Pl::Parser->new(code => 'die "Failed: $!";');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-die.*pl-errno-string/s, '$! works in die with interpolation');
+    like($output, qr/p-die.*p-errno-string/s, '$! works in die with interpolation');
 }
 
 diag '-------- Runtime Execution:';
@@ -100,9 +100,9 @@ PERL
 {
     my $parser = Pl::Parser->new(code => 'open my $fh, "<", $file or die "Cannot open: $!";');
     my $output = get_generated_code($parser);
-    like($output, qr/pl-open/, 'open is present');
-    like($output, qr/pl-die/, 'die is present');
-    like($output, qr/pl-errno-string/, '$! is interpolated in string');
+    like($output, qr/p-open/, 'open is present');
+    like($output, qr/p-die/, 'die is present');
+    like($output, qr/p-errno-string/, '$! is interpolated in string');
 }
 
 done_testing();
