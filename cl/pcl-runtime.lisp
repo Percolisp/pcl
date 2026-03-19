@@ -236,6 +236,17 @@
 
 ;;; Forward declarations to avoid style warnings
 (declaim (ftype (function (t) t) to-number to-string unbox p-get-stream))
+;;; Forward-declare functions defined later in the file to suppress SBCL
+;;; STYLE-WARNING: "undefined function" during compilation.
+(declaim (ftype (function (t) t)
+                object-address looks-like-number
+                p-typeglob-p p-typeglob-name p-typeglob-package
+                p-regex-match-p p-regex-match-pattern p-regex-match-modifiers
+                clos-class-to-pkg perl-pkg-to-clos-class))
+(declaim (ftype (function (t t) t) p-can p-isa))
+(declaim (ftype (function (&rest t) t)
+                p-method-call p-glob-undef-name p-glob-copy parse-number
+                build-ppcre-options))
 (defvar *p-undef* :undef "Perl's undef value")
 
 ;;; Forward declaration for %INC table (full definition in Module System section)
@@ -543,6 +554,11 @@
                   (return-from parse-perl-number n)))))))))
   0)
 
+(defun object-address (obj)
+  "Get a unique address/ID for an object (implementation-dependent)"
+  #+sbcl (sb-kernel:get-lisp-obj-address obj)
+  #-sbcl (sxhash obj))  ; Fallback: use hash as pseudo-address
+
 (defun box-nv (box)
   "Get numeric value from box with lazy caching.
    Tied variables: bypass cache and call FETCH."
@@ -568,11 +584,6 @@
           (setf (p-box-nv box) n
                 (p-box-nv-ok box) t)
           n))))
-
-(defun object-address (obj)
-  "Get a unique address/ID for an object (implementation-dependent)"
-  #+sbcl (sb-kernel:get-lisp-obj-address obj)
-  #-sbcl (sxhash obj))  ; Fallback: use hash as pseudo-address
 
 (defun stringify-value (v)
   "Convert a raw value to string"
@@ -741,6 +752,38 @@
 ;;; Arithmetic Operators
 ;;; ============================================================
 
+(defun looks-like-number (str)
+  "Check if the ENTIRE string is a valid number (Perl's looks_like_number).
+   Returns T only if the whole string (minus whitespace) is numeric."
+  (and (stringp str)
+       (> (length str) 0)
+       (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return) str))
+              (len (length s))
+              (pos 0)
+              (has-digit nil))
+         (when (= len 0) (return-from looks-like-number nil))
+         ;; Optional sign
+         (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
+           (incf pos))
+         ;; Digits before dot
+         (loop while (and (< pos len) (digit-char-p (char s pos)))
+               do (setf has-digit t) (incf pos))
+         ;; Optional dot + digits
+         (when (and (< pos len) (char= (char s pos) #\.))
+           (incf pos)
+           (loop while (and (< pos len) (digit-char-p (char s pos)))
+                 do (setf has-digit t) (incf pos)))
+         ;; Optional exponent
+         (when (and (< pos len) has-digit
+                    (member (char s pos) '(#\e #\E)))
+           (incf pos)
+           (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
+             (incf pos))
+           (loop while (and (< pos len) (digit-char-p (char s pos)))
+                 do (incf pos)))
+         ;; Must have consumed entire string AND have at least one digit
+         (and has-digit (= pos len)))))
+
 (defun p-+ (&rest args)
   "Perl addition"
   (apply #'+ (mapcar #'to-number args)))
@@ -847,38 +890,6 @@
   (declare (ignore seed))
   ;; CL doesn't have portable srand - just return a value
   1)
-
-(defun looks-like-number (str)
-  "Check if the ENTIRE string is a valid number (Perl's looks_like_number).
-   Returns T only if the whole string (minus whitespace) is numeric."
-  (and (stringp str)
-       (> (length str) 0)
-       (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return) str))
-              (len (length s))
-              (pos 0)
-              (has-digit nil))
-         (when (= len 0) (return-from looks-like-number nil))
-         ;; Optional sign
-         (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
-           (incf pos))
-         ;; Digits before dot
-         (loop while (and (< pos len) (digit-char-p (char s pos)))
-               do (setf has-digit t) (incf pos))
-         ;; Optional dot + digits
-         (when (and (< pos len) (char= (char s pos) #\.))
-           (incf pos)
-           (loop while (and (< pos len) (digit-char-p (char s pos)))
-                 do (setf has-digit t) (incf pos)))
-         ;; Optional exponent
-         (when (and (< pos len) has-digit
-                    (member (char s pos) '(#\e #\E)))
-           (incf pos)
-           (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
-             (incf pos))
-           (loop while (and (< pos len) (digit-char-p (char s pos)))
-                 do (incf pos)))
-         ;; Must have consumed entire string AND have at least one digit
-         (and has-digit (= pos len)))))
 
 (defun to-number (val)
   "Convert value to number (Perl semantics).
@@ -3193,17 +3204,9 @@
         (setf (aref a i) box))
       (box-set box value))))
 
-(defmacro p-autoviv-set (inner-hash-form outer-key value)
-  "Set value with autovivification for nested hash access.
-   inner-hash-form is (p-gethash hash inner-key) or deeper.
-   Expands to code that ensures intermediate hashes exist."
-  (let ((val-var (gensym "VAL"))
-        (hash-var (gensym "HASH")))
-    `(let ((,val-var ,value)
-           (,hash-var ,(expand-autoviv inner-hash-form)))
-       (setf (gethash (to-string ,outer-key) ,hash-var) ,val-var))))
-
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Forward-declare so expand-autoviv can call expand-autoviv-for-array (mutually recursive)
+  (declaim (ftype (function (t) t) expand-autoviv-for-array))
   (defun expand-autoviv (form)
     "Compile-time helper to expand nested hash/array access into autovivifying code.
      The result of this form must be a hash table (inner yields hash).
@@ -3258,6 +3261,16 @@
          `(p-autoviv-aref-for-array (p-ensure-arrayref ,ref) ,idx)))
       ;; Base case: form is a plain array container
       (t form))))
+
+(defmacro p-autoviv-set (inner-hash-form outer-key value)
+  "Set value with autovivification for nested hash access.
+   inner-hash-form is (p-gethash hash inner-key) or deeper.
+   Expands to code that ensures intermediate hashes exist."
+  (let ((val-var (gensym "VAL"))
+        (hash-var (gensym "HASH")))
+    `(let ((,val-var ,value)
+           (,hash-var ,(expand-autoviv inner-hash-form)))
+       (setf (gethash (to-string ,outer-key) ,hash-var) ,val-var))))
 
 (defmacro p-autoviv-aref-set (hash-chain idx value)
   "Set array element in a hash chain with autovivification.
