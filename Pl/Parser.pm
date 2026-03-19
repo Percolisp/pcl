@@ -462,6 +462,41 @@ sub _subscript_key_groups {
   return @groups;
 }
 
+# Return a list of individual CL key expression strings for a subscript.
+# Unlike _subscript_key_groups + _subscript_key_expr, this expands qw// into
+# individual strings — needed for delete local @h{qw/a b/} where each key
+# must get its own p-local-hash-elem scope.
+sub _subscript_key_cl_list {
+  my ($self, $sub, $open, $stmt) = @_;
+
+  # Collect non-whitespace children
+  my @tokens;
+  for my $child ($sub->children()) {
+    next if ref($child) eq 'PPI::Token::Whitespace';
+    if (ref($child) =~ /^PPI::Statement/) {
+      for my $gc ($child->children()) {
+        next if ref($gc) eq 'PPI::Token::Whitespace';
+        push @tokens, $gc;
+      }
+    } else {
+      push @tokens, $child;
+    }
+  }
+
+  # Special case: single qw// token — expand into individual quoted strings
+  if (@tokens == 1 && ref($tokens[0]) =~ /QuoteLike::Words/) {
+    my $raw = $tokens[0]->content;      # e.g. "qw/b d/" or "qw(b d)"
+    $raw =~ s/^qw\s*\S//;              # strip "qw" + opening delimiter
+    $raw =~ s/\S$//;                   # strip closing delimiter
+    my @words = grep { $_ ne '' } split /\s+/, $raw;
+    return map { "\"$_\"" } @words;
+  }
+
+  # General case: split on commas and evaluate each group
+  my @groups = $self->_subscript_key_groups($sub);
+  return map { $self->_subscript_key_expr($_, $open, $stmt) } @groups;
+}
+
 # Parse one key group to a CL expression string.
 # For hash subscripts ({...}), auto-quote single bareword tokens (Perl hash key rule).
 sub _subscript_key_expr {
@@ -681,6 +716,37 @@ sub _process_expression_statement {
     $self->_emit("(funcall (intern \"PL-IMPORT\" :$pkg))");
     $self->_emit("");
     return;
+  }
+
+  # Handle: delete local SYMBOL SUBSCRIPT (standalone delete+local statement)
+  # PPI::Statement: Word("delete"), Word("local"), Symbol, Subscript
+  # Opens a p-local-X-elem scope that wraps the rest of the block (closed at block end).
+  if (@parts >= 4
+      && ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'delete'
+      && ref($parts[1]) eq 'PPI::Token::Word' && $parts[1]->content eq 'local'
+      && ref($parts[2]) eq 'PPI::Token::Symbol'
+      && ref($parts[3]) eq 'PPI::Structure::Subscript') {
+    my $sym       = $parts[2]->content;
+    my $sub       = $parts[3];
+    my $open      = $sub->start->content;
+    my $base      = substr($sym, 1);
+    my $new_sigil = ($open eq '{') ? '%' : '@';
+    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
+    if (@key_cls) {
+      my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
+      my $del_fn  = ($open eq '{') ? 'p-delete'            : 'p-delete-array';
+      $self->_emit(";; $perl_code");
+      for my $key_cl (@key_cls) {
+        $self->_emit("($macro $cl_var $key_cl");
+        $self->_emit("  ($del_fn $cl_var $key_cl)");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth}++;
+      }
+      $self->_emit("");
+      return;
+    }
   }
 
   # Check for statement modifiers: EXPR if/unless/while/until/for COND
@@ -1086,6 +1152,64 @@ sub _process_my_toplevel_declaration {
                          $self->_is_empty_structure($rhs_parts[0]));
 
     unless ($is_empty_list) {
+      # Check for: my VARS = delete local SYMBOL SUBSCRIPT
+      # This must be handled before normal expression parsing because:
+      #  - The local save/restore must scope to the enclosing block
+      #  - The delete is done inside the local scope, and result assigned to VARS
+      my @clean_rhs = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+      if (@clean_rhs >= 4
+          && ref($clean_rhs[0]) eq 'PPI::Token::Word'  && $clean_rhs[0]->content eq 'delete'
+          && ref($clean_rhs[1]) eq 'PPI::Token::Word'  && $clean_rhs[1]->content eq 'local'
+          && ref($clean_rhs[2]) eq 'PPI::Token::Symbol'
+          && ref($clean_rhs[3]) eq 'PPI::Structure::Subscript') {
+        my $sym  = $clean_rhs[2]->content;
+        my $sub  = $clean_rhs[3];
+        my $open = $sub->start->content;
+        my $base = substr($sym, 1);
+        my $new_sigil = ($open eq '{') ? '%' : '@';
+        my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+        my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
+        if (@key_cls) {
+          my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
+          my $del_fn  = ($open eq '{') ? 'p-delete'            : 'p-delete-array';
+          $self->_emit(";; $perl_code");
+          # Pre-evaluate original values BEFORE opening local scopes,
+          # so the result of "delete local" is the ORIGINAL value (not the fresh nil box).
+          my $get_fn = ($open eq '{') ? 'p-gethash' : 'p-aref';
+          $self->{_local_counter} //= 0;
+          my @del_tmp_vars;
+          for my $key_cl (@key_cls) {
+            my $tmp = "pcl-del-" . $self->{_local_counter}++;
+            push @del_tmp_vars, $tmp;
+            $self->_emit("(let (($tmp ($get_fn $cl_var $key_cl)))");
+            $self->indent_level($self->indent_level + 1);
+            $self->{_local_let_depth} //= 0;
+            $self->{_local_let_depth}++;
+          }
+          # Open local save/restore scope for each key (nested, closed at block end)
+          for my $key_cl (@key_cls) {
+            $self->_emit("($macro $cl_var $key_cl");
+            $self->_emit("  ($del_fn $cl_var $key_cl)");
+            $self->indent_level($self->indent_level + 1);
+            $self->{_local_let_depth} //= 0;
+            $self->{_local_let_depth}++;
+          }
+          # Emit the assignment inside the local scope using pre-saved values
+          if (@vars == 1 && @key_cls == 1) {
+            # my $c = delete local $a[N]  or  my $c = delete local $h{k}
+            my $var = $vars[0];
+            $self->_emit("(box-set $var $del_tmp_vars[0])");
+          } else {
+            # my ($x,$y) = delete local @a[N,M]  or  my ($x,$y) = delete local @h{k1,k2}
+            my $lhs_cl = "(vector " . join(' ', @vars) . ")";
+            my $rhs_cl = "(let ((*wantarray* t)) (vector " . join(' ', @del_tmp_vars) . "))";
+            $self->_emit("(p-list-= $lhs_cl $rhs_cl)");
+          }
+          $self->_emit("");
+          return;
+        }
+      }
+
       if (@vars == 1) {
         my $var = $vars[0];
         my $sigil = substr($var, 0, 1);
@@ -1262,6 +1386,30 @@ sub _process_local_declaration {
     return;
   }
 
+  # ── Unwrap local(ELEM) parens form: local($a[N]) / local($h{key}) / local(@a[N,M])
+  # PPI gives Structure::List when parens are used; unwrap it so the handler below fires.
+  if (@non_ws >= 1 && ref($non_ws[0]) eq 'PPI::Structure::List') {
+    my @flat;
+    for my $child ($non_ws[0]->children) {
+      my $cr = ref($child);
+      next if $cr eq 'PPI::Token::Whitespace';
+      next if $cr eq 'PPI::Token::Structure';   # skip '(' and ')'
+      if ($cr =~ /^PPI::Statement/) {
+        for my $gc ($child->children) {
+          next if ref($gc) eq 'PPI::Token::Whitespace';
+          push @flat, $gc;
+        }
+      } else {
+        push @flat, $child;
+      }
+    }
+    if (@flat == 2
+        && ref($flat[0]) eq 'PPI::Token::Symbol'
+        && ref($flat[1]) eq 'PPI::Structure::Subscript') {
+      splice(@non_ws, 0, 1, @flat);
+    }
+  }
+
   # ── Handle local $hash{key}, local @arr[N], local @hash{@keys}, local @arr[N,M]
   # PPI gives: Symbol("$hash") + Structure::Subscript("{key}")
   if (@non_ws >= 2
@@ -1298,34 +1446,46 @@ sub _process_local_declaration {
       my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt) } @key_groups;
 
       # Choose the macro based on subscript type
-      my $macro = ($open eq '{') ? 'p-local-hash-elem' : 'p-local-array-elem';
+      my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-elem';
+      my $macro_init = ($open eq '{') ? 'p-local-hash-elem-init'  : 'p-local-array-elem-init';
 
-      # Emit one macro call per key (nested open forms, closed by _process_block)
-      for my $key_cl (@key_cls) {
-        $self->_emit("($macro $cl_var $key_cl");
+      if (defined $init_cl && @key_cls == 1) {
+        # Single element with initializer: use the *-init macro which evaluates
+        # init-form BEFORE installing the fresh box, preventing stale-read bugs
+        # like local($a[2]) = $a[2] reading the fresh undef box.
+        my $key_cl = $key_cls[0];
+        $self->_emit("($macro_init $cl_var $key_cl $init_cl");
         $self->indent_level($self->indent_level + 1);
         $self->{_local_let_depth} //= 0;
         $self->{_local_let_depth}++;
-      }
-
-      # Emit initializer as first body form if present
-      if (defined $init_cl) {
-        if (@key_cls == 1) {
-          # Single element with initializer
-          my $key_cl = $key_cls[0];
-          if ($open eq '{') {
-            $self->_emit("(p-setf (p-gethash $cl_var $key_cl) $init_cl)");
-          } else {
-            $self->_emit("(p-setf (p-aref $cl_var $key_cl) $init_cl)");
-          }
+      } elsif (defined $init_cl) {
+        # Slice with initializer: pre-evaluate RHS before any macros open,
+        # then emit nested macro opens, then assign using the saved value.
+        $self->{_local_counter} //= 0;
+        my $tmp = "pcl-local-init-" . $self->{_local_counter}++;
+        my $ctx = "(let ((*wantarray* t)) ";
+        my $ctx_close = ")";
+        $self->_emit("(let (($tmp ${ctx}$init_cl${ctx_close}))");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth}++;
+        for my $key_cl (@key_cls) {
+          $self->_emit("($macro $cl_var $key_cl");
+          $self->indent_level($self->indent_level + 1);
+          $self->{_local_let_depth}++;
+        }
+        my $keys_str = join(' ', @key_cls);
+        if ($open eq '{') {
+          $self->_emit("(let ((*wantarray* t)) (p-setf (p-hslice $cl_var $keys_str) $tmp))");
         } else {
-          # Slice with initializer: force list context so (10,20) becomes a vector
-          my $keys_str = join(' ', @key_cls);
-          if ($open eq '{') {
-            $self->_emit("(let ((*wantarray* t)) (p-setf (p-hslice $cl_var $keys_str) $init_cl))");
-          } else {
-            $self->_emit("(let ((*wantarray* t)) (p-setf (p-aslice $cl_var $keys_str) $init_cl))");
-          }
+          $self->_emit("(let ((*wantarray* t)) (p-setf (p-aslice $cl_var $keys_str) $tmp))");
+        }
+      } else {
+        # No initializer: emit one macro call per key (nested open forms)
+        for my $key_cl (@key_cls) {
+          $self->_emit("($macro $cl_var $key_cl");
+          $self->indent_level($self->indent_level + 1);
+          $self->{_local_let_depth} //= 0;
+          $self->{_local_let_depth}++;
         }
       }
 
@@ -1371,10 +1531,13 @@ sub _process_local_declaration {
     my $sigil = substr($var, 0, 1);
 
     if ($sigil eq '@') {
-      push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
+      # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
+      # CL 'let' evaluates init form with old bindings, so @arr in $init_cl reads old value.
+      push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
     }
     elsif ($sigil eq '%') {
-      push @bindings, "($var (make-hash-table :test 'equal))";
+      # local %h = EXPR: evaluate EXPR with old %h, make an independent copy.
+      push @bindings, "($var (p-copy-hash (let ((*wantarray* t)) $init_cl)))";
     }
     else {
       push @bindings, "($var (make-p-box $init_cl))";

@@ -19,6 +19,7 @@
    #:p-box #:make-p-box #:p-box-p #:p-box-value
    #:unbox #:ensure-boxed
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
+   #:to-string #:to-number
    #:p-undef #:p-defined
    #:p-let #:p-$
    ;; Arithmetic
@@ -98,6 +99,8 @@
    #:p-make-typeglob #:p-glob-assign #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob
    #:p-local-hash-elem #:p-local-array-elem
+   #:p-local-hash-elem-init #:p-local-array-elem-init
+   #:p-copy-array #:p-copy-hash
    #:p-pack #:p-unpack
    #:p-grep #:p-map #:p-sort #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
@@ -236,6 +239,17 @@
 
 ;;; Forward declarations to avoid style warnings
 (declaim (ftype (function (t) t) to-number to-string unbox p-get-stream))
+;;; Forward-declare functions defined later in the file to suppress SBCL
+;;; STYLE-WARNING: "undefined function" during compilation.
+(declaim (ftype (function (t) t)
+                object-address looks-like-number
+                p-typeglob-p p-typeglob-name p-typeglob-package
+                p-regex-match-p p-regex-match-pattern p-regex-match-modifiers
+                clos-class-to-pkg perl-pkg-to-clos-class))
+(declaim (ftype (function (t t) t) p-can p-isa))
+(declaim (ftype (function (&rest t) t)
+                p-method-call p-glob-undef-name p-glob-copy parse-number
+                build-ppcre-options))
 (defvar *p-undef* :undef "Perl's undef value")
 
 ;;; Forward declaration for %INC table (full definition in Module System section)
@@ -405,6 +419,9 @@
 (defvar |$^L| (make-p-box (string #\Page)) "FORMAT_FORMFEED - formfeed char for write")
 (defvar |$^A| (make-p-box "") "ACCUMULATOR - for formline/write output")
 (defvar |$^| (make-p-box "") "FORMAT_TOP_NAME - top-of-page format name")
+;; %SIG: signal/exception handler hash
+;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
+(defvar %SIG (make-hash-table :test 'equal) "Perl %SIG - signal handlers")
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -496,9 +513,7 @@
         ;; Extract leading numeric portion manually
         (let ((end 0)
               (len (length trimmed))
-              (has-digit nil)
-              (has-dot nil)
-              (has-exp nil))
+              (has-digit nil))
           ;; Optional sign
           (when (and (< end len)
                      (member (char trimmed end) '(#\+ #\-)))
@@ -509,7 +524,6 @@
                 do (setf has-digit t) (incf end))
           ;; Optional decimal part
           (when (and (< end len) (char= (char trimmed end) #\.))
-            (setf has-dot t)
             (incf end)
             (loop while (and (< end len)
                              (digit-char-p (char trimmed end)))
@@ -524,11 +538,9 @@
                          (member (char trimmed end) '(#\+ #\-)))
                 (incf end))
               (if (and (< end len) (digit-char-p (char trimmed end)))
-                  (progn
-                    (setf has-exp t)
-                    (loop while (and (< end len)
-                                     (digit-char-p (char trimmed end)))
-                          do (incf end)))
+                  (loop while (and (< end len)
+                                   (digit-char-p (char trimmed end)))
+                        do (incf end))
                   ;; No valid exponent, backtrack
                   (setf end exp-start))))
           ;; Parse the extracted portion
@@ -542,6 +554,11 @@
                 (when (numberp n)
                   (return-from parse-perl-number n)))))))))
   0)
+
+(defun object-address (obj)
+  "Get a unique address/ID for an object (implementation-dependent)"
+  #+sbcl (sb-kernel:get-lisp-obj-address obj)
+  #-sbcl (sxhash obj))  ; Fallback: use hash as pseudo-address
 
 (defun box-nv (box)
   "Get numeric value from box with lazy caching.
@@ -568,11 +585,6 @@
           (setf (p-box-nv box) n
                 (p-box-nv-ok box) t)
           n))))
-
-(defun object-address (obj)
-  "Get a unique address/ID for an object (implementation-dependent)"
-  #+sbcl (sb-kernel:get-lisp-obj-address obj)
-  #-sbcl (sxhash obj))  ; Fallback: use hash as pseudo-address
 
 (defun stringify-value (v)
   "Convert a raw value to string"
@@ -741,6 +753,38 @@
 ;;; Arithmetic Operators
 ;;; ============================================================
 
+(defun looks-like-number (str)
+  "Check if the ENTIRE string is a valid number (Perl's looks_like_number).
+   Returns T only if the whole string (minus whitespace) is numeric."
+  (and (stringp str)
+       (> (length str) 0)
+       (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return) str))
+              (len (length s))
+              (pos 0)
+              (has-digit nil))
+         (when (= len 0) (return-from looks-like-number nil))
+         ;; Optional sign
+         (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
+           (incf pos))
+         ;; Digits before dot
+         (loop while (and (< pos len) (digit-char-p (char s pos)))
+               do (setf has-digit t) (incf pos))
+         ;; Optional dot + digits
+         (when (and (< pos len) (char= (char s pos) #\.))
+           (incf pos)
+           (loop while (and (< pos len) (digit-char-p (char s pos)))
+                 do (setf has-digit t) (incf pos)))
+         ;; Optional exponent
+         (when (and (< pos len) has-digit
+                    (member (char s pos) '(#\e #\E)))
+           (incf pos)
+           (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
+             (incf pos))
+           (loop while (and (< pos len) (digit-char-p (char s pos)))
+                 do (incf pos)))
+         ;; Must have consumed entire string AND have at least one digit
+         (and has-digit (= pos len)))))
+
 (defun p-+ (&rest args)
   "Perl addition"
   (apply #'+ (mapcar #'to-number args)))
@@ -847,38 +891,6 @@
   (declare (ignore seed))
   ;; CL doesn't have portable srand - just return a value
   1)
-
-(defun looks-like-number (str)
-  "Check if the ENTIRE string is a valid number (Perl's looks_like_number).
-   Returns T only if the whole string (minus whitespace) is numeric."
-  (and (stringp str)
-       (> (length str) 0)
-       (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return) str))
-              (len (length s))
-              (pos 0)
-              (has-digit nil))
-         (when (= len 0) (return-from looks-like-number nil))
-         ;; Optional sign
-         (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
-           (incf pos))
-         ;; Digits before dot
-         (loop while (and (< pos len) (digit-char-p (char s pos)))
-               do (setf has-digit t) (incf pos))
-         ;; Optional dot + digits
-         (when (and (< pos len) (char= (char s pos) #\.))
-           (incf pos)
-           (loop while (and (< pos len) (digit-char-p (char s pos)))
-                 do (setf has-digit t) (incf pos)))
-         ;; Optional exponent
-         (when (and (< pos len) has-digit
-                    (member (char s pos) '(#\e #\E)))
-           (incf pos)
-           (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
-             (incf pos))
-           (loop while (and (< pos len) (digit-char-p (char s pos)))
-                 do (incf pos)))
-         ;; Must have consumed entire string AND have at least one digit
-         (and has-digit (= pos len)))))
 
 (defun to-number (val)
   "Convert value to number (Perl semantics).
@@ -2772,9 +2784,10 @@
          (actual-idx (if (< i 0) (+ len i) i)))
     (when (and (vectorp arr) (>= actual-idx 0))
       ;; Auto-extend array if needed (Perl autovivification)
+      ;; Intermediate slots get nil (deleted marker) so exists returns false for them.
       (when (>= actual-idx len)
         (dotimes (n (1+ (- actual-idx len)))
-          (vector-push-extend (make-p-box *p-undef*) arr)))
+          (vector-push-extend nil arr)))
       ;; Get or create box at this index
       (let ((box (aref arr actual-idx)))
         (unless (p-box-p box)
@@ -2794,10 +2807,10 @@
            (len (if (vectorp a) (length a) 0))
            (actual-idx (if (< i 0) (+ len i) i)))
       (when (and (vectorp a) (>= actual-idx 0))
-        ;; Auto-extend array if needed
+        ;; Auto-extend array if needed (intermediate slots are nil = non-existent)
         (when (>= actual-idx len)
           (dotimes (n (1+ (- actual-idx len)))
-            (vector-push-extend (make-p-box *p-undef*) a)))
+            (vector-push-extend nil a)))
         ;; Ensure box exists at this index
         (let ((elem (aref a actual-idx)))
           (unless (p-box-p elem)
@@ -3193,17 +3206,9 @@
         (setf (aref a i) box))
       (box-set box value))))
 
-(defmacro p-autoviv-set (inner-hash-form outer-key value)
-  "Set value with autovivification for nested hash access.
-   inner-hash-form is (p-gethash hash inner-key) or deeper.
-   Expands to code that ensures intermediate hashes exist."
-  (let ((val-var (gensym "VAL"))
-        (hash-var (gensym "HASH")))
-    `(let ((,val-var ,value)
-           (,hash-var ,(expand-autoviv inner-hash-form)))
-       (setf (gethash (to-string ,outer-key) ,hash-var) ,val-var))))
-
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Forward-declare so expand-autoviv can call expand-autoviv-for-array (mutually recursive)
+  (declaim (ftype (function (t) t) expand-autoviv-for-array))
   (defun expand-autoviv (form)
     "Compile-time helper to expand nested hash/array access into autovivifying code.
      The result of this form must be a hash table (inner yields hash).
@@ -3258,6 +3263,16 @@
          `(p-autoviv-aref-for-array (p-ensure-arrayref ,ref) ,idx)))
       ;; Base case: form is a plain array container
       (t form))))
+
+(defmacro p-autoviv-set (inner-hash-form outer-key value)
+  "Set value with autovivification for nested hash access.
+   inner-hash-form is (p-gethash hash inner-key) or deeper.
+   Expands to code that ensures intermediate hashes exist."
+  (let ((val-var (gensym "VAL"))
+        (hash-var (gensym "HASH")))
+    `(let ((,val-var ,value)
+           (,hash-var ,(expand-autoviv inner-hash-form)))
+       (setf (gethash (to-string ,outer-key) ,hash-var) ,val-var))))
 
 (defmacro p-autoviv-aref-set (hash-chain idx value)
   "Set array element in a hash chain with autovivification.
@@ -3478,8 +3493,7 @@
 (defun p-delete-array (arr idx)
   "Perl delete function for arrays.
    Sets element to nil (deleted marker) and returns the old value.
-   nil as array element means 'deleted/non-existent' (distinct from undef).
-   Unlike hash delete, this doesn't shrink the array."
+   Trims trailing nil slots (Perl shrinks array when last element deleted)."
   (let* ((a (unbox arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
@@ -3489,8 +3503,11 @@
                         (if (p-box-p elem) (p-box-value elem) *p-undef*))
                       *p-undef*)))
     (when (and (vectorp a) (>= actual-idx 0) (< actual-idx len))
-      ;; Set element to nil — the "deleted" marker
-      (setf (aref a actual-idx) nil))
+      (setf (aref a actual-idx) nil)
+      ;; Trim trailing nil slots (Perl semantics: deleting last element shrinks array)
+      (loop while (and (> (fill-pointer a) 0)
+                       (null (aref a (1- (fill-pointer a)))))
+            do (decf (fill-pointer a))))
     old-val))
 
 (defun p-exists-array (arr idx)
@@ -3526,15 +3543,18 @@
 
 (defun p-delete-array-slice (arr &rest indices)
   "Perl delete for array slices: delete @arr[i1, i2, ...]
-   Sets elements to undef and returns a list of the old values."
-  (let ((result (make-array (length indices) :adjustable t :fill-pointer 0)))
+   Sets elements to nil (deleted marker) and returns a list of the old values."
+  (let* ((a (unbox arr))
+         (result (make-array (length indices) :adjustable t :fill-pointer 0)))
     (dolist (idx indices)
       (let* ((i (truncate (to-number idx)))
-             (old-val (if (and (>= i 0) (< i (length arr)))
-                          (aref arr i)
+             (len (if (vectorp a) (length a) 0))
+             (old-val (if (and (>= i 0) (< i len))
+                          (let ((elem (aref a i)))
+                            (if (p-box-p elem) (p-box-value elem) *p-undef*))
                           *p-undef*)))
-        (when (and (>= i 0) (< i (length arr)))
-          (setf (aref arr i) *p-undef*))
+        (when (and (vectorp a) (>= i 0) (< i len))
+          (setf (aref a i) nil))  ; nil = deleted marker
         (vector-push-extend old-val result)))
     result))
 
@@ -4301,13 +4321,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ((= (length sep) 1)
          (let ((sep-char (char sep 0))
                (result (make-array 256 :element-type 'character
-                                       :adjustable t :fill-pointer 0))
-               (found nil))
+                                       :adjustable t :fill-pointer 0)))
            (loop for char = (read-char stream nil nil)
                  while char
                  do (vector-push-extend char result)
                  when (char= char sep-char)
-                   do (setf found t) and do (loop-finish))
+                   do (loop-finish))
            (if (zerop (length result)) nil (coerce result 'string))))
 
         ;; Multi-character separator
@@ -4414,6 +4433,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   (chars (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
                   (negated nil)
                   (j (1+ i)))
+              (declare (ignore bracket-start))
               ;; Check for negation [! or [^
               (when (and (< j len) (or (char= (char pattern j) #\!)
                                         (char= (char pattern j) #\^)))
@@ -4812,10 +4832,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; %INC: hash of loaded modules (key: relative path, value: absolute path)
 ;; Note: *p-inc-table* is forward-declared near top of file
 (defvar %INC '%INC-MARKER% "Marker for %INC hash access")
-
-;; %SIG: signal/exception handler hash
-;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
-(defvar %SIG (make-hash-table :test 'equal) "Perl %SIG - signal handlers")
 
 ;; @INC: module search paths (initialized by pl2cl from Perl's @INC)
 (defvar @INC (make-array 0 :adjustable t :fill-pointer 0)
@@ -5593,9 +5609,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defmacro p-local-array-elem (arr-var idx-form &body body)
   "Save/restore one array element. Like Perl's local $arr[N].
-   Extends the array if needed and installs a fresh undef box.
-   On exit, restores the original box (or marks the element deleted if
-   it was beyond the original array length)."
+   For existing elements: installs a fresh undef box (isolates body from saved box).
+   For non-existing elements: does NOT extend the array; body can extend via setf p-aref.
+   On exit: restores existing element (re-extending if body shrank array via undef @arr),
+   or trims trailing nil slots if element was non-existent."
   (let ((iv       (gensym "IDX"))
         (orig-len (gensym "ORIG-LEN"))
         (old-ex   (gensym "OLD-EXISTS"))
@@ -5605,23 +5622,97 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (,orig-len (length ,arr-var))
             (,old-ex   (< ,iv ,orig-len))
             (,old-bx   (when ,old-ex (aref ,arr-var ,iv))))
-       ;; Extend array if needed and install fresh undef box
-       (when (>= ,iv (length ,arr-var))
-         (dotimes (n (1+ (- ,iv (length ,arr-var))))
-           (vector-push-extend (make-p-box *p-undef*) ,arr-var)))
-       (setf (aref ,arr-var ,iv) (make-p-box nil))
+       ;; Only install fresh box if element existed (prevents old-box mutation by body)
+       (when ,old-ex
+         (setf (aref ,arr-var ,iv) (make-p-box nil)))
        (unwind-protect
            (progn ,@body)
          ;; Restore on any exit path
          (if ,old-ex
-             ;; Element existed: put original box back
-             (setf (aref ,arr-var ,iv) ,old-bx)
-             ;; Element did not exist: mark as deleted, shrink array if extended
+             ;; Element existed: restore original box.
+             ;; Re-extend with nil slots if body shrank the array (e.g. via undef @arr).
+             (progn
+               (when (>= ,iv (length ,arr-var))
+                 (dotimes (n (1+ (- ,iv (length ,arr-var))))
+                   (vector-push-extend nil ,arr-var)))
+               (setf (aref ,arr-var ,iv) ,old-bx))
+             ;; Element didn't exist: mark as nil if body created it, then trim
+             ;; trailing nil slots (preserves non-nil body-assigned elements).
              (progn
                (when (< ,iv (length ,arr-var))
-                 (setf (aref ,arr-var ,iv) nil))  ; nil = deleted marker
-               (when (> (length ,arr-var) ,orig-len)
-                 (setf (fill-pointer ,arr-var) ,orig-len))))))))
+                 (setf (aref ,arr-var ,iv) nil))
+               (loop while (and (> (fill-pointer ,arr-var) ,orig-len)
+                                (null (aref ,arr-var (1- (fill-pointer ,arr-var)))))
+                     do (decf (fill-pointer ,arr-var)))))))))
+
+(defmacro p-local-array-elem-init (arr-var idx-form init-form &body body)
+  "Like p-local-array-elem but evaluates init-form BEFORE installing fresh box.
+   Used for local($a[N]) = EXPR where EXPR might read the same element."
+  (let ((init-val (gensym "INIT"))
+        (iv       (gensym "IDX"))
+        (orig-len (gensym "ORIG-LEN"))
+        (old-ex   (gensym "OLD-EXISTS"))
+        (old-bx   (gensym "OLD-BOX")))
+    `(let* ((,init-val ,init-form)   ; evaluate RHS BEFORE any array changes
+            (,iv       (let ((i (truncate (to-number ,idx-form))))
+                         (if (< i 0) (max 0 (+ (length ,arr-var) i)) i)))
+            (,orig-len (length ,arr-var))
+            (,old-ex   (< ,iv ,orig-len))
+            (,old-bx   (when ,old-ex (aref ,arr-var ,iv))))
+       ;; Extend array if needed and install a fresh box set to init-val
+       (when (>= ,iv (length ,arr-var))
+         (dotimes (n (1+ (- ,iv (length ,arr-var))))
+           (vector-push-extend nil ,arr-var)))
+       (setf (aref ,arr-var ,iv) (make-p-box ,init-val))
+       (unwind-protect
+           (progn ,@body)
+         (if ,old-ex
+             (progn
+               (when (>= ,iv (length ,arr-var))
+                 (dotimes (n (1+ (- ,iv (length ,arr-var))))
+                   (vector-push-extend nil ,arr-var)))
+               (setf (aref ,arr-var ,iv) ,old-bx))
+             (progn
+               (when (< ,iv (length ,arr-var))
+                 (setf (aref ,arr-var ,iv) nil))
+               (loop while (and (> (fill-pointer ,arr-var) ,orig-len)
+                                (null (aref ,arr-var (1- (fill-pointer ,arr-var)))))
+                     do (decf (fill-pointer ,arr-var)))))))))
+
+(defmacro p-local-hash-elem-init (hash-var key-form init-form &body body)
+  "Like p-local-hash-elem but evaluates init-form BEFORE installing fresh box.
+   Used for local($h{key}) = EXPR where EXPR might read the same key."
+  (let ((init-val (gensym "INIT"))
+        (kv       (gensym "KEY"))
+        (old-ex   (gensym "OLD-EXISTS"))
+        (old-bx   (gensym "OLD-BOX")))
+    `(let* ((,init-val ,init-form)   ; evaluate RHS BEFORE any hash changes
+            (,kv       (to-string ,key-form))
+            (,old-ex   (nth-value 1 (gethash ,kv ,hash-var)))
+            (,old-bx   (gethash ,kv ,hash-var)))
+       (setf (gethash ,kv ,hash-var) (make-p-box ,init-val))
+       (unwind-protect
+           (progn ,@body)
+         (if ,old-ex
+             (setf (gethash ,kv ,hash-var) ,old-bx)
+             (remhash ,kv ,hash-var))))))
+
+(defun p-copy-array (arr)
+  "Create a fresh adjustable copy of an array for local @arr = @arr semantics."
+  (let* ((a (if (and (vectorp arr) (not (stringp arr))) arr (unbox arr)))
+         (len (if (and (vectorp a) (not (stringp a))) (length a) 0))
+         (copy (make-array len :adjustable t :fill-pointer len)))
+    (dotimes (i len)
+      (setf (aref copy i) (aref a i)))
+    copy))
+
+(defun p-copy-hash (h)
+  "Create a fresh copy of a hash for local %h = %h semantics."
+  (let* ((src (if (hash-table-p h) h (unbox h)))
+         (copy (make-hash-table :test 'equal)))
+    (when (hash-table-p src)
+      (maphash (lambda (k v) (setf (gethash k copy) v)) src))
+    copy))
 
 ;;; ============================================================
 ;;; Subroutine Reflection (exists &sub, defined &sub, undef &sub)
