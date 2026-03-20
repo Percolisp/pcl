@@ -2077,6 +2077,8 @@ sub parse_block_as_function {
   if ($is_anon_sub) {
     $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
     $self->indent_level($self->indent_level + 1);
+    $self->_emit("(catch :p-return");
+    $self->indent_level($self->indent_level + 1);
   }
 
   $self->_emit("(block nil");
@@ -2109,6 +2111,8 @@ sub parse_block_as_function {
   $self->_emit(")");  # close block nil
 
   if ($is_anon_sub) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");  # close catch :p-return
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");  # close let @_
   }

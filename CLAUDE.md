@@ -167,7 +167,8 @@ Example: `*wantarray*` must be in the `:export` list, otherwise `(let ((*wantarr
 ## Key Files to Read
 
 When resuming work:
-1. `SESSION_SUMMARY.md` - Detailed session history
+1. `docs/session-log.md` - Session history (compact, newest first)
+2. `SESSION_SUMMARY.md` - Older detailed session history
 2. `XS_BRIDGE_DESIGN.md` - Future XS/C extension plans
 3. `CODEGEN_DESIGN.md` - Code generation design notes
 4. `MOO_MOOSE_DESIGN.md` - Moo/Moose OO framework support plan

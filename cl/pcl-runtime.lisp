@@ -55,7 +55,7 @@
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
    #:p-ensure-hashref #:p-ensure-arrayref
-   #:p-aslice #:p-hslice #:p-kv-hslice
+   #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
@@ -199,7 +199,8 @@
          (setf (symbol-function local-sym)
                (lambda ,params
                  (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
-                   ,@body)))))))
+                   (catch :p-return
+                     ,@body))))))))
 
 ;;; p-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
@@ -3342,11 +3343,35 @@
         (vector-push-extend k result)
         (vector-push-extend (p-gethash hash k) result)))))
 
+(defun p-kv-aslice (arr &rest indices)
+  "Perl KV array slice %arr[indices] - returns vector of (index, value) pairs.
+   Handles individual indices, lists, and vectors (e.g. from range operator).
+   Repeated indices yield repeated pairs, matching Perl semantics."
+  (let ((flat-indices (loop for idx in indices
+                            if (and (vectorp idx) (not (stringp idx)))
+                              append (coerce idx 'list)
+                            else if (and (listp idx) (not (null idx)))
+                              append idx
+                            else
+                              collect idx))
+        (result (make-array 0 :adjustable t :fill-pointer 0)))
+    (dolist (idx flat-indices result)
+      (let* ((i (truncate (to-number idx)))
+             (i (if (< i 0) (max 0 (+ (length arr) i)) i)))
+        (vector-push-extend (make-p-box i) result)
+        (vector-push-extend (p-aref arr i) result)))))
+
 (defun p-hash (&rest pairs)
   "Create a Perl hash from key-value pairs.
-   Stores values in boxes for l-value semantics."
-  (let ((h (make-hash-table :test 'equal)))
-    (loop for (k v) on pairs by #'cddr
+   Stores values in boxes for l-value semantics.
+   Flattens vectors (e.g. from %arr[...] kv-slice) in the pair list."
+  (let ((flat (loop for item in pairs
+                    if (and (vectorp item) (not (stringp item)))
+                      append (coerce item 'list)
+                    else
+                      collect item))
+        (h (make-hash-table :test 'equal)))
+    (loop for (k v) on flat by #'cddr
           do (setf (gethash (to-string k) h) (make-p-box (unbox v))))
     h))
 
@@ -3612,34 +3637,40 @@
            (tagbody :redo ,@body :next)))))
 
 (defmacro p-while (condition &rest body-and-keys)
-  "Perl while loop with optional :label and :continue."
+  "Perl while loop with optional :label and :continue.
+Uses tagbody/go instead of loop so that (return-from nil ...) from p-return
+inside the loop body correctly exits the enclosing function, not just the loop.
+CL's (loop) creates an implicit (block nil ...) that would intercept p-return."
   (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
     (let ((block-name (or label (gensym "WHILE"))))
       `(block ,block-name
-         (loop while (p-true-p ,condition)
-               do ,(make-loop-iteration-body label body)
-                  ,@(when continue-form (list continue-form))
-               ,@(if label
-                     `(finally (return-from ,block-name ""))
-                     `(finally (return ""))))))))
+         (block nil    ; for unlabeled p-last
+           (tagbody
+             :next
+             (unless (p-true-p ,condition) (return-from ,block-name ""))
+             ,(make-loop-iteration-body label body)
+             ,@(when continue-form (list continue-form))
+             (go :next)))))))
 
 (defmacro p-until (condition &body body)
   "Perl until loop"
   `(p-while (p-! ,condition) ,@body))
 
 (defmacro p-for ((&optional init) (test) (&optional step) &rest body-and-keys)
-  "Perl C-style for loop with optional :label."
+  "Perl C-style for loop with optional :label.
+Uses tagbody/go instead of loop — see p-while for rationale."
   (multiple-value-bind (label _continue body) (parse-loop-keys body-and-keys)
     (declare (ignore _continue))
     (let ((block-name (or label (gensym "FOR"))))
       `(block ,block-name
          ,init
-         (loop while (p-true-p ,test)
-               do ,(make-loop-iteration-body label body)
-                  ,@(when step (list step))
-               ,@(if label
-                     `(finally (return-from ,block-name ""))
-                     `(finally (return ""))))))))
+         (block nil    ; for unlabeled p-last
+           (tagbody
+             :next
+             (unless (p-true-p ,test) (return-from ,block-name ""))
+             ,(make-loop-iteration-body label body)
+             ,@(when step (list step))
+             (go :next)))))))
 
 (defun ensure-vector (val)
   "Ensure value is a vector for iteration. Non-vectors become single-element vectors."
@@ -3682,23 +3713,27 @@
          result)))))
 
 (defmacro p-foreach ((var list) &rest body-and-keys)
-  "Perl foreach loop with optional :label and :continue."
+  "Perl foreach loop with optional :label and :continue.
+Uses tagbody/go instead of loop -- see p-while for rationale."
   (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
     (let ((block-name (or label (gensym "FOREACH")))
-          (item (gensym))
           (vec (gensym))
-          (raw (gensym)))
+          (raw (gensym))
+          (i (gensym)))
       `(block ,block-name
          (let* ((*wantarray* t)
                 (,raw ,list)
-                (,vec (%p-flatten-for-list ,raw)))
-           (loop for ,item across ,vec
-                 do (let ((,var (ensure-boxed ,item)))
-                      ,(make-loop-iteration-body label body)
-                      ,@(when continue-form (list continue-form)))
-                 ,@(if label
-                       `(finally (return-from ,block-name ""))
-                       `(finally (return "")))))))))
+                (,vec (%p-flatten-for-list ,raw))
+                (,i 0))
+           (block nil    ; for unlabeled p-last
+             (tagbody
+               :next
+               (when (>= ,i (length ,vec)) (return-from ,block-name ""))
+               (let ((,var (ensure-boxed (aref ,vec ,i))))
+                 (incf ,i)
+                 ,(make-loop-iteration-body label body)
+                 ,@(when continue-form (list continue-form)))
+               (go :next))))))))
 
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
@@ -3714,14 +3749,13 @@
 
 (defmacro p-return (&rest values)
   "Perl return - returns single value or list depending on args.
-   In list context (*wantarray* t): returns a vector of all values.
-   In scalar context: returns the last value (Perl semantics).
-   Unboxes simple scalars but keeps references intact."
+   Uses throw :p-return to bypass (block nil ...) from loops (for p-last),
+   so return always exits the enclosing p-sub, not just the innermost loop."
   (if (null values)
-      `(return-from nil nil)
+      `(throw :p-return nil)
       (if (= (length values) 1)
-          `(return-from nil (p-return-value ,(car values)))
-          `(return-from nil
+          `(throw :p-return (p-return-value ,(car values)))
+          `(throw :p-return
              (if *wantarray*
                  (vector ,@(mapcar (lambda (v) `(p-return-value ,v)) values))
                  (p-return-value ,(car (last values))))))))
