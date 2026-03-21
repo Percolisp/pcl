@@ -735,11 +735,34 @@ sub parse {
         && !$self->is_internal_node_type($e->[$i-1])
         && $self->is_var($e->[$i-1])
         && $e->[$i-1]->content() =~ /^%/;
+    # KV array slice: %arr[indices] - PPI parses as Symbol '%arr' + Constructor '[indices]'
+    my $is_kv_arr_constructor = ref($term) eq 'PPI::Structure::Constructor'
+        && $term->start() eq '['
+        && $i > 0
+        && !$self->is_internal_node_type($e->[$i-1])
+        && $self->is_var($e->[$i-1])
+        && $e->[$i-1]->content() =~ /^%/;
+    # KV array slice via block-deref: %{$ref}[indices] - Cast('%') + Block('{ref}') + Constructor '[indices]'
+    my $is_kv_arr_deref_constructor = ref($term) eq 'PPI::Structure::Constructor'
+        && $term->start() eq '['
+        && $i >= 2
+        && ref($e->[$i-1]) eq 'PPI::Structure::Block'
+        && $e->[$i-1]->start() eq '{'
+        && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+        && $e->[$i-2]->content() eq '%';
+    # qw[...][idx] — subscript on a qw word list literal
+    my $is_qw_subscript = ref($term) eq 'PPI::Structure::Constructor'
+        && $term->start() eq '['
+        && $i > 0
+        && ref($e->[$i-1]) eq 'PPI::Token::QuoteLike::Words';
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
         && !$is_constructor_subscript
-        && !$is_kv_slice_block;
+        && !$is_kv_slice_block
+        && !$is_kv_arr_constructor
+        && !$is_kv_arr_deref_constructor
+        && !$is_qw_subscript;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -894,6 +917,12 @@ sub parse {
                  && $cast_before->content() eq '@') {
           # @{$hashref}{keys} or @$scalar{keys} — hash ref slice
           $type = "slice_h_acc";
+        } elsif ($cast_before
+                 && ref($cast_before) eq 'PPI::Token::Cast'
+                 && $cast_before->content() eq '%'
+                 && $self->is_arr_braces($term)) {
+          # %$ref[indices] — KV array slice of array ref
+          $type = "kv_slice_a_acc";
         }
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^@/) {
@@ -927,11 +956,11 @@ sub parse {
       $e->[$i-1] = $node;
       splice @$e, $i, 1;         # Remove $term (subscript)
 
-      if ($type eq 'slice_h_acc'
+      if (($type eq 'slice_h_acc' || $type eq 'kv_slice_a_acc')
           && $i >= 2
           && ref($e->[$i-2]) eq 'PPI::Token::Cast'
-          && $e->[$i-2]->content() eq '@') {
-        # Also remove the Cast '@' that precedes the hashref
+          && ($e->[$i-2]->content() eq '@' || $e->[$i-2]->content() eq '%')) {
+        # Also remove the Cast '@'/'%' that precedes the ref symbol
         splice @$e, $i-2, 1;
         $i -= 2;
       } else {
@@ -972,7 +1001,77 @@ sub parse {
       next;
     }
 
+    # Handle KV array slice: %arr[indices] - PPI gives Symbol '%arr' + Constructor '[...]'
+    if ($is_kv_arr_constructor) {
+      my $pre_id = $self->parse([$pre]);
+      my($node, $id) = $self->make_node_insert('kv_slice_a_acc');
+
+      my @ix    = $term->children();
+      my $ix_id = $self->parse(\@ix);
+
+      $self->add_child_to_node($id, $pre_id);
+
+      # Flatten progn children (comma-separated indices)
+      my $n = $self->get_a_node($ix_id);
+      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+        my $kids = $self->get_node_children($ix_id);
+        for my $param_id (@$kids) {
+          $self->add_child_to_node($id, $param_id);
+        }
+      } else {
+        $self->add_child_to_node($id, $ix_id);
+      }
+
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;
+      $i--;
+      next;
+    }
+
+    # Handle KV array slice via block-deref: %{$ref}[indices]
+    if ($is_kv_arr_deref_constructor) {
+      my @block_kids = $e->[$i-1]->children();
+      my $ref_id = $self->parse(\@block_kids);
+      my($node, $id) = $self->make_node_insert('kv_slice_a_acc');
+
+      my @ix    = $term->children();
+      my $ix_id = $self->parse(\@ix);
+
+      $self->add_child_to_node($id, $ref_id);
+
+      # Flatten progn children (comma-separated indices)
+      my $n = $self->get_a_node($ix_id);
+      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+        my $kids = $self->get_node_children($ix_id);
+        for my $param_id (@$kids) {
+          $self->add_child_to_node($id, $param_id);
+        }
+      } else {
+        $self->add_child_to_node($id, $ix_id);
+      }
+
+      $e->[$i-2] = $node;   # Replace Cast '%' position with node
+      splice @$e, $i-1, 2;  # Remove Block and Constructor
+      $i -= 2;
+      next;
+    }
+
     # Handle Constructor [ ] after funcall/methodcall - PPI uses Constructor
+    # Handle qw[...][idx] — subscript on a qw word list literal
+    # qw[void scalar list][1] → (p-aref-deref (vector "void" "scalar" "list") 1)
+    if ($is_qw_subscript) {
+      my $pre_id = $self->parse([$pre]);
+      my($node, $id) = $self->make_node_insert('a_ref_acc');
+      my @ix = $term->children();
+      my $ix_id = $self->parse(\@ix);
+      $self->add_child_to_node($id, $pre_id);
+      $self->add_child_to_node($id, $ix_id);
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;
+      $i--;
+      next;
+    }
+
     # instead of Subscript when subscript follows a method call
     # e.g., $obj->method()[$i] has [$i] as Constructor, not Subscript
     if (ref($term) eq 'PPI::Structure::Constructor'
@@ -1841,18 +1940,45 @@ sub handle_subcalls {
             # Check if symbol is followed by subscript (hash/array access)
             my $after_symbol = $e->[$i + 2];
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
-                # Symbol + Subscript chain: consume all chained subscripts
-                # (e.g., $h{a}{b}[c] — all subscripts belong to the lvalue)
+                # Symbol + Subscript chain: consume all chained subscripts and
+                # arrow-subscript chains (e.g., $h{a}{b}[c] or $h{a}->{b}->[c])
                 $end_pars = $i + 2;
-                while ($end_pars + 1 < scalar(@$e)
-                       && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
-                    $end_pars++;
+                while ($end_pars + 1 < scalar(@$e)) {
+                    my $nx = $e->[$end_pars + 1];
+                    if (ref($nx) eq 'PPI::Structure::Subscript') {
+                        $end_pars++;
+                    } elsif (ref($nx) eq 'PPI::Token::Operator'
+                             && $nx->content() eq '->'
+                             && $end_pars + 2 < scalar(@$e)
+                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
+                        $end_pars += 2;
+                    } else {
+                        last;
+                    }
                 }
             } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
                      && $after_symbol->start() eq '{'
                      && $next_term->content() =~ /^%/) {
                 # %hash + Block is one term (KV slice: %h{keys})
                 $end_pars = $i + 2;
+            } elsif (ref($after_symbol) eq 'PPI::Token::Operator'
+                     && $after_symbol->content() eq '->'
+                     && $end_pars >= $i + 3) {
+                # $r->{key} or $r->[idx]: consume full arrow-subscript chain
+                # so exists/delete/defined can see the whole lvalue
+                $end_pars = $i + 3;  # symbol + -> + subscript/block
+                while ($end_pars + 1 < scalar(@$e)) {
+                    my $nx = $e->[$end_pars + 1];
+                    if (ref($nx) eq 'PPI::Structure::Subscript') {
+                        $end_pars++;
+                    } elsif (ref($nx) eq 'PPI::Token::Operator'
+                             && $nx->content() eq '->'
+                             && $end_pars + 2 < scalar(@$e)) {
+                        $end_pars += 2;
+                    } else {
+                        last;
+                    }
+                }
             } else {
                 $end_pars = $i + 1;
             }
@@ -2464,7 +2590,7 @@ sub lvalue_context {
     return LIST_CTX if $type =~ /^(a_ref_acc|a_acc|slice_a_acc)$/;
     
     # Hash operations return list context
-    return LIST_CTX if $type =~ /^(h_ref_acc|h_acc|slice_h_acc|kv_slice_h_acc)$/;
+    return LIST_CTX if $type =~ /^(h_ref_acc|h_acc|slice_h_acc|kv_slice_h_acc|kv_slice_a_acc)$/;
     
     # List of lvalues: ($a, $b, $c)
     return LIST_CTX if $type eq 'progn' || $type eq 'tree_val';

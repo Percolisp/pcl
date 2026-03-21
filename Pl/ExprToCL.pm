@@ -70,6 +70,7 @@ sub _build_handlers {
     'slice_a_acc'   => \&gen_array_slice,
     'slice_h_acc'   => \&gen_hash_slice,
     'kv_slice_h_acc' => \&gen_kv_hash_slice,
+    'kv_slice_a_acc' => \&gen_kv_array_slice,
     'arr_init'      => \&gen_array_init,
     'hash_init'     => \&gen_hash_init,
     'progn'         => \&gen_progn,
@@ -98,7 +99,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   env-set eof eval eval-block eval-direct exception exception-object exists exists-array exit
   exp fc fileno flatten flatten-args for foreach funcall-ref get-class get-coderef getc getcwd
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
-  grep hash hash-= hex hslice if incf index int isa join keys kv-hslice last last-dynamic lc
+  grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
   mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
@@ -1101,6 +1102,18 @@ sub gen_funcall {
           my $key = $self->gen_node($arg_kids->[1]);
           return "(p-exists $hash $key)";
         }
+        elsif ($arg_node->{type} eq 'h_ref_acc') {
+          # Hash-ref access: exists $r->{key} -> (p-exists (unbox REF) key)
+          my $ref = $self->gen_node($arg_kids->[0]);
+          my $key = $self->gen_node($arg_kids->[1]);
+          return "(p-exists (unbox $ref) $key)";
+        }
+        elsif ($arg_node->{type} eq 'a_ref_acc') {
+          # Array-ref access: exists $r->[idx] -> (p-exists-array (unbox REF) idx)
+          my $ref = $self->gen_node($arg_kids->[0]);
+          my $idx = $self->gen_node($arg_kids->[1]);
+          return "(p-exists-array (unbox $ref) $idx)";
+        }
       }
     }
   }
@@ -1547,6 +1560,14 @@ sub gen_array_ref_access {
   my $node_id = shift;
   my $kids    = shift;
 
+  # qw[...][idx] or (LIST)[idx]: if LHS is a progn (list literal), force LIST_CTX
+  # so gen_progn produces (vector ...) that p-aref-deref can index into.
+  my $child0_node = $self->expr_o->get_a_node($kids->[0]);
+  if ($self->expr_o->is_internal_node_type($child0_node)
+      && $child0_node->{type} eq 'progn') {
+    $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
+  }
+
   my $ref = $self->gen_node($kids->[0]);
   my $idx = $self->gen_node($kids->[1]);
 
@@ -1626,6 +1647,27 @@ sub gen_kv_hash_slice {
   return "(p-kv-hslice $hash $key_str)";
 }
 
+
+# KV array slice: %arr[indices] - returns key-value pairs
+sub gen_kv_array_slice {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  my $arr = $self->gen_node($kids->[0]);
+  # %arr[...] uses @ sigil for the array variable in CL
+  $arr =~ s/^\%/\@/;
+  # %$ref[...] — $ref is a scalar holding an array ref; unbox to get the vector
+  $arr = "(unbox $arr)" if $arr =~ /^\$/;
+  my @indices;
+  for my $i (1 .. $#$kids) {
+    push @indices, $self->gen_node($kids->[$i]);
+  }
+
+  my $idx_str = join(' ', @indices);
+  return "(p-kv-aslice $arr $idx_str)";
+}
 
 # Array initializer: (p-array-init ...)
 # Uses p-array-init to flatten nested arrays (handles [(@x) x 2] etc.)
