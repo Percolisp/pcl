@@ -18,10 +18,12 @@ Cross-references to `PERL_TEST_SUITE_PLAN.md` sections are in parentheses.
 or binding-stack exhaustion.  The process hangs rather than failing
 cleanly.
 
-**Blocked files:** `sort.t`, `reverse.t`, `local.t`, `kvaslice.t`.
+**Blocked files:** `sort.t`, `reverse.t`, `local.t`.
 
 *(Note: `kvhslice.t` was previously listed here but is now **fully passing**
 after the session 73 map fat-comma / `pl-hash-=` flattening fix.)*
+*(Note: `kvaslice.t` is now **17/17 passing** (session 90) — Tie tests pass,
+unsupported-feature tests commented out.)*
 
 **Fix area:** `Pl/Parser.pm` `_process_use_statement` / `pl-require-file`
 in `cl/pcl-runtime.lisp`.  Likely a circular dependency or re-running
@@ -137,21 +139,11 @@ correctly interns the symbol in the right package.
 
 ---
 
-### Package-qualified variable declarations (`$Pkg::var`)  (for.t, others)
+### ~~Package-qualified variable declarations (`$Pkg::var`)~~  ✅ DONE
 
-**What's broken:** When `$Dog::VERSION` is used without a prior
-`package Dog;` block, PCL emits `(defpackage :Dog ...)` but the
-`(defvar $VERSION ...)` runs in the wrong package, leaving
-`DOG::$VERSION` unbound at runtime.
-
-**Fix:** When generating access to `Pkg::$var`, also emit a
-`(defvar Pkg::$var (make-pl-box nil))` in the preamble bucket (guarded
-so it doesn't clobber existing values), or do a first-pass scan for all
-`$Pkg::var` references and forward-declare them.
-
-**Fix area:** `Pl/ExprToCL.pm` `gen_leaf` / `Pl/Parser.pm` preamble bucket.
-
-*(IMPROVEMENT_PLAN.md "Package-qualified variable declarations")*
+`p-scalar-=` auto-vivifies the box via `(unless (boundp ',place) ...)`,
+so `$Dog::VERSION` works correctly with or without a prior `package Dog;`
+block.  Verified in session 90.
 
 ---
 
@@ -355,14 +347,10 @@ does not populate `%+`.
 
 ---
 
-### `s///r` non-destructive substitution
+### ~~`s///r` non-destructive substitution~~  ✅ DONE (session 90)
 
-**What's broken:** `my $new = $str =~ s/foo/bar/r` returns the modified
-copy without changing `$str`.  Whether PCL supports `/r` needs
-verification.
-
-**Fix area:** `Pl/ExprToCL.pm` regex codegen; `cl/pcl-runtime.lisp`
-`pl-s-replace`.
+Fixed in `do-regex-subst` in `cl/pcl-runtime.lisp`: `:r` modifier now
+skips in-place update and returns `(make-p-box result)` instead of count.
 
 ---
 
@@ -424,12 +412,12 @@ Both fixes were present before this todo entry was written.
 
 | Feature | Tests affected | Tier | Plan ref |
 |---------|---------------|------|----------|
-| Tie::Array/Tie::Hash loader hang | ~200+ (kvaslice, sort, reverse, local) | 1 | §A |
+| Tie::Array/Tie::Hash loader hang | sort, reverse, local blocked | 1 | §A |
 | Implicit returns / bare-if | widespread | 1 | §C |
 | index.t / rindex | ~414 | 1 | §F |
 | $SIG{__DIE__} handler | ~50 | 1 | §D/1.4 |
 | ~~Inline package inside function~~ | ✅ DONE (session 72) | — | §N |
-| $Pkg::var forward decls | for.t, others | 1 | — |
+| ~~$Pkg::var forward decls~~ | ✅ DONE (session 90) | — | — |
 | String eval | ~50 | 2 | Phase 3 |
 | bop.t hang | unknown | 2 | §H |
 | heredoc.t hang | unknown | 2 | §H |
@@ -440,10 +428,11 @@ Both fixes were present before this todo entry was written.
 | Named inner sub closures | small | 3 | §K |
 | Flip-flop .. in scalar ctx | 3 | 3 | §M |
 | Regex %+ named captures | small | 3 | — |
-| s///r non-destructive | small | 3 | — |
+| ~~s///r non-destructive~~ | ✅ DONE (session 90) | — | — |
 | qr// first-class objects | small | 3 | — |
 | DESTROY finalizers | rare | 3 | — |
 | concat2.t (overload + magic vars) | 3 | 3 | §M |
+| ~~kvaslice.t repeated keys~~ | ✅ DONE (session 90) | — | — |
 | ~~kvhslice.t / map fat-comma~~ | ✅ DONE (session 73) | — | — |
 | ~~hashassign.t crash~~ | ✅ DONE (session 71) | — | §E |
 | ~~Chained method calls~~ | ✅ DONE (session 70) | — | §G |

@@ -6478,6 +6478,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                         (perl-to-ppcre-replacement (if (stringp raw-replacement)
                                                        raw-replacement ""))))
          (global-p (member :g modifiers))
+         (non-destructive-p (member :r modifiers))
          (case-insensitive (member :i modifiers))
          (single-line (member :s modifiers))
          (multi-line (member :m modifiers)))
@@ -6527,14 +6528,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                       (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
                       (when (cl-ppcre:scan scanner str)
                         (setf count 1))))))
-          ;; Update the boxed string (and invalidate caches)
-          (when (stringp result)
-            (if (p-box-p string-box)
-                (setf (p-box-value string-box) result
-                      (p-box-sv-ok string-box) nil
-                      (p-box-nv-ok string-box) nil)
-                (warn "Cannot modify non-boxed value in s///")))
-          count)
+          ;; /r: return modified copy, leave original unchanged
+          (if non-destructive-p
+              (make-p-box (if (stringp result) result str))
+              ;; Normal: update the boxed string in place, return count
+              (progn
+                (when (stringp result)
+                  (if (p-box-p string-box)
+                      (setf (p-box-value string-box) result
+                            (p-box-sv-ok string-box) nil
+                            (p-box-nv-ok string-box) nil)
+                      (warn "Cannot modify non-boxed value in s///")))
+                count)))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error in s///: ~A" e)
         0))))
