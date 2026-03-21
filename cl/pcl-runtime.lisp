@@ -113,7 +113,7 @@
    ;; Regex
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
-   #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9
+   #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^|
@@ -269,7 +269,7 @@
 (defvar @_ (make-array 0 :adjustable t :fill-pointer 0)
   "Perl @_ - current subroutine arguments")
 
-;;; Regex capture group variables ($1, $2, ... $9)
+;;; Regex capture group variables ($1, $2, ... $9) and named captures (%+)
 (defvar $1 nil "Regex capture group 1")
 (defvar $2 nil "Regex capture group 2")
 (defvar $3 nil "Regex capture group 3")
@@ -279,6 +279,7 @@
 (defvar $7 nil "Regex capture group 7")
 (defvar $8 nil "Regex capture group 8")
 (defvar $9 nil "Regex capture group 9")
+(defvar %+ (make-hash-table :test 'equal) "Perl %+ - named regex captures")
 
 ;;; Default variable ($_) - defined later after make-p-box (see Boxed special variables section)
 
@@ -6349,30 +6350,39 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun clear-capture-groups ()
   "Reset all capture group variables to nil"
   (setf $1 nil $2 nil $3 nil $4 nil $5 nil
-        $6 nil $7 nil $8 nil $9 nil))
+        $6 nil $7 nil $8 nil $9 nil)
+  (clrhash %+))
 
-(defun set-capture-groups (str reg-starts reg-ends)
-  "Set capture group variables from regex match results"
+(defmacro %set-cap (var str starts ends idx)
+  "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
+  `(let ((rs (aref ,starts ,idx)) (re (aref ,ends ,idx)))
+     (setf ,var (if (and rs re) (subseq ,str rs re) nil))))
+
+(defun set-capture-groups (str reg-starts reg-ends &optional reg-names)
+  "Set capture group variables $1..$9 and named captures %+ from regex match results.
+   REG-NAMES is the optional list of capture names returned by cl-ppcre:create-scanner.
+   Groups that did not participate in the match (optional groups) set $N to nil."
   (when (and reg-starts reg-ends)
     (let ((num-groups (length reg-starts)))
-      (when (> num-groups 0)
-        (setf $1 (subseq str (aref reg-starts 0) (aref reg-ends 0))))
-      (when (> num-groups 1)
-        (setf $2 (subseq str (aref reg-starts 1) (aref reg-ends 1))))
-      (when (> num-groups 2)
-        (setf $3 (subseq str (aref reg-starts 2) (aref reg-ends 2))))
-      (when (> num-groups 3)
-        (setf $4 (subseq str (aref reg-starts 3) (aref reg-ends 3))))
-      (when (> num-groups 4)
-        (setf $5 (subseq str (aref reg-starts 4) (aref reg-ends 4))))
-      (when (> num-groups 5)
-        (setf $6 (subseq str (aref reg-starts 5) (aref reg-ends 5))))
-      (when (> num-groups 6)
-        (setf $7 (subseq str (aref reg-starts 6) (aref reg-ends 6))))
-      (when (> num-groups 7)
-        (setf $8 (subseq str (aref reg-starts 7) (aref reg-ends 7))))
-      (when (> num-groups 8)
-        (setf $9 (subseq str (aref reg-starts 8) (aref reg-ends 8)))))))
+      (when (> num-groups 0) (%set-cap $1 str reg-starts reg-ends 0))
+      (when (> num-groups 1) (%set-cap $2 str reg-starts reg-ends 1))
+      (when (> num-groups 2) (%set-cap $3 str reg-starts reg-ends 2))
+      (when (> num-groups 3) (%set-cap $4 str reg-starts reg-ends 3))
+      (when (> num-groups 4) (%set-cap $5 str reg-starts reg-ends 4))
+      (when (> num-groups 5) (%set-cap $6 str reg-starts reg-ends 5))
+      (when (> num-groups 6) (%set-cap $7 str reg-starts reg-ends 6))
+      (when (> num-groups 7) (%set-cap $8 str reg-starts reg-ends 7))
+      (when (> num-groups 8) (%set-cap $9 str reg-starts reg-ends 8))
+      ;; Populate %+ with named captures
+      ;; reg-names is a list from cl-ppcre:create-scanner, e.g. ("year" "month" NIL)
+      (when reg-names
+        (loop for name in reg-names
+              for i from 0
+              when (and name (< i num-groups))
+              do (let ((rs (aref reg-starts i))
+                       (re (aref reg-ends   i)))
+                   (when (and rs re)
+                     (setf (gethash name %+) (subseq str rs re)))))))))
 
 (defun do-regex-match (string op)
   "Perform regex match.
@@ -6390,7 +6400,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (global-p (getf modifiers :g))
          (cont-p (getf modifiers :c)))
     (handler-case
-        (let ((scanner (apply #'cl-ppcre:create-scanner pattern options)))
+        (multiple-value-bind (scanner reg-names)
+            (apply #'cl-ppcre:create-scanner pattern options)
+          ;; Perl clears %+ on every match attempt, even failures.
+          ;; $1..$9 are only cleared/set on successful matches.
+          (clrhash %+)
           (cond
             ;; /g in list context: return all matches at once, no pos tracking
             ((and global-p *wantarray*)
@@ -6417,7 +6431,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                      (progn
                        (setf (gethash string *p-match-pos*) match-end)
                        (clear-capture-groups)
-                       (set-capture-groups str reg-starts reg-ends)
+                       (set-capture-groups str reg-starts reg-ends reg-names)
                        t)
                      (progn
                        (unless cont-p
@@ -6430,7 +6444,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (declare (ignore match-end))
                (when match-start
                  (clear-capture-groups)
-                 (set-capture-groups str reg-starts reg-ends)
+                 (set-capture-groups str reg-starts reg-ends reg-names)
                  (if *wantarray*
                      (let* ((num-groups (length reg-starts))
                             (captures (make-array num-groups :adjustable t :fill-pointer t)))
@@ -6478,16 +6492,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                         (perl-to-ppcre-replacement (if (stringp raw-replacement)
                                                        raw-replacement ""))))
          (global-p (member :g modifiers))
+         (non-destructive-p (member :r modifiers))
          (case-insensitive (member :i modifiers))
          (single-line (member :s modifiers))
          (multi-line (member :m modifiers)))
     (handler-case
         (let* ((options (append (when case-insensitive '(:case-insensitive-mode t))
                                 (when single-line '(:single-line-mode t))
-                                (when multi-line '(:multi-line-mode t))))
-               (scanner (apply #'cl-ppcre:create-scanner pattern options))
-               (count 0)
-               (result nil))
+                                (when multi-line '(:multi-line-mode t)))))
+          (multiple-value-bind (scanner reg-names)
+              (apply #'cl-ppcre:create-scanner pattern options)
+          (let* ((count 0)
+                 (result nil))
           (if eval-p
               ;; s///e: call lambda per match, setting $1..$9 from capture groups
               ;; :simple-calls t → function receives (match g1 g2 ...) as strings
@@ -6504,6 +6520,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                               (when (>= (length groups) 7) (setf $7 (or (nth 6 groups) *p-undef*)))
                               (when (>= (length groups) 8) (setf $8 (or (nth 7 groups) *p-undef*)))
                               (when (>= (length groups) 9) (setf $9 (or (nth 8 groups) *p-undef*)))
+                              ;; Populate %+ from named groups using reg-names from outer scope
+                              (clrhash %+)
+                              (when reg-names
+                                (loop for name in reg-names
+                                      for i from 0
+                                      when (and name (< i (length groups)))
+                                      do (let ((val (nth i groups)))
+                                           (when val (setf (gethash name %+) val)))))
                               (to-string (funcall raw-replacement)))))
                 (setf result (if global-p
                                  (cl-ppcre:regex-replace-all scanner str rep-fn :simple-calls t)
@@ -6516,7 +6540,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   (declare (ignore match-end))
                   (when match-start
                     (clear-capture-groups)
-                    (set-capture-groups str reg-starts reg-ends)))
+                    (set-capture-groups str reg-starts reg-ends reg-names)))
                 ;; Perform the substitution
                 (setf result (if global-p
                                  (cl-ppcre:regex-replace-all scanner str replacement)
@@ -6527,14 +6551,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                       (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
                       (when (cl-ppcre:scan scanner str)
                         (setf count 1))))))
-          ;; Update the boxed string (and invalidate caches)
-          (when (stringp result)
-            (if (p-box-p string-box)
-                (setf (p-box-value string-box) result
-                      (p-box-sv-ok string-box) nil
-                      (p-box-nv-ok string-box) nil)
-                (warn "Cannot modify non-boxed value in s///")))
-          count)
+          ;; /r: return modified copy, leave original unchanged
+          (if non-destructive-p
+              (make-p-box (if (stringp result) result str))
+              ;; Normal: update the boxed string in place, return count
+              (progn
+                (when (stringp result)
+                  (if (p-box-p string-box)
+                      (setf (p-box-value string-box) result
+                            (p-box-sv-ok string-box) nil
+                            (p-box-nv-ok string-box) nil)
+                      (warn "Cannot modify non-boxed value in s///")))
+                count)))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error in s///: ~A" e)
         0))))
@@ -6695,6 +6723,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; Make CL read all float literals as double-float (e.g., 1.5 → 1.5d0, not 1.5f0)
 (setf *read-default-float-format* 'double-float)
 
+;; Enable Perl-style named capture groups (?<name>...) in cl-ppcre
+(setf cl-ppcre:*allow-named-registers* t)
+
 ;;; ============================================================
 ;;; Stub packages for common Perl modules
 ;;; ============================================================
@@ -6715,7 +6746,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defpackage :warnings (:use :cl :pcl))
 (in-package :warnings)
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defvar $VERSION (make-p-box "1.50")))
+  (defvar $VERSION (make-p-box "1.50"))
+  (defvar $BYTES (make-p-box 12))   ; bytes in warning bitmask (12 in modern Perl)
+  )
 (defun pl-unimport (&rest args) (declare (ignore args)) nil)
 (defun pl-import (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
