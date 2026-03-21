@@ -280,9 +280,15 @@ sub parse_interpolated_variable {
     # $; $, $| $: $% $= $- $< $> $( $) $[ $] $~ $"
     # Note: $^ alone (format top name) is rare, skip it to avoid ambiguity
     if ($next_char =~ /^[!\?\.\@\/\\&\'\`\+;\,\|:\%=\-<>\(\)\[\]~"]$/) {
-      my $var_token = PPI::Token::Magic->new('$' . $next_char);
+      my $full_var = '$' . $next_char;
+      my $end_pos = $pos + 2;
+      # $+{key} is a hash subscript on %+ (named captures)
+      if ($next_char eq '+' && substr($content, $end_pos, 1) eq '{') {
+        return $self->parse_hash_subscript($parser, $content_ref, $pos, $full_var);
+      }
+      my $var_token = PPI::Token::Magic->new($full_var);
       my $var_id = $parser->make_node($var_token);
-      return ($var_id, $pos + 2);
+      return ($var_id, $end_pos);
     }
   }
 

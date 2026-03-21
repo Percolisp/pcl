@@ -9,7 +9,7 @@ use warnings;
 use lib ".";
 
 use PPI;
-use Test::More tests => 22;
+use Test::More tests => 24;
 
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
@@ -151,6 +151,19 @@ test_codegen('$count = ($str =~ tr/x//)',
              '(p-scalar-= $count (p-=~ $str (p-tr "x" "")))',
              'Count chars with tr///');
 
+
+diag "";
+diag "-------- Named captures %+:";
+
+# $+{name} in code should access the %+ hash
+test_codegen('$+{year}',
+             '(p-gethash %+ "year")',
+             '$+{name} generates hash access on %+');
+
+# $+{name} in string interpolation
+test_codegen('"$+{year}"',
+             '(p-gethash %+ "year")',
+             '"$+{name}" interpolates via p-gethash');
 
 diag "";
 diag "All s/// and tr/// tests completed!";
