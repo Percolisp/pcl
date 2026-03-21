@@ -24,6 +24,7 @@ Append new entries at the top. One section per session.
 
 ### Stats
 - PCL suite: **65 files, 2667 tests, all passing**
+- Sweep: **5433 passing, 2000 failing** (+1 vs session 89) — 41 fully-passing files
 
 ---
 
