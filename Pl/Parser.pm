@@ -324,9 +324,23 @@ sub _insert_variable_forward_declarations {
     $0 $$ $?
   );
 
-  my %declared;    # variables with defvar
+  my %declared;    # variables with defvar already in preamble/declarations
   my %let_bound;   # variables bound by let/let*/foreach at FILE scope only
   my %referenced;  # all variable references at FILE scope only
+
+  # Only scan section 0's preamble+declarations for "already declared" defvars.
+  # Forward declarations are inserted into section 0. A defvar in a later section
+  # (e.g. section 7) doesn't help section 0's runtime code which runs first.
+  # defvars inside runtime code (e.g. from 'my @a' in bare blocks) must also NOT
+  # suppress a forward declaration for the same reason.
+  {
+    my $s0 = $self->_sections->[0];
+    for my $line (@{$s0->{preamble}}, @{$s0->{declarations}}) {
+      if ($line =~ /\(defvar\s+([\$\@\%][a-zA-Z_]\w*)\b/) {
+        $declared{$1} = 1;
+      }
+    }
+  }
 
   # Collect all lines from all sections' all buckets
   my @all_lines;
@@ -352,10 +366,6 @@ sub _insert_variable_forward_declarations {
     }
 
     if ($sub_depth == 0) {
-      # Collect defvar'd variables: (defvar $var ...)
-      if ($line =~ /\(defvar\s+([\$\@\%][a-zA-Z_]\w*)\b/) {
-        $declared{$1} = 1;
-      }
       # Collect let/let*-bound variables.
       if ($line =~ /\(let\*?\s+\(/) {
         while ($line =~ /\(([\$\@\%][a-zA-Z_]\w*)\s+/g) {
@@ -380,12 +390,19 @@ sub _insert_variable_forward_declarations {
     }
   }
 
-  # Undeclared = referenced - declared - let_bound - runtime
+  # Undeclared = referenced - declared - runtime - __lex__ let-bound
+  # Note: do NOT exclude all let_bound vars. A variable may be let-bound inside a
+  # bare block (e.g. 'my @a' -> (let ((@a ...))...)) but still referenced as a
+  # package variable at an earlier point in load order. defvar is idempotent,
+  # so emitting a forward declaration for regular let-bound vars is safe.
+  # EXCEPTION: __lex__ variables (closure-renamed) must stay lexical (no defvar).
+  # They are let-bound per-iteration and must create CL lexical (not dynamic)
+  # bindings so each closure iteration captures its own independent binding.
   my @undeclared;
   for my $var (sort keys %referenced) {
     next if $declared{$var};
-    next if $let_bound{$var};
     next if $runtime_vars{$var};
+    next if $let_bound{$var} && $var =~ /__lex__/;
     push @undeclared, $var;
   }
 
@@ -1347,6 +1364,29 @@ sub _process_local_declaration {
     $r ne 'PPI::Token::Whitespace'
     && !($r eq 'PPI::Token::Word' && $_->content eq 'local')
   } @$parts;
+
+  # ── Pre-unwrap: local(*foo) — single symbol in parens. Unwrap before typeglob check.
+  if (@non_ws >= 1 && ref($non_ws[0]) eq 'PPI::Structure::List') {
+    my @flat;
+    for my $child ($non_ws[0]->children) {
+      my $cr = ref($child);
+      next if $cr eq 'PPI::Token::Whitespace';
+      next if $cr eq 'PPI::Token::Structure';
+      if ($cr =~ /^PPI::Statement/) {
+        for my $gc ($child->children) {
+          next if ref($gc) eq 'PPI::Token::Whitespace';
+          push @flat, $gc;
+        }
+      } else {
+        push @flat, $child;
+      }
+    }
+    if (@flat == 1 && ref($flat[0]) eq 'PPI::Token::Symbol') {
+      # local(*foo) or local($scalar) with no subscript — unwrap the parens
+      splice(@non_ws, 0, 1, @flat);
+    }
+  }
+
   if (@non_ws && ref($non_ws[0]) eq 'PPI::Token::Symbol'
       && $non_ws[0]->content =~ /^\*(.+)$/) {
     my $glob_content = $non_ws[0]->content;  # e.g. "*foo" or "*Pkg::foo"
@@ -1406,6 +1446,11 @@ sub _process_local_declaration {
     if (@flat == 2
         && ref($flat[0]) eq 'PPI::Token::Symbol'
         && ref($flat[1]) eq 'PPI::Structure::Subscript') {
+      splice(@non_ws, 0, 1, @flat);
+    }
+    elsif (@flat == 1
+           && ref($flat[0]) eq 'PPI::Token::Symbol') {
+      # local(*foo), local($scalar), etc. — single symbol in parens
       splice(@non_ws, 0, 1, @flat);
     }
   }
@@ -2127,18 +2172,26 @@ sub parse_block_as_function {
   }
 
   if ($return_lambda) {
-    # Collect all emitted lines from temp section and return as lambda string
+    # Collect all emitted lines from temp section and return as lambda string.
+    # Definitions (BEGIN blocks) are hoisted to the real definitions bucket
+    # rather than inlined in the lambda string — otherwise (eval-when ...) ends
+    # up as the first argument to p-funcall-ref, making NIL the function ref.
     my $temp = $self->_sections->[0];
+    my @hoisted_defs = @{$temp->{definitions}};
     my @lines = (
       @{$temp->{preamble}},
       @{$temp->{declarations}},
-      @{$temp->{definitions}},
       @{$temp->{runtime}},
     );
     $self->_sections($saved_sections);
     $self->_cur_section($saved_cur_section);
     $self->_cur_bucket($saved_cur_bucket);
     $self->indent_level($saved_indent);
+    # Re-emit hoisted definitions (BEGIN blocks, etc.) into the real sections
+    if (@hoisted_defs) {
+      my $section = $self->_sections->[$self->_cur_section];
+      push @{$section->{'definitions'}}, @hoisted_defs;
+    }
     return @lines ? join("\n", @lines) : "(lambda () nil)";
   }
 

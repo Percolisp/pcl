@@ -1560,6 +1560,14 @@ sub gen_array_ref_access {
   my $node_id = shift;
   my $kids    = shift;
 
+  # qw[...][idx] or (LIST)[idx]: if LHS is a progn (list literal), force LIST_CTX
+  # so gen_progn produces (vector ...) that p-aref-deref can index into.
+  my $child0_node = $self->expr_o->get_a_node($kids->[0]);
+  if ($self->expr_o->is_internal_node_type($child0_node)
+      && $child0_node->{type} eq 'progn') {
+    $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
+  }
+
   my $ref = $self->gen_node($kids->[0]);
   my $idx = $self->gen_node($kids->[1]);
 

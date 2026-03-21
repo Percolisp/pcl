@@ -2822,8 +2822,12 @@
       (make-p-box *p-undef*))))
 
 (defun p-aref-deref (ref idx)
-  "Perl array ref access $ref->[idx] - unbox the reference first"
-  (p-aref (unbox ref) idx))
+  "Perl array ref access $ref->[idx] - unbox the reference first.
+   When idx is a vector (range result), returns a slice instead of a single element."
+  (let ((arr (unbox ref)))
+    (if (and (vectorp idx) (not (stringp idx)))
+        (p-aslice arr idx)
+        (p-aref arr idx))))
 
 (defun p-array-last-index (arr)
   "Perl $#arr - last index. Accepts raw vectors (@arr) or boxed array refs ($aref).
@@ -5519,6 +5523,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (setf (symbol-value (intern (concatenate 'string "%" uname) pkg))
              inner))
 
+      ;; *foo = 'name' — symbolic alias: copy slots from *pkg::name
+      ((stringp inner)
+       (let ((src-name (string-upcase inner)))
+         (p-glob-copy pkg uname (make-p-typeglob pkg src-name))))
+
       ;; *foo = undef — no-op
       ((or (null inner) (eq inner *p-undef*)) nil)
 
@@ -5592,14 +5601,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (t *p-undef*))))
 
 (defmacro p-local-glob (pkg-str name-str &body body)
-  "Save all slots of *pkg::name, execute body, restore on exit."
-  (let ((pkg-var       (gensym "PKG"))
-        (uname-var     (gensym "UNAME"))
+  "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
+   execute body, restore on exit."
+  (let ((pkg-var        (gensym "PKG"))
+        (uname-var      (gensym "UNAME"))
         (saved-had-code (gensym "HAD-CODE"))
-        (saved-code    (gensym "SAVED-CODE"))
-        (saved-scalar  (gensym "SAVED-SCALAR"))
-        (saved-array   (gensym "SAVED-ARRAY"))
-        (saved-hash    (gensym "SAVED-HASH")))
+        (saved-code     (gensym "SAVED-CODE"))
+        (saved-scalar   (gensym "SAVED-SCALAR"))
+        (saved-array    (gensym "SAVED-ARRAY"))
+        (saved-hash     (gensym "SAVED-HASH"))
+        (had-scalar     (gensym "HAD-SCALAR"))
+        (had-array      (gensym "HAD-ARRAY"))
+        (had-hash       (gensym "HAD-HASH")))
     `(let* ((,pkg-var   (or (find-package (string-upcase ,pkg-str))
                             (make-package (string-upcase ,pkg-str) :use '(:cl :pcl))))
             (,uname-var (string-upcase ,name-str))
@@ -5609,16 +5622,30 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (hash-sym   (intern (concatenate 'string "%"    ,uname-var) ,pkg-var))
             (,saved-had-code (fboundp code-sym))
             (,saved-code     (when ,saved-had-code (fdefinition code-sym)))
-            (,saved-scalar   (when (boundp scalar-sym) (symbol-value scalar-sym)))
-            (,saved-array    (when (boundp array-sym)  (symbol-value array-sym)))
-            (,saved-hash     (when (boundp hash-sym)   (symbol-value hash-sym))))
+            (,had-scalar     (boundp scalar-sym))
+            (,saved-scalar   (when ,had-scalar (symbol-value scalar-sym)))
+            (,had-array      (boundp array-sym))
+            (,saved-array    (when ,had-array  (symbol-value array-sym)))
+            (,had-hash       (boundp hash-sym))
+            (,saved-hash     (when ,had-hash   (symbol-value hash-sym))))
+       ;; Clear all slots so local *foo starts fresh (Perl semantics)
+       (when ,saved-had-code (fmakunbound code-sym))
+       (setf (symbol-value scalar-sym) (make-p-box *p-undef*))
+       (setf (symbol-value array-sym)  (make-array 0 :adjustable t :fill-pointer 0))
+       (setf (symbol-value hash-sym)   (make-hash-table :test 'equal))
        (unwind-protect (progn ,@body)
          (if ,saved-had-code
              (setf (fdefinition code-sym) ,saved-code)
              (when (fboundp code-sym) (fmakunbound code-sym)))
-         (when ,saved-scalar (setf (symbol-value scalar-sym) ,saved-scalar))
-         (when ,saved-array  (setf (symbol-value array-sym)  ,saved-array))
-         (when ,saved-hash   (setf (symbol-value hash-sym)   ,saved-hash))))))
+         (if ,had-scalar
+             (setf (symbol-value scalar-sym) ,saved-scalar)
+             (makunbound scalar-sym))
+         (if ,had-array
+             (setf (symbol-value array-sym) ,saved-array)
+             (makunbound array-sym))
+         (if ,had-hash
+             (setf (symbol-value hash-sym) ,saved-hash)
+             (makunbound hash-sym))))))
 
 (defmacro p-local-hash-elem (hash-var key-form &body body)
   "Save/restore one hash entry. Like Perl's local $hash{key}.

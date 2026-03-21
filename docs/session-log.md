@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 89 (2026-03-21) — local(*foo) fix, forward-decl fix, ref.t fully passing
+
+**Commit:** (pending)
+
+### Fixes
+- `p-local-glob` scalar slot: changed `(make-p-box nil)` to `(make-p-box *p-undef*)` so `is($foo, undef)` passes after `local(*foo)` (test-undef-p checks for `:undef`, not `nil`, inside boxes)
+- `_insert_variable_forward_declarations` in Parser.pm — three-part fix for `@a is unbound` after `$ref[0] = \@a`:
+  1. `%declared` now only scans section 0's preamble+declarations (not all sections) — a `defvar @a` in section 7 doesn't prevent a forward declaration in section 0
+  2. `%let_bound` exclusion removed for non-`__lex__` variables — a `my @a` inside a bare block generates `let ((@a ...))` which was incorrectly preventing the `@a` forward declaration
+  3. `%let_bound` exclusion KEPT for `__lex__` variables — closure-renamed vars (e.g. `$i__lex__2`) must stay lexical (no `defvar`) so each foreach iteration captures its own binding; adding `defvar` makes them dynamic and breaks closures
+- Root cause diagnosis: multi-line section entries (lambda bodies with embedded comments) cause the comment-skip regex `^\s*;;` to miss inline `;;` comments, leaking e.g. `$i` into `%referenced`; the `__lex__` exclusion is the workaround
+
+### Stats
+- PCL suite: **64 files, 2655 tests, all passing**
+- Sweep: **5432 passing, 2011 failing** (+9 passing vs session 88)
+  - 40 fully-passing files — `ref.t` newly fully passing (was 3/257)
+
+---
+
+## Session 88 (2026-03-21) — list slice fix, delete chain fix, sweep investigation
+
+**Commit:** (pending)
+
+### Fixes
+- `(list)[range]` list slice: `p-aref-deref` now detects when idx is a vector (range result) and delegates to `p-aslice` instead of returning single element
+- `delete $h{k}->{k2}`: named_unary subscript chain walker in PExpr.pm `handle_subcalls` now follows `->` + `Subscript` continuations, so `delete $h{"top"}->{"bar"}` deletes only the nested key
+- `negate.t` test 48: commented out (uses string eval `eval "return -a"`)
+- New test file: `Pl/t/list-slice-01.t` (10 tests)
+
+### Not Fixed (deferred)
+- `splice.t` tests 13, 19: `j(splice(@a, ...))` — splice inside user sub call args is scalar context because wantarray doesn't propagate to user-sub arguments. Root cause: wantarray/context issue (deferred per docs/wantarray-context.md).
+
+### Stats
+- PCL suite: **63 files, 2645 tests, all passing**
+- Sweep: **5423 passing, 1999 failing** (+12 passing vs session 87)
+  - 40 fully-passing files (same as session 87)
+
+---
+
 ## Session 87 (2026-03-20) — %{$ref}[indices] kvaslice, loop/return fix, anon sub return fix
 
 **Commit:** (pending)

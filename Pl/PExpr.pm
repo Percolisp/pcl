@@ -750,13 +750,19 @@ sub parse {
         && $e->[$i-1]->start() eq '{'
         && ref($e->[$i-2]) eq 'PPI::Token::Cast'
         && $e->[$i-2]->content() eq '%';
+    # qw[...][idx] — subscript on a qw word list literal
+    my $is_qw_subscript = ref($term) eq 'PPI::Structure::Constructor'
+        && $term->start() eq '['
+        && $i > 0
+        && ref($e->[$i-1]) eq 'PPI::Token::QuoteLike::Words';
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
         && !$is_constructor_subscript
         && !$is_kv_slice_block
         && !$is_kv_arr_constructor
-        && !$is_kv_arr_deref_constructor;
+        && !$is_kv_arr_deref_constructor
+        && !$is_qw_subscript;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -1051,6 +1057,21 @@ sub parse {
     }
 
     # Handle Constructor [ ] after funcall/methodcall - PPI uses Constructor
+    # Handle qw[...][idx] — subscript on a qw word list literal
+    # qw[void scalar list][1] → (p-aref-deref (vector "void" "scalar" "list") 1)
+    if ($is_qw_subscript) {
+      my $pre_id = $self->parse([$pre]);
+      my($node, $id) = $self->make_node_insert('a_ref_acc');
+      my @ix = $term->children();
+      my $ix_id = $self->parse(\@ix);
+      $self->add_child_to_node($id, $pre_id);
+      $self->add_child_to_node($id, $ix_id);
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;
+      $i--;
+      next;
+    }
+
     # instead of Subscript when subscript follows a method call
     # e.g., $obj->method()[$i] has [$i] as Constructor, not Subscript
     if (ref($term) eq 'PPI::Structure::Constructor'
@@ -1919,12 +1940,21 @@ sub handle_subcalls {
             # Check if symbol is followed by subscript (hash/array access)
             my $after_symbol = $e->[$i + 2];
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
-                # Symbol + Subscript chain: consume all chained subscripts
-                # (e.g., $h{a}{b}[c] — all subscripts belong to the lvalue)
+                # Symbol + Subscript chain: consume all chained subscripts and
+                # arrow-subscript chains (e.g., $h{a}{b}[c] or $h{a}->{b}->[c])
                 $end_pars = $i + 2;
-                while ($end_pars + 1 < scalar(@$e)
-                       && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
-                    $end_pars++;
+                while ($end_pars + 1 < scalar(@$e)) {
+                    my $nx = $e->[$end_pars + 1];
+                    if (ref($nx) eq 'PPI::Structure::Subscript') {
+                        $end_pars++;
+                    } elsif (ref($nx) eq 'PPI::Token::Operator'
+                             && $nx->content() eq '->'
+                             && $end_pars + 2 < scalar(@$e)
+                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
+                        $end_pars += 2;
+                    } else {
+                        last;
+                    }
                 }
             } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
                      && $after_symbol->start() eq '{'
