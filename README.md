@@ -32,7 +32,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run test suite (53 files, 2507 tests)
+# Run test suite (64 files, 2655 tests)
 prove -j8 Pl/t/
 ```
 
@@ -50,7 +50,7 @@ Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
 | `Pl/Parser.pm` | Statement-level parser |
 | `Pl/PExpr.pm` | Expression parser, operator precedence |
 | `Pl/ExprToCL.pm` | Code generator |
-| `cl/pcl-runtime.lisp` | Runtime library (~6000 lines of CL) |
+| `cl/pcl-runtime.lisp` | Runtime library (~6500 lines of CL) |
 
 Generated code is intentionally readable — Perl variables keep their sigils (`$x`, `@array`, `%hash`), and functions map to `pl-` prefixed names (`pl-print`, `pl-push`, …).
 
@@ -78,9 +78,9 @@ I am Rex and I bark
 
 ## Status
 
-**Beta.** The test suite runs 2507 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own internal test suite (`t/op/`, `t/base/`, etc.) passes ~6200 / ~7600 tests (~82%).
+**Beta.** The internal test suite runs 2655 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **5432 / 7443 tests (~73%)**, with 40 files passing completely.
 
-Known gaps: `state` variable generator pattern, string `eval`, some `local` forms, XS/C extensions. Right now the bugs are shaken out by running Perl's internal tests, it is slow going.
+Known gaps: `state` variables, string `eval`, XS/C extensions. The bugs are being shaken out by running Perl's own tests.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 
