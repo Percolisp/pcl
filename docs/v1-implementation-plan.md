@@ -310,45 +310,22 @@ This matches what Perl does: `BEGIN` blocks run at compile time regardless of wh
 
 ---
 
-### C1. Regex named captures via `%+`
+### ~~C1. Regex named captures via `%+`~~  ✅ DONE (session 91)
 
 **Files:** Any code using `(?<name>...)` patterns
-**Test impact:** Small (tests that check `%+`)
-**Complexity:** Easy–Medium
+**Commits:** 0e76708, 5138471
 
-#### What's broken
+#### What was done
 
-After a match like `"foo" =~ /(?<word>\w+)/`, Perl populates `%+` with `{word => "foo"}`. PCL sets `$1`, `$2`, etc. but does not populate `%+` or `%-`.
-
-#### Fix area
-
-`cl/pcl-runtime.lisp` — `do-regex-match` (or the equivalent function that runs matches and sets `$1` etc.).
-
-`cl-ppcre:scan` with `:named-registers t` returns an additional value — a hash of named captures. After a successful match:
-
-```lisp
-;; After cl-ppcre:scan returns match:
-(multiple-value-bind (start end reg-starts reg-ends named)
-    (cl-ppcre:scan scanner subject :named-registers t)
-  (when start
-    ;; Set $1, $2, ... (already done)
-    ;; Set %+:
-    (clrhash %+)
-    (when named
-      (maphash (lambda (name idx)
-                 (let ((rs (aref reg-starts idx))
-                       (re (aref reg-ends   idx)))
-                   (when rs
-                     (setf (gethash name %+)
-                           (make-p-box (subseq subject rs re))))))
-               named))))
-```
-
-`%+` must be declared as a `defvar` in the pcl package and exported, just like `$1`, `$2`, etc.
-
-#### Named register API note
-
-`cl-ppcre:create-scanner` returns a named-register hash as its second return value (the register names mapped to indices). Check the CL-PPCRE docs for the exact API — it may be `:named-registers` in `scan` or it may come from the scanner object.
+- Set `cl-ppcre:*allow-named-registers* t` at startup (was NIL by default)
+- `defvar %+` (hash-table, exported from `:pcl`)
+- `clear-capture-groups`: added `(clrhash %+)`; also called unconditionally at the start of every match attempt (Perl clears `%+` even on failed matches)
+- `set-capture-groups`: added optional `reg-names` parameter (the list returned by `cl-ppcre:create-scanner`); loops over names, populates `%+` for non-NIL named groups; also guards `$1`-`$9` against NIL reg-starts/ends (optional groups that didn't participate in the match)
+- `do-regex-match`: wraps `create-scanner` in `multiple-value-bind` to capture `reg-names`; threads it through all three match paths (global+list, global+scalar, single)
+- `do-regex-subst`: same; s///e lambda also populates `%+` from `reg-names`
+- `StringInterpolation.pm`: `$+{name}` in double-quoted strings now calls `parse_hash_subscript` → `(p-gethash %+ "name")`
+- **API note**: `cl-ppcre:create-scanner` returns `(values scanner reg-names)` where `reg-names` is a **list** (not vector) of names, NIL for unnamed groups
+- 10 runtime regression tests in `Pl/t/named-capture-01.t`
 
 ---
 
@@ -792,7 +769,7 @@ perl run-perl-test.pl perl-tests/method.t 2>&1 | head -40
 | 4 | B1 | Bare-if tail return (parser tail-position flag) |
 | 5 | B4, B6 | lex.t (heredoc `<<""` + %ENV), context.t BEGIN hoisting |
 | 6 | B5 + C6 | sort.t investigate, method.t/pack.t investigate |
-| 7 | C1, ~~C2~~ | Named captures %+; s///r ✅ DONE session 90 |
+| 7 | ~~C1~~, ~~C2~~ | Named captures %+ ✅ DONE session 91; s///r ✅ DONE session 90 |
 | 8 | C4 | Flip-flop |
 | 9 | C5 | String eval (hardest — leave for last) |
 

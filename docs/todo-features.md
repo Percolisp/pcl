@@ -334,16 +334,15 @@ state variable.
 
 ---
 
-### Regex named captures via `%+` and `%-`
+### ~~Regex named captures via `%+`~~  ✅ DONE (session 91)
 
-**What's broken:** After a match with `(?<name>...)`, Perl populates `%+`
-with the named captures.  PCL's `do-regex-match` sets `$1`, `$2`, ... but
-does not populate `%+`.
-
-**Fix:** After a successful match, build a hash from the
-`:named-registers` return of `cl-ppcre:scan` and store it in `%+`.
-
-**Fix area:** `cl/pcl-runtime.lisp` `do-regex-match`.
+`%+` now fully implemented: `cl-ppcre:*allow-named-registers*` enabled,
+`%+` declared and exported, cleared on every match attempt (including
+failures), populated from `create-scanner`'s `reg-names` list in all
+match paths (`do-regex-match` and `do-regex-subst` including s///e).
+`$+{name}` in string interpolation generates `(p-gethash %+ "name")`.
+Optional non-matching groups set `$N` to nil (was crashing).
+10 runtime tests in `Pl/t/named-capture-01.t`.
 
 ---
 
@@ -427,7 +426,7 @@ Both fixes were present before this todo entry was written.
 | prototype() | small | 2 | §L |
 | Named inner sub closures | small | 3 | §K |
 | Flip-flop .. in scalar ctx | 3 | 3 | §M |
-| Regex %+ named captures | small | 3 | — |
+| ~~Regex %+ named captures~~ | ✅ DONE (session 91) | — | — |
 | ~~s///r non-destructive~~ | ✅ DONE (session 90) | — | — |
 | qr// first-class objects | small | 3 | — |
 | DESTROY finalizers | rare | 3 | — |

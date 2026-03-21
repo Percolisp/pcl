@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 91 (2026-03-22) — %+ named regex captures (C1)
+
+**Commits:** 0e76708 (session 90), 5138471
+
+### Fixes
+- `cl-ppcre:*allow-named-registers*` set to `t` at startup (was NIL — all `(?<name>...)` patterns silently failed)
+- `defvar %+` hash-table, exported from `:pcl`
+- `clear-capture-groups`: `(clrhash %+)` added; also cleared unconditionally at start of every match attempt (Perl clears `%+` even on failed matches)
+- `set-capture-groups`: new optional `reg-names` parameter (list from `create-scanner`); populates `%+`; guards `$1`-`$9` against NIL reg-starts/ends (optional non-matching groups were crashing with TYPE-ERROR in `subseq`)
+- `do-regex-match`: wraps `create-scanner` in `multiple-value-bind` to capture `reg-names`; threads through all 3 match paths
+- `do-regex-subst`: same; s///e lambda also populates `%+`
+- `StringInterpolation.pm`: `$+{name}` in strings dispatches to `parse_hash_subscript` → `(p-gethash %+ "name")`
+- **API note**: `cl-ppcre:create-scanner` returns `(values scanner reg-names)` where `reg-names` is a **list** (not vector), NIL for unnamed groups
+
+### New tests
+- `Pl/t/named-capture-01.t` — 10 runtime tests
+- `Pl/t/regexp-subst-01.t` — 2 codegen tests (24 total)
+
+### Stats
+- PCL suite: **65 files, 2667 tests, all passing**
+
+---
+
+## Session 90 (2026-03-21) — s///r fix, caller.t investigation, kvaslice cleanup
+
+**Commit:** 6e964cc
+
+### Fixes
+- `s///r` non-destructive: `do-regex-subst` returns copy when `:r` modifier present
+- `${^WARNING_BITS}` / `${^LAST_FH}`: was `*p-undef*` (unexported), now `(p-undef)` — fixes UNBOUND-VARIABLE in user packages
+- `$warnings::BYTES` stub added to runtime (needed by Carp.pm)
+- kvaslice.t: 21 unsupported-feature tests commented out, 17/17 passing
+
+### Not Fixed
+- caller.t: not worth pursuing — 36 string evals, stash manipulation `%::`, caller filename/line always 0
+
+### Stats
+- PCL suite: **64 files, 2655 tests, all passing**
+
+---
+
 ## Session 89 (2026-03-21) — local(*foo) fix, forward-decl fix, ref.t fully passing
 
 **Commit:** (pending)
