@@ -167,41 +167,27 @@ The inner `if ($b) { 5 }` is the tail of the outer true-branch and needs the sam
 
 ---
 
-### B2. `caller.t` — UNBOUND-VARIABLE crash at startup
+### B2. `caller.t` — investigated, NOT WORTH PURSUING  ✗ SKIPPED (session 90)
 
 **File:** `perl-tests/caller.t`
-**Test impact:** Unblocks entire file (count unknown)
-**Complexity:** Medium
+**Verdict:** Too many deep issues. Only 3/112 tests pass even after fixing the crashes.
 
-#### What's broken
+#### Investigation findings (session 90)
 
-`caller.t` crashes with `UNBOUND-VARIABLE` before running any tests. The variable name is unknown without investigation.
+Three cascading crash points found:
 
-#### Likely root cause
+1. **Fixed (session 90):** `${^WARNING_BITS}` in `Pl/ExprToCL.pm:185` was mapped to `*p-undef*` — changed to `(p-undef)` because `*p-undef*` is INTERNAL (not exported from `:pcl`), creating unbound `MAIN::*P-UNDEF*` in user packages. **Same bug fixed for `${^LAST_FH}`.**
 
-`$Pkg::var` forward declaration issue: when code references `$Dog::VERSION` (or similar package-qualified variable) before a `package Dog` block appears, PCL emits `(defpackage :Dog ...)` but the `(defvar $VERSION ...)` runs in the wrong package context.
+2. **Fixed (session 90):** `$warnings::BYTES` not defined in PCL's warnings stub — added `(defvar $BYTES (make-p-box 12))` to `cl/pcl-runtime.lisp`. This constant (bytes in warning bitmask) is needed by `Carp.pm`.
 
-#### Investigation step
+3. **NOT fixable without major work:** `delete $::{foo}` (stash manipulation) returns undef; then `$fooref->()` tries to call `:undef` as a function. Requires implementing full `%::` stash access (the symbol table hash).
 
-```bash
-perl run-perl-test.pl perl-tests/caller.t 2>&1 | head -40
-```
+#### Why not worth pursuing
 
-Look for the unbound variable name and which package it should be in.
-
-#### Fix area
-
-`Pl/ExprToCL.pm` `gen_leaf` for package-qualified variables (`$Pkg::var`). When emitting access to a cross-package variable, also emit a `(defvar Pkg::$var (make-p-box nil))` in the **preamble bucket**, guarded so it doesn't clobber existing bindings.
-
-The preamble bucket trick: PCL already uses output buckets. Add a new entry in the preamble bucket for each `$Pkg::var` reference seen, using a `defvar` that only fires if the variable isn't already bound:
-
-```lisp
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (unless (boundp '|Dog|::$VERSION)
-    (defvar |Dog|::$VERSION (make-p-box nil))))
-```
-
-Track which `$Pkg::var` combinations have already been emitted to avoid duplicates.
+- **36 string evals** (`eval 'code'`) — PCL doesn't support string eval; these all fail
+- **`%::` stash manipulation** — delete/assign to symbol table; requires major new feature
+- **`caller()` filename/line** — PCL always returns 0; many tests check exact filename and line number
+- Even after fixes 1+2, only ~3/112 tests pass
 
 #### What `pl-caller` currently returns
 

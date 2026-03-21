@@ -182,8 +182,8 @@ my %SPECIAL_VARS = (
   '$^A' => '|$^A|',   # ACCUMULATOR (for formline/write)
   '$^'  => '|$^|',    # FORMAT_TOP_NAME
   # ${^...} caret variables — stub implementations (return undef)
-  '${^WARNING_BITS}' => '*p-undef*',   # warning bits bitmask (Perl internal)
-  '${^LAST_FH}'      => '*p-undef*',   # last filehandle used (Perl internal)
+  '${^WARNING_BITS}' => '(p-undef)',   # warning bits bitmask (Perl internal)
+  '${^LAST_FH}'      => '(p-undef)',   # last filehandle used (Perl internal)
 );
 
 # Generate CL operator/function name from Perl name
