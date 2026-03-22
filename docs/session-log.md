@@ -6,7 +6,7 @@ Append new entries at the top. One section per session.
 
 ## Session 92 (continued) — time.t: extended-range gmtime/localtime + curr_test fix
 
-**Commits:** (pending)
+**Commits:** 8f89cea, aaf5eec
 
 ### Fixes
 - `p-curr_test` added to `cl/pcl-test.lisp`, exported as `p-curr_test` (returns `1+ *test-count*` boxed)
@@ -27,7 +27,7 @@ Append new entries at the top. One section per session.
 
 ## Session 92 (2026-03-22) — A3: group database functions (getgrent/setgrent/endgrent/getgrgid/getgrnam)
 
-**Commits:** (pending)
+**Commits:** 8f89cea, aaf5eec
 
 ### Fixes
 - Added `p-setgrent`, `p-getgrent`, `p-endgrent`, `p-getgrgid`, `p-getgrnam` to `cl/pcl-runtime.lisp`
