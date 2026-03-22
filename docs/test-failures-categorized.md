@@ -50,7 +50,7 @@ test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key
 | **chdir.t** | 0/? | Uses POSIX module (XS) — XSLoader not supported | Blocked (XS) |
 | **concat2.t** | 0/3 | operator overloading (`use overload '""'`, `'.'`); test 3 = `local $~` magic var | Hard (overload) |
 | **each.t** | 0/? | `XSLOADER::PL-LOAD` undefined — XSLoader crashes at load | Blocked (XS) |
-| **grent.t** | 0/? | Undefined function — likely `getgrent`/`getpwent` POSIX API | Medium (add stub) |
+| ~~**grent.t**~~ | **1/3** (session 92) | `setgrent` ✓; tests 2-3 crash on `@{$hash_elem}` auto-vivif (pre-existing) | Partial |
 | ~~**isa.t**~~ | **14/14 FULLY PASSING** | Fixed session 77 | Done |
 | **method.t** | 0/? | SBCL INPUT-ERROR-IN-LOAD — parse error, non-ASCII chars in source likely | Medium |
 | **pack.t** | 0/? | Undefined function in `pack`/`unpack` — possibly missing format chars | Medium |
@@ -205,7 +205,7 @@ test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key
 Run `perl run-perl-test.pl perl-tests/FILE.t 2>&1 | head -20` first:
 
 - caller.t (unbound var crash — what var?), pack.t (what function?)
-- grent.t (what function?), sort.t (TYPE-ERROR — what type?)
+- sort.t (TYPE-ERROR — what type?)
 
 ---
 

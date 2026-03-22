@@ -18,7 +18,11 @@
 (export '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
           pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
           pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
-          pl-eq_array))
+          pl-eq_array p-curr_test))
+
+(defun p-curr_test ()
+  "Perl curr_test() - return the next test number to run."
+  (make-p-box (1+ *test-count*)))
 
 ;;; Helper: unbox a value for display
 (defun test-display-value (x)

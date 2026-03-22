@@ -47,52 +47,26 @@ Verified working in session 90: `sprintf("%53.0f", 0)` returns the correct
 
 ---
 
-### A3. `grent.t` — stub POSIX user/group database functions
+### ~~A3. `grent.t` — stub POSIX user/group database functions~~  ✅ DONE (session 92)
 
 **File:** `perl-tests/grent.t`
-**Test impact:** Unblocks entire file (count unknown — needs investigation)
-**Complexity:** Easy–Medium
+**Result:** 1/3 tests pass. Tests 2-3 blocked by pre-existing `@{$hash_elem}` auto-vivification limitation.
 
-#### What's broken
+#### What was done (session 92)
 
-`grent.t` calls `getgrent`, `setgrent`, `endgrent` (and maybe `getpwent`, `setpwent`, `endpwent`). These are undefined in PCL.
+Full implementation using `sb-posix`, not stubs:
 
-#### Fix area
+- `p-group-struct-to-vec`: converts `sb-posix:group` struct → 4-element vector `(name passwd gid members-space-sep)`
+- `p-setgrent`: uses `sb-posix:do-groups` with `handler-case` for EOF SYSCALL-ERROR (sb-posix throws at end of db instead of returning NIL); collects all groups into `*p-group-list*`, resets `*p-group-pos*`
+- `p-getgrent`: returns next entry from cached list; scalar ctx = name only, list ctx = 4-element vector
+- `p-endgrent`: clears list and pos
+- `p-getgrgid` / `p-getgrnam`: direct `sb-posix:getgrgid` / `sb-posix:getgrnam` lookups
+- Added to `%RUNTIME_NAMES` in `Pl/ExprToCL.pm` (so transpiler uses `p-` prefix)
+- Registered in `Pl/PExpr/Config.pm` `known_no_of_params`
 
-`cl/pcl-runtime.lisp` — add stubs.
-`Pl/PExpr/Config.pm` `%known_no_of_params` — register them.
+**Key gotcha:** `sb-posix:do-groups` throws `SYSCALL-ERROR` (errno ENOENT) at end of the group database rather than stopping cleanly. Must wrap in `handler-case`.
 
-SBCL has `sb-posix:getgrent` returning a group struct. We can expose these or return `undef` for a minimal stub.
-
-#### Minimal stub approach
-
-```lisp
-(defun p-getgrent ()
-  "Stub: return undef (no real group DB access)."
-  *p-undef*)
-
-(defun p-setgrent () *p-undef*)
-(defun p-endgrent () *p-undef*)
-```
-
-#### Full implementation
-
-Use `sb-posix:getgrent` which returns a `sb-posix:group` struct. Extract fields via `sb-posix:group-name`, `sb-posix:group-passwd`, `sb-posix:group-gid`, `sb-posix:group-mem`. Return as a CL vector (list context) or group name (scalar context), checking `*wantarray*`.
-
-```lisp
-(defun p-getgrent ()
-  (handler-case
-    (let ((g (sb-posix:getgrent)))
-      (if *wantarray*
-          (vector (make-p-box (sb-posix:group-name g))
-                  (make-p-box (sb-posix:group-passwd g))
-                  (make-p-box (sb-posix:group-gid g))
-                  (make-p-box (sb-posix:group-mem g)))
-          (make-p-box (sb-posix:group-name g))))
-    (sb-posix:syscall-error () *p-undef*)))
-```
-
-Similarly for `getpwent`, `getpwnam`, `getpwuid`.
+**Remaining gap:** `push @{ $seen{$name_s} }, $.` requires auto-vivification of a hash-of-arrays slot, which PCL doesn't implement. Tests 2-3 crash there.
 
 ---
 
@@ -763,7 +737,7 @@ perl run-perl-test.pl perl-tests/method.t 2>&1 | head -40
 
 | Session | Items | Key work |
 |---------|-------|----------|
-| 1 | ~~A1~~, ~~A2~~, A3 | split ✅, sprintf ✅ (both already working); grent stubs todo |
+| 1 | ~~A1~~, ~~A2~~, ~~A3~~ | split ✅, sprintf ✅, grent ✅ (session 92) — 1/3 tests pass |
 | 2 | B2, ~~B3~~ | caller.t investigation + fix; kvaslice ✅ DONE session 90 |
 | 3 | ~~C3~~ | ~~`local $hash{key}` / `local @arr[N]`~~ ✅ DONE session 85 |
 | 4 | B1 | Bare-if tail return (parser tail-position flag) |
@@ -788,11 +762,12 @@ perl run-perl-test.pl perl-tests/method.t 2>&1 | head -40
 
 | Category | Count |
 |----------|-------|
-| PCL suite | 64 files, 2655 tests, all passing (session 90) |
-| Perl op/ suite passing | 5432 (session 89) |
-| Perl op/ suite failing | ~2011 (session 89) |
-| Fully-passing Perl files | 40 (session 89) |
+| PCL suite | 65 files, 2667 tests, all passing (session 92) |
+| Perl op/ suite passing | 5433 (session 91) |
+| Perl op/ suite failing | ~2000 (session 91) |
+| Fully-passing Perl files | 41 (session 91) |
 | Skipped (hang) | 2 (bop.t, heredoc.t) |
 | Zero-passing / unfixable | args.t, crypt.t, die_exit.t, print.t, hexfp.t, lfs.t, sprintf.t (skip_all: string eval) |
+| grent.t | 1/3 — setgrent ✓; tests 2-3 blocked by @{$hash_elem} auto-vivif |
 
 Estimated additional passing tests from this plan: **+200–400**, depending on investigation results for pack.t, method.t, sort.t.

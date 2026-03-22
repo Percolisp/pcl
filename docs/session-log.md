@@ -4,6 +4,51 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 92 (continued) — time.t: extended-range gmtime/localtime + curr_test fix
+
+**Commits:** (pending)
+
+### Fixes
+- `p-curr_test` added to `cl/pcl-test.lisp`, exported as `p-curr_test` (returns `1+ *test-count*` boxed)
+- `curr_test` added to `%RUNTIME_NAMES` in `Pl/ExprToCL.pm` → generates `(p-curr_test)` instead of stub
+- Calendar helpers added to `cl/pcl-runtime.lisp`: `%pcl-days-to-ymd` (Hinnant civil_from_days), `%pcl-is-leap-year`, `%pcl-yday`, `%pcl-unix-to-utc` (Unix sec → broken-down UTC, any range), `%pcl-format-time` (ctime-style string)
+- `+gmtime-max+` / `+gmtime-min+` constants (Perl's actual limits)
+- `p-gmtime`: bounds-checks then uses `%pcl-unix-to-utc` for full range
+- `p-localtime`: bounds-check + `decode-universal-time` for post-1900 (handles DST/TZ), `%pcl-unix-to-utc` + current TZ offset for pre-1900
+
+### Results
+- **context.t**: 6/8 passing (was 5/8) — test 7 (curr_test) now passes; tests 2/8 are wantarray (out of scope)
+- **time.t**: 20/41 passing (was 10 + crash) — TYPE-ERROR crash on negative timestamps fixed; list-context tests pass; scalar-context failures are pre-existing wantarray issue
+
+### Stats
+- PCL suite: **65 files, 2667 tests, all passing**
+
+---
+
+## Session 92 (2026-03-22) — A3: group database functions (getgrent/setgrent/endgrent/getgrgid/getgrnam)
+
+**Commits:** (pending)
+
+### Fixes
+- Added `p-setgrent`, `p-getgrent`, `p-endgrent`, `p-getgrgid`, `p-getgrnam` to `cl/pcl-runtime.lisp`
+- Uses `sb-posix:do-groups` (with `handler-case` for EOF SYSCALL-ERROR) for iteration
+- Uses `sb-posix:getgrgid` / `sb-posix:getgrnam` for direct lookups
+- `p-group-struct-to-vec` helper converts group struct → 4-element vector (name, passwd, gid, members as space-separated string)
+- `*p-group-list*` / `*p-group-pos*` state vars for getgrent iteration
+- Scalar context returns group name only; list context returns full 4-element vector
+- Exported from `:pcl` defpackage
+- Added `getgrent setgrent endgrent getgrgid getgrnam` to `%RUNTIME_NAMES` in `Pl/ExprToCL.pm` (so they get `p-` prefix)
+- Registered in `Pl/PExpr/Config.pm` `known_no_of_params` (0 args for *grent, 1 for *grgid/*grnam)
+
+### grent.t result
+- **1/3 tests pass** (test 1: `setgrent()` returns true ✓)
+- Tests 2-3 crash on `push @{ $seen{$name_s} }, $.` — `@{$hash_elem}` auto-vivification, pre-existing PCL limitation
+
+### Stats
+- PCL suite: **65 files, 2667 tests, all passing** (no regressions)
+
+---
+
 ## Session 91 (2026-03-22) — %+ named regex captures (C1)
 
 **Commits:** 0e76708 (session 90), 5138471

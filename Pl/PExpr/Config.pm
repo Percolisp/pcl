@@ -392,16 +392,23 @@ has known_no_of_params => (
       # ...Etc...
 
 
+      # Group database functions
+      getgrent   => 0,
+      setgrent   => 0,
+      endgrent   => 0,
+      getgrgid   => 1,
+      getgrnam   => 1,
+
       # Linux varants:
       # -*X*, binmode, chmod, chown, chroot, crypt, dbmclose,
-      # dbmopen, dump, endgrent, endhostent, endnetent, endprotoent,
-      # endpwent, endservent, exec, fcntl, flock, fork, getgrent,
-      # getgrgid, gethostbyname, gethostent, getlogin, getnetbyaddr,
+      # dbmopen, dump, endhostent, endnetent, endprotoent,
+      # endpwent, endservent, exec, fcntl, flock, fork,
+      # gethostbyname, gethostent, getlogin, getnetbyaddr,
       # getnetbyname, getnetent, getppid, getpgrp, getpriority,
       # getprotobynumber, getprotoent, getpwent, getpwnam, getpwuid,
       # getservbyport, getservent, getsockopt, glob, ioctl, kill,
       # link, lstat, msgctl, msgget, msgrcv, msgsnd, open, pipe,
-      # readlink, rename, select, semctl, semget, semop, setgrent,
+      # readlink, rename, select, semctl, semget, semop,
       # sethostent, setnetent, setpgrp, setpriority, setprotoent,
       # setpwent, setservent, setsockopt, shmctl, shmget, shmread,
       # shmwrite, socket, socketpair, stat, symlink, syscall,

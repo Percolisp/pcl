@@ -94,10 +94,11 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   array-last-index aslice atan2 backslash backtick binmode bit-and bit-and= bit-not bit-or
   bit-or= bit-xor bit-xor= bless box box-p box-value break caller can cast-$ cast-% cast-@
   chain-cmp chdir chmod chomp chop chr close closedir coderef-defined-p coderef-exists-p
-  continue cos cwd decf declare-sub defined defpackage delete delete-array delete-array-slice
+  continue cos curr_test cwd decf declare-sub defined defpackage delete delete-array delete-array-slice
   delete-hash-slice delete-kv-hash-slice die do each ensure-arrayref ensure-hashref env-get
   env-set eof eval eval-block eval-direct exception exception-object exists exists-array exit
   exp fc fileno flatten flatten-args for foreach funcall-ref get-class get-coderef getc getcwd
+  getgrent getgrgid getgrnam endgrent setgrent
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
