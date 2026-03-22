@@ -2824,6 +2824,7 @@
       ;; Out of bounds or not a vector
       (make-p-box *p-undef*))))
 
+(declaim (ftype function p-aslice))
 (defun p-aref-deref (ref idx)
   "Perl array ref access $ref->[idx] - unbox the reference first.
    When idx is a vector (range result), returns a slice instead of a single element."
@@ -5273,25 +5274,30 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                    (vector-push-extend r result))))
     result))
 
-(defun p-sort (list-or-fn &optional list)
-  "Perl sort - without comparator, sorts lexically (as strings).
-   With comparator fn, fn receives $a and $b and returns negative if a < b."
-  (if list
-      ;; Called with comparator: (p-sort fn list)
-      (let* ((raw (unbox list))
-             (result (if (or (eq raw *p-undef*) (null raw))
-                         (make-array 0)
-                         (copy-seq raw)))
-             (fn list-or-fn))
-        (sort result (lambda (a b)
-                       (< (funcall fn a b) 0))))
-      ;; Called without comparator: (p-sort list) - default string sort
-      (let* ((raw (unbox list-or-fn))
-             (result (if (or (eq raw *p-undef*) (null raw))
-                         (make-array 0)
-                         (copy-seq raw))))
-        (sort result (lambda (a b)
-                       (string< (to-string a) (to-string b)))))))
+(defun p-sort (&rest args)
+  "Perl sort - sort a list with optional comparator function.
+   (p-sort list)         - sort single array/list lexically
+   (p-sort fn list...)   - sort with comparator fn (lambda or unboxed code ref)
+   (p-sort a b c ...)    - sort concatenated multi-arg list lexically"
+  (if (null args)
+      (make-array 0 :adjustable t :fill-pointer 0)
+      (let* ((first-val (unbox (first args)))
+             (has-fn (functionp first-val)))
+        (if has-fn
+            ;; Comparator form: (p-sort fn list...)
+            (let* ((fn first-val)
+                   (raw (apply #'%p-collect-list (rest args)))
+                   (result (if (typep raw 'sequence)
+                               (copy-seq raw)
+                               (make-array 0 :adjustable t :fill-pointer 0))))
+              (sort result (lambda (a b) (< (to-number (funcall fn a b)) 0))))
+            ;; No comparator: flatten all args and sort lexically
+            (let* ((raw (apply #'%p-collect-list args))
+                   (result (if (typep raw 'sequence)
+                               (copy-seq raw)
+                               (make-array 0 :adjustable t :fill-pointer 0))))
+              (sort result (lambda (a b)
+                             (string< (to-string a) (to-string b)))))))))
 
 (defun p-reverse (&rest items)
   "Perl reverse - accepts single @array or multiple elements."

@@ -398,6 +398,20 @@ sub _insert_variable_forward_declarations {
   # EXCEPTION: __lex__ variables (closure-renamed) must stay lexical (no defvar).
   # They are let-bound per-iteration and must create CL lexical (not dynamic)
   # bindings so each closure iteration captures its own independent binding.
+  # Always declare $a and $b (Perl sort variables) — they are package-scoped globals
+  # used by named sort comparator subs (sub cmp { $a <=> $b }) as dynamic variables.
+  # defvar makes them CL special vars; lambda params (lambda ($a $b) ...) then create
+  # dynamic bindings that named subs see.  They appear inside sub bodies (sub_depth>0)
+  # so the file-scope scan above misses them; emit unconditionally before @undeclared.
+  my $decls = $self->_sections->[0]{declarations};
+  unless ($declared{'$a'}) {
+    push @$decls, "(defvar \$a (make-p-box nil))";
+    push @$decls, "(defvar \$b (make-p-box nil))";
+    push @$decls, "";
+    $declared{'$a'} = 1;
+    $declared{'$b'} = 1;
+  }
+
   my @undeclared;
   for my $var (sort keys %referenced) {
     next if $declared{$var};
@@ -410,7 +424,6 @@ sub _insert_variable_forward_declarations {
 
   # Push undeclared defvars into first section's declarations bucket.
   # These will be assembled before any definitions or runtime code.
-  my $decls = $self->_sections->[0]{declarations};
   push @$decls, ";; Forward declarations for package variables used without my/our.";
   push @$decls, ";; Perl globals auto-vivify as undef; CL needs defvar to avoid crashes.";
   for my $var (@undeclared) {

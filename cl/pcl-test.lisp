@@ -261,6 +261,17 @@
       (format t "ok ~A # skip ~A~%" *test-count* r)))
   (p-last-dynamic "SKIP"))
 
+;;; Helper: split string (must be before pl-diag/pl-note which use it)
+(defun split-string (str delims)
+  (let ((result nil)
+        (start 0))
+    (dotimes (i (length str))
+      (when (member (char str i) delims)
+        (push (subseq str start i) result)
+        (setf start (1+ i))))
+    (push (subseq str start) result)
+    (nreverse result)))
+
 ;;; diag(msg)
 (defun pl-diag (&rest args)
   (when args
@@ -274,17 +285,6 @@
     (dolist (msg args)
       (dolist (line (split-string (to-string msg) '(#\Newline)))
         (format t "# ~A~%" line)))))
-
-;;; Helper: split string
-(defun split-string (str delims)
-  (let ((result nil)
-        (start 0))
-    (dotimes (i (length str))
-      (when (member (char str i) delims)
-        (push (subseq str start i) result)
-        (setf start (1+ i))))
-    (push (subseq str start) result)
-    (nreverse result)))
 
 ;;; END hook: check test count
 (push (lambda ()

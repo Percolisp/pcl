@@ -252,33 +252,19 @@ Look for the exact TYPE-ERROR (what type was expected vs. what was received) and
 
 ---
 
-### B6. `context.t` tests 7-8 — `BEGIN {}` inside anonymous sub
+### ~~B6. `context.t` tests 7-8 — `BEGIN {}` inside anonymous sub~~  ✅ DONE (BEGIN hoisting)
 
 **File:** `perl-tests/context.t` tests 7-8
-**Test impact:** 2 tests
-**Complexity:** Medium
 
-#### What's broken
+#### What was done
 
-```perl
-$_ = sub { context(); BEGIN { } }->()
-```
+BEGIN hoisting already works: the `eval-when` is emitted at the top level, not inside the lambda body. No crash occurs.
 
-The `BEGIN {}` block inside the anonymous sub body is emitted as an `(eval-when ...)` form that ends up as an argument to `p-funcall-ref` instead of being hoisted out before the lambda definition. This causes a crash.
+#### Remaining failure — test 8 is wantarray (out of scope)
 
-#### Root cause
+Test 8 checks that `$_ = sub { context(); BEGIN {} }->()` calls `context()` in scalar context. The wantarray propagation into an immediately-invoked anonymous sub is not correct — `context()` sees `void` instead of `scalar`. This is a wantarray issue; see `docs/wantarray-context.md`. **Do not fix without explicit user request.**
 
-In `Pl/Parser.pm`, `_process_begin_statement` unconditionally emits into the current block's code stream. When `in_subroutine > 0`, this puts the `eval-when` inside the lambda body, where it becomes an expression (not a top-level form).
-
-#### Fix area
-
-`Pl/Parser.pm` — `_process_element` or `_process_begin_statement`. When `in_subroutine > 0` and a `BEGIN {}` is encountered:
-
-1. Process the BEGIN body into a temporary string.
-2. Emit it into the **definitions bucket** (which runs at compile time) rather than into the current function body.
-3. In the function body's code position, emit nothing (or a comment).
-
-This matches what Perl does: `BEGIN` blocks run at compile time regardless of where they appear syntactically.
+Test 2 (`@a=foo` — list context regex `/g`) is also a wantarray issue.
 
 ---
 
@@ -739,7 +725,7 @@ perl run-perl-test.pl perl-tests/method.t 2>&1 | head -40
 | 2 | B2, ~~B3~~ | caller.t investigation + fix; kvaslice ✅ DONE session 90 |
 | 3 | ~~C3~~ | ~~`local $hash{key}` / `local @arr[N]`~~ ✅ DONE session 85 |
 | 4 | B1 | Bare-if tail return (parser tail-position flag) |
-| 5 | B4, B6 | lex.t (heredoc `<<""` + %ENV), context.t BEGIN hoisting |
+| 5 | ~~B4~~, ~~B6~~ | lex.t (heredoc `<<""` + %ENV) ✅ DONE session 92; context.t BEGIN hoisting ✅ DONE (remaining failures are wantarray) |
 | 6 | B5 + C6 | sort.t investigate, method.t/pack.t investigate |
 | 7 | ~~C1~~, ~~C2~~ | Named captures %+ ✅ DONE session 91; s///r ✅ DONE session 90 |
 | 8 | C4 | Flip-flop |

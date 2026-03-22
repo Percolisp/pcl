@@ -4,6 +4,31 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 93 (2026-03-22) — sort.t analysis, sort-01.t, warning fixes
+
+### Fixes
+- **parser-01.t test 8 regression**: regex updated to match `MyClass::pl-do_setup` (package-qualified calls, introduced previous session)
+- **SBCL warnings on load**: two forward-reference warnings eliminated:
+  - `pcl-test.lisp`: moved `split-string` before `pl-diag`/`pl-note` which call it
+  - `pcl-runtime.lisp`: added `(declaim (ftype function p-aslice))` before `p-aref-deref` which calls it
+- **CLAUDE.md**: added "Suggested Workflow: perl-tests/ Failures → Pl/t/ Tests" section
+
+### New
+- `Pl/t/sort-01.t`: 16 tests documenting sort.t failures (3 expected failures = known bugs)
+  - Transpilation test: `sort NAME LIST` wrong codegen (generates call instead of `#'function`)
+  - Runtime tests: named sort comparators fail because `$a`/`$b` not dynamically bound
+
+### sort.t root causes identified
+1. `sort NAME LIST` → `(p-sort (pl-NAME list...))` instead of `(p-sort #'pl-NAME list...)` — parser not detecting named-comparator form
+2. Named sort subs use `$A`/`$B` as globals but they're not declared (`defvar`) and not bound by `p-sort`
+3. `p-sort` calls comparator with 2 args but named subs take 0 args (use `$A`/`$B` globals)
+
+### Stats
+- PCL suite: **66 files, 2683 tests** — 2680 pass, 3 expected failures (sort-01.t)
+- perl-tests sweep: **5511 passing, 2031 failing** (109 more than session 92, from sort.t fixes in prev session)
+
+---
+
 ## Session 92 (continued) — time.t: extended-range gmtime/localtime + curr_test fix
 
 **Commits:** 8f89cea, aaf5eec

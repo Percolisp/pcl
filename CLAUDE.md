@@ -240,3 +240,24 @@ and expected behavior comprehensively. Start with:
 - `t/uni/` - unicode (later)
 
 These would provide authoritative verification of Perl semantics.
+
+### Suggested Workflow: `perl-tests/` Failures → `Pl/t/` Tests
+
+When investigating a failing `perl-tests/foo.t` file, consider first creating a
+focused `Pl/t/foo-01.t` file that reproduces the specific failure modes as small,
+targeted tests. Benefits:
+
+- Faster iteration — no need to re-run the full 200-test file on every attempt
+- Self-documenting — the test file records *what* fails and *why* at the unit level
+- Regression protection — once fixed, the `Pl/t/` test prevents that bug returning
+- Easier diagnosis — smaller test cases isolate whether the issue is codegen or runtime
+
+**Pattern:**
+1. Run `perl sweep-perl-tests.pl --jobs 1 perl-tests/foo.t` to see the failure count
+2. Inspect the generated CL (`./pl2cl < perl-tests/foo.t > /tmp/foo.lisp`) for wrong output
+3. Write `Pl/t/foo-01.t` with:
+   - Transpilation tests (`like($cl, qr/expected-pattern/, 'desc')`) for codegen bugs
+   - Runtime tests using the `run_cl()`/`test_cl()` pattern for semantic bugs
+4. Fix the code against the `Pl/t/` tests, then verify the sweep count improves
+
+See `Pl/t/sort-01.t` for an example (created session 93, documents sort.t failures).
