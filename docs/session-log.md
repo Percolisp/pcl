@@ -4,6 +4,30 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 94 (2026-03-23) — state variables (state.t fully passing)
+
+**Commits:** d019ad9, 4ce258e
+
+### Fixes (six bugs)
+1. **`%p-flatten-list` nil bug** (`cl/pcl-runtime.lisp`): `(listp nil)` = T in CL swallowed undef return values from `p-post++` as empty lists, corrupting list assignment. Fixed: `(listp item)` → `(consp item)`.
+2. **`p-post++` undef → 0** (`cl/pcl-runtime.lisp`): Perl `undef++` returns 0 (numeric). `old = (if (null val) 0 val)`.
+3. **`state ($t) //= 3`** (`Pl/Parser.pm`): `_process_state_declaration` now handles `PPI::Structure::List` (list form) and `//=` operator.
+4. **Nested bare-block state vars** (`Pl/Parser.pm`): `_find_all_declarations` now recurses into `PPI::Structure::Block` (bare blocks), but skips anon sub bodies (detected via `sprevious_sibling` being `sub`).
+5. **Initial binding** (`Pl/Parser.pm`): state var outer `let` now initializes `$` → `(make-p-box nil)`, `@` → empty array, `%` → empty hash-table. Previously nil caused `p-pre++`/`p-post++` to silently no-op.
+6. **Anon sub rename merge** (`Pl/Parser.pm`): state renames now merged with parent closure renames instead of replacing.
+
+Also: `$state__*` vars excluded from defvar forward declarations.
+
+### New
+- `Pl/t/state-01.t`: 20 tests, all passing
+
+### Stats
+- PCL suite: **67 files, 2703 tests, all passing**
+- state.t: **23/0 fully passing** (was 0/23)
+- perl-tests sweep: **~5510 passing, ~2024 failing** — 43 fully-passing files (state.t added)
+
+---
+
 ## Session 93 (2026-03-22) — sort.t analysis, sort-01.t, warning fixes
 
 ### Fixes
