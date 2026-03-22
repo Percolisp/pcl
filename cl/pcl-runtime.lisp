@@ -1894,7 +1894,7 @@
                            item))
                  ((and (vectorp item) (not (stringp item)))
                   (loop for x across item do (add x)))
-                 ((listp item)
+                 ((consp item)  ; consp, not listp — nil is listp but should be treated as undef scalar
                   (loop for x in item do (add x)))
                  (t
                   ;; Snapshot the value that box-set will store, not the box
@@ -2352,10 +2352,12 @@
        `(let ((,old ,real-place))
           (setf ,real-place (perl-increment ,real-place))
           ,old))
-      ;; Boxed scalar - return the original value (string or number)
+      ;; Boxed scalar - return the original value (string or number).
+      ;; When value is nil (Perl undef), return 0 — Perl's undef++ returns 0
+      ;; because ++ treats undef as 0 in numeric context.
       (t (let ((val (gensym "VAL")))
            `(let* ((,val (unbox ,real-place))
-                   (,old ,val))
+                   (,old (if (null ,val) 0 ,val)))
               (box-set ,real-place (perl-increment ,real-place))
               ,old))))))
 

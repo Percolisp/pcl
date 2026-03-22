@@ -1,8 +1,8 @@
 # PCL v1 Implementation Plan
 
-**Written:** 2026-03-19 — **Updated:** 2026-03-22 (session 92)
-**Status:** 5402 passing / 2002 failing in Perl op/ suite. 44 fully-passing files.
-**Goal:** Push the highest-value fixable failures to zero while keeping all 2667 PCL tests green.
+**Written:** 2026-03-19 — **Updated:** 2026-03-22 (session 93)
+**Status:** 5510 passing / 2029 failing in Perl op/ suite. 43–44 fully-passing files.
+**Goal:** Push the highest-value fixable failures to zero while keeping all 2683 PCL tests green.
 
 ---
 
@@ -232,23 +232,64 @@ This also makes `$ENV{HOME}` etc. work correctly for CPAN modules that read envi
 
 ---
 
-### B5. `sort.t` — TYPE-ERROR after Tie fix
+### B5. `sort.t` — named comparator + `$a`/`$b` fixes  (session 93, partial)
 
 **File:** `perl-tests/sort.t`
-**Test impact:** Unknown — needs investigation
+**Test impact:** sort.t 31/29 → 33/27 (session 93)
 **Complexity:** Medium
 
-#### What's broken
+#### What was fixed (session 93)
 
-`sort.t` uses `Tie::StdArray`. The module now loads (Tie::Array hang was fixed in session 69), but a TYPE-ERROR occurs. Likely: `Tie::StdArray::SPLICE` calls `$self->PUSH(...)` etc., which dispatches to methods that expect tied array semantics. There may be a circular dispatch or a wrong type being passed.
+Three bugs fixed; verified by new `Pl/t/sort-01.t` (16 tests, all passing):
 
-#### Investigation step
+**1. `sort NAME LIST` generated a bare funcall instead of an inline lambda.**
 
-```bash
-perl run-perl-test.pl perl-tests/sort.t 2>&1 | head -60
-```
+PPI gives `sort` (Word), `compare` (Word), list. The block/list handlers in
+`_apply_reductions` only fired for `PPI::Structure::Block` / `PPI::Structure::List`.
+A bare Word next-token fell through; `compare qw/a b c/` was reduced to a
+funcall in a later pass, producing `(p-sort (pl-compare ...))` — wrong.
 
-Look for the exact TYPE-ERROR (what type was expected vs. what was received) and which Tie method triggered it.
+Fix in `Pl/PExpr.pm` `_apply_reductions`: detect `sort WORD LIST` before the
+"is this a known function call?" path. When WORD is not a built-in/keyword/
+package-qualified name, create a `funcall` node containing sort + an
+`inline_lambda` node with `comparator_name` set.
+
+Fix in `Pl/ExprToCL.pm` `gen_inline_lambda`: when `for_func eq 'sort'` and
+`comparator_name` is set, emit `(lambda ($a $b) (catch :p-return (block nil (pl-NAME))))`.
+
+**2. `$a` and `$b` were not declared as CL special variables (defvar).**
+
+Named sort comparator subs like `sub backwards { $b cmp $a }` are at
+`sub_depth > 0` during the file-scope scan in
+`_insert_variable_forward_declarations`, so the scan's `%referenced` hash
+missed `$a`/`$b`. They never got `defvar`, so the lambda params `($a $b)` in
+the sort wrapper created *lexical* bindings instead of dynamic ones — the
+named sub couldn't see the bound values.
+
+Fix in `Pl/Parser.pm` `_insert_variable_forward_declarations`: unconditionally
+emit `(defvar $a ...)` / `(defvar $b ...)` BEFORE computing `@undeclared`, and
+set `$declared{'$a'}` = 1 so they don't appear twice.
+
+**3. SBCL load warnings fixed.**
+
+- `cl/pcl-runtime.lisp`: added `(declaim (ftype function p-aslice))` forward
+  declaration before `p-aref-deref` (which calls `p-aslice` before its `defun`)
+- `cl/pcl-test.lisp`: moved `split-string` definition before `pl-diag`/`pl-note`
+  which call it
+
+#### Remaining failures in sort.t
+
+sort.t is at 33/27. The remaining 27 failures include:
+- `sort $coderef LIST` (scalar coderef variable as comparator)
+- `BAR::$A` / package-qualified sort variables (`$Foo::a` in named subs)
+- Complex `Tie::StdArray` interaction tests
+- Tests that check Perl's stable sort property (CL's sort is not stable)
+
+**`sort NAME LIST` is unique** — it's the only Perl built-in with a bare sub
+name (not a block) as a special second argument. `grep`/`map` require blocks.
+`&`-prototype user subs use actual block syntax, already handled via
+`has_block_proto`. `sort $coderef LIST` uses the existing `functionp` path in
+`p-sort`.
 
 ---
 

@@ -417,6 +417,7 @@ sub _insert_variable_forward_declarations {
     next if $declared{$var};
     next if $runtime_vars{$var};
     next if $let_bound{$var} && $var =~ /__lex__/;
+    next if $var =~ /^[\$\@\%]state__/;  # state vars use outer let binding, not defvar
     push @undeclared, $var;
   }
 
@@ -1653,8 +1654,7 @@ sub _process_state_declaration {
 
   # Find the variable name(s) and initializer
   my @vars;
-  my $init_expr;
-  my $found_eq = 0;
+  my $found_assign = 0;  # 1 = '=', 2 = '//='
   my @init_parts;
 
   for my $part (@$parts) {
@@ -1663,13 +1663,20 @@ sub _process_state_declaration {
     if ($ref eq 'PPI::Token::Word' && $part->content eq 'state') {
       next;  # Skip 'state' keyword
     }
-    elsif ($ref eq 'PPI::Token::Symbol' && !$found_eq) {
+    elsif ($ref eq 'PPI::Token::Symbol' && !$found_assign) {
       push @vars, $part->content;
     }
-    elsif ($ref eq 'PPI::Token::Operator' && $part->content eq '=') {
-      $found_eq = 1;
+    elsif ($ref eq 'PPI::Structure::List' && !$found_assign) {
+      # state ($t, $u) — extract symbols from the list
+      push @vars, $self->_find_symbols_in_list($part);
     }
-    elsif ($found_eq) {
+    elsif ($ref eq 'PPI::Token::Operator' && $part->content eq '=' && !$found_assign) {
+      $found_assign = 1;
+    }
+    elsif ($ref eq 'PPI::Token::Operator' && $part->content eq '//=' && !$found_assign) {
+      $found_assign = 2;  # defined-or-assign: same semantics as = for state vars
+    }
+    elsif ($found_assign) {
       push @init_parts, $part;
     }
   }
@@ -1687,9 +1694,19 @@ sub _process_state_declaration {
   for my $var (@vars) {
     my $cl_var   = $renames->{$var} // $var;
     my $init_flag = "${cl_var}__init";
+    my $sigil = substr($var, 0, 1);
     $self->_emit("(unless $init_flag");
     $self->indent_level($self->indent_level + 1);
-    $self->_emit("(setf $cl_var (ensure-boxed $init_cl))");
+    if ($sigil eq '$') {
+      # Scalar: use ensure-boxed for the init value
+      $self->_emit("(setf $cl_var (ensure-boxed $init_cl))");
+    } elsif ($sigil eq '@') {
+      # Array: only initialize if there's an explicit init expression
+      $self->_emit("(p-array-= $cl_var (list $init_cl))") if @init_parts;
+    } elsif ($sigil eq '%') {
+      # Hash: only initialize if there's an explicit init expression
+      $self->_emit("(p-hash-= $cl_var (list $init_cl))") if @init_parts;
+    }
     $self->_emit("(setf $init_flag t))");
     $self->indent_level($self->indent_level - 1);
   }
@@ -2112,7 +2129,11 @@ sub parse_block_as_function {
         my $unique = sprintf("%sstate__anon__%s__%d",
                              $sigil, $bare_slug, ++$state_var_counter);
         $state_renames{$var} = $unique;
-        push @bindings, "($unique nil)";
+        # Initialize to sigil-appropriate empty container
+        my $init_val = $sigil eq '$' ? '(make-p-box nil)'
+                     : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                     :                 '(make-hash-table :test (quote equal))';
+        push @bindings, "($unique $init_val)";
         push @bindings, "(${unique}__init nil)";
       }
       $self->_emit("(let (" . join(" ", @bindings) . ")");
@@ -2153,7 +2174,11 @@ sub parse_block_as_function {
   {
     local $self->{_current_state_vars} = \%anon_state_vars_set;
     my $saved_renames = $self->environment->state_var_renames;
-    $self->environment->state_var_renames(\%state_renames) if %state_renames;
+    if (%state_renames) {
+      # Merge with existing renames (parent closure renames must still apply)
+      my %merged = (%{$saved_renames // {}}, %state_renames);
+      $self->environment->state_var_renames(\%merged);
+    }
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     });
@@ -2367,9 +2392,19 @@ sub _find_all_declarations {
       $pending_decl = undef;
     }
 
-    # Recurse into children, but NOT into nested blocks — they are
-    # independent scopes that create their own let bindings.
-    if ($ref && $child->can('children') && $ref ne 'PPI::Structure::Block') {
+    # Recurse into nested elements, including bare blocks, but NOT into:
+    #   - Named sub definitions (PPI::Statement::Sub)
+    #   - BEGIN/END/etc blocks (PPI::Statement::Scheduled)
+    #   - Anonymous sub bodies: PPI::Structure::Block whose previous
+    #     non-whitespace sibling is the 'sub' keyword
+    if ($ref && $child->can('children')
+        && $ref ne 'PPI::Statement::Sub'
+        && $ref ne 'PPI::Statement::Scheduled'
+        && !($ref eq 'PPI::Structure::Block' && do {
+               my $prev = $child->sprevious_sibling;
+               $prev && ref($prev) eq 'PPI::Token::Word'
+                     && $prev->content eq 'sub'
+             })) {
       push @decls, @{$self->_find_all_declarations($child)};
     }
   }
@@ -3009,7 +3044,13 @@ sub _process_sub_statement {
       my $unique = sprintf("%sstate__%s__%s__%d",
                            $sigil, $sub_slug, $bare_slug, ++$state_var_counter);
       $state_renames{$var} = $unique;
-      push @bindings, "($unique nil)";
+      # Initialize state var to an appropriate empty container by sigil.
+      # $ → box(nil) so p-pre++/p-post++ work even before init guard fires.
+      # @ → empty adjustable vector; % → empty hash table.
+      my $init_val = $sigil eq '$' ? '(make-p-box nil)'
+                   : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                   :                 '(make-hash-table :test (quote equal))';
+      push @bindings, "($unique $init_val)";
       push @bindings, "(${unique}__init nil)";
     }
     $self->_emit("(let (" . join(" ", @bindings) . ")");

@@ -346,6 +346,22 @@ Optional non-matching groups set `$N` to nil (was crashing).
 
 ---
 
+### ~~`sort NAME LIST` named comparator form~~  ✅ DONE (session 93)
+
+**What was broken:** `sort compare @arr` generated `(p-sort (pl-compare ...))` — the
+comparator was called as a bare function, not passed as a lambda for `p-sort` to
+call per-pair.  Also, `$a`/`$b` were not declared as CL special variables, so named
+sort subs couldn't see the dynamically-bound values.
+
+**Fix:** `Pl/PExpr.pm` detects `sort WORD LIST` and wraps the comparator in an
+`inline_lambda` node; `Pl/ExprToCL.pm` generates `(lambda ($a $b) (pl-NAME))`.
+`Pl/Parser.pm` `_insert_variable_forward_declarations` unconditionally emits
+`(defvar $a ...)` / `(defvar $b ...)` before computing `@undeclared`.
+
+**Result:** sort.t 31/29 → 33/27. New test: `Pl/t/sort-01.t` (16 tests).
+
+---
+
 ### ~~`s///r` non-destructive substitution~~  ✅ DONE (session 90)
 
 Fixed in `do-regex-subst` in `cl/pcl-runtime.lisp`: `:r` modifier now
@@ -427,6 +443,7 @@ Both fixes were present before this todo entry was written.
 | Named inner sub closures | small | 3 | §K |
 | Flip-flop .. in scalar ctx | 3 | 3 | §M |
 | ~~Regex %+ named captures~~ | ✅ DONE (session 91) | — | — |
+| ~~sort NAME LIST named comparator~~ | ✅ DONE (session 93) | — | B5 |
 | ~~s///r non-destructive~~ | ✅ DONE (session 90) | — | — |
 | qr// first-class objects | small | 3 | — |
 | DESTROY finalizers | rare | 3 | — |
@@ -441,6 +458,17 @@ Both fixes were present before this todo entry was written.
 ---
 
 ## Known Warnings / Minor Bugs
+
+### ~~SBCL style-warnings on load~~  ✅ FIXED (session 93)
+
+Two forward-reference warnings were emitted on every SBCL load:
+
+1. `cl/pcl-runtime.lisp`: `p-aref-deref` called `p-aslice` before its `defun`.
+   Fixed by adding `(declaim (ftype function p-aslice))` before `p-aref-deref`.
+2. `cl/pcl-test.lisp`: `pl-diag` and `pl-note` called `split-string` before it
+   was defined. Fixed by moving `split-string` before those two functions.
+
+---
 
 ### `indent_level` going negative — "Negative repeat count does nothing"
 
