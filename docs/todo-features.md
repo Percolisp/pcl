@@ -346,6 +346,22 @@ Optional non-matching groups set `$N` to nil (was crashing).
 
 ---
 
+### ~~`state` variables~~  ✅ DONE (session 94)
+
+**File:** `perl-tests/state.t` — now 23/0 fully passing.
+
+Six bugs fixed (see `docs/v1-implementation-plan.md` B6 for full details):
+- `%p-flatten-list`: `(listp nil)` = T in CL swallowed undef return values as empty lists → changed to `(consp item)`
+- `p-post++`: returned nil for nil box; Perl's `undef++` returns 0 → `old = (if (null val) 0 val)`
+- `state ($t) //= 3`: list form and `//=` operator now handled in `_process_state_declaration`
+- Nested state vars in bare blocks: `_find_all_declarations` now recurses into bare `PPI::Structure::Block` (excludes anon sub bodies via `sprevious_sibling` check)
+- Initial binding: `$` → `(make-p-box nil)`, `@` → empty array, `%` → empty hash (not nil)
+- Anon sub rename merge: `{%$existing, %state_renames}` instead of replacing
+
+New test: `Pl/t/state-01.t` (20 tests, all passing).
+
+---
+
 ### ~~`sort NAME LIST` named comparator form~~  ✅ DONE (session 93)
 
 **What was broken:** `sort compare @arr` generated `(p-sort (pl-compare ...))` — the
@@ -444,6 +460,7 @@ Both fixes were present before this todo entry was written.
 | Flip-flop .. in scalar ctx | 3 | 3 | §M |
 | ~~Regex %+ named captures~~ | ✅ DONE (session 91) | — | — |
 | ~~sort NAME LIST named comparator~~ | ✅ DONE (session 93) | — | B5 |
+| ~~state variables~~ | ✅ DONE (session 94) | — | B6 |
 | ~~s///r non-destructive~~ | ✅ DONE (session 90) | — | — |
 | qr// first-class objects | small | 3 | — |
 | DESTROY finalizers | rare | 3 | — |

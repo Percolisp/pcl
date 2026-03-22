@@ -1,8 +1,8 @@
 # PCL v1 Implementation Plan
 
-**Written:** 2026-03-19 — **Updated:** 2026-03-22 (session 93)
-**Status:** 5510 passing / 2029 failing in Perl op/ suite. 43–44 fully-passing files.
-**Goal:** Push the highest-value fixable failures to zero while keeping all 2683 PCL tests green.
+**Written:** 2026-03-19 — **Updated:** 2026-03-23 (session 94)
+**Status:** ~5510 passing / ~2024 failing in Perl op/ suite. 43 fully-passing files.
+**Goal:** Push the highest-value fixable failures to zero while keeping all 2703 PCL tests green.
 
 ---
 
@@ -293,7 +293,69 @@ name (not a block) as a special second argument. `grep`/`map` require blocks.
 
 ---
 
-### ~~B6. `context.t` tests 7-8 — `BEGIN {}` inside anonymous sub~~  ✅ DONE (BEGIN hoisting)
+### ~~B6. `state` variables~~  ✅ DONE (session 94)
+
+**File:** `perl-tests/state.t`
+**Test impact:** state.t 0 → 23/0 fully passing
+**Complexity:** Medium
+
+#### What was done (session 94)
+
+Six bugs fixed; verified by `Pl/t/state-01.t` (20 tests, all passing):
+
+**1. `%p-flatten-list` treated CL nil as an empty list.**
+
+`(listp nil)` is true in Common Lisp (nil is the empty list). When `p-post++` on a nil box returned CL nil, `%p-flatten-list` iterated it as a zero-element list, swallowing the undef return value. List assignment received the wrong elements.
+
+Fix: change `(listp item)` to `(consp item)` in `%p-flatten-list`. CL nil is not consp, so it falls through to the `(t ...)` scalar case and is added to the result as-is.
+
+**2. `p-post++` on undef box returned nil instead of 0.**
+
+Perl's `$x++` on an undef scalar returns 0 (the numeric old value; undef numerifies to 0). PCL returned raw CL nil, causing `is($x, 0)` to fail.
+
+Fix in `p-post++` boxed scalar case: `old = (if (null val) 0 val)`.
+
+**3. `state ($t) //= 3` — list form and `//=` not handled.**
+
+`_process_state_declaration` only scanned for `PPI::Token::Symbol` (simple `$var`) after `state`, and only recognised `=` as an assignment operator. The `($t)` list form and the `//=` defined-or-assign operator were silently dropped.
+
+Fix: handle `PPI::Structure::List` (extract symbols via `_find_symbols_in_list`) and `//=` operator (treated identically to `=` for the init guard).
+
+**4. Nested state vars in bare blocks not found.**
+
+`_find_all_declarations` stopped recursing at any `PPI::Structure::Block`. Bare blocks inside a sub (`{ state $bar = 12; ... }`) are `PPI::Structure::Block`, so `state $bar` was never found and never got the outer `let` binding.
+
+Fix: recurse into `PPI::Structure::Block` unless it is an anonymous sub body (detected by checking `sprevious_sibling` for `PPI::Token::Word 'sub'`). Still exclude `PPI::Statement::Sub` (named subs) to avoid hoisting inner-sub state vars.
+
+**5. State var initial binding was raw nil — increment ops failed silently.**
+
+`p-pre++` and `p-post++` call `box-set` which returns early for non-box first args. With the old `($state__x nil)` initial binding, `++state $x` in expression context (no `state $x;` statement) silently no-oped.
+
+Fix: initial binding is now `(make-p-box nil)` for `$` vars, `(make-array 0 ...)` for `@`, `(make-hash-table ...)` for `%`. Also updated `_process_state_declaration` to skip the data-init form for bare `state @arr` / `state %h` (only mark `__init` as true).
+
+**6. Anon sub state rename map replaced parent renames.**
+
+In `parse_block_to_cl_string`, `state_var_renames(\%state_renames)` replaced the entire environment rename map, losing parent-scope closure renames like `$outer → $outer__lex__2`. Nested closures using both captured vars and state vars would get unbound-variable errors.
+
+Fix: merge with existing renames: `{%$existing, %state_renames}`.
+
+#### Architecture note
+
+State vars work via an outer `let` binding wrapping the `p-sub` form:
+```lisp
+(let (($state__f__x__1 (make-p-box nil)) ($state__f__x__1__init nil))
+  (p-sub pl-f (&rest %_args)
+    (block nil
+      (unless $state__f__x__1__init
+        (setf $state__f__x__1 (ensure-boxed INIT))
+        (setf $state__f__x__1__init t))
+      ...)))
+```
+The `p-sub` lambda closes over the outer `let` cells. At load time, the `defvar` for `$state__*` runs AFTER the `let+p-sub`, so the symbol is not yet special when the `let` executes — `let` creates lexical bindings captured by the closure.
+
+---
+
+### ~~B7. `context.t` tests 7-8 — `BEGIN {}` inside anonymous sub~~  ✅ DONE (BEGIN hoisting)
 
 **File:** `perl-tests/context.t` tests 7-8
 
