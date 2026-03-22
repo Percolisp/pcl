@@ -13,10 +13,6 @@ sub set_up_inc {
     # No-op for PCL - @INC is set up differently
 }
 
-sub curr_test {
-    # Returns/sets current test number - not needed for basic tests
-    return 1;
-}
 
 # skip, skip_all - provided by pcl-test.lisp, do NOT define here or it will override
 
