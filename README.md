@@ -13,7 +13,7 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 
 - **Operators** — all 92 Perl precedence levels, chained comparisons, string ops
 - **Control flow** — `if/elsif/unless`, `while/until`, `for/foreach`, loop labels, `next/last/redo`
-- **Subroutines** — signatures, defaults, prototypes, closures, `wantarray`
+- **Subroutines** — signatures, defaults, prototypes, closures, `state` variables, `wantarray`
 - **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors
 - **OO** — `bless`, method calls, `@ISA`, C3 MRO, multiple inheritance, `SUPER::`
 - **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `chomp/chop`, `length/substr/index`, `each/keys/values` (hashes and arrays), `open/close/readline`, `die/eval`, `tie/untie`, regex `m//`/`s///`/`tr///`, and more
@@ -32,7 +32,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run test suite (64 files, 2655 tests)
+# Run test suite (67 files, 2703 tests)
 prove -j8 Pl/t/
 ```
 
@@ -78,9 +78,9 @@ I am Rex and I bark
 
 ## Status
 
-**Beta.** The internal test suite runs 2655 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **5432 / 7443 tests (~73%)**, with 40 files passing completely.
+**Beta.** The internal test suite runs 2703 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~5510 / ~7534 tests (~73%)**, with 43 files passing completely.
 
-Known gaps: `state` variables, string `eval`, XS/C extensions. The bugs are being shaken out by running Perl's own tests.
+Known gaps: string `eval`, XS/C extensions. The bugs are being shaken out by running Perl's own tests.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 

@@ -18,7 +18,13 @@
 (export '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
           pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
           pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
-          pl-eq_array))
+          pl-eq_array pl-curr_test))
+
+;;; curr_test() - provided here (not as a stub in test.pl) so it reads the
+;;; real *test-count* counter that pl-ok/pl-is/etc. maintain.
+(defun pl-curr_test ()
+  "Perl curr_test() - return the next test number to run."
+  (make-p-box (1+ *test-count*)))
 
 ;;; Helper: unbox a value for display
 (defun test-display-value (x)
@@ -255,6 +261,17 @@
       (format t "ok ~A # skip ~A~%" *test-count* r)))
   (p-last-dynamic "SKIP"))
 
+;;; Helper: split string (must be before pl-diag/pl-note which use it)
+(defun split-string (str delims)
+  (let ((result nil)
+        (start 0))
+    (dotimes (i (length str))
+      (when (member (char str i) delims)
+        (push (subseq str start i) result)
+        (setf start (1+ i))))
+    (push (subseq str start) result)
+    (nreverse result)))
+
 ;;; diag(msg)
 (defun pl-diag (&rest args)
   (when args
@@ -268,17 +285,6 @@
     (dolist (msg args)
       (dolist (line (split-string (to-string msg) '(#\Newline)))
         (format t "# ~A~%" line)))))
-
-;;; Helper: split string
-(defun split-string (str delims)
-  (let ((result nil)
-        (start 0))
-    (dotimes (i (length str))
-      (when (member (char str i) delims)
-        (push (subseq str start i) result)
-        (setf start (1+ i))))
-    (push (subseq str start) result)
-    (nreverse result)))
 
 ;;; END hook: check test count
 (push (lambda ()

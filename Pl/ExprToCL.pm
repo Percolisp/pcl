@@ -98,6 +98,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   delete-hash-slice delete-kv-hash-slice die do each ensure-arrayref ensure-hashref env-get
   env-set eof eval eval-block eval-direct exception exception-object exists exists-array exit
   exp fc fileno flatten flatten-args for foreach funcall-ref get-class get-coderef getc getcwd
+  getgrent getgrgid getgrnam endgrent setgrent
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
@@ -207,6 +208,10 @@ sub cl_name {
   # Check for package-qualified name (Foo::bar or Foo::Bar::baz)
   if ($perl_name =~ /^(.+)::(.+)$/) {
     my ($pkg, $func) = ($1, $2);
+    # CORE:: is Perl's built-in namespace — strip it and use the PCL built-in
+    if ($pkg eq 'CORE') {
+      return exists $RUNTIME_NAMES{$func} ? "p-$func" : "pl-$func";
+    }
     # Record package reference for pre-declaration
     $self->environment->add_referenced_package($pkg) if $self->environment;
     # Use pipe-quoting if package contains :: (e.g., |Foo::Bar|::pl-func)
@@ -215,7 +220,19 @@ sub cl_name {
   }
 
   # Runtime built-in → p-prefix; user-defined sub → pl-prefix
-  return exists $RUNTIME_NAMES{$perl_name} ? "p-$perl_name" : "pl-$perl_name";
+  if (exists $RUNTIME_NAMES{$perl_name}) {
+    return "p-$perl_name";
+  }
+  # Inside a non-main package, qualify user-defined sub calls so SBCL's reader
+  # resolves them in the right package (not MAIN, which is the load-time package).
+  my $cur_pkg = ($self->environment && $self->environment->can('current_package'))
+                  ? $self->environment->current_package()
+                  : 'main';
+  if ($cur_pkg && $cur_pkg ne 'main') {
+    my $cl_pkg = $cur_pkg =~ /::/ ? "|$cur_pkg|" : $cur_pkg;
+    return "${cl_pkg}::pl-${perl_name}";
+  }
+  return "pl-$perl_name";
 }
 
 
@@ -1995,9 +2012,24 @@ sub gen_inline_lambda {
   my $node_id = shift;
   my $kids    = shift;
 
-  my $params = join(' ', @{$node->{params} // []});
-  my $body = $node->{body_cl} // 'nil';
+  my $params   = join(' ', @{$node->{params} // []});
+  my $body     = $node->{body_cl} // 'nil';
+  my $for_func = $node->{for_func} // '';
 
+  # Named sort comparator (sort NAME LIST): generate body as a 0-arg call to the sub.
+  # The lambda params $a/$b are CL special vars (defvar'd), so they create dynamic
+  # bindings that the named sub reads when it accesses $a/$b as globals.
+  if ($for_func eq 'sort' && $node->{comparator_name}) {
+    my $cl_func = $self->cl_name($node->{comparator_name});
+    $body = "($cl_func)";
+  }
+
+  # Sort comparator blocks may contain explicit `return` — wrap with catch.
+  # grep/map blocks do NOT get the catch: `return` inside them should
+  # propagate to the enclosing sub's (catch :p-return ...).
+  if ($for_func eq 'sort') {
+    return "(lambda ($params)\n  (catch :p-return\n    (block nil\n$body)))";
+  }
   return "(lambda ($params)\n$body)";
 }
 

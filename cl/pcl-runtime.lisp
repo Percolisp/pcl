@@ -87,6 +87,8 @@
    #:p-time #:p-times #:p-sleep #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
    #:p-exit #:p-system #:p-backtick #:p-errno-string #:p-stash
+   ;; Group/passwd database
+   #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
@@ -1892,7 +1894,7 @@
                            item))
                  ((and (vectorp item) (not (stringp item)))
                   (loop for x across item do (add x)))
-                 ((listp item)
+                 ((consp item)  ; consp, not listp — nil is listp but should be treated as undef scalar
                   (loop for x in item do (add x)))
                  (t
                   ;; Snapshot the value that box-set will store, not the box
@@ -2350,10 +2352,12 @@
        `(let ((,old ,real-place))
           (setf ,real-place (perl-increment ,real-place))
           ,old))
-      ;; Boxed scalar - return the original value (string or number)
+      ;; Boxed scalar - return the original value (string or number).
+      ;; When value is nil (Perl undef), return 0 — Perl's undef++ returns 0
+      ;; because ++ treats undef as 0 in numeric context.
       (t (let ((val (gensym "VAL")))
            `(let* ((,val (unbox ,real-place))
-                   (,old ,val))
+                   (,old (if (null ,val) 0 ,val)))
               (box-set ,real-place (perl-increment ,real-place))
               ,old))))))
 
@@ -2822,6 +2826,7 @@
       ;; Out of bounds or not a vector
       (make-p-box *p-undef*))))
 
+(declaim (ftype function p-aslice))
 (defun p-aref-deref (ref idx)
   "Perl array ref access $ref->[idx] - unbox the reference first.
    When idx is a vector (range result), returns a slice instead of a single element."
@@ -4736,55 +4741,128 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
               (p-box-nv-ok str-box) nil))
       val)))
 
+;;; ============================================================
+;;; Extended-range calendar helpers (Howard Hinnant civil_from_days)
+;;; Works for any integer Unix timestamp, including pre-1900 dates.
+;;; ============================================================
+
+(defun %pcl-days-to-ymd (epoch-days)
+  "Howard Hinnant's civil_from_days algorithm.
+   EPOCH-DAYS = days since 1970-01-01 (any integer, including negative).
+   Returns (values year month day) with month 1-12, day 1-31."
+  (let* ((z (+ epoch-days 719468))
+         (era (if (>= z 0)
+                  (floor z 146097)
+                  (floor (- z 146096) 146097)))
+         (doe (- z (* era 146097)))
+         (yoe (floor (- doe (floor doe 1460) (- (floor doe 36524)) (floor doe 146096)) 365))
+         (y   (+ yoe (* era 400)))
+         (doy (- doe (* 365 yoe) (floor yoe 4) (- (floor yoe 100))))
+         (mp  (floor (+ (* 5 doy) 2) 153))
+         (d   (+ (- doy (floor (+ (* 153 mp) 2) 5)) 1))
+         (m   (if (< mp 10) (+ mp 3) (- mp 9))))
+    (values (+ y (if (<= m 2) 1 0)) m d)))
+
+(defun %pcl-is-leap-year (y)
+  (and (zerop (mod y 4))
+       (or (not (zerop (mod y 100)))
+           (zerop (mod y 400)))))
+
+(defun %pcl-yday (y m d)
+  "Day of year, 0-based. M=1-12, D=1-31."
+  (let* ((days-before #(0 31 59 90 120 151 181 212 243 273 304 334))
+         (base (aref days-before (1- m)))
+         (leap (if (and (%pcl-is-leap-year y) (> m 2)) 1 0)))
+    (+ base leap (1- d))))
+
+(defun %pcl-unix-to-utc (unix-sec)
+  "Decompose a Unix timestamp into Perl-convention broken-down UTC time.
+   Returns (values sec min hour mday perl-mon perl-year wday yday)
+   where perl-mon=0-11, perl-year=since 1900, wday=0=Sunday."
+  (let* ((days (floor unix-sec 86400))
+         (sec-in-day (- unix-sec (* days 86400)))
+         (hour   (floor sec-in-day 3600))
+         (rem    (- sec-in-day (* hour 3600)))
+         (minute (floor rem 60))
+         (sec    (- rem (* minute 60)))
+         (wday   (mod (+ days 4) 7)))   ; Jan 1 1970 was Thursday=4, Sun=0
+    (multiple-value-bind (year month day)
+        (%pcl-days-to-ymd days)
+      (values sec minute hour day (1- month) (- year 1900) wday (%pcl-yday year month day)))))
+
+;;; Out-of-range bounds (matches Perl's TIME_UPPER/LOWER_BOUND)
+(defconstant +gmtime-max+  67767976233316800)
+(defconstant +gmtime-min+ -67768100567755200)
+
+(defun %pcl-format-time (wday perl-mon day hour minute sec year)
+  "Format a broken-down time as a Perl ctime string."
+  (format nil "~A ~A ~2D ~2,'0D:~2,'0D:~2,'0D ~D"
+          (nth wday '("Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat"))
+          (nth perl-mon '("Jan" "Feb" "Mar" "Apr" "May" "Jun"
+                          "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
+          day hour minute sec year))
+
 (defun p-localtime (&optional time)
   "Perl localtime - convert time to local time components.
    In list context returns (sec min hour mday mon year wday yday isdst).
-   Note: mon is 0-11, year is years since 1900, wday is 0=Sunday."
-  (let* ((unix-time (if time (truncate (to-number time)) (p-time)))
-         (universal (+ unix-time +unix-epoch-offset+)))
-    (multiple-value-bind (sec min hour day month year wday dst-p tz)
-        (decode-universal-time universal)
-      (declare (ignore tz))
-      ;; Perl: mon is 0-11, year is since 1900, wday 0=Sunday
-      ;; CL: month is 1-12, year is full, wday 0=Monday
-      (let ((perl-wday (mod (1+ wday) 7))  ; Convert Mon=0 to Sun=0
-            (perl-year (- year 1900))
-            (perl-mon (1- month))
-            ;; Calculate day of year (yday)
-            (yday (- (floor (encode-universal-time 0 0 0 day month year) 86400)
-                     (floor (encode-universal-time 0 0 0 1 1 year) 86400))))
-        (if *wantarray*
-            (make-array 9 :initial-contents
-                        (list sec min hour day perl-mon perl-year perl-wday yday (if dst-p 1 0))
-                        :adjustable t :fill-pointer t)
-            ;; Scalar context: return formatted string (like ctime)
-            (format nil "~A ~A ~2D ~2,'0D:~2,'0D:~2,'0D ~D"
-                    (nth wday '("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"))
-                    (nth (1- month) '("Jan" "Feb" "Mar" "Apr" "May" "Jun"
-                                       "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
-                    day hour min sec year))))))
+   Note: mon is 0-11, year is years since 1900, wday is 0=Sunday.
+   Warns and returns undef for out-of-range timestamps."
+  (let* ((unix-time (if time (truncate (to-number time)) (p-time))))
+    (cond
+      ((> unix-time +gmtime-max+)
+       (p-warn (make-p-box (format nil "localtime(~A) too large" unix-time)))
+       *p-undef*)
+      ((< unix-time +gmtime-min+)
+       (p-warn (make-p-box (format nil "localtime(~A) too small" unix-time)))
+       *p-undef*)
+      ;; Post-1900: use decode-universal-time (handles DST / TZ env vars)
+      ((>= unix-time (- +unix-epoch-offset+))
+       (let ((universal (+ unix-time +unix-epoch-offset+)))
+         (multiple-value-bind (sec min hour day month year wday dst-p tz)
+             (decode-universal-time universal)
+           (declare (ignore tz))
+           (let ((perl-wday (mod (1+ wday) 7))
+                 (perl-year (- year 1900))
+                 (perl-mon  (1- month))
+                 (yday (- (floor (encode-universal-time 0 0 0 day month year) 86400)
+                          (floor (encode-universal-time 0 0 0 1 1 year) 86400))))
+             (if *wantarray*
+                 (make-array 9 :initial-contents
+                             (list sec min hour day perl-mon perl-year perl-wday yday (if dst-p 1 0))
+                             :adjustable t :fill-pointer t)
+                 (%pcl-format-time perl-wday perl-mon day hour min sec year))))))
+      ;; Pre-1900: use current TZ offset (no DST awareness for extreme dates)
+      (t
+       (let* ((tz-secs (* -3600 (nth-value 8 (decode-universal-time (get-universal-time)))))
+              (local-unix (+ unix-time tz-secs)))
+         (multiple-value-bind (sec min hour day perl-mon perl-year wday yday)
+             (%pcl-unix-to-utc local-unix)
+           (if *wantarray*
+               (make-array 9 :initial-contents
+                           (list sec min hour day perl-mon perl-year wday yday 0)
+                           :adjustable t :fill-pointer t)
+               (%pcl-format-time wday perl-mon day hour min sec (+ perl-year 1900)))))))))
 
 (defun p-gmtime (&optional time)
   "Perl gmtime - convert time to UTC components.
-   Same return format as localtime but in UTC."
-  (let* ((unix-time (if time (truncate (to-number time)) (p-time)))
-         (universal (+ unix-time +unix-epoch-offset+)))
-    (multiple-value-bind (sec min hour day month year wday)
-        (decode-universal-time universal 0)  ; 0 = UTC
-      (let ((perl-wday (mod (1+ wday) 7))
-            (perl-year (- year 1900))
-            (perl-mon (1- month))
-            (yday (- (floor (encode-universal-time 0 0 0 day month year 0) 86400)
-                     (floor (encode-universal-time 0 0 0 1 1 year 0) 86400))))
-        (if *wantarray*
-            (make-array 9 :initial-contents
-                        (list sec min hour day perl-mon perl-year perl-wday yday 0)
-                        :adjustable t :fill-pointer t)
-            (format nil "~A ~A ~2D ~2,'0D:~2,'0D:~2,'0D ~D"
-                    (nth wday '("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"))
-                    (nth (1- month) '("Jan" "Feb" "Mar" "Apr" "May" "Jun"
-                                       "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
-                    day hour min sec year))))))
+   Same return format as localtime but in UTC.
+   Warns and returns undef for out-of-range timestamps."
+  (let* ((unix-time (if time (truncate (to-number time)) (p-time))))
+    (cond
+      ((> unix-time +gmtime-max+)
+       (p-warn (make-p-box (format nil "gmtime(~A) too large" unix-time)))
+       *p-undef*)
+      ((< unix-time +gmtime-min+)
+       (p-warn (make-p-box (format nil "gmtime(~A) too small" unix-time)))
+       *p-undef*)
+      (t
+       (multiple-value-bind (sec min hour day perl-mon perl-year wday yday)
+           (%pcl-unix-to-utc unix-time)
+         (if *wantarray*
+             (make-array 9 :initial-contents
+                         (list sec min hour day perl-mon perl-year wday yday 0)
+                         :adjustable t :fill-pointer t)
+             (%pcl-format-time wday perl-mon day hour min sec (+ perl-year 1900))))))))
 
 ;;; ============================================================
 ;;; Process Control
@@ -5198,25 +5276,30 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                    (vector-push-extend r result))))
     result))
 
-(defun p-sort (list-or-fn &optional list)
-  "Perl sort - without comparator, sorts lexically (as strings).
-   With comparator fn, fn receives $a and $b and returns negative if a < b."
-  (if list
-      ;; Called with comparator: (p-sort fn list)
-      (let* ((raw (unbox list))
-             (result (if (or (eq raw *p-undef*) (null raw))
-                         (make-array 0)
-                         (copy-seq raw)))
-             (fn list-or-fn))
-        (sort result (lambda (a b)
-                       (< (funcall fn a b) 0))))
-      ;; Called without comparator: (p-sort list) - default string sort
-      (let* ((raw (unbox list-or-fn))
-             (result (if (or (eq raw *p-undef*) (null raw))
-                         (make-array 0)
-                         (copy-seq raw))))
-        (sort result (lambda (a b)
-                       (string< (to-string a) (to-string b)))))))
+(defun p-sort (&rest args)
+  "Perl sort - sort a list with optional comparator function.
+   (p-sort list)         - sort single array/list lexically
+   (p-sort fn list...)   - sort with comparator fn (lambda or unboxed code ref)
+   (p-sort a b c ...)    - sort concatenated multi-arg list lexically"
+  (if (null args)
+      (make-array 0 :adjustable t :fill-pointer 0)
+      (let* ((first-val (unbox (first args)))
+             (has-fn (functionp first-val)))
+        (if has-fn
+            ;; Comparator form: (p-sort fn list...)
+            (let* ((fn first-val)
+                   (raw (apply #'%p-collect-list (rest args)))
+                   (result (if (typep raw 'sequence)
+                               (copy-seq raw)
+                               (make-array 0 :adjustable t :fill-pointer 0))))
+              (sort result (lambda (a b) (< (to-number (funcall fn a b)) 0))))
+            ;; No comparator: flatten all args and sort lexically
+            (let* ((raw (apply #'%p-collect-list args))
+                   (result (if (typep raw 'sequence)
+                               (copy-seq raw)
+                               (make-array 0 :adjustable t :fill-pointer 0))))
+              (sort result (lambda (a b)
+                             (string< (to-string a) (to-string b)))))))))
 
 (defun p-reverse (&rest items)
   "Perl reverse - accepts single @array or multiple elements."
@@ -6408,8 +6491,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (cond
             ;; /g in list context: return all matches at once, no pos tracking
             ((and global-p *wantarray*)
-             (let ((all-results nil))
+             (let ((all-results nil)
+                   (last-rs nil) (last-re nil))
                (cl-ppcre:do-scans (ms me rs re scanner str)
+                 (setf last-rs rs last-re re)
                  (if (> (length rs) 0)
                      (dotimes (i (length rs))
                        (push (if (and (aref rs i) (aref re i))
@@ -6420,7 +6505,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (let* ((items (nreverse all-results))
                       (result (make-array (length items) :adjustable t :fill-pointer t)))
                  (loop for item in items for i from 0 do (setf (aref result i) item))
-                 (when items (clear-capture-groups))
+                 (when items
+                   (clear-capture-groups)
+                   (when last-rs
+                     (set-capture-groups str last-rs last-re reg-names)))
                  result)))
             ;; /g in scalar context: iterate from current pos
             ((and global-p (not *wantarray*))
@@ -6790,6 +6878,75 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; We provide stub packages so calls to their functions are harmless no-ops.
 ;;
 ;; Note: PCL mistranslates defined(&foo) as (p-defined (p-foo)) — calling
+;;; ---------------------------------------------------------------------------
+;;; Group database functions (getgrent, setgrent, endgrent, getgrgid, getgrnam)
+;;; ---------------------------------------------------------------------------
+
+(defvar *p-group-list* nil "Cached list of group entries for getgrent iteration.")
+(defvar *p-group-pos*  0   "Current position in *p-group-list* for getgrent.")
+
+(defun p-group-struct-to-vec (g)
+  "Convert sb-posix group struct to a 4-element Perl list vector: (name passwd gid members)."
+  (let ((members (sb-posix:group-mem g)))
+    (vector
+     (make-p-box (sb-posix:group-name g))
+     (make-p-box (sb-posix:group-passwd g))
+     (make-p-box (sb-posix:group-gid g))
+     (make-p-box (if members (format nil "~{~A~^ ~}" members) "")))))
+
+(defun p-setgrent (&key wantarray)
+  "Perl setgrent() — rewind the group file for getgrent iteration."
+  (declare (ignore wantarray))
+  (setf *p-group-list* nil)
+  (handler-case
+    (sb-posix:do-groups (g)
+      (push (p-group-struct-to-vec g) *p-group-list*))
+    (sb-posix:syscall-error ()))   ; ignore EOF/ENOENT thrown at end of db
+  (setf *p-group-list* (nreverse *p-group-list*))
+  (setf *p-group-pos* 0)
+  (make-p-box 1))
+
+(defun p-getgrent (&key wantarray)
+  "Perl getgrent() — return next group entry from the group database."
+  (when (null *p-group-list*)
+    (p-setgrent))
+  (if (>= *p-group-pos* (length *p-group-list*))
+      *p-undef*
+      (let ((entry (nth *p-group-pos* *p-group-list*)))
+        (incf *p-group-pos*)
+        (if wantarray
+            entry
+            (aref entry 0)))))   ; scalar context: group name only
+
+(defun p-endgrent (&key wantarray)
+  "Perl endgrent() — close the group database."
+  (declare (ignore wantarray))
+  (setf *p-group-list* nil)
+  (setf *p-group-pos* 0)
+  *p-undef*)
+
+(defun p-getgrgid (gid &key wantarray)
+  "Perl getgrgid(GID) — look up group entry by numeric GID."
+  (handler-case
+    (let ((g (sb-posix:getgrgid (truncate (to-number gid)))))
+      (if g
+          (if wantarray
+              (p-group-struct-to-vec g)
+              (make-p-box (sb-posix:group-name g)))
+          *p-undef*))
+    (sb-posix:syscall-error () *p-undef*)))
+
+(defun p-getgrnam (name &key wantarray)
+  "Perl getgrnam(NAME) — look up group entry by name."
+  (handler-case
+    (let ((g (sb-posix:getgrnam (to-string name))))
+      (if g
+          (if wantarray
+              (p-group-struct-to-vec g)
+              (make-p-box (sb-posix:group-name g)))
+          *p-undef*))
+    (sb-posix:syscall-error () *p-undef*)))
+
 ;; the function instead of using fboundp. Stubs ensure those calls don't crash.
 (defpackage :DynaLoader (:use :cl :pcl))
 (in-package :DynaLoader)

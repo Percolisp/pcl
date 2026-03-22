@@ -65,7 +65,8 @@ END
   my $result = Pl::Parser->parse_code($code);
 
   # Sub body should appear in MyClass section, before the runtime call
-  like($result, qr/\(in-package :MyClass\).*\(p-sub pl-do_setup\b.*\(pl-do_setup\)/s,
+  # Package-qualified call: inside MyClass, calls use MyClass::pl-do_setup
+  like($result, qr/\(in-package :MyClass\).*\(p-sub pl-do_setup\b.*\(MyClass::pl-do_setup\)/s,
        'Sub body appears in MyClass section before call');
   like($result, qr/\(p-sub pl-do_setup\b/,
        'p-sub for package sub');

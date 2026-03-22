@@ -1537,8 +1537,9 @@ sub handle_subcalls {
               ? $self->parser->parse_hash_block_to_cl_string($block)
               : $self->parser->parse_block_to_cl_string($block);
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
-            $lambda_node->{params} = $params;
-            $lambda_node->{body_cl} = $body_cl;
+            $lambda_node->{params}   = $params;
+            $lambda_node->{body_cl}  = $body_cl;
+            $lambda_node->{for_func} = $func_name;
             $self->add_child_to_node($top_id, $lambda_id);
           } else {
             my @bc = $block->children();
@@ -1607,8 +1608,9 @@ sub handle_subcalls {
 
             # Create inline_lambda node
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
-            $lambda_node->{params} = $params;
-            $lambda_node->{body_cl} = $body_cl;
+            $lambda_node->{params}   = $params;
+            $lambda_node->{body_cl}  = $body_cl;
+            $lambda_node->{for_func} = $func_name;
             $self->add_child_to_node($top_id, $lambda_id);
           } else {
             # Parse block as a named function and get its name
@@ -1676,6 +1678,47 @@ sub handle_subcalls {
 
           # Replace sub { } with the anon_sub (4-arg splice preserves comma)
           splice @$e, $i, 2, $sub_node;
+        }
+        next;
+      }
+    }
+
+    # Handle sort NAME LIST — named comparator sub (not a block form)
+    # e.g. sort compare @list  →  (p-sort (lambda ($a $b) (pl-compare)) @list)
+    # The lambda params $a/$b create dynamic bindings (since defvar makes them special),
+    # so named comparator subs that read $a/$b as globals see the values.
+    if ($now->isa('PPI::Token::Word') && $now->content() eq 'sort'
+        && $next->isa('PPI::Token::Word')) {
+      my $comp_name = $next->content();
+      # Only treat as comparator if NOT a known built-in (reverse, etc.)
+      # and NOT a keyword (my, if, etc.)
+      my $is_builtin = exists $self->known_no_of_params->{$comp_name};
+      unless ($is_builtin || $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/ || $comp_name =~ /::/) {
+        my($top_node, $top_id) = $self->make_node_insert('funcall');
+        my $sort_id = $self->make_node($now);
+        $self->add_child_to_node($top_id, $sort_id);
+
+        # Inline lambda that wraps the named comparator call
+        # body_cl is a placeholder; comparator_name drives ExprToCL codegen
+        my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
+        $lambda_node->{params}          = ['$a', '$b'];
+        $lambda_node->{body_cl}         = 'nil';
+        $lambda_node->{for_func}        = 'sort';
+        $lambda_node->{comparator_name} = $comp_name;
+        $self->add_child_to_node($top_id, $lambda_id);
+
+        # Parse remaining elements (after sort + NAME) as the list
+        if ($i + 2 < scalar(@$e)) {
+          my @rest = @$e[$i + 2 .. $#$e];
+          my $rest_list = $self->cleanup_for_parsing(\@rest);
+          my $rest_ids  = $self->parse_list($rest_list);
+          for my $rest_id (@$rest_ids) {
+            $self->add_child_to_node($top_id, $rest_id);
+          }
+          splice @$e, $i, scalar(@$e) - $i;
+          $e->[$i] = $top_node;
+        } else {
+          splice @$e, $i, 2, $top_node;
         }
         next;
       }
