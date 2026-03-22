@@ -1,8 +1,8 @@
 # PCL v1 Implementation Plan
 
-**Written:** 2026-03-19
-**Status:** 4869 passing / 962 failing in Perl op/ suite. 41 fully-passing files.
-**Goal:** Push the highest-value fixable failures to zero while keeping all 2590 PCL tests green.
+**Written:** 2026-03-19 — **Updated:** 2026-03-22 (session 92)
+**Status:** 5402 passing / 2002 failing in Perl op/ suite. 44 fully-passing files.
+**Goal:** Push the highest-value fixable failures to zero while keeping all 2667 PCL tests green.
 
 ---
 
@@ -178,11 +178,9 @@ invalid-Perl error detection (×1).
 
 ---
 
-### B4. `lex.t` regressions
+### ~~B4. `lex.t` regressions~~  ✅ FULLY PASSING (session 92)
 
-**File:** `perl-tests/lex.t` (test 2 + crash at test 41)
-**Test impact:** ~2 tests unblocked
-**Complexity:** Medium
+**File:** `perl-tests/lex.t`
 
 #### Issue 1: Interpolating heredoc `<<""`
 

@@ -1,22 +1,18 @@
 # Perl op/ Test Suite — Categorized Failure Analysis
 
-Last updated: 2026-03-19 (session 84)
-Sweep total: **4869 passing, 962 failing** across 100 files (+2 skipped).
-Note: drop from ~8451 (session 77) is mainly sprintf.t losing ~2830 tests via `skip_all`.
+Last updated: 2026-03-22 (session 92)
+Sweep total: **5402 passing, 2002 failing** across 100 files (+2 skipped).
 
 ---
 
-## Fully Passing (41 files — do not need investigation)
+## Fully Passing (44 files — do not need investigation)
 
 anonsub.t, append.t, arith.t, arith2.t, assignwarn.t, blocks.t, bool.t,
-closure.t, cmpchain.t, concat.t, cond.t, defined.t, defins.t, die.t, dor.t,
-exp.t, for.t, grep.t, hashassign.t, if.t, int.t, isa.t, kvhslice.t, lc.t,
-loopctl.t, lop.t, my.t, not.t, num.t, or.t, pow.t, push.t, qq.t,
-quotemeta.t, recurse.t, sleep.t, study.t, sub.t, translate.t, unshift.t, while.t
-
-*Note: lex.t was listed as passing (1/1) in session 80 but now shows 1/2 + crash:
-test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key}`
-(PCL-specific: `%ENV` stored as marker, not hash-table).*
+cmpchain.t, concat.t, cond.t, defined.t, defins.t, die.t, dor.t,
+exp.t, for.t, grent.t, grep.t, if.t, int.t, isa.t, kvaslice.t, lc.t, lex.t,
+local.t, loopctl.t, lop.t, my.t, negate.t, not.t, num.t, or.t, pow.t, push.t,
+qq.t, quotemeta.t, recurse.t, ref.t, sleep.t, study.t, sub.t, translate.t,
+unshift.t, while.t
 
 ---
 
@@ -32,29 +28,28 @@ test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key
 | File | Root Cause | Notes |
 |------|-----------|-------|
 | **args.t** (0/4) | `@_` aliasing — deliberate not-supported | See `docs/not-supported.md` |
+| **chdir.t** (0/?) | Uses POSIX module (XS) — XSLoader not supported | Blocked (XS) |
 | **crypt.t** (0/0) | Self-skip: `plan 0 # Skip crypt unimplemented` | System has no crypt() |
 | **die_exit.t** (0/17) | Tests subprocess exit codes — all use `fresh_perl_is` or `system()` | Cannot run in PCL |
 | **flip.t** (0/3) | Flip-flop `..` in scalar context not implemented | See `docs/todo-features.md` |
 | **hexfp.t** (0/0) | PPI can't parse hex floats (`0x1.8p+1`) | See `docs/not-supported.md` |
 | **lfs.t** (0/0) | Self-skip: `plan 0 # Skip no 64-bit file offsets` | Platform skip |
+| **method.t** (0/?) | SBCL INPUT-ERROR-IN-LOAD — likely non-ASCII chars in source | Medium |
+| **pack.t** (0/?) | Undefined function — missing pack/unpack format chars | Medium |
 | **print.t** (0/3) | All 3 tests use `fresh_perl_is` (spawn real Perl subprocess) | Cannot run in PCL |
-| **hexfp.t** (0/0) | PPI parse error on hex float literals | See `docs/not-supported.md` |
+| **signatures.t** (0/0) | Self-skip via `skip_all` — uses `eval $data` (string eval) | Not supported |
+| **sort.t** (0/?) | TYPE-ERROR from Tie::StdArray | Medium |
+| **sprintf.t** (0/0) | Self-skip via `skip_all` — uses `eval $data` (string eval) | Not supported |
 
 ---
 
-## Zero-Passing Files — Root Causes Identified, Fixable
+## Fixable Partial-Passers (not yet fully passing)
 
 | File | Pass/Fail | Root Cause | Fix Complexity |
 |------|-----------|-----------|----------------|
-| **caller.t** | 0/? | UNBOUND-VARIABLE crash at startup — likely `$Pkg::var` forward decl issue | Medium |
-| **chdir.t** | 0/? | Uses POSIX module (XS) — XSLoader not supported | Blocked (XS) |
-| **concat2.t** | 0/3 | operator overloading (`use overload '""'`, `'.'`); test 3 = `local $~` magic var | Hard (overload) |
+| **caller.t** | 3/7+crash | 36 string evals, `%::` stash, filename/line always 0 | NOT WORTH PURSUING |
+| **concat2.t** | 1/2 | operator overloading (`use overload '""'`, `'.'`) | Hard (overload) |
 | **each.t** | 0/? | `XSLOADER::PL-LOAD` undefined — XSLoader crashes at load | Blocked (XS) |
-| ~~**grent.t**~~ | **1/3** (session 92) | `setgrent` ✓; tests 2-3 crash on `@{$hash_elem}` auto-vivif (pre-existing) | Partial |
-| ~~**isa.t**~~ | **14/14 FULLY PASSING** | Fixed session 77 | Done |
-| **method.t** | 0/? | SBCL INPUT-ERROR-IN-LOAD — parse error, non-ASCII chars in source likely | Medium |
-| **pack.t** | 0/? | Undefined function in `pack`/`unpack` — possibly missing format chars | Medium |
-| **sort.t** | 0/? | TYPE-ERROR from Tie::StdArray (Tie works now but SPLICE recursive dispatch?) | Medium |
 
 ---
 
@@ -90,12 +85,17 @@ test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key
 - **Root cause**: Mix of unsupported features (lvalue sub, @_ aliasing) and list-assign edge cases
 - **Complexity**: Hard overall; individual tests may be medium
 
-### context.t — 5/8 (3 failures)
-- **Test 2**: `$h{foo} = foo` — wantarray context in hash-subscript assignment (deferred)
-- **Tests 7-8**: `$_ = sub { context(); BEGIN { } }->()` — `BEGIN {}` inside anon sub generates
-  `(EVAL-WHEN ...)` as arg to `p-funcall-ref` instead of hoisting it. Crashes.
+### context.t — 6/8 (2 failures)
+- **Test 2**: `@a=foo` — wantarray leaks into regex inside sub body; expects `$1='a'` (void context match) but `/(.)/g` runs in list context (deferred — wantarray)
+- **Test 8**: `$_ = sub { context(); BEGIN { } }->()` — `BEGIN {}` inside anon sub generates `(EVAL-WHEN ...)` as arg to `p-funcall-ref` instead of hoisting it
 - **Fix**: Fix `BEGIN {}` inside anonymous sub body to hoist eval-when before the funcall
-- **Complexity**: Medium (parser issue in how BEGIN is handled inside sub bodies)
+- **Complexity**: Medium
+
+### time.t — 20/41 (21 failures)
+- **Passing (20)**: basic time/times, localtime/gmtime list context, extended-range list context (all ranges)
+- **Failing (21)**: all `scalar gmtime(...)` / `scalar localtime(...)` tests — `p-scalar` receives already-evaluated array, returns length (9) instead of ctime string
+- **Root cause**: wantarray — `scalar EXPR` generates `(p-scalar EXPR)`, which runs EXPR in whatever context is current (often list), producing a 9-element array, then `p-scalar` of array = length
+- **Fix**: requires `scalar EXPR` to bind `*wantarray*` to nil before evaluating EXPR — deferred (wantarray policy)
 
 ### pos.t — 8/16 (8 failures)
 - **Test 4**: `pos()` set inside `//g` loop — likely scope/state issue
@@ -109,19 +109,9 @@ test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key
 - **Remaining 8 failures**: TYPE-ERROR on some bit-width edge cases, likely `vec` with large-bit patterns
 - **Complexity**: Medium
 
-### ref.t — 3/7 then crashes
-- **Tests 1,3,5,7**: `local(*foo) = *bar` — typeglob localization (not-supported)
-- **Crash at test 8**: Continues failing after typeglob tests
-- **Root cause**: `local(*GLOB)` documented not-supported
-- **Complexity**: Blocked
+### ~~ref.t~~ — **FULLY PASSING** (session 89)
 
-### ~~anonsub.t~~ — **FULLY PASSING** (session 80)
-
-### lex.t — 1/2 + crash (regressed from session 80)
-- Test 1: heredoc `<<''` — still passing
-- Test 2: interpolating heredoc `<<""` with `$yow` — fails (prints literal `$yow`)
-- Crash at test 41: `delete $ENV{PERL_UNICODE}` — `%ENV` stored as `%ENV-MARKER%` (PCL special var), not a real hash-table; `p-delete` fails on it
-- **Complexity**: Medium
+### ~~lex.t~~ — **FULLY PASSING** (session 92)
 
 ### hash.t — 1/6 + crash [session 83 characterized]
 - Test 1 passes: `fbm scalar can be inserted into a hash`
@@ -193,12 +183,7 @@ test 2 fails (`<<""` interpolating heredoc), test 41 crashes on `delete $ENV{key
 - Tests 22-42: Various Unicode chr edge cases
 - **Complexity**: Medium; some Unicode encoding, some Tie
 
-### kvaslice.t — 10/19 (19 failures)
-- Previously "fully passing" (3/3) in session 73, but file gained more tests
-- Tests 2-7: Repeated keys, last element in scalar context
-- Tests 17-21: Error handling (die on invalid lvalue, warning on scalar context)
-- Tests 26-29: `keys %array[ix]` forbidden — error detection (not-supported per not-supported.md)
-- **Complexity**: Medium for repeated keys; error detection is hard
+### ~~kvaslice.t~~ — **FULLY PASSING** (session 90)
 
 ## Files Not Yet Characterized (need investigation before working on them)
 
@@ -342,26 +327,21 @@ Files I ran `perl run-perl-test.pl` on:
 
 ### High ROI, Doable Next Session
 
-1. **split.t test 73**: `split(/$x/, ...)` — `/$x/` compiled as literal, not interpolated.
-   Fix: In `gen_leaf` for `PPI::Token::Regexp::Match`, when pattern contains `$var`,
-   generate dynamic regex using `(p-regex (format nil "~A" $var))` or similar.
-2. **kvaslice.t repeated keys** (tests 2-7): `%arr{@keys}` with repeated keys should
-   repeat values; test 3 `last element in scalar context` — investigate.
-3. **caller.t**: UNBOUND-VARIABLE at startup — investigate `$Pkg::var` forward decl issue
-4. **range.t** test 4: `($a, @arr[0..2], $e) = (...)` — list assignment to array slice
+1. **do.t tests 9-10**: bare-if implicit return — see B1 in `docs/v1-implementation-plan.md`
+2. **context.t test 8**: BEGIN inside anon sub body generates wrong eval-when — see B6
+3. **state.t**: ~10 pass, ~8 fail — UNBOUND-VARIABLE (state variables not implemented)
+4. **sort.t**: investigate TYPE-ERROR (Tie::StdArray)
 
 ### Medium ROI, Multiple Sessions
 
-5. **do.t tests 9-10**: bare-if implicit return (condition false → return condition value)
-6. **context.t tests 7-8**: BEGIN inside anon sub generates wrong eval-when position
-7. **warn.t tests 3,6,9-11**: reference equality (HIGH RISK to box-set)
-8. **sort.t**: investigate TYPE-ERROR after Tie fix
+5. **warn.t tests 3,6,9-11**: reference equality (HIGH RISK to box-set)
+6. **range.t** test 4: `($a, @arr[0..2], $e) = (...)` — array slice on LHS of list assignment
 
 ### Low ROI or Blocked
 
 - **concat2.t**: needs operator overloading
-- **ref.t**: local(*glob) — documented not-supported
 - **chdir.t**, **each.t**: XS/DynaLoader dependency
 - **die_exit.t**, **print.t**: subprocess tests — cannot run in PCL
 - **hash.t**: needs DESTROY (finalizers) — hard/deferred
 - **length.t**, **chr.t**: use bytes / Unicode encoding — documented limitations
+- **time.t** scalar tests: wantarray issue — deferred per policy
