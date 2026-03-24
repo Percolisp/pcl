@@ -4,6 +4,127 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 99 (2026-03-25) — investigated `new CLASS ARGS` fix, no code changes
+
+**Commits:** (none)
+
+### Work done
+
+Resumed from session 98. Investigated the `new CLASS ARGS` indirect object syntax fix in
+`Pl/PExpr.pm` — read `handle_subcalls` thoroughly to understand the approach. No code was changed;
+user requested end of session before implementation.
+
+**Plan for `new CLASS ARGS` fix** (next session — implement this first):
+- Add a LEFT-TO-RIGHT pre-pass in `handle_subcalls` between the first loop (ending ~line 1881)
+  and the main right-to-left loop (starting ~line 1886).
+- The pre-pass scans for `Word(new)` followed immediately by `Word(CLASSNAME)`. It MUST run before
+  the right-to-left pass, because the right-to-left pass turns `version ~$_` into
+  `funcall(version, ~$_)`, destroying the class-name word before we can detect it.
+- When detected: call `parse_list($e, $i+2, $end_pars)` for the args, then build a `methodcall`
+  node: kids[0] = funcall{classname_word} (so ExprToCL.pm's `gen_methodcall` sees a bare
+  class-name funcall → emits `"ClassName"` or `p-resolve-invocant`), kids[1] = word 'new',
+  kids[2..N] = arg node IDs. Replace elements `$i..$end_pars` with the single node.
+- Class name detection: next element is `PPI::Token::Word` AND `!$self->is_token_operator($next_word)`.
+- End of args: use `$last_low_prio_op - 1` if defined, else `scalar(@$e) - 1`.
+- This generates `(p-method-call "version" 'pl-new (p-bit-not $_))` from `new version ~$_`.
+
+### Stats
+- PCL suite: **68 files, 2710 tests, all passing** (unchanged)
+- bop.t: **154 passing / 453 run** (unchanged)
+- perl-tests sweep: **5597 passing, 2019 failing, 43 fully-passing files** (confirmed, unchanged)
+
+---
+
+## Session 98 (2026-03-25) — bop.t: tie fixes, file-level local paren fix; +34 sweep tests
+
+**Commits:** (none yet)
+
+### Work done
+
+1. **`tie` confirmation** — User confirmed `tie` IS implemented (commit 5d2892f).
+   Updated `docs/bop-analysis.md` section 6 (was wrong: "PCL has no tie").
+
+2. **`delete $ref->{key}` codegen fix** (`Pl/ExprToCL.pm`):
+   - Added `h_ref_acc` case to `delete` special handler.
+   - Was generating `(p-delete (p-gethash-deref ref key))` (1 arg) → now `(p-delete (unbox ref) key)` (2 args).
+
+3. **`tied(arr[idx])` codegen fix** (`Pl/ExprToCL.pm`):
+   - `tied($_[0])` was generating `(p-tied (p-aref @_ 0))` — `p-aref` unboxes, FETCH fires, returns value, `p-tied(value)` = undef.
+   - Added special case for `tied(a_acc)` → `(p-tied (p-aref-box arr idx))` (returns box without unboxing).
+   - Similarly for `tied(h_acc)` → `(p-tied (p-gethash-box hash key))`.
+
+4. **`p-vec-set` tie-proxy destruction fix** (`cl/pcl-runtime.lisp`):
+   - `(setf (p-box-value str-box) ...)` was destroying the p-tie-proxy stored in p-box-value.
+   - Fixed: changed to `(box-set str-box s-ext)` which routes through STORE for tied vars.
+
+5. **File-level `local` paren fix** (`Pl/Parser.pm`):
+   - Root cause: `parse()` called `_process_children($doc)` but never closed open `let`/
+     `p-local-hash-elem-init` forms from file-level `local` declarations.
+   - `_process_block` closes them for block-scoped locals, but file-level locals (outside `{ }`)
+     had no closer. Result: generated CL file ended with 2 unclosed parens → EOF crash at test 189.
+   - Fix: after `_process_children($doc)`, drain `_local_let_depth` to 0, emitting
+     `)  ;; end local (file scope)` for each open form.
+   - bop.t: **154 passing / 453 run** (was 136/189 before; EOF crash resolved).
+
+6. **Next crash (test 454)**: `new version ~$_` indirect object syntax incorrectly transpiled
+   as `(pl-new (pl-version (p-bit-not $_)))` → `MAIN::PL-VERSION is undefined`.
+   Correct output should be `(p-method-call "version" 'pl-new (p-bit-not $_))`.
+   Not yet fixed (user requested end of session).
+
+### Stats
+- PCL suite: **68 files, 2710 tests, all passing** (unchanged)
+- bop.t: **154 passing / 453 run** (was 22/crash before this session)
+- perl-tests sweep: **5597 passing, 2019 failing, 43 fully-passing files** (+34 pass vs session 95)
+
+### Pending / next session
+- **`new CLASS ARGS` indirect object syntax** (`Pl/PExpr.pm`): detect `new CLASSNAME ARGS` in
+  `handle_subcalls` no-paren loop and generate `methodcall` AST node (same as `CLASS->new(ARGS)`).
+  Root: PPI sees `new version ~$_` as `Word(new) Word(version) Op(~) Var($_)`. Need to recognize
+  when `$sub_name eq 'new'` and next word is a class name → convert to `methodcall`.
+- **String bitwise ops (bop.t section 2, tests 21-32)** — char-by-char `logand`/`logior`/`logxor`.
+- See `docs/bop-analysis.md` for full bop.t section breakdown.
+
+---
+
+## Session 97 (2026-03-24) — prototype arg-limiting fix; bop.t crash resolved
+
+**Commits:** (none yet)
+
+### Work done
+
+1. **bop.t / heredoc.t hang diagnosis** (session 96 continuation):
+   - bop.t: confirmed crash at test 33 (not a hang) — prototype bug
+   - heredoc.t: confirmed `fresh_perl_is` no-ops (not a hang) — 137/138 silently produce no TAP
+   - Updated `docs/todo-features.md`, `docs/not-supported.md`, `docs/v1-implementation-plan.md`
+   - Created `docs/test-infrastructure.md` (SBCL startup time, fresh_perl_is, saved-core)
+   - Created `docs/bop-analysis.md` (full section-by-section bop.t analysis)
+
+2. **Old-style prototype `($)` arg-limiting at call sites** — `Pl/PExpr.pm`:
+   - Root cause: `handle_subcalls` called `parse_list($e, $i+1, $end_pars)` consuming ALL
+     remaining tokens as args, ignoring prototype `min_params`.
+   - Fix: new `_proto_max_args` helper (returns fixed arg count for user prototypes;
+     returns `undef` for built-ins which lack `min_params`, or for `@`/`%`/`*` params).
+     New arg-limiting code after named-unary / `$no_pars` single-arg checks scans forward
+     counting commas and sets `$end_pars` to stop at the Nth argument.
+   - Regression avoided: built-in `*`-prototype functions (`open`, `close`, etc.) have no
+     `min_params` in `_builtin_prototypes`, so `_proto_max_args` returns `undef` for them.
+   - Test: `Pl/t/bop-01.t` (7 tests, all passing)
+
+### Stats
+- PCL suite: **68 files, 2710 tests, all passing** (+1 file bop-01.t, +7 tests)
+- bop.t: **22 passing** (was 13 then crash at test 33; now 22/510, no crash)
+- perl-tests sweep: unchanged (5563/2015, 44 fully-passing files)
+
+### Pending / next session
+- **Review `Pl/t/prototype-01.t`** — verify existing prototype tests cover edge cases;
+  add tests for: `($;$)` optional param, `(\@)` ref proto, `(&)` block proto, zero-param `()`,
+  prototype interaction with named-unary ops, and call-with-parens (should bypass limiting).
+- **String bitwise ops (bop.t section 2)** — `p-band`/`p-bor`/`p-bxor` in `pcl-runtime.lisp`
+  need to detect string operands and do char-by-char bitwise (logand/logior/logxor on char-code).
+- See `docs/bop-analysis.md` for full bop.t section breakdown.
+
+---
+
 ## Session 95 (2026-03-24) — sort.t: scalar comparator, package $a/$b, +39 tests
 
 **Commits:** (see below)

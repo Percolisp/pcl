@@ -21,6 +21,7 @@ These are deliberate design decisions. Do not revisit without discussion.
 | `use bytes` | Unicode semantics are deep; documented |
 | DynaLoader / XS | Separate future phase |
 | `$SIG{__DIE__}` | Needs CL condition restarts — deferred |
+| `caller()` filename/line | CL has no runtime source-location metadata; `caller.t` also needs string eval + `%::` stash |
 | `?pattern?` / `reset()` | Removed in Perl 5.38 |
 | `__SUB__` | Rare in CPAN |
 | Interned boolean identity (`\!0 == \!0`) | CPython-style impl detail |
@@ -853,7 +854,7 @@ perl run-perl-test.pl perl-tests/method.t 2>&1 | head -40
 | Perl op/ suite passing | 5433 (session 91) |
 | Perl op/ suite failing | ~2000 (session 91) |
 | Fully-passing Perl files | 41 (session 91) |
-| Skipped (hang) | 2 (bop.t, heredoc.t) |
+| Skipped (crash/no-op) | bop.t (crashes test 33: prototype issue + string bitwise); heredoc.t (137/138 tests are fresh_perl_is no-ops, test 1 needs string eval) |
 | Zero-passing / unfixable | args.t, crypt.t, die_exit.t, print.t, hexfp.t, lfs.t, sprintf.t (skip_all: string eval) |
 | grent.t | 1/3 — setgrent ✓; tests 2-3 blocked by @{$hash_elem} auto-vivif |
 

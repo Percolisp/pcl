@@ -989,6 +989,33 @@ sub gen_funcall {
     return "($cl_func $target$items_str)";
   }
 
+  # Special handling for tied(): needs the box, not the unboxed value.
+  # p-aref normally unboxes (which would call FETCH on tied vars), so we use
+  # p-aref-box to get the box at the array index without triggering FETCH.
+  if ($func_name eq 'tied' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my $idx = $self->gen_node($arg_kids->[1]);
+        $arr =~ s/^\$/\@/;
+        return "(p-tied (p-aref-box $arr $idx))";
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my $key  = $self->gen_node($arg_kids->[1]);
+        $hash =~ s/^\$/\%/;
+        return "(p-tied (p-gethash-box $hash $key))";
+      }
+    }
+  }
+
   # Special handling for delete on arrays: delete $a[idx]
   # Need to pass array and index separately, not the dereferenced value
   if ($func_name eq 'delete' && @$kids == 2) {
@@ -1068,6 +1095,16 @@ sub gen_funcall {
         }
         my $keys_str = join(' ', @keys);
         return "(p-delete-kv-hash-slice $hash $keys_str)";
+      }
+    }
+    # Hash ref access: delete $ref->{key} -> (p-delete (unbox ref) key)
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_ref_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $ref = $self->gen_node($arg_kids->[0]);
+        my $key = $self->gen_node($arg_kids->[1]);
+        return "(p-delete (unbox $ref) $key)";
       }
     }
   }

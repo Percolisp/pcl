@@ -4734,12 +4734,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                 (new-byte (logior (logand byte-val (lognot (logand 255 (ash mask bit-offset))))
                                   (logand 255 (ash (logand val mask) bit-offset)))))
            (setf (char s-ext byte-offset) (code-char new-byte)))))
-      ;; Write modified string back to the box
+      ;; Write modified string back to the box (routes through STORE for tied vars)
       (when (p-box-p str-box)
-        (setf (p-box-value str-box) s-ext
-              (p-box-sv str-box)    s-ext
-              (p-box-sv-ok str-box) t
-              (p-box-nv-ok str-box) nil))
+        (box-set str-box s-ext))
       val)))
 
 ;;; ============================================================

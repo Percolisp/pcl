@@ -42,6 +42,58 @@ and read-only scalars).
 
 ---
 
+## `caller()` filename and line number
+
+**Perl behaviour:** `caller()` in list context returns `($package, $filename, $line)`.
+`caller(N)` returns the Nth frame's package, file, and line.  Many modules use
+this for error reporting (`Carp`, `Exporter`, `Test::More`).
+
+**PCL behaviour:** `pl-caller` returns the package name correctly.  Filename is
+always `"(unknown)"` and line number is always `0`.  `caller(N)` for N > 0 is
+unreliable.
+
+**Rationale:** CL does not naturally expose Perl-compatible source location
+metadata at runtime.  Embedding per-form source locations would require either
+reader macros at transpile time or a side-table mapping CL function names to
+source positions.  `caller.t` also depends on string eval (36 tests) and
+`%::` stash manipulation — together these make the file essentially impossible
+to pass without implementing those larger features first.  No CPAN module in
+scope depends on exact `caller()` filename/line values; they use it only for
+error message strings (where "at (unknown) line 0" is acceptable) or in test
+infrastructure.
+
+**Affected tests:** `perl-tests/caller.t` — only ~3/112 tests pass even after
+fixing the crash bugs found in session 90.
+
+---
+
+## Error message text and format
+
+**Perl behaviour:** Perl's compile-time and runtime errors have specific,
+documented text (e.g. `"Can't find string terminator"`, `"syntax error at
+FILE line N"`, `"Undefined subroutine &foo called"`).  Many test files use
+`fresh_perl_like` / `eval { }; like($@, qr/.../)` to match exact error
+wording.
+
+**PCL behaviour:** PCL does not guarantee that error messages match Perl's
+wording.  A parse error in PCL produces a different message than Perl's; a
+runtime error (SBCL condition) has a completely different format.  Some
+errors that Perl detects at compile time are silently ignored by PCL (see
+"Error compatibility for invalid Perl input" below).
+
+**Rationale:** PCL is a transpiler targeting correct execution of valid
+CPAN code.  Replicating Perl's exact error vocabulary would require
+duplicating Perl's full error-reporting infrastructure.  No CPAN module
+depends on the exact wording of error messages it never triggers in normal
+operation.
+
+**Affected tests:** Any `perl-tests/` file that uses `like($@, qr/text/)`
+on error strings, `fresh_perl_like(..., qr/error pattern/)`, or similar
+error-message pattern matching (e.g. `heredoc.t` tests 17–43, parts of
+`die.t`, `chop.t`, `anonsub.t`).
+
+---
+
 ## Error messages: no "at FILE line N" location info
 
 **Perl behaviour:** Die/warn/croak messages append `" at FILE line N.\n"` when

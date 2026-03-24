@@ -2153,6 +2153,35 @@ sub handle_subcalls {
       }
     }
 
+    # - - - Limit args for user-sub old-style prototypes (e.g., sub foo($)):
+    # If the function has a fixed-count prototype with no @ or % param, limit
+    # $end_pars so that only that many arguments are consumed, leaving the rest
+    # for the surrounding expression.
+    # e.g., `is _and 0, '0', 'str'` with _and($) -> `is(_and(0), '0', 'str')`
+    # _proto_max_args returns undef for built-in prototypes (no min_params set),
+    # so this only fires for user-defined subs with old-style prototypes.
+    if ($self->has_environment) {
+      my $proto = $self->environment->get_prototype($sub_name);
+      my $max_args = $self->_proto_max_args($proto);
+      if (defined $max_args) {
+        if ($max_args == 0) {
+          $end_pars = $i;
+        } else {
+          my $comma_count = 0;
+          for my $j ($i + 1 .. $end_pars) {
+            my $tok = $e->[$j];
+            if (ref($tok) eq 'PPI::Token::Operator' && $tok->content() eq ',') {
+              $comma_count++;
+              if ($comma_count == $max_args) {
+                $end_pars = $j - 1;
+                last;
+              }
+            }
+          }
+        }
+      }
+    }
+
     # - - - Special handling for print/say with filehandle:
     # print FILEHANDLE LIST  (no comma between filehandle and list)
     # print $fh LIST         (variable filehandle)
@@ -2385,6 +2414,24 @@ sub add_implicit_default_param {
     $self->add_child_to_node($node_id, $var_id);
   }
 }
+
+# Return the maximum fixed number of arguments for a user-defined old-style
+# prototype, or undef if:
+#  - no prototype / not is_proto
+#  - no min_params key (built-in prototypes from _builtin_prototypes lack this)
+#  - prototype has @ or % or * param (unbounded / filehandle)
+sub _proto_max_args {
+  my ($self, $proto) = @_;
+  return undef unless $proto && $proto->{is_proto};
+  return undef unless defined $proto->{min_params};  # built-ins have no min_params
+  my $params = $proto->{params} // [];
+  for my $p (@$params) {
+    my $pt = $p->{proto_type} // '';
+    return undef if $pt eq '@' || $pt eq '%' || $pt eq '*';
+  }
+  return scalar(@$params);
+}
+
 
 # Find the matching : for a ? at given position
 # Handles nested ternaries by counting ? and : depth

@@ -209,30 +209,45 @@ All three fixed. `closure.t` now 50/50.
 
 ---
 
-### `bop.t` hang  (unknown count — file skipped)
+### `bop.t` crash at test 33  (blocked — session 96)
 
-**What's broken:** `bop.t` (bitwise operators) hangs the SBCL process.
-Root cause unknown.  The file tests bitwise `&`/`|`/`^`/`~` on both
-integers and strings, plus `<<`/`>>` with very large shift counts.
+**What's broken:** `bop.t` does NOT hang — it crashes at test 33 with
+`invalid number of arguments: 1` to `pl-is`.
 
-**Hypothesis:** A very large shift count (e.g. `4 << 2147483648`) may
-trigger an SBCL loop or timeout in the arithmetic tower.  Or string
-bitwise ops (`&`/`|` on byte strings) may reach unimplemented code.
+**Root cause:** `sub _and($) { ... }` has prototype `($)` (one scalar arg).
+PCL does not track user-defined sub prototypes, so `is _and 0, '0', 'str'`
+is transpiled as `(pl-is (pl-_and 0 "0" "str"))` — all args go to `_and`,
+leaving `is` with only the return value.
 
-**Fix area:** Investigate by running `perl run-perl-test.pl perl-tests/bop.t`
-with a timeout and capturing the last test that printed before the hang.
+**Other issues in bop.t (even if prototype fixed):**
+- String bitwise ops `"AAAAA" & "zzzzz"` return `0` instead of character-by-character AND result (tests 21-23, 24-26)
+- `use integer` arithmetic-shift fill for large negative shifts (tests 13-14)
+- `tie`/double-magic variable tests (requires `tie` support)
+- `native_to_uni()` from `charset_tools.pl`
+
+**Fix area:** User sub prototype tracking in `Pl/Parser.pm` / `Pl/PExpr/Config.pm`
+(record `($)` etc. at sub definition time, limit args at call site).
+String bitwise ops need character-by-character implementation in `p-band`/`p-bor`/`p-bxor`.
 
 ---
 
-### `heredoc.t` hang  (unknown count — file skipped)
+### `heredoc.t` — mostly untestable (session 96)
 
-**What's broken:** `heredoc.t` hangs the SBCL process.  Root cause
-unknown.  Likely an edge case in multi-line string interpolation or
-indented heredocs (`<<~`).
+**What's broken:** `heredoc.t` does NOT hang — it crashes cleanly because
+137/138 tests use `fresh_perl_is` / `fresh_perl_like` which are no-ops in
+PCL's `test.pl` stub (they spawn a fresh Perl subprocess).  Only test 1
+produces TAP output (and it fails because it uses string `eval`).
 
-**Fix area:** Investigate using `--lenient-ppi` + binary-search for the
-hanging test.  Check `Pl/StringInterpolation.pm` for regex backtracking
-on large strings.
+**Root cause:** `fresh_perl_is` = `sub { return; }` in PCL's test.pl.  No TAP
+output for those tests → "planned 138, ran 1".
+
+**Fix area:** `fresh_perl_is` could spawn an actual Perl subprocess and compare
+its output.  But test 1 (the only non-subprocess test) needs string eval anyway.
+This file is essentially blocked on: (1) `fresh_perl_is` subprocess support,
+(2) string eval, (3) indented heredoc (`<<~`) parsing.
+
+**Verdict:** Not worth pursuing for v1.  See `docs/not-supported.md`
+for rationale on `fresh_perl_*` subprocess tests.
 
 ---
 
@@ -276,17 +291,11 @@ all five glob slots.
 
 ---
 
-### `caller()` improvements
+### ~~`caller()` improvements~~  ✗ NOT SUPPORTED (moved to `docs/not-supported.md`)
 
-**What's broken:** `pl-caller` returns only the package name.  Filename
-and line number are always `0`.  `caller(N)` for N > 0 is unreliable.
-
-**Fix:** At transpile time, PCL could embed `#.(line N)` reader macros in
-generated CL to make line numbers available at runtime.  Alternatively, a
-side-table mapping CL function names → source locations built during
-transpilation.
-
-*(Note: the "at FILE line N" suffix in error messages is deliberately not supported — see `docs/not-supported.md`. This item is specifically about `caller()` returning correct filename and line.)*
+`caller()` filename and line are always `0`; this is deliberate — see
+`docs/not-supported.md` for rationale.  `caller.t` also requires string eval
+and `%::` stash manipulation.
 
 ---
 
@@ -450,11 +459,11 @@ Both fixes were present before this todo entry was written.
 | ~~Inline package inside function~~ | ✅ DONE (session 72) | — | §N |
 | ~~$Pkg::var forward decls~~ | ✅ DONE (session 90) | — | — |
 | String eval | ~50 | 2 | Phase 3 |
-| bop.t hang | unknown | 2 | §H |
-| heredoc.t hang | unknown | 2 | §H |
+| bop.t crash (prototype + string bitwise) | 32 pass before crash | 2 | §H |
+| heredoc.t (fresh_perl_is no-ops) | 0/138 useful tests | — | not-supported |
 | use bytes | ~10 | 2 | §I/1.8 |
 | local on slices / *GLOB | local.t | 2 | Task #63 |
-| caller() file/line | 1 | 2 | — |
+| ~~caller() file/line~~ | ✗ not-supported | — | — |
 | prototype() | small | 2 | §L |
 | Named inner sub closures | small | 3 | §K |
 | Flip-flop .. in scalar ctx | 3 | 3 | §M |

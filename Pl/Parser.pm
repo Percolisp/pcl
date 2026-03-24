@@ -179,6 +179,17 @@ sub parse {
 
   $self->_process_children($doc);
 
+  # Close any local let forms opened at file level (e.g. local $^W at file scope).
+  # _process_block closes them for block-scoped locals, but file-level locals
+  # (outside any { }) need to be closed here after all children are processed.
+  my $file_local_depth = $self->{_local_let_depth} // 0;
+  while ($file_local_depth > 0) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")  ;; end local (file scope)");
+    $self->{_local_let_depth}--;
+    $file_local_depth--;
+  }
+
   # Insert forward declarations for undeclared package variables
   $self->_insert_variable_forward_declarations();
 
