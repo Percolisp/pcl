@@ -2016,12 +2016,26 @@ sub gen_inline_lambda {
   my $body     = $node->{body_cl} // 'nil';
   my $for_func = $node->{for_func} // '';
 
-  # Named sort comparator (sort NAME LIST): generate body as a 0-arg call to the sub.
-  # The lambda params $a/$b are CL special vars (defvar'd), so they create dynamic
-  # bindings that the named sub reads when it accesses $a/$b as globals.
+  # Named sort comparator (sort NAME LIST): call sub with $a $b as explicit args.
+  # The lambda params $a/$b are CL special vars (defvar'd), creating dynamic bindings
+  # visible to subs that read $a/$b as globals; passing them also populates @_ for
+  # prototype-based comparators like sub cmp($$) { my($a,$b)=@_; ... }.
   if ($for_func eq 'sort' && $node->{comparator_name}) {
     my $cl_func = $self->cl_name($node->{comparator_name});
-    $body = "($cl_func)";
+    $body = "($cl_func \$a \$b)";
+  }
+
+  # Scalar comparator (sort $var LIST): call via p-sort-get-fn at runtime.
+  # The lambda params $a/$b create dynamic bindings; p-sort-get-fn resolves
+  # the scalar (coderef, string name, glob, or glob ref) to a CL function.
+  if ($for_func eq 'sort' && $node->{scalar_cmp}) {
+    my $scalar_cl = $kids && @$kids ? $self->gen_node($kids->[0]) : 'nil';
+    # Capture *package* at lambda creation so p-sort-get-fn can look up
+    # string sub names in the correct (user) package even when called from
+    # inside p-sort (which runs in the :pcl package).
+    my $lambda_body = "(let ((*wantarray* nil) (*package* |sort--pkg|))\n  (funcall (p-sort-get-fn $scalar_cl) \$a \$b))";
+    $kids = [];
+    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    (catch :p-return\n      (block nil\n$lambda_body))))";
   }
 
   # Sort comparator blocks may contain explicit `return` — wrap with catch.

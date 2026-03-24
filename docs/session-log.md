@@ -4,6 +4,34 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 95 (2026-03-24) — sort.t: scalar comparator, package $a/$b, +39 tests
+
+**Commits:** (see below)
+
+### Fixes (four bugs across 3 files)
+
+1. **`sort $scalar LIST`** (`Pl/PExpr.pm`, `Pl/ExprToCL.pm`): New scalar-comparator detection in `_apply_reductions`. `gen_inline_lambda` emits `(funcall (p-sort-get-fn ...) $a $b)` lambda. `p-sort-get-fn` runtime helper resolves coderef/string/glob to a CL function.
+
+2. **`p-get-coderef` stringify bug** (`cl/pcl-runtime.lisp`): `(stringify-value name-val)` where `name-val` was a p-box returned `"SCALAR(0x...)"` instead of the sub name. Fixed: `(let ((v (unbox name-val))) (stringify-value v) ...)`.
+
+3. **`*package*` capture in scalar-cmp lambda** (`Pl/ExprToCL.pm`): `p-sort-get-fn` is called inside `stable-sort` (in `:pcl`), so it looked up sub names in the wrong package. Fix: capture `*package*` at sort-call-site with `(let ((|sort--pkg| *package*)) ...)` and rebind `*package*` in the comparator lambda.
+
+4. **`BAR::$A` unbound crash — inline package `$a`/`$b`** (`Pl/Parser.pm`): For `package Foo { ... }` blocks at non-top-level, `defvar Class::$a` was emitted unquoted, but the package was declared as `:|Class|`. SBCL case-folds `Class` → `CLASS`, causing "Package CLASS does not exist". Fix: strip `:` prefix from `$cl_pkg` to get `|Class|`, yielding `(defvar |Class|::$a ...)`.
+
+5. **`sort( NAME LIST )` paren form** (`Pl/PExpr.pm`): Detect named comparator when sort is called with parens.
+
+6. **`stable-sort` for consistent results** (`cl/pcl-runtime.lisp`): Changed `sort` → `stable-sort` in `p-sort` to match Perl's stable sort guarantee.
+
+7. **`p-get-coderef` / `p-glob-slot` forward references** (`cl/pcl-runtime.lisp`): Added `declaim ftype` blocks so SBCL resolves these symbols before `p-sort-get-fn` is compiled.
+
+### Stats
+- PCL suite: **67 files, 2703 tests, all passing** (unchanged)
+- sort.t: **72/18** (was 33/27 in session 93 baseline) → +39 tests
+- grent.t: **1/0** (fully passing, was 1/3)
+- perl-tests sweep: **5563 passing, 2015 failing** — **44 fully-passing files** (+1 grent.t)
+
+---
+
 ## Session 94 (2026-03-23) — state variables (state.t fully passing)
 
 **Commits:** d019ad9, 4ce258e
