@@ -1513,6 +1513,44 @@ sub handle_subcalls {
         } else {
           @inner_ch = @outer_ch;
         }
+        # sort( NAME LIST ) — named comparator in paren form
+        # e.g. sort( Backwards @arr ) where Backwards is a sub name
+        if ($func_name eq 'sort'
+            && @inner_ch
+            && $inner_ch[0]->isa('PPI::Token::Word')) {
+          my $comp_name = $inner_ch[0]->content();
+          my $is_builtin = exists $self->known_no_of_params->{$comp_name};
+          unless ($is_builtin
+                  || $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/
+                  || $comp_name =~ /^CORE::/) {
+            my($top_node, $top_id) = $self->make_node_insert('funcall');
+            my $node_id = $self->make_node($now);
+            $self->add_child_to_node($top_id, $node_id);
+            my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
+            $lambda_node->{params}          = ['$a', '$b'];
+            $lambda_node->{body_cl}         = 'nil';
+            $lambda_node->{for_func}        = 'sort';
+            $lambda_node->{comparator_name} = $comp_name;
+            $self->add_child_to_node($top_id, $lambda_id);
+            # Rest of inner_ch (after NAME, skip optional leading comma)
+            my @rest_ch = @inner_ch[1..$#inner_ch];
+            if (@rest_ch && ref($rest_ch[0]) eq 'PPI::Token::Operator'
+                && $rest_ch[0]->content eq ',') {
+              shift @rest_ch;
+            }
+            if (@rest_ch) {
+              my $rest_expr = $self->cleanup_for_parsing(\@rest_ch);
+              my $rest_ids  = $self->parse_list($rest_expr);
+              for my $rid (@$rest_ids) {
+                $self->add_child_to_node($top_id, $rid);
+              }
+            }
+            splice @$e, $i, 2;
+            $e->[$i] = $top_node;
+            next;
+          }
+        }
+
         if (@inner_ch && ref($inner_ch[0]) eq 'PPI::Structure::Block') {
           my $block = $inner_ch[0];
           # Rest: children after the block, strip leading comma
@@ -1693,7 +1731,7 @@ sub handle_subcalls {
       # Only treat as comparator if NOT a known built-in (reverse, etc.)
       # and NOT a keyword (my, if, etc.)
       my $is_builtin = exists $self->known_no_of_params->{$comp_name};
-      unless ($is_builtin || $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/ || $comp_name =~ /::/) {
+      unless ($is_builtin || $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/ || $comp_name =~ /^CORE::/) {
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $sort_id = $self->make_node($now);
         $self->add_child_to_node($top_id, $sort_id);
@@ -1722,6 +1760,42 @@ sub handle_subcalls {
         }
         next;
       }
+    }
+
+    # Handle sort $scalar LIST — scalar variable as comparator (coderef, string, glob, glob ref)
+    # e.g. sort $sortsub 4,1,3,2  →  (p-sort (lambda ($a $b) (funcall (p-sort-get-fn $sortsub) $a $b)) ...)
+    if ($now->isa('PPI::Token::Word') && $now->content() eq 'sort'
+        && $next->isa('PPI::Token::Symbol')
+        && substr($next->content(), 0, 1) eq '$') {
+      my($top_node, $top_id) = $self->make_node_insert('funcall');
+      my $sort_id = $self->make_node($now);
+      $self->add_child_to_node($top_id, $sort_id);
+
+      my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
+      $lambda_node->{params}     = ['$a', '$b'];
+      $lambda_node->{body_cl}    = 'nil';
+      $lambda_node->{for_func}   = 'sort';
+      $lambda_node->{scalar_cmp} = 1;  # flag: scalar comparator
+      # Parse the scalar as a child of the lambda (ExprToCL generates it)
+      my @scalar_tok = ($next);
+      my $scalar_clean = $self->cleanup_for_parsing(\@scalar_tok);
+      my $scalar_ids   = $self->parse_list($scalar_clean);
+      $self->add_child_to_node($lambda_id, $scalar_ids->[0]) if @$scalar_ids;
+      $self->add_child_to_node($top_id, $lambda_id);
+
+      if ($i + 2 < scalar(@$e)) {
+        my @rest = @$e[$i + 2 .. $#$e];
+        my $rest_list = $self->cleanup_for_parsing(\@rest);
+        my $rest_ids  = $self->parse_list($rest_list);
+        for my $rest_id (@$rest_ids) {
+          $self->add_child_to_node($top_id, $rest_id);
+        }
+        splice @$e, $i, scalar(@$e) - $i;
+        $e->[$i] = $top_node;
+      } else {
+        splice @$e, $i, 2, $top_node;
+      }
+      next;
     }
 
     next
@@ -2079,6 +2153,35 @@ sub handle_subcalls {
       }
     }
 
+    # - - - Limit args for user-sub old-style prototypes (e.g., sub foo($)):
+    # If the function has a fixed-count prototype with no @ or % param, limit
+    # $end_pars so that only that many arguments are consumed, leaving the rest
+    # for the surrounding expression.
+    # e.g., `is _and 0, '0', 'str'` with _and($) -> `is(_and(0), '0', 'str')`
+    # _proto_max_args returns undef for built-in prototypes (no min_params set),
+    # so this only fires for user-defined subs with old-style prototypes.
+    if ($self->has_environment) {
+      my $proto = $self->environment->get_prototype($sub_name);
+      my $max_args = $self->_proto_max_args($proto);
+      if (defined $max_args) {
+        if ($max_args == 0) {
+          $end_pars = $i;
+        } else {
+          my $comma_count = 0;
+          for my $j ($i + 1 .. $end_pars) {
+            my $tok = $e->[$j];
+            if (ref($tok) eq 'PPI::Token::Operator' && $tok->content() eq ',') {
+              $comma_count++;
+              if ($comma_count == $max_args) {
+                $end_pars = $j - 1;
+                last;
+              }
+            }
+          }
+        }
+      }
+    }
+
     # - - - Special handling for print/say with filehandle:
     # print FILEHANDLE LIST  (no comma between filehandle and list)
     # print $fh LIST         (variable filehandle)
@@ -2311,6 +2414,24 @@ sub add_implicit_default_param {
     $self->add_child_to_node($node_id, $var_id);
   }
 }
+
+# Return the maximum fixed number of arguments for a user-defined old-style
+# prototype, or undef if:
+#  - no prototype / not is_proto
+#  - no min_params key (built-in prototypes from _builtin_prototypes lack this)
+#  - prototype has @ or % or * param (unbounded / filehandle)
+sub _proto_max_args {
+  my ($self, $proto) = @_;
+  return undef unless $proto && $proto->{is_proto};
+  return undef unless defined $proto->{min_params};  # built-ins have no min_params
+  my $params = $proto->{params} // [];
+  for my $p (@$params) {
+    my $pt = $p->{proto_type} // '';
+    return undef if $pt eq '@' || $pt eq '%' || $pt eq '*';
+  }
+  return scalar(@$params);
+}
+
 
 # Find the matching : for a ? at given position
 # Handles nested ternaries by counting ? and : depth

@@ -104,7 +104,7 @@
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-copy-array #:p-copy-hash
    #:p-pack #:p-unpack
-   #:p-grep #:p-map #:p-sort #:p-reverse
+   #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
    #:p-cast-@ #:p-cast-% #:p-cast-$
@@ -248,8 +248,9 @@
                 object-address looks-like-number
                 p-typeglob-p p-typeglob-name p-typeglob-package
                 p-regex-match-p p-regex-match-pattern p-regex-match-modifiers
-                clos-class-to-pkg perl-pkg-to-clos-class))
-(declaim (ftype (function (t t) t) p-can p-isa))
+                clos-class-to-pkg perl-pkg-to-clos-class
+                p-get-coderef))
+(declaim (ftype (function (t t) t) p-can p-isa p-glob-slot))
 (declaim (ftype (function (&rest t) t)
                 p-method-call p-glob-undef-name p-glob-copy parse-number
                 build-ppcre-options))
@@ -4733,12 +4734,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                 (new-byte (logior (logand byte-val (lognot (logand 255 (ash mask bit-offset))))
                                   (logand 255 (ash (logand val mask) bit-offset)))))
            (setf (char s-ext byte-offset) (code-char new-byte)))))
-      ;; Write modified string back to the box
+      ;; Write modified string back to the box (routes through STORE for tied vars)
       (when (p-box-p str-box)
-        (setf (p-box-value str-box) s-ext
-              (p-box-sv str-box)    s-ext
-              (p-box-sv-ok str-box) t
-              (p-box-nv-ok str-box) nil))
+        (box-set str-box s-ext))
       val)))
 
 ;;; ============================================================
@@ -5276,6 +5274,27 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                    (vector-push-extend r result))))
     result))
 
+(defun p-sort-get-fn (val)
+  "Get a CL function from a Perl scalar sort comparator (coderef, string, glob, or glob ref).
+   Handles: \\&foo (double-boxed fn), *foo (typeglob), \\*foo (box of typeglob), 'name' (string)."
+  (let ((v (unbox val)))
+    (cond
+      ;; Direct function (unboxed code ref)
+      ((functionp v) v)
+      ;; Box containing function: \&foo stores box(box(fn)) after p-backslash
+      ((and (p-box-p v) (functionp (p-box-value v)))
+       (p-box-value v))
+      ;; Typeglob *foo — extract CODE slot
+      ((p-typeglob-p v)
+       (let ((code (p-glob-slot v "CODE")))
+         (and code (unbox code))))
+      ;; Box containing typeglob: \*foo stores box(box(typeglob))
+      ((and (p-box-p v) (p-typeglob-p (p-box-value v)))
+       (let ((code (p-glob-slot (p-box-value v) "CODE")))
+         (and code (unbox code))))
+      ;; String or anything else — look up sub by name in current package
+      (t (p-get-coderef val)))))
+
 (defun p-sort (&rest args)
   "Perl sort - sort a list with optional comparator function.
    (p-sort list)         - sort single array/list lexically
@@ -5292,14 +5311,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                    (result (if (typep raw 'sequence)
                                (copy-seq raw)
                                (make-array 0 :adjustable t :fill-pointer 0))))
-              (sort result (lambda (a b) (< (to-number (funcall fn a b)) 0))))
-            ;; No comparator: flatten all args and sort lexically
+              (stable-sort result (lambda (a b) (< (to-number (funcall fn a b)) 0))))
+            ;; No comparator: flatten all args and sort lexically (stable)
             (let* ((raw (apply #'%p-collect-list args))
                    (result (if (typep raw 'sequence)
                                (copy-seq raw)
                                (make-array 0 :adjustable t :fill-pointer 0))))
-              (sort result (lambda (a b)
-                             (string< (to-string a) (to-string b)))))))))
+              (stable-sort result (lambda (a b)
+                                    (string< (to-string a) (to-string b)))))))))
 
 (defun p-reverse (&rest items)
   "Perl reverse - accepts single @array or multiple elements."
@@ -5461,7 +5480,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ((functionp v) v)
       ;; String - look up by Perl function name
       (t
-       (let* ((s (stringify-value name-val))
+       (let* ((s (stringify-value v))
               (last-sep (search "::" s :from-end t)))
          (if last-sep
              ;; Package-qualified: "Pkg::name" -> Pkg::PL-NAME

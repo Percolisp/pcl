@@ -179,6 +179,17 @@ sub parse {
 
   $self->_process_children($doc);
 
+  # Close any local let forms opened at file level (e.g. local $^W at file scope).
+  # _process_block closes them for block-scoped locals, but file-level locals
+  # (outside any { }) need to be closed here after all children are processed.
+  my $file_local_depth = $self->{_local_let_depth} // 0;
+  while ($file_local_depth > 0) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")  ;; end local (file scope)");
+    $self->{_local_let_depth}--;
+    $file_local_depth--;
+  }
+
   # Insert forward declarations for undeclared package variables
   $self->_insert_variable_forward_declarations();
 
@@ -3276,6 +3287,21 @@ sub _emit_package_preamble {
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
+    # Declare $a/$b as special in this package using fully-qualified names in the
+    # top-level declarations bucket.  Using pkg::$a at top level (where the reader's
+    # *package* is whatever the enclosing section uses) ensures SBCL sees these as
+    # globally special before compiling any lambdas that reference them.
+    # The inline `defvar $a` would declare MAIN::$A (wrong package), so we skip it.
+    # Use same quoting as $cl_pkg: strip leading ':' to get the CL symbol prefix.
+    # E.g. ':|Class|' → '|Class|::$a' so SBCL reads it as Class::$a not CLASS::$A.
+    (my $cl_pkg_sym = $cl_pkg) =~ s/^://;
+    my $pkg_a = $cl_pkg_sym . '::$a';
+    my $pkg_b = $cl_pkg_sym . '::$b';
+    $self->_with_bucket('declarations', sub {
+      $self->_emit("(defvar $pkg_a (make-p-box nil))");
+      $self->_emit("(defvar $pkg_b (make-p-box nil))");
+      $self->_emit("");
+    });
     $self->_emit("");
     return;
   }
@@ -3290,6 +3316,13 @@ sub _emit_package_preamble {
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
+    $self->_emit("");
+  });
+  # Declare $a/$b as special in this package so sort comparator lambdas
+  # (lambda ($a $b) ...) create dynamic bindings visible to named comparator subs.
+  $self->_with_bucket('declarations', sub {
+    $self->_emit("(defvar \$a (make-p-box nil))");
+    $self->_emit("(defvar \$b (make-p-box nil))");
     $self->_emit("");
   });
 }

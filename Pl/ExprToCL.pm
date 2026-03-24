@@ -989,6 +989,33 @@ sub gen_funcall {
     return "($cl_func $target$items_str)";
   }
 
+  # Special handling for tied(): needs the box, not the unboxed value.
+  # p-aref normally unboxes (which would call FETCH on tied vars), so we use
+  # p-aref-box to get the box at the array index without triggering FETCH.
+  if ($func_name eq 'tied' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my $idx = $self->gen_node($arg_kids->[1]);
+        $arr =~ s/^\$/\@/;
+        return "(p-tied (p-aref-box $arr $idx))";
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my $key  = $self->gen_node($arg_kids->[1]);
+        $hash =~ s/^\$/\%/;
+        return "(p-tied (p-gethash-box $hash $key))";
+      }
+    }
+  }
+
   # Special handling for delete on arrays: delete $a[idx]
   # Need to pass array and index separately, not the dereferenced value
   if ($func_name eq 'delete' && @$kids == 2) {
@@ -1068,6 +1095,16 @@ sub gen_funcall {
         }
         my $keys_str = join(' ', @keys);
         return "(p-delete-kv-hash-slice $hash $keys_str)";
+      }
+    }
+    # Hash ref access: delete $ref->{key} -> (p-delete (unbox ref) key)
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_ref_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $ref = $self->gen_node($arg_kids->[0]);
+        my $key = $self->gen_node($arg_kids->[1]);
+        return "(p-delete (unbox $ref) $key)";
       }
     }
   }
@@ -2016,12 +2053,26 @@ sub gen_inline_lambda {
   my $body     = $node->{body_cl} // 'nil';
   my $for_func = $node->{for_func} // '';
 
-  # Named sort comparator (sort NAME LIST): generate body as a 0-arg call to the sub.
-  # The lambda params $a/$b are CL special vars (defvar'd), so they create dynamic
-  # bindings that the named sub reads when it accesses $a/$b as globals.
+  # Named sort comparator (sort NAME LIST): call sub with $a $b as explicit args.
+  # The lambda params $a/$b are CL special vars (defvar'd), creating dynamic bindings
+  # visible to subs that read $a/$b as globals; passing them also populates @_ for
+  # prototype-based comparators like sub cmp($$) { my($a,$b)=@_; ... }.
   if ($for_func eq 'sort' && $node->{comparator_name}) {
     my $cl_func = $self->cl_name($node->{comparator_name});
-    $body = "($cl_func)";
+    $body = "($cl_func \$a \$b)";
+  }
+
+  # Scalar comparator (sort $var LIST): call via p-sort-get-fn at runtime.
+  # The lambda params $a/$b create dynamic bindings; p-sort-get-fn resolves
+  # the scalar (coderef, string name, glob, or glob ref) to a CL function.
+  if ($for_func eq 'sort' && $node->{scalar_cmp}) {
+    my $scalar_cl = $kids && @$kids ? $self->gen_node($kids->[0]) : 'nil';
+    # Capture *package* at lambda creation so p-sort-get-fn can look up
+    # string sub names in the correct (user) package even when called from
+    # inside p-sort (which runs in the :pcl package).
+    my $lambda_body = "(let ((*wantarray* nil) (*package* |sort--pkg|))\n  (funcall (p-sort-get-fn $scalar_cl) \$a \$b))";
+    $kids = [];
+    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    (catch :p-return\n      (block nil\n$lambda_body))))";
   }
 
   # Sort comparator blocks may contain explicit `return` — wrap with catch.
