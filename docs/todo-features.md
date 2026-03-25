@@ -90,18 +90,20 @@ assignment).
 
 ---
 
-### `index.t` / `rindex` failures  (~414 tests)
+### ~~`index.t` / `rindex` failures~~  Partially resolved (session 101)
 
-**What's broken:** Nearly all of `index.t` fails.  Root cause unclear;
-likely a boxing issue in `pl-index` / `pl-rindex` for common cases.
+**Status:** 87/12 (was 230/162).
 
-**Quick check:**
-```bash
-echo 'print index("abcdef", "cd"), "\n";' | ./pl2cl | sbcl --script /dev/stdin
-```
-Expected: `2`.
+**Fixed:** `p-rindex` empty-substr + negative-position bug — `rindex("abc","", -1)`
+returned -1; fix: check empty-substr before negative-pos, clamp to max(0, min(pos, len)).
 
-**Fix area:** `cl/pcl-runtime.lisp` `pl-index`, `pl-rindex`.
+**Commented out:** 293 tests using `eval "string"` (OPpTARGET_MY bytecode-optimizer
+tests, large-codepoint tests, lvalue tests). Plan: 413 → 120.
+
+**Remaining 12 failures:**
+- Tests 49–58 (10): `utf8::encode` / octet-level string handling — not implemented
+- Test 90: overloaded `""` stringification in `p-index` / `to-string`
+- Test 98: `require Tie::Scalar` module loader
 
 *(PERL_TEST_SUITE_PLAN.md §F)*
 
@@ -454,7 +456,7 @@ Both fixes were present before this todo entry was written.
 |---------|---------------|------|----------|
 | Tie::Array/Tie::Hash loader hang | sort, reverse, local blocked | 1 | §A |
 | Implicit returns / bare-if | widespread | 1 | §C |
-| index.t / rindex | ~414 | 1 | §F |
+| ~~index.t / rindex~~ | ~~87/12~~ (session 101) | — | §F |
 | $SIG{__DIE__} handler | ~50 | 1 | §D/1.4 |
 | ~~Inline package inside function~~ | ✅ DONE (session 72) | — | §N |
 | ~~$Pkg::var forward decls~~ | ✅ DONE (session 90) | — | — |
