@@ -1,74 +1,70 @@
-# bop.t Analysis (updated session 97, 2026-03-24)
+# bop.t Analysis (updated session 100, 2026-03-26)
 
-510 tests. **22 pass** (up from 13 before crash fix). No longer crashes.
+510 tests. **207 pass** (up from 188 session 99). No longer crashes.
 
-## Status by section
+## Status by section (207/453 run, 57 tests 454-510 not run due to crash at 454)
 
-### Section 1: Basic integer bitwise (tests 1–15)
-Tests 1–6, 8–12, 15 pass. Failures:
-- Test 7: `~0 > 0 && do { use integer; ~0 } == -1` — `use integer` ~0 should be -1 (signed)
-- Tests 13–14: `use integer` with large negative shifts should fill with sign bit
-- Tests 16–19: unknown — need investigation
+```
+Start End    Total   Section                                     Pass/Fail
+---------------------------------------------------------------------------
+1     6      6       Basic numeric &|^~                          6/6 (100%)
+7     7      1       use integer ~0 sign check                   1/1 (100%) ✅ fixed session 100
+8     12     5       Large UV shifts                             5/5 (100%)
+13    14     2       use integer negative shifts                 2/2 (100%) ✅ fixed session 100
+15    15     1       use integer huge negative shift             1/1 (100%)
+16    20     5       Signed/unsigned cusp &|^                    5/5 (100%) ✅ fixed session 100
+21    35     15      String bitwise short/long/const             15/15 (100%)
+36    38     3       COW numeric |= &= ^=                        3/3 (100%)
+39    47     9       Numeric double-magic                        9/9 (100%)
+48    144    97      Tie double-magic (~100 tests)               73/97 (75%)
+145   165    21      vec() + UTF-8 flag                          16/21 (76%)
+166   175    10      use feature bitwise (numeric ops)           9/10 (90%)
+176   201    26      use v5.27 bitwise repeat                    26/26 (100%)
+202   214    13      ref/undef/glob bitwise                      12/13 (92%)
+215   453    239     PVBM + object overload + $SIG{__WARN__}     25/239 (10%)
+```
 
-### Section 2: String bitwise — char-by-char (tests 21–32) — NOT YET FIXED
-`"AAAAA" & "zzzzz"` must AND each character position, returning a same-length string.
-PCL's `p-band`/`p-bor`/`p-bxor` coerce to number, return 0. Fix: detect string operands
-and do char-by-char CL ops. User confirmed this should be supported.
+## Fixed in session 100
+- **use integer bitwise semantics** — `~0`, `&`, `|`, `^`, `<<`, `>>` under `use integer` now return signed 64-bit results.
+  - Added `p-to-s64`, `p-<<-int`, `p->>-int` to runtime; extended `use_integer` block in ExprToCL.pm
+  - Tests 7, 13-15, 16-20 now all pass (was 1/8)
 
-Tests 21–32 all fail. Tests 27–32 use `_and`/`_oar`/`_xor` subs with `($)` prototype
-— prototype now correctly limits args (fix below), but string bitwise still wrong.
+## Fixed in session 99
+- **String bitwise** (tests 21-35) — `p-bit-and`/`p-bit-or`/`p-bit-xor` detect non-numeric string operands, do char-by-char ops. `p-to-s64`, `p-<<-int`, `p->>-int` added to runtime.
+- **`new CLASS ARGS` indirect object syntax** — pre-pass in `handle_subcalls` before right-to-left loop.
 
-### Section 3: User-sub prototype crash — ✅ FIXED (session 97)
-`sub _and($) { ... }` — prototype `($)` means one scalar arg.
-`is _and 0, '0', 'str'` now correctly parses as `is(_and(0), '0', 'str')`.
+## Remaining failures by category
 
-**Root cause**: `handle_subcalls` in `Pl/PExpr.pm` wasn't consulting prototype `min_params`
-when deciding how many arguments to consume for a no-paren user sub call.
+### Tie double-magic (tests 48-144, 24 failures)
+FETCH called twice when should be called once. PCL's tie has a double-eval problem.
+`fetches($x)` returns 2 when expected 1. Requires tie semantics to be fixed.
 
-**Fix**: Added `_proto_max_args` helper and arg-limiting code in `handle_subcalls`.
-- `_proto_max_args` returns the fixed arg count for user prototypes with no `@`/`%`/`*` params
-- Returns `undef` for built-in prototypes (they lack `min_params`) — excludes `open`, `close`, etc.
-- Scans forward counting commas to find the Nth arg boundary, sets `$end_pars` accordingly
-- Tests: `Pl/t/bop-01.t` (7 tests, all passing)
+### vec write fetch (tests 149, 154)
+vec lvalue triggers 1 FETCH (should be 2 for read-modify-write). Also tie-related.
 
-### Section 4–5: COW numeric bitwise (tests 36–46)
-Tests 36–38 pass. Tests 39–46 fail. Need investigation.
+### UTF-8 flag (tests 145-165, 5 failures)
+`utf8::is_utf8()`, `utf8::upgrade()`, `~` on UTF-8 strings. Skip per user request.
 
-### Section 6: tie / double-magic (~120 tests)
-`tie $x, "main", 1` — PCL has no tie. FETCH/STORE call counting tests.
-Major feature, not worth implementing for v1.
+### `~.` string-force complement (tests 172, 186)
+`~.` is `use feature "bitwise"` string-force NOT. PPI tokenizes `~.22` as `~` then `.22` (float) — wrong.
+Fix requires detecting `~.` pattern at parse time.
 
-### Section 7: UTF-8 flag (~10 tests)
-`utf8::is_utf8()` — not-supported (PCL has no per-scalar UTF-8 flag).
+### `$warn` counting (tests 202, 215)
+`local $SIG{__WARN__} = sub { $warn++ }` — counts warnings from bitwise ops on refs.
+PCL doesn't implement `$SIG{__WARN__}` call protocol. `$warn` stays 0 instead of expected 10.
 
-### Section 8: `use feature "bitwise"` + `&.`/`|.`/`^.`/`~.` (~45 tests)
-New string-force operators from Perl 5.22. Not implemented in PCL.
-`use feature "bitwise"` also changes `&`/`|`/`^` on strings to force numeric.
+### Ref stringification for bitwise (tests 216-453, ~199 failures)
+`\1 | "x"` should stringify the ref ("SCALAR(0x...)") and do string bitwise.
+PCL's `p-backslash(1) = make-p-box(1)` → box-set strips to 1 → stringifies as "1" not "SCALAR(0x...)".
+**Additional blocker**: expected values in tests are computed via `eval qq/chr($co $op $so)/`.
+PCL's `p-eval` can't evaluate these Perl expressions → expected values are wrong strings.
+Fixing would require both `p-backslash` double-boxing AND full `p-eval` (string eval).
 
-### Section 9: Ref/object bitwise + `$SIG{__WARN__}` counting (~120 tests)
-Bitwise ops on undef, refs, globs, objects. `$SIG{__WARN__}` call counting.
-Depends on string bitwise + $SIG{__WARN__} call protocol being correct.
-
-### Section 10: Overload + block eval
-`use overload q/|/ => sub { "y" }` — bitwise overloading. Block eval supported,
-but error message matching fails.
-
-### Section 11: Negative shifts + use integer arithmetic right shift (~25 tests)
-`0x7b << -4` should equal `0x7b >> 4` (negative = reverse direction).
-`use integer; -1 >> 1` should be -1 (arithmetic fill), not 0.
-
-### Section 12: String eval for error testing (~15 tests)
-`eval '$_ = "\xFF" & "\x{100}"'` — tests fatalization of >0xFF codepoints in string bitwise.
-
-### Sections 13–20: fresh_perl_is, pack "P", version objects, Config
-Mostly untestable without those features.
+### Crash at test 454
+`new version ~$_` triggers `p-method-call("version", ...)` but the `version` module isn't loaded.
+Tests 455-510 (Config/XS/fresh_perl_is/string eval) are out of scope anyway.
 
 ## Priority fixes for next session
-1. **Section 2 string bitwise** — `p-band`/`p-bor`/`p-bxor` need string-context detection;
-   when both operands are strings, do char-by-char CL bitwise ops (logand/logior/logxor
-   on `char-code` per position, pad shorter operand with NUL, result length = shorter)
-2. **Section 1 tests 16–19** — investigate what these test
-3. **Section 4–5 tests 39–46** — investigate COW numeric bitwise failures
-4. **Section 11 negative shifts** — `(ash val (- shift))` when shift < 0
-5. **Section 11 use integer arithmetic right shift** — `(ash val shift)` for negative vals
-   is already arithmetic in CL (fills with sign bit), so this may already work
+1. **~. operator** (tests 172, 186) — detect `~` + `.N` token in PExpr.pm when `use feature "bitwise"` active
+2. **Tie FETCH double-call** (tests 48-144, 24 failures) — investigate why FETCH is called twice for read ops
+3. **Broader improvements** — consider bop.t-unrelated targets: sort.t remaining 18, B1 bare-if return

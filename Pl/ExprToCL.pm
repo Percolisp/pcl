@@ -723,6 +723,16 @@ sub gen_binary_op {
       return "(- (p-int $left) (p-int $right))";
     } elsif ($op eq '*') {
       return "(* (p-int $left) (p-int $right))";
+    } elsif ($op eq '&') {
+      return "(p-to-s64 (logand (p-int $left) (p-int $right)))";
+    } elsif ($op eq '|') {
+      return "(p-to-s64 (logior (p-int $left) (p-int $right)))";
+    } elsif ($op eq '^') {
+      return "(p-to-s64 (logxor (p-int $left) (p-int $right)))";
+    } elsif ($op eq '<<') {
+      return "(p-<<-int $left $right)";
+    } elsif ($op eq '>>') {
+      return "(p->>-int $left $right)";
     }
   }
 
@@ -1462,6 +1472,11 @@ sub gen_prefix_op {
 
   # Get CL name for the operator
   my $cl_op = $self->cl_name($op);
+
+  # Under 'use integer', ~ returns signed 64-bit complement
+  if ($op eq '~' && $self->environment && $self->environment->has_pragma('use_integer')) {
+    return "(p-to-s64 (lognot (p-int $operand)))";
+  }
 
   # For ++ and --, distinguish prefix from postfix
   if ($op eq '++' || $op eq '--') {

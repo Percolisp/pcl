@@ -22,7 +22,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 25;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -110,4 +110,153 @@ print scalar @a, "\n";
 print $a[0], "\n";
 print $a[1], "\n";',
         "2\n30\n30\n");
+}
+
+# ── Indirect object syntax: "new ClassName ARGS" ─────────────────────────────
+
+# Test 8: "new version ~$_" — the bop.t test 454 crash case
+# Before fix: right-to-left loop turned "version ~$_" into funcall(version,~$_),
+# then "new funcall(...)" into funcall(new,funcall(version,...)) → MAIN::PL-VERSION crash.
+{
+    my $cl = transpile('new version ~$_');
+    like($cl, qr/p-method-call.*version.*new/,
+         'new version ~$_: generates p-method-call with version and new');
+    unlike($cl, qr/pl-version/,
+           'new version ~$_: must NOT call pl-version (indirect object, not funcall)');
+}
+
+# Test 10: runtime — "new Dog" works as ClassName->new()
+{
+    test_cl('new Dog: indirect object syntax works at runtime',
+        'package Dog;
+sub new { my $class = shift; bless { name => "Fido" }, $class }
+sub name { $_[0]->{name} }
+package main;
+my $d = new Dog;
+print ref($d), "\n";
+print $d->name(), "\n";',
+        "Dog\nFido\n");
+}
+
+# ── String bitwise ops ────────────────────────────────────────────────────────
+
+# Test 11: & truncates to shorter length
+{
+    test_cl('string & truncates to shorter',
+        'my $Aaz = chr(ord("A") & ord("z"));
+print "AAAAA" & "zzzzz", "\n";',
+        chr(ord("A") & ord("z")) x 5 . "\n");
+}
+
+# Test 12: | extends to longer length, short side padded with NUL
+{
+    test_cl('string | extends to longer',
+        'my $foo = "A" x 5; my $bar = "z" x 3;
+print $foo | $bar, "\n";',
+        chr(ord("A") | ord("z")) x 3 . chr(ord("A") | 0) x 2 . "\n");
+}
+
+# Test 13: ^ extends to longer length (use ord() to avoid ';' in output getting stripped)
+{
+    test_cl('string ^ extends to longer',
+        'my $foo = "A" x 5; my $bar = "z" x 3; my $r = $foo ^ $bar;
+print length($r), " ", ord(substr($r,0,1)), " ", ord(substr($r,3,1)), "\n";',
+        "5 " . (ord("A") ^ ord("z")) . " " . (ord("A") ^ 0) . "\n");
+}
+
+# Test 14: numeric & still works
+{
+    test_cl('numeric & still works',
+        'print 0xdead & 0xbeef, "\n";',
+        "40621\n");  # 0x9ead = 40621
+}
+
+# Test 15: numeric |= (COW) still works — bop.t tests 37-38
+{
+    test_cl('$cow |= number (numeric)',
+        'my %h = (150 => 1); my $i = (keys %h)[0]; $i |= 105; print $i, "\n";',
+        "255\n");
+}
+
+# Test 16: numeric &= (COW) still works
+{
+    test_cl('$cow &= number (numeric)',
+        'my %h = (150 => 1); my $i = (keys %h)[0]; $i &= 105; print $i, "\n";',
+        "0\n");
+}
+
+# Test 17: string &= assigns string result
+{
+    test_cl('string &= works',
+        'my $s = "zzzzz"; $s &= "AAAAA"; print $s, "\n";',
+        chr(ord("z") & ord("A")) x 5 . "\n");
+}
+
+# Test 18: string |= works
+{
+    test_cl('string |= works',
+        'my $s = "AAA"; $s |= "zzzzz"; print $s, "\n";',
+        chr(ord("A") | ord("z")) x 3 . chr(0 | ord("z")) x 2 . "\n");
+}
+
+# ── use integer bitwise (tests 19-25) ────────────────────────────────────────
+
+# Test 19: use integer; ~0 == -1
+{
+    test_cl('use integer: ~0 is -1 (signed)',
+        'print ~0 > 0 ? "unsigned" : "fail", "\n";
+print do { use integer; ~0 } == -1 ? "ok" : "fail", "\n";',
+        "unsigned\nok\n");
+}
+
+# Test 20: use integer; $cusp & -1 is negative
+{
+    test_cl('use integer: $cusp & -1 is negative (signed)',
+        'my $bits = 0; for (my $i = ~0; $i; $i >>= 1) { ++$bits; }
+my $cusp = 1 << ($bits - 1);
+print +($cusp & -1) > 0 ? "unsigned-ok" : "fail", "\n";
+print do { use integer; $cusp & -1 } < 0 ? "signed-ok" : "fail", "\n";',
+        "unsigned-ok\nsigned-ok\n");
+}
+
+# Test 21: use integer; $cusp | 1 is negative
+{
+    test_cl('use integer: $cusp | 1 is negative',
+        'my $bits = 0; for (my $i = ~0; $i; $i >>= 1) { ++$bits; }
+my $cusp = 1 << ($bits - 1);
+print do { use integer; $cusp | 1 } < 0 ? "ok" : "fail", "\n";',
+        "ok\n");
+}
+
+# Test 22: use integer; 1 << ($bits-1) == -$cusp
+{
+    test_cl('use integer: 1 << 63 is -cusp',
+        'my $bits = 0; for (my $i = ~0; $i; $i >>= 1) { ++$bits; }
+my $cusp = 1 << ($bits - 1);
+print do { use integer; 1 << ($bits - 1) } == -$cusp ? "ok" : "fail", "\n";',
+        "ok\n");
+}
+
+# Test 23: use integer; large right-shift of negative = -1
+{
+    test_cl('use integer: -9 >> huge_amount is -1',
+        'print do { use integer; -9 >> 18446744073709551616 } == -1 ? "ok" : "fail", "\n";',
+        "ok\n");
+}
+
+# Test 24: use integer; negative left-shift amount (= right shift) of negative = -1
+{
+    test_cl('use integer: -4 << -2147483648 is -1',
+        'print do { use integer; -4 << -2147483648 } == -1 ? "ok" : "fail", "\n";',
+        "ok\n");
+}
+
+# Test 25: use integer; abs($cusp >> 1) == $cusp/2 (regression: must not break passing test)
+{
+    test_cl('use integer: abs(cusp >> 1) == cusp/2',
+        'my $bits = 0; for (my $i = ~0; $i; $i >>= 1) { ++$bits; }
+my $cusp = 1 << ($bits - 1);
+print +($cusp >> 1) == ($cusp / 2) ? "first-ok" : "fail", "\n";
+print do { use integer; abs($cusp >> 1) } == ($cusp / 2) ? "second-ok" : "fail", "\n";',
+        "first-ok\nsecond-ok\n");
 }

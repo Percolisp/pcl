@@ -52,6 +52,7 @@
    #:p-&& #:p-|| #:p-! #:p-not #:p-and #:p-or #:p-xor #:p-//
    ;; Bitwise
    #:p-bit-and #:p-bit-or #:p-bit-xor #:p-bit-not #:p-<< #:p->>
+   #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
    #:p-ensure-hashref #:p-ensure-arrayref
@@ -2446,15 +2447,15 @@
 
 (defmacro p-bit-and= (place value)
   "Perl &= (bitwise-and-assign)"
-  `(box-set ,place (logand (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(box-set ,place (p-bit-and ,place ,value)))
 
 (defmacro p-bit-or= (place value)
   "Perl |= (bitwise-or-assign)"
-  `(box-set ,place (logior (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(box-set ,place (p-bit-or ,place ,value)))
 
 (defmacro p-bit-xor= (place value)
   "Perl ^= (bitwise-xor-assign)"
-  `(box-set ,place (logxor (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(box-set ,place (p-bit-xor ,place ,value)))
 
 (defmacro p-<<= (place value)
   "Perl <<= (left-shift-assign)"
@@ -2728,17 +2729,45 @@
 ;;; Bitwise Operators
 ;;; ============================================================
 
+(defun p-string-bitwise-operand-p (v)
+  "Return T if v is a non-numeric string and should trigger string bitwise ops."
+  (let ((val (unbox v)))
+    (and (stringp val)
+         (not (looks-like-number val)))))
+
+(defun p-string-bit-op (a b op truncate-p)
+  "Perl string bitwise op. OP is logand/logior/logxor.
+   TRUNCATE-P T: result length = min(len(a),len(b)) (for &).
+   TRUNCATE-P NIL: result length = max(len(a),len(b)), shorter padded with NUL (for |, ^)."
+  (let* ((sa (to-string a))
+         (sb (to-string b))
+         (la (length sa))
+         (lb (length sb))
+         (result-len (if truncate-p (min la lb) (max la lb)))
+         (result (make-string result-len :initial-element #\Nul)))
+    (dotimes (i result-len)
+      (let ((ca (if (< i la) (char-code (char sa i)) 0))
+            (cb (if (< i lb) (char-code (char sb i)) 0)))
+        (setf (char result i) (code-char (funcall op ca cb)))))
+    result))
+
 (defun p-bit-and (a b)
-  "Perl bitwise AND"
-  (logand (truncate (to-number a)) (truncate (to-number b))))
+  "Perl bitwise AND — string (char-by-char, truncates) or numeric"
+  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+      (p-string-bit-op a b #'logand t)
+      (logand (truncate (to-number a)) (truncate (to-number b)))))
 
 (defun p-bit-or (a b)
-  "Perl bitwise OR"
-  (logior (truncate (to-number a)) (truncate (to-number b))))
+  "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric"
+  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+      (p-string-bit-op a b #'logior nil)
+      (logior (truncate (to-number a)) (truncate (to-number b)))))
 
 (defun p-bit-xor (a b)
-  "Perl bitwise XOR"
-  (logxor (truncate (to-number a)) (truncate (to-number b))))
+  "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric"
+  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+      (p-string-bit-op a b #'logxor nil)
+      (logxor (truncate (to-number a)) (truncate (to-number b)))))
 
 (defun p-bit-not (a)
   "Perl bitwise NOT - mask to 64 bits like Perl's UV"
@@ -2755,6 +2784,37 @@
   (let ((av (truncate (to-number a)))
         (bv (truncate (to-number b))))
     (if (>= (abs bv) 64) 0 (ash av (- bv)))))
+
+(defun p-to-s64 (n)
+  "Convert integer to signed 64-bit range (-2^63 to 2^63-1)."
+  (let ((masked (logand n #xFFFFFFFFFFFFFFFF)))
+    (if (>= masked #x8000000000000000)
+        (- masked #x10000000000000000)
+        masked)))
+
+(defun p-<<-int (a b)
+  "Perl left shift under 'use integer' — signed 64-bit arithmetic."
+  (let ((av (truncate (to-number a)))
+        (bv (truncate (to-number b))))
+    (cond
+      ;; Large positive left shift (b >= 64) or large negative right shift: 0
+      ((>= bv 64) 0)
+      ;; Large negative shift (= right shift), |b| >= 64: arithmetic fill
+      ((<= bv -64) (if (minusp av) -1 0))
+      ;; Normal range: let ash handle it (negative bv = right shift in CL ash)
+      (t (p-to-s64 (ash av bv))))))
+
+(defun p->>-int (a b)
+  "Perl right shift under 'use integer' — signed 64-bit arithmetic."
+  (let ((av (truncate (to-number a)))
+        (bv (truncate (to-number b))))
+    (cond
+      ;; Large positive right shift (b >= 64): arithmetic fill
+      ((>= bv 64) (if (minusp av) -1 0))
+      ;; Large negative shift (= left shift), |b| >= 64: result is 0
+      ((<= bv -64) 0)
+      ;; Normal range: arithmetic right shift, sign-extend to 64-bit
+      (t (p-to-s64 (ash av (- bv)))))))
 
 ;;; ============================================================
 ;;; Data Structures - Arrays
