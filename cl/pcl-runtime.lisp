@@ -1196,20 +1196,21 @@
 
 (defun p-rindex (str substr &optional start)
   "Perl rindex - find substring from end.
-   Negative start position returns -1.
+   Negative start position returns -1 for non-empty substr.
+   For empty substr, negative position is clamped to 0 (Perl returns 0).
    Position beyond string length is clamped to string length."
   (let* ((s (to-string str))
          (sub (to-string substr))
          (slen (length s))
          (start-num (if start (truncate (to-number start)) nil)))
     (cond
-      ;; Negative position returns -1
-      ((and start-num (< start-num 0)) -1)
-      ;; Empty substring: return min(position, length)
+      ;; Empty substring: clamp position to [0, slen] — even negative positions yield 0
       ((zerop (length sub))
        (if start-num
-           (min start-num slen)
+           (max 0 (min start-num slen))
            slen))
+      ;; Negative position returns -1 (for non-empty substrings)
+      ((and start-num (< start-num 0)) -1)
       ;; Normal case: search from end
       (t (let* ((end-pos (if start-num
                              (min (+ start-num (length sub)) slen)
