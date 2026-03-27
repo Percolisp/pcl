@@ -33,31 +33,20 @@ in `cl/pcl-runtime.lisp`.  Likely a circular dependency or re-running
 
 ---
 
-### Implicit returns / bare-`if` return value  (widespread)
+### ~~Implicit returns / bare-`if` return value~~  ✅ DONE (session 102)
 
-**What's broken:** In Perl, a subroutine returns the value of the last
-expression evaluated.  For `sub { if(COND) { BODY } }` with no `else`,
-if COND is false then *COND itself* is the last thing evaluated, so the
-sub returns that false value (not `undef`/nil):
+**Files:** `perl-tests/do.t` tests 9-10 fixed. 20-test regression suite in `Pl/t/bareif-01.t`.
 
-```perl
-sub x { if(0)  { 5 } }   # returns 0, not undef
-sub x { if("") { 5 } }   # returns "", not undef
-sub x { if($n) { 5 } }   # returns $n when $n is false
-```
+**What was done:** Six new methods in `Pl/Parser.pm`:
+- `_fresh_ret_var` — counter-based CL symbol name `--pcl-if-ret--N`
+- `_is_if_without_else` — detects compound if/unless without final else
+- `_is_postfix_if_without_else` — detects postfix `EXPR if/unless C`
+- `_generate_if_tail_clauses` — like `_generate_if_clauses` but wraps condition in `(setf ret_var COND)` and recurses into branch bodies via `_process_block_in_tail_context`
+- `_process_if_tail` — thin wrapper: collect clauses, call `_generate_if_tail_clauses`
+- `_process_block_in_tail_context` — like `_process_block` but dispatches last significant stmt to `_process_tail_stmt`
+- `_process_tail_stmt` — handles one tail statement: if-without-else recurses, postfix if/unless emits `p-if/p-unless (setf ...)`, simple expr emits `(setf ret_var cl)`
 
-PCL generates `(pl-if cond (progn body))` which returns NIL on the false
-branch.
-
-**Fix:** When a bare `(pl-if COND BODY)` (no else) is the tail expression
-of a block, evaluate COND once and return it on the false branch:
-```lisp
-(let ((--c-- COND)) (if --c-- (progn BODY) --c--))
-```
-This requires annotating which `if` is in tail position.  See
-`docs/rewrite-patterns.md` for a tree-annotation approach.
-
-**Fix area:** `Pl/Parser.pm` `_process_if_statement`.
+`_process_block` pre-scans `schildren`; if last is a bare if or postfix if/unless and `in_subroutine > 0`, opens `(let ((--pcl-if-ret--N nil)) ...)` and returns `--pcl-if-ret--N` after the if form.
 
 *(PERL_TEST_SUITE_PLAN.md §C)*
 
@@ -455,7 +444,7 @@ Both fixes were present before this todo entry was written.
 | Feature | Tests affected | Tier | Plan ref |
 |---------|---------------|------|----------|
 | Tie::Array/Tie::Hash loader hang | sort, reverse, local blocked | 1 | §A |
-| Implicit returns / bare-if | widespread | 1 | §C |
+| ~~Implicit returns / bare-if~~ | ✅ DONE (session 102) | — | §C |
 | ~~index.t / rindex~~ | ~~87/12~~ (session 101) | — | §F |
 | $SIG{__DIE__} handler | ~50 | 1 | §D/1.4 |
 | ~~Inline package inside function~~ | ✅ DONE (session 72) | — | §N |

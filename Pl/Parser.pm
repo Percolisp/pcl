@@ -2032,6 +2032,303 @@ sub _generate_if_clauses {
 }
 
 
+# ── Bare-if implicit return (B1) ─────────────────────────────────────────────
+#
+# Perl rule: the last expression *evaluated* is the return value of a sub.
+# For `if (COND) { BODY }` with no else and COND false, COND itself is the
+# last thing evaluated, so COND is returned (not undef).
+#
+# Fix: when the last statement of a sub block is an if/unless without else
+# (block-form or postfix), save the condition into a fresh CL variable, and
+# return that variable after the if form.
+
+# Returns a fresh CL symbol name for the if-return let binding.
+sub _fresh_ret_var {
+  my $self = shift;
+  $self->{_tail_ret_counter} //= 0;
+  return '--pcl-if-ret--' . $self->{_tail_ret_counter}++;
+}
+
+# True if $stmt is a compound if/unless statement WITHOUT a final else.
+sub _is_if_without_else {
+  my ($self, $stmt) = @_;
+  return 0 unless ref($stmt) eq 'PPI::Statement::Compound';
+  my ($first_word, $has_else);
+  for my $child ($stmt->children) {
+    next if ref($child) eq 'PPI::Token::Whitespace';
+    if (ref($child) eq 'PPI::Token::Word') {
+      my $w = $child->content;
+      $first_word //= $w;
+      $has_else = 1 if $w eq 'else';
+    }
+  }
+  return 0 if $has_else;
+  return ($first_word // '') eq 'if' || ($first_word // '') eq 'unless';
+}
+
+# True if $stmt is a postfix if/unless modifier (PPI::Statement with if/unless word).
+sub _is_postfix_if_without_else {
+  my ($self, $stmt) = @_;
+  return 0 unless ref($stmt) eq 'PPI::Statement';
+  for my $child ($stmt->children) {
+    next if ref($child) eq 'PPI::Token::Whitespace';
+    if (ref($child) eq 'PPI::Token::Word') {
+      my $w = $child->content;
+      return 1 if $w eq 'if' || $w eq 'unless';
+    }
+  }
+  return 0;
+}
+
+# Process a single statement in tail position.
+# Wraps its result in (setf ret_var ...) so the outer let captures the value.
+sub _process_tail_stmt {
+  my ($self, $stmt, $ret_var) = @_;
+
+  # Block-form if/unless without else: recurse with same ret_var (no new let)
+  if ($self->_is_if_without_else($stmt)) {
+    $self->_process_if_tail($stmt, $ret_var);
+    return;
+  }
+
+  # Postfix if/unless: emit tail form
+  if ($self->_is_postfix_if_without_else($stmt)) {
+    my $perl_code = $stmt->content;
+    $perl_code =~ s/;\s*$//;
+    $perl_code =~ s/\n/ /g;
+    my @parts = grep {
+      my $r = ref($_);
+      $r ne 'PPI::Token::Whitespace'
+        && $r ne 'PPI::Token::Comment'
+        && !($r eq 'PPI::Token::Structure' && $_->content eq ';')
+    } $stmt->children;
+
+    my ($modifier_idx, $modifier);
+    for my $i (0 .. $#parts) {
+      if (ref($parts[$i]) eq 'PPI::Token::Word') {
+        my $w = $parts[$i]->content;
+        if ($w eq 'if' || $w eq 'unless') {
+          $modifier_idx = $i;
+          $modifier = $w;
+          last;
+        }
+      }
+    }
+
+    if (defined $modifier_idx && $modifier_idx > 0) {
+      my @expr_parts = @parts[0 .. $modifier_idx - 1];
+      my @cond_parts = @parts[$modifier_idx + 1 .. $#parts];
+
+      if (@cond_parts == 1 && ref($cond_parts[0]) eq 'PPI::Structure::Condition') {
+        @cond_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } $cond_parts[0]->children;
+      }
+
+      my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt);
+      my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
+
+      $self->_emit(";; $perl_code");
+      if ($modifier eq 'if') {
+        $self->_emit("(p-if (setf $ret_var $cond_cl)");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(setf $ret_var $expr_cl)");
+        $self->_emit("nil)");
+        $self->indent_level($self->indent_level - 1);
+      } else {  # unless
+        $self->_emit("(p-unless (setf $ret_var $cond_cl)");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(setf $ret_var $expr_cl))");
+        $self->indent_level($self->indent_level - 1);
+      }
+      $self->_emit("");
+      return;
+    }
+    # Fall through to normal emit if we couldn't parse the modifier
+  }
+
+  # Simple expression statement: wrap result with setf
+  if (ref($stmt) eq 'PPI::Statement' || ref($stmt) eq 'PPI::Statement::Expression') {
+    my $perl_code = $stmt->content;
+    $perl_code =~ s/;\s*$//;
+    $perl_code =~ s/\n/ /g;
+    my @parts = grep {
+      my $r = ref($_);
+      $r ne 'PPI::Token::Whitespace'
+        && $r ne 'PPI::Token::Comment'
+        && !($r eq 'PPI::Token::Structure' && $_->content eq ';')
+    } $stmt->children;
+    if (@parts) {
+      my $cl = $self->_parse_expression(\@parts, $stmt);
+      $self->_emit(";; $perl_code");
+      $self->_emit("(setf $ret_var $cl)") if defined $cl;
+      $self->_emit("");
+    }
+    return;
+  }
+
+  # Everything else (variable decl, loops, etc.): emit normally.
+  # ret_var holds the condition value from the outer if — best-effort.
+  $self->_process_element($stmt);
+}
+
+# Generate CL for an if/elsif/else chain in tail position.
+# Mirrors _generate_if_clauses but wraps the condition (and each branch's
+# last expr) so that ret_var always holds the correct return value.
+sub _generate_if_tail_clauses {
+  my ($self, $clauses, $ret_var) = @_;
+  return unless @$clauses;
+
+  my $first = $clauses->[0];
+  my $rest  = [@$clauses[1 .. $#$clauses]];
+
+  my $cond_cl = $self->_parse_condition($first->{cond});
+
+  my $cond_perl = $first->{cond} ? $first->{cond}->content : "";
+  $cond_perl =~ s/^\s*\(\s*//;
+  $cond_perl =~ s/\s*\)\s*$//;
+  $cond_perl =~ s/\n/\n;; /g;
+  $self->_emit(";; $first->{type} ($cond_perl)");
+
+  # Wrap condition to save its Perl value.
+  # For 'unless': save first, then negate for the p-if test.
+  my $wrapped_cond;
+  if ($first->{type} eq 'unless') {
+    $wrapped_cond = "(progn (setf $ret_var $cond_cl) (p-not $ret_var))";
+  } else {
+    $wrapped_cond = "(setf $ret_var $cond_cl)";
+  }
+
+  $self->_emit("(p-if $wrapped_cond");
+  $self->indent_level($self->indent_level + 1);
+
+  # Then block
+  $self->_emit("(progn");
+  $self->indent_level($self->indent_level + 1);
+  $self->_with_declarations($first->{block}, sub {
+    $self->_process_block_in_tail_context($first->{block}, $ret_var);
+  });
+  $self->indent_level($self->indent_level - 1);
+  $self->_emit(")");
+
+  # Else/elsif
+  if (@$rest) {
+    my $next = $rest->[0];
+    if ($next->{type} eq 'else') {
+      $self->_emit(";; else");
+      $self->_emit("(progn");
+      $self->indent_level($self->indent_level + 1);
+      $self->_with_declarations($next->{block}, sub {
+        $self->_process_block_in_tail_context($next->{block}, $ret_var);
+      });
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");
+    } else {
+      # elsif: recurse with same ret_var (no new let)
+      $self->_generate_if_tail_clauses($rest, $ret_var);
+    }
+  } else {
+    # No else: nil placeholder.  ret_var already holds the last cond value.
+    $self->_emit("nil");
+  }
+
+  $self->indent_level($self->indent_level - 1);
+  $self->_emit(")");
+}
+
+# Process a tail-position if/unless compound statement.
+# Collects clauses (same as _process_if_statement) and calls
+# _generate_if_tail_clauses — no new let is opened here.
+sub _process_if_tail {
+  my ($self, $stmt, $ret_var) = @_;
+
+  my $perl_code = $stmt->content;
+  $perl_code =~ s/\n/ /g;
+  $self->_emit(";; $perl_code");
+
+  my @clauses;
+  my @conditions;
+  my $current_type;
+  my $current_cond;
+
+  for my $child ($stmt->children) {
+    my $ref = ref($child);
+    if ($ref eq 'PPI::Token::Word') {
+      my $w = $child->content;
+      if ($w eq 'if' || $w eq 'elsif' || $w eq 'unless') {
+        $current_type = $w;
+      } elsif ($w eq 'else') {
+        $current_type = 'else';
+      }
+    } elsif ($ref eq 'PPI::Structure::Condition') {
+      $current_cond = $child;
+      push @conditions, $child;
+    } elsif ($ref eq 'PPI::Structure::Block') {
+      push @clauses, {
+        type  => $current_type,
+        cond  => $current_cond,
+        block => $child,
+      };
+      $current_cond = undef;
+    }
+  }
+
+  $self->_with_declarations(\@conditions, sub {
+    $self->_generate_if_tail_clauses(\@clauses, $ret_var);
+  });
+
+  $self->_emit("");
+}
+
+# Process a block's contents where the last statement contributes to ret_var.
+# Mirrors _process_block but dispatches the last significant statement
+# through _process_tail_stmt instead of _process_element.
+sub _process_block_in_tail_context {
+  my ($self, $block, $ret_var) = @_;
+
+  $self->environment->push_scope();
+  my $start_depth = $self->{_local_let_depth} // 0;
+
+  my @sig      = $block->schildren;
+  my $last_sig = @sig ? $sig[-1] : undef;
+
+  my @children = $block->children;
+  my %skip;
+  for my $i (0 .. $#children) {
+    next if $skip{$i};
+    my $child = $children[$i];
+    my $ref   = ref($child);
+    next if $ref eq 'PPI::Token::Whitespace';
+    next if $ref eq 'PPI::Token::Comment';
+
+    if ($ref eq 'PPI::Statement::Compound') {
+      my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
+      if ($continue) {
+        $self->_process_compound_statement($child, $continue);
+        $self->_process_trailing_tokens($trailing) if $trailing && @$trailing;
+        next;
+      }
+    }
+
+    if (defined $last_sig && $child == $last_sig) {
+      $self->_process_tail_stmt($child, $ret_var);
+    } else {
+      $self->_process_element($child);
+    }
+  }
+
+  my $end_depth = $self->{_local_let_depth} // 0;
+  while ($end_depth > $start_depth) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")  ;; end local");
+    $self->{_local_let_depth}--;
+    $end_depth--;
+  }
+
+  $self->environment->pop_scope();
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 # Process a block's contents
 sub _process_block {
   my $self  = shift;
@@ -2042,6 +2339,28 @@ sub _process_block {
 
   # Track local let depth at block start
   my $start_depth = $self->{_local_let_depth} // 0;
+
+  # ── Tail-if detection ─────────────────────────────────────────────────────
+  # When the last significant statement of a sub block is an if/unless without
+  # else (or a postfix if/unless), wrap the block in a let-binding that captures
+  # the condition value.  This implements Perl's "last expression evaluated"
+  # return semantics for bare-if.
+  my ($tail_ret_var, $tail_last_sig);
+  if ($self->environment->in_subroutine > 0) {
+    my @sig = $block->schildren;
+    if (@sig) {
+      my $last = $sig[-1];
+      if ($self->_is_if_without_else($last) || $self->_is_postfix_if_without_else($last)) {
+        $tail_ret_var  = $self->_fresh_ret_var();
+        $tail_last_sig = $last;
+      }
+    }
+  }
+  if ($tail_ret_var) {
+    $self->_emit("(let (($tail_ret_var nil))");
+    $self->indent_level($self->indent_level + 1);
+  }
+  # ─────────────────────────────────────────────────────────────────────────
 
   my @children = $block->children;
   my %skip;
@@ -2062,6 +2381,12 @@ sub _process_block {
       }
     }
 
+    # Intercept last significant child when tail-if is active
+    if ($tail_ret_var && defined $tail_last_sig && $child == $tail_last_sig) {
+      $self->_process_tail_stmt($child, $tail_ret_var);
+      next;
+    }
+
     $self->_process_element($child);
   }
 
@@ -2072,6 +2397,12 @@ sub _process_block {
     $self->_emit(")  ;; end local");
     $self->{_local_let_depth}--;
     $end_depth--;
+  }
+
+  # Close the tail let (after local lets, so ret_var is the outermost form)
+  if ($tail_ret_var) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit("$tail_ret_var)");
   }
 
   # Leave scope - removes filehandles added in this block

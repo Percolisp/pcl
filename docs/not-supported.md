@@ -440,6 +440,26 @@ tools and test infrastructure.
 
 ---
 
+## Bare `if` with empty true branch
+
+**Perl behaviour:** `sub f { if(1) {} }` returns `undef`.  When the condition is
+true but the branch body is empty, the last expression evaluated is the empty block,
+which produces `undef`.
+
+**PCL behaviour:** PCL returns the condition value (`1`).  The tail-if transform
+saves the condition into `--pcl-if-ret--N` before testing it; when the branch body
+is empty, nothing overwrites that variable, so the condition value is returned.
+
+**Rationale:** This is an obscure corner case (an empty true branch whose return
+value the caller inspects) that is essentially never written intentionally in CPAN
+code.  Fixing it would require detecting the empty-branch case and emitting an
+explicit `(setf ret_var nil)` inside the then-block — extra complexity for zero
+practical gain.
+
+**Affected tests:** None in `perl-tests/` (no test exercises this combination).
+
+---
+
 ## Error compatibility for invalid Perl input
 
 **Perl behaviour:** Perl validates code at compile time and produces specific error

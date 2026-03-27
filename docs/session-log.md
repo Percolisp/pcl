@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 102 (2026-03-27) — bare-if implicit return (B1)
+
+**Commits:** (pending)
+
+### Work done
+
+Implemented bare-if implicit return value (B1 from `docs/todo-features.md`).
+
+**Root cause:** `if (COND) { BODY }` with no else generated `(p-if COND (progn BODY))`.
+When COND is false, this returns CL `nil` (= Perl undef). But Perl returns COND itself —
+it was the last expression evaluated.
+
+**Fix:** Six new methods in `Pl/Parser.pm`:
+- `_fresh_ret_var` — counter-based unique CL symbol `--pcl-if-ret--N`
+- `_is_if_without_else` / `_is_postfix_if_without_else` — detectors
+- `_generate_if_tail_clauses` — mirrors `_generate_if_clauses` but wraps condition in `(setf ret_var COND)` and uses `_process_block_in_tail_context` for each branch body
+- `_process_if_tail` — thin wrapper calling `_generate_if_tail_clauses`
+- `_process_block_in_tail_context` — mirrors `_process_block` but dispatches last significant stmt to `_process_tail_stmt`
+- `_process_tail_stmt` — handles one tail stmt: recursion for nested if-without-else, special emit for postfix if/unless, `(setf ret_var cl)` for simple exprs
+
+`_process_block` pre-scans `schildren`; if last is a bare if or postfix if/unless and `in_subroutine > 0`, opens `(let ((--pcl-if-ret--N nil)) ...)` and returns `--pcl-if-ret--N`.
+
+**Scope:** handles `if`, `unless`, `if/elsif` chains, nested if, postfix `EXPR if C`, `EXPR unless C`. Does NOT transform if-with-else (not needed), non-last if (not needed), or loops as last branch statement (rare; known limitation).
+
+**New test:** `Pl/t/bareif-01.t` — 20 tests, all passing.
+
+### Stats
+- PCL suite: **70 files, 2766 tests, all passing** (+20 in bareif-01.t)
+- perl-tests sweep: **5667 passing, 2168 failing, 43 fully-passing files** (+2 from do.t tests 9-10)
+
+---
+
 ## Session 101 (2026-03-26) — index.t: p-rindex fix + eval test cleanup
 
 **Commits:** 41ee742
