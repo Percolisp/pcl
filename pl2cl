@@ -37,6 +37,8 @@ my $bundle_mode = 0;    # Compile to single .fasl
 my $executable_mode = 0; # Create standalone executable
 my $output_file;        # Output file for bundle/executable
 my $lenient_ppi = 0;    # DEBUG: truncate at first PPI-unparseable line (test runner only)
+my $eval_pkg;           # When set, emit minimal preamble for eval-string mode
+my $server_mode = 0;    # Persistent transpiler server mode
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
 GetOptions(
@@ -47,6 +49,8 @@ GetOptions(
   'executable'   => \$executable_mode,
   'output|o=s'   => \$output_file,
   'lenient-ppi'  => \$lenient_ppi,   # DEBUG: for test runner use only
+  'eval-pkg=s'   => \$eval_pkg,      # eval "string" mode: minimal preamble for named package
+  'server'       => \$server_mode,   # persistent transpiler server mode
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or die "Usage: pl2cl [options] <file.pl>\n";
 
@@ -104,6 +108,59 @@ sub build_preamble {
   push @lines, "(in-package :main)";
 
   return join("\n", @lines);
+}
+
+# Build MINIMAL preamble for eval-string mode.
+# Only switches to the named package — all other state (@INC, *pcl-pl2cl-path*,
+# etc.) is already live in the running SBCL image.
+sub build_eval_preamble {
+  my ($pkg_name) = @_;
+  # Always use :|PKGNAME| pipe-quoting — works for both MAIN and Foo::Bar
+  return "(p-defpackage :|$pkg_name|)\n(in-package :|$pkg_name|)";
+}
+
+sub _run_server {
+  # Persistent transpiler server: read requests from stdin, write CL to stdout.
+  # Character-based protocol (UTF-8 on both sides, lengths = char counts):
+  #   Request:  "<pkg>\n<char-count>\n<perl-code: exactly char-count chars>"
+  #   Response: "ok\n<char-count>\n<cl-code: exactly char-count chars>"
+  #          or "err\n<char-count>\n<error: exactly char-count chars>"
+  binmode(STDIN,  ':encoding(utf-8)');
+  binmode(STDOUT, ':encoding(utf-8)');
+
+  while (1) {
+    my $pkg = <STDIN>;
+    last unless defined $pkg;
+    chomp $pkg;
+
+    my $len_str = <STDIN>;
+    last unless defined $len_str;
+    chomp $len_str;
+    my $len = $len_str + 0;
+
+    my $code = '';
+    my $got = read(STDIN, $code, $len);
+    last unless defined $got && $got == $len;
+
+    my $cl = eval {
+      my $output = Pl::Parser->parse_code($code);
+      my $preamble = build_eval_preamble($pkg);
+      $output =~ s/\(in-package :pcl\)/$preamble/;
+      $output
+    };
+
+    my ($status, $body);
+    if ($@) {
+      $status = 'err';
+      $body   = "$@";
+    } else {
+      $status = 'ok';
+      $body   = $cl;
+    }
+
+    print STDOUT "$status\n" . length($body) . "\n$body";
+    STDOUT->flush;
+  }
 }
 
 # Get runtime content for bundling
@@ -200,6 +257,11 @@ sub do_bundle {
   }
 }
 
+if ($server_mode) {
+  _run_server();
+  exit 0;
+}
+
 my $code;
 my $source_file;
 
@@ -234,9 +296,16 @@ elsif (!-t STDIN) {
   $code = <STDIN>;
   my $output = Pl::Parser->parse_code($code);
 
-  # Still inject preamble for stdin input
-  my $preamble = build_preamble(undef);
-  $output =~ s/(\(in-package :pcl\))/$1\n$preamble/;
+  if (defined $eval_pkg) {
+    # eval-string mode: REPLACE (in-package :pcl) with just the package switch.
+    # @INC, *pcl-pl2cl-path* etc. are already live in the running SBCL.
+    my $preamble = build_eval_preamble($eval_pkg);
+    $output =~ s/\(in-package :pcl\)/$preamble/;
+  } else {
+    # Normal stdin: inject full preamble after (in-package :pcl)
+    my $preamble = build_preamble(undef);
+    $output =~ s/(\(in-package :pcl\))/$1\n$preamble/;
+  }
 
   print $output;
 }

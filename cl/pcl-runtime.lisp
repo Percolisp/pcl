@@ -31,7 +31,7 @@
    #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat
    #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf
    #:p-version-string
-   #:p-quotemeta #:p-pos
+   #:p-pos
    ;; Assignment
    #:p-setf #:p-my #:p-incf #:p-decf
    #:p-pre++ #:p-post++ #:p-pre-- #:p-post--
@@ -260,6 +260,16 @@
 ;;; Forward declaration for %INC table (full definition in Module System section)
 (defvar *p-inc-table* (make-hash-table :test 'equal)
   "Perl %INC - tracks loaded modules (forward declaration)")
+
+;;; Cache for p-eval string transpilation results
+(defvar *p-eval-string-cache* (make-hash-table :test 'equal)
+  "Cache for p-eval: maps (cons perl-code pkg-name) -> cl-text.
+   Avoids re-spawning pl2cl for repeated identical eval calls.")
+
+;;; Persistent transpiler subprocess for p-eval
+(defvar *p-transpiler-process* nil
+  "Persistent pl2cl --server process, or nil if not yet started.
+   Started lazily on first p-transpile-string call. Restarted if it dies.")
 
 ;;; Sub declaration/definition tracking for exists &sub / defined &sub
 ;;; Maps CL function symbol → :stub (declared only), :defined (has body),
@@ -3992,22 +4002,48 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl do BLOCK - returns the value of the block."
   result)
 
-;;; p-eval (string eval) - simplified version
-;;; Full string eval would need transpiler at runtime.
-;;; This stub handles simple cases like version string evaluation.
+;;; p-eval: Perl eval(STRING) — full string eval via runtime transpilation.
+;;;
+;;; Variable access: eval sees defvar (dynamic) variables — package globals,
+;;; our vars, local vars, and file-scope my vars. Sub-scope my vars are let-
+;;; bound without defvar, so they are lexically scoped and correctly invisible
+;;; to eval (matching Perl semantics). Closure-captured vars are renamed to
+;;; $x__lex__N and also invisible. See docs/eval-string-plan.md.
+;;;
+;;; $@ format: omits " at (eval N) line M." — documented in not-supported.md.
 (defun p-eval (string)
-  "Simplified Perl eval(string) - handles simple numeric expressions.
-   Full implementation would need runtime transpiler."
+  "Perl eval(STRING): transpile and evaluate a Perl string at runtime."
   (let ((s (to-string (unbox string))))
-    (handler-case
-        (progn
-          (box-set $@ "")
-          ;; Try to parse as number (handles version strings like '1.50')
-          (let ((n (parse-number s)))
-            (if n n s)))
-      (error (e)
-        (box-set $@ (format nil "~A" e))
-        nil))))
+    ;; eval undef / eval "" -> nil (undef), $@ = ""
+    (when (string= s "")
+      (box-set $@ "")
+      (return-from p-eval nil))
+    (let* ((pkg-name  (package-name *package*))
+           (cache-key (cons s pkg-name))
+           (cached    (gethash cache-key *p-eval-string-cache*)))
+      (handler-case
+          (let* ((cl-text  (or cached
+                               (let ((r (p-transpile-string s pkg-name)))
+                                 (setf (gethash cache-key
+                                                *p-eval-string-cache*) r)
+                                 r)))
+                 ;; READ with *package* bound: symbol interning (e.g. $x)
+                 ;; uses the eval package, matching the caller's symbol space.
+                 (cl-form  (let ((*package* *package*))
+                             (read-from-string
+                              (concatenate 'string "(progn " cl-text ")"))))
+                 ;; EVAL with *package* bound: any (in-package ...) in the
+                 ;; eval'd code does not escape into the caller's dynamic scope.
+                 (result   (let ((*package* *package*))
+                             (eval cl-form))))
+            (box-set $@ "")
+            result)
+        (p-exception (e)
+          (box-set $@ (p-exception-object e))
+          nil)
+        (error (e)
+          (box-set $@ (format nil "~A" e))
+          nil)))))
 
 (defun parse-number (s)
   "Try to parse string as number, return nil if not a number."
@@ -5128,6 +5164,49 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (return-from p-transpile-file nil))))
     (when (> (length output) 0)
       output)))
+
+(defun p-ensure-transpiler ()
+  "Return the live transpiler process, starting or restarting it if needed."
+  (unless *pcl-pl2cl-path*
+    (error "pl2cl path not set - cannot start transpiler server"))
+  (when (or (null *p-transpiler-process*)
+            (not (sb-ext:process-alive-p *p-transpiler-process*)))
+    (when *p-transpiler-process*
+      (ignore-errors (sb-ext:process-close *p-transpiler-process*)))
+    (setf *p-transpiler-process*
+          (sb-ext:run-program
+           "perl"
+           (list (namestring *pcl-pl2cl-path*) "--server")
+           :input  :stream
+           :output :stream
+           :error  nil
+           :wait   nil
+           :search t
+           :external-format :utf-8)))
+  *p-transpiler-process*)
+
+(defun p-transpile-string (perl-code pkg-name)
+  "Transpile a Perl string to CL code via the persistent pl2cl server.
+   Returns the CL text string, or signals an error on failure."
+  (let* ((proc     (p-ensure-transpiler))
+         (in       (sb-ext:process-input  proc))
+         (out      (sb-ext:process-output proc))
+         (code-len (length perl-code)))
+    ;; Send request: pkg\n char-count\n perl-code
+    (write-string pkg-name in)
+    (write-char #\Newline in)
+    (write-string (princ-to-string code-len) in)
+    (write-char #\Newline in)
+    (write-string perl-code in)
+    (finish-output in)
+    ;; Read response: status\n char-count\n body
+    (let* ((status   (read-line out))
+           (resp-len (parse-integer (read-line out)))
+           (resp-buf (make-string resp-len)))
+      (read-sequence resp-buf out)
+      (if (string= status "ok")
+          resp-buf
+          (error "pl2cl server: ~A" resp-buf)))))
 
 ;;; --- Module Loading ---
 

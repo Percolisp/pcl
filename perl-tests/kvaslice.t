@@ -193,7 +193,7 @@ plan tests => 17;  # PCL: 21 tests commented out (string eval, lvalue subs/alias
 #}
 
 # \% prototype expects hash deref
-# PCL: eval "string" not implemented yet
+# PCL: prototype type checking (\%) not enforced at runtime
 #sub nowt_but_hash(\%) {}
 #eval 'nowt_but_hash %_[0]';
 #like $@, qr`^Type of arg 1 to main::nowt_but_hash must be hash \(not(?x:

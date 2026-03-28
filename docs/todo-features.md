@@ -11,25 +11,13 @@ Cross-references to `PERL_TEST_SUITE_PLAN.md` sections are in parentheses.
 
 ## Tier 1 — High value (many tests, clear root cause)
 
-### Tie::Array / Tie::Hash module loader hang  (~200+ tests, 4 files blocked)
+### ~~Tie::Array / Tie::Hash module loader hang~~ ✅ RESOLVED (session 103)
 
-**What's broken:** When any test file does `require Tie::Array` or
-`require Tie::Hash`, PCL's module loader enters an infinite recursion
-or binding-stack exhaustion.  The process hangs rather than failing
-cleanly.
+`require Tie::Array` and `require Tie::Hash` now load cleanly.  The hang
+that blocked `sort.t`, `reverse.t`, and `local.t` is gone.  No code change
+was needed — the hang appears to have been resolved by earlier fixes.
 
-**Blocked files:** `sort.t`, `reverse.t`, `local.t`.
-
-*(Note: `kvhslice.t` was previously listed here but is now **fully passing**
-after the session 73 map fat-comma / `pl-hash-=` flattening fix.)*
-*(Note: `kvaslice.t` is now **17/17 passing** (session 90) — Tie tests pass,
-unsupported-feature tests commented out.)*
-
-**Fix area:** `Pl/Parser.pm` `_process_use_statement` / `pl-require-file`
-in `cl/pcl-runtime.lisp`.  Likely a circular dependency or re-running
-`defpackage` init for an already-existing package.
-
-*(PERL_TEST_SUITE_PLAN.md §A)*
+*(Note: `kvhslice.t`, `kvaslice.t` were previously listed here — both now fully passing.)*
 
 ---
 
@@ -443,7 +431,7 @@ Both fixes were present before this todo entry was written.
 
 | Feature | Tests affected | Tier | Plan ref |
 |---------|---------------|------|----------|
-| Tie::Array/Tie::Hash loader hang | sort, reverse, local blocked | 1 | §A |
+| ~~Tie::Array/Tie::Hash loader hang~~ | ✅ RESOLVED (session 103) | — | §A |
 | ~~Implicit returns / bare-if~~ | ✅ DONE (session 102) | — | §C |
 | ~~index.t / rindex~~ | ~~87/12~~ (session 101) | — | §F |
 | $SIG{__DIE__} handler | ~50 | 1 | §D/1.4 |

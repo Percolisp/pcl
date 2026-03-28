@@ -4,6 +4,88 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 104 (2026-03-28) — `eval "string"` implementation + perl-tests eval cleanup
+
+**Commits:** (pending)
+
+### Work done
+
+**Feature: `eval "string"` — full string eval via runtime subprocess transpilation**
+
+Replaced the `p-eval` stub (which only parsed numbers) with a full implementation.
+
+**Approach:** When `p-eval` is called at runtime, it:
+1. Gets the current CL package name (`(package-name *package*)`)
+2. Calls `p-transpile-string` which spawns `perl pl2cl --eval-pkg PKGNAME` as a subprocess,
+   pipes the Perl code to its stdin, and captures the CL output
+3. Reads the CL forms with `*package*` bound to the eval package
+4. Evaluates the result with `*package*` protected (prevents `(in-package ...)` from escaping)
+5. Sets `$@` to `""` on success; catches `p-exception` (object die) and `error` (string die)
+
+**New `--eval-pkg PKGNAME` mode in `pl2cl`:** Generates a minimal preamble — just
+`(p-defpackage :|PKG|)(in-package :|PKG|)` — instead of the full startup preamble
+(which would reinitialize `@INC` etc. already live in the running SBCL).
+
+**Cache:** `*p-eval-string-cache*` (keyed on `(cons perl-code pkg-name)`) avoids
+re-spawning for repeated identical eval calls.
+
+**Variable access semantics:**
+- Package globals / `our` / `local` vars: accessible (correct)
+- Sub-scope `my` vars (not captured): lexical let, NOT accessible (matches Perl)
+- Closure-captured vars (renamed `$x__lex__N`): NOT accessible (matches Perl)
+- File-scope `my` vars: `defvar`'d in PCL, so accessible (slightly more permissive than Perl — acceptable)
+
+**Files changed:** `pl2cl`, `cl/pcl-runtime.lisp`, `Pl/t/eval-01.t` (+17 runtime tests)
+
+**Eval tests in perl-tests/**
+- `concat.t`: Uncommented 9 long-concat-chain tests (eval $c). All 9 pass. concat.t now 232/234.
+- `kvaslice.t`: Stayed 17/17. The `\% prototype` test re-commented (PCL doesn't enforce `\%` prototype type checking — unrelated to eval).
+- `signatures.t`: Replaced skip_all with original Perl 5.40.3 source, then reverted to skip_all — 734 eval subprocess calls time out even at 90s.
+- `cmpchain.t`, `list.t`: Added to sweep SKIP list — these use eval extensively (656 subprocesses / 100k-nested expression).
+
+**False-positive discovery:** Old p-eval stub returned input string (truthy) for non-numeric args, giving cmpchain.t 1475 fp + list.t ~50 fp. The apparent session 98 count of 5597 was inflated by ~1525. Real baseline was ~4072; current 4361 is +289 genuine.
+
+**Results:**
+- `Pl/t/eval-01.t`: 29/29 passing (17 runtime tests)
+- `perl-tests/negate.t`: fully passing (was 48/49)
+- `perl-tests/concat.t`: 232/234 (was 223/234)
+- sweep: 4361 passing, 1957 failing across 99 files (+ 3 skipped: heredoc, cmpchain, list)
+- sweep timeout: 60s → 90s
+- PCL suite: 70 files, 2789 tests, all passing
+
+**Design docs:** `docs/eval-string-plan.md` (high-level), `docs/persistent-transpiler-plan.md` (full implementation plan for persistent subprocess)
+
+---
+
+## Session 103 (2026-03-28) — glob/ternary bug, sort(func()) fix, sort.t +3
+
+**Commits:** (pending)
+
+### Work done
+
+**Bug 1: `<$b?1:$a>` misidentified as glob in ternary expression**
+
+`sort { $a<$b?1:$a>$b?-1:0 }` generated PARSE ERROR because `_fix_ppi_glob_after_block`
+in `PExpr.pm` was treating `<$b?1:$a>` as a glob token (the `?` triggered `has_glob_chars`).
+
+**Fix:** In `_fix_ppi_glob_after_block`, added `$prev_is_simple_value` check — when `<` is
+preceded by a PPI::Token::(Symbol|Number|Quote), it's always the less-than operator, never a glob.
+Keeps existing glob-after-block detection for structures (e.g. `sort { } <*.txt>`).
+
+**Bug 2: `sort(func(args))` — func treated as sort comparator**
+
+`sort(routine(1))` was being parsed as `sort routine` (comparator) + `(1)` (list), returning `1`
+instead of calling `routine(1)` and sorting its result.
+
+**Fix:** In `handle_subcalls` (`PExpr.pm`), sort(NAME LIST) detection now checks if NAME is
+immediately followed by `(...)` (Structure::List). If so, it's a function call, not a comparator.
+
+**Results:** sort.t: 76→79 passing. PCL suite: 70 files, 2769 tests, all passing.
+
+**Regression tests:** 3 new tests in `Pl/t/transpile-test-05.t`.
+
+---
+
 ## Session 102 (2026-03-27) — bare-if implicit return (B1)
 
 **Commits:** (pending)

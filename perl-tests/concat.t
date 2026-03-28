@@ -756,18 +756,17 @@ ok("$c$a$c" eq "foo",    "concatenate undef, fore and aft");
 
 # check everything works ok near the max arg size of a multiconcat
 
-# PCL: eval string not implemented yet — tests 230-238 use eval $c to test long concat chains
-# {
-#     my @a = map "<$_>", 0..99;
-#     for my $i (60..68) { # check each side of 64 threshold
-#         my $c = join '.', map "\$a[$_]", 0..$i;
-#         my $got = eval $c or die $@;
-#         my $empty = ''; # don't use a const string in case join'' ever
-#                         # gets optimised into a multiconcat
-#         my $expected = join $empty, @a[0..$i];
-#         is($got, $expected, "long concat chain $i");
-#     }
-# }
+{
+    my @a = map "<$_>", 0..99;
+    for my $i (60..68) { # check each side of 64 threshold
+        my $c = join '.', map "\$a[$_]", 0..$i;
+        my $got = eval $c or die $@;
+        my $empty = ''; # don't use a const string in case join'' ever
+                        # gets optimised into a multiconcat
+        my $expected = join $empty, @a[0..$i];
+        is($got, $expected, "long concat chain $i");
+    }
+}
 
 # RT #132646
 # with adjacent consts, the second const is treated as an arg rather than a
