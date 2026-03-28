@@ -193,14 +193,16 @@ my %SPECIAL_VARS = (
 # - Runtime built-in functions → p-<name>  (from %RUNTIME_NAMES)
 # - User-defined functions → p-<name>
 sub cl_name {
-  my $self      = shift;
-  my $perl_name = shift;
+  my $self       = shift;
+  my $perl_name  = shift;
+  my $for_funcall = shift // 0;  # 1 = being used as a function call, not an operator
 
   # Guard against undefined input
   return 'p-UNDEFINED' unless defined $perl_name && length($perl_name);
 
-  # Check for operator exceptions first
-  return $OP_EXCEPTIONS{$perl_name} if exists $OP_EXCEPTIONS{$perl_name};
+  # Check for operator exceptions — but NOT when generating a function call name.
+  # e.g. `x()` calls user sub x, not the string-repetition operator p-str-x.
+  return $OP_EXCEPTIONS{$perl_name} if !$for_funcall && exists $OP_EXCEPTIONS{$perl_name};
 
   # Leading :: means main:: (e.g. ::is → main::is)
   $perl_name =~ s/^::/main::/;
@@ -447,7 +449,7 @@ sub gen_leaf {
     # Note: &foo(@args) would be handled as funcall, not here
     if ($content =~ /^&(.+)$/) {
       my $func_name = $1;
-      my $cl_func = $self->cl_name($func_name);
+      my $cl_func = $self->cl_name($func_name, 1);
       return "($cl_func)";
     }
     # Check if this var is a state variable that was renamed
@@ -723,6 +725,16 @@ sub gen_binary_op {
       return "(- (p-int $left) (p-int $right))";
     } elsif ($op eq '*') {
       return "(* (p-int $left) (p-int $right))";
+    } elsif ($op eq '&') {
+      return "(p-to-s64 (logand (p-int $left) (p-int $right)))";
+    } elsif ($op eq '|') {
+      return "(p-to-s64 (logior (p-int $left) (p-int $right)))";
+    } elsif ($op eq '^') {
+      return "(p-to-s64 (logxor (p-int $left) (p-int $right)))";
+    } elsif ($op eq '<<') {
+      return "(p-<<-int $left $right)";
+    } elsif ($op eq '>>') {
+      return "(p->>-int $left $right)";
     }
   }
 
@@ -811,7 +823,7 @@ sub gen_funcall {
 
   # First child is function name
   my $func_name = $self->gen_node($kids->[0]);
-  my $cl_func   = $self->cl_name($func_name);
+  my $cl_func   = $self->cl_name($func_name, 1);
 
   # Special handling for next/last/redo with label argument
   if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo') && @$kids == 2) {
@@ -1440,7 +1452,7 @@ sub gen_prefix_op {
     if (ref($operand_node) eq 'PPI::Token::Symbol' &&
         $operand_node->content() =~ /^&(.+)$/) {
       my $func_name = $1;
-      my $cl_func = $self->cl_name($func_name);
+      my $cl_func = $self->cl_name($func_name, 1);
       return "#'$cl_func";
     }
   }
@@ -1462,6 +1474,11 @@ sub gen_prefix_op {
 
   # Get CL name for the operator
   my $cl_op = $self->cl_name($op);
+
+  # Under 'use integer', ~ returns signed 64-bit complement
+  if ($op eq '~' && $self->environment && $self->environment->has_pragma('use_integer')) {
+    return "(p-to-s64 (lognot (p-int $operand)))";
+  }
 
   # For ++ and --, distinguish prefix from postfix
   if ($op eq '++' || $op eq '--') {

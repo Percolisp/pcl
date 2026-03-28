@@ -13,14 +13,23 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 
 - **Operators** — all 92 Perl precedence levels, chained comparisons, string ops
 - **Control flow** — `if/elsif/unless`, `while/until`, `for/foreach`, loop labels, `next/last/redo`
-- **Subroutines** — signatures, defaults, prototypes, closures, `state` variables, `wantarray`
+- **Subroutines** — signatures, defaults, prototypes, closures, `state` variables
 - **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors
 - **OO** — `bless`, method calls, `@ISA`, C3 MRO, multiple inheritance, `SUPER::`
-- **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `chomp/chop`, `length/substr/index`, `each/keys/values` (hashes and arrays), `open/close/readline`, `die/eval`, `tie/untie`, regex `m//`/`s///`/`tr///`, and more
-- **Filehandles** — bareword (`F`) and lexical (`my $fh`) handles, `__DATA__`/`__END__`
+- **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `chomp/chop`, `length/substr/index`, `each/keys/values`, `open/close/readline`, `die/eval`, `tie/untie`, regex `m//`/`s///`/`tr///`, and more
+- **Filehandles** — bareword (`FH`) and lexical (`my $fh`) handles, `__DATA__`/`__END__`
 - **Packages** — `package Foo { }` block scoping, `use constant`, `BEGIN`, `use`/`require`
 - **Special vars** — `$_`, `@_`, `$!`, `$/`, `$\`, `$,`, `$"`, `$0`, `@INC`, `%ENV`, …
-- **Regex** — full `m//`/`s///`/`tr///` with modifiers, named captures, `$1`…
+- **Regex** — full `m//`/`s///`/`tr///` with modifiers, named captures `%+`, `$1`…
+- **String `eval`** — `eval "code"` transpiles and runs at runtime via a persistent subprocess
+
+## Known Gaps
+
+- **`use overload`** — operator overloading on objects not yet implemented
+- **`pack`/`unpack`** — missing several format letters
+- **`wantarray`** — context propagation is partial; scalar vs list context works in straightforward cases
+- **`$SIG{__WARN__}`/`$SIG{__DIE__}`** — signal handlers not called
+- **XS/C extensions** — anything that requires compiled C code won't work
 
 ## Quick Start
 
@@ -32,7 +41,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run test suite (67 files, 2703 tests)
+# Run test suite (70 files, 2796 tests)
 prove -j8 Pl/t/
 ```
 
@@ -50,7 +59,7 @@ Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
 | `Pl/Parser.pm` | Statement-level parser |
 | `Pl/PExpr.pm` | Expression parser, operator precedence |
 | `Pl/ExprToCL.pm` | Code generator |
-| `cl/pcl-runtime.lisp` | Runtime library (~6500 lines of CL) |
+| `cl/pcl-runtime.lisp` | Runtime library (~7000 lines of CL) |
 
 Generated code is intentionally readable — Perl variables keep their sigils (`$x`, `@array`, `%hash`), and functions map to `pl-` prefixed names (`pl-print`, `pl-push`, …).
 
@@ -78,9 +87,7 @@ I am Rex and I bark
 
 ## Status
 
-**Beta.** The internal test suite runs 2703 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~5510 / ~7534 tests (~73%)**, with 43 files passing completely.
-
-Known gaps: string `eval`, XS/C extensions. The bugs are being shaken out by running Perl's own tests.
+**Beta.** The internal test suite runs 2796 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~6809 / ~7780 tests (~88%)**, with 43 files passing completely.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 

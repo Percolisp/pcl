@@ -31,7 +31,7 @@
    #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat
    #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf
    #:p-version-string
-   #:p-quotemeta #:p-pos
+   #:p-pos
    ;; Assignment
    #:p-setf #:p-my #:p-incf #:p-decf
    #:p-pre++ #:p-post++ #:p-pre-- #:p-post--
@@ -52,6 +52,7 @@
    #:p-&& #:p-|| #:p-! #:p-not #:p-and #:p-or #:p-xor #:p-//
    ;; Bitwise
    #:p-bit-and #:p-bit-or #:p-bit-xor #:p-bit-not #:p-<< #:p->>
+   #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
    #:p-ensure-hashref #:p-ensure-arrayref
@@ -259,6 +260,16 @@
 ;;; Forward declaration for %INC table (full definition in Module System section)
 (defvar *p-inc-table* (make-hash-table :test 'equal)
   "Perl %INC - tracks loaded modules (forward declaration)")
+
+;;; Cache for p-eval string transpilation results
+(defvar *p-eval-string-cache* (make-hash-table :test 'equal)
+  "Cache for p-eval: maps (cons perl-code pkg-name) -> cl-text.
+   Avoids re-spawning pl2cl for repeated identical eval calls.")
+
+;;; Persistent transpiler subprocess for p-eval
+(defvar *p-transpiler-process* nil
+  "Persistent pl2cl --server process, or nil if not yet started.
+   Started lazily on first p-transpile-string call. Restarted if it dies.")
 
 ;;; Sub declaration/definition tracking for exists &sub / defined &sub
 ;;; Maps CL function symbol → :stub (declared only), :defined (has body),
@@ -1195,20 +1206,21 @@
 
 (defun p-rindex (str substr &optional start)
   "Perl rindex - find substring from end.
-   Negative start position returns -1.
+   Negative start position returns -1 for non-empty substr.
+   For empty substr, negative position is clamped to 0 (Perl returns 0).
    Position beyond string length is clamped to string length."
   (let* ((s (to-string str))
          (sub (to-string substr))
          (slen (length s))
          (start-num (if start (truncate (to-number start)) nil)))
     (cond
-      ;; Negative position returns -1
-      ((and start-num (< start-num 0)) -1)
-      ;; Empty substring: return min(position, length)
+      ;; Empty substring: clamp position to [0, slen] — even negative positions yield 0
       ((zerop (length sub))
        (if start-num
-           (min start-num slen)
+           (max 0 (min start-num slen))
            slen))
+      ;; Negative position returns -1 (for non-empty substrings)
+      ((and start-num (< start-num 0)) -1)
       ;; Normal case: search from end
       (t (let* ((end-pos (if start-num
                              (min (+ start-num (length sub)) slen)
@@ -2446,15 +2458,15 @@
 
 (defmacro p-bit-and= (place value)
   "Perl &= (bitwise-and-assign)"
-  `(box-set ,place (logand (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(box-set ,place (p-bit-and ,place ,value)))
 
 (defmacro p-bit-or= (place value)
   "Perl |= (bitwise-or-assign)"
-  `(box-set ,place (logior (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(box-set ,place (p-bit-or ,place ,value)))
 
 (defmacro p-bit-xor= (place value)
   "Perl ^= (bitwise-xor-assign)"
-  `(box-set ,place (logxor (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(box-set ,place (p-bit-xor ,place ,value)))
 
 (defmacro p-<<= (place value)
   "Perl <<= (left-shift-assign)"
@@ -2728,17 +2740,45 @@
 ;;; Bitwise Operators
 ;;; ============================================================
 
+(defun p-string-bitwise-operand-p (v)
+  "Return T if v is a non-numeric string and should trigger string bitwise ops."
+  (let ((val (unbox v)))
+    (and (stringp val)
+         (not (looks-like-number val)))))
+
+(defun p-string-bit-op (a b op truncate-p)
+  "Perl string bitwise op. OP is logand/logior/logxor.
+   TRUNCATE-P T: result length = min(len(a),len(b)) (for &).
+   TRUNCATE-P NIL: result length = max(len(a),len(b)), shorter padded with NUL (for |, ^)."
+  (let* ((sa (to-string a))
+         (sb (to-string b))
+         (la (length sa))
+         (lb (length sb))
+         (result-len (if truncate-p (min la lb) (max la lb)))
+         (result (make-string result-len :initial-element #\Nul)))
+    (dotimes (i result-len)
+      (let ((ca (if (< i la) (char-code (char sa i)) 0))
+            (cb (if (< i lb) (char-code (char sb i)) 0)))
+        (setf (char result i) (code-char (funcall op ca cb)))))
+    result))
+
 (defun p-bit-and (a b)
-  "Perl bitwise AND"
-  (logand (truncate (to-number a)) (truncate (to-number b))))
+  "Perl bitwise AND — string (char-by-char, truncates) or numeric"
+  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+      (p-string-bit-op a b #'logand t)
+      (logand (truncate (to-number a)) (truncate (to-number b)))))
 
 (defun p-bit-or (a b)
-  "Perl bitwise OR"
-  (logior (truncate (to-number a)) (truncate (to-number b))))
+  "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric"
+  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+      (p-string-bit-op a b #'logior nil)
+      (logior (truncate (to-number a)) (truncate (to-number b)))))
 
 (defun p-bit-xor (a b)
-  "Perl bitwise XOR"
-  (logxor (truncate (to-number a)) (truncate (to-number b))))
+  "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric"
+  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+      (p-string-bit-op a b #'logxor nil)
+      (logxor (truncate (to-number a)) (truncate (to-number b)))))
 
 (defun p-bit-not (a)
   "Perl bitwise NOT - mask to 64 bits like Perl's UV"
@@ -2755,6 +2795,37 @@
   (let ((av (truncate (to-number a)))
         (bv (truncate (to-number b))))
     (if (>= (abs bv) 64) 0 (ash av (- bv)))))
+
+(defun p-to-s64 (n)
+  "Convert integer to signed 64-bit range (-2^63 to 2^63-1)."
+  (let ((masked (logand n #xFFFFFFFFFFFFFFFF)))
+    (if (>= masked #x8000000000000000)
+        (- masked #x10000000000000000)
+        masked)))
+
+(defun p-<<-int (a b)
+  "Perl left shift under 'use integer' — signed 64-bit arithmetic."
+  (let ((av (truncate (to-number a)))
+        (bv (truncate (to-number b))))
+    (cond
+      ;; Large positive left shift (b >= 64) or large negative right shift: 0
+      ((>= bv 64) 0)
+      ;; Large negative shift (= right shift), |b| >= 64: arithmetic fill
+      ((<= bv -64) (if (minusp av) -1 0))
+      ;; Normal range: let ash handle it (negative bv = right shift in CL ash)
+      (t (p-to-s64 (ash av bv))))))
+
+(defun p->>-int (a b)
+  "Perl right shift under 'use integer' — signed 64-bit arithmetic."
+  (let ((av (truncate (to-number a)))
+        (bv (truncate (to-number b))))
+    (cond
+      ;; Large positive right shift (b >= 64): arithmetic fill
+      ((>= bv 64) (if (minusp av) -1 0))
+      ;; Large negative shift (= left shift), |b| >= 64: result is 0
+      ((<= bv -64) 0)
+      ;; Normal range: arithmetic right shift, sign-extend to 64-bit
+      (t (p-to-s64 (ash av (- bv)))))))
 
 ;;; ============================================================
 ;;; Data Structures - Arrays
@@ -3732,8 +3803,7 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
           (raw (gensym))
           (i (gensym)))
       `(block ,block-name
-         (let* ((*wantarray* t)
-                (,raw ,list)
+         (let* ((,raw (let ((*wantarray* t)) ,list))  ; list in list-context; body keeps outer context
                 (,vec (%p-flatten-for-list ,raw))
                 (,i 0))
            (block nil    ; for unlabeled p-last
@@ -3931,22 +4001,48 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl do BLOCK - returns the value of the block."
   result)
 
-;;; p-eval (string eval) - simplified version
-;;; Full string eval would need transpiler at runtime.
-;;; This stub handles simple cases like version string evaluation.
+;;; p-eval: Perl eval(STRING) — full string eval via runtime transpilation.
+;;;
+;;; Variable access: eval sees defvar (dynamic) variables — package globals,
+;;; our vars, local vars, and file-scope my vars. Sub-scope my vars are let-
+;;; bound without defvar, so they are lexically scoped and correctly invisible
+;;; to eval (matching Perl semantics). Closure-captured vars are renamed to
+;;; $x__lex__N and also invisible. See docs/eval-string-plan.md.
+;;;
+;;; $@ format: omits " at (eval N) line M." — documented in not-supported.md.
 (defun p-eval (string)
-  "Simplified Perl eval(string) - handles simple numeric expressions.
-   Full implementation would need runtime transpiler."
+  "Perl eval(STRING): transpile and evaluate a Perl string at runtime."
   (let ((s (to-string (unbox string))))
-    (handler-case
-        (progn
-          (box-set $@ "")
-          ;; Try to parse as number (handles version strings like '1.50')
-          (let ((n (parse-number s)))
-            (if n n s)))
-      (error (e)
-        (box-set $@ (format nil "~A" e))
-        nil))))
+    ;; eval undef / eval "" -> nil (undef), $@ = ""
+    (when (string= s "")
+      (box-set $@ "")
+      (return-from p-eval nil))
+    (let* ((pkg-name  (package-name *package*))
+           (cache-key (cons s pkg-name))
+           (cached    (gethash cache-key *p-eval-string-cache*)))
+      (handler-case
+          (let* ((cl-text  (or cached
+                               (let ((r (p-transpile-string s pkg-name)))
+                                 (setf (gethash cache-key
+                                                *p-eval-string-cache*) r)
+                                 r)))
+                 ;; READ with *package* bound: symbol interning (e.g. $x)
+                 ;; uses the eval package, matching the caller's symbol space.
+                 (cl-form  (let ((*package* *package*))
+                             (read-from-string
+                              (concatenate 'string "(progn " cl-text ")"))))
+                 ;; EVAL with *package* bound: any (in-package ...) in the
+                 ;; eval'd code does not escape into the caller's dynamic scope.
+                 (result   (let ((*package* *package*))
+                             (eval cl-form))))
+            (box-set $@ "")
+            result)
+        (p-exception (e)
+          (box-set $@ (p-exception-object e))
+          nil)
+        (error (e)
+          (box-set $@ (format nil "~A" e))
+          nil)))))
 
 (defun parse-number (s)
   "Try to parse string as number, return nil if not a number."
@@ -5067,6 +5163,49 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (return-from p-transpile-file nil))))
     (when (> (length output) 0)
       output)))
+
+(defun p-ensure-transpiler ()
+  "Return the live transpiler process, starting or restarting it if needed."
+  (unless *pcl-pl2cl-path*
+    (error "pl2cl path not set - cannot start transpiler server"))
+  (when (or (null *p-transpiler-process*)
+            (not (sb-ext:process-alive-p *p-transpiler-process*)))
+    (when *p-transpiler-process*
+      (ignore-errors (sb-ext:process-close *p-transpiler-process*)))
+    (setf *p-transpiler-process*
+          (sb-ext:run-program
+           "perl"
+           (list (namestring *pcl-pl2cl-path*) "--server")
+           :input  :stream
+           :output :stream
+           :error  nil
+           :wait   nil
+           :search t
+           :external-format :utf-8)))
+  *p-transpiler-process*)
+
+(defun p-transpile-string (perl-code pkg-name)
+  "Transpile a Perl string to CL code via the persistent pl2cl server.
+   Returns the CL text string, or signals an error on failure."
+  (let* ((proc     (p-ensure-transpiler))
+         (in       (sb-ext:process-input  proc))
+         (out      (sb-ext:process-output proc))
+         (code-len (length perl-code)))
+    ;; Send request: pkg\n char-count\n perl-code
+    (write-string pkg-name in)
+    (write-char #\Newline in)
+    (write-string (princ-to-string code-len) in)
+    (write-char #\Newline in)
+    (write-string perl-code in)
+    (finish-output in)
+    ;; Read response: status\n char-count\n body
+    (let* ((status   (read-line out))
+           (resp-len (parse-integer (read-line out)))
+           (resp-buf (make-string resp-len)))
+      (read-sequence resp-buf out)
+      (if (string= status "ok")
+          resp-buf
+          (error "pl2cl server: ~A" resp-buf)))))
 
 ;;; --- Module Loading ---
 
@@ -6554,12 +6693,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (set-capture-groups str reg-starts reg-ends reg-names)
                  (if *wantarray*
                      (let* ((num-groups (length reg-starts))
-                            (captures (make-array num-groups :adjustable t :fill-pointer t)))
-                       (dotimes (i num-groups)
-                         (setf (aref captures i)
-                               (if (and (aref reg-starts i) (aref reg-ends i))
-                                   (subseq str (aref reg-starts i) (aref reg-ends i))
-                                   nil)))
+                            (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                       (if (zerop num-groups)
+                           ;; No capture groups: Perl returns (1) in list context on success
+                           (setf (aref captures 0) 1)
+                           (dotimes (i num-groups)
+                             (setf (aref captures i)
+                                   (if (and (aref reg-starts i) (aref reg-ends i))
+                                       (subseq str (aref reg-starts i) (aref reg-ends i))
+                                       nil))))
                        captures)
                      t))))))
       (cl-ppcre:ppcre-syntax-error (e)

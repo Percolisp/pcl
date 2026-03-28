@@ -95,4 +95,75 @@ for (@tests) {
 }
 ', "ok\n");
 
+# ── Bug fix: sub named after a Perl operator (e.g. `x`) called as function ───
+# `x` is the string-repetition operator, but `sub x { }; x()` must call the
+# user-defined sub, not emit (p-str-x).
+
+test_transpile("sub named 'x' callable as x()", '
+sub x { return 42; }
+my $r = x();
+print "$r\n";
+', "42\n");
+
+test_transpile("sub named 'x' with arg via assignment", '
+sub x { return $_[0] * 2; }
+my $r = x(5);
+print "$r\n";
+', "10\n");
+
+test_transpile("sub named 'x' return value used in expression", '
+sub x { return 3; }
+my $n = x() + 1;
+print "$n\n";
+', "4\n");
+
+# ── Bug fix: `<` + `>` in ternary expression not misidentified as glob ────────
+# sort { $a<$b?1:$a>$b?-1:0 } was generating a PARSE ERROR because
+# _fix_ppi_glob_after_block was turning <$b?1:$a> into a glob token.
+# The fix: < preceded by a symbol/number/string is always less-than.
+
+test_transpile("ternary with < > as comparison ops: sort descending", '
+my @g = (2, 3, 1);
+my @r = sort { $a<$b?1:$a>$b?-1:0 } @g;
+print "@r\n";
+', "3 2 1\n");
+
+test_transpile("ternary < > not treated as glob in expression", '
+my $a = 2; my $b = 3;
+my $x = $a<$b?1:$a>$b?-1:0;
+print "$x\n";
+', "1\n");
+
+# ── Bug fix: sort(func(args)) — func not treated as sort comparator ────────────
+# sort(routine(1)) was being parsed as sort with 'routine' as the comparator
+# sub and '1' as the list, because sort(NAME LIST) detection did not check
+# whether NAME is immediately followed by (...) — which means it's a call.
+
+test_transpile("sort(func(args)) calls func not uses it as comparator", '
+sub routine { return "one", "two" }
+my @a = sort(routine(1));
+print "@a\n";
+', "one two\n");
+
+# ── Bug fix: *wantarray* was t in foreach loop body, making regex =~ ──────────
+# return an empty vector (#()) instead of t on match-with-no-captures,
+# causing all boolean regex tests inside foreach bodies to fail.
+
+test_transpile("regex match inside foreach body is in scalar context", '
+my @flags = ("-", "+");
+my @results;
+for my $flag (@flags) {
+    push @results, ($flag =~ /-/ ? "yes" : "no");
+}
+print join(",", @results), "\n";
+', "yes,no\n");
+
+test_transpile("function called from foreach: regex in function body correct", '
+sub has_minus { my $s = shift; return $s =~ /-/ ? 1 : 0 }
+my @flags = ("--", "++", "-+");
+my @r;
+for my $f (@flags) { push @r, has_minus($f) }
+print join(",", @r), "\n";
+', "1,0,1\n");
+
 done_testing;

@@ -1520,7 +1520,10 @@ sub handle_subcalls {
             && $inner_ch[0]->isa('PPI::Token::Word')) {
           my $comp_name = $inner_ch[0]->content();
           my $is_builtin = exists $self->known_no_of_params->{$comp_name};
-          unless ($is_builtin
+          # If NAME is followed immediately by (...), it's a function call: sort(func(args))
+          # not a comparator: sort(NAME LIST).
+          my $is_funcall = (@inner_ch >= 2 && ref($inner_ch[1]) eq 'PPI::Structure::List');
+          unless ($is_builtin || $is_funcall
                   || $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/
                   || $comp_name =~ /^CORE::/) {
             my($top_node, $top_id) = $self->make_node_insert('funcall');
@@ -1879,6 +1882,54 @@ sub handle_subcalls {
     $e->[$i]    = $top_node;
     splice @$e, $i+1, 1;        # Remove parameters.
   }
+
+  # - - - Pre-pass: Handle indirect object syntax "new ClassName ARGS"
+  # Equivalent to ClassName->new(ARGS). Must run before the right-to-left loop,
+  # which would otherwise collapse "ClassName args" into funcall(ClassName,args)
+  # before we can detect the pattern.
+  # Detects: Word("new") followed by a bare Word class name (not an operator).
+  for (my $i = 0; $i < scalar(@$e) - 1; $i++) {
+    my $now  = $e->[$i];
+    my $next = $e->[$i+1];
+    next unless $self->is_word($now) && $now->content() eq 'new';
+    next unless ref($next) eq 'PPI::Token::Word';
+    next if $self->is_token_operator($next);
+
+    my $class_word = $next;
+
+    # Find end of args: stop before any low-priority operator (and/or/xor)
+    my $end_pars = scalar(@$e) - 1;
+    for my $j ($i + 2 .. scalar(@$e) - 1) {
+      my $op = $self->is_token_operator($e->[$j]);
+      if (defined $op && ($op eq 'and' || $op eq 'or' || $op eq 'xor')) {
+        $end_pars = $j - 1;
+        last;
+      }
+    }
+
+    # Build methodcall node: kids[0]=funcall{ClassName}, kids[1]=Word("new"), kids[2+]=args
+    my($mc_node, $mc_id) = $self->make_node_insert('methodcall');
+
+    # kids[0]: funcall wrapping the class name word (shape gen_methodcall expects)
+    my($class_fc_node, $class_fc_id) = $self->make_node_insert('funcall');
+    $self->add_child_to_node($class_fc_id, $self->make_node($class_word));
+    $self->add_child_to_node($mc_id, $class_fc_id);
+
+    # kids[1]: the method name "new"
+    $self->add_child_to_node($mc_id, $self->make_node($e->[$i]));
+
+    # kids[2..N]: arguments (if any)
+    if ($end_pars >= $i + 2) {
+      my $arg_ids = $self->parse_list($e, $i + 2, $end_pars);
+      for my $arg_id (@$arg_ids) {
+        $self->add_child_to_node($mc_id, $arg_id);
+      }
+    }
+
+    # Replace "new ClassName ARGS" span with the single methodcall node
+    splice @$e, $i, $end_pars - $i + 1, $mc_node;
+  }
+
   say "---- handle_subcalls: Before main loop. Has ", dump $e   if 8 & DEBUG;
 
   # - - - Look for remaining funcalls without () around parameters:
@@ -3275,12 +3326,14 @@ sub _fix_ppi_glob_after_block {
       # the less-than operator, not the readline diamond.
       my $is_bare_fh = ($glob_content =~ /^[A-Za-z_][A-Za-z0-9_:]*$/);
       my $prev = @result ? $result[-1] : undef;
-      my $prev_is_value = $prev && (
-          ref($prev) =~ /^PPI::Token::(Symbol|Number|Quote)/ ||
-          ref($prev) =~ /^PPI::Structure/);
+      # A simple value (symbol/number/string) before < means it's definitely lt, not glob.
+      # e.g. $a<$b?1:$a>$b: the < is less-than, not a glob opener.
+      # PPI::Structure (block/subscript) before < can still be a glob (e.g. sort { } <*.txt>).
+      my $prev_is_simple_value = $prev && ref($prev) =~ /^PPI::Token::(Symbol|Number|Quote)/;
+      my $prev_is_value = $prev_is_simple_value || ($prev && ref($prev) =~ /^PPI::Structure/);
 
       # If we found a valid-looking glob pattern or bare filehandle, reconstruct it
-      if ($found_close && ($has_glob_chars || ($is_bare_fh && !$prev_is_value)) && $glob_content ne '') {
+      if ($found_close && !$prev_is_simple_value && ($has_glob_chars || ($is_bare_fh && !$prev_is_value)) && $glob_content ne '') {
         # Create a proper readline token
         my $glob_token = bless {
           content => "<$glob_content>"
