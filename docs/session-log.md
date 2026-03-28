@@ -4,6 +4,64 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 105 (2026-03-28) — persistent transpiler server + foreach wantarray fix
+
+**Commits:** (pending)
+
+### Work done
+
+**Feature: persistent transpiler server (`pl2cl --server`) for `eval "string"` speedup**
+
+Added `--server` mode to `pl2cl` that reads IPC requests from stdin (pkg + length + code)
+and writes responses (status + length + body). SBCL keeps one server process alive via
+`*p-transpiler-process*` (sb-ext:run-program), replacing per-call subprocess spawning
+(~500ms → ~2ms per eval, 250× speedup). `p-transpile-string` now uses persistent IPC.
+
+**cmpchain.t unblocked:** 656 eval calls now complete in ~1s (was timeout). +1475 tests.
+
+**list.t diagnosis:** PPI O(n²) CPU on 100k-nested expression. Not OOM. Cannot fix.
+Moved cmpchain.t out of SKIP, list.t stays in SKIP.
+
+**Regression tests:** `Pl/t/eval-01.t` extended from 12 to 22 runtime tests (tests 18-22).
+
+**Bug fix: `p-foreach` propagated `*wantarray* t` into loop bodies**
+
+Root cause: `p-foreach` macro wrapped `(let* ((*wantarray* t) (list ...) ...))` which
+covered the ENTIRE macro body. Any regex match inside a foreach body (or in a function
+called from one) ran in list context and returned `#()` (empty vector of captures) instead
+of `t`. `p-true-p` correctly treats empty vectors as falsy → regex boolean tests failed.
+
+Fix: restructure to `(let* ((raw (let ((*wantarray* t)) list)) ...))` — list-context
+binding covers only the list evaluation, not the loop body.
+
+**Bug fix: `do-regex-match` in list context with no captures returned `#()` (falsy)**
+
+Perl semantics: `$str =~ /pattern/` in list context with no capture groups returns `(1)`,
+not `()`. The latter is falsy and indistinguishable from a failed match.
+
+Fix: when `num-groups` is 0 and the match succeeded, return `#(1)` instead of `#()`.
+This is the correct Perl behavior (verified against Perl docs and test output).
+
+Together these two fixes resolved 974 failures in `sprintf2.t` (reference function
+`mysprintf_int_flags` used regex inside foreach bodies) and likely many others.
+
+**Files changed:** `pl2cl`, `cl/pcl-runtime.lisp`, `Pl/t/eval-01.t`, `Pl/t/transpile-test-05.t`,
+`sweep-perl-tests.pl`, `docs/overload-plan.md` (new), `docs/bug-finding-strategy.md` (new),
+`docs/persistent-transpiler-plan.md` (new)
+
+### Test counts
+- PCL suite: **70 files, 2796 tests, all passing**
+- Sweep: **6809 passing, 971 failing** (was 4361/1957 in session 104: +2448)
+- Fully passing: 43 files (was 42)
+- sprintf2.t: 1384/9 (was 1/983!)
+
+### Remaining 9 failures in sprintf2.t
+- Test 65: warnings count (`$^W` not implemented)
+- Tests 69, 73, 75, 77, 81, 85, 88, 96: hash-ref interpolation in test names (`"$t->{fmt}"`)
+  or missing/redundant argument warnings (`$SIG{__WARN__}` not called)
+
+---
+
 ## Session 104 (2026-03-28) — `eval "string"` implementation + perl-tests eval cleanup
 
 **Commits:** (pending)

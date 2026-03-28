@@ -145,4 +145,25 @@ my @a = sort(routine(1));
 print "@a\n";
 ', "one two\n");
 
+# ── Bug fix: *wantarray* was t in foreach loop body, making regex =~ ──────────
+# return an empty vector (#()) instead of t on match-with-no-captures,
+# causing all boolean regex tests inside foreach bodies to fail.
+
+test_transpile("regex match inside foreach body is in scalar context", '
+my @flags = ("-", "+");
+my @results;
+for my $flag (@flags) {
+    push @results, ($flag =~ /-/ ? "yes" : "no");
+}
+print join(",", @results), "\n";
+', "yes,no\n");
+
+test_transpile("function called from foreach: regex in function body correct", '
+sub has_minus { my $s = shift; return $s =~ /-/ ? 1 : 0 }
+my @flags = ("--", "++", "-+");
+my @r;
+for my $f (@flags) { push @r, has_minus($f) }
+print join(",", @r), "\n";
+', "1,0,1\n");
+
 done_testing;

@@ -3803,8 +3803,7 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
           (raw (gensym))
           (i (gensym)))
       `(block ,block-name
-         (let* ((*wantarray* t)
-                (,raw ,list)
+         (let* ((,raw (let ((*wantarray* t)) ,list))  ; list in list-context; body keeps outer context
                 (,vec (%p-flatten-for-list ,raw))
                 (,i 0))
            (block nil    ; for unlabeled p-last
@@ -6694,12 +6693,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (set-capture-groups str reg-starts reg-ends reg-names)
                  (if *wantarray*
                      (let* ((num-groups (length reg-starts))
-                            (captures (make-array num-groups :adjustable t :fill-pointer t)))
-                       (dotimes (i num-groups)
-                         (setf (aref captures i)
-                               (if (and (aref reg-starts i) (aref reg-ends i))
-                                   (subseq str (aref reg-starts i) (aref reg-ends i))
-                                   nil)))
+                            (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                       (if (zerop num-groups)
+                           ;; No capture groups: Perl returns (1) in list context on success
+                           (setf (aref captures 0) 1)
+                           (dotimes (i num-groups)
+                             (setf (aref captures i)
+                                   (if (and (aref reg-starts i) (aref reg-ends i))
+                                       (subseq str (aref reg-starts i) (aref reg-ends i))
+                                       nil))))
                        captures)
                      t))))))
       (cl-ppcre:ppcre-syntax-error (e)
