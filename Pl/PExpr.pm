@@ -2129,6 +2129,11 @@ sub handle_subcalls {
                      && $next_term->content() =~ /^%/) {
                 # %hash + Block is one term (KV slice: %h{keys})
                 $end_pars = $i + 2;
+            } elsif (ref($after_symbol) eq 'PPI::Structure::Constructor'
+                     && $after_symbol->start() eq '['
+                     && $next_term->content() =~ /^%/) {
+                # %arr + Constructor is one term (KV array slice: %arr[indices])
+                $end_pars = $i + 2;
             } elsif (ref($after_symbol) eq 'PPI::Token::Operator'
                      && $after_symbol->content() eq '->'
                      && $end_pars >= $i + 3) {

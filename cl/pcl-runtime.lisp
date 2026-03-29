@@ -60,7 +60,7 @@
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
-   #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice
+   #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
    #:p-if #:p-unless #:p-while #:p-until #:p-for #:p-foreach
    #:p-return #:p-last #:p-last-dynamic #:p-next #:p-redo
@@ -3665,6 +3665,24 @@
         (vector-push-extend old-val result)))
     result))
 
+(defun p-delete-kv-array-slice (arr &rest indices)
+  "Perl delete for KV array slices: delete %arr[i1, i2, ...]
+   Deletes elements at given indices and returns key-value pairs (index, value, ...)."
+  (let* ((a (unbox arr))
+         (result (make-array 0 :adjustable t :fill-pointer 0)))
+    (dolist (idx indices)
+      (let* ((i (truncate (to-number idx)))
+             (len (if (vectorp a) (length a) 0))
+             (old-val (if (and (>= i 0) (< i len))
+                          (let ((elem (aref a i)))
+                            (if (p-box-p elem) (p-box-value elem) *p-undef*))
+                          *p-undef*)))
+        (vector-push-extend i result)
+        (vector-push-extend old-val result)
+        (when (and (vectorp a) (>= i 0) (< i len))
+          (setf (aref a i) nil))))
+    result))
+
 (defun p-stash (pkg-name)
   "Return package stash (symbol table) as a hash.
    This is a simplified stub - full implementation would mirror Perl's stash."
@@ -6736,7 +6754,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (pattern (p-subst-op-pattern op))
          (raw-replacement (p-subst-op-replacement op))
          (modifiers (p-subst-op-modifiers op))
-         (eval-p (member :e modifiers))
+         (eval-p (or (member :e modifiers) (functionp raw-replacement)))
          (replacement (unless eval-p
                         (perl-to-ppcre-replacement (if (stringp raw-replacement)
                                                        raw-replacement ""))))

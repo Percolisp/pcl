@@ -672,8 +672,15 @@ sub _process_element {
 
   # Handle different statement types
   if ($ref eq 'PPI::Statement') {
-    # Simple expression statement
-    $self->_process_expression_statement($element);
+    # CORE::state $x = ... is a variable declaration that PPI sees as a plain statement
+    my ($first) = grep { ref($_) ne 'PPI::Token::Whitespace' } $element->children;
+    if (defined $first && ref($first) eq 'PPI::Token::Word'
+        && $first->content =~ /^CORE::(my|our|state|local)$/) {
+      $first->{content} = $1;  # strip CORE:: prefix so _process_variable_statement recognizes it
+      $self->_process_variable_statement($element);
+    } else {
+      $self->_process_expression_statement($element);
+    }
   }
   elsif ($ref eq 'PPI::Statement::Expression') {
     $self->_process_expression_statement($element);
