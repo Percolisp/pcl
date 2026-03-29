@@ -28,7 +28,7 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 - **`use overload`** — operator overloading on objects not yet implemented
 - **`pack`/`unpack`** — missing several format letters
 - **`wantarray`** — context propagation is partial; scalar vs list context works in straightforward cases
-- **`$SIG{__WARN__}`/`$SIG{__DIE__}`** — signal handlers not called
+- **`$SIG{__WARN__}`** — handler called but reference identity for warn objects is now preserved; `$SIG{__DIE__}` not yet called
 - **XS/C extensions** — anything that requires compiled C code won't work
 
 ## Quick Start
@@ -41,7 +41,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run test suite (70 files, 2796 tests)
+# Run test suite (72 files, 2819 tests)
 prove -j8 Pl/t/
 ```
 
@@ -87,7 +87,7 @@ I am Rex and I bark
 
 ## Status
 
-**Beta.** The internal test suite runs 2796 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~6809 / ~7780 tests (~88%)**, with 43 files passing completely.
+**Beta.** The internal test suite runs 2819 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **6861 / 7817 tests (~88%)**, with 51 files passing completely.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 

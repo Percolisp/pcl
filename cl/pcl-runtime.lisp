@@ -1840,6 +1840,8 @@
          (proclaim '(special ,place))
          (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
        (setf (fill-pointer ,place) 0)
+       ;; Perl: assigning to an array resets the each() iterator
+       (remhash ,place *array-iterators*)
        (labels ((add-items (src)
                   (cond
                     ((stringp src)
@@ -1851,16 +1853,26 @@
                               src))
                     ((vectorp src)
                      (loop for item across src
-                           do (if (and (vectorp item) (not (stringp item)))
-                                  (add-items item)
-                                  (let ((v (unbox item)))
-                                    (vector-push-extend (make-p-box v) ,place)))))
+                           do (cond
+                                ((and (vectorp item) (not (stringp item)))
+                                 (add-items item))
+                                ;; Preserve nil as deleted-element marker (not undef-but-exists)
+                                ((null item)
+                                 (vector-push-extend nil ,place))
+                                (t
+                                 (let ((v (unbox item)))
+                                   (vector-push-extend (make-p-box v) ,place))))))
                     ((listp src)
                      (loop for item in src
-                           do (if (and (vectorp item) (not (stringp item)))
-                                  (add-items item)
-                                  (let ((v (unbox item)))
-                                    (vector-push-extend (make-p-box v) ,place)))))
+                           do (cond
+                                ((and (vectorp item) (not (stringp item)))
+                                 (add-items item))
+                                ;; Preserve nil as deleted-element marker (not undef-but-exists)
+                                ((null item)
+                                 (vector-push-extend nil ,place))
+                                (t
+                                 (let ((v (unbox item)))
+                                   (vector-push-extend (make-p-box v) ,place))))))
                     ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
                     (t
                      (when src
@@ -2831,9 +2843,24 @@
 ;;; Data Structures - Arrays
 ;;; ============================================================
 
+(defun p-aref-unbox-elem (elem)
+  "Unbox an array element, preserving the box for reference types.
+   Scalar types (number, string, undef) are unboxed for efficiency.
+   Reference types (array/hash/code ref, scalar ref) keep their box so
+   that numeric comparison (== on refs) uses object-address, not array length."
+  (if (null elem)
+      *p-undef*
+      (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
+        (if (or (and (vectorp v) (not (stringp v)))  ; arrayref
+                (hash-table-p v)                      ; hashref
+                (functionp v)                          ; coderef
+                (p-box-p v))                           ; scalar ref (box-in-box)
+            elem   ; reference: return the box so to-number → object-address
+            v))))  ; scalar: return unboxed value
+
 (defun p-aref (arr idx)
   "Perl array access (supports negative indices, works on vectors and lists).
-   Returns the VALUE (unboxed if element is a box)."
+   Returns the VALUE (unboxed for scalars, box preserved for references)."
   (let* ((a (unbox arr)))  ; Unbox if needed
     ;; If array is undef (from failed hash lookup etc), return undef
     (when (eq a *p-undef*)
@@ -2845,12 +2872,9 @@
            (actual-idx (if (< i 0) (+ len i) i)))
       (cond
         ((and (vectorp a) (>= actual-idx 0) (< actual-idx len))
-         (let ((elem (aref a actual-idx)))
-           ;; nil means deleted element — return undef
-           (if (null elem) *p-undef* (unbox elem))))
+         (p-aref-unbox-elem (aref a actual-idx)))
         ((and (listp a) (>= actual-idx 0) (< actual-idx len))
-         (let ((elem (nth actual-idx a)))
-           (unbox elem)))
+         (p-aref-unbox-elem (nth actual-idx a)))
         (t *p-undef*)))))
 
 (defun (setf p-aref) (value arr idx)
@@ -5478,9 +5502,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                     (string< (to-string a) (to-string b)))))))))
 
 (defun p-reverse (&rest items)
-  "Perl reverse - accepts single @array or multiple elements."
-  (let ((arr (apply #'%p-collect-list items)))
-    (reverse arr)))
+  "Perl reverse: in list context reverses element order; in scalar context
+   concatenates all items into a string and reverses the characters."
+  (if *wantarray*
+      ;; List context: reverse element order, preserving nil (deleted) slots
+      (let* ((arr (apply #'%p-collect-list items))
+             (result (copy-seq arr)))
+        (nreverse result))
+      ;; Scalar context: join all items into a string and reverse characters
+      (let ((str (with-output-to-string (s)
+                   (dolist (item items)
+                     (let ((val (unbox item)))
+                       (if (and (vectorp val) (not (stringp val)))
+                           (loop for x across val do (write-string (to-string x) s))
+                           (write-string (to-string item) s)))))))
+        (nreverse (copy-seq str)))))
 
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.

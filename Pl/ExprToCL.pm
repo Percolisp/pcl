@@ -1289,6 +1289,17 @@ sub gen_funcall {
     return $ctx == 0 ? "(length $call)" : $call;
   }
 
+  # reverse/localtime/gmtime are wantarray-sensitive: they use *wantarray* internally
+  # to decide list-vs-scalar behavior.  An outer (let ((*wantarray* t)) ...) wrapper
+  # (e.g. from push/print arguments) would leak through the plain $call form and make
+  # p-reverse do list reversal when scalar string reversal was intended.
+  # Explicitly bind *wantarray* for both contexts so the outer dynamic scope can't leak.
+  if ($func_name =~ /^(reverse|localtime|gmtime|caller)$/) {
+    return $ctx == 1
+        ? "(let ((*wantarray* t)) $call)"
+        : "(let ((*wantarray* nil)) $call)";
+  }
+
   # Wrap in dynamic wantarray binding for list context
   if ($ctx == 1) {  # LIST_CTX = 1
     return "(let ((*wantarray* t)) $call)";

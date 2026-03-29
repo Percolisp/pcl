@@ -827,7 +827,6 @@ sub _process_expression_statement {
     }
 
     my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt);
-    my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
 
     # Generate appropriate control structure
     # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
@@ -835,10 +834,12 @@ sub _process_expression_statement {
     my $cl_modifier = $modifier;
     if ($modifier eq 'for' || $modifier eq 'foreach') {
       $cl_modifier = 'foreach';
-      # For foreach modifier, need ($_ list) syntax
+      # The list must be in LIST_CTX (= 1) so split() returns elements not count
+      my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
       $cl_code = "(p-foreach (\$_ $cond_cl) $expr_cl)";
     }
     else {
+      my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
       $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
     }
   }
@@ -3013,6 +3014,14 @@ sub _process_while_statement {
     }
   }
 
+  # Perl special case: while ($k = each COLL) is treated as while (defined($k = each COLL)).
+  # This prevents the loop from exiting when each returns index 0 (which is falsy).
+  # Detect pattern: (p-scalar-= $var (p-each ...)) or (p-my-= $var (p-each ...))
+  if ($keyword ne 'until' && $cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\(p-each\b/) {
+    my $var = $1;
+    $cond_cl = "(progn $cond_cl (p-defined $var))";
+  }
+
   # Handle 'until' by negating
   if ($keyword eq 'until') {
     $cond_cl = "(p-not $cond_cl)";
@@ -3133,7 +3142,15 @@ sub _process_c_style_for {
       ref($_) ne 'PPI::Token::Whitespace' &&
       !(ref($_) eq 'PPI::Token::Structure' && $_->content eq ';')
     } $statements[1]->children;
-    $cond_cl = $self->_parse_expression(\@parts, $stmt) // 't' if @parts;
+    if (@parts) {
+      $cond_cl = $self->_parse_expression(\@parts, $stmt) // 't';
+      # Perl special case: for(; $k = each COLL ;) is treated as defined()
+      # Prevents loop exit when each returns index 0 (falsy).
+      if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\(p-each\b/) {
+        my $var = $1;
+        $cond_cl = "(progn $cond_cl (p-defined $var))";
+      }
+    }
   }
 
   # Process increment
@@ -4376,12 +4393,13 @@ sub _compile_constant_value {
 
 # Parse an expression using PExpr and generate CL
 sub _parse_expression {
-  my $self  = shift;
-  my $parts = shift;
-  my $stmt  = shift;  # Original statement for full_PPI
+  my $self    = shift;
+  my $parts   = shift;
+  my $stmt    = shift;  # Original statement for full_PPI
+  my $context = shift // 0;  # 0 = SCALAR_CTX (default), 1 = LIST_CTX
 
   # Call the internal version that returns declarations too
-  my ($result, $decls) = $self->_parse_expression_internal($parts, $stmt);
+  my ($result, $decls) = $self->_parse_expression_internal($parts, $stmt, $context);
 
   # In scalar context, just return result (backwards compatible)
   return $result unless wantarray;
@@ -4392,9 +4410,10 @@ sub _parse_expression {
 
 # Internal: parse expression and return both CL code and declarations
 sub _parse_expression_internal {
-  my $self  = shift;
-  my $parts = shift;
-  my $stmt  = shift;
+  my $self    = shift;
+  my $parts   = shift;
+  my $stmt    = shift;
+  my $context = shift // 0;  # 0 = SCALAR_CTX (default), 1 = LIST_CTX
 
   my $result;
   my @decls;
@@ -4412,7 +4431,7 @@ sub _parse_expression_internal {
     @decls = @{$decl_list // []};
 
     # Annotate AST with context information (scalar/list)
-    $expr_o->annotate_contexts($node_id);
+    $expr_o->annotate_contexts($node_id, $context);
 
     my $gen = Pl::ExprToCL->new(
       expr_o       => $expr_o,

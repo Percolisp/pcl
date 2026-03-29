@@ -2694,6 +2694,13 @@ sub child_context {
         return SCALAR_CTX
             if $child_index >= 1;  # Argument is scalar context
       }
+
+      # length always takes its argument in scalar context
+      # (even when length() itself is called in list context, e.g. push @a, length reverse)
+      if ($func_name && $func_name eq 'length') {
+        return SCALAR_CTX
+            if $child_index >= 1;
+      }
     }
     # progn (comma operator) forces list context
     if ($type eq 'progn') {
