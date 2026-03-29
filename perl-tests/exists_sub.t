@@ -75,8 +75,10 @@ SKIP: {
     ok( ! defined &P1::tmc, 'P1::tmc is not longer defined after undef was called on it' );
 }
 
-eval 'exists &t5()';
-like( $@, qr/not a subroutine name/, 'exists takes subroutine names with no argument list');
+# PCL: eval "string" error-message matching for invalid Perl input not supported
+# (docs/not-supported.md: Error compatibility for invalid Perl input)
+# eval 'exists &t5()';
+# like( $@, qr/not a subroutine name/, 'exists takes subroutine names with no argument list');
 
 done_testing();
 

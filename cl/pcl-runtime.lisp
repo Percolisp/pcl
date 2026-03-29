@@ -2843,9 +2843,24 @@
 ;;; Data Structures - Arrays
 ;;; ============================================================
 
+(defun p-aref-unbox-elem (elem)
+  "Unbox an array element, preserving the box for reference types.
+   Scalar types (number, string, undef) are unboxed for efficiency.
+   Reference types (array/hash/code ref, scalar ref) keep their box so
+   that numeric comparison (== on refs) uses object-address, not array length."
+  (if (null elem)
+      *p-undef*
+      (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
+        (if (or (and (vectorp v) (not (stringp v)))  ; arrayref
+                (hash-table-p v)                      ; hashref
+                (functionp v)                          ; coderef
+                (p-box-p v))                           ; scalar ref (box-in-box)
+            elem   ; reference: return the box so to-number → object-address
+            v))))  ; scalar: return unboxed value
+
 (defun p-aref (arr idx)
   "Perl array access (supports negative indices, works on vectors and lists).
-   Returns the VALUE (unboxed if element is a box)."
+   Returns the VALUE (unboxed for scalars, box preserved for references)."
   (let* ((a (unbox arr)))  ; Unbox if needed
     ;; If array is undef (from failed hash lookup etc), return undef
     (when (eq a *p-undef*)
@@ -2857,12 +2872,9 @@
            (actual-idx (if (< i 0) (+ len i) i)))
       (cond
         ((and (vectorp a) (>= actual-idx 0) (< actual-idx len))
-         (let ((elem (aref a actual-idx)))
-           ;; nil means deleted element — return undef
-           (if (null elem) *p-undef* (unbox elem))))
+         (p-aref-unbox-elem (aref a actual-idx)))
         ((and (listp a) (>= actual-idx 0) (< actual-idx len))
-         (let ((elem (nth actual-idx a)))
-           (unbox elem)))
+         (p-aref-unbox-elem (nth actual-idx a)))
         (t *p-undef*)))))
 
 (defun (setf p-aref) (value arr idx)

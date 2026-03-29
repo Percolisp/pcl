@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 12;
 
 sub run_cl {
     my ($code) = @_;
@@ -94,4 +94,16 @@ print !exists($a[2]) && !exists($a[3]) ? "ok" : "fail", "\n";',
 
 test_cl('reverse of empty array',
     'my @a; @a = reverse @a; print scalar(@a), "\n";',
+    "0\n");
+
+# ── Postfix for with split list: reverse/length context fix ──────────────────
+# Bug: split in postfix-for list got SCALAR_CTX (wrapped in `length`), and
+# reverse used as arg to length inherited list context from push → gave ARRAY(0x...)
+
+test_cl('postfix for over split: length reverse uses $_ correctly',
+    'my @x; push @x, length reverse for split "-", "abc--def"; print join(",",@x), "\n";',
+    "3,0,3\n");
+
+test_cl('postfix for over split: empty string gives length 0',
+    'my @x; push @x, length reverse for split "-", "\x{100}--0"; print $x[1], "\n";',
     "0\n");

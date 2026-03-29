@@ -144,9 +144,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **52 test files, 2481 tests**
+- **72 test files, 2819 tests**
 - **All passing**
-- **Runtime: ~2 min with `prove -j8`** (each test spawns a new SBCL process)
+- **Runtime: ~3 min with `prove -j8`** (each test spawns a new SBCL process)
 
 ## Common Pitfalls
 
