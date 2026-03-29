@@ -56,8 +56,8 @@ Applied `docs/bug-finding-strategy.md` near-miss strategy. Three files fixed.
 
 ### Test counts
 - PCL suite: **72 files, 2819 tests, all passing**
-- Sweep: **~6868 passing, ~950 failing** (was 6857/961: +11 passing, +3 fully-passing files)
-- Fully passing: **51 files** (was 48: +3 new: warn.t, reverse.t, exists_sub.t)
+- Sweep: **6861 passing, 956 failing** (was 6857/961: +4 passing, +3 fully-passing files)
+- Fully passing: **51 files** (was 48: +3 new: warn.t, exists_sub.t, reverse.t)
 
 ---
 

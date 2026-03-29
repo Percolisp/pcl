@@ -87,7 +87,7 @@ I am Rex and I bark
 
 ## Status
 
-**Beta.** The internal test suite runs 2817 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~6868 / ~7780 tests (~88%)**, with 51 files passing completely.
+**Beta.** The internal test suite runs 2819 tests comparing PCL output directly against Perl's output. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **6861 / 7817 tests (~88%)**, with 51 files passing completely.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 
