@@ -1063,10 +1063,11 @@ sub gen_funcall {
       }
     }
     # Hash slice: delete @foo{4,5} -> (p-delete-hash-slice %hash key1 key2 ...)
+    # Also handles empty slice: delete @foo{()} -> (p-delete-hash-slice %hash)
     elsif ($self->expr_o->is_internal_node_type($arg_node) &&
            $arg_node->{type} eq 'slice_h_acc') {
       my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
+      if (@$arg_kids >= 1) {
         my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $hash = $self->gen_node($arg_kids->[0]);
         # Convert @ to % for hash access (@ is context sigil, % is container sigil)
@@ -1077,8 +1078,8 @@ sub gen_funcall {
         for my $i (1 .. $#$arg_kids) {
           push @keys, $self->gen_node($arg_kids->[$i]);
         }
-        my $keys_str = join(' ', @keys);
-        return "(p-delete-hash-slice $hash $keys_str)";
+        my $keys_str = @keys ? ' ' . join(' ', @keys) : '';
+        return "(p-delete-hash-slice $hash$keys_str)";
       }
     }
     # Array slice: delete @arr[1,2,3] -> (p-delete-array-slice @arr idx1 idx2 ...)
@@ -1107,6 +1108,20 @@ sub gen_funcall {
         }
         my $keys_str = join(' ', @keys);
         return "(p-delete-kv-hash-slice $hash $keys_str)";
+      }
+    }
+    # KV array slice: delete %arr[6,7] -> (p-delete-kv-array-slice @arr idx1 idx2 ...)
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'kv_slice_a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 1) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my @indices;
+        for my $i (1 .. $#$arg_kids) {
+          push @indices, $self->gen_node($arg_kids->[$i]);
+        }
+        my $idx_str = @indices ? ' ' . join(' ', @indices) : '';
+        return "(p-delete-kv-array-slice $arr$idx_str)";
       }
     }
     # Hash ref access: delete $ref->{key} -> (p-delete (unbox ref) key)
@@ -2104,6 +2119,8 @@ sub gen_inline_lambda {
 
 # Generate substitution s///
 # Output: (p-subst "pattern" "replacement" :g :i ...)
+#         (p-subst pat-expr "replacement" :g :i ...)  when pattern has $var
+#         (p-subst "pattern" (lambda () <cl-expr>) :g :i ...)  when replacement has $var
 #         (p-subst "pattern" (lambda () <cl-expr>) :g :e ...)  when /e
 sub gen_substitution {
   my $self = shift;
@@ -2113,26 +2130,104 @@ sub gen_substitution {
   my $subst = $node->get_substitute_string;
   my $mods  = $node->get_modifiers;
 
-  # Escape backslashes and quotes in pattern for CL string literal
-  $match =~ s/\\/\\\\/g;
-  $match =~ s/"/\\"/g;
-
   my @mod_strs;
   for my $mod (sort keys %$mods) {
     push @mod_strs, ":$mod";
   }
   my $mods_str = @mod_strs ? ' ' . join(' ', @mod_strs) : '';
 
+  # Build pattern CL expression (may be a string literal or a runtime string expression)
+  my $match_cl;
+  if (_has_regex_interpolation($match)) {
+    $match_cl = _gen_interp_regex_pattern($match);  # CL expr evaluating to pattern string
+  } else {
+    $match =~ s/\\/\\\\/g;
+    $match =~ s/"/\\"/g;
+    $match_cl = qq{"$match"};
+  }
+
   # s///e: replacement is Perl code — parse it and wrap in a lambda
   if ($mods->{e}) {
     my $cl_expr = $self->_compile_subst_e_expr($subst);
-    return qq{(p-subst "$match" (lambda () $cl_expr)$mods_str)};
+    return qq{(p-subst $match_cl (lambda () $cl_expr)$mods_str)};
   }
 
-  # Normal case: escape replacement for CL string literal
+  # Replacement with variable interpolation: wrap in a lambda so $varname/$1..$9 evaluate at match time
+  if (_has_regex_interpolation($subst)) {
+    my $interp_expr = _gen_interp_replacement($subst);
+    return qq{(p-subst $match_cl (lambda () $interp_expr)$mods_str)};
+  }
+
+  # Normal case: escape replacement for CL string literal (perl-to-ppcre-replacement handles $1..$9)
   $subst =~ s/\\/\\\\/g;
   $subst =~ s/"/\\"/g;
-  return qq{(p-subst "$match" "$subst"$mods_str)};
+  return qq{(p-subst $match_cl "$subst"$mods_str)};
+}
+
+# Build a CL expression that evaluates to the interpolated replacement string.
+# Handles $varname, $1-$9 (Perl backreferences, available as CL dynamic vars in lambda context).
+sub _gen_interp_replacement {
+  my ($str) = @_;
+  my @parts;
+  my $literal = '';
+  my $i = 0;
+  while ($i < length($str)) {
+    my $c = substr($str, $i, 1);
+    if ($c eq '\\') {
+      my $next = $i+1 < length($str) ? substr($str, $i+1, 1) : '';
+      if ($next =~ /[1-9]/) {
+        # \1..\9 in replacement = backref, map to CL var $1..$9
+        if (length($literal)) {
+          (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+          push @parts, qq{"$esc"};
+          $literal = '';
+        }
+        push @parts, "\$$next";
+        $i += 2;
+      } else {
+        $literal .= substr($str, $i, 2);
+        $i += 2;
+      }
+    } elsif ($c eq '$' && $i+1 < length($str) && substr($str, $i+1, 1) =~ /[1-9]/) {
+      # $1..$9 backreference — available as CL dynamic variable inside the lambda
+      my $n = substr($str, $i+1, 1);
+      if (length($literal)) {
+        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+        push @parts, qq{"$esc"};
+        $literal = '';
+      }
+      push @parts, "\$$n";
+      $i += 2;
+    } elsif ($c eq '$' && substr($str, $i) =~ /^\$\{([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\}/) {
+      my $varname = $1;
+      if (length($literal)) {
+        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+        push @parts, qq{"$esc"};
+        $literal = '';
+      }
+      push @parts, "\$$varname";
+      $i += 3 + length($varname);
+    } elsif ($c eq '$' && substr($str, $i) =~ /^\$([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)/) {
+      my $varname = $1;
+      if (length($literal)) {
+        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+        push @parts, qq{"$esc"};
+        $literal = '';
+      }
+      push @parts, "\$$varname";
+      $i += 1 + length($varname);
+    } else {
+      $literal .= $c;
+      $i++;
+    }
+  }
+  if (length($literal)) {
+    (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+    push @parts, qq{"$esc"};
+  }
+  return @parts == 0 ? '""'
+       : @parts == 1 ? $parts[0]
+       : "(p-string-concat " . join(" ", @parts) . ")";
 }
 
 # Parse a s///e replacement string as Perl and return CL code

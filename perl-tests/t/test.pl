@@ -7,6 +7,9 @@ package main;  # Explicitly in main package (Perl's default)
 # Used by many tests for tracking call depth (e.g., local $::Level = $::Level + 1)
 our $Level = 1;
 
+# Platform character set flag (used by char/unicode tests)
+our $IS_ASCII = (ord('A') == 65);
+
 # plan - provided by pcl-test.lisp, do NOT define here or it will override
 
 sub set_up_inc {

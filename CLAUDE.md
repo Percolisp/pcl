@@ -20,7 +20,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 4. **No Easy Write-Offs**: Don't dismiss problems as "documented limitations" without discussion. Every incompatibility is serious because it blocks CPAN code. If something doesn't work, either fix it or discuss the tradeoffs with the user before marking it as a limitation.
 
-5. **Never Simplify Tests**: When a test fails, fix the code, not the test. Tests from Perl's own test suite are authoritative - they define correct behavior. Commenting out failing tests or replacing them with `ok(1, 'SKIP: ...')` hides bugs instead of fixing them. If a feature is genuinely out of scope, discuss with the user first.
+5. **Never Simplify Tests**: When a test fails, fix the code, not the test. This applies to both `perl-tests/` (authoritative Perl test suite) and `Pl/t/` (PCL regression tests). Do NOT weaken a `Pl/t/` test to a simpler form just because the original form fails due to an unrelated bug — keep the test semantically equivalent to what it's supposed to verify. Commenting out failing tests or replacing them with `ok(1, 'SKIP: ...')` hides bugs. If a feature is genuinely out of scope, discuss with the user first.
 
 6. **Add Regression Tests for Bug Fixes**: When fixing a bug, add a test case to an existing test file that covers the fixed behavior. This prevents regressions. Prefer adding to existing files over creating new ones. **Do NOT add to `transpile-test-01.t`** (118 tests) or other large `transpile-test-NN.t` files — each file spawns a new SBCL process, so file count matters less than test count per file. Add to the smallest `transpile-test-NN.t` file, or create a new one if needed.
 

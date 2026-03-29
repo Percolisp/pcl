@@ -166,4 +166,29 @@ for my $f (@flags) { push @r, has_minus($f) }
 print join(",", @r), "\n";
 ', "1,0,1\n");
 
+# ── Bug fix: s/// with variable interpolation in pattern/replacement ──────────
+# s/($dx)/$dx$1/ was generating (p-subst "($dx)" "$dx$1") with the variable
+# names as literal strings instead of being evaluated at runtime.
+
+test_transpile("s/// with variable in pattern", '
+my $dx = "X";
+my $str = "X";
+$str =~ s/$dx/Y/;
+print "$str\n";
+', "Y\n");
+
+test_transpile("s/// with variable in pattern and replacement (back)", '
+my $dx = "\x{10f2}";
+my $str = "\x{10f2}";
+$str =~ s/($dx)/$dx$1/;
+print length($str), "\n";
+', "2\n");
+
+test_transpile("s/// with variable in pattern and replacement (front)", '
+my $dx = "\x{10f2}";
+my $str = "\x{10f2}";
+$str =~ s/($dx)/$1$dx/;
+print length($str), "\n";
+', "2\n");
+
 done_testing;

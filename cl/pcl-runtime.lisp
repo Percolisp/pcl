@@ -60,7 +60,7 @@
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
-   #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice
+   #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
    #:p-if #:p-unless #:p-while #:p-until #:p-for #:p-foreach
    #:p-return #:p-last #:p-last-dynamic #:p-next #:p-redo
@@ -1840,6 +1840,8 @@
          (proclaim '(special ,place))
          (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
        (setf (fill-pointer ,place) 0)
+       ;; Perl: assigning to an array resets the each() iterator
+       (remhash ,place *array-iterators*)
        (labels ((add-items (src)
                   (cond
                     ((stringp src)
@@ -1851,16 +1853,26 @@
                               src))
                     ((vectorp src)
                      (loop for item across src
-                           do (if (and (vectorp item) (not (stringp item)))
-                                  (add-items item)
-                                  (let ((v (unbox item)))
-                                    (vector-push-extend (make-p-box v) ,place)))))
+                           do (cond
+                                ((and (vectorp item) (not (stringp item)))
+                                 (add-items item))
+                                ;; Preserve nil as deleted-element marker (not undef-but-exists)
+                                ((null item)
+                                 (vector-push-extend nil ,place))
+                                (t
+                                 (let ((v (unbox item)))
+                                   (vector-push-extend (make-p-box v) ,place))))))
                     ((listp src)
                      (loop for item in src
-                           do (if (and (vectorp item) (not (stringp item)))
-                                  (add-items item)
-                                  (let ((v (unbox item)))
-                                    (vector-push-extend (make-p-box v) ,place)))))
+                           do (cond
+                                ((and (vectorp item) (not (stringp item)))
+                                 (add-items item))
+                                ;; Preserve nil as deleted-element marker (not undef-but-exists)
+                                ((null item)
+                                 (vector-push-extend nil ,place))
+                                (t
+                                 (let ((v (unbox item)))
+                                   (vector-push-extend (make-p-box v) ,place))))))
                     ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
                     (t
                      (when src
@@ -3665,6 +3677,24 @@
         (vector-push-extend old-val result)))
     result))
 
+(defun p-delete-kv-array-slice (arr &rest indices)
+  "Perl delete for KV array slices: delete %arr[i1, i2, ...]
+   Deletes elements at given indices and returns key-value pairs (index, value, ...)."
+  (let* ((a (unbox arr))
+         (result (make-array 0 :adjustable t :fill-pointer 0)))
+    (dolist (idx indices)
+      (let* ((i (truncate (to-number idx)))
+             (len (if (vectorp a) (length a) 0))
+             (old-val (if (and (>= i 0) (< i len))
+                          (let ((elem (aref a i)))
+                            (if (p-box-p elem) (p-box-value elem) *p-undef*))
+                          *p-undef*)))
+        (vector-push-extend i result)
+        (vector-push-extend old-val result)
+        (when (and (vectorp a) (>= i 0) (< i len))
+          (setf (aref a i) nil))))
+    result))
+
 (defun p-stash (pkg-name)
   "Return package stash (symbol table) as a hash.
    This is a simplified stub - full implementation would mirror Perl's stash."
@@ -5460,9 +5490,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                     (string< (to-string a) (to-string b)))))))))
 
 (defun p-reverse (&rest items)
-  "Perl reverse - accepts single @array or multiple elements."
-  (let ((arr (apply #'%p-collect-list items)))
-    (reverse arr)))
+  "Perl reverse: in list context reverses element order; in scalar context
+   concatenates all items into a string and reverses the characters."
+  (if *wantarray*
+      ;; List context: reverse element order, preserving nil (deleted) slots
+      (let* ((arr (apply #'%p-collect-list items))
+             (result (copy-seq arr)))
+        (nreverse result))
+      ;; Scalar context: join all items into a string and reverse characters
+      (let ((str (with-output-to-string (s)
+                   (dolist (item items)
+                     (let ((val (unbox item)))
+                       (if (and (vectorp val) (not (stringp val)))
+                           (loop for x across val do (write-string (to-string x) s))
+                           (write-string (to-string item) s)))))))
+        (nreverse (copy-seq str)))))
 
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
@@ -6736,7 +6778,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (pattern (p-subst-op-pattern op))
          (raw-replacement (p-subst-op-replacement op))
          (modifiers (p-subst-op-modifiers op))
-         (eval-p (member :e modifiers))
+         (eval-p (or (member :e modifiers) (functionp raw-replacement)))
          (replacement (unless eval-p
                         (perl-to-ppcre-replacement (if (stringp raw-replacement)
                                                        raw-replacement ""))))

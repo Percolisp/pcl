@@ -672,8 +672,15 @@ sub _process_element {
 
   # Handle different statement types
   if ($ref eq 'PPI::Statement') {
-    # Simple expression statement
-    $self->_process_expression_statement($element);
+    # CORE::state $x = ... is a variable declaration that PPI sees as a plain statement
+    my ($first) = grep { ref($_) ne 'PPI::Token::Whitespace' } $element->children;
+    if (defined $first && ref($first) eq 'PPI::Token::Word'
+        && $first->content =~ /^CORE::(my|our|state|local)$/) {
+      $first->{content} = $1;  # strip CORE:: prefix so _process_variable_statement recognizes it
+      $self->_process_variable_statement($element);
+    } else {
+      $self->_process_expression_statement($element);
+    }
   }
   elsif ($ref eq 'PPI::Statement::Expression') {
     $self->_process_expression_statement($element);
@@ -3006,6 +3013,14 @@ sub _process_while_statement {
     }
   }
 
+  # Perl special case: while ($k = each COLL) is treated as while (defined($k = each COLL)).
+  # This prevents the loop from exiting when each returns index 0 (which is falsy).
+  # Detect pattern: (p-scalar-= $var (p-each ...)) or (p-my-= $var (p-each ...))
+  if ($keyword ne 'until' && $cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\(p-each\b/) {
+    my $var = $1;
+    $cond_cl = "(progn $cond_cl (p-defined $var))";
+  }
+
   # Handle 'until' by negating
   if ($keyword eq 'until') {
     $cond_cl = "(p-not $cond_cl)";
@@ -3126,7 +3141,15 @@ sub _process_c_style_for {
       ref($_) ne 'PPI::Token::Whitespace' &&
       !(ref($_) eq 'PPI::Token::Structure' && $_->content eq ';')
     } $statements[1]->children;
-    $cond_cl = $self->_parse_expression(\@parts, $stmt) // 't' if @parts;
+    if (@parts) {
+      $cond_cl = $self->_parse_expression(\@parts, $stmt) // 't';
+      # Perl special case: for(; $k = each COLL ;) is treated as defined()
+      # Prevents loop exit when each returns index 0 (falsy).
+      if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\(p-each\b/) {
+        my $var = $1;
+        $cond_cl = "(progn $cond_cl (p-defined $var))";
+      }
+    }
   }
 
   # Process increment
