@@ -191,4 +191,16 @@ $str =~ s/($dx)/$1$dx/;
 print length($str), "\n";
 ', "2\n");
 
+test_transpile("LHS list repeat: (\$x)xN assigns N times (last wins)", '
+my $a; my $b;
+(($a)x3, $b) = 1..10;
+print "$a, $b\n";
+', "3, 4\n");
+
+test_transpile("LHS list repeat: (undef)x\$dynamic skips dynamic slots", '
+my $a; my $b;
+($a, (undef)x${\6}, $b) = "a".."z";
+print "$a$b\n";
+', "ah\n");
+
 done_testing;

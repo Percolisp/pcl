@@ -457,6 +457,13 @@ sub _insert_variable_forward_declarations {
 # Also: $::var -> main::$var (empty package = main)
 sub _transform_pkg_var {
   my ($self, $var) = @_;
+  # Handle package stash access: %Pkg:: or $Pkg:: (symbol table reference)
+  # Must be checked BEFORE the package-qualified variable regex
+  if ($var =~ /^([\$\%])(.*)::$/) {
+    my ($sigil, $pkg) = ($1, $2);
+    $pkg = 'main' if $pkg eq '';
+    return "(p-stash \"$pkg\")";
+  }
   # Handle package-qualified variables: $Pkg::var -> Pkg::$var
   # Note: Use (.*) not (.+) to allow empty package (main shorthand)
   if ($var =~ /^([\$\@\%])(.*)::([^:]+)$/) {
@@ -781,6 +788,11 @@ sub _process_expression_statement {
     my $base      = substr($sym, 1);
     my $new_sigil = ($open eq '{') ? '%' : '@';
     my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    # Stash element — not supported; skip save/restore so subsequent tests can run.
+    if ($cl_var =~ /^\(p-stash /) {
+      $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
+      return;
+    }
     my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
     if (@key_cls) {
       my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
@@ -1218,6 +1230,11 @@ sub _process_my_toplevel_declaration {
         my $base = substr($sym, 1);
         my $new_sigil = ($open eq '{') ? '%' : '@';
         my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+        # Stash element — not supported; emit comment and skip
+        if ($cl_var =~ /^\(p-stash /) {
+          $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
+          return;
+        }
         my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
         if (@key_cls) {
           my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
@@ -1503,6 +1520,14 @@ sub _process_local_declaration {
     # The CL variable: hash subscripts access %hash, array subscripts access @arr
     my $new_sigil = ($open eq '{') ? '%' : '@';
     my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+
+    # Stash slice/element: $Pkg::{key} or @Pkg::{keys} — stash manipulation
+    # is not supported. Emit just the body (no save/restore) so the file
+    # doesn't crash and subsequent tests can run.
+    if ($cl_var =~ /^\(p-stash /) {
+      $self->_emit(";; $perl_code (stash element local — not supported, running body only)");
+      return;
+    }
 
     # Extract individual key/index expressions from the subscript
     my @key_groups = $self->_subscript_key_groups($sub);

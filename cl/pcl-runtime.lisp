@@ -1947,77 +1947,145 @@
 (defmacro p-list-= (place value)
   "List destructuring assignment: (p-list-= (vector $a $b) expr).
    Each LHS element gets assigned from corresponding RHS position.
-   Handles undef skip markers, arrays, hashes, and nested lvalues."
+   Handles undef skip markers, arrays, hashes, nested lvalues, and
+   list repetition on LHS: (p-list-x (vector $a) N) repeats the
+   assignment N times (last wins); (p-list-x (vector undef) N) skips N
+   slots (N may be a runtime expression)."
   (let ((vars (cdr place))
         (src (gensym "SRC"))
         (src-vec (gensym "SRC-VEC")))
     (let ((forms nil)
-          (static-idx 0)
+          (static-idx 0)   ; statically-known offset accumulated so far
+          (dyn-vars nil)   ; gensyms for dynamic skip counts (pushed most-recent first)
+          (extra-lets nil) ; let* bindings for dynamic counts: ((gensym count-expr) ...)
           (greedy-done nil))
-      (dolist (var vars)
-        (cond
-          ;; Already consumed by greedy (array/hash) — subsequent vars get undef
-          (greedy-done
-           (push `(progn
-                    (unless (boundp ',var)
-                      (proclaim '(special ,var))
-                      (setf (symbol-value ',var) (make-p-box nil)))
-                    (box-set ,var *p-undef*))
-                 forms))
-          ;; Skip marker: (p-list-x ... N)
-          ((and (listp var)
-                (symbolp (car var))
-                (string= (symbol-name (car var)) "P-LIST-X")
-                (numberp (caddr var)))
-           (incf static-idx (caddr var)))
-          ;; Skip single undef placeholder: (p-undef), *p-undef*, or
-          ;; (let ((*wantarray* t)) (p-undef)) wrapper from wantarray context
-          ((or (eq var '*p-undef*)
-               (and (listp var)
-                    (symbolp (car var))
-                    (string= (symbol-name (car var)) "P-UNDEF"))
-               (and (listp var)
-                    (eq (car var) 'let)
-                    (= (length var) 3)
-                    (listp (third var))
-                    (symbolp (car (third var)))
-                    (string= (symbol-name (car (third var))) "P-UNDEF")))
-           (incf static-idx 1))
-          ;; Array variable (@arr) - absorbs remaining elements
-          ((and (symbolp var)
-                (char= (char (symbol-name var) 0) #\@))
-           (let ((idx static-idx))
-             (push `(p-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
-           (setf greedy-done t))
-          ;; Hash variable (%hash) - absorbs remaining elements in pairs
-          ((and (symbolp var)
-                (char= (char (symbol-name var) 0) #\%))
-           (let ((idx static-idx))
-             (push `(p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
-           (setf greedy-done t))
-          ;; Scalar variable - auto-declare and assign
-          ((symbolp var)
-           (push `(progn
-                    (unless (boundp ',var)
-                      (proclaim '(special ,var))
-                      (setf (symbol-value ',var) (make-p-box nil)))
-                    (box-set ,var (if (< ,static-idx (length ,src-vec))
-                                      (aref ,src-vec ,static-idx)
-                                      *p-undef*)))
-                 forms)
-           (incf static-idx 1))
-          ;; Other lvalue (hash/array access, etc.)
-          (t
-           (push `(p-setf ,var (if (< ,static-idx (length ,src-vec))
-                                     (aref ,src-vec ,static-idx)
-                                     *p-undef*))
-                 forms)
-           (incf static-idx 1))))
-      `(let* ((,src ,value)
-              (,src-vec (%p-flatten-list ,src)))
-         ,@(nreverse forms)
-         ;; Return RHS count (scalar context: () = LIST gives count of LIST)
-         (make-p-box (length ,src-vec))))))
+      (flet
+        ((is-undef-form (v)
+           ;; True when v is any form that produces Perl undef used as a skip placeholder
+           (or (eq v '*p-undef*)
+               (and (listp v)
+                    (symbolp (car v))
+                    (string= (symbol-name (car v)) "P-UNDEF"))
+               ;; (let ((*wantarray* t)) (p-undef)) wrapper emitted by wantarray ctx
+               (and (listp v)
+                    (eq (car v) 'let)
+                    (= (length v) 3)
+                    (listp (third v))
+                    (symbolp (car (third v)))
+                    (string= (symbol-name (car (third v))) "P-UNDEF"))))
+         (cur-idx ()
+           ;; The current index as a CL literal or form.
+           ;; When dynamic skips exist: (+ static-idx dyn1 dyn2 ...)
+           (if (null dyn-vars)
+               static-idx
+               `(+ ,static-idx ,@(reverse dyn-vars))))
+         (assign-scalar (lvar idx-expr)
+           `(progn
+              (unless (boundp ',lvar)
+                (proclaim '(special ,lvar))
+                (setf (symbol-value ',lvar) (make-p-box nil)))
+              (box-set ,lvar (if (< ,idx-expr (length ,src-vec))
+                                 (aref ,src-vec ,idx-expr)
+                                 *p-undef*)))))
+
+        (dolist (var vars)
+          (cond
+            ;; Already consumed by greedy (array/hash) — subsequent vars get undef
+            (greedy-done
+             (push `(progn
+                      (unless (boundp ',var)
+                        (proclaim '(special ,var))
+                        (setf (symbol-value ',var) (make-p-box nil)))
+                      (box-set ,var *p-undef*))
+                   forms))
+
+            ;; p-list-x on LHS: (p-list-x (vector ...) count)
+            ((and (listp var)
+                  (symbolp (car var))
+                  (string= (symbol-name (car var)) "P-LIST-X"))
+             (let* ((inner-vec (cadr var))
+                    (count-form (caddr var))
+                    (inner-vars (cdr inner-vec))
+                    (all-undef (every #'is-undef-form inner-vars))
+                    (inner-len (length inner-vars)))
+               (cond
+                 ;; All undef, static count: pure skip (original behaviour)
+                 ((and all-undef (numberp count-form))
+                  (incf static-idx (* count-form inner-len)))
+
+                 ;; All undef, dynamic count: bind gensym for runtime skip amount
+                 (all-undef
+                  (let* ((dyn-var (gensym "DYN-SKIP"))
+                         (count-expr (if (= inner-len 1)
+                                         `(max 0 (truncate (to-number ,count-form)))
+                                         `(* ,inner-len (max 0 (truncate (to-number ,count-form)))))))
+                    (push `(,dyn-var ,count-expr) extra-lets)
+                    (push dyn-var dyn-vars)))
+
+                 ;; Has real vars, static count: N-fold assignment (last pass wins)
+                 ((numberp count-form)
+                  (dotimes (i count-form)
+                    (dolist (inner-var inner-vars)
+                      (if (is-undef-form inner-var)
+                          (incf static-idx 1)
+                          (let ((idx (cur-idx)))
+                            (push (if (symbolp inner-var)
+                                      (assign-scalar inner-var idx)
+                                      `(p-setf ,inner-var
+                                               (if (< ,idx (length ,src-vec))
+                                                   (aref ,src-vec ,idx)
+                                                   *p-undef*)))
+                                  forms)
+                            (incf static-idx 1))))))
+
+                 ;; Has real vars, dynamic count: advance offset by count*inner-len
+                 ;; (cannot do per-element assignments without knowing count at macro time)
+                 (t
+                  (let* ((dyn-var (gensym "DYN-SKIP"))
+                         (count-expr `(* ,inner-len (max 0 (truncate (to-number ,count-form))))))
+                    (push `(,dyn-var ,count-expr) extra-lets)
+                    (push dyn-var dyn-vars))))))
+
+            ;; Skip single undef placeholder: (p-undef), *p-undef*, or
+            ;; (let ((*wantarray* t)) (p-undef)) wrapper from wantarray context
+            ((is-undef-form var)
+             (incf static-idx 1))
+
+            ;; Array variable (@arr) - absorbs remaining elements
+            ((and (symbolp var)
+                  (char= (char (symbol-name var) 0) #\@))
+             (let ((idx (cur-idx)))
+               (push `(p-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
+             (setf greedy-done t))
+
+            ;; Hash variable (%hash) - absorbs remaining elements in pairs
+            ((and (symbolp var)
+                  (char= (char (symbol-name var) 0) #\%))
+             (let ((idx (cur-idx)))
+               (push `(p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
+             (setf greedy-done t))
+
+            ;; Scalar variable - auto-declare and assign
+            ((symbolp var)
+             (let ((idx (cur-idx)))
+               (push (assign-scalar var idx) forms)
+               (incf static-idx 1)))
+
+            ;; Other lvalue (hash/array access, etc.)
+            (t
+             (let ((idx (cur-idx)))
+               (push `(p-setf ,var (if (< ,idx (length ,src-vec))
+                                        (aref ,src-vec ,idx)
+                                        *p-undef*))
+                     forms)
+               (incf static-idx 1)))))
+
+        `(let* ((,src ,value)
+                (,src-vec (%p-flatten-list ,src))
+                ,@(reverse extra-lets))
+           ,@(nreverse forms)
+           ;; Return RHS count (scalar context: () = LIST gives count of LIST)
+           (make-p-box (length ,src-vec)))))))
 
 ;; p-setf dispatches to the appropriate assignment form based on place type.
 ;; For element access (p-aref, p-gethash, etc.), uses CL's setf mechanism.
@@ -3608,18 +3676,25 @@
 
 (defun p-exists (hash key)
   "Perl exists function"
-  (multiple-value-bind (val found) (gethash (to-string key) hash)
-    (declare (ignore val))
-    found))
+  (let ((h (unbox hash))
+        (k (to-string key)))
+    (cond
+      ((eq h '%ENV-MARKER%) (not (null (sb-posix:getenv k))))
+      (t (nth-value 1 (gethash k h))))))
 
 (defun p-delete (hash key)
   "Perl delete function for hashes - returns unboxed value"
-  (let ((k (to-string key)))
-    (multiple-value-bind (v found) (gethash k hash)
-      (remhash k hash)
-      (if found
-          (unbox v)
-          *p-undef*))))
+  (let ((h (unbox hash))
+        (k (to-string key)))
+    (cond
+      ((eq h '%ENV-MARKER%)
+       (let ((old (sb-posix:getenv k)))
+         (sb-posix:unsetenv k)
+         (or old *p-undef*)))
+      (t
+       (multiple-value-bind (v found) (gethash k h)
+         (remhash k h)
+         (if found (unbox v) *p-undef*))))))
 
 (defun p-delete-array (arr idx)
   "Perl delete function for arrays.
@@ -4037,11 +4112,40 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; String exception
       (error (apply #'p-. args))))
 
-;;; p-do - Perl's do BLOCK
-;;; The block is already evaluated by CL, so this is identity.
-(defun p-do (result)
-  "Perl do BLOCK - returns the value of the block."
-  result)
+;;; p-do - Perl's do FILE (block form is inlined by codegen as (progn ...))
+;;; Called only for do EXPR where EXPR is not a bare block.
+(defun p-do (filename-val)
+  "Perl do FILE - find file in @INC, transpile and eval it.
+   Returns undef on I/O error (file not found), clears $@.
+   Sets $@ to error message on compilation/execution error."
+  (let* ((filename (to-string (unbox filename-val)))
+         ;; Search: absolute/relative path → use directly; else search @INC
+         (abs-path
+          (if (or (and (plusp (length filename))
+                       (char= (char filename 0) #\/))
+                  (and (>= (length filename) 2)
+                       (char= (char filename 0) #\.)
+                       (char= (char filename 1) #\/)))
+              (when (probe-file filename) (truename filename))
+              (loop for dir-box across @INC
+                    for dir = (to-string (unbox dir-box))
+                    for p = (probe-file
+                               (concatenate 'string dir "/" filename))
+                    when p return (truename p)))))
+    (if (null abs-path)
+        ;; File not found: return undef, clear $@
+        (progn
+          (box-set $@ (make-p-box ""))
+          *p-undef*)
+        ;; File found: read, transpile and eval
+        (handler-case
+          (let ((content (with-open-file (f abs-path :direction :input)
+                           (let ((s (make-string (file-length f))))
+                             (read-sequence s f) s))))
+            (p-eval (make-p-box content)))
+          (error (e)
+            (box-set $@ (make-p-box (format nil "~A" e)))
+            *p-undef*)))))
 
 ;;; p-eval: Perl eval(STRING) — full string eval via runtime transpilation.
 ;;;
@@ -5943,26 +6047,50 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              (setf (symbol-value hash-sym) ,saved-hash)
              (makunbound hash-sym))))))
 
+;;; Helper functions for p-local-hash-elem macros.
+;;; Delegating to functions keeps macro expansions compact, preventing heap
+;;; exhaustion on large files with many local $hash{key} forms.
+
+(defun %p-lhe-save (hv kv)
+  "Save hash[key] for local. Returns saved state vector."
+  (if (eq hv '%ENV-MARKER%)
+      (let ((old (sb-posix:getenv kv)))
+        (sb-posix:unsetenv kv)
+        (vector :env old))
+      (multiple-value-bind (old-bx old-ex) (gethash kv hv)
+        ;; Install fresh undef box so body assignments don't clobber saved box.
+        (setf (gethash kv hv) (make-p-box nil))
+        (vector :hash old-ex old-bx))))
+
+(defun %p-lhe-restore (hv kv saved)
+  "Restore hash[key] after local exits."
+  (if (eq (aref saved 0) :env)
+      (let ((old (aref saved 1)))
+        (if old (sb-posix:setenv kv old 1) (sb-posix:unsetenv kv)))
+      (let ((old-ex (aref saved 1)) (old-bx (aref saved 2)))
+        (if old-ex (setf (gethash kv hv) old-bx) (remhash kv hv)))))
+
+(defun %p-lhe-init (hv kv init-val)
+  "Save hash[key] and install init-val. Returns saved state vector."
+  (if (eq hv '%ENV-MARKER%)
+      (let* ((old (sb-posix:getenv kv))
+             (s (if (or (null init-val) (eq init-val *p-undef*))
+                    nil (to-string init-val))))
+        (if s (sb-posix:setenv kv s 1) (sb-posix:unsetenv kv))
+        (vector :env old))
+      (multiple-value-bind (old-bx old-ex) (gethash kv hv)
+        (setf (gethash kv hv) (make-p-box init-val))
+        (vector :hash old-ex old-bx))))
+
 (defmacro p-local-hash-elem (hash-var key-form &body body)
   "Save/restore one hash entry. Like Perl's local $hash{key}.
-   Installs a fresh undef box at the key so the body can set it freely.
-   On exit (normal or non-local), restores the original box, or removes
-   the key entirely if it did not exist before the local."
-  (let ((kv     (gensym "KEY"))
-        (old-ex (gensym "OLD-EXISTS"))
-        (old-bx (gensym "OLD-BOX")))
-    `(let* ((,kv     (to-string ,key-form))
-            (,old-ex (nth-value 1 (gethash ,kv ,hash-var)))
-            (,old-bx (gethash ,kv ,hash-var)))
-       ;; Install a fresh undef box so assignments inside the scope
-       ;; do not clobber the saved box (which (setf p-gethash) reuses in-place).
-       (setf (gethash ,kv ,hash-var) (make-p-box nil))
-       (unwind-protect
-           (progn ,@body)
-         ;; Restore on any exit path
-         (if ,old-ex
-             (setf (gethash ,kv ,hash-var) ,old-bx)
-             (remhash ,kv ,hash-var))))))
+   Handles %ENV (environment variables) specially."
+  (let ((hv (gensym "H")) (kv (gensym "K")) (sv (gensym "S")))
+    `(let* ((,hv (unbox ,hash-var))
+            (,kv (to-string ,key-form))
+            (,sv (%p-lhe-save ,hv ,kv)))
+       (unwind-protect (progn ,@body)
+         (%p-lhe-restore ,hv ,kv ,sv)))))
 
 (defmacro p-local-array-elem (arr-var idx-form &body body)
   "Save/restore one array element. Like Perl's local $arr[N].
@@ -6038,21 +6166,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defmacro p-local-hash-elem-init (hash-var key-form init-form &body body)
   "Like p-local-hash-elem but evaluates init-form BEFORE installing fresh box.
+   Handles %ENV (environment variables) specially.
    Used for local($h{key}) = EXPR where EXPR might read the same key."
-  (let ((init-val (gensym "INIT"))
-        (kv       (gensym "KEY"))
-        (old-ex   (gensym "OLD-EXISTS"))
-        (old-bx   (gensym "OLD-BOX")))
-    `(let* ((,init-val ,init-form)   ; evaluate RHS BEFORE any hash changes
-            (,kv       (to-string ,key-form))
-            (,old-ex   (nth-value 1 (gethash ,kv ,hash-var)))
-            (,old-bx   (gethash ,kv ,hash-var)))
-       (setf (gethash ,kv ,hash-var) (make-p-box ,init-val))
-       (unwind-protect
-           (progn ,@body)
-         (if ,old-ex
-             (setf (gethash ,kv ,hash-var) ,old-bx)
-             (remhash ,kv ,hash-var))))))
+  (let ((iv (gensym "I")) (hv (gensym "H")) (kv (gensym "K")) (sv (gensym "S")))
+    `(let* ((,iv ,init-form)          ; evaluate RHS BEFORE any hash changes
+            (,hv (unbox ,hash-var))
+            (,kv (to-string ,key-form))
+            (,sv (%p-lhe-init ,hv ,kv ,iv)))
+       (unwind-protect (progn ,@body)
+         (%p-lhe-restore ,hv ,kv ,sv)))))
 
 (defun p-copy-array (arr)
   "Create a fresh adjustable copy of an array for local @arr = @arr semantics."

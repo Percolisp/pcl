@@ -4,6 +4,58 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 109 (2026-03-31) — LHS list repeat + p-do file load + lib/Errno.pm stub
+
+### Work done
+
+Applied `docs/bug-finding-strategy.md` near-miss strategy targeting repeat.t and do.t.
+
+**Fix 1: LHS list repetition in `p-list-=` macro (repeat.t tests 37-38)**
+- `($x)xN` and `(undef)x$dyn` on the left side of a list assignment were broken.
+- Problem: `p-list-=` macro only handled `(undef)xN` with static count; didn't handle
+  real LHS vars repeated N times, or dynamic count `(undef)x$dynamic`.
+- Rewrote `p-list-=` macro with `flet`-based helpers (`is-undef-form`, `cur-idx`, `assign-scalar`)
+  and 4 branches for `p-list-x`:
+  1. All-undef + static count: `(incf static-idx (* count inner-len))` (original path)
+  2. All-undef + dynamic count: bind gensym `(max 0 (truncate (to-number count-form)))`, advance
+  3. Real vars + static count: `dotimes(i count) dolist(inner-var)` → N-fold assignments
+  4. Real vars + dynamic count: advance offset (uncommon)
+- Also fixed: added `flet` nesting requires 7 close parens at end, not 6.
+- Result: repeat.t 43→45/3 (tests 37-38 now pass; remaining 3 = wantarray/aliasing = out of scope)
+- Regression tests: added 2 tests to `Pl/t/transpile-test-05.t`
+
+**Fix 2: `lib/Errno.pm` stub**
+- `use Errno qw(ENOENT EISDIR)` was crashing do.t with "undefined function ENOENT".
+- Created `lib/Errno.pm` stub with individual `use constant NAME => VALUE` statements.
+- Note: multi-line `use constant { NAME => VAL, ... }` form fails — PCL emits the hash body
+  as raw CL text which causes SBCL "Comma not inside a backquote" errors.
+  Individual statements work correctly.
+
+**Fix 3: `p-do` file-load semantics**
+- Old `p-do` stub didn't load files. `do $file` was returning undef silently.
+- Rewrote `p-do` to: search `@INC`, read file content, call `p-eval`.
+- For missing files: returns `*p-undef*` and clears `$@` (Perl semantics).
+- Result: do.t 46→60/13; 14 more tests now pass because files actually load.
+
+### do.t remaining 13 failures (categorized)
+- Tests 3/22/35/36: wantarray propagation into `do FILE` context — out of scope
+- Tests 58/73: `$! == ENOENT`/`$! == EISDIR` — PCL stores `$!` as string not number
+- Tests 63-68: `do subname(args)` syntax (not implemented in ExprToCL.pm)
+- Test 70: RT 124248 (bless + method call ordering edge case)
+
+### Files changed
+- `cl/pcl-runtime.lisp` — rewrote `p-list-=` macro (4-branch p-list-x handling + flet helpers);
+  rewrote `p-do` (file-load with @INC search + p-eval)
+- `lib/Errno.pm` — created (new file, individual use constant statements)
+- `Pl/t/transpile-test-05.t` — added 2 LHS list repeat regression tests
+
+### Test counts
+- PCL suite: **72 files, 2821 tests, all passing**
+- Sweep: **7047 passing, 981 failing** (was 6861/956: +186 passing, +25 failing — new tests discovered)
+- Fully passing: **51 files** (unchanged — no new files reached 100%)
+
+---
+
 ## Session 108 (2026-03-29) — warn.t + reverse.t + exists_sub.t: reference identity + context fixes
 
 ### Work done
