@@ -3538,10 +3538,15 @@
 (defun p-hash (&rest pairs)
   "Create a Perl hash from key-value pairs.
    Stores values in boxes for l-value semantics.
-   Flattens vectors (e.g. from %arr[...] kv-slice) in the pair list."
+   Flattens vectors (e.g. from %arr[...] kv-slice) and hash-tables
+   (e.g. from %existing_hash used in list context) in the pair list."
   (let ((flat (loop for item in pairs
                     if (and (vectorp item) (not (stringp item)))
                       append (coerce item 'list)
+                    else if (hash-table-p item)
+                      append (loop for k being the hash-keys of item
+                                   using (hash-value v)
+                                   collect k collect (unbox v))
                     else
                       collect item))
         (h (make-hash-table :test 'equal)))
@@ -3749,7 +3754,7 @@
 
 (defun p-delete-array-slice (arr &rest indices)
   "Perl delete for array slices: delete @arr[i1, i2, ...]
-   Sets elements to nil (deleted marker) and returns a list of the old values."
+   Sets elements to nil (deleted marker), trims trailing nils, and returns old values."
   (let* ((a (unbox arr))
          (result (make-array (length indices) :adjustable t :fill-pointer 0)))
     (dolist (idx indices)
@@ -3762,6 +3767,11 @@
         (when (and (vectorp a) (>= i 0) (< i len))
           (setf (aref a i) nil))  ; nil = deleted marker
         (vector-push-extend old-val result)))
+    ;; Trim trailing nil slots (Perl semantics: array shrinks when last elements deleted)
+    (when (vectorp a)
+      (loop while (and (> (fill-pointer a) 0)
+                       (null (aref a (1- (fill-pointer a)))))
+            do (decf (fill-pointer a))))
     result))
 
 (defun p-delete-kv-array-slice (arr &rest indices)
@@ -3774,12 +3784,17 @@
              (len (if (vectorp a) (length a) 0))
              (old-val (if (and (>= i 0) (< i len))
                           (let ((elem (aref a i)))
-                            (if (p-box-p elem) (p-box-value elem) *p-undef*))
+                            (if (p-box-p elem) elem *p-undef*))
                           *p-undef*)))
-        (vector-push-extend i result)
+        (vector-push-extend (make-p-box i) result)
         (vector-push-extend old-val result)
         (when (and (vectorp a) (>= i 0) (< i len))
           (setf (aref a i) nil))))
+    ;; Trim trailing nil slots (Perl semantics: array shrinks when last elements deleted)
+    (when (vectorp a)
+      (loop while (and (> (fill-pointer a) 0)
+                       (null (aref a (1- (fill-pointer a)))))
+            do (decf (fill-pointer a))))
     result))
 
 (defun p-stash (pkg-name)

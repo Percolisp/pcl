@@ -231,4 +231,32 @@ print $foo[4]->(), "\n";
 print $foo[2]->(), "\n";
 ', "40\n99\n2\n");
 
+# ============ TEST 14: foreach loop var directly captured (string) ============
+# 'for my $n (LIST)' — $n is the foreach loop variable, directly captured.
+# Each closure must see the value of $n from ITS iteration, not a later value.
+
+test_io("foreach loop var directly captured: string keys", '
+my %foo;
+for my $n ("A".."E") {
+    $foo{$n} = sub { $n eq $_[0] ? 1 : 0 };
+}
+print $foo{A}->("A"), "\n";
+print $foo{C}->("C"), "\n";
+print $foo{E}->("E"), "\n";
+print $foo{A}->("E"), "\n";
+', "1\n1\n1\n0\n");
+
+# ============ TEST 15: foreach loop var directly captured (numeric) ============
+
+test_io("foreach loop var directly captured: numeric indices", '
+my @foo;
+for my $n (0..4) {
+    $foo[$n] = sub { $n == $_[0] ? 1 : 0 };
+}
+print $foo[0]->(0), "\n";
+print $foo[3]->(3), "\n";
+print $foo[4]->(4), "\n";
+print $foo[0]->(4), "\n";
+', "1\n1\n1\n0\n");
+
 done_testing();

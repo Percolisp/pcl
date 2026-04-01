@@ -48,8 +48,13 @@ unshift.t, while.t
 | File | Pass/Fail | Root Cause | Fix Complexity |
 |------|-----------|-----------|----------------|
 | **caller.t** | 3/7+crash | 36 string evals, `%::` stash, filename/line always 0 | NOT WORTH PURSUING |
-| **concat2.t** | 1/2 | operator overloading (`use overload '""'`, `'.'`) | Hard (overload) |
-| **each.t** | 0/? | `XSLOADER::PL-LOAD` undefined — XSLoader crashes at load | Blocked (XS) |
+| **concat2.t** | 1/3 | operator overloading (`use overload '""'`, `'.'`); `fresh_perl_is` no-op | Blocked (overload) |
+| **each.t** | 13/8 | test 3: `each`/`keys` traversal order mismatch; tests 5/8/14-18/20: `Hash::Util` bucket manipulation not applicable to PCL | NOT WORTH PURSUING |
+| **args.t** | 0/4+crash | `@_` aliasing (`bless \@_`, `splice @_`), `goto &sub` not implemented | Blocked (not-supported) |
+| **join.t** | 23/6 | tests 9,10,18: `$SIG{__WARN__}` + join warns on undef; tests 27-29: `use overload` separator | Blocked ($SIG/__WARN__/overload) |
+| **hash.t** | 1/5+crash | tests 2,5,6: DESTROY; tests 3-4: `tie` (TIEHASH/FETCH); crash: `guard` function undefined | Blocked (DESTROY/tie) |
+| **undef.t** | 17/4+crash | tests 16-17: read-only `$1`; test 18: string eval + bareword constant; test 20: DESTROY; crash: stash manipulation `$::{z}` | Blocked (not-supported mix) |
+| **hashassign.t** | 209/7 | tests 207-214: hash assignment in list/scalar context returns different values (wantarray) | Blocked (wantarray) |
 
 ---
 
@@ -97,12 +102,14 @@ unshift.t, while.t
 - **Root cause**: wantarray — `scalar EXPR` generates `(p-scalar EXPR)`, which runs EXPR in whatever context is current (often list), producing a 9-element array, then `p-scalar` of array = length
 - **Fix**: requires `scalar EXPR` to bind `*wantarray*` to nil before evaluating EXPR — deferred (wantarray policy)
 
-### pos.t — 8/16 (8 failures)
-- **Test 4**: `pos()` set inside `//g` loop — likely scope/state issue
-- **Tests 9-11**: lvalue pos (pos as lvalue), pos refuses @arrays and %hashes
-- **Tests 12-15**: pos on *glob, UTF-8 pos, defelems pos propagation
-- **Root cause**: `p-pos` implementation incomplete; lvalue semantics not supported
-- **Complexity**: Medium-Hard
+### pos.t — 8/16 → 8/25 (17 failures as of session 110)
+- **Test 4**: `pos()` set inside `//g` loop — scope/state issue
+- **Test 9**: DESTROY — not-supported
+- **Tests 10-11**: `pos refuses @arrays/hashes` — expects error messages PCL doesn't emit
+- **Tests 12-15**: pos on `*glob`; UTF-8 pos; defelems (pos propagated through `$_[N]` and hash elements)
+- **After test 16 — CRASH**: `is pos $_[1], 3, "msg"` → `(p-pos (p-aref @_ 1) 3 "msg")` — parser bug: `pos $_[N]` subscript bleed. `pos $x` works fine; `pos $_[N]` includes extra args. The `$_[N]` subscript isn't limiting `pos` arg count.
+- **Root cause**: Parser bug where `pos ARRAY_SUBSCRIPT_EXPR` includes too many args; DESTROY not-supported; defelems not-supported
+- **Complexity**: Medium (crash fix = fix pos $_[N] parse); others blocked by not-supported
 
 ### vec.t — 30/38 (8 failures) [session 82 improved]
 - Session 82 implemented `vec` lvalue assignment (full `Pl/t/vec-01.t` 17/17 passing)
@@ -191,6 +198,31 @@ Run `perl run-perl-test.pl perl-tests/FILE.t 2>&1 | head -20` first:
 
 - caller.t (unbound var crash — what var?), pack.t (what function?)
 - sort.t (TYPE-ERROR — what type?)
+
+---
+
+## Investigation History — Session 110 (2026-04-01)
+
+### What Was Fixed
+- **`p-hash` flattens hash-table args** (`pcl-runtime.lisp`): `p-hash` now handles `hash-table-p` items in its flattening loop, expanding them into key-value pairs. Fixes `%copy = ('%', 'Val', %existing)` style assignments.
+  `hashassign.t`: **209/7** (was 206/10 — fixed tests 44-46)
+- **New test file**: `Pl/t/hashassign-01.t` (4 tests, all passing)
+- **KV array slice codegen fix** (`ExprToCL.pm`): `delete %arr[i,j]` now generates `@arr` not `%arr` (sigil fix). Fixed previous session.
+- **Trailing nil trim in array slices** (`pcl-runtime.lisp`): `p-delete-array-slice` and `p-delete-kv-array-slice` now trim trailing nil slots. Fixed previous session.
+  `delete.t`: **51/2** (was 47/6)
+- **PCL suite**: 73 files, 2829 tests, all passing
+
+### What Was Characterized (not worth pursuing)
+- **args.t**: All failures = `@_` aliasing + `goto &sub`. NOT WORTH PURSUING.
+- **each.t**: test 3 = `each`/`keys` traversal order; tests 5-20 = `Hash::Util` bucket manipulation. NOT WORTH PURSUING.
+- **concat2.t**, **join.t**, **hash.t**: Blocked by overload/$SIG{__WARN__}/DESTROY. NOT WORTH PURSUING until those features land.
+- **undef.t**: read-only `$1`, DESTROY, stash `$::{z}` manipulation. NOT WORTH PURSUING.
+- **hashassign.t** tests 207-214: wantarray-blocked. NOT WORTH PURSUING.
+- **pos.t**: crash = `pos $_[N]` parse bug (subscript arg bleed). Tests 9-15 blocked by DESTROY/defelems.
+
+### Sweep Result
+- **Before**: 7047 passing, 981 failing
+- **After**: ~7050+3 passing (hashassign +3 from p-hash fix; delete was already committed)
 
 ---
 
@@ -339,9 +371,15 @@ Files I ran `perl run-perl-test.pl` on:
 
 ### Low ROI or Blocked
 
-- **concat2.t**: needs operator overloading
-- **chdir.t**, **each.t**: XS/DynaLoader dependency
+- **concat2.t**: needs operator overloading (all 3 failing tests)
+- **chdir.t**: XS/DynaLoader dependency
+- **each.t**: Hash::Util bucket internals not applicable to PCL — NOT WORTH PURSUING
+- **args.t**: @_ aliasing + goto &sub — NOT WORTH PURSUING
+- **join.t**: tests 9/10/18 need $SIG{__WARN__}; tests 27-29 need overload
+- **hash.t**: needs DESTROY + tie — NOT WORTH PURSUING
+- **undef.t**: read-only $1 + DESTROY + stash manipulation — NOT WORTH PURSUING
+- **hashassign.t** remaining 7: wantarray-blocked
 - **die_exit.t**, **print.t**: subprocess tests — cannot run in PCL
-- **hash.t**: needs DESTROY (finalizers) — hard/deferred
 - **length.t**, **chr.t**: use bytes / Unicode encoding — documented limitations
 - **time.t** scalar tests: wantarray issue — deferred per policy
+- **pos.t** tests 9-15: DESTROY/defelems not-supported; crash at test 17 from `pos $_[N]` parse bug

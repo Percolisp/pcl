@@ -1116,6 +1116,7 @@ sub gen_funcall {
       my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
       if (@$arg_kids >= 1) {
         my $arr = $self->gen_node($arg_kids->[0]);
+        $arr =~ s/^\%/\@/;  # %arr -> @arr (KV sigil -> array container)
         my @indices;
         for my $i (1 .. $#$arg_kids) {
           push @indices, $self->gen_node($arg_kids->[$i]);

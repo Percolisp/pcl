@@ -335,9 +335,11 @@ sub _insert_variable_forward_declarations {
     $0 $$ $?
   );
 
-  my %declared;    # variables with defvar already in preamble/declarations
-  my %let_bound;   # variables bound by let/let*/foreach at FILE scope only
-  my %referenced;  # all variable references at FILE scope only
+  my %declared;           # variables with defvar already in preamble/declarations
+  my %let_bound;          # variables bound by let/let*/foreach at FILE scope only (union)
+  my %foreach_let_bound;  # only from (p-foreach ($var ...)) lines
+  my %other_let_bound;    # only from other (let/let* ...) forms
+  my %referenced;         # all variable references at FILE scope only
 
   # Only scan section 0's preamble+declarations for "already declared" defvars.
   # Forward declarations are inserted into section 0. A defvar in a later section
@@ -377,15 +379,17 @@ sub _insert_variable_forward_declarations {
     }
 
     if ($sub_depth == 0) {
-      # Collect let/let*-bound variables.
+      # Collect let/let*-bound variables (non-foreach).
       if ($line =~ /\(let\*?\s+\(/) {
         while ($line =~ /\(([\$\@\%][a-zA-Z_]\w*)\s+/g) {
           $let_bound{$1} = 1;
+          $other_let_bound{$1} = 1;
         }
       }
-      # Collect foreach-bound variables
+      # Collect foreach-bound variables (tracked separately to identify pure loop vars).
       if ($line =~ /\(p-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
         $let_bound{$1} = 1;
+        $foreach_let_bound{$1} = 1;
       }
       # Collect all variable references
       while ($line =~ /([\$\@\%][a-zA-Z_]\w*)/g) {
@@ -401,14 +405,15 @@ sub _insert_variable_forward_declarations {
     }
   }
 
-  # Undeclared = referenced - declared - runtime - __lex__ let-bound
+  # Undeclared = referenced - declared - runtime - pure-foreach-my vars
   # Note: do NOT exclude all let_bound vars. A variable may be let-bound inside a
   # bare block (e.g. 'my @a' -> (let ((@a ...))...)) but still referenced as a
   # package variable at an earlier point in load order. defvar is idempotent,
   # so emitting a forward declaration for regular let-bound vars is safe.
-  # EXCEPTION: __lex__ variables (closure-renamed) must stay lexical (no defvar).
-  # They are let-bound per-iteration and must create CL lexical (not dynamic)
-  # bindings so each closure iteration captures its own independent binding.
+  # EXCEPTION: 'for my $var' variables are Perl lexicals, never package globals.
+  # Once defvar'd, ALL let-bindings of that name become dynamic (special) — closures
+  # inside the loop would capture the symbol rather than the per-iteration value.
+  # Safe to skip defvar when the var is foreach-only (not also bound by other let forms).
   # Always declare $a and $b (Perl sort variables) — they are package-scoped globals
   # used by named sort comparator subs (sub cmp { $a <=> $b }) as dynamic variables.
   # defvar makes them CL special vars; lambda params (lambda ($a $b) ...) then create
@@ -423,11 +428,18 @@ sub _insert_variable_forward_declarations {
     $declared{'$b'} = 1;
   }
 
+  my %lex_foreach = %{$self->{_lexical_foreach_vars} // {}};
+
   my @undeclared;
   for my $var (sort keys %referenced) {
     next if $declared{$var};
     next if $runtime_vars{$var};
+    # __lex__ variables are renamed 'my' vars from _with_declarations: they must stay
+    # lexical (no defvar) so per-closure-call let-bindings are lexical not dynamic.
     next if $let_bound{$var} && $var =~ /__lex__/;
+    # 'for my $var' is a Perl lexical — never defvar it as a package global.
+    # Safe to skip when it's foreach-only (not also bound by other let forms).
+    next if $lex_foreach{$var} && $foreach_let_bound{$var} && !$other_let_bound{$var};
     next if $var =~ /^[\$\@\%]state__/;  # state vars use outer let binding, not defvar
     push @undeclared, $var;
   }
@@ -2921,6 +2933,14 @@ sub _with_declarations {
     # Track renamed/original vars as let-bound so _emit replaces p-scalar-= with
     # p-my-= (box-set), preventing the proclaim-special side-effect that would
     # turn future let bindings from lexical to dynamic and break closure capture.
+    #
+    # HAZARD: _let_bound_vars is critical for correctness of closure capture.
+    # p-scalar-= has a side effect: (unless (boundp ',place) (proclaim '(special ,place)))
+    # which converts a variable to a CL special (dynamic) on its first write. Once
+    # special, ALL let-bindings of that name become dynamic forever in this image —
+    # closures capture the symbol (which is nil after the loop) rather than the
+    # per-iteration value. p-my-= (box-set) skips this proclaim, preserving lexicality.
+    # If you add a new let-binding path, you MUST update _let_bound_vars accordingly.
     my $old_let_vars = $self->{_let_bound_vars};
     my @bound_names = map { $new_renames{$_} // $_ } @my_vars;
     $self->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @bound_names };
@@ -3219,12 +3239,16 @@ sub _process_foreach_loop {
   my $continue_block = shift;  # Optional continue block
 
   my $loop_var;
+  my $loop_var_is_my = 0;  # true when declared 'for my $var' (Perl lexical)
   my @list_parts;
 
   for my $child ($stmt->children) {
     my $ref = ref($child);
 
-    if ($ref eq 'PPI::Token::Symbol' && !$loop_var) {
+    if ($ref eq 'PPI::Token::Word' && $child->content eq 'my') {
+      $loop_var_is_my = 1;
+    }
+    elsif ($ref eq 'PPI::Token::Symbol' && !$loop_var) {
       $loop_var = $child->content;
     }
     elsif ($ref eq 'PPI::Structure::List') {
@@ -3244,6 +3268,11 @@ sub _process_foreach_loop {
   }
 
   $loop_var //= '$_';
+  # 'for my $var' declares a Perl lexical — it must never be defvar'd as a package global.
+  # Record it so _insert_variable_forward_declarations can skip the defvar.
+  if ($loop_var_is_my && $loop_var ne '$_') {
+    $self->{_lexical_foreach_vars}{$loop_var} = 1;
+  }
   my $list_cl = @list_parts
     ? ($self->_parse_expression(\@list_parts, $stmt) // "(list)")
     : "(list)";

@@ -4,6 +4,120 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 112 (2026-04-01) — codegen elegance: remove __lex__ renaming for foreach loop vars
+
+### Work done
+
+**Option A: don't defvar `for my $var` loop variables (Parser.pm)**
+
+Root cause of the `__lex__` renaming from session 111: `_insert_variable_forward_declarations`
+emitted `(defvar $n ...)` for foreach loop vars because the CL scanner saw `$n` referenced
+at file scope. Once `defvar`'d, all `(let (($n ...)))` forms become dynamic → closure capture fails.
+
+Fix — `Pl/Parser.pm` only:
+1. `_process_foreach_loop`: detect `PPI::Token::Word "my"` before the loop symbol → set
+   `$loop_var_is_my` → record in `$self->{_lexical_foreach_vars}{$var}`. Removed the entire
+   `_vars_referenced_in_closures` + `$lex_loop_var` renaming block (was lines 3271-3308).
+2. `_insert_variable_forward_declarations`: split `%let_bound` into `%foreach_let_bound`
+   (from `(p-foreach ($var ...))` lines) and `%other_let_bound` (from other `(let ...)` forms).
+   New skip rule: skip `defvar` when var is in `_lexical_foreach_vars` AND in `%foreach_let_bound`
+   AND NOT in `%other_let_bound`. Restored the `__lex__` skip rule (still needed for
+   `_with_declarations`-renamed `my` vars inside loop bodies).
+3. Added `_let_bound_vars` hazard comment in `_with_declarations` explaining why `p-my-=`
+   (not `p-scalar-=`) must be used for let-bound vars.
+
+Generated CL before/after:
+```lisp
+;; Before: verbose
+(p-foreach ($n (p-.. "A" "E"))
+  (let (($n__lex__2 (make-p-box (unbox $n))))
+    (p-hash-set %foo $n__lex__2 (lambda () $n__lex__2))))
+;; After: clean
+(p-foreach ($n (p-.. "A" "E"))
+  (p-hash-set %foo $n (lambda () $n)))
+```
+
+All 73 PCL files / 2831 tests pass. `closure.t` fully passing.
+
+---
+
+## Session 111 (2026-04-01) — foreach loop var closure capture fix
+
+### Work done
+
+**Fix: `for my $n (LIST)` loop variable captured by closure (closure.t tests 35-49)**
+
+Root cause: PCL forward-declares all package vars with `defvar`, making `$n` a CL
+special variable. `p-foreach`'s per-iteration `(let (($n ...)))` is therefore a *dynamic*
+binding, not lexical. Closures reference `$n` by symbol lookup; after the loop exits the
+dynamic binding, they see nil/wrong value.
+
+Fix: in `_process_foreach_loop` (Parser.pm), detect when `$loop_var` is captured by
+a closure inside the body (`_vars_referenced_in_closures`). If so, emit a fresh lexical
+copy per iteration inside the `_with_declarations` callback:
+
+```lisp
+(p-foreach ($n (p-.. "A" "E"))
+  (let (($n__lex__2 (make-p-box (unbox $n))))  ; fresh non-special box per iteration
+    ...body with $n renamed to $n__lex__2...))
+```
+
+`$n__lex__2` is never `defvar`'d → CL `let` is lexical → closure captures per-iteration value.
+
+Regression tests: added tests 14-15 to `Pl/t/closure-01.t` (foreach loop var captured,
+string and numeric). All 2831 PCL tests pass.
+
+**Pending design review: elegance of `__lex__` renaming**
+
+The `__lex__` approach is correct but produces verbose CL. A cleaner alternative exists:
+don't `defvar` variables that are *only* used as foreach loop variables — then
+`p-foreach`'s existing `let` is naturally lexical with no renaming needed.
+
+See `docs/codegen-elegance-review.md` for full analysis of this and other areas to
+audit (anonymous sub wrappers, `p-scalar-=`/`_let_bound_vars` hazard, `p-setf` cases).
+
+### Sweep result
+
+- **PCL suite**: 73 files, 2831 tests, all passing
+- **Perl suite**: **7067 passing, 961 failing** (was 7054/974: +13 passing, −13 failing)
+- **52 fully-passing files** — `closure.t` added ✅
+
+---
+
+## Session 110 (2026-04-01) — p-hash hash-table flattening + near-miss triage
+
+### Work done
+
+Applied `docs/bug-finding-strategy.md` near-miss strategy. Fixed one bug; characterized many blocked files.
+
+**Fix: `p-hash` flattens hash-table arguments (hashassign.t tests 44-46)**
+- `%copy = ('%', 'Value', %existing)` was broken: `%existing` (a CL hash-table) was not being
+  flattened into key-value pairs by `p-hash`. Only vectors were flattened.
+- Added `hash-table-p` case in `p-hash`'s flattening loop: expands hash-table into `k v k v ...`
+  pairs using `loop for k being the hash-keys of item using (hash-value v)`.
+- New test file: `Pl/t/hashassign-01.t` (4 tests, all passing).
+- Result: hashassign.t 206→209/7 (tests 44-46 now pass; remaining 7 = wantarray = out of scope)
+
+**Near-miss triage — files characterized as NOT WORTH PURSUING:**
+- `args.t`: all failures = `@_` aliasing + `goto &sub`
+- `each.t`: test 3 = traversal order mismatch; tests 5-20 = Hash::Util bucket internals
+- `hash.t`: all remaining = DESTROY + tie
+- `undef.t`: read-only `$1`, DESTROY, stash `$::{z}` manipulation
+- `hashassign.t` remaining 7: wantarray-context hash assignment
+- `join.t`: $SIG{__WARN__} (9/10/18) + overload (27-29)
+- `concat2.t`: overload + fresh_perl_is
+- `pos.t` crash: `pos $_[N]` parse bug (subscript arg bleed into p-pos args)
+
+All documented in `docs/test-failures-categorized.md`.
+
+### Sweep result
+
+- **PCL suite**: 73 files, 2829 tests, all passing
+- **Perl suite**: **7054 passing, 974 failing** (was 7047/981: +7 passing, +7 fewer failing)
+- **51 fully-passing files**
+
+---
+
 ## Session 109 (2026-03-31) — LHS list repeat + p-do file load + lib/Errno.pm stub
 
 ### Work done
