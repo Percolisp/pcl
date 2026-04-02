@@ -2304,6 +2304,9 @@
                                  (aref ,src-vec i)
                                  *p-undef*)))
               ,src-vec))))
+    ;; pos as lvalue: (p-setf (p-pos var) new-val) -> (p-pos var new-val)
+    ((and (listp place) (eq (car place) 'p-pos))
+     `(p-pos ,(cadr place) ,value))
     ;; vec as lvalue: (p-setf (p-vec str offset bits) val) -> (p-vec-set str offset bits val)
     ((and (listp place) (eq (car place) 'p-vec))
      (let ((str-place (cadr place))
@@ -4127,6 +4130,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; String exception
       (error (apply #'p-. args))))
 
+;;; Forward declarations for p-do (both defined later in this file)
+(declaim (ftype function p-eval))
+(defvar @INC) ; forward declaration; value set in Module System section below
+
 ;;; p-do - Perl's do FILE (block form is inlined by codegen as (progn ...))
 ;;; Called only for do EXPR where EXPR is not a bare block.
 (defun p-do (filename-val)
@@ -4161,6 +4168,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (error (e)
             (box-set $@ (make-p-box (format nil "~A" e)))
             *p-undef*)))))
+
+;;; Forward declaration for p-eval (p-transpile-string defined later in Module System section)
+(declaim (ftype function p-transpile-string))
 
 ;;; p-eval: Perl eval(STRING) — full string eval via runtime transpilation.
 ;;;

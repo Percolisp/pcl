@@ -2183,8 +2183,9 @@ sub handle_subcalls {
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
           # Cast followed by Symbol is a single dereference term
           $end_pars = $i + 2;
-        } elsif (ref($next_term) eq 'PPI::Token::Symbol') {
-          # Symbol (like %hash, @arr, $var) - check for subscript/block chain
+        } elsif (ref($next_term) eq 'PPI::Token::Symbol'
+                 || ref($next_term) eq 'PPI::Token::Magic') {
+          # Symbol or Magic (like %hash, @arr, $var, $_, @_, etc.) - check for subscript/block chain
           if ($i + 2 <= $end_pars) {
             my $after = $e->[$i + 2];
             if (ref($after) eq 'PPI::Structure::Subscript') {

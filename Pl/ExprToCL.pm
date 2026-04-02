@@ -1028,6 +1028,33 @@ sub gen_funcall {
     }
   }
 
+  # Special handling for pos(): needs the box for identity tracking.
+  # p-aref normally unboxes scalar elements, but pos() needs the box to track
+  # the position in *p-match-pos*. Same pattern as tied().
+  if ($func_name eq 'pos' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my $idx = $self->gen_node($arg_kids->[1]);
+        $arr =~ s/^\$/\@/;
+        return "(p-pos (p-aref-box $arr $idx))";
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my $key  = $self->gen_node($arg_kids->[1]);
+        $hash =~ s/^\$/\%/;
+        return "(p-pos (p-gethash-box $hash $key))";
+      }
+    }
+  }
+
   # Special handling for delete on arrays: delete $a[idx]
   # Need to pass array and index separately, not the dereferenced value
   if ($func_name eq 'delete' && @$kids == 2) {
