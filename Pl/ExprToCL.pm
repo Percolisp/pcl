@@ -1308,6 +1308,12 @@ sub gen_funcall {
   my $args_str = @args ? ' ' . join(' ', @args) : '';
   my $call = "($cl_func$args_str)";
 
+  # 'my'/'our' in expression context is an identity (returns the expression's value).
+  # e.g. 'if (my $a = my $b = 3)' → (p-my-= $a (p-my-= $b 3)) with no wrapper needed.
+  if (($func_name eq 'my' || $func_name eq 'our') && @args == 1) {
+    return $args[0];
+  }
+
   my $ctx = $self->expr_o->get_node_context($node_id);
 
   # split: p-split always returns a vector; no *wantarray* wrapper needed.

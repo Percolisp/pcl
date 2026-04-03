@@ -33,7 +33,7 @@
    #:p-version-string
    #:p-pos
    ;; Assignment
-   #:p-setf #:p-my #:p-incf #:p-decf
+   #:p-setf #:p-incf #:p-decf
    #:p-pre++ #:p-post++ #:p-pre-- #:p-post--
    ;; Compound assignment
    #:p-*= #:p-/= #:p-%= #:p-**=
@@ -134,7 +134,7 @@
    #:p-tie-proxy-tie-obj #:p-tie-proxy-saved-value
    #:p-tie #:p-untie #:p-tied
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-sub #:p-declare-sub #:p-our #:p-my #:p-eval-direct
+   #:p-defpackage #:p-sub #:p-declare-sub
    ;; Assignment forms (distinct from p-setf for clarity)
    #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-=
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -149,12 +149,6 @@
 ;;; at compile time. This matches Perl's semantics where subs and
 ;;; package variables are defined as they are parsed, allowing BEGIN
 ;;; blocks to call subs defined before them in source order.
-
-;;; p-eval-direct: shorthand for (eval-when (:compile-toplevel :load-toplevel :execute) ...).
-;;; Used throughout generated code to make definitions visible at all compilation phases.
-(defmacro p-eval-direct (&body body)
-  `(eval-when (:compile-toplevel :load-toplevel :execute)
-     ,@body))
 
 ;;; Tracks how many PCL user subs deep we are (0 = top level).
 ;;; Used by p-caller to distinguish "called from a sub" vs "top level".
@@ -215,31 +209,6 @@
        (setf (gethash ',name *p-declared-subs*) :stub))
      (unless (fboundp ',name)
        (defun ,name (&rest args) (declare (ignore args)) nil))))
-
-;;; p-our: Declare a package variable (Perl's 'our').
-;;; Declaration happens at compile time (visible to BEGIN blocks).
-;;; Initialization (if any) happens at runtime (after all BEGIN blocks).
-;;; This matches Perl where 'our $x = 1' declares at compile, assigns at runtime.
-(defmacro p-our (name &optional (init nil init-supplied-p))
-  (if init-supplied-p
-      `(progn
-         (eval-when (:compile-toplevel :load-toplevel :execute)
-           (defvar ,name))
-         (setf ,name ,init))
-      `(eval-when (:compile-toplevel :load-toplevel :execute)
-         (defvar ,name))))
-
-;;; p-my: Declare a lexical variable at file scope (Perl's top-level 'my').
-;;; Same semantics as p-our: declaration at compile time, init at runtime.
-;;; Note: Inside subs, 'my' uses regular let bindings, not this macro.
-(defmacro p-my (name &optional (init nil init-supplied-p))
-  (if init-supplied-p
-      `(progn
-         (eval-when (:compile-toplevel :load-toplevel :execute)
-           (defvar ,name))
-         (setf ,name ,init))
-      `(eval-when (:compile-toplevel :load-toplevel :execute)
-         (defvar ,name))))
 
 ;;; Forward declarations to avoid style warnings
 (declaim (ftype (function (t) t) to-number to-string unbox p-get-stream))
@@ -2319,10 +2288,6 @@
        `(p-substr ,@args ,value)))
     ;; Other complex place (fallback)
     (t `(box-set ,place ,value))))
-
-(defmacro p-my (expr)
-  "Perl my declaration - just returns the expression"
-  expr)
 
 (defmacro p-incf (place &optional (delta 1))
   "Perl += - works on boxed values, hash/array elements, and derefs"
