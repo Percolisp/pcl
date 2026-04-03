@@ -4,6 +4,77 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 114 (2026-04-03) — codegen cleanup: remove dead macros, inline eval-when
+
+### Work done
+
+**1. Removed dead `p-my` / `p-our` macros (cl/pcl-runtime.lisp)**
+
+Two macro definitions (`p-our`, and the elaborate two-arg `p-my`) were never
+emitted by the codegen — removed them and their exports from `:pcl`.
+
+A third `p-my` (identity: `(defmacro p-my (expr) expr)`) was also removed, but
+it WAS used: `my $b` in chained `my $a = my $b = 3` expressions generates
+`(p-my (p-my-= $b 3))` via the `my` entry in `%RUNTIME_NAMES`. Fixed by adding
+a special case in `ExprToCL.pm` `gen_funcall`: when `func_name` is `my` or `our`
+with one arg, return the arg directly (no wrapper). Scoping is handled by the
+surrounding `let` from `_with_declarations`, not the wrapper.
+
+**2. Replaced `p-eval-direct` with inline `eval-when` (Pl/Parser.pm)**
+
+`p-eval-direct` was a one-liner alias for `(eval-when (:compile-toplevel
+:load-toplevel :execute) ...)`. Removed the macro; replaced all 12 emit sites
+in Parser.pm with the full `eval-when` stanza inline. Removed `#:p-eval-direct`
+from `:pcl` exports.
+
+**Todo added:** Re-introduce `p-eval-direct` (or rename) — generated CL is
+intermediate code and a named macro is preferable to a repeated 45-char stanza.
+See `docs/todo-features.md` "Codegen Cleanup" section.
+
+**3. Sweep result:** 7071 passing / 971 failing (was 7067/961 — +4 passing, no regressions).
+All 73 Pl/t/ files, 2832 tests still passing.
+
+---
+
+## Session 113 (2026-04-02) — pos.t crash fix + SBCL warning cleanup
+
+### Work done
+
+**1. SBCL compiler warnings eliminated (cl/pcl-runtime.lisp)**
+
+Three forward-reference warnings on load:
+- `@INC` undefined variable in `p-do` → added `(defvar @INC)` forward decl before `p-do`
+- `P-EVAL` undefined function in `p-do` → added `(declaim (ftype function p-eval))`
+- `P-TRANSPILE-STRING` undefined function in `p-eval` → added `(declaim (ftype function p-transpile-string))`
+`sbcl --load cl/pcl-runtime.lisp` now produces zero warnings.
+
+**2. `pos $_[N]` parse crash (Pl/PExpr.pm)**
+
+`is pos $_[1], 3, 'desc'` was crashing SBCL with "invalid number of arguments: 3 to P-POS".
+Root cause: `PPI::Token::Magic` (`$_`) was not in the `is_strictly_single` arg-limiting path —
+only `PPI::Token::Symbol` was checked. So `pos` consumed all 3 remaining args instead of 1.
+Fix: added `|| ref($next_term) eq 'PPI::Token::Magic'` to the elsif condition (line ~2186).
+pos.t now runs all 30 tests without crashing (was crashing at test 17).
+
+**3. `pos SUBSCRIPT` box identity (Pl/ExprToCL.pm + cl/pcl-runtime.lisp)**
+
+`pos $_[0] = 3; pos $_[0]` returned undef instead of 3. Two bugs:
+- `p-aref @_ 0` unboxes scalar elements (returns string value, not box). `p-pos` keys
+  the `*p-match-pos*` table by box identity, so it silently did nothing.
+- `p-setf (p-pos var) val` fell to `box-set` fallback (no-op since p-pos returns nil).
+
+Fixes (same pattern as `tied()` fix from session ~bop):
+- ExprToCL.pm: `pos(arr[N])` → `(p-pos (p-aref-box arr N))`, `pos(hash{k})` → `(p-pos (p-gethash-box hash k))`
+- pcl-runtime.lisp p-setf: added `(p-pos var)` case → `(p-pos var new-val)` setter call
+
+### Results
+- pos.t: 8/crash → 12/18 (all 30 tests now run, no crash)
+- die.t: already fully passing (task #69 marked complete)
+- PCL suite: 73 files, 2832 tests, all passing (was 2831)
+- Commit: 2107f14
+
+---
+
 ## Session 112 (2026-04-01) — codegen elegance: remove __lex__ renaming for foreach loop vars
 
 ### Work done

@@ -135,6 +135,8 @@
    #:p-tie #:p-untie #:p-tied
    ;; Compile-time definition macros (for BEGIN block support)
    #:p-defpackage #:p-sub #:p-declare-sub
+   ;; eval-when wrappers (named for readability in generated CL)
+   #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
    #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-=
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -209,6 +211,27 @@
        (setf (gethash ',name *p-declared-subs*) :stub))
      (unless (fboundp ',name)
        (defun ,name (&rest args) (declare (ignore args)) nil))))
+
+;;; p-eval-always: Wrap a form so it runs at compile time, load time, and
+;;; execute time.  This is the CL idiom known as "eval-always".  In the
+;;; generated intermediate code it marks every Perl declaration (my $x,
+;;; our @a, sub foo, use Some::Module, require ...) that must be visible to
+;;; BEGIN blocks which may call or inspect them before the file finishes
+;;; loading — mirroring Perl's rule that declarations take effect as the
+;;; parser sees them.
+(defmacro p-eval-always (&body body)
+  `(eval-when (:compile-toplevel :load-toplevel :execute) ,@body))
+
+;;; p-BEGIN: Wrap a Perl BEGIN { } block.  Runs at compile time and when
+;;; executing directly, but NOT when loading a pre-compiled FASL (so the
+;;; block fires exactly once, as Perl guarantees).
+(defmacro p-BEGIN (&body body)
+  `(eval-when (:compile-toplevel :execute) ,@body))
+
+;;; p-CHECK: Wrap a Perl CHECK { } or UNITCHECK { } block.  Runs after
+;;; compilation, just before execution starts (CL :load-toplevel phase).
+(defmacro p-CHECK (&body body)
+  `(eval-when (:load-toplevel) ,@body))
 
 ;;; Forward declarations to avoid style warnings
 (declaim (ftype (function (t) t) to-number to-string unbox p-get-stream))

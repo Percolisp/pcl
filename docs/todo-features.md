@@ -462,6 +462,34 @@ Both fixes were present before this todo entry was written.
 
 ---
 
+## Codegen Cleanup
+
+### Re-introduce `p-eval-direct` macro for compile-time forms
+
+**What's wrong:** Session 114 removed the `p-eval-direct` macro (which was
+`(eval-when (:compile-toplevel :load-toplevel :execute) ...)`) and inlined
+the full `eval-when` stanza at every emit site in `Pl/Parser.pm` (12 sites).
+The generated CL now repeats:
+
+```lisp
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar $x (make-p-box nil)))
+```
+
+everywhere, which is verbose and noisy in intermediate code.
+
+**Fix:** Restore `p-eval-direct` (or a better name like `pcl-at-compile`) to
+`cl/pcl-runtime.lisp`, re-add it to the `:pcl` export list, and revert the
+12 Parser.pm emit sites to use the macro again.  The generated CL is an
+intermediate representation — named macros are preferable to repeated verbose
+stanzas.  The original removal was correct in spirit (p-my/p-our were truly
+dead) but went too far by also inlining `eval-when`.
+
+**Fix area:** `cl/pcl-runtime.lisp` (add macro + export); `Pl/Parser.pm`
+(revert 12 `_emit("(eval-when ...")` calls back to `_emit("(p-eval-direct")`).
+
+---
+
 ## Known Warnings / Minor Bugs
 
 ### ~~SBCL style-warnings on load~~  ✅ FIXED (session 93)

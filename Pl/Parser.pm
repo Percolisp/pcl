@@ -1092,7 +1092,7 @@ sub _process_our_declaration {
       if ($sigil eq '@') {
         # Array: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(p-eval-always");
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         });
         unless ($is_empty_list) {
@@ -1105,7 +1105,7 @@ sub _process_our_declaration {
       elsif ($sigil eq '%') {
         # Hash: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(p-eval-always");
           $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
         });
         unless ($is_empty_list) {
@@ -1119,7 +1119,7 @@ sub _process_our_declaration {
         # Scalar: declare with nil box at compile time, set value at runtime
         my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(p-eval-always");
           $self->_emit("  (defvar $var (make-p-box nil)))");
         });
         $self->_emit("(setf (p-box-value $var) $init_cl)");
@@ -1131,7 +1131,7 @@ sub _process_our_declaration {
       $self->_with_bucket('declarations', sub {
         for my $var (@vars) {
           my $sigil = substr($var, 0, 1);
-          $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+          $self->_emit("(p-eval-always");
           if ($sigil eq '@') {
             $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
           } elsif ($sigil eq '%') {
@@ -1152,7 +1152,7 @@ sub _process_our_declaration {
     $self->_with_bucket('declarations', sub {
       for my $var (@vars) {
         my $sigil = substr($var, 0, 1);
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(p-eval-always");
         if ($sigil eq '@') {
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         } elsif ($sigil eq '%') {
@@ -1204,7 +1204,7 @@ sub _process_my_toplevel_declaration {
     $self->_emit(";; $perl_code");
     for my $var (@vars) {
       my $sigil = substr($var, 0, 1);
-      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("(p-eval-always");
       if ($sigil eq '@') {
         $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
       } elsif ($sigil eq '%') {
@@ -3845,7 +3845,7 @@ sub _process_include_statement {
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
         my $path = $tokens[0]->string;
         $self->_emit(";; $perl_code");
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(p-eval-always");
         $self->_emit("  (p-require-file \"$path\"))");
         $self->_emit("");
         return;
@@ -3917,16 +3917,16 @@ sub _process_include_statement {
       $self->_emit(";; $perl_code");
       if (@imports) {
         my $list = join(' ', map { qq{"$_"} } @imports);
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(p-eval-always");
         $self->_emit("  (p-use \"$module\" :imports '($list)))");
       } else {
-        $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+        $self->_emit("(p-eval-always");
         $self->_emit("  (p-use \"$module\"))");
       }
     }
     elsif ($type eq 'require') {
       $self->_emit(";; $perl_code");
-      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("(p-eval-always");
       $self->_emit("  (p-require \"$module\"))");
     }
     else {
@@ -3960,7 +3960,7 @@ sub _process_scheduled_block {
     # NOT at :load-toplevel - BEGIN should only run once, not again when loading fasl.
     $self->_with_bucket('definitions', sub {
       $self->_emit(";; $perl_code");
-      $self->_emit("(eval-when (:compile-toplevel :execute)");
+      $self->_emit("(p-BEGIN");
       $self->indent_level($self->indent_level + 1);
       $self->_process_children($block);
       $self->indent_level($self->indent_level - 1);
@@ -3985,7 +3985,7 @@ sub _process_scheduled_block {
     # CHECK runs after compile, before execute — route to definitions bucket.
     $self->_with_bucket('definitions', sub {
       $self->_emit(";; $perl_code");
-      $self->_emit("(eval-when (:load-toplevel)");
+      $self->_emit("(p-CHECK");
       $self->indent_level($self->indent_level + 1);
       $self->_process_children($block);
       $self->indent_level($self->indent_level - 1);
@@ -4013,7 +4013,7 @@ sub _process_use_lib {
   # so it appears before any 'require' or 'use' in the same section
   $self->_with_bucket('definitions', sub {
     $self->_emit(";; $perl_code");
-    $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+    $self->_emit("(p-eval-always");
 
     # Extract path arguments from the statement
     for my $child ($stmt->schildren) {
@@ -4267,7 +4267,7 @@ sub _process_use_vars {
       my $init = $sigil eq '$' ? '(make-p-box nil)'
                : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                :                 '(make-hash-table :test #\'equal)';
-      $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+      $self->_emit("(p-eval-always");
       $self->_emit("  (defvar $cl_var $init))");
     }
     $self->_emit("");

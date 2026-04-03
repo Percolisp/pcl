@@ -126,8 +126,8 @@ END_CODE
 
   my $cl_code = `$pl2cl $pl_file 2>&1`;
 
-  like($cl_code, qr/eval-when.*:compile-toplevel.*:execute/s,
-       'BEGIN generates eval-when with compile-toplevel and execute');
+  like($cl_code, qr/p-BEGIN/,
+       'BEGIN generates p-BEGIN (eval-when :compile-toplevel :execute)');
 
   unlink $pl_file;
 }
