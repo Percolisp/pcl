@@ -648,6 +648,15 @@
                                (p-typeglob-name v)))
     ;; Code reference - stringify as CODE(0xADDR) like Perl
     ((functionp v) (format nil "CODE(0x~(~X~))" (object-address v)))
+    ;; Compiled regex (qr//) — stringify as (?^modifiers:pattern) like Perl 5.14+
+    ((p-regex-match-p v)
+     (let* ((mods (p-regex-match-modifiers v))
+            (mod-str (concatenate 'string
+                                  (if (member :case-insensitive mods) "i" "")
+                                  (if (member :multi-line-mode mods) "m" "")
+                                  (if (member :single-line-mode mods) "s" "")
+                                  (if (member :extended mods) "x" ""))))
+       (format nil "(?^~A:~A)" mod-str (p-regex-match-pattern v))))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
@@ -915,6 +924,8 @@
         ((stringp val) (parse-perl-number val))
         ;; Adjustable vector = Perl @array in scalar context → array length
         ((and (vectorp val) (adjustable-array-p val)) (length val))
+        ;; Compiled regex in numeric context → object address (like a reference)
+        ((p-regex-match-p val) (object-address val))
         (t 0))))
 
 ;;; ============================================================
@@ -1643,6 +1654,16 @@
       ((#\%)
        (values "%" arg-idx))
 
+      ;; Pointer address — output as lowercase hex (like Perl's %p)
+      ((#\p)
+       (let* ((val (nth arg-idx args))
+              (obj (if val (unbox val) nil))
+              (addr #+sbcl (sb-kernel:get-lisp-obj-address obj)
+                    #-sbcl (sxhash obj))
+              (s (string-downcase (format nil "~x" addr))))
+         (values (sprintf-apply-width s (or width 0) left-justify nil "")
+                 (1+ arg-idx))))
+
       ;; Unknown: output the specifier literally
       (otherwise
        (values (format nil "%~A" type-char) arg-idx)))))
@@ -1667,6 +1688,8 @@
     (with-output-to-string (out)
       (let ((i 0)
             (arg-idx 0)
+            (has-positional nil)
+            (n-args (length args))
             (len (length fmt-str)))
         (loop while (< i len) do
           (let ((c (char fmt-str i)))
@@ -1697,6 +1720,7 @@
                                 (error "Integer overflow in format string for ~A ~A"
                                        *p-sprintf-caller* fmt-str))
                               (setf positional-idx (1- peek-n))
+                              (setf has-positional t)
                               (setf j (1+ peek))))
                           ;; Parse flags
                           (loop while (and (< j len) (find (char fmt-str j) "-+ 0#"))
@@ -1750,6 +1774,10 @@
                                 (let ((call-idx (if positional-idx
                                                     positional-idx
                                                     arg-idx)))
+                                  (when (>= call-idx n-args)
+                                    (p-warn (make-p-box
+                                              (format nil "Missing argument in ~A"
+                                                      *p-sprintf-caller*))))
                                   (multiple-value-bind (result new-arg-idx)
                                       (sprintf-one type-char flags width precision args call-idx)
                                     (write-string result out)
@@ -1762,7 +1790,11 @@
                 ;; Regular character
                 (progn
                   (write-char c out)
-                  (incf i))))))))))  ; extra ) closes outer (let ((args ...)))
+                  (incf i)))))     ; close: progn, if(char=%?), let(c), loop
+        ;; Redundant argument warning: sequential format used fewer args than provided
+        (when (and (not has-positional) (< arg-idx n-args))
+          (p-warn (make-p-box
+                    (format nil "Redundant argument in ~A" *p-sprintf-caller*))))))))) ; close: let(i..), with-output-to-string, let(fmt-str), let(args), defun
 
 (defun p-printf (&rest args)
   "Perl printf - formatted print (with optional filehandle)"
@@ -5877,13 +5909,36 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ((functionp inner) "CODE")
       ;; Typeglob reference
       ((p-typeglob-p inner) "GLOB")
+      ;; Compiled regex (qr//) — ref() returns "Regexp"
+      ((p-regex-match-p inner) "Regexp")
       ;; Not a reference
       (t ""))))
 
-;; Keep reftype as an alias for compatibility
+;; reftype() returns the base type ignoring blessed status.
+;; Differs from ref(): ref(blessed_hashref) = class, reftype(blessed_hashref) = "HASH".
+;; For qr// it returns "REGEXP" (uppercase) vs ref()'s "Regexp".
 (defun p-reftype (val)
-  "Alias for p-ref"
-  (p-ref val))
+  (let ((inner (unbox val)))
+    (cond
+      ((p-regex-match-p inner) "REGEXP")
+      ;; For all other types, reftype and ref agree (modulo blessing)
+      (t (let ((r (p-ref val)))
+           ;; If ref returns a class name (blessed), get the underlying type
+           (cond
+             ((string= r "HASH")   "HASH")
+             ((string= r "ARRAY")  "ARRAY")
+             ((string= r "CODE")   "CODE")
+             ((string= r "SCALAR") "SCALAR")
+             ((string= r "GLOB")   "GLOB")
+             ((string= r "") "")
+             ;; Blessed object — look at the inner type
+             (t (cond
+                  ((hash-table-p inner) "HASH")
+                  ((and (vectorp inner) (not (stringp inner))) "ARRAY")
+                  ((functionp inner) "CODE")
+                  ((p-box-p inner) "SCALAR")
+                  ((p-typeglob-p inner) "GLOB")
+                  (t r)))))))))
 
 ;;; ============================================================
 ;;; Typeglob Support
@@ -7142,9 +7197,126 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     result))
 
 (defun p-unpack (template str)
-  "Perl unpack - basic stub, returns empty list for now."
-  (declare (ignore template str))
-  (make-array 0 :adjustable t :fill-pointer 0))
+  "Perl unpack - parse binary string according to template.
+   Treats CL string characters as Latin-1 bytes (char-code = byte value).
+   Supported: C/c (unsigned/signed byte), n/N (big-endian 16/32-bit),
+              v/V (little-endian 16/32-bit), A/a/Z (strings), H/h (hex),
+              x (skip byte), X (back up), @ (seek), count and * modifier."
+  (let* ((tmpl   (to-string template))
+         (s      (to-string str))
+         (result (make-array 0 :adjustable t :fill-pointer 0))
+         (ti 0) (si 0)
+         (tlen (length tmpl))
+         (slen (length s)))
+    (flet ((byte-at (i) (if (< i slen) (char-code (char s i)) 0))
+           (push-val (v) (vector-push-extend (make-p-box v) result)))
+      (loop while (< ti tlen) do
+        (let ((ch (char tmpl ti)))
+          (incf ti)
+          ;; Parse optional count or *
+          (let* ((all-p (and (< ti tlen) (char= (char tmpl ti) #\*)))
+                 (count (cond
+                          (all-p (incf ti) nil)
+                          ((and (< ti tlen) (digit-char-p (char tmpl ti)))
+                           (let ((n 0))
+                             (loop while (and (< ti tlen)
+                                              (digit-char-p (char tmpl ti)))
+                                   do (setf n (+ (* n 10)
+                                                  (digit-char-p (char tmpl ti))))
+                                      (incf ti))
+                             n))
+                          (t 1))))
+            (flet ((repeat-count (max-n)
+                     (if all-p (max 0 (- max-n si)) (or count 1))))
+              (case ch
+                ;; Unsigned byte
+                ((#\C)
+                 (let ((n (repeat-count slen)))
+                   (dotimes (i n) (push-val (byte-at (+ si i))))
+                   (incf si n)))
+                ;; Signed byte
+                ((#\c)
+                 (let ((n (repeat-count slen)))
+                   (dotimes (i n)
+                     (let ((b (byte-at (+ si i))))
+                       (push-val (if (>= b 128) (- b 256) b))))
+                   (incf si n)))
+                ;; Big-endian unsigned 16-bit
+                ((#\n)
+                 (let ((n (repeat-count (floor slen 2))))
+                   (dotimes (i n)
+                     (let ((pos (+ si (* i 2))))
+                       (push-val (+ (ash (byte-at pos) 8)
+                                    (byte-at (1+ pos))))))
+                   (incf si (* n 2))))
+                ;; Big-endian unsigned 32-bit
+                ((#\N)
+                 (let ((n (repeat-count (floor slen 4))))
+                   (dotimes (i n)
+                     (let ((pos (+ si (* i 4))))
+                       (push-val (+ (ash (byte-at pos) 24)
+                                    (ash (byte-at (+ pos 1)) 16)
+                                    (ash (byte-at (+ pos 2)) 8)
+                                    (byte-at (+ pos 3))))))
+                   (incf si (* n 4))))
+                ;; Little-endian unsigned 16-bit
+                ((#\v)
+                 (let ((n (repeat-count (floor slen 2))))
+                   (dotimes (i n)
+                     (let ((pos (+ si (* i 2))))
+                       (push-val (+ (byte-at pos)
+                                    (ash (byte-at (1+ pos)) 8)))))
+                   (incf si (* n 2))))
+                ;; Little-endian unsigned 32-bit
+                ((#\V)
+                 (let ((n (repeat-count (floor slen 4))))
+                   (dotimes (i n)
+                     (let ((pos (+ si (* i 4))))
+                       (push-val (+ (byte-at pos)
+                                    (ash (byte-at (+ pos 1)) 8)
+                                    (ash (byte-at (+ pos 2)) 16)
+                                    (ash (byte-at (+ pos 3)) 24)))))
+                   (incf si (* n 4))))
+                ;; Arbitrary binary string (A strips trailing spaces/nulls, a does not)
+                ((#\A #\a #\Z)
+                 (let* ((n (if all-p (- slen si) (or count 1)))
+                        (raw (subseq s si (min (+ si n) slen))))
+                   (push-val (if (char= ch #\A)
+                                 (string-right-trim '(#\Space #\Nul) raw)
+                                 raw))
+                   (incf si n)))
+                ;; Hex string (high nybble first for H, low nybble first for h)
+                ((#\H #\h)
+                 (let* ((n (if all-p (* 2 (- slen si)) (* 2 (or count 1))))
+                        (hex (make-string n :initial-element #\0)))
+                   (dotimes (i (floor n 2))
+                     (let ((b (byte-at (+ si i))))
+                       (if (char= ch #\H)
+                           (setf (char hex (* i 2))       (digit-char (ash b -4) 16)
+                                 (char hex (1+ (* i 2)))  (digit-char (logand b 15) 16))
+                           (setf (char hex (* i 2))       (digit-char (logand b 15) 16)
+                                 (char hex (1+ (* i 2)))  (digit-char (ash b -4) 16)))))
+                   (push-val (string-downcase hex))
+                   (incf si (floor n 2))))
+                ;; Skip bytes (no output)
+                ((#\x)
+                 (let ((n (if all-p (- slen si) (or count 1))))
+                   (incf si n)))
+                ;; Back up
+                ((#\X)
+                 (let ((n (or count 1)))
+                   (decf si n)
+                   (when (< si 0) (setf si 0))))
+                ;; Absolute seek
+                ((#\@)
+                 (setf si (or count 0)))
+                ;; Ignore unknown templates
+                (otherwise nil)))))))
+    ;; In scalar context return the first value (Perl: "the first unpacked value").
+    ;; In list context return the full vector (for list/array assignment).
+    (if *wantarray*
+        result
+        (if (> (length result) 0) (aref result 0) *p-undef*))))
 
 ;;; ============================================================
 ;;; Package initialization

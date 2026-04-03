@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 115 (2026-04-04) — eval-when macros + sprintf2.t + vec.t + qr.t
+
+### Work done
+
+**1. Introduced named macros for `eval-when` variants (cl/pcl-runtime.lisp + Pl/Parser.pm)**
+
+Three semantically distinct `eval-when` patterns were identified in generated code:
+- `(:compile-toplevel :load-toplevel :execute)` — used for all declarations (subs, vars, constants); named **`p-eval-always`** (CL idiom)
+- `(:compile-toplevel :execute)` — used for Perl `BEGIN` blocks; named **`p-BEGIN`**
+- `(:load-toplevel)` — used for Perl `CHECK` blocks; named **`p-CHECK`**
+
+All 16 emit sites in `Pl/Parser.pm` updated. `begin-end-01.t` test updated to match `p-BEGIN`. Generated CL is now more readable.
+
+**2. `sprintf2.t` fully passing (7083→7113 passing, +30)**
+
+Three root-cause fixes in `cl/pcl-runtime.lisp`:
+- `%p` format: added `#+sbcl sb-kernel:get-lisp-obj-address` + `string-downcase` hex formatting in `sprintf-one`
+- Missing-arg warning: added `p-warn` call before `sprintf-one` when `arg-idx >= n-args`
+- Redundant-arg warning: added `p-warn` call after format loop when trailing unused args remain
+
+Also fixed `ref(qr//)` → "Regexp" in `p-ref` (was falling through to generic "REF").
+
+**3. `vec.t` — 30→32 passing**
+
+Replaced `p-unpack` stub with full implementation supporting: C/c (byte), n/N/v/V (16/32-bit big/little-endian), A/a/Z (strings), H/h (hex), x/X/@ (seek), count + `*` modifier. Returns first element in scalar context (`*wantarray*` nil), full vector in list context.
+
+**4. `qr.t` semantic fixes (no score change: 19/17 remaining)**
+
+Added to `cl/pcl-runtime.lisp`:
+- `stringify-value` for `p-regex-match`: returns `(?^modifiers:pattern)` (Perl 5.14+ format)
+- `to-number` for `p-regex-match`: returns `object-address` (pointer value)
+- `p-reftype` proper implementation: "REGEXP" for regex, delegates to `p-ref` for others
+
+Fixed `pl-like`/`pl-unlike` in `cl/pcl-test.lisp`: unbox regex arg before checking `p-regex-match-p` (CL-PPCRE crashes on `(?^i:...)` syntax — must use `.pattern` field directly).
+
+Remaining 17 qr.t failures: overload, tie, PVLV, Scalar::Util::reftype routing — blocked on `use overload`.
+
+**5. Sweep result:** 7113 passing / 929 failing, 52 fully-passing files (sprintf2.t newly passing).
+All 73 Pl/t/ files, 2832 tests still passing.
+
+---
+
 ## Session 114 (2026-04-03) — codegen cleanup: remove dead macros, inline eval-when
 
 ### Work done

@@ -168,8 +168,9 @@
 (defun pl-like (got regex &optional name)
   (let* ((got (test-to-scalar got))
          (got-str (if got (to-string got) ""))
-         (regex-str (if (p-regex-match-p regex)
-                        (p-regex-match-pattern regex)
+         (rx (unbox regex))
+         (regex-str (if (p-regex-match-p rx)
+                        (p-regex-match-pattern rx)
                         (to-string regex)))
          (pass (if (ppcre:scan regex-str got-str) t nil)))
     (if pass
@@ -182,8 +183,9 @@
 (defun pl-unlike (got regex &optional name)
   (let* ((got (test-to-scalar got))
          (got-str (if got (to-string got) ""))
-         (regex-str (if (p-regex-match-p regex)
-                        (p-regex-match-pattern regex)
+         (rx (unbox regex))
+         (regex-str (if (p-regex-match-p rx)
+                        (p-regex-match-pattern rx)
                         (to-string regex)))
          (pass (if (ppcre:scan regex-str got-str) nil t)))
     (if pass
