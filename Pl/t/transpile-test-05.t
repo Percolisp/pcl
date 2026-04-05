@@ -203,4 +203,19 @@ my $a; my $b;
 print "$a$b\n";
 ', "ah\n");
 
+test_transpile("(map ...)[N] list subscript returns Nth element", '
+my @r = (map { {a=>$_} } ("x"))[0]->{a};
+print "@r\n";
+', "x\n");
+
+test_transpile("(sort ...)[N] list subscript returns Nth element", '
+my $f = (sort { $a <=> $b } 3,1,2)[0];
+print "$f\n";
+', "1\n");
+
+test_transpile("(grep ...)[N] list subscript returns Nth element", '
+my @s = (grep { $_ > 1 } 1,2,3)[1];
+print "@s\n";
+', "3\n");
+
 done_testing;

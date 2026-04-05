@@ -22,8 +22,9 @@
 
 ;;; curr_test() - provided here (not as a stub in test.pl) so it reads the
 ;;; real *test-count* counter that pl-ok/pl-is/etc. maintain.
-(defun pl-curr_test ()
-  "Perl curr_test() - return the next test number to run."
+(defun pl-curr_test (&optional n)
+  "Perl curr_test() - get or set the current test number."
+  (when n (setf *test-count* (1- (to-number n))))
   (make-p-box (1+ *test-count*)))
 
 ;;; Helper: unbox a value for display

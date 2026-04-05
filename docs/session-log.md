@@ -4,6 +4,120 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 117 (2026-04-04) — regression fixes + %a format + string-eval policy
+
+### Work done
+
+**1. Fixed 3 regressions from cross-package `defvar` fix (session 116)**
+
+- **sub.t**: `_assemble_output` regex `[A-Za-z]` didn't match underscore-starting
+  package names (e.g. `_122845`), so `(defvar _122845::$ok ...)` was emitted
+  before `(defpackage :_122845 ...)`. Fixed regex to `[A-Za-z_]` in `Pl/Parser.pm`.
+  sub.t back to fully passing.
+
+- **for.t**: `++$Dog::VERSION` no longer crashes (cross-package fix), exposing
+  typed-for-loop string-eval tests 127-138. Previously these were never reached
+  (crash-before-failure masking). Restored the 12 commented-out tests. 9 now fail
+  because PCL cannot parse `for my Dog $spot (...)` typed-for-loop syntax.
+  for.t: 129/9 (real failures, not hidden).
+
+- **sprintf2.t**: `p-sprintf` arg-flattening unboxed blessed array objects via
+  `(vectorp v)` check, bypassing string overloads. Fixed by checking
+  `(not (and (p-box-p arg) (p-box-class arg)))` before flattening.
+  Overload count tests 1394-1397 now pass.
+
+**2. `%a`/%A hexfloat format in `sprintf-one` (`cl/pcl-runtime.lisp`)**
+
+Implemented full `%a`/%A support using `integer-decode-float`:
+- Sign handling, NaN/Inf, zero case
+- Mantissa nibble alignment and precision rounding
+- Biased exponent, `p` separator
+- Zero-padding with `0x` prefix preservation
+- Case conversion for `%A`
+
+Fixed paren-balance bug: `((#\a) BODY)` case clause was missing its closing `)`.
+Added to line 1948 (was 5 parens, needed 6). Runtime now loads cleanly.
+
+**Status**: runtime loads, but `%a` produces wrong output for 9 sprintf2.t tests.
+sprintf2.t: 1420/9.
+
+**3. String-eval policy update**
+
+- Reverted memory and `feedback_eval_tests.md` — string eval is implemented,
+  do NOT comment out eval string tests.
+- Added infrastructure bug note to `docs/todo-features.md`: "crash-before-failure
+  masking" — files appear fully-passing when a crash prevents later tests from
+  running; when crash is fixed, hidden failures are exposed.
+
+### Sweep result
+
+**7162 passing / 936 failing, 51 fully-passing files** (was 7127/920, 52 files).
+- sub.t: newly fully-passing ✅
+- bop.t: 307→332 (+25 passing)
+- for.t: lost (129/9, real failures from typed-for-loop)
+- sprintf2.t: lost (1420/9, %a format wrong output)
+
+### Next priorities
+
+1. **sprintf2.t %a format** — 9 failures, implementation produces wrong output.
+   Debug what Perl expects vs what `sprintf-one` generates for `%a`.
+2. **for.t typed-for-loop** — `for my Dog $spot (...)` syntax not parsed by PCL.
+   Parser.pm would need to skip type annotation after `for my`.
+3. **concat2.t** — 1/2 (2 failures), check if overload-related.
+
+---
+
+## Session 116 (2026-04-04) — `use overload` fully implemented
+
+### Work done
+
+**1. `use overload` — full implementation**
+
+All operator overloading infrastructure added.  Marked throughout with `; use overload` comments.
+
+*`cl/pcl-runtime.lisp`:*
+- `*p-overload-table*` (hash `(cons pkg op-str) → handler`) and `*p-overload-fallback*` defvars
+- `p-register-overloads pkg pairs-vec` — registers handlers from a vector of alternating key/value pairs; handles `fallback` key
+- `p-find-overload val op-str` — O(1) direct lookup, falls through to `%p-find-overload-mro` for inherited overloads; walks `@ISA` BFS-style (two-pass: direct parents first, then grandparents)
+- `p-call-overload handler self other reversedp` — dispatches to CL function, boxed code ref, or string method name
+- `p-overload-strval` / `p-overloaded` — `overload::StrVal` and `overload::Overloaded` introspection
+- `box-sv` modified to check `""` overload before stringifying
+- `box-nv` modified to check `0+` overload before numifying
+- `p-true-p` modified to check `bool` overload
+- `p-.` changed from `&rest` to binary `(a b)` with `.` overload dispatch
+- Arithmetic ops (`p-+`, `p-*`, `p--`, `p-/`, `p-%`, `p-**`) all overload-aware via `%def-overloaded-arith` macro; `p-+` and `p-*` use `(a &optional b)` to preserve unary `+` semantics
+- Numeric comparisons (`p-==`, `p-!=`, `p-<`, `p->`, `p-<=`, `p->=`, `p-<=>`) via `%def-overloaded-cmp` with `fallback-op`
+- String comparisons (`p-str-eq/ne/lt/gt/le/ge`) via `%def-overloaded-str-cmp`; fixed to return `t/nil` (not CL position numbers — `string/=` returns 0 which is Perl-falsy)
+- `p-str-cmp` overload-aware with `cmp` dispatch
+
+*`Pl/Parser.pm`:*
+- `_process_use_overload` method — collects tokens after `overload` keyword, parses in LIST_CTX, emits `(p-register-overloads "PkgName" PAIRS-VECTOR)`
+- Package name emitted as Perl literal string (not `(package-name *package*)` which CL-upcases)
+- Multi-line `use overload` fix: `$perl_code` comment truncated at first newline (bare newlines in CL = crash)
+
+*`Pl/ExprToCL.pm`:*
+- `overloaded` and `overload-strval` added to `%RUNTIME_NAMES` (and removed bogus `# comment` from inside `qw()` which generated Perl warning corrupting all CL output)
+- Package-qualified `overload::StrVal` and `overload::Overloaded` mapped to `p-overload-strval`/`p-overloaded`
+
+*`Pl/PExpr/Config.pm`:*
+- `overloaded` and `overload-strval` added to `known_no_of_params` (each takes 1 arg)
+
+**2. Regression fixes from `p-.` going binary:**
+- `p-die`: was `(error (apply #'p-. args))` — changed to `apply #'p-string-concat`
+- `p-warn-format`: same fix
+
+**3. `Pl/t/overload-01.t` — 19 new regression tests, all passing**
+
+Covers: `""` stringify, `0+` numify, `bool`, `neg`, `+`, `-`, `*`, `/`, `<=>` (sort), `cmp` (sort), `.`, `==`, fallback via `0+`, `overload::StrVal`, `overload::Overloaded`, subclass inheritance, anonymous subs, `ne`.
+
+**4. `docs/todo-features.md` updated:** `use overload` marked done, `qr//` and `concat2.t` updated.
+
+**5. Sweep result:** 7127 passing / 920 failing (was 7113/929), 52 fully-passing files.
+sort.t: 85/64 (was 78/71, +7).
+All 74 Pl/t/ files, 2851 tests passing.
+
+---
+
 ## Session 115 (2026-04-04) — eval-when macros + sprintf2.t + vec.t + qr.t
 
 ### Work done

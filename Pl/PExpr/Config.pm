@@ -111,6 +111,9 @@ has named_unary => (
       'eval'    => 1,
       'wantarray' => 1,
       'prototype' => 1,
+      # use overload introspection
+      'overloaded'      => 1,
+      'overload-strval' => 1,
     };
   },
 );

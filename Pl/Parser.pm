@@ -269,7 +269,7 @@ sub _assemble_output {
   for my $section (@{$self->_sections}) {
     for my $bucket (qw(preamble declarations definitions runtime)) {
       for my $line (@{$section->{$bucket}}) {
-        while ($line =~ /\b([A-Za-z][A-Za-z0-9_]*)::/g) {
+        while ($line =~ /\b([A-Za-z_][A-Za-z0-9_]*)::/g) {
           my $pkg = $1;
           next if lc($pkg) eq 'pcl';  # our runtime package
           $needed_packages{$pkg} = 1 unless $declared_pkgs{$pkg};
@@ -340,6 +340,7 @@ sub _insert_variable_forward_declarations {
   my %foreach_let_bound;  # only from (p-foreach ($var ...)) lines
   my %other_let_bound;    # only from other (let/let* ...) forms
   my %referenced;         # all variable references at FILE scope only
+  my %cross_pkg_vars;     # pkg::$var references needing defvar in their package
 
   # Only scan section 0's preamble+declarations for "already declared" defvars.
   # Forward declarations are inserted into section 0. A defvar in a later section
@@ -394,8 +395,22 @@ sub _insert_variable_forward_declarations {
       # Collect all variable references
       while ($line =~ /([\$\@\%][a-zA-Z_]\w*)/g) {
         my $var = $1;
-        next if $var =~ /::/;  # skip package-qualified
+        next if $var =~ /::/;  # skip package-qualified (handled separately below)
         $referenced{$var} = 1;
+      }
+    }
+
+    # Collect cross-package variable references at ANY nesting depth
+    # (including inside overload handler lambdas, sub bodies, etc.).
+    # e.g. o::$str, o::$num inside overload lambdas need defvar in their package.
+    # Skip special packages (ENV, INC, SIG, pcl, main) and already-defvar'd forms.
+    unless ($line =~ /^\s*\(defvar\s/) {
+      my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl main);
+      while ($line =~ /\b([a-zA-Z_]\w*)::([\$\@\%][a-zA-Z_]\w*)/g) {
+        my ($pkg, $var) = ($1, $2);
+        next if $skip_pkg{$pkg};
+        next if $var =~ /^[\$\@\%][0-9]/;  # special: $1, $2...
+        $cross_pkg_vars{"$pkg\::$var"} = [$pkg, $var];
       }
     }
 
@@ -442,6 +457,39 @@ sub _insert_variable_forward_declarations {
     next if $lex_foreach{$var} && $foreach_let_bound{$var} && !$other_let_bound{$var};
     next if $var =~ /^[\$\@\%]state__/;  # state vars use outer let binding, not defvar
     push @undeclared, $var;
+  }
+
+  # Emit defvars for cross-package variable references (e.g. o::$str used in
+  # overload handlers). These are declared in the global section 0 defvar block;
+  # CL defvar doesn't require the current package to match — pkg::$var works.
+  # Already-defvar'd vars are skipped (defvar is idempotent but avoid duplicates).
+  if (%cross_pkg_vars) {
+    my %already_cross_declared;
+    for my $section (@{$self->_sections}) {
+      for my $line (@{$section->{preamble}}, @{$section->{declarations}}) {
+        if ($line =~ /\(defvar\s+(\w+)::([\$\@\%]\w+)\b/) {
+          $already_cross_declared{"$1\::$2"} = 1;
+        }
+      }
+    }
+    my @cross_decls;
+    for my $key (sort keys %cross_pkg_vars) {
+      next if $already_cross_declared{$key};
+      my ($pkg, $var) = @{$cross_pkg_vars{$key}};
+      my $sigil = substr($var, 0, 1);
+      if ($sigil eq '$') {
+        push @cross_decls, "(defvar $pkg\::$var (make-p-box nil))";
+      } elsif ($sigil eq '@') {
+        push @cross_decls, "(defvar $pkg\::$var (make-array 0 :adjustable t :fill-pointer 0))";
+      } elsif ($sigil eq '%') {
+        push @cross_decls, "(defvar $pkg\::$var (make-hash-table :test 'equal))";
+      }
+    }
+    if (@cross_decls) {
+      push @$decls, ";; Cross-package variable declarations (e.g. pkg::var used in closures).";
+      push @$decls, @cross_decls;
+      push @$decls, "";
+    }
   }
 
   return unless @undeclared;
@@ -3875,6 +3923,12 @@ sub _process_include_statement {
     return;
   }
 
+  # Handle 'use overload' - register operator overloading for the current package
+  if ($module eq 'overload') {
+    $self->_process_use_overload($stmt, $perl_code);
+    return;
+  }
+
   # Handle pragmas - emit as comment (no CL equivalent)
   if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re|version)$/) {
     # 'use integer' - enable integer pragma in current scope
@@ -4002,6 +4056,53 @@ sub _process_scheduled_block {
   else {
     $self->_emit(";; $type { } (unrecognized scheduled block)");
   }
+}
+
+
+# Process 'use overload' — register operator overloading for the current package.
+# Generates: (p-register-overloads (package-name *package*) PAIRS-VECTOR)
+# where PAIRS-VECTOR is the transpiled form of the alternating op/handler list.
+sub _process_use_overload {
+  my ($self, $stmt, $perl_code) = @_;
+
+  # Collect all tokens after the 'overload' keyword and before the semicolon.
+  my @arg_tokens;
+  my $past_module = 0;
+  for my $child ($stmt->children) {
+    if (!$past_module) {
+      $past_module = 1
+        if $child->isa('PPI::Token::Word') && $child->content eq 'overload';
+      next;
+    }
+    next if $child->isa('PPI::Token::Structure');   # semicolon
+    # Skip only leading whitespace (preserve whitespace within the list)
+    next if !@arg_tokens && $child->isa('PPI::Token::Whitespace');
+    push @arg_tokens, $child;
+  }
+
+  # Strip trailing whitespace
+  pop @arg_tokens while @arg_tokens && $arg_tokens[-1]->isa('PPI::Token::Whitespace');
+
+  if (!@arg_tokens) {
+    $self->_emit(";; $perl_code (use overload - no handlers)");
+    $self->_emit("");
+    return;
+  }
+
+  # Parse the arg list in list context.
+  # "+" => \&add, "0+" => \&numify, ...  →  (vector "+" #'pl-add "0+" #'pl-numify ...)
+  my $args_cl = $self->_parse_expression(\@arg_tokens, $stmt, 1);  # 1 = LIST_CTX
+
+  # Use the Perl package name as a literal string (not (package-name *package*))
+  # because CL upcases package names ("MyStr" → "MYSTR") but p-bless stores the
+  # original Perl class name as-is.  We need them to match at lookup time.
+  my $pkg_name = $self->environment->current_package() // 'main';
+
+  # Sanitize perl_code for comment — multi-line use overload would break CL
+  (my $comment = $perl_code) =~ s/\n.*//s;  # keep only first line
+  $self->_emit(";; $comment ...");
+  $self->_emit("(p-register-overloads \"$pkg_name\" $args_cl)");
+  $self->_emit("");
 }
 
 

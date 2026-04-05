@@ -113,6 +113,10 @@
    #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant
    #:p-super-call #:perl-pkg-to-clos-class #:clos-class-to-pkg
    #:p-can #:p-isa
+   ;; use overload — operator overloading registry
+   #:*p-overload-table* #:p-register-overloads
+   #:p-find-overload #:p-call-overload
+   #:p-overload-strval #:p-overloaded
    ;; Regex
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
@@ -268,6 +272,17 @@
 ;;; or :was-defined (was defined, now undef'd).
 (defvar *p-declared-subs* (make-hash-table :test 'eq)
   "Perl sub existence tracking for exists &sub and defined &sub")
+
+;;; use overload — Operator Overloading Registry
+;;; Maps (cons pkg-name op-string) -> handler (CL function or method-name string).
+;;; Populated at class-definition time by p-register-overloads.
+(defvar *p-overload-table* (make-hash-table :test 'equal)
+  "use overload registry: (cons pkg-name op-string) -> handler")
+
+;;; use overload — fallback flags per package.
+;;; :undef = default (try stringify/numify), t = autogenerate, :no = die on undef op.
+(defvar *p-overload-fallback* (make-hash-table :test 'equal)
+  "use overload fallback per package: :undef (default), t, or :no")
 
 ;;; @_ - Perl's subroutine arguments array. Must be declared special so that
 ;;; let-bindings in p-sub are dynamic (not lexical), allowing callbacks and
@@ -568,6 +583,137 @@
   #+sbcl (sb-kernel:get-lisp-obj-address obj)
   #-sbcl (sxhash obj))  ; Fallback: use hash as pseudo-address
 
+;;; Forward declarations for use overload helpers (p-get-class and p-method-call
+;;; are defined later in the OO section; forward refs suppress SBCL style-warnings).
+(declaim (ftype function p-get-class p-method-call))
+
+;;; ============================================================
+;;; use overload — Operator Overloading Helpers
+;;; ============================================================
+;;; These three functions implement the core of `use overload` dispatch.
+;;; p-find-overload is called from every overloadable operator — it must be fast.
+;;; The common case (non-blessed value) short-circuits at p-box-p with no allocation.
+
+(defun %p-find-overload-mro (cls op-str visited)
+  "Walk @ISA hierarchy to find an inherited use overload handler for OP-STR.
+   Two-pass BFS: check direct parents first, then recurse into grandparents."
+  ;; use overload: cycle guard
+  (when (member cls visited :test #'equal)
+    (return-from %p-find-overload-mro nil))
+  (let* ((pkg      (find-package (string-upcase cls)))
+         (isa-sym  (when pkg (find-symbol "@ISA" pkg)))
+         (isa-val  (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym))))
+    (when (and isa-val (vectorp isa-val))
+      (let ((new-visited (cons cls visited)))
+        ;; First pass: direct parent table entries
+        (loop for parent across isa-val
+              for parent-str = (to-string parent)
+              do (let ((h (gethash (cons parent-str op-str) *p-overload-table*)))
+                   (when h (return-from %p-find-overload-mro h))))
+        ;; Second pass: recurse into grandparents
+        (loop for parent across isa-val
+              for parent-str = (to-string parent)
+              do (let ((h (%p-find-overload-mro parent-str op-str new-visited)))
+                   (when h (return-from %p-find-overload-mro h)))))))
+  nil)
+
+(defun p-find-overload (val op-str)
+  "Return the use overload handler for VAL's class and OP-STR, or NIL.
+   Checks the class directly, then walks @ISA for inherited overloads."
+  ;; use overload: fast path — non-boxes never have overloads
+  (when (p-box-p val)
+    (let ((cls (p-get-class val)))
+      (when cls
+        ;; Direct hit (common case)
+        (or (gethash (cons cls op-str) *p-overload-table*)
+            ;; Walk @ISA for inherited overloads (subclass of overloaded parent)
+            (%p-find-overload-mro cls op-str nil))))))
+
+(defun p-call-overload (handler self other reversedp)
+  "Call a use overload handler with Perl's three-argument convention:
+   handler(self, other, reversed).  REVERSEDP is true when the blessed
+   object was the right operand and Perl swapped the args.
+   Handler may be a CL function, a boxed code ref, or a string (method name)."
+  ;; use overload: build the three args Perl overload handlers expect
+  (let ((other-val   (or other *p-undef*))
+        (reversed-val (if reversedp (make-p-box 1) *p-undef*)))
+    (cond
+      ((functionp handler)
+       ;; Direct CL function: lambda or #'pl-name from \&sub
+       (funcall handler self other-val reversed-val))
+      ((p-box-p handler)
+       ;; Boxed code ref (e.g. stored in a variable before use overload)
+       (let ((inner (unbox handler)))
+         (if (functionp inner)
+             (funcall inner self other-val reversed-val)
+             (error "use overload: boxed handler is not a function: ~S" inner))))
+      ((stringp handler)
+       ;; Method-name form: '+' => 'add' — call $self->add($other, $reversed)
+       (p-method-call self handler other-val reversed-val))
+      (t (error "use overload: invalid handler ~S for ~S" handler self)))))
+
+(defun p-register-overloads (pkg pairs-vec)
+  "Register use overload handlers for package PKG from PAIRS-VEC.
+   PAIRS-VEC is the CL vector generated by transpiling:
+     use overload '+' => \\&add, '\"\"' => \\&str, fallback => 1, ...
+   Elements alternate: op-string handler op-string handler ..."
+  ;; use overload: iterate pairs (op . handler) from the generated vector
+  (let ((pairs (coerce pairs-vec 'list)))
+    (loop for remaining on pairs by #'cddr
+          for op-raw = (car remaining)
+          for fn    = (cadr remaining)
+          when (and op-raw (cdr remaining))
+          do (let ((op-str (if (stringp op-raw)
+                               op-raw
+                               (to-string (if (p-box-p op-raw) (unbox op-raw) op-raw)))))
+               (if (string= op-str "fallback")
+                   ;; use overload fallback setting
+                   (setf (gethash pkg *p-overload-fallback*)
+                         (cond
+                           ((null fn) :undef)
+                           ((eq fn *p-undef*) :undef)
+                           ((and (numberp fn) (zerop fn)) :no)
+                           ((p-box-p fn)
+                            (let ((v (unbox fn)))
+                              (cond ((null v) :undef)
+                                    ((eq v *p-undef*) :undef)
+                                    ((and (numberp v) (zerop v)) :no)
+                                    (t t))))
+                           (t t)))
+                   ;; use overload operator handler registration
+                   (setf (gethash (cons pkg op-str) *p-overload-table*) fn))))))
+
+(defun p-overload-strval (obj)
+  "Return the non-overloaded string value of OBJ (the raw address form).
+   Implements overload::StrVal($obj) — bypasses any '\"\"' overload."
+  ;; use overload: get raw address representation ignoring any "" handler
+  (if (p-box-p obj)
+      (let* ((inner (unbox obj))
+             (cls   (p-get-class obj))
+             (raw   (cond
+                      ((hash-table-p inner)
+                       (format nil "HASH(0x~(~X~))" (object-address inner)))
+                      ((and (vectorp inner) (not (stringp inner)))
+                       (format nil "ARRAY(0x~(~X~))" (object-address inner)))
+                      (t
+                       (format nil "SCALAR(0x~(~X~))" (object-address obj))))))
+        (make-p-box (if cls (format nil "~A=~A" cls raw) raw)))
+      (make-p-box (to-string obj))))
+
+(defun p-overloaded (obj)
+  "Return true (1) if OBJ has any use overload handlers registered, else undef.
+   Implements overload::Overloaded($obj)."
+  ;; use overload: scan table for any entry whose package matches obj's class
+  (when (p-box-p obj)
+    (let ((cls (p-get-class obj)))
+      (when cls
+        (maphash (lambda (k v)
+                   (declare (ignore v))
+                   (when (and (consp k) (equal (car k) cls))
+                     (return-from p-overloaded (make-p-box 1))))
+                 *p-overload-table*))))
+  *p-undef*)
+
 (defun box-nv (box)
   "Get numeric value from box with lazy caching.
    Tied variables: bypass cache and call FETCH."
@@ -575,6 +721,11 @@
     (when (p-tie-proxy-p inner)
       (return-from box-nv
         (to-number (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))))
+  ;; use overload "0+" (numify): call handler if registered for this class
+  (let ((handler (p-find-overload box "0+")))
+    (when handler
+      (return-from box-nv
+        (to-number (p-call-overload handler box nil nil)))))
   (if (p-box-nv-ok box)
       (p-box-nv box)
       (let ((v (p-box-value box)))
@@ -670,6 +821,12 @@
     (when (p-tie-proxy-p inner)
       (return-from box-sv
         (to-string (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))))
+  ;; use overload '""' (stringify): call handler if registered for this class.
+  ;; Checked before cache because the handler result IS the string value.
+  (let ((handler (p-find-overload box "\"\"")))
+    (when handler
+      (return-from box-sv
+        (to-string (p-call-overload handler box nil nil)))))
   (if (p-box-sv-ok box)
       (p-box-sv box)
       (let* ((inner (p-box-value box))
@@ -755,6 +912,12 @@
 
 (defun p-true-p (val)
   "Perl truthiness: false if undef, 0, empty string, empty list, or nil"
+  ;; use overload "bool": check before unboxing so we have the class info
+  (when (p-box-p val)
+    (let ((handler (p-find-overload val "bool")))
+      (when handler
+        (return-from p-true-p
+          (p-true-p (p-call-overload handler val nil nil))))))
   (let ((v (unbox val)))
     (cond
       ((eq v *p-undef*) nil)
@@ -802,61 +965,91 @@
          ;; Must have consumed entire string AND have at least one digit
          (and has-digit (= pos len)))))
 
-(defun p-+ (&rest args)
-  "Perl addition"
-  (apply #'+ (mapcar #'to-number args)))
+;;; use overload — helper macro for binary arithmetic operators.
+;;; Checks left operand first, then right (reversed), then falls back to CL-OP.
+(defmacro %def-overloaded-arith (name op-str cl-op)
+  `(defun ,name (a &optional (b nil b-supplied-p))
+     ,(format nil "Perl ~A with use overload dispatch" op-str)
+     (if (not b-supplied-p)
+         ;; Unary form: e.g. +(expr) — return as-is (no overload for unary +)
+         a
+         ;; use overload: check left operand, then right (reversed flag = t)
+         (let ((ha (p-find-overload a ,op-str)))
+           (if ha (p-call-overload ha a b nil)
+               (let ((hb (p-find-overload b ,op-str)))
+                 (if hb (p-call-overload hb b a t)
+                     (,cl-op (to-number a) (to-number b)))))))))
 
-(defun p-- (&rest args)
-  "Perl subtraction / unary minus.
-   String negation rules:
-   - Pure number string: negate numerically
-   - Starts with letter/underscore: prepend '-'
-   - Starts with +/-: flip sign char (string operation)
-   - Otherwise: negate numerically"
-  (if (= (length args) 1)
-      (let ((val (unbox (first args))))
-        (if (and (stringp val)
-                 (> (length val) 0)
-                 (not (looks-like-number val)))
-            ;; Not a pure number — do string operations
-            (let ((ch (char val 0)))
-              (cond
-                ((char= ch #\-) (concatenate 'string "+" (subseq val 1)))
-                ((char= ch #\+) (concatenate 'string "-" (subseq val 1)))
-                ;; Perl string negation only for ASCII alpha/underscore
-                ;; Non-ASCII alphabetic chars (e.g. Ā) negate numerically to 0
-                ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
-                 (concatenate 'string "-" val))
-                ;; Starts with digit but not a pure number (e.g. "12foo")
-                ;; Perl negates numerically using leading portion
-                (t (- (to-number (first args))))))
-            ;; Numeric negation
-            (- (to-number (first args)))))
-      (apply #'- (mapcar #'to-number args))))
+(%def-overloaded-arith p-+ "+" +)
+(%def-overloaded-arith p-* "*" *)
 
-(defun p-* (&rest args)
-  "Perl multiplication"
-  (apply #'* (mapcar #'to-number args)))
+(defun p-- (a &optional b)
+  "Perl subtraction / unary minus with use overload dispatch.
+   Unary: checks 'neg' overload, then applies Perl string-negation rules.
+   Binary: checks '-' overload on either operand."
+  (if (null b)
+      ;; Unary minus
+      (progn
+        ;; use overload "neg": unary minus overload
+        (let ((h-neg (p-find-overload a "neg")))
+          (when h-neg (return-from p-- (p-call-overload h-neg a nil nil))))
+        ;; No overload: apply Perl string-negation rules
+        (let ((val (unbox a)))
+          (if (and (stringp val) (> (length val) 0) (not (looks-like-number val)))
+              ;; Not a pure number — string operations
+              (let ((ch (char val 0)))
+                (cond
+                  ((char= ch #\-) (concatenate 'string "+" (subseq val 1)))
+                  ((char= ch #\+) (concatenate 'string "-" (subseq val 1)))
+                  ;; ASCII alpha/underscore: prepend '-'
+                  ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
+                   (concatenate 'string "-" val))
+                  ;; Starts with digit but not pure number (e.g. "12foo"): numeric
+                  (t (- (to-number a)))))
+              ;; Numeric negation
+              (- (to-number a)))))
+      ;; Binary subtraction
+      ;; use overload "-": binary minus overload
+      (let ((ha (p-find-overload a "-")))
+        (if ha (p-call-overload ha a b nil)
+            (let ((hb (p-find-overload b "-")))
+              (if hb (p-call-overload hb b a t)
+                  (- (to-number a) (to-number b))))))))
 
 (defun p-/ (a b)
-  "Perl division"
-  (/ (to-number a) (to-number b)))
+  "Perl division with use overload '/' dispatch"
+  ;; use overload "/": division overload
+  (let ((ha (p-find-overload a "/")))
+    (if ha (p-call-overload ha a b nil)
+        (let ((hb (p-find-overload b "/")))
+          (if hb (p-call-overload hb b a t)
+              (/ (to-number a) (to-number b)))))))
 
 (defun p-% (a b)
-  "Perl modulo"
-  (mod (truncate (to-number a)) (truncate (to-number b))))
+  "Perl modulo with use overload '%' dispatch"
+  ;; use overload "%": modulo overload
+  (let ((ha (p-find-overload a "%")))
+    (if ha (p-call-overload ha a b nil)
+        (let ((hb (p-find-overload b "%")))
+          (if hb (p-call-overload hb b a t)
+              (mod (truncate (to-number a)) (truncate (to-number b))))))))
 
 (defun p-** (a b)
-  "Perl exponentiation - returns Inf on overflow like Perl"
-  (let ((na (to-number a))
-        (nb (to-number b)))
-    (handler-case
-        (let ((result (expt (coerce na 'double-float) (coerce nb 'double-float))))
-          result)
-      (floating-point-overflow ()
-        (if (and (realp na) (minusp na) (integerp nb) (oddp (truncate nb)))
-            sb-ext:double-float-negative-infinity
-            sb-ext:double-float-positive-infinity)))))
+  "Perl exponentiation with use overload '**' dispatch"
+  ;; use overload "**": exponentiation overload
+  (let ((ha (p-find-overload a "**")))
+    (when ha (return-from p-** (p-call-overload ha a b nil)))
+    (let ((hb (p-find-overload b "**")))
+      (when hb (return-from p-** (p-call-overload hb b a t))))
+    ;; No overload: existing numeric path with Inf-on-overflow
+    (let ((na (to-number a))
+          (nb (to-number b)))
+      (handler-case
+          (expt (coerce na 'double-float) (coerce nb 'double-float))
+        (floating-point-overflow ()
+          (if (and (realp na) (minusp na) (integerp nb) (oddp (truncate nb)))
+              sb-ext:double-float-negative-infinity
+              sb-ext:double-float-positive-infinity))))))
 
 (defun p-int (val)
   "Perl int - truncate toward zero"
@@ -932,13 +1125,20 @@
 ;;; String Operators
 ;;; ============================================================
 
-(defun p-. (&rest args)
-  "Perl string concatenation"
-  (apply #'concatenate 'string (mapcar #'to-string args)))
+(defun p-. (a b)
+  "Perl string concatenation operator (.) with use overload '.' dispatch."
+  ;; use overload ".": check left operand then right (reversed)
+  (let ((ha (p-find-overload a ".")))
+    (if ha (p-call-overload ha a b nil)
+        (let ((hb (p-find-overload b ".")))
+          (if hb (p-call-overload hb b a t)
+              (concatenate 'string (to-string a) (to-string b)))))))
 
 (defun p-string-concat (&rest args)
-  "Perl string concatenation (alias for interpolation)"
-  (apply #'p-. args))
+  "Perl string concatenation for string interpolation (\"$a $b\").
+   Does NOT dispatch the '.' overload — interpolation uses the '\"\"' overload
+   automatically via to-string -> box-sv."
+  (apply #'concatenate 'string (mapcar #'to-string args)))
 
 (defun p-str-x (str count)
   "Perl string repetition operator (x).
@@ -1664,6 +1864,89 @@
          (values (sprintf-apply-width s (or width 0) left-justify nil "")
                  (1+ arg-idx))))
 
+      ;; Hexadecimal floating point: %a/%A
+      ((#\a)
+       (let* ((val (nth arg-idx args))
+              (num (to-number val))
+              (is-neg (and (not (sb-ext:float-nan-p (coerce (abs num) 'double-float)))
+                           (< (coerce num 'double-float) 0.0d0)))
+              (sign-str (cond (is-neg "-")
+                              (force-sign "+")
+                              (space-sign " ")
+                              (t "")))
+              (abs-num (abs (coerce num 'double-float))))
+         (let* ((raw
+                 (cond
+                   ((sb-ext:float-nan-p abs-num) (concatenate 'string sign-str "NaN"))
+                   ((sb-ext:float-infinity-p abs-num) (concatenate 'string sign-str "Inf"))
+                   ((zerop abs-num)
+                    (let* ((frac (cond (precision
+                                        (concatenate 'string "."
+                                                     (make-string precision :initial-element #\0)))
+                                       (alt-form ".")
+                                       (t ""))))
+                      (format nil "~A0x0~Ap+0" sign-str frac)))
+                   (t
+                    (multiple-value-bind (m e s)
+                        (integer-decode-float abs-num)
+                      (declare (ignore s))
+                      (let* ((leading (- (integer-length m) 1))
+                             (frac-int (logxor m (ash 1 leading)))
+                             (biased-exp (+ e leading))
+                             ;; Align frac-int to nibble boundary: shift up if needed
+                             (nibble-shift (mod (- 4 (mod leading 4)) 4))
+                             (total-nibbles (ceiling leading 4))
+                             (frac-aligned (ash frac-int nibble-shift))
+                             (frac-full-hex
+                              (if (zerop frac-aligned) ""
+                                  (format nil (format nil "~~~D,'0X" total-nibbles)
+                                          frac-aligned)))
+                             (frac-hex
+                              (cond
+                                ;; No precision: strip trailing zeros
+                                ((null precision) (string-right-trim "0" frac-full-hex))
+                                ;; Precision 0: no fraction digits
+                                ((= precision 0) "")
+                                ;; Precision N: round to N hex digits
+                                (t
+                                 (let* ((full-len (length frac-full-hex))
+                                        (p precision))
+                                   (if (<= full-len p)
+                                       ;; Pad with zeros to precision
+                                       (format nil (format nil "~~~D,'0A" p) frac-full-hex)
+                                       ;; Round: check digit at position p
+                                       (let* ((trunc (subseq frac-full-hex 0 p))
+                                              (next-val (digit-char-p (char frac-full-hex p) 16)))
+                                         (if (>= next-val 8)
+                                             ;; Round up
+                                             (let* ((trunc-num (parse-integer trunc :radix 16))
+                                                    (rounded (1+ trunc-num)))
+                                               (if (>= rounded (expt 16 p))
+                                                   ;; Carry: fraction overflows, bump exponent
+                                                   (progn
+                                                     (incf biased-exp)
+                                                     (make-string p :initial-element #\0))
+                                                   (format nil (format nil "~~~D,'0X" p) rounded)))
+                                             trunc)))))))
+                             (frac-part
+                              (if (string= frac-hex "")
+                                  (if (or alt-form (and precision (> precision 0))) "." "")
+                                  (concatenate 'string "." frac-hex)))
+                             (exp-str (format nil "~@d" biased-exp)))
+                        (concatenate 'string sign-str "0x1" frac-part "p" exp-str))))))
+                ;; Downcase for %a, upcase for %A
+                (formatted (if upper-case-p (string-upcase raw) (string-downcase raw))))
+           ;; Width: for zero-pad, insert zeros between "0x" and mantissa
+           (if (and zero-pad (>= (or width 0) (length formatted)))
+               (let* ((prefix-len (+ (length sign-str) 2))  ; sign + "0x"
+                      (prefix (subseq formatted 0 prefix-len))
+                      (rest (subseq formatted prefix-len))
+                      (pad-len (- (or width 0) (length formatted)))
+                      (pad (make-string pad-len :initial-element #\0)))
+                 (values (concatenate 'string prefix pad rest) (1+ arg-idx)))
+               (values (sprintf-apply-width formatted (or width 0) left-justify nil sign-str)
+                       (1+ arg-idx))))))
+
       ;; Unknown: output the specifier literally
       (otherwise
        (values (format nil "%~A" type-char) arg-idx)))))
@@ -1679,9 +1962,12 @@
    Positional: %N$type selects argument N (1-based)"
   ;; Flatten any vector args: splice/map/grep in list context returns a vector
   ;; which Perl flattens into argument lists.
+  ;; Blessed arrays (p-box with class) must NOT be flattened — they are
+  ;; overloadable scalar values (e.g. objects that stringify via "").
   (let ((args (loop for arg in args
                     nconcing (let ((v (unbox arg)))
-                               (if (and (vectorp v) (not (stringp v)))
+                               (if (and (vectorp v) (not (stringp v))
+                                        (not (and (p-box-p arg) (p-box-class arg))))
                                    (coerce v 'list)
                                    (list arg))))))
   (let ((fmt-str (to-string fmt)))
@@ -2462,6 +2748,14 @@
                (,old (unbox ,box)))
           (box-set ,box (perl-increment ,box))
           ,old))
+      ;; p-cast-$ (scalar deref): may return a mutable box (chain ref→box→value).
+      ;; Capture the VALUE before mutation so post-increment returns the old value,
+      ;; not the box that was later mutated.  e.g. ${$_[0]}++ where $o = bless \$x, ...
+      ((and (listp real-place) (eq (car real-place) 'p-cast-$))
+       `(let* ((,box ,real-place)
+               (,old (if (p-box-p ,box) (p-box-value ,box) ,box)))
+          (setf ,real-place (perl-increment ,box))
+          ,old))
       ;; Traditional setf-able places (p-aref, p-gethash, etc)
       ((and (listp real-place)
             (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
@@ -2512,6 +2806,12 @@
        `(let* ((,box ,real-place)
                (,old (to-number ,box)))
           (box-set ,box (1- ,old))
+          ,old))
+      ;; p-cast-$ (scalar deref): may return a mutable box — capture VALUE before mutation
+      ((and (listp real-place) (eq (car real-place) 'p-cast-$))
+       `(let* ((,box ,real-place)
+               (,old (to-number (if (p-box-p ,box) (p-box-value ,box) ,box))))
+          (setf ,real-place (1- ,old))
           ,old))
       ;; Traditional setf-able places (p-aref, p-gethash, etc)
       ((and (listp real-place)
@@ -2610,37 +2910,43 @@
 ;;; Numeric Comparison
 ;;; ============================================================
 
-(defun p-== (a b)
-  "Perl numeric equality"
-  (= (to-number a) (to-number b)))
+;;; use overload — helper macro for binary comparison operators.
+;;; Checks op-specific handler first, then falls back to the parent
+;;; three-way operator (<=> for numeric, cmp for string) if available.
+(defmacro %def-overloaded-cmp (name op-str fallback-op cl-test)
+  `(defun ,name (a b)
+     ,(format nil "Perl ~A with use overload dispatch" op-str)
+     ;; use overload: check op-specific handler, then fallback to <=> or cmp
+     (let ((ha (p-find-overload a ,op-str)))
+       (if ha (p-true-p (p-call-overload ha a b nil))
+           (let ((hb (p-find-overload b ,op-str)))
+             (if hb (p-true-p (p-call-overload hb b a t))
+                 ;; use overload fallback: derive from three-way if available
+                 (let ((fa (p-find-overload a ,fallback-op))
+                       (fb (p-find-overload b ,fallback-op)))
+                   (if (or fa fb)
+                       (,cl-test (to-number (if fa
+                                                (p-call-overload fa a b nil)
+                                                (p-call-overload fb b a t)))
+                                 0)
+                       (,cl-test (to-number a) (to-number b))))))))))
 
-(defun p-!= (a b)
-  "Perl numeric inequality"
-  (/= (to-number a) (to-number b)))
-
-(defun p-< (a b)
-  "Perl numeric less than"
-  (< (to-number a) (to-number b)))
-
-(defun p-> (a b)
-  "Perl numeric greater than"
-  (> (to-number a) (to-number b)))
-
-(defun p-<= (a b)
-  "Perl numeric less than or equal"
-  (<= (to-number a) (to-number b)))
-
-(defun p->= (a b)
-  "Perl numeric greater than or equal"
-  (>= (to-number a) (to-number b)))
+(%def-overloaded-cmp p-==  "=="  "<=>"  =)
+(%def-overloaded-cmp p-!=  "!="  "<=>"  /=)
+(%def-overloaded-cmp p-<   "<"   "<=>"  <)
+(%def-overloaded-cmp p->   ">"   "<=>"  >)
+(%def-overloaded-cmp p-<=  "<="  "<=>"  <=)
+(%def-overloaded-cmp p->=  ">="  "<=>"  >=)
 
 (defun p-<=> (a b)
-  "Perl spaceship operator"
-  (let ((na (to-number a))
-        (nb (to-number b)))
-    (cond ((< na nb) -1)
-          ((> na nb) 1)
-          (t 0))))
+  "Perl spaceship operator with use overload '<=>' dispatch"
+  ;; use overload "<=>": check left operand then right (reversed)
+  (let ((ha (p-find-overload a "<=>")))
+    (if ha (p-call-overload ha a b nil)
+        (let ((hb (p-find-overload b "<=>")))
+          (if hb (p-call-overload hb b a t)
+              (let ((na (to-number a)) (nb (to-number b)))
+                (cond ((< na nb) -1) ((> na nb) 1) (t 0))))))))
 
 ;;; ============================================================
 ;;; Range Operator
@@ -2721,37 +3027,47 @@
 ;;; String Comparison
 ;;; ============================================================
 
-(defun p-str-eq (a b)
-  "Perl string equality (eq)"
-  (string= (to-string a) (to-string b)))
+;;; use overload — helper macro for string comparison operators.
+;;; STR-TEST applied to (to-string a) (to-string b) for non-overloaded case.
+;;; CMP-TEST applied to (cmp-result) 0 for the cmp-based fallback.
+;;; These are distinct because str-test takes strings, cmp-test takes numbers.
+(defmacro %def-overloaded-str-cmp (name op-str str-test cmp-test)
+  `(defun ,name (a b)
+     ,(format nil "Perl ~A with use overload dispatch" op-str)
+     ;; use overload: check op-specific handler, then fallback to cmp
+     (let ((ha (p-find-overload a ,op-str)))
+       (if ha (p-true-p (p-call-overload ha a b nil))
+           (let ((hb (p-find-overload b ,op-str)))
+             (if hb (p-true-p (p-call-overload hb b a t))
+                 (let ((fa (p-find-overload a "cmp"))
+                       (fb (p-find-overload b "cmp")))
+                   (if (or fa fb)
+                       ;; use overload fallback: cmp returns -1/0/1, test against 0
+                       (,cmp-test (to-number (if fa
+                                                  (p-call-overload fa a b nil)
+                                                  (p-call-overload fb b a t)))
+                                  0)
+                       ;; No overload: direct string comparison
+                       ;; Wrap in (if ... t nil) — CL string predicates may return
+                       ;; a position number (not T), and 0 is falsy in Perl.
+                       (if (,str-test (to-string a) (to-string b)) t nil)))))))))
 
-(defun p-str-ne (a b)
-  "Perl string inequality (ne)"
-  (not (string= (to-string a) (to-string b))))
-
-(defun p-str-lt (a b)
-  "Perl string less than (lt)"
-  (if (string< (to-string a) (to-string b)) t nil))
-
-(defun p-str-gt (a b)
-  "Perl string greater than (gt)"
-  (if (string> (to-string a) (to-string b)) t nil))
-
-(defun p-str-le (a b)
-  "Perl string less than or equal (le)"
-  (if (string<= (to-string a) (to-string b)) t nil))
-
-(defun p-str-ge (a b)
-  "Perl string greater than or equal (ge)"
-  (if (string>= (to-string a) (to-string b)) t nil))
+(%def-overloaded-str-cmp p-str-eq  "eq"  string=   =)
+(%def-overloaded-str-cmp p-str-ne  "ne"  string/=  /=)
+(%def-overloaded-str-cmp p-str-lt  "lt"  string<   <)
+(%def-overloaded-str-cmp p-str-gt  "gt"  string>   >)
+(%def-overloaded-str-cmp p-str-le  "le"  string<=  <=)
+(%def-overloaded-str-cmp p-str-ge  "ge"  string>=  >=)
 
 (defun p-str-cmp (a b)
-  "Perl string comparison (cmp)"
-  (let ((sa (to-string a))
-        (sb (to-string b)))
-    (cond ((string< sa sb) -1)
-          ((string> sa sb) 1)
-          (t 0))))
+  "Perl string comparison (cmp) with use overload 'cmp' dispatch"
+  ;; use overload "cmp": check left operand then right (reversed)
+  (let ((ha (p-find-overload a "cmp")))
+    (if ha (p-call-overload ha a b nil)
+        (let ((hb (p-find-overload b "cmp")))
+          (if hb (p-call-overload hb b a t)
+              (let ((sa (to-string a)) (sb (to-string b)))
+                (cond ((string< sa sb) -1) ((string> sa sb) 1) (t 0))))))))
 
 ;;; ============================================================
 ;;; Chained Comparison
@@ -4101,7 +4417,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (t
        (let ((s (if (= (length args) 1)
                     (to-string (unbox (car args)))
-                    (apply #'p-. args))))
+                    (apply #'p-string-concat args))))
          (if (and (> (length s) 0)
                   (char= (char s (1- (length s))) #\Newline))
              s
@@ -4148,7 +4464,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; Object exception - preserve for $@
       (error 'p-exception :object (car args))
       ;; String exception
-      (error (apply #'p-. args))))
+      (error (apply #'p-string-concat args))))
 
 ;;; Forward declarations for p-do (both defined later in this file)
 (declaim (ftype function p-eval))

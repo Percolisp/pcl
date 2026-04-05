@@ -111,6 +111,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
   unlink unpack unshift untie until use values vec version-string wantarray warn while xor ||
+  overloaded overload-strval
 );
 
 # Only exceptions that need different CL names than p-<perl-op>
@@ -213,6 +214,11 @@ sub cl_name {
     # CORE:: is Perl's built-in namespace — strip it and use the PCL built-in
     if ($pkg eq 'CORE') {
       return exists $RUNTIME_NAMES{$func} ? "p-$func" : "pl-$func";
+    }
+    # use overload introspection: overload::StrVal($obj), overload::Overloaded($obj)
+    if ($pkg eq 'overload') {
+      return 'p-overload-strval' if $func eq 'StrVal';
+      return 'p-overloaded'     if $func eq 'Overloaded';
     }
     # Record package reference for pre-declaration
     $self->environment->add_referenced_package($pkg) if $self->environment;
@@ -417,6 +423,15 @@ sub gen_leaf {
       # Use pipe quoting for nested packages
       my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
       return "${cl_pkg}::${sigil}${name}";
+    }
+    # Handle package stash typeglob: *Pkg:: (no variable name) -> (p-stash "Pkg")
+    # Perl: undef *Food:: or *Mover:: = *Mover2::
+    # PCL: stash ops not fully supported but must be syntactically valid CL
+    if ($content =~ /^\*(.*)::$/) {
+      my $pkg = $1;
+      $pkg = 'main' if $pkg eq '';
+      $self->environment->add_referenced_package($pkg) if $self->environment;
+      return "(p-stash \"$pkg\")";
     }
     # Handle package-qualified typeglobs: *Pkg::foo -> (p-make-typeglob "Pkg" "foo")
     # Also: *::foo means *main::foo (empty package = main)
@@ -1524,6 +1539,31 @@ sub gen_prefix_op {
     return "(p-array-last-index $arr_expr)";
   }
 
+  # ${expr}++ / $$var++ / ${expr}-- / $$var-- (and @/% variants):
+  # The shunting-yard parser incorrectly produces prefix_op($, postfix_op(X, ++))
+  # because ++ has higher precedence (92) than Cast $ (90).
+  # The correct semantics is postfix_op(prefix_op($, X), ++):
+  #   (p-post++ (p-cast-$ X))  not  (p-cast-$ (p-post++ X))
+  if ($op eq '$' || $op eq '@' || $op eq '%') {
+    my $inner_id   = $kids->[1];
+    my $inner_node = $self->expr_o->get_a_node($inner_id);
+    if ($self->expr_o->is_internal_node_type($inner_node)
+        && $inner_node->{type} eq 'postfix_op') {
+      my $po_kids    = $self->expr_o->get_node_children($inner_id);
+      my $po_op_node = $self->expr_o->get_a_node($po_kids->[1]);
+      my $po_op      = $po_op_node->content();
+      if ($po_op eq '++' || $po_op eq '--') {
+        # Inner expression should NOT be in lvalue context: we want the VALUE
+        # (the reference) to pass to p-cast-$, not the box.
+        my $saved = $self->lvalue_context;
+        $self->lvalue_context(0);
+        my $inner_expr = $self->gen_node($po_kids->[0]);
+        $self->lvalue_context($saved);
+        return "(p-post$po_op (p-cast-$op $inner_expr))";
+      }
+    }
+  }
+
   # ++, --, and \ need l-value context for array/hash elements
   # \ needs l-value to get a reference to the box, not a copy of the value
   my $needs_lvalue = ($op eq '++' || $op eq '--' || $op eq '\\');
@@ -1910,6 +1950,44 @@ sub _is_array_expr_node {
   return 0;
 }
 
+# Returns true if a node (by ID) is a known list-returning expression.
+# Used by gen_tree_val to decide whether to wrap in (vector ...) or not.
+# Checks the AST structure — no string-matching on generated code.
+sub _child_is_list_expr {
+  my ($self, $node_id) = @_;
+  my $node = $self->expr_o->get_a_node($node_id);
+
+  # Array variable: @arr, @_  — already a vector
+  if (ref($node) && $node->can('content')) {
+    my $content = $node->content() // '';
+    return 1 if $content =~ /^@/;
+  }
+
+  # Only internal (non-leaf) nodes below this point
+  return 0 unless $self->expr_o->is_internal_node_type($node);
+
+  my $type = $node->{type} // '';
+  my $kids = $self->expr_o->get_node_children($node_id);
+
+  # funcall: map, grep, sort, split, reverse, keys, values, each, etc.
+  if ($type eq 'funcall' && @$kids >= 1) {
+    my $func_node = $self->expr_o->get_a_node($kids->[0]);
+    if (ref($func_node) && $func_node->can('content')) {
+      my $fname = lc($func_node->content() // '');
+      return 1 if $fname =~ /^(?:map|grep|sort|split|reverse|keys|values|each|unpack|readdir|localtime|caller|stat|lstat|getpwent|getgrent|getpwnam|getpwuid|getgrgid|getgrnam)$/;
+    }
+  }
+
+  # tree_val (parenthesized expr): list if multiple children, or if single
+  # child is itself list-returning.
+  if ($type eq 'tree_val') {
+    return 1 if @$kids > 1;
+    return $self->_child_is_list_expr($kids->[0]) if @$kids == 1;
+  }
+
+  return 0;
+}
+
 
 # Tree value (parenthesized expression): just generate the content
 sub gen_tree_val {
@@ -1927,6 +2005,9 @@ sub gen_tree_val {
     if ($ctx == 1) {  # LIST_CTX = 1
       $self->expr_o->set_node_context($kids->[0], 1);
     }
+    # Check at AST level (before codegen) whether child is a list-returning expr.
+    # If so, we must NOT wrap it in (vector ...) — the child already returns a vector.
+    my $child_is_list = ($ctx == 1) && $self->_child_is_list_expr($kids->[0]);
     my $child = $self->gen_node($kids->[0]);
     if ($ctx == 1) {  # LIST_CTX = 1
       # Special case: regex match already returns captures in list context
@@ -1934,7 +2015,7 @@ sub gen_tree_val {
       if ($child =~ /\(p-=~\s/) {
         return "(let ((*wantarray* t)) $child)";
       }
-      return "(vector $child)";
+      return $child_is_list ? $child : "(vector $child)";
     }
     return $child;
   }
@@ -2509,8 +2590,8 @@ sub convert_perl_string {
     # qq{}, qq(), qq[], qq<> style (optional whitespace between qq and delimiter)
     $content = $1;
   }
-  elsif ($str =~ /^qq(.)(.*)\1$/s) {
-    # qq/.../  style - content is in $2
+  elsif ($str =~ /^qq\s*(.)(.*)(\1)$/s) {
+    # qq/.../ or qq '...' style (optional whitespace between qq and delimiter)
     $content = $2;
   }
   elsif ($str =~ /^q\s*\{(.*)\}$/s || $str =~ /^q\s*\((.*)\)$/s ||
@@ -2523,8 +2604,8 @@ sub convert_perl_string {
     $content =~ s/"/\\"/g;
     return qq{"$content"};
   }
-  elsif ($str =~ /^q(.)(.*)\1$/s) {
-    # q/.../ style - content is in $2
+  elsif ($str =~ /^q\s*(.)(.*)(\1)$/s) {
+    # q/.../ or q '...' style (optional whitespace between q and delimiter)
     $content = $2;
     $content =~ s/\\\\/\\/g;
     $content =~ s/\\/\\\\/g;
