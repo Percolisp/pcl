@@ -137,6 +137,7 @@
    #:p-tie-proxy #:make-p-tie-proxy #:p-tie-proxy-p
    #:p-tie-proxy-tie-obj #:p-tie-proxy-saved-value
    #:p-tie #:p-untie #:p-tied
+   #:p-weaken #:p-isweak
    ;; Compile-time definition macros (for BEGIN block support)
    #:p-defpackage #:p-sub #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
@@ -1221,7 +1222,8 @@
          (slen (length s))
          (st (truncate (to-number start)))
          ;; Handle negative start: count from end
-         (st (if (< st 0) (max 0 (+ slen st)) st))
+         ;; Clamp: negative start counts from end; large positive start clamps to slen
+         (st (if (< st 0) (max 0 (+ slen st)) (min st slen)))
          (ln-raw (if len (truncate (to-number len)) nil))
          ;; Calculate end position, handling negative length
          (end-pos (cond ((null ln-raw) slen)
@@ -6157,9 +6159,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-cast-@ (val)
   "Perl array dereference @{$ref} - unbox to get the array.
    Handles both old format (box containing vector) and new format
-   (box containing box containing vector, from p-backslash)."
+   (box containing box containing vector, from p-backslash).
+   Auto-vivifies: if val is a box whose value is undef/nil, creates an empty
+   array, stores it back in the box, and returns it (Perl lvalue semantics)."
   (let ((v (unbox val)))
-    (if (p-box-p v) (unbox v) v)))
+    (cond
+      ;; Double-boxed: box(box(arr)) from \@arr — unwrap both layers
+      ((p-box-p v) (unbox v))
+      ;; Direct vector
+      ((and v (vectorp v) (not (stringp v))) v)
+      ;; val is an lvalue box (from p-aref-box / p-gethash-box) containing undef:
+      ;; auto-vivify — create an empty array and write it back into the box
+      ((and (p-box-p val) (or (null v) (eq v *p-undef*)))
+       (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+         (box-set val new-arr)
+         new-arr))
+      ;; Fallback: return whatever we have (may be *p-undef* if no box to write back)
+      (t (or v *p-undef*)))))
 
 (defun p-cast-% (val)
   "Perl hash dereference %{$ref} - unbox to get the hash.
@@ -6255,6 +6271,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   ((p-box-p inner) "SCALAR")
                   ((p-typeglob-p inner) "GLOB")
                   (t r)))))))))
+
+;;; Scalar::Util / builtin — weak reference stubs
+;;; PCL uses a tracing GC; true weak refs require trivial-garbage integration.
+;;; weaken() is a no-op (object stays alive); isweak() always returns false.
+(defun p-weaken (ref)
+  "Scalar::Util::weaken / builtin::weaken — no-op stub."
+  (declare (ignore ref))
+  *p-undef*)
+
+(defun p-isweak (ref)
+  "Scalar::Util::isweak / builtin::isweak — always false in PCL."
+  (declare (ignore ref))
+  "")
 
 ;;; ============================================================
 ;;; Typeglob Support
@@ -7708,6 +7737,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (in-package :INTERNALS)
 ;; Returns 0 — PCL is not a reference-counted stack build
 (defun pl-stack_refcounted () (make-p-box 0))
+;; Internals::SvREADONLY($ref, $flag) — marks a scalar read-only.
+;; PCL has no read-only box semantics; this is a documented no-op.
+;; Returns 0 (not read-only) when called as a getter (1 arg).
+(defun pl-svreadonly (&rest args)
+  (declare (ignore args))
+  (make-p-box 0))
+;; Internals::SvREFCNT($ref) — reference count; always 1 in a GC runtime.
+(defun pl-svrefcnt (&rest args)
+  (declare (ignore args))
+  (make-p-box 1))
 (in-package :pcl)
 
 ;; DynaLoader/XSLoader stubs

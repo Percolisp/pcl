@@ -110,7 +110,8 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   string-concat study sub sub-defined sub-exists subst substr super-call sysread system syswrite
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
-  unlink unpack unshift untie until use values vec version-string wantarray warn while xor ||
+  unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
+  while xor ||
   overloaded overload-strval
 );
 
@@ -1564,9 +1565,10 @@ sub gen_prefix_op {
     }
   }
 
-  # ++, --, and \ need l-value context for array/hash elements
-  # \ needs l-value to get a reference to the box, not a copy of the value
-  my $needs_lvalue = ($op eq '++' || $op eq '--' || $op eq '\\');
+  # ++, --, \ and @ need l-value context for array/hash elements.
+  # @ needs lvalue so subscripts return boxes → p-cast-@ can auto-vivify.
+  # \ needs l-value to get a reference to the box, not a copy of the value.
+  my $needs_lvalue = ($op eq '++' || $op eq '--' || $op eq '\\' || $op eq '@');
   my $saved_lvalue = $self->lvalue_context;
   $self->lvalue_context(1) if $needs_lvalue;
   my $operand = $self->gen_node($kids->[1]);
@@ -1675,7 +1677,11 @@ sub gen_array_access {
   my $kids    = shift;
 
   my $arr = $self->gen_node($kids->[0]);
-  my $idx = $self->gen_node($kids->[1]);
+  # Bareword array index: auto-quote to string (evaluates to 0 numerically, like Perl)
+  my $idx_node = $self->expr_o->get_a_node($kids->[1]);
+  my $idx = (ref($idx_node) eq 'PPI::Token::Word')
+    ? '"' . $idx_node->content() . '"'
+    : $self->gen_node($kids->[1]);
 
   # Convert $varname to @varname (Perl $arr[i] accesses @arr)
   # Handle both plain $arr and package-qualified Pkg::$arr

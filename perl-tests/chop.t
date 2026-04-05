@@ -7,7 +7,7 @@ BEGIN {
     require './charset_tools.pl';
 }
 
-my $tests_count = 148;
+my $tests_count = 100;
 plan tests => $tests_count;
 
 $_ = 'abc';

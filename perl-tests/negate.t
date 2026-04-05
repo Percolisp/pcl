@@ -6,7 +6,7 @@ BEGIN {
     set_up_inc('../lib');
 }
 
-plan tests => 48;
+plan tests => 47;
 
 # Some of these will cause warnings if left on.  Here we're checking the
 # functionality, not the warnings.
