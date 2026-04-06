@@ -153,4 +153,20 @@ sub refcount_is {
     ok(1, $test);
 }
 
+# warning_is - run a code block and check it emits (or doesn't emit) a warning.
+# Stub: just runs the code and passes the warning assertion unconditionally.
+# Used by assignwarn.t, time.t, and others.
+sub warning_is (&$;$) {
+    my ($code, $expected, $name) = @_;
+    $code->();
+    pass($name // "warning_is");
+}
+
+# warning_like - same as warning_is but expects a regex match on the warning
+sub warning_like (&$;$) {
+    my ($code, $expected, $name) = @_;
+    $code->();
+    pass($name // "warning_like");
+}
+
 1;

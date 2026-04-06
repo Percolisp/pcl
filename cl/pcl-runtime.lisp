@@ -5416,7 +5416,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    In list context returns (sec min hour mday mon year wday yday isdst).
    Note: mon is 0-11, year is years since 1900, wday is 0=Sunday.
    Warns and returns undef for out-of-range timestamps."
-  (let* ((unix-time (if time (truncate (to-number time)) (p-time))))
+  (let* ((unix-time (if time
+                        (handler-case (truncate (to-number time))
+                          (arithmetic-error () (return-from p-localtime *p-undef*)))
+                        (p-time))))
     (cond
       ((> unix-time +gmtime-max+)
        (p-warn (make-p-box (format nil "localtime(~A) too large" unix-time)))
@@ -5456,7 +5459,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl gmtime - convert time to UTC components.
    Same return format as localtime but in UTC.
    Warns and returns undef for out-of-range timestamps."
-  (let* ((unix-time (if time (truncate (to-number time)) (p-time))))
+  (let* ((unix-time (if time
+                        (handler-case (truncate (to-number time))
+                          (arithmetic-error () (return-from p-gmtime *p-undef*)))
+                        (p-time))))
     (cond
       ((> unix-time +gmtime-max+)
        (p-warn (make-p-box (format nil "gmtime(~A) too large" unix-time)))

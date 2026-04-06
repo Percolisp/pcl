@@ -1480,6 +1480,10 @@ sub handle_subcalls {
       if (ref($invocant) eq 'PPI::Token::Word'
           && !$self->is_token_operator($invocant)
           && $invocant->content =~ /^[A-Z]/) {
+        # Skip all-uppercase invocants: they are Perl special blocks (INIT, BEGIN,
+        # END, CHECK), filehandles (FILE, STDOUT), or constants — never class names
+        # in indirect-object syntax.  Same rule applied to method names above.
+        next if $invocant->content =~ /^[A-Z][A-Z0-9_]*$/;
         $invocant_is_class = 1;
       } elsif (ref($invocant) eq 'PPI::Token::Symbol'
                && $invocant->content =~ /^\$/) {
