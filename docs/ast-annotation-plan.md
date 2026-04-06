@@ -28,10 +28,11 @@ The transpiler's code generator (`Pl/ExprToCL.pm`) currently makes structural de
 ```
 Perl Source
     → PPI
-    → parse_expr_to_tree()     [PExpr.pm]
-    → annotate_contexts()      [PExpr.pm — already exists]
-    → ASTAnnotator::annotate() [NEW: Pl/ASTAnnotator.pm]
-    → ExprToCL::generate()     [reads annotations from node metadata]
+    → parse_expr_to_tree()       [PExpr.pm]
+    → annotate_contexts()        [PExpr.pm — already exists]
+    → VarAnnotator::annotate()   [NEW: Phase 0 — scope stack, var_kind, closure_captured, loop_var]
+    → ASTAnnotator::annotate()   [NEW: Phase 1–2 — returns_list, needs_wantarray, lvalue]
+    → ExprToCL::generate()       [reads annotations from node metadata]
     → CL output
 ```
 
@@ -93,7 +94,115 @@ The `ASTAnnotator` walks the complete AST once and stores type information as no
 
 ---
 
-### D. `numeric_context` / `string_context` (future)
+### D. Variable Annotations (Phase 0 — prerequisite pass)
+
+**Goal:** Resolve every variable reference in the AST to its declaration, and record how the declaration is used. This pass runs before all expression annotations (A–C) and before any code is generated. It replaces the current ad-hoc mechanisms scattered across `Parser.pm`:
+
+| Current mechanism | Replaced by |
+|---|---|
+| `_vars_referenced_in_closures` (Parser.pm) | `closure_captured` annotation on `my` decl nodes |
+| `$var__lex__N` renaming at parse time | Annotation-driven rename in codegen, not in AST |
+| `_insert_variable_forward_declarations` pre-scan | `var_kind` annotation drives `defvar` vs `let` choice |
+| Hard-coded `$a`/`$b` always-defvar rule | `sort_special` annotation on `$a`/`$b` uses inside sort blocks |
+
+#### D1. `var_kind` (string: `'my'` | `'our'` | `'local'` | `'package'` | `'special'`)
+
+**Semantics:** How the variable was declared (or used without declaration).
+
+**Set on:** Every variable-leaf node (sigil + name) during a post-order walk.
+
+- `my` — declared with `my` in enclosing lexical scope
+- `our` — declared with `our`, alias to package variable
+- `local` — declared with `local`, dynamic binding
+- `package` — used without `my`/`our`/`local`, implicitly global
+- `special` — built-in punctuation/named special vars (`$_`, `@_`, `$!`, `$@`, `$/`, `$a`, `$b`, `%ENV`, etc.)
+
+**Used in:** Codegen decides between `let`-binding (for `my`) and `defvar`/dynamic (for everything else).
+
+#### D2. `var_decl_node` (node ID or `undef`)
+
+**Semantics:** Points to the AST node of the `my`/`our`/`local` declaration that introduced this variable in its current scope. `undef` for package/special variables.
+
+**Set on:** Every variable-leaf node that resolves to a lexical declaration.
+
+**Used in:** Detecting variable shadowing; emitting a single `(let ($x ...) ...)` at the declaration site rather than a forward `(defvar $x)` + later assignment.
+
+#### D3. `closure_captured` (boolean)
+
+**Semantics:** A `my` variable is `closure_captured` if it is referenced inside a nested `sub {}` or `do {}` block that outlives the declaring scope.
+
+**Set on:** The declaration node (`my $x`) — not the use sites.
+
+**Used in:** Codegen wraps the captured variable's `let` binding in a `cons`-cell or moves it to a `defvar` with a unique `__lex__N` suffix, so the closure's `funcall` frame can reach the live binding. Currently this renaming happens at *parse time* (`_vars_referenced_in_closures` + `__lex__N` suffix injection). Moving it here means the AST stays clean; only codegen emits the mangled name.
+
+#### D4. `loop_var` (boolean)
+
+**Semantics:** This `my` declaration is the iteration variable of a `for`/`foreach` loop.
+
+**Set on:** The `my $x` node in `foreach my $x (...)`.
+
+**Used in:** Codegen must create a fresh binding per iteration (not a single `let` hoisted outside the loop). Currently `pl-foreach` handles this implicitly; the annotation makes the intent explicit and guards against accidental hoisting in future refactors.
+
+#### D5. `sort_special` (boolean)
+
+**Semantics:** This use of `$a` or `$b` is inside a sort comparator block (or a named sub used as a comparator in the same file).
+
+**Set on:** `$a` / `$b` leaf nodes inside sort blocks.
+
+**Used in:** Forces `defvar` emission even when the variable is never assigned with `my` — same as the current hard-coded unconditional `defvar` for `$a`/`$b`, but scope-limited.
+
+#### Implementation approach
+
+The variable annotation pass requires a **scope stack**. It runs in two sub-passes:
+
+1. **Declaration scan (pre-order):** Walk the AST; when a `my`/`our`/`local` declaration is seen, push `($name → decl_node_id)` onto the current scope frame. Push a new frame on entering a `sub {}` or `do {}` block; pop on exit.
+
+2. **Use resolution (same walk):** For every variable-leaf node, look up `$name` in the scope stack (innermost frame first). Annotate with `var_kind` and `var_decl_node`. If the resolution crosses a `sub` boundary, set `closure_captured` on the decl node.
+
+**Walk is done by** a new `Pl::VarAnnotator` module (or a sub-phase of `Pl::ASTAnnotator`), using the `OpcodeTree::set_metadata` / `get_metadata` API already available.
+
+---
+
+### E. `unboxable` (Phase 0b — scalar unboxing analysis)
+
+**Goal:** Identify `my $scalar` variables that are never referenced (`\$var`) and therefore do not need to be stored in a mutable heap box. Codegen can emit a plain CL `let`-binding that holds the raw value directly instead of `(make-p-box value)`.
+
+**Why boxing exists:** Every Perl scalar is currently stored as a `p-box` (a one-slot struct). This allows:
+- `\$x` — reference-taking returns the box itself
+- `pos($x)` — stores regex position in the box's metadata slot
+- Tied scalars — FETCH/STORE dispatch through the box
+- `local`-ization — dynamic binding saves/restores the box
+
+For the vast majority of `my` scalars in real code, none of these apply. The box is pure overhead: `make-p-box` at declaration, `unbox` at every read, `(setf (p-box-value b) v)` at every write.
+
+**Set on:** The declaration node of a `my $scalar` (not arrays or hashes — those are already vectors/hash-tables and don't use the box model in the same way).
+
+Set `unboxable = true` initially for every `my $scalar` declaration. Then set `unboxable = false` if any of the following are found for that variable (via the use-site list built in Phase 0):
+
+| Disqualifying use | Reason |
+|---|---|
+| `\$var` (reference-taking) | Returns the box object; box must exist |
+| `pos($var)` or `pos($var) = N` | Regex position stored as box metadata |
+| `tied($var)` or `tie $var, ...` | FETCH/STORE requires box dispatch |
+| `local $var` in an inner scope | Dynamic restore needs the box as the binding unit |
+| The variable is `closure_captured` AND it is written inside the closure | Closing over a mutable box is how captures share state |
+
+Note: a closure-captured variable that is **read-only inside the closure** (only assigned in the outer scope before the closure is created) is still unboxable — the closure can just close over the raw CL value.
+
+**Used in codegen:**
+
+- Declaration: `(let ($x INIT) ...)` instead of `(let ($x (make-p-box INIT)) ...)`
+- Read: `$x` directly instead of `(unbox $x)`
+- Write: `(setf $x RHS)` instead of `(p-setf $x RHS)` (which calls `(setf (p-box-value $x) ...)`)
+- Subscript lvalue: unaffected — `p-aref-box`/`p-gethash-box` return their own box for the slot, independent of the scalar variable's box
+
+**Walk:** Runs as a second sub-pass within Phase 0 (after variable resolution), iterating over each `my $scalar` declaration's collected use-site list. O(N) in total variable uses.
+
+**Scope:** Initially applies only to `my $scalar` (sigil `$`). Arrays (`my @arr`) and hashes (`my %hash`) are already stored as CL vectors / hash-tables; extending unboxing to them is a separate future concern.
+
+---
+
+### F. `numeric_context` / `string_context` (future)
 
 **Semantics:** "The result of this expression will be coerced to a number / string."
 
@@ -114,7 +223,7 @@ use Moo;
 
 has expr_o => (is => 'ro', required => 1);
 
-# Main entry point. Run after annotate_contexts().
+# Main entry point. Run after VarAnnotator and annotate_contexts().
 sub annotate {
     my ($self, $root_id) = @_;
     $self->_annotate_returns_list($root_id);  # bottom-up (post-order)
@@ -197,11 +306,14 @@ Remove the fallback and delete `_child_is_list_expr` once Phase 1 tests pass.
 
 | File | Status | Role |
 |------|--------|------|
-| `Pl/ASTAnnotator.pm` | **New** | All annotation walk logic |
+| `Pl/VarAnnotator.pm` | **New** | Phase 0: scope stack, variable resolution, closure capture detection |
+| `Pl/ASTAnnotator.pm` | **New** | Phase 1–2: `returns_list`, `needs_wantarray`, `lvalue` walk logic |
 | `Pl/ExprToCL.pm` | Modify | Use annotations; remove `lvalue_context` threading; remove `_child_is_list_expr` |
+| `Pl/Parser.pm` | Modify | Remove `_vars_referenced_in_closures` and `__lex__N` renaming; remove `_insert_variable_forward_declarations` pre-scan; drive these from VarAnnotator output instead |
 | `Pl/OpcodeTree.pm` | No change | `set_metadata`/`get_metadata` already sufficient |
 | `Pl/PExpr.pm` | No change | `annotate_contexts` already sets `context` metadata |
-| `Pl/t/ast-annotator-01.t` | **New** | Unit tests: verify annotation values directly |
+| `Pl/t/var-annotator-01.t` | **New** | Unit tests: verify var_kind, closure_captured, loop_var, unboxable values |
+| `Pl/t/ast-annotator-01.t` | **New** | Unit tests: verify returns_list, lvalue annotation values |
 | `Pl/t/ast-annotator-codegen-01.t` | **New** | Integration tests: verify codegen output changed correctly |
 
 ---
@@ -216,6 +328,12 @@ Remove the fallback and delete `_child_is_list_expr` once Phase 1 tests pass.
 
 ## Implementation Order
 
-1. **Phase 1** (highest ROI): `returns_list` + `needs_wantarray` annotations → fix `gen_tree_val`
-2. **Phase 2** (medium ROI): `lvalue` annotation → remove `lvalue_context` threading
-3. **Phase 3** (deferred): `numeric_context`/`string_context` for coercion optimization
+0. **Phase 0** (prerequisite): Variable annotations (D1–D5) — scope stack, declaration scan, closure capture detection. Replaces `_vars_referenced_in_closures`, the `__lex__N` renaming at parse time, and the `_insert_variable_forward_declarations` pre-scan. No codegen changes in this phase; just build the annotation data.
+
+0b. **Phase 0b** (unboxing analysis): `unboxable` annotation (E) — second sub-pass over Phase 0's use-site lists. Marks `my $scalar` declarations that need no heap box. Codegen changes: skip `make-p-box` at declaration, skip `unbox` at reads, emit raw `setf` at writes.
+
+1. **Phase 1** (highest ROI): `returns_list` + `needs_wantarray` annotations (A, B) → fix `gen_tree_val` string matching and hardcoded function list.
+
+2. **Phase 2** (medium ROI): `lvalue` annotation (C) → remove `lvalue_context` mutable-flag threading from codegen.
+
+3. **Phase 3** (deferred): `numeric_context`/`string_context` (F) — coercion optimization, not needed for correctness.

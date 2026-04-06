@@ -1082,8 +1082,9 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $arr = $self->gen_node($arg_kids->[0]);
-        # Convert $a to @a for array
-        if (ref($arr_node) eq 'PPI::Token::Symbol' && $arr =~ /^\$/) {
+        # Convert $a to @a for array (Symbol or Magic like $_)
+        if ((ref($arr_node) eq 'PPI::Token::Symbol'
+             || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /^\$/) {
           $arr =~ s/^\$/\@/;
         }
         my $idx = $self->gen_node($arg_kids->[1]);
@@ -1097,8 +1098,9 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $hash = $self->gen_node($arg_kids->[0]);
-        # Convert $h to %h for hash
-        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\$/) {
+        # Convert $h to %h for hash (Symbol or Magic like $_)
+        if ((ref($hash_node) eq 'PPI::Token::Symbol'
+             || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /^\$/) {
           $hash =~ s/^\$/\%/;
         }
         my $key = $self->gen_node($arg_kids->[1]);
@@ -1211,7 +1213,8 @@ sub gen_funcall {
           # Array access: exists $a[idx] -> (p-exists-array @arr idx)
           my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $arr = $self->gen_node($arg_kids->[0]);
-          if (ref($arr_node) eq 'PPI::Token::Symbol' && $arr =~ /^\$/) {
+          if ((ref($arr_node) eq 'PPI::Token::Symbol'
+               || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /^\$/) {
             $arr =~ s/^\$/\@/;
           }
           my $idx = $self->gen_node($arg_kids->[1]);
@@ -1221,7 +1224,8 @@ sub gen_funcall {
           # Hash access: exists $h{key} -> (p-exists %h key)
           my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $hash = $self->gen_node($arg_kids->[0]);
-          if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\$/) {
+          if ((ref($hash_node) eq 'PPI::Token::Symbol'
+               || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /^\$/) {
             $hash =~ s/^\$/\%/;
           }
           my $key = $self->gen_node($arg_kids->[1]);
@@ -1523,13 +1527,14 @@ sub gen_prefix_op {
   my $op      = $op_node->content();
 
   # Special case: \&func (reference to function)
+  # Use p-backslash-sub to safely handle undefined functions (AUTOLOAD dispatch).
   if ($op eq '\\') {
     my $operand_node = $self->expr_o->get_a_node($kids->[1]);
     if (ref($operand_node) eq 'PPI::Token::Symbol' &&
         $operand_node->content() =~ /^&(.+)$/) {
       my $func_name = $1;
       my $cl_func = $self->cl_name($func_name, 1);
-      return "#'$cl_func";
+      return "(p-backslash-sub '$cl_func)";
     }
   }
 
@@ -2217,13 +2222,20 @@ sub gen_inline_lambda {
   my $body     = $node->{body_cl} // 'nil';
   my $for_func = $node->{for_func} // '';
 
-  # Named sort comparator (sort NAME LIST): call sub with $a $b as explicit args.
-  # The lambda params $a/$b are CL special vars (defvar'd), creating dynamic bindings
-  # visible to subs that read $a/$b as globals; passing them also populates @_ for
-  # prototype-based comparators like sub cmp($$) { my($a,$b)=@_; ... }.
+  # Named sort comparator (sort NAME LIST): call sub with empty @_.
+  # Perl sets $a/$b as package globals, NOT via @_. The lambda params ($a $b)
+  # create dynamic bindings (because $a/$b are defvar'd special vars), so the
+  # comparator sub can read $a/$b without receiving them as arguments.
+  # If the function is undefined, dispatch to AUTOLOAD (Perl #30661).
   if ($for_func eq 'sort' && $node->{comparator_name}) {
     my $cl_func = $self->cl_name($node->{comparator_name});
-    $body = "($cl_func \$a \$b)";
+    my $func_str = $node->{comparator_name};  # original Perl name for AUTOLOAD
+    my $lambda_body = "(handler-case ($cl_func)\n"
+                    . "  (undefined-function ()\n"
+                    . "    (let ((al (intern \"PL-AUTOLOAD\" |sort--pkg|)))\n"
+                    . "      (when (fboundp al) (funcall (symbol-function al))))))";
+    $kids = [];
+    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    (catch :p-return\n      (block nil\n$lambda_body))))";
   }
 
   # Scalar comparator (sort $var LIST): call via p-sort-get-fn at runtime.

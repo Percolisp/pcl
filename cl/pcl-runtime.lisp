@@ -95,7 +95,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-file
    ;; Functions
-   #:p-backslash #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
+   #:p-backslash #:p-backslash-sub #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -138,6 +138,7 @@
    #:p-tie-proxy-tie-obj #:p-tie-proxy-saved-value
    #:p-tie #:p-untie #:p-tied
    #:p-weaken #:p-isweak
+   #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
    ;; Compile-time definition macros (for BEGIN block support)
    #:p-defpackage #:p-sub #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
@@ -4026,6 +4027,7 @@
         (k (to-string key)))
     (cond
       ((eq h '%ENV-MARKER%) (not (null (sb-posix:getenv k))))
+      ((eq h '%INC-MARKER%) (nth-value 1 (gethash k *p-inc-table*)))
       (t (nth-value 1 (gethash k h))))))
 
 (defun p-delete (hash key)
@@ -4037,6 +4039,10 @@
        (let ((old (sb-posix:getenv k)))
          (sb-posix:unsetenv k)
          (or old *p-undef*)))
+      ((eq h '%INC-MARKER%)
+       (multiple-value-bind (v found) (gethash k *p-inc-table*)
+         (remhash k *p-inc-table*)
+         (if found (unbox v) *p-undef*)))
       (t
        (multiple-value-bind (v found) (gethash k h)
          (remhash k h)
@@ -6130,6 +6136,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    This makes \\@arr and \\%hash opaque references, not spreadable containers."
   (make-p-box val))
 
+(defun p-backslash-sub (sym)
+  "Perl \\&funcname — return a code ref, dispatching to AUTOLOAD if not defined."
+  (if (fboundp sym)
+      (symbol-function sym)
+      ;; Function not yet defined: return a lambda that tries AUTOLOAD when called.
+      (let ((pkg *package*))
+        (lambda (&rest args)
+          (declare (ignore args))
+          (let ((al (intern "PL-AUTOLOAD" pkg)))
+            (if (fboundp al)
+                (funcall (symbol-function al))
+                (error 'undefined-function :name sym)))))))
+
 (defun p-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
    Handles 'Pkg::name' format, converting to CL naming convention (PL- prefix).
@@ -6839,14 +6858,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-resolve-invocant (name)
   "Resolve a bareword invocant for method calls.
    In Perl, Foo->bar() checks if sub Foo exists first:
-   - If p-Foo is a function → call it, return the result (object)
+   - If pl-Foo is a user-defined function in current package → call it, return result (object)
    - Otherwise → return the string as a class name"
-  (let* ((func-name (format nil "P-~A" name))
-         (func-sym (find-symbol (string-upcase func-name) :pcl)))
-    (if (and func-sym (fboundp func-sym))
-        ;; Sub exists - call it to get the object
+  (let* ((func-name (format nil "PL-~A" (string-upcase name)))
+         ;; Look in current package for user-defined sub, NOT in :pcl (which has built-ins)
+         (func-sym (find-symbol func-name *package*)))
+    (if (and func-sym (eq (symbol-package func-sym) *package*) (fboundp func-sym))
+        ;; User sub exists - call it to get the object
         (funcall func-sym)
-        ;; No sub - return string as class name
+        ;; No user sub - return string as class name
         name)))
 
 (defun p-method-call (obj method &rest args)
@@ -6882,12 +6902,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (cond
               ((string-equal method-name "isa") (apply #'p-isa obj args))
               ((string-equal method-name "can") (apply #'p-can obj args))
+              ;; Perl special case: ->import and ->unimport with no method return nothing
+              ((or (string-equal method-name "import") (string-equal method-name "unimport"))
+               (values))
               (t (error "Can't locate method ~A via package ~A" method-name class-name))))
 
           ;; No CLOS class - fall back to single-class lookup (legacy behavior)
           (let ((pkg (find-package (string-upcase class-name))))
             (unless pkg
-              (error "Package ~A not found for method call" class-name))
+              ;; Perl special case: ->import and ->unimport on unknown packages return nothing
+              (if (or (string-equal method-name "import") (string-equal method-name "unimport"))
+                  (return-from p-method-call (values))
+                  (error "Package ~A not found for method call" class-name)))
             (let ((fn (find-symbol (string-upcase (format nil "PL-~A" method-name)) pkg)))
               (cond
                 ((and fn (eq (symbol-package fn) pkg) (fboundp fn))
@@ -6895,6 +6921,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                 ;; UNIVERSAL fallbacks for isa, can
                 ((string-equal method-name "isa") (apply #'p-isa obj args))
                 ((string-equal method-name "can") (apply #'p-can obj args))
+                ;; Perl special case: ->import and ->unimport with no method return nothing
+                ((or (string-equal method-name "import") (string-equal method-name "unimport"))
+                 (values))
                 (t (error "Can't locate method ~A in package ~A" method-name class-name)))))))))
 
 ;;; Package name conversion utilities for inheritance
@@ -7544,11 +7573,43 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-unpack (template str)
   "Perl unpack - parse binary string according to template.
    Treats CL string characters as Latin-1 bytes (char-code = byte value).
+   If template starts with U0, converts string to UTF-8 bytes first.
+   Strips grouping parentheses () from template (not implemented).
    Supported: C/c (unsigned/signed byte), n/N (big-endian 16/32-bit),
               v/V (little-endian 16/32-bit), A/a/Z (strings), H/h (hex),
               x (skip byte), X (back up), @ (seek), count and * modifier."
   (let* ((tmpl   (to-string template))
-         (s      (to-string str))
+         (raw-s  (to-string str))
+         ;; U0 flag: convert string to UTF-8 bytes for processing
+         (utf8-mode (and (>= (length tmpl) 2)
+                         (char= (char tmpl 0) #\U)
+                         (char= (char tmpl 1) #\0)))
+         (s      (if utf8-mode
+                     ;; Convert Unicode string to UTF-8 byte string (char-code = byte value).
+                     ;; Use a custom encoder to handle surrogates (no strict UTF-8 check).
+                     (flet ((encode-char (code)
+                              (cond
+                                ((< code #x80)
+                                 (list code))
+                                ((< code #x800)
+                                 (list (logior #xC0 (ash code -6))
+                                       (logior #x80 (logand code #x3F))))
+                                ((< code #x10000)
+                                 (list (logior #xE0 (ash code -12))
+                                       (logior #x80 (logand (ash code -6) #x3F))
+                                       (logior #x80 (logand code #x3F))))
+                                (t
+                                 (list (logior #xF0 (ash code -18))
+                                       (logior #x80 (logand (ash code -12) #x3F))
+                                       (logior #x80 (logand (ash code -6) #x3F))
+                                       (logior #x80 (logand code #x3F)))))))
+                       (let ((bytes (loop for c across raw-s nconc (encode-char (char-code c)))))
+                         (map 'string #'code-char bytes)))
+                     raw-s))
+         ;; Strip U0 prefix and grouping parens from template
+         (tmpl   (if utf8-mode
+                     (remove #\( (remove #\) (subseq tmpl 2)))
+                     (remove #\( (remove #\) tmpl))))
          (result (make-array 0 :adjustable t :fill-pointer 0))
          (ti 0) (si 0)
          (tlen (length tmpl))
@@ -7685,16 +7746,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; Stub packages for common Perl modules
 ;;; ============================================================
 
+;; CORE::__SUB__ stub — returns a no-op lambda (PCL does not track current sub)
+(defun pl-__SUB__ ()
+  (lambda (&rest args) (declare (ignore args)) nil))
+
 ;; utf8 module stub - on non-EBCDIC systems, uni_to_native/native_to_uni are identity.
 ;; Note: PCL generates pl- prefix for user function calls (e.g. utf8::upgrade → utf8::pl-upgrade),
 ;; so stubs in user-accessible packages must use pl- prefix (not p- which is for pcl builtins).
 (defpackage :utf8 (:use :cl :pcl))
 (in-package :utf8)
-(defun pl-encode (str) (declare (ignore str)) 1)
-(defun pl-decode (str) (declare (ignore str)) 1)
-(defun pl-upgrade (str) (declare (ignore str)) 1)
-(defun pl-downgrade (str) (declare (ignore str)) 1)
-(defun pl-is_utf8 (str) (declare (ignore str)) 1)
+(defun pl-encode (&optional str) (declare (ignore str)) 1)
+(defun pl-decode (&optional str) (declare (ignore str)) 1)
+(defun pl-upgrade (&optional str) (declare (ignore str)) 1)
+(defun pl-downgrade (&optional str) (declare (ignore str)) 1)
+(defun pl-is_utf8 (&optional str) (declare (ignore str)) 1)
 (in-package :pcl)
 
 ;; warnings module stub - needed because modules like Carp.pm check $warnings::VERSION

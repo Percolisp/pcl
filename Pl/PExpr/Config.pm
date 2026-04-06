@@ -453,6 +453,8 @@ has known_no_of_params => (
       eval       => [0, 1, -2], # eval EXPR or eval BLOCK or eval (defaults to $_)
       require    => [0, 1],     # require or require VERSION or require MODULE
 
+      vec        => 3,          # vec EXPR, OFFSET, BITS
+
       # Misc
       sleep      => [0, 1],     # sleep or sleep EXPR
       print      => -1,         # print [FH] LIST (special handling)

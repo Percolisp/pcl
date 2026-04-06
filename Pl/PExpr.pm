@@ -1433,6 +1433,146 @@ sub handle_subcalls {
 
   say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
 
+  # - - - Pre-pass (BEFORE fun(list) loop): Handle general indirect object syntax
+  # "METHOD ClassName ARGS" → ClassName->METHOD(ARGS)
+  # "METHOD $obj ARGS"      → $obj->METHOD(ARGS)
+  # Must run BEFORE the fun(list) loop that transforms ClassName(ARGS) into a funcall,
+  # which would prevent us from detecting the pattern.
+  # Only triggers for non-builtin, non-keyword method names followed by uppercase Word or Symbol.
+  {
+    my %_indirect_skip = map { $_ => 1 } qw(
+      my our local state
+      return next last redo goto
+      if unless elsif else
+      while until for foreach do
+      eval sub package use require no
+      BEGIN END CHECK UNITCHECK INIT
+      and or not xor CORE new
+    );
+    for (my $i = 0; $i < scalar(@$e) - 1; $i++) {
+      my $now  = $e->[$i];
+      my $next = $e->[$i+1];
+
+      # First token must be a plain Word token (method name)
+      next unless ref($now) eq 'PPI::Token::Word';
+      next if $self->is_token_operator($now);
+      my $method_name = $now->content;
+
+      # Skip control keywords and "new" (handled by later pre-pass)
+      next if $_indirect_skip{$method_name};
+
+      # Skip known builtin functions
+      next if exists $self->known_no_of_params->{$method_name};
+
+      # Skip all-uppercase words: they are filehandles (STDIN/STDOUT/STDERR)
+      # or constants, never method names in indirect-object syntax
+      next if $method_name =~ /^[A-Z][A-Z0-9_]*$/;
+
+      # Skip if preceded by -> (this is a method name, not an invocant position)
+      if ($i > 0 && $self->is_arrow_op($e->[$i-1])) {
+        next;
+      }
+
+      # Determine invocant: next token must be uppercase-starting Word (class name)
+      # or a Symbol ($var) as object reference
+      my $invocant = $next;
+      my $invocant_is_class = 0;
+      if (ref($invocant) eq 'PPI::Token::Word'
+          && !$self->is_token_operator($invocant)
+          && $invocant->content =~ /^[A-Z]/) {
+        $invocant_is_class = 1;
+      } elsif (ref($invocant) eq 'PPI::Token::Symbol'
+               && $invocant->content =~ /^\$/) {
+        # If the token right after the symbol is ++ or --, this is $var++
+        # (postfix operator on the invocant), not indirect object syntax
+        if ($i + 2 <= scalar(@$e) - 1) {
+          my $after_inv = $e->[$i+2];
+          if (ref($after_inv) eq 'PPI::Token::Operator') {
+            my $op = $after_inv->content;
+            next if $op eq '++' || $op eq '--';
+          }
+        }
+        $invocant_is_class = 0;
+      } else {
+        next;
+      }
+
+      # Find end of arg span: stop before low-priority operators (and/or/xor)
+      # Find end of arg span.
+      # Cases:
+      # 1. Args in explicit parens: METHOD INV (args) → i+2 is a Structure::List.
+      #    Stop at next ',' so we don't grab outer expression elements.
+      # 2. No args (next is ',' separator or end of array): METHOD INV, other → no args.
+      # 3. Bare args: METHOD INV a, b, c → grab all args until and/or/xor.
+      my $args_explicit_parens = ($i + 2 <= scalar(@$e) - 1
+                                  && ref($e->[$i+2]) eq 'PPI::Structure::List');
+      # Check if there are NO args: i+2 is past end OR is a ',' operator
+      my $has_no_args = 0;
+      if ($i + 2 > scalar(@$e) - 1) {
+        $has_no_args = 1;
+      } elsif (!$args_explicit_parens) {
+        my $first_arg_op = $self->is_token_operator($e->[$i+2]);
+        if (defined $first_arg_op && $first_arg_op eq ',') {
+          $has_no_args = 1;
+        }
+      }
+
+      # For $variable invocants only: require explicit parens around args.
+      # "func $var, args" and "func $var" are ambiguous — they look like indirect
+      # object syntax but are almost always normal function calls (ok $x, 'desc',
+      # cmp_ok $a, '==', $b, etc.).  Only "method $var (args)" with explicit parens
+      # is unambiguous enough to commit to the indirect-object rewrite.
+      next if !$invocant_is_class && !$args_explicit_parens;
+
+      my $end_pars = $i + 1;  # default: just invocant, no args
+      unless ($has_no_args) {
+        $end_pars = scalar(@$e) - 1;
+        for my $j ($i + 2 .. scalar(@$e) - 1) {
+          my $op = $self->is_token_operator($e->[$j]);
+          if (defined $op) {
+            if ($op eq 'and' || $op eq 'or' || $op eq 'xor') {
+              $end_pars = $j - 1;
+              last;
+            }
+            if ($args_explicit_parens && $op eq ',') {
+              $end_pars = $j - 1;
+              last;
+            }
+          }
+        }
+      }
+
+      # Build methodcall node: kids[0]=invocant, kids[1]=method, kids[2+]=args
+      my($mc_node, $mc_id) = $self->make_node_insert('methodcall');
+
+      # kids[0]: invocant
+      if ($invocant_is_class) {
+        # Class name bareword: wrap in funcall (gen_methodcall expects this shape)
+        my($class_fc_node, $class_fc_id) = $self->make_node_insert('funcall');
+        $self->add_child_to_node($class_fc_id, $self->make_node($invocant));
+        $self->add_child_to_node($mc_id, $class_fc_id);
+      } else {
+        # $variable object: parse directly
+        my $inv_id = $self->parse([$invocant]);
+        $self->add_child_to_node($mc_id, $inv_id);
+      }
+
+      # kids[1]: method name
+      $self->add_child_to_node($mc_id, $self->make_node($now));
+
+      # kids[2+]: args (if any, after the invocant)
+      if ($end_pars >= $i + 2) {
+        my $arg_ids = $self->parse_list($e, $i + 2, $end_pars);
+        for my $arg_id (@$arg_ids) {
+          $self->add_child_to_node($mc_id, $arg_id);
+        }
+      }
+
+      # Replace "METHOD INVOCANT [ARGS]" span with the single methodcall node
+      splice @$e, $i, $end_pars - $i + 1, $mc_node;
+    }
+  }
+
   # - - - Handle: `fun(...)`:
   # (Yes, loops to all but last.)
   for(my $i=0; $i < scalar(@$e)-1; $i++) {
@@ -2104,7 +2244,8 @@ sub handle_subcalls {
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
             # Cast followed by Symbol is a single dereference term
             $end_pars = $i + 2;
-        } elsif (ref($next_term) eq 'PPI::Token::Symbol' && $end_pars >= $i + 2) {
+        } elsif ((ref($next_term) eq 'PPI::Token::Symbol'
+                  || ref($next_term) eq 'PPI::Token::Magic') && $end_pars >= $i + 2) {
             # Check if symbol is followed by subscript (hash/array access)
             my $after_symbol = $e->[$i + 2];
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {

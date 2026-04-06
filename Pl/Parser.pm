@@ -2646,14 +2646,14 @@ sub parse_block_as_function {
 
   if ($return_lambda) {
     # Collect all emitted lines from temp section and return as lambda string.
-    # Definitions (BEGIN blocks) are hoisted to the real definitions bucket
-    # rather than inlined in the lambda string — otherwise (eval-when ...) ends
-    # up as the first argument to p-funcall-ref, making NIL the function ref.
+    # Definitions (BEGIN blocks) and declarations (our $var defvars) are hoisted
+    # to the real buckets rather than inlined — otherwise (eval-when ...) ends up
+    # as the first argument to p-funcall-ref, making NIL the function ref.
     my $temp = $self->_sections->[0];
-    my @hoisted_defs = @{$temp->{definitions}};
+    my @hoisted_defs  = @{$temp->{definitions}};
+    my @hoisted_decls = @{$temp->{declarations}};
     my @lines = (
       @{$temp->{preamble}},
-      @{$temp->{declarations}},
       @{$temp->{runtime}},
     );
     $self->_sections($saved_sections);
@@ -2664,6 +2664,11 @@ sub parse_block_as_function {
     if (@hoisted_defs) {
       my $section = $self->_sections->[$self->_cur_section];
       push @{$section->{'definitions'}}, @hoisted_defs;
+    }
+    # Re-emit hoisted declarations (our $var defvars, etc.) into the real sections
+    if (@hoisted_decls) {
+      my $section = $self->_sections->[$self->_cur_section];
+      push @{$section->{'declarations'}}, @hoisted_decls;
     }
     return @lines ? join("\n", @lines) : "(lambda () nil)";
   }

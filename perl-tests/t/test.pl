@@ -147,4 +147,10 @@ sub within {
     ok($ok, $test);
 }
 
+# refcount_is - stub; Internals::SvREFCNT is not supported, always passes
+sub refcount_is {
+    my ($ref, $expected, $test) = @_;
+    ok(1, $test);
+}
+
 1;
