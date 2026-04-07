@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 124 (2026-04-08) — failure categorization + range.t fix + bareword analysis
+
+### Work done
+
+**1. Categorized all current partial/crashed test failures**
+- Added session-124 section to `docs/test-failures-categorized.md`
+- Key findings: most easy wins are blocked by tied-variables or wantarray
+- Only 2 truly easy fixes identified (see below)
+
+**2. Fixed `"-4\n".."0\n"` range with trailing whitespace (range.t test 22)**
+- `p-..` numeric detection regex rejected `"-4\n"` because of trailing newline
+- Fix: use `string-trim` before the numeric detection regex in `p-..`
+- Result: `ok 22` now passes in range.t
+
+**3. Investigated bareword array subscript crash (delete.t test 54)**
+- Source: `delete $a[bar]` — `bar` is a bareword subscript
+- PCL generates `(pl-bar)` (function call) → UNDEFINED-FUNCTION crash
+- Root cause: `handle_subcalls` in PExpr.pm converts both `bar` (bareword) and `bar()` (zero-arg call) into identical `funcall` nodes with 1 child. The distinction is lost.
+- **PPI does know the difference**: `[bar]` has only `Token::Word`, `[bar()]` has `Token::Word` + `Structure::List`.
+- **Correct fix**: At PExpr.pm subscript processing (lines 932-934), BEFORE `parse(\@ix)`, check if `@ix` has exactly 1 element of type `Token::Word` → create a string literal node (or "0") directly.
+- **Why not at ExprToCL level**: The heuristic "funcall with 1 word child" matches both `bar` (bareword) and `bar()` (explicit empty call) — cannot distinguish them after the AST is built.
+- **Reverted incomplete fix** — needs the clean PExpr.pm approach.
+
+### What's needed (plan)
+
+To fix the bareword subscript crash:
+1. In PExpr.pm, in the `a_acc` subscript processing block (around line 933):
+   ```perl
+   # Before: my $ix_id = $self->parse(\@ix);
+   # Check if subscript is a single bareword (no parentheses)
+   if (@ix == 1 && ref($ix[0]) eq 'PPI::Token::Word') {
+     my $str_token = PPI::Token::Quote::Single->new("'" . $ix[0]->content . "'");
+     $ix_id = $self->make_node($str_token);
+   } else {
+     $ix_id = $self->parse(\@ix);
+   }
+   ```
+   (Or similar — but must also apply to `delete $a[bar]` path which uses same subscript node.)
+2. Apply same logic to any other places that process numeric array subscripts.
+
+### PCL test suite
+- **74 files, 2854 tests, all passing** (unchanged — no code committed)
+- Sweep (unchanged): **7865 passing, 1174 failing, 35 fully-passing**
+
+---
+
 ## Session 123 (2026-04-06/07) — crash sweep + indirect-object fixes + stubs
 
 ### Work done

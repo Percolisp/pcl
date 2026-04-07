@@ -1,7 +1,43 @@
 # Perl op/ Test Suite — Categorized Failure Analysis
 
-Last updated: 2026-03-22 (session 92)
-Sweep total: **5402 passing, 2002 failing** across 100 files (+2 skipped).
+Last updated: 2026-04-08 (session 124)
+Sweep total: **7865 passing, 1174 failing**, 35 fully-passing, 32 crashed, 14 partial.
+
+---
+
+## Session 124 Quick-Win Analysis
+
+### Easy fixes
+
+**1. `$a[bar]` bareword array subscript → crash (delete.t test 54)**
+- Source: `my $c = \delete $a[bar];`
+- Generated: `(p-delete-array @a (pl-bar))` — `pl-bar` undefined → crash
+- Fix: In `Pl/ExprToCL.pm`, detect PPI bareword in numeric array subscript → emit `0`
+  (Perl treats barewords as string that numifies to 0, warns "Bareword not quoted")
+
+**2. String with trailing newline not numeric in `..` (range.t test 22)**
+- Test: `is(join(":","-4\n".."0\n"), "-4:-3:-2:-1:0")` — got `'-4\n'` (single element)
+- Root: `p-..` numeric regex `^[+-]?\\d+...?$` rejects `"-4\n"` (trailing newline)
+  → treated as string → non-magical string range → returns `("-4\n")` only
+- Fix: Add `\\s*` at boundaries of numeric detection regex in `p-..` (`pcl-runtime.lisp`)
+
+### Not-worth-fixing (current sweep)
+
+| File | Tests | Root cause |
+|------|-------|-----------|
+| range.t test 4 | 1 | Array slice on LHS of list assignment (lvalue) |
+| range.t tests 78-118 | 12 | IV_MAX overflow rejection — CL bignums don't reject |
+| range.t 152-153,156,159 | 4 | Tied variables (Tie::Scalar) |
+| join.t crash | 18 hidden | Tied separator (Tie::Scalar) |
+| split.t tests 32 | 1 | `runperl` subprocess |
+| split.t tests 136-138 | 3 | Unicode whitespace (CL-PPCRE limitation) |
+| split.t tests 149-151 | 3 | Lvalue list assignment |
+| split.t tests 153,155 | 2 | Regex code blocks `(?{...})` |
+| split.t test 179 | 1 | Wantarray/context |
+| split.t test 109 | 1 | Package array identity vs symbolic deref |
+| sub.t various | many | Lvalue, @_ aliasing, named sub scoping (RT124156) |
+
+---
 
 ---
 

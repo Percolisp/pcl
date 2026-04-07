@@ -1682,11 +1682,7 @@ sub gen_array_access {
   my $kids    = shift;
 
   my $arr = $self->gen_node($kids->[0]);
-  # Bareword array index: auto-quote to string (evaluates to 0 numerically, like Perl)
-  my $idx_node = $self->expr_o->get_a_node($kids->[1]);
-  my $idx = (ref($idx_node) eq 'PPI::Token::Word')
-    ? '"' . $idx_node->content() . '"'
-    : $self->gen_node($kids->[1]);
+  my $idx = $self->gen_node($kids->[1]);
 
   # Convert $varname to @varname (Perl $arr[i] accesses @arr)
   # Handle both plain $arr and package-qualified Pkg::$arr

@@ -2965,14 +2965,17 @@
            (s-undef (or (null s) (eq s *p-undef*)))
            (e-undef (or (null e) (eq e *p-undef*)))
            ;; Is value a numeric-like thing for range? (number or non-zero-padded numeric string)
+           ;; Allow surrounding whitespace: Perl numifies "-4\n" as -4 (strips whitespace).
            (s-num-p (or (numberp s)
                         (and (stringp s)
-                             (not (and (> (length s) 1) (char= (char s 0) #\0)))
-                             (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" s))))
+                             (let ((ts (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
+                               (and (not (and (> (length ts) 1) (char= (char ts 0) #\0)))
+                                    (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" ts))))))
            (e-num-p (or (numberp e)
                         (and (stringp e)
-                             (not (and (> (length e) 1) (char= (char e 0) #\0)))
-                             (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" e))))
+                             (let ((te (string-trim '(#\Space #\Tab #\Newline #\Return) e)))
+                               (and (not (and (> (length te) 1) (char= (char te 0) #\0)))
+                                    (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" te))))))
            ;; Use string range when at least one side is a genuine non-numeric string,
            ;; or both are undef (undef..undef). Excludes undef+numeric (→ fallback numeric).
            (use-string-range
