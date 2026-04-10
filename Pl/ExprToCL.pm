@@ -961,13 +961,16 @@ sub gen_funcall {
           my $word_node = $self->expr_o->get_a_node($class_kids->[0]);
           if (ref($word_node) eq 'PPI::Token::Word') {
             my $classname = $word_node->content();
-            # Handle special tokens: __PACKAGE__, __FILE__, __LINE__
+            # Handle special tokens: __PACKAGE__, __FILE__, __LINE__, undef
             if ($classname eq '__PACKAGE__') {
               my $pkg = $self->environment
                   ? $self->environment->current_package : 'main';
               $pkg //= 'main';
               $class_arg = qq{"$pkg"};
               $is_bareword = 1;
+            } elsif ($classname eq 'undef') {
+              # undef keyword: not a bareword class name — fall through to gen_node,
+              # which generates (p-undef); p-bless handles undef class at runtime
             } else {
               # Regular bareword class name - remove trailing :: if present (o:: -> o)
               $classname =~ s/::$//;

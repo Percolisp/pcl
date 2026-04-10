@@ -741,7 +741,7 @@
                    ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
                    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
                    ((functionp v) (object-address v))  ; code ref: address
-                   ((p-typeglob-p v) 0)  ; typeglob as number
+                   ((p-typeglob-p v) (object-address v))  ; typeglob: numeric = address
                    (t 0))))
           (setf (p-box-nv box) n
                 (p-box-nv-ok box) t)
@@ -835,7 +835,14 @@
              (class (or (p-box-class box)
                         (when (hash-table-p inner)
                           (gethash :__class__ inner))))
-             (raw (stringify-value inner))
+             (raw (cond
+                    ;; Blessed typeglob ref: stringify as GLOB(0xADDR) not *PKG::NAME
+                    ((p-typeglob-p inner)
+                     (format nil "GLOB(0x~(~X~))" (object-address inner)))
+                    ;; Blessed ref-to-ref (unblessed inner box): stringify as REF(0xADDR)
+                    ((and (p-box-p inner) (not (p-box-class inner)))
+                     (format nil "REF(0x~(~X~))" (object-address inner)))
+                    (t (stringify-value inner))))
              (s (if class
                     (format nil "~A=~A" class raw)
                     raw)))
@@ -6262,14 +6269,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (gethash :__class__ inner))
       ;; Reference box: inner is a p-box - check what it wraps (ARRAY/HASH/SCALAR)
       ((p-box-p inner)
-       (let ((inner2 (p-box-value inner)))
-         (cond
-           ;; Array reference: box containing vector (from p-backslash @arr)
-           ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
-           ;; Hash reference: box containing hash-table (from p-backslash %hash)
-           ((hash-table-p inner2) "HASH")
-           ;; Scalar reference: box containing box (from p-backslash $x)
-           (t "SCALAR"))))
+       ;; Check inner box's class first: handles `local $x = blessed_ref` where
+       ;; the local `let` binding wraps the original box in a new make-p-box.
+       (if (p-box-class inner)
+           (p-box-class inner)
+           (let ((inner2 (p-box-value inner)))
+             (cond
+               ;; Array reference: box containing vector (from p-backslash @arr)
+               ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
+               ;; Hash reference: box containing hash-table (from p-backslash %hash)
+               ((hash-table-p inner2) (or (gethash :__class__ inner2) "HASH"))
+               ;; Scalar reference: box containing box (from p-backslash $x)
+               (t "SCALAR")))))
       ;; Old-format hash reference (autovivified, single-boxed)
       ((hash-table-p inner) "HASH")
       ;; Old-format array reference (autovivified, single-boxed)
@@ -6846,8 +6857,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl bless - attach class to a reference (hash, array, or scalar ref).
    For hashes: stores class in :__class__ key (survives unboxing).
    For arrays/code/other: stores class on the box's class slot."
-  (let ((class-name (to-string class))
-        (inner (unbox ref)))
+  (let* ((raw-class-val (unbox class))
+         ;; Detect Perl undef (nil or *p-undef*): emits 2 warnings
+         (is-undef (or (null raw-class-val) (eq raw-class-val *p-undef*)))
+         (raw-class (to-string class))
+         ;; Empty string or Perl undef class: default to current package + warn
+         (class-name (if (string= raw-class "")
+                         (let ((pkg (package-name *package*)))
+                           ;; undef arg: also warn "Use of uninitialized value"
+                           (when is-undef
+                             (p-warn (make-p-box "Use of uninitialized value in bless")))
+                           (p-warn (make-p-box "Blessing into '' is deprecated"))
+                           ;; CL main package is "MAIN", Perl uses "main"
+                           (if (string= pkg "MAIN") "main" pkg))
+                         raw-class))
+         (inner (unbox ref)))
     (cond
       ((hash-table-p inner)
        (setf (gethash :__class__ inner) class-name)
@@ -7180,10 +7204,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    cl-ppcre does not handle \\x{HHHH} (Perl hex escapes with braces).
    Convert \\x{HHHH} to the literal Unicode character.
    Also strips (?{...}) and (??{...}) code blocks (not supported by cl-ppcre
-   and cause infinite loops)."
+   and cause infinite loops).
+   Also converts \\Q...\\E metachar-quoting blocks (not supported by cl-ppcre)
+   by applying ppcre:quote-meta-chars to the content."
   ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these
   (let* ((pat (cl-ppcre:regex-replace-all "\\(\\?\\?\\{[^}]*\\}\\)" pattern ""))
-         (pat (cl-ppcre:regex-replace-all "\\(\\?\\{[^}]*\\}\\)" pat "")))
+         (pat (cl-ppcre:regex-replace-all "\\(\\?\\{[^}]*\\}\\)" pat ""))
+         ;; Convert \Q...\E: quote all regex metacharacters in the enclosed text.
+         ;; \E is optional — \Q extends to end of pattern if \E is absent.
+         (pat (cl-ppcre:regex-replace-all
+                "\\\\Q(.*?)(?:\\\\E|$)"
+                pat
+                (lambda (match content)
+                  (declare (ignore match))
+                  (cl-ppcre:quote-meta-chars content))
+                :simple-calls t)))
     (cl-ppcre:regex-replace-all
       "\\\\x\\{([0-9a-fA-F]+)\\}"
       pat
@@ -7308,7 +7343,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    /g in scalar context: iterates over matches, tracking pos in *p-match-pos*.
    /g in list context: returns all matches at once (no pos tracking).
    /gc: keeps pos on failure instead of resetting it."
-  (let* ((str (to-string (unbox string)))
+  (let* ((str (to-string string))   ; to-string handles unboxing via box-sv (preserves class)
          (pattern (p-regex-match-pattern op))
          (modifiers (p-regex-match-modifiers op))
          (options (build-ppcre-options modifiers))
@@ -7565,16 +7600,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    - p-regex-match: perform match, return t/nil
    - p-subst-op: perform substitution, modify string, return count
    - p-tr-op: perform transliteration, modify string, return count"
-  (cond
-    ((p-regex-match-p operation)
-     (do-regex-match string operation))
-    ((p-subst-op-p operation)
-     (do-regex-subst string operation))
-    ((p-tr-op-p operation)
-     (do-tr string operation))
-    (t
-     (warn "Unknown regex operation type: ~A" (type-of operation))
-     nil)))
+  ;; Unbox operation: $r =~ $qr_var passes a p-box containing the regex struct
+  (let ((operation (unbox operation)))
+    (cond
+      ((p-regex-match-p operation)
+       (do-regex-match string operation))
+      ((p-subst-op-p operation)
+       (do-regex-subst string operation))
+      ((p-tr-op-p operation)
+       (do-tr string operation))
+      (t
+       (warn "Unknown regex operation type: ~A" (type-of operation))
+       nil))))
 
 (defun p-!~ (string operation)
   "Perl !~ negative binding operator"

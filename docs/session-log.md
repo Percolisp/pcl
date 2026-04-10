@@ -4,6 +4,70 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 128 (2026-04-10) — bless.t: 28 → 89 passing (+61)
+
+### Root cause correction
+
+`test-failures-categorized.md` listed bless.t as failing due to `@A::ISA = scalar coercion`,
+but bless.t has ZERO `@ISA` usage. The real causes were 7 runtime/transpiler bugs:
+
+### Fixes in `cl/pcl-runtime.lisp`
+
+1. **`perl-regex-to-ppcre`: `\Q...\E` quoting** — CL-PPCRE silently ignores `\Q...\E`,
+   returning NIL instead of an error. Added `cl-ppcre:regex-replace-all` step that calls
+   `cl-ppcre:quote-meta-chars` on the matched content before passing to ppcre.
+
+2. **`p-=~`: unbox operation argument** — `$r =~ $qr_var` passes a p-box wrapping a
+   `p-regex-match` struct. Added `(let ((operation (unbox operation)))` at the top.
+
+3. **`do-regex-match`: preserve class during stringification** — Was `(to-string (unbox string))`.
+   `unbox` stripped the class before `box-sv` could prepend it. Changed to `(to-string string)`;
+   `to-string` calls `box-sv` which already handles class prefixing via `box-sv`'s `class` logic.
+
+4. **`p-ref`: nested p-box class detection** — `bless \$ref, "A"` creates box-of-box where
+   outer has class. `p-ref` only checked the top level. Added: if `inner` is a p-box with a
+   class, return that class; if unclassed inner box, check inner's value for ARRAY/HASH/SCALAR.
+
+5. **`p-bless`: empty/undef class** — Added handling: if `to-string(class)` is `""` (undef input),
+   use current package name with appropriate warnings (deprecation if empty string, undef warning
+   if actual undef).
+
+6. **`box-sv`: GLOB and REF stringification** — Added special cases for the `raw` value:
+   - Typeglob inner → `"GLOB(0x~(~X~))"` (was `"*PKG::NAME"` via `stringify-value`)
+   - Unblessed inner p-box → `"REF(0x~(~X~))"` (was `"SCALAR(0x...)"`)
+
+7. **`box-nv`: typeglob numeric value** — Changed `((p-typeglob-p v) 0)` to
+   `((p-typeglob-p v) (object-address v))`. Makes `cmp_ok(hex($addr), '==', $obj)` pass for
+   blessed typeglob refs.
+
+### Fix in `Pl/ExprToCL.pm`
+
+8. **bless handler: `undef` keyword** — The bareword-detection path treated `undef` as a string
+   class name, generating `(p-bless ref "undef")`. Previously special-cased with
+   `$class_arg = '(p-undef)'`; user pointed out this belongs in the runtime. Now: the `undef`
+   branch simply doesn't set `$is_bareword = 1`, so it falls through to `gen_node` which
+   generates `(p-undef)`. The runtime `p-bless` already handles undef class correctly.
+
+### Results
+
+- **PCL suite: 74 files, 2861 tests, all passing**
+- **Sweep: 7941 passing, 1129 failing** (was 7881/1189, +60 passing)
+- **bless.t: 89/118 passing** (was 28/118 at session start)
+- Fully passing: 34 files
+
+### Remaining bless.t failures (29 tests)
+
+- **`local $x = bless $ref, "Class"` (tests 41-48, ~8 tests)**: Codegen generates
+  `(let (($a1 (make-p-box (p-bless $a1 "A3")))))`. This creates a box-of-box where the outer
+  `let`-binding box has no class. `box-sv(outer)` sees no class, gives `"HASH(0x...)"` instead
+  of `"A3=HASH(0x...)"`. Fix: either a `p-box-for-local` runtime function that shallow-copies
+  inner box's class/value, or a codegen change in `_process_local_declaration`.
+
+- **Other remaining**: Likely involve more complex stringification or `ref()` edge cases.
+  Detailed analysis not done this session.
+
+---
+
 ## Session 127 (2026-04-10) — crash doc update + quick-win fixes
 
 ### Work done
