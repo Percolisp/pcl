@@ -4,6 +4,63 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 129 (2026-04-10) — crash fixes: defined(FH), flatten-list nil, %p-fh-arg
+
+### Focus
+
+Crash-first strategy: targeted `defins.t` which was `CRASH(2+0/27)`. Applied 4 fixes.
+
+### Fixes
+
+**1. `Pl/ExprToCL.pm`: `defined(UPPERCASE_BAREWORD)` → `(p-defined-fh 'NAME)`**
+- `p-defined` is a `defun`; CL evaluates its arg before calling it. `defined(FILE)` became
+  `(p-defined FILE)` → UNBOUND-VARIABLE crash at runtime.
+- Fix: two new cases in `gen_funcall` under the `defined` handler:
+  - Case 1: arg is a `PPI::Token::Word` matching `/^[A-Z][A-Z0-9_]*$/` → `(p-defined-fh 'NAME)`
+  - Case 2: arg is an internal funcall node with single uppercase-word child → same
+- This also fixes `defined(DIR)` patterns.
+
+**2. `cl/pcl-runtime.lisp`: new `p-defined-fh` runtime function**
+- Exported from `:pcl`. Checks both `*p-filehandles*` (via `open-stream-p`) and
+  `*p-dirhandles*` (via `gethash`). Placed after `p-defined` with forward-reference
+  to the handle tables; only a compile-time warning, correct at runtime.
+
+**3. `cl/pcl-runtime.lisp`: `%p-flatten-list` — raw `nil` = empty list**
+- Old: `consp` branch had comment "nil is listp but should be treated as undef scalar";
+  nil fell through to `t` branch and was added as a 1-element vector entry.
+- Effect: `while (($x)=<FILE>)` looped forever at EOF — `p-list-=` returned `(make-p-box 1)`
+  (length=1, truthy) even when readline returned nil.
+- Fix: added `((null item) nil)` case before `consp` — raw nil produces 0 elements.
+- Explicit Perl undef uses `(p-undef)` returning `:undef`, not raw `nil`, so no breakage.
+
+**4. `cl/pcl-runtime.lisp`: `%p-fh-arg` handles `(pl-NAME)` patterns**
+- `opendir(DIR, '.')` generates `(p-opendir (pl-DIR) ".")`. The `(let ((*wantarray* t)) ...)`
+  wrapper is absent here, but codegen emits `(pl-DIR)` (1-arg funcall list) rather than
+  bare `DIR` symbol. Old `%p-fh-arg` only handled bare symbols → `(pl-DIR)` evaluated →
+  UNDEFINED-FUNCTION crash.
+- Fix: extended `%p-fh-arg` with a `cond` branch detecting `(pl-NAME)` pattern:
+  list of length 1, car is symbol with `"PL-"` prefix → intern the remainder and quote it.
+
+### Results
+
+- **defins.t: 2 → 8 passing** (was `CRASH(2+0)`, now runs through test 8 before next crash)
+- **grent.t: CRASH → PARTIAL** (benefited from `%p-fh-arg` + flatten-list fix)
+- **Net sweep: +7 passing tests, 29 → 28 crashed files** (re-run confirmed; first run showed
+  regression artifact from parallel job interference)
+
+### Remaining defins.t crash (test 9+)
+
+Wantarray wrapping: `readdir(DIR)` generates `(p-readdir (let ((*wantarray* t)) (pl-DIR)))`.
+`%p-fh-arg` receives the full `(let ...)` form — not a bare `(pl-DIR)` — so falls through
+to the `t` branch and evaluates it → UNDEFINED-FUNCTION `pl-DIR`.
+
+Fix options:
+- **Codegen**: don't wrap filehandle args in wantarray `let`s (preferred — FH args are never
+  wantarray-context-sensitive)
+- **Runtime**: make `%p-fh-arg` recursively unwrap `(let ((*wantarray* t)) ...)` wrappers
+
+---
+
 ## Session 128 (2026-04-10) — bless.t: 28 → 89 passing (+61)
 
 ### Root cause correction
