@@ -102,10 +102,10 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
-  mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
+  alarm mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
   rename require require-file reset resolve-invocant return reverse rewinddir rindex rmdir say
-  scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split
+  evalbytes scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split
   sprintf sqrt srand stat str-cmp str-eq str-ge str-gt str-le str-lt str-ne str-x str-x=
   string-concat study sub sub-defined sub-exists subst substr super-call sysread system syswrite
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
@@ -844,8 +844,9 @@ sub gen_funcall {
   my $func_name = $self->gen_node($kids->[0]);
   my $cl_func   = $self->cl_name($func_name, 1);
 
-  # Special handling for next/last/redo with label argument
-  if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo') && @$kids == 2) {
+  # Special handling for next/last/redo/goto with label argument
+  if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo'
+       || $func_name eq 'goto') && @$kids == 2) {
     # Check if the argument is a bareword label (funcall with single word child)
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
     if ($self->expr_o->is_internal_node_type($arg_node) &&
@@ -855,6 +856,10 @@ sub gen_funcall {
         my $label_node = $self->expr_o->get_a_node($arg_kids->[0]);
         if (ref($label_node) eq 'PPI::Token::Word') {
           my $label = $label_node->content();
+          if ($func_name eq 'goto') {
+            # goto LABEL → (go :label) within tagbody
+            return "(go :$label)";
+          }
           return "($cl_func $label)";
         }
       }
@@ -2079,8 +2084,8 @@ sub gen_readline {
   # Readline may have a filehandle child, or none (for <>)
   if (@$kids) {
     my $fh = $self->gen_node($kids->[0]);
-    # Quote bareword filehandles
-    if ($fh =~ /^[A-Z][A-Z0-9_]*$/) {
+    # Quote bareword filehandles (any word not starting with $ or ( )
+    if ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
       return "(p-readline '$fh)";
     }
     return "(p-readline $fh)";

@@ -85,7 +85,7 @@
    ;; File/Directory operations
    #:p-chdir #:p-set_up_inc #:p-mkdir #:p-rmdir #:p-getcwd #:p-cwd #:p-rename #:p-chmod
    ;; Time functions
-   #:p-time #:p-times #:p-sleep #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
+   #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
    #:p-exit #:p-system #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
@@ -5259,6 +5259,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((n (truncate (to-number secs))))
     (sleep n)
     n))
+
+(defun p-alarm (&optional secs)
+  "Perl alarm - schedule SIGALRM. PCL: no-op, returns 0 (no previous alarm)."
+  (declare (ignore secs))
+  0)
+
+(defun p-evalbytes (s)
+  "Perl evalbytes - evaluate byte string as Perl code. PCL: delegates to eval."
+  (p-eval s))
 
 (defun p-study (&optional str)
   "Perl study - deprecated no-op in modern Perl. Returns 1."

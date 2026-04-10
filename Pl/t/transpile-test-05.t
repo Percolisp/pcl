@@ -236,4 +236,34 @@ delete $a[bar];
 print scalar(@a), "\n";
 ', "3\n");
 
+# --- my sub (lexical sub) name extraction ---
+test_transpile("my sub name is extracted correctly (not 'my')", '
+my sub greet () { "hello" }
+print greet(), "\n";
+', "hello\n");
+
+test_transpile("my sub with signature works", '
+my sub add ($x, $y) { $x + $y }
+print add(3, 4), "\n";
+', "7\n");
+
+# --- alarm() no-op ---
+test_transpile("alarm no-op returns 0", '
+my $prev = alarm(5);
+print defined($prev) ? "ok" : "undef", "\n";
+alarm(0);
+print "done\n";
+', "ok\ndone\n");
+
+# --- goto LABEL and standalone LABEL ---
+test_transpile("goto LABEL jumps to label within bare block", '
+my $count = 0;
+{
+    top:
+    $count++;
+    goto top if $count < 3;
+}
+print "$count\n";
+', "3\n");
+
 done_testing;

@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 127 (2026-04-10) — crash doc update + quick-win fixes
+
+### Work done
+
+**1. Full sweep + categorization of all 100 test files**
+- Rewrote `docs/test-failures-categorized.md` with accurate data (corrected "Fully Passing" from 44→35,
+  added "Failing Without Crash" section for 16 files, updated all crash/partial root causes)
+- Updated `memory/project_crash_analysis.md` summary
+
+**2. Six bug fixes**
+
+- **`alarm(N)` no-op**: `p-alarm` stub in pcl-runtime.lisp; added to Config.pm + RUNTIME_NAMES
+- **`my sub` name extraction**: Parser.pm `_process_sub_statement`: skip `my`/`our`/`state` qualifiers.
+  Fixes `PL-NOT_CONSTANTM` undefined in sub.t tests 17-18.
+- **`evalbytes` stub**: `p-evalbytes` delegates to `p-eval`. lex.t: CRASH(2+4) → PARTIAL(11+12) (+9 passing)
+- **`goto LABEL` codegen**: ExprToCL.pm gen_funcall emits `(go :label)` for `goto BAREWORD`
+- **Standalone `LABEL:` statement**: Parser.pm emits `:label` tagbody tag for bare label compounds.
+  Enables `goto loop` pattern in my.t.
+- **Lowercase filehandle in `<fh>`**: gen_readline quotes `[A-Za-z_]\w*` (was uppercase-only).
+  Fixes UNBOUND-VARIABLE for `<y>` in readline.t.
+
+**3. Regression tests**: 4 new tests in `Pl/t/transpile-test-05.t` (my sub, alarm, goto/label)
+
+### Results
+
+- **PCL suite: 74 files, 2861 tests, all passing** (was 2857)
+- **Sweep: 7881 passing, 1189 failing** (was 7843/1152 — +38 passing)
+- Crashed files: 32→29. lex.t, my.t, length.t no longer crash.
+- my.t: crash(46+1) → 49 pass, 8 fail (57 planned)
+- lex.t: crash(2+4) → partial(11+12/53)
+- sub.t: partial(37+22) → partial(39+20) — PL-NOT_CONSTANTM crash fixed
+- readline.t: crash moved from PL-ALARM → UNBOUND-VARIABLE(y) → new crash at test 30 (complex)
+
+### Remaining readline.t crash (test 30)
+
+`*x=<y>` test checks that Perl warns "readline() on unopened filehandle y" and captures it
+via `$SIG{__WARN__}`. The warn handler captures into closure var `$w`. After `p-glob-assign`
+runs, `pl-like $w ...` checks the captured warning text. Crash comes from the `local $SIG{...}`
++ `p-glob-assign` interaction, not from our fixes. Needs further investigation.
+
+---
+
 ## Session 126 (2026-04-10) — fix session-125 PExpr regression, commit all improvements
 
 ### Root cause analysis (session 125 regressions)

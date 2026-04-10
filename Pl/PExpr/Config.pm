@@ -457,6 +457,8 @@ has known_no_of_params => (
 
       # Misc
       sleep      => [0, 1],     # sleep or sleep EXPR
+      alarm      => [0, 1],     # alarm or alarm EXPR
+      evalbytes  => 1,          # evalbytes EXPR
       print      => -1,         # print [FH] LIST (special handling)
       say        => -1,         # say [FH] LIST (special handling)
       printf     => -12,        # printf [FH] FORMAT, LIST

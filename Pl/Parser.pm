@@ -1867,11 +1867,16 @@ sub _process_compound_statement {
     $self->_process_bare_block($first_block, $label, $continue_block);
   }
   elsif (!$first_word) {
-    # Neither block nor keyword found - emit as comment
-    my $perl_code = $stmt->content;
-    $perl_code =~ s/\n/ /g;
-    $self->_emit(";; COMPOUND (unknown) not handled: $perl_code");
-    $self->_emit("");
+    if ($label) {
+      # Standalone label statement: LABEL: → emit as tagbody tag
+      $self->_emit(":$label");
+    } else {
+      # Neither block nor keyword found - emit as comment
+      my $perl_code = $stmt->content;
+      $perl_code =~ s/\n/ /g;
+      $self->_emit(";; COMPOUND (unknown) not handled: $perl_code");
+      $self->_emit("");
+    }
   }
   elsif ($first_word eq 'if' || $first_word eq 'unless') {
     $self->_process_if_statement($stmt, $first_word);
@@ -3379,7 +3384,9 @@ sub _process_sub_statement {
   for my $child ($stmt->children) {
     my $ref = ref($child);
 
-    if ($ref eq 'PPI::Token::Word' && $child->content ne 'sub') {
+    if ($ref eq 'PPI::Token::Word' && $child->content ne 'sub'
+        && $child->content ne 'my' && $child->content ne 'our'
+        && $child->content ne 'state') {
       $name = $child->content unless $name;
     }
     elsif ($ref eq 'PPI::Token::Prototype') {
