@@ -218,4 +218,22 @@ my @s = (grep { $_ > 1 } 1,2,3)[1];
 print "@s\n";
 ', "3\n");
 
+test_transpile("bareword array subscript \$a[bar] treated as string index", '
+my @a = (10, 20, 30);
+my $x = $a[bar];
+print defined($x) ? "ok" : "undef", "\n";
+', "ok\n");
+
+test_transpile("bareword hash subscript \$h{key} treated as string key", '
+my %h = (foo => 42, bar => 99);
+my $x = $h{bar};
+print "$x\n";
+', "99\n");
+
+test_transpile("delete with bareword array subscript", '
+my @a = (1, 2, 3);
+delete $a[bar];
+print scalar(@a), "\n";
+', "3\n");
+
 done_testing;

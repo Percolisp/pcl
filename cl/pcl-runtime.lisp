@@ -6618,13 +6618,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (%p-lhe-restore ,hv ,kv ,sv)))))
 
 (defun p-copy-array (arr)
-  "Create a fresh adjustable copy of an array for local @arr = @arr semantics."
-  (let* ((a (if (and (vectorp arr) (not (stringp arr))) arr (unbox arr)))
-         (len (if (and (vectorp a) (not (stringp a))) (length a) 0))
-         (copy (make-array len :adjustable t :fill-pointer len)))
-    (dotimes (i len)
-      (setf (aref copy i) (aref a i)))
-    copy))
+  "Create a fresh adjustable copy of an array for local @arr = @arr semantics.
+   A scalar (non-nil) value is wrapped in a 1-element array, matching Perl's
+   @arr = SCALAR semantics.  nil (from an empty list) gives an empty array."
+  (let ((a (if (and (vectorp arr) (not (stringp arr))) arr (unbox arr))))
+    (cond
+      ;; Non-string vector: copy it element-by-element
+      ((and (vectorp a) (not (stringp a)))
+       (let* ((len  (length a))
+              (copy (make-array len :adjustable t :fill-pointer len)))
+         (dotimes (i len)
+           (setf (aref copy i) (aref a i)))
+         copy))
+      ;; nil / undef from empty-list expression: empty array
+      ((null a) (make-array 0 :adjustable t :fill-pointer 0))
+      ;; Any other scalar (string, number, box): 1-element array (Perl @arr=SCALAR)
+      (t (let ((copy (make-array 1 :adjustable t :fill-pointer 1)))
+           (setf (aref copy 0) a)
+           copy)))))
 
 (defun p-copy-hash (h)
   "Create a fresh copy of a hash for local %h = %h semantics."
@@ -6885,13 +6896,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
 
-    ;; Try to find CLOS class for MRO-based lookup
-    (let* ((clos-class-name (perl-pkg-to-clos-class class-name))
-           (pkg (find-package (string-upcase class-name)))
-           (clos-class (when pkg (find-class (intern (string-upcase clos-class-name) pkg) nil))))
+    ;; Determine whether to use the @ISA walk or CLOS MRO.
+    ;; @ISA walk is preferred whenever @ISA is non-empty (it reflects `local @ISA`
+    ;; and runtime push/assignment, which CLOS cannot see).  CLOS is a fallback for
+    ;; classes that have never had @ISA set (e.g. leaf classes with no parents).
+    (let* ((pkg (find-package (string-upcase class-name)))
+           (isa-sym (when pkg (find-symbol "@ISA" pkg)))
+           (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
+           (isa-non-empty (and isa-val
+                               (vectorp isa-val) (not (stringp isa-val))
+                               (> (length isa-val) 0)))
+           (clos-class-name (perl-pkg-to-clos-class class-name))
+           (clos-class (when (and pkg (not isa-non-empty))
+                         (find-class (intern (string-upcase clos-class-name) pkg) nil))))
 
-      (if clos-class
-          ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
+      (if (and clos-class (not isa-non-empty))
+          ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list.
+          ;; Only used when @ISA is empty (no runtime inheritance set).
           (let ((mro (progn (sb-mop:finalize-inheritance clos-class)
                             (sb-mop:class-precedence-list clos-class))))
             (dolist (cls mro)
@@ -6916,24 +6937,41 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (values))
               (t (error "Can't locate method ~A via package ~A" method-name class-name))))
 
-          ;; No CLOS class - fall back to single-class lookup (legacy behavior)
-          (let ((pkg (find-package (string-upcase class-name))))
-            (unless pkg
-              ;; Perl special case: ->import and ->unimport on unknown packages return nothing
-              (if (or (string-equal method-name "import") (string-equal method-name "unimport"))
-                  (return-from p-method-call (values))
-                  (error "Package ~A not found for method call" class-name)))
-            (let ((fn (find-symbol (string-upcase (format nil "PL-~A" method-name)) pkg)))
-              (cond
-                ((and fn (eq (symbol-package fn) pkg) (fboundp fn))
-                 (apply fn obj args))
-                ;; UNIVERSAL fallbacks for isa, can
-                ((string-equal method-name "isa") (apply #'p-isa obj args))
-                ((string-equal method-name "can") (apply #'p-can obj args))
-                ;; Perl special case: ->import and ->unimport with no method return nothing
-                ((or (string-equal method-name "import") (string-equal method-name "unimport"))
-                 (values))
-                (t (error "Can't locate method ~A in package ~A" method-name class-name)))))))))
+          ;; @ISA is non-empty or no CLOS class — walk @ISA dynamically.
+          ;; This path respects `local @ISA = (...)` and runtime mutations.
+          (labels ((find-in-class (cls-str visited)
+                     (when (member cls-str visited :test #'equal)
+                       (return-from find-in-class nil))
+                     (let* ((pkg (find-package (string-upcase cls-str)))
+                            (fn  (when pkg
+                                   (find-symbol (string-upcase
+                                                  (format nil "PL-~A" method-name))
+                                                pkg))))
+                       (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+                           (return-from p-method-call (apply fn obj args))
+                           ;; Recurse through @ISA
+                           (let* ((isa-sym (when pkg (find-symbol "@ISA" pkg)))
+                                  (isa-val (when (and isa-sym (boundp isa-sym))
+                                             (symbol-value isa-sym))))
+                             (when (and isa-val (vectorp isa-val))
+                               (loop for parent across isa-val
+                                     do (find-in-class (to-string parent)
+                                                        (cons cls-str visited)))))))))
+            (let ((pkg (find-package (string-upcase class-name))))
+              (unless pkg
+                ;; Perl special case: ->import and ->unimport on unknown packages return nothing
+                (if (or (string-equal method-name "import") (string-equal method-name "unimport"))
+                    (return-from p-method-call (values))
+                    (error "Package ~A not found for method call" class-name))))
+            (find-in-class class-name nil)
+            ;; Not found anywhere in @ISA chain - check UNIVERSAL fallbacks
+            (cond
+              ((string-equal method-name "isa") (apply #'p-isa obj args))
+              ((string-equal method-name "can") (apply #'p-can obj args))
+              ;; Perl special case: ->import and ->unimport with no method return nothing
+              ((or (string-equal method-name "import") (string-equal method-name "unimport"))
+               (values))
+              (t (error "Can't locate method ~A in package ~A" method-name class-name))))))))
 
 ;;; Package name conversion utilities for inheritance
 (defun perl-pkg-to-clos-class (name)

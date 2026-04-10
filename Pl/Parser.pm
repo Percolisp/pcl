@@ -1691,7 +1691,9 @@ sub _process_local_declaration {
     my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
 
     my $var = $vars[0];
-    my $sigil = substr($var, 0, 1);
+    # For qualified vars (e.g. A::@ISA), the sigil is embedded after '::'.
+    # For simple vars (e.g. @arr), it is the first character.
+    my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
 
     if ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
@@ -1711,7 +1713,7 @@ sub _process_local_declaration {
     # Skip undef markers (they are skip slots, not real variables).
     for my $var (@vars) {
       next if $var eq '(p-undef)';  # undef slot: no binding needed
-      my $sigil = substr($var, 0, 1);
+      my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
       if ($sigil eq '@') {
         push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
       }

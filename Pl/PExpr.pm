@@ -931,7 +931,7 @@ sub parse {
       my($node, $id) = $self->make_node_insert($type);
 
       my @ix    = $term->children();
-      my $ix_id = $self->parse(\@ix);
+      my $ix_id = $self->_parse_subscript_ix(\@ix);
 
       # Add $pre as child 1
       $self->add_child_to_node($id, $pre_id);
@@ -1510,7 +1510,9 @@ sub handle_subcalls {
       # 3. Bare args: METHOD INV a, b, c → grab all args until and/or/xor.
       my $args_explicit_parens = ($i + 2 <= scalar(@$e) - 1
                                   && ref($e->[$i+2]) eq 'PPI::Structure::List');
-      # Check if there are NO args: i+2 is past end OR is a ',' operator
+      # has_no_args: true when the invocant is the last token OR is immediately followed
+      # by a comma (which is an outer-call arg separator, not a method arg).
+      # e.g.  "method Pack, extra"  → Pack at i+2 is ',', so has_no_args=1 → only Pack
       my $has_no_args = 0;
       if ($i + 2 > scalar(@$e) - 1) {
         $has_no_args = 1;
@@ -3183,6 +3185,24 @@ sub get_node_children {
 }
 
 
+
+# Parse a subscript @ix list, handling bareword subscripts.
+# In $a[bar] / $h{bar}, PPI gives a Statement::Expression wrapping a Token::Word.
+# handle_subcalls would turn that into a funcall — wrong for barewords.
+# We detect the pattern and return a string-literal node instead.
+sub _parse_subscript_ix {
+  my ($self, $ix) = @_;
+  my @sig = grep { !$_->isa('PPI::Token::Whitespace') } @$ix;
+  if (@sig == 1 && $sig[0]->isa('PPI::Statement::Expression')) {
+    my @ekids = grep { !$_->isa('PPI::Token::Whitespace') } $sig[0]->children();
+    if (@ekids == 1 && ref($ekids[0]) eq 'PPI::Token::Word') {
+      my $word    = $ekids[0]->content();
+      my $str_tok = PPI::Token::Quote::Single->new("'$word'");
+      return $self->make_node($str_tok);
+    }
+  }
+  return $self->parse($ix);
+}
 
 sub make_node {
   my $self      = shift;

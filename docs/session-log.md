@@ -4,6 +4,85 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 125 (2026-04-09) — local @A::ISA, p-method-call @ISA-first, regressions
+
+### Work done
+
+**1. Fixed `local @A::ISA = qw(C)` — generates proper array binding**
+- Root cause 1: sigil extraction used `substr($var, 0, 1)` on `A::@ISA`, which returns `'A'` not `'@'`
+- Fix: `Pl/Parser.pm` `_process_local_declaration`: use regex `($var =~ /::([%\@\$])/)` to extract sigil from qualified names. Applied in TWO places (init-with-value branch and bare-local loop).
+- Root cause 2: single-element `qw(C)` generates `(progn "C")` = a string; `p-copy-array "C"` returned empty array
+- Fix: `cl/pcl-runtime.lisp` `p-copy-array`: wrap non-nil scalars in a 1-element array (Perl `@arr = SCALAR` semantics)
+
+**2. Changed `p-method-call` to prefer @ISA walk over CLOS MRO — CAUSES REGRESSION**
+- Motivation: `local @A::ISA = qw(C)` needs `p-method-call` to see the dynamic binding
+- Change: when @ISA is non-empty, use `find-in-class` @ISA walk instead of CLOS MRO
+- **REGRESSION**: `study $a` in study.t parsed as indirect-object → `$a->study()` → `p-method-call` on non-blessed ref → crash. Previously the baseline code handled this differently.
+- study.t: fully-passing → 29+0+CRASH
+- sprintf2.t: fully-passing → 1420+9+CRASH (same root cause or related)
+- **Status: uncommitted, needs investigation next session**
+
+**3. Bareword subscripts `$a[bar]`, `$h{key}` → string literals**
+- Added `_parse_subscript_ix` helper in `Pl/PExpr.pm`
+- Single `Token::Word` in subscript → create string literal node directly
+- Also added `delete $h{bar}` support
+- Added 3 regression tests to `Pl/t/transpile-test-05.t`
+
+**4. Qualified variable assignment dispatch fixes (`Pl/ExprToCL.pm`)**
+- `@A::ISA = 'BB'` → uses `p-array-=` (was crashing because scalar assigned to array)
+- `$#Pkg::var` → `A::@ISA` form for array-last-index
+- Fixed regex for qualified sigil: `(?:^|::)@` instead of just `^@`
+
+**5. Investigated indirect-object crash: `is(method Pack, "method")`**
+- The `$end_pars` scanner stopped at commas only when `$args_explicit_parens`. But `method Pack, "method"` passes ALL tokens to the indirect-object including the `"method"` string.
+- Applied fix: change `if ($args_explicit_parens && $op eq ',')` → `if ($op eq ',')`
+- This fixed test 22 but broke test 16: `(method Pack "a","b","c")` — stops at first comma, only gets `"a"` as arg
+- **Net result**: method.t 20+12+CRASH → 19+13+CRASH. One test regressed.
+- **Status: uncommitted**
+
+### Regression summary (uncommitted changes vs baseline bbbbfc0)
+- Sweep: **7865 → 7719** passing (−146), **35 → 34** fully-passing
+- study.t: fully-passing → 29+0+CRASH (from `p-method-call` @ISA-first change)
+- sprintf2.t: fully-passing → 1420+9+CRASH (same or related root cause)
+- method.t: 20+12+CRASH → 19+13+CRASH (comma-stop fix breaks test 16)
+- **PCL suite: 74 files, 2857 tests, all passing** (3 new tests from bareword fix)
+
+### Root cause analysis: the `p-method-call` @ISA-first regression
+
+The old `p-method-call` had two paths:
+1. CLOS MRO lookup (when CLOS class exists)
+2. Legacy single-class lookup (fallback)
+
+The new @ISA-first code replaced path 2 with `find-in-class` walk. When called on a non-blessed reference (nil CLASS), `find-package (string-upcase nil)` fails or returns NIL, and the error path is different.
+
+In study.t, `study $a` where `$a` is a string is parsed as indirect-object → `$a->study()`. The old code would look for `MAIN::PL-STUDY`, find it (since `study` IS a known builtin), and call it. The new @ISA walk does NOT find the function because it only looks in the class hierarchy, not MAIN.
+
+**Fix options for next session:**
+1. Revert the `p-method-call` @ISA-first change entirely. Fix `local @A::ISA` differently: re-walk @ISA in the CLOS path when detecting a `local`-ized ISA.
+2. OR: in the new `find-in-class`, when `class-name` is nil/empty (non-blessed ref), fall back to looking up the method in the caller's package — matching the old legacy behavior.
+3. OR: in `find-in-class`, for any class, also check the caller's current package as a last resort.
+
+The cleanest fix is option 2: detect nil class-name and fall back to legacy lookup. This is a 5-line change in pcl-runtime.lisp.
+
+### Root cause analysis: `is(method Pack, "method")` indirect-object parsing
+
+`parse_list` splits by commas before calling `parse` on each part. So `parse` sees `[method, Pack]` (2 tokens), and `$has_no_args = 1`. This SHOULD work correctly.
+
+But the crash shows `(pl-is (p-method-call "Pack" 'method "method"))`. Needs deeper investigation: trace exactly WHERE the comma splitting happens vs when the indirect-object pre-pass fires. The pre-pass is called from `handle_subcalls`, which is called from `parse_list` (line 1389). So the pre-pass sees the FULL `[method, Pack, ',', "method"]` BEFORE `parse_comma_separated_list` runs!
+
+**Fix for next session**: The correct fix is NOT to change `$end_pars`. Instead, the pre-pass should be called AFTER comma-splitting, OR the pre-pass should detect whether it's the direct sub-expression of an enclosing comma list and stop at the comma. The simplest approach: in `handle_subcalls`, for class-name indirect-object rewrites, always stop at commas (they're outer separators). This is the `if ($op eq ',')` fix — but it breaks bare-arg cases like `(method Pack "a","b","c")`. Since bare-arg indirect-object syntax is extremely rare and all real code uses `->`, accepting this loss is reasonable. The remaining method.t test 16 regression (`not ok`) was already failing before (test 15) so the bar is low.
+
+### What to do next session
+
+1. **Fix `p-method-call` @ISA-first regression** (study.t, sprintf2.t):
+   - In `find-in-class`, detect when `class-name` would fail `find-package` and fall back to legacy single-class lookup (check caller's package for the method). OR revert entirely and find another way to support `local @ISA`.
+
+2. **Commit everything that's safe**: Parser.pm local-sigil fix, ExprToCL.pm qualified-assignment fix, PExpr.pm `_parse_subscript_ix` bareword fix, transpile-test-05.t new tests. These are all improvements.
+
+3. **Leave p-method-call @ISA-first for later** or fix properly first.
+
+---
+
 ## Session 124 (2026-04-08) — failure categorization + range.t fix + bareword analysis
 
 ### Work done

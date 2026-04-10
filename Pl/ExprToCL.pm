@@ -484,8 +484,10 @@ sub gen_leaf {
   # Array last index ($#arr)
   if ($ref eq 'PPI::Token::ArrayIndex') {
     my $content = $node->content();
-    # $#arr -> (p-array-last-index @arr)
-    $content =~ s/^\$#/@/;
+    # $#arr     -> (p-array-last-index @arr)
+    # $#Pkg::v  -> (p-array-last-index Pkg::@v)   — @ must go AFTER the pkg:: prefix
+    $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/  # qualified: $#A::ISA → A::@ISA
+        || $content =~ s/^\$#/\@/;            # simple: $#arr → @arr
     return "(p-array-last-index $content)";
   }
 
@@ -713,15 +715,16 @@ sub gen_binary_op {
     return "(p-glob-assign \"$pkg\" \"$name\" $right)";
   }
 
-  # For assignment, dispatch to type-specific forms based on LHS sigil
+  # For assignment, dispatch to type-specific forms based on LHS sigil.
+  # Handles both local vars (@a, %h, $x) and qualified vars (Pkg::@a, Pkg::%h, Pkg::$x).
   if ($op eq '=') {
     if ($left =~ /^\(vector /) {
       return "(p-list-= $left $right)";
-    } elsif ($left =~ /^[\@]/) {
+    } elsif ($left =~ /(?:^|::)@/) {
       return "(p-array-= $left $right)";
-    } elsif ($left =~ /^%/) {
+    } elsif ($left =~ /(?:^|::)%/) {
       return "(p-hash-= $left $right)";
-    } elsif ($left =~ /^\$/) {
+    } elsif ($left =~ /(?:^|::)\$/) {
       return "(p-scalar-= $left $right)";
     }
     # Element access, slices, etc. - keep using p-setf
