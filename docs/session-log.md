@@ -4,6 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 126 (2026-04-10) — fix session-125 PExpr regression, commit all improvements
+
+### Root cause analysis (session 125 regressions)
+
+The three `handle_subcalls` changes in PExpr.pm interacted badly:
+
+1. **`$has_no_args` simplification** removed the `,` check: old code correctly set
+   `$has_no_args=1` when token at `$i+2` is a comma operator (e.g. `method Pack, "x"` →
+   Pack at end of logical sub-expression). Removing this broke test 22 of method.t, which
+   was then "fixed" by the comma-stop change.
+
+2. **`!$has_no_args` added to guard** allowed `study $a` (2 tokens, `$a` at end →
+   `$has_no_args=1`) to be treated as indirect-object → `$a->study()` → crash.
+   This was the root cause of the study.t regression.
+
+3. **Comma-stop change** (`if ($op eq ',')` unconditionally) fixed test 22 but broke
+   test 16 of method.t: `(method Pack "a","b","c")` stopped at first comma, capturing
+   only `"a"` instead of all three args.
+
+### Fix
+
+Reverted all three handle_subcalls changes to restore baseline behavior:
+- Restored `$has_no_args` comma-check (re-add the `,`-operator check at `$i+2`)
+- Reverted guard to `next if !$invocant_is_class && !$args_explicit_parens`
+- Reverted comma-stop to `if ($args_explicit_parens && $op eq ',')`
+
+Additionally confirmed: sprintf2.t was already crashing (1420+9/CRASH) at baseline
+bbbbfc0 — it was NOT a regression from session 125 (the session log was wrong).
+
+### What was committed (78b06d0)
+
+All session-125 improvements (now safe after PExpr fix):
+- `Pl/PExpr.pm`: `_parse_subscript_ix` — bareword subscripts → string literals
+- `Pl/PExpr.pm`: handle_subcalls restored to baseline behavior
+- `Pl/Parser.pm`: `local @A::ISA` sigil extraction fix
+- `Pl/ExprToCL.pm`: `@A::ISA = ...` and `$#A::ISA` qualified-name fixes
+- `cl/pcl-runtime.lisp`: `p-copy-array` scalar wrapping + `p-method-call` @ISA-first walk
+- `Pl/t/transpile-test-05.t`: 3 new bareword subscript regression tests
+
+### Final state (78b06d0)
+
+- **PCL suite: 74 files, 2857 tests, all passing**
+- study.t: fully-passing (43/43) ✓
+- method.t: 20+12+CRASH (matches baseline bbbbfc0)
+- sprintf2.t: 1420+9+CRASH (matches baseline bbbbfc0, pre-existing)
+
+---
+
 ## Session 125 (2026-04-09) — local @A::ISA, p-method-call @ISA-first, regressions
 
 ### Work done
