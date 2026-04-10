@@ -20,7 +20,7 @@
    #:unbox #:ensure-boxed
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
    #:to-string #:to-number
-   #:p-undef #:p-defined
+   #:p-undef #:p-defined #:p-defined-fh
    #:p-let #:p-$
    ;; Arithmetic
    #:p-+ #:p-- #:p-* #:p-/ #:p-% #:p-** #:p-int #:p-abs
@@ -918,6 +918,16 @@
   (let ((v (unbox val)))
     (and (not (null v))
          (not (eq v *p-undef*)))))
+
+(defun p-defined-fh (fh-sym)
+  "Check if a bareword filehandle or dirhandle (symbol) is open.
+   Used by codegen for defined(FILEHANDLE) expressions.
+   Checks *p-filehandles* (open files) and *p-dirhandles* (open dirs)."
+  (or (let ((stream (gethash fh-sym *p-filehandles*)))
+        (and stream (open-stream-p stream) t))
+      ;; *p-dirhandles* is defined later in this file; the forward reference
+      ;; is a compile-time warning only — at runtime the variable is bound.
+      (and (ignore-errors (gethash fh-sym *p-dirhandles*)) t)))
 
 (defun p-true-p (val)
   "Perl truthiness: false if undef, 0, empty string, empty list, or nil"
@@ -2239,7 +2249,10 @@
                            item))
                  ((and (vectorp item) (not (stringp item)))
                   (loop for x across item do (add x)))
-                 ((consp item)  ; consp, not listp — nil is listp but should be treated as undef scalar
+                 ;; Raw nil means "empty list" (e.g. iterator at EOF returning nil).
+                 ;; Explicit Perl undef comes as *p-undef* or (p-undef), not raw nil.
+                 ((null item) nil)
+                 ((consp item)
                   (loop for x in item do (add x)))
                  (t
                   ;; Snapshot the value that box-set will store, not the box
@@ -4718,13 +4731,26 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 ;; Helper used by filehandle macros: if FH-FORM is a plain symbol (no sigil)
 ;; it is a bareword filehandle — quote it.  Otherwise pass through as-is.
+;; Also handles (pl-NAME) forms where codegen wrapped the bareword in a funcall.
 (defmacro %p-fh-arg (fh-form)
-  (if (and (symbolp fh-form)
-           (let ((name (symbol-name fh-form)))
-             (and (plusp (length name))
-                  (not (member (char name 0) '(#\$ #\@ #\% #\*))))))
-      `',(intern (symbol-name fh-form))
-      fh-form))
+  (cond
+    ;; Bare symbol without sigil — bareword filehandle: quote it
+    ((and (symbolp fh-form)
+          (let ((name (symbol-name fh-form)))
+            (and (plusp (length name))
+                 (not (member (char name 0) '(#\$ #\@ #\% #\*))))))
+     `',(intern (symbol-name fh-form)))
+    ;; (pl-NAME) pattern: codegen wrapped a bareword FH in a user-sub call.
+    ;; Extract the bare name and quote it instead of calling the nonexistent function.
+    ((and (listp fh-form)
+          (= (length fh-form) 1)
+          (symbolp (car fh-form))
+          (let ((name (symbol-name (car fh-form))))
+            (and (> (length name) 3)
+                 (string= (subseq name 0 3) "PL-"))))
+     `',(intern (subseq (symbol-name (car fh-form)) 3)))
+    ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
+    (t fh-form)))
 
 (defun %p-tell-impl (&optional fh)
   "Perl tell - return current file position"

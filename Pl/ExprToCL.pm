@@ -1280,6 +1280,28 @@ sub gen_funcall {
         }
       }
     }
+    # defined(FILEHANDLE) — bareword filehandle check (e.g. defined(FILE), defined(DIR))
+    # Case 1: arg is a PPI::Token::Word leaf (all-caps bareword)
+    if (ref($arg_node) eq 'PPI::Token::Word') {
+      my $name = $arg_node->content();
+      if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+        return "(p-defined-fh '$name)";
+      }
+    }
+    # Case 2: arg is an internal funcall node with a single uppercase-word child (no args)
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'funcall') {
+      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids2 == 1) {
+        my $fn_node = $self->expr_o->get_a_node($arg_kids2->[0]);
+        if (ref($fn_node) eq 'PPI::Token::Word') {
+          my $name = $fn_node->content();
+          if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+            return "(p-defined-fh '$name)";
+          }
+        }
+      }
+    }
   }
 
   # undef &funcname — undefine a sub (keeps it in exists table)
