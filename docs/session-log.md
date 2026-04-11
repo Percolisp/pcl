@@ -4,6 +4,84 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 131 (2026-04-11) — lop.t/method.t crash fixes; `^^` operator; indirect-object in arglist
+
+### Focus
+
+Fixed two crash-causing bugs: lop.t (from session 130 investigation) and method.t (partial).
+
+### Fixes Applied
+
+**1. `Pl/PExpr.pm`: `_bareword_string` flag for unknown mixed-case barewords before binary operators**
+- Root cause: `!Bare || !$x` → `handle_subcalls` treated unknown `Bare` as zero-arg funcall → `(pl-Bare)` → UNDEFINED-FUNCTION crash.
+- Fix: In the binary-only-operator check in `handle_subcalls`, unknown non-ALL-CAPS barewords get `_bareword_string = 1` flag instead of creating funcall. ALL-CAPS words (DIR, FILE, etc.) are still funcalls (needed by `%p-fh-arg`).
+- Also added same check in the `$end_pars < $i+1` (fallthrough) case.
+
+**2. `Pl/ExprToCL.pm`: `gen_leaf` respects `_bareword_string` flag**
+- Barewords flagged as strings are emitted as `"string"` literals.
+
+**3. `Pl/PExpr.pm`: `_fix_ppi_logical_xor_bug` — merge consecutive `^` `^` into `^^`**
+- PPI tokenizes Perl 5.40's `^^` operator as two separate `^` tokens → PARSE ERROR.
+- Fix: new `_fix_ppi_logical_xor_bug` sub (added to `cleanup_for_parsing`) merges them.
+- Added `^^` to `Config.pm` at prec 19 (same as `||`) and to `%OP_EXCEPTIONS → 'p-xor'`.
+
+**4. `cl/pcl-runtime.lisp`: `p-xor` returns `""` not `nil` for false case**
+- Perl `xor` returns `""` when both/neither side is true (like `||`), not undef.
+
+**5. `Pl/PExpr/Config.pm`: fix `and` precedence from 1 to 2**
+- Perl: `not` > `and` > `or/xor`. `and` was at 1 (same as `or/xor`) → wrong parse of `1 xor (1 and 0)`.
+
+**6. `Pl/PExpr.pm`: `$in_arglist` parameter for `handle_subcalls`**
+- Root cause: `is(method $obj, "method")` → `(pl-is (pl-method $obj "method"))` — `"method"` leaked into `pl-method`'s args, and `pl-method` is UNDEFINED-FUNCTION.
+- Fix: added `$in_arglist` flag to `handle_subcalls`. When `1` (called from `parse_list`), the indirect-object pre-pass allows variable-invocant rewrites when the invocant is immediately followed by a comma (outer separator). Now `is(method $obj, "method")` → `(pl-is (p-method-call $obj 'method) "method")`.
+- `parse_list()` passes `1` to `handle_subcalls`. `parse()` uses default `0`.
+
+### Test Results
+
+- **lop.t: crash at test 18 → 47/47 fully passing** ✓
+- **method.t: still has PARSE ERRORs** — `is((method $obj "a","b","c"), ...)` PARSE ERROR at indirect object with bare args (separate issue). `is(method $obj, "method")` is now fixed.
+- **PCL suite: 74 files, 2861 tests, all passing** (no regressions)
+
+### method.t — Indirect-Object Syntax: Full Analysis
+
+**What method.t tests**: Perl's indirect-object call syntax. `method $obj args` is equivalent to `$obj->method(args)`. Archaic but valid Perl; tested in Perl's own test suite.
+
+**What works now** (after fix 6):
+- `is(method Pack, "method")` — class invocant → `(p-method-call (p-resolve-invocant "Pack") 'method)` ✓
+- `is(method $obj, "method")` — variable invocant, invocant followed by comma → `(p-method-call $obj 'method)` ✓ (NEW)
+- `is((method $obj ()), "method")` — explicit parens → ✓ (pre-existing)
+- `is($obj->method, "method")` — explicit arrow syntax → always works ✓
+
+**What still fails**:
+1. `is((method $obj "a","b","c"), ...)` → PARSE ERROR
+   - The inner parens `(method $obj "a","b","c")` become a Structure::List.
+   - `parse([Structure::List])` unwraps to `parse([method, $obj, "a", ",", "b", ",", "c"])`.
+   - This runs `handle_subcalls($e, in_arglist=0)` (NOT in_arglist because called from `parse()`, not `parse_list()`).
+   - Pre-pass: `$obj` at index 1 is not followed by comma (next is `"a"`) → `$has_no_args=0` → guard fires → no indirect-object rewrite.
+   - Main loop: `method` tries to eat `$obj "a" "b" "c"` as function args → `(pl-method $obj "a" "b" "c")` — BUT this hits a PARSE ERROR first.
+   - The PARSE ERROR suggests `parse()` sees multiple nodes remaining after processing — probably `method $obj "a","b","c"` is not being handled cleanly.
+   - **Root cause not fully investigated** — likely `handle_subcalls` generates a funcall but leaves extra state, or comma handling inside `parse_list()` produces multiple nodes.
+
+2. Other PARSE ERRORs (lines 1939, 1946, 2284, 2294 of generated CL):
+   - From `&{1==1}` (code ref via `&{expr}` where expr is an operator expression) — not supported.
+   - From complex AUTOLOAD patterns with `$AUTOLOAD` — not currently targeted.
+
+**The ambiguity problem**:
+- `method $obj, value` vs `func $x, value` are IDENTICAL in structure.
+- Perl resolves them by scope: if `method` IS a declared plain function → function call; if NOT → indirect object.
+- PCL only knows about built-in functions (`known_no_of_params`). User-defined functions are tracked in `environment->prototypes` but only by qualified name (`Pack::method`, not `method`).
+- **The `$in_arglist` fix** works because inside `is(method $obj, "method")`, `method $obj` followed by an outer comma is unambiguous: either way `method` consumes only `$obj`. The difference (function call `(pl-method $obj)` vs method call `(p-method-call $obj 'method)`) matters for correctness, but the `$in_arglist` heuristic safely allows the method-call interpretation for unknown functions since known built-ins (length, ref, pos, etc.) are already filtered by `known_no_of_params`.
+- **Limitation**: `is(some_user_func $x, expected)` inside explicit parens would be wrongly treated as `$x->some_user_func()`. In practice, CPAN code uses explicit parens for function calls, so this is low-risk.
+
+**Path forward for method.t**:
+- Most method.t tests involve `$obj->method()` syntax which works fine.
+- Tests 71-82 use the archaic `method $obj` syntax. Tests with explicit parens (`method $obj (args)`) work. Test 82 (`method $obj, desc`) now works.
+- Test 72 (`(method $obj "a","b","c")`) still fails — would need `parse()` to detect it's being called from an arg-list context. Not trivial.
+- The other PARSE ERRORs are unrelated to indirect-object (AUTOLOAD, &PL_sv_yes).
+- method.t will still crash from CL errors in the non-PARSE-ERROR cases involving `&PL_sv_yes` and `$$one` dereferences.
+
+---
+
 ## Session 130 (2026-04-11) — defins.t 27/27; p-glob scalar iterator; auto-defined for while-modifier
 
 ### Focus

@@ -1386,7 +1386,7 @@ sub parse_list {
   # Strip declarators (my/our/state/local) - they may have been unwrapped above
   my @stripped  = $self->extract_declarations($e_list);
   $e_list       = \@stripped;
-  $self->handle_subcalls($e_list); # If a funcall w/o () in the list.
+  $self->handle_subcalls($e_list, 1); # If a funcall w/o () in the list.
 
   # 1. Split into list with ","-separated. Eval them
   say "Parts in list:\n", dump $e_list         if 4 & DEBUG;
@@ -1428,8 +1428,9 @@ sub _block_is_hash_constructor {
 # It use known number of parameters for subs and priorities.
 
 sub handle_subcalls {
-  my $self      = shift;
-  my $e         = shift;
+  my $self       = shift;
+  my $e          = shift;
+  my $in_arglist = shift // 0;  # 1 when called from parse_list (inside explicit parens)
 
   say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
 
@@ -1523,12 +1524,18 @@ sub handle_subcalls {
         }
       }
 
-      # For $variable invocants only: require explicit parens around args.
-      # "func $var, args" and "func $var" are ambiguous — they look like indirect
-      # object syntax but are almost always normal function calls (ok $x, 'desc',
-      # cmp_ok $a, '==', $b, etc.).  Only "method $var (args)" with explicit parens
-      # is unambiguous enough to commit to the indirect-object rewrite.
-      next if !$invocant_is_class && !$args_explicit_parens;
+      # For $variable invocants: require explicit parens around args OR be inside
+      # an explicit arg list where the invocant is immediately followed by a comma
+      # (meaning the comma is an outer separator, not part of the method's args).
+      # "func $var, args" is ambiguous in standalone context — almost always a
+      # normal function call (ok $x, 'desc', cmp_ok $a, '==', $b, etc.).
+      # Exception: inside explicit parens (in_arglist=1), "method $obj, outer_arg"
+      # with comma right after invocant is unambiguously "method($obj), outer_arg".
+      # e.g. is(method $obj, "expected") → (p-method-call $obj 'method), "expected"
+      my $comma_after_invocant = $has_no_args && ($i + 2 <= scalar(@$e) - 1);
+      my $var_invocant_ok = $args_explicit_parens
+          || ($in_arglist && $comma_after_invocant);
+      next if !$invocant_is_class && !$var_invocant_ok;
 
       my $end_pars = $i + 1;  # default: just invocant, no args
       unless ($has_no_args) {
