@@ -5168,40 +5168,78 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
               (incf i)))))
     (coerce result 'string)))
 
-(defun p-glob (&optional pattern)
-  "Perl glob / <*.txt> - expand file glob pattern.
-   In list context, returns vector of matching files.
-   In scalar context, returns each match on successive calls."
-  (let* ((pat (if pattern (to-string pattern) "*"))
-         ;; Expand character ranges [a-c] -> [abc] for SBCL compatibility
-         (expanded-pat (expand-glob-char-ranges pat))
-         ;; Check if pattern is relative (doesn't start with /)
+;;; Per-pattern iterator state for scalar-context glob.
+;;; Maps pattern string -> (index . results-vector) or :list-done (after list exhaustion).
+(defvar *p-glob-iterators* (make-hash-table :test 'equal))
+
+(defun p-glob--expand (pat)
+  "Expand glob pattern PAT and return a vector of matching filenames."
+  (let* ((expanded-pat (expand-glob-char-ranges pat))
          (is-relative (not (and (> (length expanded-pat) 0) (char= (char expanded-pat 0) #\/))))
-         ;; For relative paths, prepend current working directory
          (full-pat (if is-relative
                        (concatenate 'string (sb-posix:getcwd) "/" expanded-pat)
                        expanded-pat))
-         ;; Extract directory prefix from original pattern for return values
          (dir-prefix (let ((slash-pos (position #\/ pat :from-end t)))
                        (if slash-pos (subseq pat 0 (1+ slash-pos)) "")))
-         ;; Use SBCL's directory function with wild pathname
-         (all-matches (handler-case
-                          (directory (parse-namestring full-pat))
-                        (error () nil)))
-         ;; Filter out directories (pathname-name is nil for directories)
-         (matches (remove-if (lambda (p) (null (pathname-name p))) all-matches)))
+         (all-matches (handler-case (directory (parse-namestring full-pat)) (error () nil)))
+         (matches (remove-if (lambda (p) (null (pathname-name p))) all-matches))
+         (result (make-array (length matches) :fill-pointer 0)))
+    (dolist (path matches result)
+      (vector-push (concatenate 'string dir-prefix (file-namestring path)) result))))
+
+(defun p-glob (&optional pattern)
+  "Perl glob / <*.txt> - expand file glob pattern.
+   In list context: first call returns all matches; second call with same pattern returns empty.
+   In scalar context: returns one match per call, nil when exhausted; resets for next cycle."
+  (let ((pat (if pattern (to-string pattern) "*")))
     (if *wantarray*
-        ;; List context: return all matches as vector
-        (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
-          (dolist (path matches)
-            ;; Return path relative to pattern's directory prefix
-            (let ((name (file-namestring path)))
-              (vector-push-extend (concatenate 'string dir-prefix name) result)))
-          result)
-        ;; Scalar context: return first match (simplified - full impl needs iterator state)
-        (when matches
-          (let ((name (file-namestring (car matches))))
-            (concatenate 'string dir-prefix name))))))
+        (p-glob--list-context pat)
+        (p-glob--scalar-context pat))))
+
+(defun p-glob--list-context (pat)
+  "Glob in list context: first call returns all matches, second returns empty (then resets)."
+  (let ((state (gethash pat *p-glob-iterators*)))
+    (cond
+      ((eq state :list-done)
+       (remhash pat *p-glob-iterators*)
+       (make-array 0 :adjustable t :fill-pointer 0))
+      (t
+       (let ((vec (p-glob--expand pat)))
+         (setf (gethash pat *p-glob-iterators*) :list-done)
+         vec)))))
+
+(defun p-glob--scalar-context (pat)
+  "Glob in scalar context: return one match per call, nil when exhausted.
+   After exhaustion, returns nil once (terminating a while loop), then resets."
+  (let ((state (gethash pat *p-glob-iterators*)))
+    (cond
+      ;; Active scalar iterator: return next entry
+      ((and (consp state) (< (car state) (length (cdr state))))
+       (let* ((idx   (car state))
+              (vec   (cdr state))
+              (entry (aref vec idx)))
+         (if (< (1+ idx) (length vec))
+             (setf (car state) (1+ idx))        ; advance
+             (setf (gethash pat *p-glob-iterators*) :scalar-done)) ; mark exhausted
+         entry))
+      ;; Exhausted: return nil, then reset for next cycle
+      ((eq state :scalar-done)
+       (remhash pat *p-glob-iterators*)
+       nil)
+      ;; No iterator: start fresh
+      (t
+       (remhash pat *p-glob-iterators*)
+       (let ((vec (p-glob--expand pat)))
+         (if (zerop (length vec))
+             nil
+             (progn
+               (if (> (length vec) 1)
+                   (setf (gethash pat *p-glob-iterators*) (cons 1 vec))
+                   (setf (gethash pat *p-glob-iterators*) :scalar-done))
+               (aref vec 0))))))))
+
+
+
 
 ;;; ============================================================
 ;;; File/Directory Operations

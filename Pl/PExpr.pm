@@ -2849,6 +2849,14 @@ sub child_context {
         return SCALAR_CTX
             if $child_index >= 1;
       }
+
+      # Functions that take a filehandle as their first argument.
+      # The FH arg must be SCALAR_CTX: bareword FHs become (pl-NAME) funcalls,
+      # and wrapping them in (let ((*wantarray* t)) ...) prevents %p-fh-arg
+      # from recognising them, causing an UNDEFINED-FUNCTION crash.
+      if ($func_name && $func_name =~ /^(readdir|opendir|closedir|seekdir|telldir|rewinddir|eof|getc|read|sysread|syswrite|fileno|binmode|truncate)$/) {
+        return SCALAR_CTX if $child_index == 1;  # First arg is the filehandle
+      }
     }
     # progn (comma operator) forces list context
     if ($type eq 'progn') {

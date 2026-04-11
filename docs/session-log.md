@@ -4,6 +4,88 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 130 (2026-04-11) — defins.t 27/27; p-glob scalar iterator; auto-defined for while-modifier
+
+### Focus
+
+Continued defins.t crash-fixing. Started the session with defins.t at 8/27 passing (crash on test 9+). Fixed 3 more bugs, ending at 27/27 fully passing. Also investigated lop.t crash root cause.
+
+### Fixes Applied (all in uncommitted diff)
+
+**1. `Pl/PExpr.pm`: FH arg forced to SCALAR_CTX**
+- Root cause: `readdir(DIR)` in LIST_CTX → child `DIR` inherited LIST_CTX → generated
+  `(let ((*wantarray* t)) (pl-DIR))` → `%p-fh-arg` failed to recognise it → UNDEFINED-FUNCTION.
+- Fix: in `child_context`, added SCALAR_CTX override for the first arg (index 1) of
+  `readdir|opendir|closedir|seekdir|telldir|rewinddir|eof|getc|read|sysread|syswrite|fileno|binmode|truncate`.
+  FH args are never context-sensitive; the `let (*wantarray*)` wrapper is wrong there.
+- Unlocked tests 9-11 in defins.t (20→23 passing after fixing the next issues too).
+
+**2. `cl/pcl-runtime.lisp`: `p-glob` rewritten with scalar-context iterator**
+- Old `p-glob` always returned the first match in scalar context → infinite loop in
+  `while (my $name = glob('*'))`.
+- New implementation: split into three functions: `p-glob--expand`, `p-glob--list-context`,
+  `p-glob--scalar-context`. Uses `*p-glob-iterators*` hash-table with `:scalar-done` sentinel.
+  State machine: initial call → build vec, return `aref[0]`, store `cons(1 . vec)`;
+  subsequent calls advance index; after last entry → `:scalar-done`; next call → nil + reset.
+- Analogous `:list-done` sentinel for list context (prevents re-returning on second call).
+
+**3. `Pl/Parser.pm`: auto-defined insertion extended to readdir/readline/glob + hash slots**
+- Perl auto-inserts `defined()` around `while ($x = FUNC)` so false-but-defined values
+  (like `"0"`) don't terminate the loop prematurely.
+- Old code only handled `p-each`. New code handles `p-each|p-readdir|p-readline|p-glob`,
+  plus a new "hash slot" pattern `(p-setf (p-gethash/aref ...) (p-FUNC ...))`, plus a bare
+  call pattern `(p-FUNC ...)` (no assignment) which sets `$_` and uses defined.
+- Two code paths updated: `_process_while_statement` (block-form while) AND
+  `_process_expression_statement` (statement modifier `EXPR while FUNC` and `do {} while FUNC`).
+
+### Test Results
+
+- **defins.t: 8 → 27 passing (27/27, fully passing)** — defins.t moves to fully-passing list
+- **PCL suite: 74 files, 2861 tests, all passing** (no regressions)
+- **Sweep: 7967 passing, 1128 failing, 27 crashed files** (1 fewer crash than session 129)
+  - `defins.t` fully passing (+19 tests vs session 129's 8)
+  - `kvaslice.t`, `reverse.t`, `defined.t` added to fully-passing
+  - Note: sweep has natural variance (±50 tests); re-run will confirm exact numbers
+
+### NOT Yet Committed
+
+All 3 fixes are in the working tree but not yet committed (user asked to document first).
+
+### lop.t Crash Investigation (NOT fixed)
+
+lop.t crashes at test 18 with UNDEFINED-FUNCTION on `(pl-Bare)`. Root cause:
+
+- Perl 5.40 `^^` (logical XOR) operator: PPI tokenises `^^` as two separate `^` tokens.
+  Parser sees `$a ^ ^ $b` → second `^` has no left operand → PARSE ERROR → `(progn nil)`.
+  Tests 24-43 (xor/^^ loop) each print `(progn nil)` for the `^^` case.
+
+- **Main crash at test 18**: `$i = !Bare || !$x`. `Bare` is an unquoted bareword (string "Bare"
+  in no-strict Perl). Our handle_subcalls scans right-to-left; when `Bare` is at position `i` and
+  the token at `i+1` is `||` (binary-only operator, cannot be unary prefix), the code at
+  `Pl/PExpr.pm:2228-2234` treats it as a zero-arg funcall → `(pl-Bare)` → UNDEFINED-FUNCTION.
+
+- **Attempted fix (reverted)**: Added a check `if ($i > 0 && prev_token is unary prefix operator)
+  { next }` before the binary-only-operator check. The fix correctly skips `Bare` in
+  `handle_subcalls`, but the `(pl-Bare)` is still generated — meaning the funcall is being
+  created in a DIFFERENT code path (not yet identified). Fix was reverted to avoid regression.
+
+- **What to investigate next**: Add debug prints to `gen_funcall` and `gen_leaf` in ExprToCL.pm
+  to trace which code path creates `pl-Bare` for the single PPI::Token::Word node. The handle_subcalls
+  loop at line 2083 is NOT the source (confirmed by debug trace); look at the main operator
+  precedence loop (line 1101) calling `parse([Bare])` → `parse()` line 612-635 path.
+
+### Next Session Priorities
+
+1. **Commit this session's work** (3 fixes, defins.t 27/27)
+2. **lop.t**: Identify where `(pl-Bare)` is generated for bare uppercase words after `!`
+   - Check `parse()` path for single Word node at line 612-635 (PExpr.pm)
+   - Specifically: does `make_node(Bare_word)` create a funcall node somehow?
+   - Try: add `warn "gen_leaf Word: $content\n"` to ExprToCL gen_leaf to confirm leaf is hit
+3. **bless.t tests 41-48** — box-of-box: `local $x = bless $ref` creates outer `let` box with no class
+4. **readline.t test 30** — `local($SIG{__WARN__}, $^W) = (...)` generates wrong code (whole `$SIG` replaced)
+
+---
+
 ## Session 129 (2026-04-10) — crash fixes: defined(FH), flatten-list nil, %p-fh-arg
 
 ### Focus

@@ -912,6 +912,20 @@ sub _process_expression_statement {
     }
     else {
       my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
+      # Apply Perl's auto-defined() insertion for while-modifier loops.
+      # while ($x = readdir/each/readline/glob) terminates on undef, not on false.
+      if ($cl_modifier eq 'while') {
+        my $auto_pat = 'p-each|p-readdir|p-readline|p-glob';
+        if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\((?:$auto_pat)\b/) {
+          my $var = $1;
+          $cond_cl = "(progn $cond_cl (p-defined $var))";
+        } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
+          $cond_cl = "(p-defined $cond_cl)";
+        } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
+          # Bare call: assign to $_ and defined-check
+          $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
+        }
+      }
       $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
     }
   }
@@ -3119,12 +3133,26 @@ sub _process_while_statement {
     }
   }
 
-  # Perl special case: while ($k = each COLL) is treated as while (defined($k = each COLL)).
-  # This prevents the loop from exiting when each returns index 0 (which is falsy).
-  # Detect pattern: (p-scalar-= $var (p-each ...)) or (p-my-= $var (p-each ...))
-  if ($keyword ne 'until' && $cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\(p-each\b/) {
-    my $var = $1;
-    $cond_cl = "(progn $cond_cl (p-defined $var))";
+  # Perl auto-defined insertion: while ($x = FUNC) terminates when FUNC returns undef,
+  # not when it returns a false-but-defined value like "0".
+  # Functions: each, readdir, readline (<FH>), glob.
+  # Patterns:
+  #   (p-scalar-= $var (p-each/readdir/readline/glob ...)) → (progn COND (p-defined $var))
+  #   (p-my-= $var (p-each/readdir/readline/glob ...))     → same
+  #   (p-setf (p-gethash/aref ...) (p-each/readdir/...))  → (p-defined COND)
+  #   Bare (p-readdir/p-glob ...)   → (progn (p-setf $_ COND) (p-defined $_))
+  #   Bare (p-each ...)             → same (sets $_ to each's return value)
+  if ($keyword ne 'until') {
+    my $auto_pat = 'p-each|p-readdir|p-readline|p-glob';
+    if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\((?:$auto_pat)\b/) {
+      my $var = $1;
+      $cond_cl = "(progn $cond_cl (p-defined $var))";
+    } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
+      $cond_cl = "(p-defined $cond_cl)";
+    } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
+      # Bare call: assign to $_ and use defined-check (Perl's implicit $_ aliasing)
+      $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
+    }
   }
 
   # Handle 'until' by negating
