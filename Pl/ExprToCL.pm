@@ -138,6 +138,9 @@ my %OP_EXCEPTIONS = (
   '&&=' => 'p-and-assign',
   '||=' => 'p-or-assign',
 
+  # Logical XOR (Perl 5.40+): same precedence as ||, high-prec version of 'xor'
+  '^^'  => 'p-xor',
+
   # Reference operator
   '\\'  => 'p-backslash',
 
@@ -584,6 +587,12 @@ sub gen_leaf {
     if ($content eq '__LINE__') {
       my $line = $node->line_number // 0;
       return $line;
+    }
+    # If marked as bareword string by handle_subcalls (unknown word used as a value,
+    # e.g. !Bare where Bare is not a known function), emit as a string literal.
+    if ($node->{_bareword_string}) {
+      (my $escaped = $content) =~ s/"/\\"/g;
+      return qq{"$escaped"};
     }
     return $content;
   }

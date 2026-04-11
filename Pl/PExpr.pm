@@ -2226,7 +2226,23 @@ sub handle_subcalls {
         my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not', '++', '--');
         my $is_unary = $is_cast || $can_be_unary_op{$next_op};
         if (!$is_unary) {
-          # Binary-only operator - treat bareword as zero-arg function
+          # Binary-only operator - treat bareword as zero-arg function.
+          # BUT: if the word is not a known function (not in known_no_of_params,
+          # not declared in Environment), it's an unknown bareword string literal.
+          # e.g., !Bare || $x — Bare is the string "Bare", not a function call.
+          # Unknown barewords before binary operators are strings in no-strict Perl;
+          # in strict Perl they'd be a compile error (so CPAN modules never have them).
+          my $is_known_bop = exists $self->known_no_of_params->{$sub_name}
+              || ($self->has_environment
+                  && $self->environment->has_prototype($sub_name));
+          # ALL-CAPS words (DIR, FILE, STDIN, MAXSIZE, etc.) are filehandles or
+          # constants — leave them as funcalls so %p-fh-arg can identify them.
+          # Only mixed-case unknown words (like Bare in !Bare) are string literals.
+          my $is_all_caps_bop = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
+          unless ($is_known_bop || $is_all_caps_bop) {
+            $now->{_bareword_string} = 1;
+            next;
+          }
           my($top_node, $top_id) = $self->make_node_insert('funcall');
           my $node_id = $self->make_node($now);
           $self->add_child_to_node($top_id, $node_id);
@@ -2490,6 +2506,34 @@ sub handle_subcalls {
               last;
             }
           }
+        }
+      }
+    }
+
+    # If no parameters would be consumed and the word is not a known function,
+    # treat it as a bareword string literal instead of a zero-arg function call.
+    # This handles e.g. parse([!, Bare]) where Bare is the operand of !, not a func.
+    # The check: end_pars < i+1 means no args; unknown AND (already flagged OR preceded
+    # by a unary operator) → it's definitely an expression operand, not a func call.
+    if ($end_pars < $i + 1) {
+      my $is_known_fb = exists $self->known_no_of_params->{$sub_name}
+          || ($self->has_environment
+              && $self->environment->has_prototype($sub_name));
+      # ALL-CAPS words are filehandles/constants — leave as funcalls.
+      my $is_all_caps_fb = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
+      unless ($is_known_fb || $is_all_caps_fb) {
+        my $prev_is_unary = 0;
+        if ($i > 0) {
+          my $prev_tok = $e->[$i - 1];
+          my $prev_op  = $self->is_token_operator($prev_tok);
+          if (defined $prev_op) {
+            my %unary_ops = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+            $prev_is_unary = 1 if $unary_ops{$prev_op};
+          }
+        }
+        if ($prev_is_unary || $now->{_bareword_string}) {
+          $now->{_bareword_string} = 1;
+          next;
         }
       }
     }
@@ -3296,6 +3340,10 @@ sub cleanup_for_parsing {
   # Word + Operator. Split labels back into their components when preceded by "?".
   @no_ws = $self->_fix_ppi_ternary_label_bug(\@no_ws);
 
+  # PPI BUG WORKAROUND: Perl 5.40+ '^^' (logical XOR) is tokenized by PPI as
+  # two consecutive '^' operators.  Merge them into a single '^^' token.
+  @no_ws = $self->_fix_ppi_logical_xor_bug(\@no_ws);
+
   # PPI BUG WORKAROUND: After blocks, PPI parses <*.txt> as separate tokens
   # instead of a glob. Reconstruct glob tokens from < PATTERN > sequences.
   @no_ws = $self->_fix_ppi_glob_after_block(\@no_ws);
@@ -3346,6 +3394,29 @@ sub cleanup_for_parsing {
 # when they follow expression-ending tokens. PPI incorrectly parses "foo()-1" as
 # the number -1 rather than subtraction. Perl's actual parser treats this as "- 1".
 # See cleanup_for_parsing() for context.
+sub _fix_ppi_logical_xor_bug {
+  my $self   = shift;
+  my $tokens = shift;
+
+  # PPI tokenizes Perl 5.40's '^^' (logical XOR) as two separate '^' operators.
+  # Merge consecutive '^' '^' into a single '^^' operator token so the
+  # precedence loop sees it at the same level as '||' (not bitwise '^').
+  my @result;
+  for (my $i = 0; $i < @$tokens; $i++) {
+    if (ref($tokens->[$i]) eq 'PPI::Token::Operator'
+        && $tokens->[$i]->content eq '^'
+        && $i + 1 < @$tokens
+        && ref($tokens->[$i+1]) eq 'PPI::Token::Operator'
+        && $tokens->[$i+1]->content eq '^') {
+      push @result, PPI::Token::Operator->new('^^');
+      $i++;  # consume the second '^'
+    } else {
+      push @result, $tokens->[$i];
+    }
+  }
+  return @result;
+}
+
 sub _fix_ppi_negative_number_bug {
   my $self   = shift;
   my $tokens = shift;

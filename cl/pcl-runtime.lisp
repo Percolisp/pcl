@@ -3170,10 +3170,10 @@
   `(p-|| ,a ,b))
 
 (defun p-xor (a b)
-  "Perl 'xor' operator"
+  "Perl 'xor' operator: returns 1 if exactly one side is true, \"\" if both or neither"
   (let ((ta (p-true-p a))
         (tb (p-true-p b)))
-    (if (or (and ta (not tb)) (and (not ta) tb)) t nil)))
+    (if (or (and ta (not tb)) (and (not ta) tb)) 1 "")))
 
 (defmacro p-// (a b)
   "Perl defined-or operator"

@@ -219,6 +219,7 @@ has precedences => (
         # Logical operators (higher precedence than //)
         '&&'  => { assoc => 'l', no => 2, prec => 20 },
         '||'  => { assoc => 'l', no => 2, prec => 19 },
+        '^^'  => { assoc => 'l', no => 2, prec => 19 }, # Perl 5.40 logical XOR (same prec as ||)
 
         # Defined-or operator (same precedence as ||)
         '//'  => { assoc => 'l', no => 2, prec => 19 },
@@ -246,7 +247,7 @@ has precedences => (
         # Really. Try: p -E '$q=1; $w=14; $x=($z = $q+5 and $w); say "$z, $x";'
         # Gives: 6, 14
         not   => { assoc => 'l', no => 1, prec =>  3 },
-        and   => { assoc => 'l', no => 2, prec =>  1 },
+        and   => { assoc => 'l', no => 2, prec =>  2 }, # higher than or/xor
         or    => { assoc => 'l', no => 2, prec =>  1 },
         xor   => { assoc => 'l', no => 2, prec =>  1 },
       };
