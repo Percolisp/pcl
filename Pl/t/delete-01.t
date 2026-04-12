@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 12;
 
 sub run_cl {
     my ($code) = @_;
@@ -100,3 +100,31 @@ test_cl('delete hashref chain: keys after delete',
      my @list = sort keys %{$refhash{"top"}};
      print "@list\n";',
     "foo\n");
+
+# ── KV array slice delete: %arr[i,j] returns key-value pairs ─────────────
+
+test_cl('delete %arr[6,7]: keys are correct',
+    'my @foo = (0,1,2,3,4,5,6,7,8);
+     my @bar = delete %foo[6,7];
+     print "$bar[0] $bar[2]\n";',
+    "6 7\n");
+
+test_cl('delete %arr[6,7]: values are correct',
+    'my @foo = ("a","b","c","d","e","f","g","h","i");
+     my @bar = delete %foo[6,7];
+     print "$bar[1] $bar[3]\n";',
+    "g h\n");
+
+# ── Trailing nil trim after delete ───────────────────────────────────────
+
+test_cl('delete last elements trims array length',
+    'my @foo = (0,1,2,3,4,5,6,7);
+     delete @foo[6,7];
+     print scalar(@foo), "\n";',
+    "6\n");
+
+test_cl('delete %arr[i,j] trims array if last elements removed',
+    'my @foo = ("a","b","c","d","e","f","g","h");
+     delete %foo[6,7];
+     print scalar(@foo), "\n";',
+    "6\n");

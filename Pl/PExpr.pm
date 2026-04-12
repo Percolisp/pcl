@@ -931,7 +931,7 @@ sub parse {
       my($node, $id) = $self->make_node_insert($type);
 
       my @ix    = $term->children();
-      my $ix_id = $self->parse(\@ix);
+      my $ix_id = $self->_parse_subscript_ix(\@ix);
 
       # Add $pre as child 1
       $self->add_child_to_node($id, $pre_id);
@@ -1386,7 +1386,7 @@ sub parse_list {
   # Strip declarators (my/our/state/local) - they may have been unwrapped above
   my @stripped  = $self->extract_declarations($e_list);
   $e_list       = \@stripped;
-  $self->handle_subcalls($e_list); # If a funcall w/o () in the list.
+  $self->handle_subcalls($e_list, 1); # If a funcall w/o () in the list.
 
   # 1. Split into list with ","-separated. Eval them
   say "Parts in list:\n", dump $e_list         if 4 & DEBUG;
@@ -1428,10 +1428,163 @@ sub _block_is_hash_constructor {
 # It use known number of parameters for subs and priorities.
 
 sub handle_subcalls {
-  my $self      = shift;
-  my $e         = shift;
+  my $self       = shift;
+  my $e          = shift;
+  my $in_arglist = shift // 0;  # 1 when called from parse_list (inside explicit parens)
 
   say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
+
+  # - - - Pre-pass (BEFORE fun(list) loop): Handle general indirect object syntax
+  # "METHOD ClassName ARGS" → ClassName->METHOD(ARGS)
+  # "METHOD $obj ARGS"      → $obj->METHOD(ARGS)
+  # Must run BEFORE the fun(list) loop that transforms ClassName(ARGS) into a funcall,
+  # which would prevent us from detecting the pattern.
+  # Only triggers for non-builtin, non-keyword method names followed by uppercase Word or Symbol.
+  {
+    my %_indirect_skip = map { $_ => 1 } qw(
+      my our local state
+      return next last redo goto
+      if unless elsif else
+      while until for foreach do
+      eval sub package use require no
+      BEGIN END CHECK UNITCHECK INIT
+      and or not xor CORE new
+    );
+    for (my $i = 0; $i < scalar(@$e) - 1; $i++) {
+      my $now  = $e->[$i];
+      my $next = $e->[$i+1];
+
+      # First token must be a plain Word token (method name)
+      next unless ref($now) eq 'PPI::Token::Word';
+      next if $self->is_token_operator($now);
+      my $method_name = $now->content;
+
+      # Skip control keywords and "new" (handled by later pre-pass)
+      next if $_indirect_skip{$method_name};
+
+      # Skip known builtin functions
+      next if exists $self->known_no_of_params->{$method_name};
+
+      # Skip all-uppercase words: they are filehandles (STDIN/STDOUT/STDERR)
+      # or constants, never method names in indirect-object syntax
+      next if $method_name =~ /^[A-Z][A-Z0-9_]*$/;
+
+      # Skip if preceded by -> (this is a method name, not an invocant position)
+      if ($i > 0 && $self->is_arrow_op($e->[$i-1])) {
+        next;
+      }
+
+      # Determine invocant: next token must be uppercase-starting Word (class name)
+      # or a Symbol ($var) as object reference
+      my $invocant = $next;
+      my $invocant_is_class = 0;
+      if (ref($invocant) eq 'PPI::Token::Word'
+          && !$self->is_token_operator($invocant)
+          && $invocant->content =~ /^[A-Z]/) {
+        # Skip all-uppercase invocants: they are Perl special blocks (INIT, BEGIN,
+        # END, CHECK), filehandles (FILE, STDOUT), or constants — never class names
+        # in indirect-object syntax.  Same rule applied to method names above.
+        next if $invocant->content =~ /^[A-Z][A-Z0-9_]*$/;
+        $invocant_is_class = 1;
+      } elsif (ref($invocant) eq 'PPI::Token::Symbol'
+               && $invocant->content =~ /^\$/) {
+        # If the token right after the symbol is ++ or --, this is $var++
+        # (postfix operator on the invocant), not indirect object syntax
+        if ($i + 2 <= scalar(@$e) - 1) {
+          my $after_inv = $e->[$i+2];
+          if (ref($after_inv) eq 'PPI::Token::Operator') {
+            my $op = $after_inv->content;
+            next if $op eq '++' || $op eq '--';
+          }
+        }
+        $invocant_is_class = 0;
+      } else {
+        next;
+      }
+
+      # Find end of arg span: stop before low-priority operators (and/or/xor)
+      # Find end of arg span.
+      # Cases:
+      # 1. Args in explicit parens: METHOD INV (args) → i+2 is a Structure::List.
+      #    Stop at next ',' so we don't grab outer expression elements.
+      # 2. No args (next is ',' separator or end of array): METHOD INV, other → no args.
+      # 3. Bare args: METHOD INV a, b, c → grab all args until and/or/xor.
+      my $args_explicit_parens = ($i + 2 <= scalar(@$e) - 1
+                                  && ref($e->[$i+2]) eq 'PPI::Structure::List');
+      # has_no_args: true when the invocant is the last token OR is immediately followed
+      # by a comma (which is an outer-call arg separator, not a method arg).
+      # e.g.  "method Pack, extra"  → Pack at i+2 is ',', so has_no_args=1 → only Pack
+      my $has_no_args = 0;
+      if ($i + 2 > scalar(@$e) - 1) {
+        $has_no_args = 1;
+      } elsif (!$args_explicit_parens) {
+        my $first_arg_op = $self->is_token_operator($e->[$i+2]);
+        if (defined $first_arg_op && $first_arg_op eq ',') {
+          $has_no_args = 1;
+        }
+      }
+
+      # For $variable invocants: require explicit parens around args OR be inside
+      # an explicit arg list where the invocant is immediately followed by a comma
+      # (meaning the comma is an outer separator, not part of the method's args).
+      # "func $var, args" is ambiguous in standalone context — almost always a
+      # normal function call (ok $x, 'desc', cmp_ok $a, '==', $b, etc.).
+      # Exception: inside explicit parens (in_arglist=1), "method $obj, outer_arg"
+      # with comma right after invocant is unambiguously "method($obj), outer_arg".
+      # e.g. is(method $obj, "expected") → (p-method-call $obj 'method), "expected"
+      my $comma_after_invocant = $has_no_args && ($i + 2 <= scalar(@$e) - 1);
+      my $var_invocant_ok = $args_explicit_parens
+          || ($in_arglist && $comma_after_invocant);
+      next if !$invocant_is_class && !$var_invocant_ok;
+
+      my $end_pars = $i + 1;  # default: just invocant, no args
+      unless ($has_no_args) {
+        $end_pars = scalar(@$e) - 1;
+        for my $j ($i + 2 .. scalar(@$e) - 1) {
+          my $op = $self->is_token_operator($e->[$j]);
+          if (defined $op) {
+            if ($op eq 'and' || $op eq 'or' || $op eq 'xor') {
+              $end_pars = $j - 1;
+              last;
+            }
+            if ($args_explicit_parens && $op eq ',') {
+              $end_pars = $j - 1;
+              last;
+            }
+          }
+        }
+      }
+
+      # Build methodcall node: kids[0]=invocant, kids[1]=method, kids[2+]=args
+      my($mc_node, $mc_id) = $self->make_node_insert('methodcall');
+
+      # kids[0]: invocant
+      if ($invocant_is_class) {
+        # Class name bareword: wrap in funcall (gen_methodcall expects this shape)
+        my($class_fc_node, $class_fc_id) = $self->make_node_insert('funcall');
+        $self->add_child_to_node($class_fc_id, $self->make_node($invocant));
+        $self->add_child_to_node($mc_id, $class_fc_id);
+      } else {
+        # $variable object: parse directly
+        my $inv_id = $self->parse([$invocant]);
+        $self->add_child_to_node($mc_id, $inv_id);
+      }
+
+      # kids[1]: method name
+      $self->add_child_to_node($mc_id, $self->make_node($now));
+
+      # kids[2+]: args (if any, after the invocant)
+      if ($end_pars >= $i + 2) {
+        my $arg_ids = $self->parse_list($e, $i + 2, $end_pars);
+        for my $arg_id (@$arg_ids) {
+          $self->add_child_to_node($mc_id, $arg_id);
+        }
+      }
+
+      # Replace "METHOD INVOCANT [ARGS]" span with the single methodcall node
+      splice @$e, $i, $end_pars - $i + 1, $mc_node;
+    }
+  }
 
   # - - - Handle: `fun(...)`:
   # (Yes, loops to all but last.)
@@ -2080,7 +2233,23 @@ sub handle_subcalls {
         my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not', '++', '--');
         my $is_unary = $is_cast || $can_be_unary_op{$next_op};
         if (!$is_unary) {
-          # Binary-only operator - treat bareword as zero-arg function
+          # Binary-only operator - treat bareword as zero-arg function.
+          # BUT: if the word is not a known function (not in known_no_of_params,
+          # not declared in Environment), it's an unknown bareword string literal.
+          # e.g., !Bare || $x — Bare is the string "Bare", not a function call.
+          # Unknown barewords before binary operators are strings in no-strict Perl;
+          # in strict Perl they'd be a compile error (so CPAN modules never have them).
+          my $is_known_bop = exists $self->known_no_of_params->{$sub_name}
+              || ($self->has_environment
+                  && $self->environment->has_prototype($sub_name));
+          # ALL-CAPS words (DIR, FILE, STDIN, MAXSIZE, etc.) are filehandles or
+          # constants — leave them as funcalls so %p-fh-arg can identify them.
+          # Only mixed-case unknown words (like Bare in !Bare) are string literals.
+          my $is_all_caps_bop = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
+          unless ($is_known_bop || $is_all_caps_bop) {
+            $now->{_bareword_string} = 1;
+            next;
+          }
           my($top_node, $top_id) = $self->make_node_insert('funcall');
           my $node_id = $self->make_node($now);
           $self->add_child_to_node($top_id, $node_id);
@@ -2104,7 +2273,8 @@ sub handle_subcalls {
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
             # Cast followed by Symbol is a single dereference term
             $end_pars = $i + 2;
-        } elsif (ref($next_term) eq 'PPI::Token::Symbol' && $end_pars >= $i + 2) {
+        } elsif ((ref($next_term) eq 'PPI::Token::Symbol'
+                  || ref($next_term) eq 'PPI::Token::Magic') && $end_pars >= $i + 2) {
             # Check if symbol is followed by subscript (hash/array access)
             my $after_symbol = $e->[$i + 2];
             if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
@@ -2183,8 +2353,9 @@ sub handle_subcalls {
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
           # Cast followed by Symbol is a single dereference term
           $end_pars = $i + 2;
-        } elsif (ref($next_term) eq 'PPI::Token::Symbol') {
-          # Symbol (like %hash, @arr, $var) - check for subscript/block chain
+        } elsif (ref($next_term) eq 'PPI::Token::Symbol'
+                 || ref($next_term) eq 'PPI::Token::Magic') {
+          # Symbol or Magic (like %hash, @arr, $var, $_, @_, etc.) - check for subscript/block chain
           if ($i + 2 <= $end_pars) {
             my $after = $e->[$i + 2];
             if (ref($after) eq 'PPI::Structure::Subscript') {
@@ -2342,6 +2513,52 @@ sub handle_subcalls {
               last;
             }
           }
+        }
+      }
+    }
+
+    # If no parameters would be consumed and the word is not a known function,
+    # treat it as a bareword string literal instead of a zero-arg function call.
+    # This handles e.g. parse([!, Bare]) where Bare is the operand of !, not a func,
+    # and also the RHS of binary ops: "a .. c" — c after .. is also a bareword.
+    # Decision: use strict_subs pragma to gate. Without strict, unknown standalone
+    # words in operator context are strings. With strict, leave as funcall (may
+    # fail at runtime, which is correct Perl behavior for typo'd sub names).
+    if ($end_pars < $i + 1) {
+      my $is_known_fb = exists $self->known_no_of_params->{$sub_name}
+          || ($self->has_environment
+              && $self->environment->has_prototype($sub_name));
+      # ALL-CAPS words are filehandles/constants — leave as funcalls.
+      my $is_all_caps_fb = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
+      unless ($is_known_fb || $is_all_caps_fb) {
+        my $prev_is_unary = 0;
+        my $prev_is_binary = 0;
+        if ($i > 0) {
+          my $prev_tok = $e->[$i - 1];
+          my $prev_op  = $self->is_token_operator($prev_tok);
+          if (defined $prev_op) {
+            my %unary_ops = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+            if ($unary_ops{$prev_op}) {
+              $prev_is_unary = 1;
+            } elsif ($prev_op ne ',' && $prev_op ne '=>') {
+              # Commas and fat-commas are argument/list separators, not value-combining
+              # binary operators. A bareword after ',' could be a class name (bless \$x, Foo::)
+              # or a sub call — don't force it to a string based on separator position.
+              # For actual binary operators (.. + - eq etc.), treat RHS bareword as string.
+              $prev_is_binary = 1;
+            }
+          }
+        }
+        # In strict-subs mode: only unary context and already-flagged words → string.
+        # In no-strict mode: any value-operator context (unary OR binary, not separators) → string.
+        my $strict_subs = $self->has_environment
+                          && $self->environment->has_pragma('strict_subs');
+        my $is_op_context = $strict_subs
+            ? ($prev_is_unary || $now->{_bareword_string})
+            : ($prev_is_unary || $prev_is_binary || $now->{_bareword_string});
+        if ($is_op_context) {
+          $now->{_bareword_string} = 1;
+          next;
         }
       }
     }
@@ -2701,6 +2918,14 @@ sub child_context {
         return SCALAR_CTX
             if $child_index >= 1;
       }
+
+      # Functions that take a filehandle as their first argument.
+      # The FH arg must be SCALAR_CTX: bareword FHs become (pl-NAME) funcalls,
+      # and wrapping them in (let ((*wantarray* t)) ...) prevents %p-fh-arg
+      # from recognising them, causing an UNDEFINED-FUNCTION crash.
+      if ($func_name && $func_name =~ /^(readdir|opendir|closedir|seekdir|telldir|rewinddir|eof|getc|read|sysread|syswrite|fileno|binmode|truncate)$/) {
+        return SCALAR_CTX if $child_index == 1;  # First arg is the filehandle
+      }
     }
     # progn (comma operator) forces list context
     if ($type eq 'progn') {
@@ -3038,6 +3263,24 @@ sub get_node_children {
 
 
 
+# Parse a subscript @ix list, handling bareword subscripts.
+# In $a[bar] / $h{bar}, PPI gives a Statement::Expression wrapping a Token::Word.
+# handle_subcalls would turn that into a funcall — wrong for barewords.
+# We detect the pattern and return a string-literal node instead.
+sub _parse_subscript_ix {
+  my ($self, $ix) = @_;
+  my @sig = grep { !$_->isa('PPI::Token::Whitespace') } @$ix;
+  if (@sig == 1 && $sig[0]->isa('PPI::Statement::Expression')) {
+    my @ekids = grep { !$_->isa('PPI::Token::Whitespace') } $sig[0]->children();
+    if (@ekids == 1 && ref($ekids[0]) eq 'PPI::Token::Word') {
+      my $word    = $ekids[0]->content();
+      my $str_tok = PPI::Token::Quote::Single->new("'$word'");
+      return $self->make_node($str_tok);
+    }
+  }
+  return $self->parse($ix);
+}
+
 sub make_node {
   my $self      = shift;
   my $node      = shift;
@@ -3122,6 +3365,10 @@ sub cleanup_for_parsing {
   # Word + Operator. Split labels back into their components when preceded by "?".
   @no_ws = $self->_fix_ppi_ternary_label_bug(\@no_ws);
 
+  # PPI BUG WORKAROUND: Perl 5.40+ '^^' (logical XOR) is tokenized by PPI as
+  # two consecutive '^' operators.  Merge them into a single '^^' token.
+  @no_ws = $self->_fix_ppi_logical_xor_bug(\@no_ws);
+
   # PPI BUG WORKAROUND: After blocks, PPI parses <*.txt> as separate tokens
   # instead of a glob. Reconstruct glob tokens from < PATTERN > sequences.
   @no_ws = $self->_fix_ppi_glob_after_block(\@no_ws);
@@ -3172,6 +3419,29 @@ sub cleanup_for_parsing {
 # when they follow expression-ending tokens. PPI incorrectly parses "foo()-1" as
 # the number -1 rather than subtraction. Perl's actual parser treats this as "- 1".
 # See cleanup_for_parsing() for context.
+sub _fix_ppi_logical_xor_bug {
+  my $self   = shift;
+  my $tokens = shift;
+
+  # PPI tokenizes Perl 5.40's '^^' (logical XOR) as two separate '^' operators.
+  # Merge consecutive '^' '^' into a single '^^' operator token so the
+  # precedence loop sees it at the same level as '||' (not bitwise '^').
+  my @result;
+  for (my $i = 0; $i < @$tokens; $i++) {
+    if (ref($tokens->[$i]) eq 'PPI::Token::Operator'
+        && $tokens->[$i]->content eq '^'
+        && $i + 1 < @$tokens
+        && ref($tokens->[$i+1]) eq 'PPI::Token::Operator'
+        && $tokens->[$i+1]->content eq '^') {
+      push @result, PPI::Token::Operator->new('^^');
+      $i++;  # consume the second '^'
+    } else {
+      push @result, $tokens->[$i];
+    }
+  }
+  return @result;
+}
+
 sub _fix_ppi_negative_number_bug {
   my $self   = shift;
   my $tokens = shift;

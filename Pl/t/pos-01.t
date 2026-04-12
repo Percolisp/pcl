@@ -37,7 +37,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 8;
+plan tests => 9;
 
 # Basic /g pos tracking
 is run_cl(<<'END'), "2\n", '/g match sets pos';
@@ -83,4 +83,12 @@ is run_cl(<<'END'), "ba:na:na\n", '/g list context returns all matches';
 my $x = 'banana';
 my @m = ($x =~ /.a/g);
 print join(':', @m), "\n";
+END
+
+# pos $_[N] - Magic var with subscript must not bleed args into pos()
+# Regression: PPI::Token::Magic was not handled in is_strictly_single path,
+# causing `is pos $_[1], 3, 'desc'` to be parsed as `is(pos($_[1], 3, 'desc'))`.
+is run_cl(<<'END'), "3\n", 'pos $_[N] parsed correctly (magic+subscript)';
+sub check_pos { pos $_[0] = 3; return pos $_[0]; }
+my $x = "hello"; print check_pos($x), "\n";
 END

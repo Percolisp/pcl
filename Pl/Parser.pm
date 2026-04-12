@@ -269,7 +269,7 @@ sub _assemble_output {
   for my $section (@{$self->_sections}) {
     for my $bucket (qw(preamble declarations definitions runtime)) {
       for my $line (@{$section->{$bucket}}) {
-        while ($line =~ /\b([A-Za-z][A-Za-z0-9_]*)::/g) {
+        while ($line =~ /\b([A-Za-z_][A-Za-z0-9_]*)::/g) {
           my $pkg = $1;
           next if lc($pkg) eq 'pcl';  # our runtime package
           $needed_packages{$pkg} = 1 unless $declared_pkgs{$pkg};
@@ -335,9 +335,12 @@ sub _insert_variable_forward_declarations {
     $0 $$ $?
   );
 
-  my %declared;    # variables with defvar already in preamble/declarations
-  my %let_bound;   # variables bound by let/let*/foreach at FILE scope only
-  my %referenced;  # all variable references at FILE scope only
+  my %declared;           # variables with defvar already in preamble/declarations
+  my %let_bound;          # variables bound by let/let*/foreach at FILE scope only (union)
+  my %foreach_let_bound;  # only from (p-foreach ($var ...)) lines
+  my %other_let_bound;    # only from other (let/let* ...) forms
+  my %referenced;         # all variable references at FILE scope only
+  my %cross_pkg_vars;     # pkg::$var references needing defvar in their package
 
   # Only scan section 0's preamble+declarations for "already declared" defvars.
   # Forward declarations are inserted into section 0. A defvar in a later section
@@ -377,21 +380,37 @@ sub _insert_variable_forward_declarations {
     }
 
     if ($sub_depth == 0) {
-      # Collect let/let*-bound variables.
+      # Collect let/let*-bound variables (non-foreach).
       if ($line =~ /\(let\*?\s+\(/) {
         while ($line =~ /\(([\$\@\%][a-zA-Z_]\w*)\s+/g) {
           $let_bound{$1} = 1;
+          $other_let_bound{$1} = 1;
         }
       }
-      # Collect foreach-bound variables
+      # Collect foreach-bound variables (tracked separately to identify pure loop vars).
       if ($line =~ /\(p-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
         $let_bound{$1} = 1;
+        $foreach_let_bound{$1} = 1;
       }
       # Collect all variable references
       while ($line =~ /([\$\@\%][a-zA-Z_]\w*)/g) {
         my $var = $1;
-        next if $var =~ /::/;  # skip package-qualified
+        next if $var =~ /::/;  # skip package-qualified (handled separately below)
         $referenced{$var} = 1;
+      }
+    }
+
+    # Collect cross-package variable references at ANY nesting depth
+    # (including inside overload handler lambdas, sub bodies, etc.).
+    # e.g. o::$str, o::$num inside overload lambdas need defvar in their package.
+    # Skip special packages (ENV, INC, SIG, pcl, main) and already-defvar'd forms.
+    unless ($line =~ /^\s*\(defvar\s/) {
+      my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl main);
+      while ($line =~ /\b([a-zA-Z_]\w*)::([\$\@\%][a-zA-Z_]\w*)/g) {
+        my ($pkg, $var) = ($1, $2);
+        next if $skip_pkg{$pkg};
+        next if $var =~ /^[\$\@\%][0-9]/;  # special: $1, $2...
+        $cross_pkg_vars{"$pkg\::$var"} = [$pkg, $var];
       }
     }
 
@@ -401,14 +420,15 @@ sub _insert_variable_forward_declarations {
     }
   }
 
-  # Undeclared = referenced - declared - runtime - __lex__ let-bound
+  # Undeclared = referenced - declared - runtime - pure-foreach-my vars
   # Note: do NOT exclude all let_bound vars. A variable may be let-bound inside a
   # bare block (e.g. 'my @a' -> (let ((@a ...))...)) but still referenced as a
   # package variable at an earlier point in load order. defvar is idempotent,
   # so emitting a forward declaration for regular let-bound vars is safe.
-  # EXCEPTION: __lex__ variables (closure-renamed) must stay lexical (no defvar).
-  # They are let-bound per-iteration and must create CL lexical (not dynamic)
-  # bindings so each closure iteration captures its own independent binding.
+  # EXCEPTION: 'for my $var' variables are Perl lexicals, never package globals.
+  # Once defvar'd, ALL let-bindings of that name become dynamic (special) — closures
+  # inside the loop would capture the symbol rather than the per-iteration value.
+  # Safe to skip defvar when the var is foreach-only (not also bound by other let forms).
   # Always declare $a and $b (Perl sort variables) — they are package-scoped globals
   # used by named sort comparator subs (sub cmp { $a <=> $b }) as dynamic variables.
   # defvar makes them CL special vars; lambda params (lambda ($a $b) ...) then create
@@ -423,13 +443,53 @@ sub _insert_variable_forward_declarations {
     $declared{'$b'} = 1;
   }
 
+  my %lex_foreach = %{$self->{_lexical_foreach_vars} // {}};
+
   my @undeclared;
   for my $var (sort keys %referenced) {
     next if $declared{$var};
     next if $runtime_vars{$var};
+    # __lex__ variables are renamed 'my' vars from _with_declarations: they must stay
+    # lexical (no defvar) so per-closure-call let-bindings are lexical not dynamic.
     next if $let_bound{$var} && $var =~ /__lex__/;
+    # 'for my $var' is a Perl lexical — never defvar it as a package global.
+    # Safe to skip when it's foreach-only (not also bound by other let forms).
+    next if $lex_foreach{$var} && $foreach_let_bound{$var} && !$other_let_bound{$var};
     next if $var =~ /^[\$\@\%]state__/;  # state vars use outer let binding, not defvar
     push @undeclared, $var;
+  }
+
+  # Emit defvars for cross-package variable references (e.g. o::$str used in
+  # overload handlers). These are declared in the global section 0 defvar block;
+  # CL defvar doesn't require the current package to match — pkg::$var works.
+  # Already-defvar'd vars are skipped (defvar is idempotent but avoid duplicates).
+  if (%cross_pkg_vars) {
+    my %already_cross_declared;
+    for my $section (@{$self->_sections}) {
+      for my $line (@{$section->{preamble}}, @{$section->{declarations}}) {
+        if ($line =~ /\(defvar\s+(\w+)::([\$\@\%]\w+)\b/) {
+          $already_cross_declared{"$1\::$2"} = 1;
+        }
+      }
+    }
+    my @cross_decls;
+    for my $key (sort keys %cross_pkg_vars) {
+      next if $already_cross_declared{$key};
+      my ($pkg, $var) = @{$cross_pkg_vars{$key}};
+      my $sigil = substr($var, 0, 1);
+      if ($sigil eq '$') {
+        push @cross_decls, "(defvar $pkg\::$var (make-p-box nil))";
+      } elsif ($sigil eq '@') {
+        push @cross_decls, "(defvar $pkg\::$var (make-array 0 :adjustable t :fill-pointer 0))";
+      } elsif ($sigil eq '%') {
+        push @cross_decls, "(defvar $pkg\::$var (make-hash-table :test 'equal))";
+      }
+    }
+    if (@cross_decls) {
+      push @$decls, ";; Cross-package variable declarations (e.g. pkg::var used in closures).";
+      push @$decls, @cross_decls;
+      push @$decls, "";
+    }
   }
 
   return unless @undeclared;
@@ -457,6 +517,13 @@ sub _insert_variable_forward_declarations {
 # Also: $::var -> main::$var (empty package = main)
 sub _transform_pkg_var {
   my ($self, $var) = @_;
+  # Handle package stash access: %Pkg:: or $Pkg:: (symbol table reference)
+  # Must be checked BEFORE the package-qualified variable regex
+  if ($var =~ /^([\$\%])(.*)::$/) {
+    my ($sigil, $pkg) = ($1, $2);
+    $pkg = 'main' if $pkg eq '';
+    return "(p-stash \"$pkg\")";
+  }
   # Handle package-qualified variables: $Pkg::var -> Pkg::$var
   # Note: Use (.*) not (.+) to allow empty package (main shorthand)
   if ($var =~ /^([\$\@\%])(.*)::([^:]+)$/) {
@@ -781,6 +848,11 @@ sub _process_expression_statement {
     my $base      = substr($sym, 1);
     my $new_sigil = ($open eq '{') ? '%' : '@';
     my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    # Stash element — not supported; skip save/restore so subsequent tests can run.
+    if ($cl_var =~ /^\(p-stash /) {
+      $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
+      return;
+    }
     my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
     if (@key_cls) {
       my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
@@ -840,6 +912,20 @@ sub _process_expression_statement {
     }
     else {
       my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
+      # Apply Perl's auto-defined() insertion for while-modifier loops.
+      # while ($x = readdir/each/readline/glob) terminates on undef, not on false.
+      if ($cl_modifier eq 'while') {
+        my $auto_pat = 'p-each|p-readdir|p-readline|p-glob';
+        if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\((?:$auto_pat)\b/) {
+          my $var = $1;
+          $cond_cl = "(progn $cond_cl (p-defined $var))";
+        } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
+          $cond_cl = "(p-defined $cond_cl)";
+        } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
+          # Bare call: assign to $_ and defined-check
+          $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
+        }
+      }
       $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
     }
   }
@@ -891,7 +977,7 @@ sub _process_variable_statement {
     return;
   }
 
-  # Handle top-level 'my' declarations - need p-my for BEGIN block visibility
+  # Handle top-level 'my' declarations - need eval-when+defvar for BEGIN block visibility
   # Inside subs, my uses regular let bindings (handled elsewhere)
   # Exception: if the var was renamed by _with_declarations (closure capture at pkg level),
   # skip _process_my_toplevel_declaration and fall through to the rename handling below.
@@ -1068,7 +1154,7 @@ sub _process_our_declaration {
       if ($sigil eq '@') {
         # Array: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(p-eval-direct");
+          $self->_emit("(p-eval-always");
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         });
         unless ($is_empty_list) {
@@ -1081,7 +1167,7 @@ sub _process_our_declaration {
       elsif ($sigil eq '%') {
         # Hash: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(p-eval-direct");
+          $self->_emit("(p-eval-always");
           $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
         });
         unless ($is_empty_list) {
@@ -1095,7 +1181,7 @@ sub _process_our_declaration {
         # Scalar: declare with nil box at compile time, set value at runtime
         my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(p-eval-direct");
+          $self->_emit("(p-eval-always");
           $self->_emit("  (defvar $var (make-p-box nil)))");
         });
         $self->_emit("(setf (p-box-value $var) $init_cl)");
@@ -1107,7 +1193,7 @@ sub _process_our_declaration {
       $self->_with_bucket('declarations', sub {
         for my $var (@vars) {
           my $sigil = substr($var, 0, 1);
-          $self->_emit("(p-eval-direct");
+          $self->_emit("(p-eval-always");
           if ($sigil eq '@') {
             $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
           } elsif ($sigil eq '%') {
@@ -1128,7 +1214,7 @@ sub _process_our_declaration {
     $self->_with_bucket('declarations', sub {
       for my $var (@vars) {
         my $sigil = substr($var, 0, 1);
-        $self->_emit("(p-eval-direct");
+        $self->_emit("(p-eval-always");
         if ($sigil eq '@') {
           $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
         } elsif ($sigil eq '%') {
@@ -1180,7 +1266,7 @@ sub _process_my_toplevel_declaration {
     $self->_emit(";; $perl_code");
     for my $var (@vars) {
       my $sigil = substr($var, 0, 1);
-      $self->_emit("(p-eval-direct");
+      $self->_emit("(p-eval-always");
       if ($sigil eq '@') {
         $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
       } elsif ($sigil eq '%') {
@@ -1218,6 +1304,11 @@ sub _process_my_toplevel_declaration {
         my $base = substr($sym, 1);
         my $new_sigil = ($open eq '{') ? '%' : '@';
         my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+        # Stash element — not supported; emit comment and skip
+        if ($cl_var =~ /^\(p-stash /) {
+          $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
+          return;
+        }
         my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
         if (@key_cls) {
           my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
@@ -1504,6 +1595,14 @@ sub _process_local_declaration {
     my $new_sigil = ($open eq '{') ? '%' : '@';
     my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
 
+    # Stash slice/element: $Pkg::{key} or @Pkg::{keys} — stash manipulation
+    # is not supported. Emit just the body (no save/restore) so the file
+    # doesn't crash and subsequent tests can run.
+    if ($cl_var =~ /^\(p-stash /) {
+      $self->_emit(";; $perl_code (stash element local — not supported, running body only)");
+      return;
+    }
+
     # Extract individual key/index expressions from the subscript
     my @key_groups = $self->_subscript_key_groups($sub);
     if (@key_groups) {
@@ -1606,7 +1705,9 @@ sub _process_local_declaration {
     my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
 
     my $var = $vars[0];
-    my $sigil = substr($var, 0, 1);
+    # For qualified vars (e.g. A::@ISA), the sigil is embedded after '::'.
+    # For simple vars (e.g. @arr), it is the first character.
+    my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
 
     if ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
@@ -1618,7 +1719,7 @@ sub _process_local_declaration {
       push @bindings, "($var (p-copy-hash (let ((*wantarray* t)) $init_cl)))";
     }
     else {
-      push @bindings, "($var (make-p-box $init_cl))";
+      push @bindings, "($var (p-box-for-local $init_cl))";
     }
   }
   else {
@@ -1626,7 +1727,7 @@ sub _process_local_declaration {
     # Skip undef markers (they are skip slots, not real variables).
     for my $var (@vars) {
       next if $var eq '(p-undef)';  # undef slot: no binding needed
-      my $sigil = substr($var, 0, 1);
+      my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
       if ($sigil eq '@') {
         push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
       }
@@ -1780,11 +1881,16 @@ sub _process_compound_statement {
     $self->_process_bare_block($first_block, $label, $continue_block);
   }
   elsif (!$first_word) {
-    # Neither block nor keyword found - emit as comment
-    my $perl_code = $stmt->content;
-    $perl_code =~ s/\n/ /g;
-    $self->_emit(";; COMPOUND (unknown) not handled: $perl_code");
-    $self->_emit("");
+    if ($label) {
+      # Standalone label statement: LABEL: → emit as tagbody tag
+      $self->_emit(":$label");
+    } else {
+      # Neither block nor keyword found - emit as comment
+      my $perl_code = $stmt->content;
+      $perl_code =~ s/\n/ /g;
+      $self->_emit(";; COMPOUND (unknown) not handled: $perl_code");
+      $self->_emit("");
+    }
   }
   elsif ($first_word eq 'if' || $first_word eq 'unless') {
     $self->_process_if_statement($stmt, $first_word);
@@ -2561,14 +2667,14 @@ sub parse_block_as_function {
 
   if ($return_lambda) {
     # Collect all emitted lines from temp section and return as lambda string.
-    # Definitions (BEGIN blocks) are hoisted to the real definitions bucket
-    # rather than inlined in the lambda string — otherwise (eval-when ...) ends
-    # up as the first argument to p-funcall-ref, making NIL the function ref.
+    # Definitions (BEGIN blocks) and declarations (our $var defvars) are hoisted
+    # to the real buckets rather than inlined — otherwise (eval-when ...) ends up
+    # as the first argument to p-funcall-ref, making NIL the function ref.
     my $temp = $self->_sections->[0];
-    my @hoisted_defs = @{$temp->{definitions}};
+    my @hoisted_defs  = @{$temp->{definitions}};
+    my @hoisted_decls = @{$temp->{declarations}};
     my @lines = (
       @{$temp->{preamble}},
-      @{$temp->{declarations}},
       @{$temp->{runtime}},
     );
     $self->_sections($saved_sections);
@@ -2579,6 +2685,11 @@ sub parse_block_as_function {
     if (@hoisted_defs) {
       my $section = $self->_sections->[$self->_cur_section];
       push @{$section->{'definitions'}}, @hoisted_defs;
+    }
+    # Re-emit hoisted declarations (our $var defvars, etc.) into the real sections
+    if (@hoisted_decls) {
+      my $section = $self->_sections->[$self->_cur_section];
+      push @{$section->{'declarations'}}, @hoisted_decls;
     }
     return @lines ? join("\n", @lines) : "(lambda () nil)";
   }
@@ -2896,6 +3007,14 @@ sub _with_declarations {
     # Track renamed/original vars as let-bound so _emit replaces p-scalar-= with
     # p-my-= (box-set), preventing the proclaim-special side-effect that would
     # turn future let bindings from lexical to dynamic and break closure capture.
+    #
+    # HAZARD: _let_bound_vars is critical for correctness of closure capture.
+    # p-scalar-= has a side effect: (unless (boundp ',place) (proclaim '(special ,place)))
+    # which converts a variable to a CL special (dynamic) on its first write. Once
+    # special, ALL let-bindings of that name become dynamic forever in this image —
+    # closures capture the symbol (which is nil after the loop) rather than the
+    # per-iteration value. p-my-= (box-set) skips this proclaim, preserving lexicality.
+    # If you add a new let-binding path, you MUST update _let_bound_vars accordingly.
     my $old_let_vars = $self->{_let_bound_vars};
     my @bound_names = map { $new_renames{$_} // $_ } @my_vars;
     $self->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @bound_names };
@@ -3014,12 +3133,26 @@ sub _process_while_statement {
     }
   }
 
-  # Perl special case: while ($k = each COLL) is treated as while (defined($k = each COLL)).
-  # This prevents the loop from exiting when each returns index 0 (which is falsy).
-  # Detect pattern: (p-scalar-= $var (p-each ...)) or (p-my-= $var (p-each ...))
-  if ($keyword ne 'until' && $cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\(p-each\b/) {
-    my $var = $1;
-    $cond_cl = "(progn $cond_cl (p-defined $var))";
+  # Perl auto-defined insertion: while ($x = FUNC) terminates when FUNC returns undef,
+  # not when it returns a false-but-defined value like "0".
+  # Functions: each, readdir, readline (<FH>), glob.
+  # Patterns:
+  #   (p-scalar-= $var (p-each/readdir/readline/glob ...)) → (progn COND (p-defined $var))
+  #   (p-my-= $var (p-each/readdir/readline/glob ...))     → same
+  #   (p-setf (p-gethash/aref ...) (p-each/readdir/...))  → (p-defined COND)
+  #   Bare (p-readdir/p-glob ...)   → (progn (p-setf $_ COND) (p-defined $_))
+  #   Bare (p-each ...)             → same (sets $_ to each's return value)
+  if ($keyword ne 'until') {
+    my $auto_pat = 'p-each|p-readdir|p-readline|p-glob';
+    if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\((?:$auto_pat)\b/) {
+      my $var = $1;
+      $cond_cl = "(progn $cond_cl (p-defined $var))";
+    } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
+      $cond_cl = "(p-defined $cond_cl)";
+    } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
+      # Bare call: assign to $_ and use defined-check (Perl's implicit $_ aliasing)
+      $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
+    }
   }
 
   # Handle 'until' by negating
@@ -3194,12 +3327,16 @@ sub _process_foreach_loop {
   my $continue_block = shift;  # Optional continue block
 
   my $loop_var;
+  my $loop_var_is_my = 0;  # true when declared 'for my $var' (Perl lexical)
   my @list_parts;
 
   for my $child ($stmt->children) {
     my $ref = ref($child);
 
-    if ($ref eq 'PPI::Token::Symbol' && !$loop_var) {
+    if ($ref eq 'PPI::Token::Word' && $child->content eq 'my') {
+      $loop_var_is_my = 1;
+    }
+    elsif ($ref eq 'PPI::Token::Symbol' && !$loop_var) {
       $loop_var = $child->content;
     }
     elsif ($ref eq 'PPI::Structure::List') {
@@ -3219,6 +3356,11 @@ sub _process_foreach_loop {
   }
 
   $loop_var //= '$_';
+  # 'for my $var' declares a Perl lexical — it must never be defvar'd as a package global.
+  # Record it so _insert_variable_forward_declarations can skip the defvar.
+  if ($loop_var_is_my && $loop_var ne '$_') {
+    $self->{_lexical_foreach_vars}{$loop_var} = 1;
+  }
   my $list_cl = @list_parts
     ? ($self->_parse_expression(\@list_parts, $stmt) // "(list)")
     : "(list)";
@@ -3270,7 +3412,9 @@ sub _process_sub_statement {
   for my $child ($stmt->children) {
     my $ref = ref($child);
 
-    if ($ref eq 'PPI::Token::Word' && $child->content ne 'sub') {
+    if ($ref eq 'PPI::Token::Word' && $child->content ne 'sub'
+        && $child->content ne 'my' && $child->content ne 'our'
+        && $child->content ne 'state') {
       $name = $child->content unless $name;
     }
     elsif ($ref eq 'PPI::Token::Prototype') {
@@ -3744,6 +3888,13 @@ sub _process_include_statement {
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 0);
     }
+    # 'no strict' / 'no strict "subs"' - disable strict-subs mode
+    if ($module eq 'strict') {
+      my @args = map { $_->string } grep { $_->isa('PPI::Token::Quote') } $stmt->children;
+      if (!@args || grep { /\bsubs\b/ } @args) {
+        $self->environment->set_pragma('strict_subs', 0);
+      }
+    }
     $self->_emit(";; $perl_code (no-op)");
     $self->_emit("");
     return;
@@ -3791,7 +3942,7 @@ sub _process_include_statement {
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
         my $path = $tokens[0]->string;
         $self->_emit(";; $perl_code");
-        $self->_emit("(p-eval-direct");
+        $self->_emit("(p-eval-always");
         $self->_emit("  (p-require-file \"$path\"))");
         $self->_emit("");
         return;
@@ -3821,11 +3972,24 @@ sub _process_include_statement {
     return;
   }
 
+  # Handle 'use overload' - register operator overloading for the current package
+  if ($module eq 'overload') {
+    $self->_process_use_overload($stmt, $perl_code);
+    return;
+  }
+
   # Handle pragmas - emit as comment (no CL equivalent)
   if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re|version)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
+    }
+    # 'use strict' / 'use strict "subs"' - enable strict-subs mode for bareword disambiguation
+    if ($module eq 'strict') {
+      my @args = map { $_->string } grep { $_->isa('PPI::Token::Quote') } $stmt->children;
+      if (!@args || grep { /\bsubs\b/ } @args) {
+        $self->environment->set_pragma('strict_subs', 1);
+      }
     }
     $self->_emit(";; $perl_code (pragma)");
     $self->_emit("");
@@ -3863,16 +4027,16 @@ sub _process_include_statement {
       $self->_emit(";; $perl_code");
       if (@imports) {
         my $list = join(' ', map { qq{"$_"} } @imports);
-        $self->_emit("(p-eval-direct");
+        $self->_emit("(p-eval-always");
         $self->_emit("  (p-use \"$module\" :imports '($list)))");
       } else {
-        $self->_emit("(p-eval-direct");
+        $self->_emit("(p-eval-always");
         $self->_emit("  (p-use \"$module\"))");
       }
     }
     elsif ($type eq 'require') {
       $self->_emit(";; $perl_code");
-      $self->_emit("(p-eval-direct");
+      $self->_emit("(p-eval-always");
       $self->_emit("  (p-require \"$module\"))");
     }
     else {
@@ -3906,7 +4070,7 @@ sub _process_scheduled_block {
     # NOT at :load-toplevel - BEGIN should only run once, not again when loading fasl.
     $self->_with_bucket('definitions', sub {
       $self->_emit(";; $perl_code");
-      $self->_emit("(eval-when (:compile-toplevel :execute)");
+      $self->_emit("(p-BEGIN");
       $self->indent_level($self->indent_level + 1);
       $self->_process_children($block);
       $self->indent_level($self->indent_level - 1);
@@ -3931,7 +4095,7 @@ sub _process_scheduled_block {
     # CHECK runs after compile, before execute — route to definitions bucket.
     $self->_with_bucket('definitions', sub {
       $self->_emit(";; $perl_code");
-      $self->_emit("(eval-when (:load-toplevel)");
+      $self->_emit("(p-CHECK");
       $self->indent_level($self->indent_level + 1);
       $self->_process_children($block);
       $self->indent_level($self->indent_level - 1);
@@ -3951,6 +4115,53 @@ sub _process_scheduled_block {
 }
 
 
+# Process 'use overload' — register operator overloading for the current package.
+# Generates: (p-register-overloads (package-name *package*) PAIRS-VECTOR)
+# where PAIRS-VECTOR is the transpiled form of the alternating op/handler list.
+sub _process_use_overload {
+  my ($self, $stmt, $perl_code) = @_;
+
+  # Collect all tokens after the 'overload' keyword and before the semicolon.
+  my @arg_tokens;
+  my $past_module = 0;
+  for my $child ($stmt->children) {
+    if (!$past_module) {
+      $past_module = 1
+        if $child->isa('PPI::Token::Word') && $child->content eq 'overload';
+      next;
+    }
+    next if $child->isa('PPI::Token::Structure');   # semicolon
+    # Skip only leading whitespace (preserve whitespace within the list)
+    next if !@arg_tokens && $child->isa('PPI::Token::Whitespace');
+    push @arg_tokens, $child;
+  }
+
+  # Strip trailing whitespace
+  pop @arg_tokens while @arg_tokens && $arg_tokens[-1]->isa('PPI::Token::Whitespace');
+
+  if (!@arg_tokens) {
+    $self->_emit(";; $perl_code (use overload - no handlers)");
+    $self->_emit("");
+    return;
+  }
+
+  # Parse the arg list in list context.
+  # "+" => \&add, "0+" => \&numify, ...  →  (vector "+" #'pl-add "0+" #'pl-numify ...)
+  my $args_cl = $self->_parse_expression(\@arg_tokens, $stmt, 1);  # 1 = LIST_CTX
+
+  # Use the Perl package name as a literal string (not (package-name *package*))
+  # because CL upcases package names ("MyStr" → "MYSTR") but p-bless stores the
+  # original Perl class name as-is.  We need them to match at lookup time.
+  my $pkg_name = $self->environment->current_package() // 'main';
+
+  # Sanitize perl_code for comment — multi-line use overload would break CL
+  (my $comment = $perl_code) =~ s/\n.*//s;  # keep only first line
+  $self->_emit(";; $comment ...");
+  $self->_emit("(p-register-overloads \"$pkg_name\" $args_cl)");
+  $self->_emit("");
+}
+
+
 # Process 'use lib' statements
 sub _process_use_lib {
   my ($self, $stmt, $perl_code) = @_;
@@ -3959,7 +4170,7 @@ sub _process_use_lib {
   # so it appears before any 'require' or 'use' in the same section
   $self->_with_bucket('definitions', sub {
     $self->_emit(";; $perl_code");
-    $self->_emit("(p-eval-direct");
+    $self->_emit("(p-eval-always");
 
     # Extract path arguments from the statement
     for my $child ($stmt->schildren) {
@@ -4213,7 +4424,7 @@ sub _process_use_vars {
       my $init = $sigil eq '$' ? '(make-p-box nil)'
                : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                :                 '(make-hash-table :test #\'equal)';
-      $self->_emit("(p-eval-direct");
+      $self->_emit("(p-eval-always");
       $self->_emit("  (defvar $cl_var $init))");
     }
     $self->_emit("");

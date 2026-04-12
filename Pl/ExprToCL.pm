@@ -102,15 +102,17 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
-  mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
+  alarm mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
   rename require require-file reset resolve-invocant return reverse rewinddir rindex rmdir say
-  scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split
+  evalbytes scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split
   sprintf sqrt srand stat str-cmp str-eq str-ge str-gt str-le str-lt str-ne str-x str-x=
   string-concat study sub sub-defined sub-exists subst substr super-call sysread system syswrite
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
-  unlink unpack unshift untie until use values vec version-string wantarray warn while xor ||
+  unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
+  while xor ||
+  overloaded overload-strval
 );
 
 # Only exceptions that need different CL names than p-<perl-op>
@@ -135,6 +137,9 @@ my %OP_EXCEPTIONS = (
   # Compound assignment - logical
   '&&=' => 'p-and-assign',
   '||=' => 'p-or-assign',
+
+  # Logical XOR (Perl 5.40+): same precedence as ||, high-prec version of 'xor'
+  '^^'  => 'p-xor',
 
   # Reference operator
   '\\'  => 'p-backslash',
@@ -213,6 +218,11 @@ sub cl_name {
     # CORE:: is Perl's built-in namespace — strip it and use the PCL built-in
     if ($pkg eq 'CORE') {
       return exists $RUNTIME_NAMES{$func} ? "p-$func" : "pl-$func";
+    }
+    # use overload introspection: overload::StrVal($obj), overload::Overloaded($obj)
+    if ($pkg eq 'overload') {
+      return 'p-overload-strval' if $func eq 'StrVal';
+      return 'p-overloaded'     if $func eq 'Overloaded';
     }
     # Record package reference for pre-declaration
     $self->environment->add_referenced_package($pkg) if $self->environment;
@@ -418,6 +428,15 @@ sub gen_leaf {
       my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
       return "${cl_pkg}::${sigil}${name}";
     }
+    # Handle package stash typeglob: *Pkg:: (no variable name) -> (p-stash "Pkg")
+    # Perl: undef *Food:: or *Mover:: = *Mover2::
+    # PCL: stash ops not fully supported but must be syntactically valid CL
+    if ($content =~ /^\*(.*)::$/) {
+      my $pkg = $1;
+      $pkg = 'main' if $pkg eq '';
+      $self->environment->add_referenced_package($pkg) if $self->environment;
+      return "(p-stash \"$pkg\")";
+    }
     # Handle package-qualified typeglobs: *Pkg::foo -> (p-make-typeglob "Pkg" "foo")
     # Also: *::foo means *main::foo (empty package = main)
     if ($content =~ /^\*(.*)::([^:]+)$/) {
@@ -468,8 +487,10 @@ sub gen_leaf {
   # Array last index ($#arr)
   if ($ref eq 'PPI::Token::ArrayIndex') {
     my $content = $node->content();
-    # $#arr -> (p-array-last-index @arr)
-    $content =~ s/^\$#/@/;
+    # $#arr     -> (p-array-last-index @arr)
+    # $#Pkg::v  -> (p-array-last-index Pkg::@v)   — @ must go AFTER the pkg:: prefix
+    $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/  # qualified: $#A::ISA → A::@ISA
+        || $content =~ s/^\$#/\@/;            # simple: $#arr → @arr
     return "(p-array-last-index $content)";
   }
 
@@ -566,6 +587,12 @@ sub gen_leaf {
     if ($content eq '__LINE__') {
       my $line = $node->line_number // 0;
       return $line;
+    }
+    # If marked as bareword string by handle_subcalls (unknown word used as a value,
+    # e.g. !Bare where Bare is not a known function), emit as a string literal.
+    if ($node->{_bareword_string}) {
+      (my $escaped = $content) =~ s/"/\\"/g;
+      return qq{"$escaped"};
     }
     return $content;
   }
@@ -697,15 +724,16 @@ sub gen_binary_op {
     return "(p-glob-assign \"$pkg\" \"$name\" $right)";
   }
 
-  # For assignment, dispatch to type-specific forms based on LHS sigil
+  # For assignment, dispatch to type-specific forms based on LHS sigil.
+  # Handles both local vars (@a, %h, $x) and qualified vars (Pkg::@a, Pkg::%h, Pkg::$x).
   if ($op eq '=') {
     if ($left =~ /^\(vector /) {
       return "(p-list-= $left $right)";
-    } elsif ($left =~ /^[\@]/) {
+    } elsif ($left =~ /(?:^|::)@/) {
       return "(p-array-= $left $right)";
-    } elsif ($left =~ /^%/) {
+    } elsif ($left =~ /(?:^|::)%/) {
       return "(p-hash-= $left $right)";
-    } elsif ($left =~ /^\$/) {
+    } elsif ($left =~ /(?:^|::)\$/) {
       return "(p-scalar-= $left $right)";
     }
     # Element access, slices, etc. - keep using p-setf
@@ -825,8 +853,9 @@ sub gen_funcall {
   my $func_name = $self->gen_node($kids->[0]);
   my $cl_func   = $self->cl_name($func_name, 1);
 
-  # Special handling for next/last/redo with label argument
-  if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo') && @$kids == 2) {
+  # Special handling for next/last/redo/goto with label argument
+  if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo'
+       || $func_name eq 'goto') && @$kids == 2) {
     # Check if the argument is a bareword label (funcall with single word child)
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
     if ($self->expr_o->is_internal_node_type($arg_node) &&
@@ -836,6 +865,10 @@ sub gen_funcall {
         my $label_node = $self->expr_o->get_a_node($arg_kids->[0]);
         if (ref($label_node) eq 'PPI::Token::Word') {
           my $label = $label_node->content();
+          if ($func_name eq 'goto') {
+            # goto LABEL → (go :label) within tagbody
+            return "(go :$label)";
+          }
           return "($cl_func $label)";
         }
       }
@@ -937,13 +970,16 @@ sub gen_funcall {
           my $word_node = $self->expr_o->get_a_node($class_kids->[0]);
           if (ref($word_node) eq 'PPI::Token::Word') {
             my $classname = $word_node->content();
-            # Handle special tokens: __PACKAGE__, __FILE__, __LINE__
+            # Handle special tokens: __PACKAGE__, __FILE__, __LINE__, undef
             if ($classname eq '__PACKAGE__') {
               my $pkg = $self->environment
                   ? $self->environment->current_package : 'main';
               $pkg //= 'main';
               $class_arg = qq{"$pkg"};
               $is_bareword = 1;
+            } elsif ($classname eq 'undef') {
+              # undef keyword: not a bareword class name — fall through to gen_node,
+              # which generates (p-undef); p-bless handles undef class at runtime
             } else {
               # Regular bareword class name - remove trailing :: if present (o:: -> o)
               $classname =~ s/::$//;
@@ -1028,6 +1064,33 @@ sub gen_funcall {
     }
   }
 
+  # Special handling for pos(): needs the box for identity tracking.
+  # p-aref normally unboxes scalar elements, but pos() needs the box to track
+  # the position in *p-match-pos*. Same pattern as tied().
+  if ($func_name eq 'pos' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my $idx = $self->gen_node($arg_kids->[1]);
+        $arr =~ s/^\$/\@/;
+        return "(p-pos (p-aref-box $arr $idx))";
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my $key  = $self->gen_node($arg_kids->[1]);
+        $hash =~ s/^\$/\%/;
+        return "(p-pos (p-gethash-box $hash $key))";
+      }
+    }
+  }
+
   # Special handling for delete on arrays: delete $a[idx]
   # Need to pass array and index separately, not the dereferenced value
   if ($func_name eq 'delete' && @$kids == 2) {
@@ -1039,8 +1102,9 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $arr = $self->gen_node($arg_kids->[0]);
-        # Convert $a to @a for array
-        if (ref($arr_node) eq 'PPI::Token::Symbol' && $arr =~ /^\$/) {
+        # Convert $a to @a for array (Symbol or Magic like $_)
+        if ((ref($arr_node) eq 'PPI::Token::Symbol'
+             || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /^\$/) {
           $arr =~ s/^\$/\@/;
         }
         my $idx = $self->gen_node($arg_kids->[1]);
@@ -1054,8 +1118,9 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $hash = $self->gen_node($arg_kids->[0]);
-        # Convert $h to %h for hash
-        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\$/) {
+        # Convert $h to %h for hash (Symbol or Magic like $_)
+        if ((ref($hash_node) eq 'PPI::Token::Symbol'
+             || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /^\$/) {
           $hash =~ s/^\$/\%/;
         }
         my $key = $self->gen_node($arg_kids->[1]);
@@ -1116,6 +1181,7 @@ sub gen_funcall {
       my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
       if (@$arg_kids >= 1) {
         my $arr = $self->gen_node($arg_kids->[0]);
+        $arr =~ s/^\%/\@/;  # %arr -> @arr (KV sigil -> array container)
         my @indices;
         for my $i (1 .. $#$arg_kids) {
           push @indices, $self->gen_node($arg_kids->[$i]);
@@ -1167,7 +1233,8 @@ sub gen_funcall {
           # Array access: exists $a[idx] -> (p-exists-array @arr idx)
           my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $arr = $self->gen_node($arg_kids->[0]);
-          if (ref($arr_node) eq 'PPI::Token::Symbol' && $arr =~ /^\$/) {
+          if ((ref($arr_node) eq 'PPI::Token::Symbol'
+               || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /^\$/) {
             $arr =~ s/^\$/\@/;
           }
           my $idx = $self->gen_node($arg_kids->[1]);
@@ -1177,7 +1244,8 @@ sub gen_funcall {
           # Hash access: exists $h{key} -> (p-exists %h key)
           my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $hash = $self->gen_node($arg_kids->[0]);
-          if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\$/) {
+          if ((ref($hash_node) eq 'PPI::Token::Symbol'
+               || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /^\$/) {
             $hash =~ s/^\$/\%/;
           }
           my $key = $self->gen_node($arg_kids->[1]);
@@ -1218,6 +1286,28 @@ sub gen_funcall {
         if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
           my $inner = $self->gen_node($arg_kids2->[1]);
           return "(p-coderef-defined-p $inner)";
+        }
+      }
+    }
+    # defined(FILEHANDLE) — bareword filehandle check (e.g. defined(FILE), defined(DIR))
+    # Case 1: arg is a PPI::Token::Word leaf (all-caps bareword)
+    if (ref($arg_node) eq 'PPI::Token::Word') {
+      my $name = $arg_node->content();
+      if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+        return "(p-defined-fh '$name)";
+      }
+    }
+    # Case 2: arg is an internal funcall node with a single uppercase-word child (no args)
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'funcall') {
+      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids2 == 1) {
+        my $fn_node = $self->expr_o->get_a_node($arg_kids2->[0]);
+        if (ref($fn_node) eq 'PPI::Token::Word') {
+          my $name = $fn_node->content();
+          if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+            return "(p-defined-fh '$name)";
+          }
         }
       }
     }
@@ -1279,6 +1369,12 @@ sub gen_funcall {
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
   my $call = "($cl_func$args_str)";
+
+  # 'my'/'our' in expression context is an identity (returns the expression's value).
+  # e.g. 'if (my $a = my $b = 3)' → (p-my-= $a (p-my-= $b 3)) with no wrapper needed.
+  if (($func_name eq 'my' || $func_name eq 'our') && @args == 1) {
+    return $args[0];
+  }
 
   my $ctx = $self->expr_o->get_node_context($node_id);
 
@@ -1473,13 +1569,14 @@ sub gen_prefix_op {
   my $op      = $op_node->content();
 
   # Special case: \&func (reference to function)
+  # Use p-backslash-sub to safely handle undefined functions (AUTOLOAD dispatch).
   if ($op eq '\\') {
     my $operand_node = $self->expr_o->get_a_node($kids->[1]);
     if (ref($operand_node) eq 'PPI::Token::Symbol' &&
         $operand_node->content() =~ /^&(.+)$/) {
       my $func_name = $1;
       my $cl_func = $self->cl_name($func_name, 1);
-      return "#'$cl_func";
+      return "(p-backslash-sub '$cl_func)";
     }
   }
 
@@ -1490,9 +1587,35 @@ sub gen_prefix_op {
     return "(p-array-last-index $arr_expr)";
   }
 
-  # ++, --, and \ need l-value context for array/hash elements
-  # \ needs l-value to get a reference to the box, not a copy of the value
-  my $needs_lvalue = ($op eq '++' || $op eq '--' || $op eq '\\');
+  # ${expr}++ / $$var++ / ${expr}-- / $$var-- (and @/% variants):
+  # The shunting-yard parser incorrectly produces prefix_op($, postfix_op(X, ++))
+  # because ++ has higher precedence (92) than Cast $ (90).
+  # The correct semantics is postfix_op(prefix_op($, X), ++):
+  #   (p-post++ (p-cast-$ X))  not  (p-cast-$ (p-post++ X))
+  if ($op eq '$' || $op eq '@' || $op eq '%') {
+    my $inner_id   = $kids->[1];
+    my $inner_node = $self->expr_o->get_a_node($inner_id);
+    if ($self->expr_o->is_internal_node_type($inner_node)
+        && $inner_node->{type} eq 'postfix_op') {
+      my $po_kids    = $self->expr_o->get_node_children($inner_id);
+      my $po_op_node = $self->expr_o->get_a_node($po_kids->[1]);
+      my $po_op      = $po_op_node->content();
+      if ($po_op eq '++' || $po_op eq '--') {
+        # Inner expression should NOT be in lvalue context: we want the VALUE
+        # (the reference) to pass to p-cast-$, not the box.
+        my $saved = $self->lvalue_context;
+        $self->lvalue_context(0);
+        my $inner_expr = $self->gen_node($po_kids->[0]);
+        $self->lvalue_context($saved);
+        return "(p-post$po_op (p-cast-$op $inner_expr))";
+      }
+    }
+  }
+
+  # ++, --, \ and @ need l-value context for array/hash elements.
+  # @ needs lvalue so subscripts return boxes → p-cast-@ can auto-vivify.
+  # \ needs l-value to get a reference to the box, not a copy of the value.
+  my $needs_lvalue = ($op eq '++' || $op eq '--' || $op eq '\\' || $op eq '@');
   my $saved_lvalue = $self->lvalue_context;
   $self->lvalue_context(1) if $needs_lvalue;
   my $operand = $self->gen_node($kids->[1]);
@@ -1876,6 +1999,44 @@ sub _is_array_expr_node {
   return 0;
 }
 
+# Returns true if a node (by ID) is a known list-returning expression.
+# Used by gen_tree_val to decide whether to wrap in (vector ...) or not.
+# Checks the AST structure — no string-matching on generated code.
+sub _child_is_list_expr {
+  my ($self, $node_id) = @_;
+  my $node = $self->expr_o->get_a_node($node_id);
+
+  # Array variable: @arr, @_  — already a vector
+  if (ref($node) && $node->can('content')) {
+    my $content = $node->content() // '';
+    return 1 if $content =~ /^@/;
+  }
+
+  # Only internal (non-leaf) nodes below this point
+  return 0 unless $self->expr_o->is_internal_node_type($node);
+
+  my $type = $node->{type} // '';
+  my $kids = $self->expr_o->get_node_children($node_id);
+
+  # funcall: map, grep, sort, split, reverse, keys, values, each, etc.
+  if ($type eq 'funcall' && @$kids >= 1) {
+    my $func_node = $self->expr_o->get_a_node($kids->[0]);
+    if (ref($func_node) && $func_node->can('content')) {
+      my $fname = lc($func_node->content() // '');
+      return 1 if $fname =~ /^(?:map|grep|sort|split|reverse|keys|values|each|unpack|readdir|localtime|caller|stat|lstat|getpwent|getgrent|getpwnam|getpwuid|getgrgid|getgrnam)$/;
+    }
+  }
+
+  # tree_val (parenthesized expr): list if multiple children, or if single
+  # child is itself list-returning.
+  if ($type eq 'tree_val') {
+    return 1 if @$kids > 1;
+    return $self->_child_is_list_expr($kids->[0]) if @$kids == 1;
+  }
+
+  return 0;
+}
+
 
 # Tree value (parenthesized expression): just generate the content
 sub gen_tree_val {
@@ -1893,6 +2054,9 @@ sub gen_tree_val {
     if ($ctx == 1) {  # LIST_CTX = 1
       $self->expr_o->set_node_context($kids->[0], 1);
     }
+    # Check at AST level (before codegen) whether child is a list-returning expr.
+    # If so, we must NOT wrap it in (vector ...) — the child already returns a vector.
+    my $child_is_list = ($ctx == 1) && $self->_child_is_list_expr($kids->[0]);
     my $child = $self->gen_node($kids->[0]);
     if ($ctx == 1) {  # LIST_CTX = 1
       # Special case: regex match already returns captures in list context
@@ -1900,7 +2064,7 @@ sub gen_tree_val {
       if ($child =~ /\(p-=~\s/) {
         return "(let ((*wantarray* t)) $child)";
       }
-      return "(vector $child)";
+      return $child_is_list ? $child : "(vector $child)";
     }
     return $child;
   }
@@ -1954,8 +2118,8 @@ sub gen_readline {
   # Readline may have a filehandle child, or none (for <>)
   if (@$kids) {
     my $fh = $self->gen_node($kids->[0]);
-    # Quote bareword filehandles
-    if ($fh =~ /^[A-Z][A-Z0-9_]*$/) {
+    # Quote bareword filehandles (any word not starting with $ or ( )
+    if ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
       return "(p-readline '$fh)";
     }
     return "(p-readline $fh)";
@@ -2096,13 +2260,20 @@ sub gen_inline_lambda {
   my $body     = $node->{body_cl} // 'nil';
   my $for_func = $node->{for_func} // '';
 
-  # Named sort comparator (sort NAME LIST): call sub with $a $b as explicit args.
-  # The lambda params $a/$b are CL special vars (defvar'd), creating dynamic bindings
-  # visible to subs that read $a/$b as globals; passing them also populates @_ for
-  # prototype-based comparators like sub cmp($$) { my($a,$b)=@_; ... }.
+  # Named sort comparator (sort NAME LIST): call sub with empty @_.
+  # Perl sets $a/$b as package globals, NOT via @_. The lambda params ($a $b)
+  # create dynamic bindings (because $a/$b are defvar'd special vars), so the
+  # comparator sub can read $a/$b without receiving them as arguments.
+  # If the function is undefined, dispatch to AUTOLOAD (Perl #30661).
   if ($for_func eq 'sort' && $node->{comparator_name}) {
     my $cl_func = $self->cl_name($node->{comparator_name});
-    $body = "($cl_func \$a \$b)";
+    my $func_str = $node->{comparator_name};  # original Perl name for AUTOLOAD
+    my $lambda_body = "(handler-case ($cl_func)\n"
+                    . "  (undefined-function ()\n"
+                    . "    (let ((al (intern \"PL-AUTOLOAD\" |sort--pkg|)))\n"
+                    . "      (when (fboundp al) (funcall (symbol-function al))))))";
+    $kids = [];
+    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    (catch :p-return\n      (block nil\n$lambda_body))))";
   }
 
   # Scalar comparator (sort $var LIST): call via p-sort-get-fn at runtime.
@@ -2475,8 +2646,8 @@ sub convert_perl_string {
     # qq{}, qq(), qq[], qq<> style (optional whitespace between qq and delimiter)
     $content = $1;
   }
-  elsif ($str =~ /^qq(.)(.*)\1$/s) {
-    # qq/.../  style - content is in $2
+  elsif ($str =~ /^qq\s*(.)(.*)(\1)$/s) {
+    # qq/.../ or qq '...' style (optional whitespace between qq and delimiter)
     $content = $2;
   }
   elsif ($str =~ /^q\s*\{(.*)\}$/s || $str =~ /^q\s*\((.*)\)$/s ||
@@ -2489,8 +2660,8 @@ sub convert_perl_string {
     $content =~ s/"/\\"/g;
     return qq{"$content"};
   }
-  elsif ($str =~ /^q(.)(.*)\1$/s) {
-    # q/.../ style - content is in $2
+  elsif ($str =~ /^q\s*(.)(.*)(\1)$/s) {
+    # q/.../ or q '...' style (optional whitespace between q and delimiter)
     $content = $2;
     $content =~ s/\\\\/\\/g;
     $content =~ s/\\/\\\\/g;

@@ -191,4 +191,102 @@ $str =~ s/($dx)/$1$dx/;
 print length($str), "\n";
 ', "2\n");
 
+test_transpile("LHS list repeat: (\$x)xN assigns N times (last wins)", '
+my $a; my $b;
+(($a)x3, $b) = 1..10;
+print "$a, $b\n";
+', "3, 4\n");
+
+test_transpile("LHS list repeat: (undef)x\$dynamic skips dynamic slots", '
+my $a; my $b;
+($a, (undef)x${\6}, $b) = "a".."z";
+print "$a$b\n";
+', "ah\n");
+
+test_transpile("(map ...)[N] list subscript returns Nth element", '
+my @r = (map { {a=>$_} } ("x"))[0]->{a};
+print "@r\n";
+', "x\n");
+
+test_transpile("(sort ...)[N] list subscript returns Nth element", '
+my $f = (sort { $a <=> $b } 3,1,2)[0];
+print "$f\n";
+', "1\n");
+
+test_transpile("(grep ...)[N] list subscript returns Nth element", '
+my @s = (grep { $_ > 1 } 1,2,3)[1];
+print "@s\n";
+', "3\n");
+
+test_transpile("bareword array subscript \$a[bar] treated as string index", '
+my @a = (10, 20, 30);
+my $x = $a[bar];
+print defined($x) ? "ok" : "undef", "\n";
+', "ok\n");
+
+test_transpile("bareword hash subscript \$h{key} treated as string key", '
+my %h = (foo => 42, bar => 99);
+my $x = $h{bar};
+print "$x\n";
+', "99\n");
+
+test_transpile("delete with bareword array subscript", '
+my @a = (1, 2, 3);
+delete $a[bar];
+print scalar(@a), "\n";
+', "3\n");
+
+# --- my sub (lexical sub) name extraction ---
+test_transpile("my sub name is extracted correctly (not 'my')", '
+my sub greet () { "hello" }
+print greet(), "\n";
+', "hello\n");
+
+test_transpile("my sub with signature works", '
+my sub add ($x, $y) { $x + $y }
+print add(3, 4), "\n";
+', "7\n");
+
+# --- alarm() no-op ---
+test_transpile("alarm no-op returns 0", '
+my $prev = alarm(5);
+print defined($prev) ? "ok" : "undef", "\n";
+alarm(0);
+print "done\n";
+', "ok\ndone\n");
+
+# --- bareword strings: RHS of binary operator (a .. c) ---
+test_transpile("bareword c in 'a .. c' range becomes string", '
+my @r = ("a" .. "c");
+print join(",", @r), "\n";
+', "a,b,c\n");
+
+test_transpile("bareword range a .. c (no quotes)", '
+my @r = (a .. c);
+print join(",", @r), "\n";
+', "a,b,c\n");
+
+# --- last LABEL across function call (dynamic scope) ---
+test_transpile("last LABEL from inside called sub exits labeled block", '
+my $ok = 0;
+sub exit_block { last OUTER }
+OUTER: {
+    $ok = 1;
+    exit_block();
+    $ok = 0;
+}
+print "$ok\n";
+', "1\n");
+
+# --- goto LABEL and standalone LABEL ---
+test_transpile("goto LABEL jumps to label within bare block", '
+my $count = 0;
+{
+    top:
+    $count++;
+    goto top if $count < 3;
+}
+print "$count\n";
+', "3\n");
+
 done_testing;
