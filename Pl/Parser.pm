@@ -1953,11 +1953,12 @@ sub _process_bare_block {
     # e.g. Test::More's skip() calls (last SKIP) from inside a called function.
     $self->_emit("(catch 'pcl::LAST-$label");
     $self->indent_level($self->indent_level + 1);
-    if ($continue_block) {
-      # Use pcl:: prefix to match the package used by p-next macro's throw
-      $self->_emit("(catch 'pcl::NEXT-$label");
-      $self->indent_level($self->indent_level + 1);
-    }
+    # Always wrap tagbody in NEXT-LABEL catch so that (p-next LABEL) works even
+    # without a continue block.  When next LABEL is thrown from an inner function
+    # (e.g. eval { next $label }), the throw lands here; when there is a continue
+    # block it runs after the catch returns, just as in the continue case.
+    $self->_emit("(catch 'pcl::NEXT-$label");
+    $self->indent_level($self->indent_level + 1);
     $self->_emit("(tagbody");
     $self->indent_level($self->indent_level + 1);
     $self->_emit(":redo");
@@ -1978,10 +1979,8 @@ sub _process_bare_block {
     $self->_emit("(go :redo)");
     $self->_emit(":next)");  # close tagbody
     $self->indent_level($self->indent_level - 1);
-    if ($continue_block) {
-      $self->_emit(")");  # close catch for NEXT
-      $self->indent_level($self->indent_level - 1);
-    }
+    $self->_emit(")");  # close catch for NEXT
+    $self->indent_level($self->indent_level - 1);
     if ($continue_block) {
       $self->_emit("(progn");
       $self->indent_level($self->indent_level + 1);

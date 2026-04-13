@@ -325,4 +325,56 @@
 (defun pl-byte_utf8a_to_utf8n (n) (pcl:unbox n))
 (defun pl-utf8_to_byte (n) (pcl:unbox n))
 
+;;; skip_without_dynamic_extension(module, count)
+;;; Perl test.pl stub: always skip since PCL cannot load XS dynamic extensions.
+(export '(pl-skip_without_dynamic_extension))
+(defun pl-skip_without_dynamic_extension (module &optional (count 1))
+  (let ((mod (pcl:to-string (pcl:unbox module))))
+    (pl-skip (format nil "dynamic extension ~A not available" mod) count)))
+
+;;; next_test()
+;;; Perl test.pl: allocate and return the next test number.
+;;; Useful when a test block prints "ok N" directly rather than calling ok/is.
+(export '(pl-next_test))
+(defun pl-next_test (&rest args)
+  (declare (ignore args))
+  (pcl:make-p-box (incf *test-count*)))
+
+;;; run_perl(switches => [...], prog => "code") — Perl test.pl helper: run a sub-Perl process.
+;;; PCL cannot fork a Perl subprocess, so this always returns undef.
+;;; Tests using run_perl will fail (not crash) gracefully.
+(export '(pl-run_perl))
+(defun pl-run_perl (&rest args)
+  (declare (ignore args))
+  pcl::*p-undef*)
+
+;;; _qq(val) — Perl test.pl helper: wrap a value in double-quotes for display.
+;;; e.g., _qq("hello") → '"hello"'
+(export '(pl-_qq))
+(defun pl-_qq (&rest args)
+  (let* ((raw (if args (car args) pcl::*p-undef*))
+         (s   (if (eq raw pcl::*p-undef*) nil (pcl:to-string raw))))
+    (pcl:make-p-box
+      (if (null s) "undef" (format nil "\"~A\"" s)))))
+
+;;; eq_hash(\%h1, \%h2) — Perl test.pl helper: deep-equal comparison of two hash refs.
+;;; Returns 1 (true) if both hashes have the same keys/values, "" (false) otherwise.
+(export '(pl-eq_hash))
+(defun pl-eq_hash (ref1 ref2 &rest rest)
+  (declare (ignore rest))
+  (let ((h1 (pcl:p-box-value (pcl:unbox ref1)))
+        (h2 (pcl:p-box-value (pcl:unbox ref2))))
+    (unless (and (hash-table-p h1) (hash-table-p h2))
+      (return-from pl-eq_hash (pcl:make-p-box "")))
+    (unless (= (hash-table-count h1) (hash-table-count h2))
+      (return-from pl-eq_hash (pcl:make-p-box "")))
+    (maphash (lambda (k v)
+               (unless (nth-value 1 (gethash k h2))
+                 (return-from pl-eq_hash (pcl:make-p-box "")))
+               (let ((v2 (gethash k h2)))
+                 (unless (equal (pcl:to-string v) (pcl:to-string v2))
+                   (return-from pl-eq_hash (pcl:make-p-box "")))))
+             h1)
+    (pcl:make-p-box 1)))
+
 (format t "# PCL Test library loaded~%")

@@ -289,4 +289,11 @@ my $count = 0;
 print "$count\n";
 ', "3\n");
 
+# --- goto &funcname tail-call ---
+test_transpile("goto &funcname tail-calls target with current \@_", '
+sub base { return join(",", @_) }
+sub wrapper { goto &base }
+print wrapper("x","y"), "\n";
+', "x,y\n");
+
 done_testing;

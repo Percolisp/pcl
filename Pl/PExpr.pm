@@ -265,6 +265,14 @@ sub extract_declarations {
       if ($decl_type && @vars) {
         for my $var (@vars) {
           push @{$self->declarations}, { type => $decl_type, var => $var };
+          # For 'our' declarations, also register in the environment so that
+          # ExprToCL can emit package-qualified names when needed (e.g. in
+          # lambdas inside inline package blocks where in-package is not in
+          # effect at read time).
+          if ($decl_type eq 'our' && $self->environment) {
+            my $pkg = $self->environment->current_package // 'main';
+            $self->environment->add_our_variable($pkg, $var);
+          }
         }
         say "extract_declarations: Found $decl_type for: ", join(", ", @vars)
             if 1 & DEBUG;
@@ -298,9 +306,15 @@ sub extract_declarations {
                || ref($item) eq 'PPI::Token::Magic')) {
       # Found variable after declarator (Symbol or Magic like $/)
       my $var = $item->content();
-      push @{$self->declarations}, { type => $self->{_pending_decl}, var => $var };
-      say "extract_declarations: Found ", $self->{_pending_decl}, " $var"
+      my $decl = $self->{_pending_decl};
+      push @{$self->declarations}, { type => $decl, var => $var };
+      say "extract_declarations: Found ", $decl, " $var"
           if 1 & DEBUG;
+      # Register our vars in environment so gen_leaf can qualify them.
+      if ($decl eq 'our' && $self->environment) {
+        my $pkg = $self->environment->current_package // 'main';
+        $self->environment->add_our_variable($pkg, $var);
+      }
       delete $self->{_pending_decl};
       push @result, $item;  # Keep the variable, just stripped the declarator
     }
@@ -1647,6 +1661,17 @@ sub handle_subcalls {
 
     next
         if !$self->is_word($now); # Only want function calls.
+
+    # Strip PPI::Token::Prototype after 'sub' keyword for anonymous subs.
+    # e.g., sub (&) { ... } → sub { ... }
+    # The prototype has no effect on generated CL code; removing it lets
+    # the normal sub { BLOCK } handler below fire correctly.
+    if ($now->content() eq 'sub'
+        && $i + 1 < scalar(@$e)
+        && ref($e->[$i+1]) eq 'PPI::Token::Prototype') {
+      splice @$e, $i+1, 1;  # drop the prototype token
+      $next = ($i+1 < scalar(@$e)) ? $e->[$i+1] : undef;
+    }
 
     say "handle_subcalls() Look for subname(..), was word. Is next list ",
         ($self->is_list($next) ? "Yes" : "No"), ". Dump:", dump $next

@@ -63,7 +63,7 @@
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
    #:p-if #:p-unless #:p-while #:p-until #:p-for #:p-foreach
-   #:p-return #:p-last #:p-last-dynamic #:p-next #:p-redo
+   #:p-return #:p-goto-sub #:p-last #:p-last-dynamic #:p-next #:p-redo
    #:p-continue #:p-break
    ;; I/O
    #:p-print #:p-say #:p-warn #:p-die
@@ -109,6 +109,7 @@
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
    #:p-cast-@ #:p-cast-% #:p-cast-$
+   #:p-hash-deref-= #:p-array-deref-=
    ;; OO
    #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant
    #:p-super-call #:perl-pkg-to-clos-class #:clos-class-to-pkg
@@ -483,8 +484,15 @@
                         (if (p-box-p value) (unbox value) value)))))
   (let ((v (if (p-box-p value)
                (let ((inner (p-box-value value)))
-                 ;; If inner is a box, this is a reference - preserve it
-                 (if (p-box-p inner) value inner))
+                 (cond
+                   ;; Tied source variable: call FETCH to get the actual value.
+                   ;; Without this, assigning $c = $tied_var copies the proxy
+                   ;; into $c, making $c appear tied too.
+                   ((p-tie-proxy-p inner)
+                    (unbox (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))
+                   ;; If inner is a box, this is a reference - preserve it
+                   ((p-box-p inner) value)
+                   (t inner)))
                value)))
     ;; Perl: @arr in scalar context gives element count.
     ;; A raw adjustable vector (bare @arr, not wrapped in make-p-box) in a scalar assignment
@@ -4352,12 +4360,23 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
   (cond
     ;; Not a box - return as-is (hash tables, arrays, etc.)
     ((not (p-box-p val)) val)
+    ;; Blessed box - return the whole box so the class is preserved.
+    ;; Needed for e.g. bless \$scalar (scalar-ref inside box): the box carries the
+    ;; class, unboxing strips it.  Also fixes bless [] returning a vector that
+    ;; box-set would then convert to an element count via the adjustable-vector rule.
+    ((p-box-class val) val)
     ;; Box containing a reference (hash, array, function) - return the reference
     ((let ((v (p-box-value val)))
        (or (hash-table-p v) (vectorp v) (functionp v)))
      (p-box-value val))
     ;; Simple scalar box - return the unboxed value
     (t (unbox val))))
+
+(defmacro p-goto-sub (fn)
+  "Perl goto &func — tail-call the target function with the current @_.
+   Replaces the current frame by throwing :p-return with the result.
+   @_ must be the CL variable bound by the enclosing p-sub."
+  `(throw :p-return (apply ,fn (coerce @_ 'list))))
 
 (defmacro p-return (&rest values)
   "Perl return - returns single value or list depending on args.
@@ -6359,6 +6378,58 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (box-set val new-value)
             (error "Cannot dereference non-reference: ~A" inner)))))
 
+(defun p-hash-deref-= (hash-ref value)
+  "Assign to a dereferenced hash: %$ref = (list).
+   hash-ref is the box containing the hash reference.
+   Gets or auto-vivifies the hash, then clears and repopulates it."
+  (let* ((inner (unbox hash-ref))
+         (h (cond
+              ;; Double-boxed (from \%hash): box(box(hash))
+              ((p-box-p inner) (unbox inner))
+              ;; Direct hash-table
+              ((hash-table-p inner) inner)
+              ;; Auto-vivify: create empty hash and store back in box
+              (t (let ((new-h (make-hash-table :test 'equal)))
+                   (when (p-box-p hash-ref)
+                     (setf (p-box-value hash-ref) new-h
+                           (p-box-nv-ok hash-ref) nil
+                           (p-box-sv-ok hash-ref) nil))
+                   new-h)))))
+    (unless (hash-table-p h)
+      (setf h (make-hash-table :test 'equal)))
+    (clrhash h)
+    (let ((flat (%p-flatten-list value)))
+      (loop for i from 0 below (length flat) by 2
+            when (< (1+ i) (length flat))
+            do (setf (gethash (to-string (aref flat i)) h)
+                     (make-p-box (unbox (aref flat (1+ i)))))))
+    h))
+
+(defun p-array-deref-= (array-ref value)
+  "Assign to a dereferenced array: @$ref = (list).
+   array-ref is the box containing the array reference.
+   Gets or auto-vivifies the array, then clears and repopulates it."
+  (let* ((inner (unbox array-ref))
+         (arr (cond
+                ;; Double-boxed (from \@arr): box(box(arr))
+                ((p-box-p inner) (unbox inner))
+                ;; Direct vector
+                ((and (vectorp inner) (not (stringp inner))) inner)
+                ;; Auto-vivify: create empty array and store back in box
+                (t (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+                     (when (p-box-p array-ref)
+                       (setf (p-box-value array-ref) new-arr
+                             (p-box-nv-ok array-ref) nil
+                             (p-box-sv-ok array-ref) nil))
+                     new-arr)))))
+    (unless (and (vectorp arr) (not (stringp arr)))
+      (setf arr (make-array 0 :adjustable t :fill-pointer 0)))
+    (setf (fill-pointer arr) 0)
+    (let ((flat (%p-flatten-list value)))
+      (loop for item across flat
+            do (vector-push-extend (make-p-box (unbox item)) arr)))
+    arr))
+
 (defun p-ref (val)
   "Perl ref() function - get reference type or class name if blessed.
    Returns empty string for non-references."
@@ -7313,6 +7384,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these
   (let* ((pat (cl-ppcre:regex-replace-all "\\(\\?\\?\\{[^}]*\\}\\)" pattern ""))
          (pat (cl-ppcre:regex-replace-all "\\(\\?\\{[^}]*\\}\\)" pat ""))
+         ;; Perl's (?^flags:...) is the stringified form of qr//.
+         ;; The '^' means "reset all flags to defaults".  CL-PPCRE uses (?flags:...)
+         ;; without '^'.  Simply remove the '^'; at the top level (no enclosing flags)
+         ;; the semantics are identical.
+         (pat (cl-ppcre:regex-replace-all "\\(\\?\\^" pat "(?"
+                                          :simple-calls t))
          ;; Convert \Q...\E: quote all regex metacharacters in the enclosed text.
          ;; \E is optional — \Q extends to end of pattern if \E is absent.
          (pat (cl-ppcre:regex-replace-all

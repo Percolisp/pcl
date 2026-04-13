@@ -476,6 +476,19 @@ sub gen_leaf {
       my $renames = $self->environment->state_var_renames;
       return $renames->{$content} if $renames && exists $renames->{$content};
     }
+    # Qualify `our` variables in non-main packages using the fully-qualified name.
+    # When `our $var` is declared in `package Foo { }` the generated defvar uses
+    # `Foo::$var`, but lambdas inside inline package blocks are read/compiled with
+    # *package* = main (since only top-level in-package forms affect the reader).
+    # Emitting `Foo::$var` makes the reference unambiguous regardless of context.
+    if ($self->environment && $content =~ /^([\$\@\%])(\w+)$/) {
+      my ($sigil, $name) = ($1, $2);
+      my $pkg = $self->environment->current_package // 'main';
+      if ($pkg ne 'main' && $self->environment->is_our_variable($pkg, $content)) {
+        my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+        return "${cl_pkg}::${sigil}${name}";
+      }
+    }
     # Unknown ${^...} caret variables — die so missing cases surface clearly.
     if ($content =~ /^\$\{\^/) {
       my $line = eval { $node->line_number } // '?';
@@ -729,6 +742,12 @@ sub gen_binary_op {
   if ($op eq '=') {
     if ($left =~ /^\(vector /) {
       return "(p-list-= $left $right)";
+    } elsif ($left =~ /^\(p-cast-% /) {
+      # %$ref = (list): assign to a dereferenced hash
+      return "(p-hash-deref-= $left $right)";
+    } elsif ($left =~ /^\(p-cast-@ /) {
+      # @$ref = (list): assign to a dereferenced array
+      return "(p-array-deref-= $left $right)";
     } elsif ($left =~ /(?:^|::)@/) {
       return "(p-array-= $left $right)";
     } elsif ($left =~ /(?:^|::)%/) {
@@ -858,6 +877,32 @@ sub gen_funcall {
        || $func_name eq 'goto') && @$kids == 2) {
     # Check if the argument is a bareword label (funcall with single word child)
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+
+    # goto &funcname — tail-call: call target with current @_ and return its result.
+    # PPI tokenizes `goto &new1` as Word('goto') + Symbol('&new1').
+    if ($func_name eq 'goto' &&
+        ref($arg_node) eq 'PPI::Token::Symbol' &&
+        $arg_node->content() =~ /^&(.+)$/) {
+      my $target = $self->cl_name($1, 1);
+      return "(p-goto-sub #'$target)";
+    }
+
+    # goto &$scalar — tail-call via dynamic coderef/name.
+    # PPI tokenizes `goto &$cref` as Word('goto') + Cast('&') + Symbol('$cref').
+    # PExpr processes the Cast as a prefix_op, generating (p-get-coderef $cref).
+    if ($func_name eq 'goto' &&
+        $self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'prefix_op') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 1) {
+        my $op_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        if (ref($op_node) eq 'PPI::Token::Cast' && $op_node->content() eq '&') {
+          my $fn_expr = $self->gen_node($kids->[1]);  # (p-get-coderef ...)
+          return "(p-goto-sub $fn_expr)";
+        }
+      }
+    }
+
     if ($self->expr_o->is_internal_node_type($arg_node) &&
         $arg_node->{type} eq 'funcall') {
       my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
