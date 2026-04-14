@@ -296,4 +296,27 @@ sub wrapper { goto &base }
 print wrapper("x","y"), "\n";
 ', "x,y\n");
 
+# --- delete @$h{@keys} hash-ref slice delete ---
+test_transpile('delete @$h{@keys} removes keys from hash ref', '
+my $h = {a=>1, b=>2, c=>3};
+my @keys = qw(a b);
+my @vals = delete @$h{@keys};
+print join(",", sort keys %$h), "\n";
+print join(",", @vals), "\n";
+', "c\n1,2\n");
+
+test_transpile('delete @$h{list} with literal keys', '
+my $h = {x=>10, y=>20, z=>30};
+my @d = delete @$h{"x","y"};
+print scalar(keys %$h), "\n";
+print join(",", @d), "\n";
+', "1\n10,20\n");
+
+test_transpile('delete @$h{@keys} all keys leaves empty hash', '
+my $h = {a=>1, b=>2};
+my @k = qw(a b);
+delete @$h{@k};
+print scalar(keys %$h), "\n";
+', "0\n");
+
 done_testing;

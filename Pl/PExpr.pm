@@ -2298,6 +2298,25 @@ sub handle_subcalls {
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
             # Cast followed by Symbol is a single dereference term
             $end_pars = $i + 2;
+            # Also include a trailing Subscript: @$h{keys}, $$h{key}, @$a[idx]
+            # so delete/exists/keys on ref-slices see the full lvalue
+            if ($end_pars + 1 <= scalar(@$e) - 1
+                && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
+                $end_pars++;
+                while ($end_pars + 1 < scalar(@$e)) {
+                    my $nx = $e->[$end_pars + 1];
+                    if (ref($nx) eq 'PPI::Structure::Subscript') {
+                        $end_pars++;
+                    } elsif (ref($nx) eq 'PPI::Token::Operator'
+                             && $nx->content() eq '->'
+                             && $end_pars + 2 < scalar(@$e)
+                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
+                        $end_pars += 2;
+                    } else {
+                        last;
+                    }
+                }
+            }
         } elsif ((ref($next_term) eq 'PPI::Token::Symbol'
                   || ref($next_term) eq 'PPI::Token::Magic') && $end_pars >= $i + 2) {
             # Check if symbol is followed by subscript (hash/array access)

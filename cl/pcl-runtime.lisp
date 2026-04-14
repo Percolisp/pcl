@@ -964,7 +964,7 @@
     (cond
       ((eq v *p-undef*) nil)
       ((null v) nil)
-      ((and (numberp v) (zerop v)) nil)
+      ((and (numberp v) (not (%pcl-nan-p v)) (zerop v)) nil)
       ((and (stringp v) (string= v "")) nil)
       ((and (stringp v) (string= v "0")) nil)
       ;; Empty vector (empty list in list context) is false
@@ -1094,8 +1094,14 @@
               sb-ext:double-float-positive-infinity))))))
 
 (defun p-int (val)
-  "Perl int - truncate toward zero"
-  (truncate (to-number val)))
+  "Perl int - truncate toward zero.
+   Returns Inf/NaN unchanged (like Perl)."
+  (let ((n (to-number val)))
+    (if (floatp n)
+        (if (or (sb-ext:float-infinity-p n) (sb-ext:float-nan-p n))
+            n
+            (truncate n))
+        (truncate n))))
 
 (defun p-abs (val)
   "Perl abs - absolute value"
@@ -1121,6 +1127,7 @@
 (defun p-log (val)
   "Perl log - natural logarithm"
   (let ((n (to-number val)))
+    (when (%pcl-nan-p n) (return-from p-log n))
     (when (zerop n)
       (error "Can't take log of 0"))
     (log (coerce n 'double-float))))
@@ -1128,6 +1135,7 @@
 (defun p-sqrt (val)
   "Perl sqrt - square root"
   (let ((n (to-number val)))
+    (when (%pcl-nan-p n) (return-from p-sqrt n))
     (when (minusp n)
       (error "Can't take sqrt of ~A" n))
     (sqrt (coerce n 'double-float))))
@@ -1191,7 +1199,11 @@
          (s (if (and (vectorp v) (not (stringp v)) (adjustable-array-p v))
                 (write-to-string (length v))
                 (to-string str)))
-         (n (truncate (to-number count))))
+         (nc (to-number count))
+         (n (if (and (floatp nc)
+                     (or (sb-ext:float-infinity-p nc) (sb-ext:float-nan-p nc)))
+                0
+                (truncate nc))))
     (if (<= n 0)
         ""
         (apply #'concatenate 'string (make-list n :initial-element s)))))
@@ -2959,7 +2971,11 @@
 ;;; use overload — helper macro for binary comparison operators.
 ;;; Checks op-specific handler first, then falls back to the parent
 ;;; three-way operator (<=> for numeric, cmp for string) if available.
-(defmacro %def-overloaded-cmp (name op-str fallback-op cl-test)
+(defun %pcl-nan-p (x)
+  "True if x is a floating-point NaN."
+  (and (floatp x) (sb-ext:float-nan-p x)))
+
+(defmacro %def-overloaded-cmp (name op-str fallback-op cl-test nan-result)
   `(defun ,name (a b)
      ,(format nil "Perl ~A with use overload dispatch" op-str)
      ;; use overload: check op-specific handler, then fallback to <=> or cmp
@@ -2975,14 +2991,18 @@
                                                 (p-call-overload fa a b nil)
                                                 (p-call-overload fb b a t)))
                                  0)
-                       (,cl-test (to-number a) (to-number b))))))))))
+                       ;; IEEE 754: any comparison with NaN → nan-result
+                       (let ((na (to-number a)) (nb (to-number b)))
+                         (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
+                             ,nan-result
+                             (,cl-test na nb)))))))))))
 
-(%def-overloaded-cmp p-==  "=="  "<=>"  =)
-(%def-overloaded-cmp p-!=  "!="  "<=>"  /=)
-(%def-overloaded-cmp p-<   "<"   "<=>"  <)
-(%def-overloaded-cmp p->   ">"   "<=>"  >)
-(%def-overloaded-cmp p-<=  "<="  "<=>"  <=)
-(%def-overloaded-cmp p->=  ">="  "<=>"  >=)
+(%def-overloaded-cmp p-==  "=="  "<=>"  =   nil)   ; NaN==NaN → false
+(%def-overloaded-cmp p-!=  "!="  "<=>"  /=  t)     ; NaN!=NaN → true
+(%def-overloaded-cmp p-<   "<"   "<=>"  <   nil)   ; NaN<x → false
+(%def-overloaded-cmp p->   ">"   "<=>"  >   nil)   ; NaN>x → false
+(%def-overloaded-cmp p-<=  "<="  "<=>"  <=  nil)   ; NaN<=x → false
+(%def-overloaded-cmp p->=  ">="  "<=>"  >=  nil)   ; NaN>=x → false
 
 (defun p-<=> (a b)
   "Perl spaceship operator with use overload '<=>' dispatch"
@@ -2991,8 +3011,11 @@
     (if ha (p-call-overload ha a b nil)
         (let ((hb (p-find-overload b "<=>")))
           (if hb (p-call-overload hb b a t)
+              ;; IEEE 754: NaN comparisons always false → <=> returns undef
               (let ((na (to-number a)) (nb (to-number b)))
-                (cond ((< na nb) -1) ((> na nb) 1) (t 0))))))))
+                (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
+                    *p-undef*
+                    (cond ((< na nb) -1) ((> na nb) 1) (t 0)))))))))
 
 ;;; ============================================================
 ;;; Range Operator
@@ -3848,8 +3871,12 @@
        (p-array-set ,arr-var ,idx ,val-var))))
 
 (defun p-gethash-deref (ref key)
-  "Perl hash ref access $ref->{key} - unbox the reference first"
-  (p-gethash (unbox ref) key))
+  "Perl hash ref access $ref->{key} - unbox the reference first.
+   Returns undef if ref is undef (nil box); write path auto-vivifies via (setf p-gethash-deref)."
+  (let ((h (unbox ref)))
+    (if (or (null h) (eq h *p-undef*))
+        *p-undef*
+        (p-gethash h key))))
 
 (defun (setf p-gethash-deref) (value ref key)
   "Setf expander for p-gethash-deref - autovivify ref to hash if undef, then set key"
@@ -4126,23 +4153,39 @@
 
 (defun p-delete-hash-slice (hash &rest keys)
   "Perl delete for hash slices: delete @hash{k1, k2, ...}
-   Deletes multiple keys and returns a list of the deleted values."
-  (let ((result (make-array (length keys) :adjustable t :fill-pointer 0)))
-    (dolist (key keys)
+   Handles hash references (unboxes) and vector/list key arguments."
+  (let* ((h (unbox hash))
+         (flat-keys (loop for key in keys
+                          if (and (vectorp key) (not (stringp key)))
+                            append (coerce key 'list)
+                          else if (and (listp key) (not (null key)))
+                            append key
+                          else
+                            collect key))
+         (result (make-array (length flat-keys) :adjustable t :fill-pointer 0)))
+    (dolist (key flat-keys)
       (let ((k (to-string key)))
-        (vector-push-extend (gethash k hash *p-undef*) result)
-        (remhash k hash)))
+        (vector-push-extend (gethash k h *p-undef*) result)
+        (remhash k h)))
     result))
 
 (defun p-delete-kv-hash-slice (hash &rest keys)
   "Perl delete for KV hash slices: delete %hash{k1, k2, ...}
-   Deletes multiple keys and returns key-value pairs."
-  (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
-    (dolist (key keys)
+   Handles hash references (unboxes) and vector/list key arguments."
+  (let* ((h (unbox hash))
+         (flat-keys (loop for key in keys
+                          if (and (vectorp key) (not (stringp key)))
+                            append (coerce key 'list)
+                          else if (and (listp key) (not (null key)))
+                            append key
+                          else
+                            collect key))
+         (result (make-array 0 :adjustable t :fill-pointer 0)))
+    (dolist (key flat-keys)
       (let ((k (to-string key)))
         (vector-push-extend k result)
-        (vector-push-extend (gethash k hash *p-undef*) result)
-        (remhash k hash)))
+        (vector-push-extend (gethash k h *p-undef*) result)
+        (remhash k h)))
     result))
 
 (defun p-delete-array-slice (arr &rest indices)
@@ -5401,13 +5444,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-vec (str offset bits)
   "Perl vec - treat string as bit vector and extract element.
-   OFFSET is the element index, BITS is element size (1, 2, 4, 8, 16, 32).
+   OFFSET is the element index, BITS is element size (1, 2, 4, 8, 16, 32, 64).
    Returns the numeric value at that position."
   (let* ((s (to-string str))
          (offset (truncate (to-number offset)))
          (bits   (truncate (to-number bits))))
-    (unless (member bits '(1 2 4 8 16 32))
+    (unless (member bits '(1 2 4 8 16 32 64))
       (p-die (format nil "Illegal number of bits in vec")))
+    ;; Negative offset: return 0 (Perl silently returns 0 for rval)
+    (when (< offset 0)
+      (return-from p-vec 0))
   (let* ((byte-offset (floor (* offset bits) 8))
          (bit-offset (mod (* offset bits) 8)))
     (cond
@@ -5438,24 +5484,27 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-vec-set (str-box offset bits value)
   "Perl vec lvalue - set element in string-as-bit-vector.
-   BITS must be 1, 2, 4, 8, 16, or 32. Negative OFFSET dies. Modifies str-box."
+   BITS must be 1, 2, 4, 8, 16, 32, or 64. Negative OFFSET dies. Modifies str-box."
   (let* ((offset (truncate (to-number offset)))
          (bits   (truncate (to-number bits)))
          (val    (truncate (to-number value))))
-    (unless (member bits '(1 2 4 8 16 32))
+    (unless (member bits '(1 2 4 8 16 32 64))
       (p-die "Illegal number of bits in vec"))
     (when (< offset 0)
       (p-die "Negative offset to vec in lvalue context"))
     (let* ((byte-offset   (floor (* offset bits) 8))
            (bit-offset    (mod (* offset bits) 8))
-           (needed-bytes  (+ byte-offset (ceiling bits 8)))
-           (s             (to-string str-box))
-           ;; Extend string if needed (fill with NUL bytes)
-           (s-ext (if (< (length s) needed-bytes)
-                      (concatenate 'string s
-                                   (make-string (- needed-bytes (length s))
-                                                :initial-element #\Nul))
-                      (copy-seq s))))
+           (needed-bytes  (+ byte-offset (ceiling bits 8))))
+      ;; Very large allocation would exhaust memory — die like Perl does
+      (when (> needed-bytes (* 256 1024 1024))  ; > 256 MB
+        (p-die "Out of memory during vec in lvalue context"))
+      (let* ((s             (to-string str-box))
+             ;; Extend string if needed (fill with NUL bytes)
+             (s-ext (if (< (length s) needed-bytes)
+                        (concatenate 'string s
+                                     (make-string (- needed-bytes (length s))
+                                                  :initial-element #\Nul))
+                        (copy-seq s))))
       (cond
         ;; 8-bit aligned
         ((and (= bits 8) (= bit-offset 0))
@@ -5480,7 +5529,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; Write modified string back to the box (routes through STORE for tied vars)
       (when (p-box-p str-box)
         (box-set str-box s-ext))
-      val)))
+      val))))
 
 ;;; ============================================================
 ;;; Extended-range calendar helpers (Howard Hinnant civil_from_days)
