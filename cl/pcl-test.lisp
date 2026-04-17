@@ -346,6 +346,13 @@
   (declare (ignore args))
   (pcl:make-p-box (incf *test-count*)))
 
+;;; which_perl() — Perl test.pl helper: return path to the running Perl interpreter.
+;;; Used by closure.t and others to run a sub-perl process via system().
+(export '(pl-which_perl))
+(defun pl-which_perl (&rest args)
+  (declare (ignore args))
+  (pcl:make-p-box "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/bin/perl"))
+
 ;;; run_perl(switches => [...], prog => "code") — Perl test.pl helper: run a sub-Perl process.
 ;;; PCL cannot fork a Perl subprocess, so this always returns undef.
 ;;; Tests using run_perl will fail (not crash) gracefully.

@@ -2987,6 +2987,29 @@ sub _with_declarations {
       $new_renames{$var} = $unique;
       $old_renames{$var} = $existing->{$var};  # undef if no prior rename
     }
+
+    # CL reads unquoted symbols case-insensitively (upcase mode), so Perl variables
+    # that differ only in case (e.g. $T and $t) map to the same CL symbol and cause
+    # "variable occurs more than once in the LET" errors. Detect these collisions and
+    # rename the later occurrence to $name__uc__ to make it distinct.
+    my %cl_sym_seen;  # lc(cl_name) → first perl var with that cl symbol
+    for my $var (@my_vars) {
+      my $cl_name = $new_renames{$var} // $var;
+      my $lc = lc($cl_name);
+      if (exists $cl_sym_seen{$lc}) {
+        # Collision: $var has same CL symbol as $cl_sym_seen{$lc}
+        # Rename the later one (whichever $var this is)
+        my ($sigil, $bare) = ($cl_name =~ /^([\$\@\%])(.+)$/);
+        $sigil //= '$'; $bare //= $cl_name;
+        (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+        my $renamed = sprintf('%s%s__case__%d', $sigil, $slug, ++$lex_var_counter);
+        $new_renames{$var} = $renamed;
+        $old_renames{$var} //= $existing->{$var};
+        $cl_sym_seen{lc($renamed)} = $var;
+      } else {
+        $cl_sym_seen{$lc} = $var;
+      }
+    }
   }
 
   # Wrap in let if we have declarations

@@ -551,6 +551,14 @@ sub gen_leaf {
     }
     # Remove underscores from regular numbers (Perl allows 1_000_000)
     $num =~ s/_//g;
+    # Check if float literal overflows double range (e.g. 1e9999 -> +Inf in Perl)
+    if ($num =~ /[eE.]/) {
+      my $val = eval($num);
+      if (defined $val) {
+        if ($val == 9**9**9)  { return 'sb-ext:double-float-positive-infinity'; }
+        if ($val == -(9**9**9)) { return 'sb-ext:double-float-negative-infinity'; }
+      }
+    }
     return $num;
   }
 

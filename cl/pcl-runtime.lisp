@@ -1009,6 +1009,12 @@
 
 ;;; use overload — helper macro for binary arithmetic operators.
 ;;; Checks left operand first, then right (reversed), then falls back to CL-OP.
+(defun %pcl-ieee-arith (thunk)
+  "Call THUNK for numeric result; return NaN on floating-point-invalid-operation."
+  (handler-case (funcall thunk)
+    (floating-point-invalid-operation ()
+      (sb-kernel:make-double-float #x7FF80000 0))))
+
 (defmacro %def-overloaded-arith (name op-str cl-op)
   `(defun ,name (a &optional (b nil b-supplied-p))
      ,(format nil "Perl ~A with use overload dispatch" op-str)
@@ -1020,7 +1026,7 @@
            (if ha (p-call-overload ha a b nil)
                (let ((hb (p-find-overload b ,op-str)))
                  (if hb (p-call-overload hb b a t)
-                     (,cl-op (to-number a) (to-number b)))))))))
+                     (%pcl-ieee-arith (lambda () (,cl-op (to-number a) (to-number b)))))))))))
 
 (%def-overloaded-arith p-+ "+" +)
 (%def-overloaded-arith p-* "*" *)
@@ -1056,7 +1062,7 @@
         (if ha (p-call-overload ha a b nil)
             (let ((hb (p-find-overload b "-")))
               (if hb (p-call-overload hb b a t)
-                  (- (to-number a) (to-number b))))))))
+                  (%pcl-ieee-arith (lambda () (- (to-number a) (to-number b))))))))))
 
 (defun p-/ (a b)
   "Perl division with use overload '/' dispatch"
@@ -1065,8 +1071,7 @@
     (if ha (p-call-overload ha a b nil)
         (let ((hb (p-find-overload b "/")))
           (if hb (p-call-overload hb b a t)
-              (/ (to-number a) (to-number b)))))))
-
+              (%pcl-ieee-arith (lambda () (/ (to-number a) (to-number b)))))))))
 (defun p-% (a b)
   "Perl modulo with use overload '%' dispatch"
   ;; use overload "%": modulo overload
@@ -1074,7 +1079,13 @@
     (if ha (p-call-overload ha a b nil)
         (let ((hb (p-find-overload b "%")))
           (if hb (p-call-overload hb b a t)
-              (mod (truncate (to-number a)) (truncate (to-number b))))))))
+              (let ((na (to-number a)) (nb (to-number b)))
+                (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
+                        (sb-ext:float-infinity-p (coerce na 'double-float))
+                        (sb-ext:float-infinity-p (coerce nb 'double-float))
+                        (zerop nb))
+                    (sb-kernel:make-double-float #x7FF80000 0)
+                    (mod (truncate na) (truncate nb)))))))))
 
 (defun p-** (a b)
   "Perl exponentiation with use overload '**' dispatch"
@@ -1095,12 +1106,13 @@
 
 (defun p-int (val)
   "Perl int - truncate toward zero.
-   Returns Inf/NaN unchanged (like Perl)."
+   Clamps Inf/-Inf to 64-bit signed integer bounds; NaN becomes 0."
   (let ((n (to-number val)))
     (if (floatp n)
-        (if (or (sb-ext:float-infinity-p n) (sb-ext:float-nan-p n))
-            n
-            (truncate n))
+        (cond ((%pcl-nan-p n) 0)
+              ((= n sb-ext:double-float-positive-infinity)  (1- (expt 2 63)))
+              ((= n sb-ext:double-float-negative-infinity) (- (expt 2 63)))
+              (t (truncate n)))
         (truncate n))))
 
 (defun p-abs (val)
@@ -1109,11 +1121,17 @@
 
 (defun p-sin (val)
   "Perl sin - sine"
-  (sin (coerce (to-number val) 'double-float)))
+  (let ((n (coerce (to-number val) 'double-float)))
+    (when (or (%pcl-nan-p n) (sb-ext:float-infinity-p n))
+      (return-from p-sin (sb-kernel:make-double-float #x7FF80000 0)))
+    (sin n)))
 
 (defun p-cos (val)
   "Perl cos - cosine"
-  (cos (coerce (to-number val) 'double-float)))
+  (let ((n (coerce (to-number val) 'double-float)))
+    (when (or (%pcl-nan-p n) (sb-ext:float-infinity-p n))
+      (return-from p-cos (sb-kernel:make-double-float #x7FF80000 0)))
+    (cos n)))
 
 (defun p-atan2 (y x)
   "Perl atan2 - arctangent of y/x"
@@ -3253,38 +3271,43 @@
         (setf (char result i) (code-char (funcall op ca cb)))))
     result))
 
+(defun %pcl-to-integer (n)
+  "Convert numeric value to integer, clamping Inf/NaN to 0 (Perl UV_MAX truncation)"
+  (let ((d (coerce n 'double-float)))
+    (if (or (%pcl-nan-p d) (sb-ext:float-infinity-p d)) 0 (truncate d))))
+
 (defun p-bit-and (a b)
   "Perl bitwise AND — string (char-by-char, truncates) or numeric"
   (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
       (p-string-bit-op a b #'logand t)
-      (logand (truncate (to-number a)) (truncate (to-number b)))))
+      (logand (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
 
 (defun p-bit-or (a b)
   "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric"
   (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
       (p-string-bit-op a b #'logior nil)
-      (logior (truncate (to-number a)) (truncate (to-number b)))))
+      (logior (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
 
 (defun p-bit-xor (a b)
   "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric"
   (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
       (p-string-bit-op a b #'logxor nil)
-      (logxor (truncate (to-number a)) (truncate (to-number b)))))
+      (logxor (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
 
 (defun p-bit-not (a)
   "Perl bitwise NOT - mask to 64 bits like Perl's UV"
-  (logand (lognot (truncate (to-number a))) #xFFFFFFFFFFFFFFFF))
+  (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF))
 
 (defun p-<< (a b)
   "Perl left shift — clamp shift count to prevent SBCL bignum explosion"
-  (let ((av (truncate (to-number a)))
-        (bv (truncate (to-number b))))
+  (let ((av (%pcl-to-integer (to-number a)))
+        (bv (%pcl-to-integer (to-number b))))
     (if (>= (abs bv) 64) 0 (ash av bv))))
 
 (defun p->> (a b)
   "Perl right shift — clamp shift count to prevent SBCL bignum explosion"
-  (let ((av (truncate (to-number a)))
-        (bv (truncate (to-number b))))
+  (let ((av (%pcl-to-integer (to-number a)))
+        (bv (%pcl-to-integer (to-number b))))
     (if (>= (abs bv) 64) 0 (ash av (- bv)))))
 
 (defun p-to-s64 (n)
