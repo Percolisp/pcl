@@ -319,4 +319,136 @@ delete @$h{@k};
 print scalar(keys %$h), "\n";
 ', "0\n");
 
+# ── goto LABEL at file scope ────────────────────────────────────────────────
+# Regression: _wrap_runtime_labels must wrap only the minimal region (label to
+# last goto), not the entire rest of the runtime.  Labels inside CL strings or
+# lambdas must NOT trigger false tagbody wrapping.
+
+test_transpile('goto LABEL backward-jump loop at file scope', '
+my @out;
+my $i = 0;
+again:
+push @out, $i++;
+goto again if $i < 4;
+print join(",", @out), "\n";
+print "done\n";
+', "0,1,2,3\ndone\n");
+
+test_transpile('code after goto loop runs independently', '
+my $x = 0;
+loop:
+$x++;
+goto loop if $x < 3;
+# code after the goto region must not be swallowed by the tagbody
+print $x, "\n";
+print "after\n";
+', "3\nafter\n");
+
+test_transpile('string with :word patterns does not create tagbody', '
+my $s = join ":", split(/\n/, "ab\ncd\nef\n");
+print $s, "\n";
+', "ab:cd:ef\n");
+
+# ── Inner named subs hoisted out of outer named sub ──────────────────────────
+
+test_transpile('inner named sub callable before outer sub runs', '
+sub outer {
+    state $x = 42;
+    sub inner { sub { $x } }
+}
+my $f = inner();    # call inner() before outer()
+outer();            # initialise state $x
+print $f->(), "\n";
+', "42\n");
+
+test_transpile('inner named sub shares state var with outer', '
+sub outer2 {
+    state $n = 0;
+    sub inner2 { sub { $n } }
+    $n++;
+}
+outer2(); outer2(); outer2();
+my $f = inner2();
+print $f->(), "\n";   # $n should be 3
+', "3\n");
+
+test_transpile('inner named sub in string eval callable before outer runs', '
+eval q{
+    sub h_test {
+        state $t = 99;
+        sub i_test { sub { $t } }
+    }
+};
+my $f = i_test();
+h_test();
+print $f->(), "\n";
+', "99\n");
+
+test_transpile('two inner named subs in same outer sub', '
+sub wrap {
+    state $v = 7;
+    sub get_v  { $v }
+    sub get_v2 { sub { $v } }
+}
+wrap();
+print get_v(), "\n";
+my $f = get_v2();
+print $f->(), "\n";
+', "7\n7\n");
+
+# ── exists { hash }->{key}: hash constructor block as hashref in exists ──────
+# PExpr named-unary $end_pars expansion now continues through -> + Subscript
+# after a Block, so exists { a=>1 }->{$key} passes the full chain to exists.
+
+test_transpile('exists on anon-hash constructor result', '
+my $r = exists { a => 1, b => 2 }->{a} ? "yes" : "no";
+print "$r\n";
+', "yes\n");
+
+test_transpile('exists on anon-hash constructor result missing key', '
+my $r = exists { a => 1 }->{z} ? "yes" : "no";
+print "$r\n";
+', "no\n");
+
+# ── Perl 4 package separator ' normalised to :: ───────────────────────────────
+# $pkg'var was a single PPI Symbol token; gen_leaf now normalises ' -> ::
+
+test_transpile("Perl 4 package sep: read \$main'foo", q{
+our $foo = 42;
+print $main'foo, "\n";
+}, "42\n");
+
+test_transpile("Perl 4 package sep: read \$pkg'var in other package", q{
+package Stuff;
+our $val = 7;
+package main;
+print $Stuff'val, "\n";
+}, "7\n");
+
+# ── (sub { ... })[0]->() — list subscript on code ref ────────────────────────
+# p-aref-deref now handles function values: index 0 returns the function itself.
+
+test_transpile('(sub { expr })[0] returns the sub', '
+my $f = (sub { "baz" })[0];
+print ref($f), "\n";
+', "CODE\n");
+
+test_transpile('(sub { expr })[0]->() calls the sub', '
+my $r = (sub { "bar" })[0]->();
+print "$r\n";
+', "bar\n");
+
+# ── All-uppercase known package allowed as indirect-object invocant ───────────
+# Indirect-object detection skipped all-uppercase tokens as filehandles.
+# Fix: allow if the name is a declared package.
+
+test_transpile('all-uppercase package name usable as indirect object', '
+package WIDGET;
+sub new  { bless {}, shift }
+sub ping { "pong" }
+package main;
+my $w = new WIDGET;
+print $w->ping(), "\n";
+', "pong\n");
+
 done_testing;

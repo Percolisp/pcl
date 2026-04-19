@@ -416,6 +416,19 @@ sub parse {
 
     # Handle Block structures (used in braced derefs like ${$ref}, @{$expr})
     if (ref($e1) eq 'PPI::Structure::Block') {
+      # If the block looks like a hash constructor ({ key => val }), treat as hash_init
+      if (_block_is_hash_constructor($e1)) {
+        my @list    = $e1->children();
+        if (@list == 1 && ref($list[0]) eq 'PPI::Statement') {
+          @list = $list[0]->children();
+        }
+        my $e_list  = $self->cleanup_for_parsing(\@list);
+        $e_list     = $self->remove_expression_object_around($e_list);
+        my $x = $self->parse_list($e_list);
+        my($top_node, $top_id) = $self->make_node_insert('hash_init');
+        for (@$x) { $self->add_child_to_node($top_id, $_) }
+        return $top_id;
+      }
       my @list    = $e1->children();
       $e          = \@list;
       return $self->parse($e);
@@ -1495,10 +1508,15 @@ sub handle_subcalls {
       if (ref($invocant) eq 'PPI::Token::Word'
           && !$self->is_token_operator($invocant)
           && $invocant->content =~ /^[A-Z]/) {
-        # Skip all-uppercase invocants: they are Perl special blocks (INIT, BEGIN,
-        # END, CHECK), filehandles (FILE, STDOUT), or constants — never class names
-        # in indirect-object syntax.  Same rule applied to method names above.
-        next if $invocant->content =~ /^[A-Z][A-Z0-9_]*$/;
+        # Skip all-uppercase invocants unless they are known declared packages:
+        # unqualified all-caps words are typically filehandles (STDIN/STDOUT),
+        # special blocks (BEGIN/END), or constants — not class names.
+        # Exception: if the name is a known package, allow it as indirect invocant.
+        if ($invocant->content =~ /^[A-Z][A-Z0-9_]*$/) {
+          my $is_known_pkg = $self->has_environment
+              && $self->environment->has_package($invocant->content);
+          next unless $is_known_pkg;
+        }
         $invocant_is_class = 1;
       } elsif (ref($invocant) eq 'PPI::Token::Symbol'
                && $invocant->content =~ /^\$/) {
@@ -2368,6 +2386,26 @@ sub handle_subcalls {
                 }
             } else {
                 $end_pars = $i + 1;
+            }
+        } elsif (ref($next_term) =~ /^PPI::Structure::/
+                 && $end_pars >= $i + 3
+                 && ref($e->[$i + 2]) eq 'PPI::Token::Operator'
+                 && $e->[$i + 2]->content() eq '->'
+                 && ref($e->[$i + 3]) =~ /^PPI::Structure::/) {
+            # Block/Constructor + -> + Subscript: e.g. exists { hash }->{key}
+            # Consume full arrow-subscript chain as the named-unary argument
+            $end_pars = $i + 3;
+            while ($end_pars + 1 < scalar(@$e)) {
+                my $nx = $e->[$end_pars + 1];
+                if (ref($nx) eq 'PPI::Structure::Subscript') {
+                    $end_pars++;
+                } elsif (ref($nx) eq 'PPI::Token::Operator'
+                         && $nx->content() eq '->'
+                         && $end_pars + 2 < scalar(@$e)) {
+                    $end_pars += 2;
+                } else {
+                    last;
+                }
             }
         } else {
             $end_pars = $i + 1;

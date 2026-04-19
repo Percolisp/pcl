@@ -30,7 +30,7 @@ if ($? != 0) {
 }
 
 # Run SBCL
-my $raw = `sbcl --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $root/cl/pcl-test.lisp --load $lisp 2>&1`;
+my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $root/cl/pcl-test.lisp --load $lisp 2>&1`;
 
 # Save raw output
 open(my $fh, '>', $out) or die "write $out: $!\n";

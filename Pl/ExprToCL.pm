@@ -412,6 +412,8 @@ sub gen_leaf {
   # Variable (like $x, @arr, %hash)
   if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
     my $content = $node->content() // '';
+    # Normalize Perl 4 package separator: $pkg'var -> $pkg::var
+    $content =~ s/^([\$\@\%\*&])([a-zA-Z_]\w*)'/$1$2::/;
     # Handle magic/special variables via dispatch table
     return $SPECIAL_VARS{$content} if exists $SPECIAL_VARS{$content};
     # Handle package-qualified variables: $Pkg::var -> Pkg::$var
@@ -925,6 +927,14 @@ sub gen_funcall {
           return "($cl_func $label)";
         }
       }
+    }
+
+    # goto EXPR (computed goto) — expression evaluates to a label name.
+    # Not fully implementable in CL (go requires compile-time tags).
+    # Generate a no-op rather than an undefined function call.
+    if ($func_name eq 'goto') {
+      my $arg_cl = $self->gen_node($kids->[1]);
+      return "(p-goto-computed $arg_cl)";
     }
   }
 

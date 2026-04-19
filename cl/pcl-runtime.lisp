@@ -63,7 +63,7 @@
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
    #:p-if #:p-unless #:p-while #:p-until #:p-for #:p-foreach
-   #:p-return #:p-goto-sub #:p-last #:p-last-dynamic #:p-next #:p-redo
+   #:p-return #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
    #:p-continue #:p-break
    ;; I/O
    #:p-print #:p-say #:p-warn #:p-die
@@ -124,7 +124,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
-   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R|
    ;; Context
    #:*wantarray*
    ;; Call depth tracking (for p-caller at top level)
@@ -337,6 +337,9 @@
 
 ;;; Taint mode flag (${^TAINT}) - always off in transpiled code
 (defvar |${^TAINT}| nil "Taint mode is not enabled")
+
+;;; Regex code-block result ($^R) - result of last successful (?{...}) eval
+(defvar |$^R| nil "Result of last successful (?{...}) regex code block")
 
 ;;; System error ($!) - returns errno as string
 (defun p-errno-string ()
@@ -1010,10 +1013,9 @@
 ;;; use overload — helper macro for binary arithmetic operators.
 ;;; Checks left operand first, then right (reversed), then falls back to CL-OP.
 (defun %pcl-ieee-arith (thunk)
-  "Call THUNK for numeric result; return NaN on floating-point-invalid-operation."
-  (handler-case (funcall thunk)
-    (floating-point-invalid-operation ()
-      (sb-kernel:make-double-float #x7FF80000 0))))
+  "Call THUNK for numeric result; return NaN/Inf on IEEE floating-point exceptions."
+  (sb-int:with-float-traps-masked (:invalid :overflow)
+    (funcall thunk)))
 
 (defmacro %def-overloaded-arith (name op-str cl-op)
   `(defun ,name (a &optional (b nil b-supplied-p))
@@ -1985,8 +1987,10 @@
                                  (let* ((full-len (length frac-full-hex))
                                         (p precision))
                                    (if (<= full-len p)
-                                       ;; Pad with zeros to precision
-                                       (format nil (format nil "~~~D,'0A" p) frac-full-hex)
+                                       ;; Pad with trailing zeros to precision
+                                       (let ((pad (- p full-len)))
+                                         (concatenate 'string frac-full-hex
+                                                      (if (> pad 0) (make-string pad :initial-element #\0) "")))
                                        ;; Round: check digit at position p
                                        (let* ((trunc (subseq frac-full-hex 0 p))
                                               (next-val (digit-char-p (char frac-full-hex p) 16)))
@@ -3427,11 +3431,26 @@
 (declaim (ftype function p-aslice))
 (defun p-aref-deref (ref idx)
   "Perl array ref access $ref->[idx] - unbox the reference first.
-   When idx is a vector (range result), returns a slice instead of a single element."
+   When idx is a vector (range result), returns a slice instead of a single element.
+   When ref is a string, treat as symbolic reference to @name."
   (let ((arr (unbox ref)))
-    (if (and (vectorp idx) (not (stringp idx)))
-        (p-aslice arr idx)
-        (p-aref arr idx))))
+    (cond
+      ;; Symbolic reference: string used as array name (no strict refs)
+      ((stringp arr)
+       (when (find #\Nul arr) (return-from p-aref-deref *p-undef*))
+       (let ((sym-arr (p-ensure-arrayref ref)))
+         (if (and (vectorp idx) (not (stringp idx)))
+             (p-aslice sym-arr idx)
+             (p-aref sym-arr idx))))
+      ;; Function as single-element list: (sub{...})[0] = the sub itself
+      ((functionp arr)
+       (let ((i (truncate (to-number idx))))
+         (if (eql i 0)
+             (make-p-box arr)
+             *p-undef*)))
+      ((and (vectorp idx) (not (stringp idx)))
+       (p-aslice arr idx))
+      (t (p-aref arr idx)))))
 
 (defun p-array-last-index (arr)
   "Perl $#arr - last index. Accepts raw vectors (@arr) or boxed array refs ($aref).
@@ -3507,7 +3526,8 @@
 
 (defun p-push-impl (arr &rest items)
   "Implementation of push - stores values in boxes for l-value semantics.
-   Recognizes p-flatten-marker to flatten @array arguments."
+   Recognizes p-flatten-marker to flatten @array arguments.
+   Also spreads raw CL vectors (e.g. from qw!...! or list-context expressions)."
   (dolist (item items)
     (let ((val (unbox item)))
       (cond
@@ -3519,6 +3539,11 @@
                    ;; Unbox if element is boxed, then create new box
                    (let ((v (unbox elem)))
                      (vector-push-extend (make-p-box v) arr))))))
+        ;; Raw CL vector (not a p-box reference): spread elements.
+        ;; Handles qw!...! lists and array-valued expressions in list context.
+        ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
+         (loop for elem across val do
+               (vector-push-extend (make-p-box (unbox elem)) arr)))
         ;; Regular value - wrap in box and push
         (t (vector-push-extend (make-p-box val) arr)))))
   (length arr))
@@ -3555,6 +3580,9 @@
                   ;; Flatten marker - expand its array, unboxing elements
                   append (loop for elem across (p-flatten-marker-array val)
                                collect (unbox elem))
+                else if (and (vectorp val) (not (stringp val)) (not (p-box-p item)))
+                  ;; Raw CL vector (e.g. qw!...!): spread elements
+                  append (loop for elem across val collect (unbox elem))
                 else
                   ;; Regular value
                   collect val)))
@@ -3646,7 +3674,8 @@
 
 (defun p-gethash (hash key)
   "Perl hash access. Special handling for %ENV and %INC.
-   Returns the VALUE (unboxed if element is a box)."
+   Returns the VALUE (unboxed if element is a box).
+   When hash unboxes to a string, treats as symbolic reference to %name."
   (let* ((h (unbox hash))
          (k (to-string key)))
     ;; If hash is undef (from failed lookup), return undef
@@ -3659,6 +3688,12 @@
       ((eq h '%INC-MARKER%)
        (multiple-value-bind (val found) (gethash k *p-inc-table*)
          (if found val *p-undef*)))
+      ;; Symbolic reference: string used as hash name
+      ((stringp h)
+       (when (find #\Nul h) (return-from p-gethash *p-undef*))
+       (let ((sym-h (p-ensure-hashref hash)))
+         (multiple-value-bind (val found) (gethash k sym-h)
+           (if found (unbox val) *p-undef*))))
       (t
        (multiple-value-bind (val found) (gethash k h)
          (if (not found)
@@ -3678,6 +3713,13 @@
        value)
       ((eq h '%INC-MARKER%)
        (setf (gethash k *p-inc-table*) value))
+      ;; Symbolic reference: string used as hash name
+      ((stringp h)
+       (when (find #\Nul h) (return-from p-gethash value))  ; null byte: silent no-op
+       (let ((sym-h (p-ensure-hashref hash))
+             (box (make-p-box nil)))
+         (setf (gethash k sym-h) box)
+         (box-set box value)))
       (t
        ;; Get or create box at this key
        (multiple-value-bind (existing found) (gethash k h)
@@ -3713,23 +3755,62 @@
    If ref contains nil or undef, autovivify: create a hash table and store it in the box.
    Returns the raw hash table (not boxed). Used by autovivification macros."
   (let ((h (unbox ref)))
-    (if (or (null h) (eq h *p-undef*))
-        (let ((new-hash (make-hash-table :test 'equal)))
-          (box-set ref new-hash)
-          new-hash)
-        h)))
+    (cond
+      ((or (null h) (eq h *p-undef*))
+       (let ((new-hash (make-hash-table :test 'equal)))
+         (box-set ref new-hash)
+         new-hash))
+      ;; Symbolic reference: string used as hash name (no strict refs)
+      ((stringp h)
+       (when (find #\Nul h) (return-from p-ensure-hashref
+                               (make-hash-table :test 'equal)))
+       (let* ((pos (search "::" h :from-end t))
+              (pkg-str (if pos (string-upcase (subseq h 0 pos)) nil))
+              (var-str (if pos (subseq h (+ pos 2)) h))
+              (pkg     (if pkg-str
+                           (or (find-package pkg-str)
+                               (make-package pkg-str :use '(:cl :pcl)))
+                           *package*))
+              (sym-name (concatenate 'string "%" (string-upcase var-str)))
+              (sym      (or (find-symbol sym-name pkg) (intern sym-name pkg))))
+         (proclaim `(special ,sym))
+         (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
+           (setf (symbol-value sym) (make-hash-table :test 'equal)))
+         (symbol-value sym)))
+      (t h))))
 
 (defun p-ensure-arrayref (ref)
   "Ensure ref (a p-box) contains an adjustable vector.
    If ref contains nil or undef, autovivify: create a vector and store it in the box.
    Returns the raw vector (not boxed). Used by autovivification macros."
   (let ((a (unbox ref)))
-    (if (or (null a) (eq a *p-undef*))
-        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-          ;; Wrap in make-p-box so box-set does not treat it as scalar-context @arr.
-          (box-set ref (make-p-box new-arr))
-          new-arr)
-        a)))
+    (cond
+      ((or (null a) (eq a *p-undef*))
+       (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+         ;; Wrap in make-p-box so box-set does not treat it as scalar-context @arr.
+         (box-set ref (make-p-box new-arr))
+         new-arr))
+      ;; Symbolic reference: string used as array name
+      ((stringp a)
+       ;; Null bytes can't be CL symbols — return a transient dummy array
+       (when (find #\Nul a)
+         (return-from p-ensure-arrayref
+           (make-array 0 :adjustable t :fill-pointer 0)))
+       (let* ((pos (search "::" a :from-end t))
+              (pkg-str (if pos (string-upcase (subseq a 0 pos)) nil))
+              (var-str (if pos (subseq a (+ pos 2)) a))
+              (pkg     (if pkg-str
+                           (or (find-package pkg-str)
+                               (make-package pkg-str :use '(:cl :pcl)))
+                           *package*))
+              (sym-name (concatenate 'string "@" (string-upcase var-str)))
+              (sym      (or (find-symbol sym-name pkg) (intern sym-name pkg))))
+         (proclaim `(special ,sym))
+         (unless (and (boundp sym) (vectorp (symbol-value sym)))
+           (setf (symbol-value sym)
+                 (make-array 0 :adjustable t :fill-pointer 0)))
+         (symbol-value sym)))
+      (t a))))
 
 (defun p-autoviv-gethash (hash key)
   "Get hash value, autovivifying to empty hash if missing or :UNDEF.
@@ -3895,11 +3976,17 @@
 
 (defun p-gethash-deref (ref key)
   "Perl hash ref access $ref->{key} - unbox the reference first.
-   Returns undef if ref is undef (nil box); write path auto-vivifies via (setf p-gethash-deref)."
+   Returns undef if ref is undef (nil box); write path auto-vivifies via (setf p-gethash-deref).
+   When ref is a string, treats as symbolic reference to %name."
   (let ((h (unbox ref)))
-    (if (or (null h) (eq h *p-undef*))
-        *p-undef*
-        (p-gethash h key))))
+    (cond
+      ((or (null h) (eq h *p-undef*)) *p-undef*)
+      ;; Symbolic reference: string used as hash name (no strict refs)
+      ((stringp h)
+       (when (find #\Nul h) (return-from p-gethash-deref *p-undef*))
+       (let ((sym-hash (p-ensure-hashref ref)))
+         (p-gethash sym-hash key)))
+      (t (p-gethash h key)))))
 
 (defun (setf p-gethash-deref) (value ref key)
   "Setf expander for p-gethash-deref - autovivify ref to hash if undef, then set key"
@@ -4437,6 +4524,11 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
      (p-box-value val))
     ;; Simple scalar box - return the unboxed value
     (t (unbox val))))
+
+(defun p-goto-computed (label)
+  "Perl goto EXPR (computed goto) — not implementable in CL; silently ignore."
+  (declare (ignore label))
+  nil)
 
 (defmacro p-goto-sub (fn)
   "Perl goto &func — tail-call the target function with the current @_.
@@ -6333,6 +6425,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; after p-bless wraps raw functions. One unbox gives the inner-box, not the fn.
     (when (p-box-p fn)
       (setf fn (p-box-value fn)))
+    (unless (functionp fn)
+      (p-die "Not a CODE reference."))
     (apply fn args)))
 
 ;;; ============================================================
@@ -6422,33 +6516,73 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((v (unbox val)))
     (if (p-box-p v) (unbox v) v)))
 
+(defun %p-symref-box (name-str)
+  "Resolve Perl symbolic scalar reference NAME-STR to a CL box.
+   Returns the box on success, NIL if the name is invalid or variable not found."
+  ;; CL symbols cannot contain null bytes — silently return nil
+  (when (find #\Nul name-str) (return-from %p-symref-box nil))
+  (let* ((pos (search "::" name-str :from-end t))
+         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
+         (pkg (if pkg-str (find-package pkg-str) *package*)))
+    (when pkg
+      (let ((sym (find-symbol (concatenate 'string "$" (string-upcase var-str)) pkg)))
+        (when (and sym (boundp sym))
+          (let ((v (symbol-value sym)))
+            (when (p-box-p v) v)))))))
+
+(defun (setf %p-symref-box) (new-box name-str)
+  "Set Perl symbolic scalar reference NAME-STR to NEW-BOX."
+  (when (find #\Nul name-str) (return-from %p-symref-box new-box))
+  (let* ((pos (search "::" name-str :from-end t))
+         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
+         (pkg (if pkg-str
+                  (or (find-package pkg-str)
+                      (make-package pkg-str :use '(:cl :pcl)))
+                  *package*)))
+    (let* ((sym-name (concatenate 'string "$" (string-upcase var-str)))
+           (sym (or (find-symbol sym-name pkg)
+                    (intern sym-name pkg))))
+      (proclaim `(special ,sym))
+      (setf (symbol-value sym) new-box)))
+  new-box)
+
 (defun p-cast-$ (val)
-  "Perl scalar dereference ${$ref} - get value from reference.
-   $ref contains a reference (box), $$ref gets the referenced value."
+  "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
+   If val unboxes to a string, treat as symbolic reference."
   (let ((inner (unbox val)))
-    ;; inner is the reference (a box), get its value
-    (if (p-box-p inner)
-        (p-box-value inner)
-        inner)))
+    (cond
+      ((p-box-p inner)
+       (p-box-value inner))
+      ((stringp inner)
+       ;; Symbolic reference: ${"varname"}
+       (let ((box (%p-symref-box inner)))
+         (if box (p-box-value box) nil)))
+      (t inner))))
 
 (defun (setf p-cast-$) (new-value val)
-  "Perl scalar dereference assignment ${$ref} = val - set value in referenced box.
-   Handles two shapes:
-   - val wraps a box wrapping a box (normal scalar ref: val->ref->target):
-     set the target box's value.
-   - val wraps a non-box (blessed scalar arg in tie STORE: val IS the container):
-     set val's own value directly."
+  "Perl scalar dereference assignment ${$ref} = val or ${'name'} = val.
+   Handles symbolic references when val unboxes to a string."
   (let ((inner (unbox val)))
-    (if (p-box-p inner)
-        ;; val is a reference box; inner is the referenced box or value
-        (let ((target (p-box-value inner)))
-          (if (p-box-p target)
-              (box-set target new-value)    ; normal scalar ref: set the target
-              (box-set inner new-value)))   ; inner is the scalar container
-        ;; val itself is the scalar container (blessed scalar in tie methods)
-        (if (p-box-p val)
-            (box-set val new-value)
-            (error "Cannot dereference non-reference: ~A" inner)))))
+    (cond
+      ((p-box-p inner)
+       ;; val is a reference box; inner is the referenced box or value
+       (let ((target (p-box-value inner)))
+         (if (p-box-p target)
+             (box-set target new-value)    ; normal scalar ref: set the target
+             (box-set inner new-value))))  ; inner is the scalar container
+      ((stringp inner)
+       ;; Symbolic reference: ${"varname"} = val
+       (let ((box (or (%p-symref-box inner)
+                      (let ((b (make-p-box nil)))
+                        (setf (%p-symref-box inner) b)
+                        b))))
+         (box-set box new-value)))
+      ;; val itself is the scalar container (blessed scalar in tie methods)
+      ((p-box-p val)
+       (box-set val new-value))
+      (t (error "Cannot dereference non-reference: ~A" inner)))))
 
 (defun p-hash-deref-= (hash-ref value)
   "Assign to a dereferenced hash: %$ref = (list).
@@ -7915,8 +8049,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (t (incf arg-idx))))
     result))
 
-(defun p-unpack (template str)
+(defun p-unpack (template &optional (str $_))
   "Perl unpack - parse binary string according to template.
+   With one arg, uses $_ as the string (Perl 5.11+ behavior).
    Treats CL string characters as Latin-1 bytes (char-code = byte value).
    If template starts with U0, converts string to UTF-8 bytes first.
    Strips grouping parentheses () from template (not implemented).
@@ -8030,8 +8165,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                    (incf si (* n 4))))
                 ;; Arbitrary binary string (A strips trailing spaces/nulls, a does not)
                 ((#\A #\a #\Z)
-                 (let* ((n (if all-p (- slen si) (or count 1)))
-                        (raw (subseq s si (min (+ si n) slen))))
+                 (let* ((n (if all-p (max 0 (- slen si)) (or count 1)))
+                        (safe-si (min si slen))
+                        (raw (subseq s safe-si (min (+ safe-si n) slen))))
                    (push-val (if (char= ch #\A)
                                  (string-right-trim '(#\Space #\Nul) raw)
                                  raw))
