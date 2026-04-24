@@ -228,8 +228,8 @@ test_codegen('{a => 1, b => 2}', '(make-p-box (p-hash "a" 1 "b" 2))', 'Hash init
 diag "";
 diag "-------- Method calls:";
 
-test_codegen('$obj->method()', '(p-method-call $obj \'method)', 'Method call no args');
-test_codegen('$obj->method($x)', '(p-method-call $obj \'method $x)', 'Method call with arg');
+test_codegen('$obj->method()', '(p-method-call $obj "method")', 'Method call no args');
+test_codegen('$obj->method($x)', '(p-method-call $obj "method" $x)', 'Method call with arg');
 
 
 # ============================================================
@@ -329,7 +329,7 @@ test_codegen('$x = $arr[0] + $hash{key}',
              'Sum of array and hash values');
 
 test_codegen('$result = $obj->method($arr[0])',
-             '(p-scalar-= $result (p-method-call $obj \'method (p-aref @arr 0)))',
+             '(p-scalar-= $result (p-method-call $obj "method" (p-aref @arr 0)))',
              'Method call with array element arg');
 
 test_codegen('$total = $prices->[$i] * $qty->{$item}',

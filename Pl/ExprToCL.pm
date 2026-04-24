@@ -412,6 +412,8 @@ sub gen_leaf {
   # Variable (like $x, @arr, %hash)
   if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
     my $content = $node->content() // '';
+    # Normalize Perl 4 package separator: $pkg'var -> $pkg::var
+    $content =~ s/^([\$\@\%\*&])([a-zA-Z_]\w*)'/$1$2::/;
     # Handle magic/special variables via dispatch table
     return $SPECIAL_VARS{$content} if exists $SPECIAL_VARS{$content};
     # Handle package-qualified variables: $Pkg::var -> Pkg::$var
@@ -476,6 +478,19 @@ sub gen_leaf {
       my $renames = $self->environment->state_var_renames;
       return $renames->{$content} if $renames && exists $renames->{$content};
     }
+    # Qualify `our` variables in non-main packages using the fully-qualified name.
+    # When `our $var` is declared in `package Foo { }` the generated defvar uses
+    # `Foo::$var`, but lambdas inside inline package blocks are read/compiled with
+    # *package* = main (since only top-level in-package forms affect the reader).
+    # Emitting `Foo::$var` makes the reference unambiguous regardless of context.
+    if ($self->environment && $content =~ /^([\$\@\%])(\w+)$/) {
+      my ($sigil, $name) = ($1, $2);
+      my $pkg = $self->environment->current_package // 'main';
+      if ($pkg ne 'main' && $self->environment->is_our_variable($pkg, $content)) {
+        my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+        return "${cl_pkg}::${sigil}${name}";
+      }
+    }
     # Unknown ${^...} caret variables — die so missing cases surface clearly.
     if ($content =~ /^\$\{\^/) {
       my $line = eval { $node->line_number } // '?';
@@ -538,6 +553,14 @@ sub gen_leaf {
     }
     # Remove underscores from regular numbers (Perl allows 1_000_000)
     $num =~ s/_//g;
+    # Check if float literal overflows double range (e.g. 1e9999 -> +Inf in Perl)
+    if ($num =~ /[eE.]/) {
+      my $val = eval($num);
+      if (defined $val) {
+        if ($val == 9**9**9)  { return 'sb-ext:double-float-positive-infinity'; }
+        if ($val == -(9**9**9)) { return 'sb-ext:double-float-negative-infinity'; }
+      }
+    }
     return $num;
   }
 
@@ -724,11 +747,24 @@ sub gen_binary_op {
     return "(p-glob-assign \"$pkg\" \"$name\" $right)";
   }
 
+  # Dynamic typeglob assignment: *$var = RHS  →  (p-glob-assign-dynamic name-expr rhs)
+  # e.g. *$::AUTOLOAD = sub { ... } assigns to the CODE slot of the glob named by $AUTOLOAD.
+  if ($op eq '=' && $left =~ /^\(p-dynamic-typeglob (.+)\)$/) {
+    my $name_expr = $1;
+    return "(p-glob-assign-dynamic $name_expr $right)";
+  }
+
   # For assignment, dispatch to type-specific forms based on LHS sigil.
   # Handles both local vars (@a, %h, $x) and qualified vars (Pkg::@a, Pkg::%h, Pkg::$x).
   if ($op eq '=') {
     if ($left =~ /^\(vector /) {
       return "(p-list-= $left $right)";
+    } elsif ($left =~ /^\(p-cast-% /) {
+      # %$ref = (list): assign to a dereferenced hash
+      return "(p-hash-deref-= $left $right)";
+    } elsif ($left =~ /^\(p-cast-@ /) {
+      # @$ref = (list): assign to a dereferenced array
+      return "(p-array-deref-= $left $right)";
     } elsif ($left =~ /(?:^|::)@/) {
       return "(p-array-= $left $right)";
     } elsif ($left =~ /(?:^|::)%/) {
@@ -851,6 +887,21 @@ sub gen_funcall {
 
   # First child is function name
   my $func_name = $self->gen_node($kids->[0]);
+
+  # PPI tokenizes "-funcname" as a single Word. When followed by arguments,
+  # this means unary negation of the function call, not a call to "-funcname".
+  # e.g. "-splice @a" → (p-- (p-splice @a))
+  if ($func_name =~ /^-([A-Za-z_]\w*)$/) {
+    my $real_func = $1;
+    if (exists $RUNTIME_NAMES{$real_func}) {
+      # Known built-in: generate unary minus of the call
+      my $inner_cl = $self->cl_name($real_func, 1);
+      my @arg_strs = map { $self->gen_node($_) } @{$kids}[1..$#$kids];
+      my $args_str = @arg_strs ? ' ' . join(' ', @arg_strs) : '';
+      return "(p-- ($inner_cl$args_str))";
+    }
+  }
+
   my $cl_func   = $self->cl_name($func_name, 1);
 
   # Special handling for next/last/redo/goto with label argument
@@ -858,6 +909,32 @@ sub gen_funcall {
        || $func_name eq 'goto') && @$kids == 2) {
     # Check if the argument is a bareword label (funcall with single word child)
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+
+    # goto &funcname — tail-call: call target with current @_ and return its result.
+    # PPI tokenizes `goto &new1` as Word('goto') + Symbol('&new1').
+    if ($func_name eq 'goto' &&
+        ref($arg_node) eq 'PPI::Token::Symbol' &&
+        $arg_node->content() =~ /^&(.+)$/) {
+      my $target = $self->cl_name($1, 1);
+      return "(p-goto-sub #'$target)";
+    }
+
+    # goto &$scalar — tail-call via dynamic coderef/name.
+    # PPI tokenizes `goto &$cref` as Word('goto') + Cast('&') + Symbol('$cref').
+    # PExpr processes the Cast as a prefix_op, generating (p-get-coderef $cref).
+    if ($func_name eq 'goto' &&
+        $self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'prefix_op') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 1) {
+        my $op_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        if (ref($op_node) eq 'PPI::Token::Cast' && $op_node->content() eq '&') {
+          my $fn_expr = $self->gen_node($kids->[1]);  # (p-get-coderef ...)
+          return "(p-goto-sub $fn_expr)";
+        }
+      }
+    }
+
     if ($self->expr_o->is_internal_node_type($arg_node) &&
         $arg_node->{type} eq 'funcall') {
       my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
@@ -872,6 +949,14 @@ sub gen_funcall {
           return "($cl_func $label)";
         }
       }
+    }
+
+    # goto EXPR (computed goto) — expression evaluates to a label name.
+    # Not fully implementable in CL (go requires compile-time tags).
+    # Generate a no-op rather than an undefined function call.
+    if ($func_name eq 'goto') {
+      my $arg_cl = $self->gen_node($kids->[1]);
+      return "(p-goto-computed $arg_cl)";
     }
   }
 
@@ -1467,19 +1552,22 @@ sub gen_methodcall {
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
 
-  # Check for SUPER:: method call
+  # Check for SUPER:: method call (also handles old Perl 4 SUPER'method syntax)
   my $call;
-  if ($method =~ /^SUPER::(.+)$/) {
+  if ($method =~ /^SUPER(?:::|')(.+)$/) {
     my $real_method = $1;
     # Need current package for SUPER:: lookup
     my $current_pkg = $self->environment ? $self->environment->current_package : 'main';
-    $call = "(p-super-call $obj '$real_method \"$current_pkg\"$args_str)";
+    (my $rm_str = $real_method) =~ s/"/\\"/g;
+    $call = "(p-super-call $obj \"$rm_str\" \"$current_pkg\"$args_str)";
   } elsif ($is_dynamic_method) {
     # Dynamic method call: $obj->$method_var
     # Method name is in a variable, pass the variable value
     $call = "(p-method-call $obj $method$args_str)";
   } else {
-    $call = "(p-method-call $obj '$method$args_str)";
+    # Use string literal to preserve case (CL symbols are upcased, breaking AUTOLOAD)
+    (my $method_str = $method) =~ s/"/\\"/g;
+    $call = "(p-method-call $obj \"$method_str\"$args_str)";
   }
 
   # Wrap in dynamic wantarray binding for list context
@@ -1648,6 +1736,12 @@ sub gen_prefix_op {
   # function directly (p-backslash passes through non-box values).
   elsif ($op eq '&') {
     return "(p-get-coderef $operand)";
+  }
+  # * Cast: *$var (typeglob ref) — use distinct marker so assignment can detect it.
+  # When on LHS of =, becomes (p-glob-assign-dynamic ...).
+  # As rvalue, returns the typeglob object.
+  elsif ($op eq '*') {
+    return "(p-dynamic-typeglob $operand)";
   }
 
   return "($cl_op $operand)";

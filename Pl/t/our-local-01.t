@@ -242,7 +242,7 @@ say "# -------- 'local' Transpilation Tests:";
 {
     my $cl = parse_pl('local $x = 20;');
     like($cl, qr/\(let \(\(\$x/, 'local generates let binding');
-    like($cl, qr/make-p-box\s+20/, 'local wraps value in make-p-box');
+    like($cl, qr/p-box-for-local\s+20/, 'local with init uses p-box-for-local');
 }
 
 # Test: bare local $x generates let with nil

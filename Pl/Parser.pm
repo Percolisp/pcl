@@ -112,21 +112,61 @@ sub _build_environment {
 }
 
 
+sub _preprocess_source {
+  my ($src) = @_;
+  # Convert C99/Perl hex float literals (0x1.8p-1, 0xa_b.c_dp+1_2) to decimal
+  # before PPI sees them. PPI doesn't understand the 'p' exponent marker and
+  # misparses these as: 0x1 . p - 1  (hex-num, concat, bareword, minus, num).
+  # Perl allows underscore separators anywhere in hex floats.
+  # Format: 0x[hex_][.[hex_]]p[+-][decimal_]
+  $src =~ s{0x([0-9a-fA-F_]*)\.?([0-9a-fA-F_]*)[pP]([+-]?[\d_]+)}{
+    my ($int_str, $frac_str, $exp_str) = ($1, $2, $3);
+    $int_str  =~ s/_//g;
+    $frac_str =~ s/_//g;
+    $exp_str  =~ s/_//g;
+    my $mantissa = ($int_str ne '' ? hex($int_str) : 0);
+    $mantissa += hex($frac_str) / (16 ** length($frac_str)) if $frac_str ne '';
+    sprintf("%.17g", $mantissa * (2 ** $exp_str));
+  }ge;
+  # Convert binary float literals (0b1.1p0, 0b10p-2) to decimal before PPI.
+  $src =~ s{0b([01_]+)(?:\.([01_]*))?[pP]([+-]?[\d_]+)}{
+    my ($int_str, $frac_str, $exp_str) = ($1, $2 // '', $3);
+    $int_str  =~ s/_//g;
+    $frac_str =~ s/_//g;
+    $exp_str  =~ s/_//g;
+    my $mantissa = oct("0b$int_str");
+    $mantissa += oct("0b$frac_str") / (2 ** length($frac_str)) if $frac_str ne '';
+    sprintf("%.17g", $mantissa * (2 ** $exp_str));
+  }ge;
+  # Convert octal float literals (010.1p0, 00p0) to decimal before PPI.
+  # Negative lookbehind prevents matching digits inside a larger number.
+  $src =~ s{(?<!\w)0([0-7_]+)(?:\.([0-7_]*))?[pP]([+-]?[\d_]+)}{
+    my ($int_str, $frac_str, $exp_str) = ($1, $2 // '', $3);
+    $int_str  =~ s/_//g;
+    $frac_str =~ s/_//g;
+    $exp_str  =~ s/_//g;
+    my $mantissa = oct("0$int_str");
+    $mantissa += oct("0$frac_str") / (8 ** length($frac_str)) if $frac_str ne '';
+    sprintf("%.17g", $mantissa * (2 ** $exp_str));
+  }ge;
+  return $src;
+}
+
 sub _build_ppi_doc {
   my $self = shift;
 
   if ($self->has_filename) {
-    my $doc = PPI::Document->new($self->filename);
+    open(my $fh, '<', $self->filename)
+      or die "Failed to open file: " . $self->filename;
+    my $src = _preprocess_source(do { local $/; <$fh> });
+    close $fh;
+    my $doc = PPI::Document->new(\$src);
     return $doc if $doc;
     die "Failed to parse file: " . $self->filename unless $self->lenient_ppi;
-    open(my $fh, '<', $self->filename)
-      or die "Failed to parse file (and can't re-read): " . $self->filename;
-    my $src = do { local $/; <$fh> };
-    close $fh;
     return $self->_ppi_with_fallback($src);
   }
   elsif ($self->has_code) {
-    my $code = $self->code;
+    my $code = _preprocess_source($self->code);
     my $doc = PPI::Document->new(\$code);
     return $doc if $doc;
     die "Failed to parse code" unless $self->lenient_ppi;
@@ -308,11 +348,124 @@ sub _assemble_output {
     push @lines, @{$section->{preamble}};
     push @lines, @{$section->{declarations}};
     push @lines, @{$section->{definitions}};
-    push @lines, @{$section->{runtime}};
+    # If the runtime section contains bare top-level labels (standalone :WORD lines
+    # not inside a tagbody), wrap the contiguous run of expression-only forms that
+    # contains each label in a (tagbody ...).  Forms that contain p-sub / eval-when /
+    # defvar definitions are kept outside the tagbody to preserve top-level semantics.
+    my @rt = @{$section->{runtime}};
+    push @lines, _wrap_runtime_labels(\@rt);
   }
   return @lines;
 }
 
+
+# Wrap the minimal set of top-level runtime lines that participate in a
+# goto/label pair in individual (tagbody ...) forms.
+#
+# Real generated labels are marked with a ";; pcl-label" sentinel so we can
+# distinguish them from ":word" patterns inside CL string literals.
+#
+# @rt elements can be multi-line strings.  A goto counts as "top-level" only
+# when it is reachable by CL's lexically-scoped (go ...) — meaning it must
+# NOT be inside a lambda or named function scope.  We detect this by:
+#   - Skipping @rt elements that start with whitespace (indented = nested).
+#   - Skipping @rt elements that are p-sub/eval-when definitions.
+#   - Skipping a (go :LABEL) match if the text preceding it within the same
+#     @rt element contains "lambda" (i.e. the goto is inside a lambda body).
+#
+# Algorithm:
+#   1. Find each ":LABEL  ;; pcl-label" element (real label, first occurrence).
+#   2. Find the last qualifying (go :LABEL) for each label.
+#   3. Build [min(label_pos, last_goto_pos), max(...)] ranges, merge overlaps.
+#   4. Wrap each range in (tagbody ...), hoisting definition elements out.
+#   5. Everything outside the ranges is emitted as independent top-level forms.
+sub _wrap_runtime_labels {
+  my $rt_ref = shift;
+  my @rt = @$rt_ref;
+
+  # Quick exit: no real label sentinels.
+  return @rt unless grep { /^:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ } @rt;
+
+  # Definition elements must stay outside any tagbody (same test used in pass 2).
+  my $is_definition = sub {
+    $_[0] =~ /^\((?:p-sub|eval-when|defvar|defpackage|in-package|p-defpackage|p-BEGIN)\b/;
+  };
+
+  # Collect real labels: name → first-occurrence index.
+  my %label_first;
+  for my $i (0 .. $#rt) {
+    if ($rt[$i] =~ /^:([A-Za-z][A-Za-z0-9_]*)\s*;; pcl-label/) {
+      $label_first{$1} //= $i;
+    }
+  }
+
+  # Find the last qualifying (go :LABEL) for each known label.
+  # "Qualifying" = not inside a lambda or function definition scope.
+  my %last_goto;
+  for my $i (0 .. $#rt) {
+    next if $rt[$i] =~ /^\s/;         # starts indented → inside a nested form
+    next if $is_definition->($rt[$i]);# definition → different function scope
+    while ($rt[$i] =~ /\(go\s+:([A-Za-z][A-Za-z0-9_]*)\)/g) {
+      my $lbl    = $1;
+      my $prefix = substr($rt[$i], 0, $-[0]);
+      next if $prefix =~ /\blambda\b/;  # goto is inside a lambda → not reachable
+      $last_goto{$lbl} = $i if exists $label_first{$lbl};
+    }
+  }
+
+  # Drop labels that have no qualifying goto (nothing to wrap).
+  delete $label_first{$_} for grep { !exists $last_goto{$_} } keys %label_first;
+  return @rt unless %label_first;
+
+  # Build minimal [start, end] ranges (covers both the label and its goto).
+  my @ranges;
+  for my $lbl (keys %label_first) {
+    my ($lpos, $gpos) = ($label_first{$lbl}, $last_goto{$lbl});
+    push @ranges, [ ($lpos < $gpos ? $lpos : $gpos),
+                    ($lpos > $gpos ? $lpos : $gpos) ];
+  }
+
+  # Merge overlapping / adjacent ranges.
+  @ranges = sort { $a->[0] <=> $b->[0] } @ranges;
+  my @merged;
+  for my $r (@ranges) {
+    if (@merged && $r->[0] <= $merged[-1][1] + 1) {
+      $merged[-1][1] = $r->[1] if $r->[1] > $merged[-1][1];
+    } else {
+      push @merged, [ $r->[0], $r->[1] ];
+    }
+  }
+
+  # Assemble result.
+  my @result;
+  my $pos = 0;
+  for my $region (@merged) {
+    my ($start, $end) = @$region;
+
+    # Independent forms before this region.
+    push @result, @rt[$pos .. $start - 1] if $start > $pos;
+
+    # Wrap [start, end] in (tagbody ...), hoisting definition lines out.
+    my @tb;
+    for my $i ($start .. $end) {
+      if ($is_definition->($rt[$i])) {
+        push @result, "(tagbody", @tb, ")" if @tb;
+        @tb = ();
+        push @result, $rt[$i];
+      } else {
+        push @tb, $rt[$i];
+      }
+    }
+    push @result, "(tagbody", @tb, ")" if @tb;
+
+    $pos = $end + 1;
+  }
+
+  # Independent forms after the last region.
+  push @result, @rt[$pos .. $#rt] if $pos <= $#rt;
+
+  return @result;
+}
 
 # DELETED: _insert_sub_forward_declarations (replaced by bucket routing)
 # DELETED: _reorder_compile_runtime_forms   (replaced by bucket ordering)
@@ -404,11 +557,13 @@ sub _insert_variable_forward_declarations {
     # (including inside overload handler lambdas, sub bodies, etc.).
     # e.g. o::$str, o::$num inside overload lambdas need defvar in their package.
     # Skip special packages (ENV, INC, SIG, pcl, main) and already-defvar'd forms.
+    # Also handles pipe-quoted multi-component package names: |do::not::overwrite|::$this
     unless ($line =~ /^\s*\(defvar\s/) {
       my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl main);
-      while ($line =~ /\b([a-zA-Z_]\w*)::([\$\@\%][a-zA-Z_]\w*)/g) {
-        my ($pkg, $var) = ($1, $2);
-        next if $skip_pkg{$pkg};
+      while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][a-zA-Z_]\w*)/g) {
+        my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
+        my $bare_pkg = defined($1) ? $1 : $2;
+        next if $skip_pkg{$bare_pkg};
         next if $var =~ /^[\$\@\%][0-9]/;  # special: $1, $2...
         $cross_pkg_vars{"$pkg\::$var"} = [$pkg, $var];
       }
@@ -467,8 +622,9 @@ sub _insert_variable_forward_declarations {
     my %already_cross_declared;
     for my $section (@{$self->_sections}) {
       for my $line (@{$section->{preamble}}, @{$section->{declarations}}) {
-        if ($line =~ /\(defvar\s+(\w+)::([\$\@\%]\w+)\b/) {
-          $already_cross_declared{"$1\::$2"} = 1;
+        if ($line =~ /\(defvar\s+(?:(\w+)|\|([^|]+)\|)::([\$\@\%]\w+)\b/) {
+          my $pkg = defined($1) ? $1 : "|$2|";
+          $already_cross_declared{"$pkg\::$3"} = 1;
         }
       }
     }
@@ -532,6 +688,12 @@ sub _transform_pkg_var {
     $pkg = 'main' if $pkg eq '';
     my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
     return "${cl_pkg}::${sigil}${name}";
+  }
+  # Pipe-quote if the name contains characters CL can't read as a bare symbol
+  # (e.g. $" → |$"|, $\ → |$\\|, $| → |$\||, $; → |$;|)
+  if ($var =~ /["|;,()\[\]{}'`\\]/) {
+    (my $inner = $var) =~ s/([|\\])/\\$1/g;
+    return "|$inner|";
   }
   return $var;
 }
@@ -1132,8 +1294,20 @@ sub _process_our_declaration {
   # Compile-time declarations (defvar) go to declarations bucket.
   # Separate declaration from initialization (runtime) to match Perl:
   # 'our $x = 1; BEGIN { $x = 2 }' → at runtime $x becomes 1 (init overwrites BEGIN)
+  # When inside a sub, _insert_variable_forward_declarations won't see our variables
+  # at file scope, so we must emit defvars explicitly here.
   $self->_with_bucket('declarations', sub {
     $self->_emit(";; $perl_code");
+    if ($self->environment->in_subroutine > 0) {
+      for my $var (@vars) {
+        my $sigil = substr($var, 0, 1);
+        my $init = $sigil eq '$' ? '(make-p-box nil)'
+                 : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                 :                 '(make-hash-table :test #\'equal)';
+        my $cl_var = "${pkg}::${var}";
+        $self->_emit("(defvar $cl_var $init)");
+      }
+    }
   });
 
   if ($init_idx >= 0) {
@@ -1435,6 +1609,68 @@ sub _process_isa_declaration {
   $self->_emit("");
 }
 
+# Process 'use base' / 'use parent' - equivalent to push @ISA, ...
+# Also sets up CLOS inheritance for MRO.
+sub _process_use_base {
+  my ($self, $stmt, $perl_code, $module) = @_;
+
+  # Extract parent class names from the argument list
+  my @parents;
+  my $skip_next = 0;
+  for my $child ($stmt->children) {
+    my $ref = ref($child);
+    # 'use parent -norequire, qw(...)' — skip the -norequire flag
+    if ($ref eq 'PPI::Token::Operator' && $child->content eq '-') {
+      $skip_next = 1; next;
+    }
+    if ($skip_next && $ref eq 'PPI::Token::Word') { $skip_next = 0; next; }
+    $skip_next = 0;
+    if ($ref eq 'PPI::Token::QuoteLike::Words') {
+      my $content = $child->content;
+      $content =~ s/^qw[^\w\s]//;
+      $content =~ s/[^\w\s]$//;
+      push @parents, split /\s+/, $content;
+    }
+    elsif ($ref eq 'PPI::Token::Quote::Single' || $ref eq 'PPI::Token::Quote::Double') {
+      push @parents, $child->string;
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      for my $item ($child->children) {
+        next if ref($item) =~ /Whitespace|Separator/;
+        if (ref($item) eq 'PPI::Token::Quote::Single' || ref($item) eq 'PPI::Token::Quote::Double') {
+          push @parents, $item->string;
+        }
+      }
+    }
+  }
+  @parents = grep { /\S/ } @parents;
+  return unless @parents;
+
+  my $pkg = $self->environment->current_package;
+
+  # Redefine CLOS class with parents for MRO
+  my $cl_class = $self->_pkg_to_clos_class($pkg);
+  my $parents_cl = join(' ', map {
+    my $cls = $self->_pkg_to_clos_class($_);
+    my $pkg_prefix = ($_ =~ /::/) ? "|$_|" : $_;
+    "$pkg_prefix\:\:$cls"
+  } @parents);
+  $self->environment->set_isa($pkg, \@parents);
+  $self->_with_bucket('preamble', sub {
+    $self->_emit(";; $perl_code");
+    $self->_emit("(defclass $cl_class ($parents_cl) ())");
+  });
+
+  # Declare @ISA in declarations bucket, push parents at load time
+  $self->_with_bucket('declarations', sub {
+    $self->_emit("(defvar \@ISA (make-array 0 :adjustable t :fill-pointer 0))");
+  });
+  for my $parent (@parents) {
+    $self->_emit("(p-push \@ISA \"$parent\")");
+  }
+  $self->_emit("");
+}
+
 # Extract parent class names from an @ISA initializer expression
 # Handles: qw(Parent1 Parent2), ('Parent1', 'Parent2'), ("Parent")
 sub _extract_parent_classes {
@@ -1671,6 +1907,28 @@ sub _process_local_declaration {
     }
   }
 
+  # Detect 'local our $var' — the 'our' qualifier means a package variable.
+  # Emit a defvar so the variable is declared as special before local binds it.
+  my $has_our = (@non_ws && ref($non_ws[0]) eq 'PPI::Token::Word'
+                          && $non_ws[0]->content eq 'our');
+  if ($has_our) {
+    my $pkg = $self->environment ? $self->environment->current_package : 'main';
+    $self->_with_bucket('declarations', sub {
+      for my $p (@non_ws[1..$#non_ws]) {
+        next if ref($p) ne 'PPI::Token::Symbol';
+        my $var = $p->content;
+        last if $var =~ /^=/; # stop at '=' (won't happen but be safe)
+        my $sigil = substr($var, 0, 1);
+        my $init  = $sigil eq '$' ? '(make-p-box nil)'
+                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                  :                 "(make-hash-table :test #'equal)";
+        my $cl_var = "${pkg}::${var}";
+        $self->_emit("(defvar $cl_var $init)");
+        $self->environment->add_our_variable($pkg, $var) if $self->environment;
+      }
+    });
+  }
+
   # Find variable and optional initializer
   my @vars;
   my $init_idx = -1;
@@ -1719,7 +1977,7 @@ sub _process_local_declaration {
       push @bindings, "($var (p-copy-hash (let ((*wantarray* t)) $init_cl)))";
     }
     else {
-      push @bindings, "($var (make-p-box $init_cl))";
+      push @bindings, "($var (p-box-for-local $init_cl))";
     }
   }
   else {
@@ -1818,8 +2076,8 @@ sub _process_state_declaration {
     $self->_emit("(unless $init_flag");
     $self->indent_level($self->indent_level + 1);
     if ($sigil eq '$') {
-      # Scalar: use ensure-boxed for the init value
-      $self->_emit("(setf $cl_var (ensure-boxed $init_cl))");
+      # Use box-set so tied init values call FETCH instead of copying the proxy
+      $self->_emit("(box-set $cl_var $init_cl)");
     } elsif ($sigil eq '@') {
       # Array: only initialize if there's an explicit init expression
       $self->_emit("(p-array-= $cl_var (list $init_cl))") if @init_parts;
@@ -1882,8 +2140,10 @@ sub _process_compound_statement {
   }
   elsif (!$first_word) {
     if ($label) {
-      # Standalone label statement: LABEL: → emit as tagbody tag
-      $self->_emit(":$label");
+      # Standalone label statement: LABEL: → emit as tagbody tag.
+      # The ;; pcl-label sentinel lets _wrap_runtime_labels distinguish
+      # real generated labels from ":word" patterns inside string literals.
+      $self->_emit(":$label  ;; pcl-label");
     } else {
       # Neither block nor keyword found - emit as comment
       my $perl_code = $stmt->content;
@@ -1953,11 +2213,12 @@ sub _process_bare_block {
     # e.g. Test::More's skip() calls (last SKIP) from inside a called function.
     $self->_emit("(catch 'pcl::LAST-$label");
     $self->indent_level($self->indent_level + 1);
-    if ($continue_block) {
-      # Use pcl:: prefix to match the package used by p-next macro's throw
-      $self->_emit("(catch 'pcl::NEXT-$label");
-      $self->indent_level($self->indent_level + 1);
-    }
+    # Always wrap tagbody in NEXT-LABEL catch so that (p-next LABEL) works even
+    # without a continue block.  When next LABEL is thrown from an inner function
+    # (e.g. eval { next $label }), the throw lands here; when there is a continue
+    # block it runs after the catch returns, just as in the continue case.
+    $self->_emit("(catch 'pcl::NEXT-$label");
+    $self->indent_level($self->indent_level + 1);
     $self->_emit("(tagbody");
     $self->indent_level($self->indent_level + 1);
     $self->_emit(":redo");
@@ -1978,10 +2239,8 @@ sub _process_bare_block {
     $self->_emit("(go :redo)");
     $self->_emit(":next)");  # close tagbody
     $self->indent_level($self->indent_level - 1);
-    if ($continue_block) {
-      $self->_emit(")");  # close catch for NEXT
-      $self->indent_level($self->indent_level - 1);
-    }
+    $self->_emit(")");  # close catch for NEXT
+    $self->indent_level($self->indent_level - 1);
     if ($continue_block) {
       $self->_emit("(progn");
       $self->indent_level($self->indent_level + 1);
@@ -2807,6 +3066,38 @@ sub parse_hash_block_to_cl_string {
 }
 
 
+# Return true if the elements contain any standalone bare label statements
+# (PPI::Statement::Compound with only a PPI::Token::Label, no keyword/block).
+# Only checks the immediate children — does not recurse into sub-blocks.
+sub _has_bare_labels_shallow {
+  my $self = shift;
+  my $elements = shift;
+  my @top;
+  if (ref($elements) eq 'ARRAY') {
+    @top = @$elements;
+  } elsif (ref($elements) && $elements->can('children')) {
+    @top = $elements->children;
+  } else {
+    return 0;
+  }
+  for my $elem (@top) {
+    next unless ref($elem);
+    # Direct bare label: the element itself is a compound with only a label
+    if (ref($elem) eq 'PPI::Statement::Compound') {
+      my @sig = grep { ref($_) && ref($_) !~ /Whitespace|Comment/ } $elem->children;
+      return 1 if @sig == 1 && ref($sig[0]) eq 'PPI::Token::Label';
+    }
+    # When the elements arg is a block, its direct children are statements
+    next unless $elem->can('children');
+    for my $child ($elem->children) {
+      next unless ref($child) eq 'PPI::Statement::Compound';
+      my @sig = grep { ref($_) && ref($_) !~ /Whitespace|Comment/ } $child->children;
+      return 1 if @sig == 1 && ref($sig[0]) eq 'PPI::Token::Label';
+    }
+  }
+  return 0;
+}
+
 # Find all variable declarations recursively in a PPI element
 # Returns arrayref of { type => 'my'|'our'|..., var => '$x' }
 sub _find_all_declarations {
@@ -2871,6 +3162,25 @@ sub _find_all_declarations {
   }
 
   return \@decls;
+}
+
+# Return true if the block contains any directly-nested named sub statements.
+# Used by _process_sub_statement to decide whether to use defvar (global) vs
+# let (lexical) for state variables: if inner named subs exist, they must be
+# hoisted to the definitions bucket and need to access state vars globally.
+sub _block_has_inner_named_subs {
+  my ($self, $block) = @_;
+  for my $child ($block->children) {
+    next unless ref($child) eq 'PPI::Statement::Sub';
+    for my $c ($child->children) {
+      my $ref = ref($c);
+      next if $ref eq 'PPI::Token::Whitespace';
+      next if $ref eq 'PPI::Token::Word' && $c->content =~ /^(sub|my|our|state)$/;
+      return 1 if $ref eq 'PPI::Token::Word';  # first non-reserved word = name
+      last;
+    }
+  }
+  return 0;
 }
 
 # Helper: find all symbol names in a list structure like ($x, $y, @z)
@@ -2987,6 +3297,29 @@ sub _with_declarations {
       my $unique = sprintf('%s%s__lex__%d', $sigil, $slug, ++$lex_var_counter);
       $new_renames{$var} = $unique;
       $old_renames{$var} = $existing->{$var};  # undef if no prior rename
+    }
+
+    # CL reads unquoted symbols case-insensitively (upcase mode), so Perl variables
+    # that differ only in case (e.g. $T and $t) map to the same CL symbol and cause
+    # "variable occurs more than once in the LET" errors. Detect these collisions and
+    # rename the later occurrence to $name__uc__ to make it distinct.
+    my %cl_sym_seen;  # lc(cl_name) → first perl var with that cl symbol
+    for my $var (@my_vars) {
+      my $cl_name = $new_renames{$var} // $var;
+      my $lc = lc($cl_name);
+      if (exists $cl_sym_seen{$lc}) {
+        # Collision: $var has same CL symbol as $cl_sym_seen{$lc}
+        # Rename the later one (whichever $var this is)
+        my ($sigil, $bare) = ($cl_name =~ /^([\$\@\%])(.+)$/);
+        $sigil //= '$'; $bare //= $cl_name;
+        (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+        my $renamed = sprintf('%s%s__case__%d', $sigil, $slug, ++$lex_var_counter);
+        $new_renames{$var} = $renamed;
+        $old_renames{$var} //= $existing->{$var};
+        $cl_sym_seen{lc($renamed)} = $var;
+      } else {
+        $cl_sym_seen{$lc} = $var;
+      }
     }
   }
 
@@ -3361,6 +3694,17 @@ sub _process_foreach_loop {
   if ($loop_var_is_my && $loop_var ne '$_') {
     $self->{_lexical_foreach_vars}{$loop_var} = 1;
   }
+
+  # If the loop variable has been renamed for closure capture (e.g. $x → $x__lex__N),
+  # the p-foreach form must use the renamed symbol so each iteration's lambda closes
+  # over the correct per-iteration binding, not the outer let's initial binding.
+  my $renames = $self->environment->state_var_renames // {};
+  my $cl_loop_var = $renames->{$loop_var} // $loop_var;
+  # Also track renamed name as lexical foreach var to skip defvar generation
+  if ($cl_loop_var ne $loop_var) {
+    $self->{_lexical_foreach_vars}{$cl_loop_var} = 1;
+  }
+
   my $list_cl = @list_parts
     ? ($self->_parse_expression(\@list_parts, $stmt) // "(list)")
     : "(list)";
@@ -3380,7 +3724,7 @@ sub _process_foreach_loop {
   # Build label argument if present
   my $label_arg = $label ? " :label $label" : "";
 
-  $self->_emit("(p-foreach ($loop_var $list_cl)$label_arg");
+  $self->_emit("(p-foreach ($cl_loop_var $list_cl)$label_arg");
   $self->indent_level($self->indent_level + 1);
   if ($block) {
     $self->_with_declarations($block, sub {
@@ -3433,9 +3777,25 @@ sub _process_sub_statement {
   # declarations is assembled before definitions (BEGIN blocks, use/require),
   # which matches Perl: all named subs are compiled before any BEGIN runs,
   # so \&foo inside BEGIN can always find the sub already defined.
-  # Inside subs (in_subroutine > 0), nested named subs emit in-place.
+  # Inside subs (in_subroutine > 0), nested NAMED subs are hoisted to the
+  # definitions bucket (at indent 0) so they are available before the outer
+  # sub runs.  Their state variables use defvar (global special) instead of
+  # let (lexical) so the inner sub can reference them from outside the let.
+  #
+  # Exception: when inside a let block (_let_bound_vars non-empty), the sub
+  # must be emitted in-place so its lambda closes over the let-bound lexical
+  # variables (e.g. $x__lex__N renamed for closure capture).  p-declare-sub
+  # still goes to declarations for forward-reference support.
+  my $is_nested_named = $name && $self->environment->in_subroutine > 0
+                        && !%{$self->{_let_bound_vars} // {}};
   my $old_bucket = $self->_cur_bucket;
-  $self->_cur_bucket('declarations') if $self->environment->in_subroutine == 0;
+  my $old_indent = $self->indent_level;
+  if ($self->environment->in_subroutine == 0 && !%{$self->{_let_bound_vars} // {}}) {
+    $self->_cur_bucket('declarations');
+  } elsif ($is_nested_named) {
+    $self->_cur_bucket('definitions');
+    $self->indent_level(0);
+  }
 
   # Emit Perl code as comment
   my $perl_code = $stmt->content;
@@ -3541,10 +3901,16 @@ sub _process_sub_statement {
   # Use unique CL names ($state--subname--varname--N) to avoid colliding with
   # any defvar declarations at file scope, which would make the symbol SPECIAL
   # and turn the lexical let into a dynamic binding that evaporates after load.
+  #
+  # Exception: when the block contains inner NAMED subs (which will be hoisted
+  # to the definitions bucket), use defvar (global special) for state vars so
+  # the hoisted inner subs can reference them without being inside the let scope.
   my %state_renames;
+  my $use_defvar_state = 0;
   if (@state_vars) {
     my $sub_slug = $name ? $name : 'anon';
     $sub_slug =~ s/[^a-zA-Z0-9]/-/g;
+    $use_defvar_state = $block && $self->_block_has_inner_named_subs($block);
     my @bindings;
     for my $var (@state_vars) {
       # Strip sigil for the slug part, keep sigil for the CL name
@@ -3560,11 +3926,23 @@ sub _process_sub_statement {
       my $init_val = $sigil eq '$' ? '(make-p-box nil)'
                    : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                    :                 '(make-hash-table :test (quote equal))';
-      push @bindings, "($unique $init_val)";
-      push @bindings, "(${unique}__init nil)";
+      if ($use_defvar_state) {
+        # Emit as global defvar so inner named subs can access outside the let.
+        # Save/restore bucket+indent to emit at top level in declarations.
+        my $saved_b = $self->_cur_bucket; my $saved_i = $self->indent_level;
+        $self->_cur_bucket('declarations'); $self->indent_level(0);
+        $self->_emit("(defvar $unique $init_val)");
+        $self->_emit("(defvar ${unique}__init nil)");
+        $self->_cur_bucket($saved_b); $self->indent_level($saved_i);
+      } else {
+        push @bindings, "($unique $init_val)";
+        push @bindings, "(${unique}__init nil)";
+      }
     }
-    $self->_emit("(let (" . join(" ", @bindings) . ")");
-    $self->indent_level($self->indent_level + 1);
+    if (!$use_defvar_state) {
+      $self->_emit("(let (" . join(" ", @bindings) . ")");
+      $self->indent_level($self->indent_level + 1);
+    }
   }
 
   # User-defined subs get p- prefix to avoid conflicts with CL built-ins
@@ -3590,8 +3968,8 @@ sub _process_sub_statement {
   # p-declare-sub is idempotent: it only creates the stub if the real
   # definition hasn't loaded yet.
   if ($name) {
-    push @{$self->_sections->[$self->_cur_section]{declarations}},
-         "(p-declare-sub $cl_sub_name)";
+    unshift @{$self->_sections->[$self->_cur_section]{declarations}},
+            "(p-declare-sub $cl_sub_name)";
   }
 
   # Forward declaration: sub name; or sub name ($); or sub name : attrs;
@@ -3650,16 +4028,17 @@ sub _process_sub_statement {
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close defun
 
-  # Close state vars let
-  if (@state_vars) {
+  # Close state vars let (only when using lexical let, not defvar)
+  if (@state_vars && !$use_defvar_state) {
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");
   }
 
   $self->_emit("");
 
-  # Restore previous bucket
+  # Restore previous bucket and indent (indent was saved for hoisted inner subs)
   $self->_cur_bucket($old_bucket);
+  $self->indent_level($old_indent) if $is_nested_named;
 }
 
 
@@ -3888,6 +4267,13 @@ sub _process_include_statement {
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 0);
     }
+    # 'no strict' / 'no strict "subs"' - disable strict-subs mode
+    if ($module eq 'strict') {
+      my @args = map { $_->string } grep { $_->isa('PPI::Token::Quote') } $stmt->children;
+      if (!@args || grep { /\bsubs\b/ } @args) {
+        $self->environment->set_pragma('strict_subs', 0);
+      }
+    }
     $self->_emit(";; $perl_code (no-op)");
     $self->_emit("");
     return;
@@ -3971,11 +4357,24 @@ sub _process_include_statement {
     return;
   }
 
+  # Handle 'use base' / 'use parent' - set up @ISA inheritance
+  if ($module eq 'base' || $module eq 'parent') {
+    $self->_process_use_base($stmt, $perl_code, $module);
+    return;
+  }
+
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re|version)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re|version)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
+    }
+    # 'use strict' / 'use strict "subs"' - enable strict-subs mode for bareword disambiguation
+    if ($module eq 'strict') {
+      my @args = map { $_->string } grep { $_->isa('PPI::Token::Quote') } $stmt->children;
+      if (!@args || grep { /\bsubs\b/ } @args) {
+        $self->environment->set_pragma('strict_subs', 1);
+      }
     }
     $self->_emit(";; $perl_code (pragma)");
     $self->_emit("");

@@ -252,24 +252,12 @@ running CPAN modules.
 
 ## `local` on hash/array elements and typeglobs
 
-**Perl behaviour:** `local $hash{key}` and `local @arr[1,2]` temporarily
-localize individual hash/array slots and restore them on scope exit.
-`local *FOO` temporarily replaces an entire symbol-table entry (all of
-`$FOO`, `@FOO`, `%FOO`, `&FOO`, `*FOO`) and restores it on scope exit.
+**PCL behaviour (all now supported):**
+- `local $scalar`, `local @array`, `local %hash` — supported.
+- `local $hash{key}`, `local @arr[N]`, `local @hash{@keys}` — supported (sessions 85–86, via `p-local-hash-elem` / `p-local-array-elem` macros).
+- `local *GLOB` — supported (sessions 75–79, via `p-local-glob`).
 
-**PCL behaviour:**
-- `local $scalar` and `local @array` and `local %hash` — **supported**.
-- `local $hash{key}`, `local @arr[N]`, `local @hash{@keys}` — **not supported**.
-- `local *GLOB` — **not supported**.
-
-**Rationale:** Element-level localization requires wrapping each slot
-access in a save/restore protocol on top of CL dynamic binding, which
-doesn't compose cleanly.  Typeglob localization similarly needs snapshot /
-restore of all five slots in a PCL glob struct.  Both are deferred (see
-`docs/todo-features.md`).
-
-**Affected tests:** `perl-tests/local.t` (Tie::Array dependency causes a
-separate hang that also blocks this file).
+**Affected tests:** `perl-tests/local.t` still fails due to `Tie::Array` dependency which causes a hang — not a `local` issue.
 
 ---
 

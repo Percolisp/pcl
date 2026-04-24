@@ -86,7 +86,7 @@ sub run_one_test {
         # Disable module cache to avoid FASL corruption from parallel processes.
         # Use 'timeout' so SBCL is actually killed if it hangs (alarm() only
         # interrupts the parent Perl process, leaving SBCL running as orphan).
-        my $out = `timeout $TIMEOUT sbcl --noinform --non-interactive --load $runtime --eval "(setf pcl::*pcl-skip-cache* t)" --load $testlib --load $cl_file 2>&1`;
+        my $out = `timeout $TIMEOUT sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval "(setf pcl::*pcl-skip-cache* t)" --load $testlib --load $cl_file 2>&1`;
         my $sbcl_exit = $? >> 8;
         if ($sbcl_exit == 124) { die "TIMEOUT\n" }
         alarm(0);

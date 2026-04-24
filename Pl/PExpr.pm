@@ -265,6 +265,14 @@ sub extract_declarations {
       if ($decl_type && @vars) {
         for my $var (@vars) {
           push @{$self->declarations}, { type => $decl_type, var => $var };
+          # For 'our' declarations, also register in the environment so that
+          # ExprToCL can emit package-qualified names when needed (e.g. in
+          # lambdas inside inline package blocks where in-package is not in
+          # effect at read time).
+          if ($decl_type eq 'our' && $self->environment) {
+            my $pkg = $self->environment->current_package // 'main';
+            $self->environment->add_our_variable($pkg, $var);
+          }
         }
         say "extract_declarations: Found $decl_type for: ", join(", ", @vars)
             if 1 & DEBUG;
@@ -298,9 +306,15 @@ sub extract_declarations {
                || ref($item) eq 'PPI::Token::Magic')) {
       # Found variable after declarator (Symbol or Magic like $/)
       my $var = $item->content();
-      push @{$self->declarations}, { type => $self->{_pending_decl}, var => $var };
-      say "extract_declarations: Found ", $self->{_pending_decl}, " $var"
+      my $decl = $self->{_pending_decl};
+      push @{$self->declarations}, { type => $decl, var => $var };
+      say "extract_declarations: Found ", $decl, " $var"
           if 1 & DEBUG;
+      # Register our vars in environment so gen_leaf can qualify them.
+      if ($decl eq 'our' && $self->environment) {
+        my $pkg = $self->environment->current_package // 'main';
+        $self->environment->add_our_variable($pkg, $var);
+      }
       delete $self->{_pending_decl};
       push @result, $item;  # Keep the variable, just stripped the declarator
     }
@@ -402,6 +416,19 @@ sub parse {
 
     # Handle Block structures (used in braced derefs like ${$ref}, @{$expr})
     if (ref($e1) eq 'PPI::Structure::Block') {
+      # If the block looks like a hash constructor ({ key => val }), treat as hash_init
+      if (_block_is_hash_constructor($e1)) {
+        my @list    = $e1->children();
+        if (@list == 1 && ref($list[0]) eq 'PPI::Statement') {
+          @list = $list[0]->children();
+        }
+        my $e_list  = $self->cleanup_for_parsing(\@list);
+        $e_list     = $self->remove_expression_object_around($e_list);
+        my $x = $self->parse_list($e_list);
+        my($top_node, $top_id) = $self->make_node_insert('hash_init');
+        for (@$x) { $self->add_child_to_node($top_id, $_) }
+        return $top_id;
+      }
       my @list    = $e1->children();
       $e          = \@list;
       return $self->parse($e);
@@ -1481,10 +1508,15 @@ sub handle_subcalls {
       if (ref($invocant) eq 'PPI::Token::Word'
           && !$self->is_token_operator($invocant)
           && $invocant->content =~ /^[A-Z]/) {
-        # Skip all-uppercase invocants: they are Perl special blocks (INIT, BEGIN,
-        # END, CHECK), filehandles (FILE, STDOUT), or constants — never class names
-        # in indirect-object syntax.  Same rule applied to method names above.
-        next if $invocant->content =~ /^[A-Z][A-Z0-9_]*$/;
+        # Skip all-uppercase invocants unless they are known declared packages:
+        # unqualified all-caps words are typically filehandles (STDIN/STDOUT),
+        # special blocks (BEGIN/END), or constants — not class names.
+        # Exception: if the name is a known package, allow it as indirect invocant.
+        if ($invocant->content =~ /^[A-Z][A-Z0-9_]*$/) {
+          my $is_known_pkg = $self->has_environment
+              && $self->environment->is_package($invocant->content);
+          next unless $is_known_pkg;
+        }
         $invocant_is_class = 1;
       } elsif (ref($invocant) eq 'PPI::Token::Symbol'
                && $invocant->content =~ /^\$/) {
@@ -1648,6 +1680,17 @@ sub handle_subcalls {
     next
         if !$self->is_word($now); # Only want function calls.
 
+    # Strip PPI::Token::Prototype after 'sub' keyword for anonymous subs.
+    # e.g., sub (&) { ... } → sub { ... }
+    # The prototype has no effect on generated CL code; removing it lets
+    # the normal sub { BLOCK } handler below fire correctly.
+    if ($now->content() eq 'sub'
+        && $i + 1 < scalar(@$e)
+        && ref($e->[$i+1]) eq 'PPI::Token::Prototype') {
+      splice @$e, $i+1, 1;  # drop the prototype token
+      $next = ($i+1 < scalar(@$e)) ? $e->[$i+1] : undef;
+    }
+
     say "handle_subcalls() Look for subname(..), was word. Is next list ",
         ($self->is_list($next) ? "Yes" : "No"), ". Dump:", dump $next
         if 8 & DEBUG;
@@ -1730,6 +1773,23 @@ sub handle_subcalls {
             my $body_cl = _block_is_hash_constructor($block)
               ? $self->parser->parse_hash_block_to_cl_string($block)
               : $self->parser->parse_block_to_cl_string($block);
+
+            # Handle -> deref chain after block in paren form: grep({HASH}->{key}, LIST)
+            # @rest_ch starts with -> subscript pairs; consume them into body_cl.
+            while (@rest_ch >= 2
+                   && ref($rest_ch[0]) eq 'PPI::Token::Operator'
+                   && $rest_ch[0]->content eq '->'
+                   && ref($rest_ch[1]) eq 'PPI::Structure::Subscript') {
+              my $sub = $rest_ch[1];
+              my $key_cl = _subscript_to_cl_str($sub, $self);
+              last unless defined $key_cl;
+              my $start = $sub->start->content;
+              $body_cl = ($start eq '{')
+                  ? "(p-gethash-deref $body_cl $key_cl)"
+                  : "(p-aref-deref $body_cl $key_cl)";
+              splice @rest_ch, 0, 2;
+            }
+
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
             $lambda_node->{params}   = $params;
             $lambda_node->{body_cl}  = $body_cl;
@@ -1782,6 +1842,7 @@ sub handle_subcalls {
         $self->add_child_to_node($top_id, $node_id);
 
         # Use parser callback if available (handles multi-statement blocks)
+        my $deref_skip = 0;  # extra elements consumed by -> deref chain after block
         if ($self->has_parser) {
           # Determine parameters based on function type
           my $params = ($func_name eq 'sort') ? ['$a', '$b']
@@ -1800,11 +1861,31 @@ sub handle_subcalls {
               ? $self->parser->parse_hash_block_to_cl_string($next)
               : $self->parser->parse_block_to_cl_string($next);
 
+            # Handle -> deref chain after block: grep {HASH}->{key}, LIST
+            # Consume any leading '-> subscript' pairs from @$e[$i+2..], wrapping body_cl.
+            while ($i + 2 + $deref_skip < @$e
+                   && ref($e->[$i + 2 + $deref_skip]) eq 'PPI::Token::Operator'
+                   && $e->[$i + 2 + $deref_skip]->content eq '->'
+                   && $i + 3 + $deref_skip < @$e
+                   && ref($e->[$i + 3 + $deref_skip]) eq 'PPI::Structure::Subscript') {
+              my $sub = $e->[$i + 3 + $deref_skip];
+              my $start = $sub->start->content;
+              my $key_cl = _subscript_to_cl_str($sub, $self);
+              last unless defined $key_cl;
+              if ($start eq '{') {
+                $body_cl = "(p-gethash-deref $body_cl $key_cl)";
+              } else {
+                $body_cl = "(p-aref-deref $body_cl $key_cl)";
+              }
+              $deref_skip += 2;
+            }
+
             # Create inline_lambda node
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
             $lambda_node->{params}   = $params;
             $lambda_node->{body_cl}  = $body_cl;
             $lambda_node->{for_func} = $func_name;
+            $lambda_node->{deref_skip} = $deref_skip;
             $self->add_child_to_node($top_id, $lambda_id);
           } else {
             # Parse block as a named function and get its name
@@ -1829,8 +1910,9 @@ sub handle_subcalls {
 
         # For grep/map/sort: parse remaining elements as the list to process.
         # For eval/do: the block is the only argument; don't consume what follows.
-        if ($func_name ne 'eval' && $func_name ne 'do' && $i + 2 < scalar(@$e)) {
-          my @rest = @$e[$i + 2 .. $#$e];
+        # $deref_skip: number of extra elements already consumed by -> deref chain.
+        if ($func_name ne 'eval' && $func_name ne 'do' && $i + 2 + $deref_skip < scalar(@$e)) {
+          my @rest = @$e[$i + 2 + $deref_skip .. $#$e];
           my $rest_list = $self->cleanup_for_parsing(\@rest);
           # Parse rest as comma-separated list (usually just one element)
           my $rest_ids = $self->parse_list($rest_list);
@@ -2273,6 +2355,25 @@ sub handle_subcalls {
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
             # Cast followed by Symbol is a single dereference term
             $end_pars = $i + 2;
+            # Also include a trailing Subscript: @$h{keys}, $$h{key}, @$a[idx]
+            # so delete/exists/keys on ref-slices see the full lvalue
+            if ($end_pars + 1 <= scalar(@$e) - 1
+                && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
+                $end_pars++;
+                while ($end_pars + 1 < scalar(@$e)) {
+                    my $nx = $e->[$end_pars + 1];
+                    if (ref($nx) eq 'PPI::Structure::Subscript') {
+                        $end_pars++;
+                    } elsif (ref($nx) eq 'PPI::Token::Operator'
+                             && $nx->content() eq '->'
+                             && $end_pars + 2 < scalar(@$e)
+                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
+                        $end_pars += 2;
+                    } else {
+                        last;
+                    }
+                }
+            }
         } elsif ((ref($next_term) eq 'PPI::Token::Symbol'
                   || ref($next_term) eq 'PPI::Token::Magic') && $end_pars >= $i + 2) {
             # Check if symbol is followed by subscript (hash/array access)
@@ -2324,6 +2425,26 @@ sub handle_subcalls {
                 }
             } else {
                 $end_pars = $i + 1;
+            }
+        } elsif (ref($next_term) =~ /^PPI::Structure::/
+                 && $end_pars >= $i + 3
+                 && ref($e->[$i + 2]) eq 'PPI::Token::Operator'
+                 && $e->[$i + 2]->content() eq '->'
+                 && ref($e->[$i + 3]) =~ /^PPI::Structure::/) {
+            # Block/Constructor + -> + Subscript: e.g. exists { hash }->{key}
+            # Consume full arrow-subscript chain as the named-unary argument
+            $end_pars = $i + 3;
+            while ($end_pars + 1 < scalar(@$e)) {
+                my $nx = $e->[$end_pars + 1];
+                if (ref($nx) eq 'PPI::Structure::Subscript') {
+                    $end_pars++;
+                } elsif (ref($nx) eq 'PPI::Token::Operator'
+                         && $nx->content() eq '->'
+                         && $end_pars + 2 < scalar(@$e)) {
+                    $end_pars += 2;
+                } else {
+                    last;
+                }
             }
         } else {
             $end_pars = $i + 1;
@@ -2519,9 +2640,11 @@ sub handle_subcalls {
 
     # If no parameters would be consumed and the word is not a known function,
     # treat it as a bareword string literal instead of a zero-arg function call.
-    # This handles e.g. parse([!, Bare]) where Bare is the operand of !, not a func.
-    # The check: end_pars < i+1 means no args; unknown AND (already flagged OR preceded
-    # by a unary operator) → it's definitely an expression operand, not a func call.
+    # This handles e.g. parse([!, Bare]) where Bare is the operand of !, not a func,
+    # and also the RHS of binary ops: "a .. c" — c after .. is also a bareword.
+    # Decision: use strict_subs pragma to gate. Without strict, unknown standalone
+    # words in operator context are strings. With strict, leave as funcall (may
+    # fail at runtime, which is correct Perl behavior for typo'd sub names).
     if ($end_pars < $i + 1) {
       my $is_known_fb = exists $self->known_no_of_params->{$sub_name}
           || ($self->has_environment
@@ -2530,15 +2653,31 @@ sub handle_subcalls {
       my $is_all_caps_fb = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
       unless ($is_known_fb || $is_all_caps_fb) {
         my $prev_is_unary = 0;
+        my $prev_is_binary = 0;
         if ($i > 0) {
           my $prev_tok = $e->[$i - 1];
           my $prev_op  = $self->is_token_operator($prev_tok);
           if (defined $prev_op) {
             my %unary_ops = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
-            $prev_is_unary = 1 if $unary_ops{$prev_op};
+            if ($unary_ops{$prev_op}) {
+              $prev_is_unary = 1;
+            } elsif ($prev_op ne ',' && $prev_op ne '=>') {
+              # Commas and fat-commas are argument/list separators, not value-combining
+              # binary operators. A bareword after ',' could be a class name (bless \$x, Foo::)
+              # or a sub call — don't force it to a string based on separator position.
+              # For actual binary operators (.. + - eq etc.), treat RHS bareword as string.
+              $prev_is_binary = 1;
+            }
           }
         }
-        if ($prev_is_unary || $now->{_bareword_string}) {
+        # In strict-subs mode: only unary context and already-flagged words → string.
+        # In no-strict mode: any value-operator context (unary OR binary, not separators) → string.
+        my $strict_subs = $self->has_environment
+                          && $self->environment->has_pragma('strict_subs');
+        my $is_op_context = $strict_subs
+            ? ($prev_is_unary || $now->{_bareword_string})
+            : ($prev_is_unary || $prev_is_binary || $now->{_bareword_string});
+        if ($is_op_context) {
           $now->{_bareword_string} = 1;
           next;
         }
@@ -3249,6 +3388,22 @@ sub get_node_children {
 # In $a[bar] / $h{bar}, PPI gives a Statement::Expression wrapping a Token::Word.
 # handle_subcalls would turn that into a funcall — wrong for barewords.
 # We detect the pattern and return a string-literal node instead.
+sub _subscript_to_cl_str {
+  my ($subscript, $self) = @_;
+  my @kids = grep { !$_->isa('PPI::Token::Whitespace') } $subscript->children();
+  my @inner = @kids;
+  if (@inner == 1 && $inner[0]->isa('PPI::Statement::Expression')) {
+    @inner = grep { !$_->isa('PPI::Token::Whitespace') } $inner[0]->children();
+  }
+  if (@inner == 1) {
+    my $k = $inner[0];
+    return '"' . $k->content . '"' if ref($k) eq 'PPI::Token::Word';
+    return $k->content              if ref($k) eq 'PPI::Token::Number';
+  }
+  return $self->parser->_parse_expression(\@inner, undef) if $self->has_parser;
+  return undef;
+}
+
 sub _parse_subscript_ix {
   my ($self, $ix) = @_;
   my @sig = grep { !$_->isa('PPI::Token::Whitespace') } @$ix;

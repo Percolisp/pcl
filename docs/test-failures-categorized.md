@@ -1,7 +1,7 @@
 # Perl op/ Test Suite — Categorized Failure Analysis
 
-Last updated: 2026-04-10 (session 127)
-Sweep total: **7881 passing, 1189 failing**, 35 fully-passing, 29 crashed, 15 partial.
+Last updated: 2026-04-24 (session 148)
+Sweep total: **15272 passing**, 33 fully-passing, some crashed/partial.
 
 Run: `perl sweep-perl-tests.pl --jobs 8` from `/home/bernt/pcl/`
 
@@ -50,7 +50,8 @@ qq.t, quotemeta.t, recurse.t, reverse.t, sleep.t, study.t, translate.t, warn.t, 
 
 | File | Crash / Pass | Root Cause | Fix |
 |------|-------------|-----------|-----|
-| **readline.t** | 11+19/36 | `alarm` stub fixed PL-ALARM crash. New crash: `UNBOUND-VARIABLE` for `<y>` bareword filehandle in `p-readline y` — now fixed (lowercase fh quoting). Crash now at test 30 (typeglob warning capture — complex) | Ongoing |
+| **readline.t** | 15+19/36 PARTIAL | ✅ crash fixed (session 135): `skip_without_dynamic_extension` stub added. Remaining 19 failures are wantarray/lvalue issues. | Done — partial |
+| **args.t** | 11+12/23 | ✅ crash fixed (session 135): `goto &funcname`/`goto &$scalar` implemented. Remaining failures are @_ aliasing (documented not-supported). | Done — partial |
 
 ### Auto-vivification write-back (Hard)
 
@@ -60,8 +61,8 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 
 | File | Crash / Pass | Root Cause |
 |------|-------------|-----------|
-| **ref.t** | 22+12/257 | `push @{$arr[N]}, val` — nested ref auto-viv write-back |
-| **array.t** | 69+40/195 | Same — auto-viv write-back in nested array access |
+| **ref.t** | 107+66/257 | Session 147: no crash. 66 failing = DESTROY-callback tests + others PCL can't support without finalizers. `grep` fails on this file (embedded null bytes) — use Perl one-liners. Previous crash at test 52 (`WHATEVER->foo` via UNIVERSAL @ISA) was fixed by UNIVERSAL fallback in `p-method-call`. |
+| **array.t** | 125+69/195 | Session 147: +56 passing (was 69+40). Fixed: -splice tokenization, p-set-array-length auto-vivify, p-defpackage @ISA init. Remaining failures: nested ref auto-viv write-back (`push @{$arr[N]}, val`) |
 | **grent.t** | 2+0/3 | Same — `push @{$arr[N]}, val` in grp entry building |
 
 ### Missing built-ins
@@ -69,15 +70,15 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 | File | Crash / Pass | Root Cause | Fix |
 |------|-------------|-----------|-----|
 | **closure.t** | 50+0/? | `MAIN::PL-READ` undefined — `read(FH, $var, N)` not implemented | Medium — implement `p-read` |
-| **defins.t** | 2+0/27 | `UNBOUND-VARIABLE FILE` — `defined(FILE)` where FILE is bareword filehandle. Code: `ok(defined(FILE),'opened work file')` → `(P-DEFINED FILE)` where FILE is unbound CL var | Medium — detect bareword filehandle in `defined()` |
+| **defins.t** | ✅ 27/27 PASSING | Was "2+0/27 CRASH" (session 127). Fixed by session 130. All 27 tests pass now. |
 
 ### Complex language features
 
 | File | Crash / Pass | Root Cause |
 |------|-------------|-----------|
-| **loopctl.t** | 39+0/67 | `last LABEL` from inside called sub — LABEL is in caller's stack. Perl's `last LABEL` is dynamically scoped; PCL generates `(return-from LABEL ...)` which requires lexical scope |
-| **lop.t** | 17+0/47 | SBCL "compiled with errors" at form 43. Some `DEFUN --ANON-BLOCK-N--` codegen failure |
-| **method.t** | 20+12/163 | Indirect-object `is(method Pack, "method")` — the pre-pass sees all tokens before comma-split; `method Pack` is rewritten to `Pack->method()` including `"method"` as arg |
+| **loopctl.t** | ✅ FIXED (59/67) | Was: `last LABEL` from inside called sub. Fixed in session 133-134 |
+| **lop.t** | ✅ FIXED (47/47) | Was: "compiled with errors". Fixed in prior sessions |
+| **method.t** | 68+45/163 | Session 148: crash at ~113. Many fixes applied: dynamic typeglob `*$var=`, `use base`/`use parent` @ISA, qualified dispatch `Foo->PKG::method`, `PKG::SUPER::method`, tied scalar invocant, empty-string class → main. Next crash: `SUPER::m{@a}` indirect-object method call generates `(SUPER::pl-m @a)` as function call instead of method call. |
 | **reset.t** | 16+8/45 | `?pattern?` one-match patterns + `reset()` — both removed in Perl 5.38 |
 | **sprintf2.t** | 1420+9/? | TYPE-ERROR or `%a` hex-float format after 1429 tests (pre-existing baseline crash) |
 | **substr.t** | 273+104/400 | BOUNDING-INDICES-BAD-ERROR — string index out of bounds on edge cases |
@@ -114,7 +115,7 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 
 | File | Pass+Fail/Plan | Root Cause |
 |------|---------------|-----------|
-| **bless.t** | 28+88/118 | Indirect-object + `@A::ISA = 'BB'` scalar-to-array coercion. `@A::ISA = 'BB'` → stores string in array box |
+| **bless.t** | 116+2/118 | No longer crashes (session 146 check). Tests 111-112: read-only blessing error message (not-supported). Tests 115-116: CODE ref DESTROY never called. Planned 118 but ran 116 (2 DESTROY-based tests never print). |
 | **blocks.t** | 1+0/26 | Test 1 passes (constant named after special block). All remaining use `fresh_perl_is` (subprocess) → silently return, test harness sees fewer tests than planned |
 | **concat2.t** | 1+2/4 | `use overload '""'` and `'.'` — operator overloading not implemented |
 | **die_exit.t** | 0+0/17 | All `fresh_perl_is` / `system()` — subprocess tests |
@@ -125,7 +126,7 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 | **qr.t** | 19+17/37 | Tests 3,6,9: ref equality (`==` on regex objects → 0). Tests 12,13,14,18: pattern matching with qr// objects. Test 22: tied var for regex |
 | **range.t** | 144+17/162 | Test 4: array slice LHS; tests 62-65: string range edge cases; large integer overflow; some `sprintf "%g"` crash |
 | **sort.t** | 114+88/205 | TYPE-ERROR from Tie::StdArray |
-| **split.t** | 202+12/219 | Test 32: subprocess; tests 58-59: wantarray in `split(EXPR =~ /re/, ...)`; test 73: `/$x/` not interpolated |
+| **split.t** | 214+5/219 | 5 tests skip "need dynamic loading". "planned 219 but ran 214" is from skip count mismatch, not a crash. Tests 32,58-59,73: see "Failing Without Crash" section. |
 | **sub.t** | 37+22/65 | Tests 17-18: `my sub (){42}` — generates `PL-NOT_CONSTANTM` undefined (lexical `my sub` not implemented). Tests 21+: `@_` aliasing; tests 28-29: string eval; tests 32-41: RT124156 scoping; tests 36-51: wantarray |
 | **time.t** | 52+19/72 | All `scalar gmtime(...)` / `scalar localtime(...)` — wantarray issue (deferred by policy) |
 
@@ -198,11 +199,11 @@ These files run to completion but have failures. Not yet in fully-passing.
 
 2. **`context.t` test 8**: `BEGIN {}` inside anon sub body generates wrong `eval-when` — see B6 in `docs/v1-implementation-plan.md`. Medium.
 
-3. **`@A::ISA = scalar` coercion** → fixes bless.t crash (88 hidden tests). `@A::ISA = 'BB'` must route through `p-array-=`, not `p-setf`. Medium.
+3. **`@A::ISA = scalar` coercion** — bless.t now runs 116/118, NOT a crash. Still worth fixing: `@A::ISA = 'BB'` must route through `p-array-=`. Gains unknown (was labeled "88 hidden tests", now unclear).
 
-4. **`defined(BAREWORD_FH)`** → fixes defins.t crash. Detect bareword filehandle in `defined()` position. Medium.
+4. ~~**`defined(BAREWORD_FH)`** → defins.t ALREADY FIXED (session 130)~~ ✅
 
-5. **`split.t` test 73**: `/$x/` — regex variable not interpolated at pattern compile time. Generate interpolated regex when pattern contains `$var`.
+5. **`split.t` test 73**: `/$x/` — regex variable not interpolated at pattern compile time. Generate interpolated regex when pattern contains `$var`. File now 214/219 (not a crash).
 
 6. **`pos $_[N]` parse bug** → fixes pos.t crash at test 17. The subscript `$_[N]` is bleeding extra args into `pos`.
 
@@ -214,7 +215,8 @@ These files run to completion but have failures. Not yet in fully-passing.
 
 ### Low ROI or Blocked
 
-- **ref.t / array.t / grent.t**: auto-vivification write-back — large change to p-aref
+- **ref.t**: 107+66/257 — 66 failing tests = DESTROY-callbacks + unsupported features. No crash. Not worth pursuing without finalizer support.
+- **array.t / grent.t**: remaining failures are nested ref auto-viv write-back (`push @{$arr[N]}, val`) — large change to p-aref
 - **concat2.t**: needs operator overloading
 - **loopctl.t**: `last LABEL` dynamic scoping — fundamental limitation
 - **lop.t**: ANON-BLOCK codegen failure — needs investigation
