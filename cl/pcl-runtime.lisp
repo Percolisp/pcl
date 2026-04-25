@@ -125,7 +125,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
-   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
    ;; Call depth tracking (for p-caller at top level)
@@ -455,6 +455,11 @@
 (defvar |$:| (make-p-box " \n-") "FORMAT_LINE_BREAK_CHARACTERS - word-break chars for write")
 (defvar |$^L| (make-p-box (string #\Page)) "FORMAT_FORMFEED - formfeed char for write")
 (defvar |$^A| (make-p-box "") "ACCUMULATOR - for formline/write output")
+(defvar |$^P| (make-p-box 0)  "PERLDB - internal debugger flag (0 = not debugging)")
+(defvar |$^D| (make-p-box 0)  "DEBUGGING - debugging flags")
+(defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
+(defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")
+(defvar |$^M| (make-p-box *p-undef*) "emergency memory pool")
 (defvar |$^| (make-p-box "") "FORMAT_TOP_NAME - top-of-page format name")
 ;; %SIG: signal/exception handler hash
 ;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
@@ -762,8 +767,16 @@
                    ((functionp v) (object-address v))  ; code ref: address
                    ((p-typeglob-p v) (object-address v))  ; typeglob: numeric = address
                    (t 0))))
-          (setf (p-box-nv box) n
-                (p-box-nv-ok box) t)
+          ;; Don't cache address-based NV: SBCL's GC can move objects,
+          ;; making the cached address stale while a freshly-computed address
+          ;; gives a different value for the same logical object.
+          (unless (or (p-box-p v)
+                      (hash-table-p v)
+                      (and (vectorp v) (not (stringp v)))
+                      (functionp v)
+                      (p-typeglob-p v))
+            (setf (p-box-nv box) n
+                  (p-box-nv-ok box) t))
           n))))
 
 (defun stringify-value (v)
@@ -4369,11 +4382,28 @@
     result))
 
 (defun p-stash (pkg-name)
-  "Return package stash (symbol table) as a hash.
-   This is a simplified stub - full implementation would mirror Perl's stash."
-  (declare (ignore pkg-name))
-  ;; Return an empty hash for now - stash manipulation is rarely essential
-  (make-hash-table :test 'equal))
+  "Return the package stash as a hash mapping Perl symbol names to code-ref boxes.
+   Keys are lowercase Perl sub names; values are (make-p-box function).
+   delete $::{foo} → (p-delete (p-stash \"main\") \"foo\") returns the code ref.
+   This is a snapshot (not a live view), sufficient for delete/lookup of existing subs."
+  (let* ((pkg-str (if (or (string= (string-downcase pkg-name) "main")
+                          (string= pkg-name ""))
+                      "MAIN"
+                      (string-upcase pkg-name)))
+         (pkg (or (find-package pkg-str) (find-package pkg-name)))
+         (h (make-hash-table :test 'equal)))
+    (when pkg
+      (do-symbols (sym pkg)
+        (when (and (eq (symbol-package sym) pkg)
+                   (fboundp sym))
+          (let* ((name (symbol-name sym))
+                 (n (length name)))
+            ;; PL-xxx → Perl sub "xxx"
+            (when (and (>= n 4) (string= (subseq name 0 3) "PL-"))
+              (let ((perl-name (string-downcase (subseq name 3))))
+                (setf (gethash perl-name h)
+                      (make-p-box (symbol-function sym)))))))))
+    h))
 
 ;;; ============================================================
 ;;; Control Flow
@@ -6523,13 +6553,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Handles both old format (box containing vector) and new format
    (box containing box containing vector, from p-backslash).
    Auto-vivifies: if val is a box whose value is undef/nil, creates an empty
-   array, stores it back in the box, and returns it (Perl lvalue semantics)."
+   array, stores it back in the box, and returns it (Perl lvalue semantics).
+   Symbolic ref: if val unboxes to a string, treats it as a package variable name."
   (let ((v (unbox val)))
     (cond
       ;; Double-boxed: box(box(arr)) from \@arr — unwrap both layers
       ((p-box-p v) (unbox v))
       ;; Direct vector
       ((and v (vectorp v) (not (stringp v))) v)
+      ;; Symbolic reference: @{"pkg::var"} — look up/create the package variable
+      ((stringp v)
+       (%p-symref-array v))
       ;; val is an lvalue box containing undef: auto-vivify as array ref.
       ;; Store (make-p-box new-arr) so box-set sees a reference (not raw vector)
       ;; and preserves it instead of coercing to length.
@@ -6578,6 +6612,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (proclaim `(special ,sym))
       (setf (symbol-value sym) new-box)))
   new-box)
+
+(defun %p-symref-array (name-str)
+  "Resolve symbolic array reference NAME-STR (e.g. '3foo::ISA') to the CL vector.
+   Creates the package and the @VAR binding if they don't exist yet, so that
+   assignment through a symbolic ref works: @{\"pkg::var\"} = (...).
+   Returns the adjustable vector."
+  (when (find #\Nul name-str) (return-from %p-symref-array
+                                 (make-array 0 :adjustable t :fill-pointer 0)))
+  (let* ((pos (search "::" name-str :from-end t))
+         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
+         (pkg (if pkg-str
+                  (or (find-package pkg-str)
+                      (make-package pkg-str :use '(:cl :pcl)))
+                  *package*))
+         (sym-name (concatenate 'string "@" (string-upcase var-str)))
+         (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
+    (proclaim `(special ,sym))
+    (unless (and (boundp sym)
+                 (vectorp (symbol-value sym))
+                 (not (stringp (symbol-value sym))))
+      (setf (symbol-value sym) (make-array 0 :adjustable t :fill-pointer 0)))
+    (symbol-value sym)))
 
 (defun p-cast-$ (val)
   "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
@@ -7381,6 +7438,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
 
+    ;; Auto-load the package if it doesn't exist yet.
+    ;; This mirrors how Perl automatically has core modules (like version.pm)
+    ;; pre-loaded in its runtime.  When user code writes `new version ~$_` or
+    ;; `SomeModule->method` without an explicit `use`, we attempt a require here
+    ;; so the package can be found during dispatch.
+    (when (null (%pcl-find-package class-name))
+      (handler-case (p-require class-name) (error () nil)))
+
     ;; Dynamic SUPER:: dispatch: $obj->$method where $method = "SUPER::foo"
     ;; Perl treats this as calling SUPER's foo from the object's own package.
     (when (and (stringp method-name)
@@ -7418,6 +7483,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                         (when (and fn (fboundp fn))
                           (return-from p-method-call (apply fn resolved-obj args)))))
                     (error "Can't locate method ~A in package UNIVERSAL" meth-part)))))
+            ;; CORE::method — dispatch to the corresponding PCL built-in (p-METHOD).
+            ;; In Perl, CORE:: is not a real package; it's a namespace for built-in ops.
+            ;; "3foo"->CORE::uc  ⟹  (p-uc "3foo")
+            ((string-equal pkg-part "CORE")
+             (return-from p-method-call
+               (let ((fn (find-symbol (format nil "P-~A" (string-upcase meth-part)) :pcl)))
+                 (if (and fn (fboundp fn))
+                     (apply fn resolved-obj args)
+                     (p-die (format nil "CORE::~A is not a known built-in" meth-part))))))
             ;; General PKG::method — look up pl-METHOD in that package
             (target-pkg
              (let ((fn (find-symbol (format nil "PL-~A" (string-upcase meth-part))
@@ -7492,6 +7566,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (labels ((find-in-class (cls-str visited)
                      (when (member cls-str visited :test #'equal)
                        (return-from find-in-class nil))
+                     ;; CORE is a virtual Perl namespace for built-in functions.
+                     ;; When @ISA includes "CORE", method lookup falls back to p-METHOD.
+                     (when (string-equal cls-str "CORE")
+                       (let ((fn (find-symbol (format nil "P-~A" (string-upcase method-name)) :pcl)))
+                         (when (and fn (fboundp fn))
+                           (return-from p-method-call (apply fn resolved-obj args)))))
                      (let* ((pkg (%pcl-find-package cls-str))
                             (fn  (when pkg
                                    (find-symbol (string-upcase

@@ -4,6 +4,94 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 150 (2026-04-25) — crash fixes: method.t / bop.t / caller.t; GC-address NV cache bug
+
+### Focus
+
+Continued fixing crashes in perl-tests/ files (picking up from session 149). Three previously
+crashing files (method.t, bop.t, caller.t) are the main targets.
+
+### Fixes Applied
+
+**1. `CORE::method` dispatch in `p-method-call` — `cl/pcl-runtime.lisp`**
+
+`"3foo"->CORE::uc` crashed because `CORE::` is a virtual Perl namespace mapping to built-in
+functions. In qualified dispatch (when method-name contains `::`), added a new case: if the
+pkg-part is `"CORE"`, look up `p-METHOD` in the `:pcl` package and call it directly.
+Example: `CORE::uc` → finds `pcl:p-uc` → `(apply #'pcl:p-uc resolved-obj args)`.
+
+**2. `@{"pkg::ISA"}` symbolic array ref — `cl/pcl-runtime.lisp`**
+
+`"3foo"->uc` after `@ISA = "CORE"` crashed at `p-cast-@` (array dereference). The string
+`"3foo::ISA"` was not recognized as a symbolic reference. Added `%p-symref-array` helper that
+resolves a string like `"3foo::ISA"` to the CL package variable `@3FOO::ISA`, creating the
+package and symbol if needed. Updated `p-cast-@` to call this for string arguments.
+Also added `CORE` virtual-package handling in the `find-in-class` @ISA walk in `p-method-call`:
+when iterating @ISA and an entry is `"CORE"`, dispatch to `p-METHOD` directly.
+
+**3. `version->new` auto-loading — `cl/pcl-runtime.lisp`**
+
+`version->new` crashed because the package `version` didn't exist (hadn't been loaded yet).
+Added auto-loading in `p-method-call`: after determining `class-name`, if the CL package
+doesn't exist, silently try `p-require class-name`. This lets `version->new` trigger
+`require "version"` which loads `lib/version.pm`.
+
+**4. `p-stash` returns populated hash — `cl/pcl-runtime.lisp`**
+
+`delete $::{foo}` returned nil because `p-stash` returned an empty hash. Fixed `p-stash`
+to walk the package's symbols and populate the hash with entries for each `PL-*` function,
+boxing the function object. Now `p-delete` finds the entry and returns the code ref, which
+caller.t then invokes to capture `caller(0)` data.
+
+**5. Magic variables `$^P $^D $^F $^I $^M` — `cl/pcl-runtime.lisp`**
+
+caller.t uses `$^P` (PERLDB). These special variables were unbound. Added `defvar` for
+`|$^P|` (0), `|$^D|` (0), `|$^F|` (2), `|$^I|` (undef), `|$^M|` (undef) and exported
+all five from the `:pcl` package.
+
+**6. `perl-tests/t/op/caller.pl` stub — `perl-tests/t/op/caller.pl`**
+
+caller.t does `require './op/caller.pl'` which uses XS API (`hint_fetch`, `hint_exists`)
+not available in PCL. Created a stub that defines both as no-op stubs returning undef/0.
+(The real file is at `~/perl5/perlbrew/build/perl-5.40.3/.../t/op/caller.pl`.)
+
+**7. NV cache must not be used for address-based reference values — `cl/pcl-runtime.lisp`**
+
+`warn.t` tests 6 and 9 failed: `warn $wa` (an array ref) stored the wrong numeric value
+in `@warnings` when `$@` was non-empty. Root cause: `box-nv` caches `object-address V`
+for reference-type box values (array, hash, code, typeglob refs). SBCL's GC can move
+objects between calls, so the cached pre-GC address and a freshly-computed post-GC address
+differ, making `$warnings[0] == $wa` false despite referring to the same underlying object.
+Fix: in `box-nv`, skip the `setf (p-box-nv-ok box) t` step for all address-based types
+(p-box, vector, hash-table, function, typeglob). Every numeric comparison on references now
+recomputes the live address. Fixes warn.t tests 6 and 9 (9/11 → 11/11, fully passing again).
+
+### Test Results
+
+- **PCL suite**: 74 files, 2886 tests, all passing
+- **Sweep**: 15350 passing (+67 from session 149's 15283)
+- **Fully passing**: 33 files (+1: warn.t restored)
+
+### Crash File Status (end of session)
+
+| File | Status | Notes |
+|------|--------|-------|
+| bop.t | 377+117=494/510 | No longer crashing — version->new auto-load fix |
+| caller.t | 9+51=60/112 | No longer crashing — stash + $^P fixes |
+| method.t | 102+51=153/163 | No longer crashing — CORE:: dispatch fix |
+| warn.t | **11/11 fully passing** | GC NV cache bug fixed |
+| concat.t | 233/234 passing | Test 220 still failing (pre-existing) |
+
+### Remaining Work for Next Session
+
+1. **concat.t test 220** — one pre-existing failure, investigate
+2. **caller.t** — 60/112 passing, investigate remaining failures
+3. **method.t** — 153/163 passing, investigate remaining 10
+4. **closure.t / ref.t / sort.t / state.t** — partial files with known crash points
+5. **Unicode/encode** — deferred by user
+
+---
+
 ## Session 149 (2026-04-25) — crash fixes: require hoisting, SKIP blocks, ::pkg dispatch, version.pm
 
 ### Focus
