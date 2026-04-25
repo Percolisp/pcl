@@ -4,6 +4,101 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 149 (2026-04-25) — crash fixes: require hoisting, SKIP blocks, ::pkg dispatch, version.pm
+
+### Focus
+
+Fixing crashes in perl-tests/ files. Continued from session 148 (method.t still crashing at test ~113).
+
+### Fixes Applied
+
+**1. `last SKIP` in Test::Simple::skip() — `lib/Test/Simple.pm`**
+
+`skip_if_miniperl()` called `skip()` but it never exited the SKIP block because PCL's `skip()`
+only printed "ok N # skip" lines without calling `last SKIP`. Added `no warnings 'exiting'; last SKIP;`
+at end of `skip()`. PCL transpiles `last SKIP` → `(p-last SKIP)` → `(throw 'pcl::LAST-SKIP nil)`,
+which is caught by the generated `(catch 'pcl::LAST-SKIP ...)` wrapper around SKIP blocks.
+
+**2. `require` inside SKIP/labeled blocks not hoisted — `Pl/Parser.pm`**
+
+`require Count` and `require Fcntl` inside a SKIP block were being hoisted to the declarations
+bucket (wrapped in `p-eval-always`), running unconditionally before the SKIP block's runtime
+wrapper. This caused "Can't locate Count.pm" crash even when skip_if_miniperl should skip.
+Fix: in `_process_include_statement`, also check `_block_depth > 0` (not just `in_subroutine > 0`)
+to keep `require` inline rather than hoisting it. `_block_depth` is already incremented for
+labeled blocks (SKIP, DO, etc.) and loop bodies.
+
+**3. `"::"` and `"::Foo"` class name normalization — `cl/pcl-runtime.lisp`**
+
+`"::"->flomp` crashed: Perl's `"::"` is the root stash (equivalent to `main::`).
+`"::main"->flomp` crashed: `"::Foo"` with leading `::` strips the prefix → `"Foo"`.
+Added normalization in `p-method-call`:
+- `""` → `"main"` (was already there)
+- `"::"` → `"main::"`
+- `"::Foo"` → `"Foo"` (strip leading `::` root-stash prefix)
+
+**4. `%pcl-find-package` case-aware lookup — `cl/pcl-runtime.lisp`**
+
+Added `%pcl-find-package` helper that tries `(find-package (string-upcase pkg))` first
+(works for single-word Perl packages defined via `:Foo` keyword) then falls back to
+`(find-package pkg)` (exact case, needed for `|main::|`, `|Foo::Bar|` etc.).
+Updated four package lookups in `p-method-call` (main ISA lookup, CLOS UNIVERSAL walk,
+@ISA walk, and package-existence check) to use this helper.
+
+**5. `version` module removed from pragma list — `Pl/Parser.pm`**
+
+`version` was listed as a no-op pragma, so `use version;` never loaded `lib/version.pm`.
+Removed from regex so `p-use "version"` loads the stub.
+
+**6. `SUPER::method{@array}` indirect-object syntax — `Pl/ExprToCL.pm`, `cl/pcl-runtime.lisp`** (session 148 work, completed)
+
+Described in session 148. Added `%pcl-super-indirect` and `SUPER::` detection in `gen_funcall`.
+
+**7. `sub main::::flomp` PPI split — `Pl/Parser.pm`** (session 148 work, completed)
+
+Described in session 148. Sub name now concatenates all Word tokens.
+
+**8. `lib/List/Util.pm` pure-Perl implementation** (session 148 work)
+
+System List::Util requires XSLoader. Created pure-Perl stub in `lib/List/Util.pm`.
+
+**9. `lib/version.pm` stub** (session 148 work)
+
+Created minimal version.pm with `new`, `stringify`, `numify`, `vcmp`, overload `""`, `0+`, `cmp`.
+
+**10. `p-bit-not` string bitwise NOT — `cl/pcl-runtime.lisp`** (session 148 work)
+
+`~chr(N)` now returns string NOT (byte XOR 0xFF) for non-numeric strings, using existing
+`p-string-bitwise-operand-p` check.
+
+**11. `p-method-call` "Package not found" uses `p-die` — `cl/pcl-runtime.lisp`** (session 148 work)
+
+Changed from SBCL `(error ...)` to Perl-catchable `(p-die ...)`.
+
+### Test Results
+
+- **PCL suite**: 74 files, 2886 tests, all passing
+- **Sweep**: 15283 passing (+11 from session 148)
+- **Fully passing**: 32 files
+
+### Crash File Status (end of session)
+
+| File | Status | Notes |
+|------|--------|-------|
+| aassign.t | 101/177 passing — **no longer crashing** | List::Util fix |
+| bop.t | CRASH at test ~451/510 | `version->new` fails — version module not loading despite pragma fix (needs investigation) |
+| caller.t | CRASH at test ~10/112 | Stash manipulation `delete $::{foo}` |
+| method.t | CRASH at test ~120/163 | `"3foo"->CORE::uc` — CORE:: method dispatch not implemented |
+
+### Remaining Work for Next Session
+
+1. **method.t test 120**: `"3foo"->CORE::uc` — `CORE::` in qualified method dispatch needs to map to PCL builtins (e.g. `p-uc`)
+2. **bop.t test ~451**: `version->new` crash — `version` removed from pragma list but still crashing; check if `lib/version.pm` is being loaded correctly
+3. **caller.t crash**: `delete $::{foo}` returns undef from stash manipulation — not yet investigated
+4. **Run full sweep** after fixing above to verify +progress
+
+---
+
 ## Session 148 (2026-04-24) — crash fixes: method.t (qualified dispatch, use base, tied invocant)
 
 ### Focus

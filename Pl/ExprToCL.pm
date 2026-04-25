@@ -904,6 +904,22 @@ sub gen_funcall {
 
   my $cl_func   = $self->cl_name($func_name, 1);
 
+  # Special handling: SUPER::method(args) as indirect-object call
+  # SUPER::m{@a} is indirect-object syntax: first arg is the invocant (from block)
+  # Generate: (pcl::%pcl-super-indirect "m" "pkg" ARGS) where first arg is invocant
+  if ($func_name =~ /^SUPER::(.+)$/) {
+    my $method = $1;
+    my $cur_pkg = ($self->environment && $self->environment->can('current_package'))
+                    ? ($self->environment->current_package // 'main')
+                    : 'main';
+    if (@$kids >= 2) {
+      my $arg_str = $self->gen_node($kids->[1]);
+      return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" $arg_str)";
+    }
+    # No args — call without invocant (will signal error at runtime)
+    return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" nil)";
+  }
+
   # Special handling for next/last/redo/goto with label argument
   if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo'
        || $func_name eq 'goto') && @$kids == 2) {

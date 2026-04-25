@@ -3307,8 +3307,10 @@
       (logxor (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
 
 (defun p-bit-not (a)
-  "Perl bitwise NOT - mask to 64 bits like Perl's UV"
-  (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF))
+  "Perl bitwise NOT - string NOT if non-numeric string, integer NOT otherwise"
+  (if (p-string-bitwise-operand-p a)
+      (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))
+      (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF)))
 
 (defun p-<< (a b)
   "Perl left shift — clamp shift count to prevent SBCL bignum explosion"
@@ -7349,6 +7351,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; No user sub - return string as class name
         name)))
 
+(defun %pcl-find-package (pkg-str)
+  "Find CL package for Perl package name PKG-STR.
+   Tries upcase first (single-word packages defined via :Foo keyword), then
+   exact case (multi-level packages defined via :|Foo::Bar| notation)."
+  (or (find-package (string-upcase pkg-str))
+      (find-package pkg-str)))
+
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
   (let* ((method-name (to-string method))
@@ -7358,8 +7367,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            (unbox (p-method-call (p-tie-proxy-tie-obj (p-box-value obj)) "FETCH"))
                            obj))
          (raw-class (p-get-class resolved-obj))
-         ;; Perl treats "" as "main" in package/method contexts
-         (class-name (if (and raw-class (string= raw-class "")) "main" raw-class)))
+         ;; Perl treats "" as "main" and "::" as "main::" in package/method contexts.
+         ;; Leading "::" on a class name refers to the root stash (same as no prefix).
+         (class-name (let ((c (or raw-class "")))
+                       (cond
+                         ((string= c "")   "main")
+                         ((string= c "::") "main::")
+                         ;; "::Foo::Bar" → "Foo::Bar" (strip leading root-stash "::")
+                         ((and (>= (length c) 2)
+                               (string= (subseq c 0 2) "::"))
+                          (subseq c 2))
+                         (t c)))))
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
 
@@ -7411,7 +7429,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; @ISA walk is preferred whenever @ISA is non-empty (it reflects `local @ISA`
     ;; and runtime push/assignment, which CLOS cannot see).  CLOS is a fallback for
     ;; classes that have never had @ISA set (e.g. leaf classes with no parents).
-    (let* ((pkg (find-package (string-upcase class-name)))
+    (let* ((pkg (%pcl-find-package class-name))
            (isa-sym (when pkg (find-symbol "@ISA" pkg)))
            (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
            (isa-non-empty (and isa-val
@@ -7445,7 +7463,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
               (labels ((find-in-u (cls-str visited)
                          (when (member cls-str visited :test #'equal)
                            (return-from find-in-u nil))
-                         (let* ((pkg2 (find-package (string-upcase cls-str)))
+                         (let* ((pkg2 (%pcl-find-package cls-str))
                                 (fn2 (when pkg2
                                        (find-symbol (format nil "PL-~A" (string-upcase method-name))
                                                     pkg2))))
@@ -7474,7 +7492,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (labels ((find-in-class (cls-str visited)
                      (when (member cls-str visited :test #'equal)
                        (return-from find-in-class nil))
-                     (let* ((pkg (find-package (string-upcase cls-str)))
+                     (let* ((pkg (%pcl-find-package cls-str))
                             (fn  (when pkg
                                    (find-symbol (string-upcase
                                                   (format nil "PL-~A" method-name))
@@ -7489,12 +7507,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                (loop for parent across isa-val
                                      do (find-in-class (to-string parent)
                                                         (cons cls-str visited)))))))))
-            (let ((pkg (find-package (string-upcase class-name))))
+            (let ((pkg (%pcl-find-package class-name)))
               (unless pkg
                 ;; Perl special case: ->import and ->unimport on unknown packages return nothing
                 (if (or (string-equal method-name "import") (string-equal method-name "unimport"))
                     (return-from p-method-call (values))
-                    (error "Package ~A not found for method call" class-name))))
+                    (p-die (format nil "Can't locate object method \"~A\" via package \"~A\""
+                                   method-name class-name)))))
             (find-in-class class-name nil)
             ;; UNIVERSAL is an implicit parent of all Perl classes.
             ;; After exhausting the class's own @ISA chain, try UNIVERSAL's @ISA
@@ -7575,6 +7594,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; Try converting - to :: for nested packages
         (let ((perl-style (substitute #\: #\- upcase-name)))
           perl-style))))
+
+;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
+(defun %pcl-super-indirect (method cur-pkg inv-args-vec)
+  "Handle SUPER::method{@array} indirect-object syntax.
+   inv-args-vec: a vector where element 0 is the invocant; rest are args."
+  (let ((vec (cond ((vectorp inv-args-vec) inv-args-vec)
+                   ((null inv-args-vec)    (vector))
+                   (t                      (vector inv-args-vec)))))
+    (when (zerop (length vec))
+      (p-die (format nil "Can't call method \"~A\" without a package or object reference" method)))
+    (apply #'p-super-call (elt vec 0) method cur-pkg
+           (coerce (subseq vec 1) 'list))))
 
 ;;; SUPER:: method calls
 (defun p-super-call (obj method current-class &rest args)

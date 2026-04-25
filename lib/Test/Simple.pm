@@ -290,6 +290,8 @@ sub skip {
         $test_count = $test_count + 1;
         _print("ok $test_count # skip $reason\n");
     }
+    no warnings 'exiting';
+    last SKIP;
 }
 
 # Diagnostic output

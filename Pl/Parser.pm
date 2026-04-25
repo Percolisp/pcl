@@ -254,6 +254,8 @@ sub _qualified_sub_to_cl {
     my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
                   lc($pkg) eq 'method' || lc($pkg) eq 'function')
                  ? "|$pkg|" : $pkg;
+    # Register package so it gets pre-declared
+    $self->environment->add_referenced_package($pkg) if $self->environment;
     return "${cl_pkg}::pl-$bare";
   }
   return "pl-$name";
@@ -3759,7 +3761,8 @@ sub _process_sub_statement {
     if ($ref eq 'PPI::Token::Word' && $child->content ne 'sub'
         && $child->content ne 'my' && $child->content ne 'our'
         && $child->content ne 'state') {
-      $name = $child->content unless $name;
+      # Concatenate: PPI may split "main::::foo" into "main::" + "::foo"
+      $name .= $child->content unless $block;
     }
     elsif ($ref eq 'PPI::Token::Prototype') {
       $prototype = $child->content;
@@ -4364,7 +4367,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re|version)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
@@ -4387,10 +4390,11 @@ sub _process_include_statement {
     return;
   }
 
-  # require inside a sub body must stay inline (not hoisted) so that:
+  # require inside a sub or block body must stay inline (not hoisted) so that:
   # 1. eval { require Foo } can catch load failures properly
-  # 2. Perl semantics: require inside a sub runs at call time, not compile time
-  if ($type eq 'require' && $self->environment->in_subroutine > 0) {
+  # 2. Perl semantics: require inside a block runs at runtime, not compile time
+  # 3. require inside SKIP { } must not run when the block is skipped
+  if ($type eq 'require' && ($self->environment->in_subroutine > 0 || $self->_block_depth > 0)) {
     $self->_emit(";; $perl_code");
     $self->_emit("(p-require \"$module\")");
     $self->_emit("");
