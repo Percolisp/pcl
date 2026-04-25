@@ -13,6 +13,9 @@ use Moo;
 use Scalar::Util qw/looks_like_number/;
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX);
 
+# Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
+my $g_flipflop_count = 0;
+
 # Code generator that transforms Pl::PExpr AST into Common Lisp code.
 # Follows conventions from CODEGEN_DESIGN.md:
 # - Variables keep Perl sigils ($x, @arr, %hash)
@@ -663,6 +666,14 @@ sub gen_leaf {
 }
 
 
+# Return true if a PPI node is an integer literal (e.g. 3, 10, 0)
+sub _is_integer_literal_node {
+  my ($node) = @_;
+  return 0 unless defined $node && ref($node) =~ /^PPI::Token::Number/;
+  my $content = $node->can('content') ? ($node->content // '') : '';
+  return $content =~ /^\d+$/;  # non-negative integer only (negatives are prefix-op)
+}
+
 # Binary operator: (pcl:p-OP left right)
 # Operators always use pcl: prefix to avoid conflicts with user-defined subs
 sub gen_binary_op {
@@ -672,6 +683,27 @@ sub gen_binary_op {
   my $node_id = shift;  # Optional: for context-dependent operators like 'x'
 
   my $cl_op = $self->cl_op_name($op);
+
+  # Special case: '..'/'..' — range in list context, flip-flop in scalar context
+  if (($op eq '..' || $op eq '...') && defined $node_id) {
+    my $ctx = $self->expr_o->get_node_context($node_id);
+    if ($ctx != LIST_CTX) {
+      # Scalar context: emit flip-flop
+      my $ff_id = $g_flipflop_count++;
+      my $left_node  = $self->expr_o->get_a_node($kids->[0]);
+      my $right_node = $self->expr_o->get_a_node($kids->[1]);
+      my $left  = $self->gen_node($kids->[0]);
+      my $right = $self->gen_node($kids->[1]);
+      if (_is_integer_literal_node($left_node) && _is_integer_literal_node($right_node)) {
+        my $macro = ($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num';
+        return "($macro $ff_id $left $right)";
+      } else {
+        my $macro = ($op eq '...') ? 'p-flipflop-3' : 'p-flipflop';
+        return "($macro $ff_id $left $right)";
+      }
+    }
+    # List context: fall through to normal range (p-.. / p-...)
+  }
 
   # Special case: 'x' operator - use list repeat when LHS is parenthesized and in list context
   if ($op eq 'x' && defined $node_id) {
@@ -1136,6 +1168,26 @@ sub gen_funcall {
     }
     my $items_str = @items ? ' ' . join(' ', @items) : '';
     return "($cl_func $target$items_str)";
+  }
+
+  # Special handling for readline(BAREWORD): treat arg as filehandle symbol, not function call
+  if ($func_name eq 'readline' && @$kids == 2) {
+    my $fh_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
+      my $fh_name = $fh_node->content() // '';
+      return "(p-readline '$fh_name)";
+    }
+    # Funcall node with single word child (bareword wrapped in funcall)
+    if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
+      my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$fh_kids == 1) {
+        my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
+        if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
+          my $fh_name = $word_node->content() // '';
+          return "(p-readline '$fh_name)";
+        }
+      }
+    }
   }
 
   # Special handling for tied(): needs the box, not the unboxed value.

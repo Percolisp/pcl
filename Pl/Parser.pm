@@ -1962,12 +1962,15 @@ sub _process_local_declaration {
     # local $x = value
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
-    my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
 
     my $var = $vars[0];
     # For qualified vars (e.g. A::@ISA), the sigil is embedded after '::'.
     # For simple vars (e.g. @arr), it is the first character.
     my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
+
+    # Use LIST_CTX for array/hash RHS so '..' generates a range, not a flip-flop
+    my $rhs_ctx = ($sigil eq '@' || $sigil eq '%') ? 1 : 0;
+    my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, $rhs_ctx) // 'nil';
 
     if ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
@@ -3455,6 +3458,7 @@ sub _process_while_statement {
   # Get condition CL code
   my $cond_cl = $cond ? $self->_parse_condition($cond) : "t";
   $cond_cl //= "t";
+  $cond_cl =~ s/^\s+//;  # generate() prepends indentation; strip it for regex checks below
 
   # while (<FH>) with no explicit assignment → implicitly assign to $_
   # PPI: condition has a single Expression containing a single QuoteLike::Readline
@@ -3484,6 +3488,9 @@ sub _process_while_statement {
       $cond_cl = "(progn $cond_cl (p-defined $var))";
     } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
       $cond_cl = "(p-defined $cond_cl)";
+    } elsif ($cond_cl =~ /^\(p-setf\s+\$_\s+\((?:$auto_pat)\b/) {
+      # (p-setf $_ (p-readline ...)) — implicit $_ assign, terminate on undef
+      $cond_cl = "(progn $cond_cl (p-defined \$_))";
     } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
       # Bare call: assign to $_ and use defined-check (Perl's implicit $_ aliasing)
       $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
@@ -3708,7 +3715,7 @@ sub _process_foreach_loop {
   }
 
   my $list_cl = @list_parts
-    ? ($self->_parse_expression(\@list_parts, $stmt) // "(list)")
+    ? ($self->_parse_expression(\@list_parts, $stmt, 1) // "(list)")  # 1 = LIST_CTX
     : "(list)";
 
   # Convert (progn ...) to (vector ...) for foreach list context

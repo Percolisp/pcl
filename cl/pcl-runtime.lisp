@@ -48,6 +48,10 @@
    #:p-chain-cmp
    ;; Range operator
    #:p-.. #:p-...
+   ;; Flip-flop operator (scalar context .. and ...)
+   #:p-flipflop #:p-flipflop-3 #:p-flipflop-num #:p-flipflop-num-3
+   ;; Dualvar
+   #:p-dualvar
    ;; Logical
    #:p-&& #:p-|| #:p-! #:p-not #:p-and #:p-or #:p-xor #:p-//
    ;; Bitwise
@@ -321,8 +325,7 @@
 ;;; Child exit status ($?)
 (defvar $? 0 "Child process exit status from last system/backtick")
 
-;;; Input line number ($.)
-(defvar |$.| 0 "Input line number of last filehandle read")
+;;; Input line number ($.) - defined later after make-p-box (see Boxed special variables section)
 
 ;;; Program name ($0)
 (defvar $0 (or (car sb-ext:*posix-argv*) "perl") "Program name")
@@ -402,6 +405,15 @@
 
 ;;; ============================================================
 ;;; Tie proxy — stored inside a p-box when the variable is tied
+(defun p-dualvar (num str)
+  "Perl Scalar::Util::dualvar — create a scalar with separate numeric and string values."
+  (let ((n (to-number (unbox num)))
+        (s (to-string (unbox str))))
+    (let ((box (%make-p-box :value s)))
+      (setf (p-box-sv box) s (p-box-sv-ok box) t)
+      (setf (p-box-nv box) n (p-box-nv-ok box) t)
+      box)))
+
 ;;; ============================================================
 ;;; When tie() is called on a scalar, the box's value slot is replaced
 ;;; with a p-tie-proxy.  unbox() calls FETCH; box-set() calls STORE.
@@ -431,6 +443,8 @@
 ;;; Boxed special variables (must be after make-p-box definition)
 ;;; Default variable ($_) - p-box so p-scalar-= / box-set work correctly
 (defvar $_ (make-p-box nil) "Perl's $_ - default variable")
+;;; Input line number ($.) - p-box so box-set / let dynamic binding works
+(defvar |$.| (make-p-box nil) "Input line number of last filehandle read")
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
 (defvar $@ (make-p-box "") "Error from last eval")
 ;;; Input record separator ($/)
@@ -3139,6 +3153,94 @@
   (p-.. start end))
 
 ;;; ============================================================
+;;; Flip-flop operators (scalar context .. and ...)
+;;; Each usage of .. in scalar context gets a unique integer ID.
+;;; State is stored in *pcl-flipflop-states* keyed by ID.
+;;; State: NIL = off, fixnum N >= 1 = on with counter N.
+;;; ============================================================
+
+(defvar *pcl-flipflop-states* (make-hash-table :test 'equal))
+
+(defun %p-flipflop-lineno ()
+  "Get current line number ($.) for numeric flip-flop.
+   Returns integer, treating undef as 0 (with uninitialized warning)."
+  (let ((v (unbox $\.)))
+    (if (or (null v) (eq v *p-undef*))
+        (progn
+          (p-warn "Use of uninitialized value $. in numeric eq (==)")
+          0)
+        (truncate (to-number v)))))
+
+(defmacro p-flipflop (id left-form right-form)
+  "Perl .. flip-flop in scalar context (boolean operands).
+   id: compile-time integer literal, unique per .. usage in source.
+   left-form/right-form: lazily evaluated Perl expressions."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")))
+    `(let ((,sv (gethash ,id *pcl-flipflop-states*)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (p-true-p ,right-form)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (p-true-p ,left-form)
+               (if (p-true-p ,right-form)
+                   "1E0"
+                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
+               "")))))
+
+(defmacro p-flipflop-3 (id left-form right-form)
+  "Perl ... flip-flop in scalar context (boolean operands, no immediate right-check)."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")))
+    `(let ((,sv (gethash ,id *pcl-flipflop-states*)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (p-true-p ,right-form)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (p-true-p ,left-form)
+               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
+               "")))))
+
+(defmacro p-flipflop-num (id left-num right-num)
+  "Perl .. numeric flip-flop in scalar context.
+   Compares current $. (line number) against integer literal operands."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
+    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
+            (,ln (%p-flipflop-lineno)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (= ,ln ,right-num)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (= ,ln ,left-num)
+               (if (= ,ln ,right-num)
+                   "1E0"
+                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
+               "")))))
+
+(defmacro p-flipflop-num-3 (id left-num right-num)
+  "Perl ... numeric flip-flop (no immediate right-check on first fire)."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
+    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
+            (,ln (%p-flipflop-lineno)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (= ,ln ,right-num)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (= ,ln ,left-num)
+               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
+               "")))))
+
+;;; ============================================================
 ;;; String Comparison
 ;;; ============================================================
 
@@ -5237,7 +5339,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Respects $/ (input record separator):
      default newline = line mode, undef = slurp, \"\" = paragraph, other = custom separator.
    Returns nil at EOF. If no filehandle given, reads from *standard-input*.
-   Note: Unlike CL's read-line, this keeps the trailing separator (like Perl)."
+   Note: Unlike CL's read-line, this keeps the trailing separator (like Perl).
+   Updates $. (input line number) on each successful read."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
     (when stream
@@ -5298,8 +5401,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (if (zerop (length result)) nil (coerce result 'string))))))))
 
 (defmacro p-readline (&rest args)
-  "Perl readline / <FH> — pass args through; code-gen already quotes barewords."
-  `(%p-readline-impl ,@args))
+  "Perl readline / <FH> — reads a record, updates $. on success."
+  `(let ((%rl-val (%p-readline-impl ,@args)))
+     (when %rl-val
+       (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|))))))
+     %rl-val))
 
 ;;; ============================================================
 ;;; Directory I/O Functions
