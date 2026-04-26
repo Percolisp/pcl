@@ -2172,15 +2172,24 @@
                                 (let ((call-idx (if positional-idx
                                                     positional-idx
                                                     arg-idx)))
-                                  (when (>= call-idx n-args)
-                                    (p-warn (make-p-box
-                                              (format nil "Missing argument in ~A"
-                                                      *p-sprintf-caller*))))
-                                  (multiple-value-bind (result new-arg-idx)
-                                      (sprintf-one type-char flags width precision args call-idx)
-                                    (write-string result out)
-                                    (setf arg-idx (if positional-idx arg-idx new-arg-idx))
-                                    (setf i j))))
+                                  (if (and positional-idx (< call-idx 0))
+                                      ;; %0$x: positional 0 is invalid (1-based), output spec literally
+                                      (progn
+                                        (p-warn (make-p-box
+                                                  (format nil "Invalid conversion in ~A: \"~A\""
+                                                          *p-sprintf-caller* (string type-char))))
+                                        (write-string (concatenate 'string "%" (subseq fmt-str (1+ i) j)) out)
+                                        (setf i j))
+                                      (progn
+                                        (when (>= call-idx n-args)
+                                          (p-warn (make-p-box
+                                                    (format nil "Missing argument in ~A"
+                                                            *p-sprintf-caller*))))
+                                        (multiple-value-bind (result new-arg-idx)
+                                            (sprintf-one type-char flags width precision args call-idx)
+                                          (write-string result out)
+                                          (setf arg-idx (if positional-idx arg-idx new-arg-idx))
+                                          (setf i j))))))
                               ;; No type char found, output literally
                               (progn
                                 (write-string (subseq fmt-str i j) out)
@@ -6246,9 +6255,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-find-module-package (module-name)
   "Find CL package for a Perl module.
-   Tries: uppercase name, pipe-quoted name (for Foo::Bar)."
+   Tries: uppercase name, exact-case name (for Foo::Bar packages)."
   (or (find-package (string-upcase module-name))
-      (find-package (format nil "|~A|" module-name))))
+      (find-package module-name)))
 
 (defun p-perl-symbol-to-cl-name (sym-name)
   "Convert Perl symbol name to CL symbol name.
@@ -6268,23 +6277,75 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-import-perl-symbol (sym-name from-pkg to-pkg)
   "Import a Perl symbol from FROM-PKG to TO-PKG.
-   Handles sigils appropriately."
+   For functions: sets fdefinition in TO-PKG so compiled lambdas that
+   already interned the symbol (before the import) get the right binding.
+   For variables: shadowing-import to make the binding accessible."
   (let* ((cl-name (p-perl-symbol-to-cl-name sym-name))
-         (sym (find-symbol cl-name from-pkg)))
-    (when sym
-      (shadowing-import sym to-pkg))))
+         (from-sym (find-symbol cl-name from-pkg)))
+    (when from-sym
+      (let ((name (unbox sym-name)))
+        (cond
+          ;; Variable sigil: use shadowing-import (variable bindings)
+          ((and (stringp name) (plusp (length name))
+                (member (char name 0) '(#\$ #\@ #\%)))
+           (shadowing-import from-sym to-pkg))
+          ;; Function: set fdefinition in TO-PKG so already-compiled
+          ;; lambdas with an interned-but-unbound local symbol get the fn.
+          ((fboundp from-sym)
+           (let ((to-sym (intern cl-name to-pkg)))
+             (setf (fdefinition to-sym) (fdefinition from-sym))))
+          ;; Symbol exists but no function: still do shadowing-import
+          (t
+           (shadowing-import from-sym to-pkg)))))))
+
+(defun %p-get-export-list (pkg var-name)
+  "Helper: get a vector-valued package variable as a list, or nil."
+  (let ((sym (find-symbol var-name pkg)))
+    (when (and sym (boundp sym))
+      (let ((val (symbol-value sym)))
+        (when (and val (vectorp val))
+          (coerce val 'list))))))
+
+(defun %p-expand-import-tags (imports pkg)
+  "Expand export-tag items (starting with ':') in IMPORTS list using %EXPORT_TAGS.
+   ':DEFAULT' expands to @EXPORT; ':ALL' expands to @EXPORT_OK; ':TAG' looks up
+   %EXPORT_TAGS{TAG}.  Plain names are kept as-is."
+  (let ((result '()))
+    (dolist (item imports)
+      (let ((name (unbox item)))
+        (if (and (stringp name) (plusp (length name)) (char= (char name 0) #\:))
+            (let ((tag (subseq name 1)))
+              (cond
+                ((string= tag "DEFAULT")
+                 (let ((lst (%p-get-export-list pkg "@EXPORT")))
+                   (when lst (setf result (append result lst)))))
+                ((string= tag "ALL")
+                 (let ((lst (%p-get-export-list pkg "@EXPORT_OK")))
+                   (when lst (setf result (append result lst)))))
+                (t
+                 ;; Look up %EXPORT_TAGS{tag}
+                 (let ((tags-sym (find-symbol "%EXPORT_TAGS" pkg)))
+                   (when (and tags-sym (boundp tags-sym))
+                     (let* ((tags-hash (symbol-value tags-sym))
+                            (tag-val (when (hash-table-p tags-hash)
+                                       (or (gethash tag tags-hash)
+                                           (gethash (string-upcase tag) tags-hash)))))
+                       (when (and tag-val (vectorp tag-val))
+                         (setf result (append result (coerce tag-val 'list))))))))))
+            ;; Plain name: keep as-is
+            (push name result))))
+    (nreverse result)))
 
 (defun p-import-exports (module-name to-pkg &optional specific-imports)
-  "Import symbols from module's @EXPORT (or specific list) into TO-PKG."
+  "Import symbols from module's @EXPORT (or specific list) into TO-PKG.
+   Handles export tags like :DEFAULT, :ALL, :TAGNAME."
   (let ((pkg (p-find-module-package module-name)))
     (when pkg
-      (let ((imports (or specific-imports
-                         ;; Get @EXPORT from module's package
-                         (let ((export-sym (find-symbol "@EXPORT" pkg)))
-                           (when (and export-sym (boundp export-sym))
-                             (let ((val (symbol-value export-sym)))
-                               (when (and val (vectorp val))
-                                 (coerce val 'list))))))))
+      (let* ((raw-imports (or specific-imports
+                               (%p-get-export-list pkg "@EXPORT")))
+             (imports (if specific-imports
+                          (%p-expand-import-tags raw-imports pkg)
+                          raw-imports)))
         (dolist (sym-name imports)
           (p-import-perl-symbol sym-name pkg to-pkg))))))
 
