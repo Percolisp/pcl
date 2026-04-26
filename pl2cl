@@ -277,8 +277,12 @@ if (@ARGV && -f $ARGV[0]) {
   my $output = Pl::Parser->parse_file($source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
 
-  # Inject preamble after (in-package :pcl) - but not for modules
-  unless ($is_module) {
+  if ($is_module) {
+    # Module mode: skip full preamble (@INC etc. are already live in the running SBCL),
+    # but still inject the default package switch so subs are defined in :main, not :pcl.
+    # Any explicit 'package Foo' in the module will override this immediately.
+    $output =~ s/(\(in-package :pcl\))/$1\n(p-defpackage :main)\n(in-package :main)/;
+  } else {
     my $preamble = build_preamble($source_file);
     $output =~ s/(\(in-package :pcl\))/$1\n$preamble/;
   }

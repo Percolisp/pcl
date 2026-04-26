@@ -254,6 +254,8 @@ sub _qualified_sub_to_cl {
     my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
                   lc($pkg) eq 'method' || lc($pkg) eq 'function')
                  ? "|$pkg|" : $pkg;
+    # Register package so it gets pre-declared
+    $self->environment->add_referenced_package($pkg) if $self->environment;
     return "${cl_pkg}::pl-$bare";
   }
   return "pl-$name";
@@ -557,11 +559,13 @@ sub _insert_variable_forward_declarations {
     # (including inside overload handler lambdas, sub bodies, etc.).
     # e.g. o::$str, o::$num inside overload lambdas need defvar in their package.
     # Skip special packages (ENV, INC, SIG, pcl, main) and already-defvar'd forms.
+    # Also handles pipe-quoted multi-component package names: |do::not::overwrite|::$this
     unless ($line =~ /^\s*\(defvar\s/) {
       my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl main);
-      while ($line =~ /\b([a-zA-Z_]\w*)::([\$\@\%][a-zA-Z_]\w*)/g) {
-        my ($pkg, $var) = ($1, $2);
-        next if $skip_pkg{$pkg};
+      while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][a-zA-Z_]\w*)/g) {
+        my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
+        my $bare_pkg = defined($1) ? $1 : $2;
+        next if $skip_pkg{$bare_pkg};
         next if $var =~ /^[\$\@\%][0-9]/;  # special: $1, $2...
         $cross_pkg_vars{"$pkg\::$var"} = [$pkg, $var];
       }
@@ -620,8 +624,9 @@ sub _insert_variable_forward_declarations {
     my %already_cross_declared;
     for my $section (@{$self->_sections}) {
       for my $line (@{$section->{preamble}}, @{$section->{declarations}}) {
-        if ($line =~ /\(defvar\s+(\w+)::([\$\@\%]\w+)\b/) {
-          $already_cross_declared{"$1\::$2"} = 1;
+        if ($line =~ /\(defvar\s+(?:(\w+)|\|([^|]+)\|)::([\$\@\%]\w+)\b/) {
+          my $pkg = defined($1) ? $1 : "|$2|";
+          $already_cross_declared{"$pkg\::$3"} = 1;
         }
       }
     }
@@ -1291,8 +1296,20 @@ sub _process_our_declaration {
   # Compile-time declarations (defvar) go to declarations bucket.
   # Separate declaration from initialization (runtime) to match Perl:
   # 'our $x = 1; BEGIN { $x = 2 }' → at runtime $x becomes 1 (init overwrites BEGIN)
+  # When inside a sub, _insert_variable_forward_declarations won't see our variables
+  # at file scope, so we must emit defvars explicitly here.
   $self->_with_bucket('declarations', sub {
     $self->_emit(";; $perl_code");
+    if ($self->environment->in_subroutine > 0) {
+      for my $var (@vars) {
+        my $sigil = substr($var, 0, 1);
+        my $init = $sigil eq '$' ? '(make-p-box nil)'
+                 : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                 :                 '(make-hash-table :test #\'equal)';
+        my $cl_var = "${pkg}::${var}";
+        $self->_emit("(defvar $cl_var $init)");
+      }
+    }
   });
 
   if ($init_idx >= 0) {
@@ -1594,6 +1611,68 @@ sub _process_isa_declaration {
   $self->_emit("");
 }
 
+# Process 'use base' / 'use parent' - equivalent to push @ISA, ...
+# Also sets up CLOS inheritance for MRO.
+sub _process_use_base {
+  my ($self, $stmt, $perl_code, $module) = @_;
+
+  # Extract parent class names from the argument list
+  my @parents;
+  my $skip_next = 0;
+  for my $child ($stmt->children) {
+    my $ref = ref($child);
+    # 'use parent -norequire, qw(...)' — skip the -norequire flag
+    if ($ref eq 'PPI::Token::Operator' && $child->content eq '-') {
+      $skip_next = 1; next;
+    }
+    if ($skip_next && $ref eq 'PPI::Token::Word') { $skip_next = 0; next; }
+    $skip_next = 0;
+    if ($ref eq 'PPI::Token::QuoteLike::Words') {
+      my $content = $child->content;
+      $content =~ s/^qw[^\w\s]//;
+      $content =~ s/[^\w\s]$//;
+      push @parents, split /\s+/, $content;
+    }
+    elsif ($ref eq 'PPI::Token::Quote::Single' || $ref eq 'PPI::Token::Quote::Double') {
+      push @parents, $child->string;
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      for my $item ($child->children) {
+        next if ref($item) =~ /Whitespace|Separator/;
+        if (ref($item) eq 'PPI::Token::Quote::Single' || ref($item) eq 'PPI::Token::Quote::Double') {
+          push @parents, $item->string;
+        }
+      }
+    }
+  }
+  @parents = grep { /\S/ } @parents;
+  return unless @parents;
+
+  my $pkg = $self->environment->current_package;
+
+  # Redefine CLOS class with parents for MRO
+  my $cl_class = $self->_pkg_to_clos_class($pkg);
+  my $parents_cl = join(' ', map {
+    my $cls = $self->_pkg_to_clos_class($_);
+    my $pkg_prefix = ($_ =~ /::/) ? "|$_|" : $_;
+    "$pkg_prefix\:\:$cls"
+  } @parents);
+  $self->environment->set_isa($pkg, \@parents);
+  $self->_with_bucket('preamble', sub {
+    $self->_emit(";; $perl_code");
+    $self->_emit("(defclass $cl_class ($parents_cl) ())");
+  });
+
+  # Declare @ISA in declarations bucket, push parents at load time
+  $self->_with_bucket('declarations', sub {
+    $self->_emit("(defvar \@ISA (make-array 0 :adjustable t :fill-pointer 0))");
+  });
+  for my $parent (@parents) {
+    $self->_emit("(p-push \@ISA \"$parent\")");
+  }
+  $self->_emit("");
+}
+
 # Extract parent class names from an @ISA initializer expression
 # Handles: qw(Parent1 Parent2), ('Parent1', 'Parent2'), ("Parent")
 sub _extract_parent_classes {
@@ -1830,6 +1909,28 @@ sub _process_local_declaration {
     }
   }
 
+  # Detect 'local our $var' — the 'our' qualifier means a package variable.
+  # Emit a defvar so the variable is declared as special before local binds it.
+  my $has_our = (@non_ws && ref($non_ws[0]) eq 'PPI::Token::Word'
+                          && $non_ws[0]->content eq 'our');
+  if ($has_our) {
+    my $pkg = $self->environment ? $self->environment->current_package : 'main';
+    $self->_with_bucket('declarations', sub {
+      for my $p (@non_ws[1..$#non_ws]) {
+        next if ref($p) ne 'PPI::Token::Symbol';
+        my $var = $p->content;
+        last if $var =~ /^=/; # stop at '=' (won't happen but be safe)
+        my $sigil = substr($var, 0, 1);
+        my $init  = $sigil eq '$' ? '(make-p-box nil)'
+                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                  :                 "(make-hash-table :test #'equal)";
+        my $cl_var = "${pkg}::${var}";
+        $self->_emit("(defvar $cl_var $init)");
+        $self->environment->add_our_variable($pkg, $var) if $self->environment;
+      }
+    });
+  }
+
   # Find variable and optional initializer
   my @vars;
   my $init_idx = -1;
@@ -1861,12 +1962,15 @@ sub _process_local_declaration {
     # local $x = value
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
-    my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
 
     my $var = $vars[0];
     # For qualified vars (e.g. A::@ISA), the sigil is embedded after '::'.
     # For simple vars (e.g. @arr), it is the first character.
     my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
+
+    # Use LIST_CTX for array/hash RHS so '..' generates a range, not a flip-flop
+    my $rhs_ctx = ($sigil eq '@' || $sigil eq '%') ? 1 : 0;
+    my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, $rhs_ctx) // 'nil';
 
     if ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
@@ -3354,6 +3458,7 @@ sub _process_while_statement {
   # Get condition CL code
   my $cond_cl = $cond ? $self->_parse_condition($cond) : "t";
   $cond_cl //= "t";
+  $cond_cl =~ s/^\s+//;  # generate() prepends indentation; strip it for regex checks below
 
   # while (<FH>) with no explicit assignment → implicitly assign to $_
   # PPI: condition has a single Expression containing a single QuoteLike::Readline
@@ -3383,6 +3488,9 @@ sub _process_while_statement {
       $cond_cl = "(progn $cond_cl (p-defined $var))";
     } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
       $cond_cl = "(p-defined $cond_cl)";
+    } elsif ($cond_cl =~ /^\(p-setf\s+\$_\s+\((?:$auto_pat)\b/) {
+      # (p-setf $_ (p-readline ...)) — implicit $_ assign, terminate on undef
+      $cond_cl = "(progn $cond_cl (p-defined \$_))";
     } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
       # Bare call: assign to $_ and use defined-check (Perl's implicit $_ aliasing)
       $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
@@ -3607,7 +3715,7 @@ sub _process_foreach_loop {
   }
 
   my $list_cl = @list_parts
-    ? ($self->_parse_expression(\@list_parts, $stmt) // "(list)")
+    ? ($self->_parse_expression(\@list_parts, $stmt, 1) // "(list)")  # 1 = LIST_CTX
     : "(list)";
 
   # Convert (progn ...) to (vector ...) for foreach list context
@@ -3660,7 +3768,8 @@ sub _process_sub_statement {
     if ($ref eq 'PPI::Token::Word' && $child->content ne 'sub'
         && $child->content ne 'my' && $child->content ne 'our'
         && $child->content ne 'state') {
-      $name = $child->content unless $name;
+      # Concatenate: PPI may split "main::::foo" into "main::" + "::foo"
+      $name .= $child->content unless $block;
     }
     elsif ($ref eq 'PPI::Token::Prototype') {
       $prototype = $child->content;
@@ -4258,8 +4367,14 @@ sub _process_include_statement {
     return;
   }
 
+  # Handle 'use base' / 'use parent' - set up @ISA inheritance
+  if ($module eq 'base' || $module eq 'parent') {
+    $self->_process_use_base($stmt, $perl_code, $module);
+    return;
+  }
+
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|parent|base|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re|version)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
@@ -4282,10 +4397,11 @@ sub _process_include_statement {
     return;
   }
 
-  # require inside a sub body must stay inline (not hoisted) so that:
+  # require inside a sub or block body must stay inline (not hoisted) so that:
   # 1. eval { require Foo } can catch load failures properly
-  # 2. Perl semantics: require inside a sub runs at call time, not compile time
-  if ($type eq 'require' && $self->environment->in_subroutine > 0) {
+  # 2. Perl semantics: require inside a block runs at runtime, not compile time
+  # 3. require inside SKIP { } must not run when the block is skipped
+  if ($type eq 'require' && ($self->environment->in_subroutine > 0 || $self->_block_depth > 0)) {
     $self->_emit(";; $perl_code");
     $self->_emit("(p-require \"$module\")");
     $self->_emit("");

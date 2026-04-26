@@ -451,4 +451,31 @@ my $w = new WIDGET;
 print $w->ping(), "\n";
 ', "pong\n");
 
+# ── grep/map {HASH}->{key} — block and paren form deref ──────────────────────
+# Fixes:
+#  1. Block-form: inner `my $deref_skip` shadowed outer, leaving -> in rest-list
+#  2. Paren-form: deref chain was not handled at all in the paren path
+
+test_transpile('grep paren-form hash deref selects matching elements', '
+my @res = grep({a=>$_}->{a}, ("chobb", "", "foo"));
+print scalar(@res), "\n";
+print $res[0], "\n";
+', "2\nchobb\n");
+
+test_transpile('grep block-form hash deref selects matching elements', '
+my @res = grep {a=>$_}->{a}, ("chobb", "", "foo");
+print scalar(@res), "\n";
+print $res[0], "\n";
+', "2\nchobb\n");
+
+test_transpile('map paren-form hash deref extracts key', '
+my @res = map({a=>$_}->{a}, ("x", "y"));
+print join(",", @res), "\n";
+', "x,y\n");
+
+test_transpile('map block-form hash deref extracts key', '
+my @res = map {a=>$_}->{a}, ("x", "y");
+print join(",", @res), "\n";
+', "x,y\n");
+
 done_testing;

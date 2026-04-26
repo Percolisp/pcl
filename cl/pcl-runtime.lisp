@@ -48,6 +48,10 @@
    #:p-chain-cmp
    ;; Range operator
    #:p-.. #:p-...
+   ;; Flip-flop operator (scalar context .. and ...)
+   #:p-flipflop #:p-flipflop-3 #:p-flipflop-num #:p-flipflop-num-3
+   ;; Dualvar
+   #:p-dualvar
    ;; Logical
    #:p-&& #:p-|| #:p-! #:p-not #:p-and #:p-or #:p-xor #:p-//
    ;; Bitwise
@@ -99,7 +103,8 @@
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
-   #:p-make-typeglob #:p-glob-assign #:p-glob-copy
+   #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
+   #:p-dynamic-typeglob #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
@@ -124,7 +129,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
-   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
    ;; Call depth tracking (for p-caller at top level)
@@ -170,10 +175,17 @@
 ;;; when p-sub's compile-time shadow calls have already added symbols to the
 ;;; shadow list before defpackage re-evaluates at load time.
 (defmacro p-defpackage (name &rest options)
-  "Create/update a Perl package. Defaults to (:use :cl :pcl) when no options given."
+  "Create/update a Perl package. Defaults to (:use :cl :pcl) when no options given.
+   Also ensures @ISA is declared in the package (all Perl packages have @ISA)."
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (handler-bind ((warning #'muffle-warning))
-       (defpackage ,name ,@(or options '((:use :cl :pcl)))))))
+       (defpackage ,name ,@(or options '((:use :cl :pcl)))))
+     (let* ((pkg (find-package ,(string name)))
+            (isa-sym (when pkg (intern "@ISA" pkg))))
+       (when (and isa-sym (not (boundp isa-sym)))
+         (proclaim (list 'special isa-sym))
+         (setf (symbol-value isa-sym)
+               (make-array 0 :adjustable t :fill-pointer 0))))))
 
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
@@ -313,8 +325,7 @@
 ;;; Child exit status ($?)
 (defvar $? 0 "Child process exit status from last system/backtick")
 
-;;; Input line number ($.)
-(defvar |$.| 0 "Input line number of last filehandle read")
+;;; Input line number ($.) - defined later after make-p-box (see Boxed special variables section)
 
 ;;; Program name ($0)
 (defvar $0 (or (car sb-ext:*posix-argv*) "perl") "Program name")
@@ -341,14 +352,26 @@
 ;;; Regex code-block result ($^R) - result of last successful (?{...}) eval
 (defvar |$^R| nil "Result of last successful (?{...}) regex code block")
 
-;;; System error ($!) - returns errno as string
+;;; System error ($!) - dualvar: numeric = errno integer, string = strerror
 (defun p-errno-string ()
-  "Return the current system error message (like Perl's $!)"
+  "Return $! as dualvar: (to-number ...) = errno, (to-string ...) = strerror.
+   When errno=0, returns \"\" (falsy) to preserve Perl's !$! truthiness semantics."
   (let ((errno (sb-alien:get-errno)))
     (if (zerop errno)
-        ""
-        (or (sb-int:strerror errno)
-            (format nil "Unknown error ~D" errno)))))
+        ""   ; errno=0: falsy like Perl's $! when no error
+        (let ((msg (or (sb-int:strerror errno)
+                       (format nil "Unknown error ~D" errno))))
+          ;; Build a dualvar box so $!+0 gives the integer and $! in string context gives the message
+          (let ((box (%make-p-box :value msg)))
+            (setf (p-box-sv box) msg (p-box-sv-ok box) t)
+            (setf (p-box-nv box) (float errno) (p-box-nv-ok box) t)
+            box)))))
+
+(defun (setf p-errno-string) (val)
+  "Perl $! = N — set errno to integer N (clears it when N=0)"
+  (setf (sb-alien:extern-alien "errno" sb-alien:int)
+        (truncate (to-number (if (p-box-p val) (unbox val) val))))
+  val)
 
 ;;; Wantarray context variable
 (defvar *wantarray* nil "True when list context is expected")
@@ -394,6 +417,15 @@
 
 ;;; ============================================================
 ;;; Tie proxy — stored inside a p-box when the variable is tied
+(defun p-dualvar (num str)
+  "Perl Scalar::Util::dualvar — create a scalar with separate numeric and string values."
+  (let ((n (to-number (unbox num)))
+        (s (to-string (unbox str))))
+    (let ((box (%make-p-box :value s)))
+      (setf (p-box-sv box) s (p-box-sv-ok box) t)
+      (setf (p-box-nv box) n (p-box-nv-ok box) t)
+      box)))
+
 ;;; ============================================================
 ;;; When tie() is called on a scalar, the box's value slot is replaced
 ;;; with a p-tie-proxy.  unbox() calls FETCH; box-set() calls STORE.
@@ -423,6 +455,8 @@
 ;;; Boxed special variables (must be after make-p-box definition)
 ;;; Default variable ($_) - p-box so p-scalar-= / box-set work correctly
 (defvar $_ (make-p-box nil) "Perl's $_ - default variable")
+;;; Input line number ($.) - p-box so box-set / let dynamic binding works
+(defvar |$.| (make-p-box nil) "Input line number of last filehandle read")
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
 (defvar $@ (make-p-box "") "Error from last eval")
 ;;; Input record separator ($/)
@@ -447,6 +481,11 @@
 (defvar |$:| (make-p-box " \n-") "FORMAT_LINE_BREAK_CHARACTERS - word-break chars for write")
 (defvar |$^L| (make-p-box (string #\Page)) "FORMAT_FORMFEED - formfeed char for write")
 (defvar |$^A| (make-p-box "") "ACCUMULATOR - for formline/write output")
+(defvar |$^P| (make-p-box 0)  "PERLDB - internal debugger flag (0 = not debugging)")
+(defvar |$^D| (make-p-box 0)  "DEBUGGING - debugging flags")
+(defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
+(defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")
+(defvar |$^M| (make-p-box *p-undef*) "emergency memory pool")
 (defvar |$^| (make-p-box "") "FORMAT_TOP_NAME - top-of-page format name")
 ;; %SIG: signal/exception handler hash
 ;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
@@ -754,8 +793,16 @@
                    ((functionp v) (object-address v))  ; code ref: address
                    ((p-typeglob-p v) (object-address v))  ; typeglob: numeric = address
                    (t 0))))
-          (setf (p-box-nv box) n
-                (p-box-nv-ok box) t)
+          ;; Don't cache address-based NV: SBCL's GC can move objects,
+          ;; making the cached address stale while a freshly-computed address
+          ;; gives a different value for the same logical object.
+          (unless (or (p-box-p v)
+                      (hash-table-p v)
+                      (and (vectorp v) (not (stringp v)))
+                      (functionp v)
+                      (p-typeglob-p v))
+            (setf (p-box-nv box) n
+                  (p-box-nv-ok box) t))
           n))))
 
 (defun stringify-value (v)
@@ -2137,15 +2184,24 @@
                                 (let ((call-idx (if positional-idx
                                                     positional-idx
                                                     arg-idx)))
-                                  (when (>= call-idx n-args)
-                                    (p-warn (make-p-box
-                                              (format nil "Missing argument in ~A"
-                                                      *p-sprintf-caller*))))
-                                  (multiple-value-bind (result new-arg-idx)
-                                      (sprintf-one type-char flags width precision args call-idx)
-                                    (write-string result out)
-                                    (setf arg-idx (if positional-idx arg-idx new-arg-idx))
-                                    (setf i j))))
+                                  (if (and positional-idx (< call-idx 0))
+                                      ;; %0$x: positional 0 is invalid (1-based), output spec literally
+                                      (progn
+                                        (p-warn (make-p-box
+                                                  (format nil "Invalid conversion in ~A: \"~A\""
+                                                          *p-sprintf-caller* (string type-char))))
+                                        (write-string (concatenate 'string "%" (subseq fmt-str (1+ i) j)) out)
+                                        (setf i j))
+                                      (progn
+                                        (when (>= call-idx n-args)
+                                          (p-warn (make-p-box
+                                                    (format nil "Missing argument in ~A"
+                                                            *p-sprintf-caller*))))
+                                        (multiple-value-bind (result new-arg-idx)
+                                            (sprintf-one type-char flags width precision args call-idx)
+                                          (write-string result out)
+                                          (setf arg-idx (if positional-idx arg-idx new-arg-idx))
+                                          (setf i j))))))
                               ;; No type char found, output literally
                               (progn
                                 (write-string (subseq fmt-str i j) out)
@@ -2694,6 +2750,9 @@
                                  (aref ,src-vec i)
                                  *p-undef*)))
               ,src-vec))))
+    ;; $! as lvalue: (p-setf (p-errno-string) val) -> set C errno
+    ((and (listp place) (eq (car place) 'p-errno-string))
+     `(setf (p-errno-string) ,value))
     ;; pos as lvalue: (p-setf (p-pos var) new-val) -> (p-pos var new-val)
     ((and (listp place) (eq (car place) 'p-pos))
      `(p-pos ,(cadr place) ,value))
@@ -3118,6 +3177,94 @@
   (p-.. start end))
 
 ;;; ============================================================
+;;; Flip-flop operators (scalar context .. and ...)
+;;; Each usage of .. in scalar context gets a unique integer ID.
+;;; State is stored in *pcl-flipflop-states* keyed by ID.
+;;; State: NIL = off, fixnum N >= 1 = on with counter N.
+;;; ============================================================
+
+(defvar *pcl-flipflop-states* (make-hash-table :test 'equal))
+
+(defun %p-flipflop-lineno ()
+  "Get current line number ($.) for numeric flip-flop.
+   Returns integer, treating undef as 0 (with uninitialized warning)."
+  (let ((v (unbox $\.)))
+    (if (or (null v) (eq v *p-undef*))
+        (progn
+          (p-warn "Use of uninitialized value $. in numeric eq (==)")
+          0)
+        (truncate (to-number v)))))
+
+(defmacro p-flipflop (id left-form right-form)
+  "Perl .. flip-flop in scalar context (boolean operands).
+   id: compile-time integer literal, unique per .. usage in source.
+   left-form/right-form: lazily evaluated Perl expressions."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")))
+    `(let ((,sv (gethash ,id *pcl-flipflop-states*)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (p-true-p ,right-form)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (p-true-p ,left-form)
+               (if (p-true-p ,right-form)
+                   "1E0"
+                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
+               "")))))
+
+(defmacro p-flipflop-3 (id left-form right-form)
+  "Perl ... flip-flop in scalar context (boolean operands, no immediate right-check)."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")))
+    `(let ((,sv (gethash ,id *pcl-flipflop-states*)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (p-true-p ,right-form)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (p-true-p ,left-form)
+               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
+               "")))))
+
+(defmacro p-flipflop-num (id left-num right-num)
+  "Perl .. numeric flip-flop in scalar context.
+   Compares current $. (line number) against integer literal operands."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
+    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
+            (,ln (%p-flipflop-lineno)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (= ,ln ,right-num)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (= ,ln ,left-num)
+               (if (= ,ln ,right-num)
+                   "1E0"
+                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
+               "")))))
+
+(defmacro p-flipflop-num-3 (id left-num right-num)
+  "Perl ... numeric flip-flop (no immediate right-check on first fire)."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
+    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
+            (,ln (%p-flipflop-lineno)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (= ,ln ,right-num)
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (= ,ln ,left-num)
+               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
+               "")))))
+
+;;; ============================================================
 ;;; String Comparison
 ;;; ============================================================
 
@@ -3299,8 +3446,10 @@
       (logxor (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
 
 (defun p-bit-not (a)
-  "Perl bitwise NOT - mask to 64 bits like Perl's UV"
-  (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF))
+  "Perl bitwise NOT - string NOT if non-numeric string, integer NOT otherwise"
+  (if (p-string-bitwise-operand-p a)
+      (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))
+      (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF)))
 
 (defun p-<< (a b)
   "Perl left shift — clamp shift count to prevent SBCL bignum explosion"
@@ -3465,8 +3614,21 @@
   "Set array length by setting $#array. Perl semantics:
    - Growing: extends with undef-boxed elements
    - Shrinking: truncates (adjusts fill-pointer)
+   - If arr is a scalar box containing undef, auto-vivifies an array ref inside it.
    Returns new-last-index."
-  (let* ((a (unbox arr))
+  (let* ((inner (unbox arr))
+         ;; Auto-vivify: if arr is a box with nil/undef, create an array inside it
+         (a (cond
+              ((and (p-box-p arr) (or (null inner) (eq inner *p-undef*)))
+               (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+                 (box-set arr (make-p-box new-arr))
+                 new-arr))
+              ;; Already an array ref: unwrap one more level
+              ((p-box-p inner)
+               (let ((v (unbox inner)))
+                 (if (and v (vectorp v) (not (stringp v))) v inner)))
+              ((and inner (vectorp inner) (not (stringp inner))) inner)
+              (t arr)))
          (nli (truncate (to-number new-last-index)))
          (new-len (1+ nli))
          (cur-len (length a)))
@@ -4263,7 +4425,8 @@
 
 (defun p-delete-hash-slice (hash &rest keys)
   "Perl delete for hash slices: delete @hash{k1, k2, ...}
-   Handles hash references (unboxes) and vector/list key arguments."
+   Handles hash references (unboxes) and vector/list key arguments.
+   Empty slice returns nil (undef) per [perl #29127]."
   (let* ((h (unbox hash))
          (flat-keys (loop for key in keys
                           if (and (vectorp key) (not (stringp key)))
@@ -4271,13 +4434,14 @@
                           else if (and (listp key) (not (null key)))
                             append key
                           else
-                            collect key))
-         (result (make-array (length flat-keys) :adjustable t :fill-pointer 0)))
-    (dolist (key flat-keys)
-      (let ((k (to-string key)))
-        (vector-push-extend (gethash k h *p-undef*) result)
-        (remhash k h)))
-    result))
+                            collect key)))
+    (when (null flat-keys) (return-from p-delete-hash-slice nil))
+    (let ((result (make-array (length flat-keys) :adjustable t :fill-pointer 0)))
+      (dolist (key flat-keys)
+        (let ((k (to-string key)))
+          (vector-push-extend (gethash k h *p-undef*) result)
+          (remhash k h)))
+      result)))
 
 (defun p-delete-kv-hash-slice (hash &rest keys)
   "Perl delete for KV hash slices: delete %hash{k1, k2, ...}
@@ -4344,11 +4508,28 @@
     result))
 
 (defun p-stash (pkg-name)
-  "Return package stash (symbol table) as a hash.
-   This is a simplified stub - full implementation would mirror Perl's stash."
-  (declare (ignore pkg-name))
-  ;; Return an empty hash for now - stash manipulation is rarely essential
-  (make-hash-table :test 'equal))
+  "Return the package stash as a hash mapping Perl symbol names to code-ref boxes.
+   Keys are lowercase Perl sub names; values are (make-p-box function).
+   delete $::{foo} → (p-delete (p-stash \"main\") \"foo\") returns the code ref.
+   This is a snapshot (not a live view), sufficient for delete/lookup of existing subs."
+  (let* ((pkg-str (if (or (string= (string-downcase pkg-name) "main")
+                          (string= pkg-name ""))
+                      "MAIN"
+                      (string-upcase pkg-name)))
+         (pkg (or (find-package pkg-str) (find-package pkg-name)))
+         (h (make-hash-table :test 'equal)))
+    (when pkg
+      (do-symbols (sym pkg)
+        (when (and (eq (symbol-package sym) pkg)
+                   (fboundp sym))
+          (let* ((name (symbol-name sym))
+                 (n (length name)))
+            ;; PL-xxx → Perl sub "xxx"
+            (when (and (>= n 4) (string= (subseq name 0 3) "PL-"))
+              (let ((perl-name (string-downcase (subseq name 3))))
+                (setf (gethash perl-name h)
+                      (make-p-box (symbol-function sym)))))))))
+    h))
 
 ;;; ============================================================
 ;;; Control Flow
@@ -5182,10 +5363,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Respects $/ (input record separator):
      default newline = line mode, undef = slurp, \"\" = paragraph, other = custom separator.
    Returns nil at EOF. If no filehandle given, reads from *standard-input*.
-   Note: Unlike CL's read-line, this keeps the trailing separator (like Perl)."
+   Note: Unlike CL's read-line, this keeps the trailing separator (like Perl).
+   Updates $. (input line number) on each successful read."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
     (when stream
+      (handler-case
       (cond
         ;; Slurp mode: $/ = undef - read entire file
         ((null sep)
@@ -5240,11 +5423,31 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            (string= result sep
                                     :start1 (- (length result) sep-len)))
                    do (loop-finish))
-           (if (zerop (length result)) nil (coerce result 'string))))))))
+           (if (zerop (length result)) nil (coerce result 'string)))))
+      ;; Any stream error (e.g. reading from a directory) → return nil like Perl
+      (stream-error () nil)
+      (error () nil)))))
+
+(defun %p-readline-all (fh)
+  "Read all remaining records from FH into an adjustable vector of boxed strings.
+   Updates $. for each line. Used by p-readline in list context."
+  (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+    (loop
+      (let ((line (%p-readline-impl fh)))
+        (if line
+            (progn
+              (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|)))))
+              (vector-push-extend (make-p-box line) result))
+            (return result))))))
 
 (defmacro p-readline (&rest args)
-  "Perl readline / <FH> — pass args through; code-gen already quotes barewords."
-  `(%p-readline-impl ,@args))
+  "Perl readline / <FH> — in list context reads all records; in scalar reads one."
+  `(if *wantarray*
+       (%p-readline-all ,(if args (car args) nil))
+       (let ((%rl-val (%p-readline-impl ,@args)))
+         (when %rl-val
+           (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|))))))
+         %rl-val)))
 
 ;;; ============================================================
 ;;; Directory I/O Functions
@@ -5455,11 +5658,32 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-chdir (&optional dir)
   "Perl chdir - change current directory. Returns true on success.
    Also updates *default-pathname-defaults* for Lisp path resolution."
-  (let ((path (if dir (to-string dir) (sb-posix:getenv "HOME"))))
+  (let ((path
+         (if (null dir)
+             ;; No argument: try HOME then LOGDIR
+             (let ((home (sb-posix:getenv "HOME")))
+               (if home
+                   home
+                   (let ((logdir (sb-posix:getenv "LOGDIR")))
+                     (if logdir
+                         logdir
+                         ;; No HOME or LOGDIR: set EINVAL and fail
+                         (progn
+                           (setf (sb-alien:extern-alien "errno" sb-alien:int) 22)
+                           (return-from p-chdir nil))))))
+             ;; Argument provided: check for filehandle/dirhandle
+             (let ((raw (if (p-box-p dir) (p-box-value dir) dir)))
+               (if (or (streamp raw)
+                       (and (consp raw) (integerp (car raw))) ; dirhandle stored as (idx . entries)
+                       (and (p-box-p dir)                     ; dirhandle box via opendir
+                            (let ((v (p-box-value dir)))
+                              (and (consp v) (integerp (car v))))))
+                   ;; It's a filehandle or dirhandle: fchdir not implemented
+                   (p-die "The fchdir function is unimplemented at pcl line 0.\n")
+                   (to-string dir))))))
     (handler-case
         (progn
           (sb-posix:chdir path)
-          ;; Update *default-pathname-defaults* so relative paths resolve correctly
           (setf *default-pathname-defaults* (truename (pathname path)))
           t)
       (error () nil))))
@@ -6085,9 +6309,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-find-module-package (module-name)
   "Find CL package for a Perl module.
-   Tries: uppercase name, pipe-quoted name (for Foo::Bar)."
+   Tries: uppercase name, exact-case name (for Foo::Bar packages)."
   (or (find-package (string-upcase module-name))
-      (find-package (format nil "|~A|" module-name))))
+      (find-package module-name)))
 
 (defun p-perl-symbol-to-cl-name (sym-name)
   "Convert Perl symbol name to CL symbol name.
@@ -6107,23 +6331,75 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-import-perl-symbol (sym-name from-pkg to-pkg)
   "Import a Perl symbol from FROM-PKG to TO-PKG.
-   Handles sigils appropriately."
+   For functions: sets fdefinition in TO-PKG so compiled lambdas that
+   already interned the symbol (before the import) get the right binding.
+   For variables: shadowing-import to make the binding accessible."
   (let* ((cl-name (p-perl-symbol-to-cl-name sym-name))
-         (sym (find-symbol cl-name from-pkg)))
-    (when sym
-      (shadowing-import sym to-pkg))))
+         (from-sym (find-symbol cl-name from-pkg)))
+    (when from-sym
+      (let ((name (unbox sym-name)))
+        (cond
+          ;; Variable sigil: use shadowing-import (variable bindings)
+          ((and (stringp name) (plusp (length name))
+                (member (char name 0) '(#\$ #\@ #\%)))
+           (shadowing-import from-sym to-pkg))
+          ;; Function: set fdefinition in TO-PKG so already-compiled
+          ;; lambdas with an interned-but-unbound local symbol get the fn.
+          ((fboundp from-sym)
+           (let ((to-sym (intern cl-name to-pkg)))
+             (setf (fdefinition to-sym) (fdefinition from-sym))))
+          ;; Symbol exists but no function: still do shadowing-import
+          (t
+           (shadowing-import from-sym to-pkg)))))))
+
+(defun %p-get-export-list (pkg var-name)
+  "Helper: get a vector-valued package variable as a list, or nil."
+  (let ((sym (find-symbol var-name pkg)))
+    (when (and sym (boundp sym))
+      (let ((val (symbol-value sym)))
+        (when (and val (vectorp val))
+          (coerce val 'list))))))
+
+(defun %p-expand-import-tags (imports pkg)
+  "Expand export-tag items (starting with ':') in IMPORTS list using %EXPORT_TAGS.
+   ':DEFAULT' expands to @EXPORT; ':ALL' expands to @EXPORT_OK; ':TAG' looks up
+   %EXPORT_TAGS{TAG}.  Plain names are kept as-is."
+  (let ((result '()))
+    (dolist (item imports)
+      (let ((name (unbox item)))
+        (if (and (stringp name) (plusp (length name)) (char= (char name 0) #\:))
+            (let ((tag (subseq name 1)))
+              (cond
+                ((string= tag "DEFAULT")
+                 (let ((lst (%p-get-export-list pkg "@EXPORT")))
+                   (when lst (setf result (append result lst)))))
+                ((string= tag "ALL")
+                 (let ((lst (%p-get-export-list pkg "@EXPORT_OK")))
+                   (when lst (setf result (append result lst)))))
+                (t
+                 ;; Look up %EXPORT_TAGS{tag}
+                 (let ((tags-sym (find-symbol "%EXPORT_TAGS" pkg)))
+                   (when (and tags-sym (boundp tags-sym))
+                     (let* ((tags-hash (symbol-value tags-sym))
+                            (tag-val (when (hash-table-p tags-hash)
+                                       (or (gethash tag tags-hash)
+                                           (gethash (string-upcase tag) tags-hash)))))
+                       (when (and tag-val (vectorp tag-val))
+                         (setf result (append result (coerce tag-val 'list))))))))))
+            ;; Plain name: keep as-is
+            (push name result))))
+    (nreverse result)))
 
 (defun p-import-exports (module-name to-pkg &optional specific-imports)
-  "Import symbols from module's @EXPORT (or specific list) into TO-PKG."
+  "Import symbols from module's @EXPORT (or specific list) into TO-PKG.
+   Handles export tags like :DEFAULT, :ALL, :TAGNAME."
   (let ((pkg (p-find-module-package module-name)))
     (when pkg
-      (let ((imports (or specific-imports
-                         ;; Get @EXPORT from module's package
-                         (let ((export-sym (find-symbol "@EXPORT" pkg)))
-                           (when (and export-sym (boundp export-sym))
-                             (let ((val (symbol-value export-sym)))
-                               (when (and val (vectorp val))
-                                 (coerce val 'list))))))))
+      (let* ((raw-imports (or specific-imports
+                               (%p-get-export-list pkg "@EXPORT")))
+             (imports (if specific-imports
+                          (%p-expand-import-tags raw-imports pkg)
+                          raw-imports)))
         (dolist (sym-name imports)
           (p-import-perl-symbol sym-name pkg to-pkg))))))
 
@@ -6206,6 +6482,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (vector-push-extend item result))))
     result))
 
+(defun %p-map-copy-scalar (r)
+  "Copy a simple scalar box to prevent aliasing in map results.
+   When a map block ends with an lvalue like ($y .= $x), it returns the box $y.
+   If we store the box itself, later mutations to $y corrupt the map result.
+   Reference types (hash/array/code) and blessed objects are NOT copied."
+  (if (and (p-box-p r)
+           (not (p-box-class r))
+           (let ((v (p-box-value r)))
+             (not (or (hash-table-p v) (and (vectorp v) (not (stringp v))) (functionp v)
+                      (p-box-p v) (p-typeglob-p v)))))
+      (make-p-box (unbox r))
+      r))
+
 (defun p-grep (fn &rest items)
   "Perl grep - fn receives item as $_ parameter.
    Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
@@ -6227,7 +6516,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (if (and (vectorp r) (not (stringp r)))
                    (loop for e across r
                          do (vector-push-extend e result))
-                   (vector-push-extend r result))))
+                   (vector-push-extend (%p-map-copy-scalar r) result))))
     result))
 
 (defun p-sort-get-fn (val)
@@ -6297,18 +6586,32 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl join(SEP, LIST) - joins elements with separator.
    Handles both (join SEP @array) and (join SEP elem1 elem2 ...).
    Arrays and vectors in the argument list are flattened."
-  (let ((s (to-string sep))
-        ;; Flatten all arrays/vectors in the items list
-        (elements (loop for item in items
-                        for val = (unbox item)
-                        if (and (vectorp val) (not (stringp val)))
-                          append (coerce val 'list)
-                        else if (and (listp val) val)
-                          append val
-                        else
-                          collect val)))
-    (format nil (concatenate 'string "~{~A~^" s "~}")
-            (mapcar #'to-string elements))))
+  (let* (;; Pre-count items WITHOUT calling FETCH (to decide sep evaluation)
+         ;; Tied scalars in items are counted as 1 without fetching
+         (item-count (loop for item in items
+                           for raw = (if (p-box-p item) (p-box-value item) item)
+                           if (and (vectorp raw) (not (stringp raw)))
+                             sum (length raw)
+                           else if (and (listp raw) raw)
+                             sum (length raw)
+                           else sum 1))
+         ;; Perl optimization: sep is NOT evaluated when ≤1 elements
+         ;; (FETCH not called on tied separator — matches Perl's join optimization)
+         ;; For ≥2 elements, sep is evaluated FIRST (Perl evaluation order)
+         (s (when (> item-count 1) (to-string sep)))
+         ;; Now flatten and evaluate elements (FETCH called for tied element vars)
+         (elements (loop for item in items
+                         for val = (unbox item)
+                         if (and (vectorp val) (not (stringp val)))
+                           append (coerce val 'list)
+                         else if (and (listp val) val)
+                           append val
+                         else
+                           collect val)))
+    (if s
+        (format nil (concatenate 'string "~{~A~^" s "~}")
+                (mapcar #'to-string elements))
+        (if elements (to-string (car elements)) ""))))
 
 (defun p-split (pattern str &optional limit)
   "Perl split - split string by pattern.
@@ -6436,9 +6739,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-backslash (val)
   "Perl reference operator \\$x - returns a box containing the referenced value.
    For scalars (boxes): returns a box containing the box (reference to scalar).
-   For arrays/hashes: wraps in a box so p-flatten-args won't spread it as @arr.
-   This makes \\@arr and \\%hash opaque references, not spreadable containers."
-  (make-p-box val))
+   For arrays/hashes/typeglobs/functions: wraps in a box as an opaque reference.
+   For raw scalar values (integers, strings from \\scalar-expr): wraps in a fresh
+   mutable box first, so the reference is mutable ($$ref += 10 works)."
+  (cond
+    ((p-box-p val) (make-p-box val))
+    ((or (vectorp val) (hash-table-p val) (functionp val) (p-typeglob-p val))
+     (make-p-box val))
+    (t (make-p-box (make-p-box val)))))
 
 (defun p-box-for-local (value)
   "Create a new box for a 'local $x = init' binding using box-set semantics.
@@ -6493,18 +6801,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Handles both old format (box containing vector) and new format
    (box containing box containing vector, from p-backslash).
    Auto-vivifies: if val is a box whose value is undef/nil, creates an empty
-   array, stores it back in the box, and returns it (Perl lvalue semantics)."
+   array, stores it back in the box, and returns it (Perl lvalue semantics).
+   Symbolic ref: if val unboxes to a string, treats it as a package variable name."
   (let ((v (unbox val)))
     (cond
       ;; Double-boxed: box(box(arr)) from \@arr — unwrap both layers
       ((p-box-p v) (unbox v))
       ;; Direct vector
       ((and v (vectorp v) (not (stringp v))) v)
-      ;; val is an lvalue box (from p-aref-box / p-gethash-box) containing undef:
-      ;; auto-vivify — create an empty array and write it back into the box
+      ;; Symbolic reference: @{"pkg::var"} — look up/create the package variable
+      ((stringp v)
+       (%p-symref-array v))
+      ;; val is an lvalue box containing undef: auto-vivify as array ref.
+      ;; Store (make-p-box new-arr) so box-set sees a reference (not raw vector)
+      ;; and preserves it instead of coercing to length.
       ((and (p-box-p val) (or (null v) (eq v *p-undef*)))
        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-         (box-set val new-arr)
+         (box-set val (make-p-box new-arr))
          new-arr))
       ;; Fallback: return whatever we have (may be *p-undef* if no box to write back)
       (t (or v *p-undef*)))))
@@ -6547,6 +6860,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (proclaim `(special ,sym))
       (setf (symbol-value sym) new-box)))
   new-box)
+
+(defun %p-symref-array (name-str)
+  "Resolve symbolic array reference NAME-STR (e.g. '3foo::ISA') to the CL vector.
+   Creates the package and the @VAR binding if they don't exist yet, so that
+   assignment through a symbolic ref works: @{\"pkg::var\"} = (...).
+   Returns the adjustable vector."
+  (when (find #\Nul name-str) (return-from %p-symref-array
+                                 (make-array 0 :adjustable t :fill-pointer 0)))
+  (let* ((pos (search "::" name-str :from-end t))
+         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
+         (pkg (if pkg-str
+                  (or (find-package pkg-str)
+                      (make-package pkg-str :use '(:cl :pcl)))
+                  *package*))
+         (sym-name (concatenate 'string "@" (string-upcase var-str)))
+         (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
+    (proclaim `(special ,sym))
+    (unless (and (boundp sym)
+                 (vectorp (symbol-value sym))
+                 (not (stringp (symbol-value sym))))
+      (setf (symbol-value sym) (make-array 0 :adjustable t :fill-pointer 0)))
+    (symbol-value sym)))
 
 (defun p-cast-$ (val)
   "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
@@ -6776,6 +7112,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ((functionp rhs)
        (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
              rhs)))))
+
+(defun p-glob-assign-dynamic (name-box rhs)
+  "Dynamic typeglob assignment: *$var = val where $var contains the full name."
+  (let* ((name-str (to-string name-box))
+         (sep-pos (search "::" name-str :from-end t))
+         (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
+         (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str)))
+    (p-glob-assign pkg-str bare-str rhs)))
+
+(defun p-dynamic-typeglob (name-box)
+  "Rvalue *$var — return a typeglob object for the given name."
+  (let* ((name-str (to-string name-box))
+         (sep-pos (search "::" name-str :from-end t))
+         (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
+         (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
+         (pkg (or (find-package (string-upcase pkg-str))
+                  (make-package (string-upcase pkg-str) :use '(:cl :pcl)))))
+    (make-p-typeglob pkg (string-upcase bare-str))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
   "Copy all slots from src-glob into dst (pkg, uname)."
@@ -7302,18 +7656,102 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; No user sub - return string as class name
         name)))
 
+(defun %pcl-find-package (pkg-str)
+  "Find CL package for Perl package name PKG-STR.
+   Tries upcase first (single-word packages defined via :Foo keyword), then
+   exact case (multi-level packages defined via :|Foo::Bar| notation)."
+  (or (find-package (string-upcase pkg-str))
+      (find-package pkg-str)))
+
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
   (let* ((method-name (to-string method))
-         (class-name (p-get-class obj)))
+         ;; If obj is a box containing a tie-proxy, FETCH to get the invocant
+         (resolved-obj (if (and (p-box-p obj)
+                                (p-tie-proxy-p (p-box-value obj)))
+                           (unbox (p-method-call (p-tie-proxy-tie-obj (p-box-value obj)) "FETCH"))
+                           obj))
+         (raw-class (p-get-class resolved-obj))
+         ;; Perl treats "" as "main" and "::" as "main::" in package/method contexts.
+         ;; Leading "::" on a class name refers to the root stash (same as no prefix).
+         (class-name (let ((c (or raw-class "")))
+                       (cond
+                         ((string= c "")   "main")
+                         ((string= c "::") "main::")
+                         ;; "::Foo::Bar" → "Foo::Bar" (strip leading root-stash "::")
+                         ((and (>= (length c) 2)
+                               (string= (subseq c 0 2) "::"))
+                          (subseq c 2))
+                         (t c)))))
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
+
+    ;; Auto-load the package if it doesn't exist yet.
+    ;; This mirrors how Perl automatically has core modules (like version.pm)
+    ;; pre-loaded in its runtime.  When user code writes `new version ~$_` or
+    ;; `SomeModule->method` without an explicit `use`, we attempt a require here
+    ;; so the package can be found during dispatch.
+    (when (null (%pcl-find-package class-name))
+      (handler-case (p-require class-name) (error () nil)))
+
+    ;; Dynamic SUPER:: dispatch: $obj->$method where $method = "SUPER::foo"
+    ;; Perl treats this as calling SUPER's foo from the object's own package.
+    (when (and (stringp method-name)
+               (> (length method-name) 7)
+               (string= (subseq method-name 0 7) "SUPER::"))
+      (let ((real-method (subseq method-name 7)))
+        (return-from p-method-call
+          (apply #'p-super-call resolved-obj real-method class-name args))))
+
+    ;; Qualified method dispatch: $obj->PKG::method(args) calls PKG::method($obj, args)
+    ;; directly, bypassing normal MRO. E.g. Foo->UNIVERSAL::can("x").
+    ;; Also handles PKG::SUPER::method (call method from PKG's parent).
+    (let ((sep-pos (search "::" method-name)))
+      (when sep-pos
+        (let* ((pkg-part    (subseq method-name 0 sep-pos))
+               (meth-part   (subseq method-name (+ sep-pos 2)))
+               (target-pkg  (find-package (string-upcase pkg-part))))
+          ;; PKG::SUPER::method — call method from PKG's parent class
+          (when (and (>= (length meth-part) 7)
+                     (string= (subseq meth-part 0 7) "SUPER::"))
+            (let ((real-method (subseq meth-part 7)))
+              (return-from p-method-call
+                (apply #'p-super-call resolved-obj real-method pkg-part args))))
+          ;; UNIVERSAL built-ins
+          (cond
+            ((string-equal pkg-part "UNIVERSAL")
+             (return-from p-method-call
+               (cond
+                 ((string-equal meth-part "can")  (apply #'p-can  resolved-obj args))
+                 ((string-equal meth-part "isa")  (apply #'p-isa  resolved-obj args))
+                 ((string-equal meth-part "DOES") (apply #'p-isa  resolved-obj args))
+                 (t (when target-pkg
+                      (let ((fn (find-symbol (format nil "PL-~A" (string-upcase meth-part))
+                                             target-pkg)))
+                        (when (and fn (fboundp fn))
+                          (return-from p-method-call (apply fn resolved-obj args)))))
+                    (error "Can't locate method ~A in package UNIVERSAL" meth-part)))))
+            ;; CORE::method — dispatch to the corresponding PCL built-in (p-METHOD).
+            ;; In Perl, CORE:: is not a real package; it's a namespace for built-in ops.
+            ;; "3foo"->CORE::uc  ⟹  (p-uc "3foo")
+            ((string-equal pkg-part "CORE")
+             (return-from p-method-call
+               (let ((fn (find-symbol (format nil "P-~A" (string-upcase meth-part)) :pcl)))
+                 (if (and fn (fboundp fn))
+                     (apply fn resolved-obj args)
+                     (p-die (format nil "CORE::~A is not a known built-in" meth-part))))))
+            ;; General PKG::method — look up pl-METHOD in that package
+            (target-pkg
+             (let ((fn (find-symbol (format nil "PL-~A" (string-upcase meth-part))
+                                    target-pkg)))
+               (when (and fn (fboundp fn))
+                 (return-from p-method-call (apply fn resolved-obj args)))))))))
 
     ;; Determine whether to use the @ISA walk or CLOS MRO.
     ;; @ISA walk is preferred whenever @ISA is non-empty (it reflects `local @ISA`
     ;; and runtime push/assignment, which CLOS cannot see).  CLOS is a fallback for
     ;; classes that have never had @ISA set (e.g. leaf classes with no parents).
-    (let* ((pkg (find-package (string-upcase class-name)))
+    (let* ((pkg (%pcl-find-package class-name))
            (isa-sym (when pkg (find-symbol "@ISA" pkg)))
            (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
            (isa-non-empty (and isa-val
@@ -7340,28 +7778,55 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                     ;; that a class without a PUSH method doesn't accidentally
                     ;; call the pcl built-in instead of signalling "no method".
                     (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
-                      (return-from p-method-call (apply fn obj args)))))))
-            ;; Not found in any class in MRO - try UNIVERSAL fallbacks
+                      (return-from p-method-call (apply fn resolved-obj args)))))))
+            ;; UNIVERSAL is an implicit parent of all Perl classes.
+            ;; After CLOS MRO fails, try UNIVERSAL's @ISA chain.
+            (unless (string-equal class-name "UNIVERSAL")
+              (labels ((find-in-u (cls-str visited)
+                         (when (member cls-str visited :test #'equal)
+                           (return-from find-in-u nil))
+                         (let* ((pkg2 (%pcl-find-package cls-str))
+                                (fn2 (when pkg2
+                                       (find-symbol (format nil "PL-~A" (string-upcase method-name))
+                                                    pkg2))))
+                           (if (and fn2 (eq (symbol-package fn2) pkg2) (fboundp fn2))
+                               (return-from p-method-call (apply fn2 resolved-obj args))
+                               (let* ((isa2 (when pkg2 (find-symbol "@ISA" pkg2)))
+                                      (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
+                                 (when (and isa2v (vectorp isa2v))
+                                   (loop for p across isa2v
+                                         do (find-in-u (to-string p) (cons cls-str visited)))))))))
+                (find-in-u "UNIVERSAL" nil)))
+            ;; Not found in any class in MRO - check UNIVERSAL fallbacks, then AUTOLOAD
             (cond
-              ((string-equal method-name "isa") (apply #'p-isa obj args))
-              ((string-equal method-name "can") (apply #'p-can obj args))
+              ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
+              ((string-equal method-name "can") (apply #'p-can resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return nothing
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
                (values))
-              (t (error "Can't locate method ~A via package ~A" method-name class-name))))
+              (t (multiple-value-bind (result found)
+                     (%pcl-dispatch-autoload class-name method-name resolved-obj args)
+                   (if found result
+                       (error "Can't locate method ~A via package ~A" method-name class-name))))))
 
           ;; @ISA is non-empty or no CLOS class — walk @ISA dynamically.
           ;; This path respects `local @ISA = (...)` and runtime mutations.
           (labels ((find-in-class (cls-str visited)
                      (when (member cls-str visited :test #'equal)
                        (return-from find-in-class nil))
-                     (let* ((pkg (find-package (string-upcase cls-str)))
+                     ;; CORE is a virtual Perl namespace for built-in functions.
+                     ;; When @ISA includes "CORE", method lookup falls back to p-METHOD.
+                     (when (string-equal cls-str "CORE")
+                       (let ((fn (find-symbol (format nil "P-~A" (string-upcase method-name)) :pcl)))
+                         (when (and fn (fboundp fn))
+                           (return-from p-method-call (apply fn resolved-obj args)))))
+                     (let* ((pkg (%pcl-find-package cls-str))
                             (fn  (when pkg
                                    (find-symbol (string-upcase
                                                   (format nil "PL-~A" method-name))
                                                 pkg))))
                        (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
-                           (return-from p-method-call (apply fn obj args))
+                           (return-from p-method-call (apply fn resolved-obj args))
                            ;; Recurse through @ISA
                            (let* ((isa-sym (when pkg (find-symbol "@ISA" pkg)))
                                   (isa-val (when (and isa-sym (boundp isa-sym))
@@ -7370,21 +7835,73 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                (loop for parent across isa-val
                                      do (find-in-class (to-string parent)
                                                         (cons cls-str visited)))))))))
-            (let ((pkg (find-package (string-upcase class-name))))
+            (let ((pkg (%pcl-find-package class-name)))
               (unless pkg
                 ;; Perl special case: ->import and ->unimport on unknown packages return nothing
                 (if (or (string-equal method-name "import") (string-equal method-name "unimport"))
                     (return-from p-method-call (values))
-                    (error "Package ~A not found for method call" class-name))))
+                    (p-die (format nil "Can't locate object method \"~A\" via package \"~A\""
+                                   method-name class-name)))))
             (find-in-class class-name nil)
-            ;; Not found anywhere in @ISA chain - check UNIVERSAL fallbacks
+            ;; UNIVERSAL is an implicit parent of all Perl classes.
+            ;; After exhausting the class's own @ISA chain, try UNIVERSAL's @ISA
+            ;; (e.g. package UNIVERSAL; @ISA = 'LASTCHANCE' makes LASTCHANCE methods
+            ;; available to all objects, since all classes inherit from UNIVERSAL).
+            (unless (string-equal class-name "UNIVERSAL")
+              (find-in-class "UNIVERSAL" nil))
+            ;; Not found anywhere in @ISA chain - check UNIVERSAL fallbacks, then AUTOLOAD
             (cond
-              ((string-equal method-name "isa") (apply #'p-isa obj args))
-              ((string-equal method-name "can") (apply #'p-can obj args))
+              ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
+              ((string-equal method-name "can") (apply #'p-can resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return nothing
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
                (values))
-              (t (error "Can't locate method ~A in package ~A" method-name class-name))))))))
+              (t (multiple-value-bind (result found)
+                     (%pcl-dispatch-autoload class-name method-name resolved-obj args)
+                   (if found result
+                       (error "Can't locate method ~A in package ~A" method-name class-name))))))))))
+
+;;; AUTOLOAD helpers for p-method-call
+
+(defun %pcl-find-autoload-in-isa (class-name)
+  "Walk @ISA chain from CLASS-NAME looking for PL-AUTOLOAD.
+   Returns (cons pkg-name-str fn) or NIL."
+  (labels ((walk (cls visited)
+             (when (member cls visited :test #'equal) (return-from walk nil))
+             (let* ((pkg (find-package (string-upcase cls)))
+                    (al (when pkg (find-symbol "PL-AUTOLOAD" pkg))))
+               (if (and al (eq (symbol-package al) pkg) (fboundp al))
+                   (cons cls al)
+                   (let* ((isa-sym (when pkg (find-symbol "@ISA" pkg)))
+                          (isa-val (when (and isa-sym (boundp isa-sym))
+                                     (symbol-value isa-sym))))
+                     (when (and isa-val (vectorp isa-val))
+                       (loop for parent across isa-val
+                             for result = (walk (to-string parent) (cons cls visited))
+                             when result return result)))))))
+    (walk class-name nil)))
+
+(defun %pcl-set-autoload-var (pkg-name full-method-name)
+  "Set $PKG::AUTOLOAD to FULL-METHOD-NAME in package PKG-NAME."
+  (let* ((pkg (find-package (string-upcase pkg-name)))
+         (sym (when pkg (intern "$AUTOLOAD" pkg))))
+    (when sym
+      (unless (boundp sym) (setf (symbol-value sym) (make-p-box nil)))
+      (unless (p-box-p (symbol-value sym))
+        (setf (symbol-value sym) (make-p-box nil)))
+      (box-set (symbol-value sym) full-method-name))))
+
+(defun %pcl-dispatch-autoload (class-name method-name obj args)
+  "Try to dispatch to AUTOLOAD for CLASS-NAME method METHOD-NAME.
+   Returns (values result found-p) so caller knows if AUTOLOAD was available."
+  (unless (string-equal method-name "DESTROY")
+    (let ((al-info (%pcl-find-autoload-in-isa class-name)))
+      (when al-info
+        (%pcl-set-autoload-var (car al-info)
+                               (format nil "~A::~A" class-name method-name))
+        (return-from %pcl-dispatch-autoload
+          (values (apply (cdr al-info) obj args) t)))))
+  (values nil nil))
 
 ;;; Package name conversion utilities for inheritance
 (defun perl-pkg-to-clos-class (name)
@@ -7406,32 +7923,83 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (let ((perl-style (substitute #\: #\- upcase-name)))
           perl-style))))
 
+;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
+(defun %pcl-super-indirect (method cur-pkg inv-args-vec)
+  "Handle SUPER::method{@array} indirect-object syntax.
+   inv-args-vec: a vector where element 0 is the invocant; rest are args."
+  (let ((vec (cond ((vectorp inv-args-vec) inv-args-vec)
+                   ((null inv-args-vec)    (vector))
+                   (t                      (vector inv-args-vec)))))
+    (when (zerop (length vec))
+      (p-die (format nil "Can't call method \"~A\" without a package or object reference" method)))
+    (apply #'p-super-call (elt vec 0) method cur-pkg
+           (coerce (subseq vec 1) 'list))))
+
 ;;; SUPER:: method calls
 (defun p-super-call (obj method current-class &rest args)
-  "Call method starting from parent of current-class in MRO (for SUPER:: calls)"
+  "Call method starting from parent of current-class in MRO (for SUPER:: calls).
+   Uses CLOS MRO when @ISA is empty; falls back to @ISA walk otherwise
+   (covers the common case where @ISA is set at runtime and defclass puts
+   the class symbol in the MAIN package rather than the class's own package)."
   (let* ((method-name (to-string method))
          (clos-class-name (perl-pkg-to-clos-class current-class))
          (pkg (find-package (string-upcase current-class)))
-         (clos-class (when pkg (find-class (intern (string-upcase clos-class-name) pkg) nil))))
-
-    (unless clos-class
-      (error "Can't find class ~A for SUPER:: call" current-class))
-
-    ;; Get MRO and skip current class
-    (let* ((mro (progn (sb-mop:finalize-inheritance clos-class)
-                       (sb-mop:class-precedence-list clos-class)))
-           (parent-mro (cdr mro)))  ;; Skip current class
-
-      (dolist (cls parent-mro)
-        (let* ((cls-sym-name (symbol-name (class-name cls)))
-               (pkg-name (clos-class-to-pkg cls-sym-name))
-               (pkg (find-package pkg-name)))
-          (when pkg
-            (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) pkg)))
-              (when (and fn (fboundp fn))
-                (return-from p-super-call (apply fn obj args)))))))
-
-      (error "No SUPER::~A found from ~A" method-name current-class))))
+         (isa-sym (when pkg (find-symbol "@ISA" pkg)))
+         (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
+         (isa-non-empty (and isa-val (vectorp isa-val) (> (length isa-val) 0)))
+         (clos-class (when (and pkg (not isa-non-empty))
+                       (find-class (intern (string-upcase clos-class-name) pkg) nil))))
+    (cond
+      ((and clos-class (not isa-non-empty))
+       ;; CLOS MRO path: walk MRO starting from parent of current class
+       (let* ((mro (progn (sb-mop:finalize-inheritance clos-class)
+                          (sb-mop:class-precedence-list clos-class)))
+              (parent-mro (cdr mro)))
+         (dolist (cls parent-mro)
+           (let* ((cls-sym-name (symbol-name (class-name cls)))
+                  (pkg-name (clos-class-to-pkg cls-sym-name))
+                  (cpkg (find-package pkg-name)))
+             (when cpkg
+               (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) cpkg)))
+                 (when (and fn (fboundp fn))
+                   (return-from p-super-call (apply fn obj args)))))))
+         (error "No SUPER::~A found from ~A" method-name current-class)))
+      ((and isa-val (vectorp isa-val))
+       ;; @ISA walk path: start from parents of current-class (skip current-class itself)
+       (labels ((walk (cls-str visited)
+                  (unless (member cls-str visited :test #'equal)
+                    (let* ((cpkg (find-package (string-upcase cls-str)))
+                           (fn (when cpkg
+                                 (find-symbol (string-upcase (format nil "PL-~A" method-name))
+                                              cpkg))))
+                      (if (and fn (eq (symbol-package fn) cpkg) (fboundp fn))
+                          (return-from p-super-call (apply fn obj args))
+                          (let* ((isa2 (when cpkg (find-symbol "@ISA" cpkg)))
+                                 (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
+                            (when (and isa2v (vectorp isa2v))
+                              (loop for p across isa2v
+                                    do (walk (to-string p) (cons cls-str visited))))))))))
+         (loop for parent across isa-val
+               do (walk (to-string parent) (list current-class)))
+         ;; Method not found via direct lookup — try AUTOLOAD in the parent chain
+         (labels ((find-al (cls-str visited)
+                    (unless (member cls-str visited :test #'equal)
+                      (let* ((cpkg (find-package (string-upcase cls-str)))
+                             (al (when cpkg (find-symbol "PL-AUTOLOAD" cpkg))))
+                        (if (and al (eq (symbol-package al) cpkg) (fboundp al))
+                            (progn
+                              (%pcl-set-autoload-var cls-str method-name)
+                              (return-from p-super-call (apply al obj args)))
+                            (let* ((isa2 (when cpkg (find-symbol "@ISA" cpkg)))
+                                   (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
+                              (when (and isa2v (vectorp isa2v))
+                                (loop for p across isa2v
+                                      do (find-al (to-string p) (cons cls-str visited))))))))))
+           (loop for parent across isa-val
+                 do (find-al (to-string parent) (list current-class))))
+         (error "No SUPER::~A found from ~A" method-name current-class)))
+      (t
+       (error "Can't find class ~A for SUPER:: call" current-class)))))
 
 ;;; can() and isa() methods - available on all objects (UNIVERSAL package)
 (defun p-can (invocant method-name)
@@ -8387,6 +8955,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; XSLoader::load('Module', $version) — no-op, XS cannot be loaded by PCL
 (defun pl-load (&rest args) (declare (ignore args)) nil)
 (defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
+;;; UNIVERSAL package methods — callable as UNIVERSAL::can($obj, $m) etc.
+(defpackage :UNIVERSAL (:use :cl :pcl))
+(in-package :UNIVERSAL)
+(defun pl-can  (obj method &rest args) (declare (ignore args)) (p-can  obj method))
+(defun pl-isa  (obj class  &rest args) (declare (ignore args)) (p-isa  obj class))
+(defun pl-DOES (obj class  &rest args) (declare (ignore args)) (p-isa  obj class))
+(defun pl-VERSION (&rest args) (declare (ignore args)) nil)
+
 (in-package :pcl)
 
 (format t "PCL Runtime loaded~%")

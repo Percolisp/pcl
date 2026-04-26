@@ -13,6 +13,9 @@ use Moo;
 use Scalar::Util qw/looks_like_number/;
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX);
 
+# Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
+my $g_flipflop_count = 0;
+
 # Code generator that transforms Pl::PExpr AST into Common Lisp code.
 # Follows conventions from CODEGEN_DESIGN.md:
 # - Variables keep Perl sigils ($x, @arr, %hash)
@@ -586,8 +589,6 @@ sub gen_leaf {
     # Escape backslashes and double quotes for CL string literal
     $content =~ s/\\/\\\\/g;
     $content =~ s/"/\\"/g;
-    # Remove trailing newline if present (heredocs include it)
-    chomp $content;
     return qq{"$content"};
   }
 
@@ -663,6 +664,14 @@ sub gen_leaf {
 }
 
 
+# Return true if a PPI node is an integer literal (e.g. 3, 10, 0)
+sub _is_integer_literal_node {
+  my ($node) = @_;
+  return 0 unless defined $node && ref($node) =~ /^PPI::Token::Number/;
+  my $content = $node->can('content') ? ($node->content // '') : '';
+  return $content =~ /^\d+$/;  # non-negative integer only (negatives are prefix-op)
+}
+
 # Binary operator: (pcl:p-OP left right)
 # Operators always use pcl: prefix to avoid conflicts with user-defined subs
 sub gen_binary_op {
@@ -672,6 +681,27 @@ sub gen_binary_op {
   my $node_id = shift;  # Optional: for context-dependent operators like 'x'
 
   my $cl_op = $self->cl_op_name($op);
+
+  # Special case: '..'/'..' — range in list context, flip-flop in scalar context
+  if (($op eq '..' || $op eq '...') && defined $node_id) {
+    my $ctx = $self->expr_o->get_node_context($node_id);
+    if ($ctx != LIST_CTX) {
+      # Scalar context: emit flip-flop
+      my $ff_id = $g_flipflop_count++;
+      my $left_node  = $self->expr_o->get_a_node($kids->[0]);
+      my $right_node = $self->expr_o->get_a_node($kids->[1]);
+      my $left  = $self->gen_node($kids->[0]);
+      my $right = $self->gen_node($kids->[1]);
+      if (_is_integer_literal_node($left_node) && _is_integer_literal_node($right_node)) {
+        my $macro = ($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num';
+        return "($macro $ff_id $left $right)";
+      } else {
+        my $macro = ($op eq '...') ? 'p-flipflop-3' : 'p-flipflop';
+        return "($macro $ff_id $left $right)";
+      }
+    }
+    # List context: fall through to normal range (p-.. / p-...)
+  }
 
   # Special case: 'x' operator - use list repeat when LHS is parenthesized and in list context
   if ($op eq 'x' && defined $node_id) {
@@ -745,6 +775,13 @@ sub gen_binary_op {
   if ($op eq '=' && $left =~ /^\(p-make-typeglob "([^"]+)" "([^"]+)"\)$/) {
     my ($pkg, $name) = ($1, $2);
     return "(p-glob-assign \"$pkg\" \"$name\" $right)";
+  }
+
+  # Dynamic typeglob assignment: *$var = RHS  →  (p-glob-assign-dynamic name-expr rhs)
+  # e.g. *$::AUTOLOAD = sub { ... } assigns to the CODE slot of the glob named by $AUTOLOAD.
+  if ($op eq '=' && $left =~ /^\(p-dynamic-typeglob (.+)\)$/) {
+    my $name_expr = $1;
+    return "(p-glob-assign-dynamic $name_expr $right)";
   }
 
   # For assignment, dispatch to type-specific forms based on LHS sigil.
@@ -880,7 +917,38 @@ sub gen_funcall {
 
   # First child is function name
   my $func_name = $self->gen_node($kids->[0]);
+
+  # PPI tokenizes "-funcname" as a single Word. When followed by arguments,
+  # this means unary negation of the function call, not a call to "-funcname".
+  # e.g. "-splice @a" → (p-- (p-splice @a))
+  if ($func_name =~ /^-([A-Za-z_]\w*)$/) {
+    my $real_func = $1;
+    if (exists $RUNTIME_NAMES{$real_func}) {
+      # Known built-in: generate unary minus of the call
+      my $inner_cl = $self->cl_name($real_func, 1);
+      my @arg_strs = map { $self->gen_node($_) } @{$kids}[1..$#$kids];
+      my $args_str = @arg_strs ? ' ' . join(' ', @arg_strs) : '';
+      return "(p-- ($inner_cl$args_str))";
+    }
+  }
+
   my $cl_func   = $self->cl_name($func_name, 1);
+
+  # Special handling: SUPER::method(args) as indirect-object call
+  # SUPER::m{@a} is indirect-object syntax: first arg is the invocant (from block)
+  # Generate: (pcl::%pcl-super-indirect "m" "pkg" ARGS) where first arg is invocant
+  if ($func_name =~ /^SUPER::(.+)$/) {
+    my $method = $1;
+    my $cur_pkg = ($self->environment && $self->environment->can('current_package'))
+                    ? ($self->environment->current_package // 'main')
+                    : 'main';
+    if (@$kids >= 2) {
+      my $arg_str = $self->gen_node($kids->[1]);
+      return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" $arg_str)";
+    }
+    # No args — call without invocant (will signal error at runtime)
+    return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" nil)";
+  }
 
   # Special handling for next/last/redo/goto with label argument
   if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo'
@@ -1098,6 +1166,26 @@ sub gen_funcall {
     }
     my $items_str = @items ? ' ' . join(' ', @items) : '';
     return "($cl_func $target$items_str)";
+  }
+
+  # Special handling for readline(BAREWORD): treat arg as filehandle symbol, not function call
+  if ($func_name eq 'readline' && @$kids == 2) {
+    my $fh_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
+      my $fh_name = $fh_node->content() // '';
+      return "(p-readline '$fh_name)";
+    }
+    # Funcall node with single word child (bareword wrapped in funcall)
+    if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
+      my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$fh_kids == 1) {
+        my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
+        if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
+          my $fh_name = $word_node->content() // '';
+          return "(p-readline '$fh_name)";
+        }
+      }
+    }
   }
 
   # Special handling for tied(): needs the box, not the unboxed value.
@@ -1530,19 +1618,22 @@ sub gen_methodcall {
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
 
-  # Check for SUPER:: method call
+  # Check for SUPER:: method call (also handles old Perl 4 SUPER'method syntax)
   my $call;
-  if ($method =~ /^SUPER::(.+)$/) {
+  if ($method =~ /^SUPER(?:::|')(.+)$/) {
     my $real_method = $1;
     # Need current package for SUPER:: lookup
     my $current_pkg = $self->environment ? $self->environment->current_package : 'main';
-    $call = "(p-super-call $obj '$real_method \"$current_pkg\"$args_str)";
+    (my $rm_str = $real_method) =~ s/"/\\"/g;
+    $call = "(p-super-call $obj \"$rm_str\" \"$current_pkg\"$args_str)";
   } elsif ($is_dynamic_method) {
     # Dynamic method call: $obj->$method_var
     # Method name is in a variable, pass the variable value
     $call = "(p-method-call $obj $method$args_str)";
   } else {
-    $call = "(p-method-call $obj '$method$args_str)";
+    # Use string literal to preserve case (CL symbols are upcased, breaking AUTOLOAD)
+    (my $method_str = $method) =~ s/"/\\"/g;
+    $call = "(p-method-call $obj \"$method_str\"$args_str)";
   }
 
   # Wrap in dynamic wantarray binding for list context
@@ -1711,6 +1802,12 @@ sub gen_prefix_op {
   # function directly (p-backslash passes through non-box values).
   elsif ($op eq '&') {
     return "(p-get-coderef $operand)";
+  }
+  # * Cast: *$var (typeglob ref) — use distinct marker so assignment can detect it.
+  # When on LHS of =, becomes (p-glob-assign-dynamic ...).
+  # As rvalue, returns the typeglob object.
+  elsif ($op eq '*') {
+    return "(p-dynamic-typeglob $operand)";
   }
 
   return "($cl_op $operand)";
