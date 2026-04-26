@@ -6586,18 +6586,32 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl join(SEP, LIST) - joins elements with separator.
    Handles both (join SEP @array) and (join SEP elem1 elem2 ...).
    Arrays and vectors in the argument list are flattened."
-  (let ((s (to-string sep))
-        ;; Flatten all arrays/vectors in the items list
-        (elements (loop for item in items
-                        for val = (unbox item)
-                        if (and (vectorp val) (not (stringp val)))
-                          append (coerce val 'list)
-                        else if (and (listp val) val)
-                          append val
-                        else
-                          collect val)))
-    (format nil (concatenate 'string "~{~A~^" s "~}")
-            (mapcar #'to-string elements))))
+  (let* (;; Pre-count items WITHOUT calling FETCH (to decide sep evaluation)
+         ;; Tied scalars in items are counted as 1 without fetching
+         (item-count (loop for item in items
+                           for raw = (if (p-box-p item) (p-box-value item) item)
+                           if (and (vectorp raw) (not (stringp raw)))
+                             sum (length raw)
+                           else if (and (listp raw) raw)
+                             sum (length raw)
+                           else sum 1))
+         ;; Perl optimization: sep is NOT evaluated when ≤1 elements
+         ;; (FETCH not called on tied separator — matches Perl's join optimization)
+         ;; For ≥2 elements, sep is evaluated FIRST (Perl evaluation order)
+         (s (when (> item-count 1) (to-string sep)))
+         ;; Now flatten and evaluate elements (FETCH called for tied element vars)
+         (elements (loop for item in items
+                         for val = (unbox item)
+                         if (and (vectorp val) (not (stringp val)))
+                           append (coerce val 'list)
+                         else if (and (listp val) val)
+                           append val
+                         else
+                           collect val)))
+    (if s
+        (format nil (concatenate 'string "~{~A~^" s "~}")
+                (mapcar #'to-string elements))
+        (if elements (to-string (car elements)) ""))))
 
 (defun p-split (pattern str &optional limit)
   "Perl split - split string by pattern.
