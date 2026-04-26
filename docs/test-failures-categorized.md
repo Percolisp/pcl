@@ -88,7 +88,7 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 
 | File | Crash / Pass | Root Cause |
 |------|-------------|-----------|
-| **state.t** | 23+0/166 | `Can't locate method STORE in package countfetches` — Tie:: interaction |
+| **state.t** | 78/166 | `Can't locate method STORE in package countfetches` — Tie:: interaction, given/when (removed in Perl 5.38). 162 tests now run (vs 117); 4 fail on given/when (not-supported) |
 | **or.t** | 5+0/14 | `Can't call method FETCH on non-blessed reference` — tied variable |
 | **hash.t** | 1+5/? | DESTROY + tie + PL-GUARD scope issue |
 
@@ -99,7 +99,7 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 | **aassign.t** | 104+83/177 | Mix: lvalue aliasing, `@_` aliasing, NOSTEAL optimization |
 | **args.t** | 0+4/23 | `@_` aliasing + `goto &sub` — NOT WORTH PURSUING |
 | **caller.t** | 3+7/112 | 36 string evals, `%::` stash, filename/line — NOT WORTH PURSUING |
-| **chdir.t** | 0+0/? | POSIX/XS dependency — blocked |
+| **chdir.t** | 43/44 | 1 remaining: test 30 (LOGDIR + chdir returning wrong path). 43 of 44 passing. |
 | **each.t** | 13+8/? | `Hash::Util` bucket manipulation — NOT WORTH PURSUING |
 | **flip.t** | 0+3/14 | Flip-flop operator not implemented |
 | **hexfp.t** | 0+0/125 | PPI parse error on hex floats |
@@ -144,7 +144,7 @@ These files run to completion but have failures. Not yet in fully-passing.
 | **delete.t** | 51/56 | 5 fail | Tests 52-54: chained subscript edge cases; test 55: `$#arr` in list context; test 56: error message format | Medium |
 | **do.t** | 60/73 | 13 fail | Tests 9-10: bare-if implicit return (condition false → should return nil, not condition); tests 12-51: wantarray/context | Tests 9-10: Medium fix (see `docs/v1-implementation-plan.md` B1). Rest: wantarray (deferred) |
 | **for.t** | 129/138 | 9 fail | Tests 127,129: `for my Dog $spot` type annotations on loop var — PCL crashes/returns undef instead of running. Tests 131-138: `CORE::my/our/state` + type annotations — error-detection tests | Easy: comment out tests 131-138 (error detection). Tests 127,129: fix type annotation parsing |
-| **grep.t** | 65/77 | 12 fail | Tests 29,35,37: `grep {hash}->{deref}` — parser misreads hash-constructor block + deref. Tests 47-48: for-in-map closure variable capture. Test 54: wantarray. Tests 61,69,71,73,75,76: DESTROY / error messages | Mixed: some wantarray (deferred), DESTROY (not-supported), some fixable parser bugs |
+| **grep.t** | 67/77 | 10 fail | Tests 29,35,37: `grep {hash}->{deref}` — parser misreads hash-constructor block + deref. Tests 47-48: FIXED (map scalar aliasing). Test 54: wantarray (deferred). Tests 61,69,71,73,75,76: DESTROY / error detection — not-supported | Mixed: wantarray (deferred), DESTROY (not-supported), parser bugs remain for 29/35/37 |
 | **hashassign.t** | 262/309 | 47 fail | Tests 207-214: hash assignment list/scalar context wantarray. Remaining: various list-context edge cases | Wantarray (deferred) |
 | **index.t** | 108/120 | 12 fail | Tests 49-58: multi-byte Unicode character offset (SBCL character vs byte index). Tests 111,119: ref stringification change; tied magic | Unicode offset semantics; tied not-supported |
 | **local.t** | 297/319 | 22 fail | `local $hash{key}`, `local @arr[N]`, `local *GLOB` — element-level and typeglob localization | Documented not-supported. See `docs/not-supported.md` |

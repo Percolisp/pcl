@@ -4,6 +4,63 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 154 (2026-04-26) — chdir.t fixes, state.t DATA, grep.t map-copy
+
+### Focus
+
+Completed chdir.t fixes planned in session 153. Fixed state.t DATA loop. Fixed
+grep.t `for in map` aliasing bug. Documented unsupported grep features.
+
+### Fixes Applied
+
+**1. `p-errno-string` dualvar — `cl/pcl-runtime.lisp`**
+
+`$!` now returns a dualvar p-box: `(to-number $!)` = errno integer, `(to-string $!)` = strerror message.
+When errno=0, returns `""` (falsy). Added `(setf p-errno-string)` expander that sets C errno via
+`sb-alien:extern-alien`. Added `p-setf` special case for `(p-errno-string)` lvalue.
+Fixes chdir.t tests 27/33 (`$!+0` now returns ENOENT=2).
+
+**2. `p-chdir` LOGDIR fallback, EINVAL, fchdir detection — `cl/pcl-runtime.lisp`**
+
+- No-arg `p-chdir` now tries LOGDIR as second fallback after HOME (test 29)
+- Sets errno=EINVAL(22) when neither HOME nor LOGDIR exists (test 42)
+- Detects dirhandle box (cons cell with integer car) and dies with fchdir message (test 22)
+
+**3. `p-readline` list-context slurp — `cl/pcl-runtime.lisp`**
+
+`p-readline` macro now checks `*wantarray*`: in list context calls new `%p-readline-all`
+which reads ALL records into a vector. Fixes `foreach my $x (<DATA>)` in state.t.
+Also added `handler-case` to `%p-readline-impl` to prevent SBCL crash when reading
+from non-readable streams (directory fd after sysread errno fix).
+
+**4. `%p-map-copy-scalar` — prevent aliasing in map results — `cl/pcl-runtime.lisp`**
+
+`p-.=` and other assignment operators return the lvalue box. When used as the last
+expression in a `map {}` block, `p-map` was storing that box reference in the result
+vector. Later mutations to the original variable then corrupted previously "returned"
+values. Fix: `%p-map-copy-scalar` creates a fresh box for simple scalar results.
+Key gotcha: `(vectorp "string")` = T in CL — strings are vectors, so need
+`(and (vectorp v) (not (stringp v)))` to avoid treating strings as array references.
+Fixes grep.t tests 47-48 (`for in map` aliasing).
+
+### Unsupported Features Found (grep.t)
+
+- **Test 54** (`gimme an S!`): `wantarray()` inside `grep {}` block — requires wantarray context system (DO NOT fix)
+- **Test 61** (proper error on variable as block): `grep $var, @list` error detection — out of scope (principle 9)
+- **Tests 69/71/73**: `DESTROY` called after `@a = ()` clears blessed refs created inside `grep` — requires destructor/GC support
+- **Tests 75/76**: `DESTROY` for intermediate map values in void context — same
+
+### Results
+
+- PCL suite: 74 files, 2886 tests, all passing
+- Sweep: **15357 passing, 34 fully passing, 1 crash (lc.t)**
+- chdir.t: 43/44 (+6 from session 152 baseline of 37)
+- state.t: 78 passing, 162 tests running (was 64/117 in session 151)
+- grep.t: +2 tests passing (47-48 now pass)
+- Net improvement: +22 passing vs session 152 baseline (~15335)
+
+---
+
 ## Session 153 (2026-04-26) — chdir.t investigation, rel2abs fix
 
 ### Focus

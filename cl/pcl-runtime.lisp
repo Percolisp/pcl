@@ -352,14 +352,26 @@
 ;;; Regex code-block result ($^R) - result of last successful (?{...}) eval
 (defvar |$^R| nil "Result of last successful (?{...}) regex code block")
 
-;;; System error ($!) - returns errno as string
+;;; System error ($!) - dualvar: numeric = errno integer, string = strerror
 (defun p-errno-string ()
-  "Return the current system error message (like Perl's $!)"
+  "Return $! as dualvar: (to-number ...) = errno, (to-string ...) = strerror.
+   When errno=0, returns \"\" (falsy) to preserve Perl's !$! truthiness semantics."
   (let ((errno (sb-alien:get-errno)))
     (if (zerop errno)
-        ""
-        (or (sb-int:strerror errno)
-            (format nil "Unknown error ~D" errno)))))
+        ""   ; errno=0: falsy like Perl's $! when no error
+        (let ((msg (or (sb-int:strerror errno)
+                       (format nil "Unknown error ~D" errno))))
+          ;; Build a dualvar box so $!+0 gives the integer and $! in string context gives the message
+          (let ((box (%make-p-box :value msg)))
+            (setf (p-box-sv box) msg (p-box-sv-ok box) t)
+            (setf (p-box-nv box) (float errno) (p-box-nv-ok box) t)
+            box)))))
+
+(defun (setf p-errno-string) (val)
+  "Perl $! = N — set errno to integer N (clears it when N=0)"
+  (setf (sb-alien:extern-alien "errno" sb-alien:int)
+        (truncate (to-number (if (p-box-p val) (unbox val) val))))
+  val)
 
 ;;; Wantarray context variable
 (defvar *wantarray* nil "True when list context is expected")
@@ -2738,6 +2750,9 @@
                                  (aref ,src-vec i)
                                  *p-undef*)))
               ,src-vec))))
+    ;; $! as lvalue: (p-setf (p-errno-string) val) -> set C errno
+    ((and (listp place) (eq (car place) 'p-errno-string))
+     `(setf (p-errno-string) ,value))
     ;; pos as lvalue: (p-setf (p-pos var) new-val) -> (p-pos var new-val)
     ((and (listp place) (eq (car place) 'p-pos))
      `(p-pos ,(cadr place) ,value))
@@ -5353,6 +5368,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
     (when stream
+      (handler-case
       (cond
         ;; Slurp mode: $/ = undef - read entire file
         ((null sep)
@@ -5407,14 +5423,31 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            (string= result sep
                                     :start1 (- (length result) sep-len)))
                    do (loop-finish))
-           (if (zerop (length result)) nil (coerce result 'string))))))))
+           (if (zerop (length result)) nil (coerce result 'string)))))
+      ;; Any stream error (e.g. reading from a directory) → return nil like Perl
+      (stream-error () nil)
+      (error () nil)))))
+
+(defun %p-readline-all (fh)
+  "Read all remaining records from FH into an adjustable vector of boxed strings.
+   Updates $. for each line. Used by p-readline in list context."
+  (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+    (loop
+      (let ((line (%p-readline-impl fh)))
+        (if line
+            (progn
+              (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|)))))
+              (vector-push-extend (make-p-box line) result))
+            (return result))))))
 
 (defmacro p-readline (&rest args)
-  "Perl readline / <FH> — reads a record, updates $. on success."
-  `(let ((%rl-val (%p-readline-impl ,@args)))
-     (when %rl-val
-       (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|))))))
-     %rl-val))
+  "Perl readline / <FH> — in list context reads all records; in scalar reads one."
+  `(if *wantarray*
+       (%p-readline-all ,(if args (car args) nil))
+       (let ((%rl-val (%p-readline-impl ,@args)))
+         (when %rl-val
+           (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|))))))
+         %rl-val)))
 
 ;;; ============================================================
 ;;; Directory I/O Functions
@@ -5625,11 +5658,32 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-chdir (&optional dir)
   "Perl chdir - change current directory. Returns true on success.
    Also updates *default-pathname-defaults* for Lisp path resolution."
-  (let ((path (if dir (to-string dir) (sb-posix:getenv "HOME"))))
+  (let ((path
+         (if (null dir)
+             ;; No argument: try HOME then LOGDIR
+             (let ((home (sb-posix:getenv "HOME")))
+               (if home
+                   home
+                   (let ((logdir (sb-posix:getenv "LOGDIR")))
+                     (if logdir
+                         logdir
+                         ;; No HOME or LOGDIR: set EINVAL and fail
+                         (progn
+                           (setf (sb-alien:extern-alien "errno" sb-alien:int) 22)
+                           (return-from p-chdir nil))))))
+             ;; Argument provided: check for filehandle/dirhandle
+             (let ((raw (if (p-box-p dir) (p-box-value dir) dir)))
+               (if (or (streamp raw)
+                       (and (consp raw) (integerp (car raw))) ; dirhandle stored as (idx . entries)
+                       (and (p-box-p dir)                     ; dirhandle box via opendir
+                            (let ((v (p-box-value dir)))
+                              (and (consp v) (integerp (car v))))))
+                   ;; It's a filehandle or dirhandle: fchdir not implemented
+                   (p-die "The fchdir function is unimplemented at pcl line 0.\n")
+                   (to-string dir))))))
     (handler-case
         (progn
           (sb-posix:chdir path)
-          ;; Update *default-pathname-defaults* so relative paths resolve correctly
           (setf *default-pathname-defaults* (truename (pathname path)))
           t)
       (error () nil))))
@@ -6428,6 +6482,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (vector-push-extend item result))))
     result))
 
+(defun %p-map-copy-scalar (r)
+  "Copy a simple scalar box to prevent aliasing in map results.
+   When a map block ends with an lvalue like ($y .= $x), it returns the box $y.
+   If we store the box itself, later mutations to $y corrupt the map result.
+   Reference types (hash/array/code) and blessed objects are NOT copied."
+  (if (and (p-box-p r)
+           (not (p-box-class r))
+           (let ((v (p-box-value r)))
+             (not (or (hash-table-p v) (and (vectorp v) (not (stringp v))) (functionp v)
+                      (p-box-p v) (p-typeglob-p v)))))
+      (make-p-box (unbox r))
+      r))
+
 (defun p-grep (fn &rest items)
   "Perl grep - fn receives item as $_ parameter.
    Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
@@ -6449,7 +6516,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (if (and (vectorp r) (not (stringp r)))
                    (loop for e across r
                          do (vector-push-extend e result))
-                   (vector-push-extend r result))))
+                   (vector-push-extend (%p-map-copy-scalar r) result))))
     result))
 
 (defun p-sort-get-fn (val)
