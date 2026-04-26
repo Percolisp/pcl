@@ -589,8 +589,6 @@ sub gen_leaf {
     # Escape backslashes and double quotes for CL string literal
     $content =~ s/\\/\\\\/g;
     $content =~ s/"/\\"/g;
-    # Remove trailing newline if present (heredocs include it)
-    chomp $content;
     return qq{"$content"};
   }
 
