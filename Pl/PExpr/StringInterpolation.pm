@@ -192,7 +192,13 @@ sub parse_interpolated_variable {
   if ($sigil eq '$' && substr($content, $pos + 1, 1) eq '{') {
     return $self->parse_braced_expression($parser, $content_ref, $pos);
   }
-  
+
+  # Handle @{expr} — array dereference/expression in string interpolation
+  # e.g. "@{[uc($_)]}" → (p-join |$"| (p-cast-@ (list (p-uc $_))))
+  if ($sigil eq '@' && substr($content, $pos + 1, 1) eq '{') {
+    return $self->parse_array_braced_interpolation($parser, $content_ref, $pos);
+  }
+
   # Set position for \G anchor
   pos($content) = $pos;
 
@@ -383,6 +389,44 @@ sub parse_braced_expression {
   my $expr_id = $parser->parse(\@parts);
 
   return ($expr_id, $i);
+}
+
+
+# Parse @{expr} in an interpolated string: "@{[uc($_)]}", "@{$ref}", etc.
+# Generates an array_str_interp node wrapping the inner expression.
+# ExprToCL generates: (p-join |$"| (p-cast-@ EXPR))
+sub parse_array_braced_interpolation {
+  my ($self, $parser, $content_ref, $pos) = @_;
+  my $content = $$content_ref;
+
+  my $brace_start = $pos + 2;  # skip @{
+  my $depth = 1;
+  my $i = $brace_start;
+  while ($i < length($content) && $depth > 0) {
+    my $ch = substr($content, $i, 1);
+    $depth++ if $ch eq '{';
+    $depth-- if $ch eq '}';
+    $i++;
+  }
+  return (undef, $pos) if $depth != 0;
+
+  my $expr_str = substr($content, $brace_start, $i - $brace_start - 1);
+  # Unescape \"-style escapes that were raw in the containing string
+  $expr_str = $self->unescape_string($expr_str);
+
+  my $doc = PPI::Document->new(\$expr_str);
+  $self->{_ppi_docs} //= [];
+  push @{$self->{_ppi_docs}}, $doc;
+  my @stmts = $doc->children();
+  return (undef, $pos) if @stmts == 0;
+
+  my @parts = $stmts[0]->children();
+  my $expr_id = $parser->parse(\@parts);
+
+  my ($interp_node, $interp_id) = $parser->make_node_insert('array_str_interp');
+  $parser->add_child_to_node($interp_id, $expr_id);
+
+  return ($interp_id, $i);
 }
 
 

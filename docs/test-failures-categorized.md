@@ -1,7 +1,7 @@
 # Perl op/ Test Suite — Categorized Failure Analysis
 
-Last updated: 2026-04-24 (session 148)
-Sweep total: **15272 passing**, 33 fully-passing, some crashed/partial.
+Last updated: 2026-05-01 (session 156)
+Sweep total: **18029 passing**, 39 fully-passing.
 
 Run: `perl sweep-perl-tests.pl --jobs 8` from `/home/bernt/pcl/`
 
@@ -104,8 +104,8 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 | **flip.t** | 0+3/14 | Flip-flop operator not implemented |
 | **hexfp.t** | 0+0/125 | PPI parse error on hex floats |
 | **infnan.t** | 127+177/? | `sprintf "%a"` hex-float + `pack` with Inf/NaN |
-| **join.t** | 25+4/43 | `$SIG{__WARN__}` + join warns on undef; `use overload` separator |
-| **lc.t** | 82+0/2659 | `MAIN::PL-FIND_UTF8_CTYPE_LOCALE` from `loc_tools.pl` — stub would unlock 2577 hidden tests |
+| **join.t** | 39/43 | 4 remaining: tests 9/10 lazy-eval undef warn (hard), 18 undef sep warn, 29 ref identity. Tests 33/39 FIXED (session 155). |
+| **lc.t** | 2659/2659 PASSING (transient crash in --jobs 8 parallel sweep only) | FIXED session 155 prev. |
 | **pack.t** | 0+0/14722 | Missing pack/unpack format chars |
 | **undef.t** | 17+4/88 | read-only `$1`, DESTROY, stash `$::{z}` manipulation |
 

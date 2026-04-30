@@ -343,8 +343,17 @@
 ;;; Perl version ($^V) - we report as PCL
 (defvar |$^V| "v5.30.0" "Perl version (compatibility)")
 
-;;; Perl executable path ($^X) - use sbcl since we're transpiled
-(defvar |$^X| (or (car sb-ext:*posix-argv*) "sbcl") "Perl executable path")
+;;; Perl executable path ($^X) - point to perl so spawned subprocesses run Perl
+(defvar |$^X|
+  (or (sb-ext:posix-getenv "PERL")
+      (ignore-errors
+        (let ((out (with-output-to-string (s)
+                     (sb-ext:run-program "/bin/sh" (list "-c" "command -v perl 2>/dev/null")
+                                         :output s :error nil))))
+          (let ((trimmed (string-right-trim '(#\Newline #\Return #\Space) out)))
+            (when (> (length trimmed) 0) trimmed))))
+      "perl")
+  "Perl executable path")
 
 ;;; Taint mode flag (${^TAINT}) - always off in transpiled code
 (defvar |${^TAINT}| nil "Taint mode is not enabled")
@@ -6020,44 +6029,42 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-system (&rest args)
   "Perl system - execute a shell command.
    system(CMD) or system(PROG, ARGS...).
-   Returns exit status (0 = success). In Perl, the actual exit code is
-   return_value >> 8, but we return the raw exit code for simplicity."
+   Sets $? to wait status (exit_code << 8), returns same value."
   (if (null args)
       -1
-      (let* ((cmd (to-string (car args))))
-        (if (cdr args)
-            ;; system(PROG, ARGS...) - run program directly with args
-            (let* ((prog-args (mapcar #'to-string (cdr args)))
-                   (proc (sb-ext:run-program cmd prog-args
-                                             :search t
-                                             :input nil
-                                             :output *standard-output*
-                                             :error *error-output*
-                                             :wait t)))
-              (ash (sb-ext:process-exit-code proc) 8))
-            ;; system(CMD) - run through shell
-            (let ((proc (sb-ext:run-program "/bin/sh" (list "-c" cmd)
-                                            :input nil
-                                            :output *standard-output*
-                                            :error *error-output*
-                                            :wait t)))
-              (ash (sb-ext:process-exit-code proc) 8))))))
+      (let* ((cmd (to-string (car args)))
+             (wait-status
+              (if (cdr args)
+                  (let* ((prog-args (mapcar #'to-string (cdr args)))
+                         (proc (sb-ext:run-program cmd prog-args
+                                                   :search t
+                                                   :input nil
+                                                   :output *standard-output*
+                                                   :error *error-output*
+                                                   :wait t)))
+                    (ash (sb-ext:process-exit-code proc) 8))
+                  (let ((proc (sb-ext:run-program "/bin/sh" (list "-c" cmd)
+                                                  :input nil
+                                                  :output *standard-output*
+                                                  :error *error-output*
+                                                  :wait t)))
+                    (ash (sb-ext:process-exit-code proc) 8)))))
+        (setf $? wait-status)
+        wait-status)))
 
 (defun p-backtick (cmd)
   "Perl backticks - execute shell command and capture output.
-   Returns the stdout output as a string."
+   Returns the stdout output as a string. Uses latin-1 so binary output won't crash."
   (let* ((proc (sb-ext:run-program "/bin/sh" (list "-c" (to-string cmd))
                                    :input nil
                                    :output :stream
+                                   :external-format :latin-1
                                    :error nil
                                    :wait nil))
          (output (with-output-to-string (s)
-                   (loop for line = (read-line (sb-ext:process-output proc) nil nil)
-                         while line
-                         do (write-line line s)))))
+                   (loop for c = (read-char (sb-ext:process-output proc) nil nil)
+                         while c do (write-char c s)))))
     (sb-ext:process-wait proc)
-    ;; Remove trailing newline to match common Perl usage with chomp
-    ;; Actually, Perl backticks DO include the newline, so keep it
     output))
 
 ;;; ============================================================

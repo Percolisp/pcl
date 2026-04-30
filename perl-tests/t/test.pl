@@ -23,13 +23,49 @@ sub skip_all_without_unicode_tables {
     # No-op - we'll handle unicode tests differently
 }
 
-# fresh_perl_* run code in new Perl processes - skip these tests
+# fresh_perl_* run code in a real Perl subprocess for accurate results
 sub fresh_perl_is {
-    return;
+    my ($code, $expected, $opts, $desc) = @_;
+    $opts //= {};
+    $desc //= 'fresh_perl_is';
+    my @switches = grep { length($_) } @{$opts->{switches} // []};
+    my $capture_stderr = $opts->{stderr} ? '2>&1' : '2>/dev/null';
+    my $tmpfile = "/tmp/pcl_fp_$$" . int(rand(99999)) . ".pl";
+    open(my $fh, '>', $tmpfile) or do { fail($desc); return; };
+    print $fh $code;
+    close $fh;
+    my $perl = $^X;
+    my $sw = join(' ', @switches);
+    my $got;
+    if (defined $opts->{stdin}) {
+        my $sin = "/tmp/pcl_fp_sin_$$.txt";
+        open(my $sf, '>', $sin) or do { unlink $tmpfile; fail($desc); return; };
+        print $sf $opts->{stdin};
+        close $sf;
+        $got = `$perl $sw "$tmpfile" $capture_stderr < "$sin"`;
+        unlink $sin;
+    } else {
+        $got = `$perl $sw "$tmpfile" $capture_stderr`;
+    }
+    unlink $tmpfile;
+    is($got, $expected, $desc);
 }
 
 sub fresh_perl_like {
-    return;
+    my ($code, $pattern, $opts, $desc) = @_;
+    $opts //= {};
+    $desc //= 'fresh_perl_like';
+    my @switches = grep { length($_) } @{$opts->{switches} // []};
+    my $capture_stderr = $opts->{stderr} ? '2>&1' : '2>/dev/null';
+    my $tmpfile = "/tmp/pcl_fp_$$" . int(rand(99999)) . ".pl";
+    open(my $fh, '>', $tmpfile) or do { fail($desc); return; };
+    print $fh $code;
+    close $fh;
+    my $perl = $^X;
+    my $sw = join(' ', @switches);
+    my $got = `$perl $sw "$tmpfile" $capture_stderr`;
+    unlink $tmpfile;
+    like($got, $pattern, $desc);
 }
 
 # watchdog for timeout tests

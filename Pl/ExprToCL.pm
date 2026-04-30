@@ -85,7 +85,8 @@ sub _build_handlers {
     'anon_sub'      => \&gen_anon_sub,
     'func_ref'      => \&gen_func_ref,
     'inline_lambda' => \&gen_inline_lambda,
-    'string_concat' => \&gen_string_concat,
+    'string_concat'    => \&gen_string_concat,
+    'array_str_interp' => \&gen_array_str_interp,
   };
 }
 
@@ -875,6 +876,15 @@ sub gen_string_concat {
     }
   }
   return "(p-string-concat " . join(" ", @parts) . ")";
+}
+
+
+# Array interpolation in string: "@{[expr]}" or "@{$ref}" → (p-join |$"| (p-cast-@ EXPR))
+sub gen_array_str_interp {
+  my ($self, $node, $node_id, $kids) = @_;
+  return '""' unless @$kids;
+  my $expr = $self->gen_node($kids->[0]) // '""';
+  return '(p-join |$"| (p-cast-@ ' . $expr . '))';
 }
 
 

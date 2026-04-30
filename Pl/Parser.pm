@@ -149,6 +149,10 @@ sub _preprocess_source {
     $mantissa += oct("0$frac_str") / (8 ** length($frac_str)) if $frac_str ne '';
     sprintf("%.17g", $mantissa * (2 ** $exp_str));
   }ge;
+  # Strip type annotations from foreach loop variables: `for my Dog $spot` → `for my $spot`.
+  # Perl allows `for my ClassName $var` but PPI can't parse the ClassName and stops,
+  # producing a broken AST. PCL ignores type constraints anyway, so just drop them.
+  $src =~ s/\b(for(?:each)?\s+(?:my|our))\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\s+(\$)/$1 $2/g;
   return $src;
 }
 

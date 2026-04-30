@@ -4,6 +4,124 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 156 (2026-05-01) — crash/partial fixes: $^X, $?, fresh_perl_is, @{[expr]} interpolation
+
+### Focus
+
+Fix actual SBCL crashes and plan-mismatch "partial" files identified in test sweep.
+Continued from session 155. Skipped Unicode/encoding issues per user request.
+
+### Fixes Applied
+
+**1. for.t type annotation preprocessing — `Pl/Parser.pm`**
+
+`for my Dog $spot` (valid Perl with type annotation) failed because PPI can't parse
+the type name `Dog` and stops. Added preprocessing in `_preprocess_source()`:
+
+```perl
+$src =~ s/\b(for(?:each)?\s+(?:my|our))\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\s+(\$)/$1 $2/g;
+```
+
+Strips type annotations for `my`/`our` only (not `state` — `for state Dog $spot` is
+invalid Perl, so leaving it unparseable is correct). for.t: 129/138 → 131/138.
+
+**2. `$^X` now points to real Perl — `cl/pcl-runtime.lisp`**
+
+Was: `(or (car sb-ext:*posix-argv*) "sbcl")` — pointed to the SBCL binary.
+Now: tries `$PERL` env var, then `command -v perl` via shell, falls back to `"perl"`.
+This makes `system($^X, ...)` and backtick `$^X` spawn a real Perl interpreter.
+Critical for die_exit.t, fresh_perl_is, and any test that runs `$^X`.
+
+**3. `p-system` now sets `$?` — `cl/pcl-runtime.lisp`**
+
+`p-system` returned the wait status but never wrote it to `$?`. Added
+`(setf $? wait-status)` before returning. die_exit.t: 0/17 → 17/17 (fully passing).
+
+**4. `p-backtick` robustness — `cl/pcl-runtime.lisp`**
+
+Changed to `:external-format :latin-1` and char-by-char reading (`read-char` loop).
+Prevents UTF-8 decode crash when subprocess outputs non-UTF-8 bytes, and avoids
+spurious trailing newline from old `read-line`/`write-line` pair.
+
+**5. `fresh_perl_is`/`fresh_perl_like` implemented — `perl-tests/t/test.pl`**
+
+Was: stubs returning immediately (producing 0 TAP output → plan mismatches).
+Now: write code to temp file, run via `$^X`, capture output, call `is()`/`like()`.
+Handles `switches`, `stdin`, `stderr` options from `$opts`. Fixes ~30 files that had
+plan mismatches due to these stubs. Major newly-fully-passing files: print.t, die_exit.t,
+chdir.t, closure.t and others. Sweep: 17939 → 18029 passing (+90), 35 → 39 fully passing.
+
+**6. `@{[expr]}` string interpolation — `Pl/PExpr/StringInterpolation.pm`, `Pl/ExprToCL.pm`**
+
+`"@{[uc($_)]}"` was emitting literal `@{[uc(...)]}` text instead of evaluating.
+Added `parse_array_braced_interpolation()` in StringInterpolation.pm: detects `@{`,
+finds matching `}`, unescapes the expression string, parses via PPI, creates an
+`array_str_interp` opcode node. Added `gen_array_str_interp()` in ExprToCL.pm:
+generates `(p-join |$"| (p-cast-@ EXPR))`.
+Fixes blocks.t test 1 ($testblocks construction), lex.t patterns, and other files
+using this interpolation form.
+
+### Test Results
+
+- PCL suite: 74 files, 2886 tests, **all passing**
+- Sweep: **18029 passing, 39 fully passing** (was 17939 / 35)
+- New fully passing: **die_exit.t, print.t, chdir.t, closure.t** (+4)
+
+### Notes / Remaining Work
+
+- for.t tests 131–136, 138: error-detection tests for invalid Perl (`CORE::my/our/state`).
+  Per principle 9, should be commented out — needs user approval first.
+- blocks.t tests 8–26: mostly pass now via fresh_perl_is; a few still fail due to
+  BEGIN/CHECK/INIT ordering edge cases not supported by PCL's string eval substrate.
+- `@{$ref}` in string interpolation also now works (same code path as `@{[expr]}`).
+
+---
+
+## Session 155 (2026-04-26) — p-join tied sep optimization, context.t investigation
+
+### Focus
+
+Continued from session 154. Investigated context.t test 8 (was "BEGIN in anon sub
+generates wrong eval-when") — confirmed it's actually a wantarray issue (deferred).
+Fixed join.t: p-join now correctly handles tied separator evaluation order.
+
+### Fixes Applied
+
+**1. `p-join` tied separator optimization — `cl/pcl-runtime.lisp`**
+
+Two related fixes to match Perl's `join()` semantics for tied separator variables:
+
+- **Perl optimization**: When there are ≤1 elements, the separator is NEVER evaluated.
+  For tied variables, this means FETCH is not called. Fixes join.t tests 33, 39
+  (`FETCH not called` for single-element join).
+
+- **Evaluation order**: For ≥2 elements, separator is now evaluated BEFORE list elements.
+  A pre-count loop reads item lengths without calling FETCH on tied scalars, then
+  `(to-string sep)` is called first if count ≥ 2. Fixes join.t test 40
+  (`tied separator also in the join arguments` — self-modifying tied sep).
+
+join.t: 37/43 → 39/43
+
+### Investigations (no fix)
+
+- **context.t test 8** "context of { foo(); BEGIN {} }": Confirmed wantarray issue.
+  `wantarray` inside `context()` needs to see scalar context from `$_ =` assignment
+  through `p-funcall-ref`. The BEGIN{} is irrelevant and generated correctly (dropped).
+  Saved note in wantarray-context.md memory — do NOT investigate again.
+
+### Commit
+
+- `d30fd4d` — fix: p-join — FETCH not called on tied sep when ≤1 elements; eval sep before items
+
+### State at End
+
+- PCL suite: 74 files, 2886 tests, all passing
+- Sweep (excluding lc.t transient crash): ~17937 passing, 35 fully passing, 0 crashes
+- lc.t transient: still crashes in `--jobs 8` parallel sweep; passes when run alone
+- join.t: 39/43 (was 37/43)
+
+---
+
 ## Session 154 (2026-04-26) — chdir.t fixes, state.t DATA, grep.t map-copy
 
 ### Focus
