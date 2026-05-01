@@ -564,6 +564,14 @@
     (typecase v
       (number (setf (p-box-nv box) v (p-box-nv-ok box) t))
       (string (setf (p-box-sv box) v (p-box-sv-ok box) t)))
+    ;; Dualvar preservation: if source box has a pre-cached NV alongside a string
+    ;; value (like Perl's $! errno dualvar), copy that NV to the destination.
+    ;; Without this, $saved = $! would lose the numeric errno value.
+    (when (and (p-box-p value)
+               (p-box-nv-ok value)
+               (stringp v))
+      (setf (p-box-nv box) (p-box-nv value)
+            (p-box-nv-ok box) t))
     box))
 
 (defun parse-perl-number (str)
@@ -4919,19 +4927,33 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                (concatenate 'string dir "/" filename))
                     when p return (truename p)))))
     (if (null abs-path)
-        ;; File not found: return undef, clear $@
+        ;; File not found: return undef, clear $@, set $! = ENOENT
         (progn
           (box-set $@ (make-p-box ""))
+          (setf (sb-alien:extern-alien "errno" sb-alien:int) 2) ; ENOENT=2
           *p-undef*)
         ;; File found: read, transpile and eval
         (handler-case
-          (let ((content (with-open-file (f abs-path :direction :input)
-                           (let ((s (make-string (file-length f))))
-                             (read-sequence s f) s))))
+          (let ((content
+                 (handler-case
+                   (with-open-file (f abs-path :direction :input)
+                     (let ((s (make-string (file-length f))))
+                       (read-sequence s f) s))
+                   ;; I/O error opening/reading (e.g. is-a-directory, permissions):
+                   ;; errno already set by OS; clear $@, return undef
+                   (stream-error (e)
+                     (declare (ignore e))
+                     (return-from p-do
+                       (progn (box-set $@ (make-p-box "")) *p-undef*)))
+                   (file-error (e)
+                     (declare (ignore e))
+                     (return-from p-do
+                       (progn (box-set $@ (make-p-box "")) *p-undef*))))))
             (p-eval (make-p-box content)))
           (error (e)
             (box-set $@ (make-p-box (format nil "~A" e)))
             *p-undef*)))))
+
 
 ;;; Forward declaration for p-eval (p-transpile-string defined later in Module System section)
 (declaim (ftype function p-transpile-string))

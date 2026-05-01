@@ -4,6 +4,66 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 157 (2026-05-01) — crash/partial fixes: do.t, pos.t, bare-block let scoping
+
+### Focus
+
+Fix crashes and plan-mismatch "partial" files. Deferred Unicode/encoding per user request.
+
+### Fixes Applied
+
+**1. `p-do` ENOENT — `cl/pcl-runtime.lisp`**
+
+When `probe-file` returns nil (file doesn't exist), `p-do` now:
+- Returns `*p-undef*`
+- Clears `$@` (sets it to empty string)
+- Sets `errno` to 2 (POSIX ENOENT) via `sb-alien:extern-alien`
+Note: `sb-posix:enoent` is unavailable in this SBCL build; raw integer 2 used.
+
+**2. `p-do` directory/IO error — `cl/pcl-runtime.lisp`**
+
+When `probe-file` succeeds but `read-sequence` throws (e.g. reading a directory),
+SBCL raises `SIMPLE-STREAM-ERROR`. Added `stream-error` and `file-error` handlers
+that clear `$@` and return undef, matching Perl semantics.
+
+**3. Dualvar NV preservation in `box-set` — `cl/pcl-runtime.lisp`**
+
+`$saved = $!` lost the numeric errno value: `box-set` copied the string value but
+not the pre-cached NV. Added dualvar preservation code at the end of `box-set`:
+when the source box has `nv-ok` set and the value is a string, copy `nv`/`nv-ok`
+to the destination. Fixes `int($saved_errno)` returning 0 instead of 2.
+
+**4. pos.t plan mismatch (30 instead of 33) — `perl-tests/pos.t`**
+
+Three tests were inside `(?{code})` regex code blocks (unsupported). Commented them
+out per `docs/not-supported.md`, adjusted plan from 33 to 30.
+
+**5. Bare-block `my` hoisting fix — `Pl/Parser.pm`**
+
+`_find_all_declarations` was recursing into bare blocks `{ ... }` and hoisting their
+`my` declarations to the enclosing sub's `let`, shadowing same-name package globals.
+Fix: bare blocks now contribute only `state` declarations (not `my`/`local`/`our`)
+to the enclosing sub's hoist — `state` must still be hoisted for persistence.
+`my` vars in bare blocks are handled by `_process_bare_block`'s own `_with_declarations`.
+
+Also fixed regression: the previous session's approach fully excluded bare blocks, which
+broke `state $bar` in `{ state $bar = 12; ... }` (state-01.t test 9).
+
+### Test Results
+
+- PCL suite: 74 files, 2886 tests, **all passing**
+- Sweep: **18031 passing, 39 fully passing** (was 18029 / 39, +2 tests)
+- do.t now fully passing (dualvar + ENOENT + directory error fixes)
+
+### Notes / Remaining Work
+
+- `docs/let-scoping-problem.md` written: plan for fixing mid-function `my` scoping
+  (currently all `my` vars are hoisted to sub top, breaking substr.t and similar).
+- for.t tests 131–136, 138: error-detection tests for invalid Perl. Need user approval
+  to comment out per principle 9.
+
+---
+
 ## Session 156 (2026-05-01) — crash/partial fixes: $^X, $?, fresh_perl_is, @{[expr]} interpolation
 
 ### Focus

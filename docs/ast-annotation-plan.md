@@ -337,3 +337,25 @@ Remove the fallback and delete `_child_is_list_expr` once Phase 1 tests pass.
 2. **Phase 2** (medium ROI): `lvalue` annotation (C) → remove `lvalue_context` mutable-flag threading from codegen.
 
 3. **Phase 3** (deferred): `numeric_context`/`string_context` (F) — coercion optimization, not needed for correctness.
+
+---
+
+## Relationship to `docs/two-phase-compiler.md`
+
+`two-phase-compiler.md` (written session 158) addresses the **block/statement level**:
+the concrete scoping fix for the let-hoisting bug (`docs/let-scoping-problem.md`).
+It introduces `BlockAnalyzer`, `_emit_scoped_block`, `_stmt_pre_hook`, and `stmt_idx`
+tracking — the emission machinery for inline-let at each `my` declaration point.
+
+This plan (`ast-annotation-plan.md`) is the authority for the **expression level**: the
+`VarAnnotator` scope stack, `closure_captured`/`unboxable` on OpcodeTree nodes,
+`returns_list`, `needs_wantarray`, and `lvalue`. When both plans are implemented:
+
+- `VarAnnotator` (this plan) should replace `BlockAnalyzer._find_closure_captures`
+  and `_vars_referenced_in_closures` — it is more accurate (proper scope stack, detects
+  capture across multiple nesting levels).
+- `unboxable` (this plan) should replace `type_hint == 'fixnum'` from
+  `two-phase-compiler.md` — it explicitly accounts for ref-taking, tie, local, and
+  mutable closure captures.
+- `_emit_scoped_block` + `_stmt_pre_hook` (two-phase-compiler.md) supply the codegen
+  emission mechanism for inline-let that this plan leaves unspecified.
