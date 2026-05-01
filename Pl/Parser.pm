@@ -149,6 +149,10 @@ sub _preprocess_source {
     $mantissa += oct("0$frac_str") / (8 ** length($frac_str)) if $frac_str ne '';
     sprintf("%.17g", $mantissa * (2 ** $exp_str));
   }ge;
+  # Strip type annotations from foreach loop variables: `for my Dog $spot` → `for my $spot`.
+  # Perl allows `for my ClassName $var` but PPI can't parse the ClassName and stops,
+  # producing a broken AST. PCL ignores type constraints anyway, so just drop them.
+  $src =~ s/\b(for(?:each)?\s+(?:my|our))\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\s+(\$)/$1 $2/g;
   return $src;
 }
 
@@ -3149,20 +3153,31 @@ sub _find_all_declarations {
       $pending_decl = undef;
     }
 
-    # Recurse into nested elements, including bare blocks, but NOT into:
+    # Recurse into nested elements, but NOT into:
     #   - Named sub definitions (PPI::Statement::Sub)
     #   - BEGIN/END/etc blocks (PPI::Statement::Scheduled)
-    #   - Anonymous sub bodies: PPI::Structure::Block whose previous
-    #     non-whitespace sibling is the 'sub' keyword
+    #   - Anonymous sub bodies: PPI::Structure::Block whose prev sibling is 'sub'
+    # For bare blocks (no prev non-whitespace sibling): recurse but only keep
+    #   'state' declarations — 'my' vars in bare blocks are scoped to the block
+    #   by _process_bare_block/_with_declarations and must NOT be hoisted to the
+    #   enclosing sub level (would shadow same-name package globals outside).
     if ($ref && $child->can('children')
         && $ref ne 'PPI::Statement::Sub'
         && $ref ne 'PPI::Statement::Scheduled'
         && !($ref eq 'PPI::Structure::Block' && do {
                my $prev = $child->sprevious_sibling;
-               $prev && ref($prev) eq 'PPI::Token::Word'
-                     && $prev->content eq 'sub'
+               $prev && ref($prev) eq 'PPI::Token::Word' && $prev->content eq 'sub'
              })) {
-      push @decls, @{$self->_find_all_declarations($child)};
+      my $is_bare_block = $ref eq 'PPI::Structure::Block' && do {
+        my $prev = $child->sprevious_sibling;
+        !$prev;
+      };
+      my $inner = $self->_find_all_declarations($child);
+      if ($is_bare_block) {
+        push @decls, grep { $_->{type} eq 'state' } @$inner;
+      } else {
+        push @decls, @$inner;
+      }
     }
   }
 
