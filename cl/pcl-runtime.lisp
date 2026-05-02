@@ -1002,12 +1002,16 @@
                            (p-typeglob-name val)))))
   *p-undef*)
 
-(defun p-defined (val)
-  "Check if value is defined (not undef) - auto-unboxes.
-   Both *p-undef* and nil count as undefined."
+;;; Internal predicate — returns CL nil/t (for use in CL if/unless/when/and/or).
+;;; Use p-defined for the Perl-value result of defined() expressions.
+(defun %pcl-definedp (val)
   (let ((v (unbox val)))
-    (and (not (null v))
-         (not (eq v *p-undef*)))))
+    (and (not (null v)) (not (eq v *p-undef*)))))
+
+(defun p-defined (val)
+  "Perl defined() function — returns 1 or \"\" per Perl semantics.
+   For CL boolean contexts use %pcl-definedp instead."
+  (if (%pcl-definedp val) 1 ""))
 
 (defun p-defined-fh (fh-sym)
   "Check if a bareword filehandle or dirhandle (symbol) is open.
@@ -2633,6 +2637,17 @@
            (val (gensym "VAL")))
        `(let ((,val ,value))
           (p-autoviv-aref-set ,hash-chain ,idx ,val))))
+    ;; Array element via nested array element - autovivification of inner array ref
+    ;; (p-aref (p-aref OUTER I) J) = value  ($outer[$i][$j])
+    ((and (listp place)
+          (eq (car place) 'p-aref)
+          (listp (cadr place))
+          (eq (car (cadr place)) 'p-aref))
+     (let ((arr-chain (cadr place))
+           (idx (caddr place))
+           (val (gensym "VAL")))
+       `(let ((,val ,value))
+          (p-autoviv-aref-set ,arr-chain ,idx ,val))))
     ;; Hash element via hash-ref deref chain - autovivification
     ;; (p-gethash (p-gethash-deref $ref key) key2) = value  ($ref->{key}{key2})
     ((and (listp place)
@@ -3059,7 +3074,7 @@
    Returns the box (lvalue) to support chaining."
   (let ((p (gensym "P")))
     `(let ((,p ,place))
-       (unless (p-defined ,p)
+       (unless (%pcl-definedp ,p)
          (box-set ,p ,value))
        ,p)))
 
@@ -3412,7 +3427,7 @@
   "Perl defined-or operator"
   (let ((tmp (gensym)))
     `(let ((,tmp ,a))
-       (if (p-defined ,tmp) ,tmp ,b))))
+       (if (%pcl-definedp ,tmp) ,tmp ,b))))
 
 ;;; ============================================================
 ;;; Bitwise Operators
@@ -3554,20 +3569,21 @@
   "Setf expander for p-aref - allows assignment to array elements.
    Auto-extends array if index is beyond current length (Perl semantics).
    Stores values in boxes for l-value semantics. Returns the box."
-  (let* ((i (truncate (to-number idx)))
-         (len (if (vectorp arr) (length arr) 0))
+  (let* ((a (unbox arr))  ; unbox array refs ($arr[i][j] write-through)
+         (i (truncate (to-number idx)))
+         (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
-    (when (and (vectorp arr) (>= actual-idx 0))
+    (when (and (vectorp a) (>= actual-idx 0))
       ;; Auto-extend array if needed (Perl autovivification)
       ;; Intermediate slots get nil (deleted marker) so exists returns false for them.
       (when (>= actual-idx len)
         (dotimes (n (1+ (- actual-idx len)))
-          (vector-push-extend nil arr)))
+          (vector-push-extend nil a)))
       ;; Get or create box at this index
-      (let ((box (aref arr actual-idx)))
+      (let ((box (aref a actual-idx)))
         (unless (p-box-p box)
           (setf box (make-p-box nil))
-          (setf (aref arr actual-idx) box))
+          (setf (aref a actual-idx) box))
         ;; Set the box's value and return the box
         (box-set box value)))))
 
@@ -4027,10 +4043,10 @@
    Handles boxes in array elements."
   (let* ((a (unbox arr))
          (i (truncate idx)))
-    ;; Extend array if needed
+    ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
-            do (vector-push-extend (make-p-box *p-undef*) a)))
+            do (vector-push-extend nil a)))
     (let* ((stored (aref a i))
            ;; Unbox if element is a box
            (val (unbox stored)))
@@ -4046,10 +4062,10 @@
    Handles boxes in array elements."
   (let* ((a (unbox arr))
          (i (truncate idx)))
-    ;; Extend array if needed
+    ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
-            do (vector-push-extend (make-p-box *p-undef*) a)))
+            do (vector-push-extend nil a)))
     (let* ((stored (aref a i))
            ;; Unbox if element is a box
            (val (unbox stored)))
@@ -4065,10 +4081,10 @@
    Stores values in boxes for l-value semantics."
   (let* ((a (unbox arr))
          (i (truncate idx)))
-    ;; Extend array if needed
+    ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
-            do (vector-push-extend (make-p-box *p-undef*) a)))
+            do (vector-push-extend nil a)))
     ;; Get or create box at this index
     (let ((box (aref a i)))
       (unless (p-box-p box)

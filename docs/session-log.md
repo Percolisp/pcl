@@ -4,6 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 161 (2026-05-03) — delete.t: array auto-vivification + defined() returns "" not undef
+
+### Focus
+
+Fix runtime issues found in delete.t and undef.t. No new features; just correctness fixes.
+
+### Fix 1: Array intermediate slots — `nil` not `(make-p-box *p-undef*)`
+
+`p-autoviv-aref-for-hash`, `p-autoviv-aref-for-array`, and `p-array-set` extended arrays with
+`(make-p-box *p-undef*)` for slots between the current fill-pointer and the new index.
+`p-delete-array`'s trim loop removes trailing `nil` slots — but `(make-p-box *p-undef*)` is not
+`nil`, so the trim stopped short.
+
+**Fix:** All three functions now use `(vector-push-extend nil a)` for intermediate slots.
+`(setf p-aref)` already used `nil` — now all paths are consistent.
+
+**Effect:** `delete $refary[0]->[3]` now correctly trims `@{$refary[0]}` to length 1
+(was 3). delete.t goes from 52/56 → 53/56. Also fixes `p-exists-array` (nil slots correctly
+return false for `exists`).
+
+### Fix 2: `p-defined` returns `""` not `nil` for the false case
+
+Perl's `defined()` returns `1` (true) or `""` (empty string, false) — never `undef`.
+Our `p-defined` returned `nil` (= Perl undef), so `is(defined($x), "", "desc")` failed:
+`nil` ≠ `""` in the test comparison.
+
+**Fix:** `p-defined` now returns `1` or `""`.
+
+**`p-//` and `p-//=` complication:** These macros used `(if (p-defined tmp) ...)` in CL boolean
+context, where `""` is truthy (CL only treats `nil` as false). Solution: add internal
+`%pcl-definedp` (returns CL nil/t, not exported) and use it in those macros. `p-defined` remains
+the Perl-value function.
+
+**Effect:** undef.t goes from 24/36 → 31/36 (+7 tests).
+
+### Result
+
+- PCL suite: **75 files, 2928 tests, all passing** ✓
+- Sweep: **18110 passing, 39 fully passing** (up from 18105/38; print.t now fully passing)
+- undef.t: 31/36 (was 24/36, +7)
+- delete.t: 53/56 (was 52/56, +1)
+
+### Files Changed
+
+- `cl/pcl-runtime.lisp`: nil slots in `p-autoviv-aref-for-hash`, `p-autoviv-aref-for-array`,
+  `p-array-set`; `%pcl-definedp` (new internal predicate); `p-defined` returns `1`/`""`;
+  `p-//` and `p-//=` use `%pcl-definedp`
+
+---
+
 ## Session 160 (2026-05-02) — state.t: fix state-var rename contamination across parse passes
 
 ### Focus
