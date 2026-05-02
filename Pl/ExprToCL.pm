@@ -510,6 +510,11 @@ sub gen_leaf {
     # $#Pkg::v  -> (p-array-last-index Pkg::@v)   — @ must go AFTER the pkg:: prefix
     $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/  # qualified: $#A::ISA → A::@ISA
         || $content =~ s/^\$#/\@/;            # simple: $#arr → @arr
+    # Check state var rename (e.g., state @x → @state__sub__x__N)
+    if ($self->environment) {
+      my $renames = $self->environment->state_var_renames;
+      $content = $renames->{$content} if $renames && exists $renames->{$content};
+    }
     return "(p-array-last-index $content)";
   }
 

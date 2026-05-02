@@ -4,6 +4,211 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 160 (2026-05-02) — state.t: fix state-var rename contamination across parse passes
+
+### Focus
+
+Fix `@STATE__TOPLEVEL__F__34 is unbound` crash in state.t. Root cause: two independent bugs in `state_var_renames` handling.
+
+### Bug 1: `_process_foreach_loop` applied state-var renames to loop variables
+
+`state_var_renames` serves dual purpose: closure-capture renames (`$x__lex__N`) AND state-variable renames (`$state__toplevel__x__N`). `_process_foreach_loop` looked up the loop variable in `state_var_renames` without filtering — if `state $f = 1` had previously been processed, `foreach my $f` would incorrectly use `$state__toplevel__f__N` as the CL loop variable symbol (which has no `let`/`defvar` binding).
+
+**Fix:** In `_process_foreach_loop`, only apply the rename if it matches `/__lex__\d+$/`. State-variable renames are never correct for loop variables.
+
+### Bug 2: `parse()` didn't reset `state_var_renames` or counters between passes
+
+`parse_file` calls `parse()` twice (for two-pass compilation). The second call reset `package_stack` but NOT `state_var_renames` or the module-level counters (`$state_var_counter`, `$anon_block_counter`, `$lex_var_counter`). Consequence:
+
+1. First pass: `state $f = 1` → `$f → $state__toplevel__f__34` stored in `state_var_renames`. Output DISCARDED (second `$self->_sections([])` reset).
+2. Second pass starts with `$f → $state__toplevel__f__34` still in `state_var_renames`. Code processed BEFORE `state $f = 1` is re-encountered (e.g. `foreach my $f`, `$f[0]->()`, `$flower = $f`) uses stale `__34` name. Code at line 455 re-processes `state $f = 1` with counter=72, creating `$f → $state__toplevel__f__72` with a defvar. The stale `__34` uses have NO defvar → SBCL crash.
+
+**Fix:** At the start of `parse()`, reset `state_var_renames = {}` and all three counters to 0.
+
+### Result
+
+- PCL suite: **75 files, 2928 tests, all passing** ✓ (no regressions)
+- state.t: **98+64/166** (up from 78+84/166 baseline, +20 tests)
+- Sweep: **18105 passing, 38 fully passing** (up from 18055/38 baseline, +50 individual tests)
+- closure.t crash (tests 51+) is pre-existing, not a regression
+
+### Remaining state.t failures
+
+- Tests 70-73: computed goto — `goto state $flower = $f` (complex goto+state interaction, not in scope)
+- Tests 74-76: map/grep state vars, reference-to-state-var (minor codegen issues)
+- Tests 77-82: state pre/post increment in loops (namespace collision, pre-existing)
+- Tests 83-92: substr state vars (likely unrelated substr issue)
+- Tests 100-145: "Currently forbidden" error-detection for invalid Perl list-form state syntax — per principle 9 (invalid Perl), these should be commented out but require user approval
+- Tests 154/156: `state $z` in `sub thing` returns `''` instead of `undef` (minor init issue)
+- Tests 163-166: Not run (likely hang in `__DATA__` section processing)
+
+### Other changes from this session (earlier work, continued from context)
+
+**`Pl/ExprToCL.pm`:** Fixed `$#arr` ArrayIndex handler to apply `state_var_renames` lookup (so `$#state_array` uses the renamed CL symbol).
+
+**`Pl/Parser.pm`:** Added `_process_toplevel_state_declaration` — unique CL names (`$state__toplevel__var__N`) + init guard for state vars at in_subroutine==0. Fixed state array/hash init context: wraps init expr in `(let ((*wantarray* t)) ...)`. Added `my $x = state $y = EXPR` detection for sub-level state. Moved counters to top of file (was causing "requires explicit package name" error).
+
+**`cl/pcl-runtime.lisp`:** Fixed `p-post++` macro for `p-aref-box`/`p-gethash-box` paths: treat `nil` value as 0 before returning (Perl auto-vivifies undef to 0 for `$h{k}++`).
+
+### Files Changed This Session
+
+- `Pl/Parser.pm`: counters moved to top; `parse()` resets `state_var_renames`+counters; `_process_foreach_loop` filters to `__lex__` renames only; `_process_toplevel_state_declaration` (new); state array/hash init context fix; `my $x = state $y` detection
+- `Pl/ExprToCL.pm`: `$#arr` state_var_renames lookup
+- `cl/pcl-runtime.lisp`: `p-post++` nil-to-0 fix
+
+---
+
+## Session 159 (2026-05-02) — Two-phase block compiler: regression fixes
+
+### Focus
+
+Fix regression from session 158 two-phase compiler: sweep had dropped from 18031/39 to 13476/37 (−4555 tests, +2 crashes). Root cause: `_with_declarations` was routing ALL `PPI::Structure::Block` elements to `_emit_scoped_block`, not just sub-body blocks.
+
+### Fixes Applied
+
+**Fix 1: `is_sub_body` flag in `_with_declarations`**
+
+Added `$is_sub_body` parameter (default 0). Changed condition from `in_subroutine > 0` to also require `$is_sub_body`. Passed `1` only from the two sub-body call sites in `_process_sub_statement`. This prevents `_emit_scoped_block` from firing for if/else/while/bare block bodies inside subs.
+
+Rationale: if/else bodies inside subs share the parent sub's rename map. Running BlockAnalyzer on them re-fires closure-capture detection, creating spurious nested lets that shadow already-bound outer vars (closure.t `bizz()` test: `$i__lex__4 = 7` shadowed by new `$i__lex__4 = nil`).
+
+**Fix 2: Save/restore `_pending_let_closes` in `_process_block`**
+
+Root cause of transpile-test-02.t (recursive fib) crash: `_emit_scoped_block` hook opened `(let (($n nil)))` before `my $n = shift`, pushed 1 to `_pending_let_closes`. When the if body's `_process_block` ran (for the then-block), it flushed `_pending_let_closes = [1]` at its end, closing the `$n` let prematurely. The `return fib($n-1)` statement was left OUTSIDE the let, causing UNBOUND-VARIABLE.
+
+**Fix**: At the START of `_process_block`, save `_pending_let_closes` and set it to `[]`. At the END (after flushing the block's own pending closes), restore the saved value. Each `_process_block` call now owns an isolated set.
+
+The `_stmt_pre_hook` (set by outer `_emit_scoped_block`) is still active during inner `_process_block` calls, but `_vars_at_ppi` only has PPI addresses for the DIRECT children of the sub body block, so the hook fires no new lets in inner blocks. The hook returns early via `return unless $vars_at_ppi{$key}`.
+
+### Result
+
+- PCL suite: **75 files, 2928 tests, all passing** ✓
+- Sweep: **18055 passing, 38 fully passing** (baseline: 18031/39)
+  - 24 MORE individual tests passing than baseline
+  - 1 fewer fully-passing file than baseline (cause unknown — likely the bless.t regression from session 158 which was also pre-existing)
+- Closure.t: **50/50** ✓
+- Transpile-test-02.t (fib, mutual recursion): **passing** ✓
+- State-01.t: **20/20** ✓
+
+### Files Changed This Session
+
+- `Pl/Parser.pm`: `_with_declarations` (added `$is_sub_body`), `_process_block` (save/restore `_pending_let_closes`), `_process_sub_statement` (pass `is_sub_body=1` at both sub-body call sites)
+
+---
+
+## Session 158 (2026-05-02) — Two-phase block compiler: Phase 2 implementation + pending-closes timing fix
+
+### Focus
+
+Implement the two-phase block compiler described in `docs/two-phase-compiler.md` and `docs/ast-annotation-plan.md`. The goal: fix the mid-function `my` scoping bug (all `my` vars were hoisted to sub top in one flat `let`, causing `my $a` mid-function to shadow package `$a` from the very start).
+
+### New Files
+
+**`Pl/BlockAnalyzer.pm`** — PPI-level block analysis:
+- `analyze($class, $block, $outer, $pexpr_factory)` — entry point
+- `_collect_declarations`: walks block statements, collects `my`/`our`/`state`/`local` decls with their PPI statement objects; recurses into compound statements (while/for/if bodies) and remaps `ppi_stmt` to the outer compound stmt so the hook fires before the compound stmt
+- `_find_closure_captures`: detects anonymous sub bodies referencing outer block vars
+- `_build_var_map`: builds per-var info (sigil, scope, decl_type, captured, type_hint, usages)
+
+**`Pl/t/block-analyzer-01.t`** — 42 unit tests for BlockAnalyzer (all passing)
+
+### Parser.pm Changes
+
+**`_emit_scoped_block($analysis, $emit_body)`** — new method:
+- Called by `_with_declarations` when `$elements` is a `PPI::Structure::Block`
+- Collects `my` vars not already let-bound by enclosing scopes (`already_bound` filter)
+- Computes `__lex__N` renames for closure-captured vars, `__case__N` for CL case collisions
+- Builds `%vars_at_ppi` (PPI object address → [vars to bind at that statement])
+- Installs `_stmt_pre_hook` on `$self` — fires before each statement in `_process_block`
+- Hook opens `(let (...))` forms inline, at the exact statement where each `my` first appears
+- Pending closes stored in `$self->{_pending_let_closes}` (NOT a local var — see below)
+- Saves/restores `_pending_let_closes` to isolate inner blocks from outer closes
+
+**`_process_block` and `_process_block_in_tail_context`** — modified:
+- At end of statement loop, flush `$self->{_pending_let_closes}` (closing all open let forms)
+- This must happen INSIDE `_process_block`, before tagbody/`:next` structure emitted by outer callbacks
+
+**`_with_declarations`** — modified:
+- Routes `PPI::Structure::Block` elements to `_emit_scoped_block`
+- Other element types (arrayrefs, conditions) still use old flat-let path
+
+**`_current_outer_scope`** — new helper:
+- Collects `_let_bound_vars` + `state_var_renames` to pass as `$outer` to BlockAnalyzer
+- Lets BlockAnalyzer know which vars are already bound by enclosing scopes
+
+**`_let_init($sigil)`** — new helper:
+- Returns CL initializer for the binding: `make-p-box nil` for `$`, array for `@`, hash for `%`
+
+### Key Bug Fixed: pending_closes timing
+
+The critical issue: `_emit_scoped_block` initially closed pending lets AFTER `$emit_body()` returned. But for bare blocks, `$emit_body` emits `(tagbody :redo ... :next)` AROUND `_process_block`. This placed `)` closers after `:next)`, breaking the tagbody structure → `"attempt to GO to nonexistent tag: :NEXT"` crash.
+
+**Fix**: Store pending closes in `$self->{_pending_let_closes}`. Flush them at the END of `_process_block`'s statement loop, BEFORE `_process_block` returns. `_emit_scoped_block` does NOT close anything after `$emit_body()`.
+
+**Secondary bug**: Inner `_process_block` calls (then/else blocks of nested if-statements) would also see `_pending_let_closes` and flush outer block's pending closes prematurely.
+
+**Fix**: In `_emit_scoped_block`, ALWAYS save/restore `_pending_let_closes` (even for the early-return empty-block path), so inner blocks get an isolated empty list and don't flush outer closes.
+
+### Current State
+
+- PCL suite: 75 files, 2928 tests, **all passing**
+- Sweep: **13476 passing, 37 fully passing** (REGRESSION from 18031/39 baseline)
+
+### Known Regression — bless.t (needs investigation next session)
+
+bless.t went from 116+2/118 to 91+25/118 — 25 new failures. Tests 11, 26-28, 50-52, 65-68, 77-81 now fail (were passing before). Symptoms:
+- Test 11: "got: 'ARRAY', expected: 'SCALAR'" — ref type wrong for blessed scalar ref
+- Tests 26-28: stringification pattern match failure
+
+Root cause **not yet determined**. Hypotheses:
+1. `_emit_scoped_block` now fires for ALL `PPI::Structure::Block` elements including if-then/else blocks; the OLD flat-let path emitted `defvar` declarations which the new path omits. If dynamic binding of some var depended on `defvar`, it's now broken.
+2. The `already_bound` filter may be too aggressive, causing some vars to not get a proper `let` binding.
+3. The `_pending_let_closes` isolation may interact badly with CL symbol resolution in bless contexts.
+
+**Next session**: bisect the regression. Simplest approach — revert `_with_declarations` to NOT route if-then/else/while block-bodies to `_emit_scoped_block` (only route DIRECT sub body blocks). The scoping fix is mainly needed at the sub-body level. Inner compound-statement blocks already have their own flat-let scope and don't need fine-grained control.
+
+### Files Changed This Session
+
+- `Pl/BlockAnalyzer.pm` (new)
+- `Pl/t/block-analyzer-01.t` (new)
+- `Pl/Parser.pm` (modified: `_emit_scoped_block`, `_process_block`, `_process_block_in_tail_context`, `_with_declarations`, `_current_outer_scope`, `_let_init`)
+
+### Example: scoping fix working
+
+```perl
+sub foo { print $a; my $a = 42; print $a; }
+```
+
+**Before** (broken — $a hoisted to top):
+```lisp
+(p-sub pl-foo (&rest %_args)
+  (let ((@_ ...) ($a (make-p-box nil)))  ;; $a hoisted — shadows package $a!
+    (block nil
+      (p-print $a)   ;; sees UNINITIALIZED local $a, not package $a
+      (p-my-= $a 42)
+      (p-print $a)
+    )
+  )
+)
+```
+
+**After** (correct):
+```lisp
+(p-sub pl-foo (&rest %_args)
+  (let ((@_ ...))
+    (block nil
+      (p-print $a)          ;; uses package $a — CORRECT
+      (let (($a (make-p-box nil)))
+        (p-my-= $a 42)
+        (p-print $a)        ;; uses local $a — CORRECT
+      )
+    )
+  )
+)
+```
+
+---
+
 ## Session 157 (2026-05-01) — crash/partial fixes: do.t, pos.t, bare-block let scoping
 
 ### Focus

@@ -2898,10 +2898,11 @@
          (box (gensym "BOX")))
     (cond
       ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
+      ;; undef (nil) is treated as 0 for post-increment, matching Perl's numeric coercion
       ((and (listp real-place)
             (member (car real-place) '(p-aref-box p-gethash-box)))
        `(let* ((,box ,real-place)
-               (,old (unbox ,box)))
+               (,old (let ((v (unbox ,box))) (if (null v) 0 v))))
           (box-set ,box (perl-increment ,box))
           ,old))
       ;; p-cast-$ (scalar deref): may return a mutable box (chain ref→box→value).
