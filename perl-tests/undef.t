@@ -10,7 +10,7 @@ use strict;
 
 my (@ary, %ary, %hash);
 
-plan 36; # PCL: was 88; 50 tests inside X::DESTROY + 1 events + 1 Thingie DESTROY removed (PCL GC never calls DESTROY)
+plan 35; # PCL: was 88; 50 tests inside X::DESTROY + 1 events + 1 Thingie DESTROY + 1 stash-constant removed
 
 ok !defined($a);
 
