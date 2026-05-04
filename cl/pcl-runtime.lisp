@@ -132,6 +132,7 @@
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
+   #:*pcl-caller-wantarray*
    ;; Call depth tracking (for p-caller at top level)
    #:*pcl-sub-call-depth*
    ;; END blocks
@@ -216,7 +217,8 @@
          (setf (gethash local-sym *p-declared-subs*) :defined)
          (setf (symbol-function local-sym)
                (lambda ,params
-                 (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*)))
+                 (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
+                       (*pcl-caller-wantarray* *wantarray*))
                    (catch :p-return
                      ,@body))))))))
 
@@ -384,6 +386,10 @@
 
 ;;; Wantarray context variable
 (defvar *wantarray* nil "Context for the current call: t=list, nil=scalar, :void=void.")
+(defvar *pcl-caller-wantarray* :void
+  "Saved *wantarray* from sub entry. p-wantarray reads this so wantarray() always
+   reflects the context of the CURRENT sub's caller, even when *wantarray* has been
+   overridden by gen_funcall for a nested call.")
 
 ;;; END blocks - executed in reverse order at program exit
 (defvar *end-blocks* nil "List of END block thunks to execute at exit")
@@ -4753,16 +4759,21 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
 
 (defmacro p-return (&rest values)
   "Perl return - returns single value or list depending on args.
+   Evaluates argument(s) with *wantarray* restored to *pcl-caller-wantarray*
+   so that 'return do { @a, @b }' and similar see the correct calling context.
    Uses throw :p-return to bypass (block nil ...) from loops (for p-last),
    so return always exits the enclosing p-sub, not just the innermost loop."
   (if (null values)
       `(throw :p-return nil)
       (if (= (length values) 1)
-          `(throw :p-return (p-return-value ,(car values)))
           `(throw :p-return
-             (if (eq *wantarray* t)
-                 (vector ,@(mapcar (lambda (v) `(p-return-value ,v)) values))
-                 (p-return-value ,(car (last values))))))))
+             (let ((*wantarray* *pcl-caller-wantarray*))
+               (p-return-value ,(car values))))
+          `(throw :p-return
+             (let ((*wantarray* *pcl-caller-wantarray*))
+               (if (eq *wantarray* t)
+                   (vector ,@(mapcar (lambda (v) `(p-return-value ,v)) values))
+                   (p-return-value ,(car (last values)))))))))
 
 (defmacro p-last (&optional label)
   "Perl last (break) - optionally with label to exit specific loop.
@@ -4928,8 +4939,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-do (filename-val)
   "Perl do FILE - find file in @INC, transpile and eval it.
    Returns undef on I/O error (file not found), clears $@.
-   Sets $@ to error message on compilation/execution error."
-  (let* ((filename (to-string (unbox filename-val)))
+   Sets $@ to error message on compilation/execution error.
+   Binds *pcl-caller-wantarray* so wantarray() in the do-file sees the calling context."
+  (let* ((*pcl-caller-wantarray* *wantarray*)
+         (filename (to-string (unbox filename-val)))
          ;; Search: absolute/relative path → use directly; else search @INC
          (abs-path
           (if (or (and (plusp (length filename))
@@ -4985,8 +4998,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;;
 ;;; $@ format: omits " at (eval N) line M." — documented in not-supported.md.
 (defun p-eval (string)
-  "Perl eval(STRING): transpile and evaluate a Perl string at runtime."
-  (let ((s (to-string (unbox string))))
+  "Perl eval(STRING): transpile and evaluate a Perl string at runtime.
+   Binds *pcl-caller-wantarray* so wantarray() in the eval'd code reflects context."
+  (let ((*pcl-caller-wantarray* *wantarray*)
+        (s (to-string (unbox string))))
     ;; eval undef / eval "" -> nil (undef), $@ = ""
     (when (string= s "")
       (box-set $@ "")
@@ -7590,10 +7605,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (t v))))
 
 (defun p-wantarray ()
-  "Perl wantarray(): 1 in list context, \"\" in scalar, undef in void."
-  (cond ((eq *wantarray* t)     1)
-        ((eq *wantarray* :void) (p-undef))
-        (t                      "")))
+  "Perl wantarray(): 1 in list context, \"\" in scalar, undef in void.
+   Reads *pcl-caller-wantarray* (set at sub entry) so it reflects the caller's
+   context even when gen_funcall has overridden *wantarray* for a nested call."
+  (cond ((eq *pcl-caller-wantarray* t)     1)
+        ((eq *pcl-caller-wantarray* :void) (p-undef))
+        (t                                 "")))
 
 (defun p-caller (&optional (level 0))
   "Perl caller - return information about the calling subroutine.

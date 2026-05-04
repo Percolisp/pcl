@@ -3094,7 +3094,8 @@ sub parse_block_as_function {
   $self->indent_level($self->indent_level + 1);
 
   if ($is_anon_sub) {
-    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
+    $self->_emit("(let ((\@_ (p-flatten-args %_args))");
+    $self->_emit("      (*pcl-caller-wantarray* *wantarray*))");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(catch :p-return");
     $self->indent_level($self->indent_level + 1);

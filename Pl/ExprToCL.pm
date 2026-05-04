@@ -1028,6 +1028,8 @@ sub gen_funcall {
       if ($arg_node->{type} eq 'func_ref') {
         my $func_ref = $self->gen_node($kids->[1]);
         my $ctx = $self->expr_o->get_node_context($node_id);
+        # INHERIT_CTX: don't override *wantarray*; p-return will restore it
+        return "(funcall $func_ref)" if $ctx == INHERIT_CTX;
         my $wa  = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
         return "(let ((*wantarray* $wa)) (funcall $func_ref))";
       }
@@ -1553,13 +1555,17 @@ sub gen_funcall {
     return $ctx == 0 ? "(length $call)" : $call;
   }
 
-  # reverse/localtime/gmtime/caller are wantarray-sensitive built-ins: they use
-  # *wantarray* internally.  Explicitly bind for both contexts so the outer
-  # dynamic scope can't leak into them.
+  # reverse/localtime/gmtime/caller/do are wantarray-sensitive built-ins: they use
+  # *wantarray* internally (or propagate it to do-file code).
+  # Explicitly bind for all contexts so the outer dynamic scope can't leak into them.
   if ($func_name =~ /^(reverse|localtime|gmtime|caller)$/) {
     return $ctx == LIST_CTX
         ? "(let ((*wantarray* t)) $call)"
         : "(let ((*wantarray* nil)) $call)";
+  }
+  if ($func_name eq 'do') {
+    my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+    return "(let ((*wantarray* $wa)) $call)";
   }
 
   # INHERIT_CTX or tail position: do not override *wantarray*; let the
