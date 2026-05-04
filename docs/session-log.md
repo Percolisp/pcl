@@ -4,6 +4,120 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 166 (2026-05-05) — ref.t failure analysis
+
+### Focus
+
+Investigated ref.t failure breakdown (66/245 failing).
+
+### ref.t failure categories
+
+Total: 66 failures, 179 passing (113+66/245 as recorded in test-failures-categorized.md).
+
+**Category 1 — `@{hash_val} = LIST` assignment (tests 19-20)**
+Test 19: `@{$spring2{"foo"}} = (1,2,3); $spring2{"foo"}->[3] = 4; join(...)` → got '3:::4',
+expected '1:2:3:4'. The initial assignment to `@{$spring2{"foo"}}` sets only last element
+(scalar context?). Likely a bug in how `@{EXPR} = LIST` on an autovivified array ref works.
+Test 20: closure `$called++` via `\&mysub` gives '' instead of 1.
+
+**Category 2 — bad-deref error handling (tests 32-36, 38-39)**
+PCL returns '' (empty string) instead of "Not a SCALAR/ARRAY/HASH/CODE/GLOB reference" errors.
+PCL doesn't throw Perl-style type errors on wrong dereferences.
+
+**Category 3 — `$.` line counter in ref context (tests 54-61)**
+Output contains "Use of uninitialized value $. in numeric eq". Tests check `$.` against
+numeric values in various ref-counting scenarios.
+
+**Category 4 — DESTROY (tests 63-64, 77)**
+DESTROY not called by PCL GC — documented as not-supported.
+
+**Category 5 — UTF8/NUL stash keys (tests 83-131)**
+Tests access typeglob stash entries with UTF8 or NUL-containing names. PCL stash is CL
+packages, which don't support NUL bytes in symbol names and have different Unicode handling.
+
+**Category 6 — Aliasing/readonly refs (tests 160-166)**
+Tests like `\literal_number` aliasing, `refgen does not allow assignment to literal` —
+experimental aliasing features and readonly ref semantics not implemented.
+
+### No fixes this session
+
+Session ended early (end-of-day). No code changes, no new sweep.
+
+### TODO for next session
+
+Same as session 165 TODO, plus ref.t categories now documented.
+
+---
+
+## Session 165 (2026-05-05) — *pcl-caller-wantarray*, do.t fixes, undef.t plan
+
+### Focus
+
+Committed sessions 162-163-164 changes, fixed wantarray context propagation regressions
+in do.t, fixed p-eval context, and fixed undef.t plan off-by-one.
+
+### 19K → 18K "regression" explained
+
+The ~19K count during session 163 was a transient wrong state where `*wantarray* = :void`
+was accidentally truthy in `(if *wantarray* ...)` runtime checks. After session 164 fixed
+all 14 sites to `(if (eq *wantarray* t) ...)`, those ~1000 tests that were passing due to
+wrong void→list dispatch became correctly-failing. The 18100-18130 range is the correct
+baseline. No real regression.
+
+### `*pcl-caller-wantarray*` — new variable for correct wantarray() in nested calls
+
+**Problem**: gen_funcall wraps user sub calls with `(let ((*wantarray* CTX)) CALL)`. The
+arguments to CALL are evaluated inside this let, so `wantarray` appearing as an argument
+sees CTX (the callee's context) instead of the enclosing sub's context. This broke:
+- `wantarray` inside `eval STRING` context
+- `wantarray` inside `do FILE` context (scalar/void)
+- `return do { @a, @b }` — do block ran in scalar context instead of inheriting
+
+**Solution**: Add `*pcl-caller-wantarray*`:
+- New dynamic variable, initialized to `:void`
+- `p-sub` macro: captures `*pcl-caller-wantarray* = *wantarray*` at sub entry
+- Anonymous sub entry (Parser.pm): same capture in `let ((@_ ...) (*pcl-caller-wantarray* ...))`
+- `p-do` and `p-eval`: bind `*pcl-caller-wantarray* = *wantarray*` before running file/eval code
+- `p-wantarray`: reads `*pcl-caller-wantarray*` instead of `*wantarray*`
+- `p-return` macro: evaluates its argument(s) with `(let ((*wantarray* *pcl-caller-wantarray*)) ...)`
+  so `return do { @a, @b }` evaluates the do block in the CALLER's context
+- ExprToCL.pm: `do { BLOCK }` in INHERIT_CTX position → emit `(funcall fn)` without wantarray override
+- ExprToCL.pm: `do` added to wantarray-sensitive built-ins (explicit binding for all contexts)
+
+**do.t tests fixed**: 3 (scalar context), 5, 6 (list context), 24 (return do {}, do {} list)
+
+### Files Changed
+
+- `cl/pcl-runtime.lisp`: `*pcl-caller-wantarray*` defvar + export; p-sub, p-wantarray,
+  p-return, p-do, p-eval updated
+- `Pl/Parser.pm`: anonymous sub let captures `*pcl-caller-wantarray*`
+- `Pl/ExprToCL.pm`: INHERIT_CTX for do blocks; `do` in wantarray-sensitive list
+- `perl-tests/undef.t`: plan 36→35 (off-by-one from stash-constant test removal)
+
+### Current Sweep
+
+```
+TOTAL: 18128 passing, 40 fully passing (vs 18123/40 at session 164 end)
+```
+
+do.t: 62/73 (was 58/73, now back to pre-session-162 baseline)
+wantarray.t: 27/28 (unchanged, test 11 eval-void still known)
+context.t: 8/8 ✓
+undef.t: 32/35 (was 32+3/36 with plan mismatch, now correct)
+
+### TODO for next session
+
+1. **ref.t gap (tests 19-36+)**: Direct-print tests (`print @a` etc.) not using Test::More
+   fail. These tests use `curr_test()` and print "ok N\n" directly. Root cause unknown.
+   Approx 61 failures.
+2. **do.t remaining (tests 22, 35, 36, 42)**: Pre-existing failures about list-context do blocks
+   with flatten markers not being spread in p-array-=. The return value is `#(flatten-marker1
+   flatten-marker2)` but p-array-= doesn't handle flatten-markers in items. Fix: add
+   p-flatten-marker case to add-items in p-array-= macro.
+3. **do.t tests 63-70**: `do subname()` syntax — PCL doesn't support this (documented).
+
+---
+
 ## Session 164 (2026-05-04) — Fix sweep regression from sessions 162-163
 
 ### Focus
