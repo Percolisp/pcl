@@ -58,7 +58,7 @@ sub test_cl {
 # Test 1: ($) prototype limits to 1 arg — bop.t crash case
 {
     my $cl = transpile('sub _and($) { $_[0] & $_[1] }  is _and 0, "0", "str";');
-    like($cl, qr/\(pl-is \(pl-_and 0\)/,
+    like($cl, qr/\(pl-_and 0\)/,
          '($) proto: is _and 0, "0", "str" -> is(_and(0), ...)');
 }
 

@@ -11,7 +11,7 @@ use warnings;
 use Moo;
 
 use Scalar::Util qw/looks_like_number/;
-use Pl::PExpr qw(SCALAR_CTX LIST_CTX);
+use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
 my $g_flipflop_count = 0;
@@ -1027,7 +1027,9 @@ sub gen_funcall {
     if ($self->expr_o->is_internal_node_type($arg_node)) {
       if ($arg_node->{type} eq 'func_ref') {
         my $func_ref = $self->gen_node($kids->[1]);
-        return "(funcall $func_ref)";
+        my $ctx = $self->expr_o->get_node_context($node_id);
+        my $wa  = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+        return "(let ((*wantarray* $wa)) (funcall $func_ref))";
       }
       elsif ($arg_node->{type} eq 'anon_sub') {
         my $block_kids = $self->expr_o->get_node_children($kids->[1]);
@@ -1551,23 +1553,33 @@ sub gen_funcall {
     return $ctx == 0 ? "(length $call)" : $call;
   }
 
-  # reverse/localtime/gmtime are wantarray-sensitive: they use *wantarray* internally
-  # to decide list-vs-scalar behavior.  An outer (let ((*wantarray* t)) ...) wrapper
-  # (e.g. from push/print arguments) would leak through the plain $call form and make
-  # p-reverse do list reversal when scalar string reversal was intended.
-  # Explicitly bind *wantarray* for both contexts so the outer dynamic scope can't leak.
+  # reverse/localtime/gmtime/caller are wantarray-sensitive built-ins: they use
+  # *wantarray* internally.  Explicitly bind for both contexts so the outer
+  # dynamic scope can't leak into them.
   if ($func_name =~ /^(reverse|localtime|gmtime|caller)$/) {
-    return $ctx == 1
+    return $ctx == LIST_CTX
         ? "(let ((*wantarray* t)) $call)"
         : "(let ((*wantarray* nil)) $call)";
   }
 
-  # Wrap in dynamic wantarray binding for list context
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(let ((*wantarray* t)) $call)";
+  # INHERIT_CTX or tail position: do not override *wantarray*; let the
+  # caller's dynamic binding propagate through.
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+
+  # User sub calls: always bind *wantarray* so the callee sees the correct
+  # context regardless of what the surrounding scope has set.
+  # Built-ins (in %RUNTIME_NAMES) don't call p-wantarray; only wrap them for
+  # list context (to avoid disturbing wantarray-sensitive built-ins called
+  # inside a scalar-context scope).
+  if (!exists $RUNTIME_NAMES{$func_name}) {
+    my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+    return "(let ((*wantarray* $wa)) $call)";
   }
 
-  return $call;
+  # Built-in in list context: still wrap so it gets list-context signal
+  # (e.g. a wantarray-sensitive built-in called as the RHS of @arr = builtin())
+  return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $call)" : $call;
 }
 
 
@@ -1651,12 +1663,12 @@ sub gen_methodcall {
     $call = "(p-method-call $obj \"$method_str\"$args_str)";
   }
 
-  # Wrap in dynamic wantarray binding for list context
+  # Bind *wantarray* so the method body sees the correct call context.
   my $ctx = $self->expr_o->get_node_context($node_id);
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(let ((*wantarray* t)) $call)";
-  }
-  return $call;
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+  return "(let ((*wantarray* $wa)) $call)";
 }
 
 
@@ -1679,12 +1691,12 @@ sub gen_ref_funcall {
   my $args_str = @args ? ' ' . join(' ', @args) : '';
   my $call = "(p-funcall-ref $ref$args_str)";
 
-  # Wrap in dynamic wantarray binding for list context
+  # Bind *wantarray* so the code-ref body sees the correct call context.
   my $ctx = $self->expr_o->get_node_context($node_id);
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(let ((*wantarray* t)) $call)";
-  }
-  return $call;
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+  return "(let ((*wantarray* $wa)) $call)";
 }
 
 
@@ -1695,30 +1707,7 @@ sub gen_ternary {
   my $node_id = shift;
   my $kids    = shift;
 
-  # Check if condition is wantarray - if so, the 'then' branch should be in list context
-  my $cond_node = $self->expr_o->get_a_node($kids->[0]);
-  my $is_wantarray_cond = 0;
-
-  if ($self->expr_o->is_internal_node_type($cond_node) &&
-      $cond_node->{type} eq 'funcall') {
-    my $cond_kids = $self->expr_o->get_node_children($kids->[0]);
-    if (@$cond_kids) {
-      my $func_node = $self->expr_o->get_a_node($cond_kids->[0]);
-      if (!$self->expr_o->is_internal_node_type($func_node) &&
-          $func_node->can('content') &&
-          $func_node->content eq 'wantarray') {
-        $is_wantarray_cond = 1;
-      }
-    }
-  }
-
   my $cond = $self->gen_node($kids->[0]);
-
-  # If condition is wantarray, set list context on 'then' branch
-  if ($is_wantarray_cond) {
-    $self->expr_o->set_node_context($kids->[1], 1);  # LIST_CTX = 1
-  }
-
   my $then  = $self->gen_node($kids->[1]);
   my $else  = $self->gen_node($kids->[2]);
 
@@ -2138,10 +2127,13 @@ sub gen_progn {
     return "(vector $forms_str)";
   }
 
-  # In unknown context with multiple forms, check wantarray at runtime.
+  # In non-list context with multiple forms, check wantarray at runtime.
+  # Covers SCALAR_CTX, VOID_CTX, and INHERIT_CTX — all cases where the caller
+  # hasn't explicitly requested a list.  The runtime check handles map blocks
+  # (whose body is compiled in VOID_CTX but whose lambda runs with *wantarray* t).
   # Wrap @array items with (p-flatten ...) so %p-collect-list in
   # %p-flatten-for-list can spread @arrays while keeping arrayrefs as scalars.
-  if (@forms > 1 && $ctx == SCALAR_CTX) {
+  if (@forms > 1 && $ctx != LIST_CTX) {
     my @flat_forms;
     for my $i (0 .. $#$kids) {
       my $form = $forms[$i];

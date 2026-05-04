@@ -26,14 +26,15 @@ use Pl::PExpr::StringInterpolation;
 
 # Context constants
 use constant {
-    SCALAR_CTX => 0,
-    LIST_CTX   => 1,
-    VOID_CTX   => 2,
+    SCALAR_CTX  => 0,
+    LIST_CTX    => 1,
+    VOID_CTX    => 2,
+    INHERIT_CTX => 3,  # inherit *wantarray* from dynamic scope; emit no binding
 };
 
 # Export for use in tests/other modules
 use Exporter 'import';
-our @EXPORT_OK = qw(SCALAR_CTX LIST_CTX VOID_CTX);
+our @EXPORT_OK = qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 
 # XXXX Unary ops have a different prio compared to list ops, se page 106.
 
@@ -895,6 +896,21 @@ sub parse {
 
         $e->[$i-1] = $node;
         splice @$e, $i, 2;  # Remove -> and method name
+        $i--;
+        next;
+      } elsif (ref($nxt) eq 'PPI::Token::Cast'
+               && $nxt->content() =~ /^([\$@%])\*$/) {
+        # Postfix deref: X->$* (scalar), X->@* (array), X->%* (hash) — Perl 5.20+
+        # Equivalent to $$X, @$X, %$X respectively.
+        my $sigil    = $1;
+        my $pre_id   = $self->parse([$pre]);
+        my $cast_tok = PPI::Token::Cast->new($sigil);
+        my ($node, $id) = $self->make_node_insert('prefix_op');
+        my $op_id    = $self->make_node($cast_tok);
+        $self->add_child_to_node($id, $op_id);   # Cast sigil ($, @, or %)
+        $self->add_child_to_node($id, $pre_id);  # Ref being dereferenced
+        $e->[$i-1] = $node;
+        splice @$e, $i, 2;  # Remove -> and Cast($*/\@*/\%*)
         $i--;
         next;
       } elsif (!$self->is_internal_node_type($nxt)
@@ -3046,6 +3062,12 @@ sub child_context {
       # from recognising them, causing an UNDEFINED-FUNCTION crash.
       if ($func_name && $func_name =~ /^(readdir|opendir|closedir|seekdir|telldir|rewinddir|eof|getc|read|sysread|syswrite|fileno|binmode|truncate)$/) {
         return SCALAR_CTX if $child_index == 1;  # First arg is the filehandle
+      }
+
+      # return: the value expression inherits *wantarray* from the caller's
+      # dynamic scope — emit no binding so context propagates through.
+      if ($func_name && $func_name eq 'return') {
+        return INHERIT_CTX;
       }
     }
     # progn (comma operator) forces list context

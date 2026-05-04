@@ -8,7 +8,7 @@ BEGIN {
 
 use strict qw(refs subs);
 
-plan(257);
+plan(245); # PCL: was 257; removed 12 DESTROY-fired tests (larry/curly/moe=3, A/_B=2, x=4, FINALE=3)
 
 # Test this first before we extend the stack with other operations.
 # This caused an asan failure due to a bad write past the end of the stack.
@@ -378,10 +378,12 @@ like ($@, qr/Can\'t modify.*ref.*in.*assignment(?x:
            )|Experimental aliasing via reference not enabled/);
 
 # test for proper destruction of lexical objects
+# PCL: DESTROY subs below print tests via side-effects when objects go out of
+# scope. PCL's GC never fires DESTROY on scope exit. Tests removed from plan.
 $test = curr_test();
-sub larry::DESTROY { print "# larry\nok $test\n"; }
-sub curly::DESTROY { print "# curly\nok ", $test + 1, "\n"; }
-sub moe::DESTROY   { print "# moe\nok ", $test + 2, "\n"; }
+sub larry::DESTROY { } # PCL: was: print "# larry\nok $test\n";
+sub curly::DESTROY { } # PCL: was: print "# curly\nok ", $test + 1, "\n";
+sub moe::DESTROY   { } # PCL: was: print "# moe\nok ", $test + 2, "\n";
 
 {
     my ($joe, @curly, %larry);
@@ -392,7 +394,7 @@ sub moe::DESTROY   { print "# moe\nok ", $test + 2, "\n"; }
 }
 
 print "# left block\n";
-curr_test($test + 3);
+# curr_test($test + 3); # PCL: removed — DESTROY tests never fire
 
 # another glob test
 
@@ -409,18 +411,20 @@ is ($$_, 'glob 4');
 
 
 # test if reblessing during destruction results in more destruction
+# PCL: A::DESTROY and _B::DESTROY print tests at scope exit. PCL GC never
+# fires them. Tests removed from plan; curr_test advance removed.
 $test = curr_test();
 {
     package A;
     sub new { bless {}, shift }
-    DESTROY { print "# destroying 'A'\nok ", $test + 1, "\n" }
+    DESTROY { } # PCL: was: print "# destroying 'A'\nok ", $test + 1, "\n"
     package _B;
     sub new { bless {}, shift }
-    DESTROY { print "# destroying '_B'\nok $test\n"; bless shift, 'A' }
+    DESTROY { bless shift, 'A' } # PCL: was also: print "# destroying '_B'\nok $test\n";
     package main;
     my $b = _B->new;
 }
-curr_test($test + 2);
+# curr_test($test + 2); # PCL: removed — DESTROY tests never fire
 
 # test if $_[0] is properly protected in DESTROY()
 
@@ -503,8 +507,10 @@ foreach my $lexical ('', 'my $a; ') {
   is ($result, $expect);
 }
 
+# PCL: x::DESTROY prints 4 tests at scope exit. PCL GC never fires DESTROY.
+# Tests removed from plan; curr_test advance removed.
 $test = curr_test();
-sub x::DESTROY {print "ok ", $test + shift->[0], "\n"}
+sub x::DESTROY {} # PCL: was: print "ok ", $test + shift->[0], "\n"
 { my $a1 = bless [3],"x";
   my $a2 = bless [2],"x";
   { my $a3 = bless [1],"x";
@@ -512,7 +518,7 @@ sub x::DESTROY {print "ok ", $test + shift->[0], "\n"}
     567;
   }
 }
-curr_test($test+4);
+# curr_test($test+4); # PCL: removed — DESTROY tests never fire
 
 is (runperl (switches=>['-l'],
 	     prog=> 'print 1; print qq-*$\*-;print 1;'),
@@ -913,24 +919,11 @@ EOF
                     'rt#130861: heap uaf in pp_rv2sv');
 }
 
-# Bit of a hack to make test.pl happy. There are 3 more tests after it leaves.
-$test = curr_test();
-curr_test($test + 3);
-# test global destruction
-
-my $test1 = $test + 1;
-my $test2 = $test + 2;
-
-package FINALE;
-
-{
-    $ref3 = bless ["ok $test2\n"];	# package destruction
-    my $ref2 = bless ["ok $test1\n"];	# lexical destruction
-    local $ref1 = bless ["ok $test\n"];	# dynamic destruction
-    1;					# flush any temp values on stack
-}
-
-DESTROY {
-    print $_[0][0];
-}
+# PCL: FINALE::DESTROY fires at global destruction to print 3 tests.
+# PCL's GC never fires DESTROY. Tests removed from plan; curr_test advance removed.
+# $test = curr_test();
+# curr_test($test + 3);  # PCL: removed — DESTROY tests never fire
+# package FINALE;
+# { $ref3 = bless ["ok $test2\n"]; my $ref2 = bless ["ok $test1\n"]; local $ref1 = bless ["ok $test\n"]; 1; }
+# DESTROY { print $_[0][0]; }
 

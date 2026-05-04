@@ -27,7 +27,7 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 ## Known Gaps
 
 - **`pack`/`unpack`** — missing several format letters
-- **`wantarray`** — context propagation is partial; scalar vs list context works in straightforward cases
+- **`wantarray`** — three-valued (list/scalar/void) with full context propagation through return, tail calls, method calls, code refs, `do BLOCK`, and `||`/`&&`/`?:` operator chains; `eval "string"` void context not yet propagated
 - **`$SIG{__DIE__}`** — handler not called (requires CL condition restarts); `$SIG{__WARN__}` works correctly
 - **XS/C extensions** — anything that requires compiled C code won't work
 

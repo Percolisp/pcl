@@ -383,7 +383,7 @@
   val)
 
 ;;; Wantarray context variable
-(defvar *wantarray* nil "True when list context is expected")
+(defvar *wantarray* nil "Context for the current call: t=list, nil=scalar, :void=void.")
 
 ;;; END blocks - executed in reverse order at program exit
 (defvar *end-blocks* nil "List of END block thunks to execute at exit")
@@ -3858,7 +3858,7 @@
         (loop for i from off
               for v in flat-rep
               do (setf (aref a i) (make-p-box v)))))
-    (if *wantarray*
+    (if (eq *wantarray* t)
         removed
         (if (> (length removed) 0)
             (aref removed (1- (length removed)))
@@ -4322,13 +4322,13 @@
            ;; Exhausted sentinel or empty array: reset and return empty/undef
            (progn
              (remhash collection *array-iterators*)
-             (if *wantarray* (vector) *p-undef*))
+             (if (eq *wantarray* t) (vector) *p-undef*))
            (let ((val (aref collection i)))
              ;; Advance: set end-sentinel if this is the last element
              (if (>= (1+ i) n)
                  (setf (gethash collection *array-iterators*) n)
                  (setf (gethash collection *array-iterators*) (1+ i)))
-             (if *wantarray*
+             (if (eq *wantarray* t)
                  (vector i (unbox val))
                  i)))))
     ;; Hash case
@@ -4345,12 +4345,12 @@
        (if (null remaining)
            (progn
              (remhash collection *hash-iterators*)
-             (if *wantarray* (vector) *p-undef*))
+             (if (eq *wantarray* t) (vector) *p-undef*))
            ;; Return next key/val pair
            (let* ((key (car remaining))
                   (val (gethash key collection)))
              (setf (gethash collection *hash-iterators*) (cdr remaining))
-             (if *wantarray*
+             (if (eq *wantarray* t)
                  (vector key (unbox val))
                  (make-p-box key))))))
     ;; Neither — return empty
@@ -4760,7 +4760,7 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
       (if (= (length values) 1)
           `(throw :p-return (p-return-value ,(car values)))
           `(throw :p-return
-             (if *wantarray*
+             (if (eq *wantarray* t)
                  (vector ,@(mapcar (lambda (v) `(p-return-value ,v)) values))
                  (p-return-value ,(car (last values))))))))
 
@@ -5185,6 +5185,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (and (> (length name) 3)
                  (string= (subseq name 0 3) "PL-"))))
      `',(intern (subseq (symbol-name (car fh-form)) 3)))
+    ;; (let (BINDINGS) (pl-NAME)) — wantarray-wrapped bareword FH.
+    ;; Sessions 162+ wrap scalar-context user sub calls in (let ((*wantarray* V)) ...).
+    ;; Unwrap the let and extract the bare filehandle name.
+    ((and (listp fh-form)
+          (= (length fh-form) 3)
+          (eq (car fh-form) 'let)
+          (let ((body (caddr fh-form)))
+            (and (listp body)
+                 (= (length body) 1)
+                 (symbolp (car body))
+                 (> (length (symbol-name (car body))) 3)
+                 (string= (subseq (symbol-name (car body)) 0 3) "PL-"))))
+     `',(intern (subseq (symbol-name (car (caddr fh-form))) 3)))
     ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
     (t fh-form)))
 
@@ -5490,7 +5503,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defmacro p-readline (&rest args)
   "Perl readline / <FH> — in list context reads all records; in scalar reads one."
-  `(if *wantarray*
+  `(if (eq *wantarray* t)
        (%p-readline-all ,(if args (car args) nil))
        (let ((%rl-val (%p-readline-impl ,@args)))
          (when %rl-val
@@ -5650,7 +5663,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    In list context: first call returns all matches; second call with same pattern returns empty.
    In scalar context: returns one match per call, nil when exhausted; resets for next cycle."
   (let ((pat (if pattern (to-string pattern) "*")))
-    (if *wantarray*
+    (if (eq *wantarray* t)
         (p-glob--list-context pat)
         (p-glob--scalar-context pat))))
 
@@ -6006,7 +6019,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (perl-mon  (1- month))
                  (yday (- (floor (encode-universal-time 0 0 0 day month year) 86400)
                           (floor (encode-universal-time 0 0 0 1 1 year) 86400))))
-             (if *wantarray*
+             (if (eq *wantarray* t)
                  (make-array 9 :initial-contents
                              (list sec min hour day perl-mon perl-year perl-wday yday (if dst-p 1 0))
                              :adjustable t :fill-pointer t)
@@ -6017,7 +6030,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
               (local-unix (+ unix-time tz-secs)))
          (multiple-value-bind (sec min hour day perl-mon perl-year wday yday)
              (%pcl-unix-to-utc local-unix)
-           (if *wantarray*
+           (if (eq *wantarray* t)
                (make-array 9 :initial-contents
                            (list sec min hour day perl-mon perl-year wday yday 0)
                            :adjustable t :fill-pointer t)
@@ -6041,7 +6054,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (t
        (multiple-value-bind (sec min hour day perl-mon perl-year wday yday)
            (%pcl-unix-to-utc unix-time)
-         (if *wantarray*
+         (if (eq *wantarray* t)
              (make-array 9 :initial-contents
                          (list sec min hour day perl-mon perl-year wday yday 0)
                          :adjustable t :fill-pointer t)
@@ -6614,7 +6627,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-reverse (&rest items)
   "Perl reverse: in list context reverses element order; in scalar context
    concatenates all items into a string and reverses the characters."
-  (if *wantarray*
+  (if (eq *wantarray* t)
       ;; List context: reverse element order, preserving nil (deleted) slots
       (let* ((arr (apply #'%p-collect-list items))
              (result (copy-seq arr)))
@@ -7577,8 +7590,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (t v))))
 
 (defun p-wantarray ()
-  "Perl wantarray"
-  *wantarray*)
+  "Perl wantarray(): 1 in list context, \"\" in scalar, undef in void."
+  (cond ((eq *wantarray* t)     1)
+        ((eq *wantarray* :void) (p-undef))
+        (t                      "")))
 
 (defun p-caller (&optional (level 0))
   "Perl caller - return information about the calling subroutine.
@@ -7616,7 +7631,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        nil))
     ;; Return results
     (if frame-info
-        (if *wantarray*
+        (if (eq *wantarray* t)
             (values-list frame-info)
             (first frame-info))  ; Scalar context: just package
         nil)))  ; Past end of stack
@@ -8357,7 +8372,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (clrhash %+)
           (cond
             ;; /g in list context: return all matches at once, no pos tracking
-            ((and global-p *wantarray*)
+            ;; :void is NOT list context — only (eq *wantarray* t) is list context
+            ((and global-p (eq *wantarray* t))
              (let ((all-results nil)
                    (last-rs nil) (last-re nil))
                (cl-ppcre:do-scans (ms me rs re scanner str)
@@ -8377,8 +8393,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                    (when last-rs
                      (set-capture-groups str last-rs last-re reg-names)))
                  result)))
-            ;; /g in scalar context: iterate from current pos
-            ((and global-p (not *wantarray*))
+            ;; /g in scalar/void context: iterate from current pos
+            ((and global-p (not (eq *wantarray* t)))
              (let ((start (or (gethash string *p-match-pos*) 0)))
                (multiple-value-bind (match-start match-end reg-starts reg-ends)
                    (cl-ppcre:scan scanner str :start start)
@@ -8400,7 +8416,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (when match-start
                  (clear-capture-groups)
                  (set-capture-groups str reg-starts reg-ends reg-names)
-                 (if *wantarray*
+                 (if (eq *wantarray* t)
                      (let* ((num-groups (length reg-starts))
                             (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
                        (if (zerop num-groups)
@@ -8815,7 +8831,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                 (otherwise nil)))))))
     ;; In scalar context return the first value (Perl: "the first unpacked value").
     ;; In list context return the full vector (for list/array assignment).
-    (if *wantarray*
+    (if (eq *wantarray* t)
         result
         (if (> (length result) 0) (aref result 0) *p-undef*))))
 

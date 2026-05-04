@@ -16,7 +16,7 @@ use File::Basename;
 use File::Spec;
 use Cwd qw(abs_path);
 
-use Pl::PExpr;
+use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::ExprToCL;
 use Pl::Environment;
 
@@ -1080,7 +1080,7 @@ sub _process_expression_statement {
       } $cond_parts[0]->children;
     }
 
-    my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt);
+    my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt, VOID_CTX);
 
     # Generate appropriate control structure
     # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
@@ -1112,11 +1112,18 @@ sub _process_expression_statement {
     }
   }
   else {
-    # No modifier - parse normally
-    $cl_code = $self->_parse_expression(\@parts, $stmt);
+    # No modifier - bare expression statement; result is discarded (void context)
+    $cl_code = $self->_parse_expression(\@parts, $stmt, VOID_CTX);
   }
 
-  # Emit as comment + code
+  # Emit as comment + code.
+  # When inside a sub body and NOT at tail position, wrap in void context so that
+  # dynamic operators like /g regex don't inherit the caller's list context.
+  if (defined $cl_code
+      && $self->environment->in_subroutine > 0
+      && !$self->environment->tail_position) {
+    $cl_code = "(let ((*wantarray* :void)) $cl_code)";
+  }
   $self->_emit(";; $perl_code");
   $self->_emit($cl_code) if defined $cl_code;
   $self->_emit("");
@@ -2914,11 +2921,20 @@ sub _process_block {
   # else (or a postfix if/unless), wrap the block in a let-binding that captures
   # the condition value.  This implements Perl's "last expression evaluated"
   # return semantics for bare-if.
-  my ($tail_ret_var, $tail_last_sig);
+  my ($tail_ret_var, $tail_last_sig, $tail_sig);
   if ($self->environment->in_subroutine > 0) {
     my @sig = $block->schildren;
-    if (@sig) {
-      my $last = $sig[-1];
+    # Skip BEGIN/END/INIT/CHECK blocks — they produce no runtime code,
+    # so the tail is the last *runtime* significant statement.
+    my $last;
+    for my $s (reverse @sig) {
+      unless (ref($s) eq 'PPI::Statement::Scheduled') {
+        $last = $s;
+        last;
+      }
+    }
+    if ($last) {
+      $tail_sig = $last;  # track for tail_position context propagation
       if ($self->_is_if_without_else($last) || $self->_is_postfix_if_without_else($last)) {
         $tail_ret_var  = $self->_fresh_ret_var();
         $tail_last_sig = $last;
@@ -2961,7 +2977,12 @@ sub _process_block {
       next;
     }
 
+    # Set tail_position so gen_funcall/gen_methodcall propagate *wantarray*
+    # instead of overriding it — allowing context to flow from the call site.
+    my $is_tail = defined $tail_sig && $child == $tail_sig;
+    $self->environment->tail_position(1) if $is_tail;
     $self->_process_element($child);
+    $self->environment->tail_position(0) if $is_tail;
   }
 
   # Flush let forms opened by _emit_scoped_block's hook (innermost first).
@@ -3185,6 +3206,15 @@ sub parse_block_to_cl_string {
   # Enter new scope for filehandles
   $self->environment->push_scope();
 
+  # Find last significant child so we can set tail_position correctly.
+  # This prevents the VOID_CTX wrap (in _process_expression_statement) from
+  # incorrectly wrapping the lambda's return value in map/grep/sort blocks.
+  my @sig = grep {
+    my $r = ref($_);
+    $r ne 'PPI::Token::Whitespace' && $r ne 'PPI::Token::Comment'
+  } $block->children;
+  my $last_sig = @sig ? $sig[-1] : undef;
+
   # Process block contents
   my $has_content = 0;
   for my $child ($block->children) {
@@ -3192,7 +3222,10 @@ sub parse_block_to_cl_string {
     next if $ref eq 'PPI::Token::Whitespace';
     next if $ref eq 'PPI::Token::Comment';
 
+    my $is_tail = defined $last_sig && $child == $last_sig;
+    $self->environment->tail_position(1) if $is_tail;
     $self->_process_element($child);
+    $self->environment->tail_position(0) if $is_tail;
     $has_content = 1;
   }
 
