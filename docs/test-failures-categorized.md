@@ -61,7 +61,7 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 
 | File | Crash / Pass | Root Cause |
 |------|-------------|-----------|
-| **ref.t** | 107+66/257 | Session 147: no crash. 66 failing = DESTROY-callback tests + others PCL can't support without finalizers. `grep` fails on this file (embedded null bytes) — use Perl one-liners. Previous crash at test 52 (`WHATEVER->foo` via UNIVERSAL @ISA) was fixed by UNIVERSAL fallback in `p-method-call`. |
+| **ref.t** | 115/184 run (245 planned) | Session 147: no crash. 66 failing = DESTROY-callback tests + others PCL can't support without finalizers. Session 167: +2 (tests 54-55 fixed via p-refgen-list). Tests 56-61 still fail: `\(1,@a,@b)` — needs code-gen fix for multi-term list. `grep` fails on this file (embedded null bytes) — use Perl one-liners. |
 | **array.t** | 125+69/195 | Session 147: +56 passing (was 69+40). Fixed: -splice tokenization, p-set-array-length auto-vivify, p-defpackage @ISA init. Remaining failures: nested ref auto-viv write-back (`push @{$arr[N]}, val`) |
 | **grent.t** | 2+0/3 | Same — `push @{$arr[N]}, val` in grp entry building |
 
@@ -142,7 +142,7 @@ These files run to completion but have failures. Not yet in fully-passing.
 | **chr.t** | 15/45 | 30 fail | Tests 6,11-15: Latin-1 chars chr(128-255) encoding; tests 22-42: Unicode chr edge cases | Unicode encoding mismatch; `use bytes` |
 | **context.t** | 6/8 | 2 fail | Test 2: wantarray leaks into regex; test 8: `BEGIN {}` inside anon sub generates wrong `eval-when` | Test 2: wantarray (deferred). Test 8: Medium fix — hoist `BEGIN` eval-when before `funcall` |
 | **delete.t** | 51/56 | 5 fail | Tests 52-54: chained subscript edge cases; test 55: `$#arr` in list context; test 56: error message format | Medium |
-| **do.t** | 60/73 | 13 fail | Tests 9-10: bare-if implicit return (condition false → should return nil, not condition); tests 12-51: wantarray/context | Tests 9-10: Medium fix (see `docs/v1-implementation-plan.md` B1). Rest: wantarray (deferred) |
+| **do.t** | 63/73 | 10 fail | Tests 9-10: bare-if implicit return (condition false → should return nil, not condition); test 22: FIXED session 167 (p-array-= flatten-marker). tests 12-51: wantarray/context | Tests 9-10: Medium fix (see `docs/v1-implementation-plan.md` B1). Rest: wantarray (deferred) |
 | **for.t** | 129/138 | 9 fail | Tests 127,129: `for my Dog $spot` type annotations on loop var — PCL crashes/returns undef instead of running. Tests 131-138: `CORE::my/our/state` + type annotations — error-detection tests | Easy: comment out tests 131-138 (error detection). Tests 127,129: fix type annotation parsing |
 | **grep.t** | 67/77 | 10 fail | Tests 29,35,37: `grep {hash}->{deref}` — parser misreads hash-constructor block + deref. Tests 47-48: FIXED (map scalar aliasing). Test 54: wantarray (deferred). Tests 61,69,71,73,75,76: DESTROY / error detection — not-supported | Mixed: wantarray (deferred), DESTROY (not-supported), parser bugs remain for 29/35/37 |
 | **hashassign.t** | 262/309 | 47 fail | Tests 207-214: hash assignment list/scalar context wantarray. Remaining: various list-context edge cases | Wantarray (deferred) |

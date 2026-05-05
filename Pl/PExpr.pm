@@ -1364,6 +1364,13 @@ sub parse {
         die "Got op '$op_name', not postfix. But there is nothing after it??"
             if ! $post;
         my $id_term    = $self->parse([$post]);
+        # Mark \(LIST) so code-gen can distribute refs over list elements.
+        # By the time we reach here, Structure::List has been converted to a
+        # 'tree_val' PPIreference by the ()→node pass above (lines 704-723).
+        if ($op_name eq '\\' && ref($post) eq 'PPIreference'
+                             && ($post->{type} // '') eq 'tree_val') {
+            $self->node_tree->set_metadata($id_term, 'backslash_paren_list', 1);
+        }
         my($node, $id) = $self->make_node_insert('prefix_op');
         my $op_id      = $self->make_node($op);
         $self->add_child_to_node($id, $op_id);     # Prefix operand

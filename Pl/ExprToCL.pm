@@ -1735,12 +1735,39 @@ sub gen_prefix_op {
   # Special case: \&func (reference to function)
   # Use p-backslash-sub to safely handle undefined functions (AUTOLOAD dispatch).
   if ($op eq '\\') {
-    my $operand_node = $self->expr_o->get_a_node($kids->[1]);
+    my $operand_id   = $kids->[1];
+    my $operand_node = $self->expr_o->get_a_node($operand_id);
     if (ref($operand_node) eq 'PPI::Token::Symbol' &&
         $operand_node->content() =~ /^&(.+)$/) {
       my $func_name = $1;
       my $cl_func = $self->cl_name($func_name, 1);
       return "(p-backslash-sub '$cl_func)";
+    }
+    # \(LIST) — distribute \\ over each element. PExpr marks the operand node
+    # with 'backslash_paren_list' when the source had explicit parens.
+    if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
+      # For single-child tree_val with a scalar expression (not an array var,
+      # range, or list-function), use p-backslash directly.  This handles
+      # \(my $v = expr) correctly — without this check it generates a vector
+      # of one ref instead of a plain scalar ref, breaking bless.
+      my $inner_node = $self->expr_o->get_a_node($operand_id);
+      if ($self->expr_o->is_internal_node_type($inner_node)
+          && ($inner_node->{type} // '') eq 'tree_val') {
+        my $tv_kids = $self->expr_o->get_node_children($operand_id);
+        if (@$tv_kids == 1 && !$self->_is_list_node_for_refgen($tv_kids->[0])) {
+          # Single scalar child: \(scalar_expr) == \scalar_expr
+          my $saved_ctx = $self->expr_o->get_node_context($operand_id);
+          $self->expr_o->set_node_context($operand_id, 0);
+          my $scalar_expr = $self->gen_node($operand_id);
+          $self->expr_o->set_node_context($operand_id, $saved_ctx);
+          return "(p-backslash $scalar_expr)";
+        }
+      }
+      my $saved_ctx = $self->expr_o->get_node_context($node_id);
+      $self->expr_o->set_node_context($operand_id, LIST_CTX);
+      my $list_expr = $self->gen_node($operand_id);
+      $self->expr_o->set_node_context($operand_id, $saved_ctx);
+      return "(p-refgen-list $list_expr)";
     }
   }
 
@@ -2207,6 +2234,20 @@ sub _child_is_list_expr {
     return $self->_child_is_list_expr($kids->[0]) if @$kids == 1;
   }
 
+  return 0;
+}
+
+# Returns true if the node is a list-generating expression for \(LIST) purposes:
+# arrays, ranges, list-context functions (same as _child_is_list_expr but also
+# covers the range operator .. since \(1..3) must spread into N scalar refs).
+sub _is_list_node_for_refgen {
+  my ($self, $node_id) = @_;
+  return 1 if $self->_child_is_list_expr($node_id);
+  # Range operator .. — binary op stored as PPI::Token::Operator with children
+  my $node = $self->expr_o->get_a_node($node_id);
+  if (ref($node) eq 'PPI::Token::Operator') {
+    return 1 if ($node->content() // '') eq '..';
+  }
   return 0;
 }
 

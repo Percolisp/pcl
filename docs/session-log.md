@@ -4,6 +4,167 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 167 (2026-05-05) — `\(LIST)` refs, do.t flatten, ref.t 54-55
+
+### Focus
+
+Fixed do.t test 22 (flatten-markers in p-array-=), implemented `\(LIST)` ref generation
+(ref.t tests 54-55 now pass), investigated ref.t tests 56-61 (not yet fixed).
+
+### do.t test 22 — flatten-marker in p-array-=
+
+**Problem:** `my @a = do { ... }` where the do-block returns a list via `p-flatten`
+markers. `p-array-=` macro's `add-items` helper didn't handle `p-flatten-marker` structs,
+so they ended up as opaque items in the array instead of being spread.
+
+**Fix:** Added `p-flatten-marker-p` checks to both `vectorp` and `listp` branches of
+`add-items` in `p-array-=` (pcl-runtime.lisp ~line 2315):
+```lisp
+((p-flatten-marker-p item)
+ (add-items (p-flatten-marker-array item)))
+```
+
+**Result:** do.t 63/73 (was 62/73).
+
+### `\(LIST)` implementation (ref.t tests 54-55)
+
+Three files changed to implement `\(@array)` semantics:
+
+**PExpr.pm** — metadata marking:
+In `_apply_prefix_op` (shunting-yard), after `parse([$post])`, mark the result node
+with `backslash_paren_list = 1` when:
+- The operator is `\`
+- The operand `$post` is a `PPIreference` with type `tree_val` (meaning it was converted
+  from a `PPI::Structure::List` in the `()→node` pass at lines 704-723)
+
+Key gotcha: By the time shunting-yard runs, `PPI::Structure::List` nodes have already
+been converted to `PPIreference(type=tree_val)`. Check `ref($post) eq 'PPIreference'`
+and `$post->{type} eq 'tree_val'`, NOT `ref($post) eq 'PPI::Structure::List'`.
+
+**ExprToCL.pm** — code generation in `gen_prefix_op` for `\`:
+```perl
+if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
+    # For \(&func): handled above
+    my $saved_ctx = $self->expr_o->get_node_context($node_id);
+    $self->expr_o->set_node_context($operand_id, LIST_CTX);
+    my $list_expr = $self->gen_node($operand_id);
+    $self->expr_o->set_node_context($operand_id, $saved_ctx);
+    return "(p-refgen-list $list_expr)";
+}
+```
+
+**pcl-runtime.lisp** — `p-refgen-list` function (after p-backslash, ~line 6829):
+```lisp
+(defun p-refgen-list (val)
+  (let ((result (make-array 4 :adjustable t :fill-pointer 0)))
+    (labels ((add-ref (item)
+               (cond
+                 ((p-flatten-marker-p item)
+                  (loop for elem across (p-flatten-marker-array item)
+                        do (vector-push-extend (p-backslash elem) result)))
+                 ((and (vectorp item) (not (stringp item)))
+                  (loop for elem across item
+                        do (add-ref elem)))
+                 (t
+                  (vector-push-extend (p-backslash item) result)))))
+      (cond
+        ((and (vectorp val) (not (stringp val)))
+         (loop for item across val do (add-ref item)))
+        ((listp val)
+         (loop for item in val do (add-ref item)))
+        (t (add-ref val))))
+    result))
+```
+
+`#:p-refgen-list` is exported from `defpackage :pcl`.
+
+### ref.t tests 56-61 — STILL FAILING (complex Perl semantics)
+
+Tests 54-55 pass (`\(@array)` distributes over elements). Tests 56-61 still fail
+because of a subtle Perl semantic that requires code-gen-level treatment.
+
+**Perl's actual `\(LIST)` semantics** (verified with real Perl):
+
+| Expression | Result | Count |
+|-----------|---------|-------|
+| `\@a` | 1 ARRAY ref | 1 |
+| `\(@a)` | refs to each ELEMENT of @a | N scalar refs |
+| `\(1..3)` | refs to each element of range | 3 scalar refs |
+| `\(1, @a)` | `\1` + `\@a` (one ref per TERM) | 2 |
+| `\(1, @a, @b)` | `\1` + `\@a` + `\@b` | 3 |
+| `\(1..3, @a)` | 3 scalar + `\@a` | 4 |
+
+**Rule**: In `\(SINGLE_EXPR)`, the expression is evaluated in list context and each
+element gets a ref. In `\(MULTI_TERM)`, each syntactic TERM gets ONE ref:
+- Scalar/range terms: evaluated in list context, each scalar element gets a ref
+- Array variable terms (`@foo`): treated as a UNIT → one ARRAY ref
+
+**Generated CL (current PCL)**:
+- `\(@foo)` → `(p-refgen-list @foo)` — @foo passed directly ✓
+- `\(1..3)` → `(p-refgen-list (vector (p-.. 1 3)))` — wrapped in outer vector
+- `\(1, @foo, @bar)` → `(p-refgen-list (vector 1 @foo @bar))` — @foo, @bar as items
+
+**Why tests 56-61 fail**: In `(vector 1 @foo @bar)`, both `(p-.. 1 3)` (range result) and
+`@foo` (array var) are plain CL vectors at runtime. `p-refgen-list`'s `add-ref` recurses
+into ALL vectors, spreading both ranges AND array variables. We need to spread the range
+but NOT spread @foo.
+
+**Fix plan** (not yet implemented): Handle at code-gen level in ExprToCL.pm:
+
+When `\(EXPR)` and EXPR is a comma-list (check AST for comma operator at top):
+- For each term that is an array variable: generate `(p-backslash @var)` (array ref)  
+- For other terms: generate `(p-refgen-list TERM_EXPR)` (spread elements)
+- Combine: `(p-array-concat (vector (p-backslash @var)) (p-refgen-list range-expr) ...)`
+
+When `\(EXPR)` and EXPR is a single expression: keep current `(p-refgen-list EXPR)`.
+
+The check "is this a comma-list?" can be done by inspecting the top-level node of the
+inner expression's OpcodeTree subtree. Array variable nodes are PPI::Token::Symbol with
+sigil `@`.
+
+### Ref.t current state
+
+115 passing out of 184 run (245 planned, 61 not run due to plan mismatch from DESTROY tests).
+
+Fixes this session: tests 54-55 (2 more passing).
+Still failing: tests 56-61 (6 tests, `\(multi-term list)` with array vars).
+
+### tie-01.t regression — FIXED (tests 9, 14)
+
+`\(my $v = expr)` in TIESCALAR was incorrectly generating `(p-refgen-list (vector expr))`.
+`p-refgen-list` always returns a vector; then `p-bless(vector, class)` created a blessed
+ARRAY ref instead of a blessed SCALAR ref (TYPE-ERROR on SBCL compilation).
+
+**Root cause:** The `backslash_paren_list` metadata is set for ALL `\(...)` occurrences,
+including single scalar expressions. `gen_prefix_op` unconditionally used `p-refgen-list`.
+
+**Fix in ExprToCL.pm:**
+1. Added `_is_list_node_for_refgen()` helper — like `_child_is_list_expr` but also includes
+   the `..` range operator (a `PPI::Token::Operator` node with content `..`).
+2. In `gen_prefix_op`'s `backslash_paren_list` path: when the operand is a tree_val with
+   ONE child AND that child is NOT list-generating (`!_is_list_node_for_refgen`), generate
+   in SCALAR_CTX and return `(p-backslash scalar_expr)` instead of `p-refgen-list`.
+
+**Why range needs separate handling:** `_child_is_list_expr` (used by `gen_tree_val`) does
+not include range, so `gen_tree_val` wraps range in `(vector ...)`. `p-refgen-list` then
+recursively spreads the range-vector into N scalar refs (correct via the existing `add-ref`
+vector recursion). If we had mistakenly used `p-backslash` for range, `\(1..3)` would
+produce 1 ARRAY ref instead of 3 scalar refs.
+
+### PCL suite state
+
+76 files, 2949 tests — all passing.
+
+### TODO for next session
+
+1. **Fix `\(multi-term LIST)` with array vars**: Change ExprToCL.pm to detect comma-list
+   case and generate per-term code. Array vars → `(p-backslash @v)`, other exprs →
+   `(p-refgen-list EXPR)`. See fix plan above. Fixes ref.t 56-61.
+2. **do.t 35, 36, 42**: wantarray flatten-marker issues (deferred, needs user discussion).
+3. **ref.t tests 19-20**: `@{$hash{key}} = LIST` autovivification bug.
+
+---
+
 ## Session 166 (2026-05-05) — ref.t failure analysis
 
 ### Focus

@@ -99,7 +99,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-file
    ;; Functions
-   #:p-backslash #:p-backslash-sub #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
+   #:p-backslash #:p-backslash-sub #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -2324,6 +2324,8 @@
                     ((vectorp src)
                      (loop for item across src
                            do (cond
+                                ((p-flatten-marker-p item)
+                                 (add-items (p-flatten-marker-array item)))
                                 ((and (vectorp item) (not (stringp item)))
                                  (add-items item))
                                 ;; Preserve nil as deleted-element marker (not undef-but-exists)
@@ -2335,6 +2337,8 @@
                     ((listp src)
                      (loop for item in src
                            do (cond
+                                ((p-flatten-marker-p item)
+                                 (add-items (p-flatten-marker-array item)))
                                 ((and (vectorp item) (not (stringp item)))
                                  (add-items item))
                                 ;; Preserve nil as deleted-element marker (not undef-but-exists)
@@ -6821,6 +6825,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ((or (vectorp val) (hash-table-p val) (functionp val) (p-typeglob-p val))
      (make-p-box val))
     (t (make-p-box (make-p-box val)))))
+
+(defun p-refgen-list (val)
+  "Perl \\(LIST) — distribute reference generation over list elements.
+   Receives the list-context value of the parenthesized expression and returns
+   a fresh vector with one ref per element (spreading flatten-markers and arrays)."
+  (let ((result (make-array 4 :adjustable t :fill-pointer 0)))
+    (labels ((add-ref (item)
+               (cond
+                 ((p-flatten-marker-p item)
+                  (loop for elem across (p-flatten-marker-array item)
+                        do (vector-push-extend (p-backslash elem) result)))
+                 ((and (vectorp item) (not (stringp item)))
+                  (loop for elem across item
+                        do (add-ref elem)))
+                 (t
+                  (vector-push-extend (p-backslash item) result)))))
+      (cond
+        ((and (vectorp val) (not (stringp val)))
+         (loop for item across val do (add-ref item)))
+        ((listp val)
+         (loop for item in val do (add-ref item)))
+        (t (add-ref val))))
+    result))
 
 (defun p-box-for-local (value)
   "Create a new box for a 'local $x = init' binding using box-set semantics.
