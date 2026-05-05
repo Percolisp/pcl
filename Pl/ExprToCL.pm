@@ -11,10 +11,12 @@ use warnings;
 use Moo;
 
 use Scalar::Util qw/looks_like_number/;
-use Pl::PExpr qw(SCALAR_CTX LIST_CTX);
+use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
 my $g_flipflop_count = 0;
+# Counter for unique gensyms in \(multi-term LIST) code generation
+my $g_refgen_count = 0;
 
 # Code generator that transforms Pl::PExpr AST into Common Lisp code.
 # Follows conventions from CODEGEN_DESIGN.md:
@@ -510,6 +512,11 @@ sub gen_leaf {
     # $#Pkg::v  -> (p-array-last-index Pkg::@v)   — @ must go AFTER the pkg:: prefix
     $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/  # qualified: $#A::ISA → A::@ISA
         || $content =~ s/^\$#/\@/;            # simple: $#arr → @arr
+    # Check state var rename (e.g., state @x → @state__sub__x__N)
+    if ($self->environment) {
+      my $renames = $self->environment->state_var_renames;
+      $content = $renames->{$content} if $renames && exists $renames->{$content};
+    }
     return "(p-array-last-index $content)";
   }
 
@@ -1022,7 +1029,11 @@ sub gen_funcall {
     if ($self->expr_o->is_internal_node_type($arg_node)) {
       if ($arg_node->{type} eq 'func_ref') {
         my $func_ref = $self->gen_node($kids->[1]);
-        return "(funcall $func_ref)";
+        my $ctx = $self->expr_o->get_node_context($node_id);
+        # INHERIT_CTX: don't override *wantarray*; p-return will restore it
+        return "(funcall $func_ref)" if $ctx == INHERIT_CTX;
+        my $wa  = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+        return "(let ((*wantarray* $wa)) (funcall $func_ref))";
       }
       elsif ($arg_node->{type} eq 'anon_sub') {
         my $block_kids = $self->expr_o->get_node_children($kids->[1]);
@@ -1546,23 +1557,37 @@ sub gen_funcall {
     return $ctx == 0 ? "(length $call)" : $call;
   }
 
-  # reverse/localtime/gmtime are wantarray-sensitive: they use *wantarray* internally
-  # to decide list-vs-scalar behavior.  An outer (let ((*wantarray* t)) ...) wrapper
-  # (e.g. from push/print arguments) would leak through the plain $call form and make
-  # p-reverse do list reversal when scalar string reversal was intended.
-  # Explicitly bind *wantarray* for both contexts so the outer dynamic scope can't leak.
+  # reverse/localtime/gmtime/caller/do are wantarray-sensitive built-ins: they use
+  # *wantarray* internally (or propagate it to do-file code).
+  # Explicitly bind for all contexts so the outer dynamic scope can't leak into them.
   if ($func_name =~ /^(reverse|localtime|gmtime|caller)$/) {
-    return $ctx == 1
+    return $ctx == LIST_CTX
         ? "(let ((*wantarray* t)) $call)"
         : "(let ((*wantarray* nil)) $call)";
   }
-
-  # Wrap in dynamic wantarray binding for list context
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(let ((*wantarray* t)) $call)";
+  if ($func_name eq 'do') {
+    my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+    return "(let ((*wantarray* $wa)) $call)";
   }
 
-  return $call;
+  # INHERIT_CTX or tail position: do not override *wantarray*; let the
+  # caller's dynamic binding propagate through.
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+
+  # User sub calls: always bind *wantarray* so the callee sees the correct
+  # context regardless of what the surrounding scope has set.
+  # Built-ins (in %RUNTIME_NAMES) don't call p-wantarray; only wrap them for
+  # list context (to avoid disturbing wantarray-sensitive built-ins called
+  # inside a scalar-context scope).
+  if (!exists $RUNTIME_NAMES{$func_name}) {
+    my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+    return "(let ((*wantarray* $wa)) $call)";
+  }
+
+  # Built-in in list context: still wrap so it gets list-context signal
+  # (e.g. a wantarray-sensitive built-in called as the RHS of @arr = builtin())
+  return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $call)" : $call;
 }
 
 
@@ -1646,12 +1671,12 @@ sub gen_methodcall {
     $call = "(p-method-call $obj \"$method_str\"$args_str)";
   }
 
-  # Wrap in dynamic wantarray binding for list context
+  # Bind *wantarray* so the method body sees the correct call context.
   my $ctx = $self->expr_o->get_node_context($node_id);
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(let ((*wantarray* t)) $call)";
-  }
-  return $call;
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+  return "(let ((*wantarray* $wa)) $call)";
 }
 
 
@@ -1674,12 +1699,12 @@ sub gen_ref_funcall {
   my $args_str = @args ? ' ' . join(' ', @args) : '';
   my $call = "(p-funcall-ref $ref$args_str)";
 
-  # Wrap in dynamic wantarray binding for list context
+  # Bind *wantarray* so the code-ref body sees the correct call context.
   my $ctx = $self->expr_o->get_node_context($node_id);
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(let ((*wantarray* t)) $call)";
-  }
-  return $call;
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+  return "(let ((*wantarray* $wa)) $call)";
 }
 
 
@@ -1690,30 +1715,7 @@ sub gen_ternary {
   my $node_id = shift;
   my $kids    = shift;
 
-  # Check if condition is wantarray - if so, the 'then' branch should be in list context
-  my $cond_node = $self->expr_o->get_a_node($kids->[0]);
-  my $is_wantarray_cond = 0;
-
-  if ($self->expr_o->is_internal_node_type($cond_node) &&
-      $cond_node->{type} eq 'funcall') {
-    my $cond_kids = $self->expr_o->get_node_children($kids->[0]);
-    if (@$cond_kids) {
-      my $func_node = $self->expr_o->get_a_node($cond_kids->[0]);
-      if (!$self->expr_o->is_internal_node_type($func_node) &&
-          $func_node->can('content') &&
-          $func_node->content eq 'wantarray') {
-        $is_wantarray_cond = 1;
-      }
-    }
-  }
-
   my $cond = $self->gen_node($kids->[0]);
-
-  # If condition is wantarray, set list context on 'then' branch
-  if ($is_wantarray_cond) {
-    $self->expr_o->set_node_context($kids->[1], 1);  # LIST_CTX = 1
-  }
-
   my $then  = $self->gen_node($kids->[1]);
   my $else  = $self->gen_node($kids->[2]);
 
@@ -1735,12 +1737,44 @@ sub gen_prefix_op {
   # Special case: \&func (reference to function)
   # Use p-backslash-sub to safely handle undefined functions (AUTOLOAD dispatch).
   if ($op eq '\\') {
-    my $operand_node = $self->expr_o->get_a_node($kids->[1]);
+    my $operand_id   = $kids->[1];
+    my $operand_node = $self->expr_o->get_a_node($operand_id);
     if (ref($operand_node) eq 'PPI::Token::Symbol' &&
         $operand_node->content() =~ /^&(.+)$/) {
       my $func_name = $1;
       my $cl_func = $self->cl_name($func_name, 1);
       return "(p-backslash-sub '$cl_func)";
+    }
+    # \(LIST) — distribute \\ over each element. PExpr marks the operand node
+    # with 'backslash_paren_list' when the source had explicit parens.
+    if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
+      # For single-child tree_val with a scalar expression (not an array var,
+      # range, or list-function), use p-backslash directly.  This handles
+      # \(my $v = expr) correctly — without this check it generates a vector
+      # of one ref instead of a plain scalar ref, breaking bless.
+      my $inner_node = $self->expr_o->get_a_node($operand_id);
+      if ($self->expr_o->is_internal_node_type($inner_node)
+          && ($inner_node->{type} // '') eq 'tree_val') {
+        my $tv_kids = $self->expr_o->get_node_children($operand_id);
+        if (@$tv_kids == 1 && !$self->_is_list_node_for_refgen($tv_kids->[0])) {
+          # Single scalar child: \(scalar_expr) == \scalar_expr
+          my $saved_ctx = $self->expr_o->get_node_context($operand_id);
+          $self->expr_o->set_node_context($operand_id, 0);
+          my $scalar_expr = $self->gen_node($operand_id);
+          $self->expr_o->set_node_context($operand_id, $saved_ctx);
+          return "(p-backslash $scalar_expr)";
+        }
+        # Multi-term comma list: \(T1, T2, ...) — each @/% var gets one ref,
+        # ranges spread into N scalar refs, scalars get one scalar ref.
+        if (@$tv_kids > 1) {
+          return $self->_gen_backslash_multi_term($tv_kids);
+        }
+      }
+      my $saved_ctx = $self->expr_o->get_node_context($node_id);
+      $self->expr_o->set_node_context($operand_id, LIST_CTX);
+      my $list_expr = $self->gen_node($operand_id);
+      $self->expr_o->set_node_context($operand_id, $saved_ctx);
+      return "(p-refgen-list $list_expr)";
     }
   }
 
@@ -2133,10 +2167,13 @@ sub gen_progn {
     return "(vector $forms_str)";
   }
 
-  # In unknown context with multiple forms, check wantarray at runtime.
+  # In non-list context with multiple forms, check wantarray at runtime.
+  # Covers SCALAR_CTX, VOID_CTX, and INHERIT_CTX — all cases where the caller
+  # hasn't explicitly requested a list.  The runtime check handles map blocks
+  # (whose body is compiled in VOID_CTX but whose lambda runs with *wantarray* t).
   # Wrap @array items with (p-flatten ...) so %p-collect-list in
   # %p-flatten-for-list can spread @arrays while keeping arrayrefs as scalars.
-  if (@forms > 1 && $ctx == SCALAR_CTX) {
+  if (@forms > 1 && $ctx != LIST_CTX) {
     my @flat_forms;
     for my $i (0 .. $#$kids) {
       my $form = $forms[$i];
@@ -2205,6 +2242,69 @@ sub _child_is_list_expr {
   }
 
   return 0;
+}
+
+# Returns true if the node is a list-generating expression for \(LIST) purposes:
+# arrays, ranges, list-context functions (same as _child_is_list_expr but also
+# covers the range operator .. since \(1..3) must spread into N scalar refs).
+sub _is_list_node_for_refgen {
+  my ($self, $node_id) = @_;
+  return 1 if $self->_child_is_list_expr($node_id);
+  # Range operator .. — binary op stored as PPI::Token::Operator with children
+  my $node = $self->expr_o->get_a_node($node_id);
+  if (ref($node) eq 'PPI::Token::Operator') {
+    return 1 if ($node->content() // '') eq '..';
+  }
+  return 0;
+}
+
+# Generate \(T1, T2, ...) for multi-term comma lists.
+# Perl rule: @/% vars → one ref each (ARRAY/HASH ref), ranges spread to N scalar refs,
+# other terms → one scalar ref each.
+sub _gen_backslash_multi_term {
+  my ($self, $tv_kids) = @_;
+  my $id = $g_refgen_count++;
+
+  my @parts;  # each is ['single', CL_EXPR] or ['range', CL_EXPR]
+  for my $kid_id (@$tv_kids) {
+    my $kid_node = $self->expr_o->get_a_node($kid_id);
+    my $is_range = ref($kid_node) eq 'PPI::Token::Operator'
+                && ($kid_node->content() // '') eq '..';
+    if ($is_range) {
+      my $saved = $self->expr_o->get_node_context($kid_id);
+      $self->expr_o->set_node_context($kid_id, LIST_CTX);
+      my $kid_expr = $self->gen_node($kid_id);
+      $self->expr_o->set_node_context($kid_id, $saved);
+      push @parts, ['range', "(p-refgen-list $kid_expr)"];
+    } else {
+      # @/% vars, scalars, and everything else: one ref
+      my $kid_expr = $self->gen_node($kid_id);
+      push @parts, ['single', "(p-backslash $kid_expr)"];
+    }
+  }
+
+  my $has_range = grep { $_->[0] eq 'range' } @parts;
+  unless ($has_range) {
+    # No ranges: simple vector of refs
+    my $forms = join(' ', map { $_->[1] } @parts);
+    return "(vector $forms)";
+  }
+
+  # Mix: use let + loop to concatenate variable-length parts
+  my $result_var = "|--pcl-bsl-r$id--|";
+  my $iter_var   = "|--pcl-bsl-x$id--|";
+  my @stmts;
+  for my $part (@parts) {
+    if ($part->[0] eq 'range') {
+      push @stmts, "(loop for $iter_var across $part->[1] do "
+                 . "(vector-push-extend $iter_var $result_var))";
+    } else {
+      push @stmts, "(vector-push-extend $part->[1] $result_var)";
+    }
+  }
+  my $stmts_str = join("\n  ", @stmts);
+  return "(let (($result_var (make-array 4 :adjustable t :fill-pointer 0)))\n  "
+       . "$stmts_str\n  $result_var)";
 }
 
 

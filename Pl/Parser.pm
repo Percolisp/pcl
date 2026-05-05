@@ -16,9 +16,14 @@ use File::Basename;
 use File::Spec;
 use Cwd qw(abs_path);
 
-use Pl::PExpr;
+use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::ExprToCL;
 use Pl::Environment;
+
+# File-level counters (shared across all Parser instances within a load)
+my $anon_block_counter = 0;
+my $state_var_counter  = 0;
+my $lex_var_counter    = 0;
 
 # Statement-level parser prototype.
 # Iterates over PPI statements, delegates expressions to PExpr,
@@ -205,10 +210,19 @@ sub parse {
 
   my $doc = $self->ppi_doc;
 
-  # Reset package stack so second pass (parse_file shares environment between
-  # passes) always starts in 'main'. Without this, the first pass's
-  # push_package calls accumulate and the second pass sees a stale stack.
+  # Reset parse state so second pass (parse_file shares environment between
+  # passes) always starts clean. Without these resets:
+  #   - package_stack accumulates from the first pass
+  #   - state_var_renames contains first-pass renames, which contaminate
+  #     second-pass code (e.g. $f renamed to $state__toplevel__f__34 from
+  #     first pass bleeds into second-pass foreach/bare-block uses of $f)
+  #   - Counters must restart at 0 so defvar names match usage names in the
+  #     second pass (both are generated fresh, in the same order)
   $self->environment->package_stack(['main']);
+  $self->environment->state_var_renames({});
+  $anon_block_counter = 0;
+  $state_var_counter  = 0;
+  $lex_var_counter    = 0;
 
   # Initialize bucket system
   $self->_sections([]);
@@ -1066,7 +1080,7 @@ sub _process_expression_statement {
       } $cond_parts[0]->children;
     }
 
-    my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt);
+    my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt, VOID_CTX);
 
     # Generate appropriate control structure
     # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
@@ -1098,11 +1112,18 @@ sub _process_expression_statement {
     }
   }
   else {
-    # No modifier - parse normally
-    $cl_code = $self->_parse_expression(\@parts, $stmt);
+    # No modifier - bare expression statement; result is discarded (void context)
+    $cl_code = $self->_parse_expression(\@parts, $stmt, VOID_CTX);
   }
 
-  # Emit as comment + code
+  # Emit as comment + code.
+  # When inside a sub body and NOT at tail position, wrap in void context so that
+  # dynamic operators like /g regex don't inherit the caller's list context.
+  if (defined $cl_code
+      && $self->environment->in_subroutine > 0
+      && !$self->environment->tail_position) {
+    $cl_code = "(let ((*wantarray* :void)) $cl_code)";
+  }
   $self->_emit(";; $perl_code");
   $self->_emit($cl_code) if defined $cl_code;
   $self->_emit("");
@@ -1168,9 +1189,11 @@ sub _process_variable_statement {
   my $is_state = ($declarator eq 'state');
   my $state_vars = $self->{_current_state_vars} // {};
 
-  # Package-level state is the same as package-level my (runs once at load time)
+  # Package-level state: needs init-once guard (unlike `my` which runs once at load)
+  # Each `state $var` declaration at top-level gets a unique name and init flag
+  # so multiple `state $var` in different loops don't share the same variable.
   if ($is_state && $self->environment->in_subroutine == 0) {
-    $self->_process_my_toplevel_declaration($stmt, \@parts, $perl_code);
+    $self->_process_toplevel_state_declaration($stmt, \@parts, $perl_code);
     return;
   }
 
@@ -1240,6 +1263,73 @@ sub _process_variable_statement {
 
         $self->_emit(";; $perl_code");
         $self->_emit("(p-my-= $new_name $rhs_cl)") if defined $rhs_cl && $rhs_cl ne '';
+        $self->_emit("");
+        return;
+      }
+    }
+  }
+
+  # Special case: 'my $x = state $y = EXPR' inside a sub.
+  # The state $y part needs its init guard; the whole expr must return $y's current value.
+  # Detected when declarator is 'my', there's a state var in state_vars, and RHS has 'state'.
+  if ($declarator eq 'my' && %$state_vars) {
+    my ($eq_idx, $state_idx) = (-1, -1);
+    for my $i (0 .. $#parts) {
+      my $pref = ref($parts[$i]);
+      if ($pref eq 'PPI::Token::Operator' && $parts[$i]->content eq '=' && $eq_idx < 0) {
+        $eq_idx = $i;
+      }
+      if ($eq_idx >= 0 && $pref eq 'PPI::Token::Word' && $parts[$i]->content eq 'state') {
+        $state_idx = $i; last;
+      }
+    }
+    if ($state_idx > $eq_idx && $eq_idx >= 0) {
+      # Find the state var and its init
+      my $state_var_name;
+      my $state_eq_idx = -1;
+      my $rhs_state_parts = [grep { ref($_) ne 'PPI::Token::Whitespace' }
+                              @parts[($state_idx + 1) .. $#parts]];
+      for my $i (0 .. $#$rhs_state_parts) {
+        my $pref = ref($rhs_state_parts->[$i]);
+        if ($pref eq 'PPI::Token::Symbol' && !defined $state_var_name) {
+          $state_var_name = $rhs_state_parts->[$i]->content;
+        }
+        if ($pref eq 'PPI::Token::Operator' && $rhs_state_parts->[$i]->content eq '=' && $state_eq_idx < 0) {
+          $state_eq_idx = $i;
+        }
+      }
+      if (defined $state_var_name) {
+        my $renames  = $self->environment->state_var_renames // {};
+        my $cl_state = $renames->{$state_var_name} // $state_var_name;
+        my $flag     = "${cl_state}__init";
+
+        # Find the LHS variable name
+        my $lhs_name;
+        for my $p (@parts[0 .. ($eq_idx - 1)]) {
+          if (ref($p) eq 'PPI::Token::Symbol') { $lhs_name = $p->content; last; }
+        }
+        $lhs_name //= '$__unused';
+
+        # Parse init expression if present
+        my $init_cl = 'nil';
+        if ($state_eq_idx >= 0) {
+          my @init_parts = grep { ref($_) ne 'PPI::Token::Whitespace' }
+                           @$rhs_state_parts[($state_eq_idx + 1) .. $#$rhs_state_parts];
+          $init_cl = $self->_parse_expression(\@init_parts, $stmt) // 'nil' if @init_parts;
+        }
+
+        $self->_emit(";; $perl_code");
+        $self->_emit("(p-my-= $lhs_name");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(progn");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(unless $flag");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(box-set $cl_state $init_cl)");
+        $self->_emit("(setf $flag t))");
+        $self->indent_level($self->indent_level - 1);
+        $self->_emit("$cl_state))");
+        $self->indent_level($self->indent_level - 2);
         $self->_emit("");
         return;
       }
@@ -1407,6 +1497,91 @@ sub _process_our_declaration {
   }
 
   $self->_emit("");
+}
+
+# Process top-level 'state' declaration - like my but with init-once guard.
+# Each declaration gets a unique renamed CL variable so that multiple `state $x`
+# in different loops at the same file scope don't share the same binding.
+sub _process_toplevel_state_declaration {
+  my ($self, $stmt, $parts, $perl_code) = @_;
+
+  # Parse variable(s) and optional initializer
+  my @vars;
+  my $init_idx = -1;
+  for my $i (0 .. $#$parts) {
+    my $p    = $parts->[$i];
+    my $pref = ref($p);
+    if ($pref eq 'PPI::Token::Symbol' || $pref eq 'PPI::Token::Magic') {
+      push @vars, $p->content;
+    }
+    elsif ($pref eq 'PPI::Structure::List') {
+      push @vars, $self->_find_symbols_in_list($p);
+    }
+    elsif ($pref eq 'PPI::Token::Operator' && $p->content eq '=') {
+      $init_idx = $i; last;
+    }
+  }
+  return unless @vars;
+
+  # Assign each variable a unique renamed CL name and an init flag.
+  my %renames_for_this;
+  my $env_renames = $self->environment->state_var_renames // {};
+  for my $var (@vars) {
+    my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+    ($sigil, $bare) = ('$', $var) unless defined $bare;
+    (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+    my $n = ++$state_var_counter;
+    my $new_name = sprintf('%sstate__toplevel__%s__%d', $sigil, $slug, $n);
+    $renames_for_this{$var} = $new_name;
+  }
+
+  # Persist renames so subsequent code in this file uses the new names.
+  $self->environment->state_var_renames({ %$env_renames, %renames_for_this });
+
+  # Emit declarations (defvar for each renamed var + init flag)
+  $self->_with_bucket('declarations', sub {
+    $self->_emit(";; $perl_code");
+    for my $var (@vars) {
+      my $cl_var = $renames_for_this{$var};
+      my $sigil  = substr($cl_var, 0, 1);
+      $self->_emit("(p-eval-always");
+      if ($sigil eq '@') {
+        $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
+      } elsif ($sigil eq '%') {
+        $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
+      } else {
+        $self->_emit("  (defvar $cl_var (make-p-box nil)))");
+      }
+      $self->_emit("(p-eval-always (defvar ${cl_var}__init nil))");
+    }
+  });
+
+  # Emit inline init guard (only runs init expression once)
+  if ($init_idx >= 0) {
+    my @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' }
+                    @$parts[($init_idx + 1) .. $#$parts];
+    my $init_cl = 'nil';
+    $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil' if @rhs_parts;
+
+    $self->_emit(";; $perl_code");
+    for my $var (@vars) {
+      my $cl_var  = $renames_for_this{$var};
+      my $sigil   = substr($cl_var, 0, 1);
+      my $flag    = "${cl_var}__init";
+      $self->_emit("(unless $flag");
+      $self->indent_level($self->indent_level + 1);
+      if ($sigil eq '$') {
+        $self->_emit("(box-set $cl_var $init_cl)");
+      } elsif ($sigil eq '@') {
+        $self->_emit("(p-array-= $cl_var (let ((*wantarray* t)) (list $init_cl)))");
+      } elsif ($sigil eq '%') {
+        $self->_emit("(p-hash-= $cl_var (let ((*wantarray* t)) (list $init_cl)))");
+      }
+      $self->_emit("(setf $flag t))");
+      $self->indent_level($self->indent_level - 1);
+    }
+    $self->_emit("");
+  }
 }
 
 # Process top-level 'my' declaration - lexical at file scope
@@ -2089,10 +2264,11 @@ sub _process_state_declaration {
       $self->_emit("(box-set $cl_var $init_cl)");
     } elsif ($sigil eq '@') {
       # Array: only initialize if there's an explicit init expression
-      $self->_emit("(p-array-= $cl_var (list $init_cl))") if @init_parts;
+      # Force list context so qw(...) and other list exprs return all elements.
+      $self->_emit("(p-array-= $cl_var (let ((*wantarray* t)) (list $init_cl)))") if @init_parts;
     } elsif ($sigil eq '%') {
       # Hash: only initialize if there's an explicit init expression
-      $self->_emit("(p-hash-= $cl_var (list $init_cl))") if @init_parts;
+      $self->_emit("(p-hash-= $cl_var (let ((*wantarray* t)) (list $init_cl)))") if @init_parts;
     }
     $self->_emit("(setf $init_flag t))");
     $self->indent_level($self->indent_level - 1);
@@ -2681,6 +2857,9 @@ sub _process_block_in_tail_context {
     next if $ref eq 'PPI::Token::Whitespace';
     next if $ref eq 'PPI::Token::Comment';
 
+    # Fire the scoped-block hook before each significant statement.
+    $self->{_stmt_pre_hook}->($self, $child) if $self->{_stmt_pre_hook};
+
     if ($ref eq 'PPI::Statement::Compound') {
       my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
       if ($continue) {
@@ -2695,6 +2874,13 @@ sub _process_block_in_tail_context {
     } else {
       $self->_process_element($child);
     }
+  }
+
+  # Flush scoped-block lets (same as _process_block).
+  while (@{$self->{_pending_let_closes} // []}) {
+    pop @{$self->{_pending_let_closes}};
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
   }
 
   my $end_depth = $self->{_local_let_depth} // 0;
@@ -2716,6 +2902,14 @@ sub _process_block {
   my $self  = shift;
   my $block = shift;
 
+  # Isolate _pending_let_closes so that inner _process_block calls (e.g.
+  # for if/while/bare block bodies) cannot accidentally flush pending let
+  # closes that belong to an enclosing _emit_scoped_block context.
+  # Each _process_block call owns its own slice; the outer value is restored
+  # after this call finishes (including after flushing any closes we opened).
+  my $saved_pending_block     = $self->{_pending_let_closes};
+  $self->{_pending_let_closes} = [];
+
   # Enter new scope for filehandles
   $self->environment->push_scope();
 
@@ -2727,11 +2921,20 @@ sub _process_block {
   # else (or a postfix if/unless), wrap the block in a let-binding that captures
   # the condition value.  This implements Perl's "last expression evaluated"
   # return semantics for bare-if.
-  my ($tail_ret_var, $tail_last_sig);
+  my ($tail_ret_var, $tail_last_sig, $tail_sig);
   if ($self->environment->in_subroutine > 0) {
     my @sig = $block->schildren;
-    if (@sig) {
-      my $last = $sig[-1];
+    # Skip BEGIN/END/INIT/CHECK blocks — they produce no runtime code,
+    # so the tail is the last *runtime* significant statement.
+    my $last;
+    for my $s (reverse @sig) {
+      unless (ref($s) eq 'PPI::Statement::Scheduled') {
+        $last = $s;
+        last;
+      }
+    }
+    if ($last) {
+      $tail_sig = $last;  # track for tail_position context propagation
       if ($self->_is_if_without_else($last) || $self->_is_postfix_if_without_else($last)) {
         $tail_ret_var  = $self->_fresh_ret_var();
         $tail_last_sig = $last;
@@ -2753,6 +2956,11 @@ sub _process_block {
     next if $ref eq 'PPI::Token::Whitespace';
     next if $ref eq 'PPI::Token::Comment';
 
+    # Fire the scoped-block hook (set by _emit_scoped_block) before each
+    # significant statement.  The hook opens (let ...) for any 'my'
+    # declarations associated with this statement's PPI object.
+    $self->{_stmt_pre_hook}->($self, $child) if $self->{_stmt_pre_hook};
+
     # Lookahead: bare block followed by continue { } as sibling
     if ($ref eq 'PPI::Statement::Compound') {
       my ($continue, $trailing) = $self->_find_continue_sibling(\@children, $i, \%skip);
@@ -2769,7 +2977,21 @@ sub _process_block {
       next;
     }
 
+    # Set tail_position so gen_funcall/gen_methodcall propagate *wantarray*
+    # instead of overriding it — allowing context to flow from the call site.
+    my $is_tail = defined $tail_sig && $child == $tail_sig;
+    $self->environment->tail_position(1) if $is_tail;
     $self->_process_element($child);
+    $self->environment->tail_position(0) if $is_tail;
+  }
+
+  # Flush let forms opened by _emit_scoped_block's hook (innermost first).
+  # Must happen here, inside _process_block, so the closes land BEFORE any
+  # tagbody/:next structure that $emit_body emits after _process_block returns.
+  while (@{$self->{_pending_let_closes} // []}) {
+    pop @{$self->{_pending_let_closes}};
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");
   }
 
   # Close any let forms opened by local declarations in this block
@@ -2789,17 +3011,11 @@ sub _process_block {
 
   # Leave scope - removes filehandles added in this block
   $self->environment->pop_scope();
+
+  # Restore the outer _pending_let_closes (saved at the top of this call).
+  $self->{_pending_let_closes} = $saved_pending_block;
 }
 
-
-# Counter for anonymous block functions
-my $anon_block_counter = 0;
-
-# Counter for unique state variable names
-my $state_var_counter = 0;
-
-# Counter for unique lexical variable names (used in symbol-macrolet inside subs)
-my $lex_var_counter = 0;
 
 # Parse a block as a named function for eval/sub blocks
 # Returns the generated function name
@@ -2878,7 +3094,8 @@ sub parse_block_as_function {
   $self->indent_level($self->indent_level + 1);
 
   if ($is_anon_sub) {
-    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
+    $self->_emit("(let ((\@_ (p-flatten-args %_args))");
+    $self->_emit("      (*pcl-caller-wantarray* *wantarray*))");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(catch :p-return");
     $self->indent_level($self->indent_level + 1);
@@ -2905,7 +3122,7 @@ sub parse_block_as_function {
     }
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
-    });
+    }, 1);  # is_sub_body=1: enable two-phase scoped block
     $self->environment->state_var_renames($saved_renames);
   }
 
@@ -2990,6 +3207,15 @@ sub parse_block_to_cl_string {
   # Enter new scope for filehandles
   $self->environment->push_scope();
 
+  # Find last significant child so we can set tail_position correctly.
+  # This prevents the VOID_CTX wrap (in _process_expression_statement) from
+  # incorrectly wrapping the lambda's return value in map/grep/sort blocks.
+  my @sig = grep {
+    my $r = ref($_);
+    $r ne 'PPI::Token::Whitespace' && $r ne 'PPI::Token::Comment'
+  } $block->children;
+  my $last_sig = @sig ? $sig[-1] : undef;
+
   # Process block contents
   my $has_content = 0;
   for my $child ($block->children) {
@@ -2997,7 +3223,10 @@ sub parse_block_to_cl_string {
     next if $ref eq 'PPI::Token::Whitespace';
     next if $ref eq 'PPI::Token::Comment';
 
+    my $is_tail = defined $last_sig && $child == $last_sig;
+    $self->environment->tail_position(1) if $is_tail;
     $self->_process_element($child);
+    $self->environment->tail_position(0) if $is_tail;
     $has_content = 1;
   }
 
@@ -3277,6 +3506,159 @@ sub _vars_referenced_in_closures {
   return \%captured;
 }
 
+# Build the $outer scope hashref passed to BlockAnalyzer::analyze.
+# Collects let-bound, state-renamed, constant, and our variables from the
+# current environment so BlockAnalyzer can distinguish local from outer refs.
+sub _current_outer_scope {
+  my ($self) = @_;
+  my %outer;
+  for my $v (keys %{$self->{_let_bound_vars} // {}}) {
+    $outer{$v} = { type => 'my', cl_name => $v };
+  }
+  my $renames = $self->environment->state_var_renames // {};
+  for my $v (keys %$renames) {
+    $outer{$v} = { type => 'state', cl_name => $renames->{$v} };
+  }
+  return \%outer;
+}
+
+# CL initialization expression for a let-binding by sigil.
+sub _let_init {
+  my ($sigil) = @_;
+  return '(make-array 0 :adjustable t :fill-pointer 0)' if $sigil eq '@';
+  return "(make-hash-table :test #'equal)"              if $sigil eq '%';
+  return '(make-p-box nil)';
+}
+
+# Scoped block codegen — opens nested (let ...) forms at the exact statement
+# where each 'my' declaration first appears, rather than hoisting them all to
+# the top of the block.  Called by _with_declarations when $elements is a
+# PPI::Structure::Block.  Sets _stmt_pre_hook so _process_block fires the hook
+# before each significant statement.
+sub _emit_scoped_block {
+  my ($self, $analysis, $emit_body) = @_;
+
+  my $decls      = $analysis->{declarations};
+  my $vars       = $analysis->{vars};
+  my $state_vars = $self->{_current_state_vars} // {};
+
+  # Collect globally unique 'my' vars (excluding state vars and vars already
+  # let-bound by an enclosing _emit_scoped_block, preserving order).
+  my $already_bound = $self->{_let_bound_vars} // {};
+  my (%seen_var);
+  my @all_my_vars = grep { !$seen_var{$_}++ && !$state_vars->{$_}
+                                             && !$already_bound->{$_} }
+                    map  { @{$_->{vars}} }
+                    grep { $_->{decl_type} eq 'my' } @$decls;
+
+  # Nothing to scope? Emit body, but still isolate _pending_let_closes so that
+  # inner _process_block calls (e.g. then/else blocks of a nested if) do not
+  # accidentally flush pending closes that belong to an enclosing scoped block.
+  unless (@all_my_vars) {
+    my $saved_pending = $self->{_pending_let_closes};
+    $self->{_pending_let_closes} = [];
+    $emit_body->();
+    $self->{_pending_let_closes} = $saved_pending;
+    return;
+  }
+
+  # Compute renames: closure-captured vars → __lex__N, case-collision → __case__N.
+  my (%new_renames, %old_renames, %cl_sym_seen);
+  my $existing = $self->environment->state_var_renames // {};
+  for my $var (@all_my_vars) {
+    my $vinfo = $vars->{$var} // {};
+    if ($vinfo->{captured}) {
+      my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+      ($sigil, $bare) = ('$', $var) unless defined $bare;
+      (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+      my $u = sprintf('%s%s__lex__%d', $sigil, $slug, ++$lex_var_counter);
+      $new_renames{$var} = $u;
+      $old_renames{$var} = $existing->{$var};
+    }
+    my $cl_name = $new_renames{$var} // $var;
+    my $lc = lc($cl_name);
+    if ($cl_sym_seen{$lc}) {
+      my ($sigil, $bare) = ($cl_name =~ /^([\$\@\%])(.+)$/);
+      ($sigil, $bare) = ('$', $cl_name) unless defined $bare;
+      (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+      my $r = sprintf('%s%s__case__%d', $sigil, $slug, ++$lex_var_counter);
+      $new_renames{$var} = $r;
+      $old_renames{$var} //= $existing->{$var};
+      $cl_sym_seen{lc($r)} = $var;
+    } else {
+      $cl_sym_seen{$lc} = $var;
+    }
+  }
+
+  # Apply renames to the environment.
+  my ($saved_env_renames, $saved_scope_renames);
+  $saved_scope_renames = $self->{_current_scope_new_renames};
+  if (%new_renames) {
+    $saved_env_renames = $self->environment->state_var_renames // {};
+    $self->environment->state_var_renames({ %$saved_env_renames, %new_renames });
+    $self->{_current_scope_new_renames} = \%new_renames;
+    $self->{_current_scope_old_renames} = \%old_renames;
+  }
+
+  # Build ppi_stmt_key → [vars] map for the hook.
+  # Vars for the same ppi_stmt are batched into one let form.
+  my (%vars_at_ppi, %seen_at_ppi);
+  for my $d (@$decls) {
+    next if $d->{decl_type} ne 'my';
+    my $key = "$d->{ppi_stmt}";
+    for my $var (@{$d->{vars}}) {
+      next if $state_vars->{$var} || $seen_at_ppi{$key}{$var}++;
+      push @{$vars_at_ppi{$key}}, $var;
+    }
+  }
+
+  # Install the per-statement hook.  _process_block calls it with each child
+  # element before dispatching.  The hook opens (let ...) for any 'my' vars
+  # declared at that statement's position.
+  #
+  # Pending closes are stored on $self->{_pending_let_closes} (not a local var)
+  # so that _process_block can flush them at the end of its statement loop,
+  # BEFORE any tagbody/:next structure emitted by $emit_body closes things up.
+  # _emit_scoped_block saves/restores so nested scopes don't interfere.
+  my $saved_hook        = $self->{_stmt_pre_hook};
+  my $old_let_vars      = $self->{_let_bound_vars};
+  my $saved_pending     = $self->{_pending_let_closes};
+  $self->{_let_bound_vars}     = { %{$old_let_vars // {}} };
+  $self->{_pending_let_closes} = [];
+
+  $self->{_stmt_pre_hook} = sub {
+    my ($parser, $child) = @_;
+    my $key = "$child";
+    return unless $vars_at_ppi{$key};
+
+    my @bindings;
+    for my $var (@{$vars_at_ppi{$key}}) {
+      my $lv    = $new_renames{$var} // $var;
+      my $sigil = substr($lv, 0, 1);
+      push @bindings, "($lv " . _let_init($sigil) . ")";
+      $parser->{_let_bound_vars}{$lv} = 1;
+    }
+    return unless @bindings;
+    $parser->_emit("(let (" . join(" ", @bindings) . ")");
+    $parser->indent_level($parser->indent_level + 1);
+    push @{$parser->{_pending_let_closes}}, 1;
+  };
+
+  $emit_body->();
+
+  # Restore state.  Pending closes are flushed inside _process_block (at end
+  # of the statement loop, before any tagbody/:next structure emitted by
+  # $emit_body).  Nothing left to close here.
+  $self->{_let_bound_vars}     = $old_let_vars;
+  $self->{_pending_let_closes} = $saved_pending;
+  $self->{_stmt_pre_hook}      = $saved_hook;
+  if (%new_renames) {
+    $self->environment->state_var_renames($saved_env_renames);
+    $self->{_current_scope_new_renames} = $saved_scope_renames;
+    delete $self->{_current_scope_old_renames};
+  }
+}
+
 # Common helper: wrap emitted code with let for any 'my' declarations
 # Usage: $self->_with_declarations($ppi_elements, sub { ... emit code ... });
 # $ppi_elements can be a single PPI element or arrayref of elements to scan
@@ -3284,6 +3666,70 @@ sub _with_declarations {
   my $self = shift;
   my $elements = shift;  # PPI element(s) to scan for declarations
   my $emit_body = shift; # Callback to emit the body code
+  my $is_sub_body = shift // 0;  # 1 only for direct sub body blocks
+
+  # Phase 2: for DIRECT sub body blocks only, use the two-phase scoping fix
+  # (_emit_scoped_block) which opens let-bindings at the exact statement where
+  # each 'my' declaration first appears, rather than hoisting everything to
+  # the top of the block.
+  #
+  # IMPORTANT: restrict to $is_sub_body=1, set only from _process_sub_statement.
+  # if/else/while/bare blocks INSIDE subs must NOT use _emit_scoped_block:
+  # those inner blocks share their parent sub's rename map, and running BlockAnalyzer
+  # on them re-fires closure-capture detection and creates a spurious nested let that
+  # shadows already-bound outer vars (e.g. breaks closure.t bizz() test).
+  #
+  # At the top level (in_subroutine=0), 'my' vars are defvar'd as dynamic variables,
+  # and inline-let semantics interact badly with defvar + _process_my_toplevel_declaration.
+  if (ref($elements) eq 'PPI::Structure::Block'
+      && $self->environment->in_subroutine > 0
+      && $is_sub_body) {
+    require Pl::BlockAnalyzer;
+    my $outer    = $self->_current_outer_scope();
+    my $analysis = Pl::BlockAnalyzer->analyze($elements, $outer);
+
+    # Supplemental hoisting: _find_all_declarations does a deep recursive search
+    # and finds 'my' vars declared inside expressions (e.g. open(my $fh, '>', ...)).
+    # BlockAnalyzer only sees statement-level PPI::Statement::Variable nodes.
+    # Any var found by the deep search but not by BlockAnalyzer needs a hoisted
+    # flat-let at the top of the block so it is visible to all subsequent statements.
+    my $state_vars    = $self->{_current_state_vars} // {};
+    my $already_bound = $self->{_let_bound_vars}     // {};
+    my %stmt_level    = map  { $_ => 1 }
+                        grep { !$state_vars->{$_} && !$already_bound->{$_} }
+                        map  { @{$_->{vars}} }
+                        grep { $_->{decl_type} eq 'my' } @{$analysis->{declarations}};
+    my $deep_decls    = $self->_find_all_declarations($elements);
+    my (@hoisted, %seen_hoist);
+    for my $d (@$deep_decls) {
+      next unless $d->{type} eq 'my';
+      my $v = $d->{var};
+      next if $seen_hoist{$v}++ || $stmt_level{$v}
+           || $state_vars->{$v}  || $already_bound->{$v};
+      push @hoisted, $v;
+    }
+
+    if (@hoisted) {
+      # Open a hoisted flat-let for expression-level my vars, wrapping the
+      # inline-let scoped block. This ensures vars like $fh (from open(my $fh,...))
+      # are visible to all subsequent statements in the block.
+      my $bindings = join(" ", map {
+        my $sigil = substr($_, 0, 1);
+        "($_ " . _let_init($sigil) . ")"
+      } @hoisted);
+      $self->_emit("(let ($bindings)");
+      $self->indent_level($self->indent_level + 1);
+      my $old_let = $self->{_let_bound_vars};
+      $self->{_let_bound_vars} = { %{$old_let // {}}, map { $_ => 1 } @hoisted };
+      $self->_emit_scoped_block($analysis, $emit_body);
+      $self->{_let_bound_vars} = $old_let;
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");
+    } else {
+      $self->_emit_scoped_block($analysis, $emit_body);
+    }
+    return;
+  }
 
   # Collect declarations from all elements
   my @all_decls;
@@ -3722,8 +4168,13 @@ sub _process_foreach_loop {
   # If the loop variable has been renamed for closure capture (e.g. $x → $x__lex__N),
   # the p-foreach form must use the renamed symbol so each iteration's lambda closes
   # over the correct per-iteration binding, not the outer let's initial binding.
+  # IMPORTANT: only apply __lex__ renames here. State-variable renames (state__toplevel__
+  # or state__subname__) must NOT be applied to loop variables — the loop variable is a
+  # fresh lexical binding, not the state variable itself.
   my $renames = $self->environment->state_var_renames // {};
-  my $cl_loop_var = $renames->{$loop_var} // $loop_var;
+  my $candidate = $renames->{$loop_var};
+  my $cl_loop_var = (defined $candidate && $candidate =~ /__lex__\d+$/)
+                  ? $candidate : $loop_var;
   # Also track renamed name as lexical foreach var to skip defvar generation
   if ($cl_loop_var ne $loop_var) {
     $self->{_lexical_foreach_vars}{$cl_loop_var} = 1;
@@ -4030,7 +4481,7 @@ sub _process_sub_statement {
     my $saved_pkg_stack = [@{$self->environment->package_stack}];
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
-    });
+    }, 1);  # is_sub_body=1: enable two-phase scoped block
     # Restore package stack in case of inline package switches inside the sub
     $self->environment->package_stack($saved_pkg_stack);
     $self->environment->state_var_renames($saved_renames);

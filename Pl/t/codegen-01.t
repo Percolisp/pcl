@@ -193,9 +193,9 @@ test_codegen('$x ? $y : $z', '(p-if $x $y $z)', 'Simple ternary');
 diag "";
 diag "-------- Function calls:";
 
-test_codegen('foo()', '(pl-foo)', 'Function call no args');
-test_codegen('foo($x)', '(pl-foo $x)', 'Function call one arg');
-test_codegen('foo($x, $y)', '(pl-foo $x $y)', 'Function call two args');
+test_codegen('foo()', '(let ((*wantarray* nil)) (pl-foo))', 'Function call no args');
+test_codegen('foo($x)', '(let ((*wantarray* nil)) (pl-foo $x))', 'Function call one arg');
+test_codegen('foo($x, $y)', '(let ((*wantarray* nil)) (pl-foo $x $y))', 'Function call two args');
 
 
 # ============================================================
@@ -228,8 +228,8 @@ test_codegen('{a => 1, b => 2}', '(make-p-box (p-hash "a" 1 "b" 2))', 'Hash init
 diag "";
 diag "-------- Method calls:";
 
-test_codegen('$obj->method()', '(p-method-call $obj "method")', 'Method call no args');
-test_codegen('$obj->method($x)', '(p-method-call $obj "method" $x)', 'Method call with arg');
+test_codegen('$obj->method()', '(let ((*wantarray* nil)) (p-method-call $obj "method"))', 'Method call no args');
+test_codegen('$obj->method($x)', '(let ((*wantarray* nil)) (p-method-call $obj "method" $x))', 'Method call with arg');
 
 
 # ============================================================
@@ -329,7 +329,7 @@ test_codegen('$x = $arr[0] + $hash{key}',
              'Sum of array and hash values');
 
 test_codegen('$result = $obj->method($arr[0])',
-             '(p-scalar-= $result (p-method-call $obj "method" (p-aref @arr 0)))',
+             '(p-scalar-= $result (let ((*wantarray* nil)) (p-method-call $obj "method" (p-aref @arr 0))))',
              'Method call with array element arg');
 
 test_codegen('$total = $prices->[$i] * $qty->{$item}',

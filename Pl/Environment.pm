@@ -182,6 +182,19 @@ has in_subroutine => (
     default => 0,
 );
 
+=head2 tail_position
+
+Set to 1 when the current expression is in tail position (last expression of a
+sub body, or direct value of a return statement).  gen_funcall reads this to
+suppress the *wantarray* binding, allowing context to propagate from the caller.
+
+=cut
+
+has tail_position => (
+    is      => 'rw',
+    default => 0,
+);
+
 =head2 lvalue_subs
 
 Hash reference of subroutines declared with :lvalue attribute.

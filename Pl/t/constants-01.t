@@ -76,17 +76,17 @@ diag "-------- Constant usage in expressions:";
 # Top-level my now uses eval-when for declaration, box-set for initialization
 output_contains('use constant PI => 3.14159;
 my $x = PI;',
-                '(box-set $x (pl-PI))',
+                '(box-set $x (let ((*wantarray* nil)) (pl-PI)))',
                 'Constant in assignment');
 
 output_contains('use constant PI => 3.14;
 my $area = PI * $r * $r;',
-                '(box-set $area (p-* (p-* (pl-PI) $r) $r))',
+                '(box-set $area (p-* (p-* (let ((*wantarray* nil)) (pl-PI)) $r) $r))',
                 'Constant in arithmetic');
 
 output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
-                '(box-set $size (p-* (pl-WIDTH) (pl-HEIGHT)))',
+                '(box-set $size (p-* (let ((*wantarray* nil)) (pl-WIDTH)) (let ((*wantarray* nil)) (pl-HEIGHT))))',
                 'Multiple constants in expression');
 
 
