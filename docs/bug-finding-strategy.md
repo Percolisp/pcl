@@ -249,3 +249,39 @@ no docs because they send you down already-investigated paths.
 | Running full sweep after every one-line fix | Sweep takes 3+ min; wastes time | Use `perl sweep-perl-tests.pl --jobs 1 perl-tests/target.t` for spot checks; full sweep at session end |
 | Investigating a file that's already characterized | Wastes time re-discovering known causes | Always check `test-failures-categorized.md` first |
 | Writing Pl/t/ test after the fix | Doesn't catch regressions in that session; future fix may reintroduce the bug | Write the test first, before touching any code |
+
+---
+
+## Lessons from Session 169 (2026-05-06)
+
+### `..` operator needs LIST_CTX in slice subscripts
+
+`@a[0..$#a]` was generating `(p-flipflop ...)` instead of `(p-.. ...)` because the
+array slice index inherited scalar context from the surrounding expression. The `..`
+operator checks `get_node_context(node_id)` — if non-LIST, it emits `p-flipflop`.
+
+**Fix:** In `gen_array_slice`, `gen_hash_slice`, `gen_kv_hash_slice`, `gen_kv_array_slice`,
+call `$self->expr_o->set_node_context($kids->[$i], LIST_CTX)` before generating each
+index/key child.
+
+**Rule:** Slice subscripts and hash subscripts are ALWAYS in list context.
+
+### `p-return-value`: plain vector in scalar context = last element
+
+When a sub returns a list expression (array slice, map result, etc.) in scalar context,
+Perl returns the LAST ELEMENT, not the count. `@a` variable in scalar = count (handled
+by `p-scalar`), but `@a[SLICE]`, `map {}`, etc. in scalar = last element (handled at
+return time by `p-return-value`).
+
+**Fix:** In `p-return-value`, when `(not *wantarray*)` and val is a plain adjustable
+vector (non-string, non-box), return `(p-return-value (aref val (1- (length val))))`.
+
+### Bare `return` and `return ()` in list context = empty list
+
+`(p-return)` was throwing `nil`; `p-join` treated nil as one empty-string element.
+`return ()` → else branch `(progn)` = nil → `p-return-value(nil)` = nil → same problem.
+
+**Fix 1:** Bare `p-return` checks `*pcl-caller-wantarray*`: list context → throw empty
+vector; scalar/void → throw nil.
+
+**Fix 2:** `p-return-value(nil)` when `*wantarray* = t` → return empty adjustable vector.

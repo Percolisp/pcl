@@ -15,6 +15,8 @@ use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
 my $g_flipflop_count = 0;
+# Counter for unique gensyms in \(multi-term LIST) code generation
+my $g_refgen_count = 0;
 
 # Code generator that transforms Pl::PExpr AST into Common Lisp code.
 # Follows conventions from CODEGEN_DESIGN.md:
@@ -1762,6 +1764,11 @@ sub gen_prefix_op {
           $self->expr_o->set_node_context($operand_id, $saved_ctx);
           return "(p-backslash $scalar_expr)";
         }
+        # Multi-term comma list: \(T1, T2, ...) — each @/% var gets one ref,
+        # ranges spread into N scalar refs, scalars get one scalar ref.
+        if (@$tv_kids > 1) {
+          return $self->_gen_backslash_multi_term($tv_kids);
+        }
       }
       my $saved_ctx = $self->expr_o->get_node_context($node_id);
       $self->expr_o->set_node_context($operand_id, LIST_CTX);
@@ -2016,6 +2023,7 @@ sub gen_array_slice {
   my $arr = $self->gen_node($kids->[0]);
   my @indices;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @indices, $self->gen_node($kids->[$i]);
   }
 
@@ -2040,6 +2048,7 @@ sub gen_hash_slice {
   }
   my @keys;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @keys, $self->gen_node($kids->[$i]);
   }
 
@@ -2057,6 +2066,7 @@ sub gen_kv_hash_slice {
   my $hash = $self->gen_node($kids->[0]);
   my @keys;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @keys, $self->gen_node($kids->[$i]);
   }
 
@@ -2079,6 +2089,7 @@ sub gen_kv_array_slice {
   $arr = "(unbox $arr)" if $arr =~ /^\$/;
   my @indices;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @indices, $self->gen_node($kids->[$i]);
   }
 
@@ -2249,6 +2260,55 @@ sub _is_list_node_for_refgen {
     return 1 if ($node->content() // '') eq '..';
   }
   return 0;
+}
+
+# Generate \(T1, T2, ...) for multi-term comma lists.
+# Perl rule: @/% vars → one ref each (ARRAY/HASH ref), ranges spread to N scalar refs,
+# other terms → one scalar ref each.
+sub _gen_backslash_multi_term {
+  my ($self, $tv_kids) = @_;
+  my $id = $g_refgen_count++;
+
+  my @parts;  # each is ['single', CL_EXPR] or ['range', CL_EXPR]
+  for my $kid_id (@$tv_kids) {
+    my $kid_node = $self->expr_o->get_a_node($kid_id);
+    my $is_range = ref($kid_node) eq 'PPI::Token::Operator'
+                && ($kid_node->content() // '') eq '..';
+    if ($is_range) {
+      my $saved = $self->expr_o->get_node_context($kid_id);
+      $self->expr_o->set_node_context($kid_id, LIST_CTX);
+      my $kid_expr = $self->gen_node($kid_id);
+      $self->expr_o->set_node_context($kid_id, $saved);
+      push @parts, ['range', "(p-refgen-list $kid_expr)"];
+    } else {
+      # @/% vars, scalars, and everything else: one ref
+      my $kid_expr = $self->gen_node($kid_id);
+      push @parts, ['single', "(p-backslash $kid_expr)"];
+    }
+  }
+
+  my $has_range = grep { $_->[0] eq 'range' } @parts;
+  unless ($has_range) {
+    # No ranges: simple vector of refs
+    my $forms = join(' ', map { $_->[1] } @parts);
+    return "(vector $forms)";
+  }
+
+  # Mix: use let + loop to concatenate variable-length parts
+  my $result_var = "|--pcl-bsl-r$id--|";
+  my $iter_var   = "|--pcl-bsl-x$id--|";
+  my @stmts;
+  for my $part (@parts) {
+    if ($part->[0] eq 'range') {
+      push @stmts, "(loop for $iter_var across $part->[1] do "
+                 . "(vector-push-extend $iter_var $result_var))";
+    } else {
+      push @stmts, "(vector-push-extend $part->[1] $result_var)";
+    }
+  }
+  my $stmts_str = join("\n  ", @stmts);
+  return "(let (($result_var (make-array 4 :adjustable t :fill-pointer 0)))\n  "
+       . "$stmts_str\n  $result_var)";
 }
 
 

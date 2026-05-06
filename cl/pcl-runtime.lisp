@@ -2301,6 +2301,35 @@
    assignment intent explicit for other compiler backends reading the IR."
   `(box-set ,place ,value))
 
+(defun %p-array-store-scalar (arr item)
+  "Store a scalar ITEM into ARR, preserving blessed objects and references."
+  (if (p-box-p item)
+      (let ((inner (p-box-value item)))
+        (cond
+          ;; Blessed box: preserve as-is (class must not be lost)
+          ((p-box-class item) (vector-push-extend item arr))
+          ;; Reference type (box-in-box, array-ref, hash-ref, etc.): preserve
+          ((or (p-box-p inner)
+               (and (vectorp inner) (not (stringp inner)))
+               (hash-table-p inner)
+               (functionp inner)
+               (p-typeglob-p inner)
+               (p-regex-match-p inner))
+           (vector-push-extend item arr))
+          ;; Plain scalar box: copy into new box
+          (t (vector-push-extend (make-p-box inner) arr))))
+      (vector-push-extend (make-p-box item) arr)))
+
+(defun %p-make-hash-entry (v)
+  "Create a fresh entry box from V for storage in a hash, preserving bless class.
+   For blessed non-hash objects the class is copied to the new entry box so that
+   p-gethash can return the box and downstream p-ref / p-method-call find the class.
+   References and plain scalars use the existing (unbox+rewrap) behavior."
+  (let ((b (make-p-box (unbox v))))
+    (when (and (p-box-p v) (p-box-class v))
+      (setf (p-box-class b) (p-box-class v)))
+    b))
+
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
    Flattens nested vectors (but not strings), wraps elements in boxes."
@@ -2319,7 +2348,7 @@
                     ((hash-table-p src)
                      (maphash (lambda (k v)
                                 (vector-push-extend (make-p-box k) ,place)
-                                (vector-push-extend (make-p-box (unbox v)) ,place))
+                                (%p-array-store-scalar ,place v))
                               src))
                     ((vectorp src)
                      (loop for item across src
@@ -2332,8 +2361,7 @@
                                 ((null item)
                                  (vector-push-extend nil ,place))
                                 (t
-                                 (let ((v (unbox item)))
-                                   (vector-push-extend (make-p-box v) ,place))))))
+                                 (%p-array-store-scalar ,place item)))))
                     ((listp src)
                      (loop for item in src
                            do (cond
@@ -2345,12 +2373,11 @@
                                 ((null item)
                                  (vector-push-extend nil ,place))
                                 (t
-                                 (let ((v (unbox item)))
-                                   (vector-push-extend (make-p-box v) ,place))))))
+                                 (%p-array-store-scalar ,place item)))))
                     ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
                     (t
                      (when src
-                       (vector-push-extend (make-p-box (unbox src)) ,place))))))
+                       (%p-array-store-scalar ,place src))))))
          (add-items ,val))
        ,place)))
 
@@ -2366,17 +2393,15 @@
        (cond
          ((hash-table-p ,val)
           (maphash (lambda (k v)
-                     (let ((unboxed (unbox v)))
-                       (setf (gethash k ,place) (make-p-box unboxed))))
+                     (setf (gethash k ,place) (%p-make-hash-entry v)))
                    ,val))
          ((vectorp ,val)
           ;; Flatten nested vectors (e.g. from function returning a list in list context)
           (let ((flat (%p-flatten-list ,val)))
             (loop for i from 0 below (length flat) by 2
                   when (< (1+ i) (length flat))
-                  do (let* ((v (aref flat (1+ i)))
-                            (unboxed (unbox v)))
-                       (setf (gethash (to-string (aref flat i)) ,place) (make-p-box unboxed)))))))
+                  do (setf (gethash (to-string (aref flat i)) ,place)
+                           (%p-make-hash-entry (aref flat (1+ i))))))))
        ,place)))
 
 ;; Flatten a Perl-style value (vector/list/hash/scalar) to a flat vector
@@ -3742,16 +3767,14 @@
          (let ((src (p-flatten-marker-array val)))
            (when (vectorp src)
              (loop for elem across src do
-                   ;; Unbox if element is boxed, then create new box
-                   (let ((v (unbox elem)))
-                     (vector-push-extend (make-p-box v) arr))))))
+                   (%p-array-store-scalar arr elem)))))
         ;; Raw CL vector (not a p-box reference): spread elements.
         ;; Handles qw!...! lists and array-valued expressions in list context.
         ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
          (loop for elem across val do
-               (vector-push-extend (make-p-box (unbox elem)) arr)))
-        ;; Regular value - wrap in box and push
-        (t (vector-push-extend (make-p-box val) arr)))))
+               (%p-array-store-scalar arr elem)))
+        ;; Regular value - preserve bless class via %p-array-store-scalar
+        (t (%p-array-store-scalar arr item)))))
   (length arr))
 
 (defun p-pop (arr)
@@ -3778,31 +3801,30 @@
 (defun p-unshift (arr &rest items)
   "Perl unshift - adds to front. Stores values in boxes for l-value semantics.
    Recognizes p-flatten-marker to flatten @array arguments."
-  ;; First expand any flatten markers into a flat list of VALUES (not boxes)
-  (let ((flat-items
-          (loop for item in items
-                for val = (unbox item)
-                if (p-flatten-marker-p val)
-                  ;; Flatten marker - expand its array, unboxing elements
-                  append (loop for elem across (p-flatten-marker-array val)
-                               collect (unbox elem))
-                else if (and (vectorp val) (not (stringp val)) (not (p-box-p item)))
-                  ;; Raw CL vector (e.g. qw!...!): spread elements
-                  append (loop for elem across val collect (unbox elem))
-                else
-                  ;; Regular value
-                  collect val)))
-    (let ((nitems (length flat-items)))
+  ;; Expand into a flat array of properly-boxed elements (preserving bless class)
+  (let ((flat-arr (make-array 8 :adjustable t :fill-pointer 0)))
+    (dolist (item items)
+      (let ((val (unbox item)))
+        (cond
+          ;; Flatten marker - expand its array
+          ((p-flatten-marker-p val)
+           (loop for elem across (p-flatten-marker-array val)
+                 do (%p-array-store-scalar flat-arr elem)))
+          ;; Raw CL vector (e.g. qw!...!): spread elements
+          ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
+           (loop for elem across val do (%p-array-store-scalar flat-arr elem)))
+          ;; Regular value - preserve bless class
+          (t (%p-array-store-scalar flat-arr item)))))
+    (let ((nitems (length flat-arr)))
       ;; Make room with placeholder boxes
       (dotimes (i nitems)
         (vector-push-extend (make-p-box *p-undef*) arr))
       ;; Shift existing elements up
       (loop for i from (1- (length arr)) downto nitems
             do (setf (aref arr i) (aref arr (- i nitems))))
-      ;; Insert new items at front (in boxes)
-      (loop for i from 0
-            for item in flat-items
-            do (setf (aref arr i) (make-p-box item)))
+      ;; Insert new items at front (already properly boxed)
+      (loop for i from 0 below nitems
+            do (setf (aref arr i) (aref flat-arr i)))
       (length arr))))
 
 (defmacro p-splice (arr &rest args)
@@ -3831,23 +3853,20 @@
                         (max 0 (+ (- alen off) l))
                         (min l (- alen off))))
                   (- alen off)))
-         ;; Collect removed elements (unboxed)
+         ;; Collect removed elements (preserving boxes so bless class is not lost)
          (removed (make-array len :adjustable t :fill-pointer len)))
-    ;; Copy removed elements
+    ;; Copy removed elements (keep boxes as-is for reference/bless preservation)
     (loop for i from 0 below len
-          do (setf (aref removed i)
-                   (let ((elem (aref a (+ off i))))
-                     (unbox elem))))
+          do (setf (aref removed i) (aref a (+ off i))))
     ;; Flatten replacement items (arrays get flattened in Perl)
-    (let ((flat-rep nil))
+    (let ((flat-rep (make-array 8 :adjustable t :fill-pointer 0)))
       (dolist (r replacements)
         (let ((v (unbox r)))
-          (if (and (vectorp v) (not (stringp v)))
-              (loop for el across v
-                    do (push (unbox el) flat-rep))
-              (push v flat-rep))))
-      (setf flat-rep (nreverse flat-rep))
-      (let* ((nrep (list-length flat-rep))
+          ;; Only spread raw (unboxed) vectors; a p-box holding a vector is an array-ref scalar
+          (if (and (vectorp v) (not (stringp v)) (not (p-box-p r)))
+              (loop for el across v do (%p-array-store-scalar flat-rep el))
+              (%p-array-store-scalar flat-rep r))))
+      (let* ((nrep (length flat-rep))
              (new-len (+ off nrep (- alen off len)))
              (old-len alen))
         ;; Resize array
@@ -3864,10 +3883,10 @@
               (loop for i from (+ off nrep) below new-len
                     do (setf (aref a i) (aref a (+ i (- len nrep)))))
               (setf (fill-pointer a) new-len)))
-        ;; Insert replacements
+        ;; Insert replacements (already properly boxed)
         (loop for i from off
-              for v in flat-rep
-              do (setf (aref a i) (make-p-box v)))))
+              for j from 0 below nrep
+              do (setf (aref a i) (aref flat-rep j)))))
     (if (eq *wantarray* t)
         removed
         (if (> (length removed) 0)
@@ -3899,13 +3918,16 @@
        (when (find #\Nul h) (return-from p-gethash *p-undef*))
        (let ((sym-h (p-ensure-hashref hash)))
          (multiple-value-bind (val found) (gethash k sym-h)
-           (if found (unbox val) *p-undef*))))
+           (if found
+               ;; Return box as-is for blessed objects so p-ref/p-method-call see the class
+               (if (and (p-box-p val) (p-box-class val)) val (unbox val))
+               *p-undef*))))
       (t
        (multiple-value-bind (val found) (gethash k h)
          (if (not found)
              *p-undef*
-             ;; Unbox if stored as a box (l-value semantics)
-             (unbox val)))))))
+             ;; Return box as-is for blessed objects; unbox plain scalars/refs (l-value semantics)
+             (if (and (p-box-p val) (p-box-class val)) val (unbox val))))))))
 
 (defun (setf p-gethash) (value hash key)
   "Setf expander for p-gethash - allows assignment to hash elements.
@@ -4277,12 +4299,12 @@
                     else if (hash-table-p item)
                       append (loop for k being the hash-keys of item
                                    using (hash-value v)
-                                   collect k collect (unbox v))
+                                   collect k collect v)  ; keep box so %p-make-hash-entry sees class
                     else
                       collect item))
         (h (make-hash-table :test 'equal)))
     (loop for (k v) on flat by #'cddr
-          do (setf (gethash (to-string k) h) (make-p-box (unbox v))))
+          do (setf (gethash (to-string k) h) (%p-make-hash-entry v)))
     h))
 
 (defun p-array-init (&rest elements)
@@ -4296,19 +4318,15 @@
                  ;; String - wrap in box and add
                  ((stringp e)
                   (vector-push-extend (make-p-box e) result))
-                 ;; Vector (array) - flatten its contents (unboxing then re-boxing)
+                 ;; Vector (array) - flatten its contents, preserving bless class
                  ((vectorp e)
-                  (loop for item across e
-                        for val = (unbox item)
-                        do (vector-push-extend (make-p-box val) result)))
-                 ;; List - flatten its contents (unboxing then re-boxing)
+                  (loop for item across e do (%p-array-store-scalar result item)))
+                 ;; List - flatten its contents, preserving bless class
                  ((listp e)
-                  (loop for item in e
-                        for val = (unbox item)
-                        do (vector-push-extend (make-p-box val) result)))
-                 ;; Scalar value - unbox first (avoids double-boxing Perl vars), then wrap
+                  (loop for item in e do (%p-array-store-scalar result item)))
+                 ;; Scalar value - preserve bless class via %p-array-store-scalar
                  (t
-                  (vector-push-extend (make-p-box (unbox e)) result)))))
+                  (%p-array-store-scalar result e)))))
       (dolist (elem elements)
         (add-element elem)))
     result))
@@ -4339,7 +4357,7 @@
                  (setf (gethash collection *array-iterators*) n)
                  (setf (gethash collection *array-iterators*) (1+ i)))
              (if (eq *wantarray* t)
-                 (vector i (unbox val))
+                 (vector i (p-aref-unbox-elem val))
                  i)))))
     ;; Hash case
     ((hash-table-p collection)
@@ -4361,7 +4379,7 @@
                   (val (gethash key collection)))
              (setf (gethash collection *hash-iterators*) (cdr remaining))
              (if (eq *wantarray* t)
-                 (vector key (unbox val))
+                 (vector key (if (and (p-box-p val) (p-box-class val)) val (unbox val)))
                  (make-p-box key))))))
     ;; Neither — return empty
     (t (vector))))
@@ -4396,7 +4414,7 @@
      (remhash collection *array-iterators*)
      (let* ((n (length collection))
             (result (make-array n :adjustable t :fill-pointer n)))
-       (dotimes (i n) (setf (aref result i) (unbox (aref collection i))))
+       (dotimes (i n) (setf (aref result i) (p-aref-unbox-elem (aref collection i))))
        result))
     ;; Hash case
     ((hash-table-p collection)
@@ -4404,7 +4422,7 @@
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (maphash (lambda (k v)
                   (declare (ignore k))
-                  (vector-push-extend (unbox v) result))
+                  (vector-push-extend (if (and (p-box-p v) (p-box-class v)) v (unbox v)) result))
                 collection)
        result))
     ;; Neither
@@ -4435,7 +4453,9 @@
       (t
        (multiple-value-bind (v found) (gethash k h)
          (remhash k h)
-         (if found (unbox v) *p-undef*))))))
+         (if found
+             (if (and (p-box-p v) (p-box-class v)) v (unbox v))
+             *p-undef*))))))
 
 (defun p-delete-array (arr idx)
   "Perl delete function for arrays.
@@ -4446,8 +4466,7 @@
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i))
          (old-val (if (and (>= actual-idx 0) (< actual-idx len))
-                      (let ((elem (aref a actual-idx)))
-                        (if (p-box-p elem) (p-box-value elem) *p-undef*))
+                      (p-aref-unbox-elem (aref a actual-idx))
                       *p-undef*)))
     (when (and (vectorp a) (>= actual-idx 0) (< actual-idx len))
       (setf (aref a actual-idx) nil)
@@ -4515,8 +4534,7 @@
       (let* ((i (truncate (to-number idx)))
              (len (if (vectorp a) (length a) 0))
              (old-val (if (and (>= i 0) (< i len))
-                          (let ((elem (aref a i)))
-                            (if (p-box-p elem) (p-box-value elem) *p-undef*))
+                          (p-aref-unbox-elem (aref a i))
                           *p-undef*)))
         (when (and (vectorp a) (>= i 0) (< i len))
           (setf (aref a i) nil))  ; nil = deleted marker
@@ -4736,8 +4754,23 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
   (cond
-    ;; Not a box - return as-is (hash tables, arrays, etc.)
-    ((not (p-box-p val)) val)
+    ;; Not a box - handle arrays context-sensitively
+    ((not (p-box-p val))
+     (cond
+       ;; Plain array/list in scalar context: Perl list-in-scalar = last element.
+       ;; Applies to array slices (@a[0..N]), map results, etc. returned in scalar.
+       ;; Note: @a (array variable) in scalar gives count, but that goes through
+       ;; p-scalar directly, not through p-return-value.
+       ((and (not *wantarray*)
+             (vectorp val) (not (stringp val)) (adjustable-array-p val))
+        (if (zerop (length val))
+            nil
+            (p-return-value (aref val (1- (length val))))))
+       ;; nil (undef/empty-list) in list context: return empty list vector
+       ;; so bare `return` and `return ()` contribute 0 elements to surrounding list.
+       ((and (eq *wantarray* t) (null val))
+        (make-array 0 :adjustable t :fill-pointer 0))
+       (t val)))
     ;; Blessed box - return the whole box so the class is preserved.
     ;; Needed for e.g. bless \$scalar (scalar-ref inside box): the box carries the
     ;; class, unboxing strips it.  Also fixes bless [] returning a vector that
@@ -4768,7 +4801,11 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
    Uses throw :p-return to bypass (block nil ...) from loops (for p-last),
    so return always exits the enclosing p-sub, not just the innermost loop."
   (if (null values)
-      `(throw :p-return nil)
+      ;; Bare return: in list context contributes 0 elements; scalar/void → undef.
+      `(throw :p-return
+         (if (eq *pcl-caller-wantarray* t)
+             (make-array 0 :adjustable t :fill-pointer 0)
+             nil))
       (if (= (length values) 1)
           `(throw :p-return
              (let ((*wantarray* *pcl-caller-wantarray*))
@@ -6551,13 +6588,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun %p-collect-list (&rest items)
   "Collect &rest args into a flat vector.
    Pl-boxes wrapping vectors (@arrays) are flattened into individual elements.
+   p-flatten-markers (from ->import/->unimport empty returns) contribute 0 elements.
    Used by p-map and p-grep to handle both (fn @arr) and (fn a b c) forms."
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (dolist (item items)
-      (let ((val (unbox item)))
-        (if (and (vectorp val) (not (stringp val)))
-            (loop for x across val do (vector-push-extend x result))
-            (vector-push-extend item result))))
+      (cond
+        ((p-flatten-marker-p item)
+         (loop for x across (p-flatten-marker-array item) do (vector-push-extend x result)))
+        (t
+         (let ((val (unbox item)))
+           (if (and (vectorp val) (not (stringp val)))
+               (loop for x across val do (vector-push-extend x result))
+               (vector-push-extend item result))))))
     result))
 
 (defun %p-map-copy-scalar (r)
@@ -7045,7 +7087,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (loop for i from 0 below (length flat) by 2
             when (< (1+ i) (length flat))
             do (setf (gethash (to-string (aref flat i)) h)
-                     (make-p-box (unbox (aref flat (1+ i)))))))
+                     (%p-make-hash-entry (aref flat (1+ i))))))
     h))
 
 (defun p-array-deref-= (array-ref value)
@@ -7070,7 +7112,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (setf (fill-pointer arr) 0)
     (let ((flat (%p-flatten-list value)))
       (loop for item across flat
-            do (vector-push-extend (make-p-box (unbox item)) arr)))
+            do (%p-array-store-scalar arr item)))
     arr))
 
 (defun p-ref (val)
@@ -7711,6 +7753,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            (if (string= pkg "MAIN") "main" pkg))
                          raw-class))
          (inner (unbox ref)))
+    ;; Ensure CL package exists for this class name (mirrors Perl stash creation on bless).
+    ;; Lets p-method-call distinguish "blessed into" from "never mentioned" packages,
+    ;; so it can add the "(perhaps you forgot to load...)" hint only for truly unknown classes.
+    (unless (%pcl-find-package class-name)
+      (ignore-errors (make-package (string-upcase class-name) :use '(:cl :pcl))))
     (cond
       ((hash-table-p inner)
        (setf (gethash :__class__ inner) class-name)
@@ -7729,8 +7776,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            ;; ref is a raw function (e.g. anonymous sub from codegen). Wrap it in
            ;; a new box with the class set so box-set can propagate the class to
            ;; the variable box (box-set copies class from value-box to target-box).
-           (return-from p-bless (make-p-box ref class-name))))))
-  ref)
+           (return-from p-bless (make-p-box ref class-name)))))
+  ref))
 
 (defun p-get-class (obj)
   "Get the class name of a blessed object or class string"
@@ -7811,11 +7858,26 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; Qualified method dispatch: $obj->PKG::method(args) calls PKG::method($obj, args)
     ;; directly, bypassing normal MRO. E.g. Foo->UNIVERSAL::can("x").
     ;; Also handles PKG::SUPER::method (call method from PKG's parent).
-    (let ((sep-pos (search "::" method-name)))
-      (when sep-pos
-        (let* ((pkg-part    (subseq method-name 0 sep-pos))
-               (meth-part   (subseq method-name (+ sep-pos 2)))
-               (target-pkg  (find-package (string-upcase pkg-part))))
+    (let ((first-sep (search "::" method-name)))
+      (when first-sep
+        ;; Split at the first "::" first, then check for PKG::SUPER::method pattern.
+        ;; For multi-level names like "E::D::foo", use the LAST "::" as the split
+        ;; (so pkg-part="E::D", meth-part="foo"), UNLESS meth-part starts with "SUPER::"
+        ;; (so "PKG::SUPER::method" stays split as pkg-part="PKG", meth-part="SUPER::method").
+        (let* ((first-meth (subseq method-name (+ first-sep 2)))
+               (sep-pos (if (and (>= (length first-meth) 7)
+                                 (string= (subseq first-meth 0 7) "SUPER::"))
+                            first-sep
+                            ;; Find last "::" in method-name
+                            (let ((last first-sep))
+                              (loop for i from (1+ first-sep) below (1- (length method-name))
+                                    when (and (char= (char method-name i) #\:)
+                                              (char= (char method-name (1+ i)) #\:))
+                                    do (setf last i))
+                              last)))
+               (pkg-part   (subseq method-name 0 sep-pos))
+               (meth-part  (subseq method-name (+ sep-pos 2)))
+               (target-pkg (%pcl-find-package pkg-part)))
           ;; PKG::SUPER::method — call method from PKG's parent class
           (when (and (>= (length meth-part) 7)
                      (string= (subseq meth-part 0 7) "SUPER::"))
@@ -7835,7 +7897,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                              target-pkg)))
                         (when (and fn (fboundp fn))
                           (return-from p-method-call (apply fn resolved-obj args)))))
-                    (error "Can't locate method ~A in package UNIVERSAL" meth-part)))))
+                    ;; Package doesn't exist — standard "can't locate" error
+                    (let ((pkg-known (%pcl-find-package pkg-part)))
+                      (p-die (format nil "Can't locate object method \"~A\" via package \"~A\"~A at - line 1.~%"
+                                     meth-part pkg-part
+                                     (if pkg-known "" (format nil " (perhaps you forgot to load \"~A\"?)" pkg-part)))))))))
             ;; CORE::method — dispatch to the corresponding PCL built-in (p-METHOD).
             ;; In Perl, CORE:: is not a real package; it's a namespace for built-in ops.
             ;; "3foo"->CORE::uc  ⟹  (p-uc "3foo")
@@ -7850,7 +7916,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              (let ((fn (find-symbol (format nil "PL-~A" (string-upcase meth-part))
                                     target-pkg)))
                (when (and fn (fboundp fn))
-                 (return-from p-method-call (apply fn resolved-obj args)))))))))
+                 (return-from p-method-call (apply fn resolved-obj args)))))
+            ;; Package not found — give proper error instead of falling through
+            (t
+             (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" (perhaps you forgot to load \"~A\"?) at - line 1.~%"
+                            meth-part pkg-part pkg-part)))))))
 
     ;; Determine whether to use the @ISA walk or CLOS MRO.
     ;; @ISA walk is preferred whenever @ISA is non-empty (it reflects `local @ISA`
@@ -7906,13 +7976,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (cond
               ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
               ((string-equal method-name "can") (apply #'p-can resolved-obj args))
-              ;; Perl special case: ->import and ->unimport with no method return nothing
+              ;; Perl special case: ->import and ->unimport with no method return nothing.
+              ;; In list context: p-flatten-marker with empty array (contributes 0 items).
+              ;; In scalar/void context: nil (undef).
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
-               (values))
+               (if (eq *wantarray* t)
+                   (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
+                   nil))
               (t (multiple-value-bind (result found)
                      (%pcl-dispatch-autoload class-name method-name resolved-obj args)
                    (if found result
-                       (error "Can't locate method ~A via package ~A" method-name class-name))))))
+                       (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" at - line 1.~%"
+                                      method-name class-name)))))))
 
           ;; @ISA is non-empty or no CLOS class — walk @ISA dynamically.
           ;; This path respects `local @ISA = (...)` and runtime mutations.
@@ -7944,9 +8019,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
               (unless pkg
                 ;; Perl special case: ->import and ->unimport on unknown packages return nothing
                 (if (or (string-equal method-name "import") (string-equal method-name "unimport"))
-                    (return-from p-method-call (values))
-                    (p-die (format nil "Can't locate object method \"~A\" via package \"~A\""
-                                   method-name class-name)))))
+                    (return-from p-method-call
+                      (if (eq *wantarray* t)
+                          (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
+                          nil))
+                    ;; Package unknown (never blessed into, never declared): add "perhaps" hint
+                    (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" (perhaps you forgot to load \"~A\"?) at - line 1.~%"
+                                   method-name class-name class-name)))))
             (find-in-class class-name nil)
             ;; UNIVERSAL is an implicit parent of all Perl classes.
             ;; After exhausting the class's own @ISA chain, try UNIVERSAL's @ISA
@@ -7960,11 +8039,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
               ((string-equal method-name "can") (apply #'p-can resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return nothing
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
-               (values))
+               (if (eq *wantarray* t)
+                   (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
+                   nil))
               (t (multiple-value-bind (result found)
                      (%pcl-dispatch-autoload class-name method-name resolved-obj args)
                    (if found result
-                       (error "Can't locate method ~A in package ~A" method-name class-name))))))))))
+                       (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" at - line 1.~%"
+                                      method-name class-name)))))))))))
 
 ;;; AUTOLOAD helpers for p-method-call
 

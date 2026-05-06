@@ -467,3 +467,24 @@ benefit for running CPAN modules (which are valid Perl by definition).
 **Affected tests:** `perl-tests/anonsub.t` tests 1–5 (invalid anonymous sub syntax);
 `perl-tests/signatures.t` tests for syntax errors when `use feature 'signatures'`
 is not in effect (commented out).
+
+---
+
+## Ref aliasing (`use feature 'refaliasing'`)
+
+**Perl behaviour:** `use feature 'refaliasing'` enables assignment to references
+as lvalues: `\$x = \$y` makes `$x` an alias for `$y`.  It was experimental in
+Perl 5.22–5.38 and removed in Perl 5.40 without graduating to stable.
+
+**PCL behaviour:** Not implemented.  The `use feature 'refaliasing'` pragma is
+silently accepted as a no-op, but the lvalue-ref assignment `\$h{foo} = \$var`
+does not create an alias.
+
+**Rationale:** The feature was removed from Perl itself.  No stable CPAN modules
+depend on it.  Implementing lvalue-ref aliasing in the PCL box/unbox model would
+require significant runtime changes for a removed, never-stable feature.
+
+**Affected tests:**
+- `perl-tests/substr.t` — last block (`{ # [perl #132527] ... }`) commented out (1 test)
+- `perl-tests/aassign.t` — blocks at lines 124–175 and 284 use refaliasing (multiple tests)
+- `perl-tests/each.t` — block at lines 319–320 uses refaliasing

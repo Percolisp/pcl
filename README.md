@@ -27,8 +27,7 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 ## Known Gaps
 
 - **`pack`/`unpack`** — missing several format letters
-- **`wantarray`** — three-valued (list/scalar/void) with full context propagation through return, tail calls, method calls, code refs, `do BLOCK`, and `||`/`&&`/`?:` operator chains; `eval "string"` void context not yet propagated
-- **`$SIG{__DIE__}`** — handler not called (requires CL condition restarts); `$SIG{__WARN__}` works correctly
+- **`wantarray`** — `eval "string"` void context not yet propagated, rest seems ok.
 - **XS/C extensions** — anything that requires compiled C code won't work
 
 ## Limitations
@@ -127,7 +126,7 @@ I am Rex and I bark
 
 ## Next: AST Annotation Pass
 
-The code generator currently makes structural decisions during generation using ad-hoc techniques: string-matching on already-emitted CL (`if ($child =~ /\(p-=~\s/)`), a hardcoded list of list-returning builtins, and a mutable `lvalue_context` flag threaded through recursive calls.
+The plan now is to find incompatibilities with real Perl, then to make more of a real compiler to generate better variable handling so they can be tagged as numeric etc.
 
 The planned fix is a pre-generation annotation pass over the OpcodeTree:
 
