@@ -2023,6 +2023,7 @@ sub gen_array_slice {
   my $arr = $self->gen_node($kids->[0]);
   my @indices;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @indices, $self->gen_node($kids->[$i]);
   }
 
@@ -2047,6 +2048,7 @@ sub gen_hash_slice {
   }
   my @keys;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @keys, $self->gen_node($kids->[$i]);
   }
 
@@ -2064,6 +2066,7 @@ sub gen_kv_hash_slice {
   my $hash = $self->gen_node($kids->[0]);
   my @keys;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @keys, $self->gen_node($kids->[$i]);
   }
 
@@ -2086,6 +2089,7 @@ sub gen_kv_array_slice {
   $arr = "(unbox $arr)" if $arr =~ /^\$/;
   my @indices;
   for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
     push @indices, $self->gen_node($kids->[$i]);
   }
 

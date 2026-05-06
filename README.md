@@ -48,6 +48,7 @@ These features were removed in Perl 5.34–5.38 and are not implemented:
 - **`caller()` location** — package name is correct; filename is always `"(unknown)"`, line always `0`. CL does not expose Perl-compatible source locations at runtime.
 - **Error message text** — PCL does not guarantee error messages match Perl's wording or the `" at FILE line N"` suffix. PCL targets correct execution of valid CPAN code, not error compatibility.
 - **`$SIG{__DIE__}` handler** — not invoked; would require CL condition restarts.
+- **refaliasing** — experimental.
 
 ### Not emulated (Perl internals / niche features)
 

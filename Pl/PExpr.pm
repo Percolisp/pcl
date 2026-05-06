@@ -674,6 +674,18 @@ sub parse {
     # - - - Heredoc <<'EOF' or <<"EOF" or <<EOF
     if (ref($e1) eq 'PPI::Token::HereDoc') {
       say "parse(): Found heredoc"                   if 1 & DEBUG;
+      # For interpolated heredocs (<<"..." or <<BARE but not <<'...'),
+      # route through the string interpolation system so $var/@arr are expanded.
+      my $marker = $e1->content;   # e.g. <<'' or <<"" or <<EOF
+      if ($marker !~ /^<<'/) {
+        my $inner = join('', $e1->heredoc());
+        # Only use interpolation path if there's actually something to interpolate
+        (my $tmp = $inner) =~ s/\\\\/\x00\x00/g;
+        if ($tmp =~ /(?<!\\)[\$\@]/) {
+          my $fake_str = PPI::Token::Quote::Double->new(qq{"$inner"});
+          return $self->str_interpol->parse_interpolated_string($self, $fake_str);
+        }
+      }
       my $id = $self->make_node($e1);
       say "parse(): Made heredoc node $id"           if 1 & DEBUG;
       return $id;
@@ -1767,17 +1779,20 @@ sub handle_subcalls {
                 $self->add_child_to_node($top_id, $rid);
               }
             }
-            splice @$e, $i, 2;
-            $e->[$i] = $top_node;
+            splice @$e, $i, 2, $top_node;
             next;
           }
         }
 
         if (@inner_ch && ref($inner_ch[0]) eq 'PPI::Structure::Block') {
           my $block = $inner_ch[0];
-          # Rest: children after the block, strip leading comma
+          # Rest: children after the block; strip only the optional leading comma
+          # (grep({ block }, LIST) has a comma between block and list, but
+          # grep({ block } 1, 2, 3) needs the inner commas for parse_list).
           my @rest_ch = @inner_ch[1..$#inner_ch];
-          @rest_ch = grep { !(ref($_) eq 'PPI::Token::Operator' && $_->content eq ',') } @rest_ch;
+          if (@rest_ch && ref($rest_ch[0]) eq 'PPI::Token::Operator' && $rest_ch[0]->content eq ',') {
+            shift @rest_ch;
+          }
           # If rest is a single Structure::List, expand its children
           if (@rest_ch == 1 && ref($rest_ch[0]) eq 'PPI::Structure::List') {
             @rest_ch = grep { ref($_) !~ /Whitespace/ } $rest_ch[0]->children();
@@ -1835,8 +1850,7 @@ sub handle_subcalls {
             }
           }
 
-          splice @$e, $i, 2;
-          $e->[$i] = $top_node;
+          splice @$e, $i, 2, $top_node;
           next;
         }
       }
