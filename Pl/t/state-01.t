@@ -29,7 +29,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 23;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -262,3 +262,35 @@ test_cl('state init fires only once',
      print f(), "\n";  # 0  (stays 0, init does not re-fire)
      print f(), "\n";  # 0',
     "99\n0\n0\n");
+
+# Test 21: pre-increment state var at file scope (++ state $y)
+test_cl('++ state $y at file scope increments each iteration',
+    'use feature ":5.10";
+     for my $i (1..3) {
+         ++ state $y;
+         print "$y\n";
+     }',
+    "1\n2\n3\n");
+
+# Test 22: post-increment state var at file scope (state $z ++)
+test_cl('state $z ++ at file scope increments each iteration',
+    'use feature ":5.10";
+     for my $i (1..3) {
+         state $z ++;
+         print "$z\n";
+     }',
+    "1\n2\n3\n");
+
+# Test 23: foreach loop variable shadows outer state rename
+test_cl('foreach loop variable not confused with same-named state var',
+    'use feature ":5.10";
+     # state $x declared in grep block registers rename for $x
+     my @items = qw(a b c);
+     my @out = grep { state $x = 1 } @items;
+     # foreach loop variable $x should be a fresh binding, not the state var
+     my @vals;
+     foreach my $x (10, 20, 30) {
+         push @vals, $x;
+     }
+     print join(",", @vals), "\n";',
+    "10,20,30\n");

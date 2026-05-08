@@ -814,7 +814,7 @@
                    ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
                    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
                    ((functionp v) (object-address v))  ; code ref: address
-                   ((p-typeglob-p v) (object-address v))  ; typeglob: numeric = address
+                   ((p-typeglob-p v) 0)  ; typeglob: numeric = 0 ("*pkg::name" parses as 0)
                    (t 0))))
           ;; Don't cache address-based NV: SBCL's GC can move objects,
           ;; making the cached address stale while a freshly-computed address
@@ -822,8 +822,7 @@
           (unless (or (p-box-p v)
                       (hash-table-p v)
                       (and (vectorp v) (not (stringp v)))
-                      (functionp v)
-                      (p-typeglob-p v))
+                      (functionp v))
             (setf (p-box-nv box) n
                   (p-box-nv-ok box) t))
           n))))
@@ -895,6 +894,8 @@
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
     ((eq v t) "1")
+    ;; Super-Unicode character (code > U+10FFFF) — no CL char representation; use U+FFFD
+    ((p-superchar-p v) (string #\REPLACEMENT_CHARACTER))
     (t (format nil "~A" v))))
 
 (defun box-sv (box)
@@ -1147,7 +1148,9 @@
     (if ha (p-call-overload ha a b nil)
         (let ((hb (p-find-overload b "/")))
           (if hb (p-call-overload hb b a t)
-              (%pcl-ieee-arith (lambda () (/ (to-number a) (to-number b)))))))))
+              ;; CL integer/integer -> ratio; Perl always gives float
+              (let ((r (%pcl-ieee-arith (lambda () (/ (to-number a) (to-number b))))))
+                (if (rationalp r) (coerce r 'double-float) r)))))))
 (defun p-% (a b)
   "Perl modulo with use overload '%' dispatch"
   ;; use overload "%": modulo overload
@@ -1367,22 +1370,53 @@
    Negative start: count from end. Negative length: stop that many chars before end."
   (let* ((s (to-string str))
          (slen (length s))
-         (st (truncate (to-number start)))
-         ;; Handle negative start: count from end
-         ;; Clamp: negative start counts from end; large positive start clamps to slen
-         (st (if (< st 0) (max 0 (+ slen st)) (min st slen)))
+         (raw-st (truncate (to-number start)))
+         ;; Adjusted start (without clamping) for bounds checking
+         (adj-st (if (< raw-st 0) (+ slen raw-st) raw-st))
+         ;; Detect explicitly undefined len: warn, but treat as 0 (Perl behaviour)
+         (undef-len-p (and len (not (%pcl-definedp len))))
          (ln-raw (if len (truncate (to-number len)) nil))
-         ;; Calculate end position, handling negative length
+         ;; Bounds check: warn for read, die for write.
+         ;; Rule: OOB when start is past end of string, OR (with len given) when
+         ;; the entire requested region falls before the start of the string.
+         (oob (or (> adj-st slen)
+                  (and ln-raw
+                       (if (< ln-raw 0)
+                           ;; Negative len: region is [adj-st .. slen+ln]. OOB when
+                           ;; both endpoints are before string start.
+                           (and (< adj-st 0) (< (+ slen ln-raw) 0))
+                           ;; Positive/zero len: region is [adj-st .. adj-st+ln]. OOB
+                           ;; when endpoint is before string start.
+                           (< (+ adj-st ln-raw) 0)))))
+         ;; Clamp start to valid range for actual extraction
+         (st (max 0 (min adj-st slen)))
+         ;; Calculate end position, handling negative length.
+         ;; Use adj-st (unclamped) so that e.g. substr('54321',-7,4)
+         ;; correctly gives end = max(0,-2+4) = 2, not min(0+4,5) = 4.
          (end-pos (cond ((null ln-raw) slen)
                         ((< ln-raw 0) (max st (+ slen ln-raw)))
-                        (t (min (+ st ln-raw) slen)))))
+                        (t (max 0 (min (+ adj-st ln-raw) slen))))))
+    (when undef-len-p
+      (p-warn "Use of uninitialized value in substr\n"))
+    (when oob
+      (if replacement
+          (error "substr outside of string")
+          (p-warn "substr outside of string\n")))
     (if replacement
-        ;; 4-arg form: replace and return the replaced portion
-        (let* ((replaced-part (subseq s (min st slen) end-pos))
+        ;; 4-arg form (or lvalue): replace and return the replaced portion
+        (let* (;; Warn when target is a reference being coerced to string
+               (_ (when (p-box-p str)
+                    (let ((v (p-box-value str)))
+                      (when (or (and (vectorp v) (not (stringp v)))
+                                (hash-table-p v)
+                                (functionp v))
+                        (p-warn "Attempt to use reference as lvalue in substr\n")))))
+               (replaced-part (subseq s (min st slen) end-pos))
                (new-str (concatenate 'string
                                      (subseq s 0 (min st slen))
                                      (to-string replacement)
                                      (subseq s end-pos))))
+          (declare (ignore _))
           ;; Modify in place if str is a box
           (when (p-box-p str)
             (box-set str new-str))
@@ -1591,20 +1625,36 @@
                   code-points)
           'string))
 
+;;; Represents a Perl string whose single character has a code point > U+10FFFF.
+;;; CL characters are limited to 0–U+10FFFF; this struct carries the raw integer
+;;; so that (ord (chr N)) round-trips correctly for super-Unicode code points.
+(defstruct p-superchar
+  (code 0 :type integer))
+
 (defun p-chr (n)
-  "Perl chr - character from code point.
-   Out-of-range values (negative or > 1114111) return U+FFFD replacement char."
-  (let ((code (truncate (to-number n))))
-    (if (or (< code 0) (> code #x10FFFF))
-        (string #\REPLACEMENT_CHARACTER)  ; U+FFFD
-        (string (code-char code)))))
+  "Perl chr - character from code point."
+  (let ((num (to-number n)))
+    (when (floatp num)
+      (when #+sbcl (sb-ext:float-infinity-p num) #-sbcl nil
+        (error "Cannot chr ~A" (to-string n)))
+      (when #+sbcl (sb-ext:float-nan-p num) #-sbcl nil
+        (error "Cannot chr ~A" (to-string n))))
+    (let ((code (truncate num)))
+      (cond
+        ((< code 0) (string #\REPLACEMENT_CHARACTER))   ; negative → U+FFFD
+        ((> code #x10FFFF) (make-p-superchar :code code)) ; super-Unicode → struct
+        (t (string (code-char code)))))))
 
 (defun p-ord (str)
   "Perl ord - code point of first character"
-  (let ((s (to-string str)))
-    (if (> (length s) 0)
-        (char-code (char s 0))
-        0)))
+  (let ((v (unbox str)))
+    ;; Super-Unicode character stored as p-superchar struct (code > U+10FFFF)
+    (if (p-superchar-p v)
+        (p-superchar-code v)
+        (let ((s (to-string str)))
+          (if (> (length s) 0)
+              (char-code (char s 0))
+              0)))))
 
 (defun %strip-underscores (s)
   "Remove underscores from a numeric string (Perl allows _ as visual separator)"
@@ -2829,10 +2879,17 @@
            (offset    (caddr place))
            (bits      (cadddr place)))
        `(p-vec-set ,str-place ,offset ,bits ,value)))
-    ;; substr as lvalue: (p-setf (p-substr str start len) val) -> (p-substr str start len val)
+    ;; substr as lvalue: (p-setf (p-substr str start [len]) val) -> (p-substr str start len val)
+    ;; 2-arg form needs nil inserted for len so value lands in replacement slot.
+    ;; 4-arg form (4-arg substr used as lvalue) is a Perl error.
     ((and (listp place) (eq (car place) 'p-substr))
      (let ((args (cdr place)))
-       `(p-substr ,@args ,value)))
+       (cond
+         ((= (length args) 2)
+          `(p-substr ,(car args) ,(cadr args) nil ,value))
+         ((= (length args) 4)
+          `(error "Can't modify substr in scalar assignment"))
+         (t `(p-substr ,@args ,value)))))
     ;; Other complex place (fallback)
     (t `(box-set ,place ,value))))
 
