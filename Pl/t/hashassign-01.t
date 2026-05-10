@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 7;
 
 sub run_cl {
     my ($code) = @_;
@@ -63,6 +63,33 @@ test_cl('hash flattened in list: all keys present',
      my @k = sort keys %copy;
      print "@k\n";',
     "% & \@\n");
+
+# Regression: p-gethash must not unbox hash-ref values — session 176 fix.
+# box-set treats a raw hash-table as %hash-in-scalar-context and converts it to
+# key count, so p-gethash must return the p-box as-is for hash-table-valued entries.
+
+test_cl('hash-ref value survives hash round-trip',
+    'my %h = (a => {b => 1});
+     my $x = $h{a};
+     print ref($x), "\n";
+     print $x->{b}, "\n";',
+    "HASH\n1\n");
+
+test_cl('hash-ref retrieved from hash not converted to key count',
+    'my %h = (k => {x => 10, y => 20});
+     my $r = $h{k};
+     print scalar(%$r) ? "ok" : "fail", "\n";
+     print $r->{x}, "\n";',
+    "ok\n10\n");
+
+test_cl('delete key inside hash-ref retrieved from hash',
+    'my %h = (a => {b => 42, c => 99});
+     my $r = $h{a};
+     my $v = delete $r->{b};
+     print $v, "\n";
+     print exists $r->{b} ? "exists" : "gone", "\n";
+     print $r->{c}, "\n";',
+    "42\ngone\n99\n");
 
 test_cl('hash flattened in p-hash: hash-table arg expands to pairs',
     'my %a = (x => 1, y => 2);

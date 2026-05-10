@@ -1003,6 +1003,26 @@ sub _process_expression_statement {
 
   return unless @parts;
 
+  # Handle '++ state $y' / '-- state $y': PPI treats these as generic expression
+  # statements (not PPI::Statement::Variable) because they start with an operator.
+  # We detect the 'state' keyword here, register the state declaration (emits
+  # defvar + rename), strip 'state' from parts, then parse the remaining expression.
+  for my $i (0 .. $#parts) {
+    if (ref($parts[$i]) eq 'PPI::Token::Word' && $parts[$i]->content eq 'state') {
+      # Build synthetic parts for just the state declaration (state keyword + vars)
+      my @decl_parts = @parts[$i .. $#parts];
+      if ($self->environment->in_subroutine == 0) {
+        $self->_process_toplevel_state_declaration($stmt, \@decl_parts, $perl_code);
+      } else {
+        $self->_process_state_declaration($stmt, \@decl_parts, $perl_code);
+      }
+      # Remove the 'state' token from parts so the remaining expression parses cleanly.
+      # The state_var_renames lookup in ExprToCL will apply the rename.
+      splice(@parts, $i, 1);
+      last;
+    }
+  }
+
   # Special case: "import PACKAGE" is syntactic sugar for "PACKAGE->import()"
   # PPI parses this as two barewords, so we detect and convert it
   # Use funcall+intern to avoid read-time package dependency
@@ -1507,7 +1527,8 @@ sub _process_toplevel_state_declaration {
 
   # Parse variable(s) and optional initializer
   my @vars;
-  my $init_idx = -1;
+  my $init_idx   = -1;
+  my $postfix_op = '';  # '++' or '--' after variable (no '=')
   for my $i (0 .. $#$parts) {
     my $p    = $parts->[$i];
     my $pref = ref($p);
@@ -1519,6 +1540,9 @@ sub _process_toplevel_state_declaration {
     }
     elsif ($pref eq 'PPI::Token::Operator' && $p->content eq '=') {
       $init_idx = $i; last;
+    }
+    elsif ($pref eq 'PPI::Token::Operator' && $p->content =~ /^(\+\+|--)$/ && @vars) {
+      $postfix_op = $p->content; last;
     }
   }
   return unless @vars;
@@ -1579,6 +1603,17 @@ sub _process_toplevel_state_declaration {
       }
       $self->_emit("(setf $flag t))");
       $self->indent_level($self->indent_level - 1);
+    }
+    $self->_emit("");
+  }
+
+  # Emit post-increment/decrement when no initializer (state $z++)
+  if ($postfix_op && $init_idx < 0) {
+    my $cl_op = ($postfix_op eq '++') ? 'p-post++' : 'p-post--';
+    $self->_emit(";; $perl_code");
+    for my $var (@vars) {
+      my $cl_var = $renames_for_this{$var};
+      $self->_emit("($cl_op $cl_var)");
     }
     $self->_emit("");
   }
@@ -2217,6 +2252,7 @@ sub _process_state_declaration {
   # Find the variable name(s) and initializer
   my @vars;
   my $found_assign = 0;  # 1 = '=', 2 = '//='
+  my $postfix_op   = '';  # '++' or '--' after variable (no '=')
   my @init_parts;
 
   for my $part (@$parts) {
@@ -2237,6 +2273,9 @@ sub _process_state_declaration {
     }
     elsif ($ref eq 'PPI::Token::Operator' && $part->content eq '//=' && !$found_assign) {
       $found_assign = 2;  # defined-or-assign: same semantics as = for state vars
+    }
+    elsif ($ref eq 'PPI::Token::Operator' && $part->content =~ /^(\+\+|--)$/ && @vars && !$found_assign) {
+      $postfix_op = $part->content; last;
     }
     elsif ($found_assign) {
       push @init_parts, $part;
@@ -2272,6 +2311,15 @@ sub _process_state_declaration {
     }
     $self->_emit("(setf $init_flag t))");
     $self->indent_level($self->indent_level - 1);
+  }
+
+  # Emit post-increment/decrement when no initializer (state $z++)
+  if ($postfix_op && !$found_assign) {
+    my $cl_op = ($postfix_op eq '++') ? 'p-post++' : 'p-post--';
+    for my $var (@vars) {
+      my $cl_var = $renames->{$var} // $var;
+      $self->_emit("($cl_op $cl_var)");
+    }
   }
 
   $self->_emit("");
@@ -3821,23 +3869,37 @@ sub _with_declarations {
     # Apply new renames to environment so ExprToCL emits the unique CL names.
     # Also expose them via _current_scope_new_renames for _process_variable_statement
     # to split RHS parsing (handles 'my $i = $i + 1' shadowing correctly).
+    #
+    # Shadow removal: if any let-bound 'my' var is also in state_var_renames (e.g.
+    # 'my $x' in 'foreach my $x' after an outer 'state $x' registered a rename),
+    # remove it from the map so the let binding (not the state defvar) is used inside.
     my $saved_env_renames;
     my $saved_scope_renames = $self->{_current_scope_new_renames};
-    if (%new_renames) {
-      $saved_env_renames = $self->environment->state_var_renames // {};
-      my %merged = (%$saved_env_renames, %new_renames);
+    my $cur_env_renames = $self->environment->state_var_renames // {};
+    my %shadowed_state = map { $_ => 1 }
+                         grep { exists $cur_env_renames->{$_} }
+                         @my_vars;
+    if (%new_renames || %shadowed_state) {
+      $saved_env_renames = $cur_env_renames;
+      my %merged = %$cur_env_renames;
+      delete @merged{keys %shadowed_state};    # remove state renames shadowed by let
+      %merged = (%merged, %new_renames);       # apply closure-capture renames
       $self->environment->state_var_renames(\%merged);
-      $self->{_current_scope_new_renames} = \%new_renames;
-      $self->{_current_scope_old_renames} = \%old_renames;
+      if (%new_renames) {
+        $self->{_current_scope_new_renames} = \%new_renames;
+        $self->{_current_scope_old_renames} = \%old_renames;
+      }
     }
 
     $emit_body->();
 
     # Restore rename map
-    if (%new_renames) {
+    if (%new_renames || %shadowed_state) {
       $self->environment->state_var_renames($saved_env_renames);
-      $self->{_current_scope_new_renames} = $saved_scope_renames;
-      delete $self->{_current_scope_old_renames};
+      if (%new_renames) {
+        $self->{_current_scope_new_renames} = $saved_scope_renames;
+        delete $self->{_current_scope_old_renames};
+      }
     }
 
     $self->{_let_bound_vars} = $old_let_vars;
@@ -4202,9 +4264,22 @@ sub _process_foreach_loop {
   $self->_emit("(p-foreach ($cl_loop_var $list_cl)$label_arg");
   $self->indent_level($self->indent_level + 1);
   if ($block) {
+    # The foreach loop variable creates a fresh lexical binding that shadows any
+    # state_var_rename for the same name (e.g. 'foreach my $x' after 'state $x').
+    # Temporarily remove the rename so body expressions use the loop's $x, not the defvar.
+    my $saved_loop_var_rename;
+    my $cur_renames = $self->environment->state_var_renames // {};
+    if (exists $cur_renames->{$loop_var}) {
+      $saved_loop_var_rename = delete $cur_renames->{$loop_var};
+      $self->environment->state_var_renames({ %$cur_renames });
+    }
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     });
+    if (defined $saved_loop_var_rename) {
+      $cur_renames = $self->environment->state_var_renames // {};
+      $self->environment->state_var_renames({ %$cur_renames, $loop_var => $saved_loop_var_rename });
+    }
   }
   if ($continue_block) {
     $self->_emit(":continue (progn");
