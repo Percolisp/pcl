@@ -30,6 +30,33 @@ This file provides guidance to Claude Code when working with this repository.
 
 9. **Assume Valid Perl Input**: PCL is a transpiler for functioning Perl code, not a validator. It does not need to detect or reject invalid Perl (syntax errors, non-associative operator chains, etc.). Tests that verify rejection of invalid Perl (e.g. `eval("sub { $a <=> $b <=> $c }")` returning `undef`) are out of scope and should be commented out, not implemented.
 
+10. **Lisp Parenthesis Discipline**: After every Write or Edit to a `.lisp` file, immediately run the paren checker and fix any non-zero result before reporting done:
+    ```bash
+    perl -e '
+    my ($d,$in_str,$ahb)=(0,0,0);
+    while(<>){ my @c=split//; my $i=0;
+      while($i<@c){ my $ch=$c[$i];
+        if($in_str){ if($ch eq "\\"){$i+=2;next} $in_str=0 if $ch eq q{"} }
+        elsif($ahb){ $ahb=0 }
+        elsif($ch eq q{"}){ $in_str=1 }
+        elsif($ch eq "#" && $i+1<@c && $c[$i+1] eq "\\"){ $ahb=1;$i+=2;next }
+        elsif($ch eq ";"){ last }
+        elsif($ch eq "("){ $d++ }
+        elsif($ch eq ")"){ $d-- }
+        $i++ } }
+    print "depth: $d\n"
+    ' FILENAME.lisp
+    ```
+    **Important:** The simple one-liner checker (used in older sessions) does NOT handle `#\(` and `#\)` character literals — it gives a wrong result when those appear in the file. Always use the version above.
+    Never write a Lisp function body longer than ~80 lines. If a function needs deeply nested dispatch (e.g. a `case` with many arms inside several `let`s), extract the arms into named helper functions first, then write the short dispatcher. A function that fits on one screen has countable parens; a 300-line function does not.
+
+    **Indentation must encode depth**: Use exactly 2 spaces per paren level. A line's indentation column divided by 2 equals the paren depth it runs at. This makes depth visually checkable without counting parens. When writing or reviewing CL code, if the indentation looks wrong, the parens are wrong. Never write a closing `)` on a line that is indented deeper than the line that opened its form.
+
+    **Debugging paren problems: split on `defun`**: When a `.lisp` file has a paren or formatting problem, do NOT count parens across the whole file. Instead, split it into one file per `defun` in `/tmp/` by splitting on lines that start with `(defun ` at column 0 (no indentation). Format and check each chunk independently. Use the helper script:
+    ```bash
+    perl .claude/hooks/split-lisp.pl FILENAME.lisp   # writes /tmp/defun-FUNCNAME.lisp for each defun
+    ```
+
 ## Quick Reference
 
 ```bash

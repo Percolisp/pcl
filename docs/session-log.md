@@ -4,6 +4,78 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 179 (2026-05-13) — pack tooling + structural fix attempt (incomplete)
+
+### Focus
+
+Fixing structural paren bugs in `cl/pcl-pack.lisp` inherited from session 178.
+Introducing formatting and debugging tooling. Session ended early — pcl-pack.lisp is in a broken state.
+
+### Changes
+
+**Tooling added:**
+- `.claude/hooks/format-lisp.sh` — PostToolUse hook: auto-formats `.lisp` files via `emacs --batch` after every Edit/Write
+- `.claude/hooks/fmtlisp` — Perl wrapper for the emacs format command: `fmtlisp FILE.lisp`
+- `.claude/hooks/split-lisp.pl` — splits a `.lisp` file on top-level `^(def\w+` lines into `/tmp/defun-NAME.lisp` chunks
+- `.claude/settings.json` — registered hook + added `emacs:*` and `fmtlisp:*` to allowed commands
+- `CLAUDE.md` principle 10 updated: added "indentation must encode depth" rule and "debug by splitting on defun" rule
+- `memory/feedback_cl_indentation_depth.md` and `memory/feedback_split_lisp_on_defun.md` added
+
+**Pack fixes applied (then broken by bad splice):**
+- `p-unpack` slash-n binding: removed one extra `)` that caused `(dch ...)` to be treated as a body-level function call instead of a let* binding — fixed the `PCL::DCH is undefined` crash (was crashing at test ~4220)
+- `p-unpack` slash mode: added `(#\()` case to handle group data format `A/(SL)` — fixed crash at test 4335
+- `p-unpack` and `p-pack` count parsing: added `[N]` bracket count syntax (alternative to plain digits)
+
+**Current broken state:** `cl/pcl-pack.lisp` has a duplicate `(pack-tmpl raw-tmpl nil nil)` / `result))))` block (one at correct depth 4, one at depth 0 / top level) caused by a bug in the splice script when combining the p-pack chunk back. SBCL sees `(pack-tmpl raw-tmpl nil nil)` as a top-level form and crashes immediately on load with "The variable RAW-TMPL is unbound."
+
+### Root cause analysis (session post-mortem)
+
+Session 178 wrote p-pack (~261 lines) and p-unpack (~370 lines) as single monolithic deeply-nested functions (20+ levels), violating the CLAUDE.md 80-line rule. The buggy paren checker (which doesn't handle `#\(` character literals) gave false "depth 0", hiding structural bugs. The result was two broken functions that needed to be patched rather than used.
+
+**The right approach going forward:** See `docs/pack-rewrite-plan.md` — full rewrite as ~10 small functions (≤80 lines each) with shared `%pack-next-directive` parser, per-type helpers, and short top-level orchestrators.
+
+### Test state
+
+- PCL suite: unchanged (77 files, 2978 tests, all passing)
+- pack.t: broken (pcl-pack.lisp crashes on load due to splice bug)
+- Sweep: not re-run this session
+
+---
+
+## Session 178 (2026-05-10) — pack `/` (length-count) format + p/P/D crash prevention
+
+### Focus
+
+Implementing the `/` (slash, length-count) format in `cl/pcl-pack.lisp`, and fixing pack.t crash at test 241 (p/P/D types) and test 4098 (/ format).
+
+### Changes — `cl/pcl-pack.lisp` only
+
+**p-unpack p/P/D no-op**: Changed `((#\p #\P #\D) (error ...))` to `((#\p #\P #\D) nil)`, matching the same fix already applied to p-pack in the previous session. Prevents SBCL crash when pack.t line 322 calls `unpack("p", ...)` directly.
+
+**p-pack slash support**: When the character AFTER a format token (ch + modifiers + count) is `/`, instead of erroring: consume `/`, pre-fetch next arg, compute `slash-n = strlen(arg)`, emit `slash-n` as the count format (ch), then dispatch on the data format (next token after `/`). Data formats handled: `a`, `A` (string with dynamic length), `Z` (NUL-terminated), integer types (via `%pack-type-info`).
+
+**p-unpack slash support**: When the character AFTER a format token is `/`, consume `/`, unpack one value using the count format (ch) — integer types use `%unpack-read-int`; BER (`w`) iterates; string formats (`a`/`A`/`Z`) parse as integer — WITHOUT pushing to result. Then dispatch on the data format (next token) with the count. Data formats handled: integer types + string `a`/`A`/`Z`.
+
+**`otherwise` in p-unpack**: Removed the `(char= ch #\/)` guard from the unknown-type error since `/` is now handled before the dispatch reaches `otherwise`.
+
+### pack.t sweep progression
+
+- Before this session: crash at test 241 (`p` template) → 117+123=240 passing
+- After p/P/D no-op in p-pack: 2877+1220=4097 passing, new crash at test 4098 (`/` format)
+- After `/` implementation: sweep not yet re-run
+
+### Paren balance
+
+Verified with Perl scanner (`Final depth: 0`) after both edits.
+
+### Not yet done
+
+- Sweep re-run to measure improvement from `/` fix
+- Regression tests `Pl/t/pack-01.t`
+- Commit (sessions 162-178 still uncommitted)
+
+---
+
 ## Session 176 (2026-05-10) — p-gethash hash-ref crash fix
 
 ### Focus

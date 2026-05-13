@@ -135,6 +135,27 @@ to show these passing.
 
 ---
 
+### `ref(\$h{key})` returns wrong type when slot holds a reference  (pre-existing)
+
+**What's broken:** `\$h{key}` where `$h{key}` is itself an array/hash ref
+should give `ref()` = `"REF"` (a reference-to-a-scalar).  PCL returns `"ARRAY"`
+or `"SCALAR"` instead, and `$$nested->[0]` returns undef.
+
+**Root cause:** `p-backslash(slot-box)` produces `outer-box → slot-box → raw-vector`,
+which is structurally identical to `\[10,20]` producing `outer-box → arrayref-box → raw-vector`.
+`p-ref` peeks two levels deep, sees the vector, and cannot tell whether the intermediate
+box is "a scalar slot holding an array-ref" vs "the array-ref itself."
+
+**Fix area:** `p-backslash` / `p-ref` — either mark the box produced by
+`p-gethash-box`/`p-aref-box` paths with a distinct tag, or introduce a
+`p-backslash-lvalue` variant that wraps differently so `p-ref` can distinguish
+"ref to scalar container" from "ref to array/hash directly."
+
+**Scope:** Rare in real CPAN code (`\$h{key}` is unusual; just returning `$h{key}`
+is the normal pattern).  Basic write-through (`$$ref = 42; $h{key} == 42`) works correctly.
+
+---
+
 ## Known Warnings / Minor Bugs
 
 ### `indent_level` going negative — "Negative repeat count does nothing"

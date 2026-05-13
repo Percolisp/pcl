@@ -157,6 +157,12 @@
 
 (in-package :pcl)
 
+;;; Capture the runtime's directory at load time so extensions can be found.
+;;; Must be near the top — *load-truename* changes as nested loads execute.
+(defvar *pcl-runtime-directory*
+  (when *load-truename*
+    (make-pathname :name nil :type nil :defaults *load-truename*)))
+
 ;;; ============================================================
 ;;; Compile-Time Definition Macros
 ;;; ============================================================
@@ -3646,6 +3652,22 @@
             elem   ; reference: return the box so to-number → object-address
             v))))  ; scalar: return unboxed value
 
+(defun %p-hash-unbox-elem (elem)
+  "Unbox a hash slot value for reading.
+   Keeps the slot-box only for values that box-set would corrupt in scalar context:
+   blessed objects, unblessed hash-refs (hash-table), and array-refs (non-string vector).
+   Code-refs (raw functions) and scalar-refs (inner p-box) are returned unboxed,
+   matching the old (unbox slot) behaviour for those types.
+   Also handles raw (non-box) slot values stored directly in hashes (e.g. %+ captures)."
+  (if (null elem)
+      *p-undef*
+      (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
+        (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
+                (hash-table-p v)                          ; hash-ref
+                (and (vectorp v) (not (stringp v))))      ; array-ref
+            elem   ; keep box: box-set would convert these to count/length
+            v))))
+
 (defun p-aref (arr idx)
   "Perl array access (supports negative indices, works on vectors and lists).
    Returns the VALUE (unboxed for scalars, box preserved for references)."
@@ -3984,21 +4006,13 @@
        (let ((sym-h (p-ensure-hashref hash)))
          (multiple-value-bind (val found) (gethash k sym-h)
            (if found
-               ;; Return box as-is for blessed objects so p-ref/p-method-call see the class
-               (if (and (p-box-p val) (p-box-class val)) val (unbox val))
+               (%p-hash-unbox-elem val)
                *p-undef*))))
       (t
        (multiple-value-bind (val found) (gethash k h)
          (if (not found)
              *p-undef*
-             ;; Return box as-is for blessed objects, and also for unblessed hash-ref values.
-             ;; Keeping hash-refs wrapped prevents box-set from treating them as
-             ;; %hash-in-scalar-context and converting to key count.
-             (if (and (p-box-p val)
-                      (or (p-box-class val)
-                          (hash-table-p (p-box-value val))))
-                 val
-                 (unbox val))))))))
+             (%p-hash-unbox-elem val)))))))
 
 (defun (setf p-gethash) (value hash key)
   "Setf expander for p-gethash - allows assignment to hash elements.
@@ -4451,7 +4465,7 @@
                   (val (gethash key collection)))
              (setf (gethash collection *hash-iterators*) (cdr remaining))
              (if (eq *wantarray* t)
-                 (vector key (if (and (p-box-p val) (p-box-class val)) val (unbox val)))
+                 (vector key (%p-hash-unbox-elem val))
                  (make-p-box key))))))
     ;; Neither — return empty
     (t (vector))))
@@ -4494,7 +4508,7 @@
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (maphash (lambda (k v)
                   (declare (ignore k))
-                  (vector-push-extend (if (and (p-box-p v) (p-box-class v)) v (unbox v)) result))
+                  (vector-push-extend (%p-hash-unbox-elem v) result))
                 collection)
        result))
     ;; Neither
@@ -4526,7 +4540,7 @@
        (multiple-value-bind (v found) (gethash k h)
          (remhash k h)
          (if found
-             (if (and (p-box-p v) (p-box-class v)) v (unbox v))
+             (%p-hash-unbox-elem v)
              *p-undef*))))))
 
 (defun p-delete-array (arr idx)
@@ -9236,5 +9250,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun pl-VERSION (&rest args) (declare (ignore args)) nil)
 
 (in-package :pcl)
+
+;;; Load pack/unpack extension if present (muffle redefine warnings)
+(when *pcl-runtime-directory*
+  (let ((pack-file (merge-pathnames "pcl-pack.lisp" *pcl-runtime-directory*)))
+    (when (probe-file pack-file)
+      (handler-bind ((warning #'muffle-warning))
+        (load pack-file)))))
 
 (format t "PCL Runtime loaded~%")

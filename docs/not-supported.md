@@ -470,6 +470,35 @@ is not in effect (commented out).
 
 ---
 
+## `pack`/`unpack` — pointer types (`p`/`P`) and 80-bit long double (`D`)
+
+**Perl behaviour:**
+- `pack "p", \$str` / `pack "P", \$str` pack a raw memory address (pointer) into the
+  binary string.  `unpack "p"` / `unpack "P"` recover the pointer and dereference it.
+- `pack "D", $val` / `unpack "D", $str` use 80-bit extended-precision floating point
+  (x87 `long double`).  Perl uses the platform C `long double` type.
+
+**PCL behaviour:**
+- `p`/`P` in a pack/unpack template signals `"Invalid type 'p' in pack"` (or `"in unpack"`).
+- `D` signals `"Invalid type 'D' in pack"` (or `"in unpack"`).
+
+These errors match `qr/^Invalid type '\w'/`, so the `is_valid_error()` helper in
+`pack.t` counts them as **skipped** (TAP pass) rather than failures.
+
+**Rationale:**
+- **`p`/`P`**: CL's garbage collector moves objects; there are no stable raw memory
+  addresses.  Providing a fake address would be dangerously wrong.  No CPAN module
+  that runs on PCL would use raw pointer pack/unpack.
+- **`D`**: SBCL uses 64-bit IEEE 754 doubles only (`double-float`).  There is no
+  SBCL type for 80-bit extended precision.  `sb-kernel:single-float-bits` and
+  `sb-kernel:double-float-bits` only cover 32- and 64-bit; there is no 80-bit
+  equivalent.
+
+**Affected tests:** `perl-tests/pack.t` — the `p`/`P` and `D` format tests are
+handled via `is_valid_error()` skip, so they count as passes once the error is thrown.
+
+---
+
 ## Ref aliasing (`use feature 'refaliasing'`)
 
 **Perl behaviour:** `use feature 'refaliasing'` enables assignment to references
