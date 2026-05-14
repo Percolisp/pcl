@@ -2890,6 +2890,12 @@ sub _process_if_tail {
 sub _process_block_in_tail_context {
   my ($self, $block, $ret_var) = @_;
 
+  # Isolate _pending_let_closes so that our flush at the end does not
+  # accidentally close let forms opened by an enclosing _emit_scoped_block.
+  # Mirrors the save/reset/restore done by _process_block.
+  my $saved_pending = $self->{_pending_let_closes};
+  $self->{_pending_let_closes} = [];
+
   $self->environment->push_scope();
   my $start_depth = $self->{_local_let_depth} // 0;
 
@@ -2924,7 +2930,7 @@ sub _process_block_in_tail_context {
     }
   }
 
-  # Flush scoped-block lets (same as _process_block).
+  # Flush only the let closes opened within this block's scope.
   while (@{$self->{_pending_let_closes} // []}) {
     pop @{$self->{_pending_let_closes}};
     $self->indent_level($self->indent_level - 1);
@@ -2940,6 +2946,9 @@ sub _process_block_in_tail_context {
   }
 
   $self->environment->pop_scope();
+
+  # Restore the outer pending closes (from enclosing _emit_scoped_block).
+  $self->{_pending_let_closes} = $saved_pending;
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

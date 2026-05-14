@@ -3090,6 +3090,26 @@ sub child_context {
       if ($func_name && $func_name eq 'return') {
         return INHERIT_CTX;
       }
+
+      # Force LIST_CTX for '..'/'...' operators in function argument position so
+      # they generate a range, not a flip-flop.  Other arguments inherit the
+      # parent's context — this lets prototype-forced scalar context (e.g.
+      # Test::More's is($$;$)) work correctly via wantarray propagation.
+      # NOTE: '..' nodes are PPI::Token::Operator (not PPIreference), so we
+      # must check the PPI token content, not is_internal_node_type.
+      if ($child_index >= 1) {
+        my $child_id = $children->[$child_index];
+        if (defined $child_id) {
+          my $child_node = $self->get_a_node($child_id);
+          my $cop;
+          if ($self->is_internal_node_type($child_node)) {
+            $cop = $child_node->{type};
+          } elsif (ref($child_node) eq 'PPI::Token::Operator') {
+            $cop = $child_node->content();
+          }
+          return LIST_CTX if defined($cop) && ($cop eq '..' || $cop eq '...');
+        }
+      }
     }
     # progn (comma operator) forces list context
     if ($type eq 'progn') {

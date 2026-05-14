@@ -2695,23 +2695,55 @@ sub _compile_subst_e_expr {
   eval {
     require PPI::Document;
     require Pl::PExpr;
-    my $doc   = PPI::Document->new(\$expr);
-    my @stmts = $doc->children;
+    my $doc = PPI::Document->new(\$expr);
+
+    # Significant (non-whitespace) top-level statements
+    my @stmts = grep { !$_->isa('PPI::Token::Whitespace') } $doc->children;
     return unless @stmts;
-    my @parts = grep { ref($_) ne 'PPI::Token::Whitespace' } $stmts[0]->children;
-    return unless @parts;
-    my $expr_o = Pl::PExpr->new(
-      e        => \@parts,
-      full_PPI => $doc,
-      ($self->environment ? (environment => $self->environment) : ()),
-    );
-    my $node_id = $expr_o->parse_expr_to_tree(\@parts);
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => $self->indent_level,
-    );
-    $result = $gen->generate($node_id);
+
+    my @cl_parts;
+    my @let_vars;  # variables declared with 'my' in the replacement
+
+    for my $stmt (@stmts) {
+      # Tokens (e.g. PPI::Token::Whitespace) have no children — skip
+      next unless $stmt->can('children');
+      my @parts = grep {
+        ref($_) ne 'PPI::Token::Whitespace' && ref($_) ne 'PPI::Token::Structure'
+      } $stmt->children;
+      next unless @parts;
+
+      # Detect 'my $var' declarations and collect the variable for a let wrapper
+      if (ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'my'
+          && @parts > 1 && ref($parts[1]) eq 'PPI::Token::Symbol') {
+        push @let_vars, $parts[1]->content;
+        # Drop the 'my' keyword — compile the rest as an assignment expression
+        shift @parts;
+      }
+
+      my $expr_o = Pl::PExpr->new(
+        e        => \@parts,
+        full_PPI => $doc,
+        ($self->environment ? (environment => $self->environment) : ()),
+      );
+      my $node_id = $expr_o->parse_expr_to_tree(\@parts);
+      my $gen = Pl::ExprToCL->new(
+        expr_o       => $expr_o,
+        environment  => $self->environment,
+        indent_level => $self->indent_level,
+      );
+      my $cl = $gen->generate($node_id);
+      push @cl_parts, $cl if defined $cl && $cl ne '';
+    }
+
+    return unless @cl_parts;
+
+    my $body = @cl_parts == 1 ? $cl_parts[0] : '(progn ' . join(' ', @cl_parts) . ')';
+    if (@let_vars) {
+      my $bindings = join(' ', map { "($_ (make-p-box nil))" } @let_vars);
+      $result = "(let ($bindings) $body)";
+    } else {
+      $result = $body;
+    }
   };
   if ($@) {
     warn "Failed to compile s///e expression '$expr': $@";

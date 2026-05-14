@@ -4,6 +4,250 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 183 (2026-05-14) — `..`-in-funcall LIST_CTX targeted fix + runt timeout
+
+### Focus
+
+Complete the session 182 work: the broad LIST_CTX-for-all-funcall-args fix had been
+reverted to a targeted fix, but the targeted fix was not working. Diagnose and fix.
+Also add timeout support to `runt`.
+
+### Bug: targeted `..`-in-funcall check didn't fire
+
+Session 182 replaced the broad LIST_CTX default (which broke `reverse.t` and `flip.t`)
+with a targeted check: only return LIST_CTX if the child node is a `..` or `...` operator.
+The check was:
+
+```perl
+if ($self->is_internal_node_type($child_node)) {
+    my $cop = $child_node->{type};
+    return LIST_CTX if $cop eq '..' || $cop eq '...';
+}
+```
+
+**Root cause:** Binary operator nodes (like `..`) are stored as `PPI::Token::Operator`
+objects in the OpcodeTree, NOT as `PPIreference`. `is_internal_node_type` only returns
+true for `PPIreference` nodes — so the check always fell through and `..` in funcall
+position continued to generate flip-flop.
+
+**Fix:** Added a second branch checking `ref($child_node) eq 'PPI::Token::Operator'`:
+
+```perl
+my $cop;
+if ($self->is_internal_node_type($child_node)) {
+    $cop = $child_node->{type};
+} elsif (ref($child_node) eq 'PPI::Token::Operator') {
+    $cop = $child_node->content();
+}
+return LIST_CTX if defined($cop) && ($cop eq '..' || $cop eq '...');
+```
+
+This is targeted: only returns LIST_CTX when the direct funcall child IS `..`/`...`.
+All other funcall args inherit `$parent_ctx` (falling through to default).
+
+**Result:** `pack "C*", 65..67` now generates `(p-pack "C*" (p-.. 65 67))` ✓
+Flip-flop in non-list contexts (while condition) still generates `p-flipflop-num` ✓
+
+### runt: timeout support
+
+`runt` had no timeout — SBCL hung indefinitely. Changed from backtick to
+`timeout N sbcl ... >file` (same approach as `sweep-perl-tests.pl`):
+- Default: 300s (was: unlimited)
+- Override: `RUNT_TIMEOUT=N ./runt foo`
+- No timeout: `RUNT_TIMEOUT=0 ./runt foo`
+
+### Regression tests added
+
+`Pl/t/transpile-test-05.t` tests 59-60: ref to hash/array element via `\$h{k}` / `\$a[i]`.
+
+### Sweep result
+
+**42 fully passing** (restored from 38 regression in session 182):
+anonsub, append, arith, arith2, assignwarn, auto, bool, chars, chdir, cmpchain,
+cond, context, defined, defins, die, die_exit, dor, each_array, exists_sub, exp,
+if, int, isa, kvaslice, lc, lop, negate, not, num, oct, ord, pow, print, qq,
+quotemeta, recurse, **reverse** (newly restored), sleep, study, translate, warn, while.
+
+Total: 12439 passing, 2463 failing across 102 files (+ 2 skipped: heredoc, list).
+`pack.t`/`tmp-pack.t`: timeout at 90s in sweep (need ~300s to complete).
+
+### Files changed
+- `Pl/PExpr.pm` — targeted `..` check: check `PPI::Token::Operator` content, not just `is_internal_node_type`
+- `runt` — timeout support (default 300s, `RUNT_TIMEOUT=0` disables)
+- `Pl/t/transpile-test-05.t` — 2 regression tests for ref-to-array/hash-element (tests 59-60)
+
+---
+
+## Session 182 (2026-05-14) — `..` range as function arg + pack `*` multi-arg fix
+
+### Focus
+
+Fix two bugs that caused `pack "(SL)*", 67..74` to produce 6 bytes instead of 24:
+1. `67..74` compiled as flip-flop (not range) when used as a function argument
+2. `pack "C*"` only packed 1 element even with multiple explicit args
+
+### Bug 1: `..` as function argument evaluated as flip-flop
+
+`child_context()` in `Pl/PExpr.pm` had no default case for function call arguments.
+All function args that weren't explicitly handled (scalar, length, filehandle) fell
+through to SCALAR_CTX. In scalar context, `..` generates `p-flipflop-num` (flip-flop),
+not `p-..` (range). So `pack "C*", 67..74` became `(pl-pack "C*" (p-flipflop-num 1 67 74))`
+— one argument (the flip-flop result) instead of a range of 8 numbers.
+
+**Fix:** Added LIST_CTX default case at the end of the `funcall` child_context handler
+in `Pl/PExpr.pm`. All function arguments not explicitly typed as scalar/length/filehandle
+now default to LIST_CTX, which is correct Perl semantics (function args are list context).
+
+**Side effect:** `reverse("abc")` in function argument position now correctly evaluates
+in list context → returns the single-element list `("abc")`, not `"cba"`. Fixed
+`reverse-01.t` test 2 to use `scalar(reverse("abc"))` to force scalar context.
+
+### Bug 2: `pack "C*"` with multiple args only packed 1 element
+
+`_pack_parse_count` in `pack-impl.pl`/`pcl-pack.lisp` returns `nrep=1` for `*`.
+The integer loop `for (my $r = 0; $r < $nrep; $r++)` then only runs once.
+
+**Fix:** Before the integer/float loop in both `pack-impl.pl` and `pcl-pack.lisp`:
+```perl
+$nrep = $nargs - $ai_ref if $star;
+```
+```lisp
+(when (p-true-p $star)
+  (p-my-= $nrep (p-- $nargs (p-cast-$ $ai_ref))))
+```
+String types (`a`/`A`/`Z`) are NOT affected — they handle `$star` independently in
+`_pack_str_one`.
+
+### PCL test suite
+- 77 files, 2985 tests (added 4 from reverse-01.t fix), all passing
+
+### Files changed
+- `Pl/PExpr.pm` — LIST_CTX default for function arguments in `child_context`
+- `cl/pack-impl.pl` — `$nrep = $nargs - $ai_ref if $star` before integer handler
+- `cl/pcl-pack.lisp` — same fix in CL (regenerated from pack-impl.pl logic)
+- `Pl/t/reverse-01.t` — test 2: changed to `scalar(reverse(...))` for correct semantics
+
+---
+
+## Session 181 (2026-05-14) — runt fixes + s///e multi-stmt fix + pack.t sweep investigation
+
+### Focus
+
+Fix `runt` to show compilation errors visibly. Fix a crash in `_compile_subst_e_expr`
+(multi-statement s///e with leading whitespace). Investigate pack.t sweep results.
+
+### Changes
+
+**`runt`** — three new failure modes now detected and shown clearly:
+1. File not found → `ERROR: .../foo.t not found` (before any work)
+2. `pl2cl` exits non-zero → `=== TRANSPILE FAILED (exit N) ===` + stderr + exit 1
+3. `pl2cl` exits 0 but stderr has "Failed to compile" → `=== TRANSPILE ERRORS ===` + exit 1
+4. Other transpile warnings → `=== TRANSPILE WARNINGS ===` + content (non-fatal)
+5. SBCL crashes → shows crash output then `=== SBCL CRASHED (exit N) ===` + exit 1
+
+**`Pl/ExprToCL.pm`** `_compile_subst_e_expr` — fixed two bugs:
+- **Crash**: `$doc->children` first element is `PPI::Token::Whitespace` (no `->children`) when
+  replacement starts with newline+whitespace (e.g. pack.t's `s/PAT/\n              my $x = ...`).
+  Fix: `grep { !$_->isa('PPI::Token::Whitespace') }` before accessing children.
+- **Multi-statement**: replaced single-statement-only logic with loop over all significant
+  statements. `my $var = ...` declarations detected → extracted to a `(let (($var (make-p-box nil))) ...)`.
+  Multiple statements wrapped in `(progn ...)`. Generates correct CL for pack.t's `compress_template`.
+
+### PCL test suite
+- 2981 tests, all passing (no regressions from ExprToCL change).
+
+### Sweep result
+- **12200 passing, 42 fully passing** (same 42 fully-passing files as session 176)
+- pack.t: 0 / TIMEOUT — see below
+
+### Pack.t investigation
+
+**Why 18273→12200**: Before sessions 177-180, pack.t used the old stub `p-pack`/`p-unpack` which
+**fast-failed** unsupported formats. In 90s, thousands of tests could fail quickly → counted as
+"passing through" in the sweep. Now pcl-pack.lisp runs correctly but slowly → 90s timeout with 0
+counted. The 42 fully-passing files are unchanged; the "loss" is entirely pack.t fast-fail count.
+
+**Actual pack.t correctness** (60s direct SBCL run, no --control-stack-size):
+- 4168 tests completed: **2761 passing, 1407 failing**
+- First failures: test 2 (format `a6` not working), tests 4-7 (`%` checksum = 0), test 9 (`w` BER = wrong)
+- `pack "a6" "abcdef"` → `""` — the `a`/`A`/`Z` format in pcl-pack.lisp is broken
+- `unpack "%32B*"` → 0 — checksum format broken
+- `pack "w" 4294967295` → wrong bytes
+
+**Sweep buffering problem discovered** (UNRESOLVED):
+- The sweep runs `\`timeout N sbcl ... 2>&1\`` (backtick = pipe)
+- `timeout` sends SIGKILL to SBCL when time runs out (uutils timeout, not GNU)
+- SBCL's CL `*standard-output*` is block-buffered when writing to a pipe
+- SIGKILL doesn't flush → all buffered output lost → sweep always shows 0 for pack.t
+- Direct run to a file works (kernel page cache preserves written data)
+- **Fix needed**: either force SBCL line-buffering, or change sweep to write to temp file
+  then read, not use backtick pipe
+
+### Files changed (not yet committed)
+- `runt` — three new error detection modes
+- `Pl/ExprToCL.pm` — `_compile_subst_e_expr` crash fix + multi-statement support
+
+---
+
+## Session 180 (2026-05-14) — pack rewrite: group+endian fix, Perl impl verified
+
+### Focus
+
+Continuing pack rewrite from `docs/pack-rewrite-plan.md`. Session 180 (prior context)
+fixed the `$slen__lex__3 is unbound` SBCL crash in the generated CL and got pack.t
+running to test 4234. This session (resumed after context compaction) fixed the
+remaining `_pack_parse_mods` bug and verified the Perl implementation quality.
+
+### Changes
+
+**`cl/pack-impl.pl`** — `_pack_parse_mods`: allowed `<`/`>` modifiers after group `(`
+character (Perl allows `(TEMPLATE)<` for group-level byte-order control). Previously
+the function died with `"'<' allowed only after types … in pack"` for any group+endian
+template, crashing at pack.t test 4234. The fix: add `|| $ch eq '('` to both `>`
+and `<` guards. The endian flag is already passed to recursive `_pack_tmpl`/`_unpack_tmpl`
+group calls, so no further change needed.
+
+**`Pl/Parser.pm`** (from prior context) — `_process_block_in_tail_context`: added
+save/reset/restore of `_pending_let_closes` to prevent premature closure of let forms
+opened by an enclosing `_emit_scoped_block`. Root cause of the `$slen__lex__3 unbound`
+crash: when `_generate_if_tail_clauses` called `_process_block_in_tail_context` for the
+first branch body, it flushed the outer pending let closes (the `slen` and inner-all-vars
+lets), leaving all subsequent if-elsif branches outside their intended let scope.
+
+**`cl/pcl-pack.lisp`** — regenerated from fixed `cl/pack-impl.pl` via `./pl2cl` +
+`/tmp/postprocess-pack.pl`. Paren depth: 0. 2987 lines.
+
+### Perl implementation quality check
+
+Ran comparison script against real Perl `pack`/`unpack` builtins (~373 test cases
+spanning all integer types, endian variants, groups, string formats, hex/bit, slash):
+- **367/373 pass** — 6 failures, all in `unpack("f"/"d", ...)` float stubs (return 0)
+- Float stubs are replaced with real SBCL code post-translation; CL version is correct
+- Group+endian fix verified: `pack("(((L1)1)<)(((L)1)1)>1", ...)` matches real Perl
+
+### Performance problem discovered
+
+`./runt pack` timed out at both 2-minute and 10-minute limits. pack.t has 14722 tests;
+running them all through the CL runtime is too slow to finish in one SBCL invocation.
+This means the `./runt pack` pass-count measurement strategy does not work for pack.t.
+**Next session must figure out a faster way to measure pack.t progress** — e.g., run
+only a slice of the test file, or use the sweep infrastructure with its per-test timeout.
+
+### Test state
+
+- PCL suite: **77 files, 2981 tests, all passing** (Parser.pm fix added no regressions)
+- pack.t: unknown pass count (runt times out); no longer crashes at load or test 3/4234
+- Sweep: not re-run
+
+### Files changed (not yet committed)
+
+- `cl/pack-impl.pl` — group+endian fix in `_pack_parse_mods`
+- `cl/pcl-pack.lisp` — regenerated (paren-clean, float stubs replaced)
+- `Pl/Parser.pm` — `_process_block_in_tail_context` save/reset/restore fix
+- `Pl/t/` — 2981 tests all passing (3 new state tests from session 172)
+
+---
+
 ## Session 179 (2026-05-13) — pack tooling + structural fix attempt (incomplete)
 
 ### Focus
