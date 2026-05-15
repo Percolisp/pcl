@@ -194,9 +194,9 @@ output_contains('push @foo, $_ for 1..3;',
                 '(p-foreach ($_ (p-.. 1 3)) (p-push @foo $_))',
                 'Regression: for statement modifier uses p-foreach');
 
-# Regression: our %hash = (...) should generate p-hash, not progn
+# Regression: our %hash = (...) should generate p-hash-= with vector (not progn)
 output_contains('our %h = (a => 1, b => 2);',
-                '(p-hash-= %h (p-hash "a" 1 "b" 2))',
+                '(p-hash-= %h (vector "a" 1 "b" 2))',
                 'Regression: our %hash initialization uses p-hash');
 
 

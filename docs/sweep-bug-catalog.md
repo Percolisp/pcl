@@ -1,24 +1,19 @@
 # PCL Sweep Bug Catalog
 
 Generated 2026-05-07. Baseline: 18209 pass / 10159 fail across 100 files, 40 fully passing.
+Updated 2026-05-15 (session 185). Current: ~12506 pass / ~2396 fail, 42 fully passing.
 Skips sprintf.t (deprioritized) and Unicode/utf8-encode issues (documented not-supported).
 
 ---
 
 ## Cross-cutting bugs (high value targets)
 
-### 1. `state ++$var` / `state $var++` — parser drops `state` or the `++`
+### 1. `state ++$var` / `state $var++` — parser drops `state` or the `++` ✅ FIXED (session 172)
 
-**Files:** state.t (tests 77–82, ~6 failures)
+**Files:** state.t (tests 77–82) — now passing.
 
-**Root cause (in Parser.pm):**
-- `++ state $y` at top level: the `state` keyword is stripped; `$y` becomes a global `defvar`.
-  Generated: `(p-pre++ $y)` with no init guard.
-- `state $z ++`: generates the `unless $init` guard but never emits `(p-post++ $state__...__z)`.
-  The post-increment is simply missing from output.
-
-**Fix area:** `_process_statement` / `_process_expression_statement` — how `state` is handled
-when combined with a prefix/postfix `++`/`--` operator.
+**Root cause (fixed):** `_process_statement` / `_process_expression_statement` — `state`
+keyword was stripped when combined with a prefix/postfix `++`/`--` operator. Fixed in session 172.
 
 ---
 
@@ -37,17 +32,23 @@ hashassign.t test 209 `scalar(%h = list)` is a different issue — the assignmen
 
 ---
 
-### 3. `%hash = (...)` in list context doesn't return the list
+### 3. `%hash = (...)` in list context doesn't return the list ✅ FIXED (sessions 183–185)
 
-**Files:** hashassign.t (tests 207–208, 211–214, and more — ~13 failures)
+**Files:** hashassign.t — 42 → **4 failures** (tests 304, 307–309 = lvalue aliasing, documented not-supported)
 
-**Root cause:** `(join ':', %h = (1) x 8)` — the `%h = (...)` assignment in list context
-should return the flattened key-value list. PCL returns the hash ref string instead.
-In scalar context (test 209) it should return the count of elements assigned.
+**Root cause (fixed):**
+- `p-list-=` always returned RHS count even in list context. Added collect-forms to the macro
+  so it assembles actual LHS values into a result vector when `*wantarray* = t`.
+- `gen_binary_op` in ExprToCL.pm didn't wrap `p-list-=` with `(*wantarray* t)` in list context.
+  Now wraps based on `get_node_context(node_id)`.
+- `p-hash-=` loop condition `when (< (1+ i) cnt)` silently dropped the last key when odd-length
+  input. Fixed to store last key with `*p-undef*` value.
 
-**Fix area:** `p-hash-=` or the assignment operator result in different contexts.
-The hash assignment needs to return `(coerce (hash-table-contents ht) 'list)` in list ctx
-and the element count in scalar ctx.
+**Remaining 4 failures:** tests 304, 307–309 test that list-assignment LHS scalars are lvalue
+aliases into the RHS. Documented not-supported (`@_` aliasing).
+
+**Additional fix:** `p-hash-=` now returns the hash contents in list context (via `p-list-=`
+collect path) and element count in scalar context.
 
 ---
 
@@ -128,33 +129,48 @@ just throw a named-catch with the label string and catch it in the right loop).
 
 ---
 
-### 10. `each.t` — `each` and `keys` use different iteration orders
+### 10. `each.t` — `while (my ($k,$v) = each %h)` parse error
 
-**Files:** each.t (test 3 — 1 failure, but probably bigger latent issue)
+**Files:** each.t (tests 3, 64 — parse error; ~20 total failures across several causes)
 
-**Root cause:** The test does `@keys = keys %h` then iterates with `each %h`, expecting
-the same order. In Perl they share the internal bucket iterator. In PCL, `keys` and
-`each` may iterate CL hash-tables in different orders (CL doesn't guarantee order).
+**Root cause (tests 3, 64):** PPI tokenizes `while (my ($k,$v) = each %h)` as:
+```
+PPI::Structure::Condition
+  PPI::Statement::Variable  ← my declaration inside condition
+```
+The `PPI::Statement::Variable` inside the condition is not handled by PExpr.pm's
+expression parser (falls through to line 1410: `die "Bug. Fell through."`), so the
+condition generates `nil`, the while body never runs.
 
-**Fix area:** `p-keys` / `p-each` in `pcl-runtime.lisp` — both should use the same
-underlying iteration order. One approach: `p-keys` should use the same index-based
-iterator that `p-each` uses, so their orders agree.
+**Fix area:** PExpr.pm — handle `PPI::Statement::Variable` as an expression when it
+appears inside a `PPI::Structure::Condition`. The `my ($k,$v) = each %h` should parse
+as a list-assignment expression.
+
+**Original "iteration order" theory was wrong.** The test fails because the loop
+never runs (condition is `nil`), not because of CL hash-table ordering.
+
+**Other each.t failures (not the parse error):**
+- Tests 5, 8, 14–20: `keys %h = N` sets bucket count — not implemented
+- Tests 31–32, 35–36, 38: Unicode key UTF-8/bytes hash — not supported
+- Tests 40–42: error message mismatch ("invalid number of arguments: 0" vs "Not enough arguments for each")
+- Tests 56, 58: iterator reset warnings — not implemented
+- Test 60: `%ENV` iteration — environment hash behaviour
 
 ---
 
 ## Per-file issues (smaller scope)
 
-### sort.t (51 failures)
+### sort.t (36 failures, down from 51)
 
-- **Inplace sort** (tests 66–70): `@a = sort @a` expected `'a-a-a b c'` but got
-  `'$SCALAR(0x...)-$SCALAR(0x...)-a b c'`. The `$a` and `$b` comparator variables
-  are holding boxes instead of their string values during the sort. Bug in how `$a`/`$b`
-  are set up or unboxed during sort.
-- **Wantarray in sort** (tests 56–62): `wantarray` inside sort comparator should
-  return false (sort calls comparator in scalar ctx) but PCL returns list ctx.
+Sessions 182–184 fixed: wantarray context in comparator, `child_context` for sort list arg,
+`p-hash-=` context wrapping, `tail_position` leak in `gen_funcall`.
+
+- **Inplace sort** (tests 66–70): ✅ **FIXED** (session 184) — were getting stringified box addresses.
+- **Wantarray in sort** (tests 56–62): ✅ **FIXED** (session 184) — comparator now wraps body with `(*wantarray* nil)`.
 - **Error message** (test 22): "CORE::revers" vs "Undefined sort subroutine" — not supported.
 - **Overloaded objects** (tests ~88–90): sort with `use overload '<=>'` not working.
 - **UTF-8/locale** (test 3): locale-aware sort (not supported).
+- **Remaining ~33 failures**: investigate; some may be fixable.
 
 ### ref.t (59 failures)
 
@@ -211,7 +227,9 @@ iterator that `p-each` uses, so their orders agree.
 Most failures trace to:
 - **List-context function return** (test 1): `($a,$b) = f_ret_14()` where `f_ret_14`
   returns `1..4`. Gets `(:)` meaning empty. Root cause: the wantarray/VOID_CTX regression
-  from sessions 162–163 — sub body wrapped with void ctx, return value lost.
+  from sessions 162–163 — `_process_expression_statement` wraps sub body with VOID_CTX
+  too broadly, causing return values to be discarded. **Do NOT fix wantarray issues without
+  explicit user request** (see `docs/wantarray-context.md`).
 - **Array alias assignments** (tests 12–16): `my $a = $pkg_var` where the assignment
   is supposed to create an alias. Various alias forms.
 - **Tied variable assignments** (tests tied-*): tie interactions with list assignment.
@@ -299,11 +317,13 @@ Most failures trace to:
 - **Error on code point > 0xFF** (tests ~3): error message format mismatch.
 - **Lvalue vec** (test ~1): `vec($s, $i, 8) = $val` — lvalue form.
 
-### splice.t (10 failures)
+### splice.t (3 failures, down from 10)
 
-- **`j(1..12)` evaluates as flip-flop** (tests 2,4,6,8,10,12): `j(1..12)` inside `is()`
-  — the `..` range is being evaluated in scalar context (flip-flop) instead of list context.
-  Argument to function call not getting LIST_CTX. Root: broader context-propagation issue.
+Sessions 182–183 fixed the flip-flop/context issue for most cases.
+
+- **`j(1..12)` flip-flop** (tests 2,4,6,8,10,12): ✅ **FIXED** (session 182–183) — was evaluating
+  `1..12` in scalar context (flip-flop). Now propagates LIST_CTX to function call args.
+- **Remaining 3 failures**: needs investigation.
 
 ### join.t (6 failures)
 
@@ -370,14 +390,25 @@ Most failures trace to:
 |---|-----|---------------|--------|
 | 1 | `state ++$var` / `state $var++` parser | state.t | ✅ FIXED (session 172) |
 | 2 | `scalar(%hash)` key count | each.t | ✅ FIXED (session 175, +2 tests) |
-| 3 | `%hash = (...)` list-context return | hashassign.t | open (~13 failures) |
+| 3 | `%hash = (...)` list-context return | hashassign.t | ✅ FIXED (sessions 183–185, 42→4; 4 = lvalue alias, not-supported) |
 | 4 | `substr` out-of-bounds warning/error | substr.t | ✅ FIXED (session 174, +38 tests) |
 | 5 | `\(list_expr)` → ARRAY not SCALAR | bless.t, ref.t | open (~3 failures) |
 | 6 | `p-/` → CL ratio not float | hexfp.t (whole file skipped) | ✅ FIXED (session 172) |
 | 7 | `chr(Inf/NaN)` error message | infnan.t | ✅ FIXED (session 172) |
 | 8 | Dynamic loop labels `last $var` | loopctl.t | open (~3 failures) |
 | 9 | `join(undef, ...)` warning | join.t | ✅ test 18 FIXED (session 175); tests 9-10 not fixable (lazy eval) |
-| 10 | `each`/`keys` order mismatch | each.t | open (~1 failure) |
-| 11 | `p-sort` inplace (`@a = sort @a`) box issue | sort.t | open (~5 failures) |
+| 10 | `while (my ($k,$v) = each %h)` parse error | each.t (tests 3, 64) | open — PExpr.pm can't parse `my` decl in while condition |
+| 11 | `p-sort` inplace (`@a = sort @a`) box issue | sort.t | ✅ FIXED (session 184, tests 66–70) |
 | 12 | `bless into ref` detection | bless.t | open (~1 failure) |
 | 13 | POSIX errno stubs | bless.t | open (~2 failures) |
+
+### Newly discovered in sessions 182–185 (fixed)
+| Bug | Fix |
+|-----|-----|
+| `p-list-=` always returned count, never actual values in list ctx | Fixed in sessions 183–185: added collect-forms to macro |
+| `p-hash-=` odd-length input silently dropped last key | Fixed: stores last key with `*p-undef*` value |
+| `p-list-=` not wrapped with `(*wantarray* t)` in list ctx | Fixed: `gen_binary_op` checks `get_node_context` |
+| `tail_position` leaked across arg generation in `gen_funcall` | Fixed (session 184): save/restore around arg generation |
+| Sort comparator called in wrong context (list instead of scalar) | Fixed (session 184): wrap comparator body with `(*wantarray* nil)` |
+| `child_context` gave wrong ctx to sort list arg when no comparator | Fixed (session 184) |
+| splice.t flip-flop (10 failures): `..` in func arg got scalar ctx | Fixed (sessions 182–183): LIST_CTX propagated to call args |

@@ -2455,26 +2455,46 @@
 
 (defmacro p-hash-= (place value)
   "Assign to a hash variable (%hash). Clears and repopulates from value.
-   Wraps values in boxes for l-value semantics."
-  (let ((val (gensym "VAL")))
-    `(let ((,val ,value))
+   Returns: list ctx → flattened hash contents; scalar/void → input element count."
+  (let ((val  (gensym "VAL"))
+        (flat (gensym "FLAT"))
+        (cnt  (gensym "CNT"))
+        (ret  (gensym "RET")))
+    `(let* ((,val ,value)
+            ;; Flatten input to a uniform k-v pair vector
+            (,flat (cond
+                     ((hash-table-p ,val)
+                      (let ((r (make-array (* 2 (hash-table-count ,val))
+                                           :adjustable t :fill-pointer 0)))
+                        (maphash (lambda (k v)
+                                   (vector-push-extend (make-p-box k) r)
+                                   (vector-push-extend v r))
+                                 ,val)
+                        r))
+                     ((and (vectorp ,val) (not (stringp ,val)))
+                      (%p-flatten-list ,val))
+                     (t (make-array 0 :adjustable t :fill-pointer 0))))
+            (,cnt (length ,flat)))
        (unless (boundp ',place)
          (proclaim '(special ,place))
          (setf (symbol-value ',place) (make-hash-table :test 'equal)))
        (clrhash ,place)
-       (cond
-         ((hash-table-p ,val)
-          (maphash (lambda (k v)
-                     (setf (gethash k ,place) (%p-make-hash-entry v)))
-                   ,val))
-         ((vectorp ,val)
-          ;; Flatten nested vectors (e.g. from function returning a list in list context)
-          (let ((flat (%p-flatten-list ,val)))
-            (loop for i from 0 below (length flat) by 2
-                  when (< (1+ i) (length flat))
-                  do (setf (gethash (to-string (aref flat i)) ,place)
-                           (%p-make-hash-entry (aref flat (1+ i))))))))
-       ,place)))
+       (loop for i from 0 below ,cnt by 2
+             do (setf (gethash (to-string (aref ,flat i)) ,place)
+                      (if (< (1+ i) ,cnt)
+                          (%p-make-hash-entry (aref ,flat (1+ i)))
+                          *p-undef*)))
+       (if (eq *wantarray* t)
+           ;; List context: return hash contents as flat vector
+           (let ((,ret (make-array (* 2 (hash-table-count ,place))
+                                   :adjustable t :fill-pointer 0)))
+             (maphash (lambda (k v)
+                        (vector-push-extend (make-p-box k) ,ret)
+                        (vector-push-extend v ,ret))
+                      ,place)
+             ,ret)
+           ;; Scalar/void: return count of input elements
+           ,cnt))))
 
 ;; Flatten a Perl-style value (vector/list/hash/scalar) to a flat vector
 ;; for use in list-assignment RHS. Hash tables expand to key-value pairs;
@@ -2524,11 +2544,15 @@
    Handles undef skip markers, arrays, hashes, nested lvalues, and
    list repetition on LHS: (p-list-x (vector $a) N) repeats the
    assignment N times (last wins); (p-list-x (vector undef) N) skips N
-   slots (N may be a runtime expression)."
+   slots (N may be a runtime expression).
+   Returns: list ctx (*wantarray* t) → flat vector of actual LHS values;
+            scalar/void ctx → count of RHS elements."
   (let ((vars (cdr place))
         (src (gensym "SRC"))
-        (src-vec (gensym "SRC-VEC")))
+        (src-vec (gensym "SRC-VEC"))
+        (result-var (gensym "LIST-RESULT")))
     (let ((forms nil)
+          (collect-forms nil)  ; forms to collect LHS values for list-ctx return
           (static-idx 0)   ; statically-known offset accumulated so far
           (dyn-vars nil)   ; gensyms for dynamic skip counts (pushed most-recent first)
           (extra-lets nil) ; let* bindings for dynamic counts: ((gensym count-expr) ...)
@@ -2571,7 +2595,21 @@
                         (proclaim '(special ,var))
                         (setf (symbol-value ',var) (make-p-box nil)))
                       (box-set ,var *p-undef*))
-                   forms))
+                   forms)
+             ;; Collect: hash → maphash (empty after greedy), array → loop, scalar → undef
+             (cond
+               ((and (symbolp var)
+                     (char= (char (symbol-name var) 0) #\%))
+                (push `(maphash (lambda (k v)
+                                  (vector-push-extend (make-p-box k) ,result-var)
+                                  (vector-push-extend v ,result-var))
+                                ,var) collect-forms))
+               ((and (symbolp var)
+                     (char= (char (symbol-name var) 0) #\@))
+                (push `(loop for v across ,var
+                             do (vector-push-extend v ,result-var)) collect-forms))
+               ((symbolp var)
+                (push `(vector-push-extend *p-undef* ,result-var) collect-forms))))
 
             ;; p-list-x on LHS: (p-list-x (vector ...) count)
             ((and (listp var)
@@ -2629,23 +2667,35 @@
             ((and (symbolp var)
                   (char= (char (symbol-name var) 0) #\@))
              (let ((idx (cur-idx)))
-               (push `(p-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
+               (push `(p-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms)
+               ;; Collect: push array elements
+               (push `(loop for v across ,var
+                            do (vector-push-extend v ,result-var)) collect-forms))
              (setf greedy-done t))
 
             ;; Hash variable (%hash) - absorbs remaining elements in pairs
             ((and (symbolp var)
                   (char= (char (symbol-name var) 0) #\%))
              (let ((idx (cur-idx)))
-               (push `(p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms))
+               ;; Suppress p-hash-='s list-ctx return since we collect separately
+               (push `(let ((*wantarray* :void))
+                        (p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec))))) forms)
+               ;; Collect: push hash k-v pairs (deduplicated by the hash itself)
+               (push `(maphash (lambda (k v)
+                                 (vector-push-extend (make-p-box k) ,result-var)
+                                 (vector-push-extend v ,result-var))
+                               ,var) collect-forms))
              (setf greedy-done t))
 
             ;; Scalar variable - auto-declare and assign
             ((symbolp var)
              (let ((idx (cur-idx)))
                (push (assign-scalar var idx) forms)
+               ;; Collect: push the scalar's box (holds the assigned value)
+               (push `(vector-push-extend ,var ,result-var) collect-forms)
                (incf static-idx 1)))
 
-            ;; Other lvalue (hash/array access, etc.)
+            ;; Other lvalue (hash/array access, etc.) — no collect
             (t
              (let ((idx (cur-idx)))
                (push `(p-setf ,var (if (< ,idx (length ,src-vec))
@@ -2658,8 +2708,12 @@
                 (,src-vec (%p-flatten-list ,src))
                 ,@(reverse extra-lets))
            ,@(nreverse forms)
-           ;; Return RHS count (scalar context: () = LIST gives count of LIST)
-           (make-p-box (length ,src-vec)))))))
+           ;; List ctx: collect actual LHS values; scalar/void: return RHS count
+           (if (eq *wantarray* t)
+               (let ((,result-var (make-array 8 :adjustable t :fill-pointer 0)))
+                 ,@(nreverse collect-forms)
+                 ,result-var)
+               (make-p-box (length ,src-vec))))))))
 
 ;; p-setf dispatches to the appropriate assignment form based on place type.
 ;; For element access (p-aref, p-gethash, etc.), uses CL's setf mechanism.

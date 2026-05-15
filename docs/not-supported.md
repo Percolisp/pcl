@@ -499,6 +499,58 @@ handled via `is_valid_error()` skip, so they count as passes once the error is t
 
 ---
 
+## `DESTROY` called by garbage collector
+
+**Perl behaviour:** When a blessed object goes out of scope and its reference count drops
+to zero, Perl calls the `DESTROY` method (if defined).  Code that relies on deterministic
+destruction (e.g. releasing a file lock, closing a handle, decrementing a counter) puts
+this logic in `DESTROY`.
+
+**PCL behaviour:** `DESTROY` is never called automatically.  SBCL's garbage collector
+runs asynchronously and PCL has no finalizer hook wired to blessed objects.  A `DESTROY`
+method can be defined and called explicitly (`$obj->DESTROY()`), but the implicit GC-driven
+call does not happen.
+
+**Rationale:** CL's GC does not guarantee finalizer order or timing.  Wiring DESTROY would
+require `trivial-garbage` or SBCL-specific finalizer APIs with non-deterministic execution.
+Most CPAN modules that use `DESTROY` do so for resource cleanup that is irrelevant when the
+whole CL image exits anyway.  CPAN code that depends on DESTROY running while the program is
+still running (e.g. `Scope::Guard`, `File::Temp`) is out of scope for now.
+
+**Affected tests:** `perl-tests/ref.t` (tests 63–64), `perl-tests/grep.t` (tests 69–76),
+`perl-tests/bless.t` (a few object-lifetime tests).  Do not attempt to fix these —
+the only real fix is a GC finalizer integration.
+
+---
+
+## Lazy argument evaluation / `$SIG{__WARN__}` side effects during argument build
+
+**Perl behaviour:** In Perl, function arguments are evaluated left-to-right.  If evaluating
+one argument triggers a `$SIG{__WARN__}` handler that modifies a variable that appears in a
+later argument, the later argument sees the modified value.
+
+Example from `join.t` tests 9–10:
+```perl
+my $s = ':';
+$SIG{__WARN__} = sub { $s = '-' };
+# Each undef element warns; $s changes after the first warn;
+# subsequent elements are joined with '-', not ':'.
+is join($s, undef, undef, undef), "-";
+```
+
+**PCL behaviour:** CL evaluates all arguments before calling the function.  `p-join` receives
+a snapshot of `$s` taken before any warn handlers fire, so it always uses the original `':'`.
+
+**Rationale:** CL function calls are strict (not lazy).  Replicating Perl's left-to-right
+side-effect semantics would require thunk-wrapping every argument and forcing them one at a
+time inside the function — a pervasive change to calling convention with essentially zero
+benefit for real CPAN code (no module intentionally modifies its own separator mid-join).
+
+**Affected tests:** `perl-tests/join.t` tests 9–10.  Do not attempt to fix these —
+the fix requires a fundamentally different argument-passing model.
+
+---
+
 ## Ref aliasing (`use feature 'refaliasing'`)
 
 **Perl behaviour:** `use feature 'refaliasing'` enables assignment to references

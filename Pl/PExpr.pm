@@ -3039,9 +3039,19 @@ sub child_context {
 
       # List operators force list context on their list argument
       if ($func_name && $func_name =~ /^(map|grep|sort|keys|values|each)$/) {
-        # First arg (block/code) inherits, second arg (list) is LIST_CTX
+        # child 0 = function name, child 1 = comparator/block (for sort/grep/map),
+        # child 2+ = list to process.
+        # For sort without a comparator (e.g. sort LIST, sort &f()), child 1 IS
+        # the list — detect this by checking if child 1 is an inline_lambda.
+        if ($func_name eq 'sort' && $child_index == 1 && @$children >= 2) {
+          my $c1_node = $self->get_a_node($children->[1]);
+          # inline_lambda means there IS a comparator — child 1 is NOT the list
+          return LIST_CTX
+              unless $self->is_internal_node_type($c1_node)
+                  && $c1_node->{type} eq 'inline_lambda';
+        }
 
-        # Second parameter (index 2 in children)
+        # Standard: second parameter (index 2 in children) is the list
         return LIST_CTX
             if $child_index == 2;
       }

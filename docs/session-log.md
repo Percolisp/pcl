@@ -4,6 +4,155 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 185 (2026-05-15) — hashassign.t list-ctx fix + sweep-bug-catalog.md update
+
+### Focus
+
+Fix hashassign.t failures (42 → 4). Update `docs/sweep-bug-catalog.md` to reflect all current
+fix statuses so future sessions don't re-investigate already-resolved bugs.
+
+### Root causes fixed
+
+**Bug 1: `p-list-=` never returned actual LHS values in list context**
+
+The macro always returned `(make-p-box (length src-vec))` (the count), even when the assignment
+was in list context. Added a `collect-forms` list that mirrors the assignment forms: each scalar
+LHS variable is pushed into a result vector, each `@arr` LHS does `loop for v across var`, each
+`%hash` LHS does `maphash`. The macro's return is now:
+```lisp
+(if (eq *wantarray* t)
+    (let ((result (make-array ...))) ,@collect-forms result)
+    (make-p-box (length src-vec)))
+```
+
+**Bug 2: `gen_binary_op` didn't wrap `p-list-=` with `(*wantarray* t)`**
+
+Added: checks `get_node_context(node_id)` and wraps with `(let ((*wantarray* t/nil)) ...)`.
+
+**Bug 3: `p-hash-=` silently dropped last key for odd-length input**
+
+Loop condition was `when (< (1+ i) cnt)` — skipped assignment when key had no corresponding
+value. Fixed to always assign, using `*p-undef*` as value when no pair partner exists.
+
+**Bug 4: `%hash` LHS in `p-list-=` triggered double list-ctx wrapping**
+
+The `%hash` arm pushed `(let ((*wantarray* t)) (p-hash-= ...))`, but `gen_binary_op` ALSO
+wraps the outer `p-list-=` with `(*wantarray* t)`. The inner `p-hash-=` was correct but
+`p-list-=` macro should suppress the extra context for its internal hash use. Fixed:
+inner `p-hash-=` uses `(let ((*wantarray* :void)) (p-hash-= ...))` to avoid side effects.
+
+### Remaining 4 failures (tests 304, 307–309) — lvalue aliasing, will not fix
+
+These tests verify that LHS scalars in `($a,$b,$c) = (list)` become lvalue aliases into the
+RHS list. This is `@_`-style aliasing — documented not-supported in `docs/not-supported.md`.
+Do NOT attempt to fix these in future sessions.
+
+### Bug catalog update
+
+`docs/sweep-bug-catalog.md` updated to reflect all current statuses:
+- Groups 1, 3, 11 marked FIXED
+- sort.t and splice.t failure counts corrected
+- Group 10 ("each order mismatch") corrected: actual cause is `while (my ($k,$v) = each %h)`
+  parse error (PExpr.pm doesn't handle `PPI::Statement::Variable` inside condition)
+- aassign.t: noted explicitly to NOT touch wantarray
+
+### Do-not-retry list (confirmed unfixable or out-of-scope)
+
+| File | Tests | Reason |
+|------|-------|--------|
+| hashassign.t | 304, 307–309 | Lvalue aliasing — documented not-supported |
+| aassign.t | most failures | wantarray/VOID_CTX regression — do not touch wantarray |
+| each.t | 5,8,14–20 | `keys %h = N` bucket count — not implemented, low value |
+| each.t | 31,32,35,36,38 | Unicode key UTF-8/bytes — documented not-supported |
+| each.t | 40–42 | Error message wording — low priority |
+| for.t | 131–138 | Invalid-Perl detection — principle 9 says comment out (needs user approval) |
+| my.t | 53–59 | Invalid-Perl detection — same; needs user approval |
+| reset.t | all | `?pat?` one-match regex — removed in Perl 5.38, not-supported |
+| join.t | 9–10 | Lazy-arg evaluation — not fixable without thunk-based args |
+| pos.t | 14–20 | `@_` aliasing — not-supported |
+| substr.t | 313–397 | Lvalue substr — not-supported |
+| bless.t | 26–28 | `\substr` lvalue — not-supported |
+| grep.t | 69–76 | DESTROY via GC — not-supported |
+| ref.t | 63–64 | DESTROY via GC — not-supported |
+
+### Results
+
+hashassign.t: **42 → 4 failures** (4 = lvalue aliasing, not-supported)
+Overall sweep: ~12506 passing, ~2396 failing, 42 fully passing.
+
+### Files changed
+
+- `cl/pcl-runtime.lisp` — `p-list-=` macro: added collect-forms, context-sensitive return;
+  `p-hash-=` macro: fixed odd-length input drop
+- `Pl/ExprToCL.pm` — `gen_binary_op`: wrap `p-list-=` with `(*wantarray* ctx)`
+- `docs/sweep-bug-catalog.md` — full status update
+
+---
+
+## Session 184 (2026-05-14) — sort/wantarray context fixes: tail_position leak + comparator context
+
+### Focus
+
+Fix wantarray context propagation for sort list argument and comparator in sort.t.
+
+### Root causes found and fixed
+
+**Bug 1: `tail_position` leaked into argument generation in `gen_funcall`**
+
+When processing the last statement of a sub (tail position), `tail_position=1` was set.
+This flag caused `gen_funcall` to skip the `*wantarray*` wrapper for ALL funcall nodes it
+encountered — including arguments to the tail call. For `sort $m test_if_list()`, both
+`p-sort` AND `test_if_list` skipped the wrapper.
+
+For `sort { block } test_if_list()`, `parse_block_to_cl_string` reset `tail_position=0`
+as a side effect of processing the block body, so `test_if_list` happened to get its wrapper.
+This was accidental correctness — the same bug existed but was masked.
+
+**Fix:** In `gen_funcall` argument loop: save `tail_position`, set to 0, restore after.
+Also moved the `tail_position` check BEFORE the `reverse/localtime/gmtime/caller` special
+case so those built-ins can inherit context when they are themselves the tail call.
+
+**Bug 2: `sort` without comparator gave VOID_CTX to list argument**
+
+`sort &test_if_list()` — no comparator, so the list starts at child index 1, not 2.
+`child_context` only returned LIST_CTX for `child_index == 2` (assuming a comparator block
+at index 1). Fixed: detect if child 1 is an `inline_lambda`; if not, treat it as the list.
+
+**Bug 3: Sort comparator block saw void context instead of scalar context**
+
+Inside sort `{ block }` and `sort NAME`, the comparator should see `*wantarray* = nil`
+(scalar context), because Perl's `wantarray()` returns false inside comparators.
+Fixed: `gen_inline_lambda` for both `for_func eq 'sort'` and named comparators now wraps
+body with `(let ((*wantarray* nil)) ...)`.
+
+**Bug 4: `p-hash-=` context wrapping was too coarse**
+
+Previously wrapped all of `p-array-init` with `(*wantarray* t)` in `gen_array_init`.
+This broke `statements-01.t` test 30 (`push @x, [1,2,3]` gained an unwanted wrapper).
+Fixed: moved context-based wrapping into `gen_binary_op` at the `p-hash-=` generation
+site. Now only wraps when the annotated context is LIST_CTX or SCALAR_CTX.
+
+**Bonus fix: test 33 updated**
+
+`our %h = (a=>1, b=>2)` now generates `(p-hash-= %h (vector ...))` instead of
+`(p-hash-= %h (p-hash ...))` — vector form allows `p-hash-=` to count input elements
+for scalar-context return. Test updated to expect new output.
+
+### Results
+
+sort.t: **44 → 36 failures** (tests fixed: 56/cxt_one, 58/cxt_three, 61/cxt_five,
+62/cxt_six, 110/sortr, 112/sortcmpr wantarray-2, 114/sortcmprba, 116/sortcmprq).
+
+### Files changed
+
+- `Pl/ExprToCL.pm` — tail_position save/restore in gen_funcall arg loop; move tail_position
+  check before wantarray-sensitive builtins; add context wrapping to p-hash-= generation;
+  remove blanket (*wantarray* t) from gen_array_init; (*wantarray* nil) in sort comparators
+- `Pl/PExpr.pm` — child_context: detect sort-without-comparator at child_index 1
+- `Pl/t/statements-01.t` — update test 33 to expect new vector-based hash init output
+
+---
+
 ## Session 183 (2026-05-14) — `..`-in-funcall LIST_CTX targeted fix + runt timeout
 
 ### Focus
