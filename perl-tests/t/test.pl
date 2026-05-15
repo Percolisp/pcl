@@ -78,9 +78,39 @@ sub run_multiple_progs {
     # Skip - runs multiple Perl scripts
 }
 
-# runperl - runs Perl code in subprocess, skip
+# run_perl - run a Perl program in a subprocess, return its output.
+# Named args: prog => $code_string, switches => \@flags, args => \@argv,
+#             stdin => $input, stderr => bool.
+sub run_perl {
+    my (%opts) = @_;
+    my $prog = $opts{prog} // return "";
+    my @switches = grep { length($_) } @{$opts{switches} // []};
+    my $capture_stderr = $opts{stderr} ? '2>&1' : '2>/dev/null';
+    my $tmpfile = "/tmp/pcl_rp_$$" . int(rand(99999)) . ".pl";
+    open(my $fh, '>', $tmpfile) or return "";
+    print $fh $prog;
+    close $fh;
+    my $perl = $^X;
+    my $sw   = join(' ', @switches);
+    my $argv = join(' ', map { quotemeta($_) } @{$opts{args} // []});
+    my $got;
+    if (defined $opts{stdin}) {
+        my $sin = "/tmp/pcl_rp_sin_$$.txt";
+        open(my $sf, '>', $sin) or do { unlink $tmpfile; return ""; };
+        print $sf $opts{stdin};
+        close $sf;
+        $got = `$perl $sw "$tmpfile" $argv $capture_stderr < "$sin"`;
+        unlink $sin;
+    } else {
+        $got = `$perl $sw "$tmpfile" $argv $capture_stderr`;
+    }
+    unlink $tmpfile;
+    return $got // "";
+}
+
+# runperl - alias for run_perl (legacy name used in some test files)
 sub runperl {
-    return "";
+    return run_perl(@_);
 }
 
 # is_miniperl - check if running miniperl (always false for PCL)

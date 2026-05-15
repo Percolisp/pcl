@@ -1661,11 +1661,12 @@
             (error "Cannot chr ~A" (to-string n)))
       (when #+sbcl (sb-ext:float-nan-p num) #-sbcl nil
             (error "Cannot chr ~A" (to-string n))))
-    (let ((code (truncate num)))
-      (cond
-        ((< code 0) (string #\REPLACEMENT_CHARACTER))   ; negative → U+FFFD
-        ((> code #x10FFFF) (make-p-superchar :code code)) ; super-Unicode → struct
-        (t (string (code-char code)))))))
+    (if (< num 0)
+        (string #\REPLACEMENT_CHARACTER)                   ; negative → U+FFFD
+        (let ((code (truncate num)))
+          (cond
+            ((> code #x10FFFF) (make-p-superchar :code code)) ; super-Unicode → struct
+            (t (string (code-char code))))))))
 
 (defun p-ord (str)
   "Perl ord - code point of first character"

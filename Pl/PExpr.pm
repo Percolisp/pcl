@@ -213,6 +213,7 @@ sub extract_declarations {
       my @vars;
       my @rest;
       my $in_decl = 1;
+      my $decl_list;  # The original Structure::List for list-form declarations
 
       for my $child (@children) {
         # Skip whitespace
@@ -233,6 +234,7 @@ sub extract_declarations {
 
         # Handle list declarations: my ($x, $y) = ...
         if ($in_decl && ref($child) eq 'PPI::Structure::List') {
+          $decl_list = $child;  # Remember the original list structure
           # Extract all Symbol tokens from inside the list
           my @list_children = $child->children();
           for my $lc (@list_children) {
@@ -282,9 +284,15 @@ sub extract_declarations {
       # Add the remaining expression parts (without the declarator)
       # The variable itself stays - just the 'my'/'our'/etc is stripped
       if (@vars) {
-        # Recreate just the variable(s) and rest of expression
-        for my $var (@vars) {
-          push @result, PPI::Token::Symbol->new($var);
+        if ($decl_list) {
+          # List-form: my ($k,$v) = expr → keep Structure::List intact so
+          # the binary-op parser sees ($k,$v) as a single LHS unit.
+          push @result, $decl_list;
+        } else {
+          # Scalar-form: my $x = expr → single Symbol token
+          for my $var (@vars) {
+            push @result, PPI::Token::Symbol->new($var);
+          }
         }
       }
       push @result, @rest;
@@ -3685,12 +3693,17 @@ sub _fix_ppi_negative_number_bug {
         my $prev_ref = ref($prev);
 
         # Expression-ending tokens: ) ] } or symbols/words/numbers
+        # Named unary functions (chr, abs, uc, etc.) are NOT expression-enders:
+        # "chr -1" means chr(-1), not chr() - 1.
+        my $prev_is_named_unary = ($prev_ref eq 'PPI::Token::Word'
+                                   && $self->is_named_unary($prev->content));
         $is_expr_end = (
           $prev_ref eq 'PPI::Structure::List'        ||  # (...)
           $prev_ref eq 'PPI::Structure::Subscript'   ||  # [...]
           $prev_ref eq 'PPI::Structure::Block'       ||  # {...}
           $prev_ref eq 'PPI::Token::Symbol'          ||  # $foo
-          $prev_ref eq 'PPI::Token::Word'            ||  # bareword/func
+          ($prev_ref eq 'PPI::Token::Word'
+           && !$prev_is_named_unary)                 ||  # bareword/const (not named unary)
           $prev_ref eq 'PPI::Token::Number'          ||  # number
           $prev_ref eq 'PPI::Token::Quote::Double'   ||  # "string"
           $prev_ref eq 'PPI::Token::Quote::Single'   ||  # 'string'

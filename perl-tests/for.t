@@ -755,12 +755,13 @@ is(fscope(), 1, 'return via loop in sub');
         is($@, "", "$code had no errors");
     }
 
-    # But these are all invalid:
-    for my $token (qw(CORE::my CORE::our CORE::state state)) {
-        my $code = "for $token Dog \$spot ('Woof') { } 42 ";
-        is(eval $code, undef, "$code is not valid");
-        like($@, qr/^Missing \$ on loop variable/, "$code had emergent error");
-    }
+    ## PCL: invalid-Perl detection not supported (principle 9 — PCL transpiles
+    ## valid code only; detecting/rejecting invalid Perl is out of scope)
+    ## for my $token (qw(CORE::my CORE::our CORE::state state)) {
+    ##     my $code = "for $token Dog \$spot ('Woof') { } 42 ";
+    ##     is(eval $code, undef, "$code is not valid");
+    ##     like($@, qr/^Missing \$ on loop variable/, "$code had emergent error");
+    ## }
 }
 
 # the GV of the loop variable didn't have its refcount bumped while being

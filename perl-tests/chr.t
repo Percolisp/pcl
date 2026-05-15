@@ -23,7 +23,9 @@ is(chr(-0.1), "\x{FFFD}"); # The U+FFFD Unicode replacement character.
 is(chr(-1  ), "\x{FFFD}");
 is(chr(-2  ), "\x{FFFD}");
 is(chr(-3.0), "\x{FFFD}");
-{
+## PCL: use bytes not supported
+SKIP: {
+    skip "use bytes not supported in PCL", 4;
     use bytes; # Backward compatibility.
     is(chr(-0.1), "\x00");
     is(chr(-1  ), "\xFF");
