@@ -26,7 +26,7 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 
 ## Known Gaps
 
-- **`pack`/`unpack`** — missing several format letters
+- **`pack`/`unpack`** — mostly done, finally. In Perl and transpiled to CL.
 - **`wantarray`** — `eval "string"` void context not yet propagated, rest seems ok.
 - **XS/C extensions** — anything that requires compiled C code won't work
 

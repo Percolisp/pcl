@@ -199,17 +199,53 @@ sub parse_interpolated_variable {
     return $self->parse_array_braced_interpolation($parser, $content_ref, $pos);
   }
 
+  # Handle @$var — array dereference in string interpolation
+  # e.g. "@$ar" = "@{$ar}" = elements of the array referenced by $ar
+  if ($sigil eq '@' && substr($content, $pos + 1, 1) eq '$') {
+    my $after = substr($content, $pos + 2, 1);
+    if ($after =~ /\w/) {
+      pos($content) = $pos + 1;  # position at $
+      if ($content =~ /\G(\$\w+(?:::\w+)*)/gc) {
+        my $inner_var = $1;   # e.g. '$ar'
+        my $end_pos   = pos($content);
+        # Create a Symbol node for $inner_var, wrap in array_str_interp
+        my $var_token = PPI::Token::Symbol->new($inner_var);
+        my $var_id    = $parser->make_node($var_token);
+        my ($interp_node, $interp_id) = $parser->make_node_insert('array_str_interp');
+        $parser->add_child_to_node($interp_id, $var_id);
+        return ($interp_id, $end_pos);
+      }
+    }
+  }
+
   # Set position for \G anchor
   pos($content) = $pos;
 
-  # Handle special variable $$  (process ID)
+  # Handle special variable $$  (process ID) and $$var (scalar deref)
   if ($sigil eq '$' && substr($content, $pos + 1, 1) eq '$') {
-    # Make sure it's not $$var (scalar deref)
     my $after = substr($content, $pos + 2, 1);
     if ($after eq '' || $after !~ /\w/) {
+      # $$ alone = process ID
       my $var_token = PPI::Token::Symbol->new('$$');
       my $var_id = $parser->make_node($var_token);
       return ($var_id, $pos + 2);
+    } else {
+      # $$varname = scalar dereference (e.g. "$$r1" = ${$r1})
+      pos($content) = $pos + 1;  # start at second $
+      if ($content =~ /\G(\$\w+(?:::\w+)*)/gc) {
+        my $inner_var = $1;   # e.g. '$r1'
+        my $end_pos   = pos($content);
+        # Parse via PPI so PExpr can handle Cast+Symbol (and any subscripts)
+        my $deref_str = '$' . $inner_var;  # '$$r1'
+        my $doc = PPI::Document->new(\$deref_str);
+        $self->{_ppi_docs} //= [];
+        push @{$self->{_ppi_docs}}, $doc;
+        my $stmt = $doc->find_first('PPI::Statement');
+        return (undef, $pos) unless $stmt;
+        my @parts = $stmt->children();
+        my $expr_id = $parser->parse(\@parts);
+        return ($expr_id, $end_pos);
+      }
     }
   }
 

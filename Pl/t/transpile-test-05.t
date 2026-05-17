@@ -478,4 +478,62 @@ my @res = map {a=>$_}->{a}, ("x", "y");
 print join(",", @res), "\n";
 ', "x,y\n");
 
+# ── Scalar reference passing through function calls ──────────────────────────
+# Regression tests for the box-set double-boxing bug: when a named variable
+# that holds a scalar reference was passed to a function, PCL stored the source
+# variable box instead of the reference value, adding one extra indirection
+# level per call.  This caused $$param comparisons to return object addresses
+# rather than the referenced integer value, breaking recursive algorithms.
+
+test_transpile('scalar ref passed to function: deref and increment', '
+sub inc_ref { my ($r) = @_; $$r++ }
+my $x = 10;
+inc_ref(\$x);
+print "$x\n";
+', "11\n");
+
+test_transpile('scalar ref passed through two function levels', '
+sub inner { my ($r) = @_; $$r += 10 }
+sub outer { my ($r) = @_; inner($r) }
+my $x = 5;
+outer(\$x);
+print "$x\n";
+', "15\n");
+
+test_transpile('recursive ref passing: count to N', '
+sub count_up {
+    my ($r, $n) = @_;
+    return if $$r >= $n;
+    $$r++;
+    count_up($r, $n);
+}
+my $ai = 0;
+count_up(\$ai, 5);
+print "$ai\n";
+', "5\n");
+
+test_transpile('ref-of-ref preserved through function', '
+sub getref { my ($rr) = @_; return $$rr }
+my $x = 42;
+my $ref = \$x;
+my $refref = \$ref;
+my $got = getref($refref);
+print ref($got), "\n";
+print $$got, "\n";
+', "SCALAR\n42\n");
+
+test_transpile('ref to hash element: modify via ref updates hash', '
+my %h = (x => 10);
+my $r = \$h{x};
+$$r += 5;
+print $h{x}, "\n";
+', "15\n");
+
+test_transpile('ref to array element: modify via ref updates array', '
+my @a = (1, 2, 3);
+my $r = \$a[1];
+$$r = 99;
+print "@a\n";
+', "1 99 3\n");
+
 done_testing;

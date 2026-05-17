@@ -2186,7 +2186,11 @@ sub _process_local_declaration {
     my $rhs_ctx = ($sigil eq '@' || $sigil eq '%') ? 1 : 0;
     my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, $rhs_ctx) // 'nil';
 
-    if ($sigil eq '@') {
+    if ($var eq '$!' || $var eq '|$!|') {
+      # local $! = N: bind *p-stored-errno* (auto-restored by let) and set C errno
+      push @bindings, "(pcl::*p-stored-errno* (pcl::%pcl-local-errno-init $init_cl))";
+    }
+    elsif ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
       # CL 'let' evaluates init form with old bindings, so @arr in $init_cl reads old value.
       push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
@@ -2205,7 +2209,11 @@ sub _process_local_declaration {
     for my $var (@vars) {
       next if $var eq '(p-undef)';  # undef slot: no binding needed
       my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
-      if ($sigil eq '@') {
+      if ($var eq '$!' || $var eq '|$!|') {
+        # bare local $!: save/restore *p-stored-errno*, clear to 0 (Perl undef $! = 0)
+        push @bindings, "(pcl::*p-stored-errno* 0)";
+      }
+      elsif ($sigil eq '@') {
         push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
       }
       elsif ($sigil eq '%') {
@@ -2890,6 +2898,12 @@ sub _process_if_tail {
 sub _process_block_in_tail_context {
   my ($self, $block, $ret_var) = @_;
 
+  # Isolate _pending_let_closes so that our flush at the end does not
+  # accidentally close let forms opened by an enclosing _emit_scoped_block.
+  # Mirrors the save/reset/restore done by _process_block.
+  my $saved_pending = $self->{_pending_let_closes};
+  $self->{_pending_let_closes} = [];
+
   $self->environment->push_scope();
   my $start_depth = $self->{_local_let_depth} // 0;
 
@@ -2924,7 +2938,7 @@ sub _process_block_in_tail_context {
     }
   }
 
-  # Flush scoped-block lets (same as _process_block).
+  # Flush only the let closes opened within this block's scope.
   while (@{$self->{_pending_let_closes} // []}) {
     pop @{$self->{_pending_let_closes}};
     $self->indent_level($self->indent_level - 1);
@@ -2940,6 +2954,9 @@ sub _process_block_in_tail_context {
   }
 
   $self->environment->pop_scope();
+
+  # Restore the outer pending closes (from enclosing _emit_scoped_block).
+  $self->{_pending_let_closes} = $saved_pending;
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 17;
 
 sub run_cl {
     my ($code) = @_;
@@ -105,3 +105,41 @@ test_cl('splice list: returns removed with replacement',
      my @r = splice @a, 1, 2, 10, 20;
      print join(",", @r), " ", join(",", @a), "\n";',
     "2,3 1,10,20,4,5\n");
+
+# ── *_{ARRAY} typeglob slot access ────────────────────────────────────────
+# *_{SLOT} accesses the SLOT of the current _ typeglob. Inside a sub,
+# *_{ARRAY} returns a reference to @_.
+
+test_cl('*_{ARRAY} returns array ref',
+    'sub foo { *_{ARRAY} }
+     my $aref = foo(1,2,3);
+     print ref($aref), "\n";',
+    "ARRAY\n");
+
+test_cl('*_{ARRAY} contains correct arguments',
+    'sub foo { *_{ARRAY} }
+     my $aref = foo(10,20,30);
+     print join(",", @$aref), "\n";',
+    "10,20,30\n");
+
+test_cl('*_{HASH} returns hash ref to %_ typeglob slot',
+    '
+     %_ = (a => 1, b => 2);
+     my $href = *_{HASH};
+     print ref($href), "\n";',
+    "HASH\n");
+
+# ── %{$ref}{"keys"} KV hash slice via block-deref ───────────────────────
+# PPI gives Cast(%) + Block({ref}) + Block({"keys"}) for this form.
+
+test_cl('%{$href}{"keys"} kv hash slice via block-deref',
+    'my $h = {c=>3, d=>4, e=>5};
+     my @a = %{$h}{"c","d","e"};
+     print join(":", @a), "\n";',
+    "c:3:d:4:e:5\n");
+
+test_cl('%{$href}{key} single-key kv hash slice via block-deref',
+    'my $h = {x => 42};
+     my @kv = %{$h}{"x"};
+     print "$kv[0]:$kv[1]\n";',
+    "x:42\n");

@@ -89,6 +89,7 @@ sub _build_handlers {
     'inline_lambda' => \&gen_inline_lambda,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
+    'glob_slot'        => \&gen_glob_slot,
   };
 }
 
@@ -744,21 +745,29 @@ sub gen_binary_op {
   }
 
   # Special case: hash assignment with list
-  # %h = () or %h = (a => 1) should use (p-hash ...), not (vector ...)
+  # %h = () or %h = (k=>v, ...) — pass flat vector so p-hash-= can count
+  # input elements for scalar-context return (Perl: scalar(%h=(a,b,c,d)) = 4).
   if ($op eq '=' && $left =~ /^%/) {
     my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
     if ($self->expr_o->is_internal_node_type($rhs_node)) {
       my $rhs_type = $rhs_node->{type};
       if ($rhs_type eq 'tree_val' || $rhs_type eq 'progn') {
         my $rhs_kids = $self->expr_o->get_node_children($kids->[1]);
+        # p-hash-= reads *wantarray* at runtime to decide list vs scalar return.
+        # Wrap it with the annotated context so runtime matches compile-time expectation.
+        my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
         if (@$rhs_kids == 0) {
-          # Empty hash
-          return "(p-hash-= $left (p-hash))";
+          my $result = "(p-hash-= $left (make-array 0 :adjustable t :fill-pointer 0))";
+          return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $result)"
+               : $ctx == SCALAR_CTX ? "(let ((*wantarray* nil)) $result)"
+               : $result;
         } else {
-          # Hash with initial values - generate (p-hash k1 v1 k2 v2 ...)
+          # Flat vector — p-hash-= flattens, deduplicates, and counts internally
           my @parts = map { $self->gen_node($_) } @$rhs_kids;
-          my $hash_init = "(p-hash " . join(" ", @parts) . ")";
-          return "(p-hash-= $left $hash_init)";
+          my $result = "(p-hash-= $left (vector " . join(" ", @parts) . "))";
+          return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $result)"
+               : $ctx == SCALAR_CTX ? "(let ((*wantarray* nil)) $result)"
+               : $result;
         }
       }
     }
@@ -796,7 +805,11 @@ sub gen_binary_op {
   # Handles both local vars (@a, %h, $x) and qualified vars (Pkg::@a, Pkg::%h, Pkg::$x).
   if ($op eq '=') {
     if ($left =~ /^\(vector /) {
-      return "(p-list-= $left $right)";
+      my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
+      my $result = "(p-list-= $left $right)";
+      return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $result)"
+           : $ctx == SCALAR_CTX ? "(let ((*wantarray* nil)) $result)"
+           : $result;
     } elsif ($left =~ /^\(p-cast-% /) {
       # %$ref = (list): assign to a dereferenced hash
       return "(p-hash-deref-= $left $right)";
@@ -1511,6 +1524,13 @@ sub gen_funcall {
   my $needs_lvalue = $lvalue_funcs{$func_name} // 0;
 
   # Rest are arguments
+  # Temporarily clear tail_position while generating arguments: tail_position is
+  # a flag that the current STATEMENT is the sub's last expression (so the outer
+  # call can inherit caller context).  Arguments are NOT the tail call — they
+  # need their own annotated context from child_context/annotate_contexts.
+  my $saved_tail = $self->environment ? $self->environment->tail_position : 0;
+  $self->environment->tail_position(0) if $self->environment && $saved_tail;
+
   my @args;
   for my $i (1 .. $#$kids) {
     # Set l-value context for functions that modify their arguments
@@ -1539,6 +1559,9 @@ sub gen_funcall {
     push @args, $arg;
   }
 
+  # Restore tail_position before the tail-call context check below.
+  $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
+
   my $args_str = @args ? ' ' . join(' ', @args) : '';
   my $call = "($cl_func$args_str)";
 
@@ -1557,6 +1580,14 @@ sub gen_funcall {
     return $ctx == 0 ? "(length $call)" : $call;
   }
 
+  # INHERIT_CTX or tail position: do not override *wantarray*; let the
+  # caller's dynamic binding propagate through.  This must come BEFORE any
+  # wantarray-sensitive built-in special cases (reverse/localtime/etc.) so that
+  # when such a built-in IS the tail call of a sub, the caller's context flows
+  # through rather than being frozen to the annotation-time context.
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+
   # reverse/localtime/gmtime/caller/do are wantarray-sensitive built-ins: they use
   # *wantarray* internally (or propagate it to do-file code).
   # Explicitly bind for all contexts so the outer dynamic scope can't leak into them.
@@ -1565,15 +1596,16 @@ sub gen_funcall {
         ? "(let ((*wantarray* t)) $call)"
         : "(let ((*wantarray* nil)) $call)";
   }
+
+  # join always evaluates its list arguments in list context (args after sep),
+  # regardless of the context in which join() itself is called.
+  if ($func_name eq 'join') {
+    return "(let ((*wantarray* t)) $call)";
+  }
   if ($func_name eq 'do') {
     my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
     return "(let ((*wantarray* $wa)) $call)";
   }
-
-  # INHERIT_CTX or tail position: do not override *wantarray*; let the
-  # caller's dynamic binding propagate through.
-  return $call if $ctx == INHERIT_CTX;
-  return $call if $self->environment && $self->environment->tail_position;
 
   # User sub calls: always bind *wantarray* so the callee sees the correct
   # context regardless of what the surrounding scope has set.
@@ -1959,7 +1991,22 @@ sub gen_hash_access {
   my $kids    = shift;
 
   my $hash = $self->gen_node($kids->[0]);
-  my $key  = $self->gen_node($kids->[1]);
+
+  # $h{a, b, c} → key is join($;, a, b, c) (SUBSEP multi-key)
+  my $key_node = $self->expr_o->get_a_node($kids->[1]);
+  my $key;
+  if ($self->expr_o->is_internal_node_type($key_node)
+      && $key_node->{type} eq 'progn') {
+    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
+    if (@$key_kids > 1) {
+      my @parts = map { $self->gen_node($_) } @$key_kids;
+      $key = "(p-join |\$;| (vector " . join(' ', @parts) . "))";
+    } else {
+      $key = $self->gen_node($kids->[1]);
+    }
+  } else {
+    $key = $self->gen_node($kids->[1]);
+  }
 
   # Convert $varname to %varname (Perl $hash{k} accesses %hash)
   # Handle both plain $hash and package-qualified Pkg::$hash
@@ -2007,7 +2054,22 @@ sub gen_hash_ref_access {
   my $kids    = shift;
 
   my $ref = $self->gen_node($kids->[0]);
-  my $key = $self->gen_node($kids->[1]);
+
+  # $href->{a, b} → key is join($;, a, b) (SUBSEP multi-key)
+  my $key_node = $self->expr_o->get_a_node($kids->[1]);
+  my $key;
+  if ($self->expr_o->is_internal_node_type($key_node)
+      && $key_node->{type} eq 'progn') {
+    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
+    if (@$key_kids > 1) {
+      my @parts = map { $self->gen_node($_) } @$key_kids;
+      $key = "(p-join |\$;| (vector " . join(' ', @parts) . "))";
+    } else {
+      $key = $self->gen_node($kids->[1]);
+    }
+  } else {
+    $key = $self->gen_node($kids->[1]);
+  }
 
   return "(p-gethash-deref $ref $key)";
 }
@@ -2072,6 +2134,19 @@ sub gen_kv_hash_slice {
 
   my $key_str = join(' ', @keys);
   return "(p-kv-hslice $hash $key_str)";
+}
+
+
+# Typeglob slot access: *name{SLOT} -> (p-glob-slot <glob> "SLOT")
+sub gen_glob_slot {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  my $glob_cl   = $self->gen_node($kids->[0]);
+  my $slot_name = uc($node->{slot_name} // 'SCALAR');
+  return "(p-glob-slot $glob_cl \"$slot_name\")";
 }
 
 
@@ -2534,18 +2609,29 @@ sub gen_inline_lambda {
   my $body     = $node->{body_cl} // 'nil';
   my $for_func = $node->{for_func} // '';
 
-  # Named sort comparator (sort NAME LIST): call sub with empty @_.
-  # Perl sets $a/$b as package globals, NOT via @_. The lambda params ($a $b)
-  # create dynamic bindings (because $a/$b are defvar'd special vars), so the
-  # comparator sub can read $a/$b without receiving them as arguments.
+  # Named sort comparator (sort NAME LIST).
+  # Perl sets $a/$b as package globals; the lambda params ($a $b) create dynamic
+  # bindings so subs reading $a/$b globals still work.
+  # For ($$) prototype subs (my($a,$b)=@_), pass $a $b as explicit args too.
+  # For all other subs, pass no args (Perl's normal sort behaviour: @_ is empty).
   # If the function is undefined, dispatch to AUTOLOAD (Perl #30661).
   if ($for_func eq 'sort' && $node->{comparator_name}) {
     my $cl_func = $self->cl_name($node->{comparator_name});
-    my $func_str = $node->{comparator_name};  # original Perl name for AUTOLOAD
-    my $lambda_body = "(handler-case ($cl_func)\n"
-                    . "  (undefined-function ()\n"
-                    . "    (let ((al (intern \"PL-AUTOLOAD\" |sort--pkg|)))\n"
-                    . "      (when (fboundp al) (funcall (symbol-function al))))))";
+    my $proto;
+    if ($self->environment) {
+      my $cname = $node->{comparator_name};
+      $proto = $self->environment->get_prototype($cname)
+            // $self->environment->get_prototype($cname =~ s/^:://r)
+            // $self->environment->get_prototype($cname =~ s/.*:://r);
+    }
+    my $has_dollar_dollar = $proto && $proto->{is_proto}
+                          && ($proto->{proto_string} // '') eq '$$';
+    my $call_args = $has_dollar_dollar ? ' $a $b' : '';
+    my $lambda_body = "(let ((*wantarray* nil))\n"
+                    . "  (handler-case ($cl_func$call_args)\n"
+                    . "    (undefined-function ()\n"
+                    . "      (let ((al (intern \"PL-AUTOLOAD\" |sort--pkg|)))\n"
+                    . "        (when (fboundp al) (funcall (symbol-function al)))))))";
     $kids = [];
     return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    (catch :p-return\n      (block nil\n$lambda_body))))";
   }
@@ -2564,10 +2650,12 @@ sub gen_inline_lambda {
   }
 
   # Sort comparator blocks may contain explicit `return` — wrap with catch.
+  # Bind *wantarray* = nil (scalar): the comparator must return a scalar, and
+  # Perl's wantarray() inside a comparator returns false (scalar context).
   # grep/map blocks do NOT get the catch: `return` inside them should
   # propagate to the enclosing sub's (catch :p-return ...).
   if ($for_func eq 'sort') {
-    return "(lambda ($params)\n  (catch :p-return\n    (block nil\n$body)))";
+    return "(lambda ($params)\n  (catch :p-return\n    (block nil\n(let ((*wantarray* nil))\n$body))))";
   }
   return "(lambda ($params)\n$body)";
 }
@@ -2695,23 +2783,55 @@ sub _compile_subst_e_expr {
   eval {
     require PPI::Document;
     require Pl::PExpr;
-    my $doc   = PPI::Document->new(\$expr);
-    my @stmts = $doc->children;
+    my $doc = PPI::Document->new(\$expr);
+
+    # Significant (non-whitespace) top-level statements
+    my @stmts = grep { !$_->isa('PPI::Token::Whitespace') } $doc->children;
     return unless @stmts;
-    my @parts = grep { ref($_) ne 'PPI::Token::Whitespace' } $stmts[0]->children;
-    return unless @parts;
-    my $expr_o = Pl::PExpr->new(
-      e        => \@parts,
-      full_PPI => $doc,
-      ($self->environment ? (environment => $self->environment) : ()),
-    );
-    my $node_id = $expr_o->parse_expr_to_tree(\@parts);
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => $self->indent_level,
-    );
-    $result = $gen->generate($node_id);
+
+    my @cl_parts;
+    my @let_vars;  # variables declared with 'my' in the replacement
+
+    for my $stmt (@stmts) {
+      # Tokens (e.g. PPI::Token::Whitespace) have no children — skip
+      next unless $stmt->can('children');
+      my @parts = grep {
+        ref($_) ne 'PPI::Token::Whitespace' && ref($_) ne 'PPI::Token::Structure'
+      } $stmt->children;
+      next unless @parts;
+
+      # Detect 'my $var' declarations and collect the variable for a let wrapper
+      if (ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'my'
+          && @parts > 1 && ref($parts[1]) eq 'PPI::Token::Symbol') {
+        push @let_vars, $parts[1]->content;
+        # Drop the 'my' keyword — compile the rest as an assignment expression
+        shift @parts;
+      }
+
+      my $expr_o = Pl::PExpr->new(
+        e        => \@parts,
+        full_PPI => $doc,
+        ($self->environment ? (environment => $self->environment) : ()),
+      );
+      my $node_id = $expr_o->parse_expr_to_tree(\@parts);
+      my $gen = Pl::ExprToCL->new(
+        expr_o       => $expr_o,
+        environment  => $self->environment,
+        indent_level => $self->indent_level,
+      );
+      my $cl = $gen->generate($node_id);
+      push @cl_parts, $cl if defined $cl && $cl ne '';
+    }
+
+    return unless @cl_parts;
+
+    my $body = @cl_parts == 1 ? $cl_parts[0] : '(progn ' . join(' ', @cl_parts) . ')';
+    if (@let_vars) {
+      my $bindings = join(' ', map { "($_ (make-p-box nil))" } @let_vars);
+      $result = "(let ($bindings) $body)";
+    } else {
+      $result = $body;
+    }
   };
   if ($@) {
     warn "Failed to compile s///e expression '$expr': $@";

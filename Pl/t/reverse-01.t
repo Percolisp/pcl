@@ -45,8 +45,8 @@ test_cl('reverse("abc") in scalar context gives "cba"',
     'my $r = reverse("abc"); print $r, "\n";',
     "cba\n");
 
-test_cl('reverse("abc") as function argument gives "cba"',
-    'sub check_eq { print $_[0] eq $_[1] ? "ok" : "fail: got $_[0]", "\n" } check_eq(reverse("abc"), "cba");',
+test_cl('scalar(reverse("abc")) as function argument gives "cba"',
+    'sub check_eq { print $_[0] eq $_[1] ? "ok" : "fail: got $_[0]", "\n" } check_eq(scalar(reverse("abc")), "cba");',
     "ok\n");
 
 test_cl('reverse() uses $_ in scalar context',

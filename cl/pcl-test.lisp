@@ -32,7 +32,7 @@
   (cond
     ((null x) nil)
     ((p-box-p x) (let ((v (p-box-value x)))
-                    (if (eq v *p-undef*) nil (to-string x))))
+                   (if (eq v *p-undef*) nil (to-string x))))
     ((eq x *p-undef*) nil)
     (t x)))
 
@@ -98,13 +98,13 @@
   (incf *test-count*)
   (let* ((display-name (test-display-value name))
          (out (if display-name
-                 (format nil "~A ~A - ~A"
-                         (if pass "ok" "not ok")
-                         *test-count*
-                         display-name)
-                 (format nil "~A ~A"
-                         (if pass "ok" "not ok")
-                         *test-count*))))
+                  (format nil "~A ~A - ~A"
+                          (if pass "ok" "not ok")
+                          *test-count*
+                          display-name)
+                  (format nil "~A ~A"
+                          (if pass "ok" "not ok")
+                          *test-count*))))
     (format t "~A~%" out)
     (unless pass
       (incf *test-failures*)
@@ -119,19 +119,23 @@
 
 ;;; Helper: check if value represents Perl undef
 (defun test-undef-p (x)
+  ;; Treat boxes with nil value as undef: PCL initializes fresh package variables
+  ;; as (make-p-box nil), while Perl sees them as undef.
   (or (null x)
       (eq x *p-undef*)
-      (and (p-box-p x) (eq (p-box-value x) *p-undef*))))
+      (and (p-box-p x)
+           (let ((v (p-box-value x)))
+             (or (null v) (eq v *p-undef*))))))
 
 ;;; Helper: apply scalar context to a value (matches Test::More's $$ prototype behavior).
 ;;; When Test::More functions like is($$;$) receive an array, Perl forces scalar context,
 ;;; giving the element count. PCL can't enforce prototypes, so we do it here instead.
 (defun test-to-scalar (x)
   (handler-case
-    (let ((is-vec (and (vectorp x) (not (stringp x)))))
-      (if (and is-vec (adjustable-array-p x))
-          (make-p-box (length x))
-          x))
+      (let ((is-vec (and (vectorp x) (not (stringp x)))))
+        (if (and is-vec (adjustable-array-p x))
+            (make-p-box (length x))
+            x))
     (error (e)
       (format t "### test-to-scalar ERROR: ~A~%" e)
       (force-output)
@@ -368,7 +372,7 @@
   (let* ((raw (if args (car args) pcl::*p-undef*))
          (s   (if (eq raw pcl::*p-undef*) nil (pcl:to-string raw))))
     (pcl:make-p-box
-      (if (null s) "undef" (format nil "\"~A\"" s)))))
+     (if (null s) "undef" (format nil "\"~A\"" s)))))
 
 ;;; eq_hash(\%h1, \%h2) — Perl test.pl helper: deep-equal comparison of two hash refs.
 ;;; Returns 1 (true) if both hashes have the same keys/values, "" (false) otherwise.

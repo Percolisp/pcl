@@ -213,6 +213,7 @@ sub extract_declarations {
       my @vars;
       my @rest;
       my $in_decl = 1;
+      my $decl_list;  # The original Structure::List for list-form declarations
 
       for my $child (@children) {
         # Skip whitespace
@@ -233,6 +234,7 @@ sub extract_declarations {
 
         # Handle list declarations: my ($x, $y) = ...
         if ($in_decl && ref($child) eq 'PPI::Structure::List') {
+          $decl_list = $child;  # Remember the original list structure
           # Extract all Symbol tokens from inside the list
           my @list_children = $child->children();
           for my $lc (@list_children) {
@@ -282,9 +284,15 @@ sub extract_declarations {
       # Add the remaining expression parts (without the declarator)
       # The variable itself stays - just the 'my'/'our'/etc is stripped
       if (@vars) {
-        # Recreate just the variable(s) and rest of expression
-        for my $var (@vars) {
-          push @result, PPI::Token::Symbol->new($var);
+        if ($decl_list) {
+          # List-form: my ($k,$v) = expr → keep Structure::List intact so
+          # the binary-op parser sees ($k,$v) as a single LHS unit.
+          push @result, $decl_list;
+        } else {
+          # Scalar-form: my $x = expr → single Symbol token
+          for my $var (@vars) {
+            push @result, PPI::Token::Symbol->new($var);
+          }
         }
       }
       push @result, @rest;
@@ -790,11 +798,27 @@ sub parse {
         && $e->[$i-1]->start() eq '{'
         && ref($e->[$i-2]) eq 'PPI::Token::Cast'
         && $e->[$i-2]->content() eq '%';
+    # KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Block('{"keys"}')
+    # PPI gives two Blocks (not Subscript) when sigil is %
+    my $is_kv_hash_deref_block = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i >= 2
+        && ref($e->[$i-1]) eq 'PPI::Structure::Block'
+        && $e->[$i-1]->start() eq '{'
+        && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+        && $e->[$i-2]->content() eq '%';
     # qw[...][idx] — subscript on a qw word list literal
     my $is_qw_subscript = ref($term) eq 'PPI::Structure::Constructor'
         && $term->start() eq '['
         && $i > 0
         && ref($e->[$i-1]) eq 'PPI::Token::QuoteLike::Words';
+    # Typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
+    my $is_typeglob_slot = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i > 0
+        && !$self->is_internal_node_type($e->[$i-1])
+        && $self->is_var($e->[$i-1])
+        && $e->[$i-1]->content() =~ /^\*/;
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
@@ -802,7 +826,9 @@ sub parse {
         && !$is_kv_slice_block
         && !$is_kv_arr_constructor
         && !$is_kv_arr_deref_constructor
-        && !$is_qw_subscript;
+        && !$is_kv_hash_deref_block
+        && !$is_qw_subscript
+        && !$is_typeglob_slot;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -978,6 +1004,12 @@ sub parse {
                  && $self->is_arr_braces($term)) {
           # %$ref[indices] — KV array slice of array ref
           $type = "kv_slice_a_acc";
+        } elsif ($cast_before
+                 && ref($cast_before) eq 'PPI::Token::Cast'
+                 && $cast_before->content() eq '%'
+                 && !$self->is_arr_braces($term)) {
+          # %$ref{keys} — KV hash ref slice
+          $type = "kv_slice_h_acc";
         }
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^@/) {
@@ -992,7 +1024,7 @@ sub parse {
       $self->add_child_to_node($id, $pre_id);
 
       # Add index to arr or hash:
-      if ($type =~ /^slice_/) {
+      if ($type =~ /^slice_/ || $type eq 'kv_slice_h_acc') {
         my $n   = $self->get_a_node($ix_id);
         if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
           # Skip the 'progn' for slices:
@@ -1011,7 +1043,7 @@ sub parse {
       $e->[$i-1] = $node;
       splice @$e, $i, 1;         # Remove $term (subscript)
 
-      if (($type eq 'slice_h_acc' || $type eq 'kv_slice_a_acc')
+      if (($type eq 'slice_h_acc' || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
           && $i >= 2
           && ref($e->[$i-2]) eq 'PPI::Token::Cast'
           && ($e->[$i-2]->content() eq '@' || $e->[$i-2]->content() eq '%')) {
@@ -1108,6 +1140,54 @@ sub parse {
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
       splice @$e, $i-1, 2;  # Remove Block and Constructor
       $i -= 2;
+      next;
+    }
+
+    # Handle KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Block('{"keys"}')
+    # e.g., %{$h}{"c","d"} -> (p-kv-hslice $h "c" "d")
+    if ($is_kv_hash_deref_block) {
+      my @block_kids = $e->[$i-1]->children();
+      my $ref_id = $self->parse(\@block_kids);
+      my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
+
+      my @ix    = $term->children();
+      my $ix_id = $self->parse(\@ix);
+
+      $self->add_child_to_node($id, $ref_id);
+
+      # Flatten progn children (comma-separated keys)
+      my $n = $self->get_a_node($ix_id);
+      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+        my $kids = $self->get_node_children($ix_id);
+        for my $param_id (@$kids) {
+          $self->add_child_to_node($id, $param_id);
+        }
+      } else {
+        $self->add_child_to_node($id, $ix_id);
+      }
+
+      $e->[$i-2] = $node;   # Replace Cast '%' position with node
+      splice @$e, $i-1, 2;  # Remove Block and Block
+      $i -= 2;
+      next;
+    }
+
+    # Handle typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
+    # e.g., *_{ARRAY} -> (p-glob-slot (p-make-typeglob "main" "_") "ARRAY")
+    if ($is_typeglob_slot) {
+      my $glob_id = $self->parse([$pre]);
+      # Extract the slot name from the Block (single bareword inside)
+      my @blk_ch = grep { ref($_) !~ /Whitespace/ } $term->children();
+      if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
+        @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
+      }
+      my $slot_name = @blk_ch ? $blk_ch[0]->content() : 'SCALAR';
+      my($node, $id) = $self->make_node_insert('glob_slot');
+      $node->{slot_name} = $slot_name;
+      $self->add_child_to_node($id, $glob_id);
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;
+      $i--;
       next;
     }
 
@@ -3039,9 +3119,19 @@ sub child_context {
 
       # List operators force list context on their list argument
       if ($func_name && $func_name =~ /^(map|grep|sort|keys|values|each)$/) {
-        # First arg (block/code) inherits, second arg (list) is LIST_CTX
+        # child 0 = function name, child 1 = comparator/block (for sort/grep/map),
+        # child 2+ = list to process.
+        # For sort without a comparator (e.g. sort LIST, sort &f()), child 1 IS
+        # the list — detect this by checking if child 1 is an inline_lambda.
+        if ($func_name eq 'sort' && $child_index == 1 && @$children >= 2) {
+          my $c1_node = $self->get_a_node($children->[1]);
+          # inline_lambda means there IS a comparator — child 1 is NOT the list
+          return LIST_CTX
+              unless $self->is_internal_node_type($c1_node)
+                  && $c1_node->{type} eq 'inline_lambda';
+        }
 
-        # Second parameter (index 2 in children)
+        # Standard: second parameter (index 2 in children) is the list
         return LIST_CTX
             if $child_index == 2;
       }
@@ -3089,6 +3179,26 @@ sub child_context {
       # dynamic scope — emit no binding so context propagates through.
       if ($func_name && $func_name eq 'return') {
         return INHERIT_CTX;
+      }
+
+      # Force LIST_CTX for '..'/'...' operators in function argument position so
+      # they generate a range, not a flip-flop.  Other arguments inherit the
+      # parent's context — this lets prototype-forced scalar context (e.g.
+      # Test::More's is($$;$)) work correctly via wantarray propagation.
+      # NOTE: '..' nodes are PPI::Token::Operator (not PPIreference), so we
+      # must check the PPI token content, not is_internal_node_type.
+      if ($child_index >= 1) {
+        my $child_id = $children->[$child_index];
+        if (defined $child_id) {
+          my $child_node = $self->get_a_node($child_id);
+          my $cop;
+          if ($self->is_internal_node_type($child_node)) {
+            $cop = $child_node->{type};
+          } elsif (ref($child_node) eq 'PPI::Token::Operator') {
+            $cop = $child_node->content();
+          }
+          return LIST_CTX if defined($cop) && ($cop eq '..' || $cop eq '...');
+        }
       }
     }
     # progn (comma operator) forces list context
@@ -3655,12 +3765,17 @@ sub _fix_ppi_negative_number_bug {
         my $prev_ref = ref($prev);
 
         # Expression-ending tokens: ) ] } or symbols/words/numbers
+        # Named unary functions (chr, abs, uc, etc.) are NOT expression-enders:
+        # "chr -1" means chr(-1), not chr() - 1.
+        my $prev_is_named_unary = ($prev_ref eq 'PPI::Token::Word'
+                                   && $self->is_named_unary($prev->content));
         $is_expr_end = (
           $prev_ref eq 'PPI::Structure::List'        ||  # (...)
           $prev_ref eq 'PPI::Structure::Subscript'   ||  # [...]
           $prev_ref eq 'PPI::Structure::Block'       ||  # {...}
           $prev_ref eq 'PPI::Token::Symbol'          ||  # $foo
-          $prev_ref eq 'PPI::Token::Word'            ||  # bareword/func
+          ($prev_ref eq 'PPI::Token::Word'
+           && !$prev_is_named_unary)                 ||  # bareword/const (not named unary)
           $prev_ref eq 'PPI::Token::Number'          ||  # number
           $prev_ref eq 'PPI::Token::Quote::Double'   ||  # "string"
           $prev_ref eq 'PPI::Token::Quote::Single'   ||  # 'string'

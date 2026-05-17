@@ -20,22 +20,45 @@ my $lisp  = "/tmp/$name.lisp";
 my $out   = "/tmp/$name.out";
 my $tests = "$root/perl-tests";
 
+# Guard: make sure the source file actually exists before we do anything
+die "ERROR: $tests/$name.t not found\n" unless -f "$tests/$name.t";
+
 # Transpile (run from perl-tests/ so require './foo' in tests resolves)
 chdir $tests or die "chdir $tests: $!\n";
 system("perl -I$root $root/pl2cl --no-cache --lenient-ppi $name.t >$lisp 2>/tmp/$name.pl2cl.err");
-if ($? != 0) {
-    my $err = do { local $/; open(my $f,'<',"/tmp/$name.pl2cl.err") or die; <$f> };
-    print STDERR "Transpile failed:\n$err";
+my $transpile_exit = $?;
+my $errfile = "/tmp/$name.pl2cl.err";
+my $err_content = '';
+if (open(my $f, '<', $errfile)) { local $/; $err_content = <$f> // ''; close $f; }
+
+if ($transpile_exit != 0) {
+    my $code = $transpile_exit >> 8;
+    print STDERR "=== TRANSPILE FAILED (exit $code) ===\n";
+    print STDERR $err_content ? $err_content : "(no stderr output)\n";
     exit 1;
 }
+# Exit 0 but stderr has "Failed to compile" errors — show them and abort
+if ($err_content =~ /Failed to compile/i) {
+    print STDERR "=== TRANSPILE ERRORS (exit 0 but compilation failed) ===\n";
+    print STDERR $err_content;
+    exit 1;
+}
+# Print any other warnings non-fatally so they're visible
+if ($err_content) {
+    print STDERR "=== TRANSPILE WARNINGS ===\n";
+    print STDERR $err_content;
+}
 
-# Run SBCL
-my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $root/cl/pcl-test.lisp --load $lisp 2>&1`;
-
-# Save raw output
-open(my $fh, '>', $out) or die "write $out: $!\n";
-print $fh $raw;
-close $fh;
+# Run SBCL with timeout (default 300s, override with RUNT_TIMEOUT env var; 0 = no timeout)
+my $timeout = $ENV{RUNT_TIMEOUT} // 300;
+my $sbcl_cmd = "sbcl --control-stack-size 512 --dynamic-space-size 4096 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $root/cl/pcl-test.lisp --load $lisp >$out 2>&1";
+system($timeout ? "timeout $timeout $sbcl_cmd" : $sbcl_cmd);
+my $sbcl_exit = $?;
+if ($timeout && ($sbcl_exit >> 8) == 124) {
+    print STDERR "=== TIMEOUT after ${timeout}s — killed ===\n";
+    exit 1;
+}
+my $raw = do { open(my $f, '<', $out) or die "read $out: $!\n"; local $/; <$f> };
 
 # Filter SBCL noise and print
 $raw =~ s/^;[^\n]*\n//gm;
@@ -44,3 +67,10 @@ $raw =~ s/^STYLE-WARNING[^\n]*\n//gm;
 $raw =~ s/^\s*\n//gm;
 
 print $raw;
+
+# Report SBCL failure after printing output (so context is visible)
+if ($sbcl_exit != 0) {
+    my $code = $sbcl_exit >> 8;
+    print STDERR "=== SBCL CRASHED (exit $code) — see output above and $out ===\n";
+    exit 1;
+}
