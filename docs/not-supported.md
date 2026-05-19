@@ -569,3 +569,37 @@ require significant runtime changes for a removed, never-stable feature.
 - `perl-tests/substr.t` — last block (`{ # [perl #132527] ... }`) commented out (1 test)
 - `perl-tests/aassign.t` — blocks at lines 124–175 and 284 use refaliasing (multiple tests)
 - `perl-tests/each.t` — block at lines 319–320 uses refaliasing
+
+---
+
+## Context propagation into string eval
+
+**Perl behaviour:** `eval "code"` inherits the calling context.  Code inside the string
+eval can call `wantarray()` and get the correct answer; built-ins such as `%hash{keys}`
+emit a warning when the eval is called in scalar context (e.g. `scalar eval '...'` or
+`my $v = eval '...'`).
+
+**PCL behaviour:** `p-eval` calls the `pl2cl` subprocess to transpile the string, then
+calls `(load ...)` in the same SBCL process.  Because `*wantarray*` is a CL dynamic
+variable, `(load ...)` inherits whatever dynamic binding is in scope at the call site.
+However, PCL does not currently emit a `(let ((*wantarray* ctx)) (p-eval ...))` wrapper
+because the calling context is not known at code-generation time: determining it would
+require working AST-level context annotations (`docs/ast-annotation-plan.md`), which are
+deferred.  Without that wrapper, code inside string eval cannot reliably detect its calling
+context via `wantarray()`, and context-sensitive behaviour (e.g. the scalar-context warning
+from `%hash{keys}`) does not fire.
+
+**Path to fix:** Once `docs/ast-annotation-plan.md` is implemented, `gen_funcall` can
+detect `eval "string"` calls annotated with a context and emit:
+
+```lisp
+(let ((*wantarray* nil))   ; or t / :void
+  (p-eval ...))
+```
+
+This would propagate context through `(load ...)` correctly, since dynamic bindings cross
+`load` boundaries within the same process.
+
+**Affected tests:** `perl-tests/kvhslice.t` tests 9–12 and 25–28 (scalar-context warning
+via `scalar eval '...'`); any test in other files that relies on `wantarray()` returning a
+meaningful value inside `eval "string"`.

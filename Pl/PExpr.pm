@@ -798,11 +798,27 @@ sub parse {
         && $e->[$i-1]->start() eq '{'
         && ref($e->[$i-2]) eq 'PPI::Token::Cast'
         && $e->[$i-2]->content() eq '%';
+    # KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Block('{"keys"}')
+    # PPI gives two Blocks (not Subscript) when sigil is %
+    my $is_kv_hash_deref_block = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i >= 2
+        && ref($e->[$i-1]) eq 'PPI::Structure::Block'
+        && $e->[$i-1]->start() eq '{'
+        && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+        && $e->[$i-2]->content() eq '%';
     # qw[...][idx] — subscript on a qw word list literal
     my $is_qw_subscript = ref($term) eq 'PPI::Structure::Constructor'
         && $term->start() eq '['
         && $i > 0
         && ref($e->[$i-1]) eq 'PPI::Token::QuoteLike::Words';
+    # Typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
+    my $is_typeglob_slot = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i > 0
+        && !$self->is_internal_node_type($e->[$i-1])
+        && $self->is_var($e->[$i-1])
+        && $e->[$i-1]->content() =~ /^\*/;
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
@@ -810,7 +826,9 @@ sub parse {
         && !$is_kv_slice_block
         && !$is_kv_arr_constructor
         && !$is_kv_arr_deref_constructor
-        && !$is_qw_subscript;
+        && !$is_kv_hash_deref_block
+        && !$is_qw_subscript
+        && !$is_typeglob_slot;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -986,6 +1004,12 @@ sub parse {
                  && $self->is_arr_braces($term)) {
           # %$ref[indices] — KV array slice of array ref
           $type = "kv_slice_a_acc";
+        } elsif ($cast_before
+                 && ref($cast_before) eq 'PPI::Token::Cast'
+                 && $cast_before->content() eq '%'
+                 && !$self->is_arr_braces($term)) {
+          # %$ref{keys} — KV hash ref slice
+          $type = "kv_slice_h_acc";
         }
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^@/) {
@@ -1000,7 +1024,7 @@ sub parse {
       $self->add_child_to_node($id, $pre_id);
 
       # Add index to arr or hash:
-      if ($type =~ /^slice_/) {
+      if ($type =~ /^slice_/ || $type eq 'kv_slice_h_acc') {
         my $n   = $self->get_a_node($ix_id);
         if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
           # Skip the 'progn' for slices:
@@ -1019,7 +1043,7 @@ sub parse {
       $e->[$i-1] = $node;
       splice @$e, $i, 1;         # Remove $term (subscript)
 
-      if (($type eq 'slice_h_acc' || $type eq 'kv_slice_a_acc')
+      if (($type eq 'slice_h_acc' || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
           && $i >= 2
           && ref($e->[$i-2]) eq 'PPI::Token::Cast'
           && ($e->[$i-2]->content() eq '@' || $e->[$i-2]->content() eq '%')) {
@@ -1116,6 +1140,54 @@ sub parse {
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
       splice @$e, $i-1, 2;  # Remove Block and Constructor
       $i -= 2;
+      next;
+    }
+
+    # Handle KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Block('{"keys"}')
+    # e.g., %{$h}{"c","d"} -> (p-kv-hslice $h "c" "d")
+    if ($is_kv_hash_deref_block) {
+      my @block_kids = $e->[$i-1]->children();
+      my $ref_id = $self->parse(\@block_kids);
+      my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
+
+      my @ix    = $term->children();
+      my $ix_id = $self->parse(\@ix);
+
+      $self->add_child_to_node($id, $ref_id);
+
+      # Flatten progn children (comma-separated keys)
+      my $n = $self->get_a_node($ix_id);
+      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+        my $kids = $self->get_node_children($ix_id);
+        for my $param_id (@$kids) {
+          $self->add_child_to_node($id, $param_id);
+        }
+      } else {
+        $self->add_child_to_node($id, $ix_id);
+      }
+
+      $e->[$i-2] = $node;   # Replace Cast '%' position with node
+      splice @$e, $i-1, 2;  # Remove Block and Block
+      $i -= 2;
+      next;
+    }
+
+    # Handle typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
+    # e.g., *_{ARRAY} -> (p-glob-slot (p-make-typeglob "main" "_") "ARRAY")
+    if ($is_typeglob_slot) {
+      my $glob_id = $self->parse([$pre]);
+      # Extract the slot name from the Block (single bareword inside)
+      my @blk_ch = grep { ref($_) !~ /Whitespace/ } $term->children();
+      if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
+        @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
+      }
+      my $slot_name = @blk_ch ? $blk_ch[0]->content() : 'SCALAR';
+      my($node, $id) = $self->make_node_insert('glob_slot');
+      $node->{slot_name} = $slot_name;
+      $self->add_child_to_node($id, $glob_id);
+      $e->[$i-1] = $node;
+      splice @$e, $i, 1;
+      $i--;
       next;
     }
 
@@ -2324,10 +2396,16 @@ sub handle_subcalls {
 
     # If can be zero-param, check if next token is an operator
     # (but NOT a Cast token like @, $, %, etc. which are deref operators for arguments)
+    # Also NOT if the operator can be a unary prefix (like ~, !, +, -, not, \)
+    # because then it's likely the start of an argument expression, not a binary op.
+    # e.g., `length ~0` → length(~0), not length() followed by ~0
     if ($is_zero_param && $i + 1 < scalar(@$e)) {
       my $next = $e->[$i + 1];
-      if ($self->is_token_operator($next) && ref($next) ne 'PPI::Token::Cast') {
-        # Function followed by operator - treat as zero params
+      my $next_op = $self->is_token_operator($next);
+      my %can_be_prefix = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+      if ($next_op && ref($next) ne 'PPI::Token::Cast'
+          && !$can_be_prefix{$next_op}) {
+        # Function followed by binary-only operator - treat as zero params
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $node_id = $self->make_node($now);
         $self->add_child_to_node($top_id, $node_id);
@@ -2490,6 +2568,21 @@ sub handle_subcalls {
                 } else {
                     last;
                 }
+            }
+        } elsif (ref($next_term) eq 'PPI::Token::Operator'
+                 && grep { $next_term->content() eq $_ } ('~', '!')) {
+            # Unary prefix operator (~, !) — include operator and its operand as the argument
+            if ($end_pars >= $i + 2) {
+                $end_pars = $i + 2;
+                # Handle chained prefix operators: ~~0, !!$x, etc.
+                while ($end_pars < scalar(@$e) - 1) {
+                    my $nx = $e->[$end_pars];
+                    last unless ref($nx) eq 'PPI::Token::Operator'
+                             && grep { $nx->content() eq $_ } ('~', '!');
+                    $end_pars++;
+                }
+            } else {
+                $end_pars = $i + 1;
             }
         } else {
             $end_pars = $i + 1;

@@ -89,6 +89,7 @@ sub _build_handlers {
     'inline_lambda' => \&gen_inline_lambda,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
+    'glob_slot'        => \&gen_glob_slot,
   };
 }
 
@@ -1587,10 +1588,12 @@ sub gen_funcall {
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
 
-  # reverse/localtime/gmtime/caller/do are wantarray-sensitive built-ins: they use
+  # reverse/localtime/gmtime/caller/unpack are wantarray-sensitive built-ins: they use
   # *wantarray* internally (or propagate it to do-file code).
   # Explicitly bind for all contexts so the outer dynamic scope can't leak into them.
-  if ($func_name =~ /^(reverse|localtime|gmtime|caller)$/) {
+  # unpack: scalar unpack() in list-context assignment (@a = scalar unpack()) must
+  # force scalar context so p-unpack returns $result[0] not @result.
+  if ($func_name =~ /^(reverse|localtime|gmtime|caller|unpack)$/) {
     return $ctx == LIST_CTX
         ? "(let ((*wantarray* t)) $call)"
         : "(let ((*wantarray* nil)) $call)";
@@ -1990,7 +1993,22 @@ sub gen_hash_access {
   my $kids    = shift;
 
   my $hash = $self->gen_node($kids->[0]);
-  my $key  = $self->gen_node($kids->[1]);
+
+  # $h{a, b, c} → key is join($;, a, b, c) (SUBSEP multi-key)
+  my $key_node = $self->expr_o->get_a_node($kids->[1]);
+  my $key;
+  if ($self->expr_o->is_internal_node_type($key_node)
+      && $key_node->{type} eq 'progn') {
+    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
+    if (@$key_kids > 1) {
+      my @parts = map { $self->gen_node($_) } @$key_kids;
+      $key = "(p-join |\$;| (vector " . join(' ', @parts) . "))";
+    } else {
+      $key = $self->gen_node($kids->[1]);
+    }
+  } else {
+    $key = $self->gen_node($kids->[1]);
+  }
 
   # Convert $varname to %varname (Perl $hash{k} accesses %hash)
   # Handle both plain $hash and package-qualified Pkg::$hash
@@ -2038,7 +2056,22 @@ sub gen_hash_ref_access {
   my $kids    = shift;
 
   my $ref = $self->gen_node($kids->[0]);
-  my $key = $self->gen_node($kids->[1]);
+
+  # $href->{a, b} → key is join($;, a, b) (SUBSEP multi-key)
+  my $key_node = $self->expr_o->get_a_node($kids->[1]);
+  my $key;
+  if ($self->expr_o->is_internal_node_type($key_node)
+      && $key_node->{type} eq 'progn') {
+    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
+    if (@$key_kids > 1) {
+      my @parts = map { $self->gen_node($_) } @$key_kids;
+      $key = "(p-join |\$;| (vector " . join(' ', @parts) . "))";
+    } else {
+      $key = $self->gen_node($kids->[1]);
+    }
+  } else {
+    $key = $self->gen_node($kids->[1]);
+  }
 
   return "(p-gethash-deref $ref $key)";
 }
@@ -2103,6 +2136,19 @@ sub gen_kv_hash_slice {
 
   my $key_str = join(' ', @keys);
   return "(p-kv-hslice $hash $key_str)";
+}
+
+
+# Typeglob slot access: *name{SLOT} -> (p-glob-slot <glob> "SLOT")
+sub gen_glob_slot {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  my $glob_cl   = $self->gen_node($kids->[0]);
+  my $slot_name = uc($node->{slot_name} // 'SCALAR');
+  return "(p-glob-slot $glob_cl \"$slot_name\")";
 }
 
 
@@ -2565,16 +2611,26 @@ sub gen_inline_lambda {
   my $body     = $node->{body_cl} // 'nil';
   my $for_func = $node->{for_func} // '';
 
-  # Named sort comparator (sort NAME LIST): call sub with empty @_.
-  # Perl sets $a/$b as package globals, NOT via @_. The lambda params ($a $b)
-  # create dynamic bindings (because $a/$b are defvar'd special vars), so the
-  # comparator sub can read $a/$b without receiving them as arguments.
+  # Named sort comparator (sort NAME LIST).
+  # Perl sets $a/$b as package globals; the lambda params ($a $b) create dynamic
+  # bindings so subs reading $a/$b globals still work.
+  # For ($$) prototype subs (my($a,$b)=@_), pass $a $b as explicit args too.
+  # For all other subs, pass no args (Perl's normal sort behaviour: @_ is empty).
   # If the function is undefined, dispatch to AUTOLOAD (Perl #30661).
   if ($for_func eq 'sort' && $node->{comparator_name}) {
     my $cl_func = $self->cl_name($node->{comparator_name});
-    my $func_str = $node->{comparator_name};  # original Perl name for AUTOLOAD
+    my $proto;
+    if ($self->environment) {
+      my $cname = $node->{comparator_name};
+      $proto = $self->environment->get_prototype($cname)
+            // $self->environment->get_prototype($cname =~ s/^:://r)
+            // $self->environment->get_prototype($cname =~ s/.*:://r);
+    }
+    my $has_dollar_dollar = $proto && $proto->{is_proto}
+                          && ($proto->{proto_string} // '') eq '$$';
+    my $call_args = $has_dollar_dollar ? ' $a $b' : '';
     my $lambda_body = "(let ((*wantarray* nil))\n"
-                    . "  (handler-case ($cl_func)\n"
+                    . "  (handler-case ($cl_func$call_args)\n"
                     . "    (undefined-function ()\n"
                     . "      (let ((al (intern \"PL-AUTOLOAD\" |sort--pkg|)))\n"
                     . "        (when (fboundp al) (funcall (symbol-function al)))))))";

@@ -4,6 +4,100 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 198 (2026-05-19) — pack.t: POSIX regex classes, slash depth, B/b/H/h slash, Group B analysis
+
+### Focus
+
+Continue fixing pack.t failures from `docs/pack-attack-plan.md`. Starting from 555 failures (session 197).
+
+### Changes made
+
+1. **POSIX character classes** in `perl-regex-to-ppcre` (`cl/pcl-runtime.lisp`): CL-PPCRE 2.1.2 does not support `[[:print:]]`, `[[:alpha:]]`, etc. Added translation step converting `[:class:]` to Unicode hex ranges. Fixes the Z*/A* `s/[^[:print:]]/./g` test and 26 other regex-based tests. New `let*` binding in the POSIX translation step before `\x{HHHH}` processing.
+
+2. **`do-regex-subst` bypassed `perl-regex-to-ppcre`**: The `s///` path stored raw Perl pattern in `p-subst-op` struct and passed directly to `cl-ppcre:create-scanner`. Fixed by wrapping with `perl-regex-to-ppcre` in `do-regex-subst`. Fixes test 4370.
+
+3. **Byte-order conflict detection** in `_pack_parse_mods`: Added `$inh_le`/`$inh_be` conflict checks so `(s<)>` dies "Can't use '>' in a group with different byte-order". Fixes tests 4273-4278.
+
+4. **Slash count read: die vs last** (`_unpack_tmpl` in `cl/pack-impl.pl`): The initial slash count read (e.g., `v/a*` on `'h'`) was changed to `die` in session 197, which broke tests 4130/4132 (`is($@, '')` after `v/a*` on short string). Perl's semantics: outer count overflow at TOP LEVEL = silent last (return empty); nested count overflow = die. Fixed using `$depth` parameter: `last unless $depth > 0; die "..."`. Also fixed the recursive `S/(...)` call to pass `$depth + 1`.
+
+5. **Slash final-data-field missing B/b/H/h/U/u**: The slash handler's final-field dispatch only handled A/a/Z and `(` groups. Added B/b/H/h/U/u to call `_unpack_str`. Fixes tests 4156/4158 (`a/a*/b*` format).
+
+6. **`pcl-pack.lisp` rebuilt** from updated `cl/pack-impl.pl`.
+
+### Pack.t progress
+
+- Session 197 end: **555 failures**
+- After POSIX+regex fixes: **529**
+- After do-regex-subst: **528**
+- After byte-order conflict + die/last regression: **521** (but introduced 4130/4132 regression)
+- After die/last depth fix + B/b/H/h: **~518** (estimate; full recount needed next session)
+
+### Remaining failures (520 before B/b/H/h fix)
+
+See `docs/pack-attack-plan.md` for full breakdown. Key groups:
+- **Group A** (~264 tests): 297-443 (step 2) + 3511-3982 (pairs) — eval BLOCK list context — SKIP (wantarray restriction)
+- **Group B** (~26 remaining): 4131-4391 — various error/format mismatches (see attack plan)
+- **Group G+** (~244+ tests): 14038-14703 — U format and UTF-8
+
+### pcl-pack.lisp rebuild procedure (updated)
+
+Override section starts at line 4248 of current `cl/pcl-pack.lisp`. Use:
+```bash
+sed -n '4248,$p' cl/pcl-pack.lisp > /tmp/pack-overrides.lisp
+head -12 /tmp/pack-generated.lisp > /tmp/pack-new.lisp
+sed -n '15,$p' /tmp/pack-generated.lisp | head -n -2 >> /tmp/pack-new.lisp
+cat /tmp/pack-overrides.lisp >> /tmp/pack-new.lisp
+```
+
+---
+
+## Session 197 (2026-05-19) — pack.t: whitespace/comma rules, Z*/A* slash fix, [[:print:]] NUL bug found
+
+### Focus
+
+Continue fixing pack.t failures from `docs/pack-attack-plan.md`.
+
+### Changes made
+
+1. **Pack whitespace rule** — Perl does NOT allow whitespace between a type char and its count/modifier. Fixed `_pack_skip_ws` not to skip ws in `_pack_parse_count` or between mods and count in `_pack_tmpl`/`_pack_template_size`/`_unpack_tmpl`. Tests `'A *'`, `'A 4'`, `'A ![4]'` now correctly die "Invalid type".
+
+2. **Comma in pack** — Perl warns "Invalid type ','" (once per call) but treats comma as separator. Added `$pcl_pack_comma_warned` module-level flag reset per-call via `local` in `p_pack`. `_pack_skip_ws` now warns once on first comma, then silently skips subsequent commas.
+
+3. **Z*/A* slash format** — `pack('Z*/A* C', $str, $byte)` should encode the count as a Z-format null-terminated decimal string. Added Z handler in the slash count position in `_pack_tmpl` and a null-terminator-seeking handler in `_unpack_tmpl`. Test file `perl-tests/test_pack_z.t` tests 2/3/4 pass.
+
+4. **`pcl-pack.lisp` rebuilt** from updated `cl/pack-impl.pl`.
+
+### Z*/A* test 1 bug — root cause found
+
+`perl-tests/test_pack_z.t` test 1 checks:
+```perl
+my $h = $buf;
+$h =~ s/[^[:print:]]/./g;
+print $h eq "30.ABCABC..." ...
+```
+
+Debug shows `pack('Z*/A* C', ...)` produces the **correct bytes** — byte[2]=0 (NUL). The bug is in PCL's `[[:print:]]` character class implementation: NUL (chr 0) is treated as printable, so `s/[^[:print:]]/./g` does NOT replace it with '.'. The NUL stays in the string and prints as a space in output.
+
+**Fix needed**: `[[:print:]]` in our regex must exclude chr(0)–chr(31). See POSIX definition: printable = chr(32)–chr(126), i.e. `\x20`–`\x7e`.
+
+### test_pack_ws.t (new)
+
+4 tests all pass: `'A *'`, `'A 4'`, `'A ![4]'` die "Invalid type"; comma warning fires once.
+
+### Results
+
+pack.t: **555 fail, 14167 pass, 8770 skip** (session 196 baseline: 623 fail — **68 more fixed**).
+PCL suite: 77 files, 2992 tests, all passing.
+
+### TODO (next session)
+
+- Fix `[[:print:]]` to exclude chr(0)–chr(31) — this will fix Z*/A* test 1 and related tests
+- Check `[[:space:]]`, `[[:cntrl:]]` etc. for similar POSIX class bugs
+- Group B error messages (~32 tests), Group A eval list ctx (~216 tests)
+- **PExpr.pm line 904** — `Use of uninitialized value in string eq` warning — investigate
+
+---
+
 ## Session 196 (2026-05-19) — pack.t: checksum revert + float checksum + slash + w eE fixes
 
 ### Focus
@@ -40,7 +134,11 @@ Fixed: 47 more tests than session 195 baseline.
 - 30 float checksum tests (3075–3209, every 3rd)
 - 17 from slash/w fixes
 
+PCL suite: 77 files, 2992 tests, all passing.
+
 Attack plan for remaining failures: see `docs/pack-attack-plan.md`.
+
+Test file `Pl/t/transpile-test-01b.t` hangs, fix that first next session.
 
 ---
 

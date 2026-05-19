@@ -109,7 +109,7 @@
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-copy-array #:p-copy-hash
-   #:p-pack #:p-unpack
+   #:p-pack #:p-unpack #:p-load-extension
    #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
@@ -370,10 +370,14 @@
 (defvar |$^R| nil "Result of last successful (?{...}) regex code block")
 
 ;;; System error ($!) - dualvar: numeric = errno integer, string = strerror
+;;; We cache the errno in *p-stored-errno* so that SBCL's internal C calls
+;;; (malloc, GC, etc.) do not corrupt $! between "$! = N" and the next read.
+(defvar *p-stored-errno* 0)
+
 (defun p-errno-string ()
   "Return $! as dualvar: (to-number ...) = errno, (to-string ...) = strerror.
    When errno=0, returns \"\" (falsy) to preserve Perl's !$! truthiness semantics."
-  (let ((errno (sb-alien:get-errno)))
+  (let ((errno *p-stored-errno*))
     (if (zerop errno)
         ""   ; errno=0: falsy like Perl's $! when no error
         (let ((msg (or (sb-int:strerror errno)
@@ -386,9 +390,21 @@
 
 (defun (setf p-errno-string) (val)
   "Perl $! = N — set errno to integer N (clears it when N=0)"
-  (setf (sb-alien:extern-alien "errno" sb-alien:int)
-        (truncate (to-number (if (p-box-p val) (unbox val) val))))
+  (let ((n (truncate (to-number (if (p-box-p val) (unbox val) val)))))
+    (setf *p-stored-errno* n)
+    (setf (sb-alien:extern-alien "errno" sb-alien:int) n))
   val)
+
+(defun %pcl-save-errno ()
+  "Capture the C errno immediately after a system call into *p-stored-errno*.
+   Call this right after any OS call that may set errno on failure."
+  (setf *p-stored-errno* (sb-alien:get-errno)))
+
+(defun %pcl-local-errno-init (n)
+  "Helper for 'local $! = N': coerce n to int, set C errno, return int for let binding."
+  (let ((i (truncate (to-number n))))
+    (setf (sb-alien:extern-alien "errno" sb-alien:int) i)
+    i))
 
 ;;; Wantarray context variable
 (defvar *wantarray* nil "Context for the current call: t=list, nil=scalar, :void=void.")
@@ -1168,9 +1184,11 @@
     (if ha (p-call-overload ha a b nil)
         (let ((hb (p-find-overload b "/")))
           (if hb (p-call-overload hb b a t)
-              ;; CL integer/integer -> ratio; Perl always gives float
+              ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
+              ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
+              ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
               (let ((r (%pcl-ieee-arith (lambda () (/ (to-number a) (to-number b))))))
-                (if (rationalp r) (coerce r 'double-float) r)))))))
+                (if (typep r 'ratio) (coerce r 'double-float) r)))))))
 (defun p-% (a b)
   "Perl modulo with use overload '%' dispatch"
   ;; use overload "%": modulo overload
@@ -1180,8 +1198,8 @@
           (if hb (p-call-overload hb b a t)
               (let ((na (to-number a)) (nb (to-number b)))
                 (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
-                        (sb-ext:float-infinity-p (coerce na 'double-float))
-                        (sb-ext:float-infinity-p (coerce nb 'double-float))
+                        (and (floatp na) (sb-ext:float-infinity-p na))
+                        (and (floatp nb) (sb-ext:float-infinity-p nb))
                         (zerop nb))
                     (sb-kernel:make-double-float #x7FF80000 0)
                     (mod (truncate na) (truncate nb)))))))))
@@ -1196,6 +1214,12 @@
     ;; No overload: existing numeric path with Inf-on-overflow
     (let ((na (to-number a))
           (nb (to-number b)))
+      ;; Return exact bignum when both args are non-negative integers AND the
+      ;; result fits in ~1000 bits.  This matters for pack/unpack: 2**64 as
+      ;; double loses precision.  Guard prevents 9**(9**9) from hanging SBCL.
+      (when (and (integerp na) (integerp nb) (>= nb 0)
+                 (<= (* nb (max 1 (integer-length na))) 1000))
+        (return-from p-** (expt na nb)))
       (handler-case
           (expt (coerce na 'double-float) (coerce nb 'double-float))
         (floating-point-overflow ()
@@ -3626,8 +3650,11 @@
 
 (defun %pcl-to-integer (n)
   "Convert numeric value to integer, clamping Inf/NaN to 0 (Perl UV_MAX truncation)"
-  (let ((d (coerce n 'double-float)))
-    (if (or (%pcl-nan-p d) (sb-ext:float-infinity-p d)) 0 (truncate d))))
+  ;; Short-circuit for exact integers: avoid float coercion which loses precision
+  ;; for values >= 2^53 (e.g. 2^64-1 rounds to 2^64, breaking 64-bit unpack).
+  (if (integerp n) n
+      (let ((d (coerce n 'double-float)))
+        (if (or (%pcl-nan-p d) (sb-ext:float-infinity-p d)) 0 (truncate d)))))
 
 (defun p-bit-and (a b)
   "Perl bitwise AND — string (char-by-char, truncates) or numeric"
@@ -5150,6 +5177,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; File not found: return undef, clear $@, set $! = ENOENT
         (progn
           (box-set $@ (make-p-box ""))
+          (setf *p-stored-errno* 2)
           (setf (sb-alien:extern-alien "errno" sb-alien:int) 2) ; ENOENT=2
           *p-undef*)
         ;; File found: read, transpile and eval
@@ -5245,8 +5273,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (box-set $@ (p-exception-object e))
        nil)
      (error (e)
-       ;; String exception - convert to string
-       (box-set $@ (format nil "~A" e))
+       ;; String exception - convert to string.
+       ;; Perl appends " at SCRIPT line N.\n" when message doesn't end with \n.
+       (let ((msg (format nil "~A" e)))
+         (box-set $@ (if (and (> (length msg) 0)
+                              (char= (char msg (1- (length msg))) #\Newline))
+                         msg
+                         (format nil "~A at (eval 0) line 0.~%" msg))))
        nil)))
 
 ;;; ============================================================
@@ -5320,10 +5353,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (t
              (warn "Unknown open mode: ~A" mode-str)
              nil))))
-    (when stream
-      (cond
-        ((p-box-p fh) (box-set fh stream))
-        (t             (setf (gethash fh *p-filehandles*) stream))))
+    (if stream
+        (progn
+          (cond
+            ((p-box-p fh) (box-set fh stream))
+            (t             (setf (gethash fh *p-filehandles*) stream))))
+        (%pcl-save-errno))  ; capture C errno (ENOENT etc.) before SBCL overwrites it
     (if stream t nil)))
 
 (defmacro p-open (fh mode &optional filename)
@@ -5935,6 +5970,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                          logdir
                          ;; No HOME or LOGDIR: set EINVAL and fail
                          (progn
+                           (setf *p-stored-errno* 22)
                            (setf (sb-alien:extern-alien "errno" sb-alien:int) 22)
                            (return-from p-chdir nil))))))
              ;; Argument provided: check for filehandle/dirhandle
@@ -6047,13 +6083,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (declare (ignore pattern))
   1)
 
+(defun %pcl-vec-check-wide (s)
+  "Signal Perl's 'Use of strings with code points over 0xFF' error if any char > 0xFF."
+  (when (some (lambda (c) (> (char-code c) 255)) s)
+    (p-die "Use of strings with code points over 0xFF as arguments to vec is forbidden")))
+
 (defun p-vec (str offset bits)
   "Perl vec - treat string as bit vector and extract element.
    OFFSET is the element index, BITS is element size (1, 2, 4, 8, 16, 32, 64).
    Returns the numeric value at that position."
-  (let* ((s (to-string str))
+  (let* ((str  (p-scalar str))  ; vec evaluates its string arg in scalar context
+         (s (to-string str))
          (offset (truncate (to-number offset)))
          (bits   (truncate (to-number bits))))
+    (%pcl-vec-check-wide s)
     (unless (member bits '(1 2 4 8 16 32 64))
       (p-die (format nil "Illegal number of bits in vec")))
     ;; Negative offset: return 0 (Perl silently returns 0 for rval)
@@ -6093,6 +6136,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let* ((offset (truncate (to-number offset)))
          (bits   (truncate (to-number bits)))
          (val    (truncate (to-number value))))
+    (%pcl-vec-check-wide (to-string str-box))
     (unless (member bits '(1 2 4 8 16 32 64))
       (p-die "Illegal number of bits in vec"))
     (when (< offset 0)
@@ -6777,15 +6821,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-map (fn &rest items)
   "Perl map - fn receives item as $_ parameter.
    Runs block in list context; flattens per-iteration vectors into result.
-   Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
+   Accepts (fn @array) or (fn elem1 elem2 ...) or mixed.
+   CL nil from the block means empty-list (0 elements), not undef."
   (let* ((arr (apply #'%p-collect-list items))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     (loop for item across arr
           do (let ((r (let ((*wantarray* t)) (funcall fn item))))
-               (if (and (vectorp r) (not (stringp r)))
-                   (loop for e across r
-                         do (vector-push-extend e result))
-                   (vector-push-extend (%p-map-copy-scalar r) result))))
+               (cond
+                 ((and (vectorp r) (not (stringp r)))
+                  (loop for e across r do (vector-push-extend e result)))
+                 ;; CL nil means "return empty list" (e.g. from (progn) or if-without-else
+                 ;; evaluating to false). Perl: map { () } produces 0 elements.
+                 ((null r) nil)
+                 (t (vector-push-extend (%p-map-copy-scalar r) result)))))
     result))
 
 (defun p-sort-get-fn (val)
@@ -7028,7 +7076,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      (let ((b (make-p-box val)))
        (setf (p-box-is-ref b) t)
        b))
-    ((or (vectorp val) (hash-table-p val) (functionp val) (p-typeglob-p val))
+    ;; Non-string vector (Perl array), hash, code, typeglob: wrap directly.
+    ;; Strings are specialized vectors in CL but are Perl scalars, so exclude them here
+    ;; — they fall through to the raw-scalar branch below.
+    ((or (and (vectorp val) (not (stringp val))) (hash-table-p val) (functionp val) (p-typeglob-p val))
      (make-p-box val))
     ;; Raw scalar value (e.g. \42): double-box + is-ref so box-set handles it right.
     (t
@@ -7488,23 +7539,30 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let* ((pkg    (p-typeglob-package glob))
          (uname  (p-typeglob-name glob))
          (slot-s (string-upcase (stringify-value slot))))
-    (cond
-      ((string= slot-s "CODE")
-       (let ((sym (intern (concatenate 'string "PL-" uname) pkg)))
-         (when (fboundp sym) (make-p-box (fdefinition sym)))))
-      ((string= slot-s "SCALAR")
-       (let ((sym (intern (concatenate 'string "$" uname) pkg)))
-         (when (boundp sym) (make-p-box (symbol-value sym)))))
-      ((string= slot-s "ARRAY")
-       (let ((sym (intern (concatenate 'string "@" uname) pkg)))
-         (when (boundp sym) (symbol-value sym))))
-      ((string= slot-s "HASH")
-       (let ((sym (intern (concatenate 'string "%" uname) pkg)))
-         (when (boundp sym) (symbol-value sym))))
-      ((string= slot-s "NAME")    (make-p-box (p-typeglob-name glob)))
-      ((string= slot-s "PACKAGE") (make-p-box (package-name (p-typeglob-package glob))))
-      ((string= slot-s "GLOB")    glob)
-      (t *p-undef*))))
+    (flet ((find-sym (prefix)
+             ;; Use find-symbol (not intern) to locate inherited symbols,
+             ;; e.g. @_ is pcl::@_ inherited into main — intern would create main::@_.
+             (or (find-symbol (concatenate 'string prefix uname) pkg)
+                 (intern  (concatenate 'string prefix uname) pkg))))
+      (cond
+        ((string= slot-s "CODE")
+         (let ((sym (find-sym "PL-")))
+           (when (fboundp sym) (make-p-box (fdefinition sym)))))
+        ((string= slot-s "SCALAR")
+         (let ((sym (find-sym "$")))
+           (when (boundp sym) (make-p-box (symbol-value sym)))))
+        ((string= slot-s "ARRAY")
+         ;; Returns \@foo — an array reference (box containing the vector).
+         (let ((sym (find-sym "@")))
+           (when (boundp sym) (make-p-box (symbol-value sym)))))
+        ((string= slot-s "HASH")
+         ;; Returns \%foo — a hash reference (box containing the hash-table).
+         (let ((sym (find-sym "%")))
+           (when (boundp sym) (make-p-box (symbol-value sym)))))
+        ((string= slot-s "NAME")    (make-p-box (p-typeglob-name glob)))
+        ((string= slot-s "PACKAGE") (make-p-box (package-name (p-typeglob-package glob))))
+        ((string= slot-s "GLOB")    glob)
+        (t *p-undef*)))))
 
 (defmacro p-local-glob (pkg-str name-str &body body)
   "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
@@ -7908,6 +7966,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl bless - attach class to a reference (hash, array, or scalar ref).
    For hashes: stores class in :__class__ key (survives unboxing).
    For arrays/code/other: stores class on the box's class slot."
+  ;; Perl throws "Attempt to bless into a reference" when class is a non-overloaded ref.
+  (let ((ref-type-of-class (p-ref class)))
+    (when (and (string/= ref-type-of-class "")
+               (not (p-find-overload class "\"\"")))
+      (error "Attempt to bless into a reference")))
   (let* ((raw-class-val (unbox class))
          ;; Detect Perl undef (nil or *p-undef*): emits 2 warnings
          (is-undef (or (null raw-class-val) (eq raw-class-val *p-undef*)))
@@ -8529,6 +8592,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (lambda (match content)
                  (declare (ignore match))
                  (cl-ppcre:quote-meta-chars content))
+               :simple-calls t))
+         ;; Translate POSIX character classes to equivalent ranges.
+         ;; CL-PPCRE 2.1.2 does not support [:class:] syntax.
+         (pat (cl-ppcre:regex-replace-all
+               "\\[:(\\w+):\\]"
+               pat
+               (lambda (match class-name)
+                 (declare (ignore match))
+                 (cond
+                   ((equal class-name "alpha")  "a-zA-Z")
+                   ((equal class-name "digit")  "0-9")
+                   ((equal class-name "alnum")  "a-zA-Z0-9")
+                   ((equal class-name "upper")  "A-Z")
+                   ((equal class-name "lower")  "a-z")
+                   ((equal class-name "word")   "a-zA-Z0-9_")
+                   ((equal class-name "space")  " \\t\\n\\r\\x{0c}\\x{0b}")
+                   ((equal class-name "blank")  " \\t")
+                   ((equal class-name "print")  "\\x{20}-\\x{7e}")
+                   ((equal class-name "graph")  "\\x{21}-\\x{7e}")
+                   ((equal class-name "punct")  "\\x{21}-\\x{2f}\\x{3a}-\\x{40}\\x{5b}-\\x{60}\\x{7b}-\\x{7e}")
+                   ((equal class-name "cntrl")  "\\x{00}-\\x{1f}\\x{7f}")
+                   ((equal class-name "xdigit") "0-9a-fA-F")
+                   (t match)))
                :simple-calls t)))
     (cl-ppcre:regex-replace-all
      "\\\\x\\{([0-9a-fA-F]+)\\}"
@@ -8754,7 +8840,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perform substitution on boxed string, return count of replacements.
    Also sets capture groups $1, $2, ... from the match."
   (let* ((str (to-string (unbox string-box)))
-         (pattern (p-subst-op-pattern op))
+         (pattern (perl-regex-to-ppcre (p-subst-op-pattern op)))
          (raw-replacement (p-subst-op-replacement op))
          (modifiers (p-subst-op-modifiers op))
          (eval-p (or (member :e modifiers) (functionp raw-replacement)))
@@ -8944,192 +9030,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; ============================================================
 
 (defun p-pack (template &rest args)
-  "Perl pack - basic implementation for common templates.
-   Returns a string of bytes."
-  (let ((tmpl (to-string (unbox template)))
-        (result (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
-        (arg-idx 0))
-    (loop for i from 0 below (length tmpl)
-          for ch = (char tmpl i)
-          do (case ch
-               ;; 'd' - double-precision float (8 bytes, native order)
-               (#\d (let* ((val (to-number (unbox (nth arg-idx args))))
-                           (bits (sb-kernel:double-float-bits (coerce val 'double-float))))
-                      (dotimes (byte-idx 8)
-                        (vector-push-extend
-                         (code-char (logand #xff (ash bits (* -8 byte-idx))))
-                         result))
-                      (incf arg-idx)))
-               ;; 'C' - unsigned char
-               (#\C (let ((val (truncate (to-number (unbox (nth arg-idx args))))))
-                      (vector-push-extend (code-char (logand val #xff)) result)
-                      (incf arg-idx)))
-               ;; 'a'/'A' - ASCII string (null/space padded)
-               ((#\a #\A)
-                (let ((s (to-string (unbox (nth arg-idx args)))))
-                  (loop for c across s do (vector-push-extend c result))
-                  (incf arg-idx)))
-               ;; Skip spaces and digits (repeat counts - simplified)
-               ((#\Space #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) nil)
-               ;; Unknown template char - skip arg
-               (t (incf arg-idx))))
-    result))
+  ;; Self-loading stub: loads pcl-pack.lisp on first call then delegates.
+  (let ((loaded (p-load-extension "pcl-pack")))
+    (if loaded
+        (apply #'p-pack template args)
+        (error "p-pack: cl/pcl-pack.lisp not found in ~a"
+               (or *pcl-runtime-directory* "(no runtime dir)")))))
 
 (defun p-unpack (template &optional (str $_))
-  "Perl unpack - parse binary string according to template.
-   With one arg, uses $_ as the string (Perl 5.11+ behavior).
-   Treats CL string characters as Latin-1 bytes (char-code = byte value).
-   If template starts with U0, converts string to UTF-8 bytes first.
-   Strips grouping parentheses () from template (not implemented).
-   Supported: C/c (unsigned/signed byte), n/N (big-endian 16/32-bit),
-              v/V (little-endian 16/32-bit), A/a/Z (strings), H/h (hex),
-              x (skip byte), X (back up), @ (seek), count and * modifier."
-  (let* ((tmpl   (to-string template))
-         (raw-s  (to-string str))
-         ;; U0 flag: convert string to UTF-8 bytes for processing
-         (utf8-mode (and (>= (length tmpl) 2)
-                         (char= (char tmpl 0) #\U)
-                         (char= (char tmpl 1) #\0)))
-         (s      (if utf8-mode
-                     ;; Convert Unicode string to UTF-8 byte string (char-code = byte value).
-                     ;; Use a custom encoder to handle surrogates (no strict UTF-8 check).
-                     (flet ((encode-char (code)
-                              (cond
-                                ((< code #x80)
-                                 (list code))
-                                ((< code #x800)
-                                 (list (logior #xC0 (ash code -6))
-                                       (logior #x80 (logand code #x3F))))
-                                ((< code #x10000)
-                                 (list (logior #xE0 (ash code -12))
-                                       (logior #x80 (logand (ash code -6) #x3F))
-                                       (logior #x80 (logand code #x3F))))
-                                (t
-                                 (list (logior #xF0 (ash code -18))
-                                       (logior #x80 (logand (ash code -12) #x3F))
-                                       (logior #x80 (logand (ash code -6) #x3F))
-                                       (logior #x80 (logand code #x3F)))))))
-                       (let ((bytes (loop for c across raw-s nconc (encode-char (char-code c)))))
-                         (map 'string #'code-char bytes)))
-                     raw-s))
-         ;; Strip U0 prefix and grouping parens from template
-         (tmpl   (if utf8-mode
-                     (remove #\( (remove #\) (subseq tmpl 2)))
-                     (remove #\( (remove #\) tmpl))))
-         (result (make-array 0 :adjustable t :fill-pointer 0))
-         (ti 0) (si 0)
-         (tlen (length tmpl))
-         (slen (length s)))
-    (flet ((byte-at (i) (if (< i slen) (char-code (char s i)) 0))
-           (push-val (v) (vector-push-extend (make-p-box v) result)))
-      (loop while (< ti tlen) do
-            (let ((ch (char tmpl ti)))
-              (incf ti)
-              ;; Parse optional count or *
-              (let* ((all-p (and (< ti tlen) (char= (char tmpl ti) #\*)))
-                     (count (cond
-                              (all-p (incf ti) nil)
-                              ((and (< ti tlen) (digit-char-p (char tmpl ti)))
-                               (let ((n 0))
-                                 (loop while (and (< ti tlen)
-                                                  (digit-char-p (char tmpl ti)))
-                                       do (setf n (+ (* n 10)
-                                                     (digit-char-p (char tmpl ti))))
-                                       (incf ti))
-                                 n))
-                              (t 1))))
-                (flet ((repeat-count (max-n)
-                         (if all-p (max 0 (- max-n si)) (or count 1))))
-                  (case ch
-                    ;; Unsigned byte
-                    ((#\C)
-                     (let ((n (repeat-count slen)))
-                       (dotimes (i n) (push-val (byte-at (+ si i))))
-                       (incf si n)))
-                    ;; Signed byte
-                    ((#\c)
-                     (let ((n (repeat-count slen)))
-                       (dotimes (i n)
-                         (let ((b (byte-at (+ si i))))
-                           (push-val (if (>= b 128) (- b 256) b))))
-                       (incf si n)))
-                    ;; Big-endian unsigned 16-bit
-                    ((#\n)
-                     (let ((n (repeat-count (floor slen 2))))
-                       (dotimes (i n)
-                         (let ((pos (+ si (* i 2))))
-                           (push-val (+ (ash (byte-at pos) 8)
-                                        (byte-at (1+ pos))))))
-                       (incf si (* n 2))))
-                    ;; Big-endian unsigned 32-bit
-                    ((#\N)
-                     (let ((n (repeat-count (floor slen 4))))
-                       (dotimes (i n)
-                         (let ((pos (+ si (* i 4))))
-                           (push-val (+ (ash (byte-at pos) 24)
-                                        (ash (byte-at (+ pos 1)) 16)
-                                        (ash (byte-at (+ pos 2)) 8)
-                                        (byte-at (+ pos 3))))))
-                       (incf si (* n 4))))
-                    ;; Little-endian unsigned 16-bit
-                    ((#\v)
-                     (let ((n (repeat-count (floor slen 2))))
-                       (dotimes (i n)
-                         (let ((pos (+ si (* i 2))))
-                           (push-val (+ (byte-at pos)
-                                        (ash (byte-at (1+ pos)) 8)))))
-                       (incf si (* n 2))))
-                    ;; Little-endian unsigned 32-bit
-                    ((#\V)
-                     (let ((n (repeat-count (floor slen 4))))
-                       (dotimes (i n)
-                         (let ((pos (+ si (* i 4))))
-                           (push-val (+ (byte-at pos)
-                                        (ash (byte-at (+ pos 1)) 8)
-                                        (ash (byte-at (+ pos 2)) 16)
-                                        (ash (byte-at (+ pos 3)) 24)))))
-                       (incf si (* n 4))))
-                    ;; Arbitrary binary string (A strips trailing spaces/nulls, a does not)
-                    ((#\A #\a #\Z)
-                     (let* ((n (if all-p (max 0 (- slen si)) (or count 1)))
-                            (safe-si (min si slen))
-                            (raw (subseq s safe-si (min (+ safe-si n) slen))))
-                       (push-val (if (char= ch #\A)
-                                     (string-right-trim '(#\Space #\Nul) raw)
-                                     raw))
-                       (incf si n)))
-                    ;; Hex string (high nybble first for H, low nybble first for h)
-                    ((#\H #\h)
-                     (let* ((n (if all-p (* 2 (- slen si)) (* 2 (or count 1))))
-                            (hex (make-string n :initial-element #\0)))
-                       (dotimes (i (floor n 2))
-                         (let ((b (byte-at (+ si i))))
-                           (if (char= ch #\H)
-                               (setf (char hex (* i 2))       (digit-char (ash b -4) 16)
-                                     (char hex (1+ (* i 2)))  (digit-char (logand b 15) 16))
-                               (setf (char hex (* i 2))       (digit-char (logand b 15) 16)
-                                     (char hex (1+ (* i 2)))  (digit-char (ash b -4) 16)))))
-                       (push-val (string-downcase hex))
-                       (incf si (floor n 2))))
-                    ;; Skip bytes (no output)
-                    ((#\x)
-                     (let ((n (if all-p (- slen si) (or count 1))))
-                       (incf si n)))
-                    ;; Back up
-                    ((#\X)
-                     (let ((n (or count 1)))
-                       (decf si n)
-                       (when (< si 0) (setf si 0))))
-                    ;; Absolute seek
-                    ((#\@)
-                     (setf si (or count 0)))
-                    ;; Ignore unknown templates
-                    (otherwise nil)))))))
-    ;; In scalar context return the first value (Perl: "the first unpacked value").
-    ;; In list context return the full vector (for list/array assignment).
-    (if (eq *wantarray* t)
-        result
-        (if (> (length result) 0) (aref result 0) *p-undef*))))
+  ;; Self-loading stub: loads pcl-pack.lisp on first call then delegates.
+  (let ((loaded (p-load-extension "pcl-pack")))
+    (if loaded
+        (p-unpack template str)
+        (error "p-unpack: cl/pcl-pack.lisp not found in ~a"
+               (or *pcl-runtime-directory* "(no runtime dir)")))))
 
 ;;; ============================================================
 ;;; Package initialization
@@ -9323,11 +9237,26 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (in-package :pcl)
 
-;;; Load pack/unpack extension if present (muffle redefine warnings)
-(when *pcl-runtime-directory*
-  (let ((pack-file (merge-pathnames "pcl-pack.lisp" *pcl-runtime-directory*)))
-    (when (probe-file pack-file)
-      (handler-bind ((warning #'muffle-warning))
-        (load pack-file)))))
+;;; Extension loading registry — tracks which extension files have been loaded.
+(defvar *pcl-loaded-extensions* (make-hash-table :test 'equal))
+
+;;; Load a named extension .lisp file from *pcl-runtime-directory*.
+;;; Skips if already loaded. Returns t if the file was found and loaded, nil otherwise.
+;;; Called eagerly for built-in extensions, or lazily from generated code.
+(defun p-load-extension (name)
+  (unless (gethash name *pcl-loaded-extensions*)
+    (when *pcl-runtime-directory*
+      (let ((file (merge-pathnames
+                   (concatenate 'string name ".lisp")
+                   *pcl-runtime-directory*)))
+        (when (probe-file file)
+          (handler-bind ((warning #'muffle-warning))
+            (load file))
+          (setf (gethash name *pcl-loaded-extensions*) t)
+          (return-from p-load-extension t)))))
+  nil)
+
+;;; Load pack/unpack extension eagerly at startup (always needed by Perl code).
+(p-load-extension "pcl-pack")
 
 (format t "PCL Runtime loaded~%")

@@ -79,6 +79,39 @@ echo 'my $r = (-1) % 65536; print "$r\n"' | perl       # should be 65535
 echo 'my $r = (-1) % 65536; print "$r\n"' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp 2>/dev/null | tail -3
 ```
 
+## Session 198 Changes
+
+- **POSIX char classes**: `perl-regex-to-ppcre` now translates `[:alpha:]`, `[:print:]` etc. to Unicode hex ranges. CL-PPCRE 2.1.2 doesn't support POSIX class syntax. Fixes 26+ tests.
+- **`do-regex-subst` fix**: Was bypassing `perl-regex-to-ppcre` — now calls it on the pattern. Fixes test 4370.
+- **Byte-order conflict** in `_pack_parse_mods`: `(s<)>` now dies "Can't use '>' in a group with different byte-order". Fixes tests 4273-4278.
+- **Slash depth die/last** (`_unpack_tmpl`): Outer slash count overflow at top-level → `last` (silent). Nested → `die`. Controlled by `$depth` param. Also fixed recursive `S/(...)` call to pass `$depth + 1`. Fixes 4130/4132 regression, keeps 4395/4396 passing.
+- **Slash final-field B/b/H/h/U/u**: Added these to the dispatch in the slash final-field handler. Fixes `a/a*/b*` format (tests 4156/4158).
+- **Override section now at line 4248** of `cl/pcl-pack.lisp`.
+- **`pcl-pack.lisp` rebuilt**.
+
+### TODO: Group A — eval block context propagation
+
+**Question for next session**: Are `eval { }` blocks the ONLY place where we fail to propagate list context into the inner expression? Other candidates to check:
+- `do { }` blocks: does `my @a = do { ... }` propagate list context?
+- `for`/`foreach` loop bodies (less likely)
+- `map`/`grep` blocks (already handled differently)
+- `sort` blocks (comparator, not relevant)
+- Any other block forms in PCL that call into Perl code
+
+If `do { }` also has the same problem, a general solution might be more appropriate than fixing only `eval { }`. Before implementing Group A fix, survey all block forms.
+
+**Group A scope**: Tests 297-443 (step 2, ~74 tests) and 3511-3982 (pairs, ~118 tests) = ~192 tests failing due to `eval {}` not propagating list context.
+
+Additional Group A failures in Group B range: tests 4235, 4239, 4247, 4251, 4259 also fail because `my @got = eval { unpack(...) }` gives 1 element instead of an empty list or 2 elements. These are currently in the "Group B" bucket but are actually Group A (eval-block context) failures.
+
+## Session 197 Changes
+
+- **Whitespace rule**: Removed `_pack_skip_ws` between type char and count in `_pack_parse_count`, `_pack_tmpl`, `_unpack_tmpl`, `_pack_template_size`. `'A *'`/`'A 4'`/`'A ![4]'` now die "Invalid type".
+- **Comma warning**: `$pcl_pack_comma_warned` flag, reset per-call via `local` in `p_pack`. `_pack_skip_ws` warns once.
+- **Z*/A* slash**: Z case in slash count position (`_pack_tmpl` around line 402). Z case in unpack slash count reader (`_unpack_tmpl`). Tests 2/3/4 of `test_pack_z.t` pass.
+- **Z*/A* test 1 root cause found**: Pack produces CORRECT bytes. Failure is `[[:print:]]` treating NUL (chr 0) as printable → `s/[^[:print:]]/./g` leaves NUL in string → prints as space. **Fix needed**: `[[:print:]]` must exclude chr(0)–chr(31). POSIX: printable = 0x20–0x7e.
+- **PExpr.pm line 904**: `Use of uninitialized value in string eq` — investigate next session.
+
 ## Session 196 Changes
 
 - **Checksum formula**: Changed from `$checksum % $mod` to floor-division formula that handles both negative integers AND float checksums with fractional parts.
@@ -88,12 +121,14 @@ echo 'my $r = (-1) % 65536; print "$r\n"' | ./pl2cl | sbcl --noinform --load cl/
 
 ## Rebuild Procedure (after editing pack-impl.pl)
 
+Override section start: find with `perl -ne 'print "$.: $_" if /^\(defun pl-_pack_float32/' cl/pcl-pack.lisp`
+(was line 4248 after session 198).
+
 ```bash
 cd /home/bernt/pcl
 ./pl2cl < cl/pack-impl.pl > /tmp/pack-generated.lisp
-# Save overrides (check line number — search for "MANUAL OVERRIDES" or first "(defun pl-_pack_float32")
-grep -n "^;; The transpiled stubs" cl/pcl-pack.lisp  # find line N
-sed -n 'N,$p' cl/pcl-pack.lisp > /tmp/pack-overrides.lisp
+# Save overrides — find start line first (see above)
+sed -n 'LINE,$p' cl/pcl-pack.lisp > /tmp/pack-overrides.lisp
 # Assemble
 head -12 /tmp/pack-generated.lisp > /tmp/pack-new.lisp
 sed -n '15,$p' /tmp/pack-generated.lisp | head -n -2 >> /tmp/pack-new.lisp

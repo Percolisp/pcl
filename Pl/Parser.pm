@@ -2186,7 +2186,11 @@ sub _process_local_declaration {
     my $rhs_ctx = ($sigil eq '@' || $sigil eq '%') ? 1 : 0;
     my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, $rhs_ctx) // 'nil';
 
-    if ($sigil eq '@') {
+    if ($var eq '$!' || $var eq '|$!|') {
+      # local $! = N: bind *p-stored-errno* (auto-restored by let) and set C errno
+      push @bindings, "(pcl::*p-stored-errno* (pcl::%pcl-local-errno-init $init_cl))";
+    }
+    elsif ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
       # CL 'let' evaluates init form with old bindings, so @arr in $init_cl reads old value.
       push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
@@ -2205,7 +2209,11 @@ sub _process_local_declaration {
     for my $var (@vars) {
       next if $var eq '(p-undef)';  # undef slot: no binding needed
       my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
-      if ($sigil eq '@') {
+      if ($var eq '$!' || $var eq '|$!|') {
+        # bare local $!: save/restore *p-stored-errno*, clear to 0 (Perl undef $! = 0)
+        push @bindings, "(pcl::*p-stored-errno* 0)";
+      }
+      elsif ($sigil eq '@') {
         push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
       }
       elsif ($sigil eq '%') {
