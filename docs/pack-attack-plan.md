@@ -1,15 +1,15 @@
 # Pack.t Attack Plan — Next Session
 
-**Current state** (session 196): pack.t — **623 failures**, 14099 pass, 8771 skip, 14722 total.
+**Current state** (session 199): pack.t — **117 failures**, 14605 pass, 8771 skip, 14722 total.
 
 ## Failure Groups and How to Attack Them
 
-### Group A — `eval { }` list context (estimated ~216 tests)
-**Tests:** 297–443 (step 2, 74 tests), 3511–3981 (pairs every 5, ~142 tests)  
-**Symptom:** `my @t = eval { unpack(...) }` — `@t` gets only 1 element instead of N.  
-**Root cause:** `p-eval-block` in `pcl-runtime.lisp` does not propagate list context into the block. `unpack` runs in scalar context and returns only the first unpacked value.  
-**Fix location:** `p-eval-block` (around line 5263 of `pcl-runtime.lisp`). Need to propagate `*wantarray*` binding through the `handler-case` body.  
-**Warning:** This interacts with the wantarray system. Read `docs/wantarray-context.md` before touching it. The fix needs to be carefully scoped to not break the existing VOID_CTX behavior.
+### Group A — `eval { }` list context ✅ FIXED (session 199)
+**Tests:** 297–443 (step 2, 74 tests), 3511–3981 (pairs every 5, ~142 tests), plus some in 4235–4259 range  
+**Fix:** `Pl/ExprToCL.pm` eval-block codegen. The three eval-block paths (`anon_sub`, `inline_lambda`, `func_ref`) now wrap `(p-eval-block ...)` with `(let ((*wantarray* $wa)) ...)` based on the node's context annotation. This is identical to the pattern already used for `do { }` func_ref blocks.  
+**Root cause (fixed):** The eval block codegen emitted bare `(p-eval-block ...)` without binding `*wantarray*`. When in `(p-array-= @t ...)` context, `*wantarray*` was nil (scalar). `pl-p_unpack` saved `*pcl-caller-wantarray* = nil` at entry and returned only the first value.  
+**Investigation result:** `do { }` blocks did NOT have this problem — they already used `(let ((*wantarray* $wa)) (funcall func-ref))` for the func_ref path.  
+**Impact:** 623 → 117 failures (506 tests fixed).
 
 ### Group B — Error message mismatches (estimated ~32 tests)
 **Tests:** Various in the 4130–4410 range.  
@@ -53,17 +53,15 @@ Wait — for widths ≤ 31, modulo already handles it. For widths ≥ 32, Perl u
 
 ## Quick Wins — Recommended Order
 
-1. **Group B (error messages, ~32 tests)** — mechanical, low risk  
+1. **Group B (error messages, ~20 remaining tests)** — mechanical, low risk  
    - Run `./runt pack 2>/dev/null | grep "not ok"` then look at the diagnostic output  
    - Find each message in `pack-impl.pl` and align with Perl's exact string
 
-2. **Group A (eval list context, ~216 tests)** — high impact  
-   - Carefully modify `p-eval-block` to propagate `*wantarray*`  
-   - Test thoroughly since this touches many code paths
-
-3. **Group D (32-bit checksum)** — verify if already fixed, ~32 tests  
+2. **Group D (32-bit checksum, ~32 tests)** — verify if already fixed  
    - Run `perl -e 'printf "%d\n", unpack("%32c", pack("c5", -128,-1,0,1,127))'` and compare with PCL  
    - If the floor-division fix (session 196) already handles this, these tests may now pass
+
+3. **Group G (U format, ~244 tests)** — needs `_pack_utf8_char` and unpack U handler fixes
 
 ## Debugging Tools
 
@@ -79,6 +77,10 @@ echo 'my $r = (-1) % 65536; print "$r\n"' | perl       # should be 65535
 echo 'my $r = (-1) % 65536; print "$r\n"' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp 2>/dev/null | tail -3
 ```
 
+## Session 199 Changes
+
+- **Group A (eval list context) FIXED**: `Pl/ExprToCL.pm` — eval-block codegen now wraps `(p-eval-block ...)` with `(let ((*wantarray* $wa)) ...)` based on node context annotation. All three paths (`anon_sub`, `inline_lambda`, `func_ref`) fixed. **623 → 117 failures** (506 tests fixed).
+
 ## Session 198 Changes
 
 - **POSIX char classes**: `perl-regex-to-ppcre` now translates `[:alpha:]`, `[:print:]` etc. to Unicode hex ranges. CL-PPCRE 2.1.2 doesn't support POSIX class syntax. Fixes 26+ tests.
@@ -89,20 +91,11 @@ echo 'my $r = (-1) % 65536; print "$r\n"' | ./pl2cl | sbcl --noinform --load cl/
 - **Override section now at line 4248** of `cl/pcl-pack.lisp`.
 - **`pcl-pack.lisp` rebuilt**.
 
-### TODO: Group A — eval block context propagation
+### DONE: Group A — eval block context propagation ✅ (session 199)
 
-**Question for next session**: Are `eval { }` blocks the ONLY place where we fail to propagate list context into the inner expression? Other candidates to check:
-- `do { }` blocks: does `my @a = do { ... }` propagate list context?
-- `for`/`foreach` loop bodies (less likely)
-- `map`/`grep` blocks (already handled differently)
-- `sort` blocks (comparator, not relevant)
-- Any other block forms in PCL that call into Perl code
+Fixed in `Pl/ExprToCL.pm`. The eval-block codegen now wraps `(p-eval-block ...)` with the correct `*wantarray*` binding based on the node's context annotation — same pattern as `do { }` func_ref blocks.
 
-If `do { }` also has the same problem, a general solution might be more appropriate than fixing only `eval { }`. Before implementing Group A fix, survey all block forms.
-
-**Group A scope**: Tests 297-443 (step 2, ~74 tests) and 3511-3982 (pairs, ~118 tests) = ~192 tests failing due to `eval {}` not propagating list context.
-
-Additional Group A failures in Group B range: tests 4235, 4239, 4247, 4251, 4259 also fail because `my @got = eval { unpack(...) }` gives 1 element instead of an empty list or 2 elements. These are currently in the "Group B" bucket but are actually Group A (eval-block context) failures.
+**Investigation**: `do { }` did NOT have this problem (already uses wantarray wrapper). Only `eval { }` was missing it.
 
 ## Session 197 Changes
 

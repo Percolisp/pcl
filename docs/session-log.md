@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 199 (2026-05-20) — pack.t Group A: eval-block list context propagation
+
+### Focus
+
+Survey Group A failures from `docs/pack-attack-plan.md`: are `eval { }` blocks the only block form that fails to propagate list context? Fix if so.
+
+### Root cause analysis
+
+`my @t = eval { unpack(...) }` was returning 1 element instead of N. The issue:
+- `p-eval-block` (a CL macro) wraps the body in `handler-case`. The `*wantarray*` dynamic variable is inherited from the call site.
+- However, `p-array-= @t (p-eval-block ...)` doesn't bind `*wantarray* = t` anywhere. Whatever `*wantarray*` is in scope (typically nil = scalar) propagates into the eval block body.
+- `pl-p_unpack` saves `*pcl-caller-wantarray* = *wantarray* = nil` at entry → returns scalar (first value only).
+
+**Investigation:** `do { }` blocks did NOT have this problem. The `do { }` codegen already used `(let ((*wantarray* $wa)) (funcall func-ref))` for the func_ref path. Only `eval { }` was missing the wrapper.
+
+### Fix
+
+`Pl/ExprToCL.pm`, eval-block section (lines ~1067–1094). All three eval-block paths (`anon_sub`, `inline_lambda`, `func_ref`) now compute the context and wrap with `(let ((*wantarray* $wa)) ...)`. For INHERIT_CTX, no wrapper is added. Pattern mirrors the existing `do { }` func_ref case exactly.
+
+### Pack.t progress
+
+- Session 198 end: **518 failures** (estimated)
+- After Group A fix: **117 failures** (506 tests fixed)
+- **Total: 14605 pass, 117 fail, 8771 skip, 14722 total**
+
+### Full sweep
+
+- **27439 passing, 2230 failing across 107 files** (+ 2 skipped)
+- **58 fully passing files** (was 42 in session 192)
+
+---
+
 ## Session 198 (2026-05-19) — pack.t: POSIX regex classes, slash depth, B/b/H/h slash, Group B analysis
 
 ### Focus
