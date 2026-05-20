@@ -2396,10 +2396,16 @@ sub handle_subcalls {
 
     # If can be zero-param, check if next token is an operator
     # (but NOT a Cast token like @, $, %, etc. which are deref operators for arguments)
+    # Also NOT if the operator can be a unary prefix (like ~, !, +, -, not, \)
+    # because then it's likely the start of an argument expression, not a binary op.
+    # e.g., `length ~0` → length(~0), not length() followed by ~0
     if ($is_zero_param && $i + 1 < scalar(@$e)) {
       my $next = $e->[$i + 1];
-      if ($self->is_token_operator($next) && ref($next) ne 'PPI::Token::Cast') {
-        # Function followed by operator - treat as zero params
+      my $next_op = $self->is_token_operator($next);
+      my %can_be_prefix = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+      if ($next_op && ref($next) ne 'PPI::Token::Cast'
+          && !$can_be_prefix{$next_op}) {
+        # Function followed by binary-only operator - treat as zero params
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $node_id = $self->make_node($now);
         $self->add_child_to_node($top_id, $node_id);
@@ -2562,6 +2568,21 @@ sub handle_subcalls {
                 } else {
                     last;
                 }
+            }
+        } elsif (ref($next_term) eq 'PPI::Token::Operator'
+                 && grep { $next_term->content() eq $_ } ('~', '!')) {
+            # Unary prefix operator (~, !) — include operator and its operand as the argument
+            if ($end_pars >= $i + 2) {
+                $end_pars = $i + 2;
+                # Handle chained prefix operators: ~~0, !!$x, etc.
+                while ($end_pars < scalar(@$e) - 1) {
+                    my $nx = $e->[$end_pars];
+                    last unless ref($nx) eq 'PPI::Token::Operator'
+                             && grep { $nx->content() eq $_ } ('~', '!');
+                    $end_pars++;
+                }
+            } else {
+                $end_pars = $i + 1;
             }
         } else {
             $end_pars = $i + 1;

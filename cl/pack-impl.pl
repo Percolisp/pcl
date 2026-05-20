@@ -1,8 +1,23 @@
+## Copyright (c) 2025-2026
+## This is free software; you can redistribute it and/or modify it
+## under the same terms as the Perl 5 programming language system itself.
+
 use strict;
 use warnings;
 
+# REBUILD PROCEDURE: after running ./pl2cl < cl/pack-impl.pl to regenerate cl/pcl-pack.lisp:
+#   1. Keep the manually-maintained header in cl/pcl-pack.lisp (lines up to and including
+#      the @INC setup). The header begins with (in-package :pcl) and must stay in :pcl.
+#   2. Remove the generated (p-defpackage :main) and (in-package :main) lines — pack-impl.pl
+#      has no `package` declaration, so PCL defaults to :main. Those two lines must be deleted
+#      so all functions stay in the :pcl package (matching pcl-pack.lisp.bak behavior).
+#      Switching to :main causes "MAIN also shadows" SBCL warnings in subsequent test code.
+#   3. Ensure the p-pack / p-unpack wrapper defuns are appended at the end (they call
+#      pl-p_pack / pl-p_unpack, the transpiled names of p_pack / p_unpack below).
+
 my $CAN_ENDIAN = 'sSiIlLqQjJfFdDpP';
 my $CAN_SHRIEK = 'sSiIlLnNvVxX.@';
+my $MAX_GROUP_DEPTH = 100;
 
 # Returns (nbytes, signed_flag, big_endian_default) for integer types; () otherwise.
 sub _pack_type_info {
@@ -26,13 +41,21 @@ sub _pack_type_info {
     return ();
 }
 
+our $pcl_pack_comma_warned = 0;  # reset at start of each p_pack call
+
 sub _pack_skip_ws {
     my ($s, $ti) = @_;
     my $tlen = length($s);
     while ($ti < $tlen) {
         my $ch = substr($s, $ti, 1);
-        # Perl pack templates allow commas as separators (like whitespace)
-        if ($ch eq ' ' || $ch eq "\t" || $ch eq "\n" || $ch eq "\r" || $ch eq "\f" || $ch eq ',') {
+        if ($ch eq ' ' || $ch eq "\t" || $ch eq "\n" || $ch eq "\r" || $ch eq "\f") {
+            $ti++;
+        } elsif ($ch eq ',') {
+            # Perl warns on commas (once per pack call) but treats as separator
+            unless ($pcl_pack_comma_warned) {
+                warn "Invalid type ',' in pack\n";
+                $pcl_pack_comma_warned = 1;
+            }
             $ti++;
         } elsif ($ch eq '#') {
             $ti++;
@@ -72,22 +95,27 @@ sub _pack_parse_mods {
     my ($tmpl, $ti_ref, $inh_be, $inh_le, $ch, $ctx) = @_;
     my $tlen = length($tmpl);
     my ($bang, $be, $le) = (0, $inh_be, $inh_le);
-    my ($got_be, $got_le) = (0, 0);
+    my ($got_be, $got_le, $got_bang) = (0, 0, 0);
     while ($$ti_ref < $tlen) {
         my $m = substr($tmpl, $$ti_ref, 1);
         if ($m eq '!') {
             die "'!' allowed only after types $CAN_SHRIEK in $ctx\n"
                 unless index($CAN_SHRIEK, $ch) >= 0;
-            $bang = 1; $$ti_ref++;
+            warn "Duplicate modifier '!' after '$ch' in $ctx\n" if $got_bang;
+            $bang = 1; $got_bang = 1; $$ti_ref++;
         } elsif ($m eq '>') {
             die "'>' allowed only after types $CAN_ENDIAN in $ctx\n"
                 unless index($CAN_ENDIAN, $ch) >= 0 || $ch eq '(';
             die "Can't use both '<' and '>' after type '$ch' in $ctx\n" if $got_le;
+            die "Can't use '>' in a group with different byte-order in $ctx\n" if $inh_le;
+            warn "Duplicate modifier '>' after '$ch' in $ctx\n" if $got_be;
             $be = 1; $le = 0; $got_be = 1; $$ti_ref++;
         } elsif ($m eq '<') {
             die "'<' allowed only after types $CAN_ENDIAN in $ctx\n"
                 unless index($CAN_ENDIAN, $ch) >= 0 || $ch eq '(';
             die "Can't use both '<' and '>' after type '$ch' in $ctx\n" if $got_be;
+            die "Can't use '<' in a group with different byte-order in $ctx\n" if $inh_be;
+            warn "Duplicate modifier '<' after '$ch' in $ctx\n" if $got_le;
             $le = 1; $be = 0; $got_le = 1; $$ti_ref++;
         } else {
             last;
@@ -117,7 +145,7 @@ sub _pack_template_size {
             $bang = 1 if substr($tmpl, $ti, 1) eq '!';
             $ti++;
         }
-        $ti = _pack_skip_ws($tmpl, $ti);
+        # No ws skip here: space between type+mods and count is invalid in Perl.
         my ($all, $count, $nrep) = _pack_parse_count($tmpl, \$ti);
         $nrep = 1 unless defined $nrep && $nrep >= 1;
         if (defined $grpbeg) {
@@ -160,7 +188,8 @@ sub _pack_template_size {
 sub _pack_parse_count {
     my ($tmpl, $ti_ref) = @_;
     my $tlen = length($tmpl);
-    $$ti_ref = _pack_skip_ws($tmpl, $$ti_ref);
+    # NOTE: do NOT skip whitespace here — space between type and count is invalid in Perl.
+    # The caller (_pack_tmpl, _unpack_tmpl) skips whitespace BEFORE the type, not between type and count.
     if ($$ti_ref < $tlen && substr($tmpl, $$ti_ref, 1) eq '*') {
         $$ti_ref++; return (1, undef, 1);
     }
@@ -180,6 +209,8 @@ sub _pack_parse_count {
             my $n = $inner + 0;
             return (0, $n, $n);
         }
+        die "Within \[\]-length '\@' not allowed\n" if index($inner, '@') >= 0;
+        die "Malformed integer in \[\]\n" if $inner =~ /^\d/ && $inner !~ /^\d+$/;
         my $n = _pack_template_size($inner);
         return (0, $n, $n);
     }
@@ -225,13 +256,10 @@ sub _unpack_read_int {
         }
     }
     if ($signed) {
-        if ($nbytes == 8) {
-            # Avoid NV precision issues for 64-bit: use UV bitwise shift to detect sign bit
-            if ($v >> 63) { $v = -(~$v + 1) }  # two's-complement negation via UV bitwise ops
-        } else {
-            my $max = 2 ** ($nbytes * 8);
-            $v -= $max if $v >= $max / 2;
-        }
+        # In Perl, 2**64 is a float and loses precision, but pack-impl.pl is transpiled to CL
+        # where (expt 2 64) is exact. The general formula works for all sizes in CL.
+        my $max = 2 ** ($nbytes * 8);
+        $v -= $max if $v >= $max / 2;
     }
     return $v;
 }
@@ -299,8 +327,17 @@ sub _pack_str_one {
             $$result_ref .= chr(($hi << 4) | $lo);
         }
     } elsif ($ch eq 'u') {
-        for (my $cs = 0; $cs < $slen; $cs += 45) {
-            my $ce = $cs + 45 < $slen ? $cs + 45 : $slen;
+        my $line_len = 45;
+        if (!$star && $nrep > 45) {
+            if ($nrep > 63) {
+                warn "Field too wide in 'u' format in pack";
+                $line_len = 63;
+            } else {
+                $line_len = $nrep;
+            }
+        }
+        for (my $cs = 0; $cs < $slen; $cs += $line_len) {
+            my $ce = $cs + $line_len < $slen ? $cs + $line_len : $slen;
             my $chunk = substr($arg, $cs, $ce - $cs);
             my $clen = length($chunk);
             $$result_ref .= chr(32 + $clen);
@@ -329,9 +366,12 @@ sub _pack_utf8_char {
 
 # Main pack loop. Reads from $args_ref via $$ai_ref, appends to $$result_ref.
 # $out_base: position in $$result_ref where the current group started (for @ relative offsets).
+# $depth: nesting depth for ()-groups (dies if > $MAX_GROUP_DEPTH).
 sub _pack_tmpl {
-    my ($tmpl, $ai_ref, $args_ref, $result_ref, $inh_be, $inh_le, $out_base) = @_;
+    my ($tmpl, $ai_ref, $args_ref, $result_ref, $inh_be, $inh_le, $out_base, $depth) = @_;
     $out_base = 0 unless defined $out_base;
+    $depth = 0 unless defined $depth;
+    die "Too deeply nested \(\)-groups in pack\n" if $depth > $MAX_GROUP_DEPTH;
     my $nargs = scalar(@$args_ref);
     my $ti = 0;
     my $tlen = length($tmpl);
@@ -345,13 +385,21 @@ sub _pack_tmpl {
             $grpbeg = $ti; $ti = $grpend + 1; $ch = '(';
         }
         my ($bang, $be, $le) = _pack_parse_mods($tmpl, \$ti, $inh_be, $inh_le, $ch, 'pack');
-        $ti = _pack_skip_ws($tmpl, $ti);
+        # No ws skip here: space between type+mods and count is invalid in Perl.
+        my $ti_before_count = $ti;
         my ($star, $count, $nrep) = _pack_parse_count($tmpl, \$ti);
+        my $had_count = ($star || $ti > $ti_before_count);
         $ti = _pack_skip_ws($tmpl, $ti);
 
         # Slash — count prefix: ch encodes length, next char is data format
         if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/') {
             $ti++;
+            $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;
+            # '/' must not have a count applied directly to it (e.g. c/*a or c/1a are invalid;
+            # Z*/A* is valid because * is the count for Z, not for /).
+            { my $c = substr($tmpl, $ti, 1);
+              die "'/' does not take a repeat count in pack\n"
+                if $c eq '*' || $c eq '[' || $c =~ /\d/; }
             my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';
             $darg = '' unless defined $darg;
             my $dlen = length($darg);
@@ -360,6 +408,19 @@ sub _pack_tmpl {
                 $$result_ref .= _pack_emit_int($dlen, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));
             } elsif ($ch eq 'A' || $ch eq 'a') {
                 _pack_str_one($ch, "$dlen", 1, 0, $result_ref);
+            } elsif ($ch eq 'Z') {
+                # Z*/A*: write count as decimal string followed by null byte
+                _pack_str_one('Z', "$dlen", length("$dlen") + 1, 0, $result_ref);
+            } elsif ($ch eq 'w') {
+                # w/A*: write count as BER-encoded integer
+                my $v = $dlen;
+                if ($v == 0) { $$result_ref .= chr(0); }
+                else {
+                    my @bytes;
+                    while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                    for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                    $$result_ref .= chr($bytes[-1]);
+                }
             }
             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;
             my $dfmt = substr($tmpl, $ti, 1); $ti++;
@@ -380,17 +441,23 @@ sub _pack_tmpl {
         # Group
         if (defined $grpbeg) {
             my $inner = substr($tmpl, $grpbeg, $grpend - $grpbeg);
+            # Check: group must not start with a count
+            my $gti = _pack_skip_ws($inner, 0);
+            if ($gti < length($inner)) {
+                my $fc = substr($inner, $gti, 1);
+                die "\(\)-group starts with a count in pack\n" if $fc =~ /^[\d\*\[]/;
+            }
             if ($star) {
                 while ($$ai_ref < $nargs) {
                     my $ai_before = $$ai_ref;
                     my $iter_base = length($$result_ref);
-                    _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base);
+                    _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1);
                     last if $$ai_ref == $ai_before;  # no progress: avoid infinite loop
                 }
             } else {
                 for (my $r = 0; $r < $nrep; $r++) {
                     my $iter_base = length($$result_ref);
-                    _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base);
+                    _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1);
                 }
             }
             next;
@@ -440,7 +507,7 @@ sub _pack_tmpl {
             next;
         }
         if ($ch eq 'p' || $ch eq 'P' || $ch eq 'D') {
-            $$ai_ref++ if $$ai_ref < $nargs; next;
+            die "Invalid type '$ch' in pack\n";
         }
 
         # For multi-arg formats, * means use all remaining args
@@ -462,7 +529,7 @@ sub _pack_tmpl {
             my $be2 = $be ? 1 : ($le ? 0 : 0);
             for (my $r = 0; $r < $nrep; $r++) {
                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
-                $$result_ref .= _pack_float32($v+0.0, $be2);
+                $$result_ref .= _pack_float32($v, $be2);
             }
             next;
         }
@@ -470,7 +537,7 @@ sub _pack_tmpl {
             my $be2 = $be ? 1 : ($le ? 0 : 0);
             for (my $r = 0; $r < $nrep; $r++) {
                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
-                $$result_ref .= _pack_float64($v+0.0, $be2);
+                $$result_ref .= _pack_float64($v, $be2);
             }
             next;
         }
@@ -500,11 +567,19 @@ sub _pack_tmpl {
         }
         if ($ch eq 'w') {
             for (my $r = 0; $r < $nrep; $r++) {
-                my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
-                $v = $v + 0;
+                my $raw = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
+                my $orig_s = "$raw";  # stringify BEFORE numeric coercion
+                my $v = $raw + 0;
                 die "Cannot compress negative numbers in pack\n" if $v < 0;
                 die "Cannot compress Inf in pack\n" if $v != 0 && $v == $v * 2;
                 die "Can only compress unsigned integers in pack\n" if $v != int($v);
+                # Perl also rejects float-notation strings (e.g. "1e21") when value > UV_MAX.
+                # Pure-digit strings (even > UV_MAX) succeed; so does any non-string source.
+                # In CL: pure-digit strings → exact bignum; e/E strings → double-float.
+                # The $v != int($v) check cannot distinguish a large integer-valued float from
+                # an exact bignum, so check the original string form for scientific notation.
+                die "Can only compress unsigned integers in pack\n"
+                    if $orig_s =~ /[eE]/ && $v >= 2**64;
                 $v = int($v);
                 if ($v == 0) { $$result_ref .= chr(0); next }
                 my @bytes;
@@ -515,6 +590,7 @@ sub _pack_tmpl {
             next;
         }
 
+        die "Invalid type '/' in pack\n" if $ch eq '/';
         die "Invalid type '$ch' in pack\n";
     }
 }
@@ -549,6 +625,7 @@ sub _pack_check_brackets {
 
 sub p_pack {
     my ($tmpl, @args) = @_;
+    local $pcl_pack_comma_warned = 0;  # reset comma warning flag for this call
     _pack_check_brackets($tmpl);
     my $result = '';
     my $ai = 0;
@@ -683,9 +760,12 @@ sub _unpack_str {
 
 # Core unpack loop. Reads from $s using $$si_ref, pushes items via $push_val.
 # $group_base: the si value at the start of the current group iteration (for @ relative offsets).
+# $depth: nesting depth for ()-groups.
 sub _unpack_tmpl {
-    my ($tmpl, $s, $si_ref, $push_val, $inh_be, $inh_le, $checksum_p, $group_base) = @_;
+    my ($tmpl, $s, $si_ref, $push_val, $inh_be, $inh_le, $checksum_p, $group_base, $depth) = @_;
     $group_base = 0 unless defined $group_base;
+    $depth = 0 unless defined $depth;
+    die "Too deeply nested \(\)-groups in unpack\n" if $depth > $MAX_GROUP_DEPTH;
     my $slen = length($s);
     my $ti = 0;
     my $tlen = length($tmpl);
@@ -699,18 +779,30 @@ sub _unpack_tmpl {
             $grpbeg = $ti; $ti = $grpend + 1; $ch = '(';
         }
         my ($bang, $be, $le) = _pack_parse_mods($tmpl, \$ti, $inh_be, $inh_le, $ch, 'unpack');
-        $ti = _pack_skip_ws($tmpl, $ti);
+        # No ws skip here: space between type+mods and count is invalid in Perl.
+        my $ti_before_count = $ti;
         my ($all, $count, $nrep) = _pack_parse_count($tmpl, \$ti);
+        my $had_count = ($all || $ti > $ti_before_count);
         $ti = _pack_skip_ws($tmpl, $ti);
 
         # Slash mode: count/data pairs, with support for chained slashes (A /A /A ...)
         if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/') {
             $ti++;
+            $ti = _pack_skip_ws($tmpl, $ti);
+            die "Code missing after '/' in unpack\n" if $ti >= $tlen;
+            # '/' must not have a count applied directly to it (e.g. c/*a or c/1a are invalid;
+            # Z*/A* is valid because * is the count for Z, not for /).
+            { my $c = substr($tmpl, $ti, 1);
+              die "'/' does not take a repeat count in unpack\n"
+                if $c eq '*' || $c eq '[' || $c =~ /\d/; }
             my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);
             my $slash_n = 0;
             if ($nb) {
                 my $be2 = $be ? 1 : ($le ? 0 : $dbe);
-                last if $$si_ref + $nb > $slen;
+                if ($$si_ref + $nb > $slen) {
+                    last unless $depth > 0;
+                    die "length/code after end of string in unpack\n";
+                }
                 $slash_n = _unpack_read_int($s, $$si_ref, $nb, $be2, $sig);
                 $$si_ref += $nb;
             } elsif ($ch eq 'w') {
@@ -720,12 +812,19 @@ sub _unpack_tmpl {
                     my $b = ord(substr($s, $$si_ref++, 1));
                     $more = $b & 0x80; $slash_n = ($slash_n<<7)|($b&0x7F);
                 }
+            } elsif ($ch eq 'Z') {
+                # Z*/...: read null-terminated decimal count string
+                my $end = index($s, "\0", $$si_ref);
+                if ($end < 0) { $end = $slen; }  # no null → read to end
+                my $raw = substr($s, $$si_ref, $end - $$si_ref);
+                $$si_ref = $end + 1;  # skip past the null byte
+                $$si_ref = $slen if $$si_ref > $slen;
+                $slash_n = $raw + 0;
             } else {
                 my $n = $all ? ($slen-$$si_ref) : $nrep;
                 my $raw = $$si_ref < $slen ? substr($s, $$si_ref, $n) : '';
                 $$si_ref += $n;
                 $raw =~ s/[ \x00]+$// if $ch eq 'A';
-                $raw =~ s/\x00.*//s   if $ch eq 'Z';
                 $slash_n = $raw + 0;  # numeric value of the count string
             }
             # Process the data field(s). Loop to support chained slashes: A /A /A ...
@@ -746,10 +845,10 @@ sub _unpack_tmpl {
                     # This data field is a count for the next slash — read it, don't push
                     if ($dnb) {
                         my $dbe3 = $dbe2 ? 1 : ($dle2 ? 0 : $ddbe);
-                        if ($$si_ref + $dnb <= $slen) {
-                            $slash_n = _unpack_read_int($s, $$si_ref, $dnb, $dbe3, $dsig);
-                            $$si_ref += $dnb;
-                        } else { $slash_n = 0 }
+                        die "length/code after end of string in unpack\n"
+                            if $$si_ref + $dnb > $slen;
+                        $slash_n = _unpack_read_int($s, $$si_ref, $dnb, $dbe3, $dsig);
+                        $$si_ref += $dnb;
                     } elsif ($dch eq 'w') {
                         $slash_n = 0;
                         my $more = 1;
@@ -775,14 +874,16 @@ sub _unpack_tmpl {
                             $push_val->(_unpack_read_int($s, $$si_ref, $dnb, $dbe3, $dsig));
                             $$si_ref += $dnb;
                         }
-                    } elsif ($dch eq 'A'||$dch eq 'a'||$dch eq 'Z') {
+                    } elsif ($dch eq 'A'||$dch eq 'a'||$dch eq 'Z'
+                             ||$dch eq 'B'||$dch eq 'b'||$dch eq 'H'||$dch eq 'h'
+                             ||$dch eq 'u'||$dch eq 'U') {
                         _unpack_str($dch, $slash_n, 0, $s, $si_ref, $push_val, $checksum_p);
                     } elsif ($dch eq '(') {
                         my $ge = _pack_find_group_end($tmpl, $ti);
                         my $inner = substr($tmpl, $ti, $ge - $ti); $ti = $ge + 1;
                         for (my $r=0; $r<$slash_n; $r++) {
                             my $iter_base = $$si_ref;
-                            _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base);
+                            _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base, $depth + 1);
                         }
                     }
                     last;  # exit the chain loop
@@ -794,17 +895,22 @@ sub _unpack_tmpl {
         # Group
         if (defined $grpbeg) {
             my $inner = substr($tmpl, $grpbeg, $grpend - $grpbeg);
+            my $gti = _pack_skip_ws($inner, 0);
+            if ($gti < length($inner)) {
+                my $fc = substr($inner, $gti, 1);
+                die "\(\)-group starts with a count in unpack\n" if $fc =~ /^[\d\*\[]/;
+            }
             if ($all) {
                 while ($$si_ref < $slen) {
                     my $si_before = $$si_ref;
                     my $iter_base = $$si_ref;
-                    _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base);
+                    _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base, $depth + 1);
                     last if $$si_ref == $si_before;  # no progress: avoid infinite loop
                 }
             } else {
                 for (my $r=0; $r<$nrep; $r++) {
                     my $iter_base = $$si_ref;
-                    _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base);
+                    _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base, $depth + 1);
                 }
             }
             next;
@@ -835,7 +941,7 @@ sub _unpack_tmpl {
             next;
         }
         if ($ch eq '%' || $ch eq '!' ) { next }
-        if ($ch eq 'p'||$ch eq 'P'||$ch eq 'D') { next }
+        if ($ch eq 'p'||$ch eq 'P'||$ch eq 'D') { die "Invalid type '$ch' in unpack\n" }
         if ($ch eq '.') {
             # Position format: pushes current offset, does not advance.
             # .* = absolute pos from string start.
@@ -894,6 +1000,7 @@ sub _unpack_tmpl {
             next;
         }
 
+        die "'/' must follow a numeric type in unpack\n" if $ch eq '/';
         die "Invalid type '$ch' in unpack\n";
     }
 }
@@ -901,6 +1008,8 @@ sub _unpack_tmpl {
 sub p_unpack {
     my ($tmpl, $s) = @_;
     $s = '' unless defined $s;
+    # Strip leading whitespace and #-comments before prefix detection
+    $tmpl =~ s/\A(?:[ \t\n\r\f,]|#[^\n]*\n?)*//;
     # %N checksum detection
     my $checksum_width = 0;
     if ($tmpl =~ s/^%(\d*)//) {
@@ -908,6 +1017,8 @@ sub p_unpack {
     }
     # U0 UTF-8 byte mode
     my $utf8_mode = ($tmpl =~ s/^U0//);
+    # Strip leading whitespace again in case %32 was followed by spaces
+    $tmpl =~ s/\A(?:[ \t\n\r\f,]|#[^\n]*\n?)*// if $checksum_width;
     _pack_check_brackets($tmpl);
     if ($utf8_mode) {
         my $bytes = '';
@@ -928,7 +1039,13 @@ sub p_unpack {
     my $si = 0;
     _unpack_tmpl($tmpl, $s, \$si, $push_val, 0, 0, $checksum_width ? 1 : 0);
     if ($checksum_width) {
-        return $checksum % (2 ** $checksum_width);
+        # Use floor-division modulo: works for both negative integers and float checksums.
+        # Perl's % truncates to int first (wrong for floats); CL's p-% does (mod trunc trunc).
+        # Formula: r = checksum - floor(checksum/mod)*mod, avoiding POSIX::floor.
+        my $mod = 2 ** $checksum_width;
+        my $q = int($checksum / $mod);
+        $q-- if $q * $mod > $checksum;
+        return $checksum - $q * $mod;
     }
     return wantarray ? @result : $result[0];
 }

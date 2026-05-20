@@ -1069,6 +1069,13 @@ sub gen_funcall {
   if ($func_name eq 'eval' && @$kids == 2) {
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
     if ($self->expr_o->is_internal_node_type($arg_node)) {
+      my $ctx = $self->expr_o->get_node_context($node_id);
+      my $wrap = sub {
+        my ($inner) = @_;
+        return $inner if $ctx == INHERIT_CTX;
+        my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+        return "(let ((*wantarray* $wa)) $inner)";
+      };
       if ($arg_node->{type} eq 'anon_sub') {
         # eval { block } with inline anon_sub - generate p-eval-block with body
         my $block_kids = $self->expr_o->get_node_children($kids->[1]);
@@ -1077,18 +1084,17 @@ sub gen_funcall {
           push @body_parts, $self->gen_node($kid_id);
         }
         my $body = join(' ', @body_parts);
-        return "(p-eval-block $body)";
+        return $wrap->("(p-eval-block $body)");
       }
       elsif ($arg_node->{type} eq 'inline_lambda') {
         # eval { block } parsed as inline_lambda (avoids defun side-effect)
         my $body = $arg_node->{body_cl} // 'nil';
-        return "(p-eval-block $body)";
+        return $wrap->("(p-eval-block $body)");
       }
       elsif ($arg_node->{type} eq 'func_ref') {
         # eval { block } with named function (from Parser callback)
-        # Generate p-eval-block that calls the function
         my $func_ref = $self->gen_node($kids->[1]);
-        return "(p-eval-block (funcall $func_ref))";
+        return $wrap->("(p-eval-block (funcall $func_ref))");
       }
     }
   }
@@ -1588,10 +1594,12 @@ sub gen_funcall {
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
 
-  # reverse/localtime/gmtime/caller/do are wantarray-sensitive built-ins: they use
+  # reverse/localtime/gmtime/caller/unpack are wantarray-sensitive built-ins: they use
   # *wantarray* internally (or propagate it to do-file code).
   # Explicitly bind for all contexts so the outer dynamic scope can't leak into them.
-  if ($func_name =~ /^(reverse|localtime|gmtime|caller)$/) {
+  # unpack: scalar unpack() in list-context assignment (@a = scalar unpack()) must
+  # force scalar context so p-unpack returns $result[0] not @result.
+  if ($func_name =~ /^(reverse|localtime|gmtime|caller|unpack)$/) {
     return $ctx == LIST_CTX
         ? "(let ((*wantarray* t)) $call)"
         : "(let ((*wantarray* nil)) $call)";

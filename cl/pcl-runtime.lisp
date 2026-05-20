@@ -1184,9 +1184,11 @@
     (if ha (p-call-overload ha a b nil)
         (let ((hb (p-find-overload b "/")))
           (if hb (p-call-overload hb b a t)
-              ;; CL integer/integer -> ratio; Perl always gives float
+              ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
+              ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
+              ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
               (let ((r (%pcl-ieee-arith (lambda () (/ (to-number a) (to-number b))))))
-                (if (rationalp r) (coerce r 'double-float) r)))))))
+                (if (typep r 'ratio) (coerce r 'double-float) r)))))))
 (defun p-% (a b)
   "Perl modulo with use overload '%' dispatch"
   ;; use overload "%": modulo overload
@@ -1196,8 +1198,8 @@
           (if hb (p-call-overload hb b a t)
               (let ((na (to-number a)) (nb (to-number b)))
                 (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
-                        (sb-ext:float-infinity-p (coerce na 'double-float))
-                        (sb-ext:float-infinity-p (coerce nb 'double-float))
+                        (and (floatp na) (sb-ext:float-infinity-p na))
+                        (and (floatp nb) (sb-ext:float-infinity-p nb))
                         (zerop nb))
                     (sb-kernel:make-double-float #x7FF80000 0)
                     (mod (truncate na) (truncate nb)))))))))
@@ -1212,6 +1214,12 @@
     ;; No overload: existing numeric path with Inf-on-overflow
     (let ((na (to-number a))
           (nb (to-number b)))
+      ;; Return exact bignum when both args are non-negative integers AND the
+      ;; result fits in ~1000 bits.  This matters for pack/unpack: 2**64 as
+      ;; double loses precision.  Guard prevents 9**(9**9) from hanging SBCL.
+      (when (and (integerp na) (integerp nb) (>= nb 0)
+                 (<= (* nb (max 1 (integer-length na))) 1000))
+        (return-from p-** (expt na nb)))
       (handler-case
           (expt (coerce na 'double-float) (coerce nb 'double-float))
         (floating-point-overflow ()
@@ -3642,8 +3650,11 @@
 
 (defun %pcl-to-integer (n)
   "Convert numeric value to integer, clamping Inf/NaN to 0 (Perl UV_MAX truncation)"
-  (let ((d (coerce n 'double-float)))
-    (if (or (%pcl-nan-p d) (sb-ext:float-infinity-p d)) 0 (truncate d))))
+  ;; Short-circuit for exact integers: avoid float coercion which loses precision
+  ;; for values >= 2^53 (e.g. 2^64-1 rounds to 2^64, breaking 64-bit unpack).
+  (if (integerp n) n
+      (let ((d (coerce n 'double-float)))
+        (if (or (%pcl-nan-p d) (sb-ext:float-infinity-p d)) 0 (truncate d)))))
 
 (defun p-bit-and (a b)
   "Perl bitwise AND — string (char-by-char, truncates) or numeric"
@@ -8581,6 +8592,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                (lambda (match content)
                  (declare (ignore match))
                  (cl-ppcre:quote-meta-chars content))
+               :simple-calls t))
+         ;; Translate POSIX character classes to equivalent ranges.
+         ;; CL-PPCRE 2.1.2 does not support [:class:] syntax.
+         (pat (cl-ppcre:regex-replace-all
+               "\\[:(\\w+):\\]"
+               pat
+               (lambda (match class-name)
+                 (declare (ignore match))
+                 (cond
+                   ((equal class-name "alpha")  "a-zA-Z")
+                   ((equal class-name "digit")  "0-9")
+                   ((equal class-name "alnum")  "a-zA-Z0-9")
+                   ((equal class-name "upper")  "A-Z")
+                   ((equal class-name "lower")  "a-z")
+                   ((equal class-name "word")   "a-zA-Z0-9_")
+                   ((equal class-name "space")  " \\t\\n\\r\\x{0c}\\x{0b}")
+                   ((equal class-name "blank")  " \\t")
+                   ((equal class-name "print")  "\\x{20}-\\x{7e}")
+                   ((equal class-name "graph")  "\\x{21}-\\x{7e}")
+                   ((equal class-name "punct")  "\\x{21}-\\x{2f}\\x{3a}-\\x{40}\\x{5b}-\\x{60}\\x{7b}-\\x{7e}")
+                   ((equal class-name "cntrl")  "\\x{00}-\\x{1f}\\x{7f}")
+                   ((equal class-name "xdigit") "0-9a-fA-F")
+                   (t match)))
                :simple-calls t)))
     (cl-ppcre:regex-replace-all
      "\\\\x\\{([0-9a-fA-F]+)\\}"
@@ -8806,7 +8840,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perform substitution on boxed string, return count of replacements.
    Also sets capture groups $1, $2, ... from the match."
   (let* ((str (to-string (unbox string-box)))
-         (pattern (p-subst-op-pattern op))
+         (pattern (perl-regex-to-ppcre (p-subst-op-pattern op)))
          (raw-replacement (p-subst-op-replacement op))
          (modifiers (p-subst-op-modifiers op))
          (eval-p (or (member :e modifiers) (functionp raw-replacement)))
