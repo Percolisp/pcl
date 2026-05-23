@@ -694,7 +694,7 @@ sub gen_binary_op {
   # Special case: '..'/'..' — range in list context, flip-flop in scalar context
   if (($op eq '..' || $op eq '...') && defined $node_id) {
     my $ctx = $self->expr_o->get_node_context($node_id);
-    if ($ctx != LIST_CTX) {
+    if ($ctx != LIST_CTX && $ctx != INHERIT_CTX) {
       # Scalar context: emit flip-flop
       my $ff_id = $g_flipflop_count++;
       my $left_node  = $self->expr_o->get_a_node($kids->[0]);
@@ -841,11 +841,11 @@ sub gen_binary_op {
     } elsif ($op eq '*') {
       return "(* (p-int $left) (p-int $right))";
     } elsif ($op eq '&') {
-      return "(p-to-s64 (logand (p-int $left) (p-int $right)))";
+      return "(p-to-s64 (logand (pcl::%pcl-to-integer (to-number $left)) (pcl::%pcl-to-integer (to-number $right))))";
     } elsif ($op eq '|') {
-      return "(p-to-s64 (logior (p-int $left) (p-int $right)))";
+      return "(p-to-s64 (logior (pcl::%pcl-to-integer (to-number $left)) (pcl::%pcl-to-integer (to-number $right))))";
     } elsif ($op eq '^') {
-      return "(p-to-s64 (logxor (p-int $left) (p-int $right)))";
+      return "(p-to-s64 (logxor (pcl::%pcl-to-integer (to-number $left)) (pcl::%pcl-to-integer (to-number $right))))";
     } elsif ($op eq '<<') {
       return "(p-<<-int $left $right)";
     } elsif ($op eq '>>') {
@@ -1864,7 +1864,7 @@ sub gen_prefix_op {
 
   # Under 'use integer', ~ returns signed 64-bit complement
   if ($op eq '~' && $self->environment && $self->environment->has_pragma('use_integer')) {
-    return "(p-to-s64 (lognot (p-int $operand)))";
+    return "(p-to-s64 (lognot (pcl::%pcl-to-integer (to-number $operand))))";
   }
 
   # For ++ and --, distinguish prefix from postfix

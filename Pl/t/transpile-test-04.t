@@ -361,4 +361,37 @@ print scalar(@r), "\n";
 print $r[0], "\n";
 ', "1\nyoyodyne\n");
 
+# ============ LIST CONTEXT / ASSIGNMENT REGRESSIONS ============
+
+test_transpile("return 1..4 gives range not flip-flop", '
+sub f { return 1..4 }
+my ($a,$b) = f();
+print "$a:$b\n";
+');
+
+test_transpile("(func())[0,0] list-slice repeats element", '
+sub f { ("x", "y", "z") }
+my @r = (f())[0,0];
+print "$r[0]:$r[1]\n";
+');
+
+test_transpile("greedy array in list assignment clears later array", '
+my (@a, @b) = (1..5);
+@a = 1..10; @b = 100..110;
+(@a, @b) = qw(x y);
+print scalar(@a), " ", scalar(@b), "\n";
+');
+
+test_transpile('string interpolation: $a[0][1] nested subscript', '
+my @a;
+$a[0] = [10, 20, 30];
+print "$a[0][1]\n";
+');
+
+test_transpile('string interpolation: $h{a}{b} nested subscript', '
+my %h;
+$h{a} = {b => "found"};
+print "$h{a}{b}\n";
+');
+
 done_testing();

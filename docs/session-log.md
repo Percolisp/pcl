@@ -4,6 +4,120 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 201 (2026-05-23) — aassign.t fixes: range, list-slice, greedy-clear, string-interp
+
+### Focus
+Fix aassign.t failures. Started at 85/177 passing; ended at 115/177 passing (+30 tests).
+
+### Bug 1: `return 1..4` generates flip-flop instead of range
+
+**Root cause:** `Pl/ExprToCL.pm` line 697 checked `if ($ctx != LIST_CTX)` for the `..` operator.
+When `return` gives its expression `INHERIT_CTX`, the check treated it as non-list, emitting
+`(p-flipflop-num ...)` instead of `(p-.. ...)`.
+
+**Fix:** Changed condition to `if ($ctx != LIST_CTX && $ctx != INHERIT_CTX)` so INHERIT_CTX
+also generates range. Fixes test 1 (`($a,$b) = f_ret_14()`) and ~19 more aassign.t tests.
+
+### Bug 2: `(f18())[0,0]` selects wrong elements
+
+**Root cause:** `gen_array_ref_access` in ExprToCL.pm forces the parenthesized expression LHS
+into LIST_CTX. `gen_progn` wraps a single list-returning expression in `(vector ...)`, producing
+a one-element wrapper vector `#(result-vector)`. `p-aref-deref` then sliced the WRAPPER
+(not the inner list), getting `#(result result)`. `p-array-=` then flattened each copy of
+`result`, giving all elements twice.
+
+**Fix:** In `p-aref-deref` (`cl/pcl-runtime.lisp`): when `arr` is a simple (non-adjustable)
+1-element vector whose single element is also a vector (not a string), unwrap it before slicing.
+This is precisely the codegen pattern for `(LIST_EXPR)[idx]` — safe because boxed array refs
+are always p-boxes, not raw vectors.
+
+Fixes tests 29-54 (NOSTEAL f18 group, NOSTEAL split list-context).
+
+### Bug 3: `(@a, @b) = LIST` doesn't clear `@b`
+
+**Root cause:** In `p-list-= ` macro (`cl/pcl-runtime.lisp`), the `greedy-done` branch handled
+all subsequent vars with `(box-set ,var *p-undef*)`. But `box-set` is a no-op on non-boxes
+(it guards with `(unless (p-box-p box) ...)`). Arrays and hashes are raw vectors/hash-tables,
+not p-boxes, so they were never cleared.
+
+**Fix:** In the `greedy-done` branch, dispatch by sigil: `@` vars use `p-array-=` with an empty
+adjustable vector; `%` vars use `p-hash-=` with an empty vector; scalars use `box-set` as before.
+
+Fixes tests 61 ("double array non-empty B len") and 68 ("double hash non-empty B len").
+
+### Bug 4: `"$a[0][1]"` string interpolation doesn't chain subscripts
+
+**Root cause:** `parse_array_subscript` and `parse_hash_subscript` in
+`Pl/PExpr/StringInterpolation.pm` returned after finding the first `[...]` or `{...}` subscript.
+They didn't check for additional chained subscripts. In Perl, `"$a[0][1]"` = `$a[0]->[1]`
+(auto-deref).
+
+**Fix:** Both functions now loop after the initial subscript: if the next character is `[`, create
+an `a_ref_acc` node (→ `p-aref-deref`); if `{`, create an `h_ref_acc` node (→ `p-gethash-deref`).
+Handles arbitrary chain depth (`$a[0][1][2]`, `$h{a}{b}`, `$a[0]{k}`).
+
+Fixes tests 23 ("lexical nested array elem swap") and 24 ("package nested array elem swap").
+
+### Results
+- **aassign.t**: 85 → 115 passing (77 still fail: aliasing, lvalue subs, refaliasing, tied vars)
+- **PCL suite**: 77 files, 2994 tests, all passing
+
+---
+
+## Session 200 (2026-05-23) — Non-pack sweep review + transpile-test-05.t bug fix
+
+### Focus
+
+Review non-pack perl-tests failures; update `docs/sweep-bug-catalog.md`; fix bug in normal test set.
+
+### Bug found and fixed: `transpile-test-05.t` test 46 (pre-existing)
+
+**Root cause:** `_assemble_output()` in `Pl/Parser.pm` emitted `(defpackage :PKG (:use :cl :pcl))`
+as a pre-declaration for cross-package symbol references. When pcl-pack.lisp defines `pl-p_pack`,
+`pl-_unpack_tmpl`, etc. in `:main` (because `pack-impl.pl` had no package declaration), and user code
+later does `(defpackage :main (:use :cl :pcl))`, SBCL emits "MAIN also shadows" warnings. These warnings
+go to stdout (via `2>&1` in the test runner) and contaminate the expected output, making the test fail.
+
+**Fix:** Changed the pre-declaration from `(defpackage $cl_pkg (:use :cl :pcl))` to
+`(pcl:p-defpackage $cl_pkg)` in `Pl/Parser.pm`. The `p-defpackage` macro already suppresses all
+package-variance warnings via `(handler-bind ((warning #'muffle-warning)) ...)`. Using the fully-qualified
+`pcl:p-defpackage` form is necessary because at file load time, `*package*` is `COMMON-LISP-USER`
+(SBCL rebinds `*package*` for each `load` call), so `p-defpackage` is only accessible via the `pcl:` prefix.
+
+**Regression fix:** `Pl/t/decl-ordering-01.t` test 23 checked `qr/\(defpackage :Util\b/`; updated to
+`qr/p-defpackage :Util\b/` to match the new output form.
+
+**Result:** All 2992 PCL tests now pass (was 2991 with 1 known failure).
+
+### Non-pack sweep analysis
+
+Sweep result: **27439 passing, 2230 failing, 58 fully passing files** (unchanged from session 199 baseline).
+
+**Newly fully-passing files since session 185 catalog update** (sessions 186–200):
+- sort.t, each.t, loopctl.t, join.t, for.t, my.t, chr.t, ord.t, do.t, splice.t,
+  reset.t, vec.t, wantarray.t, auto.t, flip.t, pos.t, qr.t, readline.t
+
+**Session 200 additional fixes** (after catalog update):
+- **`p-post++` `*p-undef*` bug**: `p-post++` checked `(null v)` but `*p-undef*` is `:undef` keyword (not CL nil). Fixed: `(or (null v) (eq v *p-undef*))` in both the `p-aref-box`/`p-gethash-box` arm and the default arm. Fixes state.t test 36 (and regular hash post-increment on uninitialized keys).
+- **`state %h = qw(...)` init bug**: `_process_state_declaration` in Parser.pm wrapped hash init in `(list ...)` but `p-hash-=` has no `listp` branch. Removed the wrapper. Fixes state.t tests 38–40.
+- **state-01.t**: Added tests 23–24 as regression tests for the above fixes. Total: 25 tests.
+- **state.t sweep**: 138→142 passing.
+
+**Partial-stop files (unchanged root causes):**
+- `bop.t` (434+62/510): stops at test 451 ("correct error" message mismatch); large-shift
+  `use integer` edge cases (documented not-supported), `~.` complement, glob bitwise ops.
+- `state.t` (142+20/166): state hash `:shared` attribute, computed goto, state in map/grep.
+- `length.t` (32+15/49): `use bytes` tests (not-supported), overloaded length, 2 tests unreached.
+- `ref.t` (168+62/245): IO/FORMAT refs, lvalue ref types, UTF-8 stash names.
+- `method.t` (113+47/163): `&$one()` error message, AUTOLOAD chain, SUPER in moved package.
+- `caller.t` (12+53/112): mostly not-supported (filename/line tracking).
+
+**Zero-passing:** crypt.t, lfs.t, signatures.t, test-pack-new.t, test_ref_pass.t (all expected).
+
+Updated `docs/sweep-bug-catalog.md` with current per-file analysis.
+
+---
+
 ## Session 199 (2026-05-20) — pack.t Group A: eval-block list context propagation
 
 ### Focus
