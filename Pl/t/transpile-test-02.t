@@ -384,6 +384,33 @@ my $r = $s x 4;
 say $r;
 ');
 
+# ============ REFERENCES ============
+
+test_transpile('double deref $$ref', '
+my $y = 42;
+my $ref = \$y;
+my $got = $$ref;
+print "$got\n";
+');
+
+test_transpile('double deref ${$ref} block form', '
+my $y = 42;
+my $ref = \$y;
+my $got = ${$ref};
+print "$got\n";
+');
+
+# Triple dereference via explicit block form.
+# Note: $$$refref (no braces) is misread by PPI as $$ (PID magic var) + $refref,
+# so PCL requires the explicit block form ${$$refref} for triple dereference.
+test_transpile('triple deref ${$$refref} block form', '
+my $y = 42;
+my $ref_y = \$y;
+my $refref = \$ref_y;
+my $got = ${$$refref};
+print "$got\n";
+');
+
 # ============ NUMERIC OPERATIONS ============
 
 test_transpile("numeric: int and abs", '

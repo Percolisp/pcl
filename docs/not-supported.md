@@ -572,6 +572,40 @@ require significant runtime changes for a removed, never-stable feature.
 
 ---
 
+## Triple (and higher) dereference without braces: `$$$ref`
+
+**Perl behaviour:** `$$$ref` is a triple dereference: Perl parses it as
+`${$$ref}` — dereference `$$ref` (which is itself a scalar ref), then
+dereference the result.
+
+**PCL behaviour:** The `$$$ref` syntax does not work.  PPI — the Perl parser
+PCL relies on — tokenizes `$$$ref` as the two-token sequence `$$` (the special
+PID variable) followed by `$ref`, rather than as a triple dereference.  PCL
+therefore generates incorrect code and typically emits a PARSE ERROR.
+
+**Workaround:** Write the explicit block form `${$$ref}`, which PPI tokenizes
+correctly and PCL handles:
+
+```perl
+my $y = 42;
+my $r  = \$y;
+my $rr = \$r;
+print ${$$rr};   # prints 42 — works in PCL
+print $$$rr;     # PARSE ERROR in PCL — use block form above
+```
+
+**Rationale:** This is a PPI tokenizer limitation, not a PCL semantic gap.
+Fixing it would require either patching PPI or adding a pre-processing pass
+in `Pl/Parser.pm`'s `_preprocess_source()` to rewrite `$$$var` → `${$$var}`
+before PPI sees the source.  That rewrite is fragile (e.g. `$$\$ref` is not
+the same) and `$$$var` is extremely rare in real code; `${$$var}` is the
+idiomatic form taught in Perl documentation.
+
+**Affected tests:** `perl-tests/test_ref_pass.t` (removed; the `${$$ref}` form
+is covered by `Pl/t/transpile-test-02.t`).
+
+---
+
 ## Context propagation into string eval
 
 **Perl behaviour:** `eval "code"` inherits the calling context.  Code inside the string
