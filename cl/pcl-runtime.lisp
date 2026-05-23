@@ -157,6 +157,25 @@
 
 (in-package :pcl)
 
+;;; Forward declarations to suppress compile-time "undefined function" style-warnings.
+;;; These functions are defined later in this file; the declarations tell the compiler
+;;; they exist so that earlier functions that call them compile without noise.
+(declaim (ftype (function * *) %make-p-box p-box-p))
+(declaim (ftype (function * *) (setf p-box-nv) (setf p-box-nv-ok)
+                (setf p-box-sv) (setf p-box-sv-ok)))
+(declaim (ftype (function * *) p-superchar-p))
+(declaim (ftype (function * *)
+                %pcl-nan-p
+                p-ensure-hashref p-ensure-arrayref
+                p-warn p-die
+                p-glob--list-context p-glob--scalar-context
+                %p-symref-array
+                p-scalar
+                %pcl-find-package %pcl-dispatch-autoload
+                p-super-call
+                p-load-extension))
+(declaim (special *p-filehandles* *p-dirhandles*))
+
 ;;; Capture the runtime's directory at load time so extensions can be found.
 ;;; Must be near the top — *load-truename* changes as nested loads execute.
 (defvar *pcl-runtime-directory*
@@ -705,11 +724,25 @@
                   (setf end exp-start))))
           ;; Parse the extracted portion
           (when (and has-digit (> end 0))
-            (let ((num-str (subseq trimmed 0 end)))
+            (let* ((num-str (subseq trimmed 0 end))
+                   ;; Pre-check exponent so that "1e9999" doesn't silently return 0.
+                   ;; read-from-string wraps fp-overflow in reader-impossible-number-error,
+                   ;; so we detect extreme exponents before calling it.
+                   (e-pos (or (position #\e num-str) (position #\E num-str)))
+                   (exp-val (when e-pos
+                              (ignore-errors
+                                (parse-integer (subseq num-str (1+ e-pos))
+                                               :junk-allowed t)))))
+              (when (and exp-val (> exp-val 400))
+                (return-from parse-perl-number
+                  (if (char= (char num-str 0) #\-)
+                      sb-ext:double-float-negative-infinity
+                      sb-ext:double-float-positive-infinity)))
+              (when (and exp-val (< exp-val -400))
+                (return-from parse-perl-number 0.0d0))
               (multiple-value-bind (n pos)
                   (let ((*read-eval* nil))
-                    (ignore-errors
-                      (read-from-string num-str)))
+                    (ignore-errors (read-from-string num-str)))
                 (declare (ignore pos))
                 (when (numberp n)
                   (return-from parse-perl-number n)))))))))
@@ -2135,89 +2168,141 @@
                  (1+ arg-idx))))
 
       ;; Hexadecimal floating point: %a/%A
+      ;; Format: [sign]0x[lead].[frac]p[+-][exp]
+      ;; IEEE 754 double: 1 sign bit, 11 exponent bits, 52 mantissa bits
+      ;; Normal: leading hex digit = 1, exp = biased_exp - 1023
+      ;; Subnormal/zero: leading hex digit = 0, exp = -1022
       ((#\a)
        (let* ((val (nth arg-idx args))
-              (num (to-number val))
-              (is-neg (and (not (sb-ext:float-nan-p (coerce (abs num) 'double-float)))
-                           (< (coerce num 'double-float) 0.0d0)))
-              (sign-str (cond (is-neg "-")
+              (raw-num (to-number val))
+              (dbl (coerce (if (complexp raw-num) (realpart raw-num) raw-num)
+                           'double-float))
+              (is-nan (sb-ext:float-nan-p dbl))
+              (is-inf (and (not is-nan) (sb-ext:float-infinity-p dbl)))
+              (is-neg (and (not is-nan) (minusp dbl)))
+              ;; NaN never gets a sign prefix (matches Perl %f/%e behavior)
+              (sign-str (cond (is-nan "")
+                              (is-neg "-")
                               (force-sign "+")
                               (space-sign " ")
                               (t "")))
-              (abs-num (abs (coerce num 'double-float))))
-         (let* ((raw
-                 (cond
-                   ((sb-ext:float-nan-p abs-num) (concatenate 'string sign-str "NaN"))
-                   ((sb-ext:float-infinity-p abs-num) (concatenate 'string sign-str "Inf"))
-                   ((zerop abs-num)
-                    (let* ((frac (cond (precision
-                                        (concatenate 'string "."
-                                                     (make-string precision :initial-element #\0)))
-                                       (alt-form ".")
-                                       (t ""))))
-                      (format nil "~A0x0~Ap+0" sign-str frac)))
-                   (t
-                    (multiple-value-bind (m e s)
-                        (integer-decode-float abs-num)
-                      (declare (ignore s))
-                      (let* ((leading (- (integer-length m) 1))
-                             (frac-int (logxor m (ash 1 leading)))
-                             (biased-exp (+ e leading))
-                             ;; Align frac-int to nibble boundary: shift up if needed
-                             (nibble-shift (mod (- 4 (mod leading 4)) 4))
-                             (total-nibbles (ceiling leading 4))
-                             (frac-aligned (ash frac-int nibble-shift))
-                             (frac-full-hex
-                              (if (zerop frac-aligned) ""
-                                  (format nil (format nil "~~~D,'0X" total-nibbles)
-                                          frac-aligned)))
-                             (frac-hex
-                              (cond
-                                ;; No precision: strip trailing zeros
-                                ((null precision) (string-right-trim "0" frac-full-hex))
-                                ;; Precision 0: no fraction digits
-                                ((= precision 0) "")
-                                ;; Precision N: round to N hex digits
-                                (t
-                                 (let* ((full-len (length frac-full-hex))
-                                        (p precision))
-                                   (if (<= full-len p)
-                                       ;; Pad with trailing zeros to precision
-                                       (let ((pad (- p full-len)))
-                                         (concatenate 'string frac-full-hex
-                                                      (if (> pad 0) (make-string pad :initial-element #\0) "")))
-                                       ;; Round: check digit at position p
-                                       (let* ((trunc (subseq frac-full-hex 0 p))
-                                              (next-val (digit-char-p (char frac-full-hex p) 16)))
-                                         (if (>= next-val 8)
-                                             ;; Round up
-                                             (let* ((trunc-num (parse-integer trunc :radix 16))
-                                                    (rounded (1+ trunc-num)))
-                                               (if (>= rounded (expt 16 p))
-                                                   ;; Carry: fraction overflows, bump exponent
-                                                   (progn
-                                                     (incf biased-exp)
-                                                     (make-string p :initial-element #\0))
-                                                   (format nil (format nil "~~~D,'0X" p) rounded)))
-                                             trunc)))))))
-                             (frac-part
-                              (if (string= frac-hex "")
-                                  (if (or alt-form (and precision (> precision 0))) "." "")
-                                  (concatenate 'string "." frac-hex)))
-                             (exp-str (format nil "~@d" biased-exp)))
-                        (concatenate 'string sign-str "0x1" frac-part "p" exp-str))))))
-                ;; Downcase for %a, upcase for %A
-                (formatted (if upper-case-p (string-upcase raw) (string-downcase raw))))
-           ;; Width: for zero-pad, insert zeros between "0x" and mantissa
-           (if (and zero-pad (>= (or width 0) (length formatted)))
-               (let* ((prefix-len (+ (length sign-str) 2))  ; sign + "0x"
-                      (prefix (subseq formatted 0 prefix-len))
-                      (rest (subseq formatted prefix-len))
-                      (pad-len (- (or width 0) (length formatted)))
-                      (pad (make-string pad-len :initial-element #\0)))
-                 (values (concatenate 'string prefix pad rest) (1+ arg-idx)))
-               (values (sprintf-apply-width formatted (or width 0) left-justify nil sign-str)
-                       (1+ arg-idx))))))
+              (abs-dbl (if is-neg (- dbl) dbl))
+              ;; hex-str = the hex-float body WITHOUT sign, WITHOUT case transform
+              (hex-str
+               (cond
+                 ;; NaN: no sign prefix in Perl (matches %f/%e behavior)
+                 (is-nan "NaN")
+                 ;; Inf
+                 (is-inf "Inf")
+                 ;; Zero (positive or negative — negative zero handled via sign-str)
+                 ((zerop abs-dbl)
+                  (let ((frac-str (cond
+                                    ((null precision)
+                                     (if alt-form "." ""))
+                                    ((= precision 0)
+                                     (if alt-form "." ""))
+                                    (t (concatenate 'string "."
+                                                    (make-string precision
+                                                                 :initial-element #\0))))))
+                    (concatenate 'string "0x0" frac-str "p+0")))
+                 ;; Normal or subnormal finite non-zero
+                 (t
+                  (multiple-value-bind (m raw-e s)
+                      (integer-decode-float abs-dbl)
+                    (declare (ignore s))
+                    ;; integer-decode-float returns (m e s) such that value = m * 2^e,
+                    ;; where m always has its MSB set (normalized integer, not IEEE bits).
+                    ;; For normals: integer-length(m)=53, unbiased-exp = e+52.
+                    ;; For subnormals: integer-length(m)<53, unbiased-exp = e+leading-bits.
+                    ;; In both cases the output uses leading digit "1" with adjusted exponent.
+                    ;; Examples: 2^-1074 → m=1,e=-1074 → "0x1p-1074"
+                    ;;           253*2^-1071 → m=253,e=-1071,leading=7 → "0x1.fap-1064"
+                    (let* ((leading-bits (- (integer-length m) 1))
+                           (unbiased-exp (+ raw-e leading-bits))
+                           ;; Strip the implicit leading 1 to get fraction bits
+                           (frac-int (logxor m (ash 1 leading-bits)))
+                           ;; Align frac-int up to the next whole nibble boundary
+                           (nibble-shift (mod (- (mod leading-bits 4)) 4))
+                           ;; Total nibbles needed (0 when leading-bits=0)
+                           (total-nibbles (if (zerop leading-bits) 0
+                                              (ceiling leading-bits 4)))
+                           (frac-aligned (ash frac-int nibble-shift))
+                           ;; Format as total-nibbles uppercase hex digits
+                           (frac-full (if (zerop total-nibbles)
+                                          ""
+                                          (format nil (format nil "~~~D,'0X" total-nibbles)
+                                                  frac-aligned)))
+                           ;; Apply precision (rounding may bump unbiased-exp via incf)
+                           (frac-hex
+                            (cond
+                              ;; No precision: trim trailing zeros
+                              ((null precision)
+                               (string-right-trim "0" frac-full))
+                              ;; Precision 0: no fraction digits
+                              ((= precision 0) "")
+                              ;; Precision N: truncate or pad, with rounding
+                              (t
+                               (let ((full-len (length frac-full))
+                                     (p precision))
+                                 (if (<= full-len p)
+                                     ;; Pad on right with zeros
+                                     (concatenate 'string frac-full
+                                                  (make-string (- p full-len)
+                                                               :initial-element #\0))
+                                     ;; Truncate with rounding
+                                     (let* ((trunc (subseq frac-full 0 p))
+                                            (next-ch (char frac-full p))
+                                            (next-val (digit-char-p next-ch 16)))
+                                       (if (>= next-val 8)
+                                           ;; Round up the truncated part
+                                           (let* ((trunc-val (parse-integer trunc :radix 16))
+                                                  (rounded (1+ trunc-val)))
+                                             (if (>= rounded (expt 16 p))
+                                                 ;; Carry overflows fraction: bump exponent
+                                                 (progn
+                                                   (incf unbiased-exp)
+                                                   (make-string p :initial-element #\0))
+                                                 (format nil (format nil "~~~D,'0X" p) rounded)))
+                                           trunc)))))))
+                           ;; Build the fraction part of the output
+                           (frac-part
+                            (cond
+                              ((string= frac-hex "") (if alt-form "." ""))
+                              (t (concatenate 'string "." frac-hex))))
+                           ;; Exponent as signed decimal, always with explicit sign
+                           (exp-str (format nil "~@d" unbiased-exp)))
+                      ;; Leading digit is always "1" (integer-decode-float normalizes m)
+                      (concatenate 'string "0x1" frac-part "p" exp-str))))))
+              ;; Apply case: %a → lowercase hex, %A → uppercase hex
+              ;; NaN/Inf: Perl always uses mixed-case "NaN"/"Inf" regardless of %A
+              (hex-str-cased (cond
+                               (is-nan "NaN")
+                               (is-inf "Inf")
+                               (upper-case-p (string-upcase hex-str))
+                               (t (string-downcase hex-str)))))
+         ;; Width and padding
+         ;; For Inf/NaN: simple width padding, no zero-padding between sign and body
+         ;; For hex-float: zero-padding goes between "0x" prefix and mantissa
+         (if (or is-nan is-inf)
+             ;; Inf/NaN: treat like %e Inf/NaN (sign + body, no zero-pad between)
+             (let ((full (concatenate 'string sign-str hex-str-cased)))
+               (values (sprintf-apply-width full (or width 0) left-justify nil "")
+                       (1+ arg-idx)))
+             ;; Hex float: zero-pad inserts zeros after "0x", before mantissa
+             (let ((total-len (+ (length sign-str) (length hex-str-cased))))
+               (if (and zero-pad width (> width total-len))
+                   ;; Zero-pad: sign + "0x" + zeros + rest-of-mantissa
+                   (let* ((after-0x (subseq hex-str-cased 2))  ; skip "0x"/"0X"
+                          (prefix (concatenate 'string sign-str
+                                               (subseq hex-str-cased 0 2)))
+                          (pad-len (- width total-len))
+                          (pad (make-string pad-len :initial-element #\0)))
+                     (values (concatenate 'string prefix pad after-0x)
+                             (1+ arg-idx)))
+                   ;; No zero-pad: normal width handling
+                   (values (sprintf-apply-width hex-str-cased (or width 0)
+                                                left-justify nil sign-str)
+                           (1+ arg-idx)))))))
 
       ;; Unknown: output the specifier literally
       (otherwise
@@ -2451,11 +2536,51 @@
       (setf (p-box-class b) (p-box-class v)))
     b))
 
+(defun %p-snapshot-array-rhs (src)
+  "Snapshot SRC for use as the RHS of an array assignment.
+   Returns a fresh adjustable vector so that clearing the LHS array
+   does not corrupt the source when SRC is (or contains) the LHS.
+   Unlike %p-flatten-list this preserves nil (deleted-element markers)
+   and does NOT unbox scalars — the existing add-items loop in p-array-=
+   handles those steps.  Nested adjustable vectors are also snapshotted
+   recursively so that e.g. @a = (1, @a, 2) works correctly."
+  (cond
+    ;; Adjustable vector: copy element-by-element, recursing into nested ones
+    ((and (vectorp src) (not (stringp src)))
+     (let ((snap (make-array (length src) :adjustable t :fill-pointer 0)))
+       (loop for item across src
+             do (vector-push-extend
+                 (if (and (vectorp item) (not (stringp item)))
+                     (%p-snapshot-array-rhs item)
+                     item)
+                 snap))
+       snap))
+    ;; CL list: recurse into nested vectors, leave other items as-is
+    ((listp src)
+     (let ((snap (make-array 8 :adjustable t :fill-pointer 0)))
+       (loop for item in src
+             do (vector-push-extend
+                 (if (and (vectorp item) (not (stringp item)))
+                     (%p-snapshot-array-rhs item)
+                     item)
+                 snap))
+       snap))
+    ;; Anything else (scalar, hash-table, nil, …): return as-is
+    (t src)))
+
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
-   Flattens nested vectors (but not strings), wraps elements in boxes."
-  (let ((val (gensym "VAL")))
-    `(let ((,val ,value))
+   Flattens nested vectors (but not strings), wraps elements in boxes.
+   Snapshots any adjustable vector in the RHS before clearing the LHS
+   so that self-assignment (@a = @a) and embedding (@a = (1, @a, 2))
+   work correctly.  nil slots (deleted elements) are preserved."
+  (let ((val (gensym "VAL"))
+        (snap (gensym "SNAP")))
+    `(let* ((,val ,value)
+            ;; Snapshot any adjustable vector (including place itself) BEFORE
+            ;; we clear place, to prevent aliasing. %p-snapshot-array-rhs
+            ;; recursively copies nested adjustable vectors and preserves nil.
+            (,snap (%p-snapshot-array-rhs ,val)))
        (unless (boundp ',place)
          (proclaim '(special ,place))
          (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
@@ -2499,7 +2624,7 @@
                     (t
                      (when src
                        (%p-array-store-scalar ,place src))))))
-         (add-items ,val))
+         (add-items ,snap))
        ,place)))
 
 (defmacro p-hash-= (place value)
@@ -2767,7 +2892,7 @@
                      forms)
                (incf static-idx 1)))))
 
-        `(let* ((,src ,value)
+        `(let* ((,src (let ((*wantarray* t)) ,value))
                 (,src-vec (%p-flatten-list ,src))
                 ,@(reverse extra-lets))
            ,@(nreverse forms)
@@ -8667,7 +8792,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                "\\[:(\\w+):\\]"
                pat
                (lambda (match class-name)
-                 (declare (ignore match))
                  (cond
                    ((equal class-name "alpha")  "a-zA-Z")
                    ((equal class-name "digit")  "0-9")
