@@ -519,7 +519,10 @@ sub _pack_tmpl {
             my $be2 = $be ? 1 : ($le ? 0 : $dbe);
             for (my $r = 0; $r < $nrep; $r++) {
                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
-                $$result_ref .= _pack_emit_int(int($v+0), $nb, $sig, $be2);
+                my $nv = $v + 0;
+                die "Cannot pack NaN in pack\n" if $nv != $nv;
+                die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;
+                $$result_ref .= _pack_emit_int(int($nv), $nb, $sig, $be2);
             }
             next;
         }
@@ -554,14 +557,20 @@ sub _pack_tmpl {
         if ($ch eq 'U') {
             for (my $r = 0; $r < $nrep; $r++) {
                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
-                _pack_utf8_char(int($v+0), $result_ref);
+                my $nv = $v + 0;
+                die "Cannot pack NaN in pack\n" if $nv != $nv;
+                die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;
+                _pack_utf8_char(int($nv), $result_ref);
             }
             next;
         }
         if ($ch eq 'W') {
             for (my $r = 0; $r < $nrep; $r++) {
                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
-                $$result_ref .= chr(int($v+0));
+                my $nv = $v + 0;
+                die "Cannot pack NaN in pack\n" if $nv != $nv;
+                die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;
+                $$result_ref .= chr(int($nv));
             }
             next;
         }
@@ -570,6 +579,8 @@ sub _pack_tmpl {
                 my $raw = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;
                 my $orig_s = "$raw";  # stringify BEFORE numeric coercion
                 my $v = $raw + 0;
+                die "Cannot compress NaN in pack\n" if $v != $v;
+                die "Cannot compress -Inf in pack\n" if $v < 0 && $v == $v * 2;
                 die "Cannot compress negative numbers in pack\n" if $v < 0;
                 die "Cannot compress Inf in pack\n" if $v != 0 && $v == $v * 2;
                 die "Can only compress unsigned integers in pack\n" if $v != int($v);

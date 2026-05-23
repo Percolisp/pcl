@@ -356,7 +356,7 @@ sub _assemble_output {
                     lc($pkg) eq 'method' || lc($pkg) eq 'function')
                    ? ":|$pkg|" : ":$pkg";
       push @predecls, ";; Pre-declare package for dynamic loading";
-      push @predecls, "(defpackage $cl_pkg (:use :cl :pcl))";
+      push @predecls, "(pcl:p-defpackage $cl_pkg)";
       push @predecls, "";
     }
     unshift @{$self->_sections->[0]{preamble}}, @predecls;
@@ -2315,7 +2315,7 @@ sub _process_state_declaration {
       $self->_emit("(p-array-= $cl_var (let ((*wantarray* t)) (list $init_cl)))") if @init_parts;
     } elsif ($sigil eq '%') {
       # Hash: only initialize if there's an explicit init expression
-      $self->_emit("(p-hash-= $cl_var (let ((*wantarray* t)) (list $init_cl)))") if @init_parts;
+      $self->_emit("(p-hash-= $cl_var (let ((*wantarray* t)) $init_cl))") if @init_parts;
     }
     $self->_emit("(setf $init_flag t))");
     $self->indent_level($self->indent_level - 1);

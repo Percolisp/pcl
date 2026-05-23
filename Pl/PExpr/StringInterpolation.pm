@@ -361,11 +361,58 @@ sub parse_interpolated_variable {
       return $self->parse_hash_subscript($parser, $content_ref, $pos,
 					 $full_var);
     }
-    
+
+    # Check for arrow dereference: $var->[N] or $var->{key} (possibly chained)
+    # e.g. "$t->[2]", "$h->{key}", "$t->[0]->{name}"
+    if (length($content) > $end_pos + 1
+        && substr($content, $end_pos, 2) eq '->') {
+      my $arrow_pos = $end_pos + 2;
+      if ($arrow_pos < length($content)
+          && (substr($content, $arrow_pos, 1) eq '['
+              || substr($content, $arrow_pos, 1) eq '{')) {
+        # Collect the full expression: $var->[...]->{...} etc.
+        my $expr_end = $end_pos;
+        while ($expr_end + 1 < length($content)
+               && substr($content, $expr_end, 2) eq '->') {
+          my $after_arrow = $expr_end + 2;
+          last if $after_arrow >= length($content);
+          my $bracket = substr($content, $after_arrow, 1);
+          last unless $bracket eq '[' || $bracket eq '{';
+          # Find matching closing bracket
+          my $close = ($bracket eq '[') ? ']' : '}';
+          my $depth = 1;
+          my $i = $after_arrow + 1;
+          while ($i < length($content) && $depth > 0) {
+            my $ch = substr($content, $i, 1);
+            $depth++ if $ch eq $bracket;
+            $depth-- if $ch eq $close;
+            $i++;
+          }
+          last if $depth != 0;  # Unmatched bracket — give up
+          $expr_end = $i;       # After the closing bracket
+        }
+        if ($expr_end > $end_pos) {
+          # Build the full expression string and parse via PPI
+          my $expr_str = substr($content, $pos, $expr_end - $pos);
+          say "parse_interpolated_variable: arrow-deref expr: '$expr_str'"
+              if $parser->DEBUG & 32;
+          my $doc = PPI::Document->new(\$expr_str);
+          $self->{_ppi_docs} //= [];
+          push @{$self->{_ppi_docs}}, $doc;
+          my $stmt = $doc->find_first('PPI::Statement');
+          if ($stmt) {
+            my @parts = $stmt->children();
+            my $expr_id = $parser->parse(\@parts);
+            return ($expr_id, $expr_end) if defined $expr_id;
+          }
+        }
+      }
+    }
+
     # Simple variable - create token and node
     my $var_token = PPI::Token::Symbol->new($full_var);
     my $var_id = $parser->make_node($var_token);
-    
+
     return ($var_id, $end_pos);
   }
   
@@ -521,14 +568,68 @@ sub parse_array_subscript {
   
   # Create array access node
   my ($acc_node, $acc_id) = $parser->make_node_insert('a_acc');
-  
+
   my $arr_token = PPI::Token::Symbol->new($var_name);
   my $arr_id = $parser->make_node($arr_token);
-  
+
   $parser->add_child_to_node($acc_id, $arr_id);
   $parser->add_child_to_node($acc_id, $index_id);
-  
-  return ($acc_id, $i);
+
+  # Handle chained subscripts: $a[0][1] or $a[0]{key}
+  # In Perl string interpolation, $a[0][1] = $a[0]->[1] (autoderef).
+  my $cur_id = $acc_id;
+  while ($i < length($content)) {
+    my $ch = substr($content, $i, 1);
+    if ($ch eq '[') {
+      # Parse the next [idx] subscript
+      my $depth2 = 1;
+      my $j = $i + 1;
+      while ($j < length($content) && $depth2 > 0) {
+        my $c2 = substr($content, $j, 1);
+        $depth2++ if $c2 eq '[';
+        $depth2-- if $c2 eq ']';
+        $j++;
+      }
+      last if $depth2 != 0;  # Unmatched - stop chaining
+      my $idx2_str = substr($content, $i+1, $j - $i - 2);
+      my $doc2 = PPI::Document->new(\$idx2_str);
+      my @stmts2 = $doc2->children();
+      last unless @stmts2;
+      my @parts2 = map { $_->clone() } $stmts2[0]->children();
+      my $idx2_id = $parser->parse(\@parts2);
+      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('a_ref_acc');
+      $parser->add_child_to_node($ref_acc_id, $cur_id);
+      $parser->add_child_to_node($ref_acc_id, $idx2_id);
+      $cur_id = $ref_acc_id;
+      $i = $j;
+    }
+    elsif ($ch eq '{') {
+      # Parse the next {key} subscript
+      my $depth2 = 1;
+      my $j = $i + 1;
+      while ($j < length($content) && $depth2 > 0) {
+        my $c2 = substr($content, $j, 1);
+        $depth2++ if $c2 eq '{';
+        $depth2-- if $c2 eq '}';
+        $j++;
+      }
+      last if $depth2 != 0;
+      my $key2_str = substr($content, $i+1, $j - $i - 2);
+      my $doc2 = PPI::Document->new(\$key2_str);
+      my @stmts2 = $doc2->children();
+      last unless @stmts2;
+      my @parts2 = map { $_->clone() } $stmts2[0]->children();
+      my $key2_id = $parser->parse(\@parts2);
+      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('h_ref_acc');
+      $parser->add_child_to_node($ref_acc_id, $cur_id);
+      $parser->add_child_to_node($ref_acc_id, $key2_id);
+      $cur_id = $ref_acc_id;
+      $i = $j;
+    }
+    else { last }
+  }
+
+  return ($cur_id, $i);
 }
 
 
@@ -597,14 +698,73 @@ sub parse_hash_subscript {
   
   # Create hash access node
   my ($acc_node, $acc_id) = $parser->make_node_insert('h_acc');
-  
+
   my $hash_token = PPI::Token::Symbol->new($var_name);
   my $hash_id = $parser->make_node($hash_token);
-  
+
   $parser->add_child_to_node($acc_id, $hash_id);
   $parser->add_child_to_node($acc_id, $key_id);
-  
-  return ($acc_id, $i);
+
+  # Handle chained subscripts: $h{key}[0] or $h{a}{b}
+  # In Perl string interpolation, these are autoderef (as if -> were present).
+  my $cur_id = $acc_id;
+  while ($i < length($content)) {
+    my $ch = substr($content, $i, 1);
+    if ($ch eq '[') {
+      my $depth2 = 1;
+      my $j = $i + 1;
+      while ($j < length($content) && $depth2 > 0) {
+        my $c2 = substr($content, $j, 1);
+        $depth2++ if $c2 eq '[';
+        $depth2-- if $c2 eq ']';
+        $j++;
+      }
+      last if $depth2 != 0;
+      my $idx2_str = substr($content, $i+1, $j - $i - 2);
+      my $doc2 = PPI::Document->new(\$idx2_str);
+      my @stmts2 = $doc2->children();
+      last unless @stmts2;
+      my @parts2 = map { $_->clone() } $stmts2[0]->children();
+      my $idx2_id = $parser->parse(\@parts2);
+      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('a_ref_acc');
+      $parser->add_child_to_node($ref_acc_id, $cur_id);
+      $parser->add_child_to_node($ref_acc_id, $idx2_id);
+      $cur_id = $ref_acc_id;
+      $i = $j;
+    }
+    elsif ($ch eq '{') {
+      my $depth2 = 1;
+      my $j = $i + 1;
+      while ($j < length($content) && $depth2 > 0) {
+        my $c2 = substr($content, $j, 1);
+        $depth2++ if $c2 eq '{';
+        $depth2-- if $c2 eq '}';
+        $j++;
+      }
+      last if $depth2 != 0;
+      my $key2_str = substr($content, $i+1, $j - $i - 2);
+      my $key2_id;
+      if ($key2_str =~ /^[a-zA-Z_]\w*$/) {
+        my $str_token2 = PPI::Token::Quote::Double->new('"' . $key2_str . '"');
+        $str_token2->{separator} = '"';
+        $key2_id = $parser->make_node($str_token2);
+      } else {
+        my $doc2 = PPI::Document->new(\$key2_str);
+        my @stmts2 = $doc2->children();
+        last unless @stmts2;
+        my @parts2 = map { $_->clone() } $stmts2[0]->children();
+        $key2_id = $parser->parse(\@parts2);
+      }
+      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('h_ref_acc');
+      $parser->add_child_to_node($ref_acc_id, $cur_id);
+      $parser->add_child_to_node($ref_acc_id, $key2_id);
+      $cur_id = $ref_acc_id;
+      $i = $j;
+    }
+    else { last }
+  }
+
+  return ($cur_id, $i);
 }
 
 

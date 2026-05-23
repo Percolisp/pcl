@@ -273,7 +273,7 @@ note "-------- Phase 1: package pre-declarations";
     my $cl = parse_pl(q{
         sub Util::helper { return 1; }
     });
-    like($cl, qr/\(defpackage :Util\b/, 'qualified sub triggers defpackage');
+    like($cl, qr/p-defpackage :Util\b/, 'qualified sub triggers defpackage');
     is(relative_order($cl, qr/defpackage :Util/, qr/Util::pl-helper/), -1,
        'defpackage before the qualified sub');
 }

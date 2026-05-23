@@ -17,6 +17,9 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 - **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors, postfix deref (`->@*`, `->%*`, `->$*`)
 - **OO** — `bless`, method calls, `@ISA`, C3 MRO, multiple inheritance, `SUPER::`, `AUTOLOAD`, `UNIVERSAL`, `use overload`
 - **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `chomp/chop`, `length/substr/index`, `each/keys/values`, `open/close/readline`, `die/eval`, `tie/untie`, regex `m//`/`s///`/`tr///`, and more
+  - `pack`/`unpack` (most formats including integer, float, string, BER, UTF-8)
+  - Inf/NaN handling in arithmetic, `int()`, range operators, `sprintf`, `pack`
+- **String interpolation** — `"$ref->[N]"`, `"$ref->{key}"`, chained arrow derefs in strings
 - **Filehandles** — bareword (`FH`) and lexical (`my $fh`) handles, `__DATA__`/`__END__`
 - **Packages** — `package Foo { }` block scoping, `use constant`, `BEGIN`, `use`/`require`, `use base`/`use parent`
 - **Special vars** — `$_`, `@_`, `$!`, `$/`, `$\`, `$,`, `$"`, `$0`, `$.`, `@INC`, `%ENV`, …
@@ -26,7 +29,7 @@ $ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | 
 
 ## Known Gaps
 
-- **`pack`/`unpack`** — mostly done, finally. In Perl and transpiled to CL.
+- **`pack`/`unpack`** — implemented in Perl, transpiled to CL. Most formats pass; remaining gaps: U format, long double D, UTF-8 byte counting.
 - **`wantarray`** — `eval "string"` void context not yet propagated, rest seems ok.
 - **XS/C extensions** — anything that requires compiled C code won't work
 
@@ -80,7 +83,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run test suite (75 files, 2928 tests)
+# Run test suite (77 files, 2994 tests)
 prove -j8 Pl/t/
 ```
 
@@ -100,6 +103,7 @@ Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
 | `Pl/BlockAnalyzer.pm` | Two-phase block analysis (declaration scoping) |
 | `Pl/ExprToCL.pm` | Code generator |
 | `cl/pcl-runtime.lisp` | Runtime library (~7000 lines of CL) |
+| `cl/pack-impl.pl` | pack/unpack implementation (Perl, transpiled to CL) |
 
 Generated code is intentionally readable — Perl variables keep their sigils (`$x`, `@array`, `%hash`), and functions map to `pl-` prefixed names (`pl-print`, `pl-push`, …).
 
@@ -125,22 +129,9 @@ $ ./pl2cl input.pl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
 I am Rex and I bark
 ```
 
-## Next: AST Annotation Pass
-
-The plan now is to find incompatibilities with real Perl, then to make more of a real compiler to generate better variable handling so they can be tagged as numeric etc.
-
-The planned fix is a pre-generation annotation pass over the OpcodeTree:
-
-- **Phase 0 — variable resolution** (`Pl::VarAnnotator`): a scope-stack walk that annotates every variable reference with `var_kind` (`my`/`our`/`local`/`package`/`special`) and flags closure-captured `my` declarations. Replaces the current parse-time `__lex__N` renaming.
-- **Phase 0b — unboxing analysis**: marks `my $scalar` declarations that are never passed by reference, tied, or written inside a closure; codegen can then emit a plain CL `let` binding instead of a heap-allocated `p-box`.
-- **Phase 1 — `returns_list` / `needs_wantarray`** (`Pl::ASTAnnotator`): bottom-up walk marks expressions that produce a vector, eliminating the hardcoded function list and the `p-=~` string match.
-- **Phase 2 — `lvalue`**: top-down walk propagates the assignment context, replacing the stateful `lvalue_context` flag.
-
-See `docs/ast-annotation-plan.md` for the full design.
-
 ## Status
 
-**Beta.** The internal test suite runs 2928 tests across 75 files, all passing. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~88%** of tests, with 39 files passing completely.
+**Beta.** The internal test suite runs 2994 tests across 77 files, all passing. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~90%** of tests, with 58 files passing completely.
 
 My Common Lisp experience is from long ago — that part is exclusively Claude.
 

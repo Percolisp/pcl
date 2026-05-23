@@ -29,7 +29,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 25;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -281,7 +281,29 @@ test_cl('state $z ++ at file scope increments each iteration',
      }',
     "1\n2\n3\n");
 
-# Test 23: foreach loop variable shadows outer state rename
+# Test 23: state hash post-increment on uninitialized key returns 0 (not undef)
+test_cl('state hash post-increment on uninitialized key returns 0',
+    'use feature ":5.10";
+     sub f { state %h; return $h{foo}++ }
+     my $r1 = f();
+     my $r2 = f();
+     print "$r1\n";
+     print "$r2\n";',
+    "0\n1\n");
+
+# Test 24: state hash with initializer
+test_cl('state hash with list initializer is populated once',
+    'use feature ":5.10";
+     sub f {
+         state %x = qw(a b c d);
+         $x{foo}++;
+         return join(",", map { ($_, $x{$_}) } sort keys %x);
+     }
+     print f(), "\n";
+     print f(), "\n";',
+    "a,b,c,d,foo,1\na,b,c,d,foo,2\n");
+
+# Test 25: foreach loop variable shadows outer state rename
 test_cl('foreach loop variable not confused with same-named state var',
     'use feature ":5.10";
      # state $x declared in grep block registers rename for $x
