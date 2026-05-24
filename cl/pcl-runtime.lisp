@@ -133,6 +133,7 @@
    ;; Context
    #:*wantarray*
    #:*pcl-caller-wantarray*
+   #:*p-in-list-assign-rhs*
    ;; Call depth tracking (for p-caller at top level)
    #:*pcl-sub-call-depth*
    ;; END blocks
@@ -427,6 +428,9 @@
 
 ;;; Wantarray context variable
 (defvar *wantarray* nil "Context for the current call: t=list, nil=scalar, :void=void.")
+(defvar *p-in-list-assign-rhs* nil
+  "True while evaluating the RHS of a p-list-= assignment. Tells p-readline to use scalar
+   mode even when *wantarray* is t (avoids reading the entire file in while-loop idioms).")
 (defvar *pcl-caller-wantarray* :void
   "Saved *wantarray* from sub entry. p-wantarray reads this so wantarray() always
    reflects the context of the CURRENT sub's caller, even when *wantarray* has been
@@ -909,6 +913,7 @@
                    ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
                    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
                    ((functionp v) (object-address v))  ; code ref: address
+                   ((p-regex-match-p v) (object-address v))  ; compiled regex: address
                    ((p-typeglob-p v) 0)  ; typeglob: numeric = 0 ("*pkg::name" parses as 0)
                    (t 0))))
           ;; Don't cache address-based NV: SBCL's GC can move objects,
@@ -917,7 +922,8 @@
           (unless (or (p-box-p v)
                       (hash-table-p v)
                       (and (vectorp v) (not (stringp v)))
-                      (functionp v))
+                      (functionp v)
+                      (p-regex-match-p v))
             (setf (p-box-nv box) n
                   (p-box-nv-ok box) t))
           n))))
@@ -2492,13 +2498,16 @@
                        (p-box-nv-ok ,place) nil
                        (p-box-sv-ok ,place) nil)))
            ,val))
-      ;; Normal assignment - use box-set which unboxes
+      ;; Normal assignment - use box-set which unboxes.
+      ;; Return the place (the box) so chained operators like (.= += etc.)
+      ;; can modify it in place: ($a = expr) .= "suffix" sets $a to expr."suffix".
       (let ((val (gensym "VAL")))
         `(let ((,val ,value))
            (unless (boundp ',place)
              (proclaim '(special ,place))
              (setf (symbol-value ',place) (make-p-box nil)))
-           (box-set ,place ,val)))))
+           (box-set ,place ,val)
+           ,place))))
 
 (defmacro p-my-= (place value)
   "Assign to a lexically-bound 'my' variable. Unlike p-scalar-=, does not
@@ -2892,7 +2901,7 @@
                      forms)
                (incf static-idx 1)))))
 
-        `(let* ((,src (let ((*wantarray* t)) ,value))
+        `(let* ((,src (let ((*wantarray* t) (*p-in-list-assign-rhs* t)) ,value))
                 (,src-vec (%p-flatten-list ,src))
                 ,@(reverse extra-lets))
            ,@(nreverse forms)
@@ -5935,8 +5944,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (return result))))))
 
 (defmacro p-readline (&rest args)
-  "Perl readline / <FH> — in list context reads all records; in scalar reads one."
-  `(if (eq *wantarray* t)
+  "Perl readline / <FH> — in list context reads all records; in scalar reads one.
+   When *p-in-list-assign-rhs* is t (inside p-list-= RHS), always use scalar mode
+   so that while (($x) = <FH>) reads one line per iteration, not the whole file."
+  `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
        (%p-readline-all ,(if args (car args) nil))
        (let ((%rl-val (%p-readline-impl ,@args)))
          (when %rl-val
@@ -6181,7 +6192,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (sb-posix:chdir path)
           (setf *default-pathname-defaults* (truename (pathname path)))
           t)
-      (error () nil))))
+      (sb-posix:syscall-error (e)
+        (setf *p-stored-errno* (sb-posix:syscall-errno e))
+        nil)
+      (error ()
+        (%pcl-save-errno)
+        nil))))
 
 (defun p-set_up_inc (&rest dirs)
   "Perl test.pl set_up_inc - modifies @INC for tests. No-op in PCL since
@@ -6445,10 +6461,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                         (p-time))))
     (cond
       ((> unix-time +gmtime-max+)
-       (p-warn (make-p-box (format nil "localtime(~A) too large" unix-time)))
+       (p-warn (make-p-box (format nil "localtime(~A) too large~%localtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       ((< unix-time +gmtime-min+)
-       (p-warn (make-p-box (format nil "localtime(~A) too small" unix-time)))
+       (p-warn (make-p-box (format nil "localtime(~A) too small~%localtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       ;; Post-1900: use decode-universal-time (handles DST / TZ env vars)
       ((>= unix-time (- +unix-epoch-offset+))
@@ -6488,10 +6504,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                         (p-time))))
     (cond
       ((> unix-time +gmtime-max+)
-       (p-warn (make-p-box (format nil "gmtime(~A) too large" unix-time)))
+       (p-warn (make-p-box (format nil "gmtime(~A) too large~%gmtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       ((< unix-time +gmtime-min+)
-       (p-warn (make-p-box (format nil "gmtime(~A) too small" unix-time)))
+       (p-warn (make-p-box (format nil "gmtime(~A) too small~%gmtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       (t
        (multiple-value-bind (sec min hour day perl-mon perl-year wday yday)
@@ -7550,6 +7566,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
                ;; Hash reference: box containing hash-table (from p-backslash %hash)
                ((hash-table-p inner2) (or (gethash :__class__ inner2) "HASH"))
+               ;; Regexp reference: box containing a compiled regex (from p-backslash $qr)
+               ((p-regex-match-p inner2) "REGEXP")
                ;; Scalar reference: box containing box (from p-backslash $x)
                (t "SCALAR")))))
       ;; Old-format hash reference (autovivified, single-boxed)
@@ -7933,32 +7951,72 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (unwind-protect (progn ,@body)
          (%p-lhe-restore ,hv ,kv ,sv)))))
 
-(defun p-copy-array (arr)
-  "Create a fresh adjustable copy of an array for local @arr = @arr semantics.
-   A scalar (non-nil) value is wrapped in a 1-element array, matching Perl's
-   @arr = SCALAR semantics.  nil (from an empty list) gives an empty array."
-  (let ((a (if (and (vectorp arr) (not (stringp arr))) arr (unbox arr))))
-    (cond
-      ;; Non-string vector: copy it element-by-element
-      ((and (vectorp a) (not (stringp a)))
-       (let* ((len  (length a))
-              (copy (make-array len :adjustable t :fill-pointer len)))
-         (dotimes (i len)
-           (setf (aref copy i) (aref a i)))
-         copy))
-      ;; nil / undef from empty-list expression: empty array
-      ((null a) (make-array 0 :adjustable t :fill-pointer 0))
-      ;; Any other scalar (string, number, box): 1-element array (Perl @arr=SCALAR)
-      (t (let ((copy (make-array 1 :adjustable t :fill-pointer 1)))
-           (setf (aref copy 0) a)
-           copy)))))
+(defun p-copy-array (src)
+  "Create a fresh flat copy of SRC for 'local @arr = expr' bindings.
+   Flattens nested adjustable vectors exactly like p-array-= does, so that
+   'local @a = (X, @a, Y)' correctly interpolates the old @a contents."
+  (let ((result (make-array 0 :adjustable t :fill-pointer 0))
+        (raw (cond ((and (vectorp src) (not (stringp src))) src)
+                   ((null src) nil)
+                   (t (unbox src)))))
+    (labels ((add-items (x)
+               (cond
+                 ((null x))
+                 ((stringp x)
+                  (vector-push-extend (make-p-box x) result))
+                 ((hash-table-p x)
+                  (maphash (lambda (k v)
+                             (vector-push-extend (make-p-box k) result)
+                             (%p-array-store-scalar result v))
+                           x))
+                 ((p-flatten-marker-p x)
+                  (add-items (p-flatten-marker-array x)))
+                 ((and (vectorp x) (not (stringp x)))
+                  (loop for item across x
+                        do (cond
+                             ((p-flatten-marker-p item)
+                              (add-items (p-flatten-marker-array item)))
+                             ((and (vectorp item) (not (stringp item)))
+                              (add-items item))
+                             ((null item)
+                              (vector-push-extend nil result))
+                             (t
+                              (%p-array-store-scalar result item)))))
+                 ((listp x)
+                  (loop for item in x
+                        do (cond
+                             ((p-flatten-marker-p item)
+                              (add-items (p-flatten-marker-array item)))
+                             ((and (vectorp item) (not (stringp item)))
+                              (add-items item))
+                             ((null item)
+                              (vector-push-extend nil result))
+                             (t
+                              (%p-array-store-scalar result item)))))
+                 (t
+                  (%p-array-store-scalar result x)))))
+      (add-items raw))
+    result))
 
 (defun p-copy-hash (h)
-  "Create a fresh copy of a hash for local %h = %h semantics."
-  (let* ((src (if (hash-table-p h) h (unbox h)))
+  "Create a fresh copy of a hash for 'local %h = expr' semantics.
+   Handles both hash-table input (direct copy) and vector/list input
+   (interpreted as flat k-v pairs, like p-hash-=)."
+  (let* ((raw (if (or (hash-table-p h)
+                      (and (vectorp h) (not (stringp h))))
+                  h
+                  (unbox h)))
          (copy (make-hash-table :test 'equal)))
-    (when (hash-table-p src)
-      (maphash (lambda (k v) (setf (gethash k copy) v)) src))
+    (cond
+      ((hash-table-p raw)
+       (maphash (lambda (k v) (setf (gethash k copy) v)) raw))
+      ((and (vectorp raw) (not (stringp raw)))
+       (let ((flat (%p-flatten-list raw)))
+         (loop for i from 0 below (length flat) by 2
+               do (setf (gethash (to-string (aref flat i)) copy)
+                        (if (< (1+ i) (length flat))
+                            (%p-make-hash-entry (aref flat (1+ i)))
+                            *p-undef*))))))
     copy))
 
 ;;; ============================================================

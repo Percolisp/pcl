@@ -2039,11 +2039,17 @@ sub gen_array_ref_access {
   my $node_id = shift;
   my $kids    = shift;
 
-  # qw[...][idx] or (LIST)[idx]: if LHS is a progn (list literal), force LIST_CTX
-  # so gen_progn produces (vector ...) that p-aref-deref can index into.
+  # (LIST)[idx] or method()[idx]: force LIST_CTX on child 0 so the expression
+  # is evaluated in list context — Perl always does this for X[N] subscripts.
+  # 'list_ctx_subscript' is set by the Constructor path in PExpr.pm (covers
+  # paren-list and method-call subscripts). Arrow-deref $arr->[N] does NOT
+  # set this flag, so those keep their outer context (usually scalar).
+  # Also handle qw[...][idx]: child 0 is a 'progn' (qw words), always LIST_CTX.
+  my $is_list_subscript = $self->expr_o->node_tree->get_metadata($node_id, 'list_ctx_subscript');
   my $child0_node = $self->expr_o->get_a_node($kids->[0]);
-  if ($self->expr_o->is_internal_node_type($child0_node)
-      && $child0_node->{type} eq 'progn') {
+  if ($is_list_subscript
+      || ($self->expr_o->is_internal_node_type($child0_node)
+          && $child0_node->{type} eq 'progn')) {
     $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
   }
 

@@ -285,6 +285,7 @@ has known_no_of_params => (
       pos        => [0, 1, -2],  # pos or pos SCALAR (defaults to $_)
       grep       => -12,        # grep BLOCK|EXPR, LIST (1 before list)
       time       => 0,
+      times      => 0,
       localtime  => [0,   1],
       gmtime     => [0,   1],
 

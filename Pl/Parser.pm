@@ -356,7 +356,7 @@ sub _assemble_output {
                     lc($pkg) eq 'method' || lc($pkg) eq 'function')
                    ? ":|$pkg|" : ":$pkg";
       push @predecls, ";; Pre-declare package for dynamic loading";
-      push @predecls, "(defpackage $cl_pkg (:use :cl :pcl))";
+      push @predecls, "(pcl:p-defpackage $cl_pkg)";
       push @predecls, "";
     }
     unshift @{$self->_sections->[0]{preamble}}, @predecls;
@@ -2225,26 +2225,43 @@ sub _process_local_declaration {
     }
   }
 
+  # For multi-var local with initializer: local($a, $b, @arr) = @_
+  # Pre-evaluate the RHS BEFORE the let bindings so that variables in the RHS
+  # (e.g. @arr) still refer to their OLD values, not the freshly-bound empty ones.
+  # Example: local (undef, @bee) = @bee  — @bee on RHS must see old @bee.
+  # Use let* with the RHS as the first binding, then the fresh variable slots.
+  my ($rhs_tmp_cl);
+  if ($init_idx >= 0 && @vars > 1) {
+    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
+    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+    my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+    $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
+    $self->{_local_counter} //= 0;
+    $rhs_tmp_cl = "pcl-local-rhs-" . $self->{_local_counter}++;
+    unshift @bindings, "($rhs_tmp_cl $rhs_cl)";
+  }
+
   my $bindings_str = join("\n        ", @bindings);
-  $self->_emit("(let ($bindings_str)");
+  my $let_form = ($rhs_tmp_cl) ? "let*" : "let";
+  $self->_emit("($let_form ($bindings_str)");
   $self->indent_level($self->indent_level + 1);
 
   # Track that we have an open let that needs closing
   $self->{_local_let_depth} //= 0;
   $self->{_local_let_depth}++;
 
-  # For multi-var local with initializer: local($a, $b) = @_
-  # The let bindings start empty; emit the assignment as first body form.
-  # Include undef markers in the LHS vector so p-list-= can skip them.
-  if ($init_idx >= 0 && @vars > 1) {
-    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
-    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
-    my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-    # RHS must be evaluated in list context so list-producing expressions
-    # (qw(), function calls, etc.) return vectors. Wrap in let wantarray=t.
-    $rhs_cl = "(let ((*wantarray* t)) $rhs_cl)";
+  if ($rhs_tmp_cl) {
     my $lhs_cl = "(vector " . join(" ", @vars) . ")";
-    $self->_emit("(p-list-= $lhs_cl $rhs_cl)");
+    $self->_emit("(p-list-= $lhs_cl $rhs_tmp_cl)");
+  }
+  elsif ($init_idx >= 0 && @vars == 1) {
+    # Single array/hash local with init: emit the var as the default return value.
+    # local @arr = EXPR as last expression in a sub should return the assigned list.
+    # Subsequent statements override this as the actual return value.
+    my ($sigil) = ($vars[0] =~ /::([%\@\$])/) ? ($1) : (substr($vars[0], 0, 1));
+    if ($sigil eq '@' || $sigil eq '%') {
+      $self->_emit("$vars[0]");
+    }
   }
 
   $self->_emit("");
@@ -2315,7 +2332,7 @@ sub _process_state_declaration {
       $self->_emit("(p-array-= $cl_var (let ((*wantarray* t)) (list $init_cl)))") if @init_parts;
     } elsif ($sigil eq '%') {
       # Hash: only initialize if there's an explicit init expression
-      $self->_emit("(p-hash-= $cl_var (let ((*wantarray* t)) (list $init_cl)))") if @init_parts;
+      $self->_emit("(p-hash-= $cl_var (let ((*wantarray* t)) $init_cl))") if @init_parts;
     }
     $self->_emit("(setf $init_flag t))");
     $self->indent_level($self->indent_level - 1);
@@ -3525,7 +3542,7 @@ sub _find_symbols_and_undefs_in_list {
 
   for my $child ($list->children) {
     my $ref = ref($child);
-    if ($ref eq 'PPI::Token::Symbol') {
+    if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
       push @vars, $self->_transform_pkg_var($child->content);
     }
     elsif ($ref eq 'PPI::Token::Word' && $child->content eq 'undef') {

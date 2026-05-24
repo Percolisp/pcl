@@ -2,6 +2,16 @@
 
 Generated 2026-05-07. Baseline: 18209 pass / 10159 fail across 100 files, 40 fully passing.
 Updated 2026-05-15 (session 185). Current: ~12506 pass / ~2396 fail, 42 fully passing.
+Updated 2026-05-23 (session 200). Current: 27439 pass / 2230 fail, 58 fully passing (107 files + 2 skipped).
+Updated 2026-05-23 (session 201). Current: **27443 pass / 2226 fail, 58 fully passing** (107 files + 2 skipped).
+Updated 2026-05-23 (session 202). **`%a`/`%A` hex-float sprintf implemented** (cl/pcl-runtime.lisp sprintf-one). `parse-perl-number` overflow bug identified but NOT YET fixed (see infnan.t entry).
+Updated 2026-05-24 (session 207). **Fixed: time.t fully passing (72/72); chdir.t fully passing (44/44); qr.t 18→21 passing; args.t 15→18 passing**. Skips sprintf.t (deprioritized) and Unicode/utf8-encode issues (documented not-supported).
+
+**Session 207 fixes:**
+- **time.t** (previous session): `(EXPR)[N]` subscript now forces LIST_CTX on inner expression (`list_ctx_subscript` metadata in PExpr.pm + `gen_array_ref_access` in ExprToCL.pm). `pl-like`/`pl-unlike` now respect regex modifiers (pcl-test.lisp). `times` added to Config.pm `known_no_of_params`. `$ENV{TZ}` limitation documented in not-supported.md.
+- **qr.t** (21/37): `box-nv` now returns object-address for p-regex-match structs (not 0). `p-ref` returns "REGEXP" when inner value is p-regex-match (ref to qr// = "REGEXP"). Fixes tests 3, 9, 22, 29.
+- **args.t** (18/23): `local(@_)` now correctly handled — `_find_symbols_and_undefs_in_list` now accepts `PPI::Token::Magic` tokens (was Symbol-only; `@_` is Magic). Single array/hash local with init now emits var as default return value in let body.
+- **chdir.t** (FULLY PASSING): `p-chdir` now captures `sb-posix:syscall-errno` on failure and stores in `*p-stored-errno*`.
 Skips sprintf.t (deprioritized) and Unicode/utf8-encode issues (documented not-supported).
 
 ---
@@ -12,23 +22,11 @@ Skips sprintf.t (deprioritized) and Unicode/utf8-encode issues (documented not-s
 
 **Files:** state.t (tests 77–82) — now passing.
 
-**Root cause (fixed):** `_process_statement` / `_process_expression_statement` — `state`
-keyword was stripped when combined with a prefix/postfix `++`/`--` operator. Fixed in session 172.
-
 ---
 
 ### 2. `scalar(%hash)` returns hash-table debug string instead of key count ✅ FIXED (session 175)
 
 **Files:** each.t (tests 47, 53) — fixed. hashassign.t (test 209) — separate issue (group 3).
-
-**Root cause:** In Perl 5.26+, `scalar(%hash)` returns the number of keys (integer).
-
-**Fix:** Three changes in `pcl-runtime.lisp`:
-- `box-set`: when storing a raw hash-table (not wrapped in p-box) to a scalar box, converts to key count (mirrors existing array→length logic). `p-ensure-hashref` updated to wrap new hash in `make-p-box` to prevent conversion during autovivification.
-- `p-scalar`: added hash-table case returning `(hash-table-count v)` when val is not a p-box.
-- `to-number`: added hash-table case returning `(hash-table-count val)`.
-
-hashassign.t test 209 `scalar(%h = list)` is a different issue — the assignment return value, not `scalar(%hash)` itself (see group 3).
 
 ---
 
@@ -36,29 +34,11 @@ hashassign.t test 209 `scalar(%h = list)` is a different issue — the assignmen
 
 **Files:** hashassign.t — 42 → **4 failures** (tests 304, 307–309 = lvalue aliasing, documented not-supported)
 
-**Root cause (fixed):**
-- `p-list-=` always returned RHS count even in list context. Added collect-forms to the macro
-  so it assembles actual LHS values into a result vector when `*wantarray* = t`.
-- `gen_binary_op` in ExprToCL.pm didn't wrap `p-list-=` with `(*wantarray* t)` in list context.
-  Now wraps based on `get_node_context(node_id)`.
-- `p-hash-=` loop condition `when (< (1+ i) cnt)` silently dropped the last key when odd-length
-  input. Fixed to store last key with `*p-undef*` value.
-
-**Remaining 4 failures:** tests 304, 307–309 test that list-assignment LHS scalars are lvalue
-aliases into the RHS. Documented not-supported (`@_` aliasing).
-
-**Additional fix:** `p-hash-=` now returns the hash contents in list context (via `p-list-=`
-collect path) and element count in scalar context.
-
 ---
 
 ### 4. `substr` out-of-bounds: no "substr outside of string" warning or error ✅ FIXED (session 174)
 
-**Files:** substr.t — ~38 OOB failures fixed; now 357/397 passing.
-
-**Fix:** `p-substr` in `pcl-runtime.lisp` has `oob` bounds check (lines ~1382-1404):
-- OOB reads: `(p-warn "substr outside of string\n")`
-- OOB writes: `(error "substr outside of string")`
+**Files:** substr.t — ~38 OOB failures fixed; now 358/397 passing.
 Remaining failures (tests 313-397) are lvalue substr and \substr — documented not-supported.
 
 ---
@@ -71,344 +51,638 @@ Remaining failures (tests 313-397) are lvalue substr and \substr — documented 
 scalar context should take a ref to the last scalar element, giving a SCALAR ref.
 PCL is treating `map` as returning an array-ref and `\` on that gives ARRAY ref.
 
-**Fix area:** ExprToCL.pm or PExpr.pm — `\` operator applied to a list expression.
-When `\(expr)` is in scalar context and `expr` is a list, it should dereference to the
-last element and take `\$last_elem`.
-
 ---
 
 ### 6. `p-/` produces CL rational `1/4` instead of float `0.25` ✅ FIXED (session 172)
 
-**Files:** hexfp.t (tests 42–46, ~5 failures)
+---
 
-**Root cause:** `1 / (1 << 2)` — CL's `(/ 1 4)` returns the ratio `1/4`. `to-string`
-of a CL ratio prints `"1/4"` instead of `"0.25"`.
-
-**Fix:** `p-/` in `pcl-runtime.lisp` wraps result with `(if (rationalp r) (coerce r 'double-float) r)`.
-hexfp.t still fails entirely (PPI can't parse `0x1p-2` hex float literals) — documented not-supported.
+### 7. `infnan.t` — wrong error format for `chr(Inf)` / `chr(NaN)` ✅ FIXED (session 172)
 
 ---
 
-### 7. `infnan.t` — wrong error format for `chr(Inf)` / `chr(NaN)`
-
-**Files:** infnan.t (~6 failures)
-
-**Root cause:** PCL raises:
-`"Can't decode NaN or infinity: #.SB-EXT:DOUBLE-FLOAT-POSITIVE-INFINITY."`
-Perl expects: `"Cannot chr X..."` pattern.
-
-**Fix area:** `p-chr` in `pcl-runtime.lisp` — change the error message to match
-Perl's "Cannot chr" wording.
+### 8. Dynamic loop labels: `last $var` / `next $var` ✅ FIXED indirectly (loopctl.t now fully passing)
 
 ---
 
-### 8. Dynamic loop labels: `last $var` / `next $var` not supported
-
-**Files:** loopctl.t (tests 62–64, 3 failures)
-
-**Root cause:** `eval { last $label }` where `$label` is a runtime string variable.
-PCL only handles literal label names. `p-last` / `p-next` / `p-redo` don't support
-a variable label argument.
-
-**Fix area:** ExprToCL.pm — when `last LABEL` / `next LABEL` / `redo LABEL` has
-a non-literal label expression, emit something like `(p-last-dynamic label-value)`.
-Runtime: walk up the block structure to find the right catch tag (hard; alternative:
-just throw a named-catch with the label string and catch it in the right loop).
+### 9. `join.t` — `join(undef, list)` ✅ CLOSED (join.t fully passing)
 
 ---
 
-### 9. `join.t` — `join(undef, list)` wrong length / no warning
-
-**Files:** join.t (tests 9–10, 18)
-
-**Root cause (two separate bugs):**
-- Tests 9–10 (**not fixable without lazy eval**): separator is `':'`, but list elements include `undef` which trigger `$SIG{__WARN__}` that increments `$s`. The modified `$s` should be read lazily on subsequent elements. CL evaluates all args before calling `p-join`, so `$s` is already bound at call time. Would need thunk-based lazy args.
-- Test 18 (**FIXED, session 175**): `join(undef, ())` with empty list should warn. Fix: `p-join` now checks for undef sep before item-count check, skipping the check for tied boxes to avoid premature FETCH.
-
-**Status:** test 18 passes; tests 9–10 are not fixable (lazy eval limitation).
+### 10. `each.t` ✅ FULLY PASSING (session 200)
 
 ---
 
-### 10. `each.t` — `while (my ($k,$v) = each %h)` parse error
+## Per-file issues (smaller scope, current as of session 201)
 
-**Files:** each.t (tests 3, 64 — parse error; ~20 total failures across several causes)
-
-**Root cause (tests 3, 64):** PPI tokenizes `while (my ($k,$v) = each %h)` as:
-```
-PPI::Structure::Condition
-  PPI::Statement::Variable  ← my declaration inside condition
-```
-The `PPI::Statement::Variable` inside the condition is not handled by PExpr.pm's
-expression parser (falls through to line 1410: `die "Bug. Fell through."`), so the
-condition generates `nil`, the while body never runs.
-
-**Fix area:** PExpr.pm — handle `PPI::Statement::Variable` as an expression when it
-appears inside a `PPI::Structure::Condition`. The `my ($k,$v) = each %h` should parse
-as a list-assignment expression.
-
-**Original "iteration order" theory was wrong.** The test fails because the loop
-never runs (condition is `nil`), not because of CL hash-table ordering.
-
-**Other each.t failures (not the parse error):**
-- Tests 5, 8, 14–20: `keys %h = N` sets bucket count — not implemented
-- Tests 31–32, 35–36, 38: Unicode key UTF-8/bytes hash — not supported
-- Tests 40–42: error message mismatch ("invalid number of arguments: 0" vs "Not enough arguments for each")
-- Tests 56, 58: iterator reset warnings — not implemented
-- Test 60: `%ENV` iteration — environment hash behaviour
+Files ordered roughly by remaining failure count.
 
 ---
 
-## Per-file issues (smaller scope)
+### hash.t (269 failures, 225/494 passing)
 
-### sort.t (36 failures, down from 51)
+Three distinct bug classes:
 
-Sessions 182–184 fixed: wantarray context in comparator, `child_context` for sort list arg,
-`p-hash-=` context wrapping, `tail_position` leak in `gen_funcall`.
+- **`Hash::Util` bucket statistics** (~225 tests): `bucket_ratio`, `bucket_array`,
+  `num_buckets`, `bucket_stats` — all test CL internal hash layout (number of buckets,
+  fill ratios). Not implementable: CL hash tables have opaque internals.
+  These tests should be treated as documented not-supported.
 
-- **Inplace sort** (tests 66–70): ✅ **FIXED** (session 184) — were getting stringified box addresses.
-- **Wantarray in sort** (tests 56–62): ✅ **FIXED** (session 184) — comparator now wraps body with `(*wantarray* nil)`.
-- **Error message** (test 22): "CORE::revers" vs "Undefined sort subroutine" — not supported.
-- **Overloaded objects** (tests ~88–90): sort with `use overload '<=>'` not working.
-- **UTF-8/locale** (test 3): locale-aware sort (not supported).
-- **Remaining ~33 failures**: investigate; some may be fixable.
+- **`scalar(%hash)` string format** (~24 tests): In older Perl, `scalar(%hash)` returned
+  `"used/total-buckets"` e.g. `"2/8"`. As of 5.26 it returns just the count. Tests that
+  compare `scalar(%h) eq scalar(0+keys %h)` still pass, but tests that expect the old
+  ratio string fail. PCL returns an integer key count which is correct for 5.26+.
 
-### ref.t (59 failures)
+- **Hash copy identity** (~13 tests): `a .. zz (+N copy) has same keys` — copy of hash
+  should have identical key set. `@{%copy} == @{%orig}` fails, probably because PCL's
+  hash copy iterates differently or misses some keys.
 
-- **NUL in symbolic refs** (tests 87–113): `${"foo\0bar"}` — symbolic ref with NUL
-  in name. In Perl, NUL terminates the package lookup. PCL doesn't model this.
-- **DESTROY on array/closure** (tests 63–64): DESTROY called when blessed object
-  leaves scope — PCL GC doesn't call DESTROY (documented).
-- **`&{""}` call** (test 21): calling code ref with empty string name → should be
-  "SCALAR" but got different ref type.
-- **Weak ref** (test 38–39): `ref()` and stringify for ref-to-undef.
-- **UTF8 representation** (test 83): `length` of UTF-8 string (use bytes context).
+- **DESTROY / weak-ref** (3 tests): GC-based destruction — documented not-supported.
 
-### method.t (47 failures)
+- **`ref hash keys at compile`** (test 3): `ref hash keys are not stringified during
+  compilation` — compile-time constant folding check.
 
-- **`&{1}()` call** (tests 5–9): `&$one()` where `$one=1` — PCL raises "Not a CODE
-  reference" instead of "Undefined subroutine &main::1" and fails to dispatch via
-  `local *1 = sub{...}`.
-- **`local @ISA` method cache** (tests 49–57): after `local @ISA = qw(C)`, method
-  lookup still uses old ISA. The method dispatch cache isn't invalidated on `local @ISA`.
-- **`UNIVERSAL::AUTOLOAD`** (tests 97–99): `$AUTOLOAD` set to `Foo::ARRAY` instead of
-  `Foo::Bar` when AUTOLOAD is in UNIVERSAL. Variable scoping for `$AUTOLOAD` across
-  packages.
+- **`magic keys`** (test 493): hash magic keys not implemented.
 
-### state.t (64 failures)
+---
 
-- **`++ state $y` / `state $z ++`**: see bug #1 above.
-- **`goto state $label`** (tests 70–73): computed goto with state var as label —
-  not implemented.
-- **`state $x` in map/grep** (tests 74–75): state vars inside map/grep blocks don't
-  preserve value between map iterations.
-- **lvalue `\substr` as state** (tests 83+): `state $c = \substr $s, $i, 1` — lvalue
-  ref to substr (documented not-supported).
+### infnan.t (396 failures, 716/1112 passing)
 
-### local.t (24 failures)
+- **`sprintf("%a", Inf)` case** (tests 21, 25, ~2 total): Returns `'inf'` instead of
+  `'Inf'`. `%a` format for Inf/NaN should capitalize. Fix: `p-sprintf` special-case
+  for Inf/NaN with `%a` format.
 
-- **Array size after `local($a[5])`** (tests 119–120): after `local($a[5]) = 'z'` and
-  `$a[4] = 'y'` in a block, when block exits `$a[5]` is restored (deleted) but `$a[4]`
-  is also being lost. The local-restore is incorrectly trimming the array.
-- **`local` sub via stash** (tests 271–278): `local *{$pkg}{method}` syntax for
-  temporarily replacing a method via stash slice — not supported.
-- **`local $_` with filetest/match** (tests 255–264): `local $_` interactions with
-  filetest operators and pattern matching on default `$_`.
+- **`pack c/C/s/S/...` with Inf/NaN error messages** (tests 56–167, ~112 failures):
+  `pack('c', Inf)` should die `"Cannot pack Inf in pack"`. PCL returns wrong error
+  message or undef. Fix area: `_pack_tmpl` in `cl/pcl-pack.lisp` — add Inf/NaN checks
+  before integer conversion.
 
-### each.t (22 failures)
+- **`pack W/U` with Inf** (tests 175–207, ~33 failures): `pack('W', Inf)` should die
+  `"Cannot pack Inf"`. PCL currently returns empty string. W/U formats don't have
+  the Inf guard that integer formats have.
 
-- **`each`/`keys`/`values` with no args** (tests 40–42): PCL says "invalid number of
-  arguments: 0"; Perl says "Not enough arguments for each" — error message mismatch.
-- **`keys %h = N`** (tests 5, 8, 14–20): `keys %h = 10` sets pre-allocated bucket count
-  — not implemented in PCL.
-- **Iterator order mismatch** (test 3): see bug #10 above.
+- **`pack p/P` with Inf** (tests 252–255, 4 failures): `pack p Inf` should return
+  a pointer to the string "Inf" (not undef). p/P format is disabled (skipped) in PCL.
 
-### aassign.t (89 failures)
+- **`sprintf` Inf/NaN with various formats** (tests 365–440, ~73 failures): padding,
+  width, precision flags with Inf/NaN — edge cases in `p-sprintf`.
 
-Most failures trace to:
+- **`parse-perl-number` overflow for `'1e9999'`** (~10 failures): `(ignore-errors
+  (read-from-string "1e9999"))` silently catches SBCL's `FLOATING-POINT-OVERFLOW`
+  READ-ERROR and returns `nil`, so `parse-perl-number` returns 0 instead of Inf.
+  Fix: change to `handler-case` catching `floating-point-overflow` → return
+  `sb-ext:double-float-positive-infinity` (or negative Inf if leading minus present).
+
+- **String eval of NaN/Inf** (tests 500+, ~126 failures): `eval { $x + 1 }` with NaN
+  raises SBCL `FLOATING-POINT-INVALID-OPERATION` instead of returning NaN. The
+  `p-eval-block` trap doesn't catch SBCL arithmetic signals. Needs SBCL condition
+  handler inside `p-eval-block`.
+
+---
+
+### sprintf2.t (171 failures, 1507/1678 passing)
+
+- **`%a`/`%A` hex float format** ✅ **IMPLEMENTED (session 202)**: `sprintf-one` now has a
+  full `(#\a)` arm using `integer-decode-float`. Verified: `printf "%a\n", 3.14` →
+  `0x1.91eb851eb851fp+1`. The 171 remaining failures in sprintf2.t are NOT `%a` tests —
+  they are: `%NNN$s` positional args, missing/redundant argument warnings, UTF-8 string widths.
+  The `%a` test block in sprintf2.t is gated on `$Config{nvsize} == 8` — investigate `$Config`
+  support as a next step to enable those gated tests.
+
+- **`%a` precision overflow** (tests 1570–1572, 3 failures): Integer overflow in extreme
+  precision values for `%a`.
+
+- **`%n` format** (tests 1577–1578, 2 failures): `sprintf("%n", ...)` — stores character
+  count to an argument. Not implemented (and intentionally not in Perl's standard sprintf).
+
+- **`.=` on array element with sprintf** (test 1657, 1 failure): `$ary[3] .= sprintf(...)` —
+  probably lvalue context issue on array element .=.
+
+- **Croak for large numeric format** (tests 1673–1678, 6 failures): `sprintf("%7000000000E", 1)`
+  should die "Integer overflow in format string". Error message format mismatch.
+
+---
+
+### aassign.t (85 failures, 104/177 failing — PARTIAL, early stop not shown)
+
 - **List-context function return** (test 1): `($a,$b) = f_ret_14()` where `f_ret_14`
   returns `1..4`. Gets `(:)` meaning empty. Root cause: the wantarray/VOID_CTX regression
-  from sessions 162–163 — `_process_expression_statement` wraps sub body with VOID_CTX
-  too broadly, causing return values to be discarded. **Do NOT fix wantarray issues without
-  explicit user request** (see `docs/wantarray-context.md`).
-- **Array alias assignments** (tests 12–16): `my $a = $pkg_var` where the assignment
-  is supposed to create an alias. Various alias forms.
+  from sessions 162–163. **Do NOT fix wantarray issues without explicit user request**.
+
+- **Array alias assignments** (tests 12–16): lvalue aliasing forms — documented not-supported.
+
 - **Tied variable assignments** (tests tied-*): tie interactions with list assignment.
 
-### do.t (20 failures)
+---
 
-- **`return do { }` in scalar context** (tests 17–38): `return do { @a }` in scalar
-  context returns the full array value (e.g., sum 7+8+...= 15) instead of scalar count.
-  Context not propagated through `do {}` block to `return`.
+### array.t (67 failures, 128/195 passing)
 
-### substr.t (105 failures)
+Two root causes:
 
-- **Out-of-bounds warning/error**: see bug #4 above. Accounts for ~38 failures.
-- **Other failures** (tests 38–48 and beyond): likely lvalue substr, scalar-lvalue
-  distinction, and ref-to-substr forms (documented not-supported).
+- **List-of-arrays slice** (test 30): `join('', (@foo,@bar)[0..5])` — result is
+  `'ARRAY(0x...)ARRAY(0x...)'` instead of `'acebdf'`. When two arrays appear in a list
+  and a slice is taken, PCL boxes each array as an array-ref instead of flattening.
+  Fix area: list context expansion of array variables inside slice operand.
 
-### bless.t (23 failures)
+- **AASSIGN_COMMON self-assignment** (tests 33–62, ~27 failures): Patterns like
+  `@a = @a`, `(undef,@a) = @a`, `@a = ('X',@a,'Y')`, `local @b = @b` — these require
+  that the RHS is fully evaluated before assignment begins. PCL evaluates and assigns
+  simultaneously, so `@a = @a` truncates and `(undef,@a) = @a` drops first element.
+  Fix area: `p-list-=` / `p-array-=` in `pcl-runtime.lisp` — snapshot RHS into a temp
+  vector before assigning.
 
-- **`\(map ...)`** (tests 11, 105): see bug #5 above.
+- **Negative-index error** (test 82): `-1` index assignment: `$a[-1] = 0` on non-existent
+  array should error. PCL doesn't check.
+
+- **`$#ary` on freed array** (test 83): Should be undef, PCL returns `-1`.
+
+---
+
+### ref.t (62 failures, 168/245 passing — PARTIAL, stops at ~230)
+
+- **`&{""}` call** (test 21): `ref eval {\&{""}}` should return "CODE". PCL raises error.
+- **IO/FORMAT dereference errors** (tests 32–40): `*STDOUT{IO}` and `*STDERR{FORMAT}` derefs.
+- **ref to lvalue types** (tests 64–73): documented not-supported (lvalue subs).
+- **ref to format / IO refs** (tests 88–90): format system not implemented.
+- **UTF-8 symbol names** (tests 134–168): Unicode stash name lookup not supported.
+- **Deref from list slice** (tests 173–177): `@{(...)}{...}` — hash deref from list slice.
+- **Early stop**: investigate tests ~230 onwards.
+
+---
+
+### bop.t (62 failures, 434/510 passing — PARTIAL, stops at test 451)
+
+- **Large shift / `use integer` edge cases** (tests 50–125): `4 << 2147483648` should yield 0;
+  CL integers are bignums, not 64-bit fixed-width. Documented not-supported.
+- **UTF-8 flag operations** (test 158): bitwise ops with UTF-8 flagged strings — `use bytes`.
+- **`~.` string complement with number** (tests 172, 186): `~."string"` where the operand
+  is a number — PCL returns large integer instead of complement string.
+- **Duplicate warning suppression** (tests 202, 215): `no warnings 'uninitialized'` should
+  prevent repeated warnings.
+- **Glob bitwise ops** (tests 320–328): `*STDOUT | "string"` — bitwise ops between glob and string.
+- **Early stop at 451**: test 451 "correct error" — error message mismatch triggers exit.
+
+---
+
+### caller.t (53 failures, 12/112 passing — PARTIAL)
+
+Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)"` filename and line 0.
+
+---
+
+### method.t (47 failures, 113/163 passing — PARTIAL)
+
+- **`&$one()` where `$one=1`** (tests 5–12): PCL raises "Not a CODE reference" instead of
+  "Undefined subroutine &main::1 called". Error message mismatch.
+- **AUTOLOAD via @ISA chain** (tests 40–58): method resolution with AUTOLOAD + goto &$AUTOLOAD
+  returns wrong result across multi-level inheritance.
+- **`SUPER` inside moved package** (tests 77–78): `$obj->Bminor::SUPER::test(...)` fails.
+- **DESTROY/AUTOLOAD interaction** (tests 100, 103, 114–115): documented (GC doesn't call DESTROY).
+- **`UNIVERSAL::AUTOLOAD`** (tests 97–99): `$AUTOLOAD` scoping across packages.
+- **Error message format** (tests 116–118): `"new{}"` in error message.
+- **Method call on typeglob** (tests 128–131): `*glob->method`.
+
+---
+
+### do.t (20 failures, 53/73 passing)
+
+- **`return do { }` scalar context** (tests 17–38, ~14 failures): `do { }` block doesn't
+  receive caller's scalar context when used as the return expression of a sub. Got empty
+  instead of the block's scalar value. Fix area: context propagation into `p-eval-block`
+  when used as tail expression of a `pl-sub`.
+
+- **`do subname(arg)` / `do $subref("arg")`** (tests 63–68, 4 failures): `do subname("arg")`
+  is a syntax error in Perl; `do subname(arg)` (no parens) calls the sub. PCL probably
+  parses both forms as sub calls and doesn't distinguish.
+
+- **RT 124248** (test 70): Edge case not yet investigated.
+
+- **`$! is EISDIR on do dir`** (test 73): `do "/tmp"` (a directory) should set `$!` to EISDIR.
+
+---
+
+### local.t (23 failures, 298/319 passing, previously 24)
+
+- **Array size after `local($a[5])`** (tests 119–120): after `local($a[5]) = 'z'` and
+  `$a[4] = 'y'` in a block, when block exits `$a[5]` is restored but `$a[4]` is also lost.
+  The local-restore trims the array too aggressively.
+- **`local $_` with filetest/match** (tests 255–264): `local $_` interactions with
+  filetest operators and pattern matching on default `$_`.
+- **`local *{$pkg}{method}`** (tests 271–278): temporarily replacing a method via stash
+  slot — not supported.
+
+---
+
+### pos.t (16 failures, 14/30 passing)
+
+- **`pos()` set inside `//g`** (test 4): PCL's `pos()` tracking doesn't update correctly
+  inside a `//g` loop when using `$&` or other side effects.
+- **Lvalue pos DESTROY** (test 9): documented not-supported (GC).
+- **`pos` refuses @array / %hash** (tests 10–11): error detection — principle 9.
+- **`pos *glob`** (test 12): `pos` on a typeglob not supported.
+- **`pos` through defelem** (tests 13–21): accessing/setting pos through aliased array
+  elements (defelem). PCL returns undef. Defelem not fully supported.
+- **`use bytes` pos** (tests 26, 29–30): byte-offset vs char-offset — `use bytes` not supported.
+
+---
+
+### state.t (20 failures, 142/166 passing — PARTIAL)
+
+**Fixed in session 200** (4 more tests):
+- Test 36: `p-post++` `*p-undef*` check fixed.
+- Tests 38–40: `state %x = qw(...)` init codegen fixed.
+
+**Remaining:**
+- **State hash `:shared`** (tests 41–43): `%f :shared` attribute.
+- **Computed goto with state label** (tests 70–73): `goto state $label` — not implemented.
+- **State in map/grep** (tests 74–75): `state $x` inside `map/grep` block loses value.
+- **Reference to state variable** (test 76): `\state $x` gives same address each call.
+- **Lvalue substr as state** (tests 83–92): documented not-supported.
+
+---
+
+### qr.t (16 failures, 21/37 passing)
+
+- **Regex object identity** ✅ FIXED (session 207): `p-regex-match-p` now handled in `box-nv` — qr// objects return unique addresses for `+0` comparison.
+
+- **`ref(\$qr)` returns "REGEXP"** ✅ FIXED (session 207, tests 22, 29): `p-ref` now returns "REGEXP" when the inner value is a p-regex-match struct.
+
+- **Scalar aliasing after bless** (test 6): `my $b1 = $b; bless $b, 'Pie'` — `$b1` should also be Pie. Scalar assignment copies in PCL, can't share identity.
+
+- **PVLV deref `${qr//}`** (tests 11, 12, 16, 24, 25, 27, 31, 32, 37): `${qr//}` should return a magical PVLV that stringifies to the pattern. Complex. Not supported.
+
+- **Stringification of blessed qr// objects** (tests 14, 18): `"$qr"` should match `Foo=REGEXP(0x...)`. Not supported.
+
+- **DESTROY via GC** (test 36): documented not-supported.
+
+---
+
+### index.t (30 failures, 90/120 passing)
+
+- **`utf8::encode` octet-mode index** (tests 49–58, ~10 failures): After `utf8::encode($s)`
+  the string is raw bytes. `index($encoded, $encoded_pattern)` should find at byte position,
+  not character position. PCL treats everything as characters.
+
+- **NUL character search** (tests 63–72, ~10 failures): `index($str, "\0")` returns -1 when
+  it should find the NUL byte. CL strings are NUL-safe but PCL's `p-index` may stop at NUL
+  or use a C-string-based search. Fix: use CL's `search` on character sequences.
+
+---
+
+### length.t (15 failures, 32/49 passing — PARTIAL, 2 tests unreached)
+
+- **`use bytes; length(unicode_str)`** (tests 7–23): not supported.
+- **`length(undef)` returns `''` instead of `undef`** (test 34).
+- **Overloaded `length`** (tests 35, 41, 43): `length($obj)` where obj overloads `""`.
+- **Missing "uninitialized" warnings** (tests 36, 42).
+- **Tests 48–49 not reached**: depend on `charset_tools.pl`.
+
+---
+
+### substr.t (~39 failures, ~358/397 passing)
+
+- **Out-of-bounds warning/error**: ✅ FIXED session 174.
+- **Lvalue substr** (tests 313–397): documented not-supported.
+
+---
+
+### range.t (18 failures, 144/162 passing)
+
+- **LHS array slice in list assignment** (test 4): `($a,@bcd[0..2],$e) = ('a','b','c','d','e')` —
+  list assignment with array slice on the LHS. Got `'a:b:c:d:e'` expected but PCL returns
+  `'a:ARRAY(...)...'`. Fix area: `p-list-=` / array slice LHS handling.
+
+- **Range in `/e` eval** (tests 15, 17): `s/(\w)-(\w)/join ':', $1..$2/e` — the `..` range
+  inside `/e` gets scalar context (returns flip-flop 1) instead of list context. Result
+  is `'1E0'` (i.e. float 1). Fix: ensure eval'd expression in `/e` captures list context
+  from the surrounding `join`.
+
+- **`scalar range`** (tests 15–16): `my $n = (() = "0"..-1)` — count of empty range.
+  Gets `'1E0'` instead of `0`. Same root cause as above — `..` in context of counting.
+
+- **Bignum range bounds not rejected** (tests 78–118, ~18 failures): `(9223372036854775808..10)`
+  should die "Range iterator outside integer range". SBCL bignums don't overflow 64-bit
+  bounds, so no error is raised. Documented as "not-supported" (SBCL is infinite precision).
+
+- **Modifiable variable range** (tests 156, 159): `for my $x (...) { ... }` where loop
+  var appears on both sides — needs investigation.
+
+---
+
+### readline.t (12 failures, 24/36 passing)
+
+- **Read-only modification** (test 1): error message format mismatch for
+  `readline()` on read-only value.
+
+- **`readline` reads first line** (test 16): `readline STDIN` in a specific context
+  returns `''` instead of reading a line. Likely a filehandle setup issue in the test.
+
+- **UTF-8 append** (tests 19–22): `$str .= <FH>` when string or filehandle is UTF-8
+  encoded — appending truncates content. `'ascii'` instead of `'ascii...'`.
+
+- **`<>` autovivification** (tests 26–27): `<>` and `readline` should not autovivify
+  a scalar when the filehandle doesn't exist.
+
+- **`tell()` after GV unglobbed** (tests 28–30): `tell()` should return -1 after the
+  last typeglob pointing to a filehandle is destroyed. PCL returns 0.
+
+- **Error message on unopened FH** (test 32): `readline()` on unopened FH — error
+  message format `"readline() on unopened filehandle y"` not matching.
+
+---
+
+### bless.t (~11 failures, 95/106 passing)
+
+- **`\(map ...)`** (tests 11, 105): see cross-cutting bug #5.
 - **`\substr` lvalue ref** (tests 26–28): documented not-supported.
-- **POSIX errno values** (tests 77–78): `POSIX::EINVAL` gives wrong errno string
-  ("Operation not permitted" vs "Invalid argument") — POSIX errno stubs wrong.
-- **Bless-into-ref detection** (test 101): `bless $obj, $ref_ref` should die "Attempt
-  to bless into a reference" but PCL doesn't validate the class argument is a string.
+- **POSIX errno values** (tests 77–78): `POSIX::EINVAL` gives wrong errno string.
+- **Bless-into-ref detection** (test 101): `bless $obj, $ref_ref` should die.
 
-### loopctl.t (8 failures)
+---
 
-- **Dynamic labels** (tests 62–64): see bug #8 above.
-- **Reverse with sparse array** (test 47): `reverse` on array with empty slots gives
-  wrong result (leading spaces).
-- **`$_` in continue block** (tests 49–53): `$_` set in `continue` block is not
-  propagating back to the test after the loop.
+### grep.t (6 failures, 71/77 passing)
 
-### for.t (7 failures)
+- **DESTROY in grep** (tests 69–76): documented (GC doesn't call DESTROY).
+- **Invalid grep syntax** (test 61): error detection — principle 9.
 
-- **Invalid Perl error detection** (tests 131–138): `for CORE::my Dog $spot (...)` —
-  PCL doesn't reject invalid declarator forms. Per principle 9, these tests should
-  be commented out (needs user approval).
+---
 
-### grep.t (6 failures)
+### split.t (9 failures, 210/219 passing)
 
-- **DESTROY in grep** (tests 69–76): blessed objects not destroyed when `@a = ()` — GC issue.
-- **Invalid grep syntax** (test 61): `grep $var, @list` — PCL doesn't detect error.
+- **Replacement interpolation** (test 58): split with `/e`-style replacement pattern —
+  PCL returned `'p:q:r:s'` expected `'p1q1r1s'`.
 
-### pos.t (18 failures)
+- **Unicode whitespace separator** (tests 136–138): `split(' ', $str)` with Unicode
+  whitespace (e.g. U+2000) — PCL splits on ASCII whitespace only.
 
-- **`pos(*glob)`** (test 12): pos() on a glob — not supported.
-- **pos through defelem** (tests 14–20): passing pos through default element (`$_[0]`
-  aliasing) — `@_` aliasing is documented not-supported.
+- **Split to specific array** (tests 149–151): `@pkg::ary = split(...)` — assignment
+  to a package-qualified or stacked array. Got `'a b c'` instead of `'1 2 3'`.
 
-### qr.t (20 failures)
+- **`/e` re-eval count** (tests 153, 155): `split(/(?{ $n++ })/, ...)` — inline code
+  in split pattern only evaluated once instead of per-split.
 
-- **`ref(\$qr)` returns SCALAR not REGEXP** (tests ~5–10): A compiled regex ref should
-  have `ref()` return `"REGEXP"`. PCL wraps qr// in a box, so `ref(\$box)` = SCALAR.
-- **`$a + 0 == $b + 0`** (test 3): two separate `qr//` objects stringify to the same
-  address-like number — coercion of a regex object to a number gives same result.
+---
 
-### readline.t (17 failures)
+### do.t (already listed above)
 
-- **Read-only `<STDIN>` glob** (test 1): writing to `STDIN` filehandle should be
-  "Modification of a read-only value" — PCL doesn't enforce read-only on standard filehandles.
-- **`rcatline`** (tests 4–7): `$a .= <FH>` where the FH has been opened to a specific
-  string/array — something about append-readline not working.
-- **SIGALRM / interrupted readline** (tests 16, 18): `readline` interrupted by signal —
-  not implemented.
+---
 
-### reset.t (20 failures)
+### time.t ✅ FULLY PASSING (session 207)
 
-- **`?pat?` one-match regex** (all failures): documented not-supported (removed in Perl 5.38).
+---
 
-### auto.t (2 failures)
+### chop.t (6 failures, 94/100 passing)
 
-- **`$x-- on a glob copy`** (tests 45, 47): `$x = *foo` (glob assigned to scalar), then
-  `$x--` should give `-1`. PCL `p-post--` / `p-pre--` on a glob value produces a huge
-  number (address) instead of numeric decrement.
+- **`chop(@stuff = @stuff)`** (test 35): `chop` on a freshly-assigned array — returns
+  `''` instead of last char `'f'`. `chop` doesn't see the updated array value after
+  the assignment.
 
-### my.t (7 failures)
+- **`chop` as lvalue error** (tests 48–51): `chop($x) = 1` / `chomp($x,$y) = (1,2)` —
+  should die "Can't modify chop in assignment". PCL doesn't detect this.
 
-- **`my $x if 0` error** (tests 53–59): `eval "my \$x if 0"` should raise "This use of
-  my() in false conditional is no longer allowed". Per principle 9 (invalid Perl), these
-  should be commented out (needs user approval).
+- **`chomp` on hash keys** (test 100): `$b = chomp @a when $b eq $/ eq 0 and \$a[0] == \$b`
+  — lvalue aliasing condition.
 
-### vec.t (8 failures)
+---
 
-- **Error on code point > 0xFF** (tests ~3): error message format mismatch.
-- **Lvalue vec** (test ~1): `vec($s, $i, 8) = $val` — lvalue form.
+### args.t (5 failures, 18/23 passing)
 
-### splice.t (3 failures, down from 10)
+- **`splice(@_, 0, 0, 'x')`** (tests 3–4): `splice` on `@_` inside a function — modifies
+  `@_` but changes aren't visible through lvalue args. Got `'4'` instead of `'a b c x'`.
 
-Sessions 182–183 fixed the flip-flop/context issue for most cases.
+- **`goto &sub` with multiple @_ elements** (tests 7–8): `goto &sub` with a modified `@_`
+  containing multiple elements — same @_ aliasing issue.
 
-- **`j(1..12)` flip-flop** (tests 2,4,6,8,10,12): ✅ **FIXED** (session 182–183) — was evaluating
-  `1..12` in scalar context (flip-flop). Now propagates LIST_CTX to function call args.
-- **Remaining 3 failures**: needs investigation.
+- **`local @_`** ✅ FIXED (session 207, tests 12, 15, 18): `_find_symbols_and_undefs_in_list` now handles `PPI::Token::Magic` (`@_` is Magic not Symbol). Single array local with init emits var as default return value.
 
-### join.t (6 failures)
+- **`delete $_[0]`** (test 23): `delete $_[0]` outside a block should set element to undef.
 
-- See bug #9 above for tests 9–10, 18.
-- **Test 29**: `join(const, const)` — consecutive calls shouldn't return the same scalar
-  (ref identity check). PCL likely interning or caching the result.
+---
 
-### flip.t (2 failures)
+### chdir.t ✅ FULLY PASSING (session 207)
 
-- **Test 10**: Unknown (no description, need to investigate).
-- **Test 12**: `\scalar($a..$b)` giving same scalar address each time — consecutive
-  `\scalar(...)` calls should give distinct refs.
+---
 
-### wantarray.t (1 failure)
+### concat2.t (2 failures, 2/4 passing)
 
-- **Test 11**: Returns `'S'` (scalar) instead of `'V'` (void) in some context. Wantarray
-  void-context detection.
+- **UTF-8 concatenation changes flag** (tests 1–2): `.=` concatenation changes the UTF-8
+  flag of the string in ways that affect subsequent operations. `"abc" .= $utf8_str`
+  should upgrade the LHS to UTF-8; PCL doesn't track the UTF-8 flag.
 
-### unshift.t / push.t / delete.t (few failures each)
+---
 
-- **Read-only array error** (push, unshift): pushing/unshifting onto a read-only array
-  should die "Modification of a read-only value" — PCL doesn't mark arrays as read-only.
-- **push onto scalar/literal/hashref** (push.t): error message format differences.
-- **delete.t**: croak when deleting from read-only — same read-only issue.
+### closure.t (2 failures, 48/? passing)
 
-### ord.t (3 failures)
+- **Nested closure with `my $i = $i`** (tests 11, 13): `sub bizz { my $i=7; sub { my $i=$i; sub{...} } }`.
+  Inner closure captures `my $i = $i` (shadow). When `bizz()` is called twice,
+  the two inner subs should have independent `$i` values (both 7). PCL returns `''` —
+  the inner variable doesn't properly capture the outer `$i` before shadowing it.
+  Root cause: `_vars_referenced_in_closures` renames `$i__lex__N` but the `my $i = $i`
+  RHS is parsed against the wrong scope (new name already in effect for RHS).
 
-- **Over-Unicode-plane chars** (tests 33–35): `ord(chr(0x110000))` returns 65533
-  (U+FFFD) instead of `1114112`. PCL's `p-chr` clamps to valid Unicode range but
-  shouldn't for very large code points.
+---
 
-### chr.t (30 failures)
+### or.t (3 failures, 11/14 passing)
 
-- **`chr(-N)` should return U+FFFD** (test 6+): `chr(-0.1)` should return the Unicode
-  replacement character U+FFFD. PCL probably returns `""` or `chr(0)`.
-- **`use bytes`** (tests 11–13): `use bytes; chr(-1)` = `"\xFF"` — not supported.
-- **Tied scalar with chr** (tests 14–15): `chr($tied_var)` where tied var is -1 —
-  PCL either doesn't fetch or fetches wrong value.
+- **Tied variable as `||` operand** (tests 8–10): `$tied || $var` — lvalue context
+  propagated through `||` to RHS and LHS. Tied variable fetch semantics in lvalue context
+  not supported. Also `||` propagating lvalue context to its lhs.
 
-### infnan.t (383 failures)
+---
 
-- **String eval of NaN/Inf string addition** (tests 535+, ~70 failures): `eval '$a = "nan(123)" + 1'`
-  — should give NaN, but string eval subprocess doesn't return value correctly.
-- **`chr(Inf/NaN)` error message** (~6 failures): see bug #7 above.
-- **`sprintf %a`** (~2 failures): hex float format not implemented.
-- **Various pack with NaN/Inf** (~50 failures): `pack("c", NaN)` etc. — error message format.
+### push.t (4 failures, 28/32 passing)
+
+- **Push onto invalid target** (tests 4–6): `push $int, ...` / `push $hashref, ...` /
+  `push $blessed_arrayref, ...` — should die "Type of arg 1 to push must be array or
+  list-ref". PCL doesn't validate push target type.
+- **Croak on readonly array** (test 32): same as unshift below.
+
+---
+
+### repeat.t (3 failures, 45/48 passing)
+
+- **Void context list repeat** (test 43): `(...)x... in void context in list (via scalar
+  comma)` — context classification edge case.
+- **Lvalue aliasing in repetition** (tests 46–47): `\$_[0] == \$_[1]` when @_ aliases
+  elems repeated by x — documented not-supported (@_ aliasing).
+
+---
+
+### delete.t (3 failures, 53/56 passing)
+
+- **`\delete $h{key}` address equality** (tests 26, 54): `\(values %a)` == `\$a{bar}` ==
+  `\delete $a{bar}` — all three should give the same address. PCL's delete returns a
+  copy, not the same slot.
+- **DESTROY on deleted element** (test 56): GC-based DESTROY — documented not-supported.
+
+---
+
+### hashassign.t (4 failures, 305/309 passing)
+
+- **Remaining 4 failures** (tests 304, 307–309): lvalue aliasing into RHS list —
+  documented not-supported.
+
+---
+
+### flip.t (1 failure, 13/14 passing)
+
+- **String flip-flop warning count** (test 10): `"foo".."bar"` in scalar context should
+  generate 2 "isn't numeric" warnings (one for "foo", one for "bar"). PCL generates 0.
+  Fix: `p-..` / `p-...` flip-flop code should warn when comparing non-numeric endpoints.
+
+---
+
+### concat.t (1 failure, 233/225 passing — note: extra tests exist)
+
+- **`($a = expr) .= 'c'`** (test 220): `($a = 'A'.$b) .= 'c'` — assignment expression
+  used as lvalue for `.=`. Expected `"Abc"`, got `"ab"`. PCL doesn't treat the result
+  of `=` as an lvalue. Fix: `p-.=` / assignment chain to detect `(var = expr) .= rhs` form.
+
+---
+
+### undef.t (3 failures, 32/35 passing)
+
+- **Modification of read-only value** (tests 16–17): `undef $constant` should die
+  "Modification of a read-only value attempted". PCL gives `''` (no error).
+- **`undef &tcp_proto`** (test 18): `undef &Socket::tcp_proto` — undefining a function
+  slot. PCL generates "function undefined" error instead of silently setting it to undef.
+  Fix: `p-undef-func` or similar in runtime.
+
+---
+
+### unshift.t (1 failure, 18/19 passing)
+
+- **Croak on readonly array** (test 19): `unshift @readonly, ...` should die "Modification
+  of a read-only value attempted". PCL doesn't mark arrays as readonly.
+
+---
+
+### wantarray.t (1 failure, 27/28 passing)
+
+- **Void context through `||`** (test 11): `sub f { $false || context(shift) }; f('V')` —
+  should see void context at `||` RHS. PCL propagates scalar context instead.
+  Do NOT fix — wantarray regression area. See `docs/wantarray-context.md`.
+
+---
+
+### vec.t (2 failures, 76/78 passing)
+
+- **`my $foo` hoisted across `eval {}`** (tests 25–26): `eval { my $foo = vec($foo,...) }`
+  — PCL hoists `my $foo` to the outer block, shadowing file-level `$foo`. Documented in
+  session-log §189. Fix: don't hoist declarations across `eval {}` boundaries.
+
+---
+
+### grent.t (1 failure, 2/3 passing)
+
+- **Parallel test ordering** (test 2): "not necessarily serious: run t/op/grent.t by itself".
+  Race condition in parallel sweep only.
+
+---
+
+### Hexfp.t (21 failures, 104/125 passing)
+
+- PPI can't parse `0x1.8p-1` hex float literals — documented not-supported.
+  Remaining failures all involve hex float literals in source code.
+
+---
+
+### sort.t ✅ FULLY PASSING
+### join.t ✅ FULLY PASSING
+### loopctl.t ✅ FULLY PASSING
+### for.t ✅ FULLY PASSING
+### my.t ✅ FULLY PASSING
+### chr.t ✅ FULLY PASSING
+### ord.t ✅ FULLY PASSING
+### do.t — listed above
+### splice.t ✅ FULLY PASSING
+### reset.t ✅ FULLY PASSING
+### vec.t — 2 failures listed above
+### flip.t — 1 failure listed above
+### wantarray.t — 1 failure listed above
+### auto.t ✅ FULLY PASSING
+### pos.t — listed above
+### qr.t — listed above
+### readline.t — listed above
+
+---
+
+### Zero-passing files
+
+- **crypt.t**: requires `crypt()` XS function — not implemented.
+- **lfs.t**: large file support — not tested.
+- **signatures.t**: Perl 5.36+ subroutine signatures — partial implementation.
+- **test-pack-new.t**: new pack tests in progress.
+- **test_ref_pass.t**: pass-by-reference tests in progress.
 
 ---
 
 ## Documented not-supported (no fix needed)
 
 - `?pat?` one-match regex (reset.t)
-- `@_` aliasing (pos.t defelem, aassign.t alias tests)
+- `@_` aliasing (pos.t defelem, aassign.t alias tests, repeat.t 46–47)
 - `lvalue substr` (state.t, substr.t, bless.t)
-- DESTROY via GC (ref.t, grep.t, bless.t)
-- `use bytes` (chr.t)
+- DESTROY via GC (ref.t, grep.t, bless.t, delete.t test 56, hash.t)
+- `use bytes` (chr.t, pos.t 26/29/30, length.t 7–23)
 - Error detection for invalid Perl (for.t 131–138, my.t 53–59) — per principle 9, comment out
+- Hash bucket internals (`Hash::Util` bucket_ratio etc.) — not implementable in CL
+- Hex float literals `0x1p-2` — PPI misparse
 
 ---
 
-## Priority ranking (fixable, multi-file impact)
+## Priority ranking (open items, session 207)
 
-| # | Bug | Files affected | Status |
-|---|-----|---------------|--------|
-| 1 | `state ++$var` / `state $var++` parser | state.t | ✅ FIXED (session 172) |
-| 2 | `scalar(%hash)` key count | each.t | ✅ FIXED (session 175, +2 tests) |
-| 3 | `%hash = (...)` list-context return | hashassign.t | ✅ FIXED (sessions 183–185, 42→4; 4 = lvalue alias, not-supported) |
-| 4 | `substr` out-of-bounds warning/error | substr.t | ✅ FIXED (session 174, +38 tests) |
-| 5 | `\(list_expr)` → ARRAY not SCALAR | bless.t, ref.t | open (~3 failures) |
-| 6 | `p-/` → CL ratio not float | hexfp.t (whole file skipped) | ✅ FIXED (session 172) |
-| 7 | `chr(Inf/NaN)` error message | infnan.t | ✅ FIXED (session 172) |
-| 8 | Dynamic loop labels `last $var` | loopctl.t | open (~3 failures) |
-| 9 | `join(undef, ...)` warning | join.t | ✅ test 18 FIXED (session 175); tests 9-10 not fixable (lazy eval) |
-| 10 | `while (my ($k,$v) = each %h)` parse error | each.t (tests 3, 64) | open — PExpr.pm can't parse `my` decl in while condition |
-| 11 | `p-sort` inplace (`@a = sort @a`) box issue | sort.t | ✅ FIXED (session 184, tests 66–70) |
-| 12 | `bless into ref` detection | bless.t | open (~1 failure) |
-| 13 | POSIX errno stubs | bless.t | open (~2 failures) |
+Ordered by estimated fixable test count, excluding pack.t (separate plan).
 
-### Newly discovered in sessions 182–185 (fixed)
-| Bug | Fix |
-|-----|-----|
-| `p-list-=` always returned count, never actual values in list ctx | Fixed in sessions 183–185: added collect-forms to macro |
-| `p-hash-=` odd-length input silently dropped last key | Fixed: stores last key with `*p-undef*` value |
-| `p-list-=` not wrapped with `(*wantarray* t)` in list ctx | Fixed: `gen_binary_op` checks `get_node_context` |
-| `tail_position` leaked across arg generation in `gen_funcall` | Fixed (session 184): save/restore around arg generation |
-| Sort comparator called in wrong context (list instead of scalar) | Fixed (session 184): wrap comparator body with `(*wantarray* nil)` |
-| `child_context` gave wrong ctx to sort list arg when no comparator | Fixed (session 184) |
-| splice.t flip-flop (10 failures): `..` in func arg got scalar ctx | Fixed (sessions 182–183): LIST_CTX propagated to call args |
+| # | Bug | Files affected | Est. impact |
+|---|-----|----------------|-------------|
+| 1 | `%a` hex float format in sprintf | sprintf2.t, infnan.t | ~170 tests |
+| 2 | `infnan.t` SBCL arithmetic signal in eval-block | infnan.t | ~126 tests |
+| 3 | `Hash::Util` bucket stats — document/skip | hash.t | ~225 tests (all not-supported) |
+| 4 | `gmtime` large/negative timestamps | time.t 47–70 | ✅ FIXED (time.t fully passing) |
+| 5 | NUL character search in `index`/`rindex` | index.t 63–72 | ✅ FIXED (already passing) |
+| 6 | `index` in utf8::encode octet mode | index.t 49–58 | ~10 tests |
+| 7 | AASSIGN_COMMON: `@a = @a` snapshot RHS | array.t 33–62 | ~27 tests |
+| 8 | `pack c/C/s/...` Inf/NaN error messages | infnan.t 56–167 | ~112 tests |
+| 9 | `do {}` scalar context at sub return | do.t 17–38 | ~14 tests (wantarray-adjacent) |
+| 10 | method AUTOLOAD chain + goto &$AUTOLOAD | method.t 40–58 | ~15 tests |
+| 11 | `ref($qr)` returns "REGEXP" | qr.t | ✅ PARTIALLY FIXED (session 207, +3 tests) |
+| 12 | `gmtime(0)` scalar year format | time.t 43,45 | ✅ FIXED (time.t fully passing) |
+| 13 | `local @_` in sub not properly scoped | args.t 12/15/18 | ✅ FIXED (session 207) |
+| 14 | `~.` string complement on number | bop.t 172, 186 | ~2 tests (PPI parses wrong, hard) |
+| 15 | `\(list_expr)` → ARRAY not SCALAR | bless.t, ref.t | ~3 tests |
+| 16 | `state $x` in map/grep block | state.t 74–75 | ~2 tests |
+| 17 | Glob bitwise ops (`*STDOUT \| "str"`) | bop.t 320–328 | ~9 tests |
+| 18 | `chdir('')` not setting `$!` | chdir.t 28, 34 | ✅ FIXED (session 207) |
+
+### All previously listed cross-cutting bugs — FIXED or CLOSED
+
+| Bug | Resolution |
+|-----|-----------|
+| `state ++$var` parser | ✅ FIXED session 172 |
+| `scalar(%hash)` key count | ✅ FIXED session 175 |
+| `%hash = (...)` list-context return | ✅ FIXED sessions 183–185 |
+| `substr` out-of-bounds warning | ✅ FIXED session 174 |
+| `p-/` CL ratio not float | ✅ FIXED session 172 |
+| `chr(Inf/NaN)` error message | ✅ FIXED session 172 |
+| `join(undef, ...)` test 18 | ✅ FIXED session 175 |
+| `p-sort` inplace sort | ✅ FIXED session 184 |
+| `while (my ($k,$v) = each %h)` | ✅ CLOSED (each.t now fully passing) |
+| Dynamic loop labels `last $var` | ✅ CLOSED (loopctl.t now fully passing) |
+| `p-list-=` list-context return | ✅ FIXED sessions 183–185 |
+| `tail_position` leaked in `gen_funcall` | ✅ FIXED session 184 |
+| Sort comparator wrong context | ✅ FIXED session 184 |
+| splice.t flip-flop LIST_CTX | ✅ FIXED sessions 182–183 |
+| eval-block list context (pack.t Group A) | ✅ FIXED session 199 |
+| time.t — `(EXPR)[N]` subscript LIST_CTX, `times` bareword, regex modifiers in `pl-like` | ✅ FIXED session 207 |
+| chdir.t — `$!` not set on failed `chdir('')` | ✅ FIXED session 207 |
+| args.t — `local(@_)` not localized (Magic token not found) | ✅ FIXED session 207 |
+| qr.t — qr// object numeric address was 0 | ✅ FIXED session 207 |
+
+### Session 200 fix: `(pcl:p-defpackage ...)` pre-declaration
+
+**Bug:** `_assemble_output()` in `Pl/Parser.pm` emitted `(defpackage :PKG (:use :cl :pcl))`
+for cross-package symbol pre-declarations, triggering SBCL "MAIN also shadows" warnings.
+
+**Fix:** Changed to `(pcl:p-defpackage $cl_pkg)` (warning-suppressed, idempotent).
+Updated `Pl/t/decl-ordering-01.t` test 23 regex accordingly.

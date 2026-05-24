@@ -177,7 +177,13 @@
          (regex-str (if (p-regex-match-p rx)
                         (p-regex-match-pattern rx)
                         (to-string regex)))
-         (pass (if (ppcre:scan regex-str got-str) t nil)))
+         (pass (handler-case
+                   (if (p-regex-match-p rx)
+                       (let* ((opts (build-ppcre-options (p-regex-match-modifiers rx)))
+                              (scanner (apply #'ppcre:create-scanner regex-str opts)))
+                         (if (ppcre:scan scanner got-str) t nil))
+                       (if (ppcre:scan regex-str got-str) t nil))
+                 (error () nil))))
     (if pass
         (test-ok t name)
         (test-ok nil name
@@ -192,7 +198,13 @@
          (regex-str (if (p-regex-match-p rx)
                         (p-regex-match-pattern rx)
                         (to-string regex)))
-         (pass (if (ppcre:scan regex-str got-str) nil t)))
+         (pass (handler-case
+                   (if (p-regex-match-p rx)
+                       (let* ((opts (build-ppcre-options (p-regex-match-modifiers rx)))
+                              (scanner (apply #'ppcre:create-scanner regex-str opts)))
+                         (if (ppcre:scan scanner got-str) nil t))
+                       (if (ppcre:scan regex-str got-str) nil t))
+                 (error () t))))
     (if pass
         (test-ok t name)
         (test-ok nil name

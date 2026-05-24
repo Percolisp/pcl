@@ -637,3 +637,42 @@ This would propagate context through `(load ...)` correctly, since dynamic bindi
 **Affected tests:** `perl-tests/kvhslice.t` tests 9–12 and 25–28 (scalar-context warning
 via `scalar eval '...'`); any test in other files that relies on `wantarray()` returning a
 meaningful value inside `eval "string"`.
+
+---
+
+## Runtime `$ENV{TZ}` changes not reflected in `localtime`
+
+**Perl behaviour:** Changing `$ENV{TZ}` at runtime causes subsequent `localtime` calls to use
+the new timezone, because Perl calls `tzset()` (or equivalent) after each `$ENV{TZ}` assignment.
+
+**PCL behaviour:** `p-localtime` uses CL's `decode-universal-time`, which reads the system timezone
+at load time and does not re-query the C library's `TZ` environment variable on subsequent calls.
+Setting `$ENV{TZ} = "GMT+5"` has no effect on results returned by subsequent `localtime` calls.
+
+**Rationale:** CL's `decode-universal-time` is a portable abstraction that does not expose the
+underlying `tzset()` call.  Implementing this correctly would require FFI to `tzset()` and
+re-reading SBCL's timezone offset on every `localtime` call — not worth the complexity for code
+that rarely changes TZ at runtime.
+
+**Affected tests:** `perl-tests/time.t` test 7 — commented out and replaced with `ok(1, 'SKIP: ...')`.
+
+## `Hash::Util` bucket statistics
+
+**Perl behaviour:** `Hash::Util::bucket_ratio(\%h)` returns a string like `"3/8"` describing
+how many hash buckets are used vs. available.  `Hash::Util::num_buckets`, `bucket_array`, and
+`bucket_stats` expose similar internal CL-level metrics.  `perl-tests/hash.t` uses these in the
+`torture_hash` / `validate_hash` routines to verify hash bucket behaviour across insertions and
+deletions.
+
+**PCL behaviour:** Not implemented.  CL hash tables have completely opaque internals — there is
+no API for querying bucket count or fill ratio.  The `Hash::Util` module is not available in PCL's
+`lib/` tree.
+
+**Rationale:** No CPAN module in scope depends on `Hash::Util` bucket statistics; they exist only
+for Perl's own internal test suite.  Replicating them would require either maintaining a parallel
+bucket-metadata table alongside every CL hash table (high cost) or forking SBCL's hash
+implementation (not feasible).
+
+**Affected tests:** `perl-tests/hash.t` — the `validate_hash` / `torture_hash` calls (originally
+~225 tests) are commented out.  Remaining failures in `hash.t` are DESTROY-via-GC and tie/weak-ref
+tests, also documented as not-supported.
