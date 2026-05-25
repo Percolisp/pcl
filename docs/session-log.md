@@ -4,6 +4,49 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 210 (2026-05-26) — PPI 1.284→1.291 upgrade, dotted bitwise operators, newline-comment bug fix
+
+### Focus
+Upgraded PPI from 1.284 to 1.291. Fixed a bug exposed by the upgrade (multi-line `use` statement
+comment breaking CL syntax). Implemented dotted bitwise operators newly parseable by PPI 1.291.
+
+### PPI 1.291 Changes Relevant to PCL
+Key change in PPI 1.285: **dotted bitwise operators** (`&.`, `|.`, `^.`, `~.`, `&.=`, `|.=`, `^.=`)
+now tokenized as single `PPI::Token::Operator` tokens. Previously PPI 1.284 tokenized `~.` as two
+tokens (`~` + `.`), causing PARSE ERROR in bop.t.
+
+### Bug Fixed: Multi-line `use` statements create broken CL comments
+`_process_include_statement` in `Pl/Parser.pm` was calling `$stmt->content` but NOT stripping
+embedded newlines before emitting `";; $perl_code"` as a CL comment. For multi-line `use Foo qw(...)`
+statements, continuation lines would appear without `;;` prefix, causing SBCL to interpret them as
+code (unmatched close paren).
+
+**Fix**: Added `$perl_code =~ s/\n/ /g;` in `_process_include_statement` (Parser.pm line ~4980),
+matching the pattern already used in `_process_element` and other handlers. This was a latent bug
+masked by `.fasl` cache hits; clearing the cache exposed it.
+
+### Dotted Bitwise Operators Implemented
+New operators: `$a &. $b` (string bitwise AND), `$a |. $b` (string bitwise OR),
+`$a ^. $b` (string bitwise XOR), `~.$a` (string bitwise NOT), plus `&.=`, `|.=`, `^.=` assignment forms.
+These ALWAYS operate on string (byte-by-byte) values regardless of operand type.
+
+**Changes:**
+- `Pl/PExpr/Config.pm`: Added `&.`, `|.`, `^.` (prec 25/24), `&.=`, `|.=`, `^.=` (prec 8)
+- `Pl/PExpr.pm`: Added `~.` to `%can_be_unary_op` list
+- `Pl/ExprToCL.pm`: Added `OP_EXCEPTIONS` mappings to `p-str-bit-{and,or,xor,not}` and `p-str-bit-{and,or,xor}=`
+- `cl/pcl-runtime.lisp`: Added `p-str-bit-and`, `p-str-bit-or`, `p-str-bit-xor`, `p-str-bit-not` functions
+  (always use string path via `p-string-bit-op`), and `p-str-bit-{and,or,xor}=` macros; exported all
+
+### Results
+- **Pl/t suite**: 78 files, 3010 tests — all pass
+- **Sweep**: 27727 pass / 903 fail (vs 1455 fail before = **552 more tests passing**)
+- **Fully passing**: 58 files (unchanged)
+- **bop.t**: 434+60/510 (partial stop) → 446+49/510 (crash) — 12 more tests pass; crash is pre-existing
+  overload section issue, previously masked by `~.` PARSE ERROR causing early exit
+- **sprintf.t**: POSIX::DBL_MAX crash pre-existing (no POSIX stub in lib/)
+
+---
+
 ## Session 209 (2026-05-24) — array.t `my @arr = EXPR` self-referential init fix
 
 ### Focus

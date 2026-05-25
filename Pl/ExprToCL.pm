@@ -130,6 +130,11 @@ my %OP_EXCEPTIONS = (
   '|'   => 'p-bit-or',
   '^'   => 'p-bit-xor',
   '~'   => 'p-bit-not',
+  # Dotted string bitwise operators (always string, never numeric)
+  '&.'  => 'p-str-bit-and',
+  '|.'  => 'p-str-bit-or',
+  '^.'  => 'p-str-bit-xor',
+  '~.'  => 'p-str-bit-not',
 
   # Assignment variants with clearer names
   '='   => 'p-setf',
@@ -140,6 +145,9 @@ my %OP_EXCEPTIONS = (
   '&='  => 'p-bit-and=',
   '|='  => 'p-bit-or=',
   '^='  => 'p-bit-xor=',
+  '&.=' => 'p-str-bit-and=',
+  '|.=' => 'p-str-bit-or=',
+  '^.=' => 'p-str-bit-xor=',
 
   # Compound assignment - logical
   '&&=' => 'p-and-assign',

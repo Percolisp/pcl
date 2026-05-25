@@ -215,6 +215,10 @@ has precedences => (
         '&'   => { assoc => 'l', no => 2, prec => 25 }, # Bitwise AND
         '|'   => { assoc => 'l', no => 2, prec => 24 }, # Bitwise OR
         '^'   => { assoc => 'l', no => 2, prec => 24 }, # Bitwise XOR
+        # Dotted string bitwise operators (always string, never numeric)
+        '&.'  => { assoc => 'l', no => 2, prec => 25 }, # String bitwise AND
+        '|.'  => { assoc => 'l', no => 2, prec => 24 }, # String bitwise OR
+        '^.'  => { assoc => 'l', no => 2, prec => 24 }, # String bitwise XOR
 
         # Logical operators (higher precedence than //)
         '&&'  => { assoc => 'l', no => 2, prec => 20 },
@@ -240,6 +244,9 @@ has precedences => (
         '&='  => { assoc => 'r', no => 2, prec =>  8 },
         '|='  => { assoc => 'r', no => 2, prec =>  8 },
         '^='  => { assoc => 'r', no => 2, prec =>  8 },
+        '&.=' => { assoc => 'r', no => 2, prec =>  8 }, # String bitwise AND assign
+        '|.=' => { assoc => 'r', no => 2, prec =>  8 }, # String bitwise OR assign
+        '^.=' => { assoc => 'r', no => 2, prec =>  8 }, # String bitwise XOR assign
         '<<=' => { assoc => 'r', no => 2, prec =>  8 },
         '>>=' => { assoc => 'r', no => 2, prec =>  8 },
 

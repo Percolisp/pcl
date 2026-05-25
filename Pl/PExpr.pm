@@ -2446,8 +2446,8 @@ sub handle_subcalls {
         # Check if this is a binary-only operator (cannot be unary prefix)
         # Cast tokens (@, $, %, &, *) are always unary deref operators
         my $is_cast = ref($next) eq 'PPI::Token::Cast';
-        # Operators that can be unary prefix: + - ! ~ \ not
-        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not', '++', '--');
+        # Operators that can be unary prefix: + - ! ~ ~. \ not
+        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '~.', '\\', 'not', '++', '--');
         my $is_unary = $is_cast || $can_be_unary_op{$next_op};
         if (!$is_unary) {
           # Binary-only operator - treat bareword as zero-arg function.

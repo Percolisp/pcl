@@ -6,6 +6,7 @@ Updated 2026-05-23 (session 200). Current: 27439 pass / 2230 fail, 58 fully pass
 Updated 2026-05-23 (session 201). Current: **27443 pass / 2226 fail, 58 fully passing** (107 files + 2 skipped).
 Updated 2026-05-23 (session 202). **`%a`/`%A` hex-float sprintf implemented** (cl/pcl-runtime.lisp sprintf-one). `parse-perl-number` overflow bug identified but NOT YET fixed (see infnan.t entry).
 Updated 2026-05-24 (session 207). **Fixed: time.t fully passing (72/72); chdir.t fully passing (44/44); qr.t 18→21 passing; args.t 15→18 passing**. Skips sprintf.t (deprioritized) and Unicode/utf8-encode issues (documented not-supported).
+Updated 2026-05-26 (session 210). **PPI 1.291 upgrade. 27727 pass / 903 fail, 58 fully passing. Dotted bitwise ops (&./|./^./~.) implemented. newline-in-use-comment bug fixed. bop.t: 434→446 passing (crash vs early-stop). sprintf.t: POSIX::DBL_MAX crash (pre-existing, no stub).**
 
 **Session 207 fixes:**
 - **time.t** (previous session): `(EXPR)[N]` subscript now forces LIST_CTX on inner expression (`list_ctx_subscript` metadata in PExpr.pm + `gen_array_ref_access` in ExprToCL.pm). `pl-like`/`pl-unlike` now respect regex modifiers (pcl-test.lisp). `times` added to Config.pm `known_no_of_params`. `$ENV{TZ}` limitation documented in not-supported.md.

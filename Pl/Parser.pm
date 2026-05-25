@@ -4977,6 +4977,7 @@ sub _process_include_statement {
 
   my $perl_code = $stmt->content;
   $perl_code =~ s/;\s*$//;
+  $perl_code =~ s/\n/ /g;   # Collapse newlines (multi-line use statements break CL ;; comments)
 
   my $type = $stmt->type // 'use';    # 'use', 'require', 'no'
   my $module = $stmt->module // '';

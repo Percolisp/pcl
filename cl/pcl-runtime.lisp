@@ -39,6 +39,7 @@
    #:p-*= #:p-/= #:p-%= #:p-**=
    #:p-.= #:p-str-x=
    #:p-bit-and= #:p-bit-or= #:p-bit-xor= #:p-<<= #:p->>=
+   #:p-str-bit-and= #:p-str-bit-or= #:p-str-bit-xor=
    #:p-and-assign #:p-or-assign #:p-//=
    ;; Comparison (numeric)
    #:p-== #:p-!= #:p-< #:p-> #:p-<= #:p->= #:p-<=>
@@ -56,6 +57,7 @@
    #:p-&& #:p-|| #:p-! #:p-not #:p-and #:p-or #:p-xor #:p-//
    ;; Bitwise
    #:p-bit-and #:p-bit-or #:p-bit-xor #:p-bit-not #:p-<< #:p->>
+   #:p-str-bit-and #:p-str-bit-or #:p-str-bit-xor #:p-str-bit-not
    #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
@@ -3895,6 +3897,31 @@
   (if (p-string-bitwise-operand-p a)
       (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))
       (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF)))
+
+(defun p-str-bit-and (a b)
+  "Perl string bitwise AND (&.) — always string, byte-by-byte, truncates to shorter"
+  (p-string-bit-op a b #'logand t))
+
+(defun p-str-bit-or (a b)
+  "Perl string bitwise OR (|.) — always string, byte-by-byte, pads with NUL"
+  (p-string-bit-op a b #'logior nil))
+
+(defun p-str-bit-xor (a b)
+  "Perl string bitwise XOR (^.) — always string, byte-by-byte, pads with NUL"
+  (p-string-bit-op a b #'logxor nil))
+
+(defun p-str-bit-not (a)
+  "Perl string bitwise NOT (~.) — always string, complement each byte"
+  (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a)))
+
+(defmacro p-str-bit-and= (place value)
+  `(box-set ,place (p-str-bit-and ,place ,value)))
+
+(defmacro p-str-bit-or= (place value)
+  `(box-set ,place (p-str-bit-or ,place ,value)))
+
+(defmacro p-str-bit-xor= (place value)
+  `(box-set ,place (p-str-bit-xor ,place ,value)))
 
 (defun %pcl-uv-coerce (n)
   "Coerce float to integer using UV (unsigned) semantics: +Inf=UV_MAX, -Inf=IV_MIN, NaN=0."
