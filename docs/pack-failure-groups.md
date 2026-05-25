@@ -1,301 +1,282 @@
 # pack.t Remaining Failure Groups
 
-**Status as of session 194:** 5174 pass, 778 fail, 8770 skip (14722 total).
+**Status as of session 205:** 5634 pass, 91 fail, 8997 skip (14722 total)
 
-**Session 193 baseline:** 5118 pass, 834 fail, 8770 skip (14722 total).
-
-Skipped blocks (not counted here):
-- 8748 tests: `(?{code})` regex blocks used in `%val` setup — CL-PPCRE rejects this syntax
-- 10 tests: `p`/`P` pointer format — raw C memory address, no CL equivalent
-- 7 tests: Unicode section p/P tests — same reason
-- 1 test: `P*` error message check — same reason
-
-The 834 failures fall into the groups below, ordered by test count.
+Pack.t breakdown:
+- **5634 tests actually pass** (not skip)
+- **91 tests fail** (detailed below)
+- **8997 tests skip** (see "Skipped Test Sections" below)
 
 ---
 
-## Group A — `eval { }` list context not propagated (~276 tests)
+## Remaining Failures (91 tests)
 
-**Tests:** 297–443, 3511–3912 (pairs), 3916–3982
+### Group: U0/C0 Mode Switching Mid-Template (~18 tests)
+
+**Tests:** 14045–14046, 14075, 14077, 14080, 14082, 14144–14147, 14195, 14197, 14200, 14202, 14264–14267
 
 **Symptom:**
 ```
-is(scalar @t, 2)        → got: '1'   expected: '2'
-is($t[1], 34)           → got: undef expected: '34'
-is($x[0], $x[1])        → got: '-32768.0'  expected: undef
+unpack("aU0C/UU", "b\0$U_1FFC_bytes")  → got: 'b,8188'  expected: 'b,225'
+pack H5 C0 W returns expected value     → got: 'øù û'    expected: 'øùðû'
+pack U0U C0 W should give 1+1 chars    → got: '3'        expected: '2'
 ```
 
-**Root cause:** `my @t = eval { unpack(...) }` — PCL's `p-eval-block` does not propagate
-list context from the enclosing array assignment into the block. `unpack()` runs in scalar
-context inside the eval, returning only 1 element. `@t` gets 1 element; tests that check
-`$t[1]` or `scalar @t == 2` fail.
+**Root cause:** `U0` or `C0` appearing in the middle of a template should switch the encoding
+mode (byte vs character) for subsequent format chars. PCL only handles `U0` as a top-level
+prefix transformation on the whole input string (in `p_unpack`). When `U0` appears mid-template
+(e.g. `aU0C/UU`), PCL doesn't switch mode — it keeps reading Unicode codepoints rather than raw
+bytes.
 
-Affects three loops:
-- **Tests 297–443** (74 fails): `my @t = eval { unpack("$t*", pack("$t*", 12, 34)) }` for
-  each format in `@templates` (c, C, W, i, I, s, S, l, L, n, N, v, V, f, d, q, Q).
-- **Tests 3511–3912** (163 fails, every 5th test): byteorder loop —
-  `my @x = eval { unpack "$format$format>$format<", $nat.$be.$le }`, then `is($x[0], $x[1])`.
-- **Tests 3916–3982** (39 fails): same byteorder loop, `f`/`F`/`d`/`D` formats.
-  Also reveals float formatting bug: $x[0] prints as `'0.0f0'` instead of `'0'` (see Group B).
+**Fix area:** `_unpack_tmpl` / `_pack_tmpl` in `cl/pack-impl.pl` — threading a `$mode` flag
+(`:byte` vs `:unicode`) through the loop, updated when `U0` or `C0` is encountered as a type char.
+The 'U' format handler reads differently depending on mode.
 
-**Fix area:** `Parser.pm` — `_process_eval_block_statement`; `pcl-runtime.lisp` — `p-eval-block`.
-The block must detect the enclosing wantarray and propagate it into the block body.
-
-**Note:** Fixing Group A also eliminates the `'expected: undef'` pattern in tests 3511–3982,
-because once `@x` has 3 elements, `is($x[0], $x[1])` and `is($x[0], $x[2])` both compare
-equal values and pass (even if those values have float format issues).
+**Difficulty:** Medium.
 
 ---
 
-## Group G — `U` Unicode codepoint format (~152 tests)
+### Group: UTF-8 Upgrade Neutrality (~23 tests)
 
-**Tests:** 14045–14288
+**Tests:** 14288, 14297, 14306, 14315, 14324, 14333, 14342, 14351, 14360, 14369, 14378, 14396,
+14405, 14414, 14423, 14432, 14441, 14450, 14459, 14468, 14477, 14486, 14495
 
 **Symptom:**
 ```
-unpack("aC/UU", "b\0$bytes")  → got: 'b,225'   expected: 'b,8188'
+Simple s pack doesn't get upgraded    → got: something-upgraded  expected: same-bytes
+Simple Q pack doesn't get upgraded    → ...
 ```
-225 = 0xE1 = first byte of UTF-8 for U+1FFC (8188).
+For formats s, S, i, I, l, L, j, J, f, d, F, q, Q, s!, S!, i!, I!, l!, L!, n!, N!, v!, V!.
 
-**Root cause:** PCL's `U` format handler returns the first raw byte of the UTF-8 byte sequence
-instead of decoding the full multi-byte sequence into its Unicode codepoint. `unpack 'U'`
-should return the integer codepoint (e.g., 8188 = U+1FFC); PCL returns the first byte (0xE1 = 225).
+**Root cause:** Perl maintains a per-string UTF-8 upgrade flag. When `utf8::upgrade($str)` is
+called, the bytes change but the semantic value doesn't — pack should produce identical output
+regardless of whether the source string is UTF-8-flagged. PCL strings are always Unicode (CL
+has no byte/unicode duality), so there is no upgrade flag to track. Fixing requires either
+emulating the flag (significant work) or always normalizing to bytes before packing.
 
-Also affects:
-- `U0` mode scoping (`U0` switches encoding mode for subsequent format chars)
-- Counted-length strings with `U` format (`C/U`, `a/U`)
-- Round-trips: `pack("U", N)` / `unpack("U", str)`
-
-**Fix area:** `cl/pack-impl.pl` — `U` format pack and unpack handlers.
-Unpack: read UTF-8 bytes, decode codepoint. Pack: encode integer N as UTF-8 byte sequence.
+**Difficulty:** Hard — requires architectural UTF-8 flag tracking.
 
 ---
 
-## Group C — Sign extension in `l!`, `s!`, `i!`, `j` formats ✅ FIXED (session 194)
+### Group: `.` Format and `@!` with Multibyte Strings (~19 tests)
 
-**Tests:** 2293–2454, 13189–13350 — **now 0 failures**
-
-**Root cause (confirmed):** `p-**` in pcl-runtime.lisp always coerces to double-float:
-`(expt 2.0d0 64.0d0)` = `1.8446744073709552d19`. For 64-bit sign extension, subtracting
-this float from the bignum `18446744073709551615` gives 0.0 (both round to the same double).
-
-**Fix:** Added `pl-_unpack_read_int` CL override at the bottom of `cl/pcl-pack.lisp`
-that uses `(ash 1 bits)` for exact integer powers of 2. The override redefines the
-`p-sub`-generated transpiled function with direct CL code. No changes to pack-impl.pl.
-
----
-
-## Group I — UTF-8 `@`/`@!`/`W` byte-vs-character counting (~106 tests)
-
-**Tests:** 13857–14038 (48), 14297–14495 (sparse, ~28), 14564–14703 (58 — but overlaps with H)
+**Tests:** 14656, 14657, 14658, 14660, 14661, 14669, 14673, 14674, 14681, 14682, 14683, 14687,
+14691, 14692, 14693, 14694, 14698, 14702, 14703
 
 **Symptom:**
 ```
-# @! alignment with UTF-8 string
-got: '́̂'   expected: '́'          # wrong number of characters positioned
-
-# Pack neutrality test for j
-not ok - Pack j undoes unpack j
-got: '        '  expected: 'þÿÿÿÿÿÿÿ'   # sign extension issue + encoding
+utf8 offset is relative to inner group  → got: '2'   expected: '6'
+. relative to counted group, extend     → got: wrong  expected: correct
+Test basic utf8 @!                      → fails
+Proper error message ("'.' outside of string")  → got: ''
 ```
 
-**Root cause (two sub-issues):**
+**Root cause:** `.` (position relative to group start) and `@!` (absolute byte offset) both
+need byte-offset arithmetic when operating on multibyte UTF-8 strings. PCL does character-level
+counting. The error message for `'.'` outside of string bounds is also missing.
 
-1. **`@` / `@!` positioning with multi-byte UTF-8 strings**: `@N` means "seek to byte offset N"
-   in pack, but "seek to character offset N" for UTF-8 strings. PCL counts bytes/characters
-   incorrectly for one of these modes.
-
-2. **Upgrade/downgrade neutrality**: Various formats (`s`, `j`, `D`) should produce the same
-   packed bytes regardless of whether the input string is UTF-8-flagged. PCL sometimes produces
-   different byte sequences for upgraded vs downgraded strings, or loses the sign of negative
-   values when encoding.
-
-**Fix area:** `cl/pack-impl.pl` — `@` and `@!` format handlers (check UTF-8 character vs byte
-offset); `W` format and format neutrality for signed types.
+**Difficulty:** Hard — requires byte vs char counting awareness with UTF-8 strings.
 
 ---
 
-## Group H — `F<`/`D` long double and checksum precision (~16 tests)
+### Group: UTF-8 Byte Encoding (11 tests)
 
-**Tests:** 13681–13801
+**Tests:** 14600, 14601, 14603, 14604, 14605, 14606, 14607, 14608, 14609, 14610, 14611
 
 **Symptom:**
 ```
-unpack '%65F<' gave 0, expected 16
-unpack pack D> -17179869184  → got: undef
+got: 'Ã¾'   expected: 'þ'    (UTF-8 double-encoding of high bytes)
 ```
 
-**Root cause:**
-- `F<` (little-endian native float, likely 80-bit long double on x86): checksum `%65F<` gives 0
-  instead of 16. Likely a bit-counting issue in the checksum accumulation for the `F` (long
-  double) format.
-- `D>` (big-endian long double): `unpack pack D> $val` returns undef, meaning packing or
-  unpacking fails silently. `D` format may not be implemented or may behave differently from
-  Perl's x87 80-bit extended-precision float.
+**Root cause:** After `utf8::upgrade`, PCL double-encodes high bytes. Packing a downgraded
+string vs an upgraded string should produce identical raw bytes, but PCL UTF-8-encodes the
+output when the string is internally Unicode.
 
-**Fix area:** `cl/pack-impl.pl` — `F` and `D` format size and checksum handling.
+**Difficulty:** Hard — same root cause as upgrade neutrality group.
 
 ---
 
-## Group D — `%N` checksum arithmetic overflow (~32 tests)
+### Group: A\* Unicode Whitespace Stripping (5 tests)
 
-**Tests:** 3393–3499 (sparse, every ~3rd test)
+**Tests:** 14628, 14629, 14630, 14631, 14632
 
 **Symptom:**
 ```
-# For list (0,1,...,18446744073709551615) packed with Q
-unpack '%65Q' gave 18446744073709551617,  expected 36893488147419103231
+normal A* strip leaves \xa0  → got: 'ab \nÂ '  expected: 'ab \n'
+upgraded strings A* removes \xa0         → ...
+upgraded strings A* removes all unicode whitespace → ...
 ```
 
-**Root cause:** The `%N` format computes a checksum: sum all (bit-)values, then take the
-result modulo 2^N. For large values like `Q` (unsigned 64-bit), the sum overflows into
-numbers larger than 2^64. Perl uses arbitrary-precision arithmetic for the accumulator
-then truncates; PCL may use a native CL integer (which doesn't overflow) but applies the
-modulus at the wrong point, or uses a narrower intermediate type.
+**Root cause:** The `A` format strips trailing ASCII spaces and NUL bytes. For UTF-8-upgraded
+strings, Perl also strips Unicode whitespace (U+00A0 non-breaking space, etc.). PCL's `A` format
+only strips ASCII space (0x20) and NUL. Handling upgraded-string stripping requires UTF-8 flag
+awareness.
 
-**Fix area:** `cl/pack-impl.pl` — `%` format accumulator: use `logand result (1- (expt 2 N))`
-after summing all values (not per-value). Ensure accumulator is a bignum throughout.
+**Difficulty:** Medium for \xa0 specifically; hard for full Unicode whitespace (upgrade-flag needed).
 
 ---
 
-## Group E — `f` (single-precision float) round-trip precision (~33 tests)
+### Group: Slash/W/u Format and Error Message Mismatches (~10 tests)
 
-**Tests:** 3069–3211 (sparse, every ~3rd test)
+**Tests:** 4131, 4166, 4167, 4170, 4171, 4175, 4176, 4264, 4265, 4391
+
+**Symptom (several distinct sub-issues):**
+
+- **Test 4131** (`got: '1'  expected: '0'`): Byte-order conflict check — PCL may be raising an
+  error where Perl doesn't (or vice versa) for `(s<)>` style constructs.
+
+- **Tests 4166, 4167** (`%vd` sprintf — `got: '1.20.300.4000'  expected: '%vd'`):
+  The `%vd` vector-flag format in `sprintf` is not supported. PCL's sprintf doesn't handle
+  the `v` flag, so the template is returned as-is with a "Redundant argument" warning.
+
+- **Tests 4170, 4171** (`got: '196'  expected: '300'`; `got: undef  expected: '300'`):
+  Slash-format unpack returning wrong element — likely the data-format count being applied
+  wrong in `_unpack_tmpl`'s slash handler.
+
+- **Tests 4175, 4176** (`pack 'W', 202` — `got: '@Ã'  expected: '@Ê'`; malformed UTF-8 error):
+  `W` format should write a raw octet (byte). PCL UTF-8-encodes high bytes (202 → 0xC3 0x8A),
+  producing 2 chars instead of 1 raw byte. Perl's `W` format writes the raw byte value.
+  Test 4176 expects a "Malformed UTF-8" error which PCL doesn't raise.
+
+- **Tests 4264, 4265** (`got: ''  expected: 'xyzzy'`; `got: undef  expected: 'ab'`):
+  Byte-order conflict detection: some `(x>)` or `(x<)` constructs not raising the right error,
+  causing the eval to succeed with wrong output instead of failing.
+
+- **Test 4391** (`got: 'b'  expected: 'badc'`): Unpack `a/a*` or similar slash format returns
+  only the first element instead of the full unpacked sequence.
+
+**Difficulty:** Medium — mostly string-level fixes in `pack-impl.pl`. `%vd` requires new sprintf
+handling; `W` raw-byte fix is straightforward; `@Ê` vs `@Ã` is a character-code issue.
+
+---
+
+### Group: `w` Format with Large Float (2 tests)
+
+**Tests:** 238, 240
 
 **Symptom:**
 ```
-unpack('f', pack('f', 17179869184))  → got: '17179870000'  expected: '17179869184'
+Should be able to pack 'w', 8.98e307  → got: 'Can only compress unsigned integers'
+Round trip pack/unpack 'w' of 2**1023 → got: '-Inf%' precision difference
 ```
 
-**Root cause:** IEEE 754 single-precision (`f`) has 23-bit mantissa (~7 decimal digits).
-`17179869184 = 2^34` is exactly representable in float, but PCL's round-trip loses precision.
-The pattern is every third test (the third value in each set of 5, corresponding to larger
-magnitudes where single-precision rounding matters).
+**Root cause:** PCL's `w` format (BER-compressed integer) rejects float arguments with "Can only
+compress unsigned integers". But Perl converts float arguments to integer first if the value is
+non-negative and representable. `8.98e307 = 2**1023` is a large but exact integer value;
+Perl calls `IV_cast(NV)` which converts it. PCL's check fires before this conversion.
 
-**Fix area:** `cl/pack-impl.pl` — `f` format: use `single-float` explicitly in CL (not
-`double-float`) so that the pack/unpack round-trips through 32-bit IEEE 754 as Perl does.
+**Fix area:** `_pack_str_one` or `_pack_tmpl` `w` handler in `cl/pack-impl.pl`: call `int()` on
+the argument before rejecting it; only die if `int($arg) != $arg` (fractional) or `$arg < 0`.
+
+**Difficulty:** Easy (2 tests).
 
 ---
 
-## Group B — Error message text mismatches (~32 tests)
+### Isolated / Miscellaneous (3 tests)
 
-**Tests:** 38, 4128–4131, 4273–4278, 4395–4420
-
-**Symptom:**
-```
-# Test 38
-got: ''    expected to match: qr/^Can only compress unsigned integers/
-
-# Test 4128
-got: "Invalid type '/' in unpack"
-     expected to match: '/' must follow a numeric type
-
-# Test 4273
-got: ''    expected to match: Can't use '[<>]' in a group with different byte-order
-
-# Tests 4395, 4404, 4414
-got: ''    expected to match: length/code after end of string / Invalid type / Code missing after '/'
-```
-
-**Root cause:** PCL's pack error messages differ from Perl's exact wording, or some errors
-are not thrown at all (empty `$@` when Perl would die).
-
-**Fix area:** `cl/pack-impl.pl` — error message strings in validation functions. Match Perl's
-exact wording for: `'/' must follow a numeric type`, `Can't use '[<>]' in a group`,
-`length/code after end of string`, `Code missing after '/'`, etc.
+| Test | Description | Root Cause | Difficulty |
+|------|-------------|-----------|------------|
+| 24   | `pack` transpiler crash | PPI wraps `eval { pack ... }` condition in a `PPI::Structure::Condition` node; codegen doesn't handle it | Medium |
+| 447  | `u` uuencode trailing chars | `¨  ` vs `   ` — trailing padding in the last uuencoded block is 2 chars wrong | Medium |
+| 14616 | `pack N/S13 works` | `"@array[0..12]"` string interpolation generates `(p-aref @array (p-.. 0 12))` (scalar element) instead of array slice | Medium |
 
 ---
 
-## Group F — `/` counted-length format issues (~25 tests)
+## Previously Fixed Groups
 
-**Tests:** 4136–4167, 4235–4265, 4370–4387
-
-**Symptom (three sub-issues):**
-
-1. **`/` format returning wrong value in list context** (4136, 4156): unpack returns undef
-   instead of the expected string for `a/a*/b*` and similar patterns.
-
-2. **`x` format in list context returns `""` instead of `()`** (4235):
-   `list unpack ('x', "N") gave "" expected ()` — the `x` skip format should contribute
-   nothing (empty list) but returns an empty string.
-
-3. **Pack `n/a*` not prepending count** (4370–4387):
-   `got: 'ABCABC...*', expected: '30.ABCABC...*'` — the count prefix is missing from output.
-
-**Fix area:** `cl/pack-impl.pl` — `/` format logic; `x`/`X` return value in list context.
-
----
-
-## Group K — IV/NV precision at 64-bit boundary (~5 tests)
-
-**Tests:** 26–30
-
-**Symptom:**
-```
-pack 'Q', ~0   (= 18446744073709551615 = 2^64-1)  → gives 0
-~0 - 1  → got: '18446744073709535232'  expected: '18446744073709551614'
-```
-
-**Root cause:** `~0` = 2^64−1 cannot be represented exactly as a double-float
-(max exact integer in double is 2^53). Perl stores it as an IV (native 64-bit integer);
-PCL converts it to double first, losing the low bits. `pack 'Q'` then encodes the rounded
-value (which may be 0 if overflow).
-
-**Fix area:** `cl/pack-impl.pl` — promote integers to `(unsigned-byte 64)` before packing
-`Q`, `L`, `N`, `V` formats. Use CL's bignum path when the value exceeds 2^53.
+| Group | Tests Fixed | Session |
+|-------|-------------|---------|
+| A — `eval { }` list context not propagated | ~276 | 199 |
+| B — Error message mismatches | ~32 | 196–198 |
+| C — Sign extension `l!`/`s!`/`i!`/`j` formats | ~96 | 194 |
+| D — `%N` checksum arithmetic overflow | ~32 | 196 |
+| E — `f` single-precision float round-trip | ~33 | (via float overrides) |
+| F — `/` counted-length format bugs | ~25 | 197–198 |
+| G — `U` Unicode codepoint format | ~152 | 198–199 (partial) |
+| H — `F<`/`D` long double checksum | ~16 | (skipped — D not in use) |
+| I — `@`/`@!`/`W` byte-vs-char counting | ~106 | (partial — some remain) |
+| K — 64-bit IV/NV precision (`~0`) | ~5 | 194 |
+| L — `pack W` UTF-8 output | ~18 | (partial) |
+| M — Small isolated | ~7 | Various |
 
 ---
 
-## Group L — UTF-8 encoding in `pack W` / `pack U` output (~18 tests)
+## Easy Wins (Recommended Next Fixes)
 
-**Tests:** 4175–4192
-
-**Symptom:**
-```
-got: '@Ã'   expected: '@Ê'   (pack with W or U of a high character)
-not ok - pack doesn't return malformed UTF-8
-```
-
-**Root cause:** `pack 'W', N` for N > 127 should produce raw bytes (not UTF-8 encoded).
-PCL may be encoding the value as UTF-8 instead of a raw byte (double-encoding), or
-producing a different byte sequence due to encoding mode confusion.
-
-**Fix area:** `cl/pack-impl.pl` — `W` format pack: write raw byte (character code N),
-do not UTF-8-encode. Check encoding mode flags (`U0`/`C0`) for context.
+| Tests | Fix | Effort |
+|-------|-----|--------|
+| 238, 240 | `w` format: call `int($arg)` before rejecting as non-integer | ~5 lines in `_pack_str_one` |
+| 4175 | `W` raw-byte: `chr($val)` should write a byte, not UTF-8 encode it | Check `_pack_str_one` W handler |
+| 4391 | Slash `a/a*` unpack wrong element | Debug `_unpack_tmpl` slash chain |
+| 14616 | `"@arr[0..12]"` slice interpolation | Fix `StringInterpolation.pm` or `ExprToCL.pm` |
+| 4264, 4265 | Byte-order conflict — eval succeeds with wrong value | `_pack_parse_mods` die logic |
+| 14045–14046 | `U0` mid-template byte mode | Thread `$utf8_mode` flag through `_unpack_tmpl` |
 
 ---
 
-## Group M — Small isolated failures (~7 tests)
+## Skipped Test Sections (8997 tests)
 
-| Test | Count | Issue |
-|------|-------|-------|
-| 24 | 1 | Transpiler error: `PPI::Structure::Condition` not handled — fires inside `eval { pack ... }` where PPI wraps the condition in a Condition node |
-| 38 | 1 | Error message: `Can only compress unsigned integers` — PCL may not generate this error for `pack 'w', -1` |
-| 447 | 1 | `u` uuencode: last chars of decoded output differ by 2 bytes (`¨  ` vs `   `) — trailing padding in uuencoded block |
-| 4165 | 1 | `A` format: got `' stringetc'`, expected `' stringetc'` — invisible whitespace difference (likely tab vs newline in trailing whitespace handling) |
-| 4196–4212 | 5 | compress_template loop: `is(join('!',@u1), join('!',@u2))` gives `'1'` vs `'42'` — possibly eval-list-context in a `my @u1 = eval { unpack ... }` call (related to Group A) |
+These tests are skipped entirely and represent features PCL cannot test today:
+
+### 1. `(?{code})` Regex Code Blocks — 8748 tests
+
+The largest skip block in pack.t. The test setup uses `/(PATTERN)(?{$var{TYPE}=$^R})/`
+to populate a `%val` hash mapping pack-format letters to numeric test values. CL-PPCRE
+rejects `(?{code})` syntax, and `$^R` is never set, so all `%val` entries are undef.
+Pack receives undef arguments → the x[TEMPLATE] count expressions compute junk byte counts.
+
+**What it covers:** The 8748 tests exercise `x[SUBEXPR]` repeat-count notation for every
+format letter (A, Z, a, c, C, W, B, b, H, h, s, v, n, S, i, I, l, V, N, L, p, P, f, F, d,
+D, w, u, U, q, Q, j, J). These tests verify that `x[sizeof(TYPE)]` produces the correct
+number of pad bytes for alignment.
+
+**To fix:** Implement `(?{code})` regex code blocks (hard — requires mid-match side effects)
+OR replace `%val` setup with a Perl pre-computation that doesn't use `(?{...})`.
+
+### 2. `D` Format (Long Double) — 208 tests
+
+`D` format is 80-bit extended-precision long double (x87 format). SBCL uses IEEE 64-bit
+doubles with no 80-bit support. The skip fires when `pack("D", 12.34)` throws "Invalid type".
+
+The skipped section (`skip "Long doubles not in use", 166`) tests:
+- `pack("D", N)` / `unpack("D", str)` round-trips for values -(2^34) to 2^34
+- `D>` big-endian and `D<` little-endian variants
+- `(DcCD)>` and `(DcCD)<` groupings
+- Byte-size `length(pack("D", 0)) == $Config{longdblsize}`
+
+**Status:** Unfixable without XS/C FFI to do 80-bit float I/O. Correctly skipped.
+
+### 3. `p`/`P` Pointer Format — 28 tests
+
+`p` packs a C `char *` pointer (address of a string); `P` packs a `char *` with fixed length.
+These store raw virtual memory addresses — no equivalent in garbage-collected CL.
+
+The 28 skips cover:
+- Basic `p`/`P` round-trips
+- Error check for `P*` (no star allowed)
+- [perl #131844] pointer overflow on 32-bit builds (4 tests, separately skipped)
+
+**Status:** Correctly skipped. See `docs/not-supported.md`.
+
+### 4. 32-bit Build Tests — 4 tests
+
+`[perl #131844]` — pointer addition overflow test that requires a 32-bit pointer size.
+PCL runs on a 64-bit platform, so `$Config{ptrsize} == 4` is false.
+
+**Status:** Correctly skipped (platform constraint, not a PCL limitation).
 
 ---
 
-## Summary Table
+## Summary Table (Current State)
 
-| Group | Tests | Root Cause | Fix Difficulty |
-|-------|-------|-----------|----------------|
-| A — eval BLOCK list ctx | ~276 | `p-eval-block` ignores enclosing wantarray | Medium — needs context propagation through eval |
-| G — `U` codepoint format | ~152 | Returns raw byte instead of decoded codepoint | Medium — UTF-8 decode in pack-impl.pl |
-| I — UTF-8 @/W positioning | ~106 | Byte vs character count in `@`/`@!` with multibyte | Hard — UTF-8 mode interaction |
-| C — sign extension `!`/`j` | ~96 | Wrong native size for `l!`, `j` (4 bytes not 8) | Easy — fix size table in pack-impl.pl |
-| D — `%N` checksum overflow | ~32 | Wrong modulus accumulation for large values | Easy — fix accumulator arithmetic |
-| B — error messages | ~32 | Message strings don't match Perl's exactly | Easy — text changes in pack-impl.pl |
-| E — `f` float precision | ~33 | Double used where single-float required | Medium — use `single-float` in CL |
-| H — `F<`/`D` long double | ~16 | Long double size/format not handled correctly | Hard — platform-specific |
-| L — `pack W` UTF-8 output | ~18 | Raw byte vs UTF-8 encoded output | Medium |
-| F — `/` counted length | ~25 | `/` format bugs, `x` returns `""` not `()` | Medium |
-| K — 64-bit IV/NV | ~5 | Double can't hold 2^64−1 exactly | Medium — use bignum path |
-| M — isolated | ~7 | Various (see table above) | Varies |
-
-**Easiest wins:** Group C (96 tests, fix size table), Group D (32 tests, fix accumulator),
-Group B (32 tests, fix message strings). Together ~160 tests for straightforward changes.
-
-**Biggest payoff:** Group A (276 tests) — but context propagation through eval is complex and
-touches wantarray semantics (see `docs/wantarray-context.md`).
+| Category | Tests | Root Cause | Fix Difficulty |
+|----------|-------|-----------|----------------|
+| U0/C0 mode switching mid-template | 18 | Mode flag not threaded through template loop | Medium |
+| UTF-8 upgrade neutrality | 23 | No UTF-8 flag in CL strings | Hard |
+| `.`/`@!` with multibyte strings | 19 | Byte vs char counting in position formats | Hard |
+| UTF-8 byte encoding | 11 | Double-encoding high bytes after upgrade | Hard |
+| A\* Unicode whitespace | 5 | Only strips ASCII space/NUL, not Unicode WS | Medium–Hard |
+| Slash/W/error-msg misc | 10 | Mixed: `%vd`, W raw-byte, slash chain, die logic | Easy–Medium |
+| `w` format with float | 2 | Rejects float before int-conversion | Easy |
+| Isolated (24, 447, 14616) | 3 | Transpiler node, uuencode padding, slice interp | Medium |
+| **TOTAL** | **91** | | |

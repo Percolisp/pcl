@@ -394,8 +394,40 @@ sub _gen_interp_regex_pattern {
         push @parts, qq{"$esc"};
         $literal = '';
       }
-      push @parts, "\$$varname";
+      my $cl_expr = "\$$varname";
       $i += 1 + length($varname);
+      # Handle arrow dereferences: $var->[N] or $var->{key} (possibly chained)
+      while ($i + 2 < length($pattern) && substr($pattern, $i, 2) eq '->') {
+        my $bracket = substr($pattern, $i + 2, 1);
+        if ($bracket eq '[') {
+          my ($start, $depth, $j) = ($i + 3, 1, $i + 3);
+          while ($j < length($pattern) && $depth > 0) {
+            my $ch = substr($pattern, $j, 1);
+            $depth++ if $ch eq '[';
+            $depth-- if $ch eq ']';
+            $j++;
+          }
+          last if $depth != 0;
+          my $idx = substr($pattern, $start, $j - $start - 1);
+          $cl_expr = "(p-aref $cl_expr $idx)";
+          $i = $j;
+        } elsif ($bracket eq '{') {
+          my ($start, $depth, $j) = ($i + 3, 1, $i + 3);
+          while ($j < length($pattern) && $depth > 0) {
+            my $ch = substr($pattern, $j, 1);
+            $depth++ if $ch eq '{';
+            $depth-- if $ch eq '}';
+            $j++;
+          }
+          last if $depth != 0;
+          my $key = substr($pattern, $start, $j - $start - 1);
+          $key =~ s/^["']//; $key =~ s/["']$//;
+          $key =~ s/\\/\\\\/g; $key =~ s/"/\\"/g;
+          $cl_expr = "(p-gethash $cl_expr \"$key\")";
+          $i = $j;
+        } else { last; }
+      }
+      push @parts, $cl_expr;
     } else {
       $literal .= $c;
       $i++;

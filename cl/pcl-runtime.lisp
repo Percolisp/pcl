@@ -639,6 +639,35 @@
             (p-box-nv-ok box) t))
     box))
 
+(defun %pcl-nan-canonical-p (s)
+  "True if S (lowercased, sign/whitespace-stripped) is a canonical NaN form that
+   Perl converts without an 'isn't numeric' warning."
+  (or (member s '("nan" "nanq" "nans" "qnan" "snan"
+                  "1.#nanq" "1.#qnan" "1.#ind" "1.#ind00"
+                  "1#nan" "1#snan" "1#ind")
+              :test #'string=)
+      ;; nan/nanq/nans with decimal or hex payload in properly-closed parens
+      (and (>= (length s) 3) (string= (subseq s 0 3) "nan")
+           (let* ((base-end
+                   (cond
+                     ((and (>= (length s) 4) (char= (char s 3) #\()) 3)
+                     ((and (>= (length s) 5)
+                           (member (char s 3) '(#\q #\s))
+                           (char= (char s 4) #\()) 4)
+                     (t nil))))
+             (when base-end
+               (let* ((payload-start (1+ base-end))
+                      (close (position #\) s :start payload-start)))
+                 (and close
+                      (= close (1- (length s)))
+                      (let ((content (subseq s payload-start close)))
+                        (or (and (> (length content) 0)
+                                 (every #'digit-char-p content))
+                            (and (>= (length content) 3)
+                                 (string= (subseq content 0 2) "0x")
+                                 (every (lambda (c) (digit-char-p c 16))
+                                        (subseq content 2))))))))))))
+
 (defun parse-perl-number (str)
   "Parse a string to number using Perl semantics.
    Extracts leading numeric portion: '3rd' -> 3, '3.14foo' -> 3.14.
@@ -655,15 +684,20 @@
             (when (char= (char check 0) #\-)
               (setf sign -1))
             (setf check (subseq check 1)))
-          (let ((lower (string-downcase check)))
-            ;; Inf: "inf", "infinity", "infinite", "info", "inf123" (any "inf" prefix),
-            ;; also "1.#inf..." and "1#inf..." (MSVC-style)
+          (let* ((lower (string-downcase check))
+                 (lower-stripped (string-right-trim '(#\Space #\Tab #\Newline) lower)))
+            ;; Inf: "inf", "infinity", and MSVC "1.#inf*" / "1#inf*"
             (when (or (and (>= (length lower) 3)
                            (string= (subseq lower 0 3) "inf"))
                       (and (>= (length lower) 5)
                            (string= (subseq lower 0 5) "1#inf"))
                       (and (>= (length lower) 6)
                            (string= (subseq lower 0 6) "1.#inf")))
+              ;; Warn when the form has garbage after the canonical Inf prefix
+              (unless (member lower-stripped
+                              '("inf" "infinity" "1.#inf" "1.#inf00" "1#inf" "1#inf00")
+                              :test #'string=)
+                (p-warn (format nil "Argument ~S isn't numeric~%" str)))
               (return-from parse-perl-number
                 (if (minusp sign)
                     sb-ext:double-float-negative-infinity
@@ -673,9 +707,7 @@
             ;; "1#NAN", "1#SNAN", "1#IND" (MSVC-style without dot)
             (when (or (and (>= (length lower) 3)
                            (string= (subseq lower 0 3) "nan"))
-                      (string= lower "qnan")
-                      (string= lower "snan")
-                      (string= lower "nanq")
+                      (member lower-stripped '("qnan" "snan" "nanq") :test #'string=)
                       (and (>= (length lower) 6)
                            (string= (subseq lower 0 6) "1.#nan"))
                       (and (>= (length lower) 7)
@@ -690,6 +722,9 @@
                            (string= (subseq lower 0 6) "1#snan"))
                       (and (>= (length lower) 5)
                            (string= (subseq lower 0 5) "1#ind")))
+              ;; Warn when the form has garbage after the canonical NaN pattern
+              (unless (%pcl-nan-canonical-p lower-stripped)
+                (p-warn (format nil "Argument ~S isn't numeric~%" str)))
               (return-from parse-perl-number
                 #+sbcl (sb-kernel:make-double-float #x7FF80000 0)
                 #-sbcl (/ 0d0 0d0)))))
@@ -4031,6 +4066,23 @@
                  (and (vectorp inner)
                       (not (stringp inner)))))
       (setf arr (aref arr 0)))
+    ;; Flatten Perl @array variables embedded in a literal list-slice vector.
+    ;; (vector @foo @bar)[0..5] generates (p-aref-deref (vector @foo @bar) ...)
+    ;; where each @arr is an adjustable fill-pointer vector. Flatten them so
+    ;; slicing sees the elements, not the sub-arrays.
+    (when (and (vectorp arr)
+               (not (array-has-fill-pointer-p arr))
+               (some (lambda (e)
+                       (and (vectorp e)
+                            (not (stringp e))
+                            (array-has-fill-pointer-p e)))
+                     arr))
+      (let ((flat (make-array 0 :adjustable t :fill-pointer 0)))
+        (loop for e across arr do
+              (if (and (vectorp e) (not (stringp e)) (array-has-fill-pointer-p e))
+                  (loop for item across e do (vector-push-extend item flat))
+                  (vector-push-extend e flat)))
+        (setf arr flat)))
     (cond
       ;; Symbolic reference: string used as array name (no strict refs)
       ((stringp arr)
@@ -7258,15 +7310,33 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     result))
 
 (defun p-funcall-ref (ref &rest args)
-  "Call a code reference"
+  "Call a code reference or a symbolic sub name (no-strict-refs semantics)."
   (let ((fn (unbox ref)))
-    ;; Double-unbox: blessed coderefs are stored as box(inner-box(lambda, class="E"))
-    ;; after p-bless wraps raw functions. One unbox gives the inner-box, not the fn.
+    ;; Double-unbox: blessed coderefs are stored as box(inner-box(lambda))
     (when (p-box-p fn)
       (setf fn (p-box-value fn)))
-    (unless (functionp fn)
-      (p-die "Not a CODE reference."))
-    (apply fn args)))
+    (if (functionp fn)
+        (apply fn args)
+        ;; Not a function: treat as symbolic sub name (string/number).
+        ;; Look up PL-NAME in the current CL package (typeglob CODE slot or defun).
+        (let* ((name (to-string fn))
+               (sep-pos (search "::" name :from-end t))
+               (perl-pkg (if sep-pos
+                             (subseq name 0 sep-pos)
+                             (let ((cpkg (package-name *package*)))
+                               (if (string= cpkg "MAIN") "main" cpkg))))
+               (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
+               (cl-pkg (find-package (string-upcase perl-pkg)))
+               (sym (when cl-pkg
+                      (find-symbol (concatenate 'string "PL-"
+                                                (string-upcase bare-name))
+                                   cl-pkg)))
+               (fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
+          (if fn-val
+              (apply fn-val args)
+              (p-die (format nil
+                             "Undefined subroutine &~A::~A called at (eval 1) line 1.~%"
+                             perl-pkg bare-name)))))))
 
 ;;; ============================================================
 ;;; Type Functions
@@ -9506,7 +9576,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (return-from p-load-extension t)))))
   nil)
 
-;;; Load pack/unpack extension eagerly at startup (always needed by Perl code).
-(p-load-extension "pcl-pack")
+;;; pack/unpack loaded lazily on first call via self-loading stubs above.
 
 (format t "PCL Runtime loaded~%")

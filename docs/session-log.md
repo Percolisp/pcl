@@ -4,6 +4,152 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 209 (2026-05-24) — array.t `my @arr = EXPR` self-referential init fix
+
+### Focus
+Fixed the root cause of all 8 array.t failures (TAP 45, 46, 49-51, 56-58). All now pass.
+TAP 45 and 46 had already been fixed in session 206 (local @bee). The real work was TAP 49-51, 56-58.
+
+### Root Cause
+`my @bee = @bee` inside a bare block (`{ }`) generates:
+```lisp
+(let ((@bee (make-array 0 :adjustable t :fill-pointer 0)))  ; empty binding
+  (p-array-= @bee @bee)   ; RHS @bee sees new empty binding → no-op
+  ...)
+```
+CL's `let` evaluates all binding inits in the outer scope. But the body assignment runs INSIDE the let, where @bee is already the new empty binding. The RHS sees empty @bee → wrong value.
+
+### Fix: `_with_declarations` scan for self-referential `my @arr = EXPR`
+
+In `Pl/Parser.pm`, `_with_declarations` (non-scoped path for bare blocks), before building let bindings:
+
+1. **Scan** top-level `PPI::Statement::Variable` nodes in the block for self-referential inits
+2. **Detect** when RHS contains a Symbol token equal to one of the declared array/hash vars
+3. **Skip double-my** (`my @x = my @x = qw(...)`) — check for `my` keyword in RHS tokens
+4. **Single-var** `my @bee = EXPR`: pre-initialize let binding to `(p-copy-array (let (*wantarray* t) EXPR))`, mark var in `_my_binding_init_vars` to skip body assignment
+5. **Multi-var** `my (undef, @bee) = @bee`: pre-initialize @bee's let binding to `(p-copy-array (let (*wantarray* t) @bee))` (outer @bee only). Keep body (p-list-= still does the destructuring from now-correct source @bee)
+
+`_my_binding_init_vars` is REPLACED (not merged) on each nested `_with_declarations` call so inner blocks don't inherit outer blocks' skip flags for the same variable.
+
+### Body-skip in `_process_my_toplevel_declaration`
+When `_my_binding_init_vars{$var}` is set, the array/hash body assignment is replaced with a comment.
+
+### Key bug in List scan
+`PPI::Structure::List`'s direct children is a single `PPI::Statement::Expression`, not individual symbols. Use `$sp[1]->find('PPI::Token::Symbol')` to recurse.
+
+### Result
+array.t: was 153 passing/42 failing. All 8 targeted tests now pass (TAP 49, 50, 51, 56, 57, 58 fixed + 45, 46 already fixed). Full suite NOT yet run — do this next session.
+
+---
+
+## Session 208 (2026-05-24) — array.t nested-local investigation (no fix applied)
+
+### Focus
+Continued from session 207; tried to fix remaining array.t failures. No code was changed.
+
+### Bugs identified (not yet fixed)
+
+**Failing TAP tests in array.t:** 45, 46, 49, 50, 51, 56, 57, 58
+
+Confirmed from diagnostics (run `./runt array 2>/dev/null | grep -A3 "not ok"`):
+- TAP 45: expected 'foo bar burbl blah', got 'foo bar'
+- TAP 46: expected 'XXX bar burbl blah YYY', got 'foo bar burbl blah'
+- TAP 49: expected 'foo bar burbl blah', got ''
+- TAP 50: expected 'bar burbl blah', got ''
+- TAP 51: expected 'XXX bar burbl blah YYY', got 'XXX YYY'
+- TAP 56: expected 'XXX YYY' (??), got something else — **TAP numbers are SHIFTED**
+
+**TAP numbering issue**: The expected values in diagnostics don't match the source comments.
+Source test 45 expects 'XXX bar burbl blah YYY', but TAP 45's expected is 'foo bar burbl blah'
+(= source 43's value). This means there is at least one EXTRA TAP test generated between
+source tests 43 and 45 that doesn't appear in the Perl source. Likely from a sub call inside
+the `local @bee = @bee` block — **investigate before fixing**.
+
+**Bug A — `p-array-=` in `let` binding form mutates the "old" value (fixes TAP 50 equivalent)**
+
+For `local @bee = local(@bee) = qw(foo bar burbl blah)`, the generated CL is:
+```lisp
+(let ((@bee (p-copy-array (let ((*wantarray* t))
+                            (p-array-= @bee (vector "foo" "bar" "burbl" "blah"))))))
+```
+The binding form evaluates `(p-array-= @bee ...)` in the OUTER scope. `p-array-= @bee` is a
+DESTRUCTIVE macro that MUTATES the current @bee vector in place. CL's `let` saves the old
+symbol-value of @bee (the vector OBJECT) before creating the new binding. But `p-array-=`
+has already MUTATED that saved vector. When the `let` exits, CL restores @bee to the
+(now-mutated) saved vector — so the restore produces the WRONG value.
+
+**Fix for Bug A** — in `Pl/Parser.pm`, `_process_local_declaration`, `elsif ($sigil eq '@')` branch (~line 2193):
+```perl
+elsif ($sigil eq '@') {
+    if ($init_cl =~ /^\(p-array-= \Q$var\E (.+)\)$/s) {
+        my $inner_rhs = $1;
+        # Strip the p-array-= wrapper — don't mutate the outer @var
+        push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $inner_rhs)))";
+    } else {
+        push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
+    }
+}
+```
+This avoids mutating the outer @bee vector entirely, so on let-exit it is restored correctly.
+
+**Bug B — `local(@bee)` in expression context doesn't create a `let` binding (fixes TAP 49 equivalent)**
+
+For `local (@bim) = local(@bee) = qw(foo bar)`, PCL generates:
+```lisp
+(let ((@bim (p-copy-array (let ((*wantarray* t))
+                            (p-array-= @bee (vector "foo" "bar"))))))
+```
+Only @bim gets a new `let` binding. The inner `local(@bee)` is parsed as an expression and
+generates `(p-array-= @bee ...)` without a surrounding `let ((@bee ...))` to save/restore @bee.
+The binding form for @bim MUTATES @bee (the current binding from the outer `local @bee` let).
+No save/restore happens for @bee in this inner block.
+
+**Fix for Bug B** — in `_process_local_declaration`, `elsif ($sigil eq '@')` branch: detect
+when `$init_cl` is `(p-array-= $other_var INNER-RHS)` where $other_var ≠ $var, then generate
+`let*` bindings for BOTH vars from the same pre-evaluated INNER-RHS:
+```perl
+elsif ($sigil eq '@') {
+    if ($init_cl =~ /^\(p-array-= (\S+) (.+)\)$/s) {
+        my ($mutated_var, $inner_rhs) = ($1, $2);
+        if ($mutated_var eq $var) {
+            # Same var: don't mutate outer, use inner RHS directly
+            push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $inner_rhs)))";
+        } else {
+            # Different vars: save/restore both from same pre-evaled RHS
+            $self->{_local_counter} //= 0;
+            my $tmp = "pcl-local-inner-" . $self->{_local_counter}++;
+            unshift @bindings, "($tmp (let ((*wantarray* t)) $inner_rhs))";
+            push @bindings, "($mutated_var (p-copy-array $tmp))";
+            push @bindings, "($var (p-copy-array $tmp))";
+            $use_let_star = 1;  # force let* so bindings evaluate in order
+        }
+    } else {
+        push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
+    }
+}
+```
+This generates:
+```lisp
+(let* ((pcl-local-inner-0 (let ((*wantarray* t)) (vector "foo" "bar")))
+       (@bee (p-copy-array pcl-local-inner-0))
+       (@bim (p-copy-array pcl-local-inner-0)))
+  @bim ...)
+```
+Now @bee is properly saved/restored, and both vars get the correct value.
+
+**Note on `let*`**: both fixes above need `let*` instead of `let` for the outer form (since the
+bindings evaluate left-to-right and later bindings depend on earlier ones). The code currently
+only sets `let*` when `$rhs_tmp_cl` is set (multi-var path). Need to add a `$use_let_star` flag.
+
+### What to do next session
+1. **Understand TAP shift first**: run `./runt array 2>/dev/null | grep -A1 "not ok 43\|not ok 44\|not ok 45"` and compare with Perl source to find where the extra test comes from. A `test_arylen` call or similar sub inside the local-block body is the likely cause.
+2. Implement Bug A fix (simpler, same-var case).
+3. Implement Bug B fix (different-var case, requires `let*`).
+4. Handle the `$use_let_star` flag: either reuse `$rhs_tmp_cl` mechanism or add a separate flag.
+5. Tests 56-58 (my chain) need separate investigation — `my @bee = my @bee = qw(...)` generates `(p-array-= @bee (p-array-= @bee ...))` which should work, but may also have a TAP-shift issue.
+
+---
+
 ## Session 207 (2026-05-24) — time.t/chdir.t fully pass; qr.t/args.t improvements
 
 ### Focus

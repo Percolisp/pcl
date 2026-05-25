@@ -195,10 +195,13 @@ Example: `*wantarray*` must be in the `:export` list, otherwise `(let ((*wantarr
 
 When resuming work:
 1. `docs/session-log.md` - Session history (compact, newest first)
-2. `SESSION_SUMMARY.md` - Older detailed session history
-2. `XS_BRIDGE_DESIGN.md` - Future XS/C extension plans
 3. `CODEGEN_DESIGN.md` - Code generation design notes
-4. `MOO_MOOSE_DESIGN.md` - Moo/Moose OO framework support plan
+
+Not relevant now:
+1. `XS_BRIDGE_DESIGN.md` - Future XS/C extension plans
+2. `MOO_MOOSE_DESIGN.md` - Future Moo/Moose OO framework support plan
+2. `SESSION_SUMMARY.md` - Older detailed session history, use `docs/session-log.md` now
+
 
 ### Semantic Deep-Dives (read before touching these areas)
 - `docs/declaration-ordering.md` - Perl vs CL compile/load phases, defvar/defun ordering, local/dynamic scoping
