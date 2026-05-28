@@ -4,6 +4,156 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 213 (2026-05-28) — v-string fix, tr/// escapes, yada yada, POSIX stub, unicode non-chars
+
+### Focus
+Five bugs fixed. Sweep improved from 27745/967/59 to 27996/964/60.
+
+### Bug 1: v-string without `v` prefix (`256.65.258`)
+PPI tokenizes `256.65.258` as `PPI::Token::Number::Version` with no `v` prefix. PCL's
+version string handler only matched `^v(\d...)$`. Fix: check `$ref =~ /::Version$/` in
+addition to the pattern match. File: `Pl/ExprToCL.pm`. tr.t unblocked from first crash.
+
+### Bug 2: Surrogate/non-character Unicode in CL string literals
+When Perl source contains `"\x{d800}\x{ffff}"`, PCL was embedding the literal Unicode chars
+in the generated `.lisp` file. SBCL rejects files with invalid UTF-8 (surrogates). Fix: new
+`_cl_string_literal()` function in ExprToCL.pm. Scans for surrogates/non-chars and generates
+`(concatenate 'string "safe" (string (code-char N)) "more")` for problematic chars. File:
+`Pl/ExprToCL.pm`. tr.t crash at line 1346 fixed; now runs to completion.
+
+### Bug 3: tr/// from/to strings not processing escape sequences
+`gen_transliteration` was embedding raw strings like `"\x40-\xbf"` in CL string literals.
+CL doesn't interpret `\x40` as hex escape — it's literal backslash+x+4+0. So `expand-tr-chars`
+expanded a wrong set. Fix: new `_expand_tr_escapes()` + `_process_tr_escape()` functions
+that convert Perl escapes to actual characters BEFORE building the CL literal. File:
+`Pl/ExprToCL.pm`. tr.t: 40→226 passing.
+
+### Bug 4: Yada yada `...` statement not implemented
+Standalone `...` (yada yada) should die with "Unimplemented". PCL generated PARSE ERROR.
+Fix: in `_process_expression_statement`, detect single `PPI::Token::Operator: ...` and
+emit `(p-die "Unimplemented")`. File: `Pl/Parser.pm`. yadayada.t: 13→16 passing.
+
+### Bug 5: POSIX stub missing DBL_MAX — sprintf.t crash
+sprintf.t does `&POSIX::DBL_MAX` after `require POSIX` succeeds. PCL loads the real POSIX.pm
+but DynaLoader bootstrap fails silently (no .so loaded), so DBL_MAX is undefined. Fix: created
+`lib/POSIX.pm` stub with `DBL_MAX`, `DBL_MIN`, math constants, errno codes, and POSIX functions
+(`floor`, `ceil`, `SEEK_SET`, etc.). sprintf.t: crash fixed, 1→14 passing (552 failures remain).
+
+### Results
+- PCL suite: **78 files, 3010 tests, all passing** (no regressions)
+- Sweep: **27996 passing, 964 failing, 60 fully passing** (104 files + 2 skipped)
+- tr.t: 40 passing (crash) → 226/317 passing (no crash)
+- sprintf.t: 1 passing (crash) → 14/566 passing (no crash)
+- yadayada.t: 13→16 passing
+- sub.t: now fully passing (was crashing on SIMPLE-FILE-ERROR)
+- Net gain: +251 tests passing vs start of session
+
+### Remaining sprintf.t issue (NOT YET FIXED)
+Root cause of 552 sprintf.t failures found:
+
+`%p-array-store-scalar` in pcl-runtime.lisp stores the original p-box (box_A) when it
+detects a "reference type" (box-in-box). The branch:
+```lisp
+((p-box-p inner) (vector-push-extend item arr))  ; stores box_A itself!
+```
+
+For anonymous array construction `[$evalData]`, Perl copies the VALUE, not the identity.
+When $evalData changes in the next while-loop iteration, all @tests entries that stored box_A
+now see the new value. Example: two DATA lines processed → both @tests entries share same
+`$evalData` box_A → second iteration sets box_A to value for `%D` → when sprintf.t tests
+run, first entry (`%B`) sees 2147483647 (binary = 31 ones) instead of 4294967295 (32 ones).
+
+Fix needed: in `%p-array-store-scalar`, for the reference-type branch, create a new box:
+```lisp
+((p-box-p inner) (vector-push-extend (make-p-box inner) arr))  ; copy the reference value
+```
+Instead of `(vector-push-extend item arr)`. This preserves copy semantics for array literals.
+This is a significant fix — verify against all passing tests before committing.
+
+---
+
+## Session 212 (2026-05-28) — p-return-value fix, sub hoisting, eval boundary, inline @ISA fix
+
+### Focus
+Four bugs fixed, sweep improved from 27727/903/58 to 27787/841/60.
+
+### Bug 1: `p-return-value` case 3 stripped box from references
+`return \%x` → `p-backslash %x` → `box(hash-table)`. `p-return-value` case 3 was
+`(p-box-value val)` which unwrapped the box → raw hash-table. `box-set $scalar hash-table`
+then converted to key count. Fix: return `val` (the box) not `(p-box-value val)`.
+File: `cl/pcl-runtime.lisp`. Verified with array.t test pattern `join(sort(keys(%x)))`.
+
+### Bug 2: Sub hoisting inside let-bound blocks
+Named subs inside `let` blocks (my-declarations) were only defined when the `p-sub` form was
+reached sequentially. If a sub was called before its definition, the stub returned nil.
+Fix in `Pl/Parser.pm` `_process_block`: pre-pass hoists only subs that (a) appear AFTER their
+first call-site in source, (b) are the FIRST definition of that sub (avoids reversing
+last-definition-wins order). Only fires when `_let_bound_vars` is non-empty.
+
+### Bug 3: `eval { }` boundary in `_find_all_declarations`
+`_find_all_declarations` recursed INTO `eval { }` blocks, hoisting `my` declarations to the
+outer scope. `eval { my $foo = vec($foo, 1, 8) }` → `$foo` hoisted → nil `$foo` shadowed
+outer wide-char `$foo` → no "code point over 0xFF" error. Fix: added `eval` to the
+exclusion list alongside `sub` in the block recursion guard.
+File: `Pl/Parser.pm`. Fixed vec.t tests 25-26.
+
+### Bug 4: Inline `package MyTie { our @ISA = ... }` → `@ISA` wrong package
+When `package MyTie { }` appears inside a sub body (inline package, no `in-package` context),
+`_process_isa_declaration` emitted bare `(defvar @ISA ...)` and `(p-push @ISA ...)`.
+Without `(in-package :MyTie)`, these land in `main::@ISA` not `MyTie::@ISA`, so method
+dispatch via `@ISA` walk finds no `TIESCALAR` → tie fails. Fix: qualify as `${pkg}::@ISA`
+when `in_subroutine > 0`. File: `Pl/Parser.pm` `_process_isa_declaration`. Fixed index.t test 119.
+
+### Results
+- PCL suite: **78 files, 3010 tests, all passing**
+- Sweep: **27787 passing, 841 failing, 60 fully passing** (102 files + 2 skipped)
+- Newly fully passing: join.t, range.t, lc.t, vec.t (4 new vs session 210)
+- index.t: test 119 fixed; 11 remaining (49-58 utf8::encode byte-mode, 111 blessed-scalar-ref overload)
+
+---
+
+## Session 211 (2026-05-27) — flip-flop recursion bug fix, local array slice improvements
+
+### Focus
+Fixed a flip-flop codegen bug that caused `return /regex/../regex/` inside a recursive sub to
+generate a range vector instead of a flip-flop. Also fixed `local $a[N]` → now generates
+`p-local-array-slice` (handles both scalar and vector/range indices). Added `p-flipflop-dyn`/
+`p-flipflop-dyn-3` macros for string-literal flip-flop operands.
+
+### Bug Fixed: `return /3/../5/` generates range instead of flip-flop
+
+**Root cause**: `..` operator in `INHERIT_CTX` (set by `return`) with non-literal operands
+(like regex matches) fell through to `p-..` (range function), not `p-flipflop`. This meant:
+- `return /3/../5/` → `(p-return (p-.. (p-=~ ...) (p-=~ ...)))` → range of 0/1 values
+- All calls to the sub were ALWAYS truthy (range `#(0)` is non-nil), not a flip-flop
+
+**Fix in `Pl/ExprToCL.pm`**:
+- New helper `_is_string_literal_node` to detect PPI string quote tokens
+- New categorization for `..` INHERIT_CTX:
+  - Non-literal operands (variables, expressions, regex matches): `INHERIT_CTX → SCALAR_CTX` → use `p-flipflop` (boolean eval)
+  - Literal operands (int or string): emit runtime wantarray check `(if (eq *wantarray* t) (p-.. L R) (flipflop-macro ID L R))`
+- Scalar context dispatch now:
+  - Both integer literals → `p-flipflop-num` (clean, no warnings)
+  - Both string literals → `p-flipflop-dyn` (compare with `$.` numerically, warns for non-numeric)
+  - Variables/expressions/regex → `p-flipflop` (boolean evaluation, no `$.` comparison)
+
+**New macros in `cl/pcl-runtime.lisp`**:
+- `p-flipflop-dyn id left-form right-form`: like `p-flipflop-num` but evaluates operands at runtime via `p-==` (may warn "isn't numeric")
+- `p-flipflop-dyn-3 id left-form right-form`: three-dot variant
+
+### Also completed in this session (from earlier context)
+- `p-local-array-slice` macro: localize array elements by scalar index or range vector
+- `p-list-=` p-aslice case: handle `@arr[0..2]` as LHS in list destructuring
+- `_subscript_key_expr` updated to accept ctx parameter (uses LIST_CTX for `[` subscripts to avoid flip-flop for `1..2` in local)
+- `local-elem-01.t`: 18 tests (runtime + codegen checks for local $h{key}, $a[N], @h{slice})
+
+### Results
+- PCL suite: **78 files, 3010 tests, all passing** (no regressions)
+- flip.t: **12→13 passing** (test 13 "recursion shares state" fixed)
+- flip.t test 10 still fails: `"foo".."bar"` should generate "isn't numeric" warnings but `parse-perl-number` silently returns 0 for non-numeric strings
+
+---
+
 ## Session 210 (2026-05-26) — PPI 1.284→1.291 upgrade, dotted bitwise operators, newline-comment bug fix
 
 ### Focus

@@ -791,7 +791,8 @@ sub _subscript_key_cl_list {
 # Parse one key group to a CL expression string.
 # For hash subscripts ({...}), auto-quote single bareword tokens (Perl hash key rule).
 sub _subscript_key_expr {
-  my ($self, $group, $open, $stmt) = @_;
+  my ($self, $group, $open, $stmt, $ctx) = @_;
+  $ctx //= 0;  # default SCALAR_CTX
   if ($open eq '{' && @$group == 1 && ref($group->[0]) eq 'PPI::Token::Word') {
     my $word = $group->[0]->content;
     # Only auto-quote if it's not a keyword
@@ -799,7 +800,7 @@ sub _subscript_key_expr {
       return "\"$word\"";
     }
   }
-  return $self->_parse_expression($group, $stmt) // 'nil';
+  return $self->_parse_expression($group, $stmt, $ctx) // 'nil';
 }
 
 # Process children of a PPI node (Document or Block)
@@ -1002,6 +1003,14 @@ sub _process_expression_statement {
   } $stmt->children;
 
   return unless @parts;
+
+  # Handle '...' (yada yada / unimplemented placeholder) as a statement.
+  # In Perl, a bare '...' statement dies with "Unimplemented".
+  if (@parts == 1 && ref($parts[0]) eq 'PPI::Token::Operator' && $parts[0]->content eq '...') {
+    $self->_emit(";; $perl_code (yada yada)");
+    $self->_emit('(p-die "Unimplemented")');
+    return;
+  }
 
   # Handle '++ state $y' / '-- state $y': PPI treats these as generic expression
   # statements (not PPI::Statement::Variable) because they start with an operator.
@@ -1840,11 +1849,16 @@ sub _process_isa_declaration {
   }
 
   # Declare @ISA in declarations bucket, initialize at runtime
+  # When inside a sub (inline package with no (in-package) context change),
+  # qualify @ISA with the package name so it lands in the right package.
+  my $isa_sym = ($self->environment->in_subroutine > 0)
+    ? "${pkg}::\@ISA"
+    : "\@ISA";
   $self->_with_bucket('declarations', sub {
-    $self->_emit("(defvar \@ISA (make-array 0 :adjustable t :fill-pointer 0))");
+    $self->_emit("(defvar $isa_sym (make-array 0 :adjustable t :fill-pointer 0))");
   });
   for my $parent (@parents) {
-    $self->_emit("(p-push \@ISA \"$parent\")");
+    $self->_emit("(p-push $isa_sym \"$parent\")");
   }
 
   $self->_emit("");
@@ -2097,10 +2111,14 @@ sub _process_local_declaration {
       $self->_emit(";; $perl_code");
 
       # Parse all key CL expressions up front (need them for both macro open and init)
-      my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt) } @key_groups;
+      # Array subscripts use LIST_CTX so that 1..2 generates a range vector instead
+      # of a flip-flop (which would trigger $SIG{__WARN__} via uninitialized $..).
+      my $sub_ctx = ($open eq '[') ? 1 : 0;
+      my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) } @key_groups;
 
-      # Choose the macro based on subscript type
-      my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-elem';
+      # Choose the macro based on subscript type.
+      # p-local-array-slice handles both scalar and vector (range) indices.
+      my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-slice';
       my $macro_init = ($open eq '{') ? 'p-local-hash-elem-init'  : 'p-local-array-elem-init';
 
       if (defined $init_cl && @key_cls == 1) {
@@ -3081,6 +3099,58 @@ sub _process_block {
 
   my @children = $block->children;
   my %skip;
+
+  # Hoist named sub definitions that are called BEFORE their definition in the block.
+  # Perl compiles all named subs at compile time so they are callable anywhere in their
+  # lexical scope.  In a let-bound block p-sub is emitted inline and evaluated
+  # sequentially — calls to the sub BEFORE the p-sub form would use the forward stub
+  # (returns nil).  Only hoist when actually needed (called before defined), to avoid
+  # disturbing package context for subs already defined before their calls.
+  # Only fires when _let_bound_vars is non-empty (otherwise subs already go to
+  # declarations/definitions and are pre-hoisted).
+  if (%{$self->{_let_bound_vars} // {}}) {
+    # First pass: find which sub names appear as word tokens before their FIRST definition.
+    # Only the first definition of a sub is ever hoisted — later redefinitions stay in order
+    # so that last-definition-wins semantics are preserved.
+    my %words_seen;    # token content => 1 if seen in a non-sub statement
+    my %sub_defined;   # sub_name => 1 once we've seen the first definition
+    my %needs_hoist;   # child index => 1 for subs that need hoisting
+    for my $i (0 .. $#children) {
+      my $child = $children[$i];
+      my $ref = ref($child);
+      next if $ref eq 'PPI::Token::Whitespace' || $ref eq 'PPI::Token::Comment';
+      if ($ref eq 'PPI::Statement::Sub') {
+        my ($sub_name, $has_block) = ('', 0);
+        for my $sc ($child->children) {
+          my $scref = ref($sc);
+          if ($scref eq 'PPI::Token::Word' && $sc->content ne 'sub'
+              && $sc->content ne 'my' && $sc->content ne 'our' && $sc->content ne 'state') {
+            $sub_name ||= $sc->content;
+          }
+          $has_block = 1 if $scref eq 'PPI::Structure::Block';
+        }
+        if ($sub_name && $has_block) {
+          # Hoist only if: (a) called before this definition, and (b) no earlier definition
+          if ($words_seen{$sub_name} && !$sub_defined{$sub_name}) {
+            $needs_hoist{$i} = 1;
+          }
+          $sub_defined{$sub_name} = 1;
+        }
+      } else {
+        # Record all word tokens as potential calls
+        my $words = $child->find('PPI::Token::Word') || [];
+        for my $w (@$words) {
+          $words_seen{$w->content} = 1;
+        }
+      }
+    }
+    # Second pass: hoist only subs that need it
+    for my $i (sort { $a <=> $b } keys %needs_hoist) {
+      $self->_process_element($children[$i]);
+      $skip{$i} = 1;
+    }
+  }
+
   for my $i (0 .. $#children) {
     next if $skip{$i};
     my $child = $children[$i];
@@ -3518,6 +3588,9 @@ sub _find_all_declarations {
     #   - Named sub definitions (PPI::Statement::Sub)
     #   - BEGIN/END/etc blocks (PPI::Statement::Scheduled)
     #   - Anonymous sub bodies: PPI::Structure::Block whose prev sibling is 'sub'
+    #   - eval { } blocks: PPI::Structure::Block whose prev sibling is 'eval'
+    #     (my vars inside eval { } are scoped to that eval; hoisting them to the
+    #     enclosing let would shadow outer vars of the same name)
     # For bare blocks (no prev non-whitespace sibling): recurse but only keep
     #   'state' declarations — 'my' vars in bare blocks are scoped to the block
     #   by _process_bare_block/_with_declarations and must NOT be hoisted to the
@@ -3527,7 +3600,8 @@ sub _find_all_declarations {
         && $ref ne 'PPI::Statement::Scheduled'
         && !($ref eq 'PPI::Structure::Block' && do {
                my $prev = $child->sprevious_sibling;
-               $prev && ref($prev) eq 'PPI::Token::Word' && $prev->content eq 'sub'
+               $prev && ref($prev) eq 'PPI::Token::Word'
+                     && ($prev->content eq 'sub' || $prev->content eq 'eval')
              })) {
       my $is_bare_block = $ref eq 'PPI::Structure::Block' && do {
         my $prev = $child->sprevious_sibling;
