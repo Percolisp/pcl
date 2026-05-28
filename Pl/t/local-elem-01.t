@@ -50,8 +50,8 @@ plan tests => 18;
 
 {
     my $cl = parse_pl('our @a; local $a[2];');
-    like($cl, qr/p-local-array-elem/, 'local $a[2] generates p-local-array-elem');
-    like($cl, qr/p-local-array-elem \@a 2/, 'array element uses correct index');
+    like($cl, qr/p-local-array-slice/, 'local $a[2] generates p-local-array-slice');
+    like($cl, qr/p-local-array-slice \@a 2/, 'array element uses correct index');
 }
 
 {

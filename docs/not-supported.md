@@ -676,3 +676,18 @@ implementation (not feasible).
 **Affected tests:** `perl-tests/hash.t` — the `validate_hash` / `torture_hash` calls (originally
 ~225 tests) are commented out.  Remaining failures in `hash.t` are DESTROY-via-GC and tie/weak-ref
 tests, also documented as not-supported.
+
+## `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+
+**Perl behaviour:** This special variable (introduced in Perl 5.38) controls the maximum number
+of nested `BEGIN` blocks allowed inside `eval "string"`.  Setting it to 0 prevents any `BEGIN`
+blocks from running inside string eval; higher values limit nesting depth.
+
+**PCL behaviour:** Not implemented.  PCL does not recognize `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+as a special variable and will report a transpile error if it appears in source.
+
+**Rationale:** This is a very new, rarely-used safety valve for deeply nested `eval` in
+adversarial code.  No CPAN module in scope uses it.
+
+**Affected tests:** `perl-tests/eval.t` — the block using `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+is commented out (6 tests).

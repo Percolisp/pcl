@@ -4,6 +4,85 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 214 (2026-05-28) — sprintf.t unblocked (array-store copy semantics + s///x mode)
+
+### Focus
+Continued the sprintf.t investigation from session 213. Two runtime fixes took
+sprintf.t from 14→365 passing. Sweep: 27996/964/60 → **28363/1137/60** (+367 pass,
+fully-passing unchanged, no regressions).
+
+### Bug 1: `%p-array-store-scalar` aliased the original box for object refs
+`[$evalData]` / `@a = ($x)` must COPY the scalar container. When `$x` holds a
+reference to a raw object (arrayref/hashref/coderef/glob/qr//), the old code stored
+the *original* box `item`. sprintf.t builds `@tests` in a `while (<DATA>)` loop:
+`$evalData = ref $evalData ? $evalData : [$evalData]; push @tests, [$tmpl,$evalData,...]`.
+Because `$evalData` is reassigned each iteration (`box-set` mutates the box in place),
+every stored row aliased the *same* box and ended up seeing the LAST iteration's value.
+552 tests failed because the template/data were corrupted before the test loop ran.
+
+**Fix** (`cl/pcl-runtime.lisp`, `%p-array-store-scalar`): split the reference branch.
+- `(p-box-p inner)` (scalar/nested refs `\$x`, `\\1`): keep `item` AS-IS. Box-nesting
+  depth encodes SCALAR-vs-REF; `(make-p-box inner)` adds a layer and turns `\$x` into
+  REF (broke ref.t tests 43-67 stringify — caught during verification).
+- raw-object refs (vector/hash/function/typeglob/regex): `(vector-push-extend
+  (make-p-box inner) arr)` — a fresh container pointing at the SAME object. Correct
+  Perl copy semantics; ref type unchanged because the object is unchanged.
+
+### Bug 2: `s///x` extended-mode silently ignored
+`do-regex-subst` built cl-ppcre `options` from `:i`/`:s`/`:m` but omitted `:x`. So
+`s/^\s* ( [ae] )? >//x` did not ignore pattern whitespace and failed to strip the
+leading `>` from sprintf.t's `>%B<`-style DATA template field (when there was no
+leading whitespace). The match path (line ~9152) already handled `:x`; only the
+substitution path was missing it.
+
+**Fix**: added `(extended (member :x modifiers))` and
+`(when extended '(:extended-mode t))` to the `options` list in `do-regex-subst`.
+
+### Bug 3-6: sprintf format-parsing gaps (after the data corruption was fixed)
+With the table no longer corrupted, the remaining sprintf.t failures were real format
+gaps. Fixed in `sprintf-one` / the `p-sprintf` parser:
+- **Integer formatting rewrite**: `%#x`/`%#b` suppress the `0x`/`0b` prefix when the
+  value is 0; `%#o` forces a leading `0`; `%.0d`/`%.0x` of 0 → empty string. Computes
+  bare digits (via `sprintf-format-int … nil`), applies precision, then the alt-form
+  prefix. The prefix now sits LEFT of zero-padding, so `%#08x` 255 → `0x0000ff`
+  (was `00000xff`) — `sign+prefix` passed as the sign arg to `sprintf-apply-width`.
+- **Negative `*` precision**: `%.*d` with -2 means precision OMITTED (nil), not 0
+  (was `(max 0 …)`).
+- **`%c` zero-pad**: `%010c` now honors the `0` flag (was hardcoded no-pad).
+- **`%v` vector flag implemented**: new `sprintf-vector` helper. Parses `v` (sep ".")
+  or `*v` (sep from next arg) between flags and width, plus flags after `v` (`%v02x`).
+  Formats each character ordinal of the string arg via `sprintf-one` and joins with the
+  separator. Handles `%vd %vX %*vX %v.3X %*v.3X %v02x`. +55 tests.
+
+### Bug 7: overloaded `length` (length.t 32→35)
+`length($obj)` where `$obj` overloads `""` returned the raw ref text length (e.g. 19)
+because `p-length` did `(unbox val)` and then `(to-string v)` on the unwrapped inner —
+stripping the box/class so the `""` overload never fired.  Fix: `(to-string val)` on the
+original boxed value (box-sv invokes the handler).  Fixes length.t tests 35/41/43.
+Remaining length.t: `use bytes` (not-supported), tied-scalar `undef` (test 34, tie FETCH
+returns ''), and uninit warnings (36/42, a cross-cutting under-emission — risky to add).
+
+### Results
+- PCL suite: **78 files, 3010 tests, all passing** (verified 4×)
+- Sweep: **28464 passing, 1036 failing, 60 fully passing** (+468 vs session 213)
+- sprintf.t: 14 → **460** passing (x-mode 26 → +array-store copy 365 → +int/precision/%c 404 → +%v 460)
+- sprintf2.t: 1507 (unchanged — no regression from shared sprintf code)
+- ref.t: 171 (regression from the naive full-copy array-store avoided by the box-in-box split)
+- bop.t: 446
+
+### Remaining sprintf.t failures (92)
+INVALID/MISSING/REDUNDANT warning detection for malformed/excess/short args
+(`%6. 6s`, etc.), `%N$` positional args (`%3$*4$v...`), `version->new` objects in `%vd`,
+`%.0g` of -0.0 sign, `%#.0g`.
+
+---
+
+# PCL Session Log
+
+Append new entries at the top. One section per session.
+
+---
+
 ## Session 213 (2026-05-28) — v-string fix, tr/// escapes, yada yada, POSIX stub, unicode non-chars
 
 ### Focus

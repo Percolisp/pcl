@@ -23,15 +23,17 @@ sub skip_all_without_unicode_tables {
     # No-op - we'll handle unicode tests differently
 }
 
-# fresh_perl_* run code in a real Perl subprocess for accurate results
-sub fresh_perl_is {
-    my ($code, $expected, $opts, $desc) = @_;
+# _fresh_perl_run: shared helper — runs code in a fresh Perl, returns normalized output.
+# Mirrors Perl t/test.pl _fresh_perl: captures stderr by default, strips trailing newlines,
+# normalises temp-file paths in error messages.
+sub _fresh_perl_run {
+    my ($code, $opts) = @_;
     $opts //= {};
-    $desc //= 'fresh_perl_is';
     my @switches = grep { length($_) } @{$opts->{switches} // []};
-    my $capture_stderr = $opts->{stderr} ? '2>&1' : '2>/dev/null';
+    # Default: capture stderr (same as Perl's real t/test.pl). Pass stderr=>0 to suppress.
+    my $capture_stderr = (!exists $opts->{stderr} || $opts->{stderr}) ? '2>&1' : '2>/dev/null';
     my $tmpfile = "/tmp/pcl_fp_$$" . int(rand(99999)) . ".pl";
-    open(my $fh, '>', $tmpfile) or do { fail($desc); return; };
+    open(my $fh, '>', $tmpfile) or return "";
     print $fh $code;
     close $fh;
     my $perl = $^X;
@@ -39,7 +41,7 @@ sub fresh_perl_is {
     my $got;
     if (defined $opts->{stdin}) {
         my $sin = "/tmp/pcl_fp_sin_$$.txt";
-        open(my $sf, '>', $sin) or do { unlink $tmpfile; fail($desc); return; };
+        open(my $sf, '>', $sin) or do { unlink $tmpfile; return ""; };
         print $sf $opts->{stdin};
         close $sf;
         $got = `$perl $sw "$tmpfile" $capture_stderr < "$sin"`;
@@ -48,6 +50,24 @@ sub fresh_perl_is {
         $got = `$perl $sw "$tmpfile" $capture_stderr`;
     }
     unlink $tmpfile;
+    $got //= "";
+    # Normalize temp-file path in error messages (at /tmp/pcl_fp_NNN.pl line N -> at - line N)
+    (my $escaped = $tmpfile) =~ s/[.]/[.]/g;
+    $got =~ s{at\s+$escaped\s+line}{at - line}g;
+    $got =~ s{of\s+$escaped\s+aborted}{of - aborted}g;
+    # Strip trailing newlines (matches Perl t/test.pl _fresh_perl behaviour)
+    $got =~ s/\n+$//;
+    return $got;
+}
+
+# fresh_perl_* run code in a real Perl subprocess for accurate results
+sub fresh_perl_is {
+    my ($code, $expected, $opts, $desc) = @_;
+    $opts //= {};
+    $desc //= 'fresh_perl_is';
+    my $got = _fresh_perl_run($code, $opts);
+    # Also strip trailing newlines from expected (Perl t/test.pl does this too)
+    $expected =~ s/\n+$//;
     is($got, $expected, $desc);
 }
 
@@ -55,16 +75,7 @@ sub fresh_perl_like {
     my ($code, $pattern, $opts, $desc) = @_;
     $opts //= {};
     $desc //= 'fresh_perl_like';
-    my @switches = grep { length($_) } @{$opts->{switches} // []};
-    my $capture_stderr = $opts->{stderr} ? '2>&1' : '2>/dev/null';
-    my $tmpfile = "/tmp/pcl_fp_$$" . int(rand(99999)) . ".pl";
-    open(my $fh, '>', $tmpfile) or do { fail($desc); return; };
-    print $fh $code;
-    close $fh;
-    my $perl = $^X;
-    my $sw = join(' ', @switches);
-    my $got = `$perl $sw "$tmpfile" $capture_stderr`;
-    unlink $tmpfile;
+    my $got = _fresh_perl_run($code, $opts);
     like($got, $pattern, $desc);
 }
 
@@ -105,7 +116,11 @@ sub run_perl {
         $got = `$perl $sw "$tmpfile" $argv $capture_stderr`;
     }
     unlink $tmpfile;
-    return $got // "";
+    $got //= "";
+    (my $escaped = $tmpfile) =~ s/[.]/[.]/g;
+    $got =~ s{at\s+$escaped\s+line}{at - line}g;
+    $got =~ s{of\s+$escaped\s+aborted}{of - aborted}g;
+    return $got;
 }
 
 # runperl - alias for run_perl (legacy name used in some test files)

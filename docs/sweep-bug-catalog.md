@@ -10,6 +10,14 @@ Updated 2026-05-26 (session 210). **PPI 1.291 upgrade. 27727 pass / 903 fail, 58
 Updated 2026-05-27 (session 211). **flip.t 12→13 passing (test 13 fixed: flip-flop state sharing across recursive sub calls). `return /3/../5/` now generates `p-flipflop` not `p-..` range. Added `p-flipflop-dyn`/`p-flipflop-dyn-3` macros for string-literal flip-flop operands (compare with `$.`). PCL test suite: 78 files, 3010 tests, all passing.**
 Updated 2026-05-28 (session 212). **27787 pass / 841 fail, 60 fully passing. 4 bugs fixed: (1) p-return-value case 3 stripped box from references (return \%x → hash count); (2) sub hoisting inside let-bound blocks (call-before-def only, first-def-only); (3) eval{} boundary in _find_all_declarations (vec.t 25-26); (4) inline package @ISA wrong package (index.t 119: MyTie::@ISA now qualified). Newly fully passing: join.t, range.t, lc.t, vec.t.**
 Updated 2026-05-28 (session 212b — no-op). **Added perl-tests: tr.t (94/134 failures, then crashes on Unicode non-chars), eval.t (crashes early, needs investigation), yadayada.t (partial failures). Removed: repeat.t (3 failures, edge cases), numconvert.t (fully skipped on 64-bit). Noted: ExprToCL.pm warnings ($idx undef line 2082, $num undef lines 570/583/589/595/601/607/609) exposed by numconvert.t — TODO to fix. ${^MAX_NESTED_EVAL_BEGIN_BLOCKS} documented as not-supported.**
+Updated 2026-05-28 (session 214). **28464 pass / 1036 fail, 60 fully passing** (104 files + 2 skipped). +468 vs session 213, no fully-passing drop. sprintf.t **14→460**, length.t **32→35** (overloaded `length` via `to-string` on boxed value — `p-length` no longer unboxes before stringifying). sprintf fixes:
+  - (1) `%p-array-store-scalar` now COPIES the scalar container for refs to raw objects (array/hash/code/glob/qr) — `[$x]`/`@a=($x)` no longer aliases the original box when `$x` is later reassigned (was corrupting sprintf.t's `@tests` across `<DATA>` iterations). Box-in-box (scalar refs `\$x`/`\\1`) keep the box AS-IS, since box-nesting depth encodes SCALAR-vs-REF (adding a layer turned `\$x` into REF, broke ref.t stringify).
+  - (2) `do-regex-subst` now passes `:extended-mode t` for `/x` (was silently ignored in s///; match path already had it).
+  - (3) sprintf integer formatting rewritten (`sprintf-one`): `%#x`/`%#b` suppress the `0x`/`0b` prefix when the value is 0; `%#o` forces a leading `0`; `%.0d`/`%.0x` of 0 → empty. The `0x`/`0b`/`0` prefix now sits left of zero-padding (`%#08x` 255 → `0x0000ff`).
+  - (4) negative `*` precision (`%.*d`, -2) means precision OMITTED, not 0.
+  - (5) `%c` now honors the `0` zero-pad flag (`%010c`).
+  - (6) **`%v` vector flag implemented**: `%vd`/`%vX`/`%*vX` (separator from arg)/`%v.3X`/`%v02x` — new `sprintf-vector` helper formats each char ordinal joined by sep ("." default). +55 tests.
+  Remaining sprintf.t (92): INVALID/REDUNDANT/MISSING warning detection (~warning-tag mismatches), `%N$` positional args, `version->new` objects in `%vd`.
 Updated 2026-05-28 (session 213). **27996 pass / 964 fail, 60 fully passing. Fixes: (1) v-string without `v` prefix (`256.65.258`): now handled as Version token in ExprToCL; (2) surrogate/non-char Unicode in CL string literals: new `_cl_string_literal()` in ExprToCL uses (concatenate 'string ...) forms; (3) tr/// escape sequences: new `_expand_tr_escapes()` converts Perl escapes before CL embedding — tr.t 40→226 passing; (4) yada yada `...`: detected in `_process_expression_statement`, emits (p-die "Unimplemented"); (5) lib/POSIX.pm stub added: DBL_MAX, math constants, errno, SEEK_* — sprintf.t crash fixed, 1→14 passing. Root cause of remaining 552 sprintf.t failures identified (see session-log.md §213).**
 
 **Session 207 fixes:**
@@ -334,12 +342,17 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### length.t (15 failures, 32/49 passing — PARTIAL, 2 tests unreached)
+### length.t (12 failures, 35/49 passing — PARTIAL, 2 tests unreached)
 
 - **`use bytes; length(unicode_str)`** (tests 7–23): not supported.
-- **`length(undef)` returns `''` instead of `undef`** (test 34).
-- **Overloaded `length`** (tests 35, 41, 43): `length($obj)` where obj overloads `""`.
-- **Missing "uninitialized" warnings** (tests 36, 42).
+- **Overloaded `length`** (tests 35, 41, 43): ✅ FIXED (session 214). `p-length` now calls
+  `to-string` on the original boxed value (not the unboxed inner), so a blessed object's
+  `""` overload fires. `length($obj)` where `""` returns undef → 0; returns "hello" → 5.
+- **`length(undef)` on a tied scalar** (test 34): tie FETCH returns `''` not `undef`
+  (`undef $u` on a `Tie::StdScalar`). Tie semantics, not the plain-undef path (which works).
+- **Missing "uninitialized" warnings** (tests 36, 42): when the `""` overload returns undef,
+  Perl warns "Use of uninitialized value". PCL under-emits uninit warnings generally (a
+  cross-cutting feature); not emitted here. Adding it risks breaking test 202 (warning count).
 - **Tests 48–49 not reached**: depend on `charset_tools.pl`.
 
 ---
