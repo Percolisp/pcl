@@ -39,6 +39,7 @@
    #:p-*= #:p-/= #:p-%= #:p-**=
    #:p-.= #:p-str-x=
    #:p-bit-and= #:p-bit-or= #:p-bit-xor= #:p-<<= #:p->>=
+   #:p-str-bit-and= #:p-str-bit-or= #:p-str-bit-xor=
    #:p-and-assign #:p-or-assign #:p-//=
    ;; Comparison (numeric)
    #:p-== #:p-!= #:p-< #:p-> #:p-<= #:p->= #:p-<=>
@@ -50,12 +51,14 @@
    #:p-.. #:p-...
    ;; Flip-flop operator (scalar context .. and ...)
    #:p-flipflop #:p-flipflop-3 #:p-flipflop-num #:p-flipflop-num-3
+   #:p-flipflop-dyn #:p-flipflop-dyn-3
    ;; Dualvar
    #:p-dualvar
    ;; Logical
    #:p-&& #:p-|| #:p-! #:p-not #:p-and #:p-or #:p-xor #:p-//
    ;; Bitwise
    #:p-bit-and #:p-bit-or #:p-bit-xor #:p-bit-not #:p-<< #:p->>
+   #:p-str-bit-and #:p-str-bit-or #:p-str-bit-xor #:p-str-bit-not
    #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
@@ -108,6 +111,7 @@
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
+   #:p-local-array-slice
    #:p-copy-array #:p-copy-hash
    #:p-pack #:p-unpack #:p-load-extension
    #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-reverse
@@ -133,6 +137,7 @@
    ;; Context
    #:*wantarray*
    #:*pcl-caller-wantarray*
+   #:*p-in-list-assign-rhs*
    ;; Call depth tracking (for p-caller at top level)
    #:*pcl-sub-call-depth*
    ;; END blocks
@@ -156,6 +161,25 @@
    #:p-my-=))
 
 (in-package :pcl)
+
+;;; Forward declarations to suppress compile-time "undefined function" style-warnings.
+;;; These functions are defined later in this file; the declarations tell the compiler
+;;; they exist so that earlier functions that call them compile without noise.
+(declaim (ftype (function * *) %make-p-box p-box-p))
+(declaim (ftype (function * *) (setf p-box-nv) (setf p-box-nv-ok)
+                (setf p-box-sv) (setf p-box-sv-ok)))
+(declaim (ftype (function * *) p-superchar-p))
+(declaim (ftype (function * *)
+                %pcl-nan-p
+                p-ensure-hashref p-ensure-arrayref
+                p-warn p-die
+                p-glob--list-context p-glob--scalar-context
+                %p-symref-array
+                p-scalar
+                %pcl-find-package %pcl-dispatch-autoload
+                p-super-call
+                p-load-extension))
+(declaim (special *p-filehandles* *p-dirhandles*))
 
 ;;; Capture the runtime's directory at load time so extensions can be found.
 ;;; Must be near the top — *load-truename* changes as nested loads execute.
@@ -408,6 +432,9 @@
 
 ;;; Wantarray context variable
 (defvar *wantarray* nil "Context for the current call: t=list, nil=scalar, :void=void.")
+(defvar *p-in-list-assign-rhs* nil
+  "True while evaluating the RHS of a p-list-= assignment. Tells p-readline to use scalar
+   mode even when *wantarray* is t (avoids reading the entire file in while-loop idioms).")
 (defvar *pcl-caller-wantarray* :void
   "Saved *wantarray* from sub entry. p-wantarray reads this so wantarray() always
    reflects the context of the CURRENT sub's caller, even when *wantarray* has been
@@ -616,6 +643,35 @@
             (p-box-nv-ok box) t))
     box))
 
+(defun %pcl-nan-canonical-p (s)
+  "True if S (lowercased, sign/whitespace-stripped) is a canonical NaN form that
+   Perl converts without an 'isn't numeric' warning."
+  (or (member s '("nan" "nanq" "nans" "qnan" "snan"
+                  "1.#nanq" "1.#qnan" "1.#ind" "1.#ind00"
+                  "1#nan" "1#snan" "1#ind")
+              :test #'string=)
+      ;; nan/nanq/nans with decimal or hex payload in properly-closed parens
+      (and (>= (length s) 3) (string= (subseq s 0 3) "nan")
+           (let* ((base-end
+                   (cond
+                     ((and (>= (length s) 4) (char= (char s 3) #\()) 3)
+                     ((and (>= (length s) 5)
+                           (member (char s 3) '(#\q #\s))
+                           (char= (char s 4) #\()) 4)
+                     (t nil))))
+             (when base-end
+               (let* ((payload-start (1+ base-end))
+                      (close (position #\) s :start payload-start)))
+                 (and close
+                      (= close (1- (length s)))
+                      (let ((content (subseq s payload-start close)))
+                        (or (and (> (length content) 0)
+                                 (every #'digit-char-p content))
+                            (and (>= (length content) 3)
+                                 (string= (subseq content 0 2) "0x")
+                                 (every (lambda (c) (digit-char-p c 16))
+                                        (subseq content 2))))))))))))
+
 (defun parse-perl-number (str)
   "Parse a string to number using Perl semantics.
    Extracts leading numeric portion: '3rd' -> 3, '3.14foo' -> 3.14.
@@ -632,15 +688,20 @@
             (when (char= (char check 0) #\-)
               (setf sign -1))
             (setf check (subseq check 1)))
-          (let ((lower (string-downcase check)))
-            ;; Inf: "inf", "infinity", "infinite", "info", "inf123" (any "inf" prefix),
-            ;; also "1.#inf..." and "1#inf..." (MSVC-style)
+          (let* ((lower (string-downcase check))
+                 (lower-stripped (string-right-trim '(#\Space #\Tab #\Newline) lower)))
+            ;; Inf: "inf", "infinity", and MSVC "1.#inf*" / "1#inf*"
             (when (or (and (>= (length lower) 3)
                            (string= (subseq lower 0 3) "inf"))
                       (and (>= (length lower) 5)
                            (string= (subseq lower 0 5) "1#inf"))
                       (and (>= (length lower) 6)
                            (string= (subseq lower 0 6) "1.#inf")))
+              ;; Warn when the form has garbage after the canonical Inf prefix
+              (unless (member lower-stripped
+                              '("inf" "infinity" "1.#inf" "1.#inf00" "1#inf" "1#inf00")
+                              :test #'string=)
+                (p-warn (format nil "Argument ~S isn't numeric~%" str)))
               (return-from parse-perl-number
                 (if (minusp sign)
                     sb-ext:double-float-negative-infinity
@@ -650,9 +711,7 @@
             ;; "1#NAN", "1#SNAN", "1#IND" (MSVC-style without dot)
             (when (or (and (>= (length lower) 3)
                            (string= (subseq lower 0 3) "nan"))
-                      (string= lower "qnan")
-                      (string= lower "snan")
-                      (string= lower "nanq")
+                      (member lower-stripped '("qnan" "snan" "nanq") :test #'string=)
                       (and (>= (length lower) 6)
                            (string= (subseq lower 0 6) "1.#nan"))
                       (and (>= (length lower) 7)
@@ -667,6 +726,9 @@
                            (string= (subseq lower 0 6) "1#snan"))
                       (and (>= (length lower) 5)
                            (string= (subseq lower 0 5) "1#ind")))
+              ;; Warn when the form has garbage after the canonical NaN pattern
+              (unless (%pcl-nan-canonical-p lower-stripped)
+                (p-warn (format nil "Argument ~S isn't numeric~%" str)))
               (return-from parse-perl-number
                 #+sbcl (sb-kernel:make-double-float #x7FF80000 0)
                 #-sbcl (/ 0d0 0d0)))))
@@ -705,11 +767,25 @@
                   (setf end exp-start))))
           ;; Parse the extracted portion
           (when (and has-digit (> end 0))
-            (let ((num-str (subseq trimmed 0 end)))
+            (let* ((num-str (subseq trimmed 0 end))
+                   ;; Pre-check exponent so that "1e9999" doesn't silently return 0.
+                   ;; read-from-string wraps fp-overflow in reader-impossible-number-error,
+                   ;; so we detect extreme exponents before calling it.
+                   (e-pos (or (position #\e num-str) (position #\E num-str)))
+                   (exp-val (when e-pos
+                              (ignore-errors
+                                (parse-integer (subseq num-str (1+ e-pos))
+                                               :junk-allowed t)))))
+              (when (and exp-val (> exp-val 400))
+                (return-from parse-perl-number
+                  (if (char= (char num-str 0) #\-)
+                      sb-ext:double-float-negative-infinity
+                      sb-ext:double-float-positive-infinity)))
+              (when (and exp-val (< exp-val -400))
+                (return-from parse-perl-number 0.0d0))
               (multiple-value-bind (n pos)
                   (let ((*read-eval* nil))
-                    (ignore-errors
-                      (read-from-string num-str)))
+                    (ignore-errors (read-from-string num-str)))
                 (declare (ignore pos))
                 (when (numberp n)
                   (return-from parse-perl-number n)))))))))
@@ -876,6 +952,7 @@
                    ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
                    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
                    ((functionp v) (object-address v))  ; code ref: address
+                   ((p-regex-match-p v) (object-address v))  ; compiled regex: address
                    ((p-typeglob-p v) 0)  ; typeglob: numeric = 0 ("*pkg::name" parses as 0)
                    (t 0))))
           ;; Don't cache address-based NV: SBCL's GC can move objects,
@@ -884,7 +961,8 @@
           (unless (or (p-box-p v)
                       (hash-table-p v)
                       (and (vectorp v) (not (stringp v)))
-                      (functionp v))
+                      (functionp v)
+                      (p-regex-match-p v))
             (setf (p-box-nv box) n
                   (p-box-nv-ok box) t))
           n))))
@@ -1427,11 +1505,14 @@
       (stringify-value val)))
 
 (defun p-length (val)
-  "Perl length function - returns undef for undef input"
+  "Perl length function - returns undef for undef input.
+   Stringifies via to-string on the original (boxed) value so that a blessed
+   object's overloaded '' handler fires (e.g. length($obj) on an object that
+   overloads stringification), rather than measuring the raw ref text."
   (let ((v (unbox val)))
     (if (or (eq v *p-undef*) (null v))
         *p-undef*
-        (length (to-string v)))))
+        (length (to-string val)))))
 
 (defun p-substr (str start &optional len replacement)
   "Perl substr function.
@@ -2011,7 +2092,7 @@
                         (string (code-char code))
                         ""))
                 (sign ""))
-           (values (sprintf-apply-width ch (or width 0) left-justify nil sign)
+           (values (sprintf-apply-width ch (or width 0) left-justify zero-pad sign)
                    (1+ arg-idx)))))
 
       ;; Integer types: d/i, u, o, x/X, b/B
@@ -2044,38 +2125,40 @@
                             (#\o 8)
                             (#\x 16)
                             (#\b 2)))
-                    (raw (sprintf-format-int (abs int-val) base upper-case-p alt-form))
+                    ;; Bare base digits of |value|, no 0x/0b/0-prefix.
+                    (digits0 (sprintf-format-int (abs int-val) base upper-case-p nil))
+                    ;; Apply precision (minimum digit count, zero-padded).  A zero
+                    ;; value with precision 0 produces NO digits (Perl: "%.0d",0 => "").
+                    (digits (cond
+                              ((and precision (zerop precision) (zerop int-val)) "")
+                              ((and precision (> precision (length digits0)))
+                               (concatenate 'string
+                                            (make-string (- precision (length digits0))
+                                                         :initial-element #\0)
+                                            digits0))
+                              (t digits0)))
+                    ;; Alt-form (#) prefix.  For hex/binary the 0x/0b prefix is
+                    ;; suppressed when the value is zero (Perl).  For octal, # forces
+                    ;; the digit string to begin with a 0.
+                    (prefix (cond
+                              ((not alt-form) "")
+                              ((= base 16) (if (zerop int-val) "" (if upper-case-p "0X" "0x")))
+                              ((= base 2)  (if (zerop int-val) "" (if upper-case-p "0B" "0b")))
+                              ((= base 8)  (if (or (zerop (length digits))
+                                                   (char/= (char digits 0) #\0))
+                                               "0" ""))
+                              (t "")))
                     ;; Sign handling
                     (sign (cond
                             ((minusp int-val) "-")
                             ((and (member type-lower '(#\d #\i)) force-sign) "+")
                             ((and (member type-lower '(#\d #\i)) space-sign) " ")
                             (t "")))
-                    ;; Precision for integers: minimum digits (pad with zeros)
-                    (result (if precision
-                                ;; Precision = minimum digits, zero-pad the digits
-                                (let* ((prefix (cond
-                                                 ((and alt-form (= base 16))
-                                                  (if upper-case-p "0X" "0x"))
-                                                 ((and alt-form (= base 8)) "")
-                                                 ((and alt-form (= base 2))
-                                                  (if upper-case-p "0B" "0b"))
-                                                 (t "")))
-                                       (digit-str (if (> (length prefix) 0)
-                                                      (subseq raw (length prefix))
-                                                      raw))
-                                       (padded (if (and (zerop precision) (zerop (abs int-val)))
-                                                   ""
-                                                   (if (> precision (length digit-str))
-                                                       (concatenate 'string
-                                                                    (make-string (- precision (length digit-str))
-                                                                                 :initial-element #\0)
-                                                                    digit-str)
-                                                       digit-str))))
-                                  (concatenate 'string prefix padded))
-                                raw)))
-               (values (sprintf-apply-width result (or width 0) left-justify
-                                            (and zero-pad (null precision)) sign)
+                    ;; The 0x/0b/0 prefix stays left of any zero-padding, like the
+                    ;; sign — so %#08x of 255 is "0x0000ff", not "00000xff".
+                    (sign+prefix (concatenate 'string sign prefix)))
+               (values (sprintf-apply-width digits (or width 0) left-justify
+                                            (and zero-pad (null precision)) sign+prefix)
                        (1+ arg-idx))))))
 
       ;; Float types: f/F, e/E, g/G
@@ -2278,6 +2361,21 @@
 (defvar *p-sprintf-caller* "sprintf"
   "Name of the calling function (sprintf or printf) for error messages.")
 
+(defun sprintf-vector (type-char flags width precision sep val)
+  "Format VAL (a string / v-string) as a vector: each character's ordinal is
+   formatted with the given conversion and the results joined by SEP.
+   Implements Perl's %vd / %*vd family."
+  (let ((s (to-string val)))
+    (if (zerop (length s))
+        ""
+        (with-output-to-string (out)
+          (loop for ch across s
+                for first = t then nil
+                do (unless first (write-string sep out))
+                (write-string (sprintf-one type-char flags width precision
+                                           (list (char-code ch)) 0)
+                              out))))))
+
 (defun p-sprintf (fmt &rest args)
   "Perl sprintf - full format string parser.
    Supports: %d %i %u %o %x %X %b %B %e %E %f %F %g %G %s %c %%
@@ -2316,7 +2414,8 @@
                                     (flags "")
                                     (width nil)
                                     (precision nil)
-                                    (positional-idx nil))
+                                    (positional-idx nil)
+                                    (vector-sep nil))
                                 ;; Check for N$ positional specifier before flags
                                 (let ((peek j) (peek-n 0) (peek-has-digit nil))
                                   (loop while (and (< peek len) (digit-char-p (char fmt-str peek)))
@@ -2337,6 +2436,26 @@
                                       do (setf flags (concatenate 'string flags
                                                                   (string (char fmt-str j))))
                                       (incf j))
+                                ;; Vector flag: v (separator ".") or *v (separator
+                                ;; taken from the next argument).  Sits between flags
+                                ;; and width.  Disambiguated from a width '*' by
+                                ;; looking ahead for the 'v'.
+                                (cond
+                                  ((and (< j len) (char= (char fmt-str j) #\v))
+                                   (setf vector-sep ".")
+                                   (incf j))
+                                  ((and (< j len) (char= (char fmt-str j) #\*)
+                                        (< (1+ j) len) (char= (char fmt-str (1+ j)) #\v))
+                                   (setf vector-sep (to-string (nth arg-idx args)))
+                                   (incf arg-idx)
+                                   (incf j 2)))  ; consume '*' and 'v'
+                                ;; Flags may also follow the vector flag (e.g. %v02x,
+                                ;; where 0 is a per-element zero-pad flag).
+                                (when vector-sep
+                                  (loop while (and (< j len) (find (char fmt-str j) "-+ 0#"))
+                                        do (setf flags (concatenate 'string flags
+                                                                    (string (char fmt-str j))))
+                                        (incf j)))
                                 ;; Parse width
                                 (cond
                                   ((and (< j len) (char= (char fmt-str j) #\*))
@@ -2362,7 +2481,11 @@
                                   (incf j)
                                   (cond
                                     ((and (< j len) (char= (char fmt-str j) #\*))
-                                     (setf precision (max 0 (truncate (to-number (nth arg-idx args)))))
+                                     ;; A negative precision supplied via * means the
+                                     ;; precision is omitted entirely (Perl semantics),
+                                     ;; not a precision of 0.
+                                     (let ((pv (truncate (to-number (nth arg-idx args)))))
+                                       (setf precision (if (minusp pv) nil pv)))
                                      (incf arg-idx)
                                      (incf j))
                                     (t
@@ -2397,11 +2520,21 @@
                                                 (p-warn (make-p-box
                                                          (format nil "Missing argument in ~A"
                                                                  *p-sprintf-caller*))))
-                                              (multiple-value-bind (result new-arg-idx)
-                                                  (sprintf-one type-char flags width precision args call-idx)
-                                                (write-string result out)
-                                                (setf arg-idx (if positional-idx arg-idx new-arg-idx))
-                                                (setf i j))))))
+                                              (if vector-sep
+                                                  ;; Vector flag: format each character
+                                                  ;; ordinal of the string arg, joined.
+                                                  (progn
+                                                    (write-string
+                                                     (sprintf-vector type-char flags width precision
+                                                                     vector-sep (nth call-idx args))
+                                                     out)
+                                                    (setf arg-idx (if positional-idx arg-idx (1+ call-idx)))
+                                                    (setf i j))
+                                                  (multiple-value-bind (result new-arg-idx)
+                                                      (sprintf-one type-char flags width precision args call-idx)
+                                                    (write-string result out)
+                                                    (setf arg-idx (if positional-idx arg-idx new-arg-idx))
+                                                    (setf i j)))))))
                                     ;; No type char found, output literally
                                     (progn
                                       (write-string (subseq fmt-str i j) out)
@@ -2459,13 +2592,16 @@
                        (p-box-nv-ok ,place) nil
                        (p-box-sv-ok ,place) nil)))
            ,val))
-      ;; Normal assignment - use box-set which unboxes
+      ;; Normal assignment - use box-set which unboxes.
+      ;; Return the place (the box) so chained operators like (.= += etc.)
+      ;; can modify it in place: ($a = expr) .= "suffix" sets $a to expr."suffix".
       (let ((val (gensym "VAL")))
         `(let ((,val ,value))
            (unless (boundp ',place)
              (proclaim '(special ,place))
              (setf (symbol-value ',place) (make-p-box nil)))
-           (box-set ,place ,val)))))
+           (box-set ,place ,val)
+           ,place))))
 
 (defmacro p-my-= (place value)
   "Assign to a lexically-bound 'my' variable. Unlike p-scalar-=, does not
@@ -2481,14 +2617,23 @@
         (cond
           ;; Blessed box: preserve as-is (class must not be lost)
           ((p-box-class item) (vector-push-extend item arr))
-          ;; Reference type (box-in-box, array-ref, hash-ref, etc.): preserve
-          ((or (p-box-p inner)
-               (and (vectorp inner) (not (stringp inner)))
+          ;; Scalar/nested reference (box-in-box, e.g. \$x or \\$x): the depth of
+          ;; box nesting encodes the reference type (SCALAR vs REF), so we must
+          ;; NOT add or remove a box layer here.  Store the reference box as-is.
+          ((p-box-p inner) (vector-push-extend item arr))
+          ;; Reference to a raw object (array-ref, hash-ref, code-ref, glob, qr//):
+          ;; copy the scalar CONTAINER while keeping the SAME underlying object.
+          ;; Perl's [$x] / @a=($x) copies the scalar; if $x is later reassigned
+          ;; (box-set mutates the original box in place) the stored copy must not
+          ;; follow it.  A fresh box around the same object is a distinct container
+          ;; pointing at the same referent — and does not change the ref type
+          ;; (still ARRAY/HASH/CODE/…), since the object itself is unchanged.
+          ((or (and (vectorp inner) (not (stringp inner)))
                (hash-table-p inner)
                (functionp inner)
                (p-typeglob-p inner)
                (p-regex-match-p inner))
-           (vector-push-extend item arr))
+           (vector-push-extend (make-p-box inner) arr))
           ;; Plain scalar box: copy into new box
           (t (vector-push-extend (make-p-box inner) arr))))
       (vector-push-extend (make-p-box item) arr)))
@@ -2850,6 +2995,36 @@
                (push `(vector-push-extend ,var ,result-var) collect-forms)
                (incf static-idx 1)))
 
+            ;; Array slice on LHS: (@arr[0..2]) or (@arr[i,j,...]) in a list assignment.
+            ;; Assigns consecutive RHS elements to each index in the slice.
+            ;; (@arr[0..2]) in ($a, @arr[0..2], $e) = (...) consumes 3 RHS slots.
+            ((and (listp var) (symbolp (car var))
+                  (string= (symbol-name (car var)) "P-ASLICE"))
+             (let* ((arr-form (cadr var))
+                    (raw-idx-forms (cddr var))
+                    (flat-idx (gensym "FLAT-IDX"))
+                    (dyn-n (gensym "SLICE-N"))
+                    (loop-i (gensym "ASLICE-I"))
+                    (loop-j (gensym "ASLICE-J"))
+                    (prev-offset (cur-idx)))
+               (push `(,flat-idx (%p-flatten-list (list ,@raw-idx-forms))) extra-lets)
+               (push `(,dyn-n (length ,flat-idx)) extra-lets)
+               (push `(dotimes (,loop-i ,dyn-n)
+                        (p-array-set ,arr-form
+                                     (truncate (to-number (aref ,flat-idx ,loop-i)))
+                                     (if (< (+ ,prev-offset ,loop-i) (length ,src-vec))
+                                         (aref ,src-vec (+ ,prev-offset ,loop-i))
+                                         *p-undef*)))
+                     forms)
+               (push `(dotimes (,loop-j ,dyn-n)
+                        (vector-push-extend
+                         (if (< (+ ,prev-offset ,loop-j) (length ,src-vec))
+                             (aref ,src-vec (+ ,prev-offset ,loop-j))
+                             *p-undef*)
+                         ,result-var))
+                     collect-forms)
+               (push dyn-n dyn-vars)))
+
             ;; Other lvalue (hash/array access, etc.) — no collect
             (t
              (let ((idx (cur-idx)))
@@ -2859,7 +3034,7 @@
                      forms)
                (incf static-idx 1)))))
 
-        `(let* ((,src ,value)
+        `(let* ((,src (let ((*wantarray* t) (*p-in-list-assign-rhs* t)) ,value))
                 (,src-vec (%p-flatten-list ,src))
                 ,@(reverse extra-lets))
            ,@(nreverse forms)
@@ -3625,6 +3800,41 @@
                (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
                "")))))
 
+(defmacro p-flipflop-dyn (id left-form right-form)
+  "Flip-flop for non-regex, non-integer operands: compare them numerically with $.
+   Generates 'isn't numeric' warnings when operands are non-numeric strings."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
+    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
+            (,ln (%p-flipflop-lineno)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (p-true-p (p-== ,ln ,right-form))
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (p-true-p (p-== ,ln ,left-form))
+               (if (p-true-p (p-== ,ln ,right-form))
+                   "1E0"
+                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
+               "")))))
+
+(defmacro p-flipflop-dyn-3 (id left-form right-form)
+  "Three-dot variant of p-flipflop-dyn (no immediate right-check on first fire)."
+  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
+    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
+            (,ln (%p-flipflop-lineno)))
+       (if ,sv
+           (let ((,nc (1+ ,sv)))
+             (if (p-true-p (p-== ,ln ,right-form))
+                 (progn (remhash ,id *pcl-flipflop-states*)
+                        (format nil "~AE0" ,nc))
+                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
+                        (format nil "~A" ,nc))))
+           (if (p-true-p (p-== ,ln ,left-form))
+               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
+               "")))))
+
 ;;; ============================================================
 ;;; String Comparison
 ;;; ============================================================
@@ -3819,6 +4029,31 @@
       (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))
       (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF)))
 
+(defun p-str-bit-and (a b)
+  "Perl string bitwise AND (&.) — always string, byte-by-byte, truncates to shorter"
+  (p-string-bit-op a b #'logand t))
+
+(defun p-str-bit-or (a b)
+  "Perl string bitwise OR (|.) — always string, byte-by-byte, pads with NUL"
+  (p-string-bit-op a b #'logior nil))
+
+(defun p-str-bit-xor (a b)
+  "Perl string bitwise XOR (^.) — always string, byte-by-byte, pads with NUL"
+  (p-string-bit-op a b #'logxor nil))
+
+(defun p-str-bit-not (a)
+  "Perl string bitwise NOT (~.) — always string, complement each byte"
+  (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a)))
+
+(defmacro p-str-bit-and= (place value)
+  `(box-set ,place (p-str-bit-and ,place ,value)))
+
+(defmacro p-str-bit-or= (place value)
+  `(box-set ,place (p-str-bit-or ,place ,value)))
+
+(defmacro p-str-bit-xor= (place value)
+  `(box-set ,place (p-str-bit-xor ,place ,value)))
+
 (defun %pcl-uv-coerce (n)
   "Coerce float to integer using UV (unsigned) semantics: +Inf=UV_MAX, -Inf=IV_MIN, NaN=0."
   (if (floatp n)
@@ -3989,6 +4224,23 @@
                  (and (vectorp inner)
                       (not (stringp inner)))))
       (setf arr (aref arr 0)))
+    ;; Flatten Perl @array variables embedded in a literal list-slice vector.
+    ;; (vector @foo @bar)[0..5] generates (p-aref-deref (vector @foo @bar) ...)
+    ;; where each @arr is an adjustable fill-pointer vector. Flatten them so
+    ;; slicing sees the elements, not the sub-arrays.
+    (when (and (vectorp arr)
+               (not (array-has-fill-pointer-p arr))
+               (some (lambda (e)
+                       (and (vectorp e)
+                            (not (stringp e))
+                            (array-has-fill-pointer-p e)))
+                     arr))
+      (let ((flat (make-array 0 :adjustable t :fill-pointer 0)))
+        (loop for e across arr do
+              (if (and (vectorp e) (not (stringp e)) (array-has-fill-pointer-p e))
+                  (loop for item across e do (vector-push-extend item flat))
+                  (vector-push-extend e flat)))
+        (setf arr flat)))
     (cond
       ;; Symbolic reference: string used as array name (no strict refs)
       ((stringp arr)
@@ -5112,10 +5364,12 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
     ;; class, unboxing strips it.  Also fixes bless [] returning a vector that
     ;; box-set would then convert to an element count via the adjustable-vector rule.
     ((p-box-class val) val)
-    ;; Box containing a reference (hash, array, function) - return the reference
+    ;; Box containing a reference (hash, array, function) - return the box intact.
+    ;; The box IS the reference (hashref/arrayref/coderef). Stripping it would give
+    ;; a raw hash-table/vector/function, which box-set then misinterprets.
     ((let ((v (p-box-value val)))
        (or (hash-table-p v) (vectorp v) (functionp v)))
-     (p-box-value val))
+     val)
     ;; Simple scalar box - return the unboxed value
     (t (unbox val))))
 
@@ -5902,8 +6156,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (return result))))))
 
 (defmacro p-readline (&rest args)
-  "Perl readline / <FH> — in list context reads all records; in scalar reads one."
-  `(if (eq *wantarray* t)
+  "Perl readline / <FH> — in list context reads all records; in scalar reads one.
+   When *p-in-list-assign-rhs* is t (inside p-list-= RHS), always use scalar mode
+   so that while (($x) = <FH>) reads one line per iteration, not the whole file."
+  `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
        (%p-readline-all ,(if args (car args) nil))
        (let ((%rl-val (%p-readline-impl ,@args)))
          (when %rl-val
@@ -6148,7 +6404,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (sb-posix:chdir path)
           (setf *default-pathname-defaults* (truename (pathname path)))
           t)
-      (error () nil))))
+      (sb-posix:syscall-error (e)
+        (setf *p-stored-errno* (sb-posix:syscall-errno e))
+        nil)
+      (error ()
+        (%pcl-save-errno)
+        nil))))
 
 (defun p-set_up_inc (&rest dirs)
   "Perl test.pl set_up_inc - modifies @INC for tests. No-op in PCL since
@@ -6412,10 +6673,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                         (p-time))))
     (cond
       ((> unix-time +gmtime-max+)
-       (p-warn (make-p-box (format nil "localtime(~A) too large" unix-time)))
+       (p-warn (make-p-box (format nil "localtime(~A) too large~%localtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       ((< unix-time +gmtime-min+)
-       (p-warn (make-p-box (format nil "localtime(~A) too small" unix-time)))
+       (p-warn (make-p-box (format nil "localtime(~A) too small~%localtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       ;; Post-1900: use decode-universal-time (handles DST / TZ env vars)
       ((>= unix-time (- +unix-epoch-offset+))
@@ -6455,10 +6716,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                         (p-time))))
     (cond
       ((> unix-time +gmtime-max+)
-       (p-warn (make-p-box (format nil "gmtime(~A) too large" unix-time)))
+       (p-warn (make-p-box (format nil "gmtime(~A) too large~%gmtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       ((< unix-time +gmtime-min+)
-       (p-warn (make-p-box (format nil "gmtime(~A) too small" unix-time)))
+       (p-warn (make-p-box (format nil "gmtime(~A) too small~%gmtime(~A) failed" unix-time unix-time)))
        *p-undef*)
       (t
        (multiple-value-bind (sec min hour day perl-mon perl-year wday yday)
@@ -7209,15 +7470,33 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     result))
 
 (defun p-funcall-ref (ref &rest args)
-  "Call a code reference"
+  "Call a code reference or a symbolic sub name (no-strict-refs semantics)."
   (let ((fn (unbox ref)))
-    ;; Double-unbox: blessed coderefs are stored as box(inner-box(lambda, class="E"))
-    ;; after p-bless wraps raw functions. One unbox gives the inner-box, not the fn.
+    ;; Double-unbox: blessed coderefs are stored as box(inner-box(lambda))
     (when (p-box-p fn)
       (setf fn (p-box-value fn)))
-    (unless (functionp fn)
-      (p-die "Not a CODE reference."))
-    (apply fn args)))
+    (if (functionp fn)
+        (apply fn args)
+        ;; Not a function: treat as symbolic sub name (string/number).
+        ;; Look up PL-NAME in the current CL package (typeglob CODE slot or defun).
+        (let* ((name (to-string fn))
+               (sep-pos (search "::" name :from-end t))
+               (perl-pkg (if sep-pos
+                             (subseq name 0 sep-pos)
+                             (let ((cpkg (package-name *package*)))
+                               (if (string= cpkg "MAIN") "main" cpkg))))
+               (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
+               (cl-pkg (find-package (string-upcase perl-pkg)))
+               (sym (when cl-pkg
+                      (find-symbol (concatenate 'string "PL-"
+                                                (string-upcase bare-name))
+                                   cl-pkg)))
+               (fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
+          (if fn-val
+              (apply fn-val args)
+              (p-die (format nil
+                             "Undefined subroutine &~A::~A called at (eval 1) line 1.~%"
+                             perl-pkg bare-name)))))))
 
 ;;; ============================================================
 ;;; Type Functions
@@ -7517,6 +7796,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
                ;; Hash reference: box containing hash-table (from p-backslash %hash)
                ((hash-table-p inner2) (or (gethash :__class__ inner2) "HASH"))
+               ;; Regexp reference: box containing a compiled regex (from p-backslash $qr)
+               ((p-regex-match-p inner2) "REGEXP")
                ;; Scalar reference: box containing box (from p-backslash $x)
                (t "SCALAR")))))
       ;; Old-format hash reference (autovivified, single-boxed)
@@ -7900,32 +8181,110 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (unwind-protect (progn ,@body)
          (%p-lhe-restore ,hv ,kv ,sv)))))
 
-(defun p-copy-array (arr)
-  "Create a fresh adjustable copy of an array for local @arr = @arr semantics.
-   A scalar (non-nil) value is wrapped in a 1-element array, matching Perl's
-   @arr = SCALAR semantics.  nil (from an empty list) gives an empty array."
-  (let ((a (if (and (vectorp arr) (not (stringp arr))) arr (unbox arr))))
-    (cond
-      ;; Non-string vector: copy it element-by-element
-      ((and (vectorp a) (not (stringp a)))
-       (let* ((len  (length a))
-              (copy (make-array len :adjustable t :fill-pointer len)))
-         (dotimes (i len)
-           (setf (aref copy i) (aref a i)))
-         copy))
-      ;; nil / undef from empty-list expression: empty array
-      ((null a) (make-array 0 :adjustable t :fill-pointer 0))
-      ;; Any other scalar (string, number, box): 1-element array (Perl @arr=SCALAR)
-      (t (let ((copy (make-array 1 :adjustable t :fill-pointer 1)))
-           (setf (aref copy 0) a)
-           copy)))))
+(defun %p-local-array-slice-nested (arr vec pos thunk)
+  "Helper: save/restore arr[idx] for each idx in vec[pos..end], then call thunk."
+  (if (>= pos (length vec))
+      (funcall thunk)
+      (let* ((raw-idx (truncate (to-number (aref vec pos))))
+             (iv      (if (< raw-idx 0)
+                          (max 0 (+ (length arr) raw-idx))
+                          raw-idx))
+             (orig-len (length arr))
+             (old-ex  (< iv orig-len))
+             (old-bx  (when old-ex (aref arr iv))))
+        (when old-ex (setf (aref arr iv) (make-p-box nil)))
+        (unwind-protect
+             (%p-local-array-slice-nested arr vec (1+ pos) thunk)
+          (if old-ex
+              (progn
+                (when (>= iv (length arr))
+                  (dotimes (n (1+ (- iv (length arr))))
+                    (vector-push-extend nil arr)))
+                (setf (aref arr iv) old-bx))
+              (progn
+                (when (< iv (length arr))
+                  (setf (aref arr iv) nil))
+                (loop while (and (> (fill-pointer arr) orig-len)
+                                 (null (aref arr (1- (fill-pointer arr)))))
+                      do (decf (fill-pointer arr)))))))))
+
+(defmacro p-local-array-slice (arr-var idx-form &body body)
+  "Localize array elements by index or range. idx-form may be a scalar index or
+   an adjustable non-string vector (result of p-.. range)."
+  (let ((g-idx (gensym "IDX")))
+    `(let ((,g-idx ,idx-form))
+       (if (and (vectorp ,g-idx)
+                (adjustable-array-p ,g-idx)
+                (not (stringp ,g-idx)))
+           (%p-local-array-slice-nested ,arr-var ,g-idx 0 (lambda () ,@body))
+           (p-local-array-elem ,arr-var ,g-idx ,@body)))))
+
+(defun p-copy-array (src)
+  "Create a fresh flat copy of SRC for 'local @arr = expr' bindings.
+   Flattens nested adjustable vectors exactly like p-array-= does, so that
+   'local @a = (X, @a, Y)' correctly interpolates the old @a contents."
+  (let ((result (make-array 0 :adjustable t :fill-pointer 0))
+        (raw (cond ((and (vectorp src) (not (stringp src))) src)
+                   ((null src) nil)
+                   (t (unbox src)))))
+    (labels ((add-items (x)
+               (cond
+                 ((null x))
+                 ((stringp x)
+                  (vector-push-extend (make-p-box x) result))
+                 ((hash-table-p x)
+                  (maphash (lambda (k v)
+                             (vector-push-extend (make-p-box k) result)
+                             (%p-array-store-scalar result v))
+                           x))
+                 ((p-flatten-marker-p x)
+                  (add-items (p-flatten-marker-array x)))
+                 ((and (vectorp x) (not (stringp x)))
+                  (loop for item across x
+                        do (cond
+                             ((p-flatten-marker-p item)
+                              (add-items (p-flatten-marker-array item)))
+                             ((and (vectorp item) (not (stringp item)))
+                              (add-items item))
+                             ((null item)
+                              (vector-push-extend nil result))
+                             (t
+                              (%p-array-store-scalar result item)))))
+                 ((listp x)
+                  (loop for item in x
+                        do (cond
+                             ((p-flatten-marker-p item)
+                              (add-items (p-flatten-marker-array item)))
+                             ((and (vectorp item) (not (stringp item)))
+                              (add-items item))
+                             ((null item)
+                              (vector-push-extend nil result))
+                             (t
+                              (%p-array-store-scalar result item)))))
+                 (t
+                  (%p-array-store-scalar result x)))))
+      (add-items raw))
+    result))
 
 (defun p-copy-hash (h)
-  "Create a fresh copy of a hash for local %h = %h semantics."
-  (let* ((src (if (hash-table-p h) h (unbox h)))
+  "Create a fresh copy of a hash for 'local %h = expr' semantics.
+   Handles both hash-table input (direct copy) and vector/list input
+   (interpreted as flat k-v pairs, like p-hash-=)."
+  (let* ((raw (if (or (hash-table-p h)
+                      (and (vectorp h) (not (stringp h))))
+                  h
+                  (unbox h)))
          (copy (make-hash-table :test 'equal)))
-    (when (hash-table-p src)
-      (maphash (lambda (k v) (setf (gethash k copy) v)) src))
+    (cond
+      ((hash-table-p raw)
+       (maphash (lambda (k v) (setf (gethash k copy) v)) raw))
+      ((and (vectorp raw) (not (stringp raw)))
+       (let ((flat (%p-flatten-list raw)))
+         (loop for i from 0 below (length flat) by 2
+               do (setf (gethash (to-string (aref flat i)) copy)
+                        (if (< (1+ i) (length flat))
+                            (%p-make-hash-entry (aref flat (1+ i)))
+                            *p-undef*))))))
     copy))
 
 ;;; ============================================================
@@ -8759,7 +9118,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                "\\[:(\\w+):\\]"
                pat
                (lambda (match class-name)
-                 (declare (ignore match))
                  (cond
                    ((equal class-name "alpha")  "a-zA-Z")
                    ((equal class-name "digit")  "0-9")
@@ -9011,11 +9369,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (non-destructive-p (member :r modifiers))
          (case-insensitive (member :i modifiers))
          (single-line (member :s modifiers))
-         (multi-line (member :m modifiers)))
+         (multi-line (member :m modifiers))
+         (extended (member :x modifiers)))
     (handler-case
         (let* ((options (append (when case-insensitive '(:case-insensitive-mode t))
                                 (when single-line '(:single-line-mode t))
-                                (when multi-line '(:multi-line-mode t)))))
+                                (when multi-line '(:multi-line-mode t))
+                                (when extended '(:extended-mode t)))))
           (multiple-value-bind (scanner reg-names)
               (apply #'cl-ppcre:create-scanner pattern options)
             (let* ((count 0)
@@ -9416,7 +9776,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (return-from p-load-extension t)))))
   nil)
 
-;;; Load pack/unpack extension eagerly at startup (always needed by Perl code).
-(p-load-extension "pcl-pack")
+;;; pack/unpack loaded lazily on first call via self-loading stubs above.
 
 (format t "PCL Runtime loaded~%")

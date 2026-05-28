@@ -791,7 +791,8 @@ sub _subscript_key_cl_list {
 # Parse one key group to a CL expression string.
 # For hash subscripts ({...}), auto-quote single bareword tokens (Perl hash key rule).
 sub _subscript_key_expr {
-  my ($self, $group, $open, $stmt) = @_;
+  my ($self, $group, $open, $stmt, $ctx) = @_;
+  $ctx //= 0;  # default SCALAR_CTX
   if ($open eq '{' && @$group == 1 && ref($group->[0]) eq 'PPI::Token::Word') {
     my $word = $group->[0]->content;
     # Only auto-quote if it's not a keyword
@@ -799,7 +800,7 @@ sub _subscript_key_expr {
       return "\"$word\"";
     }
   }
-  return $self->_parse_expression($group, $stmt) // 'nil';
+  return $self->_parse_expression($group, $stmt, $ctx) // 'nil';
 }
 
 # Process children of a PPI node (Document or Block)
@@ -1002,6 +1003,14 @@ sub _process_expression_statement {
   } $stmt->children;
 
   return unless @parts;
+
+  # Handle '...' (yada yada / unimplemented placeholder) as a statement.
+  # In Perl, a bare '...' statement dies with "Unimplemented".
+  if (@parts == 1 && ref($parts[0]) eq 'PPI::Token::Operator' && $parts[0]->content eq '...') {
+    $self->_emit(";; $perl_code (yada yada)");
+    $self->_emit('(p-die "Unimplemented")');
+    return;
+  }
 
   # Handle '++ state $y' / '-- state $y': PPI treats these as generic expression
   # statements (not PPI::Statement::Variable) because they start with an operator.
@@ -1350,6 +1359,26 @@ sub _process_variable_statement {
         $self->indent_level($self->indent_level - 1);
         $self->_emit("$cl_state))");
         $self->indent_level($self->indent_level - 2);
+        $self->_emit("");
+        return;
+      }
+    }
+  }
+
+  # For 'my @arr = EXPR' inside a block where init was pre-computed into the let binding
+  # (self-referential init: my @bee = @bee), skip the body assignment — it's already done.
+  if ($declarator eq 'my') {
+    my $binding_inits = $self->{_my_binding_init_vars} // {};
+    if (%$binding_inits) {
+      my $decl_var;
+      for my $p (@parts) {
+        my $ref = ref($p);
+        last if $ref eq 'PPI::Token::Operator' && $p->content eq '=';
+        last if $ref eq 'PPI::Structure::List';  # multi-var: don't skip
+        if ($ref eq 'PPI::Token::Symbol') { $decl_var = $p->content; last; }
+      }
+      if (defined $decl_var && $binding_inits->{$decl_var}) {
+        $self->_emit(";; $perl_code (init in let binding)");
         $self->_emit("");
         return;
       }
@@ -1750,10 +1779,15 @@ sub _process_my_toplevel_declaration {
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
           $self->_emit("(box-set $var $init_cl)");
         } else {
-          # Array/hash: parse full statement through expression parser for proper list context
-          # This generates (p-array-= @arr (vector ...)) or (p-hash-= %h (p-hash ...))
-          my $cl_code = $self->_parse_expression($parts, $stmt);
-          $self->_emit($cl_code) if defined $cl_code;
+          # Array/hash: check if init was moved to the let binding (self-referential init)
+          if (($self->{_my_binding_init_vars} // {})->{$var}) {
+            $self->_emit(";; $perl_code (init in let binding)");
+          } else {
+            # Parse full statement through expression parser for proper list context
+            # This generates (p-array-= @arr (vector ...)) or (p-hash-= %h (p-hash ...))
+            my $cl_code = $self->_parse_expression($parts, $stmt);
+            $self->_emit($cl_code) if defined $cl_code;
+          }
         }
       } else {
         # Multiple variables: parse full statement through expression parser
@@ -1815,11 +1849,16 @@ sub _process_isa_declaration {
   }
 
   # Declare @ISA in declarations bucket, initialize at runtime
+  # When inside a sub (inline package with no (in-package) context change),
+  # qualify @ISA with the package name so it lands in the right package.
+  my $isa_sym = ($self->environment->in_subroutine > 0)
+    ? "${pkg}::\@ISA"
+    : "\@ISA";
   $self->_with_bucket('declarations', sub {
-    $self->_emit("(defvar \@ISA (make-array 0 :adjustable t :fill-pointer 0))");
+    $self->_emit("(defvar $isa_sym (make-array 0 :adjustable t :fill-pointer 0))");
   });
   for my $parent (@parents) {
-    $self->_emit("(p-push \@ISA \"$parent\")");
+    $self->_emit("(p-push $isa_sym \"$parent\")");
   }
 
   $self->_emit("");
@@ -2072,10 +2111,14 @@ sub _process_local_declaration {
       $self->_emit(";; $perl_code");
 
       # Parse all key CL expressions up front (need them for both macro open and init)
-      my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt) } @key_groups;
+      # Array subscripts use LIST_CTX so that 1..2 generates a range vector instead
+      # of a flip-flop (which would trigger $SIG{__WARN__} via uninitialized $..).
+      my $sub_ctx = ($open eq '[') ? 1 : 0;
+      my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) } @key_groups;
 
-      # Choose the macro based on subscript type
-      my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-elem';
+      # Choose the macro based on subscript type.
+      # p-local-array-slice handles both scalar and vector (range) indices.
+      my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-slice';
       my $macro_init = ($open eq '{') ? 'p-local-hash-elem-init'  : 'p-local-array-elem-init';
 
       if (defined $init_cl && @key_cls == 1) {
@@ -2172,6 +2215,7 @@ sub _process_local_declaration {
 
   # Build let bindings
   my @bindings;
+  my $use_let_star = 0;
   if ($init_idx >= 0 && @vars == 1) {
     # local $x = value
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
@@ -2192,8 +2236,32 @@ sub _process_local_declaration {
     }
     elsif ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
-      # CL 'let' evaluates init form with old bindings, so @arr in $init_cl reads old value.
-      push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
+      # Special case: when EXPR is (p-array-= VAR RHS), p-array-= mutates VAR in-place
+      # during let binding evaluation. CL saves the symbol-value POINTER before binding,
+      # but p-array-= has already mutated the pointed-to vector. On let exit, CL restores
+      # the pointer to the (now-mutated) old vector — giving the wrong restored value.
+      #
+      # Fix: detect (p-array-= VAR RHS) and bypass the in-place mutation:
+      #   Same var (local @bee = local(@bee) = RHS): use inner RHS for p-copy-array.
+      #   Different var (local @bim = local(@bee) = RHS): give @bee its own let binding.
+      (my $init_cl_trimmed = $init_cl) =~ s/^\s+|\s+$//gs;
+      if ($init_cl_trimmed =~ /^\(p-array-= (\S+) (.+)\)$/s) {
+        my ($mutated_var, $inner_rhs) = ($1, $2);
+        if ($mutated_var eq $var) {
+          # Same-var: skip the p-array-= mutation; copy the RHS directly.
+          push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $inner_rhs)))";
+        } else {
+          # Different-var: bind BOTH vars so CL saves/restores each independently.
+          $self->{_local_counter} //= 0;
+          my $tmp = "pcl-local-inner-" . $self->{_local_counter}++;
+          unshift @bindings, "($tmp (let ((*wantarray* t)) $inner_rhs))";
+          push @bindings, "($mutated_var (p-copy-array $tmp))";
+          push @bindings, "($var (p-copy-array $tmp))";
+          $use_let_star = 1;
+        }
+      } else {
+        push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
+      }
     }
     elsif ($sigil eq '%') {
       # local %h = EXPR: evaluate EXPR with old %h, make an independent copy.
@@ -2225,26 +2293,43 @@ sub _process_local_declaration {
     }
   }
 
+  # For multi-var local with initializer: local($a, $b, @arr) = @_
+  # Pre-evaluate the RHS BEFORE the let bindings so that variables in the RHS
+  # (e.g. @arr) still refer to their OLD values, not the freshly-bound empty ones.
+  # Example: local (undef, @bee) = @bee  — @bee on RHS must see old @bee.
+  # Use let* with the RHS as the first binding, then the fresh variable slots.
+  my ($rhs_tmp_cl);
+  if ($init_idx >= 0 && @vars > 1) {
+    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
+    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+    my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+    $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
+    $self->{_local_counter} //= 0;
+    $rhs_tmp_cl = "pcl-local-rhs-" . $self->{_local_counter}++;
+    unshift @bindings, "($rhs_tmp_cl $rhs_cl)";
+  }
+
   my $bindings_str = join("\n        ", @bindings);
-  $self->_emit("(let ($bindings_str)");
+  my $let_form = ($rhs_tmp_cl || $use_let_star) ? "let*" : "let";
+  $self->_emit("($let_form ($bindings_str)");
   $self->indent_level($self->indent_level + 1);
 
   # Track that we have an open let that needs closing
   $self->{_local_let_depth} //= 0;
   $self->{_local_let_depth}++;
 
-  # For multi-var local with initializer: local($a, $b) = @_
-  # The let bindings start empty; emit the assignment as first body form.
-  # Include undef markers in the LHS vector so p-list-= can skip them.
-  if ($init_idx >= 0 && @vars > 1) {
-    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
-    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
-    my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-    # RHS must be evaluated in list context so list-producing expressions
-    # (qw(), function calls, etc.) return vectors. Wrap in let wantarray=t.
-    $rhs_cl = "(let ((*wantarray* t)) $rhs_cl)";
+  if ($rhs_tmp_cl) {
     my $lhs_cl = "(vector " . join(" ", @vars) . ")";
-    $self->_emit("(p-list-= $lhs_cl $rhs_cl)");
+    $self->_emit("(p-list-= $lhs_cl $rhs_tmp_cl)");
+  }
+  elsif ($init_idx >= 0 && @vars == 1) {
+    # Single array/hash local with init: emit the var as the default return value.
+    # local @arr = EXPR as last expression in a sub should return the assigned list.
+    # Subsequent statements override this as the actual return value.
+    my ($sigil) = ($vars[0] =~ /::([%\@\$])/) ? ($1) : (substr($vars[0], 0, 1));
+    if ($sigil eq '@' || $sigil eq '%') {
+      $self->_emit("$vars[0]");
+    }
   }
 
   $self->_emit("");
@@ -3014,6 +3099,58 @@ sub _process_block {
 
   my @children = $block->children;
   my %skip;
+
+  # Hoist named sub definitions that are called BEFORE their definition in the block.
+  # Perl compiles all named subs at compile time so they are callable anywhere in their
+  # lexical scope.  In a let-bound block p-sub is emitted inline and evaluated
+  # sequentially — calls to the sub BEFORE the p-sub form would use the forward stub
+  # (returns nil).  Only hoist when actually needed (called before defined), to avoid
+  # disturbing package context for subs already defined before their calls.
+  # Only fires when _let_bound_vars is non-empty (otherwise subs already go to
+  # declarations/definitions and are pre-hoisted).
+  if (%{$self->{_let_bound_vars} // {}}) {
+    # First pass: find which sub names appear as word tokens before their FIRST definition.
+    # Only the first definition of a sub is ever hoisted — later redefinitions stay in order
+    # so that last-definition-wins semantics are preserved.
+    my %words_seen;    # token content => 1 if seen in a non-sub statement
+    my %sub_defined;   # sub_name => 1 once we've seen the first definition
+    my %needs_hoist;   # child index => 1 for subs that need hoisting
+    for my $i (0 .. $#children) {
+      my $child = $children[$i];
+      my $ref = ref($child);
+      next if $ref eq 'PPI::Token::Whitespace' || $ref eq 'PPI::Token::Comment';
+      if ($ref eq 'PPI::Statement::Sub') {
+        my ($sub_name, $has_block) = ('', 0);
+        for my $sc ($child->children) {
+          my $scref = ref($sc);
+          if ($scref eq 'PPI::Token::Word' && $sc->content ne 'sub'
+              && $sc->content ne 'my' && $sc->content ne 'our' && $sc->content ne 'state') {
+            $sub_name ||= $sc->content;
+          }
+          $has_block = 1 if $scref eq 'PPI::Structure::Block';
+        }
+        if ($sub_name && $has_block) {
+          # Hoist only if: (a) called before this definition, and (b) no earlier definition
+          if ($words_seen{$sub_name} && !$sub_defined{$sub_name}) {
+            $needs_hoist{$i} = 1;
+          }
+          $sub_defined{$sub_name} = 1;
+        }
+      } else {
+        # Record all word tokens as potential calls
+        my $words = $child->find('PPI::Token::Word') || [];
+        for my $w (@$words) {
+          $words_seen{$w->content} = 1;
+        }
+      }
+    }
+    # Second pass: hoist only subs that need it
+    for my $i (sort { $a <=> $b } keys %needs_hoist) {
+      $self->_process_element($children[$i]);
+      $skip{$i} = 1;
+    }
+  }
+
   for my $i (0 .. $#children) {
     next if $skip{$i};
     my $child = $children[$i];
@@ -3451,6 +3588,9 @@ sub _find_all_declarations {
     #   - Named sub definitions (PPI::Statement::Sub)
     #   - BEGIN/END/etc blocks (PPI::Statement::Scheduled)
     #   - Anonymous sub bodies: PPI::Structure::Block whose prev sibling is 'sub'
+    #   - eval { } blocks: PPI::Structure::Block whose prev sibling is 'eval'
+    #     (my vars inside eval { } are scoped to that eval; hoisting them to the
+    #     enclosing let would shadow outer vars of the same name)
     # For bare blocks (no prev non-whitespace sibling): recurse but only keep
     #   'state' declarations — 'my' vars in bare blocks are scoped to the block
     #   by _process_bare_block/_with_declarations and must NOT be hoisted to the
@@ -3460,7 +3600,8 @@ sub _find_all_declarations {
         && $ref ne 'PPI::Statement::Scheduled'
         && !($ref eq 'PPI::Structure::Block' && do {
                my $prev = $child->sprevious_sibling;
-               $prev && ref($prev) eq 'PPI::Token::Word' && $prev->content eq 'sub'
+               $prev && ref($prev) eq 'PPI::Token::Word'
+                     && ($prev->content eq 'sub' || $prev->content eq 'eval')
              })) {
       my $is_bare_block = $ref eq 'PPI::Structure::Block' && do {
         my $prev = $child->sprevious_sibling;
@@ -3525,7 +3666,7 @@ sub _find_symbols_and_undefs_in_list {
 
   for my $child ($list->children) {
     my $ref = ref($child);
-    if ($ref eq 'PPI::Token::Symbol') {
+    if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
       push @vars, $self->_transform_pkg_var($child->content);
     }
     elsif ($ref eq 'PPI::Token::Word' && $child->content eq 'undef') {
@@ -3856,11 +3997,99 @@ sub _with_declarations {
 
   # Wrap in let if we have declarations
   if (@my_vars) {
+    # Pre-scan: for 'my @arr = EXPR' / 'my (LIST) = EXPR' statements where the RHS
+    # self-references a declared array/hash variable, pre-evaluate EXPR in the let
+    # binding init position so the outer binding is still visible.
+    # Single-var my @arr=EXPR: use full EXPR as init, mark to skip body assignment.
+    # Multi-var  my(LIST)=EXPR: pre-init @arr to a copy of its outer value only;
+    #   keep body so p-list-= can do the actual list destructuring from the correct source.
+    my %arr_rhs_inits;   # let_var => cl_init_string
+    my %skip_body_vars;  # perl_var => 1  (skip body emit for single-var case)
+    {
+      my %my_ah_set = map { $_ => 1 } grep { /^[@%]/ } @my_vars;
+      if (%my_ah_set) {
+        my @top_stmts;
+        if (ref($elements) eq 'PPI::Structure::Block') {
+          @top_stmts = grep { ref($_) eq 'PPI::Statement::Variable' } $elements->children;
+        } elsif (ref($elements) eq 'ARRAY') {
+          @top_stmts = grep { ref($_) eq 'PPI::Statement::Variable' } @$elements;
+        }
+        for my $chk_stmt (@top_stmts) {
+          my @sp = grep { ref($_) ne 'PPI::Token::Whitespace' &&
+                          !(ref($_) eq 'PPI::Token::Structure' && $_->content eq ';') }
+                   $chk_stmt->children;
+          next unless @sp >= 3;
+          next unless ref($sp[0]) eq 'PPI::Token::Word' && $sp[0]->content eq 'my';
+          my $eq_idx = -1;
+          my @decl_ah;
+          my $is_single = 0;
+          if (ref($sp[1]) eq 'PPI::Token::Symbol') {
+            my $v = $sp[1]->content;
+            push @decl_ah, $v if $my_ah_set{$v};
+            $is_single = 1;
+            for my $i (2 .. $#sp) {
+              if (ref($sp[$i]) eq 'PPI::Token::Operator' && $sp[$i]->content eq '=') {
+                $eq_idx = $i; last;
+              }
+            }
+          } elsif (ref($sp[1]) eq 'PPI::Structure::List') {
+            # List children may be wrapped in PPI::Statement::Expression — use find()
+            my $found = $sp[1]->find('PPI::Token::Symbol') || [];
+            for my $lv (@$found) {
+              my $v = $lv->content;
+              push @decl_ah, $v if $my_ah_set{$v};
+            }
+            for my $i (2 .. $#sp) {
+              if (ref($sp[$i]) eq 'PPI::Token::Operator' && $sp[$i]->content eq '=') {
+                $eq_idx = $i; last;
+              }
+            }
+          }
+          next if $eq_idx < 0 || !@decl_ah;
+          my @rhs_p = @sp[$eq_idx+1 .. $#sp];
+          next unless @rhs_p;
+          # Skip double-my (e.g. my @x = my @x = qw(...)) — existing code handles it
+          next if grep { ref($_) eq 'PPI::Token::Word' && $_->content eq 'my' } @rhs_p;
+          # Collect all Symbol tokens from RHS (including inside nested structures)
+          my @rhs_syms;
+          for my $rp (@rhs_p) {
+            if (ref($rp) eq 'PPI::Token::Symbol') {
+              push @rhs_syms, $rp->content;
+            } elsif ($rp->can('find')) {
+              my $found = $rp->find('PPI::Token::Symbol') || [];
+              push @rhs_syms, map { $_->content } @$found;
+            }
+          }
+          my %rhs_sym_set = map { $_ => 1 } @rhs_syms;
+          my @self_ref = grep { $rhs_sym_set{$_} } @decl_ah;
+          next unless @self_ref;
+          if ($is_single) {
+            my $var     = $self_ref[0];
+            my $rhs_cl  = $self->_parse_expression(\@rhs_p, $chk_stmt) // 'nil';
+            my $let_var = $new_renames{$var} // $var;
+            my $sigil   = substr($var, 0, 1);
+            my $copyfn  = $sigil eq '@' ? 'p-copy-array' : 'p-copy-hash';
+            $arr_rhs_inits{$let_var} = "($copyfn (let ((*wantarray* t)) $rhs_cl))";
+            $skip_body_vars{$var} = 1;
+          } else {
+            for my $var (@self_ref) {
+              my $sigil   = substr($var, 0, 1);
+              my $copyfn  = $sigil eq '@' ? 'p-copy-array' : 'p-copy-hash';
+              my $outer   = $old_renames{$var} // $var;
+              my $let_var = $new_renames{$var} // $var;
+              $arr_rhs_inits{$let_var} = "($copyfn (let ((*wantarray* t)) $outer))";
+            }
+          }
+        }
+      }
+    }
+
     # Build let bindings using the (possibly renamed) CL variable names
     my $bindings = join(" ", map {
       my $let_var = $new_renames{$_} // $_;
       my $sigil = substr($let_var, 0, 1);
-      my $init = $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+      my $init = exists $arr_rhs_inits{$let_var} ? $arr_rhs_inits{$let_var}
+               : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                : $sigil eq '%' ? "(make-hash-table :test #'equal)"
                :                 '(make-p-box nil)';
       "($let_var $init)"
@@ -3908,7 +4137,16 @@ sub _with_declarations {
       }
     }
 
+    # Save/restore _my_binding_init_vars so nested _with_declarations calls don't interfere.
+    # REPLACE (don't merge) with this block's skip set: inner blocks that create a new
+    # let for @bee must NOT inherit the outer block's skip flag for @bee — the inner let
+    # has its own init and should not inherit the skip from an outer block's let.
+    my $old_skip_body = $self->{_my_binding_init_vars};
+    $self->{_my_binding_init_vars} = \%skip_body_vars;
+
     $emit_body->();
+
+    $self->{_my_binding_init_vars} = $old_skip_body;
 
     # Restore rename map
     if (%new_renames || %shadowed_state) {
@@ -4813,6 +5051,7 @@ sub _process_include_statement {
 
   my $perl_code = $stmt->content;
   $perl_code =~ s/;\s*$//;
+  $perl_code =~ s/\n/ /g;   # Collapse newlines (multi-line use statements break CL ;; comments)
 
   my $type = $stmt->type // 'use';    # 'use', 'require', 'no'
   my $module = $stmt->module // '';

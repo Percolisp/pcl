@@ -287,11 +287,13 @@ sub _pack_str_one {
         }
     } elsif ($ch eq 'Z') {
         my $len = $star ? $slen + 1 : $nrep;
-        my $body = $len > 1 ? $len - 1 : 0;
-        for (my $k = 0; $k < $body; $k++) {
-            $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);
+        if ($len > 0) {
+            my $body = $len - 1;
+            for (my $k = 0; $k < $body; $k++) {
+                $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);
+            }
+            $$result_ref .= chr(0);
         }
-        $$result_ref .= chr(0);
     } elsif ($ch eq 'b') {
         my $nbits = $star ? $slen : $nrep;
         for (my $bs = 0; $bs < $nbits; $bs += 8) {
@@ -391,48 +393,118 @@ sub _pack_tmpl {
         my $had_count = ($star || $ti > $ti_before_count);
         $ti = _pack_skip_ws($tmpl, $ti);
 
-        # Slash — count prefix: ch encodes length, next char is data format
+        # Slash — count prefix: ch encodes data length/count, next char is data format.
+        # Parse the DATA format first to compute the actual count, then encode prefix.
         if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/') {
             $ti++;
             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;
-            # '/' must not have a count applied directly to it (e.g. c/*a or c/1a are invalid;
-            # Z*/A* is valid because * is the count for Z, not for /).
+            # '/' must not have a count applied directly to it
             { my $c = substr($tmpl, $ti, 1);
               die "'/' does not take a repeat count in pack\n"
                 if $c eq '*' || $c eq '[' || $c =~ /\d/; }
-            my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';
-            $darg = '' unless defined $darg;
-            my $dlen = length($darg);
-            my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);
-            if ($nb) {
-                $$result_ref .= _pack_emit_int($dlen, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));
-            } elsif ($ch eq 'A' || $ch eq 'a') {
-                _pack_str_one($ch, "$dlen", 1, 0, $result_ref);
-            } elsif ($ch eq 'Z') {
-                # Z*/A*: write count as decimal string followed by null byte
-                _pack_str_one('Z', "$dlen", length("$dlen") + 1, 0, $result_ref);
-            } elsif ($ch eq 'w') {
-                # w/A*: write count as BER-encoded integer
-                my $v = $dlen;
-                if ($v == 0) { $$result_ref .= chr(0); }
-                else {
-                    my @bytes;
-                    while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
-                    for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
-                    $$result_ref .= chr($bytes[-1]);
-                }
-            }
-            $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;
+            # Parse data format type, mods, count
             my $dfmt = substr($tmpl, $ti, 1); $ti++;
             my ($dbang, $dbe2, $dle2) = _pack_parse_mods($tmpl, \$ti, $be, $le, $dfmt, 'pack');
             $ti = _pack_skip_ws($tmpl, $ti);
+            my $ti_before_dcount = $ti;
             my ($dstar2, $dcnt2, $dnrep2) = _pack_parse_count($tmpl, \$ti);
-            _pack_str_one($dfmt, $darg, $dlen, 0, $result_ref)
-                if $dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z';
-            if ($dfmt ne 'a' && $dfmt ne 'A' && $dfmt ne 'Z') {
-                my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang);
-                if ($dnb) {
-                    $$result_ref .= _pack_emit_int($dlen, $dnb, $dsig, $dbe2 ? 1 : ($dle2 ? 0 : $ddbe));
+            my $had_dcount = ($dstar2 || $ti > $ti_before_dcount);
+            my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang);
+            my $actual_count;
+            if ($dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z') {
+                # String data: one arg, output length determined by data format count
+                my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';
+                $darg = '' unless defined $darg;
+                my $dlen = length($darg);
+                if (!$had_dcount || $dstar2) {
+                    # No explicit count or * — pack all chars (+ NUL for Z)
+                    $actual_count = ($dfmt eq 'Z') ? $dlen + 1 : $dlen;
+                } else {
+                    $actual_count = $dnrep2;  # explicit count (may be 0)
+                }
+                # Encode the count in the prefix field
+                my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);
+                if ($nb) {
+                    $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));
+                } elsif ($ch eq 'A' || $ch eq 'a') {
+                    _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);
+                } elsif ($ch eq 'Z') {
+                    _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);
+                } elsif ($ch eq 'w') {
+                    my $v = $actual_count;
+                    if ($v == 0) { $$result_ref .= chr(0); }
+                    else {
+                        my @bytes;
+                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                        $$result_ref .= chr($bytes[-1]);
+                    }
+                }
+                # Pack the data using actual_count as the length
+                _pack_str_one($dfmt, $darg, $actual_count, 0, $result_ref);
+            } elsif ($dnb) {
+                # Numeric data: count = number of elements to pack
+                my $remaining = $nargs - $$ai_ref;
+                if (!$had_dcount || $dstar2) {
+                    # No explicit count or * — pack all remaining args
+                    $actual_count = $remaining;
+                } else {
+                    # Explicit count — pack min(count, remaining) args
+                    $actual_count = ($dnrep2 < $remaining) ? $dnrep2 : $remaining;
+                }
+                # Encode count in prefix
+                my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);
+                if ($nb) {
+                    $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));
+                } elsif ($ch eq 'A' || $ch eq 'a') {
+                    _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);
+                } elsif ($ch eq 'Z') {
+                    _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);
+                } elsif ($ch eq 'w') {
+                    my $v = $actual_count;
+                    if ($v == 0) { $$result_ref .= chr(0); }
+                    else {
+                        my @bytes;
+                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                        $$result_ref .= chr($bytes[-1]);
+                    }
+                }
+                # Pack the elements
+                my $dbe_eff = $dbe2 ? 1 : ($dle2 ? 0 : $ddbe);
+                for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {
+                    my $val = $args_ref->[$$ai_ref++];
+                    $$result_ref .= _pack_emit_int($val, $dnb, $dsig, $dbe_eff);
+                }
+            } elsif ($dfmt eq 'w') {
+                # BER data: count = number of BER elements
+                my $remaining = $nargs - $$ai_ref;
+                $actual_count = (!$had_dcount || $dstar2) ? $remaining :
+                                ($dnrep2 < $remaining ? $dnrep2 : $remaining);
+                # Encode count in prefix
+                my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);
+                if ($nb) {
+                    $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));
+                } elsif ($ch eq 'w') {
+                    my $v = $actual_count;
+                    if ($v == 0) { $$result_ref .= chr(0); }
+                    else {
+                        my @bytes;
+                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                        $$result_ref .= chr($bytes[-1]);
+                    }
+                }
+                # Pack BER elements
+                for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {
+                    my $v = $args_ref->[$$ai_ref++] + 0;
+                    if ($v == 0) { $$result_ref .= chr(0); }
+                    else {
+                        my @bytes;
+                        while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                        for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                        $$result_ref .= chr($bytes[-1]);
+                    }
                 }
             }
             next;
@@ -1016,6 +1088,24 @@ sub _unpack_tmpl {
     }
 }
 
+# Returns (first_item_tmpl, rest_tmpl): the first complete format item and everything after it.
+# Used by p_unpack to apply %N to only the next item, not the whole template.
+sub _next_format_item {
+    my ($tmpl) = @_;
+    my $tlen = length($tmpl);
+    my $ti = 0;
+    $ti = _pack_skip_ws($tmpl, $ti);
+    return ('', '') if $ti >= $tlen;
+    my $ch = substr($tmpl, $ti, 1); $ti++;
+    if ($ch eq '(') {
+        my $grpend = _pack_find_group_end($tmpl, $ti);
+        $ti = $grpend + 1;
+    }
+    while ($ti < $tlen && substr($tmpl, $ti, 1) =~ /[!<>]/) { $ti++ }
+    _pack_parse_count($tmpl, \$ti);
+    return (substr($tmpl, 0, $ti), substr($tmpl, $ti));
+}
+
 sub p_unpack {
     my ($tmpl, $s) = @_;
     $s = '' unless defined $s;
@@ -1043,20 +1133,24 @@ sub p_unpack {
         $s = $bytes;
     }
     my @result;
-    my $checksum = 0;
-    my $push_val = $checksum_width
-        ? sub { $checksum += $_[0] }
-        : sub { push @result, $_[0] };
     my $si = 0;
-    _unpack_tmpl($tmpl, $s, \$si, $push_val, 0, 0, $checksum_width ? 1 : 0);
     if ($checksum_width) {
-        # Use floor-division modulo: works for both negative integers and float checksums.
-        # Perl's % truncates to int first (wrong for floats); CL's p-% does (mod trunc trunc).
-        # Formula: r = checksum - floor(checksum/mod)*mod, avoiding POSIX::floor.
+        # %N applies to the NEXT format item only, then normal unpacking continues.
+        my ($cs_tmpl, $rest_tmpl) = _next_format_item($tmpl);
+        my $checksum = 0;
+        if (length($cs_tmpl)) {
+            _unpack_tmpl($cs_tmpl, $s, \$si, sub { $checksum += $_[0] }, 0, 0, 1);
+        }
+        # Use floor-division modulo: works for negative integers and float checksums.
         my $mod = 2 ** $checksum_width;
         my $q = int($checksum / $mod);
         $q-- if $q * $mod > $checksum;
-        return $checksum - $q * $mod;
+        push @result, $checksum - $q * $mod;
+        if (length($rest_tmpl)) {
+            _unpack_tmpl($rest_tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0);
+        }
+    } else {
+        _unpack_tmpl($tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0);
     }
     return wantarray ? @result : $result[0];
 }

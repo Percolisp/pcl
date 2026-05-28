@@ -215,6 +215,10 @@ has precedences => (
         '&'   => { assoc => 'l', no => 2, prec => 25 }, # Bitwise AND
         '|'   => { assoc => 'l', no => 2, prec => 24 }, # Bitwise OR
         '^'   => { assoc => 'l', no => 2, prec => 24 }, # Bitwise XOR
+        # Dotted string bitwise operators (always string, never numeric)
+        '&.'  => { assoc => 'l', no => 2, prec => 25 }, # String bitwise AND
+        '|.'  => { assoc => 'l', no => 2, prec => 24 }, # String bitwise OR
+        '^.'  => { assoc => 'l', no => 2, prec => 24 }, # String bitwise XOR
 
         # Logical operators (higher precedence than //)
         '&&'  => { assoc => 'l', no => 2, prec => 20 },
@@ -240,6 +244,9 @@ has precedences => (
         '&='  => { assoc => 'r', no => 2, prec =>  8 },
         '|='  => { assoc => 'r', no => 2, prec =>  8 },
         '^='  => { assoc => 'r', no => 2, prec =>  8 },
+        '&.=' => { assoc => 'r', no => 2, prec =>  8 }, # String bitwise AND assign
+        '|.=' => { assoc => 'r', no => 2, prec =>  8 }, # String bitwise OR assign
+        '^.=' => { assoc => 'r', no => 2, prec =>  8 }, # String bitwise XOR assign
         '<<=' => { assoc => 'r', no => 2, prec =>  8 },
         '>>=' => { assoc => 'r', no => 2, prec =>  8 },
 
@@ -285,6 +292,7 @@ has known_no_of_params => (
       pos        => [0, 1, -2],  # pos or pos SCALAR (defaults to $_)
       grep       => -12,        # grep BLOCK|EXPR, LIST (1 before list)
       time       => 0,
+      times      => 0,
       localtime  => [0,   1],
       gmtime     => [0,   1],
 

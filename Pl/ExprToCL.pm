@@ -130,6 +130,11 @@ my %OP_EXCEPTIONS = (
   '|'   => 'p-bit-or',
   '^'   => 'p-bit-xor',
   '~'   => 'p-bit-not',
+  # Dotted string bitwise operators (always string, never numeric)
+  '&.'  => 'p-str-bit-and',
+  '|.'  => 'p-str-bit-or',
+  '^.'  => 'p-str-bit-xor',
+  '~.'  => 'p-str-bit-not',
 
   # Assignment variants with clearer names
   '='   => 'p-setf',
@@ -140,6 +145,9 @@ my %OP_EXCEPTIONS = (
   '&='  => 'p-bit-and=',
   '|='  => 'p-bit-or=',
   '^='  => 'p-bit-xor=',
+  '&.=' => 'p-str-bit-and=',
+  '|.=' => 'p-str-bit-or=',
+  '^.=' => 'p-str-bit-xor=',
 
   # Compound assignment - logical
   '&&=' => 'p-and-assign',
@@ -394,8 +402,40 @@ sub _gen_interp_regex_pattern {
         push @parts, qq{"$esc"};
         $literal = '';
       }
-      push @parts, "\$$varname";
+      my $cl_expr = "\$$varname";
       $i += 1 + length($varname);
+      # Handle arrow dereferences: $var->[N] or $var->{key} (possibly chained)
+      while ($i + 2 < length($pattern) && substr($pattern, $i, 2) eq '->') {
+        my $bracket = substr($pattern, $i + 2, 1);
+        if ($bracket eq '[') {
+          my ($start, $depth, $j) = ($i + 3, 1, $i + 3);
+          while ($j < length($pattern) && $depth > 0) {
+            my $ch = substr($pattern, $j, 1);
+            $depth++ if $ch eq '[';
+            $depth-- if $ch eq ']';
+            $j++;
+          }
+          last if $depth != 0;
+          my $idx = substr($pattern, $start, $j - $start - 1);
+          $cl_expr = "(p-aref $cl_expr $idx)";
+          $i = $j;
+        } elsif ($bracket eq '{') {
+          my ($start, $depth, $j) = ($i + 3, 1, $i + 3);
+          while ($j < length($pattern) && $depth > 0) {
+            my $ch = substr($pattern, $j, 1);
+            $depth++ if $ch eq '{';
+            $depth-- if $ch eq '}';
+            $j++;
+          }
+          last if $depth != 0;
+          my $key = substr($pattern, $start, $j - $start - 1);
+          $key =~ s/^["']//; $key =~ s/["']$//;
+          $key =~ s/\\/\\\\/g; $key =~ s/"/\\"/g;
+          $cl_expr = "(p-gethash $cl_expr \"$key\")";
+          $i = $j;
+        } else { last; }
+      }
+      push @parts, $cl_expr;
     } else {
       $literal .= $c;
       $i++;
@@ -526,15 +566,11 @@ sub gen_leaf {
   if ($ref =~ /^PPI::Token::Number/) {
     my $num = $node->content();
 
-    # Version strings: v1.20.300 -> string of chr values
-    if ($num =~ /^v(\d[\d.]*)$/) {
-      my @parts = split /\./, $1;
-      my $str = join('', map { chr($_) } @parts);
-      # Escape for CL string literal
-      $str =~ s/\\/\\\\/g;
-      $str =~ s/"/\\"/g;
-      # For non-printable chars, use CL character escapes or just embed
-      # Convert to a runtime call for safety with high codepoints
+    # Version strings: v1.20.300 or 256.65.258 -> string of chr values
+    if ($ref =~ /::Version$/ || $num =~ /^v(\d[\d.]*)$/) {
+      my $vpart = $num;
+      $vpart =~ s/^v//;   # strip leading 'v' if present
+      my @parts = split /\./, $vpart;
       my $args = join(' ', @parts);
       return "(p-version-string $args)";
     }
@@ -681,6 +717,24 @@ sub _is_integer_literal_node {
   return $content =~ /^\d+$/;  # non-negative integer only (negatives are prefix-op)
 }
 
+sub _is_regex_match_node {
+  # Returns true if the node is a regex-match expression (=~ or !~).
+  # Such nodes are boolean-valued and not compared numerically with $. in flip-flops.
+  my ($expr_o, $node) = @_;
+  return 0 unless defined $node;
+  return 0 unless $expr_o->is_internal_node_type($node);
+  my $type = $node->{type} // '';
+  return $type eq '=~' || $type eq '!~';
+}
+
+sub _is_string_literal_node {
+  # Returns true for PPI string literal nodes (single/double/heredoc quotes etc.)
+  # String literals in flip-flops use $.  comparison (may warn "isn't numeric").
+  my ($node) = @_;
+  return 0 unless defined $node;
+  return ref($node) =~ /^PPI::Token::Quote/;
+}
+
 # Binary operator: (pcl:p-OP left right)
 # Operators always use pcl: prefix to avoid conflicts with user-defined subs
 sub gen_binary_op {
@@ -694,22 +748,57 @@ sub gen_binary_op {
   # Special case: '..'/'..' — range in list context, flip-flop in scalar context
   if (($op eq '..' || $op eq '...') && defined $node_id) {
     my $ctx = $self->expr_o->get_node_context($node_id);
-    if ($ctx != LIST_CTX && $ctx != INHERIT_CTX) {
-      # Scalar context: emit flip-flop
+    my $left_node  = $self->expr_o->get_a_node($kids->[0]);
+    my $right_node = $self->expr_o->get_a_node($kids->[1]);
+    my $both_int  = _is_integer_literal_node($left_node) && _is_integer_literal_node($right_node);
+    # Literal flip-flop: both operands are compile-time constants (ints or strings).
+    # Perl compares them against $. (the line number), possibly warning "isn't numeric".
+    # Variable/expression operands (including regex matches) use boolean evaluation.
+    my $both_literal = ($both_int
+                        || (_is_string_literal_node($left_node) && _is_string_literal_node($right_node)));
+    # INHERIT_CTX with non-literal operands: range of booleans is degenerate; treat as scalar.
+    # INHERIT_CTX with literals: emit a runtime wantarray check.
+    my $effective_ctx = $ctx;
+    if ($ctx == INHERIT_CTX && !$both_literal) {
+      $effective_ctx = SCALAR_CTX;
+    }
+    if ($effective_ctx != LIST_CTX && $effective_ctx != INHERIT_CTX) {
+      # Scalar (or demoted INHERIT) context: emit flip-flop
       my $ff_id = $g_flipflop_count++;
-      my $left_node  = $self->expr_o->get_a_node($kids->[0]);
-      my $right_node = $self->expr_o->get_a_node($kids->[1]);
       my $left  = $self->gen_node($kids->[0]);
       my $right = $self->gen_node($kids->[1]);
-      if (_is_integer_literal_node($left_node) && _is_integer_literal_node($right_node)) {
+      if ($both_int) {
+        # Integer literals: clean $.  comparison, no warnings
         my $macro = ($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num';
         return "($macro $ff_id $left $right)";
+      } elsif ($both_literal) {
+        # String literals: $. comparison with numeric coercion, warns for non-numeric strings
+        my $macro = ($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn';
+        return "($macro $ff_id $left $right)";
       } else {
+        # Variables, expressions, regex matches: boolean evaluation (no $. comparison)
         my $macro = ($op eq '...') ? 'p-flipflop-3' : 'p-flipflop';
         return "($macro $ff_id $left $right)";
       }
     }
-    # List context: fall through to normal range (p-.. / p-...)
+    if ($effective_ctx == INHERIT_CTX) {
+      # Literals in INHERIT_CTX: runtime wantarray check
+      my $ff_id = $g_flipflop_count++;
+      my $left  = $self->gen_node($kids->[0]);
+      my $right = $self->gen_node($kids->[1]);
+      my ($ff_macro, $range_fn);
+      if ($both_int) {
+        $ff_macro = ($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num';
+      } else {
+        $ff_macro = ($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn';
+      }
+      $range_fn  = ($op eq '...') ? 'p-...' : 'p-..';
+      return "(if (eq *wantarray* t) ($range_fn $left $right) ($ff_macro $ff_id $left $right))";
+    }
+    # List context: range endpoints are always scalars, not lists
+    $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
+    $self->expr_o->set_node_context($kids->[1], SCALAR_CTX);
+    # Fall through to normal range (p-.. / p-...)
   }
 
   # Special case: 'x' operator - use list repeat when LHS is parenthesized and in list context
@@ -2039,11 +2128,17 @@ sub gen_array_ref_access {
   my $node_id = shift;
   my $kids    = shift;
 
-  # qw[...][idx] or (LIST)[idx]: if LHS is a progn (list literal), force LIST_CTX
-  # so gen_progn produces (vector ...) that p-aref-deref can index into.
+  # (LIST)[idx] or method()[idx]: force LIST_CTX on child 0 so the expression
+  # is evaluated in list context — Perl always does this for X[N] subscripts.
+  # 'list_ctx_subscript' is set by the Constructor path in PExpr.pm (covers
+  # paren-list and method-call subscripts). Arrow-deref $arr->[N] does NOT
+  # set this flag, so those keep their outer context (usually scalar).
+  # Also handle qw[...][idx]: child 0 is a 'progn' (qw words), always LIST_CTX.
+  my $is_list_subscript = $self->expr_o->node_tree->get_metadata($node_id, 'list_ctx_subscript');
   my $child0_node = $self->expr_o->get_a_node($kids->[0]);
-  if ($self->expr_o->is_internal_node_type($child0_node)
-      && $child0_node->{type} eq 'progn') {
+  if ($is_list_subscript
+      || ($self->expr_o->is_internal_node_type($child0_node)
+          && $child0_node->{type} eq 'progn')) {
     $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
   }
 
@@ -2858,9 +2953,9 @@ sub gen_transliteration {
   my $to   = $node->get_substitute_string;
   my $mods = $node->get_modifiers;
 
-  # Escape quotes
-  $from =~ s/"/\\"/g;
-  $to   =~ s/"/\\"/g;
+  # Process tr escape sequences to actual characters, then build safe CL literals
+  my $from_cl = _cl_string_literal(_expand_tr_escapes($from));
+  my $to_cl   = _cl_string_literal(_expand_tr_escapes($to));
 
   my @mod_strs;
   for my $mod (sort keys %$mods) {
@@ -2868,7 +2963,51 @@ sub gen_transliteration {
   }
 
   my $mods_str = @mod_strs ? ' ' . join(' ', @mod_strs) : '';
-  return qq{(p-tr "$from" "$to"$mods_str)};
+  return "(p-tr $from_cl $to_cl$mods_str)";
+}
+
+# Process tr/// string escape sequences (no interpolation, but \xHH etc. apply)
+sub _expand_tr_escapes {
+  my $str = shift;
+  $str =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{U\+[0-9A-Fa-f]+\}|[0-7]{1,3}|c.|[ntraefbd"\\/])!
+    _process_tr_escape($1)
+  !ge;
+  return $str;
+}
+
+sub _process_tr_escape {
+  my $esc = shift;
+  return "\n" if $esc eq 'n';
+  return "\t" if $esc eq 't';
+  return "\r" if $esc eq 'r';
+  return "\a" if $esc eq 'a';
+  return "\e" if $esc eq 'e';
+  return "\f" if $esc eq 'f';
+  return "\b" if $esc eq 'b';
+  return "\\" if $esc eq '\\';
+  return '"'  if $esc eq '"';
+  return '/'  if $esc eq '/';
+  return "\x00" if $esc eq '0';
+  if ($esc =~ /^c(.)$/) {
+    return chr(ord(uc($1)) ^ 64);
+  }
+  if ($esc =~ /^x\{([^}]*)\}$/) {
+    return _hex_brace_escape($1);
+  }
+  if ($esc =~ /^x([0-9A-Fa-f]{1,2})$/) {
+    return chr(hex($1));
+  }
+  return chr(0) if $esc eq 'x';
+  if ($esc =~ /^o\{([^}]*)\}$/) {
+    return _octal_brace_escape($1);
+  }
+  if ($esc =~ /^N\{U\+([0-9A-Fa-f]+)\}$/) {
+    return chr(hex($1));
+  }
+  if ($esc =~ /^([0-7]{1,3})$/) {
+    return chr(oct($1));
+  }
+  return $esc;  # unknown \X -> X
 }
 
 
@@ -3083,11 +3222,37 @@ sub convert_perl_string {
   # Apply \U, \L, \u, \l, \Q, \F ... \E transformations (non-interpolated strings)
   $content = _apply_case_escapes($content);
 
-  # Now escape for CL output: backslashes and quotes
-  $content =~ s/\\/\\\\/g;
-  $content =~ s/"/\\"/g;
+  return _cl_string_literal($content);
+}
 
-  return qq{"$content"};
+# Build a CL string literal, escaping surrogate and non-character codepoints
+# that can't be embedded in a UTF-8 source file.
+sub _cl_string_literal {
+  my $content = shift;
+  # Characters invalid in UTF-8: surrogates U+D800-U+DFFF, and non-chars U+FFFE/U+FFFF
+  # (and the pattern repeats at every 0x10000 boundary: U+1FFFE, U+1FFFF, etc.)
+  my $bad_char_re = qr/[\x{D800}-\x{DFFF}]|[\x{FFFE}\x{FFFF}]/;
+  if ($content !~ $bad_char_re) {
+    $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
+    return qq{"$content"};
+  }
+  # Build a (concatenate 'string ...) form with code-char for bad chars
+  my @parts;
+  while (length $content) {
+    if ($content =~ /\A((?:[^\x{D800}-\x{DFFF}\x{FFFE}\x{FFFF}])+)/s) {
+      my $safe = $1;
+      $safe =~ s/\\/\\\\/g;
+      $safe =~ s/"/\\"/g;
+      push @parts, qq{"$safe"};
+      $content = substr($content, length($1));
+    } else {
+      my $ch = substr($content, 0, 1);
+      push @parts, "(string (code-char " . ord($ch) . "))";
+      $content = substr($content, 1);
+    }
+  }
+  return @parts == 1 ? $parts[0] : "(concatenate 'string " . join(' ', @parts) . ")";
 }
 
 

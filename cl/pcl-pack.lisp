@@ -1,6 +1,3 @@
-;; Pre-declare package for dynamic loading
-(pcl:p-defpackage :POSIX)
-
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -10,11 +7,14 @@
 (vector-push-extend "/home/bernt/pcl" pcl::@INC)
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux" pcl::@INC)
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3" pcl::@INC)
+(vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux" pcl::@INC)
+(vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3" pcl::@INC)
 ;; Switch to main package (Perl's default for code without 'package' statement)
 (p-defpackage :main)
 (in-package :main)
 
 (p-declare-sub pl-p_unpack)
+(p-declare-sub pl-_next_format_item)
 (p-declare-sub pl-_unpack_tmpl)
 (p-declare-sub pl-_unpack_str)
 (p-declare-sub pl-_unpack_utf8_char)
@@ -1224,7 +1224,7 @@
                             (p-my-= $slen (p-length $arg))
               
               (let (($len (make-p-box nil)) ($body (make-p-box nil)) ($nbits (make-p-box nil)) ($byte (make-p-box nil)) ($idx (make-p-box nil)) ($nyb (make-p-box nil)) ($hi (make-p-box nil)) ($lo (make-p-box nil)) ($line_len (make-p-box nil)) ($ce (make-p-box nil)) ($chunk (make-p-box nil)) ($clen (make-p-box nil)) ($b0 (make-p-box nil)) ($b1 (make-p-box nil)) ($b2 (make-p-box nil)) ($cm (make-p-box nil)) ($uu (make-p-box nil)))
-                ;; if ($ch eq 'a') {         my $len = $star ? $slen : $nrep;         for (my $k = 0; $k < $len; $k++) {             $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);         }     } elsif ($ch eq 'A') {         my $len = $star ? $slen : $nrep;         for (my $k = 0; $k < $len; $k++) {             $$result_ref .= $k < $slen ? substr($arg,$k,1) : ' ';         }     } elsif ($ch eq 'Z') {         my $len = $star ? $slen + 1 : $nrep;         my $body = $len > 1 ? $len - 1 : 0;         for (my $k = 0; $k < $body; $k++) {             $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);         }         $$result_ref .= chr(0);     } elsif ($ch eq 'b') {         my $nbits = $star ? $slen : $nrep;         for (my $bs = 0; $bs < $nbits; $bs += 8) {             my $byte = 0;             for (my $bit = 0; $bit < 8 && $bs+$bit < $nbits; $bit++) {                 my $idx = $bs + $bit;                 $byte |= (1 << $bit) if $idx < $slen && substr($arg,$idx,1) eq '1';             }             $$result_ref .= chr($byte);         }     } elsif ($ch eq 'B') {         my $nbits = $star ? $slen : $nrep;         for (my $bs = 0; $bs < $nbits; $bs += 8) {             my $byte = 0;             for (my $bit = 0; $bit < 8 && $bs+$bit < $nbits; $bit++) {                 my $idx = $bs + $bit;                 $byte |= (1 << (7 - $bit)) if $idx < $slen && substr($arg,$idx,1) eq '1';             }             $$result_ref .= chr($byte);         }     } elsif ($ch eq 'H') {         my $nyb = $star ? $slen : $nrep;  # count is number of nybbles         for (my $k = 0; $k < $nyb; $k += 2) {             my $hi = $k   < $slen ? hex(substr($arg,$k,  1)) : 0;             my $lo = $k+1 < $slen ? hex(substr($arg,$k+1,1)) : 0;             $$result_ref .= chr(($hi << 4) | $lo);         }     } elsif ($ch eq 'h') {         my $nyb = $star ? $slen : $nrep;  # count is number of nybbles         for (my $k = 0; $k < $nyb; $k += 2) {             my $lo = $k   < $slen ? hex(substr($arg,$k,  1)) : 0;             my $hi = $k+1 < $slen ? hex(substr($arg,$k+1,1)) : 0;             $$result_ref .= chr(($hi << 4) | $lo);         }     } elsif ($ch eq 'u') {         my $line_len = 45;         if (!$star && $nrep > 45) {             if ($nrep > 63) {                 warn "Field too wide in 'u' format in pack";                 $line_len = 63;             } else {                 $line_len = $nrep;             }         }         for (my $cs = 0; $cs < $slen; $cs += $line_len) {             my $ce = $cs + $line_len < $slen ? $cs + $line_len : $slen;             my $chunk = substr($arg, $cs, $ce - $cs);             my $clen = length($chunk);             $$result_ref .= chr(32 + $clen);             for (my $k = 0; $k < $clen; $k += 3) {                 my $b0 = ord(substr($chunk,$k,1));                 my $b1 = $k+1 < $clen ? ord(substr($chunk,$k+1,1)) : 0;                 my $b2 = $k+2 < $clen ? ord(substr($chunk,$k+2,1)) : 0;                 my $cm = ($b0 << 16) | ($b1 << 8) | $b2;                 my $uu = sub { my $c = 32 + ($_[0] & 63); $c == 32 ? 96 : $c };                 $$result_ref .= chr($uu->(($cm>>18)&63)) . chr($uu->(($cm>>12)&63))                               . chr($uu->(($cm>> 6)&63)) . chr($uu->( $cm    &63));             }             $$result_ref .= "\n";         }     }
+                ;; if ($ch eq 'a') {         my $len = $star ? $slen : $nrep;         for (my $k = 0; $k < $len; $k++) {             $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);         }     } elsif ($ch eq 'A') {         my $len = $star ? $slen : $nrep;         for (my $k = 0; $k < $len; $k++) {             $$result_ref .= $k < $slen ? substr($arg,$k,1) : ' ';         }     } elsif ($ch eq 'Z') {         my $len = $star ? $slen + 1 : $nrep;         if ($len > 0) {             my $body = $len - 1;             for (my $k = 0; $k < $body; $k++) {                 $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);             }             $$result_ref .= chr(0);         }     } elsif ($ch eq 'b') {         my $nbits = $star ? $slen : $nrep;         for (my $bs = 0; $bs < $nbits; $bs += 8) {             my $byte = 0;             for (my $bit = 0; $bit < 8 && $bs+$bit < $nbits; $bit++) {                 my $idx = $bs + $bit;                 $byte |= (1 << $bit) if $idx < $slen && substr($arg,$idx,1) eq '1';             }             $$result_ref .= chr($byte);         }     } elsif ($ch eq 'B') {         my $nbits = $star ? $slen : $nrep;         for (my $bs = 0; $bs < $nbits; $bs += 8) {             my $byte = 0;             for (my $bit = 0; $bit < 8 && $bs+$bit < $nbits; $bit++) {                 my $idx = $bs + $bit;                 $byte |= (1 << (7 - $bit)) if $idx < $slen && substr($arg,$idx,1) eq '1';             }             $$result_ref .= chr($byte);         }     } elsif ($ch eq 'H') {         my $nyb = $star ? $slen : $nrep;  # count is number of nybbles         for (my $k = 0; $k < $nyb; $k += 2) {             my $hi = $k   < $slen ? hex(substr($arg,$k,  1)) : 0;             my $lo = $k+1 < $slen ? hex(substr($arg,$k+1,1)) : 0;             $$result_ref .= chr(($hi << 4) | $lo);         }     } elsif ($ch eq 'h') {         my $nyb = $star ? $slen : $nrep;  # count is number of nybbles         for (my $k = 0; $k < $nyb; $k += 2) {             my $lo = $k   < $slen ? hex(substr($arg,$k,  1)) : 0;             my $hi = $k+1 < $slen ? hex(substr($arg,$k+1,1)) : 0;             $$result_ref .= chr(($hi << 4) | $lo);         }     } elsif ($ch eq 'u') {         my $line_len = 45;         if (!$star && $nrep > 45) {             if ($nrep > 63) {                 warn "Field too wide in 'u' format in pack";                 $line_len = 63;             } else {                 $line_len = $nrep;             }         }         for (my $cs = 0; $cs < $slen; $cs += $line_len) {             my $ce = $cs + $line_len < $slen ? $cs + $line_len : $slen;             my $chunk = substr($arg, $cs, $ce - $cs);             my $clen = length($chunk);             $$result_ref .= chr(32 + $clen);             for (my $k = 0; $k < $clen; $k += 3) {                 my $b0 = ord(substr($chunk,$k,1));                 my $b1 = $k+1 < $clen ? ord(substr($chunk,$k+1,1)) : 0;                 my $b2 = $k+2 < $clen ? ord(substr($chunk,$k+2,1)) : 0;                 my $cm = ($b0 << 16) | ($b1 << 8) | $b2;                 my $uu = sub { my $c = 32 + ($_[0] & 63); $c == 32 ? 96 : $c };                 $$result_ref .= chr($uu->(($cm>>18)&63)) . chr($uu->(($cm>>12)&63))                               . chr($uu->(($cm>> 6)&63)) . chr($uu->( $cm    &63));             }             $$result_ref .= "\n";         }     }
                 ;; if ($ch eq 'a')
                 (p-if (setf --pcl-if-ret--6                 (p-str-eq $ch "a"))
                   (progn
@@ -1272,22 +1272,32 @@
                           ;; my $len = $star ? $slen + 1 : $nrep
                                                     (p-my-= $len (p-if $star (p-+ $slen 1) $nrep))
                           
-                          ;; my $body = $len > 1 ? $len - 1 : 0
-                                                    (p-my-= $body (p-if (p-> $len 1) (p-- $len 1) 0))
-                          
-                          ;; for (my $k = 0; $k < $body; $k++) {             $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);         }
-                          (let (($k (make-p-box nil)))
-                            (p-for (                          (p-my-= $k 0))
-                                    (                          (p-< $k $body))
-                                    (                          (p-post++ $k))
-                              ;; $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0)
-                                                            (p-.= (p-cast-$ $result_ref) (p-if (p-< $k $slen) (p-substr $arg $k 1) (p-chr 0)))
-                              
+                          ;; if ($len > 0) {             my $body = $len - 1;             for (my $k = 0; $k < $body; $k++) {                 $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);             }             $$result_ref .= chr(0);         }
+                          ;; if ($len > 0)
+                          (p-if (setf --pcl-if-ret--6                           (p-> $len 0))
+                            (progn
+                              (let (($body (make-p-box nil)) ($k (make-p-box nil)))
+                                ;; my $body = $len - 1
+                                                                (p-my-= $body (p-- $len 1))
+                                
+                                ;; for (my $k = 0; $k < $body; $k++) {                 $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0);             }
+                                (let (($k (make-p-box nil)))
+                                  (p-for (                                (p-my-= $k 0))
+                                          (                                (p-< $k $body))
+                                          (                                (p-post++ $k))
+                                    ;; $$result_ref .= $k < $slen ? substr($arg,$k,1) : chr(0)
+                                                                        (p-.= (p-cast-$ $result_ref) (p-if (p-< $k $slen) (p-substr $arg $k 1) (p-chr 0)))
+                                    
+                                  )
+                                )
+                                
+                                ;; $$result_ref .= chr(0)
+                                (setf --pcl-if-ret--6                                 (p-.= (p-cast-$ $result_ref) (p-chr 0)))
+                                
+                              )
                             )
+                            nil
                           )
-                          
-                          ;; $$result_ref .= chr(0)
-                          (setf --pcl-if-ret--6                           (p-.= (p-cast-$ $result_ref) (p-chr 0)))
                           
                         )
                       )
@@ -1611,7 +1621,7 @@
 (p-sub pl-_pack_tmpl (&rest %_args)
   (let ((@_ (p-flatten-args %_args)))
     (block nil
-      (let (($k (make-p-box nil)) ($r (make-p-box nil)))
+      (let (($k (make-p-box nil)) ($i (make-p-box nil)) ($r (make-p-box nil)))
         (let (($tmpl (make-p-box nil)) ($ai_ref (make-p-box nil)) ($args_ref (make-p-box nil)) ($result_ref (make-p-box nil)) ($inh_be (make-p-box nil)) ($inh_le (make-p-box nil)) ($out_base (make-p-box nil)) ($depth (make-p-box nil)))
           ;; my ($tmpl, $ai_ref, $args_ref, $result_ref, $inh_be, $inh_le, $out_base, $depth) = @_
                     (let ((*wantarray* nil)) (p-list-= (vector $tmpl $ai_ref $args_ref $result_ref $inh_be $inh_le $out_base $depth) @_))
@@ -1638,10 +1648,10 @@
                 ;; my $tlen = length($tmpl)
                                 (p-my-= $tlen (p-length $tmpl))
                 
-                (let (($ch (make-p-box nil)) ($grpbeg (make-p-box nil)) ($grpend (make-p-box nil)) ($bang (make-p-box nil)) ($be (make-p-box nil)) ($le (make-p-box nil)) ($ti_before_count (make-p-box nil)) ($star (make-p-box nil)) ($count (make-p-box nil)) ($nrep (make-p-box nil)) ($had_count (make-p-box nil)) ($darg (make-p-box nil)) ($dlen (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($dfmt (make-p-box nil)) ($dbang (make-p-box nil)) ($dbe2 (make-p-box nil)) ($dle2 (make-p-box nil)) ($dstar2 (make-p-box nil)) ($dcnt2 (make-p-box nil)) ($dnrep2 (make-p-box nil)) ($dnb (make-p-box nil)) ($dsig (make-p-box nil)) ($ddbe (make-p-box nil)) ($inner (make-p-box nil)) ($gti (make-p-box nil)) ($fc (make-p-box nil)) ($ai_before (make-p-box nil)) ($iter_base (make-p-box nil)) ($n (make-p-box nil)) ($cur (make-p-box nil)) ($pad (make-p-box nil)) ($fp (make-p-box nil)) ($t (make-p-box nil)) ($tgt (make-p-box nil)) ($abs_tgt (make-p-box nil)) ($be2 (make-p-box nil)) ($nv (make-p-box nil)) ($arg (make-p-box nil)) ($raw (make-p-box nil)) ($orig_s (make-p-box nil)))
-                  ;; while (1) {         $ti = _pack_skip_ws($tmpl, $ti);         last if $ti >= $tlen;         my $ch = substr($tmpl, $ti, 1); $ti++;         my ($grpbeg, $grpend) = (undef, undef);         if ($ch eq '(') {             $grpend = _pack_find_group_end($tmpl, $ti);             $grpbeg = $ti; $ti = $grpend + 1; $ch = '(';         }         my ($bang, $be, $le) = _pack_parse_mods($tmpl, \$ti, $inh_be, $inh_le, $ch, 'pack');         # No ws skip here: space between type+mods and count is invalid in Perl.         my $ti_before_count = $ti;         my ($star, $count, $nrep) = _pack_parse_count($tmpl, \$ti);         my $had_count = ($star || $ti > $ti_before_count);         $ti = _pack_skip_ws($tmpl, $ti);          # Slash â count prefix: ch encodes length, next char is data format         if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/') {             $ti++;             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;             # '/' must not have a count applied directly to it (e.g. c/*a or c/1a are invalid;             # Z*/A* is valid because * is the count for Z, not for /).             { my $c = substr($tmpl, $ti, 1);               die "'/' does not take a repeat count in pack\n"                 if $c eq '*' || $c eq '[' || $c =~ /\d/; }             my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';             $darg = '' unless defined $darg;             my $dlen = length($darg);             my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);             if ($nb) {                 $$result_ref .= _pack_emit_int($dlen, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));             } elsif ($ch eq 'A' || $ch eq 'a') {                 _pack_str_one($ch, "$dlen", 1, 0, $result_ref);             } elsif ($ch eq 'Z') {                 # Z*/A*: write count as decimal string followed by null byte                 _pack_str_one('Z', "$dlen", length("$dlen") + 1, 0, $result_ref);             } elsif ($ch eq 'w') {                 # w/A*: write count as BER-encoded integer                 my $v = $dlen;                 if ($v == 0) { $$result_ref .= chr(0); }                 else {                     my @bytes;                     while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                     for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                     $$result_ref .= chr($bytes[-1]);                 }             }             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;             my $dfmt = substr($tmpl, $ti, 1); $ti++;             my ($dbang, $dbe2, $dle2) = _pack_parse_mods($tmpl, \$ti, $be, $le, $dfmt, 'pack');             $ti = _pack_skip_ws($tmpl, $ti);             my ($dstar2, $dcnt2, $dnrep2) = _pack_parse_count($tmpl, \$ti);             _pack_str_one($dfmt, $darg, $dlen, 0, $result_ref)                 if $dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z';             if ($dfmt ne 'a' && $dfmt ne 'A' && $dfmt ne 'Z') {                 my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang);                 if ($dnb) {                     $$result_ref .= _pack_emit_int($dlen, $dnb, $dsig, $dbe2 ? 1 : ($dle2 ? 0 : $ddbe));                 }             }             next;         }          # Group         if (defined $grpbeg) {             my $inner = substr($tmpl, $grpbeg, $grpend - $grpbeg);             # Check: group must not start with a count             my $gti = _pack_skip_ws($inner, 0);             if ($gti < length($inner)) {                 my $fc = substr($inner, $gti, 1);                 die "\(\)-group starts with a count in pack\n" if $fc =~ /^[\d\*\[]/;             }             if ($star) {                 while ($$ai_ref < $nargs) {                     my $ai_before = $$ai_ref;                     my $iter_base = length($$result_ref);                     _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1);                     last if $$ai_ref == $ai_before;  # no progress: avoid infinite loop                 }             } else {                 for (my $r = 0; $r < $nrep; $r++) {                     my $iter_base = length($$result_ref);                     _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1);                 }             }             next;         }          # Position ops (no arg)         if ($ch eq 'x') {             if ($bang) {                 # x!N: pad to N-byte alignment                 my $n = $nrep > 0 ? $nrep : 1;                 my $cur = length($$result_ref);                 my $pad = ($n - ($cur % $n)) % $n;                 $$result_ref .= chr(0) x $pad;             } else {                 $$result_ref .= chr(0) x $nrep;             }             next;         }         if ($ch eq 'X') {             if ($bang) {                 # X!N: truncate back to N-byte alignment                 my $n = $nrep > 0 ? $nrep : 1;                 my $cur = length($$result_ref);                 $$result_ref = substr($$result_ref, 0, int($cur/$n)*$n);             } else {                 my $fp = length($$result_ref) - $nrep;                 $$result_ref = substr($$result_ref, 0, $fp < 0 ? 0 : $fp);             }             next;         }         if ($ch eq '@') {             # @N: relative to group start (out_base). @!N: absolute byte position.             my $n = defined($count) ? $count : 0;             my $t = $bang ? $n : $out_base + $n;             if (length($$result_ref) < $t) { $$result_ref .= chr(0) x ($t - length($$result_ref)) }             elsif (length($$result_ref) > $t) { $$result_ref = substr($$result_ref, 0, $t) }             next;         }         if ($ch eq '.') {             # Position format: reads target from arg list.             # .* = absolute; . or .N = relative to current group's start (out_base).             my $tgt = ($$ai_ref < $nargs) ? int(($args_ref->[$$ai_ref++] // 0) + 0) : 0;             my $abs_tgt = $star ? $tgt : $out_base + $tgt;             my $cur = length($$result_ref);             if ($cur < $abs_tgt) { $$result_ref .= chr(0) x ($abs_tgt - $cur) }             elsif ($cur > $abs_tgt) { $$result_ref = substr($$result_ref, 0, $abs_tgt) }             next;         }         if ($ch eq 'p' || $ch eq 'P' || $ch eq 'D') {             die "Invalid type '$ch' in pack\n";         }          # For multi-arg formats, * means use all remaining args         $nrep = $nargs - $$ai_ref if $star;          # Integer types         my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);         if ($nb) {             my $be2 = $be ? 1 : ($le ? 0 : $dbe);             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $nv = $v + 0;                 die "Cannot pack NaN in pack\n" if $nv != $nv;                 die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;                 $$result_ref .= _pack_emit_int(int($nv), $nb, $sig, $be2);             }             next;         }          # Float types         if ($ch eq 'f') {             my $be2 = $be ? 1 : ($le ? 0 : 0);             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 $$result_ref .= _pack_float32($v, $be2);             }             next;         }         if ($ch eq 'd' || $ch eq 'F') {             my $be2 = $be ? 1 : ($le ? 0 : 0);             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 $$result_ref .= _pack_float64($v, $be2);             }             next;         }          # Single-arg string types         if ($ch eq 'a'||$ch eq 'A'||$ch eq 'Z'||$ch eq 'b'||$ch eq 'B'||             $ch eq 'H'||$ch eq 'h'||$ch eq 'u') {             my $arg = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // '') : '';             _pack_str_one($ch, $arg, $nrep, $star, $result_ref);             next;         }          # Per-rep types: U W w         if ($ch eq 'U') {             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $nv = $v + 0;                 die "Cannot pack NaN in pack\n" if $nv != $nv;                 die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;                 _pack_utf8_char(int($nv), $result_ref);             }             next;         }         if ($ch eq 'W') {             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $nv = $v + 0;                 die "Cannot pack NaN in pack\n" if $nv != $nv;                 die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;                 $$result_ref .= chr(int($nv));             }             next;         }         if ($ch eq 'w') {             for (my $r = 0; $r < $nrep; $r++) {                 my $raw = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $orig_s = "$raw";  # stringify BEFORE numeric coercion                 my $v = $raw + 0;                 die "Cannot compress NaN in pack\n" if $v != $v;                 die "Cannot compress -Inf in pack\n" if $v < 0 && $v == $v * 2;                 die "Cannot compress negative numbers in pack\n" if $v < 0;                 die "Cannot compress Inf in pack\n" if $v != 0 && $v == $v * 2;                 die "Can only compress unsigned integers in pack\n" if $v != int($v);                 # Perl also rejects float-notation strings (e.g. "1e21") when value > UV_MAX.                 # Pure-digit strings (even > UV_MAX) succeed; so does any non-string source.                 # In CL: pure-digit strings â exact bignum; e/E strings â double-float.                 # The $v != int($v) check cannot distinguish a large integer-valued float from                 # an exact bignum, so check the original string form for scientific notation.                 die "Can only compress unsigned integers in pack\n"                     if $orig_s =~ /[eE]/ && $v >= 2**64;                 $v = int($v);                 if ($v == 0) { $$result_ref .= chr(0); next }                 my @bytes;                 while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                 for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                 $$result_ref .= chr($bytes[-1]);             }             next;         }          die "Invalid type '/' in pack\n" if $ch eq '/';         die "Invalid type '$ch' in pack\n";     }
+                (let (($ch (make-p-box nil)) ($grpbeg (make-p-box nil)) ($grpend (make-p-box nil)) ($bang (make-p-box nil)) ($be (make-p-box nil)) ($le (make-p-box nil)) ($ti_before_count (make-p-box nil)) ($star (make-p-box nil)) ($count (make-p-box nil)) ($nrep (make-p-box nil)) ($had_count (make-p-box nil)) ($dfmt (make-p-box nil)) ($dbang (make-p-box nil)) ($dbe2 (make-p-box nil)) ($dle2 (make-p-box nil)) ($ti_before_dcount (make-p-box nil)) ($dstar2 (make-p-box nil)) ($dcnt2 (make-p-box nil)) ($dnrep2 (make-p-box nil)) ($had_dcount (make-p-box nil)) ($dnb (make-p-box nil)) ($dsig (make-p-box nil)) ($ddbe (make-p-box nil)) ($actual_count (make-p-box nil)) ($darg (make-p-box nil)) ($dlen (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($remaining (make-p-box nil)) ($dbe_eff (make-p-box nil)) ($val (make-p-box nil)) ($inner (make-p-box nil)) ($gti (make-p-box nil)) ($fc (make-p-box nil)) ($ai_before (make-p-box nil)) ($iter_base (make-p-box nil)) ($n (make-p-box nil)) ($cur (make-p-box nil)) ($pad (make-p-box nil)) ($fp (make-p-box nil)) ($t (make-p-box nil)) ($tgt (make-p-box nil)) ($abs_tgt (make-p-box nil)) ($be2 (make-p-box nil)) ($nv (make-p-box nil)) ($arg (make-p-box nil)) ($raw (make-p-box nil)) ($orig_s (make-p-box nil)))
+                  ;; while (1) {         $ti = _pack_skip_ws($tmpl, $ti);         last if $ti >= $tlen;         my $ch = substr($tmpl, $ti, 1); $ti++;         my ($grpbeg, $grpend) = (undef, undef);         if ($ch eq '(') {             $grpend = _pack_find_group_end($tmpl, $ti);             $grpbeg = $ti; $ti = $grpend + 1; $ch = '(';         }         my ($bang, $be, $le) = _pack_parse_mods($tmpl, \$ti, $inh_be, $inh_le, $ch, 'pack');         # No ws skip here: space between type+mods and count is invalid in Perl.         my $ti_before_count = $ti;         my ($star, $count, $nrep) = _pack_parse_count($tmpl, \$ti);         my $had_count = ($star || $ti > $ti_before_count);         $ti = _pack_skip_ws($tmpl, $ti);          # Slash â count prefix: ch encodes data length/count, next char is data format.         # Parse the DATA format first to compute the actual count, then encode prefix.         if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/') {             $ti++;             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;             # '/' must not have a count applied directly to it             { my $c = substr($tmpl, $ti, 1);               die "'/' does not take a repeat count in pack\n"                 if $c eq '*' || $c eq '[' || $c =~ /\d/; }             # Parse data format type, mods, count             my $dfmt = substr($tmpl, $ti, 1); $ti++;             my ($dbang, $dbe2, $dle2) = _pack_parse_mods($tmpl, \$ti, $be, $le, $dfmt, 'pack');             $ti = _pack_skip_ws($tmpl, $ti);             my $ti_before_dcount = $ti;             my ($dstar2, $dcnt2, $dnrep2) = _pack_parse_count($tmpl, \$ti);             my $had_dcount = ($dstar2 || $ti > $ti_before_dcount);             my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang);             my $actual_count;             if ($dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z') {                 # String data: one arg, output length determined by data format count                 my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';                 $darg = '' unless defined $darg;                 my $dlen = length($darg);                 if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all chars (+ NUL for Z)                     $actual_count = ($dfmt eq 'Z') ? $dlen + 1 : $dlen;                 } else {                     $actual_count = $dnrep2;  # explicit count (may be 0)                 }                 # Encode the count in the prefix field                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack the data using actual_count as the length                 _pack_str_one($dfmt, $darg, $actual_count, 0, $result_ref);             } elsif ($dnb) {                 # Numeric data: count = number of elements to pack                 my $remaining = $nargs - $$ai_ref;                 if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all remaining args                     $actual_count = $remaining;                 } else {                     # Explicit count â pack min(count, remaining) args                     $actual_count = ($dnrep2 < $remaining) ? $dnrep2 : $remaining;                 }                 # Encode count in prefix                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack the elements                 my $dbe_eff = $dbe2 ? 1 : ($dle2 ? 0 : $ddbe);                 for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $val = $args_ref->[$$ai_ref++];                     $$result_ref .= _pack_emit_int($val, $dnb, $dsig, $dbe_eff);                 }             } elsif ($dfmt eq 'w') {                 # BER data: count = number of BER elements                 my $remaining = $nargs - $$ai_ref;                 $actual_count = (!$had_dcount || $dstar2) ? $remaining :                                 ($dnrep2 < $remaining ? $dnrep2 : $remaining);                 # Encode count in prefix                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack BER elements                 for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $v = $args_ref->[$$ai_ref++] + 0;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }             }             next;         }          # Group         if (defined $grpbeg) {             my $inner = substr($tmpl, $grpbeg, $grpend - $grpbeg);             # Check: group must not start with a count             my $gti = _pack_skip_ws($inner, 0);             if ($gti < length($inner)) {                 my $fc = substr($inner, $gti, 1);                 die "\(\)-group starts with a count in pack\n" if $fc =~ /^[\d\*\[]/;             }             if ($star) {                 while ($$ai_ref < $nargs) {                     my $ai_before = $$ai_ref;                     my $iter_base = length($$result_ref);                     _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1);                     last if $$ai_ref == $ai_before;  # no progress: avoid infinite loop                 }             } else {                 for (my $r = 0; $r < $nrep; $r++) {                     my $iter_base = length($$result_ref);                     _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1);                 }             }             next;         }          # Position ops (no arg)         if ($ch eq 'x') {             if ($bang) {                 # x!N: pad to N-byte alignment                 my $n = $nrep > 0 ? $nrep : 1;                 my $cur = length($$result_ref);                 my $pad = ($n - ($cur % $n)) % $n;                 $$result_ref .= chr(0) x $pad;             } else {                 $$result_ref .= chr(0) x $nrep;             }             next;         }         if ($ch eq 'X') {             if ($bang) {                 # X!N: truncate back to N-byte alignment                 my $n = $nrep > 0 ? $nrep : 1;                 my $cur = length($$result_ref);                 $$result_ref = substr($$result_ref, 0, int($cur/$n)*$n);             } else {                 my $fp = length($$result_ref) - $nrep;                 $$result_ref = substr($$result_ref, 0, $fp < 0 ? 0 : $fp);             }             next;         }         if ($ch eq '@') {             # @N: relative to group start (out_base). @!N: absolute byte position.             my $n = defined($count) ? $count : 0;             my $t = $bang ? $n : $out_base + $n;             if (length($$result_ref) < $t) { $$result_ref .= chr(0) x ($t - length($$result_ref)) }             elsif (length($$result_ref) > $t) { $$result_ref = substr($$result_ref, 0, $t) }             next;         }         if ($ch eq '.') {             # Position format: reads target from arg list.             # .* = absolute; . or .N = relative to current group's start (out_base).             my $tgt = ($$ai_ref < $nargs) ? int(($args_ref->[$$ai_ref++] // 0) + 0) : 0;             my $abs_tgt = $star ? $tgt : $out_base + $tgt;             my $cur = length($$result_ref);             if ($cur < $abs_tgt) { $$result_ref .= chr(0) x ($abs_tgt - $cur) }             elsif ($cur > $abs_tgt) { $$result_ref = substr($$result_ref, 0, $abs_tgt) }             next;         }         if ($ch eq 'p' || $ch eq 'P' || $ch eq 'D') {             die "Invalid type '$ch' in pack\n";         }          # For multi-arg formats, * means use all remaining args         $nrep = $nargs - $$ai_ref if $star;          # Integer types         my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);         if ($nb) {             my $be2 = $be ? 1 : ($le ? 0 : $dbe);             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $nv = $v + 0;                 die "Cannot pack NaN in pack\n" if $nv != $nv;                 die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;                 $$result_ref .= _pack_emit_int(int($nv), $nb, $sig, $be2);             }             next;         }          # Float types         if ($ch eq 'f') {             my $be2 = $be ? 1 : ($le ? 0 : 0);             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 $$result_ref .= _pack_float32($v, $be2);             }             next;         }         if ($ch eq 'd' || $ch eq 'F') {             my $be2 = $be ? 1 : ($le ? 0 : 0);             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 $$result_ref .= _pack_float64($v, $be2);             }             next;         }          # Single-arg string types         if ($ch eq 'a'||$ch eq 'A'||$ch eq 'Z'||$ch eq 'b'||$ch eq 'B'||             $ch eq 'H'||$ch eq 'h'||$ch eq 'u') {             my $arg = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // '') : '';             _pack_str_one($ch, $arg, $nrep, $star, $result_ref);             next;         }          # Per-rep types: U W w         if ($ch eq 'U') {             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $nv = $v + 0;                 die "Cannot pack NaN in pack\n" if $nv != $nv;                 die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;                 _pack_utf8_char(int($nv), $result_ref);             }             next;         }         if ($ch eq 'W') {             for (my $r = 0; $r < $nrep; $r++) {                 my $v = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $nv = $v + 0;                 die "Cannot pack NaN in pack\n" if $nv != $nv;                 die "Cannot pack " . ($nv < 0 ? "-Inf" : "Inf") . " in pack\n" if $nv != 0 && $nv == $nv * 2;                 $$result_ref .= chr(int($nv));             }             next;         }         if ($ch eq 'w') {             for (my $r = 0; $r < $nrep; $r++) {                 my $raw = ($$ai_ref < $nargs) ? ($args_ref->[$$ai_ref++] // 0) : 0;                 my $orig_s = "$raw";  # stringify BEFORE numeric coercion                 my $v = $raw + 0;                 die "Cannot compress NaN in pack\n" if $v != $v;                 die "Cannot compress -Inf in pack\n" if $v < 0 && $v == $v * 2;                 die "Cannot compress negative numbers in pack\n" if $v < 0;                 die "Cannot compress Inf in pack\n" if $v != 0 && $v == $v * 2;                 die "Can only compress unsigned integers in pack\n" if $v != int($v);                 # Perl also rejects float-notation strings (e.g. "1e21") when value > UV_MAX.                 # Pure-digit strings (even > UV_MAX) succeed; so does any non-string source.                 # In CL: pure-digit strings â exact bignum; e/E strings â double-float.                 # The $v != int($v) check cannot distinguish a large integer-valued float from                 # an exact bignum, so check the original string form for scientific notation.                 die "Can only compress unsigned integers in pack\n"                     if $orig_s =~ /[eE]/ && $v >= 2**64;                 $v = int($v);                 if ($v == 0) { $$result_ref .= chr(0); next }                 my @bytes;                 while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                 for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                 $$result_ref .= chr($bytes[-1]);             }             next;         }          die "Invalid type '/' in pack\n" if $ch eq '/';         die "Invalid type '$ch' in pack\n";     }
                   (p-while 1
-                    (let (($ch (make-p-box nil)) ($grpbeg (make-p-box nil)) ($grpend (make-p-box nil)) ($bang (make-p-box nil)) ($be (make-p-box nil)) ($le (make-p-box nil)) ($ti_before_count (make-p-box nil)) ($star (make-p-box nil)) ($count (make-p-box nil)) ($nrep (make-p-box nil)) ($had_count (make-p-box nil)) ($darg (make-p-box nil)) ($dlen (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)) ($dfmt (make-p-box nil)) ($dbang (make-p-box nil)) ($dbe2 (make-p-box nil)) ($dle2 (make-p-box nil)) ($dstar2 (make-p-box nil)) ($dcnt2 (make-p-box nil)) ($dnrep2 (make-p-box nil)) ($dnb (make-p-box nil)) ($dsig (make-p-box nil)) ($ddbe (make-p-box nil)) ($inner (make-p-box nil)) ($gti (make-p-box nil)) ($fc (make-p-box nil)) ($ai_before (make-p-box nil)) ($iter_base (make-p-box nil)) ($r (make-p-box nil)) ($n (make-p-box nil)) ($cur (make-p-box nil)) ($pad (make-p-box nil)) ($fp (make-p-box nil)) ($t (make-p-box nil)) ($tgt (make-p-box nil)) ($abs_tgt (make-p-box nil)) ($be2 (make-p-box nil)) ($nv (make-p-box nil)) ($arg (make-p-box nil)) ($raw (make-p-box nil)) ($orig_s (make-p-box nil)))
+                    (let (($ch (make-p-box nil)) ($grpbeg (make-p-box nil)) ($grpend (make-p-box nil)) ($bang (make-p-box nil)) ($be (make-p-box nil)) ($le (make-p-box nil)) ($ti_before_count (make-p-box nil)) ($star (make-p-box nil)) ($count (make-p-box nil)) ($nrep (make-p-box nil)) ($had_count (make-p-box nil)) ($dfmt (make-p-box nil)) ($dbang (make-p-box nil)) ($dbe2 (make-p-box nil)) ($dle2 (make-p-box nil)) ($ti_before_dcount (make-p-box nil)) ($dstar2 (make-p-box nil)) ($dcnt2 (make-p-box nil)) ($dnrep2 (make-p-box nil)) ($had_dcount (make-p-box nil)) ($dnb (make-p-box nil)) ($dsig (make-p-box nil)) ($ddbe (make-p-box nil)) ($actual_count (make-p-box nil)) ($darg (make-p-box nil)) ($dlen (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)) ($remaining (make-p-box nil)) ($dbe_eff (make-p-box nil)) ($i (make-p-box nil)) ($val (make-p-box nil)) ($inner (make-p-box nil)) ($gti (make-p-box nil)) ($fc (make-p-box nil)) ($ai_before (make-p-box nil)) ($iter_base (make-p-box nil)) ($r (make-p-box nil)) ($n (make-p-box nil)) ($cur (make-p-box nil)) ($pad (make-p-box nil)) ($fp (make-p-box nil)) ($t (make-p-box nil)) ($tgt (make-p-box nil)) ($abs_tgt (make-p-box nil)) ($be2 (make-p-box nil)) ($nv (make-p-box nil)) ($arg (make-p-box nil)) ($raw (make-p-box nil)) ($orig_s (make-p-box nil)))
                       ;; $ti = _pack_skip_ws($tmpl, $ti)
                                             (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
                       
@@ -1692,11 +1702,11 @@
                       ;; $ti = _pack_skip_ws($tmpl, $ti)
                       (let ((*wantarray* :void))                       (p-my-= $ti (let ((*wantarray* nil)) (pl-_pack_skip_ws $tmpl $ti))))
                       
-                      ;; if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/') {             $ti++;             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;             # '/' must not have a count applied directly to it (e.g. c/*a or c/1a are invalid;             # Z*/A* is valid because * is the count for Z, not for /).             { my $c = substr($tmpl, $ti, 1);               die "'/' does not take a repeat count in pack\n"                 if $c eq '*' || $c eq '[' || $c =~ /\d/; }             my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';             $darg = '' unless defined $darg;             my $dlen = length($darg);             my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);             if ($nb) {                 $$result_ref .= _pack_emit_int($dlen, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));             } elsif ($ch eq 'A' || $ch eq 'a') {                 _pack_str_one($ch, "$dlen", 1, 0, $result_ref);             } elsif ($ch eq 'Z') {                 # Z*/A*: write count as decimal string followed by null byte                 _pack_str_one('Z', "$dlen", length("$dlen") + 1, 0, $result_ref);             } elsif ($ch eq 'w') {                 # w/A*: write count as BER-encoded integer                 my $v = $dlen;                 if ($v == 0) { $$result_ref .= chr(0); }                 else {                     my @bytes;                     while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                     for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                     $$result_ref .= chr($bytes[-1]);                 }             }             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;             my $dfmt = substr($tmpl, $ti, 1); $ti++;             my ($dbang, $dbe2, $dle2) = _pack_parse_mods($tmpl, \$ti, $be, $le, $dfmt, 'pack');             $ti = _pack_skip_ws($tmpl, $ti);             my ($dstar2, $dcnt2, $dnrep2) = _pack_parse_count($tmpl, \$ti);             _pack_str_one($dfmt, $darg, $dlen, 0, $result_ref)                 if $dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z';             if ($dfmt ne 'a' && $dfmt ne 'A' && $dfmt ne 'Z') {                 my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang);                 if ($dnb) {                     $$result_ref .= _pack_emit_int($dlen, $dnb, $dsig, $dbe2 ? 1 : ($dle2 ? 0 : $ddbe));                 }             }             next;         }
+                      ;; if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/') {             $ti++;             $ti = _pack_skip_ws($tmpl, $ti); last if $ti >= $tlen;             # '/' must not have a count applied directly to it             { my $c = substr($tmpl, $ti, 1);               die "'/' does not take a repeat count in pack\n"                 if $c eq '*' || $c eq '[' || $c =~ /\d/; }             # Parse data format type, mods, count             my $dfmt = substr($tmpl, $ti, 1); $ti++;             my ($dbang, $dbe2, $dle2) = _pack_parse_mods($tmpl, \$ti, $be, $le, $dfmt, 'pack');             $ti = _pack_skip_ws($tmpl, $ti);             my $ti_before_dcount = $ti;             my ($dstar2, $dcnt2, $dnrep2) = _pack_parse_count($tmpl, \$ti);             my $had_dcount = ($dstar2 || $ti > $ti_before_dcount);             my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang);             my $actual_count;             if ($dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z') {                 # String data: one arg, output length determined by data format count                 my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';                 $darg = '' unless defined $darg;                 my $dlen = length($darg);                 if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all chars (+ NUL for Z)                     $actual_count = ($dfmt eq 'Z') ? $dlen + 1 : $dlen;                 } else {                     $actual_count = $dnrep2;  # explicit count (may be 0)                 }                 # Encode the count in the prefix field                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack the data using actual_count as the length                 _pack_str_one($dfmt, $darg, $actual_count, 0, $result_ref);             } elsif ($dnb) {                 # Numeric data: count = number of elements to pack                 my $remaining = $nargs - $$ai_ref;                 if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all remaining args                     $actual_count = $remaining;                 } else {                     # Explicit count â pack min(count, remaining) args                     $actual_count = ($dnrep2 < $remaining) ? $dnrep2 : $remaining;                 }                 # Encode count in prefix                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack the elements                 my $dbe_eff = $dbe2 ? 1 : ($dle2 ? 0 : $ddbe);                 for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $val = $args_ref->[$$ai_ref++];                     $$result_ref .= _pack_emit_int($val, $dnb, $dsig, $dbe_eff);                 }             } elsif ($dfmt eq 'w') {                 # BER data: count = number of BER elements                 my $remaining = $nargs - $$ai_ref;                 $actual_count = (!$had_dcount || $dstar2) ? $remaining :                                 ($dnrep2 < $remaining ? $dnrep2 : $remaining);                 # Encode count in prefix                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack BER elements                 for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $v = $args_ref->[$$ai_ref++] + 0;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }             }             next;         }
                       ;; if ($ti < $tlen && substr($tmpl, $ti, 1) eq '/')
                       (p-if                       (p-&& (p-< $ti $tlen) (p-str-eq (p-substr $tmpl $ti 1) "/"))
                         (progn
-                          (let (($darg (make-p-box nil)) ($dlen (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)) ($dfmt (make-p-box nil)) ($dbang (make-p-box nil)) ($dbe2 (make-p-box nil)) ($dle2 (make-p-box nil)) ($dstar2 (make-p-box nil)) ($dcnt2 (make-p-box nil)) ($dnrep2 (make-p-box nil)) ($dnb (make-p-box nil)) ($dsig (make-p-box nil)) ($ddbe (make-p-box nil)))
+                          (let (($dfmt (make-p-box nil)) ($dbang (make-p-box nil)) ($dbe2 (make-p-box nil)) ($dle2 (make-p-box nil)) ($ti_before_dcount (make-p-box nil)) ($dstar2 (make-p-box nil)) ($dcnt2 (make-p-box nil)) ($dnrep2 (make-p-box nil)) ($had_dcount (make-p-box nil)) ($dnb (make-p-box nil)) ($dsig (make-p-box nil)) ($ddbe (make-p-box nil)) ($actual_count (make-p-box nil)) ($darg (make-p-box nil)) ($dlen (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)) ($remaining (make-p-box nil)) ($dbe_eff (make-p-box nil)) ($i (make-p-box nil)) ($val (make-p-box nil)))
                             ;; $ti++
                             (let ((*wantarray* :void))                             (p-post++ $ti))
                             
@@ -1727,102 +1737,6 @@
                               )
                             )
                             
-                            ;; my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : ''
-                                                        (p-my-= $darg (p-if (p-< (p-cast-$ $ai_ref) $nargs) (p-aref-deref $args_ref (p-post++ (p-cast-$ $ai_ref))) ""))
-                            
-                            ;; $darg = '' unless defined $darg
-                            (let ((*wantarray* :void)) (p-unless                             (p-defined $darg)                             (p-my-= $darg "")))
-                            
-                            ;; my $dlen = length($darg)
-                                                        (p-my-= $dlen (p-length $darg))
-                            
-                            ;; my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang)
-                                                        (let ((*wantarray* nil)) (p-list-= (vector $nb $sig $dbe) (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
-                            
-                            ;; if ($nb) {                 $$result_ref .= _pack_emit_int($dlen, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));             } elsif ($ch eq 'A' || $ch eq 'a') {                 _pack_str_one($ch, "$dlen", 1, 0, $result_ref);             } elsif ($ch eq 'Z') {                 # Z*/A*: write count as decimal string followed by null byte                 _pack_str_one('Z', "$dlen", length("$dlen") + 1, 0, $result_ref);             } elsif ($ch eq 'w') {                 # w/A*: write count as BER-encoded integer                 my $v = $dlen;                 if ($v == 0) { $$result_ref .= chr(0); }                 else {                     my @bytes;                     while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                     for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                     $$result_ref .= chr($bytes[-1]);                 }             }
-                            ;; if ($nb)
-                            (p-if                             $nb
-                              (progn
-                                ;; $$result_ref .= _pack_emit_int($dlen, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe))
-                                                                (p-.= (p-cast-$ $result_ref) (pl-_pack_emit_int $dlen $nb $sig (p-if $be 1 (p-if $le 0 $dbe))))
-                                
-                              )
-                              ;; elsif ($ch eq 'A' || $ch eq 'a')
-                              (p-if                               (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a"))
-                                (progn
-                                  ;; _pack_str_one($ch, "$dlen", 1, 0, $result_ref)
-                                                                    (pl-_pack_str_one $ch $dlen 1 0 $result_ref)
-                                  
-                                )
-                                ;; elsif ($ch eq 'Z')
-                                (p-if                                 (p-str-eq $ch "Z")
-                                  (progn
-                                    ;; _pack_str_one('Z', "$dlen", length("$dlen") + 1, 0, $result_ref)
-                                                                        (pl-_pack_str_one "Z" $dlen (p-+ (p-length $dlen) 1) 0 $result_ref)
-                                    
-                                  )
-                                  ;; elsif ($ch eq 'w')
-                                  (p-if                                   (p-str-eq $ch "w")
-                                    (progn
-                                      (let (($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
-                                        ;; my $v = $dlen
-                                                                                (p-my-= $v $dlen)
-                                        
-                                        ;; if ($v == 0) { $$result_ref .= chr(0); }                 else {                     my @bytes;                     while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                     for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                     $$result_ref .= chr($bytes[-1]);                 }
-                                        ;; if ($v == 0)
-                                        (p-if                                         (p-== $v 0)
-                                          (progn
-                                            ;; $$result_ref .= chr(0)
-                                                                                        (p-.= (p-cast-$ $result_ref) (p-chr 0))
-                                            
-                                          )
-                                          ;; else
-                                          (progn
-                                            (let ((@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
-                                              ;; my @bytes (bare declaration)
-                                              
-                                              ;; while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
-                                              (p-while (p-> $v 0)
-                                                ;; unshift @bytes, ($v & 0x7F)
-                                                (let ((*wantarray* :void))                                                 (p-unshift @bytes (p-bit-and $v #x7F)))
-                                                
-                                                ;; $v >>= 7
-                                                                                                (p->>= $v 7)
-                                                
-                                              )
-                                              
-                                              ;; for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
-                                              (let (($k (make-p-box nil)))
-                                                (p-for (                                              (p-my-= $k 0))
-                                                        (                                              (p-< $k (p-array-last-index @bytes)))
-                                                        (                                              (p-post++ $k))
-                                                  ;; $$result_ref .= chr($bytes[$k] | 0x80)
-                                                                                                    (p-.= (p-cast-$ $result_ref) (p-chr (p-bit-or (p-aref @bytes $k) #x80)))
-                                                  
-                                                )
-                                              )
-                                              
-                                              ;; $$result_ref .= chr($bytes[-1])
-                                                                                            (p-.= (p-cast-$ $result_ref) (p-chr (p-aref @bytes -1)))
-                                              
-                                            )
-                                          )
-                                        )
-                                        
-                                      )
-                                    )
-                                    nil
-                                  )
-                                )
-                              )
-                            )
-                            
-                            ;; $ti = _pack_skip_ws($tmpl, $ti)
-                            (let ((*wantarray* :void))                             (p-my-= $ti (let ((*wantarray* nil)) (pl-_pack_skip_ws $tmpl $ti))))
-                            
-                            ;; last if $ti >= $tlen
-                            (let ((*wantarray* :void)) (p-if                             (p->= $ti $tlen)                             (p-last)))
-                            
                             ;; my $dfmt = substr($tmpl, $ti, 1)
                                                         (p-my-= $dfmt (p-substr $tmpl $ti 1))
                             
@@ -1835,36 +1749,395 @@
                             ;; $ti = _pack_skip_ws($tmpl, $ti)
                             (let ((*wantarray* :void))                             (p-my-= $ti (let ((*wantarray* nil)) (pl-_pack_skip_ws $tmpl $ti))))
                             
+                            ;; my $ti_before_dcount = $ti
+                                                        (p-my-= $ti_before_dcount $ti)
+                            
                             ;; my ($dstar2, $dcnt2, $dnrep2) = _pack_parse_count($tmpl, \$ti)
                                                         (let ((*wantarray* nil)) (p-list-= (vector $dstar2 $dcnt2 $dnrep2) (let ((*wantarray* t)) (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
                             
-                            ;; _pack_str_one($dfmt, $darg, $dlen, 0, $result_ref)                 if $dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z'
-                            (let ((*wantarray* :void)) (p-if                             (p-|| (p-|| (p-str-eq $dfmt "a") (p-str-eq $dfmt "A")) (p-str-eq $dfmt "Z"))                             (let ((*wantarray* :void)) (pl-_pack_str_one $dfmt $darg $dlen 0 $result_ref))))
+                            ;; my $had_dcount = ($dstar2 || $ti > $ti_before_dcount)
+                                                        (p-my-= $had_dcount (p-|| $dstar2 (p-> $ti $ti_before_dcount)))
                             
-                            ;; if ($dfmt ne 'a' && $dfmt ne 'A' && $dfmt ne 'Z') {                 my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang);                 if ($dnb) {                     $$result_ref .= _pack_emit_int($dlen, $dnb, $dsig, $dbe2 ? 1 : ($dle2 ? 0 : $ddbe));                 }             }
-                            ;; if ($dfmt ne 'a' && $dfmt ne 'A' && $dfmt ne 'Z')
-                            (p-if                             (p-&& (p-&& (p-str-ne $dfmt "a") (p-str-ne $dfmt "A")) (p-str-ne $dfmt "Z"))
+                            ;; my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang)
+                                                        (let ((*wantarray* nil)) (p-list-= (vector $dnb $dsig $ddbe) (let ((*wantarray* t)) (pl-_pack_type_info $dfmt $dbang))))
+                            
+                            ;; my $actual_count (bare declaration)
+                            
+                            ;; if ($dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z') {                 # String data: one arg, output length determined by data format count                 my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : '';                 $darg = '' unless defined $darg;                 my $dlen = length($darg);                 if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all chars (+ NUL for Z)                     $actual_count = ($dfmt eq 'Z') ? $dlen + 1 : $dlen;                 } else {                     $actual_count = $dnrep2;  # explicit count (may be 0)                 }                 # Encode the count in the prefix field                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack the data using actual_count as the length                 _pack_str_one($dfmt, $darg, $actual_count, 0, $result_ref);             } elsif ($dnb) {                 # Numeric data: count = number of elements to pack                 my $remaining = $nargs - $$ai_ref;                 if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all remaining args                     $actual_count = $remaining;                 } else {                     # Explicit count â pack min(count, remaining) args                     $actual_count = ($dnrep2 < $remaining) ? $dnrep2 : $remaining;                 }                 # Encode count in prefix                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack the elements                 my $dbe_eff = $dbe2 ? 1 : ($dle2 ? 0 : $ddbe);                 for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $val = $args_ref->[$$ai_ref++];                     $$result_ref .= _pack_emit_int($val, $dnb, $dsig, $dbe_eff);                 }             } elsif ($dfmt eq 'w') {                 # BER data: count = number of BER elements                 my $remaining = $nargs - $$ai_ref;                 $actual_count = (!$had_dcount || $dstar2) ? $remaining :                                 ($dnrep2 < $remaining ? $dnrep2 : $remaining);                 # Encode count in prefix                 my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang);                 if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }                 # Pack BER elements                 for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $v = $args_ref->[$$ai_ref++] + 0;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }             }
+                            ;; if ($dfmt eq 'a' || $dfmt eq 'A' || $dfmt eq 'Z')
+                            (p-if                             (p-|| (p-|| (p-str-eq $dfmt "a") (p-str-eq $dfmt "A")) (p-str-eq $dfmt "Z"))
                               (progn
-                                (let (($dnb (make-p-box nil)) ($dsig (make-p-box nil)) ($ddbe (make-p-box nil)))
-                                  (let ((--pcl-if-ret--10 nil))
-                                    ;; my ($dnb, $dsig, $ddbe) = _pack_type_info($dfmt, $dbang)
-                                                                        (let ((*wantarray* nil)) (p-list-= (vector $dnb $dsig $ddbe) (let ((*wantarray* t)) (pl-_pack_type_info $dfmt $dbang))))
-                                    
-                                    ;; if ($dnb) {                     $$result_ref .= _pack_emit_int($dlen, $dnb, $dsig, $dbe2 ? 1 : ($dle2 ? 0 : $ddbe));                 }
-                                    ;; if ($dnb)
-                                    (p-if (setf --pcl-if-ret--10                                     $dnb)
+                                (let (($darg (make-p-box nil)) ($dlen (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                  ;; my $darg = ($$ai_ref < $nargs) ? $args_ref->[$$ai_ref++] : ''
+                                                                    (p-my-= $darg (p-if (p-< (p-cast-$ $ai_ref) $nargs) (p-aref-deref $args_ref (p-post++ (p-cast-$ $ai_ref))) ""))
+                                  
+                                  ;; $darg = '' unless defined $darg
+                                  (let ((*wantarray* :void)) (p-unless                                   (p-defined $darg)                                   (p-my-= $darg "")))
+                                  
+                                  ;; my $dlen = length($darg)
+                                                                    (p-my-= $dlen (p-length $darg))
+                                  
+                                  ;; if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all chars (+ NUL for Z)                     $actual_count = ($dfmt eq 'Z') ? $dlen + 1 : $dlen;                 } else {                     $actual_count = $dnrep2;  # explicit count (may be 0)                 }
+                                  ;; if (!$had_dcount || $dstar2)
+                                  (p-if                                   (p-|| (p-! $had_dcount) $dstar2)
+                                    (progn
+                                      ;; $actual_count = ($dfmt eq 'Z') ? $dlen + 1 : $dlen
+                                                                            (p-my-= $actual_count (p-if (p-str-eq $dfmt "Z") (p-+ $dlen 1) $dlen))
+                                      
+                                    )
+                                    ;; else
+                                    (progn
+                                      ;; $actual_count = $dnrep2
+                                                                            (p-my-= $actual_count $dnrep2)
+                                      
+                                    )
+                                  )
+                                  
+                                  ;; my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang)
+                                                                    (let ((*wantarray* nil)) (p-list-= (vector $nb $sig $dbe) (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
+                                  
+                                  ;; if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }
+                                  ;; if ($nb)
+                                  (p-if                                   $nb
+                                    (progn
+                                      ;; $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe))
+                                                                            (p-.= (p-cast-$ $result_ref) (pl-_pack_emit_int $actual_count $nb $sig (p-if $be 1 (p-if $le 0 $dbe))))
+                                      
+                                    )
+                                    ;; elsif ($ch eq 'A' || $ch eq 'a')
+                                    (p-if                                     (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a"))
                                       (progn
-                                        ;; $$result_ref .= _pack_emit_int($dlen, $dnb, $dsig, $dbe2 ? 1 : ($dle2 ? 0 : $ddbe))
-                                        (setf --pcl-if-ret--10                                         (p-.= (p-cast-$ $result_ref) (let ((*wantarray* nil)) (pl-_pack_emit_int $dlen $dnb $dsig (p-if $dbe2 1 (p-if $dle2 0 $ddbe))))))
+                                        ;; _pack_str_one($ch, "$actual_count", 1, 0, $result_ref)
+                                                                                (pl-_pack_str_one $ch $actual_count 1 0 $result_ref)
                                         
                                       )
-                                      nil
+                                      ;; elsif ($ch eq 'Z')
+                                      (p-if                                       (p-str-eq $ch "Z")
+                                        (progn
+                                          ;; _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref)
+                                                                                    (pl-_pack_str_one "Z" $actual_count (p-+ (p-length $actual_count) 1) 0 $result_ref)
+                                          
+                                        )
+                                        ;; elsif ($ch eq 'w')
+                                        (p-if                                         (p-str-eq $ch "w")
+                                          (progn
+                                            (let (($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                              ;; my $v = $actual_count
+                                                                                            (p-my-= $v $actual_count)
+                                              
+                                              ;; if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }
+                                              ;; if ($v == 0)
+                                              (p-if                                               (p-== $v 0)
+                                                (progn
+                                                  ;; $$result_ref .= chr(0)
+                                                                                                    (p-.= (p-cast-$ $result_ref) (p-chr 0))
+                                                  
+                                                )
+                                                ;; else
+                                                (progn
+                                                  (let ((@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                                    ;; my @bytes (bare declaration)
+                                                    
+                                                    ;; while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                                                    (p-while (p-> $v 0)
+                                                      ;; unshift @bytes, ($v & 0x7F)
+                                                      (let ((*wantarray* :void))                                                       (p-unshift @bytes (p-bit-and $v #x7F)))
+                                                      
+                                                      ;; $v >>= 7
+                                                                                                            (p->>= $v 7)
+                                                      
+                                                    )
+                                                    
+                                                    ;; for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                                                    (let (($k (make-p-box nil)))
+                                                      (p-for (                                                    (p-my-= $k 0))
+                                                              (                                                    (p-< $k (p-array-last-index @bytes)))
+                                                              (                                                    (p-post++ $k))
+                                                        ;; $$result_ref .= chr($bytes[$k] | 0x80)
+                                                                                                                (p-.= (p-cast-$ $result_ref) (p-chr (p-bit-or (p-aref @bytes $k) #x80)))
+                                                        
+                                                      )
+                                                    )
+                                                    
+                                                    ;; $$result_ref .= chr($bytes[-1])
+                                                                                                        (p-.= (p-cast-$ $result_ref) (p-chr (p-aref @bytes -1)))
+                                                    
+                                                  )
+                                                )
+                                              )
+                                              
+                                            )
+                                          )
+                                          nil
+                                        )
+                                      )
                                     )
-                                    
-                                  --pcl-if-ret--10)
+                                  )
+                                  
+                                  ;; _pack_str_one($dfmt, $darg, $actual_count, 0, $result_ref)
+                                                                    (pl-_pack_str_one $dfmt $darg $actual_count 0 $result_ref)
+                                  
                                 )
                               )
-                              nil
+                              ;; elsif ($dnb)
+                              (p-if                               $dnb
+                                (progn
+                                  (let (($remaining (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)) ($dbe_eff (make-p-box nil)) ($i (make-p-box nil)) ($val (make-p-box nil)))
+                                    ;; my $remaining = $nargs - $$ai_ref
+                                                                        (p-my-= $remaining (p-- $nargs (p-cast-$ $ai_ref)))
+                                    
+                                    ;; if (!$had_dcount || $dstar2) {                     # No explicit count or * â pack all remaining args                     $actual_count = $remaining;                 } else {                     # Explicit count â pack min(count, remaining) args                     $actual_count = ($dnrep2 < $remaining) ? $dnrep2 : $remaining;                 }
+                                    ;; if (!$had_dcount || $dstar2)
+                                    (p-if                                     (p-|| (p-! $had_dcount) $dstar2)
+                                      (progn
+                                        ;; $actual_count = $remaining
+                                                                                (p-my-= $actual_count $remaining)
+                                        
+                                      )
+                                      ;; else
+                                      (progn
+                                        ;; $actual_count = ($dnrep2 < $remaining) ? $dnrep2 : $remaining
+                                                                                (p-my-= $actual_count (p-if (p-< $dnrep2 $remaining) $dnrep2 $remaining))
+                                        
+                                      )
+                                    )
+                                    
+                                    ;; my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang)
+                                                                        (let ((*wantarray* nil)) (p-list-= (vector $nb $sig $dbe) (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
+                                    
+                                    ;; if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'A' || $ch eq 'a') {                     _pack_str_one($ch, "$actual_count", 1, 0, $result_ref);                 } elsif ($ch eq 'Z') {                     _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref);                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }
+                                    ;; if ($nb)
+                                    (p-if                                     $nb
+                                      (progn
+                                        ;; $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe))
+                                                                                (p-.= (p-cast-$ $result_ref) (pl-_pack_emit_int $actual_count $nb $sig (p-if $be 1 (p-if $le 0 $dbe))))
+                                        
+                                      )
+                                      ;; elsif ($ch eq 'A' || $ch eq 'a')
+                                      (p-if                                       (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a"))
+                                        (progn
+                                          ;; _pack_str_one($ch, "$actual_count", 1, 0, $result_ref)
+                                                                                    (pl-_pack_str_one $ch $actual_count 1 0 $result_ref)
+                                          
+                                        )
+                                        ;; elsif ($ch eq 'Z')
+                                        (p-if                                         (p-str-eq $ch "Z")
+                                          (progn
+                                            ;; _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref)
+                                                                                        (pl-_pack_str_one "Z" $actual_count (p-+ (p-length $actual_count) 1) 0 $result_ref)
+                                            
+                                          )
+                                          ;; elsif ($ch eq 'w')
+                                          (p-if                                           (p-str-eq $ch "w")
+                                            (progn
+                                              (let (($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                                ;; my $v = $actual_count
+                                                                                                (p-my-= $v $actual_count)
+                                                
+                                                ;; if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }
+                                                ;; if ($v == 0)
+                                                (p-if                                                 (p-== $v 0)
+                                                  (progn
+                                                    ;; $$result_ref .= chr(0)
+                                                                                                        (p-.= (p-cast-$ $result_ref) (p-chr 0))
+                                                    
+                                                  )
+                                                  ;; else
+                                                  (progn
+                                                    (let ((@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                                      ;; my @bytes (bare declaration)
+                                                      
+                                                      ;; while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                                                      (p-while (p-> $v 0)
+                                                        ;; unshift @bytes, ($v & 0x7F)
+                                                        (let ((*wantarray* :void))                                                         (p-unshift @bytes (p-bit-and $v #x7F)))
+                                                        
+                                                        ;; $v >>= 7
+                                                                                                                (p->>= $v 7)
+                                                        
+                                                      )
+                                                      
+                                                      ;; for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                                                      (let (($k (make-p-box nil)))
+                                                        (p-for (                                                      (p-my-= $k 0))
+                                                                (                                                      (p-< $k (p-array-last-index @bytes)))
+                                                                (                                                      (p-post++ $k))
+                                                          ;; $$result_ref .= chr($bytes[$k] | 0x80)
+                                                                                                                    (p-.= (p-cast-$ $result_ref) (p-chr (p-bit-or (p-aref @bytes $k) #x80)))
+                                                          
+                                                        )
+                                                      )
+                                                      
+                                                      ;; $$result_ref .= chr($bytes[-1])
+                                                                                                            (p-.= (p-cast-$ $result_ref) (p-chr (p-aref @bytes -1)))
+                                                      
+                                                    )
+                                                  )
+                                                )
+                                                
+                                              )
+                                            )
+                                            nil
+                                          )
+                                        )
+                                      )
+                                    )
+                                    
+                                    ;; my $dbe_eff = $dbe2 ? 1 : ($dle2 ? 0 : $ddbe)
+                                                                        (p-my-= $dbe_eff (p-if $dbe2 1 (p-if $dle2 0 $ddbe)))
+                                    
+                                    ;; for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $val = $args_ref->[$$ai_ref++];                     $$result_ref .= _pack_emit_int($val, $dnb, $dsig, $dbe_eff);                 }
+                                    (let (($i (make-p-box nil)))
+                                      (p-for (                                    (p-my-= $i 0))
+                                              (                                    (p-&& (p-< $i $actual_count) (p-< (p-cast-$ $ai_ref) $nargs)))
+                                              (                                    (p-post++ $i))
+                                        (let (($val (make-p-box nil)))
+                                          ;; my $val = $args_ref->[$$ai_ref++]
+                                                                                    (p-my-= $val (p-aref-deref $args_ref (p-post++ (p-cast-$ $ai_ref))))
+                                          
+                                          ;; $$result_ref .= _pack_emit_int($val, $dnb, $dsig, $dbe_eff)
+                                                                                    (p-.= (p-cast-$ $result_ref) (pl-_pack_emit_int $val $dnb $dsig $dbe_eff))
+                                          
+                                        )
+                                      )
+                                    )
+                                    
+                                  )
+                                )
+                                ;; elsif ($dfmt eq 'w')
+                                (p-if                                 (p-str-eq $dfmt "w")
+                                  (progn
+                                    (let (($remaining (make-p-box nil)) ($nb (make-p-box nil)) ($sig (make-p-box nil)) ($dbe (make-p-box nil)) ($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)) ($i (make-p-box nil)))
+                                      ;; my $remaining = $nargs - $$ai_ref
+                                                                            (p-my-= $remaining (p-- $nargs (p-cast-$ $ai_ref)))
+                                      
+                                      ;; $actual_count = (!$had_dcount || $dstar2) ? $remaining :                                 ($dnrep2 < $remaining ? $dnrep2 : $remaining)
+                                      (let ((*wantarray* :void))                                       (p-my-= $actual_count (p-if (p-|| (p-! $had_dcount) $dstar2) $remaining (p-if (p-< $dnrep2 $remaining) $dnrep2 $remaining))))
+                                      
+                                      ;; my ($nb, $sig, $dbe) = _pack_type_info($ch, $bang)
+                                                                            (let ((*wantarray* nil)) (p-list-= (vector $nb $sig $dbe) (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
+                                      
+                                      ;; if ($nb) {                     $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe));                 } elsif ($ch eq 'w') {                     my $v = $actual_count;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }
+                                      ;; if ($nb)
+                                      (p-if                                       $nb
+                                        (progn
+                                          ;; $$result_ref .= _pack_emit_int($actual_count, $nb, $sig, $be ? 1 : ($le ? 0 : $dbe))
+                                                                                    (p-.= (p-cast-$ $result_ref) (pl-_pack_emit_int $actual_count $nb $sig (p-if $be 1 (p-if $le 0 $dbe))))
+                                          
+                                        )
+                                        ;; elsif ($ch eq 'w')
+                                        (p-if                                         (p-str-eq $ch "w")
+                                          (progn
+                                            (let (($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                              ;; my $v = $actual_count
+                                                                                            (p-my-= $v $actual_count)
+                                              
+                                              ;; if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }
+                                              ;; if ($v == 0)
+                                              (p-if                                               (p-== $v 0)
+                                                (progn
+                                                  ;; $$result_ref .= chr(0)
+                                                                                                    (p-.= (p-cast-$ $result_ref) (p-chr 0))
+                                                  
+                                                )
+                                                ;; else
+                                                (progn
+                                                  (let ((@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                                    ;; my @bytes (bare declaration)
+                                                    
+                                                    ;; while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                                                    (p-while (p-> $v 0)
+                                                      ;; unshift @bytes, ($v & 0x7F)
+                                                      (let ((*wantarray* :void))                                                       (p-unshift @bytes (p-bit-and $v #x7F)))
+                                                      
+                                                      ;; $v >>= 7
+                                                                                                            (p->>= $v 7)
+                                                      
+                                                    )
+                                                    
+                                                    ;; for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                                                    (let (($k (make-p-box nil)))
+                                                      (p-for (                                                    (p-my-= $k 0))
+                                                              (                                                    (p-< $k (p-array-last-index @bytes)))
+                                                              (                                                    (p-post++ $k))
+                                                        ;; $$result_ref .= chr($bytes[$k] | 0x80)
+                                                                                                                (p-.= (p-cast-$ $result_ref) (p-chr (p-bit-or (p-aref @bytes $k) #x80)))
+                                                        
+                                                      )
+                                                    )
+                                                    
+                                                    ;; $$result_ref .= chr($bytes[-1])
+                                                                                                        (p-.= (p-cast-$ $result_ref) (p-chr (p-aref @bytes -1)))
+                                                    
+                                                  )
+                                                )
+                                              )
+                                              
+                                            )
+                                          )
+                                          nil
+                                        )
+                                      )
+                                      
+                                      ;; for (my $i = 0; $i < $actual_count && $$ai_ref < $nargs; $i++) {                     my $v = $args_ref->[$$ai_ref++] + 0;                     if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }                 }
+                                      (let (($i (make-p-box nil)))
+                                        (p-for (                                      (p-my-= $i 0))
+                                                (                                      (p-&& (p-< $i $actual_count) (p-< (p-cast-$ $ai_ref) $nargs)))
+                                                (                                      (p-post++ $i))
+                                          (let (($v (make-p-box nil)) (@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                            ;; my $v = $args_ref->[$$ai_ref++] + 0
+                                                                                        (p-my-= $v (p-+ (p-aref-deref $args_ref (p-post++ (p-cast-$ $ai_ref))) 0))
+                                            
+                                            ;; if ($v == 0) { $$result_ref .= chr(0); }                     else {                         my @bytes;                         while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }                         for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }                         $$result_ref .= chr($bytes[-1]);                     }
+                                            ;; if ($v == 0)
+                                            (p-if                                             (p-== $v 0)
+                                              (progn
+                                                ;; $$result_ref .= chr(0)
+                                                                                                (p-.= (p-cast-$ $result_ref) (p-chr 0))
+                                                
+                                              )
+                                              ;; else
+                                              (progn
+                                                (let ((@bytes (make-array 0 :adjustable t :fill-pointer 0)) ($k (make-p-box nil)))
+                                                  ;; my @bytes (bare declaration)
+                                                  
+                                                  ;; while ($v > 0) { unshift @bytes, ($v & 0x7F); $v >>= 7 }
+                                                  (p-while (p-> $v 0)
+                                                    ;; unshift @bytes, ($v & 0x7F)
+                                                    (let ((*wantarray* :void))                                                     (p-unshift @bytes (p-bit-and $v #x7F)))
+                                                    
+                                                    ;; $v >>= 7
+                                                                                                        (p->>= $v 7)
+                                                    
+                                                  )
+                                                  
+                                                  ;; for (my $k = 0; $k < $#bytes; $k++) { $$result_ref .= chr($bytes[$k] | 0x80) }
+                                                  (let (($k (make-p-box nil)))
+                                                    (p-for (                                                  (p-my-= $k 0))
+                                                            (                                                  (p-< $k (p-array-last-index @bytes)))
+                                                            (                                                  (p-post++ $k))
+                                                      ;; $$result_ref .= chr($bytes[$k] | 0x80)
+                                                                                                            (p-.= (p-cast-$ $result_ref) (p-chr (p-bit-or (p-aref @bytes $k) #x80)))
+                                                      
+                                                    )
+                                                  )
+                                                  
+                                                  ;; $$result_ref .= chr($bytes[-1])
+                                                                                                    (p-.= (p-cast-$ $result_ref) (p-chr (p-aref @bytes -1)))
+                                                  
+                                                )
+                                              )
+                                            )
+                                            
+                                          )
+                                        )
+                                      )
+                                      
+                                    )
+                                  )
+                                  nil
+                                )
+                              )
                             )
                             
                             ;; next
@@ -1891,17 +2164,17 @@
                             (p-if                             (p-< $gti (p-length $inner))
                               (progn
                                 (let (($fc (make-p-box nil)))
-                                  (let ((--pcl-if-ret--11 nil))
+                                  (let ((--pcl-if-ret--10 nil))
                                     ;; my $fc = substr($inner, $gti, 1)
                                                                         (p-my-= $fc (p-substr $inner $gti 1))
                                     
                                     ;; die "\(\)-group starts with a count in pack\n" if $fc =~ /^[\d\*\[]/
-                                    (p-if (setf --pcl-if-ret--11                                     (p-=~ $fc (p-regex "/^[\\d\\*\\[]/")))
-                                      (setf --pcl-if-ret--11                                     (p-die "()-group starts with a count in pack
+                                    (p-if (setf --pcl-if-ret--10                                     (p-=~ $fc (p-regex "/^[\\d\\*\\[]/")))
+                                      (setf --pcl-if-ret--10                                     (p-die "()-group starts with a count in pack
 "))
                                       nil)
                                     
-                                  --pcl-if-ret--11)
+                                  --pcl-if-ret--10)
                                 )
                               )
                               nil
@@ -2493,30 +2766,30 @@
                           (                (p-< $i $tlen))
                           (                (p-post++ $i))
                     (let (($c (make-p-box nil)))
-                      (let ((--pcl-if-ret--12 nil))
+                      (let ((--pcl-if-ret--11 nil))
                         ;; my $c = substr($tmpl, $i, 1)
                                                 (p-my-= $c (p-substr $tmpl $i 1))
                         
                         ;; if    ($c eq '[') { $n_open++ }         elsif ($c eq ']') { $n_close++ }
                         ;; if ($c eq '[')
-                        (p-if (setf --pcl-if-ret--12                         (p-str-eq $c "["))
+                        (p-if (setf --pcl-if-ret--11                         (p-str-eq $c "["))
                           (progn
                             ;; $n_open++
-                            (setf --pcl-if-ret--12                             (p-post++ $n_open))
+                            (setf --pcl-if-ret--11                             (p-post++ $n_open))
                             
                           )
                           ;; elsif ($c eq ']')
-                          (p-if (setf --pcl-if-ret--12                           (p-str-eq $c "]"))
+                          (p-if (setf --pcl-if-ret--11                           (p-str-eq $c "]"))
                             (progn
                               ;; $n_close++
-                              (setf --pcl-if-ret--12                               (p-post++ $n_close))
+                              (setf --pcl-if-ret--11                               (p-post++ $n_close))
                               
                             )
                             nil
                           )
                         )
                         
-                      --pcl-if-ret--12)
+                      --pcl-if-ret--11)
                     )
                   )
                 )
@@ -2539,42 +2812,42 @@
                               (                    (p-< $i $tlen))
                               (                    (p-post++ $i))
                         (let (($c (make-p-box nil)))
-                          (let ((--pcl-if-ret--13 nil))
+                          (let ((--pcl-if-ret--12 nil))
                             ;; my $c = substr($tmpl, $i, 1)
                                                         (p-my-= $c (p-substr $tmpl $i 1))
                             
                             ;; if    ($c eq '[') { push @stk, '[' }         elsif ($c eq '(') { push @stk, '(' }         elsif ($c eq ']') {             die "Mismatched brackets in template\n"                 if !@stk || $stk[-1] ne '[';             pop @stk;         }         elsif ($c eq ')') {             pop @stk if @stk && $stk[-1] eq '(';         }
                             ;; if ($c eq '[')
-                            (p-if (setf --pcl-if-ret--13                             (p-str-eq $c "["))
+                            (p-if (setf --pcl-if-ret--12                             (p-str-eq $c "["))
                               (progn
                                 ;; push @stk, '['
-                                (setf --pcl-if-ret--13                                 (p-push @stk "["))
+                                (setf --pcl-if-ret--12                                 (p-push @stk "["))
                                 
                               )
                               ;; elsif ($c eq '(')
-                              (p-if (setf --pcl-if-ret--13                               (p-str-eq $c "("))
+                              (p-if (setf --pcl-if-ret--12                               (p-str-eq $c "("))
                                 (progn
                                   ;; push @stk, '('
-                                  (setf --pcl-if-ret--13                                   (p-push @stk "("))
+                                  (setf --pcl-if-ret--12                                   (p-push @stk "("))
                                   
                                 )
                                 ;; elsif ($c eq ']')
-                                (p-if (setf --pcl-if-ret--13                                 (p-str-eq $c "]"))
+                                (p-if (setf --pcl-if-ret--12                                 (p-str-eq $c "]"))
                                   (progn
                                     ;; die "Mismatched brackets in template\n"                 if !@stk || $stk[-1] ne '['
                                     (p-if                                     (p-|| (p-! @stk) (p-str-ne (p-aref @stk -1) "["))                                     (p-die "Mismatched brackets in template
 "))
                                     
                                     ;; pop @stk
-                                    (setf --pcl-if-ret--13                                     (p-pop @stk))
+                                    (setf --pcl-if-ret--12                                     (p-pop @stk))
                                     
                                   )
                                   ;; elsif ($c eq ')')
-                                  (p-if (setf --pcl-if-ret--13                                   (p-str-eq $c ")"))
+                                  (p-if (setf --pcl-if-ret--12                                   (p-str-eq $c ")"))
                                     (progn
                                       ;; pop @stk if @stk && $stk[-1] eq '('
-                                      (p-if (setf --pcl-if-ret--13                                       (p-&& @stk (p-str-eq (p-aref @stk -1) "(")))
-                                        (setf --pcl-if-ret--13                                       (p-pop @stk))
+                                      (p-if (setf --pcl-if-ret--12                                       (p-&& @stk (p-str-eq (p-aref @stk -1) "(")))
+                                        (setf --pcl-if-ret--12                                       (p-pop @stk))
                                         nil)
                                       
                                     )
@@ -2584,7 +2857,7 @@
                               )
                             )
                             
-                          --pcl-if-ret--13)
+                          --pcl-if-ret--12)
                         )
                       )
                     )
@@ -2708,13 +2981,13 @@
                   (p-for (                (p-my-= $k 1))
                           (                (p-< $k $nb))
                           (                (p-post++ $k))
-                    (let ((--pcl-if-ret--14 nil))
+                    (let ((--pcl-if-ret--13 nil))
                       ;; $code = ($code<<6)|(ord(substr($s, $$si_ref+$k, 1))&0x3F) if $$si_ref+$k<$slen
-                      (p-if (setf --pcl-if-ret--14                       (p-< (p-+ (p-cast-$ $si_ref) $k) $slen))
-                        (setf --pcl-if-ret--14                       (p-my-= $code (p-bit-or (p-<< $code 6) (p-bit-and (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $k) 1)) #x3F))))
+                      (p-if (setf --pcl-if-ret--13                       (p-< (p-+ (p-cast-$ $si_ref) $k) $slen))
+                        (setf --pcl-if-ret--13                       (p-my-= $code (p-bit-or (p-<< $code 6) (p-bit-and (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $k) 1)) #x3F))))
                         nil)
                       
-                    --pcl-if-ret--14)
+                    --pcl-if-ret--13)
                   )
                 )
                 
@@ -2738,7 +3011,7 @@
   (let ((@_ (p-flatten-args %_args)))
     (block nil
       (let (($i (make-p-box nil)) ($k (make-p-box nil)))
-        (let ((--pcl-if-ret--15 nil))
+        (let ((--pcl-if-ret--14 nil))
           (let (($ch (make-p-box nil)) ($nrep (make-p-box nil)) ($all (make-p-box nil)) ($s__lex__1 (make-p-box nil)) ($si_ref__lex__2 (make-p-box nil)) ($push_val (make-p-box nil)) ($checksum_p (make-p-box nil)))
             ;; my ($ch, $nrep, $all, $s, $si_ref, $push_val, $checksum_p) = @_
                         (let ((*wantarray* nil)) (p-list-= (vector $ch $nrep $all $s__lex__1 $si_ref__lex__2 $push_val $checksum_p) @_))
@@ -2750,7 +3023,7 @@
               (let (($n (make-p-box nil)) ($raw (make-p-box nil)) ($hex (make-p-box nil)) ($b (make-p-box nil)) ($nbits (make-p-box nil)) ($bits (make-p-box nil)) ($decoded (make-p-box nil)) ($lc (make-p-box nil)) ($nb (make-p-box nil)) ($ng (make-p-box nil)) ($get (make-p-box nil)) ($cm (make-p-box nil)) ($done (make-p-box nil)) ($v (make-p-box nil)) ($more (make-p-box nil)))
                 ;; if ($ch eq 'A' || $ch eq 'a' || $ch eq 'Z') {         my $n = $all ? ($slen - $$si_ref) : $nrep;         $n = 0 if $n < 0;         my $raw = $$si_ref < $slen ? substr($s, $$si_ref, $n) : '';         $$si_ref += $n;         $raw =~ s/[ \x00]+$// if $ch eq 'A';         $raw =~ s/\x00.*//s   if $ch eq 'Z';         $push_val->($raw);     } elsif ($ch eq 'H') {         my $n = $all ? (2 * ($slen - $$si_ref)) : $nrep;  # n = number of nybbles         my $hex = '';         for (my $i = 0; $i < int($n/2); $i++) {             my $b = $$si_ref+$i < $slen ? ord(substr($s,$$si_ref+$i,1)) : 0;             $hex .= sprintf('%02x', $b);         }         $hex = substr($hex, 0, $n);         $$si_ref += int(($n+1)/2);         $push_val->($hex);     } elsif ($ch eq 'h') {         my $n = $all ? (2 * ($slen - $$si_ref)) : $nrep;  # n = number of nybbles         my $hex = '';         for (my $i = 0; $i < int($n/2); $i++) {             my $b = $$si_ref+$i < $slen ? ord(substr($s,$$si_ref+$i,1)) : 0;             $hex .= sprintf('%x%x', $b&0xF, ($b>>4)&0xF);         }         $hex = substr($hex, 0, $n);         $$si_ref += int(($n+1)/2);         $push_val->($hex);     } elsif ($ch eq 'B') {         my $nbits = $all ? (8*($slen-$$si_ref)) : $nrep;         if ($checksum_p) {             for (my $i=0; $i<$nbits; $i++) {                 my $b = $$si_ref+int($i/8)<$slen ? ord(substr($s,$$si_ref+int($i/8),1)) : 0;                 $push_val->( ($b>>(7-($i%8))) & 1 );             }         } else {             my $bits = '';             for (my $i=0; $i<$nbits; $i++) {                 my $b = $$si_ref+int($i/8)<$slen ? ord(substr($s,$$si_ref+int($i/8),1)) : 0;                 $bits .= (($b>>(7-($i%8)))&1) ? '1' : '0';             }             $push_val->($bits);         }         $$si_ref += int(($nbits+7)/8);     } elsif ($ch eq 'b') {         my $nbits = $all ? (8*($slen-$$si_ref)) : $nrep;         if ($checksum_p) {             for (my $i=0; $i<$nbits; $i++) {                 my $b = $$si_ref+int($i/8)<$slen ? ord(substr($s,$$si_ref+int($i/8),1)) : 0;                 $push_val->( ($b>>($i%8)) & 1 );             }         } else {             my $bits = '';             for (my $i=0; $i<$nbits; $i++) {                 my $b = $$si_ref+int($i/8)<$slen ? ord(substr($s,$$si_ref+int($i/8),1)) : 0;                 $bits .= (($b>>($i%8))&1) ? '1' : '0';             }             $push_val->($bits);         }         $$si_ref += int(($nbits+7)/8);     } elsif ($ch eq 'u') {         my $decoded = '';         while ($$si_ref < $slen) {             my $lc = ord(substr($s, $$si_ref, 1));             my $nb = ($lc - 32) & 63; $$si_ref++;             last if $nb == 0;             my $ng = int(($nb+2)/3);             for (my $k=0; $k<$ng; $k++) {                 my $get = sub { my $i=$$si_ref+$_[0]; $i<$slen?(ord(substr($s,$i,1))-32)&63:0 };                 my $cm = ($get->(4*$k)<<18)|($get->(4*$k+1)<<12)|($get->(4*$k+2)<<6)|$get->(4*$k+3);                 $decoded .= chr(($cm>>16)&0xFF) if $k*3   < $nb;                 $decoded .= chr(($cm>> 8)&0xFF) if $k*3+1 < $nb;                 $decoded .= chr( $cm     &0xFF) if $k*3+2 < $nb;             }             $$si_ref += $ng*4;             $$si_ref++ if $$si_ref < $slen && substr($s,$$si_ref,1) eq "\n";         }         $push_val->($decoded);     } elsif ($ch eq 'U') {         my $n = $all ? 9**9 : $nrep;         my $done = 0;         while ($done < $n && $$si_ref < $slen) {             $push_val->(_unpack_utf8_char($s, $si_ref)); $done++;         }     } elsif ($ch eq 'W') {         my $n = $all ? ($slen-$$si_ref) : $nrep;         for (my $i=0; $i<$n && $$si_ref<$slen; $i++) {             $push_val->(ord(substr($s, $$si_ref++, 1)));         }     } elsif ($ch eq 'w') {         my $done = 0;         while (($all || $done < $nrep) && $$si_ref < $slen) {             my ($v, $more) = (0, 1);             while ($more) {                 die "Unterminated compressed integer in unpack\n" if $$si_ref >= $slen;                 my $b = ord(substr($s, $$si_ref++, 1));                 $more = $b & 0x80; $v = ($v<<7)|($b&0x7F);             }             $push_val->($v); $done++;         }     }
                 ;; if ($ch eq 'A' || $ch eq 'a' || $ch eq 'Z')
-                (p-if (setf --pcl-if-ret--15                 (p-|| (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a")) (p-str-eq $ch "Z")))
+                (p-if (setf --pcl-if-ret--14                 (p-|| (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a")) (p-str-eq $ch "Z")))
                   (progn
                     (let (($n (make-p-box nil)) ($raw (make-p-box nil)))
                       ;; my $n = $all ? ($slen - $$si_ref) : $nrep
@@ -2772,12 +3045,12 @@
                       (let ((*wantarray* :void)) (p-if                       (p-str-eq $ch "Z")                       (p-=~ $raw (p-subst "\\x00.*" "" :s))))
                       
                       ;; $push_val->($raw)
-                      (setf --pcl-if-ret--15                       (let ((*wantarray* nil)) (p-funcall-ref $push_val $raw)))
+                      (setf --pcl-if-ret--14                       (let ((*wantarray* nil)) (p-funcall-ref $push_val $raw)))
                       
                     )
                   )
                   ;; elsif ($ch eq 'H')
-                  (p-if (setf --pcl-if-ret--15                   (p-str-eq $ch "H"))
+                  (p-if (setf --pcl-if-ret--14                   (p-str-eq $ch "H"))
                     (progn
                       (let (($n (make-p-box nil)) ($hex (make-p-box nil)) ($i (make-p-box nil)) ($b (make-p-box nil)))
                         ;; my $n = $all ? (2 * ($slen - $$si_ref)) : $nrep
@@ -2809,12 +3082,12 @@
                         (let ((*wantarray* :void))                         (p-incf (p-cast-$ $si_ref__lex__2) (p-int (p-/ (p-+ $n 1) 2))))
                         
                         ;; $push_val->($hex)
-                        (setf --pcl-if-ret--15                         (let ((*wantarray* nil)) (p-funcall-ref $push_val $hex)))
+                        (setf --pcl-if-ret--14                         (let ((*wantarray* nil)) (p-funcall-ref $push_val $hex)))
                         
                       )
                     )
                     ;; elsif ($ch eq 'h')
-                    (p-if (setf --pcl-if-ret--15                     (p-str-eq $ch "h"))
+                    (p-if (setf --pcl-if-ret--14                     (p-str-eq $ch "h"))
                       (progn
                         (let (($n (make-p-box nil)) ($hex (make-p-box nil)) ($i (make-p-box nil)) ($b (make-p-box nil)))
                           ;; my $n = $all ? (2 * ($slen - $$si_ref)) : $nrep
@@ -2846,12 +3119,12 @@
                           (let ((*wantarray* :void))                           (p-incf (p-cast-$ $si_ref__lex__2) (p-int (p-/ (p-+ $n 1) 2))))
                           
                           ;; $push_val->($hex)
-                          (setf --pcl-if-ret--15                           (let ((*wantarray* nil)) (p-funcall-ref $push_val $hex)))
+                          (setf --pcl-if-ret--14                           (let ((*wantarray* nil)) (p-funcall-ref $push_val $hex)))
                           
                         )
                       )
                       ;; elsif ($ch eq 'B')
-                      (p-if (setf --pcl-if-ret--15                       (p-str-eq $ch "B"))
+                      (p-if (setf --pcl-if-ret--14                       (p-str-eq $ch "B"))
                         (progn
                           (let (($nbits (make-p-box nil)) ($i (make-p-box nil)) ($b (make-p-box nil)) ($bits (make-p-box nil)))
                             ;; my $nbits = $all ? (8*($slen-$$si_ref)) : $nrep
@@ -2910,12 +3183,12 @@
                             )
                             
                             ;; $$si_ref += int(($nbits+7)/8)
-                            (setf --pcl-if-ret--15                             (p-incf (p-cast-$ $si_ref__lex__2) (p-int (p-/ (p-+ $nbits 7) 8))))
+                            (setf --pcl-if-ret--14                             (p-incf (p-cast-$ $si_ref__lex__2) (p-int (p-/ (p-+ $nbits 7) 8))))
                             
                           )
                         )
                         ;; elsif ($ch eq 'b')
-                        (p-if (setf --pcl-if-ret--15                         (p-str-eq $ch "b"))
+                        (p-if (setf --pcl-if-ret--14                         (p-str-eq $ch "b"))
                           (progn
                             (let (($nbits (make-p-box nil)) ($i (make-p-box nil)) ($b (make-p-box nil)) ($bits (make-p-box nil)))
                               ;; my $nbits = $all ? (8*($slen-$$si_ref)) : $nrep
@@ -2974,12 +3247,12 @@
                               )
                               
                               ;; $$si_ref += int(($nbits+7)/8)
-                              (setf --pcl-if-ret--15                               (p-incf (p-cast-$ $si_ref__lex__2) (p-int (p-/ (p-+ $nbits 7) 8))))
+                              (setf --pcl-if-ret--14                               (p-incf (p-cast-$ $si_ref__lex__2) (p-int (p-/ (p-+ $nbits 7) 8))))
                               
                             )
                           )
                           ;; elsif ($ch eq 'u')
-                          (p-if (setf --pcl-if-ret--15                           (p-str-eq $ch "u"))
+                          (p-if (setf --pcl-if-ret--14                           (p-str-eq $ch "u"))
                             (progn
                               (let (($decoded (make-p-box nil)) ($lc (make-p-box nil)) ($nb (make-p-box nil)) ($ng (make-p-box nil)) ($k (make-p-box nil)) ($get (make-p-box nil)) ($cm (make-p-box nil)))
                                 ;; my $decoded = ''
@@ -2988,7 +3261,7 @@
                                 ;; while ($$si_ref < $slen) {             my $lc = ord(substr($s, $$si_ref, 1));             my $nb = ($lc - 32) & 63; $$si_ref++;             last if $nb == 0;             my $ng = int(($nb+2)/3);             for (my $k=0; $k<$ng; $k++) {                 my $get = sub { my $i=$$si_ref+$_[0]; $i<$slen?(ord(substr($s,$i,1))-32)&63:0 };                 my $cm = ($get->(4*$k)<<18)|($get->(4*$k+1)<<12)|($get->(4*$k+2)<<6)|$get->(4*$k+3);                 $decoded .= chr(($cm>>16)&0xFF) if $k*3   < $nb;                 $decoded .= chr(($cm>> 8)&0xFF) if $k*3+1 < $nb;                 $decoded .= chr( $cm     &0xFF) if $k*3+2 < $nb;             }             $$si_ref += $ng*4;             $$si_ref++ if $$si_ref < $slen && substr($s,$$si_ref,1) eq "\n";         }
                                 (p-while (p-< (p-cast-$ $si_ref__lex__2) $slen__lex__3)
                                   (let (($lc (make-p-box nil)) ($nb (make-p-box nil)) ($ng (make-p-box nil)) ($k (make-p-box nil)) ($get (make-p-box nil)) ($cm (make-p-box nil)))
-                                    (let ((--pcl-if-ret--16 nil))
+                                    (let ((--pcl-if-ret--15 nil))
                                       ;; my $lc = ord(substr($s, $$si_ref, 1))
                                                                             (p-my-= $lc (p-ord (p-substr $s__lex__1 (p-cast-$ $si_ref__lex__2) 1)))
                                       
@@ -3010,7 +3283,7 @@
                                                 (                                      (p-< $k $ng))
                                                 (                                      (p-post++ $k))
                                           (let (($get (make-p-box nil)) ($cm (make-p-box nil)))
-                                            (let ((--pcl-if-ret--17 nil))
+                                            (let ((--pcl-if-ret--16 nil))
                                               ;; my $get = sub { my $i=$$si_ref+$_[0]; $i<$slen?(ord(substr($s,$i,1))-32)&63:0 }
                                                                                             (p-my-= $get (lambda (&rest %_args)
   (let ((@_ (p-flatten-args %_args))
@@ -3038,11 +3311,11 @@
                                               (let ((*wantarray* :void)) (p-if                                               (p-< (p-+ (p-* $k 3) 1) $nb)                                               (p-.= $decoded (p-chr (p-bit-and (p->> $cm 8) #xFF)))))
                                               
                                               ;; $decoded .= chr( $cm     &0xFF) if $k*3+2 < $nb
-                                              (p-if (setf --pcl-if-ret--17                                               (p-< (p-+ (p-* $k 3) 2) $nb))
-                                                (setf --pcl-if-ret--17                                               (p-.= $decoded (p-chr (p-bit-and $cm #xFF))))
+                                              (p-if (setf --pcl-if-ret--16                                               (p-< (p-+ (p-* $k 3) 2) $nb))
+                                                (setf --pcl-if-ret--16                                               (p-.= $decoded (p-chr (p-bit-and $cm #xFF))))
                                                 nil)
                                               
-                                            --pcl-if-ret--17)
+                                            --pcl-if-ret--16)
                                           )
                                         )
                                       )
@@ -3051,22 +3324,22 @@
                                       (let ((*wantarray* :void))                                       (p-incf (p-cast-$ $si_ref__lex__2) (p-* $ng 4)))
                                       
                                       ;; $$si_ref++ if $$si_ref < $slen && substr($s,$$si_ref,1) eq "\n"
-                                      (p-if (setf --pcl-if-ret--16                                       (p-&& (p-< (p-cast-$ $si_ref__lex__2) $slen__lex__3) (p-str-eq (p-substr $s__lex__1 (p-cast-$ $si_ref__lex__2) 1) "
+                                      (p-if (setf --pcl-if-ret--15                                       (p-&& (p-< (p-cast-$ $si_ref__lex__2) $slen__lex__3) (p-str-eq (p-substr $s__lex__1 (p-cast-$ $si_ref__lex__2) 1) "
 ")))
-                                        (setf --pcl-if-ret--16                                       (p-post++ (p-cast-$ $si_ref__lex__2)))
+                                        (setf --pcl-if-ret--15                                       (p-post++ (p-cast-$ $si_ref__lex__2)))
                                         nil)
                                       
-                                    --pcl-if-ret--16)
+                                    --pcl-if-ret--15)
                                   )
                                 )
                                 
                                 ;; $push_val->($decoded)
-                                (setf --pcl-if-ret--15                                 (let ((*wantarray* nil)) (p-funcall-ref $push_val $decoded)))
+                                (setf --pcl-if-ret--14                                 (let ((*wantarray* nil)) (p-funcall-ref $push_val $decoded)))
                                 
                               )
                             )
                             ;; elsif ($ch eq 'U')
-                            (p-if (setf --pcl-if-ret--15                             (p-str-eq $ch "U"))
+                            (p-if (setf --pcl-if-ret--14                             (p-str-eq $ch "U"))
                               (progn
                                 (let (($n (make-p-box nil)) ($done (make-p-box nil)))
                                   ;; my $n = $all ? 9**9 : $nrep
@@ -3088,7 +3361,7 @@
                                 )
                               )
                               ;; elsif ($ch eq 'W')
-                              (p-if (setf --pcl-if-ret--15                               (p-str-eq $ch "W"))
+                              (p-if (setf --pcl-if-ret--14                               (p-str-eq $ch "W"))
                                 (progn
                                   (let (($n (make-p-box nil)) ($i (make-p-box nil)))
                                     ;; my $n = $all ? ($slen-$$si_ref) : $nrep
@@ -3108,7 +3381,7 @@
                                   )
                                 )
                                 ;; elsif ($ch eq 'w')
-                                (p-if (setf --pcl-if-ret--15                                 (p-str-eq $ch "w"))
+                                (p-if (setf --pcl-if-ret--14                                 (p-str-eq $ch "w"))
                                   (progn
                                     (let (($done (make-p-box nil)) ($v (make-p-box nil)) ($more (make-p-box nil)) ($b (make-p-box nil)))
                                       ;; my $done = 0
@@ -3164,7 +3437,7 @@
               )
             )
           )
-        --pcl-if-ret--15)
+        --pcl-if-ret--14)
       )
     )
   )
@@ -3275,17 +3548,17 @@
                               (let (($c (make-p-box nil)))
                                 (block nil
                                   (tagbody :redo
-                                    (let ((--pcl-if-ret--18 nil))
+                                    (let ((--pcl-if-ret--17 nil))
                                       ;; my $c = substr($tmpl, $ti, 1)
                                                                             (p-my-= $c (p-substr $tmpl $ti 1))
                                       
                                       ;; die "'/' does not take a repeat count in unpack\n"                 if $c eq '*' || $c eq '[' || $c =~ /\d/
-                                      (p-if (setf --pcl-if-ret--18                                       (p-|| (p-|| (p-str-eq $c "*") (p-str-eq $c "[")) (p-=~ $c (p-regex "/\\d/"))))
-                                        (setf --pcl-if-ret--18                                       (p-die "'/' does not take a repeat count in unpack
+                                      (p-if (setf --pcl-if-ret--17                                       (p-|| (p-|| (p-str-eq $c "*") (p-str-eq $c "[")) (p-=~ $c (p-regex "/\\d/"))))
+                                        (setf --pcl-if-ret--17                                       (p-die "'/' does not take a repeat count in unpack
 "))
                                         nil)
                                       
-                                    --pcl-if-ret--18)
+                                    --pcl-if-ret--17)
                                     :next)
                                 )
                               )
@@ -3642,17 +3915,17 @@
                             (p-if                             (p-< $gti (p-length $inner))
                               (progn
                                 (let (($fc (make-p-box nil)))
-                                  (let ((--pcl-if-ret--19 nil))
+                                  (let ((--pcl-if-ret--18 nil))
                                     ;; my $fc = substr($inner, $gti, 1)
                                                                         (p-my-= $fc (p-substr $inner $gti 1))
                                     
                                     ;; die "\(\)-group starts with a count in unpack\n" if $fc =~ /^[\d\*\[]/
-                                    (p-if (setf --pcl-if-ret--19                                     (p-=~ $fc (p-regex "/^[\\d\\*\\[]/")))
-                                      (setf --pcl-if-ret--19                                     (p-die "()-group starts with a count in unpack
+                                    (p-if (setf --pcl-if-ret--18                                     (p-=~ $fc (p-regex "/^[\\d\\*\\[]/")))
+                                      (setf --pcl-if-ret--18                                     (p-die "()-group starts with a count in unpack
 "))
                                       nil)
                                     
-                                  --pcl-if-ret--19)
+                                  --pcl-if-ret--18)
                                 )
                               )
                               nil
@@ -3776,16 +4049,16 @@
                               )
                               ;; else
                               (progn
-                                (let ((--pcl-if-ret--20 nil))
+                                (let ((--pcl-if-ret--19 nil))
                                   ;; $$si_ref -= $nrep
                                   (let ((*wantarray* :void))                                   (p-decf (p-cast-$ $si_ref) $nrep))
                                   
                                   ;; $$si_ref = 0 if $$si_ref < 0
-                                  (p-if (setf --pcl-if-ret--20                                   (p-< (p-cast-$ $si_ref) 0))
-                                    (setf --pcl-if-ret--20                                   (p-setf (p-cast-$ $si_ref) 0))
+                                  (p-if (setf --pcl-if-ret--19                                   (p-< (p-cast-$ $si_ref) 0))
+                                    (setf --pcl-if-ret--19                                   (p-setf (p-cast-$ $si_ref) 0))
                                     nil)
                                   
-                                --pcl-if-ret--20)
+                                --pcl-if-ret--19)
                               )
                             )
                             
@@ -4029,6 +4302,74 @@
   )
 )
 
+;; sub _next_format_item { ... }
+(p-sub pl-_next_format_item (&rest %_args)
+  (let ((@_ (p-flatten-args %_args)))
+    (block nil
+      (let (($tmpl (make-p-box nil)))
+        ;; my ($tmpl) = @_
+                (let ((*wantarray* nil)) (p-list-= (vector $tmpl) @_))
+        
+        (let (($tlen (make-p-box nil)))
+          ;; my $tlen = length($tmpl)
+                    (p-my-= $tlen (p-length $tmpl))
+          
+          (let (($ti (make-p-box nil)))
+            ;; my $ti = 0
+                        (p-my-= $ti 0)
+            
+            ;; $ti = _pack_skip_ws($tmpl, $ti)
+            (let ((*wantarray* :void))             (p-my-= $ti (let ((*wantarray* nil)) (pl-_pack_skip_ws $tmpl $ti))))
+            
+            ;; return ('', '') if $ti >= $tlen
+            (let ((*wantarray* :void)) (p-if             (p->= $ti $tlen)             (p-return "" "")))
+            
+            (let (($ch (make-p-box nil)))
+              ;; my $ch = substr($tmpl, $ti, 1)
+                            (p-my-= $ch (p-substr $tmpl $ti 1))
+              
+              ;; $ti++
+              (let ((*wantarray* :void))               (p-post++ $ti))
+              
+              (let (($grpend (make-p-box nil)))
+                ;; if ($ch eq '(') {         my $grpend = _pack_find_group_end($tmpl, $ti);         $ti = $grpend + 1;     }
+                ;; if ($ch eq '(')
+                (p-if                 (p-str-eq $ch "(")
+                  (progn
+                    (let (($grpend (make-p-box nil)))
+                      ;; my $grpend = _pack_find_group_end($tmpl, $ti)
+                                            (p-my-= $grpend (let ((*wantarray* nil)) (pl-_pack_find_group_end $tmpl $ti)))
+                      
+                      ;; $ti = $grpend + 1
+                                            (p-my-= $ti (p-+ $grpend 1))
+                      
+                    )
+                  )
+                  nil
+                )
+                
+                ;; while ($ti < $tlen && substr($tmpl, $ti, 1) =~ /[!<>]/) { $ti++ }
+                (p-while (p-&& (p-< $ti $tlen) (p-=~ (p-substr $tmpl $ti 1) (p-regex "/[!<>]/")))
+                  ;; $ti++
+                                    (p-post++ $ti)
+                  
+                )
+                
+                ;; _pack_parse_count($tmpl, \$ti)
+                (let ((*wantarray* :void))                 (let ((*wantarray* :void)) (pl-_pack_parse_count $tmpl (p-backslash $ti))))
+                
+                ;; return (substr($tmpl, 0, $ti), substr($tmpl, $ti))
+                                (p-return (p-substr $tmpl 0 $ti) (p-substr $tmpl $ti))
+                
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
 ;; sub p_unpack { ... }
 (p-sub pl-p_unpack (&rest %_args)
   (let ((@_ (p-flatten-args %_args)))
@@ -4130,24 +4471,63 @@
                 (let ((@result__lex__4 (make-array 0 :adjustable t :fill-pointer 0)))
                   ;; my @result (bare declaration)
                   
-                  (let (($checksum__lex__5 (make-p-box nil)))
-                    ;; my $checksum = 0
-                    (p-my-= $checksum__lex__5                     0)
+                  (let (($si (make-p-box nil)))
+                    ;; my $si = 0
+                                        (p-my-= $si 0)
                     
-                    (let (($push_val (make-p-box nil)))
-                      ;; my $push_val = $checksum_width         ? sub { $checksum += $_[0] }         : sub { push @result, $_[0] }
-                                            (p-my-= $push_val (p-if $checksum_width (lambda (&rest %_args)
+                    (let (($cs_tmpl (make-p-box nil)) ($rest_tmpl (make-p-box nil)) ($checksum__lex__5 (make-p-box nil)) ($mod (make-p-box nil)) ($q (make-p-box nil)))
+                      ;; if ($checksum_width) {         # %N applies to the NEXT format item only, then normal unpacking continues.         my ($cs_tmpl, $rest_tmpl) = _next_format_item($tmpl);         my $checksum = 0;         if (length($cs_tmpl)) {             _unpack_tmpl($cs_tmpl, $s, \$si, sub { $checksum += $_[0] }, 0, 0, 1);         }         # Use floor-division modulo: works for negative integers and float checksums.         my $mod = 2 ** $checksum_width;         my $q = int($checksum / $mod);         $q-- if $q * $mod > $checksum;         push @result, $checksum - $q * $mod;         if (length($rest_tmpl)) {             _unpack_tmpl($rest_tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0);         }     } else {         _unpack_tmpl($tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0);     }
+                      ;; if ($checksum_width)
+                      (p-if                       $checksum_width
+                        (progn
+                          (let (($cs_tmpl (make-p-box nil)) ($rest_tmpl (make-p-box nil)) ($checksum__lex__6 (make-p-box nil)) ($mod (make-p-box nil)) ($q (make-p-box nil)))
+                            (let ((--pcl-if-ret--20 nil))
+                              ;; my ($cs_tmpl, $rest_tmpl) = _next_format_item($tmpl)
+                                                            (let ((*wantarray* nil)) (p-list-= (vector $cs_tmpl $rest_tmpl) (let ((*wantarray* t)) (pl-_next_format_item $tmpl))))
+                              
+                              ;; my $checksum = 0
+                              (p-my-= $checksum__lex__6                               0)
+                              
+                              ;; if (length($cs_tmpl)) {             _unpack_tmpl($cs_tmpl, $s, \$si, sub { $checksum += $_[0] }, 0, 0, 1);         }
+                              ;; if (length($cs_tmpl))
+                              (p-if                               (p-length $cs_tmpl)
+                                (progn
+                                  ;; _unpack_tmpl($cs_tmpl, $s, \$si, sub { $checksum += $_[0] }, 0, 0, 1)
+                                  (let ((*wantarray* :void))                                   (let ((*wantarray* :void)) (pl-_unpack_tmpl $cs_tmpl $s (p-backslash $si) (lambda (&rest %_args)
   (let ((@_ (p-flatten-args %_args))
         (*pcl-caller-wantarray* *wantarray*))
     (catch :p-return
       (block nil
         ;; $checksum += $_[0]
-                (p-incf $checksum__lex__5 (p-aref @_ 0))
+                (p-incf $checksum__lex__6 (p-aref @_ 0))
         
       )
     )
   )
-) (lambda (&rest %_args)
+) 0 0 1)))
+                                  
+                                )
+                                nil
+                              )
+                              
+                              ;; my $mod = 2 ** $checksum_width
+                                                            (p-my-= $mod (p-** 2 $checksum_width))
+                              
+                              ;; my $q = int($checksum / $mod)
+                                                            (p-my-= $q (p-int (p-/ $checksum__lex__6 $mod)))
+                              
+                              ;; $q-- if $q * $mod > $checksum
+                              (let ((*wantarray* :void)) (p-if                               (p-> (p-* $q $mod) $checksum__lex__6)                               (p-post-- $q)))
+                              
+                              ;; push @result, $checksum - $q * $mod
+                              (let ((*wantarray* :void))                               (p-push @result__lex__4 (p-- $checksum__lex__6 (p-* $q $mod))))
+                              
+                              ;; if (length($rest_tmpl)) {             _unpack_tmpl($rest_tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0);         }
+                              ;; if (length($rest_tmpl))
+                              (p-if (setf --pcl-if-ret--20                               (p-length $rest_tmpl))
+                                (progn
+                                  ;; _unpack_tmpl($rest_tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0)
+                                  (setf --pcl-if-ret--20                                   (let ((*wantarray* nil)) (pl-_unpack_tmpl $rest_tmpl $s (p-backslash $si) (lambda (&rest %_args)
   (let ((@_ (p-flatten-args %_args))
         (*pcl-caller-wantarray* *wantarray*))
     (catch :p-return
@@ -4158,43 +4538,37 @@
       )
     )
   )
-)))
-                      
-                      (let (($si (make-p-box nil)))
-                        ;; my $si = 0
-                                                (p-my-= $si 0)
-                        
-                        ;; _unpack_tmpl($tmpl, $s, \$si, $push_val, 0, 0, $checksum_width ? 1 : 0)
-                        (let ((*wantarray* :void))                         (let ((*wantarray* :void)) (pl-_unpack_tmpl $tmpl $s (p-backslash $si) $push_val 0 0 (p-if $checksum_width 1 0))))
-                        
-                        (let (($mod (make-p-box nil)) ($q (make-p-box nil)))
-                          ;; if ($checksum_width) {         # Use floor-division modulo: works for both negative integers and float checksums.         # Perl's % truncates to int first (wrong for floats); CL's p-% does (mod trunc trunc).         # Formula: r = checksum - floor(checksum/mod)*mod, avoiding POSIX::floor.         my $mod = 2 ** $checksum_width;         my $q = int($checksum / $mod);         $q-- if $q * $mod > $checksum;         return $checksum - $q * $mod;     }
-                          ;; if ($checksum_width)
-                          (p-if                           $checksum_width
-                            (progn
-                              (let (($mod (make-p-box nil)) ($q (make-p-box nil)))
-                                ;; my $mod = 2 ** $checksum_width
-                                                                (p-my-= $mod (p-** 2 $checksum_width))
-                                
-                                ;; my $q = int($checksum / $mod)
-                                                                (p-my-= $q (p-int (p-/ $checksum__lex__5 $mod)))
-                                
-                                ;; $q-- if $q * $mod > $checksum
-                                (let ((*wantarray* :void)) (p-if                                 (p-> (p-* $q $mod) $checksum__lex__5)                                 (p-post-- $q)))
-                                
-                                ;; return $checksum - $q * $mod
-                                                                (p-return (p-- $checksum__lex__5 (p-* $q $mod)))
-                                
+) 0 0 0)))
+                                  
+                                )
+                                nil
                               )
-                            )
-                            nil
+                              
+                            --pcl-if-ret--20)
                           )
-                          
-                          ;; return wantarray ? @result : $result[0]
-                                                    (p-return (p-if (p-wantarray) @result__lex__4 (p-aref @result__lex__4 0)))
+                        )
+                        ;; else
+                        (progn
+                          ;; _unpack_tmpl($tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0)
+                          (let ((*wantarray* :void))                           (let ((*wantarray* :void)) (pl-_unpack_tmpl $tmpl $s (p-backslash $si) (lambda (&rest %_args)
+  (let ((@_ (p-flatten-args %_args))
+        (*pcl-caller-wantarray* *wantarray*))
+    (catch :p-return
+      (block nil
+        ;; push @result, $_[0]
+                (p-push @result__lex__4 (p-aref @_ 0))
+        
+      )
+    )
+  )
+) 0 0 0)))
                           
                         )
                       )
+                      
+                      ;; return wantarray ? @result : $result[0]
+                                            (p-return (p-if (p-wantarray) @result__lex__4 (p-aref @result__lex__4 0)))
+                      
                     )
                   )
                 )
@@ -4285,6 +4659,10 @@
 ;; # $group_base: the si value at the start of the current group iteration (for @ relative offsets).
 
 ;; # $depth: nesting depth for ()-groups.
+
+;; # Returns (first_item_tmpl, rest_tmpl): the first complete format item and everything after it.
+
+;; # Used by p_unpack to apply %N to only the next item, not the whole template.
 
 ;; 1
 1

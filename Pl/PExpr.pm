@@ -903,7 +903,8 @@ sub parse {
         next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/
-               && $nxt_2 && $nxt_2->{type} eq 'tree_val') {
+               && $nxt_2 && $self->is_internal_node_type($nxt_2)
+               && $nxt_2->{type} eq 'tree_val') {
         # Case 1B: X->$foo(...)
         my $pre_id = $self->parse([$pre]);
         my $meth_id= $self->parse([$nxt]); # Variable name with method
@@ -1048,6 +1049,14 @@ sub parse {
           && ref($e->[$i-2]) eq 'PPI::Token::Cast'
           && ($e->[$i-2]->content() eq '@' || $e->[$i-2]->content() eq '%')) {
         # Also remove the Cast '@'/'%' that precedes the ref symbol
+        splice @$e, $i-2, 1;
+        $i -= 2;
+      } elsif (($type eq 'a_ref_acc' || $type eq 'h_ref_acc')
+               && $i >= 2
+               && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+               && $e->[$i-2]->content() eq '$') {
+        # $$scalar[n] / $$scalar{key}: also remove the leading Cast '$'
+        # so it doesn't get applied again as a prefix p-cast-$ on the result.
         splice @$e, $i-2, 1;
         $i -= 2;
       } else {
@@ -1212,9 +1221,12 @@ sub parse {
     if (ref($term) eq 'PPI::Structure::Constructor'
         && $term->start() eq '['
         && $self->is_internal_node_type($pre)) {
-      # Treat as array subscript on the result of the previous expression
+      # Treat as array subscript on the result of the previous expression.
+      # Mark as list-context subscript: (EXPR)[N] / method()[N] forces list
+      # context on the expression, unlike $arr->[N] which is a scalar deref.
       my $pre_id = $pre->{id};
       my($node, $id) = $self->make_node_insert('a_ref_acc');
+      $self->node_tree->set_metadata($id, 'list_ctx_subscript', 1);
 
       my @ix    = $term->children();
       my $ix_id = $self->parse(\@ix);
@@ -2434,8 +2446,8 @@ sub handle_subcalls {
         # Check if this is a binary-only operator (cannot be unary prefix)
         # Cast tokens (@, $, %, &, *) are always unary deref operators
         my $is_cast = ref($next) eq 'PPI::Token::Cast';
-        # Operators that can be unary prefix: + - ! ~ \ not
-        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not', '++', '--');
+        # Operators that can be unary prefix: + - ! ~ ~. \ not
+        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '~.', '\\', 'not', '++', '--');
         my $is_unary = $is_cast || $can_be_unary_op{$next_op};
         if (!$is_unary) {
           # Binary-only operator - treat bareword as zero-arg function.
@@ -2585,7 +2597,23 @@ sub handle_subcalls {
                 $end_pars = $i + 1;
             }
         } else {
-            $end_pars = $i + 1;
+            # Named unary with a literal/word/subtree first arg (not Cast, Symbol/Magic,
+            # or Structure+arrow). Consume through high-prec binary ops (prec >= 55:
+            # . + - * / % x ** =~ !~ << >>), stop before comparison/logical/assignment.
+            # E.g.: eval 'a' . $x . 'b' → eval('a' . $x . 'b'), not (eval 'a') . $x . 'b'
+            my $j = $i + 1;
+            while ($j + 1 < scalar(@$e)) {
+                my $nxt = $e->[$j + 1];
+                if (ref($nxt) eq 'PPI::Token::Operator') {
+                    my $op_str = $nxt->content();
+                    unless ($op_str eq '->') {
+                        my $op_info = $self->config->precedences->{$op_str};
+                        last unless defined $op_info && $op_info->{prec} >= 55;
+                    }
+                }
+                $j++;
+            }
+            $end_pars = $j;
         }
     }
 
