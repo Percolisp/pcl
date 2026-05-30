@@ -425,4 +425,34 @@ test_transpile("hash flattens mixed with scalars in join", '
   print join(",", "p", %h, "q"), "\n";
 ', "p,x,9,q\n");
 
+# print takes a LIST: a bare @array / %hash must flatten, not stringify as a ref.
+test_transpile("print flattens array", '
+  my @a = (1,2,3);
+  print @a, "\n";
+', "123\n");
+
+test_transpile("print flattens hash", '
+  my %h = (e => 1);
+  print %h, "\n";
+', "e1\n");
+
+test_transpile("print keeps a ref as a scalar", '
+  my @a = (1,2,3);
+  my $r = \@a;
+  print ref($r), "\n";
+', "ARRAY\n");
+
+test_transpile("push flattens a hash", '
+  my %h = (e => 1);
+  my @a;
+  push @a, %h;
+  print "@a\n";
+', "e 1\n");
+
+test_transpile("map over a hash flattens it", '
+  my %h = (a => 1);
+  my @r = map { uc } %h;
+  print join(",", sort @r), "\n";
+', "1,A\n");
+
 done_testing();

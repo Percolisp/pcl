@@ -2879,6 +2879,17 @@
       (add src))
     result))
 
+(defun %p-hash-keyval-list (h)
+  "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...) of boxed values,
+   matching how %hash flattens in list context (same pairing as %p-flatten-list).
+   Used by list consumers that flatten %hash args: join, foreach, push, map/grep."
+  (let ((result nil))
+    (maphash (lambda (k v)
+               (push (make-p-box k) result)
+               (push (if (p-box-p v) v (make-p-box v)) result))
+             h)
+    (nreverse result)))
+
 (defmacro p-list-= (place value)
   "List destructuring assignment: (p-list-= (vector $a $b) expr).
    Each LHS element gets assigned from corresponding RHS position.
@@ -4426,6 +4437,10 @@
         ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
          (loop for elem across val do
                (%p-array-store-scalar arr elem)))
+        ;; Raw hash-table (not a ref): spread to key/value pairs (%hash in list ctx).
+        ((and (hash-table-p val) (not (p-box-p item)) (not (gethash :__class__ val)))
+         (dolist (kv (%p-hash-keyval-list val))
+           (%p-array-store-scalar arr kv)))
         ;; Regular value - preserve bless class via %p-array-store-scalar
         (t (%p-array-store-scalar arr item)))))
   (length arr))
@@ -5533,7 +5548,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (setf fh (p-get-stream (second args)))
       (setf args (cddr args)))
-    (dolist (arg args)
+    ;; Flatten raw @array / %hash args (print takes a LIST): a bare vector/hash
+    ;; spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar
+    ;; (so `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
+    (dolist (arg (coerce (p-flatten-args args) 'list))
       (princ (to-string arg) fh))
     ;; Append output record separator $\ if set
     (let ((ors (unbox |$\\|)))
@@ -7295,9 +7313,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (loop for x across (p-flatten-marker-array item) do (vector-push-extend x result)))
         (t
          (let ((val (unbox item)))
-           (if (and (vectorp val) (not (stringp val)))
-               (loop for x across val do (vector-push-extend x result))
-               (vector-push-extend item result))))))
+           (cond
+             ((and (vectorp val) (not (stringp val)))
+              (loop for x across val do (vector-push-extend x result)))
+             ;; Raw %hash (not a ref): spread to key/value pairs in list context.
+             ((and (hash-table-p val) (not (p-box-p item)))
+              (dolist (kv (%p-hash-keyval-list val)) (vector-push-extend kv result)))
+             (t (vector-push-extend item result)))))))
     result))
 
 (defun %p-map-copy-scalar (r)
@@ -7403,16 +7425,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            (loop for x across val do (write-string (to-string x) s))
                            (write-string (to-string item) s)))))))
         (nreverse (copy-seq str)))))
-
-(defun %p-hash-keyval-list (h)
-  "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...) of boxed values,
-   matching how %hash flattens in list context (same pairing as %p-flatten-list)."
-  (let ((result nil))
-    (maphash (lambda (k v)
-               (push (make-p-box k) result)
-               (push (if (p-box-p v) v (make-p-box v)) result))
-             h)
-    (nreverse result)))
 
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
