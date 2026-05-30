@@ -119,6 +119,12 @@ sub _build_environment {
 
 sub _preprocess_source {
   my ($src) = @_;
+  # hex()/oct() on a hex-float mantissa (below) can exceed 0xffffffff (32-bit),
+  # which makes Perl emit spurious 'Hexadecimal number > 0xffffffff non-portable'
+  # / 'Integer overflow' warnings *from our own toolchain* while transpiling source
+  # that legitimately contains large hex literals (hexfp.t, sprintf.t). These
+  # conversions are intentional and correct on 64-bit, so silence the noise.
+  no warnings 'portable', 'overflow';
   # Convert C99/Perl hex/binary/octal float literals (0x1.8p-1, 0b10p-2, 010.1p0)
   # to decimal before PPI sees them. PPI doesn't understand the 'p' exponent marker
   # and misparses 0x1.8p-1 as: 0x1 . p - 1 (hex-num, concat, bareword, minus, num).

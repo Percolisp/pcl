@@ -1956,6 +1956,31 @@ sub gen_prefix_op {
     }
   }
 
+  # Unary + is a pure no-op disambiguator in Perl (`map +(LIST), ...`,
+  # `func +(...)`, `print +(...)`). It must NOT numify or collapse a list to a
+  # scalar — it passes its operand through unchanged, inheriting the surrounding
+  # context. Propagate our node's context to the operand so a parenthesised list
+  # stays a list (fixes `map +($_, $h{$_}), LIST`). See docs/sweep-bug-catalog.md.
+  if ($op eq '+') {
+    my $operand_id = $kids->[1];
+    my $my_ctx     = defined $node_id
+                     ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+    # A parenthesised SINGLE expression `+(EXPR)` is just EXPR — unwrap the
+    # tree_val so it does not become a 1-element vector in list context (e.g.
+    # `print +(2+3)`). A multi-term `+(A, B)` keeps the list (becomes a vector).
+    my $on = $self->expr_o->get_a_node($operand_id);
+    if ($self->expr_o->is_internal_node_type($on)
+        && ($on->{type} // '') eq 'tree_val') {
+      my $tv_kids = $self->expr_o->get_node_children($operand_id);
+      $operand_id = $tv_kids->[0] if @$tv_kids == 1;
+    }
+    my $saved = $self->expr_o->get_node_context($operand_id);
+    $self->expr_o->set_node_context($operand_id, $my_ctx);
+    my $inner = $self->gen_node($operand_id);
+    $self->expr_o->set_node_context($operand_id, $saved);
+    return $inner;
+  }
+
   # ++, --, \ and @ need l-value context for array/hash elements.
   # @ needs lvalue so subscripts return boxes → p-cast-@ can auto-vivify.
   # \ needs l-value to get a reference to the box, not a copy of the value.
@@ -1964,6 +1989,24 @@ sub gen_prefix_op {
   $self->lvalue_context(1) if $needs_lvalue;
   my $operand = $self->gen_node($kids->[1]);
   $self->lvalue_context($saved_lvalue);
+
+  # \$#array — reference to the arylen ($#array) magic. A plain
+  # (p-backslash (p-array-last-index X)) backslashes a COPY of the integer, so
+  # $$ref = N would not resize X. Emit a live magic-cell ref instead (getter =
+  # p-array-last-index, setter = p-set-array-length). See docs/sweep-bug-catalog.md.
+  if ($op eq '\\' && $operand =~ /^\(p-array-last-index (.+)\)$/) {
+    return "(p-arylen-ref $1)";
+  }
+
+  # \substr / \pos / \vec — references to scalar magic lvalues. Like \$#array,
+  # a plain (p-backslash (p-substr ...)) backslashes a COPY of the extracted
+  # value, so $$ref = X would not write back. Emit live magic-cell refs instead
+  # (getter reads, setter writes through). See docs/sweep-bug-catalog.md.
+  if ($op eq '\\') {
+    if ($operand =~ /^\(p-substr (.+)\)$/) { return "(p-substr-ref $1)"; }
+    if ($operand =~ /^\(p-pos (.+)\)$/)    { return "(p-pos-ref $1)"; }
+    if ($operand =~ /^\(p-vec (.+)\)$/)    { return "(p-vec-ref $1)"; }
+  }
 
   # Get CL name for the operator
   my $cl_op = $self->cl_name($op);

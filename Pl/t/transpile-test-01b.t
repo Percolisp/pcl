@@ -379,4 +379,32 @@ test_transpile("prototype() returns undef", '
   print defined($p) ? "defined" : "undef", "\n";
 ', "undef\n");
 
+# Unary + is a pure no-op disambiguator (perlop): must not numify or collapse a
+# list. `map +(LIST)` must preserve the list; +(EXPR) must not become a 1-vector.
+test_transpile("unary +: map +(LIST) preserves list", '
+  my @x = map +($_, $_*10), (1,2,3);
+  print "@x\n";
+', "1 10 2 20 3 30\n");
+
+test_transpile("unary +: map +(key,val) over hash", '
+  my %h = (1,2,3,4);
+  my @x = map +($_, $h{$_}), sort keys %h;
+  print "@x\n";
+', "1 2 3 4\n");
+
+test_transpile("unary +: print +(EXPR) stays scalar", '
+  print +(2+3), "\n";
+', "5\n");
+
+test_transpile("unary +: no-op on string (no numify)", '
+  my $s = +"3abc";
+  print "$s\n";
+', "3abc\n");
+
+test_transpile("unary +: parenthesised array spreads in list", '
+  my @a = (1,2,3);
+  my @b = +(@a);
+  print "@b\n";
+', "1 2 3\n");
+
 done_testing();

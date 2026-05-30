@@ -242,30 +242,60 @@ breakdown still applies. The breakdown below is retained for reference only.
 
 ---
 
-### array.t (67 failures, 128/195 passing)
+### array.t (15 failures, 163/195 passing, 17 skip — session 218)
 
-Two root causes:
+**AASSIGN_COMMON is DONE** — the old catalog claim of "~27 self-assignment failures
+needing RHS snapshot in `p-list-=`/`p-array-=`" was STALE. Verified directly (session 218):
+`@a=@a`, `(undef,@a)=@a`, `@a=('X',@a,'Y')`, and the `my`/`local`/`our @bee` blocks
+(tests 37–62) all PASS (fixed sessions 209 + 215). `p-hash-=` already snapshots before
+`clrhash`, so even `my %x = %$x` (the [perl #70171] ref-self-assign) works. **There is no
+AASSIGN snapshot bug left.**
 
-- **List-of-arrays slice** (test 30): `join('', (@foo,@bar)[0..5])` — result is
-  `'ARRAY(0x...)ARRAY(0x...)'` instead of `'acebdf'`. When two arrays appear in a list
-  and a slice is taken, PCL boxes each array as an array-ref instead of flattening.
-  Fix area: list context expansion of array variables inside slice operand.
+**Registered not-supported (session 218, 17 skips, 0 stale)** in `cl/skip-registry.lisp`,
+backed by not-supported.md §"Sparse arrays (holes), element aliasing, and SV identity":
+- error-detection of non-creatable negative index (`$a[-1]=0`, alias-to-neg-index): 82, 133, 135
+- `&PL_sv_undef`/SV identity (127, 128), `@_` alias to nonexistent elem (130, 131)
+- sparse-array holes / lazy element creation / map-no-vivify: 174, 176, 179, 181, 184, 189, 191–194
 
-- **AASSIGN_COMMON via `our`** (tests 115–117): ✅ FIXED (session 215). `our ($x,$y,$z) = (1..3)`
-  emitted a flip-flop for the RHS (all-empty result); now LIST context → range. Also `$cond && (list)`
-  RHS now inherits list context. See header.
+**Remaining 21 = two held-back fix targets (NOT registered):**
 
-- **AASSIGN_COMMON self-assignment** (tests 33–62, ~27 failures): Patterns like
-  `@a = @a`, `(undef,@a) = @a`, `@a = ('X',@a,'Y')`, `local @b = @b` — these require
-  that the RHS is fully evaluated before assignment begins. PCL evaluates and assigns
-  simultaneously, so `@a = @a` truncates and `(undef,@a) = @a` drops first element.
-  Fix area: `p-list-=` / `p-array-=` in `pcl-runtime.lisp` — snapshot RHS into a temp
-  vector before assigning.
+- **arylen magic `\$#array` write-through — ✅ DONE (session 218), +6 tests** (92, 95, 98,
+  101, 103, 105). Implemented exactly as predicted, via the existing `tie` mechanism. New
+  `(defstruct p-magic-cell getter setter)` (sibling of `p-tie-proxy`) in `cl/pcl-runtime.lisp`,
+  intercepted at **four** chokepoints (not two — `tie` itself uses all four): `unbox` (call
+  getter), `box-set` STORE-arm + the value-copy arm at the `(p-box-p value)` cond (call
+  getter so `my $c = $$ref` copies the value, not the cell), `box-sv` and `box-nv` (bypass
+  the lazy cache → getter, mirroring tie's FETCH). New `p-arylen-ref` builds
+  `(p-backslash (make-p-box (make-p-magic-cell :getter #'(p-array-last-index arr)
+  :setter #'(p-set-array-length arr …))))`; codegen: `\$#array` → `(p-arylen-ref X)` (one
+  `if` in `Pl/ExprToCL.pm` backslash handling matching `(p-array-last-index X)`). `$$ref`
+  read/write and numeric/string contexts all resize the array. **Gate 3052/3052, 0 real
+  regressions** (the one flagged sprintf `%P` "regression" is a flaky pointer-address diff).
+- **arylen residue still failing (NOT the write-through):**
+  - **freed-array (83–88, 100):** the GC-hard corner, as predicted. The magic cell holds a
+    *strong* ref to the vector so it never dies → reads stale index, not `undef`. Needs
+    `sb-ext:make-weak-pointer` + GC nondeterminism (same family as DESTROY-via-GC). Leave.
+  - **symbolic-ref length (109–114):** `$#{@array}`/`$#{$x}`/`$4[8]` (#37350) — a different
+    feature (symbolic ref → glob), not arylen write-through.
+  - **126** (`arylen_p` magic vs `@ISA` element magic), **172** (arylen aliased in foreach):
+    separate magic-interaction sub-problems.
+- **BONUS still open:** the generalized `p-magic-cell` (getter/setter closures) now EXISTS and
+  is proven — it can back `\substr`/`\pos`/`\vec` and lvalue `substr` (the `:lvalue` skips in
+  ref.t 68–73 / substr.t 313–397 / state.t) by emitting analogous magic-cell refs. Next spike.
 
-- **Negative-index error** (test 82): `-1` index assignment: `$a[-1] = 0` on non-existent
-  array should error. PCL doesn't check.
+- **`map +(LIST)` unary-plus parse bug** (tests 118, 121) ✅ **FIXED (session 219)**.
+  `map +($_, $h{$_}), LIST` misparsed the leading `+(` (a no-op disambiguator in Perl) as
+  unary numeric plus, collapsing the list into `(p-+ (progn …))`. Fix: `gen_prefix_op` in
+  `Pl/ExprToCL.pm` now treats unary `+` as a **pure no-op** (perlop: "no effect whatsoever,
+  even on strings" — it must NOT numify): it propagates its own context to the operand and
+  returns it unchanged, so `+(A,B)` stays a list (→ vector, map flattens) while a single
+  `+(EXPR)` is unwrapped from its tree_val (so `print +(2+3)` stays scalar 5, not a 1-vector).
+  array.t **163→165** (118,121); substr.t 358→**359**. Regression tests in
+  `Pl/t/transpile-test-01b.t` (+5). Gate 3077/3077.
 
-- **`$#ary` on freed array** (test 83): Should be undef, PCL returns `-1`.
+- **List-of-arrays slice** (test 30): `join('', (@foo,@bar)[0..5])` → `'ARRAY(0x..)..'`
+  instead of `'acebdf'`. Two arrays in a list + slice: PCL boxes each as an array-ref
+  instead of flattening. Fix area: list-context expansion of array vars inside a slice.
 
 ---
 
@@ -275,7 +305,9 @@ Two root causes:
 (stale: 0). Registered clusters — leave these alone (now skips):
 - **IO/FORMAT dereference errors** (tests 32–40): `$$`/`@$`/… on `*STDOUT{IO}`/`*STDERR{FORMAT}`
   must die "Not a X reference"; FORMAT unsupported. → :error-msg.
-- **ref to substr/pos/vec lvalue** (tests 68–73): "LVALUE" — lvalue refs not-supported. → :lvalue.
+- ~~**ref to substr/pos/vec lvalue** (tests 68–73): "LVALUE"~~ ✅ **IMPLEMENTED (session 219)**
+  via `p-substr-ref`/`p-pos-ref`/`p-vec-ref` (`p-magic-cell` kind `:lvalue`). Registry
+  entry removed; ref.t 168→174. See not-supported.md "Lvalue subroutines".
 - **ref to format / IO refs** (tests 88–90): format/write not implemented. → :error-msg.
 - **NUL/UTF-8 symbolic-ref stash names** (tests 134–168): Unicode/NUL stash lookup. → :utf8.
 - **literal-aliased read-only assignment / weaken read-only ref** (tests 211, 213–216):
@@ -607,12 +639,16 @@ list context), 63–68 (`do subname(arg)` vs `do subname("arg")` syntax distinct
 
 ---
 
-### push.t (4 failures, 28/32 passing)
+### push.t (1 failure, 31/32 passing — session 218)
 
-- **Push onto invalid target** (tests 4–6): `push $int, ...` / `push $hashref, ...` /
-  `push $blessed_arrayref, ...` — should die "Type of arg 1 to push must be array or
-  list-ref". PCL doesn't validate push target type.
-- **Croak on readonly array** (test 32): same as unshift below.
+- **Push onto invalid target** (tests 4–6) ✅ **FIXED (session 218)**. `p-push-impl`
+  (`cl/pcl-runtime.lisp`) now guards its first arg: a non-array literal dies "Type of arg 1
+  to push must be array (not constant item)" (matches `qr/must be array/`); a scalar/ref
+  dies "Experimental push on scalar is now forbidden". Previously a raw CL type error (a
+  Lisp `#S(P-BOX …)` struct dump) leaked into `$@`. Regression-safe: only the already-erroring
+  non-vector path changed.
+- **Croak on readonly array** (test 32): read-only arrays not marked — documented
+  not-supported (read-only scalars / Internals). Same as unshift.t 19.
 
 ---
 

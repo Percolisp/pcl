@@ -94,10 +94,8 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("^(Scalar|Array|Hash|Code|Glob) dereference$"
                  :error-msg
                  "deref of an IO/FORMAT glob slot must die 'Not a X reference' — error detection PCL does not perform; FORMAT unsupported. not-supported.md: 'Error message text and format' + 'format / write report formatting'.")
-                ;; ref()/stringify of a ref to a substr/pos/vec lvalue → "LVALUE".
-                ("ref to (substr|pos|vec) lvalue"
-                 :lvalue
-                 "ref() of a \\substr/\\pos/\\vec lvalue must be 'LVALUE' — lvalue refs not supported. not-supported.md: 'Lvalue subroutines'.")
+                ;; (\substr / \pos / \vec lvalue refs are now IMPLEMENTED via
+                ;;  p-magic-cell — session 219 — so they are no longer skipped.)
                 ;; ref()/stringify of a ref to a FORMAT, and IO-handle stringify.
                 ("ref to format|stringify for IO refs"
                  :error-msg
@@ -112,3 +110,52 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("read-only ref|aliased to literal"
                  :read-only
                  "assignment to a literal-aliased value / weaken of a read-only ref must die 'Modification of a read-only value' — read-only scalars not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' / 'Internals::* C-level introspection'."))
+
+;; array.t — documented not-supported failures (sparse arrays / @_ aliasing / SV
+;; identity / error-detection). HELD BACK as fix targets, deliberately NOT registered:
+;;   - arylen magic (\$#array, freed-array length, arylen_p): tests 83-88, 92-114,
+;;     126, 172 — needs a write-through magical-lvalue + Perl refcount/freed-state.
+;;   - the `map +(LIST)` unary-plus parse bug (tests 118, 121) — a real fixable PExpr
+;;     bug (the `+(` map disambiguator collapses the list), not not-supported.
+(register-skips "array.t"
+                ;; $a[-1]=0 on an empty array must die "Modification of non-creatable
+                ;; array value attempted" — error detection of an invalid index.
+                ("\\$a\\[-1\\] = 0"
+                 :principle9
+                 "$a[-1]=0 on an empty array must die 'Modification of non-creatable array value attempted, subscript -1' — error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ;; Writing through an @_ alias to a non-creatable negative index must
+                ;; die. (The 'reading alias ...' siblings legitimately pass.)
+                ("error when setting alias to (negative index past beginning|-1 elem of empty array)"
+                 :principle9
+                 "assigning through an @_ alias to a non-creatable negative index must die 'Modification of non-creatable array value attempted' — error detection. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ;; &PL_sv_undef / per-element SV identity — CL box model has neither.
+                ("exists returns true for &PL_sv_undef elem"
+                 :alias
+                 "exists of the shared &PL_sv_undef SV in an array — CL box model has no shared-undef SV. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ("undef preserves identity in array"
+                 :alias
+                 "\\$_[0] aliased to an undef element must keep SV identity (\\$_[0] == \\undef) — box model copies. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ;; @_ aliasing to nonexistent (sparse) elements.
+                ("\\@_ alias to nonexistent"
+                 :alias
+                 "writing through an @_ alias to a nonexistent array element must autovivify the caller's element — @_ aliasing not emulated. not-supported.md: '@_ argument aliasing'.")
+                ;; Sparse-array holes preserved through subs / reads.
+                ("holes passed to sub do not lose their position"
+                 :alias
+                 "array holes (nonexistent elements) passed to a sub must keep their position — PCL has no defelem/hole. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ("non-elems read from \\@a do not lose their position"
+                 :alias
+                 "reading a hole must not vivify or shift later elements — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'. (The 'magical @a' sibling is excluded.)")
+                ;; Lazy element creation / map-no-vivify — these share descriptions
+                ;; with PASSING siblings ('copying an array via =', extra refgen/map
+                ;; assertions), so keyed by current TAP number, not regex.
+                (174 :alias
+                     "lazy element creation via sub call must autovivify an array hole — sparse arrays/defelem not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                (176 :alias
+                     "lazy element creation via refgen (\\$q[$_] address identity) — box model. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                (179 :alias
+                     "lazy element creation via foreach alias — sparse arrays/defelem. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                (181 :alias
+                     "map {} over @a must not vivify holes — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                (184 :alias
+                     "map {} over a magical @a must not vivify holes — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'."))

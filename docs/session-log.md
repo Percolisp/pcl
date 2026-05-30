@@ -4,6 +4,127 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 219 (2026-05-30) — `map +(LIST)` no-op fix + `\substr`/`\pos`/`\vec` magic-cell lvalue refs
+
+Two fix targets from `docs/sweep-bug-catalog.md`, chosen "A then B".
+
+### A — unary `+` is a pure no-op (fixes `map +(LIST)` parse bug)
+`map +($_, $h{$_}), LIST` misparsed the no-op `+(` disambiguator as **unary numeric
+plus**, collapsing the list into `(p-+ (progn …))` → only the value ("2 4" not
+"1 2 3 4"). Root cause was treating unary `+` as `(p-+ operand)`. Per perlop, unary
+`+` has "**no effect whatsoever, even on strings**" — it must NOT numify (`+"3abc"`
+stays `"3abc"`, verified against perl). Fix in `gen_prefix_op` (`Pl/ExprToCL.pm`):
+unary `+` now propagates its own context to the operand and returns it unchanged, so
+`+(A,B)` stays a list (→ vector, map flattens) while a SINGLE `+(EXPR)` is unwrapped
+from its `tree_val` (so `print +(2+3)` stays scalar `5`, not a 1-vector). This is
+strictly *more* correct than the old code, which would have numified strings.
+**array.t 163→165** (118,121); **substr.t 358→359**. Regression tests in
+`Pl/t/transpile-test-01b.t` (+5).
+
+### B — `\substr` / `\pos` / `\vec` live lvalue references (via `p-magic-cell`)
+Reused the session-218 `p-magic-cell` mechanism (the "next spike" it flagged).
+`\substr(...)` previously compiled to `(p-backslash (p-substr …))` — backslashing a
+COPY of the extracted value, so `$$ref = X` did not write back. Now:
+- New runtime `p-substr-ref` / `p-pos-ref` / `p-vec-ref` (`cl/pcl-runtime.lisp`),
+  each wrapping a `p-magic-cell` whose getter reads (`p-substr`/`p-pos`/`p-vec`) and
+  setter writes through (4-arg `p-substr` / `p-pos` set / `p-vec-set`). Exported.
+- Codegen: 3 `\`-handler rules in `gen_prefix_op` rewrite `(p-substr …)`→`(p-substr-ref …)`
+  etc. (siblings of the arylen rule).
+- `p-magic-cell` gained a `kind` slot: `:lvalue` for substr/pos/vec (arylen keeps nil).
+  `p-ref`/`p-reftype` report **"LVALUE"** for `:lvalue` cells (arylen stays "SCALAR"),
+  and ref **stringification** (`box-sv`) prints `LVALUE(0x…)`. The `p-ref` LVALUE arm
+  computes the referent as `(if (p-box-is-ref val) inner inner2)` so it works both for
+  a DIRECT `ref(\substr…)` and a stored `my $r=\substr…; ref $r`.
+- **Bug found + fixed via the `.faillog` DB**: vec.t 35/36 (`${\vec %h,0,1}`) regressed —
+  `p-cast-$` on a DIRECT magic ref returned the raw cell struct (one box too deep).
+  Fixed `p-cast-$` to fire the getter when the referent box holds a `p-magic-cell`.
+  (Through a variable, `box-set`'s existing magic-cell copy arm already handled it.)
+
+**ref.t 168→174** (substr/pos/vec lvalue rows, ref+stringify each). Registry entry
+"ref to (substr|pos|vec) lvalue" removed (now implemented, not skipped). substr.t
+359→361, state.t →148, vec.t restored to PASS. New `Pl/t/lvalue-ref-01.t` (12).
+not-supported.md "Lvalue subroutines" amended (built-in substr/pos/vec lvalues now
+supported; only user `: lvalue` subs remain out).
+
+### Verification
+Gate `prove -j8 Pl/t/` **3089/3089** green (86 files). Fully-passing **63, unchanged**.
+**Infra note:** the full perl-tests sweep currently aborts most partial files with
+`Unhandled SB-INT:SIMPLE-FILE-ERROR` (even at `--jobs 1`), so a full sweep-diff is
+unreliable right now — `/tmp` is not full (1% used); cause not yet found, pre-existing
+this session. Verified per-file instead (single-file runs are clean). Files touched:
+`Pl/ExprToCL.pm`, `cl/pcl-runtime.lisp`, `cl/skip-registry.lisp`, `docs/not-supported.md`,
+`docs/sweep-bug-catalog.md`, `Pl/t/transpile-test-01b.t`, `Pl/t/lvalue-ref-01.t`.
+
+---
+
+## Session 218 (2026-05-30) — array.t review (no AASSIGN bug), skip-registry, arylen `\$#array` magic-cell
+
+### array.t review (the gated AASSIGN_COMMON item) — the "bug" was a phantom
+Reviewed the array.t AASSIGN_COMMON fix (review gate from s217). **There is no AASSIGN
+bug**: `@a=@a`, `(undef,@a)=@a`, `@a=('X',@a,'Y')`, the `my`/`local`/`our @bee` blocks
+(37–62), and `my %x = %$x` ([perl #70171]) all PASS — fixed s209+s215; `p-hash-=` already
+snapshots before `clrhash`. The stale catalog claim ("~27 tests, snapshot RHS in
+`p-list-=`/`p-array-=`") was wrong. Tests 118/121 (the ones the catalog labelled "self-
+assignment via my %x=%$x") actually fail on a **different, fixable** bug: `map +($_,$h{$_})`
+misparses the no-op `+(` disambiguator as **unary numeric plus**, collapsing the list to
+just the value ("2 4" not "1 2 3 4"). Logged as a fix target, not done.
+
+### Skip-registry: 17 array.t not-supported failures registered
+Added an `array.t` block to `cl/skip-registry.lisp` (backed by new not-supported.md
+§"Sparse arrays (holes), element aliasing, and SV identity"): error-detection of
+non-creatable negative index (82, 133, 135), `&PL_sv_undef`/SV identity (127, 128), `@_`
+alias to nonexistent elem (130, 131), sparse-array holes / lazy creation / map-no-vivify
+(174, 176, 179, 181, 184, 189, 191–194). array.t 38 fail → 21 fail / 17 skip, 0 stale.
+
+### arylen `\$#array` write-through — implemented via the existing `tie` mechanism (+6)
+The "hard" framing was wrong: PCL already has a runtime get/set-interception hook — the
+`tie` proxy, dispatched at the box chokepoints. Added `(defstruct p-magic-cell getter
+setter)` (sibling of `p-tie-proxy`) and intercepted it at **four** chokepoints (the same
+four `tie` uses): `unbox` → getter; `box-set` STORE-arm **and** the value-copy cond-arm
+(so `my $c=$$ref` copies the value, not the cell); `box-sv`/`box-nv` → getter (bypass the
+lazy cache, like tie's FETCH). New `p-arylen-ref` (exported) wraps a magic cell whose
+getter = `p-array-last-index`, setter = `p-set-array-length`, then `p-backslash`es it.
+Codegen: one `if` in `Pl/ExprToCL.pm` backslash handling rewrites `\(p-array-last-index X)`
+→ `(p-arylen-ref X)`. `$$ref` read, `$$ref = N` resize, numeric/string contexts all work.
+**array.t 21 → 15 fail (+6: 92,95,98,101,103,105).** Gate **3052/3052**; full sweep **0 real
+regressions** (the lone flagged sprintf `%P` diff is a flaky pointer-address, unrelated).
+Residue (NOT write-through): freed-array 83–88/100 (GC-hard — strong ref keeps the vector
+alive; needs a weak pointer), symbolic-ref length 109–114 (#37350, different feature),
+126/172 (magic-interaction). **BONUS now unlocked:** the proven `p-magic-cell` can back
+`\substr`/`\pos`/`\vec`/lvalue-substr next.
+
+### End-of-session fixes
+- **Parser warning noise**: `Pl/Parser.pm` `_preprocess_source` emitted Perl's
+  'Hexadecimal number > 0xffffffff non-portable' / 'overflow' warnings from `hex()`/`oct()`
+  on large hex-float mantissas (hexfp.t, sprintf.t) — scoped `no warnings 'portable','overflow'`.
+- **push onto non-array (push.t 4–6, +3)**: `p-push-impl` now guards its first arg and dies
+  with Perl's wording ("...must be array" for a literal; "Experimental push on scalar is now
+  forbidden" for a scalar/ref) instead of leaking a raw CL `#S(P-BOX …)` struct into `$@`.
+  Regression-safe (only the already-erroring non-vector path changed); push.t 28→31, gate clean.
+- **`split ' '` Unicode whitespace**: PCL strings are always Unicode (effectively always /u),
+  so awk-mode `split ' '` now uses the full `\p{White_Space}` set via new `%perl-space-char-p`
+  in `p-split` (\xA0/\x85/\x{2000}.. separate). New `split-unicode-ws-01.t` (6). NOTE: does
+  NOT flip split.t 136–138 — those *locate* their separator via `grep /\s/u`, and regex `\s`
+  is a separate CL-PPCRE Unicode gap (`chr(0xA0) =~ /\s/` → no match); broadening `\s`/`\S`
+  is a large/risky change left as not-supported for now.
+- **Chained-subscript interpolation (real bug)**: `"$h->{a}[1]"`, `"$a->[1][0]"`,
+  `"$h->{a}{b}{c}"`, mixed `"$d->{a}[1]{n}"` leaked `ARRAY(0x..)[1]` — the interp arrow-deref
+  chain loop in `Pl/PExpr/StringInterpolation.pm` only continued on an EXPLICIT `->`. Now it
+  accepts an implicit arrow (bare `[`/`{`) between subscripts. Doesn't over-consume trailing
+  text/spaced braces; explicit-arrow & single forms unregressed. New
+  `interp-chained-subscript-01.t` (8). Gate 84/84 files green. Remaining (separate path, NOT
+  fixed): `"$a[1]{x}"` — a chain that STARTS with a no-arrow subscript (`parse_array_subscript`
+  doesn't chain) still mis-parses/crashes; follow-up.
+
+### Meta
+Corrected my own over-statement that arylen "needs a representation CL has no equivalent
+for" — the equivalent (tie proxy at unbox/box-set/box-sv/box-nv) was already in the runtime.
+Saved `memory/reference_box_magic_hook.md` so the box-magic hook is checked before declaring
+any magic-lvalue feature not-supported. Files touched: `cl/pcl-runtime.lisp`,
+`Pl/ExprToCL.pm`, `cl/skip-registry.lisp`, `docs/not-supported.md`, `docs/sweep-bug-catalog.md`.
+
+---
+
 ## Session 217b (2026-05-30) — crash localization (accelerator #3)
 
 ### Built: localization for every aborting/under-counting file

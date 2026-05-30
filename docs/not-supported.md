@@ -391,17 +391,25 @@ field() = 42;           # modifies $obj->{field}
 
 The built-in `substr` also acts as an lvalue: `substr($s, 0, 4) = "new"`.
 
-**PCL behaviour:** The `: lvalue` attribute is not implemented.  `substr`
-on the left-hand side of an assignment is also not supported.
+**PCL behaviour:** The user-defined `: lvalue` attribute is not implemented.
 
-**Rationale:** Implementing lvalue subs requires an "lvalue context"
+Note (session 219): the *built-in* magic lvalues `substr`, `pos` and `vec` **are**
+supported, both as direct assignment targets and as live references:
+- `substr($s, 0, 4) = "new"` works (rewritten to the four-argument form).
+- `\substr($s, $off, $len)`, `\pos($s)` and `\vec($s, $o, $b)` now produce live
+  write-through references (`my $r = \substr($s,0,1); $$r = "J"` mutates `$s`),
+  via the `p-magic-cell` mechanism (`p-substr-ref` / `p-pos-ref` / `p-vec-ref` in
+  `cl/pcl-runtime.lisp`).  `ref`/`reftype`/stringification report `LVALUE`.
+
+Only user-defined `: lvalue` subs remain unsupported.
+
+**Rationale:** Implementing user lvalue subs requires an "lvalue context"
 that propagates through the call, returns a settable location, and then
 performs the store — a fundamentally different calling convention from
-normal subs.  No maintained CPAN module in scope requires custom lvalue
-subs.  The `substr`-as-lvalue form can always be rewritten as
-`substr($s, 0, 4, "new")` (four-argument form), which PCL does support.
+normal subs.  No maintained CPAN module in scope requires custom lvalue subs.
 
-**Affected tests:** `perl-tests/aassign.t` (a few tests use lvalue subs).
+**Affected tests:** `perl-tests/aassign.t` (a few tests use user `: lvalue` subs).
+The `\substr`/`\pos`/`\vec` lvalue-ref rows in `perl-tests/ref.t` now pass.
 
 ---
 
@@ -691,3 +699,34 @@ adversarial code.  No CPAN module in scope uses it.
 
 **Affected tests:** `perl-tests/eval.t` — the block using `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 is commented out (6 tests).
+
+## Sparse arrays (holes), element aliasing, and SV identity
+
+**Perl behaviour:** A Perl array can have *holes* — index positions that have never
+been assigned, which `exists $a[$i]` reports as false and which are distinct from an
+element explicitly set to `undef`.  Holes survive being passed to a sub, sliced, or
+iterated, and `map`/copy-assignment do not vivify them.  Separately, every array
+element is an SV with its own identity: `\$_[0]` aliases the caller's element (so
+`\$_[0] == \undef` holds for the shared `&PL_sv_undef`), and reading/refgen of a
+not-yet-existing element can lazily create it as a *defelem* magical lvalue.
+
+**PCL behaviour:** A PCL array is a CL adjustable vector of boxes.  It has no
+hole/`undef`/defelem distinction (a missing slot reads as `undef` and may shift or
+drop when the vector is rebuilt), no shared read-only `&PL_sv_undef`, and no
+per-element SV identity that survives copying.  `@_` elements are copies, not aliases
+(see "`@_` argument aliasing"), so writing through `$_[$i]` does not autovivify the
+caller's element, and a hole passed to a sub loses its position.
+
+**Rationale:** Emulating holes/defelem/SV-identity requires a sparse representation
+with per-element magical lvalues and Perl's SV/refcount lifecycle — a pervasive change
+to the box/vector model for behaviour real CPAN code does not rely on.
+
+**Affected tests:** `perl-tests/array.t` — `&PL_sv_undef` exists/identity, `undef
+preserves identity`, `@_ alias to nonexistent elem`, `lazy element creation`,
+`map {} @a does not vivify elements`, and `holes passed to sub do not lose their
+position` (registered in `cl/skip-registry.lisp`).  Also covers the non-creatable
+negative-index error-detection cases (`$a[-1] = 0`), which fall under "Error
+compatibility for invalid Perl input".
+
+**NOT covered here (still fix targets):** arylen magic (`\$#array`, freed-array length,
+`arylen_p`) and the `map +(LIST)` unary-plus parse bug — see `docs/sweep-bug-catalog.md`.

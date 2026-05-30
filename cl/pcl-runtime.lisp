@@ -102,7 +102,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-file
    ;; Functions
-   #:p-backslash #:p-backslash-sub #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
+   #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -505,14 +505,29 @@
   tie-obj       ; object returned by TIESCALAR/TIEARRAY/TIEHASH
   saved-value)  ; p-box-value before tie was installed (restored on untie)
 
+;;; A magical scalar lvalue.  Like p-tie-proxy it lives in a p-box's value slot
+;;; and is intercepted at the unbox/box-set chokepoints, but it dispatches to two
+;;; CL closures rather than a Perl tie object: reading calls GETTER, writing calls
+;;; SETTER.  Used for \$#array (arylen) and reusable for other magic lvalue refs
+;;; (\substr / \pos / \vec).  See docs/sweep-bug-catalog.md (array.t arylen).
+(defstruct p-magic-cell
+  getter        ; (function () -> value)        — invoked by unbox
+  setter        ; (function (new-value) -> value) — invoked by box-set
+  (kind nil))   ; nil → ref()="SCALAR" (arylen); :lvalue → ref()="LVALUE"
+                                        ;   (\substr / \pos / \vec), matching Perl's reftype.
+
 (defun unbox (val)
   "Extract value from a box, or return val if not boxed.
-   If the box contains a p-tie-proxy, dispatches to FETCH."
+   If the box contains a p-tie-proxy, dispatches to FETCH.
+   If the box contains a p-magic-cell, dispatches to its getter."
   (if (p-box-p val)
       (let ((v (p-box-value val)))
-        (if (p-tie-proxy-p v)
-            (unbox (p-method-call (p-tie-proxy-tie-obj v) "FETCH"))
-            v))
+        (cond
+          ((p-tie-proxy-p v)
+           (unbox (p-method-call (p-tie-proxy-tie-obj v) "FETCH")))
+          ((p-magic-cell-p v)
+           (funcall (p-magic-cell-getter v)))
+          (t v)))
       val))
 
 (defun ensure-boxed (val)
@@ -587,12 +602,16 @@
    If box is tied (contains a p-tie-proxy), routes through STORE."
   (unless (p-box-p box)
     (return-from box-set value))
-  ;; Tied variable: delegate to STORE
+  ;; Tied variable: delegate to STORE.  Magic lvalue: delegate to its setter.
   (let ((current (p-box-value box)))
     (when (p-tie-proxy-p current)
       (return-from box-set
         (p-method-call (p-tie-proxy-tie-obj current) "STORE"
-                       (if (p-box-p value) (unbox value) value)))))
+                       (if (p-box-p value) (unbox value) value))))
+    (when (p-magic-cell-p current)
+      (return-from box-set
+        (funcall (p-magic-cell-setter current)
+                 (if (p-box-p value) (unbox value) value)))))
   (let ((v (if (p-box-p value)
                (let ((inner (p-box-value value)))
                  (cond
@@ -601,6 +620,10 @@
                    ;; into $c, making $c appear tied too.
                    ((p-tie-proxy-p inner)
                     (unbox (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))
+                   ;; Magic source ($c = $$arylen_ref): copy the getter's VALUE,
+                   ;; not the magic cell itself (else $c would alias the magic).
+                   ((p-magic-cell-p inner)
+                    (funcall (p-magic-cell-getter inner)))
                    ;; If inner is a box, this is a reference.
                    ;; If value itself is a ref-wrapper (from p-backslash), preserve it as-is.
                    ;; If value is a variable box containing a reference, use inner directly
@@ -933,7 +956,9 @@
   (let ((inner (p-box-value box)))
     (when (p-tie-proxy-p inner)
       (return-from box-nv
-        (to-number (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))))
+        (to-number (p-method-call (p-tie-proxy-tie-obj inner) "FETCH"))))
+    (when (p-magic-cell-p inner)
+      (return-from box-nv (to-number (funcall (p-magic-cell-getter inner))))))
   ;; use overload "0+" (numify): call handler if registered for this class
   (let ((handler (p-find-overload box "0+")))
     (when handler
@@ -1044,7 +1069,9 @@
   (let ((inner (p-box-value box)))
     (when (p-tie-proxy-p inner)
       (return-from box-sv
-        (to-string (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))))
+        (to-string (p-method-call (p-tie-proxy-tie-obj inner) "FETCH"))))
+    (when (p-magic-cell-p inner)
+      (return-from box-sv (to-string (funcall (p-magic-cell-getter inner))))))
   ;; use overload '""' (stringify): call handler if registered for this class.
   ;; Checked before cache because the handler result IS the string value.
   (let ((handler (p-find-overload box "\"\"")))
@@ -1068,17 +1095,22 @@
                     ((p-box-p inner)
                      (let* ((inner2 (p-box-value inner))
                             (inner3 (when (p-box-p inner2) (p-box-value inner2))))
-                       (if (and (p-box-p inner2)
-                                (not (or (p-box-p inner3)
-                                         (and (vectorp inner3) (not (stringp inner3)))
-                                         (hash-table-p inner3)
-                                         (functionp inner3)
-                                         (p-typeglob-p inner3)
-                                         (p-regex-match-p inner3))))
-                           ;; inner2 is a box with a scalar payload → SCALAR ref
-                           (format nil "SCALAR(0x~(~X~))" (object-address inner))
-                           ;; inner2 is a ref-type or a raw value → REF
-                           (format nil "REF(0x~(~X~))" (object-address inner)))))
+                       (cond
+                         ;; \substr / \pos / \vec lvalue ref → "LVALUE(0x...)".
+                         ((and (p-magic-cell-p inner3)
+                               (eq (p-magic-cell-kind inner3) :lvalue))
+                          (format nil "LVALUE(0x~(~X~))" (object-address inner)))
+                         ;; inner2 is a box with a scalar payload → SCALAR ref
+                         ((and (p-box-p inner2)
+                               (not (or (p-box-p inner3)
+                                        (and (vectorp inner3) (not (stringp inner3)))
+                                        (hash-table-p inner3)
+                                        (functionp inner3)
+                                        (p-typeglob-p inner3)
+                                        (p-regex-match-p inner3))))
+                          (format nil "SCALAR(0x~(~X~))" (object-address inner)))
+                         ;; inner2 is a ref-type or a raw value → REF
+                         (t (format nil "REF(0x~(~X~))" (object-address inner))))))
                     (t (stringify-value inner))))
              (s (if class
                     (format nil "~A=~A" class raw)
@@ -4371,6 +4403,15 @@
   "Implementation of push - stores values in boxes for l-value semantics.
    Recognizes p-flatten-marker to flatten @array arguments.
    Also spreads raw CL vectors (e.g. from qw!...! or list-context expressions)."
+  ;; push's first arg must be a real array.  Without this guard, pushing onto a
+  ;; non-array (a literal, or a scalar/ref) reaches %p-array-store-scalar / length
+  ;; and leaks a raw CL type error (a Lisp struct dump) into $@.  Perl dies
+  ;; "...must be array" for a literal and "Experimental push on scalar is now
+  ;; forbidden" for the removed experimental autoderef on a scalar/ref.
+  (unless (and (vectorp arr) (not (stringp arr)))
+    (if (p-box-p arr)
+        (error "Experimental push on scalar is now forbidden")
+        (error "Type of arg 1 to push must be array (not constant item)")))
   (dolist (item items)
     (let ((val (unbox item)))
       (cond
@@ -7401,6 +7442,27 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                 (mapcar #'to-string elements))
         (if elements (to-string (car elements)) ""))))
 
+(defun %perl-space-char-p (c)
+  "T if C is whitespace under Perl's Unicode \\p{White_Space} property — the set that
+   `\\s` and `split ' '` match under /u.  PCL strings are always Unicode (no per-scalar
+   UTF8 flag, no `use bytes`), so split ' ' always uses this full set rather than the
+   ASCII-only subset.  This is what lets `split ' '` find \\xA0/\\x85/\\x{2000}.. as
+   separators (RT #130907); the inverse /d byte-mode behaviour is not representable and
+   is documented not-supported."
+  (or (char= c #\Space) (char= c #\Tab) (char= c #\Newline)
+      (char= c #\Return) (char= c #\Page)              ; \x20 \x09 \x0A \x0D \x0C
+      (let ((cp (char-code c)))
+        (or (= cp #x0B)                                ; LINE TABULATION (vtab)
+            (= cp #x85)                                ; NEXT LINE (NEL)
+            (= cp #xA0)                                ; NO-BREAK SPACE
+            (= cp #x1680)                              ; OGHAM SPACE MARK
+            (<= #x2000 cp #x200A)                      ; EN QUAD .. HAIR SPACE
+            (= cp #x2028)                              ; LINE SEPARATOR
+            (= cp #x2029)                              ; PARAGRAPH SEPARATOR
+            (= cp #x202F)                              ; NARROW NO-BREAK SPACE
+            (= cp #x205F)                              ; MEDIUM MATHEMATICAL SPACE
+            (= cp #x3000)))))                          ; IDEOGRAPHIC SPACE
+
 (defun p-split (pattern str &optional limit)
   "Perl split - split string by pattern.
    Note: pattern and str are NOT optional here - PExpr.pm adds defaults
@@ -7463,22 +7525,25 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                (list s))))))
            (dolist (p parts)
              (vector-push-extend (or p *p-undef*) result))))
-        ;; Special whitespace splitting: " " splits on runs of whitespace
+        ;; Special whitespace splitting: " " splits on runs of whitespace and strips
+        ;; leading whitespace (Perl's awk-mode split ' ').  Uses the full Unicode
+        ;; whitespace set via %perl-space-char-p (so \xA0/\x85/\x{2000}.. separate too).
+        ;; Iterating the raw string and only opening a word on a non-space naturally
+        ;; skips leading whitespace and collapses runs; trailing whitespace closes the
+        ;; final word with nothing after it.
         ((and (stringp pattern) (string= pattern " "))
-         (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
-           (unless (zerop (length trimmed))
-             (let ((in-word nil) (word-start 0))
-               (loop for i from 0 below (length trimmed)
-                     for c = (char trimmed i)
-                     do (cond
-                          ((and (not in-word) (not (member c '(#\Space #\Tab #\Newline #\Return))))
-                           (setf in-word t word-start i))
-                          ((and in-word (member c '(#\Space #\Tab #\Newline #\Return)))
-                           (when (or (null max-fields) (< (length result) (1- max-fields)))
-                             (vector-push-extend (subseq trimmed word-start i) result)
-                             (setf in-word nil)))))
-               (when in-word
-                 (vector-push-extend (subseq trimmed word-start) result))))))
+         (let ((in-word nil) (word-start 0))
+           (loop for i from 0 below (length s)
+                 for c = (char s i)
+                 do (cond
+                      ((and (not in-word) (not (%perl-space-char-p c)))
+                       (setf in-word t word-start i))
+                      ((and in-word (%perl-space-char-p c))
+                       (when (or (null max-fields) (< (length result) (1- max-fields)))
+                         (vector-push-extend (subseq s word-start i) result)
+                         (setf in-word nil)))))
+           (when in-word
+             (vector-push-extend (subseq s word-start) result))))
         ;; Literal string pattern
         (t
          (let* ((pat (to-string pattern))
@@ -7565,6 +7630,54 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      (let ((b (make-p-box (make-p-box val))))
        (setf (p-box-is-ref b) t)
        b))))
+
+(defun p-arylen-ref (arr)
+  "Perl \\$#array — a live reference to the array-length (arylen) magic of ARR.
+   A plain (p-backslash (p-array-last-index arr)) backslashes a COPY of the
+   integer, so $$ref = N would not resize ARR.  Instead wrap a p-magic-cell whose
+   getter reads the last index and whose setter resizes ARR; reading/writing
+   through the resulting scalar ref then flows through unbox/box-set automatically.
+   ARR is whatever $#array's operand evaluates to (raw @arr vector or a boxed
+   array ref) — p-array-last-index / p-set-array-length both accept either."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :getter (lambda () (p-array-last-index arr))
+     :setter (lambda (n) (p-set-array-length arr (to-number n)))))))
+
+(defun p-substr-ref (str start &optional len)
+  "Perl \\substr(STR, START [, LEN]) — a live reference to the substr lvalue
+   window.  Like p-arylen-ref it wraps a p-magic-cell: reading returns the current
+   substring (p-substr getter), writing replaces that region of STR in place
+   (4-arg p-substr).  STR must be a box for writes to propagate; START/LEN are
+   fixed at refgen time (a fixed window), matching the common \\substr idiom."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :kind :lvalue
+     :getter (lambda () (p-substr str start len))
+     :setter (lambda (v) (p-substr str start len v))))))
+
+(defun p-pos-ref (var)
+  "Perl \\pos(VAR) — a live reference to VAR's /g match-position magic.  Reading
+   returns the current pos (or undef); writing sets it.  VAR must be a box."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :kind :lvalue
+     :getter (lambda () (let ((p (p-pos var))) (if p p *p-undef*)))
+     :setter (lambda (v) (p-pos var v))))))
+
+(defun p-vec-ref (str offset bits)
+  "Perl \\vec(STR, OFFSET, BITS) — a live reference to a vec() lvalue element.
+   Reading returns the element value (p-vec); writing stores it (p-vec-set).
+   STR must be a box; OFFSET/BITS are fixed at refgen time."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :kind :lvalue
+     :getter (lambda () (p-vec str offset bits))
+     :setter (lambda (v) (p-vec-set str offset bits v))))))
 
 (defun p-refgen-list (val)
   "Perl \\(LIST) — distribute reference generation over list elements.
@@ -7731,7 +7844,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((inner (unbox val)))
     (cond
       ((p-box-p inner)
-       (p-box-value inner))
+       ;; If the referent box holds a magic cell (\substr/\pos/\vec via a DIRECT
+       ;; ref, e.g. ${\vec %h,0,1}), fire its getter rather than returning the raw
+       ;; cell struct. Through a variable the cell sits one box deeper and
+       ;; box-set's magic-cell copy arm handles it.
+       (let ((v (p-box-value inner)))
+         (if (p-magic-cell-p v) (funcall (p-magic-cell-getter v)) v)))
       ((stringp inner)
        ;; Symbolic reference: ${"varname"}
        (let ((box (%p-symref-box inner)))
@@ -7846,6 +7964,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (p-box-class inner)
            (let ((inner2 (p-box-value inner)))
              (cond
+               ;; Magic lvalue ref (\substr / \pos / \vec): the referent box holds
+               ;; a p-magic-cell with :lvalue kind → "LVALUE" (arylen's cell has
+               ;; kind nil and falls through to "SCALAR").  The referent is `inner`
+               ;; for a direct `\substr(...)` (is-ref wrapper) and `inner2` when the
+               ;; ref was stored through a variable (`my $r = \substr…; ref $r`),
+               ;; mirroring the ref-to-ref arm below.
+               ((let* ((referent (if (p-box-is-ref val) inner inner2))
+                       (rv (and (p-box-p referent) (p-box-value referent))))
+                  (and (p-magic-cell-p rv)
+                       (eq (p-magic-cell-kind rv) :lvalue)))
+                "LVALUE")
                ;; Direct aggregate referent (raw value held by the pointed-at
                ;; scalar): \$qr → REGEXP, \$aref → ARRAY, \$href → HASH. These
                ;; check inner2 (= the referent's held value for a direct `\$x`).
@@ -7895,6 +8024,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              ((string= r "ARRAY")  "ARRAY")
              ((string= r "CODE")   "CODE")
              ((string= r "SCALAR") "SCALAR")
+             ((string= r "LVALUE") "LVALUE")
              ;; ref-to-ref: the referent is still a SCALAR (it happens to hold a ref)
              ((string= r "REF")    "SCALAR")
              ((string= r "GLOB")   "GLOB")
