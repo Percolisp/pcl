@@ -66,13 +66,15 @@ Edit `cl/skip-registry.lisp` — add one line under the file's `register-skips` 
 
 ## 4. Crashes / PARTIAL — never auto-skipped
 The registry hooks per-assertion (`test-ok`); a crash/abort never reaches it. So:
-- A **PARTIAL** file: the faillog still has every failure *before* the abort. The abort site
-  is localized automatically (session 217): the test harness emits `# ABORTED after test N
-  (<last-desc>)`, and the sweep records it in `<faillog>/_status.tsv` col 6 and leads the
-  CRASH/PARTIAL snippet with it. So `grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,6` lists
-  every aborting file → the assertion after which it died (crash site = ~test N+1). Open the
-  source at that test, fix the PCL defect so the rest of the file runs; the registry can then
-  reach the later assertions.
+- Abort/under-count localization is automatic (session 217). The harness emits
+  `# PCL-INCOMPLETE last=N planned=M desc=…`; the sweep refines it by exit code into
+  `<faillog>/_status.tsv` col 6 (`grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,2,6`):
+  - **CRASH** → `CRASH after test N (<desc>) -- crash site ~test N+1 | <SBCL error>`. Open the
+    source at test N+1, fix the PCL defect so the rest of the file runs; the registry can then
+    reach the later assertions.
+  - **PARTIAL** → `INCOMPLETE: ran N of M, last test N (<desc>)`. This is a *clean exit that
+    under-counted* — tests were dropped/skipped across the file (not a single abort at N+1).
+    Diff the emitted TAP numbers against the source to find where PCL skipped a test/block.
 - A **whole-file crash from a not-supported feature** (e.g. `(?{code})`, Tie::Array hang):
   use the file-level `@SKIP` list in `sweep-perl-tests.pl` (coarse), or implement the
   deferred per-statement `handler-case` wrapper (`docs/test-skip-registry.md` §3.1).

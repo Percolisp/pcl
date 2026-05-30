@@ -6,24 +6,28 @@ Append new entries at the top. One section per session.
 
 ## Session 217b (2026-05-30) — crash localization (accelerator #3)
 
-### Built: `# ABORTED after test N (<desc>)` markers for every aborting file
+### Built: localization for every aborting/under-counting file
 The CRASH/PARTIAL bucket (bop/eval/caller/length/method/ref/state) was the hardest to debug
 because you didn't know *which statement* aborted. Now you do:
 - `cl/pcl-test.lisp`: new `*last-test-name*` (set in `test-ok` for every assertion); the
-  existing `sb-ext:*exit-hooks*` entry now also emits, when a file ran fewer tests than
-  planned, `# ABORTED after test N (<last-desc>) -- next assertion (~test N+1) is the likely
-  crash site`. Confirmed empirically that exit hooks fire on an unhandled condition under
-  `--non-interactive` (bop.t already printed the existing "planned X but ran Y" hook on crash),
-  so this covers both CRASH and PARTIAL. All 7 target files use a plan, so `*test-planned*`
-  is always set and the `count < planned` trigger is reliable.
-- `sweep-perl-tests.pl`: leads the CRASH/PARTIAL snippet with the ABORTED marker, then
-  appends the *real* SBCL crash line (prefers `Unhandled …`/`is not of type`/`UNBOUND`/… over
-  test descriptions that merely contain "error"); records it in `<faillog>/_status.tsv` col 6.
-- One sweep now maps every aborting file → its crash site. Current map:
-  bop.t after 495 (`IV -1 right shift 64+1`, SIMPLE-ERROR), eval.t after 28 (`is not of type`),
-  caller.t after 65 (`no freed scalars`), length.t after 47 (`There were no other warnings`),
-  method.t after 160 (`undef method name on unblessed ref`), ref.t after 235 (`RT #78288
-  mutable PL_sv_zero copy`), state.t after 162 (`Attempt to free unreferenced scalar`).
+  existing `sb-ext:*exit-hooks*` entry emits, when a file ran fewer tests than planned, a
+  **neutral** fact `# PCL-INCOMPLETE last=N planned=M desc=<last-desc>`. Confirmed exit hooks
+  fire on an unhandled condition under `--non-interactive` (bop.t already printed the existing
+  "planned X but ran Y" hook on crash), so this covers both CRASH and PARTIAL. All 7 files
+  use a plan, so `*test-planned*` is set and the `count < planned` trigger is reliable.
+- `sweep-perl-tests.pl`: refines the neutral fact **by exit code** (the hook can't tell EOF
+  from abort, but the sweep knows the code) and records it in `<faillog>/_status.tsv` col 6:
+  - **CRASH** (nonzero exit) = true mid-file abort → `CRASH after test N (<desc>) -- crash
+    site ~test N+1 | <real SBCL error>` (error line prefers `Unhandled …`/`is not of type`/
+    `UNBOUND` over test descriptions that merely contain "error").
+  - **PARTIAL** (clean exit) = reached EOF but **under-counted** → `INCOMPLETE: ran N of M,
+    last test N (<desc>)`. caller.t exposed this: it's NOT a crash at test 66 — it reaches
+    EOF having emitted only 65/112 because tests were dropped across the file.
+- Map from one sweep (`cut -f1,2,6 _status.tsv`): bop.t CRASH→496 (`IV -1 right shift 64+1`,
+  SIMPLE-ERROR), eval.t CRASH→29 (`is not of type`; the string-eval lexical-scope limit —
+  `eval 'recurse($l)'` can't see `$l`, sets `$@`, top-level `die if $@` aborts), state.t
+  CRASH→163, method.t CRASH→161, ref.t CRASH→236, length.t CRASH→48; caller.t PARTIAL
+  under-counted 65/112.
 
 Test-infra only (`pcl-test.lisp`, sweep) — not loaded by the `Pl/t` gate; `pcl-runtime.lisp`
 untouched. Full sweep unchanged at 806 honest fails / 63 fully passing (no regression).

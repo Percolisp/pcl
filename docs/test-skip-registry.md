@@ -231,14 +231,21 @@ until the early-stop crash is localized — see #3 below.)
 
 ### 3. Crash localization (which statement aborted) — BUILT (session 217)
 `cl/pcl-test.lisp` tracks `*last-test-name*` (set in `test-ok` for every assertion) and its
-`sb-ext:*exit-hooks*` entry emits, when a file ran **fewer** tests than planned (i.e.
-aborted), `# ABORTED after test N (<last-desc>) -- next assertion (~test N+1) is the likely
-crash site`. Exit hooks fire even on an unhandled condition under `--non-interactive`
-(verified), so this works for both CRASH and PARTIAL. `sweep-perl-tests.pl` leads the
-CRASH/PARTIAL snippet with that marker (then appends the real SBCL crash line, preferring
-`Unhandled …`/`is not of type`/… over test descriptions that merely contain "error") and
-records it in `<faillog>/_status.tsv` column 6. So one sweep now maps every aborting file to
-the source assertion that crashed it — `grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,6`.
+`sb-ext:*exit-hooks*` entry emits, when a file ran **fewer** tests than planned, a neutral
+fact: `# PCL-INCOMPLETE last=N planned=M desc=<last-desc>`. Exit hooks fire on both a clean
+EOF and an unhandled condition under `--non-interactive` (verified), and the hook itself
+cannot tell which — so it stays neutral. **The sweep refines it by SBCL exit code**, because
+"ran < planned" means two different things:
+- **CRASH** (nonzero exit) = a true mid-file abort → `CRASH after test N (<desc>) -- crash
+  site ~test N+1 | <real SBCL error>` (the error line prefers `Unhandled …`/`is not of
+  type`/`UNBOUND` over a test description that merely contains "error").
+- **PARTIAL** (clean exit) = reached EOF but **under-counted** (tests dropped/skipped
+  throughout, NOT a crash at N+1) → `INCOMPLETE: ran N of M, last test N (<desc>)`.
+
+`sweep-perl-tests.pl` leads the CRASH/PARTIAL snippet with this and records it in
+`<faillog>/_status.tsv` column 6. So one sweep maps every aborting file —
+`grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,2,6`. (caller.t exposed the
+distinction: it's PARTIAL/EOF/under-counted, not a crash at test 66.)
 
 ### 4. Root-cause clustering — planned (`tools/triage.pl` on top of the log)
 Normalize got/expected (addresses → `ADDR`, numbers → `N`) and group identical shapes

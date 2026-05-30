@@ -133,11 +133,17 @@ sub run_one_test {
         }
 
         if ($fail > 0 || $pass == 0 || $status ne 'OK') {
-            # For a crash/partial, lead with the test harness's own localization
-            # marker (# ABORTED after test N (desc)) — it names the last test that
-            # ran, so the crash site is the next assertion. Far more useful than
-            # the raw SBCL error, which we append if there's room.
-            my ($aborted) = ($out =~ /^#\s*(ABORTED after test \d+ \([^\n]*?\))/m);
+            # Crash localization. The harness emits a neutral fact when it ran
+            # fewer tests than planned: "# PCL-INCOMPLETE last=N planned=M desc=D".
+            # We phrase it by exit code: a nonzero exit (CRASH) is a true mid-file
+            # abort whose crash site is the next assertion (~test N+1); a clean
+            # exit (PARTIAL) reached EOF but under-counted (tests dropped/skipped).
+            my $loc = '';
+            if (my ($n, $pl, $d) = ($out =~ /^#\s*PCL-INCOMPLETE last=(\d+) planned=(\S+) desc=(.*)$/m)) {
+                $loc = ($status eq 'CRASH')
+                    ? "CRASH after test $n ($d) -- crash site ~test @{[$n+1]}"
+                    : "INCOMPLETE: ran $n of $pl, last test $n ($d)";
+            }
             # Prefer a genuine SBCL crash line over a test description that merely
             # contains the word "error".
             my ($errline) =
@@ -146,7 +152,7 @@ sub run_one_test {
                 unless defined $errline;
             $errline //= (split /\n/, $out)[0] // '';
             $errline =~ s/^\s+//;
-            $snippet = $aborted ? ($aborted . ' | ' . $errline) : $errline;
+            $snippet = $loc ? ($status eq 'CRASH' ? "$loc | $errline" : $loc) : $errline;
             $snippet = substr($snippet, 0, 160);
         }
     };

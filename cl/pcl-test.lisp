@@ -432,14 +432,15 @@
         (when (and *test-planned* (/= *test-count* *test-planned*))
           (format t "# Looks like you planned ~A tests but ran ~A.~%"
                   *test-planned* *test-count*))
-        ;; Crash localization: running FEWER tests than planned means the file
-        ;; aborted (unhandled condition / early die — exit hooks still fire under
-        ;; --non-interactive).  The last completed test is N, so the next
-        ;; assertion (~test N+1) is the likely crash site.  Naming the last test
-        ;; lets you jump straight to the culprit source without bisecting.
+        ;; Crash localization: running FEWER tests than planned means the run is
+        ;; INCOMPLETE.  Emit a neutral, machine-parseable fact (the exit hook
+        ;; fires both on a clean EOF and on an unhandled condition under
+        ;; --non-interactive, and cannot itself tell which).  The *sweep* knows
+        ;; the SBCL exit code and refines this into either "crashed mid-file
+        ;; (crash site ~test N+1)" or "reached EOF but under-counted".
         (when (and *test-planned* (< *test-count* *test-planned*))
-          (format t "# ABORTED after test ~A (~A) -- next assertion (~~test ~A) is the likely crash site~%"
-                  *test-count* (or *last-test-name* "?") (1+ *test-count*))
+          (format t "# PCL-INCOMPLETE last=~A planned=~A desc=~A~%"
+                  *test-count* *test-planned* (or *last-test-name* "?"))
           (force-output))
         (when *test-no-plan*
           (format t "1..~A~%" *test-count*)))
