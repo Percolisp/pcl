@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sed:*)",
+      "Bash(./clt:*)",
+      "Bash(emacs:*)",
+      "Bash(.claude/hooks/fmtlisp:*)",
+      "Bash(perl .claude/hooks/split-lisp.pl:*)",
+      "Bash(grep:*)",
+      "Bash(perl:*)",
+      "Bash(prove:*)",
+      "Bash(perl sweep-perl-tests.pl:*)",
+      "Bash(./pl2cl:*)",
+      "Bash(sbcl:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(echo:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/bernt/pcl/.claude/hooks/format-lisp.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

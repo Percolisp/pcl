@@ -1,0 +1,7 @@
+#!/usr/bin/perl
+# fmtlisp FILE.lisp — reformat a CL file in place using emacs
+die "Usage: fmtlisp FILE.lisp\n" unless @ARGV == 1;
+exec "emacs", "--batch", $ARGV[0],
+     "--eval", "(setq-default indent-tabs-mode nil)",
+     "--eval", "(indent-region (point-min) (point-max))",
+     "-f", "save-buffer";

@@ -1,3 +1,6 @@
 
 # Generated failure log (tools/sweep-diff.pl input)
 .faillog/
+
+# Nested git worktree created by background agents (has its own .git)
+.claude/worktrees/
