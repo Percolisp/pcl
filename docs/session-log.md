@@ -23,11 +23,23 @@ because you didn't know *which statement* aborted. Now you do:
   - **PARTIAL** (clean exit) = reached EOF but **under-counted** → `INCOMPLETE: ran N of M,
     last test N (<desc>)`. caller.t exposed this: it's NOT a crash at test 66 — it reaches
     EOF having emitted only 65/112 because tests were dropped across the file.
-- Map from one sweep (`cut -f1,2,6 _status.tsv`): bop.t CRASH→496 (`IV -1 right shift 64+1`,
-  SIMPLE-ERROR), eval.t CRASH→29 (`is not of type`; the string-eval lexical-scope limit —
-  `eval 'recurse($l)'` can't see `$l`, sets `$@`, top-level `die if $@` aborts), state.t
-  CRASH→163, method.t CRASH→161, ref.t CRASH→236, length.t CRASH→48; caller.t PARTIAL
-  under-counted 65/112.
+- Map from one sweep (`cut -f1,2,6 _status.tsv`): only **bop.t and eval.t are true CRASHES**
+  (nonzero exit); caller/length/method/ref/state are **PARTIAL under-counts** (clean exit,
+  reached EOF emitting fewer tests than planned — tests dropped across the file, not a crash).
+
+### Crash root-cause look (end of session 217b)
+Investigated the two true crashes — both are **not-supported-feature crashes**, NOT simple bugs:
+- **bop.t → 496**: line 636 `$byte = substr unpack("P2", pack "P", $$_[0] &. $$_[1]), -1;`.
+  `pack "P"` (pointer type) is documented not-supported (CL GC moves objects → no stable
+  addresses; `docs/not-supported.md`). PCL correctly dies "Invalid type 'P' in pack", but the
+  die is **uncaught at top level** and kills the file (loses tests 496–510, ~14).
+- **eval.t → 29**: string-eval lexical scope (`eval 'recurse($l)'` can't see lexical `$l`/the
+  `recurse` sub → `$@` set → top-level `die if $@` aborts). Hard subsystem limitation.
+Both need the deferred **per-statement `handler-case` wrapper** for transpiled test files
+(`docs/test-skip-registry.md` §3.1) to convert the abort into one `not ok`/skip and let the
+file continue — they are not fixable as ordinary bugs. So the actionable bug queue for next
+session is the *regular* failures (array.t AASSIGN_COMMON ~27 — pending user review; sprintf
+warning markers; the PARTIAL under-count investigations), not these crashes.
 
 Test-infra only (`pcl-test.lisp`, sweep) — not loaded by the `Pl/t` gate; `pcl-runtime.lisp`
 untouched. Full sweep unchanged at 806 honest fails / 63 fully passing (no regression).
