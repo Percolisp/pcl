@@ -13,6 +13,96 @@
 (defvar *test-planned* nil)
 (defvar *test-no-plan* nil)
 (defvar *test-failures* 0)
+(defvar *test-skipped* 0)
+(defvar *last-test-name* nil
+  "Description of the last assertion that ran. Used by the exit hook for crash
+   localization: when a file aborts mid-run, this names the last test that
+   completed, so the next assertion (~test *test-count*+1) is the crash site.")
+
+;;; ─── Structured failure log (opt-in via PCL_TEST_LOG_DIR) ───────────────────
+;;; When the env var PCL_TEST_LOG_DIR names a directory, `test-ok` appends one
+;;; TSV line per FAILING assertion to <dir>/<current-test-file>.fails.tsv:
+;;;     file <TAB> num <TAB> description <TAB> got <TAB> expected
+;;; This is the queryable failure DB that tools/sweep-diff.pl (regression
+;;; watchdog, keyed on file+description) and tools/triage.pl consume.  With the
+;;; var unset there is ZERO overhead — normal runs and the Pl/t gate are
+;;; unaffected.  Only failures are logged, so a full-sweep DB is small (~fail count).
+(defvar *test-log-stream* :unopened
+  "Cached output stream for the failure log, or NIL if logging is disabled.")
+
+(defun %test-log-clean (s)
+  "Make S safe for one TSV field: stringify and collapse tab/newline to space."
+  (let ((str (if (stringp s) s (princ-to-string s))))
+    (substitute #\Space #\Tab (substitute #\Space #\Newline str))))
+
+(defun %test-log-stream ()
+  "Return the failure-log stream (opening it lazily from PCL_TEST_LOG_DIR), or NIL.
+   The failure log is a diagnostic side-channel: a failure to open it (e.g. the
+   directory does not exist after a test `chdir`d, or PCL_TEST_LOG_DIR was relative)
+   must NEVER crash the test run.  We ensure the directory exists and swallow any
+   error, leaving *test-log-stream* = NIL (logging silently disabled for this file)."
+  (when (eq *test-log-stream* :unopened)
+    (let ((dir (sb-ext:posix-getenv "PCL_TEST_LOG_DIR")))
+      (setf *test-log-stream*
+            (if (and dir (plusp (length dir)) *current-test-file*)
+                (ignore-errors
+                  (let ((path (merge-pathnames
+                               (concatenate 'string *current-test-file* ".fails.tsv")
+                               (concatenate 'string dir "/"))))
+                    (ensure-directories-exist path)
+                    (open path :direction :output
+                          :if-exists :supersede :if-does-not-exist :create)))
+                nil))))
+  *test-log-stream*)
+
+(defun %test-log-failure (num name diag)
+  "Append one TSV failure line to the structured log, if enabled."
+  (let ((stream (%test-log-stream)))
+    (when stream
+      (let ((got "") (expected ""))
+        (dolist (d diag)
+          (let ((ds (if (stringp d) d (princ-to-string d))))
+            (cond
+              ((nth-value 0 (ppcre:scan "(?i)got:" ds))
+               (setf got (ppcre:regex-replace "(?i).*?got:\\s*" ds "")))
+              ((nth-value 0 (ppcre:scan "(?i)expected" ds))
+               (setf expected (ppcre:regex-replace "(?i).*?expected[^:]*:\\s*" ds ""))))))
+        (format stream "~A~C~A~C~A~C~A~C~A~%"
+                (%test-log-clean *current-test-file*) #\Tab
+                num #\Tab
+                (%test-log-clean (or (test-display-value name) "")) #\Tab
+                (%test-log-clean got) #\Tab
+                (%test-log-clean expected))
+        (force-output stream)))))
+
+;;; ─── Declarative skip-registry ──────────────────────────────────────────────
+;;; Instead of hand-editing perl-tests/*.t to disable not-supported tests, we keep
+;;; an external registry (cl/skip-registry.lisp) keyed by test-file basename and a
+;;; regex on the test DESCRIPTION (robust to TAP-number shifts).  A registry entry
+;;; ONLY converts a FAILING assertion into a real TAP `# skip`; an entry whose test
+;;; unexpectedly PASSES is flagged stale (so accidental real fixes surface).  The
+;;; underlying assertion still runs — nothing is weakened (CLAUDE.md principle 5).
+(defvar *current-test-file* nil
+  "Basename (e.g. \"tr.t\") of the perl-tests file being run; set per-file by the
+   sweep / runt so the skip-registry can be consulted.")
+(defvar *skip-registry* (make-hash-table :test 'equal)
+  "basename string -> list of (scanner category reason raw-pattern) entries.")
+
+(defun %register-skips (basename entries)
+  "Implementation of REGISTER-SKIPS.  Each ENTRY is (MATCHER CATEGORY REASON), where
+   MATCHER is a DESCRIPTION-REGEX (string — preferred, number-shift-robust) OR an exact
+   test NUMBER (integer — fallback for tests with no description)."
+  (setf (gethash basename *skip-registry*)
+        (append (gethash basename *skip-registry*)
+                (loop for (pat cat reason) in entries
+                      collect (list (if (integerp pat) pat (ppcre:create-scanner pat))
+                                    cat reason pat)))))
+
+(defmacro register-skips (basename &rest entries)
+  "Register not-supported test skips for BASENAME.  Each ENTRY is an unquoted list
+   (MATCHER CATEGORY-KEYWORD REASON-STRING) — MATCHER is a description-regex string or an
+   exact test-number integer (for unnamed tests)."
+  `(%register-skips ,basename ',entries))
 
 ;;; Export test functions
 (export '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
@@ -94,8 +184,41 @@
   (sb-ext:exit :code 255))
 
 ;;; Core: _ok(pass, name, @diag)
+(defun %skip-registry-lookup (name)
+  "Return the matching registry entry for the current test under *current-test-file*, or NIL.
+   A string matcher is matched against the test description; an integer matcher against the
+   current test number (*test-count*, already incremented by test-ok)."
+  (let* ((entries (and *current-test-file*
+                       (gethash *current-test-file* *skip-registry*)))
+         (disp (test-display-value name))
+         (str  (and disp (to-string disp))))
+    (when entries
+      (dolist (e entries)
+        (let ((matcher (first e)))
+          (when (if (integerp matcher)
+                    (= matcher *test-count*)
+                    (and str (ppcre:scan matcher str)))
+            (return e)))))))
+
 (defun test-ok (pass name &rest diag)
   (incf *test-count*)
+  ;; Record the last test to run (all paths: pass/fail/skip) for crash localization.
+  (setf *last-test-name* (or (test-display-value name) "(unnamed)"))
+  (let ((entry (%skip-registry-lookup name)))
+    ;; Registry says this test is documented not-supported.
+    (when entry
+      (cond
+        ((not pass)
+         ;; Expected failure -> emit a real TAP skip (counts as neither pass nor fail).
+         (incf *test-skipped*)
+         (format t "ok ~A # skip ~A~%" *test-count* (third entry))
+         (return-from test-ok nil))
+        (t
+         ;; Unexpectedly passes -> emit ok AND flag the stale registry entry.
+         (format t "ok ~A~@[ - ~A~]~%" *test-count* (test-display-value name))
+         (format t "# REGISTRY-STALE: ~A test ~A now passes; drop skip-registry pattern ~S~%"
+                 *current-test-file* *test-count* (fourth entry))
+         (return-from test-ok t)))))
   (let* ((display-name (test-display-value name))
          (out (if display-name
                   (format nil "~A ~A - ~A"
@@ -108,6 +231,7 @@
     (format t "~A~%" out)
     (unless pass
       (incf *test-failures*)
+      (%test-log-failure *test-count* name diag)
       (when diag
         (dolist (d diag)
           (format t "# ~A~%" d))))
@@ -316,6 +440,16 @@
         (when (and *test-planned* (/= *test-count* *test-planned*))
           (format t "# Looks like you planned ~A tests but ran ~A.~%"
                   *test-planned* *test-count*))
+        ;; Crash localization: running FEWER tests than planned means the run is
+        ;; INCOMPLETE.  Emit a neutral, machine-parseable fact (the exit hook
+        ;; fires both on a clean EOF and on an unhandled condition under
+        ;; --non-interactive, and cannot itself tell which).  The *sweep* knows
+        ;; the SBCL exit code and refines this into either "crashed mid-file
+        ;; (crash site ~test N+1)" or "reached EOF but under-counted".
+        (when (and *test-planned* (< *test-count* *test-planned*))
+          (format t "# PCL-INCOMPLETE last=~A planned=~A desc=~A~%"
+                  *test-count* *test-planned* (or *last-test-name* "?"))
+          (force-output))
         (when *test-no-plan*
           (format t "1..~A~%" *test-count*)))
       sb-ext:*exit-hooks*)

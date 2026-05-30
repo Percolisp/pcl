@@ -1,0 +1,108 @@
+#!/usr/bin/env perl
+# list-scalar-context-01.t — array/list/slice behaviour in scalar context,
+# and slice interpolation in strings.
+#
+# Covers (session 215):
+#  - array variable in scalar context  -> element COUNT      (return @a, my $s=@a)
+#  - slice in scalar context           -> LAST element       (return @a[..], my $s=@a[..])
+#  - map/grep in scalar context        -> COUNT
+#  - `return do { @a }` inherits the caller's context (scalar -> count, list -> elems)
+#  - array/hash slice interpolated in a string joins with $" (was: ARRAY(0x..))
+#  - split nested in join: pattern arg stays scalar (was: =~ returned a list)
+
+use v5.30;
+use strict;
+use warnings;
+use Test::More;
+use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+
+my $project_root = "$RealBin/../..";
+my $pl2cl        = "$project_root/pl2cl";
+my $runtime      = "$project_root/cl/pcl-runtime.lisp";
+
+plan skip_all => "pl2cl not found" unless -x $pl2cl;
+plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
+
+plan tests => 13;
+
+sub run_cl {
+    my ($code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    my $cl_code = `$pl2cl $pl_file 2>/dev/null`;
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl_code;
+    close $cl_fh;
+    my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+    $output =~ s/^;.*\n//gm;
+    $output =~ s/^PCL Runtime loaded\n//gm;
+    $output =~ s/^\s*\n//gm;
+    return $output;
+}
+
+sub test_cl {
+    my ($name, $code, $expected) = @_;
+    is(run_cl($code), $expected, $name);
+}
+
+# ── array variable in scalar context = count ─────────────────────────────────
+test_cl('return @a in scalar context = count',
+    'our @a=(7,8,9); sub g { return @a } my $s=g(); print "$s\n";',
+    "3\n");
+
+test_cl('my $s = @a is count',
+    'our @a=(7,8,9); my $s = @a; print "$s\n";',
+    "3\n");
+
+test_cl('return map in scalar context = count',
+    'our @a=(7,8,9); sub g { return map {$_} @a } my $s=g(); print "$s\n";',
+    "3\n");
+
+# ── slice in scalar context = LAST element ───────────────────────────────────
+test_cl('return @a[..] in scalar context = last element',
+    'our @a=(5,3,1,9); sub g { return @a[0,1,2] } my $s=g(); print "$s\n";',
+    "1\n");
+
+test_cl('my $s = @a[..] is last element',
+    'our @a=(5,3,1,9); my $s = @a[0,1,2]; print "$s\n";',
+    "1\n");
+
+test_cl('my $s = @h{..} is last value',
+    'my %h=(x=>10,y=>20,z=>30); my $s = @h{qw(x y z)}; print "$s\n";',
+    "30\n");
+
+# ── slices stay full lists in list context ───────────────────────────────────
+test_cl('@a[..] in list assignment keeps all elements',
+    'our @a=(5,3,1,9); my @b = @a[0,1,2]; print "@b\n";',
+    "5 3 1\n");
+
+# ── return do { @a } inherits caller context ─────────────────────────────────
+test_cl('return do { @a } scalar context = count',
+    'our @a=(7); my $x = sub { do { return do { @a } }; 2 }->(); print "$x\n";',
+    "1\n");
+
+test_cl('return do { @a } list context = elements',
+    'our @a=(7,8); my @x = sub { do { return do { @a } }; 2 }->(); print "@x\n";',
+    "7 8\n");
+
+# ── array/hash slice interpolation joins with $" ─────────────────────────────
+test_cl('array slice interpolates joined (not ARRAY(0x..))',
+    'our @a=(5,3,1,9); print "@a[0,2]\n";',
+    "5 1\n");
+
+test_cl('hash slice interpolates joined',
+    'my %h=(x=>10,y=>20,z=>30); print "@h{qw(x z)}\n";',
+    "10 30\n");
+
+test_cl('single element interpolation still works',
+    'our @a=(5,3,1,9); print "$a[2]\n";',
+    "1\n");
+
+# ── split nested in join: pattern arg evaluated in scalar context ────────────
+# `'abc' =~ /b/` is split's scalar pattern (-> 1, matches the "1" chars); the
+# enclosing join must not impose list context (which made =~ return a list).
+test_cl('split pattern arg stays scalar inside join',
+    q{my $r = join ':', split('abc' =~ /b/, 'p1q1r1s'); print "$r\n";},
+    "p:q:r:s\n");

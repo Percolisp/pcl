@@ -379,4 +379,80 @@ test_transpile("prototype() returns undef", '
   print defined($p) ? "defined" : "undef", "\n";
 ', "undef\n");
 
+# Unary + is a pure no-op disambiguator (perlop): must not numify or collapse a
+# list. `map +(LIST)` must preserve the list; +(EXPR) must not become a 1-vector.
+test_transpile("unary +: map +(LIST) preserves list", '
+  my @x = map +($_, $_*10), (1,2,3);
+  print "@x\n";
+', "1 10 2 20 3 30\n");
+
+test_transpile("unary +: map +(key,val) over hash", '
+  my %h = (1,2,3,4);
+  my @x = map +($_, $h{$_}), sort keys %h;
+  print "@x\n";
+', "1 2 3 4\n");
+
+test_transpile("unary +: print +(EXPR) stays scalar", '
+  print +(2+3), "\n";
+', "5\n");
+
+test_transpile("unary +: no-op on string (no numify)", '
+  my $s = +"3abc";
+  print "$s\n";
+', "3abc\n");
+
+test_transpile("unary +: parenthesised array spreads in list", '
+  my @a = (1,2,3);
+  my @b = +(@a);
+  print "@b\n";
+', "1 2 3\n");
+
+# A %hash used as a list element must flatten to its key/value pairs (list
+# context), not stringify as HASH(0x..). Covers join, foreach, and print.
+test_transpile("hash flattens in join", '
+  my %h = (e => 1);
+  print join(":", %h), "\n";
+', "e:1\n");
+
+test_transpile("hash flattens in foreach", '
+  my %h = (a => 1);
+  for (%h) { print "$_ " }
+  print "\n";
+', "a 1 \n");
+
+test_transpile("hash flattens mixed with scalars in join", '
+  my %h = (x => 9);
+  print join(",", "p", %h, "q"), "\n";
+', "p,x,9,q\n");
+
+# print takes a LIST: a bare @array / %hash must flatten, not stringify as a ref.
+test_transpile("print flattens array", '
+  my @a = (1,2,3);
+  print @a, "\n";
+', "123\n");
+
+test_transpile("print flattens hash", '
+  my %h = (e => 1);
+  print %h, "\n";
+', "e1\n");
+
+test_transpile("print keeps a ref as a scalar", '
+  my @a = (1,2,3);
+  my $r = \@a;
+  print ref($r), "\n";
+', "ARRAY\n");
+
+test_transpile("push flattens a hash", '
+  my %h = (e => 1);
+  my @a;
+  push @a, %h;
+  print "@a\n";
+', "e 1\n");
+
+test_transpile("map over a hash flattens it", '
+  my %h = (a => 1);
+  my @r = map { uc } %h;
+  print join(",", sort @r), "\n";
+', "1,A\n");
+
 done_testing();

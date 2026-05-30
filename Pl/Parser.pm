@@ -119,41 +119,60 @@ sub _build_environment {
 
 sub _preprocess_source {
   my ($src) = @_;
-  # Convert C99/Perl hex float literals (0x1.8p-1, 0xa_b.c_dp+1_2) to decimal
-  # before PPI sees them. PPI doesn't understand the 'p' exponent marker and
-  # misparses these as: 0x1 . p - 1  (hex-num, concat, bareword, minus, num).
-  # Perl allows underscore separators anywhere in hex floats.
-  # Format: 0x[hex_][.[hex_]]p[+-][decimal_]
-  $src =~ s{0x([0-9a-fA-F_]*)\.?([0-9a-fA-F_]*)[pP]([+-]?[\d_]+)}{
-    my ($int_str, $frac_str, $exp_str) = ($1, $2, $3);
-    $int_str  =~ s/_//g;
-    $frac_str =~ s/_//g;
-    $exp_str  =~ s/_//g;
-    my $mantissa = ($int_str ne '' ? hex($int_str) : 0);
-    $mantissa += hex($frac_str) / (16 ** length($frac_str)) if $frac_str ne '';
-    sprintf("%.17g", $mantissa * (2 ** $exp_str));
-  }ge;
-  # Convert binary float literals (0b1.1p0, 0b10p-2) to decimal before PPI.
-  $src =~ s{0b([01_]+)(?:\.([01_]*))?[pP]([+-]?[\d_]+)}{
-    my ($int_str, $frac_str, $exp_str) = ($1, $2 // '', $3);
-    $int_str  =~ s/_//g;
-    $frac_str =~ s/_//g;
-    $exp_str  =~ s/_//g;
-    my $mantissa = oct("0b$int_str");
-    $mantissa += oct("0b$frac_str") / (2 ** length($frac_str)) if $frac_str ne '';
-    sprintf("%.17g", $mantissa * (2 ** $exp_str));
-  }ge;
-  # Convert octal float literals (010.1p0, 00p0) to decimal before PPI.
-  # Negative lookbehind prevents matching digits inside a larger number.
-  $src =~ s{(?<!\w)0([0-7_]+)(?:\.([0-7_]*))?[pP]([+-]?[\d_]+)}{
-    my ($int_str, $frac_str, $exp_str) = ($1, $2 // '', $3);
-    $int_str  =~ s/_//g;
-    $frac_str =~ s/_//g;
-    $exp_str  =~ s/_//g;
-    my $mantissa = oct("0$int_str");
-    $mantissa += oct("0$frac_str") / (8 ** length($frac_str)) if $frac_str ne '';
-    sprintf("%.17g", $mantissa * (2 ** $exp_str));
-  }ge;
+  # hex()/oct() on a hex-float mantissa (below) can exceed 0xffffffff (32-bit),
+  # which makes Perl emit spurious 'Hexadecimal number > 0xffffffff non-portable'
+  # / 'Integer overflow' warnings *from our own toolchain* while transpiling source
+  # that legitimately contains large hex literals (hexfp.t, sprintf.t). These
+  # conversions are intentional and correct on 64-bit, so silence the noise.
+  no warnings 'portable', 'overflow';
+  # Convert C99/Perl hex/binary/octal float literals (0x1.8p-1, 0b10p-2, 010.1p0)
+  # to decimal before PPI sees them. PPI doesn't understand the 'p' exponent marker
+  # and misparses 0x1.8p-1 as: 0x1 . p - 1 (hex-num, concat, bareword, minus, num).
+  # Perl allows underscore separators anywhere in these literals.
+  #
+  # CRITICAL: only convert *numeric literals*, never text that merely looks like one
+  # inside a quoted string (e.g. the string '0x1p+0' must stay '0x1p+0', not become
+  # '1'). Each substitution therefore matches a quoted string as its FIRST alternative
+  # and passes it through unchanged, so the float pattern is never seen inside a string.
+  # (A float pattern inside a comment is harmless to convert — PPI discards comments —
+  # so comments are not specially skipped.)
+  my $str_re = qr{'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"};
+  # Hex float: 0x[hex_][.[hex_]]p[+-][decimal_]
+  $src =~ s{($str_re)|0x([0-9a-fA-F_]*)\.?([0-9a-fA-F_]*)[pP]([+-]?[\d_]+)}{
+    if (defined $1) { $1 } else {
+      my ($int_str, $frac_str, $exp_str) = ($2, $3, $4);
+      $int_str  =~ s/_//g;
+      $frac_str =~ s/_//g;
+      $exp_str  =~ s/_//g;
+      my $mantissa = ($int_str ne '' ? hex($int_str) : 0);
+      $mantissa += hex($frac_str) / (16 ** length($frac_str)) if $frac_str ne '';
+      sprintf("%.17g", $mantissa * (2 ** $exp_str));
+    }
+  }gex;
+  # Binary float: 0b1.1p0, 0b10p-2
+  $src =~ s{($str_re)|0b([01_]+)(?:\.([01_]*))?[pP]([+-]?[\d_]+)}{
+    if (defined $1) { $1 } else {
+      my ($int_str, $frac_str, $exp_str) = ($2, $3 // '', $4);
+      $int_str  =~ s/_//g;
+      $frac_str =~ s/_//g;
+      $exp_str  =~ s/_//g;
+      my $mantissa = oct("0b$int_str");
+      $mantissa += oct("0b$frac_str") / (2 ** length($frac_str)) if $frac_str ne '';
+      sprintf("%.17g", $mantissa * (2 ** $exp_str));
+    }
+  }gex;
+  # Octal float: 010.1p0, 00p0.  Lookbehind prevents matching digits inside a larger number.
+  $src =~ s{($str_re)|(?<!\w)0([0-7_]+)(?:\.([0-7_]*))?[pP]([+-]?[\d_]+)}{
+    if (defined $1) { $1 } else {
+      my ($int_str, $frac_str, $exp_str) = ($2, $3 // '', $4);
+      $int_str  =~ s/_//g;
+      $frac_str =~ s/_//g;
+      $exp_str  =~ s/_//g;
+      my $mantissa = oct("0$int_str");
+      $mantissa += oct("0$frac_str") / (8 ** length($frac_str)) if $frac_str ne '';
+      sprintf("%.17g", $mantissa * (2 ** $exp_str));
+    }
+  }gex;
   # Strip type annotations from foreach loop variables: `for my Dog $spot` → `for my $spot`.
   # Perl allows `for my ClassName $var` but PPI can't parse the ClassName and stops,
   # producing a broken AST. PCL ignores type constraints anyway, so just drop them.
@@ -1522,8 +1541,10 @@ sub _process_our_declaration {
           }
         }
       });
-      # Now do the assignment at runtime
-      my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+      # Now do the assignment at runtime.
+      # our (...) = (...) is a list assignment, so the RHS is LIST context
+      # (so '1..3' generates a range, not a flip-flop).
+      my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, 1) // 'nil';  # 1 = LIST_CTX
       my $vars_vector = "(vector " . join(" ", @vars) . ")";
       $self->_emit("(p-list-= $vars_vector $init_cl)");
     }

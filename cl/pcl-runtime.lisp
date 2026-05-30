@@ -63,7 +63,7 @@
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
    #:p-ensure-hashref #:p-ensure-arrayref
-   #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice
+   #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
@@ -102,7 +102,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-file
    ;; Functions
-   #:p-backslash #:p-backslash-sub #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
+   #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -505,14 +505,29 @@
   tie-obj       ; object returned by TIESCALAR/TIEARRAY/TIEHASH
   saved-value)  ; p-box-value before tie was installed (restored on untie)
 
+;;; A magical scalar lvalue.  Like p-tie-proxy it lives in a p-box's value slot
+;;; and is intercepted at the unbox/box-set chokepoints, but it dispatches to two
+;;; CL closures rather than a Perl tie object: reading calls GETTER, writing calls
+;;; SETTER.  Used for \$#array (arylen) and reusable for other magic lvalue refs
+;;; (\substr / \pos / \vec).  See docs/sweep-bug-catalog.md (array.t arylen).
+(defstruct p-magic-cell
+  getter        ; (function () -> value)        — invoked by unbox
+  setter        ; (function (new-value) -> value) — invoked by box-set
+  (kind nil))   ; nil → ref()="SCALAR" (arylen); :lvalue → ref()="LVALUE"
+                                        ;   (\substr / \pos / \vec), matching Perl's reftype.
+
 (defun unbox (val)
   "Extract value from a box, or return val if not boxed.
-   If the box contains a p-tie-proxy, dispatches to FETCH."
+   If the box contains a p-tie-proxy, dispatches to FETCH.
+   If the box contains a p-magic-cell, dispatches to its getter."
   (if (p-box-p val)
       (let ((v (p-box-value val)))
-        (if (p-tie-proxy-p v)
-            (unbox (p-method-call (p-tie-proxy-tie-obj v) "FETCH"))
-            v))
+        (cond
+          ((p-tie-proxy-p v)
+           (unbox (p-method-call (p-tie-proxy-tie-obj v) "FETCH")))
+          ((p-magic-cell-p v)
+           (funcall (p-magic-cell-getter v)))
+          (t v)))
       val))
 
 (defun ensure-boxed (val)
@@ -587,12 +602,16 @@
    If box is tied (contains a p-tie-proxy), routes through STORE."
   (unless (p-box-p box)
     (return-from box-set value))
-  ;; Tied variable: delegate to STORE
+  ;; Tied variable: delegate to STORE.  Magic lvalue: delegate to its setter.
   (let ((current (p-box-value box)))
     (when (p-tie-proxy-p current)
       (return-from box-set
         (p-method-call (p-tie-proxy-tie-obj current) "STORE"
-                       (if (p-box-p value) (unbox value) value)))))
+                       (if (p-box-p value) (unbox value) value))))
+    (when (p-magic-cell-p current)
+      (return-from box-set
+        (funcall (p-magic-cell-setter current)
+                 (if (p-box-p value) (unbox value) value)))))
   (let ((v (if (p-box-p value)
                (let ((inner (p-box-value value)))
                  (cond
@@ -601,6 +620,10 @@
                    ;; into $c, making $c appear tied too.
                    ((p-tie-proxy-p inner)
                     (unbox (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))
+                   ;; Magic source ($c = $$arylen_ref): copy the getter's VALUE,
+                   ;; not the magic cell itself (else $c would alias the magic).
+                   ((p-magic-cell-p inner)
+                    (funcall (p-magic-cell-getter inner)))
                    ;; If inner is a box, this is a reference.
                    ;; If value itself is a ref-wrapper (from p-backslash), preserve it as-is.
                    ;; If value is a variable box containing a reference, use inner directly
@@ -933,7 +956,9 @@
   (let ((inner (p-box-value box)))
     (when (p-tie-proxy-p inner)
       (return-from box-nv
-        (to-number (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))))
+        (to-number (p-method-call (p-tie-proxy-tie-obj inner) "FETCH"))))
+    (when (p-magic-cell-p inner)
+      (return-from box-nv (to-number (funcall (p-magic-cell-getter inner))))))
   ;; use overload "0+" (numify): call handler if registered for this class
   (let ((handler (p-find-overload box "0+")))
     (when handler
@@ -1044,7 +1069,9 @@
   (let ((inner (p-box-value box)))
     (when (p-tie-proxy-p inner)
       (return-from box-sv
-        (to-string (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))))
+        (to-string (p-method-call (p-tie-proxy-tie-obj inner) "FETCH"))))
+    (when (p-magic-cell-p inner)
+      (return-from box-sv (to-string (funcall (p-magic-cell-getter inner))))))
   ;; use overload '""' (stringify): call handler if registered for this class.
   ;; Checked before cache because the handler result IS the string value.
   (let ((handler (p-find-overload box "\"\"")))
@@ -1068,17 +1095,22 @@
                     ((p-box-p inner)
                      (let* ((inner2 (p-box-value inner))
                             (inner3 (when (p-box-p inner2) (p-box-value inner2))))
-                       (if (and (p-box-p inner2)
-                                (not (or (p-box-p inner3)
-                                         (and (vectorp inner3) (not (stringp inner3)))
-                                         (hash-table-p inner3)
-                                         (functionp inner3)
-                                         (p-typeglob-p inner3)
-                                         (p-regex-match-p inner3))))
-                           ;; inner2 is a box with a scalar payload → SCALAR ref
-                           (format nil "SCALAR(0x~(~X~))" (object-address inner))
-                           ;; inner2 is a ref-type or a raw value → REF
-                           (format nil "REF(0x~(~X~))" (object-address inner)))))
+                       (cond
+                         ;; \substr / \pos / \vec lvalue ref → "LVALUE(0x...)".
+                         ((and (p-magic-cell-p inner3)
+                               (eq (p-magic-cell-kind inner3) :lvalue))
+                          (format nil "LVALUE(0x~(~X~))" (object-address inner)))
+                         ;; inner2 is a box with a scalar payload → SCALAR ref
+                         ((and (p-box-p inner2)
+                               (not (or (p-box-p inner3)
+                                        (and (vectorp inner3) (not (stringp inner3)))
+                                        (hash-table-p inner3)
+                                        (functionp inner3)
+                                        (p-typeglob-p inner3)
+                                        (p-regex-match-p inner3))))
+                          (format nil "SCALAR(0x~(~X~))" (object-address inner)))
+                         ;; inner2 is a ref-type or a raw value → REF
+                         (t (format nil "REF(0x~(~X~))" (object-address inner))))))
                     (t (stringify-value inner))))
              (s (if class
                     (format nil "~A=~A" class raw)
@@ -2376,6 +2408,19 @@
                                            (list (char-code ch)) 0)
                               out))))))
 
+(defun %sprintf-star-positional (fmt-str j len)
+  "After a '*' in a sprintf width/precision, check for an N$ positional reference
+   (e.g. the `3$` in `%*3$d`).  Returns (values positional-index new-j) when present
+   — a 0-based arg index and j advanced past the `$` — or (values NIL j) when the '*'
+   should consume the next sequential argument instead."
+  (let ((peek j) (pn 0) (pd nil))
+    (loop while (and (< peek len) (digit-char-p (char fmt-str peek)))
+          do (setf pn (+ (* pn 10) (digit-char-p (char fmt-str peek))) pd t)
+          (incf peek))
+    (if (and pd (< peek len) (char= (char fmt-str peek) #\$))
+        (values (1- pn) (1+ peek))
+        (values nil j))))
+
 (defun p-sprintf (fmt &rest args)
   "Perl sprintf - full format string parser.
    Supports: %d %i %u %o %x %X %b %B %e %E %f %F %g %G %s %c %%
@@ -2459,12 +2504,17 @@
                                 ;; Parse width
                                 (cond
                                   ((and (< j len) (char= (char fmt-str j) #\*))
-                                   (setf width (truncate (to-number (nth arg-idx args))))
-                                   (when (minusp width)
-                                     (setf flags (concatenate 'string flags "-"))
-                                     (setf width (- width)))
-                                   (incf arg-idx)
-                                   (incf j))
+                                   (incf j)  ; consume '*'
+                                   (multiple-value-bind (pos-idx new-j)
+                                       (%sprintf-star-positional fmt-str j len)
+                                     (setf j new-j)
+                                     (when pos-idx (setf has-positional t))
+                                     (let ((src (or pos-idx arg-idx)))
+                                       (setf width (truncate (to-number (nth src args))))
+                                       (unless pos-idx (incf arg-idx)))
+                                     (when (minusp width)
+                                       (setf flags (concatenate 'string flags "-"))
+                                       (setf width (- width)))))
                                   (t
                                    (let ((w 0) (has-digit nil))
                                      (loop while (and (< j len) (digit-char-p (char fmt-str j)))
@@ -2483,11 +2533,16 @@
                                     ((and (< j len) (char= (char fmt-str j) #\*))
                                      ;; A negative precision supplied via * means the
                                      ;; precision is omitted entirely (Perl semantics),
-                                     ;; not a precision of 0.
-                                     (let ((pv (truncate (to-number (nth arg-idx args)))))
-                                       (setf precision (if (minusp pv) nil pv)))
-                                     (incf arg-idx)
-                                     (incf j))
+                                     ;; not a precision of 0.  Supports `.*N$` positional.
+                                     (incf j)  ; consume '*'
+                                     (multiple-value-bind (pos-idx new-j)
+                                         (%sprintf-star-positional fmt-str j len)
+                                       (setf j new-j)
+                                       (when pos-idx (setf has-positional t))
+                                       (let* ((src (or pos-idx arg-idx))
+                                              (pv (truncate (to-number (nth src args)))))
+                                         (setf precision (if (minusp pv) nil pv))
+                                         (unless pos-idx (incf arg-idx)))))
                                     (t
                                      (let ((p 0) (has-digit nil))
                                        (loop while (and (< j len) (digit-char-p (char fmt-str j)))
@@ -2823,6 +2878,17 @@
                    result)))))
       (add src))
     result))
+
+(defun %p-hash-keyval-list (h)
+  "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...) of boxed values,
+   matching how %hash flattens in list context (same pairing as %p-flatten-list).
+   Used by list consumers that flatten %hash args: join, foreach, push, map/grep."
+  (let ((result nil))
+    (maphash (lambda (k v)
+               (push (make-p-box k) result)
+               (push (if (p-box-p v) v (make-p-box v)) result))
+             h)
+    (nreverse result)))
 
 (defmacro p-list-= (place value)
   "List destructuring assignment: (p-list-= (vector $a $b) expr).
@@ -4348,6 +4414,15 @@
   "Implementation of push - stores values in boxes for l-value semantics.
    Recognizes p-flatten-marker to flatten @array arguments.
    Also spreads raw CL vectors (e.g. from qw!...! or list-context expressions)."
+  ;; push's first arg must be a real array.  Without this guard, pushing onto a
+  ;; non-array (a literal, or a scalar/ref) reaches %p-array-store-scalar / length
+  ;; and leaks a raw CL type error (a Lisp struct dump) into $@.  Perl dies
+  ;; "...must be array" for a literal and "Experimental push on scalar is now
+  ;; forbidden" for the removed experimental autoderef on a scalar/ref.
+  (unless (and (vectorp arr) (not (stringp arr)))
+    (if (p-box-p arr)
+        (error "Experimental push on scalar is now forbidden")
+        (error "Type of arg 1 to push must be array (not constant item)")))
   (dolist (item items)
     (let ((val (unbox item)))
       (cond
@@ -4362,6 +4437,10 @@
         ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
          (loop for elem across val do
                (%p-array-store-scalar arr elem)))
+        ;; Raw hash-table (not a ref): spread to key/value pairs (%hash in list ctx).
+        ((and (hash-table-p val) (not (p-box-p item)) (not (gethash :__class__ val)))
+         (dolist (kv (%p-hash-keyval-list val))
+           (%p-array-store-scalar arr kv)))
         ;; Regular value - preserve bless class via %p-array-store-scalar
         (t (%p-array-store-scalar arr item)))))
   (length arr))
@@ -5288,6 +5367,9 @@ Uses tagbody/go instead of loop — see p-while for rationale."
    - Scalar -> single-element vector"
   (let ((val (unbox raw)))
     (cond
+      ((hash-table-p val)
+       ;; %hash as a foreach list flattens to its key/value pairs (same as %p-flatten-list)
+       (coerce (%p-hash-keyval-list val) 'vector))
       ((not (and (vectorp val) (not (stringp val))))
        (vector raw))
       ((p-box-p raw)
@@ -5345,15 +5427,16 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
     ;; Not a box - handle arrays context-sensitively
     ((not (p-box-p val))
      (cond
-       ;; Plain array/list in scalar context: Perl list-in-scalar = last element.
-       ;; Applies to array slices (@a[0..N]), map results, etc. returned in scalar.
-       ;; Note: @a (array variable) in scalar gives count, but that goes through
-       ;; p-scalar directly, not through p-return-value.
+       ;; Plain array in scalar context: Perl array-in-scalar = element count.
+       ;; This matches box-set (which counts adjustable vectors), so explicit
+       ;; `return @a` agrees with the implicit-tail form `sub { @a }`.  Note: a
+       ;; literal list `return (5,3,1)` does NOT reach here — it arrives as
+       ;; multiple values and is handled by p-return's multi-value branch (last
+       ;; element).  Only array variables, map/grep results, and blocks returning
+       ;; arrays reach here as a single vector; Perl counts those in scalar.
        ((and (not *wantarray*)
              (vectorp val) (not (stringp val)) (adjustable-array-p val))
-        (if (zerop (length val))
-            nil
-            (p-return-value (aref val (1- (length val))))))
+        (length val))
        ;; nil (undef/empty-list) in list context: return empty list vector
        ;; so bare `return` and `return ()` contribute 0 elements to surrounding list.
        ((and (eq *wantarray* t) (null val))
@@ -5372,6 +5455,22 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
      val)
     ;; Simple scalar box - return the unboxed value
     (t (unbox val))))
+
+(defun p-list-scalar (val)
+  "A list/slice evaluated in scalar context yields its LAST element (undef if
+   empty) — the comma-operator semantics.  This differs from an array variable
+   in scalar context, which yields the element COUNT.  Slices, sort, and bare
+   list literals use this; arrays/map/grep/keys/values use the count path."
+  (if (and (vectorp val) (not (stringp val)))
+      (if (zerop (length val)) nil (aref val (1- (length val))))
+      val))
+
+(defun p-slice-result (val)
+  "Context-dispatch for a slice whose context is only known at runtime (e.g. it
+   is the argument of `return`): list context keeps the vector, scalar context
+   reduces to the last element.  *wantarray* is :void / t (truthy) for
+   void/list and nil for scalar."
+  (if *wantarray* val (p-list-scalar val)))
 
 (defun p-goto-computed (label)
   "Perl goto EXPR (computed goto) — not implementable in CL; silently ignore."
@@ -5449,7 +5548,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (setf fh (p-get-stream (second args)))
       (setf args (cddr args)))
-    (dolist (arg args)
+    ;; Flatten raw @array / %hash args (print takes a LIST): a bare vector/hash
+    ;; spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar
+    ;; (so `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
+    (dolist (arg (coerce (p-flatten-args args) 'list))
       (princ (to-string arg) fh))
     ;; Append output record separator $\ if set
     (let ((ors (unbox |$\\|)))
@@ -7211,9 +7313,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (loop for x across (p-flatten-marker-array item) do (vector-push-extend x result)))
         (t
          (let ((val (unbox item)))
-           (if (and (vectorp val) (not (stringp val)))
-               (loop for x across val do (vector-push-extend x result))
-               (vector-push-extend item result))))))
+           (cond
+             ((and (vectorp val) (not (stringp val)))
+              (loop for x across val do (vector-push-extend x result)))
+             ;; Raw %hash (not a ref): spread to key/value pairs in list context.
+             ((and (hash-table-p val) (not (p-box-p item)))
+              (dolist (kv (%p-hash-keyval-list val)) (vector-push-extend kv result)))
+             (t (vector-push-extend item result)))))))
     result))
 
 (defun %p-map-copy-scalar (r)
@@ -7323,7 +7429,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
    Handles both (join SEP @array) and (join SEP elem1 elem2 ...).
-   Arrays and vectors in the argument list are flattened."
+   Arrays/vectors and hashes in the argument list are flattened."
   (let* (;; Warn for undef separator (Perl warns regardless of list length).
          ;; Skip for tied sep to avoid premature FETCH before item-count check.
          (_ (when (and (not (and (p-box-p sep) (p-tie-proxy-p (p-box-value sep))))
@@ -7335,6 +7441,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            for raw = (if (p-box-p item) (p-box-value item) item)
                            if (and (vectorp raw) (not (stringp raw)))
                            sum (length raw)
+                           else if (hash-table-p raw)
+                           sum (* 2 (hash-table-count raw))
                            else if (and (listp raw) raw)
                            sum (length raw)
                            else sum 1))
@@ -7348,6 +7456,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                          for val = (unbox item)
                          if (and (vectorp val) (not (stringp val)))
                          append (coerce val 'list)
+                         else if (hash-table-p val)
+                         append (%p-hash-keyval-list val)
                          else if (and (listp val) val)
                          append val
                          else
@@ -7360,6 +7470,27 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (format nil (concatenate 'string "~{~A~^" s "~}")
                 (mapcar #'to-string elements))
         (if elements (to-string (car elements)) ""))))
+
+(defun %perl-space-char-p (c)
+  "T if C is whitespace under Perl's Unicode \\p{White_Space} property — the set that
+   `\\s` and `split ' '` match under /u.  PCL strings are always Unicode (no per-scalar
+   UTF8 flag, no `use bytes`), so split ' ' always uses this full set rather than the
+   ASCII-only subset.  This is what lets `split ' '` find \\xA0/\\x85/\\x{2000}.. as
+   separators (RT #130907); the inverse /d byte-mode behaviour is not representable and
+   is documented not-supported."
+  (or (char= c #\Space) (char= c #\Tab) (char= c #\Newline)
+      (char= c #\Return) (char= c #\Page)              ; \x20 \x09 \x0A \x0D \x0C
+      (let ((cp (char-code c)))
+        (or (= cp #x0B)                                ; LINE TABULATION (vtab)
+            (= cp #x85)                                ; NEXT LINE (NEL)
+            (= cp #xA0)                                ; NO-BREAK SPACE
+            (= cp #x1680)                              ; OGHAM SPACE MARK
+            (<= #x2000 cp #x200A)                      ; EN QUAD .. HAIR SPACE
+            (= cp #x2028)                              ; LINE SEPARATOR
+            (= cp #x2029)                              ; PARAGRAPH SEPARATOR
+            (= cp #x202F)                              ; NARROW NO-BREAK SPACE
+            (= cp #x205F)                              ; MEDIUM MATHEMATICAL SPACE
+            (= cp #x3000)))))                          ; IDEOGRAPHIC SPACE
 
 (defun p-split (pattern str &optional limit)
   "Perl split - split string by pattern.
@@ -7423,22 +7554,25 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                (list s))))))
            (dolist (p parts)
              (vector-push-extend (or p *p-undef*) result))))
-        ;; Special whitespace splitting: " " splits on runs of whitespace
+        ;; Special whitespace splitting: " " splits on runs of whitespace and strips
+        ;; leading whitespace (Perl's awk-mode split ' ').  Uses the full Unicode
+        ;; whitespace set via %perl-space-char-p (so \xA0/\x85/\x{2000}.. separate too).
+        ;; Iterating the raw string and only opening a word on a non-space naturally
+        ;; skips leading whitespace and collapses runs; trailing whitespace closes the
+        ;; final word with nothing after it.
         ((and (stringp pattern) (string= pattern " "))
-         (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
-           (unless (zerop (length trimmed))
-             (let ((in-word nil) (word-start 0))
-               (loop for i from 0 below (length trimmed)
-                     for c = (char trimmed i)
-                     do (cond
-                          ((and (not in-word) (not (member c '(#\Space #\Tab #\Newline #\Return))))
-                           (setf in-word t word-start i))
-                          ((and in-word (member c '(#\Space #\Tab #\Newline #\Return)))
-                           (when (or (null max-fields) (< (length result) (1- max-fields)))
-                             (vector-push-extend (subseq trimmed word-start i) result)
-                             (setf in-word nil)))))
-               (when in-word
-                 (vector-push-extend (subseq trimmed word-start) result))))))
+         (let ((in-word nil) (word-start 0))
+           (loop for i from 0 below (length s)
+                 for c = (char s i)
+                 do (cond
+                      ((and (not in-word) (not (%perl-space-char-p c)))
+                       (setf in-word t word-start i))
+                      ((and in-word (%perl-space-char-p c))
+                       (when (or (null max-fields) (< (length result) (1- max-fields)))
+                         (vector-push-extend (subseq s word-start i) result)
+                         (setf in-word nil)))))
+           (when in-word
+             (vector-push-extend (subseq s word-start) result))))
         ;; Literal string pattern
         (t
          (let* ((pat (to-string pattern))
@@ -7525,6 +7659,54 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      (let ((b (make-p-box (make-p-box val))))
        (setf (p-box-is-ref b) t)
        b))))
+
+(defun p-arylen-ref (arr)
+  "Perl \\$#array — a live reference to the array-length (arylen) magic of ARR.
+   A plain (p-backslash (p-array-last-index arr)) backslashes a COPY of the
+   integer, so $$ref = N would not resize ARR.  Instead wrap a p-magic-cell whose
+   getter reads the last index and whose setter resizes ARR; reading/writing
+   through the resulting scalar ref then flows through unbox/box-set automatically.
+   ARR is whatever $#array's operand evaluates to (raw @arr vector or a boxed
+   array ref) — p-array-last-index / p-set-array-length both accept either."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :getter (lambda () (p-array-last-index arr))
+     :setter (lambda (n) (p-set-array-length arr (to-number n)))))))
+
+(defun p-substr-ref (str start &optional len)
+  "Perl \\substr(STR, START [, LEN]) — a live reference to the substr lvalue
+   window.  Like p-arylen-ref it wraps a p-magic-cell: reading returns the current
+   substring (p-substr getter), writing replaces that region of STR in place
+   (4-arg p-substr).  STR must be a box for writes to propagate; START/LEN are
+   fixed at refgen time (a fixed window), matching the common \\substr idiom."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :kind :lvalue
+     :getter (lambda () (p-substr str start len))
+     :setter (lambda (v) (p-substr str start len v))))))
+
+(defun p-pos-ref (var)
+  "Perl \\pos(VAR) — a live reference to VAR's /g match-position magic.  Reading
+   returns the current pos (or undef); writing sets it.  VAR must be a box."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :kind :lvalue
+     :getter (lambda () (let ((p (p-pos var))) (if p p *p-undef*)))
+     :setter (lambda (v) (p-pos var v))))))
+
+(defun p-vec-ref (str offset bits)
+  "Perl \\vec(STR, OFFSET, BITS) — a live reference to a vec() lvalue element.
+   Reading returns the element value (p-vec); writing stores it (p-vec-set).
+   STR must be a box; OFFSET/BITS are fixed at refgen time."
+  (p-backslash
+   (make-p-box
+    (make-p-magic-cell
+     :kind :lvalue
+     :getter (lambda () (p-vec str offset bits))
+     :setter (lambda (v) (p-vec-set str offset bits v))))))
 
 (defun p-refgen-list (val)
   "Perl \\(LIST) — distribute reference generation over list elements.
@@ -7691,7 +7873,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((inner (unbox val)))
     (cond
       ((p-box-p inner)
-       (p-box-value inner))
+       ;; If the referent box holds a magic cell (\substr/\pos/\vec via a DIRECT
+       ;; ref, e.g. ${\vec %h,0,1}), fire its getter rather than returning the raw
+       ;; cell struct. Through a variable the cell sits one box deeper and
+       ;; box-set's magic-cell copy arm handles it.
+       (let ((v (p-box-value inner)))
+         (if (p-magic-cell-p v) (funcall (p-magic-cell-getter v)) v)))
       ((stringp inner)
        ;; Symbolic reference: ${"varname"}
        (let ((box (%p-symref-box inner)))
@@ -7773,6 +7960,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             do (%p-array-store-scalar arr item)))
     arr))
 
+(defun %scalar-holds-ref-p (referent)
+  "True when REFERENT (a scalar box that some reference points at) itself holds
+   a reference value — i.e. ref(\\referent) is \"REF\", not \"SCALAR\".
+   Non-recursive: only looks one unbox deep, so a self-referential scalar ref
+   ($x = \\$x) does not loop."
+  (and (p-box-p referent)
+       (let ((u (unbox referent)))
+         (or (and (vectorp u) (not (stringp u)))   ; holds an array ref
+             (hash-table-p u)                       ; holds a hash ref
+             (p-regex-match-p u)                    ; holds a regexp ref
+             (functionp u)                          ; holds a code ref
+             (p-typeglob-p u)                       ; holds a glob ref
+             (and (p-box-p u) (p-box-is-ref u))))))  ; holds a scalar/ref wrapper
+
 (defun p-ref (val)
   "Perl ref() function - get reference type or class name if blessed.
    Returns empty string for non-references."
@@ -7792,12 +7993,36 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (p-box-class inner)
            (let ((inner2 (p-box-value inner)))
              (cond
-               ;; Array reference: box containing vector (from p-backslash @arr)
+               ;; Magic lvalue ref (\substr / \pos / \vec): the referent box holds
+               ;; a p-magic-cell with :lvalue kind → "LVALUE" (arylen's cell has
+               ;; kind nil and falls through to "SCALAR").  The referent is `inner`
+               ;; for a direct `\substr(...)` (is-ref wrapper) and `inner2` when the
+               ;; ref was stored through a variable (`my $r = \substr…; ref $r`),
+               ;; mirroring the ref-to-ref arm below.
+               ((let* ((referent (if (p-box-is-ref val) inner inner2))
+                       (rv (and (p-box-p referent) (p-box-value referent))))
+                  (and (p-magic-cell-p rv)
+                       (eq (p-magic-cell-kind rv) :lvalue)))
+                "LVALUE")
+               ;; Direct aggregate referent (raw value held by the pointed-at
+               ;; scalar): \$qr → REGEXP, \$aref → ARRAY, \$href → HASH. These
+               ;; check inner2 (= the referent's held value for a direct `\$x`).
                ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
-               ;; Hash reference: box containing hash-table (from p-backslash %hash)
                ((hash-table-p inner2) (or (gethash :__class__ inner2) "HASH"))
-               ;; Regexp reference: box containing a compiled regex (from p-backslash $qr)
                ((p-regex-match-p inner2) "REGEXP")
+               ;; Ref-to-ref → "REF".  The referent (the scalar pointed at) is
+               ;; `inner` when `val` is itself the ref-wrapper (is-ref set, e.g.
+               ;; a literal `\$x`), else `inner2` (when `val` is a variable whose
+               ;; value is the wrapper).  It is a ref-to-ref iff that referent is
+               ;; itself a ref-wrapper (\\1) or *holds* a reference (\$r, \$aref
+               ;; through a variable).  %scalar-holds-ref-p is non-recursive so a
+               ;; self-referential scalar ($x=\$x) does not loop, and a plain
+               ;; scalar — incl. undef (*p-undef*) and '' array elements — yields
+               ;; SCALAR, not REF.
+               ((let ((referent (if (p-box-is-ref val) inner inner2)))
+                  (or (and (p-box-p referent) (p-box-is-ref referent))
+                      (%scalar-holds-ref-p referent)))
+                "REF")
                ;; Scalar reference: box containing box (from p-backslash $x)
                (t "SCALAR")))))
       ;; Old-format hash reference (autovivified, single-boxed)
@@ -7828,6 +8053,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              ((string= r "ARRAY")  "ARRAY")
              ((string= r "CODE")   "CODE")
              ((string= r "SCALAR") "SCALAR")
+             ((string= r "LVALUE") "LVALUE")
+             ;; ref-to-ref: the referent is still a SCALAR (it happens to hold a ref)
+             ((string= r "REF")    "SCALAR")
              ((string= r "GLOB")   "GLOB")
              ((string= r "") "")
              ;; Blessed object — look at the inner type
@@ -9463,54 +9691,76 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   (write-char (char str i) out)
                   (incf i)))))))
 
+(defun %tr-from-index (code from-set sorted-from complement-p)
+  "Return the position of codepoint CODE within the (possibly complemented) tr
+   search-list, or NIL if CODE is not matched.
+   - Non-complement: the first index of CODE in the search list (from-set hash).
+   - Complement: CODE's rank among all codepoints NOT in the search list, i.e.
+     CODE minus the number of search codepoints strictly less than CODE."
+  (if complement-p
+      (if (nth-value 1 (gethash code from-set))
+          nil
+          (let ((less 0))
+            (loop for fc across sorted-from while (< fc code) do (incf less))
+            (- code less)))
+      (gethash code from-set)))
+
 (defun do-tr (string-box op)
-  "Perform transliteration on boxed string, return count of changes"
+  "Perform transliteration on boxed string.  Returns the count of matched chars,
+   or (with /r) the transliterated copy without modifying STRING-BOX."
   (let* ((str (to-string (unbox string-box)))
-         (from-raw (p-tr-op-from op))
-         (to-raw (p-tr-op-to op))
          (modifiers (p-tr-op-modifiers op))
-         (complement-p (member :c modifiers))
-         (delete-p (member :d modifiers))
-         (squash-p (member :s modifiers))
-         (from-chars (expand-tr-chars from-raw))
-         (to-chars (expand-tr-chars to-raw))
+         (complement-p (and (member :c modifiers) t))
+         (delete-p (and (member :d modifiers) t))
+         (squash-p (and (member :s modifiers) t))
+         (return-p (and (member :r modifiers) t))
+         (from-chars (expand-tr-chars (p-tr-op-from op)))
+         (to-chars (expand-tr-chars (p-tr-op-to op)))
+         (to-len (length to-chars))
+         (from-set (make-hash-table))
          (count 0)
-         (last-char nil))
-    ;; Build translation table
-    (let ((result (with-output-to-string (out)
-                    (loop for c across str
-                          do (let* ((pos (position c from-chars))
-                                    (in-from (if complement-p (null pos) pos)))
-                               (cond
-                                 ;; Character is in from-set (or complement case)
-                                 (in-from
-                                  (incf count)
-                                  (let* ((actual-pos (if complement-p 0 pos))
-                                         (new-char (cond
-                                                     (delete-p nil)
-                                                     ((>= actual-pos (length to-chars))
-                                                      (if (> (length to-chars) 0)
-                                                          (char to-chars (1- (length to-chars)))
-                                                          c))
-                                                     (t (char to-chars actual-pos)))))
-                                    (when new-char
-                                      ;; Squash: skip consecutive identical replacements
-                                      (if (and squash-p (eql new-char last-char))
-                                          nil  ; skip duplicate
-                                          (progn
-                                            (write-char new-char out)
-                                            (setf last-char new-char))))))
-                                 ;; Character not in from-set
-                                 (t
-                                  (write-char c out)
-                                  (setf last-char c))))))))
-      ;; Update the boxed string (and invalidate caches)
-      (if (p-box-p string-box)
-          (setf (p-box-value string-box) result
-                (p-box-sv-ok string-box) nil
-                (p-box-nv-ok string-box) nil)
-          (warn "Cannot modify non-boxed value in tr///"))
-      count)))
+         (last-out nil)
+         (last-was-tr nil))
+    ;; from-set: codepoint -> first index in the search list
+    (loop for ch across from-chars for i from 0
+          do (unless (nth-value 1 (gethash (char-code ch) from-set))
+               (setf (gethash (char-code ch) from-set) i)))
+    (let* ((sorted-from (when complement-p
+                          (sort (remove-duplicates
+                                 (map 'vector #'char-code from-chars))
+                                #'<)))
+           (result
+            (with-output-to-string (out)
+              (loop for c across str
+                    for idx = (%tr-from-index (char-code c) from-set
+                                              sorted-from complement-p)
+                    do (cond
+                         (idx
+                          (incf count)
+                          (let ((new-char
+                                 (cond
+                                   ((and delete-p (>= idx to-len)) nil)
+                                   ((zerop to-len) c)  ; empty repl, no /d: identity
+                                   ((>= idx to-len) (char to-chars (1- to-len)))
+                                   (t (char to-chars idx)))))
+                            (cond
+                              ((null new-char) nil)  ; deleted (/d)
+                              ((and squash-p last-was-tr (eql new-char last-out))
+                               nil)                   ; squeezed (/s)
+                              (t (write-char new-char out)
+                                 (setf last-out new-char last-was-tr t)))))
+                         (t
+                          (write-char c out)
+                          (setf last-out c last-was-tr nil)))))))
+      (cond
+        (return-p result)
+        (t
+         (if (p-box-p string-box)
+             (setf (p-box-value string-box) result
+                   (p-box-sv-ok string-box) nil
+                   (p-box-nv-ok string-box) nil)
+             (warn "Cannot modify non-boxed value in tr///"))
+         count)))))
 
 (defun p-=~ (string operation)
   "Perl =~ binding operator.

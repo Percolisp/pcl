@@ -51,7 +51,7 @@ if ($err_content) {
 
 # Run SBCL with timeout (default 300s, override with RUNT_TIMEOUT env var; 0 = no timeout)
 my $timeout = $ENV{RUNT_TIMEOUT} // 300;
-my $sbcl_cmd = "sbcl --control-stack-size 512 --dynamic-space-size 4096 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $root/cl/pcl-test.lisp --load $lisp >$out 2>&1";
+my $sbcl_cmd = "sbcl --control-stack-size 512 --dynamic-space-size 4096 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $root/cl/pcl-test.lisp --load $root/cl/skip-registry.lisp --eval \"(setf pcl::*current-test-file* \\\"$name.t\\\")\" --load $lisp >$out 2>&1";
 system($timeout ? "timeout $timeout $sbcl_cmd" : $sbcl_cmd);
 my $sbcl_exit = $?;
 if ($timeout && ($sbcl_exit >> 8) == 124) {

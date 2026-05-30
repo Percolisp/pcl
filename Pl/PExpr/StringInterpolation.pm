@@ -370,18 +370,30 @@ sub parse_interpolated_variable {
       if ($arrow_pos < length($content)
           && (substr($content, $arrow_pos, 1) eq '['
               || substr($content, $arrow_pos, 1) eq '{')) {
-        # Collect the full expression: $var->[...]->{...} etc.
+        # Collect the full expression: $var->[...]->{...} etc.  After the first
+        # subscript, Perl allows chained subscripts with an IMPLICIT arrow:
+        # "$h->{a}[1]" == $h->{a}->[1], "$a->[1][0]" == $a->[1]->[0],
+        # "$h->{a}{b}{c}" == $h->{a}->{b}->{c}.  So at each step accept either an
+        # explicit '->' before the next bracket, or a bracket directly.
         my $expr_end = $end_pos;
-        while ($expr_end + 1 < length($content)
-               && substr($content, $expr_end, 2) eq '->') {
-          my $after_arrow = $expr_end + 2;
-          last if $after_arrow >= length($content);
-          my $bracket = substr($content, $after_arrow, 1);
-          last unless $bracket eq '[' || $bracket eq '{';
+        while ($expr_end < length($content)) {
+          my $bracket_pos;
+          if (substr($content, $expr_end, 2) eq '->'
+              && ($expr_end + 2) < length($content)
+              && (substr($content, $expr_end + 2, 1) eq '['
+                  || substr($content, $expr_end + 2, 1) eq '{')) {
+            $bracket_pos = $expr_end + 2;   # explicit arrow: ->[ or ->{
+          } elsif (substr($content, $expr_end, 1) eq '['
+                   || substr($content, $expr_end, 1) eq '{') {
+            $bracket_pos = $expr_end;       # implicit arrow: chained [ or {
+          } else {
+            last;
+          }
+          my $bracket = substr($content, $bracket_pos, 1);
           # Find matching closing bracket
           my $close = ($bracket eq '[') ? ']' : '}';
           my $depth = 1;
-          my $i = $after_arrow + 1;
+          my $i = $bracket_pos + 1;
           while ($i < length($content) && $depth > 0) {
             my $ch = substr($content, $i, 1);
             $depth++ if $ch eq $bracket;
@@ -565,7 +577,18 @@ sub parse_array_subscript {
   # (PPI tokens lose content when their parent document is garbage collected)
   my @parts = map { $_->clone() } $stmts[0]->children();
   my $index_id = $parser->parse(\@parts);
-  
+
+  # A leading '@' sigil means a slice: "@a[0,2]" interpolates to the joined
+  # elements at those indices, NOT a single element.  Build a slice node so the
+  # comma list is flattened by p-aslice (which flattens vector indices).
+  if ($var_name =~ /^\@/) {
+    my ($slice_node, $slice_id) = $parser->make_node_insert('slice_a_acc');
+    my $sarr_id = $parser->make_node(PPI::Token::Symbol->new($var_name));
+    $parser->add_child_to_node($slice_id, $sarr_id);
+    $parser->add_child_to_node($slice_id, $index_id);
+    return ($slice_id, $i);
+  }
+
   # Create array access node
   my ($acc_node, $acc_id) = $parser->make_node_insert('a_acc');
 
@@ -696,6 +719,17 @@ sub parse_hash_subscript {
     $key_id = $parser->parse(\@parts);
   }
   
+  # A leading '@' sigil means a hash slice: "@h{a,b}" interpolates to the joined
+  # values for those keys, not a single value.  gen_hash_slice converts the @
+  # sigil to % for the container access.
+  if ($var_name =~ /^\@/) {
+    my ($slice_node, $slice_id) = $parser->make_node_insert('slice_h_acc');
+    my $shash_id = $parser->make_node(PPI::Token::Symbol->new($var_name));
+    $parser->add_child_to_node($slice_id, $shash_id);
+    $parser->add_child_to_node($slice_id, $key_id);
+    return ($slice_id, $i);
+  }
+
   # Create hash access node
   my ($acc_node, $acc_id) = $parser->make_node_insert('h_acc');
 
