@@ -67,8 +67,12 @@ Edit `cl/skip-registry.lisp` — add one line under the file's `register-skips` 
 ## 4. Crashes / PARTIAL — never auto-skipped
 The registry hooks per-assertion (`test-ok`); a crash/abort never reaches it. So:
 - A **PARTIAL** file: the faillog still has every failure *before* the abort. The abort site
-  = last logged test + the sweep's `CRASH/PARTIAL … <snippet>`. Fix the abort (it's a PCL
-  defect) so the rest of the file runs; the registry can then reach the later assertions.
+  is localized automatically (session 217): the test harness emits `# ABORTED after test N
+  (<last-desc>)`, and the sweep records it in `<faillog>/_status.tsv` col 6 and leads the
+  CRASH/PARTIAL snippet with it. So `grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,6` lists
+  every aborting file → the assertion after which it died (crash site = ~test N+1). Open the
+  source at that test, fix the PCL defect so the rest of the file runs; the registry can then
+  reach the later assertions.
 - A **whole-file crash from a not-supported feature** (e.g. `(?{code})`, Tie::Array hang):
   use the file-level `@SKIP` list in `sweep-perl-tests.pl` (coarse), or implement the
   deferred per-statement `handler-case` wrapper (`docs/test-skip-registry.md` §3.1).

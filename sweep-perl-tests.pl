@@ -133,10 +133,21 @@ sub run_one_test {
         }
 
         if ($fail > 0 || $pass == 0 || $status ne 'OK') {
-            ($snippet) = ($out =~ /^(.*?(?:error|UNBOUND|unbound|undefined|Backtrace)[^\n]*)/im);
-            $snippet //= (split /\n/, $out)[0] // '';
-            $snippet =~ s/^\s+//;
-            $snippet = substr($snippet, 0, 100);
+            # For a crash/partial, lead with the test harness's own localization
+            # marker (# ABORTED after test N (desc)) — it names the last test that
+            # ran, so the crash site is the next assertion. Far more useful than
+            # the raw SBCL error, which we append if there's room.
+            my ($aborted) = ($out =~ /^#\s*(ABORTED after test \d+ \([^\n]*?\))/m);
+            # Prefer a genuine SBCL crash line over a test description that merely
+            # contains the word "error".
+            my ($errline) =
+                ($out =~ /^[^\n]*(Unhandled [^\n]*|debugger invoked[^\n]*|fatal error[^\n]*|UNBOUND-VARIABLE[^\n]*|is not of type[^\n]*|undefined function[^\n]*)/im);
+            ($errline) = ($out =~ /^(.*?(?:error|UNBOUND|unbound|undefined|Backtrace)[^\n]*)/im)
+                unless defined $errline;
+            $errline //= (split /\n/, $out)[0] // '';
+            $errline =~ s/^\s+//;
+            $snippet = $aborted ? ($aborted . ' | ' . $errline) : $errline;
+            $snippet = substr($snippet, 0, 160);
         }
     };
     alarm(0);
@@ -308,12 +319,16 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 # remaining assertions) apart from one that genuinely passed.  Without this, a
 # flaky -j8 crash (e.g. pack.t's transient SIMPLE-FILE-ERROR) makes every
 # baseline failure in that file look "FIXED".  One line per file:
-#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned
+#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> note
+# where `note` carries the crash-localization snippet (# ABORTED after test N ...)
+# for CRASH/PARTIAL files.
 if (open my $sf, '>', "$log_dir/_status.tsv") {
     for my $name (sort keys %results) {
         my $r = $results{$name};
+        my $note = ($r->{status} // 'OK') eq 'OK' ? '' : ($r->{snippet} // '');
+        $note =~ s/[\t\n]/ /g;
         print $sf join("\t", $name, $r->{status} // 'OK',
-                       $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1) . "\n";
+                       $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1, $note) . "\n";
     }
     close $sf;
 }

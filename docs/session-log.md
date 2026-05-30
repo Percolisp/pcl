@@ -4,6 +4,33 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 217b (2026-05-30) — crash localization (accelerator #3)
+
+### Built: `# ABORTED after test N (<desc>)` markers for every aborting file
+The CRASH/PARTIAL bucket (bop/eval/caller/length/method/ref/state) was the hardest to debug
+because you didn't know *which statement* aborted. Now you do:
+- `cl/pcl-test.lisp`: new `*last-test-name*` (set in `test-ok` for every assertion); the
+  existing `sb-ext:*exit-hooks*` entry now also emits, when a file ran fewer tests than
+  planned, `# ABORTED after test N (<last-desc>) -- next assertion (~test N+1) is the likely
+  crash site`. Confirmed empirically that exit hooks fire on an unhandled condition under
+  `--non-interactive` (bop.t already printed the existing "planned X but ran Y" hook on crash),
+  so this covers both CRASH and PARTIAL. All 7 target files use a plan, so `*test-planned*`
+  is always set and the `count < planned` trigger is reliable.
+- `sweep-perl-tests.pl`: leads the CRASH/PARTIAL snippet with the ABORTED marker, then
+  appends the *real* SBCL crash line (prefers `Unhandled …`/`is not of type`/`UNBOUND`/… over
+  test descriptions that merely contain "error"); records it in `<faillog>/_status.tsv` col 6.
+- One sweep now maps every aborting file → its crash site. Current map:
+  bop.t after 495 (`IV -1 right shift 64+1`, SIMPLE-ERROR), eval.t after 28 (`is not of type`),
+  caller.t after 65 (`no freed scalars`), length.t after 47 (`There were no other warnings`),
+  method.t after 160 (`undef method name on unblessed ref`), ref.t after 235 (`RT #78288
+  mutable PL_sv_zero copy`), state.t after 162 (`Attempt to free unreferenced scalar`).
+
+Test-infra only (`pcl-test.lisp`, sweep) — not loaded by the `Pl/t` gate; `pcl-runtime.lisp`
+untouched. Full sweep unchanged at 806 honest fails / 63 fully passing (no regression).
+Next: fix the aborts (each unblocks the rest of its file + lets the registry reach later tests).
+
+---
+
 ## Session 217 (2026-05-30) — ref.t skip-registry migration (35), ref-to-ref fix, sweep-diff crash distinction
 
 ### Focus

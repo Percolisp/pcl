@@ -229,12 +229,16 @@ a crashed file emits no failures, so it can never manufacture a false regression
 treated like CRASH: its post-stop assertions did not run, so a "fix" there is unverifiable
 until the early-stop crash is localized — see #3 below.)
 
-### 3. Crash localization (which statement aborted) — planned (falls out for free)
-Because `test-ok` prints `ok N` as it goes, the **last logged line + 1 is the crash site**,
-with the *name* of the next test. Add an `unwind-protect`/exit marker so a CRASH emits
-`# ABORTED after test N (<last-desc>)` automatically. This is the biggest help for the
-CRASH/PARTIAL bucket (bop.t, eval.t, caller/length/method/ref/state), which is otherwise
-the hardest to debug because you do not even know which statement aborted.
+### 3. Crash localization (which statement aborted) — BUILT (session 217)
+`cl/pcl-test.lisp` tracks `*last-test-name*` (set in `test-ok` for every assertion) and its
+`sb-ext:*exit-hooks*` entry emits, when a file ran **fewer** tests than planned (i.e.
+aborted), `# ABORTED after test N (<last-desc>) -- next assertion (~test N+1) is the likely
+crash site`. Exit hooks fire even on an unhandled condition under `--non-interactive`
+(verified), so this works for both CRASH and PARTIAL. `sweep-perl-tests.pl` leads the
+CRASH/PARTIAL snippet with that marker (then appends the real SBCL crash line, preferring
+`Unhandled …`/`is not of type`/… over test descriptions that merely contain "error") and
+records it in `<faillog>/_status.tsv` column 6. So one sweep now maps every aborting file to
+the source assertion that crashed it — `grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,6`.
 
 ### 4. Root-cause clustering — planned (`tools/triage.pl` on top of the log)
 Normalize got/expected (addresses → `ADDR`, numbers → `N`) and group identical shapes

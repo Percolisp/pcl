@@ -14,6 +14,10 @@
 (defvar *test-no-plan* nil)
 (defvar *test-failures* 0)
 (defvar *test-skipped* 0)
+(defvar *last-test-name* nil
+  "Description of the last assertion that ran. Used by the exit hook for crash
+   localization: when a file aborts mid-run, this names the last test that
+   completed, so the next assertion (~test *test-count*+1) is the crash site.")
 
 ;;; ─── Structured failure log (opt-in via PCL_TEST_LOG_DIR) ───────────────────
 ;;; When the env var PCL_TEST_LOG_DIR names a directory, `test-ok` appends one
@@ -190,6 +194,8 @@
 
 (defun test-ok (pass name &rest diag)
   (incf *test-count*)
+  ;; Record the last test to run (all paths: pass/fail/skip) for crash localization.
+  (setf *last-test-name* (or (test-display-value name) "(unnamed)"))
   (let ((entry (%skip-registry-lookup name)))
     ;; Registry says this test is documented not-supported.
     (when entry
@@ -426,6 +432,15 @@
         (when (and *test-planned* (/= *test-count* *test-planned*))
           (format t "# Looks like you planned ~A tests but ran ~A.~%"
                   *test-planned* *test-count*))
+        ;; Crash localization: running FEWER tests than planned means the file
+        ;; aborted (unhandled condition / early die — exit hooks still fire under
+        ;; --non-interactive).  The last completed test is N, so the next
+        ;; assertion (~test N+1) is the likely crash site.  Naming the last test
+        ;; lets you jump straight to the culprit source without bisecting.
+        (when (and *test-planned* (< *test-count* *test-planned*))
+          (format t "# ABORTED after test ~A (~A) -- next assertion (~~test ~A) is the likely crash site~%"
+                  *test-count* (or *last-test-name* "?") (1+ *test-count*))
+          (force-output))
         (when *test-no-plan*
           (format t "1..~A~%" *test-count*)))
       sb-ext:*exit-hooks*)
