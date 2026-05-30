@@ -34,6 +34,7 @@ my $project_root = abs_path(dirname($0));
 my $pl2cl      = "$project_root/pl2cl";
 my $runtime    = "$project_root/cl/pcl-runtime.lisp";
 my $testlib    = "$project_root/cl/pcl-test.lisp";
+my $registry   = "$project_root/cl/skip-registry.lisp";
 my $perl_tests = "$project_root/perl-tests";
 
 unless (@test_files) {
@@ -50,15 +51,23 @@ my $total = scalar @test_files;
 my $tmpdir = tempdir(CLEANUP => 0);
 END { system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir }
 
+# Structured failure log (consumed by tools/sweep-diff.pl and tools/triage.pl).
+# Set PCL_TEST_LOG_DIR so child SBCL processes append one TSV line per FAILING
+# assertion to <dir>/<file>.fails.tsv. Cleared each run for a fresh DB.
+my $log_dir = $ENV{PCL_TEST_LOG_DIR} || "$project_root/.faillog";
+system("rm -rf \Q$log_dir\E"); mkdir $log_dir;
+$ENV{PCL_TEST_LOG_DIR} = $log_dir;   # inherited by all forked children / system() calls
+
 print "Running $total tests with $JOBS parallel jobs (timeout=${TIMEOUT}s)\n";
-print "Skipping: ", join(', ', @SKIP), "\n\n";
+print "Skipping: ", join(', ', @SKIP), "\n";
+print "Failure log: $log_dir/*.fails.tsv\n\n";
 
 # Worker function — runs in child process, writes results to a file
 sub run_one_test {
     my ($file, $result_file) = @_;
     my $name = basename($file);
 
-    my $pass = 0; my $fail = 0; my $planned = -1; my $status = 'OK'; my $snippet = '';
+    my $pass = 0; my $fail = 0; my $skip = 0; my $planned = -1; my $status = 'OK'; my $snippet = '';
 
     eval {
         local $SIG{ALRM} = sub { die "TIMEOUT\n" };
@@ -89,7 +98,7 @@ sub run_one_test {
         # Write to a temp file (not backtick pipe) so SBCL's block-buffered
         # output is not lost when timeout sends SIGKILL.
         my $tmp_out = "/tmp/pcl-sweep-$$.out";
-        system("timeout $TIMEOUT sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $cl_file >$tmp_out 2>&1");
+        system("timeout $TIMEOUT sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --load $cl_file >$tmp_out 2>&1");
         my $sbcl_exit = $? >> 8;
         my $out = do { local $/; my $f; open($f, '<', $tmp_out) ? do { my $c = <$f>; $c // '' } : '' };
         unlink $tmp_out;
@@ -107,12 +116,18 @@ sub run_one_test {
         ($planned) = ($out =~ /^1\.\.(\d+)/m);
         $planned //= -1;
 
-        while ($out =~ /^(not )?ok \d+/gm) { $1 ? $fail++ : $pass++ }
+        # Count: `not ok N` = fail; `ok N # skip ...` = skip (test-own or registry);
+        # plain `ok N` = pass.
+        while ($out =~ /^(not ok|ok) \d+([^\n]*)$/gm) {
+            if    ($1 eq 'not ok')      { $fail++ }
+            elsif ($2 =~ /#\s*skip/i)   { $skip++ }
+            else                        { $pass++ }
+        }
 
         # Detect abnormal termination
         if ($sbcl_exit != 0) {
             $status = 'CRASH';
-        } elsif ($planned >= 0 && ($pass + $fail) < $planned) {
+        } elsif ($planned >= 0 && ($pass + $fail + $skip) < $planned) {
             # SBCL exited cleanly but fewer tests ran than planned — crashed mid-file
             $status = 'PARTIAL';
         }
@@ -135,12 +150,12 @@ sub run_one_test {
         } else {
             ($status, $snippet) = ('ERROR', substr($err, 0, 100));
         }
-        ($pass, $fail) = (0, 0);
+        ($pass, $fail, $skip) = (0, 0, 0);
     }
 
-    # Write tab-separated result (planned added between fail and status)
+    # Write tab-separated result (skip + planned added between fail and status)
     open(my $rf, '>', $result_file) or die;
-    print $rf join("\t", $name, $pass, $fail, $planned, $status, $snippet) . "\n";
+    print $rf join("\t", $name, $pass, $fail, $skip, $planned, $status, $snippet) . "\n";
     close $rf;
 }
 
@@ -187,18 +202,19 @@ while (@queue || %children) {
         $finished++;
 
         # Read result file
-        my $r = { pass => 0, fail => 0, planned => -1, status => 'NO_RESULT', snippet => '' };
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, status => 'NO_RESULT', snippet => '' };
         if (open my $rf, '<', $info->{result_file}) {
             chomp(my $line = <$rf>);
             close $rf;
-            my ($n, $p, $f, $pl, $s, $snip) = split /\t/, $line, 6;
-            $r = { pass => $p // 0, fail => $f // 0, planned => $pl // -1,
+            my ($n, $p, $f, $sk, $pl, $s, $snip) = split /\t/, $line, 7;
+            $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
                    status => $s // 'OK', snippet => $snip // '' };
         }
         $results{$info->{name}} = $r;
 
         my $elapsed = time() - $info->{start};
         my $plan_info = $r->{planned} >= 0 ? "$r->{planned}" : '?';
+        my $skip_info = $r->{skip} ? " skip=$r->{skip}" : '';
         my $line_result =
             $r->{status} eq 'TIMEOUT'        ? "TIMEOUT"                                          :
             $r->{status} eq 'TRANSPILE_FAIL' ? "TRANSPILE FAIL  $r->{snippet}"                   :
@@ -206,8 +222,8 @@ while (@queue || %children) {
             $r->{status} eq 'PARTIAL'        ? "PARTIAL ($r->{pass}+$r->{fail}/$plan_info ran)  $r->{snippet}" :
             $r->{status} eq 'ERROR'          ? "ERROR  $r->{snippet}"                             :
             $r->{fail} == 0 && $r->{pass} == 0 ? "NO OUTPUT  $r->{snippet}"                      :
-            $r->{fail} == 0                  ? "PASS  ($r->{pass}/$plan_info)"                    :
-                                               "pass=$r->{pass} fail=$r->{fail} planned=$plan_info";
+            $r->{fail} == 0                  ? "PASS  ($r->{pass}/$plan_info$skip_info)"          :
+                                               "pass=$r->{pass} fail=$r->{fail}$skip_info planned=$plan_info";
 
         printf "  done  %-22s %s  [%ds]\n", $info->{name}, $line_result, $elapsed;
         STDOUT->flush();
@@ -238,26 +254,27 @@ print "\n" . "=" x 72 . "\n";
 print "RESULTS SUMMARY\n";
 print "=" x 72 . "\n\n";
 
-printf "%-26s %5s %5s  %s\n", "Test", "Pass", "Fail", "Notes";
+printf "%-26s %5s %5s %5s  %s\n", "Test", "Pass", "Fail", "Skip", "Notes";
 printf "%s\n", "-" x 72;
 
-my ($total_pass, $total_fail) = (0, 0);
+my ($total_pass, $total_fail, $total_skip) = (0, 0, 0);
 my (@fully_passing, @crashed_files, @partial_files, @zero_pass, @timeouts);
 
 for my $name (sort { ($results{$b}{pass} <=> $results{$a}{pass}) || ($a cmp $b) } keys %results) {
     my $r = $results{$name};
     $total_pass += $r->{pass};
     $total_fail += $r->{fail};
+    $total_skip += ($r->{skip} // 0);
 
     my $note = ($r->{status} ne 'OK') ? "$r->{status} $r->{snippet}" : $r->{snippet};
     $note = substr($note // '', 0, 40);
 
     my $plan_info = $r->{planned} >= 0 ? "/$r->{planned}" : '';
-    printf "%-26s %5d %5d%s  %s\n", $name, $r->{pass}, $r->{fail}, $plan_info, $note;
+    printf "%-26s %5d %5d %5d%s  %s\n", $name, $r->{pass}, $r->{fail}, ($r->{skip} // 0), $plan_info, $note;
 
     # "Fully passing" requires: clean exit, no failures, at least all planned tests ran
     # (pass+fail > planned is OK — subtests or done_testing() can cause minor over-count)
-    my $all_ran = ($r->{planned} < 0 || ($r->{pass} + $r->{fail}) >= $r->{planned});
+    my $all_ran = ($r->{planned} < 0 || ($r->{pass} + $r->{fail} + ($r->{skip} // 0)) >= $r->{planned});
     push @fully_passing, $name
         if $r->{status} eq 'OK' && $r->{fail} == 0 && $r->{pass} > 0 && $all_ran;
 
@@ -271,8 +288,8 @@ for my $name (sort { ($results{$b}{pass} <=> $results{$a}{pass}) || ($a cmp $b) 
 
 my $file_count = scalar(keys %results);
 print "\n" . "=" x 72 . "\n";
-printf "TOTAL: %d passing, %d failing across %d files (+ %d skipped)\n",
-    $total_pass, $total_fail, $file_count, scalar(@SKIP);
+printf "TOTAL: %d passing, %d failing, %d skipped across %d files (+ %d files skipped)\n",
+    $total_pass, $total_fail, $total_skip, $file_count, scalar(@SKIP);
 print "\nFully passing   (" . scalar(@fully_passing) . "): " . join(', ', sort @fully_passing) . "\n";
 if (@crashed_files) {
     print "\nCrashed (SBCL)  (" . scalar(@crashed_files) . "): " . join(', ', sort @crashed_files) . "\n";
@@ -285,3 +302,18 @@ if (@timeouts) {
     print "\nTimeouts        (" . scalar(@timeouts)   . "): " . join(', ', sort @timeouts)      . "\n";
 }
 print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
+
+# Per-file run status, written alongside the failure log so tools/sweep-diff.pl
+# can tell a file that CRASHED/PARTIAL/TIMEOUT (and therefore did not run its
+# remaining assertions) apart from one that genuinely passed.  Without this, a
+# flaky -j8 crash (e.g. pack.t's transient SIMPLE-FILE-ERROR) makes every
+# baseline failure in that file look "FIXED".  One line per file:
+#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned
+if (open my $sf, '>', "$log_dir/_status.tsv") {
+    for my $name (sort keys %results) {
+        my $r = $results{$name};
+        print $sf join("\t", $name, $r->{status} // 'OK',
+                       $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1) . "\n";
+    }
+    close $sf;
+}

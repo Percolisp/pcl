@@ -63,7 +63,7 @@
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
    #:p-ensure-hashref #:p-ensure-arrayref
-   #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice
+   #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
@@ -2376,6 +2376,19 @@
                                            (list (char-code ch)) 0)
                               out))))))
 
+(defun %sprintf-star-positional (fmt-str j len)
+  "After a '*' in a sprintf width/precision, check for an N$ positional reference
+   (e.g. the `3$` in `%*3$d`).  Returns (values positional-index new-j) when present
+   — a 0-based arg index and j advanced past the `$` — or (values NIL j) when the '*'
+   should consume the next sequential argument instead."
+  (let ((peek j) (pn 0) (pd nil))
+    (loop while (and (< peek len) (digit-char-p (char fmt-str peek)))
+          do (setf pn (+ (* pn 10) (digit-char-p (char fmt-str peek))) pd t)
+          (incf peek))
+    (if (and pd (< peek len) (char= (char fmt-str peek) #\$))
+        (values (1- pn) (1+ peek))
+        (values nil j))))
+
 (defun p-sprintf (fmt &rest args)
   "Perl sprintf - full format string parser.
    Supports: %d %i %u %o %x %X %b %B %e %E %f %F %g %G %s %c %%
@@ -2459,12 +2472,17 @@
                                 ;; Parse width
                                 (cond
                                   ((and (< j len) (char= (char fmt-str j) #\*))
-                                   (setf width (truncate (to-number (nth arg-idx args))))
-                                   (when (minusp width)
-                                     (setf flags (concatenate 'string flags "-"))
-                                     (setf width (- width)))
-                                   (incf arg-idx)
-                                   (incf j))
+                                   (incf j)  ; consume '*'
+                                   (multiple-value-bind (pos-idx new-j)
+                                       (%sprintf-star-positional fmt-str j len)
+                                     (setf j new-j)
+                                     (when pos-idx (setf has-positional t))
+                                     (let ((src (or pos-idx arg-idx)))
+                                       (setf width (truncate (to-number (nth src args))))
+                                       (unless pos-idx (incf arg-idx)))
+                                     (when (minusp width)
+                                       (setf flags (concatenate 'string flags "-"))
+                                       (setf width (- width)))))
                                   (t
                                    (let ((w 0) (has-digit nil))
                                      (loop while (and (< j len) (digit-char-p (char fmt-str j)))
@@ -2483,11 +2501,16 @@
                                     ((and (< j len) (char= (char fmt-str j) #\*))
                                      ;; A negative precision supplied via * means the
                                      ;; precision is omitted entirely (Perl semantics),
-                                     ;; not a precision of 0.
-                                     (let ((pv (truncate (to-number (nth arg-idx args)))))
-                                       (setf precision (if (minusp pv) nil pv)))
-                                     (incf arg-idx)
-                                     (incf j))
+                                     ;; not a precision of 0.  Supports `.*N$` positional.
+                                     (incf j)  ; consume '*'
+                                     (multiple-value-bind (pos-idx new-j)
+                                         (%sprintf-star-positional fmt-str j len)
+                                       (setf j new-j)
+                                       (when pos-idx (setf has-positional t))
+                                       (let* ((src (or pos-idx arg-idx))
+                                              (pv (truncate (to-number (nth src args)))))
+                                         (setf precision (if (minusp pv) nil pv))
+                                         (unless pos-idx (incf arg-idx)))))
                                     (t
                                      (let ((p 0) (has-digit nil))
                                        (loop while (and (< j len) (digit-char-p (char fmt-str j)))
@@ -5345,15 +5368,16 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
     ;; Not a box - handle arrays context-sensitively
     ((not (p-box-p val))
      (cond
-       ;; Plain array/list in scalar context: Perl list-in-scalar = last element.
-       ;; Applies to array slices (@a[0..N]), map results, etc. returned in scalar.
-       ;; Note: @a (array variable) in scalar gives count, but that goes through
-       ;; p-scalar directly, not through p-return-value.
+       ;; Plain array in scalar context: Perl array-in-scalar = element count.
+       ;; This matches box-set (which counts adjustable vectors), so explicit
+       ;; `return @a` agrees with the implicit-tail form `sub { @a }`.  Note: a
+       ;; literal list `return (5,3,1)` does NOT reach here — it arrives as
+       ;; multiple values and is handled by p-return's multi-value branch (last
+       ;; element).  Only array variables, map/grep results, and blocks returning
+       ;; arrays reach here as a single vector; Perl counts those in scalar.
        ((and (not *wantarray*)
              (vectorp val) (not (stringp val)) (adjustable-array-p val))
-        (if (zerop (length val))
-            nil
-            (p-return-value (aref val (1- (length val))))))
+        (length val))
        ;; nil (undef/empty-list) in list context: return empty list vector
        ;; so bare `return` and `return ()` contribute 0 elements to surrounding list.
        ((and (eq *wantarray* t) (null val))
@@ -5372,6 +5396,22 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
      val)
     ;; Simple scalar box - return the unboxed value
     (t (unbox val))))
+
+(defun p-list-scalar (val)
+  "A list/slice evaluated in scalar context yields its LAST element (undef if
+   empty) — the comma-operator semantics.  This differs from an array variable
+   in scalar context, which yields the element COUNT.  Slices, sort, and bare
+   list literals use this; arrays/map/grep/keys/values use the count path."
+  (if (and (vectorp val) (not (stringp val)))
+      (if (zerop (length val)) nil (aref val (1- (length val))))
+      val))
+
+(defun p-slice-result (val)
+  "Context-dispatch for a slice whose context is only known at runtime (e.g. it
+   is the argument of `return`): list context keeps the vector, scalar context
+   reduces to the last element.  *wantarray* is :void / t (truthy) for
+   void/list and nil for scalar."
+  (if *wantarray* val (p-list-scalar val)))
 
 (defun p-goto-computed (label)
   "Perl goto EXPR (computed goto) — not implementable in CL; silently ignore."
@@ -7773,6 +7813,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             do (%p-array-store-scalar arr item)))
     arr))
 
+(defun %scalar-holds-ref-p (referent)
+  "True when REFERENT (a scalar box that some reference points at) itself holds
+   a reference value — i.e. ref(\\referent) is \"REF\", not \"SCALAR\".
+   Non-recursive: only looks one unbox deep, so a self-referential scalar ref
+   ($x = \\$x) does not loop."
+  (and (p-box-p referent)
+       (let ((u (unbox referent)))
+         (or (and (vectorp u) (not (stringp u)))   ; holds an array ref
+             (hash-table-p u)                       ; holds a hash ref
+             (p-regex-match-p u)                    ; holds a regexp ref
+             (functionp u)                          ; holds a code ref
+             (p-typeglob-p u)                       ; holds a glob ref
+             (and (p-box-p u) (p-box-is-ref u))))))  ; holds a scalar/ref wrapper
+
 (defun p-ref (val)
   "Perl ref() function - get reference type or class name if blessed.
    Returns empty string for non-references."
@@ -7792,12 +7846,25 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (p-box-class inner)
            (let ((inner2 (p-box-value inner)))
              (cond
-               ;; Array reference: box containing vector (from p-backslash @arr)
+               ;; Direct aggregate referent (raw value held by the pointed-at
+               ;; scalar): \$qr → REGEXP, \$aref → ARRAY, \$href → HASH. These
+               ;; check inner2 (= the referent's held value for a direct `\$x`).
                ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
-               ;; Hash reference: box containing hash-table (from p-backslash %hash)
                ((hash-table-p inner2) (or (gethash :__class__ inner2) "HASH"))
-               ;; Regexp reference: box containing a compiled regex (from p-backslash $qr)
                ((p-regex-match-p inner2) "REGEXP")
+               ;; Ref-to-ref → "REF".  The referent (the scalar pointed at) is
+               ;; `inner` when `val` is itself the ref-wrapper (is-ref set, e.g.
+               ;; a literal `\$x`), else `inner2` (when `val` is a variable whose
+               ;; value is the wrapper).  It is a ref-to-ref iff that referent is
+               ;; itself a ref-wrapper (\\1) or *holds* a reference (\$r, \$aref
+               ;; through a variable).  %scalar-holds-ref-p is non-recursive so a
+               ;; self-referential scalar ($x=\$x) does not loop, and a plain
+               ;; scalar — incl. undef (*p-undef*) and '' array elements — yields
+               ;; SCALAR, not REF.
+               ((let ((referent (if (p-box-is-ref val) inner inner2)))
+                  (or (and (p-box-p referent) (p-box-is-ref referent))
+                      (%scalar-holds-ref-p referent)))
+                "REF")
                ;; Scalar reference: box containing box (from p-backslash $x)
                (t "SCALAR")))))
       ;; Old-format hash reference (autovivified, single-boxed)
@@ -7828,6 +7895,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              ((string= r "ARRAY")  "ARRAY")
              ((string= r "CODE")   "CODE")
              ((string= r "SCALAR") "SCALAR")
+             ;; ref-to-ref: the referent is still a SCALAR (it happens to hold a ref)
+             ((string= r "REF")    "SCALAR")
              ((string= r "GLOB")   "GLOB")
              ((string= r "") "")
              ;; Blessed object — look at the inner type
@@ -9463,54 +9532,76 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   (write-char (char str i) out)
                   (incf i)))))))
 
+(defun %tr-from-index (code from-set sorted-from complement-p)
+  "Return the position of codepoint CODE within the (possibly complemented) tr
+   search-list, or NIL if CODE is not matched.
+   - Non-complement: the first index of CODE in the search list (from-set hash).
+   - Complement: CODE's rank among all codepoints NOT in the search list, i.e.
+     CODE minus the number of search codepoints strictly less than CODE."
+  (if complement-p
+      (if (nth-value 1 (gethash code from-set))
+          nil
+          (let ((less 0))
+            (loop for fc across sorted-from while (< fc code) do (incf less))
+            (- code less)))
+      (gethash code from-set)))
+
 (defun do-tr (string-box op)
-  "Perform transliteration on boxed string, return count of changes"
+  "Perform transliteration on boxed string.  Returns the count of matched chars,
+   or (with /r) the transliterated copy without modifying STRING-BOX."
   (let* ((str (to-string (unbox string-box)))
-         (from-raw (p-tr-op-from op))
-         (to-raw (p-tr-op-to op))
          (modifiers (p-tr-op-modifiers op))
-         (complement-p (member :c modifiers))
-         (delete-p (member :d modifiers))
-         (squash-p (member :s modifiers))
-         (from-chars (expand-tr-chars from-raw))
-         (to-chars (expand-tr-chars to-raw))
+         (complement-p (and (member :c modifiers) t))
+         (delete-p (and (member :d modifiers) t))
+         (squash-p (and (member :s modifiers) t))
+         (return-p (and (member :r modifiers) t))
+         (from-chars (expand-tr-chars (p-tr-op-from op)))
+         (to-chars (expand-tr-chars (p-tr-op-to op)))
+         (to-len (length to-chars))
+         (from-set (make-hash-table))
          (count 0)
-         (last-char nil))
-    ;; Build translation table
-    (let ((result (with-output-to-string (out)
-                    (loop for c across str
-                          do (let* ((pos (position c from-chars))
-                                    (in-from (if complement-p (null pos) pos)))
-                               (cond
-                                 ;; Character is in from-set (or complement case)
-                                 (in-from
-                                  (incf count)
-                                  (let* ((actual-pos (if complement-p 0 pos))
-                                         (new-char (cond
-                                                     (delete-p nil)
-                                                     ((>= actual-pos (length to-chars))
-                                                      (if (> (length to-chars) 0)
-                                                          (char to-chars (1- (length to-chars)))
-                                                          c))
-                                                     (t (char to-chars actual-pos)))))
-                                    (when new-char
-                                      ;; Squash: skip consecutive identical replacements
-                                      (if (and squash-p (eql new-char last-char))
-                                          nil  ; skip duplicate
-                                          (progn
-                                            (write-char new-char out)
-                                            (setf last-char new-char))))))
-                                 ;; Character not in from-set
-                                 (t
-                                  (write-char c out)
-                                  (setf last-char c))))))))
-      ;; Update the boxed string (and invalidate caches)
-      (if (p-box-p string-box)
-          (setf (p-box-value string-box) result
-                (p-box-sv-ok string-box) nil
-                (p-box-nv-ok string-box) nil)
-          (warn "Cannot modify non-boxed value in tr///"))
-      count)))
+         (last-out nil)
+         (last-was-tr nil))
+    ;; from-set: codepoint -> first index in the search list
+    (loop for ch across from-chars for i from 0
+          do (unless (nth-value 1 (gethash (char-code ch) from-set))
+               (setf (gethash (char-code ch) from-set) i)))
+    (let* ((sorted-from (when complement-p
+                          (sort (remove-duplicates
+                                 (map 'vector #'char-code from-chars))
+                                #'<)))
+           (result
+            (with-output-to-string (out)
+              (loop for c across str
+                    for idx = (%tr-from-index (char-code c) from-set
+                                              sorted-from complement-p)
+                    do (cond
+                         (idx
+                          (incf count)
+                          (let ((new-char
+                                 (cond
+                                   ((and delete-p (>= idx to-len)) nil)
+                                   ((zerop to-len) c)  ; empty repl, no /d: identity
+                                   ((>= idx to-len) (char to-chars (1- to-len)))
+                                   (t (char to-chars idx)))))
+                            (cond
+                              ((null new-char) nil)  ; deleted (/d)
+                              ((and squash-p last-was-tr (eql new-char last-out))
+                               nil)                   ; squeezed (/s)
+                              (t (write-char new-char out)
+                                 (setf last-out new-char last-was-tr t)))))
+                         (t
+                          (write-char c out)
+                          (setf last-out c last-was-tr nil)))))))
+      (cond
+        (return-p result)
+        (t
+         (if (p-box-p string-box)
+             (setf (p-box-value string-box) result
+                   (p-box-sv-ok string-box) nil
+                   (p-box-nv-ok string-box) nil)
+             (warn "Cannot modify non-boxed value in tr///"))
+         count)))))
 
 (defun p-=~ (string operation)
   "Perl =~ binding operator.

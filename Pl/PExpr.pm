@@ -3216,6 +3216,15 @@ sub child_context {
             if $child_index >= 1;
       }
 
+      # split takes scalar arguments (pattern, string, limit) even though it
+      # returns a list.  In list context (e.g. join ':', split('a'=~/b/, $s)) the
+      # pattern arg must stay scalar — otherwise `'a' =~ /b/` returns the list (1)
+      # instead of the scalar 1 used as the pattern.
+      if ($func_name && $func_name eq 'split') {
+        return SCALAR_CTX
+            if $child_index >= 1;
+      }
+
       # Functions that take a filehandle as their first argument.
       # The FH arg must be SCALAR_CTX: bareword FHs become (pl-NAME) funcalls,
       # and wrapping them in (let ((*wantarray* t)) ...) prevents %p-fh-arg
@@ -3322,10 +3331,18 @@ sub child_context {
       return SCALAR_CTX;
     }
 
-    # Logical AND/OR force scalar context on their operands.
-    # These operators return one of their operands, not a list.
-    if ($op eq '&&' || $op eq '||' || $op eq '//'
-        || $op eq 'and' || $op eq 'or' || $op eq 'xor') {
+    # Short-circuit logical ops (&&, and, ||, //, or): the LHS is always
+    # evaluated in scalar (boolean) context — even in list context, a true LHS
+    # is returned as a scalar (`@a = (@x || @y)` yields the count of @x, not its
+    # elements).  The RHS is the value returned when the LHS short-circuits, so
+    # it inherits the surrounding context (`() || (1,2)` -> (1,2) in list ctx).
+    if ($op eq '&&' || $op eq 'and'
+        || $op eq '||' || $op eq '//' || $op eq 'or') {
+      return $child_index == 0 ? SCALAR_CTX : $parent_ctx;
+    }
+
+    # xor is purely boolean — always scalar.
+    if ($op eq 'xor') {
       return SCALAR_CTX;
     }
 
@@ -3435,6 +3452,16 @@ sub get_node_context {
   my $node_id       = shift;
 
   return $self->node_tree->get_metadata($node_id, 'context') // SCALAR_CTX;
+}
+
+# Like get_node_context but returns undef when no context was ever annotated
+# (instead of defaulting to SCALAR_CTX).  Used where the default-scalar fallback
+# would be wrong — e.g. a slice in an unannotated position is list-natural, not
+# scalar, so it must not be reduced to its last element.
+sub get_node_context_raw {
+  my $self    = shift;
+  my $node_id = shift;
+  return $self->node_tree->get_metadata($node_id, 'context');
 }
 
 # Helper: Get context name for debugging

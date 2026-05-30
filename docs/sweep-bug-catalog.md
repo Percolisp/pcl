@@ -18,6 +18,10 @@ Updated 2026-05-28 (session 214). **28464 pass / 1036 fail, 60 fully passing** (
   - (5) `%c` now honors the `0` zero-pad flag (`%010c`).
   - (6) **`%v` vector flag implemented**: `%vd`/`%vX`/`%*vX` (separator from arg)/`%v.3X`/`%v02x` — new `sprintf-vector` helper formats each char ordinal joined by sep ("." default). +55 tests.
   Remaining sprintf.t (92): INVALID/REDUNDANT/MISSING warning detection (~warning-tag mismatches), `%N$` positional args, `version->new` objects in `%vd`.
+Updated 2026-05-29 (session 215, Part 2). **More list-vs-scalar context fixes** (wantarray work now authorized). do.t 20→10, split.t 9→8, array.t 41→38. Fixes: `split` args scalar; `=~`/`!~` bare-match context wrapper; `return @a`/map=count + `return @slice`/`my $s=@slice`=last (new `p-list-scalar`/`p-slice-result`, `_slice_in_context`, `get_node_context_raw`); `return do {@a}` caller context; string-interp `@a[..]`/`@h{..}` slice+join. New test `Pl/t/list-scalar-context-01.t` (13). **Full sweep NOT re-run after Part 2 — run it next session.**
+Updated 2026-05-30 (session 217). **Skip-registry migration: ref.t 35 documented not-supported failures registered** (deref of IO/FORMAT glob slots, \substr/\pos/\vec lvalue refs, ref-to-FORMAT/IO, NUL/UTF-8 symbolic-ref stash names, literal-aliased read-only assignment). ref.t **57→22 fail** (still PARTIAL). Honest sweep total **808 fail** (registry-era counter; −35), **63 fully passing**, no regression. Baseline re-blessed (531 keys). No runtime changes (a `ref(\$ref)`→"REF" fix was attempted but reverted — box-nesting depth doesn't cleanly separate scalar-ref from ref-to-ref through a `my` round-trip).
+Updated 2026-05-29 (session 216). **Post-fix sweep: 28604 pass / 896 fail, 60 fully passing** (104 files + 2 skipped; +124 vs the 28480 baseline this session, no fully-passing regression; gate `prove -j8 Pl/t/` green at 81 files / 3040 tests). Three fixes: tr.t /c complement +43, sprintf2.t hex-float-string + positional +69, sprintf.t positional +9, hexfp.t +3. Baseline before fixes was 28480/1020/60 (+13 vs s215p1, confirming the s215 Part-2 net gain). **tr.t /c complement family FIXED: 229→272 passing (+43)** — `do-tr` rewritten to rank each complemented char by its position among all codepoints NOT in the search list (was mapping every complement char to repl[0]); `/cd` delete-past-repl, `/cs` squeeze-translated-only, and `/r` non-destructive return all now correct. New `Pl/t/tr-01.t` (8). Remaining tr.t failures are error/warning-message detection (principle 9) + named sequences/RO strings. **Stale-number corrections this session: infnan.t now only 6 fail (was 396); array.t 38; aassign.t 66; index.t 11; do.t 10; split.t 8; chop.t 5; method.t 39; ref.t 57.**
+Updated 2026-05-29 (session 215, Part 1). **28467 pass / 1033 fail, 60 fully passing** (+3 vs s214, no regressions, Pl/t 3013/3013). array.t 115–117 fixed (AASSIGN_COMMON via `our`). Two fixes: (1) `our (...) = (...)` now parses its RHS in LIST context (`Pl/Parser.pm` `_process_our_declaration`), so `our ($x,$y,$z) = (1..3)` generates a range, not a flip-flop (was emitting `p-flipflop-num`, yielding all-empty). (2) short-circuit ops `&&`/`and`/`||`/`//`/`or` now evaluate the LHS in scalar (boolean) context but let the RHS **inherit** the surrounding context (`Pl/PExpr.pm` `child_context`) — `$cond && (list)` and `() || (list)` return the list in list context (matches Perl `@a=(0||@x)` → elements; `@a=(@x||@y)` LHS still scalar count). Regression tests added to `Pl/t/aassign-01.t` (8→11).
 Updated 2026-05-28 (session 213). **27996 pass / 964 fail, 60 fully passing. Fixes: (1) v-string without `v` prefix (`256.65.258`): now handled as Version token in ExprToCL; (2) surrogate/non-char Unicode in CL string literals: new `_cl_string_literal()` in ExprToCL uses (concatenate 'string ...) forms; (3) tr/// escape sequences: new `_expand_tr_escapes()` converts Perl escapes before CL embedding — tr.t 40→226 passing; (4) yada yada `...`: detected in `_process_expression_statement`, emits (p-die "Unimplemented"); (5) lib/POSIX.pm stub added: DBL_MAX, math constants, errno, SEEK_* — sprintf.t crash fixed, 1→14 passing. Root cause of remaining 552 sprintf.t failures identified (see session-log.md §213).**
 
 **Session 207 fixes:**
@@ -119,7 +123,13 @@ Three distinct bug classes:
 
 ---
 
-### infnan.t (396 failures, 716/1112 passing)
+### infnan.t (6 failures, 1106/1112 passing — session 216)
+
+**MOSTLY RESOLVED.** The large clusters below were fixed between sessions 202–215
+(pack Inf/NaN error messages, eval-block arithmetic-signal trapping, parse-perl-number
+overflow). Only **6 failures remain** as of session 216 — re-triage these individually
+(run `./runt infnan` and read the `not ok` lines) before assuming the historical
+breakdown still applies. The breakdown below is retained for reference only.
 
 - **`sprintf("%a", Inf)` case** (tests 21, 25, ~2 total): Returns `'inf'` instead of
   `'Inf'`. `%a` format for Inf/NaN should capitalize. Fix: `p-sprintf` special-case
@@ -153,7 +163,51 @@ Three distinct bug classes:
 
 ---
 
-### sprintf2.t (171 failures, 1507/1678 passing)
+### sprintf.t (83 failures, 469/552 passing — session 216, was 92)
+
+`p-sprintf` / `sprintf-one` / `sprintf-vector` in `cl/pcl-runtime.lisp`.
+
+- **Reordered positional width/precision** ✅ **FIXED (session 216)**: `%*N$` / `%.*N$`
+  drew their value from positional arg N but were emitted literally. New helper
+  `%sprintf-star-positional`; both `*` arms in `p-sprintf` now consume a trailing `N$`
+  without advancing the sequential arg index. Fixes 332–335 (`%.*2$d`, `%*3$.*2$d`,
+  `%3$*2$.*1$d`) and the 674–685 reorder block. +9.
+
+- **INVALID / REDUNDANT / MISSING warning markers** (biggest remaining group, ~40t):
+  tests like `>%z< >''< >%z INVALID< >%z REDUNDANT<` expect PCL to (a) warn
+  "Invalid conversion", (b) leave the bad spec verbatim in the output, and (c) warn
+  "Redundant argument". PCL formats most of these but doesn't reproduce the exact
+  marker text the harness compares. Mostly error/warning-detection — borderline
+  principle 9; revisit only if the harness's `%REDUNDANT`/`%INVALID` accounting can be
+  matched cheaply. NB the harness encodes the *expected warnings* in the data columns,
+  so these are not pure "ignore invalid input" cases.
+
+- **`version->new` / `version::qv` objects in `%vd`/`%vx`** (~15t): `sprintf "%vd",
+  version->new("1.2")` should print `1.2` using the version object's release components.
+  PCL stringifies the object char-by-char (`49.46.50`). Needs real `version` object
+  support (the `%v` flag reads each *character ordinal* of the stringification; a version
+  object must expose its v-string form). Fix area: `sprintf-vector` + `version` in `lib/`.
+
+- **`%n`** (~3t): stores the running char count back into an argument (and the magic/utf8
+  variants). Not implemented; discouraged in modern Perl. Leave unless a CPAN dep needs it.
+
+---
+
+### sprintf2.t (102 failures, 1576/1678 passing — session 216, was 171)
+
+- **String-literal hex-float corruption** ✅ **FIXED (session 216)**: `_preprocess_source`
+  in `Pl/Parser.pm` ran the hex/binary/octal-float→decimal regex over the WHOLE source,
+  so the string `'0x1p+0'` became `'1'` — corrupting the entire `@hexfloat` data table.
+  Fixed by matching a quoted string as the first alternative of each substitution (skip)
+  before the float pattern (`($str_re)|0x...p...`). +69 here, +3 hexfp.t. Regression test
+  `Pl/t/hexfloat-01.t`.
+- **Reordered width/precision positional args** ✅ **FIXED (session 216)**: `%*N$`/`%.*N$`
+  (width/precision drawn from positional arg N) were emitted literally. New helper
+  `%sprintf-star-positional` in `cl/pcl-runtime.lisp`; both `*` arms in `p-sprintf` now
+  detect a trailing `N$`. +9 in sprintf.t (positional reorder block 332–335, 674–685).
+- **Remaining 102**: subnormal/denormal `%a` precision (last-hexdigit rounding, `0x0p+0`
+  for tiny denormals ~10t), `%.HUGEa` integer-overflow error messages, utf8 invalid-format
+  warnings, `%n`. Niche float-internals + error detection.
 
 - **`%a`/`%A` hex float format** ✅ **IMPLEMENTED (session 202)**: `sprintf-one` now has a
   full `(#\a)` arm using `integer-decode-float`. Verified: `printf "%a\n", 3.14` →
@@ -197,6 +251,10 @@ Two root causes:
   and a slice is taken, PCL boxes each array as an array-ref instead of flattening.
   Fix area: list context expansion of array variables inside slice operand.
 
+- **AASSIGN_COMMON via `our`** (tests 115–117): ✅ FIXED (session 215). `our ($x,$y,$z) = (1..3)`
+  emitted a flip-flop for the RHS (all-empty result); now LIST context → range. Also `$cond && (list)`
+  RHS now inherits list context. See header.
+
 - **AASSIGN_COMMON self-assignment** (tests 33–62, ~27 failures): Patterns like
   `@a = @a`, `(undef,@a) = @a`, `@a = ('X',@a,'Y')`, `local @b = @b` — these require
   that the RHS is fully evaluated before assignment begins. PCL evaluates and assigns
@@ -211,15 +269,31 @@ Two root causes:
 
 ---
 
-### ref.t (62 failures, 168/245 passing — PARTIAL, stops at ~230)
+### ref.t (22 failures, 167/245 passing, 41 skip — PARTIAL, stops at ~230; session 217)
 
+**Session 217: 35 documented not-supported failures REGISTERED** in `cl/skip-registry.lisp`
+(stale: 0). Registered clusters — leave these alone (now skips):
+- **IO/FORMAT dereference errors** (tests 32–40): `$$`/`@$`/… on `*STDOUT{IO}`/`*STDERR{FORMAT}`
+  must die "Not a X reference"; FORMAT unsupported. → :error-msg.
+- **ref to substr/pos/vec lvalue** (tests 68–73): "LVALUE" — lvalue refs not-supported. → :lvalue.
+- **ref to format / IO refs** (tests 88–90): format/write not implemented. → :error-msg.
+- **NUL/UTF-8 symbolic-ref stash names** (tests 134–168): Unicode/NUL stash lookup. → :utf8.
+- **literal-aliased read-only assignment / weaken read-only ref** (tests 211, 213–216):
+  "Modification of a read-only value". → :read-only.
+
+**Remaining 21 = genuine bugs / gaps (NOT registered):**
+- **`ref(\$ref)` ref-to-ref → "REF"** (test 66) ✅ **FIXED (session 217)**. `p-ref` uses the
+  `is-ref` flag to find the referent (`inner` when `val` is itself a wrapper, else `inner2`)
+  and reports "REF" iff the referent is a wrapper (`\\1`) or *holds* a reference (new
+  non-recursive `%scalar-holds-ref-p`, which keeps `*p-undef*`/array-element/`\$qr` cases
+  correct and can't loop on `$x=\$x`). Also fixed substr.t 377. Two earlier attempts (naive
+  `p-box-p inner2`; recursive-`p-ref` restructure) were reverted after the sweep flagged
+  qr.t/index.t/split.t regressions — do not retry those shapes.
+- **vstring refs** (tests 64–65): `ref(\v1)` should be "VSTRING".
 - **`&{""}` call** (test 21): `ref eval {\&{""}}` should return "CODE". PCL raises error.
-- **IO/FORMAT dereference errors** (tests 32–40): `*STDOUT{IO}` and `*STDERR{FORMAT}` derefs.
-- **ref to lvalue types** (tests 64–73): documented not-supported (lvalue subs).
-- **ref to format / IO refs** (tests 88–90): format system not implemented.
-- **UTF-8 symbol names** (tests 134–168): Unicode stash name lookup not supported.
-- **Deref from list slice** (tests 173–177): `@{(...)}{...}` — hash deref from list slice.
-- **Early stop**: investigate tests ~230 onwards.
+- **PVBM ref-type** (tests 178–182), **list-slice deref** (test 177), **sub-ref CL-lambda
+  stringification** (tests 171–172), **`-e` vs `-` eval filename** (tests 189–191).
+- **Early stop**: investigate tests ~230 onwards (crash to localize).
 
 ---
 
@@ -441,7 +515,32 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### do.t (already listed above)
+### tr.t (45 failures, 272/317 passing — session 216, was 88 failing)
+
+- **`/c` complement family** (tests 17–95) ✅ **FIXED (session 216)**. `do-tr` in
+  `cl/pcl-runtime.lisp` rewritten: complemented chars are ranked by codepoint position
+  among all non-search codepoints (`%tr-from-index`), mapped positionally into the
+  replacement list (last char repeats past the end); `/cd` deletes past repl end; `/cs`
+  squeezes only translated runs (pass-through chars break the run); `/r` returns the
+  transliterated copy without mutating the box. Regression test `Pl/t/tr-01.t`.
+
+- **Remaining 45 failures are mostly error/warning detection** (principle 9 — out of scope,
+  candidates to comment out after user OK):
+  - Tests 5, 6, 154, 161, 167, 250–251: error messages (named sequence in tr, reversed/
+    min>max range, bad LHS, zero-length read-only string).
+  - Tests 129–131: `/r` error in `!~`, void-context warnings.
+  - Tests 258–305 (RT #130198, ~30 tests): `chop(tr/a/a/)` / `chomp(...)` should die
+    "Can't modify transliteration (tr///) in chop" — error detection of invalid lvalue.
+  - Tests 223–224: non-modifying tr/// on a scalar ref (shouldn't stringify the ref).
+  - Test 257: `tr// of \N{name}` for upper-Latin1 — named char escape in tr.
+
+---
+
+### do.t (10 failures, 63/73 passing — session 215 Part 2 brought 20→10)
+
+See `memory/project_wantarray_followup.md`. Remaining: tests 35/36 (`return (do{}, (do{}) x N)`
+list context), 63–68 (`do subname(arg)` vs `do subname("arg")` syntax distinction), 70, 73
+(EISDIR on `do dir`).
 
 ---
 

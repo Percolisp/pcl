@@ -565,7 +565,18 @@ sub parse_array_subscript {
   # (PPI tokens lose content when their parent document is garbage collected)
   my @parts = map { $_->clone() } $stmts[0]->children();
   my $index_id = $parser->parse(\@parts);
-  
+
+  # A leading '@' sigil means a slice: "@a[0,2]" interpolates to the joined
+  # elements at those indices, NOT a single element.  Build a slice node so the
+  # comma list is flattened by p-aslice (which flattens vector indices).
+  if ($var_name =~ /^\@/) {
+    my ($slice_node, $slice_id) = $parser->make_node_insert('slice_a_acc');
+    my $sarr_id = $parser->make_node(PPI::Token::Symbol->new($var_name));
+    $parser->add_child_to_node($slice_id, $sarr_id);
+    $parser->add_child_to_node($slice_id, $index_id);
+    return ($slice_id, $i);
+  }
+
   # Create array access node
   my ($acc_node, $acc_id) = $parser->make_node_insert('a_acc');
 
@@ -696,6 +707,17 @@ sub parse_hash_subscript {
     $key_id = $parser->parse(\@parts);
   }
   
+  # A leading '@' sigil means a hash slice: "@h{a,b}" interpolates to the joined
+  # values for those keys, not a single value.  gen_hash_slice converts the @
+  # sigil to % for the container access.
+  if ($var_name =~ /^\@/) {
+    my ($slice_node, $slice_id) = $parser->make_node_insert('slice_h_acc');
+    my $shash_id = $parser->make_node(PPI::Token::Symbol->new($var_name));
+    $parser->add_child_to_node($slice_id, $shash_id);
+    $parser->add_child_to_node($slice_id, $key_id);
+    return ($slice_id, $i);
+  }
+
   # Create hash access node
   my ($acc_node, $acc_id) = $parser->make_node_insert('h_acc');
 

@@ -17,7 +17,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 11;
 
 sub run_cl {
     my ($code) = @_;
@@ -91,3 +91,23 @@ test_cl('delete then @a = reverse @a preserves nil slot',
      @a = reverse @a;
      print exists($a[2]) ? "exists" : "deleted", "\n";',
     "deleted\n");
+
+# ── our (...) = (1..N) — RHS is LIST context, so .. is a range not a flip-flop ──
+# Was generating (p-flipflop-num ...) for the RHS, yielding all-empty values.
+
+test_cl('our (...) = (1..3) is a range',
+    'our ($x, $y, $z) = (1..3); print "$x $y $z\n";',
+    "1 2 3\n");
+
+# ── AASSIGN_COMMON via our: RHS snapshotted before the LHS is overwritten ──────
+
+test_cl('our (...) self-assign snapshots RHS',
+    'our ($x,$y,$z) = (1..3); our ($y,$z) = ($x,$y); print "$x $y $z\n";',
+    "1 1 2\n");
+
+# ── Logical && in list context returns the list, not a scalar ──────────────────
+# `$cond && ($x,$y)` in list context must yield ($x,$y); previously forced scalar.
+
+test_cl('&& propagates list context to its value operand',
+    'our ($x,$y,$z) = (1..3); my $t = 1; (our $y, our $z) = $t && ($x,$y); print "$x $y $z\n";',
+    "1 1 2\n");

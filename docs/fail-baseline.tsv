@@ -1,0 +1,529 @@
+aassign.t	177	GH #16685	'1'	'3'
+aassign.t	176	GH #17816	'2'	'2 1'
+aassign.t	54	NOSTEAL split list-context result	'4'	'abc:def'
+aassign.t	168	RT #130132 scalar derefffed 1	'3'	'2'
+aassign.t	169	RT #130132 scalar derefffed 2	'1'	'3'
+aassign.t	170	RT #130132 scalar undef 1	undef	'2'
+aassign.t	171	RT #130132 scalar undef 2	'1'	undef
+aassign.t	110	lval: a post 0 XYAZ	undef	'lval0'
+aassign.t	146	lval: a post 0 XYHZ	undef	'lval0'
+aassign.t	74	lval: a post 0 XYZ	undef	'lval0'
+aassign.t	92	lval: a post 0 XYZA	undef	'lval0'
+aassign.t	128	lval: a post 0 XYZH	undef	'lval0'
+aassign.t	116	lval: a post 1 XYAZ	'assign1'	'lval0'
+aassign.t	152	lval: a post 1 XYHZ	'assign1'	'lval0'
+aassign.t	80	lval: a post 1 XYZ	'assign1'	'lval0'
+aassign.t	98	lval: a post 1 XYZA	'assign1'	'lval0'
+aassign.t	134	lval: a post 1 XYZH	'assign1'	'lval0'
+aassign.t	122	lval: a post 2 XYAZ	'assign1'	'lval0'
+aassign.t	158	lval: a post 2 XYHZ	'assign1'	'lval0'
+aassign.t	86	lval: a post 2 XYZ	'assign1'	'lval0'
+aassign.t	104	lval: a post 2 XYZA	'assign1'	'lval0'
+aassign.t	140	lval: a post 2 XYZH	'assign1'	'lval0'
+aassign.t	111	lval: b post 0 XYAZ	undef	'lval1'
+aassign.t	147	lval: b post 0 XYHZ	undef	'lval1'
+aassign.t	75	lval: b post 0 XYZ	undef	'lval1'
+aassign.t	93	lval: b post 0 XYZA	undef	'lval1'
+aassign.t	129	lval: b post 0 XYZH	undef	'lval1'
+aassign.t	117	lval: b post 1 XYAZ	undef	'lval1'
+aassign.t	153	lval: b post 1 XYHZ	undef	'lval1'
+aassign.t	81	lval: b post 1 XYZ	undef	'lval1'
+aassign.t	99	lval: b post 1 XYZA	undef	'lval1'
+aassign.t	135	lval: b post 1 XYZH	undef	'lval1'
+aassign.t	123	lval: b post 2 XYAZ	'assign2'	'lval1'
+aassign.t	159	lval: b post 2 XYHZ	'assign2'	'lval1'
+aassign.t	87	lval: b post 2 XYZ	'assign2'	'lval1'
+aassign.t	105	lval: b post 2 XYZA	'assign2'	'lval1'
+aassign.t	141	lval: b post 2 XYZH	'assign2'	'lval1'
+aassign.t	112	lval: c post 0 XYAZ	undef	'lval2'
+aassign.t	148	lval: c post 0 XYHZ	undef	'lval2'
+aassign.t	76	lval: c post 0 XYZ	undef	'lval2'
+aassign.t	94	lval: c post 0 XYZA	undef	'lval2'
+aassign.t	130	lval: c post 0 XYZH	undef	'lval2'
+aassign.t	118	lval: c post 1 XYAZ	undef	'lval2'
+aassign.t	154	lval: c post 1 XYHZ	undef	'lval2'
+aassign.t	82	lval: c post 1 XYZ	undef	'lval2'
+aassign.t	100	lval: c post 1 XYZA	undef	'lval2'
+aassign.t	136	lval: c post 1 XYZH	undef	'lval2'
+aassign.t	124	lval: c post 2 XYAZ	undef	'lval2'
+aassign.t	160	lval: c post 2 XYHZ	undef	'lval2'
+aassign.t	88	lval: c post 2 XYZ	undef	'lval2'
+aassign.t	106	lval: c post 2 XYZA	undef	'lval2'
+aassign.t	142	lval: c post 2 XYZH	undef	'lval2'
+aassign.t	19	lvalue sub on RHS returns array	''	'1 2 3'
+aassign.t	20	lvalue sub on RHS returns scalars	':'	'1:2'
+aassign.t	26	my (....) = @_	'(1)(2 3)'	'(3)(2 1)'
+aassign.t	16	my: lex alias of array alement	' 3'	'1 3'
+aassign.t	17	my: lex alias of array alements	' '	'2 1'
+aassign.t	13	my: lex array elements aliased	':'	'2:1'
+aassign.t	14	my: pkg array elements aliased	':'	'2:1'
+aassign.t	182	tied both first	'a'	'b'
+aassign.t	183	tied both second	'b'	'a'
+aassign.t	178	tied left first	'a'	'b'
+aassign.t	179	tied left second	'b'	'a'
+aassign.t	180	tied right first	'a'	'b'
+aassign.t	181	tied right second	'b'	'a'
+aassign.t	164	undef as lvalue	'21:10:20'	'21:11:20'
+args.t	23	delete $_[0] : outside block		
+array.t	114		undef	'23'
+array.t	83	$a: $# on freed array is undef	'-1'	undef
+array.t	85	$a: msg	undef	^Attempt to set length of freed array
+array.t	84	$a: number of warnings	'0'	'1'
+array.t	82	$a[-1] = 0	''	Modification of non-creatable array value attempted, subscript -1
+array.t	130	@_ alias to nonexistent elem within array	undef	'2'
+array.t	131	@_ alias to nonexistent neg index within array	undef	'3'
+array.t	126	arylen_p magic does not stop isa magic from being copied	undef	'pling'
+array.t	172	assigning to arylen aliased in foreach(scalar $#arylen)	'1'	'3'
+array.t	118	bug 70171 (self-assignment via my %x = %$x)	'2 4'	'1 2 3 4'
+array.t	121	bug 70171 (self-assignment via my %x = %$x) - goto variant	'1 2 3 4'	'a 1 b 2 c 3 d 4'
+array.t	86	do {}: $# on freed array is undef	'-1'	undef
+array.t	88	do {}: msg	undef	^Attempt to set length of freed array
+array.t	87	do {}: number of warnings	'0'	'1'
+array.t	135	error when setting alias to -1 elem of empty array	''	Modification of non-creatable array value attempted, (?x:                )subscript -1
+array.t	133	error when setting alias to negative index past beginning	''	Modification of non-creatable array value attempted, (?x:                )subscript -5
+array.t	127	exists returns true for &PL_sv_undef elem [perl #7508]		
+array.t	193	holes passed to sub do not lose their position (aelem)	'[7  1]'	'[7 3 1]'
+array.t	194	holes passed to sub do not lose their position (aelem, mg)	'[7  1]'	'[7 3 1]'
+array.t	191	holes passed to sub do not lose their position (multideref)	'[7  1]'	'[7 3 1]'
+array.t	192	holes passed to sub do not lose their position (multideref, mg)	'[7  1]'	'[7 3 1]'
+array.t	179	lazy element creation with foreach	'5'	'55'
+array.t	176	lazy element creation with refgen	'REF(0x10047f9d43)'	'REF(0x10047fa263)'
+array.t	174	lazy element creation with sub call	'1  7'	'1 5 7'
+array.t	184	map {} @a does not vivify elements	''	'1,2,3,4,5'
+array.t	189	non-elems read from @a do not lose their position	'[7  1]'	'[7 3 1]'
+array.t	100	orphaned 1 is always undef	'42'	undef
+array.t	128	undef preserves identity in array [perl #109726]	'REF(0x1004e67403)'	'REF(0x1004e67483)'
+bless.t	68		'68793833667'	== 'D=GLOB(0x10046e98c3)'
+blocks.t	24	RT #2917: No constraint on how late INIT blocks can run	''	'in init'
+bop.t	144		'0'	'1'
+bop.t	158	    and turns off the UTF-8 flag		
+bop.t	463	correct error	''	no method found
+bop.t	333	glob & string	'@'	'('
+bop.t	346	glob & utf8	''	'"'
+bop.t	339	glob &= string	'@'	'('
+bop.t	352	glob &= utf8	''	'"'
+bop.t	334	glob ^ string	'?'	'R'
+bop.t	347	glob ^ utf8	'ñ'	''
+bop.t	340	glob ^= string	'?'	'R'
+bop.t	353	glob ^= utf8	'ñ'	''
+bop.t	332	glob | string	''	'z'
+bop.t	345	glob | utf8	'÷'	'¾'
+bop.t	338	glob |= string	''	'z'
+bop.t	351	glob |= utf8	'÷'	'¾'
+bop.t	481	neg UV (sic) left shift  = 0xFF..E	'-2'	'18446744073709551614'
+bop.t	482	neg UV (sic) right shift = 0x7F..F	'-1'	'9223372036854775807'
+bop.t	227	no duplicate warnings	'0'	'10'
+bop.t	336	string & glob	'@'	'('
+bop.t	342	string &= glob	'@'	'('
+bop.t	337	string ^ glob	'?'	'R'
+bop.t	343	string ^= glob	'?'	'R'
+bop.t	462	string overload can't use |		
+bop.t	335	string | glob	''	'z'
+bop.t	341	string |= glob	''	'z'
+bop.t	349	utf8 & glob	''	'"'
+bop.t	355	utf8 &= glob	''	'"'
+bop.t	350	utf8 ^ glob	'ñ'	''
+bop.t	356	utf8 ^= glob	'ñ'	''
+bop.t	348	utf8 | glob	'÷'	'¾'
+bop.t	354	utf8 |= glob	'÷'	'¾'
+bop.t	464	| overload works	'zaz=ARRAY(0x1000eb1baf)'	'y'
+caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
+caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
+caller.t	35	@DB::args is still tied		
+caller.t	36	BEGIN block sees correct caller filename	undef	'virtually/op/caller.t'
+caller.t	37	BEGIN block sees correct caller line	undef	'12345'
+caller.t	38	BEGIN block sees correct caller package	undef	'RT129239'
+caller.t	52	GH #15109 - callers count	'0'	'10'
+caller.t	51	GH #15109 - eval	'Can't locate Apack.pm in @INC (@INC contains: #S(P-BOX                                                  :VALUE lib/caller/                                                  :NV NIL                                                  :NV-OK NIL                                                  :SV lib/caller/                                                  :SV-OK T                                                  :CLASS NIL                                                  :IS-REF NIL))'	''
+caller.t	63	GH #15109 - eval okay	'end of file on #<dynamic-extent STRING-INPUT-STREAM (unavailable) from "(progn (...">'	''
+caller.t	53	GH #15109 level 0	undef	caller/Bpack.pm:3
+caller.t	54	GH #15109 level 1	undef	caller/Bpack.pm:3
+caller.t	55	GH #15109 level 2	undef	caller/Bpack.pm:3
+caller.t	56	GH #15109 level 3	undef	caller/Apack.pm:3
+caller.t	57	GH #15109 level 4	undef	caller/Apack.pm:3
+caller.t	58	GH #15109 level 5	undef	caller/Apack.pm:3
+caller.t	59	GH #15109 level 6	undef	\(eval \d+\):1
+caller.t	60	GH #15109 level 7	undef	\(eval \d+\):1
+caller.t	61	GH #15109 level 8	undef	\(eval \d+\):1
+caller.t	62	GH #15109 level 9	undef	caller\.t
+caller.t	50	RT #7165: line number should be consistent for multiline subroutine calls	'6 10'	'6 9'
+caller.t	41	[perl #115768] caller gets line numbers from nulled cops	undef	'253'
+caller.t	1	[perl #68712] filenames after require in a BEGIN block	undef	'caller.t'
+caller.t	27	actually return the right function name	'main'	'main::pb'
+caller.t	29	actually return the right function name even if $^P had been on at some point	'main'	'main::pb'
+caller.t	2	all bits off via "no warnings"		
+caller.t	20	anonymous subroutine name	undef	'main::__ANON__'
+caller.t	34	caller dies with tie @DB::args	''	"^Cannot set tied \@DB::args at
+caller.t	32	caller does not leak @DB::args elems when AvREAL	''	'1'
+caller.t	47	check large line numbers are preserved	undef	'3000000000'
+caller.t	3	default bits on via "use warnings"		
+caller.t	22	deleted subroutine name	undef	'main::foo2'
+caller.t	26	do not skip over eval (and caller returns 10 elements)	''	'11'
+caller.t	28	do not skip over eval even if $^P had been on at some point	''	'11'
+caller.t	40	eval text returned by caller does not include \n;	undef	'(caller 0)[6]'
+caller.t	21	hasargs true with anon sub		
+caller.t	14	hasargs true with callf()		
+caller.t	23	hasargs true with deleted sub		
+caller.t	44	here-docs do not gut eval text	undef	'<<END; foo END (caller 0)[6]'
+caller.t	45	here-docs in quote-like ops do not gut eval text	undef	's//<<END/e; foo END (caller 0)[6]'
+caller.t	65	no freed scalars	'-'	'-B'
+caller.t	13	subroutine name	undef	'main::callf'
+caller.t	18	subroutine name in an eval ''	undef	'(eval)'
+caller.t	16	subroutine name in an eval {}	undef	'(eval)'
+caller.t	46	value from (caller 0)[9] (bitmask) works in ${^WARNING_BITS}	''	'1'
+caller.t	25	warnings match caller (all)		
+caller.t	24	warnings match caller (no bits)		
+closure.t	13		''	'7'
+concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
+concat2.t	2	RT #132385	'REF(0x100414dc03)REF(0x100414dde3)'	'AB'
+delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
+delete.t	54	a b c also equivalent		
+delete.t	26	a b c equivalent		
+do.t	73	$! is EISDIR on do dir		
+do.t	70	RT 124248	'0'	'1'
+do.t	67	do $subref("arg") is syntax error	''	\Asyntax error
+do.t	68	do $subref() is syntax error	''	\Asyntax error
+do.t	64	do subname("arg") is syntax error	''	\Asyntax error
+do.t	65	do subname() called		
+do.t	66	do subname() is syntax error	''	\Asyntax error
+do.t	63	do subname(arg) called		
+do.t	35	return (do { }, (do { }) x ...) - list context 1	'11 12 '	'11 12'
+do.t	36	return (do { }, (do { }) x ...) - list context 2	'11 12 3'	'11 12 21 22 23'
+eval.t	28		''	'right'
+eval.t	13	calculate a factorial with recursive evals	''	'120'
+eval.t	10	eval run-time error in list context	undef	'0'
+eval.t	9	eval syntax error in list context	undef	'0'
+flip.t	10			
+grent.t	2			
+grep.t	75	block map void 2	'0'	'1'
+grep.t	76	block map void 3	'0'	'1'
+grep.t	73	grep list post	'0'	'3'
+grep.t	71	grep scalar post	'0'	'3'
+grep.t	69	grep void post	'0'	'3'
+grep.t	61	proper error on variable as block. [perl #37314]	''	Missing comma after first argument to grep function
+hash.t	2	Timely hash destruction with lvalue keys	'0'	'1'
+hash.t	5	deleting the current iterator in void context frees the val		
+hash.t	6	freed hash elems are not visible to DESTROY		
+hash.t	12	hash self-assign	'HASH(0x100304fe53)'	'x:'
+hash.t	13	magic keys	'HASH(0x10031e0463)'	'x:y'
+hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
+hash.t	8	the destructor was called	''	'1'
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1002b5a2c3)'	undef
+hashassign.t	309	all assigned values are returned		
+hashassign.t	304	odd elements also lvalued		
+hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
+index.t	58		'18'	'-1'
+index.t	49	index octets, octets	'5'	'7'
+index.t	111	index respects changes in ref stringification	'-1'	'0'
+index.t	50	rindex octets, octets	'18'	'21'
+infnan.t	253	pack P +Inf	undef	'Inf'
+infnan.t	464	pack P +NaN	undef	'NaN'
+infnan.t	255	pack P -Inf	undef	'-Inf'
+infnan.t	252	pack p +Inf	undef	'Inf'
+infnan.t	463	pack p +NaN	undef	'NaN'
+infnan.t	254	pack p -Inf	undef	'-Inf'
+length.t	34		''	undef
+length.t	42	uninit warning for stringifying as undef	''	uninitialized
+local.t	264		''	Modification of a read-only value attempted
+local.t	315	RT #7411: local($#a) should change count	'4'	'2'
+local.t	316	RT #7411: local($#a) should shorten array	'1 2 3 4 5'	'1 2 3'
+local.t	319	RT #7615: local in if condition should be restored	'1'	'10'
+local.t	260	Underscore 'Assignment'		
+local.t	258	Underscore 'Chop'		
+local.t	257	Underscore 'Concat'		
+local.t	259	Underscore 'Filetest'		
+local.t	256	Underscore 'Matching'		
+local.t	255	Underscore 'Reading'		
+local.t	275	localised sub via stash		
+local.t	278	localised sub via stash slice		
+method.t	91		'none'	'ok'
+method.t	115	$AUTOLOAD set correctly for DESTROY		
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1002e049e3)'
+method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF NIL)     )'
+method.t	114	AUTOLOAD called for DESTROY		
+method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
+method.t	117	Err msg from new{} when stack contains a word	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
+method.t	118	Err msg from new{} when stack contains undef	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
+method.t	158	RT #123619	''	Modification of a read-only value attempted
+method.t	77	SUPER inside moved package	undef	'dohtem'
+method.t	78	SUPER inside moved package respects method changes	undef	'method'
+method.t	129	method call on \*typeglob	''	^Can't call method "squeak" on unblessed reference
+method.t	125	method call on empty string	''	^Can't call method "flomp" without a package or object reference
+method.t	128	method call on typeglob ignores package	''	^Can't call method "squeak" without a package or object reference
+method.t	102	method lookup is nul-clean	''	Can't locate object method "method\\0Whoops" via package "NulTest" at
+method.t	121	method{@array}$more_args	'arg'	'arg b'
+or.t	8	   $tied || $var	'0'	'1'
+or.t	10	|| propagates lvaluish context to its lhs	'1'	'2'
+or.t	9	|| propagates lvaluish context to its rhs	''	'1'
+pack.t	14703		'1'	'0'
+pack.t	14687	. based shrink properly updates group starts	'12     a'	'12  a'
+pack.t	14682	. relative to counted group, extend	'12345     '	'12345  '
+pack.t	14683	. relative to counted group, keep	'12345   '	'12345'
+pack.t	14681	. relative to counted group, shorten	'12345'	'12'
+pack.t	14673	. relative to string current, extend	'12'	'12345  '
+pack.t	14674	. relative to string current, keep	''	'12345'
+pack.t	14669	Proper error message	''	'\.' outside of string in pack
+pack.t	240	Round trip pack, unpack 'w' of 8.98846567431158e+307 is within 1% (-Inf%)		
+pack.t	238	Should be able to pack 'w', 8.98846567431158e+307 # 2**1023	'Can only compress unsigned integers in pack '	''
+pack.t	14378	Simple F pack doesn't get upgraded		
+pack.t	14315	Simple I pack doesn't get upgraded		
+pack.t	14441	Simple I! pack doesn't get upgraded		
+pack.t	14351	Simple J pack doesn't get upgraded		
+pack.t	14333	Simple L pack doesn't get upgraded		
+pack.t	14459	Simple L! pack doesn't get upgraded		
+pack.t	14477	Simple N! pack doesn't get upgraded		
+pack.t	14405	Simple Q pack doesn't get upgraded		
+pack.t	14297	Simple S pack doesn't get upgraded		
+pack.t	14423	Simple S! pack doesn't get upgraded		
+pack.t	14495	Simple V! pack doesn't get upgraded		
+pack.t	14369	Simple d pack doesn't get upgraded		
+pack.t	14360	Simple f pack doesn't get upgraded		
+pack.t	14306	Simple i pack doesn't get upgraded		
+pack.t	14432	Simple i! pack doesn't get upgraded		
+pack.t	14342	Simple j pack doesn't get upgraded		
+pack.t	14324	Simple l pack doesn't get upgraded		
+pack.t	14450	Simple l! pack doesn't get upgraded		
+pack.t	14468	Simple n! pack doesn't get upgraded		
+pack.t	14396	Simple q pack doesn't get upgraded		
+pack.t	14288	Simple s pack doesn't get upgraded		
+pack.t	14414	Simple s! pack doesn't get upgraded		
+pack.t	14486	Simple v! pack doesn't get upgraded		
+pack.t	14702	Test basic utf8 @!	'̅'	'̃̄̅'
+pack.t	14628	normal A* strip leaves \xa0 even if it got upgraded for technical reasons	'ab  Â '	'ab   '
+pack.t	24	pack	'Ðä '	''
+pack.t	14195	pack H5 C0 W returns expected value	'øù û'	'øùðû'
+pack.t	14616	pack N/S13 works	'1 2 3 4 5 6 7 8 9 10 11 12 13'	'13'
+pack.t	14265	pack U0U C0 W returns expected value	'Ã¸Ã'	'øùú'
+pack.t	14264	pack U0U C0 W should give 1+1 chars	'3'	'2'
+pack.t	14197	pack a0 H5 C0 W returns expected value	'øù û'	'øùðû'
+pack.t	14267	pack a0 U0U C0 W returns expected value	'Ã¸Ã'	'øùú'
+pack.t	14266	pack a0 U0U C0 W should give 1+1 chars	'3'	'2'
+pack.t	14202	pack a0 h5 C0 W returns expected value	'øù û'	'øù û'
+pack.t	14200	pack h5 C0 W returns expected value	'øù û'	'øù û'
+pack.t	14629	upgraded strings A* removes \xa0	'ab  Â '	'ab'
+pack.t	14630	upgraded strings A* removes all unicode whitespace	'ab  Â á'	'ab'
+pack.t	14632	upgraded strings A* with nothing left	'á'	''
+pack.t	14631	upgraded strings A5 removes all unicode whitespace	'ab  á'	'ab'
+pack.t	14694	utf8 . based shrink properly updates group starts	'́̂     a'	'́̂  a'
+pack.t	14693	utf8 . relative to group, extend	'́̂̃̄̅    '	'́̂̃̄̅  '
+pack.t	14692	utf8 . relative to group, keep	'́̂̃̄̅  '	'́̂̃̄̅'
+pack.t	14691	utf8 . relative to group, shorten	'́'	'́̂'
+pack.t	14657	utf8 negative offset relative to inner group	'-2'	'-6'
+pack.t	14660	utf8 offset counts groups	'5'	'15'
+pack.t	14656	utf8 offset is relative to inner group	'2'	'6'
+pack.t	14661	utf8 star offset is relative to start	'5'	'15'
+pos.t	18	//g can read pos through a defelem	'h'	'o'
+pos.t	19	//gc in list cx can set pos through a defelem	undef	'4'
+pos.t	29	Got expected length in bytes	'4'	'7'
+pos.t	30	Got expected pos in bytes	'2'	'5'
+pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
+pos.t	21	\G works with defelem scalars		
+pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
+pos.t	14	defelems can propagate pos assignment	undef	'3'
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1004870ce3)'	undef
+pos.t	12	pos *glob works	undef	'1'
+pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
+pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
+pos.t	10	pos refuses @arrays	''	^Can't modify array dereference in match position at 
+pos.t	4	pos() set inside //g	' ?'	'0123 5678910?'
+pos.t	17	reading pos through a defelem	undef	'3'
+pos.t	20	s///g setting pos through a defelem	undef	'1'
+push.t	32	croak when pushing onto readonly array	''	^Modification of a read-only value
+push.t	6	push onto a blessed array ref	'#S(P-BOX    :VALUE #()    :NV NIL    :NV-OK NIL    :SV NIL    :SV-OK NIL    :CLASS "main"    :IS-REF NIL) is not an array with a fill pointer.'	Experimental push on scalar is now forbidden
+push.t	5	push onto a hashref	'#S(P-BOX    :VALUE #<HASH-TABLE :TEST EQUAL :COUNT 0 {100431FDC3}>    :NV NIL    :NV-OK NIL    :SV NIL    :SV-OK NIL    :CLASS NIL    :IS-REF NIL) is not an array with a fill pointer.'	Experimental push on scalar is now forbidden
+push.t	4	push onto a literal integer	'42 is not an array with a fill pointer.'	must be array
+qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
+qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
+qr.t	36	REGEXP RV leak	'0'	'1'
+qr.t	25	double upgraded to regexp	'68791575939'	'0'
+qr.t	27	int upgraded to regexp	'68791581171'	'0'
+qr.t	28	likewise produces non-numeric warning	undef	numeric
+qr.t	13	object is blessed		
+qr.t	26	produces non-numeric warning	''	numeric
+qr.t	24	regexp assignment is not maledictory	'REGEXP'	'main'
+qr.t	32	stringifying regexpvlv in place	'#S(P-REGEX-MATCH :PATTERN  :MODIFIERS NIL)'	'(?^:) '
+qr.t	23	tied var is still tied after regexp assignment		
+readline.t	26	<> does not autovivify		
+readline.t	19	Appending from ascii to ascii	'ascii'	'ascii... '
+readline.t	20	Appending from ascii to utf8	'₀ utf8'	'₀ utf8... '
+readline.t	21	Appending from utf8 to ascii	'ascii'	'ascii... '
+readline.t	22	appending from utf to utf8	'₀ utf8'	'₀ utf8₀... '
+readline.t	30	readline *$glob_copy sets PL_last_in_gv	'0'	'-1'
+readline.t	27	readline does not autovivify		
+readline.t	16	readline read first line ok	''	'once '
+readline.t	28	tell returns -1 after last gv is unglobbed	'0'	'-1'
+readline.t	29	unglobbery of last gv nullifies PL_last_in_gv	'0'	'-1'
+ref.t	191		'Died at - line 1. '	'Died at -e line 1. '
+ref.t	179	PVBM is not a GLOB ref		
+ref.t	182	PVBM is not a HASH ref		
+ref.t	180	PVBM is not a SCALAR ref		
+ref.t	181	PVBM is not an ARRAY ref		
+ref.t	178	PVBM ref is not a GLOB ref		
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1002a16a63)'	'SCALAR(0x1002a16aa3)'
+ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
+ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
+ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
+ref.t	65	stringify for ref to vstring	'SCALAR(0x1003631433)'	^VSTRING\(0x[0-9a-f]+\)$
+split.t	149	assignment to split-to-array (pmtarget/package array)	'a b c'	'1 2 3'
+split.t	151	assignment to split-to-array (stacked)	'a b c'	'1 2 3'
+split.t	150	assignment to split-to-array (targ/lexical)	'a b c'	'1 2 3'
+split.t	153	compile-time re-eval count	'0'	'2'
+split.t	155	run-time re-eval count	'0'	'2'
+split.t	137	whitespace split: unicode whitespace separator: field 0	'./'	'.'
+split.t	138	whitespace split: unicode whitespace separator: field 1	undef	'/'
+split.t	136	whitespace split: unicode whitespace separator: field count	'1'	'2'
+sprintf.t	232	> %.0g< >[]< > 0 MISSING< >  MISSING< 		
+sprintf.t	237	>%#.0g< >12345.6789< >1.e+04< >1e+04< => >1e+4< 		
+sprintf.t	532	>%*.*K %d< >[13, 29, 76]< >%*.*K 13 INVALID< >%K 76< 		
+sprintf.t	540	>%*1073741819$v2d< >''< > MISSING< >%v2d< 		
+sprintf.t	477	>%*2$*2$d< >[12, 3]< >%*2$*2$d INVALID< >%*2$d< 		
+sprintf.t	479	>%*2$1d< >[12, 3]< >%*2$1d INVALID< >%1d< 		
+sprintf.t	546	>%*2$d< >123< >123 MISSING< >123< 		
+sprintf.t	478	>%*2*2$d< >[12, 3]< >%*2*2$d INVALID< >%2*2$d REDUNDANT< 		
+sprintf.t	472	>%*3$2$d %d< >[12, 34, 3]< >%*3$2$d 12 INVALID< >%2$d 12< 		
+sprintf.t	535	>%*v*999\$d %d %d< >[11, 22, 33]< >%*v*999\$d 11 22 INVALID< >%911%999\$d 0 0 MISSING MISSING< 		
+sprintf.t	165	>%+-v*d< >[3, "\01\02\03"]< >+1 .2  .3  < >+1 .+2 .+3 < cf perl #83194		
+sprintf.t	157	>%+-v3d< >"\01\02\03"< >+1 .2  .3  < >+1 .+2 .+3 < 		
+sprintf.t	158	>%+-v3d< >[version::qv("1.2.3")]< >+1 .2  .3  < > MISSING< 		
+sprintf.t	235	>%.0g< >-0.0< >-0< >< C99 standard mandates minus sign but C89 does not		
+sprintf.t	231	>%.0g< >[]< >0 MISSING< > MISSING< 		
+sprintf.t	227	>%.0hf< >1< >%.0hf INVALID< >1< 'h' should be rejected		
+sprintf.t	169	>%0*v*d< >['-', 2, version::qv("0.7.11")]< >00-07-11< > MISSING< cf perl #83194		
+sprintf.t	475	>%1$$d< >12< >%1$$d INVALID< >%$d< 		
+sprintf.t	476	>%1$1$d< >12< >%1$1$d INVALID< >%$d< 		
+sprintf.t	543	>%3$*4$v*2$.*1$x< >[3, 4, "\x11\x22\x33", "/"]< > 011/ 022/ 033< >%v*2$.*1$x< four reordered args		
+sprintf.t	533	>%4$K %d< >[45, 67]< >%4$K 45 INVALID< >%K 45 MISSING< 		
+sprintf.t	2	>%6 .6s< >''< >%6 .6s INVALID< >% .6s REDUNDANT< 		
+sprintf.t	1	>%6. 6s< >''< >%6. 6s INVALID< >% 6s REDUNDANT< (See use of $w in code above)		
+sprintf.t	3	>%6.6 s< >''< >%6.6 s INVALID< >% s REDUNDANT< 		
+sprintf.t	8	>%C< >''< >%C INVALID< > < 		
+sprintf.t	18	>%H< >''< >%H INVALID< >%H REDUNDANT< 		
+sprintf.t	19	>%I< >''< >%I INVALID< >0< 		
+sprintf.t	20	>%J< >''< >%J INVALID< >%J REDUNDANT< 		
+sprintf.t	531	>%K %d %d< >[13, 29]< >%K 13 29 INVALID< >%K 13 29< 		
+sprintf.t	21	>%K< >''< >%K INVALID< >%K REDUNDANT< 		
+sprintf.t	22	>%L< >''< >%L INVALID< >%L REDUNDANT< 		
+sprintf.t	23	>%M< >''< >%M INVALID< >%M REDUNDANT< 		
+sprintf.t	24	>%N< >''< >%N INVALID< >%N REDUNDANT< 		
+sprintf.t	26	>%P< >''< >%P INVALID< >1000ca7c9f< 		
+sprintf.t	27	>%Q< >''< >%Q INVALID< >%Q REDUNDANT< 		
+sprintf.t	28	>%R< >''< >%R INVALID< >%R REDUNDANT< 		
+sprintf.t	29	>%S< >''< >%S INVALID< >< 		
+sprintf.t	30	>%T< >''< >%T INVALID< >%T REDUNDANT< 		
+sprintf.t	530	>%V-%s< >["Hello"]< >%V-Hello INVALID< >%V-Hello< 		
+sprintf.t	32	>%V< >''< >%V INVALID< >%V REDUNDANT< 		
+sprintf.t	139	>%Vd< >1< >1< >%Vd REDUNDANT< 		
+sprintf.t	33	>%W< >''< >%W INVALID< >%W REDUNDANT< 		
+sprintf.t	36	>%Y< >''< >%Y INVALID< >%Y REDUNDANT< 		
+sprintf.t	37	>%Z< >''< >%Z INVALID< >%Z REDUNDANT< 		
+sprintf.t	534	>%d %K %d< >[23, 45]< >23 %K 45 INVALID< >23 %K 45< 		
+sprintf.t	341	>%d< >$p=sprintf('%#p',$p);$p=~/^0x[0-9a-f]+\s*$/< >1< >0 MISSING< Coarse hack: hex from %#p		
+sprintf.t	265	>%h< >''< >%h INVALID< >%h REDUNDANT< 		
+sprintf.t	267	>%j< >''< >%j INVALID< >%j REDUNDANT< 		
+sprintf.t	268	>%k< >''< >%k INVALID< >%k REDUNDANT< 		
+sprintf.t	269	>%l< >''< >%l INVALID< >%l REDUNDANT< 		
+sprintf.t	270	>%m< >''< >%m INVALID< >%m REDUNDANT< 		
+sprintf.t	342	>%q< >''< >%q INVALID< >%q REDUNDANT< 		
+sprintf.t	343	>%r< >''< >%r INVALID< >%r REDUNDANT< 		
+sprintf.t	272	>%s< >$n="abc"; sprintf(' %n%s', substr($n,1,1), $n)< > a1c< > %nb< %n w/magic		
+sprintf.t	273	>%s< >no warnings; sprintf('%s%n', chr(256)x5, $n),$n< >5< >abc< Unicode %n		
+sprintf.t	271	>%s< >sprintf('%%n%n %d', $n, $n)< >%n 2< >%n%n 0< Slight sneakiness to test %n		
+sprintf.t	365	>%t< >''< >%t INVALID< >%t REDUNDANT< 		
+sprintf.t	494	>%v#x< >''< >%v#x INVALID< >< 		
+sprintf.t	482	>%v%,%d< >[63, 64, 65]< >%v%,63 INVALID INVALID< >%.%,64 REDUNDANT< 		
+sprintf.t	155	>%v.3d< >[version::qv("1.2.3")]< >001.002.003< > MISSING< 		
+sprintf.t	380	>%v< >''< >%v INVALID< >%v REDUNDANT< 		
+sprintf.t	487	>%vE,%d< >[1, 2, 3]< >%vE,1 INVALID< >4.900000E+01,2 REDUNDANT< => >4.900000E+1,2 REDUNDANT< 		
+sprintf.t	485	>%vF,%d< >[1, 2, 3]< >%vF,1 INVALID< >49.000000,2 REDUNDANT< 		
+sprintf.t	489	>%vG,%d< >[1, 2, 3]< >%vG,1 INVALID< >49,2 REDUNDANT< 		
+sprintf.t	493	>%v_< >''< >%v_ INVALID< >< 		
+sprintf.t	481	>%vc,%d< >[63, 64, 65]< >%vc,63 INVALID< >6.3,64 REDUNDANT< 		
+sprintf.t	150	>%vd< >[version->new("1.002")]< >1.2< >49.46.48.48.50< 		
+sprintf.t	149	>%vd< >[version->new("1.02")]< >1.2< >49.46.48.50< 		
+sprintf.t	148	>%vd< >[version->new("1.2")]< >1.2< >49.46.50< 		
+sprintf.t	151	>%vd< >[version->new("1048576.5")]< >1048576.5< >49.48.52.56.53.55.54.46.53< 		
+sprintf.t	152	>%vd< >[version->new("50")]< >50< >53.48< 		
+sprintf.t	147	>%vd< >[version::qv("1.2.3")]< >1.2.3< > MISSING< 		
+sprintf.t	486	>%ve,%d< >[1, 2, 3]< >%ve,1 INVALID< >4.900000e+01,2 REDUNDANT< => >4.900000e+1,2 REDUNDANT< 		
+sprintf.t	484	>%vf,%d< >[1, 2, 3]< >%vf,1 INVALID< >49.000000,2 REDUNDANT< 		
+sprintf.t	488	>%vg,%d< >[1, 2, 3]< >%vg,1 INVALID< >49,2 REDUNDANT< 		
+sprintf.t	491	>%vn< >''< >%vn INVALID< >< 		
+sprintf.t	490	>%vp< >''< >%vp INVALID< >< 		
+sprintf.t	492	>%vs,%d< >[1, 2, 3]< >%vs,1 INVALID< >49,2 REDUNDANT< 		
+sprintf.t	441	>%vx< >[version::qv("1.2.3")]< >1.2.3< > MISSING< 		
+sprintf.t	442	>%vx< >[version::qv("1.20.300")]< >1.14.12c< > MISSING< 		
+sprintf.t	381	>%w< >''< >%w INVALID< >%w REDUNDANT< 		
+sprintf.t	463	>%y< >''< >%y INVALID< >%y REDUNDANT< 		
+sprintf.t	464	>%z< >''< >%z INVALID< >%z REDUNDANT< 		
+sprintf2.t	1545		'            0x1.8p+0'	'            1.5'
+sprintf2.t	1657	$ary[3] .= sprintf ...	'ghi'	'ghi(pqr,xyz)'
+sprintf2.t	1578	%n	''	Missing argument for %n in sprintf
+sprintf2.t	1570	Integer overflow: "%.18446744073709551615a", "1.1"	'The value   18446744073709551602 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow in format string
+sprintf2.t	1572	Integer overflow: "%.18446744073709551615i", "-1"	'The value   18446744073709551614 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow in format string
+sprintf2.t	1571	Integer overflow: "%.18446744073709551615i", "1"	'The value   18446744073709551614 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow in format string
+sprintf2.t	1535	[rt.perl.org #128888]	'0x1p+0'	'1'
+sprintf2.t	1536	[rt.perl.org #128889]	'0x1.08p+0'	'1.03125'
+sprintf2.t	1542	[rt.perl.org #128893]	' 0x000000000001.8p+0'	' 1.5'
+sprintf2.t	1537	[rt.perl.org #134008]	'0x1.08p+0'	'1.03125'
+sprintf2.t	1673	croak for very large numeric format results	'Integer overflow in format string for sprintf %7000000000E at (eval 0) line 0. '	^Numeric format result too large at 
+sprintf2.t	1577	first arg not special utf8-wise		
+sprintf2.t	1538	negative precision ignored by format_hexfp	'0x0p+0'	'0'
+sprintf2.t	1677	offset after 0	''	'1'
+sprintf2.t	1676	offset at start	''	'0'
+sprintf2.t	1648	overflow: %*2$s	'The value   4611686018427387901 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1626	overflow: %*s 0x4000000000000000, 4611686018427387904	'The value   4611686018427387901 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1621	overflow: %*s 0x4000000000000001, 4611686018427387905	'The value   4611686018427387902 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1616	overflow: %*s 0x7ffffffffffffffd, 9223372036854775805	'The value   9223372036854775802 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1611	overflow: %*s 0x7ffffffffffffffe, 9223372036854775806	'The value   9223372036854775803 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1606	overflow: %*s 0x7fffffffffffffff, 9223372036854775807	'The value   9223372036854775804 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1631	overflow: %*s 0x8000000000000000, -9223372036854775808	'The value   9223372036854775805 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1601	overflow: %*s 0x8000000000000000, 9223372036854775808	'The value   9223372036854775805 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1635	overflow: %*s 0x8000000000000001, -9223372036854775807	'The value   9223372036854775804 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1596	overflow: %*s 0x8000000000000001, 9223372036854775809	'The value   9223372036854775806 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1639	overflow: %*s 0x8000000000000002, -9223372036854775806	'The value   9223372036854775803 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1643	overflow: %*s 0xbfffffffffffffff, -4611686018427387905	'The value   4611686018427387902 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1647	overflow: %*s 0xc000000000000000, -4611686018427387904	'The value   4611686018427387901 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1591	overflow: %*s 0xfffffffffffffffd, 18446744073709551613	'The value   18446744073709551610 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1586	overflow: %*s 0xfffffffffffffffe, 18446744073709551614	'The value   18446744073709551611 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1581	overflow: %*s 0xffffffffffffffff, 18446744073709551615	'The value   18446744073709551612 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1650	overflow: %.*2$s	''	Integer overflow
+sprintf2.t	1649	overflow: %.*s	''	Integer overflow
+sprintf2.t	1630	overflow: %.NNNf	'Exponent too large to fit into memory: 4611686018427387904 at (eval 0) line 0. '	Integer overflow
+sprintf2.t	1675	reasonable result	'%n0%nĀ'	'0Ā'
+sprintf2.t	1678	sprintf( "%.54g", 0.3 ) renders correctly	'0.3'	eq '0.299999999999999988897769753748434595763683319091796875'
+sprintf2.t	1519	subnormal 3e-322 %.4a 0x1.e800p-1069 got 0x1.e000p-1069	'0x1.e000p-1069'	'0x1.e800p-1069'
+sprintf2.t	1509	subnormal 3e-322 %a 0x1.e8p-1069 got 0x1.ep-1069	'0x1.ep-1069'	'0x1.e8p-1069'
+sprintf2.t	1526	subnormal 3e-324 %.1a 0x1.0p-1074 got 0x0.0p+0	'0x0.0p+0'	'0x1.0p-1074'
+sprintf2.t	1521	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x0.0000p+0	'0x0.0000p+0'	'0x1.0000p-1074'
+sprintf2.t	1511	subnormal 3e-324 %a 0x1p-1074 got 0x0p+0	'0x0p+0'	'0x1p-1074'
+sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'
+sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'
+sprintf2.t	1574	utf8 for invalid format: invalid warnings	'0'	'1'
+state.t	43		'3,6,x:x:x,a:b:c:x:x:x,HASH(0x1003045aa3),a:b:c:d:e:3'	'3,6,x:x:x,a:b:c:x:x:x,e:3,a:b:c:d:e:3'
+state.t	76	Reference to state variable	'SCALAR(0x10043dd803)'	'SCALAR(0x10043f4af3)'
+state.t	73	computed goto 0		
+state.t	75	grep	'Eagle'	'EagleAntaresOdysseyAquarius'
+state.t	74	map	'1'	'EagleEagleEagleEagle'
+state.t	92	substr	'John'	'xxxxx'
+substr.t	397		'-1'	'23'
+substr.t	386	Timely scalar destruction with lvalue substr	'0'	'1'
+substr.t	384	\substr %h	'HASH(0x1005325603)'	'50'
+substr.t	385	\substr @a	'ARRAY(0x10053256bf)'	'100'
+substr.t	376	\substr does not coerce its glob arg just yet	'REF'	'GLOB'
+substr.t	387	ref-to-substr retains lvalue-ness under recursion [perl #3363]	'test'	'best'
+substr.t	345	scalar does not affect lvalueness of substr	'abcdef'	'abcdeaf'
+substr.t	378	substr lvalue assignment when stringification turns on UTF8ness	'Āa'	'b'
+tr.t	224	    doesn't stringify its argument	''	'SCALAR'
+tr.t	223	non-modifying tr/// on a scalar ref	'0'	'2'
+tr.t	257	tr// of \N{name} works for upper-Latin1	'á'	'A'
+wantarray.t	11		'S'	'V'
+yadayada.t	30		''	\Asyntax error 
+yadayada.t	5	Disambiguation case 1	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 31. '
+yadayada.t	6	Disambiguation case 2	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 36. '
+yadayada.t	7	Disambiguation case 3	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 41. '
+yadayada.t	8	Disambiguation case 4	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 46. '
+yadayada.t	1	Execution of ellipsis statement reported 'Unimplemented' code	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 18. '
+yadayada.t	32	{Parsing '...' in "my @arr = 'A' ... 'D';" as a range operator} ()		
+yadayada.t	36	{Parsing '...' in "print  D  ...  A ;" as a range operator} ()		
+yadayada.t	37	{Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator} (The function MAIN::PL-A is undefined.)		
+yadayada.t	34	{Parsing '...' in "print 'D' ... 'A';" as a range operator} ()		

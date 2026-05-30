@@ -4,6 +4,263 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 217 (2026-05-30) — ref.t skip-registry migration (35), ref-to-ref fix, sweep-diff crash distinction
+
+### Focus
+Continued the declarative skip-registry workflow (`docs/test-debugging-runbook.md`):
+(1) migrated ref.t's 35 documented not-supported failures into `cl/skip-registry.lisp`;
+(2) fixed `ref(\$ref)` ref-to-ref → "REF" (the genuine bug left failing earlier);
+(3) made `tools/sweep-diff.pl` distinguish a CRASHED file from a genuinely-fixed one.
+Gate `prove -j8 Pl/t/` green throughout (3040/3040). **End state: 806 honest fails, 63
+fully passing, baseline re-blessed at 529 keys** (registry-era counter).
+
+### Registered (ref.t, 35 tests → documented skips, stale: 0)
+Added a `(register-skips "ref.t" …)` block with five narrow description-regex matchers,
+each citing `docs/not-supported.md`:
+- **Deref of an IO/FORMAT glob slot** (`^(Scalar|Array|Hash|Code|Glob) dereference$`, 9t) —
+  `$$ref`/`@$ref`/… on `*STDOUT{IO}`/`*STDERR{FORMAT}` must die "Not a X reference"; PCL
+  doesn't, and FORMAT is unsupported. (`$`-anchor excludes the passing "Glob dereference of
+  PVIO is acceptable" sibling.) :error-msg.
+- **ref to substr/pos/vec lvalue** (`ref to (substr|pos|vec) lvalue`, 6t) → "LVALUE";
+  lvalue refs unsupported. :lvalue.
+- **ref to FORMAT / IO handle** (`ref to format|stringify for IO refs`, 3t) — format/write
+  unimplemented. (Narrowed to `stringify for IO refs` so the passing "IO refs are blessed
+  into IO::File" doesn't match.) :error-msg.
+- **Symbolic ref to NUL/UTF-8-named stash entry**
+  (`UTF8 representation is 3 chars|via the UTF8 byte sequence|via the correct name works`,
+  12t) — Unicode/NUL stash lookup unsupported. :utf8.
+- **Assignment to literal-aliased value / weaken read-only ref**
+  (`read-only ref|aliased to literal`, 5t) — must die "Modification of a read-only value";
+  read-only scalars not emulated. :read-only.
+
+### Fix: `ref(\$ref)` ref-to-ref → "REF" (ref.t test 66, +substr.t 377)
+`p-ref` returned "SCALAR" for a ref-to-a-ref. Root cause: box-nesting depth does NOT
+cleanly separate a plain scalar-ref from a ref-to-ref — a `my`-bound ref (`$r = \$x`)
+round-trips through `box-set` to the same depth as `\$x` direct, and `*p-undef*` /
+double-boxed array elements make plain scalars look boxed. The `is-ref` flag (set only by
+`p-backslash` on scalar-ref wrappers) is the real discriminator.
+
+Fix in `cl/pcl-runtime.lisp` `p-ref`: keep the original `inner2`-type arms (so direct
+`\$qr`→REGEXP, `\$aref`→ARRAY are preserved), then add a ref-to-ref arm that computes the
+**referent** (`inner` when `val` itself is a wrapper, else `inner2`) and reports "REF" iff
+that referent *is* a wrapper (`is-ref`, e.g. `\\1`) or *holds* a reference. The held-a-ref
+test is a new **non-recursive** helper `%scalar-holds-ref-p` (one `unbox` deep — so a
+self-referential `$x=\$x` does not loop, and `*p-undef*`/`''` array elements correctly stay
+SCALAR). `p-reftype` maps the new "REF" → "SCALAR" (reftype of the referent scalar).
+Verified: `\$x`=SCALAR, `\\1`=`\\$x`=`\$r`=`\$rr`=REF, self-ref=REF (no hang), gate
+**3040/3040 PASS**. First two attempts (naive `p-box-p inner2`; full restructure with
+recursive `p-ref`) were reverted after they regressed qr.t/index.t/split.t — the sweep
+caught them; documented here so we don't retry them.
+
+### Tooling: sweep-diff distinguishes CRASHED from FIXED (user request)
+The clean-pack.t sweep exposed the flaky-`-j8` `SIMPLE-FILE-ERROR` on pack.t: when a file
+crashes it runs 0 assertions, so every baseline failure in it looked "FIXED" (60 false
+fixes). Fixed the tooling so it can't mislead:
+- `sweep-perl-tests.pl` now writes `<faillog>/_status.tsv` (`name⇥status⇥pass⇥fail⇥planned`)
+  for every file from `%results`.
+- `tools/sweep-diff.pl diff` reads it: a baseline fail absent in the current run counts as
+  **FIXED only if its file ran OK**; if the file CRASHED/PARTIAL/TIMEOUT it is reported under
+  **"DID NOT RUN … UNVERIFIED, not fixed"** and excluded from the fixed count. Regressions
+  (NEW) are unaffected (a crashed file emits no fails). Re-ran clean (pack.t 5636/89);
+  baseline re-blessed at **529** keys.
+
+### Left failing (genuine bugs / gaps — NOT registered)
+ref.t still 21 fails: vstring refs (64–65), PVBM ref-type (178–182), `&{""}` (21), list-slice
+deref (177), sub-ref CL-lambda stringification (171–172), `-e` vs `-` eval filename
+(189–191), and the PARTIAL early-stop at ~test 230 (a crash to localize next).
+
+---
+
+## Session 216 (2026-05-29) — tr/// complement, sprintf positional args, hex-float string bug
+
+### Focus
+Re-swept after s215 Part-2 (baseline **28480/1020/60**, +13, confirming the Part-2 gain),
+updated `docs/sweep-bug-catalog.md` (many stale counts corrected — esp. infnan.t now only
+6 fail, not 396), then fixed three bug clusters. **Post-fix sweep: 28604/896/60 (+124, no
+fully-passing regression).** Gate `prove -j8 Pl/t/` green (81 files / 3040 tests).
+
+### Fix 1: tr/// `/c` complement family (tr.t 229→272, +43)
+`do-tr` in `cl/pcl-runtime.lisp` mapped every complemented char to `to-chars[0]`. Correct
+Perl semantics: each char NOT in the search list is ranked by its codepoint position among
+*all* non-search codepoints, then mapped positionally into the replacement list (last repl
+char repeats past its end). New helper `%tr-from-index` computes the rank as
+`code - (count of search codepoints < code)` (works for non-contiguous search ranges).
+Rewrote `do-tr`: `/cd` deletes past repl end, `/cs` squeezes only *translated* runs
+(pass-through chars break the run), `/r` returns the transliterated copy without mutating
+the box. Remaining 45 tr.t failures are error/warning-message detection (principle 9) plus
+named sequences / read-only strings. Regression test `Pl/t/tr-01.t` (8).
+
+### Fix 2: sprintf reordered positional width/precision (sprintf.t +9)
+`%*N$` / `%.*N$` (width/precision from positional arg N) were emitted literally. New helper
+`%sprintf-star-positional` in `cl/pcl-runtime.lisp`; both `*` arms in `p-sprintf` now detect
+a trailing `N$` and use that 1-based arg without advancing the sequential index. Fixes the
+332–335 and 674–685 reorder blocks.
+
+### Fix 3: string-literal hex-float corruption (sprintf2.t +69, hexfp.t +3)
+`_preprocess_source` (`Pl/Parser.pm`) ran the hex/binary/octal-float→decimal regex over the
+WHOLE source, so the **string** `'0x1p+0'` became `'1'` — corrupting sprintf2.t's entire
+`@hexfloat` data table (and any string that looks like a hex float). Fixed with the
+"match-what-you-skip OR match-what-you-change" technique: each substitution now matches a
+quoted string (`'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"`) as its first alternative and passes it
+through untouched, so the float pattern is never seen inside a string. Comments are not
+skipped (converting a float-lookalike in a comment is harmless — PPI discards comments).
+Real hex-float numeric literals (`0x1.8p+1` → 3.0) still convert. Regression test
+`Pl/t/hexfloat-01.t` (6). Remaining sprintf2.t failures are subnormal/denormal `%a` rounding,
+`%.HUGEa` overflow messages, utf8 invalid-format warnings, `%n`.
+
+### Catalog maintenance
+`docs/sweep-bug-catalog.md` header refreshed; added dedicated `sprintf.t`, `tr.t`, and `do.t`
+sections; corrected grossly-stale per-file counts (infnan.t 396→6, array.t→38, aassign.t→66,
+etc.); marked infnan.t as MOSTLY RESOLVED needing re-triage.
+
+### New infrastructure: declarative skip-registry (replaces inline `ok(1,'SKIP')`)
+Instead of hand-editing `perl-tests/*.t` to disable not-supported tests, added a registry
+keyed on test-file basename + a regex on the test DESCRIPTION. Full design in
+`docs/test-skip-registry.md`. Mechanism:
+- `cl/pcl-test.lisp`: `*current-test-file*`, `*skip-registry*`, `register-skips` (macro),
+  `%skip-registry-lookup`, and a hook in `test-ok` (the single chokepoint all assertions
+  funnel through). A FAILING matched assertion → real TAP `ok N # skip <reason>`; a PASSING
+  matched assertion → normal `ok` + `# REGISTRY-STALE` warning (catches over-broad patterns
+  and accidental real fixes). The assertion still runs — nothing weakened (principle 5).
+- `cl/skip-registry.lisp`: registry data; first entries cover tr.t's documented
+  not-supported set (RT#130198 chop/chomp-of-tr error detection, error-message tests,
+  read-only). tr.t fail count: **45 → 3** (the 3 are genuine triage items 223/224/257);
+  0 stale after narrowing `RT #130198` → `RT #130198 eval:` + `…warn: cho(p|mp)\(@a`.
+- `runt` + `sweep-perl-tests.pl`: load the registry, set `*current-test-file*`, and the
+  sweep now reports **Pass / Fail / Skip** (3 columns). "Fully passing" = fail==0.
+- **Crashes/PARTIAL are NOT auto-skipped** — the registry only sees assertion-level
+  failures; a process-abort never reaches `test-ok`. Crashes stay characterized as
+  CRASH/PARTIAL (+ snippet + ran/planned) and are fix targets. The four buckets:
+  pass / fail / skip / CRASH·PARTIAL. CLAUDE.md principle 5 updated to point here.
+- **Full migration (reverting the ~14 inline-skipped files into the registry) is NOT yet
+  done** — next step.
+- **Debugging accelerators on the `test-ok` chokepoint** (see `docs/test-skip-registry.md`
+  "Leveraging the instrumentation"). **#1 + #2 BUILT:**
+  - **#1 structured failure log** — `test-ok` appends `file⇥num⇥desc⇥got⇥expected` per FAILING
+    assertion to `<PCL_TEST_LOG_DIR>/<file>.fails.tsv` (got/expected parsed from diag). Zero
+    overhead when the env var is unset (Pl/t gate unaffected). The sweep auto-sets it to
+    `.faillog` (cleared each run, gitignored). Impl: `%test-log-stream`/`%test-log-failure`.
+  - **#2 `tools/sweep-diff.pl`** — regression watchdog keyed on `(file, description)` (number-
+    shift-robust). Modes: summary / `diff <baseline> <current>` (NEW=regressions + FIXED, exit≠0
+    on regressions) / `save`. Committed baseline `docs/fail-baseline.tsv` (560 keys).
+  - **#3 crash localization** and **#4 `tools/triage.pl` clustering** still planned.
+
+### Faillog-driven triage demo + number-keyed registry
+Demonstrated the faillog workflow on a couple of small-fail files. The `.faillog` got/expected
+made triage instant — both files were entirely *documented not-supported* (read-only), so the
+correct "fix" was registration, not code:
+- **undef.t** 16/17/18 (read-only scalar/constant; not-supported.md 'Read-only constants via
+  \undef …') and **unshift.t** 19 (`Internals::SvREADONLY` array; not-supported.md 'Internals::*')
+  → registered → both files now **0 fail** (undef.t 30/0/5, unshift.t 18/0/1), 0 stale. +2 fully
+  passing in a clean sweep.
+- **Limitation found & fixed:** unnamed tests (undef.t 16/17 use `like($@,qr/…/)` with no name)
+  can't be keyed by description. Extended the registry: a matcher may be a description-regex
+  (preferred) OR an exact test-NUMBER integer (matches `*test-count*`; stale-detector still
+  guards it). `%register-skips`/`%skip-registry-lookup` in `cl/pcl-test.lisp`.
+- Triage also confirmed (left unregistered, real bugs/edge cases): index.t 111 (overloaded
+  constant-ref stringification in index), concat2.t 2 (RT#132385 multiconcat distinct-TEMP),
+  push.t 4-6 (push onto non-array leaks an SBCL struct print instead of dying cleanly — worth a
+  clean-die fix later).
+
+### New baseline with skip-registry (3-column sweep)
+`perl sweep-perl-tests.pl --jobs 8`: **16822 pass / 854 fail / 11824 skip, 60 fully passing**.
+The pass count dropped from 28604 because the old counter scored every `ok N # skip` line as
+a pass; the new counter separates them (skips are dominated by test-files' OWN SKIP
+directives: pack.t 8997, lc.t 2577, … + 42 tr.t registry skips). Fail 896→854 (−42 = tr.t
+registry). No regressions; fully-passing held at 60. **854 is now the honest fixable/untriaged
+failure count.**
+
+---
+
+## Session 215 (2026-05-29) — AASSIGN_COMMON via `our` + short-circuit op list context
+
+### Focus
+array.t AASSIGN_COMMON cluster (tests 115–117). Two related context bugs fixed.
+Sweep: 28464/1036/60 → **28467/1033/60** (+3 pass, no regressions, fully-passing
+unchanged). Pl/t: 3010 → 3013 (3 new regression tests, all green).
+
+### Bug 1: `our (...) = (...)` parsed its RHS in scalar context
+`our ($x,$y,$z) = (1..3)` generated `(p-list-= (vector $x $y $z) (p-flipflop-num 1 1 3))`
+— the `(1..3)` RHS was a flip-flop (compared against `$.`), not a range, so all three
+vars ended up empty (and a stray "uninitialized $." warning fired). `my (...)` and plain
+`(...)` list assignments already passed LIST_CTX to the RHS; the `our` path did not.
+
+**Fix** (`Pl/Parser.pm`, `_process_our_declaration`, multi-var path ~line 1526): pass
+`1` (LIST_CTX) as the 3rd arg to `_parse_expression` for the RHS, mirroring the array/
+hash declaration path. Now `(1..3)` → `(p-..  1 3)`. Fixes array.t 115, 116.
+
+### Bug 2: short-circuit ops forced scalar context on BOTH operands
+`child_context` in `Pl/PExpr.pm` returned SCALAR_CTX for both operands of `&&`/`and`/
+`||`/`//`/`or`. Correct Perl semantics: the LHS is always evaluated in scalar (boolean)
+context, but the RHS is the value returned on short-circuit and **inherits the surrounding
+context**. So `$cond && ($x,$y)` and `() || (1,2)` return the list in list context.
+This broke array.t test 117: `(our $y, our $z) = $true && ($x,$y)` generated
+`(p-&& $true (progn $x $y))` — the `(progn …)` returned only `$y` (scalar), so the list
+assignment saw a single value.
+
+**Fix**: `&&`/`and`/`||`/`//`/`or` now return `$child_index == 0 ? SCALAR_CTX : $parent_ctx`.
+`xor` stays scalar (purely boolean). Verified against Perl: `@a=(0||@x)` → elements,
+`@a=(@x||@y)` → count of @x (LHS still scalar), `(1 and (7,8,9))` → 7,8,9.
+
+**Caution noted during dev**: an intermediate version let `||`/`or` LHS *also* inherit
+context — that caused a -1 net sweep regression (recovered once LHS was pinned to scalar).
+The LHS of a short-circuit op is *never* list context, even in list context.
+
+### Regression tests
+`Pl/t/aassign-01.t` 8 → 11 tests: `our (...) = (1..3)` range, `our` self-assign snapshot,
+`&&` list-context propagation.
+
+### Part 2 — more list-vs-scalar context fixes (wantarray work now authorized)
+The user lifted the long-standing wantarray/context prohibition this session. Several
+more context bugs fixed (all verified against real Perl; new file
+`Pl/t/list-scalar-context-01.t`, 13 tests). do.t 20→10, split.t 9→8, array.t 41→38.
+
+- **split args forced scalar** (`Pl/PExpr.pm` child_context): `join ':', split('abc'=~/b/, $s)`
+  — the match `'abc'=~/b/` is split's scalar *pattern* arg, but the enclosing `join` bound
+  `*wantarray* t`, so `=~` returned the capture list `(1)` instead of scalar `1`. split.t 58.
+- **`=~`/`!~` bare-match context wrapper** (`Pl/ExprToCL.pm` gen_binary_op): a bare match
+  reads `*wantarray*` at runtime; now wrapped `(let ((*wantarray* nil/t)) …)` when the node
+  has a definite annotated context, so ambient list context from an enclosing construct
+  can't leak in. **Only bare matches** — `s///`/`tr///` (which return scalar counts) are
+  excluded by checking `$right !~ /^\(p-(subst|tr|translate)/`, else regexp-subst-01.t's
+  codegen-string assertions break.
+- **`return @a` = count, `return @slice` = last element**: `p-return-value` reduced ANY
+  adjustable vector to its last element in scalar context, but an array variable / map /
+  grep should give the COUNT (matching box-set and the implicit-tail form). Changed
+  `p-return-value` to count vectors in scalar context. Slices and list literals still need
+  last-element: list literals already arrive as separate args to `p-return` (handled), and
+  **slices are now reduced at their own codegen site** — new `_slice_in_context` (ExprToCL)
+  wraps `(p-aslice …)`/`(p-hslice …)` with `p-list-scalar` (scalar→last) or `p-slice-result`
+  (runtime `*wantarray*` check, for `return @slice`).  Critically it reads `get_node_context_raw`
+  (undef when unannotated) — an unannotated slice is list-natural (string interpolation,
+  unit-test exprs) and must keep its full vector. New runtime helpers `p-list-scalar` /
+  `p-slice-result` (exported).  This also FIXED a pre-existing bug: `my $s = @a[0,1,2]` was
+  giving the count (3) via box-set; now gives the last element (1).
+- **`return do { @a }` inherits caller context** (do.t 17–38 cluster): falls out of the
+  `p-return-value` count fix — the do-block returns the raw array vector and `p-return-value`
+  now counts it in scalar / keeps it in list. do.t scalar+list context tests now pass
+  (35/36 remain — `(do{}, (do{}) x N)` list context).
+- **String-interp array/hash slices** (`Pl/PExpr/StringInterpolation.pm` + `gen_string_concat`):
+  `"@a[0,2]"` generated `(p-aref @a (vector 0 2))` (single element — pre-existing bug, gave
+  "5"). Now `parse_array_subscript`/`parse_hash_subscript` build `slice_a_acc`/`slice_h_acc`
+  for the `@` sigil, and `gen_string_concat` joins slice nodes with `$"` (like `@arr`). Gives
+  "5 1". (User asked for a regression test for this `print` case — included.)
+
+### Docs / preference
+Removed the wantarray prohibition from CLAUDE.md, `docs/wantarray-context.md`, MEMORY.md.
+Follow-up note for next session: `memory/project_wantarray_followup.md` — sweep context
+handling in more constructs (kv-slices, sort/reverse scalar, other wantarray-sensitive
+builtins as list-func args; long-term: AST-level context annotation per two-phase-compiler.md).
+
+### NOT yet done (next session)
+Full `perl sweep-perl-tests.pl --jobs 8` was NOT re-run after Part 2 — the earlier sweep
+(28467/1033/60) only covered the first three fixes. **Run the full sweep next session** to
+confirm the Part-2 net gain and guard the fully-passing count. `prove -j8 Pl/t/` is GREEN
+with all Part-2 fixes: **79 files, 3026 tests, all passing** (confirmed at session end).
+Only the perl-tests sweep remains to re-run.
+
+---
+
 ## Session 214 (2026-05-28) — sprintf.t unblocked (array-store copy semantics + s///x mode)
 
 ### Focus

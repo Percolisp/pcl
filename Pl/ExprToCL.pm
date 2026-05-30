@@ -942,6 +942,19 @@ sub gen_binary_op {
     }
   }
 
+  # Match operators read *wantarray* at runtime to choose between a boolean
+  # (scalar) and a capture list (list).  When the surrounding expression pins
+  # the match to a definite context, wrap it so the ambient *wantarray* from an
+  # enclosing list construct does not leak in.  e.g. `join ':', split('a'=~/b/,…)`
+  # — the match is split's scalar pattern arg, but join binds *wantarray* t.
+  # Only a bare match is context-sensitive; s/// and tr/// return a scalar count,
+  # so skip the wrapper for those (and keep their codegen string unchanged).
+  if (($op eq '=~' || $op eq '!~') && $right !~ /^\(p-(?:subst|tr|translate)\b/) {
+    my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+    return "(let ((*wantarray* nil)) ($cl_op $left $right))" if $ctx == SCALAR_CTX;
+    return "(let ((*wantarray* t)) ($cl_op $left $right))"   if $ctx == LIST_CTX;
+  }
+
   return "($cl_op $left $right)";
 }
 
@@ -976,7 +989,11 @@ sub gen_string_concat {
     # Check if this is an array variable (@arr) - needs to be joined
     my $kid_content = (ref($kid_node) eq 'PPI::Token::Symbol' && $kid_node->can('content'))
                       ? ($kid_node->content() // '') : '';
-    if ($kid_content =~ /^@/) {
+    # Array/hash slices interpolate like arrays: their elements are joined with $".
+    my $is_slice = $self->expr_o->is_internal_node_type($kid_node)
+                   && ($kid_node->{type} eq 'slice_a_acc'
+                       || $kid_node->{type} eq 'slice_h_acc');
+    if ($kid_content =~ /^@/ || $is_slice) {
       # In Perl, "@arr" in string interpolation joins with $" (default space)
       # Use |$"| which is the CL variable for Perl's $" list separator
       push @parts, '(p-join |$"| ' . $generated . ')';
@@ -2193,7 +2210,22 @@ sub gen_array_slice {
   }
 
   my $idx_str = join(' ', @indices);
-  return "(p-aslice $arr $idx_str)";
+  return $self->_slice_in_context("(p-aslice $arr $idx_str)", $node_id);
+}
+
+# An array/hash slice in scalar context yields its LAST element (list semantics),
+# not the element count.  Wrap the slice vector accordingly: scalar → last elem,
+# list/void → the vector itself, inherited (e.g. `return @a[...]`) → runtime check.
+sub _slice_in_context {
+  my ($self, $slice_cl, $node_id) = @_;
+  # Use the RAW context: an unannotated slice is list-natural (e.g. inside string
+  # interpolation or a freshly-parsed unit-test expression) and must keep its full
+  # vector — defaulting it to scalar would wrongly reduce it to the last element.
+  my $ctx = defined $node_id ? $self->expr_o->get_node_context_raw($node_id) : undef;
+  return $slice_cl unless defined $ctx;            # unannotated → full slice vector
+  return "(p-list-scalar $slice_cl)"  if $ctx == SCALAR_CTX;
+  return "(p-slice-result $slice_cl)" if $ctx == INHERIT_CTX;
+  return $slice_cl;  # LIST_CTX / VOID_CTX: keep the full slice vector
 }
 
 
@@ -2218,7 +2250,7 @@ sub gen_hash_slice {
   }
 
   my $key_str = join(' ', @keys);
-  return "(p-hslice $hash $key_str)";
+  return $self->_slice_in_context("(p-hslice $hash $key_str)", $node_id);
 }
 
 # KV hash slice: %hash{keys} - returns key-value pairs
