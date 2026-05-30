@@ -22,6 +22,22 @@ Updated 2026-05-29 (session 215, Part 2). **More list-vs-scalar context fixes** 
 Updated 2026-05-30 (session 217). **Skip-registry migration: ref.t 35 documented not-supported failures registered** (deref of IO/FORMAT glob slots, \substr/\pos/\vec lvalue refs, ref-to-FORMAT/IO, NUL/UTF-8 symbolic-ref stash names, literal-aliased read-only assignment). ref.t **57→22 fail** (still PARTIAL). Honest sweep total **808 fail** (registry-era counter; −35), **63 fully passing**, no regression. Baseline re-blessed (531 keys). No runtime changes (a `ref(\$ref)`→"REF" fix was attempted but reverted — box-nesting depth doesn't cleanly separate scalar-ref from ref-to-ref through a `my` round-trip).
 Updated 2026-05-29 (session 216). **Post-fix sweep: 28604 pass / 896 fail, 60 fully passing** (104 files + 2 skipped; +124 vs the 28480 baseline this session, no fully-passing regression; gate `prove -j8 Pl/t/` green at 81 files / 3040 tests). Three fixes: tr.t /c complement +43, sprintf2.t hex-float-string + positional +69, sprintf.t positional +9, hexfp.t +3. Baseline before fixes was 28480/1020/60 (+13 vs s215p1, confirming the s215 Part-2 net gain). **tr.t /c complement family FIXED: 229→272 passing (+43)** — `do-tr` rewritten to rank each complemented char by its position among all codepoints NOT in the search list (was mapping every complement char to repl[0]); `/cd` delete-past-repl, `/cs` squeeze-translated-only, and `/r` non-destructive return all now correct. New `Pl/t/tr-01.t` (8). Remaining tr.t failures are error/warning-message detection (principle 9) + named sequences/RO strings. **Stale-number corrections this session: infnan.t now only 6 fail (was 396); array.t 38; aassign.t 66; index.t 11; do.t 10; split.t 8; chop.t 5; method.t 39; ref.t 57.**
 Updated 2026-05-29 (session 215, Part 1). **28467 pass / 1033 fail, 60 fully passing** (+3 vs s214, no regressions, Pl/t 3013/3013). array.t 115–117 fixed (AASSIGN_COMMON via `our`). Two fixes: (1) `our (...) = (...)` now parses its RHS in LIST context (`Pl/Parser.pm` `_process_our_declaration`), so `our ($x,$y,$z) = (1..3)` generates a range, not a flip-flop (was emitting `p-flipflop-num`, yielding all-empty). (2) short-circuit ops `&&`/`and`/`||`/`//`/`or` now evaluate the LHS in scalar (boolean) context but let the RHS **inherit** the surrounding context (`Pl/PExpr.pm` `child_context`) — `$cond && (list)` and `() || (list)` return the list in list context (matches Perl `@a=(0||@x)` → elements; `@a=(@x||@y)` LHS still scalar count). Regression tests added to `Pl/t/aassign-01.t` (8→11).
+Updated 2026-05-30 (session 219). **Sweep harness fixed — only 2 genuine crashes left.**
+The full sweep had been aborting ~36 files with `SB-INT:SIMPLE-FILE-ERROR` (looked like
+mass crashes; pass total slumped to ~7993). **Root cause:** the failure-log writer
+(`%test-log-stream`, `cl/pcl-test.lisp`) opened `PCL_TEST_LOG_DIR/<file>.fails.tsv` via a
+**relative** path; many perl-tests do `chdir 't'`, so when a *failing* test fired after the
+chdir, the relative `.faillog/` dir didn't exist in the new cwd → unhandled file error killed
+the whole file. It only surfaced for files whose failing test was GC-nondeterministic
+(e.g. array.t 83 "freed array") — hence the "flakiness" memory noted since s216. **Fix:**
+(1) `sweep-perl-tests.pl` absolutizes `$log_dir` (relative → `$project_root/$log_dir`);
+(2) `%test-log-stream` now `ensure-directories-exist` + `ignore-errors` (a diagnostic
+side-channel must never crash a run). **Clean sweep now: 16849 pass / 770 fail / 11881 skip,
+63 fully passing** (this is the honest registry-era counter; the old 28604 scored skips as
+pass). **Only genuine crashes: bop.t & eval.t** (both not-supported, see below). Baseline
+re-blessed (506 keys). +24 fixed vs s217 baseline (array.t holes→skips s218, push.t guards
+s218, `\substr`/`map +()` s219), 0 real regressions (lone sprintf `%P` diff is a flaky
+pointer address).
 Updated 2026-05-28 (session 213). **27996 pass / 964 fail, 60 fully passing. Fixes: (1) v-string without `v` prefix (`256.65.258`): now handled as Version token in ExprToCL; (2) surrogate/non-char Unicode in CL string literals: new `_cl_string_literal()` in ExprToCL uses (concatenate 'string ...) forms; (3) tr/// escape sequences: new `_expand_tr_escapes()` converts Perl escapes before CL embedding — tr.t 40→226 passing; (4) yada yada `...`: detected in `_process_expression_statement`, emits (p-die "Unimplemented"); (5) lib/POSIX.pm stub added: DBL_MAX, math constants, errno, SEEK_* — sprintf.t crash fixed, 1→14 passing. Root cause of remaining 552 sprintf.t failures identified (see session-log.md §213).**
 
 **Session 207 fixes:**
@@ -329,8 +345,15 @@ backed by not-supported.md §"Sparse arrays (holes), element aliasing, and SV id
 
 ---
 
-### bop.t (62 failures, 434/510 passing — PARTIAL, stops at test 451)
+### bop.t (446/510 passing — CRASH at test 496; session 219)
 
+**GENUINE CRASH (1 of the only 2 left after the s219 sweep fix).** bop.t runs to test 495,
+then **`pack "P"`** (line 636: `unpack("P2", pack "P", …)`, a memory-layout idiom) dies
+`"Invalid type 'P' in pack"` — a **correct** die (P/P pointer pack is not-supported,
+not-supported.md §pack pointer types) but thrown in a **bare `for` loop** (no eval), so it
+aborts the file and tests 496–510 never run. To recover them, the offending statement must
+not abort the process — needs the deferred **per-statement `handler-case` wrapper**
+(`docs/test-skip-registry.md` §3.1) turning a top-level die into one `not ok` + continue.
 - **Large shift / `use integer` edge cases** (tests 50–125): `4 << 2147483648` should yield 0;
   CL integers are bignums, not 64-bit fixed-width. Documented not-supported.
 - **UTF-8 flag operations** (test 158): bitwise ops with UTF-8 flagged strings — `use bytes`.
@@ -339,7 +362,19 @@ backed by not-supported.md §"Sparse arrays (holes), element aliasing, and SV id
 - **Duplicate warning suppression** (tests 202, 215): `no warnings 'uninitialized'` should
   prevent repeated warnings.
 - **Glob bitwise ops** (tests 320–328): `*STDOUT | "string"` — bitwise ops between glob and string.
-- **Early stop at 451**: test 451 "correct error" — error message mismatch triggers exit.
+
+---
+
+### eval.t (15/169 passing — CRASH at test 29; session 219)
+
+**GENUINE CRASH (2 of 2).** Runs to test 28, then top-level **`die if $@`**
+(`(P-IF $@ (P-DIE))`) re-throws and aborts — because a preceding **string `eval "…"`**
+that succeeds in real Perl FAILS in PCL (the string-eval **lexical-scope** gap: the
+`pl2cl` subprocess can't see the caller's lexicals), leaving `$@` set. So the crash is a
+*consequence* of the string-eval limitation compounded by an uncaught top-level die. Same
+remedy as bop.t (per-statement `handler-case` wrapper would let tests 29–169 run, most
+still failing on the lexical-scope gap but no longer aborting). The lexical-scope gap
+itself is HARD (would need in-process eval with caller-env capture, not a subprocess).
 
 ---
 

@@ -69,31 +69,13 @@ array.t	114		undef	'23'
 array.t	83	$a: $# on freed array is undef	'-1'	undef
 array.t	85	$a: msg	undef	^Attempt to set length of freed array
 array.t	84	$a: number of warnings	'0'	'1'
-array.t	82	$a[-1] = 0	''	Modification of non-creatable array value attempted, subscript -1
-array.t	130	@_ alias to nonexistent elem within array	undef	'2'
-array.t	131	@_ alias to nonexistent neg index within array	undef	'3'
 array.t	126	arylen_p magic does not stop isa magic from being copied	undef	'pling'
 array.t	172	assigning to arylen aliased in foreach(scalar $#arylen)	'1'	'3'
-array.t	118	bug 70171 (self-assignment via my %x = %$x)	'2 4'	'1 2 3 4'
-array.t	121	bug 70171 (self-assignment via my %x = %$x) - goto variant	'1 2 3 4'	'a 1 b 2 c 3 d 4'
 array.t	86	do {}: $# on freed array is undef	'-1'	undef
 array.t	88	do {}: msg	undef	^Attempt to set length of freed array
 array.t	87	do {}: number of warnings	'0'	'1'
-array.t	135	error when setting alias to -1 elem of empty array	''	Modification of non-creatable array value attempted, (?x:                )subscript -1
-array.t	133	error when setting alias to negative index past beginning	''	Modification of non-creatable array value attempted, (?x:                )subscript -5
-array.t	127	exists returns true for &PL_sv_undef elem [perl #7508]		
-array.t	193	holes passed to sub do not lose their position (aelem)	'[7  1]'	'[7 3 1]'
-array.t	194	holes passed to sub do not lose their position (aelem, mg)	'[7  1]'	'[7 3 1]'
-array.t	191	holes passed to sub do not lose their position (multideref)	'[7  1]'	'[7 3 1]'
-array.t	192	holes passed to sub do not lose their position (multideref, mg)	'[7  1]'	'[7 3 1]'
-array.t	179	lazy element creation with foreach	'5'	'55'
-array.t	176	lazy element creation with refgen	'REF(0x10047f9d43)'	'REF(0x10047fa263)'
-array.t	174	lazy element creation with sub call	'1  7'	'1 5 7'
-array.t	184	map {} @a does not vivify elements	''	'1,2,3,4,5'
-array.t	189	non-elems read from @a do not lose their position	'[7  1]'	'[7 3 1]'
 array.t	100	orphaned 1 is always undef	'42'	undef
-array.t	128	undef preserves identity in array [perl #109726]	'REF(0x1004e67403)'	'REF(0x1004e67483)'
-bless.t	68		'68793833667'	== 'D=GLOB(0x10046e98c3)'
+bless.t	68		'68801392627'	== 'D=GLOB(0x1004e1eff3)'
 blocks.t	24	RT #2917: No constraint on how late INIT blocks can run	''	'in init'
 bop.t	144		'0'	'1'
 bop.t	158	    and turns off the UTF-8 flag		
@@ -126,7 +108,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x1000eb1baf)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x10021c1baf)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -175,7 +157,7 @@ caller.t	25	warnings match caller (all)
 caller.t	24	warnings match caller (no bits)		
 closure.t	13		''	'7'
 concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
-concat2.t	2	RT #132385	'REF(0x100414dc03)REF(0x100414dde3)'	'AB'
+concat2.t	2	RT #132385	'REF(0x10044c4533)REF(0x10044c4713)'	'AB'
 delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
 delete.t	54	a b c also equivalent		
 delete.t	26	a b c equivalent		
@@ -204,11 +186,11 @@ grep.t	61	proper error on variable as block. [perl #37314]	''	Missing comma afte
 hash.t	2	Timely hash destruction with lvalue keys	'0'	'1'
 hash.t	5	deleting the current iterator in void context frees the val		
 hash.t	6	freed hash elems are not visible to DESTROY		
-hash.t	12	hash self-assign	'HASH(0x100304fe53)'	'x:'
-hash.t	13	magic keys	'HASH(0x10031e0463)'	'x:y'
+hash.t	12	hash self-assign	'HASH(0x10035b7e53)'	'x:'
+hash.t	13	magic keys	'HASH(0x100374d5f3)'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1002b5a2c3)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x10030c1833)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -238,7 +220,7 @@ local.t	275	localised sub via stash
 local.t	278	localised sub via stash slice		
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1002e049e3)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1003486d23)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF NIL)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -320,7 +302,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1004870ce3)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1004c79fa3)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -329,14 +311,11 @@ pos.t	4	pos() set inside //g	' ?'	'0123 5678910?'
 pos.t	17	reading pos through a defelem	undef	'3'
 pos.t	20	s///g setting pos through a defelem	undef	'1'
 push.t	32	croak when pushing onto readonly array	''	^Modification of a read-only value
-push.t	6	push onto a blessed array ref	'#S(P-BOX    :VALUE #()    :NV NIL    :NV-OK NIL    :SV NIL    :SV-OK NIL    :CLASS "main"    :IS-REF NIL) is not an array with a fill pointer.'	Experimental push on scalar is now forbidden
-push.t	5	push onto a hashref	'#S(P-BOX    :VALUE #<HASH-TABLE :TEST EQUAL :COUNT 0 {100431FDC3}>    :NV NIL    :NV-OK NIL    :SV NIL    :SV-OK NIL    :CLASS NIL    :IS-REF NIL) is not an array with a fill pointer.'	Experimental push on scalar is now forbidden
-push.t	4	push onto a literal integer	'42 is not an array with a fill pointer.'	must be array
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'68791575939'	'0'
-qr.t	27	int upgraded to regexp	'68791581171'	'0'
+qr.t	25	double upgraded to regexp	'68795942963'	'0'
+qr.t	27	int upgraded to regexp	'68795948195'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -359,11 +338,11 @@ ref.t	182	PVBM is not a HASH ref
 ref.t	180	PVBM is not a SCALAR ref		
 ref.t	181	PVBM is not an ARRAY ref		
 ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1002a16a63)'	'SCALAR(0x1002a16aa3)'
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1002ea4f93)'	'SCALAR(0x1002ea4fd3)'
 ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
 ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x1003631433)'	^VSTRING\(0x[0-9a-f]+\)$
+ref.t	65	stringify for ref to vstring	'SCALAR(0x10039f1e23)'	^VSTRING\(0x[0-9a-f]+\)$
 split.t	149	assignment to split-to-array (pmtarget/package array)	'a b c'	'1 2 3'
 split.t	151	assignment to split-to-array (stacked)	'a b c'	'1 2 3'
 split.t	150	assignment to split-to-array (targ/lexical)	'a b c'	'1 2 3'
@@ -405,7 +384,7 @@ sprintf.t	21	>%K< >''< >%K INVALID< >%K REDUNDANT<
 sprintf.t	22	>%L< >''< >%L INVALID< >%L REDUNDANT< 		
 sprintf.t	23	>%M< >''< >%M INVALID< >%M REDUNDANT< 		
 sprintf.t	24	>%N< >''< >%N INVALID< >%N REDUNDANT< 		
-sprintf.t	26	>%P< >''< >%P INVALID< >1000ca7c9f< 		
+sprintf.t	26	>%P< >''< >%P INVALID< >1000e9951f< 		
 sprintf.t	27	>%Q< >''< >%Q INVALID< >%Q REDUNDANT< 		
 sprintf.t	28	>%R< >''< >%R INVALID< >%R REDUNDANT< 		
 sprintf.t	29	>%S< >''< >%S INVALID< >< 		
@@ -499,20 +478,18 @@ sprintf2.t	1511	subnormal 3e-324 %a 0x1p-1074 got 0x0p+0	'0x0p+0'	'0x1p-1074'
 sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'
 sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'
 sprintf2.t	1574	utf8 for invalid format: invalid warnings	'0'	'1'
-state.t	43		'3,6,x:x:x,a:b:c:x:x:x,HASH(0x1003045aa3),a:b:c:d:e:3'	'3,6,x:x:x,a:b:c:x:x:x,e:3,a:b:c:d:e:3'
-state.t	76	Reference to state variable	'SCALAR(0x10043dd803)'	'SCALAR(0x10043f4af3)'
+state.t	43		'3,6,x:x:x,a:b:c:x:x:x,HASH(0x10030bb0e3),a:b:c:d:e:3'	'3,6,x:x:x,a:b:c:x:x:x,e:3,a:b:c:d:e:3'
+state.t	76	Reference to state variable	'SCALAR(0x10044b56a3)'	'SCALAR(0x10044d4993)'
 state.t	73	computed goto 0		
 state.t	75	grep	'Eagle'	'EagleAntaresOdysseyAquarius'
 state.t	74	map	'1'	'EagleEagleEagleEagle'
-state.t	92	substr	'John'	'xxxxx'
+state.t	92	substr	'Johnx'	'xxxxx'
 substr.t	397		'-1'	'23'
 substr.t	386	Timely scalar destruction with lvalue substr	'0'	'1'
-substr.t	384	\substr %h	'HASH(0x1005325603)'	'50'
-substr.t	385	\substr @a	'ARRAY(0x10053256bf)'	'100'
+substr.t	384	\substr %h	'HASH(0x1000c57db3)'	'50'
+substr.t	385	\substr @a	'ARRAY(0x1000c57e6f)'	'100'
 substr.t	376	\substr does not coerce its glob arg just yet	'REF'	'GLOB'
-substr.t	387	ref-to-substr retains lvalue-ness under recursion [perl #3363]	'test'	'best'
 substr.t	345	scalar does not affect lvalueness of substr	'abcdef'	'abcdeaf'
-substr.t	378	substr lvalue assignment when stringification turns on UTF8ness	'Āa'	'b'
 tr.t	224	    doesn't stringify its argument	''	'SCALAR'
 tr.t	223	non-modifying tr/// on a scalar ref	'0'	'2'
 tr.t	257	tr// of \N{name} works for upper-Latin1	'á'	'A'

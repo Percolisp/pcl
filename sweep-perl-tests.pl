@@ -55,6 +55,10 @@ END { system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir }
 # Set PCL_TEST_LOG_DIR so child SBCL processes append one TSV line per FAILING
 # assertion to <dir>/<file>.fails.tsv. Cleared each run for a fresh DB.
 my $log_dir = $ENV{PCL_TEST_LOG_DIR} || "$project_root/.faillog";
+# MUST be absolute: SBCL is run from perl-tests/ and many tests `chdir 't'`, so a
+# relative log dir (e.g. PCL_TEST_LOG_DIR=.faillog) would resolve against the test's
+# cwd and the open would die SB-INT:SIMPLE-FILE-ERROR, killing the whole file.
+$log_dir = "$project_root/$log_dir" unless $log_dir =~ m{^/};
 system("rm -rf \Q$log_dir\E"); mkdir $log_dir;
 $ENV{PCL_TEST_LOG_DIR} = $log_dir;   # inherited by all forked children / system() calls
 

@@ -36,14 +36,22 @@
     (substitute #\Space #\Tab (substitute #\Space #\Newline str))))
 
 (defun %test-log-stream ()
-  "Return the failure-log stream (opening it lazily from PCL_TEST_LOG_DIR), or NIL."
+  "Return the failure-log stream (opening it lazily from PCL_TEST_LOG_DIR), or NIL.
+   The failure log is a diagnostic side-channel: a failure to open it (e.g. the
+   directory does not exist after a test `chdir`d, or PCL_TEST_LOG_DIR was relative)
+   must NEVER crash the test run.  We ensure the directory exists and swallow any
+   error, leaving *test-log-stream* = NIL (logging silently disabled for this file)."
   (when (eq *test-log-stream* :unopened)
     (let ((dir (sb-ext:posix-getenv "PCL_TEST_LOG_DIR")))
       (setf *test-log-stream*
             (if (and dir (plusp (length dir)) *current-test-file*)
-                (open (merge-pathnames (concatenate 'string *current-test-file* ".fails.tsv")
-                                       (concatenate 'string dir "/"))
-                      :direction :output :if-exists :supersede :if-does-not-exist :create)
+                (ignore-errors
+                  (let ((path (merge-pathnames
+                               (concatenate 'string *current-test-file* ".fails.tsv")
+                               (concatenate 'string dir "/"))))
+                    (ensure-directories-exist path)
+                    (open path :direction :output
+                          :if-exists :supersede :if-does-not-exist :create)))
                 nil))))
   *test-log-stream*)
 
