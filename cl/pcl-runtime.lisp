@@ -5352,6 +5352,9 @@ Uses tagbody/go instead of loop — see p-while for rationale."
    - Scalar -> single-element vector"
   (let ((val (unbox raw)))
     (cond
+      ((hash-table-p val)
+       ;; %hash as a foreach list flattens to its key/value pairs (same as %p-flatten-list)
+       (coerce (%p-hash-keyval-list val) 'vector))
       ((not (and (vectorp val) (not (stringp val))))
        (vector raw))
       ((p-box-p raw)
@@ -7401,10 +7404,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            (write-string (to-string item) s)))))))
         (nreverse (copy-seq str)))))
 
+(defun %p-hash-keyval-list (h)
+  "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...) of boxed values,
+   matching how %hash flattens in list context (same pairing as %p-flatten-list)."
+  (let ((result nil))
+    (maphash (lambda (k v)
+               (push (make-p-box k) result)
+               (push (if (p-box-p v) v (make-p-box v)) result))
+             h)
+    (nreverse result)))
+
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
    Handles both (join SEP @array) and (join SEP elem1 elem2 ...).
-   Arrays and vectors in the argument list are flattened."
+   Arrays/vectors and hashes in the argument list are flattened."
   (let* (;; Warn for undef separator (Perl warns regardless of list length).
          ;; Skip for tied sep to avoid premature FETCH before item-count check.
          (_ (when (and (not (and (p-box-p sep) (p-tie-proxy-p (p-box-value sep))))
@@ -7416,6 +7429,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            for raw = (if (p-box-p item) (p-box-value item) item)
                            if (and (vectorp raw) (not (stringp raw)))
                            sum (length raw)
+                           else if (hash-table-p raw)
+                           sum (* 2 (hash-table-count raw))
                            else if (and (listp raw) raw)
                            sum (length raw)
                            else sum 1))
@@ -7429,6 +7444,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                          for val = (unbox item)
                          if (and (vectorp val) (not (stringp val)))
                          append (coerce val 'list)
+                         else if (hash-table-p val)
+                         append (%p-hash-keyval-list val)
                          else if (and (listp val) val)
                          append val
                          else

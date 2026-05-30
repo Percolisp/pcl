@@ -407,4 +407,22 @@ test_transpile("unary +: parenthesised array spreads in list", '
   print "@b\n";
 ', "1 2 3\n");
 
+# A %hash used as a list element must flatten to its key/value pairs (list
+# context), not stringify as HASH(0x..). Covers join, foreach, and print.
+test_transpile("hash flattens in join", '
+  my %h = (e => 1);
+  print join(":", %h), "\n";
+', "e:1\n");
+
+test_transpile("hash flattens in foreach", '
+  my %h = (a => 1);
+  for (%h) { print "$_ " }
+  print "\n";
+', "a 1 \n");
+
+test_transpile("hash flattens mixed with scalars in join", '
+  my %h = (x => 9);
+  print join(",", "p", %h, "q"), "\n";
+', "p,x,9,q\n");
+
 done_testing();
