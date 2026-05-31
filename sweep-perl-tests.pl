@@ -20,7 +20,9 @@ my $TIMEOUT = 90;  # seconds per test
 # heredoc.t: 137/138 tests are fresh_perl_is no-ops (no TAP output)
 # list.t: builds 100k-nested "(1,(1,...))" string then evals it — PPI parse is O(n²+)
 #         on deeply-nested expressions; takes >8 min at 100% CPU (not OOM, just slow)
-my @SKIP    = qw(heredoc.t list.t);
+# lfs.t: large-file support — needs 64-bit lseek offsets + sparse files (XS/platform);
+#        self-skips (1..0) anyway. Permanently skipped (not-supported, no recoverable tests).
+my @SKIP    = qw(heredoc.t list.t lfs.t);
 
 my @test_files;
 while (@ARGV) {

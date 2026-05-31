@@ -292,6 +292,11 @@ skipped by the stub.
 `XS_BRIDGE_DESIGN.md`).  Until then, POSIX and other XS modules must be
 stubbed in `lib/` by hand.
 
+Note (session 223c): individual XS *functions* can be bridged directly via
+`sb-alien` when there is a stable libc entry point.  `crypt()` is now
+implemented (`p-crypt` → system `crypt(3)` in `libcrypt.so.1`), so it is no
+longer in this not-supported bucket.
+
 **Affected tests:** `perl-tests/chdir.t` (uses POSIX).
 
 ---

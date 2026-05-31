@@ -77,6 +77,12 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  :alias
                  "result aliasing (\\$a[0] == \\$b after `chomp @a`, the $/ eq 0 case) — element/@_ aliasing not emulated. not-supported.md: '@_ argument aliasing'. (The eq 7 sibling legitimately passes.)"))
 
+(register-skips "crypt.t"
+                ("crypt turns off utf8 on its target"
+                 :utf8
+                 "checks !utf8::is_utf8(result); PCL does not track the per-scalar UTF-8 flag \
+(utf8::is_utf8 is a stub). not-supported.md: 'Unicode semantics differences' (utf8 flag)."))
+
 (register-skips "readline.t"
                 ("perl #19566"
                  :read-only

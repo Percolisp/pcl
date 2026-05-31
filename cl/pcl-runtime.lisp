@@ -29,7 +29,7 @@
    ;; String
    #:p-. #:p-str-x #:p-list-x #:p-length #:p-substr #:p-lc #:p-uc #:p-fc #:p-quotemeta
    #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat
-   #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf
+   #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf #:p-crypt
    #:p-version-string
    #:p-pos
    ;; Assignment
@@ -1934,6 +1934,38 @@
                                   (not (alphanumericp c)))))
                  (when escapep (write-char #\\ out))
                  (write-char c out))))))
+
+;;; crypt(3) — one-way password hashing via the system C library.
+;;; Perl's crypt() is a thin wrapper over the C crypt(3); we call the same
+;;; function, so output is byte-identical to Perl on the same platform
+;;; (DES with a 2-char salt, or glibc $1$/$5$/$6$ etc. by salt prefix).
+(defvar *p-crypt-available* nil
+  "T if the system crypt(3) could be resolved at load time.")
+
+(eval-when (:load-toplevel :execute)
+  ;; glibc 2.39+ split crypt(3) out of libc into libcrypt; load it if present.
+  (when (ignore-errors (sb-alien:load-shared-object "libcrypt.so.1") t)
+    (setf *p-crypt-available* t)))
+
+(sb-alien:define-alien-routine ("crypt" %c-crypt)
+    (sb-alien:c-string :external-format :latin-1)
+  ;; crypt(3) operates on bytes; pass latin-1 so codepoints 0-255 map 1:1.
+  (key  (sb-alien:c-string :external-format :latin-1))
+  (salt (sb-alien:c-string :external-format :latin-1)))
+
+(defun p-crypt (plaintext salt)
+  "Perl crypt(PLAINTEXT, SALT): one-way hash via the system crypt(3).
+   Dies on wide characters (codepoint > 255), like Perl.  Returns undef when
+   crypt(3) returns NULL (e.g. FIPS rejecting a weak algorithm)."
+  (let ((pt (to-string plaintext))
+        (sl (to-string salt)))
+    (when (or (find-if (lambda (c) (> (char-code c) 255)) pt)
+              (find-if (lambda (c) (> (char-code c) 255)) sl))
+      (p-die "Wide character in crypt"))
+    (unless *p-crypt-available*
+      (p-die "The crypt() function is unimplemented due to excessive paranoia."))
+    (let ((result (%c-crypt pt sl)))
+      (if result result *p-undef*))))
 
 (defun p-pos (var &optional new-pos)
   "Perl pos - get/set match position for /g regex.

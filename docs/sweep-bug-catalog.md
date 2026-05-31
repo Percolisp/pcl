@@ -33,6 +33,14 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-05-31 (session 223c). **`crypt()` implemented via FFI; lfs.t permanently skipped.**
+`p-crypt` (`cl/pcl-runtime.lisp`) calls the system `crypt(3)` (`libcrypt.so.1`) through
+`sb-alien` — byte-identical to Perl (same C function). Latin-1-encoded args, wide-char→die,
+NULL→undef. `crypt` added to `RUNTIME_NAMES` (`Pl/ExprToCL.pm`); `d_crypt`→`define`
+(`lib/Config.pm`). **crypt.t 0 → fully passing (5/6, test 6 = utf8 flag registered
+not-supported).** lfs.t added to sweep `@SKIP` (64-bit lseek/sparse files, XS/platform). **Full
+sweep 17341 pass / 1263 fail, 64 fully passing** (+1: crypt.t; 0 regressions, only bop.t+eval.t
+crash). Gate 88 files / 3118 tests. New `Pl/t/crypt-01.t` (4). Baseline 489 keys.
 Updated 2026-05-31 (session 223b). **Match variables `$&`/`` $` ``/`$'` implemented; signatures.t un-skipped.**
 These were fully broken: codegen emitted bare `$'` (CL quote macro) and `` $` `` (quasiquote),
 none were defvar'd. Now mapped to pipe-quoted symbols in `%SPECIAL_VARS` (`Pl/ExprToCL.pm`),
@@ -873,13 +881,17 @@ See `memory/project_wantarray_followup.md`.
 
 ---
 
-### Zero-passing files
+### Zero-passing files (UPDATED session 223b — none remain a black hole)
 
-- **crypt.t**: requires `crypt()` XS function — not implemented.
-- **lfs.t**: large file support — not tested.
-- **signatures.t**: Perl 5.36+ subroutine signatures — partial implementation.
-- **test-pack-new.t**: new pack tests in progress.
-- **test_ref_pass.t**: pass-by-reference tests in progress.
+- **crypt.t** ✅ **FULLY PASSING (5/6, 1 skip) — session 223b**: `crypt()` now implemented via
+  FFI to the system `crypt(3)` (`libcrypt.so.1`); byte-identical to Perl. Test 6 (utf8 flag)
+  registered not-supported.
+- **lfs.t**: large-file support (64-bit `lseek` offsets + sparse files) — XS/platform feature,
+  self-skips (`1..0`). **Permanently in the sweep `@SKIP`** (session 223b); no recoverable tests.
+- **signatures.t** — **un-skipped, now completes 418 pass / 559 fail / 1 skip (session 223b)**.
+  Was a stale whole-file skip ("eval too slow" — false, runs ~4s). The 559 fails are arity
+  error-message-text + experimental-warning detection (not-supported / principle-9).
+- **test-pack-new.t / test_ref_pass.t**: REMOVED (no longer in `perl-tests/`); stale entries.
 
 ---
 
