@@ -33,6 +33,14 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-05-31 (session 223). **`(LIST) x $n` list-repeat in `return` list fixed.**
+do.t 35/36: `return (@a, (@b) x $n)` in list context scalar-repeated `(@b)` (`x` list-vs-
+string decision only handled LIST_CTX, but `return` args get INHERIT_CTX). Added an
+INHERIT_CTX runtime `*wantarray*` check to the `x` arm of `gen_binary_op`
+(`Pl/ExprToCL.pm`), mirroring the `..` path. **Full sweep 16919 pass / 703 fail, 63 fully
+passing** (was 16917/705/63; +2/−2, no regression, only bop.t+eval.t crash). do.t 10→8 fail.
+Gate 87 files / 3111 tests green. Baseline re-blessed (441 keys). +2 in
+`Pl/t/list-scalar-context-01.t`.
 Updated 2026-05-31 (session 222). **sprintf "Invalid conversion" cluster fixed.**
 Unrecognised conversions (`%C`/`%I`/`%Z`/`%L`/`%h`/`%v`/`%vc`/malformed `%6. 6s`) now
 leave the spec verbatim + warn "Invalid conversion" + don't consume an arg + suppress
@@ -639,11 +647,22 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### do.t (10 failures, 63/73 passing — session 215 Part 2 brought 20→10)
+### do.t (8 failures, 64/73 passing, 1 skip — session 223 brought 10→8)
 
-See `memory/project_wantarray_followup.md`. Remaining: tests 35/36 (`return (do{}, (do{}) x N)`
-list context), 63–68 (`do subname(arg)` vs `do subname("arg")` syntax distinction), 70, 73
-(EISDIR on `do dir`).
+See `memory/project_wantarray_followup.md`.
+- **`return (do{}, (do{}) x N)` list context** (tests 35/36) ✅ **FIXED (session 223)**. The
+  `x` repetition op's LHS-is-parenthesized list-repeat decision (`gen_binary_op` in
+  `Pl/ExprToCL.pm`) only fired for `$ctx == LIST_CTX`. In a `return` list each element gets
+  **INHERIT_CTX**, so `(@b) x $n` fell through to `p-str-x` (scalar repeat → scalar(@b)
+  count). Added an INHERIT_CTX arm mirroring the `..` path: emit a runtime
+  `(if (eq *wantarray* t) (p-list-x …LIST-gen…) (p-str-x …SCALAR-gen…))`, generating the
+  parenthesized LHS in both list and scalar context. Regression tests in
+  `Pl/t/list-scalar-context-01.t` (+2).
+- Remaining: 63–68 (`do subname(arg)` vs `do subname("arg")` syntax distinction), 70
+  (RT 124248), 73 (EISDIR on `do dir`).
+- NOTE: a separate pre-existing parser-precedence bug exists — `return (X) x N` (no
+  comma, single paren) parses as `(return X) x N` instead of `return((X) x N)`. The
+  comma-list form do.t needs works; this degenerate form is left as-is.
 
 ---
 

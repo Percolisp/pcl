@@ -807,13 +807,25 @@ sub gen_binary_op {
     my $lhs_is_paren = $self->expr_o->is_internal_node_type($lhs_node) &&
                        ($lhs_node->{type} eq 'tree_val' || $lhs_node->{type} eq 'progn');
     my $ctx = $self->expr_o->get_node_context($node_id);
-    if ($lhs_is_paren && $ctx == 1) {  # LIST_CTX = 1
+    if ($lhs_is_paren && $ctx == LIST_CTX) {
       # List repeat: (@x,1) x 4 — force LHS to list context so
       # gen_progn returns (vector ...) not (progn ...) / scalar last-val
-      $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
+      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
       my $left  = $self->gen_node($kids->[0]);
       my $right = $self->gen_node($kids->[1]);
       return "(p-list-x $left $right)";
+    }
+    if ($lhs_is_paren && $ctx == INHERIT_CTX) {
+      # Caller-context-dependent, e.g. `return (LIST) x $n`: list repeat in
+      # list context, string repeat in scalar context.  Emit a runtime
+      # *wantarray* check (mirrors the '..' INHERIT_CTX path above), generating
+      # the parenthesized LHS in both list and scalar context.
+      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
+      my $left_list   = $self->gen_node($kids->[0]);
+      $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
+      my $left_scalar = $self->gen_node($kids->[0]);
+      my $right = $self->gen_node($kids->[1]);
+      return "(if (eq *wantarray* t) (p-list-x $left_list $right) (p-str-x $left_scalar $right))";
     }
   }
 
