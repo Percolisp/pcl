@@ -532,7 +532,13 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### index.t (30 failures, 90/120 passing)
+### index.t (1 failure, 119/120 passing; 10 utf8::encode tests registered not-supported - session 224)
+
+**Session 224:** tests 49-58 (the `utf8::encode` octet-vs-char-offset cluster) registered
+in `cl/skip-registry.lisp` (:utf8) - PCL has no per-scalar UTF-8 flag, CL strings are
+always Unicode. NUL-search tests (the old "tests 63-72" bullet) now PASS. Only **test 111**
+("index respects changes in ref stringification" - the `""` overload must fire when
+`index` stringifies a blessed scalar-ref constant) remains as a real fix target.
 
 - **`utf8::encode` octet-mode index** (tests 49–58, ~10 failures): After `utf8::encode($s)`
   the string is raw bytes. `index($encoded, $encoded_pattern)` should find at byte position,

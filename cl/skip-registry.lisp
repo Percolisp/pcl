@@ -13,6 +13,28 @@
 
 (in-package :pcl)
 
+;; index.t 49-58 — utf8::encode byte/char-flag distinction.  After utf8::encode a
+;; string is treated as raw octets in Perl (each multi-byte char expands to its
+;; UTF-8 bytes), so index/rindex use BYTE offsets and an octet-string never matches
+;; a character-string.  PCL has no per-scalar UTF-8 flag (CL strings are always
+;; Unicode), so utf8::encode is a no-op and index/rindex match on characters.
+;; 49/50 are named; 51-58 are UNNAMED -> keyed by test number.
+(register-skips "index.t"
+                ("^index octets, octets"
+                 :utf8
+                 "index on a utf8::encode'd byte-string must use byte offsets (expect 7) -- PCL has no per-scalar UTF-8 flag (CL strings are always Unicode). not-supported.md: 'Unicode semantics differences' (utf8::encode/decode).")
+                ("rindex octets, octets"
+                 :utf8
+                 "rindex on a utf8::encode'd byte-string must use byte offsets (expect 21) -- PCL has no per-scalar UTF-8 flag. not-supported.md: 'Unicode semantics differences' (utf8::encode/decode).")
+                (51 :utf8 "index octet-string vs utf8-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (52 :utf8 "rindex octet-string vs utf8-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (53 :utf8 "index utf8-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (54 :utf8 "rindex utf8-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (55 :utf8 "index octet-string vs char-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (56 :utf8 "rindex octet-string vs char-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (57 :utf8 "index char-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (58 :utf8 "rindex char-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'."))
+
 (register-skips "tr.t"
                 ("RT #130198 eval:"
                  :principle9
