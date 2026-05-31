@@ -35,6 +35,32 @@
                 (57 :utf8 "index char-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
                 (58 :utf8 "rindex char-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'."))
 
+;; grep.t — DESTROY-via-GC + one error-detection failure.  Tests 69/71/73 ("grep
+;; void/scalar/list post") and 75/76 ("block map void 2/3") need a blessed object's
+;; DESTROY to fire when its refcount hits zero (after @a=(), or the immediate
+;; void-context release of the map block's returned PADTMP); PCL never calls DESTROY
+;; via GC.  Test 61 wants the compile-time "Missing comma after first argument to
+;; grep" error.  not-supported.md: 'DESTROY called by garbage collector' (grep.t 69-76).
+(register-skips "grep.t"
+                ("proper error on variable as block"
+                 :principle9
+                 "grep with a variable (not a block/expr) as first arg must die 'Missing comma after first argument to grep function' -- error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ("grep void post"
+                 :destroy-gc
+                 "after @a=() the 3 blessed grep args must be DESTROYed (count==3) -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("grep scalar post"
+                 :destroy-gc
+                 "after @a=() the 3 blessed grep args must be DESTROYed (count==3) -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("grep list post"
+                 :destroy-gc
+                 "after @a=() the 3 blessed grep args must be DESTROYed (count==3) -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("block map void 2"
+                 :destroy-gc
+                 "map in void context must DESTROY each block's returned PADTMP immediately so count resets to 1 -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("block map void 3"
+                 :destroy-gc
+                 "map in void context must DESTROY each block's returned PADTMP immediately so count resets to 1 -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'."))
+
 (register-skips "tr.t"
                 ("RT #130198 eval:"
                  :principle9

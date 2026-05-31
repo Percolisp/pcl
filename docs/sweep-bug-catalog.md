@@ -631,7 +631,13 @@ always Unicode. NUL-search tests (the old "tests 63-72" bullet) now PASS. Only *
 
 ---
 
-### grep.t (6 failures, 71/77 passing)
+### grep.t (FULLY PASSING - 77/77, 6 registered not-supported - session 224)
+
+**Session 224:** all 6 failures registered in `cl/skip-registry.lisp`. Tests 69/71/73
+("grep void/scalar/list post") and 75/76 ("block map void 2/3") are DESTROY-via-GC
+(blessed objects must be DESTROYed when refcount hits 0; PCL never calls DESTROY via GC).
+Test 61 is the compile-time "Missing comma after first argument to grep" error-detection
+case (principle 9). not-supported.md: "DESTROY called by garbage collector".
 
 - **DESTROY in grep** (tests 69–76): documented (GC doesn't call DESTROY).
 - **Invalid grep syntax** (test 61): error detection — principle 9.
