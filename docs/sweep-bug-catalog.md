@@ -33,6 +33,14 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-05-31 (session 222). **sprintf "Invalid conversion" cluster fixed.**
+Unrecognised conversions (`%C`/`%I`/`%Z`/`%L`/`%h`/`%v`/`%vc`/malformed `%6. 6s`) now
+leave the spec verbatim + warn "Invalid conversion" + don't consume an arg + suppress
+the trailing "Redundant" (new `sprintf-valid-type-p`, `saw-invalid`/`spec-start-arg` in
+`p-sprintf`; `V` added to size-modifiers; root cause was the unconditional type-char
+downcase that aliased `%C`→`%c` etc.). **sprintf.t 469→523** (+54, git-stash-verified 0
+regressions). Full sweep **16917 pass / 705 fail, 63 fully passing** (unchanged), only
+bop.t+eval.t crash. New `Pl/t/sprintf-invalid-01.t` (9).
 Updated 2026-05-30 (session 219). **Sweep harness fixed — only 2 genuine crashes left.**
 The full sweep had been aborting ~36 files with `SB-INT:SIMPLE-FILE-ERROR` (looked like
 mass crashes; pass total slumped to ~7993). **Root cause:** the failure-log writer
@@ -190,9 +198,21 @@ breakdown still applies. The breakdown below is retained for reference only.
 
 ---
 
-### sprintf.t (83 failures, 469/552 passing — session 216, was 92)
+### sprintf.t (27 failures, 523/552 passing — session 222, was 83)
 
 `p-sprintf` / `sprintf-one` / `sprintf-vector` in `cl/pcl-runtime.lisp`.
+
+- **Invalid conversions** ✅ **FIXED (session 222), +56**: `%C %H %I %J %K %L %M %N %P
+  %Q %R %S %T %V %W %Y %Z`, lowercase `%h %j %l %q %t %v %w %y %z`, the malformed
+  embedded-space specs `%6. 6s`/`%6 .6s`/`%6.6 s`, and vector-with-non-integer `%vc`/
+  `%vf`/`%vs`/`%vp`. Each is now left verbatim, warns "Invalid conversion", doesn't
+  consume an arg (arg pointer restored to spec start, so a trailing `%d` re-reads it),
+  and suppresses the "Redundant argument" warning. `%Vd` is now `%d` (V = IV/UV size
+  flag). See session-log §222.
+- **Remaining 27** are hard/niche: `version`-object `%vd`/`%vx` (need real `version`
+  objects, 147–152/441/442), `%n` family (271–273/341), `%.0hf` size-modifier
+  rejection (227), `%.0g` float edges (231–237), reordered positional+vector
+  (482/540/543/546).
 
 - **Reordered positional width/precision** ✅ **FIXED (session 216)**: `%*N$` / `%.*N$`
   drew their value from positional arg N but were emitted literally. New helper
@@ -539,16 +559,21 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### readline.t (12 failures, 24/36 passing)
+### readline.t (5 failures, 31/36 passing — session 220)
+
+- **`pipe` + `alarm`/`$SIG{ALRM}` implemented** ✅ **FIXED (session 220), +5 tests** (16, 19–22).
+  `p-pipe` was a no-op stub; now creates a real OS pipe via `sb-posix:pipe`, wrapping both
+  ends as unbuffered utf-8 `fd-stream`s bound to the `$in`/`$out` boxes (or bareword FHs).
+  Implementing `pipe` exposed a latent hang: test 17 does `alarm 1; readline $in` on an empty
+  pipe, and `p-alarm` was a no-op so the blocking read never returned. `p-alarm` now schedules
+  a real `SIGALRM` (`sb-posix:alarm`) and a lazily-installed Unix handler dispatches to the
+  Perl `$SIG{ALRM}` handler — the handler's `die` unwinds out of the interrupted read.
+  `%p-syswrite-impl` is now unbuffered (`finish-output`) + encode-safe (`handler-case`). The
+  utf-8 pipe round-trips both ascii (test 19) and Unicode (tests 20–22) content. Regression
+  tests in `Pl/t/fileio-02.t` (+3). Neither `pipe` nor `alarm` was a documented not-support.
 
 - **Read-only modification** (test 1): error message format mismatch for
   `readline()` on read-only value.
-
-- **`readline` reads first line** (test 16): `readline STDIN` in a specific context
-  returns `''` instead of reading a line. Likely a filehandle setup issue in the test.
-
-- **UTF-8 append** (tests 19–22): `$str .= <FH>` when string or filehandle is UTF-8
-  encoded — appending truncates content. `'ascii'` instead of `'ascii...'`.
 
 - **`<>` autovivification** (tests 26–27): `<>` and `readline` should not autovivify
   a scalar when the filehandle doesn't exist.

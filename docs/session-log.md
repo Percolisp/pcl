@@ -4,6 +4,127 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 222 (2026-05-31) — sprintf "Invalid conversion" warnings (+56)
+
+**Target:** the largest remaining *tractable* sprintf.t cluster — unrecognised
+conversions (`%C`, `%I`, `%Z`, `%L`, `%h`, `%v`, `%vc`, malformed `%6. 6s`, …).
+Perl leaves the spec **verbatim** in the output, warns **"Invalid conversion in
+sprintf: …"**, does **not** consume an argument, and a malformed spec **suppresses**
+the trailing "Redundant argument" warning. PCL was silently mis-handling these: it
+**unconditionally downcased** the type char, so `%C`→`%c`, `%I`→`%i`, `%P`→`%p`,
+`%S`→`%s` were wrongly accepted; and the size-modifier / bare-`%v` cases fell through
+to a silent literal-output branch that then mis-fired "Redundant".
+
+**Fixes (all in `cl/pcl-runtime.lisp`, sprintf only):**
+1. New `sprintf-valid-type-p (type-char vector-p)` — the exact Perl valid set
+   (`csdiuoxXbBeEfFgGaADUOpn%`; with the `%v` flag only the **integer** conversions
+   `diuoxXbBDUO` are valid, so `%vc`/`%vf`/`%vs`/`%vp` are invalid).
+2. In `p-sprintf`, at the type-char dispatch: if the char is invalid → warn
+   "Invalid conversion", write the whole spec verbatim (`(subseq fmt-str i j)`),
+   **restore the arg pointer** to a new `spec-start-arg` (so the `*`-consumed width/
+   precision args are rolled back and a following `%d` re-reads them), set a new
+   `saw-invalid` flag, and don't dispatch.
+3. The "no type char found" branch (reached by `%L`, `%h`, `%q`, `%z`, `%j`, `%t`,
+   bare `%v`, or `%5` at EOS) now warns INVALID + restores arg + sets `saw-invalid`
+   instead of silently emitting the literal (which had let "Redundant" fire).
+4. The final "Redundant argument" check is gated on `(not saw-invalid)`.
+5. Added `V` to the size-modifier set (`lhqLzjtV`) — Perl's IV/UV-size flag, so
+   `%Vd` is a synonym for `%d` (and bare `%V` still warns via #3).
+
+**Result:** sprintf.t **469→523** (+54 net; verified by git-stash before/after:
+**0 real regressions**, 56 test-numbers newly passing). sprintf2.t 102→101 fail.
+Full sweep **16860→16917 pass / 762→705 fail**, **63 fully passing (unchanged)**,
+only bop.t+eval.t crash (unchanged). Gate `prove -j8 Pl/t/` green (3109 tests).
+New regression test `Pl/t/sprintf-invalid-01.t` (9).
+
+Remaining sprintf.t (27) are genuinely hard/niche: `version`-object `%vd`/`%vx`
+(147–152,441,442), `%n` family (271–273,341), `%.0hf` size-mod rejection (227),
+`%.0g` float edges (231–237), and reordered positional+vector (482,540,543,546).
+
+---
+
+## Session 221 (2026-05-31) — `pcl` command (Phases 1–2 of the rollout plan)
+
+Design discussion (this session) produced four docs: `docs/pcl-command-plan.md`
+(updated — default flipped to no-FASL, `-E` alias, `--cache`/`--fasl`/`--clear-cache`),
+`docs/fasl-caching-design.md` (NEW — pedagogical: the two caveats, the
+bytecode-compiler hazard, require-is-safe, fail-closed, 4 alternatives),
+`docs/shipped-modules.md` (NEW — `lib/` vs `cl/modules/` + `*pcl-module-providers*`
+registry), and `docs/pcl-rollout-plan.md` (NEW — 8 phases).
+
+Then **implemented Phases 1–2**: the **`pcl`** command (repo root).
+- **Phase 1 (Tier-0 run):** `-e`/`-E` (E is a plain alias), `-I` (rides pl2cl's
+  `@INC`), `-M` (prepends `use`), `-c` (syntax-check → "… syntax OK"), `-w`
+  (accepted, no-op), `-v`, `-h`. Source is transpiled to a temp `.lisp` and loaded
+  directly — the main script is never compiled to a FASL (Tier 0); the module
+  cache applies underneath. `@ARGV` injected by explicitly `setf`-ing `pcl::@ARGV`
+  to a raw-string vector (the runtime's default derives from `*posix-argv*` =
+  SBCL's own flags, so it must be overridden). `exec`s SBCL so the script's exit
+  code becomes `pcl`'s.
+- **Phase 2 (saved core):** `--make-core` → `save-lisp-and-die`
+  ($PCL_CACHE_DIR/pcl.core, ~40 MB); `find_core` auto-uses it when `>=` runtime
+  mtime; `pcl -e …` then runs in ~0.12 s. `--clear-cache` wipes cached
+  `.fasl`/`.lisp`, keeps the core.
+- **Clean output:** moved the runtime's `"PCL Runtime loaded"` banner from
+  `*standard-output*` → `*error-output*` (`cl/pcl-runtime.lisp`) and wrapped the
+  SBCL `(load …)` in a warning-muffling, non-verbose form, so a script's stdout is
+  pure. Harnesses capture 2>&1 and filter the banner, so unaffected.
+
+**Verified:** output matches `perl` on sample programs; `@ARGV` (incl. negative
+index + numeric); `warn`→stderr; `-I` custom module dir; `-M`; missing file →
+exit 2; `exit N` propagates. **Gate green: 86 files / 3100 tests.** No runtime
+regressions from the banner move (`print.t` sweep + `fileio-02.t` run_cl checked
+individually too).
+
+**Deferred (per plan):** `--cache`/`--fasl` Tier 1/2 = Phase 6; Test::More/user
+tests = Phases 3–4; `pclbuild` = Phase 8. **`$0` not wired** (resolves to "sbcl";
+no clean symbol hook — follow-up).
+
+---
+
+## Session 220 (2026-05-30) — real `pipe` + `alarm`/`$SIG{ALRM}` (readline.t +5)
+
+Target: `readline.t` (was 12 fail / 24 pass). Failing tests 16, 19–22 all depend on
+`pipe` + `syswrite` + `readline`, which never worked because `p-pipe` was a stub
+returning `nil`.
+
+### `p-pipe` — real OS pipe
+`p-pipe` (`cl/pcl-runtime.lisp`) now calls `sb-posix:pipe`, wraps the read/write fds as
+unbuffered (`:buffering :none`) **utf-8** `sb-sys:make-fd-stream`s, and binds them into
+the target `$in`/`$out` boxes (or bareword FH symbols in `*p-filehandles*`). Converted
+from a `defun` to a `defmacro` + `%p-pipe-impl` pair so bareword filehandles get
+`%p-fh-arg` auto-quoting like the other I/O ops. utf-8 (not latin-1) so the Unicode
+append tests 20–22 round-trip without an encode crash.
+
+### `p-alarm` + `$SIG{ALRM}` — needed to avoid a latent hang
+Once `pipe` worked, test 17 (`alarm 1; readline $in` on an empty pipe) **hung**, because
+`p-alarm` was a no-op so the blocking read never returned. Fix: `p-alarm` now schedules a
+real `SIGALRM` via `sb-posix:alarm` (returning the prior alarm's remaining seconds, like
+Perl) and lazily installs a Unix handler (`sb-sys:enable-interrupt sb-unix:sigalrm`) that
+dispatches to the Perl `$SIG{ALRM}` handler stored in `%SIG`. SIGALRM interrupts the
+blocking `read-char` (EINTR); the Perl handler's `die` then unwinds out of it to the
+enclosing `eval {}`. Verified SBCL delivers the signal mid-`read-char` and the condition
+propagates. Handler install is lazy (first `alarm` call) so non-alarm programs keep the
+default signal disposition.
+
+### `%p-syswrite-impl` — unbuffered + encode-safe
+Now `finish-output`s after writing (so a same-process `readline` on the pipe's other end
+sees the data immediately — Perl `syswrite` is unbuffered anyway) and is wrapped in
+`handler-case` so an un-encodable char returns `nil` instead of crashing.
+
+**Note:** none of `pipe`, `alarm`, or `$SIG{ALRM}` is in `docs/not-supported.md` — they
+were unimplemented stubs, not design decisions. (`$SIG{__DIE__}` is the only deferred
+`%SIG` item.)
+
+**Results:** readline.t **12→5 fail** (fixed 16, 19, 20, 21, 22). Pl/t gate green
+(86 files / 3097 tests; +3 new `Pl/t/fileio-02.t` pipe/alarm regression tests). Full -j8
+sweep clean per `sweep-diff`: 6 fixed (5 readline + 1 flaky sprintf `%P` address), only
+"new" is the same flaky sprintf `%P` pointer-address diff; pow.t's `SIMPLE-FILE-ERROR` was
+the known flaky -j8 faillog artifact (passes fully in isolation), state.t the known PARTIAL.
+Baseline NOT re-blessed (sweep wasn't clean — pow.t flaked).
+
+---
+
 ## Session 219 (2026-05-30) — `map +(LIST)` no-op fix + `\substr`/`\pos`/`\vec` magic-cell lvalue refs
 
 Two fix targets from `docs/sweep-bug-catalog.md`, chosen "A then B".

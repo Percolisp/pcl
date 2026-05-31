@@ -2390,6 +2390,15 @@
       (otherwise
        (values (format nil "%~A" type-char) arg-idx)))))
 
+(defun sprintf-valid-type-p (type-char vector-p)
+  "True if TYPE-CHAR is a valid sprintf conversion character.  Perl rejects an
+   unrecognised conversion (e.g. %C, %I, %P, %Z) by leaving the spec verbatim in
+   the output and warning \"Invalid conversion\".  With the %v vector flag only the
+   integer conversions are valid (%vd is fine, %vc / %vf / %vs are not)."
+  (if vector-p
+      (find type-char "diuoxXbBDUO")
+      (find type-char "csdiuoxXbBeEfFgGaADUOpn%")))
+
 (defvar *p-sprintf-caller* "sprintf"
   "Name of the calling function (sprintf or printf) for error messages.")
 
@@ -2442,6 +2451,7 @@
         (let ((i 0)
               (arg-idx 0)
               (has-positional nil)
+              (saw-invalid nil)
               (n-args (length args))
               (len (length fmt-str)))
           (loop while (< i len) do
@@ -2460,7 +2470,8 @@
                                     (width nil)
                                     (precision nil)
                                     (positional-idx nil)
-                                    (vector-sep nil))
+                                    (vector-sep nil)
+                                    (spec-start-arg arg-idx))
                                 ;; Check for N$ positional specifier before flags
                                 (let ((peek j) (peek-n 0) (peek-has-digit nil))
                                   (loop while (and (< peek len) (digit-char-p (char fmt-str peek)))
@@ -2550,56 +2561,83 @@
                                              (setf has-digit t)
                                              (incf j))
                                        (setf precision (if has-digit p 0))))))
-                                ;; Skip size modifiers (l, h, q, L, etc.)
-                                (loop while (and (< j len) (find (char fmt-str j) "lhqLzjt"))
+                                ;; Skip size modifiers (l, h, q, L, V, etc.) — Perl's
+                                ;; integer-size flags.  V is Perl's IV/UV-size modifier
+                                ;; (so %Vd is a synonym for %d).
+                                (loop while (and (< j len) (find (char fmt-str j) "lhqLzjtV"))
                                       do (incf j))
                                 ;; Type character
                                 (if (< j len)
                                     (let ((type-char (char fmt-str j)))
                                       (incf j) ; consume the type char
-                                      ;; For positional %N$type, use the fixed index;
-                                      ;; for sequential, use arg-idx and advance it.
-                                      (let ((call-idx (if positional-idx
-                                                          positional-idx
-                                                          arg-idx)))
-                                        (if (and positional-idx (< call-idx 0))
-                                            ;; %0$x: positional 0 is invalid (1-based), output spec literally
-                                            (progn
-                                              (p-warn (make-p-box
-                                                       (format nil "Invalid conversion in ~A: \"~A\""
-                                                               *p-sprintf-caller* (string type-char))))
-                                              (write-string (concatenate 'string "%" (subseq fmt-str (1+ i) j)) out)
-                                              (setf i j))
-                                            (progn
-                                              (when (>= call-idx n-args)
-                                                (p-warn (make-p-box
-                                                         (format nil "Missing argument in ~A"
-                                                                 *p-sprintf-caller*))))
-                                              (if vector-sep
-                                                  ;; Vector flag: format each character
-                                                  ;; ordinal of the string arg, joined.
-                                                  (progn
-                                                    (write-string
-                                                     (sprintf-vector type-char flags width precision
-                                                                     vector-sep (nth call-idx args))
-                                                     out)
-                                                    (setf arg-idx (if positional-idx arg-idx (1+ call-idx)))
-                                                    (setf i j))
-                                                  (multiple-value-bind (result new-arg-idx)
-                                                      (sprintf-one type-char flags width precision args call-idx)
-                                                    (write-string result out)
-                                                    (setf arg-idx (if positional-idx arg-idx new-arg-idx))
-                                                    (setf i j)))))))
-                                    ;; No type char found, output literally
+                                      (if (not (sprintf-valid-type-p type-char vector-sep))
+                                          ;; Invalid conversion (e.g. %C, %I, %Z, or %vc):
+                                          ;; leave the entire spec verbatim, warn, and do
+                                          ;; NOT consume an argument (restore the arg pointer
+                                          ;; to the spec start).  A malformed spec also
+                                          ;; suppresses the trailing "Redundant argument".
+                                          (progn
+                                            (p-warn (make-p-box
+                                                     (format nil "Invalid conversion in ~A: \"~A\""
+                                                             *p-sprintf-caller* (string type-char))))
+                                            (write-string (subseq fmt-str i j) out)
+                                            (setf arg-idx spec-start-arg)
+                                            (setf saw-invalid t)
+                                            (setf i j))
+                                          ;; For positional %N$type, use the fixed index;
+                                          ;; for sequential, use arg-idx and advance it.
+                                          (let ((call-idx (if positional-idx
+                                                              positional-idx
+                                                              arg-idx)))
+                                            (if (and positional-idx (< call-idx 0))
+                                                ;; %0$x: positional 0 is invalid (1-based), output spec literally
+                                                (progn
+                                                  (p-warn (make-p-box
+                                                           (format nil "Invalid conversion in ~A: \"~A\""
+                                                                   *p-sprintf-caller* (string type-char))))
+                                                  (write-string (concatenate 'string "%" (subseq fmt-str (1+ i) j)) out)
+                                                  (setf saw-invalid t)
+                                                  (setf i j))
+                                                (progn
+                                                  (when (>= call-idx n-args)
+                                                    (p-warn (make-p-box
+                                                             (format nil "Missing argument in ~A"
+                                                                     *p-sprintf-caller*))))
+                                                  (if vector-sep
+                                                      ;; Vector flag: format each character
+                                                      ;; ordinal of the string arg, joined.
+                                                      (progn
+                                                        (write-string
+                                                         (sprintf-vector type-char flags width precision
+                                                                         vector-sep (nth call-idx args))
+                                                         out)
+                                                        (setf arg-idx (if positional-idx arg-idx (1+ call-idx)))
+                                                        (setf i j))
+                                                      (multiple-value-bind (result new-arg-idx)
+                                                          (sprintf-one type-char flags width precision args call-idx)
+                                                        (write-string result out)
+                                                        (setf arg-idx (if positional-idx arg-idx new-arg-idx))
+                                                        (setf i j))))))))
+                                    ;; No valid conversion char (e.g. "%L", "%h", "%v",
+                                    ;; or a bare "%5" at end of string): the spec ran off
+                                    ;; the end after flags/width/precision/size or the
+                                    ;; lone vector flag.  Leave it verbatim, warn INVALID,
+                                    ;; restore the arg pointer, and suppress "Redundant".
                                     (progn
+                                      (p-warn (make-p-box
+                                               (format nil "Invalid conversion in ~A: \"%\""
+                                                       *p-sprintf-caller*)))
                                       (write-string (subseq fmt-str i j) out)
+                                      (setf arg-idx spec-start-arg)
+                                      (setf saw-invalid t)
                                       (setf i j))))))
                       ;; Regular character
                       (progn
                         (write-char c out)
                         (incf i)))))     ; close: progn, if(char=%?), let(c), loop
-          ;; Redundant argument warning: sequential format used fewer args than provided
-          (when (and (not has-positional) (< arg-idx n-args))
+          ;; Redundant argument warning: sequential format used fewer args than provided.
+          ;; A malformed/invalid conversion suppresses this warning (Perl behaviour).
+          (when (and (not has-positional) (not saw-invalid) (< arg-idx n-args))
             (p-warn (make-p-box
                      (format nil "Redundant argument in ~A" *p-sprintf-caller*))))))))) ; close: let(i..), with-output-to-string, let(fmt-str), let(args), defun
 
@@ -6019,14 +6057,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   `(%p-sysread-impl (%p-fh-arg ,fh) ,@args))
 
 (defun %p-syswrite-impl (fh data &optional len)
-  "Perl syswrite - write data to filehandle"
-  (let ((stream (p-get-stream fh))
-        (str (to-string data)))
-    (when stream
-      (if len
-          (write-string (subseq str 0 (min (to-number len) (length str))) stream)
-          (write-string str stream))
-      (length str))))
+  "Perl syswrite - write data to filehandle. Unbuffered (flushes immediately) so a
+   readline on the other end of a pipe sees the data. Returns nil on stream/encode error."
+  (handler-case
+      (let ((stream (p-get-stream fh))
+            (str (to-string data)))
+        (when stream
+          (let ((out (if len
+                         (subseq str 0 (min (to-number len) (length str)))
+                         str)))
+            (write-string out stream)
+            (finish-output stream)
+            (length out))))
+    (error () nil)))
 
 (defmacro p-syswrite (fh &rest args)
   "Perl syswrite — bareword filehandle is auto-quoted."
@@ -6587,10 +6630,30 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (sleep n)
     n))
 
+(defvar *p-alarm-handler-installed* nil
+  "Whether the SIGALRM Unix handler has been installed yet (lazy, on first alarm).")
+
+(defun %p-ensure-alarm-handler ()
+  "Install a SIGALRM handler (once) that dispatches to the Perl $SIG{ALRM} handler.
+   Done lazily so programs that never call alarm keep SBCL's default signal disposition."
+  (unless *p-alarm-handler-installed*
+    (setf *p-alarm-handler-installed* t)
+    (sb-sys:enable-interrupt
+     sb-unix:sigalrm
+     (lambda (signo info ctx)
+       (declare (ignore signo info ctx))
+       (let ((handler (gethash "ALRM" %SIG)))
+         (when (and handler (functionp (unbox handler)))
+           ;; Perl passes the signal name as $_[0]; the handler may die, which
+           ;; unwinds out of any blocking syscall (read) interrupted by the signal.
+           (funcall (unbox handler) (make-p-box "ALRM"))))))))
+
 (defun p-alarm (&optional secs)
-  "Perl alarm - schedule SIGALRM. PCL: no-op, returns 0 (no previous alarm)."
-  (declare (ignore secs))
-  0)
+  "Perl alarm - schedule SIGALRM after SECS seconds (0 cancels a pending alarm).
+   When it fires, $SIG{ALRM} is invoked.  Returns the number of seconds that were
+   remaining on any previously-scheduled alarm (Perl semantics)."
+  (%p-ensure-alarm-handler)
+  (sb-posix:alarm (if secs (truncate (to-number secs)) 0)))
 
 (defun p-evalbytes (s)
   "Perl evalbytes - evaluate byte string as Perl code. PCL: delegates to eval."
@@ -6836,10 +6899,33 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; Process Control
 ;;; ============================================================
 
-(defun p-pipe (read-fh write-fh)
-  "Perl pipe - create pipe pair (not implemented, returns nil)"
-  (declare (ignore read-fh write-fh))
-  nil)
+(defun %p-pipe-impl (read-fh write-fh)
+  "Perl pipe - create a connected pair of filehandles backed by an OS pipe.
+   READ-FH receives the read end, WRITE-FH the write end.  Each target may be a
+   p-box (lexical $fh) or a symbol (bareword FH).  Streams are unbuffered so a
+   syswrite is immediately visible to a readline on the other end (same process)."
+  (handler-case
+      (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
+        (let ((read-stream (sb-sys:make-fd-stream read-fd
+                                                  :input t
+                                                  :buffering :none
+                                                  :external-format :utf-8))
+              (write-stream (sb-sys:make-fd-stream write-fd
+                                                   :output t
+                                                   :buffering :none
+                                                   :external-format :utf-8)))
+          (if (p-box-p read-fh)
+              (box-set read-fh read-stream)
+              (setf (gethash read-fh *p-filehandles*) read-stream))
+          (if (p-box-p write-fh)
+              (box-set write-fh write-stream)
+              (setf (gethash write-fh *p-filehandles*) write-stream))
+          t))
+    (error () (%pcl-save-errno) nil)))
+
+(defmacro p-pipe (read-fh write-fh)
+  "Perl pipe - bareword filehandles are auto-quoted; lexical $fh passed as box."
+  `(%p-pipe-impl (%p-fh-arg ,read-fh) (%p-fh-arg ,write-fh)))
 
 (defun p-select (&optional fh)
   "Perl select - set default output filehandle (stub, returns previous handle)"
@@ -10028,4 +10114,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 ;;; pack/unpack loaded lazily on first call via self-loading stubs above.
 
-(format t "PCL Runtime loaded~%")
+;; Diagnostic banner on *error-output*, not *standard-output*, so it never
+;; pollutes a script's stdout when run via the `pcl` command. Test harnesses
+;; capture 2>&1 and filter it, so they are unaffected.
+(format *error-output* "PCL Runtime loaded~%")
