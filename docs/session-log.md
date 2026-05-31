@@ -4,6 +4,39 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 224 (2026-05-31) — register index.t + grep.t not-supported failures
+
+Two skip-registry-only changes (no runtime/codegen change), each verified and committed.
+
+**index.t (commit 6bbc769): 11 fail -> 1.** Tests 49-58 are the `utf8::encode`
+octet-vs-char-offset cluster -- after `utf8::encode` Perl treats a string as raw
+bytes so `index`/`rindex` use byte offsets and an octet-string never matches a
+character-string. PCL has no per-scalar UTF-8 flag (CL strings are always Unicode),
+so it matches on characters. Registered in `cl/skip-registry.lisp` (:utf8) citing
+not-supported.md "Unicode semantics differences". 49/50 by description
+(`^index octets`-anchored so it does not substring-match `rindex octets`), 51-58 by
+test number (unnamed). The catalog's old "NUL search (63-72)" failures are stale --
+they now pass. Only **test 111** ("index respects changes in ref stringification" --
+the `""` overload must fire when `index` stringifies a blessed scalar-ref constant)
+remains as a real fix target.
+
+**grep.t (commit e2ce294): 6 fail -> 0 -- now FULLY PASSING (+1).** Tests 69/71/73
+("grep void/scalar/list post") and 75/76 ("block map void 2/3") are DESTROY-via-GC:
+they require a blessed object's DESTROY to fire when its refcount hits zero (after
+`@a=()`, or the immediate void-context release of a map block's returned PADTMP);
+PCL never calls DESTROY via GC. Test 61 wants the compile-time "Missing comma after
+first argument to grep" error (principle 9). All registered citing not-supported.md
+"DESTROY called by garbage collector" / "Error compatibility for invalid Perl input".
+(The catalog had named these DESTROY tests but mis-stated the breakdown; corrected.)
+
+**Infra note:** the tool-output channel had severe batched latency this session;
+worked around it by running diagnostics/verification as background jobs and reading
+their output files on completion. skip-registry.lisp paren-checked (depth 0) after
+each edit. Pl/t gate not re-run (skip-registry only affects perl-tests assertions via
+test-ok, keyed by perl-tests basename, so Pl/t is unaffected). Full sweep not re-run.
+
+---
+
 ## Session 222 (2026-05-31) — sprintf "Invalid conversion" warnings (+56)
 
 **Target:** the largest remaining *tractable* sprintf.t cluster — unrecognised
