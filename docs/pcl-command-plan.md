@@ -37,9 +37,9 @@ Optional environment overrides:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PCL_CACHE_DIR` | `~/.pcl-cache` | FASL cache directory |
+| `PCL_CACHE_DIR` | `~/.pcl-cache` | FASL cache directory (used only with `--cache`) |
 | `PCL_CORE` | `~/.pcl-cache/pcl.core` | Saved SBCL core (see §Saved core) |
-| `PCL_NO_CACHE` | `0` | Set to `1` to act as if `--no-fasl` always |
+| `PCL_CACHE` | `0` | Set to `1` to make `--cache` the default |
 
 ---
 
@@ -50,20 +50,31 @@ Optional environment overrides:
 ```
 pcl [options] script.pl [script-args...]
 pcl [options] -e 'code'  [script-args...]
+pcl [options] -E 'code'  [script-args...]
 ```
 
 | Flag | Meaning |
 |---|---|
 | `-e 'code'` | Inline code (like `perl -e`) |
+| `-E 'code'` | Alias of `-e` (identical; provided for `perl -E` muscle memory) |
 | `-I dir` | Prepend *dir* to `@INC` |
 | `-M Module` | `use Module` before the script |
 | `-w` | Enable warnings (passed to transpiler) |
 | `-c` | Syntax-check only; print "Syntax OK" and exit |
-| `--no-fasl` | Run from `.lisp` without compiling or caching |
+| `--cache` | Use the managed md5 FASL cache in `$PCL_CACHE_DIR` |
+| `--fasl PATH` (`-o PATH`) | Compile to *PATH* and run it; reuse if newer than source |
+| `--clear-cache` | Delete all cached `.fasl`/`.lisp` files in `$PCL_CACHE_DIR`, then exit |
 
 ### Caching behaviour
 
-By default `pcl` caches a compiled FASL of the main script in `$PCL_CACHE_DIR`:
+**Default: no FASL.**  `pcl script.pl` transpiles to a temp `.lisp`, loads it,
+and deletes the temp on exit.  Nothing is written to any cache.  This is the
+simplest path and the right one for active development where the script changes
+on every run.
+
+There are two opt-in ways to persist a compiled FASL:
+
+**`--cache` — managed cache (auto-keyed, auto-invalidated):**
 
 ```
 script.pl (mtime T) ──pl2cl──► /tmp/pcl-PID.lisp
@@ -73,16 +84,71 @@ script.pl (mtime T) ──pl2cl──► /tmp/pcl-PID.lisp
                     ~/.pcl-cache/MD5HASH.fasl   (cache key = md5(abs-path + mtime))
 ```
 
-On the next run with the same source and mtime the `.fasl` is loaded directly —
-no transpilation, no compile-file, no `.lisp` I/O.  With a saved core (see §)
-the full startup drops to ≈0.3 s.
+On the next `--cache` run with the same source and mtime the `.fasl` is loaded
+directly — no transpilation, no compile-file, no `.lisp` I/O.  With a saved core
+(see §) the full startup drops to ≈0.3 s.  Set `PCL_CACHE=1` to make `--cache`
+the default.
 
-`--no-fasl` skips both the compile and the write; the `.lisp` is left in `/tmp`
-and deleted after exit.  Useful during active development where the script
-changes on every run.
+**`--fasl PATH` (alias `-o PATH`) — explicit FASL you control:**
+
+```
+pcl --fasl build/app.fasl app.pl        # compiles to build/app.fasl, then runs it
+pcl --fasl build/app.fasl app.pl        # second run reuses it (PATH newer than app.pl)
+```
+
+This is the simple way to save a FASL anywhere on disk without the md5 cache.
+It compiles only when *PATH* is missing or older than the source, otherwise
+loads it directly.  (For a fully detached redistributable FASL or a standalone
+binary, use `pclbuild` — see below.)
+
+`-e`/`-E` inline code **never** caches (the code is ephemeral and an md5 key
+would grow the cache unboundedly); `--cache`/`--fasl` are ignored with inline code.
 
 Module `use`/`require` already go through the existing FASL cache
 (`p-load-module-cached`); `pcl` does not change that.
+
+### Clearing the cache (`--clear-cache`)
+
+```
+pcl --clear-cache
+```
+
+Deletes every `.fasl` and `.lisp` file in `$PCL_CACHE_DIR` and exits.  The
+expensive saved core (`pcl.core`) is **left intact** — rebuild it with
+`--make-core` if you need to.
+
+This is the escape hatch for the one cache-soundness gap described next.
+
+### Caveat: compile-time interface drift
+
+The module cache (`p-load-module-cached`) and the optional main-script `--cache`
+are both **per-file, keyed on absolute-path + mtime** (cache key = `sxhash`
+of the path; validity = `cache-mtime > source-mtime` AND `age < 7 days`).
+`use B`/`require "c.pl"` are transpiled to *runtime calls* (`(p-use "B")`,
+`(p-require-file "c.pl")`) that re-check each dependency's mtime when the
+enclosing FASL loads — so editing `b.pl`/`c.pl` (which bumps their mtime) *does*
+trigger their recompilation, recursively, including any newly-added `use`
+statements in the changed file.
+
+The gap is **compile-time interface drift**: a FASL is compiled against its
+dependencies' compile-time interface *at build time* — `use constant` values get
+inlined, prototypes affect parsing, import lists are resolved.  If you change
+**B's compile-time interface** (e.g. a constant's value) but **don't** change
+`a.pl`, then B is recompiled (its mtime changed) but `a.fasl` stays "valid"
+(a.pl unchanged) and keeps the **stale inlined value**.  Real Perl never hits
+this because it recompiles everything from source every run; PCL's per-file FASL
+cache does not re-derive `a` when only `b`'s interface changes.  This is the same
+hazard that sank Perl's own bytecode-compiler experiments, and it intersects
+PCL's long-standing `BEGIN`/load-order sensitivity.
+
+**Mitigations:**
+- The **default (no main-script FASL)** sidesteps it entirely — `a.pl` is
+  re-transpiled every run, always seeing B's current interface.  The module
+  cache underneath still saves compile cost for unchanged modules.
+- `pcl --clear-cache` after editing widely-`use`d modules forces a clean rebuild.
+- A future hardening (open question below) is to fold transitive dependency
+  mtimes (or a content hash) into the cache key so changing `b.pl` invalidates
+  `a`'s cache too.
 
 ### SBCL invocation
 
@@ -244,24 +310,27 @@ my $ROOT    = dirname(abs_path($0));
 my $PL2CL   = "$ROOT/pl2cl";
 my $RUNTIME = "$ROOT/cl/pcl-runtime.lisp";
 
-my ($no_fasl, $fasl_dir, $check_only, $make_core);
+my ($use_cache, $fasl_out, $fasl_dir, $check_only, $make_core, $clear_cache);
 my ($inline, @inc_dirs, @use_mods);
 GetOptions(
-  'no-fasl'    => \$no_fasl,
-  'fasl-dir=s' => \$fasl_dir,
-  'c'          => \$check_only,
-  'make-core'  => \$make_core,
-  'e=s'        => \$inline,
-  'I=s@'       => \@inc_dirs,
-  'M=s@'       => \@use_mods,
+  'cache'       => \$use_cache,    # opt in to the managed md5 cache
+  'fasl|o=s'    => \$fasl_out,     # explicit FASL path to write/reuse
+  'fasl-dir=s'  => \$fasl_dir,
+  'c'           => \$check_only,
+  'make-core'   => \$make_core,
+  'clear-cache' => \$clear_cache,  # wipe cached .fasl/.lisp, then exit
+  'e|E=s'       => \$inline,       # -E is an alias of -e
+  'I=s@'        => \@inc_dirs,
+  'M=s@'        => \@use_mods,
 ) or die usage();
 
-$no_fasl  = 1 if $ENV{PCL_NO_CACHE};
+$use_cache = 1 if $ENV{PCL_CACHE};
 $fasl_dir //= $ENV{PCL_CACHE_DIR} // "$ENV{HOME}/.pcl-cache";
-mkdir $fasl_dir, 0755 unless -d $fasl_dir;
+mkdir $fasl_dir, 0755 if ($use_cache || $clear_cache) && !-d $fasl_dir;
 
-# --- Build a saved core on request
-if ($make_core) { make_core(); exit 0 }
+# --- One-shot maintenance actions (no script needed)
+if ($clear_cache) { clear_cache(); exit 0 }
+if ($make_core)   { make_core();   exit 0 }
 
 my $source = (!defined $inline && @ARGV) ? shift @ARGV : undef;
 my @args   = @ARGV;
@@ -292,28 +361,39 @@ sub get_load_file {
   my ($source, $inline) = @_;
 
   if (defined $source) {
-    my $abs = abs_path($source) or die "pcl: not found: $source\n";
+    my $abs   = abs_path($source) or die "pcl: not found: $source\n";
+    my $mtime = (stat $abs)[9];
 
-    if (!$no_fasl) {
-      my $mtime = (stat $abs)[9];
-      my $key   = md5_hex("$abs:$mtime");
-      my $fasl  = "$fasl_dir/$key.fasl";
-      my $lisp  = "$fasl_dir/$key.lisp";
+    # Tier 2: explicit FASL path (--fasl / -o). Compile if missing/stale, else reuse.
+    if (defined $fasl_out) {
+      unless (-f $fasl_out && (stat $fasl_out)[9] > $mtime) {
+        my $lisp = "/tmp/pcl-$$.lisp";
+        transpile_file($abs, $lisp);
+        compile_to_fasl($lisp, $fasl_out);
+        unlink $lisp;
+      }
+      return $fasl_out if -f $fasl_out;
+      die "pcl: FASL compile failed: $fasl_out\n";
+    }
 
+    # Tier 1: managed md5 cache (--cache or PCL_CACHE=1).
+    if ($use_cache) {
+      my $key  = md5_hex("$abs:$mtime");
+      my $fasl = "$fasl_dir/$key.fasl";
+      my $lisp = "$fasl_dir/$key.lisp";
       unless (-f $fasl && (stat $fasl)[9] > $mtime) {
         transpile_file($abs, $lisp);
         compile_to_fasl($lisp, $fasl);
       }
       return $fasl if -f $fasl;
       return $lisp;      # fall back to .lisp if compile failed
-    } else {
-      my $tmp = "/tmp/pcl-$$.lisp";
-      transpile_file($abs, $tmp);
-      # register cleanup on exit
-      $SIG{__DIE__} = sub { unlink $tmp };
-      END { unlink $tmp if $tmp && -f $tmp }
-      return $tmp;
     }
+
+    # Tier 0 (default): transpile-and-run, no FASL.
+    my $tmp = "/tmp/pcl-$$.lisp";
+    transpile_file($abs, $tmp);
+    END { unlink $tmp if $tmp && -f $tmp }
+    return $tmp;
 
   } elsif (defined $inline) {
     my $tmp  = "/tmp/pcl-$$.lisp";
@@ -335,8 +415,7 @@ sub get_load_file {
 
 sub transpile_file {
   my ($src, $dest) = @_;
-  my @extra = $no_fasl ? ('--no-cache') : ();
-  system("perl \Q$PL2CL\E @extra \Q$src\E > \Q$dest\E") == 0
+  system("perl \Q$PL2CL\E \Q$src\E > \Q$dest\E") == 0
     or die "pcl: transpile failed\n";
 }
 
@@ -366,7 +445,14 @@ sub make_core {
   say "Done. Startup should now be ~5× faster.";
 }
 
-sub usage { "Usage: pcl [-e code] [-I dir] [-M mod] [-c] [--no-fasl] script.pl [args]\n" }
+sub clear_cache {
+  # Remove every cached .fasl/.lisp; leave pcl.core (rebuild with --make-core).
+  my @files = (glob("\Q$fasl_dir\E/*.fasl"), glob("\Q$fasl_dir\E/*.lisp"));
+  my $n = unlink @files;
+  say "Cleared $n cached file(s) from $fasl_dir";
+}
+
+sub usage { "Usage: pcl [-e|-E code] [-I dir] [-M mod] [-c] [--cache] [--fasl PATH] [--clear-cache] [--make-core] script.pl [args]\n" }
 ```
 
 ### `pclbuild`
@@ -505,11 +591,22 @@ sub usage { "Usage: pclbuild [--exe] [-o output] [--eval-lib Mod ...] script.pl\
 
 ## Open questions (to decide before implementing)
 
-1. **Naming**: `--no-fasl` vs `--no-cache` (mirrors `PCL_NO_CACHE` env var).
+1. **Naming**: ✅ resolved — default is **no FASL**; opt in with `--cache` (managed
+   md5 cache) or `--fasl PATH` (explicit file). Env override is `PCL_CACHE=1`.
+   `-E` is an alias of `-e`.
 
-2. **`-e` and inline code with FASL**: should `pcl -e 'code'` ever cache?
-   Suggested answer: no — the code is ephemeral and the md5 key would grow
-   the cache unboundedly.
+2. **`-e` and inline code with FASL**: ✅ resolved — no, inline code never caches
+   (ephemeral; md5 key would grow the cache unboundedly). `--cache`/`--fasl` are
+   ignored with `-e`/`-E`.
+
+6. **Harden the cache against compile-time interface drift?** (see "Caveat:
+   compile-time interface drift" above). Options: (a) leave as-is and rely on the
+   no-FASL default + `--clear-cache` (current plan); (b) fold each file's
+   transitive dependency mtimes into its cache key; (c) switch the key from
+   path+mtime to a content hash of the file *and* its resolved dependency set.
+   (b)/(c) make `--cache` sound but require the transpiler to emit each module's
+   dependency list so the runtime can hash it. Deferred unless `--cache` becomes
+   a common workflow.
 
 3. **`pclbuild` as separate script or `pcl --build` subcommand?**
    Separate script is simpler and mirrors the `perl` / `perlbrew` precedent.

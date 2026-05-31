@@ -91,3 +91,13 @@ for programs that don't use `pack`/`unpack`):
 ```
 
 The stubs will then load pcl-pack.lisp on the first `pack()` or `unpack()` call.
+
+## See also: the module provider registry
+
+Extensions are the **engine** behind CL-backed module overrides, but *which*
+`use Foo` maps to which extension is a separate, higher-level concern. That
+mapping — plus the `lib/` (pure-Perl) vs `cl/modules/` (CL-backed) split and the
+`use`-resolution order — is specified in `docs/shipped-modules.md`. The planned
+`*pcl-module-providers*` registry there folds the eager-load list, the
+`*p-xs-only-modules*` skip-list, and the (currently sweep-only) `Test::More`
+loading into one table. See `docs/pcl-rollout-plan.md` Phase 3 for the build step.
