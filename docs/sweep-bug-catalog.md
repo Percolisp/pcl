@@ -33,6 +33,20 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-05-31 (session 223b). **Match variables `$&`/`` $` ``/`$'` implemented; signatures.t un-skipped.**
+These were fully broken: codegen emitted bare `$'` (CL quote macro) and `` $` `` (quasiquote),
+none were defvar'd. Now mapped to pipe-quoted symbols in `%SPECIAL_VARS` (`Pl/ExprToCL.pm`),
+defvar'd+exported, and **set on every successful match/subst** via new `set-match-vars`
+(`cl/pcl-runtime.lisp`) wired into the single / /g-scalar / /g-list / s/// / s///e paths.
+`$+` deliberately NOT in the codegen map (it would hijack `$+{name}` = `%+` named-capture
+access). **signatures.t un-skipped** (the "734 eval too slow" note was stale — runs in ~4s via
+the persistent pl2cl server, NOT the s219–221 FASL work); two source-tree/not-supported
+landmines guarded (missing `regen/keywords.pl`; `:lvalue`-sub + return-in-default RT#132141).
+signatures.t now **completes: 418 pass / 559 fail / 1 skip** (was a whole-file skip; the 559 are
+arity error-message-text + experimental-warning detection = not-supported/principle-9). **Full
+sweep 17337 pass / 1262 fail, 63 fully passing** (held; +418/+559 = signatures now running, 0
+non-signatures regressions, only bop.t+eval.t crash). Gate 87 files / 3111 tests. New
+`Pl/t/match-vars-01.t` (7). Baseline re-blessed (489 keys).
 Updated 2026-05-31 (session 223). **`(LIST) x $n` list-repeat in `return` list fixed.**
 do.t 35/36: `return (@a, (@b) x $n)` in list context scalar-repeated `(@b)` (`x` list-vs-
 string decision only handled LIST_CTX, but `return` args get INHERIT_CTX). Added an

@@ -75,7 +75,7 @@ array.t	86	do {}: $# on freed array is undef	'-1'	undef
 array.t	88	do {}: msg	undef	^Attempt to set length of freed array
 array.t	87	do {}: number of warnings	'0'	'1'
 array.t	100	orphaned 1 is always undef	'42'	undef
-bless.t	68		'77391723251'	== 'D=GLOB(0x1204e7faf3)'
+bless.t	68		'77322467971'	== 'D=GLOB(0x1200c73a83)'
 blocks.t	24	RT #2917: No constraint on how late INIT blocks can run	''	'in init'
 bop.t	144		'0'	'1'
 bop.t	158	    and turns off the UTF-8 flag		
@@ -108,7 +108,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x12021591af)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x1202229fbf)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -157,7 +157,7 @@ caller.t	25	warnings match caller (all)
 caller.t	24	warnings match caller (no bits)		
 closure.t	13		''	'7'
 concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
-concat2.t	2	RT #132385	'REF(0x12045eb803)REF(0x12045eb9e3)'	'AB'
+concat2.t	2	RT #132385	'REF(0x12046edc03)REF(0x12046edde3)'	'AB'
 delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
 delete.t	54	a b c also equivalent		
 delete.t	26	a b c equivalent		
@@ -188,7 +188,7 @@ hash.t	12	hash self-assign	''	'x:'
 hash.t	13	magic keys	'a:x:b:y'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x12030a9e13)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1203123e33)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -218,7 +218,7 @@ local.t	275	localised sub via stash
 local.t	278	localised sub via stash slice		
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x120342c7d3)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1203384bf3)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF NIL)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -300,7 +300,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1204d95443)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1200c63e33)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -312,8 +312,8 @@ push.t	32	croak when pushing onto readonly array	''	^Modification of a read-only
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'77386999411'	'0'
-qr.t	27	int upgraded to regexp	'77387003491'	'0'
+qr.t	25	double upgraded to regexp	'77387555171'	'0'
+qr.t	27	int upgraded to regexp	'77387559251'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -331,11 +331,59 @@ ref.t	182	PVBM is not a HASH ref
 ref.t	180	PVBM is not a SCALAR ref		
 ref.t	181	PVBM is not an ARRAY ref		
 ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1202aa7fb3)'	'SCALAR(0x1202abf3f3)'
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1202bafa13)'	'SCALAR(0x1202bafa53)'
 ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
 ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x1203548063)'	^VSTRING\(0x[0-9a-f]+\)$
+ref.t	65	stringify for ref to vstring	'SCALAR(0x12035eb8c3)'	^VSTRING\(0x[0-9a-f]+\)$
+signatures.t	942		'invalid number of arguments: 0 at (eval 0) line 0. '	^Too few arguments for subroutine 'T200::foo'
+signatures.t	438	//= absent	'5'	'8'
+signatures.t	437	//= present	undef	'9'
+signatures.t	439	//= undef	undef	'7'
+signatures.t	440	//= zero	undef	'4'
+signatures.t	943	RT #130661	'Error while parsing arguments to DEFMACRO P-SUB:   too few elements in     ()   to satisfy lambda list     (NAME PARAMS &BODY BODY):   at least 2 expected, but got 0'	A signature parameter must start with
+signatures.t	944	RT #132141	'abc'	'Xbc'
+signatures.t	946	RT 132760 err 0	undef	^Subroutine attributes must come before the signature at
+signatures.t	945	RT 132760 expect 1 error	'0'	'1'
+signatures.t	972	Warns of experimental @_ in param default	''	^Use of \@_ in array element with signatured subroutine is experimental at \(eval 
+signatures.t	961	`$_[0]` warns of experimental @_		
+signatures.t	958	`&SUB` warns of experimental @_		
+signatures.t	968	`each @_` warns of experimental @_		
+signatures.t	973	`eval q( $_[0] )` warns of experimental @_		
+signatures.t	970	`func("a", @_, "z")` warns of experimental @_		
+signatures.t	957	`goto &SUB` warns of experimental @_		
+signatures.t	966	`keys @_` warns of experimental @_		
+signatures.t	962	`my $one = 1; $_[$one]` warns of experimental @_		
+signatures.t	960	`pop @_` warns of experimental @_		
+signatures.t	956	`pop` warns of experimental @_		
+signatures.t	969	`print "a", @_, "z"` warns of experimental @_		
+signatures.t	963	`push @_, 1` warns of experimental @_		
+signatures.t	959	`shift @_` warns of experimental @_		
+signatures.t	955	`shift` warns of experimental @_		
+signatures.t	965	`splice @_, 1, 2, 3` warns of experimental @_		
+signatures.t	964	`unshift @_, 9` warns of experimental @_		
+signatures.t	967	`values @_` warns of experimental @_		
+signatures.t	935	duplicate sig var names	''	'2'
+signatures.t	954	f($1)	''	Illegal operator following parameter in a subroutine signature
+signatures.t	951	f($_)	''	Can't use global \$_ in subroutine signature
+signatures.t	953	f(%_)	''	Can't use global \%_ in subroutine signature
+signatures.t	952	f(@_)	''	Can't use global \@_ in subroutine signature
+signatures.t	933	handle commonality in slurpy hash	'1'	'1 (k1,v2) (k2,v1)'
+signatures.t	936	masking warning	''	^"my" variable \$x masks earlier declaration in same scope
+signatures.t	947	multiline1: $b	undef	line 4,
+signatures.t	948	multiline1: $c	undef	line 5,
+signatures.t	949	multiline1: $d	undef	line 7,
+signatures.t	950	multiline1: $e	undef	line 8,
+signatures.t	917	t150: b: growing @_	'2'	'b'
+signatures.t	919	t151: b: tied @_	'2'	'b'
+signatures.t	925	t156: b: growing @_	''	'b c'
+signatures.t	927	t157: b: growing @_	''	'b:c'
+signatures.t	929	t158: b: tied @_	''	'b c'
+signatures.t	931	t159: b: tied @_	''	'b:c'
+signatures.t	442	||= absent	'5'	'8'
+signatures.t	441	||= present	undef	'9'
+signatures.t	443	||= undef	undef	'7'
+signatures.t	444	||= zero	undef	'7'
 split.t	149	assignment to split-to-array (pmtarget/package array)	'a b c'	'1 2 3'
 split.t	151	assignment to split-to-array (stacked)	'a b c'	'1 2 3'
 split.t	150	assignment to split-to-array (targ/lexical)	'a b c'	'1 2 3'
@@ -414,15 +462,15 @@ sprintf2.t	1521	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x0.0000p+0	'0x0.0000p+
 sprintf2.t	1511	subnormal 3e-324 %a 0x1p-1074 got 0x0p+0	'0x0p+0'	'0x1p-1074'
 sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'
 sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'
-state.t	76	Reference to state variable	'SCALAR(0x12043d8e93)'	'SCALAR(0x12043efd73)'
+state.t	76	Reference to state variable	'SCALAR(0x1204567a83)'	'SCALAR(0x120457e903)'
 state.t	73	computed goto 0		
 state.t	75	grep	'Eagle'	'EagleAntaresOdysseyAquarius'
 state.t	74	map	'1'	'EagleEagleEagleEagle'
 state.t	92	substr	'Johnx'	'xxxxx'
 substr.t	397		'-1'	'23'
 substr.t	386	Timely scalar destruction with lvalue substr	'0'	'1'
-substr.t	384	\substr %h	'HASH(0x1200d17693)'	'50'
-substr.t	385	\substr @a	'ARRAY(0x1200d1774f)'	'100'
+substr.t	384	\substr %h	'HASH(0x1200e16e73)'	'50'
+substr.t	385	\substr @a	'ARRAY(0x1200e16f2f)'	'100'
 substr.t	376	\substr does not coerce its glob arg just yet	'REF'	'GLOB'
 substr.t	345	scalar does not affect lvalueness of substr	'abcdef'	'abcdeaf'
 tr.t	224	    doesn't stringify its argument	''	'SCALAR'

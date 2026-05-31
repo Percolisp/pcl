@@ -189,6 +189,12 @@ my %SPECIAL_VARS = (
   '$/'  => '|$/|',
   '$\\' => '|$\\|',
   '$"'  => '|$"|',
+  '$&'  => '|$&|',    # MATCH      - whole matched string
+  '$`'  => '|$`|',    # PREMATCH   - text before the match
+  q{$'} => q{|$'|},   # POSTMATCH  - text after the match
+  # NB: do NOT map '$+' here — `$+{name}` is hash access on %+ (named captures);
+  # a SPECIAL_VARS entry hijacks it.  Scalar `$+` (last-paren match) is rare; %+
+  # is common.  The runtime |$+| var is still set by set-match-vars (harmless).
   '$|'  => '|$\||',
   '$;'  => '|$;|',
   '$,'  => '|$,|',

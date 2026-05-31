@@ -9,11 +9,6 @@ BEGIN {
 use warnings;
 use strict;
 
-# PCL: signatures.t makes 734 eval-string subprocess calls — times out in sweep.
-# Needs persistent-subprocess optimization + use feature "signatures" enforcement.
-# Uncomment when both are implemented.
-skip_all("PCL: eval-string subprocess too slow (734 calls); signatures enforcement not implemented");
-
 our $a = 123;
 our $z;
 
@@ -1556,8 +1551,11 @@ like $@, qr/A signature parameter must start with/, "RT #130661";
 
 use File::Spec::Functions;
 my $keywords_file = catfile(updir,'regen','keywords.pl');
-open my $kh, $keywords_file
-   or die "$0 cannot open $keywords_file: $!";
+# PCL: regen/keywords.pl only exists in the full Perl source tree, not in the
+# extracted perl-tests/ environment.  Guard the open so a missing data file
+# skips this per-keyword block instead of dying at top level (which aborted the
+# whole file).  Real Perl runs this from its source tree where the file exists.
+if (open my $kh, $keywords_file) {
 while(<$kh>) {
     if (m?__END__?..${\0} and /^[+-]/) {
         chomp(my $word = $');
@@ -1567,6 +1565,7 @@ while(<$kh>) {
         isnt $@, "", "$word does not swallow trailing comma";
     }
 }
+}
 
 # RT #132141
 # Attributes such as lvalue have to come *before* the signature to
@@ -1574,11 +1573,17 @@ while(<$kh>) {
 
 {
     my $x;
-    sub f :lvalue ($a = do { $x = "abc"; return substr($x,0,1)}) {
-        die; # notreached
-    }
-
-    f() = "X";
+    # PCL: user-defined :lvalue subs are not supported (not-supported.md
+    # "Lvalue subroutines").  This case also relies on `return` inside a
+    # signature-default `do {}` thunk, which PCL evaluates outside the sub's
+    # return-catch.  Wrap in eval so the unsupported construct fails as a
+    # normal test instead of aborting the whole file.
+    eval q{
+        sub f :lvalue ($a = do { $x = "abc"; return substr($x,0,1)}) {
+            die; # notreached
+        }
+        f() = "X";
+    };
     is $x, "Xbc", "RT #132141";
 }
 

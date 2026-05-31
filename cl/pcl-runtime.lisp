@@ -131,6 +131,7 @@
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
+   #:|$&| #:|$`| #:|$'| #:|$+|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
@@ -347,6 +348,10 @@
 (defvar $7 nil "Regex capture group 7")
 (defvar $8 nil "Regex capture group 8")
 (defvar $9 nil "Regex capture group 9")
+(defvar |$&| nil "Regex MATCH - the whole matched string")
+(defvar |$`| nil "Regex PREMATCH - everything before the match")
+(defvar |$'| nil "Regex POSTMATCH - everything after the match")
+(defvar |$+| nil "Regex - last (highest-numbered) capture group that matched")
 (defvar %+ (make-hash-table :test 'equal) "Perl %+ - named regex captures")
 
 ;;; Default variable ($_) - defined later after make-p-box (see Boxed special variables section)
@@ -9529,8 +9534,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun clear-capture-groups ()
   "Reset all capture group variables to nil"
   (setf $1 nil $2 nil $3 nil $4 nil $5 nil
-        $6 nil $7 nil $8 nil $9 nil)
+        $6 nil $7 nil $8 nil $9 nil
+        |$&| nil |$`| nil |$'| nil |$+| nil)
   (clrhash %+))
+
+(defun set-match-vars (str match-start match-end reg-starts reg-ends)
+  "Set the match position variables from a successful match:
+   $& (MATCH), $` (PREMATCH), $' (POSTMATCH), and $+ (last capture that matched)."
+  (when (and match-start match-end)
+    (setf |$&| (subseq str match-start match-end)
+          |$`| (subseq str 0 match-start)
+          |$'| (subseq str match-end)))
+  ;; $+ = highest-numbered capture group that actually participated
+  (when (and reg-starts reg-ends)
+    (loop for i from (1- (length reg-starts)) downto 0
+          do (let ((rs (aref reg-starts i)) (re (aref reg-ends i)))
+               (when (and rs re)
+                 (setf |$+| (subseq str rs re))
+                 (return))))))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
@@ -9589,9 +9610,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             ;; :void is NOT list context — only (eq *wantarray* t) is list context
             ((and global-p (eq *wantarray* t))
              (let ((all-results nil)
-                   (last-rs nil) (last-re nil))
+                   (last-rs nil) (last-re nil) (last-ms nil) (last-me nil))
                (cl-ppcre:do-scans (ms me rs re scanner str)
-                 (setf last-rs rs last-re re)
+                 (setf last-rs rs last-re re last-ms ms last-me me)
                  (if (> (length rs) 0)
                      (dotimes (i (length rs))
                        (push (if (and (aref rs i) (aref re i))
@@ -9604,8 +9625,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (loop for item in items for i from 0 do (setf (aref result i) item))
                  (when items
                    (clear-capture-groups)
-                   (when last-rs
-                     (set-capture-groups str last-rs last-re reg-names)))
+                   (set-capture-groups str last-rs last-re reg-names)
+                   (set-match-vars str last-ms last-me last-rs last-re))
                  result)))
             ;; /g in scalar/void context: iterate from current pos
             ((and global-p (not (eq *wantarray* t)))
@@ -9617,6 +9638,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                        (setf (gethash string *p-match-pos*) match-end)
                        (clear-capture-groups)
                        (set-capture-groups str reg-starts reg-ends reg-names)
+                       (set-match-vars str match-start match-end reg-starts reg-ends)
                        t)
                      (progn
                        (unless cont-p
@@ -9626,10 +9648,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (t
              (multiple-value-bind (match-start match-end reg-starts reg-ends)
                  (cl-ppcre:scan scanner str)
-               (declare (ignore match-end))
                (when match-start
                  (clear-capture-groups)
                  (set-capture-groups str reg-starts reg-ends reg-names)
+                 (set-match-vars str match-start match-end reg-starts reg-ends)
                  (if (eq *wantarray* t)
                      (let* ((num-groups (length reg-starts))
                             (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
@@ -9698,9 +9720,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   ;; s///e: call lambda per match, setting $1..$9 from capture groups
                   ;; :simple-calls t → function receives (match g1 g2 ...) as strings
                   (let ((rep-fn (lambda (whole-match &rest groups)
-                                  (declare (ignore whole-match))
                                   (incf count)
                                   (clear-capture-groups)
+                                  (setf |$&| whole-match)
                                   (when (>= (length groups) 1) (setf $1 (or (nth 0 groups) *p-undef*)))
                                   (when (>= (length groups) 2) (setf $2 (or (nth 1 groups) *p-undef*)))
                                   (when (>= (length groups) 3) (setf $3 (or (nth 2 groups) *p-undef*)))
@@ -9727,10 +9749,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                     ;; First, set capture groups from the match
                     (multiple-value-bind (match-start match-end reg-starts reg-ends)
                         (cl-ppcre:scan scanner str)
-                      (declare (ignore match-end))
                       (when match-start
                         (clear-capture-groups)
-                        (set-capture-groups str reg-starts reg-ends reg-names)))
+                        (set-capture-groups str reg-starts reg-ends reg-names)
+                        (set-match-vars str match-start match-end reg-starts reg-ends)))
                     ;; Perform the substitution
                     (setf result (if global-p
                                      (cl-ppcre:regex-replace-all scanner str replacement)
