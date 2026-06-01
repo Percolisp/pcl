@@ -134,4 +134,4 @@ These come *after* compatibility is solid:
 
 ## License
 
-This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
+This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself — dual-licensed under the Artistic License 1.0 or the GNU GPL v1-or-later. See [`LICENSE`](LICENSE) for details.
