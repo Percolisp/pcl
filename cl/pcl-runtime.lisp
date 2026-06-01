@@ -2924,7 +2924,12 @@
                         r))
                      ((and (vectorp ,val) (not (stringp ,val)))
                       (%p-flatten-list ,val))
-                     (t (make-array 0 :adjustable t :fill-pointer 0))))
+                     ;; A bare scalar RHS is a one-element list: `%h = "x"` means
+                     ;; `%h = ("x")` -> key "x" with an undef value (Perl pads the
+                     ;; odd element).  Route it through %p-flatten-list so a string,
+                     ;; number, box, or undef becomes one entry; a raw nil (empty
+                     ;; list) flattens to nothing, clearing the hash.
+                     (t (%p-flatten-list (vector ,val)))))
             (,cnt (length ,flat)))
        (unless (boundp ',place)
          (proclaim '(special ,place))

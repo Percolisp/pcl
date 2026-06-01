@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -96,3 +96,20 @@ test_cl('hash flattened in p-hash: hash-table arg expands to pairs',
      my %b = (z => 3, %a);
      print join(",", map { "$_=$b{$_}" } sort keys %b), "\n";',
     "x=1,y=2,z=3\n");
+
+# Regression: a bare-scalar RHS is a one-element list — `%h = "x"` means
+# `%h = ("x")`, giving key "x" with an undef value (Perl pads the odd element).
+# Previously p-hash-= dropped a non-vector RHS and produced an empty hash.
+test_cl('scalar RHS becomes a single key with undef value',
+    'my %h; %h = "x";
+     print join(":", %h), "|", scalar(keys %h), "\n";',
+    "x:|1\n");
+
+# The hash.t "self-assign" case: %h = $h{a} reads the scalar element (here "x")
+# and assigns it as the sole key, value undef.
+test_cl('hash self-assign from own scalar element',
+    'my %h = qw(a x b y c z);
+     no warnings;
+     %h = $h{a};
+     print join(":", %h), "\n";',
+    "x:\n");
