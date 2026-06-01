@@ -1,3 +1,7 @@
+;;;; Copyright (c) 2025-2026
+;;;; This is free software; you can redistribute it and/or modify it
+;;;; under the same terms as the Perl 5 programming language system itself.
+
 ;;;; skip-registry.lisp — declarative registry of documented not-supported tests.
 ;;;;
 ;;;; Instead of hand-editing perl-tests/*.t to disable tests PCL deliberately does

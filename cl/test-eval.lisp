@@ -1,3 +1,7 @@
+;;;; Copyright (c) 2025-2026
+;;;; This is free software; you can redistribute it and/or modify it
+;;;; under the same terms as the Perl 5 programming language system itself.
+
 ;;; Test eval { } block behavior
 ;;; Run with: sbcl --load pcl-runtime.lisp --load test-eval.lisp
 
@@ -35,8 +39,8 @@
 
 ;; eval { } with multiple expressions returns last value
 (let ((result (pl-eval-block
-                (pl-setf $x 10)
-                (pl-+ $x 5))))
+               (pl-setf $x 10)
+               (pl-+ $x 5))))
   (test-equal result 15 "eval { $x=10; $x+5 } returns 15"))
 
 
@@ -87,10 +91,10 @@
 
 ;; Outer eval succeeds even when inner eval catches error
 (let ((result (pl-eval-block
-                (pl-eval-block (pl-die "inner error"))
-                (if (> (length $@) 0)
-                    "caught inner"
-                    "no error"))))
+               (pl-eval-block (pl-die "inner error"))
+               (if (> (length $@) 0)
+                   "caught inner"
+                   "no error"))))
   (test-equal result "caught inner" "nested eval: outer succeeds")
   (test-equal $@ "" "nested eval: outer $@ is empty (success)"))
 
@@ -99,8 +103,8 @@
       (inner-result nil))
   (setf outer-result
         (pl-eval-block
-          (setf inner-result (pl-eval-block (pl-die "inner")))
-          "outer ok"))
+         (setf inner-result (pl-eval-block (pl-die "inner")))
+         "outer ok"))
   (test-equal inner-result nil "nested: inner returns nil")
   (test-equal outer-result "outer ok" "nested: outer returns its value"))
 

@@ -1,3 +1,7 @@
+;;;; Copyright (c) 2025-2026
+;;;; This is free software; you can redistribute it and/or modify it
+;;;; under the same terms as the Perl 5 programming language system itself.
+
 ;;; pcl-test.lisp - TAP test framework for PCL
 ;;;
 ;;; Provides Perl test.pl compatible functions:
