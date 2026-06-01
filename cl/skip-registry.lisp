@@ -165,6 +165,50 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  :read-only
                  "assignment to a literal-aliased value / weaken of a read-only ref must die 'Modification of a read-only value' — read-only scalars not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' / 'Internals::* C-level introspection'."))
 
+;; substr.t — documented not-supported failures.  The for(substr())/\substr
+;; lvalue-aliasing rows are now IMPLEMENTED (session: p-substr-lvalue-cell with
+;; edit-tracking) and NOT skipped.  HELD BACK as fix targets, deliberately NOT
+;; registered:
+;;   - [perl #62646] huge 32-bit-overflow offsets (substr($a,0xffffffff,1) → undef
+;;     + "substr outside of string" warning): out-of-range-offset semantics are
+;;     potentially fixable (PCL returns '' not undef), entangled with warning
+;;     emission — discuss before writing off (CLAUDE.md principle 4).
+(register-skips "substr.t"
+                ;; perl #24346: `sub { $_[0]=... }->(scalar substr ...)` writes the
+                ;; substr lvalue through @_ — needs @_ pass-by-alias.
+                ("scalar does not affect lvalueness of substr"
+                 :alias
+                 "modifying $_[0] (a scalar-substr lvalue) inside a sub must write back through @_ — @_ elements are copies in PCL. not-supported.md: '@_ argument aliasing'.")
+                ;; perl #24200 / #128260: user `: lvalue` subs returning substr, and
+                ;; substr/\substr on $#array (arylen) or an lvalue sub.
+                (346 :lvalue
+                     "user `sub bar : lvalue { substr ... }` then `bar = \"XXX\"` — user-defined lvalue subs are not implemented. not-supported.md: 'Lvalue subroutines'.")
+                (391 :lvalue "substr($#ta,0,2)=23 — substr as an lvalue on $#array (arylen) magic. not-supported.md: 'Lvalue subroutines' / arylen magic.")
+                (392 :lvalue "substr($#ta,0,2)=~s/// — substr-lvalue on arylen via s///. not-supported.md: 'Lvalue subroutines'.")
+                (393 :lvalue "substr($#ta,0,2,23) — 4-arg substr on arylen. not-supported.md: 'Lvalue subroutines'.")
+                (394 :lvalue "ta_tindex() = 23 — user `: lvalue` sub returning $#ta. not-supported.md: 'Lvalue subroutines'.")
+                (395 :lvalue "substr(ta_tindex(),0,2)=23 — substr-lvalue on an lvalue sub. not-supported.md: 'Lvalue subroutines'.")
+                (396 :lvalue "substr(ta_tindex(),0,2)=~s/// — substr-lvalue on an lvalue sub via s///. not-supported.md: 'Lvalue subroutines'.")
+                (397 :lvalue "substr(ta_tindex(),0,2,23) — 4-arg substr on an lvalue sub. not-supported.md: 'Lvalue subroutines'.")
+                ;; perl #128260: \substr of a whole hash/array (stringified aggregate).
+                ("\\\\substr %h"
+                 :lvalue
+                 "${\\substr %h, 0} — \\substr of a stringified hash (perl #128260 assertion). not-supported.md: 'Lvalue subroutines'.")
+                ("\\\\substr @a"
+                 :lvalue
+                 "${\\substr @a, 0} — \\substr of a stringified array (perl #128260 assertion). not-supported.md: 'Lvalue subroutines'.")
+                ;; \substr does not coerce a glob/ref arg — Perl itself defers this.
+                ("does not coerce its glob arg just yet"
+                 :lvalue
+                 "\\substr *glob must not coerce the glob (ref \\$x stays GLOB) — glob/substr coercion not modelled. not-supported.md: 'Lvalue subroutines'.")
+                ;; DESTROY must fire when an lvalue-substr target is replaced.
+                ("Timely scalar destruction with lvalue substr"
+                 :destroy-gc
+                 "DESTROY must fire when the object held by a substr-lvalue target is overwritten — PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ;; 4-arg substr replacement on a tied (Tie::StdScalar) magical value.
+                (142 :tie
+                     "substr($tied,0,5,'') must STORE back through the tie so the tied value becomes 'last' — 4-arg substr does not write through tie magic. not-supported.md: 'DESTROY/tie magic' (tie write-through)."))
+
 ;; array.t — documented not-supported failures (sparse arrays / @_ aliasing / SV
 ;; identity / error-detection). HELD BACK as fix targets, deliberately NOT registered:
 ;;   - arylen magic (\$#array, freed-array length, arylen_p): tests 83-88, 92-114,
