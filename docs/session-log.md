@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 228 (2026-06-01) — yada-yada die location + sprintf integer-overflow guards
+
+Two independent fixes; the sweep bug-catalog was found significantly stale (many
+listed bugs — list-of-arrays slice, chop-on-assigned-array, `($a=…) .= 'c'`, LHS
+array-slice assignment — already pass).
+
+**1. Yada-yada `...` die location** (`Pl/Parser.pm`). A bare `...` statement died with
+`Unimplemented` but no location, so `p-eval-block` appended the placeholder
+`at (eval 0) line 0.`.  Perl reports `Unimplemented at $0 line N.\n`, where the file is
+the **runtime** program name (`$0`, = "sbcl" under the sweep) and N is the source line.
+Fixed by emitting `(p-die "Unimplemented" :loc (format nil "~A line ~D" (to-string
+(unbox $0)) N))` — the `:loc` is built at runtime from `$0` (not the compile-time
+`source_file`, which wouldn't match the test's `$0`-based expectation) plus the literal
+line.  **yadayada.t 16 → 21** (tests 1, 5–8; the rest are syntax-error detection / range-
+in-eval, principle 9 + lexical-scope gap).  Regression: `Pl/t/eval-01.t` 38 → 40.
+
+**2. sprintf "Integer overflow in format string"** (`cl/pcl-runtime.lisp` `p-sprintf`).
+A width/precision exceeding a C int (2³¹−1) leaked an SBCL type error
+(`…not of type (UNSIGNED-BYTE 44)…`) instead of Perl's `Integer overflow in format
+string`.  The literal-*width* path already guarded this; added the three sibling guards
+it missed: width-from-`*`, precision-from-`*` (using `(abs …)` so the huge-negative
+IV_MIN case errors before the "negative precision = omitted" rule), and literal `.NNN`
+precision.  Each is one O(1) integer compare per format spec (formatting hot path
+untouched — confirmed with the user re: perf).  **sprintf2.t 1544 → 1617** (+73, 0 new
+fails).  Regression: `Pl/t/sprintf-invalid-01.t` 9 → 13.
+
+Remaining sprintf2.t (28): subnormal `%a` hex-float last-digit rounding, `%n`,
+`.=`-on-array-elem, "Numeric format result too large", float-precision edges — all niche.
+
+---
+
 ## Session 227 (2026-06-01) — closure.t fully passing: nested `my $i = $i` shadow capture
 
 **Bug:** `sub bizz { my $i=7; if(@_){...} else { my $i=$i; sub{$i=shift if @_; $i} } }` —

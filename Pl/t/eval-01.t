@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 38;
+use Test::More tests => 40;
 use File::Temp qw(tempfile);
 BEGIN { use_ok('Pl::Parser') };
 BEGIN { use_ok('Pl::Environment') };
@@ -366,5 +366,24 @@ SKIP: {
         my $out = run_pl(qq{\n\neval { die "deep" }; print \$\@;});
         like($out, qr/ line 3\.\n/,
              'die location reports the actual die statement line');
+    }
+
+    # ========================================
+    diag "";
+    diag "-------- yada-yada (...) Unimplemented location:";
+
+    # Test 27: bare '...' dies "Unimplemented at $0 line N." with the runtime
+    # program name and the real source line (not "(eval 0) line 0").
+    {
+        my $out = run_pl(qq{\neval { ... }; print \$\@;});
+        like($out, qr/^Unimplemented at \S+ line 2\.\n/,
+             'yada-yada dies "Unimplemented at \$0 line N."');
+    }
+
+    # Test 28: '...' inside a map block carries the same location format
+    {
+        my $out = run_pl(qq{my \@r; eval { \@r = map {; ... } (1,2,3) }; print \$\@;});
+        like($out, qr/^Unimplemented at \S+ line 1\.\n/,
+             'yada-yada inside map block reports a real location');
     }
 }

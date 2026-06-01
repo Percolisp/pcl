@@ -20,7 +20,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 13;
 
 sub run_cl {
     my ($code) = @_;
@@ -80,3 +80,24 @@ test_cl('valid %X upper hex',       q{printf "%X\n", 255;},        "FF\n");
 # Normal Redundant warning still fires when there is NO invalid conversion.
 test_cl('normal REDUNDANT still fires',
     $harness . q{print fmt('%d', 1, 2), "\n";}, "1 REDUNDANT\n");
+
+# Integer overflow: a width/precision exceeding a C int (2**31-1) dies
+# "Integer overflow in format string ..." instead of leaking an SBCL type
+# error.  Covers literal precision, *-arg width, *-arg precision (even huge
+# negative, which overflows before the "negative = omitted" rule).
+sub like_cl {
+    my ($name, $code, $re) = @_;
+    like(run_cl($code), $re, $name);
+}
+like_cl('literal precision overflow dies Integer overflow',
+    q{my $r = eval { sprintf "%.18446744073709551615a", 1.1 }; print $@;},
+    qr/^Integer overflow in format string for sprintf /);
+like_cl('*-arg width overflow dies Integer overflow',
+    q{my $r = eval { sprintf "%*s", ~0, "abc" }; print $@;},
+    qr/Integer overflow/);
+like_cl('*-arg precision (huge negative) overflow dies Integer overflow',
+    q{my $r = eval { sprintf "%.*s", -1-(~0>>1), "abc" }; print $@;},
+    qr/Integer overflow/);
+# A normal small width/precision must NOT trip the overflow guard.
+test_cl('normal width/precision unaffected by overflow guard',
+    q{printf "%5.2f|%*d|%.*f\n", 3.14159, 4, 7, 2, 3.14159;}, " 3.14|   7|3.14\n");

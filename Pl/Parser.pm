@@ -1027,7 +1027,12 @@ sub _process_expression_statement {
   # In Perl, a bare '...' statement dies with "Unimplemented".
   if (@parts == 1 && ref($parts[0]) eq 'PPI::Token::Operator' && $parts[0]->content eq '...') {
     $self->_emit(";; $perl_code (yada yada)");
-    $self->_emit('(p-die "Unimplemented")');
+    # Perl dies "Unimplemented at $0 line N.\n".  The file part is the runtime
+    # program name ($0), not the compile-time source file, so build the :loc
+    # location at runtime from $0 and the literal source line.
+    my $yada_line = (ref($parts[0]) && $parts[0]->can('line_number'))
+      ? ($parts[0]->line_number // 0) : 0;
+    $self->_emit(qq{(p-die "Unimplemented" :loc (format nil "~A line ~D" (to-string (unbox \$0)) $yada_line))});
     return;
   }
 

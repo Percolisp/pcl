@@ -2566,6 +2566,12 @@
                                      (let ((src (or pos-idx arg-idx)))
                                        (setf width (truncate (to-number (nth src args))))
                                        (unless pos-idx (incf arg-idx)))
+                                     ;; Width from * must fit in a C int; otherwise
+                                     ;; Perl dies "Integer overflow" (abs covers the
+                                     ;; huge-negative IV_MIN case before the - flip).
+                                     (when (> (abs width) 2147483647)
+                                       (error "Integer overflow in format string for ~A ~A"
+                                              *p-sprintf-caller* fmt-str))
                                      (when (minusp width)
                                        (setf flags (concatenate 'string flags "-"))
                                        (setf width (- width)))))
@@ -2595,6 +2601,12 @@
                                        (when pos-idx (setf has-positional t))
                                        (let* ((src (or pos-idx arg-idx))
                                               (pv (truncate (to-number (nth src args)))))
+                                         ;; Precision from * must fit in a C int; a
+                                         ;; huge magnitude (even negative) overflows
+                                         ;; before the "negative means omitted" rule.
+                                         (when (> (abs pv) 2147483647)
+                                           (error "Integer overflow in format string for ~A ~A"
+                                                  *p-sprintf-caller* fmt-str))
                                          (setf precision (if (minusp pv) nil pv))
                                          (unless pos-idx (incf arg-idx)))))
                                     (t
@@ -2603,6 +2615,9 @@
                                              do (setf p (+ (* p 10) (digit-char-p (char fmt-str j))))
                                              (setf has-digit t)
                                              (incf j))
+                                       (when (and has-digit (> p 2147483647))
+                                         (error "Integer overflow in format string for ~A ~A"
+                                                *p-sprintf-caller* fmt-str))
                                        (setf precision (if has-digit p 0))))))
                                 ;; Skip size modifiers (l, h, q, L, V, etc.) — Perl's
                                 ;; integer-size flags.  V is Perl's IV/UV-size modifier
