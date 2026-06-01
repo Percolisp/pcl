@@ -4595,6 +4595,7 @@ sub _process_sub_statement {
 
   my $name = '';
   my $prototype = '';
+  my $is_signature_syntax = 0;
   my $block;
 
   for my $child ($stmt->children) {
@@ -4612,6 +4613,7 @@ sub _process_sub_statement {
     elsif ($ref eq 'PPI::Structure::Signature') {
       # Perl 5.20+ signature (when 'use feature "signatures"' is used)
       $prototype = $child->content;
+      $is_signature_syntax = 1;
     }
     elsif ($ref eq 'PPI::Structure::Block') {
       $block = $child;
@@ -4652,9 +4654,37 @@ sub _process_sub_statement {
   # Default: -1 means "unknown/list" - sub takes any number of args
   # Only explicit prototypes/signatures set specific min_params
   my $sig_info = { params => [], min_params => -1, is_proto => 0 };
-  if ($prototype) {
+  if ($is_signature_syntax) {
+    # Signature syntax (feature "signatures") is ALWAYS parsed as a signature,
+    # never as an old-style prototype — even all-anonymous forms like ($) or
+    # ($, $) that would otherwise look like a prototype.  Empty () => min 0.
+    my $inner = $prototype;
+    $inner =~ s/^\s*\(\s*//;
+    $inner =~ s/\s*\)\s*$//;
+    $sig_info = $self->_parse_signature($inner, $stmt);
+  } elsif ($prototype) {
     $sig_info = $self->parse_prototype_or_signature($prototype, $stmt);
   }
+
+  # A real Perl signature (feature "signatures"), not an old-style prototype.
+  # When set, args are flattened into @_, arity is checked with Perl's exact
+  # error message, and the named params are bound from @_ (see below).
+  my $is_sig = $is_signature_syntax && !$sig_info->{is_proto};
+
+  # Partition signature params into required / optional / slurpy and derive the
+  # arity bounds.  Used both for the arity check and the @_-based binding.
+  my (@sig_req, @sig_opt, $sig_slurpy);
+  if ($is_sig) {
+    for my $param (@{$sig_info->{params}}) {
+      my $pname = $param->{name};
+      if ($pname =~ /^[\@\%]/)          { $sig_slurpy = $pname; }
+      elsif (defined $param->{default_cl}) { push @sig_opt, $param; }
+      else                              { push @sig_req, $param; }
+    }
+  }
+  my $sig_min  = scalar @sig_req;
+  my $sig_max  = $sig_slurpy ? 'nil' : ($sig_min + scalar @sig_opt);
+  my $sig_flex = (@sig_opt || $sig_slurpy) ? 't' : 'nil';
 
   # Store in environment for later use by PExpr
   if ($name) {
@@ -4730,6 +4760,23 @@ sub _process_sub_statement {
   if (!@param_names && !@optional_params) {
     $params_cl = '&rest %_args';
     $needs_args_conversion = 1;
+  }
+
+  # Real signatures: discard the CL-lambda param list built above and instead
+  # capture every arg via &rest, then flatten + arity-check + bind from @_.
+  # This makes foo(@arr) flatten correctly and gives Perl's exact arity error.
+  if ($is_sig) {
+    $params_cl = '&rest %_args';
+    $needs_args_conversion = 0;   # we emit our own @_ binding below
+  }
+
+  # Perl package-qualified name for the arity error message ("main::foo").
+  my $sig_qname;
+  if ($is_sig) {
+    my $pkg = $self->environment->current_package();
+    my $bn  = $name ne '' ? $name : '__ANON__';
+    $sig_qname = ($bn =~ /::/) ? $bn
+               : ($pkg eq 'main' ? "main::$bn" : "$pkg\::$bn");
   }
 
   # Find state declarations in the block (they need special handling)
@@ -4827,8 +4874,42 @@ sub _process_sub_statement {
   $self->_emit("(p-sub $cl_sub_name ($params_cl)");
   $self->indent_level($self->indent_level + 1);
 
+  # Number of wrapper forms ((let ...)/(let* ...)) opened for a signature sub,
+  # so the close section emits exactly that many ')'.
+  my $sig_wrap_closes = 0;
+
+  if ($is_sig) {
+    # (let ((@_ (p-flatten-args %_args))) — flatten args (foo(@arr) spreads)
+    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
+    $self->indent_level($self->indent_level + 1);
+    $sig_wrap_closes++;
+    # Arity check BEFORE any binding (a too-few call must not index past @_).
+    $self->_emit("(p-check-arity \"$sig_qname\" (length \@_) $sig_min $sig_max $sig_flex)");
+    # Bind the named params positionally from @_ via a sequential let*
+    # (so an optional default can reference an earlier param, e.g. $r = f($c)).
+    my @binds;
+    my $idx = 0;
+    for my $p (@sig_req) {
+      push @binds, "($p->{name} (aref \@_ $idx))";
+      $idx++;
+    }
+    for my $p (@sig_opt) {
+      push @binds,
+        "($p->{name} (if (> (length \@_) $idx) (aref \@_ $idx) $p->{default_cl}))";
+      $idx++;
+    }
+    if ($sig_slurpy) {
+      my $fn = $sig_slurpy =~ /^\@/ ? 'p-sig-rest-array' : 'p-sig-rest-hash';
+      push @binds, "($sig_slurpy ($fn \@_ $idx))";
+    }
+    if (@binds) {
+      $self->_emit("(let* (" . join(' ', @binds) . ")");
+      $self->indent_level($self->indent_level + 1);
+      $sig_wrap_closes++;
+    }
+  }
   # If using %_args, convert to @_ vector
-  if ($needs_args_conversion) {
+  elsif ($needs_args_conversion) {
     $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
     $self->indent_level($self->indent_level + 1);
   }
@@ -4865,7 +4946,13 @@ sub _process_sub_statement {
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close block
 
-  if ($needs_args_conversion) {
+  if ($is_sig) {
+    for (1 .. $sig_wrap_closes) {
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");  # close signature let / let*
+    }
+  }
+  elsif ($needs_args_conversion) {
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");  # close let
   }
@@ -6091,6 +6178,7 @@ sub _parse_signature {
   my @params;
   my $min_params = 0;
   my $seen_optional = 0;
+  my $anon_counter = 0;
 
   # Split on commas, but be careful with nested parens in defaults
   my @param_strs = $self->_split_signature_params($sig_str);
@@ -6111,6 +6199,20 @@ sub _parse_signature {
     elsif ($param_str =~ /^([\$\@\%]\w+)$/) {
       # Simple parameter: $x
       $name = $1;
+      $default_expr = undef;
+    }
+    elsif ($param_str =~ /^([\$\@\%])\s*=\s*(.*)$/) {
+      # Anonymous placeholder with default: ($ = undef), ($ =)
+      # Still counts toward arity; bound to a throwaway name.
+      $name = $1 . '_sig_anon' . (++$anon_counter);
+      my $rhs = $2;
+      $rhs =~ s/\s+$//;
+      $default_expr = ($rhs eq '') ? 'undef' : $rhs;
+      $seen_optional = 1;
+    }
+    elsif ($param_str =~ /^([\$\@\%])$/) {
+      # Anonymous mandatory placeholder: ($a, $) — the bare $ is a required slot.
+      $name = $1 . '_sig_anon' . (++$anon_counter);
       $default_expr = undef;
     }
     else {

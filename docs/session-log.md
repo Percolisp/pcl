@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 226 (2026-06-01) — subroutine-signature arity + arg flattening + Perl error message
+
+**Three coupled signature bugs fixed** (`Pl/Parser.pm` `_process_sub_statement` +
+`_parse_signature`; `cl/pcl-runtime.lisp`):
+
+1. **Args didn't flatten into signatures.** `sub f($a,$b){} ; f(@arr)` compiled to
+   `(pl-f @arr)` — the raw array vector as ONE arg → SBCL "invalid number of arguments"
+   crash. Signature subs now capture via `(&rest %_args)`, `(p-flatten-args)` into `@_`,
+   and bind params positionally from `@_`, so `f(@arr)` spreads like Perl.
+2. **Arity not enforced / wrong message.** Previously relied on SBCL's native lambda
+   arity (message "invalid number of arguments: N", and empty `()` used `&rest` so it
+   accepted any count). New runtime `p-check-arity` throws Perl's exact text
+   `Too few|many arguments for subroutine 'main::NAME' (got G; expected [at least|at most ]N)`.
+   `min`=#required, `max`=#required+#optional (nil if slurpy), flexible wording when the
+   sub has optional/slurpy params.
+3. **Empty / anonymous-placeholder signatures.** `()` now means strict zero-arity (was
+   flexible). Signature syntax is always parsed as a signature (never misrouted to
+   old-prototype detection), so `($)` / `($, $)` count as required slots; bare `$`/`@`/`%`
+   placeholders (named or `= default`) parse to throwaway params.
+
+Also: **string eval now appends `" at (eval N) line 1."`** to runtime errors that don't
+end in a newline (`p-eval` `(error)` arm + new `*p-eval-counter*`), matching Perl — this is
+what lets the `like $@, qr/... at \(eval \d+\) line 1\.\n/` arity tests pass.
+
+New runtime helpers `p-check-arity` / `p-sig-rest-array` / `p-sig-rest-hash` (exported).
+
+**Result:** **signatures.t 418 → 672 pass** (+254). Full sweep **pass +~255**, **65 fully
+passing held**, 0 real regressions (sweep-diff's 1 "new" yadayada entry is the same
+already-failing test whose error text now carries the eval-line suffix — still failing,
+no pass lost; +8 named signatures slurpy/`@_`-growth tests also flipped). Gate 90 files /
+3134 tests green. New `Pl/t/signatures-arity-01.t` (10). Baseline re-blessed (471 keys).
+Remaining signatures.t (305): list-op defaults that eat the param comma
+(`$p = t018 222, $a = 333` → one param), undef-vs-empty-string eval results, syntax-error
+detection (principle 9), and string-eval feature gaps (`__SUB__`/`caller`/`package X; ::f()`).
+
+---
+
 ## Session 225 (2026-06-01) — `state $x = EXPR` value in tail/expression position
 
 **Bug:** `state $x = EXPR` used as an expression (a `map`/`grep` block return, or a sub's

@@ -75,7 +75,7 @@ array.t	86	do {}: $# on freed array is undef	'-1'	undef
 array.t	88	do {}: msg	undef	^Attempt to set length of freed array
 array.t	87	do {}: number of warnings	'0'	'1'
 array.t	100	orphaned 1 is always undef	'42'	undef
-bless.t	68		'77323996483'	== 'D=GLOB(0x1200de8d43)'
+bless.t	68		'77325523971'	== 'D=GLOB(0x1200f5dc03)'
 blocks.t	24	RT #2917: No constraint on how late INIT blocks can run	''	'in init'
 bop.t	144		'0'	'1'
 bop.t	158	    and turns off the UTF-8 flag		
@@ -108,7 +108,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x1201e299cf)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x12023e718f)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -116,8 +116,8 @@ caller.t	36	BEGIN block sees correct caller filename	undef	'virtually/op/caller.
 caller.t	37	BEGIN block sees correct caller line	undef	'12345'
 caller.t	38	BEGIN block sees correct caller package	undef	'RT129239'
 caller.t	52	GH #15109 - callers count	'0'	'10'
-caller.t	51	GH #15109 - eval	'Can't locate Apack.pm in @INC (@INC contains: #S(P-BOX                                                  :VALUE lib/caller/                                                  :NV NIL                                                  :NV-OK NIL                                                  :SV lib/caller/                                                  :SV-OK T                                                  :CLASS NIL                                                  :IS-REF NIL))'	''
-caller.t	63	GH #15109 - eval okay	'end of file on #<dynamic-extent STRING-INPUT-STREAM (unavailable) from "(progn (...">'	''
+caller.t	51	GH #15109 - eval	'Can't locate Apack.pm in @INC (@INC contains: #S(P-BOX                                                  :VALUE lib/caller/                                                  :NV NIL                                                  :NV-OK NIL                                                  :SV lib/caller/                                                  :SV-OK T                                                  :CLASS NIL                                                  :IS-REF NIL)) at (eval 5) line 1. '	''
+caller.t	63	GH #15109 - eval okay	'end of file on #<dynamic-extent STRING-INPUT-STREAM (unavailable) from "(progn (..."> at (eval 6) line 1. '	''
 caller.t	53	GH #15109 level 0	undef	caller/Bpack.pm:3
 caller.t	54	GH #15109 level 1	undef	caller/Bpack.pm:3
 caller.t	55	GH #15109 level 2	undef	caller/Bpack.pm:3
@@ -157,7 +157,7 @@ caller.t	25	warnings match caller (all)
 caller.t	24	warnings match caller (no bits)		
 closure.t	13		''	'7'
 concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
-concat2.t	2	RT #132385	'REF(0x12047ce0e3)REF(0x12047ce2c3)'	'AB'
+concat2.t	2	RT #132385	'REF(0x1204b7f873)REF(0x1204b7fa53)'	'AB'
 delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
 delete.t	54	a b c also equivalent		
 delete.t	26	a b c equivalent		
@@ -182,7 +182,7 @@ hash.t	12	hash self-assign	''	'x:'
 hash.t	13	magic keys	'a:x:b:y'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x12032d3fc3)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1203829e13)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -209,7 +209,7 @@ local.t	275	localised sub via stash
 local.t	278	localised sub via stash slice		
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x12034eaf53)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1203612f53)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF NIL)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -291,7 +291,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1200dbbb23)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1200f9c173)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -303,8 +303,8 @@ push.t	32	croak when pushing onto readonly array	''	^Modification of a read-only
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'77391127811'	'0'
-qr.t	27	int upgraded to regexp	'77391131891'	'0'
+qr.t	25	double upgraded to regexp	'77322006931'	'0'
+qr.t	27	int upgraded to regexp	'77322011011'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -322,17 +322,17 @@ ref.t	182	PVBM is not a HASH ref
 ref.t	180	PVBM is not a SCALAR ref		
 ref.t	181	PVBM is not an ARRAY ref		
 ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1202d57a93)'	'SCALAR(0x1202d57ad3)'
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x12032e79a3)'	'SCALAR(0x12032e79e3)'
 ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
 ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x12037a0f23)'	^VSTRING\(0x[0-9a-f]+\)$
-signatures.t	942		'invalid number of arguments: 0 at (eval 0) line 0. '	^Too few arguments for subroutine 'T200::foo'
+ref.t	65	stringify for ref to vstring	'SCALAR(0x1203e50f23)'	^VSTRING\(0x[0-9a-f]+\)$
+signatures.t	940		'Undefined subroutine &main:: called at (eval 1) line 1. '	^Too few arguments for subroutine 'main::__ANON__'
 signatures.t	438	//= absent	'5'	'8'
 signatures.t	437	//= present	undef	'9'
 signatures.t	439	//= undef	undef	'7'
 signatures.t	440	//= zero	undef	'4'
-signatures.t	943	RT #130661	'Error while parsing arguments to DEFMACRO P-SUB:   too few elements in     ()   to satisfy lambda list     (NAME PARAMS &BODY BODY):   at least 2 expected, but got 0'	A signature parameter must start with
+signatures.t	943	RT #130661	'Error while parsing arguments to DEFMACRO P-SUB:   too few elements in     ()   to satisfy lambda list     (NAME PARAMS &BODY BODY):   at least 2 expected, but got 0 at (eval 205) line 1. '	A signature parameter must start with
 signatures.t	944	RT #132141	'abc'	'Xbc'
 signatures.t	946	RT 132760 err 0	undef	^Subroutine attributes must come before the signature at
 signatures.t	945	RT 132760 expect 1 error	'0'	'1'
@@ -359,18 +359,11 @@ signatures.t	954	f($1)	''	Illegal operator following parameter in a subroutine s
 signatures.t	951	f($_)	''	Can't use global \$_ in subroutine signature
 signatures.t	953	f(%_)	''	Can't use global \%_ in subroutine signature
 signatures.t	952	f(@_)	''	Can't use global \@_ in subroutine signature
-signatures.t	933	handle commonality in slurpy hash	'1'	'1 (k1,v2) (k2,v1)'
 signatures.t	936	masking warning	''	^"my" variable \$x masks earlier declaration in same scope
 signatures.t	947	multiline1: $b	undef	line 4,
 signatures.t	948	multiline1: $c	undef	line 5,
 signatures.t	949	multiline1: $d	undef	line 7,
 signatures.t	950	multiline1: $e	undef	line 8,
-signatures.t	917	t150: b: growing @_	'2'	'b'
-signatures.t	919	t151: b: tied @_	'2'	'b'
-signatures.t	925	t156: b: growing @_	''	'b c'
-signatures.t	927	t157: b: growing @_	''	'b:c'
-signatures.t	929	t158: b: tied @_	''	'b c'
-signatures.t	931	t159: b: tied @_	''	'b:c'
 signatures.t	442	||= absent	'5'	'8'
 signatures.t	441	||= present	undef	'9'
 signatures.t	443	||= undef	undef	'7'
@@ -453,13 +446,13 @@ sprintf2.t	1521	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x0.0000p+0	'0x0.0000p+
 sprintf2.t	1511	subnormal 3e-324 %a 0x1p-1074 got 0x0p+0	'0x0p+0'	'0x1p-1074'
 sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'
 sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'
-state.t	76	Reference to state variable	'SCALAR(0x12045697c3)'	'SCALAR(0x1204580713)'
+state.t	76	Reference to state variable	'SCALAR(0x1200cdc1f3)'	'SCALAR(0x1200cfb103)'
 state.t	73	computed goto 0		
 state.t	92	substr	'Johnx'	'xxxxx'
 substr.t	397		'-1'	'23'
 substr.t	386	Timely scalar destruction with lvalue substr	'0'	'1'
-substr.t	384	\substr %h	'HASH(0x1200f3f3f3)'	'50'
-substr.t	385	\substr @a	'ARRAY(0x1200f3f4af)'	'100'
+substr.t	384	\substr %h	'HASH(0x120109e8b3)'	'50'
+substr.t	385	\substr @a	'ARRAY(0x120109e96f)'	'100'
 substr.t	376	\substr does not coerce its glob arg just yet	'REF'	'GLOB'
 substr.t	345	scalar does not affect lvalueness of substr	'abcdef'	'abcdeaf'
 tr.t	224	    doesn't stringify its argument	''	'SCALAR'
@@ -474,5 +467,5 @@ yadayada.t	8	Disambiguation case 4	'Unimplemented at (eval 0) line 0. '	'Unimple
 yadayada.t	1	Execution of ellipsis statement reported 'Unimplemented' code	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 18. '
 yadayada.t	32	{Parsing '...' in "my @arr = 'A' ... 'D';" as a range operator} ()		
 yadayada.t	36	{Parsing '...' in "print  D  ...  A ;" as a range operator} ()		
-yadayada.t	37	{Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator} (The function MAIN::PL-A is undefined.)		
+yadayada.t	37	{Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator} (The function MAIN::PL-A is undefined. at (eval 1) line 1.)		
 yadayada.t	34	{Parsing '...' in "print 'D' ... 'A';" as a range operator} ()		

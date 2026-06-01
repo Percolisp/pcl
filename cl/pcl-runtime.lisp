@@ -66,6 +66,7 @@
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
+   #:p-check-arity #:p-sig-rest-array #:p-sig-rest-hash
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
@@ -309,6 +310,11 @@
 (defvar *p-eval-string-cache* (make-hash-table :test 'equal)
   "Cache for p-eval: maps (cons perl-code pkg-name) -> cl-text.
    Avoids re-spawning pl2cl for repeated identical eval calls.")
+
+;;; Counter for the "(eval N)" tag Perl puts in error messages from string eval.
+(defvar *p-eval-counter* 0
+  "Incremented per string-eval that throws, so $@'s ' at (eval N) line 1.'
+   suffix carries a distinct N like Perl's eval-sequence number.")
 
 ;;; Persistent transpiler subprocess for p-eval
 (defvar *p-transpiler-process* nil
@@ -4475,6 +4481,39 @@
          (vector-push-extend arg result))))
     result))
 
+(defun p-check-arity (funcname got min max flexible)
+  "Perl subroutine-signature arity check.  Throws a Perl-formatted
+   'Too few/many arguments for subroutine ...' error when GOT is outside
+   [MIN, MAX].  MAX = nil means no upper bound (a slurpy @/% param).  FLEXIBLE
+   non-nil selects the 'at least'/'at most' wording Perl uses when the sub has
+   optional or slurpy params (a fixed-arity sub uses the bare count)."
+  (cond
+    ((< got min)
+     (error "Too few arguments for subroutine '~A' (got ~D; expected ~A~D)"
+            funcname got (if flexible "at least " "") min))
+    ((and max (> got max))
+     (error "Too many arguments for subroutine '~A' (got ~D; expected ~A~D)"
+            funcname got (if flexible "at most " "") max))))
+
+(defun p-sig-rest-array (args start)
+  "Slurpy @rest signature parameter: a fresh adjustable Perl array holding the
+   flattened ARGS from index START onward."
+  (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
+    (when (and (vectorp args) (< start (length args)))
+      (loop for i from start below (length args)
+            do (vector-push-extend (aref args i) out)))
+    out))
+
+(defun p-sig-rest-hash (args start)
+  "Slurpy %rest signature parameter: a hash built from the flattened ARGS
+   key/value pairs from index START onward."
+  (let ((h (make-hash-table :test 'equal)))
+    (when (vectorp args)
+      (loop for i from start below (length args) by 2
+            do (setf (gethash (to-string (aref args i)) h)
+                     (if (< (1+ i) (length args)) (aref args (1+ i)) *p-undef*))))
+    h))
+
 ;; Marker struct for flattened arrays in push/unshift
 (defstruct p-flatten-marker
   "Marker indicating an array should be flattened when pushed/unshifted"
@@ -5839,7 +5878,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (box-set $@ (p-exception-object e))
           nil)
         (error (e)
-          (box-set $@ (format nil "~A" e))
+          ;; Perl appends " at (eval N) line M." to die/runtime-error messages
+          ;; thrown inside string eval when they don't already end in a newline.
+          ;; PCL doesn't track the in-eval line, so it uses line 1 (correct for
+          ;; the common single-line eval string).
+          (let ((msg (format nil "~A" e)))
+            (box-set $@ (if (and (> (length msg) 0)
+                                 (char= (char msg (1- (length msg))) #\Newline))
+                            msg
+                            (format nil "~A at (eval ~D) line 1.~%"
+                                    msg (incf *p-eval-counter*)))))
           nil)))))
 
 (defun parse-number (s)
