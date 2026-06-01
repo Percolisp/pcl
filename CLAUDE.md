@@ -171,9 +171,10 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **72 test files, 2819 tests**
+- **90 test files, 3151 tests** (Pl/t gate, as of session 228)
 - **All passing**
-- **Runtime: ~3 min with `prove -j8`** (each test spawns a new SBCL process)
+- **Runtime: ~5 min with `prove -j8`** (each test spawns a new SBCL process)
+- Full `perl-tests/` sweep: 66 files fully passing; see `docs/sweep-bug-catalog.md`
 
 ## Common Pitfalls
 
