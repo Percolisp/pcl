@@ -33,6 +33,7 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-06-01 (session 228). **yadayada.t 16→21** (`...` now dies `Unimplemented at $0 line N.` via a runtime-built `:loc`, `Pl/Parser.pm`); **sprintf2.t 1544→1617** (+73; `Integer overflow in format string` guards for `*`-width/`*`-precision/literal-precision, `cl/pcl-runtime.lisp`). Gate 90 files / 3145. NOTE: this session found the catalog significantly stale — list-of-arrays slice, chop-on-assigned-array, `($a=…) .= 'c'`, and LHS array-slice assignment all already pass.
 Updated 2026-05-31 (session 223c). **`crypt()` implemented via FFI; lfs.t permanently skipped.**
 `p-crypt` (`cl/pcl-runtime.lisp`) calls the system `crypt(3)` (`libcrypt.so.1`) through
 `sb-alien` — byte-identical to Perl (same C function). Latin-1-encoded args, wide-char→die,
@@ -270,7 +271,20 @@ breakdown still applies. The breakdown below is retained for reference only.
 
 ---
 
-### sprintf2.t (102 failures, 1576/1678 passing — session 216, was 171)
+### sprintf2.t (28 failures, 1617/1678 passing — session 228, was 102)
+
+- **Integer overflow in format string** ✅ **FIXED (session 228), +73**: a width/precision
+  exceeding a C int (2³¹−1) leaked an SBCL `(UNSIGNED-BYTE 44)` type error instead of Perl's
+  `Integer overflow in format string`. The literal-*width* path already guarded this; added
+  the three missing sibling guards in `p-sprintf` (`cl/pcl-runtime.lisp`): width-from-`*`,
+  precision-from-`*` (via `(abs …)`, so huge-negative IV_MIN errors before the
+  negative-precision-omitted rule), and literal `.NNN` precision. One O(1) compare per format
+  spec; formatting hot path untouched. Regression test `Pl/t/sprintf-invalid-01.t` (9→13).
+- **Remaining 28**: subnormal/denormal `%a` last-hexdigit rounding (`0x0p+0` for tiny
+  denormals, ~17t), `%n` (2t), `.=`-on-array-elem (1657), "Numeric format result too large"
+  (1673), and a few float-precision edges. Niche float-internals + error detection.
+
+### sprintf2.t (HISTORICAL: 102 failures, 1576/1678 passing — session 216, was 171)
 
 - **String-literal hex-float corruption** ✅ **FIXED (session 216)**: `_preprocess_source`
   in `Pl/Parser.pm` ran the hex/binary/octal-float→decimal regex over the WHOLE source,
