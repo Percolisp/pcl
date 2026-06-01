@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -122,3 +122,10 @@ test_cl('local in a signature default restores on sub exit',
     "$H\nour \$a = 123;\nsub t (\$b = (local \$a = \$a + 1)) { \"\$a/\$b\" }\n"
   . "my \$r = eval(\"t()\");\nprint \$r, \" then \", \$a, \"\\n\";",
     "124/124 then 123\n");
+
+# 16: `our \$VAR` in a default declares the package global so it persists across
+#     calls (spec §4.3) — `(our \$k)++` was returning undef (\$k never defvar'd).
+test_cl('our in a signature default declares a persistent global',
+    "$H\nsub t125 (\$c = (our \$k)++) { \$c }\n"
+  . "print eval(\"t125()\"), \",\", eval(\"t125()\"), \",\", eval(\"t125()\"), \"\\n\";",
+    "0,1,2\n");

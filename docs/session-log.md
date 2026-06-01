@@ -60,10 +60,18 @@ it surfaced two real bugs, both now fixed:
   $param)))))…)` so `$G` is localised only when the default ran and restored on
   exit by CL dynamic unwinding.
 
-**signatures.t 672 → 775 (+103), 0 regressions.** Full Pl/t gate 90 files / 3150
+- **§4.3 — `our $VAR` in a signature default was never declared.** `(our $k)++`
+  compiled to `(p-post++ $k)` (PExpr drops `our` correctly) but `$k` was never
+  `defvar`'d → unbound → the call errored (undef through eval). Fix:
+  `_parse_signature` scans the default for `our $VAR`, registers it
+  (`add_our_variable`) and emits `(p-eval-always (defvar $VAR …))` to the
+  declarations bucket (mirrors `_process_our_declaration`); the default is left
+  intact. `our $k` now persists across calls, so `(our $k)++` → 0,1,2,…
+
+**signatures.t 672 → 780 (+108), 0 regressions.** Full Pl/t gate 90 files / 3151
 tests green; full sweep 0 new fails, 66 fully passing (held). New regression
-tests in `Pl/t/signatures-arity-01.t` (10→15). §4.3 (`(our $k)++` default →
-undef, t125) left open (isolated). Baseline re-blessed.
+tests in `Pl/t/signatures-arity-01.t` (10→16). All of §4.1/§4.2/§4.3 fixed.
+Baseline re-blessed.
 
 ---
 

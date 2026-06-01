@@ -178,12 +178,21 @@ no-op in PExpr.
 Combined, 4.1 + 4.2 took **`signatures.t` 672 → 775** (+103) with zero
 regressions; full Pl/t gate green (90 files / 3150 tests).
 
-### 4.3 Declaration / post-inc inside a default returns undef (open)
+### 4.3 `our $VAR` inside a default was never declared — ✅ FIXED (session 228)
 
-`sub t125 ($c = (our $k)++) { $c }` → every call yields undef instead of
-0,1,2,… The `(our $k)++` default (declare-and-post-increment) does not produce
-the pre-increment value. Lower priority; isolated to a few tests; **not yet
-fixed**.
+`sub t125 ($c = (our $k)++) { $c }` used to yield undef on every call instead of
+0,1,2,…  PExpr drops the `our` keyword in expression position (so `(our $k)++`
+correctly compiles to `(p-post++ $k)`), but `$k` was then **never `defvar`'d** —
+the auto-`defvar` pass missed it inside the `let*` default — so it was unbound at
+runtime and the call errored (→ undef through the surrounding eval).
+
+**Fix (`Pl/Parser.pm` `_parse_signature`):** scan the default for `our $VAR`,
+register it (`add_our_variable`) and emit `(p-eval-always (defvar $VAR …))` into
+the declarations bucket, mirroring `_process_our_declaration`. The default
+expression is left untouched (PExpr already handles the `our`-as-identity). `our
+$k` thus persists across calls, so `(our $k)++` returns 0,1,2,…  (+5 tests.)
+
+With 4.1 + 4.2 + 4.3, **`signatures.t` 672 → 780** (+108), zero regressions.
 
 ---
 

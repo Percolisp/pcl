@@ -6275,6 +6275,27 @@ sub _parse_signature {
       $default_expr = $2;
     }
 
+    # `our $VAR` inside a default declares a package global.  PExpr drops the
+    # `our` keyword in expression position (so `(our $k)++` compiles to
+    # `(p-post++ $k)`), but without an explicit declaration $VAR is never
+    # defvar'd → unbound at runtime.  Register + emit the defvar here, mirroring
+    # _process_our_declaration; the default expression keeps referencing $VAR.
+    # See docs/variable-declarations-spec.md §4.3.
+    if (defined $default_expr && $default_expr =~ /\bour\b/) {
+      my $pkg = $self->environment->current_package;
+      while ($default_expr =~ /\bour\s+([\$\@\%]\w+)/g) {
+        my $ovar  = $1;
+        my $sigil = substr($ovar, 0, 1);
+        my $init  = $sigil eq '$' ? '(make-p-box nil)'
+                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                  :                 '(make-hash-table :test #\'equal)';
+        $self->environment->add_our_variable($pkg, $ovar);
+        $self->_with_bucket('declarations', sub {
+          $self->_emit("(p-eval-always (defvar $ovar $init))");
+        });
+      }
+    }
+
     my $default_cl = undef;
     if (defined $default_expr) {
       # Compile the default expression to CL
