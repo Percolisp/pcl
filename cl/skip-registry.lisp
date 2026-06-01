@@ -13,6 +13,54 @@
 
 (in-package :pcl)
 
+;; index.t 49-58 — utf8::encode byte/char-flag distinction.  After utf8::encode a
+;; string is treated as raw octets in Perl (each multi-byte char expands to its
+;; UTF-8 bytes), so index/rindex use BYTE offsets and an octet-string never matches
+;; a character-string.  PCL has no per-scalar UTF-8 flag (CL strings are always
+;; Unicode), so utf8::encode is a no-op and index/rindex match on characters.
+;; 49/50 are named; 51-58 are UNNAMED -> keyed by test number.
+(register-skips "index.t"
+                ("^index octets, octets"
+                 :utf8
+                 "index on a utf8::encode'd byte-string must use byte offsets (expect 7) -- PCL has no per-scalar UTF-8 flag (CL strings are always Unicode). not-supported.md: 'Unicode semantics differences' (utf8::encode/decode).")
+                ("rindex octets, octets"
+                 :utf8
+                 "rindex on a utf8::encode'd byte-string must use byte offsets (expect 21) -- PCL has no per-scalar UTF-8 flag. not-supported.md: 'Unicode semantics differences' (utf8::encode/decode).")
+                (51 :utf8 "index octet-string vs utf8-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (52 :utf8 "rindex octet-string vs utf8-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (53 :utf8 "index utf8-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (54 :utf8 "rindex utf8-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (55 :utf8 "index octet-string vs char-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (56 :utf8 "rindex octet-string vs char-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (57 :utf8 "index char-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'.")
+                (58 :utf8 "rindex char-string vs octet-string must not match (expect -1) -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences'."))
+
+;; grep.t — DESTROY-via-GC + one error-detection failure.  Tests 69/71/73 ("grep
+;; void/scalar/list post") and 75/76 ("block map void 2/3") need a blessed object's
+;; DESTROY to fire when its refcount hits zero (after @a=(), or the immediate
+;; void-context release of the map block's returned PADTMP); PCL never calls DESTROY
+;; via GC.  Test 61 wants the compile-time "Missing comma after first argument to
+;; grep" error.  not-supported.md: 'DESTROY called by garbage collector' (grep.t 69-76).
+(register-skips "grep.t"
+                ("proper error on variable as block"
+                 :principle9
+                 "grep with a variable (not a block/expr) as first arg must die 'Missing comma after first argument to grep function' -- error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ("grep void post"
+                 :destroy-gc
+                 "after @a=() the 3 blessed grep args must be DESTROYed (count==3) -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("grep scalar post"
+                 :destroy-gc
+                 "after @a=() the 3 blessed grep args must be DESTROYed (count==3) -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("grep list post"
+                 :destroy-gc
+                 "after @a=() the 3 blessed grep args must be DESTROYed (count==3) -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("block map void 2"
+                 :destroy-gc
+                 "map in void context must DESTROY each block's returned PADTMP immediately so count resets to 1 -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ("block map void 3"
+                 :destroy-gc
+                 "map in void context must DESTROY each block's returned PADTMP immediately so count resets to 1 -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'."))
+
 (register-skips "tr.t"
                 ("RT #130198 eval:"
                  :principle9
@@ -76,6 +124,12 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("chomp @a when.*eq 0 and"
                  :alias
                  "result aliasing (\\$a[0] == \\$b after `chomp @a`, the $/ eq 0 case) — element/@_ aliasing not emulated. not-supported.md: '@_ argument aliasing'. (The eq 7 sibling legitimately passes.)"))
+
+(register-skips "crypt.t"
+                ("crypt turns off utf8 on its target"
+                 :utf8
+                 "checks !utf8::is_utf8(result); PCL does not track the per-scalar UTF-8 flag \
+(utf8::is_utf8 is a stub). not-supported.md: 'Unicode semantics differences' (utf8 flag)."))
 
 (register-skips "readline.t"
                 ("perl #19566"

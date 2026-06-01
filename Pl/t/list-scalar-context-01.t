@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -106,3 +106,19 @@ test_cl('single element interpolation still works',
 test_cl('split pattern arg stays scalar inside join',
     q{my $r = join ':', split('abc' =~ /b/, 'p1q1r1s'); print "$r\n";},
     "p:q:r:s\n");
+
+# ── (LIST) x $n as a return element inherits caller context ──────────────────
+# `return (@a, (@b) x $n)` in list context must list-repeat (@b), not scalar-
+# repeat scalar(@b).  At codegen the `x` node has INHERIT_CTX, so we emit a
+# runtime *wantarray* check: p-list-x in list context, p-str-x in scalar.
+test_cl('(LIST) x $n in return list = list repeat in list context',
+    q{my @a=(11,12); my @b=(21,22,23);
+      my $c = sub { my ($n)=@_; return (@a, (@b) x $n) };
+      my @x = $c->(1); print "@x\n";},
+    "11 12 21 22 23\n");
+
+test_cl('(LIST) x $n in return list = string repeat in scalar context',
+    q{my @a=(11,12); my @b=(21,22,23);
+      my $c = sub { my ($n)=@_; return (@a, (@b) x $n) };
+      my $s = $c->(2); print "$s\n";},
+    "33\n");

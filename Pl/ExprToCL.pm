@@ -101,7 +101,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   array-last-index aslice atan2 backslash backtick binmode bit-and bit-and= bit-not bit-or
   bit-or= bit-xor bit-xor= bless box box-p box-value break caller can cast-$ cast-% cast-@
   chain-cmp chdir chmod chomp chop chr close closedir coderef-defined-p coderef-exists-p
-  continue cos cwd decf declare-sub defined defpackage delete delete-array delete-array-slice
+  continue cos crypt cwd decf declare-sub defined defpackage delete delete-array delete-array-slice
   delete-hash-slice delete-kv-hash-slice die do each ensure-arrayref ensure-hashref env-get
   env-set eof eval eval-block eval-direct exception exception-object exists exists-array exit
   exp fc fileno flatten flatten-args for foreach funcall-ref get-class get-coderef getc getcwd
@@ -189,6 +189,12 @@ my %SPECIAL_VARS = (
   '$/'  => '|$/|',
   '$\\' => '|$\\|',
   '$"'  => '|$"|',
+  '$&'  => '|$&|',    # MATCH      - whole matched string
+  '$`'  => '|$`|',    # PREMATCH   - text before the match
+  q{$'} => q{|$'|},   # POSTMATCH  - text after the match
+  # NB: do NOT map '$+' here — `$+{name}` is hash access on %+ (named captures);
+  # a SPECIAL_VARS entry hijacks it.  Scalar `$+` (last-paren match) is rare; %+
+  # is common.  The runtime |$+| var is still set by set-match-vars (harmless).
   '$|'  => '|$\||',
   '$;'  => '|$;|',
   '$,'  => '|$,|',
@@ -807,13 +813,25 @@ sub gen_binary_op {
     my $lhs_is_paren = $self->expr_o->is_internal_node_type($lhs_node) &&
                        ($lhs_node->{type} eq 'tree_val' || $lhs_node->{type} eq 'progn');
     my $ctx = $self->expr_o->get_node_context($node_id);
-    if ($lhs_is_paren && $ctx == 1) {  # LIST_CTX = 1
+    if ($lhs_is_paren && $ctx == LIST_CTX) {
       # List repeat: (@x,1) x 4 — force LHS to list context so
       # gen_progn returns (vector ...) not (progn ...) / scalar last-val
-      $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
+      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
       my $left  = $self->gen_node($kids->[0]);
       my $right = $self->gen_node($kids->[1]);
       return "(p-list-x $left $right)";
+    }
+    if ($lhs_is_paren && $ctx == INHERIT_CTX) {
+      # Caller-context-dependent, e.g. `return (LIST) x $n`: list repeat in
+      # list context, string repeat in scalar context.  Emit a runtime
+      # *wantarray* check (mirrors the '..' INHERIT_CTX path above), generating
+      # the parenthesized LHS in both list and scalar context.
+      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
+      my $left_list   = $self->gen_node($kids->[0]);
+      $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
+      my $left_scalar = $self->gen_node($kids->[0]);
+      my $right = $self->gen_node($kids->[1]);
+      return "(if (eq *wantarray* t) (p-list-x $left_list $right) (p-str-x $left_scalar $right))";
     }
   }
 
@@ -1675,6 +1693,18 @@ sub gen_funcall {
   $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
+
+  # die/warn: pass the source location so the runtime appends Perl's
+  # " at FILE line N." suffix (when the message doesn't end in a newline).
+  # The (:loc "...") marker is stripped by p-die/p-warn before concatenation.
+  if ($cl_func eq 'p-die' || $cl_func eq 'p-warn') {
+    my $word = $self->expr_o->get_a_node($kids->[0]);
+    my $line = (ref($word) && $word->can('line_number')) ? ($word->line_number // 0) : 0;
+    my $file = ($self->environment && $self->environment->source_file) || '-';
+    $file =~ s/(["\\])/\\$1/g;
+    $args_str = " :loc \"$file line $line\"$args_str";
+  }
+
   my $call = "($cl_func$args_str)";
 
   # 'my'/'our' in expression context is an identity (returns the expression's value).

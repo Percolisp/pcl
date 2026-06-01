@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 9;
+plan tests => 12;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -194,5 +194,45 @@ my \$b = <\$fh>;
 close \$fh;
 chomp \$a; chomp \$b;
 print "\$a \$b\n";
+PERL
+}
+
+# --- Test 10: pipe + syswrite + readline roundtrip ---
+{
+    test_io('pipe: syswrite then readline', <<'PERL');
+my ($in, $out);
+pipe $in, $out;
+syswrite $out, "once\n";
+my $line = readline $in;
+print $line;
+PERL
+}
+
+# --- Test 11: pipe + .= append of readline result ---
+{
+    test_io('pipe: $line .= readline', <<'PERL');
+my $line = 'ascii';
+my ($in, $out);
+pipe $in, $out;
+syswrite $out, "...\n";
+$line .= readline $in;
+print $line;
+PERL
+}
+
+# --- Test 12: alarm fires $SIG{ALRM} and interrupts a blocking readline ---
+{
+    test_io('alarm interrupts blocking readline via $SIG{ALRM}', <<'PERL');
+my ($in, $out);
+pipe $in, $out;
+my $timed_out = 0;
+my $line = 'untouched';
+eval {
+    local $SIG{ALRM} = sub { $timed_out = 1; die "abort\n" };
+    alarm 1;
+    $line = readline $in;   # blocks forever; SIGALRM aborts it
+    alarm 0;
+};
+print "timed_out=$timed_out line=$line\n";
 PERL
 }

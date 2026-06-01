@@ -1027,7 +1027,12 @@ sub _process_expression_statement {
   # In Perl, a bare '...' statement dies with "Unimplemented".
   if (@parts == 1 && ref($parts[0]) eq 'PPI::Token::Operator' && $parts[0]->content eq '...') {
     $self->_emit(";; $perl_code (yada yada)");
-    $self->_emit('(p-die "Unimplemented")');
+    # Perl dies "Unimplemented at $0 line N.\n".  The file part is the runtime
+    # program name ($0), not the compile-time source file, so build the :loc
+    # location at runtime from $0 and the literal source line.
+    my $yada_line = (ref($parts[0]) && $parts[0]->can('line_number'))
+      ? ($parts[0]->line_number // 0) : 0;
+    $self->_emit(qq{(p-die "Unimplemented" :loc (format nil "~A line ~D" (to-string (unbox \$0)) $yada_line))});
     return;
   }
 
@@ -1666,6 +1671,15 @@ sub _process_toplevel_state_declaration {
       $self->_emit("($cl_op $cl_var)");
     }
     $self->_emit("");
+  }
+
+  # The value of a `state $x = EXPR` expression is the CURRENT value of $x
+  # (not the init-guard result). Emit the variable as the trailing form so the
+  # statement yields the right value in tail/expression position — e.g. as a
+  # map/grep block return or a sub's implicit return. Only meaningful for a
+  # single declared variable; list forms are left as-is.
+  if (!$postfix_op && @vars == 1) {
+    $self->_emit($renames_for_this{$vars[0]});
   }
 }
 
@@ -2434,6 +2448,15 @@ sub _process_state_declaration {
       my $cl_var = $renames->{$var} // $var;
       $self->_emit("($cl_op $cl_var)");
     }
+  }
+
+  # The value of a `state $x = EXPR` expression is the CURRENT value of $x
+  # (not the init-guard result), so emit the variable as the trailing form for
+  # tail/expression position (map/grep block, implicit sub return). Single
+  # scalar/array/hash declarations only; list forms left as-is.
+  if (!$postfix_op && @vars == 1) {
+    my $cl_var = $renames->{$vars[0]} // $vars[0];
+    $self->_emit($cl_var);
   }
 
   $self->_emit("");
@@ -4577,6 +4600,7 @@ sub _process_sub_statement {
 
   my $name = '';
   my $prototype = '';
+  my $is_signature_syntax = 0;
   my $block;
 
   for my $child ($stmt->children) {
@@ -4594,6 +4618,7 @@ sub _process_sub_statement {
     elsif ($ref eq 'PPI::Structure::Signature') {
       # Perl 5.20+ signature (when 'use feature "signatures"' is used)
       $prototype = $child->content;
+      $is_signature_syntax = 1;
     }
     elsif ($ref eq 'PPI::Structure::Block') {
       $block = $child;
@@ -4634,9 +4659,37 @@ sub _process_sub_statement {
   # Default: -1 means "unknown/list" - sub takes any number of args
   # Only explicit prototypes/signatures set specific min_params
   my $sig_info = { params => [], min_params => -1, is_proto => 0 };
-  if ($prototype) {
+  if ($is_signature_syntax) {
+    # Signature syntax (feature "signatures") is ALWAYS parsed as a signature,
+    # never as an old-style prototype — even all-anonymous forms like ($) or
+    # ($, $) that would otherwise look like a prototype.  Empty () => min 0.
+    my $inner = $prototype;
+    $inner =~ s/^\s*\(\s*//;
+    $inner =~ s/\s*\)\s*$//;
+    $sig_info = $self->_parse_signature($inner, $stmt);
+  } elsif ($prototype) {
     $sig_info = $self->parse_prototype_or_signature($prototype, $stmt);
   }
+
+  # A real Perl signature (feature "signatures"), not an old-style prototype.
+  # When set, args are flattened into @_, arity is checked with Perl's exact
+  # error message, and the named params are bound from @_ (see below).
+  my $is_sig = $is_signature_syntax && !$sig_info->{is_proto};
+
+  # Partition signature params into required / optional / slurpy and derive the
+  # arity bounds.  Used both for the arity check and the @_-based binding.
+  my (@sig_req, @sig_opt, $sig_slurpy);
+  if ($is_sig) {
+    for my $param (@{$sig_info->{params}}) {
+      my $pname = $param->{name};
+      if ($pname =~ /^[\@\%]/)          { $sig_slurpy = $pname; }
+      elsif (defined $param->{default_cl}) { push @sig_opt, $param; }
+      else                              { push @sig_req, $param; }
+    }
+  }
+  my $sig_min  = scalar @sig_req;
+  my $sig_max  = $sig_slurpy ? 'nil' : ($sig_min + scalar @sig_opt);
+  my $sig_flex = (@sig_opt || $sig_slurpy) ? 't' : 'nil';
 
   # Store in environment for later use by PExpr
   if ($name) {
@@ -4712,6 +4765,23 @@ sub _process_sub_statement {
   if (!@param_names && !@optional_params) {
     $params_cl = '&rest %_args';
     $needs_args_conversion = 1;
+  }
+
+  # Real signatures: discard the CL-lambda param list built above and instead
+  # capture every arg via &rest, then flatten + arity-check + bind from @_.
+  # This makes foo(@arr) flatten correctly and gives Perl's exact arity error.
+  if ($is_sig) {
+    $params_cl = '&rest %_args';
+    $needs_args_conversion = 0;   # we emit our own @_ binding below
+  }
+
+  # Perl package-qualified name for the arity error message ("main::foo").
+  my $sig_qname;
+  if ($is_sig) {
+    my $pkg = $self->environment->current_package();
+    my $bn  = $name ne '' ? $name : '__ANON__';
+    $sig_qname = ($bn =~ /::/) ? $bn
+               : ($pkg eq 'main' ? "main::$bn" : "$pkg\::$bn");
   }
 
   # Find state declarations in the block (they need special handling)
@@ -4809,8 +4879,68 @@ sub _process_sub_statement {
   $self->_emit("(p-sub $cl_sub_name ($params_cl)");
   $self->indent_level($self->indent_level + 1);
 
+  # Number of wrapper forms ((let ...)/(let* ...)) opened for a signature sub,
+  # so the close section emits exactly that many ')'.
+  my $sig_wrap_closes = 0;
+
+  if ($is_sig) {
+    # (let ((@_ (p-flatten-args %_args))) — flatten args (foo(@arr) spreads)
+    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
+    $self->indent_level($self->indent_level + 1);
+    $sig_wrap_closes++;
+    # Arity check BEFORE any binding (a too-few call must not index past @_).
+    $self->_emit("(p-check-arity \"$sig_qname\" (length \@_) $sig_min $sig_max $sig_flex)");
+    # Bind the named params positionally from @_ via a sequential let*
+    # (so an optional default can reference an earlier param, e.g. $r = f($c)).
+    #
+    # Each scalar param is copied into a FRESH box via p-copy-scalar-arg: Perl
+    # params are copies of @_ (`my ($x)=@_`), so the param must be its own
+    # mutable box.  The param names are also registered in _let_bound_vars (see
+    # below) so the body's `$x = ...` lowers to p-my-= (box-set) instead of
+    # p-scalar-= — the latter's (proclaim special) would globalise the param and
+    # make the write a silent no-op.  See docs/variable-declarations-spec.md §4.1.
+    my @binds;
+    my @sig_param_names;
+    my @local_wraps;          # `local $G = …` defaults: localise $G for the body
+    my $idx = 0;
+    for my $p (@sig_req) {
+      push @binds, "($p->{name} (p-copy-scalar-arg (aref \@_ $idx)))";
+      push @sig_param_names, $p->{name};
+      $idx++;
+    }
+    for my $p (@sig_opt) {
+      push @binds,
+        "($p->{name} (p-copy-scalar-arg (if (> (length \@_) $idx) (aref \@_ $idx) $p->{default_cl})))";
+      push @sig_param_names, $p->{name};
+      push @local_wraps, { var => $p->{local_var}, name => $p->{name}, idx => $idx }
+        if $p->{local_var};
+      $idx++;
+    }
+    if ($sig_slurpy) {
+      my $fn = $sig_slurpy =~ /^\@/ ? 'p-sig-rest-array' : 'p-sig-rest-hash';
+      push @binds, "($sig_slurpy ($fn \@_ $idx))";
+    }
+    if (@binds) {
+      $self->_emit("(let* (" . join(' ', @binds) . ")");
+      $self->indent_level($self->indent_level + 1);
+      $sig_wrap_closes++;
+    }
+    # `local $G = RHS` default: localise $G to the param's value (= RHS) when the
+    # default was taken, restored on sub exit via CL dynamic unwinding.  When an
+    # arg was supplied the default did not run, so $G is rebound to itself (a
+    # no-op rebinding that restores to the same box).  See spec §4.2.
+    for my $lw (@local_wraps) {
+      $self->_emit("(let (($lw->{var} (if (> (length \@_) $lw->{idx}) $lw->{var}"
+                 . " (p-box-for-local (unbox $lw->{name})))))");
+      $self->indent_level($self->indent_level + 1);
+      $sig_wrap_closes++;
+    }
+    # Scalar params are lexical 'my'-style boxes: record them so _emit rewrites
+    # their (p-scalar-= ...) to (p-my-= ...) for the duration of the body.
+    $self->{_sig_param_names} = \@sig_param_names;
+  }
   # If using %_args, convert to @_ vector
-  if ($needs_args_conversion) {
+  elsif ($needs_args_conversion) {
     $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
     $self->indent_level($self->indent_level + 1);
   }
@@ -4828,6 +4958,16 @@ sub _process_sub_statement {
     local $self->{_current_state_vars} = { map { $_ => 1 } @state_vars };
     my $saved_renames = $self->environment->state_var_renames;
     $self->environment->state_var_renames(\%state_renames) if %state_renames;
+    # Register scalar signature params so the body's `$param = ...` is rewritten
+    # to p-my-= (box-set) by _emit, not p-scalar-=.  Kept in a SEPARATE set from
+    # _let_bound_vars: the latter gates nested-named-sub hoisting (a sub inside a
+    # `let` body stays inline to capture the lexicals), and params must NOT flip
+    # that gate — an independently-called inner named sub must still hoist.
+    local $self->{_sig_param_lexicals} = {
+      %{$self->{_sig_param_lexicals} // {}},
+      map { $_ => 1 } @{$self->{_sig_param_names} // []},
+    };
+    delete $self->{_sig_param_names};
     # Save package stack: inline 'package NAME;' inside a sub body must not leak
     my $saved_pkg_stack = [@{$self->environment->package_stack}];
     $self->_with_declarations($block, sub {
@@ -4847,7 +4987,13 @@ sub _process_sub_statement {
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close block
 
-  if ($needs_args_conversion) {
+  if ($is_sig) {
+    for (1 .. $sig_wrap_closes) {
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");  # close signature let / let*
+    }
+  }
+  elsif ($needs_args_conversion) {
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");  # close let
   }
@@ -5895,8 +6041,10 @@ sub _emit {
   # of a lexical one, breaking closure capture.
   # p-my-= is a semantic macro (expands to box-set) that expresses intent for
   # other compiler backends reading the generated IR.
-  if ($line && $self->{_let_bound_vars}) {
-    for my $var (keys %{$self->{_let_bound_vars}}) {
+  if ($line && ($self->{_let_bound_vars} || $self->{_sig_param_lexicals})) {
+    my %lex = (%{$self->{_let_bound_vars} // {}},
+               %{$self->{_sig_param_lexicals} // {}});
+    for my $var (keys %lex) {
       my $pat = quotemeta("(p-scalar-= $var");
       $line =~ s/$pat(?=[\s)])/(p-my-= $var/g;
     }
@@ -6073,6 +6221,7 @@ sub _parse_signature {
   my @params;
   my $min_params = 0;
   my $seen_optional = 0;
+  my $anon_counter = 0;
 
   # Split on commas, but be careful with nested parens in defaults
   my @param_strs = $self->_split_signature_params($sig_str);
@@ -6095,9 +6244,56 @@ sub _parse_signature {
       $name = $1;
       $default_expr = undef;
     }
+    elsif ($param_str =~ /^([\$\@\%])\s*=\s*(.*)$/) {
+      # Anonymous placeholder with default: ($ = undef), ($ =)
+      # Still counts toward arity; bound to a throwaway name.
+      $name = $1 . '_sig_anon' . (++$anon_counter);
+      my $rhs = $2;
+      $rhs =~ s/\s+$//;
+      $default_expr = ($rhs eq '') ? 'undef' : $rhs;
+      $seen_optional = 1;
+    }
+    elsif ($param_str =~ /^([\$\@\%])$/) {
+      # Anonymous mandatory placeholder: ($a, $) — the bare $ is a required slot.
+      $name = $1 . '_sig_anon' . (++$anon_counter);
+      $default_expr = undef;
+    }
     else {
       # Unknown format, skip
       next;
+    }
+
+    # A `local $G = RHS` default localises $G for the sub's dynamic extent (and
+    # the param's value is RHS).  PExpr would drop the `local` in expression
+    # position (clobbering $G permanently), so peel it off here: compile only the
+    # RHS as the default value and record the localised var for a body wrapper.
+    # See docs/variable-declarations-spec.md §4.2.
+    my $local_var;
+    if (defined $default_expr
+        && $default_expr =~ /^\s*\(?\s*local\s+(\$\w+)\s*=\s*(.+?)\s*\)?\s*$/s) {
+      $local_var    = $1;
+      $default_expr = $2;
+    }
+
+    # `our $VAR` inside a default declares a package global.  PExpr drops the
+    # `our` keyword in expression position (so `(our $k)++` compiles to
+    # `(p-post++ $k)`), but without an explicit declaration $VAR is never
+    # defvar'd → unbound at runtime.  Register + emit the defvar here, mirroring
+    # _process_our_declaration; the default expression keeps referencing $VAR.
+    # See docs/variable-declarations-spec.md §4.3.
+    if (defined $default_expr && $default_expr =~ /\bour\b/) {
+      my $pkg = $self->environment->current_package;
+      while ($default_expr =~ /\bour\s+([\$\@\%]\w+)/g) {
+        my $ovar  = $1;
+        my $sigil = substr($ovar, 0, 1);
+        my $init  = $sigil eq '$' ? '(make-p-box nil)'
+                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+                  :                 '(make-hash-table :test #\'equal)';
+        $self->environment->add_our_variable($pkg, $ovar);
+        $self->_with_bucket('declarations', sub {
+          $self->_emit("(p-eval-always (defvar $ovar $init))");
+        });
+      }
     }
 
     my $default_cl = undef;
@@ -6109,6 +6305,7 @@ sub _parse_signature {
     push @params, {
       name       => $name,
       default_cl => $default_cl,
+      local_var  => $local_var,
     };
 
     # Count mandatory params (before any optional, and not slurpy)

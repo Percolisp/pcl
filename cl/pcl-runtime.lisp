@@ -17,7 +17,7 @@
   (:export
    ;; Value boxing
    #:p-box #:make-p-box #:p-box-p #:p-box-value
-   #:unbox #:ensure-boxed
+   #:unbox #:ensure-boxed #:p-copy-scalar-arg
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
    #:to-string #:to-number
    #:p-undef #:p-defined #:p-defined-fh
@@ -29,7 +29,7 @@
    ;; String
    #:p-. #:p-str-x #:p-list-x #:p-length #:p-substr #:p-lc #:p-uc #:p-fc #:p-quotemeta
    #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat
-   #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf
+   #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf #:p-crypt
    #:p-version-string
    #:p-pos
    ;; Assignment
@@ -66,6 +66,7 @@
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
+   #:p-check-arity #:p-sig-rest-array #:p-sig-rest-hash
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
@@ -131,6 +132,7 @@
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
+   #:|$&| #:|$`| #:|$'| #:|$+|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
@@ -309,6 +311,11 @@
   "Cache for p-eval: maps (cons perl-code pkg-name) -> cl-text.
    Avoids re-spawning pl2cl for repeated identical eval calls.")
 
+;;; Counter for the "(eval N)" tag Perl puts in error messages from string eval.
+(defvar *p-eval-counter* 0
+  "Incremented per string-eval that throws, so $@'s ' at (eval N) line 1.'
+   suffix carries a distinct N like Perl's eval-sequence number.")
+
 ;;; Persistent transpiler subprocess for p-eval
 (defvar *p-transpiler-process* nil
   "Persistent pl2cl --server process, or nil if not yet started.
@@ -347,6 +354,10 @@
 (defvar $7 nil "Regex capture group 7")
 (defvar $8 nil "Regex capture group 8")
 (defvar $9 nil "Regex capture group 9")
+(defvar |$&| nil "Regex MATCH - the whole matched string")
+(defvar |$`| nil "Regex PREMATCH - everything before the match")
+(defvar |$'| nil "Regex POSTMATCH - everything after the match")
+(defvar |$+| nil "Regex - last (highest-numbered) capture group that matched")
 (defvar %+ (make-hash-table :test 'equal) "Perl %+ - named regex captures")
 
 ;;; Default variable ($_) - defined later after make-p-box (see Boxed special variables section)
@@ -534,6 +545,20 @@
   "Ensure a value is boxed"
   (if (p-box-p val)
       val
+      (make-p-box val)))
+
+(defun p-copy-scalar-arg (val)
+  "Copy a scalar argument/default into a FRESH p-box for a signature parameter.
+   Perl signature params are copies of @_ (like `my ($x) = @_`), so a param must
+   be its own mutable box — mutating it ($x = ...) must not write through to the
+   caller's variable (p-flatten-args keeps the caller's boxes as-is in @_).
+   Reads through tie/magic are FETCHed via unbox; the reference flag and blessed
+   class are preserved so a ref/blessed arg copies its container, not its referent."
+  (if (p-box-p val)
+      (let ((b (make-p-box (unbox val))))
+        (setf (p-box-is-ref b) (p-box-is-ref val)
+              (p-box-class b)  (p-box-class val))
+        b)
       (make-p-box val)))
 
 ;;; Boxed special variables (must be after make-p-box definition)
@@ -1930,6 +1955,38 @@
                  (when escapep (write-char #\\ out))
                  (write-char c out))))))
 
+;;; crypt(3) — one-way password hashing via the system C library.
+;;; Perl's crypt() is a thin wrapper over the C crypt(3); we call the same
+;;; function, so output is byte-identical to Perl on the same platform
+;;; (DES with a 2-char salt, or glibc $1$/$5$/$6$ etc. by salt prefix).
+(defvar *p-crypt-available* nil
+  "T if the system crypt(3) could be resolved at load time.")
+
+(eval-when (:load-toplevel :execute)
+  ;; glibc 2.39+ split crypt(3) out of libc into libcrypt; load it if present.
+  (when (ignore-errors (sb-alien:load-shared-object "libcrypt.so.1") t)
+    (setf *p-crypt-available* t)))
+
+(sb-alien:define-alien-routine ("crypt" %c-crypt)
+    (sb-alien:c-string :external-format :latin-1)
+  ;; crypt(3) operates on bytes; pass latin-1 so codepoints 0-255 map 1:1.
+  (key  (sb-alien:c-string :external-format :latin-1))
+  (salt (sb-alien:c-string :external-format :latin-1)))
+
+(defun p-crypt (plaintext salt)
+  "Perl crypt(PLAINTEXT, SALT): one-way hash via the system crypt(3).
+   Dies on wide characters (codepoint > 255), like Perl.  Returns undef when
+   crypt(3) returns NULL (e.g. FIPS rejecting a weak algorithm)."
+  (let ((pt (to-string plaintext))
+        (sl (to-string salt)))
+    (when (or (find-if (lambda (c) (> (char-code c) 255)) pt)
+              (find-if (lambda (c) (> (char-code c) 255)) sl))
+      (p-die "Wide character in crypt"))
+    (unless *p-crypt-available*
+      (p-die "The crypt() function is unimplemented due to excessive paranoia."))
+    (let ((result (%c-crypt pt sl)))
+      (if result result *p-undef*))))
+
 (defun p-pos (var &optional new-pos)
   "Perl pos - get/set match position for /g regex.
    With one arg, returns current position (or nil).
@@ -2390,6 +2447,15 @@
       (otherwise
        (values (format nil "%~A" type-char) arg-idx)))))
 
+(defun sprintf-valid-type-p (type-char vector-p)
+  "True if TYPE-CHAR is a valid sprintf conversion character.  Perl rejects an
+   unrecognised conversion (e.g. %C, %I, %P, %Z) by leaving the spec verbatim in
+   the output and warning \"Invalid conversion\".  With the %v vector flag only the
+   integer conversions are valid (%vd is fine, %vc / %vf / %vs are not)."
+  (if vector-p
+      (find type-char "diuoxXbBDUO")
+      (find type-char "csdiuoxXbBeEfFgGaADUOpn%")))
+
 (defvar *p-sprintf-caller* "sprintf"
   "Name of the calling function (sprintf or printf) for error messages.")
 
@@ -2442,6 +2508,7 @@
         (let ((i 0)
               (arg-idx 0)
               (has-positional nil)
+              (saw-invalid nil)
               (n-args (length args))
               (len (length fmt-str)))
           (loop while (< i len) do
@@ -2460,7 +2527,8 @@
                                     (width nil)
                                     (precision nil)
                                     (positional-idx nil)
-                                    (vector-sep nil))
+                                    (vector-sep nil)
+                                    (spec-start-arg arg-idx))
                                 ;; Check for N$ positional specifier before flags
                                 (let ((peek j) (peek-n 0) (peek-has-digit nil))
                                   (loop while (and (< peek len) (digit-char-p (char fmt-str peek)))
@@ -2512,6 +2580,12 @@
                                      (let ((src (or pos-idx arg-idx)))
                                        (setf width (truncate (to-number (nth src args))))
                                        (unless pos-idx (incf arg-idx)))
+                                     ;; Width from * must fit in a C int; otherwise
+                                     ;; Perl dies "Integer overflow" (abs covers the
+                                     ;; huge-negative IV_MIN case before the - flip).
+                                     (when (> (abs width) 2147483647)
+                                       (error "Integer overflow in format string for ~A ~A"
+                                              *p-sprintf-caller* fmt-str))
                                      (when (minusp width)
                                        (setf flags (concatenate 'string flags "-"))
                                        (setf width (- width)))))
@@ -2541,6 +2615,12 @@
                                        (when pos-idx (setf has-positional t))
                                        (let* ((src (or pos-idx arg-idx))
                                               (pv (truncate (to-number (nth src args)))))
+                                         ;; Precision from * must fit in a C int; a
+                                         ;; huge magnitude (even negative) overflows
+                                         ;; before the "negative means omitted" rule.
+                                         (when (> (abs pv) 2147483647)
+                                           (error "Integer overflow in format string for ~A ~A"
+                                                  *p-sprintf-caller* fmt-str))
                                          (setf precision (if (minusp pv) nil pv))
                                          (unless pos-idx (incf arg-idx)))))
                                     (t
@@ -2549,57 +2629,87 @@
                                              do (setf p (+ (* p 10) (digit-char-p (char fmt-str j))))
                                              (setf has-digit t)
                                              (incf j))
+                                       (when (and has-digit (> p 2147483647))
+                                         (error "Integer overflow in format string for ~A ~A"
+                                                *p-sprintf-caller* fmt-str))
                                        (setf precision (if has-digit p 0))))))
-                                ;; Skip size modifiers (l, h, q, L, etc.)
-                                (loop while (and (< j len) (find (char fmt-str j) "lhqLzjt"))
+                                ;; Skip size modifiers (l, h, q, L, V, etc.) — Perl's
+                                ;; integer-size flags.  V is Perl's IV/UV-size modifier
+                                ;; (so %Vd is a synonym for %d).
+                                (loop while (and (< j len) (find (char fmt-str j) "lhqLzjtV"))
                                       do (incf j))
                                 ;; Type character
                                 (if (< j len)
                                     (let ((type-char (char fmt-str j)))
                                       (incf j) ; consume the type char
-                                      ;; For positional %N$type, use the fixed index;
-                                      ;; for sequential, use arg-idx and advance it.
-                                      (let ((call-idx (if positional-idx
-                                                          positional-idx
-                                                          arg-idx)))
-                                        (if (and positional-idx (< call-idx 0))
-                                            ;; %0$x: positional 0 is invalid (1-based), output spec literally
-                                            (progn
-                                              (p-warn (make-p-box
-                                                       (format nil "Invalid conversion in ~A: \"~A\""
-                                                               *p-sprintf-caller* (string type-char))))
-                                              (write-string (concatenate 'string "%" (subseq fmt-str (1+ i) j)) out)
-                                              (setf i j))
-                                            (progn
-                                              (when (>= call-idx n-args)
-                                                (p-warn (make-p-box
-                                                         (format nil "Missing argument in ~A"
-                                                                 *p-sprintf-caller*))))
-                                              (if vector-sep
-                                                  ;; Vector flag: format each character
-                                                  ;; ordinal of the string arg, joined.
-                                                  (progn
-                                                    (write-string
-                                                     (sprintf-vector type-char flags width precision
-                                                                     vector-sep (nth call-idx args))
-                                                     out)
-                                                    (setf arg-idx (if positional-idx arg-idx (1+ call-idx)))
-                                                    (setf i j))
-                                                  (multiple-value-bind (result new-arg-idx)
-                                                      (sprintf-one type-char flags width precision args call-idx)
-                                                    (write-string result out)
-                                                    (setf arg-idx (if positional-idx arg-idx new-arg-idx))
-                                                    (setf i j)))))))
-                                    ;; No type char found, output literally
+                                      (if (not (sprintf-valid-type-p type-char vector-sep))
+                                          ;; Invalid conversion (e.g. %C, %I, %Z, or %vc):
+                                          ;; leave the entire spec verbatim, warn, and do
+                                          ;; NOT consume an argument (restore the arg pointer
+                                          ;; to the spec start).  A malformed spec also
+                                          ;; suppresses the trailing "Redundant argument".
+                                          (progn
+                                            (p-warn (make-p-box
+                                                     (format nil "Invalid conversion in ~A: \"~A\""
+                                                             *p-sprintf-caller* (string type-char))))
+                                            (write-string (subseq fmt-str i j) out)
+                                            (setf arg-idx spec-start-arg)
+                                            (setf saw-invalid t)
+                                            (setf i j))
+                                          ;; For positional %N$type, use the fixed index;
+                                          ;; for sequential, use arg-idx and advance it.
+                                          (let ((call-idx (if positional-idx
+                                                              positional-idx
+                                                              arg-idx)))
+                                            (if (and positional-idx (< call-idx 0))
+                                                ;; %0$x: positional 0 is invalid (1-based), output spec literally
+                                                (progn
+                                                  (p-warn (make-p-box
+                                                           (format nil "Invalid conversion in ~A: \"~A\""
+                                                                   *p-sprintf-caller* (string type-char))))
+                                                  (write-string (concatenate 'string "%" (subseq fmt-str (1+ i) j)) out)
+                                                  (setf saw-invalid t)
+                                                  (setf i j))
+                                                (progn
+                                                  (when (>= call-idx n-args)
+                                                    (p-warn (make-p-box
+                                                             (format nil "Missing argument in ~A"
+                                                                     *p-sprintf-caller*))))
+                                                  (if vector-sep
+                                                      ;; Vector flag: format each character
+                                                      ;; ordinal of the string arg, joined.
+                                                      (progn
+                                                        (write-string
+                                                         (sprintf-vector type-char flags width precision
+                                                                         vector-sep (nth call-idx args))
+                                                         out)
+                                                        (setf arg-idx (if positional-idx arg-idx (1+ call-idx)))
+                                                        (setf i j))
+                                                      (multiple-value-bind (result new-arg-idx)
+                                                          (sprintf-one type-char flags width precision args call-idx)
+                                                        (write-string result out)
+                                                        (setf arg-idx (if positional-idx arg-idx new-arg-idx))
+                                                        (setf i j))))))))
+                                    ;; No valid conversion char (e.g. "%L", "%h", "%v",
+                                    ;; or a bare "%5" at end of string): the spec ran off
+                                    ;; the end after flags/width/precision/size or the
+                                    ;; lone vector flag.  Leave it verbatim, warn INVALID,
+                                    ;; restore the arg pointer, and suppress "Redundant".
                                     (progn
+                                      (p-warn (make-p-box
+                                               (format nil "Invalid conversion in ~A: \"%\""
+                                                       *p-sprintf-caller*)))
                                       (write-string (subseq fmt-str i j) out)
+                                      (setf arg-idx spec-start-arg)
+                                      (setf saw-invalid t)
                                       (setf i j))))))
                       ;; Regular character
                       (progn
                         (write-char c out)
                         (incf i)))))     ; close: progn, if(char=%?), let(c), loop
-          ;; Redundant argument warning: sequential format used fewer args than provided
-          (when (and (not has-positional) (< arg-idx n-args))
+          ;; Redundant argument warning: sequential format used fewer args than provided.
+          ;; A malformed/invalid conversion suppresses this warning (Perl behaviour).
+          (when (and (not has-positional) (not saw-invalid) (< arg-idx n-args))
             (p-warn (make-p-box
                      (format nil "Redundant argument in ~A" *p-sprintf-caller*))))))))) ; close: let(i..), with-output-to-string, let(fmt-str), let(args), defun
 
@@ -4400,6 +4510,39 @@
          (vector-push-extend arg result))))
     result))
 
+(defun p-check-arity (funcname got min max flexible)
+  "Perl subroutine-signature arity check.  Throws a Perl-formatted
+   'Too few/many arguments for subroutine ...' error when GOT is outside
+   [MIN, MAX].  MAX = nil means no upper bound (a slurpy @/% param).  FLEXIBLE
+   non-nil selects the 'at least'/'at most' wording Perl uses when the sub has
+   optional or slurpy params (a fixed-arity sub uses the bare count)."
+  (cond
+    ((< got min)
+     (error "Too few arguments for subroutine '~A' (got ~D; expected ~A~D)"
+            funcname got (if flexible "at least " "") min))
+    ((and max (> got max))
+     (error "Too many arguments for subroutine '~A' (got ~D; expected ~A~D)"
+            funcname got (if flexible "at most " "") max))))
+
+(defun p-sig-rest-array (args start)
+  "Slurpy @rest signature parameter: a fresh adjustable Perl array holding the
+   flattened ARGS from index START onward."
+  (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
+    (when (and (vectorp args) (< start (length args)))
+      (loop for i from start below (length args)
+            do (vector-push-extend (aref args i) out)))
+    out))
+
+(defun p-sig-rest-hash (args start)
+  "Slurpy %rest signature parameter: a hash built from the flattened ARGS
+   key/value pairs from index START onward."
+  (let ((h (make-hash-table :test 'equal)))
+    (when (vectorp args)
+      (loop for i from start below (length args) by 2
+            do (setf (gethash (to-string (aref args i)) h)
+                     (if (< (1+ i) (length args)) (aref args (1+ i)) *p-undef*))))
+    h))
+
 ;; Marker struct for flattened arrays in push/unshift
 (defstruct p-flatten-marker
   "Marker indicating an array should be flattened when pushed/unshifted"
@@ -5580,13 +5723,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (p-box-p v)         ; variable box wrapping a reference box
                  (p-box-class val))))))
 
-(defun p-warn-build-message (args)
+(defun p-warn-build-message (args &optional loc)
   "Build warn message string per Perl semantics:
    - Non-scalar (ref): return as-is
    - Scalar with trailing newline: use as-is
    - Scalar without trailing newline: append 'at FILE line N.'
-   - Empty string or no args: use $@ if set, else 'Warning: something's wrong'"
-  (let* ((empty-or-no-args
+   - Empty string or no args: use $@ if set, else 'Warning: something's wrong'
+   LOC, when supplied (codegen passes the real 'FILE line N' for an explicit
+   warn), replaces the placeholder 'unknown line 0' in the appended suffix."
+  (let* ((at-loc (or loc "unknown line 0"))
+         (empty-or-no-args
           (or (null args)
               (and (= (length args) 1)
                    (let ((a (car args)))
@@ -5603,10 +5749,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            ;; $@ already ends with \n (Perl convention), so just concatenate
            ((and (stringp (to-string (unbox err)))
                  (> (length (to-string (unbox err))) 0))
-            (format nil "~A~A~A~%" (to-string (unbox err))
-                    #\Tab "...caught at unknown line 0."))
+            (format nil "~A~A...caught at ~A.~%" (to-string (unbox err))
+                    #\Tab at-loc))
            ;; No $@ → default warning
-           (t (format nil "Warning: something's wrong at unknown line 0.~%")))))
+           (t (format nil "Warning: something's wrong at ~A.~%" at-loc)))))
       ;; Single ref arg: return as-is
       ((and (= (length args) 1) (p-warn-is-reference (car args)))
        (car args))
@@ -5618,26 +5764,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (if (and (> (length s) 0)
                   (char= (char s (1- (length s))) #\Newline))
              s
-             (format nil "~A at unknown line 0.~%" s)))))))
+             (format nil "~A at ~A.~%" s at-loc)))))))
 
-(defun p-warn (&rest args)
-  "Perl warn - respects $SIG{__WARN__} handler."
-  (let* ((msg (p-warn-build-message args))
-         (handler (gethash "__WARN__" %SIG)))
-    (cond
-      ;; Custom handler: call with message as argument ($_[0])
-      ((and handler (functionp (unbox handler)))
-       (let ((boxed (if (p-box-p msg) msg (make-p-box msg))))
-         (funcall (unbox handler) boxed)))
-      ;; "IGNORE": suppress warning
-      ((and handler (stringp (unbox handler))
-            (string= (unbox handler) "IGNORE"))
-       nil)
-      ;; Default: print to *error-output*
-      (t
-       (let ((s (if (p-box-p msg) (to-string (unbox msg)) (format nil "~A" msg))))
-         (write-string s *error-output*)
-         (force-output *error-output*))))))
+(defun p-warn (&rest raw-args)
+  "Perl warn - respects $SIG{__WARN__} handler.
+   Accepts an optional (:loc \"FILE line N\") marker from codegen for the
+   ' at FILE line N.' suffix on a message that doesn't end in a newline."
+  (multiple-value-bind (args loc) (%p-extract-loc raw-args)
+    (let* ((msg (p-warn-build-message args loc))
+           (handler (gethash "__WARN__" %SIG)))
+      (cond
+        ;; Custom handler: call with message as argument ($_[0])
+        ((and handler (functionp (unbox handler)))
+         (let ((boxed (if (p-box-p msg) msg (make-p-box msg))))
+           (funcall (unbox handler) boxed)))
+        ;; "IGNORE": suppress warning
+        ((and handler (stringp (unbox handler))
+              (string= (unbox handler) "IGNORE"))
+         nil)
+        ;; Default: print to *error-output*
+        (t
+         (let ((s (if (p-box-p msg) (to-string (unbox msg)) (format nil "~A" msg))))
+           (write-string s *error-output*)
+           (force-output *error-output*)))))))
 
 ;;; Exception condition for object-based die
 ;;; When Perl dies with a blessed reference, we preserve it in $@
@@ -5646,22 +5795,49 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (:report (lambda (c s)
              (format s "~A" (p-exception-object c)))))
 
-(defun p-die (&rest args)
+(defun %p-extract-loc (args)
+  "Pull an optional (:loc \"FILE line N\") marker out of a die/warn arg list.
+   Returns (values real-args loc-or-nil).  Codegen passes :loc for an explicit
+   user die/warn so the Perl ' at FILE line N.' suffix carries the real source
+   location; internal runtime callers pass no :loc and so keep legacy behavior.
+   The marker is the keyword symbol :loc, which user die/warn args (strings,
+   numbers, boxes) never are, so this is unambiguous."
+  (let ((loc nil) (real '()) (skip nil))
+    (dolist (a args)
+      (cond (skip (setf loc a skip nil))
+            ((eq a :loc) (setf skip t))
+            (t (push a real))))
+    (values (nreverse real) loc)))
+
+(defun p-die (&rest raw-args)
   "Perl die - throw an exception.
    If given a single blessed reference, throw it as an exception object.
-   Otherwise, concatenate args as error string."
-  (if (and (= (length args) 1)
-           (let ((obj (car args)))
-             ;; Check if it's a blessed hash or blessed box
-             (or (and (hash-table-p obj) (gethash :__class__ obj))
-                 (and (p-box-p obj)
-                      (let ((inner (p-box-value obj)))
-                        (or (p-box-class obj)
-                            (and (hash-table-p inner) (gethash :__class__ inner))))))))
-      ;; Object exception - preserve for $@
-      (error 'p-exception :object (car args))
-      ;; String exception
-      (error (apply #'p-string-concat args))))
+   Otherwise, concatenate args as error string.  An optional (:loc \"FILE line N\")
+   marker (emitted by codegen for an explicit die) appends Perl's
+   ' at FILE line N.' suffix when the message doesn't already end in a newline."
+  (multiple-value-bind (args loc) (%p-extract-loc raw-args)
+    (if (and (= (length args) 1)
+             (let ((obj (car args)))
+               ;; Check if it's a blessed hash or blessed box
+               (or (and (hash-table-p obj) (gethash :__class__ obj))
+                   (and (p-box-p obj)
+                        (let ((inner (p-box-value obj)))
+                          (or (p-box-class obj)
+                              (and (hash-table-p inner) (gethash :__class__ inner))))))))
+        ;; Object exception - preserve for $@
+        (error 'p-exception :object (car args))
+        ;; String exception
+        (let ((msg (apply #'p-string-concat args)))
+          (cond
+            ;; No location marker: exact legacy behavior.
+            ((null loc) (error msg))
+            ;; Message ends in newline: Perl does NOT append a location.
+            ((and (> (length msg) 0)
+                  (char= (char msg (1- (length msg))) #\Newline))
+             (error "~A" msg))
+            ;; Empty die message: Perl uses "Died".
+            ((string= msg "") (error "Died at ~A.~%" loc))
+            (t (error "~A at ~A.~%" msg loc)))))))
 
 ;;; Forward declarations for p-do (both defined later in this file)
 (declaim (ftype function p-eval))
@@ -5764,7 +5940,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (box-set $@ (p-exception-object e))
           nil)
         (error (e)
-          (box-set $@ (format nil "~A" e))
+          ;; Perl appends " at (eval N) line M." to die/runtime-error messages
+          ;; thrown inside string eval when they don't already end in a newline.
+          ;; PCL doesn't track the in-eval line, so it uses line 1 (correct for
+          ;; the common single-line eval string).
+          (let ((msg (format nil "~A" e)))
+            (box-set $@ (if (and (> (length msg) 0)
+                                 (char= (char msg (1- (length msg))) #\Newline))
+                            msg
+                            (format nil "~A at (eval ~D) line 1.~%"
+                                    msg (incf *p-eval-counter*)))))
           nil)))))
 
 (defun parse-number (s)
@@ -6019,14 +6204,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   `(%p-sysread-impl (%p-fh-arg ,fh) ,@args))
 
 (defun %p-syswrite-impl (fh data &optional len)
-  "Perl syswrite - write data to filehandle"
-  (let ((stream (p-get-stream fh))
-        (str (to-string data)))
-    (when stream
-      (if len
-          (write-string (subseq str 0 (min (to-number len) (length str))) stream)
-          (write-string str stream))
-      (length str))))
+  "Perl syswrite - write data to filehandle. Unbuffered (flushes immediately) so a
+   readline on the other end of a pipe sees the data. Returns nil on stream/encode error."
+  (handler-case
+      (let ((stream (p-get-stream fh))
+            (str (to-string data)))
+        (when stream
+          (let ((out (if len
+                         (subseq str 0 (min (to-number len) (length str)))
+                         str)))
+            (write-string out stream)
+            (finish-output stream)
+            (length out))))
+    (error () nil)))
 
 (defmacro p-syswrite (fh &rest args)
   "Perl syswrite — bareword filehandle is auto-quoted."
@@ -6587,10 +6777,30 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (sleep n)
     n))
 
+(defvar *p-alarm-handler-installed* nil
+  "Whether the SIGALRM Unix handler has been installed yet (lazy, on first alarm).")
+
+(defun %p-ensure-alarm-handler ()
+  "Install a SIGALRM handler (once) that dispatches to the Perl $SIG{ALRM} handler.
+   Done lazily so programs that never call alarm keep SBCL's default signal disposition."
+  (unless *p-alarm-handler-installed*
+    (setf *p-alarm-handler-installed* t)
+    (sb-sys:enable-interrupt
+     sb-unix:sigalrm
+     (lambda (signo info ctx)
+       (declare (ignore signo info ctx))
+       (let ((handler (gethash "ALRM" %SIG)))
+         (when (and handler (functionp (unbox handler)))
+           ;; Perl passes the signal name as $_[0]; the handler may die, which
+           ;; unwinds out of any blocking syscall (read) interrupted by the signal.
+           (funcall (unbox handler) (make-p-box "ALRM"))))))))
+
 (defun p-alarm (&optional secs)
-  "Perl alarm - schedule SIGALRM. PCL: no-op, returns 0 (no previous alarm)."
-  (declare (ignore secs))
-  0)
+  "Perl alarm - schedule SIGALRM after SECS seconds (0 cancels a pending alarm).
+   When it fires, $SIG{ALRM} is invoked.  Returns the number of seconds that were
+   remaining on any previously-scheduled alarm (Perl semantics)."
+  (%p-ensure-alarm-handler)
+  (sb-posix:alarm (if secs (truncate (to-number secs)) 0)))
 
 (defun p-evalbytes (s)
   "Perl evalbytes - evaluate byte string as Perl code. PCL: delegates to eval."
@@ -6836,10 +7046,33 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; Process Control
 ;;; ============================================================
 
-(defun p-pipe (read-fh write-fh)
-  "Perl pipe - create pipe pair (not implemented, returns nil)"
-  (declare (ignore read-fh write-fh))
-  nil)
+(defun %p-pipe-impl (read-fh write-fh)
+  "Perl pipe - create a connected pair of filehandles backed by an OS pipe.
+   READ-FH receives the read end, WRITE-FH the write end.  Each target may be a
+   p-box (lexical $fh) or a symbol (bareword FH).  Streams are unbuffered so a
+   syswrite is immediately visible to a readline on the other end (same process)."
+  (handler-case
+      (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
+        (let ((read-stream (sb-sys:make-fd-stream read-fd
+                                                  :input t
+                                                  :buffering :none
+                                                  :external-format :utf-8))
+              (write-stream (sb-sys:make-fd-stream write-fd
+                                                   :output t
+                                                   :buffering :none
+                                                   :external-format :utf-8)))
+          (if (p-box-p read-fh)
+              (box-set read-fh read-stream)
+              (setf (gethash read-fh *p-filehandles*) read-stream))
+          (if (p-box-p write-fh)
+              (box-set write-fh write-stream)
+              (setf (gethash write-fh *p-filehandles*) write-stream))
+          t))
+    (error () (%pcl-save-errno) nil)))
+
+(defmacro p-pipe (read-fh write-fh)
+  "Perl pipe - bareword filehandles are auto-quoted; lexical $fh passed as box."
+  `(%p-pipe-impl (%p-fh-arg ,read-fh) (%p-fh-arg ,write-fh)))
 
 (defun p-select (&optional fh)
   "Perl select - set default output filehandle (stub, returns previous handle)"
@@ -9443,8 +9676,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun clear-capture-groups ()
   "Reset all capture group variables to nil"
   (setf $1 nil $2 nil $3 nil $4 nil $5 nil
-        $6 nil $7 nil $8 nil $9 nil)
+        $6 nil $7 nil $8 nil $9 nil
+        |$&| nil |$`| nil |$'| nil |$+| nil)
   (clrhash %+))
+
+(defun set-match-vars (str match-start match-end reg-starts reg-ends)
+  "Set the match position variables from a successful match:
+   $& (MATCH), $` (PREMATCH), $' (POSTMATCH), and $+ (last capture that matched)."
+  (when (and match-start match-end)
+    (setf |$&| (subseq str match-start match-end)
+          |$`| (subseq str 0 match-start)
+          |$'| (subseq str match-end)))
+  ;; $+ = highest-numbered capture group that actually participated
+  (when (and reg-starts reg-ends)
+    (loop for i from (1- (length reg-starts)) downto 0
+          do (let ((rs (aref reg-starts i)) (re (aref reg-ends i)))
+               (when (and rs re)
+                 (setf |$+| (subseq str rs re))
+                 (return))))))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
@@ -9503,9 +9752,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             ;; :void is NOT list context — only (eq *wantarray* t) is list context
             ((and global-p (eq *wantarray* t))
              (let ((all-results nil)
-                   (last-rs nil) (last-re nil))
+                   (last-rs nil) (last-re nil) (last-ms nil) (last-me nil))
                (cl-ppcre:do-scans (ms me rs re scanner str)
-                 (setf last-rs rs last-re re)
+                 (setf last-rs rs last-re re last-ms ms last-me me)
                  (if (> (length rs) 0)
                      (dotimes (i (length rs))
                        (push (if (and (aref rs i) (aref re i))
@@ -9518,8 +9767,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (loop for item in items for i from 0 do (setf (aref result i) item))
                  (when items
                    (clear-capture-groups)
-                   (when last-rs
-                     (set-capture-groups str last-rs last-re reg-names)))
+                   (set-capture-groups str last-rs last-re reg-names)
+                   (set-match-vars str last-ms last-me last-rs last-re))
                  result)))
             ;; /g in scalar/void context: iterate from current pos
             ((and global-p (not (eq *wantarray* t)))
@@ -9531,6 +9780,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                        (setf (gethash string *p-match-pos*) match-end)
                        (clear-capture-groups)
                        (set-capture-groups str reg-starts reg-ends reg-names)
+                       (set-match-vars str match-start match-end reg-starts reg-ends)
                        t)
                      (progn
                        (unless cont-p
@@ -9540,10 +9790,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (t
              (multiple-value-bind (match-start match-end reg-starts reg-ends)
                  (cl-ppcre:scan scanner str)
-               (declare (ignore match-end))
                (when match-start
                  (clear-capture-groups)
                  (set-capture-groups str reg-starts reg-ends reg-names)
+                 (set-match-vars str match-start match-end reg-starts reg-ends)
                  (if (eq *wantarray* t)
                      (let* ((num-groups (length reg-starts))
                             (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
@@ -9612,9 +9862,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   ;; s///e: call lambda per match, setting $1..$9 from capture groups
                   ;; :simple-calls t → function receives (match g1 g2 ...) as strings
                   (let ((rep-fn (lambda (whole-match &rest groups)
-                                  (declare (ignore whole-match))
                                   (incf count)
                                   (clear-capture-groups)
+                                  (setf |$&| whole-match)
                                   (when (>= (length groups) 1) (setf $1 (or (nth 0 groups) *p-undef*)))
                                   (when (>= (length groups) 2) (setf $2 (or (nth 1 groups) *p-undef*)))
                                   (when (>= (length groups) 3) (setf $3 (or (nth 2 groups) *p-undef*)))
@@ -9641,10 +9891,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                     ;; First, set capture groups from the match
                     (multiple-value-bind (match-start match-end reg-starts reg-ends)
                         (cl-ppcre:scan scanner str)
-                      (declare (ignore match-end))
                       (when match-start
                         (clear-capture-groups)
-                        (set-capture-groups str reg-starts reg-ends reg-names)))
+                        (set-capture-groups str reg-starts reg-ends reg-names)
+                        (set-match-vars str match-start match-end reg-starts reg-ends)))
                     ;; Perform the substitution
                     (setf result (if global-p
                                      (cl-ppcre:regex-replace-all scanner str replacement)
@@ -10028,4 +10278,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 ;;; pack/unpack loaded lazily on first call via self-loading stubs above.
 
-(format t "PCL Runtime loaded~%")
+;; Diagnostic banner on *error-output*, not *standard-output*, so it never
+;; pollutes a script's stdout when run via the `pcl` command. Test harnesses
+;; capture 2>&1 and filter it, so they are unaffected.
+(format *error-output* "PCL Runtime loaded~%")

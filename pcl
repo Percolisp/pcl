@@ -1,0 +1,286 @@
+#!/usr/bin/env perl
+# pcl — run a Perl script (or inline code) through PCL, like `perl`.
+#
+#   pcl script.pl [args...]      run a script
+#   pcl -e 'code'  [args...]     run inline code   (-E is an alias of -e)
+#   pcl -c script.pl             syntax-check only
+#   pcl --clear-cache            wipe the cached compiled modules, then exit
+#   pcl --make-core              snapshot the loaded runtime for fast startup, then exit
+#
+# A "core" is a memory image of SBCL with the PCL runtime preloaded; running
+# from it skips re-loading the runtime (~1s → ~0.1s). It's a pure speed cache.
+# (Compiling/running a script as a standalone .fasl is not supported yet —
+# Phase 6.) See `pcl --help` for the user-facing summary.
+#
+# Phase 1 of docs/pcl-rollout-plan.md: Tier-0 "transpile-and-run" only — the main
+# script is transpiled fresh on every run (no main-script FASL). The module cache
+# (use/require) still applies underneath, with its own mtime freshness check.
+# Caching tiers (--cache / --fasl) are Phase 6; user test support is Phase 4.
+
+use v5.30;
+use strict;
+use warnings;
+use Getopt::Long qw(:config pass_through require_order no_ignore_case bundling);
+use File::Basename qw(dirname basename);
+use Cwd qw(abs_path);
+use File::Temp qw(tempfile);
+
+my $ROOT    = dirname(abs_path($0));
+my $PL2CL   = "$ROOT/pl2cl";
+my $RUNTIME = "$ROOT/cl/pcl-runtime.lisp";
+
+# ---- options -------------------------------------------------------------
+my ($inline, $check_only, $make_core, $clear_cache, $verbose, $want_help);
+my (@inc_dirs, @use_mods, $warnings_flag);
+
+GetOptions(
+  'e|E=s'       => \$inline,         # inline code; -E is a plain alias of -e
+  'I=s@'        => \@inc_dirs,        # prepend dir(s) to @INC
+  'M=s@'        => \@use_mods,        # `use Module` before the script
+  'c'           => \$check_only,      # syntax-check only
+  'w'           => \$warnings_flag,   # accepted; PCL warning behaviour is fixed (no-op)
+  'clear-cache' => \$clear_cache,
+  'make-core'   => \$make_core,
+  'v|verbose'   => \$verbose,
+  'h|help'      => \$want_help,
+) or die usage();
+
+print(usage()), exit 0 if $want_help;
+
+my $cache_dir = $ENV{PCL_CACHE_DIR} // "$ENV{HOME}/.pcl-cache";
+
+# ---- one-shot maintenance actions (no script needed) ---------------------
+if ($clear_cache) { clear_cache(); exit 0 }
+if ($make_core)   { make_core();   exit 0 }
+
+# ---- figure out the source + the script's own @ARGV ----------------------
+my $source = (!defined $inline && @ARGV) ? shift(@ARGV) : undef;
+my @script_args = @ARGV;          # everything left belongs to the script
+
+die usage() unless defined $inline || defined $source;
+if (defined $source && !-f $source) {
+  die "pcl: can't open script \"$source\": No such file or directory\n";
+}
+
+# ---- transpile to a temp .lisp (Tier 0) ----------------------------------
+my $lisp = transpile($source, $inline);
+
+if ($check_only) {
+  my $name = defined $source ? $source : '-e';
+  say "$name syntax OK";
+  unlink $lisp;
+  exit 0;
+}
+
+# ---- run --------------------------------------------------------------------
+exec_sbcl($lisp, \@script_args);   # never returns
+
+# ===========================================================================
+# Helpers
+# ===========================================================================
+
+# Transpile $source (a file) or $inline (a code string), honouring -M.
+# Returns the path to a temp .lisp (cleaned up at exit).
+sub transpile {
+  my ($source, $inline) = @_;
+
+  my $tmp = mktmp('.lisp');
+
+  # -M Module  →  prepend `use Module;` lines. If any are present (or we're in
+  # -e mode), assemble the full source text and transpile that; otherwise
+  # transpile the file directly so line numbers and the source dir are preserved.
+  my $use_prefix = join('', map { "use $_;\n" } @use_mods);
+
+  my @inc_args = map { ("-I", $_) } ($ROOT, @inc_dirs);   # -I dirs ride pl2cl's @INC
+
+  my $src_path;          # the .pl file we hand to pl2cl
+  my @cleanup;
+  if (defined $inline) {
+    $src_path = mktmp('.pl');
+    write_file($src_path, $use_prefix . $inline . "\n");
+    push @cleanup, $src_path;
+  }
+  elsif ($use_prefix ne '') {
+    # File + -M: prepend the use-lines into a temp copy, but keep the original
+    # directory on @INC (-I) so the script's own `use`/`do` still resolve.
+    $src_path = mktmp('.pl');
+    write_file($src_path, $use_prefix . slurp($source));
+    push @inc_args, "-I", dirname(abs_path($source));
+    push @cleanup, $src_path;
+  }
+  else {
+    $src_path = $source;
+  }
+
+  say STDERR "pcl: transpiling $src_path" if $verbose;
+  my $rc = run('perl', @inc_args, $PL2CL, $src_path, { stdout => $tmp });
+  unlink @cleanup;
+
+  if ($rc != 0) {
+    unlink $tmp;
+    exit($rc >> 8 || 1);           # pl2cl already wrote the error to stderr
+  }
+  register_cleanup($tmp);
+  return $tmp;
+}
+
+# Build the SBCL command and exec it (replacing this process so the script's
+# exit code becomes pcl's). @ARGV is injected as a fresh vector of raw strings;
+# warnings/verbose load chatter is muffled so only the program's own output shows.
+sub exec_sbcl {
+  my ($lisp, $args) = @_;
+
+  my $argv_form = '(setf pcl::@ARGV '
+    . cl_string_vector(@$args) . ')';
+
+  my $quiet_load = sub {
+    my ($file) = @_;
+    return '(let ((*load-verbose* nil) (*load-print* nil)'
+         . ' (*compile-verbose* nil) (*compile-print* nil))'
+         . ' (handler-bind ((warning #\'muffle-warning))'
+         . qq{ (load #P"$file"}.')))';
+  };
+
+  my @cmd = ('sbcl', '--control-stack-size', '512',
+             '--noinform', '--non-interactive');
+
+  my $core = find_core();
+  if ($core) {
+    push @cmd, '--core', $core;
+  } else {
+    push @cmd, '--eval', $quiet_load->($RUNTIME);
+  }
+  push @cmd, '--eval', $argv_form;
+  push @cmd, '--eval', $quiet_load->($lisp);
+
+  say STDERR "pcl: exec @cmd" if $verbose;
+  exec { $cmd[0] } @cmd or die "pcl: cannot exec sbcl: $!\n";
+}
+
+# A saved core is used automatically when present and newer than the runtime.
+sub find_core {
+  my $c = $ENV{PCL_CORE} // "$cache_dir/pcl.core";
+  return undef unless -f $c;
+  return undef unless -f $RUNTIME && (stat $c)[9] >= (stat $RUNTIME)[9];
+  return $c;
+}
+
+sub make_core {
+  my $c = $ENV{PCL_CORE} // "$cache_dir/pcl.core";
+  mkdir $cache_dir, 0755 unless -d $cache_dir;
+  say "pcl: building core $c";
+  my $rc = run('sbcl', '--noinform', '--non-interactive',
+               '--load', $RUNTIME,
+               '--eval', qq{(sb-ext:save-lisp-and-die "$c" :executable nil)});
+  die "pcl: core build failed\n" if $rc != 0;
+  say "pcl: done — startup should now be much faster";
+}
+
+sub clear_cache {
+  # Remove cached .fasl/.lisp; leave pcl.core (rebuild with --make-core).
+  my @files = (glob("\Q$cache_dir\E/*.fasl"), glob("\Q$cache_dir\E/*.lisp"));
+  my $n = @files ? unlink(@files) : 0;
+  say "pcl: cleared $n cached file(s) from $cache_dir";
+}
+
+# ---- small utilities -----------------------------------------------------
+
+# Format a list of strings as a CL adjustable vector literal of raw strings.
+sub cl_string_vector {
+  my @parts = map { '"' . cl_escape($_) . '"' } @_;
+  my $n = scalar @parts;
+  return "(make-array $n :adjustable t :fill-pointer $n"
+       . ($n ? " :initial-contents (list @parts)" : "")
+       . ")";
+}
+
+sub cl_escape {
+  my ($s) = @_;
+  $s =~ s/\\/\\\\/g;
+  $s =~ s/"/\\"/g;
+  return $s;
+}
+
+# Run a command. Last arg may be a {stdout => path} hashref to redirect stdout.
+# Returns the raw $? value.
+sub run {
+  my @args = @_;
+  my $opts = (ref $args[-1] eq 'HASH') ? pop @args : {};
+  if (my $out = $opts->{stdout}) {
+    my $pid = fork // die "fork: $!";
+    if ($pid == 0) {
+      open(STDOUT, '>', $out) or die "pcl: cannot write $out: $!\n";
+      exec { $args[0] } @args or die "pcl: cannot exec $args[0]: $!\n";
+    }
+    waitpid($pid, 0);
+    return $?;
+  }
+  system { $args[0] } @args;
+  return $?;
+}
+
+sub slurp {
+  my ($path) = @_;
+  open my $fh, '<', $path or die "pcl: cannot read $path: $!\n";
+  local $/; my $c = <$fh>; close $fh; return $c;
+}
+
+sub write_file {
+  my ($path, $content) = @_;
+  open my $fh, '>', $path or die "pcl: cannot write $path: $!\n";
+  print $fh $content; close $fh;
+}
+
+sub mktmp {
+  my ($suffix) = @_;
+  my ($fh, $name) = tempfile("pcl_${$}_XXXX", TMPDIR => 1, SUFFIX => $suffix);
+  close $fh;
+  return $name;
+}
+
+{
+  my @to_clean;
+  sub register_cleanup { push @to_clean, @_ }
+  END { unlink @to_clean if @to_clean }
+}
+
+sub usage {
+  return <<'USAGE';
+Usage: pcl [options] script.pl [script-args...]
+       pcl [options] -e 'code'  [script-args...]
+
+Runs a Perl script (or inline code) by transpiling it to Common Lisp and
+executing it under SBCL. Works like `perl` for the Perl subset PCL supports.
+
+Options:
+  -e CODE        run inline CODE (like perl -e)
+  -E CODE        alias of -e
+  -I DIR         prepend DIR to @INC (repeatable)
+  -M MODULE      `use MODULE` before running (repeatable)
+  -c             syntax-check only: transpile, print "syntax OK", exit
+  -w             accepted for compatibility (PCL's warning behaviour is fixed)
+  -v, --verbose  print the underlying sbcl command pcl runs
+  -h, --help     this message
+
+Faster startup (optional):
+  --make-core    Build a "saved core" once, then exit. A core is a memory image
+                 of SBCL with the PCL runtime already loaded; later runs start
+                 from it instead of re-loading the runtime, cutting startup from
+                 ~1s to ~0.1s. pcl uses the core automatically when present and
+                 rebuilds it as needed when the runtime changes. It's purely a
+                 speed cache — safe to delete (pcl just loads the runtime again).
+  --clear-cache  Delete PCL's internal module cache — the compiled files it
+                 makes for `use`/`require`d modules — then exit. The saved core
+                 is kept (rebuild it with --make-core).
+
+Notes:
+  * Every run transpiles your script fresh; there is no way yet to compile a
+    script to a .fasl and run that directly (planned — see Phase 6 of
+    docs/pcl-rollout-plan.md). Only `use`/`require`d modules are cached today.
+  * --make-core / --clear-cache only affect speed, never results.
+
+Environment:
+  PCL_CACHE_DIR  where the core and module cache live (default ~/.pcl-cache)
+  PCL_CORE       explicit path to the saved core (default <cache>/pcl.core)
+USAGE
+}

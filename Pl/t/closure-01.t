@@ -259,4 +259,32 @@ print $foo[4]->(4), "\n";
 print $foo[0]->(4), "\n";
 ', "1\n1\n1\n0\n");
 
+# ====== TEST 16: my $x = $x shadow inside an if/else branch (closure.t bizz) ======
+# Each branch declares `my $i` that shadows the outer `my $i = 7`; the closure
+# returned from the branch must capture the branch copy.  In the else branch the
+# RHS of `my $i = $i` must read the OUTER $i (7), not the just-declared shadow.
+# Regression: BlockAnalyzer hoisted the branch `my $i` to the sub level and the
+# two-phase scoped block opened a parent let that reused the outer rename and
+# shadowed 7 with nil, so the closure returned undef.
+test_io("nested my-shadow capture across if/else branches", '
+sub bizz {
+  my $i = 7;
+  if (@_) {
+    my $i = shift;
+    sub { $i = shift if @_; $i };
+  } else {
+    my $i = $i;
+    sub { $i = shift if @_; $i };
+  }
+}
+my $foo = bizz();
+my $bar = bizz();
+print &$foo(), "\n";       # 7 (else branch captured outer $i)
+&$foo(8);
+print &$foo(), "\n";       # 8 (closure has its own mutable copy)
+print &$bar(), "\n";       # 7 (independent closure)
+my $baz = bizz(9);
+print &$baz(), "\n";       # 9 (then branch captured shifted arg)
+', "7\n8\n7\n9\n");
+
 done_testing();
