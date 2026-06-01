@@ -240,6 +240,17 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  :xs
                  "unpack(...,pack 'p'/'P',$inf_or_nan) roundtrips a raw pointer -- no stable addresses under a moving GC; PCL throws 'Invalid type'. not-supported.md: 'pack/unpack — pointer types (p/P)'."))
 
+;; push.t — push onto an Internals::SvREADONLY array must croak "Modification of
+;; a read-only value".  PCL emulates neither Internals::SvREADONLY nor a per-array
+;; read-only flag, so the push succeeds and $@ stays empty.  This is the file's
+;; only failure.  not-supported.md: 'Internals::* C-level introspection' /
+;; 'Read-only constants'.  (The sibling "can push empty list onto readonly array"
+;; legitimately passes — a no-op push raises nothing — and is excluded by the regex.)
+(register-skips "push.t"
+                ("croak when pushing onto readonly array"
+                 :read-only
+                 "push onto an Internals::SvREADONLY array must die 'Modification of a read-only value' -- read-only arrays / Internals::* not emulated. not-supported.md: 'Internals::* C-level introspection'."))
+
 ;; array.t — documented not-supported failures (sparse arrays / @_ aliasing / SV
 ;; identity / error-detection). HELD BACK as fix targets, deliberately NOT registered:
 ;;   - arylen magic (\$#array, freed-array length, arylen_p): tests 83-88, 92-114,
