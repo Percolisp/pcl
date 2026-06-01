@@ -750,14 +750,20 @@ See `memory/project_wantarray_followup.md`.
 
 ---
 
-### closure.t (2 failures, 48/? passing)
+### closure.t ✅ FULLY PASSING (50/50 — session 227)
 
-- **Nested closure with `my $i = $i`** (tests 11, 13): `sub bizz { my $i=7; sub { my $i=$i; sub{...} } }`.
-  Inner closure captures `my $i = $i` (shadow). When `bizz()` is called twice,
-  the two inner subs should have independent `$i` values (both 7). PCL returns `''` —
-  the inner variable doesn't properly capture the outer `$i` before shadowing it.
-  Root cause: `_vars_referenced_in_closures` renames `$i__lex__N` but the `my $i = $i`
-  RHS is parsed against the wrong scope (new name already in effect for RHS).
+- **Nested closure with `my $i = $i`** (tests 11, 13) ✅ **FIXED (session 227)**.
+  `sub bizz { my $i=7; if(@_){my $i=shift; sub{...}} else {my $i=$i; sub{...}} }`.
+  The else branch's `my $i = $i` closure returned `undef` instead of 7. Root cause was
+  NOT the RHS-scope theory in the old note — the else branch codegen was already correct
+  (`$i__lex__3 = $i__lex__1`). The bug: `Pl::BlockAnalyzer::_collect_declarations` recursed
+  into if/else/while/for **bodies** and hoisted their `my $i` to the parent sub level at the
+  compound statement's index. The two-phase scoped block then opened a *second*
+  `(let (($i__lex__1 (make-p-box nil))))` wrapping the `if` — reusing the outer var's
+  closure rename and shadowing the `7` with `nil`. Fix: compound-statement bodies now bubble
+  up only `state` vars (like bare blocks); their `my` vars are scoped by the body's own
+  `_with_declarations`. Regression test `Pl/t/closure-01.t` test 16; `Pl/t/block-analyzer-01.t`
+  test 8 updated to assert the no-hoist behavior.
 
 ---
 

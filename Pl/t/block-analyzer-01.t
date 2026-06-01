@@ -109,17 +109,24 @@ sub parse_block {
     is $a->{vars}{'$x'}{captured}, 0, 'named inner sub does not capture $x';
 }
 
-# ── Test 8: inner my decl inside while — hoisted to compound stmt ────────────
+# ── Test 8: inner my decl inside a compound body is NOT hoisted ───────────────
 {
+    # A 'my' declared inside a while/for/if body is lexically scoped to that
+    # body and handled by the body's own _with_declarations.  BlockAnalyzer must
+    # NOT hoist it to the enclosing sub level — doing so opened a spurious
+    # parent let that reused a same-named outer var's closure rename and shadowed
+    # it (the closure.t bizz() `my $i = $i` regression).  Only 'state' bubbles up.
     my ($block, $doc) = parse_block('sub foo { while (1) { my $i = 0; } }');
     my $a = Pl::BlockAnalyzer->analyze($block);
+    is scalar(@{$a->{declarations}}), 0, 'my in while body is not hoisted';
+    ok !exists $a->{vars}{'$i'},         '$i not registered at parent scope';
 
-    # $i is declared inside the while body.  BlockAnalyzer maps it to the
-    # while compound statement (stmt_idx 0 — the only statement in foo's body).
-    is scalar(@{$a->{declarations}}), 1,    'one declaration entry';
-    is $a->{declarations}[0]{stmt_idx}, 0,  'mapped to while statement (idx 0)';
-    is $a->{declarations}[0]{vars}[0], '$i', 'var is $i';
-    is $a->{vars}{'$i'}{scope}, 'local',    'scope is local';
+    # ...but a 'state' var inside a compound body still bubbles up (it needs the
+    # once-init storage hoisted out of the loop).
+    my ($block2, $doc2) = parse_block('sub foo { while (1) { state $s = 0; } }');
+    my $a2 = Pl::BlockAnalyzer->analyze($block2);
+    is scalar(@{$a2->{declarations}}), 1, 'state in while body bubbles up';
+    is $a2->{declarations}[0]{vars}[0], '$s', 'bubbled state var is $s';
 }
 
 # ── Test 9: our declaration ───────────────────────────────────────────────────

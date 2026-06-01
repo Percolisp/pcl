@@ -118,19 +118,16 @@ sub _collect_declarations {
                     next if $prev
                             && ref($prev) eq 'PPI::Token::Word'
                             && $prev->content eq 'sub';
-                    my $is_bare = !$prev;
                     my $inner = $self->_collect_declarations([_stmts_of($child)]);
-                    if ($is_bare) {
-                        # Bare block: only state vars bubble up
-                        push @result,
-                            grep { $_->{decl_type} eq 'state' } @$inner;
-                    } else {
-                        # While/for/if body: remap ppi_stmt to outer compound
-                        # statement so the hook can match on it.
-                        push @result,
-                            map { { %$_, stmt_idx => $idx, ppi_stmt => $stmt } }
-                            @$inner;
-                    }
+                    # Only 'state' vars bubble up from a nested block (bare OR a
+                    # while/for/if body).  'my' vars in those blocks are lexically
+                    # scoped to the block and are handled by that block's own
+                    # _with_declarations; hoisting them here would open a spurious
+                    # parent-level let that reuses the same closure-capture rename
+                    # as a same-named outer var and shadows it (broke closure.t
+                    # bizz(): `my $i = $i` in an else branch read nil, not 7).
+                    push @result,
+                        grep { $_->{decl_type} eq 'state' } @$inner;
                 }
             }
         }

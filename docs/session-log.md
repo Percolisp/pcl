@@ -4,6 +4,33 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 227 (2026-06-01) — closure.t fully passing: nested `my $i = $i` shadow capture
+
+**Bug:** `sub bizz { my $i=7; if(@_){...} else { my $i=$i; sub{$i=shift if @_; $i} } }` —
+calling `bizz()` (else branch) returned a closure that gave `undef` instead of 7.
+
+**Root cause** (not the old RHS-scope note — the branch codegen `$i__lex__3 = $i__lex__1`
+was already correct): `Pl::BlockAnalyzer::_collect_declarations` recursed into if/else/while/for
+**bodies** and hoisted their `my` declarations up to the enclosing sub at the compound
+statement's index. The two-phase scoped block then opened a spurious second
+`(let (($i__lex__1 (make-p-box nil))))` wrapping the `if` — reusing the OUTER `$i`'s
+closure-capture rename (`$i__lex__1`) and shadowing the `7` with `nil`, which the else
+branch's `my $i = $i` then read.
+
+**Fix** (`Pl/BlockAnalyzer.pm`): compound-statement bodies now bubble up only `state` vars
+(same as bare blocks); their `my` vars are lexically scoped to the body and handled by the
+body's own `_with_declarations`. One-line behavior change in `_collect_declarations`. This
+matches the existing intent documented in `_with_declarations` (which already excluded
+inner blocks from `_emit_scoped_block` for this exact reason).
+
+**Result:** closure.t **48 → 50 (fully passing)**. Full sweep 0 real regressions
+(`append.t` flaked on the known `-j8 SIMPLE-FILE-ERROR`; passes 13/13 solo — real
+fully-passing is 66). Gate 90 files / 3139 green. Regression tests: `Pl/t/closure-01.t`
+test 16; `Pl/t/block-analyzer-01.t` test 8 updated to assert the no-hoist behavior +
+that `state` still bubbles up. Baseline re-blessed (470 keys).
+
+---
+
 ## Session 226 (2026-06-01) — subroutine-signature arity + arg flattening + Perl error message
 
 **Three coupled signature bugs fixed** (`Pl/Parser.pm` `_process_sub_statement` +
