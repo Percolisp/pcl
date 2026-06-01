@@ -1667,6 +1667,15 @@ sub _process_toplevel_state_declaration {
     }
     $self->_emit("");
   }
+
+  # The value of a `state $x = EXPR` expression is the CURRENT value of $x
+  # (not the init-guard result). Emit the variable as the trailing form so the
+  # statement yields the right value in tail/expression position — e.g. as a
+  # map/grep block return or a sub's implicit return. Only meaningful for a
+  # single declared variable; list forms are left as-is.
+  if (!$postfix_op && @vars == 1) {
+    $self->_emit($renames_for_this{$vars[0]});
+  }
 }
 
 # Process top-level 'my' declaration - lexical at file scope
@@ -2434,6 +2443,15 @@ sub _process_state_declaration {
       my $cl_var = $renames->{$var} // $var;
       $self->_emit("($cl_op $cl_var)");
     }
+  }
+
+  # The value of a `state $x = EXPR` expression is the CURRENT value of $x
+  # (not the init-guard result), so emit the variable as the trailing form for
+  # tail/expression position (map/grep block, implicit sub return). Single
+  # scalar/array/hash declarations only; list forms left as-is.
+  if (!$postfix_op && @vars == 1) {
+    my $cl_var = $renames->{$vars[0]} // $vars[0];
+    $self->_emit($cl_var);
   }
 
   $self->_emit("");

@@ -29,7 +29,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 25;
+plan tests => 27;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -316,3 +316,21 @@ test_cl('foreach loop variable not confused with same-named state var',
      }
      print join(",", @vals), "\n";',
     "10,20,30\n");
+
+# Test 26: `state $x = EXPR` as a map/grep block value yields $x's current value,
+# not the init-guard result. state persists, so every iteration sees the value
+# initialized on the first iteration. (state.t tests 74-75)
+test_cl('state var as map/grep block value yields the variable, persists',
+    'use feature ":5.10";
+     my @apollo  = qw(Eagle Antares Odyssey Aquarius);
+     my @result1 = map  { state $x = $_; }     @apollo;
+     my @result2 = grep { state $x = /Eagle/ } @apollo;
+     { local $" = ""; print "@result1\n"; print "@result2\n"; }',
+    "EagleEagleEagleEagle\nEagleAntaresOdysseyAquarius\n");
+
+# Test 27: `state $y = EXPR` as a sub implicit (tail) return yields $y's value.
+test_cl('state var as implicit sub return yields the variable',
+    'use feature ":5.10";
+     sub g { my $v = shift; state $y = $v; }
+     print g(8), g(9), "\n";',
+    "88\n");

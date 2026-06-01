@@ -501,7 +501,7 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### state.t (20 failures, 142/166 passing — PARTIAL)
+### state.t (9 failures, 153/166 passing — PARTIAL; session 225)
 
 **Fixed in session 200** (4 more tests):
 - Test 36: `p-post++` `*p-undef*` check fixed.
@@ -510,7 +510,13 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 **Remaining:**
 - **State hash `:shared`** (tests 41–43): `%f :shared` attribute.
 - **Computed goto with state label** (tests 70–73): `goto state $label` — not implemented.
-- **State in map/grep** (tests 74–75): `state $x` inside `map/grep` block loses value.
+- **State in map/grep** (tests 74–75) ✅ **FIXED (session 225)**. `state $x = EXPR` used as a
+  block/tail expression returned the init-guard result (`1` first call, `nil` after) instead of
+  `$x`'s current value. Both state handlers (`_process_toplevel_state_declaration`,
+  `_process_state_declaration` in `Pl/Parser.pm`) now emit the declared variable as the trailing
+  form for single-var declarations, so `map { state $x = $_ }` and a sub whose tail is
+  `state $y = $v` yield the (persistent) variable value. Regression tests in `Pl/t/state-01.t`
+  (26–27).
 - **Reference to state variable** (test 76): `\state $x` gives same address each call.
 - **Lvalue substr as state** (tests 83–92): documented not-supported.
 

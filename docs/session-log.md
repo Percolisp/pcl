@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 225 (2026-06-01) — `state $x = EXPR` value in tail/expression position
+
+**Bug:** `state $x = EXPR` used as an expression (a `map`/`grep` block return, or a sub's
+implicit/tail return) yielded the **init-guard result** (`1` on the first call, `nil`
+afterward) instead of the current value of `$x`. Root cause: both state-declaration
+codegen paths (`_process_toplevel_state_declaration` and `_process_state_declaration` in
+`Pl/Parser.pm`) emitted the `(unless …__init …)` guard as the last form of the statement
+and never emitted the variable itself, so the statement's value was the guard's value.
+
+**Fix:** Both handlers now emit the declared variable as the trailing form for a
+single-variable declaration (skipped for postfix `state $z++`, whose post-op form already
+yields the right value, and for multi-var list forms). So:
+- `map  { state $x = $_ } @apollo`   → `(Eagle) x 4` (state persists; every iteration sees
+  the value set on the first iteration), not `(1)`.
+- `grep { state $x = /Eagle/ } @apollo` → all 4 elements (state stays truthy), not just the
+  first.
+- `sub g { my $v = shift; state $y = $v }` → `g(8); g(9)` both return 8.
+
+**Result:** state.t **151→153 pass / 11→9 fail** (tests 74–75 fixed). Full sweep
+**17343 pass / 1245 fail, 65 fully passing** (+2/−2, 0 regressions via sweep-diff, only the
+same 2 crashes bop.t+eval.t). Gate 89 files / 3122 tests green. Regression tests in
+`Pl/t/state-01.t` (26–27). Baseline re-blessed (478 keys).
+
+**Aside (user question):** `$x = EXPR` where EXPR mutates `$x` (`$x++`/`++$x`) matches Perl
+in PCL (`$x=$x++ +10`→15, `$x=++$x +10`→16, `$x++ + $x++`→x=7/y=11, `$x=$x++`→5) — the box
+model mutates in place during RHS eval and the assignment is the last write, same as Perl.
+These are Perl's documented multiple-modify-between-sequence-points UB cases anyway, so no
+obligation to match; PCL matches for free.
+
+---
+
 ## Session 224 (2026-05-31) — register index.t + grep.t not-supported failures
 
 Two skip-registry-only changes (no runtime/codegen change), each verified and committed.
