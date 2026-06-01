@@ -1,0 +1,38 @@
+PCL — Perl to Common Lisp compiler
+
+Copyright (c) 2025-2026 the PCL authors.
+
+This program is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself — that is, at
+your option, under the terms of either:
+
+  a) the GNU General Public License as published by the Free Software
+     Foundation; either version 1, or (at your option) any later version
+     ("GPL-1.0-or-later"); or
+
+  b) the Artistic License version 1.0 ("Artistic-1.0-Perl").
+
+This dual licensing is identical to Perl's own. SPDX-License-Identifier:
+
+    Artistic-1.0-Perl OR GPL-1.0-or-later
+
+The full text of each license is the canonical text distributed with Perl
+itself, traditionally in the files named "Artistic" (the Artistic License) and
+"Copying" (the GNU General Public License). Authoritative copies are available
+from:
+
+  Artistic License 1.0:  https://dev.perl.org/licenses/artistic.html
+  GNU GPL:               https://www.gnu.org/licenses/
+
+If you wish to bundle the complete license texts with this distribution, copy
+the "Artistic" and "Copying" files from a Perl source distribution, or fetch
+them verbatim from the URLs above, and place them alongside this file.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.
+
+Third-party code included for testing purposes (for example, the modules under
+cpan-tests/) is the property of its respective authors and is distributed under
+its own license terms, which are stated in those files; it is not covered by
+this notice.

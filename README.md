@@ -29,7 +29,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run the internal test suite (86 files, 3092 tests)
+# Run the internal test suite (91 files, 3168 tests)
 prove -j8 Pl/t/
 ```
 
@@ -60,7 +60,7 @@ I am Rex and I bark
 A teaser across the big areas — most of Perl's day-to-day surface is in:
 
 - **Operators** — all 92 precedence levels, chained comparisons, string ops
-- **Control flow** — `if/unless`, `while/until`, `for/foreach`, loop labels, `next/last/redo`
+- **Control flow** — `if/unless`, `while/until`, `for/foreach` (aliasing `$_` to elements, incl. hash/array elements and `substr`/`pos`/`vec` lvalues), loop labels, `next/last/redo`
 - **Subroutines** — signatures, defaults, closures, `state` variables
 - **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors, postfix deref, and live lvalue refs (`\substr`, `\pos`, `\vec`, `\$#array`)
 - **OO** — `bless`, method calls, `@ISA` with C3 MRO, multiple inheritance, `SUPER::`, `AUTOLOAD`, `use overload`
@@ -116,7 +116,7 @@ Generated code is intentionally readable: Perl variables keep their sigils (`$x`
 
 This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the end is visible on the horizon — and hopefully not a mirage.
 
-Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **63 files passing completely**.
+Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **66 files passing completely**.
 
 A small illustration of how it gets done: when implementing `pack()` in CL proved fiddly even with the original C source in hand, the trick was to write `pack` *in Perl* and let PCL translate it to CL. It worked — eating our own dog food.
 
@@ -134,4 +134,4 @@ These come *after* compatibility is solid:
 
 ## License
 
-This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
+This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself — dual-licensed under the Artistic License 1.0 or the GNU GPL v1-or-later. See [`LICENSE`](LICENSE) for details.

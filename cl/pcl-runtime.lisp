@@ -103,7 +103,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-file
    ;; Functions
-   #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
+   #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -2924,7 +2924,12 @@
                         r))
                      ((and (vectorp ,val) (not (stringp ,val)))
                       (%p-flatten-list ,val))
-                     (t (make-array 0 :adjustable t :fill-pointer 0))))
+                     ;; A bare scalar RHS is a one-element list: `%h = "x"` means
+                     ;; `%h = ("x")` -> key "x" with an undef value (Perl pads the
+                     ;; odd element).  Route it through %p-flatten-list so a string,
+                     ;; number, box, or undef becomes one entry; a raw nil (empty
+                     ;; list) flattens to nothing, clearing the hash.
+                     (t (%p-flatten-list (vector ,val)))))
             (,cnt (length ,flat)))
        (unless (boundp ',place)
          (proclaim '(special ,place))
@@ -7907,39 +7912,80 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      :getter (lambda () (p-array-last-index arr))
      :setter (lambda (n) (p-set-array-length arr (to-number n)))))))
 
+(defun p-substr-lvalue-cell (str start &optional len)
+  "Bare magic-cell box for a substr() lvalue window (no \\-ref wrapper).
+   Reading returns the current substring (p-substr getter), writing replaces
+   that region of STR in place (4-arg p-substr).  STR must be a box for writes
+   to propagate.  Used both by p-substr-ref (which adds the \\-ref layer) and to
+   alias a foreach loop variable to substr(): `for (substr($x,1,3)) { $_ = ... }`
+   binds $_ to this cell so the assignment writes through to $x.
+
+   Perl's substr lvalue tracks edits: after each assignment the live window
+   re-anchors onto the just-written text.
+   - A positive start stays positive and resolves to its absolute position; a
+     negative start stays anchored from the end and is recomputed as
+     -(new-strlen - start) so it keeps pointing at the written text.
+   - A fixed non-negative length becomes M (the characters just written); a
+     to-end (nil) or from-end (negative) length keeps its end anchored to the
+     string's end and is left as-is.
+   So assigning 'XX' to substr($x,1,3) leaves substr($x,1,2); to substr($x,-5)
+   leaves substr($x,-2); to substr($x,-5,3) leaves substr($x,-4,2)."
+  (let ((cur-start (to-number start))
+        (cur-len   (when len (to-number len))))
+    (make-p-box
+     (make-p-magic-cell
+      :kind :lvalue
+      :getter (lambda () (p-substr str cur-start cur-len))
+      :setter (lambda (v)
+                (let* ((slen-before (length (to-string (unbox str))))
+                       (astart (if (< cur-start 0)
+                                   (max 0 (+ slen-before cur-start))
+                                   (min cur-start slen-before)))
+                       (neg    (< cur-start 0))
+                       (result (p-substr str cur-start cur-len v))
+                       (slen-after (length (to-string (unbox str))))
+                       (m      (length (to-string (unbox v)))))
+                  (setf cur-start (if neg (- (- slen-after astart)) astart))
+                  (when (and cur-len (>= cur-len 0))
+                    (setf cur-len m))
+                  result))))))
+
+(defun p-pos-lvalue-cell (var)
+  "Bare magic-cell box for a pos() lvalue (no \\-ref wrapper).  See
+   p-substr-lvalue-cell."
+  (make-p-box
+   (make-p-magic-cell
+    :kind :lvalue
+    :getter (lambda () (let ((p (p-pos var))) (if p p *p-undef*)))
+    :setter (lambda (v) (p-pos var v)))))
+
+(defun p-vec-lvalue-cell (str offset bits)
+  "Bare magic-cell box for a vec() lvalue element (no \\-ref wrapper).  See
+   p-substr-lvalue-cell."
+  (make-p-box
+   (make-p-magic-cell
+    :kind :lvalue
+    :getter (lambda () (p-vec str offset bits))
+    :setter (lambda (v) (p-vec-set str offset bits v)))))
+
 (defun p-substr-ref (str start &optional len)
   "Perl \\substr(STR, START [, LEN]) — a live reference to the substr lvalue
    window.  Like p-arylen-ref it wraps a p-magic-cell: reading returns the current
    substring (p-substr getter), writing replaces that region of STR in place
    (4-arg p-substr).  STR must be a box for writes to propagate; START/LEN are
    fixed at refgen time (a fixed window), matching the common \\substr idiom."
-  (p-backslash
-   (make-p-box
-    (make-p-magic-cell
-     :kind :lvalue
-     :getter (lambda () (p-substr str start len))
-     :setter (lambda (v) (p-substr str start len v))))))
+  (p-backslash (p-substr-lvalue-cell str start len)))
 
 (defun p-pos-ref (var)
   "Perl \\pos(VAR) — a live reference to VAR's /g match-position magic.  Reading
    returns the current pos (or undef); writing sets it.  VAR must be a box."
-  (p-backslash
-   (make-p-box
-    (make-p-magic-cell
-     :kind :lvalue
-     :getter (lambda () (let ((p (p-pos var))) (if p p *p-undef*)))
-     :setter (lambda (v) (p-pos var v))))))
+  (p-backslash (p-pos-lvalue-cell var)))
 
 (defun p-vec-ref (str offset bits)
   "Perl \\vec(STR, OFFSET, BITS) — a live reference to a vec() lvalue element.
    Reading returns the element value (p-vec); writing stores it (p-vec-set).
    STR must be a box; OFFSET/BITS are fixed at refgen time."
-  (p-backslash
-   (make-p-box
-    (make-p-magic-cell
-     :kind :lvalue
-     :getter (lambda () (p-vec str offset bits))
-     :setter (lambda (v) (p-vec-set str offset bits v))))))
+  (p-backslash (p-vec-lvalue-cell str offset bits)))
 
 (defun p-refgen-list (val)
   "Perl \\(LIST) — distribute reference generation over list elements.

@@ -1,3 +1,7 @@
+;;;; Copyright (c) 2025-2026
+;;;; This is free software; you can redistribute it and/or modify it
+;;;; under the same terms as the Perl 5 programming language system itself.
+
 ;;;; skip-registry.lisp — declarative registry of documented not-supported tests.
 ;;;;
 ;;;; Instead of hand-editing perl-tests/*.t to disable tests PCL deliberately does
@@ -9,7 +13,8 @@
 ;;;;
 ;;;; Each entry: (DESCRIPTION-REGEX  :CATEGORY  "reason — cite docs/not-supported.md").
 ;;;; Categories: :principle9 (error detection of invalid Perl), :error-msg,
-;;;; :warning-emit, :read-only, :utf8, :destroy-gc, :lvalue, :alias, :tie.
+;;;; :warning-emit, :read-only, :utf8, :destroy-gc, :lvalue, :alias, :tie,
+;;;; :xs (XS / C-level: pointer pack types, DynaLoader, etc.).
 
 (in-package :pcl)
 
@@ -164,6 +169,91 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("read-only ref|aliased to literal"
                  :read-only
                  "assignment to a literal-aliased value / weaken of a read-only ref must die 'Modification of a read-only value' — read-only scalars not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' / 'Internals::* C-level introspection'."))
+
+;; substr.t — documented not-supported failures.  The for(substr())/\substr
+;; lvalue-aliasing rows are now IMPLEMENTED (session: p-substr-lvalue-cell with
+;; edit-tracking) and NOT skipped.  HELD BACK as fix targets, deliberately NOT
+;; registered:
+;;   - [perl #62646] huge 32-bit-overflow offsets (substr($a,0xffffffff,1) → undef
+;;     + "substr outside of string" warning): out-of-range-offset semantics are
+;;     potentially fixable (PCL returns '' not undef), entangled with warning
+;;     emission — discuss before writing off (CLAUDE.md principle 4).
+(register-skips "substr.t"
+                ;; perl #24346: `sub { $_[0]=... }->(scalar substr ...)` writes the
+                ;; substr lvalue through @_ — needs @_ pass-by-alias.
+                ("scalar does not affect lvalueness of substr"
+                 :alias
+                 "modifying $_[0] (a scalar-substr lvalue) inside a sub must write back through @_ — @_ elements are copies in PCL. not-supported.md: '@_ argument aliasing'.")
+                ;; perl #24200 / #128260: user `: lvalue` subs returning substr, and
+                ;; substr/\substr on $#array (arylen) or an lvalue sub.
+                (346 :lvalue
+                     "user `sub bar : lvalue { substr ... }` then `bar = \"XXX\"` — user-defined lvalue subs are not implemented. not-supported.md: 'Lvalue subroutines'.")
+                (391 :lvalue "substr($#ta,0,2)=23 — substr as an lvalue on $#array (arylen) magic. not-supported.md: 'Lvalue subroutines' / arylen magic.")
+                (392 :lvalue "substr($#ta,0,2)=~s/// — substr-lvalue on arylen via s///. not-supported.md: 'Lvalue subroutines'.")
+                (393 :lvalue "substr($#ta,0,2,23) — 4-arg substr on arylen. not-supported.md: 'Lvalue subroutines'.")
+                (394 :lvalue "ta_tindex() = 23 — user `: lvalue` sub returning $#ta. not-supported.md: 'Lvalue subroutines'.")
+                (395 :lvalue "substr(ta_tindex(),0,2)=23 — substr-lvalue on an lvalue sub. not-supported.md: 'Lvalue subroutines'.")
+                (396 :lvalue "substr(ta_tindex(),0,2)=~s/// — substr-lvalue on an lvalue sub via s///. not-supported.md: 'Lvalue subroutines'.")
+                (397 :lvalue "substr(ta_tindex(),0,2,23) — 4-arg substr on an lvalue sub. not-supported.md: 'Lvalue subroutines'.")
+                ;; perl #128260: \substr of a whole hash/array (stringified aggregate).
+                ("\\\\substr %h"
+                 :lvalue
+                 "${\\substr %h, 0} — \\substr of a stringified hash (perl #128260 assertion). not-supported.md: 'Lvalue subroutines'.")
+                ("\\\\substr @a"
+                 :lvalue
+                 "${\\substr @a, 0} — \\substr of a stringified array (perl #128260 assertion). not-supported.md: 'Lvalue subroutines'.")
+                ;; \substr does not coerce a glob/ref arg — Perl itself defers this.
+                ("does not coerce its glob arg just yet"
+                 :lvalue
+                 "\\substr *glob must not coerce the glob (ref \\$x stays GLOB) — glob/substr coercion not modelled. not-supported.md: 'Lvalue subroutines'.")
+                ;; DESTROY must fire when an lvalue-substr target is replaced.
+                ("Timely scalar destruction with lvalue substr"
+                 :destroy-gc
+                 "DESTROY must fire when the object held by a substr-lvalue target is overwritten — PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
+                ;; 4-arg substr replacement on a tied (Tie::StdScalar) magical value.
+                (142 :tie
+                     "substr($tied,0,5,'') must STORE back through the tie so the tied value becomes 'last' — 4-arg substr does not write through tie magic. not-supported.md: 'DESTROY/tie magic' (tie write-through)."))
+
+;; length.t — UTF-8 / `use bytes` / `pack "U"` byte-vs-character tests.  PCL has
+;; no per-scalar UTF-8 flag (CL strings are always Unicode), `use bytes` is not
+;; implemented, and `pack "U", N` yields the UTF-8 bytes as characters rather than
+;; a flagged 1-char string.  So `length` under `use bytes` (byte count) and the
+;; byte_utf8a_to_utf8n string comparisons cannot match Perl.  All unnamed -> keyed
+;; by test number.  not-supported.md: 'Unicode semantics differences'
+;; (utf8 flag / `use bytes` / `pack 'U'`).  NOT registered (other reasons / fix
+;; targets): 34 (length of tied undef into a reused TARG), 36/42 (uninit-stringify
+;; warning emission).
+(register-skips "length.t"
+                (7  :utf8 "length(pack 'U',0xFF) must be 1 char -- PCL's pack 'U' yields UTF-8 bytes as chars (got 2). not-supported.md: 'Unicode semantics differences' (pack 'U').")
+                (10 :utf8 "length(pack 'U',0xB6) must be 1 char -- pack 'U' yields UTF-8 bytes as chars. not-supported.md: 'Unicode semantics differences' (pack 'U').")
+                (14 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc4\\x80') -- no per-scalar UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (15 :utf8 "use bytes: length(\\x{100}) must be 2 bytes -- use bytes not implemented (got 1 char). not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (17 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc4\\x80\\xc2\\xb6') -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (18 :utf8 "use bytes: length(\\x{100}\\x{B6}) must be 4 bytes (got 2 chars) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (20 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc2\\xb6\\xc4\\x80') -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (21 :utf8 "use bytes: length(\\x{B6}\\x{100}) must be 4 bytes (got 2 chars) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (23 :utf8 "use bytes: length(tied \\x{263A}) must be 3 bytes (got 1 char) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes)."))
+
+;; infnan.t — pack/unpack pointer types `p` and `P`.  `pack 'p'/'P'` packs a raw
+;; memory address; under CL's moving GC there are no stable addresses, so PCL
+;; throws "Invalid type 'p'/'P'" and the eval-wrapped roundtrip yields undef
+;; (expected "Inf"/"-Inf"/"NaN").  not-supported.md: 'pack/unpack — pointer types
+;; (p/P)'.  These six are the file's only failures.
+(register-skips "infnan.t"
+                ("^pack [pP] "
+                 :xs
+                 "unpack(...,pack 'p'/'P',$inf_or_nan) roundtrips a raw pointer -- no stable addresses under a moving GC; PCL throws 'Invalid type'. not-supported.md: 'pack/unpack — pointer types (p/P)'."))
+
+;; push.t — push onto an Internals::SvREADONLY array must croak "Modification of
+;; a read-only value".  PCL emulates neither Internals::SvREADONLY nor a per-array
+;; read-only flag, so the push succeeds and $@ stays empty.  This is the file's
+;; only failure.  not-supported.md: 'Internals::* C-level introspection' /
+;; 'Read-only constants'.  (The sibling "can push empty list onto readonly array"
+;; legitimately passes — a no-op push raises nothing — and is excluded by the regex.)
+(register-skips "push.t"
+                ("croak when pushing onto readonly array"
+                 :read-only
+                 "push onto an Internals::SvREADONLY array must die 'Modification of a read-only value' -- read-only arrays / Internals::* not emulated. not-supported.md: 'Internals::* C-level introspection'."))
 
 ;; array.t — documented not-supported failures (sparse arrays / @_ aliasing / SV
 ;; identity / error-detection). HELD BACK as fix targets, deliberately NOT registered:

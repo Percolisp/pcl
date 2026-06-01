@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+
+# Copyright (c) 2025-2026
+# This is free software; you can redistribute it and/or modify it
+# under the same terms as the Perl 5 programming language system itself.
+
 # runt — transpile and run a single perl-tests/*.t file against PCL.
 #
 # Usage:  ./runt loopctl          # or: ./runt loopctl.t

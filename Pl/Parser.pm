@@ -4482,6 +4482,51 @@ sub _process_c_style_for {
 }
 
 
+# If a foreach list is a single aliasable lvalue, return (FROM-HEAD, TO-HEAD) so
+# the caller can rewrite the generated call head to its box-returning form, making
+# the loop variable alias the live container (write-through).  Otherwise ().
+# Two shapes are recognised (AST-level, per the codegen-style preference — inspect
+# the PPI nodes, don't pattern-match the generated CL):
+#   - a magic-lvalue builtin call: substr(...) / pos(...) / vec(...)
+#     -> p-substr -> p-substr-lvalue-cell, etc.  (Word + argument-List)
+#   - a single hash/array ELEMENT: $h{k} / $a[i]
+#     -> p-gethash -> p-gethash-box  /  p-aref -> p-aref-box  (Symbol + Subscript)
+# A two-part match guards against multi-element lists like `for (substr(...), $y)`.
+# Slices (@a[...], @h{...}) and `values %h` are intentionally NOT handled here —
+# they flatten through the shared copy machinery; see docs/foreach-aliasing.md.
+sub _foreach_alias_rewrite {
+  my ($list_parts) = @_;
+  my @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } @$list_parts;
+  # A sole list element arrives wrapped in a PPI::Statement (or Expression) —
+  # `for (substr($x,1,3))` gives one PPI::Statement('substr($x,1,3)'). Unwrap it.
+  while (@sig == 1
+         && (ref($sig[0]) eq 'PPI::Statement'
+             || ref($sig[0]) eq 'PPI::Statement::Expression')) {
+    @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig[0]->children;
+  }
+  return () unless @sig == 2;
+
+  # Magic-lvalue builtin call: Word + argument-List.
+  if (ref($sig[0]) eq 'PPI::Token::Word'
+      && ref($sig[1]) eq 'PPI::Structure::List') {
+    my %head = (substr => 'p-substr', pos => 'p-pos', vec => 'p-vec');
+    my $h = $head{ $sig[0]->content } or return ();
+    return ($h, "$h-lvalue-cell");
+  }
+
+  # Scalar element of a named hash/array: $-sigil Symbol + Subscript.
+  # {k} -> hash element (p-gethash-box); [i] -> array element (p-aref-box).
+  if (ref($sig[0]) eq 'PPI::Token::Symbol'
+      && $sig[0]->content =~ /^\$/
+      && ref($sig[1]) eq 'PPI::Structure::Subscript') {
+    my $sub = $sig[1]->content;
+    return ('p-gethash', 'p-gethash-box') if $sub =~ /^\{/;
+    return ('p-aref',    'p-aref-box')    if $sub =~ /^\[/;
+  }
+
+  return ();
+}
+
 # Process foreach-style loop: for/foreach VAR (LIST) { }
 sub _process_foreach_loop {
   my $self  = shift;
@@ -4555,6 +4600,20 @@ sub _process_foreach_loop {
   # Skip if it's already a vector, array, hash, range, or function call
   if ($list_cl !~ /^\s*\(/ && $list_cl !~ /^[@%]/) {
     $list_cl = "(vector $list_cl)";
+  }
+
+  # foreach-aliasing of a single lvalue: `for (substr($x,1,3)) { $_ = ... }` or
+  # `for ($h{k}) { $_ = ... }` must bind $_ to the live lvalue (substr window /
+  # hash or array slot) so writing $_ writes through — matching how `for (@a) {
+  # $_ = ... }` aliases array elements.  A plain rvalue form ((p-substr ...) /
+  # (p-gethash ...)) yields a VALUE in a fresh box, so the write is lost.  Detect
+  # the shape at the AST level and rewrite the (one) generated call head to its
+  # box-returning form; %p-flatten-for-list keeps the single box and p-foreach
+  # binds $_ to it.  The outer call appears before its args, so the first
+  # occurrence is the right one; the trailing space avoids matching e.g.
+  # (p-substr-ref / (p-gethash-box .
+  if (my ($from, $to) = _foreach_alias_rewrite(\@list_parts)) {
+    $list_cl =~ s/\(\Q$from\E /($to /;
   }
 
   # Build label argument if present

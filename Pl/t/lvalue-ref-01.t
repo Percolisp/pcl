@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -90,3 +90,28 @@ test_cl('stringify of \substr ref matches LVALUE(0x..)',
 # --- arylen ref must STILL be SCALAR, not LVALUE (kind nil) ---
 test_cl('arylen \$#a ref stays SCALAR (not LVALUE)',
     q{my @a=(1,2,3); print ref(\$#a),"\n";}, "SCALAR\n");
+
+# --- foreach aliasing of a substr() lvalue (perl #24346) ---
+# `for (substr(...)) { $_ = ... }` must bind $_ to the substr lvalue window so
+# the assignment writes through, mirroring `for (@a) { $_ = ... }`.  Uses the same
+# bare magic-cell as \substr (p-substr-lvalue-cell), via the foreach codegen.
+like(transpile('my $x="abcdef"; for (substr($x,1,3)) { $_="XX" }'),
+    qr/\(p-substr-lvalue-cell /, 'for(substr) compiles to p-substr-lvalue-cell');
+test_cl('for(substr) write-through to source',
+    q{my $x="abcdef"; for (substr($x,1,3)) { $_="XX" } print "$x\n";}, "aXXef\n");
+test_cl('for(substr) reads current window value',
+    q{my $x="abcdef"; for (substr($x,1,3)) { print "$_\n" }}, "bcd\n");
+# Edit-tracking: a fixed positive-length window re-anchors to the written length,
+# so the second assignment replaces just the 2 chars written by the first.
+test_cl('for(substr) edit-tracking (shrink then re-assign)',
+    q{my $x="abcdef"; for (substr($x,1,3)) { $_="XX"; $_="Y" } print "$x\n";},
+    "aYef\n");
+# A positive-start to-end window keeps tracking from that offset to the new end.
+test_cl('for(substr) positive-start to-end tracks appended text',
+    q{my $x="abcdef"; for (substr($x,1)) { $_="XX"; $x.="z"; print "$_\n" }},
+    "XXz\n");
+# A negative start re-anchors from the END after an edit (perl #24346): the
+# window becomes substr($x,-2), so after appending it reads the last 2 chars.
+test_cl('for(substr) negative start re-anchors from end',
+    q{my $x="abcdef"; for (substr($x,-5)) { $_="XX"; $x.="z"; print "$_\n" }},
+    "Xz\n");
