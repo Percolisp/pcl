@@ -1,77 +1,23 @@
-# PCL — Perl to Common Lisp Transpiler
+# PCL — A Perl-to-Common-Lisp Compiler
 
-**PCL** converts Perl source code to Common Lisp, aiming for enough compatibility to run real CPAN modules. It parses Perl with [PPI](https://metacpan.org/pod/PPI), builds an AST with proper operator precedence, and generates readable CL code.
-
-There are two motivations. The first is simply running Perl code in a Common Lisp environment. The second is that the generated CL serves as a **portable intermediate representation**: Common Lisp is high-level enough to express Perl semantics cleanly, yet is easy to parse — lowering the threshold for compiling Perl to new platforms.
+**PCL is a from-scratch source-to-source compiler that turns Perl into readable Common Lisp.** It parses Perl with [PPI](https://metacpan.org/pod/PPI), builds an AST with correct operator precedence, and generates CL that a Perl programmer can still read.
 
 ```bash
-$ echo 'my @a = (1..5); print join(", ", map { $_ * 2 } @a), "\n";' | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
-2, 4, 6, 8, 10
+$ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
+    | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
+2,4,6,8,10
 ```
 
-## What Works
+### Why Common Lisp?
 
-- **Operators** — all 92 Perl precedence levels, chained comparisons, string ops
-- **Control flow** — `if/elsif/unless`, `while/until`, `for/foreach`, loop labels, `next/last/redo`
-- **Subroutines** — signatures, defaults, prototypes, closures, `state` variables
-- **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors, postfix deref (`->@*`, `->%*`, `->$*`)
-- **OO** — `bless`, method calls, `@ISA`, C3 MRO, multiple inheritance, `SUPER::`, `AUTOLOAD`, `UNIVERSAL`, `use overload`
-- **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `chomp/chop`, `length/substr/index`, `each/keys/values`, `open/close/readline`, `die/eval`, `tie/untie`, regex `m//`/`s///`/`tr///`, and more
-  - `pack`/`unpack` (most formats including integer, float, string, BER, UTF-8)
-  - Inf/NaN handling in arithmetic, `int()`, range operators, `sprintf`, `pack`
-- **String interpolation** — `"$ref->[N]"`, `"$ref->{key}"`, chained arrow derefs in strings
-- **Filehandles** — bareword (`FH`) and lexical (`my $fh`) handles, `__DATA__`/`__END__`
-- **Packages** — `package Foo { }` block scoping, `use constant`, `BEGIN`, `use`/`require`, `use base`/`use parent`
-- **Special vars** — `$_`, `@_`, `$!`, `$/`, `$\`, `$,`, `$"`, `$0`, `$.`, `@INC`, `%ENV`, …
-- **Regex** — full `m//`/`s///`/`tr///` with modifiers, named captures `%+`, `$1`…
-- **String `eval`** — `eval "code"` transpiles and runs at runtime via a persistent subprocess
-- **`local`** — scalars, arrays, hashes, hash/array elements, typeglobs
+Two reasons:
 
-## Known Gaps
+1. **Compiling to a high-level language keeps the compiler tractable.** CL is expressive enough to model Perl's semantics directly, so PCL can stay a manageable size instead of growing into a full interpreter.
+2. **Lisp is trivial to parse**, which makes the generated CL a good *intermediate representation* — a stepping stone for compiling Perl onward to other environments.
 
-- **`pack`/`unpack`** — implemented in Perl, transpiled to CL. Most formats pass; remaining gaps: U format, long double D, UTF-8 byte counting.
-- **`wantarray`** — `eval "string"` void context not yet propagated, rest seems ok.
-- **XS/C extensions** — anything that requires compiled C code won't work
+### There is no bytecode engine
 
-## Limitations
-
-### Deprecated or removed in modern Perl
-
-These features were removed in Perl 5.34–5.38 and are not implemented:
-
-| Feature | Status in Perl |
-|---------|---------------|
-| `given`/`when`, `~~` smart match | Removed in 5.38 |
-| `?pattern?` one-match regex | Removed in 5.38 |
-| `reset()` for `?pattern?` | Removed in 5.38 |
-
-### Intentional design decisions
-
-- **`@_` argument aliasing** — PCL copies args into `@_`; `$_[0] = 42` does not modify the caller's variable. CL function arguments are values, not aliases.
-- **`caller()` location** — package name is correct; filename is always `"(unknown)"`, line always `0`. CL does not expose Perl-compatible source locations at runtime.
-- **Error message text** — PCL does not guarantee error messages match Perl's wording or the `" at FILE line N"` suffix. PCL targets correct execution of valid CPAN code, not error compatibility.
-- **`$SIG{__DIE__}` handler** — not invoked; would require CL condition restarts.
-- **refaliasing** — experimental.
-
-### Not emulated (Perl internals / niche features)
-
-- **Boolean identity** — `!0`/`!1` return fresh values each call; taking `\!0` twice gives different addresses.
-- **Read-only scalars** — `Internals::SvREADONLY`, `\undef` stash tricks, and read-only constants via `BEGIN { $::{z} = \undef }` are not emulated.
-- **`prototype()`** — always returns `undef`; prototype strings are not stored at parse time.
-- **`__SUB__`** — not recognized; use a named sub or a captured `$self = sub { ... }`.
-- **Lvalue subs** — `: lvalue` attribute not implemented; use four-arg `substr` instead.
-- **`format`/`write`** — Perl's report-formatting system is essentially unused in modern CPAN code; not implemented.
-- **Regex code blocks** — `(?{code})` and `(??{code})` are not supported; CL-PPCRE has no equivalent hook.
-- **Regex locale modifiers** — `/a`, `/d`, `/l`, `/u` are accepted but ignored; CL-PPCRE always uses Unicode semantics.
-- **Hex float literals** — `0x1.8p+1` — PPI does not tokenize these correctly.
-- **`use integer` edge cases** — extreme shift counts and C-level overflow corner cases differ from Perl's C runtime.
-
-### Unicode
-
-CL strings are always Unicode; Perl's per-scalar UTF-8 flag does not exist. Divergences:
-- `utf8::encode`/`utf8::decode` — the byte/character distinction is not meaningful in PCL.
-- `use bytes` — not implemented.
-- `\p{IsWord}` in CL-PPCRE does not reliably match non-ASCII word characters.
+This is a genuinely new implementation. PCL does **not** embed, link, or reimplement Perl's runtime or opcode interpreter. It is a from-scratch source-to-source compiler: Perl text in, Common Lisp text out.
 
 ## Quick Start
 
@@ -83,36 +29,16 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run test suite (77 files, 2994 tests)
+# Run the internal test suite (91 files, 3168 tests)
 prove -j8 Pl/t/
 ```
-
-## Architecture
-
-```
-Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
-                          ↓                                  ↓
-                  Pl::BlockAnalyzer                 pcl-runtime.lisp
-               (two-phase scope analysis)       (Perl semantics in CL)
-```
-
-| Module | Purpose |
-|--------|---------|
-| `Pl/Parser.pm` | Statement-level parser |
-| `Pl/PExpr.pm` | Expression parser, operator precedence |
-| `Pl/BlockAnalyzer.pm` | Two-phase block analysis (declaration scoping) |
-| `Pl/ExprToCL.pm` | Code generator |
-| `cl/pcl-runtime.lisp` | Runtime library (~7000 lines of CL) |
-| `cl/pack-impl.pl` | pack/unpack implementation (Perl, transpiled to CL) |
-
-Generated code is intentionally readable — Perl variables keep their sigils (`$x`, `@array`, `%hash`), and functions map to `pl-` prefixed names (`pl-print`, `pl-push`, …).
 
 ## Example
 
 ```perl
 # input.pl
 package Animal;
-sub new { bless { name => $_[1] }, $_[0] }
+sub new   { bless { name => $_[1] }, $_[0] }
 sub speak { "I am " . $_[0]->{name} }
 
 package Dog;
@@ -129,13 +55,82 @@ $ ./pl2cl input.pl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
 I am Rex and I bark
 ```
 
+## What Works
+
+A teaser across the big areas — most of Perl's day-to-day surface is in:
+
+- **Operators** — all 92 precedence levels, chained comparisons, string ops
+- **Control flow** — `if/unless`, `while/until`, `for/foreach` (aliasing `$_` to elements, incl. hash/array elements and `substr`/`pos`/`vec` lvalues), loop labels, `next/last/redo`
+- **Subroutines** — signatures, defaults, closures, `state` variables
+- **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors, postfix deref, and live lvalue refs (`\substr`, `\pos`, `\vec`, `\$#array`)
+- **OO** — `bless`, method calls, `@ISA` with C3 MRO, multiple inheritance, `SUPER::`, `AUTOLOAD`, `use overload`
+- **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `length/substr/index`, `each/keys/values`, `open/readline`, `die/eval`, `tie`, regex `m//`/`s///`/`tr///`, `pack`/`unpack`
+- **Regex** via CL-PPCRE — modifiers, named captures `%+`, `$1`…
+- **Modules & packages** — `package Foo { }`, `use constant`, `BEGIN`, `use`/`require`, `use parent`
+- **`eval`** — both block `eval { }` and string `eval "code"` (transpiled and run at runtime)
+- **`local`** — scalars, arrays, hashes, hash/array elements, typeglobs
+
+*See [`REMAINING.md`](REMAINING.md) for the full picture.*
+
+## Not Supported
+
+A few of the biggest items:
+
+- **XS / C extensions** — anything requiring compiled C code (the eventual goal; see the roadmap).
+- **`@_` argument aliasing** — args are copied into `@_`; `$_[0] = 42` does not write back to the caller.
+- **Exact error-message text** — PCL targets correct execution, not byte-for-byte error wording or the `" at FILE line N"` suffix.
+- **`DESTROY` on garbage collection** — CL's GC gives no deterministic finalizer timing.
+- **Removed Perl features** — `given`/`when`, the `~~` smart-match, and `?pattern?` (gone in Perl 5.38).
+
+*Full list and rationale: [`REMAINING.md`](REMAINING.md) and [`docs/not-supported.md`](docs/not-supported.md).*
+
+## How It Is Tested
+
+Perl ships an excellent, thorough test suite (`t/op/`, `t/base/`, …). PCL compiles those test files to Common Lisp and runs them — using Perl's own expectations as the oracle for compatibility.
+
+Some tests exercise features that are deliberately out of scope (e.g. CL-PPCRE has no executable code blocks inside regexes, `(?{...})`, and removed/experimental features aren't implemented). Those tests have to be skipped — which means some features can quietly end up *under-covered*, something that has to be reviewed with care rather than assumed away.
+
+The safety net is the **skip-registry** ([`cl/skip-registry.lisp`](cl/skip-registry.lisp)): it records exactly *which* tests are skipped and *why*, still runs the underlying assertion, and flags itself **stale** the moment a skipped test starts passing. So "what is uncovered" is tracked, not guessed. (See [`docs/test-skip-registry.md`](docs/test-skip-registry.md).)
+
+## Architecture
+
+```
+Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
+                          ↓                                ↓
+                  Pl::BlockAnalyzer               cl/pcl-runtime.lisp
+               (two-phase scope analysis)        (Perl semantics in CL)
+```
+
+| Module | Purpose |
+|--------|---------|
+| `Pl/Parser.pm` | Statement-level parser |
+| `Pl/PExpr.pm` | Expression parser, operator precedence |
+| `Pl/BlockAnalyzer.pm` | Two-phase block analysis (declaration scoping) |
+| `Pl/ExprToCL.pm` | Code generator |
+| `cl/pcl-runtime.lisp` | Runtime library (~10,000 lines of CL) |
+| `cl/pack-impl.pl` | `pack`/`unpack`, written in Perl and transpiled to CL |
+
+Generated code is intentionally readable: Perl variables keep their sigils (`$x`, `@array`, `%hash`), and built-ins map to `pl-`/`p-` prefixed names (`pl-print`, `p-push`, …). Today **every variable is a small data structure** (a "box") so it can carry both a numeric and a string value and be referenced — see the roadmap for where that goes next.
+
 ## Status
 
-**Beta.** The internal test suite runs 2994 tests across 77 files, all passing. A broad sweep against Perl's own test suite (`t/op/`, `t/base/`, etc.) passes **~90%** of tests, with 58 files passing completely.
+This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the end is visible on the horizon — and hopefully not a mirage.
 
-My Common Lisp experience is from long ago — that part is exclusively Claude.
+Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **66 files passing completely**.
 
-*(I'll put it on CPAN later, when it is closer to ready.)*
+A small illustration of how it gets done: when implementing `pack()` in CL proved fiddly even with the original C source in hand, the trick was to write `pack` *in Perl* and let PCL translate it to CL. It worked — eating our own dog food.
+
+My own Common Lisp experience is from long ago; that side of the work is essentially all Claude.
+
+*(It'll go on CPAN later, once it's closer to ready.)*
+
+## Roadmap — after it works reliably
+
+These come *after* compatibility is solid:
+
+- **A smarter code generator.** Right now every variable is a boxed data structure (so it can hold a number, a string, and be referenced). With analysis, variables that are only ever numeric can be compiled to plain native numbers — and PCL could become genuinely fast.
+- **Cleaner intermediate code.** Lean on a small set of high-level CL macros for the generated output, making it an easy target for compiling Perl onward to *other* environments.
+- **The Eldorado: XS / C extensions.** Get compiled C (XS) working and the full CPAN ecosystem opens up on new platforms. Here I'd welcome help from people who know XS and CL internals better than I do.
 
 ## License
 

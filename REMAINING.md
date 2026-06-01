@@ -5,10 +5,11 @@ A reader-friendly overview of what PCL does and, more importantly, what it
 tests, see [`docs/not-supported.md`](docs/not-supported.md); this file is the
 short version.
 
-**Current status:** 85 PCL regression-test files (≈3072 tests), all passing.
+**Current status:** 91 PCL regression-test files (≈3168 tests), all passing.
 Against Perl's own test suite (`perl-tests/`, 106 files) PCL passes the large
-majority of individual tests; remaining failures are dominated by the
-deliberate non-support items below plus a handful of open bugs tracked in
+majority of individual tests (~95% of those it runs, 66 files passing
+completely); remaining failures are dominated by the deliberate non-support
+items below plus a handful of open bugs tracked in
 [`docs/sweep-bug-catalog.md`](docs/sweep-bug-catalog.md).
 
 ---
@@ -20,8 +21,10 @@ PCL covers the bulk of everyday Perl. In broad strokes:
 - **Expressions:** all operators with correct precedence, ternary, ranges,
   string/list repetition, every number literal form (hex/octal/binary/underscored).
 - **Control flow:** `if`/`elsif`/`else`/`unless`, `while`/`until`, C-style and
-  list `for`/`foreach`, `last`/`next`/`redo`, loop labels, `goto &sub` and
-  `goto LABEL` (tagbody).
+  list `for`/`foreach` (aliasing `$_`/the loop var to the live element so writes
+  propagate — arrays, scalars, hash/array elements, and `substr`/`pos`/`vec`
+  lvalues), `last`/`next`/`redo`, loop labels, `goto &sub` and `goto LABEL`
+  (tagbody).
 - **Data:** scalars, arrays, hashes, references and dereferencing, slices,
   anonymous `[]`/`{}`, nested structures, autovivification.
 - **Subs:** signatures with defaults, old-style prototypes (including `&` block
@@ -102,8 +105,10 @@ PCL loads only pure-Perl modules:
   GC) and **80-bit long double `D`** (SBCL has only 64-bit doubles).
 
 ### Niche syntax and introspection
-- **Lvalue subs (`:lvalue`) and `substr`-as-lvalue** — use the 4-arg
-  `substr($s,$o,$l,$repl)` form instead.
+- **User lvalue subs (`: lvalue`)** — not implemented. (The *built-in* magic
+  lvalues `substr`/`pos`/`vec` **do** work: direct assignment
+  `substr($s,$o,$l)=…`, live write-through refs `\substr`/`\pos`/`\vec`, and
+  `foreach` aliasing all supported.)
 - **`prototype()`** always returns `undef` (the *behaviour* of prototypes works;
   only the introspection string is missing).
 - **`__SUB__`**, **`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`** — not recognized.
@@ -129,8 +134,10 @@ Genuinely fixable gaps still being worked are tracked in
 [`docs/sweep-bug-catalog.md`](docs/sweep-bug-catalog.md) and
 [`docs/session-log.md`](docs/session-log.md). Current notable items include
 arylen magic for freed/symbolic-ref arrays, the `map +(LIST)` unary-plus parse
-case, and assorted `sprintf` warning-marker outputs. These are fix targets, not
-declared limitations.
+case, assorted `sprintf` warning-marker outputs, and `foreach` aliasing of
+*slices* (`@a[…]`/`@h{…}`) and `values %h` (single elements already alias; see
+[`docs/foreach-aliasing.md`](docs/foreach-aliasing.md)). These are fix targets,
+not declared limitations.
 
 ---
 
