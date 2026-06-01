@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -93,3 +93,32 @@ test_cl('too many arguments message',
 test_cl('flexible "at most" message for optional-param sub',
     "$H\nsub t (\$a = 1) { 1 }\neval(\"t(5, 6)\");\nprint \$\@;",
     "Too many arguments for subroutine 'main::t' (got 2; expected at most 1) at (eval 1) line 1.\n");
+
+# ── Parameters are mutable lexicals (spec §4.1) ──────────────────────────────
+
+# 11: assigning to a parameter actually mutates it (was a silent no-op).
+test_cl('parameter is mutable (arg given)',
+    "$H\nsub f (\$x) { \$x = \$x + 1; return \$x }\nprint f(10), \"\\n\";",
+    "11\n");
+
+# 12: mutating a parameter that took its default works too.
+test_cl('parameter is mutable (default taken)',
+    "$H\nsub g (\$x = 5) { \$x += 100; return \$x }\nprint g(), \"|\", g(10), \"\\n\";",
+    "105|110\n");
+
+# 13: parameters are COPIES of @_ — mutating one must not touch the caller's var.
+test_cl('parameter mutation does not corrupt the caller',
+    "$H\nsub h (\$x) { \$x = 99 }\nmy \$v = 7; h(\$v); print \$v, \"\\n\";",
+    "7\n");
+
+# 14: assigning to a later param inside a default updates the param (not a global).
+test_cl('assignment in a default binds the param',
+    "$H\nour \$a = 123;\nsub t (\$a = 222, \$b = (\$a = 333)) { \"\$a/\$b\" }\nprint eval(\"t()\"), \" g=\", \$a, \"\\n\";",
+    "333/333 g=123\n");
+
+# 15: `local \$G = …` in a default localises \$G for the call and restores after
+#     (spec §4.2) — was permanently clobbering the global.
+test_cl('local in a signature default restores on sub exit',
+    "$H\nour \$a = 123;\nsub t (\$b = (local \$a = \$a + 1)) { \"\$a/\$b\" }\n"
+  . "my \$r = eval(\"t()\");\nprint \$r, \" then \", \$a, \"\\n\";",
+    "124/124 then 123\n");

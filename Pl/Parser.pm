@@ -4892,15 +4892,28 @@ sub _process_sub_statement {
     $self->_emit("(p-check-arity \"$sig_qname\" (length \@_) $sig_min $sig_max $sig_flex)");
     # Bind the named params positionally from @_ via a sequential let*
     # (so an optional default can reference an earlier param, e.g. $r = f($c)).
+    #
+    # Each scalar param is copied into a FRESH box via p-copy-scalar-arg: Perl
+    # params are copies of @_ (`my ($x)=@_`), so the param must be its own
+    # mutable box.  The param names are also registered in _let_bound_vars (see
+    # below) so the body's `$x = ...` lowers to p-my-= (box-set) instead of
+    # p-scalar-= — the latter's (proclaim special) would globalise the param and
+    # make the write a silent no-op.  See docs/variable-declarations-spec.md §4.1.
     my @binds;
+    my @sig_param_names;
+    my @local_wraps;          # `local $G = …` defaults: localise $G for the body
     my $idx = 0;
     for my $p (@sig_req) {
-      push @binds, "($p->{name} (aref \@_ $idx))";
+      push @binds, "($p->{name} (p-copy-scalar-arg (aref \@_ $idx)))";
+      push @sig_param_names, $p->{name};
       $idx++;
     }
     for my $p (@sig_opt) {
       push @binds,
-        "($p->{name} (if (> (length \@_) $idx) (aref \@_ $idx) $p->{default_cl}))";
+        "($p->{name} (p-copy-scalar-arg (if (> (length \@_) $idx) (aref \@_ $idx) $p->{default_cl})))";
+      push @sig_param_names, $p->{name};
+      push @local_wraps, { var => $p->{local_var}, name => $p->{name}, idx => $idx }
+        if $p->{local_var};
       $idx++;
     }
     if ($sig_slurpy) {
@@ -4912,6 +4925,19 @@ sub _process_sub_statement {
       $self->indent_level($self->indent_level + 1);
       $sig_wrap_closes++;
     }
+    # `local $G = RHS` default: localise $G to the param's value (= RHS) when the
+    # default was taken, restored on sub exit via CL dynamic unwinding.  When an
+    # arg was supplied the default did not run, so $G is rebound to itself (a
+    # no-op rebinding that restores to the same box).  See spec §4.2.
+    for my $lw (@local_wraps) {
+      $self->_emit("(let (($lw->{var} (if (> (length \@_) $lw->{idx}) $lw->{var}"
+                 . " (p-box-for-local (unbox $lw->{name})))))");
+      $self->indent_level($self->indent_level + 1);
+      $sig_wrap_closes++;
+    }
+    # Scalar params are lexical 'my'-style boxes: record them so _emit rewrites
+    # their (p-scalar-= ...) to (p-my-= ...) for the duration of the body.
+    $self->{_sig_param_names} = \@sig_param_names;
   }
   # If using %_args, convert to @_ vector
   elsif ($needs_args_conversion) {
@@ -4932,6 +4958,16 @@ sub _process_sub_statement {
     local $self->{_current_state_vars} = { map { $_ => 1 } @state_vars };
     my $saved_renames = $self->environment->state_var_renames;
     $self->environment->state_var_renames(\%state_renames) if %state_renames;
+    # Register scalar signature params so the body's `$param = ...` is rewritten
+    # to p-my-= (box-set) by _emit, not p-scalar-=.  Kept in a SEPARATE set from
+    # _let_bound_vars: the latter gates nested-named-sub hoisting (a sub inside a
+    # `let` body stays inline to capture the lexicals), and params must NOT flip
+    # that gate — an independently-called inner named sub must still hoist.
+    local $self->{_sig_param_lexicals} = {
+      %{$self->{_sig_param_lexicals} // {}},
+      map { $_ => 1 } @{$self->{_sig_param_names} // []},
+    };
+    delete $self->{_sig_param_names};
     # Save package stack: inline 'package NAME;' inside a sub body must not leak
     my $saved_pkg_stack = [@{$self->environment->package_stack}];
     $self->_with_declarations($block, sub {
@@ -6005,8 +6041,10 @@ sub _emit {
   # of a lexical one, breaking closure capture.
   # p-my-= is a semantic macro (expands to box-set) that expresses intent for
   # other compiler backends reading the generated IR.
-  if ($line && $self->{_let_bound_vars}) {
-    for my $var (keys %{$self->{_let_bound_vars}}) {
+  if ($line && ($self->{_let_bound_vars} || $self->{_sig_param_lexicals})) {
+    my %lex = (%{$self->{_let_bound_vars} // {}},
+               %{$self->{_sig_param_lexicals} // {}});
+    for my $var (keys %lex) {
       my $pat = quotemeta("(p-scalar-= $var");
       $line =~ s/$pat(?=[\s)])/(p-my-= $var/g;
     }
@@ -6225,6 +6263,18 @@ sub _parse_signature {
       next;
     }
 
+    # A `local $G = RHS` default localises $G for the sub's dynamic extent (and
+    # the param's value is RHS).  PExpr would drop the `local` in expression
+    # position (clobbering $G permanently), so peel it off here: compile only the
+    # RHS as the default value and record the localised var for a body wrapper.
+    # See docs/variable-declarations-spec.md §4.2.
+    my $local_var;
+    if (defined $default_expr
+        && $default_expr =~ /^\s*\(?\s*local\s+(\$\w+)\s*=\s*(.+?)\s*\)?\s*$/s) {
+      $local_var    = $1;
+      $default_expr = $2;
+    }
+
     my $default_cl = undef;
     if (defined $default_expr) {
       # Compile the default expression to CL
@@ -6234,6 +6284,7 @@ sub _parse_signature {
     push @params, {
       name       => $name,
       default_cl => $default_cl,
+      local_var  => $local_var,
     };
 
     # Count mandatory params (before any optional, and not slurpy)

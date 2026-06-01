@@ -75,7 +75,7 @@ array.t	86	do {}: $# on freed array is undef	'-1'	undef
 array.t	88	do {}: msg	undef	^Attempt to set length of freed array
 array.t	87	do {}: number of warnings	'0'	'1'
 array.t	100	orphaned 1 is always undef	'42'	undef
-bless.t	68		'77326722643'	== 'D=GLOB(0x1201082653)'
+bless.t	68		'77341128131'	== 'D=GLOB(0x1201e3f5c3)'
 blocks.t	24	RT #2917: No constraint on how late INIT blocks can run	''	'in init'
 bop.t	144		'0'	'1'
 bop.t	158	    and turns off the UTF-8 flag		
@@ -108,7 +108,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x12025671cf)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x1202639b6f)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -156,7 +156,7 @@ caller.t	46	value from (caller 0)[9] (bitmask) works in ${^WARNING_BITS}	''	'1'
 caller.t	25	warnings match caller (all)		
 caller.t	24	warnings match caller (no bits)		
 concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
-concat2.t	2	RT #132385	'REF(0x1204c7bab3)REF(0x1204c7bc93)'	'AB'
+concat2.t	2	RT #132385	'REF(0x1204cdf133)REF(0x1204cdf313)'	'AB'
 delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
 delete.t	54	a b c also equivalent		
 delete.t	26	a b c equivalent		
@@ -181,7 +181,7 @@ hash.t	12	hash self-assign	''	'x:'
 hash.t	13	magic keys	'a:x:b:y'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1203529e13)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x12036ebb63)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -208,7 +208,7 @@ local.t	275	localised sub via stash
 local.t	278	localised sub via stash slice		
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1203632f53)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1203717ce3)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF NIL)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -290,7 +290,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x120105dfb3)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x12011f3b23)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -302,8 +302,8 @@ push.t	32	croak when pushing onto readonly array	''	^Modification of a read-only
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'77322938915'	'0'
-qr.t	27	int upgraded to regexp	'77322942995'	'0'
+qr.t	25	double upgraded to regexp	'77324697011'	'0'
+qr.t	27	int upgraded to regexp	'77324701091'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -321,11 +321,11 @@ ref.t	182	PVBM is not a HASH ref
 ref.t	180	PVBM is not a SCALAR ref		
 ref.t	181	PVBM is not an ARRAY ref		
 ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1203147a93)'	'SCALAR(0x1203147ad3)'
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1203267a93)'	'SCALAR(0x1203267ad3)'
 ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
 ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x1203aa3a63)'	^VSTRING\(0x[0-9a-f]+\)$
+ref.t	65	stringify for ref to vstring	'SCALAR(0x1203bc4233)'	^VSTRING\(0x[0-9a-f]+\)$
 signatures.t	940		'Undefined subroutine &main:: called at (eval 1) line 1. '	^Too few arguments for subroutine 'main::__ANON__'
 signatures.t	438	//= absent	'5'	'8'
 signatures.t	437	//= present	undef	'9'
@@ -405,9 +405,6 @@ sprintf.t	442	>%vx< >[version::qv("1.20.300")]< >1.14.12c< > MISSING<
 sprintf2.t	1545		'            0x1.8p+0'	'            1.5'
 sprintf2.t	1657	$ary[3] .= sprintf ...	'ghi'	'ghi(pqr,xyz)'
 sprintf2.t	1578	%n	''	Missing argument for %n in sprintf
-sprintf2.t	1570	Integer overflow: "%.18446744073709551615a", "1.1"	'The value   18446744073709551602 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow in format string
-sprintf2.t	1572	Integer overflow: "%.18446744073709551615i", "-1"	'The value   18446744073709551614 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow in format string
-sprintf2.t	1571	Integer overflow: "%.18446744073709551615i", "1"	'The value   18446744073709551614 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow in format string
 sprintf2.t	1535	[rt.perl.org #128888]	'0x1p+0'	'1'
 sprintf2.t	1536	[rt.perl.org #128889]	'0x1.08p+0'	'1.03125'
 sprintf2.t	1542	[rt.perl.org #128893]	' 0x000000000001.8p+0'	' 1.5'
@@ -417,25 +414,6 @@ sprintf2.t	1577	first arg not special utf8-wise
 sprintf2.t	1538	negative precision ignored by format_hexfp	'0x0p+0'	'0'
 sprintf2.t	1677	offset after 0	''	'1'
 sprintf2.t	1676	offset at start	''	'0'
-sprintf2.t	1648	overflow: %*2$s	'The value   4611686018427387901 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1626	overflow: %*s 0x4000000000000000, 4611686018427387904	'The value   4611686018427387901 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1621	overflow: %*s 0x4000000000000001, 4611686018427387905	'The value   4611686018427387902 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1616	overflow: %*s 0x7ffffffffffffffd, 9223372036854775805	'The value   9223372036854775802 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1611	overflow: %*s 0x7ffffffffffffffe, 9223372036854775806	'The value   9223372036854775803 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1606	overflow: %*s 0x7fffffffffffffff, 9223372036854775807	'The value   9223372036854775804 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1631	overflow: %*s 0x8000000000000000, -9223372036854775808	'The value   9223372036854775805 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1601	overflow: %*s 0x8000000000000000, 9223372036854775808	'The value   9223372036854775805 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1635	overflow: %*s 0x8000000000000001, -9223372036854775807	'The value   9223372036854775804 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1596	overflow: %*s 0x8000000000000001, 9223372036854775809	'The value   9223372036854775806 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1639	overflow: %*s 0x8000000000000002, -9223372036854775806	'The value   9223372036854775803 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1643	overflow: %*s 0xbfffffffffffffff, -4611686018427387905	'The value   4611686018427387902 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1647	overflow: %*s 0xc000000000000000, -4611686018427387904	'The value   4611686018427387901 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1591	overflow: %*s 0xfffffffffffffffd, 18446744073709551613	'The value   18446744073709551610 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1586	overflow: %*s 0xfffffffffffffffe, 18446744073709551614	'The value   18446744073709551611 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1581	overflow: %*s 0xffffffffffffffff, 18446744073709551615	'The value   18446744073709551612 is not of type   (UNSIGNED-BYTE 44) at (eval 0) line 0. '	Integer overflow
-sprintf2.t	1650	overflow: %.*2$s	''	Integer overflow
-sprintf2.t	1649	overflow: %.*s	''	Integer overflow
-sprintf2.t	1630	overflow: %.NNNf	'Exponent too large to fit into memory: 4611686018427387904 at (eval 0) line 0. '	Integer overflow
 sprintf2.t	1675	reasonable result	'%n0%nĀ'	'0Ā'
 sprintf2.t	1678	sprintf( "%.54g", 0.3 ) renders correctly	'0.3'	eq '0.299999999999999988897769753748434595763683319091796875'
 sprintf2.t	1519	subnormal 3e-322 %.4a 0x1.e800p-1069 got 0x1.e000p-1069	'0x1.e000p-1069'	'0x1.e800p-1069'
@@ -445,13 +423,13 @@ sprintf2.t	1521	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x0.0000p+0	'0x0.0000p+
 sprintf2.t	1511	subnormal 3e-324 %a 0x1p-1074 got 0x0p+0	'0x0p+0'	'0x1p-1074'
 sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'
 sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'
-state.t	76	Reference to state variable	'SCALAR(0x1200e36423)'	'SCALAR(0x1200e55323)'
+state.t	76	Reference to state variable	'SCALAR(0x1200f7eb73)'	'SCALAR(0x1200f95a33)'
 state.t	73	computed goto 0		
 state.t	92	substr	'Johnx'	'xxxxx'
 substr.t	397		'-1'	'23'
 substr.t	386	Timely scalar destruction with lvalue substr	'0'	'1'
-substr.t	384	\substr %h	'HASH(0x1204b72523)'	'50'
-substr.t	385	\substr @a	'ARRAY(0x1204b725df)'	'100'
+substr.t	384	\substr %h	'HASH(0x1204c3b223)'	'50'
+substr.t	385	\substr @a	'ARRAY(0x1204c3b2df)'	'100'
 substr.t	376	\substr does not coerce its glob arg just yet	'REF'	'GLOB'
 substr.t	345	scalar does not affect lvalueness of substr	'abcdef'	'abcdeaf'
 tr.t	224	    doesn't stringify its argument	''	'SCALAR'
@@ -459,11 +437,6 @@ tr.t	223	non-modifying tr/// on a scalar ref	'0'	'2'
 tr.t	257	tr// of \N{name} works for upper-Latin1	'á'	'A'
 wantarray.t	11		'S'	'V'
 yadayada.t	30		''	\Asyntax error 
-yadayada.t	5	Disambiguation case 1	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 31. '
-yadayada.t	6	Disambiguation case 2	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 36. '
-yadayada.t	7	Disambiguation case 3	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 41. '
-yadayada.t	8	Disambiguation case 4	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 46. '
-yadayada.t	1	Execution of ellipsis statement reported 'Unimplemented' code	'Unimplemented at (eval 0) line 0. '	'Unimplemented at sbcl line 18. '
 yadayada.t	32	{Parsing '...' in "my @arr = 'A' ... 'D';" as a range operator} ()		
 yadayada.t	36	{Parsing '...' in "print  D  ...  A ;" as a range operator} ()		
 yadayada.t	37	{Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator} (The function MAIN::PL-A is undefined. at (eval 1) line 1.)		

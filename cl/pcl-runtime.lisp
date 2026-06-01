@@ -17,7 +17,7 @@
   (:export
    ;; Value boxing
    #:p-box #:make-p-box #:p-box-p #:p-box-value
-   #:unbox #:ensure-boxed
+   #:unbox #:ensure-boxed #:p-copy-scalar-arg
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
    #:to-string #:to-number
    #:p-undef #:p-defined #:p-defined-fh
@@ -545,6 +545,20 @@
   "Ensure a value is boxed"
   (if (p-box-p val)
       val
+      (make-p-box val)))
+
+(defun p-copy-scalar-arg (val)
+  "Copy a scalar argument/default into a FRESH p-box for a signature parameter.
+   Perl signature params are copies of @_ (like `my ($x) = @_`), so a param must
+   be its own mutable box — mutating it ($x = ...) must not write through to the
+   caller's variable (p-flatten-args keeps the caller's boxes as-is in @_).
+   Reads through tie/magic are FETCHed via unbox; the reference flag and blessed
+   class are preserved so a ref/blessed arg copies its container, not its referent."
+  (if (p-box-p val)
+      (let ((b (make-p-box (unbox val))))
+        (setf (p-box-is-ref b) (p-box-is-ref val)
+              (p-box-class b)  (p-box-class val))
+        b)
       (make-p-box val)))
 
 ;;; Boxed special variables (must be after make-p-box definition)

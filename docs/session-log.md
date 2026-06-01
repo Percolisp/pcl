@@ -33,6 +33,38 @@ fails).  Regression: `Pl/t/sprintf-invalid-01.t` 9 → 13.
 Remaining sprintf2.t (28): subnormal `%a` hex-float last-digit rounding, `%n`,
 `.=`-on-array-elem, "Numeric format result too large", float-precision edges — all niche.
 
+**3. Variable-declaration spec + two signature-param declaration bugs.** Wrote
+`docs/variable-declarations-spec.md` (how `my`/`our`/`state`/`local`/sig-params
+lower to CL; the `p-box` model; +Appendix A pressure-testing the planned
+unbox-non-reference-scalars rewrite — verdict: sound only as an analysis-gated,
+conservative transform, "provably value-only" not "not-seen-as-a-ref"). Writing
+it surfaced two real bugs, both now fixed:
+
+- **§4.1 — signature params were effectively immutable.** `sub f($x){ $x=$x+1 }`
+  returned the original, not +1: params were bound in `let*` to raw `@_`
+  values and the body's `$x = …` lowered to `p-scalar-=`, whose `(proclaim
+  special)` globalised the param and made the write a silent no-op. Fix: bind
+  each scalar param to a fresh box via new `p-copy-scalar-arg` (`cl/pcl-runtime.lisp`
+  — copies the `@_` box so mutation doesn't corrupt the caller, since
+  `p-flatten-args` shares boxes), and register param names in a dedicated
+  `_sig_param_lexicals` set so `_emit` rewrites their assignments to `p-my-=`.
+  That set is kept **separate** from `_let_bound_vars` because the latter gates
+  nested-named-sub hoisting — an early attempt that reused `_let_bound_vars`
+  regressed the `t160x`/`t161x` "commonality" tests (inner named sub stopped
+  hoisting). Also fixes `($a=333)`-in-default (t128).
+- **§4.2 — `local $G = RHS` in a signature default was dropped** (PExpr treats
+  `local` as an identity prefix in expression position), permanently clobbering
+  `$G`. Fix: `_parse_signature` peels the `local $G =` off (compiles only RHS as
+  the default value, records `local_var`); `_process_sub_statement` wraps the
+  body in a conditional `(let (($G (if arg-given $G (p-box-for-local (unbox
+  $param)))))…)` so `$G` is localised only when the default ran and restored on
+  exit by CL dynamic unwinding.
+
+**signatures.t 672 → 775 (+103), 0 regressions.** Full Pl/t gate 90 files / 3150
+tests green; full sweep 0 new fails, 66 fully passing (held). New regression
+tests in `Pl/t/signatures-arity-01.t` (10→15). §4.3 (`(our $k)++` default →
+undef, t125) left open (isolated). Baseline re-blessed.
+
 ---
 
 ## Session 227 (2026-06-01) — closure.t fully passing: nested `my $i = $i` shadow capture
