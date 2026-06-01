@@ -209,6 +209,26 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 (142 :tie
                      "substr($tied,0,5,'') must STORE back through the tie so the tied value becomes 'last' — 4-arg substr does not write through tie magic. not-supported.md: 'DESTROY/tie magic' (tie write-through)."))
 
+;; length.t — UTF-8 / `use bytes` / `pack "U"` byte-vs-character tests.  PCL has
+;; no per-scalar UTF-8 flag (CL strings are always Unicode), `use bytes` is not
+;; implemented, and `pack "U", N` yields the UTF-8 bytes as characters rather than
+;; a flagged 1-char string.  So `length` under `use bytes` (byte count) and the
+;; byte_utf8a_to_utf8n string comparisons cannot match Perl.  All unnamed -> keyed
+;; by test number.  not-supported.md: 'Unicode semantics differences'
+;; (utf8 flag / `use bytes` / `pack 'U'`).  NOT registered (other reasons / fix
+;; targets): 34 (length of tied undef into a reused TARG), 36/42 (uninit-stringify
+;; warning emission).
+(register-skips "length.t"
+                (7  :utf8 "length(pack 'U',0xFF) must be 1 char -- PCL's pack 'U' yields UTF-8 bytes as chars (got 2). not-supported.md: 'Unicode semantics differences' (pack 'U').")
+                (10 :utf8 "length(pack 'U',0xB6) must be 1 char -- pack 'U' yields UTF-8 bytes as chars. not-supported.md: 'Unicode semantics differences' (pack 'U').")
+                (14 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc4\\x80') -- no per-scalar UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (15 :utf8 "use bytes: length(\\x{100}) must be 2 bytes -- use bytes not implemented (got 1 char). not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (17 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc4\\x80\\xc2\\xb6') -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (18 :utf8 "use bytes: length(\\x{100}\\x{B6}) must be 4 bytes (got 2 chars) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (20 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc2\\xb6\\xc4\\x80') -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (21 :utf8 "use bytes: length(\\x{B6}\\x{100}) must be 4 bytes (got 2 chars) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes).")
+                (23 :utf8 "use bytes: length(tied \\x{263A}) must be 3 bytes (got 1 char) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes)."))
+
 ;; array.t — documented not-supported failures (sparse arrays / @_ aliasing / SV
 ;; identity / error-detection). HELD BACK as fix targets, deliberately NOT registered:
 ;;   - arylen magic (\$#array, freed-array length, arylen_p): tests 83-88, 92-114,
