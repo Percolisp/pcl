@@ -4,8 +4,13 @@
 #   pcl script.pl [args...]      run a script
 #   pcl -e 'code'  [args...]     run inline code   (-E is an alias of -e)
 #   pcl -c script.pl             syntax-check only
-#   pcl --clear-cache            wipe the module FASL cache, then exit
-#   pcl --make-core              build a saved SBCL core for fast startup, then exit
+#   pcl --clear-cache            wipe the cached compiled modules, then exit
+#   pcl --make-core              snapshot the loaded runtime for fast startup, then exit
+#
+# A "core" is a memory image of SBCL with the PCL runtime preloaded; running
+# from it skips re-loading the runtime (~1s → ~0.1s). It's a pure speed cache.
+# (Compiling/running a script as a standalone .fasl is not supported yet —
+# Phase 6.) See `pcl --help` for the user-facing summary.
 #
 # Phase 1 of docs/pcl-rollout-plan.md: Tier-0 "transpile-and-run" only — the main
 # script is transpiled fresh on every run (no main-script FASL). The module cache
@@ -244,18 +249,38 @@ sub usage {
 Usage: pcl [options] script.pl [script-args...]
        pcl [options] -e 'code'  [script-args...]
 
+Runs a Perl script (or inline code) by transpiling it to Common Lisp and
+executing it under SBCL. Works like `perl` for the Perl subset PCL supports.
+
 Options:
   -e CODE        run inline CODE (like perl -e)
   -E CODE        alias of -e
   -I DIR         prepend DIR to @INC (repeatable)
   -M MODULE      `use MODULE` before running (repeatable)
-  -c             syntax-check only (transpile, print "... syntax OK", exit)
+  -c             syntax-check only: transpile, print "syntax OK", exit
   -w             accepted for compatibility (PCL's warning behaviour is fixed)
-  --clear-cache  delete cached .fasl/.lisp in the cache dir, then exit
-  --make-core    build a saved SBCL core for fast startup, then exit
-  -v, --verbose  print what pcl is doing
+  -v, --verbose  print the underlying sbcl command pcl runs
   -h, --help     this message
 
-Env: PCL_CACHE_DIR (default ~/.pcl-cache), PCL_CORE (default <cache>/pcl.core)
+Faster startup (optional):
+  --make-core    Build a "saved core" once, then exit. A core is a memory image
+                 of SBCL with the PCL runtime already loaded; later runs start
+                 from it instead of re-loading the runtime, cutting startup from
+                 ~1s to ~0.1s. pcl uses the core automatically when present and
+                 rebuilds it as needed when the runtime changes. It's purely a
+                 speed cache — safe to delete (pcl just loads the runtime again).
+  --clear-cache  Delete PCL's internal module cache — the compiled files it
+                 makes for `use`/`require`d modules — then exit. The saved core
+                 is kept (rebuild it with --make-core).
+
+Notes:
+  * Every run transpiles your script fresh; there is no way yet to compile a
+    script to a .fasl and run that directly (planned — see Phase 6 of
+    docs/pcl-rollout-plan.md). Only `use`/`require`d modules are cached today.
+  * --make-core / --clear-cache only affect speed, never results.
+
+Environment:
+  PCL_CACHE_DIR  where the core and module cache live (default ~/.pcl-cache)
+  PCL_CORE       explicit path to the saved core (default <cache>/pcl.core)
 USAGE
 }
