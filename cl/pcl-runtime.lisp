@@ -5694,13 +5694,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (p-box-p v)         ; variable box wrapping a reference box
                  (p-box-class val))))))
 
-(defun p-warn-build-message (args)
+(defun p-warn-build-message (args &optional loc)
   "Build warn message string per Perl semantics:
    - Non-scalar (ref): return as-is
    - Scalar with trailing newline: use as-is
    - Scalar without trailing newline: append 'at FILE line N.'
-   - Empty string or no args: use $@ if set, else 'Warning: something's wrong'"
-  (let* ((empty-or-no-args
+   - Empty string or no args: use $@ if set, else 'Warning: something's wrong'
+   LOC, when supplied (codegen passes the real 'FILE line N' for an explicit
+   warn), replaces the placeholder 'unknown line 0' in the appended suffix."
+  (let* ((at-loc (or loc "unknown line 0"))
+         (empty-or-no-args
           (or (null args)
               (and (= (length args) 1)
                    (let ((a (car args)))
@@ -5717,10 +5720,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            ;; $@ already ends with \n (Perl convention), so just concatenate
            ((and (stringp (to-string (unbox err)))
                  (> (length (to-string (unbox err))) 0))
-            (format nil "~A~A~A~%" (to-string (unbox err))
-                    #\Tab "...caught at unknown line 0."))
+            (format nil "~A~A...caught at ~A.~%" (to-string (unbox err))
+                    #\Tab at-loc))
            ;; No $@ → default warning
-           (t (format nil "Warning: something's wrong at unknown line 0.~%")))))
+           (t (format nil "Warning: something's wrong at ~A.~%" at-loc)))))
       ;; Single ref arg: return as-is
       ((and (= (length args) 1) (p-warn-is-reference (car args)))
        (car args))
@@ -5732,26 +5735,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (if (and (> (length s) 0)
                   (char= (char s (1- (length s))) #\Newline))
              s
-             (format nil "~A at unknown line 0.~%" s)))))))
+             (format nil "~A at ~A.~%" s at-loc)))))))
 
-(defun p-warn (&rest args)
-  "Perl warn - respects $SIG{__WARN__} handler."
-  (let* ((msg (p-warn-build-message args))
-         (handler (gethash "__WARN__" %SIG)))
-    (cond
-      ;; Custom handler: call with message as argument ($_[0])
-      ((and handler (functionp (unbox handler)))
-       (let ((boxed (if (p-box-p msg) msg (make-p-box msg))))
-         (funcall (unbox handler) boxed)))
-      ;; "IGNORE": suppress warning
-      ((and handler (stringp (unbox handler))
-            (string= (unbox handler) "IGNORE"))
-       nil)
-      ;; Default: print to *error-output*
-      (t
-       (let ((s (if (p-box-p msg) (to-string (unbox msg)) (format nil "~A" msg))))
-         (write-string s *error-output*)
-         (force-output *error-output*))))))
+(defun p-warn (&rest raw-args)
+  "Perl warn - respects $SIG{__WARN__} handler.
+   Accepts an optional (:loc \"FILE line N\") marker from codegen for the
+   ' at FILE line N.' suffix on a message that doesn't end in a newline."
+  (multiple-value-bind (args loc) (%p-extract-loc raw-args)
+    (let* ((msg (p-warn-build-message args loc))
+           (handler (gethash "__WARN__" %SIG)))
+      (cond
+        ;; Custom handler: call with message as argument ($_[0])
+        ((and handler (functionp (unbox handler)))
+         (let ((boxed (if (p-box-p msg) msg (make-p-box msg))))
+           (funcall (unbox handler) boxed)))
+        ;; "IGNORE": suppress warning
+        ((and handler (stringp (unbox handler))
+              (string= (unbox handler) "IGNORE"))
+         nil)
+        ;; Default: print to *error-output*
+        (t
+         (let ((s (if (p-box-p msg) (to-string (unbox msg)) (format nil "~A" msg))))
+           (write-string s *error-output*)
+           (force-output *error-output*)))))))
 
 ;;; Exception condition for object-based die
 ;;; When Perl dies with a blessed reference, we preserve it in $@
@@ -5760,22 +5766,49 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (:report (lambda (c s)
              (format s "~A" (p-exception-object c)))))
 
-(defun p-die (&rest args)
+(defun %p-extract-loc (args)
+  "Pull an optional (:loc \"FILE line N\") marker out of a die/warn arg list.
+   Returns (values real-args loc-or-nil).  Codegen passes :loc for an explicit
+   user die/warn so the Perl ' at FILE line N.' suffix carries the real source
+   location; internal runtime callers pass no :loc and so keep legacy behavior.
+   The marker is the keyword symbol :loc, which user die/warn args (strings,
+   numbers, boxes) never are, so this is unambiguous."
+  (let ((loc nil) (real '()) (skip nil))
+    (dolist (a args)
+      (cond (skip (setf loc a skip nil))
+            ((eq a :loc) (setf skip t))
+            (t (push a real))))
+    (values (nreverse real) loc)))
+
+(defun p-die (&rest raw-args)
   "Perl die - throw an exception.
    If given a single blessed reference, throw it as an exception object.
-   Otherwise, concatenate args as error string."
-  (if (and (= (length args) 1)
-           (let ((obj (car args)))
-             ;; Check if it's a blessed hash or blessed box
-             (or (and (hash-table-p obj) (gethash :__class__ obj))
-                 (and (p-box-p obj)
-                      (let ((inner (p-box-value obj)))
-                        (or (p-box-class obj)
-                            (and (hash-table-p inner) (gethash :__class__ inner))))))))
-      ;; Object exception - preserve for $@
-      (error 'p-exception :object (car args))
-      ;; String exception
-      (error (apply #'p-string-concat args))))
+   Otherwise, concatenate args as error string.  An optional (:loc \"FILE line N\")
+   marker (emitted by codegen for an explicit die) appends Perl's
+   ' at FILE line N.' suffix when the message doesn't already end in a newline."
+  (multiple-value-bind (args loc) (%p-extract-loc raw-args)
+    (if (and (= (length args) 1)
+             (let ((obj (car args)))
+               ;; Check if it's a blessed hash or blessed box
+               (or (and (hash-table-p obj) (gethash :__class__ obj))
+                   (and (p-box-p obj)
+                        (let ((inner (p-box-value obj)))
+                          (or (p-box-class obj)
+                              (and (hash-table-p inner) (gethash :__class__ inner))))))))
+        ;; Object exception - preserve for $@
+        (error 'p-exception :object (car args))
+        ;; String exception
+        (let ((msg (apply #'p-string-concat args)))
+          (cond
+            ;; No location marker: exact legacy behavior.
+            ((null loc) (error msg))
+            ;; Message ends in newline: Perl does NOT append a location.
+            ((and (> (length msg) 0)
+                  (char= (char msg (1- (length msg))) #\Newline))
+             (error "~A" msg))
+            ;; Empty die message: Perl uses "Died".
+            ((string= msg "") (error "Died at ~A.~%" loc))
+            (t (error "~A at ~A.~%" msg loc)))))))
 
 ;;; Forward declarations for p-do (both defined later in this file)
 (declaim (ftype function p-eval))

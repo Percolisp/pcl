@@ -1693,6 +1693,18 @@ sub gen_funcall {
   $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
+
+  # die/warn: pass the source location so the runtime appends Perl's
+  # " at FILE line N." suffix (when the message doesn't end in a newline).
+  # The (:loc "...") marker is stripped by p-die/p-warn before concatenation.
+  if ($cl_func eq 'p-die' || $cl_func eq 'p-warn') {
+    my $word = $self->expr_o->get_a_node($kids->[0]);
+    my $line = (ref($word) && $word->can('line_number')) ? ($word->line_number // 0) : 0;
+    my $file = ($self->environment && $self->environment->source_file) || '-';
+    $file =~ s/(["\\])/\\$1/g;
+    $args_str = " :loc \"$file line $line\"$args_str";
+  }
+
   my $call = "($cl_func$args_str)";
 
   # 'my'/'our' in expression context is an identity (returns the expression's value).

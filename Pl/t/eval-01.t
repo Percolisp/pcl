@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 34;
+use Test::More tests => 38;
 use File::Temp qw(tempfile);
 BEGIN { use_ok('Pl::Parser') };
 BEGIN { use_ok('Pl::Environment') };
@@ -107,8 +107,10 @@ output_matches('eval { eval { die "inner" }; print $@ };',
 diag "";
 diag "-------- eval with exception objects:";
 
+# die carries a (:loc "FILE line N") marker so the runtime can append Perl's
+# " at FILE line N." suffix; the exception variable is still the final arg.
 output_contains('eval { die $exception };',
-                '(p-die $exception)',
+                '(p-die :loc "- line 1" $exception)',
                 'die with variable exception object');
 
 
@@ -146,8 +148,8 @@ sub run_pl {
 }
 
 SKIP: {
-    skip "pl2cl not found", 22 unless -x $pl2cl;
-    skip "sbcl not found",  22 unless `which sbcl 2>/dev/null`;
+    skip "pl2cl not found", 26 unless -x $pl2cl;
+    skip "sbcl not found",  26 unless `which sbcl 2>/dev/null`;
 
     # Test 1: basic arithmetic
     {
@@ -328,5 +330,41 @@ SKIP: {
         });
         like($out, qr/^1024,1024,1024,1024,1024/,
              'cache: repeated identical eval returns same value each time');
+    }
+
+    # ========================================
+    diag "";
+    diag "-------- die/warn 'at FILE line N' location:";
+
+    # Test 23: explicit die (no trailing newline) gets the source location
+    {
+        my $out = run_pl(qq{eval { die "boom" }; print \$\@;});
+        like($out, qr/^boom at \S+ line 1\.\n/,
+             'die "msg" appends " at FILE line N."');
+    }
+
+    # Test 24: die whose message ends in \n does NOT get a location appended
+    {
+        my $out = run_pl(qq{eval { die "clean\\n" }; print \$\@;});
+        like($out, qr/^clean\n\z/,
+             'die "msg\\n" suppresses the location suffix');
+    }
+
+    # Test 25: warn (no newline) routes through __WARN__ with the real location
+    {
+        my $out = run_pl(q{
+            my $w; local $SIG{__WARN__} = sub { $w = $_[0] };
+            warn "careful";
+            print $w;
+        });
+        like($out, qr/^careful at \S+ line 3\.\n/,
+             'warn "msg" appends " at FILE line N." with the real line');
+    }
+
+    # Test 26: line number tracks the actual source line of the die
+    {
+        my $out = run_pl(qq{\n\neval { die "deep" }; print \$\@;});
+        like($out, qr/ line 3\.\n/,
+             'die location reports the actual die statement line');
     }
 }

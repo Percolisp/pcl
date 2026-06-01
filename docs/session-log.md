@@ -39,6 +39,21 @@ Remaining signatures.t (305): list-op defaults that eat the param comma
 (`$p = t018 222, $a = 333` → one param), undef-vs-empty-string eval results, syntax-error
 detection (principle 9), and string-eval feature gaps (`__SUB__`/`caller`/`package X; ::f()`).
 
+**Follow-on (same session) — `die`/`warn` " at FILE line N." location.** `__LINE__`/`__FILE__`
+were already emitted as compile-time literals (Level 1 done). Added the cheap Level 2: an
+explicit `die`/`warn` now carries a `(:loc "FILE line N")` marker (injected in
+`Pl/ExprToCL.pm` `gen_funcall` from the node's `line_number` + `environment->source_file`).
+New `%p-extract-loc` strips it in `p-die`/`p-warn` (`cl/pcl-runtime.lisp`) and appends Perl's
+`" at FILE line N."` suffix when the message doesn't end in a newline — `die "boom"` →
+`boom at foo.pl line 42.`, `die "x\n"` keeps no suffix, `warn` uses the real line instead of
+the old `unknown line 0` placeholder. ONE function each (the marker rides the existing
+`&rest`; internal runtime callers pass no `:loc` and are unchanged). Sweep net-neutral (the
+`like $@, qr/at FILE line N/` tests it helps also fail on other aspects), **0 regressions**,
+gate 90 files / 3138. Updated `Pl/t/eval-01.t` (now 38): test 11's exact-codegen assertion
+matches the new `(p-die :loc …)` form; +4 runtime location tests (23–26). NOTE: runtime-
+*originated* errors (arity, arithmetic) and `caller()` still lack location (would need a
+`*p-current-line*` register / call-stack — deferred).
+
 ---
 
 ## Session 225 (2026-06-01) — `state $x = EXPR` value in tail/expression position
