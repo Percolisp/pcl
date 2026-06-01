@@ -4,6 +4,63 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 229 (2026-06-01) — foreach aliasing of lvalues (substr/pos/vec + hash/array elements)
+
+In Perl `for (LVALUE) { $_ = ... }` aliases `$_` to the live container so writes
+propagate (`for (@a){$_++}` mutates `@a`).  PCL aliased whole arrays and plain
+scalars but silently dropped writes for **lvalue builtins** and **hash/array
+elements**.  Fixed both; documented the model + the deliberately-deferred cases in
+`docs/foreach-aliasing.md`.
+
+**Mechanism.** `p-foreach` binds the loop var to the *same box object* the container
+holds (`(let ((,var (ensure-boxed (aref ,vec ,i)))) …)`), so aliasing works iff the
+foreach-list codegen surfaces the actual container box rather than a fresh value-box.
+A single non-vector value survives `%p-flatten-for-list` as `(vector raw)` with `raw`'s
+identity intact — so a single box flows straight to `$_`.
+
+**1. `substr`/`pos`/`vec` lvalues** (`cl/pcl-runtime.lisp`, `Pl/Parser.pm`).  Extracted
+bare magic-cell helpers `p-substr-lvalue-cell` / `p-pos-lvalue-cell` /
+`p-vec-lvalue-cell` (the `\substr`/`\pos`/`\vec` ref fns now wrap these in
+`p-backslash`).  The substr cell implements Perl's **edit-tracking**: after an
+assignment a fixed positive-length window re-anchors to the written length
+(`substr($x,1,3)`←'XX' ⇒ live `substr($x,1,2)`); a negative start stays anchored from
+the end (recomputed `-(newlen-start)`); a to-end/negative-length window keeps its end
+anchored.  Foreach codegen detects a sole `substr/pos/vec` list element (AST: Word +
+arg-List) and rewrites the call head to the `-lvalue-cell` form.  **substr.t 361 → 375**
+(+14; all `for(substr())` perl #24346 blocks), no ref.t regression.
+
+**2. Hash/array elements** `for ($h{k})` / `for ($a[i])` (`Pl/Parser.pm`).  Generalised
+the detector to `_foreach_alias_rewrite` returning a `(from-head, to-head)` pair; for a
+sole Symbol+Subscript element it rewrites `p-gethash`→`p-gethash-box` /
+`p-aref`→`p-aref-box` (the same box-returning fns `\$h{k}`/`\$a[i]` already use).  Now
+`for ($h{name}){ s/b/B/g }` edits in place.  A two-part AST match guards multi-element
+lists (`for ($a[0],$a[1])`).
+
+**Boundary (correctly NOT aliased, pinned by tests):** computed temps (`$x+1`, `uc $x`),
+normal sub returns — Perl agrees (throwaway SV).  Diverges only on literals
+(`for(1,2,3){$_++}` dies in Perl, PCL permits — read-only SVs not emulated) and
+`:lvalue` subs (unsupported).
+
+**3. skip-registry — substr.t not-supported** (`cl/skip-registry.lisp`).  Registered 14:
+user `:lvalue` subs (`bar`, `ta_tindex`, substr-on-`$#ta`), `@_` aliasing, `\substr` on
+glob/hash/array, DESTROY-via-GC, tied 4-arg substr.  **Held back as fix targets** (NOT
+registered): the 8 `[perl #62646]` huge-32-bit-offset fails (`substr($a,0xffffffff,1)` →
+undef + "outside of string" warning) — plausibly fixable, principle 4.
+
+**Deferred (documented, do not re-investigate):** slices `@a[…]`/`@h{…}` and `values %h`
+should alias but don't — they flatten through the shared list-*copy* machinery (used by
+`my @c=@orig`, call args), so the fix is box-returning *slice* forms gated by the same
+AST check, NOT a flattener change.  See `docs/foreach-aliasing.md` (incl. the
+`my @c=values %h; $c[0]++` regression to guard).
+
+Gate **91 files / 3168 tests** (new `foreach-aliasing-01.t` (11); `lvalue-ref-01.t`
+12→18).  Full sweep **17801 pass / 774 fail, 66 fully passing (held)**; sweep-diff 0 new.
+Baseline re-blessed (438).  Also noted: `mro` analysis in `MOO_MOOSE_DESIGN.md`; `t/io/`
+is in-scope-deferred + "debug existing before new feature files" sequencing in
+`docs/perl-test-suite-coverage.md`.
+
+---
+
 ## Session 228 (2026-06-01) — yada-yada die location + sprintf integer-overflow guards
 
 Two independent fixes; the sweep bug-catalog was found significantly stale (many

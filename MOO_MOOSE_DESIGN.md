@@ -654,3 +654,52 @@ CLOS is actually more powerful than Moo/Moose in several ways:
 - Method combinations are first-class
 - Generic functions allow methods on multiple classes
 - Full metaobject protocol for introspection
+
+---
+
+## Note: the `mro` module (deferred — revisit when integrating serious OO)
+
+**Question raised (2026-06-01):** Does real Perl code actually use the `mro` module?
+**Answer:** Yes, but almost entirely inside OO meta-frameworks and introspection
+code — very rarely in plain application code. Split it into three distinct things,
+because PCL would treat each differently:
+
+### 1. The pragma `use mro 'c3';`
+Switches a class from Perl's default DFS-flavored resolution to true C3. **Rarest in
+the wild.** Most code that wants C3 does `use Class::C3` (the CPAN backport) or lets a
+framework do it; direct `use mro 'c3'` appears mostly in framework base classes that
+knowingly build diamond hierarchies.
+
+PCL mapping is awkward: our runtime already resolves everything via CLOS's single fixed
+C3 MRO, so a *per-class* DFS-vs-C3 choice at the Perl level doesn't map cleanly onto
+"CLOS already picked C3 for everything." Low CPAN payoff. → `not-supported.md` territory.
+
+### 2. `mro::get_linear_isa($class)` — **the high-value part**
+Returns the linearized ancestor list. This is *everywhere* in the meta-object layer:
+Class::MOP / Moose (`linearized_isa`), Moo / Role::Tiny, namespace::clean,
+mro::compat / MRO::Compat, and assorted `*::Util` introspection helpers. Any
+nontrivial Moose/Moo program calls it heavily under the hood.
+
+**Cheap for us:** PCL already computes C3 linearization (`@ISA` → CLOS C3 MRO). This is
+a *surfacing* problem, not a new algorithm — expose the existing linearization as a
+callable function returning package names in MRO order. A thin shim over machinery we
+already have.
+
+### 3. `next::method` / `next::can` / `maybe::next::method`
+The C3 "call the next method in the chain" dispatch (the MRO-aware cousin of `SUPER::`).
+Travels together with `use mro 'c3'`; appears in code that opted into C3 (older
+Catalyst guts, DBIx::Class, plugin systems). Depends on having the linearization, which
+we have — maps reasonably onto `call-next-method` semantics.
+
+The cache-management functions (`mro::invalidate_all_method_caches`,
+`mro::method_changed_in`, `mro::set_mro`/`get_mro`) are purely framework-internal and
+essentially never appear in user code — skip.
+
+### Verdict for when we revisit serious OO
+- **Pragma `use mro 'c3'`** → defer / not-supported (awkward mapping, low payoff).
+- **`mro::get_linear_isa`** → implement; cheap given our existing C3 machinery, and it's
+  the part real CPAN OO code actually exercises.
+- **`next::method`** → implement alongside, maps onto `call-next-method`.
+
+Decision deferred — note kept here so the analysis isn't re-derived. Pairs with the
+Moo/Moose plan above (both are about running real CPAN OO frameworks).

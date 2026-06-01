@@ -28,6 +28,12 @@ pulled the authoritative test file in. Each one is likely to surface real bugs.
 
 ## New Perl 5.34–5.36 features — not yet implemented
 
+**Sequencing decision (2026-06-01):** pull these new feature files only *after* we've
+finished debugging the files already in `perl-tests/` (drive the PARTIAL files toward
+green first — that's where the shared-codegen leverage is). `try`/`catch`/`defer` are
+feature work, not bugfixing; queue them behind the existing-file cleanup. Same for the
+deferred `t/io/` layer above.
+
 These files test syntax PCL has not implemented. Worth noting but lower priority
 than the gap files above.
 
@@ -47,6 +53,25 @@ These are PCL-specific tests or tests we wrote ourselves:
 - `errno_test.t` — errno handling (our own)
 - `min_local.t` — minimal local test (our own)
 - `qq.t` — quoting operators (our own)
+
+## `t/io/` — IN SCOPE, revisit later (note added 2026-06-01)
+
+**44 files.** Earlier survey skipped this dir as "real filesystem/socket/process" —
+that call was wrong. File, database, and network IO are *core* to running real CPAN
+code, so `t/io/` is in scope; it's just deferred until we tackle the IO layer
+deliberately (it needs real fds/pipes/sockets, not just codegen). Session 220 already
+landed real `pipe` + `alarm`/`$SIG{ALRM}`, so the groundwork exists.
+
+When we come back, triage `t/io/` into:
+- **Pure file IO** (`open`/`read`/`write`/`print`/`seek`/`eof`/`close`, layers,
+  `$/`/`$\`/`$,`) — most actionable, builds on existing `fileio-*` work.
+- **Pipes / process IO** (`open "|-"`, `pipe`, `IPC`) — partially started.
+- **Sockets / network** — needs `sb-bsd-sockets`; largest new surface.
+- **DB** — via DBI/DBD, depends on the IO + XS story.
+
+Don't pull these as a sweep batch — open the IO layer as its own work item first, then
+bring the `t/io/` files in to drive it. (`docs/extensions.md` is the likely home for the
+socket/DB backend design.)
 
 ## Clearly out of scope — do not pull
 
