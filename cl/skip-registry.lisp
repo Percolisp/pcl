@@ -9,7 +9,8 @@
 ;;;;
 ;;;; Each entry: (DESCRIPTION-REGEX  :CATEGORY  "reason — cite docs/not-supported.md").
 ;;;; Categories: :principle9 (error detection of invalid Perl), :error-msg,
-;;;; :warning-emit, :read-only, :utf8, :destroy-gc, :lvalue, :alias, :tie.
+;;;; :warning-emit, :read-only, :utf8, :destroy-gc, :lvalue, :alias, :tie,
+;;;; :xs (XS / C-level: pointer pack types, DynaLoader, etc.).
 
 (in-package :pcl)
 
@@ -228,6 +229,16 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 (20 :utf8 "use bytes: $a eq byte_utf8a_to_utf8n('\\xc2\\xb6\\xc4\\x80') -- no UTF-8 flag. not-supported.md: 'Unicode semantics differences' (use bytes).")
                 (21 :utf8 "use bytes: length(\\x{B6}\\x{100}) must be 4 bytes (got 2 chars) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes).")
                 (23 :utf8 "use bytes: length(tied \\x{263A}) must be 3 bytes (got 1 char) -- use bytes not implemented. not-supported.md: 'Unicode semantics differences' (use bytes)."))
+
+;; infnan.t — pack/unpack pointer types `p` and `P`.  `pack 'p'/'P'` packs a raw
+;; memory address; under CL's moving GC there are no stable addresses, so PCL
+;; throws "Invalid type 'p'/'P'" and the eval-wrapped roundtrip yields undef
+;; (expected "Inf"/"-Inf"/"NaN").  not-supported.md: 'pack/unpack — pointer types
+;; (p/P)'.  These six are the file's only failures.
+(register-skips "infnan.t"
+                ("^pack [pP] "
+                 :xs
+                 "unpack(...,pack 'p'/'P',$inf_or_nan) roundtrips a raw pointer -- no stable addresses under a moving GC; PCL throws 'Invalid type'. not-supported.md: 'pack/unpack — pointer types (p/P)'."))
 
 ;; array.t — documented not-supported failures (sparse arrays / @_ aliasing / SV
 ;; identity / error-detection). HELD BACK as fix targets, deliberately NOT registered:
