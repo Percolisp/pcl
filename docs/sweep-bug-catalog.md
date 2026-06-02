@@ -343,7 +343,11 @@ breakdown still applies. The breakdown below is retained for reference only.
 
 ---
 
-### array.t (15 failures, 163/195 passing, 17 skip — session 218)
+### array.t (13 failures, 165/195 passing, 17 skip — confirmed session 230)
+
+Remaining 13 verified session 230: freed-array length (83–88, 100; GC-hard), symbolic-ref
+length (109–114), arylen-magic interactions (126, 172). All as the session-218 notes below.
+
 
 **AASSIGN_COMMON is DONE** — the old catalog claim of "~27 self-assignment failures
 needing RHS snapshot in `p-list-=`/`p-array-=`" was STALE. Verified directly (session 218):
@@ -469,8 +473,13 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### method.t (47 failures, 113/163 passing — PARTIAL)
+### method.t (39 failures, 95/163, 26 skip — PARTIAL, runs 160/163; confirmed session 230)
 
+Bulk of the 39 is **error-message-text** (principle 9: 6/8/10/12, 68/69, 90/102, 116–118,
+125/128/129, 158) and the **AUTOLOAD-via-@ISA** cluster — both hard. Genuinely discrete,
+plausibly-fixable rows worth a look: test 40 (`got '#(C::d NIL)'` exp `'1'` — list leaking
+where scalar expected), test 121 (`got 'arg'` exp `'arg b'`), tests 130/131 (typeglob method
+call returns a box-wrapped struct instead of the value/REF). Clusters below still hold:
 - **`&$one()` where `$one=1`** (tests 5–12): PCL raises "Not a CODE reference" instead of
   "Undefined subroutine &main::1 called". Error message mismatch.
 - **AUTOLOAD via @ISA chain** (tests 40–58): method resolution with AUTOLOAD + goto &$AUTOLOAD
@@ -483,30 +492,30 @@ Mostly not-supported — see `docs/not-supported.md`. Caller returns `"(unknown)
 
 ---
 
-### do.t (20 failures, 53/73 passing)
+### do.t — SUPERSEDED, see the "do.t (8 failures … session 223)" entry below
 
-- **`return do { }` scalar context** (tests 17–38, ~14 failures): `do { }` block doesn't
-  receive caller's scalar context when used as the return expression of a sub. Got empty
-  instead of the block's scalar value. Fix area: context propagation into `p-eval-block`
-  when used as tail expression of a `pl-sub`.
-
-- **`do subname(arg)` / `do $subref("arg")`** (tests 63–68, 4 failures): `do subname("arg")`
-  is a syntax error in Perl; `do subname(arg)` (no parens) calls the sub. PCL probably
-  parses both forms as sub calls and doesn't distinguish.
-
-- **RT 124248** (test 70): Edge case not yet investigated.
-
-- **`$! is EISDIR on do dir`** (test 73): `do "/tmp"` (a directory) should set `$!` to EISDIR.
+(The old "20 failures, 53/73 passing" analysis here is obsolete — `return do {}` scalar
+context and the list-context cases were fixed in sessions 215/223. Current state: 8
+failures; see the later do.t entry.)
 
 ---
 
-### local.t (23 failures, 298/319 passing, previously 24)
+### local.t (16 failures, 300/319 passing, 3 todo-skip — session 230)
 
+- **`local $#a = N`** (old tests 315/316) ✅ **FIXED (session 230)**. PPI tokenizes `$#a`
+  as `PPI::Token::ArrayIndex`, unrecognized by `_process_local_declaration` (Symbol/Magic/
+  List only) → statement silently dropped. New ArrayIndex branch emits a plain length-set,
+  **no save/restore** — Perl does NOT restore `local $#a` on scope exit (RT #7411; the
+  "after local … should be restored" rows are `local $::TODO`, now correctly TODO-skipped).
+- **`local $a` in `if` condition + TODO** (tests 317–319): RT #7411/#7615 — `local $::TODO`
+  rows; now emitted as `# TODO` and counted as expected non-failures (session 230 harness).
 - **Array size after `local($a[5])`** (tests 119–120): after `local($a[5]) = 'z'` and
   `$a[4] = 'y'` in a block, when block exits `$a[5]` is restored but `$a[4]` is also lost.
-  The local-restore trims the array too aggressively.
+  The local-restore trims the array too aggressively. **Still a fix target.**
 - **`local $_` with filetest/match** (tests 255–264): `local $_` interactions with
   filetest operators and pattern matching on default `$_`.
+- **package-name reported unqualified** (tests 237, 240): got `'foo'`, expected
+  `'main::foo'` — a qualified-name lookup gap (not yet investigated).
 - **`local *{$pkg}{method}`** (tests 271–278): temporarily replacing a method via stash
   slot — not supported.
 
@@ -602,26 +611,19 @@ always Unicode. NUL-search tests (the old "tests 63-72" bullet) now PASS. Only *
 
 ---
 
-### range.t (18 failures, 144/162 passing)
+### range.t ✅ FULLY PASSING (158/162, 4 skip — re-triaged session 230)
 
-- **LHS array slice in list assignment** (test 4): `($a,@bcd[0..2],$e) = ('a','b','c','d','e')` —
-  list assignment with array slice on the LHS. Got `'a:b:c:d:e'` expected but PCL returns
-  `'a:ARRAY(...)...'`. Fix area: `p-list-=` / array slice LHS handling.
+**Catalog was stale** — the "18 failures" entry below was long obsolete; range.t now
+runs clean (only the bignum-bounds / not-supported rows are skipped). The LHS-array-slice
+(test 4), `/e`-range-context (15/17), and scalar-range counting bugs all already pass.
+History retained for reference only:
 
-- **Range in `/e` eval** (tests 15, 17): `s/(\w)-(\w)/join ':', $1..$2/e` — the `..` range
-  inside `/e` gets scalar context (returns flip-flop 1) instead of list context. Result
-  is `'1E0'` (i.e. float 1). Fix: ensure eval'd expression in `/e` captures list context
-  from the surrounding `join`.
-
-- **`scalar range`** (tests 15–16): `my $n = (() = "0"..-1)` — count of empty range.
-  Gets `'1E0'` instead of `0`. Same root cause as above — `..` in context of counting.
-
-- **Bignum range bounds not rejected** (tests 78–118, ~18 failures): `(9223372036854775808..10)`
+- ~~**LHS array slice in list assignment** (test 4)~~ — already passes.
+- ~~**Range in `/e` eval** (tests 15, 17)~~ — already passes.
+- ~~**`scalar range`** (tests 15–16)~~ — already passes.
+- **Bignum range bounds not rejected** (tests 78–118): `(9223372036854775808..10)`
   should die "Range iterator outside integer range". SBCL bignums don't overflow 64-bit
-  bounds, so no error is raised. Documented as "not-supported" (SBCL is infinite precision).
-
-- **Modifiable variable range** (tests 156, 159): `for my $x (...) { ... }` where loop
-  var appears on both sides — needs investigation.
+  bounds — documented not-supported (skipped).
 
 ---
 
@@ -674,19 +676,22 @@ case (principle 9). not-supported.md: "DESTROY called by garbage collector".
 
 ---
 
-### split.t (9 failures, 210/219 passing)
-
-- **Replacement interpolation** (test 58): split with `/e`-style replacement pattern —
-  PCL returned `'p:q:r:s'` expected `'p1q1r1s'`.
+### split.t (8 failures, 185/193 passing — re-triaged session 230)
 
 - **Unicode whitespace separator** (tests 136–138): `split(' ', $str)` with Unicode
-  whitespace (e.g. U+2000) — PCL splits on ASCII whitespace only.
+  whitespace (e.g. U+2000) — PCL's awk-split is ASCII-whitespace only. Needs Unicode `\s`
+  in CL-PPCRE (a separate, known cl-ppcre gap; `split ' '` itself is Unicode-aware since
+  s218 but the regex `\s` path isn't).
 
-- **Split to specific array** (tests 149–151): `@pkg::ary = split(...)` — assignment
-  to a package-qualified or stacked array. Got `'a b c'` instead of `'1 2 3'`.
+- **Chained list-assignment-as-lvalue** (tests 149–151) — **catalog mislabeled these
+  "package-qualified array"; they are not.** The construct is `(@a = split //, "abc") = 1..10`
+  (also the `local @a` and `@{\@a}` stacked variants). In Perl a list assignment used as an
+  lvalue yields N element-slots where **N = the count of the inner RHS** (3 here), so the
+  outer `= 1..10` fills only 3 → `@a = (1,2,3)`. PCL treats the inner result as a whole-array
+  lvalue and assigns all of `1..10`. Niche double-list-assignment lvalue semantics.
 
-- **`/e` re-eval count** (tests 153, 155): `split(/(?{ $n++ })/, ...)` — inline code
-  in split pattern only evaluated once instead of per-split.
+- **`/e` re-eval count** (tests 153, 155): `split(/(?{ $n++ })/, ...)` — regex code blocks
+  `(?{...})` are not-supported (CL-PPCRE has no mid-match Perl callback); see not-supported.md.
 
 ---
 
@@ -734,17 +739,11 @@ See `memory/project_wantarray_followup.md`.
 
 ---
 
-### chop.t (6 failures, 94/100 passing)
+### chop.t ✅ FULLY PASSING (96/100, 4 skip — re-triaged session 230)
 
-- **`chop(@stuff = @stuff)`** (test 35): `chop` on a freshly-assigned array — returns
-  `''` instead of last char `'f'`. `chop` doesn't see the updated array value after
-  the assignment.
-
-- **`chop` as lvalue error** (tests 48–51): `chop($x) = 1` / `chomp($x,$y) = (1,2)` —
-  should die "Can't modify chop in assignment". PCL doesn't detect this.
-
-- **`chomp` on hash keys** (test 100): `$b = chomp @a when $b eq $/ eq 0 and \$a[0] == \$b`
-  — lvalue aliasing condition.
+**Catalog was stale.** `chop(@stuff = @stuff)` (old test 35) now passes; the lvalue-error
+and chomp-aliasing rows are skipped (registered not-supported / principle 9). No fix
+targets remain here.
 
 ---
 
@@ -766,11 +765,16 @@ See `memory/project_wantarray_followup.md`.
 
 ---
 
-### concat2.t (2 failures, 2/4 passing)
+### concat2.t (2 failures, 2/4 passing — re-triaged session 230)
 
-- **UTF-8 concatenation changes flag** (tests 1–2): `.=` concatenation changes the UTF-8
-  flag of the string in ways that affect subsequent operations. `"abc" .= $utf8_str`
-  should upgrade the LHS to UTF-8; PCL doesn't track the UTF-8 flag.
+Both failures need **`use overload`** support (operator overloading), not plain concat:
+- **Test 1** (`'"\xff\x{101}\x{101}"'`): `package o` overloads `""`; the test does
+  `$x .= chr 257` twice on a blessed object and checks the result isn't "confused by
+  changing utf8ness". Needs `""`-overload-aware `.=`. (got `'ÿ'`, exp `'ÿāā'`.)
+- **Test 2** (RT #132385, got `'REF(0x..)REF(0x..)'` exp `'AB'`): `package RT132385`
+  overloads `.` to `push @a, \$_[1]; $_[0]`; `$o . "A" . $o . 'B'` must give each const
+  TEMP a distinct SV so `\$_[1]` refs deref back to "A"/"B". Needs overloaded `.` + per-call
+  distinct argument SVs. Both are overload-machinery gaps, not utf8 (catalog was wrong here).
 
 ---
 
@@ -791,11 +795,14 @@ See `memory/project_wantarray_followup.md`.
 
 ---
 
-### or.t (3 failures, 11/14 passing)
+### or.t (2 failures + 1 todo-skip, 11/14 — re-triaged session 230)
 
-- **Tied variable as `||` operand** (tests 8–10): `$tied || $var` — lvalue context
-  propagated through `||` to RHS and LHS. Tied variable fetch semantics in lvalue context
-  not supported. Also `||` propagating lvalue context to its lhs.
+- **`$tied || $var`** (the `local $TODO = 'Double FETCH'` row): now emitted as `# TODO`
+  and counted as an expected non-failure (session 230 harness). Tied double-FETCH.
+- **`||` propagates lvalue/pos context** (tests 9–10): `for (pos $x || pos $y) { $_++ }` —
+  `||` should pass lvaluish context to whichever side it returns, so `$_` aliases the live
+  `pos()` slot and `$_++` mutates it. PCL doesn't propagate lvalue context through `||`, so
+  `pos()` stays undef. Niche (foreach-aliasing + pos-lvalue through `||`).
 
 ---
 
