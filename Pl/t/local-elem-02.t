@@ -32,7 +32,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 26;
+plan tests => 29;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -451,4 +451,48 @@ my @a = (1,2,3);
 }
 });
     is($out, "5\n", 'RT #7411: local $#a = 4 extends array length inside block');
+}
+
+# ─── Group I: delete local on an ARROW-DEREF element ($ref->{k} / $ref->[N]) ──
+# Was silently dropping the `local` (no save/restore) so the element never
+# restored on scope exit (local.t 119/120).  Both `my $x = delete local …` and
+# the standalone form must wrap in p-local-{hash,array}-elem on the referent.
+{
+    my $out = run_pl(q{
+my $a = { b => 1 };
+{
+    my $bb = delete local $a->{b};
+    say "$bb ", scalar(keys %$a);
+    $a->{d} = 3;
+}
+say scalar(keys %$a), " ", $a->{b}, " ", $a->{d};
+});
+    is($out, "1 0\n2 1 3\n",
+       'I1: my $x = delete local $ref->{k} restores the hash elem on exit');
+}
+
+{
+    my $out = run_pl(q{
+my $a = [10, 20, 30];
+{
+    my $x = delete local $a->[1];
+    say "$x ", join(",", map { defined $_ ? $_ : "u" } @$a);
+}
+say join(",", map { defined $_ ? $_ : "u" } @$a);
+});
+    is($out, "20 10,u,30\n10,20,30\n",
+       'I2: my $x = delete local $ref->[N] restores the array elem on exit');
+}
+
+{
+    my $out = run_pl(q{
+my $a = { b => 1, c => 2 };
+{
+    delete local $a->{b};
+    say join(",", sort keys %$a);
+}
+say join(",", sort keys %$a);
+});
+    is($out, "c\nb,c\n",
+       'I3: standalone delete local $ref->{k} restores the hash elem on exit');
 }

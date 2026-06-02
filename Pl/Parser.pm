@@ -1072,22 +1072,41 @@ sub _process_expression_statement {
   # Handle: delete local SYMBOL SUBSCRIPT (standalone delete+local statement)
   # PPI::Statement: Word("delete"), Word("local"), Symbol, Subscript
   # Opens a p-local-X-elem scope that wraps the rest of the block (closed at block end).
+  # Symbol-form `delete local $h{k}` / `$a[N]`, plus the arrow-deref form
+  # `delete local $ref->{k}` / `$ref->[N]` (container = unboxed referent).
+  my ($sl_sub, $sl_cl_var, $sl_open);
   if (@parts >= 4
       && ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'delete'
       && ref($parts[1]) eq 'PPI::Token::Word' && $parts[1]->content eq 'local'
       && ref($parts[2]) eq 'PPI::Token::Symbol'
       && ref($parts[3]) eq 'PPI::Structure::Subscript') {
     my $sym       = $parts[2]->content;
-    my $sub       = $parts[3];
-    my $open      = $sub->start->content;
+    $sl_sub       = $parts[3];
+    $sl_open      = $sl_sub->start->content;
     my $base      = substr($sym, 1);
-    my $new_sigil = ($open eq '{') ? '%' : '@';
-    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    my $new_sigil = ($sl_open eq '{') ? '%' : '@';
+    $sl_cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
     # Stash element — not supported; skip save/restore so subsequent tests can run.
-    if ($cl_var =~ /^\(p-stash /) {
+    if ($sl_cl_var =~ /^\(p-stash /) {
       $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
       return;
     }
+  }
+  elsif (@parts >= 5
+      && ref($parts[0]) eq 'PPI::Token::Word'     && $parts[0]->content eq 'delete'
+      && ref($parts[1]) eq 'PPI::Token::Word'     && $parts[1]->content eq 'local'
+      && ref($parts[2]) eq 'PPI::Token::Symbol'
+      && ref($parts[3]) eq 'PPI::Token::Operator' && $parts[3]->content eq '->'
+      && ref($parts[4]) eq 'PPI::Structure::Subscript') {
+    $sl_sub     = $parts[4];
+    $sl_open    = $sl_sub->start->content;
+    my $base_cl = $self->_parse_expression([$parts[2]], $stmt);
+    $sl_cl_var  = "(unbox $base_cl)";
+  }
+  if ($sl_sub) {
+    my $sub       = $sl_sub;
+    my $open      = $sl_open;
+    my $cl_var    = $sl_cl_var;
     my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
     if (@key_cls) {
       my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
@@ -1747,22 +1766,46 @@ sub _process_my_toplevel_declaration {
       #  - The local save/restore must scope to the enclosing block
       #  - The delete is done inside the local scope, and result assigned to VARS
       my @clean_rhs = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+      # Match `delete local $h{k}` / `$a[N]` (Symbol Subscript) AND the arrow-deref
+      # form `delete local $ref->{k}` / `$ref->[N]` (Symbol -> Subscript), whose
+      # container is the unboxed referent.  Without the arrow branch the `local`
+      # was silently dropped (no save/restore), so the element never restored.
+      my ($dl_sub, $dl_cl_var, $dl_open);
       if (@clean_rhs >= 4
           && ref($clean_rhs[0]) eq 'PPI::Token::Word'  && $clean_rhs[0]->content eq 'delete'
           && ref($clean_rhs[1]) eq 'PPI::Token::Word'  && $clean_rhs[1]->content eq 'local'
           && ref($clean_rhs[2]) eq 'PPI::Token::Symbol'
           && ref($clean_rhs[3]) eq 'PPI::Structure::Subscript') {
         my $sym  = $clean_rhs[2]->content;
-        my $sub  = $clean_rhs[3];
-        my $open = $sub->start->content;
+        $dl_sub  = $clean_rhs[3];
+        $dl_open = $dl_sub->start->content;
         my $base = substr($sym, 1);
-        my $new_sigil = ($open eq '{') ? '%' : '@';
-        my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+        my $new_sigil = ($dl_open eq '{') ? '%' : '@';
+        $dl_cl_var = $self->_transform_pkg_var("${new_sigil}${base}");
         # Stash element — not supported; emit comment and skip
-        if ($cl_var =~ /^\(p-stash /) {
+        if ($dl_cl_var =~ /^\(p-stash /) {
           $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
           return;
         }
+      }
+      elsif (@clean_rhs >= 5
+          && ref($clean_rhs[0]) eq 'PPI::Token::Word'     && $clean_rhs[0]->content eq 'delete'
+          && ref($clean_rhs[1]) eq 'PPI::Token::Word'     && $clean_rhs[1]->content eq 'local'
+          && ref($clean_rhs[2]) eq 'PPI::Token::Symbol'
+          && ref($clean_rhs[3]) eq 'PPI::Token::Operator' && $clean_rhs[3]->content eq '->'
+          && ref($clean_rhs[4]) eq 'PPI::Structure::Subscript') {
+        $dl_sub    = $clean_rhs[4];
+        $dl_open   = $dl_sub->start->content;
+        # Container is the unboxed referent of the scalar (same as plain delete's
+        # `(p-delete (unbox $ref) k)`); the local macros unbox a hash again (no-op
+        # on a hash-table) and use a vector directly.
+        my $base_cl = $self->_parse_expression([$clean_rhs[2]], $stmt);
+        $dl_cl_var  = "(unbox $base_cl)";
+      }
+      if ($dl_sub) {
+        my $sub     = $dl_sub;
+        my $open    = $dl_open;
+        my $cl_var  = $dl_cl_var;
         my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
         if (@key_cls) {
           my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
