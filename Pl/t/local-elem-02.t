@@ -32,7 +32,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 29;
+plan tests => 31;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -495,4 +495,33 @@ say join(",", sort keys %$a);
 });
     is($out, "c\nb,c\n",
        'I3: standalone delete local $ref->{k} restores the hash elem on exit');
+}
+
+# ─── Group J: plain `local $ref->{k} = v` (no delete) on an arrow-deref ───────
+# Was mis-binding the scalar $ref itself to the RHS (a runtime crash); must wrap
+# the referent's element in p-local-hash-elem-init / p-local-array-elem-init.
+{
+    my $out = run_pl(q{
+my $a = { b => 1 };
+{
+    local $a->{b} = 99;
+    say $a->{b};
+}
+say $a->{b};
+});
+    is($out, "99\n1\n",
+       'J1: local $ref->{k} = v installs then restores the hash elem');
+}
+
+{
+    my $out = run_pl(q{
+my $a = [10, 20, 30];
+{
+    local $a->[1] = 99;
+    say $a->[1];
+}
+say $a->[1];
+});
+    is($out, "99\n20\n",
+       'J2: local $ref->[N] = v installs then restores the array elem');
 }

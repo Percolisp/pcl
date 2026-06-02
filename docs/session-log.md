@@ -10,6 +10,27 @@ Four real, independent bugs fixed across two commits; full gate green (91 files 
 3182) and full sweep clean (no regressions).  **17802→17816 pass / 750→736 fail**,
 69 fully passing held throughout, same 2 crashes (bop.t/eval.t) and 5 partials.
 
+### Commit 3 — `local $ref->{k}=v` crash + qr// flag stringification (correctness; 0 sweep delta, 0 regressions)
+
+**5. Plain `local $ref->{k} = v` / `$ref->[N] = v` (no delete) mis-bound the scalar
+`$ref` and crashed** (`Pl/Parser.pm`).  Same arrow-drop family as #3 but in the
+`local`-with-init path: the `local $hash{key}` matcher required Symbol immediately
+followed by Subscript, so the arrow form fell through and `$ref` itself was localized to
+the RHS (then `p-gethash 99 "b"` → TYPE-ERROR).  Generalized the matcher to accept the
+arrow form (container = unboxed referent; init-scan starts after the subscript).  Not in
+perl-tests/ (so 0 sweep delta) but a real crash on valid Perl.  Tests `local-elem-02.t`
+29→31 (Group J).
+
+**6. `qr//` stringification dropped all modifier flags** (`cl/pcl-runtime.lisp`).
+`"@{[ qr/abc/i ]}"` gave `(?^:abc)` instead of Perl's `(?^i:abc)` — the flag test used
+keys that are never present (`:case-insensitive`, `:multi-line-mode`, …) while the struct
+stores the upcased flag letters (`:I :M :S :X`) from `parse-regex-modifiers`.  Fixed to
+read `(getf mods :m/:s/:i/:x)` and emit them in Perl's canonical **m,s,i,x** order.  Only
+qr-in-string-context is affected (the match path uses the struct directly); it also fixes
+flag-loss when a qr is *interpolated* into a larger pattern.  No sweep test exercises it
+(only qr.t mentions `(?^`, and not for flags), 0 regressions.  Tests `match-vars-01.t`
+7→12.  Gate 91 files / 3189.
+
 ### Commit 2 — `delete local $ref->{k}` + glob-ref numeric value (+5 tests)
 
 **3. `delete local` on an arrow-deref element silently dropped the `local`**

@@ -37,7 +37,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 7;
+plan tests => 12;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -85,3 +85,28 @@ my $pre  = $`;
 my $post = $';
 print "pre=$pre post=$post\n";
 END
+
+# ── qr// stringification preserves modifier flags (Perl 5.14+ "(?^FLAGS:pat)").
+#    The flag check used non-existent keys (:case-insensitive ...) so flags were
+#    always dropped; Perl emits them in the fixed order m,s,i,x.
+
+# 8. single flag
+is run_cl(qq{print qr/abc/i, "\\n";\n}), "(?^i:abc)\n",
+    'qr/abc/i stringifies as (?^i:abc)';
+
+# 9. all four flags, in Perl's canonical m,s,i,x order regardless of source order
+is run_cl(qq{print qr/abc/imsx, "\\n";\n}), "(?^msix:abc)\n",
+    'qr/abc/imsx stringifies as (?^msix:abc)';
+
+# 10. a subset preserves order
+is run_cl(qq{print qr/abc/xs, "\\n";\n}), "(?^sx:abc)\n",
+    'qr/abc/xs stringifies as (?^sx:abc)';
+
+# 11. no flags
+is run_cl(qq{print qr/abc/, "\\n";\n}), "(?^:abc)\n",
+    'qr/abc/ stringifies as (?^:abc)';
+
+# 12. an interpolated case-insensitive qr keeps its flag when matched
+is run_cl(qq{my \$q = qr/HELLO/i; print(("hello world" =~ \$q) ? "match\\n" : "no\\n");\n}),
+    "match\n",
+    'qr/HELLO/i still matches case-insensitively when used as a variable';

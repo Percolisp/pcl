@@ -1082,12 +1082,17 @@
     ((functionp v) (format nil "CODE(0x~(~X~))" (object-address v)))
     ;; Compiled regex (qr//) — stringify as (?^modifiers:pattern) like Perl 5.14+
     ((p-regex-match-p v)
+     ;; modifiers is the plist from parse-regex-modifiers, keyed by the upcased
+     ;; flag letter (:M :S :I :X ...).  Perl stringifies qr// flags in the fixed
+     ;; order m,s,i,x (e.g. qr/x/imsx -> "(?^msix:x)").  (The old code checked
+     ;; :case-insensitive etc. — keys that are never present — so flags were
+     ;; always dropped.)
      (let* ((mods (p-regex-match-modifiers v))
             (mod-str (concatenate 'string
-                                  (if (member :case-insensitive mods) "i" "")
-                                  (if (member :multi-line-mode mods) "m" "")
-                                  (if (member :single-line-mode mods) "s" "")
-                                  (if (member :extended mods) "x" ""))))
+                                  (if (getf mods :m) "m" "")
+                                  (if (getf mods :s) "s" "")
+                                  (if (getf mods :i) "i" "")
+                                  (if (getf mods :x) "x" ""))))
        (format nil "(?^~A:~A)" mod-str (p-regex-match-pattern v))))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))

@@ -33,6 +33,13 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-06-02 (session 231c). **Two correctness fixes (0 sweep delta, 0 regressions).**
+(1) Plain `local $ref->{k} = v` / `$ref->[N] = v` (no delete) mis-bound the scalar `$ref` and
+crashed — same arrow-drop family as 231b; the `local`-with-init matcher now accepts the arrow
+form (`Pl/Parser.pm`). Not in perl-tests/ but a real crash on valid Perl. (2) `qr//`
+stringification dropped modifier flags (`(?^:abc)` for `qr/abc/i`) — the flag check used keys
+never present; now reads the upcased flag letters and emits Perl's canonical m,s,i,x order
+(`cl/pcl-runtime.lisp`). Gate 91 files / 3189; sweep unchanged 17816/736, 69 fully passing.
 Updated 2026-06-02 (session 231b). **`delete local $ref->{k}` arrow-deref + glob-ref numify.**
 `delete local $a->{b}` / `$a->[N]` silently dropped the `local` (matcher required Symbol
 immediately+Subscript; arrow form is Symbol `->` Subscript) → element never restored

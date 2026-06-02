@@ -2164,35 +2164,47 @@ sub _process_local_declaration {
   }
 
   # ── Handle local $hash{key}, local @arr[N], local @hash{@keys}, local @arr[N,M]
-  # PPI gives: Symbol("$hash") + Structure::Subscript("{key}")
+  # PPI gives: Symbol("$hash") + Structure::Subscript("{key}").  Also the
+  # arrow-deref form local $ref->{key} / $ref->[N] (Symbol -> Subscript), whose
+  # container is the unboxed referent.  Without the arrow branch the `local` was
+  # silently dropped and `$ref` itself was mis-bound to the RHS (a crash).
+  my ($ld_sub, $ld_cl_var, $ld_sub_idx);
   if (@non_ws >= 2
       && ref($non_ws[0]) eq 'PPI::Token::Symbol'
       && ref($non_ws[1]) eq 'PPI::Structure::Subscript') {
-
-    my $sym   = $non_ws[0]->content;           # e.g. "$hash", "@arr"
-    my $sub   = $non_ws[1];
-    my $open  = $sub->start()->content();       # '{' or '['
-    my $sigil = substr($sym, 0, 1);             # '$' (single) or '@' (slice)
-    my $base  = substr($sym, 1);               # "hash" or "arr"
-
-    # The CL variable: hash subscripts access %hash, array subscripts access @arr
+    my $sym       = $non_ws[0]->content;           # e.g. "$hash", "@arr"
+    $ld_sub       = $non_ws[1];
+    $ld_sub_idx   = 1;
+    my $open      = $ld_sub->start()->content();    # '{' or '['
+    my $base      = substr($sym, 1);               # "hash" or "arr"
     my $new_sigil = ($open eq '{') ? '%' : '@';
-    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
-
-    # Stash slice/element: $Pkg::{key} or @Pkg::{keys} — stash manipulation
-    # is not supported. Emit just the body (no save/restore) so the file
-    # doesn't crash and subsequent tests can run.
-    if ($cl_var =~ /^\(p-stash /) {
+    $ld_cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    # Stash slice/element: $Pkg::{key} — stash manipulation is not supported.
+    if ($ld_cl_var =~ /^\(p-stash /) {
       $self->_emit(";; $perl_code (stash element local — not supported, running body only)");
       return;
     }
+  }
+  elsif (@non_ws >= 3
+      && ref($non_ws[0]) eq 'PPI::Token::Symbol'
+      && ref($non_ws[1]) eq 'PPI::Token::Operator' && $non_ws[1]->content eq '->'
+      && ref($non_ws[2]) eq 'PPI::Structure::Subscript') {
+    $ld_sub     = $non_ws[2];
+    $ld_sub_idx = 2;
+    my $base_cl = $self->_parse_expression([$non_ws[0]], $stmt);
+    $ld_cl_var  = "(unbox $base_cl)";
+  }
+  if ($ld_sub) {
+    my $sub   = $ld_sub;
+    my $open  = $sub->start()->content();       # '{' or '['
+    my $cl_var = $ld_cl_var;
 
     # Extract individual key/index expressions from the subscript
     my @key_groups = $self->_subscript_key_groups($sub);
     if (@key_groups) {
       # Check for initializer (= expr) after the subscript
       my ($has_init, @rhs_parts);
-      for my $i (2 .. $#non_ws) {
+      for my $i (($ld_sub_idx + 1) .. $#non_ws) {
         if (ref($non_ws[$i]) eq 'PPI::Token::Operator' && $non_ws[$i]->content eq '=') {
           $has_init = 1;
           @rhs_parts = @non_ws[($i + 1) .. $#non_ws];
