@@ -104,7 +104,12 @@ sub run_one_test {
         # Write to a temp file (not backtick pipe) so SBCL's block-buffered
         # output is not lost when timeout sends SIGKILL.
         my $tmp_out = "/tmp/pcl-sweep-$$.out";
-        system("timeout $TIMEOUT sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --load $cl_file >$tmp_out 2>&1");
+        # Load the generated test via p-load-with-recovery (NOT plain --load): it
+        # evaluates the file one top-level form at a time and recovers from an
+        # uncaught die in any single form, so one not-supported statement (e.g.
+        # `pack "P"`, or `die if $@` after an unsatisfiable string eval) no longer
+        # aborts the whole file and silently swallows every test after it.
+        system("timeout $TIMEOUT sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --eval \"(pcl::p-load-with-recovery \\\"$cl_file\\\")\" >$tmp_out 2>&1");
         my $sbcl_exit = $? >> 8;
         my $out = do { local $/; my $f; open($f, '<', $tmp_out) ? do { my $c = <$f>; $c // '' } : '' };
         unlink $tmp_out;

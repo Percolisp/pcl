@@ -4,6 +4,42 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 231d (2026-06-02) — sweep recovery loader: 0 crashes, +96 hidden passes
+
+**The two "Crashed (SBCL)" files are gone — and one of them was hiding 96 passing
+tests.**  Root concern (raised by the user): a `.t` file about feature A that aborts
+on an unrelated not-supported feature B (uncaught `die`) silently swallows *every*
+test after the abort — invisible coverage loss.  bop.t aborted at `pack "P"` (test
+496), eval.t at `die if $@` (test 28).
+
+**Fix — `p-load-with-recovery`** (in `cl/pcl-test.lisp`, the HARNESS library — NOT
+`pcl-runtime.lisp`, which ships with transpiled programs; it is test infra, not Perl
+semantics).  The sweep now loads each generated file **one top-level form at a time**
+and recovers from an uncaught error in any single form (prints it to `*error-output*`
+and continues) instead of letting one `die` abort SBCL's `load`.  Faithful to `load`:
+the reader tracks `*package*` between forms, and every PCL `eval-when` wrapper includes
+`:execute`, so per-form `eval` fires the same situations.  A file with no uncaught
+top-level die evaluates identically (verified: arith.t 183 = 183).  Wired into
+`sweep-perl-tests.pl` only (the Pl/t gate keeps plain `load`, so a real PCL crash there
+stays loud).
+
+**Result: 17816→17912 pass / 736→766 fail, 0 crashes (was 2), 69 fully passing held.**
+- **eval.t 15→111 passing** (PARTIAL 111+42/169) — the `die if $@` crash had been
+  hiding ~96 genuinely-passing tests (eval.t has many top-level forms, so recovery
+  reaches them).  The +30 fail are eval.t failures that were *always there, just
+  invisible* (error-detection, string-eval lexical scope, a `return`-from-eval
+  `:P-RETURN` issue).
+- **bop.t → PARTIAL** (446+49/510, no longer CRASH).  Its whole body is one giant
+  file-scope `let`, so recovery can't subdivide it (the `pack "P"` die still loses the
+  tail) — but it exits cleanly now, a *visible* partial (ran 495 of 510) instead of a
+  silent abort.
+- sweep-diff: **17 new, all in eval.t (newly-visible, 0 regressions in any other
+  file)**; baseline re-blessed 415→432.  Gate 91 files / 3189.
+
+This directly answers the coverage worry: a crash drops an *unbounded, silent* tail;
+the sweep now has none.  (The skip-registry, by contrast, only rewrites *emitted*
+`not ok` rows and never auto-skips a crash.)
+
 ## Session 231 (2026-06-02) — refgen/sig-defaults, then delete-local-arrow + glob-ref numify
 
 Four real, independent bugs fixed across two commits; full gate green (91 files /

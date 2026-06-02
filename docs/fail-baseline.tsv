@@ -106,7 +106,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x120287718f)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x120297178f)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -153,7 +153,7 @@ caller.t	46	value from (caller 0)[9] (bitmask) works in ${^WARNING_BITS}	''	'1'
 caller.t	25	warnings match caller (all)		
 caller.t	24	warnings match caller (no bits)		
 concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
-concat2.t	2	RT #132385	'REF(0x1200cbbab3)REF(0x1200cbbc93)'	'AB'
+concat2.t	2	RT #132385	'REF(0x1200e39c33)REF(0x1200e39e13)'	'AB'
 delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
 delete.t	54	a b c also equivalent		
 delete.t	26	a b c equivalent		
@@ -165,10 +165,27 @@ do.t	64	do subname("arg") is syntax error	''	\Asyntax error
 do.t	65	do subname() called		
 do.t	66	do subname() is syntax error	''	\Asyntax error
 do.t	63	do subname(arg) called		
-eval.t	28		''	'right'
+eval.t	93		'4'	'3'
+eval.t	132	FREETMPS: return string eval exit	'attempt to THROW to a tag that does not exist: :P-RETURN at (eval 9) line 1. '	''
+eval.t	131	FREETMPS: return try exit	'attempt to THROW to a tag that does not exist: :P-RETURN at (eval 0) line 0. '	''
+eval.t	125	Right line number for eval "{"	''	'Missing right curly or square bracket at (eval 1) line 1, at end of line syntax error at (eval 1) line 1, at EOF Execution of (eval 1) aborted due to compilation errors. '
+eval.t	124	Right line number for eval "{;"	''	'Missing right curly or square bracket at (eval 1) line 1, at end of line syntax error at (eval 1) line 1, at EOF Execution of (eval 1) aborted due to compilation errors. '
 eval.t	13	calculate a factorial with recursive evals	''	'120'
+eval.t	39	eval catches bad goto calls	'Execution of a form compiled with errors. Form:   (GO :FOO) Compile-time error:   attempt to GO to nonexistent tag: :FOO at (eval 0) line 0. '	Can't "goto" into the middle of a foreach loop
+eval.t	121	eval does not localise %^H at run time		
+eval.t	126	eval qq{\${\nfoo\n}; warn} updates the line number correctly	''	'should be line 3 at (eval 1) line 3. '
 eval.t	10	eval run-time error in list context	undef	'0'
 eval.t	9	eval syntax error in list context	undef	'0'
+eval.t	103	eval syntax error, no warnings	''	^syntax error
+eval.t	34	lexical search terminates correctly at subroutine boundary	'bad!'	'good!'
+eval.t	43	my $$$x is forbidden	''	anything else
+eval.t	40	my $$x is forbidden	''	anything else
+eval.t	42	my %$x is forbidden	''	anything else
+eval.t	41	my @$x is forbidden	''	anything else
+eval.t	38	return from eval "" should clear $@ correctly	'end of file on #<dynamic-extent STRING-INPUT-STREAM (unavailable) from "(progn (..."> at (eval 7) line 1. '	''
+eval.t	37	return from eval {} should clear $@ correctly	'attempt to THROW to a tag that does not exist: :P-RETURN at (eval 0) line 0. '	''
+eval.t	98	string eval list context	'VV'	'AA'
+eval.t	99	string eval scalar context	'VV'	'SS'
 flip.t	10			
 grent.t	2			
 hash.t	2	Timely hash destruction with lvalue keys	'0'	'1'
@@ -177,7 +194,7 @@ hash.t	6	freed hash elems are not visible to DESTROY
 hash.t	13	magic keys	'a:x:b:y'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x12039a9093)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1203aeb9e3)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -195,7 +212,7 @@ local.t	275	localised sub via stash
 local.t	278	localised sub via stash slice		
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x12039b47d3)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1203bac153)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF T)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -276,7 +293,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x12022880a3)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x12023735c3)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -287,8 +304,8 @@ pos.t	20	s///g setting pos through a defelem	undef	'1'
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'77327312387'	'0'
-qr.t	27	int upgraded to regexp	'77327316467'	'0'
+qr.t	25	double upgraded to regexp	'77343319491'	'0'
+qr.t	27	int upgraded to regexp	'77343323571'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -306,11 +323,11 @@ ref.t	182	PVBM is not a HASH ref
 ref.t	180	PVBM is not a SCALAR ref		
 ref.t	181	PVBM is not an ARRAY ref		
 ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x120386fad3)'	'SCALAR(0x120386fb13)'
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x120385fb83)'	'SCALAR(0x120385fbc3)'
 ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
 ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x120432bca3)'	^VSTRING\(0x[0-9a-f]+\)$
+ref.t	65	stringify for ref to vstring	'SCALAR(0x1203ff8923)'	^VSTRING\(0x[0-9a-f]+\)$
 signatures.t	940		'Undefined subroutine &main:: called at (eval 1) line 1. '	^Too few arguments for subroutine 'main::__ANON__'
 signatures.t	943	RT #130661	'Error while parsing arguments to DEFMACRO P-SUB:   too few elements in     ()   to satisfy lambda list     (NAME PARAMS &BODY BODY):   at least 2 expected, but got 0 at (eval 194) line 1. '	A signature parameter must start with
 signatures.t	944	RT #132141	'abc'	'Xbc'
@@ -400,7 +417,7 @@ sprintf2.t	1521	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x0.0000p+0	'0x0.0000p+
 sprintf2.t	1511	subnormal 3e-324 %a 0x1p-1074 got 0x0p+0	'0x0p+0'	'0x1p-1074'
 sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'
 sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'
-state.t	76	Reference to state variable	'SCALAR(0x1201329bd3)'	'SCALAR(0x1201a08d63)'
+state.t	76	Reference to state variable	'SCALAR(0x1201b28be3)'	'SCALAR(0x1201b47823)'
 state.t	73	computed goto 0		
 state.t	92	substr	'Johnx'	'xxxxx'
 substr.t	372		''	undef

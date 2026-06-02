@@ -583,4 +583,46 @@
              h1)
     (pcl:make-p-box 1)))
 
+;;; ----------------------------------------------------------------------------
+;;; Sweep-harness loader with per-form recovery.
+;;;
+;;; This is TEST INFRASTRUCTURE, not Perl runtime semantics — it lives here in the
+;;; harness library (loaded only by the sweep / gate), never in pcl-runtime.lisp
+;;; (which ships with every transpiled program).
+;;;
+;;; It loads a generated test file one top-level form at a time and continues past
+;;; an uncaught error in any single form, instead of aborting the whole file the
+;;; way plain LOAD does.  So one not-supported statement — e.g. `pack "P"` in a bare
+;;; loop, or `die if $@` after a string eval PCL can't satisfy — no longer swallows
+;;; every test after it; the remaining statements still run and emit their TAP.
+;;;
+;;; Faithful to LOAD for PCL's output: (a) the reader tracks *package* between forms
+;;; exactly as LOAD does, so `(in-package ...)` forms affect later reads; (b) every
+;;; eval-when wrapper PCL emits includes :execute, so a per-form EVAL fires the same
+;;; situations a LOAD would.  A file with no uncaught top-level die evaluates
+;;; identically, form for form.  Each caught error is still printed on *error-output*
+;;; (recovered, not hidden) so the planned-vs-emitted check flags the under-count.
+(defun p-load-with-recovery (path)
+  (with-open-file (stream path :direction :input :external-format :utf-8)
+    (let ((*load-pathname* (pathname path))
+          (*load-truename* (ignore-errors (truename path)))
+          (eof '#:eof)
+          (errs 0))
+      (loop
+       (let ((form (handler-case (read stream nil eof)
+                     (error (e)
+                       (format *error-output*
+                               "~&; PCL recovery: unreadable form, stopping: ~A~%" e)
+                       eof))))
+         (when (eq form eof) (return))
+         (handler-case (eval form)
+           (error (e)
+             (incf errs)
+             (format *error-output*
+                     "~&; PCL recovery: top-level form aborted (recovered): ~A~%" e)))))
+      (when (plusp errs)
+        (format *error-output*
+                "~&; PCL recovery: ~D top-level form(s) aborted in ~A~%" errs path))
+      (values))))
+
 (format t "# PCL Test library loaded~%")
