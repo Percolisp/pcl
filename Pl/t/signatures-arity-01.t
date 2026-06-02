@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -129,3 +129,18 @@ test_cl('our in a signature default declares a persistent global',
     "$H\nsub t125 (\$c = (our \$k)++) { \$c }\n"
   . "print eval(\"t125()\"), \",\", eval(\"t125()\"), \",\", eval(\"t125()\"), \"\\n\";",
     "0,1,2\n");
+
+# ── //= and ||= default operators (Perl 5.38+; spec §4) ──────────────────────
+
+# 17: `//=` applies the default on an absent OR undef arg, but not on a defined
+#     false value (0).  Was: the param was dropped entirely (regex only matched `=`).
+test_cl('//= signature default (absent/undef/zero)',
+    "$H\nsub f (\$x, \$y //= 3) { \$x + \$y }\n"
+  . "print f(5,4), f(5), f(4,undef), f(4,0), \"\\n\";",
+    "9874\n");
+
+# 18: `||=` applies the default on an absent OR false arg (including 0).
+test_cl('||= signature default (absent/undef/false)',
+    "$H\nsub f (\$x, \$y ||= 3) { \$x + \$y }\n"
+  . "print f(5,4), f(5), f(4,undef), f(4,0), \"\\n\";",
+    "9877\n");

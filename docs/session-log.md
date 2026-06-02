@@ -4,6 +4,50 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 231 (2026-06-02) — `\(LIST)` scalar-context refgen + `//=`/`||=` signature defaults
+
+Two real, independent bugs fixed; full gate green (91 files / 3172) and full sweep
+clean (sweep-diff **0 new / 8 fixed**, 69 fully passing held, baseline re-blessed
+423→415).  **17802→17811 pass / 750→741 fail.**
+
+**1. `\(LIST)` in scalar context took a ref to the wrong thing** (cross-cutting bug #5;
+`Pl/ExprToCL.pm`).  `bless \(map "$_", "test"), "C"` blessed an **ARRAY** ref instead of
+a **SCALAR** ref.  `\(LIST)` is a list operator: it distributes `\` over the elements
+and, *in scalar context*, yields a ref to the **last** element (comma-operator
+semantics — confirmed with real perl: `\(@a)`, `\(map…)`, `\(1,2,3)` all give a SCALAR
+ref to the last element in scalar context).  The codegen always emitted
+`(p-refgen-list …)` (a vector) regardless of context, so a scalar consumer (`bless`,
+`my $x =`) saw the whole vector and treated it as an ARRAY ref.  Fix: read the node's
+**raw** context (`get_node_context_raw`, so the SCALAR_CTX *default* doesn't fire on
+list-natural unannotated nodes) and, only when explicitly SCALAR_CTX/VOID_CTX, wrap the
+result in `(p-list-scalar …)` (which reduces a vector to its last element).  List and
+unannotated contexts keep the full vector.  **bless.t 95→96** (test 11; test 62 now
+correctly shows `C=SCALAR(0x…)` instead of `C=ARRAY`).  No ref.t change.
+
+**2. `//=` / `||=` signature default operators were dropped entirely** (Perl 5.38+;
+`Pl/Parser.pm`).  `sub f ($x, $y //= 3)` — the `_parse_signature` regex only matched
+`name = default`, so `$y //= 3` matched **no** branch and fell through to `next` — the
+parameter `$y` vanished (arity 1, body referenced a free `$y`).  Fix: the param regex
+now captures the operator (`//=` | `||=` | `=`) into `default_op`; the optional-param
+binding chooses the guard accordingly — `=` applies the default only when the arg is
+**absent**, `//=` also when it is **undef** (`%pcl-definedp`), `||=` also when it is
+**false** (`p-true-p`).  The `and` short-circuits the availability check so an absent arg
+never indexes past `@_`.  Exported `%pcl-definedp` and `p-true-p` from the `pcl` package
+(generated code runs in user packages that `(:use :pcl)`).  **signatures.t 780→788**
+(tests 437–444: `//=`/`||=` present/absent/undef/zero).
+
+**Regression tests:** `Pl/t/list-scalar-context-01.t` 15→18 (scalar/list `\(map…)`,
+`bless \(map…)`); `Pl/t/signatures-arity-01.t` 16→18 (`//=`/`||=`).  Gate 91 files / 3172.
+
+**Catalog re-confirmed stale.**  Investigated but left (documented/hard): bless.t
+rebless-in-place (61/62 — class stored on the wrapper box not the referent = the same
+"scalar assignment copies identity" limitation as qr.t 6); signatures.t list-operator
+default consuming the comma (`$p = t018 222, $a = 333` is ONE default in Perl — needs
+list-op precedence at signature-parse time); remaining signatures fails are mostly
+arity-message-text / error-detection (principle 9).
+
+---
+
 ## Session 230 (2026-06-02) — `local $#a` + TAP `$TODO` harness support
 
 Bug-hunting via perl-tests (catalog confirmed badly stale: chop.t and range.t both

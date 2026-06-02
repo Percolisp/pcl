@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -122,3 +122,20 @@ test_cl('(LIST) x $n in return list = string repeat in scalar context',
       my $c = sub { my ($n)=@_; return (@a, (@b) x $n) };
       my $s = $c->(2); print "$s\n";},
     "33\n");
+
+# ── \(LIST) refgen distributes \ over the list (cross-cutting bug #5) ─────────
+# In scalar context `\(LIST)` yields a ref to the LAST element (comma-operator
+# semantics): a SCALAR ref, not an ARRAY ref.  `bless \(map ...), "C"` was a
+# blessed ARRAY ref before this fix.
+test_cl('\(map ...) in scalar context is a SCALAR ref to last element',
+    q{my $c = \(map "$_", "p", "q"); print ref($c), " ", $$c, "\n";},
+    "SCALAR q\n");
+
+test_cl('bless \(map ...) is a blessed SCALAR ref',
+    q{my $b = bless \(map "$_", "test"), "C"; print ref($b), " ", $$b, "\n";},
+    "C test\n");
+
+# In list context \(LIST) keeps one ref per element.
+test_cl('\(map ...) in list context = one ref per element',
+    q{my @r = \(map "$_", "a", "b"); print scalar(@r), " ", ref($r[0]), " ", ${$r[1]}, "\n";},
+    "2 SCALAR b\n");

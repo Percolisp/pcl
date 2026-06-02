@@ -4983,8 +4983,16 @@ sub _process_sub_statement {
       $idx++;
     }
     for my $p (@sig_opt) {
+      # `=` applies the default only when the arg is absent; `//=` also when the
+      # supplied arg is undef; `||=` also when it is false.  The `and` short-
+      # circuits so an absent arg never indexes past @_.
+      my $op    = $p->{default_op} // '=';
+      my $avail = "(> (length \@_) $idx)";
+      my $cond  = $op eq '//=' ? "(and $avail (%pcl-definedp (aref \@_ $idx)))"
+                : $op eq '||=' ? "(and $avail (p-true-p (aref \@_ $idx)))"
+                :                $avail;
       push @binds,
-        "($p->{name} (p-copy-scalar-arg (if (> (length \@_) $idx) (aref \@_ $idx) $p->{default_cl})))";
+        "($p->{name} (p-copy-scalar-arg (if $cond (aref \@_ $idx) $p->{default_cl})))";
       push @sig_param_names, $p->{name};
       push @local_wraps, { var => $p->{local_var}, name => $p->{name}, idx => $idx }
         if $p->{local_var};
@@ -6306,11 +6314,14 @@ sub _parse_signature {
     next if $param_str eq '';
 
     my ($name, $default_expr);
+    my $default_op = '=';   # '=' | '//=' | '||=' — when the default applies
 
-    if ($param_str =~ /^([\$\@\%]\w+)\s*=\s*(.+)$/) {
-      # Parameter with default: $x = 10
+    if ($param_str =~ m{^([\$\@\%]\w+)\s*(//=|\|\|=|=)\s*(.+)$}) {
+      # Parameter with default: $x = 10, $x //= 10 (apply on absent/undef),
+      # $x ||= 10 (apply on absent/false).  Perl 5.38+ allows //= and ||=.
       $name = $1;
-      $default_expr = $2;
+      $default_op = $2;
+      $default_expr = $3;
       $seen_optional = 1;
     }
     elsif ($param_str =~ /^([\$\@\%]\w+)$/) {
@@ -6379,6 +6390,7 @@ sub _parse_signature {
     push @params, {
       name       => $name,
       default_cl => $default_cl,
+      default_op => $default_op,
       local_var  => $local_var,
     };
 

@@ -33,6 +33,16 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-06-02 (session 231). **`\(LIST)` scalar-context refgen (cross-cutting #5) +
+`//=`/`||=` signature defaults.** `bless \(map "$_","test"), "C"` blessed an ARRAY ref —
+`\(LIST)` in scalar context must yield a SCALAR ref to the LAST element (comma-operator
+semantics); fixed in `Pl/ExprToCL.pm` by wrapping `(p-refgen-list …)` in `(p-list-scalar …)`
+only when the node's *raw* context is SCALAR/VOID (**bless.t 95→96**). Separately, signature
+default operators `$x //= D` / `$x ||= D` (Perl 5.38+) were dropped entirely by
+`_parse_signature` (regex only matched `=`) — now captured into `default_op` and emitted with
+a definedness (`//=`) / truthiness (`||=`) guard (**signatures.t 780→788**). Full sweep
+**17811 pass / 741 fail, 69 fully passing** (sweep-diff 0 new / 8 fixed; baseline 423→415).
+Gate 91 files / 3172.
 Updated 2026-06-02 (session 230). **`local $#a = N` fixed + TAP `$TODO` harness support.**
 `local $#a` (PPI `ArrayIndex`) was silently dropped by `_process_local_declaration`; now
 emits the plain length-set (Perl does NOT restore on scope exit — RT #7411 — so neither do
@@ -136,13 +146,20 @@ Remaining failures (tests 313-397) are lvalue substr and \substr — documented 
 
 ---
 
-### 5. `\(list_expr)` takes ref to ARRAY instead of SCALAR in some contexts
+### 5. `\(list_expr)` takes ref to ARRAY instead of SCALAR in some contexts ✅ FIXED (session 231)
 
-**Files:** bless.t (test 11, 105, ~3 failures), ref.t
+**Files:** bless.t (test 11 — fixed), ref.t
 
-**Root cause:** `bless \(map "$_", "test"), "C"` — `map` returns a list; `\(list)` in
+**Root cause:** `bless \(map "$_", "test"), "C"` — `map` returns a list; `\(LIST)` in
 scalar context should take a ref to the last scalar element, giving a SCALAR ref.
-PCL is treating `map` as returning an array-ref and `\` on that gives ARRAY ref.
+PCL emitted `(p-refgen-list …)` (a vector) regardless of context, so a scalar consumer
+treated it as an ARRAY ref.
+
+**Fix (session 231):** `gen_prefix_op` in `Pl/ExprToCL.pm` now reads the refgen node's
+*raw* context and, only when explicitly SCALAR_CTX/VOID_CTX, wraps the result in
+`(p-list-scalar (p-refgen-list …))` — comma-operator semantics (last element). List and
+unannotated (list-natural) contexts keep the full vector, so `my @r = \(map…)` still
+gets one ref per element. bless.t 95→96.
 
 ---
 
@@ -656,7 +673,7 @@ History retained for reference only:
 
 ### bless.t (~11 failures, 95/106 passing)
 
-- **`\(map ...)`** (tests 11, 105): see cross-cutting bug #5.
+- **`\(map ...)`** (test 11) ✅ **FIXED (session 231)**: see cross-cutting bug #5.
 - **`\substr` lvalue ref** (tests 26–28): documented not-supported.
 - **POSIX errno values** (tests 77–78): `POSIX::EINVAL` gives wrong errno string.
 - **Bless-into-ref detection** (test 101): `bless $obj, $ref_ref` should die.

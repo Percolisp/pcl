@@ -20,7 +20,7 @@
    #:unbox #:ensure-boxed #:p-copy-scalar-arg
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
    #:to-string #:to-number
-   #:p-undef #:p-defined #:p-defined-fh
+   #:p-undef #:p-defined #:p-defined-fh #:%pcl-definedp #:p-true-p
    #:p-let #:p-$
    ;; Arithmetic
    #:p-+ #:p-- #:p-* #:p-/ #:p-% #:p-** #:p-int #:p-abs
