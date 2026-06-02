@@ -4,11 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 231 (2026-06-02) — `\(LIST)` scalar-context refgen + `//=`/`||=` signature defaults
+## Session 231 (2026-06-02) — refgen/sig-defaults, then delete-local-arrow + glob-ref numify
 
-Two real, independent bugs fixed; full gate green (91 files / 3172) and full sweep
-clean (sweep-diff **0 new / 8 fixed**, 69 fully passing held, baseline re-blessed
-423→415).  **17802→17811 pass / 750→741 fail.**
+Four real, independent bugs fixed across two commits; full gate green (91 files /
+3182) and full sweep clean (no regressions).  **17802→17816 pass / 750→736 fail**,
+69 fully passing held throughout, same 2 crashes (bop.t/eval.t) and 5 partials.
+
+### Commit 2 — `delete local $ref->{k}` + glob-ref numeric value (+5 tests)
+
+**3. `delete local` on an arrow-deref element silently dropped the `local`**
+(`Pl/Parser.pm`).  `delete local $a->{b}` / `$a->[N]` matched neither delete-local
+matcher (both required Symbol **immediately** followed by Subscript; the arrow form is
+Symbol `->` Subscript), so it compiled to a plain `delete` with no save/restore — the
+element never restored on scope exit.  Added an arrow branch to both the standalone
+and `my VARS =` paths; the container is the unboxed referent `(unbox $ref)` (same as
+plain delete's codegen).  **local.t 300→302** (119/120, the `delete local $a->{b}`
+inside a nested hashref block).  Regression tests `local-elem-02.t` 26→29.
+NB the sibling `local $ref->{k} = v` (no delete) is the same arrow-drop family and
+still mis-binds the scalar (a latent crash, not in perl-tests/) — left for follow-up.
+
+**4. A glob ref `\*foo` numified to 0** instead of its address (`cl/pcl-runtime.lisp`).
+A bare glob (`my $g = *foo`) and a glob ref (`\*foo`) both became `box(value=typeglob)`
+— indistinguishable — and `box-nv` returned 0 for both, while `box-sv` stringified the
+ref as `GLOB(0x..)`.  Fix: `p-backslash` now sets `is-ref` on a glob-ref box, `box-set`
+preserves/clears it when storing a typeglob, and `box-nv` returns the address when
+is-ref (else 0).  `box-sv` untouched, `ref`/`reftype`/deref unchanged.  **bless.t 96→99**
+(16/52/68: `cmp_ok(hex($2), '==', $object)` on glob refs).  Regression tests
+`ref-to-ref-01.t` 12→14.  (Exact address round-trip is GC-fragile, so the test asserts
+non-zero-ness, matching how the array/hash-ref tests already behave.)
+
+### Commit 1 — `\(LIST)` scalar-context refgen + `//=`/`||=` signature defaults
+
+Sweep-diff **0 new / 8 fixed**, baseline re-blessed 423→415.  **17802→17811 pass.**
 
 **1. `\(LIST)` in scalar context took a ref to the wrong thing** (cross-cutting bug #5;
 `Pl/ExprToCL.pm`).  `bless \(map "$_", "test"), "C"` blessed an **ARRAY** ref instead of

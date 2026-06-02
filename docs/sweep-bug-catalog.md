@@ -33,6 +33,13 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-06-02 (session 231b). **`delete local $ref->{k}` arrow-deref + glob-ref numify.**
+`delete local $a->{b}` / `$a->[N]` silently dropped the `local` (matcher required Symbol
+immediately+Subscript; arrow form is Symbol `->` Subscript) → element never restored
+(**local.t 300→302**, 119/120). A glob ref `\*foo` numified to 0 (bare glob and glob ref
+both became `box(value=typeglob)`); `p-backslash` now sets `is-ref`, `box-set` preserves it,
+`box-nv` returns the address for glob refs (**bless.t 96→99**, 16/52/68). Full sweep
+**17816 pass / 736 fail, 69 fully passing** (0 regressions). Gate 91 files / 3182.
 Updated 2026-06-02 (session 231). **`\(LIST)` scalar-context refgen (cross-cutting #5) +
 `//=`/`||=` signature defaults.** `bless \(map "$_","test"), "C"` blessed an ARRAY ref —
 `\(LIST)` in scalar context must yield a SCALAR ref to the LAST element (comma-operator
@@ -526,9 +533,13 @@ failures; see the later do.t entry.)
   "after local … should be restored" rows are `local $::TODO`, now correctly TODO-skipped).
 - **`local $a` in `if` condition + TODO** (tests 317–319): RT #7411/#7615 — `local $::TODO`
   rows; now emitted as `# TODO` and counted as expected non-failures (session 230 harness).
-- **Array size after `local($a[5])`** (tests 119–120): after `local($a[5]) = 'z'` and
-  `$a[4] = 'y'` in a block, when block exits `$a[5]` is restored but `$a[4]` is also lost.
-  The local-restore trims the array too aggressively. **Still a fix target.**
+- **`delete local $ref->{k}` / `$ref->[N]`** (tests 119–120) ✅ **FIXED (session 231b)**.
+  The arrow-deref form (`my $b = delete local $a->{b}`) was not matched by either
+  delete-local matcher (both required Symbol immediately followed by Subscript), so the
+  `local` was dropped and the element never restored on scope exit.  Added an arrow branch
+  in `_process_local_declaration`'s standalone and `my VARS =` paths (container = unboxed
+  referent).  (The catalog's old "array size after local($a[5])" description was wrong —
+  these are the hashref-element `delete local` rows at source lines 247–266.)
 - **`local $_` with filetest/match** (tests 255–264): `local $_` interactions with
   filetest operators and pattern matching on default `$_`.
 - **package-name reported unqualified** (tests 237, 240): got `'foo'`, expected
@@ -674,6 +685,12 @@ History retained for reference only:
 ### bless.t (~11 failures, 95/106 passing)
 
 - **`\(map ...)`** (test 11) ✅ **FIXED (session 231)**: see cross-cutting bug #5.
+- **glob-ref numeric value** (tests 16, 52, 68) ✅ **FIXED (session 231b)**: `\*foo` numified
+  to 0 (couldn't distinguish a bare glob from a glob ref — both `box(value=typeglob)`).
+  `p-backslash` now sets `is-ref` on a glob-ref box; `box-nv` returns the address when set.
+- **C3 rebless-in-place** (tests 61/62, 46–48): `my $c1 = bless $c1, "C3"` doesn't rebless the
+  outer `$c1` — the class is stored on the wrapper box, not the referent (the same scalar-
+  identity-copy limitation as qr.t 6). Documented/hard.
 - **`\substr` lvalue ref** (tests 26–28): documented not-supported.
 - **POSIX errno values** (tests 77–78): `POSIX::EINVAL` gives wrong errno string.
 - **Bless-into-ref detection** (test 101): `bless $obj, $ref_ref` should die.

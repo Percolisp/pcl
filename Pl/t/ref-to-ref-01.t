@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 14;
 
 sub run_cl {
     my ($code) = @_;
@@ -91,3 +91,14 @@ test_cl('reftype($rr) is SCALAR',
 test_cl('reftype($r) of a plain scalar ref is SCALAR',
     'use Scalar::Util qw(reftype);'
   . 'my $x=1; my $r=\$x; print reftype($r), "\n";', "SCALAR\n");
+
+# ── glob ref numifies to a (non-zero) address like other refs; a *bare* glob
+#    numifies to 0.  Both share box-value=typeglob — the is-ref flag set by
+#    p-backslash (and preserved by box-set) is the only discriminator.  (Exact
+#    address round-trip is GC-fragile, so we only assert non-zero-ness here.)
+test_cl('glob ref numifies to a non-zero address',
+    'our $g_t = 5; my $r = \*g_t; print +($r + 0 != 0 ? "nonzero" : "zero"), "\n";',
+    "nonzero\n");
+
+test_cl('bare glob in scalar numifies to 0',
+    'our $g_t = 5; my $g = *g_t; print 0 + $g, "\n";', "0\n");
