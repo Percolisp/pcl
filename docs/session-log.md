@@ -4,6 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 230 (2026-06-02) — `local $#a` + TAP `$TODO` harness support
+
+Bug-hunting via perl-tests (catalog confirmed badly stale: chop.t and range.t both
+now fully pass; many cataloged bugs already fixed).  Two changes — one real codegen
+bug, one harness-protocol gap that was silently miscounting known-broken-in-Perl
+tests across 18 files.
+
+**1. `local $#a = N` was silently dropped** (`Pl/Parser.pm`).  PPI tokenizes `$#a` as
+`PPI::Token::ArrayIndex`, which `_process_local_declaration`'s variable extraction
+(Symbol/Magic/List only) did not recognize → `@vars` empty → the whole statement was
+discarded (the assignment never even happened).  Added an `ArrayIndex` branch that
+emits the plain length-set expression with **no** save/restore wrapper.  This matches
+Perl *exactly*: Perl localizes the array-length magic but does **not** restore it on
+scope exit (RT #7411 — verified with real perl: `{ local $#a=2 } print "@a"` stays
+`1 2 3`; the "after local … should be restored" rows in `perl-tests/local.t` are
+`local $::TODO`, i.e. known-broken in Perl itself).  **local.t 315/316 now pass.**
+
+**2. TAP `$TODO` support** (`cl/pcl-test.lisp`, `sweep-perl-tests.pl`).  The harness had
+no `$TODO` handling, so a test run under `local $TODO = "reason"` (a known-broken-in-
+Perl test) was counted as a hard failure — and, worse, a TODO test that *happened* to
+pass under PCL counted as a false pass (this is why fixing `local $#a` looked net-zero:
+the now-correctly-failing restore tests 317/318 had been false-passing).  Real `prove`
+treats a failing TODO as an *expected* non-failure.
+
+   - New `%current-todo` reads the dynamic value of the symbol `$TODO` in package
+     `MAIN` (perl-tests run in main; both bare `local $TODO` and `local $::TODO`
+     resolve there).  **No codegen change and no variable hijacking** — the alternative
+     of mapping `$TODO` via `%SPECIAL_VARS` was rejected because it would also clobber
+     any lexical `my $TODO` in real code.  Out of the TODO extent the symbol holds its
+     defvar'd undef box, which `test-undef-p` rejects.
+   - `test-ok` checks `%current-todo` before the skip-registry: a failing TODO emits
+     `not ok N - desc # TODO reason` and is **not** counted as a failure or logged to
+     the faillog; an unexpected pass emits `ok N … # TODO` and counts as a normal pass.
+   - The sweep's TAP parser now treats `# TODO` as non-fail (a `not ok … # TODO` counts
+     as skip like prove; an `ok … # TODO` counts as pass).
+
+**Results.** Gate **91 files / 3172 tests, all green** (`Pl/t/local-elem-02.t` 24→26:
+the two RT #7411 in-block rows).  Full sweep **17802 pass / 750 fail / 11935 skip, 69
+fully passing** (was 757 fail / 68; **blocks.t** newly fully passing — its lone failure
+was a TODO test).  sweep-diff: **0 new**, 6 fixed (local.t 315/316 genuine; aassign.t /
+blocks.t / or.t / local.t-319 TODO-skipped).  Baseline re-blessed 430→423 keys.  Only
+bop.t + eval.t still crash.
+
+**Catalog freshness note:** re-triaged chop.t (now fully passing), range.t (fully
+passing), split.t (149–151 are chained list-assignment-as-lvalue `(@a=split)=1..10`,
+niche — the catalog mislabeled them "package-qualified array"), or.t (8–10 are `||`
+propagating lvalue/pos context, niche), concat2.t (overloaded `.` + `\$_[1]`).
+
+---
+
 ## Session 229 (2026-06-01) — foreach aliasing of lvalues (substr/pos/vec + hash/array elements)
 
 In Perl `for (LVALUE) { $_ = ... }` aliases `$_` to the live container so writes

@@ -33,6 +33,16 @@ context. **`print @a` (a very common op) was fully broken** — print.t never co
 on **-j8** (16855 pass / 767 fail / 11881 skip, only bop.t+eval.t crash, 0 SIMPLE-FILE-ERROR).
 The -j8 "flakiness" was the same relative-faillog bug surfacing under GC pressure, not a
 write race (every child writes unique paths). +8 regression tests in `transpile-test-01b.t`.
+Updated 2026-06-02 (session 230). **`local $#a = N` fixed + TAP `$TODO` harness support.**
+`local $#a` (PPI `ArrayIndex`) was silently dropped by `_process_local_declaration`; now
+emits the plain length-set (Perl does NOT restore on scope exit — RT #7411 — so neither do
+we). **local.t 315/316 pass.** Separately, the harness now honors Test::More `$TODO`
+(`cl/pcl-test.lisp` `%current-todo` reads `main::$TODO`; `sweep-perl-tests.pl` counts
+`# TODO` as non-fail like prove) — failing-TODO tests across 18 files no longer count as
+failures. **Full sweep 17802 pass / 750 fail (was 757), 69 fully passing** (+1 blocks.t),
+baseline 423 keys, only bop.t+eval.t crash. **Catalog STILL stale**: chop.t & range.t now
+fully pass; split.t 149–151 are chained list-assign-as-lvalue (not package-array); or.t
+8–10 are `||`-lvalue/pos-context. Re-triage before trusting per-file notes below.
 Updated 2026-06-01 (session 228). **yadayada.t 16→21** (`...` now dies `Unimplemented at $0 line N.` via a runtime-built `:loc`, `Pl/Parser.pm`); **sprintf2.t 1544→1617** (+73; `Integer overflow in format string` guards for `*`-width/`*`-precision/literal-precision, `cl/pcl-runtime.lisp`); **signatures.t 672→780** (+108; three signature-param declaration bugs fixed — params are now mutable boxes, `local $G=RHS` defaults restore on sub exit, and `our $VAR` defaults are declared; see `docs/variable-declarations-spec.md` §4.1/§4.2/§4.3). Full sweep 0 new fails, 66 fully passing. Gate 90 files / 3150. NOTE: this session found the catalog significantly stale — list-of-arrays slice, chop-on-assigned-array, `($a=…) .= 'c'`, and LHS array-slice assignment all already pass.
 Updated 2026-05-31 (session 223c). **`crypt()` implemented via FFI; lfs.t permanently skipped.**
 `p-crypt` (`cl/pcl-runtime.lisp`) calls the system `crypt(3)` (`libcrypt.so.1`) through

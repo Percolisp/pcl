@@ -123,11 +123,15 @@ sub run_one_test {
         $planned //= -1;
 
         # Count: `not ok N` = fail; `ok N # skip ...` = skip (test-own or registry);
-        # plain `ok N` = pass.
+        # `# TODO` = expected outcome, never a failure (a failing TODO is a known-
+        # broken-in-Perl test, counted as skip like prove does; a passing TODO is
+        # an unexpected success, counted as pass); plain `ok N` = pass.
         while ($out =~ /^(not ok|ok) \d+([^\n]*)$/gm) {
-            if    ($1 eq 'not ok')      { $fail++ }
-            elsif ($2 =~ /#\s*skip/i)   { $skip++ }
-            else                        { $pass++ }
+            my ($verb, $rest) = ($1, $2);
+            if    ($rest =~ /#\s*skip/i) { $skip++ }
+            elsif ($rest =~ /#\s*todo/i) { $verb eq 'not ok' ? $skip++ : $pass++ }
+            elsif ($verb eq 'not ok')    { $fail++ }
+            else                         { $pass++ }
         }
 
         # Detect abnormal termination

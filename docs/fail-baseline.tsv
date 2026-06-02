@@ -52,7 +52,6 @@ aassign.t	106	lval: c post 2 XYZA	undef	'lval2'
 aassign.t	142	lval: c post 2 XYZH	undef	'lval2'
 aassign.t	19	lvalue sub on RHS returns array	''	'1 2 3'
 aassign.t	20	lvalue sub on RHS returns scalars	':'	'1:2'
-aassign.t	26	my (....) = @_	'(1)(2 3)'	'(3)(2 1)'
 aassign.t	16	my: lex alias of array alement	' 3'	'1 3'
 aassign.t	17	my: lex alias of array alements	' '	'2 1'
 aassign.t	13	my: lex array elements aliased	':'	'2:1'
@@ -75,8 +74,7 @@ array.t	86	do {}: $# on freed array is undef	'-1'	undef
 array.t	88	do {}: msg	undef	^Attempt to set length of freed array
 array.t	87	do {}: number of warnings	'0'	'1'
 array.t	100	orphaned 1 is always undef	'42'	undef
-bless.t	68		'77342914915'	== 'D=GLOB(0x1201ff3963)'
-blocks.t	24	RT #2917: No constraint on how late INIT blocks can run	''	'in init'
+bless.t	68		'77343204627'	== 'D=GLOB(0x120203a513)'
 bop.t	144		'0'	'1'
 bop.t	158	    and turns off the UTF-8 flag		
 bop.t	463	correct error	''	no method found
@@ -108,7 +106,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x1202801b6f)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x12028419cf)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -128,7 +126,6 @@ caller.t	59	GH #15109 level 6	undef	\(eval \d+\):1
 caller.t	60	GH #15109 level 7	undef	\(eval \d+\):1
 caller.t	61	GH #15109 level 8	undef	\(eval \d+\):1
 caller.t	62	GH #15109 level 9	undef	caller\.t
-caller.t	50	RT #7165: line number should be consistent for multiline subroutine calls	'6 10'	'6 9'
 caller.t	41	[perl #115768] caller gets line numbers from nulled cops	undef	'253'
 caller.t	1	[perl #68712] filenames after require in a BEGIN block	undef	'caller.t'
 caller.t	27	actually return the right function name	'main'	'main::pb'
@@ -156,7 +153,7 @@ caller.t	46	value from (caller 0)[9] (bitmask) works in ${^WARNING_BITS}	''	'1'
 caller.t	25	warnings match caller (all)		
 caller.t	24	warnings match caller (no bits)		
 concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
-concat2.t	2	RT #132385	'REF(0x1204e23ab3)REF(0x1204e23c93)'	'AB'
+concat2.t	2	RT #132385	'REF(0x1200c356f3)REF(0x1200c358d3)'	'AB'
 delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
 delete.t	54	a b c also equivalent		
 delete.t	26	a b c equivalent		
@@ -180,7 +177,7 @@ hash.t	6	freed hash elems are not visible to DESTROY
 hash.t	13	magic keys	'a:x:b:y'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x12037e1e13)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x120389bb63)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -188,9 +185,6 @@ index.t	111	index respects changes in ref stringification	'-1'	'0'
 length.t	34		''	undef
 length.t	42	uninit warning for stringifying as undef	''	uninitialized
 local.t	264		''	Modification of a read-only value attempted
-local.t	315	RT #7411: local($#a) should change count	'4'	'2'
-local.t	316	RT #7411: local($#a) should shorten array	'1 2 3 4 5'	'1 2 3'
-local.t	319	RT #7615: local in if condition should be restored	'1'	'10'
 local.t	260	Underscore 'Assignment'		
 local.t	258	Underscore 'Chop'		
 local.t	257	Underscore 'Concat'		
@@ -201,7 +195,7 @@ local.t	275	localised sub via stash
 local.t	278	localised sub via stash slice		
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x12037dfc93)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x12038bf683)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF NIL)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -215,7 +209,6 @@ method.t	125	method call on empty string	''	^Can't call method "flomp" without a
 method.t	128	method call on typeglob ignores package	''	^Can't call method "squeak" without a package or object reference
 method.t	102	method lookup is nul-clean	''	Can't locate object method "method\\0Whoops" via package "NulTest" at
 method.t	121	method{@array}$more_args	'arg'	'arg b'
-or.t	8	   $tied || $var	'0'	'1'
 or.t	10	|| propagates lvaluish context to its lhs	'1'	'2'
 or.t	9	|| propagates lvaluish context to its rhs	''	'1'
 pack.t	14703		'1'	'0'
@@ -283,7 +276,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x12020ed3f3)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x120217e123)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -294,8 +287,8 @@ pos.t	20	s///g setting pos through a defelem	undef	'1'
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'77326196307'	'0'
-qr.t	27	int upgraded to regexp	'77326200387'	'0'
+qr.t	25	double upgraded to regexp	'77326316643'	'0'
+qr.t	27	int upgraded to regexp	'77326353507'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -313,11 +306,11 @@ ref.t	182	PVBM is not a HASH ref
 ref.t	180	PVBM is not a SCALAR ref		
 ref.t	181	PVBM is not an ARRAY ref		
 ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x12033a7f43)'	'SCALAR(0x12033a7f83)'
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x12037679a3)'	'SCALAR(0x12037679e3)'
 ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
 ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x1203cb20d3)'	^VSTRING\(0x[0-9a-f]+\)$
+ref.t	65	stringify for ref to vstring	'SCALAR(0x12042a0f23)'	^VSTRING\(0x[0-9a-f]+\)$
 signatures.t	940		'Undefined subroutine &main:: called at (eval 1) line 1. '	^Too few arguments for subroutine 'main::__ANON__'
 signatures.t	438	//= absent	'5'	'8'
 signatures.t	437	//= present	undef	'9'
@@ -415,7 +408,7 @@ sprintf2.t	1521	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x0.0000p+0	'0x0.0000p+
 sprintf2.t	1511	subnormal 3e-324 %a 0x1p-1074 got 0x0p+0	'0x0p+0'	'0x1p-1074'
 sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'
 sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'
-state.t	76	Reference to state variable	'SCALAR(0x12010e53f3)'	'SCALAR(0x12011042c3)'
+state.t	76	Reference to state variable	'SCALAR(0x12010d0283)'	'SCALAR(0x12010e7133)'
 state.t	73	computed goto 0		
 state.t	92	substr	'Johnx'	'xxxxx'
 substr.t	372		''	undef

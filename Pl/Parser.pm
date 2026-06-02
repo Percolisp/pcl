@@ -2076,6 +2076,21 @@ sub _process_local_declaration {
     return;
   }
 
+  # ── Handle local $#array = N (RT #7411).
+  # Perl's local on the array-length magic ($#a) changes the length but does NOT
+  # restore it on scope exit — a long-standing Perl limitation (RT #7411: the
+  # "after local($#a) ... should be restored" tests in perl-tests/local.t are
+  # marked local $::TODO).  Match Perl exactly: emit a plain length-set with no
+  # save/restore wrapper.  PPI tokenizes $#a as PPI::Token::ArrayIndex, which the
+  # generic symbol/list extraction below does not recognize (so the statement was
+  # silently dropped).
+  if (@non_ws && ref($non_ws[0]) eq 'PPI::Token::ArrayIndex') {
+    $self->_emit(";; $perl_code");
+    my $cl = $self->_parse_expression(\@non_ws, $stmt) // 'nil';
+    $self->_emit($cl);
+    return;
+  }
+
   # ── Unwrap local(ELEM) parens form: local($a[N]) / local($h{key}) / local(@a[N,M])
   # PPI gives Structure::List when parens are used; unwrap it so the handler below fires.
   if (@non_ws >= 1 && ref($non_ws[0]) eq 'PPI::Structure::List') {

@@ -32,7 +32,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 24;
+plan tests => 26;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -424,4 +424,31 @@ $a[4] = 'd';
 }
 });
     is($out, "not-exists\n", 'Fix-K: exists $a[3] false inside delete local $a[1] block (no box fill)');
+}
+
+# RT #7411: local $#a = N truncates the array inside the block.
+# Perl localizes the array-length magic; the truncation takes effect immediately.
+# (Perl does NOT restore on scope exit — that is a known Perl limitation, RT #7411,
+# marked local $::TODO in perl-tests/local.t — so we only assert the in-block effect.)
+{
+    my $out = run_pl(q{
+my @a = (1..5);
+{
+    local $#a = 2;
+    say "$#a [@a]";
+}
+});
+    is($out, "2 [1 2 3]\n", 'RT #7411: local $#a = 2 shortens array inside block');
+}
+
+# local $#a = N can also extend the array (with undef tail) inside the block.
+{
+    my $out = run_pl(q{
+my @a = (1,2,3);
+{
+    local $#a = 4;
+    say scalar(@a);
+}
+});
+    is($out, "5\n", 'RT #7411: local $#a = 4 extends array length inside block');
 }
