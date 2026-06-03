@@ -1072,22 +1072,41 @@ sub _process_expression_statement {
   # Handle: delete local SYMBOL SUBSCRIPT (standalone delete+local statement)
   # PPI::Statement: Word("delete"), Word("local"), Symbol, Subscript
   # Opens a p-local-X-elem scope that wraps the rest of the block (closed at block end).
+  # Symbol-form `delete local $h{k}` / `$a[N]`, plus the arrow-deref form
+  # `delete local $ref->{k}` / `$ref->[N]` (container = unboxed referent).
+  my ($sl_sub, $sl_cl_var, $sl_open);
   if (@parts >= 4
       && ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'delete'
       && ref($parts[1]) eq 'PPI::Token::Word' && $parts[1]->content eq 'local'
       && ref($parts[2]) eq 'PPI::Token::Symbol'
       && ref($parts[3]) eq 'PPI::Structure::Subscript') {
     my $sym       = $parts[2]->content;
-    my $sub       = $parts[3];
-    my $open      = $sub->start->content;
+    $sl_sub       = $parts[3];
+    $sl_open      = $sl_sub->start->content;
     my $base      = substr($sym, 1);
-    my $new_sigil = ($open eq '{') ? '%' : '@';
-    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    my $new_sigil = ($sl_open eq '{') ? '%' : '@';
+    $sl_cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
     # Stash element — not supported; skip save/restore so subsequent tests can run.
-    if ($cl_var =~ /^\(p-stash /) {
+    if ($sl_cl_var =~ /^\(p-stash /) {
       $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
       return;
     }
+  }
+  elsif (@parts >= 5
+      && ref($parts[0]) eq 'PPI::Token::Word'     && $parts[0]->content eq 'delete'
+      && ref($parts[1]) eq 'PPI::Token::Word'     && $parts[1]->content eq 'local'
+      && ref($parts[2]) eq 'PPI::Token::Symbol'
+      && ref($parts[3]) eq 'PPI::Token::Operator' && $parts[3]->content eq '->'
+      && ref($parts[4]) eq 'PPI::Structure::Subscript') {
+    $sl_sub     = $parts[4];
+    $sl_open    = $sl_sub->start->content;
+    my $base_cl = $self->_parse_expression([$parts[2]], $stmt);
+    $sl_cl_var  = "(unbox $base_cl)";
+  }
+  if ($sl_sub) {
+    my $sub       = $sl_sub;
+    my $open      = $sl_open;
+    my $cl_var    = $sl_cl_var;
     my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
     if (@key_cls) {
       my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
@@ -1747,22 +1766,46 @@ sub _process_my_toplevel_declaration {
       #  - The local save/restore must scope to the enclosing block
       #  - The delete is done inside the local scope, and result assigned to VARS
       my @clean_rhs = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
+      # Match `delete local $h{k}` / `$a[N]` (Symbol Subscript) AND the arrow-deref
+      # form `delete local $ref->{k}` / `$ref->[N]` (Symbol -> Subscript), whose
+      # container is the unboxed referent.  Without the arrow branch the `local`
+      # was silently dropped (no save/restore), so the element never restored.
+      my ($dl_sub, $dl_cl_var, $dl_open);
       if (@clean_rhs >= 4
           && ref($clean_rhs[0]) eq 'PPI::Token::Word'  && $clean_rhs[0]->content eq 'delete'
           && ref($clean_rhs[1]) eq 'PPI::Token::Word'  && $clean_rhs[1]->content eq 'local'
           && ref($clean_rhs[2]) eq 'PPI::Token::Symbol'
           && ref($clean_rhs[3]) eq 'PPI::Structure::Subscript') {
         my $sym  = $clean_rhs[2]->content;
-        my $sub  = $clean_rhs[3];
-        my $open = $sub->start->content;
+        $dl_sub  = $clean_rhs[3];
+        $dl_open = $dl_sub->start->content;
         my $base = substr($sym, 1);
-        my $new_sigil = ($open eq '{') ? '%' : '@';
-        my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+        my $new_sigil = ($dl_open eq '{') ? '%' : '@';
+        $dl_cl_var = $self->_transform_pkg_var("${new_sigil}${base}");
         # Stash element — not supported; emit comment and skip
-        if ($cl_var =~ /^\(p-stash /) {
+        if ($dl_cl_var =~ /^\(p-stash /) {
           $self->_emit(";; $perl_code (delete local on stash — not supported, skipped)");
           return;
         }
+      }
+      elsif (@clean_rhs >= 5
+          && ref($clean_rhs[0]) eq 'PPI::Token::Word'     && $clean_rhs[0]->content eq 'delete'
+          && ref($clean_rhs[1]) eq 'PPI::Token::Word'     && $clean_rhs[1]->content eq 'local'
+          && ref($clean_rhs[2]) eq 'PPI::Token::Symbol'
+          && ref($clean_rhs[3]) eq 'PPI::Token::Operator' && $clean_rhs[3]->content eq '->'
+          && ref($clean_rhs[4]) eq 'PPI::Structure::Subscript') {
+        $dl_sub    = $clean_rhs[4];
+        $dl_open   = $dl_sub->start->content;
+        # Container is the unboxed referent of the scalar (same as plain delete's
+        # `(p-delete (unbox $ref) k)`); the local macros unbox a hash again (no-op
+        # on a hash-table) and use a vector directly.
+        my $base_cl = $self->_parse_expression([$clean_rhs[2]], $stmt);
+        $dl_cl_var  = "(unbox $base_cl)";
+      }
+      if ($dl_sub) {
+        my $sub     = $dl_sub;
+        my $open    = $dl_open;
+        my $cl_var  = $dl_cl_var;
         my @key_cls = $self->_subscript_key_cl_list($sub, $open, $stmt);
         if (@key_cls) {
           my $macro   = ($open eq '{') ? 'p-local-hash-elem'  : 'p-local-array-elem';
@@ -2076,6 +2119,21 @@ sub _process_local_declaration {
     return;
   }
 
+  # ── Handle local $#array = N (RT #7411).
+  # Perl's local on the array-length magic ($#a) changes the length but does NOT
+  # restore it on scope exit — a long-standing Perl limitation (RT #7411: the
+  # "after local($#a) ... should be restored" tests in perl-tests/local.t are
+  # marked local $::TODO).  Match Perl exactly: emit a plain length-set with no
+  # save/restore wrapper.  PPI tokenizes $#a as PPI::Token::ArrayIndex, which the
+  # generic symbol/list extraction below does not recognize (so the statement was
+  # silently dropped).
+  if (@non_ws && ref($non_ws[0]) eq 'PPI::Token::ArrayIndex') {
+    $self->_emit(";; $perl_code");
+    my $cl = $self->_parse_expression(\@non_ws, $stmt) // 'nil';
+    $self->_emit($cl);
+    return;
+  }
+
   # ── Unwrap local(ELEM) parens form: local($a[N]) / local($h{key}) / local(@a[N,M])
   # PPI gives Structure::List when parens are used; unwrap it so the handler below fires.
   if (@non_ws >= 1 && ref($non_ws[0]) eq 'PPI::Structure::List') {
@@ -2106,35 +2164,47 @@ sub _process_local_declaration {
   }
 
   # ── Handle local $hash{key}, local @arr[N], local @hash{@keys}, local @arr[N,M]
-  # PPI gives: Symbol("$hash") + Structure::Subscript("{key}")
+  # PPI gives: Symbol("$hash") + Structure::Subscript("{key}").  Also the
+  # arrow-deref form local $ref->{key} / $ref->[N] (Symbol -> Subscript), whose
+  # container is the unboxed referent.  Without the arrow branch the `local` was
+  # silently dropped and `$ref` itself was mis-bound to the RHS (a crash).
+  my ($ld_sub, $ld_cl_var, $ld_sub_idx);
   if (@non_ws >= 2
       && ref($non_ws[0]) eq 'PPI::Token::Symbol'
       && ref($non_ws[1]) eq 'PPI::Structure::Subscript') {
-
-    my $sym   = $non_ws[0]->content;           # e.g. "$hash", "@arr"
-    my $sub   = $non_ws[1];
-    my $open  = $sub->start()->content();       # '{' or '['
-    my $sigil = substr($sym, 0, 1);             # '$' (single) or '@' (slice)
-    my $base  = substr($sym, 1);               # "hash" or "arr"
-
-    # The CL variable: hash subscripts access %hash, array subscripts access @arr
+    my $sym       = $non_ws[0]->content;           # e.g. "$hash", "@arr"
+    $ld_sub       = $non_ws[1];
+    $ld_sub_idx   = 1;
+    my $open      = $ld_sub->start()->content();    # '{' or '['
+    my $base      = substr($sym, 1);               # "hash" or "arr"
     my $new_sigil = ($open eq '{') ? '%' : '@';
-    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
-
-    # Stash slice/element: $Pkg::{key} or @Pkg::{keys} — stash manipulation
-    # is not supported. Emit just the body (no save/restore) so the file
-    # doesn't crash and subsequent tests can run.
-    if ($cl_var =~ /^\(p-stash /) {
+    $ld_cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    # Stash slice/element: $Pkg::{key} — stash manipulation is not supported.
+    if ($ld_cl_var =~ /^\(p-stash /) {
       $self->_emit(";; $perl_code (stash element local — not supported, running body only)");
       return;
     }
+  }
+  elsif (@non_ws >= 3
+      && ref($non_ws[0]) eq 'PPI::Token::Symbol'
+      && ref($non_ws[1]) eq 'PPI::Token::Operator' && $non_ws[1]->content eq '->'
+      && ref($non_ws[2]) eq 'PPI::Structure::Subscript') {
+    $ld_sub     = $non_ws[2];
+    $ld_sub_idx = 2;
+    my $base_cl = $self->_parse_expression([$non_ws[0]], $stmt);
+    $ld_cl_var  = "(unbox $base_cl)";
+  }
+  if ($ld_sub) {
+    my $sub   = $ld_sub;
+    my $open  = $sub->start()->content();       # '{' or '['
+    my $cl_var = $ld_cl_var;
 
     # Extract individual key/index expressions from the subscript
     my @key_groups = $self->_subscript_key_groups($sub);
     if (@key_groups) {
       # Check for initializer (= expr) after the subscript
       my ($has_init, @rhs_parts);
-      for my $i (2 .. $#non_ws) {
+      for my $i (($ld_sub_idx + 1) .. $#non_ws) {
         if (ref($non_ws[$i]) eq 'PPI::Token::Operator' && $non_ws[$i]->content eq '=') {
           $has_init = 1;
           @rhs_parts = @non_ws[($i + 1) .. $#non_ws];
@@ -4968,8 +5038,16 @@ sub _process_sub_statement {
       $idx++;
     }
     for my $p (@sig_opt) {
+      # `=` applies the default only when the arg is absent; `//=` also when the
+      # supplied arg is undef; `||=` also when it is false.  The `and` short-
+      # circuits so an absent arg never indexes past @_.
+      my $op    = $p->{default_op} // '=';
+      my $avail = "(> (length \@_) $idx)";
+      my $cond  = $op eq '//=' ? "(and $avail (%pcl-definedp (aref \@_ $idx)))"
+                : $op eq '||=' ? "(and $avail (p-true-p (aref \@_ $idx)))"
+                :                $avail;
       push @binds,
-        "($p->{name} (p-copy-scalar-arg (if (> (length \@_) $idx) (aref \@_ $idx) $p->{default_cl})))";
+        "($p->{name} (p-copy-scalar-arg (if $cond (aref \@_ $idx) $p->{default_cl})))";
       push @sig_param_names, $p->{name};
       push @local_wraps, { var => $p->{local_var}, name => $p->{name}, idx => $idx }
         if $p->{local_var};
@@ -6291,11 +6369,14 @@ sub _parse_signature {
     next if $param_str eq '';
 
     my ($name, $default_expr);
+    my $default_op = '=';   # '=' | '//=' | '||=' — when the default applies
 
-    if ($param_str =~ /^([\$\@\%]\w+)\s*=\s*(.+)$/) {
-      # Parameter with default: $x = 10
+    if ($param_str =~ m{^([\$\@\%]\w+)\s*(//=|\|\|=|=)\s*(.+)$}) {
+      # Parameter with default: $x = 10, $x //= 10 (apply on absent/undef),
+      # $x ||= 10 (apply on absent/false).  Perl 5.38+ allows //= and ||=.
       $name = $1;
-      $default_expr = $2;
+      $default_op = $2;
+      $default_expr = $3;
       $seen_optional = 1;
     }
     elsif ($param_str =~ /^([\$\@\%]\w+)$/) {
@@ -6364,6 +6445,7 @@ sub _parse_signature {
     push @params, {
       name       => $name,
       default_cl => $default_cl,
+      default_op => $default_op,
       local_var  => $local_var,
     };
 

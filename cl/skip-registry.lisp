@@ -14,7 +14,8 @@
 ;;;; Each entry: (DESCRIPTION-REGEX  :CATEGORY  "reason — cite docs/not-supported.md").
 ;;;; Categories: :principle9 (error detection of invalid Perl), :error-msg,
 ;;;; :warning-emit, :read-only, :utf8, :destroy-gc, :lvalue, :alias, :tie,
-;;;; :xs (XS / C-level: pointer pack types, DynaLoader, etc.).
+;;;; :xs (XS / C-level: pointer pack types, DynaLoader, etc.),
+;;;; :feature (a deliberately-unimplemented language feature, e.g. computed goto).
 
 (in-package :pcl)
 
@@ -303,3 +304,18 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                      "map {} over @a must not vivify holes — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
                 (184 :alias
                      "map {} over a magical @a must not vivify holes — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'."))
+
+;; NB qr.t test 6 ("my $b1=$b; bless $b" — $b1 should also be blessed) is the same
+;; scalar-identity limitation, but its description "object is blessed" is shared with
+;; the PASSING test 1, so it can't be uniquely description-keyed; left as a baselined
+;; failure rather than adding a fragile number-key for one cosmetic row.
+
+;; state.t — \state identity (same address each call) + computed goto into a label
+;; held in a state variable.
+(register-skips "state.t"
+                ("^Reference to state variable$"
+                 :alias
+                 "\\state $x must yield the same address on every call -- PCL re-boxes on scalar copy. not-supported.md: 'Scalar copy does not preserve reference/SV identity'.")
+                ("computed goto"
+                 :feature
+                 "goto EXPR to a runtime-computed label is not implementable in CL (tags are lexical, not first-class). not-supported.md: 'Computed goto (goto EXPR)'."))

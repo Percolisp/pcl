@@ -18,6 +18,10 @@
 (defvar *test-no-plan* nil)
 (defvar *test-failures* 0)
 (defvar *test-skipped* 0)
+(defvar *test-todo* 0
+  "Count of TODO tests (Test::More `local $TODO = ...`).  A failing TODO test is
+   an *expected* failure (it does not count toward *test-failures*); an
+   unexpectedly-passing TODO test counts as a normal pass.")
 (defvar *last-test-name* nil
   "Description of the last assertion that ran. Used by the exit hook for crash
    localization: when a file aborts mid-run, this names the last test that
@@ -204,10 +208,45 @@
                     (and str (ppcre:scan matcher str)))
             (return e)))))))
 
+(defun %current-todo ()
+  "Return the active Test::More $TODO reason string, or NIL.
+   Test files mark known-broken tests with `local $TODO = \"reason\"` (or the
+   fully-qualified `local $::TODO`).  Both resolve to the symbol $TODO in package
+   MAIN (perl-tests run in main), so reading that symbol's dynamic value here lets
+   the harness honor TODO without any codegen change or variable hijacking.  When
+   the binding is out of scope the symbol holds its defvar'd undef box, which
+   test-undef-p rejects."
+  (let* ((pkg (find-package :main))
+         (sym (and pkg (find-symbol "$TODO" pkg))))
+    (when (and sym (boundp sym))
+      (let ((v (symbol-value sym)))
+        (unless (test-undef-p v)
+          (let ((s (to-string v)))
+            (when (and (stringp s) (plusp (length s))) s)))))))
+
 (defun test-ok (pass name &rest diag)
   (incf *test-count*)
   ;; Record the last test to run (all paths: pass/fail/skip) for crash localization.
   (setf *last-test-name* (or (test-display-value name) "(unnamed)"))
+  ;; TODO: a test run under `local $TODO = ...` is known-broken.  Emit the TAP
+  ;; `# TODO` directive; a failure here is *expected* (not counted as a real
+  ;; failure or logged), an unexpected pass counts normally.  Checked before the
+  ;; skip-registry because TODO is set per-test by the source, not by us.
+  (let ((todo (%current-todo)))
+    (when todo
+      (let ((dn (test-display-value name)))
+        (cond
+          ((not pass)
+           (incf *test-todo*)
+           (if dn
+               (format t "not ok ~A - ~A # TODO ~A~%" *test-count* dn todo)
+               (format t "not ok ~A # TODO ~A~%" *test-count* todo))
+           (return-from test-ok nil))
+          (t
+           (if dn
+               (format t "ok ~A - ~A # TODO ~A~%" *test-count* dn todo)
+               (format t "ok ~A # TODO ~A~%" *test-count* todo))
+           (return-from test-ok t))))))
   (let ((entry (%skip-registry-lookup name)))
     ;; Registry says this test is documented not-supported.
     (when entry
@@ -543,5 +582,47 @@
                    (return-from pl-eq_hash (pcl:make-p-box "")))))
              h1)
     (pcl:make-p-box 1)))
+
+;;; ----------------------------------------------------------------------------
+;;; Sweep-harness loader with per-form recovery.
+;;;
+;;; This is TEST INFRASTRUCTURE, not Perl runtime semantics — it lives here in the
+;;; harness library (loaded only by the sweep / gate), never in pcl-runtime.lisp
+;;; (which ships with every transpiled program).
+;;;
+;;; It loads a generated test file one top-level form at a time and continues past
+;;; an uncaught error in any single form, instead of aborting the whole file the
+;;; way plain LOAD does.  So one not-supported statement — e.g. `pack "P"` in a bare
+;;; loop, or `die if $@` after a string eval PCL can't satisfy — no longer swallows
+;;; every test after it; the remaining statements still run and emit their TAP.
+;;;
+;;; Faithful to LOAD for PCL's output: (a) the reader tracks *package* between forms
+;;; exactly as LOAD does, so `(in-package ...)` forms affect later reads; (b) every
+;;; eval-when wrapper PCL emits includes :execute, so a per-form EVAL fires the same
+;;; situations a LOAD would.  A file with no uncaught top-level die evaluates
+;;; identically, form for form.  Each caught error is still printed on *error-output*
+;;; (recovered, not hidden) so the planned-vs-emitted check flags the under-count.
+(defun p-load-with-recovery (path)
+  (with-open-file (stream path :direction :input :external-format :utf-8)
+    (let ((*load-pathname* (pathname path))
+          (*load-truename* (ignore-errors (truename path)))
+          (eof '#:eof)
+          (errs 0))
+      (loop
+       (let ((form (handler-case (read stream nil eof)
+                     (error (e)
+                       (format *error-output*
+                               "~&; PCL recovery: unreadable form, stopping: ~A~%" e)
+                       eof))))
+         (when (eq form eof) (return))
+         (handler-case (eval form)
+           (error (e)
+             (incf errs)
+             (format *error-output*
+                     "~&; PCL recovery: top-level form aborted (recovered): ~A~%" e)))))
+      (when (plusp errs)
+        (format *error-output*
+                "~&; PCL recovery: ~D top-level form(s) aborted in ~A~%" errs path))
+      (values))))
 
 (format t "# PCL Test library loaded~%")

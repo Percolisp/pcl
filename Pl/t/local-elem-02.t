@@ -32,7 +32,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 24;
+plan tests => 31;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -424,4 +424,104 @@ $a[4] = 'd';
 }
 });
     is($out, "not-exists\n", 'Fix-K: exists $a[3] false inside delete local $a[1] block (no box fill)');
+}
+
+# RT #7411: local $#a = N truncates the array inside the block.
+# Perl localizes the array-length magic; the truncation takes effect immediately.
+# (Perl does NOT restore on scope exit — that is a known Perl limitation, RT #7411,
+# marked local $::TODO in perl-tests/local.t — so we only assert the in-block effect.)
+{
+    my $out = run_pl(q{
+my @a = (1..5);
+{
+    local $#a = 2;
+    say "$#a [@a]";
+}
+});
+    is($out, "2 [1 2 3]\n", 'RT #7411: local $#a = 2 shortens array inside block');
+}
+
+# local $#a = N can also extend the array (with undef tail) inside the block.
+{
+    my $out = run_pl(q{
+my @a = (1,2,3);
+{
+    local $#a = 4;
+    say scalar(@a);
+}
+});
+    is($out, "5\n", 'RT #7411: local $#a = 4 extends array length inside block');
+}
+
+# ─── Group I: delete local on an ARROW-DEREF element ($ref->{k} / $ref->[N]) ──
+# Was silently dropping the `local` (no save/restore) so the element never
+# restored on scope exit (local.t 119/120).  Both `my $x = delete local …` and
+# the standalone form must wrap in p-local-{hash,array}-elem on the referent.
+{
+    my $out = run_pl(q{
+my $a = { b => 1 };
+{
+    my $bb = delete local $a->{b};
+    say "$bb ", scalar(keys %$a);
+    $a->{d} = 3;
+}
+say scalar(keys %$a), " ", $a->{b}, " ", $a->{d};
+});
+    is($out, "1 0\n2 1 3\n",
+       'I1: my $x = delete local $ref->{k} restores the hash elem on exit');
+}
+
+{
+    my $out = run_pl(q{
+my $a = [10, 20, 30];
+{
+    my $x = delete local $a->[1];
+    say "$x ", join(",", map { defined $_ ? $_ : "u" } @$a);
+}
+say join(",", map { defined $_ ? $_ : "u" } @$a);
+});
+    is($out, "20 10,u,30\n10,20,30\n",
+       'I2: my $x = delete local $ref->[N] restores the array elem on exit');
+}
+
+{
+    my $out = run_pl(q{
+my $a = { b => 1, c => 2 };
+{
+    delete local $a->{b};
+    say join(",", sort keys %$a);
+}
+say join(",", sort keys %$a);
+});
+    is($out, "c\nb,c\n",
+       'I3: standalone delete local $ref->{k} restores the hash elem on exit');
+}
+
+# ─── Group J: plain `local $ref->{k} = v` (no delete) on an arrow-deref ───────
+# Was mis-binding the scalar $ref itself to the RHS (a runtime crash); must wrap
+# the referent's element in p-local-hash-elem-init / p-local-array-elem-init.
+{
+    my $out = run_pl(q{
+my $a = { b => 1 };
+{
+    local $a->{b} = 99;
+    say $a->{b};
+}
+say $a->{b};
+});
+    is($out, "99\n1\n",
+       'J1: local $ref->{k} = v installs then restores the hash elem');
+}
+
+{
+    my $out = run_pl(q{
+my $a = [10, 20, 30];
+{
+    local $a->[1] = 99;
+    say $a->[1];
+}
+say $a->[1];
+});
+    is($out, "99\n20\n",
+       'J2: local $ref->[N] = v installs then restores the array elem');
 }

@@ -20,7 +20,7 @@
    #:unbox #:ensure-boxed #:p-copy-scalar-arg
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
    #:to-string #:to-number
-   #:p-undef #:p-defined #:p-defined-fh
+   #:p-undef #:p-defined #:p-defined-fh #:%pcl-definedp #:p-true-p
    #:p-let #:p-$
    ;; Arithmetic
    #:p-+ #:p-- #:p-* #:p-/ #:p-% #:p-** #:p-int #:p-abs
@@ -678,6 +678,12 @@
     ;; Preserve class from blessed boxes
     (when (and (p-box-p value) (p-box-class value))
       (setf (p-box-class box) (p-box-class value)))
+    ;; Glob ref vs bare glob: a typeglob arriving through a ref-wrapper (\\*foo,
+    ;; is-ref t) keeps is-ref so it numifies to its address (GLOB(0x..)); a bare
+    ;; glob (my $g = *foo) clears it so it numifies to 0.  The typeglob is stored
+    ;; raw as the value either way, so the flag is the only discriminator.
+    (when (p-typeglob-p v)
+      (setf (p-box-is-ref box) (and (p-box-p value) (p-box-is-ref value))))
     (typecase v
       (number (setf (p-box-nv box) v (p-box-nv-ok box) t))
       (string (setf (p-box-sv box) v (p-box-sv-ok box) t)))
@@ -1003,7 +1009,9 @@
                    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
                    ((functionp v) (object-address v))  ; code ref: address
                    ((p-regex-match-p v) (object-address v))  ; compiled regex: address
-                   ((p-typeglob-p v) 0)  ; typeglob: numeric = 0 ("*pkg::name" parses as 0)
+                   ;; Glob REF numifies to its address (matches GLOB(0x..) stringify);
+                   ;; a bare glob (is-ref nil) numifies to 0 ("*pkg::name" parses as 0).
+                   ((p-typeglob-p v) (if (p-box-is-ref box) (object-address v) 0))
                    (t 0))))
           ;; Don't cache address-based NV: SBCL's GC can move objects,
           ;; making the cached address stale while a freshly-computed address
@@ -1012,7 +1020,8 @@
                       (hash-table-p v)
                       (and (vectorp v) (not (stringp v)))
                       (functionp v)
-                      (p-regex-match-p v))
+                      (p-regex-match-p v)
+                      (and (p-typeglob-p v) (p-box-is-ref box)))  ; glob-ref address
             (setf (p-box-nv box) n
                   (p-box-nv-ok box) t))
           n))))
@@ -1073,12 +1082,17 @@
     ((functionp v) (format nil "CODE(0x~(~X~))" (object-address v)))
     ;; Compiled regex (qr//) — stringify as (?^modifiers:pattern) like Perl 5.14+
     ((p-regex-match-p v)
+     ;; modifiers is the plist from parse-regex-modifiers, keyed by the upcased
+     ;; flag letter (:M :S :I :X ...).  Perl stringifies qr// flags in the fixed
+     ;; order m,s,i,x (e.g. qr/x/imsx -> "(?^msix:x)").  (The old code checked
+     ;; :case-insensitive etc. — keys that are never present — so flags were
+     ;; always dropped.)
      (let* ((mods (p-regex-match-modifiers v))
             (mod-str (concatenate 'string
-                                  (if (member :case-insensitive mods) "i" "")
-                                  (if (member :multi-line-mode mods) "m" "")
-                                  (if (member :single-line-mode mods) "s" "")
-                                  (if (member :extended mods) "x" ""))))
+                                  (if (getf mods :m) "m" "")
+                                  (if (getf mods :s) "s" "")
+                                  (if (getf mods :i) "i" "")
+                                  (if (getf mods :x) "x" ""))))
        (format nil "(?^~A:~A)" mod-str (p-regex-match-pattern v))))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
@@ -7890,8 +7904,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; Non-string vector (Perl array), hash, code, typeglob: wrap directly.
     ;; Strings are specialized vectors in CL but are Perl scalars, so exclude them here
     ;; — they fall through to the raw-scalar branch below.
-    ((or (and (vectorp val) (not (stringp val))) (hash-table-p val) (functionp val) (p-typeglob-p val))
+    ((or (and (vectorp val) (not (stringp val))) (hash-table-p val) (functionp val))
      (make-p-box val))
+    ;; Typeglob ref \\*foo: set is-ref so it is distinguishable from a *bare* glob
+    ;; stored in a scalar (my $g = *foo).  A glob REF numifies to its address
+    ;; (GLOB(0x..)); a bare glob numifies to 0.  Both share box-value=typeglob.
+    ((p-typeglob-p val)
+     (let ((b (make-p-box val)))
+       (setf (p-box-is-ref b) t)
+       b))
     ;; Raw scalar value (e.g. \42): double-box + is-ref so box-set handles it right.
     (t
      (let ((b (make-p-box (make-p-box val))))

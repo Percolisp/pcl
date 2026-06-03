@@ -1946,10 +1946,18 @@ sub gen_prefix_op {
           return $self->_gen_backslash_multi_term($tv_kids);
         }
       }
+      my $raw_ctx   = $self->expr_o->get_node_context_raw($node_id);
       my $saved_ctx = $self->expr_o->get_node_context($node_id);
       $self->expr_o->set_node_context($operand_id, LIST_CTX);
       my $list_expr = $self->gen_node($operand_id);
       $self->expr_o->set_node_context($operand_id, $saved_ctx);
+      # \(LIST) is a list operator: in explicit scalar/void context it yields a
+      # ref to the LAST element (comma-operator semantics), e.g.
+      # `bless \(map "$_", "x"), "C"` is a SCALAR ref, not an ARRAY ref.  When the
+      # context is list or unannotated (list-natural), keep the full vector.
+      if (defined $raw_ctx && ($raw_ctx == SCALAR_CTX || $raw_ctx == VOID_CTX)) {
+        return "(p-list-scalar (p-refgen-list $list_expr))";
+      }
       return "(p-refgen-list $list_expr)";
     }
   }
