@@ -362,6 +362,48 @@ through every function call.
 
 ---
 
+## Scalar copy does not preserve reference/SV identity
+
+**Perl behaviour:** A Perl scalar variable holds an SV with a stable identity.
+Copying a *reference* into another scalar (`my $b1 = $b`) makes both point at the
+same referent, so `bless $b, 'Pie'` is visible through `$b1`, and `\state $x`
+returns the *same* address on every call (the state SV persists).
+
+**PCL behaviour:** A PCL scalar is a `p-box`; copying it (`my $b1 = $b`) unboxes
+and re-boxes the value, so the two scalars do not share a single underlying SV.
+Re-blessing through one copy is not seen through another, and `\(state $x)` yields a
+fresh address each call.  (Blessed *hash*/*array* refs DO share identity — the class
+lives in the referent — so this only affects blessed/aliased **scalar** refs.)
+
+**Rationale:** Faithful scalar SV-identity would require every scalar to be a shared
+mutable cell threaded by reference everywhere, a pervasive change to the box model
+for a corner real CPAN code does not depend on (it shows up only in identity/aliasing
+torture tests).  Related: "`@_` argument aliasing" and "Sparse arrays … SV identity".
+
+**Affected tests:** `perl-tests/qr.t` test 6 (`my $b1=$b; bless $b` — `$b1` should
+also be blessed), `perl-tests/state.t` "Reference to state variable", and the C3
+rebless-in-place rows in `perl-tests/bless.t` (`my $c1 = bless $c1, "C3"` not seen
+through the outer `$c1`).
+
+---
+
+## Computed goto (`goto EXPR`)
+
+**Perl behaviour:** `goto EXPR` where EXPR evaluates to a label name (or `&sub`)
+transfers control to that label/sub.  `state.t` uses `goto state $flower = $f` to
+jump to a label held in a state variable.
+
+**PCL behaviour:** Not implemented for the label form.  CL has no first-class labels,
+so a label name computed at runtime cannot be resolved to a `tagbody` tag.
+`p-goto-computed` is a no-op.  (`goto &sub` — the tail-call form — *is* supported.)
+
+**Rationale:** Runtime-computed `goto LABEL` has no clean CL target (tags are lexical,
+not first-class).  It is rare and discouraged in modern Perl.
+
+**Affected tests:** `perl-tests/state.t` "computed goto" rows (70–73).
+
+---
+
 ## `use integer` — large shift / overflow edge cases
 
 **Perl behaviour:** Under `use integer`, very large shift amounts (e.g.

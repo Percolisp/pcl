@@ -40,6 +40,20 @@ This directly answers the coverage worry: a crash drops an *unbounded, silent* t
 the sweep now has none.  (The skip-registry, by contrast, only rewrites *emitted*
 `not ok` rows and never auto-skips a crash.)
 
+**Tier-3 not-supported registration (small, description-keyed only).**  Registered the
+clean Group-A-Tier-3 about-B limitations in `cl/skip-registry.lisp`: `state.t`
+"Reference to state variable" (`\state $x` same-address) and "computed goto" (×4,
+`goto EXPR` into a state-held label) → **state.t 9→4 fail / 5 skip**.  New
+not-supported.md sections: "Scalar copy does not preserve reference/SV identity" and
+"Computed goto (`goto EXPR`)", new `:feature` category.  Deliberately **not** registered:
+qr.t test 6 (same scalar-identity limitation, but its description "object is blessed" is
+shared with the *passing* test 1 → flagged REGISTRY-STALE; left baselined rather than
+add a fragile number-key for one cosmetic row) and the bless.t C3-rebless cluster (all
+unnamed → would need number-keys).  Decision rule reaffirmed with the user: the
+fail-baseline already contains every tolerable failure, so registration is *cosmetic*
+(cleaner count + stale-detection if a feature later lands), not a safety mechanism —
+hence skip only the clean description-keyable ones, don't bulk-register.
+
 ## Session 231 (2026-06-02) — refgen/sig-defaults, then delete-local-arrow + glob-ref numify
 
 Four real, independent bugs fixed across two commits; full gate green (91 files /
