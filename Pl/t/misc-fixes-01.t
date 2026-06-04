@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 21;
 
 sub run_cl {
     my ($code) = @_;
@@ -143,3 +143,26 @@ test_cl('%{$href}{key} single-key kv hash slice via block-deref',
      my @kv = %{$h}{"x"};
      print "$kv[0]:$kv[1]\n";',
     "x:42\n");
+
+# ── low-precedence prefix `not` as an assignment RHS ────────────────────
+# 'not' (prec 3) is the loosest prefix op, so as the RHS of '=' it used to be
+# grabbed as a bare token by the higher-prec '=' → "unknown node" parse crash,
+# notably inside sub bodies ('my $x = not eval {...}' in Try::Tiny).
+test_cl('my $x = not 5 inside a sub (not-as-RHS parse fix)',
+    'sub f { my $x = not 5; return $x ? "T" : "F"; }
+     print f(), "\n";',
+    "F\n");
+
+test_cl('my $x = not 0 yields true',
+    'my $x = not 0; print $x ? "T\n" : "F\n";',
+    "T\n");
+
+# 'not 5' is the empty string (false), not undef
+test_cl('$x = not 5 (no my) gives empty-string false',
+    'my $y; $y = not 5; print "[", (defined $y ? $y : "U"), "]\n";',
+    "[]\n");
+
+# `not` must still bind looser than `==`: not $a == $b  ==  not ($a == $b)
+test_cl('not binds looser than == (semantics preserved)',
+    'my $a = 3; my $b = 3; my $r = not $a == $b; print $r ? "T\n" : "F\n";',
+    "F\n");
