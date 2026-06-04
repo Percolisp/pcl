@@ -4,7 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 232 (2026-06-04) — magic.t coverage: caret vars, @-/@+, $$, $\ truncation; use parent require — UNCOMMITTED, mid-flight
+## Session 233 (2026-06-05) — design Q&A, v5.20/SBCL floors, `p-double-inf` macro, CPAN no-XS survey + `not`-RHS parser fix
+
+**Committed (5 commits):** `bb924a6` (session-232 magic.t work + entangled shared-file
+edits), `83216bf` (docs/floors), `0708782` (`not` fix), `980b528` (re-bless baseline).
+
+### Design Q&A — `docs/questions.org`
+Answered the user's standing questions inline. Highlights:
+- **Live `%main::` stash**: a pure *runtime* change — make `p-stash` return a live proxy over
+  the CL package + branch the hash primitives to `do-symbols` introspection. Cheap (normal
+  `$Foo::bar` never touches the stash). Deferred, not blocked on the smarter compiler.
+- **`__SUB__` (non-eval)**, **richer `caller()` via `sb-debug`**: feasible, deferred.
+- Documented these as **DEFERRED — planned, not rejected** in README roadmap, REMAINING.md,
+  not-supported.md (distinct from permanent non-support).
+
+### Floors
+- **Perl floor v5.30 → v5.20** (brute force per user): flipped every `use v5.30;` (12 files);
+  gate green. Caveat: validates only that we don't depend on the 5.30 *bundle* under the current
+  perl — a real 5.20 binary would need its own run.
+- **SBCL floor → 2.5.2+** documented (README + CLAUDE.md). *Empirical*: suite passed on 2.5.2
+  (dev env until 2026-05-31 per dpkg) and 2.6.0 (current). Chose "declare a tested floor" over a
+  compat-abstraction layer (the layer's real payoff is cross-Lisp, not version-spanning).
+- **`p-double-inf` macro** (`cl/pcl-runtime.lisp`, Arithmetic section): the transpiler emits
+  exactly ONE SBCL-specific symbol into generated code (overflow float literals like `1e9999`).
+  `ExprToCL.pm` now emits `(p-double-inf)`/`(p-double-inf t)` wrapping
+  `sb-ext:double-float-{positive,negative}-infinity` — one place for a future port to change.
+
+### CPAN no-XS module survey (new effort)
+Network IS up (corrected a wrong "CPAN down" call). Surveyed installed XS-free modules:
+**PASS** `Safe::Isa`, `Role::Tiny`, `List::Util`; **FAIL** `Try::Tiny`, `Data::Dump`.
+- **FIXED — `not` as an assignment RHS** (`Pl/PExpr.pm` precedence loop): `$x = not EXPR` (esp.
+  `my $failed = not eval {...}` in Try::Tiny) crashed transpilation — `not` (prec 3, the loosest
+  prefix op) was grabbed raw by a higher-prec binary op. Fix: reduce a right-neighbour `not`
+  before the binary op; safe because `not`'s own operand is a single reduced term by then.
+  Preserves `not $a == $b` → `not ($a==$b)`. 4 regression tests in `misc-fixes-01.t`.
+- **Still open**: Try::Tiny doesn't run even after the fix — `try`/`catch` don't import into
+  `main`, and `Try::Tiny::try` dies calling `_HAS_SUBNAME` (glob-installed constant sub from its
+  `eval { require Sub::Util/Sub::Name }` BEGIN); ~10 reproductions all passed (subtle interaction).
+  `Data::Dump` (undefined-function) not yet investigated. Minor: `defined(&glob_installed_sub)`
+  falsely reports undef. See `memory/project_cpan_module_survey.md`.
+
+### Validation
+Gate **91 files / 3210 tests** green (+4 `not` tests). Full sweep **18041 pass / 789 fail /
+69 fully passing** — *identical* to session 232 (zero regressions from the parser change).
+Baseline re-blessed 430 → 453 (folds in committed magic.t); `sweep-diff` 0 new / 0 fixed.
+
+---
+
+## Session 232 (2026-06-04) — magic.t coverage: caret vars, @-/@+, $$, $\ truncation; use parent require — committed session 233 (`bb924a6`)
 
 **Context:** pulled `perl-tests/magic.t` (983 lines, t/op/magic.t) into the suite. It was a hard
 TRANSPILE FAIL (0/208). Drove it to **129 pass / 28 fail** across several real bugs. **NOTHING IS
