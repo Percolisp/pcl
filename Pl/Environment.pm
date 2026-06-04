@@ -4,7 +4,7 @@ package Pl::Environment;
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as the Perl 5 programming language system itself.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 
@@ -166,6 +166,21 @@ declared in any enclosing scope). Built during code generation.
 =cut
 
 has undeclared_vars => (
+    is => 'rw',
+    default => sub { {} },
+);
+
+=head2 caret_globals
+
+Accumulates unknown C<${^NAME}> caret variables encountered during code
+generation. Perl treats any C<${^NAME}> not given special meaning as an
+ordinary (main-forced) global scalar: undef until assigned, autovivifying.
+Each one needs a file-level defvar so CL reads/increments it as a box rather
+than crashing. Keyed on the pipe-quoted CL symbol (e.g. C<|${^MPE}|>).
+
+=cut
+
+has caret_globals => (
     is => 'rw',
     default => sub { {} },
 );
@@ -534,6 +549,29 @@ Adds a variable to the set needing file-level defvar.
 sub add_undeclared_var {
     my ($self, $name) = @_;
     $self->undeclared_vars->{$name} = 1;
+}
+
+=head2 add_caret_global($sym)
+
+Records an unknown C<${^NAME}> caret variable (by its pipe-quoted CL symbol)
+that needs a file-level defvar.
+
+=cut
+
+sub add_caret_global {
+    my ($self, $sym) = @_;
+    $self->caret_globals->{$sym} = 1;
+}
+
+=head2 get_caret_globals()
+
+Returns sorted list of caret-variable CL symbols needing a file-level defvar.
+
+=cut
+
+sub get_caret_globals {
+    my $self = shift;
+    return [sort keys %{$self->caret_globals}];
 }
 
 =head2 get_undeclared_vars()

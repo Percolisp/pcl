@@ -4,7 +4,7 @@ package Pl::PExpr;
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as the Perl 5 programming language system itself.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 
@@ -1296,6 +1296,27 @@ sub parse {
     }
     last
         if ! defined $hi_ix;
+
+    # Low-precedence prefix 'not' deadlock: 'not' (prec 3) is the loosest prefix
+    # operator, so when it is the right operand of a higher-precedence binary op
+    # (e.g. '$x = not 5', 'my @a = not $y') it is never selected on its own and
+    # the binary op would grab the bare 'not' token.  Reduce the 'not' first.
+    # This is safe because, 'not' being looser than everything except and/or/xor,
+    # its own right operand is already a single reduced term by now — so it grabs
+    # exactly one term, matching Perl ('$x = not 5' => '$x = (not 5)', while
+    # 'not $a == $b' still parses as 'not ($a == $b)' since '==' reduced earlier).
+    if ($hi_ix + 1 < scalar(@$e)) {
+      my $rn      = $e->[$hi_ix + 1];
+      my $rn_str  = $self->is_token_operator($rn) // '';
+      my $rn_info = $self->op_info($rn);
+      if ($rn_str eq 'not' && defined $rn_info && $rn_info->{prec} < $hi_prio) {
+        $hi_ix++;
+        $op       = $rn;
+        $op_info  = $rn_info;
+        $op_name  = $rn_str;
+        $hi_prio  = $rn_info->{prec};
+      }
+    }
 
     say "++++++ Found an op to replace. Got ", $op->content(),
         ", precedence: $hi_prio"                     if 2 & DEBUG;

@@ -17,12 +17,12 @@ Two reasons:
 
 ### There is no bytecode engine
 
-This is a genuinely new implementation. PCL does **not** embed, link, or reimplement Perl's runtime or opcode interpreter. It is a from-scratch source-to-source compiler: Perl text in, Common Lisp text out.
+This is a genuinely new implementation. PCL does **not** embed, link, or reimplement Perl's runtime or opcode interpreter. It is a from-scratch source-to-source compiler: Perl code in, Common Lisp code out.
 
 ## Quick Start
 
 ```bash
-# Dependencies: Perl 5.30+, PPI, Moo, SBCL, cl-ppcre (via Quicklisp)
+# Dependencies: Perl 5.20+, PPI, Moo, SBCL 2.5.2+, cl-ppcre (via Quicklisp)
 cpanm PPI Moo
 sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 
@@ -131,6 +131,25 @@ These come *after* compatibility is solid:
 - **A smarter code generator.** Right now every variable is a boxed data structure (so it can hold a number, a string, and be referenced). With analysis, variables that are only ever numeric can be compiled to plain native numbers — and PCL could become genuinely fast.
 - **Cleaner intermediate code.** Lean on a small set of high-level CL macros for the generated output, making it an easy target for compiling Perl onward to *other* environments.
 - **The Eldorado: XS / C extensions.** Get compiled C (XS) working and the full CPAN ecosystem opens up on new platforms. Here I'd welcome help from people who know XS and CL internals better than I do.
+
+### Deferred language features — planned, not rejected
+
+A handful of introspection/metaprogramming features are *implementable* but
+deliberately parked until the compatibility phase is solid. They are listed in
+[`docs/not-supported.md`](docs/not-supported.md) today, but unlike the
+interpreter-internals items they are a matter of *when*, not *whether*:
+
+- **Live symbol-table hashes (`%main::`, `%Foo::`).** Today the stash is a
+  read-only, subs-only snapshot. The plan is a live proxy over the underlying
+  CL package (read/write/`delete`/`keys`), then full typeglob slots. It is a
+  pure runtime change — no new compiler analysis needed — and cheap, because
+  normal `$Foo::bar` access never touches the stash.
+- **`__SUB__` (outside string `eval`).** A per-sub macro can give a sub a
+  reference to itself for recursion; only subs that mention `__SUB__` pay
+  anything. The string-`eval` case stays unsupported (dies).
+- **Richer `caller()`.** Package and sub-name depth for `caller(N)` are
+  reachable via SBCL frame walking (behind a debug flag). Accurate file/line
+  still waits on the source-map work that the smarter code generator brings.
 
 ## License
 

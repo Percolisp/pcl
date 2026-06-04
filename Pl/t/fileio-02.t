@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 12;
+plan tests => 13;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -234,5 +234,21 @@ eval {
     alarm 0;
 };
 print "timed_out=$timed_out line=$line\n";
+PERL
+}
+
+# --- Test 13: system() sets $? to the child's wait status ---
+# Differential vs. real perl.  $? packs the exit code in the high byte
+# ($? >> 8) and the signal in the low byte.  (Not exercised elsewhere as a
+# runtime test — magic-vars-01.t only checks $? string interpolation; magic.t's
+# own $? rows shell out to a './perl' that doesn't exist outside Perl's tree.)
+{
+    test_io('system() exit code is reported via $? >> 8', <<'PERL');
+system("/bin/sh", "-c", "exit 0");
+print "zero: ", ($? >> 8), " raw ", $?, "\n";
+system("/bin/sh", "-c", "exit 3");
+print "three: ", ($? >> 8), " raw ", $?, "\n";
+system("/bin/sh", "-c", "exit 42");
+print "fortytwo: ", ($? >> 8), "\n";
 PERL
 }

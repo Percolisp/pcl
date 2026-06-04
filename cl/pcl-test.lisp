@@ -554,6 +554,21 @@
   (declare (ignore args))
   pcl::*p-undef*)
 
+;;; unlink_all(@files) — Perl test.pl helper: delete the named files, returning
+;;; the count that are gone afterwards (t/test.pl counts an already-absent file
+;;; too).  A standard cleanup helper across t/op and t/io; defined here in the
+;;; harness lib (not pcl-runtime.lisp) because it is test infrastructure.
+(export '(pl-unlink_all))
+(defun pl-unlink_all (&rest files)
+  (let ((count 0))
+    (dolist (f files)
+      (let ((path (pcl:to-string (pcl:unbox f))))
+        (when (> (length path) 0)
+          (ignore-errors (delete-file path))
+          (unless (probe-file path)
+            (incf count)))))
+    (pcl:make-p-box count)))
+
 ;;; _qq(val) — Perl test.pl helper: wrap a value in double-quotes for display.
 ;;; e.g., _qq("hello") → '"hello"'
 (export '(pl-_qq))

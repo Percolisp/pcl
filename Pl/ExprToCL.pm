@@ -4,7 +4,7 @@ package Pl::ExprToCL;
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as the Perl 5 programming language system itself.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 
@@ -187,7 +187,8 @@ my %SPECIAL_VARS = (
   '$^V' => '|$^V|',
   '$^X' => '|$^X|',
   '$/'  => '|$/|',
-  '$\\' => '|$\\|',
+  '$\\' => '|$\\\\|',   # $\ (ORS): backslash must be escaped INSIDE the |...| symbol;
+                        # |$\| would escape the closing pipe -> unreadable form
   '$"'  => '|$"|',
   '$&'  => '|$&|',    # MATCH      - whole matched string
   '$`'  => '|$`|',    # PREMATCH   - text before the match
@@ -544,10 +545,17 @@ sub gen_leaf {
         return "${cl_pkg}::${sigil}${name}";
       }
     }
-    # Unknown ${^...} caret variables — die so missing cases surface clearly.
+    # Unknown ${^...} caret variables. Perl (perlvar: "alphanumeric strings
+    # preceded by a caret") treats any ${^NAME} without assigned special meaning
+    # as an ordinary, main-forced global scalar: undef until set, autovivifying
+    # (e.g. `is ${^MPE}, undef` then `++${^MPE}` is 1). The reserved names we DO
+    # model live in %SPECIAL_VARS above; everything else degrades to a normal
+    # global here rather than aborting the whole transpile. We register the
+    # symbol so _insert_variable_forward_declarations emits a file-level defvar.
     if ($content =~ /^\$\{\^/) {
-      my $line = eval { $node->line_number } // '?';
-      die "PCL: unsupported special variable '$content' at line $line\n";
+      my $sym = "|$content|";
+      $self->environment->add_caret_global($sym) if $self->environment;
+      return $sym;
     }
     return $content;
   }
@@ -611,8 +619,8 @@ sub gen_leaf {
     if ($num =~ /[eE.]/) {
       my $val = eval($num);
       if (defined $val) {
-        if ($val == 9**9**9)  { return 'sb-ext:double-float-positive-infinity'; }
-        if ($val == -(9**9**9)) { return 'sb-ext:double-float-negative-infinity'; }
+        if ($val == 9**9**9)  { return '(p-double-inf)'; }
+        if ($val == -(9**9**9)) { return '(p-double-inf t)'; }
       }
     }
     return $num;

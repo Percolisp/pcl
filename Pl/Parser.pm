@@ -4,7 +4,7 @@ package Pl::Parser;
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as the Perl 5 programming language system itself.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 
@@ -629,6 +629,20 @@ sub _insert_variable_forward_declarations {
   # dynamic bindings that named subs see.  They appear inside sub bodies (sub_depth>0)
   # so the file-scope scan above misses them; emit unconditionally before @undeclared.
   my $decls = $self->_sections->[0]{declarations};
+
+  # Emit defvars for unknown ${^NAME} caret variables seen during codegen.
+  # Perl treats these as ordinary main-forced global scalars (undef until set,
+  # autovivifying); CL needs a box-valued defvar so reads/increments work
+  # instead of an unbound-symbol crash. See ExprToCL _emit_token's caret branch.
+  if ($self->environment) {
+    my @caret = @{$self->environment->get_caret_globals};
+    if (@caret) {
+      push @$decls, ";; Unknown \${^NAME} caret variables -> ordinary global scalars (undef).";
+      push @$decls, "(defvar $_ (make-p-box nil))" for @caret;
+      push @$decls, "";
+    }
+  }
+
   unless ($declared{'$a'}) {
     push @$decls, "(defvar \$a (make-p-box nil))";
     push @$decls, "(defvar \$b (make-p-box nil))";
@@ -1950,13 +1964,21 @@ sub _process_use_base {
   # Extract parent class names from the argument list
   my @parents;
   my $skip_next = 0;
+  my $norequire = 0;   # 'use parent -norequire, ...' suppresses the implicit require
   for my $child ($stmt->children) {
     my $ref = ref($child);
-    # 'use parent -norequire, qw(...)' — skip the -norequire flag
+    # 'use parent -norequire, qw(...)' — PPI tokenizes -norequire as a single
+    # Word "-norequire" (not operator '-' + word).  Handle both spellings.
+    if ($ref eq 'PPI::Token::Word' && $child->content eq '-norequire') {
+      $norequire = 1; next;
+    }
     if ($ref eq 'PPI::Token::Operator' && $child->content eq '-') {
       $skip_next = 1; next;
     }
-    if ($skip_next && $ref eq 'PPI::Token::Word') { $skip_next = 0; next; }
+    if ($skip_next && $ref eq 'PPI::Token::Word') {
+      $norequire = 1 if $child->content eq 'norequire';
+      $skip_next = 0; next;
+    }
     $skip_next = 0;
     if ($ref eq 'PPI::Token::QuoteLike::Words') {
       my $content = $child->content;
@@ -1991,6 +2013,16 @@ sub _process_use_base {
   $self->environment->set_isa($pkg, \@parents);
   $self->_with_bucket('preamble', sub {
     $self->_emit(";; $perl_code");
+    # Perl's `use parent`/`use base` does an implicit `require` of each parent
+    # (unless -norequire).  Emit it BEFORE the defclass: loading the parent both
+    # brings in its methods AND creates the Parent:: package, without which the
+    # `(defclass child (Parent::class) ...)` form below cannot even be READ.
+    # p-require-parent is non-fatal (inline same-file parents have no .pm).
+    unless ($norequire) {
+      for my $parent (@parents) {
+        $self->_emit("(p-eval-always (p-require-parent \"$parent\"))");
+      }
+    }
     $self->_emit("(defclass $cl_class ($parents_cl) ())");
   });
 

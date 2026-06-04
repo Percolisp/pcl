@@ -23,7 +23,7 @@
    #:p-undef #:p-defined #:p-defined-fh #:%pcl-definedp #:p-true-p
    #:p-let #:p-$
    ;; Arithmetic
-   #:p-+ #:p-- #:p-* #:p-/ #:p-% #:p-** #:p-int #:p-abs
+   #:p-+ #:p-- #:p-* #:p-/ #:p-% #:p-** #:p-int #:p-abs #:p-double-inf
    ;; Math
    #:p-sin #:p-cos #:p-atan2 #:p-exp #:p-log #:p-sqrt #:p-rand #:p-srand
    ;; String
@@ -101,7 +101,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-file
+   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-parent #:p-require-file
    ;; Functions
    #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
@@ -132,7 +132,7 @@
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
-   #:|$&| #:|$`| #:|$'| #:|$+|
+   #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
@@ -359,11 +359,15 @@
 (defvar |$'| nil "Regex POSTMATCH - everything after the match")
 (defvar |$+| nil "Regex - last (highest-numbered) capture group that matched")
 (defvar %+ (make-hash-table :test 'equal) "Perl %+ - named regex captures")
+;; @- (@LAST_MATCH_START) and @+ (@LAST_MATCH_END): offset arrays from the last
+;; successful match.  Element 0 is the whole-match start/end; element N is the
+;; start/end of capture group N.  Non-participating groups hold undef (nil).
+(defvar |@-| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_START - match/group start offsets")
+(defvar |@+| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_END - match/group end offsets")
 
 ;;; Default variable ($_) - defined later after make-p-box (see Boxed special variables section)
-
-;;; Process ID ($$)
-(defvar $$ (sb-posix:getpid) "Process ID")
+;;; Process ID ($$) is likewise boxed and defined in that later section so
+;;; Perl-side `$$ = N` works (assignable since 5.16).
 
 ;;; Child exit status ($?)
 (defvar $? 0 "Child process exit status from last system/backtick")
@@ -564,6 +568,8 @@
 ;;; Boxed special variables (must be after make-p-box definition)
 ;;; Default variable ($_) - p-box so p-scalar-= / box-set work correctly
 (defvar $_ (make-p-box nil) "Perl's $_ - default variable")
+;;; Process ID ($$) - p-box so Perl-side `$$ = N` works (assignable since 5.16).
+(defvar $$ (make-p-box (sb-posix:getpid)) "Process ID")
 ;;; Input line number ($.) - p-box so box-set / let dynamic binding works
 (defvar |$.| (make-p-box nil) "Input line number of last filehandle read")
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
@@ -1263,6 +1269,16 @@
 ;;; ============================================================
 ;;; Arithmetic Operators
 ;;; ============================================================
+
+(defmacro p-double-inf (&optional negative)
+  "Portable +Inf / -Inf double-float literal.  This is the ONLY SBCL-specific
+   symbol the transpiler emits into generated code (for overflowing float
+   literals such as 1e9999; see Pl/ExprToCL.pm).  Keeping it behind a macro
+   gives a future port (or a different CL implementation) a single place to
+   change, and expands at compile time so there is no runtime cost."
+  (if negative
+      'sb-ext:double-float-negative-infinity
+      'sb-ext:double-float-positive-infinity))
 
 (defun looks-like-number (str)
   "Check if the ENTIRE string is a valid number (Perl's looks_like_number).
@@ -7528,6 +7544,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl require - load module at runtime (no imports)."
   (p-use module-name))
 
+(defun p-require-parent (module-name)
+  "Implicit require performed by `use parent`/`use base` (Perl does
+   `require $_` for each parent unless -norequire).  Loading the parent makes
+   its package and methods exist — which is also what lets the generated
+   (defclass child (Parent::class) ...) form READ, since Parent:: must be a
+   real package.  Unlike a bare require this is NON-FATAL: the parent may be an
+   inline same-file package (no .pm to find) or simply unavailable, and in
+   neither case should we abort.  Returns T if the module was loaded."
+  (handler-case (progn (p-use module-name) t)
+    (error () nil)))
+
 (defun p-require-file (path)
   "Perl require with file path - load a .pl file by path.
    Resolves relative paths against current directory."
@@ -9760,7 +9787,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           do (let ((rs (aref reg-starts i)) (re (aref reg-ends i)))
                (when (and rs re)
                  (setf |$+| (subseq str rs re))
-                 (return))))))
+                 (return)))))
+  ;; @- / @+ : offset arrays.  Element 0 is the whole-match start/end; element
+  ;; N (1-based) is capture group N's start/end (nil for groups that did not
+  ;; participate).  Elements are boxed integers like any other array element.
+  (when (and match-start match-end)
+    (setf (fill-pointer |@-|) 0
+          (fill-pointer |@+|) 0)
+    (vector-push-extend (make-p-box match-start) |@-|)
+    (vector-push-extend (make-p-box match-end)   |@+|)
+    (when (and reg-starts reg-ends)
+      (loop for i from 0 below (length reg-starts)
+            for rs = (aref reg-starts i)
+            for re = (aref reg-ends i)
+            do (vector-push-extend (make-p-box rs) |@-|)
+            (vector-push-extend (make-p-box re) |@+|)))))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."

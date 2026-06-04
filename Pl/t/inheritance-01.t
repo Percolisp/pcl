@@ -938,5 +938,62 @@ END_PERL
   like($cl, qr/UNIVERSAL::pl-isa/, 'UNIVERSAL::isa generates qualified call');
 }
 
+# ============================================================
+diag "";
+diag '-------- use parent / use base:';
+
+# use parent does the implicit require of the parent (Perl: require $_ unless
+# -norequire), emitted BEFORE the defclass so the Parent:: package exists and
+# the (defclass child (Parent::class)) form is even readable.
+{
+  my $cl = transpile(<<'END_PERL');
+package Child;
+use parent 'Parent';
+END_PERL
+  like($cl, qr/\(p-eval-always \(p-require-parent "Parent"\)\)/,
+       'use parent emits the implicit require of the parent');
+  like($cl, qr/defclass child \(Parent::parent\)/,
+       'use parent still sets up the CLOS parent class');
+  # require must come before the defclass (package must exist at read time)
+  like($cl, qr/p-require-parent "Parent".*defclass child/s,
+       'require-parent precedes the defclass');
+}
+
+# -norequire suppresses the implicit require (parent defined elsewhere / inline)
+{
+  my $cl = transpile(<<'END_PERL');
+package Child;
+use parent -norequire, 'Parent';
+END_PERL
+  unlike($cl, qr/p-require-parent/,
+         'use parent -norequire does NOT emit a require');
+  like($cl, qr/defclass child \(Parent::parent\)/,
+       'use parent -norequire still sets up the CLOS parent class');
+}
+
+# use base behaves like use parent (always requires)
+{
+  my $cl = transpile(<<'END_PERL');
+package Child;
+use base qw(Parent1 Parent2);
+END_PERL
+  like($cl, qr/\(p-eval-always \(p-require-parent "Parent1"\)\)/,
+       'use base emits require for first parent');
+  like($cl, qr/\(p-eval-always \(p-require-parent "Parent2"\)\)/,
+       'use base emits require for second parent');
+}
+
+# nested parent name is requires by its Perl name, class is pipe-qualified
+{
+  my $cl = transpile(<<'END_PERL');
+package Child;
+use parent 'My::Parent';
+END_PERL
+  like($cl, qr/\(p-require-parent "My::Parent"\)/,
+       'nested parent required by its full Perl name');
+  like($cl, qr/defclass child \(\|My::Parent\|::my-parent\)/,
+       'nested parent class is pipe-qualified in the defclass');
+}
+
 
 done_testing();

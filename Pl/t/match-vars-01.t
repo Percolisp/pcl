@@ -37,7 +37,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 12;
+plan tests => 19;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -110,3 +110,55 @@ is run_cl(qq{print qr/abc/, "\\n";\n}), "(?^:abc)\n",
 is run_cl(qq{my \$q = qr/HELLO/i; print(("hello world" =~ \$q) ? "match\\n" : "no\\n");\n}),
     "match\n",
     'qr/HELLO/i still matches case-insensitively when used as a variable';
+
+# ── Unknown ${^NAME} caret variables degrade to ordinary main-forced global
+#    scalars (perlvar) instead of aborting the transpile.  Previously any
+#    unmodelled ${^...} threw "unsupported special variable" and killed the
+#    whole file (e.g. magic.t was 0/208 because of ${^TAINT} on line 44).
+
+# 13. an unallocated caret name reads as undef
+is run_cl(<<'END'), "undef\n", '${^MPE} reads as undef before assignment';
+print defined(${^MPE}) ? "def\n" : "undef\n";
+END
+
+# 14. it autovivifies and increments like a normal global (magic.t's assertion)
+is run_cl(<<'END'), "1\n", '++${^MPE} is 1 (autovivifies from undef)';
+print ++${^MPE}, "\n";
+END
+
+# 15. it holds an assigned value
+is run_cl(<<'END'), "42\n", '${^MY_VAR} round-trips an assigned value';
+${^MY_VAR} = 42;
+print ${^MY_VAR}, "\n";
+END
+
+# ── @- (@LAST_MATCH_START) and @+ (@LAST_MATCH_END): match/group offset arrays
+#    set on every successful match.  Element 0 is the whole match; element N is
+#    capture group N.  (magic.t lines 627-628.)
+
+# 16. @- / @+ as plain arrays
+is run_cl(<<'END'), "0 0 2 7 | 10 1 6 10\n", '@- and @+ hold match/group offsets';
+"I like pie" =~ /(I) (like) (pie)/;
+my @s = @-;
+my @e = @+;
+print "@s | @e\n";
+END
+
+# 17. @- / @+ interpolated directly (the original 5.6.1 interpolation bug)
+is run_cl(<<'END'), "0 0 2 7\n10 1 6 10\n", '@- and @+ interpolate in strings';
+"I like pie" =~ /(I) (like) (pie)/;
+print "@-\n@+\n";
+END
+
+# ── $$ is assignable (Perl 5.16+); previously it was a bare integer, not a box.
+
+# 18. $$ reads as the real pid (> 0)
+is run_cl(<<'END'), "ok\n", '$$ reads as a positive pid';
+print $$ > 0 ? "ok\n" : "no\n";
+END
+
+# 19. $$ can be assigned (magic.t: 'is $$, 42')
+is run_cl(<<'END'), "42\n", '$$ can be modified';
+$$ = 42;
+print "$$\n";
+END

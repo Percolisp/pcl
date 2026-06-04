@@ -128,6 +128,21 @@ PCL loads only pure-Perl modules:
 
 ---
 
+## Deferred — planned, not rejected
+
+Unlike everything above, these are *implementable* and intended; they are
+parked until the compatibility phase is solid (see the README roadmap):
+
+- **Live symbol-table hashes (`%main::`, `%Foo::`)** — currently a read-only,
+  subs-only snapshot; the plan is a live proxy over the CL package, then full
+  typeglob slots.
+- **`__SUB__` outside string `eval`** — a per-sub macro can supply the
+  self-reference; the string-`eval` case stays unsupported.
+- **Richer `caller()`** — package/sub-name depth via SBCL frame walking;
+  file/line awaits the source-map work in the smarter code generator.
+
+---
+
 ## Open work (bugs, not non-support)
 
 Genuinely fixable gaps still being worked are tracked in
