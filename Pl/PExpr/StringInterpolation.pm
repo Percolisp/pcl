@@ -4,7 +4,7 @@ package Pl::PExpr::StringInterpolation;
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as the Perl 5 programming language system itself.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 
@@ -216,6 +216,19 @@ sub parse_interpolated_variable {
         return ($interp_id, $end_pos);
       }
     }
+  }
+
+  # Handle @- (@LAST_MATCH_START) and @+ (@LAST_MATCH_END) in interpolation.
+  # e.g. "@-" => (p-join |$"| @-).  These are the only punctuation-named arrays;
+  # a following [ or { would be a slice, so let those fall through.
+  if ($sigil eq '@' && substr($content, $pos + 1, 1) =~ /^[-+]$/
+      && substr($content, $pos + 2, 1) !~ /^[\[{]$/) {
+    my $punct     = substr($content, $pos + 1, 1);
+    my $var_token = PPI::Token::Symbol->new('@' . $punct);
+    my $var_id    = $parser->make_node($var_token);
+    my ($interp_node, $interp_id) = $parser->make_node_insert('array_str_interp');
+    $parser->add_child_to_node($interp_id, $var_id);
+    return ($interp_id, $pos + 2);
   }
 
   # Set position for \G anchor

@@ -178,7 +178,10 @@ sub get_generated_code {
 {
     my $parser = Pl::Parser->new(code => 'my $sep = $\\;');
     my $output = get_generated_code($parser);
-    like($output, qr/\|\$\\\|/, '$\\ generates pipe-quoted symbol');
+    # Must be |$\\| (backslash escaped inside the |...| symbol).  The old buggy
+    # form |$\| escapes the closing pipe -> an unreadable symbol that truncates
+    # the whole file at the CL reader.  Must match the runtime's (defvar |$\\|).
+    like($output, qr/\|\$\\\\\|/, '$\\ generates a correctly-escaped pipe-quoted symbol');
 }
 
 # ============================================

@@ -4,6 +4,90 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 232 (2026-06-04) — magic.t coverage: caret vars, @-/@+, $$, $\ truncation; use parent require — UNCOMMITTED, mid-flight
+
+**Context:** pulled `perl-tests/magic.t` (983 lines, t/op/magic.t) into the suite. It was a hard
+TRANSPILE FAIL (0/208). Drove it to **129 pass / 28 fail** across several real bugs. **NOTHING IS
+COMMITTED YET** — see "State of the tree" below. Gate was green at 3197 *after* fixing a
+bug-pinning test; needs one more clean full-gate + full-sweep run before commit.
+
+### Fixes landed in the working tree (all verified individually)
+1. **Unknown `${^NAME}` caret vars no longer abort transpile** (`Pl/ExprToCL.pm` ~line 547,
+   `Pl/Environment.pm` `caret_globals` + add/get, `Pl/Parser.pm` `_insert_variable_forward_declarations`).
+   Perl treats any unallocated `${^NAME}` as an ordinary main-forced global scalar (undef, autovivifying).
+   We now degrade to a defvar'd global `(defvar |${^NAME}| (make-p-box nil))` instead of `die`.
+   This alone took magic.t 0 → 85 (`${^TAINT}` on line 44 had been killing the whole file).
+   Tests: `match-vars-01.t` #13-15.
+2. **`@-` / `@+` (@LAST_MATCH_START/END) implemented** (`cl/pcl-runtime.lisp`: defvars `|@-|`/`|@+|`
+   + export + populate in `set-match-vars`; `Pl/PExpr/StringInterpolation.pm`: `"@-"`/`"@+"` interp).
+   Element 0 = whole match, element N = group N, boxed ints. Tests: `match-vars-01.t` #16-17.
+   NOT done: `$-[N]`/`$+[N]` element access (conflicts with `$-` FORMAT_LINES_LEFT; parser work).
+3. **`$$` is now assignable** (`cl/pcl-runtime.lisp`: moved `$$` defvar into the boxed-special section
+   as `(make-p-box (sb-posix:getpid))`; was a bare integer). `$$ = 42` works (Perl 5.16+).
+   Tests: `match-vars-01.t` #18-19.
+4. **`$?` exit-status runtime test added** (`fileio-02.t` #13, differential vs real perl). `$?` already
+   worked — the magic.t `$?` rows only fail because the file hardcodes `$PERL='./perl'` (Perl build-tree
+   binary, absent here). NOT a `$?` bug; do not "fix" by editing magic.t.
+5. **`unlink_all` test.pl helper** added to `cl/pcl-test.lisp` (HARNESS lib, not runtime). Standard
+   t/op+t/io cleanup helper; our trimmed `perl-tests/test.pl` omits it. Removed a crash.
+6. **THE BIG ONE — `$\` symbol mis-escaping (the real magic.t truncation bug).** `%SPECIAL_VARS` in
+   `Pl/ExprToCL.pm` mapped `$\` to the TEXT `|$\|`. Inside a `|...|` CL symbol, `\|` escapes the closing
+   pipe → the symbol never terminates → reader swallows the rest of the file → "unmatched close
+   parenthesis" → **everything after is silently lost**. Changed to emit `|$\\|` (escaped backslash),
+   matching the runtime `(defvar |$\\|)`. **magic.t 88 → 129** (truncation moved test 124 → 179).
+   Class of bug = "codegen emits UNREADABLE Lisp" — worse than a runtime crash because the recovery
+   loader can't skip a form it can't read. **Fixed `magic-vars-01.t` test 18, which had PINNED the buggy
+   `|$\|` output** (regex `qr/\|\$\\\|/` → `qr/\|\$\\\\\|/`); that was the lone gate failure.
+7. **`use parent`/`use base` implicit require** (`Pl/Parser.pm` `_process_use_base`; `cl/pcl-runtime.lisp`
+   new non-fatal `p-require-parent` + export). Perl does `require $_` per parent unless `-norequire`;
+   PCL only did the `push @ISA`/defclass half, leaving a dangling `Parent::` package ref. Now emits
+   `(p-eval-always (p-require-parent "Parent"))` BEFORE the defclass (package must exist at READ time).
+   `p-require-parent` is NON-FATAL (inline same-file parents have no .pm) — DELIBERATE, see open question.
+   **Also fixed `-norequire` detection** (PPI tokenizes `-norequire` as a single Word, not `-`+word, so
+   it was never detected → `-norequire` was still emitting the require). Tests: `inheritance-01.t` +8
+   (transpile-level; they caught the -norequire bug). Verified `use parent 'Tie::Scalar'` → isa works.
+   NOTE: full sweep showed **0 fixed** from this — no current sweep file exercises `use parent 'RealMod'`
+   failing→passing. It's correct + zero-regression but delivers no measurable benefit *today*. KEEP/REVERT
+   is the user's open call.
+
+### Full sweep result (with all the above): **18041 pass / 789 fail / 69 fully passing**
+- sweep-diff vs `docs/fail-baseline.tsv`: **23 new, 0 fixed, ZERO regressions outside magic.t.** The 23
+  "new" are all magic.t rows now visible (it was a transpile-fail=0 in the baseline). Fully-passing held 69.
+- Baseline NOT re-blessed yet (do it from a clean sweep before commit; the +23 magic.t rows are legit).
+
+### OPEN — stopped here (in the middle of investigating, NOT fixed)
+**`perl-tests/parent.t`** (Perl's authoritative `cpan/parent/t/parent.t`, 9 tests) was pulled in but
+produces **NO OUTPUT** — blocked by a **separate pre-existing transpile bug**:
+- **`lib/POSIX.pm:15`** `use constant LDBL_MAX => 1.1897314953572317e+4932;` — that's the 80-bit
+  long-double max. SBCL `double-float` maxes at ~1.7976931348623157e308, so transpiling it to a bare CL
+  float literal makes the **reader overflow** (`failed to build float from 1.1897314953572317e+4932`),
+  failing the whole POSIX module compile. parent.t hits it because it uses real `use Test::More` (whose
+  chain pulls in POSIX), unlike most perl-tests which use `test.pl`/the CL harness.
+- **PROPOSED FIX (not yet done), two levels:** (1) local — `lib/POSIX.pm` `LDBL_MAX` → a representable
+  value (`most-positive-double-float`/DBL_MAX or +Inf; PCL has no 80-bit float per not-supported.md);
+  (2) GENERAL/robust — make ExprToCL float-literal emission detect out-of-double-range values and emit a
+  safe form (`sb-ext:double-float-positive-infinity` / `most-positive-double-float`) so NO float literal
+  ever produces unreadable Lisp (same bug class as `$\`). Do both.
+- **DESIGN QUESTION for the user:** parent.t tests 7-8 expect `use parent 'Missing'` to **die** with
+  "Can't locate ... in @INC". My `p-require-parent` is deliberately NON-FATAL (to avoid the dangling-
+  defclass truncation). Perl's answer is "fatal." Decide: keep non-fatal, or make it fatal + also fix the
+  defclass to be readable when the parent is missing? (error-message text itself is not-supported anyway.)
+
+### State of the tree (UNCOMMITTED — 10 modified, 2 untracked)
+Modified: `Pl/Environment.pm`, `Pl/ExprToCL.pm`, `Pl/PExpr/StringInterpolation.pm`, `Pl/Parser.pm`,
+`cl/pcl-runtime.lisp`, `cl/pcl-test.lisp`, `Pl/t/{fileio-02,inheritance-01,magic-vars-01,match-vars-01}.t`.
+Untracked: `perl-tests/magic.t` (keep — 129/208), `perl-tests/parent.t` (blocked by POSIX float bug; keep
+as target OR remove — currently NO OUTPUT in a sweep).
+
+### NEXT STEPS (resume order)
+1. Decide keep/revert on the `use parent` require change (correct but 0 current benefit).
+2. Fix the POSIX `LDBL_MAX` float overflow (both levels) → unblocks parent.t and any over-range float.
+3. Resolve the fatal-vs-non-fatal `use parent` require design question (parent.t 7-8).
+4. Clean full gate (`prove -j8 Pl/t/`) + full sweep; re-bless `docs/fail-baseline.tsv`; commit
+   (split logically: `$\` fix + magic.t feature work as one unit; use-parent as another if kept).
+
+---
+
 ## Session 231d (2026-06-02) — sweep recovery loader: 0 crashes, +96 hidden passes
 
 **The two "Crashed (SBCL)" files are gone — and one of them was hiding 96 passing
