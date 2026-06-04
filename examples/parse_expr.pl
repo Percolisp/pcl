@@ -6,7 +6,7 @@
 #
 # Part of PCL (Perl to Common Lisp) - demonstrates Pl::PExpr usage
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 

@@ -11,7 +11,7 @@ package Pl::BlockAnalyzer;
 #
 # See docs/two-phase-compiler.md for the full design.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 

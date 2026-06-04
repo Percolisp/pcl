@@ -4,6 +4,15 @@ This document lists Perl behaviours that PCL intentionally does not emulate,
 along with the rationale.  Tests covering these features are commented out in
 the `perl-tests/` files.
 
+> **Deferred vs. permanent.** Most items here are *permanent* design decisions
+> (they replicate a Perl interpreter implementation detail with no payoff for
+> real CPAN code).  A few, however, are merely **deferred until after the
+> compatibility phase** — implementable, planned, and tracked in the README
+> roadmap ("Deferred language features — planned, not rejected").  These are
+> marked **[DEFERRED — see roadmap]** below: live symbol-table hashes
+> (`%main::`), `__SUB__` outside string `eval`, and richer `caller()`
+> (package/sub-name depth).
+
 ---
 
 ## Interned boolean constants (`!0` / `!1` identity)
@@ -42,7 +51,36 @@ and read-only scalars).
 
 ---
 
-## `caller()` filename and line number
+## Live symbol-table hashes (`%main::`, `%Foo::`)  [DEFERRED — see roadmap]
+
+**Perl behaviour:** `%main::` (and any `%Pkg::`) is a live view of the package
+symbol table: its keys are symbol names, its values are typeglobs, and writing
+to it (`$main::{foo} = \&bar`) installs into the package.  Code that walks or
+mutates the stash (`Exporter`, plugin loaders, `*{...}` glob tricks) relies on
+this being live.
+
+**PCL behaviour:** The syntax (`$Pkg::`, `%Pkg::`, `$::`, `%::`, `*Pkg::`) parses
+and routes to `(p-stash "Pkg")`, but `p-stash` returns a **read-only snapshot
+containing only subs** (a fresh hash of `name → code-ref` built from the CL
+package on each call).  Reads of existing subs (`delete`/`exists`/lookup) work;
+writes are lost; scalar/array/hash/IO glob slots are absent; `local` on a stash
+element is skipped.
+
+**Why deferred, not permanent:** PCL package vars and subs already *are* CL
+symbols in a CL package, so the stash is introspectable via `do-symbols`.  The
+plan (README roadmap) is to make `p-stash` return a **live proxy** over the CL
+package and teach the hash primitives (`p-hash-get`/`-set`, `p-exists`,
+`p-delete`, `p-keys`, …) to dispatch to package introspection — a pure runtime
+change needing no new compiler analysis, and cheap because normal `$Foo::bar`
+access compiles to a direct symbol reference and never touches the stash.  Full
+typeglob slots are the fiddly remainder.
+
+**Affected tests:** `perl-tests/caller.t` (needs `%::`), `perl-tests/undef.t`
+(stash-slot tricks), and any stash-walking module code.
+
+---
+
+## `caller()` filename and line number  [DEFERRED — see roadmap]
 
 **Perl behaviour:** `caller()` in list context returns `($package, $filename, $line)`.
 `caller(N)` returns the Nth frame's package, file, and line.  Many modules use
@@ -344,7 +382,7 @@ the `reset` / `?pat?` tests fail).
 
 ---
 
-## `__SUB__` (current sub reference)
+## `__SUB__` (current sub reference)  [DEFERRED (non-eval case) — see roadmap]
 
 **Perl behaviour:** `use feature 'current_sub'; __SUB__` returns a
 reference to the currently executing subroutine, enabling anonymous subs

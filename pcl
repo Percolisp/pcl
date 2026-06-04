@@ -22,7 +22,7 @@
 # (use/require) still applies underneath, with its own mtime freshness check.
 # Caching tiers (--cache / --fasl) are Phase 6; user test support is Phase 4.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 use Getopt::Long qw(:config pass_through require_order no_ignore_case bundling);

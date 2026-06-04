@@ -1,0 +1,299 @@
+* Questions for Claude
+** Hashes for packages? (%main:: etc)
+   How are they supported? Do we register all variables? Do we use some
+   introspection utilitu in SBCL?
+
+   *Answer (Claude 2026-06-04):*
+
+   /Current state (what actually happens today):/
+   - We do *not* register a parallel symbol table. Package vars and subs
+     already /are/ CL symbols living in a CL package: =package Foo= → CL
+     package =FOO=, with symbols named =$x=, =@y=, =%z=, =PL-bar=, etc.
+     So the "stash" is really just the CL package, and SBCL's =do-symbols=
+     is our introspection utility.
+   - =$Pkg::=, =%Pkg::=, =$::=, =%::=, =*Pkg::= all parse and route to
+     =(p-stash "Pkg")= (see =ExprToCL.pm:487-520=, =Parser.pm:729=).
+   - But =p-stash= (=pcl-runtime.lisp:5407=) is weak in two ways:
+     1. It returns a *fresh snapshot* hash on every call — a read-only
+        copy, not a live view. So =$main::{foo} = \&bar= mutates a
+        throwaway and is lost. Only reads (=delete=/=exists=/lookup of an
+        /existing/ sub) work.
+     2. It only contains *subs* — it walks for =fboundp= symbols named
+        =PL-xxx= and maps ="xxx" → code-ref box=. The scalar/array/hash/IO
+        glob slots are absent, so =${$main::{x}}=, typeglob tricks, and
+        stash-as-namespace lookups find nothing.
+   - =local $main::{key}= is explicitly skipped (3 spots in =Parser.pm=:
+     1104, 1800, 2215 — emit a comment, run the body only).
+
+   /How to fake it — your tie idea:/
+   - The instinct is right, with one correction. We /do/ have a full tie
+     mechanism (=p-tie-proxy=, FETCH/STORE via =unbox=/=box-set=), *but it
+     is scalar-only* — =p-tie= notes "Phase 1: scalars only. Arrays/hashes
+     require boxing those types first" (=pcl-runtime.lisp:8905=). Our hashes
+     are raw =hash-table=s, not boxed, so the generic tie path can't carry a
+     =%main::= today.
+   - So don't route =%main::= through generic =tie=. Instead make =p-stash=
+     return a dedicated *live stash-proxy struct* (e.g. =p-stash-view= holding
+     the CL package object), and teach the hash primitives — =p-hash-get=,
+     =p-hash-set=, =p-exists=, =p-delete=, =p-keys=, =p-values=, =p-each= — to
+     recognize that struct and dispatch to package introspection:
+       - FETCH/key → look up =$key=, =@key=, =%key=, =PL-key= in the package,
+         build/return a glob object on the fly.
+       - STORE → install into the package (=defparameter= the right symbol /
+         =(setf (symbol-function …))=).
+       - EXISTS/DELETE/KEYS → =do-symbols= filtered, with sub-package keys
+         (=Foo::=) for nested namespaces.
+     This is the same "recognize a magic value and branch" shape we already
+     use for =p-tie-proxy= and =p-magic-cell=, just at the hash layer.
+
+   /Is it too expensive?/ No — and this is the key reassurance:
+   - Normal variable access (=$main::foo=, =@Foo::bar=) compiles to a
+     *direct CL symbol reference*. It does /not/ go through the stash hash.
+     Only explicit meta-programming (=$main::{...}=, =keys %main::=) touches
+     the proxy. So the dispatch cost is paid only when you actually poke the
+     symbol table — which is rare — and is zero for everything else.
+   - The one extra per-call cost is the branch in the hash primitives to
+     check "is this arg a stash-proxy?". That's a single =typep= on a path
+     that's already doing a hash op; negligible.
+
+   /The genuinely hard part — typeglobs:/ Perl stash /values/ are globs
+   (=*main::foo=) with scalar+array+hash+code+IO slots, and reading one slot
+   then assigning another is real metaprogramming. We have partial glob
+   support (=local *GLOB=, =p-local-glob=). A faithful =%main::= means the
+   proxy's FETCH returns a glob bundling all five slots of one name. That is
+   the part that takes design care; the live read/write dispatch above is the
+   easy 80%.
+
+   /Should we wait for the smarter compiler?/ *No need.* This is independent
+   of the two-phase compiler and the AST-annotation plan — it's a pure
+   /runtime/ change (a new struct + a branch in ~7 hash functions) plus making
+   =p-stash= return the live proxy instead of a snapshot. Nothing here needs
+   context annotations or AST rewrites. I'd stage it:
+     1. Live read-through proxy over the CL package (covers =keys %Foo::=,
+        =exists=, =delete=, sub lookup) — small, high value.
+     2. Glob objects with all slots (full =*Foo::foo= round-trips).
+     3. =local= on stash elements (build on the glob save/restore).
+   Step 1 alone unblocks most real introspection (=Exporter=-style
+   "walk the stash" code) at low cost.
+
+** Could we implement `__SUB__` for not eval strings?
+   We could set up a sub pointers in those subs that use it. With a macro.
+
+   That should test quite a few cases. Then let it die if the code
+   reference `__SUB__` in an eval.
+
+   *Answer (Claude 2026-06-04):* Yes, this is very doable and your sketch is
+   the right one. =__SUB__= is currently in =not-supported.md=, but only
+   because the generic solution (thread a =*current-sub*= through /every/
+   call) is costly. Your targeted version avoids that:
+   - At codegen, when a sub body *lexically contains* =__SUB__=, wrap that one
+     sub so it has a self-reference in scope. In CL the clean idiom is
+     =(labels ((this-sub (...) ...body...)) #'this-sub)= for anon subs, or for
+     named subs just emit =__SUB__= → =(function pl-thatname)= /
+     =(make-p-box #'pl-thatname)= directly (the name is known at compile time).
+   - Only subs that mention =__SUB__= pay anything; all others are untouched.
+     So it's a per-sub macro, exactly as you say — no global threading.
+   - For string =eval=: the eval'd code is transpiled in a subprocess that has
+     no enclosing sub, so make =__SUB__= there emit a runtime
+     =(p-die "__SUB__ outside of a subroutine")= (or detect lexical absence
+     and die). That matches Perl's own "Undefined subroutine" / out-of-scope
+     behaviour closely enough.
+   This would move =__SUB__= out of not-supported for the common (non-eval)
+   case. Worth doing — recursion-by-=__SUB__= shows up in real closures.
+
+** POSIX varies a lot in different CL versions?
+   2:2.1.11-1 fails hard for those.
+
+   What is the mini-version of CL? What versions of Ubuntu/Debian/??
+   don't have that?
+
+   *Answer (Claude 2026-06-04):* A clarification first: ="2:2.1.11-1"= is the
+   Debian/Ubuntu *SBCL package* version (epoch 2, SBCL 2.1.11, ~Nov 2021), not
+   a CL-standard version. So the real question is "which SBCL floor do we
+   require, and which distros ship older?".
+
+   I can't give the exact floor without testing — it has to be measured, not
+   guessed. What I /can/ say:
+   - We lean hard on SBCL internals: *74* call sites across
+     =sb-posix= / =sb-alien= / =sb-unix= / =sb-kernel= / =sb-debug= in
+     =pcl-runtime.lisp= alone. These are SBCL-only (not portable CL), and some
+     (=sb-posix:pipe=, =sb-posix:alarm=, =sb-unix:sigalrm=, the =sb-alien=
+     =crypt(3)= bridge) are the kind of thing whose API drifts between
+     releases. That is almost certainly what "fails hard" on 2.1.11.
+   - Practical recommendation: pick a *known-good floor* by testing the suite
+     against a couple of SBCL releases, then document it (e.g. "requires SBCL
+     ≥ 2.3.x") and pin it. Debian Bookworm ships 2.3.x; Ubuntu 22.04 shipped
+     2.1.11 (the one that fails), 24.04 ships ~2.3.x. So the failing target is
+     specifically *Ubuntu 22.04 / older LTS*.
+   - Cheap robustness win: wrap the riskiest =sb-*= calls in feature-detect
+     (=(if (fboundp 'sb-posix:…) … fallback)=) so an old SBCL degrades a
+     feature instead of failing to /load/ the whole runtime.
+
+   /I can run this audit for you/ — grep the exact =sb-*= symbols we use and
+   cross-check which exist in SBCL 2.1.11 vs current — if you want a concrete
+   floor and a list of risky calls. Just say so.
+
+** Is there full support for `goto`?
+   *Answer (Claude 2026-06-04):* Partial, and the split is principled:
+   - =goto &sub= (tail-call form) — *supported* via =p-goto-sub=
+     (=pcl-runtime.lisp:5648=); re-invokes the target with the current =@_=.
+   - =goto LABEL= to a /static, lexically-visible/ label — supported through
+     the =tagbody= machinery added for =state.t= (sessions 143+).
+   - =goto EXPR= where EXPR computes a label name at runtime — *not supported*
+     (=p-goto-computed= is a no-op). CL tags aren't first-class, so a
+     runtime-computed label can't be resolved to a =tagbody= tag. This is in
+     =not-supported.md= ("Computed goto"), and it's rare/discouraged in modern
+     Perl. =state.t= rows 70-73 are the only things that hit it.
+
+** Can we use `sb-debug::frame-call` for better `caller()` functionality?
+   It would need a special flag for compatibility to sbcl, so the call
+   stack is kept.
+
+   *Answer (Claude 2026-06-04):* Partly yes — worth a prototype, but it won't
+   get us all the way. =caller()= today returns the package correctly but
+   ="(unknown)"= file and =0= line (=not-supported.md=).
+   - =sb-debug= frame walking (=sb-di=/=sb-debug= map-backtrace) /can/ recover
+     CL function names per frame, and with =(declaim (optimize (debug 3)))= (or
+     a compile flag, as you note) the frames are preserved. From a CL function
+     name like =PL-FOO= we can derive the Perl sub name and package. So the
+     *first two* =caller= return values (package, subname for =caller(N)='s
+     4-element form) are reachable.
+   - The blocker is *file + line*. CL frames know the CL function, not the
+     Perl source position. Mapping back to "= at file.pl line N=" needs a
+     side-table from generated forms to source locations — i.e. exactly the
+     AST-annotation / source-map work that's deferred. Frame walking alone
+     can't synthesize it.
+   - Also: it's an internal SBCL API (=sb-debug=/=sb-di=), so it's
+     version-fragile (ties into the previous question) and the =(optimize
+     debug)= requirement has a runtime cost.
+   Verdict: a good incremental win for package/subname depth (=caller(N)=), but
+   file/line still waits on source maps. I'd prototype it behind a flag and
+   keep expectations to the first elements.
+
+** Please see if we can lower the demanded Perl version to 5.20 or lower?
+   (That is, for our scripts etc.)
+
+   *Answer (Claude 2026-06-04):* Every PCL module currently declares
+   =use v5.30;= (=Pl/*.pm=, =pl2cl=, =pcl=). Lowering to 5.20 is an *audit
+   task*, not a flip of that line — we have to confirm we don't use any
+   5.22+ feature in our /own/ source:
+   - 5.20: =sub name ($sig)= signatures, =->@*=/=->%*= postfix deref were all
+     /experimental/ (signatures landed 5.20 exp, postfix deref 5.20 exp).
+   - 5.22+: stable postfix deref (5.24), =\(...)= refaliasing, some =fc=, etc.
+   - Pre-5.20 would also lose =//= -default-everywhere comfort? (=//= is fine,
+     5.10) but signatures definitely aren't there before 5.20.
+   The thing to check is whether =Pl/PExpr.pm= / =Pl/Parser.pm= use signatures
+   or postfix-deref in /their own/ code (the grep was noisy because those files
+   contain Perl-source /patterns/ as data). /I can do the real audit/: strip
+   strings/regexes, find genuine feature use, and tell you the lowest floor we
+   can honestly declare. Want me to?
+
+   Note: this is purely about the Perl that /runs PCL/. It's separate from what
+   Perl /version semantics PCL emulates/ for transpiled code (which is newer).
+
+** We shouldn't support the `class` keyword and syntax, it is experimental?
+   I do want to, but no. :-)
+
+   *Answer (Claude 2026-06-04):* Agreed — hold off. =class=/=field=/=method=
+   (the "Corinna" object system) landed as an /experimental/ feature in
+   5.38 and is *still experimental* in 5.40 (emits the experimental warning,
+   syntax still in flux). Per Design Principle: target stable Perl that real
+   CPAN modules rely on. Almost no CPAN module /requires/ =class= yet, and the
+   syntax could still change. When it stabilizes (and CPAN adopts it), it maps
+   reasonably onto our existing CLOS-backed OO — so it's a "later, cleanly"
+   rather than "never". Same call you made. :-)
+
+** The `Config.pm` is among our always supported, right?
+   Test::Simple too? Test::More?
+   Suggestions: https://perl.petamem.com/docs/eng/p5/index.html
+
+   *Answer (Claude 2026-06-04):* Yes:
+   - =lib/Config.pm= ships (the =%Config= stub; =d_crypt= etc. wired in
+     session 223c). Always available.
+   - =lib/Test/Simple.pm= ships.
+   - =Test::More= is provided specially — it's backed by the CL test harness
+     (=cl/pcl-test.lisp=) and the module-provider registry, not a =lib/= shim
+     (see =docs/shipped-modules.md=, "Test::More isn't the last case"). It's
+     always available when running the suite.
+   - Other shipped =lib/= shims: =Cwd=, =Errno=, =POSIX=, =version=, and
+     =File::*= / =List::*= / =Scalar::*= subtrees.
+   The =*pcl-module-providers*= registry (=:cl= / =:perl= / =:xs=) is the
+   single place that says what's "always supported"; adding one is "1 file +
+   1 row" per =docs/shipped-modules.md=.
+
+*** Need to have an answer about Moo(se) etc and DBI/DBD
+    *Answer (Claude 2026-06-04):*
+    - *Moo / Moose:* planned, not done. There's a design doc
+      (=MOO_MOOSE_DESIGN.md=). Moo is pure-Perl (Moose core has XS accel but
+      degrades to pure-Perl), so it's /reachable/ without the XS bridge — it's
+      a real candidate once the metaprotocol glue is built. This is probably
+      the single highest-leverage "real CPAN" target.
+    - *DBI:* DBI's core is largely pure Perl, /but/ it bootstraps an XS layer
+      (=DBI::DBD=, the driver dispatch) — so plain DBI won't load without the
+      XS bridge or a hand-stub.
+    - *DBD::\*:* almost all real drivers are XS (=DBD::SQLite=, =DBD::mysql=,
+      =DBD::Pg=). Out of scope until the XS bridge — /except/ pure-Perl
+      drivers like =DBD::CSV= (via =SQL::Statement= + =Text::CSV_XS=… which is
+      again XS). Realistically: DBI is a "needs XS bridge first" item.
+    - Verdict: *Moo first* (pure-Perl, huge surface), DBI/DBD parked behind
+      the XS bridge phase.
+
+** Need to test with some no-XS CPAN modules, too
+   Should hash out some problems.
+
+   *Answer (Claude 2026-06-04):* Strongly agree — this is the best way to find
+   real gaps that the synthetic =perl-tests/= suite misses. Good pure-Perl
+   candidates to start (no XS, widely used, exercise different areas):
+   - =JSON::PP= — string/number edge cases, regex, refs.
+   - =List::Util::PP= / =List::MoreUtils::PurePerl= — closures, prototypes.
+   - =Text::CSV= (pure-Perl fallback path) — parsing, state machines.
+   - =Time::Local=, =Date::Calc= (pp) — arithmetic-heavy.
+   - =Try::Tiny= — closures, =$@=, =local=.
+   - =URI= — OO + regex + overload.
+   Suggest a =cpan-tests/= harness mirroring =sweep-perl-tests.pl= so failures
+   land in the same faillog/skip-registry workflow. I can scaffold that.
+
+** Add a comment to the `pack` implementation, about the origin of the code
+   It was based on the original C.
+
+   *Answer (Claude 2026-06-04):* Easy, actionable — I can add a header comment
+   to the =pack=/=unpack= implementation noting it was modeled on Perl's
+   original C (=pp_pack.c=) and pointing at =docs/pack-implementation-plan.md=
+   / =docs/pack-failure-groups.md=. Tell me to and I'll do it (need the file —
+   pack lives in an extension file loaded via =*load-truename*=; I'll locate
+   it first).
+
+** In the README, change
+   "Perl text in, Common Lisp text out" =~ s/text/code/g;
+
+   *Answer (Claude 2026-06-04):* "Perl code in, Common Lisp code out." Trivial
+   edit — say the word and I'll apply it to =README=.
+
+** How will parsing binary file/network formats work, if there are no bytes?!
+   How does `pack()` work? :-)
+
+   *Answer (Claude 2026-06-04):* The "no bytes" worry is about the /UTF-8
+   flag/, not about bytes being unavailable. Here's the model:
+   - A PCL string is a CL string = a vector of characters. A "byte string" is
+     just a string whose characters all have code points 0-255 (Latin-1
+     range). =chr(0xFF)= is a one-char string; =ord= gets it back. So binary
+     data /is/ representable — as strings of sub-256 code-point chars.
+   - =pack= builds exactly such a string: =pack("N", 1)= produces the 4-char
+     string ="\0\0\0\1"=, char codes 0,0,0,1. =unpack= reads char codes back as
+     byte values. That's why pack/unpack already work for the integer/float
+     formats — they manipulate code points, treating each char as a byte.
+   - Binary file/network IO: read/write in binary mode maps each byte ↔ one
+     char (Latin-1 / iso-8859-1 external format). =sb-posix:pipe= streams are
+     set up this way. So a packed string written out yields the right bytes.
+   - What's genuinely missing is *not* bytes — it's:
+     1. The per-scalar UTF-8 /flag/ (=utf8::encode=/=decode= toggling — see
+        =not-supported.md= "Unicode semantics"): we can't distinguish "string
+        of 2 chars" from "string of N utf-8 bytes of those chars" because CL
+        has one string type. For round-tripping raw bytes this rarely matters;
+        for code that inspects the flag, it does.
+     2. Raw-pointer pack (=p=/=P=) and 80-bit =D= — genuinely unsupportable
+        (GC moves objects; SBCL has no 80-bit float). Already in
+        =not-supported.md=.
+   - So: binary protocols that pack/unpack fixed-width integers, strings, and
+     IEEE floats work fine. The cases that break are the ones depending on the
+     UTF-8-flag distinction or raw memory addresses — not "bytes" per se.

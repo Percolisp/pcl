@@ -219,7 +219,11 @@ Not relevant now:
 
 ## Dependencies
 
-- Perl 5.30+
+- Perl 5.20+
+- SBCL 2.5.2+ (the full suite has passed on 2.5.2 — the prior dev env until
+  2026-05-31 — and on 2.6.0, the current one; the runtime uses some
+  SBCL-internal symbols, so the supported floor is whatever the suite is
+  actually validated against, not a guessed range)
 - PPI (Perl parser)
 - Moo (OO framework)
 - Test::More

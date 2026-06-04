@@ -4,7 +4,7 @@ package Pl::PExpr::Config;
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as the Perl 5 programming language system itself.
 
-use v5.30;
+use v5.20;
 use strict;
 use warnings;
 
