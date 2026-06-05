@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 29;
 
 sub run_cl {
     my ($code) = @_;
@@ -166,3 +166,67 @@ test_cl('$x = not 5 (no my) gives empty-string false',
 test_cl('not binds looser than == (semantics preserved)',
     'my $a = 3; my $b = 3; my $r = not $a == $b; print $r ? "T\n" : "F\n";',
     "F\n");
+
+# ── slurpy (@) prototype tail forces LIST context on those args ──────────
+# A sub declared (&;@) runs its trailing @-slurped arguments in list context,
+# so a context-sensitive call there sees wantarray true. (Found via Try::Tiny:
+# catch croaks 'Useless bare catch()' unless wantarray.)
+test_cl('arg in a (&;@) slurpy position runs in list context',
+    'sub want { wantarray ? "LIST" : "SCALAR" }
+     sub mytry (&;@) { my ($blk, @rest) = @_; return $rest[0]; }
+     my $r = mytry { 0 } want();
+     print "$r\n";',
+    "LIST\n");
+
+# Guard: a ($$) prototype does NOT force list context — its args inherit the
+# call context (here scalar), matching Test::More is($$;$) keeping unpack scalar.
+test_cl('($$) prototype arg is not forced to list context',
+    'sub want { wantarray ? "LIST" : "SCALAR" }
+     sub two ($$) { return "$_[0]"; }
+     my $r = two(want(), 9);
+     print "$r\n";',
+    "SCALAR\n");
+
+# Guard: a plain scalar assignment still gives scalar context.
+test_cl('scalar assignment gives scalar context',
+    'sub inner { return wantarray ? "LIST" : "SCALAR"; }
+     my $s = inner();
+     print "$s\n";',
+    "SCALAR\n");
+
+# ── return inside eval { } exits the eval, not the enclosing sub ──────────
+# perldoc -f return: "return can also be used to exit an eval block". The
+# eval evaluates to the returned value and the sub keeps running.
+test_cl('return inside eval { } exits only the eval block',
+    'sub f { my $x = eval { return 1; }; return "after x=$x"; }
+     print f(), "\n";',
+    "after x=1\n");
+
+test_cl('eval { ...; return V } yields V to the assignment',
+    'my $v = eval { 2 + 2; return 7; 99 };
+     print "v=$v\n";',
+    "v=7\n");
+
+# ── &-prototype block argument is an anon sub (accepts @_) ────────────────
+# A sub declared (&;@) receives its block as an anonymous sub, which must
+# accept call arguments via @_ (Try::Tiny's catch is called with $error).
+test_cl('block arg of a (&;@) sub accepts call arguments via @_',
+    'sub mytry (&;@) { my ($blk, @rest) = @_; return $blk->("ARG"); }
+     my $r = mytry { "got:$_[0]" };
+     print "$r\n";',
+    "got:ARG\n");
+
+# ── use Carp imports croak/carp/confess; croak dies catchably ────────────
+test_cl('use Carp; croak dies with the message (caught by eval)',
+    'use Carp;
+     eval { croak "boom" };
+     print $@ =~ /^boom/ ? "caught\n" : "no\n";',
+    "caught\n");
+
+# ── glob-assign into a multi-segment package preserves case ──────────────
+# *Foo::Bar::name = sub {...} must install into package Foo::Bar (case
+# preserved), matching how codegen emits the qualified call.
+test_cl('glob-assign a sub into a multi-segment package, then call it',
+    '*Foo::Bar::greet = sub { "hi" };
+     print Foo::Bar::greet(), "\n";',
+    "hi\n");

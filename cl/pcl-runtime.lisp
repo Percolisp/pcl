@@ -220,6 +220,18 @@
          (setf (symbol-value isa-sym)
                (make-array 0 :adjustable t :fill-pointer 0))))))
 
+;;; perl-pkg-to-cl-pkg-name: map a Perl package name to the CL package-name
+;;; string PCL's codegen uses.  Codegen pipe-quotes multi-segment names
+;;; (|Try::Tiny|, case-preserved) but emits single-segment names as bare
+;;; tokens the reader upcases (Carp -> CARP, main -> MAIN).  Runtime package
+;;; lookups must follow the SAME rule, or e.g. a glob/symbolic-ref op on a
+;;; multi-segment package would create/find a wrong-case empty "TRY::TINY"
+;;; that shadows the real "Try::Tiny".
+(defun perl-pkg-to-cl-pkg-name (pkg-str)
+  (if (search "::" pkg-str)
+      (string pkg-str)
+      (string-upcase pkg-str)))
+
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
@@ -6001,8 +6013,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl eval { } - execute body catching errors.
    Sets $@ to error/exception on failure, empty string on success.
    Returns result of body on success, nil on failure."
+  ;; `return` inside eval { } exits the eval block (perldoc -f return), not the
+  ;; enclosing sub — so catch :p-return here, letting the eval evaluate to the
+  ;; returned value rather than unwinding the whole sub.
   `(handler-case
-       (prog1 (progn ,@body)
+       (prog1 (catch :p-return ,@body)
          (box-set $@ ""))
      (p-exception (e)
        ;; Object exception - preserve the object in $@
@@ -7409,7 +7424,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-find-module-package (module-name)
   "Find CL package for a Perl module.
    Tries: uppercase name, exact-case name (for Foo::Bar packages)."
-  (or (find-package (string-upcase module-name))
+  (or (find-package (perl-pkg-to-cl-pkg-name module-name))
+      (find-package (string-upcase module-name))
       (find-package module-name)))
 
 (defun p-perl-symbol-to-cl-name (sym-name)
@@ -8420,16 +8436,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-make-typeglob (pkg-str name-str)
   "Create a typeglob object for *Pkg::Name."
-  (let ((pkg (or (find-package (string-upcase pkg-str))
+  (let ((pkg (or (%pcl-find-package pkg-str)
                  ;; Package may not exist yet; create it lazily
-                 (make-package (string-upcase pkg-str) :use '(:cl :pcl)))))
+                 (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
     (make-p-typeglob pkg (string-upcase name-str))))
 
 (defun p-glob-assign (pkg-str name-str rhs)
   "Assign RHS to the appropriate slot of typeglob *pkg::name.
    Dispatch is by type of the unwrapped RHS value."
-  (let* ((pkg   (or (find-package (string-upcase pkg-str))
-                    (make-package (string-upcase pkg-str) :use '(:cl :pcl))))
+  (let* ((pkg   (or (%pcl-find-package pkg-str)
+                    (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
          (uname (string-upcase name-str))
          ;; Unwrap one box level to see what was referenced
          (inner (if (p-box-p rhs) (unbox rhs) rhs)))
@@ -8485,8 +8501,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (sep-pos (search "::" name-str :from-end t))
          (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
          (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
-         (pkg (or (find-package (string-upcase pkg-str))
-                  (make-package (string-upcase pkg-str) :use '(:cl :pcl)))))
+         (pkg (or (%pcl-find-package pkg-str)
+                  (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
     (make-p-typeglob pkg (string-upcase bare-str))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
@@ -8573,8 +8589,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (had-scalar     (gensym "HAD-SCALAR"))
         (had-array      (gensym "HAD-ARRAY"))
         (had-hash       (gensym "HAD-HASH")))
-    `(let* ((,pkg-var   (or (find-package (string-upcase ,pkg-str))
-                            (make-package (string-upcase ,pkg-str) :use '(:cl :pcl))))
+    `(let* ((,pkg-var   (or (%pcl-find-package ,pkg-str)
+                            (make-package (perl-pkg-to-cl-pkg-name ,pkg-str) :use '(:cl :pcl))))
             (,uname-var (string-upcase ,name-str))
             (code-sym   (intern (concatenate 'string "PL-"  ,uname-var) ,pkg-var))
             (scalar-sym (intern (concatenate 'string "$"    ,uname-var) ,pkg-var))
@@ -9064,7 +9080,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; Lets p-method-call distinguish "blessed into" from "never mentioned" packages,
     ;; so it can add the "(perhaps you forgot to load...)" hint only for truly unknown classes.
     (unless (%pcl-find-package class-name)
-      (ignore-errors (make-package (string-upcase class-name) :use '(:cl :pcl))))
+      (ignore-errors (make-package (perl-pkg-to-cl-pkg-name class-name) :use '(:cl :pcl))))
     (cond
       ((hash-table-p inner)
        (setf (gethash :__class__ inner) class-name)
@@ -9119,7 +9135,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Find CL package for Perl package name PKG-STR.
    Tries upcase first (single-word packages defined via :Foo keyword), then
    exact case (multi-level packages defined via :|Foo::Bar| notation)."
-  (or (find-package (string-upcase pkg-str))
+  (or (find-package (perl-pkg-to-cl-pkg-name pkg-str))
+      (find-package (string-upcase pkg-str))
       (find-package pkg-str)))
 
 (defun p-method-call (obj method &rest args)

@@ -4,6 +4,62 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 234 (2026-06-05) — Try::Tiny works: 5 general bugs (pkg-casing, Carp, eval-return, &-proto blocks, slurpy list-ctx)
+
+Continued the no-XS CPAN survey ([[project_cpan_module_survey]]). Drove **Try::Tiny**
+end-to-end through PCL; each failure was a *general* PCL bug, not module-specific.
+Core `try`/`catch` (incl. nested + rethrow) now produces byte-identical output to perl.
+Gate **91 files / 3218** green. Full sweep **18043 pass / 787 fail / 69 fully passing**
+(was 18041/789/69 — **+2 pass / −2 fail, fully-passing held**); `sweep-diff` **0 new,
+0 tracked regressions**. New tests in `Pl/t/misc-fixes-01.t` (21→29). **Uncommitted at
+time of writing.**
+
+**Bugs fixed:**
+1. **Multi-segment package casing** (`cl/pcl-runtime.lisp`). The glob/bless/typeglob/
+   symref runtime did `(string-upcase pkg-str)` for *every* package, so Try::Tiny's
+   `*_HAS_SUBNAME = …` created an uppercase empty `TRY::TINY` that then shadowed the
+   real, case-preserved `Try::Tiny` (where the subs live) at import time. Codegen rule:
+   multi-segment names are pipe-quoted → case-preserved (`|Try::Tiny|`); single-segment
+   → bare → reader-upcased (`Carp`→`CARP`, `main`→`MAIN`). New helper
+   `perl-pkg-to-cl-pkg-name` mirrors it; applied at `p-make-typeglob`, `p-glob-assign`,
+   `p-dynamic-typeglob`, `p-local-glob`, bless, `%pcl-find-package`,
+   `p-find-module-package`. Single-segment behaviour unchanged (helper == old upcase).
+2. **`use Carp` was a no-op pragma** (`Pl/Parser.pm` pragma regex) → `croak`/`carp`/
+   `confess` never imported; the runtime `|Carp|` stub was in the wrong-case package and
+   unreachable by generated `CARP::pl-croak` calls anyway. Removed `Carp` from the pragma
+   list and added **`lib/Carp.pm`** shim (croak/carp/confess/cluck/longmess/shortmess +
+   `@EXPORT`/`@EXPORT_OK`); `lib/` precedes site_perl in `@INC` so it wins over the real
+   (utf8-looping) Carp.pm.
+3. **`&`-prototype block args were fixed 0-arg lambdas** (`Pl/PExpr.pm`). `try { }` /
+   `catch { }` blocks compiled with `is_anon_sub=0`, but Try::Tiny invokes the catch
+   block with `$error` → "invalid number of arguments: 1". Now pass `$has_block_proto`
+   as the `is_anon_sub` flag so the block accepts `@_`; `do { }` (no block proto) stays
+   0-arg.
+4. **`return` inside `eval { }` exited the whole sub** (`cl/pcl-runtime.lisp`,
+   `p-eval-block`). perldoc -f return: `return` exits an eval BLOCK. `p-eval-block` used
+   `handler-case` (catches *conditions*), but `(p-return …)` is a `throw :p-return` that
+   sailed past it to the sub's catch. Fix: wrap the body in `(catch :p-return ,@body)`.
+   This was Try::Tiny's success-value bug (`my $a = try { 42 }` returned `1` — Try::Tiny's
+   internal `return 1` from inside its `eval`).
+5. **Slurpy `@` prototype → LIST context** (`Pl/PExpr.pm` `child_context`). `try (&;@)`
+   must run its trailing catch/finally in list context (catch croaks "Useless bare
+   catch()" unless `wantarray`). **Cautionary tale:** I first tried the *general* Perl
+   rule "every user-sub arg is list context" — correct in principle, but it ignores
+   prototypes and PCL doesn't know Test::More's `is($$;$)`, so it forced `is(unpack(…), …)`
+   into list context and **regressed pack.t 10→138 not-ok**. The safe fix only forces
+   LIST_CTX for args landing in the slurpy `@`/`%` tail of a *known* prototype.
+   Unprototyped subs and `$`-proto positions inherit as before — so `outer(inner())` for a
+   plain sub still (safely, if not strictly correctly) gives scalar; full correctness needs
+   PCL to know all prototypes (deferred).
+
+**Not fixed (documented limitation):** Try::Tiny `finally` doesn't run — it relies on
+`Try::Tiny::ScopeGuard`→`DESTROY` at scope exit (DESTROY-via-GC, `not-supported.md`).
+
+**Still open CPAN-survey items:** `Data::Dump` (runtime UNDEFINED-FUNCTION, uninvestigated);
+`defined(&glob_installed_sub)` reports undef though callable (cosmetic).
+
+---
+
 ## Session 233 (2026-06-05) — design Q&A, v5.20/SBCL floors, `p-double-inf` macro, CPAN no-XS survey + `not`-RHS parser fix
 
 **Committed (5 commits):** `bb924a6` (session-232 magic.t work + entangled shared-file

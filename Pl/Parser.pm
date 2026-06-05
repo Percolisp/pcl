@@ -5507,7 +5507,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|re)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
