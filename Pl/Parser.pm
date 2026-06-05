@@ -6096,13 +6096,15 @@ sub _compile_constant_value {
   my $self  = shift;
   my $parts = shift;
 
-  # Simple case: single literal
+  # Simple case: single literal.
+  # NOTE: Number tokens are intentionally NOT short-circuited here — emitting
+  # $tok->content raw mishandles octal (0777 -> CL 777) and, worse, float
+  # literals that overflow double range (e.g. POSIX::LDBL_MAX 1.18e+4932) which
+  # SBCL cannot even read, crashing compile-file.  Numbers fall through to the
+  # full ExprToCL path below, which maps those to #o.../(p-double-inf) etc.
   if (@$parts == 1) {
     my $tok = $parts->[0];
-    if ($tok->isa('PPI::Token::Number')) {
-      return $tok->content;
-    }
-    elsif ($tok->isa('PPI::Token::Quote')) {
+    if ($tok->isa('PPI::Token::Quote')) {
       # String - get the actual string value
       my $str = $tok->string // $tok->content;
       return '"' . $str . '"';

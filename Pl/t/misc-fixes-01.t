@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 29;
+plan tests => 31;
 
 sub run_cl {
     my ($code) = @_;
@@ -230,3 +230,19 @@ test_cl('glob-assign a sub into a multi-segment package, then call it',
     '*Foo::Bar::greet = sub { "hi" };
      print Foo::Bar::greet(), "\n";',
     "hi\n");
+
+# ── use constant value goes through the full number codegen path ─────────
+# The "single literal" fast path used to emit the raw token, which mishandles
+# octal (0777 -> CL 777) and crashes compile-file on float literals that
+# overflow double range (POSIX::LDBL_MAX 1.18e+4932 — unreadable to SBCL).
+test_cl('use constant octal literal is parsed as octal',
+    'use constant FOO => 0777;
+     my $v = FOO;
+     print "$v\n";',
+    "511\n");
+
+test_cl('use constant overflowing float literal becomes Inf (not a crash)',
+    'use constant BIG => 1.1897314953572317e+4932;
+     my $v = BIG;
+     print "$v\n";',
+    "Inf\n");
