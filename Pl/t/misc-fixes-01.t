@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 33;
+plan tests => 36;
 
 sub run_cl {
     my ($code) = @_;
@@ -266,3 +266,30 @@ test_cl('use Config qw/%Config/ in a non-main package binds %Config',
      package main;
      print Foo::kind(), "\n";',
     "HASH\n");
+
+# ── mro: require mro + C3 get_linear_isa (C3-only shim) ───────────────────
+# require mro in expression context used to misparse to (p-require (pl-mro))
+# and crash; lib/mro.pm provides C3 get_linear_isa. See docs/mro-plan.md.
+test_cl('require mro in expression context loads (no crash)',
+    'my $ok = (1 && require mro) ? "yes" : "no";
+     print "$ok\n";',
+    "yes\n");
+
+test_cl('mro::get_linear_isa returns C3 order for a diamond',
+    'package A; our @ISA=();
+     package B; our @ISA=("A");
+     package C; our @ISA=("A");
+     package D; our @ISA=("B","C");
+     package main;
+     require mro;
+     print "@{mro::get_linear_isa(q(D))}\n";',
+    "D B C A\n");
+
+test_cl('\\&mro::get_linear_isa is a usable coderef',
+    'package P; our @ISA=();
+     package Q; our @ISA=("P");
+     package main;
+     require mro;
+     my $code = \\&mro::get_linear_isa;
+     print "@{$code->(q(Q))}\n";',
+    "Q P\n");

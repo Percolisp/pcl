@@ -815,3 +815,46 @@ compatibility for invalid Perl input".
 
 **NOT covered here (still fix targets):** arylen magic (`\$#array`, freed-array length,
 `arylen_p`) and the `map +(LIST)` unary-plus parse bug — see `docs/sweep-bug-catalog.md`.
+
+---
+
+## `mro` pragma — DFS default, ordering switch, and full API
+
+**Perl behaviour:** `mro` selects a class's method resolution order. Perl's
+**default is DFS** (depth-first); `use mro 'c3'` switches to C3. The pragma also
+exposes an introspection/maintenance API: `mro::get_linear_isa($class[,$type])`,
+`mro::get_mro`, `mro::set_mro`, `mro::get_isarev`, `mro::is_universal`,
+`mro::invalidate_all_method_caches`, plus the `next::method` / `next::can` /
+`maybe::next::method` family.
+
+**PCL behaviour:** PCL **always uses C3** method resolution (CLOS
+`class-precedence-list`), with no way to switch to DFS. The `mro` pragma's
+DFS default, the ability to choose ordering, and most of the introspection API are
+not emulated. For the diamond `D → (B,C) → A`, `mro::get_linear_isa('D')` would
+yield C3 order `D B C A`, where stock Perl's *default* is DFS `D B A C`.
+
+**Rationale:** PCL's whole object system is CLOS-backed and C3 is what CLOS gives
+us; emulating Perl's DFS default (and a per-class switchable order) would mean
+re-deriving linearization outside CLOS for no practical gain. Real consumers that
+take `\&mro::get_linear_isa` typically don't depend on the exact order — e.g.
+`Test2::Util::HashBase` comments *"these are not strictly equivalent, but for our
+use we don't care about order."* This is **brute force and ignorance, by design**:
+use C3 everywhere and revisit only if a real module is shown to depend on DFS
+order or the wider API.
+
+**What IS / will be provided (minimal, C3-only):** so that `require mro` /
+`use mro` and `\&mro::get_linear_isa` don't crash at load (they currently do —
+`require mro` even mis-parses), PCL ships a minimal C3-only provider. Anything
+beyond `get_linear_isa` (DFS ordering, `set_mro`/`get_mro`, `next::method`, …) is
+out of scope until needed. Full design + tiers: `docs/mro-plan.md`.
+
+**Affected tests:** any module that `require mro` / `use mro` (Test2 stack via
+`Test2::Util::HashBase`); a dedicated `perl-tests/mro.t` if present.
+
+> **Revisit if it becomes a problem:** this is a deliberate, provisional
+> simplification, not a closed decision. If C3-only (or the missing `mro` API /
+> DFS ordering) is ever shown to actually break a real module's *behaviour* — not
+> merely produce a different-looking order — we will reconsider and implement the
+> needed pieces per `docs/mro-plan.md` (DFS ordering, `set_mro`/`get_mro`,
+> `next::method`, …). The "brute force C3" stance holds only until a concrete case
+> proves it insufficient.

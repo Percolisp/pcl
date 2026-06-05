@@ -1112,6 +1112,31 @@ sub gen_funcall {
     return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" nil)";
   }
 
+  # Special handling: require BAREWORD (module name) in expression context.
+  # Statement-level `require Foo;` is handled in Parser.pm, but in expression
+  # context (e.g. `$] >= 5.010 && require mro`) the bareword reaches here and
+  # would otherwise be emitted as a function call (require (pl-mro)).  Detect a
+  # single bareword/qualified module-name argument and load it by name.
+  if ($func_name eq 'require' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    my $mod;
+    if (ref($arg_node) eq 'PPI::Token::Word') {
+      $mod = $arg_node->content;
+    }
+    # Bareword wrapped in a 0-arg funcall node (mro -> funcall(Word 'mro')).
+    elsif ($self->expr_o->is_internal_node_type($arg_node)
+           && $arg_node->{type} eq 'funcall') {
+      my $ak = $self->expr_o->get_node_children($kids->[1]);
+      if (@$ak == 1) {
+        my $w = $self->expr_o->get_a_node($ak->[0]);
+        $mod = $w->content if ref($w) eq 'PPI::Token::Word';
+      }
+    }
+    if (defined $mod && $mod =~ /^\w+(?:::\w+)*$/) {
+      return qq{(p-require "$mod")};
+    }
+  }
+
   # Special handling for next/last/redo/goto with label argument
   if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo'
        || $func_name eq 'goto') && @$kids == 2) {
