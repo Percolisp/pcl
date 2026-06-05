@@ -5866,11 +5866,11 @@ sub _parse_use_import_list {
 
   for my $child ($stmt->schildren) {
     if ($child->isa('PPI::Token::QuoteLike::Words')) {
-      # qw(foo bar baz)
-      my $content = $child->content;
-      $content =~ s/^qw\s*[\(\[\{<]//;
-      $content =~ s/[\)\]\}>]$//;
-      push @imports, split /\s+/, $content;
+      # qw(foo bar baz) — use PPI's literal() so ALL delimiters work
+      # (qw/.../, qw!...!, qw,..., not just brackets). The old manual strip
+      # only handled ([{< and silently passed e.g. qw/%Config/ through as the
+      # literal token "qw/%Config/", breaking `use Config qw/%Config/`.
+      push @imports, $child->literal;
     }
     elsif ($child->isa('PPI::Structure::List')) {
       # ('foo', 'bar') import list

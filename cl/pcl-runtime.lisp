@@ -7454,10 +7454,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when from-sym
       (let ((name (unbox sym-name)))
         (cond
-          ;; Variable sigil: use shadowing-import (variable bindings)
+          ;; Variable sigil ($ @ %): the compiled code in TO-PKG already
+          ;; interned a package-local symbol for this name, so shadowing-import
+          ;; (which uninterns the conflicting local) would orphan that captured
+          ;; symbol (-> "#:%CONFIG unbound").  Mirror the function path: bind the
+          ;; already-interned local symbol to share FROM-SYM's value — the same
+          ;; box/hash/array container, so reads and in-place mutations alias.
           ((and (stringp name) (plusp (length name))
                 (member (char name 0) '(#\$ #\@ #\%)))
-           (shadowing-import from-sym to-pkg))
+           (let ((to-sym (intern cl-name to-pkg)))
+             (proclaim (list 'special to-sym))
+             (when (boundp from-sym)
+               (setf (symbol-value to-sym) (symbol-value from-sym)))))
           ;; Function: set fdefinition in TO-PKG so already-compiled
           ;; lambdas with an interned-but-unbound local symbol get the fn.
           ((fboundp from-sym)

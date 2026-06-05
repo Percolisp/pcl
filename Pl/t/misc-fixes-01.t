@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 33;
 
 sub run_cl {
     my ($code) = @_;
@@ -246,3 +246,23 @@ test_cl('use constant overflowing float literal becomes Inf (not a crash)',
      my $v = BIG;
      print "$v\n";',
     "Inf\n");
+
+# ── import list qw// with non-bracket delimiter ──────────────────────────
+# The qw// handler only stripped bracket delimiters ([{< — qw/.../ passed
+# through as the literal token "qw/sum/" so nothing imported.
+test_cl('use Module qw/.../ (slash delimiter) imports correctly',
+    'use List::Util qw/sum/;
+     print sum(1..5), "\n";',
+    "15\n");
+
+# ── import a %hash variable into a non-main package ──────────────────────
+# `use Config qw/%Config/` in package Foo used shadowing-import, which
+# orphaned the already-compiled package-local %Config symbol (#:%CONFIG
+# unbound). Now the local symbol shares the source value.
+test_cl('use Config qw/%Config/ in a non-main package binds %Config',
+    'package Foo;
+     use Config qw/%Config/;
+     sub kind { return ref(\\%Config); }
+     package main;
+     print Foo::kind(), "\n";',
+    "HASH\n");
