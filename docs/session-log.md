@@ -42,11 +42,18 @@ installer's lexicals (`$before`/`$after`/`$wrapped`). PCL's string `eval` runs i
 cannot capture outer lexicals (`FOO::$BEFORE` unbound) — the documented eval-lexical-capture
 limitation, not a quick fix.
 
-**Two separate bugs found, NOT fixed (noted for later):**
-- **Runtime `@ISA` → CLOS class never finalized**: `package Bar; our @ISA=("Foo"); Bar->can('m')`
-  crashes with `%CLASS-PRECEDENCE-LIST is unbound` — `p-can` reads `sb-mop:class-precedence-list`
-  directly without `finalize-inheritance` when `@ISA` was set at runtime (the method-call path *does*
-  finalize; `p-can`/the `isa` path at line ~9648 does not). Real fix target.
+**Follow-on fix (same session): `can()`/`isa()` and runtime `@ISA`.** `p-can` read
+`sb-mop:class-precedence-list` directly; a class whose `@ISA` was set at runtime
+(`our @ISA=("Foo")`) is never finalized → `UNBOUND-SLOT %CLASS-PRECEDENCE-LIST` crash
+(`Bar->can('m')`). And even finalized the CPL wouldn't reflect runtime `@ISA` (PCL emits
+CLOS classes with empty supers; all inheritance lives in `@ISA`). Fixed with a shared
+**`%pcl-isa-ancestry`** helper (linearize via `@ISA`, DFS + cycle/diamond guard, + implicit
+UNIVERSAL) — the same `@ISA` walk `p-method-call` already prefers. `p-can` resolves through it
+(own-package methods only, like dispatch); `p-isa` checks membership, dropping its fragile
+handler-case'd CLOS-CPL path. Verified vs perl incl. diamond + negatives. Gate 3256; sweep
+18044/786/69, sweep-diff 0/0. `misc-fixes-01.t` 64→67.
+
+**One bug still NOT fixed (noted for later):**
 - **`caller(0)` in list context returns only the package** (1 element, not the 4-list) — a
   `wantarray`-propagation gap for `(caller(0))[N]` slices; pre-existing (committed code identical),
   and file/line are documented non-support anyway.
