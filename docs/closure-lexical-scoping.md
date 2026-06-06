@@ -109,6 +109,48 @@ not `// []` when deferencing the result.
 **Result:** `closure.t` 38→42/50. `make_counter`, `bar(4)->()`, mutable closures all work.
 Remaining 8 failures = `for my $n (0..4) { sub { $n } }` (foreach variable capture = out-of-scope).
 
+## Fix 3: map/grep/sort block closures (DONE, Session 236c) — "Case A"
+
+Named-sub bodies get the `$x__lex__N` rename via `_with_declarations`, but
+`map`/`grep`/`sort` blocks take a *different* path — `parse_block_to_cl_string`
+collects the body into a temp section and flattens it to a string for an inline
+lambda — which never invoked the rename. So a block-local `my` captured by a
+nested sub was `defvar`'d (global), and `map { my $x=$_; sub {$x} } qw(a b c)`
+returned `"ccc"` instead of `"abc"`.
+
+`_begin_block_closure_scope` / `_end_block_closure_scope` (`Pl/Parser.pm`)
+reproduce the rename **directly in the string path** (the bucket-based
+`_emit_scoped_block` does not compose with string collection — the reason the
+session-235 attempt failed). For each block-local `my` captured by a nested anon
+sub, mint a fresh never-`defvar`'d `$x__lex__N`, populate the four maps
+codegen consults (`state_var_renames`, `_current_scope_new_renames`,
+`_current_scope_old_renames`, `_let_bound_vars`), and wrap the body in
+`(let (($x__lex__N …)) …)`. The block compiles to `(lambda ($_) …)` called once
+per element, so the `let` mints a fresh box per element ⇒ correct per-iteration
+capture. Strict no-op when no block-local `my` is closure-captured.
+
+Also fixed `_vars_referenced_in_closures`: it only scanned
+`PPI::Token::Symbol` nodes, so a var referenced **only via string
+interpolation/regex** inside the closure (`sub { "v=$x" }`) was missed and stayed
+shared. It now also scans interpolating quote/heredoc/regex tokens
+(`_vars_in_interpolated_text`); this corrects the same bug for *named-sub*
+closures too. Over-inclusion is safe (callers intersect with block-local `my`).
+
+**Unblocks:** functional closure-table modules (e.g. Safe::Isa's
+`$_isa`/`$_can`).
+
+### Status: per-iteration capture is now complete
+
+With Fix 3, **both** remaining cases work and `perl-tests/closure.t` passes
+**50/50** (0 skips):
+
+- `map`/`grep`/`sort { my $x=$_; sub {$x} }` — fixed here (Fix 3).
+- `for my $n (…) { sub {$n} }` / `foreach my $v (@a) { sub {$v} }` — the original
+  "Fix 2 remaining 8 failures" (foreach loop-variable capture). These were fixed
+  by later evolution of the rename machinery and verified working in session
+  236c (top-level and in-sub, C-style and list `foreach`, and capture via string
+  interpolation). No separate `pl-foreach` change turned out to be needed.
+
 ## Plan for Next Session: Unique Names for Subroutine `my` Vars (SUPERSEDED — DONE)
 
 ### The Fix

@@ -4,6 +4,35 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 236c (2026-06-06) — per-iteration closure capture in map/grep/sort ("Case A")
+
+Fixed the long-standing `map { my $x=$_; sub {$x} } qw(a b c)` → `"ccc"` bug (Perl: `"abc"`).
+Named-sub closures already got the `$x__lex__N` lexical-rename fix; map/grep/sort blocks took the
+`parse_block_to_cl_string` string-collection path that never invoked it, so a block-local `my`
+captured by a nested sub was `defvar`'d (one shared global). New `_begin_block_closure_scope`/
+`_end_block_closure_scope` (`Pl/Parser.pm`) reproduce the rename directly in that path (the
+bucket-based `_emit_scoped_block` doesn't compose with string collection — why the s235 attempt
+failed): mint a fresh `$x__lex__N`, populate the four maps codegen reads, wrap the body in a
+`let`. The block is a `(lambda ($_) …)` called once per element, so the `let` gives a fresh box
+per element ⇒ per-iteration capture. No-op when nothing is captured.
+
+Also fixed **`_vars_referenced_in_closures`**: it only scanned `PPI::Token::Symbol` nodes, so a var
+used **only via string interpolation** in the closure (`sub { "v=$x" }`) was missed → stayed
+shared (found while edge-testing: `"v=$x"` gave `"v=bv=b"`, multi-var `"$k:$v"` produced nothing).
+Now also scans interpolating quote/heredoc/regex tokens (`_vars_in_interpolated_text`); fixes the
+same class for named-sub closures too. Over-inclusion is safe (intersected with block-local `my`).
+
+Verified vs perl 5.40: interpolation, multi-var, grep/sort, plain blocks. **Gate 91 / 3262.**
+Sweep **18045 / 785 / 69 fully passing** (held), sweep-diff 0/0; closure.t still fully passing.
+`misc-fixes-01.t` 73→77. Doc: `docs/closure-lexical-scoping.md` (Fix 3). **Unblocks** Safe::Isa
+`$_isa`/`$_can`. **Surprise:** the foreach loop-variable case ("Case B", `for my $n (…){ sub {$n} }`)
+turned out to **already work** — verified top-level + in-sub, C-style + list foreach, and
+interpolation capture, all matching perl; `closure.t` is 50/50. So per-iteration closure capture is
+now **complete**; the stale "Case B TODO" in memory/REMAINING was corrected (no `pl-foreach` change
+needed).
+
+---
+
 ## Session 236b (2026-06-06) — JSON::PP survey: overload::import/unimport, constant array-index, module-load pkg leak
 
 Continued the no-XS CPAN survey ([[project_cpan_module_survey]]) onto **JSON::PP** (pure-Perl,
