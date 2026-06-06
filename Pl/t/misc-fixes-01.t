@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 80;
+plan tests => 83;
 
 sub run_cl {
     my ($code) = @_;
@@ -613,3 +613,19 @@ test_cl('builtin::created_as_number/created_as_string proxy via value type',
            (builtin::created_as_string("hi") ? "S":"-"),
            (builtin::created_as_number("hi") ? "N":"-"), "\n");',
     "NS-\n");
+
+# --- ${ EXPR } block dereference in string interpolation (Sub::Quote) ---
+# ${$ref} derefs as a scalar; ${\ EXPR} is the "interpolate an expression"
+# idiom; ${N} is the numbered capture var $N. Were emitting SCALAR(0x..)/
+# REF(0x..)/literal N respectively.
+test_cl('${$ref} scalar-deref in interpolation',
+    'my $r = \"hello"; print "v=${$r}\n";',
+    "v=hello\n");
+
+test_cl('${\ EXPR} expression-interpolation idiom',
+    'my @a = (10,20); print "j=${\ join(q{,},@a)} s=${\ (1+2)}\n";',
+    "j=10,20 s=3\n");
+
+test_cl('${N} numbered capture var in interpolation',
+    'my $s = "abc"; $s =~ /(b)(c)/; print "c=${1}${2}\n";',
+    "c=bc\n");

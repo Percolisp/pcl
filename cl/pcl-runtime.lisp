@@ -7758,9 +7758,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
   (let* ((arr (apply #'%p-collect-list items))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
+    ;; $_ must be a stable box so \$_ aliases consistently within an iteration
+    ;; ([perl #78194]). Array/ref elements are already boxes; a literal-scalar
+    ;; element (from the (fn a b c) form) is raw — box it once per iteration.
     (loop for item across arr
-          when (p-true-p (let ((*wantarray* nil)) (funcall fn item)))
-          do (vector-push-extend item result))
+          for slot = (if (p-box-p item) item (make-p-box item))
+          when (p-true-p (let ((*wantarray* nil)) (funcall fn slot)))
+          do (vector-push-extend slot result))
     result))
 
 (defun p-map (fn &rest items)
@@ -7771,7 +7775,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let* ((arr (apply #'%p-collect-list items))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     (loop for item across arr
-          do (let ((r (let ((*wantarray* t)) (funcall fn item))))
+          for slot = (if (p-box-p item) item (make-p-box item))  ; stable $_ box, [perl #78194]
+          do (let ((r (let ((*wantarray* t)) (funcall fn slot))))
                (cond
                  ((and (vectorp r) (not (stringp r)))
                   (loop for e across r do (vector-push-extend e result)))
@@ -7818,7 +7823,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                    (result (if (typep raw 'sequence)
                                (copy-seq raw)
                                (make-array 0 :adjustable t :fill-pointer 0))))
-              (stable-sort result (lambda (a b) (< (to-number (funcall fn a b)) 0))))
+              ;; Box raw literal elements so \$a/\$b alias stably ([perl #78194]).
+              (stable-sort result (lambda (a b)
+                                    (< (to-number
+                                        (funcall fn
+                                                 (if (p-box-p a) a (make-p-box a))
+                                                 (if (p-box-p b) b (make-p-box b))))
+                                       0))))
             ;; No comparator: flatten all args and sort lexically (stable)
             (let* ((raw (apply #'%p-collect-list args))
                    (result (if (typep raw 'sequence)

@@ -484,8 +484,22 @@ sub parse_braced_expression {
     return ($expr_id, $i);
   }
 
-  # Complex expression (e.g., ${$ref}) — parse via PPI but keep doc alive
-  my $doc = PPI::Document->new(\$expr_str);
+  # ${1}, ${2}, ... — numbered capture variables ($1, $2). These are Magic
+  # tokens in PPI, not Symbols; PCL doesn't treat bare ${N} as $N otherwise.
+  if ($expr_str =~ /^\d+$/) {
+    my $sym = PPI::Token::Magic->new('$' . $expr_str);
+    my $expr_id = $parser->make_node($sym);
+    return ($expr_id, $i);
+  }
+
+  # Complex expression — a scalar dereference. ${$ref}, ${\ EXPR} (the
+  # "interpolate an arbitrary expression" idiom), ${ [...]->[0] }, etc. all
+  # mean: evaluate the block to a reference and dereference it as a scalar.
+  # Parse the FULL ${ ... } text so the normal scalar-deref pipeline (p-cast-$)
+  # handles it — parsing just the inner EXPR would interpolate the ref itself
+  # (yielding "REF(0x..)"/"SCALAR(0x..)") instead of its referent.
+  my $deref_str = '${' . $expr_str . '}';
+  my $doc = PPI::Document->new(\$deref_str);
   $self->{_ppi_docs} //= [];
   push @{$self->{_ppi_docs}}, $doc;  # prevent GC
   my @stmts = $doc->children();
