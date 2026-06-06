@@ -8546,6 +8546,75 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (declare (ignore ref))
   "")
 
+;;; ------------------------------------------------------------
+;;; builtin:: namespace (core pragma, Perl 5.36+; user is on 5.40)
+;;; ------------------------------------------------------------
+;;; Perl's `builtin` functions are always available without `use`, so they live
+;;; in the runtime (a generated `builtin::is_bool(...)` call compiles to a direct
+;;; BUILTIN::PL-IS_BOOL form that must resolve).  We provide the functions PCL
+;;; can implement faithfully and register them in *p-declared-subs* so
+;;; `defined &builtin::NAME` reports true like real Perl.
+;;;
+;;; DELIBERATELY ABSENT: created_as_number / created_as_string (and is_bool's
+;;; precision) depend on per-SV IOK/NOK/POK/bool flags PCL's box model does not
+;;; track — the same SV-flags limitation as JSON number encoding.  Leaving
+;;; created_as_* undefined makes `defined &builtin::created_as_number` false, so
+;;; consumers (e.g. Sub::Quote) degrade to their flag-free fallback path.  is_bool
+;;; is provided but best-effort: it always returns false ("not a tracked bool"),
+;;; which is the safe answer (a boolean is still an ordinary scalar).
+(defun %p-builtin-blessed (x)
+  "builtin::blessed — class name of a blessed ref, else undef."
+  (let ((r (p-ref x)))
+    (if (or (string= r "")
+            (member r '("HASH" "ARRAY" "CODE" "SCALAR" "REF" "GLOB" "LVALUE" "Regexp")
+                    :test #'string=))
+        *p-undef*
+        r)))
+
+(defun %p-builtin-refaddr (x)
+  "builtin::refaddr — integer address of the referent, else undef."
+  (if (string= (p-ref x) "") *p-undef* (object-address (unbox x))))
+
+(defun %p-builtin-reftype (x)
+  "builtin::reftype — underlying ref type, else undef (not empty string)."
+  (let ((rt (p-reftype x))) (if (string= rt "") *p-undef* rt)))
+
+(defun %p-builtin-trim (s)
+  "builtin::trim — strip leading/trailing ASCII whitespace."
+  (string-trim '(#\Space #\Tab #\Newline #\Return #\Page) (to-string s)))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (find-package "BUILTIN")
+    (make-package "BUILTIN" :use '(:cl :pcl))))
+
+(eval-when (:load-toplevel :execute)
+  (flet ((def (name fn)
+           (let ((sym (intern (concatenate 'string "PL-" name) "BUILTIN")))
+             (setf (symbol-function sym) fn)
+             (setf (gethash sym *p-declared-subs*) :defined))))
+    (def "TRUE"     (lambda (&rest a) (declare (ignore a)) (make-p-box 1)))
+    (def "FALSE"    (lambda (&rest a) (declare (ignore a)) (make-p-box "")))
+    (def "IS_BOOL"  (lambda (&rest a) (declare (ignore a)) (make-p-box "")))
+    (def "WEAKEN"   (lambda (r) (p-weaken r)))
+    (def "UNWEAKEN" (lambda (r) (declare (ignore r)) *p-undef*))
+    (def "IS_WEAK"  (lambda (r) (p-isweak r)))
+    (def "BLESSED"  #'%p-builtin-blessed)
+    (def "REFADDR"  #'%p-builtin-refaddr)
+    (def "REFTYPE"  #'%p-builtin-reftype)
+    (def "CEIL"     (lambda (x) (values (ceiling (to-number x)))))
+    (def "FLOOR"    (lambda (x) (values (floor (to-number x)))))
+    (def "TRIM"     #'%p-builtin-trim)
+    (def "STRINGIFY" (lambda (x) (to-string x)))
+    ;; created_as_number / created_as_string: Perl reports how the SV was
+    ;; created (IOK/NOK vs POK).  PCL can't see those flags, but its box stores a
+    ;; CL number for numeric scalars and a CL string for string scalars, which is
+    ;; a faithful-enough proxy: a value held as a number was created numeric, one
+    ;; held as a string was created as a string.  (Best-effort — a number that has
+    ;; been stringified in place may read as a string; acceptable for the inlining
+    ;; decisions these drive, e.g. Sub::Quote::quotify.)
+    (def "CREATED_AS_NUMBER" (lambda (x) (make-p-box (if (numberp (unbox x)) 1 ""))))
+    (def "CREATED_AS_STRING" (lambda (x) (make-p-box (if (stringp (unbox x)) 1 ""))))))
+
 ;;; ============================================================
 ;;; Typeglob Support
 ;;; ============================================================

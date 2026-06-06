@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 77;
+plan tests => 80;
 
 sub run_cl {
     my ($code) = @_;
@@ -588,3 +588,28 @@ test_cl('plain map/sort blocks unaffected by closure-capture handling',
      my @b = sort { $b <=> $a } (3,1,2);
      print join(",", @a), " ", join(",", @b), "\n";',
     "2,3,4 3,2,1\n");
+
+# --- builtin:: namespace (core pragma, Perl 5.36+) ---
+# Always available without `use` (a generated builtin::NAME(...) call must
+# resolve). PCL provides the flag-free functions faithfully.
+test_cl('builtin::true/false/ceil/floor/trim',
+    'no warnings;
+     printf "%s %s %d %d [%s]\n",
+       (builtin::true() ? "T":"F"), (builtin::false() ? "T":"F"),
+       builtin::ceil(2.1), builtin::floor(2.9), builtin::trim("  hi  ");',
+    "T F 3 2 [hi]\n");
+
+test_cl('builtin::blessed/reftype on a blessed ref vs a plain string',
+    'no warnings; my $o = bless {}, "Foo";
+     print builtin::blessed($o)//"u", " ", builtin::reftype($o)//"u", " ",
+           builtin::blessed("x")//"u", "\n";',
+    "Foo HASH u\n");
+
+# created_as_number/created_as_string use the box value type as a proxy for the
+# SV IOK/NOK/POK flags PCL cannot see.
+test_cl('builtin::created_as_number/created_as_string proxy via value type',
+    'no warnings;
+     print((builtin::created_as_number(42) ? "N":"-"),
+           (builtin::created_as_string("hi") ? "S":"-"),
+           (builtin::created_as_number("hi") ? "N":"-"), "\n");',
+    "NS-\n");
