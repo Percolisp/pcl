@@ -4,6 +4,31 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 236d (2026-06-06) — builtin:: core namespace (Perl 5.36+)
+
+Continued the no-XS CPAN survey ([[project_cpan_module_survey]]). Implemented the **`builtin::`
+core namespace** (always available without `use`; user is on perl 5.40). A generated
+`builtin::NAME(...)` call compiles to a direct `BUILTIN::PL-NAME` form that must resolve at load,
+so these live in `cl/pcl-runtime.lisp`. Created the `BUILTIN` package and registered the
+flag-free subset in `*p-declared-subs*` so `defined &builtin::NAME` reports true like real Perl:
+
+  `true`/`false`/`is_bool`, `weaken`/`unweaken`/`is_weak`, `blessed`/`refaddr`/`reftype`,
+  `ceil`/`floor`, `trim`, `stringify`, `created_as_number`/`created_as_string`.
+
+**Faithfulness boundary:** `created_as_*` and `is_bool` depend on per-SV IOK/NOK/POK/bool flags
+PCL's box model doesn't track (same SV-flags limitation as JSON::PP number encoding). `is_bool`
+returns false (the safe answer — a boolean is still an ordinary scalar). `created_as_*` use the
+box value type as a faithful-enough proxy (number-held ⇒ created numeric, string-held ⇒ created
+as string), good enough for the inlining decisions they drive (e.g. Sub::Quote::quotify); leaving
+`created_as_*` defined-and-best-effort rather than undefined so consumers don't have to special-case.
+`blessed`/`refaddr`/`reftype` reuse the existing `p-ref`/`p-reftype`/`object-address` runtime and
+return `undef` (not "") for non-refs / non-blessed, matching Scalar::Util-compatible semantics.
+
+Gate `misc-fixes-01.t` 77→80. Full sweep **18045 pass / 785 fail / 69 fully passing** (held),
+sweep-diff **0 new / 0 fixed**. Committed `4f02f9c`.
+
+---
+
 ## Session 236c (2026-06-06) — per-iteration closure capture in map/grep/sort ("Case A")
 
 Fixed the long-standing `map { my $x=$_; sub {$x} } qw(a b c)` → `"ccc"` bug (Perl: `"abc"`).
