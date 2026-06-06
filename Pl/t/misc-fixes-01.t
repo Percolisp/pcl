@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 55;
+plan tests => 64;
 
 sub run_cl {
     my ($code) = @_;
@@ -440,3 +440,57 @@ test_cl('user method receives flattened array arguments',
      my $o = C->new; my @a = (1,2,3);
      print $o->take(@a, 4), "\n";',
     "1,2,3,4\n");
+
+# --- caller() reports the original-case package of the calling frame ---
+# (was always "main"; broke modules like Class::Method::Modifiers / Exporter
+# that capture scalar(caller) at import time to find the target package).
+test_cl('caller() returns the calling frame package, not always main',
+    'package Foo; sub who { return scalar caller } package main;
+     print Foo::who(), "\n";',
+    "main\n");
+
+test_cl('caller() preserves single-segment package case',
+    'package Foo; sub who { scalar caller } package Foo::Bar; sub call_who { Foo::who() }
+     package main;
+     print Foo::Bar::call_who(), "\n";',
+    "Foo::Bar\n");
+
+# --- method dispatch on a scalar holding a class-name string ---
+# (a *boxed* string invocant used to dispatch against "main" instead of the
+# class the string names; only a literal "Foo"->m worked).
+test_cl('method call via class-name string in a scalar dispatches to that class',
+    'package Foo; sub greet { "hi from Foo" } package main;
+     my $cls = "Foo"; print $cls->greet(), "\n";',
+    "hi from Foo\n");
+
+test_cl('can() via class-name in a scalar finds the sub',
+    'package Foo; sub greet { "x" } package main;
+     my $cls = "Foo"; print((defined($cls->can("greet")) ? "Y" : "N"), "\n");',
+    "Y\n");
+
+# --- compound conditional-assignment on hash/array element places ---
+# (||=, &&=, //= used to box-set the *read* result, which is undef for an
+# absent key, so nothing was stored; nested places were not autovivified).
+test_cl('||= autovivifies and stores into an absent hash element',
+    'my %h; $h{a} ||= 5; print "$h{a}\n";',
+    "5\n");
+
+test_cl('||= on a nested hash element autovivifies the intermediate',
+    'my %h; my $into = "Foo"; my $name = "greet";
+     my $c = $h{$into}{$name} ||= { around => [] };
+     push @{ $c->{around} }, "x";
+     print ref($c), ":", scalar(@{$h{$into}{$name}{around}}), "\n";',
+    "HASH:1\n");
+
+test_cl('//= stores into an absent hash element when undef',
+    'my %h; $h{k} //= 7; $h{k} //= 99; print "$h{k}\n";',
+    "7\n");
+
+test_cl('&&= updates an existing element only when true',
+    'my %h = (a => 1, b => 0); $h{a} &&= 10; $h{b} &&= 20;
+     print "$h{a},$h{b}\n";',
+    "10,0\n");
+
+test_cl('||= on an absent array element stores the value',
+    'my @a; $a[2] ||= "z"; print "$a[2]\n";',
+    "z\n");

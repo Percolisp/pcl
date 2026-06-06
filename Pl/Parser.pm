@@ -5227,16 +5227,14 @@ sub _process_package_statement {
       #      the right order within the same call.
       my $saved_pkg_stack = [@{$self->environment->package_stack}];
 
-      my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' ||
-                    lc($pkg_name) eq 'error' || lc($pkg_name) eq 'method' ||
-                    lc($pkg_name) eq 'function')
-                   ? ":|$pkg_name|" : ":$pkg_name";
+      my $cl_pkg = $self->_cl_pkg_designator($pkg_name);
       my $cl_class = $self->_pkg_to_clos_class($pkg_name);
 
       $self->_emit(";;; inline package $pkg_name");
       $self->_emit("(p-defpackage $cl_pkg)");
       $self->_emit(";; CLOS class for MRO");
       $self->_emit("(defclass $cl_class () ())");
+      $self->_emit("(p-set-current-package $cl_pkg \"$pkg_name\")");
       $self->_emit("");
 
       $self->environment->push_package($pkg_name);
@@ -5264,7 +5262,7 @@ sub _process_package_statement {
       $self->environment->pop_package();
       # Switch back to previous package: open a new section with in-package in preamble
       my $prev_pkg = $self->environment->current_package();
-      my $cl_prev  = $prev_pkg =~ /::/ ? ":|$prev_pkg|" : ":$prev_pkg";
+      my $cl_prev  = $self->_cl_pkg_designator($prev_pkg);
       $self->_open_section($prev_pkg);
       $self->_cur_bucket('runtime');
       $self->_with_bucket('preamble', sub {
@@ -5272,6 +5270,8 @@ sub _process_package_statement {
         $self->_emit(";;; end package $pkg_name");
         $self->_emit("");
       });
+      # Restore the runtime current-package to the enclosing package.
+      $self->_emit("(p-set-current-package $cl_prev \"$prev_pkg\")");
     }
   }
   else {
@@ -5283,6 +5283,10 @@ sub _process_package_statement {
       # SBCL reader's package context and corrupt the section/bucket structure.
       # The environment's current_package is used by codegen (e.g. 1-arg bless).
       $self->environment->push_package($pkg_name);
+      # Reflect the package switch at runtime too (caller()/__PACKAGE__ case).
+      # The setf is restored on sub exit via p-sub's dynamic binding.
+      $self->_emit("(p-set-current-package " . $self->_cl_pkg_designator($pkg_name) .
+                   " \"$pkg_name\")");
     } else {
       $self->_emit_package_preamble($pkg_name);
       $self->environment->push_package($pkg_name);
@@ -5295,14 +5299,23 @@ sub _process_package_statement {
 # Emit CL package preamble (defpackage + in-package)
 # Uses pipe-quoting for package names with :: or that conflict with CL symbols
 # Also emits a CLOS class for MRO tracking (inheritance)
+# The CL package designator codegen uses for a Perl package name.  Names with
+# :: (or that collide with CL symbols) are pipe-quoted so the reader preserves
+# case; plain single-segment names are emitted bare and the reader upcases them.
+# Single source of truth — used wherever a (p-defpackage ...) / in-package form
+# or a runtime package reference is emitted.
+sub _cl_pkg_designator {
+  my ($self, $pkg_name) = @_;
+  return ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' || lc($pkg_name) eq 'error' ||
+          lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
+         ? ":|$pkg_name|" : ":$pkg_name";
+}
+
 sub _emit_package_preamble {
   my $self     = shift;
   my $pkg_name = shift;
 
-  # Pipe-quote if contains :: or conflicts with CL symbols
-  my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' || lc($pkg_name) eq 'error' ||
-                lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
-               ? ":|$pkg_name|" : ":$pkg_name";
+  my $cl_pkg = $self->_cl_pkg_designator($pkg_name);
 
   my $cl_class = $self->_pkg_to_clos_class($pkg_name);
 
@@ -5330,6 +5343,8 @@ sub _emit_package_preamble {
       $self->_emit("(defvar $pkg_b (make-p-box nil))");
       $self->_emit("");
     });
+    # Record original-case name + make current at runtime (caller()/__PACKAGE__).
+    $self->_emit("(p-set-current-package $cl_pkg \"$pkg_name\")");
     $self->_emit("");
     return;
   }
@@ -5353,6 +5368,10 @@ sub _emit_package_preamble {
     $self->_emit("(defvar \$b (make-p-box nil))");
     $self->_emit("");
   });
+  # Record original-case name + make current at runtime (caller()/__PACKAGE__).
+  # Emitted into the section's runtime bucket so it runs in execution order
+  # (cur_bucket was set to 'runtime' above), not hoisted with the preamble.
+  $self->_emit("(p-set-current-package $cl_pkg \"$pkg_name\")");
 }
 
 # Convert Perl package name to CLOS class name

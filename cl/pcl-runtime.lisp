@@ -142,6 +142,8 @@
    #:*p-in-list-assign-rhs*
    ;; Call depth tracking (for p-caller at top level)
    #:*pcl-sub-call-depth*
+   ;; Current/caller package tracking (for caller() package, __PACKAGE__-at-runtime)
+   #:*pcl-current-package* #:*pcl-caller-pkg-stack* #:p-set-current-package
    ;; END blocks
    #:*end-blocks*
    ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
@@ -200,6 +202,40 @@
 ;;; Tracks how many PCL user subs deep we are (0 = top level).
 ;;; Used by p-caller to distinguish "called from a sub" vs "top level".
 (defvar *pcl-sub-call-depth* 0)
+
+;;; Original-case Perl package name of the lexically-current code.  PCL upcases
+;;; single-segment package names into CL packages (Foo -> CL package "FOO"), so
+;;; the CL package object cannot recover the Perl case.  This dynamic variable
+;;; carries the original case: codegen sets it at each `package` statement, and
+;;; p-sub rebinds it per call to the sub's own package.  Read by p-caller.
+(defvar *pcl-current-package* "main")
+
+;;; Stack of caller packages.  At each p-sub entry the caller's
+;;; *pcl-current-package* is pushed; p-caller(N) reads (nth N ...) for the
+;;; package from which the Nth frame's sub was called.
+(defvar *pcl-caller-pkg-stack* nil)
+
+;;; Maps a CL package-name string (e.g. "FOO") to the original-case Perl name
+;;; (e.g. "Foo").  Populated by p-set-current-package as `package` statements run.
+(defvar *pcl-pkg-name-map* (make-hash-table :test 'equal))
+
+(defun p-set-current-package (pkg perl-name)
+  "Record the original-case PERL-NAME for CL package PKG (a package designator
+   as emitted by codegen) and make it the lexically-current package.  Called by
+   generated code at each `package` statement."
+  (let ((p (ignore-errors (find-package pkg))))
+    (when p
+      (setf (gethash (package-name p) *pcl-pkg-name-map*) perl-name)))
+  (setf *pcl-current-package* perl-name))
+
+(defun pcl-pkg-perl-name (cl-pkg)
+  "Best-effort original-case Perl name for a CL package object.  Uses the
+   *pcl-pkg-name-map* registry; falls back to the CL name (with MAIN -> main)."
+  (let ((n (and cl-pkg (package-name cl-pkg))))
+    (or (and n (gethash n *pcl-pkg-name-map*))
+        (cond ((null n) "main")
+              ((string= n "MAIN") "main")
+              (t n)))))
 
 ;;; p-defpackage: Create/update a Perl package namespace.
 ;;; Wraps defpackage in eval-when so it runs at compile time (needed so that
@@ -261,8 +297,12 @@
          (setf (gethash local-sym *p-declared-subs*) :defined)
          (setf (symbol-function local-sym)
                (lambda ,params
-                 (let ((*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
-                       (*pcl-caller-wantarray* *wantarray*))
+                 (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package*
+                                                      *pcl-caller-pkg-stack*))
+                        (*pcl-current-package* (pcl-pkg-perl-name
+                                                (symbol-package ',name)))
+                        (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
+                        (*pcl-caller-wantarray* *wantarray*))
                    (catch :p-return
                      ,@body))))))))
 
@@ -3796,32 +3836,41 @@
   "Perl >>= (right-shift-assign)"
   `(box-set ,place (ash (truncate (to-number ,place)) (- (truncate (to-number ,value))))))
 
+;;; Compound conditional-assignment operators (&&=, ||=, //=).
+;;;
+;;; The store is delegated to p-setf rather than box-set on the read result.
+;;; box-set only works when the place already holds a shared box, but a hash/
+;;; array element that does not yet exist reads as *p-undef* (p-gethash returns
+;;; undef for absent keys, never a stored box), and a nested place needs its
+;;; intermediate containers autovivified — exactly what p-setf already does for
+;;; every place shape.  We read the place once (plain rvalue read, which never
+;;; autovivifies) to test the condition; the RHS is evaluated only on the branch
+;;; that stores, matching Perl's short-circuit semantics.  (Subscript subforms
+;;; in `place` are evaluated twice — once for the read, once in p-setf — which is
+;;; harmless for the variable/constant subscripts that occur in practice.)
 (defmacro p-and-assign (place value)
-  "Perl &&= (and-assign) - assigns value only if place is true.
-   Returns the box (lvalue) to support chaining."
-  (let ((p (gensym "P")))
-    `(let ((,p ,place))
-       (when (p-true-p ,p)
-         (box-set ,p ,value))
-       ,p)))
+  "Perl &&= (and-assign) - assigns value only if place is true."
+  (let ((cur (gensym "CUR")))
+    `(let ((,cur ,place))
+       (if (p-true-p ,cur)
+           (p-setf ,place ,value)
+           ,cur))))
 
 (defmacro p-or-assign (place value)
-  "Perl ||= (or-assign) - assigns value only if place is false.
-   Returns the box (lvalue) to support chaining."
-  (let ((p (gensym "P")))
-    `(let ((,p ,place))
-       (unless (p-true-p ,p)
-         (box-set ,p ,value))
-       ,p)))
+  "Perl ||= (or-assign) - assigns value only if place is false."
+  (let ((cur (gensym "CUR")))
+    `(let ((,cur ,place))
+       (if (p-true-p ,cur)
+           ,cur
+           (p-setf ,place ,value)))))
 
 (defmacro p-//= (place value)
-  "Perl //= (defined-or-assign) - assigns value only if place is undef.
-   Returns the box (lvalue) to support chaining."
-  (let ((p (gensym "P")))
-    `(let ((,p ,place))
-       (unless (%pcl-definedp ,p)
-         (box-set ,p ,value))
-       ,p)))
+  "Perl //= (defined-or-assign) - assigns value only if place is undef."
+  (let ((cur (gensym "CUR")))
+    `(let ((,cur ,place))
+       (if (%pcl-definedp ,cur)
+           ,cur
+           (p-setf ,place ,value)))))
 
 ;;; ============================================================
 ;;; Numeric Comparison
@@ -9040,7 +9089,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; This is the common case: 'run_tests() unless caller' at top level.
   (when (zerop *pcl-sub-call-depth*)
     (return-from p-caller nil))
-  (let ((frame-info nil)
+  ;; Package of the frame's caller comes from the dynamic caller stack pushed at
+  ;; each p-sub entry (the only source that preserves Perl package case).
+  (let ((lvl (if (p-box-p level) (truncate (to-number level)) level)))
+    (when (>= lvl (length *pcl-caller-pkg-stack*))
+      (return-from p-caller nil))
+    (setf level lvl))
+  (let ((caller-package (nth level *pcl-caller-pkg-stack*))
+        (frame-info nil)
         (current-level 0)
         (target-level (+ level 2)))  ; Skip p-caller itself and its caller
     ;; Walk the backtrace to find the target frame
@@ -9051,7 +9107,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                 (name (sb-di:debug-fun-name debug-fun))
                 (code-loc (sb-di:frame-code-location frame)))
            (setf frame-info
-                 (list "main"  ; Package (simplified - always "main" for now)
+                 (list caller-package  ; Package of the calling frame (from stack)
                        (or (ignore-errors
                              (sb-di:debug-source-namestring
                               (sb-di:code-location-debug-source code-loc)))
@@ -9065,12 +9121,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (incf current-level)
        ;; Return nil to continue, non-nil would stop
        nil))
-    ;; Return results
-    (if frame-info
-        (if (eq *wantarray* t)
-            (values-list frame-info)
-            (first frame-info))  ; Scalar context: just package
-        nil)))  ; Past end of stack
+    ;; The package always comes from the caller stack (above); if the backtrace
+    ;; walk couldn't locate a matching frame for filename/line/subname, still
+    ;; report the package with placeholder location info.
+    (unless frame-info
+      (setf frame-info (list caller-package "-" 0 "(unknown)")))
+    (if (eq *wantarray* t)
+        (values-list frame-info)
+        (first frame-info))))  ; Scalar context: just package
 
 (defun p-prototype (&optional ref)
   "Perl prototype() - returns the prototype string of a function, or undef.
@@ -9149,6 +9207,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              (t nil)))))
     (t nil)))
 
+(defun %pcl-invocant-class (invocant)
+  "The class name a method-call invocant denotes: a blessed object's class, or
+   a plain string (raw or in a scalar) treated as a class name — `my $c=\"Foo\";
+   $c->m` dispatches against package Foo, just like the literal `\"Foo\"->m`.
+   Shared by p-method-call, p-can and p-isa so every dispatch path agrees.
+   NOTE: deliberately distinct from p-get-class, which must keep reporting NIL
+   for a boxed plain string (overload/ref checks treat it as a value, not a class)."
+  (cond
+    ((stringp invocant) invocant)
+    ((hash-table-p invocant) (gethash :__class__ invocant))
+    ((p-box-p invocant)
+     (or (p-get-class invocant)
+         (let ((uv (unbox invocant)))
+           (when (stringp uv) uv))))
+    (t nil)))
+
 (defun p-resolve-invocant (name)
   "Resolve a bareword invocant for method calls.
    In Perl, Foo->bar() checks if sub Foo exists first:
@@ -9192,7 +9266,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                 (p-tie-proxy-p (p-box-value obj)))
                            (unbox (p-method-call (p-tie-proxy-tie-obj (p-box-value obj)) "FETCH"))
                            obj))
-         (raw-class (p-get-class resolved-obj))
+         (raw-class (%pcl-invocant-class resolved-obj))
          ;; Perl treats "" as "main" and "::" as "main::" in package/method contexts.
          ;; Leading "::" on a class name refers to the root stash (same as no prefix).
          (class-name (let ((c (or raw-class "")))
@@ -9563,11 +9637,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Returns the code reference if method exists, nil otherwise.
    Uses C3 MRO to check inheritance chain."
   (let* ((method-str (to-string method-name))
-         (class-name (cond
-                       ((stringp invocant) invocant)
-                       ((p-box-p invocant) (p-get-class invocant))
-                       ((hash-table-p invocant) (gethash :__class__ invocant))
-                       (t nil))))
+         (class-name (%pcl-invocant-class invocant)))
     (unless class-name
       (return-from p-can nil))
 
@@ -9604,11 +9674,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Uses C3 MRO to check inheritance chain.
    Returns t if invocant is-a class-name, nil otherwise."
   (let* ((check-class (to-string class-name))
-         (obj-class (cond
-                      ((stringp invocant) invocant)
-                      ((p-box-p invocant) (p-get-class invocant))
-                      ((hash-table-p invocant) (gethash :__class__ invocant))
-                      (t nil))))
+         (obj-class (%pcl-invocant-class invocant)))
     (unless obj-class
       (return-from p-isa nil))
 
