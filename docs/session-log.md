@@ -4,6 +4,55 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 236 (2026-06-06) — Class::Method::Modifiers survey: 3 general bugs (caller pkg, string-scalar dispatch, compound-assign autoviv)
+
+Continued the no-XS CPAN survey ([[project_cpan_module_survey]]), driving **Class::Method::Modifiers**
+(CMM). Three *general* PCL bugs found and fixed (commit on top of session 235's docs commit). Gate
+**91 files / 3253** green. Full sweep **18044 pass / 786 fail / 69 fully passing**; `sweep-diff`
+**0 new, 0 fixed**. New regression tests in `Pl/t/misc-fixes-01.t` (55→64).
+
+**Bugs fixed:**
+1. **`caller()` always reported package `"main"`** (`cl/pcl-runtime.lisp` + `Pl/Parser.pm`). Perl
+   modules that capture `scalar(caller)` at import time to discover the *target* package
+   (`Exporter`, CMM's `before`/`after`/`around`, …) were all misdirected to main. Fix: a dynamic
+   `*pcl-current-package*` (original-case Perl name, since PCL upcases single-segment names into CL
+   packages and the case is otherwise unrecoverable) set by codegen at each `package` statement via
+   new `p-set-current-package`; `p-sub` pushes the caller frame's package onto `*pcl-caller-pkg-stack*`
+   and rebinds current to its own package per call; `p-caller` reads `(nth level …)` of the stack.
+   Parser side folded the emission + the previously-triplicated cl-pkg ternary into one
+   `_cl_pkg_designator` helper / the `_emit_package_preamble` chokepoint.
+2. **Method dispatch on a class-name string in a scalar** (`my $c="Foo"; $c->m`/`->can`/`->isa`)
+   dispatched against `"main"` — a *boxed* string invocant fell through `p-get-class` to nil; only
+   the literal `"Foo"->m` worked. New shared helper **`%pcl-invocant-class`** used by `p-method-call`,
+   `p-can`, `p-isa` (blessed class, or a string scalar treated as a class name). **Deliberately NOT
+   folded into `p-get-class`** — that must keep returning nil for a boxed plain string so the
+   overload/ref checks during `bless` keep treating it as a value. (Regression caught mid-session:
+   broadening `p-get-class` broke subclass-inherited `""` overload because the `bless` guard's
+   `p-find-overload` then saw the boxed class-name string as itself overloaded.)
+3. **Compound conditional-assignment (`||= &&= //=`) broken for ALL hash/array element places**
+   (`cl/pcl-runtime.lisp`), not only nested ones: the macros `box-set` the *read* result, but an
+   absent key reads as `*p-undef*` (never a stored box) so nothing was stored, and nested places
+   weren't autovivified (`$CACHE{$a}{$b} ||= {...}` → undef). Fix: delegate the store to `p-setf`
+   (which already handles every place shape with autovivification); read the place once for the test;
+   RHS still evaluated only on the storing branch (short-circuit preserved).
+
+**CMM still blocked (documented hard limitation):** CMM builds the wrapped method via
+`eval "package $into; sub $name { ... \$before ... \$wrapped ... }"` whose body closes over the
+installer's lexicals (`$before`/`$after`/`$wrapped`). PCL's string `eval` runs in a subprocess and
+cannot capture outer lexicals (`FOO::$BEFORE` unbound) — the documented eval-lexical-capture
+limitation, not a quick fix.
+
+**Two separate bugs found, NOT fixed (noted for later):**
+- **Runtime `@ISA` → CLOS class never finalized**: `package Bar; our @ISA=("Foo"); Bar->can('m')`
+  crashes with `%CLASS-PRECEDENCE-LIST is unbound` — `p-can` reads `sb-mop:class-precedence-list`
+  directly without `finalize-inheritance` when `@ISA` was set at runtime (the method-call path *does*
+  finalize; `p-can`/the `isa` path at line ~9648 does not). Real fix target.
+- **`caller(0)` in list context returns only the package** (1 element, not the 4-list) — a
+  `wantarray`-propagation gap for `(caller(0))[N]` slices; pre-existing (committed code identical),
+  and file/line are documented non-support anyway.
+
+---
+
 ## Session 235 (2026-06-06) — Data::Dump works: 6 general bugs (truthiness, &foo @_, do{} semantics, method dispatch)
 
 Continued the no-XS CPAN survey ([[project_cpan_module_survey]]). Drove **Data::Dump**
