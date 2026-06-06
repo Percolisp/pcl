@@ -4,6 +4,39 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 236b (2026-06-06) — JSON::PP survey: overload::import/unimport, constant array-index, module-load pkg leak
+
+Continued the no-XS CPAN survey ([[project_cpan_module_survey]]) onto **JSON::PP** (pure-Perl,
+core). Three more general bugs fixed; JSON::PP now round-trips. Gate **91 / 3260**. Sweep
+**18045 pass / 785 fail / 69 fully passing** (+1 pass), `sweep-diff` 0 new / 0 fixed.
+`misc-fixes-01.t` 67→73.
+
+1. **`overload::import` / `overload::unimport` were undefined** (`OVERLOAD::PL-IMPORT` /
+   `PL-UNIMPORT`). `JSON::PP::Boolean` — and any `overload->import(...)` consumer — calls them
+   directly. Implemented in the OVERLOAD package (`cl/pcl-runtime.lisp`): both act on the CALLER
+   package (`*pcl-current-package*`, from the session-236 caller work) after shifting the leading
+   `'overload'` class arg, mirroring real `overload.pm` (`my $package = caller; shift; …`).
+   `import` → `p-register-overloads`; `unimport` `remhash`-es the named ops (+ fallback).
+2. **Bareword constant as an ARRAY subscript** (`$self->[P_ALLOW_NONREF]`) was autoquoted to the
+   string `"P_ALLOW_NONREF"` → non-integer-index crash. Perl autoquotes only HASH `{bareword}`;
+   `[bareword]` is a numeric expression, so a bareword naming a known sub/constant is **called**,
+   and an unknown bareword is the string (no strict subs) → 0. New `_bareword_subscript_autoquotes`
+   (`Pl/PExpr.pm`) consults the environment (`has_prototype` / `declared_subs`) to decide, in both
+   `_parse_subscript_ix` and `_subscript_to_cl_str`; hash subscripts still always autoquote. The
+   two-pass `parse_file` makes this work for **forward-referenced and imported** constants too
+   (pass 1 registers all prototypes before pass-2 codegen) — verified.
+3. **Module load leaked its last `package`** into the caller: `p-load-module-cached` now
+   dynamically rebinds `*pcl-current-package*` around the load (the orig-case name map, a separate
+   global, still persists). Documented in `docs/caller-implementation.md`.
+
+**JSON::PP remaining gaps (NOT fixed):** (a) numbers encode as quoted strings — JSON::PP's
+`_looks_like_number` reads `B::svref_2object(\$v)->FLAGS` (`SVp_IOK|SVp_NOK` & `!SVp_POK`), the
+core `B` XS module's SV-flag introspection PCL doesn't implement (SV-flags limitation, same class
+as dualvar/utf8-flag). (b) hash key ordering differs (both valid JSON; only matters with
+`canonical`).
+
+---
+
 ## Session 236 (2026-06-06) — Class::Method::Modifiers survey: 3 general bugs (caller pkg, string-scalar dispatch, compound-assign autoviv)
 
 Continued the no-XS CPAN survey ([[project_cpan_module_survey]]), driving **Class::Method::Modifiers**

@@ -89,6 +89,25 @@ from `Pl/Parser.pm`.
   instead of the hard-coded `"main"`. Out-of-range levels return `nil` (Perl
   `undef`), matching the existing top-level behaviour.
 
+### Module loads must not leak their package
+
+`*pcl-current-package*` is set imperatively by `p-set-current-package` as each
+`package` statement executes. When a module is loaded mid-execution (`use`/
+`require` → `p-load-module-cached`), the loaded file runs its *own* `package`
+statements and would leave `*pcl-current-package*` pointing at that module's
+last package after the load returns — corrupting the caller's view (and any
+`caller()` / `overload::import` that reads it). So `p-load-module-cached`
+**dynamically rebinds `*pcl-current-package*` around the load**:
+
+```lisp
+(let ((*pcl-current-package* *pcl-current-package*))   ; restored after load
+  ... load the module ...)
+```
+
+The orig-case **name map** (`*pcl-pkg-name-map*`) is a separate global hash and
+is intentionally *not* rebound — the loaded module's package→case mappings must
+persist so `caller()` reports the right case for those packages later.
+
 ### Why a stack (not just one "caller package" variable)
 
 `caller(N)` needs the package of the frame *N* levels up. Pushing the caller's
@@ -127,7 +146,7 @@ package-statement branches:
 
 | File | Change |
 |------|--------|
-| `cl/pcl-runtime.lisp` | Add `*pcl-current-package*`, `*pcl-caller-pkg-stack*`, `*pcl-pkg-name-map*`, `p-set-current-package`, `pcl-pkg-perl-name` (+ exports). `p-sub` macro: 2 extra dynamic bindings. `p-caller`: package from stack instead of `"main"`, with a placeholder-frame fallback when the SBCL backtrace walk can't locate a frame. |
+| `cl/pcl-runtime.lisp` | Add `*pcl-current-package*`, `*pcl-caller-pkg-stack*`, `*pcl-pkg-name-map*`, `p-set-current-package`, `pcl-pkg-perl-name` (+ exports). `p-sub` macro: 2 extra dynamic bindings. `p-caller`: package from stack instead of `"main"`, with a placeholder-frame fallback when the SBCL backtrace walk can't locate a frame. `p-load-module-cached`: rebind `*pcl-current-package*` around the load so a loaded module's `package` statements don't leak into the caller. |
 | `Pl/Parser.pm` | New `_cl_pkg_designator` helper (de-duplicates the triplicated ternary). `_emit_package_preamble` + the package-statement branches emit `p-set-current-package`. |
 | `Pl/t/misc-fixes-01.t` | Regression tests (calling-frame package; single-segment case preserved). |
 
