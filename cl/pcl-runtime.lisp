@@ -9173,6 +9173,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
+  ;; Method argument lists flatten like any Perl call: $o->m(@a, %h) spreads its
+  ;; arrays/hashes.  The codegen passes raw @arrays straight through, so flatten
+  ;; here once — built-in methods (p-isa/p-can) take fixed scalar args, and user
+  ;; methods re-flatten their already-flat %_args harmlessly.
+  (setf args (coerce (p-flatten-args args) 'list))
+  ;; $obj->$coderef(@args): when the method slot holds a CODE ref (rather than a
+  ;; method-name string), Perl invokes it directly as $coderef->($obj, @args),
+  ;; bypassing package/MRO lookup.  Used by Safe::Isa ($_isa/$_can) and any
+  ;; `$obj->$method` where $method was set to \&some_sub.
+  (let ((m (unbox method)))
+    (when (p-box-p m) (setf m (p-box-value m)))  ; double-boxed blessed coderef
+    (when (functionp m)
+      (return-from p-method-call (apply m obj args))))
   (let* ((method-name (to-string method))
          ;; If obj is a box containing a tie-proxy, FETCH to get the invocant
          (resolved-obj (if (and (p-box-p obj)

@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 51;
+plan tests => 55;
 
 sub run_cl {
     my ($code) = @_;
@@ -407,3 +407,36 @@ test_cl('&CONSTANT (no parens) does not arity-error',
     'use constant { K => 7 };
      print "direct:", &K, " eval:", eval("&K"), "\n";',
     "direct:7 eval:7\n");
+
+# ── $obj->$coderef and method-arg flattening ─────────────────────────────
+# $obj->$coderef(@args) invokes the coderef directly as $coderef->($obj,@args),
+# bypassing method-name lookup (Safe::Isa $_isa/$_can idiom, dispatch tables).
+test_cl('method call via coderef invokes it with invocant first',
+    'package Foo; sub new { bless {}, shift }
+     sub greet { my ($self, $n) = @_; "hi $n from " . ref($self) }
+     package main;
+     my $o = Foo->new; my $m = \&Foo::greet;
+     print $o->$m("bob"), "\n";',
+    "hi bob from Foo\n");
+
+# $obj->$name(...) where $name is a string still dispatches by method name.
+test_cl('method call via string name dispatches by name',
+    'package Foo; sub new { bless {}, shift } sub hi { "HI:$_[1]" }
+     package main;
+     my $o = Foo->new; my $n = "hi";
+     print $o->$n("x"), "\n";',
+    "HI:x\n");
+
+# Method arguments flatten like any Perl call: $o->isa(@a) spreads @a.
+test_cl('method arguments flatten (array arg spread)',
+    'my $o = bless {}, "Foo"; my @a = ("Foo");
+     print(($o->isa(@a) ? "Y" : "N"), "\n");',
+    "Y\n");
+
+test_cl('user method receives flattened array arguments',
+    'package C; sub new { bless {}, shift }
+     sub take { my ($s, @rest) = @_; join(",", @rest) }
+     package main;
+     my $o = C->new; my @a = (1,2,3);
+     print $o->take(@a, 4), "\n";',
+    "1,2,3,4\n");
