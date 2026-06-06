@@ -27,6 +27,34 @@ return `undef` (not "") for non-refs / non-blessed, matching Scalar::Util-compat
 Gate `misc-fixes-01.t` 77→80. Full sweep **18045 pass / 785 fail / 69 fully passing** (held),
 sweep-diff **0 new / 0 fixed**. Committed `4f02f9c`.
 
+**Then Sub::Quote** (next no-XS module; installed, pure-Perl; core **Moo** dep). `quotify` worked
+immediately (validates the `builtin::created_as_*` path). `quote_sub`/`qsub` crashed: PCL's
+*execution* of Sub::Quote's `capture_unroll` (line 176, `qq{my ${_} = ${1}{${from}->{${\quotify
+$_}}};}`) produced garbage — `${1}`→literal `1`, `${\quotify $_}`→`REF(0x..)`. Root cause = string
+interpolation only handled `${identifier}`; the **`${ EXPR }` block-deref forms were all broken**:
+`${$ref}`→`SCALAR(0x..)`, `${\ EXPR}` (the "interpolate any expression" idiom)→`REF(0x..)`, `${N}`
+→literal digit. Fixed `parse_braced_expression` (`Pl/PExpr/StringInterpolation.pm`): route complex
+content through the FULL `${...}` scalar-deref pipeline (`p-cast-$`) instead of parsing only the
+inner EXPR, + a numbered-capture branch (`${N}`→Magic `$N`). **Sub::Quote now works** end-to-end
+(quote_sub/qsub/quotify + the deferred Sub::Defer path).
+
+That fix **exposed a latent grep/map/sort bug** (`[perl #78194]`): `$_`/`$a`/`$b` were bound to RAW
+(unboxed) literal-scalar elements (the `(fn a b c)` form), so `\$_` re-boxed each access and
+`\$_ == \$_` was false (array/ref elements were already boxes, so it only bit literal lists — which
+the test data `"${\''}"`=`''` now produces). Fixed in `p-grep`/`p-map`/`p-sort` (`cl/pcl-runtime.lisp`):
+box raw scalar elements once per iteration (no-op when already a box). grep.t/sort.t held at
+fully-passing; **concat2.t RT #132385 newly passes** (interp idiom). Gate misc-fixes-01.t 80→83,
+full Pl/t green. Committed `3a5a576`.
+
+**Sweep flakiness flagged by the user** (costing time). Quick diagnostic (commented out bop.t's
+`pack "P"`, line 636): confirmed **deterministic** abort sites under `--jobs 1` — stops at test 495
+(pack "P"); commenting it advances to 507 (next die = `formline`, line 702). `--jobs 1` identical on
+HEAD vs my changes (446/49); flapping is **parallel-only**. Two problems: (1) file-abort-on-die →
+PARTIAL (fix = per-statement `handler-case` wrapper, already planned); (2) parallel race (baseline
+records only 2 bop.t keys vs ~49 real → blessed from an early-abort run; SIMPLE-FILE-ERROR /
+cache / `pl2cl --server` contention). Full investigation QUEUED — see
+[[project_sweep_flakiness_investigation]]. bop.t edit reverted (diagnostic only).
+
 ---
 
 ## Session 236c (2026-06-06) — per-iteration closure capture in map/grep/sort ("Case A")
