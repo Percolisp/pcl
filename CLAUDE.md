@@ -205,6 +205,7 @@ Not relevant now:
 
 
 ### Semantic Deep-Dives (read before touching these areas)
+- `docs/caller-implementation.md` - How `caller()` reports the calling frame's **package** (dynamic `*pcl-current-package*` + per-sub caller stack; orig-case carried out-of-band since single-segment pkg names are upcased into CL packages). Cost analysis included.
 - `docs/declaration-ordering.md` - Perl vs CL compile/load phases, defvar/defun ordering, local/dynamic scoping
 - `docs/wantarray-context.md` - Wantarray/context system (work authorized 2026-05-29; previously deferred)
 - `docs/ppi-glob-disambiguation.md` - **HIGH PRIORITY BUG**: PPI misreads `< expr >` as glob, silently drops statements
