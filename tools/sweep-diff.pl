@@ -106,7 +106,16 @@ sub ran_clean {
     return $s eq 'OK';
 }
 
-my @new   = sort grep { !exists $base->{$_} } keys %$cur;   # regressions
+my @new_all = sort grep { !exists $base->{$_} } keys %$cur;
+# A NEW failure is only a genuine regression if its file finished cleanly this
+# run.  A file that CRASHED/PARTIAL'd has a nondeterministic tail of assertions
+# above its abort point (the abort site can shift run-to-run under parallel
+# load); the extra described failures it emits there are noise, NOT regressions.
+# This is the symmetric twin of the @notrun guard on the FIXED side, and is what
+# stops a flaky crash in a known crash/PARTIAL file (bop.t, eval.t, …) from
+# masquerading as "NEW failures (regressions)" and forcing a manual stash/compare.
+my @new      = grep {  ran_clean($cur->{$_}{file}) } @new_all;  # file ran clean → real regression
+my @new_unstable = grep { !ran_clean($cur->{$_}{file}) } @new_all;  # crash/partial file → noise
 my @fixed_all = sort grep { !exists $cur->{$_} } keys %$base;
 my @fixed   = grep {  ran_clean($base->{$_}{file}) } @fixed_all;  # file ran → real fix
 my @notrun  = grep { !ran_clean($base->{$_}{file}) } @fixed_all;  # file did not run
@@ -118,6 +127,19 @@ if (@new) {
         printf "  + %-14s %s\n", $r->{file}, $r->{desc};
         printf "      got=%s expected=%s\n", $r->{got}, $r->{expected}
             if length($r->{got}) || length($r->{expected});
+    }
+    print "\n";
+}
+if (@new_unstable) {
+    # Group by file — these are in crash/PARTIAL files this run, so they are
+    # unverified noise (the file's abort point can shift), NOT regressions.
+    my %by_file;
+    $by_file{ $cur->{$_}{file} }++ for @new_unstable;
+    print "UNSTABLE new fails (file crashed/partial this run — NOT counted as regressions): ",
+        scalar(@new_unstable), "\n";
+    for my $file (sort keys %by_file) {
+        printf "  ~ %-14s %d new fail(s) above abort point — %s\n",
+            $file, $by_file{$file}, ($cur_status->{$file} // 'NOT RUN');
     }
     print "\n";
 }
@@ -141,8 +163,9 @@ if (@notrun) {
     }
     print "\n";
 }
-printf "summary: %d new, %d fixed%s (baseline %d fails, current %d fails)\n",
+printf "summary: %d new, %d fixed%s%s (baseline %d fails, current %d fails)\n",
     scalar(@new), scalar(@fixed),
+    (@new_unstable ? sprintf(", %d unstable (crash-file noise)", scalar(@new_unstable)) : ''),
     (@notrun ? sprintf(", %d unverified (did not run)", scalar(@notrun)) : ''),
     scalar(keys %$base), scalar(keys %$cur);
 

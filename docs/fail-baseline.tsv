@@ -106,7 +106,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x120281075f)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x12033c0b4f)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -153,7 +153,6 @@ caller.t	46	value from (caller 0)[9] (bitmask) works in ${^WARNING_BITS}	''	'1'
 caller.t	25	warnings match caller (all)		
 caller.t	24	warnings match caller (no bits)		
 concat2.t	1	.= is not confused by changing utf8ness	'ÿ'	'ÿāā'
-concat2.t	2	RT #132385	'REF(0x120104a493)REF(0x120104a673)'	'AB'
 delete.t	56	[perl #30733] array delete didn't free returned element	'0'	== '1'
 delete.t	54	a b c also equivalent		
 delete.t	26	a b c equivalent		
@@ -192,7 +191,7 @@ hash.t	6	freed hash elems are not visible to DESTROY
 hash.t	13	magic keys	'a:x:b:y'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1203cf4b73)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1200c44803)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -209,14 +208,14 @@ local.t	255	Underscore 'Reading'
 local.t	275	localised sub via stash		
 local.t	278	localised sub via stash slice		
 magic.t	92		''	'$^X is ./perl, $0 is ./show-shebang '
-magic.t	155	${^LAST_FH} after another tell	undef	'GLOB(0x1204f79b43)'
-magic.t	154	${^LAST_FH} after tell	undef	'GLOB(0x1204f24b63)'
-magic.t	156	${^LAST_FH} referencing lexical coercible glob	undef	'REF(0x1204fc02c3)'
-magic.t	108	.. and /proc cmdline shows that	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/Fhd3GkoomP/DebkGhncPx.lisp")'	'hahaĀhoho'
+magic.t	155	${^LAST_FH} after another tell	undef	'GLOB(0x12010f6dd3)'
+magic.t	154	${^LAST_FH} after tell	undef	'GLOB(0x12010a1eb3)'
+magic.t	156	${^LAST_FH} referencing lexical coercible glob	undef	'REF(0x120113d4d3)'
+magic.t	108	.. and /proc cmdline shows that	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/u7RGewFcYz/zANnlAX2wk.lisp")'	'hahaĀhoho'
 magic.t	107	.. and the UTF-8 version is written	'sbcl'	'hahaĀhoho'
 magic.t	106	.. and the warning is about a wide character	undef	wide
-magic.t	103	/proc cmdline shows as expected (compare to UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/Fhd3GkoomP/DebkGhncPx.lisp")'	'é'
-magic.t	104	/proc cmdline shows as expected (compare to non-UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/Fhd3GkoomP/DebkGhncPx.lisp")'	'é'
+magic.t	103	/proc cmdline shows as expected (compare to UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/u7RGewFcYz/zANnlAX2wk.lisp")'	'é'
+magic.t	104	/proc cmdline shows as expected (compare to non-UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/u7RGewFcYz/zANnlAX2wk.lisp")'	'é'
 magic.t	134	Can assign to INT	'int'	'main::int'
 magic.t	130	Can assign to __WARN__	'__warn__'	'main::__warn__'
 magic.t	135	Can delete from INT	'int'	'main::int'
@@ -233,7 +232,7 @@ magic.t	75	referencing @` before $` etc. still saws off ampersands	''	'[f]'
 magic.t	105	warning after assignment of wide character	'0'	'1'
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x12047328d3)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1201b1ecb3)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF T)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -314,7 +313,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x12024335c3)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1202be7b53)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -325,8 +324,8 @@ pos.t	20	s///g setting pos through a defelem	undef	'1'
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'77343839459'	'0'
-qr.t	27	int upgraded to regexp	'77343843539'	'0'
+qr.t	25	double upgraded to regexp	'77352451331'	'0'
+qr.t	27	int upgraded to regexp	'77352455411'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -343,11 +342,11 @@ ref.t	182	PVBM is not a HASH ref
 ref.t	180	PVBM is not a SCALAR ref		
 ref.t	181	PVBM is not an ARRAY ref		
 ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1202cf76f3)'	'SCALAR(0x1202cf7733)'
+ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x12037e6223)'	'SCALAR(0x12037e6263)'
 ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
 ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x1204258923)'	^VSTRING\(0x[0-9a-f]+\)$
+ref.t	65	stringify for ref to vstring	'SCALAR(0x12010e2d53)'	^VSTRING\(0x[0-9a-f]+\)$
 signatures.t	940		'Undefined subroutine &main:: called at (eval 1) line 1. '	^Too few arguments for subroutine 'main::__ANON__'
 signatures.t	943	RT #130661	'Error while parsing arguments to DEFMACRO P-SUB:   too few elements in     ()   to satisfy lambda list     (NAME PARAMS &BODY BODY):   at least 2 expected, but got 0 at (eval 194) line 1. '	A signature parameter must start with
 signatures.t	944	RT #132141	'abc'	'Xbc'
