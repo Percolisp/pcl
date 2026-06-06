@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 64;
+plan tests => 67;
 
 sub run_cl {
     my ($code) = @_;
@@ -494,3 +494,27 @@ test_cl('&&= updates an existing element only when true',
 test_cl('||= on an absent array element stores the value',
     'my @a; $a[2] ||= "z"; print "$a[2]\n";',
     "z\n");
+
+# --- can()/isa() honour runtime @ISA without crashing on an unfinalized class ---
+# (p-can read the CLOS class-precedence-list directly; a class whose @ISA was set
+#  at runtime was never finalized -> UNBOUND-SLOT %CLASS-PRECEDENCE-LIST crash.
+#  Now both walk @ISA, like the method-call path already does.)
+test_cl('can() finds an inherited method via runtime @ISA',
+    'package Foo; sub greet { "hi" } package Bar; our @ISA = ("Foo");
+     package main; print((Bar->can("greet") ? "Y" : "N"), "\n");',
+    "Y\n");
+
+test_cl('isa() honours runtime @ISA',
+    'package Foo; sub new { bless {}, shift } package Bar; our @ISA = ("Foo");
+     package main; my $o = Bar->new;
+     print(($o->isa("Foo") ? "Y" : "N"), ($o->isa("Nope") ? "Y" : "N"), "\n");',
+    "YN\n");
+
+test_cl('can()/isa() walk a diamond @ISA hierarchy',
+    'package A; sub new { bless {}, shift } sub am { "A::am" }
+     package B; our @ISA=("A"); package C; our @ISA=("A"); sub cm { "c" }
+     package D; our @ISA=("B","C");
+     package main; my $o = D->new;
+     print(($o->isa("A")?"Y":"N"), ($o->can("cm")?"Y":"N"),
+           ($o->can("nope")?"Y":"N"), " ", $o->am(), "\n");',
+    "YYN A::am\n");

@@ -9631,43 +9631,47 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (t
        (error "Can't find class ~A for SUPER:: call" current-class)))))
 
+(defun %pcl-isa-ancestry (class-name)
+  "Linearized class ancestry for CLASS-NAME: the class itself, then its @ISA
+   chain (depth-first, cycle- and diamond-guarded), then the implicit UNIVERSAL
+   parent.  Walks @ISA rather than the CLOS class-precedence-list because PCL
+   records ALL inheritance in @ISA (CLOS classes are emitted with empty
+   superclasses) and @ISA reflects runtime/`local` mutation — and because
+   reading the CPL of a never-instantiated class touches an unfinalized class
+   (the UNBOUND-SLOT %CLASS-PRECEDENCE-LIST crash p-can used to hit).
+   Mirrors the @ISA walk p-method-call already prefers over CLOS."
+  (let ((out '()))
+    (labels ((walk (cls visited)
+               (unless (or (member cls visited :test #'equal)
+                           (member cls out :test #'equal))
+                 (setf out (nconc out (list cls)))
+                 (let* ((pkg (%pcl-find-package cls))
+                        (isa-sym (when pkg (find-symbol "@ISA" pkg)))
+                        (isa-val (when (and isa-sym (boundp isa-sym))
+                                   (symbol-value isa-sym))))
+                   (when (and isa-val (vectorp isa-val) (not (stringp isa-val)))
+                     (loop for parent across isa-val
+                           do (walk (to-string parent) (cons cls visited))))))))
+      (walk class-name nil)
+      (unless (member "UNIVERSAL" out :test #'equal)
+        (setf out (nconc out (list "UNIVERSAL")))))
+    out))
+
 ;;; can() and isa() methods - available on all objects (UNIVERSAL package)
 (defun p-can (invocant method-name)
-  "Perl can() - check if object/class can perform a method.
-   Returns the code reference if method exists, nil otherwise.
-   Uses C3 MRO to check inheritance chain."
+  "Perl can() - return the code reference for METHOD-NAME resolvable from the
+   invocant's class (walking @ISA + UNIVERSAL), or nil.  Only methods actually
+   defined in a class's own package count — inherited CL symbols (e.g. the pcl
+   built-ins a user package :uses) are ignored, matching p-method-call."
   (let* ((method-str (to-string method-name))
          (class-name (%pcl-invocant-class invocant)))
     (unless class-name
       (return-from p-can nil))
-
-    ;; Try to find CLOS class for MRO-based lookup
-    ;; Classes are defined in packages named after the Perl package (e.g., Dog::dog)
-    (let* ((clos-class-name (perl-pkg-to-clos-class class-name))
-           (pkg (find-package (string-upcase class-name)))
-           (clos-class (when pkg
-                         (find-class (intern (string-upcase clos-class-name) pkg) nil))))
-
-      (if clos-class
-          ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
-          (let ((mro (sb-mop:class-precedence-list clos-class)))
-            (dolist (cls mro)
-              (let* ((cls-sym-name (symbol-name (class-name cls)))
-                     (pkg-name (clos-class-to-pkg cls-sym-name))
-                     (pkg (find-package pkg-name)))
-                (when pkg
-                  (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg)))
-                    (when (and fn (fboundp fn))
-                      (return-from p-can (symbol-function fn)))))))
-            nil)  ; Not found in any class in MRO
-
-          ;; No CLOS class - fall back to single-class lookup
-          (let ((pkg (find-package (string-upcase class-name))))
-            (when pkg
-              (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg)))
-                (if (and fn (fboundp fn))
-                    (symbol-function fn)
-                    nil))))))))
+    (dolist (cls (%pcl-isa-ancestry class-name) nil)
+      (let* ((pkg (%pcl-find-package cls))
+             (fn  (when pkg (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg))))
+        (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+          (return-from p-can (symbol-function fn)))))))
 
 (defun p-isa (invocant class-name)
   "Perl isa() - check if object is-a class.
@@ -9685,50 +9689,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (when (and custom-isa (eq (symbol-package custom-isa) pkg) (fboundp custom-isa))
         (return-from p-isa (funcall custom-isa invocant check-class))))
 
-    ;; Exact match
-    (when (string-equal obj-class check-class)
-      (return-from p-isa t))
-
-    ;; Try to find CLOS class for MRO-based lookup
-    ;; Classes are defined in packages named after the Perl package (e.g., Dog::dog)
-    (let* ((clos-class-name (perl-pkg-to-clos-class obj-class))
-           (pkg (find-package (string-upcase obj-class)))
-           (clos-class (when pkg
-                         (find-class (intern (string-upcase clos-class-name) pkg) nil))))
-
-      (when clos-class
-        ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list
-        ;; The class may not be finalized yet (no instances created), so handle that.
-        (handler-case
-            (sb-mop:finalize-inheritance clos-class)
-          (error () nil))
-        (handler-case
-            (let ((mro (sb-mop:class-precedence-list clos-class)))
-              (dolist (cls mro)
-                (let* ((cls-sym-name (symbol-name (class-name cls)))
-                       (pkg-name (clos-class-to-pkg cls-sym-name)))
-                  (when (string-equal pkg-name check-class)
-                    (return-from p-isa t)))))
-          (unbound-slot () nil)))
-
-      ;; Fallback: walk runtime @ISA for dynamically modified inheritance
-      (labels ((walk-isa (class-str visited)
-                 (when (member class-str visited :test #'equal)
-                   (return-from walk-isa nil))
-                 (let* ((pkg-sym (find-package (string-upcase class-str)))
-                        (isa-sym (when pkg-sym
-                                   (find-symbol "@ISA" pkg-sym)))
-                        (isa-val (when (and isa-sym (boundp isa-sym))
-                                   (symbol-value isa-sym))))
-                   (when (and isa-val (vectorp isa-val))
-                     (loop for parent across isa-val
-                           for parent-str = (to-string parent)
-                           do (when (or (string-equal parent-str check-class)
-                                        (walk-isa parent-str (cons class-str visited)))
-                                (return-from p-isa t)))))))
-        (walk-isa obj-class nil))
-
-      nil)))
+    ;; A class is-a any class in its linearized @ISA ancestry (which includes
+    ;; itself and the implicit UNIVERSAL parent).  Uses the same @ISA walk as
+    ;; p-can / p-method-call — reflects runtime @ISA and never touches an
+    ;; unfinalized CLOS class.
+    (if (member check-class (%pcl-isa-ancestry obj-class) :test #'string-equal)
+        t
+        nil)))
 
 ;;; ============================================================
 ;;; Regex Support (using CL-PPCRE)
