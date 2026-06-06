@@ -1008,6 +1008,43 @@
                    ;; use overload operator handler registration
                    (setf (gethash (cons pkg op-str) *p-overload-table*) fn))))))
 
+;;; overload::import / overload::unimport — the runtime entry points behind
+;;; `overload->import(...)` and modules that call them directly (e.g.
+;;; JSON::PP::Boolean does `overload::unimport('overload', qw(0+ ++ -- fallback));
+;;; overload::import('overload', '0+' => ..., 'bool' => ..., '""' => ...)`).
+;;; Both act on the CALLER's package — which PCL tracks as *pcl-current-package*
+;;; — after shifting off the leading 'overload' class argument, exactly like
+;;; real overload.pm's `my $package = caller(); shift; ...`.
+;;; Defined in the OVERLOAD package so the generated OVERLOAD::PL-IMPORT /
+;;; OVERLOAD::PL-UNIMPORT calls resolve.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (find-package "OVERLOAD")
+    (make-package "OVERLOAD" :use '(:cl :pcl))))
+
+(defun %p-overload-import (&rest args)
+  "overload::import(class, op1 => h1, op2 => h2, ...): register handlers for the
+   caller's package.  ARGS[0] is the 'overload' class (dropped); the rest are the
+   op/handler pairs, registered via p-register-overloads."
+  (let ((pkg *pcl-current-package*))
+    (when (cdr args)
+      (p-register-overloads pkg (coerce (cdr args) 'vector))))
+  nil)
+
+(defun %p-overload-unimport (&rest args)
+  "overload::unimport(class, op1, op2, ...): remove the named overload handlers
+   from the caller's package.  ARGS[0] is the 'overload' class (dropped)."
+  (let ((pkg *pcl-current-package*))
+    (dolist (op (cdr args))
+      (let ((op-str (to-string op)))
+        (if (string= op-str "fallback")
+            (remhash pkg *p-overload-fallback*)
+            (remhash (cons pkg op-str) *p-overload-table*)))))
+  nil)
+
+(eval-when (:load-toplevel :execute)
+  (setf (symbol-function (intern "PL-IMPORT" "OVERLOAD"))   #'%p-overload-import)
+  (setf (symbol-function (intern "PL-UNIMPORT" "OVERLOAD")) #'%p-overload-unimport))
+
 (defun p-overload-strval (obj)
   "Return the non-overloaded string value of OBJ (the raw address form).
    Implements overload::StrVal($obj) — bypasses any '\"\"' overload."
@@ -7440,7 +7477,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-load-module-cached (source-path)
   "Load a Perl module with caching. Returns t on success."
   (p-ensure-cache-dir)
-  (let ((cache-path (p-compute-cache-path source-path (not *pcl-cache-fasl*))))
+  ;; A loaded module sets *pcl-current-package* via its own `package` statements;
+  ;; rebind here so those changes don't leak into the caller's notion of the
+  ;; current package (which caller()/overload::import read).  The orig-case name
+  ;; map it populates is a separate global hash and intentionally persists.
+  (let ((*pcl-current-package* *pcl-current-package*)
+        (cache-path (p-compute-cache-path source-path (not *pcl-cache-fasl*))))
     (cond
       ;; Cache hit
       ((p-cache-valid-p source-path cache-path)

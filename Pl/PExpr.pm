@@ -1019,7 +1019,7 @@ sub parse {
       my($node, $id) = $self->make_node_insert($type);
 
       my @ix    = $term->children();
-      my $ix_id = $self->_parse_subscript_ix(\@ix);
+      my $ix_id = $self->_parse_subscript_ix(\@ix, $self->is_arr_braces($term));
 
       # Add $pre as child 1
       $self->add_child_to_node($id, $pre_id);
@@ -1932,9 +1932,9 @@ sub handle_subcalls {
                    && $rest_ch[0]->content eq '->'
                    && ref($rest_ch[1]) eq 'PPI::Structure::Subscript') {
               my $sub = $rest_ch[1];
-              my $key_cl = _subscript_to_cl_str($sub, $self);
-              last unless defined $key_cl;
               my $start = $sub->start->content;
+              my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
+              last unless defined $key_cl;
               $body_cl = ($start eq '{')
                   ? "(p-gethash-deref $body_cl $key_cl)"
                   : "(p-aref-deref $body_cl $key_cl)";
@@ -2020,7 +2020,7 @@ sub handle_subcalls {
                    && ref($e->[$i + 3 + $deref_skip]) eq 'PPI::Structure::Subscript') {
               my $sub = $e->[$i + 3 + $deref_skip];
               my $start = $sub->start->content;
-              my $key_cl = _subscript_to_cl_str($sub, $self);
+              my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
               last unless defined $key_cl;
               if ($start eq '{') {
                 $body_cl = "(p-gethash-deref $body_cl $key_cl)";
@@ -3689,8 +3689,27 @@ sub get_node_children {
 # In $a[bar] / $h{bar}, PPI gives a Statement::Expression wrapping a Token::Word.
 # handle_subcalls would turn that into a funcall — wrong for barewords.
 # We detect the pattern and return a string-literal node instead.
+# Whether a lone bareword subscript should be autoquoted to a string.
+# HASH subscripts ($h{bar}) always autoquote.  ARRAY subscripts ($a[bar]) are
+# numeric expressions: Perl evaluates the bareword as a function/constant call
+# IF one of that name is known at this point (e.g. a use-constant index like
+# $self->[P_ALLOW_NONREF]); otherwise (no strict subs) an unknown bareword is
+# just the string "bar" → numeric 0.  So we autoquote unless it's a known
+# callable, mirroring Perl's compile-time decision.
+sub _bareword_subscript_autoquotes {
+  my ($self, $name, $is_array) = @_;
+  return 1 unless $is_array;                       # hash subscript: always quote
+  return 1 unless $self->has_parser;               # no environment: fall back to quote
+  my $env = $self->parser->environment;
+  return 0 if $env->has_prototype($name);          # constant or prototyped/known sub
+  for my $s (@{ $env->get_declared_subs || [] }) {
+    return 0 if defined $s->{name} && $s->{name} eq $name;
+  }
+  return 1;                                         # unknown bareword: string index
+}
+
 sub _subscript_to_cl_str {
-  my ($subscript, $self) = @_;
+  my ($subscript, $self, $is_array) = @_;
   my @kids = grep { !$_->isa('PPI::Token::Whitespace') } $subscript->children();
   my @inner = @kids;
   if (@inner == 1 && $inner[0]->isa('PPI::Statement::Expression')) {
@@ -3698,22 +3717,30 @@ sub _subscript_to_cl_str {
   }
   if (@inner == 1) {
     my $k = $inner[0];
-    return '"' . $k->content . '"' if ref($k) eq 'PPI::Token::Word';
-    return $k->content              if ref($k) eq 'PPI::Token::Number';
+    if (ref($k) eq 'PPI::Token::Word') {
+      return '"' . $k->content . '"'
+        if $self->_bareword_subscript_autoquotes($k->content, $is_array);
+      # else: known callable in an array subscript — evaluate it (fall through)
+    } elsif (ref($k) eq 'PPI::Token::Number') {
+      return $k->content;
+    }
   }
   return $self->parser->_parse_expression(\@inner, undef) if $self->has_parser;
   return undef;
 }
 
 sub _parse_subscript_ix {
-  my ($self, $ix) = @_;
+  my ($self, $ix, $is_array) = @_;
   my @sig = grep { !$_->isa('PPI::Token::Whitespace') } @$ix;
   if (@sig == 1 && $sig[0]->isa('PPI::Statement::Expression')) {
     my @ekids = grep { !$_->isa('PPI::Token::Whitespace') } $sig[0]->children();
     if (@ekids == 1 && ref($ekids[0]) eq 'PPI::Token::Word') {
-      my $word    = $ekids[0]->content();
-      my $str_tok = PPI::Token::Quote::Single->new("'$word'");
-      return $self->make_node($str_tok);
+      my $word = $ekids[0]->content();
+      if ($self->_bareword_subscript_autoquotes($word, $is_array)) {
+        my $str_tok = PPI::Token::Quote::Single->new("'$word'");
+        return $self->make_node($str_tok);
+      }
+      # else: known callable in an array subscript — parse as an expression below
     }
   }
   return $self->parse($ix);

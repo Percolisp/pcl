@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 67;
+plan tests => 73;
 
 sub run_cl {
     my ($code) = @_;
@@ -518,3 +518,45 @@ test_cl('can()/isa() walk a diamond @ISA hierarchy',
      print(($o->isa("A")?"Y":"N"), ($o->can("cm")?"Y":"N"),
            ($o->can("nope")?"Y":"N"), " ", $o->am(), "\n");',
     "YYN A::am\n");
+
+# --- bareword constant as an ARRAY subscript is evaluated, not autoquoted ---
+# (Perl autoquotes only HASH {bareword}; [bareword] is a numeric expression, so a
+#  use-constant index like $self->[P_FOO] must call the constant. Was quoted to
+#  "P_FOO" -> non-integer index crash. JSON::PP's array-backed objects need this.)
+test_cl('use-constant as array index is evaluated',
+    'use constant P_FOO => 7; my @a; $a[P_FOO] = "hi"; print "$a[P_FOO]\n";',
+    "hi\n");
+
+test_cl('use-constant as arrayref index is evaluated',
+    'use constant P_FOO => 7; my $r = []; $r->[P_FOO] = "yo"; print "$r->[P_FOO]\n";',
+    "yo\n");
+
+# Forward reference: the constant is used (in a sub) BEFORE its `use constant`.
+# The two-pass parse_file collects the prototype in pass 1, so the subscript in
+# pass 2 still knows P_FOO is a constant (not an autoquoted string).
+test_cl('forward-referenced constant array index resolves (two-pass)',
+    'sub set { my @a; $a[P_FOO] = "hi"; return $a[P_FOO]; }
+     use constant P_FOO => 3;
+     print set(), "\n";',
+    "hi\n");
+
+# An UNKNOWN bareword array index is the string "bar" (no strict subs) -> index 0,
+# so the element is defined; it must NOT be evaluated as an undefined sub call.
+test_cl('unknown bareword array index is a string (not an undefined sub call)',
+    'my @a = (10,20,30); my $x = $a[bar]; print defined($x) ? "ok" : "undef", "\n";',
+    "ok\n");
+
+# Hash subscripts still autoquote a bareword (must NOT be treated as a sub call).
+test_cl('hash bareword subscript still autoquotes (constant name not called)',
+    'use constant FOO => "xyz"; my %h = (FOO => 1); my $r = { FOO => 9 };
+     print "$h{FOO},$r->{FOO}\n";',
+    "1,9\n");
+
+# overload::import / overload::unimport install/remove for the caller package
+# (JSON::PP::Boolean drives these directly).
+test_cl('overload::import installs stringify for the caller package',
+    'package MyB; use overload ();
+     overload::import("overload", q("") => sub { ${$_[0]} ? "T" : "F" });
+     sub new { my $v = $_[1]; bless \$v, $_[0] }
+     package main; my $t = MyB->new(1); print "$t\n";',
+    "T\n");
