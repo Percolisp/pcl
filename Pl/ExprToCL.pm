@@ -931,6 +931,14 @@ sub gen_binary_op {
     } elsif ($left =~ /^\(p-cast-@ /) {
       # @$ref = (list): assign to a dereferenced array
       return "(p-array-deref-= $left $right)";
+    } elsif ($left =~ /^\(p-(?:gethash|aref) /) {
+      # Single-element store: $h{k} = ... / $a[i] = ...  (via p-setf).  This
+      # MUST precede the sigil regexes below: a package-qualified element form
+      # like (p-gethash |Foo::Bar|::%H "x") contains "::%" (or "::@" for arrays)
+      # which would otherwise be mis-detected as a whole %hash/@array LHS and
+      # routed to p-hash-= / p-array-= (which expect a bare symbol place and
+      # crash on the gethash/aref form).
+      return "(p-setf $left $right)";
     } elsif ($left =~ /(?:^|::)@/) {
       return "(p-array-= $left $right)";
     } elsif ($left =~ /(?:^|::)%/) {
@@ -1396,7 +1404,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $arr = $self->gen_node($arg_kids->[0]);
         my $idx = $self->gen_node($arg_kids->[1]);
-        $arr =~ s/^\$/\@/;
+        $arr =~ s/(^|::)\$/${1}\@/;
         return "(p-tied (p-aref-box $arr $idx))";
       }
     }
@@ -1406,7 +1414,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $hash = $self->gen_node($arg_kids->[0]);
         my $key  = $self->gen_node($arg_kids->[1]);
-        $hash =~ s/^\$/\%/;
+        $hash =~ s/(^|::)\$/${1}%/;
         return "(p-tied (p-gethash-box $hash $key))";
       }
     }
@@ -1423,7 +1431,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $arr = $self->gen_node($arg_kids->[0]);
         my $idx = $self->gen_node($arg_kids->[1]);
-        $arr =~ s/^\$/\@/;
+        $arr =~ s/(^|::)\$/${1}\@/;
         return "(p-pos (p-aref-box $arr $idx))";
       }
     }
@@ -1433,7 +1441,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $hash = $self->gen_node($arg_kids->[0]);
         my $key  = $self->gen_node($arg_kids->[1]);
-        $hash =~ s/^\$/\%/;
+        $hash =~ s/(^|::)\$/${1}%/;
         return "(p-pos (p-gethash-box $hash $key))";
       }
     }
@@ -1452,8 +1460,8 @@ sub gen_funcall {
         my $arr = $self->gen_node($arg_kids->[0]);
         # Convert $a to @a for array (Symbol or Magic like $_)
         if ((ref($arr_node) eq 'PPI::Token::Symbol'
-             || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /^\$/) {
-          $arr =~ s/^\$/\@/;
+             || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
+          $arr =~ s/(^|::)\$/${1}\@/;
         }
         my $idx = $self->gen_node($arg_kids->[1]);
         return "(p-delete-array $arr $idx)";
@@ -1468,8 +1476,8 @@ sub gen_funcall {
         my $hash = $self->gen_node($arg_kids->[0]);
         # Convert $h to %h for hash (Symbol or Magic like $_)
         if ((ref($hash_node) eq 'PPI::Token::Symbol'
-             || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /^\$/) {
-          $hash =~ s/^\$/\%/;
+             || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
+          $hash =~ s/(^|::)\$/${1}%/;
         }
         my $key = $self->gen_node($arg_kids->[1]);
         return "(p-delete $hash $key)";
@@ -1483,9 +1491,9 @@ sub gen_funcall {
       if (@$arg_kids >= 1) {
         my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $hash = $self->gen_node($arg_kids->[0]);
-        # Convert @ to % for hash access (@ is context sigil, % is container sigil)
-        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\@/) {
-          $hash =~ s/^\@/\%/;
+        # Convert @ to % for hash access (handle qualified names too).
+        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /(?:^|::)\@/) {
+          $hash =~ s/(^|::)\@/${1}%/;
         }
         my @keys;
         for my $i (1 .. $#$arg_kids) {
@@ -1529,7 +1537,7 @@ sub gen_funcall {
       my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
       if (@$arg_kids >= 1) {
         my $arr = $self->gen_node($arg_kids->[0]);
-        $arr =~ s/^\%/\@/;  # %arr -> @arr (KV sigil -> array container)
+        $arr =~ s/(^|::)\%/${1}\@/;  # %arr -> @arr (KV sigil -> array container)
         my @indices;
         for my $i (1 .. $#$arg_kids) {
           push @indices, $self->gen_node($arg_kids->[$i]);
@@ -1581,9 +1589,12 @@ sub gen_funcall {
           # Array access: exists $a[idx] -> (p-exists-array @arr idx)
           my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $arr = $self->gen_node($arg_kids->[0]);
+          # $a[i] -> @a : rewrite the scalar sigil to the array sigil, whether
+          # bare ($a -> @a) or package-qualified (Foo::$a / |Foo::Bar|::$a ->
+          # ...::@a). The `$` to rewrite is at the start or right after `::`.
           if ((ref($arr_node) eq 'PPI::Token::Symbol'
-               || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /^\$/) {
-            $arr =~ s/^\$/\@/;
+               || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
+            $arr =~ s/(^|::)\$/${1}\@/;
           }
           my $idx = $self->gen_node($arg_kids->[1]);
           return "(p-exists-array $arr $idx)";
@@ -1592,9 +1603,12 @@ sub gen_funcall {
           # Hash access: exists $h{key} -> (p-exists %h key)
           my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $hash = $self->gen_node($arg_kids->[0]);
+          # $h{k} -> %h : rewrite the scalar sigil to the hash sigil, whether
+          # bare ($h -> %h) or package-qualified (Foo::$h / |Foo::Bar|::$h ->
+          # ...::%h). The `$` to rewrite is at the start or right after `::`.
           if ((ref($hash_node) eq 'PPI::Token::Symbol'
-               || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /^\$/) {
-            $hash =~ s/^\$/\%/;
+               || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
+            $hash =~ s/(^|::)\$/${1}%/;
           }
           my $key = $self->gen_node($arg_kids->[1]);
           return "(p-exists $hash $key)";
@@ -2353,9 +2367,10 @@ sub gen_hash_slice {
 
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   my $hash = $self->gen_node($kids->[0]);
-  # Convert @ to % for hash access (@ is context sigil, % is container sigil)
-  if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /^\@/) {
-    $hash =~ s/^\@/\%/;
+  # Convert @ to % for hash access (@ is context sigil, % is container sigil),
+  # handling package-qualified names (Foo::@h / |Foo::Bar|::@h) too.
+  if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /(?:^|::)\@/) {
+    $hash =~ s/(^|::)\@/${1}%/;
   }
   my @keys;
   for my $i (1 .. $#$kids) {
@@ -2407,8 +2422,8 @@ sub gen_kv_array_slice {
   my $kids    = shift;
 
   my $arr = $self->gen_node($kids->[0]);
-  # %arr[...] uses @ sigil for the array variable in CL
-  $arr =~ s/^\%/\@/;
+  # %arr[...] uses @ sigil for the array variable in CL (handle qualified names).
+  $arr =~ s/(^|::)\%/${1}\@/;
   # %$ref[...] — $ref is a scalar holding an array ref; unbox to get the vector
   $arr = "(unbox $arr)" if $arr =~ /^\$/;
   my @indices;

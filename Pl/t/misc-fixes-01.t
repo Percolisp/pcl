@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 36;
+plan tests => 40;
 
 sub run_cl {
     my ($code) = @_;
@@ -293,3 +293,44 @@ test_cl('\\&mro::get_linear_isa is a usable coderef',
      my $code = \\&mro::get_linear_isa;
      print "@{$code->(q(Q))}\n";',
     "Q P\n");
+
+# ── package-qualified hash/array ELEMENT ops ─────────────────────────────
+# $Pkg::H{k}/$Pkg::A[i]: the qualified symbol contains "::%"/"::@" which the
+# assignment dispatch and the exists/defined/delete sigil-rewrites used to
+# mishandle (whole-hash p-hash-= on an element; wrong $-sigil container).
+test_cl('qualified hash element: assign/read/exists/defined/delete',
+    '$Pk::Q::H{k} = 7;
+     my @o;
+     push @o, $Pk::Q::H{k};
+     push @o, (exists $Pk::Q::H{k} ? 1 : 0);
+     push @o, (defined $Pk::Q::H{k} ? 1 : 0);
+     push @o, delete $Pk::Q::H{k};
+     push @o, (exists $Pk::Q::H{k} ? 1 : 0);
+     print "@o\n";',
+    "7 1 1 7 0\n");
+
+test_cl('qualified array element: assign/read/exists/delete',
+    '$Pk::Q::A[2] = "v";
+     my @o;
+     push @o, $Pk::Q::A[2];
+     push @o, (exists $Pk::Q::A[2] ? 1 : 0);
+     push @o, delete $Pk::Q::A[2];
+     print "@o\n";',
+    "v 1 v\n");
+
+# ── package-qualified hash/array SLICES ──────────────────────────────────
+# @Pkg::H{...} -> %Pkg::H and %Pkg::A[...] -> @Pkg::A sigil rewrites must
+# handle the "::"-qualified position, not just a leading sigil.
+test_cl('qualified hash slice and array slice read',
+    '%Pk::Q::H = (a=>1, b=>2, c=>3);
+     @Pk::Q::A = (10, 20, 30);
+     my @hs = @Pk::Q::H{qw(a c)};
+     my @as = @Pk::Q::A[0, 2];
+     print "@hs | @as\n";',
+    "1 3 | 10 30\n");
+
+test_cl('qualified delete hash slice',
+    '%Pk::Q::H = (a=>1, b=>2, c=>3);
+     my @d = delete @Pk::Q::H{qw(a b)};
+     print "@d | ", join(",", sort keys %Pk::Q::H), "\n";',
+    "1 2 | c\n");
