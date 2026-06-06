@@ -2037,9 +2037,31 @@ sub handle_subcalls {
             $lambda_node->{for_func} = $func_name;
             $lambda_node->{deref_skip} = $deref_skip;
             $self->add_child_to_node($top_id, $lambda_id);
+          } elsif ($func_name eq 'do') {
+            # do { } : emit an INLINE lambda (return_lambda=1) rather than a
+            # named defun.  A defun side-effect would be written into the output
+            # stream at the current position, which corrupts a surrounding p-if
+            # when the do{} sits in an elsif condition (the defun lands between
+            # the p-if branches).  Unlike parse_block_to_cl_string, the
+            # return_lambda path runs the block through _process_block, so the
+            # bare-if tail-return semantics (`do { 1 if $x }` returns the
+            # condition value when the modifier suppresses the expression) are
+            # preserved.  do{} is a plain 0-arg block (is_anon_sub=0).  The
+            # loop_transparent flag (5th arg) wraps the body in (progn ...) not
+            # (block nil ...), so an unlabeled last/next/redo inside the do{}
+            # escapes to the enclosing loop, matching Perl.
+            my $lambda_str =
+              $self->parser->parse_block_as_function($next, [], 0, 1, 1);
+            my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
+            $ref_node->{raw_lambda} = $lambda_str;
+            $self->add_child_to_node($top_id, $ref_id);
           } else {
-            # Parse block as a named function and get its name
-            my $block_func_name = $self->parser->parse_block_as_function($next, $params);
+            # Parse block as a named function and get its name.
+            # A &-prototype sub (e.g. try/catch) receives the block as an
+            # anonymous sub: it must accept call arguments via @_, since the
+            # caller may invoke it with args (Try::Tiny's catch passes $error).
+            my $block_func_name =
+              $self->parser->parse_block_as_function($next, $params, $has_block_proto);
 
             # Create a func_ref node that holds the function name
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
@@ -3277,6 +3299,27 @@ sub child_context {
             $cop = $child_node->content();
           }
           return LIST_CTX if defined($cop) && ($cop eq '..' || $cop eq '...');
+        }
+      }
+
+      # A sub declared with an explicit prototype evaluates the arguments that
+      # land in its slurpy (@/%) tail in LIST context — e.g. try (&;@) runs the
+      # trailing catch/finally blocks in list context, so Try::Tiny's catch
+      # (croak unless wantarray) is happy.  We act ONLY on the slurpy tail of a
+      # KNOWN prototype; unprototyped subs and $-proto positions (e.g.
+      # Test::More's is($$;$)) are left to inherit, matching Perl when the
+      # prototype isn't known to us — this keeps is(unpack(...), ...) scalar.
+      if ($func_name && $child_index >= 1 && $self->environment) {
+        my $proto = $self->environment->get_prototype($func_name);
+        if ($proto && $proto->{is_proto} && $proto->{params}) {
+          my @p = @{$proto->{params}};
+          my $slurpy_at;
+          for my $j (0 .. $#p) {
+            my $pt = $p[$j]{proto_type} // '';
+            if ($pt eq '@' || $pt eq '%') { $slurpy_at = $j; last; }
+          }
+          return LIST_CTX
+            if defined($slurpy_at) && ($child_index - 1) >= $slurpy_at;
         }
       }
     }

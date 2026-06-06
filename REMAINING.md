@@ -5,12 +5,14 @@ A reader-friendly overview of what PCL does and, more importantly, what it
 tests, see [`docs/not-supported.md`](docs/not-supported.md); this file is the
 short version.
 
-**Current status:** 91 PCL regression-test files (≈3168 tests), all passing.
+**Current status:** 91 PCL regression-test files (≈3244 tests), all passing.
 Against Perl's own test suite (`perl-tests/`, 106 files) PCL passes the large
-majority of individual tests (~95% of those it runs, 66 files passing
+majority of individual tests (~95% of those it runs, 69 files passing
 completely); remaining failures are dominated by the deliberate non-support
 items below plus a handful of open bugs tracked in
-[`docs/sweep-bug-catalog.md`](docs/sweep-bug-catalog.md).
+[`docs/sweep-bug-catalog.md`](docs/sweep-bug-catalog.md). Several pure-Perl CPAN
+modules now run unmodified end-to-end (e.g. `List::Util`, `Role::Tiny`,
+`Data::Dump`, and the core try/catch of `Try::Tiny`).
 
 ---
 
@@ -105,6 +107,16 @@ PCL loads only pure-Perl modules:
   GC) and **80-bit long double `D`** (SBCL has only 64-bit doubles).
 
 ### Niche syntax and introspection
+- **`mro` pragma — C3 only** — PCL's object system is CLOS-backed and always
+  resolves methods in **C3**. Perl's *default* DFS order, the ability to switch
+  ordering (`use mro 'c3'`/`'dfs'`), and most of the `mro::*` API
+  (`set_mro`/`get_mro`/`get_isarev`/`is_universal`/`next::method`/…) are **not
+  emulated**. A minimal C3-only `mro::get_linear_isa` is shipped (`lib/mro.pm`) so
+  modules that `require mro`/`use mro` load and work; `\&mro::get_linear_isa` is a
+  usable coderef. This is a deliberate, **provisional** simplification — revisit if
+  a module is shown to depend on DFS order or the missing API (real consumers like
+  `Test2::Util::HashBase` explicitly *don't* care about order). Plan:
+  [`docs/mro-plan.md`](docs/mro-plan.md); rationale: `docs/not-supported.md`.
 - **User lvalue subs (`: lvalue`)** — not implemented. (The *built-in* magic
   lvalues `substr`/`pos`/`vec` **do** work: direct assignment
   `substr($s,$o,$l)=…`, live write-through refs `\substr`/`\pos`/`\vec`, and
@@ -153,6 +165,23 @@ case, assorted `sprintf` warning-marker outputs, and `foreach` aliasing of
 *slices* (`@a[…]`/`@h{…}`) and `values %h` (single elements already alias; see
 [`docs/foreach-aliasing.md`](docs/foreach-aliasing.md)). These are fix targets,
 not declared limitations.
+
+**Per-iteration closure capture in loops and `map`/`grep`/`sort`.** A `my`
+variable declared *inside* a loop body or a `map`/`grep`/`sort` block that is
+captured by a nested closure is currently compiled to a single shared variable
+rather than a fresh binding per iteration. So
+
+```perl
+my @subs = map { my $x = $_; sub { $x } } qw(a b c);
+print $subs[0]->(), $subs[1]->(), $subs[2]->();   # Perl: abc   PCL: ccc
+```
+
+all three closures see the last value. This is the same root cause as
+`for my $n (0..4) { push @s, sub { $n } }`. It blocks functional-style modules
+that build closure tables (e.g. `Safe::Isa`'s `$_isa`/`$_can`). The fix needs a
+real lexical scope (per-iteration `let`) for those block bodies — see
+[`docs/closure-lexical-scoping.md`](docs/closure-lexical-scoping.md). A fix
+target, not a declared limitation.
 
 ---
 

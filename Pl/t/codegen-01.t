@@ -456,11 +456,11 @@ test_codegen('print STDERR "a", $b, "c"',
 diag "";
 diag "-------- Regression tests (session 3):";
 
-# Regression: &subname should generate function call
-# Was outputting literal &foo which is invalid CL
+# Regression: &subname should generate a function call (not literal &foo).
+# Perl's bare &foo (no parens) re-uses the caller's @_, so it must pass @_.
 test_codegen('&foo',
-             '(pl-foo)',
-             'Regression: &subname generates funcall');
+             '(pl-foo @_)',
+             'Regression: &subname generates funcall passing @_');
 
 # Regression: delete $a[idx] should use p-delete-array
 # Was passing value instead of array+index

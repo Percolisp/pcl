@@ -3377,6 +3377,9 @@ sub parse_block_as_function {
   my $params        = shift // [];  # Parameter names
   my $is_anon_sub   = shift // 0;   # 1 = anonymous sub (receives call args via @_)
   my $return_lambda = shift // 0;   # 1 = return lambda string, don't emit defun
+  my $loop_transparent = shift // 0; # 1 = wrap body in (progn ...) not (block nil ...)
+                                     #     so unlabeled last/next/redo propagate to the
+                                     #     enclosing loop (Perl do{} semantics)
 
   # Generate unique function name (used only for defun path)
   my $func_name = sprintf("--anon-block-%d--", ++$anon_block_counter);
@@ -3449,7 +3452,12 @@ sub parse_block_as_function {
     $self->indent_level($self->indent_level + 1);
   }
 
-  $self->_emit("(block nil");
+  # A do{} block is loop-transparent: wrap in (progn ...) so an unlabeled
+  # last/next/redo (return-from nil / go :next / go :redo) escapes to the
+  # ENCLOSING loop instead of being caught here.  A (block nil) would shadow
+  # the loop's own block for the return-from-nil that `last` compiles to.
+  # `return` still escapes (it throws :p-return, caught by the enclosing sub).
+  $self->_emit($loop_transparent ? "(progn" : "(block nil");
   $self->indent_level($self->indent_level + 1);
 
   # Enter new scope for filehandles; count as a subroutine so 'my'
@@ -5507,7 +5515,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|Carp|re)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|re)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
@@ -5866,11 +5874,11 @@ sub _parse_use_import_list {
 
   for my $child ($stmt->schildren) {
     if ($child->isa('PPI::Token::QuoteLike::Words')) {
-      # qw(foo bar baz)
-      my $content = $child->content;
-      $content =~ s/^qw\s*[\(\[\{<]//;
-      $content =~ s/[\)\]\}>]$//;
-      push @imports, split /\s+/, $content;
+      # qw(foo bar baz) — use PPI's literal() so ALL delimiters work
+      # (qw/.../, qw!...!, qw,..., not just brackets). The old manual strip
+      # only handled ([{< and silently passed e.g. qw/%Config/ through as the
+      # literal token "qw/%Config/", breaking `use Config qw/%Config/`.
+      push @imports, $child->literal;
     }
     elsif ($child->isa('PPI::Structure::List')) {
       # ('foo', 'bar') import list
@@ -6079,8 +6087,13 @@ sub _emit_constant {
 
   # Emit as a function (Perl implements constants as subs)
   # Use p-sub for compile-time visibility (BEGIN blocks can use constants)
+  # Every Perl sub accepts @_, so the constant must tolerate args too — a bare
+  # `&CONST` (no parens) re-uses the caller's @_ and would otherwise hit an
+  # arity error against a strict 0-arg lambda list.  The `(progn %_args VALUE)`
+  # references %_args so it ignores (and silences the unused-var warning on)
+  # the arguments while still returning the constant value.
   my $cl_sub_name = $self->_qualified_sub_to_cl($name);
-  $self->_emit("(p-sub $cl_sub_name () $cl_value)");
+  $self->_emit("(p-sub $cl_sub_name (&rest %_args) (progn %_args $cl_value))");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
   $self->environment->add_prototype($name, {
@@ -6096,13 +6109,15 @@ sub _compile_constant_value {
   my $self  = shift;
   my $parts = shift;
 
-  # Simple case: single literal
+  # Simple case: single literal.
+  # NOTE: Number tokens are intentionally NOT short-circuited here — emitting
+  # $tok->content raw mishandles octal (0777 -> CL 777) and, worse, float
+  # literals that overflow double range (e.g. POSIX::LDBL_MAX 1.18e+4932) which
+  # SBCL cannot even read, crashing compile-file.  Numbers fall through to the
+  # full ExprToCL path below, which maps those to #o.../(p-double-inf) etc.
   if (@$parts == 1) {
     my $tok = $parts->[0];
-    if ($tok->isa('PPI::Token::Number')) {
-      return $tok->content;
-    }
-    elsif ($tok->isa('PPI::Token::Quote')) {
+    if ($tok->isa('PPI::Token::Quote')) {
       # String - get the actual string value
       my $str = $tok->string // $tok->content;
       return '"' . $str . '"';

@@ -220,6 +220,18 @@
          (setf (symbol-value isa-sym)
                (make-array 0 :adjustable t :fill-pointer 0))))))
 
+;;; perl-pkg-to-cl-pkg-name: map a Perl package name to the CL package-name
+;;; string PCL's codegen uses.  Codegen pipe-quotes multi-segment names
+;;; (|Try::Tiny|, case-preserved) but emits single-segment names as bare
+;;; tokens the reader upcases (Carp -> CARP, main -> MAIN).  Runtime package
+;;; lookups must follow the SAME rule, or e.g. a glob/symbolic-ref op on a
+;;; multi-segment package would create/find a wrong-case empty "TRY::TINY"
+;;; that shadows the real "Try::Tiny".
+(defun perl-pkg-to-cl-pkg-name (pkg-str)
+  (if (search "::" pkg-str)
+      (string pkg-str)
+      (string-upcase pkg-str)))
+
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
@@ -1248,23 +1260,47 @@
       (and (ignore-errors (gethash fh-sym *p-dirhandles*)) t)))
 
 (defun p-true-p (val)
-  "Perl truthiness: false if undef, 0, empty string, empty list, or nil"
+  "Perl truthiness: false if undef, 0, empty string, empty list, or nil.
+
+   A BOXED value is a Perl scalar: if it holds a reference (arrayref/hashref/
+   coderef/scalarref/typeglob — represented as a raw container or inner box) it
+   is ALWAYS true, even when the referent is empty (`my $r=[]; if($r)` is true,
+   `if({}` too).  Otherwise normal scalar truthiness applies (0/\"\"/\"0\"/undef false).
+
+   A RAW (non-box) container is a bare @array/%hash used in boolean context, so
+   it is true iff non-empty (`if(%h)`/`if(@a)` test element count)."
   ;; use overload "bool": check before unboxing so we have the class info
   (when (p-box-p val)
     (let ((handler (p-find-overload val "bool")))
       (when handler
         (return-from p-true-p
           (p-true-p (p-call-overload handler val nil nil))))))
-  (let ((v (unbox val)))
-    (cond
-      ((eq v *p-undef*) nil)
-      ((null v) nil)
-      ((and (numberp v) (not (%pcl-nan-p v)) (zerop v)) nil)
-      ((and (stringp v) (string= v "")) nil)
-      ((and (stringp v) (string= v "0")) nil)
-      ;; Empty vector (empty list in list context) is false
-      ((and (vectorp v) (not (stringp v)) (zerop (length v))) nil)
-      (t t))))
+  (if (p-box-p val)
+      ;; Boxed = Perl scalar.  A held reference is always true.
+      (let ((v (unbox val)))
+        (cond
+          ((eq v *p-undef*) nil)
+          ((null v) nil)
+          ((or (and (vectorp v) (not (stringp v)))   ; arrayref
+               (hash-table-p v)                       ; hashref
+               (functionp v)                          ; coderef
+               (p-box-p v)                            ; scalarref / ref-to-ref
+               (p-typeglob-p v)) t)                   ; globref
+          ((and (numberp v) (not (%pcl-nan-p v)) (zerop v)) nil)
+          ((and (stringp v) (string= v "")) nil)
+          ((and (stringp v) (string= v "0")) nil)
+          (t t)))
+      ;; Raw value: bare aggregate → count; scalar → normal truthiness.
+      (cond
+        ((eq val *p-undef*) nil)
+        ((null val) nil)
+        ((and (numberp val) (not (%pcl-nan-p val)) (zerop val)) nil)
+        ((and (stringp val) (string= val "")) nil)
+        ((and (stringp val) (string= val "0")) nil)
+        ;; bare @array / %hash in boolean context: true iff non-empty
+        ((and (vectorp val) (not (stringp val))) (> (length val) 0))
+        ((hash-table-p val) (> (hash-table-count val) 0))
+        (t t))))
 
 ;;; ============================================================
 ;;; Arithmetic Operators
@@ -6001,8 +6037,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Perl eval { } - execute body catching errors.
    Sets $@ to error/exception on failure, empty string on success.
    Returns result of body on success, nil on failure."
+  ;; `return` inside eval { } exits the eval block (perldoc -f return), not the
+  ;; enclosing sub — so catch :p-return here, letting the eval evaluate to the
+  ;; returned value rather than unwinding the whole sub.
   `(handler-case
-       (prog1 (progn ,@body)
+       (prog1 (catch :p-return ,@body)
          (box-set $@ ""))
      (p-exception (e)
        ;; Object exception - preserve the object in $@
@@ -7409,7 +7448,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-find-module-package (module-name)
   "Find CL package for a Perl module.
    Tries: uppercase name, exact-case name (for Foo::Bar packages)."
-  (or (find-package (string-upcase module-name))
+  (or (find-package (perl-pkg-to-cl-pkg-name module-name))
+      (find-package (string-upcase module-name))
       (find-package module-name)))
 
 (defun p-perl-symbol-to-cl-name (sym-name)
@@ -7438,10 +7478,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when from-sym
       (let ((name (unbox sym-name)))
         (cond
-          ;; Variable sigil: use shadowing-import (variable bindings)
+          ;; Variable sigil ($ @ %): the compiled code in TO-PKG already
+          ;; interned a package-local symbol for this name, so shadowing-import
+          ;; (which uninterns the conflicting local) would orphan that captured
+          ;; symbol (-> "#:%CONFIG unbound").  Mirror the function path: bind the
+          ;; already-interned local symbol to share FROM-SYM's value — the same
+          ;; box/hash/array container, so reads and in-place mutations alias.
           ((and (stringp name) (plusp (length name))
                 (member (char name 0) '(#\$ #\@ #\%)))
-           (shadowing-import from-sym to-pkg))
+           (let ((to-sym (intern cl-name to-pkg)))
+             (proclaim (list 'special to-sym))
+             (when (boundp from-sym)
+               (setf (symbol-value to-sym) (symbol-value from-sym)))))
           ;; Function: set fdefinition in TO-PKG so already-compiled
           ;; lambdas with an interned-but-unbound local symbol get the fn.
           ((fboundp from-sym)
@@ -8420,16 +8468,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-make-typeglob (pkg-str name-str)
   "Create a typeglob object for *Pkg::Name."
-  (let ((pkg (or (find-package (string-upcase pkg-str))
+  (let ((pkg (or (%pcl-find-package pkg-str)
                  ;; Package may not exist yet; create it lazily
-                 (make-package (string-upcase pkg-str) :use '(:cl :pcl)))))
+                 (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
     (make-p-typeglob pkg (string-upcase name-str))))
 
 (defun p-glob-assign (pkg-str name-str rhs)
   "Assign RHS to the appropriate slot of typeglob *pkg::name.
    Dispatch is by type of the unwrapped RHS value."
-  (let* ((pkg   (or (find-package (string-upcase pkg-str))
-                    (make-package (string-upcase pkg-str) :use '(:cl :pcl))))
+  (let* ((pkg   (or (%pcl-find-package pkg-str)
+                    (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
          (uname (string-upcase name-str))
          ;; Unwrap one box level to see what was referenced
          (inner (if (p-box-p rhs) (unbox rhs) rhs)))
@@ -8485,8 +8533,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (sep-pos (search "::" name-str :from-end t))
          (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
          (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
-         (pkg (or (find-package (string-upcase pkg-str))
-                  (make-package (string-upcase pkg-str) :use '(:cl :pcl)))))
+         (pkg (or (%pcl-find-package pkg-str)
+                  (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
     (make-p-typeglob pkg (string-upcase bare-str))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
@@ -8573,8 +8621,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (had-scalar     (gensym "HAD-SCALAR"))
         (had-array      (gensym "HAD-ARRAY"))
         (had-hash       (gensym "HAD-HASH")))
-    `(let* ((,pkg-var   (or (find-package (string-upcase ,pkg-str))
-                            (make-package (string-upcase ,pkg-str) :use '(:cl :pcl))))
+    `(let* ((,pkg-var   (or (%pcl-find-package ,pkg-str)
+                            (make-package (perl-pkg-to-cl-pkg-name ,pkg-str) :use '(:cl :pcl))))
             (,uname-var (string-upcase ,name-str))
             (code-sym   (intern (concatenate 'string "PL-"  ,uname-var) ,pkg-var))
             (scalar-sym (intern (concatenate 'string "$"    ,uname-var) ,pkg-var))
@@ -9064,7 +9112,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; Lets p-method-call distinguish "blessed into" from "never mentioned" packages,
     ;; so it can add the "(perhaps you forgot to load...)" hint only for truly unknown classes.
     (unless (%pcl-find-package class-name)
-      (ignore-errors (make-package (string-upcase class-name) :use '(:cl :pcl))))
+      (ignore-errors (make-package (perl-pkg-to-cl-pkg-name class-name) :use '(:cl :pcl))))
     (cond
       ((hash-table-p inner)
        (setf (gethash :__class__ inner) class-name)
@@ -9119,11 +9167,25 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Find CL package for Perl package name PKG-STR.
    Tries upcase first (single-word packages defined via :Foo keyword), then
    exact case (multi-level packages defined via :|Foo::Bar| notation)."
-  (or (find-package (string-upcase pkg-str))
+  (or (find-package (perl-pkg-to-cl-pkg-name pkg-str))
+      (find-package (string-upcase pkg-str))
       (find-package pkg-str)))
 
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
+  ;; Method argument lists flatten like any Perl call: $o->m(@a, %h) spreads its
+  ;; arrays/hashes.  The codegen passes raw @arrays straight through, so flatten
+  ;; here once — built-in methods (p-isa/p-can) take fixed scalar args, and user
+  ;; methods re-flatten their already-flat %_args harmlessly.
+  (setf args (coerce (p-flatten-args args) 'list))
+  ;; $obj->$coderef(@args): when the method slot holds a CODE ref (rather than a
+  ;; method-name string), Perl invokes it directly as $coderef->($obj, @args),
+  ;; bypassing package/MRO lookup.  Used by Safe::Isa ($_isa/$_can) and any
+  ;; `$obj->$method` where $method was set to \&some_sub.
+  (let ((m (unbox method)))
+    (when (p-box-p m) (setf m (p-box-value m)))  ; double-boxed blessed coderef
+    (when (functionp m)
+      (return-from p-method-call (apply m obj args))))
   (let* ((method-name (to-string method))
          ;; If obj is a box containing a tie-proxy, FETCH to get the invocant
          (resolved-obj (if (and (p-box-p obj)
