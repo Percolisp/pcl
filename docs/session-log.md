@@ -4,6 +4,39 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 237 (2026-06-07) — sweep-flakiness investigation: deterministic; guarded crash-file noise
+
+User asked to chase the parallel-sweep flakiness (every regression check was costing a
+stash/compare detour). **Measured it:** ran the full `--jobs 8` sweep **3× into separate log dirs**
+on an unchanged tree → **byte-identical** (0 (file,desc,num) key diffs across all pairs; 784 raw
+lines / 449 deduped keys each; same 18046/784/11959 TOTAL, same 69 fully-passing, same 8 PARTIAL
+files at the SAME counts, bop.t 446+49/510 = `--jobs 1`). **Conclusion: the sweep is deterministic;
+the "flakiness" is NOT run-to-run, it's a RARE crash-under-load in a known CRASH/PARTIAL file** (the
+236d "11 new bop.t" was a one-off). **Ruled out:** faillog write-race (each child owns its
+`<file>.fails.tsv`, supersede + force-output/line), `/tmp/pcl-sweep-$$.out` (PID-unique), module
+cache (FASL mode = PID-temp+atomic-rename; bop.t uses only pragmas anyway). `*pcl-skip-cache*` only
+forces a cache MISS, still writes; the non-default Lisp-mode cache branch has a latent racy
+`:supersede` direct write — noted, not the sweep path.
+
+**Root of the false-alarm cost:** sweep-diff keys on (file, **description**); a crash file's abort
+point shifting changes its set of *described* fails above the abort, which sweep-diff flagged as
+"NEW failures (regressions)". It already guarded the FIXED side (`ran_clean` via `_status.tsv`).
+**FIX (commit 6f0cb18, `tools/sweep-diff.pl`):** symmetric guard on the NEW side — a NEW failure in
+a file that CRASHED/PARTIAL'd this run is segregated as **"UNSTABLE (crash-file noise)"** (shown,
+not a regression, doesn't set nonzero exit). Verified: real regression in an OK file still
+gate-fails (exit 1); the 236d bop.t scenario now exits 0. **Re-blessed `docs/fail-baseline.tsv`**
+450→449 (captures the concat2 RT#132385 fix); runs 2 & 3 diff 0/0.
+
+**Still open (the real cure):** per-statement `handler-case` wrapper so bop.t/eval.t run to
+COMPLETION (finer than `p-load-with-recovery`'s per-top-level-form granularity — the missing ~15
+bop.t tests live inside loops that abort partway). Would make crash files deterministic+fully
+counted, let regressions INSIDE them be detected, and likely kill the rare flapping. Also widen
+`p-load-with-recovery` (`cl/pcl-test.lisp:620`) to catch `serious-condition` (stack exhaustion
+under `--control-stack-size 512` is a candidate for the rare crash). See
+[[project_sweep_flakiness_investigation]].
+
+---
+
 ## Session 236d (2026-06-06) — builtin:: core namespace (Perl 5.36+)
 
 Continued the no-XS CPAN survey ([[project_cpan_module_survey]]). Implemented the **`builtin::`
