@@ -1260,23 +1260,47 @@
       (and (ignore-errors (gethash fh-sym *p-dirhandles*)) t)))
 
 (defun p-true-p (val)
-  "Perl truthiness: false if undef, 0, empty string, empty list, or nil"
+  "Perl truthiness: false if undef, 0, empty string, empty list, or nil.
+
+   A BOXED value is a Perl scalar: if it holds a reference (arrayref/hashref/
+   coderef/scalarref/typeglob — represented as a raw container or inner box) it
+   is ALWAYS true, even when the referent is empty (`my $r=[]; if($r)` is true,
+   `if({}` too).  Otherwise normal scalar truthiness applies (0/\"\"/\"0\"/undef false).
+
+   A RAW (non-box) container is a bare @array/%hash used in boolean context, so
+   it is true iff non-empty (`if(%h)`/`if(@a)` test element count)."
   ;; use overload "bool": check before unboxing so we have the class info
   (when (p-box-p val)
     (let ((handler (p-find-overload val "bool")))
       (when handler
         (return-from p-true-p
           (p-true-p (p-call-overload handler val nil nil))))))
-  (let ((v (unbox val)))
-    (cond
-      ((eq v *p-undef*) nil)
-      ((null v) nil)
-      ((and (numberp v) (not (%pcl-nan-p v)) (zerop v)) nil)
-      ((and (stringp v) (string= v "")) nil)
-      ((and (stringp v) (string= v "0")) nil)
-      ;; Empty vector (empty list in list context) is false
-      ((and (vectorp v) (not (stringp v)) (zerop (length v))) nil)
-      (t t))))
+  (if (p-box-p val)
+      ;; Boxed = Perl scalar.  A held reference is always true.
+      (let ((v (unbox val)))
+        (cond
+          ((eq v *p-undef*) nil)
+          ((null v) nil)
+          ((or (and (vectorp v) (not (stringp v)))   ; arrayref
+               (hash-table-p v)                       ; hashref
+               (functionp v)                          ; coderef
+               (p-box-p v)                            ; scalarref / ref-to-ref
+               (p-typeglob-p v)) t)                   ; globref
+          ((and (numberp v) (not (%pcl-nan-p v)) (zerop v)) nil)
+          ((and (stringp v) (string= v "")) nil)
+          ((and (stringp v) (string= v "0")) nil)
+          (t t)))
+      ;; Raw value: bare aggregate → count; scalar → normal truthiness.
+      (cond
+        ((eq val *p-undef*) nil)
+        ((null val) nil)
+        ((and (numberp val) (not (%pcl-nan-p val)) (zerop val)) nil)
+        ((and (stringp val) (string= val "")) nil)
+        ((and (stringp val) (string= val "0")) nil)
+        ;; bare @array / %hash in boolean context: true iff non-empty
+        ((and (vectorp val) (not (stringp val))) (> (length val) 0))
+        ((hash-table-p val) (> (hash-table-count val) 0))
+        (t t))))
 
 ;;; ============================================================
 ;;; Arithmetic Operators

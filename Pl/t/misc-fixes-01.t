@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 40;
+plan tests => 51;
 
 sub run_cl {
     my ($code) = @_;
@@ -334,3 +334,76 @@ test_cl('qualified delete hash slice',
      my @d = delete @Pk::Q::H{qw(a b)};
      print "@d | ", join(",", sort keys %Pk::Q::H), "\n";',
     "1 2 | c\n");
+
+# ── CPAN survey bugs (Data::Dump) ─────────────────────────────────────────
+# do { } inside an elsif condition used to emit its defun BETWEEN the p-if
+# branches, producing a malformed p-if (too many args).  Now inline.
+test_cl('do {} block in elsif condition',
+    'my $x = 5; my $rval = \$x; my $out;
+     if (!defined $$rval)            { $out = "undef"; }
+     elsif (do { $$rval + 0 eq $$rval }) { $out = $$rval; }
+     else                            { $out = "other"; }
+     print "$out\n";',
+    "5\n");
+
+# Bare %hash in boolean context: true iff non-empty (was always true).
+test_cl('empty %hash is false in boolean context',
+    'my %h; print((%h ? "T" : "F"), "\n"); %h=(a=>1); print((%h ? "T":"F"),"\n");',
+    "F\nT\n");
+
+# A reference held in a scalar is ALWAYS true, even for an empty referent.
+test_cl('empty array/hash refs are true',
+    'my $ar = []; my $hr = {}; my @a; my $ar2 = \@a;
+     print(($ar ? "T":"F"), ($hr ? "T":"F"), ($ar2 ? "T":"F"), "\n");',
+    "TTT\n");
+
+# Deref of an aggregate in boolean context still tests element count.
+test_cl('empty deref is false in boolean context',
+    'my @a; my $ar = \@a; print((@$ar ? "T" : "F"), "\n");',
+    "F\n");
+
+# Bare &foo (no parens) re-uses the caller's @_ (was passing empty list).
+test_cl('&foo (no parens) passes current @_',
+    'sub inner { return "GOT:$_[0]"; }
+     sub outer { my $x = &inner; return $x; }
+     print outer("hi"), "\n";',
+    "GOT:hi\n");
+
+# local $_ = &quote pattern from Data::Dump str()/quote().
+test_cl('&sub via local $_ assignment threads @_',
+    'sub q1 { local($_) = $_[0]; return qq("$_"); }
+     sub s1 { local $_ = &q1; return $_; }
+     print s1("hi"), "\n";',
+    "\"hi\"\n");
+
+# Data::Dump end-to-end: string values must survive the str/quote chain.
+test_cl('Data::Dump dumps strings and nested structures',
+    'use Data::Dump qw(dump);
+     print dump({x=>[1,2], y=>"hi"}), "\n";',
+    "{ x => [1, 2], y => \"hi\" }\n");
+
+# ── do {} loop-control transparency (Perl semantics) ─────────────────────
+# do{} is not a loop; an unlabeled last/next/redo inside it must escape to
+# the ENCLOSING loop (do{} body is wrapped in progn, not block nil).
+test_cl('last inside do{} breaks the enclosing loop',
+    'my @o; for my $i (1..5) { push @o, $i; do { last if $i == 3; }; }
+     print "@o\n";',
+    "1 2 3\n");
+
+test_cl('next inside do{} continues the enclosing loop',
+    'my @o; for my $i (1..5) { do { next if $i == 2; }; push @o, $i; }
+     print "@o\n";',
+    "1 3 4 5\n");
+
+# return inside do{} exits the enclosing sub (not just the do block).
+test_cl('return inside do{} exits the enclosing sub',
+    'sub f { my $x = do { return "from-do"; 99 }; return "after:$x"; }
+     print f(), "\n";',
+    "from-do\n");
+
+# A use-constant value tolerates being called with args (every Perl sub
+# accepts @_); a bare &CONST re-uses the caller @_ and must not arity-error.
+test_cl('&CONSTANT (no parens) does not arity-error',
+    'use constant { K => 7 };
+     print "direct:", &K, " eval:", eval("&K"), "\n";',
+    "direct:7 eval:7\n");

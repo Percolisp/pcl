@@ -519,13 +519,14 @@ sub gen_leaf {
       $self->environment->add_referenced_package($pkg) if $self->environment;
       return "(p-stash \"$pkg\")";
     }
-    # Handle &subname - call subroutine
-    # &foo -> (p-foo) - calls without passing @_ through
-    # Note: &foo(@args) would be handled as funcall, not here
+    # &foo (no parens) re-uses the CALLER'S @_ — unlike &foo() which passes an
+    # empty list, or foo() which is a normal call.  At file top level @_ is the
+    # global empty vector, so emitting @_ is always safe.
+    # Note: &foo(@args) is handled as a funcall, not here; \&foo is a refgen.
     if ($content =~ /^&(.+)$/) {
       my $func_name = $1;
       my $cl_func = $self->cl_name($func_name, 1);
-      return "($cl_func)";
+      return "($cl_func \@_)";
     }
     # Check if this var is a state variable that was renamed
     if ($self->environment) {
@@ -1222,9 +1223,13 @@ sub gen_funcall {
         return "(progn " . join(' ', @body_parts) . ")";
       }
       elsif ($arg_node->{type} eq 'inline_lambda') {
-        # do { BLOCK } parsed as inline_lambda - just call it
+        # do { BLOCK } parsed as inline_lambda (avoids defun side-effect that
+        # would corrupt a surrounding p-if when do{} sits in an elsif condition)
         my $body = $arg_node->{body_cl} // 'nil';
-        return "(progn $body)";
+        my $ctx  = $self->expr_o->get_node_context($node_id);
+        return "(progn $body)" if $ctx == INHERIT_CTX;
+        my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+        return "(let ((*wantarray* $wa)) (progn $body))";
       }
     }
   }

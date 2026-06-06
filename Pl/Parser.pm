@@ -3377,6 +3377,9 @@ sub parse_block_as_function {
   my $params        = shift // [];  # Parameter names
   my $is_anon_sub   = shift // 0;   # 1 = anonymous sub (receives call args via @_)
   my $return_lambda = shift // 0;   # 1 = return lambda string, don't emit defun
+  my $loop_transparent = shift // 0; # 1 = wrap body in (progn ...) not (block nil ...)
+                                     #     so unlabeled last/next/redo propagate to the
+                                     #     enclosing loop (Perl do{} semantics)
 
   # Generate unique function name (used only for defun path)
   my $func_name = sprintf("--anon-block-%d--", ++$anon_block_counter);
@@ -3449,7 +3452,12 @@ sub parse_block_as_function {
     $self->indent_level($self->indent_level + 1);
   }
 
-  $self->_emit("(block nil");
+  # A do{} block is loop-transparent: wrap in (progn ...) so an unlabeled
+  # last/next/redo (return-from nil / go :next / go :redo) escapes to the
+  # ENCLOSING loop instead of being caught here.  A (block nil) would shadow
+  # the loop's own block for the return-from-nil that `last` compiles to.
+  # `return` still escapes (it throws :p-return, caught by the enclosing sub).
+  $self->_emit($loop_transparent ? "(progn" : "(block nil");
   $self->indent_level($self->indent_level + 1);
 
   # Enter new scope for filehandles; count as a subroutine so 'my'
@@ -6079,8 +6087,13 @@ sub _emit_constant {
 
   # Emit as a function (Perl implements constants as subs)
   # Use p-sub for compile-time visibility (BEGIN blocks can use constants)
+  # Every Perl sub accepts @_, so the constant must tolerate args too — a bare
+  # `&CONST` (no parens) re-uses the caller's @_ and would otherwise hit an
+  # arity error against a strict 0-arg lambda list.  The `(progn %_args VALUE)`
+  # references %_args so it ignores (and silences the unused-var warning on)
+  # the arguments while still returning the constant value.
   my $cl_sub_name = $self->_qualified_sub_to_cl($name);
-  $self->_emit("(p-sub $cl_sub_name () $cl_value)");
+  $self->_emit("(p-sub $cl_sub_name (&rest %_args) (progn %_args $cl_value))");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
   $self->environment->add_prototype($name, {
