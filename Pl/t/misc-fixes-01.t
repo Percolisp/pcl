@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 73;
+plan tests => 77;
 
 sub run_cl {
     my ($code) = @_;
@@ -560,3 +560,31 @@ test_cl('overload::import installs stringify for the caller package',
      sub new { my $v = $_[1]; bless \$v, $_[0] }
      package main; my $t = MyB->new(1); print "$t\n";',
     "T\n");
+
+# --- per-iteration closure capture in map/grep/sort blocks ---
+# A `my` declared in the block and captured by a nested anon sub must be a fresh
+# lexical per element (the block is a lambda called once per element), not one
+# shared file-level global. Was "ccc"; Perl is "abc".
+test_cl('map { my $x=$_; sub {$x} } captures per-iteration',
+    'my @s = map { my $x = $_; sub { $x } } qw(a b c);
+     print $s[0]->(), $s[1]->(), $s[2]->(), "\n";',
+    "abc\n");
+
+# The captured var used only via string interpolation must also be detected
+# (it is not a PPI::Token::Symbol; it lives inside the quote token).
+test_cl('map closure captures a var used only in string interpolation',
+    'my @s = map { my $x = $_; sub { "v=$x" } } qw(a b);
+     print $s[0]->(), $s[1]->(), "\n";',
+    "v=av=b\n");
+
+test_cl('map closure captures multiple per-iteration vars',
+    'my @s = map { my $k=$_; my $v=$_*10; sub { "$k:$v" } } (1,2);
+     print $s[0]->(), " ", $s[1]->(), "\n";',
+    "1:10 2:20\n");
+
+# A plain map block (no closure) is unaffected, and sort still sees $a/$b.
+test_cl('plain map/sort blocks unaffected by closure-capture handling',
+    'my @a = map { $_ + 1 } (1,2,3);
+     my @b = sort { $b <=> $a } (3,1,2);
+     print join(",", @a), " ", join(",", @b), "\n";',
+    "2,3,4 3,2,1\n");

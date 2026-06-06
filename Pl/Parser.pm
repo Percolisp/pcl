@@ -3563,6 +3563,12 @@ sub parse_block_to_cl_string {
   # Enter new scope for filehandles
   $self->environment->push_scope();
 
+  # Per-iteration closure capture: if a `my` var declared in this block is
+  # captured by a nested anon sub, wrap the body in a `let` of a fresh lexical
+  # so each block invocation (the block is a (lambda ($_) ...) called once per
+  # element) gets its own binding.  No-op for ordinary blocks.
+  my $clo_scope = $self->_begin_block_closure_scope($block);
+
   # Find last significant child so we can set tail_position correctly.
   # This prevents the VOID_CTX wrap (in _process_expression_statement) from
   # incorrectly wrapping the lambda's return value in map/grep/sort blocks.
@@ -3597,6 +3603,9 @@ sub parse_block_to_cl_string {
   }
   $self->{_local_let_depth} = $saved_local_depth;
 
+  # Close the per-iteration closure-capture let (if one was opened).
+  $self->_end_block_closure_scope($clo_scope);
+
   # Leave scope
   $self->environment->pop_scope();
 
@@ -3621,6 +3630,85 @@ sub parse_block_to_cl_string {
   } else {
     return "nil";
   }
+}
+
+# Open a per-iteration closure-capture scope for a map/grep/sort block body.
+# A `my` var declared in the block AND captured by a nested anonymous sub is
+# renamed to a fresh, never-`defvar`'d lexical ($x__lex__N) and bound by a `let`
+# wrapping the body.  The block compiles to a (lambda ($_) ...) called once per
+# element, so the `let` mints a new box per element — giving Perl's per-iteration
+# capture (`map { my $x=$_; sub {$x} } qw(a b c)` → "abc", not "ccc").
+#
+# This reproduces _with_declarations's rename, but emits the `let` directly into
+# the temp-section string this path collects (the bucket-based _emit_scoped_block
+# does not compose with that string collection).  Returns a state hashref for
+# _end_block_closure_scope, or undef (strict no-op) when the block has no
+# closure-captured block-local `my` — the overwhelmingly common case.
+sub _begin_block_closure_scope {
+  my ($self, $block) = @_;
+  return undef unless ref($block) && $block->can('children');
+
+  # Cheap gate: only blocks containing a nested `sub` can capture anything.
+  my $captured = $self->_vars_referenced_in_closures($block);
+  return undef unless %$captured;
+
+  # Block-local `my` declarations (NOT those inside the nested sub — that path
+  # is excluded by _find_all_declarations) that the closure actually captures.
+  my %seen;
+  my @vars = grep { !$seen{$_}++ }
+             grep { $captured->{$_} }
+             map  { $_->{var} }
+             grep { $_->{type} eq 'my' }
+             @{ $self->_find_all_declarations($block) };
+  return undef unless @vars;
+
+  my $env_renames = $self->environment->state_var_renames // {};
+  my $clo = {
+    saved_env       => { %$env_renames },
+    saved_scope_new => $self->{_current_scope_new_renames},
+    saved_scope_old => $self->{_current_scope_old_renames},
+    saved_letbound  => $self->{_let_bound_vars},
+    saved_indent    => $self->indent_level,
+  };
+
+  my (%new_renames, @bindings);
+  my %env = %$env_renames;
+  for my $var (@vars) {
+    my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+    $sigil //= '$'; $bare //= $var;
+    (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+    my $uniq = sprintf('%s%s__lex__%d', $sigil, $slug, ++$lex_var_counter);
+    $new_renames{$var} = $uniq;
+    $env{$var}         = $uniq;
+    push @bindings, "($uniq " . _let_init($sigil) . ")";
+  }
+
+  # state_var_renames → references + string interpolation emit the lexical name.
+  # _current_scope_new_renames → _process_variable_statement takes the rename path
+  #   (and skips _process_my_toplevel_declaration's defvar at top level).
+  # _current_scope_old_renames → the RHS of `my $x = $x` sees the outer binding.
+  # _let_bound_vars → the var is treated as lexical, not a package global.
+  $self->environment->state_var_renames(\%env);
+  $self->{_current_scope_new_renames} = { %{$clo->{saved_scope_new} // {}}, %new_renames };
+  $self->{_current_scope_old_renames} = { %{$clo->{saved_scope_old} // {}},
+                                          map { $_ => $clo->{saved_env}{$_} } @vars };
+  $self->{_let_bound_vars} = { %{$clo->{saved_letbound} // {}}, map { $_ => 1 } @vars };
+
+  $self->_emit("(let (" . join(" ", @bindings) . ")");
+  $self->indent_level($self->indent_level + 1);
+  return $clo;
+}
+
+# Close the let opened by _begin_block_closure_scope and restore the rename maps.
+sub _end_block_closure_scope {
+  my ($self, $clo) = @_;
+  return unless $clo;
+  $self->indent_level($clo->{saved_indent});
+  $self->_emit(")");
+  $self->environment->state_var_renames($clo->{saved_env});
+  $self->{_current_scope_new_renames} = $clo->{saved_scope_new};
+  $self->{_current_scope_old_renames} = $clo->{saved_scope_old};
+  $self->{_let_bound_vars}            = $clo->{saved_letbound};
 }
 
 
@@ -3861,9 +3949,41 @@ sub _vars_referenced_in_closures {
       next unless $sib;
       my $syms = $sib->find('PPI::Token::Symbol') || [];  # same: || not //
       $captured{$_->content} = 1 for @$syms;
+
+      # Variables used ONLY via string interpolation / regex (e.g. sub { "v=$x" })
+      # are not PPI::Token::Symbol nodes — they live inside quote/heredoc/regex
+      # tokens. Scan those too, or the closure-capture rename misses them and the
+      # var stays a shared global. Over-inclusion is safe: callers intersect this
+      # set with the block-local `my` declarations.
+      my $interp = $sib->find(sub {
+        my $t = $_[1];
+        $t->isa('PPI::Token::Quote::Double')
+          || $t->isa('PPI::Token::Quote::Interpolate')
+          || $t->isa('PPI::Token::QuoteLike::Backtick')
+          || $t->isa('PPI::Token::QuoteLike::Command')
+          || $t->isa('PPI::Token::HereDoc')
+          || $t->isa('PPI::Token::Regexp::Match')
+          || $t->isa('PPI::Token::Regexp::Substitute');
+      }) || [];
+      for my $t (@$interp) {
+        $captured{$_} = 1 for _vars_in_interpolated_text($t->content);
+      }
     }
   }
   return \%captured;
+}
+
+# Extract interpolated variable names ($name, ${name}, @name, @{name}, and the
+# base var of $name[..]/$name{..}) from raw interpolating text. A deliberately
+# liberal over-approximation used only to decide closure capture; an unescaped
+# sigil immediately followed by a word character (or {word}) is taken as a ref.
+sub _vars_in_interpolated_text {
+  my ($txt) = @_;
+  my @vars;
+  while ($txt =~ /(?<!\\)([\$\@])\{?(\w+)\}?/g) {
+    push @vars, "$1$2";
+  }
+  return @vars;
 }
 
 # Build the $outer scope hashref passed to BlockAnalyzer::analyze.
