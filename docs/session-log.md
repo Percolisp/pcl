@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 235 (2026-06-06) — Data::Dump works: 6 general bugs (truthiness, &foo @_, do{} semantics, method dispatch)
+
+Continued the no-XS CPAN survey ([[project_cpan_module_survey]]). Drove **Data::Dump**
+end-to-end (now byte-identical to perl) and started on **Safe::Isa**; every failure was a
+*general* PCL bug. Gate **91 files / 3244** green. Full sweep **18044 pass / 786 fail /
+69 fully passing** (`lop.t`+`sub.t` newly full); `sweep-diff` **0 new, +1 fixed (qr.t)**.
+Baseline re-blessed 453→450. New tests in `Pl/t/misc-fixes-01.t` (29→55),
+`codegen-01.t`/`constants-01.t` updated for intentional codegen changes. **3 commits**
+(9c8403d, 8d7b752, + this doc commit).
+
+**Bugs fixed (commit 9c8403d — Data::Dump):**
+1. **`p-true-p` ref-awareness** (`cl/pcl-runtime.lisp`). A **boxed** value is a Perl
+   scalar — a held reference (arrayref/hashref/coderef/scalarref/glob) is ALWAYS true,
+   even when the referent is empty (`my $r=[]; if($r)` true; `{}` too). A **raw**
+   (non-box) container is a bare `@array`/`%hash` in boolean context — true iff
+   non-empty. Was: empty `%hash` wrongly true (broke Data::Dump's `if (%refcnt)`), empty
+   arrayref wrongly false. The two are indistinguishable *after* unbox, so the box-ness
+   test is the discriminator.
+2. **`&foo` with no parens re-uses the caller's `@_`** (`Pl/ExprToCL.pm`, `gen_leaf`).
+   Was emitting `(pl-foo)` (empty list); Perl's bare `&foo` threads the current `@_`.
+   `local $_ = &quote` in Data::Dump's `str()` depended on it. (Self-inflicted gotcha:
+   `"($cl_func @_)"` interpolated Perl's own empty `@_` → had to escape `\@_`.)
+   Constants now emit `(p-sub NAME (&rest %_args) (progn %_args VALUE))` (`Pl/Parser.pm`)
+   so `&CONST` doesn't arity-error against a strict 0-arg lambda list — every Perl sub
+   accepts `@_`.
+3. **`do { }` in an elsif condition** (`Pl/PExpr.pm`). The do-block compiled to a `defun`
+   emitted *inline*, which landed between the `p-if` branches → malformed `p-if`. Now
+   compiles to an inline lambda via `parse_block_as_function(..., return_lambda=1)` — no
+   mid-stream defun — while still running through `_process_block`, so the bare-if
+   tail-return semantics (`do { 1 if $x }` returns the condition value when the modifier
+   suppresses the expression) are preserved.
+4. **`do { }` loop-control transparency** (`Pl/Parser.pm`, new `loop_transparent` flag).
+   The do-lambda body is wrapped in `(progn …)` not `(block nil …)`, so an unlabeled
+   `last`/`next`/`redo` (return-from nil / go :next / go :redo) escapes to the
+   **enclosing loop** instead of being caught by the lambda's own block; `return` still
+   exits the enclosing sub (throw :p-return). Verified all six control-flow cases against
+   perl 5.40. **Both 3 and 4 keep the same semantics as the previous defun path** — only
+   the emission site and the block-vs-progn wrapper changed (a defun and a lambda are
+   identical w.r.t. throw/catch and return-from).
+
+**Bugs fixed (commit 8d7b752 — method dispatch, via Safe::Isa):**
+5. **`$obj->$coderef(@args)`** (`p-method-call`). When the method slot holds a CODE ref
+   instead of a name string, Perl invokes it directly as `$coderef->($obj, @args)`,
+   bypassing package/MRO lookup. PCL stringified the coderef (`"CODE(0x..)"`) → doomed
+   method lookup. Now detects a function (or double-boxed blessed coderef) and applies it
+   with the invocant first. Used by Safe::Isa `$_isa`/`$_can` and dispatch tables.
+6. **Method argument lists now flatten** (`p-method-call`). `$o->isa(@a)` / `$o->m(@arr,
+   %h)` spread their arrays/hashes via `p-flatten-args` before dispatch. Previously a raw
+   `@array` reached fixed-arg built-ins (`p-isa`/`p-can`) as one unspread vector, so
+   `$o->isa(@a)` failed while `$o->isa("Foo")` worked.
+
+**Known incompatibility found (NOT fixed — documented):** per-iteration **closure
+capture** in `map`/`grep`/`sort` blocks and loops: `map { my $x=$_; sub { $x } } qw(a b
+c)` returns `ccc` in PCL, `abc` in perl. `my $x` inside `parse_block_to_cl_string`
+compiles to a file-level **defvar** (shared global), not a per-iteration **let**.
+Attempted the fix (wrap the block body in `_with_declarations(is_sub_body=1)` + bump
+`in_subroutine`): the two-phase scoped-let mechanism does NOT compose with the function's
+temp-section string collection — the closure-rename fires (`$x__lex__N`) but the let
+binding isn't emitted (unbound var) and `"$x"` interpolation isn't renamed. **Reverted.**
+Same family as the documented `for my $n (…){ sub {$n} }` limitation
+(`docs/closure-lexical-scoping.md`); this is the remaining blocker for Safe::Isa `$_isa`.
+A deferred hard fix — don't destabilize map/grep/sort without a proper
+scoped-let-in-string design.
+
+---
+
 ## Session 234 (2026-06-05) — Try::Tiny works: 5 general bugs (pkg-casing, Carp, eval-return, &-proto blocks, slurpy list-ctx)
 
 Continued the no-XS CPAN survey ([[project_cpan_module_survey]]). Drove **Try::Tiny**

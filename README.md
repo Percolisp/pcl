@@ -29,7 +29,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run the internal test suite (91 files, 3168 tests)
+# Run the internal test suite (91 files, 3244 tests)
 prove -j8 Pl/t/
 ```
 
@@ -81,6 +81,7 @@ A few of the biggest items:
 - **Exact error-message text** — PCL targets correct execution, not byte-for-byte error wording or the `" at FILE line N"` suffix.
 - **`DESTROY` on garbage collection** — CL's GC gives no deterministic finalizer timing.
 - **Removed Perl features** — `given`/`when`, the `~~` smart-match, and `?pattern?` (gone in Perl 5.38).
+- **`mro` pragma** — PCL always uses C3 (it is CLOS-backed); the DFS default, ordering switch, and most of the `mro::*` API are not emulated. A minimal C3-only `mro::get_linear_isa` is provided so modules that `require mro` load. Provisional — revisit if a module is shown to depend on the missing parts.
 
 *Full list and rationale: [`REMAINING.md`](REMAINING.md) and [`docs/not-supported.md`](docs/not-supported.md).*
 
@@ -116,7 +117,7 @@ Generated code is intentionally readable: Perl variables keep their sigils (`$x`
 
 This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the end is visible on the horizon — and hopefully not a mirage.
 
-Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **66 files passing completely**.
+Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **69 files passing completely**. Several pure-Perl CPAN modules now run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process.
 
 A small illustration of how it gets done: when implementing `pack()` in CL proved fiddly even with the original C source in hand, the trick was to write `pack` *in Perl* and let PCL translate it to CL. It worked — eating our own dog food.
 
