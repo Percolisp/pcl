@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 238f (2026-06-08) — generic `use Foo LIST` → Foo->import(LIST) via the REAL Exporter
+
+The big one (commit `57fab5f`): made `use` work like Perl — **parse the import LIST, call the
+module's `import` method** — instead of the long-standing hack where `p-use` peeked at `@EXPORT`
+and never ran anyone's `import`. Driven by the Test::More work (which kept wanting parser
+special-cases) until the user pushed: "running import() is a generic feature; sideload it." It is,
+and now it does. Pieces:
+
+- **Parser** (`Pl/Parser.pm`): the args after `use Module [VERSION]` ARE a Perl list, so transpile
+  them through the normal list parser → `(p-use "Foo" :import-args (vector …))` (new
+  `_use_import_arg_tokens`). `tests => 5` / `qw(a b)` / `'no_plan'` all work (old
+  `_parse_use_import_list` dropped fat-comma args). Removed `Exporter` from the pragma no-op list.
+- **Dispatch** (`cl/pcl-runtime.lisp`): `p-use` → `%p-do-import` calls `Foo->import(@args)` when Foo
+  has an `import` in its MRO (own, or inherited `Exporter::import`); else the `@EXPORT`-copy
+  convenience (for shims that declare `@EXPORT` but inherit nothing). `caller` inside import resolves
+  to the `use`r correctly (verified).
+- **REAL Exporter, no shim**: PCL had NO `Exporter::import` (no-op pragma + `@EXPORT` fake). Wrote a
+  small `lib/Exporter.pm` shim first, then — per the user's "why ship our own if it's pure Perl?" —
+  **tested the real core `Exporter.pm`: it transpiles + runs** on the primitives we've fixed (caller,
+  symbolic derefs, glob-assign), so deleted our shim. `@ISA=('Exporter')`, `*import=\&Exporter::import`,
+  `use Exporter 'import'` all resolve to the real import.
+- **Multi-seg `\&{...}` fix** (`p-get-coderef`): `\&{"Data::Dump::pp"}` upcased the pkg to
+  `DATA::DUMP`, missed `|Data::Dump|`, returned a SCALAR ref to nil → Exporter::import installed
+  garbage for EVERY multi-seg module. Now via `perl-pkg-to-cl-pkg-name` (the s238b rule; the
+  `\&{...}` refgen path was the one symbolic-ref form we'd missed). **This was the only thing wrong
+  with Data::Dump** (single-seg AliasMod worked; `dump` being a keyword was a red herring).
+- Removed dead, never-run `sub import` from `lib/Config.pm`/`Cwd.pm`/`File/Spec/Functions.pm` (they
+  hand-rolled Exporter; the change would have activated + broken them — they use `@EXPORT` now).
+
+**Data::Dump now runs end-to-end through the real generic path, byte-exact vs perl 5.40.** Gate
+**91/3310**, full sweep **18148/823/69, sweep-diff 0 new / 0 fixed** — zero regressions despite
+touching every `use`. Re-surveyed CPAN modules: Scalar::Util / List::Util(sum,max) / Try::Tiny /
+Safe::Isa / JSON::PP / Data::Dump ✅. **Role::Tiny now hits the cascade** `STRICT::$^H unbound`
+(NOT a regression — its `import` was never run before; my change correctly activates it, and it
+calls `strict->import`). **Follow-up = pragma `->import`/`->unimport` as no-op method calls + bind
+`$^H`** (unblocks Role::Tiny + Moo). Also `List::Util first {}` (block-arg) and the `defined
+&glob_installed_sub` cosmetic remain separate pre-existing gaps. See [[project_cpan_module_survey]],
+`docs/test-more-plan.md`.
+
+---
+
 ## Session 238e (2026-06-08) — UNIVERSAL::isa reftype special case + Test::More plan/status
 
 Two pieces, both en route to running CPAN modules' own test suites.
