@@ -4,6 +4,58 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 238 (2026-06-07) — pull multideref.t + postfixderef.t; 2 general subscript/our bugs fixed
+
+Picked up the queued task (end of 237b): pull Perl's own `t/op/multideref.t` (65) and
+`t/op/postfixderef.t` (128) into `perl-tests/` to guard the postfix-deref / multi-level
+subscript work. multideref.t **crashed at test 5**; drilling in found two *general* bugs
+(both committed, regression tests in `Pl/t/misc-fixes-01.t` 104→107):
+
+1. **Package-var INDEX sigils corrupted in nested subscript chains** (`Pl/ExprToCL.pm`,
+   commit `ac6fdc1`). `gen_array_access`/`gen_hash_access` rewrote the *container's* `$`→`@`/`%`
+   with an unanchored `s/(^|::)\$/.../`. For a nested access the container is already a full
+   `(p-aref @a Pkg::$i ...)` string, and the `::$` alternative matched the inner
+   package-qualified **index** `Pkg::$i` → `$a[$i]{$k}` emitted `(p-aref @a Pkg::%i)` (i
+   mis-sigiled to `%i`; `{$k}[..]`→`@k`; etc.). Pattern: every NON-terminal subscript var
+   inherited the NEXT bracket's sigil; the last was correct. Lexical (`my`) indices escaped
+   (`$` not preceded by `^`/`::`); only `our`/package vars hit it. Fix: gate the rewrite on the
+   container node being a bare **Symbol/Magic** token, mirroring the existing guard on the
+   `exists` codegen path. Affects ANY package-var multi-level subscript → broad.
+
+2. **`our (LIST) = (...)` inside a `{ package X; ... }` BLOCK never reached references**
+   (`Pl/Parser.pm`, same commit). A brace-delimited package block compiles to ONE top-level CL
+   form, so the inline `(in-package :X)` does **not** change how the reader interns names inside
+   it: the bare `$x` in the declaration/`p-list-=` interned as `MAIN::$x`, while references (via
+   gen_node) read `X::$x` → the assignment landed in a *different* box (undef read → the original
+   `(p-gethash 66 ...)` crash). File-scope `package X;` dodged it (later top-level forms ARE read
+   after in-package, so bare `$x` interns into X). Fix: new `_our_var_cl_name($pkg,$var)` helper
+   mirrors gen_node's qualification byte-for-byte; applied to every `our` defvar/assignment target
+   (single + list + bare-decl paths). No-op at file scope / main.
+
+**Results:** multideref 13→**28/65**, postfixderef **72/128**. Gate **91/3296 green**. Full sweep
+**18148 pass / 823 fail / 69 fully passing** (the +101 pass/+39 fail vs 237b is almost entirely the
+two new files: 100 pass + 40 fail). `sweep-diff` **0 new / 0 fixed** (33 new fails correctly
+segregated as crash-file noise in the two PARTIAL files). Baseline re-blessed **449→482** (commit
+`95bfc9e`).
+
+**Both new files still PARTIAL (aborts halt the rest), remaining = mostly not-supported + 3 real targets:**
+- **multideref aborts on `($r//0)->[$li1]{$lk1}[$li2+$z]{$lk2} = 15`** — lvalue autoviv can't
+  thread through a parenthesized `//` base → `(setf (p-gethash :UNDEF "c") 15)`. Niche lvalue bug.
+- **postfixderef aborts on `$name1->@[2,3] = ("Very","Yummy")`** where `$name1="\0Chalk"` — symbolic-ref
+  (glob-name) slice-assign; PCL tries to vector-set into a string box. Not-supported (symbol-table) +
+  a runtime-robustness gap (don't `(setf p-aref)` into a CHARACTER array).
+- **SEPARATE pre-existing general autoviv gap (NOT from these fixes): `$a[N]{k} = v` on an empty
+  array fails to autovivify** — reproduces with lexical vars AND literal indices:
+  `(setf (p-gethash :UNDEF "k") v)`. `p-aref` (not `p-aref-box`) in the setf chain returns `:UNDEF`
+  instead of autovivifying `$a[N]` into a hashref. Real fixable target; multideref's *store* tests
+  only passed because they used a pre-built structure (`push @a,...,$rh`). The 105/107 regression
+  tests were rewritten to read a pre-built `@a=(undef,{x=>N})` to isolate fix #1 from this gap.
+
+Next: (a) the `$a[N]{k}=v` autoviv gap (general, would lift several store rows), then re-survey
+multideref/postfixderef; (b) resume the CPAN-module survey (Moo) per [[project_cpan_module_survey]].
+
+---
+
 ## Session 237b (2026-06-07) — Moo survey: 4 general glob/print/our bugs fixed; Moo blocked on eval-capture
 
 Resumed the no-XS CPAN survey ([[project_cpan_module_survey]]) toward **Moo**. Began by
