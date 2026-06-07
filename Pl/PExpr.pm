@@ -1652,6 +1652,54 @@ sub parse_list {
 # Returns true if a PPI::Structure::Block looks like a hash constructor:
 # first significant token is a bareword followed by =>
 # e.g., {a => $_, b => $x}
+# Extend an operand-boundary index over a trailing POSTFIX chain, returning the
+# new (inclusive) end index.  This is the one place that knows the postfix grammar
+#   postfix := [subscript] | {subscript}
+#            | -> [..] | -> {..}              (arrow subscript)
+#            | -> @* | -> %* | -> $*          (postfix deref)
+#            | -> @[..] | -> @{..} | -> %[..] | -> %{..}   (postfix slice)
+#            | -> method                      (method name; args are bounded elsewhere)
+# It replaces five hand-rolled, subtly-divergent copies of this walk that used to
+# live in the named-unary / 1-arg-function operand-boundary logic (some handled
+# `-> subscript` but not `-> @*`, etc.).  $end is the index of the last token of
+# the term so far; the walk looks at $e->[$end+1] onward.  See
+# docs/pexpr-term-parsing-review.md (Option A) for the rationale and Option B for
+# the eventual two-phase replacement.
+sub _extend_postfix_chain {
+  my ($self, $e, $end) = @_;
+  my $n = scalar(@$e);
+  while ($end + 1 < $n) {
+    my $nx = $e->[$end + 1];
+    if (ref($nx) eq 'PPI::Structure::Subscript') {
+      $end++;                                       # [..] or {..}
+      next;
+    }
+    last unless ref($nx) eq 'PPI::Token::Operator'
+             && $nx->content() eq '->'
+             && $end + 2 < $n;
+    my $after = $e->[$end + 2];
+    if (ref($after) eq 'PPI::Structure::Subscript') {
+      $end += 2;                                    # -> [..] / -> {..}
+    } elsif (ref($after) eq 'PPI::Token::Cast'
+             && $after->content() =~ /^[\$\@%]\*$/) {
+      $end += 2;                                    # -> @* / %* / $*
+    } elsif (ref($after) eq 'PPI::Token::Cast'
+             && $after->content() =~ /^[\@%]$/
+             && $end + 3 < $n
+             && ($e->[$end + 3]->isa('PPI::Structure::Subscript')
+                 || $e->[$end + 3]->isa('PPI::Structure::Block'))) {
+      $end += 3;                                    # -> @[..]/@{..}/%[..]/%{..}
+    } elsif (ref($after) eq 'PPI::Token::Word'
+             || ref($after) eq 'PPI::Token::Symbol'
+             || ref($after) eq 'PPI::Token::Magic') {
+      $end += 2;                                    # -> method (name)
+    } else {
+      last;
+    }
+  }
+  return $end;
+}
+
 # True if BLOCK is a single glob-slot bareword: {CODE}, {SCALAR}, {ARRAY}, ...
 # Used to recognize the SLOT block of *{EXPR}{SLOT} dynamic glob-slot access.
 sub _block_is_glob_slot {
@@ -2617,19 +2665,7 @@ sub handle_subcalls {
             if ($end_pars + 1 <= scalar(@$e) - 1
                 && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
                 $end_pars++;
-                while ($end_pars + 1 < scalar(@$e)) {
-                    my $nx = $e->[$end_pars + 1];
-                    if (ref($nx) eq 'PPI::Structure::Subscript') {
-                        $end_pars++;
-                    } elsif (ref($nx) eq 'PPI::Token::Operator'
-                             && $nx->content() eq '->'
-                             && $end_pars + 2 < scalar(@$e)
-                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
-                        $end_pars += 2;
-                    } else {
-                        last;
-                    }
-                }
+                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
             }
         } elsif ((ref($next_term) eq 'PPI::Token::Symbol'
                   || ref($next_term) eq 'PPI::Token::Magic') && $end_pars >= $i + 2) {
@@ -2639,19 +2675,7 @@ sub handle_subcalls {
                 # Symbol + Subscript chain: consume all chained subscripts and
                 # arrow-subscript chains (e.g., $h{a}{b}[c] or $h{a}->{b}->[c])
                 $end_pars = $i + 2;
-                while ($end_pars + 1 < scalar(@$e)) {
-                    my $nx = $e->[$end_pars + 1];
-                    if (ref($nx) eq 'PPI::Structure::Subscript') {
-                        $end_pars++;
-                    } elsif (ref($nx) eq 'PPI::Token::Operator'
-                             && $nx->content() eq '->'
-                             && $end_pars + 2 < scalar(@$e)
-                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
-                        $end_pars += 2;
-                    } else {
-                        last;
-                    }
-                }
+                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
             } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
                      && $after_symbol->start() eq '{'
                      && $next_term->content() =~ /^%/) {
@@ -2668,18 +2692,7 @@ sub handle_subcalls {
                 # $r->{key} or $r->[idx]: consume full arrow-subscript chain
                 # so exists/delete/defined can see the whole lvalue
                 $end_pars = $i + 3;  # symbol + -> + subscript/block
-                while ($end_pars + 1 < scalar(@$e)) {
-                    my $nx = $e->[$end_pars + 1];
-                    if (ref($nx) eq 'PPI::Structure::Subscript') {
-                        $end_pars++;
-                    } elsif (ref($nx) eq 'PPI::Token::Operator'
-                             && $nx->content() eq '->'
-                             && $end_pars + 2 < scalar(@$e)) {
-                        $end_pars += 2;
-                    } else {
-                        last;
-                    }
-                }
+                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
             } else {
                 $end_pars = $i + 1;
             }
@@ -2691,18 +2704,7 @@ sub handle_subcalls {
             # Block/Constructor + -> + Subscript: e.g. exists { hash }->{key}
             # Consume full arrow-subscript chain as the named-unary argument
             $end_pars = $i + 3;
-            while ($end_pars + 1 < scalar(@$e)) {
-                my $nx = $e->[$end_pars + 1];
-                if (ref($nx) eq 'PPI::Structure::Subscript') {
-                    $end_pars++;
-                } elsif (ref($nx) eq 'PPI::Token::Operator'
-                         && $nx->content() eq '->'
-                         && $end_pars + 2 < scalar(@$e)) {
-                    $end_pars += 2;
-                } else {
-                    last;
-                }
-            }
+            $end_pars = $self->_extend_postfix_chain($e, $end_pars);
         } elsif (ref($next_term) eq 'PPI::Token::Operator'
                  && grep { $next_term->content() eq $_ } ('~', '!')) {
             # Unary prefix operator (~, !) — include operator and its operand as the argument
@@ -2764,37 +2766,19 @@ sub handle_subcalls {
           $end_pars = $i + 2;
         } elsif (ref($next_term) eq 'PPI::Token::Symbol'
                  || ref($next_term) eq 'PPI::Token::Magic') {
-          # Symbol or Magic (like %hash, @arr, $var, $_, @_, etc.) - check for subscript/block chain
+          # Symbol or Magic (%hash, @arr, $var, $_, @_, …)
           if ($i + 2 <= $end_pars) {
             my $after = $e->[$i + 2];
-            if (ref($after) eq 'PPI::Structure::Subscript') {
-              # Symbol + Subscript is one term (e.g., keys $h{key})
+            if (ref($after) eq 'PPI::Structure::Block'
+                && $after->start() eq '{'
+                && $next_term->content() =~ /^%/) {
+              # %hash + Block is one term (KV slice: %h{keys}) — not a postfix chain
               $end_pars = $i + 2;
-            } elsif (ref($after) eq 'PPI::Structure::Block'
-                     && $after->start() eq '{'
-                     && $next_term->content() =~ /^%/) {
-              # %hash + Block is one term (KV slice: %h{keys})
-              $end_pars = $i + 2;
-            } elsif (ref($after) eq 'PPI::Token::Operator'
-                     && $after->content() eq '->'
-                     && $i + 3 <= $end_pars
-                     && ref($e->[$i + 3]) eq 'PPI::Token::Cast') {
-              # Symbol + postfix deref: keys $hr->%*, values $ar->@*, and the
-              # slice forms keys $hr->@{...} / values $ar->@[...].
-              my $cast = $e->[$i + 3];
-              if ($cast->content() =~ /^[\$\@%]\*$/) {
-                $end_pars = $i + 3;                 # $hr->@*/%*/$*
-              } elsif ($cast->content() =~ /^[\@%]$/
-                       && $i + 4 <= $end_pars
-                       && ($e->[$i + 4]->isa('PPI::Structure::Subscript')
-                           || $e->[$i + 4]->isa('PPI::Structure::Block'))) {
-                $end_pars = $i + 4;                 # $hr->@[...]/%{...}
-              } else {
-                $end_pars = $i + 1;
-              }
             } else {
-              # Just the symbol (e.g., keys %hash, values @arr)
-              $end_pars = $i + 1;
+              # Subscript chain, -> subscript, -> deref (@*/%*), -> slice
+              # (@[..]/%{..}), or just the bare symbol — all bounded by the walk.
+              # (Subsumes the old keys $hr->%* / values $ar->@* special cases.)
+              $end_pars = $self->_extend_postfix_chain($e, $i + 1);
             }
           } else {
             $end_pars = $i + 1;
