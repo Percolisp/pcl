@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 89;
+plan tests => 92;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -699,3 +699,23 @@ test_cl('*{$globref}{CODE} is false for an empty glob',
     'no strict "refs"; my $gr = \*{"main::no_code"};'
     . ' print( (*{$gr}{CODE} ? "yes" : "no"), "\n");',
     "no\n");
+
+# --- scalar ref placed directly in a %hash = (...) literal/copy ---
+# `%h = (k => \$x)` and `%c = %$href` lost the scalar-ref-ness: %p-make-hash-entry
+# unboxed the ref one level and p-gethash then stripped it to a plain scalar, so
+# ref()='' and ${$h{k}} read empty. Sub::Quote builds captures as {'$x'=>\$v} and
+# copies them via `my %captures = %$captures`, so this blocked Sub::Quote entirely.
+test_cl('scalar ref as direct value in %h = (k => \\$x) literal',
+    'my $v = "AAA"; my %h = (k => \$v);'
+    . ' print ref($h{k}), ":", ${$h{k}}, "\n";',
+    "SCALAR:AAA\n");
+
+test_cl('scalar ref survives %copy = %$href',
+    'my $v = "BBB"; my $href = { s => \$v }; my %c = %$href;'
+    . ' print ref($c{s}), ":", ${$c{s}}, "\n";',
+    "SCALAR:BBB\n");
+
+# writing through the copied ref reaches the original scalar
+test_cl('writeback through a hash-copied scalar ref reaches the original',
+    'my $v = "old"; my %h = (r => \$v); ${$h{r}} = "new"; print $v, "\n";',
+    "new\n");

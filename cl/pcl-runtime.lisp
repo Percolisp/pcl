@@ -2947,14 +2947,27 @@
       (vector-push-extend (make-p-box item) arr)))
 
 (defun %p-make-hash-entry (v)
-  "Create a fresh entry box from V for storage in a hash, preserving bless class.
-   For blessed non-hash objects the class is copied to the new entry box so that
-   p-gethash can return the box and downstream p-ref / p-method-call find the class.
-   References and plain scalars use the existing (unbox+rewrap) behavior."
-  (let ((b (make-p-box (unbox v))))
-    (when (and (p-box-p v) (p-box-class v))
-      (setf (p-box-class b) (p-box-class v)))
-    b))
+  "Create a fresh entry box from V for storage in a hash, preserving bless class
+   AND scalar-reference-ness.
+
+   For a SCALAR reference passed DIRECTLY (V is itself a box with is-ref set, e.g.
+   from `%h = (k => \\$x)` whose RHS element is (p-backslash $x)), wrap the ref box
+   whole — entry = box(→refbox→referent).  This is the same double-box shape that
+   the already-working `my $r=\\$x; %h=(k=>$r)` path produces, and the shape
+   p-gethash expects: its (make-p-box (unbox …)) on read yields the inner refbox,
+   keeping the entry a scalar ref.  The previous (make-p-box (unbox v)) UNBOXED the
+   ref one level, so p-gethash then stripped it to a plain scalar — silently
+   turning `%h=(k=>\\$x)` into a non-ref (ref()='' , ${$h{k}} empty).
+
+   Plain scalars and blessed objects keep copy semantics (unbox+rewrap, copying the
+   bless class).  Array/hash refs don't set is-ref (a box wrapping a vector/
+   hash-table is unambiguously a ref), so they take the plain branch unchanged."
+  (if (and (p-box-p v) (p-box-is-ref v))
+      (make-p-box v)
+      (let ((b (make-p-box (unbox v))))
+        (when (and (p-box-p v) (p-box-class v))
+          (setf (p-box-class b) (p-box-class v)))
+        b)))
 
 (defun %p-snapshot-array-rhs (src)
   "Snapshot SRC for use as the RHS of an array assignment.
