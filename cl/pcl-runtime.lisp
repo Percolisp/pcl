@@ -8071,6 +8071,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             do (vector-pop result)))
     result))
 
+(defun %p-resolve-sub-symbol (name)
+  "Resolve a Perl sub-name string (\"foo\" or \"Pkg::foo\") to its CL symbol
+   PKG::PL-FOO, or NIL if the package/symbol does not exist.  Shared by the
+   symbolic-code-ref paths: &{$name}(...), defined/exists &{$name}.  An
+   unqualified name resolves against the current CL package (MAIN -> main)."
+  (let* ((name (to-string name))
+         (sep-pos (search "::" name :from-end t))
+         (perl-pkg (if sep-pos
+                       (subseq name 0 sep-pos)
+                       (let ((cpkg (package-name *package*)))
+                         (if (string= cpkg "MAIN") "main" cpkg))))
+         (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
+         (cl-pkg (find-package (perl-pkg-to-cl-pkg-name perl-pkg))))
+    (when cl-pkg
+      (find-symbol (concatenate 'string "PL-" (string-upcase bare-name)) cl-pkg))))
+
 (defun p-funcall-ref (ref &rest args)
   "Call a code reference or a symbolic sub name (no-strict-refs semantics)."
   (let ((fn (unbox ref)))
@@ -8324,9 +8340,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-cast-% (val)
   "Perl hash dereference %{$ref} - unbox to get the hash.
    Handles both old format (box containing hash) and new format
-   (box containing box containing hash, from p-backslash)."
+   (box containing box containing hash, from p-backslash).
+   A string ending in \"::\" is a symbolic stash reference (%{\"Pkg::\"} /
+   %{\"main::\"}): return that package's stash (read-only snapshot of its subs),
+   so keys/values/exists over a package symbol table work (Class::Inspector etc.)."
   (let ((v (unbox val)))
-    (if (p-box-p v) (unbox v) v)))
+    (cond
+      ((p-box-p v) (unbox v))
+      ((and (stringp v)
+            (>= (length v) 2)
+            (string= (subseq v (- (length v) 2)) "::"))
+       (p-stash (subseq v 0 (- (length v) 2))))
+      (t v))))
 
 (defun %p-symref-box (name-str)
   "Resolve Perl symbolic scalar reference NAME-STR to a CL box.
@@ -8334,7 +8359,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; CL symbols cannot contain null bytes — silently return nil
   (when (find #\Nul name-str) (return-from %p-symref-box nil))
   (let* ((pos (search "::" name-str :from-end t))
-         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
+         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
+         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
          (pkg (if pkg-str (find-package pkg-str) *package*)))
     (when pkg
@@ -8347,7 +8375,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Set Perl symbolic scalar reference NAME-STR to NEW-BOX."
   (when (find #\Nul name-str) (return-from %p-symref-box new-box))
   (let* ((pos (search "::" name-str :from-end t))
-         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
+         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
+         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
          (pkg (if pkg-str
                   (or (find-package pkg-str)
@@ -8368,7 +8399,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (when (find #\Nul name-str) (return-from %p-symref-array
                                 (make-array 0 :adjustable t :fill-pointer 0)))
   (let* ((pos (search "::" name-str :from-end t))
-         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
+         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
+         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
          (pkg (if pkg-str
                   (or (find-package pkg-str)
@@ -9160,27 +9194,45 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   *p-undef*)
 
 (defun p-coderef-exists-p (coderef)
-  "Perl exists &{$coderef} — true if coderef points to a declared or defined sub."
+  "Perl exists &{$coderef} — true if coderef points to a declared or defined sub.
+   Accepts a real function object OR a symbolic sub-name string (no-strict-refs)."
   (let ((v (unbox coderef)))
-    (unless (functionp v) (return-from p-coderef-exists-p (make-p-box nil)))
-    ;; Get the function's name symbol (SBCL-specific)
-    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
-           (status (and (symbolp fname) (gethash fname *p-declared-subs*))))
-      (if status
-          (make-p-box 1)
-          ;; Fallback: any non-nil function object "exists"
-          (make-p-box 1)))))
+    (when (p-box-p v) (setf v (p-box-value v)))
+    (cond
+      ((functionp v)
+       ;; Any non-nil function object exists (declared stub or defined body).
+       (make-p-box 1))
+      ;; Symbolic name: exists iff it resolves to a known sub (stub or defined).
+      ((or (stringp v) (numberp v))
+       (let ((sym (%p-resolve-sub-symbol v)))
+         (if (and sym (or (gethash sym *p-declared-subs*) (fboundp sym)))
+             (make-p-box 1)
+             (make-p-box nil))))
+      (t (make-p-box nil)))))
 
 (defun p-coderef-defined-p (coderef)
-  "Perl defined &{$coderef} — true only if coderef points to a sub with a body."
+  "Perl defined &{$coderef} — true only if coderef points to a sub with a body.
+   Accepts a real function object OR a symbolic sub-name string (no-strict-refs).
+   A forward-declared sub (p-declare-sub installs a :stub that IS fboundp) is NOT
+   defined, so the status must be :defined (or fbound with no status = imported)."
   (let ((v (unbox coderef)))
-    (unless (functionp v) (return-from p-coderef-defined-p (make-p-box nil)))
-    ;; Get the function's name symbol (SBCL-specific)
-    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
-           (status (and (symbolp fname) (gethash fname *p-declared-subs*))))
-      (if (eq status :defined)
-          (make-p-box 1)
-          (make-p-box nil)))))
+    (when (p-box-p v) (setf v (p-box-value v)))
+    (cond
+      ((functionp v)
+       (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
+              (status (and (symbolp fname) (gethash fname *p-declared-subs*))))
+         (if (eq status :defined)
+             (make-p-box 1)
+             (make-p-box nil))))
+      ((or (stringp v) (numberp v))
+       (let* ((sym (%p-resolve-sub-symbol v))
+              (status (and sym (gethash sym *p-declared-subs*))))
+         (if (and sym
+                  (or (eq status :defined)
+                      (and (null status) (fboundp sym))))
+             (make-p-box 1)
+             (make-p-box nil))))
+      (t (make-p-box nil)))))
 
 ;;; ============================================================
 ;;; Tie / Untie / Tied — scalar implementation

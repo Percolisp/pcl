@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 110;
+plan tests => 114;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -831,3 +831,38 @@ test_cl('autoviv $a[$i]{$k}=v with boxed index and key',
 test_cl('autoviv $a[$i][$j]=v with boxed indices (array-in-array)',
     'my $i=0; my $j=2; my @a; $a[$i][$j]=7; print "A=", $a[$i][$j], "\n";',
     "A=7\n");
+
+# --- symbolic code-ref existence: defined/exists &{"Pkg::sub"} ---
+# p-coderef-defined-p/-exists-p only handled a real function object; a symbolic
+# NAME string (the no-strict-refs form Class::Inspector / Sub::Override use) fell
+# through to false. Now they resolve the name via %p-resolve-sub-symbol. A
+# forward-declared sub installs an fboundp :stub, so "defined" must check status
+# :defined, not mere fboundp.
+test_cl('defined &{"Pkg::sub"} (symbolic): defined vs forward-decl vs missing',
+    'sub foo { 1 } sub fwd;'
+    . ' print join("", map { defined(&{"main::$_"}) ? "y":"n" } qw(foo fwd none)), "\n";',
+    "ynn\n");
+
+test_cl('exists &{"Pkg::sub"} (symbolic): present vs missing',
+    'sub foo { 1 }'
+    . ' my $a = exists &{"main::foo"} ? "y":"n";'
+    . ' my $b = exists &{"main::none"} ? "y":"n";'
+    . ' print "$a$b\n";',
+    "yn\n");
+
+# --- symbolic stash deref: keys %{"Pkg::"} returns the package's sub names ---
+# %{"Pkg::"} (a string ending in ::) now routes through p-cast-% to p-stash; was
+# left as a bare string -> keys yielded nothing.
+test_cl('keys %{"Pkg::"} lists the package subs (symbolic stash)',
+    'package P; sub aa {1} sub bb {2} package main;'
+    . ' print join(",", sort keys %{"P::"}), "\n";',
+    "aa,bb\n");
+
+# --- multi-segment symbolic ref: @{"Foo::Bar::ISA"} ---
+# %p-symref-array/-box upcased the package (FOO::BAR) instead of preserving case
+# for a multi-seg package (|Foo::Bar|), so it made a fresh empty package and the
+# deref came back empty. Now via perl-pkg-to-cl-pkg-name.
+test_cl('multi-segment symbolic array deref @{"Foo::Bar::ISA"}',
+    'package Foo::Bar; our @ISA=("Base"); package main;'
+    . ' print "[", join(",", @{"Foo::Bar::ISA"}), "]\n";',
+    "[Base]\n");
