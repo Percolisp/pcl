@@ -106,7 +106,7 @@ bop.t	350	utf8 ^ glob	'ñ'	''
 bop.t	356	utf8 ^= glob	'ñ'	''
 bop.t	348	utf8 | glob	'÷'	'¾'
 bop.t	354	utf8 |= glob	'÷'	'¾'
-bop.t	464	| overload works	'zaz=ARRAY(0x12033c0b4f)'	'y'
+bop.t	464	| overload works	'zaz=ARRAY(0x12034a8a5f)'	'y'
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*
 caller.t	35	@DB::args is still tied		
@@ -191,7 +191,7 @@ hash.t	6	freed hash elems are not visible to DESTROY
 hash.t	13	magic keys	'a:x:b:y'	'x:y'
 hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'
 hash.t	8	the destructor was called	''	'1'
-hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1200c44803)'	undef
+hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x1200caadb3)'	undef
 hashassign.t	309	all assigned values are returned		
 hashassign.t	304	odd elements also lvalued		
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow
@@ -208,14 +208,14 @@ local.t	255	Underscore 'Reading'
 local.t	275	localised sub via stash		
 local.t	278	localised sub via stash slice		
 magic.t	92		''	'$^X is ./perl, $0 is ./show-shebang '
-magic.t	155	${^LAST_FH} after another tell	undef	'GLOB(0x12010f6dd3)'
-magic.t	154	${^LAST_FH} after tell	undef	'GLOB(0x12010a1eb3)'
-magic.t	156	${^LAST_FH} referencing lexical coercible glob	undef	'REF(0x120113d4d3)'
-magic.t	108	.. and /proc cmdline shows that	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/u7RGewFcYz/zANnlAX2wk.lisp")'	'hahaĀhoho'
+magic.t	155	${^LAST_FH} after another tell	undef	'GLOB(0x12010cedd3)'
+magic.t	154	${^LAST_FH} after tell	undef	'GLOB(0x1201079eb3)'
+magic.t	156	${^LAST_FH} referencing lexical coercible glob	undef	'REF(0x12011154d3)'
+magic.t	108	.. and /proc cmdline shows that	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/4pYW90UMGI/Dzr9zOnw_X.lisp")'	'hahaĀhoho'
 magic.t	107	.. and the UTF-8 version is written	'sbcl'	'hahaĀhoho'
 magic.t	106	.. and the warning is about a wide character	undef	wide
-magic.t	103	/proc cmdline shows as expected (compare to UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/u7RGewFcYz/zANnlAX2wk.lisp")'	'é'
-magic.t	104	/proc cmdline shows as expected (compare to non-UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/u7RGewFcYz/zANnlAX2wk.lisp")'	'é'
+magic.t	103	/proc cmdline shows as expected (compare to UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/4pYW90UMGI/Dzr9zOnw_X.lisp")'	'é'
+magic.t	104	/proc cmdline shows as expected (compare to non-UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/4pYW90UMGI/Dzr9zOnw_X.lisp")'	'é'
 magic.t	134	Can assign to INT	'int'	'main::int'
 magic.t	130	Can assign to __WARN__	'__warn__'	'main::__warn__'
 magic.t	135	Can delete from INT	'int'	'main::int'
@@ -232,7 +232,7 @@ magic.t	75	referencing @` before $` etc. still saws off ampersands	''	'[f]'
 magic.t	105	warning after assignment of wide character	'0'	'1'
 method.t	91		'none'	'ok'
 method.t	115	$AUTOLOAD set correctly for DESTROY		
-method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1201b1ecb3)'
+method.t	131	$pvlv_glob->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT)  )'	'REF(0x1201b890a3)'
 method.t	130	*glob->method is equiv to (\*glob)->method	'#(ok  #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)  )'	'#(ok    #S(P-BOX       :VALUE #S(P-TYPEGLOB :PACKAGE #<PACKAGE "MAIN"> :NAME STDOUT2)       :NV NIL       :NV-OK NIL       :SV NIL       :SV-OK NIL       :CLASS NIL       :IS-REF T)     )'
 method.t	114	AUTOLOAD called for DESTROY		
 method.t	116	Err msg from new{} when stack contains a number	'The function MAIN::PL-NEW is undefined. at (eval 0) line 0. '	^Can't call method "new" without a package or object reference
@@ -248,7 +248,7 @@ method.t	102	method lookup is nul-clean	''	Can't locate object method "method\\0
 method.t	121	method{@array}$more_args	'arg'	'arg b'
 or.t	10	|| propagates lvaluish context to its lhs	'1'	'2'
 or.t	9	|| propagates lvaluish context to its rhs	''	'1'
-pack.t	14703		'1'	'0'
+pack.t	14611		'Ã¾b '	'þb '
 pack.t	14687	. based shrink properly updates group starts	'12     a'	'12  a'
 pack.t	14682	. relative to counted group, extend	'12345     '	'12345  '
 pack.t	14683	. relative to counted group, keep	'12345   '	'12345'
@@ -313,7 +313,7 @@ pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'
 pos.t	21	\G works with defelem scalars		
 pos.t	15	defelems can propagate implicit pos (via //g)	undef	'4'
 pos.t	14	defelems can propagate pos assignment	undef	'3'
-pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1202be7b53)'	undef
+pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1202c753b3)'	undef
 pos.t	12	pos *glob works	undef	'1'
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'
 pos.t	11	pos refuses %hashes	''	^Can't modify hash dereference in match position at 
@@ -324,8 +324,8 @@ pos.t	20	s///g setting pos through a defelem	undef	'1'
 qr.t	18		'Fake!'	\Stew=SCALAR\(0x[0-9a-f]+\)\z
 qr.t	37	REGEXP PVLV leak	undef	'(?^:x)'
 qr.t	36	REGEXP RV leak	'0'	'1'
-qr.t	25	double upgraded to regexp	'77352451331'	'0'
-qr.t	27	int upgraded to regexp	'77352455411'	'0'
+qr.t	25	double upgraded to regexp	'77352680707'	'0'
+qr.t	27	int upgraded to regexp	'77352684787'	'0'
 qr.t	28	likewise produces non-numeric warning	undef	numeric
 qr.t	13	object is blessed		
 qr.t	26	produces non-numeric warning	''	numeric
@@ -336,17 +336,17 @@ readline.t	30	readline *$glob_copy sets PL_last_in_gv	'0'	'-1'
 readline.t	27	readline does not autovivify		
 readline.t	28	tell returns -1 after last gv is unglobbed	'0'	'-1'
 readline.t	29	unglobbery of last gv nullifies PL_last_in_gv	'0'	'-1'
-ref.t	191		'Died at - line 1. '	'Died at -e line 1. '
-ref.t	179	PVBM is not a GLOB ref		
-ref.t	182	PVBM is not a HASH ref		
-ref.t	180	PVBM is not a SCALAR ref		
-ref.t	181	PVBM is not an ARRAY ref		
-ref.t	178	PVBM ref is not a GLOB ref		
-ref.t	217	[perl #109746] referential identity of \literal under threads+mad	'REF(0x12037e6223)'	'SCALAR(0x12037e6263)'
-ref.t	177	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
-ref.t	64	ref() for ref to vstring	'SCALAR'	'VSTRING'
+ref.t	192		'Died at - line 1. '	'Died at -e line 1. '
+ref.t	180	PVBM is not a GLOB ref		
+ref.t	183	PVBM is not a HASH ref		
+ref.t	181	PVBM is not a SCALAR ref		
+ref.t	182	PVBM is not an ARRAY ref		
+ref.t	179	PVBM ref is not a GLOB ref		
+ref.t	218	[perl #109746] referential identity of \literal under threads+mad	'REF(0x1203ba7c23)'	'SCALAR(0x1203ba7c63)'
+ref.t	178	deref of undef from list slice fails	''	Can't use an undefined value as a HASH reference
+ref.t	65	ref() for ref to vstring	'SCALAR'	'VSTRING'
 ref.t	21	reference to &{""} [perl #94476]	'SCALAR'	'CODE'
-ref.t	65	stringify for ref to vstring	'SCALAR(0x12010e2d53)'	^VSTRING\(0x[0-9a-f]+\)$
+ref.t	66	stringify for ref to vstring	'SCALAR(0x12010c0923)'	^VSTRING\(0x[0-9a-f]+\)$
 signatures.t	940		'Undefined subroutine &main:: called at (eval 1) line 1. '	^Too few arguments for subroutine 'main::__ANON__'
 signatures.t	943	RT #130661	'Error while parsing arguments to DEFMACRO P-SUB:   too few elements in     ()   to satisfy lambda list     (NAME PARAMS &BODY BODY):   at least 2 expected, but got 0 at (eval 194) line 1. '	A signature parameter must start with
 signatures.t	944	RT #132141	'abc'	'Xbc'
@@ -395,7 +395,6 @@ sprintf.t	546	>%*2$d< >123< >123 MISSING< >123<
 sprintf.t	165	>%+-v*d< >[3, "\01\02\03"]< >+1 .2  .3  < >+1 .+2 .+3 < cf perl #83194		
 sprintf.t	157	>%+-v3d< >"\01\02\03"< >+1 .2  .3  < >+1 .+2 .+3 < 		
 sprintf.t	158	>%+-v3d< >[version::qv("1.2.3")]< >+1 .2  .3  < > MISSING< 		
-sprintf.t	235	>%.0g< >-0.0< >-0< >< C99 standard mandates minus sign but C89 does not		
 sprintf.t	231	>%.0g< >[]< >0 MISSING< > MISSING< 		
 sprintf.t	227	>%.0hf< >1< >%.0hf INVALID< >1< 'h' should be rejected		
 sprintf.t	169	>%0*v*d< >['-', 2, version::qv("0.7.11")]< >00-07-11< > MISSING< cf perl #83194		
