@@ -166,23 +166,6 @@ case, assorted `sprintf` warning-marker outputs, and `foreach` aliasing of
 [`docs/foreach-aliasing.md`](docs/foreach-aliasing.md)). These are fix targets,
 not declared limitations.
 
-**Per-iteration closure capture in loops and `map`/`grep`/`sort`.** A `my`
-variable declared *inside* a loop body or a `map`/`grep`/`sort` block that is
-captured by a nested closure is currently compiled to a single shared variable
-rather than a fresh binding per iteration. So
-
-```perl
-my @subs = map { my $x = $_; sub { $x } } qw(a b c);
-print $subs[0]->(), $subs[1]->(), $subs[2]->();   # Perl: abc   PCL: ccc
-```
-
-all three closures see the last value. This is the same root cause as
-`for my $n (0..4) { push @s, sub { $n } }`. It blocks functional-style modules
-that build closure tables (e.g. `Safe::Isa`'s `$_isa`/`$_can`). The fix needs a
-real lexical scope (per-iteration `let`) for those block bodies — see
-[`docs/closure-lexical-scoping.md`](docs/closure-lexical-scoping.md). A fix
-target, not a declared limitation.
-
 ---
 
 *For the complete rationale, the exact affected tests, and the skip-registry

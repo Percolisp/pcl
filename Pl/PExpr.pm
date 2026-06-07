@@ -819,6 +819,17 @@ sub parse {
         && !$self->is_internal_node_type($e->[$i-1])
         && $self->is_var($e->[$i-1])
         && $e->[$i-1]->content() =~ /^\*/;
+    # Dynamic typeglob slot access: *{EXPR}{SLOT} — Cast('*') + Block('{EXPR}') +
+    # Block('{SLOT}').  e.g. *{$glob}{CODE}, used by Moo's _install_coderef.
+    # SLOT must be a known glob-slot bareword so we don't misread *{$x}{$y}.
+    my $is_dyn_typeglob_slot = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i >= 2
+        && ref($e->[$i-1]) eq 'PPI::Structure::Block'
+        && $e->[$i-1]->start() eq '{'
+        && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+        && $e->[$i-2]->content() eq '*'
+        && $self->_block_is_glob_slot($term);
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
@@ -828,7 +839,8 @@ sub parse {
         && !$is_kv_arr_deref_constructor
         && !$is_kv_hash_deref_block
         && !$is_qw_subscript
-        && !$is_typeglob_slot;
+        && !$is_typeglob_slot
+        && !$is_dyn_typeglob_slot;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -952,6 +964,36 @@ sub parse {
         splice @$e, $i, 2;  # Remove -> and Cast($*/\@*/\%*)
         $i--;
         next;
+      } elsif (ref($nxt) eq 'PPI::Token::Cast'
+               && $nxt->content() =~ /^([@%])$/
+               && defined($nxt_2)
+               && (ref($nxt_2) eq 'PPI::Structure::Subscript'
+                   || ref($nxt_2) eq 'PPI::Structure::Block')) {
+        # Postfix deref slice: X->@[i,j] / X->@{k,l} / X->%[i,j] / X->%{k,l}
+        # (Perl 5.20+).  Equivalent to @{X}[i,j], @{X}{k,l}, %{X}[i,j], %{X}{k,l}
+        # — build the same slice node the prefix forms use.
+        my $sigil  = $1;
+        my $is_arr = ($nxt_2->start() eq '[');
+        my $type   = $sigil eq '@'
+                     ? ($is_arr ? 'slice_a_acc'    : 'slice_h_acc')
+                     : ($is_arr ? 'kv_slice_a_acc' : 'kv_slice_h_acc');
+        my $pre_id = $self->parse([$pre]);
+        my ($node, $id) = $self->make_node_insert($type);
+        $self->add_child_to_node($id, $pre_id);
+        my @ix    = $nxt_2->children();
+        my $ix_id = $self->_parse_subscript_ix(\@ix, $is_arr);
+        my $n     = $self->get_a_node($ix_id);
+        if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+          # Flatten comma-separated indices/keys into separate children
+          my $kids = $self->get_node_children($ix_id);
+          $self->add_child_to_node($id, $_) for @$kids;
+        } else {
+          $self->add_child_to_node($id, $ix_id);
+        }
+        $e->[$i-1] = $node;
+        splice @$e, $i, 3;  # Remove ->, Cast(@/%), and the subscript
+        $i--;
+        next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/) {
         # Case 1D: X->$foo (variable method name, no parentheses)
@@ -997,8 +1039,11 @@ sub parse {
         } elsif ($cast_before
                  && ref($cast_before) eq 'PPI::Token::Cast'
                  && $cast_before->content() eq '@') {
-          # @{$hashref}{keys} or @$scalar{keys} — hash ref slice
-          $type = "slice_h_acc";
+          # @$ref[indices] — ARRAY ref slice (square brackets);
+          # @$ref{keys} / @{$hashref}{keys} — HASH ref slice (curly braces).
+          # The bracket type decides, NOT the ref type.  (Was always slice_h_acc,
+          # so @$ar[0,2] wrongly hit p-hslice → p-gethash on a vector → crash.)
+          $type = $self->is_arr_braces($term) ? "slice_a_acc" : "slice_h_acc";
         } elsif ($cast_before
                  && ref($cast_before) eq 'PPI::Token::Cast'
                  && $cast_before->content() eq '%'
@@ -1019,7 +1064,7 @@ sub parse {
       my($node, $id) = $self->make_node_insert($type);
 
       my @ix    = $term->children();
-      my $ix_id = $self->_parse_subscript_ix(\@ix);
+      my $ix_id = $self->_parse_subscript_ix(\@ix, $self->is_arr_braces($term));
 
       # Add $pre as child 1
       $self->add_child_to_node($id, $pre_id);
@@ -1044,7 +1089,8 @@ sub parse {
       $e->[$i-1] = $node;
       splice @$e, $i, 1;         # Remove $term (subscript)
 
-      if (($type eq 'slice_h_acc' || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
+      if (($type eq 'slice_a_acc' || $type eq 'slice_h_acc'
+           || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
           && $i >= 2
           && ref($e->[$i-2]) eq 'PPI::Token::Cast'
           && ($e->[$i-2]->content() eq '@' || $e->[$i-2]->content() eq '%')) {
@@ -1177,6 +1223,26 @@ sub parse {
 
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
       splice @$e, $i-1, 2;  # Remove Block and Block
+      $i -= 2;
+      next;
+    }
+
+    # Handle dynamic typeglob slot access: *{EXPR}{SLOT} — Cast('*') +
+    # Block('{EXPR}') + Block('{SLOT}'), e.g. *{$glob}{CODE}.
+    # Parse the Cast+Block pair into the (p-dynamic-typeglob ...) node, then
+    # wrap it in a glob_slot node — same shape as the static *name{SLOT} below.
+    if ($is_dyn_typeglob_slot) {
+      my $glob_id = $self->parse([$e->[$i-2], $e->[$i-1]]);
+      my @blk_ch = grep { ref($_) !~ /Whitespace/ } $term->children();
+      if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
+        @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
+      }
+      my $slot_name = @blk_ch ? $blk_ch[0]->content() : 'SCALAR';
+      my($node, $id) = $self->make_node_insert('glob_slot');
+      $node->{slot_name} = $slot_name;
+      $self->add_child_to_node($id, $glob_id);
+      $e->[$i-2] = $node;   # Replace Cast '*' position with node
+      splice @$e, $i-1, 2;  # Remove Block(EXPR) and Block(SLOT)
       $i -= 2;
       next;
     }
@@ -1586,6 +1652,67 @@ sub parse_list {
 # Returns true if a PPI::Structure::Block looks like a hash constructor:
 # first significant token is a bareword followed by =>
 # e.g., {a => $_, b => $x}
+# Extend an operand-boundary index over a trailing POSTFIX chain, returning the
+# new (inclusive) end index.  This is the one place that knows the postfix grammar
+#   postfix := [subscript] | {subscript}
+#            | -> [..] | -> {..}              (arrow subscript)
+#            | -> @* | -> %* | -> $*          (postfix deref)
+#            | -> @[..] | -> @{..} | -> %[..] | -> %{..}   (postfix slice)
+#            | -> method                      (method name; args are bounded elsewhere)
+# It replaces five hand-rolled, subtly-divergent copies of this walk that used to
+# live in the named-unary / 1-arg-function operand-boundary logic (some handled
+# `-> subscript` but not `-> @*`, etc.).  $end is the index of the last token of
+# the term so far; the walk looks at $e->[$end+1] onward.  See
+# docs/pexpr-term-parsing-review.md (Option A) for the rationale and Option B for
+# the eventual two-phase replacement.
+sub _extend_postfix_chain {
+  my ($self, $e, $end) = @_;
+  my $n = scalar(@$e);
+  while ($end + 1 < $n) {
+    my $nx = $e->[$end + 1];
+    if (ref($nx) eq 'PPI::Structure::Subscript') {
+      $end++;                                       # [..] or {..}
+      next;
+    }
+    last unless ref($nx) eq 'PPI::Token::Operator'
+             && $nx->content() eq '->'
+             && $end + 2 < $n;
+    my $after = $e->[$end + 2];
+    if (ref($after) eq 'PPI::Structure::Subscript') {
+      $end += 2;                                    # -> [..] / -> {..}
+    } elsif (ref($after) eq 'PPI::Token::Cast'
+             && $after->content() =~ /^[\$\@%]\*$/) {
+      $end += 2;                                    # -> @* / %* / $*
+    } elsif (ref($after) eq 'PPI::Token::Cast'
+             && $after->content() =~ /^[\@%]$/
+             && $end + 3 < $n
+             && ($e->[$end + 3]->isa('PPI::Structure::Subscript')
+                 || $e->[$end + 3]->isa('PPI::Structure::Block'))) {
+      $end += 3;                                    # -> @[..]/@{..}/%[..]/%{..}
+    } elsif (ref($after) eq 'PPI::Token::Word'
+             || ref($after) eq 'PPI::Token::Symbol'
+             || ref($after) eq 'PPI::Token::Magic') {
+      $end += 2;                                    # -> method (name)
+    } else {
+      last;
+    }
+  }
+  return $end;
+}
+
+# True if BLOCK is a single glob-slot bareword: {CODE}, {SCALAR}, {ARRAY}, ...
+# Used to recognize the SLOT block of *{EXPR}{SLOT} dynamic glob-slot access.
+sub _block_is_glob_slot {
+  my ($self, $block) = @_;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return 0 unless @ch == 1 && $ch[0]->isa('PPI::Token::Word');
+  return $ch[0]->content =~ /^(?:SCALAR|ARRAY|HASH|CODE|IO|GLOB|NAME|PACKAGE|FORMAT)$/
+       ? 1 : 0;
+}
+
 sub _block_is_hash_constructor {
   my $block = shift;
   my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
@@ -1932,9 +2059,9 @@ sub handle_subcalls {
                    && $rest_ch[0]->content eq '->'
                    && ref($rest_ch[1]) eq 'PPI::Structure::Subscript') {
               my $sub = $rest_ch[1];
-              my $key_cl = _subscript_to_cl_str($sub, $self);
-              last unless defined $key_cl;
               my $start = $sub->start->content;
+              my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
+              last unless defined $key_cl;
               $body_cl = ($start eq '{')
                   ? "(p-gethash-deref $body_cl $key_cl)"
                   : "(p-aref-deref $body_cl $key_cl)";
@@ -2020,7 +2147,7 @@ sub handle_subcalls {
                    && ref($e->[$i + 3 + $deref_skip]) eq 'PPI::Structure::Subscript') {
               my $sub = $e->[$i + 3 + $deref_skip];
               my $start = $sub->start->content;
-              my $key_cl = _subscript_to_cl_str($sub, $self);
+              my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
               last unless defined $key_cl;
               if ($start eq '{') {
                 $body_cl = "(p-gethash-deref $body_cl $key_cl)";
@@ -2538,19 +2665,7 @@ sub handle_subcalls {
             if ($end_pars + 1 <= scalar(@$e) - 1
                 && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
                 $end_pars++;
-                while ($end_pars + 1 < scalar(@$e)) {
-                    my $nx = $e->[$end_pars + 1];
-                    if (ref($nx) eq 'PPI::Structure::Subscript') {
-                        $end_pars++;
-                    } elsif (ref($nx) eq 'PPI::Token::Operator'
-                             && $nx->content() eq '->'
-                             && $end_pars + 2 < scalar(@$e)
-                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
-                        $end_pars += 2;
-                    } else {
-                        last;
-                    }
-                }
+                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
             }
         } elsif ((ref($next_term) eq 'PPI::Token::Symbol'
                   || ref($next_term) eq 'PPI::Token::Magic') && $end_pars >= $i + 2) {
@@ -2560,19 +2675,7 @@ sub handle_subcalls {
                 # Symbol + Subscript chain: consume all chained subscripts and
                 # arrow-subscript chains (e.g., $h{a}{b}[c] or $h{a}->{b}->[c])
                 $end_pars = $i + 2;
-                while ($end_pars + 1 < scalar(@$e)) {
-                    my $nx = $e->[$end_pars + 1];
-                    if (ref($nx) eq 'PPI::Structure::Subscript') {
-                        $end_pars++;
-                    } elsif (ref($nx) eq 'PPI::Token::Operator'
-                             && $nx->content() eq '->'
-                             && $end_pars + 2 < scalar(@$e)
-                             && ref($e->[$end_pars + 2]) eq 'PPI::Structure::Subscript') {
-                        $end_pars += 2;
-                    } else {
-                        last;
-                    }
-                }
+                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
             } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
                      && $after_symbol->start() eq '{'
                      && $next_term->content() =~ /^%/) {
@@ -2589,18 +2692,7 @@ sub handle_subcalls {
                 # $r->{key} or $r->[idx]: consume full arrow-subscript chain
                 # so exists/delete/defined can see the whole lvalue
                 $end_pars = $i + 3;  # symbol + -> + subscript/block
-                while ($end_pars + 1 < scalar(@$e)) {
-                    my $nx = $e->[$end_pars + 1];
-                    if (ref($nx) eq 'PPI::Structure::Subscript') {
-                        $end_pars++;
-                    } elsif (ref($nx) eq 'PPI::Token::Operator'
-                             && $nx->content() eq '->'
-                             && $end_pars + 2 < scalar(@$e)) {
-                        $end_pars += 2;
-                    } else {
-                        last;
-                    }
-                }
+                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
             } else {
                 $end_pars = $i + 1;
             }
@@ -2612,18 +2704,7 @@ sub handle_subcalls {
             # Block/Constructor + -> + Subscript: e.g. exists { hash }->{key}
             # Consume full arrow-subscript chain as the named-unary argument
             $end_pars = $i + 3;
-            while ($end_pars + 1 < scalar(@$e)) {
-                my $nx = $e->[$end_pars + 1];
-                if (ref($nx) eq 'PPI::Structure::Subscript') {
-                    $end_pars++;
-                } elsif (ref($nx) eq 'PPI::Token::Operator'
-                         && $nx->content() eq '->'
-                         && $end_pars + 2 < scalar(@$e)) {
-                    $end_pars += 2;
-                } else {
-                    last;
-                }
-            }
+            $end_pars = $self->_extend_postfix_chain($e, $end_pars);
         } elsif (ref($next_term) eq 'PPI::Token::Operator'
                  && grep { $next_term->content() eq $_ } ('~', '!')) {
             # Unary prefix operator (~, !) — include operator and its operand as the argument
@@ -2685,20 +2766,19 @@ sub handle_subcalls {
           $end_pars = $i + 2;
         } elsif (ref($next_term) eq 'PPI::Token::Symbol'
                  || ref($next_term) eq 'PPI::Token::Magic') {
-          # Symbol or Magic (like %hash, @arr, $var, $_, @_, etc.) - check for subscript/block chain
+          # Symbol or Magic (%hash, @arr, $var, $_, @_, …)
           if ($i + 2 <= $end_pars) {
             my $after = $e->[$i + 2];
-            if (ref($after) eq 'PPI::Structure::Subscript') {
-              # Symbol + Subscript is one term (e.g., keys $h{key})
-              $end_pars = $i + 2;
-            } elsif (ref($after) eq 'PPI::Structure::Block'
-                     && $after->start() eq '{'
-                     && $next_term->content() =~ /^%/) {
-              # %hash + Block is one term (KV slice: %h{keys})
+            if (ref($after) eq 'PPI::Structure::Block'
+                && $after->start() eq '{'
+                && $next_term->content() =~ /^%/) {
+              # %hash + Block is one term (KV slice: %h{keys}) — not a postfix chain
               $end_pars = $i + 2;
             } else {
-              # Just the symbol (e.g., keys %hash, values @arr)
-              $end_pars = $i + 1;
+              # Subscript chain, -> subscript, -> deref (@*/%*), -> slice
+              # (@[..]/%{..}), or just the bare symbol — all bounded by the walk.
+              # (Subsumes the old keys $hr->%* / values $ar->@* special cases.)
+              $end_pars = $self->_extend_postfix_chain($e, $i + 1);
             }
           } else {
             $end_pars = $i + 1;
@@ -3689,8 +3769,27 @@ sub get_node_children {
 # In $a[bar] / $h{bar}, PPI gives a Statement::Expression wrapping a Token::Word.
 # handle_subcalls would turn that into a funcall — wrong for barewords.
 # We detect the pattern and return a string-literal node instead.
+# Whether a lone bareword subscript should be autoquoted to a string.
+# HASH subscripts ($h{bar}) always autoquote.  ARRAY subscripts ($a[bar]) are
+# numeric expressions: Perl evaluates the bareword as a function/constant call
+# IF one of that name is known at this point (e.g. a use-constant index like
+# $self->[P_ALLOW_NONREF]); otherwise (no strict subs) an unknown bareword is
+# just the string "bar" → numeric 0.  So we autoquote unless it's a known
+# callable, mirroring Perl's compile-time decision.
+sub _bareword_subscript_autoquotes {
+  my ($self, $name, $is_array) = @_;
+  return 1 unless $is_array;                       # hash subscript: always quote
+  return 1 unless $self->has_parser;               # no environment: fall back to quote
+  my $env = $self->parser->environment;
+  return 0 if $env->has_prototype($name);          # constant or prototyped/known sub
+  for my $s (@{ $env->get_declared_subs || [] }) {
+    return 0 if defined $s->{name} && $s->{name} eq $name;
+  }
+  return 1;                                         # unknown bareword: string index
+}
+
 sub _subscript_to_cl_str {
-  my ($subscript, $self) = @_;
+  my ($subscript, $self, $is_array) = @_;
   my @kids = grep { !$_->isa('PPI::Token::Whitespace') } $subscript->children();
   my @inner = @kids;
   if (@inner == 1 && $inner[0]->isa('PPI::Statement::Expression')) {
@@ -3698,22 +3797,30 @@ sub _subscript_to_cl_str {
   }
   if (@inner == 1) {
     my $k = $inner[0];
-    return '"' . $k->content . '"' if ref($k) eq 'PPI::Token::Word';
-    return $k->content              if ref($k) eq 'PPI::Token::Number';
+    if (ref($k) eq 'PPI::Token::Word') {
+      return '"' . $k->content . '"'
+        if $self->_bareword_subscript_autoquotes($k->content, $is_array);
+      # else: known callable in an array subscript — evaluate it (fall through)
+    } elsif (ref($k) eq 'PPI::Token::Number') {
+      return $k->content;
+    }
   }
   return $self->parser->_parse_expression(\@inner, undef) if $self->has_parser;
   return undef;
 }
 
 sub _parse_subscript_ix {
-  my ($self, $ix) = @_;
+  my ($self, $ix, $is_array) = @_;
   my @sig = grep { !$_->isa('PPI::Token::Whitespace') } @$ix;
   if (@sig == 1 && $sig[0]->isa('PPI::Statement::Expression')) {
     my @ekids = grep { !$_->isa('PPI::Token::Whitespace') } $sig[0]->children();
     if (@ekids == 1 && ref($ekids[0]) eq 'PPI::Token::Word') {
-      my $word    = $ekids[0]->content();
-      my $str_tok = PPI::Token::Quote::Single->new("'$word'");
-      return $self->make_node($str_tok);
+      my $word = $ekids[0]->content();
+      if ($self->_bareword_subscript_autoquotes($word, $is_array)) {
+        my $str_tok = PPI::Token::Quote::Single->new("'$word'");
+        return $self->make_node($str_tok);
+      }
+      # else: known callable in an array subscript — parse as an expression below
     }
   }
   return $self->parse($ix);

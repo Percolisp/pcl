@@ -1501,12 +1501,17 @@ sub _process_our_declaration {
   $self->_with_bucket('declarations', sub {
     $self->_emit(";; $perl_code");
     if ($self->environment->in_subroutine > 0) {
+      # Multi-segment package names (Foo::Bar) must be pipe-quoted in the CL
+      # symbol prefix, else the reader sees "Foo::Bar::$var" as too many colons.
+      # _cl_pkg_designator is the single source of truth (':|Foo::Bar|' / ':main');
+      # strip the leading ':' to get the symbol-package prefix (cf. line ~5458).
+      (my $cl_pkg_sym = $self->_cl_pkg_designator($pkg)) =~ s/^://;
       for my $var (@vars) {
         my $sigil = substr($var, 0, 1);
         my $init = $sigil eq '$' ? '(make-p-box nil)'
                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                  :                 '(make-hash-table :test #\'equal)';
-        my $cl_var = "${pkg}::${var}";
+        my $cl_var = "${cl_pkg_sym}::${var}";
         $self->_emit("(defvar $cl_var $init)");
       }
     }
@@ -1728,6 +1733,11 @@ sub _process_my_toplevel_declaration {
   # Find variable(s) and optional initializer
   my @vars;
   my $init_idx = -1;
+  # Whether the LHS was parenthesized: my ($x) is a LIST assignment (so a single
+  # scalar gets the FIRST RHS element), whereas my $x is a SCALAR assignment (the
+  # comma operator / array-in-scalar count).  Without this, my ($x) = @a wrongly
+  # compiled to (box-set $x @a) → element count, and my ($x) = (a,b) → last elem.
+  my $lhs_is_list = 0;
 
   for my $i (0 .. $#$parts) {
     my $p = $parts->[$i];
@@ -1737,7 +1747,8 @@ sub _process_my_toplevel_declaration {
       push @vars, $p->content;
     }
     elsif ($ref eq 'PPI::Structure::List') {
-      # List declaration: my ($x, $y)
+      # List declaration: my ($x, $y) — or a parenthesized single var my ($x)
+      $lhs_is_list = 1;
       push @vars, $self->_find_symbols_in_list($p);
     }
     elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
@@ -1866,8 +1877,13 @@ sub _process_my_toplevel_declaration {
         my $var = $vars[0];
         my $sigil = substr($var, 0, 1);
 
-        if ($sigil eq '$') {
-          # Scalar: parse RHS and use box-set to properly unbox source
+        if ($sigil eq '$' && $lhs_is_list) {
+          # my ($x) = LIST — parenthesized single scalar is a LIST assignment:
+          # $x gets the FIRST element (RHS parsed in list context).
+          my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt, 1) // 'nil';
+          $self->_emit("(p-list-= (vector $var) $rhs_cl)");
+        } elsif ($sigil eq '$') {
+          # my $x = EXPR — scalar assignment; box-set unboxes the source properly
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
           $self->_emit("(box-set $var $init_cl)");
         } else {
@@ -3563,6 +3579,12 @@ sub parse_block_to_cl_string {
   # Enter new scope for filehandles
   $self->environment->push_scope();
 
+  # Per-iteration closure capture: if a `my` var declared in this block is
+  # captured by a nested anon sub, wrap the body in a `let` of a fresh lexical
+  # so each block invocation (the block is a (lambda ($_) ...) called once per
+  # element) gets its own binding.  No-op for ordinary blocks.
+  my $clo_scope = $self->_begin_block_closure_scope($block);
+
   # Find last significant child so we can set tail_position correctly.
   # This prevents the VOID_CTX wrap (in _process_expression_statement) from
   # incorrectly wrapping the lambda's return value in map/grep/sort blocks.
@@ -3597,6 +3619,9 @@ sub parse_block_to_cl_string {
   }
   $self->{_local_let_depth} = $saved_local_depth;
 
+  # Close the per-iteration closure-capture let (if one was opened).
+  $self->_end_block_closure_scope($clo_scope);
+
   # Leave scope
   $self->environment->pop_scope();
 
@@ -3621,6 +3646,85 @@ sub parse_block_to_cl_string {
   } else {
     return "nil";
   }
+}
+
+# Open a per-iteration closure-capture scope for a map/grep/sort block body.
+# A `my` var declared in the block AND captured by a nested anonymous sub is
+# renamed to a fresh, never-`defvar`'d lexical ($x__lex__N) and bound by a `let`
+# wrapping the body.  The block compiles to a (lambda ($_) ...) called once per
+# element, so the `let` mints a new box per element — giving Perl's per-iteration
+# capture (`map { my $x=$_; sub {$x} } qw(a b c)` → "abc", not "ccc").
+#
+# This reproduces _with_declarations's rename, but emits the `let` directly into
+# the temp-section string this path collects (the bucket-based _emit_scoped_block
+# does not compose with that string collection).  Returns a state hashref for
+# _end_block_closure_scope, or undef (strict no-op) when the block has no
+# closure-captured block-local `my` — the overwhelmingly common case.
+sub _begin_block_closure_scope {
+  my ($self, $block) = @_;
+  return undef unless ref($block) && $block->can('children');
+
+  # Cheap gate: only blocks containing a nested `sub` can capture anything.
+  my $captured = $self->_vars_referenced_in_closures($block);
+  return undef unless %$captured;
+
+  # Block-local `my` declarations (NOT those inside the nested sub — that path
+  # is excluded by _find_all_declarations) that the closure actually captures.
+  my %seen;
+  my @vars = grep { !$seen{$_}++ }
+             grep { $captured->{$_} }
+             map  { $_->{var} }
+             grep { $_->{type} eq 'my' }
+             @{ $self->_find_all_declarations($block) };
+  return undef unless @vars;
+
+  my $env_renames = $self->environment->state_var_renames // {};
+  my $clo = {
+    saved_env       => { %$env_renames },
+    saved_scope_new => $self->{_current_scope_new_renames},
+    saved_scope_old => $self->{_current_scope_old_renames},
+    saved_letbound  => $self->{_let_bound_vars},
+    saved_indent    => $self->indent_level,
+  };
+
+  my (%new_renames, @bindings);
+  my %env = %$env_renames;
+  for my $var (@vars) {
+    my ($sigil, $bare) = ($var =~ /^([\$\@\%])(.+)$/);
+    $sigil //= '$'; $bare //= $var;
+    (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
+    my $uniq = sprintf('%s%s__lex__%d', $sigil, $slug, ++$lex_var_counter);
+    $new_renames{$var} = $uniq;
+    $env{$var}         = $uniq;
+    push @bindings, "($uniq " . _let_init($sigil) . ")";
+  }
+
+  # state_var_renames → references + string interpolation emit the lexical name.
+  # _current_scope_new_renames → _process_variable_statement takes the rename path
+  #   (and skips _process_my_toplevel_declaration's defvar at top level).
+  # _current_scope_old_renames → the RHS of `my $x = $x` sees the outer binding.
+  # _let_bound_vars → the var is treated as lexical, not a package global.
+  $self->environment->state_var_renames(\%env);
+  $self->{_current_scope_new_renames} = { %{$clo->{saved_scope_new} // {}}, %new_renames };
+  $self->{_current_scope_old_renames} = { %{$clo->{saved_scope_old} // {}},
+                                          map { $_ => $clo->{saved_env}{$_} } @vars };
+  $self->{_let_bound_vars} = { %{$clo->{saved_letbound} // {}}, map { $_ => 1 } @vars };
+
+  $self->_emit("(let (" . join(" ", @bindings) . ")");
+  $self->indent_level($self->indent_level + 1);
+  return $clo;
+}
+
+# Close the let opened by _begin_block_closure_scope and restore the rename maps.
+sub _end_block_closure_scope {
+  my ($self, $clo) = @_;
+  return unless $clo;
+  $self->indent_level($clo->{saved_indent});
+  $self->_emit(")");
+  $self->environment->state_var_renames($clo->{saved_env});
+  $self->{_current_scope_new_renames} = $clo->{saved_scope_new};
+  $self->{_current_scope_old_renames} = $clo->{saved_scope_old};
+  $self->{_let_bound_vars}            = $clo->{saved_letbound};
 }
 
 
@@ -3861,9 +3965,41 @@ sub _vars_referenced_in_closures {
       next unless $sib;
       my $syms = $sib->find('PPI::Token::Symbol') || [];  # same: || not //
       $captured{$_->content} = 1 for @$syms;
+
+      # Variables used ONLY via string interpolation / regex (e.g. sub { "v=$x" })
+      # are not PPI::Token::Symbol nodes — they live inside quote/heredoc/regex
+      # tokens. Scan those too, or the closure-capture rename misses them and the
+      # var stays a shared global. Over-inclusion is safe: callers intersect this
+      # set with the block-local `my` declarations.
+      my $interp = $sib->find(sub {
+        my $t = $_[1];
+        $t->isa('PPI::Token::Quote::Double')
+          || $t->isa('PPI::Token::Quote::Interpolate')
+          || $t->isa('PPI::Token::QuoteLike::Backtick')
+          || $t->isa('PPI::Token::QuoteLike::Command')
+          || $t->isa('PPI::Token::HereDoc')
+          || $t->isa('PPI::Token::Regexp::Match')
+          || $t->isa('PPI::Token::Regexp::Substitute');
+      }) || [];
+      for my $t (@$interp) {
+        $captured{$_} = 1 for _vars_in_interpolated_text($t->content);
+      }
     }
   }
   return \%captured;
+}
+
+# Extract interpolated variable names ($name, ${name}, @name, @{name}, and the
+# base var of $name[..]/$name{..}) from raw interpolating text. A deliberately
+# liberal over-approximation used only to decide closure capture; an unescaped
+# sigil immediately followed by a word character (or {word}) is taken as a ref.
+sub _vars_in_interpolated_text {
+  my ($txt) = @_;
+  my @vars;
+  while ($txt =~ /(?<!\\)([\$\@])\{?(\w+)\}?/g) {
+    push @vars, "$1$2";
+  }
+  return @vars;
 }
 
 # Build the $outer scope hashref passed to BlockAnalyzer::analyze.
@@ -5227,16 +5363,14 @@ sub _process_package_statement {
       #      the right order within the same call.
       my $saved_pkg_stack = [@{$self->environment->package_stack}];
 
-      my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' ||
-                    lc($pkg_name) eq 'error' || lc($pkg_name) eq 'method' ||
-                    lc($pkg_name) eq 'function')
-                   ? ":|$pkg_name|" : ":$pkg_name";
+      my $cl_pkg = $self->_cl_pkg_designator($pkg_name);
       my $cl_class = $self->_pkg_to_clos_class($pkg_name);
 
       $self->_emit(";;; inline package $pkg_name");
       $self->_emit("(p-defpackage $cl_pkg)");
       $self->_emit(";; CLOS class for MRO");
       $self->_emit("(defclass $cl_class () ())");
+      $self->_emit("(p-set-current-package $cl_pkg \"$pkg_name\")");
       $self->_emit("");
 
       $self->environment->push_package($pkg_name);
@@ -5264,7 +5398,7 @@ sub _process_package_statement {
       $self->environment->pop_package();
       # Switch back to previous package: open a new section with in-package in preamble
       my $prev_pkg = $self->environment->current_package();
-      my $cl_prev  = $prev_pkg =~ /::/ ? ":|$prev_pkg|" : ":$prev_pkg";
+      my $cl_prev  = $self->_cl_pkg_designator($prev_pkg);
       $self->_open_section($prev_pkg);
       $self->_cur_bucket('runtime');
       $self->_with_bucket('preamble', sub {
@@ -5272,6 +5406,8 @@ sub _process_package_statement {
         $self->_emit(";;; end package $pkg_name");
         $self->_emit("");
       });
+      # Restore the runtime current-package to the enclosing package.
+      $self->_emit("(p-set-current-package $cl_prev \"$prev_pkg\")");
     }
   }
   else {
@@ -5283,6 +5419,10 @@ sub _process_package_statement {
       # SBCL reader's package context and corrupt the section/bucket structure.
       # The environment's current_package is used by codegen (e.g. 1-arg bless).
       $self->environment->push_package($pkg_name);
+      # Reflect the package switch at runtime too (caller()/__PACKAGE__ case).
+      # The setf is restored on sub exit via p-sub's dynamic binding.
+      $self->_emit("(p-set-current-package " . $self->_cl_pkg_designator($pkg_name) .
+                   " \"$pkg_name\")");
     } else {
       $self->_emit_package_preamble($pkg_name);
       $self->environment->push_package($pkg_name);
@@ -5295,14 +5435,23 @@ sub _process_package_statement {
 # Emit CL package preamble (defpackage + in-package)
 # Uses pipe-quoting for package names with :: or that conflict with CL symbols
 # Also emits a CLOS class for MRO tracking (inheritance)
+# The CL package designator codegen uses for a Perl package name.  Names with
+# :: (or that collide with CL symbols) are pipe-quoted so the reader preserves
+# case; plain single-segment names are emitted bare and the reader upcases them.
+# Single source of truth — used wherever a (p-defpackage ...) / in-package form
+# or a runtime package reference is emitted.
+sub _cl_pkg_designator {
+  my ($self, $pkg_name) = @_;
+  return ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' || lc($pkg_name) eq 'error' ||
+          lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
+         ? ":|$pkg_name|" : ":$pkg_name";
+}
+
 sub _emit_package_preamble {
   my $self     = shift;
   my $pkg_name = shift;
 
-  # Pipe-quote if contains :: or conflicts with CL symbols
-  my $cl_pkg = ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' || lc($pkg_name) eq 'error' ||
-                lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
-               ? ":|$pkg_name|" : ":$pkg_name";
+  my $cl_pkg = $self->_cl_pkg_designator($pkg_name);
 
   my $cl_class = $self->_pkg_to_clos_class($pkg_name);
 
@@ -5330,6 +5479,8 @@ sub _emit_package_preamble {
       $self->_emit("(defvar $pkg_b (make-p-box nil))");
       $self->_emit("");
     });
+    # Record original-case name + make current at runtime (caller()/__PACKAGE__).
+    $self->_emit("(p-set-current-package $cl_pkg \"$pkg_name\")");
     $self->_emit("");
     return;
   }
@@ -5353,6 +5504,10 @@ sub _emit_package_preamble {
     $self->_emit("(defvar \$b (make-p-box nil))");
     $self->_emit("");
   });
+  # Record original-case name + make current at runtime (caller()/__PACKAGE__).
+  # Emitted into the section's runtime bucket so it runs in execution order
+  # (cur_bucket was set to 'runtime' above), not hoisted with the preamble.
+  $self->_emit("(p-set-current-package $cl_pkg \"$pkg_name\")");
 }
 
 # Convert Perl package name to CLOS class name
