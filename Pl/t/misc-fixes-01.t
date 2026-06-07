@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 104;
+plan tests => 107;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -788,3 +788,27 @@ test_cl('ucfirst(reverse $s) in list context reverses the string',
 test_cl('length(reverse $s) counts characters in list context',
     'my $s="abcd"; print "n=", length(reverse($s)), "\n";',
     "n=4\n");
+
+# --- package ($our) vars as indices in a nested subscript chain ---
+# $a[$i]{$k} : the $->@ / $->% container-sigil rewrite (ExprToCL gen_array/hash
+# _access) used an unanchored s/(^|::)\$/.../ that hit the inner package-qualified
+# INDEX var (Sig::$i) too, corrupting $a[$i]{...} into (p-aref @a Sig::%i ...).
+# Lexical (my) indices escaped (no '::' before the '$'); only package vars hit it.
+test_cl('our var as array index before a hash subscript keeps its $ sigil',
+    'package Sig; our $i=1; our $k="x"; my @a=(undef, {x=>42});'
+    . ' print "A=", $a[$i]{$k}, "\n";',
+    "A=42\n");
+
+# --- our (LIST) = (...) inside a { package X; ... } BLOCK ---
+# The whole block is ONE top-level CL form, so the inline (in-package :X) does NOT
+# change how the reader interns names within it: bare $x in the declaration/
+# assignment became MAIN::$x while references read X::$x -> the assignment never
+# reached the referenced box (read as undef). Now the our targets are qualified.
+test_cl('our (LIST)=(...) assignment reaches references inside a package block',
+    '{ package Blk; our ($x,$y)=(3,4); print "B=", $x+$y, "\n"; }',
+    "B=7\n");
+
+test_cl('our indices drive a nested subscript chain inside a package block',
+    '{ package Mlt; our ($i,$k)=(1,"x"); my @a=(undef, {x=>9});'
+    . ' print "M=", $a[$i]{$k}, "\n"; }',
+    "M=9\n");

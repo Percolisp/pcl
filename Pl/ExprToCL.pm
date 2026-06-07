@@ -2206,12 +2206,20 @@ sub gen_array_access {
   my $node_id = shift;
   my $kids    = shift;
 
+  my $arr_node = $self->expr_o->get_a_node($kids->[0]);
   my $arr = $self->gen_node($kids->[0]);
   my $idx = $self->gen_node($kids->[1]);
 
   # Convert $varname to @varname (Perl $arr[i] accesses @arr)
-  # Handle both plain $arr and package-qualified Pkg::$arr
-  $arr =~ s/(^|::)\$/$1@/;
+  # Handle both plain $arr and package-qualified Pkg::$arr.
+  # Only rewrite when the container is a bare variable (Symbol/Magic): for a
+  # nested access like $a[$i]{...} the container is already a full (p-aref ...)
+  # form whose inner package-qualified index (Pkg::$i) would be wrongly hit by
+  # the `::$` alternative.
+  if (ref($arr_node) eq 'PPI::Token::Symbol'
+      || ref($arr_node) eq 'PPI::Token::Magic') {
+    $arr =~ s/(^|::)\$/$1@/;
+  }
 
   # Numeric-named arrays like @0, @1 are not valid Perl identifiers.
   # $0[n] parses as @0[n] but @0 is never a real variable; return undef.
@@ -2256,8 +2264,16 @@ sub gen_hash_access {
   }
 
   # Convert $varname to %varname (Perl $hash{k} accesses %hash)
-  # Handle both plain $hash and package-qualified Pkg::$hash
-  $hash =~ s/(^|::)\$/$1%/;
+  # Handle both plain $hash and package-qualified Pkg::$hash.
+  # Only rewrite when the container is a bare variable (Symbol/Magic): for a
+  # nested access like $h{$k}[...] the container is already a full (p-gethash
+  # ...) form whose inner package-qualified key (Pkg::$k) would be wrongly hit
+  # by the `::$` alternative.
+  my $hash_node = $self->expr_o->get_a_node($kids->[0]);
+  if (ref($hash_node) eq 'PPI::Token::Symbol'
+      || ref($hash_node) eq 'PPI::Token::Magic') {
+    $hash =~ s/(^|::)\$/$1%/;
+  }
 
   # Apply rename map for %varname (closure/state variable captures)
   if ($self->environment) {
