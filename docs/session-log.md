@@ -4,6 +4,36 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 238d (2026-06-07) — Class::Inspector->subclasses (child-namespace stash) + CPAN-testing methodology
+
+User: "Run Class::Inspector subclasses next." Done — `Class::Inspector->subclasses` now matches
+perl 5.40 (commit `8cb0e78`, `cl/pcl-runtime.lisp`). `subclasses` walks the package tree via
+`_subnames` → `keys %{"...::"}` and checks `->isa`; `p-stash` previously returned **only subs**, so
+the walk found nothing. Now `p-stash` also adds a **`"<child>::"` key** for every registered Perl
+package one namespace segment deeper than the requested package (`""`/`"main"` = root), via new
+`%p-stash-add-child-namespaces`. Child names come from **`*pcl-pkg-name-map*`** (the orig-case
+registry filled by `p-set-current-package` at each `package` statement), so **single-segment
+packages keep their case** (`Dog`, not the upcased CL package `DOG`) — essential, since a subclass
+walk reports/compares those names. Runs even when the requested namespace has **no CL package** of
+its own, so intermediate namespaces (`Sub::` when only `Sub::Override` exists) still report children.
+Namespace keys end in `::`, so they stay transparent to `functions`/`methods` (filtered by the
+identifier regex + `defined &{...}`) and to `_loaded`'s skip-`::` guard. Verified over both
+namespace-nested (`Foo::Bar`) and `@ISA`-linked single-seg classes (`Cat/Dog/Puppy → Animal`,
+transitive, correct case). Gate **91/3309**, sweep-diff **0 new / 0 fixed**, 69 fully passing held.
+Tests `misc-fixes-01.t` 118→120. **Class::Inspector is now fully working.**
+
+**Methodology note (answered for the user):** CPAN modules are currently tested by **smoke probes**
+— tiny `use Mod; …` drivers through `./runpl`, each output diffed **byte-for-byte against stock
+perl** — NOT by running the modules' own `t/*.t` suites. Reason: a dist's `t/` uses `use Test::More`,
+which PCL resolves to the real site-perl Test2 stack → `%Config` unbound → crash (the `perl-tests/`
+files dodge this by using perl-core's `require './test.pl'` instead). **Gateway to running real
+suites = a Test::More shim** wiring `use Test::More` to PCL's TAP fns in `cl/pcl-test.lisp`
+(pcl-rollout-plan Phase 3-4); that would convert every working module (Class::Inspector,
+Sub::Override, Try::Tiny, Data::Dump, JSON::PP, Safe::Isa, Role::Tiny…) from "checked a few methods"
+into "N/M of the author's tests pass." Flagged as the likely highest-leverage next infra step.
+
+---
+
 ## Session 238c (2026-06-07) — Sub::Override unblocked: dynamic-glob CODE-slot read + blessed-hash class-key leak
 
 User: "Fix the dynamic-glob CODE-slot read to unblock Sub::Override." Two root causes, one
