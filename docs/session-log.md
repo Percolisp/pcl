@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 238c (2026-06-07) — Sub::Override unblocked: dynamic-glob CODE-slot read + blessed-hash class-key leak
+
+User: "Fix the dynamic-glob CODE-slot read to unblock Sub::Override." Two root causes, one
+commit (`e7e6665`); Sub::Override now works end-to-end (replace + restore match perl 5.40):
+
+1. **Paren-less named unary before a dynamic glob-slot** (`Pl/PExpr.pm`). `defined *{$g}{CODE}`
+   was a PARSE ERROR ("Missing case"), and `*$g{CODE}` mis-parsed as `*(%g{CODE})` (hash access).
+   Cause: `handle_subcalls` runs (line 388) BEFORE the structure loops, so a named unary grabbed
+   only the Cast `*` and orphaned the `{EXPR}{SLOT}` blocks. Fix: a **pre-pass
+   `_precollapse_dyn_glob_slots`** (run just before `handle_subcalls`) collapses BOTH spellings —
+   `*{EXPR}{SLOT}` (Cast+Block+Block) and `*$var{SLOT}` (Cast+Symbol+Subscript, == `*{$var}{SLOT}`)
+   — into one `glob_slot` node, so the named unary grabs the whole term. `_block_is_glob_slot` /
+   `_glob_slot_name_of` also learned to accept a **quoted** slot name, because the SLOT arrives as
+   a hash Subscript that `cleanup_for_parsing` autoquotes (`{CODE}`→`{"CODE"}`); the Block form
+   `*{$g}{CODE}` escaped that (Block contents aren't autoquoted), which is why only the Symbol
+   form had failed silently.
+
+2. **Blessed-hash `:__class__` key leaked into keys/values/each/count/flatten** (`cl/pcl-runtime.lisp`).
+   A blessed HASH ref stores its class under the internal keyword key `:__class__` (so it survives
+   unboxing). That key was visible to `keys`/`values`/`each`, the scalar key-count (`scalar %h` /
+   `scalar keys %h`), and every `%hash` list-flatten → `keys %$self` saw a phantom `__CLASS__`
+   (broke Sub::Override's "exactly one key" restore shortcut, and would mis-count any module
+   iterating `%$self`). New **`%p-real-hash-key-p`** predicate + **`%p-hash-user-count`**; applied
+   at every user-visible site: `p-keys`/`p-values`/`p-each`, the three scalar-count branches,
+   `%p-hash-keyval-list`, `%p-flatten-list`, the `p-hash-=`/`p-array-=` flatten maphashes, and
+   join's pre-count. **Internal clones** (which must keep the class) and the overload-table walk
+   left untouched. Audited all 16 maphash/hash-key sites.
+
+Verified each vs perl 5.40. Gate **91/3307**, full sweep **18148/823/69**, sweep-diff **0 new /
+0 fixed** (zero regressions despite touching widely-used hash iteration — the `:__class__` skip
+only affects blessed hashes, which the tracked perl-tests don't iterate-and-count). Tests
+`misc-fixes-01.t` 114→118. Next Sub::Override-adjacent: Class::Inspector `subclasses` (global
+package walk) is the remaining introspection gap; `Test::Deep` → `Scalar::Util::@EXPORT_FAIL`
+default. See [[project_cpan_module_survey]].
+
+---
+
 ## Session 238b (2026-06-07) — CPAN survey of installed pure-Perl modules; symbolic-ref/stash introspection fixed
 
 User asked to go back to CPAN modules and find **simpler-than-Moo** targets, *"ask before
