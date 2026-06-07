@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 114;
+plan tests => 118;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -866,3 +866,35 @@ test_cl('multi-segment symbolic array deref @{"Foo::Bar::ISA"}',
     'package Foo::Bar; our @ISA=("Base"); package main;'
     . ' print "[", join(",", @{"Foo::Bar::ISA"}), "]\n";',
     "[Base]\n");
+
+# --- dynamic typeglob CODE-slot read without parens (Sub::Override) ---
+# `defined *{$g}{CODE}` and `*$g{CODE}` (Cast '*' + Block/Symbol + glob-slot) were
+# parse errors / mis-parsed as hash access. A pre-pass now collapses the glob-slot
+# before handle_subcalls so a preceding named unary grabs it whole; the slot
+# bareword is recognised even after a hash Subscript autoquotes it ({"CODE"}).
+test_cl('defined *{$g}{CODE} (no parens) + *$g{CODE} read',
+    'package F; sub x { 42 } package main; my $g = "F::x";'
+    . ' my $d = defined *{$g}{CODE} ? "y" : "n";'
+    . ' my $c = *$g{CODE};'
+    . ' print "$d ", ($c ? $c->() : "-"), "\n";',
+    "y 42\n");
+
+# --- blessed-hash class no longer leaks into keys/values/each/count ---
+# A blessed hashref stores its class in the internal :__class__ key; that key
+# leaked into keys/values/each and the scalar key-count (broke Sub::Override's
+# `keys %$self`). Now hidden everywhere a user iterates/counts the hash.
+test_cl('keys/scalar on a blessed hash exclude the internal class key',
+    'my $o = bless { a=>1, b=>2 }, "X";'
+    . ' print join(",", sort keys %$o), ":", scalar(keys %$o), ":", scalar(%$o), "\n";',
+    "a,b:2:2\n");
+
+test_cl('values/each on a blessed hash exclude the internal class key',
+    'my $o = bless { x=>10 }, "Y"; my @v = values %$o;'
+    . ' my @pairs; while (my ($k,$val)=each %$o) { push @pairs, "$k=$val" }'
+    . ' print "v=@v pairs=@pairs\n";',
+    "v=10 pairs=x=10\n");
+
+test_cl('flattening a blessed hash to a list excludes the class key',
+    'my $o = bless { k=>"v" }, "Z"; my @list = %$o;'
+    . ' print scalar(@list), ":@list\n";',
+    "2:k v\n");

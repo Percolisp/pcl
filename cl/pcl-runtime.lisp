@@ -268,6 +268,23 @@
       (string pkg-str)
       (string-upcase pkg-str)))
 
+;;; A blessed HASH ref stores its class in the hash under the keyword key
+;;; :__class__ (so it survives unboxing).  Real Perl hash keys are always
+;;; strings, so this internal key must be hidden from keys/values/each and the
+;;; scalar key-count — otherwise a blessed object's class leaks (e.g. broke
+;;; Sub::Override's `keys %$self`).  Centralised here so every hash-iteration
+;;; site can filter it out the same way.
+(declaim (inline %p-real-hash-key-p))
+(defun %p-real-hash-key-p (k)
+  "T for a user-visible Perl hash key, NIL for the internal :__class__ blessing key."
+  (not (eq k :__class__)))
+
+(defun %p-hash-user-count (h)
+  "hash-table-count of H minus the internal :__class__ blessing key, if present.
+   The user-visible Perl key count (`scalar %h` / `scalar keys %h`)."
+  (- (hash-table-count h)
+     (if (nth-value 1 (gethash :__class__ h)) 1 0)))
+
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
@@ -727,7 +744,7 @@
     ;; But (make-p-box ht) = hash ref must stay as-is.
     (when (and (not (p-box-p value))   ; unwrapped raw hash-table only
                (hash-table-p v))
-      (setf v (hash-table-count v)))
+      (setf v (%p-hash-user-count v)))
     (setf (p-box-value box) v
           (p-box-nv-ok box) nil
           (p-box-sv-ok box) nil)
@@ -1376,7 +1393,7 @@
         ((and (stringp val) (string= val "0")) nil)
         ;; bare @array / %hash in boolean context: true iff non-empty
         ((and (vectorp val) (not (stringp val))) (> (length val) 0))
-        ((hash-table-p val) (> (hash-table-count val) 0))
+        ((hash-table-p val) (> (%p-hash-user-count val) 0))
         (t t))))
 
 ;;; ============================================================
@@ -1611,7 +1628,7 @@
         ;; Adjustable vector = Perl @array in scalar context → array length
         ((and (vectorp val) (adjustable-array-p val)) (length val))
         ;; Perl 5.26+: plain %hash in numeric context → key count
-        ((hash-table-p val) (hash-table-count val))
+        ((hash-table-p val) (%p-hash-user-count val))
         ;; Compiled regex in numeric context → object address (like a reference)
         ((p-regex-match-p val) (object-address val))
         (t 0))))
@@ -3026,8 +3043,9 @@
                      (vector-push-extend (make-p-box src) ,place))
                     ((hash-table-p src)
                      (maphash (lambda (k v)
-                                (vector-push-extend (make-p-box k) ,place)
-                                (%p-array-store-scalar ,place v))
+                                (when (%p-real-hash-key-p k)
+                                  (vector-push-extend (make-p-box k) ,place)
+                                  (%p-array-store-scalar ,place v)))
                               src))
                     ((vectorp src)
                      (loop for item across src
@@ -3074,8 +3092,9 @@
                       (let ((r (make-array (* 2 (hash-table-count ,val))
                                            :adjustable t :fill-pointer 0)))
                         (maphash (lambda (k v)
-                                   (vector-push-extend (make-p-box k) r)
-                                   (vector-push-extend v r))
+                                   (when (%p-real-hash-key-p k)
+                                     (vector-push-extend (make-p-box k) r)
+                                     (vector-push-extend v r)))
                                  ,val)
                         r))
                      ((and (vectorp ,val) (not (stringp ,val)))
@@ -3101,8 +3120,9 @@
            (let ((,ret (make-array (* 2 (hash-table-count ,place))
                                    :adjustable t :fill-pointer 0)))
              (maphash (lambda (k v)
-                        (vector-push-extend (make-p-box k) ,ret)
-                        (vector-push-extend v ,ret))
+                        (when (%p-real-hash-key-p k)
+                          (vector-push-extend (make-p-box k) ,ret)
+                          (vector-push-extend v ,ret)))
                       ,place)
              ,ret)
            ;; Scalar/void: return count of input elements
@@ -3117,8 +3137,9 @@
                (cond
                  ((hash-table-p item)
                   (maphash (lambda (k v)
-                             (vector-push-extend (make-p-box k) result)
-                             (vector-push-extend (if (p-box-p v) v (make-p-box v)) result))
+                             (when (%p-real-hash-key-p k)
+                               (vector-push-extend (make-p-box k) result)
+                               (vector-push-extend (if (p-box-p v) v (make-p-box v)) result)))
                            item))
                  ((and (vectorp item) (not (stringp item)))
                   (loop for x across item do (add x)))
@@ -3156,8 +3177,9 @@
    Used by list consumers that flatten %hash args: join, foreach, push, map/grep."
   (let ((result nil))
     (maphash (lambda (k v)
-               (push (make-p-box k) result)
-               (push (if (p-box-p v) v (make-p-box v)) result))
+               (when (%p-real-hash-key-p k)
+                 (push (make-p-box k) result)
+                 (push (if (p-box-p v) v (make-p-box v)) result)))
              h)
     (nreverse result)))
 
@@ -5284,7 +5306,8 @@
                     else if (hash-table-p item)
                     append (loop for k being the hash-keys of item
                                  using (hash-value v)
-                                 collect k collect v)  ; keep box so %p-make-hash-entry sees class
+                                 when (%p-real-hash-key-p k)
+                                 collect k and collect v)  ; keep box so %p-make-hash-entry sees class
                     else
                     collect item))
         (h (make-hash-table :test 'equal)))
@@ -5351,7 +5374,8 @@
        ;; If not started yet, initialize iterator with all keys
        (unless exists-p
          (let ((keys nil))
-           (maphash (lambda (k v) (declare (ignore v)) (push k keys)) collection)
+           (maphash (lambda (k v) (declare (ignore v))
+                      (when (%p-real-hash-key-p k) (push k keys))) collection)
            (setf remaining (nreverse keys))
            (setf (gethash collection *hash-iterators*) remaining)))
        ;; If remaining is empty, return exhaustion sentinel and reset iterator
@@ -5385,7 +5409,7 @@
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (maphash (lambda (k v)
                   (declare (ignore v))
-                  (vector-push-extend k result))
+                  (when (%p-real-hash-key-p k) (vector-push-extend k result)))
                 collection)
        result))
     ;; Neither
@@ -5406,8 +5430,8 @@
      (remhash collection *hash-iterators*)
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (maphash (lambda (k v)
-                  (declare (ignore k))
-                  (vector-push-extend (%p-hash-unbox-elem v) result))
+                  (when (%p-real-hash-key-p k)
+                    (vector-push-extend (%p-hash-unbox-elem v) result)))
                 collection)
        result))
     ;; Neither
@@ -7910,7 +7934,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            if (and (vectorp raw) (not (stringp raw)))
                            sum (length raw)
                            else if (hash-table-p raw)
-                           sum (* 2 (hash-table-count raw))
+                           sum (* 2 (%p-hash-user-count raw))
                            else if (and (listp raw) raw)
                            sum (length raw)
                            else sum 1))
@@ -9098,8 +9122,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   (vector-push-extend (make-p-box x) result))
                  ((hash-table-p x)
                   (maphash (lambda (k v)
-                             (vector-push-extend (make-p-box k) result)
-                             (%p-array-store-scalar result v))
+                             (when (%p-real-hash-key-p k)
+                               (vector-push-extend (make-p-box k) result)
+                               (%p-array-store-scalar result v)))
                            x))
                  ((p-flatten-marker-p x)
                   (add-items (p-flatten-marker-array x)))
@@ -9298,7 +9323,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; Arrays (non-string vectors) return length
       ((and (vectorp v) (adjustable-array-p v)) (length v))
       ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count
-      ((and (hash-table-p v) (not (p-box-p val))) (hash-table-count v))
+      ((and (hash-table-p v) (not (p-box-p val))) (%p-hash-user-count v))
       ;; Everything else (numbers, hash refs, etc.) returns as-is
       (t v))))
 
