@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 102;
+plan tests => 122;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -776,3 +776,171 @@ test_cl('keys on a postfix hash deref: keys $hr->%*',
 test_cl('exists $h{a}{b} on empty hash does not crash',
     'my %h; print((exists $h{a}{b}) ? "T":"F", "\n");',
     "F\n");
+
+# --- scalar-argument named-unary ops impose SCALAR context on their arg ---
+# In list context (e.g. a print arg), ucfirst/lc/length/... must still run their
+# argument in scalar context, so a context-sensitive callee like reverse reverses
+# the STRING, not the list. Was inheriting the caller's list context -> ARRAY(0x..).
+test_cl('ucfirst(reverse $s) in list context reverses the string',
+    'my $s="abc"; print "x", ucfirst(reverse($s)), "y", "\n";',
+    "xCbay\n");
+
+test_cl('length(reverse $s) counts characters in list context',
+    'my $s="abcd"; print "n=", length(reverse($s)), "\n";',
+    "n=4\n");
+
+# --- package ($our) vars as indices in a nested subscript chain ---
+# $a[$i]{$k} : the $->@ / $->% container-sigil rewrite (ExprToCL gen_array/hash
+# _access) used an unanchored s/(^|::)\$/.../ that hit the inner package-qualified
+# INDEX var (Sig::$i) too, corrupting $a[$i]{...} into (p-aref @a Sig::%i ...).
+# Lexical (my) indices escaped (no '::' before the '$'); only package vars hit it.
+test_cl('our var as array index before a hash subscript keeps its $ sigil',
+    'package Sig; our $i=1; our $k="x"; my @a=(undef, {x=>42});'
+    . ' print "A=", $a[$i]{$k}, "\n";',
+    "A=42\n");
+
+# --- our (LIST) = (...) inside a { package X; ... } BLOCK ---
+# The whole block is ONE top-level CL form, so the inline (in-package :X) does NOT
+# change how the reader interns names within it: bare $x in the declaration/
+# assignment became MAIN::$x while references read X::$x -> the assignment never
+# reached the referenced box (read as undef). Now the our targets are qualified.
+test_cl('our (LIST)=(...) assignment reaches references inside a package block',
+    '{ package Blk; our ($x,$y)=(3,4); print "B=", $x+$y, "\n"; }',
+    "B=7\n");
+
+test_cl('our indices drive a nested subscript chain inside a package block',
+    '{ package Mlt; our ($i,$k)=(1,"x"); my @a=(undef, {x=>9});'
+    . ' print "M=", $a[$i]{$k}, "\n"; }',
+    "M=9\n");
+
+# --- autovivification: $a[N]{k}=v on an empty array ---
+# p-setf had no dispatch arm for (p-gethash (p-aref ...) key), so $a[N]{k}=v fell
+# through to (setf (p-gethash :UNDEF ...) v) (p-aref on an empty array = :UNDEF)
+# and crashed. Added the arm -> p-autoviv-set (expand-autoviv already vivifies a
+# p-aref slot to a hash). Separately, the p-autoviv-*-aref helpers + p-array-set
+# did raw (truncate idx), which type-errored on a BOXED index ($i): now they
+# (truncate (to-number idx)). The latter also fixed pre-existing $a[$i][$j]=v.
+test_cl('autoviv $a[N]{k}=v on empty array (literal index/key)',
+    'my @a; $a[1]{"x"}=42; print "A=", $a[1]{"x"}, ":", scalar(@a), "\n";',
+    "A=42:2\n");
+
+test_cl('autoviv $a[$i]{$k}=v with boxed index and key',
+    'my $i=1; my $k="x"; my @a; $a[$i]{$k}=42; print "A=", $a[$i]{$k}, "\n";',
+    "A=42\n");
+
+test_cl('autoviv $a[$i][$j]=v with boxed indices (array-in-array)',
+    'my $i=0; my $j=2; my @a; $a[$i][$j]=7; print "A=", $a[$i][$j], "\n";',
+    "A=7\n");
+
+# --- symbolic code-ref existence: defined/exists &{"Pkg::sub"} ---
+# p-coderef-defined-p/-exists-p only handled a real function object; a symbolic
+# NAME string (the no-strict-refs form Class::Inspector / Sub::Override use) fell
+# through to false. Now they resolve the name via %p-resolve-sub-symbol. A
+# forward-declared sub installs an fboundp :stub, so "defined" must check status
+# :defined, not mere fboundp.
+test_cl('defined &{"Pkg::sub"} (symbolic): defined vs forward-decl vs missing',
+    'sub foo { 1 } sub fwd;'
+    . ' print join("", map { defined(&{"main::$_"}) ? "y":"n" } qw(foo fwd none)), "\n";',
+    "ynn\n");
+
+test_cl('exists &{"Pkg::sub"} (symbolic): present vs missing',
+    'sub foo { 1 }'
+    . ' my $a = exists &{"main::foo"} ? "y":"n";'
+    . ' my $b = exists &{"main::none"} ? "y":"n";'
+    . ' print "$a$b\n";',
+    "yn\n");
+
+# --- symbolic stash deref: keys %{"Pkg::"} returns the package's sub names ---
+# %{"Pkg::"} (a string ending in ::) now routes through p-cast-% to p-stash; was
+# left as a bare string -> keys yielded nothing.
+test_cl('keys %{"Pkg::"} lists the package subs (symbolic stash)',
+    'package P; sub aa {1} sub bb {2} package main;'
+    . ' print join(",", sort keys %{"P::"}), "\n";',
+    "aa,bb\n");
+
+# --- multi-segment symbolic ref: @{"Foo::Bar::ISA"} ---
+# %p-symref-array/-box upcased the package (FOO::BAR) instead of preserving case
+# for a multi-seg package (|Foo::Bar|), so it made a fresh empty package and the
+# deref came back empty. Now via perl-pkg-to-cl-pkg-name.
+test_cl('multi-segment symbolic array deref @{"Foo::Bar::ISA"}',
+    'package Foo::Bar; our @ISA=("Base"); package main;'
+    . ' print "[", join(",", @{"Foo::Bar::ISA"}), "]\n";',
+    "[Base]\n");
+
+# --- dynamic typeglob CODE-slot read without parens (Sub::Override) ---
+# `defined *{$g}{CODE}` and `*$g{CODE}` (Cast '*' + Block/Symbol + glob-slot) were
+# parse errors / mis-parsed as hash access. A pre-pass now collapses the glob-slot
+# before handle_subcalls so a preceding named unary grabs it whole; the slot
+# bareword is recognised even after a hash Subscript autoquotes it ({"CODE"}).
+test_cl('defined *{$g}{CODE} (no parens) + *$g{CODE} read',
+    'package F; sub x { 42 } package main; my $g = "F::x";'
+    . ' my $d = defined *{$g}{CODE} ? "y" : "n";'
+    . ' my $c = *$g{CODE};'
+    . ' print "$d ", ($c ? $c->() : "-"), "\n";',
+    "y 42\n");
+
+# --- blessed-hash class no longer leaks into keys/values/each/count ---
+# A blessed hashref stores its class in the internal :__class__ key; that key
+# leaked into keys/values/each and the scalar key-count (broke Sub::Override's
+# `keys %$self`). Now hidden everywhere a user iterates/counts the hash.
+test_cl('keys/scalar on a blessed hash exclude the internal class key',
+    'my $o = bless { a=>1, b=>2 }, "X";'
+    . ' print join(",", sort keys %$o), ":", scalar(keys %$o), ":", scalar(%$o), "\n";',
+    "a,b:2:2\n");
+
+test_cl('values/each on a blessed hash exclude the internal class key',
+    'my $o = bless { x=>10 }, "Y"; my @v = values %$o;'
+    . ' my @pairs; while (my ($k,$val)=each %$o) { push @pairs, "$k=$val" }'
+    . ' print "v=@v pairs=@pairs\n";',
+    "v=10 pairs=x=10\n");
+
+test_cl('flattening a blessed hash to a list excludes the class key',
+    'my $o = bless { k=>"v" }, "Z"; my @list = %$o;'
+    . ' print scalar(@list), ":@list\n";',
+    "2:k v\n");
+
+# --- keys %{"Pkg::"} reports child namespaces (Class::Inspector->subclasses) ---
+# p-stash now adds a "<child>::" key for each registered package one segment
+# deeper than Pkg, using the orig-case name map (so single-seg packages keep
+# their case). Lets the package-tree walk in Class::Inspector->subclasses work.
+test_cl('keys %{"Pkg::"} includes child namespaces (orig-case)',
+    'package P; sub aa { 1 } package P::Kid; sub cc { 1 } package main;'
+    . ' print join(",", sort keys %{"P::"}), "\n";',
+    "Kid::,aa\n");
+
+# --- UNIVERSAL::isa reftype special case ---
+# UNIVERSAL::isa(REF, TYPE) is true when TYPE names a builtin reftype and
+# reftype(REF) matches — blessed or not — on top of the normal @ISA check. Was
+# only doing the @ISA check (p-isa), so unblessed refs and blessed-vs-reftype
+# came back false. Fix is in UNIVERSAL::pl-isa, so the method form $obj->isa
+# (which dispatches there) gets it too.
+test_cl('UNIVERSAL::isa reftype special case (function + @ISA + non-ref)',
+    'my $a=[1]; package D; sub new { bless {}, shift } package main;'
+    . ' my $d=D->new;'
+    . ' print join("", map { $_ ? 1 : 0 }'
+    . '   UNIVERSAL::isa($a,"ARRAY"), UNIVERSAL::isa($a,"HASH"),'
+    . '   UNIVERSAL::isa($d,"HASH"),  UNIVERSAL::isa($d,"D"),'
+    . '   UNIVERSAL::isa("x","ARRAY")), "\n";',
+    "10110\n");
+
+# Transitive subclass walk over @ISA (single-seg packages, case preserved).
+test_cl('symbolic-stash subclass walk finds @ISA descendants with correct case',
+    'package Animal; package Dog; our @ISA=("Animal");'
+    . ' package Puppy; our @ISA=("Dog"); package main;'
+    . ' my %seen; for my $ns (keys %{"::"}) {'
+    . '   (my $c = $ns) =~ s/::$//; next unless @{"${c}::ISA"};'
+    . '   $seen{$c} = 1 if $c->isa("Animal"); }'
+    . ' print join(",", sort keys %seen), "\n";',
+    "Dog,Puppy\n");
+
+# --- lexical pragmas as no-op import methods ---
+# A module's import calling strict->import / warnings->import / feature->import
+# (Role::Tiny, Moo do) used to load the core strict.pm, whose import does
+# $^H |= bits -> STRICT::$^H unbound. These manipulate compile-time hint bitmasks
+# PCL doesn't model, so they're runtime no-op methods now.
+test_cl('strict/warnings/feature ->import are no-op methods (no $^H crash)',
+    'package R; sub import { my $c = shift;'
+    . ' strict->import; warnings->import; feature->import(":5.10");'
+    . ' strict->unimport; 1 }'
+    . ' package main; R->import; print "ok\n";',
+    "ok\n");

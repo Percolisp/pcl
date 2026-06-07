@@ -1450,6 +1450,23 @@ sub _process_variable_statement {
   $self->_emit("");
 }
 
+# Qualify an `our` variable name to its fully-qualified CL symbol, byte-identical
+# to what gen_node (ExprToCL.pm ~541-546) emits for *references* to the same var.
+# Inside a `{ package Foo; ... }` BLOCK the whole block is one top-level CL form, so
+# the inline `(in-package :Foo)` does NOT affect how the reader interns the bare
+# names within it — bare `$x` would become MAIN::$x while references read Foo::$x.
+# Emitting the qualified name here keeps declaration/assignment and reference in
+# the same symbol. (At file scope `package Foo;` bare names already intern into
+# Foo, so qualifying is a no-op there.)
+sub _our_var_cl_name {
+  my ($self, $pkg, $var) = @_;
+  return $var if !defined($pkg) || $pkg eq 'main';
+  return $var unless $var =~ /^([\$\@\%])(\w+)$/;
+  my ($sigil, $name) = ($1, $2);
+  my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+  return "${cl_pkg}::${sigil}${name}";
+}
+
 # Process 'our' variable declaration - package-level variable
 sub _process_our_declaration {
   my $self = shift;
@@ -1532,11 +1549,12 @@ sub _process_our_declaration {
                            ref($rhs_parts[0]) eq 'PPI::Structure::List' &&
                            $self->_is_empty_structure($rhs_parts[0]));
 
+      my $cl_var = $self->_our_var_cl_name($pkg, $var);
       if ($sigil eq '@') {
         # Array: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
           $self->_emit("(p-eval-always");
-          $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+          $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
         });
         unless ($is_empty_list) {
           # Parse full statement so PExpr sees '@arr = ...' and propagates
@@ -1549,7 +1567,7 @@ sub _process_our_declaration {
         # Hash: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
           $self->_emit("(p-eval-always");
-          $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+          $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
         });
         unless ($is_empty_list) {
           # Parse full statement so PExpr sees '%hash = ...' and propagates
@@ -1563,9 +1581,9 @@ sub _process_our_declaration {
         my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
         $self->_with_bucket('declarations', sub {
           $self->_emit("(p-eval-always");
-          $self->_emit("  (defvar $var (make-p-box nil)))");
+          $self->_emit("  (defvar $cl_var (make-p-box nil)))");
         });
-        $self->_emit("(setf (p-box-value $var) $init_cl)");
+        $self->_emit("(setf (p-box-value $cl_var) $init_cl)");
       }
     }
     else {
@@ -1574,13 +1592,14 @@ sub _process_our_declaration {
       $self->_with_bucket('declarations', sub {
         for my $var (@vars) {
           my $sigil = substr($var, 0, 1);
+          my $cl_var = $self->_our_var_cl_name($pkg, $var);
           $self->_emit("(p-eval-always");
           if ($sigil eq '@') {
-            $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+            $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
           } elsif ($sigil eq '%') {
-            $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+            $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
           } else {
-            $self->_emit("  (defvar $var (make-p-box nil)))");
+            $self->_emit("  (defvar $cl_var (make-p-box nil)))");
           }
         }
       });
@@ -1588,7 +1607,8 @@ sub _process_our_declaration {
       # our (...) = (...) is a list assignment, so the RHS is LIST context
       # (so '1..3' generates a range, not a flip-flop).
       my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, 1) // 'nil';  # 1 = LIST_CTX
-      my $vars_vector = "(vector " . join(" ", @vars) . ")";
+      my $vars_vector = "(vector " .
+        join(" ", map { $self->_our_var_cl_name($pkg, $_) } @vars) . ")";
       $self->_emit("(p-list-= $vars_vector $init_cl)");
     }
   }
@@ -1597,13 +1617,14 @@ sub _process_our_declaration {
     $self->_with_bucket('declarations', sub {
       for my $var (@vars) {
         my $sigil = substr($var, 0, 1);
+        my $cl_var = $self->_our_var_cl_name($pkg, $var);
         $self->_emit("(p-eval-always");
         if ($sigil eq '@') {
-          $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+          $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
         } elsif ($sigil eq '%') {
-          $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+          $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
         } else {
-          $self->_emit("  (defvar $var (make-p-box nil)))");
+          $self->_emit("  (defvar $cl_var (make-p-box nil)))");
         }
       }
     });
@@ -5670,7 +5691,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|re)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|re)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
@@ -5716,13 +5737,20 @@ sub _process_include_statement {
         $self->_merge_module_prototypes($module_env, \@imports);
       }
 
+      # Perl: `use Module LIST` makes LIST a normal list that is evaluated and
+      # passed to Module->import(LIST).  Transpile the import-arg tokens through
+      # the ordinary list parser (so tests => 5 / qw(a b) / 'no_plan' all work),
+      # and hand the resulting vector to p-use.  Bare `use Module;` (no args)
+      # passes no :import-args -> import called with no args (default exports).
       $self->_emit(";; $perl_code");
-      if (@imports) {
-        my $list = join(' ', map { qq{"$_"} } @imports);
-        $self->_emit("(p-eval-always");
-        $self->_emit("  (p-use \"$module\" :imports '($list)))");
+      my @arg_tokens = $self->_use_import_arg_tokens($stmt);
+      my $args_cl = @arg_tokens
+                  ? $self->_parse_expression(\@arg_tokens, $stmt, 1)  # LIST ctx
+                  : undef;
+      $self->_emit("(p-eval-always");
+      if (defined $args_cl && $args_cl ne '') {
+        $self->_emit("  (p-use \"$module\" :import-args $args_cl))");
       } else {
-        $self->_emit("(p-eval-always");
         $self->_emit("  (p-use \"$module\"))");
       }
     }
@@ -6021,6 +6049,34 @@ sub _merge_module_prototypes {
   }
 }
 
+
+# The import-argument tokens of a `use`/`no` statement: everything after
+# `use Module [VERSION]`, minus the trailing ';'.  These ARE a Perl list (the
+# LIST in `use Module LIST`), so the caller runs them through the normal list
+# parser.  The optional module VERSION (use Foo 1.2 …) is NOT an import arg
+# (Perl calls Foo->VERSION(1.2)), so it's skipped.
+sub _use_import_arg_tokens {
+  my ($self, $stmt) = @_;
+  my $ver = $stmt->version;
+  $ver = (defined $ver && ref($ver)) ? $ver->content : $ver;
+  my @args;
+  my $past_module = 0;
+  for my $c ($stmt->schildren) {
+    if (!$past_module) {
+      next if $c->isa('PPI::Token::Word')
+           && ($c->content eq 'use' || $c->content eq 'no' || $c->content eq 'require');
+      $past_module = 1, next if $c->isa('PPI::Token::Word');   # module name
+      next;                                                    # anything else before it
+    }
+    next if $c->isa('PPI::Token::Structure') && $c->content eq ';';
+    # Skip the module VERSION number sitting right after the module name.
+    next if !@args && defined $ver && $ver ne ''
+         && ($c->isa('PPI::Token::Number') || $c->isa('PPI::Token::Number::Version'))
+         && $c->content eq $ver;
+    push @args, $c;
+  }
+  return @args;
+}
 
 # Parse import list from use statement (e.g., qw(foo bar) or ('foo', 'bar'))
 sub _parse_use_import_list {

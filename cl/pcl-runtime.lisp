@@ -268,6 +268,23 @@
       (string pkg-str)
       (string-upcase pkg-str)))
 
+;;; A blessed HASH ref stores its class in the hash under the keyword key
+;;; :__class__ (so it survives unboxing).  Real Perl hash keys are always
+;;; strings, so this internal key must be hidden from keys/values/each and the
+;;; scalar key-count — otherwise a blessed object's class leaks (e.g. broke
+;;; Sub::Override's `keys %$self`).  Centralised here so every hash-iteration
+;;; site can filter it out the same way.
+(declaim (inline %p-real-hash-key-p))
+(defun %p-real-hash-key-p (k)
+  "T for a user-visible Perl hash key, NIL for the internal :__class__ blessing key."
+  (not (eq k :__class__)))
+
+(defun %p-hash-user-count (h)
+  "hash-table-count of H minus the internal :__class__ blessing key, if present.
+   The user-visible Perl key count (`scalar %h` / `scalar keys %h`)."
+  (- (hash-table-count h)
+     (if (nth-value 1 (gethash :__class__ h)) 1 0)))
+
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
@@ -727,7 +744,7 @@
     ;; But (make-p-box ht) = hash ref must stay as-is.
     (when (and (not (p-box-p value))   ; unwrapped raw hash-table only
                (hash-table-p v))
-      (setf v (hash-table-count v)))
+      (setf v (%p-hash-user-count v)))
     (setf (p-box-value box) v
           (p-box-nv-ok box) nil
           (p-box-sv-ok box) nil)
@@ -1376,7 +1393,7 @@
         ((and (stringp val) (string= val "0")) nil)
         ;; bare @array / %hash in boolean context: true iff non-empty
         ((and (vectorp val) (not (stringp val))) (> (length val) 0))
-        ((hash-table-p val) (> (hash-table-count val) 0))
+        ((hash-table-p val) (> (%p-hash-user-count val) 0))
         (t t))))
 
 ;;; ============================================================
@@ -1611,7 +1628,7 @@
         ;; Adjustable vector = Perl @array in scalar context → array length
         ((and (vectorp val) (adjustable-array-p val)) (length val))
         ;; Perl 5.26+: plain %hash in numeric context → key count
-        ((hash-table-p val) (hash-table-count val))
+        ((hash-table-p val) (%p-hash-user-count val))
         ;; Compiled regex in numeric context → object address (like a reference)
         ((p-regex-match-p val) (object-address val))
         (t 0))))
@@ -3026,8 +3043,9 @@
                      (vector-push-extend (make-p-box src) ,place))
                     ((hash-table-p src)
                      (maphash (lambda (k v)
-                                (vector-push-extend (make-p-box k) ,place)
-                                (%p-array-store-scalar ,place v))
+                                (when (%p-real-hash-key-p k)
+                                  (vector-push-extend (make-p-box k) ,place)
+                                  (%p-array-store-scalar ,place v)))
                               src))
                     ((vectorp src)
                      (loop for item across src
@@ -3074,8 +3092,9 @@
                       (let ((r (make-array (* 2 (hash-table-count ,val))
                                            :adjustable t :fill-pointer 0)))
                         (maphash (lambda (k v)
-                                   (vector-push-extend (make-p-box k) r)
-                                   (vector-push-extend v r))
+                                   (when (%p-real-hash-key-p k)
+                                     (vector-push-extend (make-p-box k) r)
+                                     (vector-push-extend v r)))
                                  ,val)
                         r))
                      ((and (vectorp ,val) (not (stringp ,val)))
@@ -3101,8 +3120,9 @@
            (let ((,ret (make-array (* 2 (hash-table-count ,place))
                                    :adjustable t :fill-pointer 0)))
              (maphash (lambda (k v)
-                        (vector-push-extend (make-p-box k) ,ret)
-                        (vector-push-extend v ,ret))
+                        (when (%p-real-hash-key-p k)
+                          (vector-push-extend (make-p-box k) ,ret)
+                          (vector-push-extend v ,ret)))
                       ,place)
              ,ret)
            ;; Scalar/void: return count of input elements
@@ -3117,8 +3137,9 @@
                (cond
                  ((hash-table-p item)
                   (maphash (lambda (k v)
-                             (vector-push-extend (make-p-box k) result)
-                             (vector-push-extend (if (p-box-p v) v (make-p-box v)) result))
+                             (when (%p-real-hash-key-p k)
+                               (vector-push-extend (make-p-box k) result)
+                               (vector-push-extend (if (p-box-p v) v (make-p-box v)) result)))
                            item))
                  ((and (vectorp item) (not (stringp item)))
                   (loop for x across item do (add x)))
@@ -3156,8 +3177,9 @@
    Used by list consumers that flatten %hash args: join, foreach, push, map/grep."
   (let ((result nil))
     (maphash (lambda (k v)
-               (push (make-p-box k) result)
-               (push (if (p-box-p v) v (make-p-box v)) result))
+               (when (%p-real-hash-key-p k)
+                 (push (make-p-box k) result)
+                 (push (if (p-box-p v) v (make-p-box v)) result)))
              h)
     (nreverse result)))
 
@@ -3423,11 +3445,16 @@
             (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
           (setf (p-aref ,arr ,idx) ,val))))
     ;; Nested hash access - autovivification
-    ;; (p-gethash (p-gethash ... ) key) = value
+    ;; (p-gethash (p-gethash ... ) key) = value         ($h{a}{b})
+    ;; (p-gethash (p-aref   ... ) key) = value          ($a[N]{k})
+    ;; In both cases the container slot must vivify to a hash before the store.
+    ;; expand-autoviv already handles a p-aref inner form (-> p-autoviv-aref-for-hash);
+    ;; this dispatch arm just has to route it there instead of the plain (setf ...)
+    ;; fallthrough, which would (setf (p-gethash :UNDEF ...) ...) on an empty array.
     ((and (listp place)
           (eq (car place) 'p-gethash)
           (listp (cadr place))
-          (eq (car (cadr place)) 'p-gethash))
+          (member (car (cadr place)) '(p-gethash p-aref)))
      (let ((outer-key (caddr place))
            (val (gensym "VAL")))
        `(let ((,val ,value))
@@ -5054,7 +5081,7 @@
   "Get array element, autovivifying to empty hash if missing.
    Handles boxes in array elements."
   (let* ((a (unbox arr))
-         (i (truncate idx)))
+         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
@@ -5073,7 +5100,7 @@
   "Get array element, autovivifying to empty array if missing.
    Handles boxes in array elements."
   (let* ((a (unbox arr))
-         (i (truncate idx)))
+         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
@@ -5092,7 +5119,7 @@
   "Set array element, extending array if needed.
    Stores values in boxes for l-value semantics."
   (let* ((a (unbox arr))
-         (i (truncate idx)))
+         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
@@ -5279,7 +5306,8 @@
                     else if (hash-table-p item)
                     append (loop for k being the hash-keys of item
                                  using (hash-value v)
-                                 collect k collect v)  ; keep box so %p-make-hash-entry sees class
+                                 when (%p-real-hash-key-p k)
+                                 collect k and collect v)  ; keep box so %p-make-hash-entry sees class
                     else
                     collect item))
         (h (make-hash-table :test 'equal)))
@@ -5346,7 +5374,8 @@
        ;; If not started yet, initialize iterator with all keys
        (unless exists-p
          (let ((keys nil))
-           (maphash (lambda (k v) (declare (ignore v)) (push k keys)) collection)
+           (maphash (lambda (k v) (declare (ignore v))
+                      (when (%p-real-hash-key-p k) (push k keys))) collection)
            (setf remaining (nreverse keys))
            (setf (gethash collection *hash-iterators*) remaining)))
        ;; If remaining is empty, return exhaustion sentinel and reset iterator
@@ -5380,7 +5409,7 @@
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (maphash (lambda (k v)
                   (declare (ignore v))
-                  (vector-push-extend k result))
+                  (when (%p-real-hash-key-p k) (vector-push-extend k result)))
                 collection)
        result))
     ;; Neither
@@ -5401,8 +5430,8 @@
      (remhash collection *hash-iterators*)
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (maphash (lambda (k v)
-                  (declare (ignore k))
-                  (vector-push-extend (%p-hash-unbox-elem v) result))
+                  (when (%p-real-hash-key-p k)
+                    (vector-push-extend (%p-hash-unbox-elem v) result)))
                 collection)
        result))
     ;; Neither
@@ -5554,9 +5583,40 @@
             do (decf (fill-pointer a))))
     result))
 
+(defun %p-stash-add-child-namespaces (pkg-name h)
+  "Add a \"<child>::\" key to stash hash H for every registered Perl package one
+   namespace segment deeper than PKG-NAME (\"\"/\"main\" = the root).  Values are
+   irrelevant — consumers (Class::Inspector->subclasses via keys %{\"Foo::\"})
+   only read the keys.  Orig-case names come from *pcl-pkg-name-map*, so
+   single-segment packages keep their case (Foo, not FOO).  Runs even when
+   PKG-NAME itself has no CL package, so intermediate namespaces (e.g. Sub:: when
+   only Sub::Override exists) still report their children."
+  (let* ((root (or (string= pkg-name "")
+                   (string= (string-downcase pkg-name) "main")))
+         (prefix (if root "" (concatenate 'string pkg-name "::")))
+         (plen (length prefix)))
+    (loop for perl-name being the hash-values of *pcl-pkg-name-map*
+          do (let ((child
+                    (cond
+                      (root
+                       (let ((c (search "::" perl-name)))
+                         (if c (subseq perl-name 0 c) perl-name)))
+                      ((and (> (length perl-name) plen)
+                            (string= prefix (subseq perl-name 0 plen)))
+                       (let* ((rest (subseq perl-name plen))
+                              (c (search "::" rest)))
+                         (if c (subseq rest 0 c) rest)))
+                      (t nil))))
+               (when (and child
+                          (> (length child) 0)
+                          (not (string= child "main")))
+                 (setf (gethash (concatenate 'string child "::") h)
+                       (make-p-box 1)))))))
+
 (defun p-stash (pkg-name)
   "Return the package stash as a hash mapping Perl symbol names to code-ref boxes.
-   Keys are lowercase Perl sub names; values are (make-p-box function).
+   Keys are lowercase Perl sub names; values are (make-p-box function).  Child
+   namespaces are also added as \"<child>::\" keys (see %p-stash-add-child-namespaces).
    delete $::{foo} → (p-delete (p-stash \"main\") \"foo\") returns the code ref.
    This is a snapshot (not a live view), sufficient for delete/lookup of existing subs."
   (let* ((pkg-str (if (or (string= (string-downcase pkg-name) "main")
@@ -5576,6 +5636,7 @@
               (let ((perl-name (string-downcase (subseq name 3))))
                 (setf (gethash perl-name h)
                       (make-p-box (symbol-function sym)))))))))
+    (%p-stash-add-child-namespaces pkg-name h)
     h))
 
 ;;; ============================================================
@@ -7675,14 +7736,43 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (dolist (sym-name imports)
           (p-import-perl-symbol sym-name pkg to-pkg))))))
 
+(defun %p-module-can-import-p (module-name)
+  "True if MODULE has an `import` method resolvable through its MRO — its own
+   `sub import` (Test::More, Moo, …) OR an inherited one (the usual
+   `our @ISA = ('Exporter')` → Exporter::import, now a real sub in lib/Exporter.pm).
+   When true, `use` dispatches to Foo->import(@args), exactly like Perl; when
+   false (a shim that declares @EXPORT but inherits nothing), `use` falls back to
+   the @EXPORT-copy convenience."
+  (p-true-p (ignore-errors (p-can module-name "import"))))
+
+(defun %p-do-import (module-name to-pkg import-args)
+  "Perform the import half of `use Module LIST`.  Perl: `use Foo X` evaluates X to
+   a list and calls Foo->import(X).  IMPORT-ARGS is that evaluated list (a vector)
+   or :default for bare `use Foo;` (import with no args → default exports).
+   Dispatch: an import method (own or inherited Exporter::import) → call it; else
+   the @EXPORT-copy convenience for shims that declare @EXPORT but inherit nothing."
+  (let ((args (cond ((eq import-args :default) :default)
+                    ((and (vectorp import-args) (not (stringp import-args)))
+                     (coerce import-args 'list))
+                    ((null import-args) nil)
+                    (t (list import-args)))))
+    (if (%p-module-can-import-p module-name)
+        ;; Foo->import(@args).  :default = called with no args.
+        (apply #'p-method-call module-name "import"
+               (if (eq args :default) nil args))
+        ;; @EXPORT-copy convenience: names are strings; :default = default @EXPORT.
+        (p-import-exports module-name to-pkg
+                          (if (eq args :default) nil (mapcar #'to-string args))))))
+
 (defparameter *p-xs-only-modules*
   '("XSLoader" "DynaLoader" "Carp::Heavy")
   "Modules that use XS/C code and cannot be transpiled. Skip loading them.")
 
-(defun p-use (module-name &key imports)
+(defun p-use (module-name &key (import-args :default))
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
-   IMPORTS: list of symbols to import (nil = use @EXPORT, empty list = no imports)"
+   IMPORT-ARGS: the evaluated import list (a vector) — `use Foo X` makes X a Perl
+   list — or :default for a bare `use Foo;` (import with no args)."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
     (return-from p-use t))
@@ -7690,9 +7780,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (caller-pkg *package*))
     ;; Already loaded?
     (when (gethash rel-path *p-inc-table*)
-      ;; Still import symbols for repeated use statements
-      (unless (and imports (null imports))
-        (p-import-exports module-name caller-pkg imports))
+      ;; Still import for repeated use statements
+      (%p-do-import module-name caller-pkg import-args)
       (return-from p-use t))
     ;; Circular dependency?
     (when (member rel-path *p-loading-modules* :test #'string=)
@@ -7709,8 +7798,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; Update %INC
       (setf (gethash rel-path *p-inc-table*) abs-path)
       ;; Import symbols from module
-      (unless (and imports (null imports))
-        (p-import-exports module-name caller-pkg imports))
+      (%p-do-import module-name caller-pkg import-args)
       t)))
 
 (defun p-require (module-name)
@@ -7905,7 +7993,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                            if (and (vectorp raw) (not (stringp raw)))
                            sum (length raw)
                            else if (hash-table-p raw)
-                           sum (* 2 (hash-table-count raw))
+                           sum (* 2 (%p-hash-user-count raw))
                            else if (and (listp raw) raw)
                            sum (length raw)
                            else sum 1))
@@ -8065,6 +8153,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                        (zerop (length (aref result (1- (length result))))))
             do (vector-pop result)))
     result))
+
+(defun %p-resolve-sub-symbol (name)
+  "Resolve a Perl sub-name string (\"foo\" or \"Pkg::foo\") to its CL symbol
+   PKG::PL-FOO, or NIL if the package/symbol does not exist.  Shared by the
+   symbolic-code-ref paths: &{$name}(...), defined/exists &{$name}.  An
+   unqualified name resolves against the current CL package (MAIN -> main)."
+  (let* ((name (to-string name))
+         (sep-pos (search "::" name :from-end t))
+         (perl-pkg (if sep-pos
+                       (subseq name 0 sep-pos)
+                       (let ((cpkg (package-name *package*)))
+                         (if (string= cpkg "MAIN") "main" cpkg))))
+         (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
+         (cl-pkg (find-package (perl-pkg-to-cl-pkg-name perl-pkg))))
+    (when cl-pkg
+      (find-symbol (concatenate 'string "PL-" (string-upcase bare-name)) cl-pkg))))
 
 (defun p-funcall-ref (ref &rest args)
   "Call a code reference or a symbolic sub name (no-strict-refs semantics)."
@@ -8277,8 +8381,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (let* ((s (stringify-value v))
               (last-sep (search "::" s :from-end t)))
          (if last-sep
-             ;; Package-qualified: "Pkg::name" -> Pkg::PL-NAME
-             (let* ((pkg-str (string-upcase (subseq s 0 last-sep)))
+             ;; Package-qualified: "Pkg::name" -> Pkg::PL-NAME.  Multi-segment
+             ;; packages (Foo::Bar) keep their case (|Foo::Bar|); single-segment
+             ;; is upcased — via perl-pkg-to-cl-pkg-name, the same rule the other
+             ;; symbolic-ref paths use.  Plain string-upcase gave DATA::DUMP for a
+             ;; multi-seg name, missed the |Data::Dump| package, and returned nil
+             ;; (so \&{"Data::Dump::pp"} came back as a SCALAR ref to nil).
+             (let* ((pkg-str (perl-pkg-to-cl-pkg-name (subseq s 0 last-sep)))
                     (func-str (string-upcase (subseq s (+ last-sep 2))))
                     (cl-func-name (concatenate 'string "PL-" func-str))
                     (pkg (find-package pkg-str)))
@@ -8319,9 +8428,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-cast-% (val)
   "Perl hash dereference %{$ref} - unbox to get the hash.
    Handles both old format (box containing hash) and new format
-   (box containing box containing hash, from p-backslash)."
+   (box containing box containing hash, from p-backslash).
+   A string ending in \"::\" is a symbolic stash reference (%{\"Pkg::\"} /
+   %{\"main::\"}): return that package's stash (read-only snapshot of its subs),
+   so keys/values/exists over a package symbol table work (Class::Inspector etc.)."
   (let ((v (unbox val)))
-    (if (p-box-p v) (unbox v) v)))
+    (cond
+      ((p-box-p v) (unbox v))
+      ((and (stringp v)
+            (>= (length v) 2)
+            (string= (subseq v (- (length v) 2)) "::"))
+       (p-stash (subseq v 0 (- (length v) 2))))
+      (t v))))
 
 (defun %p-symref-box (name-str)
   "Resolve Perl symbolic scalar reference NAME-STR to a CL box.
@@ -8329,7 +8447,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; CL symbols cannot contain null bytes — silently return nil
   (when (find #\Nul name-str) (return-from %p-symref-box nil))
   (let* ((pos (search "::" name-str :from-end t))
-         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
+         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
+         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
          (pkg (if pkg-str (find-package pkg-str) *package*)))
     (when pkg
@@ -8342,7 +8463,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Set Perl symbolic scalar reference NAME-STR to NEW-BOX."
   (when (find #\Nul name-str) (return-from %p-symref-box new-box))
   (let* ((pos (search "::" name-str :from-end t))
-         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
+         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
+         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
          (pkg (if pkg-str
                   (or (find-package pkg-str)
@@ -8363,7 +8487,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (when (find #\Nul name-str) (return-from %p-symref-array
                                 (make-array 0 :adjustable t :fill-pointer 0)))
   (let* ((pos (search "::" name-str :from-end t))
-         (pkg-str (if pos (string-upcase (subseq name-str 0 pos)) nil))
+         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
+         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
+         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
          (pkg (if pkg-str
                   (or (find-package pkg-str)
@@ -9059,8 +9186,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   (vector-push-extend (make-p-box x) result))
                  ((hash-table-p x)
                   (maphash (lambda (k v)
-                             (vector-push-extend (make-p-box k) result)
-                             (%p-array-store-scalar result v))
+                             (when (%p-real-hash-key-p k)
+                               (vector-push-extend (make-p-box k) result)
+                               (%p-array-store-scalar result v)))
                            x))
                  ((p-flatten-marker-p x)
                   (add-items (p-flatten-marker-array x)))
@@ -9155,27 +9283,45 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   *p-undef*)
 
 (defun p-coderef-exists-p (coderef)
-  "Perl exists &{$coderef} — true if coderef points to a declared or defined sub."
+  "Perl exists &{$coderef} — true if coderef points to a declared or defined sub.
+   Accepts a real function object OR a symbolic sub-name string (no-strict-refs)."
   (let ((v (unbox coderef)))
-    (unless (functionp v) (return-from p-coderef-exists-p (make-p-box nil)))
-    ;; Get the function's name symbol (SBCL-specific)
-    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
-           (status (and (symbolp fname) (gethash fname *p-declared-subs*))))
-      (if status
-          (make-p-box 1)
-          ;; Fallback: any non-nil function object "exists"
-          (make-p-box 1)))))
+    (when (p-box-p v) (setf v (p-box-value v)))
+    (cond
+      ((functionp v)
+       ;; Any non-nil function object exists (declared stub or defined body).
+       (make-p-box 1))
+      ;; Symbolic name: exists iff it resolves to a known sub (stub or defined).
+      ((or (stringp v) (numberp v))
+       (let ((sym (%p-resolve-sub-symbol v)))
+         (if (and sym (or (gethash sym *p-declared-subs*) (fboundp sym)))
+             (make-p-box 1)
+             (make-p-box nil))))
+      (t (make-p-box nil)))))
 
 (defun p-coderef-defined-p (coderef)
-  "Perl defined &{$coderef} — true only if coderef points to a sub with a body."
+  "Perl defined &{$coderef} — true only if coderef points to a sub with a body.
+   Accepts a real function object OR a symbolic sub-name string (no-strict-refs).
+   A forward-declared sub (p-declare-sub installs a :stub that IS fboundp) is NOT
+   defined, so the status must be :defined (or fbound with no status = imported)."
   (let ((v (unbox coderef)))
-    (unless (functionp v) (return-from p-coderef-defined-p (make-p-box nil)))
-    ;; Get the function's name symbol (SBCL-specific)
-    (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
-           (status (and (symbolp fname) (gethash fname *p-declared-subs*))))
-      (if (eq status :defined)
-          (make-p-box 1)
-          (make-p-box nil)))))
+    (when (p-box-p v) (setf v (p-box-value v)))
+    (cond
+      ((functionp v)
+       (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
+              (status (and (symbolp fname) (gethash fname *p-declared-subs*))))
+         (if (eq status :defined)
+             (make-p-box 1)
+             (make-p-box nil))))
+      ((or (stringp v) (numberp v))
+       (let* ((sym (%p-resolve-sub-symbol v))
+              (status (and sym (gethash sym *p-declared-subs*))))
+         (if (and sym
+                  (or (eq status :defined)
+                      (and (null status) (fboundp sym))))
+             (make-p-box 1)
+             (make-p-box nil))))
+      (t (make-p-box nil)))))
 
 ;;; ============================================================
 ;;; Tie / Untie / Tied — scalar implementation
@@ -9241,7 +9387,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; Arrays (non-string vectors) return length
       ((and (vectorp v) (adjustable-array-p v)) (length v))
       ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count
-      ((and (hash-table-p v) (not (p-box-p val))) (hash-table-count v))
+      ((and (hash-table-p v) (not (p-box-p val))) (%p-hash-user-count v))
       ;; Everything else (numbers, hash refs, etc.) returns as-is
       (t v))))
 
@@ -10627,11 +10773,40 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defpackage :UNIVERSAL (:use :cl :pcl))
 (in-package :UNIVERSAL)
 (defun pl-can  (obj method &rest args) (declare (ignore args)) (p-can  obj method))
-(defun pl-isa  (obj class  &rest args) (declare (ignore args)) (p-isa  obj class))
-(defun pl-DOES (obj class  &rest args) (declare (ignore args)) (p-isa  obj class))
+(defun pl-isa  (obj class  &rest args)
+  (declare (ignore args))
+  ;; Perl's UNIVERSAL::isa(REF, TYPE) carries interpreter-baked behaviour beyond
+  ;; @ISA: when TYPE names a builtin reference type (ARRAY/HASH/SCALAR/CODE/GLOB/
+  ;; LVALUE/…) it is true iff reftype(REF) eq TYPE — regardless of blessing.
+  ;; p-reftype is "" for a non-ref, so ordinary strings/numbers fall through to
+  ;; the normal @ISA inheritance check.  (A blessed hashref isa "HASH" AND isa
+  ;; its class; both work — reftype path then @ISA path.)
+  (let ((rt (p-reftype obj)))
+    (if (and (plusp (length rt)) (string= rt (to-string class)))
+        (make-p-box 1)
+        (p-isa obj class))))
+(defun pl-DOES (obj class  &rest args) (declare (ignore args)) (pl-isa obj class))
 (defun pl-VERSION (&rest args) (declare (ignore args)) nil)
 
 (in-package :pcl)
+
+;;; Lexical pragmas as no-op import/unimport methods.
+;;; strict/warnings/feature/... manipulate the COMPILE-TIME hint bitmasks
+;;; ($^H, ${^WARNING_BITS}) — purely lexical, meaningless at runtime, and PCL
+;;; does not enforce them.  `use strict` is already a parser no-op, but a
+;;; module's import calling `strict->import` / `warnings->import` as a METHOD
+;;; (Role::Tiny, Moo) would otherwise load the core .pm, whose import does
+;;; `$^H |= bits` → STRICT::$^H unbound.  Defining the stubs here makes the
+;;; method resolve to a no-op (and find-symbol-first prevents the core file from
+;;; being loaded), so we never have to model $^H at all.
+(eval-when (:load-toplevel :execute)
+  (dolist (p '("STRICT" "WARNINGS" "FEATURE" "UTF8" "OPEN" "BYTES"
+               "LOCALE" "INTEGER" "RE" "OVERLOADING" "WARNINGS::REGISTER"))
+    (let ((pkg (or (find-package p) (make-package p :use '(:cl :pcl)))))
+      (dolist (m '("PL-IMPORT" "PL-UNIMPORT"))
+        (let ((sym (intern m pkg)))
+          (setf (fdefinition sym) (lambda (&rest a) (declare (ignore a)) nil))
+          (setf (gethash sym *p-declared-subs*) :defined))))))
 
 ;;; Extension loading registry — tracks which extension files have been loaded.
 (defvar *pcl-loaded-extensions* (make-hash-table :test 'equal))

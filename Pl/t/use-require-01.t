@@ -48,7 +48,7 @@ note "-------- Transpilation Tests:";
 # Test: use Module with qw() imports
 {
   my $result = Pl::Parser->parse_code('use Foo qw(bar baz);');
-  like($result, qr/p-use "Foo" :imports '\("bar" "baz"\)/, 'use with qw() imports');
+  like($result, qr/p-use "Foo" :import-args \(vector "bar" "baz"\)/, 'use with qw() imports');
 }
 
 # Test: require generates p-require

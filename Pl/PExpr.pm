@@ -385,6 +385,12 @@ sub parse {
   }
 
   $e            = $self->cleanup_for_parsing($e);
+  # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
+  # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
+  # as its argument (e.g. `defined *{$g}{CODE}` in Sub::Override) instead of just
+  # the Cast '*'.  Without parens, handle_subcalls would otherwise orphan the
+  # trailing {EXPR}{SLOT} blocks and the parse would fall through.
+  $self->_precollapse_dyn_glob_slots($e);
   $self->handle_subcalls($e);
   say "parse: //////  After calling handle_subcalls, in param:"  if 1 & DEBUG;
   say dump($e)      if 1 & DEBUG;
@@ -1700,6 +1706,54 @@ sub _extend_postfix_chain {
   return $end;
 }
 
+# Extract the slot name from a glob-slot block ({CODE} -> "CODE").  Mirrors the
+# inline extraction in the two glob_slot handlers; defaults to SCALAR if empty.
+sub _glob_slot_name_of {
+  my ($self, $block) = @_;
+  my @blk_ch = grep { ref($_) !~ /Whitespace/ } $block->children();
+  if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
+    @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
+  }
+  return 'SCALAR' unless @blk_ch;
+  # Unwrap a quoted slot name ({"CODE"} from an autoquoted Subscript) to CODE.
+  return $blk_ch[0]->isa('PPI::Token::Quote')
+       ? $blk_ch[0]->string : $blk_ch[0]->content();
+}
+
+# Pre-pass (runs before handle_subcalls): collapse a dynamic typeglob-slot into a
+# single glob_slot node, for both spellings:
+#   *{EXPR}{SLOT}  — Cast('*') + Block('{EXPR}') + {SLOT}
+#   *$var{SLOT}    — Cast('*') + Symbol('$var')  + {SLOT}   (Perl: == *{$var}{SLOT})
+# SLOT must be a known glob-slot bareword (CODE/SCALAR/…); it arrives as a Block
+# (after a Block glob-name) or a Subscript (after a Symbol glob-name).  Doing this
+# early — before handle_subcalls and before $var{SLOT} is read as a hash access —
+# lets a preceding named unary (`defined *{$g}{CODE}` in Sub::Override) grab the
+# whole glob-slot as one argument.  The in-loop handler (~line 1234) still covers
+# the Block/Block form reached via later recursion.
+sub _precollapse_dyn_glob_slots {
+  my ($self, $e) = @_;
+  for (my $i = 2; $i < scalar(@$e); $i++) {
+    my $term = $e->[$i];
+    next unless (ref($term) eq 'PPI::Structure::Block'
+                 || ref($term) eq 'PPI::Structure::Subscript')
+             && $term->start() eq '{'
+             && $self->_block_is_glob_slot($term);
+    my $cast = $e->[$i-2];
+    my $name = $e->[$i-1];
+    next unless ref($cast) eq 'PPI::Token::Cast' && $cast->content() eq '*';
+    my $name_ok = (ref($name) eq 'PPI::Structure::Block' && $name->start() eq '{')
+               || (ref($name) eq 'PPI::Token::Symbol'    && $name->content() =~ /^\$/);
+    next unless $name_ok;
+    my $glob_id = $self->parse([$cast, $name]);
+    my ($node, $id) = $self->make_node_insert('glob_slot');
+    $node->{slot_name} = $self->_glob_slot_name_of($term);
+    $self->add_child_to_node($id, $glob_id);
+    $e->[$i-2] = $node;     # replace Cast '*' position with the glob_slot node
+    splice @$e, $i-1, 2;    # remove glob-name and SLOT tokens
+    $i -= 2;
+  }
+}
+
 # True if BLOCK is a single glob-slot bareword: {CODE}, {SCALAR}, {ARRAY}, ...
 # Used to recognize the SLOT block of *{EXPR}{SLOT} dynamic glob-slot access.
 sub _block_is_glob_slot {
@@ -1708,8 +1762,13 @@ sub _block_is_glob_slot {
   if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
     @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
   }
-  return 0 unless @ch == 1 && $ch[0]->isa('PPI::Token::Word');
-  return $ch[0]->content =~ /^(?:SCALAR|ARRAY|HASH|CODE|IO|GLOB|NAME|PACKAGE|FORMAT)$/
+  return 0 unless @ch == 1;
+  # The slot can be a bareword Word ({CODE}) or — when it arrives as a hash
+  # Subscript, which cleanup_for_parsing autoquotes — a string literal ({"CODE"}).
+  my $name = $ch[0]->isa('PPI::Token::Word')  ? $ch[0]->content
+           : $ch[0]->isa('PPI::Token::Quote') ? $ch[0]->string
+           : return 0;
+  return $name =~ /^(?:SCALAR|ARRAY|HASH|CODE|IO|GLOB|NAME|PACKAGE|FORMAT)$/
        ? 1 : 0;
 }
 
@@ -3332,9 +3391,16 @@ sub child_context {
             if $child_index >= 1;  # Argument is scalar context
       }
 
-      # length always takes its argument in scalar context
-      # (even when length() itself is called in list context, e.g. push @a, length reverse)
-      if ($func_name && $func_name eq 'length') {
+      # Scalar-argument named-unary operators impose SCALAR context on their
+      # argument even when the operator itself is in list context — e.g.
+      # `print ucfirst(reverse $s)` must reverse the STRING, not the list, and
+      # `push @a, length reverse $s` counts characters.  Without this the arg
+      # inherits the caller's list context and a context-sensitive callee like
+      # reverse/sort returns a list.
+      if ($func_name && $func_name =~ /^(length|uc|lc|ucfirst|lcfirst|fc
+                                         |ord|chr|hex|oct|quotemeta
+                                         |abs|int|sqrt|sin|cos|exp|log
+                                         |defined|ref)$/x) {
         return SCALAR_CTX
             if $child_index >= 1;
       }
