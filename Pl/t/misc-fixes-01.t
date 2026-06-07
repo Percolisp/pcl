@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 92;
+plan tests => 96;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -719,3 +719,30 @@ test_cl('scalar ref survives %copy = %$href',
 test_cl('writeback through a hash-copied scalar ref reaches the original',
     'my $v = "old"; my %h = (r => \$v); ${$h{r}} = "new"; print $v, "\n";',
     "new\n");
+
+# --- return of a scalar ref must not strip it ---
+# p-return-value preserved hash/array/code refs (inner is hash/vector/function)
+# but a scalar ref's inner is a p-box, so `return \$x` (and `return $_[0]` when
+# $_[0] is a directly-passed \$x) unboxed it to a plain scalar. Keyed the fix on
+# the is-ref flag. Needed by Sub::Quote's unquote_sub.
+test_cl('return \\$x preserves the scalar ref',
+    'my $x = "V"; sub r { return \$x } my $s = r();'
+    . ' print ref($s), ":", ${$s}, "\n";',
+    "SCALAR:V\n");
+
+test_cl('return $_[0] preserves a directly-passed scalar ref',
+    'my $x = "V"; sub a { return $_[0] } my $s = a(\$x);'
+    . ' print ref($s), ":", ${$s}, "\n";',
+    "SCALAR:V\n");
+
+# --- top-level my ($x) = LIST is a LIST assignment (first element) ---
+# my ($x) is parenthesized → list context → $x gets the FIRST element. The
+# top-level my handler dropped the parens and emitted a scalar box-set, so
+# my ($x)=(a,b) gave the last element and my ($x)=@a gave the element count.
+test_cl('my ($x) = (a, b) takes the first element',
+    'my ($x) = ("A", "B"); print $x, "\n";',
+    "A\n");
+
+test_cl('my ($x) = @array takes the first element (not the count)',
+    'my @a = ("P","Q","R"); my ($x) = @a; print $x, "\n";',
+    "P\n");

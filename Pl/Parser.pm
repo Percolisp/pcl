@@ -1733,6 +1733,11 @@ sub _process_my_toplevel_declaration {
   # Find variable(s) and optional initializer
   my @vars;
   my $init_idx = -1;
+  # Whether the LHS was parenthesized: my ($x) is a LIST assignment (so a single
+  # scalar gets the FIRST RHS element), whereas my $x is a SCALAR assignment (the
+  # comma operator / array-in-scalar count).  Without this, my ($x) = @a wrongly
+  # compiled to (box-set $x @a) → element count, and my ($x) = (a,b) → last elem.
+  my $lhs_is_list = 0;
 
   for my $i (0 .. $#$parts) {
     my $p = $parts->[$i];
@@ -1742,7 +1747,8 @@ sub _process_my_toplevel_declaration {
       push @vars, $p->content;
     }
     elsif ($ref eq 'PPI::Structure::List') {
-      # List declaration: my ($x, $y)
+      # List declaration: my ($x, $y) — or a parenthesized single var my ($x)
+      $lhs_is_list = 1;
       push @vars, $self->_find_symbols_in_list($p);
     }
     elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
@@ -1871,8 +1877,13 @@ sub _process_my_toplevel_declaration {
         my $var = $vars[0];
         my $sigil = substr($var, 0, 1);
 
-        if ($sigil eq '$') {
-          # Scalar: parse RHS and use box-set to properly unbox source
+        if ($sigil eq '$' && $lhs_is_list) {
+          # my ($x) = LIST — parenthesized single scalar is a LIST assignment:
+          # $x gets the FIRST element (RHS parsed in list context).
+          my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt, 1) // 'nil';
+          $self->_emit("(p-list-= (vector $var) $rhs_cl)");
+        } elsif ($sigil eq '$') {
+          # my $x = EXPR — scalar assignment; box-set unboxes the source properly
           my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
           $self->_emit("(box-set $var $init_cl)");
         } else {

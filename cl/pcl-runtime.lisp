@@ -5760,6 +5760,13 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
     ;; class, unboxing strips it.  Also fixes bless [] returning a vector that
     ;; box-set would then convert to an element count via the adjustable-vector rule.
     ((p-box-class val) val)
+    ;; Scalar reference or typeglob reference (is-ref set) - return the box intact.
+    ;; A scalar ref's inner is a p-box and a glob ref's is a p-typeglob, so neither
+    ;; matches the hash/vector/function test below; without this, `return \$x` (and
+    ;; `return $_[0]` when $_[0] is a directly-passed \$x) unboxed the ref one level
+    ;; and stripped it to a plain scalar.  is-ref is set only by p-backslash for
+    ;; scalar/glob refs (array/hash/code refs don't set it), so this is exact.
+    ((p-box-is-ref val) val)
     ;; Box containing a reference (hash, array, function) - return the box intact.
     ;; The box IS the reference (hashref/arrayref/coderef). Stripping it would give
     ;; a raw hash-table/vector/function, which box-set then misinterprets.
