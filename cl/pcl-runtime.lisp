@@ -7736,14 +7736,43 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (dolist (sym-name imports)
           (p-import-perl-symbol sym-name pkg to-pkg))))))
 
+(defun %p-module-can-import-p (module-name)
+  "True if MODULE has an `import` method resolvable through its MRO — its own
+   `sub import` (Test::More, Moo, …) OR an inherited one (the usual
+   `our @ISA = ('Exporter')` → Exporter::import, now a real sub in lib/Exporter.pm).
+   When true, `use` dispatches to Foo->import(@args), exactly like Perl; when
+   false (a shim that declares @EXPORT but inherits nothing), `use` falls back to
+   the @EXPORT-copy convenience."
+  (p-true-p (ignore-errors (p-can module-name "import"))))
+
+(defun %p-do-import (module-name to-pkg import-args)
+  "Perform the import half of `use Module LIST`.  Perl: `use Foo X` evaluates X to
+   a list and calls Foo->import(X).  IMPORT-ARGS is that evaluated list (a vector)
+   or :default for bare `use Foo;` (import with no args → default exports).
+   Dispatch: an import method (own or inherited Exporter::import) → call it; else
+   the @EXPORT-copy convenience for shims that declare @EXPORT but inherit nothing."
+  (let ((args (cond ((eq import-args :default) :default)
+                    ((and (vectorp import-args) (not (stringp import-args)))
+                     (coerce import-args 'list))
+                    ((null import-args) nil)
+                    (t (list import-args)))))
+    (if (%p-module-can-import-p module-name)
+        ;; Foo->import(@args).  :default = called with no args.
+        (apply #'p-method-call module-name "import"
+               (if (eq args :default) nil args))
+        ;; @EXPORT-copy convenience: names are strings; :default = default @EXPORT.
+        (p-import-exports module-name to-pkg
+                          (if (eq args :default) nil (mapcar #'to-string args))))))
+
 (defparameter *p-xs-only-modules*
   '("XSLoader" "DynaLoader" "Carp::Heavy")
   "Modules that use XS/C code and cannot be transpiled. Skip loading them.")
 
-(defun p-use (module-name &key imports)
+(defun p-use (module-name &key (import-args :default))
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
-   IMPORTS: list of symbols to import (nil = use @EXPORT, empty list = no imports)"
+   IMPORT-ARGS: the evaluated import list (a vector) — `use Foo X` makes X a Perl
+   list — or :default for a bare `use Foo;` (import with no args)."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
     (return-from p-use t))
@@ -7751,9 +7780,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (caller-pkg *package*))
     ;; Already loaded?
     (when (gethash rel-path *p-inc-table*)
-      ;; Still import symbols for repeated use statements
-      (unless (and imports (null imports))
-        (p-import-exports module-name caller-pkg imports))
+      ;; Still import for repeated use statements
+      (%p-do-import module-name caller-pkg import-args)
       (return-from p-use t))
     ;; Circular dependency?
     (when (member rel-path *p-loading-modules* :test #'string=)
@@ -7770,8 +7798,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ;; Update %INC
       (setf (gethash rel-path *p-inc-table*) abs-path)
       ;; Import symbols from module
-      (unless (and imports (null imports))
-        (p-import-exports module-name caller-pkg imports))
+      (%p-do-import module-name caller-pkg import-args)
       t)))
 
 (defun p-require (module-name)
@@ -8354,8 +8381,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (let* ((s (stringify-value v))
               (last-sep (search "::" s :from-end t)))
          (if last-sep
-             ;; Package-qualified: "Pkg::name" -> Pkg::PL-NAME
-             (let* ((pkg-str (string-upcase (subseq s 0 last-sep)))
+             ;; Package-qualified: "Pkg::name" -> Pkg::PL-NAME.  Multi-segment
+             ;; packages (Foo::Bar) keep their case (|Foo::Bar|); single-segment
+             ;; is upcased — via perl-pkg-to-cl-pkg-name, the same rule the other
+             ;; symbolic-ref paths use.  Plain string-upcase gave DATA::DUMP for a
+             ;; multi-seg name, missed the |Data::Dump| package, and returned nil
+             ;; (so \&{"Data::Dump::pp"} came back as a SCALAR ref to nil).
+             (let* ((pkg-str (perl-pkg-to-cl-pkg-name (subseq s 0 last-sep)))
                     (func-str (string-upcase (subseq s (+ last-sep 2))))
                     (cl-func-name (concatenate 'string "PL-" func-str))
                     (pkg (find-package pkg-str)))

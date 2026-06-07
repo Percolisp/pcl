@@ -5691,7 +5691,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|Exporter|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|re)$/) {
+  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|re)$/) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
@@ -5737,13 +5737,20 @@ sub _process_include_statement {
         $self->_merge_module_prototypes($module_env, \@imports);
       }
 
+      # Perl: `use Module LIST` makes LIST a normal list that is evaluated and
+      # passed to Module->import(LIST).  Transpile the import-arg tokens through
+      # the ordinary list parser (so tests => 5 / qw(a b) / 'no_plan' all work),
+      # and hand the resulting vector to p-use.  Bare `use Module;` (no args)
+      # passes no :import-args -> import called with no args (default exports).
       $self->_emit(";; $perl_code");
-      if (@imports) {
-        my $list = join(' ', map { qq{"$_"} } @imports);
-        $self->_emit("(p-eval-always");
-        $self->_emit("  (p-use \"$module\" :imports '($list)))");
+      my @arg_tokens = $self->_use_import_arg_tokens($stmt);
+      my $args_cl = @arg_tokens
+                  ? $self->_parse_expression(\@arg_tokens, $stmt, 1)  # LIST ctx
+                  : undef;
+      $self->_emit("(p-eval-always");
+      if (defined $args_cl && $args_cl ne '') {
+        $self->_emit("  (p-use \"$module\" :import-args $args_cl))");
       } else {
-        $self->_emit("(p-eval-always");
         $self->_emit("  (p-use \"$module\"))");
       }
     }
@@ -6042,6 +6049,34 @@ sub _merge_module_prototypes {
   }
 }
 
+
+# The import-argument tokens of a `use`/`no` statement: everything after
+# `use Module [VERSION]`, minus the trailing ';'.  These ARE a Perl list (the
+# LIST in `use Module LIST`), so the caller runs them through the normal list
+# parser.  The optional module VERSION (use Foo 1.2 …) is NOT an import arg
+# (Perl calls Foo->VERSION(1.2)), so it's skipped.
+sub _use_import_arg_tokens {
+  my ($self, $stmt) = @_;
+  my $ver = $stmt->version;
+  $ver = (defined $ver && ref($ver)) ? $ver->content : $ver;
+  my @args;
+  my $past_module = 0;
+  for my $c ($stmt->schildren) {
+    if (!$past_module) {
+      next if $c->isa('PPI::Token::Word')
+           && ($c->content eq 'use' || $c->content eq 'no' || $c->content eq 'require');
+      $past_module = 1, next if $c->isa('PPI::Token::Word');   # module name
+      next;                                                    # anything else before it
+    }
+    next if $c->isa('PPI::Token::Structure') && $c->content eq ';';
+    # Skip the module VERSION number sitting right after the module name.
+    next if !@args && defined $ver && $ver ne ''
+         && ($c->isa('PPI::Token::Number') || $c->isa('PPI::Token::Number::Version'))
+         && $c->content eq $ver;
+    push @args, $c;
+  }
+  return @args;
+}
 
 # Parse import list from use statement (e.g., qw(foo bar) or ('foo', 'bar'))
 sub _parse_use_import_list {

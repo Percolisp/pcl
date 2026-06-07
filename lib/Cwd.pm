@@ -8,15 +8,8 @@ use strict;
 our @EXPORT    = qw(cwd getcwd);
 our @EXPORT_OK = qw(cwd getcwd abs_path fast_abs_path realpath fast_cwd);
 
-sub import {
-    my $class = shift;
-    my $pkg = caller;
-    no strict 'refs';
-    my @to_export = @_ ? @_ : @EXPORT;
-    for my $fn (@to_export) {
-        *{"${pkg}::${fn}"} = \&{"Cwd::${fn}"};
-    }
-}
+# No custom import: PCL imports @EXPORT / a requested subset automatically.
+# (A hand-rolled Exporter here would just duplicate that.)
 
 # getcwd/cwd: PCL transpiler maps these to p-getcwd/p-cwd (Config.pm line ~384)
 sub getcwd { return getcwd() }

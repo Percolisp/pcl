@@ -12,26 +12,8 @@ our @EXPORT = qw(
 our @EXPORT_OK = @EXPORT;
 our %EXPORT_TAGS = ( DEFAULT => \@EXPORT, ALL => \@EXPORT );
 
-sub import {
-    my $class = shift;
-    my $pkg = caller;
-    no strict 'refs';
-    my @to_export;
-    if (@_) {
-        for my $item (@_) {
-            if ($item eq ':DEFAULT' || $item eq ':ALL') {
-                push @to_export, @EXPORT;
-            } else {
-                push @to_export, $item;
-            }
-        }
-    } else {
-        @to_export = @EXPORT;
-    }
-    for my $fn (do { my %seen; grep { !$seen{$_}++ } @to_export }) {
-        *{"${pkg}::${fn}"} = \&{"File::Spec::Functions::${fn}"};
-    }
-}
+# No custom import: PCL imports @EXPORT / a requested subset (and :DEFAULT/:ALL
+# tags) automatically.  A hand-rolled Exporter here would just duplicate that.
 
 sub catfile {
     my @parts = @_;

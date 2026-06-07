@@ -174,9 +174,8 @@ sub myconfig {
 
 # import - called by "import Config" or "use Config"
 # PCL doesn't actually support symbol import, so this is a no-op
-sub import {
-    # No-op - %Config is accessed via $Config::Config{key} or after use Config
-    return 1;
-}
+# No custom import: PCL imports @EXPORT (%Config) automatically on `use Config`.
+# (The previous no-op import relied on that fake running — which it no longer
+# does when a module defines its own import.)
 
 1;
