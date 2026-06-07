@@ -4,6 +4,42 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 238b (2026-06-07) — CPAN survey of installed pure-Perl modules; symbolic-ref/stash introspection fixed
+
+User asked to go back to CPAN modules and find **simpler-than-Moo** targets, *"ask before
+installing"*. Surveyed the **already-installed** pure-Perl modules (no CPAN fetch) via `./runpl`
+smoke probes. Findings: `oo.pm` loads (trivial); **Class::Inspector** & **Sub::Override** load and
+their *cores* nearly work but hit symbol-table introspection gaps; `Test::Deep` hit
+`Scalar::Util::@EXPORT_FAIL` unbound; `YAML::PP` = compile-file failure; `Sub::Uplevel` = `uplevel`
+import gap. Picked the **shared, lowest-hanging cluster**: symbol-table introspection. Three general
+fixes (commit `814724e`, `cl/pcl-runtime.lisp`; tests `misc-fixes-01.t` 110→114):
+
+1. **`defined &{"Pkg::sub"}` / `exists &{"Pkg::sub"}` on a symbolic NAME string** always returned
+   false — `p-coderef-defined-p`/`-exists-p` only handled a real function object. Added a symbolic
+   branch resolving the name via a new **`%p-resolve-sub-symbol`** helper (factored out of
+   `p-funcall-ref`'s inline resolver). "defined" must check status `:defined` (not mere `fboundp`)
+   because `p-declare-sub` installs an fboundp **`:stub`** for a forward-declared sub.
+
+2. **`keys`/`values %{"Pkg::"}`** (symbolic stash deref) yielded nothing — `p-cast-%` left the
+   trailing-`::` string as-is. Now a string ending in `::` routes to `p-stash` (which already builds
+   a name→coderef snapshot of the package's subs).
+
+3. **`@{"Foo::Bar::var"}` / `${...}` (multi-segment symbolic ref)** came back empty — `%p-symref-array`
+   /`-box` `string-upcase`d the package (`FOO::BAR`) then `make-package`d a fresh empty one instead of
+   preserving case to match the real `|Foo::Bar|`. Now via `perl-pkg-to-cl-pkg-name` (the s234
+   convention). Single-seg unaffected (upcase already matched).
+
+**Result: Class::Inspector's core now matches perl 5.40** — `loaded`/`installed`/`functions`/`methods`/
+`function_exists` all correct (multi-seg classes too). **`subclasses` still gaps** (needs a global
+package-table walk — enumerate all packages, check each `@ISA`). **Sub::Override still blocked** on a
+*different* primitive: `*{"Pkg::sub"}{CODE}` (dynamic typeglob CODE-slot read) + `*{$str}=$code`
+install — not addressed. Gate **91/3303**, sweep-diff **0 new / 0 fixed** (none of the tracked
+perl-tests rows use these idioms), 69 fully passing held. Next CPAN steps: (a) `subclasses` /
+dynamic-glob-CODE-slot to finish Class::Inspector + unblock Sub::Override; (b) `Scalar::Util::@EXPORT_FAIL`
+unbound (Test::Deep) looked like a cheap Exporter-emulation default. See [[project_cpan_module_survey]].
+
+---
+
 ## Session 238 (2026-06-07) — pull multideref.t + postfixderef.t; 2 general subscript/our bugs fixed
 
 Picked up the queued task (end of 237b): pull Perl's own `t/op/multideref.t` (65) and
