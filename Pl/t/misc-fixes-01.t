@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 86;
+plan tests => 89;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -677,3 +677,25 @@ test_cl('our $var inside a sub in a multi-segment package',
     'package Foo::Bar; sub setit { our $thing = 42; return $thing; }'
     . ' package main; print Foo::Bar::setit(), "\n";',
     "42\n");
+
+# --- glob-ref install/inspect: *{\*glob} = code and *{\*glob}{CODE} ---
+# Moo's _install_coderef does _getglob = \*{$name}, then `if (*{$glob}{CODE})`
+# and `*{$glob} = $code`.  p-glob-assign-dynamic / p-dynamic-typeglob
+# stringified the glob ref (→ GLOB(0x..)) instead of recognizing the
+# p-typeglob it wraps, so the install was lost and the slot read returned
+# nothing.  Also *{EXPR}{SLOT} (dynamic glob-slot) used to be a parse error.
+test_cl('*{$globref} = sub installs a callable sub',
+    'no strict "refs"; my $gr = \*{"main::zap"};'
+    . ' *{$gr} = sub { return "zapped" }; print zap(), "\n";',
+    "zapped\n");
+
+test_cl('*{$globref}{CODE} reflects an installed sub',
+    'no strict "refs"; *{"main::has_code"} = sub { 1 };'
+    . ' my $gr = \*{"main::has_code"};'
+    . ' print( (*{$gr}{CODE} ? "yes" : "no"), "\n");',
+    "yes\n");
+
+test_cl('*{$globref}{CODE} is false for an empty glob',
+    'no strict "refs"; my $gr = \*{"main::no_code"};'
+    . ' print( (*{$gr}{CODE} ? "yes" : "no"), "\n");',
+    "no\n");

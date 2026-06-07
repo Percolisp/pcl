@@ -819,6 +819,17 @@ sub parse {
         && !$self->is_internal_node_type($e->[$i-1])
         && $self->is_var($e->[$i-1])
         && $e->[$i-1]->content() =~ /^\*/;
+    # Dynamic typeglob slot access: *{EXPR}{SLOT} — Cast('*') + Block('{EXPR}') +
+    # Block('{SLOT}').  e.g. *{$glob}{CODE}, used by Moo's _install_coderef.
+    # SLOT must be a known glob-slot bareword so we don't misread *{$x}{$y}.
+    my $is_dyn_typeglob_slot = ref($term) eq 'PPI::Structure::Block'
+        && $term->start() eq '{'
+        && $i >= 2
+        && ref($e->[$i-1]) eq 'PPI::Structure::Block'
+        && $e->[$i-1]->start() eq '{'
+        && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+        && $e->[$i-2]->content() eq '*'
+        && $self->_block_is_glob_slot($term);
     next
         if !$self->is_arrow_op($term)
         && !$self->is_arr_or_hash_braces($term)
@@ -828,7 +839,8 @@ sub parse {
         && !$is_kv_arr_deref_constructor
         && !$is_kv_hash_deref_block
         && !$is_qw_subscript
-        && !$is_typeglob_slot;
+        && !$is_typeglob_slot
+        && !$is_dyn_typeglob_slot;
 
     die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
         if $i == 0;
@@ -1177,6 +1189,26 @@ sub parse {
 
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
       splice @$e, $i-1, 2;  # Remove Block and Block
+      $i -= 2;
+      next;
+    }
+
+    # Handle dynamic typeglob slot access: *{EXPR}{SLOT} — Cast('*') +
+    # Block('{EXPR}') + Block('{SLOT}'), e.g. *{$glob}{CODE}.
+    # Parse the Cast+Block pair into the (p-dynamic-typeglob ...) node, then
+    # wrap it in a glob_slot node — same shape as the static *name{SLOT} below.
+    if ($is_dyn_typeglob_slot) {
+      my $glob_id = $self->parse([$e->[$i-2], $e->[$i-1]]);
+      my @blk_ch = grep { ref($_) !~ /Whitespace/ } $term->children();
+      if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
+        @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
+      }
+      my $slot_name = @blk_ch ? $blk_ch[0]->content() : 'SCALAR';
+      my($node, $id) = $self->make_node_insert('glob_slot');
+      $node->{slot_name} = $slot_name;
+      $self->add_child_to_node($id, $glob_id);
+      $e->[$i-2] = $node;   # Replace Cast '*' position with node
+      splice @$e, $i-1, 2;  # Remove Block(EXPR) and Block(SLOT)
       $i -= 2;
       next;
     }
@@ -1586,6 +1618,19 @@ sub parse_list {
 # Returns true if a PPI::Structure::Block looks like a hash constructor:
 # first significant token is a bareword followed by =>
 # e.g., {a => $_, b => $x}
+# True if BLOCK is a single glob-slot bareword: {CODE}, {SCALAR}, {ARRAY}, ...
+# Used to recognize the SLOT block of *{EXPR}{SLOT} dynamic glob-slot access.
+sub _block_is_glob_slot {
+  my ($self, $block) = @_;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return 0 unless @ch == 1 && $ch[0]->isa('PPI::Token::Word');
+  return $ch[0]->content =~ /^(?:SCALAR|ARRAY|HASH|CODE|IO|GLOB|NAME|PACKAGE|FORMAT)$/
+       ? 1 : 0;
+}
+
 sub _block_is_hash_constructor {
   my $block = shift;
   my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();

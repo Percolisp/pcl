@@ -8653,14 +8653,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
     (make-p-typeglob pkg (string-upcase name-str))))
 
-(defun p-glob-assign (pkg-str name-str rhs)
-  "Assign RHS to the appropriate slot of typeglob *pkg::name.
-   Dispatch is by type of the unwrapped RHS value."
-  (let* ((pkg   (or (%pcl-find-package pkg-str)
-                    (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
-         (uname (string-upcase name-str))
-         ;; Unwrap one box level to see what was referenced
-         (inner (if (p-box-p rhs) (unbox rhs) rhs)))
+(defun %p-glob-assign-slots (pkg uname rhs)
+  "Assign RHS to the appropriate slot of typeglob (PKG package-object, UNAME
+   already-upcased name string).  Dispatch is by type of the unwrapped RHS.
+   Shared by p-glob-assign (name-string form) and the glob-REF form of
+   p-glob-assign-dynamic (*{\\*Pkg::name} = val)."
+  (let ((inner (if (p-box-p rhs) (unbox rhs) rhs)))
     (cond
       ;; *foo = *bar — full glob copy
       ((p-typeglob-p rhs)   (p-glob-copy pkg uname rhs))
@@ -8699,23 +8697,42 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
              rhs)))))
 
+(defun p-glob-assign (pkg-str name-str rhs)
+  "Assign RHS to the appropriate slot of typeglob *pkg::name (by name strings)."
+  (let ((pkg   (or (%pcl-find-package pkg-str)
+                   (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
+        (uname (string-upcase name-str)))
+    (%p-glob-assign-slots pkg uname rhs)))
+
 (defun p-glob-assign-dynamic (name-box rhs)
-  "Dynamic typeglob assignment: *$var = val where $var contains the full name."
-  (let* ((name-str (to-string name-box))
-         (sep-pos (search "::" name-str :from-end t))
-         (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
-         (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str)))
-    (p-glob-assign pkg-str bare-str rhs)))
+  "Dynamic typeglob assignment: *{EXPR} = val.  EXPR is either a NAME string
+   (\"Pkg::name\") or a glob REFERENCE (\\*{...}) — the form Moo's _install_coderef
+   uses (_getglob returns \\*{$name}, then *{$glob} = $code).  A glob ref unboxes
+   to a p-typeglob; assign straight into its slots rather than stringifying it
+   (which would yield GLOB(0x..) and install nothing)."
+  (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
+    (if (p-typeglob-p inner)
+        (%p-glob-assign-slots (p-typeglob-package inner) (p-typeglob-name inner) rhs)
+        (let* ((name-str (to-string name-box))
+               (sep-pos (search "::" name-str :from-end t))
+               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
+               (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str)))
+          (p-glob-assign pkg-str bare-str rhs)))))
 
 (defun p-dynamic-typeglob (name-box)
-  "Rvalue *$var — return a typeglob object for the given name."
-  (let* ((name-str (to-string name-box))
-         (sep-pos (search "::" name-str :from-end t))
-         (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
-         (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
-         (pkg (or (%pcl-find-package pkg-str)
-                  (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
-    (make-p-typeglob pkg (string-upcase bare-str))))
+  "Rvalue *{EXPR} — return a typeglob object.  EXPR is a NAME string (\"Pkg::name\")
+   or a glob REFERENCE (\\*{...}); a glob ref unboxes to a p-typeglob, which we
+   return as-is (e.g. *{$glob}{CODE} where $glob = \\*{...})."
+  (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
+    (if (p-typeglob-p inner)
+        inner
+        (let* ((name-str (to-string name-box))
+               (sep-pos (search "::" name-str :from-end t))
+               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
+               (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
+               (pkg (or (%pcl-find-package pkg-str)
+                        (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
+          (make-p-typeglob pkg (string-upcase bare-str))))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
   "Copy all slots from src-glob into dst (pkg, uname)."
