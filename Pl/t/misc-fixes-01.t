@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 85;
+plan tests => 86;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -668,3 +668,12 @@ test_cl('${N} numbered capture var in interpolation',
     like($err, qr/ERRMARK/,
         'print STDERR reaches stderr (foreign-package STDERR symbol)');
 }
+
+# --- our $var inside a sub in a multi-segment package ---
+# `_process_our_declaration` emitted the inner defvar with a raw package prefix
+# (Foo::Bar::$thing), which the CL reader rejects as too many colons.  Must
+# pipe-quote multi-segment names (|Foo::Bar|::$thing).  Hit via Moo::sification.
+test_cl('our $var inside a sub in a multi-segment package',
+    'package Foo::Bar; sub setit { our $thing = 42; return $thing; }'
+    . ' package main; print Foo::Bar::setit(), "\n";',
+    "42\n");

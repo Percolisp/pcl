@@ -1501,12 +1501,17 @@ sub _process_our_declaration {
   $self->_with_bucket('declarations', sub {
     $self->_emit(";; $perl_code");
     if ($self->environment->in_subroutine > 0) {
+      # Multi-segment package names (Foo::Bar) must be pipe-quoted in the CL
+      # symbol prefix, else the reader sees "Foo::Bar::$var" as too many colons.
+      # _cl_pkg_designator is the single source of truth (':|Foo::Bar|' / ':main');
+      # strip the leading ':' to get the symbol-package prefix (cf. line ~5458).
+      (my $cl_pkg_sym = $self->_cl_pkg_designator($pkg)) =~ s/^://;
       for my $var (@vars) {
         my $sigil = substr($var, 0, 1);
         my $init = $sigil eq '$' ? '(make-p-box nil)'
                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                  :                 '(make-hash-table :test #\'equal)';
-        my $cl_var = "${pkg}::${var}";
+        my $cl_var = "${cl_pkg_sym}::${var}";
         $self->_emit("(defvar $cl_var $init)");
       }
     }
