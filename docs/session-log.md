@@ -59,6 +59,60 @@ Next-session options: (A) custom-import dispatch in `p-use` **gated** behind mak
 Moo gets; (B) tackle eval-lexical-capture (the recurring wall for Moo/CMM); (C) keep surveying
 lighter no-XS modules. See [[project_cpan_module_survey]].
 
+### Session 237b continued — "is Sub::Quote the problem?" → a list/scalar-context bug cluster + a parser refactor
+
+User asked whether Sub::Quote was Moo's blocker. **Tested instead of guessing** (Sub::Quote itself
+works since 236d): a `quote_sub(code, {'$x'=>\$v})` capture returned empty. Drilled down through a
+clean matrix and found it was **NOT** Sub::Quote and **NOT** the eval wall — it was a *general*
+list/scalar-context bug cluster that string-eval/Moo merely exposed. Four more general fixes, each
+with a `misc-fixes-01.t` regression test (89→102), each gate-green + sweep-clean:
+
+5. **Scalar ref lost in `%h=(k=>\$x)` / `%c=%$href`** (commit `2f1f97c`). `%p-make-hash-entry` (the
+   per-value copy step of `%hash=(LIST)`) did `(make-p-box (unbox v))` for copy semantics, which for
+   a SCALAR ref unboxed the reference one level; `p-gethash` then stripped the rest → `ref()`=''.
+   Array/hash/code refs (no is-ref flag) and the `{}`/element/via-var paths all dodged it, so only a
+   *scalar* ref *directly* in a `%h=(...)` literal hit it — which is exactly Sub::Quote's captures
+   (`my %captures = %$captures`). Fix: when v is itself a ref box, wrap it whole (the double-box
+   shape `p-gethash` round-trips). **Sub::Quote captures now work end-to-end.**
+
+6. **`return \$x` stripped the ref** (commit `190f677`). `p-return-value` preserved hash/array/code
+   refs (inner is hash/vector/function) but a scalar ref's inner is a p-box → fell to `(unbox val)`.
+   Added an is-ref case. (Implicit tail-return already worked.)
+
+7. **Top-level `my ($x) = LIST` was scalar-assign** (same commit). `_process_my_toplevel_declaration`
+   flattened `($x)` and bare `$x` into the same `@vars`, discarding the parens (the list-context
+   signal), then emitted `box-set` → `my ($x)=(a,b)` took the LAST element, `my ($x)=@a` took the
+   COUNT. Track `$lhs_is_list` and route the parenthesized single scalar through `p-list-=`. The
+   in-sub path (`my ($x)=@_`) and ≥2-var path were already correct; only top-level single-var-paren
+   was wrong (rare → uncaught; `list.t` is sweep-skipped for an unrelated O(n²) PPI-perf reason).
+
+8. **Whole dereference-slice / postfix-deref family** (commit `06840f7`). A feature-sweep vs Perl
+   5.40 found a coherent broken cluster: prefix `@$ar[0,2]` (array-ref slice) was routed to
+   `slice_h_acc`→`p-hslice`→`p-gethash` on a vector → crash (bracket type now picks the slice kind);
+   postfix slices `$ref->@[..]`/`->@{..}`/`->%[..]`/`->%{..}` were parse errors (added a postfix-slice
+   builder mirroring the prefix nodes); `keys/values $ref->%*` parsed as `(keys $ref)->%*` (operand
+   grab extended); nested `exists $h{a}{b}` on a missing intermediate crashed `p-exists` on undef
+   (guarded → false; the autoviv side-effect is documented not-supported). Maps to upstream
+   `postfixderef.t`/`multideref.t` (not yet pulled in). Sweep +1 (a sprintf array-slice case).
+
+**Survey** (user asked which upstream tests cover this / what's untouched): upstream `t/op` has 221
+files, we have ~108; the ref/list cluster is covered by `postfixderef.t`/`multideref.t`/`decl-refs.t`
+(MISSING) and `list.t` (skipped for the O(n²) eval). Documented as the recommended next pulls.
+
+**Parser review + refactor** (user: "a maze of special cases… make it neater. Think long and hard").
+Wrote **`docs/pexpr-term-parsing-review.md`** (commit `c8af358`): the operand-boundary logic had the
+"consume postfix chain" walk hand-rolled 5–6 times with drifted coverage, because there's no single
+"a term" abstraction. **Option B** (two-phase: reduce all `cast* primary postfix*` terms into nodes,
+THEN bind operators — deletes the whole `$end_pars` machinery) documented for a future focused change.
+**Option A implemented** (commit `acc9639`): extracted `_extend_postfix_chain($e,$end)` — the one
+place that knows the postfix grammar — and routed all 5 sites + the 1-arg Symbol case through it;
+deleted the `keys $hr->%*` special case (now subsumed) and ~70 lines of duplicated lookahead. Gate
+91/**3291**, sweep 18048 pass / **0 new / 0 fixed** vs the 449 baseline (also reverted a stray
+449→448 bless that had captured a flaky parallel pass of sprintf.t's `%.0g -0.0` test, which fails
+deterministically standalone).
+
+**Net session: 9 commits.** Gate 3291 green; sweep 18048/783/69 fully-passing held; baseline 449.
+
 ---
 
 ## Session 237 (2026-06-07) — sweep-flakiness investigation: deterministic; guarded crash-file noise
