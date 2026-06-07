@@ -10741,8 +10741,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defpackage :UNIVERSAL (:use :cl :pcl))
 (in-package :UNIVERSAL)
 (defun pl-can  (obj method &rest args) (declare (ignore args)) (p-can  obj method))
-(defun pl-isa  (obj class  &rest args) (declare (ignore args)) (p-isa  obj class))
-(defun pl-DOES (obj class  &rest args) (declare (ignore args)) (p-isa  obj class))
+(defun pl-isa  (obj class  &rest args)
+  (declare (ignore args))
+  ;; Perl's UNIVERSAL::isa(REF, TYPE) carries interpreter-baked behaviour beyond
+  ;; @ISA: when TYPE names a builtin reference type (ARRAY/HASH/SCALAR/CODE/GLOB/
+  ;; LVALUE/…) it is true iff reftype(REF) eq TYPE — regardless of blessing.
+  ;; p-reftype is "" for a non-ref, so ordinary strings/numbers fall through to
+  ;; the normal @ISA inheritance check.  (A blessed hashref isa "HASH" AND isa
+  ;; its class; both work — reftype path then @ISA path.)
+  (let ((rt (p-reftype obj)))
+    (if (and (plusp (length rt)) (string= rt (to-string class)))
+        (make-p-box 1)
+        (p-isa obj class))))
+(defun pl-DOES (obj class  &rest args) (declare (ignore args)) (pl-isa obj class))
 (defun pl-VERSION (&rest args) (declare (ignore args)) nil)
 
 (in-package :pcl)

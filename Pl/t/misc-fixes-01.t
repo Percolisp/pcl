@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 120;
+plan tests => 121;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -907,6 +907,21 @@ test_cl('keys %{"Pkg::"} includes child namespaces (orig-case)',
     'package P; sub aa { 1 } package P::Kid; sub cc { 1 } package main;'
     . ' print join(",", sort keys %{"P::"}), "\n";',
     "Kid::,aa\n");
+
+# --- UNIVERSAL::isa reftype special case ---
+# UNIVERSAL::isa(REF, TYPE) is true when TYPE names a builtin reftype and
+# reftype(REF) matches — blessed or not — on top of the normal @ISA check. Was
+# only doing the @ISA check (p-isa), so unblessed refs and blessed-vs-reftype
+# came back false. Fix is in UNIVERSAL::pl-isa, so the method form $obj->isa
+# (which dispatches there) gets it too.
+test_cl('UNIVERSAL::isa reftype special case (function + @ISA + non-ref)',
+    'my $a=[1]; package D; sub new { bless {}, shift } package main;'
+    . ' my $d=D->new;'
+    . ' print join("", map { $_ ? 1 : 0 }'
+    . '   UNIVERSAL::isa($a,"ARRAY"), UNIVERSAL::isa($a,"HASH"),'
+    . '   UNIVERSAL::isa($d,"HASH"),  UNIVERSAL::isa($d,"D"),'
+    . '   UNIVERSAL::isa("x","ARRAY")), "\n";',
+    "10110\n");
 
 # Transitive subclass walk over @ISA (single-seg packages, case preserved).
 test_cl('symbolic-stash subclass walk finds @ISA descendants with correct case',
