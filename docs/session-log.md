@@ -4,6 +4,63 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 237b (2026-06-07) — Moo survey: 4 general glob/print/our bugs fixed; Moo blocked on eval-capture
+
+Resumed the no-XS CPAN survey ([[project_cpan_module_survey]]) toward **Moo**. Began by
+recovering an **uncommitted `pcl-runtime.lisp` change** (the "lost contact" work): a
+`print STDERR`/filehandle fix. Validated it (confirmed the HEAD bug + the fix with separated
+stdout/stderr capture), added a regression test, swept clean, committed.
+
+**Four general bugs fixed (4 commits), each with a misc-fixes-01.t regression test:**
+
+1. **`print STDERR` routed to stdout** (commit `5971cf3`). `p-get-filehandle-stream` looked up
+   FH symbols only by `eq` in `*p-filehandles*`. STDIN/STDOUT/STDERR are registered under the
+   `:pcl` symbols, but generated code in a user package passes that package's own (unexported,
+   distinct) same-named symbol → `eq` miss → silently fell through to stdout, corrupting
+   Carp/warn diagnostics. Added a by-name fallback (look up the canonical `:pcl` symbol of the
+   same name). User FHs register under their own symbol → hit directly; only standard handles use
+   the fallback.
+
+2. **Multi-colon `our $var` defvar** (commit `ed81095`). `our $x` inside a sub emits an explicit
+   `(defvar PKG::$x …)`. `_process_our_declaration` built the prefix as the raw `"${pkg}::${var}"`,
+   so a multi-segment package gave `(defvar Foo::Bar::$x …)` → CL reader "too many colons in Bar"
+   → crash loading ANY such module (hit via Moo::sification's `our $disabled = 1`). Now routes the
+   prefix through `_cl_pkg_designator` (single source of truth: multi-seg→`|Foo::Bar|`,
+   single-seg→bare) and strips the leading `:`, exactly as `_emit_package_preamble` does for $a/$b.
+
+3. **Glob-REF assign/slot** (commit `404e2b5`). Moo's `_install_coderef` does `_getglob` = `\*{$name}`
+   then `*{$glob} = $code` / `if (*{$glob}{CODE})`. (a) `p-glob-assign-dynamic` & `p-dynamic-typeglob`
+   stringified their name arg; a glob ref is a box wrapping a `p-typeglob` so it became `GLOB(0x..)`
+   → install lost, slot read empty. Both now unbox and, on a `p-typeglob`, operate on it directly;
+   extracted `%p-glob-assign-slots` shared by the name-string and glob-ref paths. (b) `*{EXPR}{SLOT}`
+   (dynamic glob-slot) was a **parse error** — added structural detection (Cast `*` + Block + Block,
+   SLOT a known glob-slot bareword) mirroring the `%{$ref}{keys}` path + `_block_is_glob_slot` guard.
+
+Gate **91 / 3278** green throughout; full sweep **18047 pass / 784 fail / 69 fully passing** (held,
++1 pass), sweep-diff **0 new / 0 fixed** on every change. misc-fixes-01.t 83→89.
+
+**Moo is still blocked** (matches the memory prediction "expect eval-lexical-capture walls"). The
+chain, now mapped end-to-end:
+- `use Moo` → `Moo::sification` loads (after fix #2) → `Moo.pm` loads. But **`has`/`with`/`extends`
+  are never installed**, because **`p-use` never calls a module's custom `import`** — it only does
+  `p-import-exports` (copies `@EXPORT`). PCL fakes Exporter by reading `@EXPORT` directly; modules
+  with a *custom* `import` (Moo, Moose, namespace::clean…) get nothing run.
+- Wiring custom-import dispatch into `p-use` is a **real general gap worth doing** but it
+  **cascades**: Moo's `import` immediately calls `strict->import; warnings->import;` as real method
+  calls → PCL resolves `STRICT::PL-IMPORT` (real strict.pm transpiled) → **`STRICT::$^H` unbound**
+  (the hints var). And *beyond* that, `_install_subs`→`_gen_subs`→`Method::Generate::{Constructor,
+  Accessor}` generate accessors via **Sub::Quote/eval closing over installer lexicals** = the
+  documented eval-lexical-capture limitation (same family as the CMM block). So full Moo needs
+  eval-lexical-capture solved first; deferred. Did **not** wire custom-import this session (it would
+  turn `use Moo` from a silent no-op into a `$^H` crash — strictly worse) — documented instead.
+
+Next-session options: (A) custom-import dispatch in `p-use` **gated** behind making
+`strict`/`warnings`/`feature` `->import` no-op method calls + binding `$^H`, then re-survey how far
+Moo gets; (B) tackle eval-lexical-capture (the recurring wall for Moo/CMM); (C) keep surveying
+lighter no-XS modules. See [[project_cpan_module_survey]].
+
+---
+
 ## Session 237 (2026-06-07) — sweep-flakiness investigation: deterministic; guarded crash-file noise
 
 User asked to chase the parallel-sweep flakiness (every regression check was costing a
