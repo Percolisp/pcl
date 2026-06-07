@@ -4,6 +4,44 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 238e (2026-06-08) — UNIVERSAL::isa reftype special case + Test::More plan/status
+
+Two pieces, both en route to running CPAN modules' own test suites.
+
+**`UNIVERSAL::isa` reftype special case fixed** (commit `bad53a9`, `cl/pcl-runtime.lisp`).
+`UNIVERSAL::pl-isa` only delegated to `p-isa` (the @ISA path), so the **interpreter-baked
+reftype behaviour** was missing: `UNIVERSAL::isa(REF, TYPE)` is true when TYPE names a builtin
+reftype (ARRAY/HASH/SCALAR/CODE/GLOB/LVALUE/…) and `reftype(REF) eq TYPE`, regardless of blessing.
+So `UNIVERSAL::isa([],"ARRAY")` and `UNIVERSAL::isa($blessed_href,"HASH")` returned undef instead of
+1. Fix: `pl-isa` checks `p-reftype` first (`""` for a non-ref → plain scalars fall through to the
+@ISA check), then `p-isa`. Because `$obj->isa(TYPE)` (method form) dispatches to `UNIVERSAL::pl-isa`
+via `p-method-call`'s UNIVERSAL fallback, the blessed-ref **method form gets the reftype check too**.
+`pl-DOES` now routes through `pl-isa` (Perl's DOES defaults to isa). Verified byte-for-byte vs perl
+5.40 across the full matrix. Gate **91/3310** green. **Sweep skipped this run at user request** (the
+gate is the regression guard; no sweep-diff this time). Tests `misc-fixes-01.t` 120→121.
+
+This was the one piece of interpreter magic the copied Test::More `_type`/`is_deeply` needs — so
+`is_deeply` can now be copied from real Test::More **without** the `_type`→`reftype` rewrite.
+
+**Also: the UNIVERSAL-as-universal-methods mechanism already works** — verified (byte-exact vs perl)
+that user code `package UNIVERSAL; sub frob {…}` makes `frob` a method on every object/class, via
+`p-method-call`'s implicit-UNIVERSAL-parent fallback. The builtins (`isa`/`can`/`DOES`/`VERSION`)
+ride that same mechanism; only their *extra* interpreter semantics (isa's reftype case) needed code.
+
+**Test::More — wrote `docs/test-more-plan.md` (committed `64f1d30`) and TESTED current status.**
+**Verdict: doesn't work yet, blocked on exactly one thing (Phase 0).** `use Test::More` →
+`(p-use "Test::More")` loads the *real* site_perl Test::More → transpiles the Test2 stack → dies
+`Test2::API::Instance::PL-IPC undefined`. BUT with the `use` line removed, the ambient runtime
+`pl-ok`/`pl-is`/`pl-isnt`/`pl-like` produce **perfect TAP** (verified `1..5` + ok/not-ok lines). So
+the *only* blocker is the `use` loading the real module. **Plan Phase 0** (add Test::More/Test::Builder
+to a runtime-provided skip-load set in `p-use`) **+ Phase 1** (capture `tests => N` → `pl-plan`) is
+the minimal unlock; most CPAN `t/` files use only ok/is/like/done_testing, which already work.
+Decision recorded in the plan: Test::More is **runtime-provided** (NOT a pure-Perl `lib/` shim — the
+counter/failure-log/skip-registry/$TODO live in the runtime); `is_deeply`/`isa_ok` get **copied from
+real Test::More** (credited), now that the `isa` reftype case works. See [[project_cpan_module_survey]].
+
+---
+
 ## Session 238d (2026-06-07) — Class::Inspector->subclasses (child-namespace stash) + CPAN-testing methodology
 
 User: "Run Class::Inspector subclasses next." Done — `Class::Inspector->subclasses` now matches
