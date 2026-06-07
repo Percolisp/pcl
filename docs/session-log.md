@@ -54,6 +54,20 @@ segregated as crash-file noise in the two PARTIAL files). Baseline re-blessed **
 Next: (a) the `$a[N]{k}=v` autoviv gap (general, would lift several store rows), then re-survey
 multideref/postfixderef; (b) resume the CPAN-module survey (Moo) per [[project_cpan_module_survey]].
 
+**Follow-up (same session): the `$a[N]{k}=v` autoviv gap is FIXED** (commit `f1a0c7f`,
+`cl/pcl-runtime.lisp`). Two related causes: (1) `p-setf` had **no dispatch arm** for
+`(p-gethash (p-aref …) key)` — a hash store whose container is a plain array element fell through
+to the generic `(setf (p-gethash :UNDEF …) v)` and crashed. The autoviv machinery already vivifies
+a `p-aref` inner form (`expand-autoviv` → `p-autoviv-aref-for-hash`), so the fix is to widen the
+existing nested-hash arm's inner head from `'p-gethash` to `'(p-gethash p-aref)`. (2)
+`p-autoviv-aref-for-hash`/`-for-array` and `p-array-set` did a raw `(truncate idx)` that TYPE-errored
+on a **boxed** index — so `$a[$i]{$k}=v`, and even the pre-existing `$a[$i][$j]=v` / `$h{$k}[$j]=v`,
+crashed with a *variable* index; now `(truncate (to-number idx))` (matches `p-aref`'s own coercion).
+Verified value/length/hole behaviour byte-for-byte vs perl 5.40. Gate **91/3299**; sweep-diff
+**0 new / 0 fixed** (the patterns weren't among the tracked failing rows — multideref/postfixderef
+still abort on their *other* bugs: the `($r//0)->…=` lvalue-autoviv and the symbolic-ref slice-assign).
+69 fully passing held; baseline unchanged (482). Tests `misc-fixes-01.t` 107→110.
+
 ---
 
 ## Session 237b (2026-06-07) — Moo survey: 4 general glob/print/our bugs fixed; Moo blocked on eval-capture
