@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 118;
+plan tests => 120;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -898,3 +898,22 @@ test_cl('flattening a blessed hash to a list excludes the class key',
     'my $o = bless { k=>"v" }, "Z"; my @list = %$o;'
     . ' print scalar(@list), ":@list\n";',
     "2:k v\n");
+
+# --- keys %{"Pkg::"} reports child namespaces (Class::Inspector->subclasses) ---
+# p-stash now adds a "<child>::" key for each registered package one segment
+# deeper than Pkg, using the orig-case name map (so single-seg packages keep
+# their case). Lets the package-tree walk in Class::Inspector->subclasses work.
+test_cl('keys %{"Pkg::"} includes child namespaces (orig-case)',
+    'package P; sub aa { 1 } package P::Kid; sub cc { 1 } package main;'
+    . ' print join(",", sort keys %{"P::"}), "\n";',
+    "Kid::,aa\n");
+
+# Transitive subclass walk over @ISA (single-seg packages, case preserved).
+test_cl('symbolic-stash subclass walk finds @ISA descendants with correct case',
+    'package Animal; package Dog; our @ISA=("Animal");'
+    . ' package Puppy; our @ISA=("Dog"); package main;'
+    . ' my %seen; for my $ns (keys %{"::"}) {'
+    . '   (my $c = $ns) =~ s/::$//; next unless @{"${c}::ISA"};'
+    . '   $seen{$c} = 1 if $c->isa("Animal"); }'
+    . ' print join(",", sort keys %seen), "\n";',
+    "Dog,Puppy\n");

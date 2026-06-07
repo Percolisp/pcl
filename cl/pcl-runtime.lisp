@@ -5583,9 +5583,40 @@
             do (decf (fill-pointer a))))
     result))
 
+(defun %p-stash-add-child-namespaces (pkg-name h)
+  "Add a \"<child>::\" key to stash hash H for every registered Perl package one
+   namespace segment deeper than PKG-NAME (\"\"/\"main\" = the root).  Values are
+   irrelevant — consumers (Class::Inspector->subclasses via keys %{\"Foo::\"})
+   only read the keys.  Orig-case names come from *pcl-pkg-name-map*, so
+   single-segment packages keep their case (Foo, not FOO).  Runs even when
+   PKG-NAME itself has no CL package, so intermediate namespaces (e.g. Sub:: when
+   only Sub::Override exists) still report their children."
+  (let* ((root (or (string= pkg-name "")
+                   (string= (string-downcase pkg-name) "main")))
+         (prefix (if root "" (concatenate 'string pkg-name "::")))
+         (plen (length prefix)))
+    (loop for perl-name being the hash-values of *pcl-pkg-name-map*
+          do (let ((child
+                    (cond
+                      (root
+                       (let ((c (search "::" perl-name)))
+                         (if c (subseq perl-name 0 c) perl-name)))
+                      ((and (> (length perl-name) plen)
+                            (string= prefix (subseq perl-name 0 plen)))
+                       (let* ((rest (subseq perl-name plen))
+                              (c (search "::" rest)))
+                         (if c (subseq rest 0 c) rest)))
+                      (t nil))))
+               (when (and child
+                          (> (length child) 0)
+                          (not (string= child "main")))
+                 (setf (gethash (concatenate 'string child "::") h)
+                       (make-p-box 1)))))))
+
 (defun p-stash (pkg-name)
   "Return the package stash as a hash mapping Perl symbol names to code-ref boxes.
-   Keys are lowercase Perl sub names; values are (make-p-box function).
+   Keys are lowercase Perl sub names; values are (make-p-box function).  Child
+   namespaces are also added as \"<child>::\" keys (see %p-stash-add-child-namespaces).
    delete $::{foo} → (p-delete (p-stash \"main\") \"foo\") returns the code ref.
    This is a snapshot (not a live view), sufficient for delete/lookup of existing subs."
   (let* ((pkg-str (if (or (string= (string-downcase pkg-name) "main")
@@ -5605,6 +5636,7 @@
               (let ((perl-name (string-downcase (subseq name 3))))
                 (setf (gethash perl-name h)
                       (make-p-box (symbol-function sym)))))))))
+    (%p-stash-add-child-namespaces pkg-name h)
     h))
 
 ;;; ============================================================
