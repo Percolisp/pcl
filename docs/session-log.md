@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 238g (2026-06-08) — pragma `->import` no-op stubs; Moo/Role::Tiny next walls mapped
+
+**Pragma `->import` cascade fixed** (commit `d436707`, `cl/pcl-runtime.lisp`). Now that `use`
+dispatches to a module's real import (238f), a module whose import calls `strict->import` /
+`warnings->import` as a METHOD (Role::Tiny, Moo) loaded the core `strict.pm`, whose import does
+`$^H |= bits` → `STRICT::$^H` unbound. These pragmas only manipulate the compile-time lexical hint
+bitmasks (`$^H`, `${^WARNING_BITS}`) which PCL doesn't model/enforce. Fix: runtime no-op
+`pl-import`/`pl-unimport` in each pragma package (STRICT/WARNINGS/FEATURE/UTF8/OPEN/BYTES/LOCALE/
+INTEGER/RE/OVERLOADING/WARNINGS::REGISTER) — same pattern as the UNIVERSAL stubs — so the method
+resolves to a no-op and the core .pm never loads. **No need to model `$^H` at all.** Gate 91/3311,
+misc-fixes-01.t 121→122.
+
+**Moo + Role::Tiny — both blow through the cascade now; next walls mapped (NOT fixed):**
+- **Moo**: `use Moo` was a *silent no-op* before this session; now it loads Moo + runs Moo's custom
+  `import` + clears the strict/warnings calls, reaching Moo's internals — dies `Moo::_set_loaded
+  undefined`. ROOT CAUSE (traced, NOT import-related): **`Moo::_Utils` aborts mid-load on a PARSE
+  ERROR** at `*{$old}{$type}` — a **dynamic typeglob-slot with a VARIABLE slot name** (`$type` holds
+  "SCALAR"/"HASH"/… in a `foreach`), in its glob-copy loop. Our glob-slot parser
+  (`_block_is_glob_slot`, from the Sub::Override work) only recognizes *literal* slot barewords
+  (`{CODE}`/`{SCALAR}`), a deliberate guard against misreading `*{$x}{$y}`. The variable-slot form
+  falls through → broken CL → load aborts before `_set_loaded` (line 221) is installed → Moo's
+  `use Moo::_Utils qw(_set_loaded)` has nothing to import. **NEXT MOO WALL = parse `*{$glob}{$var}`
+  (variable-slot dynamic glob access).** (Then the always-known last wall: accessor gen via
+  Sub::Quote/eval-lexical-capture.)
+- **Role::Tiny**: past the cascade, runs its import into role composition, dies TYPE-ERROR
+  `2 is not HASH-TABLE` = `$INFO{$target}{non_methods}` where `$INFO{Comp}` is `2` not a hashref
+  (Role::Tiny-internal; separate deeper bug).
+
+See [[project_cpan_module_survey]].
+
+---
+
 ## Session 238f (2026-06-08) — generic `use Foo LIST` → Foo->import(LIST) via the REAL Exporter
 
 The big one (commit `57fab5f`): made `use` work like Perl — **parse the import LIST, call the
