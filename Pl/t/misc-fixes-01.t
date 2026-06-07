@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 107;
+plan tests => 110;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -812,3 +812,22 @@ test_cl('our indices drive a nested subscript chain inside a package block',
     '{ package Mlt; our ($i,$k)=(1,"x"); my @a=(undef, {x=>9});'
     . ' print "M=", $a[$i]{$k}, "\n"; }',
     "M=9\n");
+
+# --- autovivification: $a[N]{k}=v on an empty array ---
+# p-setf had no dispatch arm for (p-gethash (p-aref ...) key), so $a[N]{k}=v fell
+# through to (setf (p-gethash :UNDEF ...) v) (p-aref on an empty array = :UNDEF)
+# and crashed. Added the arm -> p-autoviv-set (expand-autoviv already vivifies a
+# p-aref slot to a hash). Separately, the p-autoviv-*-aref helpers + p-array-set
+# did raw (truncate idx), which type-errored on a BOXED index ($i): now they
+# (truncate (to-number idx)). The latter also fixed pre-existing $a[$i][$j]=v.
+test_cl('autoviv $a[N]{k}=v on empty array (literal index/key)',
+    'my @a; $a[1]{"x"}=42; print "A=", $a[1]{"x"}, ":", scalar(@a), "\n";',
+    "A=42:2\n");
+
+test_cl('autoviv $a[$i]{$k}=v with boxed index and key',
+    'my $i=1; my $k="x"; my @a; $a[$i]{$k}=42; print "A=", $a[$i]{$k}, "\n";',
+    "A=42\n");
+
+test_cl('autoviv $a[$i][$j]=v with boxed indices (array-in-array)',
+    'my $i=0; my $j=2; my @a; $a[$i][$j]=7; print "A=", $a[$i][$j], "\n";',
+    "A=7\n");

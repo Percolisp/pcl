@@ -3423,11 +3423,16 @@
             (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
           (setf (p-aref ,arr ,idx) ,val))))
     ;; Nested hash access - autovivification
-    ;; (p-gethash (p-gethash ... ) key) = value
+    ;; (p-gethash (p-gethash ... ) key) = value         ($h{a}{b})
+    ;; (p-gethash (p-aref   ... ) key) = value          ($a[N]{k})
+    ;; In both cases the container slot must vivify to a hash before the store.
+    ;; expand-autoviv already handles a p-aref inner form (-> p-autoviv-aref-for-hash);
+    ;; this dispatch arm just has to route it there instead of the plain (setf ...)
+    ;; fallthrough, which would (setf (p-gethash :UNDEF ...) ...) on an empty array.
     ((and (listp place)
           (eq (car place) 'p-gethash)
           (listp (cadr place))
-          (eq (car (cadr place)) 'p-gethash))
+          (member (car (cadr place)) '(p-gethash p-aref)))
      (let ((outer-key (caddr place))
            (val (gensym "VAL")))
        `(let ((,val ,value))
@@ -5054,7 +5059,7 @@
   "Get array element, autovivifying to empty hash if missing.
    Handles boxes in array elements."
   (let* ((a (unbox arr))
-         (i (truncate idx)))
+         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
@@ -5073,7 +5078,7 @@
   "Get array element, autovivifying to empty array if missing.
    Handles boxes in array elements."
   (let* ((a (unbox arr))
-         (i (truncate idx)))
+         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
@@ -5092,7 +5097,7 @@
   "Set array element, extending array if needed.
    Stores values in boxes for l-value semantics."
   (let* ((a (unbox arr))
-         (i (truncate idx)))
+         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
       (loop for j from (length a) to i
