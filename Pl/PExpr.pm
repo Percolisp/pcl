@@ -964,6 +964,36 @@ sub parse {
         splice @$e, $i, 2;  # Remove -> and Cast($*/\@*/\%*)
         $i--;
         next;
+      } elsif (ref($nxt) eq 'PPI::Token::Cast'
+               && $nxt->content() =~ /^([@%])$/
+               && defined($nxt_2)
+               && (ref($nxt_2) eq 'PPI::Structure::Subscript'
+                   || ref($nxt_2) eq 'PPI::Structure::Block')) {
+        # Postfix deref slice: X->@[i,j] / X->@{k,l} / X->%[i,j] / X->%{k,l}
+        # (Perl 5.20+).  Equivalent to @{X}[i,j], @{X}{k,l}, %{X}[i,j], %{X}{k,l}
+        # — build the same slice node the prefix forms use.
+        my $sigil  = $1;
+        my $is_arr = ($nxt_2->start() eq '[');
+        my $type   = $sigil eq '@'
+                     ? ($is_arr ? 'slice_a_acc'    : 'slice_h_acc')
+                     : ($is_arr ? 'kv_slice_a_acc' : 'kv_slice_h_acc');
+        my $pre_id = $self->parse([$pre]);
+        my ($node, $id) = $self->make_node_insert($type);
+        $self->add_child_to_node($id, $pre_id);
+        my @ix    = $nxt_2->children();
+        my $ix_id = $self->_parse_subscript_ix(\@ix, $is_arr);
+        my $n     = $self->get_a_node($ix_id);
+        if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
+          # Flatten comma-separated indices/keys into separate children
+          my $kids = $self->get_node_children($ix_id);
+          $self->add_child_to_node($id, $_) for @$kids;
+        } else {
+          $self->add_child_to_node($id, $ix_id);
+        }
+        $e->[$i-1] = $node;
+        splice @$e, $i, 3;  # Remove ->, Cast(@/%), and the subscript
+        $i--;
+        next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/) {
         # Case 1D: X->$foo (variable method name, no parentheses)
@@ -1009,8 +1039,11 @@ sub parse {
         } elsif ($cast_before
                  && ref($cast_before) eq 'PPI::Token::Cast'
                  && $cast_before->content() eq '@') {
-          # @{$hashref}{keys} or @$scalar{keys} — hash ref slice
-          $type = "slice_h_acc";
+          # @$ref[indices] — ARRAY ref slice (square brackets);
+          # @$ref{keys} / @{$hashref}{keys} — HASH ref slice (curly braces).
+          # The bracket type decides, NOT the ref type.  (Was always slice_h_acc,
+          # so @$ar[0,2] wrongly hit p-hslice → p-gethash on a vector → crash.)
+          $type = $self->is_arr_braces($term) ? "slice_a_acc" : "slice_h_acc";
         } elsif ($cast_before
                  && ref($cast_before) eq 'PPI::Token::Cast'
                  && $cast_before->content() eq '%'
@@ -1056,7 +1089,8 @@ sub parse {
       $e->[$i-1] = $node;
       splice @$e, $i, 1;         # Remove $term (subscript)
 
-      if (($type eq 'slice_h_acc' || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
+      if (($type eq 'slice_a_acc' || $type eq 'slice_h_acc'
+           || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
           && $i >= 2
           && ref($e->[$i-2]) eq 'PPI::Token::Cast'
           && ($e->[$i-2]->content() eq '@' || $e->[$i-2]->content() eq '%')) {
@@ -2741,6 +2775,23 @@ sub handle_subcalls {
                      && $next_term->content() =~ /^%/) {
               # %hash + Block is one term (KV slice: %h{keys})
               $end_pars = $i + 2;
+            } elsif (ref($after) eq 'PPI::Token::Operator'
+                     && $after->content() eq '->'
+                     && $i + 3 <= $end_pars
+                     && ref($e->[$i + 3]) eq 'PPI::Token::Cast') {
+              # Symbol + postfix deref: keys $hr->%*, values $ar->@*, and the
+              # slice forms keys $hr->@{...} / values $ar->@[...].
+              my $cast = $e->[$i + 3];
+              if ($cast->content() =~ /^[\$\@%]\*$/) {
+                $end_pars = $i + 3;                 # $hr->@*/%*/$*
+              } elsif ($cast->content() =~ /^[\@%]$/
+                       && $i + 4 <= $end_pars
+                       && ($e->[$i + 4]->isa('PPI::Structure::Subscript')
+                           || $e->[$i + 4]->isa('PPI::Structure::Block'))) {
+                $end_pars = $i + 4;                 # $hr->@[...]/%{...}
+              } else {
+                $end_pars = $i + 1;
+              }
             } else {
               # Just the symbol (e.g., keys %hash, values @arr)
               $end_pars = $i + 1;

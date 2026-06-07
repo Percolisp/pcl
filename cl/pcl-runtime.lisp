@@ -5415,7 +5415,12 @@
     (cond
       ((eq h '%ENV-MARKER%) (not (null (sb-posix:getenv k))))
       ((eq h '%INC-MARKER%) (nth-value 1 (gethash k *p-inc-table*)))
-      (t (nth-value 1 (gethash k h))))))
+      ;; Non-hash container (e.g. undef intermediate in `exists $h{a}{b}` where
+      ;; $h{a} doesn't exist): Perl autovivifies $h{a} and the result is false.
+      ;; We don't autovivify the intermediate, but must return false, not crash
+      ;; gethash on a non-hash-table.
+      ((hash-table-p h) (nth-value 1 (gethash k h)))
+      (t nil))))
 
 (defun p-delete (hash key)
   "Perl delete function for hashes - returns unboxed value"

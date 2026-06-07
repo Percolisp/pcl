@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 96;
+plan tests => 102;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -746,3 +746,33 @@ test_cl('my ($x) = (a, b) takes the first element',
 test_cl('my ($x) = @array takes the first element (not the count)',
     'my @a = ("P","Q","R"); my ($x) = @a; print $x, "\n";',
     "P\n");
+
+# --- dereference slices (prefix and postfix) ---
+# @$ar[i,j] (array-ref slice, square brackets) wrongly routed to p-hslice (hash
+# slice) → p-gethash on a vector → crash; the bracket type must pick the slice
+# kind. And the postfix forms $ref->@[...], ->@{...}, ->%{...}, ->%[...] were
+# parse errors. keys/values $ref->%* parsed as (keys $ref)->%*.
+test_cl('prefix array-ref slice @$ar[0,2]',
+    'my $ar=[10,20,30]; my @s=@$ar[0,2]; print "@s\n";',
+    "10 30\n");
+
+test_cl('postfix array-ref slice $ar->@[0,2]',
+    'my $ar=[10,20,30]; my @s=$ar->@[0,2]; print "@s\n";',
+    "10 30\n");
+
+test_cl('postfix hash-ref slice $hr->@{...}',
+    'my $hr={a=>1,b=>2,c=>3}; my @s=$hr->@{qw(a c)}; print "@s\n";',
+    "1 3\n");
+
+test_cl('postfix kv hash-ref slice $hr->%{...}',
+    'my $hr={a=>1,c=>3}; my @s=$hr->%{qw(a c)}; print "@s\n";',
+    "a 1 c 3\n");
+
+test_cl('keys on a postfix hash deref: keys $hr->%*',
+    'my $hr={a=>1,b=>2,c=>3}; print join(",",sort keys $hr->%*), "\n";',
+    "a,b,c\n");
+
+# nested exists on a missing intermediate must not crash (returns false)
+test_cl('exists $h{a}{b} on empty hash does not crash',
+    'my %h; print((exists $h{a}{b}) ? "T":"F", "\n");',
+    "F\n");
