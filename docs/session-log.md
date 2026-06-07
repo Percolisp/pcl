@@ -113,6 +113,32 @@ deterministically standalone).
 
 **Net session: 9 commits.** Gate 3291 green; sweep 18048/783/69 fully-passing held; baseline 449.
 
+### Session 237b — coverage survey + `reverse`-scalar-context fix
+
+Completed the systematic `t/` coverage survey (had been sidetracked by the bug cluster). We cover
+**~99/221 `t/op`** files and **almost nothing** of `t/comp` (0/25), `t/class` (1/10), `t/re` (80),
+`t/io` (44), `t/mro` (73), `t/uni` (30). A feature-sweep probe of untested areas found one new real
+bug (fixed below) and re-confirmed the documented Unicode/case-mapping gap; everything else probed
+(vec, sprintf `%b`/`%o`/`%vd`, `goto &sub`, sort comparators, nested-ternary lvalue, pack `N`,
+chomp-return, …) matched Perl.
+
+**`reverse` (and any context-sensitive callee) in scalar-unary args** (committed): `print ucfirst(reverse
+$s)` gave `ARRAY(0x..)` — `child_context` (`Pl/PExpr.pm`) had list-forcing cases (map/grep/reverse/
+print) and `scalar`/`length` scalar-forcing, but **no general scalar-argument named-unary case**, so
+`ucfirst`/`lc`/`uc`/… let their argument inherit the caller's list context. Broadened the `length`
+case to `length|uc|lc|ucfirst|lcfirst|fc|ord|chr|hex|oct|quotemeta|abs|int|sqrt|sin|cos|exp|log|
+defined|ref` → SCALAR_CTX on the arg. `misc-fixes-01.t` 102→104.
+
+> **NEXT-SESSION TODO (b): pull `perl-tests/postfixderef.t` + `perl-tests/multideref.t`** from
+> upstream `t/op/` (`/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/op/`). They directly
+> exercise the deref-slice / postfix-deref family fixed this session (commit `06840f7`) and the
+> nested-`exists`/autoviv chains — so they will both give a hard pass-count and guard the fixes
+> against regression. Expect some not-supported rows (refaliasing `lvref`, autoviv side-effects) to
+> need skip-registry entries; run via `perl sweep-perl-tests.pl --jobs 1 perl-tests/postfixderef.t`
+> first to triage. Lower-priority follow-ons: `decl-refs.t`, `localref.t`, and re-examining the
+> sweep-skipped `list.t` (skipped only for an O(n²) PPI-perf 100k-nested eval, not semantics — its
+> ordinary list-context tests are lost coverage; consider splitting).
+
 ---
 
 ## Session 237 (2026-06-07) — sweep-flakiness investigation: deterministic; guarded crash-file noise

@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 102;
+plan tests => 104;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -776,3 +776,15 @@ test_cl('keys on a postfix hash deref: keys $hr->%*',
 test_cl('exists $h{a}{b} on empty hash does not crash',
     'my %h; print((exists $h{a}{b}) ? "T":"F", "\n");',
     "F\n");
+
+# --- scalar-argument named-unary ops impose SCALAR context on their arg ---
+# In list context (e.g. a print arg), ucfirst/lc/length/... must still run their
+# argument in scalar context, so a context-sensitive callee like reverse reverses
+# the STRING, not the list. Was inheriting the caller's list context -> ARRAY(0x..).
+test_cl('ucfirst(reverse $s) in list context reverses the string',
+    'my $s="abc"; print "x", ucfirst(reverse($s)), "y", "\n";',
+    "xCbay\n");
+
+test_cl('length(reverse $s) counts characters in list context',
+    'my $s="abcd"; print "n=", length(reverse($s)), "\n";',
+    "n=4\n");

@@ -3332,9 +3332,16 @@ sub child_context {
             if $child_index >= 1;  # Argument is scalar context
       }
 
-      # length always takes its argument in scalar context
-      # (even when length() itself is called in list context, e.g. push @a, length reverse)
-      if ($func_name && $func_name eq 'length') {
+      # Scalar-argument named-unary operators impose SCALAR context on their
+      # argument even when the operator itself is in list context — e.g.
+      # `print ucfirst(reverse $s)` must reverse the STRING, not the list, and
+      # `push @a, length reverse $s` counts characters.  Without this the arg
+      # inherits the caller's list context and a context-sensitive callee like
+      # reverse/sort returns a list.
+      if ($func_name && $func_name =~ /^(length|uc|lc|ucfirst|lcfirst|fc
+                                         |ord|chr|hex|oct|quotemeta
+                                         |abs|int|sqrt|sin|cos|exp|log
+                                         |defined|ref)$/x) {
         return SCALAR_CTX
             if $child_index >= 1;
       }
