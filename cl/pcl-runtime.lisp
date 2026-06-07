@@ -6159,7 +6159,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Get CL stream from Perl filehandle (symbol, box, or stream)"
   (cond
     ((streamp fh) fh)
-    ((symbolp fh) (gethash fh *p-filehandles*))
+    ((symbolp fh)
+     (or (gethash fh *p-filehandles*)
+         ;; The standard handles STDIN/STDOUT/STDERR are registered under the
+         ;; :pcl symbols, but generated code in a user package passes that
+         ;; package's own same-named symbol (these names are not exported, so
+         ;; they are distinct symbols) — an `eq` miss.  Perl filehandles are
+         ;; by-name, so fall back to a by-name lookup; this is what makes
+         ;; `print STDERR ...` actually reach *error-output* instead of stdout.
+         (let ((canon (find-symbol (symbol-name fh) :pcl)))
+           (and canon (not (eq canon fh)) (gethash canon *p-filehandles*)))))
     ((p-box-p fh)
      (let ((v (p-box-value fh)))
        (if (streamp v) v nil)))   ; only return if it IS a stream

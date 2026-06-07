@@ -15,7 +15,31 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 83;
+plan tests => 85;
+
+# Run transpiled code capturing stdout and stderr SEPARATELY (the normal
+# run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
+# noise lines filtered from both.
+sub run_cl_split {
+    my ($code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    my $cl_code = `$pl2cl $pl_file 2>/dev/null`;
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl_code;
+    close $cl_fh;
+    my ($ef, $err_file) = tempfile(SUFFIX => '.err', UNLINK => 1);
+    close $ef;
+    my $out = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>$err_file`;
+    my $err = do { local $/; open(my $f, '<', $err_file) or return ($out, ''); <$f> };
+    for my $s ($out, $err) {
+        $s =~ s/^;.*\n//gm;
+        $s =~ s/^PCL Runtime loaded\n//gm;
+        $s =~ s/^\s*\n//gm;
+    }
+    return ($out, $err);
+}
 
 sub run_cl {
     my ($code) = @_;
@@ -629,3 +653,18 @@ test_cl('${\ EXPR} expression-interpolation idiom',
 test_cl('${N} numbered capture var in interpolation',
     'my $s = "abc"; $s =~ /(b)(c)/; print "c=${1}${2}\n";',
     "c=bc\n");
+
+# --- print STDERR routes to *error-output*, not stdout ---
+# Generated code runs in a user package whose STDERR symbol is NOT the :pcl
+# STDERR registered in *p-filehandles* (an `eq` miss).  p-get-filehandle-stream
+# now falls back to a by-name lookup so `print STDERR ...` reaches *error-output*
+# rather than silently going to stdout (which broke Carp/warn diagnostics for
+# CPAN modules).  Without reopening STDERR, the only observable difference is
+# which stream the bytes land on — so capture them separately.
+{
+    my ($out, $err) = run_cl_split(
+        'print STDOUT "OUTMARK"; print STDERR "ERRMARK";');
+    like($out, qr/OUTMARK/, 'print STDOUT reaches stdout');
+    like($err, qr/ERRMARK/,
+        'print STDERR reaches stderr (foreign-package STDERR symbol)');
+}
