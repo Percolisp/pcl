@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 121;
+plan tests => 122;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -932,3 +932,15 @@ test_cl('symbolic-stash subclass walk finds @ISA descendants with correct case',
     . '   $seen{$c} = 1 if $c->isa("Animal"); }'
     . ' print join(",", sort keys %seen), "\n";',
     "Dog,Puppy\n");
+
+# --- lexical pragmas as no-op import methods ---
+# A module's import calling strict->import / warnings->import / feature->import
+# (Role::Tiny, Moo do) used to load the core strict.pm, whose import does
+# $^H |= bits -> STRICT::$^H unbound. These manipulate compile-time hint bitmasks
+# PCL doesn't model, so they're runtime no-op methods now.
+test_cl('strict/warnings/feature ->import are no-op methods (no $^H crash)',
+    'package R; sub import { my $c = shift;'
+    . ' strict->import; warnings->import; feature->import(":5.10");'
+    . ' strict->unimport; 1 }'
+    . ' package main; R->import; print "ok\n";',
+    "ok\n");

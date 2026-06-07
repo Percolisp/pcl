@@ -10790,6 +10790,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (in-package :pcl)
 
+;;; Lexical pragmas as no-op import/unimport methods.
+;;; strict/warnings/feature/... manipulate the COMPILE-TIME hint bitmasks
+;;; ($^H, ${^WARNING_BITS}) — purely lexical, meaningless at runtime, and PCL
+;;; does not enforce them.  `use strict` is already a parser no-op, but a
+;;; module's import calling `strict->import` / `warnings->import` as a METHOD
+;;; (Role::Tiny, Moo) would otherwise load the core .pm, whose import does
+;;; `$^H |= bits` → STRICT::$^H unbound.  Defining the stubs here makes the
+;;; method resolve to a no-op (and find-symbol-first prevents the core file from
+;;; being loaded), so we never have to model $^H at all.
+(eval-when (:load-toplevel :execute)
+  (dolist (p '("STRICT" "WARNINGS" "FEATURE" "UTF8" "OPEN" "BYTES"
+               "LOCALE" "INTEGER" "RE" "OVERLOADING" "WARNINGS::REGISTER"))
+    (let ((pkg (or (find-package p) (make-package p :use '(:cl :pcl)))))
+      (dolist (m '("PL-IMPORT" "PL-UNIMPORT"))
+        (let ((sym (intern m pkg)))
+          (setf (fdefinition sym) (lambda (&rest a) (declare (ignore a)) nil))
+          (setf (gethash sym *p-declared-subs*) :defined))))))
+
 ;;; Extension loading registry — tracks which extension files have been loaded.
 (defvar *pcl-loaded-extensions* (make-hash-table :test 'equal))
 
