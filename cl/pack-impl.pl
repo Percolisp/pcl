@@ -706,6 +706,12 @@ sub _pack_check_brackets {
     }
 }
 
+# This pack()/unpack() implementation is modelled directly on Perl's own C
+# version in the interpreter source (pp_pack.c — pp_pack/pp_unpack and their
+# helpers), reimplemented here in Perl: the template grammar, type table, count/
+# star handling, endianness ('<'/'>'), the '!' shriek modifier, group '()' and
+# '/' length-prefix rules, and the checksum logic all mirror pp_pack.c so the
+# behaviour matches stock Perl rather than a from-scratch interpretation.
 sub p_pack {
     my ($tmpl, @args) = @_;
     local $pcl_pack_comma_warned = 0;  # reset comma warning flag for this call
