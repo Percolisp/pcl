@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 239 (2026-06-09) — Moo loads its whole stack; glob-slot exprs, caller list-ctx, symbolic `\%{}`, Errno shim regen
+
+Knocked down **three Moo walls in sequence** plus the general bugs each exposed; Moo now loads its
+entire internal stack (Moo, _Utils, Config, Object, sification, HandleMoose, Method::Generate::
+{Constructor,Accessor}) and runs into **constructor generation** (was dying at the front door,
+`_set_loaded undefined`, in 238g). All gate-green: **69 fully-passing / 3315 Pl/t tests**, sweep-diff
+**0 new / 0 fixed**. NOT yet committed at session end — commit pending.
+
+**1. Glob-slot `*{$glob}{EXPR}` — variable AND general expression (Moo wall A).** Moo::_Utils'
+glob-copy loop does `*{$old}{$type}` (slot name is a runtime variable); the slot parser only
+accepted literal barewords → PARSE ERROR aborted _Utils mid-load → `_set_loaded` (defined after)
+never installed. Fix (`Pl/PExpr.pm` `_glob_slot_spec`/`_attach_glob_slot`, `Pl/ExprToCL.pm`
+`gen_glob_slot`, runtime `p-glob-slot` uses `to-string`): the slot is now **lone-bareword → string
+(Perl's glob-slot autoquote); everything else → parsed as an expression** → `(p-glob-slot glob
+<expr-cl>)`, runtime stringifies. Handles `{$type}`, `{"CO".$s}`, `{uc $x}` on both `*{$g}{…}` and
+static `*F::x{…}`. No parser ambiguity: after a `*` cast `{…}` is always a slot. (User asked why it
+was var-only first — the only real subtlety is the bareword autoquote; expressions are a clean
+generalization, ~15 lines.)
+
+**2. `caller(N)` in list context + `(caller(N))[3]` subname (general bug).** Two bugs: (a) p-caller
+returned `(values-list frame-info)` — CL **multiple values** that the calling form truncates to ONE,
+so `my @c = caller(N)` had 1 element; now returns a list-vector like p-localtime. (b) `[3]` (sub
+name) came from the SBCL backtrace, which can't name PCL's anonymous-lambda subs → returned a lambda
+string. New **`*pcl-caller-subname-stack*`** (exported) pushed at `p-sub` entry with `%p-sub-perl-name`
+(`Pkg::NAME`, PL- stripped); p-caller reads `[3]` from it. Needed by Exporter::Heavy `as_heavy`
+(`(caller(1))[3] =~ s/.*:://` → `heavy_<name>`). (PCL upcases sub names, so it's `Foo::OUTER` not
+`Foo::outer` — harmless, PCL resolves case-insensitively.)
+
+**3. Nested-import `caller` binding (unblocks `_set_loaded`).** `%p-do-import` (`cl/pcl-runtime.lisp`)
+now binds `*pcl-current-package*` to the importing package (`to-pkg`) around the method-import
+dispatch. A `use Foo qw(...)` *inside a module being loaded* installed into the wrong package because
+PCL emits `p-set-current-package` AFTER the package's `use` stmts, so `caller` inside `import` lagged.
+`to-pkg` (= `*package*` at the lexical use site) is exactly Perl's `caller` for import. This is what
+makes Moo's `use Moo::_Utils qw(_set_loaded)` install into Moo.
+
+**4. Symbolic `\%{"Pkg::Name"}` hash deref (unblocks `%Config`).** `p-cast-%` had no general
+symbolic-ref case (only the `"Pkg::"` stash form), so a plain string fell through and `\%{"Pkg::H"}`
+backslashed the **string** → `ref` SCALAR not HASH. This is exactly Exporter::Heavy's `%hash` export
+(`*{...} = \%{"$pkg\::$name"}`), so `use Config` left `%Config` empty. New `%p-symref-hash` (mirrors
+`%p-symref-array`, multi-seg via `perl-pkg-to-cl-pkg-name`); `p-cast-%` calls it for non-`::` strings.
+Same bug class as 238f's `\&{...}` fix, for `%`.
+
+**5. Errno shim regenerated + `tools/shim-gaps.pl` (the shim-gap checker).** Fix #3 made Exporter
+**correctly validate exports** — which exposed that PCL's hand-written `lib/Errno.pm` shim was missing
+`EBADF` (and 86 more), so `use Errno qw(... EBADF ...)` now hard-died → **chdir.t regressed 44/44 →
+partial** (caught by the fully-passing guard: 69→68). Root: the real Errno.pm is pure-perl but builds
+constants via a dynamic symbol-table loop PCL doesn't execute (constants come out undefined), so PCL
+shims it — but the shim drifts. Built **`tools/shim-gaps.pl`** (diffs each lib/ shim vs the real
+module in a clean perl; report-only) → found **221 gaps**. **Regenerated lib/Errno.pm from the real
+module** (`perl -MErrno`, 134 constants, exact platform values) → 221→**47 gaps**, chdir.t restored.
+Remaining 47 are **functions** (Cwd `fastcwd`/`refaddr`/`sample`/`canonpath`…) = fill-as-needed; the
+checker is the live punch-list.
+
+**Regression tests** (`Pl/t/misc-fixes-01.t` → 126): glob-slot var, glob-slot expression, caller
+list-ctx+subname, symbolic `\%{}`/`\@{}` deref.
+
+**Moo NEXT walls** (in order): (a) `Carp::short_error_loc` undefined — `lib/Carp.pm` shim has only
+croak/carp/confess/cluck/longmess/shortmess, missing the internal location helpers; (b) `$self->${\(
+EXPR)}` deref-as-method-name (Moo::Object/Accessor) — emits 8 "Cast unknown type" transpile warnings,
+doesn't stop load yet but generated new/accessors won't dispatch; (c) the deep one: accessor/constructor
+codegen via Sub::Quote string-eval closing over installer lexicals = **eval-lexical-capture** wall
+(null lexical environment of CL `eval`; globals/package vars DO resolve, lexicals don't).
+
+---
+
 ## Session 238g (2026-06-08) — pragma `->import` no-op stubs; Moo/Role::Tiny next walls mapped
 
 **Pragma `->import` cascade fixed** (commit `d436707`, `cl/pcl-runtime.lisp`). Now that `use`

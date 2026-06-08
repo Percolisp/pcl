@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 122;
+plan tests => 126;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -944,3 +944,50 @@ test_cl('strict/warnings/feature ->import are no-op methods (no $^H crash)',
     . ' strict->unimport; 1 }'
     . ' package main; R->import; print "ok\n";',
     "ok\n");
+
+# --- dynamic typeglob slot with a VARIABLE slot name: *{$glob}{$var} ---
+# Moo's _Utils glob-copy loop does `*{$old}{$type}` with $type holding
+# SCALAR/HASH/ARRAY/IO at runtime. The glob-slot parser only accepted literal
+# barewords ({CODE}/{SCALAR}); a variable slot was a PARSE ERROR. Now the slot
+# can be a scalar var, evaluated at runtime (p-glob-slot stringifies it).
+# *F::x has both a SCALAR ($x=5) and CODE (sub x) slot; ARRAY/HASH/IO are empty.
+test_cl('*{$glob}{$var} dynamic typeglob slot with variable slot name',
+    'package F; our $x=5; sub x {1} package main; my $g=\*F::x;'
+    . ' print join("", map { defined(*{$g}{$_})?1:0 } qw(SCALAR ARRAY HASH CODE IO)), "\n";',
+    "10010\n");
+
+# The slot may be a full expression (not just a bareword/scalar): Perl evaluates
+# it, except a lone bareword which autoquotes. Exercise concat + a function call
+# on both the *{$g}{...} and static *F::x{...} forms. CODE exists (sub x); ARRAY
+# does not (and, unlike SCALAR, is not autovivified by either Perl or PCL).
+test_cl('*{$glob}{EXPR} typeglob slot with a computed expression',
+    'package F; sub x {1} package main; my $g=\*F::x; my $s="DE";'
+    . ' print( (defined(*{$g}{"CO".$s})?1:0), (defined(*{$g}{uc("code")})?1:0),'
+    . '        (defined(*F::x{"AR"."RAY"})?1:0), "\n");',
+    "110\n");
+
+# --- caller(N) in list context returns the full frame, including [3] subname ---
+# p-caller returned (values-list ...) whose extra CL values got truncated to one
+# by the calling form, so `my @c = caller(N)` had 1 element and (caller(N))[3]
+# was undef (broke Exporter::as_heavy). Now it returns a list-vector, and [3]
+# (the subroutine name) comes from a dedicated stack since SBCL can't name our
+# subs. (PCL upcases sub names, so compare case-insensitively.)
+test_cl('caller(N) list context: full frame + [3] subroutine name',
+    'package Foo; sub inner { my @c=caller(1);'
+    . ' print( (scalar(@c)>=4 && $c[0] eq "main" && uc($c[3]) eq "FOO::OUTER")'
+    . '        ? "ok" : "no:@c", "\n"); }'
+    . ' sub outer { inner() } package main; Foo::outer();',
+    "ok\n");
+
+# --- symbolic HASH/ARRAY dereference of a (multi-segment) package name ---
+# \%{"Pkg::Name"} must resolve to the package %hash. p-cast-% had no symbolic-ref
+# case (only the "Pkg::" stash form), so a plain string fell through and \%{...}
+# backslashed the *string* -> ref SCALAR, not HASH. This is exactly what
+# Exporter::Heavy uses to export a %hash (*{...} = \%{"$pkg\::$name"}), so e.g.
+# `use Config` left %Config empty. p-cast-@ already had the array case.
+test_cl('symbolic \%{"Pkg::Name"} / \@{...} deref resolves the package variable',
+    'package Src::S; our %H=(a=>1,b=>2); our @A=(10,20); package main;'
+    . ' no strict "refs"; my $hr=\%{"Src::S::H"}; my $ar=\@{"Src::S::A"};'
+    . ' print ref($hr), ":", join(",",map {"$_=$hr->{$_}"} sort keys %$hr),'
+    . '       " ", ref($ar), ":", join(",", @$ar), "\n";',
+    "HASH:a=1,b=2 ARRAY:10,20\n");

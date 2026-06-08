@@ -1,5 +1,25 @@
 # CPAN module blockers — what to fix next
 
+> **Session 239 update (2026-06-09):** Moo walls A–C are DOWN. Moo now loads its whole stack and
+> runs into **constructor generation**. Four general fixes landed (see `session-log.md` §239):
+> (1) glob-slot `*{$glob}{EXPR}` parses (variable + expression) — wall A; (2) nested-import `caller`
+> binding in `%p-do-import` — unblocks `_set_loaded`; (3) symbolic `\%{"Pkg::Name"}` hash deref
+> (`%p-symref-hash`) — unblocks `%Config`/Exporter-heavy; (4) `caller(N)` list-context + `[3]` subname.
+> Plus: Errno shim regenerated from real module, and **`tools/shim-gaps.pl`** (diffs each lib/ shim vs
+> the real module — run it to find missing exports/subs; 47 function-gaps remain, fill-as-needed).
+>
+> **Moo's NEW walls, in order:**
+> 1. **`Carp::short_error_loc` undefined** — `lib/Carp.pm` shim is missing the internal location
+>    helpers (`short_error_loc`, `caller_info`, …). Likely small: add them (now that `caller(N)[3]`
+>    works, `short_error_loc` = `(caller(...))[lots]` can be real). DO THIS NEXT for Moo.
+> 2. **`$self->${\(EXPR)}`** (Moo::Object lines 48/56, Method::Generate::Accessor) — a method call
+>    whose *name* is a deref of a ref. Emits "Handle single node of unknown type: PPI::Token::Cast"
+>    (×8); doesn't stop the load yet, but generated `new`/accessors won't dispatch. Parser/codegen gap.
+> 3. **eval-lexical-capture** — accessor/constructor codegen via Sub::Quote string-eval closing over
+>    the installer's lexicals. CL `eval` runs in the null lexical environment: globals/package vars
+>    resolve, lexical `my` does not. The recurring deep wall (CMM family). Sub::Quote's own
+>    `capture_unroll` works (it threads captures through a hash); naive `eval "sub {…$lex…}"` doesn't.
+
 State after session 238g (2026-06-08). The generic `use Foo LIST → Foo->import(LIST)`
 machinery is **done and solid**: custom-import dispatch, the real core `Exporter.pm`,
 the multi-seg `\&{...}` fix, and pragma `->import` no-ops all landed (commits

@@ -2430,6 +2430,12 @@ sub gen_glob_slot {
   my $kids    = shift;
 
   my $glob_cl   = $self->gen_node($kids->[0]);
+  # Computed slot {$type} / {EXPR}: the slot name is produced at runtime; the
+  # slot expression is child 1, and p-glob-slot stringifies + upcases the result.
+  if ($node->{slot_is_expr}) {
+    my $slot_cl = $self->gen_node($kids->[1]);
+    return "(p-glob-slot $glob_cl $slot_cl)";
+  }
   my $slot_name = uc($node->{slot_name} // 'SCALAR');
   return "(p-glob-slot $glob_cl \"$slot_name\")";
 }
