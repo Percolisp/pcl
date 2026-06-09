@@ -116,7 +116,8 @@
 (export '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
           pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
           pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
-          pl-eq_array pl-curr_test))
+          pl-eq_array pl-curr_test
+          pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
 
 ;;; curr_test() - provided here (not as a stub in test.pl) so it reads the
 ;;; real *test-count* counter that pl-ok/pl-is/etc. maintain.
@@ -433,6 +434,75 @@
         (every (lambda (x y)
                  (equal (to-string x) (to-string y)))
                av bv)))))
+
+;;; ----- Test::More structural / module asserts (for CPAN module test suites) -----
+
+;;; Recursive deep comparison for is_deeply: unwrap boxes at each level, compare
+;;; arrayrefs elementwise, hashrefs key-by-key, scalars by stringification (with
+;;; undef handling).  Covers the common ref shapes Test::More::is_deeply is used on.
+(defun test-deeply-equal (a b)
+  (let ((a (if (p-box-p a) (p-box-value a) a))
+        (b (if (p-box-p b) (p-box-value b) b)))
+    (cond
+      ((and (test-undef-p a) (test-undef-p b)) t)
+      ((or (test-undef-p a) (test-undef-p b)) nil)
+      ((and (vectorp a) (not (stringp a)) (vectorp b) (not (stringp b)))
+       (and (= (length a) (length b))
+            (every #'test-deeply-equal a b)))
+      ((or (and (vectorp a) (not (stringp a)))
+           (and (vectorp b) (not (stringp b)))) nil)
+      ((and (hash-table-p a) (hash-table-p b))
+       (and (= (hash-table-count a) (hash-table-count b))
+            (block cmp
+              (maphash (lambda (k v)
+                         (multiple-value-bind (bv found) (gethash k b)
+                           (unless (and found (test-deeply-equal v bv))
+                             (return-from cmp nil))))
+                       a)
+              t)))
+      ((or (hash-table-p a) (hash-table-p b)) nil)
+      (t (equal (to-string a) (to-string b))))))
+
+;;; is_deeply(got, expected, name)
+(defun pl-is_deeply (got expected &optional name)
+  (if (test-deeply-equal got expected)
+      (test-ok t name)
+      (test-ok nil name
+               (format nil "     got: ~A" (test-quote-value got))
+               (format nil "expected: ~A" (test-quote-value expected)))))
+
+;;; use_ok(module, ...) / require_ok(module) — the transpiler resolves `use` at
+;;; compile time, so by the time this runs the module is already loaded (a load
+;;; failure would have aborted the program).  Report success.
+(defun pl-use_ok (module &rest args)
+  (declare (ignore args))
+  (test-ok t (format nil "use ~A;" (to-string (unbox module)))))
+
+(defun pl-require_ok (module)
+  (test-ok t (format nil "require ~A;" (to-string (unbox module)))))
+
+;;; isa_ok(object, class, [name])
+(defun pl-isa_ok (object class &optional name)
+  (let* ((cls (to-string (unbox class)))
+         (nm  (or name (format nil "The object isa ~A" cls))))
+    (if (p-true-p (p-isa object cls))
+        (test-ok t nm)
+        (test-ok nil nm (format nil "The object isn't a '~A'" cls)))))
+
+;;; can_ok(object, methods...)
+(defun pl-can_ok (object &rest methods)
+  (let* ((names   (mapcar (lambda (m) (to-string (unbox m))) methods))
+         (missing (remove-if (lambda (m) (p-true-p (p-can object m))) names))
+         (cls     (to-string (p-ref object))))
+    (if (and names (null missing))
+        (test-ok t (format nil "~A->can(...)" cls))
+        (test-ok nil (format nil "~A->can(...)" cls)
+                 (format nil "method(s) not found: ~{~A~^ ~}" missing)))))
+
+;;; explain(...) — Test::More returns a Data::Dumper-ish rendering for note/diag.
+;;; Not byte-identical to Dumper, but readable and crash-free.
+(defun pl-explain (&rest args)
+  (format nil "~{~A~^~%~}" (mapcar #'to-string args)))
 
 ;;; pass(name)
 (defun pl-pass (&optional name)

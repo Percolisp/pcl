@@ -7850,6 +7850,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   '("XSLoader" "DynaLoader" "Carp::Heavy")
   "Modules that use XS/C code and cannot be transpiled. Skip loading them.")
 
+(defparameter *p-pcl-provided-modules*
+  '("Test::More" "Test::Simple" "Test2::Bundle::More")
+  "Modules whose interface PCL supplies INTERNALLY (here: the Test::More TAP API
+  lives in cl/pcl-test.lisp, loaded by the harness).  `use`-ing them must NOT
+  load the real .pm — the real Test::More is the Test2 stack, which depends on
+  XS internals (Test2::API::Instance) PCL cannot run.  The exported subs (ok,
+  is, like, plan, done_testing, is_deeply, subtest, isa_ok, …) are already
+  defined, so skipping the load and letting those resolve is the whole job.")
+
 (defun p-use (module-name &key (import-args :default))
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
@@ -7857,6 +7866,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    list — or :default for a bare `use Foo;` (import with no args)."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
+    (return-from p-use t))
+  ;; Modules PCL provides internally (Test::More TAP API): don't load the real
+  ;; .pm; the subs are already defined in cl/pcl-test.lisp.
+  (when (member module-name *p-pcl-provided-modules* :test #'string=)
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
         (caller-pkg *package*))
