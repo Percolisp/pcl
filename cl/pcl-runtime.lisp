@@ -7853,11 +7853,27 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defparameter *p-pcl-provided-modules*
   '("Test::More" "Test::Simple" "Test2::Bundle::More")
   "Modules whose interface PCL supplies INTERNALLY (here: the Test::More TAP API
-  lives in cl/pcl-test.lisp, loaded by the harness).  `use`-ing them must NOT
-  load the real .pm — the real Test::More is the Test2 stack, which depends on
-  XS internals (Test2::API::Instance) PCL cannot run.  The exported subs (ok,
-  is, like, plan, done_testing, is_deeply, subtest, isa_ok, …) are already
-  defined, so skipping the load and letting those resolve is the whole job.")
+  lives in cl/pcl-test.lisp).  `use`-ing them must NOT load the real .pm — the
+  real Test::More is the Test2 stack, which depends on XS internals
+  (Test2::API::Instance) PCL cannot run.  Instead, `use Test::More` loads the
+  TAP layer ON DEMAND (p-ensure-test-lib), so a non-test program never pulls in
+  the test infrastructure, and a .t file is self-contained.")
+
+(defvar *pcl-test-lib-loaded* nil
+  "T once cl/pcl-test.lisp has been loaded — by the harness preloading it, or
+  on demand from `use Test::More`.  Guards against re-loading.")
+
+(defun p-ensure-test-lib ()
+  "Load the Test::More TAP layer (cl/pcl-test.lisp) on demand, exactly once.
+  This is what lets the runner stop preloading the test infrastructure for every
+  program: it is pulled in only when a script `use`s Test::More.  Idempotent —
+  if the harness already loaded it (pl-ok is fbound) this is a no-op."
+  (unless (or *pcl-test-lib-loaded* (fboundp 'pl-ok))
+    (let ((path (and *pcl-runtime-directory*
+                     (merge-pathnames "pcl-test.lisp" *pcl-runtime-directory*))))
+      (when (and path (probe-file path))
+        (load path))))
+  (setf *pcl-test-lib-loaded* t))
 
 (defun p-use (module-name &key (import-args :default))
   "Perl use - load module at compile time and import symbols.
@@ -7868,8 +7884,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (when (member module-name *p-xs-only-modules* :test #'string=)
     (return-from p-use t))
   ;; Modules PCL provides internally (Test::More TAP API): don't load the real
-  ;; .pm; the subs are already defined in cl/pcl-test.lisp.
+  ;; .pm; load PCL's TAP layer on demand instead (no-op if already loaded).
   (when (member module-name *p-pcl-provided-modules* :test #'string=)
+    (p-ensure-test-lib)
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
         (caller-pkg *package*))
