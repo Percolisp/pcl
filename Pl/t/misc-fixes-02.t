@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 5;
 
 sub run_cl {
     my ($code) = @_;
@@ -75,3 +75,14 @@ test_cl('braced array block-deref with index/slice subscript',
     . ' my $x = ${$ar}[1]; my @s = @{$ar}[0,2];'
     . ' print "[$x][@s]\n";',
     "[20][10 30]\n");
+
+# Float stringification must match Perl's %.15g (15 significant digits, then
+# strip trailing zeros), NOT SBCL's shortest-round-trip form.  `0.1+0.2` is the
+# canonical case: perl prints 0.3, PCL was printing 0.30000000000000004.
+# Found by tools/difftest-ops.pl numeric axis (session 242).  Covers the
+# fixed-notation branch (0.1+0.2, 1/3, 2**0.5) and the exponential branch
+# (the 1e+16 rounding-bump) of stringify-value.
+test_cl('float stringification matches Perl %.15g',
+    'print "[", 0.1+0.2, "][", 1/3, "][", 2**0.5, "][",'
+    . ' 9.999999999999999e15, "]\n";',
+    "[0.3][0.333333333333333][1.4142135623731][1e+16]\n");

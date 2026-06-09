@@ -1202,12 +1202,19 @@
         (let* ((abs-v (abs v))
                (exp10 (floor (log abs-v (coerce 10 (type-of v))))))
           (if (and (>= exp10 -4) (< exp10 15))
-              ;; Fixed notation: strip trailing zeros then trailing dot
-              (let ((s (format nil "~F" v)))
-                (string-right-trim "." (string-right-trim "0" s)))
-              ;; Exponential notation: use write-to-string + cleanup
-              (let* ((*read-default-float-format* (type-of v))
-                     (s (write-to-string v))
+              ;; Fixed notation, %.15g: 15 significant digits total, so the
+              ;; number of fraction digits is (15 - 1 - exp10).  Without an
+              ;; explicit precision, ~F prints the full round-trip form
+              ;; (0.1+0.2 -> 0.30000000000000004 instead of Perl's 0.3).
+              (let* ((digits (max 0 (- 14 exp10)))
+                     (s (format nil "~,VF" digits v))
+                     (c (string-right-trim "." (string-right-trim "0" s))))
+                (if (or (string= c "") (string= c "-")) "0" c))
+              ;; Exponential notation, %.15g: mantissa to 15 significant
+              ;; digits (14 after the point).  ~,14E rounds correctly and
+              ;; bumps the exponent when the mantissa rounds up to 10
+              ;; (9.999999999999999e15 -> 1e+16), matching Perl.
+              (let* ((s (format nil "~,14E" v))
                      ;; Clean up CL exponent notation to Perl format
                      ;; SBCL outputs "1.5d-8" for double, "1.5e-8" for single
                      (s (substitute #\e #\d s :count 1))

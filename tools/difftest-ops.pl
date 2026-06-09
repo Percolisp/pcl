@@ -256,6 +256,93 @@ for my $oc (
     add("oo $expr", prog($expr, $OO));
 }
 
+# --- Axis 9: string builtins & sprintf formatting ---------------------------
+# substr (2/3/4-arg, negative offset+len), index/rindex, x-repeat, join,
+# and a broad sprintf format sweep — all scalar-context results.
+my @strfns = (
+    'substr("hello",1)', 'substr("hello",1,3)', 'substr("hello",-3)',
+    'substr("hello",-3,2)', 'substr("hello",1,-1)', 'substr("hello",-2,-1)',
+    'substr("hello",0,0)', 'substr("hello",5)',
+    'index("hello world","o")', 'index("hello world","o",5)',
+    'index("abc","z")', 'index("abc","")',
+    'rindex("hello world","o")', 'rindex("hello world","o",4)',
+    'rindex("abc","z")',
+    '"ab" x 3', '"ab" x 0', '"-" x 5', 'join("",("a") x 3)',
+    'join("-",1,2,3)', 'join("",1..4)',
+    'sprintf("%d",42)', 'sprintf("%5d",42)', 'sprintf("%-5d|",42)',
+    'sprintf("%05d",42)', 'sprintf("%x",255)', 'sprintf("%X",255)',
+    'sprintf("%#x",255)', 'sprintf("%o",8)', 'sprintf("%b",5)',
+    'sprintf("%e",1234.5)', 'sprintf("%.2f",3.14159)', 'sprintf("%g",0.0001)',
+    'sprintf("%g",1000000)', 'sprintf("%g",100000000)', 'sprintf("%+d",42)',
+    'sprintf("% d",42)', 'sprintf("%c",65)', 'sprintf("%s","hi")',
+    'sprintf("%3s","hi")', 'sprintf("%-3s|","hi")', 'sprintf("%.2s","hello")',
+    'sprintf("%%")', 'sprintf("%2\$s %1\$s","a","b")',
+    'sprintf("%*d",4,7)', 'sprintf("%.*f",2,3.14159)',
+    'sprintf("%d %d",1,2)', 'sprintf("[%6.2f]",3.14159)',
+    'reverse("abc")', 'lc("MiXeD")', 'uc("MiXeD")',
+    'ucfirst("hello world")', 'lcfirst("HELLO")',
+    'length("héllo")', 'ord("A")', 'chr(97)',
+    'quotemeta("a.b*c")', 'sprintf("%s",undef)',
+);
+add("strfn $_", prog($_)) for @strfns;
+
+# --- Axis 10: regex match / substitution / transliteration ------------------
+my @regex = (
+    [ '"hello" =~ /l+/ ? "y" : "n"' ],
+    [ '"hello" =~ /z/ ? "y" : "n"' ],
+    [ '"hello" !~ /z/ ? "y" : "n"' ],
+    [ 'join(",", "2024-01-02" =~ /(\d+)-(\d+)-(\d+)/)' ],
+    [ '(my $x="aaa") =~ s/a/b/g' ],                # returns subst count
+    [ 'do { my $x="aaa"; $x =~ s/a/b/g; $x }' ],
+    [ 'do { my $x="a.b.c"; $x =~ s/\./_/g; $x }' ],
+    [ 'do { my $s="Hello"; $s =~ tr/a-z/A-Z/; $s }' ],
+    [ 'do { my $s="Hello"; ($s =~ tr/l//) }' ],     # count, no change
+    [ 'do { my $s="hello"; $s =~ tr/a-z//cd; $s }' ],
+    [ '"a1b2c3" =~ /(\w)(\d)/ ? "$1$2" : "no"' ],
+    [ '"FooBar" =~ /(?<x>Foo)/ ? $+{x} : "no"' ],
+    [ 'scalar(my @m = ("a1b2c3" =~ /(\d)/g))' ],    # global match count
+    [ 'join(",", "a1b2c3" =~ /(\d)/g)' ],
+    [ 'do { my $c = () = "mississippi" =~ /s/g; $c }' ],
+    [ '"Hello World" =~ /world/i ? "y" : "n"' ],
+    [ 'do { my $s="  trim  "; $s =~ s/^\s+|\s+$//g; "[$s]" }' ],
+    [ 'join("|", split //, "abc")' ],
+    [ 'join("|", split /,/, "a,,b", -1)' ],
+    [ 'join("|", split /(,)/, "a,b")' ],            # capturing split
+);
+add("re $_->[0]", prog($_->[0])) for @regex;
+
+# --- Axis 11: numeric edge cases --------------------------------------------
+# Negative modulo (Perl follows right-operand sign), bit ops, ~ (u64),
+# string<->number coercion, and magic string auto-increment.
+my @nums = (
+    '10 % 3', '-10 % 3', '10 % -3', '-10 % -3', '0 % 5',
+    'int(7/2)', 'int(-7/2)', 'int(2.999)', 'int(-2.999)',
+    '7 <=> 3', '3 <=> 7', '5 <=> 5',
+    'abs(-3.5)', 'abs(3.5)', 'abs(-0)',
+    '2 ** 10', '4 ** 0.5', '10 ** -2', '2 ** -1',
+    '0.1 + 0.2', '1/4', '3/2',
+    '0xff', '0b1010', '017', '1_000_000',
+    'sprintf("%d", 3.9)', 'sprintf("%d", -3.9)',
+    '1e3', '1.5e-3', '1234567890123',
+    '5 & 3', '5 | 2', '5 ^ 1', '~0', '~5',
+    '1 << 4', '256 >> 2', '1 << 30',
+    '"10abc" + 5', '"3.14xyz" * 2', '"  42  " + 0', '"0x10" + 0',
+    'ord("")', '"" + 0', '"abc" + 0',
+    '"inf" + 0', '9**9**2 > 0 ? "pos" : "neg"',
+    '5 == 5.0 ? "eq" : "ne"', '0.1+0.2 == 0.3 ? "eq" : "ne"',
+    'do { my $s="Az"; $s++; $s }',
+    'do { my $s="Zz"; $s++; $s }',
+    'do { my $s="a9"; $s++; $s }',
+    'do { my $s="Zz9"; $s++; $s }',
+    'do { my $s="aa"; $s++; $s }',
+    'do { my $s="a1"; $s--; $s }',          # numeric (no magic on --)
+    'join(",", "aa".."ae")',
+    'join(",", "Az".."Ba")',
+    'join(",", 1..5)', 'join(",", reverse 1..3)',
+    'join(",", "a".."e")',
+);
+add("num $_", prog($_)) for @nums;
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------
