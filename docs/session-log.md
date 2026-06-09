@@ -4,6 +4,55 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 240 (2026-06-09) — Moo loads + accessors + rw work; 6 general bugs
+
+Chased `use Moo; has x => (is=>'ro'); Point->new(x=>3)` end-to-end. Moo now loads
+its whole stack, generates accessors, and `rw` set/get works. The constructor
+reaches MGC's generated body and copies `@_` args; remaining wall is Moo's
+self-referential bootstrap (`assert_constructor` "Unknown constructor for
+Method::Generate::Constructor already exists" — `$MAKERS{MGC}{constructor}` falsy
+post-bootstrap). Gate 91/3318 throughout. Two commits.
+
+Six general bugs (commit `0aebf0a` = #1-3, `248f8ab` = #4-6):
+
+1. **`package NAME;` inside a BEGIN/scheduled block leaked past the block.** Perl
+   block-scopes it. `_process_scheduled_block` now snapshots the package stack,
+   bumps `_block_depth` (inner package emits inline, no new section), and reverts
+   the reader + parser package on exit. Unblocks Moo's
+   `BEGIN { package ...::_Generated; ... }` then-call-imported-subs idiom.
+
+2. **`$obj->${ EXPR }(args)`** — method whose name/coderef is a scalar deref
+   (Moo::Object's `$self->${\(...)}(@_)`). New PExpr arrow case (1E) +
+   `gen_methodcall` routes computed (internal-node) methods through dynamic
+   `p-method-call`.
+
+3. **`Carp::short_error_loc`/`long_error_loc`** added to `lib/Carp.pm`.
+
+4. **`caller()` returned the UPCASED single-segment package** (`POINT` not
+   `Point`) inside an imported module's `import()`. THE KEY MOO BUG: Moo keys all
+   per-class `%MAKERS` state on `caller` but blesses into the correct-case name,
+   so the mismatch silently broke construction. Root: orig-case registered only
+   by `p-set-current-package`, emitted AFTER the package's `use` statements, so
+   `pcl-pkg-perl-name` fell back to the CL name during import. Fix: new exported
+   `p-register-pkg-name` emitted in the package PREAMBLE (before `use`). (A direct
+   `Class->import` method call — not via `use` — still mis-reports caller;
+   separate, unfixed.)
+
+5. **`CORE::<builtin>`** now behaves like the builtin: `CORE::shift()`/`CORE::shift`
+   default to `@_`, `CORE::ref $x` (no parens) is a named unary (was a bareword
+   string). `handle_subcalls` normalizes `CORE::foo`→`foo` (gated on
+   `known_no_of_params`); `add_implicit_default_param` strips `CORE::`.
+
+6. **Nested ternary in the TRUE branch without parens** `A ? B ? C : D : E` failed
+   to parse entirely. The inner `?`'s false-branch scan used `prec < 15`,
+   swallowing the enclosing `: E` (the `:` is also prec 15). Fixed to stop at a
+   `:`. **`perl-tests/cond.t` (17 lines) tests `&&`/`||`/`eq` but never the `?:`
+   operator — a real coverage gap.**
+
+Tests: `Pl/t/misc-fixes-01.t` 126→133.
+
+---
+
 ## Session 239 (2026-06-09) — Moo loads its whole stack; glob-slot exprs, caller list-ctx, symbolic `\%{}`, Errno shim regen
 
 Knocked down **three Moo walls in sequence** plus the general bugs each exposed; Moo now loads its
