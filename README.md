@@ -119,6 +119,8 @@ This phase is about hashing out incompatibilities with Perl. It has been slow an
 
 Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **69 files passing completely**. Several pure-Perl CPAN modules now run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process.
 
+As an aside - Claude suggested doing "fuzzing", between PCL and Perl. It generated different expressions and evaluated them in both environments. It was valuable, found both real bugs and formatting differences etc. (It seems to be a common procedure in compilers? I didn't know, if compilers were my job I would have another hobby. :-) )
+
 A small illustration of how it gets done: when implementing `pack()` in CL proved fiddly even with the original C source in hand, the trick was to write `pack` *in Perl* and let PCL translate it to CL. It worked — eating our own dog food.
 
 My own Common Lisp experience is from long ago; that side of the work is essentially all Claude.

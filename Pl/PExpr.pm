@@ -424,7 +424,15 @@ sub parse {
       return $self->parse(\@stripped);
     }
 
-    if (ref($e1) eq 'PPI::Structure::List') {
+    # A parenthesised expression.  PPI normally labels `(...)` as Structure::List,
+    # but in a postfix conditional whose condition STARTS with a parenthesised
+    # group followed by an operator — `return X if (A) || (B)` — PPI mislabels the
+    # leading `(A)` as a Structure::Condition (the bracket type it uses for
+    # `if (...)`).  Both are just a parenthesised expression here, so treat them
+    # identically: parse the inner children.  (Found in Math::BigInt via the CPAN
+    # test-suite survey.)
+    if (ref($e1) eq 'PPI::Structure::List'
+        || ref($e1) eq 'PPI::Structure::Condition') {
       my @list    = $e1->children();
       $e          = \@list;
       return $self->parse($e);

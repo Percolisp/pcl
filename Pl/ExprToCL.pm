@@ -1019,15 +1019,20 @@ sub gen_string_concat {
   my @parts;
   for my $kid_id (@$kids) {
     my $kid_node = $self->expr_o->get_a_node($kid_id);
+
+    # Array/hash slices interpolate like arrays: their elements are joined with
+    # $".  Force LIST context BEFORE generating — a slice inside a string used
+    # in scalar context (my $s = "@a[1..2]") would otherwise inherit that scalar
+    # context and reduce to its last element instead of joining all elements.
+    my $is_slice = $self->expr_o->is_internal_node_type($kid_node)
+                   && ($kid_node->{type} eq 'slice_a_acc'
+                       || $kid_node->{type} eq 'slice_h_acc');
+    $self->expr_o->set_node_context($kid_id, LIST_CTX) if $is_slice;
     my $generated = $self->gen_node($kid_id) // '';
 
     # Check if this is an array variable (@arr) - needs to be joined
     my $kid_content = (ref($kid_node) eq 'PPI::Token::Symbol' && $kid_node->can('content'))
                       ? ($kid_node->content() // '') : '';
-    # Array/hash slices interpolate like arrays: their elements are joined with $".
-    my $is_slice = $self->expr_o->is_internal_node_type($kid_node)
-                   && ($kid_node->{type} eq 'slice_a_acc'
-                       || $kid_node->{type} eq 'slice_h_acc');
     if ($kid_content =~ /^@/ || $is_slice) {
       # In Perl, "@arr" in string interpolation joins with $" (default space)
       # Use |$"| which is the CL variable for Perl's $" list separator
@@ -2475,10 +2480,24 @@ sub gen_array_init {
   my $node_id = shift;
   my $kids    = shift;
 
+  # The contents of an anonymous array constructor [ ... ] are ALWAYS evaluated
+  # in list context, regardless of the context the [...] expression itself sits
+  # in.  Two things leak otherwise: (1) the annotated context, and (2) the
+  # tail_position flag — a wantarray-sensitive builtin (reverse/unpack/…) skips
+  # its (let ((*wantarray* t)) …) wrapper in tail position, so the enclosing
+  # scalar context leaks in.  E.g. `my $s = do { ...; "@{[reverse @a]}" }` ran
+  # reverse in scalar context (reversing the joined string "123" -> "321")
+  # instead of the list (3,2,1).  The bracket contents are never the tail call.
+  my $saved_tail = $self->environment ? $self->environment->tail_position : 0;
+  $self->environment->tail_position(0) if $self->environment && $saved_tail;
   my @elements;
   for my $kid_id (@$kids) {
+    my $saved_ctx = $self->expr_o->get_node_context($kid_id);
+    $self->expr_o->set_node_context($kid_id, LIST_CTX);
     push @elements, $self->gen_node($kid_id);
+    $self->expr_o->set_node_context($kid_id, $saved_ctx);
   }
+  $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
 
   # Use p-array-init which flattens nested arrays
   # Wrap in make-p-box because [...] creates a REFERENCE to an anonymous array

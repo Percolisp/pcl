@@ -43,8 +43,12 @@ if ($? != 0) {
     exit 1;
 }
 
-# Run SBCL
-my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $root/cl/pcl-test.lisp --load $lisp 2>&1`;
+# Run SBCL.
+# NB: we deliberately do NOT preload cl/pcl-test.lisp.  The test infrastructure
+# is loaded on demand when (and only when) the program does `use Test::More`
+# (p-ensure-test-lib in the runtime).  A non-test program — a fuzzer snippet, an
+# arbitrary .pl — never pulls it in.
+my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $lisp 2>&1`;
 
 # Cleanup
 unlink $lisp, "/tmp/runpl_$$.err";

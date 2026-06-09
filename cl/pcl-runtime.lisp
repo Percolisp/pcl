@@ -1202,12 +1202,19 @@
         (let* ((abs-v (abs v))
                (exp10 (floor (log abs-v (coerce 10 (type-of v))))))
           (if (and (>= exp10 -4) (< exp10 15))
-              ;; Fixed notation: strip trailing zeros then trailing dot
-              (let ((s (format nil "~F" v)))
-                (string-right-trim "." (string-right-trim "0" s)))
-              ;; Exponential notation: use write-to-string + cleanup
-              (let* ((*read-default-float-format* (type-of v))
-                     (s (write-to-string v))
+              ;; Fixed notation, %.15g: 15 significant digits total, so the
+              ;; number of fraction digits is (15 - 1 - exp10).  Without an
+              ;; explicit precision, ~F prints the full round-trip form
+              ;; (0.1+0.2 -> 0.30000000000000004 instead of Perl's 0.3).
+              (let* ((digits (max 0 (- 14 exp10)))
+                     (s (format nil "~,VF" digits v))
+                     (c (string-right-trim "." (string-right-trim "0" s))))
+                (if (or (string= c "") (string= c "-")) "0" c))
+              ;; Exponential notation, %.15g: mantissa to 15 significant
+              ;; digits (14 after the point).  ~,14E rounds correctly and
+              ;; bumps the exponent when the mantissa rounds up to 10
+              ;; (9.999999999999999e15 -> 1e+16), matching Perl.
+              (let* ((s (format nil "~,14E" v))
                      ;; Clean up CL exponent notation to Perl format
                      ;; SBCL outputs "1.5d-8" for double, "1.5e-8" for single
                      (s (substitute #\e #\d s :count 1))
@@ -3911,16 +3918,18 @@
   `(box-set ,place (* (to-number ,place) (to-number ,value))))
 
 (defmacro p-/= (place value)
-  "Perl /= (divide-assign)"
-  `(box-set ,place (/ (to-number ,place) (to-number ,value))))
+  "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
+  a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
+  `(box-set ,place (p-/ ,place ,value)))
 
 (defmacro p-%= (place value)
   "Perl %= (modulo-assign)"
   `(box-set ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
 
 (defmacro p-**= (place value)
-  "Perl **= (exponent-assign)"
-  `(box-set ,place (expt (to-number ,place) (to-number ,value))))
+  "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
+  float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
+  `(box-set ,place (p-** ,place ,value)))
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign)"
@@ -7841,6 +7850,31 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   '("XSLoader" "DynaLoader" "Carp::Heavy")
   "Modules that use XS/C code and cannot be transpiled. Skip loading them.")
 
+(defparameter *p-pcl-provided-modules*
+  '("Test::More" "Test::Simple" "Test2::Bundle::More")
+  "Modules whose interface PCL supplies INTERNALLY (here: the Test::More TAP API
+  lives in cl/pcl-test.lisp).  `use`-ing them must NOT load the real .pm — the
+  real Test::More is the Test2 stack, which depends on XS internals
+  (Test2::API::Instance) PCL cannot run.  Instead, `use Test::More` loads the
+  TAP layer ON DEMAND (p-ensure-test-lib), so a non-test program never pulls in
+  the test infrastructure, and a .t file is self-contained.")
+
+(defvar *pcl-test-lib-loaded* nil
+  "T once cl/pcl-test.lisp has been loaded — by the harness preloading it, or
+  on demand from `use Test::More`.  Guards against re-loading.")
+
+(defun p-ensure-test-lib ()
+  "Load the Test::More TAP layer (cl/pcl-test.lisp) on demand, exactly once.
+  This is what lets the runner stop preloading the test infrastructure for every
+  program: it is pulled in only when a script `use`s Test::More.  Idempotent —
+  if the harness already loaded it (pl-ok is fbound) this is a no-op."
+  (unless (or *pcl-test-lib-loaded* (fboundp 'pl-ok))
+    (let ((path (and *pcl-runtime-directory*
+                     (merge-pathnames "pcl-test.lisp" *pcl-runtime-directory*))))
+      (when (and path (probe-file path))
+        (load path))))
+  (setf *pcl-test-lib-loaded* t))
+
 (defun p-use (module-name &key (import-args :default))
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
@@ -7848,6 +7882,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    list — or :default for a bare `use Foo;` (import with no args)."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
+    (return-from p-use t))
+  ;; Modules PCL provides internally (Test::More TAP API): don't load the real
+  ;; .pm; load PCL's TAP layer on demand instead (no-op if already loaded).
+  (when (member module-name *p-pcl-provided-modules* :test #'string=)
+    (p-ensure-test-lib)
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
         (caller-pkg *package*))

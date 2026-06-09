@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -75,3 +75,63 @@ test_cl('braced array block-deref with index/slice subscript',
     . ' my $x = ${$ar}[1]; my @s = @{$ar}[0,2];'
     . ' print "[$x][@s]\n";',
     "[20][10 30]\n");
+
+# Float stringification must match Perl's %.15g (15 significant digits, then
+# strip trailing zeros), NOT SBCL's shortest-round-trip form.  `0.1+0.2` is the
+# canonical case: perl prints 0.3, PCL was printing 0.30000000000000004.
+# Found by tools/difftest-ops.pl numeric axis (session 242).  Covers the
+# fixed-notation branch (0.1+0.2, 1/3, 2**0.5) and the exponential branch
+# (the 1e+16 rounding-bump) of stringify-value.
+test_cl('float stringification matches Perl %.15g',
+    'print "[", 0.1+0.2, "][", 1/3, "][", 2**0.5, "][",'
+    . ' 9.999999999999999e15, "]\n";',
+    "[0.3][0.333333333333333][1.4142135623731][1e+16]\n");
+
+# Compound /= and **= leaked a CL ratio: `$x /= 2` gave "7/2" and `$x **= -1`
+# gave "1/2" instead of Perl's 3.5 / 0.5.  The macros divided/exponentiated
+# raw (CL int/int -> ratio) while plain p-/ and p-** coerce ratio -> float.
+# Fixed by delegating p-/= -> p-/ and p-**= -> p-**.  Found by the difftest-ops
+# compound-assignment axis (session 242).
+test_cl('compound /= and **= coerce ratio to float like Perl',
+    'my $a=7; $a /= 2; my $b=2; $b **= -1;'
+    . ' my $c=10; $c /= 4; print "[$a][$b][$c]\n";',
+    "[3.5][0.5][2.5]\n");
+
+# Array/hash SLICE inside string interpolation must join its elements with $"
+# (list context), regardless of the context the string is used in.  Bug: a
+# single-slice string "@a[1..2]" bypassed the string_concat/join wrapper, and
+# even wrapped slices inherited the outer scalar context and reduced to the
+# LAST element (`my $s = "@a[1..2]"` gave "3" not "2 3"; mid-string gave "x3y").
+# Whole-array "@a" interpolation was always fine.  Found by the difftest-ops
+# slice axis (session 242).
+test_cl('array/hash slice in string interpolation joins with $" (list ctx)',
+    'my @a=(1,2,3,4,5); my %h=(a=>1,b=>2,c=>3);'
+    . ' my $s = "@a[1..2]"; my $t = "x@a[-2,-1]y"; my $u = "@h{qw(a c)}";'
+    . ' print "[$s][$t][$u]\n";',
+    "[2 3][x4 5y][1 3]\n");
+
+# Anonymous array constructor [ ... ] evaluates its contents in LIST context and
+# is never the enclosing sub's tail call.  Bug: a wantarray-sensitive builtin
+# inside [...] (e.g. reverse) skipped its (let ((*wantarray* t)) ...) wrapper in
+# tail position, so a scalar context leaked in — `do { ...; "@{[reverse @a]}" }`
+# reversed the joined string ("123" -> "321") instead of the list (3,2,1).
+# Found by the difftest-ops babycart axis (session 242).  sort/map (always-list)
+# were unaffected; reverse exposed it.
+test_cl('anon arrayref [ ] forces list context on contents (reverse in do-tail)',
+    'my $r = do { my @a=(1,2,3); "@{[reverse @a]}" };'
+    . ' my $d = "@{[reverse 1,2,3]}";'
+    . ' sub f { return [ reverse @_ ] } my $t = "@{f(7,8,9)}";'
+    . ' print "[$r][$d][$t]\n";',
+    "[3 2 1][3 2 1][9 8 7]\n");
+
+# Postfix conditional whose condition starts with a parenthesised group followed
+# by an operator — `return X if (A) || (B)` — made PPI mislabel the leading `(A)`
+# as a Structure::Condition (its `if (...)` bracket type) instead of a
+# Structure::List, which PExpr's parse() did not handle ("unknown type
+# PPI::Structure::Condition" -> the whole sub failed to transpile).  Now a
+# Structure::Condition in expression position is parsed as a parenthesised expr,
+# like Structure::List.  Found in Math::BigInt via the CPAN test-suite survey.
+test_cl('postfix if with leading parenthesised condition (A) || (B)',
+    'sub f { my ($a,$b)=@_; return "yes" if ($a == 1) || ($b == 2); return "no" }'
+    . ' print "[", f(1,9), "][", f(9,2), "][", f(9,9), "]\n";',
+    "[yes][yes][no]\n");

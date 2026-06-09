@@ -148,14 +148,21 @@ sub parse_interpolated_string {
   }
 
   # If only one part, check if it's a simple string literal
-  # Array variables need string_concat wrapper for proper join handling
+  # Array variables AND slices need the string_concat wrapper for proper join
+  # handling (gen_string_concat wraps them in (p-join |$"| ...) and forces list
+  # context).  A whole array is a PPI::Token::Symbol "@x"; a slice is an internal
+  # node (slice_a_acc / slice_h_acc).  Without this, a single-slice string like
+  # "@a[1..2]" returned the bare slice node — no join, and it inherited the
+  # surrounding context (so `my $s = "@a[1..2]"` reduced to the last element).
   if (@parts == 1) {
     my $part_node = $parser->get_a_node($parts[0]);
-    # Only return directly if it's a string literal, not an @array
-    if (ref($part_node) ne 'PPI::Token::Symbol' || $part_node->content() !~ /^@/) {
-      return $parts[0];
-    }
-    # Fall through to create string_concat for array variables
+    my $is_array_sym = (ref($part_node) eq 'PPI::Token::Symbol'
+                        && $part_node->content() =~ /^@/);
+    my $itype = $parser->is_internal_node_type($part_node);
+    my $is_slice = (defined $itype
+                    && ($itype eq 'slice_a_acc' || $itype eq 'slice_h_acc'));
+    return $parts[0] unless $is_array_sym || $is_slice;
+    # Fall through to create string_concat for arrays/slices
   }
 
   # Build string_concat node with all parts
