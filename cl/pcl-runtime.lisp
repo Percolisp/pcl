@@ -3918,16 +3918,18 @@
   `(box-set ,place (* (to-number ,place) (to-number ,value))))
 
 (defmacro p-/= (place value)
-  "Perl /= (divide-assign)"
-  `(box-set ,place (/ (to-number ,place) (to-number ,value))))
+  "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
+  a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
+  `(box-set ,place (p-/ ,place ,value)))
 
 (defmacro p-%= (place value)
   "Perl %= (modulo-assign)"
   `(box-set ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
 
 (defmacro p-**= (place value)
-  "Perl **= (exponent-assign)"
-  `(box-set ,place (expt (to-number ,place) (to-number ,value))))
+  "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
+  float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
+  `(box-set ,place (p-** ,place ,value)))
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign)"

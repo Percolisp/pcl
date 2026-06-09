@@ -343,6 +343,82 @@ my @nums = (
 );
 add("num $_", prog($_)) for @nums;
 
+# --- Axis 12: compound assignment & increment/decrement ---------------------
+# Test BOTH the value the assignment expression yields AND the final variable.
+# `do { my $x=I; my $r = ($x OP RHS); "$r|$x" }` -> [returnval|finalval].
+my @asn = (
+    [ 5,    '+= 3'  ], [ 5,    '-= 3'  ], [ 5,    '*= 3'  ], [ 7,    '/= 2'  ],
+    [ 7,    '%= 3'  ], [ 2,    '**= 3' ], [ 5,    '|= 2'  ], [ 5,    '&= 3'  ],
+    [ 5,    '^= 1'  ], [ 1,    '<<= 4' ], [ 256,  '>>= 2' ],
+    [ '"a"','.= "b"'], [ '"ab"','x= 3' ],
+    [ 0,    '||= 7' ], [ 3,    '||= 7' ], [ 0,    '//= 7' ], [ 5,    '&&= 9' ],
+    [ 0,    '&&= 9' ],
+);
+for my $a (@asn) {
+    my ($init, $op) = @$a;
+    add("asn my \$x=$init; \$x $op",
+        prog(qq{do { my \$x=$init; my \$r = (\$x $op); "\$r|\$x" }}));
+}
+# pre/post increment & decrement: value of the expression + the variable after
+for my $form ('$x++','++$x','$x--','--$x') {
+    add("incdec $form",
+        prog(qq{do { my \$x=5; my \$r = $form; "\$r|\$x" }}));
+}
+# chained / nested assignment.  (We deliberately do NOT test forms that modify
+# the same variable twice in one statement, e.g. `$x += $x += 1` or `$i = $i++`:
+# perlop declares those UNDEFINED behavior — "Perl will not guarantee what the
+# result is" — so any PCL-vs-perl divergence there is meaningless, not a bug.)
+add('asn chain $a=$b=4',   prog('do { my ($a,$b); $a=$b=4; "$a|$b" }'));
+
+# --- Axis 13: array/hash builtins — return value AND mutation ----------------
+# push/pop/shift/unshift/splice return values + the resulting array; scalar(@a),
+# scalar(%h), keys/values/exists/delete, wantarray of slices.
+my @aryops = (
+    [ 'push',     'do { my @a=(1,2); my $r=push @a,3,4; "$r|@a" }' ],
+    [ 'pop',      'do { my @a=(1,2,3); my $r=pop @a; "$r|@a" }' ],
+    [ 'shift',    'do { my @a=(1,2,3); my $r=shift @a; "$r|@a" }' ],
+    [ 'unshift',  'do { my @a=(2,3); my $r=unshift @a,0,1; "$r|@a" }' ],
+    [ 'splice3',  'do { my @a=(1,2,3,4,5); my @r=splice(@a,1,2); "@r|@a" }' ],
+    [ 'splice4',  'do { my @a=(1,2,3,4,5); my @r=splice(@a,1,2,9,9,9); "@r|@a" }' ],
+    [ 'splice-neg','do { my @a=(1,2,3,4,5); my @r=splice(@a,-2); "@r|@a" }' ],
+    [ 'scalar-ary','do { my @a=(1,2,3); scalar(@a) }' ],
+    [ 'scalar-hash','do { my %h=(a=>1,b=>2); scalar(%h) }' ],
+    [ 'keys-count','do { my %h=(a=>1,b=>2,c=>3); scalar(keys %h) }' ],
+    [ 'values-sum','do { my %h=(a=>1,b=>2,c=>3); my $s=0; $s+=$_ for values %h; $s }' ],
+    [ 'exists',   'do { my %h=(a=>1); exists $h{a} ? "y":"n" }' ],
+    [ 'exists-no','do { my %h=(a=>1); exists $h{z} ? "y":"n" }' ],
+    [ 'delete',   'do { my %h=(a=>1,b=>2); my $r=delete $h{a}; "$r|".join(",",sort keys %h) }' ],
+    [ 'exists-ary','do { my @a=(1,2,3); exists $a[1] ? "y":"n" }' ],
+    [ 'delete-ary','do { my @a=(1,2,3); my $r=delete $a[1]; "$r|".(defined $a[1]?"def":"undef") }' ],
+    [ 'wantarray-slice','do { my @a=(5,6,7,8); "@a[1..2]" }' ],
+    [ 'grep-scalar','do { my @a=(1,2,3,4); my $n=grep { $_%2==0 } @a; $n }' ],
+    [ 'map-scalar', 'do { my @a=(1,2,3); my $n=map { ($_,$_) } @a; $n }' ],
+    [ 'reverse-list','do { my @a=(1,2,3); "@{[reverse @a]}" }' ],
+    [ 'sort-default','do { my @a=(10,9,100,2); join(",",sort @a) }' ],  # string sort!
+    [ 'sort-num',   'do { my @a=(10,9,100,2); join(",",sort {$a<=>$b} @a) }' ],
+    [ 'wantarray-ctx','do { sub c { wantarray ? "L":"S" } my @x=c(); my $y=c(); "$x[0]|$y" }' ],
+);
+add("ah $_->[0]", prog($_->[1])) for @aryops;
+
+# --- Axis 14: list construction / slices / swap / nested -------------------
+my @listops = (
+    [ 'list-repeat',   'do { my @a=(1,2) x 3; "@a" }' ],
+    [ 'list-repeat0',  'do { my @a=(1,2) x 0; scalar(@a) }' ],
+    [ 'swap',          'do { my ($a,$b)=(1,2); ($a,$b)=($b,$a); "$a|$b" }' ],
+    [ 'list-assign-ct','do { my $n=(my ($a,$b,$c)=(1,2,3,4,5)); $n }' ],  # =count RHS
+    [ 'array-in-list', 'do { my @a=(2,3); my @b=(1,@a,4); "@b" }' ],
+    [ 'hash-slice-asn','do { my %h; @h{qw(a b c)}=(1,2,3); join(",",map "$_=$h{$_}",sort keys %h) }' ],
+    [ 'nested-aref',   'do { my $r=[[1,2],[3,4]]; $r->[1][0] }' ],
+    [ 'nested-href',   'do { my $r={a=>{b=>42}}; $r->{a}{b} }' ],
+    [ 'aoh',           'do { my @a=({n=>1},{n=>2}); $a[1]{n} }' ],
+    [ 'wantarray-flat','do { my @a=((1,2),(3,4)); scalar(@a) }' ],
+    [ 'range-rev',     'do { join(",", reverse 1..3) }' ],
+    [ 'last-expr-list','do { my @a=(1,2,3); my $x=(4,5,6)[-1]; $x }' ],
+    [ 'neg-slice',     'do { my @a=(1,2,3,4,5); "@a[-2,-1]" }' ],
+    [ 'qw-count',      'do { my @a=qw(a b c d); scalar(@a) }' ],
+);
+add("list $_->[0]", prog($_->[1])) for @listops;
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------

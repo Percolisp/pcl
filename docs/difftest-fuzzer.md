@@ -82,6 +82,15 @@ RESULT: 761 valid snippets, 757 match, 4 MISMATCH in 2 clusters
 | 9 | string builtins & sprintf | `substr`/`index`/`rindex` (negative offsets), `x`, `join`, and a broad `sprintf` format sweep |
 | 10 | regex match / substitution / tr | `m//`, captures, `s///g` count, `tr///`, named captures `%+`, `split` variants |
 | 11 | numeric edge cases | negative modulo, bit ops + `~` (unsigned-64), string↔number coercion, **magic string auto-increment** (`"Az"++`), ranges |
+| 12 | compound assignment & inc/dec | `+= -= *= /= %= **= .= x= \|\|= //= &&=` etc., return value *and* final variable; `$x++`/`++$x` |
+| 13 | array/hash builtins | push/pop/shift/unshift/splice return-value + mutation, `scalar(@a)`/`scalar(%h)`, keys/values/exists/delete, grep/map in scalar |
+| 14 | list construction | list-repeat `(1,2)x3`, swap, list-assign count, nested aref/href, slices, `qw` |
+
+> **A fuzzer finding is a *candidate*, not a verdict.** Some mismatches are
+> **undefined behavior** in Perl itself — e.g. `$x += $x += 1` modifies a
+> variable twice in one statement, which perlop explicitly leaves undefined
+> ("Perl will not guarantee what the result is"). PCL is free to diverge there
+> (principle 9). Such snippets are removed from the axes, not "fixed."
 
 Adding an axis is just more `add($desc, prog($expr, $prelude))` calls before the
 `$LIMIT and ...` line. Use `prog` for scalar-context results, `prog_list` for
@@ -112,6 +121,23 @@ This is the running ledger; the authoritative narrative lives in
   now formats with `(14 - exp10)` fraction digits and the exponential branch uses
   `~,14E`. See the "deliberate divergences" note below for why sprintf `%g` is a
   *separate*, already-correct path.
+
+**Session 242 (Axes 12–14):**
+- **`/=` and `**=` leaked a CL ratio** — `$x /= 2` → `"7/2"`, `$x **= -1` →
+  `"1/2"`. The macros divided/exponentiated raw (CL int/int → ratio) while plain
+  `p-/` / `p-**` coerce ratio → float. Fixed by delegating `p-/=` → `p-/` and
+  `p-**=` → `p-**` (also gains overload dispatch).
+- **array/hash slice in string interpolation leaked scalar context** —
+  `my $s = "@a[1..2]"` reduced to the last element instead of joining `"2 3"`.
+  A single-slice string bypassed the join wrapper (`StringInterpolation.pm`), and
+  even wrapped slices inherited the outer scalar context (`gen_string_concat`).
+  Both forced to list context. Whole-array `"@a"` was always fine.
+- **anon arrayref `[...]` leaked scalar context + tail_position into its
+  contents** — `do { ...; "@{[reverse @a]}" }` ran `reverse` in scalar context,
+  reversing the joined string (`"321"`) instead of the list (`"3 2 1"`). Fixed in
+  `gen_array_init` (force list context, clear tail_position — bracket contents are
+  never the enclosing sub's tail call). sort/map were unaffected; reverse exposed
+  it.
 
 **Documented / deferred divergences (the fuzzer keeps reporting these; they are
 intentional):**
