@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 4;
 
 sub run_cl {
     my ($code) = @_;
@@ -64,3 +64,14 @@ test_cl('numeric bitwise | ^ treat operands as unsigned 64-bit',
 test_cl('relational binds tighter than equality (no cross-tier chaining)',
     'my $a = 2 != 3 > 4; my $b = 2 != 3 >= 4; print "[$a][$b]\n";',
     "[1][1]\n");
+
+# Braced block-deref + subscript: PPI tags the `[...]` after a `${BLOCK}`/`@{BLOCK}`
+# as a Constructor (anon array) not a Subscript, so `${$ar}[1]` / `@{$ar}[0,2]`
+# fell through to the "Missing case" die and silently became undef.  The arrow
+# (`$ar->[1]`), $$ (`$$ar[1]`), and hash (`${$hr}{a}`) forms always worked.
+# Found by tools/difftest-ops.pl deref axis (session 241).
+test_cl('braced array block-deref with index/slice subscript',
+    'my @a=(10,20,30); my $ar=\@a;'
+    . ' my $x = ${$ar}[1]; my @s = @{$ar}[0,2];'
+    . ' print "[$x][@s]\n";',
+    "[20][10 30]\n");

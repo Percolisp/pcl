@@ -35,26 +35,33 @@ Two fuzzer mismatches DEFERRED (not fixed, by design / risk):
   prefix when inlined into `(p-if …)` (tail-if transform / statement-path
   render in `Pl/ExprToCL.pm`). Cosmetic codegen TODO, no semantic effect.
 
-### Brace block-deref + subscript broken (session 241, deref axis) — REAL fix-target
+### Brace block-deref + subscript — FIXED (session 241, deref axis)
 
 Found by the `tools/difftest-ops.pl` deref axis. The **`${ BLOCK }[idx]`** and
 **`@{ BLOCK }[slice]`** forms — block-dereference of an array ref followed by an
-element/slice subscript — silently produce the wrong value:
+element/slice subscript — silently produced the wrong value:
 
 ```perl
 my @a = (10,20,30); my $ar = \@a;
-${$ar}[1]      # perl 20   — PCL undef
-@{$ar}[0,2]    # perl (10,30) — PCL ()
+${$ar}[1]      # perl 20      — PCL was undef
+@{$ar}[0,2]    # perl (10,30) — PCL was ()
 ```
 
-The sibling forms all work, so this is specific to the **braced** deref +
-subscript: `$$ar[1]`, `@$ar[0,2]`, `$ar->[1]`, `$ar->@[0,2]` all match perl.
-This is a *common* idiom (not niche) — a good fix-target. Documented now per the
-"just document" exploratory pass; likely a PExpr/ExprToCL gap where `${EXPR}`
-followed by `[` / `@{EXPR}` followed by `[` is not recognized as deref+subscript
-(probably parsed as a scalar/array block-deref whose trailing subscript is
-dropped). Hash form (`${$hr}{a}`, `@{$hr}{...}`) DID match — only the array-index
-/ array-slice braced forms are broken. **NOT a representation deferral — fix it.**
+**Root cause:** PPI mis-tokenizes the `[...]` after a `${BLOCK}`/`@{BLOCK}` as a
+`PPI::Structure::Constructor` (anonymous-array literal) instead of a
+`PPI::Structure::Subscript` — purely because it follows a Block `}` rather than a
+Symbol.  The hash form `${$hr}{a}` is correctly a Subscript (that is why it always
+worked).  The Cast+Block+Constructor triple matched no case in the PExpr main loop
+→ fell through to the "Missing case" die → degraded to a silent `(progn ;; …)` =
+`undef` (which is why this *common* idiom survived undetected).
+
+**Fix:** new preprocessing pass `_retag_braced_deref_subscript` in `Pl/PExpr.pm`
+re-blesses the mis-tagged `Constructor` into a `Subscript` when it follows a
+`$`/`@` Cast + Block, so the existing Cast+Block+Subscript machinery (the same path
+`${$hr}{a}` uses) handles it.  `%`-cast (KV slice `%{$ref}[i]`) and `*`-cast (glob)
+are left as Constructors — they have dedicated handlers.  Verified vs perl 5.40;
+regression test in `Pl/t/misc-fixes-02.t`.  Adjacent forms unaffected (anon arrays,
+`%{$ref}[i]`, `${$hr}{a}`, `@{$hr}{…}`, nested `${$rr}[1][0]`).
 
 ---
 
