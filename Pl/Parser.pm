@@ -1167,6 +1167,9 @@ sub _process_expression_statement {
     }
 
     my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt, VOID_CTX);
+    # Drop inline-leading indent: expr/cond are spliced onto the same line as
+    # "(p-if "/"(p-foreach " below, so a leading prefix makes a weird gap.
+    $expr_cl =~ s/^[ \t]+// if defined $expr_cl;
 
     # Generate appropriate control structure
     # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
@@ -1176,10 +1179,14 @@ sub _process_expression_statement {
       $cl_modifier = 'foreach';
       # The list must be in LIST_CTX (= 1) so split() returns elements not count
       my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
+      $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
       $cl_code = "(p-foreach (\$_ $cond_cl) $expr_cl)";
     }
     else {
       my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
+      # Strip leading indent BEFORE the ^\(p-... auto-defined regexes below,
+      # which are anchored and would miss a space-prefixed cond.
+      $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
       # Apply Perl's auto-defined() insertion for while-modifier loops.
       # while ($x = readdir/each/readline/glob) terminates on undef, not on false.
       if ($cl_modifier eq 'while') {
@@ -3007,6 +3014,9 @@ sub _process_tail_stmt {
 
       my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt);
       my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
+      # Drop inline-leading indent so the (setf ...) operands sit flush.
+      $expr_cl =~ s/^[ \t]+// if defined $expr_cl;
+      $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
 
       $self->_emit(";; $perl_code");
       if ($modifier eq 'if') {
@@ -3040,6 +3050,7 @@ sub _process_tail_stmt {
     } $stmt->children;
     if (@parts) {
       my $cl = $self->_parse_expression(\@parts, $stmt);
+      $cl =~ s/^[ \t]+// if defined $cl;  # drop inline-leading indent (setf gap)
       $self->_emit(";; $perl_code");
       $self->_emit("(setf $ret_var $cl)") if defined $cl;
       $self->_emit("");
@@ -4506,6 +4517,13 @@ sub _parse_condition {
   my ($result, $decls) = $self->_parse_expression(\@parts, $cond);
   $result //= "nil";
 
+  # The expression generator prefixes the result with (indent_str x
+  # indent_level).  A condition is inlined right after "(p-if "/"(p-while " on
+  # the SAME line, so that leading indentation produces a weird gap
+  # ("(p-if                       (cond)").  Strip the leading whitespace; any
+  # internal newlines (multi-line conditions) keep their alignment.
+  $result =~ s/^[ \t]+//;
+
   # Merge: use our recursive findings (which catches nested decls)
   return wantarray ? ($result, $all_decls) : $result;
 }
@@ -5210,8 +5228,9 @@ sub _process_sub_statement {
   my $sig_wrap_closes = 0;
 
   if ($is_sig) {
-    # (let ((@_ (p-flatten-args %_args))) — flatten args (foo(@arr) spreads)
-    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
+    # (p-args-body ...) — flatten %_args into @_ (foo(@arr) spreads); see the
+    # p-args-body macro in cl/pcl-runtime.lisp.
+    $self->_emit("(p-args-body");
     $self->indent_level($self->indent_level + 1);
     $sig_wrap_closes++;
     # Arity check BEFORE any binding (a too-few call must not index past @_).
@@ -5273,9 +5292,9 @@ sub _process_sub_statement {
     # their (p-scalar-= ...) to (p-my-= ...) for the duration of the body.
     $self->{_sig_param_names} = \@sig_param_names;
   }
-  # If using %_args, convert to @_ vector
+  # If using %_args, convert to @_ vector (p-args-body macro binds @_)
   elsif ($needs_args_conversion) {
-    $self->_emit("(let ((\@_ (p-flatten-args %_args)))");
+    $self->_emit("(p-args-body");
     $self->indent_level($self->indent_level + 1);
   }
 

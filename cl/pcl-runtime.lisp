@@ -101,7 +101,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-parent #:p-require-file
+   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file
    ;; Functions
    #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
@@ -157,7 +157,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-sub #:p-declare-sub
+   #:p-defpackage #:p-sub #:p-args-body #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
@@ -356,6 +356,16 @@
                         (*pcl-caller-wantarray* *wantarray*))
                    (catch :p-return
                      ,@body))))))))
+
+(defmacro p-args-body (&body body)
+  "Standard named-sub prologue emitted by the code generator: bind Perl's @_
+   from the &rest %_args captured by the enclosing p-sub lambda list, then run
+   BODY.  Both @_ and %_args are symbols exported from :pcl and inherited into
+   every generated user package, so `(p-sub NAME (&rest %_args) (p-args-body …))`
+   binds and reads the SAME symbols here regardless of *package* — no
+   expansion-time package resolution needed."
+  `(let ((@_ (p-flatten-args %_args)))
+     ,@body))
 
 ;;; p-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
