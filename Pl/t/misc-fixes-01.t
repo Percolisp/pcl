@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 129;
+plan tests => 131;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -1019,3 +1019,40 @@ test_cl('$obj->${\ $code }(args) dispatches by computed coderef',
     . ' sub run { my $s=shift; my $c=sub { shift; "C:@_" }; $s->${\ $c }("a","b") }'
     . ' package main; print Foo->new->run, "\n";',
     "C:a b\n");
+
+# --- nested ternary in the TRUE branch without parens: A ? B ? C : D : E -----
+# Right-assoc selects the rightmost `?` as hi_ix; its false-branch scan must stop
+# at the enclosing `:` (same precedence 15), else it swallowed `D : E` and the
+# whole `my $x = ...` failed to parse. Found via Moo's generated constructor
+# (`scalar @_==1 ? ref $_[0] eq 'HASH' ? {...} : die : @_%2 ? die : {@_}`).
+# Our perl-tests/cond.t never exercised the ternary operator at all.
+test_cl('nested ternary in true branch (no parens) parses and evaluates',
+    'sub a { my ($x,$y)=@_; return $x ? $y ? "TY" : "TN" : "F"; }'
+    . ' print join(",", a(1,1), a(1,0), a(0,1)), "\n";',
+    "TY,TN,F\n");
+
+test_cl('nested ternary returns a hashref from the deep else branch',
+    'sub mk { my $args = scalar @_ == 1 ? ref $_[0] eq "HASH" ? "h" : "s"'
+    . '                                 : @_ % 2 ? "odd" : { @_ }; return $args; }'
+    . ' my $r = mk(p=>1, q=>2); print ref($r), ":", join(",", map {"$_=$r->{$_}"} sort keys %$r), "\n";',
+    "HASH:p=1,q=2\n");
+
+# --- CORE::<builtin> behaves exactly like the builtin --------------------------
+# CORE::foo names Perl's builtin (bypassing overrides). PCL must give it the
+# builtin's param spec: CORE::shift()/CORE::shift default to @_, and CORE::ref
+# (no parens) is a named unary, not a bareword string. Moo's quote_sub'd code
+# uses CORE::shift()/CORE::ref/CORE::join throughout.
+test_cl('CORE::shift() and CORE::shift default to @_',
+    'sub f { my $a = CORE::shift(); my $b = CORE::shift; return "$a|$b"; }'
+    . ' print f("x","y"), "\n";',
+    "x|y\n");
+
+test_cl('CORE::ref without parens is a named unary',
+    'my $h = {}; my $r = CORE::ref $h eq "HASH" ? "yes" : "no"; print $r, "\n";',
+    "yes\n");
+
+# NB: bug #4 this session — caller() inside an imported module's import()
+# reporting the use-site package in ORIGINAL case for a single-segment package
+# (Point not POINT) — is validated through the real `use` path (needs a module
+# on disk, which this single-file harness can't set up) and by Moo loading. The
+# orig-case name is now registered in the package preamble (before `use` runs).

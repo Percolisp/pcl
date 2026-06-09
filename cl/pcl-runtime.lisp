@@ -144,7 +144,7 @@
    #:*pcl-sub-call-depth*
    ;; Current/caller package tracking (for caller() package, __PACKAGE__-at-runtime)
    #:*pcl-current-package* #:*pcl-caller-pkg-stack* #:*pcl-caller-subname-stack*
-   #:p-set-current-package
+   #:p-set-current-package #:p-register-pkg-name
    ;; END blocks
    #:*end-blocks*
    ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
@@ -225,6 +225,18 @@
 ;;; Maps a CL package-name string (e.g. "FOO") to the original-case Perl name
 ;;; (e.g. "Foo").  Populated by p-set-current-package as `package` statements run.
 (defvar *pcl-pkg-name-map* (make-hash-table :test 'equal))
+
+(defun p-register-pkg-name (pkg perl-name)
+  "Record the original-case PERL-NAME for CL package PKG in *pcl-pkg-name-map*
+   WITHOUT changing the lexically-current package.  Emitted in each package's
+   preamble (before its `use` statements) so that caller()/__PACKAGE__ inside an
+   imported module's import() resolve the use-site package to its original case
+   — p-set-current-package runs only in execution order, which is AFTER the use
+   statements, too late for the name-map lookup during import."
+  (let ((p (ignore-errors (find-package pkg))))
+    (when p
+      (setf (gethash (package-name p) *pcl-pkg-name-map*) perl-name)))
+  perl-name)
 
 (defun p-set-current-package (pkg perl-name)
   "Record the original-case PERL-NAME for CL package PKG (a package designator

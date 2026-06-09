@@ -1,5 +1,39 @@
 # CPAN module blockers — what to fix next
 
+> **Session 240 update (2026-06-09):** Moo now LOADS its whole stack, generates accessors, and
+> rw set/get works. Six general bugs fixed this session (each a Moo wall), all gate-green:
+> 1. **`package NAME;` inside a BEGIN/scheduled block is block-scoped** — was leaking past the
+>    block, so later subs resolved unqualified calls in the inner package (Moo's
+>    `Method::Generate::Accessor::_Generated` idiom). `_process_scheduled_block` snapshots the
+>    package stack + reverts.
+> 2. **`$obj->${ EXPR }(args)`** — method whose name/coderef is a scalar deref (Moo::Object).
+>    New parser case + gen_methodcall routes computed methods through dynamic `p-method-call`.
+> 3. **`Carp::short_error_loc`/`long_error_loc`** added to lib/Carp.pm shim.
+> 4. **`caller()` returned UPCASED single-segment pkg** (`POINT` not `Point`) — the orig-case
+>    name was registered only by `p-set-current-package`, emitted AFTER the package's `use`
+>    stmts, so `pcl-pkg-perl-name` fell back to the CL name during import. Fix: new
+>    `p-register-pkg-name` emitted in the package PREAMBLE (before `use`). **This was the key
+>    Moo bug** — Moo keys all per-class state on `caller`, but blesses into the correct-case
+>    name, so the mismatch silently broke construction.
+> 5. **`CORE::<builtin>`** now behaves like the builtin: `CORE::shift()`/`CORE::shift` default
+>    to `@_`, `CORE::ref $x` (no parens) is a named unary (was parsed as a bareword string).
+>    handle_subcalls normalizes `CORE::foo`→`foo`; add_implicit_default_param strips `CORE::`.
+> 6. **Nested ternary in the TRUE branch without parens** `A ? B ? C : D : E` failed to parse
+>    entirely — the inner `?`'s false-branch scan used `prec < 15` and so swallowed the outer
+>    `: E` (the `:` is also prec 15). **Our perl-tests/cond.t never tested `?:` at all** —
+>    coverage gap. Fixed the false-end scan to stop at a `:`.
+>
+> **Moo's REMAINING wall (240):** `Point->new` now reaches MGC's generated constructor and the
+> arg-copy works (MGC objects store `package`/`attribute_specs`/…). But it dies
+> `assert_constructor: "Unknown constructor for Method::Generate::Constructor already exists"`
+> — `_constructor_maker_for(MGC)` runs with a FRESH maker (`$self->{constructor}` unset) while
+> MGC's own `new` already exists in the glob, so `$MAKERS{MGC}{constructor}` looks unset when it
+> shouldn't (memoization/identity in Moo's self-referential bootstrap). NEXT: trace why
+> `$Moo::MAKERS{"Method::Generate::Constructor"}{constructor}` is falsy after bootstrap (the
+> subconstructor_handler calls `Moo->_constructor_maker_for($class)` when MAKERS{$class} is set
+> but {constructor} is not — likely a coderef-identity or `weaken`-interaction nuance, or a
+> stale-case `$class`). Repro: `package Point; use Moo; has x=>(is=>'ro'); Point->new(x=>3)`.
+
 > **Session 239 update (2026-06-09):** Moo walls A–C are DOWN. Moo now loads its whole stack and
 > runs into **constructor generation**. Four general fixes landed (see `session-log.md` §239):
 > (1) glob-slot `*{$glob}{EXPR}` parses (variable + expression) — wall A; (2) nested-import `caller`

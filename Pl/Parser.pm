@@ -5516,6 +5516,11 @@ sub _emit_package_preamble {
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
+    # Register the original-case name eagerly (preamble is hoisted before any
+    # runtime code, so before this package's `use` statements run).  Needed so
+    # caller()/__PACKAGE__ inside an imported module's import() resolve this
+    # use-site package to its original case rather than the upcased CL name.
+    $self->_emit("(p-register-pkg-name $cl_pkg \"$pkg_name\")");
     $self->_emit("");
   });
   # Declare $a/$b as special in this package so sort comparator lambdas

@@ -1506,11 +1506,17 @@ sub parse {
         }
       }
 
-      # Find false end: scan forward from : to find lower-prec operator
+      # Find false end: scan forward from : to find lower-prec operator, OR a
+      # ':' marking the boundary of an ENCLOSING ternary.  The latter matters
+      # for a nested ternary in the true branch: `A ? B ? C : D : E` reduces the
+      # inner `?` first (right-assoc picks the rightmost `?` as hi_ix), and its
+      # false branch (`D`) must stop at the outer `:` — which has the same prec
+      # 15, so a strict `prec < ternary_prec` test would wrongly swallow `D : E`.
       my $false_end = $#{$e};
       for (my $i = $colon_pos + 1; $i <= $#{$e}; $i++) {
+        my $tok_op = $self->is_token_operator($e->[$i]) // '';
         my $info = $self->op_info($e->[$i]);
-        if ($info && $info->{prec} < $ternary_prec) {
+        if ($tok_op eq ':' || ($info && $info->{prec} < $ternary_prec)) {
           $false_end = $i - 1;
           last;
         }
@@ -1836,6 +1842,20 @@ sub handle_subcalls {
   my $in_arglist = shift // 0;  # 1 when called from parse_list (inside explicit parens)
 
   say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
+
+  # - - - Pre-pass: normalize CORE::<builtin> to the bare builtin name.
+  # `CORE::foo` explicitly names Perl's builtin (bypassing any override).  PCL
+  # has no overridable builtins, so CORE::foo == foo.  Rewriting the token here
+  # makes ALL downstream logic — named-unary detection, param specs, funcall
+  # recognition — treat it as the builtin (codegen already maps both to p-foo).
+  # Without this, `CORE::ref $x` / `CORE::shift` (no parens) parse as barewords.
+  for my $tok (@$e) {
+    next unless ref($tok) eq 'PPI::Token::Word';
+    my $c = $tok->content();
+    if ($c =~ /^CORE::(\w+)$/ && exists $self->known_no_of_params->{$1}) {
+      $tok->set_content($1);
+    }
+  }
 
   # - - - Pre-pass (BEFORE fun(list) loop): Handle general indirect object syntax
   # "METHOD ClassName ARGS" → ClassName->METHOD(ARGS)
@@ -3158,6 +3178,11 @@ sub add_implicit_default_param {
   my $node_id   = shift;
 
   return unless defined $func_name;
+
+  # CORE::foo explicitly names the builtin (bypassing any override), so it must
+  # inherit the builtin's param spec — e.g. CORE::shift()/CORE::pop() default to
+  # @_ just like shift/pop.  Strip the prefix for the spec lookup.
+  $func_name =~ s/^CORE:://;
 
   my $param_spec = $self->known_no_of_params->{$func_name};
   return unless defined $param_spec;
