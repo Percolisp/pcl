@@ -35,6 +35,27 @@ Two fuzzer mismatches DEFERRED (not fixed, by design / risk):
   prefix when inlined into `(p-if …)` (tail-if transform / statement-path
   render in `Pl/ExprToCL.pm`). Cosmetic codegen TODO, no semantic effect.
 
+### Brace block-deref + subscript broken (session 241, deref axis) — REAL fix-target
+
+Found by the `tools/difftest-ops.pl` deref axis. The **`${ BLOCK }[idx]`** and
+**`@{ BLOCK }[slice]`** forms — block-dereference of an array ref followed by an
+element/slice subscript — silently produce the wrong value:
+
+```perl
+my @a = (10,20,30); my $ar = \@a;
+${$ar}[1]      # perl 20   — PCL undef
+@{$ar}[0,2]    # perl (10,30) — PCL ()
+```
+
+The sibling forms all work, so this is specific to the **braced** deref +
+subscript: `$$ar[1]`, `@$ar[0,2]`, `$ar->[1]`, `$ar->@[0,2]` all match perl.
+This is a *common* idiom (not niche) — a good fix-target. Documented now per the
+"just document" exploratory pass; likely a PExpr/ExprToCL gap where `${EXPR}`
+followed by `[` / `@{EXPR}` followed by `[` is not recognized as deref+subscript
+(probably parsed as a scalar/array block-deref whose trailing subscript is
+dropped). Hash form (`${$hr}{a}`, `@{$hr}{...}`) DID match — only the array-index
+/ array-slice braced forms are broken. **NOT a representation deferral — fix it.**
+
 ---
 
 Generated 2026-05-07. Baseline: 18209 pass / 10159 fail across 100 files, 40 fully passing.

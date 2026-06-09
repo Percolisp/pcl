@@ -155,6 +155,107 @@ for my $ce (@ctx_exprs) {
     add("ctx-scalar $expr",  prog_scalar($expr, $pre)) if $scalar_ok;
 }
 
+# --- Axis 6: builtins x call forms (paren / named / CORE:: / $_ default) -----
+# Catches @_/$_ defaulting and named-unary parsing differences across call
+# syntaxes (e.g. session 240's CORE::shift / CORE::ref bugs).  ARG is a Perl
+# literal; each form prints one [result].
+sub add_builtin {
+    my ($name, $arg, $us) = @_;   # $us = defaults to $_ when called with no arg
+    add("bi $name($arg)",        prog("$name($arg)"));
+    add("bi $name $arg",         prog("$name $arg"));
+    add("bi CORE::$name($arg)",  prog("CORE::$name($arg)"));
+    add("bi CORE::$name $arg",   prog("CORE::$name $arg"));
+    if ($us) {
+        add("bi $name \$_",        prog($name,         "\$_ = $arg;"));
+        add("bi CORE::$name \$_",  prog("CORE::$name", "\$_ = $arg;"));
+    }
+}
+add_builtin('length',   '"abcd"', 1);
+add_builtin('uc',       '"abc"',  1);
+add_builtin('lc',       '"ABC"',  1);
+add_builtin('ucfirst',  '"abc"',  1);
+add_builtin('lcfirst',  '"ABC"',  1);
+# NB: fc() is gated behind `use feature 'fc'`; without it perl treats a bare
+# `fc` as the string "fc", so it is omitted here (PCL always treats it builtin).
+add_builtin('ord',      '"A"',    1);
+add_builtin('chr',      '65',     1);
+add_builtin('hex',      '"ff"',   1);
+add_builtin('oct',      '"0x1f"', 1);
+add_builtin('abs',      '-5',     1);
+add_builtin('int',      '3.7',    1);
+add_builtin('sqrt',     '16',     1);
+add_builtin('quotemeta','"a.b"',  1);
+add_builtin('ref',      '[1]',    1);
+add_builtin('defined',  '0',      1);
+
+# --- Axis 7: deref / sigil / slices / postfix deref -------------------------
+# Ref names avoid $r / @__r (used by prog / prog_list).
+my $SR = 'my $x = 42; my $sr = \$x;';
+my $AR = 'my @a = (10,20,30); my $ar = \@a;';
+my $HR = 'my %h = (a=>1,b=>2,c=>3); my $hr = \%h;';
+# [ expr, prelude, kind ]  kind: 's' scalar(prog), 'l' list(prog_list)
+my @deref = (
+    [ '$$sr',            $SR, 's' ],
+    [ '${$sr}',          $SR, 's' ],
+    [ '$sr->$*',         $SR, 's' ],
+    [ '@$ar',            $AR, 'l' ],
+    [ '@{$ar}',          $AR, 'l' ],
+    [ '$ar->@*',         $AR, 'l' ],
+    [ '$$ar[1]',         $AR, 's' ],
+    [ '${$ar}[1]',       $AR, 's' ],
+    [ '$ar->[1]',        $AR, 's' ],
+    [ '$ar->[-1]',       $AR, 's' ],
+    [ '$#$ar',           $AR, 's' ],
+    [ '$#{$ar}',         $AR, 's' ],
+    [ '@$ar[0,2]',       $AR, 'l' ],
+    [ '@{$ar}[0,2]',     $AR, 'l' ],
+    [ '$ar->@[0,2]',     $AR, 'l' ],
+    [ '$$hr{a}',         $HR, 's' ],
+    [ '${$hr}{a}',       $HR, 's' ],
+    [ '$hr->{a}',        $HR, 's' ],
+    [ '@$hr{qw(a c)}',   $HR, 'l' ],
+    [ '$hr->@{qw(a c)}', $HR, 'l' ],
+    [ 'sort keys %$hr',  $HR, 'l' ],
+    [ 'sort keys %{$hr}',$HR, 'l' ],
+    [ '$ar->[0] + $ar->[1]', $AR, 's' ],
+);
+for my $d (@deref) {
+    my ($expr, $pre, $kind) = @$d;
+    add("deref $expr", $kind eq 'l' ? prog_list($expr, $pre) : prog($expr, $pre));
+}
+
+# --- Axis 8: OO dispatch ----------------------------------------------------
+# Small hierarchy Dog -> Animal exercising override / inherited / SUPER:: /
+# can / isa / ref / method-name-in-var / class-method / chained.
+my $OO = join('',
+    'package Animal; sub new { bless { name => $_[1] }, $_[0] }',
+    ' sub speak { "generic" } sub name { $_[0]{name} }',
+    ' package Dog; our @ISA = ("Animal");',
+    ' sub speak { "woof" } sub fetch { "fetch" }',
+    ' sub describe { my $s = shift; $s->SUPER::speak() . "+" . $s->speak() }',
+    ' package main; my $d = Dog->new("Rex"); my $m = "speak";');
+for my $oc (
+    [ '$d->speak',                  ],   # inherited override
+    [ '$d->speak()',                ],
+    [ '$d->name',                   ],   # inherited method
+    [ '$d->fetch',                  ],   # own method
+    [ '$d->$m',                     ],   # method name in scalar
+    [ '$d->$m()',                   ],
+    [ 'Dog->speak',                 ],   # class-method call
+    [ 'Dog->new("X")->name',        ],   # chained
+    [ '$d->describe',               ],   # SUPER::
+    [ 'ref $d',                     ],
+    [ '$d->isa("Animal") ? 1 : 0',  ],
+    [ '$d->isa("Cat") ? 1 : 0',     ],
+    [ '$d->can("fetch") ? "y":"n"', ],
+    [ '$d->can("meow") ? "y":"n"',  ],
+    [ 'Dog->can("speak") ? "y":"n"',],
+    [ '$d->isa("Dog") ? 1 : 0',     ],
+) {
+    my $expr = $oc->[0];
+    add("oo $expr", prog($expr, $OO));
+}
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------
@@ -217,9 +318,13 @@ sub extract {
     $out //= '';
     return 'PARSE-ERROR'   if $out =~ /PARSE ERROR|unknown type|Transpile failed/i;
     return 'CL-ERROR'      if $out =~ /UNDEFINED-FUNCTION|SIMPLE-ERROR|debugger invoked|unhandled|Unhandled/i;
-    if ($out =~ /\[([^\]]*)\]/) { return $1; }
-    $out =~ s/\s+\z//; $out =~ s/\A\s+//;
-    return $out eq '' ? '(empty)' : "?:$out";
+    my $val;
+    if ($out =~ /\[([^\]]*)\]/) { $val = $1; }
+    else { $out =~ s/\s+\z//; $out =~ s/\A\s+//; $val = $out eq '' ? '(empty)' : "?:$out"; }
+    # Normalize reference stringifications: the hex address always differs
+    # between perl and PCL, so compare only the ref TYPE (ARRAY/HASH/REF/...).
+    $val =~ s/\b((?:ARRAY|HASH|CODE|REF|SCALAR|GLOB|Regexp|[\w:]+)\()0x[0-9a-fA-F]+\)/${1}0xADDR)/g;
+    return $val;
 }
 
 # ---------------------------------------------------------------------------
