@@ -1416,11 +1416,16 @@ sub parse {
     # the leftmost chained op in this run, then build a single flat chain node
     # covering all N terms and N-1 operators.
     if ($self->op_is_chained($op_info)) {
+      # Only operators of the SAME precedence chain together.  Perl parses
+      # `2 != 3 > 4` as `2 != (3 > 4)` (relational `>` is tighter than `!=`),
+      # NOT as a chain `(2 != 3) && (3 > 4)`.  Restrict the left-scan to ops
+      # whose precedence equals this op's precedence.
       my $left = $hi_ix;
       while ($left >= 2) {
         my $prev_op   = $e->[$left - 2];
         my $prev_info = $self->op_info($prev_op);
         last unless defined $prev_info && $self->op_is_chained($prev_info);
+        last unless $prev_info->{prec} == $op_info->{prec};
         $left -= 2;
       }
 

@@ -1,5 +1,42 @@
 # PCL Sweep Bug Catalog
 
+## Differential-fuzzer findings (session 241, `tools/difftest-ops.pl`)
+
+The operator/precedence fuzzer (PCL vs real perl 5.40) surfaced 5 bugs that the
+whole `perl-tests/` suite missed — all FIXED session 241 (regression tests in
+`Pl/t/misc-fixes-02.t`): chained string-cmp crash (`cmp-op-to-fn`→`p-str-*`),
+bitwise `& | ^` signed→unsigned-64 (`%pcl-to-u64`), relational-vs-equality
+precedence (chained-cmp left-scan now same-prec only), false-comparison returns
+`""` not nil (`p-bool` wrapping the cmp macros), and bitwise string-mode needing
+BOTH operands strings (`or`→`and`). See `memory/project_difftest_fuzzer.md`.
+
+Two fuzzer mismatches DEFERRED (not fixed, by design / risk):
+
+- **`**` always returns NV in Perl, exact bignum in PCL.** `2 ** 3 ** 4` →
+  perl `2.41785163922926e+24` (lossy float), PCL `2417851639229258349412352`
+  (exact). Only differs for results > 2^53. **Representation choice** — PCL's
+  exact value is arguably better, and matching Perl risks regressing any
+  `2**N`-as-integer-size/bitmask code with no CPAN module needing the float
+  imprecision. Treated as a documented difference; revisit only if a real module
+  depends on the NV behaviour.
+
+- **Named-unary operator precedence (REAL fix-target, deferred).** Perl gives
+  named unary ops (`length`, `sqrt`, `int`, …) LOWER precedence than `+ - .`, so
+  `length $s + 1` means `length($s + 1)` (= 1); PCL computes `length($s) + 1`
+  (= 5). The bug is in `Pl/PExpr.pm` ~line 2784: named unary is parsed by a
+  special "consume one term" mechanism (not the precedence table), and the
+  comment there wrongly claims they "bind tighter than binary operators".
+  Correct perlop order: `* / % x` > `+ - .` > `<< >>` > **named unary** >
+  relational. Fixing means giving named unary a real precedence band looser than
+  `.`/shift — an involved parser change, so deferred to a focused session.
+
+- **Generated-CL whitespace cosmetic** (`(p-if                       (cond)` big
+  gap): condition sub-expressions carry a leading `indent_str x indent_level`
+  prefix when inlined into `(p-if …)` (tail-if transform / statement-path
+  render in `Pl/ExprToCL.pm`). Cosmetic codegen TODO, no semantic effect.
+
+---
+
 Generated 2026-05-07. Baseline: 18209 pass / 10159 fail across 100 files, 40 fully passing.
 Updated 2026-05-15 (session 185). Current: ~12506 pass / ~2396 fail, 42 fully passing.
 Updated 2026-05-23 (session 200). Current: 27439 pass / 2230 fail, 58 fully passing (107 files + 2 skipped).
