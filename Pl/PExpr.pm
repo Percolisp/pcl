@@ -941,6 +941,31 @@ sub parse {
         splice @$e, $i, 3;
         $i--;
         next;
+      } elsif (ref($nxt) eq 'PPI::Token::Cast'
+               && $nxt->content() eq '$'
+               && ref($nxt_2) eq 'PPI::Structure::Block') {
+        # Case 1E: X->${ EXPR }(...) — method whose name (or coderef) is the
+        # scalar deref of EXPR.  e.g. Moo::Object's $self->${\(...)}(@_).
+        # Build the ${ EXPR } deref node as a (computed/dynamic) method, with
+        # optional trailing argument list (already a tree_val node).
+        my $pre_id  = $self->parse([$pre]);
+        my $meth_id = $self->parse([$nxt, $nxt_2]);  # ${ EXPR } scalar deref
+        my ($node, $id) = $self->make_node_insert('methodcall');
+        $self->add_child_to_node($id, $pre_id);   # Object
+        $self->add_child_to_node($id, $meth_id);  # Method (computed)
+        my $count  = 3;  # remove ->, Cast, Block
+        my $params = $e->[$i+3];
+        if ($params && $self->is_internal_node_type($params)
+            && $params->{type} eq 'tree_val') {
+          for my $kid_id (@{ $self->get_node_children($params->{id}) }) {
+            $self->add_child_to_node($id, $kid_id);
+          }
+          $count++;  # also consume the params node
+        }
+        $e->[$i-1] = $node;
+        splice @$e, $i, $count;
+        $i--;
+        next;
       } elsif ($self->is_word($nxt)) {
         # Case 1C: X->method (no parentheses)
         # Method call without arguments, e.g., $obj->DEBUG or $self->nodes

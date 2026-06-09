@@ -1871,6 +1871,10 @@ sub gen_methodcall {
   my $is_dynamic_method = 0;
   if (ref($method_node) eq 'PPI::Token::Symbol' && $method_node->content() =~ /^\$/) {
     $is_dynamic_method = 1;
+  } elsif ($self->expr_o->is_internal_node_type($method_node)) {
+    # Computed method name, e.g. $obj->${ EXPR }(...) — the method is the
+    # runtime value of an expression (a name string or a coderef).
+    $is_dynamic_method = 1;
   }
 
   # Rest are arguments

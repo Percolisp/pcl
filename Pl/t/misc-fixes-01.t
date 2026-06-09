@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 126;
+plan tests => 129;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -991,3 +991,31 @@ test_cl('symbolic \%{"Pkg::Name"} / \@{...} deref resolves the package variable'
     . ' print ref($hr), ":", join(",",map {"$_=$hr->{$_}"} sort keys %$hr),'
     . '       " ", ref($ar), ":", join(",", @$ar), "\n";',
     "HASH:a=1,b=2 ARRAY:10,20\n");
+
+# --- a bare `package NAME;` statement inside a BEGIN block is block-scoped ---
+# Perl reverts the package when the BEGIN block ends. PCL leaked the package
+# switch past the block, so a later sub's unqualified calls resolved against the
+# inner package (e.g. Moo's Method::Generate::Accessor uses
+# `BEGIN { package ...::_Generated; ... }` then calls imported subs after).
+test_cl('package NAME; inside BEGIN block is scoped to the block',
+    'package Outer; sub helper { "HELP:".$_[0] }'
+    . ' BEGIN { package Outer::Inner; our $x = 1; }'
+    . ' sub run { helper("hi") } package main; print Outer::run(), "\n";',
+    "HELP:hi\n");
+
+# --- $obj->${ EXPR }(args): method name/coderef is a scalar deref ---------
+# Moo::Object dispatches via $self->${\(...generate_method...)}(@_), where the
+# deref yields either a method-name string or a coderef. PCL emitted a PARSE
+# ERROR ("unknown node ... Cast") for the ${...} method position. Both the
+# name and coderef forms must dispatch.
+test_cl('$obj->${\ $name }(args) dispatches by computed method name',
+    'package Foo; sub new { bless {}, shift } sub greet { shift; "hi @_" }'
+    . ' sub run { my $s=shift; my $n="greet"; $s->${\ $n }("world") }'
+    . ' package main; print Foo->new->run, "\n";',
+    "hi world\n");
+
+test_cl('$obj->${\ $code }(args) dispatches by computed coderef',
+    'package Foo; sub new { bless {}, shift }'
+    . ' sub run { my $s=shift; my $c=sub { shift; "C:@_" }; $s->${\ $c }("a","b") }'
+    . ' package main; print Foo->new->run, "\n";',
+    "C:a b\n");

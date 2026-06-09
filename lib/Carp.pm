@@ -21,6 +21,15 @@ our $VERSION = '1.50';
 sub longmess  { return join('', @_); }
 sub shortmess { return join('', @_); }
 
+# Internal helper used by some callers (e.g. Method::Generate::Constructor)
+# to find the caller depth at which to report an error.  The real Carp walks
+# the call stack skipping Carp-internal frames; PCL does not track runtime
+# file/line (see docs/not-supported.md), so the precise depth only affects an
+# error-message location string.  Return the conventional first non-internal
+# frame.
+sub short_error_loc { return 1; }
+sub long_error_loc  { return 1; }
+
 sub croak   { die join('', @_), "\n"; }
 sub confess { die join('', @_), "\n"; }
 
