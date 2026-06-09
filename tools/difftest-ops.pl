@@ -106,6 +106,55 @@ add('ref-in-cond',     prog('ref $h eq "HASH" && length $k > 0 ? "y" : "n"',
                                                 'my $h={}; my $k="x";'));
 add('chained-named',   prog('lc uc $s', 'my $s = "AbC";'));
 
+# --- Axis 5: context sensitivity (scalar / list / count) --------------------
+# The SAME expression is evaluated in list, count (goatse `()=`), and (where
+# well-defined) scalar context; PCL must match perl in every one.  These catch
+# the list-vs-scalar / flatten / wantarray bugs that recur in CPAN sweeps.
+# Each program prints exactly one [payload] so the existing extractor works.
+sub prog_list {           # list context: join elements, undef -> U
+    my ($expr, $prelude) = @_; $prelude //= '';
+    return "${prelude}my \@__r = ($expr);\n"
+         . "print '[', join(',', map { defined \$_ ? \$_ : 'U' } \@__r), \"]\\n\";\n";
+}
+sub prog_count {          # count context: number of list elements via () =
+    my ($expr, $prelude) = @_; $prelude //= '';
+    return "${prelude}my \$__n = () = ($expr);\n"
+         . "print \"[\$__n]\\n\";\n";
+}
+sub prog_scalar {         # scalar context
+    my ($expr, $prelude) = @_; $prelude //= '';
+    return "${prelude}my \$__s = scalar($expr);\n"
+         . "\$__s = 'U' unless defined \$__s;\n"
+         . "print \"[\$__s]\\n\";\n";
+}
+# [ expr, prelude, scalar-is-well-defined? ] — skip scalar where perl warns
+# (split) or it is unspecified (sort).  list+count are always well-defined.
+my @ctx_exprs = (
+    [ '@a',                    'my @a = (10,20,30);',          1 ],
+    [ 'reverse @a',            'my @a = (1,2,3);',             1 ],
+    [ 'reverse "abc"',         '',                             1 ],
+    [ 'map { $_*2 } @a',       'my @a = (1,2,3);',             1 ],
+    [ 'map { ($_,$_) } @a',    'my @a = (1,2);',               1 ],
+    [ 'grep { $_ > 1 } @a',    'my @a = (1,2,3);',             1 ],
+    [ 'sort { $a <=> $b } @a', 'my @a = (3,1,2);',             0 ],
+    [ 'split /,/, $s',         'my $s = "a,b,c";',             0 ],
+    [ '(1,2,3)',               '',                             1 ],
+    [ '(10,20,30)[1,2]',       '',                             1 ],
+    [ '@a[0,2]',               'my @a = (5,6,7);',             1 ],
+    [ '@h{qw(a c)}',           'my %h = (a=>1,b=>2,c=>3);',    1 ],
+    [ 'sort keys %h',          'my %h = (b=>2,a=>1,c=>3);',    0 ],
+    [ '$s =~ /(\d)(\d)/',      'my $s = "42";',                1 ],
+    [ 'unpack("A1A1","xy")',   '',                             1 ],
+    [ '("x") x 3',             '',                             1 ],
+    [ 'wantarray ? "L" : defined(wantarray) ? "S" : "V"', '',  1 ],
+);
+for my $ce (@ctx_exprs) {
+    my ($expr, $pre, $scalar_ok) = @$ce;
+    add("ctx-list   $expr",  prog_list($expr, $pre));
+    add("ctx-count  $expr",  prog_count($expr, $pre));
+    add("ctx-scalar $expr",  prog_scalar($expr, $pre)) if $scalar_ok;
+}
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------

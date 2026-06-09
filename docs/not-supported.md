@@ -858,3 +858,37 @@ out of scope until needed. Full design + tiers: `docs/mro-plan.md`.
 > needed pieces per `docs/mro-plan.md` (DFS ordering, `set_mro`/`get_mro`,
 > `next::method`, …). The "brute force C3" stance holds only until a concrete case
 > proves it insufficient.
+
+---
+
+## `split` implicit LHS-arity limit (`my ($a,$b) = split …` / `() = split …`)
+
+**Perl behaviour:** When a `split` is *directly* the RHS of a list assignment,
+Perl passes the number of LHS lvalues **+ 1** as an implicit `LIMIT` to `split`,
+so it never produces more fields than the assignment can consume.  The visible
+consequence shows up only when the *cardinality* of the split is observed:
+
+```perl
+my $n = () = split /,/, "a,b,c";   # Perl: 1  (LHS has 0 scalars → LIMIT 1 →
+                                   #           the whole string is one field)
+```
+
+The ordinary value-producing forms are unaffected by the limit because the extra
+fields are either discarded (`my ($a,$b) = split …` keeps `$a`,`$b` regardless)
+or the LHS is an unbounded array (`my @a = split …` → LIMIT 0 = unlimited).
+
+**PCL behaviour:** `p-split` always splits fully (effectively `LIMIT 0`) and does
+not know the arity of the enclosing list assignment, so `() = split …` counts the
+*actual* field count (`3` above).  Every common case still matches Perl:
+`my ($a,$b) = split`, `my ($p,$q,@rest) = split`, `my @a = split`, and
+`scalar(my @t = split)` all agree (verified vs perl 5.40).
+
+**Rationale:** Implementing the optimization requires context-dependent `split`
+codegen — the generator would have to thread the enclosing list-assignment's
+lvalue count down to the `split` call as a `LIMIT`.  That is a pervasive
+calling-convention change for a single observable idiom (`() = split`, used to
+*count* fields) that real code writes as `scalar(@parts)` instead.  No CPAN
+module in scope depends on the field-count of a directly-assigned `split`.
+
+**Found by:** `tools/difftest-ops.pl` context axis (session 241) — `ctx-count
+split /,/, $s` → perl `[1]`, PCL `[3]`.  Logged as a deliberate divergence.
