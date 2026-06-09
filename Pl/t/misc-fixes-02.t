@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -123,3 +123,15 @@ test_cl('anon arrayref [ ] forces list context on contents (reverse in do-tail)'
     . ' sub f { return [ reverse @_ ] } my $t = "@{f(7,8,9)}";'
     . ' print "[$r][$d][$t]\n";',
     "[3 2 1][3 2 1][9 8 7]\n");
+
+# Postfix conditional whose condition starts with a parenthesised group followed
+# by an operator — `return X if (A) || (B)` — made PPI mislabel the leading `(A)`
+# as a Structure::Condition (its `if (...)` bracket type) instead of a
+# Structure::List, which PExpr's parse() did not handle ("unknown type
+# PPI::Structure::Condition" -> the whole sub failed to transpile).  Now a
+# Structure::Condition in expression position is parsed as a parenthesised expr,
+# like Structure::List.  Found in Math::BigInt via the CPAN test-suite survey.
+test_cl('postfix if with leading parenthesised condition (A) || (B)',
+    'sub f { my ($a,$b)=@_; return "yes" if ($a == 1) || ($b == 2); return "no" }'
+    . ' print "[", f(1,9), "][", f(9,2), "][", f(9,9), "]\n";',
+    "[yes][yes][no]\n");

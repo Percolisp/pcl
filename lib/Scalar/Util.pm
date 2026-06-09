@@ -10,7 +10,7 @@ use Exporter 'import';
 our @EXPORT_OK = qw(
     blessed reftype weaken isweak looks_like_number
     readonly tainted dualvar isdual isvstring openhandle
-    set_prototype
+    set_prototype refaddr unweaken
 );
 
 our $VERSION = '1.63';
@@ -54,5 +54,11 @@ sub isdual    { 0 }
 sub isvstring { 0 }
 sub openhandle { $_[0] }
 sub set_prototype { }
+
+# Not yet implemented in PCL — exported as dying stubs so `use Scalar::Util
+# qw(refaddr unweaken)` succeeds (the real Exporter hard-dies on a missing
+# export, which kills the whole importing file); only an actual CALL fails.
+sub refaddr  { die "Scalar::Util::refaddr is not yet implemented in PCL\n" }
+sub unweaken { die "Scalar::Util::unweaken is not yet implemented in PCL\n" }
 
 1;

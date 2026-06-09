@@ -12,6 +12,8 @@ our @EXPORT_OK = qw(
     shuffle uniq uniqstr uniqnum uniqint
     pairs unpairs pairkeys pairvalues pairfirst pairgrep pairmap
     head tail zip mesh
+    maxstr minstr reductions sample
+    zip_longest zip_shortest mesh_longest mesh_shortest
 );
 
 our $VERSION = "1.63";
@@ -209,5 +211,17 @@ sub zip {
 }
 
 sub mesh { zip(@_) }
+
+# Not yet implemented in PCL — exported as dying stubs so `use List::Util
+# qw(...)` succeeds (the real Exporter hard-dies on a missing export, which kills
+# the whole importing file); only an actual CALL fails.
+sub maxstr       { die "List::Util::maxstr is not yet implemented in PCL\n" }
+sub minstr       { die "List::Util::minstr is not yet implemented in PCL\n" }
+sub reductions   { die "List::Util::reductions is not yet implemented in PCL\n" }
+sub sample       { die "List::Util::sample is not yet implemented in PCL\n" }
+sub zip_longest  { die "List::Util::zip_longest is not yet implemented in PCL\n" }
+sub zip_shortest { die "List::Util::zip_shortest is not yet implemented in PCL\n" }
+sub mesh_longest { die "List::Util::mesh_longest is not yet implemented in PCL\n" }
+sub mesh_shortest{ die "List::Util::mesh_shortest is not yet implemented in PCL\n" }
 
 1;
