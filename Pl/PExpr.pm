@@ -390,6 +390,7 @@ sub parse {
   # as its argument (e.g. `defined *{$g}{CODE}` in Sub::Override) instead of just
   # the Cast '*'.  Without parens, handle_subcalls would otherwise orphan the
   # trailing {EXPR}{SLOT} blocks and the parse would fall through.
+  $self->_retag_braced_deref_subscript($e);
   $self->_precollapse_dyn_glob_slots($e);
   $self->handle_subcalls($e);
   say "parse: //////  After calling handle_subcalls, in param:"  if 1 & DEBUG;
@@ -1416,11 +1417,16 @@ sub parse {
     # the leftmost chained op in this run, then build a single flat chain node
     # covering all N terms and N-1 operators.
     if ($self->op_is_chained($op_info)) {
+      # Only operators of the SAME precedence chain together.  Perl parses
+      # `2 != 3 > 4` as `2 != (3 > 4)` (relational `>` is tighter than `!=`),
+      # NOT as a chain `(2 != 3) && (3 > 4)`.  Restrict the left-scan to ops
+      # whose precedence equals this op's precedence.
       my $left = $hi_ix;
       while ($left >= 2) {
         my $prev_op   = $e->[$left - 2];
         my $prev_info = $self->op_info($prev_op);
         last unless defined $prev_info && $self->op_is_chained($prev_info);
+        last unless $prev_info->{prec} == $op_info->{prec};
         $left -= 2;
       }
 
@@ -1737,6 +1743,33 @@ sub _extend_postfix_chain {
 # lets a preceding named unary (`defined *{$g}{CODE}` in Sub::Override) grab the
 # whole glob-slot as one argument.  The in-loop handler (~line 1234) still covers
 # the Block/Block form reached via later recursion.
+# PPI mis-tokenizes the subscript after a braced array/scalar deref: in
+# `${$ref}[idx]` and `@{$ref}[i,j]` the `[...]` arrives as a
+# PPI::Structure::Constructor (an anonymous-array literal) rather than a
+# PPI::Structure::Subscript — only because it follows a Block `}` rather than a
+# Symbol.  (The hash form `${$ref}{key}` is correctly a Subscript, which is why
+# it already works.)  Left alone, the Cast+Block+Constructor triple matches no
+# case in the main loop and the parse falls through to the "Missing case" die,
+# which degrades to a silent `undef`.  Re-tag the Constructor as a Subscript so
+# the existing Cast+Block+Subscript machinery (the same path `${$ref}{key}`
+# uses) handles it.  `%`-cast (KV array slice `%{$ref}[i]`) and `*`-cast (glob)
+# are left as Constructors — they have their own dedicated handlers.
+sub _retag_braced_deref_subscript {
+  my ($self, $e) = @_;
+  for (my $i = 2; $i < scalar(@$e); $i++) {
+    my $term = $e->[$i];
+    next unless ref($term) eq 'PPI::Structure::Constructor'
+             && $term->start() eq '[';
+    my $block = $e->[$i-1];
+    my $cast  = $e->[$i-2];
+    next unless ref($block) eq 'PPI::Structure::Block'
+             && $block->start() eq '{'
+             && ref($cast) eq 'PPI::Token::Cast'
+             && ($cast->content() eq '$' || $cast->content() eq '@');
+    bless $term, 'PPI::Structure::Subscript';   # correct PPI's misclassification
+  }
+}
+
 sub _precollapse_dyn_glob_slots {
   my ($self, $e) = @_;
   for (my $i = 2; $i < scalar(@$e); $i++) {

@@ -101,7 +101,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:p-use #:p-require #:p-require-parent #:p-require-file
+   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file
    ;; Functions
    #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
@@ -157,7 +157,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-sub #:p-declare-sub
+   #:p-defpackage #:p-sub #:p-args-body #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
@@ -356,6 +356,16 @@
                         (*pcl-caller-wantarray* *wantarray*))
                    (catch :p-return
                      ,@body))))))))
+
+(defmacro p-args-body (&body body)
+  "Standard named-sub prologue emitted by the code generator: bind Perl's @_
+   from the &rest %_args captured by the enclosing p-sub lambda list, then run
+   BODY.  Both @_ and %_args are symbols exported from :pcl and inherited into
+   every generated user package, so `(p-sub NAME (&rest %_args) (p-args-body …))`
+   binds and reads the SAME symbols here regardless of *package* — no
+   expansion-time package resolution needed."
+  `(let ((@_ (p-flatten-args %_args)))
+     ,@body))
 
 ;;; p-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
@@ -3994,27 +4004,36 @@
   "True if x is a floating-point NaN."
   (and (floatp x) (sb-ext:float-nan-p x)))
 
+(defun p-bool (x)
+  "Map a CL boolean to a Perl boolean scalar: true → 1, false → \"\".
+   Perl comparison operators return 1 for true and the empty string (which is
+   *defined*) for false — NOT undef.  This matters for `defined(2==3)` (true)
+   and `(2==3) // 4` (yields \"\", not 4)."
+  (if x 1 ""))
+
 (defmacro %def-overloaded-cmp (name op-str fallback-op cl-test nan-result)
   `(defun ,name (a b)
-     ,(format nil "Perl ~A with use overload dispatch" op-str)
-     ;; use overload: check op-specific handler, then fallback to <=> or cmp
-     (let ((ha (p-find-overload a ,op-str)))
-       (if ha (p-true-p (p-call-overload ha a b nil))
-           (let ((hb (p-find-overload b ,op-str)))
-             (if hb (p-true-p (p-call-overload hb b a t))
-                 ;; use overload fallback: derive from three-way if available
-                 (let ((fa (p-find-overload a ,fallback-op))
-                       (fb (p-find-overload b ,fallback-op)))
-                   (if (or fa fb)
-                       (,cl-test (to-number (if fa
-                                                (p-call-overload fa a b nil)
-                                                (p-call-overload fb b a t)))
-                                 0)
-                       ;; IEEE 754: any comparison with NaN → nan-result
-                       (let ((na (to-number a)) (nb (to-number b)))
-                         (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
-                             ,nan-result
-                             (,cl-test na nb)))))))))))
+     ,(format nil "Perl ~A with use overload dispatch (returns 1 / \"\")" op-str)
+     ;; use overload: check op-specific handler, then fallback to <=> or cmp.
+     ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
+     (p-bool
+      (let ((ha (p-find-overload a ,op-str)))
+        (if ha (p-true-p (p-call-overload ha a b nil))
+            (let ((hb (p-find-overload b ,op-str)))
+              (if hb (p-true-p (p-call-overload hb b a t))
+                  ;; use overload fallback: derive from three-way if available
+                  (let ((fa (p-find-overload a ,fallback-op))
+                        (fb (p-find-overload b ,fallback-op)))
+                    (if (or fa fb)
+                        (,cl-test (to-number (if fa
+                                                 (p-call-overload fa a b nil)
+                                                 (p-call-overload fb b a t)))
+                                  0)
+                        ;; IEEE 754: any comparison with NaN → nan-result
+                        (let ((na (to-number a)) (nb (to-number b)))
+                          (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
+                              ,nan-result
+                              (,cl-test na nb))))))))))))
 
 (%def-overloaded-cmp p-==  "=="  "<=>"  =   nil)   ; NaN==NaN → false
 (%def-overloaded-cmp p-!=  "!="  "<=>"  /=  t)     ; NaN!=NaN → true
@@ -4252,24 +4271,24 @@
 ;;; These are distinct because str-test takes strings, cmp-test takes numbers.
 (defmacro %def-overloaded-str-cmp (name op-str str-test cmp-test)
   `(defun ,name (a b)
-     ,(format nil "Perl ~A with use overload dispatch" op-str)
-     ;; use overload: check op-specific handler, then fallback to cmp
-     (let ((ha (p-find-overload a ,op-str)))
-       (if ha (p-true-p (p-call-overload ha a b nil))
-           (let ((hb (p-find-overload b ,op-str)))
-             (if hb (p-true-p (p-call-overload hb b a t))
-                 (let ((fa (p-find-overload a "cmp"))
-                       (fb (p-find-overload b "cmp")))
-                   (if (or fa fb)
-                       ;; use overload fallback: cmp returns -1/0/1, test against 0
-                       (,cmp-test (to-number (if fa
-                                                 (p-call-overload fa a b nil)
-                                                 (p-call-overload fb b a t)))
-                                  0)
-                       ;; No overload: direct string comparison
-                       ;; Wrap in (if ... t nil) — CL string predicates may return
-                       ;; a position number (not T), and 0 is falsy in Perl.
-                       (if (,str-test (to-string a) (to-string b)) t nil)))))))))
+     ,(format nil "Perl ~A with use overload dispatch (returns 1 / \"\")" op-str)
+     ;; use overload: check op-specific handler, then fallback to cmp.
+     ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
+     (p-bool
+      (let ((ha (p-find-overload a ,op-str)))
+        (if ha (p-true-p (p-call-overload ha a b nil))
+            (let ((hb (p-find-overload b ,op-str)))
+              (if hb (p-true-p (p-call-overload hb b a t))
+                  (let ((fa (p-find-overload a "cmp"))
+                        (fb (p-find-overload b "cmp")))
+                    (if (or fa fb)
+                        ;; use overload fallback: cmp returns -1/0/1, test against 0
+                        (,cmp-test (to-number (if fa
+                                                  (p-call-overload fa a b nil)
+                                                  (p-call-overload fb b a t)))
+                                   0)
+                        ;; No overload: direct string comparison
+                        (,str-test (to-string a) (to-string b))))))))))) ; t/nil → p-bool
 
 (%def-overloaded-str-cmp p-str-eq  "eq"  string=   =)
 (%def-overloaded-str-cmp p-str-ne  "ne"  string/=  /=)
@@ -4295,11 +4314,20 @@
 (defun cmp-op-to-fn (op)
   "Convert comparison operator symbol to p- function symbol.
    Handles both raw symbols and quoted forms.
-   e.g., < -> p-<, (quote <) -> p-<, eq -> p-eq"
-  (let ((sym (if (and (consp op) (eq (car op) 'quote))
-                 (cadr op)  ; extract symbol from (quote sym)
-                 op)))
-    (intern (format nil "P-~A" sym) :pcl)))
+   e.g., < -> p-<, (quote <) -> p-<, eq -> p-str-eq"
+  (let* ((sym (if (and (consp op) (eq (car op) 'quote))
+                  (cadr op)  ; extract symbol from (quote sym)
+                  op))
+         (name (string-downcase (symbol-name sym))))
+    ;; String comparison operators map to the p-str-* family, not p-<name>.
+    (cond ((string= name "eq")  'p-str-eq)
+          ((string= name "ne")  'p-str-ne)
+          ((string= name "lt")  'p-str-lt)
+          ((string= name "gt")  'p-str-gt)
+          ((string= name "le")  'p-str-le)
+          ((string= name "ge")  'p-str-ge)
+          ((string= name "cmp") 'p-str-cmp)
+          (t (intern (format nil "P-~A" sym) :pcl)))))
 
 (defun chain-cmp-expand (prev ops-and-terms)
   "Recursively expand a chained comparison.
@@ -4412,23 +4440,28 @@
                (if (minusp d) #x-8000000000000000 #xFFFFFFFFFFFFFFFF))
               (t (truncate d))))))
 
+(defun %pcl-to-u64 (n)
+  "Coerce a number to its unsigned 64-bit value — Perl's bitwise & | ^ ~ treat
+   their integer operands as unsigned 64-bit, so a negative operand wraps."
+  (logand (%pcl-to-integer n) #xFFFFFFFFFFFFFFFF))
+
 (defun p-bit-and (a b)
-  "Perl bitwise AND — string (char-by-char, truncates) or numeric"
-  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+  "Perl bitwise AND — string (char-by-char, truncates) or numeric (unsigned 64-bit)"
+  (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
       (p-string-bit-op a b #'logand t)
-      (logand (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
+      (logand (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b)))))
 
 (defun p-bit-or (a b)
-  "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric"
-  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+  "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
+  (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
       (p-string-bit-op a b #'logior nil)
-      (logior (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
+      (logior (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b)))))
 
 (defun p-bit-xor (a b)
-  "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric"
-  (if (or (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+  "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
+  (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
       (p-string-bit-op a b #'logxor nil)
-      (logxor (%pcl-to-integer (to-number a)) (%pcl-to-integer (to-number b)))))
+      (logxor (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b)))))
 
 (defun p-bit-not (a)
   "Perl bitwise NOT - string NOT if non-numeric string, integer NOT otherwise"
