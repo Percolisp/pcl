@@ -2803,14 +2803,34 @@ sub _process_bare_block {
 
 
 # Process if/elsif/else statement
+# Build a source-echo comment for a compound statement, collapsing each
+# top-level brace block to "{ ... }".  The block's inner statements get their
+# own ";; ..." comments when we recurse into them, so echoing the whole body in
+# the header comment just duplicates it (and produces an absurdly long line).
+# Conditions/lists (PPI::Structure::Condition / ::List / ::For) are kept
+# verbatim, so hash subscripts and string braces inside them survive intact.
+sub _compound_comment {
+  my ($self, $stmt) = @_;
+  my $code = '';
+  for my $child ($stmt->children) {
+    if (ref($child) eq 'PPI::Structure::Block') {
+      $code .= '{ ... }';
+    }
+    else {
+      $code .= $child->content;
+    }
+  }
+  $code =~ s/\n/ /g;
+  return $code;
+}
+
 sub _process_if_statement {
   my $self     = shift;
   my $stmt     = shift;
   my $keyword  = shift;  # 'if' or 'unless'
 
-  # Emit the original Perl as comment
-  my $perl_code = $stmt->content;
-  $perl_code =~ s/\n/ /g;
+  # Emit the original Perl as comment (body collapsed; see _compound_comment)
+  my $perl_code = $self->_compound_comment($stmt);
   $self->_emit(";; $perl_code");
 
   # Collect the if/elsif/else chain and conditions for declaration scanning
@@ -4536,8 +4556,7 @@ sub _process_while_statement {
   my $keyword = shift;
   my $label   = shift;  # Optional loop label
 
-  my $perl_code = $stmt->content;
-  $perl_code =~ s/\n/ /g;
+  my $perl_code = $self->_compound_comment($stmt);
   $self->_emit(";; $perl_code");
 
   # Find condition, block, and optional continue block
@@ -4643,8 +4662,7 @@ sub _process_for_statement {
   my $keyword = shift;
   my $label   = shift;  # Optional loop label
 
-  my $perl_code = $stmt->content;
-  $perl_code =~ s/\n/ /g;
+  my $perl_code = $self->_compound_comment($stmt);
   $self->_emit(";; $perl_code");
 
   # Check for C-style for vs foreach style, and detect continue block
@@ -6442,10 +6460,14 @@ sub _parse_expression_internal {
     # Annotate AST with context information (scalar/list)
     $expr_o->annotate_contexts($node_id, $context);
 
+    # indent_level 0: generate() prepends only the form's own indentation, and
+    # _emit re-applies the caller's base indent.  Passing $self->indent_level
+    # here double-counted it, pushing each emitted form far right of its ;;
+    # comment.  All other ExprToCL callsites already use 0.
     my $gen = Pl::ExprToCL->new(
       expr_o       => $expr_o,
       environment  => $self->environment,
-      indent_level => $self->indent_level,
+      indent_level => 0,
     );
 
     $result = $gen->generate($node_id);
