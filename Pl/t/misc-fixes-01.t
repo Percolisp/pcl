@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 122;
+plan tests => 133;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -944,3 +944,115 @@ test_cl('strict/warnings/feature ->import are no-op methods (no $^H crash)',
     . ' strict->unimport; 1 }'
     . ' package main; R->import; print "ok\n";',
     "ok\n");
+
+# --- dynamic typeglob slot with a VARIABLE slot name: *{$glob}{$var} ---
+# Moo's _Utils glob-copy loop does `*{$old}{$type}` with $type holding
+# SCALAR/HASH/ARRAY/IO at runtime. The glob-slot parser only accepted literal
+# barewords ({CODE}/{SCALAR}); a variable slot was a PARSE ERROR. Now the slot
+# can be a scalar var, evaluated at runtime (p-glob-slot stringifies it).
+# *F::x has both a SCALAR ($x=5) and CODE (sub x) slot; ARRAY/HASH/IO are empty.
+test_cl('*{$glob}{$var} dynamic typeglob slot with variable slot name',
+    'package F; our $x=5; sub x {1} package main; my $g=\*F::x;'
+    . ' print join("", map { defined(*{$g}{$_})?1:0 } qw(SCALAR ARRAY HASH CODE IO)), "\n";',
+    "10010\n");
+
+# The slot may be a full expression (not just a bareword/scalar): Perl evaluates
+# it, except a lone bareword which autoquotes. Exercise concat + a function call
+# on both the *{$g}{...} and static *F::x{...} forms. CODE exists (sub x); ARRAY
+# does not (and, unlike SCALAR, is not autovivified by either Perl or PCL).
+test_cl('*{$glob}{EXPR} typeglob slot with a computed expression',
+    'package F; sub x {1} package main; my $g=\*F::x; my $s="DE";'
+    . ' print( (defined(*{$g}{"CO".$s})?1:0), (defined(*{$g}{uc("code")})?1:0),'
+    . '        (defined(*F::x{"AR"."RAY"})?1:0), "\n");',
+    "110\n");
+
+# --- caller(N) in list context returns the full frame, including [3] subname ---
+# p-caller returned (values-list ...) whose extra CL values got truncated to one
+# by the calling form, so `my @c = caller(N)` had 1 element and (caller(N))[3]
+# was undef (broke Exporter::as_heavy). Now it returns a list-vector, and [3]
+# (the subroutine name) comes from a dedicated stack since SBCL can't name our
+# subs. (PCL upcases sub names, so compare case-insensitively.)
+test_cl('caller(N) list context: full frame + [3] subroutine name',
+    'package Foo; sub inner { my @c=caller(1);'
+    . ' print( (scalar(@c)>=4 && $c[0] eq "main" && uc($c[3]) eq "FOO::OUTER")'
+    . '        ? "ok" : "no:@c", "\n"); }'
+    . ' sub outer { inner() } package main; Foo::outer();',
+    "ok\n");
+
+# --- symbolic HASH/ARRAY dereference of a (multi-segment) package name ---
+# \%{"Pkg::Name"} must resolve to the package %hash. p-cast-% had no symbolic-ref
+# case (only the "Pkg::" stash form), so a plain string fell through and \%{...}
+# backslashed the *string* -> ref SCALAR, not HASH. This is exactly what
+# Exporter::Heavy uses to export a %hash (*{...} = \%{"$pkg\::$name"}), so e.g.
+# `use Config` left %Config empty. p-cast-@ already had the array case.
+test_cl('symbolic \%{"Pkg::Name"} / \@{...} deref resolves the package variable',
+    'package Src::S; our %H=(a=>1,b=>2); our @A=(10,20); package main;'
+    . ' no strict "refs"; my $hr=\%{"Src::S::H"}; my $ar=\@{"Src::S::A"};'
+    . ' print ref($hr), ":", join(",",map {"$_=$hr->{$_}"} sort keys %$hr),'
+    . '       " ", ref($ar), ":", join(",", @$ar), "\n";',
+    "HASH:a=1,b=2 ARRAY:10,20\n");
+
+# --- a bare `package NAME;` statement inside a BEGIN block is block-scoped ---
+# Perl reverts the package when the BEGIN block ends. PCL leaked the package
+# switch past the block, so a later sub's unqualified calls resolved against the
+# inner package (e.g. Moo's Method::Generate::Accessor uses
+# `BEGIN { package ...::_Generated; ... }` then calls imported subs after).
+test_cl('package NAME; inside BEGIN block is scoped to the block',
+    'package Outer; sub helper { "HELP:".$_[0] }'
+    . ' BEGIN { package Outer::Inner; our $x = 1; }'
+    . ' sub run { helper("hi") } package main; print Outer::run(), "\n";',
+    "HELP:hi\n");
+
+# --- $obj->${ EXPR }(args): method name/coderef is a scalar deref ---------
+# Moo::Object dispatches via $self->${\(...generate_method...)}(@_), where the
+# deref yields either a method-name string or a coderef. PCL emitted a PARSE
+# ERROR ("unknown node ... Cast") for the ${...} method position. Both the
+# name and coderef forms must dispatch.
+test_cl('$obj->${\ $name }(args) dispatches by computed method name',
+    'package Foo; sub new { bless {}, shift } sub greet { shift; "hi @_" }'
+    . ' sub run { my $s=shift; my $n="greet"; $s->${\ $n }("world") }'
+    . ' package main; print Foo->new->run, "\n";',
+    "hi world\n");
+
+test_cl('$obj->${\ $code }(args) dispatches by computed coderef',
+    'package Foo; sub new { bless {}, shift }'
+    . ' sub run { my $s=shift; my $c=sub { shift; "C:@_" }; $s->${\ $c }("a","b") }'
+    . ' package main; print Foo->new->run, "\n";',
+    "C:a b\n");
+
+# --- nested ternary in the TRUE branch without parens: A ? B ? C : D : E -----
+# Right-assoc selects the rightmost `?` as hi_ix; its false-branch scan must stop
+# at the enclosing `:` (same precedence 15), else it swallowed `D : E` and the
+# whole `my $x = ...` failed to parse. Found via Moo's generated constructor
+# (`scalar @_==1 ? ref $_[0] eq 'HASH' ? {...} : die : @_%2 ? die : {@_}`).
+# Our perl-tests/cond.t never exercised the ternary operator at all.
+test_cl('nested ternary in true branch (no parens) parses and evaluates',
+    'sub a { my ($x,$y)=@_; return $x ? $y ? "TY" : "TN" : "F"; }'
+    . ' print join(",", a(1,1), a(1,0), a(0,1)), "\n";',
+    "TY,TN,F\n");
+
+test_cl('nested ternary returns a hashref from the deep else branch',
+    'sub mk { my $args = scalar @_ == 1 ? ref $_[0] eq "HASH" ? "h" : "s"'
+    . '                                 : @_ % 2 ? "odd" : { @_ }; return $args; }'
+    . ' my $r = mk(p=>1, q=>2); print ref($r), ":", join(",", map {"$_=$r->{$_}"} sort keys %$r), "\n";',
+    "HASH:p=1,q=2\n");
+
+# --- CORE::<builtin> behaves exactly like the builtin --------------------------
+# CORE::foo names Perl's builtin (bypassing overrides). PCL must give it the
+# builtin's param spec: CORE::shift()/CORE::shift default to @_, and CORE::ref
+# (no parens) is a named unary, not a bareword string. Moo's quote_sub'd code
+# uses CORE::shift()/CORE::ref/CORE::join throughout.
+test_cl('CORE::shift() and CORE::shift default to @_',
+    'sub f { my $a = CORE::shift(); my $b = CORE::shift; return "$a|$b"; }'
+    . ' print f("x","y"), "\n";',
+    "x|y\n");
+
+test_cl('CORE::ref without parens is a named unary',
+    'my $h = {}; my $r = CORE::ref $h eq "HASH" ? "yes" : "no"; print $r, "\n";',
+    "yes\n");
+
+# NB: bug #4 this session — caller() inside an imported module's import()
+# reporting the use-site package in ORIGINAL case for a single-segment package
+# (Point not POINT) — is validated through the real `use` path (needs a module
+# on disk, which this single-file harness can't set up) and by Moo loading. The
+# orig-case name is now registered in the package preamble (before `use` runs).

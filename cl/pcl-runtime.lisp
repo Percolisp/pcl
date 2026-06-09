@@ -143,7 +143,8 @@
    ;; Call depth tracking (for p-caller at top level)
    #:*pcl-sub-call-depth*
    ;; Current/caller package tracking (for caller() package, __PACKAGE__-at-runtime)
-   #:*pcl-current-package* #:*pcl-caller-pkg-stack* #:p-set-current-package
+   #:*pcl-current-package* #:*pcl-caller-pkg-stack* #:*pcl-caller-subname-stack*
+   #:p-set-current-package #:p-register-pkg-name
    ;; END blocks
    #:*end-blocks*
    ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
@@ -215,9 +216,27 @@
 ;;; package from which the Nth frame's sub was called.
 (defvar *pcl-caller-pkg-stack* nil)
 
+;;; Parallel stack of the entered sub's fully-qualified Perl name ("Pkg::name").
+;;; p-caller(N) reads (nth N ...) for (caller(N))[3].  SBCL can't name our subs —
+;;; they are anonymous lambdas installed via (setf (symbol-function ...)) — so the
+;;; name is recorded here at p-sub entry instead of recovered from the backtrace.
+(defvar *pcl-caller-subname-stack* nil)
+
 ;;; Maps a CL package-name string (e.g. "FOO") to the original-case Perl name
 ;;; (e.g. "Foo").  Populated by p-set-current-package as `package` statements run.
 (defvar *pcl-pkg-name-map* (make-hash-table :test 'equal))
+
+(defun p-register-pkg-name (pkg perl-name)
+  "Record the original-case PERL-NAME for CL package PKG in *pcl-pkg-name-map*
+   WITHOUT changing the lexically-current package.  Emitted in each package's
+   preamble (before its `use` statements) so that caller()/__PACKAGE__ inside an
+   imported module's import() resolve the use-site package to its original case
+   — p-set-current-package runs only in execution order, which is AFTER the use
+   statements, too late for the name-map lookup during import."
+  (let ((p (ignore-errors (find-package pkg))))
+    (when p
+      (setf (gethash (package-name p) *pcl-pkg-name-map*) perl-name)))
+  perl-name)
 
 (defun p-set-current-package (pkg perl-name)
   "Record the original-case PERL-NAME for CL package PKG (a package designator
@@ -236,6 +255,19 @@
         (cond ((null n) "main")
               ((string= n "MAIN") "main")
               (t n)))))
+
+(defun %p-sub-perl-name (name)
+  "Fully-qualified Perl name 'Pkg::subname' for a PCL sub symbol (Pkg::PL-SUBNAME).
+   Strips the runtime's PL- prefix and uses the package's original-case Perl name.
+   Recorded on *pcl-caller-subname-stack* at p-sub entry for (caller(N))[3]."
+  (if (and name (symbolp name))
+      (let* ((sname (symbol-name name))
+             (bare  (if (and (>= (length sname) 3)
+                             (string= (subseq sname 0 3) "PL-"))
+                        (subseq sname 3)
+                        sname)))
+        (concatenate 'string (pcl-pkg-perl-name (symbol-package name)) "::" bare))
+      (and name (format nil "~A" name))))
 
 ;;; p-defpackage: Create/update a Perl package namespace.
 ;;; Wraps defpackage in eval-when so it runs at compile time (needed so that
@@ -316,6 +348,8 @@
                (lambda ,params
                  (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package*
                                                       *pcl-caller-pkg-stack*))
+                        (*pcl-caller-subname-stack* (cons (%p-sub-perl-name ',name)
+                                                          *pcl-caller-subname-stack*))
                         (*pcl-current-package* (pcl-pkg-perl-name
                                                 (symbol-package ',name)))
                         (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
@@ -7757,9 +7791,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                     ((null import-args) nil)
                     (t (list import-args)))))
     (if (%p-module-can-import-p module-name)
-        ;; Foo->import(@args).  :default = called with no args.
-        (apply #'p-method-call module-name "import"
-               (if (eq args :default) nil args))
+        ;; Foo->import(@args).  :default = called with no args.  Perl calls import
+        ;; with caller = the package containing the `use`; TO-PKG is exactly that
+        ;; lexical package (the loader's *package* at the use site).  Bind
+        ;; *pcl-current-package* to it so caller() inside import resolves correctly
+        ;; — *pcl-current-package* otherwise lags during nested module loads (the
+        ;; runtime p-set-current-package is emitted after the package's use stmts).
+        (let ((*pcl-current-package* (pcl-pkg-perl-name to-pkg)))
+          (apply #'p-method-call module-name "import"
+                 (if (eq args :default) nil args)))
         ;; @EXPORT-copy convenience: names are strings; :default = default @EXPORT.
         (p-import-exports module-name to-pkg
                           (if (eq args :default) nil (mapcar #'to-string args))))))
@@ -8439,6 +8479,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (>= (length v) 2)
             (string= (subseq v (- (length v) 2)) "::"))
        (p-stash (subseq v 0 (- (length v) 2))))
+      ;; Symbolic reference: %{"pkg::var"} — look up/create the package hash.
+      ;; Mirrors p-cast-@'s %p-symref-array; without this a string fell through to
+      ;; (t v) and \%{"Pkg::H"} backslashed the *string* (ref → SCALAR, not HASH),
+      ;; which broke Exporter::Heavy's `*{...}=\%{"$pkg\::$name"}` %hash export.
+      ((stringp v) (%p-symref-hash v))
       (t v))))
 
 (defun %p-symref-box (name-str)
@@ -8503,6 +8548,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  (vectorp (symbol-value sym))
                  (not (stringp (symbol-value sym))))
       (setf (symbol-value sym) (make-array 0 :adjustable t :fill-pointer 0)))
+    (symbol-value sym)))
+
+(defun %p-symref-hash (name-str)
+  "Resolve symbolic hash reference NAME-STR (e.g. 'Config::Config') to the CL
+   hash-table.  Creates the package and the %VAR binding if they don't exist yet,
+   so assignment through a symbolic ref works: %{\"pkg::var\"} = (...).
+   Returns the hash-table."
+  (when (find #\Nul name-str) (return-from %p-symref-hash
+                                (make-hash-table :test 'equal)))
+  (let* ((pos (search "::" name-str :from-end t))
+         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
+         ;; match its CL package |Foo::Bar|; single-seg is upcased.
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
+         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
+         (pkg (if pkg-str
+                  (or (find-package pkg-str)
+                      (make-package pkg-str :use '(:cl :pcl)))
+                  *package*))
+         (sym-name (concatenate 'string "%" (string-upcase var-str)))
+         (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
+    (proclaim `(special ,sym))
+    (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
+      (setf (symbol-value sym) (make-hash-table :test 'equal)))
     (symbol-value sym)))
 
 (defun p-cast-$ (val)
@@ -8931,7 +8999,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   "Read *foo{SLOT}."
   (let* ((pkg    (p-typeglob-package glob))
          (uname  (p-typeglob-name glob))
-         (slot-s (string-upcase (stringify-value slot))))
+         ;; SLOT may be a literal string ("CODE") or a boxed scalar ($type) when
+         ;; written as *{$glob}{$var}; to-string unboxes the latter.
+         (slot-s (string-upcase (to-string slot))))
     (flet ((find-sym (prefix)
              ;; Use find-symbol (not intern) to locate inherited symbols,
              ;; e.g. @_ is pcl::@_ inherited into main — intern would create main::@_.
@@ -9414,17 +9484,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when (>= lvl (length *pcl-caller-pkg-stack*))
       (return-from p-caller nil))
     (setf level lvl))
-  (let ((caller-package (nth level *pcl-caller-pkg-stack*))
-        (frame-info nil)
-        (current-level 0)
-        (target-level (+ level 2)))  ; Skip p-caller itself and its caller
-    ;; Walk the backtrace to find the target frame
+  (let* ((caller-package (nth level *pcl-caller-pkg-stack*))
+         ;; Subroutine name (caller(N))[3] comes from the dedicated subname stack;
+         ;; SBCL's backtrace can't name our subs (anonymous lambdas).
+         (caller-subname (or (nth level *pcl-caller-subname-stack*) "(unknown)"))
+         (frame-info nil)
+         (current-level 0)
+         (target-level (+ level 2)))  ; Skip p-caller itself and its caller
+    ;; Walk the backtrace for best-effort filename/line (documented unreliable).
     (sb-debug:map-backtrace
      (lambda (frame)
        (when (= current-level target-level)
-         (let* ((debug-fun (sb-di:frame-debug-fun frame))
-                (name (sb-di:debug-fun-name debug-fun))
-                (code-loc (sb-di:frame-code-location frame)))
+         (let ((code-loc (sb-di:frame-code-location frame)))
            (setf frame-info
                  (list caller-package  ; Package of the calling frame (from stack)
                        (or (ignore-errors
@@ -9434,19 +9505,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                        (or (ignore-errors
                              (sb-di:code-location-toplevel-form-offset code-loc))
                            0)  ; Line number approximation
-                       (if (and name (symbolp name))
-                           (symbol-name name)
-                           (format nil "~A" name))))))  ; Subroutine name
+                       caller-subname))))
        (incf current-level)
        ;; Return nil to continue, non-nil would stop
        nil))
-    ;; The package always comes from the caller stack (above); if the backtrace
-    ;; walk couldn't locate a matching frame for filename/line/subname, still
-    ;; report the package with placeholder location info.
+    ;; The package/subname always come from the caller stacks (above); if the
+    ;; backtrace walk couldn't locate a matching frame for filename/line, still
+    ;; report package + subname with placeholder location info.
     (unless frame-info
-      (setf frame-info (list caller-package "-" 0 "(unknown)")))
+      (setf frame-info (list caller-package "-" 0 caller-subname)))
     (if (eq *wantarray* t)
-        (values-list frame-info)
+        ;; List context: Perl returns (package, filename, line, subname, ...).
+        ;; Return a PCL list-vector (like p-localtime) — NOT (values-list ...),
+        ;; whose extra CL values get truncated to one by the calling form, which
+        ;; is why (caller(N))[3] (e.g. Exporter::as_heavy) used to read undef.
+        (make-array (length frame-info) :initial-contents frame-info
+                    :adjustable t :fill-pointer t)
         (first frame-info))))  ; Scalar context: just package
 
 (defun p-prototype (&optional ref)

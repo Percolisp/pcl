@@ -1871,6 +1871,10 @@ sub gen_methodcall {
   my $is_dynamic_method = 0;
   if (ref($method_node) eq 'PPI::Token::Symbol' && $method_node->content() =~ /^\$/) {
     $is_dynamic_method = 1;
+  } elsif ($self->expr_o->is_internal_node_type($method_node)) {
+    # Computed method name, e.g. $obj->${ EXPR }(...) — the method is the
+    # runtime value of an expression (a name string or a coderef).
+    $is_dynamic_method = 1;
   }
 
   # Rest are arguments
@@ -2430,6 +2434,12 @@ sub gen_glob_slot {
   my $kids    = shift;
 
   my $glob_cl   = $self->gen_node($kids->[0]);
+  # Computed slot {$type} / {EXPR}: the slot name is produced at runtime; the
+  # slot expression is child 1, and p-glob-slot stringifies + upcases the result.
+  if ($node->{slot_is_expr}) {
+    my $slot_cl = $self->gen_node($kids->[1]);
+    return "(p-glob-slot $glob_cl $slot_cl)";
+  }
   my $slot_name = uc($node->{slot_name} // 'SCALAR');
   return "(p-glob-slot $glob_cl \"$slot_name\")";
 }

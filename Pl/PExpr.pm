@@ -941,6 +941,31 @@ sub parse {
         splice @$e, $i, 3;
         $i--;
         next;
+      } elsif (ref($nxt) eq 'PPI::Token::Cast'
+               && $nxt->content() eq '$'
+               && ref($nxt_2) eq 'PPI::Structure::Block') {
+        # Case 1E: X->${ EXPR }(...) — method whose name (or coderef) is the
+        # scalar deref of EXPR.  e.g. Moo::Object's $self->${\(...)}(@_).
+        # Build the ${ EXPR } deref node as a (computed/dynamic) method, with
+        # optional trailing argument list (already a tree_val node).
+        my $pre_id  = $self->parse([$pre]);
+        my $meth_id = $self->parse([$nxt, $nxt_2]);  # ${ EXPR } scalar deref
+        my ($node, $id) = $self->make_node_insert('methodcall');
+        $self->add_child_to_node($id, $pre_id);   # Object
+        $self->add_child_to_node($id, $meth_id);  # Method (computed)
+        my $count  = 3;  # remove ->, Cast, Block
+        my $params = $e->[$i+3];
+        if ($params && $self->is_internal_node_type($params)
+            && $params->{type} eq 'tree_val') {
+          for my $kid_id (@{ $self->get_node_children($params->{id}) }) {
+            $self->add_child_to_node($id, $kid_id);
+          }
+          $count++;  # also consume the params node
+        }
+        $e->[$i-1] = $node;
+        splice @$e, $i, $count;
+        $i--;
+        next;
       } elsif ($self->is_word($nxt)) {
         # Case 1C: X->method (no parentheses)
         # Method call without arguments, e.g., $obj->DEBUG or $self->nodes
@@ -1239,14 +1264,9 @@ sub parse {
     # wrap it in a glob_slot node — same shape as the static *name{SLOT} below.
     if ($is_dyn_typeglob_slot) {
       my $glob_id = $self->parse([$e->[$i-2], $e->[$i-1]]);
-      my @blk_ch = grep { ref($_) !~ /Whitespace/ } $term->children();
-      if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
-        @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
-      }
-      my $slot_name = @blk_ch ? $blk_ch[0]->content() : 'SCALAR';
       my($node, $id) = $self->make_node_insert('glob_slot');
-      $node->{slot_name} = $slot_name;
       $self->add_child_to_node($id, $glob_id);
+      $self->_attach_glob_slot($id, $node, $term);
       $e->[$i-2] = $node;   # Replace Cast '*' position with node
       splice @$e, $i-1, 2;  # Remove Block(EXPR) and Block(SLOT)
       $i -= 2;
@@ -1257,15 +1277,10 @@ sub parse {
     # e.g., *_{ARRAY} -> (p-glob-slot (p-make-typeglob "main" "_") "ARRAY")
     if ($is_typeglob_slot) {
       my $glob_id = $self->parse([$pre]);
-      # Extract the slot name from the Block (single bareword inside)
-      my @blk_ch = grep { ref($_) !~ /Whitespace/ } $term->children();
-      if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
-        @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
-      }
-      my $slot_name = @blk_ch ? $blk_ch[0]->content() : 'SCALAR';
       my($node, $id) = $self->make_node_insert('glob_slot');
-      $node->{slot_name} = $slot_name;
       $self->add_child_to_node($id, $glob_id);
+      # Slot: literal bareword (*name{CODE}), scalar var, string, or expression.
+      $self->_attach_glob_slot($id, $node, $term);
       $e->[$i-1] = $node;
       splice @$e, $i, 1;
       $i--;
@@ -1491,11 +1506,17 @@ sub parse {
         }
       }
 
-      # Find false end: scan forward from : to find lower-prec operator
+      # Find false end: scan forward from : to find lower-prec operator, OR a
+      # ':' marking the boundary of an ENCLOSING ternary.  The latter matters
+      # for a nested ternary in the true branch: `A ? B ? C : D : E` reduces the
+      # inner `?` first (right-assoc picks the rightmost `?` as hi_ix), and its
+      # false branch (`D`) must stop at the outer `:` — which has the same prec
+      # 15, so a strict `prec < ternary_prec` test would wrongly swallow `D : E`.
       my $false_end = $#{$e};
       for (my $i = $colon_pos + 1; $i <= $#{$e}; $i++) {
+        my $tok_op = $self->is_token_operator($e->[$i]) // '';
         my $info = $self->op_info($e->[$i]);
-        if ($info && $info->{prec} < $ternary_prec) {
+        if ($tok_op eq ':' || ($info && $info->{prec} < $ternary_prec)) {
           $false_end = $i - 1;
           last;
         }
@@ -1706,20 +1727,6 @@ sub _extend_postfix_chain {
   return $end;
 }
 
-# Extract the slot name from a glob-slot block ({CODE} -> "CODE").  Mirrors the
-# inline extraction in the two glob_slot handlers; defaults to SCALAR if empty.
-sub _glob_slot_name_of {
-  my ($self, $block) = @_;
-  my @blk_ch = grep { ref($_) !~ /Whitespace/ } $block->children();
-  if (@blk_ch == 1 && $blk_ch[0]->isa('PPI::Statement')) {
-    @blk_ch = grep { ref($_) !~ /Whitespace/ } $blk_ch[0]->children();
-  }
-  return 'SCALAR' unless @blk_ch;
-  # Unwrap a quoted slot name ({"CODE"} from an autoquoted Subscript) to CODE.
-  return $blk_ch[0]->isa('PPI::Token::Quote')
-       ? $blk_ch[0]->string : $blk_ch[0]->content();
-}
-
 # Pre-pass (runs before handle_subcalls): collapse a dynamic typeglob-slot into a
 # single glob_slot node, for both spellings:
 #   *{EXPR}{SLOT}  — Cast('*') + Block('{EXPR}') + {SLOT}
@@ -1746,30 +1753,71 @@ sub _precollapse_dyn_glob_slots {
     next unless $name_ok;
     my $glob_id = $self->parse([$cast, $name]);
     my ($node, $id) = $self->make_node_insert('glob_slot');
-    $node->{slot_name} = $self->_glob_slot_name_of($term);
     $self->add_child_to_node($id, $glob_id);
+    $self->_attach_glob_slot($id, $node, $term);
     $e->[$i-2] = $node;     # replace Cast '*' position with the glob_slot node
     splice @$e, $i-1, 2;    # remove glob-name and SLOT tokens
     $i -= 2;
   }
 }
 
-# True if BLOCK is a single glob-slot bareword: {CODE}, {SCALAR}, {ARRAY}, ...
-# Used to recognize the SLOT block of *{EXPR}{SLOT} dynamic glob-slot access.
-sub _block_is_glob_slot {
+# Classify the SLOT block of a dynamic glob-slot access *{EXPR}{SLOT}.
+# Returns () if BLOCK is not a glob slot, otherwise a (kind, value) pair:
+#   ('lit',  "CODE")     — a literal bareword slot ({CODE}); Perl's glob-slot
+#                          autoquote means the bareword is the *string* "CODE",
+#                          not a call to sub CODE, so it is recorded verbatim.
+#   ('expr', \@tokens)   — anything else: a scalar var ({$type}), a string
+#                          ({"CODE"}), or a full expression ({uc $x}, {"CO".$s}).
+#                          Parsed and evaluated at runtime; p-glob-slot stringifies
+#                          the result.  Moo's glob-copy loop uses the {$type} form.
+# Only ever consulted in a `*`-cast-guarded context (every caller requires a
+# preceding Cast '*'), and a glob has no hash-element semantics, so accepting an
+# arbitrary expression here cannot make ordinary hash access $h{$k} mis-parse.
+sub _glob_slot_spec {
   my ($self, $block) = @_;
   my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
   if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
     @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
   }
-  return 0 unless @ch == 1;
-  # The slot can be a bareword Word ({CODE}) or — when it arrives as a hash
-  # Subscript, which cleanup_for_parsing autoquotes — a string literal ({"CODE"}).
-  my $name = $ch[0]->isa('PPI::Token::Word')  ? $ch[0]->content
-           : $ch[0]->isa('PPI::Token::Quote') ? $ch[0]->string
-           : return 0;
-  return $name =~ /^(?:SCALAR|ARRAY|HASH|CODE|IO|GLOB|NAME|PACKAGE|FORMAT)$/
-       ? 1 : 0;
+  return () unless @ch;
+  # Lone bareword slot — restricted to the known slot names so an unknown bareword
+  # isn't silently swallowed as a glob slot (it falls through to normal parsing).
+  if (@ch == 1 && $ch[0]->isa('PPI::Token::Word')) {
+    my $name = $ch[0]->content;
+    return $name =~ /^(?:SCALAR|ARRAY|HASH|CODE|IO|GLOB|NAME|PACKAGE|FORMAT)$/
+         ? ('lit', $name) : ();
+  }
+  # Everything else (scalar/string/expression) is computed at runtime.
+  return ('expr', \@ch);
+}
+
+# True if BLOCK is a glob slot: {CODE}, {SCALAR}, ..., {$type}, or any expression.
+# Used to recognize the SLOT block of *{EXPR}{SLOT} dynamic glob-slot access.
+sub _block_is_glob_slot {
+  my ($self, $block) = @_;
+  return scalar($self->_glob_slot_spec($block)) ? 1 : 0;
+}
+
+# Attach the SLOT of a glob_slot NODE (whose glob is already child 0) from BLOCK:
+# a literal bareword sets {slot_name}; anything else is parsed as a child
+# expression and flagged {slot_is_expr} (codegen reads child 1, runtime stringifies).
+sub _attach_glob_slot {
+  my ($self, $id, $node, $block) = @_;
+  my ($kind, $slot) = $self->_glob_slot_spec($block);
+  if ($kind eq 'expr') {
+    $self->add_child_to_node($id, $self->parse($slot));  # $slot = \@tokens
+    $node->{slot_is_expr} = 1;
+  } elsif ($kind eq 'lit') {
+    $node->{slot_name} = $slot;
+  } else {
+    # Unrecognized lone bareword (e.g. *name{SOMEWORD}): keep its text verbatim,
+    # defaulting to SCALAR for an empty block — matches the historical static
+    # *name{SLOT} behavior (p-glob-slot returns undef for an unknown slot).
+    my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children()
+        if @ch == 1 && $ch[0]->isa('PPI::Statement');
+    $node->{slot_name} = @ch ? $ch[0]->content() : 'SCALAR';
+  }
 }
 
 sub _block_is_hash_constructor {
@@ -1794,6 +1842,20 @@ sub handle_subcalls {
   my $in_arglist = shift // 0;  # 1 when called from parse_list (inside explicit parens)
 
   say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
+
+  # - - - Pre-pass: normalize CORE::<builtin> to the bare builtin name.
+  # `CORE::foo` explicitly names Perl's builtin (bypassing any override).  PCL
+  # has no overridable builtins, so CORE::foo == foo.  Rewriting the token here
+  # makes ALL downstream logic — named-unary detection, param specs, funcall
+  # recognition — treat it as the builtin (codegen already maps both to p-foo).
+  # Without this, `CORE::ref $x` / `CORE::shift` (no parens) parse as barewords.
+  for my $tok (@$e) {
+    next unless ref($tok) eq 'PPI::Token::Word';
+    my $c = $tok->content();
+    if ($c =~ /^CORE::(\w+)$/ && exists $self->known_no_of_params->{$1}) {
+      $tok->set_content($1);
+    }
+  }
 
   # - - - Pre-pass (BEFORE fun(list) loop): Handle general indirect object syntax
   # "METHOD ClassName ARGS" → ClassName->METHOD(ARGS)
@@ -3116,6 +3178,11 @@ sub add_implicit_default_param {
   my $node_id   = shift;
 
   return unless defined $func_name;
+
+  # CORE::foo explicitly names the builtin (bypassing any override), so it must
+  # inherit the builtin's param spec — e.g. CORE::shift()/CORE::pop() default to
+  # @_ just like shift/pop.  Strip the prefix for the spec lookup.
+  $func_name =~ s/^CORE:://;
 
   my $param_spec = $self->known_no_of_params->{$func_name};
   return unless defined $param_spec;

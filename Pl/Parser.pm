@@ -5516,6 +5516,11 @@ sub _emit_package_preamble {
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
     $self->_emit("(defclass $cl_class () ())");
+    # Register the original-case name eagerly (preamble is hoisted before any
+    # runtime code, so before this package's `use` statements run).  Needed so
+    # caller()/__PACKAGE__ inside an imported module's import() resolve this
+    # use-site package to its original case rather than the upcased CL name.
+    $self->_emit("(p-register-pkg-name $cl_pkg \"$pkg_name\")");
     $self->_emit("");
   });
   # Declare $a/$b as special in this package so sort comparator lambdas
@@ -5785,6 +5790,25 @@ sub _process_scheduled_block {
     return;
   }
 
+  # A bare `package NAME;` statement inside the block is block-scoped in Perl:
+  # the package reverts when the block ends.  Snapshot the package stack and
+  # bump _block_depth so a package switch inside emits inline (no new section)
+  # and gets fully-qualified sub names; after processing, revert any switch so
+  # both the CL reader package and the parser environment are restored.
+  my $saved_pkg_stack = [@{$self->environment->package_stack}];
+  my $prev_pkg        = $self->environment->current_package();
+  my $process = sub {
+    $self->_block_depth($self->_block_depth + 1);
+    $self->_process_children($block);
+    if ($self->environment->current_package() ne $prev_pkg) {
+      my $cl_prev = $self->_cl_pkg_designator($prev_pkg);
+      $self->_emit("(in-package $cl_prev)");
+      $self->_emit("(p-set-current-package $cl_prev \"$prev_pkg\")");
+    }
+    $self->_block_depth($self->_block_depth - 1);
+    $self->environment->package_stack($saved_pkg_stack);
+  };
+
   if ($type eq 'BEGIN') {
     # BEGIN blocks execute at compile time — route to definitions bucket.
     # NOT at :load-toplevel - BEGIN should only run once, not again when loading fasl.
@@ -5792,7 +5816,7 @@ sub _process_scheduled_block {
       $self->_emit(";; $perl_code");
       $self->_emit("(p-BEGIN");
       $self->indent_level($self->indent_level + 1);
-      $self->_process_children($block);
+      $process->();
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
       $self->_emit("");
@@ -5805,7 +5829,7 @@ sub _process_scheduled_block {
       $self->_emit(";; $perl_code");
       $self->_emit("(push (lambda ()");
       $self->indent_level($self->indent_level + 2);
-      $self->_process_children($block);
+      $process->();
       $self->indent_level($self->indent_level - 2);
       $self->_emit("  ) *end-blocks*)");
       $self->_emit("");
@@ -5817,7 +5841,7 @@ sub _process_scheduled_block {
       $self->_emit(";; $perl_code");
       $self->_emit("(p-CHECK");
       $self->indent_level($self->indent_level + 1);
-      $self->_process_children($block);
+      $process->();
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
       $self->_emit("");
@@ -5826,7 +5850,7 @@ sub _process_scheduled_block {
   elsif ($type eq 'INIT') {
     # INIT runs just before main code starts — keep in runtime (source-order sensitive)
     $self->_emit(";; $perl_code (runs at load time, before main)");
-    $self->_process_children($block);
+    $process->();
     $self->_emit("");
   }
   else {
