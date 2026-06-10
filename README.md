@@ -10,7 +10,7 @@ $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
 
 ### The hard part — Perl's runtime *magic*
 
-The features that make Perl notoriously hard to compile are its *magic*: tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and so resists any purely static translation. PCL handles it the only honest way: it **reproduces the same magic in the Common Lisp runtime**. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard precisely *because they must execute* simply execute — on the CL side, with the same semantics.
+Perl is famously hard — hard to parse, and harder still to run faithfully. The deepest difficulty is its *magic*: tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and so resists any purely static translation. PCL handles it the only honest way: it **reproduces the same magic in the Common Lisp runtime**. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard precisely *because they must execute* simply execute — on the CL side, with the same semantics.
 
 ### Why Common Lisp?
 
