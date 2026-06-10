@@ -8,6 +8,10 @@ $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
 2,4,6,8,10
 ```
 
+### The hard part — Perl's runtime *magic*
+
+The features that make Perl notoriously hard to compile are its *magic*: tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and so resists any purely static translation. PCL handles it the only honest way: it **reproduces the same magic in the Common Lisp runtime**. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard precisely *because they must execute* simply execute — on the CL side, with the same semantics.
+
 ### Why Common Lisp?
 
 Two reasons:
@@ -118,6 +122,8 @@ Generated code is intentionally readable: Perl variables keep their sigils (`$x`
 This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the end is visible on the horizon — and hopefully not a mirage.
 
 Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **69 files passing completely**. Several pure-Perl CPAN modules now run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process.
+
+As an aside - Claude suggested doing "fuzzing", between PCL and Perl. It generated different expressions and evaluated them in both environments. It was valuable, found both real bugs and formatting differences etc. (It seems to be a common procedure in compilers? I didn't know, if compilers were my job I would have another hobby. :-) )
 
 A small illustration of how it gets done: when implementing `pack()` in CL proved fiddly even with the original C source in hand, the trick was to write `pack` *in Perl* and let PCL translate it to CL. It worked — eating our own dog food.
 
