@@ -199,16 +199,42 @@ drop, and the file should shrink / lose boxes visibly.
 
 ---
 
-## §Priority order
+## §Unified implementation phases  *(single source of truth)*
 
-Independent, each shippable, all correctness-preserving:
+This is the **authoritative end-to-end ordering** for the whole rewrite — it
+merges this doc's perf items (#1–#12) with the analysis passes from
+`type-flow-and-codegen-plan.md` §(f) and the scoping/declarator work from its
+§(s). Where the two docs previously had separate ordering tables, *this* is the
+one that governs; the per-pass detail tables stay in their home docs but are
+sequenced here.
 
-1. **#2** `*wantarray*` wrap — biggest cleanup, removes a known regression (CLAUDE.md §8), touches almost every statement.
-2. **#1** dead boxes — per-call allocation win, isolated to `_with_declarations`.
-3. **#9 / #10 / #11** runtime declaims — minutes of work, broad effect, no codegen risk.
-4. **#3** fixed-arity lambda lists — biggest call-path win (kills rest-cons + arg vector per call).
-5. **#6 / #7 / #12** — loop counters, accumulator, overload de-cons (the compounding tier; pairs with the type-flow `repr` work).
-6. **#4 / #5 / #8** — `case` lowering, unused if-ret, constant folding (polish).
+The guiding property: **Phase 1 is free speed, Phase 2 is the foundation
+everything else needs, Phases 3–4 cash it in.** Every item is independently
+shippable and correctness-preserving — the specialization steps are opt-in
+narrowings from `box`, so an incomplete analysis loses an optimization, never
+correctness.
+
+| Phase | Goal | Work | Gate |
+|-------|------|------|------|
+| **0** *(done)* | Statement scoping for sub bodies | `BlockAnalyzer` + `_emit_scoped_block` (`two-phase-compiler.md`) | suite green |
+| **1** — free wins | Speed with **no architecture change** | Tier 3 runtime: **#9** optimize declaims, **#10** inline accessors, **#11** tighten `ftype`s, **#12** overload de-cons. Tier 1 codegen: **#2** kill spurious `*wantarray*` wraps, **#1** dead double-bound boxes. | `prove -j8` green; no fully-passing drop; microbench moves |
+| **2** — analysis spine | The foundation; **still 100 % boxed** | `VarAnnotator`: recursive scope stack for **all** blocks (retire sub-body-only), **decl-site keying** (§s.1), position-aware resolution (§s.3), closure capture across `is_sub` frames, `var_kind` + my/our/local/state classification (§s.6), rename decisions (§s.2). Retire `_vars_referenced_in_closures` + parse-time renames. *(= type-flow §(f) step 1, extended with declarators.)* | closure.t + shadowing cases (§s.4) + full suite green; **no repr yet** |
+| **3** — expression annotations | Retire the codegen hacks | `ASTAnnotator`: `returns_list` + `needs_wantarray` (delete `_child_is_list_expr` + the `p-=~` string-match), then `lvalue` (remove the `lvalue_context` flag). *(= type-flow §(f) steps 2–3.)* | `gen_tree_val` + aref/href lvalue tests |
+| **4** — representation | The payoff | Gate 1 `unboxable` → Gate 2 `repr` (string/number/any), from the use-site lists *(= type-flow §(f) steps 4–5)*. repr-dependent codegen: **#6** fixnum/integer loops, **#7** string accumulator. **#3** fixed-arity lambda lists (calling-convention change — safest now `@_`-usage is solid). Declarator-correct shapes (§s.7) for unboxable `my`/`state`. | north-stars **N1**/**N2**; new `Pl/t/type-flow-*.t`; no fully-passing drop |
+| **5** — polish + deferred | Cleanups & future tiers | **#4** `case` lowering, **#5** unused if-ret writes, **#8** constant folding. *Deferred:* A4 interprocedural return types (type-flow step 7), SSA flow-sensitivity (step 8). | per-item tests |
+
+**Dependencies / parallelism:**
+- **Phase 1 and Phase 2 are independent** — Phase 1 fixes existing emission and
+  the runtime; Phase 2 rebuilds the analysis. They can proceed in parallel.
+- Phase 3 depends on Phase 2's OpcodeTree-metadata infrastructure.
+- Phase 4 depends on Phase 2 (use-site lists) and is *amplified* by Phase 1 #12:
+  once scalars unbox, the runtime's `(when (p-box-p val) …)` fast paths finally
+  fire (see "compounding effect" above).
+
+**Cross-cutting rule for every phase:** end on a clean `prove -j8 Pl/t/` **and** a
+`perl-tests/` sweep with **no drop in fully-passing count** (the guard-the-count
+rule) **and** a `cl/pack-impl.pl` → `cl/pcl-pack.lisp` rebuild as a codegen sanity
+check (pass count must not drop; boxes/gaps should visibly shrink).
 
 Do **not** sketch the remaining items further before implementing — the two
 north-stars (N1, N2) are the contract; everything else is specified enough to

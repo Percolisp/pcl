@@ -812,24 +812,28 @@ first hit is the binding; whether the walk crossed an `is_sub` frame sets
 
 ---
 
-## (f) Implementation order (extends the two source docs' sequences)
+## (f) Analysis-pass build steps  *(sequenced by the unified plan)*
 
-| Step | Work | Gate |
-|------|------|------|
-| 0 | (done) `BlockAnalyzer` + `_emit_scoped_block` scoping fix | suite green |
-| 1 | `VarAnnotator` (Phase 0): scope stack, `var_kind`, `var_decl_node`, `closure_captured`. Retire `_vars_referenced_in_closures`. **Correctness, no perf.** | closure.t + full suite no regression |
-| 2 | `ASTAnnotator` (Phase 1): `returns_list` + `needs_wantarray`. Delete `_child_is_list_expr` + the `p-=~` string match. | gen_tree_val tests |
-| 3 | `ASTAnnotator` (Phase 2): `lvalue`. Remove `lvalue_context` mutable-flag threading. | aref/href lvalue tests |
-| 4 | Phase 0b `unboxable` (boolean: box or not), **no repr yet**. | suite green; spot-check generated CL |
-| 5 | Phase 0c `repr`+`coerce`: `repr=string` (demand ⊆ `{string,key,bool}`, numeric absent), else `repr=any` for non-magic mixes. Flow-insensitive. Codegen `_var_repr`/`_emit_var_read`. | new `Pl/t/type-flow-*.t`; suite green; manual CL inspection on E1/E2/E3 |
-| 6 | Accumulator (`.=` O(n)) special case. | benchmark + correctness |
-| 7 *(deferred)* | A4 interprocedural return-type table → type `call` sources, enabling native `repr=number`/`fixnum` for sub-sourced numeric vars. | — |
-| 8 *(deferred)* | Flow-sensitive (SSA) re-typing of reassigned scalars. | — |
+> **The authoritative end-to-end ordering lives in
+> `docs/codegen-rewrite-spec.md` §Unified implementation phases.** This table is
+> just the *analysis-side* detail (what each pass produces + its gate); the
+> `Phase` column maps each step onto that plan so the two never drift.
 
-**Each step is independently shippable and the specialization steps (4–8) are
+| Phase | Step | Work | Gate |
+|-------|------|------|------|
+| 0 | — | (done) `BlockAnalyzer` + `_emit_scoped_block` scoping fix | suite green |
+| 2 | A | `VarAnnotator`: recursive scope stack (all blocks), decl-site keying (§s.1), position-aware resolution (§s.3), `var_kind`/`var_decl_node`/`closure_captured`, my/our/local/state classification (§s.6), renames (§s.2). Retire `_vars_referenced_in_closures`. **Correctness, no perf.** | closure.t + shadowing (§s.4) + full suite, no regression |
+| 3 | B | `ASTAnnotator`: `returns_list` + `needs_wantarray`. Delete `_child_is_list_expr` + the `p-=~` string match. | gen_tree_val tests |
+| 3 | C | `ASTAnnotator`: `lvalue`. Remove `lvalue_context` mutable-flag threading. | aref/href lvalue tests |
+| 4 | D | `unboxable` (Gate 1: box or not), **no repr yet**. | suite green; spot-check generated CL |
+| 4 | E | `repr`+`coerce` (Gate 2): `repr=string` (demand ⊆ `{string,key,bool}`, numeric absent), else `repr=any` for non-magic mixes. Flow-insensitive. Codegen `_var_repr`/`_emit_var_read`. | new `Pl/t/type-flow-*.t`; suite green; CL inspection on E1/E2/E3 |
+| 4 | F | Accumulator (`.=` O(n)) special case. | benchmark + correctness |
+| 5 *(deferred)* | G | A4 interprocedural return-type table → type `call` sources, enabling native `repr=number`/`fixnum` for sub-sourced numeric vars. | — |
+| 5 *(deferred)* | H | Flow-sensitive (SSA) re-typing of reassigned scalars. | — |
+
+**Every step is independently shippable and the specialization steps (D–H) are
 strictly opt-in narrowings from `box`** — an incomplete or buggy analysis loses
-an optimization, never correctness. That property is the reason to build it in
-this order.
+an optimization, never correctness. That property is why this order is safe.
 
 ---
 
