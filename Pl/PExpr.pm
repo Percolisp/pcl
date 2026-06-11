@@ -2284,12 +2284,7 @@ sub handle_subcalls {
         my $deref_skip = 0;  # extra elements consumed by -> deref chain after block
         if ($self->has_parser) {
           # Determine parameters based on function type
-          # List::Util's reduce/pair* call the block as $code->($a,$b) with
-          # the two values passed positionally, so bind them as block params
-          # ($a/$b are List::Util-package locals in the shim, not main's, so
-          # the block can't read them as globals).
           my $params = ($func_name eq 'sort') ? ['$a', '$b']
-                     : ($func_name =~ /^(reduce|pairfirst|pairgrep|pairmap)$/) ? ['$a', '$b']
                      : ($func_name eq 'eval') ? []
                      : ($func_name eq 'grep' || $func_name eq 'map') ? ['$_']
                      : [];  # Other & prototype functions: no implicit params
@@ -2299,8 +2294,7 @@ sub handle_subcalls {
           # corrupt the surrounding p-if argument list (e.g. eval{} inside elsif condition).
           # For other blocks, use named function (may need to be called separately)
           if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
-              || $func_name eq 'eval'
-              || $func_name =~ /^(reduce|pairfirst|pairgrep|pairmap)$/) {
+              || $func_name eq 'eval') {
             # Parse block body as CL string
             my $body_cl = _block_is_hash_constructor($next)
               ? $self->parser->parse_hash_block_to_cl_string($next)

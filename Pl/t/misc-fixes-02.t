@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 sub run_cl {
     my ($code) = @_;
@@ -144,11 +144,26 @@ test_cl('postfix if with leading parenthesised condition (A) || (B)',
 #     un-skipping List::Util (the generic mechanism reads the prototype).
 # (2) The slurpy @ tail of (&@) must force LIST context on the list args, else a
 #     scalar-context call (my $x = first {...} (1,2,3,4)) collapsed the paren
-#     list to its last element.  reduce/pair* additionally bind $a/$b as block
-#     params (the shim calls $code->($a,$b)), routed through the inline-lambda path.
+#     list to its last element.  reduce/pair* set the CALLER's $a/$b by symbolic
+#     ref in the shim (lib/List/Util.pm) — $a/$b are package-scoped, so the block
+#     {$a+$b}, compiled in the caller, reads the caller's globals (no parser hack).
 test_cl('List::Util first/reduce block form parses and respects list context',
     'use List::Util qw(first reduce);'
     . ' my $f = first { $_ > 2 } (1,2,3,4);'
     . ' my $r = reduce { $a + $b } 1,2,3,4;'
     . ' print "[$f][$r]\n";',
     "[3][10]\n");
+
+# A 'my @arr'/'my %hash' captured by a closure is renamed to a let-bound LEXICAL
+# (@a__lex__N) so the closure sees per-instance state.  Bug (session 244): the
+# init went through p-my-= (box-set), which is a NO-OP on a non-box array/hash
+# place — so the captured aggregate was never populated.  Whole-aggregate reads
+# (scalar(@a), keys %h, "@a") saw an empty array; element reads ($a[0]) happened
+# to work only when the var dodged the rename.  Fix: fill the (already adjustable)
+# lexical in place via p-array-fill / p-hash-fill (extracted from p-array-=/p-hash-=
+# without their proclaim-special guard), and force LIST context on the RHS.
+test_cl('closure capturing a my-array/my-hash populates the lexical aggregate',
+    'my $r = do { my @a=(1,2,3); my $f=sub { my $s=0; $s+=$_ for @a; "@a|$s|".scalar(@a) }; $f->() };'
+    . ' my $h = do { my %h=(a=>1,b=>2); my $g=sub { $h{c}=3; join(",",sort keys %h) }; $g->() };'
+    . ' print "[$r][$h]\n";',
+    "[1 2 3|6|3][a,b,c]\n");

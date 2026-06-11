@@ -59,12 +59,22 @@ sub product {
 sub reduce (&@) {
     my $code = shift;
     return undef unless @_;
+    # $a/$b belong to the CALLER's package (like sort), not List::Util's, so the
+    # block `{ $a + $b }` — a plain anon sub compiled in the caller — reads the
+    # caller's globals.  Real List::Util (XS) sets them via glob magic; the
+    # pure-Perl path sets them by symbolic reference, saving/restoring so we
+    # don't clobber the caller's $a/$b.
+    my $caller = caller;
+    no strict 'refs';
+    no warnings 'once';
+    my ($sa, $sb) = (${"${caller}::a"}, ${"${caller}::b"});
     my $acc = shift;
     for (@_) {
-        local $a = $acc;
-        local $b = $_;
-        $acc = $code->($a, $b);
+        ${"${caller}::a"} = $acc;
+        ${"${caller}::b"} = $_;
+        $acc = $code->();
     }
+    (${"${caller}::a"}, ${"${caller}::b"}) = ($sa, $sb);
     return $acc;
 }
 
@@ -171,35 +181,55 @@ sub pairvalues {
     return @out;
 }
 
+# pair* expose each pair's key/value as the caller's $a/$b (see reduce above).
 sub pairfirst (&@) {
     my $code = shift;
+    my $caller = caller;
+    no strict 'refs';
+    no warnings 'once';
+    my ($sa, $sb) = (${"${caller}::a"}, ${"${caller}::b"});
+    my @found = ();
     while (@_) {
         my ($k, $v) = (shift, shift);
-        local $a = $k; local $b = $v;
-        return ($k, $v) if $code->($k, $v);
+        ${"${caller}::a"} = $k;
+        ${"${caller}::b"} = $v;
+        if ($code->()) { @found = ($k, $v); last; }
     }
-    return ();
+    (${"${caller}::a"}, ${"${caller}::b"}) = ($sa, $sb);
+    return @found;
 }
 
 sub pairgrep (&@) {
     my $code = shift;
+    my $caller = caller;
+    no strict 'refs';
+    no warnings 'once';
+    my ($sa, $sb) = (${"${caller}::a"}, ${"${caller}::b"});
     my @out;
     while (@_) {
         my ($k, $v) = (shift, shift);
-        local $a = $k; local $b = $v;
-        push @out, $k, $v if $code->($k, $v);
+        ${"${caller}::a"} = $k;
+        ${"${caller}::b"} = $v;
+        push @out, $k, $v if $code->();
     }
+    (${"${caller}::a"}, ${"${caller}::b"}) = ($sa, $sb);
     return @out;
 }
 
 sub pairmap (&@) {
     my $code = shift;
+    my $caller = caller;
+    no strict 'refs';
+    no warnings 'once';
+    my ($sa, $sb) = (${"${caller}::a"}, ${"${caller}::b"});
     my @out;
     while (@_) {
         my ($k, $v) = (shift, shift);
-        local $a = $k; local $b = $v;
-        push @out, $code->($k, $v);
+        ${"${caller}::a"} = $k;
+        ${"${caller}::b"} = $v;
+        push @out, $code->();
     }
+    (${"${caller}::a"}, ${"${caller}::b"}) = ($sa, $sb);
     return @out;
 }
 

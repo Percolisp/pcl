@@ -161,7 +161,7 @@
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
-   #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-=
+   #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-= #:p-array-fill #:p-hash-fill
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
    #:p-my-=))
 
@@ -3069,115 +3069,128 @@
     ;; Anything else (scalar, hash-table, nil, …): return as-is
     (t src)))
 
+(defun p-array-fill (place value)
+  "Clear adjustable array PLACE and refill it from VALUE: flatten nested vectors
+   (but not strings), box elements, preserve nil holes.  Snapshots VALUE first so
+   self-assignment (@a = @a) and embedding (@a = (1, @a, 2)) work.  Returns PLACE.
+   Shared by the p-array-= macro and the closure-capture lexical array-init path
+   (which cannot use p-array='s boundp/proclaim-special guard — that would make a
+   let-bound lexical special and break the closure)."
+  ;; Snapshot any adjustable vector (including PLACE itself) BEFORE we clear PLACE,
+  ;; to prevent aliasing. %p-snapshot-array-rhs recursively copies nested
+  ;; adjustable vectors and preserves nil.
+  (let ((snap (%p-snapshot-array-rhs value)))
+    (setf (fill-pointer place) 0)
+    ;; Perl: assigning to an array resets the each() iterator
+    (remhash place *array-iterators*)
+    (labels ((add-items (src)
+               (cond
+                 ((stringp src)
+                  (vector-push-extend (make-p-box src) place))
+                 ((hash-table-p src)
+                  (maphash (lambda (k v)
+                             (when (%p-real-hash-key-p k)
+                               (vector-push-extend (make-p-box k) place)
+                               (%p-array-store-scalar place v)))
+                           src))
+                 ((vectorp src)
+                  (loop for item across src
+                        do (cond
+                             ((p-flatten-marker-p item)
+                              (add-items (p-flatten-marker-array item)))
+                             ((and (vectorp item) (not (stringp item)))
+                              (add-items item))
+                             ;; Preserve nil as deleted-element marker (not undef-but-exists)
+                             ((null item)
+                              (vector-push-extend nil place))
+                             (t
+                              (%p-array-store-scalar place item)))))
+                 ((listp src)
+                  (loop for item in src
+                        do (cond
+                             ((p-flatten-marker-p item)
+                              (add-items (p-flatten-marker-array item)))
+                             ((and (vectorp item) (not (stringp item)))
+                              (add-items item))
+                             ;; Preserve nil as deleted-element marker (not undef-but-exists)
+                             ((null item)
+                              (vector-push-extend nil place))
+                             (t
+                              (%p-array-store-scalar place item)))))
+                 ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
+                 (t
+                  (when src
+                    (%p-array-store-scalar place src))))))
+      (add-items snap))
+    place))
+
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
    Flattens nested vectors (but not strings), wraps elements in boxes.
    Snapshots any adjustable vector in the RHS before clearing the LHS
    so that self-assignment (@a = @a) and embedding (@a = (1, @a, 2))
    work correctly.  nil slots (deleted elements) are preserved."
-  (let ((val (gensym "VAL"))
-        (snap (gensym "SNAP")))
-    `(let* ((,val ,value)
-            ;; Snapshot any adjustable vector (including place itself) BEFORE
-            ;; we clear place, to prevent aliasing. %p-snapshot-array-rhs
-            ;; recursively copies nested adjustable vectors and preserves nil.
-            (,snap (%p-snapshot-array-rhs ,val)))
+  (let ((val (gensym "VAL")))
+    `(let ((,val ,value))
        (unless (boundp ',place)
          (proclaim '(special ,place))
          (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
-       (setf (fill-pointer ,place) 0)
-       ;; Perl: assigning to an array resets the each() iterator
-       (remhash ,place *array-iterators*)
-       (labels ((add-items (src)
-                  (cond
-                    ((stringp src)
-                     (vector-push-extend (make-p-box src) ,place))
-                    ((hash-table-p src)
-                     (maphash (lambda (k v)
-                                (when (%p-real-hash-key-p k)
-                                  (vector-push-extend (make-p-box k) ,place)
-                                  (%p-array-store-scalar ,place v)))
-                              src))
-                    ((vectorp src)
-                     (loop for item across src
-                           do (cond
-                                ((p-flatten-marker-p item)
-                                 (add-items (p-flatten-marker-array item)))
-                                ((and (vectorp item) (not (stringp item)))
-                                 (add-items item))
-                                ;; Preserve nil as deleted-element marker (not undef-but-exists)
-                                ((null item)
-                                 (vector-push-extend nil ,place))
-                                (t
-                                 (%p-array-store-scalar ,place item)))))
-                    ((listp src)
-                     (loop for item in src
-                           do (cond
-                                ((p-flatten-marker-p item)
-                                 (add-items (p-flatten-marker-array item)))
-                                ((and (vectorp item) (not (stringp item)))
-                                 (add-items item))
-                                ;; Preserve nil as deleted-element marker (not undef-but-exists)
-                                ((null item)
-                                 (vector-push-extend nil ,place))
-                                (t
-                                 (%p-array-store-scalar ,place item)))))
-                    ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
-                    (t
-                     (when src
-                       (%p-array-store-scalar ,place src))))))
-         (add-items ,snap))
-       ,place)))
+       (p-array-fill ,place ,val))))
+
+(defun p-hash-fill (place value)
+  "Clear hash PLACE and repopulate it from VALUE (flattened to k-v pairs; an odd
+   trailing key gets an undef value).  Returns the number of input elements (the
+   scalar-context value of a hash assignment).  Shared by the p-hash-= macro and
+   the closure-capture lexical hash-init path (which can't use p-hash='s
+   boundp/proclaim-special guard)."
+  (let* ((flat (cond
+                 ((hash-table-p value)
+                  (let ((r (make-array (* 2 (hash-table-count value))
+                                       :adjustable t :fill-pointer 0)))
+                    (maphash (lambda (k v)
+                               (when (%p-real-hash-key-p k)
+                                 (vector-push-extend (make-p-box k) r)
+                                 (vector-push-extend v r)))
+                             value)
+                    r))
+                 ((and (vectorp value) (not (stringp value)))
+                  (%p-flatten-list value))
+                 ;; A bare scalar RHS is a one-element list: `%h = "x"` means
+                 ;; `%h = ("x")` -> key "x" with an undef value (Perl pads the
+                 ;; odd element).
+                 (t (%p-flatten-list (vector value)))))
+         (cnt (length flat)))
+    (clrhash place)
+    (loop for i from 0 below cnt by 2
+          do (setf (gethash (to-string (aref flat i)) place)
+                   (if (< (1+ i) cnt)
+                       (%p-make-hash-entry (aref flat (1+ i)))
+                       *p-undef*)))
+    cnt))
 
 (defmacro p-hash-= (place value)
   "Assign to a hash variable (%hash). Clears and repopulates from value.
    Returns: list ctx → flattened hash contents; scalar/void → input element count."
-  (let ((val  (gensym "VAL"))
-        (flat (gensym "FLAT"))
-        (cnt  (gensym "CNT"))
-        (ret  (gensym "RET")))
-    `(let* ((,val ,value)
-            ;; Flatten input to a uniform k-v pair vector
-            (,flat (cond
-                     ((hash-table-p ,val)
-                      (let ((r (make-array (* 2 (hash-table-count ,val))
-                                           :adjustable t :fill-pointer 0)))
-                        (maphash (lambda (k v)
-                                   (when (%p-real-hash-key-p k)
-                                     (vector-push-extend (make-p-box k) r)
-                                     (vector-push-extend v r)))
-                                 ,val)
-                        r))
-                     ((and (vectorp ,val) (not (stringp ,val)))
-                      (%p-flatten-list ,val))
-                     ;; A bare scalar RHS is a one-element list: `%h = "x"` means
-                     ;; `%h = ("x")` -> key "x" with an undef value (Perl pads the
-                     ;; odd element).  Route it through %p-flatten-list so a string,
-                     ;; number, box, or undef becomes one entry; a raw nil (empty
-                     ;; list) flattens to nothing, clearing the hash.
-                     (t (%p-flatten-list (vector ,val)))))
-            (,cnt (length ,flat)))
+  (let ((val (gensym "VAL"))
+        (cnt (gensym "CNT"))
+        (ret (gensym "RET")))
+    `(let ((,val ,value))
        (unless (boundp ',place)
          (proclaim '(special ,place))
          (setf (symbol-value ',place) (make-hash-table :test 'equal)))
-       (clrhash ,place)
-       (loop for i from 0 below ,cnt by 2
-             do (setf (gethash (to-string (aref ,flat i)) ,place)
-                      (if (< (1+ i) ,cnt)
-                          (%p-make-hash-entry (aref ,flat (1+ i)))
-                          *p-undef*)))
-       (if (eq *wantarray* t)
-           ;; List context: return hash contents as flat vector
-           (let ((,ret (make-array (* 2 (hash-table-count ,place))
-                                   :adjustable t :fill-pointer 0)))
-             (maphash (lambda (k v)
-                        (when (%p-real-hash-key-p k)
-                          (vector-push-extend (make-p-box k) ,ret)
-                          (vector-push-extend v ,ret)))
-                      ,place)
-             ,ret)
-           ;; Scalar/void: return count of input elements
-           ,cnt))))
+       (let ((,cnt (p-hash-fill ,place ,val)))
+         (if (eq *wantarray* t)
+             ;; List context: return hash contents as flat vector
+             (let ((,ret (make-array (* 2 (hash-table-count ,place))
+                                     :adjustable t :fill-pointer 0)))
+               (maphash (lambda (k v)
+                          (when (%p-real-hash-key-p k)
+                            (vector-push-extend (make-p-box k) ,ret)
+                            (vector-push-extend v ,ret)))
+                        ,place)
+               ,ret)
+             ;; Scalar/void: return count of input elements
+             ,cnt)))))
 
 ;; Flatten a Perl-style value (vector/list/hash/scalar) to a flat vector
 ;; for use in list-assignment RHS. Hash tables expand to key-value pairs;
