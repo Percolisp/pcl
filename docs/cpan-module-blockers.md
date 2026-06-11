@@ -143,19 +143,24 @@ isolated. Lower priority than Moo wall A (Role::Tiny is less central than Moo).
 
 ---
 
-## 3. List::Util `first { } LIST` returns empty  (pre-existing, not from 238f/g)
+## 3. List::Util `first { } LIST` returns empty  ✅ FIXED (session 244)
 
-**Symptom:** `first { $_ > 2 } (1,2,3,4)` → undef/empty. `sum`/`max`/`reduce`? — `sum`
-and `max` work; the **block-prototype** form (`first BLOCK LIST`, like grep/map) does
-not.
+**Was:** `first { $_ > 2 } (1,2,3,4)` → parse error / undef. The whole block-prototype
+family (`first`/`any`/`all`/`none`/`notall`/`reduce`/`pair*`) failed.
 
-**Root cause:** unknown — `first` has a `&@` prototype; PCL may not pass the block
-correctly to List::Util's `first`. Predates this session's work (the use→import change
-didn't touch it).
+**Root cause (two bugs):** (1) List::Util was in `_extract_module_prototypes`'s
+skip-list, so the shim's `(&@)` prototypes were never read → the block-form parser hit
+"Missing case: [". (2) The slurpy `@` of `(&@)` didn't force LIST context, so a
+scalar-context call collapsed the paren list to its last element.
 
-**Fix direction:** check how `first { } LIST` transpiles vs `grep { } LIST` (which
-works); compare block-arg handling. Likely a prototype/block-arg plumbing gap for
-List::Util's pure-Perl `first`.
+**Fix (at the right layers — see CLAUDE.md Principle 9a):**
+- `lib/List/Util.pm`: declared `(&@)` on the shim subs (the data).
+- `Pl/Parser.pm`: un-skipped List::Util so the generic block-form parser reads the
+  prototype (the mechanism); the slurpy `@` then forces LIST_CTX.
+- `Pl/PExpr.pm`: routed `reduce`/`pair*` blocks through the inline-lambda path so
+  `$a`/`$b` bind as block params (the shim calls `$code->($a,$b)`), like grep/map/sort.
+
+All forms now match real perl byte-for-byte. Regression: `Pl/t/misc-fixes-02.t`.
 
 ---
 
