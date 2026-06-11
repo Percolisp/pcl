@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 245 (2026-06-11) — in-memory scalar I/O rework, paren-print fix, Fcntl shim
+
+Adopted Perl 5.40 `t/io/scalar.t` into `perl-tests/` and drove the fixes it
+exposed. Commits: Fcntl shim, paren-print parser fix, in-memory stream rework.
+Gate 92/3340 (all pass); `scalar.t` CRASH@39 → PARTIAL 120/128, 17 → 66 passing.
+
+1. **Paren-form `print($fh LIST)`** (also `printf`/`say`, and `print(STDERR …)`
+   / `print({EXPR} …)`) silently dropped the write — the filehandle inside the
+   parens was parsed as the first list element ("Missing case" parse error).
+   Only the no-paren `print $fh …` worked. Fix: `Pl/PExpr.pm` `handle_subcalls`
+   detects print/say/printf + `Structure::List` and pulls a leading filehandle
+   out of the parens (new `_extract_paren_filehandle`). Regression: `fileio-02.t`.
+
+2. **`lib/Fcntl.pm` shim** — Fcntl is XS, so `use Fcntl qw(SEEK_SET …)` died with
+   an undefined-function error. Added a pure-Perl shim (right layer) with the
+   Linux SEEK_*/O_*/LOCK_*/S_I* constant values + real S_IS*/S_IMODE/S_IFMT
+   mode-bit helpers + croaking stubs for platform macros this build lacks.
+
+3. **In-memory scalar filehandles reworked to be position-aware**
+   (`cl/pcl-runtime.lisp`). Was append-only and faulted (vector-push-extend into
+   a simple-string) when user code reassigned the scalar mid-write; tracked no
+   position. Now: shared `p-string-stream-mixin` (target box + offset); writes
+   overwrite in place / extend / NUL-zero-fill across a forward-seek gap;
+   `stream-file-position` implements tell()/seek() (SEEK_END via buffer length,
+   negative offset → seek returns false not fault); `%psos-buf` rebuilds the
+   scalar if reassigned; new `p-string-io-stream` adds the read side so `+<`/`+>`
+   (and `<`) support interleaved read/write/seek/tell. Also gave `p-tie-proxy` a
+   non-descending `print-object` (a self-referential tie box — `sub TIESCALAR {
+   bless \my $x }` — was exhausting the control stack in the default printer).
+   Remaining scalar.t gaps are not-supported (B introspection, `pack 'P'`, utf8
+   byte semantics, read-only enforcement, tie+IO) and refaliasing.
+
 ## Session 244 (2026-06-11) — List::Util block-form, closure capture, fuzzer +7 axes, IO
 
 Bug-finding via the differential fuzzer (now 21 axes, 931 snippets) and Perl's
