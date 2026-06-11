@@ -15,6 +15,10 @@ Two reasons:
 1. **Compiling to a high-level language keeps the compiler tractable.** CL is expressive enough to model Perl's semantics directly, so PCL can stay a manageable size instead of growing into a full interpreter.
 2. **Lisp is trivial to parse**, which makes the generated CL a good *intermediate representation* — a stepping stone for compiling Perl onward to other environments.
 
+#### The hard part — Perl's runtime *magic*
+
+Perl is hard to parse. It has tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and hence resists any purely static translation. PCL avoids the problem by reproducing the same magic in the Common Lisp runtime. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard because they must execute, will simply execute on the CL side with the same semantics.
+
 ### There is no bytecode engine
 
 This is a genuinely new implementation. PCL does **not** embed, link, or reimplement Perl's runtime or opcode interpreter. It is a from-scratch source-to-source compiler: Perl code in, Common Lisp code out.

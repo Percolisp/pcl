@@ -1349,13 +1349,28 @@ sub _process_variable_statement {
         }
         $self->environment->state_var_renames(\%temp);
 
-        my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt);
+        # An array/hash LHS forces LIST context on the RHS — resolved at COMPILE
+        # time (no runtime *wantarray* check): `my @a = (1,2,3)` captured by a
+        # closure inside a scalar-context block (my $r = do { ... my @a=... })
+        # must still build the whole list, not collapse to its last element.
+        my $lhs_ctx = ($var_name =~ /^[\@%]/) ? 1 : 0;  # 1 = LIST_CTX, 0 = SCALAR
+        my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt, $lhs_ctx);
 
         # Re-apply new rename
         $self->environment->state_var_renames($env_renames);
 
+        # Choose the assignment op by LHS sigil.  A captured array/hash is a
+        # let-bound LEXICAL (already an adjustable array / hash table), so we
+        # fill it in place via p-array-fill / p-hash-fill — NOT p-array-=/p-hash-=
+        # (their boundp/proclaim-special guard would make the lexical special and
+        # break the closure) and NOT p-my-= (box-set is a no-op on a non-box
+        # array/hash place, so the aggregate would never be populated).
+        my $sigil = substr($var_name, 0, 1);
+        my $assign = $sigil eq '@' ? "(p-array-fill $new_name $rhs_cl)"
+                   : $sigil eq '%' ? "(p-hash-fill $new_name $rhs_cl)"
+                   :                 "(p-my-= $new_name $rhs_cl)";
         $self->_emit(";; $perl_code");
-        $self->_emit("(p-my-= $new_name $rhs_cl)") if defined $rhs_cl && $rhs_cl ne '';
+        $self->_emit($assign) if defined $rhs_cl && $rhs_cl ne '';
         $self->_emit("");
         return;
       }
@@ -6026,8 +6041,11 @@ sub _extract_module_prototypes {
   # Return cached result if already parsed
   return $cache->{$module} if exists $cache->{$module};
 
-  # Skip known core modules that don't have prototypes affecting codegen
-  if ($module =~ /^(Test2?::|Carp|Scalar::Util|List::Util|Time::HiRes|
+  # Skip known core modules that don't have prototypes affecting codegen.
+  # (List::Util is intentionally NOT skipped: its shim declares block
+  # prototypes — first/any/reduce/pair* (&@) — that the block-form parser
+  # needs, so its prototypes must be extracted from lib/List/Util.pm.)
+  if ($module =~ /^(Test2?::|Carp|Scalar::Util|Time::HiRes|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;

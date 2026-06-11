@@ -2,6 +2,15 @@
 ## This is free software; you can redistribute it and/or modify it
 ## under the same terms as the Perl 5 programming language system itself.
 
+## PROVENANCE: this is a pure-Perl re-implementation of Perl's built-in
+## pack()/unpack(), which in real Perl are implemented in C in pp_pack.c
+## (perl source: pp_pack.c, with the template grammar in perldoc -f pack /
+## perlpacktut). The format semantics here — type codes, counts, '*', the
+## '<'/'>' endian and '!' shriek modifiers, group '(...)' nesting, the
+## checksum 'U'/'%' rules, uuencode 'u', BER 'w', etc. — are translated from
+## that C source's behaviour, not from any Perl-level original. PCL transpiles
+## this file to cl/pcl-pack.lisp (see REBUILD PROCEDURE below).
+
 use strict;
 use warnings;
 

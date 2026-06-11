@@ -419,6 +419,151 @@ my @listops = (
 );
 add("list $_->[0]", prog($_->[1])) for @listops;
 
+# --- Axis 15: closures & lexical capture ------------------------------------
+# Counter/accumulator closures, independent vs shared state, capture-by-
+# reference (a mutation after capture is visible), nested closures, escape from
+# an inner block.  NOTE: the foreach per-iteration capture
+# `for my $i (...) { push @s, sub { $i } }` is a DOCUMENTED not-supported case
+# (each iteration should bind a fresh $i — see CLAUDE.md / closure.t), so it is
+# deliberately omitted here to avoid a permanent known-divergence in the report.
+my @closures = (
+    'do { my $n=0; my $c=sub { $n++ }; $c->(); $c->(); $c->() }',            # 2 post-inc
+    'do { my $n=0; my $c=sub { ++$n }; $c->(); $c->() }',                    # 2 pre-inc
+    'do { sub mk { my $n=shift; sub { $n++ } } my $a=mk(10); my $b=mk(20);'
+      . ' $a->(); my $x=$a->(); my $y=$b->(); "$x|$y" }',                    # 11|20 independent
+    'do { my $x=1; my $f=sub { $x }; $x=99; $f->() }',                       # 99 capture-by-ref
+    'do { my $x=0; my $inc=sub { $x++ }; $inc->(); $inc->(); $x }',          # 2 visible outside
+    'do { my $f=sub { my $x=shift; sub { my $y=shift; $x+$y } }; $f->(10)->(5) }', # 15 nested
+    'do { my @a=(1,2,3); my $sum=0; my $f=sub { $sum+=$_ for @a }; $f->(); $sum }', # 6
+    'do { my $g; { my $h=42; $g=sub { $h }; } $g->() }',                     # 42 escapes block
+    'do { my $acc=""; my $add=sub { $acc.=shift }; $add->("a"); $add->("b"); $acc }', # ab
+    'do { my $c=do { my $n=5; sub { $n-- } }; $c->(); $c->(); $c->() }',     # 3
+    'do { my @subs=map { my $k=$_; sub { $k*$k } } 1..3; join(",",map { $_->() } @subs) }', # 1,4,9
+);
+add("closure $_", prog($_)) for @closures;
+
+# --- Axis 16: local / dynamic scoping ---------------------------------------
+# local on package scalars/arrays/hashes and their elements; the dynamic value
+# seen by a called sub during the extent; restoration afterwards.  (local on a
+# lexical is a perl compile error, so every target here is a package global or
+# an aggregate element, which the oracle accepts.)
+my @locals = (
+    'do { our $G=1; sub rd { $G } my $r; { local $G=9; $r=rd() } "$r|$G" }',  # 9|1
+    'do { our @A=(1,2,3); my $r; { local $A[1]=99; $r="@A" } "$r|@A" }',       # 1 99 3|1 2 3
+    'do { our %H=(a=>1); my $r; { local $H{a}=9; $r=$H{a} } "$r|$H{a}" }',     # 9|1
+    'do { our %H=(a=>1); my $r; { local $H{b}=5; $r=$H{b} } "$r|".(exists $H{b}?"y":"n") }', # 5|n
+    'do { local $_="hi"; uc }',                                               # HI
+    'do { our $G=10; sub inc { $G++ } { local $G=0; inc(); inc() } $G }',      # 10 restored
+    'do { our @A=(1,2,3); my $r; { local @A=(7,8); $r="@A" } "$r|@A" }',       # 7 8|1 2 3
+    'do { our $sep=","; sub j { join($sep,@_) } my $r;'
+      . ' { local $sep="-"; $r=j(1,2,3) } "$r|".j(4,5) }',                     # 1-2-3|4,5
+    'do { our $G="x"; sub g { $G } my @r; for my $v (qw(a b)) { local $G=$v; push @r,g() } "@r|$G" }', # a b|x
+);
+add("local $_", prog($_)) for @locals;
+
+# --- Axis 17: sort variants -------------------------------------------------
+# Default string sort vs numeric, descending, reverse-sort, multi-key tie-break,
+# sort-by-hash-value, Schwartzian transform, named comparator, sorted slice,
+# scalar-context count, sort feeding/fed-by map.
+my @sorts = (
+    'join(",", sort 3,1,20,2)',                          # string sort -> 1,2,20,3
+    'join(",", sort { $a <=> $b } 3,1,20,2)',            # numeric
+    'join(",", sort { $b <=> $a } 3,1,20,2)',            # numeric desc
+    'join(",", reverse sort { $a <=> $b } 3,1,2)',       # 3,2,1
+    'join(",", sort { length($a) <=> length($b) or $a cmp $b } qw(bb a ccc aa))', # a,aa,bb,ccc
+    'do { my %h=(a=>3,b=>1,c=>2); join(",", sort { $h{$a} <=> $h{$b} } keys %h) }', # b,c,a
+    'do { my @a=map {$_->[1]} sort {$a->[0]<=>$b->[0]} map {[length,$_]} qw(ccc a bb); "@a" }', # a bb ccc
+    'join(",", sort { $a cmp $b } qw(banana apple cherry))',
+    'do { sub byn { $a <=> $b } join(",", sort byn 3,1,2) }',  # named comparator
+    'join(",", (sort { $a <=> $b } 5,3,8,1)[0,1])',      # sorted slice -> 1,3
+    'scalar(my @s = sort 3,1,2)',                        # count in scalar
+    'join(",", sort { $a <=> $b } map { $_*2 } 3,1,2)',  # 2,4,6
+    'join(",", sort { $a <=> $b } grep { $_ % 2 } 1..6)',# 1,3,5
+);
+add("sort $_", prog($_)) for @sorts;
+
+# --- Axis 18: regex features (flags, lookaround, non-greedy, backrefs) -------
+# Word boundary, lookahead/lookbehind, non-greedy, /g list & count, optional,
+# quantifier capture, /i /m /s flags, backreference, /e with nested calls,
+# alternation, capturing/limit split.  \n in the double-quoted subject strings
+# becomes a real newline in the generated program (needed for /m and /s).
+my @regex2 = (
+    '"Hello World" =~ /\bWorld\b/ ? "y":"n"',
+    '"foobar" =~ /foo(?=bar)/ ? $& : "no"',                 # lookahead -> foo
+    '"foobar" =~ /(?<=foo)bar/ ? $& : "no"',                # lookbehind -> bar
+    '"aaa" =~ /a+?/ ? $& : "no"',                           # non-greedy -> a
+    '"<a><b>" =~ /<(.+?)>/ ? $1 : "no"',                    # non-greedy group -> a
+    'do { my $s="a1b2c3"; my @m = $s =~ /(\d)/g; "@m" }',   # 1 2 3
+    '"color colour" =~ /colou?r/ ? $& : "no"',              # color
+    '"2024-01-02" =~ /(\d{4})-(\d{2})-(\d{2})/ ? "$1/$2/$3" : "no"',
+    'do { my $s="aXbXc"; my $c = () = $s =~ /X/g; $c }',    # 2 match count
+    '"ABCabc" =~ /abc/i ? "y":"n"',
+    '"line1\nline2" =~ /^line2/m ? "y":"n"',                # /m -> y
+    '"a\nb" =~ /a.b/s ? "y":"n"',                           # /s dot eats newline -> y
+    '"a\nb" =~ /a.b/ ? "y":"n"',                            # no /s -> n
+    '"abcabc" =~ /(abc)\1/ ? "y":"n"',                      # backreference -> y
+    'do { my $s="the quick"; $s =~ s/(\w+)/ucfirst($1)/ge; $s }', # The Quick
+    '"cat dog bird" =~ /(cat|dog)/ ? $1 : "no"',            # cat
+    'join("|", split /\s*,\s*/, "a, b ,c")',                # a|b|c
+    'do { my @p = "key=val" =~ /(\w+)=(\w+)/; "@p" }',      # key val
+    '"FooBar" =~ /(?<x>Foo)(?<y>Bar)/ ? "$+{x}-$+{y}" : "no"', # Foo-Bar
+);
+add("re2 $_", prog($_)) for @regex2;
+
+# --- Axis 19: autovivification & nested data structures ---------------------
+# Deep hash/array autoviv, push to an autovivified arrayref, mixed AoH/HoA,
+# iterating/building structures in a loop.  Each prints one scalar [payload].
+my @autoviv = (
+    'do { my %h; $h{a}{b}=1; $h{a}{c}=2; join(",",map "$_=$h{a}{$_}",sort keys %{$h{a}}) }',
+    'do { my %h; push @{$h{list}}, 1,2,3; "@{$h{list}}" }',
+    'do { my @a; $a[2][1]=9; $a[2][0]=8; "$a[2][0]$a[2][1]" }',
+    'do { my %h; $h{x}[0]=1; $h{x}[1]=2; "@{$h{x}}" }',
+    'do { my $r={}; $r->{a}{b}{c}=42; $r->{a}{b}{c} }',
+    'do { my @a=([1,2],[3,4]); $a[0][1]+$a[1][0] }',
+    'do { my %h=(a=>[1,2,3]); scalar @{$h{a}} }',
+    'do { my $r=[{n=>1},{n=>2}]; $r->[0]{n}+$r->[1]{n} }',
+    'do { my %h; $h{$_}=$_*$_ for 1..3; join(",",map "$_=$h{$_}",sort keys %h) }',
+    'do { my %seen; $seen{$_}++ for qw(a b a c a b); join(",",map "$_:$seen{$_}",sort keys %seen) }',
+    'do { my @m; $m[$_]=$_**2 for 0..3; "@m" }',
+    'do { my %h; push @{$h{$_%2?"odd":"even"}}, $_ for 1..6; "@{$h{odd}}|@{$h{even}}" }',
+);
+add("av $_", prog($_)) for @autoviv;
+
+# --- Axis 20: numeric stringification & sprintf precision -------------------
+# Float printing (Perl uses %.15g for stringification), large integers crossing
+# the IV/NV boundary, sprintf rounding (banker's vs away-from-zero), %g/%e/%f.
+my @numstr = (
+    '0.1+0.2', '1/3', '2/3', '10/3', '1e20', '1e-20',
+    '0.0000001', '1000000000000000',
+    'sprintf("%.17g",0.1)', 'sprintf("%g",0.1)', 'sprintf("%.15g",1/3)',
+    'sprintf("%e",0)', 'sprintf("%.0f",2.5)', 'sprintf("%.0f",3.5)',
+    'sprintf("%.0f",0.5)', 'sprintf("%d",2**31)', 'sprintf("%x",2**32)',
+    '0.1*3', '3*0.1', 'int(0.1*3*10)', '1.0', '1.5', '100.0',
+    '"3.14"+0', '0.5**10', '10**-5', 'sqrt(2)',
+    'sprintf("%s",0.1+0.2)', 'sprintf("%s",1/3)', '1234567.89', '-1234567.89',
+    '1_000_000 * 1_000_000', '2**53', '2**53 + 1',
+);
+add("ns $_", prog($_)) for @numstr;
+
+# --- Axis 21: short-circuit / defined-or, with side-effect ordering ---------
+# ||/&&///, ||=/&&=///=, and the exact set of operands actually evaluated
+# (tracked via a @log the closure pushes to) — catches eager-evaluation bugs.
+my @sc = (
+    'do { my $x; my $y = $x // "default"; $y }',
+    'do { my $x=0; my $y = $x || "fb"; $y }',
+    'do { my $x=0; my $y = $x // "fb"; $y }',
+    'do { my @log; my $f=sub { push @log,$_[0]; $_[0] }; my $r=$f->(0)||$f->(1)||$f->(2); "$r|@log" }',
+    'do { my @log; my $f=sub { push @log,$_[0]; $_[0] }; my $r=$f->(1)&&$f->(2)&&$f->(3); "$r|@log" }',
+    'do { my $c=0; $c ||= 5; $c ||= 9; $c }',
+    'do { my $h={}; $h->{x} //= 10; $h->{x} //= 20; $h->{x} }',
+    'do { my @a=(1,2,3); my $x = $a[5] // "none"; $x }',
+    'do { my $s = "" || 0 || "third"; $s }',
+    'do { my $n = 0 // 5; $n }',
+    'do { my $x = undef; $x //= do { 42 }; $x }',
+    'do { my ($a,$b)=(0,2); my $r = $a || $b; $r }',
+);
+add("sc $_", prog($_)) for @sc;
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------

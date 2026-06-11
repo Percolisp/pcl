@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -135,3 +135,79 @@ test_cl('postfix if with leading parenthesised condition (A) || (B)',
     'sub f { my ($a,$b)=@_; return "yes" if ($a == 1) || ($b == 2); return "no" }'
     . ' print "[", f(1,9), "][", f(9,2), "][", f(9,9), "]\n";',
     "[yes][yes][no]\n");
+
+# List::Util block-prototype functions (first/any/all/none/reduce, pair*) must
+# parse the `{ BLOCK } LIST` form like grep/map.  Two bugs (session 244):
+# (1) List::Util was in _extract_module_prototypes's skip-list, so the shim's
+#     `sub first (&@)` prototype was never read -> "Missing case: [" parse error.
+#     Fixed by declaring the (&@) prototypes in lib/List/Util.pm (the data) and
+#     un-skipping List::Util (the generic mechanism reads the prototype).
+# (2) The slurpy @ tail of (&@) must force LIST context on the list args, else a
+#     scalar-context call (my $x = first {...} (1,2,3,4)) collapsed the paren
+#     list to its last element.  reduce/pair* set the CALLER's $a/$b by symbolic
+#     ref in the shim (lib/List/Util.pm) — $a/$b are package-scoped, so the block
+#     {$a+$b}, compiled in the caller, reads the caller's globals (no parser hack).
+test_cl('List::Util first/reduce block form parses and respects list context',
+    'use List::Util qw(first reduce);'
+    . ' my $f = first { $_ > 2 } (1,2,3,4);'
+    . ' my $r = reduce { $a + $b } 1,2,3,4;'
+    . ' print "[$f][$r]\n";',
+    "[3][10]\n");
+
+# A 'my @arr'/'my %hash' captured by a closure is renamed to a let-bound LEXICAL
+# (@a__lex__N) so the closure sees per-instance state.  Bug (session 244): the
+# init went through p-my-= (box-set), which is a NO-OP on a non-box array/hash
+# place — so the captured aggregate was never populated.  Whole-aggregate reads
+# (scalar(@a), keys %h, "@a") saw an empty array; element reads ($a[0]) happened
+# to work only when the var dodged the rename.  Fix: fill the (already adjustable)
+# lexical in place via p-array-fill / p-hash-fill (extracted from p-array-=/p-hash-=
+# without their proclaim-special guard), and force LIST context on the RHS.
+test_cl('closure capturing a my-array/my-hash populates the lexical aggregate',
+    'my $r = do { my @a=(1,2,3); my $f=sub { my $s=0; $s+=$_ for @a; "@a|$s|".scalar(@a) }; $f->() };'
+    . ' my $h = do { my %h=(a=>1,b=>2); my $g=sub { $h{c}=3; join(",",sort keys %h) }; $g->() };'
+    . ' print "[$r][$h]\n";',
+    "[1 2 3|6|3][a,b,c]\n");
+
+# sprintf %.Nf must round half-to-EVEN (C/Perl printf), not half-away-from-zero.
+# Bug (session 244, found by the fuzzer numeric axis): SBCL's ~F (and scaling a
+# float before ROUND) rounds 2.5->3, 0.5->1; C/Perl give 2 and 0.  Fixed by
+# rounding the EXACT rational of the double with CL ROUND (itself half-to-even).
+test_cl('sprintf %.Nf rounds half-to-even like C/Perl printf',
+    'printf "%.0f %.0f %.0f %.0f|%.2f|%.0f\n", 2.5, 3.5, 0.5, 1.5, 9.999, -2.5;',
+    "2 4 0 2|10.00|-2\n");
+
+# In-memory string filehandles: open my $fh, MODE, \$scalar.  Writes append into
+# the scalar live (a p-string-output-stream Gray stream over the box's adjustable
+# string); reads come from a string-input-stream.  Previously open got the scalar
+# ref stringified to a junk filename and the scalar stayed empty.  Found by the
+# fuzzer special-variable axis (session 244).
+test_cl('in-memory string filehandles (open my $fh, ">", \\$scalar)',
+    'my $w=""; open my $o,">",\$w; print {$o} "a","b"; printf {$o} "%d",7; close $o;'
+    . ' my $a="Z"; open my $ap,">>",\$a; print {$ap} "!"; close $ap;'
+    . ' my $d="p\nq\nr\n"; open my $i,"<",\$d; my $n=0; while(<$i>){$n++} close $i;'
+    . ' print "[$w][$a][$n]\n";',
+    "[ab7][Z!][3]\n");
+
+# $, (output field separator) is printed between print's arguments; $\ (output
+# record separator) after.  Bug (session 244, fuzzer special-var axis): p-print
+# honored $\ but ignored $,.  `local $,=","; print 1,2,3` should give "1,2,3".
+test_cl('print honors $, (output field separator) between arguments',
+    'local $, = ","; local $\\ = "!\n"; print 1,2,3;',
+    "1,2,3!\n");
+
+# my @a = <$fh> must read ALL records (list context), not one.  Bug (session 244):
+# p-array-= did not bind *wantarray* t, so the readline RHS saw the ambient scalar
+# context and read a single line.  Array-assignment RHS is always list context.
+test_cl('my @lines = <$fh> reads all records (list context)',
+    'my $d = "a\nb\nc\n"; open my $fh, "<", \$d; my @lines = <$fh>; close $fh;'
+    . ' my $one; open my $g, "<", \$d; $one = <$g>; close $g; chomp $one;'
+    . ' print scalar(@lines), "|$one\n";',
+    "3|a\n");
+
+# printf/print take a LIST: a bare array arg must flatten so the format comes
+# from the first element.  Bug (from Perl t/io/print.t, session 244): p-printf
+# grabbed the whole @a vector as the format -> "ARRAY(0x..)".  p-print already
+# flattened; p-printf now does too.
+test_cl('printf @a flattens the array (format from first element)',
+    'my @a = ("%s=%d\n", "x", 5); printf @a; printf STDOUT @a;',
+    "x=5\nx=5\n");
