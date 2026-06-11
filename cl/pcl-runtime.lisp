@@ -633,6 +633,13 @@
   tie-obj       ; object returned by TIESCALAR/TIEARRAY/TIEHASH
   saved-value)  ; p-box-value before tie was installed (restored on untie)
 
+;; A tie object can hold a (blessed) ref back to the very box it proxies — e.g.
+;; `sub TIESCALAR { bless \my $x }` — making the structure self-referential.
+;; The default structure printer would recurse forever and exhaust the control
+;; stack, so print opaquely instead of descending into the slots.
+(defmethod print-object ((p p-tie-proxy) stream)
+  (print-unreadable-object (p stream :type t :identity t)))
+
 ;;; A magical scalar lvalue.  Like p-tie-proxy it lives in a p-box's value slot
 ;;; and is intercepted at the unbox/box-set chokepoints, but it dispatches to two
 ;;; CL closures rather than a Perl tie object: reading calls GETTER, writing calls
@@ -6397,21 +6404,90 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; A p-string-output-stream is an SBCL Gray output stream that appends written
 ;;; characters directly into the target scalar box's adjustable string, so the
 ;;; scalar reflects the output live (matching Perl's PerlIO ":scalar" layer).
-(defclass p-string-output-stream (sb-gray:fundamental-character-output-stream)
-  ((target :initarg :target :reader psos-target)))
+;; Shared state for in-memory string filehandles: a target scalar box and a
+;; current byte offset.  Perl's PerlIO ":scalar" layer tracks a position, so a
+;; seek/tell or a re-assignment of the scalar mid-write does not lose the
+;; place; writes overwrite existing chars and extend past the end; a forward
+;; seek beyond the end zero-fills with NUL.
+(defclass p-string-stream-mixin ()
+  ((target :initarg :target :reader psos-target)
+   (pos    :initarg :pos :initform 0 :accessor psos-pos)))
 
-(defmethod sb-gray:stream-write-char ((s p-string-output-stream) ch)
-  (vector-push-extend ch (p-box-value (psos-target s)))
-  ch)
+;; Write-only handle: open my $fh, ">",  \$s   /   ">>", \$s
+(defclass p-string-output-stream
+    (p-string-stream-mixin sb-gray:fundamental-character-output-stream)
+  ())
+
+;; Read+write handle: open my $fh, "+<", \$s   /   "+>", \$s
+(defclass p-string-io-stream
+    (p-string-stream-mixin
+     sb-gray:fundamental-character-input-stream
+     sb-gray:fundamental-character-output-stream)
+  ())
+
+(defun %psos-buf (s)
+  "Return the target box's value as an adjustable fill-pointer string.  The
+user may have reassigned the scalar with a plain (non-adjustable) string while
+the handle is open; rebuild it from the current contents when that happens so
+writes never fault on a simple-string."
+  (let* ((box (psos-target s))
+         (v   (p-box-value box)))
+    (if (and (stringp v) (adjustable-array-p v) (array-has-fill-pointer-p v))
+        v
+        (let ((buf (%p-fresh-adjustable-string
+                    (if (or (null v) (eq v *p-undef*)) "" (to-string v)))))
+          (setf (p-box-value box) buf
+                (p-box-sv-ok box) nil (p-box-nv-ok box) nil)
+          buf))))
+
+(defun %psos-put (s ch)
+  "Write CH at the stream's current position: overwrite if within the string,
+zero-fill any gap from a forward seek, otherwise extend at the end."
+  (let ((buf (%psos-buf s))
+        (p   (psos-pos s)))
+    (loop while (< (fill-pointer buf) p) do (vector-push-extend #\Nul buf))
+    (if (< p (fill-pointer buf))
+        (setf (char buf p) ch)
+        (vector-push-extend ch buf))
+    (setf (psos-pos s) (1+ p)
+          (p-box-sv-ok (psos-target s)) nil
+          (p-box-nv-ok (psos-target s)) nil)
+    ch))
+
+(defmethod sb-gray:stream-write-char ((s p-string-stream-mixin) ch)
+  (%psos-put s ch))
 
 (defmethod sb-gray:stream-write-string
-    ((s p-string-output-stream) string &optional (start 0) end)
-  (let ((buf (p-box-value (psos-target s)))
-        (lim (or end (length string))))
-    (loop for i from start below lim do (vector-push-extend (char string i) buf)))
+    ((s p-string-stream-mixin) string &optional (start 0) end)
+  (loop for i from start below (or end (length string))
+        do (%psos-put s (char string i)))
   string)
 
-(defmethod sb-gray:stream-line-column ((s p-string-output-stream)) nil)
+(defmethod sb-gray:stream-line-column ((s p-string-stream-mixin)) nil)
+
+;; tell()/seek() on an in-memory handle go through file-position.
+(defmethod sb-gray:stream-file-position
+    ((s p-string-stream-mixin) &optional position)
+  (cond ((null position) (psos-pos s))
+        (t (setf (psos-pos s)
+                 (case position
+                   (:start 0)
+                   (:end   (fill-pointer (%psos-buf s)))
+                   (t      position)))
+           t)))
+
+;; --- read side of a bidirectional in-memory handle ("+<" / "+>") ----------
+(defmethod sb-gray:stream-read-char ((s p-string-io-stream))
+  (let ((buf (%psos-buf s))
+        (p   (psos-pos s)))
+    (if (< p (fill-pointer buf))
+        (progn (setf (psos-pos s) (1+ p)) (char buf p))
+        :eof)))
+
+(defmethod sb-gray:stream-unread-char ((s p-string-io-stream) ch)
+  (declare (ignore ch))
+  (when (> (psos-pos s) 0) (decf (psos-pos s)))
+  nil)
 
 (defun %p-install-fh (fh stream)
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol)."
@@ -6432,20 +6508,41 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (cond
       ;; Write/truncate: replace the scalar with a fresh adjustable string the
       ;; Gray stream grows in place.  Bypass box-set's sv-cache by invalidating.
-      ((or (string= mode-str ">") (string= mode-str "+>"))
+      ((string= mode-str ">")
        (setf (p-box-value target-box) (%p-fresh-adjustable-string)
              (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
        (%p-install-fh fh (make-instance 'p-string-output-stream :target target-box))
        t)
-      ;; Append: seed the adjustable string with the current contents.
+      ;; Read+write, truncate: like ">", but the handle can also be read back.
+      ((string= mode-str "+>")
+       (setf (p-box-value target-box) (%p-fresh-adjustable-string)
+             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
+       (%p-install-fh fh (make-instance 'p-string-io-stream :target target-box))
+       t)
+      ;; Append: seed the adjustable string with the current contents and
+      ;; position the write offset at the end.
       ((string= mode-str ">>")
        (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
              (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
-       (%p-install-fh fh (make-instance 'p-string-output-stream :target target-box))
+       (%p-install-fh fh (make-instance 'p-string-output-stream
+                                        :target target-box
+                                        :pos (length cur)))
        t)
-      ;; Read: a plain string-input-stream over the current contents.
+      ;; Read+write, keep contents: position at start, reads see the current
+      ;; contents, writes overwrite/extend in place (Perl's "+<" on a scalar).
+      ((string= mode-str "+<")
+       (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
+             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
+       (%p-install-fh fh (make-instance 'p-string-io-stream :target target-box))
+       t)
+      ;; Read: the bidirectional stream positioned at the start.  (Using the
+      ;; same class as "+<" gives uniform seek/tell/SEEK_END; PCL does not
+      ;; enforce read-only-ness on the handle, matching its general stance.)
       ((string= mode-str "<")
-       (%p-install-fh fh (make-string-input-stream cur))
+       (%p-install-fh fh (make-instance 'p-string-io-stream
+                                        :target (let ((b (make-p-box
+                                                          (%p-fresh-adjustable-string cur))))
+                                                  b)))
        t)
       (t (warn "Unsupported in-memory open mode: ~A" mode-str) nil))))
 
@@ -6588,9 +6685,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              (cond
                ((= w 0) position)                              ; SEEK_SET
                ((= w 1) (+ (file-position stream) position))   ; SEEK_CUR
-               ((= w 2) (+ (file-length stream) position))     ; SEEK_END
+               ((= w 2) (+ (%p-stream-length stream) position)); SEEK_END
                (t position))))
-        (file-position stream new-pos)))))
+        ;; A negative resulting offset is an error in Perl: seek() returns
+        ;; false and leaves the position unchanged (rather than faulting).
+        (if (and (integerp new-pos) (minusp new-pos))
+            nil
+            (and (file-position stream new-pos) 1))))))
+
+(defun %p-stream-length (stream)
+  "Total length of STREAM for SEEK_END.  In-memory output streams expose their
+buffer's fill-pointer; everything else falls back to file-length."
+  (if (typep stream 'p-string-stream-mixin)
+      (fill-pointer (%psos-buf stream))
+      (file-length stream)))
 
 (defmacro p-seek (fh &rest args)
   "Perl seek — bareword filehandle is auto-quoted."

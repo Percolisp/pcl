@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 13;
+plan tests => 15;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -250,5 +250,50 @@ system("/bin/sh", "-c", "exit 3");
 print "three: ", ($? >> 8), " raw ", $?, "\n";
 system("/bin/sh", "-c", "exit 42");
 print "fortytwo: ", ($? >> 8), "\n";
+PERL
+}
+
+# --- Test 14: paren-form print/printf/say with a leading filehandle ---
+# print($fh LIST) puts the filehandle *inside* the parens (no comma before
+# the first argument).  Both the no-paren and paren forms must agree.
+{
+    test_io('paren-form print/printf/say(FH ...) routes to the filehandle', <<'PERL');
+use feature "say";
+my $buf = '';
+open(my $fh, '>', \$buf) or die "open: $!";
+print($fh "alpha\n");
+printf($fh "n=%d\n", 7);
+say($fh "omega");
+close $fh;
+print $buf;
+PERL
+}
+
+# --- Test 15: in-memory scalar handle seek/tell, zero-fill, +< read+write ---
+# Exercises the PerlIO ":scalar" position semantics: tell() after open, a
+# forward seek that zero-fills with NUL, overwrite-in-place, SEEK_END append,
+# and a "+<" handle that both reads and writes the same scalar.
+{
+    test_io('in-memory scalar: seek/tell, zero-fill, overwrite, +< read+write', <<'PERL');
+use Fcntl qw(SEEK_SET SEEK_END);
+my $foo;
+open(my $w, '>', \$foo) or die "open: $!";
+print "tell0=", tell($w), "\n";
+seek($w, 5, SEEK_SET);
+print $w "x";
+printf "len=%d zerofill=%d\n", length($foo), ($foo =~ /^\0{5}x$/ ? 1 : 0);
+seek($w, 0, SEEK_SET);
+print $w "AB";                       # overwrite first two bytes in place
+(my $shown = $foo) =~ s/\0/./g;
+print "overwrite=[$shown]\n";
+close $w;
+
+my $rw = "hello world";
+open(my $rwh, '+<', \$rw) or die "open: $!";
+my $first = <$rwh>;                  # read the whole record
+seek($rwh, 0, SEEK_END);
+print $rwh "!";                      # append at end
+print "readback=[$first] rw=[$rw]\n";
+close $rwh;
 PERL
 }
