@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -187,3 +187,19 @@ test_cl('in-memory string filehandles (open my $fh, ">", \\$scalar)',
     . ' my $d="p\nq\nr\n"; open my $i,"<",\$d; my $n=0; while(<$i>){$n++} close $i;'
     . ' print "[$w][$a][$n]\n";',
     "[ab7][Z!][3]\n");
+
+# $, (output field separator) is printed between print's arguments; $\ (output
+# record separator) after.  Bug (session 244, fuzzer special-var axis): p-print
+# honored $\ but ignored $,.  `local $,=","; print 1,2,3` should give "1,2,3".
+test_cl('print honors $, (output field separator) between arguments',
+    'local $, = ","; local $\\ = "!\n"; print 1,2,3;',
+    "1,2,3!\n");
+
+# my @a = <$fh> must read ALL records (list context), not one.  Bug (session 244):
+# p-array-= did not bind *wantarray* t, so the readline RHS saw the ambient scalar
+# context and read a single line.  Array-assignment RHS is always list context.
+test_cl('my @lines = <$fh> reads all records (list context)',
+    'my $d = "a\nb\nc\n"; open my $fh, "<", \$d; my @lines = <$fh>; close $fh;'
+    . ' my $one; open my $g, "<", \$d; $one = <$g>; close $g; chomp $one;'
+    . ' print scalar(@lines), "|$one\n";',
+    "3|a\n");

@@ -3137,7 +3137,14 @@
    so that self-assignment (@a = @a) and embedding (@a = (1, @a, 2))
    work correctly.  nil slots (deleted elements) are preserved."
   (let ((val (gensym "VAL")))
-    `(let ((,val ,value))
+    ;; Assigning to an array imposes LIST context on the RHS (Perl: @a = EXPR
+    ;; evaluates EXPR in list context).  Bind *wantarray* t so a context-sensitive
+    ;; RHS — most importantly readline `my @lines = <$fh>` — yields its list form
+    ;; (all records) rather than the ambient scalar form (one record).  *p-in-
+    ;; list-assign-rhs* stays nil so this is NOT the per-line `while(($x)=<FH>)`
+    ;; case.  Funcalls are already wrapped by gen_funcall; an inner binding wins,
+    ;; so this is a no-op for them and only fixes the unwrapped readline/each forms.
+    `(let ((,val (let ((*wantarray* t)) ,value)))
        (unless (boundp ',place)
          (proclaim '(special ,place))
          (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
@@ -6032,8 +6039,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; Flatten raw @array / %hash args (print takes a LIST): a bare vector/hash
     ;; spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar
     ;; (so `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
-    (dolist (arg (coerce (p-flatten-args args) 'list))
-      (princ (to-string arg) fh))
+    ;; $, (output field separator) is printed BETWEEN successive arguments.
+    (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
+          (firstp t))
+      (dolist (arg (coerce (p-flatten-args args) 'list))
+        (when (and ofs (not firstp)) (princ ofs fh))
+        (setf firstp nil)
+        (princ (to-string arg) fh)))
     ;; Append output record separator $\ if set
     (let ((ors (unbox |$\\|)))
       (when (and (stringp ors) (plusp (length ors)))
