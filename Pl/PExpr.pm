@@ -1066,6 +1066,25 @@ sub parse {
       # If it was X->[] or X->{}:
       if ($is_reference) {
         $type   = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
+      } elsif (ref($pre) eq 'PPI::Structure::Block'
+               && $pre->start() eq '{'
+               && $i >= 2
+               && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+               && ($e->[$i-2]->content() eq '@'
+                   || $e->[$i-2]->content() eq '$')) {
+        # Braced deref with a TRAILING subscript: @{EXPR}[..] / @{EXPR}{..} are
+        # slices of the deref'd EXPR; ${EXPR}[..] / ${EXPR}{..} are element
+        # accesses.  The subscript's position disambiguates at parse time: a
+        # subscript AFTER the block makes a slice/element node here, while
+        # @{$a[0]} / @{$h{k}} (subscript INSIDE the block, no trailing one)
+        # never enter this branch and stay plain casts.  EXPR is an arbitrary
+        # expression — an array/hash ref or a symbolic-ref name string;
+        # p-aref/p-gethash resolve ref-vs-string at runtime.  The %-sigil kv
+        # forms have their own raw-token patterns above ($is_kv_*_deref_*).
+        # See docs/symbolic-ref-slice-parse-fix.md.
+        $type = $e->[$i-2]->content() eq '@'
+              ? ($self->is_arr_braces($term) ? "slice_a_acc" : "slice_h_acc")
+              : ($self->is_arr_braces($term) ? "a_ref_acc"   : "h_ref_acc");
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^\$/) {
         # Check for $$scalar[n] / $$scalar{key} (Cast '$') or

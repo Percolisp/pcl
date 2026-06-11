@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -214,12 +214,14 @@ test_cl('printf @a flattens the array (format from first element)',
 
 # Symbolic-ref array slice (session 245).  @{NAME}[i,j] under no-strict-refs is a
 # symbolic reference: NAME (a string, or any expr giving one) names a package
-# array.  The simple-scalar form @{$s}[..] already compiled to (p-aslice $s ..),
-# whose p-aref now resolves a string operand symbolically (was: (setf p-aref)
-# into the string's chars → CHARACTER type-error).  The literal/computed-expr
-# forms @{"foo"}[..] / @{EXPR}[..] used to invert to (p-cast-@ (p-aref-box ..))
-# and crash; they now compile to the SAME one path (p-aslice / p-hslice), which
-# checks ref-vs-string at runtime.  Write via one spelling, read via another.
+# array.  PExpr now builds a slice_a_acc node whenever a Cast('@') + Block is
+# followed by a TRAILING subscript, whatever the block contains (the subscript's
+# position disambiguates slice-vs-deref at parse time — see
+# docs/symbolic-ref-slice-parse-fix.md).  Every spelling compiles to the SAME
+# one path (p-aslice), whose p-aref resolves ref-vs-string at runtime (was:
+# (setf p-aref) into the string's chars → CHARACTER type-error for $scalar,
+# inverted (p-cast-@ (p-aref-box ..)) crash for literal/expr).
+# Write via one spelling, read via another.
 test_cl('symbolic-ref array slice: scalar / literal / computed expr all agree',
     'no strict;'
     . ' my $f = "marr"; @{$f}[1,2] = ("A","B");'          # write via $scalar
@@ -229,10 +231,39 @@ test_cl('symbolic-ref array slice: scalar / literal / computed expr all agree',
     "u,A,B,C,D,E\n");
 
 # Same symbolic slice with a VARIABLE / computed index (single-subscript form):
-# this takes the non-(vector ..) branch of _slice_indices, so the index expr is
-# passed straight through — @{EXPR}[$i] = ... must work for any deref spelling.
+# the subscript is a bare expression, not a comma list, so it exercises the
+# single-child (non-progn) path of the slice node — @{EXPR}[$i] = ... must work
+# for any deref spelling.
 test_cl('symbolic-ref array slice with a variable/computed index',
     'no strict; my $f = "narr"; my $i = 2;'
     . ' @{$f}[$i] = "X"; @{"narr"}[$i+1] = "Y"; @{"n"."arr"}[$i+2] = "Z";'
     . ' print join(",", map { defined $_ ? $_ : "u" } @{"narr"}[0,1,2,3,4]), "\n";',
     "u,u,X,Y,Z\n");
+
+# Symbolic-ref HASH slice (fuzzer axis-22 find, session 245): @{EXPR}{keys} is a
+# hash value-slice (the @ sigil + {} subscript), %{EXPR}{keys} a key/value slice.
+# The literal/computed-expr deref forms used to invert to (p-cast-@ (p-gethash-
+# box ..)) and crash (CL-ERROR); the parse-time slice rule routes them to
+# (p-hslice / p-kv-hslice EXPR keys), the same path @{$scalar}{..} already used.
+test_cl('symbolic-ref hash slice: @{}=values, %{}=key/value, all spellings',
+    'no strict; %hh=(a=>1,b=>2,c=>3);'
+    . ' my $n="hh";'
+    . ' print join(",", @{$n}{qw(a c)}), "|",'        # via scalar  -> 1,3
+    . '       join(",", @{"hh"}{qw(a c)}), "|",'      # via literal -> 1,3
+    . '       join(",", @{"h"."h"}{qw(a c)}), "|",'   # via expr    -> 1,3
+    . '       join(",", %{"hh"}{qw(a c)}), "\n";',    # kv-slice    -> a,1,c,3
+    "1,3|1,3|1,3|a,1,c,3\n");
+
+# GUARD for the session-245 regression: @{$a[0]} / @{$h{k}} / @{$obj->{x}} are
+# DEREFS of a container element (the subscript is INSIDE the braces) and must
+# stay plain casts — the codegen rewrite of 2bc25da turned them into slices
+# because both compile to the same (p-cast-@ (p-aref-box ..)) string shape
+# (scalar @{$a[0]} gave 1, not 3).  The parse-time rule keys on a subscript
+# AFTER the block, so these never match; the last case (@{$h{a}}[0,2]) has
+# BOTH — an inner element subscript and a trailing slice — and is a genuine
+# slice of the deref'd element.
+test_cl('deref of container element stays a deref; trailing subscript slices it',
+    'my @a=([1,2,3]); my %h=(a=>[4,5,6]); my $o={x=>[7,8,9]};'
+    . ' print scalar(@{$a[0]}), scalar(@{$h{a}}), scalar(@{$o->{x}}), "|",'
+    . '       join(",", @{$h{a}}[0,2]), "\n";',
+    "333|4,6\n");
