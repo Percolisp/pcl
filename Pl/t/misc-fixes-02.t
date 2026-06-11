@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 sub run_cl {
     my ($code) = @_;
@@ -135,3 +135,20 @@ test_cl('postfix if with leading parenthesised condition (A) || (B)',
     'sub f { my ($a,$b)=@_; return "yes" if ($a == 1) || ($b == 2); return "no" }'
     . ' print "[", f(1,9), "][", f(9,2), "][", f(9,9), "]\n";',
     "[yes][yes][no]\n");
+
+# List::Util block-prototype functions (first/any/all/none/reduce, pair*) must
+# parse the `{ BLOCK } LIST` form like grep/map.  Two bugs (session 244):
+# (1) List::Util was in _extract_module_prototypes's skip-list, so the shim's
+#     `sub first (&@)` prototype was never read -> "Missing case: [" parse error.
+#     Fixed by declaring the (&@) prototypes in lib/List/Util.pm (the data) and
+#     un-skipping List::Util (the generic mechanism reads the prototype).
+# (2) The slurpy @ tail of (&@) must force LIST context on the list args, else a
+#     scalar-context call (my $x = first {...} (1,2,3,4)) collapsed the paren
+#     list to its last element.  reduce/pair* additionally bind $a/$b as block
+#     params (the shim calls $code->($a,$b)), routed through the inline-lambda path.
+test_cl('List::Util first/reduce block form parses and respects list context',
+    'use List::Util qw(first reduce);'
+    . ' my $f = first { $_ > 2 } (1,2,3,4);'
+    . ' my $r = reduce { $a + $b } 1,2,3,4;'
+    . ' print "[$f][$r]\n";',
+    "[3][10]\n");

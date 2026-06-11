@@ -6026,8 +6026,11 @@ sub _extract_module_prototypes {
   # Return cached result if already parsed
   return $cache->{$module} if exists $cache->{$module};
 
-  # Skip known core modules that don't have prototypes affecting codegen
-  if ($module =~ /^(Test2?::|Carp|Scalar::Util|List::Util|Time::HiRes|
+  # Skip known core modules that don't have prototypes affecting codegen.
+  # (List::Util is intentionally NOT skipped: its shim declares block
+  # prototypes — first/any/reduce/pair* (&@) — that the block-form parser
+  # needs, so its prototypes must be extracted from lib/List/Util.pm.)
+  if ($module =~ /^(Test2?::|Carp|Scalar::Util|Time::HiRes|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;

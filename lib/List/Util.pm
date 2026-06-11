@@ -56,7 +56,7 @@ sub product {
     return $prod;
 }
 
-sub reduce {
+sub reduce (&@) {
     my $code = shift;
     return undef unless @_;
     my $acc = shift;
@@ -68,7 +68,7 @@ sub reduce {
     return $acc;
 }
 
-sub first {
+sub first (&@) {
     my $code = shift;
     for (@_) {
         return $_ if $code->($_);
@@ -76,7 +76,7 @@ sub first {
     return undef;
 }
 
-sub any {
+sub any (&@) {
     my $code = shift;
     for (@_) {
         return 1 if $code->($_);
@@ -84,7 +84,7 @@ sub any {
     return '';
 }
 
-sub all {
+sub all (&@) {
     my $code = shift;
     for (@_) {
         return '' unless $code->($_);
@@ -92,7 +92,7 @@ sub all {
     return 1;
 }
 
-sub none {
+sub none (&@) {
     my $code = shift;
     for (@_) {
         return '' if $code->($_);
@@ -100,7 +100,7 @@ sub none {
     return 1;
 }
 
-sub notall {
+sub notall (&@) {
     my $code = shift;
     for (@_) {
         return 1 unless $code->($_);
@@ -171,7 +171,7 @@ sub pairvalues {
     return @out;
 }
 
-sub pairfirst {
+sub pairfirst (&@) {
     my $code = shift;
     while (@_) {
         my ($k, $v) = (shift, shift);
@@ -181,7 +181,7 @@ sub pairfirst {
     return ();
 }
 
-sub pairgrep {
+sub pairgrep (&@) {
     my $code = shift;
     my @out;
     while (@_) {
@@ -192,7 +192,7 @@ sub pairgrep {
     return @out;
 }
 
-sub pairmap {
+sub pairmap (&@) {
     my $code = shift;
     my @out;
     while (@_) {

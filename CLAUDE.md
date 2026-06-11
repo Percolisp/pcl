@@ -30,6 +30,22 @@ This file provides guidance to Claude Code when working with this repository.
 
 9. **Assume Valid Perl Input**: PCL is a transpiler for functioning Perl code, not a validator. It does not need to detect or reject invalid Perl (syntax errors, non-associative operator chains, etc.). Tests that verify rejection of invalid Perl (e.g. `eval("sub { $a <=> $b <=> $c }")` returning `undef`) are out of scope and should be commented out, not implemented.
 
+   **9a. Fix at the right LAYER — module behavior never goes in the parser or runtime.**
+   When a CPAN module misbehaves, the parser (`Pl/*.pm`) or runtime (`cl/pcl-runtime.lisp`) is the *closest* place to patch, and therefore the wrong one by default. Three layers, each owning a different kind of fact:
+   - **`lib/<Module>.pm` shim** — one module's behavior: its subs, prototypes, exports, constants. PCL transpiles it like user code. This is where module-specific facts live.
+   - **`Pl/*.pm` parser/codegen** — *generic language mechanisms*, keyed on the **mechanism, never a name**: e.g. "a `(&@)` prototype makes the trailing block parse as a block-form." The shim supplies the data (the prototype); the parser consumes it generically.
+   - **`cl/pcl-runtime.lisp`** — genuine Perl *core* semantics: builtins, the box model.
+
+   **Decision rule:** *Could a user write this thing in plain Perl?* If yes → it belongs in a `.pm` shim, and your only parser/runtime job is to make the generic mechanism work so that plain Perl transpiles correctly.
+
+   **Smell test (hard stop):** if your diff adds a literal CPAN module name *or a non-core function name* to a file under `Pl/` or `cl/`, you are at the wrong layer — back up. (Core builtins — `grep`/`map`/`sort`/`print` — are the only exception: they are language, not modules.)
+
+   **Worked example (session 244):** `first { … } @list` (List::Util) parse-errored.
+   - WRONG: add `first => {has_block_arg=>1}` to `Pl/Environment.pm` (module data in the core).
+   - RIGHT: declare `sub first (&@)` in `lib/List/Util.pm` (the *data*), and stop `_extract_module_prototypes` from skipping List::Util so the *generic* block-form parser reads that prototype (the *mechanism*).
+
+   See `docs/shipped-modules.md` for the module-override architecture.
+
 10. **Lisp Parenthesis Discipline**: After every Write or Edit to a `.lisp` file, immediately run the paren checker and fix any non-zero result before reporting done:
     ```bash
     perl -e '
