@@ -2127,6 +2127,27 @@ sub gen_prefix_op {
   }
   # Sigil cast operators (dereference) - use p-cast-X
   elsif ($op eq '@' || $op eq '%' || $op eq '$') {
+    # @{EXPR}[slice] / %{EXPR}{slice} where EXPR is not a simple scalar (a
+    # literal or a computed expression) is parsed as a `@`/`%` cast wrapping a
+    # subscript on EXPR, so the naive operand comes out as
+    #   (p-cast-@ (p-aref-box EXPR IDX))   -- inverted: it subscripts EXPR's
+    # value first, then derefs, which faults for a symbolic-ref string.
+    # The simple-scalar form @{$s}[slice] already compiles to the correct
+    # (p-aslice $s ...), whose p-aref checks ref-vs-string at runtime — the one
+    # path that handles both array refs and symbolic names.  Re-route the block
+    # form onto that same path: subscript the DEREFERENCED EXPR, not its value.
+    if ($op eq '@' && $operand =~ /^\(p-aref-box (.+)\)$/) {
+      my ($base, $idx) = $self->_split_first_sexp($1);
+      if (defined $idx && length $idx) {
+        return "(p-aslice $base " . $self->_slice_indices($idx) . ")";
+      }
+    }
+    if ($op eq '%' && $operand =~ /^\(p-gethash-box (.+)\)$/) {
+      my ($base, $key) = $self->_split_first_sexp($1);
+      if (defined $key && length $key) {
+        return "(p-hslice $base " . $self->_slice_indices($key) . ")";
+      }
+    }
     $cl_op = "p-cast-$op";
   }
   # & Cast: &{expr} or &$var - dynamic coderef by name
@@ -2143,6 +2164,67 @@ sub gen_prefix_op {
   }
 
   return "($cl_op $operand)";
+}
+
+
+# Split a generated argument string into its first balanced s-expression and the
+# rest, e.g. '"foo" (vector 0 1)' -> ('"foo"', '(vector 0 1)') and
+# '(p-. "f" "oo") 0' -> ('(p-. "f" "oo")', '0').  Quote-aware so a paren or
+# space inside a "string" is not treated as structure.  Returns (FIRST, REST)
+# with REST whitespace-trimmed; REST is undef when there is only one token.
+# Normalise a subscript index/key expression into the bare argument list that
+# p-aslice / p-hslice want.  A multi-element subscript is a list, which comes
+# through as (vector A B C) in rvalue position, or wrapped in the context
+# conditional (if *wantarray* (vector A B C) (progn A B C)) in lvalue position;
+# a single subscript is a bare value.  Returns the inside of the vector (the
+# index args) or the value unchanged.
+sub _slice_indices {
+  my ($self, $idx) = @_;
+  if ($idx =~ /^\(if \*wantarray\* (.+)\)$/s) {
+    my ($then) = $self->_split_first_sexp($1);
+    $idx = $then if defined $then;
+  }
+  return $1 if $idx =~ /^\(vector (.+)\)$/s;
+  return $idx;
+}
+
+
+sub _split_first_sexp {
+  my ($self, $s) = @_;
+  $s =~ s/^\s+//;
+  return ($s, undef) if $s eq '';
+  my @c = split //, $s;
+  my $n = scalar @c;
+  my $i = 0;
+  if ($c[0] eq '"') {                 # quoted string token
+    $i = 1;
+    while ($i < $n) {
+      if ($c[$i] eq '\\') { $i += 2; next; }
+      if ($c[$i] eq '"')  { $i++; last; }
+      $i++;
+    }
+  }
+  elsif ($c[0] eq '(') {              # parenthesised s-expression
+    my ($depth, $in_str) = (0, 0);
+    while ($i < $n) {
+      my $ch = $c[$i];
+      if ($in_str) {
+        if ($ch eq '\\') { $i += 2; next; }
+        $in_str = 0 if $ch eq '"';
+      }
+      elsif ($ch eq '"') { $in_str = 1; }
+      elsif ($ch eq '(') { $depth++; }
+      elsif ($ch eq ')') { $depth--; $i++; last if $depth == 0; next; }
+      $i++;
+    }
+  }
+  else {                             # bare atom: up to next whitespace
+    $i++ while $i < $n && $c[$i] !~ /\s/;
+  }
+  my $first = substr($s, 0, $i);
+  my $rest  = substr($s, $i);
+  $rest =~ s/^\s+//;
+  return ($first, length $rest ? $rest : undef);
 }
 
 

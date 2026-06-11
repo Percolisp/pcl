@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -211,3 +211,28 @@ test_cl('my @lines = <$fh> reads all records (list context)',
 test_cl('printf @a flattens the array (format from first element)',
     'my @a = ("%s=%d\n", "x", 5); printf @a; printf STDOUT @a;',
     "x=5\nx=5\n");
+
+# Symbolic-ref array slice (session 245).  @{NAME}[i,j] under no-strict-refs is a
+# symbolic reference: NAME (a string, or any expr giving one) names a package
+# array.  The simple-scalar form @{$s}[..] already compiled to (p-aslice $s ..),
+# whose p-aref now resolves a string operand symbolically (was: (setf p-aref)
+# into the string's chars → CHARACTER type-error).  The literal/computed-expr
+# forms @{"foo"}[..] / @{EXPR}[..] used to invert to (p-cast-@ (p-aref-box ..))
+# and crash; they now compile to the SAME one path (p-aslice / p-hslice), which
+# checks ref-vs-string at runtime.  Write via one spelling, read via another.
+test_cl('symbolic-ref array slice: scalar / literal / computed expr all agree',
+    'no strict;'
+    . ' my $f = "marr"; @{$f}[1,2] = ("A","B");'          # write via $scalar
+    . ' @{"marr"}[3] = "C";'                               # write via literal
+    . ' @{"m"."arr"}[4,5] = ("D","E");'                    # write via expr
+    . ' print join(",", map { defined $_ ? $_ : "u" } @{"marr"}[0,1,2,3,4,5]), "\n";',
+    "u,A,B,C,D,E\n");
+
+# Same symbolic slice with a VARIABLE / computed index (single-subscript form):
+# this takes the non-(vector ..) branch of _slice_indices, so the index expr is
+# passed straight through — @{EXPR}[$i] = ... must work for any deref spelling.
+test_cl('symbolic-ref array slice with a variable/computed index',
+    'no strict; my $f = "narr"; my $i = 2;'
+    . ' @{$f}[$i] = "X"; @{"narr"}[$i+1] = "Y"; @{"n"."arr"}[$i+2] = "Z";'
+    . ' print join(",", map { defined $_ ? $_ : "u" } @{"narr"}[0,1,2,3,4]), "\n";',
+    "u,u,X,Y,Z\n");

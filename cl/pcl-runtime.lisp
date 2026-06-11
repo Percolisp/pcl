@@ -4634,6 +4634,12 @@
     ;; If array is undef (from failed hash lookup etc), return undef
     (when (eq a *p-undef*)
       (return-from p-aref *p-undef*))
+    ;; A bare string here is a SYMBOLIC array reference (@{$str}[i] under
+    ;; no-strict-refs), not a char-vector to index — resolve it to the package
+    ;; array.  A NUL in the name is inaccessible (Perl gives nothing), so undef.
+    (when (stringp a)
+      (return-from p-aref
+        (if (find #\Nul a) *p-undef* (p-aref (p-ensure-arrayref arr) idx))))
     (let* ((i (truncate (to-number idx)))
            (len (cond ((vectorp a) (length a))
                       ((listp a) (length a))
@@ -4650,7 +4656,16 @@
   "Setf expander for p-aref - allows assignment to array elements.
    Auto-extends array if index is beyond current length (Perl semantics).
    Stores values in boxes for l-value semantics. Returns the box."
-  (let* ((a (unbox arr))  ; unbox array refs ($arr[i][j] write-through)
+  (let* ((a (unbox arr)))  ; unbox array refs ($arr[i][j] write-through)
+    ;; A bare string is a SYMBOLIC array reference (@{$str}[i] = ... under
+    ;; no-strict-refs), not a char-vector to overwrite — resolve to the package
+    ;; array and store there.  A NUL-containing name is inaccessible in PCL
+    ;; (p-ensure-arrayref returns a throwaway), so the write is lost like Perl's
+    ;; unreachable stash slot rather than faulting on a CHARACTER type-error.
+    (when (stringp a)
+      (return-from p-aref
+        (setf (p-aref (p-ensure-arrayref arr) idx) value))))
+  (let* ((a (unbox arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
