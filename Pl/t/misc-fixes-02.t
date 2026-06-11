@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -203,3 +203,11 @@ test_cl('my @lines = <$fh> reads all records (list context)',
     . ' my $one; open my $g, "<", \$d; $one = <$g>; close $g; chomp $one;'
     . ' print scalar(@lines), "|$one\n";',
     "3|a\n");
+
+# printf/print take a LIST: a bare array arg must flatten so the format comes
+# from the first element.  Bug (from Perl t/io/print.t, session 244): p-printf
+# grabbed the whole @a vector as the format -> "ARRAY(0x..)".  p-print already
+# flattened; p-printf now does too.
+test_cl('printf @a flattens the array (format from first element)',
+    'my @a = ("%s=%d\n", "x", 5); printf @a; printf STDOUT @a;',
+    "x=5\nx=5\n");

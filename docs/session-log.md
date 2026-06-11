@@ -4,6 +4,46 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 244 (2026-06-11) — List::Util block-form, closure capture, fuzzer +7 axes, IO
+
+Bug-finding via the differential fuzzer (now 21 axes, 931 snippets) and Perl's
+own `t/io/` tests. Commits `b8421a3`, `9fad8d2`, `bee3791`, `88effd4`, `5ad4d05`,
++ printf @a fix. Gate 92/3338.
+
+1. **List::Util block form** `first {…} @list` (+ any/all/none/notall/reduce/
+   pair*) parse-errored. Fix at the RIGHT layers (user flagged a layering trap):
+   `(&@)` prototypes in `lib/List/Util.pm` (data) + un-skipped List::Util in
+   `_extract_module_prototypes` (generic mechanism). reduce/pair* `$a`/`$b` set in
+   the SHIM by symbolic ref (package-scoped, like real List::Util) — NOT a parser
+   hack (reverted it). → CLAUDE.md **Principle 9a** + feedback_fix_at_right_layer.
+
+2. **Closure-captured `my @a`/`my %h` never populated** (fuzzer closure axis). The
+   captured aggregate is renamed to a let-bound lexical, but init went through
+   `p-my-=` (box-set = no-op on a non-box array/hash). Fix: extract
+   `p-array-fill`/`p-hash-fill` from `p-array-=`/`p-hash-=` (macros delegate),
+   fill the adjustable lexical in place (no proclaim-special), + LIST-context RHS.
+
+3. **`sprintf %.Nf` rounded half-away-from-zero** (fuzzer numeric axis) — C/Perl
+   round half-to-even. Fixed by rounding the EXACT rational of the double with CL
+   `ROUND`. sprintf.t +54, sprintf2.t +42.
+
+4. **In-memory string filehandles** `open my $fh,MODE,\$s` (fuzzer special-var
+   axis) — sb-gray output stream + string-input-stream. write/append/printf/line-
+   read work; seek/tell/`+<` NOT yet.
+
+5. **`$,` ignored by print**; **`my @a=<$fh>` read one line** (p-array-= didn't
+   bind `*wantarray* t`); **`printf @a` not flattened** (vector became the format).
+   All fixed.
+
+**Fuzzer:** +7 axes (15 closures, 16 local, 17 sort, 18 regex, 19 autoviv,
+20 numeric-stringify, 21 short-circuit). DOCUMENTED-not-fixed: `%.17g` ~15
+sig-digits, `2**53` bignum-not-float (same representation call as `**`).
+
+**NEXT (user chose adopt+curate):** bring Perl `t/io/` tests into `perl-tests/`
+(use 5.40.3 tree); remember **open/IO error gaps** — IO on a bad handle doesn't
+set `$!`=EBADF, `>-`/`<-` dup, in-mem `seek`/`tell`/`+<`. See
+project_io_tests_and_open_errors.
+
 ## Session 240 (2026-06-09) — Moo loads + accessors + rw work; 6 general bugs
 
 Chased `use Moo; has x => (is=>'ro'); Point->new(x=>3)` end-to-end. Moo now loads

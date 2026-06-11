@@ -2939,6 +2939,10 @@
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (setf fh (p-get-stream (second args)))
       (setf args (cddr args)))
+    ;; printf takes a LIST (FORMAT, LIST): flatten raw @array/%hash args so the
+    ;; format comes from the first flattened element, e.g. `printf @a` where
+    ;; @a = ("%d\n", 5).  A p-box-wrapped ref stays scalar (printf "%s", $aref).
+    (setf args (coerce (p-flatten-args args) 'list))
     ;; First remaining arg is format, rest are format args
     (setf fmt (first args))
     (setf fmt-args (rest args))
