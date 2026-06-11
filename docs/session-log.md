@@ -4,11 +4,96 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 245 (2026-06-11) — in-memory scalar I/O rework, paren-print fix, Fcntl shim
+## Session 246 (2026-06-12) — symbolic-ref slices RESOLVED at the parser layer (option 3)
 
+Closed the session-245 open decision by implementing the **parser-level fix**
+(option 3) — design written up first in `docs/symbolic-ref-slice-parse-fix.md`
+(user asked "is the information there at parse time?" — answer: yes, completely:
+the subscript's *position* disambiguates; `@{$a[0]}` has it INSIDE the braces
+(no third token), `@{EXPR}[1,3]` has it AFTER. The ambiguity only ever existed
+in the generated CL strings, where the parser had already thrown the position
+away. The `%`-sigil kv forms already worked exactly this way.)
+
+**The fix:**
+- `Pl/PExpr.pm` — new branch in the `is_arr_or_hash_braces` dispatcher: when
+  raw tokens are `Cast('@'|'$')` + `{BLOCK}` + trailing subscript, build the
+  slice/element node from sigil + bracket kind (`@…[`→slice_a_acc,
+  `@…{`→slice_h_acc, `$…[`→a_ref_acc, `$…{`→h_ref_acc) with `parse(BLOCK)` as
+  base — whatever the block contains. Placed before the parsed-node `is_var`
+  heuristic (which remains for brace-less `@$s[..]`/`$$s[0]`). Existing
+  cast-removal and progn-flattening code handles the new paths unchanged.
+- `Pl/ExprToCL.pm` — DELETED the whole string-rewrite machinery: the
+  `gen_prefix_op` slice rewrite (incl. the committed `2bc25da` array branch
+  that carried the live `scalar @{$a[0]}`→1 regression, and the uncommitted
+  `_is_symbolic_name` guard), plus helpers `_slice_indices`,
+  `_split_first_sexp`, `_is_symbolic_name`. No base-sniffing remains.
+- Runtime untouched — committed `p-aref` ref-vs-string resolution (`2bc25da`,
+  kept) + pre-existing `p-gethash` string arms are all the slice primitives
+  need.
+
+**Verified:** gate **92 files / 3344 tests ALL PASS**; fuzzer **959/965
+match** — only documented divergences remain (`**` float-vs-bigint ×3,
+`length $s+1`, `()=split` arity, `$ar->$#*`); session 245's 9-mismatch/5-cluster
+state is cleared. `misc-fixes-02.t` now 20 tests (added deref-guard test 20:
+`scalar @{$a[0]}`==3 etc. + `@{$h{a}}[0,2]` slice-of-element). `perl-tests/ref.t`
+fail-set identical before/after modulo addresses **plus test 19 newly FIXED**
+(`${$ref}[..]`-family, 21→20 fails). 12-line probe vs perl 5.40: identical.
+
+**Still open (small, separate):** `$ar->$#*` postfix last-index (fuzzer find,
+session 245) — `Pl/PExpr.pm` postfix-deref arm ~line 1007.
+
+---
+
+## Session 245 (2026-06-11) — IO rework, paren-print, Fcntl; symbolic-ref slices (LEFT MID-DECISION)
+
+Two arcs. **Arc 1 (clean, committed, done).** **Arc 2 (symbolic-ref slices)
+got fragile and was STOPPED mid-decision — see the WARNING + `memory/
+project_symbolic_ref_slice_decision.md` before resuming.**
+
+### Arc 1 — committed & green
 Adopted Perl 5.40 `t/io/scalar.t` into `perl-tests/` and drove the fixes it
-exposed. Commits: Fcntl shim, paren-print parser fix, in-memory stream rework.
-Gate 92/3340 (all pass); `scalar.t` CRASH@39 → PARTIAL 120/128, 17 → 66 passing.
+exposed (commits `502c81c` Fcntl shim, `b034740` paren-print, `b1ab4ec` in-mem
+stream, `84a2b09` log). `scalar.t` CRASH@39 → PARTIAL 120/128, 17→66 passing.
+Then unblocked two crash files (commit `24657ed`): **bop.t** comment out
+`pack "P"` (pointer, not-supported) → 507/510; **method.t** comment out
+`"3foo"->CORE::uc` (CORE-builtin-as-method / @ISA=CORE dispatch — niche, autobox
+is XS) → 159/163. The third crasher **ref.t was FIXED not skipped** (see Arc 2)
+→ 237/245. (User asked thrice "what's the third skipped file?" — answer: only
+TWO skipped; ref.t was repaired.)
+
+### Arc 2 — symbolic-ref array/hash slices — ⚠️ STOPPED, OPEN DECISION + LIVE REGRESSION
+`@{EXPR}[slice]` / `@{EXPR}{slice}` under no-strict-refs (EXPR a string naming a
+package array/hash). Started from the ref.t crash (`@{$name1}[2,3]=...` doing
+`(setf p-aref)` into a NUL-string → CHARACTER type-error).
+
+- **CLEAN runtime half (committed `2bc25da`, KEEP):** `p-aref`/`(setf p-aref)`
+  resolve a string operand symbolically (`p-ensure-arrayref`) instead of indexing
+  its chars. Makes `@{$scalar}[slice]` correct; ref.t runs unmodified. This is the
+  real "one path, ref-vs-string at runtime."
+- **MESSY codegen half (in `2bc25da` + uncommitted):** `@{LITERAL}[slice]` /
+  `@{EXPR}[slice]` parse as `@`-cast over a subscript → inverted
+  `(p-cast-@ (p-aref-box EXPR IDX))`. Rewrote to `(p-aslice/p-hslice EXPR ..)`
+  via string-munging (`_split_first_sexp`/`_slice_indices`). **BUG the fuzzer
+  caught:** `@{$h{a}}` / `@{$a[0]}` (deref of a container element) compile to the
+  SAME shape and got mis-rewritten as slices (`scalar @{$a[0]}` → 1 not 3).
+  **This regression is LIVE in committed `2bc25da` (array branch).** Uncommitted
+  working tree adds a guard `_is_symbolic_name` (rewrite only when base is a
+  `"literal"`/`(p-. ..)` string, not a `$var`/`%h`/`@a`/ref) which fixes it —
+  but that base-sniffing is the fragility the user objected to.
+- **Fuzzer:** added `tools/difftest-ops.pl` axis 22 (symref) + axis 23 (postfix
+  deref / nested AoH-HoA). New finding: `$ar->$#*` (postfix last-index) →
+  pcl=undef, NOT SUPPORTED (small fix target). Pre-guard run: 965 valid, 956
+  match, 9 mismatch.
+
+**OPEN DECISION (next session):** (1) revert codegen, keep runtime only — simplest,
+clean, regression gone, literal/expr slices not-supported [recommended to get main
+clean]; (2) keep the heuristic guard; (3) parser-level fix in `Pl/PExpr.pm` (tag
+`@{BLOCK}` + trailing subscript as a slice node) — the right layer, bigger.
+Full detail: `memory/project_symbolic_ref_slice_decision.md`.
+
+**Uncommitted at stop:** `Pl/ExprToCL.pm` (hash-slice + guard), `Pl/t/misc-fixes-02.t`
+(tests 18/19, plan 19, all pass), `tools/difftest-ops.pl` (axes 22/23). Gate was
+re-running to validate the working tree when we stopped.
 
 1. **Paren-form `print($fh LIST)`** (also `printf`/`say`, and `print(STDERR …)`
    / `print({EXPR} …)`) silently dropped the write — the filehandle inside the

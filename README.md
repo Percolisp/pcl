@@ -8,16 +8,16 @@ $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
 2,4,6,8,10
 ```
 
-### The hard part — Perl's runtime *magic*
-
-Perl is famously hard — hard to parse, and harder still to run faithfully. The deepest difficulty is its *magic*: tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and so resists any purely static translation. PCL handles it the only honest way: it **reproduces the same magic in the Common Lisp runtime**. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard precisely *because they must execute* simply execute — on the CL side, with the same semantics.
-
 ### Why Common Lisp?
 
 Two reasons:
 
 1. **Compiling to a high-level language keeps the compiler tractable.** CL is expressive enough to model Perl's semantics directly, so PCL can stay a manageable size instead of growing into a full interpreter.
 2. **Lisp is trivial to parse**, which makes the generated CL a good *intermediate representation* — a stepping stone for compiling Perl onward to other environments.
+
+#### The hard part — Perl's runtime *magic*
+
+Perl is hard to parse. It has tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and hence resists any purely static translation. PCL avoids the problem by reproducing the same magic in the Common Lisp runtime. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard because they must execute, will simply execute on the CL side with the same semantics.
 
 ### There is no bytecode engine
 
