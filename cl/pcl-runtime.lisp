@@ -6377,8 +6377,69 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (t
        (cons "<" s)))))
 
+;;; In-memory string filehandles: open my $fh, ">", \$s
+;;; A p-string-output-stream is an SBCL Gray output stream that appends written
+;;; characters directly into the target scalar box's adjustable string, so the
+;;; scalar reflects the output live (matching Perl's PerlIO ":scalar" layer).
+(defclass p-string-output-stream (sb-gray:fundamental-character-output-stream)
+  ((target :initarg :target :reader psos-target)))
+
+(defmethod sb-gray:stream-write-char ((s p-string-output-stream) ch)
+  (vector-push-extend ch (p-box-value (psos-target s)))
+  ch)
+
+(defmethod sb-gray:stream-write-string
+    ((s p-string-output-stream) string &optional (start 0) end)
+  (let ((buf (p-box-value (psos-target s)))
+        (lim (or end (length string))))
+    (loop for i from start below lim do (vector-push-extend (char string i) buf)))
+  string)
+
+(defmethod sb-gray:stream-line-column ((s p-string-output-stream)) nil)
+
+(defun %p-install-fh (fh stream)
+  "Bind STREAM to the filehandle FH (a box, or a bareword symbol)."
+  (cond ((p-box-p fh) (box-set fh stream))
+        (t            (setf (gethash fh *p-filehandles*) stream))))
+
+(defun %p-fresh-adjustable-string (&optional (init ""))
+  (let ((buf (make-array (length init) :element-type 'character
+                         :adjustable t :fill-pointer 0)))
+    (loop for c across init do (vector-push-extend c buf))
+    buf))
+
+(defun %p-open-memory (fh mode target-box)
+  "Open an in-memory string filehandle over TARGET-BOX (the scalar behind \\$s)."
+  (let ((mode-str (to-string mode))
+        (cur (let ((v (p-box-value target-box)))
+               (if (or (null v) (eq v *p-undef*)) "" (to-string v)))))
+    (cond
+      ;; Write/truncate: replace the scalar with a fresh adjustable string the
+      ;; Gray stream grows in place.  Bypass box-set's sv-cache by invalidating.
+      ((or (string= mode-str ">") (string= mode-str "+>"))
+       (setf (p-box-value target-box) (%p-fresh-adjustable-string)
+             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
+       (%p-install-fh fh (make-instance 'p-string-output-stream :target target-box))
+       t)
+      ;; Append: seed the adjustable string with the current contents.
+      ((string= mode-str ">>")
+       (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
+             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
+       (%p-install-fh fh (make-instance 'p-string-output-stream :target target-box))
+       t)
+      ;; Read: a plain string-input-stream over the current contents.
+      ((string= mode-str "<")
+       (%p-install-fh fh (make-string-input-stream cur))
+       t)
+      (t (warn "Unsupported in-memory open mode: ~A" mode-str) nil))))
+
 (defun %p-open-impl (fh mode filename)
   "Implementation of Perl open"
+  ;; In-memory filehandle: the target is a SCALAR ref (a box whose value is a box),
+  ;; e.g. open my $fh, '>', \$s.  Dispatch before the filename is stringified.
+  (when (and (p-box-p filename) (p-box-p (p-box-value filename)))
+    (return-from %p-open-impl
+      (%p-open-memory fh mode (p-box-value filename))))
   (let* ((mode-str (to-string mode))
          (file-str (to-string filename))
          (stream

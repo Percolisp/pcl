@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 sub run_cl {
     my ($code) = @_;
@@ -175,3 +175,15 @@ test_cl('closure capturing a my-array/my-hash populates the lexical aggregate',
 test_cl('sprintf %.Nf rounds half-to-even like C/Perl printf',
     'printf "%.0f %.0f %.0f %.0f|%.2f|%.0f\n", 2.5, 3.5, 0.5, 1.5, 9.999, -2.5;',
     "2 4 0 2|10.00|-2\n");
+
+# In-memory string filehandles: open my $fh, MODE, \$scalar.  Writes append into
+# the scalar live (a p-string-output-stream Gray stream over the box's adjustable
+# string); reads come from a string-input-stream.  Previously open got the scalar
+# ref stringified to a junk filename and the scalar stayed empty.  Found by the
+# fuzzer special-variable axis (session 244).
+test_cl('in-memory string filehandles (open my $fh, ">", \\$scalar)',
+    'my $w=""; open my $o,">",\$w; print {$o} "a","b"; printf {$o} "%d",7; close $o;'
+    . ' my $a="Z"; open my $ap,">>",\$a; print {$ap} "!"; close $ap;'
+    . ' my $d="p\nq\nr\n"; open my $i,"<",\$d; my $n=0; while(<$i>){$n++} close $i;'
+    . ' print "[$w][$a][$n]\n";',
+    "[ab7][Z!][3]\n");
