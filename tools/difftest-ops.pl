@@ -510,6 +510,60 @@ my @regex2 = (
 );
 add("re2 $_", prog($_)) for @regex2;
 
+# --- Axis 19: autovivification & nested data structures ---------------------
+# Deep hash/array autoviv, push to an autovivified arrayref, mixed AoH/HoA,
+# iterating/building structures in a loop.  Each prints one scalar [payload].
+my @autoviv = (
+    'do { my %h; $h{a}{b}=1; $h{a}{c}=2; join(",",map "$_=$h{a}{$_}",sort keys %{$h{a}}) }',
+    'do { my %h; push @{$h{list}}, 1,2,3; "@{$h{list}}" }',
+    'do { my @a; $a[2][1]=9; $a[2][0]=8; "$a[2][0]$a[2][1]" }',
+    'do { my %h; $h{x}[0]=1; $h{x}[1]=2; "@{$h{x}}" }',
+    'do { my $r={}; $r->{a}{b}{c}=42; $r->{a}{b}{c} }',
+    'do { my @a=([1,2],[3,4]); $a[0][1]+$a[1][0] }',
+    'do { my %h=(a=>[1,2,3]); scalar @{$h{a}} }',
+    'do { my $r=[{n=>1},{n=>2}]; $r->[0]{n}+$r->[1]{n} }',
+    'do { my %h; $h{$_}=$_*$_ for 1..3; join(",",map "$_=$h{$_}",sort keys %h) }',
+    'do { my %seen; $seen{$_}++ for qw(a b a c a b); join(",",map "$_:$seen{$_}",sort keys %seen) }',
+    'do { my @m; $m[$_]=$_**2 for 0..3; "@m" }',
+    'do { my %h; push @{$h{$_%2?"odd":"even"}}, $_ for 1..6; "@{$h{odd}}|@{$h{even}}" }',
+);
+add("av $_", prog($_)) for @autoviv;
+
+# --- Axis 20: numeric stringification & sprintf precision -------------------
+# Float printing (Perl uses %.15g for stringification), large integers crossing
+# the IV/NV boundary, sprintf rounding (banker's vs away-from-zero), %g/%e/%f.
+my @numstr = (
+    '0.1+0.2', '1/3', '2/3', '10/3', '1e20', '1e-20',
+    '0.0000001', '1000000000000000',
+    'sprintf("%.17g",0.1)', 'sprintf("%g",0.1)', 'sprintf("%.15g",1/3)',
+    'sprintf("%e",0)', 'sprintf("%.0f",2.5)', 'sprintf("%.0f",3.5)',
+    'sprintf("%.0f",0.5)', 'sprintf("%d",2**31)', 'sprintf("%x",2**32)',
+    '0.1*3', '3*0.1', 'int(0.1*3*10)', '1.0', '1.5', '100.0',
+    '"3.14"+0', '0.5**10', '10**-5', 'sqrt(2)',
+    'sprintf("%s",0.1+0.2)', 'sprintf("%s",1/3)', '1234567.89', '-1234567.89',
+    '1_000_000 * 1_000_000', '2**53', '2**53 + 1',
+);
+add("ns $_", prog($_)) for @numstr;
+
+# --- Axis 21: short-circuit / defined-or, with side-effect ordering ---------
+# ||/&&///, ||=/&&=///=, and the exact set of operands actually evaluated
+# (tracked via a @log the closure pushes to) — catches eager-evaluation bugs.
+my @sc = (
+    'do { my $x; my $y = $x // "default"; $y }',
+    'do { my $x=0; my $y = $x || "fb"; $y }',
+    'do { my $x=0; my $y = $x // "fb"; $y }',
+    'do { my @log; my $f=sub { push @log,$_[0]; $_[0] }; my $r=$f->(0)||$f->(1)||$f->(2); "$r|@log" }',
+    'do { my @log; my $f=sub { push @log,$_[0]; $_[0] }; my $r=$f->(1)&&$f->(2)&&$f->(3); "$r|@log" }',
+    'do { my $c=0; $c ||= 5; $c ||= 9; $c }',
+    'do { my $h={}; $h->{x} //= 10; $h->{x} //= 20; $h->{x} }',
+    'do { my @a=(1,2,3); my $x = $a[5] // "none"; $x }',
+    'do { my $s = "" || 0 || "third"; $s }',
+    'do { my $n = 0 // 5; $n }',
+    'do { my $x = undef; $x //= do { 42 }; $x }',
+    'do { my ($a,$b)=(0,2); my $r = $a || $b; $r }',
+);
+add("sc $_", prog($_)) for @sc;
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------

@@ -85,6 +85,13 @@ RESULT: 761 valid snippets, 757 match, 4 MISMATCH in 2 clusters
 | 12 | compound assignment & inc/dec | `+= -= *= /= %= **= .= x= \|\|= //= &&=` etc., return value *and* final variable; `$x++`/`++$x` |
 | 13 | array/hash builtins | push/pop/shift/unshift/splice return-value + mutation, `scalar(@a)`/`scalar(%h)`, keys/values/exists/delete, grep/map in scalar |
 | 14 | list construction | list-repeat `(1,2)x3`, swap, list-assign count, nested aref/href, slices, `qw` |
+| 15 | closures & lexical capture | counter/accumulator closures, independent vs shared state, capture-by-ref, nested closures, escape-from-block (foreach per-iteration capture omitted — documented non-support) |
+| 16 | local / dynamic scoping | `local` on package scalars/arrays/hashes + elements, the value a called sub sees during the extent, restoration afterwards |
+| 17 | sort variants | string vs numeric, descending, reverse-sort, multi-key tie-break, sort-by-hash-value, Schwartzian, named comparator, sorted slice |
+| 18 | regex features | `\b`, lookahead/lookbehind, non-greedy, `/g` list & count, `/i /m /s`, backreferences, `/e` with nested calls, alternation, capturing split |
+| 19 | autovivification & nested data | deep hash/array autoviv, `push @{$h{k}}`, AoH/HoA, building structures in a loop |
+| 20 | numeric stringification & sprintf precision | float printing (`%.15g`), IV/NV boundary (`2**53`), `%.Nf` rounding (half-to-even), `%g`/`%e`/`%f` |
+| 21 | short-circuit / defined-or | `\|\| && //`, `\|\|= &&= //=`, and the exact set of operands evaluated (side-effect ordering via a logged closure) |
 
 > **A fuzzer finding is a *candidate*, not a verdict.** Some mismatches are
 > **undefined behavior** in Perl itself — e.g. `$x += $x += 1` modifies a
@@ -139,10 +146,27 @@ This is the running ledger; the authoritative narrative lives in
   never the enclosing sub's tail call). sort/map were unaffected; reverse exposed
   it.
 
+**Session 244 (Axes 15–21):**
+- **closure-captured `my @a`/`my %h` never populated** (axis 15) — a captured
+  array/hash is renamed to a let-bound lexical, but its init went through `p-my-=`
+  (`box-set`), a no-op on a non-box aggregate. Whole-aggregate reads saw an empty
+  array. Fixed via shared `p-array-fill`/`p-hash-fill` (fill the adjustable lexical
+  in place, no proclaim-special) + LIST-context RHS. `cl/pcl-runtime.lisp`,
+  `Pl/Parser.pm`.
+- **`%.Nf` rounded half-AWAY-from-zero** (axis 20) — `sprintf("%.0f",2.5)`→`3`,
+  `("%.0f",0.5)`→`1`. C/Perl round half-to-EVEN (→`2`,`0`). `sprintf-format-float-f`
+  now rounds the *exact rational* of the double with CL `ROUND` (itself half-even),
+  so the scale-by-10^prec is exact. Also lifted sprintf.t +54 / sprintf2.t +42.
+
 **Documented / deferred divergences (the fuzzer keeps reporting these; they are
 intentional):**
 - `**` always yields a float in Perl; PCL returns an exact bignum (differs only
-  past 2^53). Representation choice — `docs/sweep-bug-catalog.md`.
+  past 2^53 — `2**53` prints `9.00719925474099e+15` vs `9007199254740992`).
+  Representation choice — `docs/sweep-bug-catalog.md`.
+- `%.17g` (and precision > 15) prints only ~15 sig-digits: `sprintf("%.17g",0.1)`
+  is `0.1` in PCL vs `0.10000000000000001` in Perl. PCL's float→decimal is the
+  lossy `%.15g`-style path; full 17-digit round-trip is the same representation
+  call as the `**` item. Deferred — `docs/sweep-bug-catalog.md`.
 - named-unary precedence: `length $s + 1` is `length($s+1)` in Perl. Real
   fix-target in `Pl/PExpr.pm` (~2784), deferred.
 - `() = split` LHS-arity LIMIT: `my $n = () = split/,/,"a,b,c"` is `1` in Perl

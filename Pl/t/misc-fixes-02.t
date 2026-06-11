@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 12;
 
 sub run_cl {
     my ($code) = @_;
@@ -167,3 +167,11 @@ test_cl('closure capturing a my-array/my-hash populates the lexical aggregate',
     . ' my $h = do { my %h=(a=>1,b=>2); my $g=sub { $h{c}=3; join(",",sort keys %h) }; $g->() };'
     . ' print "[$r][$h]\n";',
     "[1 2 3|6|3][a,b,c]\n");
+
+# sprintf %.Nf must round half-to-EVEN (C/Perl printf), not half-away-from-zero.
+# Bug (session 244, found by the fuzzer numeric axis): SBCL's ~F (and scaling a
+# float before ROUND) rounds 2.5->3, 0.5->1; C/Perl give 2 and 0.  Fixed by
+# rounding the EXACT rational of the double with CL ROUND (itself half-to-even).
+test_cl('sprintf %.Nf rounds half-to-even like C/Perl printf',
+    'printf "%.0f %.0f %.0f %.0f|%.2f|%.0f\n", 2.5, 3.5, 0.5, 1.5, 9.999, -2.5;',
+    "2 4 0 2|10.00|-2\n");

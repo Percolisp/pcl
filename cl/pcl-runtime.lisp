@@ -2246,14 +2246,20 @@
 
 (defun sprintf-format-float-f (num precision)
   "Format float as fixed-point with given precision (default 6).
-   Precision 0 means no decimal point (Perl: sprintf '%.0f', 0 => '0', not '0.')."
-  (let* ((prec (or precision 6))
-         ;; Use CL format with precision - works correctly with any float type
-         (s (string-left-trim " " (format nil "~,vF" prec (abs num)))))
-    ;; CL produces trailing "." when prec=0 (e.g. "0."); Perl never does
+   Precision 0 means no decimal point (Perl: sprintf '%.0f', 0 => '0', not '0.').
+   Rounds half-to-EVEN on the EXACT value of the double, matching C/Perl printf
+   %f.  (CL's ~F — and scaling a float before ROUND — round half-AWAY-from-zero,
+   so '%.0f' of 2.5 gave 3 and of 0.5 gave 1; C/Perl give 2 and 0.)  Using
+   (rational num) makes the scale-by-10^prec exact, so ROUND — which is itself
+   round-half-to-even — produces the C result without float-multiply error."
+  (let* ((prec    (or precision 6))
+         (exact   (rational (abs num)))      ; exact rational value of the double
+         (scale   (expt 10 prec))
+         (rounded (round (* exact scale))))  ; CL ROUND = round-half-to-even
     (if (zerop prec)
-        (string-right-trim "." s)
-        s)))
+        (format nil "~D" rounded)
+        (multiple-value-bind (int frac) (floor rounded scale)
+          (format nil "~D.~V,'0D" int prec frac)))))
 
 (defun sprintf-format-float-e (num precision upper-case-p)
   "Format float as exponential notation with given precision (default 6)."
