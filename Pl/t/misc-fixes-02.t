@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 29;
 
 sub run_cl {
     my ($code) = @_;
@@ -371,3 +371,31 @@ test_cl('box-set class: clear on ref-holder overwrite, keep on referent write',
     . ' my $x = 1; my $r = bless \$x, "C"; $x = 5;'
     . ' print ref($r), "\n";',
     "[b]plain|[X]1|C\n");
+
+# ── Moo bootstrap fixes (session 248b) ──────────────────────────────────────
+
+# Named sub inside a block must close over the block's `my` lexicals.  The
+# closure-capture renamer skipped named subs, so the block's let of the
+# defvar'd name dynamically shadowed the global the defun read — the sub saw
+# nil.  This is Sub::Quote's eval'd shape: { my $default_for_b = ...;
+# sub new { ... $default_for_b->($new) ... } } — the Moo coderef-default wall.
+test_cl('named sub in a block closes over the block lexical',
+    '{ my $x = sub { "OK" }; sub callit { $x->() } }'
+    . ' print callit(), "|";'
+    . ' { my $n = 41; sub bump { $n + 1 } }'
+    . ' print bump(), "\n";',
+    "OK|42\n");
+
+# SUPER:: through a multi-segment parent package: p-super-call did
+# (find-package (string-upcase ...)), which misses case-preserved
+# |My::Base|-style packages — the walk dead-ended with "No SUPER::new found"
+# (Moo: Animal's SUPER::new -> Moo::Object::new).  Now uses %pcl-find-package
+# like the rest of dispatch.
+test_cl('SUPER:: resolves through multi-segment package names',
+    'package My::Base; sub new { my $c = shift; bless {ok=>1}, (ref($c)||$c) }'
+    . ' package Kid::Sub; our @ISA = ("My::Base");'
+    . ' sub new { my $c = shift; my $o = $c->SUPER::new; $o->{kid}=1; $o }'
+    . ' package main;'
+    . ' my $o = Kid::Sub->new;'
+    . ' print $o->{ok}, $o->{kid}, " ", ref($o), "\n";',
+    "11 Kid::Sub\n");

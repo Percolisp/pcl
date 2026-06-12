@@ -10327,7 +10327,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    the class symbol in the MAIN package rather than the class's own package)."
   (let* ((method-name (to-string method))
          (clos-class-name (perl-pkg-to-clos-class current-class))
-         (pkg (find-package (string-upcase current-class)))
+         ;; %pcl-find-package, NOT (find-package (string-upcase ...)):
+         ;; multi-segment packages are case-preserved (|Moo::Object|), so the
+         ;; raw upcase lookup silently misses them and the SUPER walk dead-ends
+         ;; (Moo: Animal's SUPER::new -> Moo::Object::new was "not found").
+         (pkg (%pcl-find-package current-class))
          (isa-sym (when pkg (find-symbol "@ISA" pkg)))
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
          (isa-non-empty (and isa-val (vectorp isa-val) (> (length isa-val) 0)))
@@ -10352,7 +10356,7 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; @ISA walk path: start from parents of current-class (skip current-class itself)
        (labels ((walk (cls-str visited)
                   (unless (member cls-str visited :test #'equal)
-                    (let* ((cpkg (find-package (string-upcase cls-str)))
+                    (let* ((cpkg (%pcl-find-package cls-str))
                            (fn (when cpkg
                                  (find-symbol (string-upcase (format nil "PL-~A" method-name))
                                               cpkg))))
@@ -10368,7 +10372,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; Method not found via direct lookup — try AUTOLOAD in the parent chain
          (labels ((find-al (cls-str visited)
                     (unless (member cls-str visited :test #'equal)
-                      (let* ((cpkg (find-package (string-upcase cls-str)))
+                      (let* ((cpkg (%pcl-find-package cls-str))
                              (al (when cpkg (find-symbol "PL-AUTOLOAD" cpkg))))
                         (if (and al (eq (symbol-package al) cpkg) (fboundp al))
                             (progn

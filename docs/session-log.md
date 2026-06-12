@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 248b (2026-06-12/13) — Moo: coderef-default wall DOWN (named-sub closure capture); next wall = MGC->new loses all attrs on subclass bootstrap
+
+Continued to Moo after the list-flatten work. **Two fixes, both general:**
+
+1. **Named sub in a block closes over block lexicals** (`Pl/Parser.pm`).
+   The closure-capture scan (`_vars_referenced_in_closures`) deliberately
+   skipped named subs ("global defuns, not closures") — so for
+   `{ my $x = sub{...}; sub callit { $x->() } }` the block's `my $x` was
+   defvar'd by the toplevel-my path AND let-bound by `_with_declarations`;
+   the let dynamically shadowed the global the defun read → callit saw nil
+   ("Undefined subroutine &main::").  Removing the skip lets the existing
+   `__lex__N` rename fire: the let becomes a true CL lexical and the defun
+   (executed at block runtime) closes over it.  File-level
+   `my $x; sub f {$x}` (no block) is unaffected — callers intersect with
+   block-local declarations.  **This was the Moo coderef-default wall**:
+   Sub::Quote evals `{ my $default_for_b = ${$_[1]->{...}}; sub new { ...
+   $default_for_b->($new) ... } }` — the named `sub new` read the unset
+   global.  `has b => (default => sub {"cb"})` now works (moo8.pl GREEN).
+   Diagnosis trick: `SUB_QUOTE_DEBUG=1 ./runpl ...` dumps every generated
+   sub (note: host-perl pl2cl also uses Moo, so most of the dump is the
+   transpiler's own Sub::Quote — grep for your package).
+
+2. **`p-super-call` multi-segment package lookup** (`cl/pcl-runtime.lisp`).
+   The @ISA walk used `(find-package (string-upcase cls))`, which misses
+   case-preserved `|Moo::Object|`-style packages (canonical rule:
+   `perl-pkg-to-cl-pkg-name` upcases only single-segment names).  Switched
+   all 3 lookups to `%pcl-find-package` — the same helper p-method-call and
+   p-bless use.  Fixes "No SUPER::new found from Animal" (extends chain).
+
+Tests: misc-fixes-02.t #28 (named-sub block capture) + #29 (multi-seg SUPER).
+
+**Moo status:** single-class Moo is fully working incl. coderef defaults,
+lazy, required, ro/rw.  **NEXT WALL — subclass constructor bootstrap**
+(probe ladder /tmp/moo13–18.pl shapes, instrumented session log below):
+`package Dog; use Moo; extends 'Animal'; Dog->new` → empty hash (no
+defaults).  Root cause localized with shadow-instrumented lib/Moo.pm +
+lib/Method/Generate/Constructor.pm (REMOVED after — copy real module to
+lib/, `chmod u+w` it [cp preserves site_perl's 444 mode], add warns):
+- `%construct_opts` is CORRECT right before `MGC->new(%construct_opts)`
+  (`CMF target=[Dog] opts={accessor_generator=...,package=len3,
+  subconstructor_handler=len501}`),
+- but the constructed maker has `selfkeys={}` — **the generated MGC::new
+  stored NOTHING** (all `exists $args->{...}` checks failed), so
+  `install_delayed` reads `$self->{package}` = "" → `defer_sub "::new"` →
+  `$package ||= caller` installs the deferred ctor as **MGC::new instead of
+  Dog::new** → re-dispatch finds Animal::new again → `$MAKERS{Dog}
+  {constructor}` now true → `package Animal; SUPER::new` → Moo::Object::new
+  → bare bless {} (empty hash).  Calls 1 (MGC's own maker) and 2 (Animal)
+  store their attrs fine; only call 3 (Dog, made re-entrantly from INSIDE
+  the eval'd Animal::new) loses them.
+- **Leading hypothesis**: argument flattening shifts the k/v pairing in
+  `MGC->new(%construct_opts)` for call 3 — it differs from calls 1/2 by the
+  `construction_string` opt (`$con->construction_string`, computed from the
+  parent's maker AFTER the CMF warn point); if that value arrives as a raw
+  vector/hash (not a string), p-flatten-args spreads it mid-arglist and the
+  `{@_}` in the generated constructor pairs everything wrong → every
+  `exists` check fails.  NEXT PROBE: dump `$con->construction_string` (ref
+  + value) at the `->new` call, and/or reproduce with a plain
+  `Klass->new(a=>1, weird=>VECTOR, b=>2)` through an eval'd constructor.
+
+---
+
 ## Session 248 (2026-06-12) — list flattening in `return` + parenthesized list in ternary return (2 bugs)
 
 Investigated the session-247 side find: `return ($i, map { $_->() } @subs)`

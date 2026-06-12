@@ -4032,14 +4032,16 @@ sub _vars_referenced_in_closures {
       sub { $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }
     ) || [];   # PPI returns 0 (not undef) when nothing found — use || not //
     for my $kw (@$sub_kws) {
-      # Skip NAMED subs (sub foo { ... }) — they are global defuns, not closures.
-      # Only anonymous subs (sub { ... }) capture variables from the enclosing scope.
-      # To detect named subs: the first non-whitespace sibling after 'sub' is a Word (the name).
-      my $first = $kw->next_sibling;
-      $first = $first->next_sibling while $first && $first->isa('PPI::Token::Whitespace');
-      next if $first && $first->isa('PPI::Token::Word');  # named sub — skip
+      # NAMED subs (sub foo { ... }) count as capturers too: a named sub inside
+      # a block that references a block-local 'my' must see that lexical (Perl
+      # closes over the first instance).  Without the rename, the block's let
+      # of the defvar'd name dynamically shadows the global the defun reads —
+      # the sub sees nil (Moo: Sub::Quote's eval'd `{ my $default_for_b = ...;
+      # sub new { ... $default_for_b->($new) ... } }`).  Over-inclusion is safe:
+      # callers intersect this set with the block-local 'my' declarations, so
+      # file-level `my $x; sub f { $x }` (no enclosing block) is unaffected.
 
-      # Walk forward to find the block (skipping prototypes/attributes for anon subs)
+      # Walk forward to find the block (skipping name/prototypes/attributes)
       my $sib = $kw->next_sibling;
       $sib = $sib->next_sibling while $sib && !$sib->isa('PPI::Structure::Block');
       next unless $sib;
