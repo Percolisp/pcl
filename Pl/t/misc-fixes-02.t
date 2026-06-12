@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 24;
 
 sub run_cl {
     my ($code) = @_;
@@ -267,3 +267,62 @@ test_cl('deref of container element stays a deref; trailing subscript slices it'
     . ' print scalar(@{$a[0]}), scalar(@{$h{a}}), scalar(@{$o->{x}}), "|",'
     . '       join(",", @{$h{a}}[0,2]), "\n";',
     "333|4,6\n");
+
+# ── Moo-driven fixes (session 247) ──────────────────────────────────────────
+
+# Closure-shadow rename bug: an anon sub that re-declares `my $c` with the SAME
+# name as the outer var the sub is being assigned to (Moo install_delayed:
+# my $c = defer_sub ... sub { my $c = gen(); $c }).  The closure-capture
+# renamer renamed the inner decl's ASSIGNMENT target to the outer __lex__ var
+# while the inner body read its own plain let binding -> undef.  Fixed in
+# _process_variable_statement (rename path strips the var from
+# _current_scope_new_renames for the RHS parse) + _with_declarations (shadowed
+# my-vars drop outer renames for the body).
+test_cl('my $c = sub { my $c = ...; $c } shadow returns inner value',
+    'sub inner { sub { "INNER" } }'
+    . ' sub mf { my ($p) = @_; my $c = sub { my $c = inner($p); $c }; return $c }'
+    . ' my $made = mf("X")->();'
+    . ' print defined $made ? "ok ".$made->() : "UNDEF", "\n";'
+    . ' my $o = 5; my $bump = sub { $o + 1 };'
+    . ' my $f = sub { my $o = inner(); $o };'
+    . ' print $bump->(), " ", $f->()->(), "\n";',
+    "ok INNER\n6 INNER\n");
+
+# Stash delete write-through: delete $Pkg::{name} (via \%{"Pkg::"}) must really
+# remove the sub so *{Pkg::name}{CODE}, defined &, and ->can stop seeing it.
+# Moo's Method::Generate::Constructor bootstrap `sub new` deletes itself from
+# the stash on first call; the old read-only-snapshot p-stash lost the delete
+# and assert_constructor croaked "Unknown constructor ... already exists".
+test_cl('delete from package stash removes the sub (write-through)',
+    'no strict "refs"; package Foo; sub hello { "hi" } package main;'
+    . ' my $st = \%{"Foo::"};'
+    . ' print defined &Foo::hello ? "y":"n", exists $st->{hello} ? "y":"n";'
+    . ' delete $st->{hello};'
+    # NB: perl keeps `defined &Foo::hello` true here (the compiled reference
+    # pins the glob); only the live ->can lookup sees the deletion.
+    . ' print defined &Foo::hello ? "y":"n", Foo->can("hello") ? "y":"n", "\n";',
+    "yyyn\n");
+
+# Typeglob deref slots: @{*{globref}} (and %{...}) must resolve to the glob's
+# ARRAY/HASH slot, live and lvalue-capable.  Moo's _set_superclasses does
+# @{*{_getglob("${target}::ISA")}} = @_ — the write was silently lost, so
+# `extends` never changed @ISA.
+test_cl('@{*{globref}} reads and writes the glob ARRAY slot',
+    'no strict "refs"; @Bar::ISA = ("X");'
+    . ' sub _gg { no strict "refs"; \*{$_[0]} }'
+    . ' @{*{_gg("Bar::ISA")}} = ("Foo");'
+    . ' print "(@Bar::ISA)(@{*{_gg(q(Bar::ISA))}})\n";',
+    "(Foo)(Foo)\n");
+
+# local $h{k} = {} must store the init with ordinary assignment box shape:
+# %p-lhe-init used raw make-p-box, so the localized hashref defeated
+# p-autoviv-gethash's unboxing — a later nested write clobbered the elem with
+# a RAW hash and scalar reads returned the COUNT (Moo: local $self->{captures}
+# = {} then $self->{captures}{$k} = \$v in generate_method).
+test_cl('local hash-elem init holds a hashref usable by nested writes',
+    'my $self = { captures => undef };'
+    . ' sub fill { my $s = shift; $s->{captures}{q($x)} = \42; }'
+    . ' { local $self->{captures} = {}; fill($self); my $c = $self->{captures};'
+    . '   print ref($c), " ", scalar(keys %$c), " ", ${$c->{q($x)}}, "\n"; }'
+    . ' print defined $self->{captures} ? "kept" : "restored", "\n";',
+    "HASH 1 42\nrestored\n");

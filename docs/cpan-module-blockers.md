@@ -1,5 +1,26 @@
 # CPAN module blockers — what to fix next
 
+> **Session 247 update (2026-06-12): Moo CONSTRUCTOR WALL DOWN.**
+> `package Point; use Moo; has x=>(is=>'ro'); has y=>(is=>'rw'); Point->new(x=>3,y=>4)`
+> WORKS end-to-end (construction, ro read, rw set/get), as do scalar defaults
+> (`default => 4`), `is => 'lazy'` + `_build_*`, and `extends` (@ISA now really
+> changes). Four GENERAL bugs fixed (see session-log §247): (1) stash delete
+> write-through (MGC bootstrap `delete _getstash(...)->{new}`); (2) closure-shadow
+> rename bug (`my $c = sub { my $c = ...; $c }` — Sub::Defer maker returned undef);
+> (3) `@{*{globref}}` typeglob-deref ARRAY/HASH slot read+write (Moo extends);
+> (4) `local $h{k} = {}` box shape (MGC `local $self->{captures}`).
+>
+> **Moo's REMAINING wall (247): coderef-default captures.**
+> `has b => (is=>'ro', default=>sub{"cb"}); P2->new->b` →
+> `Undefined subroutine &main:: called at (eval 1) line 1` — the generated
+> constructor's `$default_for_b->($new)` capture arrives UNDEF inside the
+> string-eval. Plain `quote_sub q{ $cb->() }, { '$cb' => \$cb }` WORKS (probe),
+> and the `@{$self->{captures}}{keys %$x} = values %$x` merge works in isolation
+> — so the loss is somewhere in MGA's `_generate_default`/`_cap_call` chain
+> between spec and quote_sub. NEXT: shadow-instrument Sub::Quote (dump capture
+> keys/definedness at quote and unquote time) and MGA `_generate_default`;
+> note the instrumented-copy-in-lib/ technique from session 247 (REMOVE after).
+
 > **Session 240 update (2026-06-09):** Moo now LOADS its whole stack, generates accessors, and
 > rw set/get works. Six general bugs fixed this session (each a Moo wall), all gate-green:
 > 1. **`package NAME;` inside a BEGIN/scheduled block is block-scoped** — was leaking past the

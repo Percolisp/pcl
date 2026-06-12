@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 247 (2026-06-12) — Moo: constructor wall DOWN (4 general bugs fixed); next wall = coderef-default captures
+
+Goal: make CPAN Moo work. Drove `package Point; use Moo; has x=>(is=>'ro');
+Point->new(x=>3)` (the session-240 wall) to GREEN, plus scalar defaults, lazy
+builders, required, ro/rw accessors. Method: instrument shadowed copies of the
+real Sub::Defer/Sub::Quote in `lib/` (REMOVED afterwards — debug only), bisect
+with minimal probes, fix each layer-correct bug. **All four fixes are GENERAL
+plain-Perl bugs, not Moo special-cases:**
+
+1. **Stash delete write-through** (`cl/pcl-runtime.lisp`). MGC's bootstrap
+   `sub new { delete _getstash(__PACKAGE__)->{new}; ... }` deletes itself; the
+   old p-stash snapshot lost writes, so `assert_constructor` croaked "Unknown
+   constructor ... already exists". Fix: `*p-stash-pkg-table*` (weak eq table
+   snapshot-hash → pkg name, registered in `p-stash`) + `p-delete` write-through
+   (resolve `Pkg::name` via `%p-resolve-sub-symbol`, `fmakunbound`). First step
+   of the not-supported.md "live stash" roadmap. NB perl semantics: after the
+   delete, `->can` says no but `defined &Foo::hello` stays TRUE (compiled ref
+   pins the glob) — both match now.
+
+2. **Closure-shadow rename bug** (`Pl/Parser.pm`) — found via Sub::Defer maker
+   returning undef. `my $c = sub { my $c = inner(); $c }` (inner my SHADOWS the
+   outer var being assigned): the capture renamer emitted the inner decl's
+   assignment against the OUTER `$c__lex__N` while the body read its own plain
+   let binding → undef return (and outer clobber). TWO fix sites: (a) the
+   `_process_variable_statement` rename path now strips `$var_name` from
+   `_current_scope_new_renames` while parsing the RHS (the lambda lives there);
+   (b) `_with_declarations`: when a body's my-vars shadow outer renames and the
+   body adds no new renames, drop the shadowed names from the scope map (was:
+   map left at outer value). `my $i = $i + 1` semantics preserved.
+
+3. **Typeglob-deref slots** (`cl/pcl-runtime.lisp`). Moo `extends` does
+   `@{*{_getglob("${target}::ISA")}} = @_` — PCL's `p-cast-@` didn't recognize
+   a p-typeglob operand → write silently lost → @ISA never changed (extends
+   no-op; `has '+attr'` croaked "no attr attribute already exists"). Fix:
+   `%p-glob-slot-place` + typeglob arms in `p-cast-@` (ARRAY slot) and
+   `p-cast-%` (HASH slot), live + lvalue-capable (binds empty if unbound).
+
+4. **`local $h{k} = {}` box shape** (`cl/pcl-runtime.lisp`). `%p-lhe-init`
+   stored the init via raw `make-p-box`; the localized hashref's nonstandard
+   shape defeated `p-autoviv-gethash`'s unbox → a later nested write
+   (`$self->{captures}{$k} = \$v`, MGC generate_method) clobbered the elem with
+   a RAW hash; scalar reads then returned the COUNT. Fix: normalize through
+   `box-set` like ordinary `(setf p-gethash)`.
+
+**Moo status after:** `Point->new(x=>3,y=>4)` + ro/rw accessors + rw set ✓;
+scalar `default => 4` ✓; `is => 'lazy'` + `_build_` ✓. **NEXT WALL:**
+`default => sub {...}` (coderef default) → "Undefined subroutine &main:: called
+at (eval 1) line 1" — the `$default_for_b` CAPTURE arrives undef inside the
+eval'd constructor (plain quote_sub coderef captures DO work — probe passes;
+suspect the captures hash loses the entry somewhere between MGA's
+`_cap_call`/slice-merge and quote_sub's `%$captures` copy). moo2.pl (extends +
+`+sound` override + required) gets past +sound now, dies on the same
+has_default/captures issue. Repro: `/tmp/moo8.pl` equivalent:
+`package P2; use Moo; has b => (is=>'ro', default=>sub{"cb"}); P2->new->b`.
+
+Regression tests: misc-fixes-02.t 21–24 (shadow, stash-delete, glob-slot
+deref, local-elem init). Gate + tests 21/23/24 verified; full gate result in
+this session's commit message.
+
+**Git note:** a `git stash push` hit "could not write index" mid-session and a
+subsequent pop pulled in the OLD `pack-P WIP` stash (conflict in
+cl/pcl-pack.lisp) — restored those files to HEAD; **stash@{0} "pack-P WIP
+(paused)" still exists and still holds that work.**
+
+---
+
 ## Session 246 (2026-06-12) — symbolic-ref slices RESOLVED at the parser layer (option 3)
 
 Closed the session-245 open decision by implementing the **parser-level fix**

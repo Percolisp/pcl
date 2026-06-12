@@ -5579,6 +5579,14 @@
       ((hash-table-p h) (nth-value 1 (gethash k h)))
       (t nil))))
 
+(defvar *p-stash-pkg-table* (make-hash-table :test 'eq :weakness :key)
+  "Weak side-table mapping a stash snapshot hash (as returned by p-stash) to its
+   Perl package name.  Lets mutation primitives recognize a stash and write
+   through to the CL package: delete $Pkg::{name} must really remove the sub so
+   *{Pkg::name}{CODE} and method dispatch stop seeing it (Moo's
+   Method::Generate::Constructor bootstrap `delete _getstash(...)->{new}`
+   depends on this).  Weak keys so abandoned snapshots are collected.")
+
 (defun p-delete (hash key)
   "Perl delete function for hashes - returns unboxed value"
   (let ((h (unbox hash))
@@ -5593,6 +5601,14 @@
          (remhash k *p-inc-table*)
          (if found (unbox v) *p-undef*)))
       (t
+       ;; Stash write-through: deleting a sub entry from a package stash
+       ;; (delete $Pkg::{name}) must really remove the sub from the package.
+       (let ((stash-pkg (gethash h *p-stash-pkg-table*)))
+         (when stash-pkg
+           (let ((sym (%p-resolve-sub-symbol
+                       (concatenate 'string stash-pkg "::" k))))
+             (when (and sym (fboundp sym))
+               (fmakunbound sym)))))
        (multiple-value-bind (v found) (gethash k h)
          (remhash k h)
          (if found
@@ -5746,7 +5762,8 @@
    Keys are lowercase Perl sub names; values are (make-p-box function).  Child
    namespaces are also added as \"<child>::\" keys (see %p-stash-add-child-namespaces).
    delete $::{foo} → (p-delete (p-stash \"main\") \"foo\") returns the code ref.
-   This is a snapshot (not a live view), sufficient for delete/lookup of existing subs."
+   Reads are a snapshot (not a live view); deletes write through to the package
+   via *p-stash-pkg-table*."
   (let* ((pkg-str (if (or (string= (string-downcase pkg-name) "main")
                           (string= pkg-name ""))
                       "MAIN"
@@ -5765,6 +5782,7 @@
                 (setf (gethash perl-name h)
                       (make-p-box (symbol-function sym)))))))))
     (%p-stash-add-child-namespaces pkg-name h)
+    (setf (gethash h *p-stash-pkg-table*) pkg-name)
     h))
 
 ;;; ============================================================
@@ -8730,19 +8748,35 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (sym (intern cl-func-name *package*)))
                (and (fboundp sym) (symbol-function sym)))))))))
 
+(defun %p-glob-slot-place (glob sigil init)
+  "The value bound to GLOB's SIGIL slot symbol (\"@\" array / \"%\" hash),
+   binding INIT first if the slot is unbound.  Returning the live binding makes
+   @{*{glob}} / %{*{glob}} read AND write through to the package variable
+   (Moo's _set_superclasses: @{*{_getglob(\"Pkg::ISA\")}} = @_)."
+  (let ((sym (let ((n (concatenate 'string sigil (p-typeglob-name glob)))
+                   (p (p-typeglob-package glob)))
+               (or (find-symbol n p) (intern n p)))))
+    (unless (boundp sym)
+      (setf (symbol-value sym) init))
+    (symbol-value sym)))
+
 (defun p-cast-@ (val)
   "Perl array dereference @{$ref} - unbox to get the array.
    Handles both old format (box containing vector) and new format
    (box containing box containing vector, from p-backslash).
    Auto-vivifies: if val is a box whose value is undef/nil, creates an empty
    array, stores it back in the box, and returns it (Perl lvalue semantics).
-   Symbolic ref: if val unboxes to a string, treats it as a package variable name."
+   Symbolic ref: if val unboxes to a string, treats it as a package variable name.
+   Typeglob: @{*{...}} resolves to the glob's ARRAY slot (live, lvalue-capable)."
   (let ((v (unbox val)))
     (cond
       ;; Double-boxed: box(box(arr)) from \@arr — unwrap both layers
       ((p-box-p v) (unbox v))
       ;; Direct vector
       ((and v (vectorp v) (not (stringp v))) v)
+      ;; Typeglob (from *{EXPR} or a glob ref): the glob's ARRAY slot
+      ((p-typeglob-p v)
+       (%p-glob-slot-place v "@" (make-array 0 :adjustable t :fill-pointer 0)))
       ;; Symbolic reference: @{"pkg::var"} — look up/create the package variable
       ((stringp v)
        (%p-symref-array v))
@@ -8766,6 +8800,9 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((v (unbox val)))
     (cond
       ((p-box-p v) (unbox v))
+      ;; Typeglob (from *{EXPR} or a glob ref): the glob's HASH slot
+      ((p-typeglob-p v)
+       (%p-glob-slot-place v "%" (make-hash-table :test 'equal)))
       ((and (stringp v)
             (>= (length v) 2)
             (string= (subseq v (- (length v) 2)) "::"))
@@ -9389,7 +9426,11 @@ buffer's fill-pointer; everything else falls back to file-length."
         (if old-ex (setf (gethash kv hv) old-bx) (remhash kv hv)))))
 
 (defun %p-lhe-init (hv kv init-val)
-  "Save hash[key] and install init-val. Returns saved state vector."
+  "Save hash[key] and install init-val. Returns saved state vector.
+   init-val goes through box-set (not raw make-p-box) so the localized elem has
+   the same box shape as ordinary (setf p-gethash) — a raw-wrapped ref defeats
+   p-autoviv-gethash's unboxing and gets clobbered (Moo: local $self->{captures}
+   = {} then $self->{captures}{$k} = ...)."
   (if (eq hv '%ENV-MARKER%)
       (let* ((old (sb-posix:getenv kv))
              (s (if (or (null init-val) (eq init-val *p-undef*))
@@ -9397,7 +9438,9 @@ buffer's fill-pointer; everything else falls back to file-length."
         (if s (sb-posix:setenv kv s 1) (sb-posix:unsetenv kv))
         (vector :env old))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
-        (setf (gethash kv hv) (make-p-box init-val))
+        (let ((bx (make-p-box nil)))
+          (box-set bx init-val)
+          (setf (gethash kv hv) bx))
         (vector :hash old-ex old-bx))))
 
 (defmacro p-local-hash-elem (hash-var key-form &body body)

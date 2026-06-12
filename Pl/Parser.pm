@@ -1348,6 +1348,18 @@ sub _process_variable_statement {
           delete $temp{$var_name};
         }
         $self->environment->state_var_renames(\%temp);
+        # Also remove it from _current_scope_new_renames for the RHS parse: an
+        # anon sub in the RHS may RE-DECLARE `my $var_name` (Moo install_delayed:
+        # my $c = defer_sub ... sub { my $c = gen(); $c }).  That inner decl is a
+        # SHADOW with its own plain let binding; if this map still carries the
+        # rename, the inner decl's assignment would target OUR new __lex__ var
+        # while the inner body reads its plain binding (assignment lost).
+        my $saved_scope_rn = $self->{_current_scope_new_renames};
+        {
+          my %scope = %{ $saved_scope_rn // {} };
+          delete $scope{$var_name};
+          $self->{_current_scope_new_renames} = \%scope;
+        }
 
         # An array/hash LHS forces LIST context on the RHS — resolved at COMPILE
         # time (no runtime *wantarray* check): `my @a = (1,2,3)` captured by a
@@ -1358,6 +1370,7 @@ sub _process_variable_statement {
 
         # Re-apply new rename
         $self->environment->state_var_renames($env_renames);
+        $self->{_current_scope_new_renames} = $saved_scope_rn;
 
         # Choose the assignment op by LHS sigil.  A captured array/hash is a
         # let-bound LEXICAL (already an adjustable array / hash table), so we
@@ -4492,6 +4505,18 @@ sub _with_declarations {
         $self->{_current_scope_new_renames} = \%new_renames;
         $self->{_current_scope_old_renames} = \%old_renames;
       }
+      else {
+        # All of this body's 'my' vars shadow renames from an OUTER sub scope
+        # (e.g. `my $c = sub { my $c = f(); $c }` — Moo's install_delayed maker).
+        # The let above binds the PLAIN name and the env map was stripped, so
+        # references resolve plainly; _current_scope_new_renames must drop the
+        # shadowed names too, or _process_variable_statement's rename path
+        # emits the inner decl's assignment against the OUTER __lex__ variable
+        # while the body reads the plain let binding (assignment lost).
+        my %scope = %{ $saved_scope_renames // {} };
+        delete @scope{keys %shadowed_state};
+        $self->{_current_scope_new_renames} = \%scope;
+      }
     }
 
     # Save/restore _my_binding_init_vars so nested _with_declarations calls don't interfere.
@@ -4511,6 +4536,9 @@ sub _with_declarations {
       if (%new_renames) {
         $self->{_current_scope_new_renames} = $saved_scope_renames;
         delete $self->{_current_scope_old_renames};
+      }
+      else {
+        $self->{_current_scope_new_renames} = $saved_scope_renames;
       }
     }
 

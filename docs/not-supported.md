@@ -60,11 +60,16 @@ mutates the stash (`Exporter`, plugin loaders, `*{...}` glob tricks) relies on
 this being live.
 
 **PCL behaviour:** The syntax (`$Pkg::`, `%Pkg::`, `$::`, `%::`, `*Pkg::`) parses
-and routes to `(p-stash "Pkg")`, but `p-stash` returns a **read-only snapshot
-containing only subs** (a fresh hash of `name → code-ref` built from the CL
-package on each call).  Reads of existing subs (`delete`/`exists`/lookup) work;
-writes are lost; scalar/array/hash/IO glob slots are absent; `local` on a stash
-element is skipped.
+and routes to `(p-stash "Pkg")`, but `p-stash` returns a **snapshot containing
+only subs** (a fresh hash of `name → code-ref` built from the CL package on
+each call).  Reads of existing subs (`exists`/lookup) work.  **`delete` now
+writes through** (session 247): each snapshot is registered in a weak
+side-table (`*p-stash-pkg-table*`), and `p-delete` on a stash also
+`fmakunbound`s the sub in the CL package, so `*{Pkg::name}{CODE}` and method
+dispatch stop seeing it (Moo's Method::Generate::Constructor bootstrap relies
+on this).  Other writes (`$Pkg::{foo} = \&bar`) are still lost;
+scalar/array/hash/IO glob slots are absent; `local` on a stash element is
+skipped.
 
 **Why deferred, not permanent:** PCL package vars and subs already *are* CL
 symbols in a CL package, so the stash is introspectable via `do-symbols`.  The
