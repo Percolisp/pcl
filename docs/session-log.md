@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 248 (2026-06-12) — list flattening in `return` + parenthesized list in ternary return (2 bugs)
+
+Investigated the session-247 side find: `return ($i, map { $_->() } @subs)`
+printed `5,ARRAY(0x...)` instead of `5,6,6`. Two distinct bugs, both general:
+
+1. **`p-return` list-context multi-value branch didn't flatten**
+   (`cl/pcl-runtime.lisp`): it built `(vector (p-return-value v) ...)`, so an
+   array-valued element (map/grep result, @array) stayed a NESTED vector.
+   List assignment (`my @r = f()`) deep-flattens and hid the bug; `join(",",
+   f())` stringified the inner vector as ARRAY. Fix: build via
+   `p-flatten-args` (raw vectors/hashes spread; boxes/refs/blessed intact).
+   Bonus: `return (1, (), 2)` no longer contributes a spurious empty vector.
+
+2. **`gen_tree_val` multi-value non-list branch always emitted the comma
+   OPERATOR** (`Pl/ExprToCL.pm`): a parenthesized list in a runtime-context
+   position — e.g. a ternary arm in `return wantarray ? ($i, map ...) : 0` —
+   ran as `(progn ...)` and dropped all but the last value. Fix: for
+   **INHERIT_CTX only**, emit `(if (eq *wantarray* t) (p-flatten-args (list
+   ...)) (progn ...))` — the same runtime dispatch gen_progn uses. Two
+   restrictions proved load-bearing during validation:
+   - *truthiness broke Moo*: `:void` is truthy, and Sub::Defer's
+     `*_subname = cond ? \&f : ($flag = 1, sub {...})` sits in a
+     :void-wrapped statement — the vector branch handed the glob a vector
+     (`PL-_SUBNAME undefined`, ALL of Moo broken). Hence `(eq *wantarray* t)`.
+   - *firing on SCALAR/VOID ctx broke cmpchain.t* (20 sweep regressions):
+     `($e .= "a", $x) == ($e .= "b", $y)` inside `join`'s list args — the
+     operand is statically scalar but dynamic `*wantarray*` is t. Hence
+     INHERIT_CTX only.
+
+Verification: gate 92 files/3350 ALL PASS (3×), fuzzer 959/965 (only the 6
+known documented divergences), full sweep **68 fully passing** (66→68:
+cmpchain.t + anonsub.t now full), sweep-diff 0 regressions from this work.
+Regression tests: misc-fixes-02.t #25–26.
+
+**NOT the Moo root cause:** the coderef-default wall (`default => sub{...}`
+→ "Undefined subroutine &main:: called at (eval 1) line 1") is unchanged.
+
+**Pre-existing regressions found by sweep-diff (NOT from this session;
+verified identical on clean HEAD):** parent.t #7/#8 ("baseclass that does
+not exist" — error text now `Package REALLYREALLYNOTEXISTS does not exist`
+instead of `Can't locate ... in @INC`) and substr.t #378 ("substr lvalue
+assignment when stringification turns on UTF8ness"). Baseline `95bfc9e` has
+no rows for either file, so they broke in one of the ~55 commits since —
+bisect target.
+
+---
+
 ## Session 247 (2026-06-12) — Moo: constructor wall DOWN (4 general bugs fixed); next wall = coderef-default captures
 
 Goal: make CPAN Moo work. Drove `package Point; use Moo; has x=>(is=>'ro');

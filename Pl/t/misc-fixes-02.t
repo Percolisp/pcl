@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 26;
 
 sub run_cl {
     my ($code) = @_;
@@ -326,3 +326,29 @@ test_cl('local hash-elem init holds a hashref usable by nested writes',
     . '   print ref($c), " ", scalar(keys %$c), " ", ${$c->{q($x)}}, "\n"; }'
     . ' print defined $self->{captures} ? "kept" : "restored", "\n";',
     "HASH 1 42\nrestored\n");
+
+# ── List flattening in return (session 248) ─────────────────────────────────
+
+# p-return's list-context multi-value branch built (vector v1 v2 ...) without
+# splicing array-valued elements, so `return ($i, map ...)` handed the caller
+# a NESTED vector — join() stringified it as ARRAY(0x...).  List assignment
+# happened to deep-flatten, hiding the bug.  Now flattened via p-flatten-args
+# (raw vectors/hashes spread; boxes/refs/blessed stay intact).
+test_cl('return ($i, map ...) flattens; refs in returned list stay refs',
+    'sub f { my $i = 5; my @subs = (sub { 6 }, sub { 6 });'
+    . '   return ($i, map { $_->() } @subs); }'
+    . ' sub g { my $i = 1; return ($i, [2,3], ()); }'
+    . ' print join(",", f()), "|";'
+    . ' my @g = g(); print scalar(@g), ",", $g[1][1], "\n";',
+    "5,6,6|2,3\n");
+
+# gen_tree_val emitted a bare (progn ...) for a multi-value parenthesized list
+# in non-list static context, so a ternary branch inside return — context only
+# known at runtime — ran as the comma OPERATOR and dropped all but the last
+# value.  Now it dispatches on *wantarray* like gen_progn does.
+test_cl('parenthesized list in ternary return: list vs scalar by context',
+    'sub t { my @a = (7,8); return wantarray ? (0, @a) : -1 }'
+    . ' sub u { my $i = 5; my @s = (sub { 6 });'
+    . '   return wantarray ? ($i, map { $_->() } @s) : 0 }'
+    . ' print join(",", t()), ",", scalar(t()), "|", join(",", u()), "\n";',
+    "0,7,8,-1|5,6\n");

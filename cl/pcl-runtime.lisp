@@ -6034,7 +6034,11 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
           `(throw :p-return
              (let ((*wantarray* *pcl-caller-wantarray*))
                (if (eq *wantarray* t)
-                   (vector ,@(mapcar (lambda (v) `(p-return-value ,v)) values))
+                   ;; List flattening: return ($i, map ...) splices array-valued
+                   ;; elements (raw vectors / non-blessed hashes) like any Perl
+                   ;; list; boxes (refs) stay intact.  p-flatten-args is the
+                   ;; same rule @_ uses.
+                   (p-flatten-args (list ,@(mapcar (lambda (v) `(p-return-value ,v)) values)))
                    (p-return-value ,(car (last values)))))))))
 
 (defmacro p-last (&optional label)

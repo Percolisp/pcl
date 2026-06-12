@@ -2749,6 +2749,22 @@ sub gen_tree_val {
     return "(vector $forms_str)";
   }
 
+  # INHERIT context with multiple forms: the real context is only known at
+  # runtime (e.g. this is a ternary branch inside `return`, where Perl treats
+  # ($a, LIST) as a list in list context but as the comma operator in scalar
+  # context).  p-flatten-args builds a flat vector (spreads raw vectors/
+  # hashes, keeps boxes/refs).  Two restrictions, both load-bearing:
+  # - only INHERIT_CTX: a statically scalar operand position (e.g. the
+  #   comma exprs in cmpchain.t's `($e .= "a", $x) == ($e .= "b", $y)`) must
+  #   stay a progn even when the *dynamic* *wantarray* happens to be t
+  #   (the comparison sits inside join's list-context args).
+  # - (eq *wantarray* t), not truthiness: :void takes the comma-operator
+  #   branch (Sub::Defer: `*_subname = cond ? \&f : ($flag = 1, sub {...})`
+  #   inside a :void-wrapped statement).
+  if (@forms > 1 && $ctx == INHERIT_CTX) {
+    return "(if (eq *wantarray* t) (p-flatten-args (list $forms_str)) (progn $forms_str))";
+  }
+
   return "(progn $forms_str)";
 }
 
