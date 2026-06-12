@@ -72,6 +72,40 @@ unwinding.  Requires CL condition restarts to do cleanly.
 
 ## Tier 2 — Medium value (tens of tests, clear approach)
 
+### Wire tie for hashes/arrays (TIEHASH/TIEARRAY element dispatch)  (~1 session each)
+
+**Status (probed session 247):** `tie` is one-quarter done, and the missing
+three quarters are mechanical, not architectural.
+
+- **TIESCALAR WORKS end-to-end.**  The `p-tie-proxy` lives in the scalar's
+  box; `unbox` → FETCH, `box-set` → STORE.  Verified: a self-incrementing
+  FETCH counter and STORE both match perl.  (Same hook `p-magic-cell` reuses
+  for `\substr`/`\pos`/`\vec`.)
+- **TIEHASH/TIEARRAY: the proxy IS created but never consulted.**  `p-tie`
+  (cl/pcl-runtime.lisp ~9737) already dispatches to TIEHASH/TIEARRAY by
+  container type and stores the proxy — but the element primitives
+  (`p-gethash`, `(setf p-gethash)`, `p-delete`, `p-exists`, `p-keys`,
+  `p-each`, and the `p-aref`/`p-array-set`/push/pop/shift/unshift/splice
+  family) never check for it.  A tied `$h{k}` read returns nothing instead
+  of calling FETCH.
+- **TIEHANDLE: absent.**
+
+**Fix shape:** add a `p-tie-proxy-p` arm to each container primitive — the
+exact pattern the `%ENV-MARKER%`/`%INC-MARKER%`/stash arms already use at
+the same chokepoints.  Method map: hash FETCH/STORE/EXISTS/DELETE/CLEAR +
+FIRSTKEY/NEXTKEY (drives `keys`/`each`); array FETCH/STORE/FETCHSIZE/
+STORESIZE/PUSH/POP/SHIFT/UNSHIFT/SPLICE/EXTEND.  Estimate ~1 session per
+container kind; TIEHANDLE smaller and rarer.
+
+**Follow-ups once wired (sweep catalog):** double-FETCH ordering
+(`$tied || $var` TODO row), `local.t`'s hang via the real Tie::Array.
+
+**Constraint:** DESTROY is permanently not supported (user decision
+2026-06-12, see not-supported.md) — tie tests that need DESTROY-on-untie
+stay skipped; untie itself just detaches the proxy.
+
+---
+
 ### `prototype()` function  (signatures.t, small)
 
 **What's broken:** `prototype(\&foo)` should return the prototype string
