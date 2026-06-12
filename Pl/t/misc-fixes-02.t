@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 26;
+plan tests => 27;
 
 sub run_cl {
     my ($code) = @_;
@@ -352,3 +352,22 @@ test_cl('parenthesized list in ternary return: list vs scalar by context',
     . '   return wantarray ? ($i, map { $_->() } @s) : 0 }'
     . ' print join(",", t()), ",", scalar(t()), "|", join(",", u()), "\n";',
     "0,7,8,-1|5,6\n");
+
+# box-set class rules (substr.t #378/#383 regressions, session 248):
+# (1) overwriting a box that held a blessed REF with a plain value clears the
+#     stale class (else overloaded "" keeps firing on the new string and
+#     p-aref's symbolic-ref arm turns it into undef);
+# (2) a blessed object assigned into a substr lvalue reaches the magic-cell
+#     setter still boxed, so its "" overload is used (exactly once);
+# (3) a blessed scalar REFERENT keeps its class on assignment (Perl SV stash).
+test_cl('box-set class: clear on ref-holder overwrite, keep on referent write',
+    'package o { use overload q("") => sub { ++our $count; $_[0][0] } }'
+    . ' my $refee = bless ["Za"], "o";'
+    . ' my $substr = \substr $refee, -2; $$substr = "b";'
+    . ' print "[$refee]", (ref($refee) eq "" ? "plain" : "CLASSY"), "|";'
+    . ' my $t = ""; $o::count = 0;'
+    . ' ${\substr $t, 0} = bless ["X"], "o";'
+    . ' print "[$t]$o::count|";'
+    . ' my $x = 1; my $r = bless \$x, "C"; $x = 5;'
+    . ' print ref($r), "\n";',
+    "[b]plain|[X]1|C\n");

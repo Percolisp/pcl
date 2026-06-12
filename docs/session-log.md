@@ -41,13 +41,35 @@ Regression tests: misc-fixes-02.t #25–26.
 **NOT the Moo root cause:** the coderef-default wall (`default => sub{...}`
 → "Undefined subroutine &main:: called at (eval 1) line 1") is unchanged.
 
-**Pre-existing regressions found by sweep-diff (NOT from this session;
-verified identical on clean HEAD):** parent.t #7/#8 ("baseclass that does
-not exist" — error text now `Package REALLYREALLYNOTEXISTS does not exist`
-instead of `Can't locate ... in @INC`) and substr.t #378 ("substr lvalue
-assignment when stringification turns on UTF8ness"). Baseline `95bfc9e` has
-no rows for either file, so they broke in one of the ~55 commits since —
-bisect target.
+**Sweep-diff triage (continued same session):**
+- **parent.t #7/#8** — NOT a regression: at baseline-bless commit `95bfc9e`
+  parent.t produced NO OUTPUT (crashed), so the baseline has no rows; the
+  eval'd `use parent`-of-missing-module error text (`Package X does not
+  exist` vs perl's `Can't locate X.pm in @INC`) has failed since ≤ s232
+  (bisect endpoints checked). Open fix target: the "Can't locate" idiom is
+  what CPAN code matches to detect optional modules.
+- **substr.t #378 — REAL regression, root-caused + FIXED.** Bisect →
+  `2bc25da` (s245 p-aref symbolic-ref string arm). But the test had only
+  ever passed BY ACCIDENT (old p-aref char-indexed the string). Real
+  pre-existing bug: **`box-set` never cleared a stale `:CLASS`** when a
+  plain value overwrote a box that held a blessed ref — after a
+  substr-lvalue write through an overloaded object, the stale class kept
+  firing overloaded `""` on the new string and 2bc25da's (correct)
+  symbolic-ref arm made it undef. TWO box-set fixes (cl/pcl-runtime.lisp):
+  (1) clear the class when the box's OLD value was the reference itself
+  (vector/hash/fn/box) — but KEEP it when old value was a plain scalar
+  (blessed scalar REFERENT keeps its class, Perl SV-stash semantics: qr.t
+  `$$e='Fake!'` stays Stew); (2) magic-cell setter receives BLESSED boxes
+  un-unboxed so `""` overload stays visible (substr.t #383 "calls ovld
+  1ce" — which had also only passed via the stale-class accident).
+  Also: the ref-as-lvalue-in-substr warn is suppressed when the class has
+  a `""` overload (perl is silent). substr.t 374→375, concat2.t `.=`
+  utf8-overload test FIXED → fully passing 68→**69**. qr.t verified
+  byte-identical on old/new runtime. Gate 92/3351 PASS, Moo Point OK.
+  Test: misc-fixes-02.t #27.
+- **defins.t #16 flake**: a leftover `perl-tests/t/&=FILE` junk file
+  (io-test debris from a sweep) polluted `glob('*')` — deleting it returns
+  defins.t to 27/27. If it reappears, find which io test creates it.
 
 ---
 

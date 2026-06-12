@@ -762,8 +762,14 @@
     (when (p-magic-cell-p current)
       (return-from box-set
         (funcall (p-magic-cell-setter current)
-                 (if (p-box-p value) (unbox value) value)))))
-  (let ((v (if (p-box-p value)
+                 ;; keep a BLESSED box intact so the setter's stringification
+                 ;; sees its "" overload (substr.t: assigning an overloaded
+                 ;; object to a substr lvalue must call the overload)
+                 (if (and (p-box-p value) (not (p-box-class value)))
+                     (unbox value)
+                     value)))))
+  (let ((old-val (p-box-value box))  ; pre-assignment value, for the class-clear rule below
+        (v (if (p-box-p value)
                (let ((inner (p-box-value value)))
                  (cond
                    ;; Tied source variable: call FETCH to get the actual value.
@@ -802,8 +808,22 @@
     ;; Perl: assigning to a scalar resets pos()
     (remhash box *p-match-pos*)
     ;; Preserve class from blessed boxes
-    (when (and (p-box-p value) (p-box-class value))
-      (setf (p-box-class box) (p-box-class value)))
+    ;; Preserve class from blessed boxes.  Otherwise, CLEAR a stale class —
+    ;; but only when the box's OLD value was itself the reference (vector/
+    ;; hash/function/box): overwriting a blessed REFERENCE-holder with a plain
+    ;; value unblesses the variable (substr.t: a substr-lvalue write through
+    ;; an overloaded object leaves a plain string, else the stale class keeps
+    ;; firing overloaded "" on it).  A blessed scalar REFERENT (old value a
+    ;; plain scalar) keeps its class on assignment, like Perl's SV stash:
+    ;; qr.t `$$e = 'Fake!'` leaves $e blessed into Stew.
+    (if (and (p-box-p value) (p-box-class value))
+        (setf (p-box-class box) (p-box-class value))
+        (when (and (p-box-class box)
+                   (or (and (vectorp old-val) (not (stringp old-val)))
+                       (hash-table-p old-val)
+                       (functionp old-val)
+                       (p-box-p old-val)))
+          (setf (p-box-class box) nil)))
     ;; Glob ref vs bare glob: a typeglob arriving through a ref-wrapper (\\*foo,
     ;; is-ref t) keeps is-ref so it numifies to its address (GLOB(0x..)); a bare
     ;; glob (my $g = *foo) clears it so it numifies to 0.  The typeglob is stored
@@ -1830,12 +1850,15 @@
           (p-warn "substr outside of string\n")))
     (if replacement
         ;; 4-arg form (or lvalue): replace and return the replaced portion
-        (let* (;; Warn when target is a reference being coerced to string
+        (let* (;; Warn when target is a reference being coerced to string —
+               ;; but not when its class has a "" overload (perl uses the
+               ;; overloaded stringification silently; substr.t UTF8ness test)
                (_ (when (p-box-p str)
                     (let ((v (p-box-value str)))
-                      (when (or (and (vectorp v) (not (stringp v)))
-                                (hash-table-p v)
-                                (functionp v))
+                      (when (and (or (and (vectorp v) (not (stringp v)))
+                                     (hash-table-p v)
+                                     (functionp v))
+                                 (not (p-find-overload str "\"\"")))
                         (p-warn "Attempt to use reference as lvalue in substr\n")))))
                (replaced-part (subseq s (min st slen) end-pos))
                (new-str (concatenate 'string
