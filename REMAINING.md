@@ -5,7 +5,7 @@ A reader-friendly overview of what PCL does and, more importantly, what it
 tests, see [`docs/not-supported.md`](docs/not-supported.md); this file is the
 short version.
 
-**Current status:** 91 PCL regression-test files (≈3244 tests), all passing.
+**Current status:** 93 PCL regression-test files (≈3392 tests), all passing.
 Against Perl's own test suite (`perl-tests/`, 106 files) PCL passes the large
 majority of individual tests (~95% of those it runs, 69 files passing
 completely); remaining failures are dominated by the deliberate non-support
@@ -44,7 +44,10 @@ PCL covers the bulk of everyday Perl. In broad strokes:
   globs), package variables, cross-package refs.
 - **Other:** string interpolation (incl. `$a[0]`, `$h{k}`, chained
   `$h->{a}[1]`), heredocs, `BEGIN`/`END` blocks, `eval { }` **and**
-  `eval "string"`, `s///e`, `%ENV`, file I/O, time/system calls.
+  `eval "string"` (the latter with **lexical capture** — the eval'd code reads
+  and writes the enclosing scope's `my` variables, including the `foreach` loop
+  variable and `$a`/`$b`, and closures built inside the eval close over them),
+  `s///e`, `%ENV`, file I/O, time/system calls.
 
 ---
 
@@ -133,9 +136,13 @@ PCL loads only pure-Perl modules:
   before the call, so a `$SIG{__WARN__}` handler mutating a later argument
   mid-build isn't observed.
 - **`$SIG{__DIE__}` handlers** — not invoked (`$SIG{__WARN__}` is).
-- **Context into `eval "string"`** — `wantarray()` inside a string eval isn't
-  reliably context-aware yet (needs the deferred AST context annotations,
-  [`docs/ast-annotation-plan.md`](docs/ast-annotation-plan.md)).
+- **Calling *context* into `eval "string"`** — lexical capture now works (see
+  *What works*), but `wantarray()` inside a string eval isn't reliably
+  context-aware yet (needs the deferred AST context annotations,
+  [`docs/ast-annotation-plan.md`](docs/ast-annotation-plan.md)). A few narrow
+  divergences remain (a `my $a` masking a `sort` *inside* the same eval; nested
+  string eval; a variable referenced *only* through the eval string in a
+  returned closure) — see [`docs/eval-lexical-capture.md`](docs/eval-lexical-capture.md).
 - **Runtime `$ENV{TZ}` changes** — not reflected by later `localtime` calls.
 
 ---

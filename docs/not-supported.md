@@ -706,6 +706,13 @@ is covered by `Pl/t/transpile-test-02.t`).
 
 ## Context propagation into string eval
 
+> **Update (session 250): lexical *variable* capture is now IMPLEMENTED** — the
+> eval'd code reads and writes the enclosing scope's `my` lexicals, and closures
+> built inside the eval close over them (see
+> [`docs/eval-lexical-capture.md`](eval-lexical-capture.md)). This section is now
+> scoped to the remaining gap: propagation of the *calling context*
+> (`wantarray()` / scalar-vs-list), which is still deferred.
+
 **Perl behaviour:** `eval "code"` inherits the calling context.  Code inside the string
 eval can call `wantarray()` and get the correct answer; built-ins such as `%hash{keys}`
 emit a warning when the eval is called in scalar context (e.g. `scalar eval '...'` or
