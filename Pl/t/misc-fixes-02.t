@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 33;
+plan tests => 34;
 
 sub run_cl {
     my ($code) = @_;
@@ -446,3 +446,11 @@ test_cl('refaddr: distinct/stable/undef + agrees with stringification',
     . '       (defined refaddr(5) ? "x" : "u"),'
     . '       ($a == $hex ? "H" : "h"), "\n");',
     "SDuH\n");
+
+# refaddr of a non-ref is undef — including numeric/hex-looking STRINGS, which
+# must NOT be numified (the `ref` guard short-circuits before `0 + $r`).
+test_cl('refaddr returns undef for non-ref scalars (strings included)',
+    'use Scalar::Util qw(refaddr);'
+    . ' print((map { defined refaddr($_) ? "x" : "u" }'
+    . '            ("hello", "42", "0xff", 7, undef)), "\n");',
+    "uuuuu\n");
