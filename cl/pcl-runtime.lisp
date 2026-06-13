@@ -6075,8 +6075,32 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
 (defmacro p-goto-sub (fn)
   "Perl goto &func — tail-call the target function with the current @_.
    Replaces the current frame by throwing :p-return with the result.
-   @_ must be the CL variable bound by the enclosing p-sub."
-  `(throw :p-return (apply ,fn (coerce @_ 'list))))
+   @_ must be the CL variable bound by the enclosing p-sub.
+
+   goto &sub REPLACES the current call frame: the target must see the *caller*
+   of the goto-ing sub, not the goto-ing sub itself (Perl semantics — e.g.
+   Moo::Role::import does `goto &Role::Tiny::import` and Role::Tiny relies on
+   `caller` reporting the original `use`r's package).  So pop the goto-ing sub's
+   frame and restore *pcl-current-package* to its caller before applying FN;
+   FN's own p-sub prologue then pushes that caller as FN's calling frame.
+
+   The TARGET expression is evaluated FIRST, in the CURRENT (un-popped) frame:
+   `goto &{EXPR}` runs EXPR before the frame is replaced, so Exporter's
+   `goto &{as_heavy()}` lets as_heavy read (caller(1))[3] off the real stack to
+   choose heavy_import vs heavy_export.  Only then pop and apply."
+  (let ((target (gensym "GOTO-TARGET")))
+    `(let ((,target ,fn))
+       (throw :p-return
+         (let ((*pcl-current-package*
+                (if *pcl-caller-pkg-stack*
+                    (car *pcl-caller-pkg-stack*) *pcl-current-package*))
+               (*pcl-caller-pkg-stack*
+                (if *pcl-caller-pkg-stack*
+                    (cdr *pcl-caller-pkg-stack*) *pcl-caller-pkg-stack*))
+               (*pcl-caller-subname-stack*
+                (if *pcl-caller-subname-stack*
+                    (cdr *pcl-caller-subname-stack*) *pcl-caller-subname-stack*)))
+           (apply ,target (coerce @_ 'list)))))))
 
 (defmacro p-return (&rest values)
   "Perl return - returns single value or list depending on args.
