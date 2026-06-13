@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 33;
 
 sub run_cl {
     my ($code) = @_;
@@ -431,3 +431,18 @@ test_cl('stringified ref identity is invariant across allocation',
     . ' my $s2 = "$r";'
     . ' print(($s1 eq $s2 ? "SAME" : "MOVED"), "\n");',
     "SAME\n");
+
+# refaddr: implemented via ref-numification over the stable object identity.
+# Distinct refs differ; the same ref is invariant across allocation; a non-ref
+# is undef; and refaddr agrees with the hex of the stringified ref.
+test_cl('refaddr: distinct/stable/undef + agrees with stringification',
+    'use Scalar::Util qw(refaddr);'
+    . ' my $r = {}; my $r2 = {};'
+    . ' my $a = refaddr($r);'
+    . ' my @j; for (1..50000) { push @j, [$_] } @j = ();'
+    . ' my $hex = ("$r" =~ /0x([0-9a-f]+)/) ? hex($1) : -1;'
+    . ' print(($a == refaddr($r) ? "S" : "M"),'
+    . '       (refaddr($r) != refaddr($r2) ? "D" : "d"),'
+    . '       (defined refaddr(5) ? "x" : "u"),'
+    . '       ($a == $hex ? "H" : "h"), "\n");',
+    "SDuH\n");

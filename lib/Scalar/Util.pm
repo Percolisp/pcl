@@ -55,10 +55,20 @@ sub isvstring { 0 }
 sub openhandle { $_[0] }
 sub set_prototype { }
 
-# Not yet implemented in PCL — exported as dying stubs so `use Scalar::Util
-# qw(refaddr unweaken)` succeeds (the real Exporter hard-dies on a missing
-# export, which kills the whole importing file); only an actual CALL fails.
-sub refaddr  { die "Scalar::Util::refaddr is not yet implemented in PCL\n" }
+# refaddr($ref) — the address of the referent, or undef for a non-ref.
+# In Perl numifying a ref yields its address; PCL routes ref-numification
+# through the same stable object-identity (object-address) that ref
+# stringification uses, so `0 + $r` and the hex of `"$r"` agree, and the id is
+# invariant for the referent's lifetime (see object-address in pcl-runtime).
+sub refaddr {
+    my ($r) = @_;
+    return undef unless ref $r;
+    return 0 + $r;
+}
+
+# Not yet implemented in PCL — exported as a dying stub so `use Scalar::Util
+# qw(unweaken)` succeeds (the real Exporter hard-dies on a missing export,
+# which kills the whole importing file); only an actual CALL fails.
 sub unweaken { die "Scalar::Util::unweaken is not yet implemented in PCL\n" }
 
 1;
