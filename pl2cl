@@ -143,7 +143,7 @@ sub _run_server {
     last unless defined $got && $got == $len;
 
     my $cl = eval {
-      my $output = Pl::Parser->parse_code($code);
+      my $output = Pl::Parser->parse_code($code, eval_mode => 1);
       my $preamble = build_eval_preamble($pkg);
       $output =~ s/\(in-package :pcl\)/$preamble/;
       $output
@@ -298,7 +298,8 @@ elsif (!-t STDIN) {
   # Read from stdin
   local $/;
   $code = <STDIN>;
-  my $output = Pl::Parser->parse_code($code);
+  my $output = Pl::Parser->parse_code($code,
+                 (defined $eval_pkg ? (eval_mode => 1) : ()));
 
   if (defined $eval_pkg) {
     # eval-string mode: REPLACE (in-package :pcl) with just the package switch.

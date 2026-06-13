@@ -223,9 +223,12 @@ eval tests (Unicode/bytecode-optimizer internals) for later.
 
 - `$@` will NOT have `" at (eval N) line M.\n"` suffix — PCL doesn't track source locations.
   Already documented in `docs/not-supported.md`.
-- Lexical `my` vars from the enclosing scope are NOT visible in the eval string.
-  In PCL, `my` vars compiled to `defvar` ARE accessible (since defvar is dynamic), which
-  is slightly more permissive than Perl. Acceptable — no CPAN code relies on this difference.
+- **UPDATE (session 250): lexical `my` capture is now IMPLEMENTED** — the eval
+  body can read/write the enclosing scope's `my` lexicals (and closures built
+  inside the eval capture them). See `docs/eval-lexical-capture.md`. The note
+  below is the pre-250 behavior, kept for history:
+  - ~~Lexical `my` vars from the enclosing scope are NOT visible in the eval
+    string.~~  (Now captured via the alist + p-eval-thunk lambda-param mechanism.)
 - Performance: first call for a given string spawns a Perl process (~50–100ms).
   The cache handles repeated identical strings.
 

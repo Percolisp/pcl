@@ -78,7 +78,9 @@
    ;; do BLOCK
    #:p-do
    ;; Exception handling
-   #:p-eval #:p-eval-block #:p-exception #:p-exception-object
+   #:p-eval #:p-eval-block #:p-eval-thunk #:p-eval-lex-lookup
+   #:*p-eval-lex-alist*
+   #:p-exception #:p-exception-object
    ;; File I/O
    #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
@@ -428,6 +430,22 @@
 (defvar *p-eval-counter* 0
   "Incremented per string-eval that throws, so $@'s ' at (eval N) line 1.'
    suffix carries a distinct N like Perl's eval-sequence number.")
+
+;;; Lexical-capture bridge for string eval.  Perl's `eval "code"` can see the
+;;; enclosing sub's `my` lexicals; CL's `eval` runs in the null lexical
+;;; environment and cannot.  PCL bridges the gap by:
+;;;   1. codegen at the eval site passing an alist of (name . box/array/hash)
+;;;      for the in-scope lexicals (bound to *p-eval-lex-alist* by p-eval),
+;;;   2. the transpiler wrapping the eval body in
+;;;      (p-eval-thunk '(free-names) (lambda (free-syms) body)),
+;;; so every variable the eval references that is NOT declared inside the eval
+;;; becomes a lambda parameter.  Because the lambda creates a *lexical* binding,
+;;; closures built inside the eval body capture it correctly (the whole point —
+;;; e.g. Sub::Defer's `eval 'sub { $captured }'`).  See
+;;; docs/eval-lexical-capture.md.
+(defvar *p-eval-lex-alist* nil
+  "Alist (var-name-string . box/array/hash) of the caller's in-scope lexicals,
+   bound by p-eval and consumed by p-eval-thunk.")
 
 ;;; Persistent transpiler subprocess for p-eval
 (defvar *p-transpiler-process* nil
@@ -6350,10 +6368,38 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; $x__lex__N and also invisible. See docs/eval-string-plan.md.
 ;;;
 ;;; $@ format: omits " at (eval N) line M." — documented in not-supported.md.
-(defun p-eval (string)
+(defun p-eval-lex-lookup (name)
+  "Resolve a free variable NAME (e.g. \"$captured\") referenced inside a string
+   eval to the container the eval body should bind it to:
+     - the caller's in-scope lexical, if codegen passed it in *p-eval-lex-alist*;
+     - otherwise the real package global (when the symbol is already bound),
+       so `our`/top-level vars still read/write correctly;
+     - otherwise a fresh undef container (Perl auto-vivifies the global as undef)."
+  (let ((cell (assoc name *p-eval-lex-alist* :test #'string=)))
+    (cond
+      (cell (cdr cell))
+      (t (let ((sym (intern (string-upcase name) *package*))
+               (sigil (char name 0)))
+           (cond
+             ((boundp sym) (symbol-value sym))
+             ((char= sigil #\@) (make-array 0 :adjustable t :fill-pointer 0))
+             ((char= sigil #\%) (make-hash-table :test 'equal))
+             (t (make-p-box nil))))))))
+
+(defun p-eval-thunk (free-names fn)
+  "Apply FN (the lambda wrapping a string-eval body) to the containers for its
+   free variables FREE-NAMES, looked up via p-eval-lex-lookup.  The lambda's
+   parameters are those same variables, so the eval body — and any closure it
+   builds — references them as ordinary lexicals."
+  (apply fn (mapcar #'p-eval-lex-lookup free-names)))
+
+(defun p-eval (string &optional lex-alist)
   "Perl eval(STRING): transpile and evaluate a Perl string at runtime.
+   LEX-ALIST carries the caller's in-scope lexicals (name . container) so the
+   eval body can capture them (see p-eval-thunk).
    Binds *pcl-caller-wantarray* so wantarray() in the eval'd code reflects context."
   (let ((*pcl-caller-wantarray* *wantarray*)
+        (*p-eval-lex-alist* lex-alist)
         (s (to-string (unbox string))))
     ;; eval undef / eval "" -> nil (undef), $@ = ""
     (when (string= s "")

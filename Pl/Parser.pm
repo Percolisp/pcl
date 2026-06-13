@@ -39,6 +39,18 @@ has code => (
   predicate => 'has_code',
 );
 
+# eval_mode: set when transpiling a string for `eval "..."` (via pl2cl
+# --eval-pkg / --server).  In this mode, variables used but not declared
+# inside the eval string are the caller's in-scope lexicals; instead of
+# emitting forward-declaration defvars for them (which proclaim them special
+# and break lexical capture), we record them in _eval_free_vars and wrap the
+# eval body in a (p-eval-thunk '(names) (lambda (syms) body)) so the runtime
+# can bind them to the caller's containers.  See docs/eval-lexical-capture.md.
+has eval_mode => (
+  is      => 'ro',
+  default => sub { 0 },
+);
+
 has ppi_doc => (
   is        => 'lazy',
 );
@@ -381,6 +393,29 @@ sub _assemble_output {
     unshift @{$self->_sections->[0]{preamble}}, @predecls;
   }
 
+  # eval-string mode: emit all preambles+declarations, then wrap the combined
+  # definitions+runtime (the actual eval body) in a (p-eval-thunk ...) so the
+  # caller's in-scope lexicals become lambda parameters.  See eval_mode above.
+  if ($self->eval_mode) {
+    my (@head, @body);
+    for my $section (@{$self->_sections}) {
+      push @head, @{$section->{preamble}};
+      push @head, @{$section->{declarations}};
+      push @body, @{$section->{definitions}};
+      my @rt = @{$section->{runtime}};
+      push @body, _wrap_runtime_labels(\@rt);
+    }
+    my @free = @{$self->{_eval_free_vars} // []};
+    return (@head, @body) unless @free;
+    my $names  = join(' ', map { "\"$_\"" } @free);
+    my $params = join(' ', @free);
+    return (@head,
+            "(pcl:p-eval-thunk (list $names)",
+            " (lambda ($params)",
+            @body,
+            " ))");
+  }
+
   # Assemble: for each section emit preamble → declarations → definitions → runtime
   my @lines;
   for my $section (@{$self->_sections}) {
@@ -643,12 +678,15 @@ sub _insert_variable_forward_declarations {
     }
   }
 
+  my %forced_sort_var;  # $a/$b force-declared here (vs. user-declared via my)
   unless ($declared{'$a'}) {
     push @$decls, "(defvar \$a (make-p-box nil))";
     push @$decls, "(defvar \$b (make-p-box nil))";
     push @$decls, "";
     $declared{'$a'} = 1;
     $declared{'$b'} = 1;
+    $forced_sort_var{'$a'} = 1;
+    $forced_sort_var{'$b'} = 1;
   }
 
   my %lex_foreach = %{$self->{_lexical_foreach_vars} // {}};
@@ -699,6 +737,26 @@ sub _insert_variable_forward_declarations {
       push @$decls, @cross_decls;
       push @$decls, "";
     }
+  }
+
+  # eval-string mode: the eval body's free variables become parameters of the
+  # wrapping (p-eval-thunk ...) lambda, so the runtime can bind them to the
+  # caller's in-scope lexicals (or fall back to the package global).
+  #
+  #  - Ordinary undeclared vars: do NOT defvar them — a defvar would proclaim
+  #    them globally special and turn the lambda parameter into a *dynamic*
+  #    binding, breaking lexical capture by closures built inside the eval.
+  #  - $a/$b that we force-declared above: KEEP the defvar (sort comparators
+  #    need them special) but ALSO list them as params when referenced, so a
+  #    caller's lexical `my $a`/`my $b` is captured.  Being special, the param
+  #    is a dynamic rebinding — a bare $a sees the caller's box, while `sort`
+  #    inside the eval can still rebind it.  (A pathological `my $a` masking a
+  #    sort block matches Perl only loosely; see docs/eval-lexical-capture.md.)
+  if ($self->eval_mode) {
+    my @free = @undeclared;
+    push @free, grep { $referenced{$_} && $forced_sort_var{$_} } ('$a', '$b');
+    $self->{_eval_free_vars} = \@free if @free;
+    return;
   }
 
   return unless @undeclared;
@@ -4979,9 +5037,18 @@ sub _process_foreach_loop {
       $saved_loop_var_rename = delete $cur_renames->{$loop_var};
       $self->environment->state_var_renames({ %$cur_renames });
     }
+    # The loop variable is a live CL binding inside the p-foreach body, but it
+    # lives in _lexical_foreach_vars, not _let_bound_vars.  Add it to
+    # _let_bound_vars for the body so a string eval in the body captures it
+    # (e.g. `for my $x (...) { eval '$x' }`).  Save/restore around the body.
+    my $saved_let_bound = $self->{_let_bound_vars};
+    if ($cl_loop_var ne '$_') {
+      $self->{_let_bound_vars} = { %{$saved_let_bound // {}}, $cl_loop_var => 1 };
+    }
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     });
+    $self->{_let_bound_vars} = $saved_let_bound;
     if (defined $saved_loop_var_rename) {
       $cur_renames = $self->environment->state_var_renames // {};
       $self->environment->state_var_renames({ %$cur_renames, $loop_var => $saved_loop_var_rename });

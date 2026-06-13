@@ -1272,6 +1272,14 @@ sub gen_funcall {
         return $wrap->("(p-eval-block (funcall $func_ref))");
       }
     }
+    else {
+      # eval STRING (string form): pass the caller's in-scope lexicals as an
+      # alist so the eval body can capture them (the transpiler wraps the body
+      # in a lambda whose params are those vars).  See docs/eval-lexical-capture.md.
+      my $arg_cl = $self->gen_node($kids->[1]);
+      my $alist  = $self->_eval_lexical_alist;
+      return $alist ? "(p-eval $arg_cl $alist)" : "(p-eval $arg_cl)";
+    }
   }
 
   # Special handling for grep/map expression form (without block)
@@ -1821,6 +1829,33 @@ sub gen_funcall {
   # Built-in in list context: still wrap so it gets list-context signal
   # (e.g. a wantarray-sensitive built-in called as the RHS of @arr = builtin())
   return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $call)" : $call;
+}
+
+
+# Build the lexical-capture alist passed as the 2nd arg to (p-eval STRING ...).
+# Each in-scope lexical becomes (cons "$name" $name), mapping its Perl name to
+# its live CL container (box/array/hash).  The in-scope lexicals are the
+# parser's _let_bound_vars (the rolling set of `my`/let-bound names, saved and
+# restored around every closure).  Returns '' when there are none (top-level
+# eval), so codegen emits a plain (p-eval STRING).
+sub _eval_lexical_alist {
+  my $self = shift;
+  my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
+                && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+  return '' unless $parser;
+  my $lb = $parser->{_let_bound_vars} // {};
+  my @vars = sort keys %$lb;
+  return '' unless @vars;
+  # The alist KEY is the original Perl name; the VALUE is the live CL symbol.
+  # Closure-captured lexicals are renamed to $name__lex__N (so per-call let
+  # bindings stay lexical); strip that suffix so the key matches the bare name
+  # the eval body uses (the eval string never sees the rename).
+  my @pairs;
+  for my $v (@vars) {
+    (my $key = $v) =~ s/__lex__\d+$//;
+    push @pairs, "(cons \"$key\" $v)";
+  }
+  return '(list ' . join(' ', @pairs) . ')';
 }
 
 
