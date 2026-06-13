@@ -4,6 +4,65 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 251 (2026-06-13) — Moo SUBCLASS FIXED (module double-exec); PExpr exit→die; goto &sub caller-frame. 3 commits, gate 93/3395.
+
+**pack crash (quick check, user-requested):** NOT a bug — `pack "P"` correctly
+throws `Invalid type 'P' in pack`; the bop.t block that crashed is already
+commented out. bop.t now reaches 507/510 (remaining early-stop is an unrelated
+UNDEFINED-FUNCTION near test 507, not pack).
+
+**Moo subclass empty-attrs — ROOT CAUSE FOUND, supersedes s249/s250 theory.**
+NOT coderef identity. It's **module compile-file+load DOUBLE-EXECUTION**: PCL
+caches modules by `compile-file`→fasl then `load` in the same process;
+`p-sub` installs in `eval-when(:compile :load :execute)`, so `sub NAME` runs at
+BOTH phases. A module that redefines a sub at BEGIN/compile time guarded by an
+idempotency check (`||=`/`%DEFERRED`/`%MAKERS`) has the redefine run only on the
+compile pass; the load pass re-runs `sub NAME` and CLOBBERS it. Breaks
+Sub::Defer deferred ctors → subclass falls through @ISA to Moo::Object::new →
+empty attrs. **General** (Moose/Sub::Quote/Type::Tiny). 9-line non-Moo repro
+`/tmp/GuardBoot.pm` (sub + guarded glob-reinstall in BEGIN). Found by white-box
+shadow-instrumentation (`PCL_MGC_DEBUG` traces tagging compile-vs-load via
+`*compile-file-pathname*`); all debug removed after.
+- **Fix (commit `5521200`):** `*pcl-cache-fasl*` default → **nil** (load modules
+  as source, single-pass). Correct, slower module loads. **Proper FASL-preserving
+  fix deferred → `docs/module-double-exec-bug.md` (options C/D), NEXT SESSION.**
+- Verified Moo: `new`, ro/rw (scalar+ref defaults), 3-deep inheritance, isa,
+  required, lazy/_build_ (subclass override), BUILD all match perl 5.40.
+
+**PExpr `exit 0` → `die` (commit `d957056`).** The postfix-`->` fallthrough did a
+hard `say…; exit 0`, bypassing the `eval{}` in `_extract_module_prototypes` and
+killing pl2cl when scanning Moo::Role's dep chain (raw `??? Term:` as output).
+Now dies (catchable) → module's prototypes gracefully skipped; `use Moo::Role`
+transpiles. Regression test in use-require-01.t.
+
+**`goto &sub` replaces caller frame (commit `ca1cdb3`).** Perl's `goto &sub`
+replaces the frame, so `caller` inside the target reports the goto-ing sub's
+CALLER. PCL's `p-goto-sub` just `(apply fn @_)`, so the target saw the goto-ing
+sub. Broke Moo::Role's `goto &Role::Tiny::import` (Role::Tiny read caller as
+"Moo::Role" instead of the user pkg). Fix: pop the goto-ing frame from the
+caller pkg/subname stacks + restore `*pcl-current-package*` before applying.
+**Subtlety:** evaluate the TARGET expr FIRST in the un-popped frame —
+`goto &{as_heavy()}` reads `(caller(1))[3]` to pick heavy_import vs heavy_export;
+my first cut evaluated it post-pop → nil coderef → regressed `use Exporter
+'import'`/`use Config`. Binding target before the popped `let` fixed it.
+Regression test in transpile-test-05.
+
+**Moo modifiers/roles — root-caused, still broken (next targets):**
+- `around`/`before`/`after` → `P::$WRAPPED unbound`. ROOT: Class::Method::
+  Modifiers `eval`s a RUNTIME string defining a **named** `sub greet {…$$wrapped…}`
+  referencing the eval's captured lexical; PCL installs named subs at PACKAGE
+  level (not closures) → `$wrapped` becomes unbound pkg var. Extends s248b/s250
+  named-sub-closure + eval-capture. HARD.
+- Roles `with`/`does`: progressed parse-crash → Role::Tiny → Config → now
+  `Cannot import Moo::Role into a Moo class` (Moo::Role::import guard; next layer
+  — likely `$target`/caller or MAKERS state). `/tmp/moo_b.pl`.
+- Minor: attr named after a builtin (`has log`) calls the builtin; rename fixes.
+
+See `memory/project_module_compile_load_double_exec.md`, `project_moo_progress.md`,
+`docs/module-double-exec-bug.md`.
+
+---
+
 ## Session 250 (2026-06-13) — String-eval LEXICAL CAPTURE implemented (the deferred "option B"); commit `d930239`, gate 93/3392 green.
 
 User asked to discuss the long-deferred gap: `eval "CODE"` couldn't see the
