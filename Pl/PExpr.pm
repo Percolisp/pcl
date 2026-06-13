@@ -1066,6 +1066,25 @@ sub parse {
       # If it was X->[] or X->{}:
       if ($is_reference) {
         $type   = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
+      } elsif (ref($pre) eq 'PPI::Structure::Block'
+               && $pre->start() eq '{'
+               && $i >= 2
+               && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+               && ($e->[$i-2]->content() eq '@'
+                   || $e->[$i-2]->content() eq '$')) {
+        # Braced deref with a TRAILING subscript: @{EXPR}[..] / @{EXPR}{..} are
+        # slices of the deref'd EXPR; ${EXPR}[..] / ${EXPR}{..} are element
+        # accesses.  The subscript's position disambiguates at parse time: a
+        # subscript AFTER the block makes a slice/element node here, while
+        # @{$a[0]} / @{$h{k}} (subscript INSIDE the block, no trailing one)
+        # never enter this branch and stay plain casts.  EXPR is an arbitrary
+        # expression — an array/hash ref or a symbolic-ref name string;
+        # p-aref/p-gethash resolve ref-vs-string at runtime.  The %-sigil kv
+        # forms have their own raw-token patterns above ($is_kv_*_deref_*).
+        # See docs/symbolic-ref-slice-parse-fix.md.
+        $type = $e->[$i-2]->content() eq '@'
+              ? ($self->is_arr_braces($term) ? "slice_a_acc" : "slice_h_acc")
+              : ($self->is_arr_braces($term) ? "a_ref_acc"   : "h_ref_acc");
       } elsif ($self->is_var($pre_n)
                && $pre_n->content() =~ /^\$/) {
         # Check for $$scalar[n] / $$scalar{key} (Cast '$') or
@@ -2539,6 +2558,15 @@ sub handle_subcalls {
       }
     }
 
+    # Paren-form print/say/printf with a leading filehandle inside the parens:
+    #   print($fh LIST)  print(STDERR LIST)  print({EXPR} LIST)
+    # Extract the filehandle from the front of the list (it has no separating
+    # comma) and prepend it as the funcall's first child.
+    my $paren_fh_id;
+    if ($func_name eq 'print' || $func_name eq 'say' || $func_name eq 'printf') {
+      $paren_fh_id = $self->_extract_paren_filehandle($next);
+    }
+
     # Replace the two items in expr with a subtree:
     my($top_node, $top_id) = $self->make_node_insert('funcall');
 
@@ -2546,6 +2574,9 @@ sub handle_subcalls {
     my $node_id = $self->make_node($now);
 
     $self->add_child_to_node($top_id, $node_id);
+    if (defined $paren_fh_id) {
+      $self->add_child_to_node($top_id, $paren_fh_id);
+    }
     for my $c_id (@$c_ids) {
       $self->add_child_to_node($top_id, $c_id);
     }
@@ -3380,6 +3411,60 @@ sub _is_print_term_start {
   #   QuoteLike (qw()), Structure::List ((expr)), Constructor ([]),
   #   and already-parsed internal nodes
   return 1;
+}
+
+
+# Detect and extract a filehandle from the front of a paren-form print:
+#   print(FH LIST)   print($fh LIST)   print({EXPR} LIST)
+# The filehandle is the first significant token inside the parens, separated
+# from the first real argument by whitespace (no comma). On success this prunes
+# the filehandle token from the PPI list (so the remaining tokens parse as the
+# args) and returns the new filehandle node id; otherwise returns undef and
+# leaves the list untouched (it's an ordinary parenthesised argument list).
+sub _extract_paren_filehandle {
+  my ($self, $list) = @_;
+
+  # Find the inner expression node that actually holds the tokens.
+  my ($expr) = grep { ref($_) =~ /^PPI::Statement/ } $list->children;
+  $expr ||= $list;
+  my @kids = grep { ref($_) !~ /Whitespace/ } $expr->schildren;
+  return undef unless @kids >= 2;
+
+  my $first  = $kids[0];
+  my $second = $kids[1];
+
+  # The first token must look like a filehandle, and the second must start a
+  # new term (no separating comma → not a normal argument list).
+  my $is_fh = 0;
+  if ($self->is_word($first) && $first->content =~ /^[A-Z][A-Z0-9_]*$/) {
+    $is_fh = 1;            # bareword: print(STDERR ...)
+  }
+  elsif (ref($first) eq 'PPI::Token::Symbol' && $first->content =~ /^\$/) {
+    $is_fh = 1;            # scalar: print($fh ...)
+  }
+  elsif (ref($first) eq 'PPI::Structure::Block') {
+    $is_fh = 1;            # block: print({EXPR} ...)
+  }
+  return undef unless $is_fh && $self->_is_print_term_start($second);
+
+  # Build the filehandle node.
+  my ($fh_node, $fh_id) = $self->make_node_insert('filehandle');
+  if (ref($first) eq 'PPI::Structure::Block') {
+    my @bk = grep { ref($_) !~ /Whitespace/ } $first->schildren;
+    if (@bk == 1 && ref($bk[0]) =~ /^PPI::Statement/) {
+      @bk = grep { ref($_) !~ /Whitespace/ } $bk[0]->schildren;
+    }
+    my $inner = $self->parse([@bk]);
+    $self->add_child_to_node($fh_id, $inner);
+  }
+  else {
+    my $name_id = $self->make_node($first);
+    $self->add_child_to_node($fh_id, $name_id);
+  }
+
+  # Prune the filehandle token from the PPI list so the rest parses as args.
+  $first->remove;
+  return $fh_id;
 }
 
 

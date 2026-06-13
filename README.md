@@ -33,7 +33,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run the internal test suite (91 files, 3244 tests)
+# Run the internal test suite (93 files, 3392 tests)
 prove -j8 Pl/t/
 ```
 
@@ -71,7 +71,7 @@ A teaser across the big areas — most of Perl's day-to-day surface is in:
 - **Built-ins** — `print/say`, `push/pop/shift/unshift/splice`, `map/grep/sort`, `sprintf`, `length/substr/index`, `each/keys/values`, `open/readline`, `die/eval`, `tie`, regex `m//`/`s///`/`tr///`, `pack`/`unpack`
 - **Regex** via CL-PPCRE — modifiers, named captures `%+`, `$1`…
 - **Modules & packages** — `package Foo { }`, `use constant`, `BEGIN`, `use`/`require`, `use parent`
-- **`eval`** — both block `eval { }` and string `eval "code"` (transpiled and run at runtime)
+- **`eval`** — block `eval { }` and string `eval "code"` (transpiled and run at runtime), with **lexical capture**: the eval'd code reads *and writes* the enclosing scope's `my` variables, and closures built inside the eval close over them
 - **`local`** — scalars, arrays, hashes, hash/array elements, typeglobs
 
 *See [`REMAINING.md`](REMAINING.md) for the full picture.*

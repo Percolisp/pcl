@@ -9,7 +9,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 40;
+use Test::More tests => 44;
 use File::Temp qw(tempfile);
 BEGIN { use_ok('Pl::Parser') };
 BEGIN { use_ok('Pl::Environment') };
@@ -148,8 +148,8 @@ sub run_pl {
 }
 
 SKIP: {
-    skip "pl2cl not found", 26 unless -x $pl2cl;
-    skip "sbcl not found",  26 unless `which sbcl 2>/dev/null`;
+    skip "pl2cl not found", 32 unless -x $pl2cl;
+    skip "sbcl not found",  32 unless `which sbcl 2>/dev/null`;
 
     # Test 1: basic arithmetic
     {
@@ -385,5 +385,48 @@ SKIP: {
         my $out = run_pl(qq{my \@r; eval { \@r = map {; ... } (1,2,3) }; print \$\@;});
         like($out, qr/^Unimplemented at \S+ line 1\.\n/,
              'yada-yada inside map block reports a real location');
+    }
+
+    # ========================================
+    diag "";
+    diag "-------- Lexical capture in string eval:";
+
+    # Test 29: eval READS an enclosing sub's `my` lexical (not a defvar/our).
+    {
+        my $out = run_pl(q{
+            sub r { my $captured = "SECRET"; return eval '$captured'; }
+            print r(), "\n";
+        });
+        like($out, qr/^SECRET/, 'eval string reads enclosing sub lexical');
+    }
+
+    # Test 30: eval WRITES back to an enclosing sub lexical (shared box).
+    {
+        my $out = run_pl(q{
+            sub w { my $x = 10; eval '$x = 99'; return $x; }
+            print w(), "\n";
+        });
+        like($out, qr/^99/, 'eval string writes back to enclosing lexical');
+    }
+
+    # Test 31: a closure BUILT inside the eval captures the enclosing lexical
+    # (the Sub::Defer / Moo idiom that motivated this feature).
+    {
+        my $out = run_pl(q{
+            sub make { my $c = "deferred"; return eval 'sub { "got: $c" }'; }
+            my $f = make();
+            print $f->(), "\n";
+        });
+        like($out, qr/^got: deferred/,
+             'closure inside eval captures enclosing lexical');
+    }
+
+    # Test 32: eval reads an enclosing lexical ARRAY element.
+    {
+        my $out = run_pl(q{
+            sub a { my @items = (11, 22, 33); return eval '$items[1]'; }
+            print a(), "\n";
+        });
+        like($out, qr/^22/, 'eval string reads enclosing lexical array element');
     }
 }

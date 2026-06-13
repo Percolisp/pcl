@@ -564,6 +564,71 @@ my @sc = (
 );
 add("sc $_", prog($_)) for @sc;
 
+# --- Axis 22: symbolic references (no strict refs) --------------------------
+# @{NAME}/${NAME}/%{NAME} where NAME is a string (in a scalar, a literal, or a
+# computed expression) is a symbolic reference to a package variable.  Exercises
+# the deref + slice + element + lvalue paths across all three spellings; the
+# read-back is via the SAME symbolic ref so the round-trip is self-consistent.
+# (Session 245 fixed p-aref string resolution + the @{EXPR}[slice] codegen.)
+my @symref = (
+    # scalar symbolic deref: name via scalar / literal / computed expr
+    [ 'scalar-var',   'do { $sv=7; my $n="sv"; ${$n} }' ],
+    [ 'scalar-lit',   'do { $sv=7; ${"sv"} }' ],
+    [ 'scalar-expr',  'do { $sv=7; ${"s"."v"} }' ],
+    # whole-array deref
+    [ 'arr-var',      'do { @av=(1,2,3); my $n="av"; join(",",@{$n}) }' ],
+    [ 'arr-lit',      'do { @av=(1,2,3); join(",",@{"av"}) }' ],
+    [ 'arr-expr',     'do { @av=(1,2,3); join(",",@{"a"."v"}) }' ],
+    # array slice rvalue
+    [ 'aslice-var',   'do { @av=(10,20,30,40); my $n="av"; join(",",@{$n}[1,3]) }' ],
+    [ 'aslice-lit',   'do { @av=(10,20,30,40); join(",",@{"av"}[1,3]) }' ],
+    [ 'aslice-expr',  'do { @av=(10,20,30,40); join(",",@{"a"."v"}[1,3]) }' ],
+    # array slice lvalue (write + read back via the same symbolic ref)
+    [ 'aslice-set-var',  'do { my $n="bv"; @{$n}[1,2]=("X","Y"); join(",",map { defined $_?$_:"u" } @{$n}[0,1,2]) }' ],
+    [ 'aslice-set-lit',  'do { @{"bv"}[1,2]=("X","Y"); join(",",map { defined $_?$_:"u" } @{"bv"}[0,1,2]) }' ],
+    [ 'aslice-set-expr', 'do { @{"b"."v"}[1,2]=("X","Y"); join(",",map { defined $_?$_:"u" } @{"b"."v"}[0,1,2]) }' ],
+    # array element write with a variable / computed index
+    [ 'aelem-vidx',   'do { my $n="cv"; my $i=2; @{$n}[$i]="Z"; @{$n}[$i+1]="W"; join(",",map { defined $_?$_:"u" } @{$n}[0..3]) }' ],
+    # cross-check: write via symbolic ref, read via the plain package array
+    [ 'set-read-plain', 'do { my $n="dv"; @{$n}[0,1]=("p","q"); "$dv[0]$dv[1]" }' ],
+    # hash slice rvalue / lvalue
+    [ 'hslice-var',   'do { %hv=(a=>1,b=>2,c=>3); my $n="hv"; join(",",@{$n}{qw(a c)}) }' ],
+    [ 'hslice-lit',   'do { %hv=(a=>1,b=>2,c=>3); join(",",@{"hv"}{qw(a c)}) }' ],
+    [ 'hslice-set',   'do { my $n="iv"; @{$n}{qw(x y)}=(8,9); join(",",@{$n}{qw(x y)}) }' ],
+);
+add("symref[$_->[0]] $_->[1]", prog($_->[1])) for @symref;
+
+# --- Axis 23: postfix dereference + nested deref chains ---------------------
+# The ->@* / ->%* / ->$* / ->@[..] / ->%{..} / ->$#* postfix-deref family, and
+# chained derefs through nested AoH/HoA structures.  Full-hash flatten (->%*)
+# is excluded — its key order is unspecified, which would be false-positive
+# noise; explicit-key slices preserve their argument order.
+my $NEST = 'my $d = { list => [10,20,30], map => { x => 1, y => 2 } };';
+my $AOA  = 'my $m = [[1,2],[3,4]];';
+my @postfix = (
+    [ '$ar->@*',              $AR,   'l' ],   # 10,20,30
+    [ '$ar->$#*',             $AR,   's' ],   # 2
+    [ '$ar->@[0,2]',          $AR,   'l' ],   # 10,30
+    [ '$ar->@[-1,-2]',        $AR,   'l' ],   # 30,20
+    [ 'scalar $ar->@*',       $AR,   's' ],   # 3
+    [ '$hr->@{qw(a c)}',      $HR,   'l' ],   # 1,3
+    [ '$hr->%{qw(a c)}',      $HR,   'l' ],   # a,1,c,3 (kv-slice, key order = args)
+    [ '$d->{list}[1]',        $NEST, 's' ],   # 20
+    [ '$d->{list}->[1]',      $NEST, 's' ],   # 20
+    [ '$d->{list}->@*',       $NEST, 'l' ],   # 10,20,30
+    [ '$d->{list}->@[0,2]',   $NEST, 'l' ],   # 10,30
+    [ 'scalar $d->{list}->@*',$NEST, 's' ],   # 3
+    [ '$d->{map}{x}',         $NEST, 's' ],   # 1
+    [ '$d->{map}->@{qw(x y)}',$NEST, 'l' ],   # 1,2
+    [ '$m->[1][0]',           $AOA,  's' ],   # 3
+    [ '$m->[1]->@*',          $AOA,  'l' ],   # 3,4
+    [ '$#{$d->{list}}',       $NEST, 's' ],   # 2
+);
+for my $p (@postfix) {
+    my ($expr, $pre, $kind) = @$p;
+    add("postfix $expr", $kind eq 'l' ? prog_list($expr, $pre) : prog($expr, $pre));
+}
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------

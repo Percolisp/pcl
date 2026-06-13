@@ -1272,6 +1272,14 @@ sub gen_funcall {
         return $wrap->("(p-eval-block (funcall $func_ref))");
       }
     }
+    else {
+      # eval STRING (string form): pass the caller's in-scope lexicals as an
+      # alist so the eval body can capture them (the transpiler wraps the body
+      # in a lambda whose params are those vars).  See docs/eval-lexical-capture.md.
+      my $arg_cl = $self->gen_node($kids->[1]);
+      my $alist  = $self->_eval_lexical_alist;
+      return $alist ? "(p-eval $arg_cl $alist)" : "(p-eval $arg_cl)";
+    }
   }
 
   # Special handling for grep/map expression form (without block)
@@ -1824,6 +1832,33 @@ sub gen_funcall {
 }
 
 
+# Build the lexical-capture alist passed as the 2nd arg to (p-eval STRING ...).
+# Each in-scope lexical becomes (cons "$name" $name), mapping its Perl name to
+# its live CL container (box/array/hash).  The in-scope lexicals are the
+# parser's _let_bound_vars (the rolling set of `my`/let-bound names, saved and
+# restored around every closure).  Returns '' when there are none (top-level
+# eval), so codegen emits a plain (p-eval STRING).
+sub _eval_lexical_alist {
+  my $self = shift;
+  my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
+                && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+  return '' unless $parser;
+  my $lb = $parser->{_let_bound_vars} // {};
+  my @vars = sort keys %$lb;
+  return '' unless @vars;
+  # The alist KEY is the original Perl name; the VALUE is the live CL symbol.
+  # Closure-captured lexicals are renamed to $name__lex__N (so per-call let
+  # bindings stay lexical); strip that suffix so the key matches the bare name
+  # the eval body uses (the eval string never sees the rename).
+  my @pairs;
+  for my $v (@vars) {
+    (my $key = $v) =~ s/__lex__\d+$//;
+    push @pairs, "(cons \"$key\" $v)";
+  }
+  return '(list ' . join(' ', @pairs) . ')';
+}
+
+
 # Method call: (p-method-call obj 'method args...)
 sub gen_methodcall {
   my $self    = shift;
@@ -2126,6 +2161,9 @@ sub gen_prefix_op {
     $cl_op = "p-pre" . $op;
   }
   # Sigil cast operators (dereference) - use p-cast-X
+  # (@{EXPR}[slice] / @{EXPR}{slice} never reach here: PExpr builds a
+  # slice_a_acc/slice_h_acc node when a Cast+Block is followed by a trailing
+  # subscript — see docs/symbolic-ref-slice-parse-fix.md.)
   elsif ($op eq '@' || $op eq '%' || $op eq '$') {
     $cl_op = "p-cast-$op";
   }
@@ -2744,6 +2782,22 @@ sub gen_tree_val {
   # This handles: @a = (1, 2, 3), foreach (1, 2, 3), etc.
   if ($ctx == 1) {  # LIST_CTX = 1
     return "(vector $forms_str)";
+  }
+
+  # INHERIT context with multiple forms: the real context is only known at
+  # runtime (e.g. this is a ternary branch inside `return`, where Perl treats
+  # ($a, LIST) as a list in list context but as the comma operator in scalar
+  # context).  p-flatten-args builds a flat vector (spreads raw vectors/
+  # hashes, keeps boxes/refs).  Two restrictions, both load-bearing:
+  # - only INHERIT_CTX: a statically scalar operand position (e.g. the
+  #   comma exprs in cmpchain.t's `($e .= "a", $x) == ($e .= "b", $y)`) must
+  #   stay a progn even when the *dynamic* *wantarray* happens to be t
+  #   (the comparison sits inside join's list-context args).
+  # - (eq *wantarray* t), not truthiness: :void takes the comma-operator
+  #   branch (Sub::Defer: `*_subname = cond ? \&f : ($flag = 1, sub {...})`
+  #   inside a :void-wrapped statement).
+  if (@forms > 1 && $ctx == INHERIT_CTX) {
+    return "(if (eq *wantarray* t) (p-flatten-args (list $forms_str)) (progn $forms_str))";
   }
 
   return "(progn $forms_str)";

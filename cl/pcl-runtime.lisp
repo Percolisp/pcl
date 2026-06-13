@@ -78,7 +78,9 @@
    ;; do BLOCK
    #:p-do
    ;; Exception handling
-   #:p-eval #:p-eval-block #:p-exception #:p-exception-object
+   #:p-eval #:p-eval-block #:p-eval-thunk #:p-eval-lex-lookup
+   #:*p-eval-lex-alist*
+   #:p-exception #:p-exception-object
    ;; File I/O
    #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
@@ -429,6 +431,22 @@
   "Incremented per string-eval that throws, so $@'s ' at (eval N) line 1.'
    suffix carries a distinct N like Perl's eval-sequence number.")
 
+;;; Lexical-capture bridge for string eval.  Perl's `eval "code"` can see the
+;;; enclosing sub's `my` lexicals; CL's `eval` runs in the null lexical
+;;; environment and cannot.  PCL bridges the gap by:
+;;;   1. codegen at the eval site passing an alist of (name . box/array/hash)
+;;;      for the in-scope lexicals (bound to *p-eval-lex-alist* by p-eval),
+;;;   2. the transpiler wrapping the eval body in
+;;;      (p-eval-thunk '(free-names) (lambda (free-syms) body)),
+;;; so every variable the eval references that is NOT declared inside the eval
+;;; becomes a lambda parameter.  Because the lambda creates a *lexical* binding,
+;;; closures built inside the eval body capture it correctly (the whole point —
+;;; e.g. Sub::Defer's `eval 'sub { $captured }'`).  See
+;;; docs/eval-lexical-capture.md.
+(defvar *p-eval-lex-alist* nil
+  "Alist (var-name-string . box/array/hash) of the caller's in-scope lexicals,
+   bound by p-eval and consumed by p-eval-thunk.")
+
 ;;; Persistent transpiler subprocess for p-eval
 (defvar *p-transpiler-process* nil
   "Persistent pl2cl --server process, or nil if not yet started.
@@ -633,6 +651,13 @@
   tie-obj       ; object returned by TIESCALAR/TIEARRAY/TIEHASH
   saved-value)  ; p-box-value before tie was installed (restored on untie)
 
+;; A tie object can hold a (blessed) ref back to the very box it proxies — e.g.
+;; `sub TIESCALAR { bless \my $x }` — making the structure self-referential.
+;; The default structure printer would recurse forever and exhaust the control
+;; stack, so print opaquely instead of descending into the slots.
+(defmethod print-object ((p p-tie-proxy) stream)
+  (print-unreadable-object (p stream :type t :identity t)))
+
 ;;; A magical scalar lvalue.  Like p-tie-proxy it lives in a p-box's value slot
 ;;; and is intercepted at the unbox/box-set chokepoints, but it dispatches to two
 ;;; CL closures rather than a Perl tie object: reading calls GETTER, writing calls
@@ -755,8 +780,14 @@
     (when (p-magic-cell-p current)
       (return-from box-set
         (funcall (p-magic-cell-setter current)
-                 (if (p-box-p value) (unbox value) value)))))
-  (let ((v (if (p-box-p value)
+                 ;; keep a BLESSED box intact so the setter's stringification
+                 ;; sees its "" overload (substr.t: assigning an overloaded
+                 ;; object to a substr lvalue must call the overload)
+                 (if (and (p-box-p value) (not (p-box-class value)))
+                     (unbox value)
+                     value)))))
+  (let ((old-val (p-box-value box))  ; pre-assignment value, for the class-clear rule below
+        (v (if (p-box-p value)
                (let ((inner (p-box-value value)))
                  (cond
                    ;; Tied source variable: call FETCH to get the actual value.
@@ -795,8 +826,22 @@
     ;; Perl: assigning to a scalar resets pos()
     (remhash box *p-match-pos*)
     ;; Preserve class from blessed boxes
-    (when (and (p-box-p value) (p-box-class value))
-      (setf (p-box-class box) (p-box-class value)))
+    ;; Preserve class from blessed boxes.  Otherwise, CLEAR a stale class —
+    ;; but only when the box's OLD value was itself the reference (vector/
+    ;; hash/function/box): overwriting a blessed REFERENCE-holder with a plain
+    ;; value unblesses the variable (substr.t: a substr-lvalue write through
+    ;; an overloaded object leaves a plain string, else the stale class keeps
+    ;; firing overloaded "" on it).  A blessed scalar REFERENT (old value a
+    ;; plain scalar) keeps its class on assignment, like Perl's SV stash:
+    ;; qr.t `$$e = 'Fake!'` leaves $e blessed into Stew.
+    (if (and (p-box-p value) (p-box-class value))
+        (setf (p-box-class box) (p-box-class value))
+        (when (and (p-box-class box)
+                   (or (and (vectorp old-val) (not (stringp old-val)))
+                       (hash-table-p old-val)
+                       (functionp old-val)
+                       (p-box-p old-val)))
+          (setf (p-box-class box) nil)))
     ;; Glob ref vs bare glob: a typeglob arriving through a ref-wrapper (\\*foo,
     ;; is-ref t) keeps is-ref so it numifies to its address (GLOB(0x..)); a bare
     ;; glob (my $g = *foo) clears it so it numifies to 0.  The typeglob is stored
@@ -964,9 +1009,31 @@
                   (return-from parse-perl-number n)))))))))
   0)
 
+;;; Stable object identity.  SBCL's get-lisp-obj-address returns the raw
+;;; pointer, which is NOT a usable Perl ref identity: the compacting GC
+;;; relocates objects (changing the pointer), and PCL re-boxes refs on some
+;;; paths.  A coderef threaded through Sub::Defer's coderef-keyed %DEFERRED
+;;; would then present two different CODE(0x..) strings for one logical sub,
+;;; breaking the hash lookup (Moo's lazy/subclass constructor bootstrap).
+;;; Instead we assign each object a monotonic id the first time its identity
+;;; is requested and reuse it for the object's lifetime.  The table is
+;;; weak-on-key so dead objects don't leak; ids are never reused, so distinct
+;;; objects can never collide (an improvement over reusable raw addresses).
+#+sbcl
+(defvar *p-object-id-table*
+  (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Live object -> stable identity integer (see object-address).")
+(defvar *p-object-id-counter* 0
+  "Monotonic source of ids for *p-object-id-table*.")
+
 (defun object-address (obj)
-  "Get a unique address/ID for an object (implementation-dependent)"
-  #+sbcl (sb-kernel:get-lisp-obj-address obj)
+  "Stable unique numeric identity for OBJ — the basis for Perl ref identity
+   (refaddr, == on refs) and ref stringification (CODE/HASH/ARRAY(0x..)).
+   Stable across GC relocation and re-boxing, unlike the raw pointer."
+  #+sbcl
+  (or (gethash obj *p-object-id-table*)
+      (setf (gethash obj *p-object-id-table*)
+            (incf *p-object-id-counter*)))
   #-sbcl (sxhash obj))  ; Fallback: use hash as pseudo-address
 
 ;;; Forward declarations for use overload helpers (p-get-class and p-method-call
@@ -1823,12 +1890,15 @@
           (p-warn "substr outside of string\n")))
     (if replacement
         ;; 4-arg form (or lvalue): replace and return the replaced portion
-        (let* (;; Warn when target is a reference being coerced to string
+        (let* (;; Warn when target is a reference being coerced to string —
+               ;; but not when its class has a "" overload (perl uses the
+               ;; overloaded stringification silently; substr.t UTF8ness test)
                (_ (when (p-box-p str)
                     (let ((v (p-box-value str)))
-                      (when (or (and (vectorp v) (not (stringp v)))
-                                (hash-table-p v)
-                                (functionp v))
+                      (when (and (or (and (vectorp v) (not (stringp v)))
+                                     (hash-table-p v)
+                                     (functionp v))
+                                 (not (p-find-overload str "\"\"")))
                         (p-warn "Attempt to use reference as lvalue in substr\n")))))
                (replaced-part (subseq s (min st slen) end-pos))
                (new-str (concatenate 'string
@@ -4627,6 +4697,12 @@
     ;; If array is undef (from failed hash lookup etc), return undef
     (when (eq a *p-undef*)
       (return-from p-aref *p-undef*))
+    ;; A bare string here is a SYMBOLIC array reference (@{$str}[i] under
+    ;; no-strict-refs), not a char-vector to index — resolve it to the package
+    ;; array.  A NUL in the name is inaccessible (Perl gives nothing), so undef.
+    (when (stringp a)
+      (return-from p-aref
+        (if (find #\Nul a) *p-undef* (p-aref (p-ensure-arrayref arr) idx))))
     (let* ((i (truncate (to-number idx)))
            (len (cond ((vectorp a) (length a))
                       ((listp a) (length a))
@@ -4643,7 +4719,16 @@
   "Setf expander for p-aref - allows assignment to array elements.
    Auto-extends array if index is beyond current length (Perl semantics).
    Stores values in boxes for l-value semantics. Returns the box."
-  (let* ((a (unbox arr))  ; unbox array refs ($arr[i][j] write-through)
+  (let* ((a (unbox arr)))  ; unbox array refs ($arr[i][j] write-through)
+    ;; A bare string is a SYMBOLIC array reference (@{$str}[i] = ... under
+    ;; no-strict-refs), not a char-vector to overwrite — resolve to the package
+    ;; array and store there.  A NUL-containing name is inaccessible in PCL
+    ;; (p-ensure-arrayref returns a throwaway), so the write is lost like Perl's
+    ;; unreachable stash slot rather than faulting on a CHARACTER type-error.
+    (when (stringp a)
+      (return-from p-aref
+        (setf (p-aref (p-ensure-arrayref arr) idx) value))))
+  (let* ((a (unbox arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
@@ -5557,6 +5642,14 @@
       ((hash-table-p h) (nth-value 1 (gethash k h)))
       (t nil))))
 
+(defvar *p-stash-pkg-table* (make-hash-table :test 'eq :weakness :key)
+  "Weak side-table mapping a stash snapshot hash (as returned by p-stash) to its
+   Perl package name.  Lets mutation primitives recognize a stash and write
+   through to the CL package: delete $Pkg::{name} must really remove the sub so
+   *{Pkg::name}{CODE} and method dispatch stop seeing it (Moo's
+   Method::Generate::Constructor bootstrap `delete _getstash(...)->{new}`
+   depends on this).  Weak keys so abandoned snapshots are collected.")
+
 (defun p-delete (hash key)
   "Perl delete function for hashes - returns unboxed value"
   (let ((h (unbox hash))
@@ -5571,6 +5664,14 @@
          (remhash k *p-inc-table*)
          (if found (unbox v) *p-undef*)))
       (t
+       ;; Stash write-through: deleting a sub entry from a package stash
+       ;; (delete $Pkg::{name}) must really remove the sub from the package.
+       (let ((stash-pkg (gethash h *p-stash-pkg-table*)))
+         (when stash-pkg
+           (let ((sym (%p-resolve-sub-symbol
+                       (concatenate 'string stash-pkg "::" k))))
+             (when (and sym (fboundp sym))
+               (fmakunbound sym)))))
        (multiple-value-bind (v found) (gethash k h)
          (remhash k h)
          (if found
@@ -5724,7 +5825,8 @@
    Keys are lowercase Perl sub names; values are (make-p-box function).  Child
    namespaces are also added as \"<child>::\" keys (see %p-stash-add-child-namespaces).
    delete $::{foo} → (p-delete (p-stash \"main\") \"foo\") returns the code ref.
-   This is a snapshot (not a live view), sufficient for delete/lookup of existing subs."
+   Reads are a snapshot (not a live view); deletes write through to the package
+   via *p-stash-pkg-table*."
   (let* ((pkg-str (if (or (string= (string-downcase pkg-name) "main")
                           (string= pkg-name ""))
                       "MAIN"
@@ -5743,6 +5845,7 @@
                 (setf (gethash perl-name h)
                       (make-p-box (symbol-function sym)))))))))
     (%p-stash-add-child-namespaces pkg-name h)
+    (setf (gethash h *p-stash-pkg-table*) pkg-name)
     h))
 
 ;;; ============================================================
@@ -5994,7 +6097,11 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
           `(throw :p-return
              (let ((*wantarray* *pcl-caller-wantarray*))
                (if (eq *wantarray* t)
-                   (vector ,@(mapcar (lambda (v) `(p-return-value ,v)) values))
+                   ;; List flattening: return ($i, map ...) splices array-valued
+                   ;; elements (raw vectors / non-blessed hashes) like any Perl
+                   ;; list; boxes (refs) stay intact.  p-flatten-args is the
+                   ;; same rule @_ uses.
+                   (p-flatten-args (list ,@(mapcar (lambda (v) `(p-return-value ,v)) values)))
                    (p-return-value ,(car (last values)))))))))
 
 (defmacro p-last (&optional label)
@@ -6261,10 +6368,38 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; $x__lex__N and also invisible. See docs/eval-string-plan.md.
 ;;;
 ;;; $@ format: omits " at (eval N) line M." — documented in not-supported.md.
-(defun p-eval (string)
+(defun p-eval-lex-lookup (name)
+  "Resolve a free variable NAME (e.g. \"$captured\") referenced inside a string
+   eval to the container the eval body should bind it to:
+     - the caller's in-scope lexical, if codegen passed it in *p-eval-lex-alist*;
+     - otherwise the real package global (when the symbol is already bound),
+       so `our`/top-level vars still read/write correctly;
+     - otherwise a fresh undef container (Perl auto-vivifies the global as undef)."
+  (let ((cell (assoc name *p-eval-lex-alist* :test #'string=)))
+    (cond
+      (cell (cdr cell))
+      (t (let ((sym (intern (string-upcase name) *package*))
+               (sigil (char name 0)))
+           (cond
+             ((boundp sym) (symbol-value sym))
+             ((char= sigil #\@) (make-array 0 :adjustable t :fill-pointer 0))
+             ((char= sigil #\%) (make-hash-table :test 'equal))
+             (t (make-p-box nil))))))))
+
+(defun p-eval-thunk (free-names fn)
+  "Apply FN (the lambda wrapping a string-eval body) to the containers for its
+   free variables FREE-NAMES, looked up via p-eval-lex-lookup.  The lambda's
+   parameters are those same variables, so the eval body — and any closure it
+   builds — references them as ordinary lexicals."
+  (apply fn (mapcar #'p-eval-lex-lookup free-names)))
+
+(defun p-eval (string &optional lex-alist)
   "Perl eval(STRING): transpile and evaluate a Perl string at runtime.
+   LEX-ALIST carries the caller's in-scope lexicals (name . container) so the
+   eval body can capture them (see p-eval-thunk).
    Binds *pcl-caller-wantarray* so wantarray() in the eval'd code reflects context."
   (let ((*pcl-caller-wantarray* *wantarray*)
+        (*p-eval-lex-alist* lex-alist)
         (s (to-string (unbox string))))
     ;; eval undef / eval "" -> nil (undef), $@ = ""
     (when (string= s "")
@@ -6397,21 +6532,90 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; A p-string-output-stream is an SBCL Gray output stream that appends written
 ;;; characters directly into the target scalar box's adjustable string, so the
 ;;; scalar reflects the output live (matching Perl's PerlIO ":scalar" layer).
-(defclass p-string-output-stream (sb-gray:fundamental-character-output-stream)
-  ((target :initarg :target :reader psos-target)))
+;; Shared state for in-memory string filehandles: a target scalar box and a
+;; current byte offset.  Perl's PerlIO ":scalar" layer tracks a position, so a
+;; seek/tell or a re-assignment of the scalar mid-write does not lose the
+;; place; writes overwrite existing chars and extend past the end; a forward
+;; seek beyond the end zero-fills with NUL.
+(defclass p-string-stream-mixin ()
+  ((target :initarg :target :reader psos-target)
+   (pos    :initarg :pos :initform 0 :accessor psos-pos)))
 
-(defmethod sb-gray:stream-write-char ((s p-string-output-stream) ch)
-  (vector-push-extend ch (p-box-value (psos-target s)))
-  ch)
+;; Write-only handle: open my $fh, ">",  \$s   /   ">>", \$s
+(defclass p-string-output-stream
+    (p-string-stream-mixin sb-gray:fundamental-character-output-stream)
+  ())
+
+;; Read+write handle: open my $fh, "+<", \$s   /   "+>", \$s
+(defclass p-string-io-stream
+    (p-string-stream-mixin
+     sb-gray:fundamental-character-input-stream
+     sb-gray:fundamental-character-output-stream)
+  ())
+
+(defun %psos-buf (s)
+  "Return the target box's value as an adjustable fill-pointer string.  The
+user may have reassigned the scalar with a plain (non-adjustable) string while
+the handle is open; rebuild it from the current contents when that happens so
+writes never fault on a simple-string."
+  (let* ((box (psos-target s))
+         (v   (p-box-value box)))
+    (if (and (stringp v) (adjustable-array-p v) (array-has-fill-pointer-p v))
+        v
+        (let ((buf (%p-fresh-adjustable-string
+                    (if (or (null v) (eq v *p-undef*)) "" (to-string v)))))
+          (setf (p-box-value box) buf
+                (p-box-sv-ok box) nil (p-box-nv-ok box) nil)
+          buf))))
+
+(defun %psos-put (s ch)
+  "Write CH at the stream's current position: overwrite if within the string,
+zero-fill any gap from a forward seek, otherwise extend at the end."
+  (let ((buf (%psos-buf s))
+        (p   (psos-pos s)))
+    (loop while (< (fill-pointer buf) p) do (vector-push-extend #\Nul buf))
+    (if (< p (fill-pointer buf))
+        (setf (char buf p) ch)
+        (vector-push-extend ch buf))
+    (setf (psos-pos s) (1+ p)
+          (p-box-sv-ok (psos-target s)) nil
+          (p-box-nv-ok (psos-target s)) nil)
+    ch))
+
+(defmethod sb-gray:stream-write-char ((s p-string-stream-mixin) ch)
+  (%psos-put s ch))
 
 (defmethod sb-gray:stream-write-string
-    ((s p-string-output-stream) string &optional (start 0) end)
-  (let ((buf (p-box-value (psos-target s)))
-        (lim (or end (length string))))
-    (loop for i from start below lim do (vector-push-extend (char string i) buf)))
+    ((s p-string-stream-mixin) string &optional (start 0) end)
+  (loop for i from start below (or end (length string))
+        do (%psos-put s (char string i)))
   string)
 
-(defmethod sb-gray:stream-line-column ((s p-string-output-stream)) nil)
+(defmethod sb-gray:stream-line-column ((s p-string-stream-mixin)) nil)
+
+;; tell()/seek() on an in-memory handle go through file-position.
+(defmethod sb-gray:stream-file-position
+    ((s p-string-stream-mixin) &optional position)
+  (cond ((null position) (psos-pos s))
+        (t (setf (psos-pos s)
+                 (case position
+                   (:start 0)
+                   (:end   (fill-pointer (%psos-buf s)))
+                   (t      position)))
+           t)))
+
+;; --- read side of a bidirectional in-memory handle ("+<" / "+>") ----------
+(defmethod sb-gray:stream-read-char ((s p-string-io-stream))
+  (let ((buf (%psos-buf s))
+        (p   (psos-pos s)))
+    (if (< p (fill-pointer buf))
+        (progn (setf (psos-pos s) (1+ p)) (char buf p))
+        :eof)))
+
+(defmethod sb-gray:stream-unread-char ((s p-string-io-stream) ch)
+  (declare (ignore ch))
+  (when (> (psos-pos s) 0) (decf (psos-pos s)))
+  nil)
 
 (defun %p-install-fh (fh stream)
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol)."
@@ -6432,20 +6636,41 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (cond
       ;; Write/truncate: replace the scalar with a fresh adjustable string the
       ;; Gray stream grows in place.  Bypass box-set's sv-cache by invalidating.
-      ((or (string= mode-str ">") (string= mode-str "+>"))
+      ((string= mode-str ">")
        (setf (p-box-value target-box) (%p-fresh-adjustable-string)
              (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
        (%p-install-fh fh (make-instance 'p-string-output-stream :target target-box))
        t)
-      ;; Append: seed the adjustable string with the current contents.
+      ;; Read+write, truncate: like ">", but the handle can also be read back.
+      ((string= mode-str "+>")
+       (setf (p-box-value target-box) (%p-fresh-adjustable-string)
+             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
+       (%p-install-fh fh (make-instance 'p-string-io-stream :target target-box))
+       t)
+      ;; Append: seed the adjustable string with the current contents and
+      ;; position the write offset at the end.
       ((string= mode-str ">>")
        (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
              (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
-       (%p-install-fh fh (make-instance 'p-string-output-stream :target target-box))
+       (%p-install-fh fh (make-instance 'p-string-output-stream
+                                        :target target-box
+                                        :pos (length cur)))
        t)
-      ;; Read: a plain string-input-stream over the current contents.
+      ;; Read+write, keep contents: position at start, reads see the current
+      ;; contents, writes overwrite/extend in place (Perl's "+<" on a scalar).
+      ((string= mode-str "+<")
+       (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
+             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
+       (%p-install-fh fh (make-instance 'p-string-io-stream :target target-box))
+       t)
+      ;; Read: the bidirectional stream positioned at the start.  (Using the
+      ;; same class as "+<" gives uniform seek/tell/SEEK_END; PCL does not
+      ;; enforce read-only-ness on the handle, matching its general stance.)
       ((string= mode-str "<")
-       (%p-install-fh fh (make-string-input-stream cur))
+       (%p-install-fh fh (make-instance 'p-string-io-stream
+                                        :target (let ((b (make-p-box
+                                                          (%p-fresh-adjustable-string cur))))
+                                                  b)))
        t)
       (t (warn "Unsupported in-memory open mode: ~A" mode-str) nil))))
 
@@ -6588,9 +6813,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              (cond
                ((= w 0) position)                              ; SEEK_SET
                ((= w 1) (+ (file-position stream) position))   ; SEEK_CUR
-               ((= w 2) (+ (file-length stream) position))     ; SEEK_END
+               ((= w 2) (+ (%p-stream-length stream) position)); SEEK_END
                (t position))))
-        (file-position stream new-pos)))))
+        ;; A negative resulting offset is an error in Perl: seek() returns
+        ;; false and leaves the position unchanged (rather than faulting).
+        (if (and (integerp new-pos) (minusp new-pos))
+            nil
+            (and (file-position stream new-pos) 1))))))
+
+(defun %p-stream-length (stream)
+  "Total length of STREAM for SEEK_END.  In-memory output streams expose their
+buffer's fill-pointer; everything else falls back to file-length."
+  (if (typep stream 'p-string-stream-mixin)
+      (fill-pointer (%psos-buf stream))
+      (file-length stream)))
 
 (defmacro p-seek (fh &rest args)
   "Perl seek — bareword filehandle is auto-quoted."
@@ -8607,19 +8843,35 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                     (sym (intern cl-func-name *package*)))
                (and (fboundp sym) (symbol-function sym)))))))))
 
+(defun %p-glob-slot-place (glob sigil init)
+  "The value bound to GLOB's SIGIL slot symbol (\"@\" array / \"%\" hash),
+   binding INIT first if the slot is unbound.  Returning the live binding makes
+   @{*{glob}} / %{*{glob}} read AND write through to the package variable
+   (Moo's _set_superclasses: @{*{_getglob(\"Pkg::ISA\")}} = @_)."
+  (let ((sym (let ((n (concatenate 'string sigil (p-typeglob-name glob)))
+                   (p (p-typeglob-package glob)))
+               (or (find-symbol n p) (intern n p)))))
+    (unless (boundp sym)
+      (setf (symbol-value sym) init))
+    (symbol-value sym)))
+
 (defun p-cast-@ (val)
   "Perl array dereference @{$ref} - unbox to get the array.
    Handles both old format (box containing vector) and new format
    (box containing box containing vector, from p-backslash).
    Auto-vivifies: if val is a box whose value is undef/nil, creates an empty
    array, stores it back in the box, and returns it (Perl lvalue semantics).
-   Symbolic ref: if val unboxes to a string, treats it as a package variable name."
+   Symbolic ref: if val unboxes to a string, treats it as a package variable name.
+   Typeglob: @{*{...}} resolves to the glob's ARRAY slot (live, lvalue-capable)."
   (let ((v (unbox val)))
     (cond
       ;; Double-boxed: box(box(arr)) from \@arr — unwrap both layers
       ((p-box-p v) (unbox v))
       ;; Direct vector
       ((and v (vectorp v) (not (stringp v))) v)
+      ;; Typeglob (from *{EXPR} or a glob ref): the glob's ARRAY slot
+      ((p-typeglob-p v)
+       (%p-glob-slot-place v "@" (make-array 0 :adjustable t :fill-pointer 0)))
       ;; Symbolic reference: @{"pkg::var"} — look up/create the package variable
       ((stringp v)
        (%p-symref-array v))
@@ -8643,6 +8895,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((v (unbox val)))
     (cond
       ((p-box-p v) (unbox v))
+      ;; Typeglob (from *{EXPR} or a glob ref): the glob's HASH slot
+      ((p-typeglob-p v)
+       (%p-glob-slot-place v "%" (make-hash-table :test 'equal)))
       ((and (stringp v)
             (>= (length v) 2)
             (string= (subseq v (- (length v) 2)) "::"))
@@ -9266,7 +9521,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (if old-ex (setf (gethash kv hv) old-bx) (remhash kv hv)))))
 
 (defun %p-lhe-init (hv kv init-val)
-  "Save hash[key] and install init-val. Returns saved state vector."
+  "Save hash[key] and install init-val. Returns saved state vector.
+   init-val goes through box-set (not raw make-p-box) so the localized elem has
+   the same box shape as ordinary (setf p-gethash) — a raw-wrapped ref defeats
+   p-autoviv-gethash's unboxing and gets clobbered (Moo: local $self->{captures}
+   = {} then $self->{captures}{$k} = ...)."
   (if (eq hv '%ENV-MARKER%)
       (let* ((old (sb-posix:getenv kv))
              (s (if (or (null init-val) (eq init-val *p-undef*))
@@ -9274,7 +9533,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (if s (sb-posix:setenv kv s 1) (sb-posix:unsetenv kv))
         (vector :env old))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
-        (setf (gethash kv hv) (make-p-box init-val))
+        (let ((bx (make-p-box nil)))
+          (box-set bx init-val)
+          (setf (gethash kv hv) bx))
         (vector :hash old-ex old-bx))))
 
 (defmacro p-local-hash-elem (hash-var key-form &body body)
@@ -9484,7 +9745,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-sub-exists (pkg-str name-str)
   "Perl exists &funcname — true if sub has been declared or defined."
-  (let* ((pkg (find-package (string-upcase pkg-str)))
+  (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
                 (find-symbol (concatenate 'string "PL-"
                                           (string-upcase name-str))
@@ -9497,7 +9758,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-sub-defined (pkg-str name-str)
   "Perl defined &funcname — true only if sub has an actual body (not a stub)."
-  (let* ((pkg (find-package (string-upcase pkg-str)))
+  (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
                 (find-symbol (concatenate 'string "PL-"
                                           (string-upcase name-str))
@@ -9509,7 +9770,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-undef-sub (pkg-str name-str)
   "Perl undef &funcname — remove sub body; sub still 'exists' afterward."
-  (let* ((pkg (find-package (string-upcase pkg-str)))
+  (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
                 (find-symbol (concatenate 'string "PL-"
                                           (string-upcase name-str))
@@ -10134,7 +10395,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    the class symbol in the MAIN package rather than the class's own package)."
   (let* ((method-name (to-string method))
          (clos-class-name (perl-pkg-to-clos-class current-class))
-         (pkg (find-package (string-upcase current-class)))
+         ;; %pcl-find-package, NOT (find-package (string-upcase ...)):
+         ;; multi-segment packages are case-preserved (|Moo::Object|), so the
+         ;; raw upcase lookup silently misses them and the SUPER walk dead-ends
+         ;; (Moo: Animal's SUPER::new -> Moo::Object::new was "not found").
+         (pkg (%pcl-find-package current-class))
          (isa-sym (when pkg (find-symbol "@ISA" pkg)))
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
          (isa-non-empty (and isa-val (vectorp isa-val) (> (length isa-val) 0)))
@@ -10159,7 +10424,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        ;; @ISA walk path: start from parents of current-class (skip current-class itself)
        (labels ((walk (cls-str visited)
                   (unless (member cls-str visited :test #'equal)
-                    (let* ((cpkg (find-package (string-upcase cls-str)))
+                    (let* ((cpkg (%pcl-find-package cls-str))
                            (fn (when cpkg
                                  (find-symbol (string-upcase (format nil "PL-~A" method-name))
                                               cpkg))))
@@ -10175,7 +10440,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          ;; Method not found via direct lookup — try AUTOLOAD in the parent chain
          (labels ((find-al (cls-str visited)
                     (unless (member cls-str visited :test #'equal)
-                      (let* ((cpkg (find-package (string-upcase cls-str)))
+                      (let* ((cpkg (%pcl-find-package cls-str))
                              (al (when cpkg (find-symbol "PL-AUTOLOAD" cpkg))))
                         (if (and al (eq (symbol-package al) cpkg) (fboundp al))
                             (progn

@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 34;
 
 sub run_cl {
     my ($code) = @_;
@@ -211,3 +211,246 @@ test_cl('my @lines = <$fh> reads all records (list context)',
 test_cl('printf @a flattens the array (format from first element)',
     'my @a = ("%s=%d\n", "x", 5); printf @a; printf STDOUT @a;',
     "x=5\nx=5\n");
+
+# Symbolic-ref array slice (session 245).  @{NAME}[i,j] under no-strict-refs is a
+# symbolic reference: NAME (a string, or any expr giving one) names a package
+# array.  PExpr now builds a slice_a_acc node whenever a Cast('@') + Block is
+# followed by a TRAILING subscript, whatever the block contains (the subscript's
+# position disambiguates slice-vs-deref at parse time — see
+# docs/symbolic-ref-slice-parse-fix.md).  Every spelling compiles to the SAME
+# one path (p-aslice), whose p-aref resolves ref-vs-string at runtime (was:
+# (setf p-aref) into the string's chars → CHARACTER type-error for $scalar,
+# inverted (p-cast-@ (p-aref-box ..)) crash for literal/expr).
+# Write via one spelling, read via another.
+test_cl('symbolic-ref array slice: scalar / literal / computed expr all agree',
+    'no strict;'
+    . ' my $f = "marr"; @{$f}[1,2] = ("A","B");'          # write via $scalar
+    . ' @{"marr"}[3] = "C";'                               # write via literal
+    . ' @{"m"."arr"}[4,5] = ("D","E");'                    # write via expr
+    . ' print join(",", map { defined $_ ? $_ : "u" } @{"marr"}[0,1,2,3,4,5]), "\n";',
+    "u,A,B,C,D,E\n");
+
+# Same symbolic slice with a VARIABLE / computed index (single-subscript form):
+# the subscript is a bare expression, not a comma list, so it exercises the
+# single-child (non-progn) path of the slice node — @{EXPR}[$i] = ... must work
+# for any deref spelling.
+test_cl('symbolic-ref array slice with a variable/computed index',
+    'no strict; my $f = "narr"; my $i = 2;'
+    . ' @{$f}[$i] = "X"; @{"narr"}[$i+1] = "Y"; @{"n"."arr"}[$i+2] = "Z";'
+    . ' print join(",", map { defined $_ ? $_ : "u" } @{"narr"}[0,1,2,3,4]), "\n";',
+    "u,u,X,Y,Z\n");
+
+# Symbolic-ref HASH slice (fuzzer axis-22 find, session 245): @{EXPR}{keys} is a
+# hash value-slice (the @ sigil + {} subscript), %{EXPR}{keys} a key/value slice.
+# The literal/computed-expr deref forms used to invert to (p-cast-@ (p-gethash-
+# box ..)) and crash (CL-ERROR); the parse-time slice rule routes them to
+# (p-hslice / p-kv-hslice EXPR keys), the same path @{$scalar}{..} already used.
+test_cl('symbolic-ref hash slice: @{}=values, %{}=key/value, all spellings',
+    'no strict; %hh=(a=>1,b=>2,c=>3);'
+    . ' my $n="hh";'
+    . ' print join(",", @{$n}{qw(a c)}), "|",'        # via scalar  -> 1,3
+    . '       join(",", @{"hh"}{qw(a c)}), "|",'      # via literal -> 1,3
+    . '       join(",", @{"h"."h"}{qw(a c)}), "|",'   # via expr    -> 1,3
+    . '       join(",", %{"hh"}{qw(a c)}), "\n";',    # kv-slice    -> a,1,c,3
+    "1,3|1,3|1,3|a,1,c,3\n");
+
+# GUARD for the session-245 regression: @{$a[0]} / @{$h{k}} / @{$obj->{x}} are
+# DEREFS of a container element (the subscript is INSIDE the braces) and must
+# stay plain casts — the codegen rewrite of 2bc25da turned them into slices
+# because both compile to the same (p-cast-@ (p-aref-box ..)) string shape
+# (scalar @{$a[0]} gave 1, not 3).  The parse-time rule keys on a subscript
+# AFTER the block, so these never match; the last case (@{$h{a}}[0,2]) has
+# BOTH — an inner element subscript and a trailing slice — and is a genuine
+# slice of the deref'd element.
+test_cl('deref of container element stays a deref; trailing subscript slices it',
+    'my @a=([1,2,3]); my %h=(a=>[4,5,6]); my $o={x=>[7,8,9]};'
+    . ' print scalar(@{$a[0]}), scalar(@{$h{a}}), scalar(@{$o->{x}}), "|",'
+    . '       join(",", @{$h{a}}[0,2]), "\n";',
+    "333|4,6\n");
+
+# ── Moo-driven fixes (session 247) ──────────────────────────────────────────
+
+# Closure-shadow rename bug: an anon sub that re-declares `my $c` with the SAME
+# name as the outer var the sub is being assigned to (Moo install_delayed:
+# my $c = defer_sub ... sub { my $c = gen(); $c }).  The closure-capture
+# renamer renamed the inner decl's ASSIGNMENT target to the outer __lex__ var
+# while the inner body read its own plain let binding -> undef.  Fixed in
+# _process_variable_statement (rename path strips the var from
+# _current_scope_new_renames for the RHS parse) + _with_declarations (shadowed
+# my-vars drop outer renames for the body).
+test_cl('my $c = sub { my $c = ...; $c } shadow returns inner value',
+    'sub inner { sub { "INNER" } }'
+    . ' sub mf { my ($p) = @_; my $c = sub { my $c = inner($p); $c }; return $c }'
+    . ' my $made = mf("X")->();'
+    . ' print defined $made ? "ok ".$made->() : "UNDEF", "\n";'
+    . ' my $o = 5; my $bump = sub { $o + 1 };'
+    . ' my $f = sub { my $o = inner(); $o };'
+    . ' print $bump->(), " ", $f->()->(), "\n";',
+    "ok INNER\n6 INNER\n");
+
+# Stash delete write-through: delete $Pkg::{name} (via \%{"Pkg::"}) must really
+# remove the sub so *{Pkg::name}{CODE}, defined &, and ->can stop seeing it.
+# Moo's Method::Generate::Constructor bootstrap `sub new` deletes itself from
+# the stash on first call; the old read-only-snapshot p-stash lost the delete
+# and assert_constructor croaked "Unknown constructor ... already exists".
+test_cl('delete from package stash removes the sub (write-through)',
+    'no strict "refs"; package Foo; sub hello { "hi" } package main;'
+    . ' my $st = \%{"Foo::"};'
+    . ' print defined &Foo::hello ? "y":"n", exists $st->{hello} ? "y":"n";'
+    . ' delete $st->{hello};'
+    # NB: perl keeps `defined &Foo::hello` true here (the compiled reference
+    # pins the glob); only the live ->can lookup sees the deletion.
+    . ' print defined &Foo::hello ? "y":"n", Foo->can("hello") ? "y":"n", "\n";',
+    "yyyn\n");
+
+# Typeglob deref slots: @{*{globref}} (and %{...}) must resolve to the glob's
+# ARRAY/HASH slot, live and lvalue-capable.  Moo's _set_superclasses does
+# @{*{_getglob("${target}::ISA")}} = @_ — the write was silently lost, so
+# `extends` never changed @ISA.
+test_cl('@{*{globref}} reads and writes the glob ARRAY slot',
+    'no strict "refs"; @Bar::ISA = ("X");'
+    . ' sub _gg { no strict "refs"; \*{$_[0]} }'
+    . ' @{*{_gg("Bar::ISA")}} = ("Foo");'
+    . ' print "(@Bar::ISA)(@{*{_gg(q(Bar::ISA))}})\n";',
+    "(Foo)(Foo)\n");
+
+# local $h{k} = {} must store the init with ordinary assignment box shape:
+# %p-lhe-init used raw make-p-box, so the localized hashref defeated
+# p-autoviv-gethash's unboxing — a later nested write clobbered the elem with
+# a RAW hash and scalar reads returned the COUNT (Moo: local $self->{captures}
+# = {} then $self->{captures}{$k} = \$v in generate_method).
+test_cl('local hash-elem init holds a hashref usable by nested writes',
+    'my $self = { captures => undef };'
+    . ' sub fill { my $s = shift; $s->{captures}{q($x)} = \42; }'
+    . ' { local $self->{captures} = {}; fill($self); my $c = $self->{captures};'
+    . '   print ref($c), " ", scalar(keys %$c), " ", ${$c->{q($x)}}, "\n"; }'
+    . ' print defined $self->{captures} ? "kept" : "restored", "\n";',
+    "HASH 1 42\nrestored\n");
+
+# ── List flattening in return (session 248) ─────────────────────────────────
+
+# p-return's list-context multi-value branch built (vector v1 v2 ...) without
+# splicing array-valued elements, so `return ($i, map ...)` handed the caller
+# a NESTED vector — join() stringified it as ARRAY(0x...).  List assignment
+# happened to deep-flatten, hiding the bug.  Now flattened via p-flatten-args
+# (raw vectors/hashes spread; boxes/refs/blessed stay intact).
+test_cl('return ($i, map ...) flattens; refs in returned list stay refs',
+    'sub f { my $i = 5; my @subs = (sub { 6 }, sub { 6 });'
+    . '   return ($i, map { $_->() } @subs); }'
+    . ' sub g { my $i = 1; return ($i, [2,3], ()); }'
+    . ' print join(",", f()), "|";'
+    . ' my @g = g(); print scalar(@g), ",", $g[1][1], "\n";',
+    "5,6,6|2,3\n");
+
+# gen_tree_val emitted a bare (progn ...) for a multi-value parenthesized list
+# in non-list static context, so a ternary branch inside return — context only
+# known at runtime — ran as the comma OPERATOR and dropped all but the last
+# value.  Now it dispatches on *wantarray* like gen_progn does.
+test_cl('parenthesized list in ternary return: list vs scalar by context',
+    'sub t { my @a = (7,8); return wantarray ? (0, @a) : -1 }'
+    . ' sub u { my $i = 5; my @s = (sub { 6 });'
+    . '   return wantarray ? ($i, map { $_->() } @s) : 0 }'
+    . ' print join(",", t()), ",", scalar(t()), "|", join(",", u()), "\n";',
+    "0,7,8,-1|5,6\n");
+
+# box-set class rules (substr.t #378/#383 regressions, session 248):
+# (1) overwriting a box that held a blessed REF with a plain value clears the
+#     stale class (else overloaded "" keeps firing on the new string and
+#     p-aref's symbolic-ref arm turns it into undef);
+# (2) a blessed object assigned into a substr lvalue reaches the magic-cell
+#     setter still boxed, so its "" overload is used (exactly once);
+# (3) a blessed scalar REFERENT keeps its class on assignment (Perl SV stash).
+test_cl('box-set class: clear on ref-holder overwrite, keep on referent write',
+    'package o { use overload q("") => sub { ++our $count; $_[0][0] } }'
+    . ' my $refee = bless ["Za"], "o";'
+    . ' my $substr = \substr $refee, -2; $$substr = "b";'
+    . ' print "[$refee]", (ref($refee) eq "" ? "plain" : "CLASSY"), "|";'
+    . ' my $t = ""; $o::count = 0;'
+    . ' ${\substr $t, 0} = bless ["X"], "o";'
+    . ' print "[$t]$o::count|";'
+    . ' my $x = 1; my $r = bless \$x, "C"; $x = 5;'
+    . ' print ref($r), "\n";',
+    "[b]plain|[X]1|C\n");
+
+# ── Moo bootstrap fixes (session 248b) ──────────────────────────────────────
+
+# Named sub inside a block must close over the block's `my` lexicals.  The
+# closure-capture renamer skipped named subs, so the block's let of the
+# defvar'd name dynamically shadowed the global the defun read — the sub saw
+# nil.  This is Sub::Quote's eval'd shape: { my $default_for_b = ...;
+# sub new { ... $default_for_b->($new) ... } } — the Moo coderef-default wall.
+test_cl('named sub in a block closes over the block lexical',
+    '{ my $x = sub { "OK" }; sub callit { $x->() } }'
+    . ' print callit(), "|";'
+    . ' { my $n = 41; sub bump { $n + 1 } }'
+    . ' print bump(), "\n";',
+    "OK|42\n");
+
+# SUPER:: through a multi-segment parent package: p-super-call did
+# (find-package (string-upcase ...)), which misses case-preserved
+# |My::Base|-style packages — the walk dead-ended with "No SUPER::new found"
+# (Moo: Animal's SUPER::new -> Moo::Object::new).  Now uses %pcl-find-package
+# like the rest of dispatch.
+test_cl('SUPER:: resolves through multi-segment package names',
+    'package My::Base; sub new { my $c = shift; bless {ok=>1}, (ref($c)||$c) }'
+    . ' package Kid::Sub; our @ISA = ("My::Base");'
+    . ' sub new { my $c = shift; my $o = $c->SUPER::new; $o->{kid}=1; $o }'
+    . ' package main;'
+    . ' my $o = Kid::Sub->new;'
+    . ' print $o->{ok}, $o->{kid}, " ", ref($o), "\n";',
+    "11 Kid::Sub\n");
+
+# ── session 249: unblocking Moo's lazy/subclass constructor bootstrap ──
+
+# `defined &Pkg::sub` for a MULTI-SEGMENT package: p-sub-defined did
+# (find-package (string-upcase pkg)), which can't see a case-preserved
+# |Sub::Util|-style CL package, so it always reported false.  Sub::Defer's
+# BEGIN gate `defined &Sub::Util::set_subname` then mis-detected _CAN_SUBNAME.
+# Now resolves via %pcl-find-package.  (Single-segment was already fine.)
+test_cl('defined &Pkg::sub works for multi-segment package names',
+    'package Sub::Util; sub set_subname { $_[1] }'
+    . ' package main;'
+    . ' print((defined &Sub::Util::set_subname ? 1 : 0),'
+    . '       (defined &Sub::Util::missing ? 1 : 0), "\n");',
+    "10\n");
+
+# Coderef identity must be STABLE across allocation/GC.  object-address used
+# the raw moving pointer, so a coderef stringified into a hash key (CODE(0x..))
+# could diverge after the GC relocated it -> hash lookup miss (broke
+# Sub::Defer's %DEFERRED).  A coderef key must still be found after heavy
+# allocation, and refaddr must be invariant.
+test_cl('coderef hash key is stable across allocation (object identity)',
+    'my %h; my $c = sub { 1 }; $h{$c} = "v";'
+    . ' my @j; for (1..50000) { push @j, [$_, {a=>$_}] } @j = ();'
+    . ' print((exists $h{$c} ? "HIT" : "MISS"), "\n");',
+    "HIT\n");
+
+test_cl('stringified ref identity is invariant across allocation',
+    'my $r = {}; my $s1 = "$r";'
+    . ' my @j; for (1..50000) { push @j, [$_] } @j = ();'
+    . ' my $s2 = "$r";'
+    . ' print(($s1 eq $s2 ? "SAME" : "MOVED"), "\n");',
+    "SAME\n");
+
+# refaddr: implemented via ref-numification over the stable object identity.
+# Distinct refs differ; the same ref is invariant across allocation; a non-ref
+# is undef; and refaddr agrees with the hex of the stringified ref.
+test_cl('refaddr: distinct/stable/undef + agrees with stringification',
+    'use Scalar::Util qw(refaddr);'
+    . ' my $r = {}; my $r2 = {};'
+    . ' my $a = refaddr($r);'
+    . ' my @j; for (1..50000) { push @j, [$_] } @j = ();'
+    . ' my $hex = ("$r" =~ /0x([0-9a-f]+)/) ? hex($1) : -1;'
+    . ' print(($a == refaddr($r) ? "S" : "M"),'
+    . '       (refaddr($r) != refaddr($r2) ? "D" : "d"),'
+    . '       (defined refaddr(5) ? "x" : "u"),'
+    . '       ($a == $hex ? "H" : "h"), "\n");',
+    "SDuH\n");
+
+# refaddr of a non-ref is undef — including numeric/hex-looking STRINGS, which
+# must NOT be numified (the `ref` guard short-circuits before `0 + $r`).
+test_cl('refaddr returns undef for non-ref scalars (strings included)',
+    'use Scalar::Util qw(refaddr);'
+    . ' print((map { defined refaddr($_) ? "x" : "u" }'
+    . '            ("hello", "42", "0xff", 7, undef)), "\n");',
+    "uuuuu\n");

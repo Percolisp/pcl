@@ -39,6 +39,18 @@ has code => (
   predicate => 'has_code',
 );
 
+# eval_mode: set when transpiling a string for `eval "..."` (via pl2cl
+# --eval-pkg / --server).  In this mode, variables used but not declared
+# inside the eval string are the caller's in-scope lexicals; instead of
+# emitting forward-declaration defvars for them (which proclaim them special
+# and break lexical capture), we record them in _eval_free_vars and wrap the
+# eval body in a (p-eval-thunk '(names) (lambda (syms) body)) so the runtime
+# can bind them to the caller's containers.  See docs/eval-lexical-capture.md.
+has eval_mode => (
+  is      => 'ro',
+  default => sub { 0 },
+);
+
 has ppi_doc => (
   is        => 'lazy',
 );
@@ -381,6 +393,29 @@ sub _assemble_output {
     unshift @{$self->_sections->[0]{preamble}}, @predecls;
   }
 
+  # eval-string mode: emit all preambles+declarations, then wrap the combined
+  # definitions+runtime (the actual eval body) in a (p-eval-thunk ...) so the
+  # caller's in-scope lexicals become lambda parameters.  See eval_mode above.
+  if ($self->eval_mode) {
+    my (@head, @body);
+    for my $section (@{$self->_sections}) {
+      push @head, @{$section->{preamble}};
+      push @head, @{$section->{declarations}};
+      push @body, @{$section->{definitions}};
+      my @rt = @{$section->{runtime}};
+      push @body, _wrap_runtime_labels(\@rt);
+    }
+    my @free = @{$self->{_eval_free_vars} // []};
+    return (@head, @body) unless @free;
+    my $names  = join(' ', map { "\"$_\"" } @free);
+    my $params = join(' ', @free);
+    return (@head,
+            "(pcl:p-eval-thunk (list $names)",
+            " (lambda ($params)",
+            @body,
+            " ))");
+  }
+
   # Assemble: for each section emit preamble → declarations → definitions → runtime
   my @lines;
   for my $section (@{$self->_sections}) {
@@ -643,12 +678,15 @@ sub _insert_variable_forward_declarations {
     }
   }
 
+  my %forced_sort_var;  # $a/$b force-declared here (vs. user-declared via my)
   unless ($declared{'$a'}) {
     push @$decls, "(defvar \$a (make-p-box nil))";
     push @$decls, "(defvar \$b (make-p-box nil))";
     push @$decls, "";
     $declared{'$a'} = 1;
     $declared{'$b'} = 1;
+    $forced_sort_var{'$a'} = 1;
+    $forced_sort_var{'$b'} = 1;
   }
 
   my %lex_foreach = %{$self->{_lexical_foreach_vars} // {}};
@@ -699,6 +737,26 @@ sub _insert_variable_forward_declarations {
       push @$decls, @cross_decls;
       push @$decls, "";
     }
+  }
+
+  # eval-string mode: the eval body's free variables become parameters of the
+  # wrapping (p-eval-thunk ...) lambda, so the runtime can bind them to the
+  # caller's in-scope lexicals (or fall back to the package global).
+  #
+  #  - Ordinary undeclared vars: do NOT defvar them — a defvar would proclaim
+  #    them globally special and turn the lambda parameter into a *dynamic*
+  #    binding, breaking lexical capture by closures built inside the eval.
+  #  - $a/$b that we force-declared above: KEEP the defvar (sort comparators
+  #    need them special) but ALSO list them as params when referenced, so a
+  #    caller's lexical `my $a`/`my $b` is captured.  Being special, the param
+  #    is a dynamic rebinding — a bare $a sees the caller's box, while `sort`
+  #    inside the eval can still rebind it.  (A pathological `my $a` masking a
+  #    sort block matches Perl only loosely; see docs/eval-lexical-capture.md.)
+  if ($self->eval_mode) {
+    my @free = @undeclared;
+    push @free, grep { $referenced{$_} && $forced_sort_var{$_} } ('$a', '$b');
+    $self->{_eval_free_vars} = \@free if @free;
+    return;
   }
 
   return unless @undeclared;
@@ -1348,6 +1406,18 @@ sub _process_variable_statement {
           delete $temp{$var_name};
         }
         $self->environment->state_var_renames(\%temp);
+        # Also remove it from _current_scope_new_renames for the RHS parse: an
+        # anon sub in the RHS may RE-DECLARE `my $var_name` (Moo install_delayed:
+        # my $c = defer_sub ... sub { my $c = gen(); $c }).  That inner decl is a
+        # SHADOW with its own plain let binding; if this map still carries the
+        # rename, the inner decl's assignment would target OUR new __lex__ var
+        # while the inner body reads its plain binding (assignment lost).
+        my $saved_scope_rn = $self->{_current_scope_new_renames};
+        {
+          my %scope = %{ $saved_scope_rn // {} };
+          delete $scope{$var_name};
+          $self->{_current_scope_new_renames} = \%scope;
+        }
 
         # An array/hash LHS forces LIST context on the RHS — resolved at COMPILE
         # time (no runtime *wantarray* check): `my @a = (1,2,3)` captured by a
@@ -1358,6 +1428,7 @@ sub _process_variable_statement {
 
         # Re-apply new rename
         $self->environment->state_var_renames($env_renames);
+        $self->{_current_scope_new_renames} = $saved_scope_rn;
 
         # Choose the assignment op by LHS sigil.  A captured array/hash is a
         # let-bound LEXICAL (already an adjustable array / hash table), so we
@@ -4019,14 +4090,16 @@ sub _vars_referenced_in_closures {
       sub { $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }
     ) || [];   # PPI returns 0 (not undef) when nothing found — use || not //
     for my $kw (@$sub_kws) {
-      # Skip NAMED subs (sub foo { ... }) — they are global defuns, not closures.
-      # Only anonymous subs (sub { ... }) capture variables from the enclosing scope.
-      # To detect named subs: the first non-whitespace sibling after 'sub' is a Word (the name).
-      my $first = $kw->next_sibling;
-      $first = $first->next_sibling while $first && $first->isa('PPI::Token::Whitespace');
-      next if $first && $first->isa('PPI::Token::Word');  # named sub — skip
+      # NAMED subs (sub foo { ... }) count as capturers too: a named sub inside
+      # a block that references a block-local 'my' must see that lexical (Perl
+      # closes over the first instance).  Without the rename, the block's let
+      # of the defvar'd name dynamically shadows the global the defun reads —
+      # the sub sees nil (Moo: Sub::Quote's eval'd `{ my $default_for_b = ...;
+      # sub new { ... $default_for_b->($new) ... } }`).  Over-inclusion is safe:
+      # callers intersect this set with the block-local 'my' declarations, so
+      # file-level `my $x; sub f { $x }` (no enclosing block) is unaffected.
 
-      # Walk forward to find the block (skipping prototypes/attributes for anon subs)
+      # Walk forward to find the block (skipping name/prototypes/attributes)
       my $sib = $kw->next_sibling;
       $sib = $sib->next_sibling while $sib && !$sib->isa('PPI::Structure::Block');
       next unless $sib;
@@ -4492,6 +4565,18 @@ sub _with_declarations {
         $self->{_current_scope_new_renames} = \%new_renames;
         $self->{_current_scope_old_renames} = \%old_renames;
       }
+      else {
+        # All of this body's 'my' vars shadow renames from an OUTER sub scope
+        # (e.g. `my $c = sub { my $c = f(); $c }` — Moo's install_delayed maker).
+        # The let above binds the PLAIN name and the env map was stripped, so
+        # references resolve plainly; _current_scope_new_renames must drop the
+        # shadowed names too, or _process_variable_statement's rename path
+        # emits the inner decl's assignment against the OUTER __lex__ variable
+        # while the body reads the plain let binding (assignment lost).
+        my %scope = %{ $saved_scope_renames // {} };
+        delete @scope{keys %shadowed_state};
+        $self->{_current_scope_new_renames} = \%scope;
+      }
     }
 
     # Save/restore _my_binding_init_vars so nested _with_declarations calls don't interfere.
@@ -4511,6 +4596,9 @@ sub _with_declarations {
       if (%new_renames) {
         $self->{_current_scope_new_renames} = $saved_scope_renames;
         delete $self->{_current_scope_old_renames};
+      }
+      else {
+        $self->{_current_scope_new_renames} = $saved_scope_renames;
       }
     }
 
@@ -4949,9 +5037,18 @@ sub _process_foreach_loop {
       $saved_loop_var_rename = delete $cur_renames->{$loop_var};
       $self->environment->state_var_renames({ %$cur_renames });
     }
+    # The loop variable is a live CL binding inside the p-foreach body, but it
+    # lives in _lexical_foreach_vars, not _let_bound_vars.  Add it to
+    # _let_bound_vars for the body so a string eval in the body captures it
+    # (e.g. `for my $x (...) { eval '$x' }`).  Save/restore around the body.
+    my $saved_let_bound = $self->{_let_bound_vars};
+    if ($cl_loop_var ne '$_') {
+      $self->{_let_bound_vars} = { %{$saved_let_bound // {}}, $cl_loop_var => 1 };
+    }
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     });
+    $self->{_let_bound_vars} = $saved_let_bound;
     if (defined $saved_loop_var_rename) {
       $cur_renames = $self->environment->state_var_renames // {};
       $self->environment->state_var_renames({ %$cur_renames, $loop_var => $saved_loop_var_rename });
