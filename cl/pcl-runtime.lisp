@@ -7835,8 +7835,20 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Max cache age in seconds (default: 1 week)")
 (defparameter *pcl-skip-cache* nil
   "When true, bypass cache (set by --no-cache or PCL_NO_CACHE)")
-(defparameter *pcl-cache-fasl* t
-  "When true, cache compiled FASL; when nil, cache .lisp for debugging")
+(defparameter *pcl-cache-fasl* nil
+  "When true, cache compiled FASL; when nil, cache .lisp and load as SOURCE.
+
+   NOTE (session 251): defaults to NIL as a correctness workaround for the
+   module compile-file+load DOUBLE-EXECUTION bug.  With FASL caching on,
+   compile-file executes the module body once (running BEGIN-time, guarded
+   sub redefinitions such as Sub::Defer's deferred ctors), then `load` re-runs
+   the plain `sub NAME` installs at load time and CLOBBERS those redefinitions
+   (the guard makes the redefine skip on the load pass).  This breaks Moo
+   subclasses (empty attrs) and any module using the define-then-guarded-
+   BEGIN-redefine pattern (Moose/Sub::Quote/Type::Tiny/...).  Loading as
+   source is single-pass and correct, at the cost of slower module loads.
+   The proper fix (keep FASL, eliminate double-exec) is option C/D in
+   docs/module-double-exec-bug.md — DO NEXT SESSION.")
 (defparameter *pcl-pl2cl-path* nil
   "Path to pl2cl script (set at load time)")
 
