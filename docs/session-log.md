@@ -4,6 +4,55 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 250 (2026-06-13) — String-eval LEXICAL CAPTURE implemented (the deferred "option B"); commit `d930239`, gate 93/3392 green.
+
+User asked to discuss the long-deferred gap: `eval "CODE"` couldn't see the
+enclosing sub's `my` lexicals (CL `eval` = null lexical env; the pl2cl
+subprocess defvar'd each free var to a fresh empty box). User proposed the fix
+shape: **turn the eval's free variables into parameters of a lambda wrapping the
+body, call it with the caller's values.** Implemented exactly that.
+
+**Mechanism (3 layers):**
+1. Subprocess (`pl2cl --server`/`--eval-pkg`, `eval_mode=1` via `parse_code`):
+   `_insert_variable_forward_declarations` SUPPRESSES the free-var (`@undeclared`)
+   defvars (a defvar proclaims the symbol special → lambda param becomes dynamic
+   → kills closure capture) and `_assemble_output` wraps the body as
+   `(pcl:p-eval-thunk '(names) (lambda (params) body))`.
+2. Call site (`ExprToCL._eval_lexical_alist`): `eval STRING` →
+   `(p-eval STR (list (cons "$x" $x) ...))`, lexicals from the PARSER's
+   `_let_bound_vars` (NOT `Environment->scope_stack` — its declared_vars is empty
+   for `my`!), via `$self->expr_o->parser`. Alist KEY strips the closure-rename
+   `__lex__N` suffix so it matches the eval's bare name.
+3. Runtime: `*p-eval-lex-alist*` (bound by p-eval's new 2nd arg), `p-eval-thunk`
+   = `(apply fn (mapcar #'p-eval-lex-lookup names))`. Lookup: alist hit → caller's
+   container; else boundp global → symbol-value; else fresh. **Boxes are shared,
+   so writes propagate back** (`eval '$x=99'`, `+=`, `push @a`).
+
+**$a/$b (user caught this):** force-declared special (sort comparators need
+them dynamic). Kept the defvar AND list referenced `$a`/`$b` as params
+(`%forced_sort_var`) → special+param = dynamic rebinding: bare `$a` sees the
+caller's box, `sort{$a<=>$b}` still rebinds. **foreach loop var:** added to
+`_let_bound_vars` for the body (it lived only in `_lexical_foreach_vars`).
+
+**Method = differential fuzzing vs real perl** (write snippet to file, `perl
+file` vs `./runpl file` — NEVER inline `perl -e`, the shell mangles `$`). Two
+hand batteries found 5 bugs; fixed the 3 that were the feature's
+(`my $a` capture, closure-rename key, foreach var), 2 are PRE-EXISTING (fail on
+clean HEAD): named-sort-comparator-defined-after-use-inside-a-sub; and
+`our $x` inside a sub + `local` + eval. New `tools/difftest-eval.pl` (7 axes,
+batched into one transpile+run for speed) — **15000 cases / 25 seeds, 0 fails**.
+
+**Tests/docs:** `Pl/t/eval-capture-01.t` (30 cases, 1 SBCL run) + 4 in
+`eval-01.t` (44); `docs/eval-lexical-capture.md` (design + 3 documented
+divergences + the 2 pre-existing bugs). See `memory/project_string_eval_lexical_capture.md`.
+
+**Divergences documented, not chased:** `my $a` masking sort inside the same
+eval (perl garbage order); nested string eval `eval 'eval "$x"'`; eval in a
+returned closure over a var mentioned ONLY in the string (perl's closure-opt
+skips it → undef; PCL captures = more permissive).
+
+---
+
 ## Session 249 (2026-06-13) — Moo subclass: coderef-identity loop FIXED (stable object-address); + Sub::Util shim, multi-seg `defined &`, real `refaddr`. Subclass still empty-attrs (white-box next).
 
 Continued the Moo subclass wall from 248b (`Dog extends Animal` → `Dog->new`
