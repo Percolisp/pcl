@@ -1051,9 +1051,10 @@ sub parse {
         $i--;
         next;
       } else {
-        say "??? Term:", dump($term), "\nNext is:", dump $nxt;
-        say " Next 2:", dump $nxt_2;
-        exit 0;
+        my $fn = eval { $self->parser->filename } // '(unknown)';
+        die "PExpr: unhandled postfix '->' term in $fn: "
+          . "term=" . dump($term) . " next=" . dump($nxt)
+          . " next2=" . dump($nxt_2) . "\n";
       }
     }
 

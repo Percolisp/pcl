@@ -616,4 +616,16 @@ say \$Dual::other;
   like($output, qr/not exported/, 'Exporter: qualified access to non-exported works');
 }
 
+# Test: an unparseable postfix '->' construct during module prototype
+# extraction must NOT hard-exit the whole transpiler (regression: PExpr used
+# `exit 0`, which bypassed the eval{} guard in _extract_module_prototypes and
+# killed pl2cl when scanning Moo::Role's dependency chain — session 251).
+{
+  my $result = Pl::Parser->parse_code('use Moo::Role;');
+  like($result, qr/\(p-use "Moo::Role"\)/,
+       'use Moo::Role transpiles (no hard exit on prototype-scan parse gap)');
+  unlike($result, qr/\?\?\? Term/,
+       'use Moo::Role: no "??? Term" parser-crash dump in output');
+}
+
 done_testing();
