@@ -991,9 +991,31 @@
                   (return-from parse-perl-number n)))))))))
   0)
 
+;;; Stable object identity.  SBCL's get-lisp-obj-address returns the raw
+;;; pointer, which is NOT a usable Perl ref identity: the compacting GC
+;;; relocates objects (changing the pointer), and PCL re-boxes refs on some
+;;; paths.  A coderef threaded through Sub::Defer's coderef-keyed %DEFERRED
+;;; would then present two different CODE(0x..) strings for one logical sub,
+;;; breaking the hash lookup (Moo's lazy/subclass constructor bootstrap).
+;;; Instead we assign each object a monotonic id the first time its identity
+;;; is requested and reuse it for the object's lifetime.  The table is
+;;; weak-on-key so dead objects don't leak; ids are never reused, so distinct
+;;; objects can never collide (an improvement over reusable raw addresses).
+#+sbcl
+(defvar *p-object-id-table*
+  (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Live object -> stable identity integer (see object-address).")
+(defvar *p-object-id-counter* 0
+  "Monotonic source of ids for *p-object-id-table*.")
+
 (defun object-address (obj)
-  "Get a unique address/ID for an object (implementation-dependent)"
-  #+sbcl (sb-kernel:get-lisp-obj-address obj)
+  "Stable unique numeric identity for OBJ — the basis for Perl ref identity
+   (refaddr, == on refs) and ref stringification (CODE/HASH/ARRAY(0x..)).
+   Stable across GC relocation and re-boxing, unlike the raw pointer."
+  #+sbcl
+  (or (gethash obj *p-object-id-table*)
+      (setf (gethash obj *p-object-id-table*)
+            (incf *p-object-id-counter*)))
   #-sbcl (sxhash obj))  ; Fallback: use hash as pseudo-address
 
 ;;; Forward declarations for use overload helpers (p-get-class and p-method-call
@@ -9677,7 +9699,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-sub-exists (pkg-str name-str)
   "Perl exists &funcname — true if sub has been declared or defined."
-  (let* ((pkg (find-package (string-upcase pkg-str)))
+  (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
                 (find-symbol (concatenate 'string "PL-"
                                           (string-upcase name-str))
@@ -9690,7 +9712,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-sub-defined (pkg-str name-str)
   "Perl defined &funcname — true only if sub has an actual body (not a stub)."
-  (let* ((pkg (find-package (string-upcase pkg-str)))
+  (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
                 (find-symbol (concatenate 'string "PL-"
                                           (string-upcase name-str))
@@ -9702,7 +9724,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-undef-sub (pkg-str name-str)
   "Perl undef &funcname — remove sub body; sub still 'exists' afterward."
-  (let* ((pkg (find-package (string-upcase pkg-str)))
+  (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
                 (find-symbol (concatenate 'string "PL-"
                                           (string-upcase name-str))
