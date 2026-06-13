@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 29;
+plan tests => 32;
 
 sub run_cl {
     my ($code) = @_;
@@ -399,3 +399,35 @@ test_cl('SUPER:: resolves through multi-segment package names',
     . ' my $o = Kid::Sub->new;'
     . ' print $o->{ok}, $o->{kid}, " ", ref($o), "\n";',
     "11 Kid::Sub\n");
+
+# ── session 249: unblocking Moo's lazy/subclass constructor bootstrap ──
+
+# `defined &Pkg::sub` for a MULTI-SEGMENT package: p-sub-defined did
+# (find-package (string-upcase pkg)), which can't see a case-preserved
+# |Sub::Util|-style CL package, so it always reported false.  Sub::Defer's
+# BEGIN gate `defined &Sub::Util::set_subname` then mis-detected _CAN_SUBNAME.
+# Now resolves via %pcl-find-package.  (Single-segment was already fine.)
+test_cl('defined &Pkg::sub works for multi-segment package names',
+    'package Sub::Util; sub set_subname { $_[1] }'
+    . ' package main;'
+    . ' print((defined &Sub::Util::set_subname ? 1 : 0),'
+    . '       (defined &Sub::Util::missing ? 1 : 0), "\n");',
+    "10\n");
+
+# Coderef identity must be STABLE across allocation/GC.  object-address used
+# the raw moving pointer, so a coderef stringified into a hash key (CODE(0x..))
+# could diverge after the GC relocated it -> hash lookup miss (broke
+# Sub::Defer's %DEFERRED).  A coderef key must still be found after heavy
+# allocation, and refaddr must be invariant.
+test_cl('coderef hash key is stable across allocation (object identity)',
+    'my %h; my $c = sub { 1 }; $h{$c} = "v";'
+    . ' my @j; for (1..50000) { push @j, [$_, {a=>$_}] } @j = ();'
+    . ' print((exists $h{$c} ? "HIT" : "MISS"), "\n");',
+    "HIT\n");
+
+test_cl('stringified ref identity is invariant across allocation',
+    'my $r = {}; my $s1 = "$r";'
+    . ' my @j; for (1..50000) { push @j, [$_] } @j = ();'
+    . ' my $s2 = "$r";'
+    . ' print(($s1 eq $s2 ? "SAME" : "MOVED"), "\n");',
+    "SAME\n");
