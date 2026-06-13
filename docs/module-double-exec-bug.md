@@ -1,5 +1,12 @@
 # Module compile-file+load DOUBLE-EXECUTION bug — proper fix is NEXT SESSION
 
+> ► **NEXT SESSION OPENS HERE.** The decision to make first: **what to do about
+> saving/loading FASL.** Right now modules load as *source* (correct but slower);
+> we want compiled-FASL speed back without re-introducing the double-execution.
+> Pick from the options in "NEXT SESSION — proper fix" below (lean C or D), then
+> implement and flip `*pcl-cache-fasl*` back to `t`. Everything needed to decide
+> is in this doc.
+
 **Status (session 251):** root cause found and documented; a *correctness*
 workaround is in place (`*pcl-cache-fasl*` defaults to **nil** → modules load
 as source, single-pass). The **proper fix that keeps FASL caching is deferred
