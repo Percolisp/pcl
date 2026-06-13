@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 249 (2026-06-13) — Moo subclass: coderef-identity loop FIXED (stable object-address); + Sub::Util shim, multi-seg `defined &`, real `refaddr`. Subclass still empty-attrs (white-box next).
+
+Continued the Moo subclass wall from 248b (`Dog extends Animal` → `Dog->new`
+infinite-looped). Peeled a chain of root causes; **3 commits, gate green
+92 files / 3353 tests**:
+
+1. **`bacf448` — stable coderef/ref identity (the loop fix) + Sub::Util shim +
+   multi-seg `defined &`.**
+   - `object-address` (cl/pcl-runtime.lisp ~994) replaced raw
+     `get-lisp-obj-address` (the live pointer — the compacting GC relocates
+     objects, and PCL re-boxes refs on some paths) with a **weak `eq` id
+     table** (`*p-object-id-table*` `:weakness :key` + `*p-object-id-counter*`):
+     each object gets a monotonic id on first request, reused for life. The old
+     pointer got frozen into Perl hash keys `CODE(0x..)` / refaddr; when GC
+     moved the object a fresh stringification diverged, so Sub::Defer's
+     coderef-keyed `%DEFERRED` missed and `undefer_sub` never ran the maker →
+     `goto &$undeferred` self-loop. SBCL `eq` tables are GC-aware (rehash on key
+     move) so the id is move-invariant. **Killed the infinite loop.** (User Qs:
+     not stored in the box — side table keyed by the object; memory bounded by
+     *live* identified objects via weak keys, only the counter grows
+     monotonically (fixnum, won't realistically overflow); CL `eq` hash tables
+     key on the object directly, unlike Perl which stringifies refs to text.)
+   - `lib/Sub/Util.pm` shim (set_subname/set_prototype/subname/prototype) →
+     `Sub::Defer::_CAN_SUBNAME=1` → defer_sub uses its pure-Perl **closure**
+     branch, not the string-eval branch (PCL string eval can't capture
+     enclosing lexicals — flagged, see
+     `memory/project_string_eval_lexical_capture.md`).
+   - Multi-seg `defined &Pkg::sub`: `p-sub-defined`/`-exists`/`p-undef-sub` →
+     `%pcl-find-package` (was `find-package (string-upcase pkg)`, blind to
+     case-preserved `|Sub::Util|`). Same class as 248b's p-super-call fix.
+
+2. **`a8b3cbf` — implement `Scalar::Util::refaddr`** (was a dying stub). Trivial
+   now: `ref($r) ? 0 + $r : undef`. PCL routes ref-numification through the same
+   stable `object-address`, so `refaddr($r)` equals the hex of `"$r"` and is
+   lifetime-invariant. `ref` guard short-circuits before `0 + $r`, so a string
+   (incl. `"42"`/`"0xff"`) correctly returns undef (verified vs perl). Only
+   `unweaken` remains a dying stub.
+
+3. **`7e8d7ac` + `04b8d52` — regression tests** in misc-fixes-02.t (29→34):
+   multi-seg `defined &`, coderef hash-key stability across allocation,
+   stringified-ref identity invariance, refaddr distinct/stable/undef/agrees,
+   refaddr-undef-for-strings.
+
+**STILL FAILING — subclass builds EMPTY attrs (no loop):** instrumented the
+real Moo flow (copy Moo/Method::Generate::Constructor/Moo::Object into lib/ +
+warns; REMOVED after). At construction, `(ref $con)->new(%construct_opts)` for
+Dog dispatches to **Moo::Object::new** (bare `bless {}`) instead of MGC::new →
+empty maker (package="") → empty Dog. Stable-string trace of `MGC->can('new')`:
+MGC build = BOOTSTRAP(fn 0x1); Animal build = **OTHER (fn 0x4)** — a SECOND
+distinct function still running the bootstrap body, while the installed
+DEFERRED never fires (no `generate_method` for MGC ever); Dog build =
+Moo::Object (MGC::new gone). **Unexplained:** the 2nd bootstrap-body function.
+RULED OUT by isolated repro (all PASS): require idempotency (top-level + inside
+a repeated sub), glob-overwrite vs dispatch, method-cache invalidation,
+self-deleting-bootstrap + defer_sub + recall (single + multi-seg pkg),
+delete+glob-reinstall round-trip. Black-box probing exhausted. **NEXT = WHITE-
+BOX**: read PCL's sub-storage model (defun `PL-NAME` vs glob CODE-slot side
+table) and reconcile p-method-call resolution vs `*{glob}=code` (defer_sub
+install) vs s247 stash-`delete` — they appear to touch *different* storage,
+explaining both the 2nd fn and why the deferred is never dispatched. See
+`memory/project_coderef_identity_blocker.md` (refined NEXT WALL section) +
+`memory/project_moo_progress.md`.
+
+---
+
 ## Session 248b (2026-06-12/13) — Moo: coderef-default wall DOWN (named-sub closure capture); next wall = MGC->new loses all attrs on subclass bootstrap
 
 Continued to Moo after the list-flatten work. **Two fixes, both general:**
