@@ -5102,10 +5102,17 @@ sub _process_sub_statement {
     }
   }
 
-  # At file scope, route named sub definitions to the declarations bucket.
-  # declarations is assembled before definitions (BEGIN blocks, use/require),
-  # which matches Perl: all named subs are compiled before any BEGIN runs,
-  # so \&foo inside BEGIN can always find the sub already defined.
+  # At file scope, route named sub definitions to the DEFINITIONS bucket, in
+  # SOURCE ORDER alongside use/BEGIN/require.  This reproduces Perl's compile-time
+  # stream: a `use`/`BEGIN` sees exactly the subs written BEFORE it and none
+  # written after.  (The old policy routed subs to the `declarations` bucket,
+  # which assembles before `definitions`, so every sub ran before every use/BEGIN
+  # — breaking any module that introspects the package's subs at use-time, e.g.
+  # Moo::Role's make_role.  See docs/declaration-ordering-fix-plan.md.)
+  # Forward references (a runtime `foo()` or `\&foo` written before `sub foo`)
+  # still resolve: the compile-time stream is assembled before the runtime stream
+  # (C1), and the `p-declare-sub` stub (unshifted into declarations below) covers
+  # a `\&foo` taken inside an earlier BEGIN.
   # Inside subs (in_subroutine > 0), nested NAMED subs are hoisted to the
   # definitions bucket (at indent 0) so they are available before the outer
   # sub runs.  Their state variables use defvar (global special) instead of
@@ -5120,9 +5127,15 @@ sub _process_sub_statement {
   my $old_bucket = $self->_cur_bucket;
   my $old_indent = $self->indent_level;
   if ($self->environment->in_subroutine == 0 && !%{$self->{_let_bound_vars} // {}}) {
-    $self->_cur_bucket('declarations');
-  } elsif ($is_nested_named) {
     $self->_cur_bucket('definitions');
+  } elsif ($is_nested_named) {
+    # A nested NAMED sub must be hoisted OUT of the enclosing sub's form so it is
+    # installed independently (callable before the outer runs).  The hoist works
+    # by emitting it into a DIFFERENT bucket than the one currently open for the
+    # enclosing top-level sub — otherwise its lines interleave inside the outer's
+    # parens.  Top-level subs now live in `definitions`, so nested subs go to
+    # `declarations` (assembled earlier, separate array → clean separation).
+    $self->_cur_bucket('declarations');
     $self->indent_level(0);
   }
 

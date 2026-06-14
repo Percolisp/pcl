@@ -5861,7 +5861,15 @@
     (when pkg
       (do-symbols (sym pkg)
         (when (and (eq (symbol-package sym) pkg)
-                   (fboundp sym))
+                   (fboundp sym)
+                   ;; Skip forward-declaration STUBS (p-declare-sub).  A stub is
+                   ;; fboundp but not a real definition; Perl would not have it in
+                   ;; the symbol table yet.  Including it makes use-time package
+                   ;; introspection (Moo::Role's make_role via _all_subs) see subs
+                   ;; that are only *declared*, not yet defined — exactly the bug
+                   ;; in docs/declaration-ordering-fix-plan.md.  A real definition
+                   ;; flips the entry to :defined, so this only hides pure stubs.
+                   (not (eq (gethash sym *p-declared-subs*) :stub)))
           (let* ((name (symbol-name sym))
                  (n (length name)))
             ;; PL-xxx → Perl sub "xxx"
@@ -8869,16 +8877,27 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-backslash-sub (sym)
   "Perl \\&funcname — return a code ref, dispatching to AUTOLOAD if not defined."
-  (if (fboundp sym)
-      (symbol-function sym)
-      ;; Function not yet defined: return a lambda that tries AUTOLOAD when called.
-      (let ((pkg *package*))
-        (lambda (&rest args)
-          (declare (ignore args))
-          (let ((al (intern "PL-AUTOLOAD" pkg)))
-            (if (fboundp al)
-                (funcall (symbol-function al))
-                (error 'undefined-function :name sym)))))))
+  (cond
+    ;; Real definition exists: return it directly (stable coderef identity).
+    ((and (fboundp sym) (not (eq (gethash sym *p-declared-subs*) :stub)))
+     (symbol-function sym))
+    ;; Only a forward-declaration STUB exists (p-declare-sub).  Perl's \\&foo is
+    ;; late-bound to the glob slot, so taking it before `sub foo {...}` and then
+    ;; calling it after must reach the real body.  A stub returns nil and would
+    ;; be captured by value, so return a trampoline that re-reads symbol-function
+    ;; at CALL time.  (Needed now that sub bodies stay in source order relative
+    ;; to use/BEGIN — see docs/declaration-ordering-fix-plan.md.)
+    ((fboundp sym)
+     (lambda (&rest args) (apply (symbol-function sym) args)))
+    ;; Not declared at all: return a lambda that tries AUTOLOAD when called.
+    (t
+     (let ((pkg *package*))
+       (lambda (&rest args)
+         (declare (ignore args))
+         (let ((al (intern "PL-AUTOLOAD" pkg)))
+           (if (fboundp al)
+               (funcall (symbol-function al))
+               (error 'undefined-function :name sym))))))))
 
 (defun p-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
@@ -10564,7 +10583,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     (dolist (cls (%pcl-isa-ancestry class-name) nil)
       (let* ((pkg (%pcl-find-package cls))
              (fn  (when pkg (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg))))
-        (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+        (when (and fn (eq (symbol-package fn) pkg) (fboundp fn)
+                   ;; A forward-declaration STUB is fboundp but not a real method
+                   ;; (Perl wouldn't have compiled it yet) — ignore it, matching
+                   ;; p-stash.  See docs/declaration-ordering-fix-plan.md.
+                   (not (eq (gethash fn *p-declared-subs*) :stub)))
           (return-from p-can (symbol-function fn)))))))
 
 (defun p-isa (invocant class-name)
