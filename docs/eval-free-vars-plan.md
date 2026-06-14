@@ -45,6 +45,25 @@ It's already wired through `_emit_scoped_block` for per-block `my` hoisting, wit
 `$pexpr_factory` available in Parser. So the machinery and the call pattern exist;
 the eval path just doesn't use them.
 
+### Wiring reality check (session 253b, read before implementing)
+
+`analyze()` is currently called in ONE place — `_process_block` for a direct sub
+body (`Pl/Parser.pm` ~4328) — and **without** a `$pexpr_factory`. So:
+
+- `_collect_usages` returns `{}` (factory-gated), hence `_find_outer_refs` returns
+  an **empty `outer_refs`** today. The OpcodeTree usage walk (`_walk_tree`) is
+  built but **dormant** in the live path.
+- What actually runs factory-free is `_collect_declarations` (PPI-level) and
+  `_find_closure_captures`, which finds referenced symbols via
+  `$block->find('PPI::Token::Symbol')` — a PPI-tree walk (parse-based, NOT
+  generated-CL text).
+
+Implication for this plan: the eval free-var set should be computed from a
+**PPI-symbol find** (like `_find_closure_captures`) minus per-scope declarations —
+either by passing a `$pexpr_factory` to light up the OpcodeTree path, OR (simpler,
+matches what's already proven to work) a dedicated PPI-find that descends into
+named subs. Either is parse-based; neither is the reverted regex-over-CL.
+
 ### The one real gap: named subs
 
 `_collect_declarations` / `_find_closure_captures` **intentionally do not recurse
