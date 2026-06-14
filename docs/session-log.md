@@ -4,6 +4,55 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 253 (2026-06-14/15) — Moo: roles + method modifiers WORK. Many commits, gate green (95 files / ~3440+).
+
+Goal: continue Moo (pack.t already done s252). Outcome: **Moo is now broadly
+working** — roles and all method modifiers (before/after/around, single+stacked)
+verified vs perl 5.40. See `docs/moo-status.md` for the feature matrix.
+
+Landed (each its own commit, gate green throughout):
+- **Source-order compile-time stream** — top-level sub bodies moved from the
+  `declarations` bucket to `definitions` in source order (with use/BEGIN); nested
+  named subs → `declarations`; forward stubs made invisible to introspection
+  (p-stash/p-can skip `:stub`); `\&foo`-before-def uses a late-binding trampoline.
+  Permanent fix for "use/BEGIN ran against the wrong set of subs"; unblocked roles.
+  `docs/declaration-ordering-fix-plan.md`; tests `decl-ordering-02.t`.
+- **eval named-sub free-var capture (AST-level)** — `_eval_free_vars_from_ppi`
+  walks the PPI tree scope-by-scope, descends into named subs, excludes
+  `PPI::Token::Magic` specials (so `$.`/`local $.` still work); interpolated eval
+  strings now also get the lexical alist; `p-eval` reads/evals form-by-form so
+  `package X;` in an eval routes named subs. Unblocked before/after.
+  `docs/eval-free-vars-plan.md`, `docs/method-modifiers-plan.md`;
+  `eval-named-sub-01.t`.
+- **`around` (4 fixes)** — `$$ref->()` precedence ((${$r})->() not ${$r->()});
+  `return` inside string eval returns from the eval; assignment to a non-lvalue
+  sub call is a propagating (`PCL:`-prefixed) transpile error so
+  Class::Method::Modifiers' `_sub_attrs` compile-error feature-probe works; live
+  `\$ref->{k}`/`\$ref->[i]` refs (new `p-gethash-deref-box`/`p-aref-deref-box`)
+  so stacked `around` re-wrapping is seen. `misc-fixes-02.t` +3, `eval-named-sub-01.t` +2.
+- **PPI upstream bugs** — `docs/ppi-bug-report.t` (ready to send: `$$$ref`,
+  hex-float); glob-misparse confirmed FIXED in PPI 1.291 (kept as our regression
+  in misc-fixes-02.t). `$$ref->()` is NOT a PPI bug (PCL precedence).
+- **nested autoviv stores refs** + require-no-import + BEGIN current-package
+  (earlier in the session; `autoviv-01.t` +16).
+
+Key learning: the parser swallows per-statement codegen `die`s into
+`;; PARSE ERROR` comments UNLESS the message starts with `PCL:` (Parser.pm ~6722
+re-throws those); the pl2cl `--server` wraps parse_code in `eval{}` and returns
+status=err, which p-transpile-string → p-eval turns into undef+$@. That chain is
+how feature-detection-by-eval-and-die modules work.
+
+Remaining for Moo (mostly NOT Moo-specific): identifier collisions with CL
+builtins (`package Car`→`car`, `has log`) = highest-impact next target; Type::Tiny;
+module double-exec is perf-only. See `docs/moo-status.md`.
+
+NEXT DIRECTION (user): survey MORE CPAN modules to test whether the problems
+CONVERGE (a finite shared set) rather than each module finding a brand-new
+problem. The hope (supported this session — roles+modifiers reduced to a handful
+of general bugs) is that fixes generalize.
+
+---
+
 ## Session 252 (2026-06-14) — pack.t hang ROOT-CAUSED + 3 general fixes; BigInt multiply half-fixed. 3 commits, gate 93/3410.
 
 Goal: finish the long-running pack() hang (Math::BigInt) then continue Moo.
