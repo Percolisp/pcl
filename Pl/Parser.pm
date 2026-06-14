@@ -266,6 +266,9 @@ sub parse {
     $self->_emit("");
   });
 
+  # Disambiguate case-colliding identifiers before any codegen sees them.
+  $self->_compute_and_apply_case_renames($doc);
+
   $self->_process_children($doc);
 
   # Close any local let forms opened at file level (e.g. local $^W at file scope).
@@ -6661,6 +6664,75 @@ sub parse_file {
   return $parser->parse;
 }
 
+
+# ------------------------------------------------------------------
+# Case-disambiguation: Perl identifiers are case-sensitive, but PCL emits bare
+# CL symbols and relies on the reader, which upcases them — so $BASE_LEN and
+# $base_len would collide onto one symbol (the lexical shadows the file-`my`,
+# breaking Math::BigInt::Calc). When a file actually contains such a collision
+# we rename all-but-one member to a reader-safe, distinct name (a digit-bearing
+# suffix survives upcasing). Token contents are rewritten in place so all code
+# paths (declarations, references, element access) see the new name; string
+# interpolation, which builds fresh Symbol nodes from raw text, is handled by a
+# matching lookup in ExprToCL::_convert_node via environment->case_renames.
+#
+# This is a targeted, collision-only fix; the general solution (a case-safe
+# symbol-naming scheme) belongs in the compiler rewrite — see docs.
+sub _bare_ident_of_token {
+  my $tok = shift;
+  my $c   = $tok->content;
+  return undef unless defined $c;
+  return $1 if $c =~ /^\$#.*?([A-Za-z_]\w*)\z/;          # $#arr / $#Pkg::arr
+  return $1 if $c =~ /^[\$\@\%\&\*].*?([A-Za-z_]\w*)\z/; # $x @x %x &x *x (opt pkg::)
+  return undef;
+}
+
+sub _compute_and_apply_case_renames {
+  my ($self, $doc) = @_;
+  return unless $doc;
+
+  # Identifiers with dedicated CL handling (special vars, sort vars, @ISA, the
+  # %ENV/@ARGV/... families, bareword filehandles) must never be renamed: their
+  # emission does not flow through the mutated token, so a rename would desync.
+  my %skip = map { $_ => 1 } qw(
+    _ a b ISA ENV ARGV ARGVOUT INC SIG STDIN STDOUT STDERR DATA
+  );
+
+  my @tokens;
+  for my $cls (qw(PPI::Token::Symbol PPI::Token::Magic PPI::Token::ArrayIndex)) {
+    my $found = $doc->find($cls) || [];
+    push @tokens, @$found;
+  }
+
+  my %spellings;  # uc(name) => { name => 1 }
+  for my $tok (@tokens) {
+    my $name = _bare_ident_of_token($tok);
+    next unless defined $name;
+    next if $skip{$name};
+    $spellings{uc $name}{$name} = 1;
+  }
+
+  my %renames;
+  for my $uc (sort keys %spellings) {
+    my @sp = sort keys %{ $spellings{$uc} };
+    next if @sp < 2;                 # no case collision
+    # Keep the first spelling unchanged; rename the rest.
+    for my $i (1 .. $#sp) {
+      $renames{$sp[$i]} = $sp[$i] . "__pcl_ci_$i";
+    }
+  }
+
+  $self->environment->case_renames(\%renames) if $self->environment;
+  return unless %renames;
+
+  for my $tok (@tokens) {
+    my $name = _bare_ident_of_token($tok);
+    next unless defined $name && exists $renames{$name};
+    my $content = $tok->content;
+    (my $new = $content) =~ s/\Q$name\E\z/$renames{$name}/;
+    $tok->set_content($new) if $new ne $content;
+  }
+}
 
 sub parse_code {
   my $class = shift;

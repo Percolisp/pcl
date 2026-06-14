@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 34;
+plan tests => 38;
 
 sub run_cl {
     my ($code) = @_;
@@ -454,3 +454,38 @@ test_cl('refaddr returns undef for non-ref scalars (strings included)',
     . ' print((map { defined refaddr($_) ? "x" : "u" }'
     . '            ("hello", "42", "0xff", 7, undef)), "\n");',
     "uuuuu\n");
+
+# ── Case-sensitive identifiers must not collide on the case-folding CL reader ──
+# Perl is case-sensitive; PCL emits bare CL symbols which the reader upcases, so
+# $base_len and $BASE_LEN would otherwise map to one symbol (the lexical shadows
+# the file-`my`, which is exactly what broke Math::BigInt::Calc). Targeted
+# collision-only rename keeps the two distinct. See Parser::_compute_and_apply_
+# case_renames + ExprToCL::_case_renamed.
+test_cl('case-colliding scalars stay distinct (plain refs)',
+    'my $base_len = 1; my $BASE_LEN = 2;'
+    . ' print "$base_len $BASE_LEN\n";',
+    "1 2\n");
+
+# The collision also has to survive string interpolation (interpolation builds
+# fresh Symbol nodes from raw text, a separate code path from the PPI mutation).
+test_cl('case-colliding scalars stay distinct (interpolation + reassign)',
+    'my $val = 10; my $VAL = 20;'
+    . ' $val += 5; $VAL += 5;'
+    . ' print "$val/$VAL\n";',
+    "15/25\n");
+
+# The Math::BigInt::Calc shape: a file-scoped `my` written from inside a sub
+# whose lexical param differs only in case. The file-`my` must keep the value
+# after the sub returns.
+test_cl('file-my written via same-case-collision lexical param persists',
+    'my $WIDTH;'
+    . ' sub setw { my ($width) = @_; $WIDTH = $width; }'
+    . ' setw(9);'
+    . ' print "WIDTH=$WIDTH\n";',
+    "WIDTH=9\n");
+
+# Non-colliding code is left completely untouched (common path unchanged).
+test_cl('no rename when there is no case collision',
+    'my $count = 3; my $total = $count * 2;'
+    . ' print "$count $total\n";',
+    "3 6\n");
