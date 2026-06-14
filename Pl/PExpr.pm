@@ -2084,20 +2084,24 @@ sub handle_subcalls {
 
     # Handle &funcname( list ) - direct function call with & sigil
     # e.g., &foo(1, 2) -> (pl-foo 1 2), &Pkg::foo(1,2) -> (Pkg::pl-foo 1 2)
+    # The `&` sigil forces the user sub even when the name is a builtin (Perl
+    # semantics: `&connect()` calls a user `sub connect`, not the builtin), via
+    # force_user_sub. Gated on a trailing list, so `\&NAME` (no list) stays a
+    # code-ref refgen and never reaches here.
     if (ref($now) eq 'PPI::Token::Symbol'
         && $now->content() =~ /^&(.+)$/
         && $self->is_list($next)) {
       my $func_name = $1;
       my $word_token = PPI::Token::Word->new($func_name);
       my($top_node, $top_id) = $self->make_node_insert('funcall');
+      $top_node->{force_user_sub} = 1;
       my $c_ids = $self->make_nodes_from_list($next);
       my $node_id = $self->make_node($word_token);
       $self->add_child_to_node($top_id, $node_id);
       for my $c_id (@$c_ids) {
         $self->add_child_to_node($top_id, $c_id);
       }
-      splice @$e, $i, 2;
-      $e->[$i] = $top_node;
+      splice @$e, $i, 2, $top_node;
       next;
     }
 

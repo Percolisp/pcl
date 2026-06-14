@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 38;
+plan tests => 44;
 
 sub run_cl {
     my ($code) = @_;
@@ -489,3 +489,42 @@ test_cl('no rename when there is no case collision',
     'my $count = 3; my $total = $count * 2;'
     . ' print "$count $total\n";',
     "3 6\n");
+
+# ── &NAME(...) calls the USER sub, even over a builtin (Perl's & sigil) ──
+# A user `sub length` is reachable only via &length(...); the bareword still
+# calls the builtin. (The real-world case: `sub connect` imported into main::
+# called as `&connect()`.)
+test_cl('&NAME(args) calls user sub overriding a builtin',
+    'sub length { return "U:@_" }'
+    . ' print &length("ab"), "|", length("ab"), "\n";',
+    "U:ab|2\n");
+
+# Empty parens: &NAME() passes an empty list (not the caller @_).
+test_cl('&NAME() empty parens calls user sub with no args',
+    'sub connect { return "C:@_" } print &connect(), "\n";',
+    "C:\n");
+
+# &NAME(args) followed by more of the expression must keep those elements
+# (regression guard for the funcall splice).
+test_cl('&NAME(args) in a larger expression keeps trailing tokens',
+    'sub ucfirst { return "U:@_" } print &ucfirst("a") . "Z", "\n";',
+    "U:aZ\n");
+
+# Package-qualified &Pkg::sub(args).
+test_cl('&Pkg::sub(args) calls the qualified user sub',
+    'package Foo; sub bar { return "B:@_" } package main;'
+    . ' print &Foo::bar("x"), "\n";',
+    "B:x\n");
+
+# The ref-taking form \&foo stays a code ref (NOT a call) — gated on no list.
+test_cl('\\&foo remains a code ref, not a call',
+    'sub foo { return "F:@_" } my $r = \&foo;'
+    . ' print ref($r), ":", $r->("a","b"), "\n";',
+    "CODE:F:a b\n");
+
+# \&NAME references the sub slot, never the builtin — even when NAME is a
+# builtin name. With a user `sub length`, \&length calls the user sub.
+test_cl('\\&NAME refs the user sub slot, not the builtin operator',
+    'sub length { return "UL:@_" } my $r = \&length;'
+    . ' print $r->("zz"), "\n";',
+    "UL:zz\n");

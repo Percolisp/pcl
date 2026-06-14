@@ -233,13 +233,14 @@ sub cl_name {
   my $self       = shift;
   my $perl_name  = shift;
   my $for_funcall = shift // 0;  # 1 = being used as a function call, not an operator
+  my $force_user  = shift // 0;  # 1 = &NAME(...) form: call the user sub, never a builtin
 
   # Guard against undefined input
   return 'p-UNDEFINED' unless defined $perl_name && length($perl_name);
 
   # Check for operator exceptions — but NOT when generating a function call name.
   # e.g. `x()` calls user sub x, not the string-repetition operator p-str-x.
-  return $OP_EXCEPTIONS{$perl_name} if !$for_funcall && exists $OP_EXCEPTIONS{$perl_name};
+  return $OP_EXCEPTIONS{$perl_name} if !$for_funcall && !$force_user && exists $OP_EXCEPTIONS{$perl_name};
 
   # Leading :: means main:: (e.g. ::is → main::is)
   $perl_name =~ s/^::/main::/;
@@ -263,8 +264,11 @@ sub cl_name {
     return "${cl_pkg}::pl-${func}";
   }
 
-  # Runtime built-in → p-prefix; user-defined sub → pl-prefix
-  if (exists $RUNTIME_NAMES{$perl_name}) {
+  # Runtime built-in → p-prefix; user-defined sub → pl-prefix.
+  # The `&NAME(...)` call form forces the user sub even when NAME is a builtin
+  # (Perl's `&` sigil bypasses builtins/prototypes — e.g. a user `sub connect`
+  # imported into main:: called as `&connect()`).
+  if (!$force_user && exists $RUNTIME_NAMES{$perl_name}) {
     return "p-$perl_name";
   }
   # Inside a non-main package, qualify user-defined sub calls so SBCL's reader
@@ -538,7 +542,8 @@ sub gen_leaf {
     # Note: &foo(@args) is handled as a funcall, not here; \&foo is a refgen.
     if ($content =~ /^&(.+)$/) {
       my $func_name = $1;
-      my $cl_func = $self->cl_name($func_name, 1);
+      # &NAME (no parens) calls the user sub even when NAME is a builtin.
+      my $cl_func = $self->cl_name($func_name, 1, 1);
       return "($cl_func \@_)";
     }
     # Check if this var is a state variable that was renamed
@@ -1128,7 +1133,7 @@ sub gen_funcall {
     }
   }
 
-  my $cl_func   = $self->cl_name($func_name, 1);
+  my $cl_func   = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
 
   # Special handling: SUPER::method(args) as indirect-object call
   # SUPER::m{@a} is indirect-object syntax: first arg is the invocant (from block)
@@ -2042,7 +2047,10 @@ sub gen_prefix_op {
     if (ref($operand_node) eq 'PPI::Token::Symbol' &&
         $operand_node->content() =~ /^&(.+)$/) {
       my $func_name = $1;
-      my $cl_func = $self->cl_name($func_name, 1);
+      # \&NAME references the sub slot (the user sub), never a builtin — even
+      # when NAME happens to be a builtin name (Perl: `\&length` refers to
+      # `&main::length`, not the `length` operator). Force the user sub.
+      my $cl_func = $self->cl_name($func_name, 1, 1);
       return "(p-backslash-sub '$cl_func)";
     }
     # \(LIST) — distribute \\ over each element. PExpr marks the operand node
