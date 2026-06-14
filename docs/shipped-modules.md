@@ -164,3 +164,20 @@ Order matters only in that step 2 should land before step 4 relies on it.
 - `docs/pcl-rollout-plan.md` — the phased build order (this registry is a phase).
 - `cl/pcl-runtime.lisp` — `p-use`, `p-load-extension`, `*pcl-loaded-extensions*`,
   `*p-xs-only-modules*`, `*pcl-runtime-directory*`.
+
+## 7. Shims that exist to dodge a PCL *semantic* gap (not just XS)
+
+Most `lib/` shims stand in for XS or for a module too entangled to transpile.
+A second, distinct category exists: shims that are **near-verbatim copies of the
+real pure-Perl module, patched only to avoid a place where PCL's semantics
+differ from native perl**. Each entry below records the *exact* divergence so a
+future session can delete the shim once PCL closes the gap.
+
+| Shim | Divergence it dodges | Patch | Delete when |
+|------|----------------------|-------|-------------|
+| `lib/Math/BigInt/Calc.pm` | Stock Calc's `BEGIN` auto-detects the platform base length with two precision-rollover probe loops: an empty-condition `for(;;)` that exits **only** when `"9"x$e * "9"x$e` loses native precision. PCL integers are **arbitrary-precision bignums**, so the product is always exact, `last` never fires → **infinite loop / hang at load**. (This is what made `perl-tests/pack.t` time out: its `eval q{ use Math::BigInt }` pulls in Calc.) | Replace the two probe loops with the values stock perl computes on this platform (`MAX_EXP_F = MAX_EXP_I = 9` ⇒ `BASE_LEN = 9`, `USE_INT = 1`). Correct at any base because PCL arithmetic is exact. Full header comment in the file. | PCL gains a native-precision "rollover" mode, OR Math::BigInt is reworked not to probe. |
+
+**General rule:** any CPAN module that probes the platform's native numeric
+precision via a rollover loop (multiply until inexact, shift until zero, etc.)
+will hang under PCL's unlimited-precision integers. See `docs/not-supported.md`
+("arbitrary-precision integers") — the shim is the per-module escape hatch.
