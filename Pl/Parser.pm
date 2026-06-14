@@ -553,6 +553,102 @@ sub _wrap_runtime_labels {
 
 # Insert defvar for package variables used without my/our declaration.
 # Scans all output buckets; pushes defvars into first section's declarations.
+# ── AST-level free-variable detection for eval "STRING" bodies ───────────────
+#
+# A free variable is one referenced inside the eval but declared NOWHERE in its
+# enclosing eval scope chain — it must be captured from the caller (it becomes a
+# p-eval-thunk lambda parameter; see docs/eval-lexical-capture.md).  Unlike the
+# old post-codegen regex this is SCOPE-AWARE and descends into NAMED subs (the
+# Class::Method::Modifiers idiom: eval "sub $name { ... \$wrapped ... }").  Works
+# on the PPI parse tree, not generated CL.  See docs/eval-free-vars-plan.md.
+
+# Globals that are NOT capturable lexicals but which PPI classifies as PLAIN
+# PPI::Token::Symbol (so the Magic-token filter below does not catch them).
+# Punctuation/magic specials ($_, @_, $@, $0, $1.., $., $!, $/, $&, $;, $^W, ...)
+# are all PPI::Token::Magic and are excluded by type in _eval_scope_parts.
+my %EVAL_RUNTIME_VARS = map { $_ => 1 } qw(
+  @ARGV @INC %ENV %INC %SIG $$ $? %_args
+);
+
+sub _eval_free_vars_from_ppi {
+  my ($self, $doc) = @_;
+  return {} unless $doc;
+  my %free;
+  $self->_eval_scope_free($doc, {}, \%free);
+  delete $free{$_} for ('$a', '$b');   # $a/$b handled specially by the caller
+  return \%free;
+}
+
+# Analyze one lexical scope ($root) given the names bound by enclosing scopes.
+# Collects this scope's own declarations, flags free refs, recurses into nested
+# subs (each carrying the enclosing+local bound set).
+sub _eval_scope_free {
+  my ($self, $root, $enclosing, $free) = @_;
+  my (@decls, @refs, @subs);
+  $self->_eval_scope_parts($root, \@decls, \@refs, \@subs);
+  my %bound = (%$enclosing, map { $_ => 1 } @decls);
+  for my $v (@refs) {
+    next if $bound{$v};
+    next if $EVAL_RUNTIME_VARS{$v};
+    next if $v =~ /::/;                 # package-qualified: not a lexical
+    next if $v =~ /^[\$\@\%][0-9]/;     # $1, $2, ... capture vars
+    $free->{$v} = 1;
+  }
+  $self->_eval_scope_free($_, \%bound, $free) for @subs;
+}
+
+# Walk ONE scope's elements: collect declared vars, referenced symbols, and the
+# bodies of nested subs (named + anonymous), WITHOUT descending into those sub
+# bodies (they are separate scopes, handled by _eval_scope_free recursion).
+sub _eval_scope_parts {
+  my ($self, $node, $decls, $refs, $subs) = @_;
+  for my $child ($node->children) {
+    next unless ref $child;
+    next if $child->isa('PPI::Token::Whitespace')
+         || $child->isa('PPI::Token::Comment')
+         || $child->isa('PPI::Token::Pod');
+    # Named sub: its block is a nested scope.
+    if ($child->isa('PPI::Statement::Sub')) {
+      push @$subs, $child->block if $child->can('block') && $child->block;
+      next;
+    }
+    # Anonymous sub block: a Block preceded by 'sub' (optionally a prototype/sig).
+    if ($child->isa('PPI::Structure::Block') && _block_is_anon_sub($child)) {
+      push @$subs, $child;
+      next;
+    }
+    # Variable declaration: record the declared names.  Do NOT `next` — fall
+    # through so the initializer's own references (my $x = $y → $y) are scanned.
+    if ($child->isa('PPI::Statement::Variable') && $child->can('type') && $child->type) {
+      push @$decls, $child->variables;
+    }
+    # Reference symbol (normalized: $items[1] → @items, $h{k} → %h).
+    # Skip MAGIC vars by type ($_, @_, $@, $0, $1.., and every punctuation
+    # special: $. $! $/ $& $` $' $+ $; $, $\ $" $^W ...).  They are globals, never
+    # capturable lexicals, and many aren't valid CL parameter names.
+    if ($child->isa('PPI::Token::Symbol')) {
+      push @$refs, $child->symbol unless $child->isa('PPI::Token::Magic');
+      next;
+    }
+    # Recurse into composite nodes (statements, lists, blocks) — still THIS scope.
+    if ($child->isa('PPI::Node')) {
+      $self->_eval_scope_parts($child, $decls, $refs, $subs);
+    }
+  }
+}
+
+# True if a Structure::Block is an anonymous sub body (`sub { }` / `sub (proto){}`).
+sub _block_is_anon_sub {
+  my ($block) = @_;
+  my $s = $block->sprevious_sibling;
+  # Skip an intervening prototype/signature: sub ($x){...} / sub (){...}.
+  while ($s && ($s->isa('PPI::Structure::List')
+            || ($s->isa('PPI::Structure') && (($s->braces // '') eq '()')))) {
+    $s = $s->sprevious_sibling;
+  }
+  return $s && $s->isa('PPI::Token::Word') && $s->content eq 'sub';
+}
+
 sub _insert_variable_forward_declarations {
   my $self = shift;
 
@@ -756,8 +852,14 @@ sub _insert_variable_forward_declarations {
   #    inside the eval can still rebind it.  (A pathological `my $a` masking a
   #    sort block matches Perl only loosely; see docs/eval-lexical-capture.md.)
   if ($self->eval_mode) {
-    my @free = @undeclared;
-    push @free, grep { $referenced{$_} && $forced_sort_var{$_} } ('$a', '$b');
+    # Scope-aware AST analysis (descends into named subs) is authoritative; union
+    # with the legacy file-scope @undeclared set for back-compat, then add the
+    # $a/$b special case.  The AST set is what makes a lexical referenced only
+    # inside a named sub body (the modifier idiom) become a captured param.
+    my $ast_free = $self->_eval_free_vars_from_ppi($self->ppi_doc);
+    my %free = (%$ast_free, map { $_ => 1 } @undeclared);
+    $free{$_} = 1 for grep { $referenced{$_} && $forced_sort_var{$_} } ('$a', '$b');
+    my @free = sort keys %free;
     $self->{_eval_free_vars} = \@free if @free;
     return;
   }

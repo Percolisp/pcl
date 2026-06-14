@@ -1296,10 +1296,21 @@ sub gen_funcall {
         my $func_ref = $self->gen_node($kids->[1]);
         return $wrap->("(p-eval-block (funcall $func_ref))");
       }
+      else {
+        # An internal node that is NOT a block form = an interpolated/computed
+        # STRING, e.g. eval "package $into; sub greet { ... }" (a concatenation).
+        # This is still eval STRING and must carry the lexical-capture alist —
+        # without this it fell through to the generic funcall path with no alist,
+        # so the modifier idiom never captured its lexicals.  See
+        # docs/eval-free-vars-plan.md / docs/eval-lexical-capture.md.
+        my $arg_cl = $self->gen_node($kids->[1]);
+        my $alist  = $self->_eval_lexical_alist;
+        return $alist ? "(p-eval $arg_cl $alist)" : "(p-eval $arg_cl)";
+      }
     }
     else {
-      # eval STRING (string form): pass the caller's in-scope lexicals as an
-      # alist so the eval body can capture them (the transpiler wraps the body
+      # eval STRING (plain string literal): pass the caller's in-scope lexicals as
+      # an alist so the eval body can capture them (the transpiler wraps the body
       # in a lambda whose params are those vars).  See docs/eval-lexical-capture.md.
       my $arg_cl = $self->gen_node($kids->[1]);
       my $alist  = $self->_eval_lexical_alist;

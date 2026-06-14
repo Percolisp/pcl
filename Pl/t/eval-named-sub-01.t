@@ -79,13 +79,12 @@ eval "sub plain { return 7 }";
 print plain(), "\n";
 PL
 
-# ---- TODO: free-variable capture by a named sub defined in eval ----
-# Implemented by docs/eval-free-vars-plan.md (BlockAnalyzer-driven). When that
-# lands these should pass and the harness will flag them as unexpectedly OK.
+# ---- free-variable capture by a named sub defined in eval ----
+# Implemented via AST-level scope analysis (docs/eval-free-vars-plan.md):
+# _eval_free_vars_from_ppi descends into named-sub bodies; the call site passes
+# the lexical alist even for interpolated eval strings.
 
-TODO: {
-    local $TODO = "eval named-sub free-var capture (docs/eval-free-vars-plan.md)";
-
+{
     both_agree('named sub in eval captures an enclosing lexical', <<'PL');
 use v5.30;
 sub make_method {
