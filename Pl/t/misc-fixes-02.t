@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 44;
+plan tests => 47;
 
 sub run_cl {
     my ($code) = @_;
@@ -528,3 +528,24 @@ test_cl('\\&NAME refs the user sub slot, not the builtin operator',
     'sub length { return "UL:@_" } my $r = \&length;'
     . ' print $r->("zz"), "\n";',
     "UL:zz\n");
+
+# ── Compound assignment must write back through array/hash element places ──
+# `$a[i] OP= v` / `$h{k} OP= v` previously used box-set on the value (a no-op on
+# a non-box deref), so the store was lost. (Surfaced by Math::BigInt::Calc's
+# `$xv->[0] *= $yv->[0]`.) Mirrors what += already did.
+test_cl('compound assign on array/hashref elements writes back',
+    'my $xv=[100]; my $yv=[3]; $xv->[0] *= $yv->[0];'
+    . ' my $h={a=>"x"}; $h->{a} .= "Y";'
+    . ' my @a=(20,30); $a[1] /= 3;'
+    . ' print "$xv->[0] $h->{a} $a[1]\n";',
+    "300 xY 10\n");
+
+# Plain boxed scalar compound assign is unchanged.
+test_cl('compound assign on a plain scalar still works',
+    'my $x = 100; $x *= 3; $x -= 50; print "$x\n";',
+    "250\n");
+
+# Empty array flattens to nothing (baseline list-flatten sanity).
+test_cl('empty array flattens to nothing (not a spurious undef)',
+    'my @a; my @b = (@a, 1); print scalar(@b), ":@b\n";',
+    "1:1\n");

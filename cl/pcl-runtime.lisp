@@ -3296,6 +3296,11 @@
                   (loop for x across item do (add x)))
                  ;; Raw nil means "empty list" (e.g. iterator at EOF returning nil).
                  ;; Explicit Perl undef comes as *p-undef* or (p-undef), not raw nil.
+                 ;; NOTE: array HOLES are also raw nil here and currently vanish
+                 ;; (the documented sparse-array limitation).  Converting them to
+                 ;; undef collides with Exporter's hash-export internals (a nil
+                 ;; that must drop) — both are indistinguishable raw nils, so the
+                 ;; real fix is a distinct hole marker at the (setf p-aref) source.
                  ((null item) nil)
                  ((consp item)
                   (loop for x in item do (add x)))
@@ -3814,6 +3819,25 @@
     ;; Other complex place (fallback)
     (t `(box-set ,place ,value))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-accessor-place-p (place)
+    "True for value-returning element/deref accessor forms (hash/array element
+     or deref).  These are not boxes — they return raw values and have setf
+     expanders — so a compound assignment must write them back with SETF, not
+     BOX-SET (which silently no-ops on a non-box).  Mirrors the place test in
+     p-incf/p-decf so every compound-assignment operator works on $a[i]/$h{k}
+     and their deref forms, e.g. Math::BigInt::Calc's `$xv->[0] *= $yv->[0]`."
+    (and (consp place)
+         (member (car place)
+                 '(p-gethash p-aref p-gethash-deref p-aref-deref)))))
+
+(defmacro %p-store-back (place new)
+  "Write NEW into PLACE for a read-modify-write compound assignment: SETF for
+   accessor places, BOX-SET for boxed scalars and scalar derefs."
+  (if (%p-accessor-place-p place)
+      `(setf ,place ,new)
+      `(box-set ,place ,new)))
+
 (defmacro p-incf (place &optional (delta 1))
   "Perl += - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
@@ -4015,27 +4039,25 @@
 
 (defmacro p-*= (place value)
   "Perl *= (multiply-assign)"
-  `(box-set ,place (* (to-number ,place) (to-number ,value))))
+  `(%p-store-back ,place (* (to-number ,place) (to-number ,value))))
 
 (defmacro p-/= (place value)
   "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
   a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
-  `(box-set ,place (p-/ ,place ,value)))
+  `(%p-store-back ,place (p-/ ,place ,value)))
 
 (defmacro p-%= (place value)
   "Perl %= (modulo-assign)"
-  `(box-set ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(%p-store-back ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
 
 (defmacro p-**= (place value)
   "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
   float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
-  `(box-set ,place (p-** ,place ,value)))
+  `(%p-store-back ,place (p-** ,place ,value)))
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign)"
-  (let ((g (gensym "PLACE")))
-    `(let ((,g ,place))
-       (box-set ,g (concatenate 'string (to-string ,g) (to-string ,value))))))
+  `(%p-store-back ,place (concatenate 'string (to-string ,place) (to-string ,value))))
 
 (defmacro p-str-x= (place value)
   "Perl x= (repeat-assign)"
@@ -4043,28 +4065,28 @@
         (n (gensym "N")))
     `(let ((,s (to-string ,place))
            (,n (truncate (to-number ,value))))
-       (box-set ,place (if (<= ,n 0) ""
-                           (apply #'concatenate 'string (make-list ,n :initial-element ,s)))))))
+       (%p-store-back ,place (if (<= ,n 0) ""
+                                 (apply #'concatenate 'string (make-list ,n :initial-element ,s)))))))
 
 (defmacro p-bit-and= (place value)
   "Perl &= (bitwise-and-assign)"
-  `(box-set ,place (p-bit-and ,place ,value)))
+  `(%p-store-back ,place (p-bit-and ,place ,value)))
 
 (defmacro p-bit-or= (place value)
   "Perl |= (bitwise-or-assign)"
-  `(box-set ,place (p-bit-or ,place ,value)))
+  `(%p-store-back ,place (p-bit-or ,place ,value)))
 
 (defmacro p-bit-xor= (place value)
   "Perl ^= (bitwise-xor-assign)"
-  `(box-set ,place (p-bit-xor ,place ,value)))
+  `(%p-store-back ,place (p-bit-xor ,place ,value)))
 
 (defmacro p-<<= (place value)
   "Perl <<= (left-shift-assign)"
-  `(box-set ,place (ash (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(%p-store-back ,place (ash (truncate (to-number ,place)) (truncate (to-number ,value)))))
 
 (defmacro p->>= (place value)
   "Perl >>= (right-shift-assign)"
-  `(box-set ,place (ash (truncate (to-number ,place)) (- (truncate (to-number ,value))))))
+  `(%p-store-back ,place (ash (truncate (to-number ,place)) (- (truncate (to-number ,value))))))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -4595,13 +4617,13 @@
   (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a)))
 
 (defmacro p-str-bit-and= (place value)
-  `(box-set ,place (p-str-bit-and ,place ,value)))
+  `(%p-store-back ,place (p-str-bit-and ,place ,value)))
 
 (defmacro p-str-bit-or= (place value)
-  `(box-set ,place (p-str-bit-or ,place ,value)))
+  `(%p-store-back ,place (p-str-bit-or ,place ,value)))
 
 (defmacro p-str-bit-xor= (place value)
-  `(box-set ,place (p-str-bit-xor ,place ,value)))
+  `(%p-store-back ,place (p-str-bit-xor ,place ,value)))
 
 (defun %pcl-uv-coerce (n)
   "Coerce float to integer using UV (unsigned) semantics: +Inf=UV_MAX, -Inf=IV_MIN, NaN=0."
