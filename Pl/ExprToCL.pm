@@ -1884,7 +1884,15 @@ sub gen_methodcall {
       my $class_node = $self->expr_o->get_a_node($obj_kids->[0]);
       if (ref($class_node) eq 'PPI::Token::Word') {
         my $name = $class_node->content();
-        if ($self->environment && $self->environment->is_package($name)) {
+        if ($name eq '__PACKAGE__') {
+          # Compile-time token: __PACKAGE__->method resolves the invocant to the
+          # current package name (same as bareword __PACKAGE__ elsewhere), NOT a
+          # class literally named "__PACKAGE__".  Common idiom in module BEGIN
+          # blocks, e.g. Math::BigInt::Calc's __PACKAGE__->_base_len(...).
+          my $pkg = ($self->environment && $self->environment->current_package)
+                      ? $self->environment->current_package : 'main';
+          $obj = '"' . $pkg . '"';
+        } elsif ($self->environment && $self->environment->is_package($name)) {
           # Known package → class name string
           $obj = '"' . $name . '"';
         } elsif ($self->environment && $self->environment->has_prototype($name)) {
