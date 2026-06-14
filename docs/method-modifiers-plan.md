@@ -127,6 +127,34 @@ Fix 1 first (smaller, self-contained, independently testable with the
 non-capturing `eval "package X; sub f {...}"` case). Then Fix 2 (capture). Then
 the modifier end-to-end.
 
+## STATUS (session 253b) — before/after DONE, around BLOCKED on a parser bug
+
+**Done & gated (commit 4870b7f + 699baff):** eval named-sub free-var capture
+(AST-level, `_eval_free_vars_from_ppi`) + interpolated-eval alist + form-by-form
+`p-eval`.  `before`/`after` modifiers work end-to-end vs perl 5.40 (`/tmp/mod.pl`
+→ `before: 0 / after: 1 / final: 1`).
+
+**`around` BLOCKED by a SEPARATE, general parser precedence bug — NOT eval:**
+`$$ref->()` (deref a scalar-ref-to-coderef, then call) is mis-associated.
+- Perl: `$$r->()` == `(${$r})->()` — deref first, then call.
+- PCL emits `(p-cast-$ (p-funcall-ref $r))` == `${ $r->() }` — call first, then
+  deref. The AST is built as `cast-$(funcall($r))` instead of
+  `funcall(cast-$($r))`.
+- Root: in `Pl/PExpr.pm` the leading scalar Cast (`$` of `$$r`, a
+  `PPI::Token::Cast` + `Symbol`) consumes `$r->()` (symbol + its postfix arrow)
+  as its operand, so the cast ends up OUTSIDE the `->()`. The fix is in the
+  arrow/cast precedence loop (~lines 762–916), which is dense (KV slices, method
+  calls, deref subscripts) → do it in a focused session with the full gate.
+- `before`/`after` only limp past this because `p-funcall-ref` double-unboxes a
+  ref-to-coderef (`cl/pcl-runtime.lisp` ~8703), so `(p-funcall-ref $wrapped)`
+  accidentally derefs+calls. `around` adds a second eval'd wrapper layer where
+  the accident no longer covers it.
+- Isolated repros (no Moo): `/tmp/derefcall.pl` (`my $cv=sub{...}; my $r=\$cv;
+  print $$r->()` → perl `ORIG`, PCL dies "Undefined subroutine &main::"),
+  `/tmp/wrapmech2.pl`, `/tmp/around1.pl`.
+- Acceptance when fixed: `$$r->()` outside eval returns ORIG; `/tmp/around1.pl`
+  → 50; stacked `around` (`/tmp/around.pl`) → 60.
+
 ## Risks
 
 - **R1 — `p-eval` form-by-form changes return value / side-effect timing.** The
