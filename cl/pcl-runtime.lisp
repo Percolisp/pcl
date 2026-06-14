@@ -61,7 +61,7 @@
    #:p-str-bit-and #:p-str-bit-or #:p-str-bit-xor #:p-str-bit-not
    #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
-   #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
+   #:p-aref #:p-aref-box #:p-aref-deref #:p-aref-deref-box #:p-gethash #:p-gethash-box #:p-gethash-deref #:p-gethash-deref-box
    #:p-ensure-hashref #:p-ensure-arrayref
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
@@ -5447,6 +5447,18 @@
   "Setf expander for p-aref-deref - autovivify ref to array if undef, then set element"
   (setf (p-aref (p-ensure-arrayref ref) idx) value))
 
+(defun p-gethash-deref-box (ref key)
+  "Live BOX at $ref->{key} — for \\$ref->{k} refgen and l-value ops, so a
+   reference to a hashref element tracks later writes to that slot (unlike
+   p-gethash-deref, which returns a snapshot value).  Autovivifies the ref to a
+   hashref if undef, then returns the live box at key (like p-gethash-box does
+   for a direct %hash element)."
+  (p-gethash-box (p-ensure-hashref ref) key))
+
+(defun p-aref-deref-box (ref idx)
+  "Live BOX at $ref->[idx] — the array-ref analogue of p-gethash-deref-box."
+  (p-aref-box (p-ensure-arrayref ref) idx))
+
 (defun p-aslice (arr &rest indices)
   "Perl array slice @arr[indices] - returns vector of values.
    Handles individual indices, lists, and vectors (from range operator)."
@@ -6482,14 +6494,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  ;; *package* is rebound so the (in-package ...) does not leak into
                  ;; the caller's dynamic scope (restored on exit).
                  ;; See docs/method-modifiers-plan.md.
-                 (result   (let ((*package* *package*)
-                                 (eof '#:eof))
-                             (with-input-from-string (in cl-text)
-                               (loop with r = nil
-                                     for form = (read in nil eof)
-                                     until (eq form eof)
-                                     do (setf r (eval form))
-                                     finally (return r))))))
+                 ;; A `return` inside the eval'd string returns from the EVAL
+                 ;; (giving the eval that value), not from the enclosing Perl sub
+                 ;; — so catch :p-return here.  Without this, `_sub_attrs`'s
+                 ;; `(eval 'return 1; ...') ? ':lvalue' : ''` let the `return 1`
+                 ;; unwind the whole sub, which returned 1 instead of the ternary.
+                 (result   (catch :p-return
+                             (let ((*package* *package*)
+                                   (eof '#:eof))
+                               (with-input-from-string (in cl-text)
+                                 (loop with r = nil
+                                       for form = (read in nil eof)
+                                       until (eq form eof)
+                                       do (setf r (eval form))
+                                       finally (return r)))))))
             (box-set $@ "")
             result)
         (p-exception (e)

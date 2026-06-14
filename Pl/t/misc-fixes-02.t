@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 48;
+plan tests => 51;
 
 sub run_cl {
     my ($code) = @_;
@@ -558,3 +558,21 @@ test_cl('empty array flattens to nothing (not a spurious undef)',
 test_cl('chained < > comparison is not misparsed as a glob/readline',
     'my $x=[1,5,3]; print join(",", "a", ($x->[0] < $x->[1] > $x->[2]), "b"), "\n";',
     "a,1,b\n");
+
+# $$ref->() must parse as (${$ref})->() — deref the scalar-ref-to-coderef, THEN
+# call — not ${ $ref->() }.  Was mis-associated in PExpr (the leading scalar Cast
+# swallowed the postfix call).  Class::Method::Modifiers' $$wrapped->(@_) needs it.
+test_cl('$$ref->() derefs then calls (scalar-ref-to-coderef)',
+    'my $cv = sub { return "OK" }; my $r = \$cv; print $$r->(), "\n";',
+    "OK\n");
+
+# \$ref->{k} / \$ref->[i] must be a LIVE reference to the slot, so a later write
+# to that element is visible through the ref (stacked Moo `around` relies on
+# \$cache->{wrapped} seeing reassignment).  Direct \$h{k} was already live; the
+# arrow-deref form used to snapshot.
+test_cl('\\$href->{k} is a live ref (tracks later writes)',
+    'my $c = { k => "A" }; my $r = \$c->{k}; $c->{k} = "B"; print "$$r\n";',
+    "B\n");
+test_cl('\\$aref->[i] is a live ref (tracks later writes)',
+    'my $a = [10, 20]; my $r = \$a->[1]; $a->[1] = 99; print "$$r\n";',
+    "99\n");

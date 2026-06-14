@@ -119,4 +119,24 @@ print uses_it(), "-", binds_it(), "\n";
 PL
 }
 
+# ---- return inside a string eval returns from the EVAL, not the enclosing sub ----
+both_agree('return inside string eval exits the eval (not the caller)', <<'PL');
+use v5.30;
+sub f { my $r = eval "return 5; 99"; return "got=$r after"; }
+print f(), "\n";
+PL
+
+# ---- assignment to a non-lvalue sub call is a compile error (feature probes) ----
+# Class::Method::Modifiers' _sub_attrs detects lvalue subs via
+# `eval 'return 1; &_sub = 1'` and treats the COMPILE failure as "not lvalue".
+# PCL must fail that eval (return undef, set $@) the way Perl does.
+both_agree('eval of (&sub = x) fails, leaving $@ set and the program alive', <<'PL');
+use v5.30;
+no strict 'refs';
+my $cv = sub { 42 };
+local *_probe = $cv;
+my $r = eval 'return 1; &_probe = 1';
+print "defined=", (defined $r ? 1 : 0), " err=", ($@ ? 1 : 0), " alive=", eval("6*7"), "\n";
+PL
+
 done_testing();

@@ -890,7 +890,21 @@ sub parse {
         #    $q   3
 
         # (This '($q...)->(5)' should work the same.)
-        my $pre_id = $self->parse([$pre]);
+        #
+        # A leading scalar deref binds WITH the ref target: $$r->() means
+        # (${$r})->() — deref $r to the coderef, THEN call.  PPI hands us a flat
+        # Cast('$') + Symbol/Block before the '->', and without consuming the
+        # cast here it would wrap the whole funcall instead — ${ $r->() }.  So
+        # if $e->[$i-2] is a scalar Cast, parse it together with $pre as the ref.
+        my @pre_toks      = ($pre);
+        my $cast_consumed = 0;
+        if ($i >= 2
+            && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+            && $e->[$i-2]->content eq '$') {
+          unshift @pre_toks, $e->[$i-2];
+          $cast_consumed = 1;
+        }
+        my $pre_id = $self->parse(\@pre_toks);
         my $pst_id = $nxt->{id};
         my $kids   = $self->get_node_children($pst_id);
 
@@ -900,9 +914,15 @@ sub parse {
           $self->add_child_to_node($id, $kid_id); # Parameters
         }
 
-        $e->[$i-1] = $node;
-        splice @$e, $i, 2;
-        $i--;
+        if ($cast_consumed) {
+          $e->[$i-2] = $node;
+          splice @$e, $i-1, 3;   # remove the ref term, '->', and the param list
+          $i -= 2;
+        } else {
+          $e->[$i-1] = $node;
+          splice @$e, $i, 2;     # remove '->' and the param list
+          $i--;
+        }
         next;
       } elsif ($self->is_internal_node_type($nxt)
                && $nxt->{type} eq 'funcall') {

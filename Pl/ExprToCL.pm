@@ -945,6 +945,43 @@ sub gen_binary_op {
   # For assignment, dispatch to type-specific forms based on LHS sigil.
   # Handles both local vars (@a, %h, $x) and qualified vars (Pkg::@a, Pkg::%h, Pkg::$x).
   if ($op eq '=') {
+    # Assigning to a subroutine/code-ref CALL (`&sub = x`, `foo() = x`,
+    # `$cref->() = x`) is only valid for an lvalue sub — which PCL does not
+    # support — so it is a compile error, exactly as in Perl.  Raising it here
+    # (a transpile-time die) is what makes feature-detection probes that rely on
+    # the compile error work: Class::Method::Modifiers' _sub_attrs does
+    # `eval 'return 1; &_sub = 1'` and treats failure as "not an lvalue sub".
+    # In eval-string mode the die surfaces via the pl2cl server's error status,
+    # so the eval returns undef and the probe correctly reports ''.  The
+    # built-in magic lvalues substr/pos/vec ARE supported, so allow those.
+    if (defined $node_id) {
+      my $lnode = $self->expr_o->get_a_node($kids->[0]);
+      my $bad_lvalue = 0;
+      if ($self->expr_o->is_internal_node_type($lnode)
+          && ($lnode->{type} eq 'funcall' || $lnode->{type} eq 'ref_funcall')) {
+        # foo() = x  /  $cref->() = x
+        $bad_lvalue = 1;
+        if ($lnode->{type} eq 'funcall') {
+          my $fkids = $self->expr_o->get_node_children($kids->[0]);
+          if ($fkids && @$fkids) {
+            my $fn = $self->expr_o->get_a_node($fkids->[0]);
+            my $nm = (ref($fn) && $fn->can('content')) ? $fn->content : '';
+            $bad_lvalue = 0 if $nm =~ /^(?:CORE::)?(?:substr|pos|vec)$/;
+          }
+        }
+      } elsif (ref($lnode) && $lnode->can('content')
+               && $lnode->content =~ /^&/) {
+        # &sub = x  (ampersand call as an lvalue; a leaf Symbol token, not a
+        # funcall node — see _emit_token's &NAME branch).
+        $bad_lvalue = 1;
+      }
+      # PCL: prefix makes the parser propagate this as a hard error (Parser.pm
+      # ~6722) instead of swallowing it into a ;; PARSE ERROR comment — so in
+      # eval-string mode the transpile FAILS and the eval returns undef, exactly
+      # like Perl's compile error for assignment to a non-lvalue sub.
+      die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
+        if $bad_lvalue;
+    }
     if ($left =~ /^\(vector /) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = "(p-list-= $left $right)";
@@ -2405,7 +2442,11 @@ sub gen_array_ref_access {
   my $ref = $self->gen_node($kids->[0]);
   my $idx = $self->gen_node($kids->[1]);
 
-  return "(p-aref-deref $ref $idx)";
+  # In l-value context (e.g. \$ref->[i], or a modifying op) return the LIVE box
+  # at the slot so a reference tracks later writes (stacked Moo `around` relies on
+  # \$cache->{wrapped} seeing reassignment).  Plain reads stay snapshot-valued.
+  my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
+  return "($func $ref $idx)";
 }
 
 
@@ -2434,7 +2475,10 @@ sub gen_hash_ref_access {
     $key = $self->gen_node($kids->[1]);
   }
 
-  return "(p-gethash-deref $ref $key)";
+  # L-value context (\$ref->{k}, modifying ops): return the LIVE box at the slot
+  # so a reference tracks later writes (see gen_array_ref_access).
+  my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
+  return "($func $ref $key)";
 }
 
 
