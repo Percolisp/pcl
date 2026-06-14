@@ -6471,15 +6471,25 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                  (setf (gethash cache-key
                                                 *p-eval-string-cache*) r)
                                  r)))
-                 ;; READ with *package* bound: symbol interning (e.g. $x)
-                 ;; uses the eval package, matching the caller's symbol space.
-                 (cl-form  (let ((*package* *package*))
-                             (read-from-string
-                              (concatenate 'string "(progn " cl-text ")"))))
-                 ;; EVAL with *package* bound: any (in-package ...) in the
-                 ;; eval'd code does not escape into the caller's dynamic scope.
-                 (result   (let ((*package* *package*))
-                             (eval cl-form))))
+                 ;; READ+EVAL form-by-form (like `load`), NOT one big (progn ...).
+                 ;; read-from-string would intern EVERY symbol under the initial
+                 ;; *package* before any (in-package ...) form in the text runs —
+                 ;; so a `package Foo;` inside the eval string would be silently
+                 ;; defeated and a named `sub` would land in the caller's package.
+                 ;; Reading one form, evaluating it, then reading the next lets an
+                 ;; (in-package ...) take effect before subsequent forms are read,
+                 ;; so `eval "package Foo; sub f {...}"` installs Foo::f.
+                 ;; *package* is rebound so the (in-package ...) does not leak into
+                 ;; the caller's dynamic scope (restored on exit).
+                 ;; See docs/method-modifiers-plan.md.
+                 (result   (let ((*package* *package*)
+                                 (eof '#:eof))
+                             (with-input-from-string (in cl-text)
+                               (loop with r = nil
+                                     for form = (read in nil eof)
+                                     until (eq form eof)
+                                     do (setf r (eval form))
+                                     finally (return r))))))
             (box-set $@ "")
             result)
         (p-exception (e)
