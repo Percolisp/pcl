@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 252 (2026-06-14) — pack.t hang ROOT-CAUSED + 3 general fixes; BigInt multiply half-fixed. 3 commits, gate 93/3410.
+
+Goal: finish the long-running pack() hang (Math::BigInt) then continue Moo.
+Outcome: the hang was a **case-sensitivity** bug, not the BigInt shim. Fixed
+that + two more general bugs found en route. Moo not revisited.
+
+**1. Case-disambiguation (`ecfb023`) — the real pack.t TIMEOUT cause.**
+Math::BigInt::Calc has file-`my $BASE_LEN` AND a lexical param `my $base_len`.
+PCL emits bare CL symbols and relies on the reader, whose default
+`readtable-case` is `:upcase`, so both fold onto ONE symbol `$BASE_LEN`: the
+lexical `let` shadows the file-`my` defvar, `_base_len`'s write was lost →
+`import` passed undef → croak. General bug (vars, string interpolation, subs):
+`my $x=1;my $X=2` printed `2 2`. **Targeted, collision-only rename**:
+`Pl/Parser.pm::_compute_and_apply_case_renames` walks the PPI doc, groups bare
+idents by `uc`, and only when a real collision exists renames all-but-one to
+`<name>__pcl_ci_N` (digit suffix survives upcasing), rewriting token contents in
+place (covers decls/refs/element-access); `ExprToCL::_case_renamed` handles the
+interpolation path (fresh Symbol nodes). Skips specials/`$a`/`$b`/`@ISA`/
+`%ENV`-family/filehandles. **pack.t now COMPLETES (5638/87) instead of hanging.**
+Per-package symbol interning + per-file rename covers essentially all real
+variable cases (user-confirmed); subs not yet disambiguated. General fix
+(readtable `:invert` / bar-escape / case-safe mangling) = compiler-rewrite TODO.
+See `memory/project_case_sensitivity_general_fix.md`.
+
+**2. `&NAME(...)` / `\&NAME` force the user sub (`ff139f7`).** Perl's `&` sigil
+names the sub slot, bypassing a same-named builtin (`&connect()` for a user
+`sub connect` imported into main::). PCL routed through cl_name's
+`%RUNTIME_NAMES` → builtin. Added a `$force_user` flag to `cl_name`; gen_funcall
+passes it when the funcall node is `force_user_sub`; the `&NAME` no-paren
+(@_-reuse) and `\&NAME` refgen paths force it too. Also fixed the existing
+`&NAME(LIST)` handler's splice bug (`splice @e,$i,2; $e->[$i]=…` clobbered
+trailing tokens → `print &foo(x),"\n"` parse-errored) → `splice @e,$i,2,$node`.
+`\&NAME` stays a code ref (gated on a trailing list) and references the user-sub
+slot — `\&length` with `sub length{}` calls it, without one it is still a CODE
+value whose call errors (Undefined subroutine), never the builtin. Bareword
+`length(...)` still the builtin. 6 tests.
+
+**3. Compound assignment on container elements (`03133d7`).** `$h{k} *= v`,
+`$a[i] .= v`, `$xv->[0] /= v` and every `OP=` except `+=`/`-=` used
+`(box-set place …)`, which no-ops on a non-box; the element/deref accessors
+return raw VALUES → store lost (`100*3` stayed `100`). New `%p-accessor-place-p`
++ `%p-store-back` (setf for accessor places, box-set for boxes; mirrors p-incf),
+applied to `p-*= p-/= p-%= p-**= p-.= p-str-x= p-bit-and/or/xor= p-<<= p->>=
+p-str-bit-*=`. Compile-time dispatch ⇒ zero runtime cost, boxed-scalar path
+byte-identical. Surfaced by Math::BigInt::Calc `$xv->[0] *= $yv->[0]`.
+
+**Math::BigInt status:** addition always worked; `_mul` itself is now fully
+correct (single- AND multi-chunk); **single-chunk multiply works end-to-end**
+(`999999999**2`). **Multi-chunk multiply via the overload still wrong** — root
+caused to the **sparse-array-holes** limitation: `bmul` builds `my @r;
+$r[3]=$y; $x->round(@r)`; holes (raw `nil` in the adjustable vector) VANISH in
+`%p-flatten-list` (the p-list-= RHS flattener drops raw nil), so `round` gets
+`($y)` not `(undef,undef,undef,$y)` → the multiplicand lands in the accuracy slot
+→ product rounded to 2 sig figs. **Attempted** converting adjustable-vector nils
+→ `*p-undef*`; fixed multiply but the **gate caught a regression** —
+`use-require-01` #37 (`%Config`); minimal repro `use Exporter 'import'; our
+@EXPORT=qw(%Stuff)` dies `"" is not exported` (Exporter::Heavy's hash-export path
+has an internal raw nil that MUST drop; the two nils are indistinguishable at the
+flattener). **Reverted.** Real fix = distinct hole marker (`*p-undef*`) at
+`(setf p-aref)` ~4757 + `p-aref-box`, auditing `exists`/`delete`/element checks —
+own focused session. See `memory/project_bigint_multiply_and_array_holes.md`.
+
+Tests: `Pl/t/misc-fixes-02.t` 34→47. Gate 93 files / 3410, all green.
+
+---
+
 ## Session 251 (2026-06-13) — Moo SUBCLASS FIXED (module double-exec); PExpr exit→die; goto &sub caller-frame. 3 commits, gate 93/3395.
 
 **pack crash (quick check, user-requested):** NOT a bug — `pack "P"` correctly
