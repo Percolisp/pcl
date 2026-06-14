@@ -15,7 +15,7 @@ use Pl::Parser;
 my $sbcl_version = `sbcl --version 2>/dev/null`;
 plan skip_all => "SBCL not available" unless $sbcl_version;
 
-plan tests => 22;
+plan tests => 38;
 
 # Helper to run Perl code
 sub run_perl {
@@ -228,6 +228,125 @@ my $ref;
 $ref->[0]{name} = "alice";
 $ref->[1]{name} = "bob";
 print $ref->[0]{name}, "-", $ref->[1]{name};
+');
+
+diag "";
+diag "-------- Copying autovivified nested refs to scalars (regression: box-set must not scalarize a ref):";
+
+# An autovivified hash element holds a hash REFERENCE, not a bare %hash.
+# Copying it to a scalar must preserve the ref, not collapse to the key-count.
+test_transpile("copy autovivified nested hashref to scalar", '
+my %h;
+$h{a}{b} = 1;
+$h{a}{c} = 2;
+my $r = $h{a};
+print ref($r), " ", scalar(keys %$r);
+');
+
+test_transpile("copy autovivified nested arrayref to scalar", '
+my %h;
+$h{a}[0] = 10;
+$h{a}[1] = 20;
+my $r = $h{a};
+print ref($r), " ", scalar(@$r);
+');
+
+test_transpile("copy nested arrayref-in-array to scalar", '
+my @a;
+$a[0][0] = 1;
+$a[0][1] = 2;
+my $r = $a[0];
+print ref($r), " ", scalar(@$r);
+');
+
+test_transpile("copy nested hashref-in-array to scalar", '
+my @a;
+$a[0]{x} = 1;
+$a[0]{y} = 2;
+my $r = $a[0];
+print ref($r), " ", scalar(keys %$r);
+');
+
+test_transpile("autovivified slot stringifies as a HASH ref", '
+my %h;
+$h{a}{b} = 1;
+my $r = $h{a};
+print( ($r =~ /^HASH\(0x[0-9a-f]+\)$/) ? "isref" : "notref" );
+');
+
+test_transpile("ref through fully-qualified package hash element", '
+$Pkg::data{k}{inner} = 5;
+my $r = $Pkg::data{k};
+print ref($r), " ", $r->{inner};
+');
+
+diag "";
+diag "-------- Initializing with hash/array constants and storing in containers:";
+
+test_transpile("store anon hashref constant in hash element", '
+my %h;
+$h{cfg} = { x => 1, y => 2 };
+my $r = $h{cfg};
+print ref($r), " ", $r->{x} + $r->{y};
+');
+
+test_transpile("store anon arrayref constant in array element", '
+my @a;
+$a[0] = [ 10, 20, 30 ];
+my $r = $a[0];
+print ref($r), " ", $r->[0] + $r->[1] + $r->[2];
+');
+
+test_transpile("array of hashrefs (list of constants)", '
+my @recs = ( { n => "a" }, { n => "b" }, { n => "c" } );
+my $r = $recs[1];
+print ref($r), " ", $r->{n};
+');
+
+test_transpile("hash of arrayrefs (constants)", '
+my %h = ( evens => [2,4,6], odds => [1,3,5] );
+my $r = $h{odds};
+print ref($r), " ", join(",", @$r);
+');
+
+test_transpile("nested arrayref constant, copy inner to scalar", '
+my $aoa = [ [1,2], [3,4] ];
+my $row = $aoa->[1];
+print ref($row), " ", $row->[0], $row->[1];
+');
+
+test_transpile("nested hashref constant, copy inner to scalar", '
+my $h = { a => { deep => 9 } };
+my $inner = $h->{a};
+print ref($inner), " ", $inner->{deep};
+');
+
+test_transpile("push hashrefs into array then copy out", '
+my @a;
+push @a, { id => $_ } for 1..3;
+my $r = $a[2];
+print ref($r), " ", $r->{id};
+');
+
+test_transpile("array element is a copied autovivified hashref, then mutate", '
+my %src;
+$src{a}{b} = 1;
+my @dst;
+$dst[0] = $src{a};
+$dst[0]{c} = 2;
+print join(",", map { "$_=$src{a}{$_}" } sort keys %{$src{a}});
+');
+
+test_transpile("scalar copy of bare hash IS the key count (not a regression)", '
+my %h = (a => 1, b => 2, c => 3);
+my $n = %h;
+print( ($n =~ m{^3(/\d+)?$}) ? "count-ok" : "got:$n" );
+');
+
+test_transpile("scalar copy of bare array IS the element count", '
+my @a = (10, 20, 30, 40);
+my $n = @a;
+print $n;
 ');
 
 done_testing();

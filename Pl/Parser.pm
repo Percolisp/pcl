@@ -5968,6 +5968,16 @@ sub _process_scheduled_block {
       $self->_emit(";; $perl_code");
       $self->_emit("(p-BEGIN");
       $self->indent_level($self->indent_level + 1);
+      # BEGIN blocks run in the definitions bucket, BEFORE this package's runtime
+      # `p-set-current-package` (runtime bucket).  Without setting it here,
+      # *pcl-current-package* lags during the BEGIN, so caller()/__PACKAGE__ —
+      # and any explicit `Module->import` (Moo's `require Moo; Moo->import;`
+      # bootstrap) — resolve to the wrong package.  Set it as the first stmt so
+      # imports install into the enclosing package.  (in-package is already set
+      # in the hoisted preamble, so the CL reader package is correct; this fixes
+      # the runtime call-context pointer.)
+      my $cl_cur = $self->_cl_pkg_designator($prev_pkg);
+      $self->_emit("(p-set-current-package $cl_cur \"$prev_pkg\")");
       $process->();
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");

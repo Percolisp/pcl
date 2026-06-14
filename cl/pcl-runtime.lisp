@@ -5270,9 +5270,12 @@
       (let ((val (unbox stored)))
         (if (and found (hash-table-p val))
             val
-            ;; Autovivify: create new hash and store it
+            ;; Autovivify: create new hash, store it as a hash REFERENCE
+            ;; (make-p-box) — a hash element that holds a nested hash holds a
+            ;; ref, not a bare %hash.  Storing the raw table makes a later
+            ;; scalar copy ($x = $h{a}) collapse to the key-count.
             (let ((new-hash (make-hash-table :test 'equal)))
-              (setf (gethash k h) new-hash)
+              (setf (gethash k h) (make-p-box new-hash))
               new-hash))))))
 
 (defun p-autoviv-gethash-for-array (hash key)
@@ -5285,9 +5288,9 @@
       (let ((val (unbox stored)))
         (if (and found (vectorp val))
             val
-            ;; Autovivify: create new array and store it
+            ;; Autovivify: create new array, store it as an array REFERENCE.
             (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-              (setf (gethash k h) new-arr)
+              (setf (gethash k h) (make-p-box new-arr))
               new-arr))))))
 
 (defun p-autoviv-aref-for-hash (arr idx)
@@ -5304,9 +5307,9 @@
            (val (unbox stored)))
       (if (hash-table-p val)
           val
-          ;; Autovivify: create new hash and store it
+          ;; Autovivify: create new hash, store it as a hash REFERENCE.
           (let ((new-hash (make-hash-table :test 'equal)))
-            (setf (aref a i) new-hash)
+            (setf (aref a i) (make-p-box new-hash))
             new-hash)))))
 
 (defun p-autoviv-aref-for-array (arr idx)
@@ -5323,9 +5326,9 @@
            (val (unbox stored)))
       (if (vectorp val)
           val
-          ;; Autovivify: create new array and store it
+          ;; Autovivify: create new array, store it as an array REFERENCE.
           (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-            (setf (aref a i) new-arr)
+            (setf (aref a i) (make-p-box new-arr))
             new-arr)))))
 
 (defun p-array-set (arr idx value)
@@ -8265,11 +8268,13 @@ buffer's fill-pointer; everything else falls back to file-length."
         (load path))))
   (setf *pcl-test-lib-loaded* t))
 
-(defun p-use (module-name &key (import-args :default))
+(defun p-use (module-name &key (import-args :default) (do-import t))
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
    IMPORT-ARGS: the evaluated import list (a vector) — `use Foo X` makes X a Perl
-   list — or :default for a bare `use Foo;` (import with no args)."
+   list — or :default for a bare `use Foo;` (import with no args).
+   DO-IMPORT: when NIL, load the module but do NOT call its ->import (this is the
+   `require Foo` semantics — load only, no symbol import)."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
     (return-from p-use t))
@@ -8282,8 +8287,9 @@ buffer's fill-pointer; everything else falls back to file-length."
         (caller-pkg *package*))
     ;; Already loaded?
     (when (gethash rel-path *p-inc-table*)
-      ;; Still import for repeated use statements
-      (%p-do-import module-name caller-pkg import-args)
+      ;; Still import for repeated use statements (but not for bare require)
+      (when do-import
+        (%p-do-import module-name caller-pkg import-args))
       (return-from p-use t))
     ;; Circular dependency?
     (when (member rel-path *p-loading-modules* :test #'string=)
@@ -8299,13 +8305,17 @@ buffer's fill-pointer; everything else falls back to file-length."
         (p-load-module-cached abs-path))
       ;; Update %INC
       (setf (gethash rel-path *p-inc-table*) abs-path)
-      ;; Import symbols from module
-      (%p-do-import module-name caller-pkg import-args)
+      ;; Import symbols from module (skipped for bare require)
+      (when do-import
+        (%p-do-import module-name caller-pkg import-args))
       t)))
 
 (defun p-require (module-name)
-  "Perl require - load module at runtime (no imports)."
-  (p-use module-name))
+  "Perl require - load module at runtime WITHOUT calling its ->import.
+   `require Foo` only loads; `use Foo` = require + import.  Calling import here
+   would re-run the module's import into the current package, which (for modules
+   like Moo::Role whose import has a guard) is both wrong and can be fatal."
+  (p-use module-name :do-import nil))
 
 (defun p-require-parent (module-name)
   "Implicit require performed by `use parent`/`use base` (Perl does
