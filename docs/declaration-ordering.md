@@ -246,6 +246,16 @@ Runs AFTER Phase 2. Inserts `(defvar $x ...)` for undeclared package variables.
 These defvars go after `(in-package ...)`, before Phase 2's reordered output, so they
 precede any sub definitions that reference the variable.
 
+> **UPDATE (session 253): the bucket model now enforces a source-order
+> compile-time stream.** Top-level sub *bodies* live in the `definitions` bucket
+> interleaved with `use`/`BEGIN` in source order (no longer hoisted to
+> `declarations`), and forward stubs are invisible to introspection. This is the
+> permanent fix for "use/BEGIN ran against the wrong set of subs" (Moo roles).
+> See **`declaration-ordering-fix-plan.md`** — it supersedes the "Known
+> Limitations" below. The two-stream invariant: compile-time forms
+> (use/BEGIN/sub) in source order, then runtime; only `defvar` proclamations and
+> introspection-invisible stubs jump ahead.
+
 ## Known Limitations
 
 ### `sub` before `use` (reverse order)
