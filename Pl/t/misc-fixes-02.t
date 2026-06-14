@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 47;
+plan tests => 48;
 
 sub run_cl {
     my ($code) = @_;
@@ -549,3 +549,12 @@ test_cl('compound assign on a plain scalar still works',
 test_cl('empty array flattens to nothing (not a spurious undef)',
     'my @a; my @b = (@a, 1); print scalar(@b), ":@b\n";',
     "1:1\n");
+
+# A `X < Y > Z` comparison chain must parse as operators, not a <...> readline/glob.
+# This used to PARSE-ERROR — PPI misread `< … >` as a glob and dropped the
+# statement (docs/ppi-glob-disambiguation.md).  PPI 1.291 tokenizes it correctly
+# and PCL handles it; this guards against either side regressing.  (Fixed
+# upstream, so docs/ppi-bug-report.t no longer carries it.)
+test_cl('chained < > comparison is not misparsed as a glob/readline',
+    'my $x=[1,5,3]; print join(",", "a", ($x->[0] < $x->[1] > $x->[2]), "b"), "\n";',
+    "a,1,b\n");

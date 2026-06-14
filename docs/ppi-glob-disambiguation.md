@@ -1,5 +1,11 @@
 # PPI Glob/Diamond Operator Disambiguation Bug
 
+> **RESOLVED (session 253b): FIXED upstream in PPI 1.291.** The chains below now
+> tokenize correctly as comparisons, and PCL transpiles them fine. Kept as a
+> historical record. Regression guard lives in `Pl/t/misc-fixes-02.t` ("chained
+> < > comparison is not misparsed as a glob/readline"); see also
+> `docs/ppi-upstream-bugs.md` §3. No PCL workaround is needed any longer.
+
 ## Problem
 
 PPI (the Perl parser used by PCL) misinterprets certain comparison chains as

@@ -71,24 +71,17 @@ floating-point literals").
 
 ---
 
-## 3. `< EXPR >` comparison chain misread as a glob/readline  [NEEDS RE-CONFIRM]
+## 3. `< EXPR >` comparison chain misread as a glob/readline  [FIXED in PPI]
 
 **Reported earlier** (PCL `docs/ppi-glob-disambiguation.md`): a chain like
 `$x->[0] < $x->[1] > $x->[2]` was misread by PPI as a `<...>` readline/glob,
 silently dropping/garbling the statement.
 
-**Status on PPI 1.291:** could NOT reproduce — the following all tokenize
-correctly (zero `PPI::Token::QuoteLike::Readline`):
-
-```perl
-my $r = $x->[0] < $x->[1] > $x->[2];
-print $a < $b > $c;
-my $s = join(",", "x", $_->[0] < $_->[1] > $_->[2], "y");
-```
-
-Likely fixed in a PPI release after the one PCL's doc was written against. **Do
-NOT file** until a current-PPI repro is found; if PCL still trips on a specific
-form, capture that exact source first.
+**Status on PPI 1.291:** FIXED upstream — it tokenizes correctly now (zero
+`PPI::Token::QuoteLike::Readline`). Do NOT file. It is **not** in
+`docs/ppi-bug-report.t`. PCL keeps its own regression guard for it in
+`Pl/t/misc-fixes-02.t` ("chained < > comparison is not misparsed as a
+glob/readline") so we notice if either PPI or PCL regresses.
 
 ---
 

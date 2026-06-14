@@ -224,7 +224,7 @@ Not relevant now:
 - `docs/caller-implementation.md` - How `caller()` reports the calling frame's **package** (dynamic `*pcl-current-package*` + per-sub caller stack; orig-case carried out-of-band since single-segment pkg names are upcased into CL packages). Cost analysis included.
 - `docs/declaration-ordering.md` - Perl vs CL compile/load phases, defvar/defun ordering, local/dynamic scoping
 - `docs/wantarray-context.md` - Wantarray/context system (work authorized 2026-05-29; previously deferred)
-- `docs/ppi-glob-disambiguation.md` - **HIGH PRIORITY BUG**: PPI misreads `< expr >` as glob, silently drops statements
+- `docs/ppi-glob-disambiguation.md` - **RESOLVED (fixed in PPI 1.291)**: PPI used to misread `< expr >` as glob and drop statements; now tokenizes correctly. Regression guard in `Pl/t/misc-fixes-02.t`. See `docs/ppi-upstream-bugs.md`.
 - `docs/closure-lexical-scoping.md` - **NEXT TODO**: Why `defvar` breaks closures, plan for `$x__lex__N` renaming
 - `docs/todo-features.md` - **Features left to implement** (tiered, with test counts and fix areas)
 - `docs/not-supported.md` - **Deliberate non-support** (design decisions: `@_` aliasing, Unicode limits, etc.)

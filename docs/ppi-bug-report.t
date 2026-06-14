@@ -1,16 +1,13 @@
 #!/usr/bin/env perl
 #
-# PPI tokenizer bug report — three small cases.
-# Tested against PPI 1.291 / perl 5.40.3.
-#
-# Tests 1 & 2 currently FAIL (the bugs).  Test 3 currently PASSES and is kept as
-# a regression guard (it failed in an older PPI; please keep it green).
+# PPI tokenizer bug report — two small cases.
+# Tested against PPI 1.291 / perl 5.40.3.  Both tests currently FAIL (the bugs).
 #
 #   perl ppi-bug-report.t
 #
 use strict;
 use warnings;
-use Test::More tests => 3;
+use Test::More tests => 2;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -44,15 +41,4 @@ sub toks {
     is( scalar(@nums), 1,
         '0x1.8p+1 should be a single numeric token' )
         or diag "got: @t";
-}
-
-# ── Bug 3: comparison chain  X < Y > Z  must not be read as a <...> readline ───
-#
-# Regression guard: an earlier PPI misread `$x->[0] < $x->[1] > $x->[2]` as a
-# glob/readline (<...>).  It is correct on 1.291; this keeps it so.
-{
-    my $doc = PPI::Document->new(\'my $r = $x->[0] < $x->[1] > $x->[2];');
-    my $readline = $doc->find('PPI::Token::QuoteLike::Readline') || [];
-    is( scalar(@$readline), 0,
-        'X < Y > Z is a comparison chain, not a readline/glob' );
 }
