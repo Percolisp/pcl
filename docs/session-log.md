@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 254 (2026-06-15) — CPAN test-suite survey; CL-name collision + package-designator + blessed fixes (commit `dee80e7`). Gate 3448/3448.
+
+Goal (user): set Moo aside; run the OWN `t/*.t` suites of the CPAN modules we've
+worked with, see how much trouble is left, and judge whether problems converge.
+
+`use Test::More` is now wired internally (loads PCL's TAP layer on demand), so a
+dist's own test files can run. Runner: `/tmp/run-dist-t.pl <dist-dir> t/foo.t`
+(transpiles + runs with the dist's lib/t-lib on @INC). **CAVEAT: don't put
+`$dist/lib` on @INC for XS-stubbed modules (Scalar/List::Util) — it pollutes
+pl2cl's OWN @INC, since pl2cl `use`s Moo→Scalar::Util → a false TRANSPILE-FAIL.
+PCL uses its `lib/` shims for those anyway.**
+
+Swept 7 dists in `~/.cpan/build` (Try-Tiny, Role-Tiny, Safe-Isa, Data-Dump,
+Class-Inspector, Class-Method-Modifiers, Scalar-List-Utils). **Answer to the
+user's "infinite problems?" fear: NO — crashes cluster into ~7 buckets, dominated
+by 3.** Biggest = CL-name collision (28 files).
+
+Landed (one commit `dee80e7`, gate green, sweep 0 zero-passing):
+- **CL-name collision** — a Perl package whose upcased name is a *locked*
+  COMMON-LISP symbol (`If`→CL:IF via `use if`, also `Second`/`Symbol`) crashed the
+  emitted `(defclass NAME)`. Fix: CLOS class names now **`plc-`-prefixed**
+  (`_pkg_to_clos_class` + `perl-pkg-to-clos-class`/`clos-class-to-pkg`); dropped
+  the old ad-hoc escape list. Runtime dispatch is string-based → `ref`/`blessed`
+  unaffected (verified vs perl, incl. `Second`). Naming discipline is now:
+  builtins `p-`, user subs `pl-`, **classes `plc-`**.
+- **Package designators unified** — 3 copies of a `class/error/method/function`
+  pipe-quote special-case (`_cl_pkg_designator` + Parser.pm ~306 + ~389) disagreed
+  with each other AND the runtime's `perl-pkg-to-cl-pkg-name` (upcase). All now go
+  through `_cl_pkg_designator` (pipe-quote ONLY multi-seg). Safe to drop the escape
+  because plc- handles the defclass collision. Fixes `package Class`/`Error`/
+  `Method` ("Package CLASS does not exist" read error). NOTE: an incomplete first
+  edit (only `_cl_pkg_designator`) desynced the 3 paths and briefly broke
+  substr/pos/vec/hash — lesson: keep all 3 designator sites in lock-step.
+- **substr.t recovery** — the lvalue-sub `die` (added s253 so CMM's eval-probe
+  fails) stays hard ONLY in eval-string mode; whole-file mode degrades to a
+  per-statement PARSE ERROR. substr.t 0 (crash) → 389 ok / 8 not-ok.
+- **blessed/reftype** — Scalar::Util shim delegates to the core builtins
+  (`blessed`→undef for UNblessed refs, not the reftype); `p-reftype` returns undef
+  (not "") for non-refs; `UNIVERSAL::pl-isa` guarded for a non-string reftype.
+
+Validation: gate 3448/3448; sweep 18020 pass / 0 zero-passing (`vec.t` now fully
+passes). sweep-diff flagged 7 "regressions" — verified each byte-identical on a
+clean `git stash` → all stale-committed-baseline artifacts, NONE introduced here.
+(Did NOT re-bless `docs/fail-baseline.tsv` — it's many sessions stale.)
+
+**NEXT (the real CMM / `use if` walls — collision+casing were prerequisites, not
+sufficient):**
+1. **Block-scoped package** `do { package X; ... }` emits `(defvar X::$a)` and
+   qualified calls in the read-time declarations bucket BEFORE the inline runtime
+   `(p-defpackage)` runs → "Package X does not exist" read error. This still blocks
+   the whole Class-Method-Modifiers suite. Fix idea: hoist a read-time/top-level
+   package creation for block-scoped packages.
+2. **String `require "Foo/Bar.pm"`** doesn't resolve via @INC/shims the way
+   bareword `use`/`require Foo::Bar` does (blocks `use if COND,MOD`'s true branch;
+   `use if 0,...` no-op already matches perl).
+Other buckets (lower priority): Data::Dump 10 files = `use Test` (OLD pre-Test::More
+module) → `$_`/`TEST::_` unbound; Safe::Isa 2 = CLOS finalize-inheritance on a
+forward-ref class; Role::Tiny 6 SIMPLE-ERROR (role composition internals).
+Full detail in `memory/project_cpan_module_survey.md`.
+
+Left dirty intentionally (not mine): `README.md` (already modified at session
+start), stray `perl-tests/t/&=FILE` artifact.
+
+---
+
 ## Session 253 (2026-06-14/15) — Moo: roles + method modifiers WORK. Many commits, gate green (95 files / ~3440+).
 
 Goal: continue Moo (pack.t already done s252). Outcome: **Moo is now broadly
