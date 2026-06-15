@@ -8288,6 +8288,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   TAP layer ON DEMAND (p-ensure-test-lib), so a non-test program never pulls in
   the test infrastructure, and a .t file is self-contained.")
 
+(defparameter *p-pragma-modules*
+  '("strict" "warnings" "feature" "utf8" "open" "bytes"
+    "locale" "integer" "re" "overloading" "warnings::register")
+  "Lexical pragmas: they manipulate compile-time hint bitmasks ($^H,
+  ${^WARNING_BITS}) that PCL does not model.  Bareword `use strict` is already a
+  parser no-op, but a STRING require — the `if` pragma does `require \"strict.pm\"`
+  — or an explicit `require strict` reaches p-use, where loading the real .pm
+  would hit `STRICT::$^H unbound`.  So skip the load entirely (the import/unimport
+  methods are separately stubbed as no-ops below).")
+
 (defvar *pcl-test-lib-loaded* nil
   "T once cl/pcl-test.lisp has been loaded — by the harness preloading it, or
   on demand from `use Test::More`.  Guards against re-loading.")
@@ -8318,6 +8328,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; .pm; load PCL's TAP layer on demand instead (no-op if already loaded).
   (when (member module-name *p-pcl-provided-modules* :test #'string=)
     (p-ensure-test-lib)
+    (return-from p-use t))
+  ;; Lexical pragmas (strict/warnings/feature/...): never load the core .pm —
+  ;; PCL doesn't model the hint bitmasks they touch.  Reached only via a string
+  ;; require (the `if` pragma) or an explicit `require strict`.
+  (when (member module-name *p-pragma-modules* :test #'string-equal)
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
         (caller-pkg *package*))
@@ -8365,25 +8380,46 @@ buffer's fill-pointer; everything else falls back to file-length."
     (error () nil)))
 
 (defun p-require-file (path)
-  "Perl require with file path - load a .pl file by path.
-   Resolves relative paths against current directory."
-  (let* ((path-str (unbox path))
-         ;; Check if already loaded (Perl tracks this in %INC by path)
-         (abs-path (if (char= (char path-str 0) #\/)
-                       path-str
-                       ;; Relative path - resolve against current dir
-                       (merge-pathnames path-str (truename *default-pathname-defaults*)))))
-    ;; Check %INC to avoid reloading
+  "Perl require with a string/path argument.
+   A `.pm` path (Foo/Bar.pm) is a MODULE require: resolve through @INC and the
+   lib/ shims exactly like a bareword `require Foo::Bar`.  This is what the `if`
+   pragma's `use if COND, MODULE` does — it builds \"MODULE.pm\" (`::`->`/`) and
+   string-requires it; routing through p-require also makes the XS-only and
+   PCL-provided (Test::More) shortcuts in p-use fire, which key on the `::` name.
+   A non-.pm path (./test.pl) is loaded literally, relative to the current dir,
+   with an @INC fallback (Perl searches @INC for all string requires)."
+  (let ((path-str (unbox path)))
+    ;; Check %INC to avoid reloading (Perl keys %INC by the string used).
     (when (gethash path-str *p-inc-table*)
       (return-from p-require-file t))
-    ;; Load the file using pl2cl
-    (unless (probe-file abs-path)
-      (error "Can't locate ~A" path-str))
-    ;; Transpile and load
-    (p-load-module-cached abs-path)
-    ;; Update %INC
-    (setf (gethash path-str *p-inc-table*) (namestring abs-path))
-    t))
+    ;; A `.pm` path is a module require — delegate to the bareword machinery.
+    (when (and (>= (length path-str) 3)
+               (string= path-str ".pm" :start1 (- (length path-str) 3)))
+      (let* ((bare (subseq path-str 0 (- (length path-str) 3)))
+             (module-name (with-output-to-string (s)
+                            (loop for ch across bare
+                                  do (if (char= ch #\/)
+                                         (write-string "::" s)
+                                         (write-char ch s))))))
+        (p-require module-name)
+        ;; p-use already records the rel-path (= path-str for a .pm) in %INC;
+        ;; set it too so the guard above fires on a literal repeat.
+        (setf (gethash path-str *p-inc-table*) path-str)
+        (return-from p-require-file t)))
+    ;; Non-.pm: literal file load (e.g. ./test.pl), cwd-relative, @INC fallback.
+    (let ((abs-path (if (char= (char path-str 0) #\/)
+                        path-str
+                        (let ((cwd-path (merge-pathnames
+                                         path-str
+                                         (truename *default-pathname-defaults*))))
+                          (if (probe-file cwd-path)
+                              cwd-path
+                              (or (p-find-module-in-inc path-str) cwd-path))))))
+      (unless (probe-file abs-path)
+        (error "Can't locate ~A" path-str))
+      (p-load-module-cached abs-path)
+      (setf (gethash path-str *p-inc-table*) (namestring abs-path))
+      t)))
 
 ;;; ============================================================
 ;;; List Functions
@@ -11431,9 +11467,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; method resolve to a no-op (and find-symbol-first prevents the core file from
 ;;; being loaded), so we never have to model $^H at all.
 (eval-when (:load-toplevel :execute)
-  (dolist (p '("STRICT" "WARNINGS" "FEATURE" "UTF8" "OPEN" "BYTES"
-               "LOCALE" "INTEGER" "RE" "OVERLOADING" "WARNINGS::REGISTER"))
-    (let ((pkg (or (find-package p) (make-package p :use '(:cl :pcl)))))
+  (dolist (pragma *p-pragma-modules*)
+    (let* ((p (string-upcase pragma))
+           (pkg (or (find-package p) (make-package p :use '(:cl :pcl)))))
       (dolist (m '("PL-IMPORT" "PL-UNIMPORT"))
         (let ((sym (intern m pkg)))
           (setf (fdefinition sym) (lambda (&rest a) (declare (ignore a)) nil))
