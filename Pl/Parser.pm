@@ -266,6 +266,9 @@ sub parse {
     $self->_emit("");
   });
 
+  # Disambiguate case-colliding identifiers before any codegen sees them.
+  $self->_compute_and_apply_case_renames($doc);
+
   $self->_process_children($doc);
 
   # Close any local let forms opened at file level (e.g. local $^W at file scope).
@@ -299,10 +302,12 @@ sub _qualified_sub_to_cl {
   $name =~ s/'/::/g;
   if ($name =~ /^(.+)::([^:]+)$/) {
     my ($pkg, $bare) = ($1, $2);
-    # Pipe-quote if contains :: or conflicts with CL symbols
-    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
-                  lc($pkg) eq 'method' || lc($pkg) eq 'function')
-                 ? "|$pkg|" : $pkg;
+    # Only MULTI-segment names need pipe-quoting; single-segment names are
+    # upcased by the reader (matching the runtime's perl-pkg-to-cl-pkg-name).
+    # MUST agree with _cl_pkg_designator — single source of truth for the rule.
+    # (The old class/error/method/function special-case is obsolete: CLOS class
+    #  names are plc-prefixed now, so the package name needs no escaping.)
+    (my $cl_pkg = $self->_cl_pkg_designator($pkg)) =~ s/^://;
     # Register package so it gets pre-declared
     $self->environment->add_referenced_package($pkg) if $self->environment;
     return "${cl_pkg}::pl-$bare";
@@ -383,9 +388,7 @@ sub _assemble_output {
   if (%needed_packages) {
     my @predecls;
     for my $pkg (sort keys %needed_packages) {
-      my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
-                    lc($pkg) eq 'method' || lc($pkg) eq 'function')
-                   ? ":|$pkg|" : ":$pkg";
+      my $cl_pkg = $self->_cl_pkg_designator($pkg);
       push @predecls, ";; Pre-declare package for dynamic loading";
       push @predecls, "(pcl:p-defpackage $cl_pkg)";
       push @predecls, "";
@@ -550,6 +553,102 @@ sub _wrap_runtime_labels {
 
 # Insert defvar for package variables used without my/our declaration.
 # Scans all output buckets; pushes defvars into first section's declarations.
+# ── AST-level free-variable detection for eval "STRING" bodies ───────────────
+#
+# A free variable is one referenced inside the eval but declared NOWHERE in its
+# enclosing eval scope chain — it must be captured from the caller (it becomes a
+# p-eval-thunk lambda parameter; see docs/eval-lexical-capture.md).  Unlike the
+# old post-codegen regex this is SCOPE-AWARE and descends into NAMED subs (the
+# Class::Method::Modifiers idiom: eval "sub $name { ... \$wrapped ... }").  Works
+# on the PPI parse tree, not generated CL.  See docs/eval-free-vars-plan.md.
+
+# Globals that are NOT capturable lexicals but which PPI classifies as PLAIN
+# PPI::Token::Symbol (so the Magic-token filter below does not catch them).
+# Punctuation/magic specials ($_, @_, $@, $0, $1.., $., $!, $/, $&, $;, $^W, ...)
+# are all PPI::Token::Magic and are excluded by type in _eval_scope_parts.
+my %EVAL_RUNTIME_VARS = map { $_ => 1 } qw(
+  @ARGV @INC %ENV %INC %SIG $$ $? %_args
+);
+
+sub _eval_free_vars_from_ppi {
+  my ($self, $doc) = @_;
+  return {} unless $doc;
+  my %free;
+  $self->_eval_scope_free($doc, {}, \%free);
+  delete $free{$_} for ('$a', '$b');   # $a/$b handled specially by the caller
+  return \%free;
+}
+
+# Analyze one lexical scope ($root) given the names bound by enclosing scopes.
+# Collects this scope's own declarations, flags free refs, recurses into nested
+# subs (each carrying the enclosing+local bound set).
+sub _eval_scope_free {
+  my ($self, $root, $enclosing, $free) = @_;
+  my (@decls, @refs, @subs);
+  $self->_eval_scope_parts($root, \@decls, \@refs, \@subs);
+  my %bound = (%$enclosing, map { $_ => 1 } @decls);
+  for my $v (@refs) {
+    next if $bound{$v};
+    next if $EVAL_RUNTIME_VARS{$v};
+    next if $v =~ /::/;                 # package-qualified: not a lexical
+    next if $v =~ /^[\$\@\%][0-9]/;     # $1, $2, ... capture vars
+    $free->{$v} = 1;
+  }
+  $self->_eval_scope_free($_, \%bound, $free) for @subs;
+}
+
+# Walk ONE scope's elements: collect declared vars, referenced symbols, and the
+# bodies of nested subs (named + anonymous), WITHOUT descending into those sub
+# bodies (they are separate scopes, handled by _eval_scope_free recursion).
+sub _eval_scope_parts {
+  my ($self, $node, $decls, $refs, $subs) = @_;
+  for my $child ($node->children) {
+    next unless ref $child;
+    next if $child->isa('PPI::Token::Whitespace')
+         || $child->isa('PPI::Token::Comment')
+         || $child->isa('PPI::Token::Pod');
+    # Named sub: its block is a nested scope.
+    if ($child->isa('PPI::Statement::Sub')) {
+      push @$subs, $child->block if $child->can('block') && $child->block;
+      next;
+    }
+    # Anonymous sub block: a Block preceded by 'sub' (optionally a prototype/sig).
+    if ($child->isa('PPI::Structure::Block') && _block_is_anon_sub($child)) {
+      push @$subs, $child;
+      next;
+    }
+    # Variable declaration: record the declared names.  Do NOT `next` — fall
+    # through so the initializer's own references (my $x = $y → $y) are scanned.
+    if ($child->isa('PPI::Statement::Variable') && $child->can('type') && $child->type) {
+      push @$decls, $child->variables;
+    }
+    # Reference symbol (normalized: $items[1] → @items, $h{k} → %h).
+    # Skip MAGIC vars by type ($_, @_, $@, $0, $1.., and every punctuation
+    # special: $. $! $/ $& $` $' $+ $; $, $\ $" $^W ...).  They are globals, never
+    # capturable lexicals, and many aren't valid CL parameter names.
+    if ($child->isa('PPI::Token::Symbol')) {
+      push @$refs, $child->symbol unless $child->isa('PPI::Token::Magic');
+      next;
+    }
+    # Recurse into composite nodes (statements, lists, blocks) — still THIS scope.
+    if ($child->isa('PPI::Node')) {
+      $self->_eval_scope_parts($child, $decls, $refs, $subs);
+    }
+  }
+}
+
+# True if a Structure::Block is an anonymous sub body (`sub { }` / `sub (proto){}`).
+sub _block_is_anon_sub {
+  my ($block) = @_;
+  my $s = $block->sprevious_sibling;
+  # Skip an intervening prototype/signature: sub ($x){...} / sub (){...}.
+  while ($s && ($s->isa('PPI::Structure::List')
+            || ($s->isa('PPI::Structure') && (($s->braces // '') eq '()')))) {
+    $s = $s->sprevious_sibling;
+  }
+  return $s && $s->isa('PPI::Token::Word') && $s->content eq 'sub';
+}
+
 sub _insert_variable_forward_declarations {
   my $self = shift;
 
@@ -753,8 +852,14 @@ sub _insert_variable_forward_declarations {
   #    inside the eval can still rebind it.  (A pathological `my $a` masking a
   #    sort block matches Perl only loosely; see docs/eval-lexical-capture.md.)
   if ($self->eval_mode) {
-    my @free = @undeclared;
-    push @free, grep { $referenced{$_} && $forced_sort_var{$_} } ('$a', '$b');
+    # Scope-aware AST analysis (descends into named subs) is authoritative; union
+    # with the legacy file-scope @undeclared set for back-compat, then add the
+    # $a/$b special case.  The AST set is what makes a lexical referenced only
+    # inside a named sub body (the modifier idiom) become a captured param.
+    my $ast_free = $self->_eval_free_vars_from_ppi($self->ppi_doc);
+    my %free = (%$ast_free, map { $_ => 1 } @undeclared);
+    $free{$_} = 1 for grep { $referenced{$_} && $forced_sort_var{$_} } ('$a', '$b');
+    my @free = sort keys %free;
     $self->{_eval_free_vars} = \@free if @free;
     return;
   }
@@ -5099,10 +5204,17 @@ sub _process_sub_statement {
     }
   }
 
-  # At file scope, route named sub definitions to the declarations bucket.
-  # declarations is assembled before definitions (BEGIN blocks, use/require),
-  # which matches Perl: all named subs are compiled before any BEGIN runs,
-  # so \&foo inside BEGIN can always find the sub already defined.
+  # At file scope, route named sub definitions to the DEFINITIONS bucket, in
+  # SOURCE ORDER alongside use/BEGIN/require.  This reproduces Perl's compile-time
+  # stream: a `use`/`BEGIN` sees exactly the subs written BEFORE it and none
+  # written after.  (The old policy routed subs to the `declarations` bucket,
+  # which assembles before `definitions`, so every sub ran before every use/BEGIN
+  # — breaking any module that introspects the package's subs at use-time, e.g.
+  # Moo::Role's make_role.  See docs/declaration-ordering-fix-plan.md.)
+  # Forward references (a runtime `foo()` or `\&foo` written before `sub foo`)
+  # still resolve: the compile-time stream is assembled before the runtime stream
+  # (C1), and the `p-declare-sub` stub (unshifted into declarations below) covers
+  # a `\&foo` taken inside an earlier BEGIN.
   # Inside subs (in_subroutine > 0), nested NAMED subs are hoisted to the
   # definitions bucket (at indent 0) so they are available before the outer
   # sub runs.  Their state variables use defvar (global special) instead of
@@ -5117,9 +5229,15 @@ sub _process_sub_statement {
   my $old_bucket = $self->_cur_bucket;
   my $old_indent = $self->indent_level;
   if ($self->environment->in_subroutine == 0 && !%{$self->{_let_bound_vars} // {}}) {
-    $self->_cur_bucket('declarations');
-  } elsif ($is_nested_named) {
     $self->_cur_bucket('definitions');
+  } elsif ($is_nested_named) {
+    # A nested NAMED sub must be hoisted OUT of the enclosing sub's form so it is
+    # installed independently (callable before the outer runs).  The hoist works
+    # by emitting it into a DIFFERENT bucket than the one currently open for the
+    # enclosing top-level sub — otherwise its lines interleave inside the outer's
+    # parens.  Top-level subs now live in `definitions`, so nested subs go to
+    # `declarations` (assembled earlier, separate array → clean separation).
+    $self->_cur_bucket('declarations');
     $self->indent_level(0);
   }
 
@@ -5612,9 +5730,15 @@ sub _process_package_statement {
 # or a runtime package reference is emitted.
 sub _cl_pkg_designator {
   my ($self, $pkg_name) = @_;
-  return ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' || lc($pkg_name) eq 'error' ||
-          lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
-         ? ":|$pkg_name|" : ":$pkg_name";
+  # Only MULTI-segment names need pipe-quoting (to preserve the '::' and case).
+  # Single-segment names are upcased by the reader (:Class -> CLASS), which is
+  # exactly what the runtime's perl-pkg-to-cl-pkg-name does and what bareword
+  # call qualifiers (Class::pl-foo) resolve to — so they MUST stay bare to agree.
+  # (The old `class/error/method/function` special-case existed only because
+  # `(defclass class ...)` collided with CL:CLASS; CLOS class names are now
+  # plc-prefixed, so escaping the *package* name here is redundant and actually
+  # caused a :|Class| vs CLASS mismatch.)
+  return ($pkg_name =~ /::/) ? ":|$pkg_name|" : ":$pkg_name";
 }
 
 sub _emit_package_preamble {
@@ -5692,13 +5816,16 @@ sub _pkg_to_clos_class {
   my ($self, $pkg) = @_;
   my $class = lc($pkg);
   $class =~ s/::/-/g;
-  # Pipe-quote to avoid CL symbol conflicts (especially 'class', 'error')
-  if ($class eq 'class' || $class eq 'method' || $class eq 'function' ||
-      $class eq 'error' || $class eq 'warning' || $class eq 'condition' ||
-      $class eq 'standard-class' || $class eq 'standard-object') {
-    return "|$class|";
-  }
-  return $class;
+  # Prefix with plc- so the CLOS class symbol can NEVER collide with a
+  # COMMON-LISP / SBCL symbol once the reader upcases it.  A Perl
+  # `package If` / `Second` / `Symbol` / `List` / `Car` ... would otherwise
+  # become CL:IF / CL:SECOND / CL:SYMBOL ... — symbols in the *locked*
+  # COMMON-LISP package, so the emitted `(defclass NAME ...)` dies with a
+  # package-lock violation.  The plc- prefix (PL Class) extends the existing
+  # naming discipline: builtins are `p-`, user subs `pl-`, classes `plc-`.
+  # This subsumes the old ad-hoc pipe-escape list (class/method/error/...).
+  # MUST stay in lock-step with `perl-pkg-to-clos-class` in cl/pcl-runtime.lisp.
+  return "plc-$class";
 }
 
 
@@ -5965,6 +6092,16 @@ sub _process_scheduled_block {
       $self->_emit(";; $perl_code");
       $self->_emit("(p-BEGIN");
       $self->indent_level($self->indent_level + 1);
+      # BEGIN blocks run in the definitions bucket, BEFORE this package's runtime
+      # `p-set-current-package` (runtime bucket).  Without setting it here,
+      # *pcl-current-package* lags during the BEGIN, so caller()/__PACKAGE__ —
+      # and any explicit `Module->import` (Moo's `require Moo; Moo->import;`
+      # bootstrap) — resolve to the wrong package.  Set it as the first stmt so
+      # imports install into the enclosing package.  (in-package is already set
+      # in the hoisted preamble, so the CL reader package is correct; this fixes
+      # the runtime call-context pointer.)
+      my $cl_cur = $self->_cl_pkg_designator($prev_pkg);
+      $self->_emit("(p-set-current-package $cl_cur \"$prev_pkg\")");
       $process->();
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
@@ -6591,7 +6728,14 @@ sub _parse_expression_internal {
   if ($@) {
     my $error = $@;
     # Hard errors (e.g. unsupported features) must propagate — don't swallow.
-    die $error if $error =~ /^PCL:/;
+    # EXCEPT: assignment to a non-lvalue (user :lvalue) sub call.  That die is
+    # only *meant* to be hard in eval-string mode, where it makes a feature
+    # probe (CMM's `eval 'return 1; &_sub = 1'`) fail and return undef.  In
+    # whole-file mode it must degrade to a per-statement PARSE ERROR so one
+    # unsupported lvalue-sub assignment doesn't abort the entire file (e.g.
+    # perl-tests/substr.t defines `sub bar : lvalue` and does `bar = "XXX"`).
+    die $error if $error =~ /^PCL:/
+      && ($self->eval_mode || $error !~ /non-lvalue subroutine/);
     $error =~ s/ at \/.*//s;  # Remove file/line info
     $error =~ s/\n.*//s;      # First line only
     return ("(progn ;; PARSE ERROR: $error\n nil)", []);
@@ -6661,6 +6805,75 @@ sub parse_file {
   return $parser->parse;
 }
 
+
+# ------------------------------------------------------------------
+# Case-disambiguation: Perl identifiers are case-sensitive, but PCL emits bare
+# CL symbols and relies on the reader, which upcases them — so $BASE_LEN and
+# $base_len would collide onto one symbol (the lexical shadows the file-`my`,
+# breaking Math::BigInt::Calc). When a file actually contains such a collision
+# we rename all-but-one member to a reader-safe, distinct name (a digit-bearing
+# suffix survives upcasing). Token contents are rewritten in place so all code
+# paths (declarations, references, element access) see the new name; string
+# interpolation, which builds fresh Symbol nodes from raw text, is handled by a
+# matching lookup in ExprToCL::_convert_node via environment->case_renames.
+#
+# This is a targeted, collision-only fix; the general solution (a case-safe
+# symbol-naming scheme) belongs in the compiler rewrite — see docs.
+sub _bare_ident_of_token {
+  my $tok = shift;
+  my $c   = $tok->content;
+  return undef unless defined $c;
+  return $1 if $c =~ /^\$#.*?([A-Za-z_]\w*)\z/;          # $#arr / $#Pkg::arr
+  return $1 if $c =~ /^[\$\@\%\&\*].*?([A-Za-z_]\w*)\z/; # $x @x %x &x *x (opt pkg::)
+  return undef;
+}
+
+sub _compute_and_apply_case_renames {
+  my ($self, $doc) = @_;
+  return unless $doc;
+
+  # Identifiers with dedicated CL handling (special vars, sort vars, @ISA, the
+  # %ENV/@ARGV/... families, bareword filehandles) must never be renamed: their
+  # emission does not flow through the mutated token, so a rename would desync.
+  my %skip = map { $_ => 1 } qw(
+    _ a b ISA ENV ARGV ARGVOUT INC SIG STDIN STDOUT STDERR DATA
+  );
+
+  my @tokens;
+  for my $cls (qw(PPI::Token::Symbol PPI::Token::Magic PPI::Token::ArrayIndex)) {
+    my $found = $doc->find($cls) || [];
+    push @tokens, @$found;
+  }
+
+  my %spellings;  # uc(name) => { name => 1 }
+  for my $tok (@tokens) {
+    my $name = _bare_ident_of_token($tok);
+    next unless defined $name;
+    next if $skip{$name};
+    $spellings{uc $name}{$name} = 1;
+  }
+
+  my %renames;
+  for my $uc (sort keys %spellings) {
+    my @sp = sort keys %{ $spellings{$uc} };
+    next if @sp < 2;                 # no case collision
+    # Keep the first spelling unchanged; rename the rest.
+    for my $i (1 .. $#sp) {
+      $renames{$sp[$i]} = $sp[$i] . "__pcl_ci_$i";
+    }
+  }
+
+  $self->environment->case_renames(\%renames) if $self->environment;
+  return unless %renames;
+
+  for my $tok (@tokens) {
+    my $name = _bare_ident_of_token($tok);
+    next unless defined $name && exists $renames{$name};
+    my $content = $tok->content;
+    (my $new = $content) =~ s/\Q$name\E\z/$renames{$name}/;
+    $tok->set_content($new) if $new ne $content;
+  }
+}
 
 sub parse_code {
   my $class = shift;

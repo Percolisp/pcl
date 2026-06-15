@@ -296,6 +296,18 @@ sub wrapper { goto &base }
 print wrapper("x","y"), "\n";
 ', "x,y\n");
 
+# --- goto &funcname replaces the caller frame (caller() sees ORIGINAL caller) ---
+# Perl semantics: goto &sub makes the target inherit the goto-ing sub's caller
+# frame, so caller() inside the target reports the package that called the
+# goto-ing sub, not the goto-ing sub's package.  Moo::Role::import relies on
+# this (goto &Role::Tiny::import; Role::Tiny reads caller to find the user's
+# package).  Regression for session 251.
+test_transpile("goto &sub: caller() reports the original caller's package", '
+package B; sub real { my $t = caller; print "$t\n"; }
+package A; sub via { goto &B::real; }
+package Main; A::via();
+', "Main\n");
+
 # --- delete @$h{@keys} hash-ref slice delete ---
 test_transpile('delete @$h{@keys} removes keys from hash ref', '
 my $h = {a=>1, b=>2, c=>3};

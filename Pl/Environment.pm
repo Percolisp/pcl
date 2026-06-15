@@ -330,6 +330,17 @@ has state_var_renames => (
     default => sub { {} },
 );
 
+# Case-disambiguation renames (file-global). Perl identifiers are case-sensitive
+# but PCL emits bare CL symbols which the reader upcases, so two names differing
+# only in case (e.g. $BASE_LEN vs $base_len in Math::BigInt::Calc) would collide
+# onto one CL symbol. When a file actually contains such a collision, we rename
+# all-but-one member to a reader-safe distinct name. Keyed on the bare identifier
+# (no sigil/package): { 'base_len' => 'base_len__pcl_ci_1', ... }.
+has case_renames => (
+    is      => 'rw',
+    default => sub { {} },
+);
+
 =head1 METHODS
 
 =head2 get_prototype($name)

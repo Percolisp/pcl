@@ -42,7 +42,7 @@ package Child;
 our @ISA = qw(Parent);
 END_PERL
 
-  like($cl, qr/defclass child \(Parent::parent\)/, '@ISA qw() generates CLOS class with parent');
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, '@ISA qw() generates CLOS class with parent');
   like($cl, qr/defvar \@ISA/, '@ISA array is still created');
   like($cl, qr/p-push \@ISA "Parent"/, 'Parent pushed to @ISA array');
 }
@@ -54,7 +54,7 @@ package Child;
 our @ISA = ('Parent1', 'Parent2');
 END_PERL
 
-  like($cl, qr/defclass child \(Parent1::parent1 Parent2::parent2\)/, '@ISA list generates CLOS class with parents');
+  like($cl, qr/defclass plc-child \(Parent1::plc-parent1 Parent2::plc-parent2\)/, '@ISA list generates CLOS class with parents');
 }
 
 # Test nested package names
@@ -64,7 +64,7 @@ package My::Child;
 our @ISA = qw(My::Parent);
 END_PERL
 
-  like($cl, qr/defclass my-child \(\|My::Parent\|::my-parent\)/, 'Nested package names converted to CLOS class names');
+  like($cl, qr/defclass plc-my-child \(\|My::Parent\|::plc-my-parent\)/, 'Nested package names converted to CLOS class names');
 }
 
 
@@ -79,7 +79,7 @@ package Animal;
 sub speak { "generic sound" }
 END_PERL
 
-  like($cl, qr/defclass animal \(\) \(\)/, 'Package generates empty CLOS class');
+  like($cl, qr/defclass plc-animal \(\) \(\)/, 'Package generates empty CLOS class');
 }
 
 
@@ -130,7 +130,7 @@ package Bat;
 our @ISA = qw(Mammal Flyer);
 END_PERL
 
-  like($cl, qr/defclass bat \(Mammal::mammal Flyer::flyer\)/, 'Multiple inheritance generates CLOS class with multiple parents');
+  like($cl, qr/defclass plc-bat \(Mammal::plc-mammal Flyer::plc-flyer\)/, 'Multiple inheritance generates CLOS class with multiple parents');
 }
 
 
@@ -201,9 +201,9 @@ my $dog = Dog->new();
 END_PERL
 
   # Check that each class is generated
-  like($cl, qr/defclass animal \(\) \(\)/, 'Animal CLOS class generated');
-  like($cl, qr/defclass mammal \(Animal::animal\)/, 'Mammal inherits from Animal');
-  like($cl, qr/defclass dog \(Mammal::mammal\)/, 'Dog inherits from Mammal');
+  like($cl, qr/defclass plc-animal \(\) \(\)/, 'Animal CLOS class generated');
+  like($cl, qr/defclass plc-mammal \(Animal::plc-animal\)/, 'Mammal inherits from Animal');
+  like($cl, qr/defclass plc-dog \(Mammal::plc-mammal\)/, 'Dog inherits from Mammal');
 }
 
 
@@ -227,10 +227,10 @@ package Bat;
 our @ISA = qw(Mammal Flyer);
 END_PERL
 
-  like($cl, qr/defclass animal \(\)/, 'Animal base class');
-  like($cl, qr/defclass mammal \(Animal::animal\)/, 'Mammal inherits Animal');
-  like($cl, qr/defclass flyer \(Animal::animal\)/, 'Flyer inherits Animal');
-  like($cl, qr/defclass bat \(Mammal::mammal Flyer::flyer\)/, 'Bat has multiple parents (diamond)');
+  like($cl, qr/defclass plc-animal \(\)/, 'Animal base class');
+  like($cl, qr/defclass plc-mammal \(Animal::plc-animal\)/, 'Mammal inherits Animal');
+  like($cl, qr/defclass plc-flyer \(Animal::plc-animal\)/, 'Flyer inherits Animal');
+  like($cl, qr/defclass plc-bat \(Mammal::plc-mammal Flyer::plc-flyer\)/, 'Bat has multiple parents (diamond)');
 }
 
 
@@ -287,7 +287,7 @@ package Child;
 our @ISA = ('Parent');
 END_PERL
 
-  like($cl, qr/defclass child \(Parent::parent\)/, 'Single-quoted @ISA works');
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Single-quoted @ISA works');
 }
 
 
@@ -307,7 +307,7 @@ sub process {
 }
 END_PERL
 
-  like($cl, qr/defclass my-deep-child \(\|My::Deep::Parent\|::my-deep-parent\)/, 'Nested package inheritance');
+  like($cl, qr/defclass plc-my-deep-child \(\|My::Deep::Parent\|::plc-my-deep-parent\)/, 'Nested package inheritance');
   like($cl, qr/p-super-call .* "process" "My::Deep::Child"/, 'SUPER:: in nested package uses full package name');
 }
 
@@ -367,7 +367,7 @@ my $c = Child->new();
 END_PERL
 
   # Child should not have its own new, but call should work via inheritance
-  like($cl, qr/defclass child \(Parent::parent\)/, 'Child inherits from Parent');
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Child inherits from Parent');
   # The method call Child->new() should use p-method-call
   like($cl, qr/p-method-call.*"Child".*"new"/s, 'Child->new() generates method call');
 }
@@ -426,9 +426,9 @@ sub greet {
 }
 END_PERL
 
-  like($cl, qr/defclass grandparent \(\)/, 'GrandParent class');
-  like($cl, qr/defclass parent \(GrandParent::grandparent\)/, 'Parent inherits GrandParent');
-  like($cl, qr/defclass child \(Parent::parent\)/, 'Child inherits Parent');
+  like($cl, qr/defclass plc-grandparent \(\)/, 'GrandParent class');
+  like($cl, qr/defclass plc-parent \(GrandParent::plc-grandparent\)/, 'Parent inherits GrandParent');
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Child inherits Parent');
 
   # Check SUPER:: calls reference correct packages
   like($cl, qr/p-super-call .* "greet" "Parent"/, 'Parent SUPER:: uses "Parent"');
@@ -455,7 +455,7 @@ our @ISA = qw(Left Right);
 END_PERL
 
   # CLOS will use C3 MRO, with Left before Right
-  like($cl, qr/defclass child \(Left::left Right::right\)/, 'Child MRO: Left before Right');
+  like($cl, qr/defclass plc-child \(Left::plc-left Right::plc-right\)/, 'Child MRO: Left before Right');
 }
 
 
@@ -524,7 +524,7 @@ END_PERL
 
   # Check chained method calls
   like($cl, qr/p-method-call.*p-method-call/s, 'Chained method calls present');
-  like($cl, qr/defclass extendedbuilder \(Builder::builder\)/, 'ExtendedBuilder inherits Builder');
+  like($cl, qr/defclass plc-extendedbuilder \(Builder::plc-builder\)/, 'ExtendedBuilder inherits Builder');
 }
 
 
@@ -601,11 +601,11 @@ sub action { "solo" }
 END_PERL
 
   # Check all classes are generated correctly
-  like($cl, qr/defclass animal \(\)/, 'Animal (tree 1)');
-  like($cl, qr/defclass dog \(Animal::animal\)/, 'Dog inherits Animal');
-  like($cl, qr/defclass vehicle \(\)/, 'Vehicle (tree 2)');
-  like($cl, qr/defclass car \(Vehicle::vehicle\)/, 'Car inherits Vehicle');
-  like($cl, qr/defclass standalone \(\)/, 'Standalone (no inheritance)');
+  like($cl, qr/defclass plc-animal \(\)/, 'Animal (tree 1)');
+  like($cl, qr/defclass plc-dog \(Animal::plc-animal\)/, 'Dog inherits Animal');
+  like($cl, qr/defclass plc-vehicle \(\)/, 'Vehicle (tree 2)');
+  like($cl, qr/defclass plc-car \(Vehicle::plc-vehicle\)/, 'Car inherits Vehicle');
+  like($cl, qr/defclass plc-standalone \(\)/, 'Standalone (no inheritance)');
 }
 
 
@@ -620,7 +620,7 @@ package NoParent;
 sub method { "I have no parent" }
 END_PERL
 
-  like($cl, qr/defclass noparent \(\) \(\)/, 'Package without @ISA gets empty parent list');
+  like($cl, qr/defclass plc-noparent \(\) \(\)/, 'Package without @ISA gets empty parent list');
 }
 
 
@@ -659,7 +659,7 @@ sub name {
 }
 END_PERL
 
-  like($cl, qr/defclass extended \(Base::base\)/, 'Extended inherits Base');
+  like($cl, qr/defclass plc-extended \(Base::plc-base\)/, 'Extended inherits Base');
   # Two SUPER::name calls (getter and setter paths)
   my @super_calls = ($cl =~ /p-super-call[^)]+name/g);
   is(scalar @super_calls, 2, 'Two SUPER::name calls (getter and setter)');
@@ -701,7 +701,7 @@ package Child;
 our @ISA = ("Parent");
 END_PERL
 
-  like($cl, qr/defclass child \(Parent::parent\)/, 'Double-quoted @ISA works');
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Double-quoted @ISA works');
 }
 
 
@@ -716,7 +716,7 @@ package Child;
 our @ISA = ('Parent1', "Parent2");
 END_PERL
 
-  like($cl, qr/defclass child \(Parent1::parent1 Parent2::parent2\)/, 'Mixed quote styles in @ISA');
+  like($cl, qr/defclass plc-child \(Parent1::plc-parent1 Parent2::plc-parent2\)/, 'Mixed quote styles in @ISA');
 }
 
 
@@ -745,10 +745,10 @@ sub method {
 }
 END_PERL
 
-  like($cl, qr/defclass level0 \(\)/, 'Level0 base');
-  like($cl, qr/defclass level1 \(Level0::level0\)/, 'Level1 inherits Level0');
-  like($cl, qr/defclass level2 \(Level1::level1\)/, 'Level2 inherits Level1');
-  like($cl, qr/defclass level3 \(Level2::level2\)/, 'Level3 inherits Level2');
+  like($cl, qr/defclass plc-level0 \(\)/, 'Level0 base');
+  like($cl, qr/defclass plc-level1 \(Level0::plc-level0\)/, 'Level1 inherits Level0');
+  like($cl, qr/defclass plc-level2 \(Level1::plc-level1\)/, 'Level2 inherits Level1');
+  like($cl, qr/defclass plc-level3 \(Level2::plc-level2\)/, 'Level3 inherits Level2');
 }
 
 
@@ -773,7 +773,7 @@ END_PERL
 
   # Both _private methods should be defined
   like($cl, qr/p-sub pl-_private/, '_private method defined');
-  like($cl, qr/defclass derived \(Base::base\)/, 'Derived inherits Base');
+  like($cl, qr/defclass plc-derived \(Base::plc-base\)/, 'Derived inherits Base');
 }
 
 
@@ -952,10 +952,10 @@ use parent 'Parent';
 END_PERL
   like($cl, qr/\(p-eval-always \(p-require-parent "Parent"\)\)/,
        'use parent emits the implicit require of the parent');
-  like($cl, qr/defclass child \(Parent::parent\)/,
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/,
        'use parent still sets up the CLOS parent class');
   # require must come before the defclass (package must exist at read time)
-  like($cl, qr/p-require-parent "Parent".*defclass child/s,
+  like($cl, qr/p-require-parent "Parent".*defclass plc-child/s,
        'require-parent precedes the defclass');
 }
 
@@ -967,7 +967,7 @@ use parent -norequire, 'Parent';
 END_PERL
   unlike($cl, qr/p-require-parent/,
          'use parent -norequire does NOT emit a require');
-  like($cl, qr/defclass child \(Parent::parent\)/,
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/,
        'use parent -norequire still sets up the CLOS parent class');
 }
 
@@ -991,7 +991,7 @@ use parent 'My::Parent';
 END_PERL
   like($cl, qr/\(p-require-parent "My::Parent"\)/,
        'nested parent required by its full Perl name');
-  like($cl, qr/defclass child \(\|My::Parent\|::my-parent\)/,
+  like($cl, qr/defclass plc-child \(\|My::Parent\|::plc-my-parent\)/,
        'nested parent class is pipe-qualified in the defclass');
 }
 

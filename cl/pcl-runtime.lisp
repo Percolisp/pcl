@@ -61,7 +61,7 @@
    #:p-str-bit-and #:p-str-bit-or #:p-str-bit-xor #:p-str-bit-not
    #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
-   #:p-aref #:p-aref-box #:p-aref-deref #:p-gethash #:p-gethash-box #:p-gethash-deref
+   #:p-aref #:p-aref-box #:p-aref-deref #:p-aref-deref-box #:p-gethash #:p-gethash-box #:p-gethash-deref #:p-gethash-deref-box
    #:p-ensure-hashref #:p-ensure-arrayref
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
@@ -3296,6 +3296,11 @@
                   (loop for x across item do (add x)))
                  ;; Raw nil means "empty list" (e.g. iterator at EOF returning nil).
                  ;; Explicit Perl undef comes as *p-undef* or (p-undef), not raw nil.
+                 ;; NOTE: array HOLES are also raw nil here and currently vanish
+                 ;; (the documented sparse-array limitation).  Converting them to
+                 ;; undef collides with Exporter's hash-export internals (a nil
+                 ;; that must drop) — both are indistinguishable raw nils, so the
+                 ;; real fix is a distinct hole marker at the (setf p-aref) source.
                  ((null item) nil)
                  ((consp item)
                   (loop for x in item do (add x)))
@@ -3814,6 +3819,25 @@
     ;; Other complex place (fallback)
     (t `(box-set ,place ,value))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-accessor-place-p (place)
+    "True for value-returning element/deref accessor forms (hash/array element
+     or deref).  These are not boxes — they return raw values and have setf
+     expanders — so a compound assignment must write them back with SETF, not
+     BOX-SET (which silently no-ops on a non-box).  Mirrors the place test in
+     p-incf/p-decf so every compound-assignment operator works on $a[i]/$h{k}
+     and their deref forms, e.g. Math::BigInt::Calc's `$xv->[0] *= $yv->[0]`."
+    (and (consp place)
+         (member (car place)
+                 '(p-gethash p-aref p-gethash-deref p-aref-deref)))))
+
+(defmacro %p-store-back (place new)
+  "Write NEW into PLACE for a read-modify-write compound assignment: SETF for
+   accessor places, BOX-SET for boxed scalars and scalar derefs."
+  (if (%p-accessor-place-p place)
+      `(setf ,place ,new)
+      `(box-set ,place ,new)))
+
 (defmacro p-incf (place &optional (delta 1))
   "Perl += - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
@@ -4015,27 +4039,25 @@
 
 (defmacro p-*= (place value)
   "Perl *= (multiply-assign)"
-  `(box-set ,place (* (to-number ,place) (to-number ,value))))
+  `(%p-store-back ,place (* (to-number ,place) (to-number ,value))))
 
 (defmacro p-/= (place value)
   "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
   a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
-  `(box-set ,place (p-/ ,place ,value)))
+  `(%p-store-back ,place (p-/ ,place ,value)))
 
 (defmacro p-%= (place value)
   "Perl %= (modulo-assign)"
-  `(box-set ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(%p-store-back ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
 
 (defmacro p-**= (place value)
   "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
   float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
-  `(box-set ,place (p-** ,place ,value)))
+  `(%p-store-back ,place (p-** ,place ,value)))
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign)"
-  (let ((g (gensym "PLACE")))
-    `(let ((,g ,place))
-       (box-set ,g (concatenate 'string (to-string ,g) (to-string ,value))))))
+  `(%p-store-back ,place (concatenate 'string (to-string ,place) (to-string ,value))))
 
 (defmacro p-str-x= (place value)
   "Perl x= (repeat-assign)"
@@ -4043,28 +4065,28 @@
         (n (gensym "N")))
     `(let ((,s (to-string ,place))
            (,n (truncate (to-number ,value))))
-       (box-set ,place (if (<= ,n 0) ""
-                           (apply #'concatenate 'string (make-list ,n :initial-element ,s)))))))
+       (%p-store-back ,place (if (<= ,n 0) ""
+                                 (apply #'concatenate 'string (make-list ,n :initial-element ,s)))))))
 
 (defmacro p-bit-and= (place value)
   "Perl &= (bitwise-and-assign)"
-  `(box-set ,place (p-bit-and ,place ,value)))
+  `(%p-store-back ,place (p-bit-and ,place ,value)))
 
 (defmacro p-bit-or= (place value)
   "Perl |= (bitwise-or-assign)"
-  `(box-set ,place (p-bit-or ,place ,value)))
+  `(%p-store-back ,place (p-bit-or ,place ,value)))
 
 (defmacro p-bit-xor= (place value)
   "Perl ^= (bitwise-xor-assign)"
-  `(box-set ,place (p-bit-xor ,place ,value)))
+  `(%p-store-back ,place (p-bit-xor ,place ,value)))
 
 (defmacro p-<<= (place value)
   "Perl <<= (left-shift-assign)"
-  `(box-set ,place (ash (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  `(%p-store-back ,place (ash (truncate (to-number ,place)) (truncate (to-number ,value)))))
 
 (defmacro p->>= (place value)
   "Perl >>= (right-shift-assign)"
-  `(box-set ,place (ash (truncate (to-number ,place)) (- (truncate (to-number ,value))))))
+  `(%p-store-back ,place (ash (truncate (to-number ,place)) (- (truncate (to-number ,value))))))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -4595,13 +4617,13 @@
   (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a)))
 
 (defmacro p-str-bit-and= (place value)
-  `(box-set ,place (p-str-bit-and ,place ,value)))
+  `(%p-store-back ,place (p-str-bit-and ,place ,value)))
 
 (defmacro p-str-bit-or= (place value)
-  `(box-set ,place (p-str-bit-or ,place ,value)))
+  `(%p-store-back ,place (p-str-bit-or ,place ,value)))
 
 (defmacro p-str-bit-xor= (place value)
-  `(box-set ,place (p-str-bit-xor ,place ,value)))
+  `(%p-store-back ,place (p-str-bit-xor ,place ,value)))
 
 (defun %pcl-uv-coerce (n)
   "Coerce float to integer using UV (unsigned) semantics: +Inf=UV_MAX, -Inf=IV_MIN, NaN=0."
@@ -5248,9 +5270,12 @@
       (let ((val (unbox stored)))
         (if (and found (hash-table-p val))
             val
-            ;; Autovivify: create new hash and store it
+            ;; Autovivify: create new hash, store it as a hash REFERENCE
+            ;; (make-p-box) — a hash element that holds a nested hash holds a
+            ;; ref, not a bare %hash.  Storing the raw table makes a later
+            ;; scalar copy ($x = $h{a}) collapse to the key-count.
             (let ((new-hash (make-hash-table :test 'equal)))
-              (setf (gethash k h) new-hash)
+              (setf (gethash k h) (make-p-box new-hash))
               new-hash))))))
 
 (defun p-autoviv-gethash-for-array (hash key)
@@ -5263,9 +5288,9 @@
       (let ((val (unbox stored)))
         (if (and found (vectorp val))
             val
-            ;; Autovivify: create new array and store it
+            ;; Autovivify: create new array, store it as an array REFERENCE.
             (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-              (setf (gethash k h) new-arr)
+              (setf (gethash k h) (make-p-box new-arr))
               new-arr))))))
 
 (defun p-autoviv-aref-for-hash (arr idx)
@@ -5282,9 +5307,9 @@
            (val (unbox stored)))
       (if (hash-table-p val)
           val
-          ;; Autovivify: create new hash and store it
+          ;; Autovivify: create new hash, store it as a hash REFERENCE.
           (let ((new-hash (make-hash-table :test 'equal)))
-            (setf (aref a i) new-hash)
+            (setf (aref a i) (make-p-box new-hash))
             new-hash)))))
 
 (defun p-autoviv-aref-for-array (arr idx)
@@ -5301,9 +5326,9 @@
            (val (unbox stored)))
       (if (vectorp val)
           val
-          ;; Autovivify: create new array and store it
+          ;; Autovivify: create new array, store it as an array REFERENCE.
           (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-            (setf (aref a i) new-arr)
+            (setf (aref a i) (make-p-box new-arr))
             new-arr)))))
 
 (defun p-array-set (arr idx value)
@@ -5421,6 +5446,18 @@
 (defun (setf p-aref-deref) (value ref idx)
   "Setf expander for p-aref-deref - autovivify ref to array if undef, then set element"
   (setf (p-aref (p-ensure-arrayref ref) idx) value))
+
+(defun p-gethash-deref-box (ref key)
+  "Live BOX at $ref->{key} — for \\$ref->{k} refgen and l-value ops, so a
+   reference to a hashref element tracks later writes to that slot (unlike
+   p-gethash-deref, which returns a snapshot value).  Autovivifies the ref to a
+   hashref if undef, then returns the live box at key (like p-gethash-box does
+   for a direct %hash element)."
+  (p-gethash-box (p-ensure-hashref ref) key))
+
+(defun p-aref-deref-box (ref idx)
+  "Live BOX at $ref->[idx] — the array-ref analogue of p-gethash-deref-box."
+  (p-aref-box (p-ensure-arrayref ref) idx))
 
 (defun p-aslice (arr &rest indices)
   "Perl array slice @arr[indices] - returns vector of values.
@@ -5836,7 +5873,15 @@
     (when pkg
       (do-symbols (sym pkg)
         (when (and (eq (symbol-package sym) pkg)
-                   (fboundp sym))
+                   (fboundp sym)
+                   ;; Skip forward-declaration STUBS (p-declare-sub).  A stub is
+                   ;; fboundp but not a real definition; Perl would not have it in
+                   ;; the symbol table yet.  Including it makes use-time package
+                   ;; introspection (Moo::Role's make_role via _all_subs) see subs
+                   ;; that are only *declared*, not yet defined — exactly the bug
+                   ;; in docs/declaration-ordering-fix-plan.md.  A real definition
+                   ;; flips the entry to :defined, so this only hides pure stubs.
+                   (not (eq (gethash sym *p-declared-subs*) :stub)))
           (let* ((name (symbol-name sym))
                  (n (length name)))
             ;; PL-xxx → Perl sub "xxx"
@@ -6075,8 +6120,32 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
 (defmacro p-goto-sub (fn)
   "Perl goto &func — tail-call the target function with the current @_.
    Replaces the current frame by throwing :p-return with the result.
-   @_ must be the CL variable bound by the enclosing p-sub."
-  `(throw :p-return (apply ,fn (coerce @_ 'list))))
+   @_ must be the CL variable bound by the enclosing p-sub.
+
+   goto &sub REPLACES the current call frame: the target must see the *caller*
+   of the goto-ing sub, not the goto-ing sub itself (Perl semantics — e.g.
+   Moo::Role::import does `goto &Role::Tiny::import` and Role::Tiny relies on
+   `caller` reporting the original `use`r's package).  So pop the goto-ing sub's
+   frame and restore *pcl-current-package* to its caller before applying FN;
+   FN's own p-sub prologue then pushes that caller as FN's calling frame.
+
+   The TARGET expression is evaluated FIRST, in the CURRENT (un-popped) frame:
+   `goto &{EXPR}` runs EXPR before the frame is replaced, so Exporter's
+   `goto &{as_heavy()}` lets as_heavy read (caller(1))[3] off the real stack to
+   choose heavy_import vs heavy_export.  Only then pop and apply."
+  (let ((target (gensym "GOTO-TARGET")))
+    `(let ((,target ,fn))
+       (throw :p-return
+         (let ((*pcl-current-package*
+                (if *pcl-caller-pkg-stack*
+                    (car *pcl-caller-pkg-stack*) *pcl-current-package*))
+               (*pcl-caller-pkg-stack*
+                (if *pcl-caller-pkg-stack*
+                    (cdr *pcl-caller-pkg-stack*) *pcl-caller-pkg-stack*))
+               (*pcl-caller-subname-stack*
+                (if *pcl-caller-subname-stack*
+                    (cdr *pcl-caller-subname-stack*) *pcl-caller-subname-stack*)))
+           (apply ,target (coerce @_ 'list)))))))
 
 (defmacro p-return (&rest values)
   "Perl return - returns single value or list depending on args.
@@ -6414,15 +6483,31 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                  (setf (gethash cache-key
                                                 *p-eval-string-cache*) r)
                                  r)))
-                 ;; READ with *package* bound: symbol interning (e.g. $x)
-                 ;; uses the eval package, matching the caller's symbol space.
-                 (cl-form  (let ((*package* *package*))
-                             (read-from-string
-                              (concatenate 'string "(progn " cl-text ")"))))
-                 ;; EVAL with *package* bound: any (in-package ...) in the
-                 ;; eval'd code does not escape into the caller's dynamic scope.
-                 (result   (let ((*package* *package*))
-                             (eval cl-form))))
+                 ;; READ+EVAL form-by-form (like `load`), NOT one big (progn ...).
+                 ;; read-from-string would intern EVERY symbol under the initial
+                 ;; *package* before any (in-package ...) form in the text runs —
+                 ;; so a `package Foo;` inside the eval string would be silently
+                 ;; defeated and a named `sub` would land in the caller's package.
+                 ;; Reading one form, evaluating it, then reading the next lets an
+                 ;; (in-package ...) take effect before subsequent forms are read,
+                 ;; so `eval "package Foo; sub f {...}"` installs Foo::f.
+                 ;; *package* is rebound so the (in-package ...) does not leak into
+                 ;; the caller's dynamic scope (restored on exit).
+                 ;; See docs/method-modifiers-plan.md.
+                 ;; A `return` inside the eval'd string returns from the EVAL
+                 ;; (giving the eval that value), not from the enclosing Perl sub
+                 ;; — so catch :p-return here.  Without this, `_sub_attrs`'s
+                 ;; `(eval 'return 1; ...') ? ':lvalue' : ''` let the `return 1`
+                 ;; unwind the whole sub, which returned 1 instead of the ternary.
+                 (result   (catch :p-return
+                             (let ((*package* *package*)
+                                   (eof '#:eof))
+                               (with-input-from-string (in cl-text)
+                                 (loop with r = nil
+                                       for form = (read in nil eof)
+                                       until (eq form eof)
+                                       do (setf r (eval form))
+                                       finally (return r)))))))
             (box-set $@ "")
             result)
         (p-exception (e)
@@ -7835,8 +7920,20 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Max cache age in seconds (default: 1 week)")
 (defparameter *pcl-skip-cache* nil
   "When true, bypass cache (set by --no-cache or PCL_NO_CACHE)")
-(defparameter *pcl-cache-fasl* t
-  "When true, cache compiled FASL; when nil, cache .lisp for debugging")
+(defparameter *pcl-cache-fasl* nil
+  "When true, cache compiled FASL; when nil, cache .lisp and load as SOURCE.
+
+   NOTE (session 251): defaults to NIL as a correctness workaround for the
+   module compile-file+load DOUBLE-EXECUTION bug.  With FASL caching on,
+   compile-file executes the module body once (running BEGIN-time, guarded
+   sub redefinitions such as Sub::Defer's deferred ctors), then `load` re-runs
+   the plain `sub NAME` installs at load time and CLOBBERS those redefinitions
+   (the guard makes the redefine skip on the load pass).  This breaks Moo
+   subclasses (empty attrs) and any module using the define-then-guarded-
+   BEGIN-redefine pattern (Moose/Sub::Quote/Type::Tiny/...).  Loading as
+   source is single-pass and correct, at the cost of slower module loads.
+   The proper fix (keep FASL, eliminate double-exec) is option C/D in
+   docs/module-double-exec-bug.md — DO NEXT SESSION.")
 (defparameter *pcl-pl2cl-path* nil
   "Path to pl2cl script (set at load time)")
 
@@ -8207,11 +8304,13 @@ buffer's fill-pointer; everything else falls back to file-length."
         (load path))))
   (setf *pcl-test-lib-loaded* t))
 
-(defun p-use (module-name &key (import-args :default))
+(defun p-use (module-name &key (import-args :default) (do-import t))
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
    IMPORT-ARGS: the evaluated import list (a vector) — `use Foo X` makes X a Perl
-   list — or :default for a bare `use Foo;` (import with no args)."
+   list — or :default for a bare `use Foo;` (import with no args).
+   DO-IMPORT: when NIL, load the module but do NOT call its ->import (this is the
+   `require Foo` semantics — load only, no symbol import)."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
     (return-from p-use t))
@@ -8224,8 +8323,9 @@ buffer's fill-pointer; everything else falls back to file-length."
         (caller-pkg *package*))
     ;; Already loaded?
     (when (gethash rel-path *p-inc-table*)
-      ;; Still import for repeated use statements
-      (%p-do-import module-name caller-pkg import-args)
+      ;; Still import for repeated use statements (but not for bare require)
+      (when do-import
+        (%p-do-import module-name caller-pkg import-args))
       (return-from p-use t))
     ;; Circular dependency?
     (when (member rel-path *p-loading-modules* :test #'string=)
@@ -8241,13 +8341,17 @@ buffer's fill-pointer; everything else falls back to file-length."
         (p-load-module-cached abs-path))
       ;; Update %INC
       (setf (gethash rel-path *p-inc-table*) abs-path)
-      ;; Import symbols from module
-      (%p-do-import module-name caller-pkg import-args)
+      ;; Import symbols from module (skipped for bare require)
+      (when do-import
+        (%p-do-import module-name caller-pkg import-args))
       t)))
 
 (defun p-require (module-name)
-  "Perl require - load module at runtime (no imports)."
-  (p-use module-name))
+  "Perl require - load module at runtime WITHOUT calling its ->import.
+   `require Foo` only loads; `use Foo` = require + import.  Calling import here
+   would re-run the module's import into the current package, which (for modules
+   like Moo::Role whose import has a guard) is both wrong and can be fatal."
+  (p-use module-name :do-import nil))
 
 (defun p-require-parent (module-name)
   "Implicit require performed by `use parent`/`use base` (Perl does
@@ -8801,16 +8905,27 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-backslash-sub (sym)
   "Perl \\&funcname — return a code ref, dispatching to AUTOLOAD if not defined."
-  (if (fboundp sym)
-      (symbol-function sym)
-      ;; Function not yet defined: return a lambda that tries AUTOLOAD when called.
-      (let ((pkg *package*))
-        (lambda (&rest args)
-          (declare (ignore args))
-          (let ((al (intern "PL-AUTOLOAD" pkg)))
-            (if (fboundp al)
-                (funcall (symbol-function al))
-                (error 'undefined-function :name sym)))))))
+  (cond
+    ;; Real definition exists: return it directly (stable coderef identity).
+    ((and (fboundp sym) (not (eq (gethash sym *p-declared-subs*) :stub)))
+     (symbol-function sym))
+    ;; Only a forward-declaration STUB exists (p-declare-sub).  Perl's \\&foo is
+    ;; late-bound to the glob slot, so taking it before `sub foo {...}` and then
+    ;; calling it after must reach the real body.  A stub returns nil and would
+    ;; be captured by value, so return a trampoline that re-reads symbol-function
+    ;; at CALL time.  (Needed now that sub bodies stay in source order relative
+    ;; to use/BEGIN — see docs/declaration-ordering-fix-plan.md.)
+    ((fboundp sym)
+     (lambda (&rest args) (apply (symbol-function sym) args)))
+    ;; Not declared at all: return a lambda that tries AUTOLOAD when called.
+    (t
+     (let ((pkg *package*))
+       (lambda (&rest args)
+         (declare (ignore args))
+         (let ((al (intern "PL-AUTOLOAD" pkg)))
+           (if (fboundp al)
+               (funcall (symbol-function al))
+               (error 'undefined-function :name sym))))))))
 
 (defun p-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
@@ -9186,7 +9301,8 @@ buffer's fill-pointer; everything else falls back to file-length."
              ;; ref-to-ref: the referent is still a SCALAR (it happens to hold a ref)
              ((string= r "REF")    "SCALAR")
              ((string= r "GLOB")   "GLOB")
-             ((string= r "") "")
+             ;; Non-ref: Perl's reftype returns undef (NOT ""; ref() returns "").
+             ((string= r "") *p-undef*)
              ;; Blessed object — look at the inner type
              (t (cond
                   ((hash-table-p inner) "HASH")
@@ -10357,23 +10473,27 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 ;;; Package name conversion utilities for inheritance
 (defun perl-pkg-to-clos-class (name)
-  "Convert Perl package name to CLOS class name: Foo::Bar -> foo-bar"
-  (string-downcase (substitute #\- #\: name)))
+  "Convert Perl package name to CLOS class name: Foo::Bar -> plc-foo-bar.
+   The plc- prefix guarantees the upcased class symbol never lands on a locked
+   COMMON-LISP/SBCL symbol (e.g. `package If` -> CL:IF would die in defclass).
+   MUST stay in lock-step with _pkg_to_clos_class in Pl/Parser.pm."
+  (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
 
 (defun clos-class-to-pkg (cls-name)
   "Convert CLOS class name back to CL package name for lookup.
-   foo-bar -> FOO-BAR (works because we use pipe-quoted or simple package names)"
-  ;; For now, just upcase - the CL package name matches the Perl name
-  ;; If Perl package is Foo::Bar, CL package is |Foo::Bar| or Foo-Bar
-  ;; We try both strategies
-  (let* ((upcase-name (string-upcase cls-name))
+   plc-foo-bar -> FOO-BAR.  Strips the plc- class prefix first (see
+   perl-pkg-to-clos-class), then maps - to the package name."
+  (let* ((stripped (if (and (>= (length cls-name) 4)
+                            (string-equal (subseq cls-name 0 4) "plc-"))
+                       (subseq cls-name 4)
+                       cls-name))
+         (upcase-name (string-upcase stripped))
          ;; Try direct mapping first (for simple package names)
          (pkg (find-package upcase-name)))
     (if pkg
         upcase-name
         ;; Try converting - to :: for nested packages
-        (let ((perl-style (substitute #\: #\- upcase-name)))
-          perl-style))))
+        (substitute #\: #\- upcase-name))))
 
 ;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
 (defun %pcl-super-indirect (method cur-pkg inv-args-vec)
@@ -10496,7 +10616,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     (dolist (cls (%pcl-isa-ancestry class-name) nil)
       (let* ((pkg (%pcl-find-package cls))
              (fn  (when pkg (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg))))
-        (when (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+        (when (and fn (eq (symbol-package fn) pkg) (fboundp fn)
+                   ;; A forward-declaration STUB is fboundp but not a real method
+                   ;; (Perl wouldn't have compiled it yet) — ignore it, matching
+                   ;; p-stash.  See docs/declaration-ordering-fix-plan.md.
+                   (not (eq (gethash fn *p-declared-subs*) :stub)))
           (return-from p-can (symbol-function fn)))))))
 
 (defun p-isa (invocant class-name)
@@ -11285,11 +11409,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; Perl's UNIVERSAL::isa(REF, TYPE) carries interpreter-baked behaviour beyond
   ;; @ISA: when TYPE names a builtin reference type (ARRAY/HASH/SCALAR/CODE/GLOB/
   ;; LVALUE/…) it is true iff reftype(REF) eq TYPE — regardless of blessing.
-  ;; p-reftype is "" for a non-ref, so ordinary strings/numbers fall through to
-  ;; the normal @ISA inheritance check.  (A blessed hashref isa "HASH" AND isa
-  ;; its class; both work — reftype path then @ISA path.)
+  ;; p-reftype is undef (NOT "") for a non-ref, so ordinary strings/numbers fall
+  ;; through to the normal @ISA inheritance check.  (A blessed hashref isa "HASH"
+  ;; AND isa its class; both work — reftype path then @ISA path.)
   (let ((rt (p-reftype obj)))
-    (if (and (plusp (length rt)) (string= rt (to-string class)))
+    (if (and (stringp rt) (plusp (length rt)) (string= rt (to-string class)))
         (make-p-box 1)
         (p-isa obj class))))
 (defun pl-DOES (obj class  &rest args) (declare (ignore args)) (pl-isa obj class))

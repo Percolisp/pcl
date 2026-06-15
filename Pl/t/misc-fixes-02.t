@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 34;
+plan tests => 51;
 
 sub run_cl {
     my ($code) = @_;
@@ -454,3 +454,125 @@ test_cl('refaddr returns undef for non-ref scalars (strings included)',
     . ' print((map { defined refaddr($_) ? "x" : "u" }'
     . '            ("hello", "42", "0xff", 7, undef)), "\n");',
     "uuuuu\n");
+
+# ── Case-sensitive identifiers must not collide on the case-folding CL reader ──
+# Perl is case-sensitive; PCL emits bare CL symbols which the reader upcases, so
+# $base_len and $BASE_LEN would otherwise map to one symbol (the lexical shadows
+# the file-`my`, which is exactly what broke Math::BigInt::Calc). Targeted
+# collision-only rename keeps the two distinct. See Parser::_compute_and_apply_
+# case_renames + ExprToCL::_case_renamed.
+test_cl('case-colliding scalars stay distinct (plain refs)',
+    'my $base_len = 1; my $BASE_LEN = 2;'
+    . ' print "$base_len $BASE_LEN\n";',
+    "1 2\n");
+
+# The collision also has to survive string interpolation (interpolation builds
+# fresh Symbol nodes from raw text, a separate code path from the PPI mutation).
+test_cl('case-colliding scalars stay distinct (interpolation + reassign)',
+    'my $val = 10; my $VAL = 20;'
+    . ' $val += 5; $VAL += 5;'
+    . ' print "$val/$VAL\n";',
+    "15/25\n");
+
+# The Math::BigInt::Calc shape: a file-scoped `my` written from inside a sub
+# whose lexical param differs only in case. The file-`my` must keep the value
+# after the sub returns.
+test_cl('file-my written via same-case-collision lexical param persists',
+    'my $WIDTH;'
+    . ' sub setw { my ($width) = @_; $WIDTH = $width; }'
+    . ' setw(9);'
+    . ' print "WIDTH=$WIDTH\n";',
+    "WIDTH=9\n");
+
+# Non-colliding code is left completely untouched (common path unchanged).
+test_cl('no rename when there is no case collision',
+    'my $count = 3; my $total = $count * 2;'
+    . ' print "$count $total\n";',
+    "3 6\n");
+
+# ── &NAME(...) calls the USER sub, even over a builtin (Perl's & sigil) ──
+# A user `sub length` is reachable only via &length(...); the bareword still
+# calls the builtin. (The real-world case: `sub connect` imported into main::
+# called as `&connect()`.)
+test_cl('&NAME(args) calls user sub overriding a builtin',
+    'sub length { return "U:@_" }'
+    . ' print &length("ab"), "|", length("ab"), "\n";',
+    "U:ab|2\n");
+
+# Empty parens: &NAME() passes an empty list (not the caller @_).
+test_cl('&NAME() empty parens calls user sub with no args',
+    'sub connect { return "C:@_" } print &connect(), "\n";',
+    "C:\n");
+
+# &NAME(args) followed by more of the expression must keep those elements
+# (regression guard for the funcall splice).
+test_cl('&NAME(args) in a larger expression keeps trailing tokens',
+    'sub ucfirst { return "U:@_" } print &ucfirst("a") . "Z", "\n";',
+    "U:aZ\n");
+
+# Package-qualified &Pkg::sub(args).
+test_cl('&Pkg::sub(args) calls the qualified user sub',
+    'package Foo; sub bar { return "B:@_" } package main;'
+    . ' print &Foo::bar("x"), "\n";',
+    "B:x\n");
+
+# The ref-taking form \&foo stays a code ref (NOT a call) — gated on no list.
+test_cl('\\&foo remains a code ref, not a call',
+    'sub foo { return "F:@_" } my $r = \&foo;'
+    . ' print ref($r), ":", $r->("a","b"), "\n";',
+    "CODE:F:a b\n");
+
+# \&NAME references the sub slot, never the builtin — even when NAME is a
+# builtin name. With a user `sub length`, \&length calls the user sub.
+test_cl('\\&NAME refs the user sub slot, not the builtin operator',
+    'sub length { return "UL:@_" } my $r = \&length;'
+    . ' print $r->("zz"), "\n";',
+    "UL:zz\n");
+
+# ── Compound assignment must write back through array/hash element places ──
+# `$a[i] OP= v` / `$h{k} OP= v` previously used box-set on the value (a no-op on
+# a non-box deref), so the store was lost. (Surfaced by Math::BigInt::Calc's
+# `$xv->[0] *= $yv->[0]`.) Mirrors what += already did.
+test_cl('compound assign on array/hashref elements writes back',
+    'my $xv=[100]; my $yv=[3]; $xv->[0] *= $yv->[0];'
+    . ' my $h={a=>"x"}; $h->{a} .= "Y";'
+    . ' my @a=(20,30); $a[1] /= 3;'
+    . ' print "$xv->[0] $h->{a} $a[1]\n";',
+    "300 xY 10\n");
+
+# Plain boxed scalar compound assign is unchanged.
+test_cl('compound assign on a plain scalar still works',
+    'my $x = 100; $x *= 3; $x -= 50; print "$x\n";',
+    "250\n");
+
+# Empty array flattens to nothing (baseline list-flatten sanity).
+test_cl('empty array flattens to nothing (not a spurious undef)',
+    'my @a; my @b = (@a, 1); print scalar(@b), ":@b\n";',
+    "1:1\n");
+
+# A `X < Y > Z` comparison chain must parse as operators, not a <...> readline/glob.
+# This used to PARSE-ERROR — PPI misread `< … >` as a glob and dropped the
+# statement (docs/ppi-glob-disambiguation.md).  PPI 1.291 tokenizes it correctly
+# and PCL handles it; this guards against either side regressing.  (Fixed
+# upstream, so docs/ppi-bug-report.t no longer carries it.)
+test_cl('chained < > comparison is not misparsed as a glob/readline',
+    'my $x=[1,5,3]; print join(",", "a", ($x->[0] < $x->[1] > $x->[2]), "b"), "\n";',
+    "a,1,b\n");
+
+# $$ref->() must parse as (${$ref})->() — deref the scalar-ref-to-coderef, THEN
+# call — not ${ $ref->() }.  Was mis-associated in PExpr (the leading scalar Cast
+# swallowed the postfix call).  Class::Method::Modifiers' $$wrapped->(@_) needs it.
+test_cl('$$ref->() derefs then calls (scalar-ref-to-coderef)',
+    'my $cv = sub { return "OK" }; my $r = \$cv; print $$r->(), "\n";',
+    "OK\n");
+
+# \$ref->{k} / \$ref->[i] must be a LIVE reference to the slot, so a later write
+# to that element is visible through the ref (stacked Moo `around` relies on
+# \$cache->{wrapped} seeing reassignment).  Direct \$h{k} was already live; the
+# arrow-deref form used to snapshot.
+test_cl('\\$href->{k} is a live ref (tracks later writes)',
+    'my $c = { k => "A" }; my $r = \$c->{k}; $c->{k} = "B"; print "$$r\n";',
+    "B\n");
+test_cl('\\$aref->[i] is a live ref (tracks later writes)',
+    'my $a = [10, 20]; my $r = \$a->[1]; $a->[1] = 99; print "$$r\n";',
+    "99\n");

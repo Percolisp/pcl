@@ -17,11 +17,12 @@ Two reasons:
 
 #### The hard part — Perl's runtime *magic*
 
-Perl is hard to parse. It has tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and hence resists any purely static translation. PCL avoids the problem by reproducing the same magic in the Common Lisp runtime. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard because they must execute, will simply execute on the CL side with the same semantics.
+Perl is "hard" to parse. It has tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and hence resists any purely static translation. PCL avoids the problem by reproducing the same magic in the Common Lisp runtime. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard because they must execute, will simply execute on the CL side with the same semantics.
 
 ### There is no bytecode engine
 
 This is a genuinely new implementation. PCL does **not** embed, link, or reimplement Perl's runtime or opcode interpreter. It is a from-scratch source-to-source compiler: Perl code in, Common Lisp code out.
+
 
 ## Quick Start
 
@@ -131,6 +132,7 @@ My own Common Lisp experience is from long ago; that side of the work is essenti
 
 *(It'll go on CPAN later, once it's closer to ready.)*
 
+
 ## Roadmap — after it works reliably
 
 These come *after* compatibility is solid:
@@ -157,6 +159,7 @@ interpreter-internals items they are a matter of *when*, not *whether*:
 - **Richer `caller()`.** Package and sub-name depth for `caller(N)` are
   reachable via SBCL frame walking (behind a debug flag). Accurate file/line
   still waits on the source-map work that the smarter code generator brings.
+
 
 ## License
 

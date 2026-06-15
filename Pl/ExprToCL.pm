@@ -219,17 +219,28 @@ my %SPECIAL_VARS = (
 # - Operator exceptions → from %OP_EXCEPTIONS (all runtime → p-)
 # - Runtime built-in functions → p-<name>  (from %RUNTIME_NAMES)
 # - User-defined functions → p-<name>
+# Map a bare identifier through the file-global case-disambiguation table (see
+# Pl::Parser::_compute_and_apply_case_renames). Returns the name unchanged when
+# there is no collision rename for it.
+sub _case_renamed {
+  my ($self, $name) = @_;
+  return $name unless $self->environment;
+  my $cr = $self->environment->case_renames;
+  return ($cr && exists $cr->{$name}) ? $cr->{$name} : $name;
+}
+
 sub cl_name {
   my $self       = shift;
   my $perl_name  = shift;
   my $for_funcall = shift // 0;  # 1 = being used as a function call, not an operator
+  my $force_user  = shift // 0;  # 1 = &NAME(...) form: call the user sub, never a builtin
 
   # Guard against undefined input
   return 'p-UNDEFINED' unless defined $perl_name && length($perl_name);
 
   # Check for operator exceptions — but NOT when generating a function call name.
   # e.g. `x()` calls user sub x, not the string-repetition operator p-str-x.
-  return $OP_EXCEPTIONS{$perl_name} if !$for_funcall && exists $OP_EXCEPTIONS{$perl_name};
+  return $OP_EXCEPTIONS{$perl_name} if !$for_funcall && !$force_user && exists $OP_EXCEPTIONS{$perl_name};
 
   # Leading :: means main:: (e.g. ::is → main::is)
   $perl_name =~ s/^::/main::/;
@@ -253,8 +264,11 @@ sub cl_name {
     return "${cl_pkg}::pl-${func}";
   }
 
-  # Runtime built-in → p-prefix; user-defined sub → pl-prefix
-  if (exists $RUNTIME_NAMES{$perl_name}) {
+  # Runtime built-in → p-prefix; user-defined sub → pl-prefix.
+  # The `&NAME(...)` call form forces the user sub even when NAME is a builtin
+  # (Perl's `&` sigil bypasses builtins/prototypes — e.g. a user `sub connect`
+  # imported into main:: called as `&connect()`).
+  if (!$force_user && exists $RUNTIME_NAMES{$perl_name}) {
     return "p-$perl_name";
   }
   # Inside a non-main package, qualify user-defined sub calls so SBCL's reader
@@ -478,6 +492,9 @@ sub gen_leaf {
       my ($sigil, $pkg, $name) = ($1, $2, $3);
       # Empty package means main (e.g., $::foo = $main::foo)
       $pkg = 'main' if $pkg eq '';
+      # Case-disambiguation rename (interpolation-origin nodes only; code-origin
+      # tokens were already rewritten in the PPI doc).
+      $name = $self->_case_renamed($name);
       # Track referenced package
       $self->environment->add_referenced_package($pkg) if $self->environment;
       # Use pipe quoting for nested packages
@@ -525,7 +542,8 @@ sub gen_leaf {
     # Note: &foo(@args) is handled as a funcall, not here; \&foo is a refgen.
     if ($content =~ /^&(.+)$/) {
       my $func_name = $1;
-      my $cl_func = $self->cl_name($func_name, 1);
+      # &NAME (no parens) calls the user sub even when NAME is a builtin.
+      my $cl_func = $self->cl_name($func_name, 1, 1);
       return "($cl_func \@_)";
     }
     # Check if this var is a state variable that was renamed
@@ -557,6 +575,13 @@ sub gen_leaf {
       my $sym = "|$content|";
       $self->environment->add_caret_global($sym) if $self->environment;
       return $sym;
+    }
+    # Case-disambiguation rename for simple vars (interpolation-origin nodes;
+    # code-origin tokens were already rewritten in the PPI doc, so their renamed
+    # names are not in the map and this is a no-op for them).
+    if ($content =~ /^([\$\@\%\&\*])([A-Za-z_]\w*)\z/) {
+      my $renamed = $self->_case_renamed($2);
+      return "$1$renamed" if $renamed ne $2;
     }
     return $content;
   }
@@ -920,6 +945,43 @@ sub gen_binary_op {
   # For assignment, dispatch to type-specific forms based on LHS sigil.
   # Handles both local vars (@a, %h, $x) and qualified vars (Pkg::@a, Pkg::%h, Pkg::$x).
   if ($op eq '=') {
+    # Assigning to a subroutine/code-ref CALL (`&sub = x`, `foo() = x`,
+    # `$cref->() = x`) is only valid for an lvalue sub — which PCL does not
+    # support — so it is a compile error, exactly as in Perl.  Raising it here
+    # (a transpile-time die) is what makes feature-detection probes that rely on
+    # the compile error work: Class::Method::Modifiers' _sub_attrs does
+    # `eval 'return 1; &_sub = 1'` and treats failure as "not an lvalue sub".
+    # In eval-string mode the die surfaces via the pl2cl server's error status,
+    # so the eval returns undef and the probe correctly reports ''.  The
+    # built-in magic lvalues substr/pos/vec ARE supported, so allow those.
+    if (defined $node_id) {
+      my $lnode = $self->expr_o->get_a_node($kids->[0]);
+      my $bad_lvalue = 0;
+      if ($self->expr_o->is_internal_node_type($lnode)
+          && ($lnode->{type} eq 'funcall' || $lnode->{type} eq 'ref_funcall')) {
+        # foo() = x  /  $cref->() = x
+        $bad_lvalue = 1;
+        if ($lnode->{type} eq 'funcall') {
+          my $fkids = $self->expr_o->get_node_children($kids->[0]);
+          if ($fkids && @$fkids) {
+            my $fn = $self->expr_o->get_a_node($fkids->[0]);
+            my $nm = (ref($fn) && $fn->can('content')) ? $fn->content : '';
+            $bad_lvalue = 0 if $nm =~ /^(?:CORE::)?(?:substr|pos|vec)$/;
+          }
+        }
+      } elsif (ref($lnode) && $lnode->can('content')
+               && $lnode->content =~ /^&/) {
+        # &sub = x  (ampersand call as an lvalue; a leaf Symbol token, not a
+        # funcall node — see _emit_token's &NAME branch).
+        $bad_lvalue = 1;
+      }
+      # PCL: prefix makes the parser propagate this as a hard error (Parser.pm
+      # ~6722) instead of swallowing it into a ;; PARSE ERROR comment — so in
+      # eval-string mode the transpile FAILS and the eval returns undef, exactly
+      # like Perl's compile error for assignment to a non-lvalue sub.
+      die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
+        if $bad_lvalue;
+    }
     if ($left =~ /^\(vector /) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = "(p-list-= $left $right)";
@@ -1108,7 +1170,7 @@ sub gen_funcall {
     }
   }
 
-  my $cl_func   = $self->cl_name($func_name, 1);
+  my $cl_func   = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
 
   # Special handling: SUPER::method(args) as indirect-object call
   # SUPER::m{@a} is indirect-object syntax: first arg is the invocant (from block)
@@ -1271,10 +1333,21 @@ sub gen_funcall {
         my $func_ref = $self->gen_node($kids->[1]);
         return $wrap->("(p-eval-block (funcall $func_ref))");
       }
+      else {
+        # An internal node that is NOT a block form = an interpolated/computed
+        # STRING, e.g. eval "package $into; sub greet { ... }" (a concatenation).
+        # This is still eval STRING and must carry the lexical-capture alist —
+        # without this it fell through to the generic funcall path with no alist,
+        # so the modifier idiom never captured its lexicals.  See
+        # docs/eval-free-vars-plan.md / docs/eval-lexical-capture.md.
+        my $arg_cl = $self->gen_node($kids->[1]);
+        my $alist  = $self->_eval_lexical_alist;
+        return $alist ? "(p-eval $arg_cl $alist)" : "(p-eval $arg_cl)";
+      }
     }
     else {
-      # eval STRING (string form): pass the caller's in-scope lexicals as an
-      # alist so the eval body can capture them (the transpiler wraps the body
+      # eval STRING (plain string literal): pass the caller's in-scope lexicals as
+      # an alist so the eval body can capture them (the transpiler wraps the body
       # in a lambda whose params are those vars).  See docs/eval-lexical-capture.md.
       my $arg_cl = $self->gen_node($kids->[1]);
       my $alist  = $self->_eval_lexical_alist;
@@ -1884,7 +1957,15 @@ sub gen_methodcall {
       my $class_node = $self->expr_o->get_a_node($obj_kids->[0]);
       if (ref($class_node) eq 'PPI::Token::Word') {
         my $name = $class_node->content();
-        if ($self->environment && $self->environment->is_package($name)) {
+        if ($name eq '__PACKAGE__') {
+          # Compile-time token: __PACKAGE__->method resolves the invocant to the
+          # current package name (same as bareword __PACKAGE__ elsewhere), NOT a
+          # class literally named "__PACKAGE__".  Common idiom in module BEGIN
+          # blocks, e.g. Math::BigInt::Calc's __PACKAGE__->_base_len(...).
+          my $pkg = ($self->environment && $self->environment->current_package)
+                      ? $self->environment->current_package : 'main';
+          $obj = '"' . $pkg . '"';
+        } elsif ($self->environment && $self->environment->is_package($name)) {
           # Known package → class name string
           $obj = '"' . $name . '"';
         } elsif ($self->environment && $self->environment->has_prototype($name)) {
@@ -2014,7 +2095,10 @@ sub gen_prefix_op {
     if (ref($operand_node) eq 'PPI::Token::Symbol' &&
         $operand_node->content() =~ /^&(.+)$/) {
       my $func_name = $1;
-      my $cl_func = $self->cl_name($func_name, 1);
+      # \&NAME references the sub slot (the user sub), never a builtin — even
+      # when NAME happens to be a builtin name (Perl: `\&length` refers to
+      # `&main::length`, not the `length` operator). Force the user sub.
+      my $cl_func = $self->cl_name($func_name, 1, 1);
       return "(p-backslash-sub '$cl_func)";
     }
     # \(LIST) — distribute \\ over each element. PExpr marks the operand node
@@ -2358,7 +2442,11 @@ sub gen_array_ref_access {
   my $ref = $self->gen_node($kids->[0]);
   my $idx = $self->gen_node($kids->[1]);
 
-  return "(p-aref-deref $ref $idx)";
+  # In l-value context (e.g. \$ref->[i], or a modifying op) return the LIVE box
+  # at the slot so a reference tracks later writes (stacked Moo `around` relies on
+  # \$cache->{wrapped} seeing reassignment).  Plain reads stay snapshot-valued.
+  my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
+  return "($func $ref $idx)";
 }
 
 
@@ -2387,7 +2475,10 @@ sub gen_hash_ref_access {
     $key = $self->gen_node($kids->[1]);
   }
 
-  return "(p-gethash-deref $ref $key)";
+  # L-value context (\$ref->{k}, modifying ops): return the LIVE box at the slot
+  # so a reference tracks later writes (see gen_array_ref_access).
+  my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
+  return "($func $ref $key)";
 }
 
 

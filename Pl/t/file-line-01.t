@@ -222,6 +222,18 @@ diag '-------- __PACKAGE__ Token:';
     like($output, qr/p-bless.*"MyClass"/, '__PACKAGE__ works in bless');
 }
 
+# Test 21b: __PACKAGE__ as a method invocant resolves to the current package
+# (regression: previously emitted (p-resolve-invocant "__PACKAGE__"), which made
+#  the runtime dispatch a method on a class literally named "__PACKAGE__").
+{
+    my $parser = Pl::Parser->new(code => 'package Foo; sub run { __PACKAGE__->greet }');
+    my $output = get_generated_code($parser);
+    like($output, qr/p-method-call\s+"Foo"\s+"greet"/,
+         '__PACKAGE__->method resolves invocant to current package');
+    unlike($output, qr/p-resolve-invocant "__PACKAGE__"/,
+         '__PACKAGE__->method does not emit a literal "__PACKAGE__" invocant');
+}
+
 # Test 22: __PACKAGE__ in arithmetic (concatenation)
 {
     my $parser = Pl::Parser->new(code => 'package Foo; my $s = __PACKAGE__ . "::method";');

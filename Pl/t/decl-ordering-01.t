@@ -180,54 +180,56 @@ note "-------- Phase 2: compile-time before runtime";
     # All four compile-time forms before runtime
     is(relative_order($cl, qr/\(push \(lambda/, qr/\(p-print "runtime"/), -1,
        'END blocks before runtime');
-    # Subs are in declarations bucket; END blocks are in definitions bucket.
-    # declarations assembles before definitions, so all subs come before all END blocks.
+    # Subs and END blocks share the compile-time stream (definitions bucket) in
+    # SOURCE ORDER: sub a, END1, sub b, END2.  This matches Perl — a compile-time
+    # form sees only what came before it.  (Old policy hoisted all subs before all
+    # END blocks; see docs/declaration-ordering-fix-plan.md.)
     is(relative_order($cl, qr/\(p-sub pl-a/, qr/;; END.*end1/), -1,
        'source order: sub a before END1');
-    is(relative_order($cl, qr/\(p-sub pl-b/, qr/;; END.*end1/), -1,
-       'sub b (declarations) comes before END1 (definitions)');
+    is(relative_order($cl, qr/;; END.*end1/, qr/\(p-sub pl-b/), -1,
+       'source order: END1 before sub b (compile-time stream preserves source order)');
 }
 
 
 note "-------- Phase 1: defvar hoisting";
 
-# Test: defvar (from 'our') appears after sub — sub is in declarations bucket,
-# our $x generates eval-when+defvar in runtime bucket. declarations assembles first.
+# Test: defvar (from 'our') is hoisted to declarations, BEFORE the sub
+# (definitions).  This is required for C2: $x must be proclaimed special before
+# the defun whose `let` binds it dynamically.  (Old policy put subs in
+# declarations too, so the order was reversed; see declaration-ordering-fix-plan.md.)
 {
     my $cl = parse_pl(q{
         sub get_x { return $x; }
         our $x = 10;
     });
-    is(relative_order($cl, qr/\(p-sub pl-get_x/, qr/defvar \$x/), -1,
-       'sub (declarations) before our-defvar (runtime)');
+    is(relative_order($cl, qr/defvar \$x/, qr/\(p-sub pl-get_x/), -1,
+       'our-defvar (declarations) before sub (definitions)');
 }
 
-# Test: multiple defvars (from 'our') appear after sub in declarations.
-# Sub is in declarations bucket; our $x/$y generate eval-when+defvar in runtime.
+# Test: multiple defvars (from 'our') are hoisted before the sub.
 {
     my $cl = parse_pl(q{
         sub compute { local $x = 10; local $y = 20; return $x + $y; }
         our $x = 1;
         our $y = 2;
     });
-    is(relative_order($cl, qr/\(p-sub pl-compute/, qr/defvar \$x/), -1,
-       'sub (declarations) before $x defvar (runtime)');
-    is(relative_order($cl, qr/\(p-sub pl-compute/, qr/defvar \$y/), -1,
-       'sub (declarations) before $y defvar (runtime)');
+    is(relative_order($cl, qr/defvar \$x/, qr/\(p-sub pl-compute/), -1,
+       '$x defvar before sub');
+    is(relative_order($cl, qr/defvar \$y/, qr/\(p-sub pl-compute/), -1,
+       '$y defvar before sub');
 }
 
-# Test: defvar value assignment stays at original runtime position.
-# Sub is in declarations; our $x generates eval-when+defvar in runtime bucket.
-# So sub comes before defvar, and defvar comes before setf.
+# Test: defvar declaration before the sub, and the value assignment (setf) stays
+# at its original runtime position (after the sub).
 {
     my $cl = parse_pl(q{
         sub foo { return $x; }
         our $x = 42;
         print foo();
     });
-    # sub (declarations) before our-defvar (runtime)
-    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/defvar \$x/), -1,
-       'sub (declarations) before our-defvar (runtime)');
+    # our-defvar (declarations) before sub (definitions)
+    is(relative_order($cl, qr/defvar \$x/, qr/\(p-sub pl-foo/), -1,
+       'our-defvar (declarations) before sub (definitions)');
     # defvar before setf (value assignment)
     is(relative_order($cl, qr/defvar \$x/, qr/setf.*p-box-value.*\$x.*42/), -1,
        'defvar declaration before runtime value assignment');

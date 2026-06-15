@@ -890,7 +890,21 @@ sub parse {
         #    $q   3
 
         # (This '($q...)->(5)' should work the same.)
-        my $pre_id = $self->parse([$pre]);
+        #
+        # A leading scalar deref binds WITH the ref target: $$r->() means
+        # (${$r})->() — deref $r to the coderef, THEN call.  PPI hands us a flat
+        # Cast('$') + Symbol/Block before the '->', and without consuming the
+        # cast here it would wrap the whole funcall instead — ${ $r->() }.  So
+        # if $e->[$i-2] is a scalar Cast, parse it together with $pre as the ref.
+        my @pre_toks      = ($pre);
+        my $cast_consumed = 0;
+        if ($i >= 2
+            && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+            && $e->[$i-2]->content eq '$') {
+          unshift @pre_toks, $e->[$i-2];
+          $cast_consumed = 1;
+        }
+        my $pre_id = $self->parse(\@pre_toks);
         my $pst_id = $nxt->{id};
         my $kids   = $self->get_node_children($pst_id);
 
@@ -900,9 +914,15 @@ sub parse {
           $self->add_child_to_node($id, $kid_id); # Parameters
         }
 
-        $e->[$i-1] = $node;
-        splice @$e, $i, 2;
-        $i--;
+        if ($cast_consumed) {
+          $e->[$i-2] = $node;
+          splice @$e, $i-1, 3;   # remove the ref term, '->', and the param list
+          $i -= 2;
+        } else {
+          $e->[$i-1] = $node;
+          splice @$e, $i, 2;     # remove '->' and the param list
+          $i--;
+        }
         next;
       } elsif ($self->is_internal_node_type($nxt)
                && $nxt->{type} eq 'funcall') {
@@ -1051,9 +1071,10 @@ sub parse {
         $i--;
         next;
       } else {
-        say "??? Term:", dump($term), "\nNext is:", dump $nxt;
-        say " Next 2:", dump $nxt_2;
-        exit 0;
+        my $fn = eval { $self->parser->filename } // '(unknown)';
+        die "PExpr: unhandled postfix '->' term in $fn: "
+          . "term=" . dump($term) . " next=" . dump($nxt)
+          . " next2=" . dump($nxt_2) . "\n";
       }
     }
 
@@ -2083,20 +2104,24 @@ sub handle_subcalls {
 
     # Handle &funcname( list ) - direct function call with & sigil
     # e.g., &foo(1, 2) -> (pl-foo 1 2), &Pkg::foo(1,2) -> (Pkg::pl-foo 1 2)
+    # The `&` sigil forces the user sub even when the name is a builtin (Perl
+    # semantics: `&connect()` calls a user `sub connect`, not the builtin), via
+    # force_user_sub. Gated on a trailing list, so `\&NAME` (no list) stays a
+    # code-ref refgen and never reaches here.
     if (ref($now) eq 'PPI::Token::Symbol'
         && $now->content() =~ /^&(.+)$/
         && $self->is_list($next)) {
       my $func_name = $1;
       my $word_token = PPI::Token::Word->new($func_name);
       my($top_node, $top_id) = $self->make_node_insert('funcall');
+      $top_node->{force_user_sub} = 1;
       my $c_ids = $self->make_nodes_from_list($next);
       my $node_id = $self->make_node($word_token);
       $self->add_child_to_node($top_id, $node_id);
       for my $c_id (@$c_ids) {
         $self->add_child_to_node($top_id, $c_id);
       }
-      splice @$e, $i, 2;
-      $e->[$i] = $top_node;
+      splice @$e, $i, 2, $top_node;
       next;
     }
 
