@@ -440,6 +440,16 @@ sub parse {
 
     # Handle Block structures (used in braced derefs like ${$ref}, @{$expr})
     if (ref($e1) eq 'PPI::Structure::Block') {
+      # Perl: a LONE bareword in a deref block is autoquoted — ${foo}/@{foo}/
+      # %{foo} mean the symbolic refs ${"foo"}/@{"foo"}/%{"foo"} (the package
+      # variable named foo), NEVER a sub call (you must write {foo()} to call).
+      # PPI would otherwise parse the bareword as a function call (pl-foo), which
+      # is undefined at runtime.  Replace it with a string literal so the cast
+      # (p-cast-@ / p-cast-$ / p-cast-%) does the symbolic deref.
+      if (defined(my $bw = _block_sole_bareword($e1))) {
+        my $str = PPI::Token::Quote::Single->new("'$bw'");
+        return $self->make_node($str);
+      }
       # If the block looks like a hash constructor ({ key => val }), treat as hash_init
       if (_block_is_hash_constructor($e1)) {
         my @list    = $e1->children();
@@ -1911,6 +1921,23 @@ sub _block_is_hash_constructor {
       && ref($ch[0]) eq 'PPI::Token::Word'
       && ref($ch[1]) eq 'PPI::Token::Operator'
       && $ch[1]->content() eq '=>';
+}
+
+# If a deref BLOCK contains exactly one bareword identifier (e.g. the `foo` in
+# ${foo} / @{foo} / %{foo}), return that identifier — Perl autoquotes it into a
+# symbolic ref to the package variable of that name.  Returns undef for anything
+# else (a sub call `foo()` has a trailing List; `$ref`/`[...]`/`\ ...` are not a
+# lone Word; multi-token blocks are expressions), so those keep their normal
+# parse.
+sub _block_sole_bareword {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return undef unless @ch == 1 && ref($ch[0]) eq 'PPI::Token::Word';
+  my $w = $ch[0]->content();
+  return ($w =~ /\A\w+(?:::\w+)*\z/ && $w !~ /\A\d/) ? $w : undef;
 }
 
 

@@ -777,6 +777,29 @@ sub _insert_variable_forward_declarations {
     }
   }
 
+  # Embedded `our $var` declarations (e.g. \our $referent, bless \our $x) — the
+  # package global is referenced only inside a generated body, so the file-scope
+  # scan below misses it. Emit one idempotent defvar each (matching the sigil's
+  # container), skipping any already declared.
+  if ($self->environment) {
+    my $eov = $self->environment->expression_our_vars;
+    my @eov_decls;
+    for my $cl_var (sort keys %$eov) {
+      next if $declared{$cl_var};
+      my $sigil = $eov->{$cl_var};
+      my $init = $sigil eq '@' ? "(make-array 0 :adjustable t :fill-pointer 0)"
+               : $sigil eq '%' ? "(make-hash-table :test 'equal)"
+               :                 "(make-p-box nil)";
+      push @eov_decls, "(defvar $cl_var $init)";
+      $declared{$cl_var} = 1;
+    }
+    if (@eov_decls) {
+      push @$decls, ";; Embedded `our \$var` declarations (\\our \$x, use constant => \\our \$v).";
+      push @$decls, @eov_decls;
+      push @$decls, "";
+    }
+  }
+
   my %forced_sort_var;  # $a/$b force-declared here (vs. user-declared via my)
   unless ($declared{'$a'}) {
     push @$decls, "(defvar \$a (make-p-box nil))";
@@ -6656,7 +6679,23 @@ sub _compile_constant_value {
       environment => $self->environment,
       parser      => $self,
     );
-    my $node_id = $expr_o->parse_expr_to_tree($parts);
+    my ($node_id, $cdecls) = $expr_o->parse_expr_to_tree($parts);
+    # An embedded `our $var` in the constant value (e.g. use constant K => \our
+    # $v) is stripped by extract_declarations and otherwise lost: this value
+    # compiles to a sub body, so the file-scope forward-declaration scan never
+    # sees the reference and the package global is never defvar'd. Register each
+    # `our` here (BEFORE generate, so non-main packages qualify consistently) and
+    # queue a file-level defvar via expression_our_vars.
+    if ($cdecls && $self->environment) {
+      my $pkg = $self->environment->current_package;
+      for my $d (@$cdecls) {
+        next unless ($d->{type} // '') eq 'our';
+        my $var = $d->{var} // '';
+        next unless $var =~ /^([\$\@\%])\w+$/;
+        $self->environment->add_our_variable($pkg, $var);
+        $self->environment->expression_our_vars->{ $self->_our_var_cl_name($pkg, $var) } = $1;
+      }
+    }
     my $gen = Pl::ExprToCL->new(
       expr_o       => $expr_o,
       environment  => $self->environment,

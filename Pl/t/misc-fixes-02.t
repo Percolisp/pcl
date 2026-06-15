@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 51;
+plan tests => 57;
 
 sub run_cl {
     my ($code) = @_;
@@ -576,3 +576,41 @@ test_cl('\\$href->{k} is a live ref (tracks later writes)',
 test_cl('\\$aref->[i] is a live ref (tracks later writes)',
     'my $a = [10, 20]; my $r = \$a->[1]; $a->[1] = 99; print "$$r\n";',
     "99\n");
+
+# ── session 255b: the six sweep-crash fixes (see docs/session-log.md) ──────────
+
+# A lone bareword in a deref block is a symbolic ref to the package variable,
+# NOT a sub call.  @{foo} / "$x->@{foo}" used to emit (pl-foo) → UNDEFINED-FUNCTION
+# (crashed postfixderef.t and magic.t at *@{HASH}).
+test_cl('@{bareword} is the symbolic array @bareword (interpolated)',
+    'our @foo = (7,8,9); $_ = "foo"; print "$_->@{foo}\n";',
+    "foo->7 8 9\n");
+test_cl('@{bareword} is the symbolic array @bareword (non-interpolated)',
+    'our @foo = (7,8,9); print join(",", @{foo}), "\n";',
+    "7,8,9\n");
+
+# $^H (hint bits) and %^H (hints hash) are inert always-bound empties — \%^H,
+# keys %^H, $^H & MASK no longer crash with an unbound variable (eval.t RT 63110).
+test_cl('$^H / %^H are inert, always-bound specials',
+    'print "h=", ($^H & 0x20000), " k=", scalar(keys %^H), " r=", ref(\%^H), "\n";',
+    "h=0 k=0 r=HASH\n");
+
+# An embedded `our $var` in a use-constant value (\our $referent) declares the
+# package global — previously dropped, leaving $referent unbound (index.t).
+test_cl('embedded `our $var` in a use constant value is declared',
+    'use constant riffraff => \our $referent; $referent = 42;'
+  . ' print ref(riffraff), " ", ${riffraff()}, "\n";',
+    "SCALAR 42\n");
+
+# A bareword filehandle argument to select is a filehandle, not a value — was
+# emitted as an unbound bareword symbol (scalar.t `select STDERR`).
+test_cl('select BAREWORD does not evaluate an unbound symbol',
+    'select STDERR; select STDOUT; print "ok\n";',
+    "ok\n");
+
+# A parenthesised scalar arrow-deref base — ($r//0)->[i]... = v — must not be
+# treated as a list (rendered (vector ...)); it autovivified into a bogus
+# 1-element vector → p-autoviv-aref-for-hash TYPE-ERROR (multideref.t).
+test_cl('parenthesised scalar deref base autovivifies through the referent',
+    'my $r = [[0]]; ($r // 0)->[0][0] = 9; print $r->[0][0], "\n";',
+    "9\n");

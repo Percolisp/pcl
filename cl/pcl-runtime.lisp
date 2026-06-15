@@ -136,7 +136,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+|
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
@@ -517,6 +517,13 @@
   #+windows "MSWin32"
   #-(or linux darwin windows) "unknown"
   "Operating system name")
+
+;;; Lexical hints — $^H (hint bits) and %^H (the hints hash). PCL does not model
+;;; compile-time hints; expose them as inert always-bound empties so `$^H & MASK`,
+;;; `\%^H` and `keys %^H` never hit an unbound variable (eval.t RT 63110 / the
+;;; "use feature" hint-transmission tests). Nothing ever writes meaningful data.
+(defvar |$^H| 0 "Perl $^H - lexical hint bits (inert 0 in PCL)")
+(defvar |%^H| (make-hash-table :test 'equal) "Perl %^H - hints hash (inert empty in PCL)")
 
 ;;; Perl version ($^V) - we report as PCL
 (defvar |$^V| "v5.30.0" "Perl version (compatibility)")

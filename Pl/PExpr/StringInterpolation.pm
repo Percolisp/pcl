@@ -543,6 +543,14 @@ sub parse_array_braced_interpolation {
   # Unescape \"-style escapes that were raw in the containing string
   $expr_str = $self->unescape_string($expr_str);
 
+  # @{foo} with a LONE bareword is the array @foo (symbolic ref), NOT a call to
+  # foo(). Autoquote it so the standard path below yields (p-cast-@ "foo") — the
+  # same shape the explicit @{"foo"} produces. (A sub call must be written
+  # @{foo()}, which has parens and so is not a lone bareword.)
+  if ($expr_str =~ /\A[a-zA-Z_]\w*(?:::\w+)*\z/) {
+    $expr_str = "'" . $expr_str . "'";
+  }
+
   my $doc = PPI::Document->new(\$expr_str);
   $self->{_ppi_docs} //= [];
   push @{$self->{_ppi_docs}}, $doc;
