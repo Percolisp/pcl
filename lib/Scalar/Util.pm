@@ -16,18 +16,18 @@ our @EXPORT_OK = qw(
 our $VERSION = '1.63';
 
 sub blessed {
-    my ($ref) = @_;
-    return undef unless defined $ref && ref($ref);
-    return ref($ref);
+    # Must distinguish a *blessed* ref from a plain one: ref() returns the
+    # reftype ("ARRAY"/"HASH"/...) for an UNblessed ref, but blessed() must
+    # return undef there.  That blessed-vs-not distinction lives in the runtime
+    # box flag, exposed via the core builtin (which checks it correctly).
+    return builtin::blessed($_[0]);
 }
 
 sub reftype {
-    my ($ref) = @_;
-    return undef unless ref($ref);
-    return 'HASH'  if UNIVERSAL::isa($ref, 'HASH');
-    return 'ARRAY' if UNIVERSAL::isa($ref, 'ARRAY');
-    return 'CODE'  if UNIVERSAL::isa($ref, 'CODE');
-    return ref($ref);
+    # Underlying reference type regardless of blessing — again a runtime-level
+    # fact (a blessed arrayref is still "ARRAY"), so delegate to the builtin
+    # rather than re-deriving it from ref()/UNIVERSAL::isa (which keys on @ISA).
+    return builtin::reftype($_[0]);
 }
 
 sub weaken { }

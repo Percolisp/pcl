@@ -302,10 +302,12 @@ sub _qualified_sub_to_cl {
   $name =~ s/'/::/g;
   if ($name =~ /^(.+)::([^:]+)$/) {
     my ($pkg, $bare) = ($1, $2);
-    # Pipe-quote if contains :: or conflicts with CL symbols
-    my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
-                  lc($pkg) eq 'method' || lc($pkg) eq 'function')
-                 ? "|$pkg|" : $pkg;
+    # Only MULTI-segment names need pipe-quoting; single-segment names are
+    # upcased by the reader (matching the runtime's perl-pkg-to-cl-pkg-name).
+    # MUST agree with _cl_pkg_designator — single source of truth for the rule.
+    # (The old class/error/method/function special-case is obsolete: CLOS class
+    #  names are plc-prefixed now, so the package name needs no escaping.)
+    (my $cl_pkg = $self->_cl_pkg_designator($pkg)) =~ s/^://;
     # Register package so it gets pre-declared
     $self->environment->add_referenced_package($pkg) if $self->environment;
     return "${cl_pkg}::pl-$bare";
@@ -386,9 +388,7 @@ sub _assemble_output {
   if (%needed_packages) {
     my @predecls;
     for my $pkg (sort keys %needed_packages) {
-      my $cl_pkg = ($pkg =~ /::/ || lc($pkg) eq 'class' || lc($pkg) eq 'error' ||
-                    lc($pkg) eq 'method' || lc($pkg) eq 'function')
-                   ? ":|$pkg|" : ":$pkg";
+      my $cl_pkg = $self->_cl_pkg_designator($pkg);
       push @predecls, ";; Pre-declare package for dynamic loading";
       push @predecls, "(pcl:p-defpackage $cl_pkg)";
       push @predecls, "";
@@ -5730,9 +5730,15 @@ sub _process_package_statement {
 # or a runtime package reference is emitted.
 sub _cl_pkg_designator {
   my ($self, $pkg_name) = @_;
-  return ($pkg_name =~ /::/ || lc($pkg_name) eq 'class' || lc($pkg_name) eq 'error' ||
-          lc($pkg_name) eq 'method' || lc($pkg_name) eq 'function')
-         ? ":|$pkg_name|" : ":$pkg_name";
+  # Only MULTI-segment names need pipe-quoting (to preserve the '::' and case).
+  # Single-segment names are upcased by the reader (:Class -> CLASS), which is
+  # exactly what the runtime's perl-pkg-to-cl-pkg-name does and what bareword
+  # call qualifiers (Class::pl-foo) resolve to — so they MUST stay bare to agree.
+  # (The old `class/error/method/function` special-case existed only because
+  # `(defclass class ...)` collided with CL:CLASS; CLOS class names are now
+  # plc-prefixed, so escaping the *package* name here is redundant and actually
+  # caused a :|Class| vs CLASS mismatch.)
+  return ($pkg_name =~ /::/) ? ":|$pkg_name|" : ":$pkg_name";
 }
 
 sub _emit_package_preamble {
@@ -5810,13 +5816,16 @@ sub _pkg_to_clos_class {
   my ($self, $pkg) = @_;
   my $class = lc($pkg);
   $class =~ s/::/-/g;
-  # Pipe-quote to avoid CL symbol conflicts (especially 'class', 'error')
-  if ($class eq 'class' || $class eq 'method' || $class eq 'function' ||
-      $class eq 'error' || $class eq 'warning' || $class eq 'condition' ||
-      $class eq 'standard-class' || $class eq 'standard-object') {
-    return "|$class|";
-  }
-  return $class;
+  # Prefix with plc- so the CLOS class symbol can NEVER collide with a
+  # COMMON-LISP / SBCL symbol once the reader upcases it.  A Perl
+  # `package If` / `Second` / `Symbol` / `List` / `Car` ... would otherwise
+  # become CL:IF / CL:SECOND / CL:SYMBOL ... — symbols in the *locked*
+  # COMMON-LISP package, so the emitted `(defclass NAME ...)` dies with a
+  # package-lock violation.  The plc- prefix (PL Class) extends the existing
+  # naming discipline: builtins are `p-`, user subs `pl-`, classes `plc-`.
+  # This subsumes the old ad-hoc pipe-escape list (class/method/error/...).
+  # MUST stay in lock-step with `perl-pkg-to-clos-class` in cl/pcl-runtime.lisp.
+  return "plc-$class";
 }
 
 
@@ -6719,7 +6728,14 @@ sub _parse_expression_internal {
   if ($@) {
     my $error = $@;
     # Hard errors (e.g. unsupported features) must propagate — don't swallow.
-    die $error if $error =~ /^PCL:/;
+    # EXCEPT: assignment to a non-lvalue (user :lvalue) sub call.  That die is
+    # only *meant* to be hard in eval-string mode, where it makes a feature
+    # probe (CMM's `eval 'return 1; &_sub = 1'`) fail and return undef.  In
+    # whole-file mode it must degrade to a per-statement PARSE ERROR so one
+    # unsupported lvalue-sub assignment doesn't abort the entire file (e.g.
+    # perl-tests/substr.t defines `sub bar : lvalue` and does `bar = "XXX"`).
+    die $error if $error =~ /^PCL:/
+      && ($self->eval_mode || $error !~ /non-lvalue subroutine/);
     $error =~ s/ at \/.*//s;  # Remove file/line info
     $error =~ s/\n.*//s;      # First line only
     return ("(progn ;; PARSE ERROR: $error\n nil)", []);

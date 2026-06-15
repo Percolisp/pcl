@@ -9301,7 +9301,8 @@ buffer's fill-pointer; everything else falls back to file-length."
              ;; ref-to-ref: the referent is still a SCALAR (it happens to hold a ref)
              ((string= r "REF")    "SCALAR")
              ((string= r "GLOB")   "GLOB")
-             ((string= r "") "")
+             ;; Non-ref: Perl's reftype returns undef (NOT ""; ref() returns "").
+             ((string= r "") *p-undef*)
              ;; Blessed object — look at the inner type
              (t (cond
                   ((hash-table-p inner) "HASH")
@@ -10472,23 +10473,27 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 ;;; Package name conversion utilities for inheritance
 (defun perl-pkg-to-clos-class (name)
-  "Convert Perl package name to CLOS class name: Foo::Bar -> foo-bar"
-  (string-downcase (substitute #\- #\: name)))
+  "Convert Perl package name to CLOS class name: Foo::Bar -> plc-foo-bar.
+   The plc- prefix guarantees the upcased class symbol never lands on a locked
+   COMMON-LISP/SBCL symbol (e.g. `package If` -> CL:IF would die in defclass).
+   MUST stay in lock-step with _pkg_to_clos_class in Pl/Parser.pm."
+  (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
 
 (defun clos-class-to-pkg (cls-name)
   "Convert CLOS class name back to CL package name for lookup.
-   foo-bar -> FOO-BAR (works because we use pipe-quoted or simple package names)"
-  ;; For now, just upcase - the CL package name matches the Perl name
-  ;; If Perl package is Foo::Bar, CL package is |Foo::Bar| or Foo-Bar
-  ;; We try both strategies
-  (let* ((upcase-name (string-upcase cls-name))
+   plc-foo-bar -> FOO-BAR.  Strips the plc- class prefix first (see
+   perl-pkg-to-clos-class), then maps - to the package name."
+  (let* ((stripped (if (and (>= (length cls-name) 4)
+                            (string-equal (subseq cls-name 0 4) "plc-"))
+                       (subseq cls-name 4)
+                       cls-name))
+         (upcase-name (string-upcase stripped))
          ;; Try direct mapping first (for simple package names)
          (pkg (find-package upcase-name)))
     (if pkg
         upcase-name
         ;; Try converting - to :: for nested packages
-        (let ((perl-style (substitute #\: #\- upcase-name)))
-          perl-style))))
+        (substitute #\: #\- upcase-name))))
 
 ;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
 (defun %pcl-super-indirect (method cur-pkg inv-args-vec)
@@ -11404,11 +11409,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; Perl's UNIVERSAL::isa(REF, TYPE) carries interpreter-baked behaviour beyond
   ;; @ISA: when TYPE names a builtin reference type (ARRAY/HASH/SCALAR/CODE/GLOB/
   ;; LVALUE/…) it is true iff reftype(REF) eq TYPE — regardless of blessing.
-  ;; p-reftype is "" for a non-ref, so ordinary strings/numbers fall through to
-  ;; the normal @ISA inheritance check.  (A blessed hashref isa "HASH" AND isa
-  ;; its class; both work — reftype path then @ISA path.)
+  ;; p-reftype is undef (NOT "") for a non-ref, so ordinary strings/numbers fall
+  ;; through to the normal @ISA inheritance check.  (A blessed hashref isa "HASH"
+  ;; AND isa its class; both work — reftype path then @ISA path.)
   (let ((rt (p-reftype obj)))
-    (if (and (plusp (length rt)) (string= rt (to-string class)))
+    (if (and (stringp rt) (plusp (length rt)) (string= rt (to-string class)))
         (make-p-box 1)
         (p-isa obj class))))
 (defun pl-DOES (obj class  &rest args) (declare (ignore args)) (pl-isa obj class))
