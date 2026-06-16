@@ -3726,6 +3726,19 @@ sub child_context {
           }
           return LIST_CTX
             if defined($slurpy_at) && ($child_index - 1) >= $slurpy_at;
+
+          # A scalar ($) — or reference (\$, \@, \%, \&, \*) — prototype slot
+          # imposes SCALAR context on that argument, even when the call sits in
+          # void/list context.  This is what makes Test::More's is($$;$) /
+          # ok($;$) / like($$;$) evaluate `is(try {42}, 42)` with try in scalar
+          # context (so it returns 42, not undef).  Without it the arg inherits
+          # the caller's context — VOID at statement level — and wantarray()
+          # reports undef inside the callee.
+          my $pidx = $child_index - 1;
+          if (!defined($slurpy_at) || $pidx < $slurpy_at) {
+            my $pt = ($pidx <= $#p) ? ($p[$pidx]{proto_type} // '') : '';
+            return SCALAR_CTX if $pt eq '$' || $pt =~ /^\\/;
+          }
         }
       }
     }

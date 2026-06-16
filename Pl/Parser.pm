@@ -6302,9 +6302,18 @@ sub _extract_module_prototypes {
   # (List::Util is intentionally NOT skipped: its shim declares block
   # prototypes — first/any/reduce/pair* (&@) — that the block-form parser
   # needs, so its prototypes must be extracted from lib/List/Util.pm.)
-  if ($module =~ /^(Test2?::|Carp|Scalar::Util|Time::HiRes|
+  if ($module =~ /^(Carp|Scalar::Util|Time::HiRes|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
+    return $cache->{$module} = undef;
+  }
+  # Skip the heavy Test2 stack and Test:: internals — EXCEPT Test::More and
+  # Test::Simple, whose tiny lib/ shims declare the assertion prototypes
+  # (is($$;$), ok($;$), like($$;$), …) that child_context needs to impose
+  # SCALAR context on their arguments.  The shims win in @INC, so we read the
+  # prototype stub, never the real Test2 stack.
+  if (($module =~ /^Test2::/ || $module =~ /^Test::/)
+      && $module !~ /^Test::(?:More|Simple)$/) {
     return $cache->{$module} = undef;
   }
 
@@ -6359,6 +6368,10 @@ sub _merge_module_prototypes {
   # For now, import all prototypes that affect code generation:
   # - has_block_arg: requires &{} wrapping
   # - reference params (\@, \%, \$): require auto-boxing
+  # - scalar params ($): impose SCALAR context on that argument (child_context),
+  #   so e.g. Test::More's is($$;$) evaluates `is(try {...}, ...)` in scalar
+  #   context.  Any old-style prototype ($-proto) is a context signal now, so a
+  #   plain ($$) sub propagates too — not just block/ref prototypes.
   # This is a simplification - full implementation would track @EXPORT
   for my $name (keys %{$module_env->prototypes}) {
     my $proto = $module_env->get_prototype($name);
@@ -6368,11 +6381,13 @@ sub _merge_module_prototypes {
     my $needs_import = 0;
     $needs_import = 1 if $proto->{has_block_arg};
 
-    # Check for reference parameters (proto_type starts with \)
-    if ($proto->{params} && @{$proto->{params}}) {
+    # An old-style prototype with explicit parameter slots affects argument
+    # context (scalar $, ref \X, or slurpy @/%) — import it so child_context
+    # can apply the right wantarray to each argument.
+    if ($proto->{is_proto} && $proto->{params} && @{$proto->{params}}) {
       for my $param (@{$proto->{params}}) {
-        my $ptype = $param->{proto_type} // $param->{name};
-        if ($ptype && $ptype =~ /^\\/) {
+        my $ptype = $param->{proto_type} // $param->{name} // '';
+        if ($ptype =~ /^\\/ || $ptype eq '$' || $ptype eq '@' || $ptype eq '%') {
           $needs_import = 1;
           last;
         }

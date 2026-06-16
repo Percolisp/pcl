@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 58;
+plan tests => 63;
 
 sub run_cl {
     my ($code) = @_;
@@ -624,3 +624,42 @@ test_cl('scalar(eval{die}) contributes one undef element in a returned list',
     'sub f { return ( scalar(eval { die "boom\n"; 1 }), $@ ); }'
   . ' my @x = f(); print "n=", scalar(@x), " d0=", (defined $x[0]?1:0), " e=$x[1]";',
     "n=2 d0=0 e=boom\n");
+
+# ── session 256: a ($)/($$) prototype imposes SCALAR context on its arguments ──
+# child_context honors the scalar/ref slots of an old-style prototype, so an
+# argument that lands in a $ slot is evaluated in scalar context even when the
+# call is at statement level (void).  Without this, wantarray() reports void/
+# undef inside the callee — e.g. Test::More's is($$;$) made `is(try {42}, 42)`
+# evaluate try in void context and return undef.  Self-contained repro (no
+# Test::More): the arg in a $ slot sees scalar context, the slurpy @ sees list.
+test_cl('a ($$;@) prototype imposes scalar context on its $ args, list on @ tail',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub probe ($$;@) { print "a=$_[0] b=$_[1] c=$_[2]\n" }'
+  . ' probe( wa(), wa(), wa() );',
+    "a=S b=S c=L\n");
+
+# Edge cases of prototype-driven argument context (all verified vs perl 5.40):
+
+# A ($) unary-scalar prototype forces scalar context on its single argument.
+test_cl('($) prototype forces scalar context on the argument',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub p1 ($) { print "$_[0]\n" } p1( wa() );',
+    "S\n");
+
+# ($@): the leading $ is scalar, the slurpy @ tail is list — within one call.
+test_cl('($@) prototype: scalar head arg, list slurpy tail',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub psl ($@) { print "a=$_[0] rest=", join(",", @_[1..$#_]), "\n" }'
+  . ' psl( wa(), wa(), wa() );',
+    "a=S rest=L,L\n");
+
+# ($$$;$) — every mandatory/optional scalar slot is scalar context (cmp_ok shape).
+test_cl('($$$;$) prototype forces scalar context on all $ slots',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub p3 ($$$;$) { print join(",", @_), "\n" } p3( wa(), wa(), wa() );',
+    "S,S,S\n");
+
+# A (\@) reference prototype: the argument is taken as a ref (scalar slot).
+test_cl('(\\@) reference prototype takes the argument as an array ref',
+    'sub pref (\@) { print ref($_[0]), "\n" } my @b = (1, 2); pref(@b);',
+    "ARRAY\n");
