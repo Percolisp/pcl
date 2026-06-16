@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 65;
+plan tests => 69;
 
 sub run_cl {
     my ($code) = @_;
@@ -675,3 +675,29 @@ test_cl('die with an unblessed hashref preserves it as $@ (ref, not string)',
 test_cl('die with an unblessed arrayref preserves it as $@',
     'eval { die [10, 20, 30] }; print ref($@), " ", join("-", @{$@});',
     "ARRAY 10-20-30");
+
+# ── session 256: `my $x = EXPR if COND` = `my $x; $x = EXPR if COND` ─────────
+# A statement modifier on a `my` declaration: the lexical is declared
+# unconditionally (its let is opened by the block scanner), only the
+# initializer assignment is conditional, and the lexical is re-bound per call
+# (no stale carryover).  Was: the modifier tokens stayed in the RHS — a bare
+# list-op RHS (`my $c = shift if @_>1`) crashed with a malformed (p-if ...),
+# and a literal RHS dropped the initializer.  Found in File::Spec via
+# Class::Inspector.  (verified vs perl 5.40)
+test_cl('my $x = shift if COND — assigns when true (list-op RHS, no crash)',
+    'sub f { my $c = shift if @_ > 1; return defined $c ? "c=$c" : "u" }'
+  . ' print f(10, 20);',
+    "c=10");
+test_cl('my $x = shift if COND — undef when false',
+    'sub f { my $c = shift if @_ > 1; return defined $c ? "c=$c" : "u" }'
+  . ' print f();',
+    "u");
+test_cl('my $x = LITERAL if COND — initializer kept when true',
+    'sub f { my $c = 5 if @_ > 1; return defined $c ? "c=$c" : "u" }'
+  . ' print f(10, 20);',
+    "c=5");
+# Re-bound per call: a false COND on a later call must NOT see the earlier value.
+test_cl('my $x = EXPR if COND re-binds per call (no stale carryover)',
+    'sub f { my $c = "set" if $_[0]; return defined $c ? $c : "undef" }'
+  . ' print f(1), ",", f(0), ",", f(1);',
+    "set,undef,set");

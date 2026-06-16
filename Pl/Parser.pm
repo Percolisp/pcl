@@ -1433,6 +1433,35 @@ sub _process_variable_statement {
     $declarator = $1;
   }
 
+  # Statement modifier on a `my` declaration inside a sub:
+  #   my $x = EXPR if COND;   my @a = LIST unless COND;   my $c = shift if @_;
+  # The lexical is declared UNCONDITIONALLY — its `let` is opened by the block
+  # scanner from the `my` — and only the initializer assignment is conditional.
+  # Strip the declarator and route `$x = EXPR if COND` through the expression-
+  # statement path, which already lowers if/unless/while/until/for modifiers.
+  # Without this the modifier tokens stayed in @parts and the RHS parser choked
+  # (`my $c = shift if @_>1` → (p-shift (p-if ...)) crash; `my $c = 5 if @_>1`
+  # → dropped initializer).  Scoped to in-sub `my`: top-level my/our/local/state
+  # emit their declaration inline (not via the scanner), so they keep their own
+  # paths.
+  if ($declarator eq 'my' && $self->environment->in_subroutine > 0) {
+    my $mod_idx = -1;
+    for my $i (1 .. $#parts) {
+      next unless ref($parts[$i]) eq 'PPI::Token::Word';
+      if ($parts[$i]->content =~ /^(?:if|unless|while|until|for|foreach)$/) {
+        $mod_idx = $i;
+        last;
+      }
+    }
+    if ($mod_idx > 0) {
+      $self->_emit(";; $perl_code");
+      my $synth = PPI::Statement->new();
+      $synth->add_element($_->clone) for @parts[1 .. $#parts];
+      $self->_process_expression_statement($synth);
+      return;
+    }
+  }
+
   # Handle 'our' declarations - package variables
   if ($declarator eq 'our') {
     $self->_process_our_declaration($stmt, \@parts, $perl_code);
