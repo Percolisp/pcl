@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 69;
+plan tests => 70;
 
 sub run_cl {
     my ($code) = @_;
@@ -701,3 +701,15 @@ test_cl('my $x = EXPR if COND re-binds per call (no stale carryover)',
     'sub f { my $c = "set" if $_[0]; return defined $c ? $c : "undef" }'
   . ' print f(1), ",", f(0), ",", f(1);',
     "set,undef,set");
+
+# ── session 256: interpolated @ISA element (runtime parent class name) ───────
+# `our @ISA = ("Base::$impl")` names a parent only known at run time.  It must
+# NOT be baked into the compile-time CLOS defclass (it would store the literal
+# "Base::$impl"); instead it is pushed onto @ISA at run time and resolved by the
+# %pcl-isa-ancestry method-dispatch walk.  This is the mechanism the real (pure-
+# Perl) File::Spec uses to dispatch to File::Spec::Unix.
+test_cl('interpolated @ISA parent (runtime class name) resolves inherited methods',
+    'package Base::Impl; sub greet { "hi from impl" }'
+  . ' package Front; my $impl = "Impl"; our @ISA = ("Base::$impl");'
+  . ' package main; print Front->greet, "\n";',
+    "hi from impl\n");

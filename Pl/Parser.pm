@@ -2194,17 +2194,23 @@ sub _process_isa_declaration {
 
   my $pkg = $self->environment->current_package;
 
-  # Extract parent class names from RHS
+  # Extract parent class names from RHS.  Split into LITERAL parents (known at
+  # compile time → baked into the CLOS defclass supers + MRO) and INTERPOLATED
+  # parents (a runtime-only class name, e.g. File::Spec's
+  # `our @ISA = ("File::Spec::$module")`).  An interpolated parent can't go in
+  # the defclass — its name isn't known until run time — so it is only pushed
+  # onto @ISA at run time, and method dispatch resolves it via the runtime
+  # %pcl-isa-ancestry walk (verified: a string pushed onto @ISA dispatches).
   my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
   @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
 
-  my @parents = $self->_extract_parent_classes(\@rhs_parts);
+  my ($parents, $expr_parents) = $self->_classify_isa_parents(\@rhs_parts);
 
   $self->_with_bucket('declarations', sub {
     $self->_emit(";; $perl_code");
   });
 
-  if (@parents) {
+  if (@$parents) {
     # Emit CLOS class with parent classes for MRO tracking
     my $cl_class = $self->_pkg_to_clos_class($pkg);
     # Package-qualify parent class symbols so they resolve correctly regardless
@@ -2215,10 +2221,10 @@ sub _process_isa_declaration {
       my $cls = $self->_pkg_to_clos_class($_);
       my $pkg_prefix = ($_ =~ /::/) ? "|$_|" : $_;
       "$pkg_prefix\:\:$cls"
-    } @parents);
+    } @$parents);
 
     # Store parent list in environment for later use
-    $self->environment->set_isa($pkg, \@parents);
+    $self->environment->set_isa($pkg, $parents);
 
     # Redefine the CLOS class with parents in preamble (package-setup form)
     $self->_with_bucket('preamble', sub {
@@ -2236,11 +2242,61 @@ sub _process_isa_declaration {
   $self->_with_bucket('declarations', sub {
     $self->_emit("(defvar $isa_sym (make-array 0 :adjustable t :fill-pointer 0))");
   });
-  for my $parent (@parents) {
+  for my $parent (@$parents) {
     $self->_emit("(p-push $isa_sym \"$parent\")");
+  }
+  # Interpolated parents: push the runtime-evaluated class-name string.
+  for my $expr_cl (@$expr_parents) {
+    $self->_emit("(p-push $isa_sym $expr_cl)");
   }
 
   $self->_emit("");
+}
+
+# Classify @ISA RHS elements into literal parent names (compile-time, for the
+# CLOS defclass) and interpolated parent expressions (runtime CL strings, for a
+# runtime push).  Returns (\@literal_names, \@expr_cl).  An interpolating quote
+# (double-quoted / qq) that actually contains a sigil is treated as runtime;
+# everything else (qw, single-quoted, sigil-free double-quoted) is literal.
+sub _classify_isa_parents {
+  my ($self, $parts) = @_;
+  my (@literal, @expr);
+
+  for my $part (@$parts) {
+    my $ref = ref($part);
+    if ($ref eq 'PPI::Token::Quote::Double'
+        || $ref eq 'PPI::Token::Quote::Interpolate') {
+      if ($part->string =~ /[\$\@]/) {
+        # Interpolated, runtime-only class name → (p-string-concat ...).
+        my $cl = $self->_parse_expression([$part]);
+        $cl =~ s/^[ \t]+//;
+        push @expr, $cl if defined $cl && length $cl;
+        next;
+      }
+      push @literal, $part->string;       # double-quoted but no sigil
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      for my $child ($part->schildren) {
+        if ($child->isa('PPI::Statement::Expression')) {
+          my ($l, $e) = $self->_classify_isa_parents([$child->schildren]);
+          push @literal, @$l;
+          push @expr,    @$e;
+        }
+        elsif ($child->isa('PPI::Token::Quote')) {
+          my ($l, $e) = $self->_classify_isa_parents([$child]);
+          push @literal, @$l;
+          push @expr,    @$e;
+        }
+      }
+    }
+    else {
+      # qw(...), single-quoted, etc. — all literal: reuse the existing extractor.
+      push @literal, $self->_extract_parent_classes([$part]);
+    }
+  }
+
+  @literal = grep { defined $_ && $_ ne '' } @literal;
+  return (\@literal, \@expr);
 }
 
 # Process 'use base' / 'use parent' - equivalent to push @ISA, ...
@@ -5977,14 +6033,26 @@ sub _process_include_statement {
         return;
       }
 
-      # Check if it's a simple string literal (compile-time)
+      # Check if it's a simple string literal (compile-time).  An INTERPOLATING
+      # quote with variables — require "File/Spec/$module.pm" (the real
+      # File::Spec OS-dispatch) — must NOT be emitted as a raw literal: the
+      # $module is only known at runtime.  Treat it as compile-time literal only
+      # when the quote does not interpolate (single-quoted / q{}) OR has no
+      # sigils; otherwise fall through to the runtime expression path below,
+      # which lowers the interpolation to (p-string-concat ...).
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
-        my $path = $tokens[0]->string;
-        $self->_emit(";; $perl_code");
-        $self->_emit("(p-eval-always");
-        $self->_emit("  (p-require-file \"$path\"))");
-        $self->_emit("");
-        return;
+        my $q = $tokens[0];
+        my $interpolating = $q->isa('PPI::Token::Quote::Double')
+                         || $q->isa('PPI::Token::Quote::Interpolate');
+        my $path = $q->string;
+        if (!$interpolating || $path !~ /[\$\@]/) {
+          $self->_emit(";; $perl_code");
+          $self->_emit("(p-eval-always");
+          $self->_emit("  (p-require-file \"$path\"))");
+          $self->_emit("");
+          return;
+        }
+        # interpolating with variables → fall through to the expression path
       }
 
       # Otherwise, parse as expression (runtime)
