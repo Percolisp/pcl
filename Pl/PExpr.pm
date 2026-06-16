@@ -2443,7 +2443,22 @@ sub handle_subcalls {
         # For grep/map/sort: parse remaining elements as the list to process.
         # For eval/do: the block is the only argument; don't consume what follows.
         # $deref_skip: number of extra elements already consumed by -> deref chain.
-        if ($func_name ne 'eval' && $func_name ne 'do' && $i + 2 + $deref_skip < scalar(@$e)) {
+        #
+        # For a user (&;@)-prototype sub (Try::Tiny's try/catch/finally), the
+        # slurpy @ consumes only JUXTAPOSED trailing terms; a comma immediately
+        # after the block terminates the slurp and belongs to the enclosing list.
+        # Perl: `try {42}, 42, "d"` → try gets ONLY the block (the 42,"d" are
+        # siblings), whereas `try {} catch {}` (no comma) → catch{} is slurped.
+        # grep/map/sort are true list-ops whose list starts juxtaposed and then
+        # continues across commas, so this only applies to $has_block_proto subs.
+        my $next_after = $e->[$i + 2 + $deref_skip];
+        my $comma_stops = $has_block_proto
+          && $next_after
+          && $next_after->isa('PPI::Token::Operator')
+          && ($next_after->content eq ',' || $next_after->content eq '=>');
+
+        if ($func_name ne 'eval' && $func_name ne 'do' && !$comma_stops
+            && $i + 2 + $deref_skip < scalar(@$e)) {
           my @rest = @$e[$i + 2 + $deref_skip .. $#$e];
           my $rest_list = $self->cleanup_for_parsing(\@rest);
           # Parse rest as comma-separated list (usually just one element)

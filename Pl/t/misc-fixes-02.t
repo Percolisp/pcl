@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 57;
+plan tests => 58;
 
 sub run_cl {
     my ($code) = @_;
@@ -614,3 +614,13 @@ test_cl('select BAREWORD does not evaluate an unbound symbol',
 test_cl('parenthesised scalar deref base autovivifies through the referent',
     'my $r = [[0]]; ($r // 0)->[0][0] = 9; print $r->[0][0], "\n";',
     "9\n");
+
+# ── session 256: scalar(eval{die}) is a single undef element, not empty list ──
+# scalar(EXPR) always produces exactly one scalar.  scalar(eval{die}) was
+# returning raw nil, which p-flatten-args (used by `return (LIST)` in list
+# context) splices away — so `return (scalar(eval{...}), $@)` dropped the undef
+# and shifted the list.  This is the Try::Tiny / Test helper `_eval` idiom.
+test_cl('scalar(eval{die}) contributes one undef element in a returned list',
+    'sub f { return ( scalar(eval { die "boom\n"; 1 }), $@ ); }'
+  . ' my @x = f(); print "n=", scalar(@x), " d0=", (defined $x[0]?1:0), " e=$x[1]";',
+    "n=2 d0=0 e=boom\n");

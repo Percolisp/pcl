@@ -10046,6 +10046,14 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((and (vectorp v) (adjustable-array-p v)) (length v))
       ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count
       ((and (hash-table-p v) (not (p-box-p val))) (%p-hash-user-count v))
+      ;; An undef result is the scalar undef: return the *p-undef* sentinel, not
+      ;; raw nil.  scalar(EXPR) ALWAYS produces a single scalar, so e.g.
+      ;; `scalar(eval { die })` must contribute exactly one undef element to a
+      ;; surrounding list.  Raw nil is ambiguous with the empty list and gets
+      ;; spliced away by p-flatten-args (the `return (scalar(eval{...}), $@)`
+      ;; idiom in Try::Tiny / test helpers); the sentinel survives like literal
+      ;; undef does.
+      ((null v) *p-undef*)
       ;; Everything else (numbers, hash refs, etc.) returns as-is
       (t v))))
 
