@@ -6355,12 +6355,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (multiple-value-bind (args loc) (%p-extract-loc raw-args)
     (if (and (= (length args) 1)
              (let ((obj (car args)))
-               ;; Check if it's a blessed hash or blessed box
+               ;; Perl's `die REF` preserves ANY reference (blessed or not) as
+               ;; the exception object — $@/$_ in the catcher IS that reference,
+               ;; with no stringification and no " at FILE line N." suffix (the
+               ;; suffix is only for string dies).  So preserve: a blessed raw
+               ;; hash, a scalar/glob ref box (p-box-is-ref), or a box wrapping a
+               ;; reference container (hashref/arrayref/coderef/ref-to-ref).
+               ;; Without this, `die { prev => $@ }` (an UNBLESSED hashref) fell
+               ;; to the string branch and stringified to "HASH(0x..) at line N".
                (or (and (hash-table-p obj) (gethash :__class__ obj))
                    (and (p-box-p obj)
-                        (let ((inner (p-box-value obj)))
-                          (or (p-box-class obj)
-                              (and (hash-table-p inner) (gethash :__class__ inner))))))))
+                        (or (p-box-class obj)
+                            (p-box-is-ref obj)
+                            (let ((inner (p-box-value obj)))
+                              (or (hash-table-p inner)
+                                  (and (vectorp inner) (not (stringp inner)))
+                                  (functionp inner)
+                                  (p-box-p inner)
+                                  (p-typeglob-p inner))))))))
         ;; Object exception - preserve for $@
         (error 'p-exception :object (car args))
         ;; String exception

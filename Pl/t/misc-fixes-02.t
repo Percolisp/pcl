@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 63;
+plan tests => 65;
 
 sub run_cl {
     my ($code) = @_;
@@ -663,3 +663,15 @@ test_cl('($$$;$) prototype forces scalar context on all $ slots',
 test_cl('(\\@) reference prototype takes the argument as an array ref',
     'sub pref (\@) { print ref($_[0]), "\n" } my @b = (1, 2); pref(@b);',
     "ARRAY\n");
+
+# ── session 256: die preserves ANY reference (blessed OR not) in $@ ──────────
+# Perl's `die REF` keeps the reference verbatim as the exception — no
+# stringification, no " at FILE line N." suffix.  p-die used to preserve only
+# BLESSED refs; an unblessed hashref (`die { prev => $@ }`, Try::Tiny basic.t)
+# fell to the string branch and became "HASH(0x..) at line N".
+test_cl('die with an unblessed hashref preserves it as $@ (ref, not string)',
+    'eval { die { prev => "bar\n" } }; print ref($@), " ", $@->{prev};',
+    "HASH bar\n");
+test_cl('die with an unblessed arrayref preserves it as $@',
+    'eval { die [10, 20, 30] }; print ref($@), " ", join("-", @{$@});',
+    "ARRAY 10-20-30");
