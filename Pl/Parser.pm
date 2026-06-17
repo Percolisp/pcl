@@ -2405,10 +2405,14 @@ sub _extract_parent_classes {
     my $ref = ref($part);
 
     if ($ref eq 'PPI::Token::QuoteLike::Words') {
-      # qw(Parent1 Parent2)
+      # qw(Parent1 Parent2) — strip the qw and ANY delimiter, not just brackets.
+      # `our @ISA = qw/ Foo /` (slash, or !|#, etc.) must work too; the old
+      # bracket-only strip left "qw/" and "/" as bogus parent names → a broken
+      # (defclass ... (qw/::plc-qw/ ... /::plc-/)) that fails to READ.
+      # Mirrors the general strip in _process_use_base.
       my $content = $part->content;
-      $content =~ s/^qw\s*[\(\[\{<]//;
-      $content =~ s/[\)\]\}>]$//;
+      $content =~ s/^qw\s*[^\w\s]//;
+      $content =~ s/[^\w\s]$//;
       push @parents, split(/\s+/, $content);
     }
     elsif ($ref eq 'PPI::Token::Quote::Single'

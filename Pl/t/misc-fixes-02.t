@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 79;
+plan tests => 80;
 
 sub run_cl {
     my ($code) = @_;
@@ -811,3 +811,18 @@ test_cl('%INC key uses single slash and keys %INC enumerates loaded modules',
   . ' my @f = grep { m{/} } keys %INC;'
   . ' print scalar(@f) ? "K" : "k"; print "\n";',
     "YK\n");
+
+# ── session 258b: @ISA = qw/.../ with a NON-bracket delimiter ────────────────
+# _extract_parent_classes stripped only bracket qw delimiters ( [ { < — so
+# `our @ISA = qw/ Parent /` (slash, or !|#, etc.) kept its "qw/" prefix and "/"
+# suffix and split into bogus parent names ("qw/", "Parent", "/"), emitting a
+# (defclass ... (qw/::plc-qw/ ... /::plc-/)) that failed to READ ("Package QW/
+# does not exist").  qw(Parent) always worked.  Found in YAML::PP::Reader
+# (`our @ISA = qw/ YAML::PP::Reader /`).  Fix: strip qw + ANY delimiter.
+test_cl('@ISA = qw/.../ (slash/non-bracket delimiter) sets inheritance',
+    'package P; sub new { bless {}, shift } sub hi { "hi" }'
+  . ' package C; our @ISA = qw/ P /;'
+  . ' package D; our @ISA = qw! P !;'
+  . ' package main;'
+  . ' print ref(C->new), ":", C->new->hi, ":", ref(D->new), "\n";',
+    "C:hi:D\n");
