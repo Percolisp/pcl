@@ -4,6 +4,29 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 258 (2026-06-17) — s257 OPEN THREAD CLOSED: unprototyped user-function args are LIST context. Gate 95/3478, sweep +40.
+
+Goal (user): keep driving CPAN modules; specifically re-examine the s257 open thread (flagged twice). Closed it.
+
+**The thread:** a call to an unprototyped *user* function should evaluate its args in LIST context (Perl flattens them into @_), the sibling of s257's methodcall rule. `myfunc(split /::/, $name)` was giving the field COUNT (2), not the fields. The s257 *blanket* attempt regressed the sweep ~170 tests; the task was to find the narrow discriminator.
+
+**Root cause of the regression (studied per user's instruction):** the TAP assertions (`is`/`ok`/`like`/…) LOOK unprototyped but really carry `($$@)`-style prototypes (perl-core `t/test.pl`: `sub is ($$@)`). The leading `$` slots impose SCALAR context, so `is(unpack(...), $exp)` runs unpack in scalar context — matching real Perl. perl-tests reach those via `require './test.pl'`, NOT `use Test::More`, so the shim-prototype extractor never saw them. The blanket LIST rule therefore list-ified `is`'s first arg → pack.t/aassign/etc. broke.
+
+**Fix (commit `96a111b`), three parts + two exposed latent bugs:**
+1. **`_extract_file_prototypes` (`Pl/Parser.pm`)** — the literal-path `require` handler now extracts prototypes from the required file (the require-equivalent of `_extract_module_prototypes` for `use`). Nested requires recurse, so the `perl-tests/test.pl → t/test.pl` redirect is followed. Path resolved relative to cwd then the source file's dir; memoized + cycle-guarded via the shared `_parsing_modules`.
+2. **`perl-tests/t/test.pl`** declares the real TAP prototypes as forward decls (`sub is ($$@);` …, no bodies — runtime `pl-is`/`pl-ok` still supply the TAP layer; `p-declare-sub` is a no-op when the fn is already fbound, so no clobber). This is the shim pattern — prototypes are DATA in test.pl, read generically.
+3. **`child_context` (`Pl/PExpr.pm`)** — unprototyped non-builtin funcall args → LIST; prototyped subs keep their per-slot context (the s256 `$`→SCALAR / slurpy-`@`→LIST machinery).
+4. **Bit-shift/bitwise operators (`<< >> & | ^`) force SCALAR context on operands** — latent bug: `($x || 255) << 8` evaluated the `||` RHS in list context and the shift yielded 0. These ops were missing from `child_context`'s scalar-forcing operator list.
+5. **`chop`/`chomp` force LIST context on their args** — `is(chop(@slice), 't')` collapsed the slice to a scalar (Test::More's `$`-proto forces the result scalar, which propagated inward). Kept as a **context-only special-case branch, NOT a `_builtin_prototypes` entry**: tried the data-driven `(@)`-prototype form (per user's "wouldn't a prototype table be simpler?") but the prototype table is ALSO read by codegen → a `(@)` on `chomp` changed how `chomp @a` compiles and broke chop.t. Lesson: in PCL "prototype" conflates calling-convention codegen + arg context, so it's not a clean home for a pure context hint.
+
+**Results:** Gate 95 files / **3478** tests green (+3 regression tests in `Pl/t/misc-fixes-02.t` 75→78). Sweep **18088 pass (+40 over 18048 baseline)** / **66 fully-passing held** / 0 real regressions. aassign.t +39 (123→162), chop/pack/die_exit held. The 8 sweep-diff "new failures" verified file-by-file as stale-baseline artifacts (per-file counts identical HEAD vs change); chop.t was the ONE real regression caught and fixed (#5). 48 tests newly pass.
+
+**Probing edge case the user raised (NOT fixed, pre-existing):** `chop $f, @duh, $bar` (no parens) — Perl treats `chop`/`chomp` without parens as a NAMED UNARY (chops only `$f`; rest is a discarded comma list), but with parens `chop(...)` as a list operator (chops all). PCL registers them as list ops `[-1,-2]` and always grabs the whole list — divergence present at HEAD too, orthogonal to context. The context fix preserves in-place lvalue mutation in all forms (verified vs perl 5.40).
+
+**Process notes:** (a) repeated `git stash push/pop` for HEAD-vs-change comparisons collided with a pre-existing `pack-P WIP` stash — a conflicted pop leaked its content into the working tree (`UU cl/pcl-pack.lisp` + staged pack files). Restored the 3 pack files to HEAD; pack-P WIP remains intact in `stash@{0}`. **Use a worktree or file copies, not stash, when a stash already exists.** (b) Baseline NOT re-blessed: later single-file `chop.t` sweeps clobbered `.faillog` (only `_status.tsv` survives); re-bless needs a fresh clean full sweep — deferred to next session.
+
+---
+
 ## Session 257 (2026-06-17) — block-scoped package @ISA wall DOWN; Safe::Isa 0→63/68, Class::Inspector runs. Gate 95/3475.
 
 Goal (user): keep driving diverse CPAN module test suites; fix the general bugs.
