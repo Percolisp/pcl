@@ -10282,6 +10282,20 @@ buffer's fill-pointer; everything else falls back to file-length."
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
 
+    ;; A method call on undef or an UNBLESSED reference is a fatal Perl error
+    ;; ("Can't call method X on an undefined value" / "on unblessed reference").
+    ;; Real code relies on this firing under eval — e.g. Safe::Isa's $_isa/$_can
+    ;; guard `$thing->$_isa(...)` against non-objects.  raw-class is nil for undef,
+    ;; unblessed refs, AND plain strings/numbers; only the first two die — a plain
+    ;; string is a legitimate class name (e.g. `my $c="Foo"; $c->m`), handled below.
+    (when (null raw-class)
+      (let ((uv (unbox resolved-obj)))
+        (cond
+          ((or (null uv) (eq uv *p-undef*))
+           (error "Can't call method ~A on an undefined value" method-name))
+          ((plusp (length (the string (p-ref resolved-obj))))
+           (error "Can't call method ~A on unblessed reference" method-name)))))
+
     ;; Auto-load the package if it doesn't exist yet.
     ;; This mirrors how Perl automatically has core modules (like version.pm)
     ;; pre-loaded in its runtime.  When user code writes `new version ~$_` or
