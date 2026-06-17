@@ -17,7 +17,7 @@ Two reasons:
 
 #### The hard part — Perl's runtime *magic*
 
-Perl is "hard" to parse. It has tied variables, operator overloading, magical special variables, regex match state, and write-through lvalue references — behaviour that exists only while the program runs and hence resists any purely static translation. PCL avoids the problem by reproducing the same magic in the Common Lisp runtime. Scalars are boxes that carry their own magic, ties and overloads dispatch live, and special variables bind dynamically. The constructs that are hard because they must execute, will simply execute on the CL side with the same semantics.
+Perl is "hard" to parse, you really need to execute code to do that. PCL avoids the problem by not solving it, reproducing the same magic in the Common Lisp runtime. The constructs that are hard because they must execute, will simply execute on the CL side with the same semantics.
 
 ### There is no bytecode engine
 
@@ -37,6 +37,9 @@ echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtim
 # Run the internal test suite (93 files, 3392 tests)
 prove -j8 Pl/t/
 ```
+
+(PCL is a bit sensitive for the Common Lisp versions, it will be examined before first release.)
+
 
 ## Example
 
@@ -92,7 +95,9 @@ A few of the biggest items:
 
 ## How It Is Tested
 
-Perl ships an excellent, thorough test suite (`t/op/`, `t/base/`, …). PCL compiles those test files to Common Lisp and runs them — using Perl's own expectations as the oracle for compatibility.
+Right now, testing is mostly with CPAN modules and with a fuzzer.
+
+During most of the development time, testing has been done with Perl's excellent and thorough test suite (`t/op/`, `t/base/`, …). PCL compiles those test files to Common Lisp and runs them — using Perl's own expectations as the oracle for compatibility.
 
 Some tests exercise features that are deliberately out of scope (e.g. CL-PPCRE has no executable code blocks inside regexes, `(?{...})`, and removed/experimental features aren't implemented). Those tests have to be skipped — which means some features can quietly end up *under-covered*, something that has to be reviewed with care rather than assumed away.
 
@@ -120,7 +125,7 @@ Generated code is intentionally readable: Perl variables keep their sigils (`$x`
 
 ## Status
 
-This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the end is visible on the horizon — and hopefully not a mirage.
+This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the end should be in weeks not months.
 
 Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **69 files passing completely**. Several pure-Perl CPAN modules now run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process.
 
