@@ -2226,19 +2226,35 @@ sub _process_isa_declaration {
     # Store parent list in environment for later use
     $self->environment->set_isa($pkg, $parents);
 
-    # Redefine the CLOS class with parents in preamble (package-setup form)
-    $self->_with_bucket('preamble', sub {
+    # Redefine the CLOS class with parents for MRO.  Normally this goes in the
+    # package's preamble (hoisted before runtime code).  But inside a runtime
+    # block ({ package X; our @ISA=... }), the package's *bare* defclass is
+    # emitted inline (see _emit_package_preamble), so a preamble "Redefine" would
+    # be hoisted BEFORE that bare defclass and then get clobbered by it.  Emit the
+    # parented defclass inline instead, so it follows the bare one in the stream.
+    if ($self->_block_depth > 0) {
+      # Qualify the class name (same read-time-package reason as the bare
+      # defclass in _emit_package_preamble's block branch).
+      my $q_class = $self->_qualified_clos_class($pkg);
       $self->_emit(";; Redefine CLOS class with parents for MRO");
-      $self->_emit("(defclass $cl_class ($parents_cl) ())");
-    });
+      $self->_emit("(defclass $q_class ($parents_cl) ())");
+    }
+    else {
+      $self->_with_bucket('preamble', sub {
+        $self->_emit(";; Redefine CLOS class with parents for MRO");
+        $self->_emit("(defclass $cl_class ($parents_cl) ())");
+      });
+    }
   }
 
-  # Declare @ISA in declarations bucket, initialize at runtime
-  # When inside a sub (inline package with no (in-package) context change),
-  # qualify @ISA with the package name so it lands in the right package.
-  my $isa_sym = ($self->environment->in_subroutine > 0)
-    ? "${pkg}::\@ISA"
-    : "\@ISA";
+  # Declare @ISA in declarations bucket, initialize at runtime.
+  # When inside a sub OR a runtime block (an inline package whose @ISA push runs
+  # under (in-package :Pkg)), qualify @ISA with the package name so the defvar
+  # lands in the SAME package the push targets — otherwise the runtime
+  # %pcl-isa-ancestry walk reads an unpopulated Pkg::@ISA and inheritance breaks.
+  my $qualify = ($self->environment->in_subroutine > 0
+                 || $self->_block_depth > 0);
+  my $isa_sym = $qualify ? $self->_qualified_isa_symbol($pkg) : "\@ISA";
   $self->_with_bucket('declarations', sub {
     $self->_emit("(defvar $isa_sym (make-array 0 :adjustable t :fill-pointer 0))");
   });
@@ -5849,6 +5865,30 @@ sub _cl_pkg_designator {
   return ($pkg_name =~ /::/) ? ":|$pkg_name|" : ":$pkg_name";
 }
 
+# The package-qualified CL symbol for a package's @ISA array, e.g.
+# Dog::@ISA for single-segment, |Foo::Bar|::@ISA for multi-segment.  Built from
+# the package designator so it reads into the SAME package the runtime resolves
+# via perl-pkg-to-cl-pkg-name (and that %pcl-isa-ancestry searches).
+sub _qualified_isa_symbol {
+  my ($self, $pkg_name) = @_;
+  (my $prefix = $self->_cl_pkg_designator($pkg_name)) =~ s/^://;
+  return "${prefix}::\@ISA";
+}
+
+# The package-qualified CLOS class symbol for a package, e.g. Foo::plc-foo (or
+# |Foo::Bar|::plc-foo--bar).  Used INSIDE a runtime block, where the whole
+# package is one top-level (let ...) form: the inner (in-package :Foo) does not
+# take effect at READ time, so a bare `(defclass plc-foo ...)` would intern
+# plc-foo in the read-time package instead of :Foo.  A sibling class that names
+# this one as a superclass (`(defclass plc-bar (Foo::plc-foo) ())`) DOES use the
+# qualified symbol, so without qualifying the definition the two diverge and the
+# referenced class is left FORWARD-REFERENCED (finalize-inheritance crash).
+sub _qualified_clos_class {
+  my ($self, $pkg_name) = @_;
+  (my $prefix = $self->_cl_pkg_designator($pkg_name)) =~ s/^://;
+  return "${prefix}::" . $self->_pkg_to_clos_class($pkg_name);
+}
+
 sub _emit_package_preamble {
   my $self     = shift;
   my $pkg_name = shift;
@@ -5865,7 +5905,10 @@ sub _emit_package_preamble {
     $self->_emit("(p-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
-    $self->_emit("(defclass $cl_class () ())");
+    # Qualify the class name: the inline (in-package) above has not taken effect
+    # at READ time (the whole block is one top-level form), so a bare class name
+    # would intern in the wrong package — see _qualified_clos_class.
+    $self->_emit("(defclass @{[ $self->_qualified_clos_class($pkg_name) ]} () ())");
     # Declare $a/$b as special in this package using fully-qualified names in the
     # top-level declarations bucket.  Using pkg::$a at top level (where the reader's
     # *package* is whatever the enclosing section uses) ensures SBCL sees these as

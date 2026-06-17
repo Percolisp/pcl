@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 70;
+plan tests => 74;
 
 sub run_cl {
     my ($code) = @_;
@@ -713,3 +713,45 @@ test_cl('interpolated @ISA parent (runtime class name) resolves inherited method
   . ' package Front; my $impl = "Impl"; our @ISA = ("Base::$impl");'
   . ' package main; print Front->greet, "\n";',
     "hi from impl\n");
+
+# ── session 257: block-scoped `{ package X; our @ISA = (...) }` inheritance ──
+# Two bugs made a block-scoped package's @ISA inheritance silently break (while
+# the same code at file scope worked).  (1) The package's bare `(defclass X ())`
+# is emitted INLINE inside the runtime block, but the parented "Redefine"
+# defclass was hoisted to the package PREAMBLE — emitted earlier, then clobbered
+# by the inline bare one.  (2) The `(defvar @ISA ...)` was unqualified → landed
+# in MAIN::@ISA, but the `(p-push @ISA ...)` ran under `(in-package :X)` → wrote
+# X::@ISA; %pcl-isa-ancestry reads X::@ISA, which stayed empty.  Both now key off
+# _block_depth: parented defclass emitted inline, @ISA package-qualified.  This
+# was the wall blocking Class::Inspector / Safe::Isa.  (verified vs perl 5.40)
+test_cl('block-scoped package @ISA — inherited method dispatch',
+    '{ package Animal; sub new { bless {}, shift } sub speak { "generic" } }'
+  . '{ package Dog; our @ISA = ("Animal"); sub bark { "woof" } }'
+  . ' my $d = Dog->new; print $d->speak, "-", $d->bark, "\n";',
+    "generic-woof\n");
+test_cl('block-scoped package @ISA — isa() and can()',
+    '{ package Animal; sub new { bless {}, shift } sub legs { 4 } }'
+  . '{ package Dog; our @ISA = ("Animal"); }'
+  . ' my $d = Dog->new;'
+  . ' print +($d->isa("Animal") ? "y" : "n"), ($d->can("legs") ? "y" : "n"), "\n";',
+    "yy\n");
+test_cl('block-scoped package @ISA — SUPER:: dispatch',
+    '{ package Animal; sub new { bless {}, shift } sub speak { "generic" } }'
+  . '{ package Dog; our @ISA = ("Animal");'
+  . '  sub speak { my $s = shift; "woof+" . $s->SUPER::speak() } }'
+  . ' print Dog->new->speak, "\n";',
+    "woof+generic\n");
+
+# ── session 257: method call on undef / unblessed ref is a fatal error ───────
+# `$ref->method` where $ref is an unblessed reference dies "Can't call method X
+# on unblessed reference"; on undef it dies "...on an undefined value".  Was: the
+# invocant yielded a nil class which fell through to "main", so the call silently
+# dispatched against main (lived).  Safe::Isa's $_isa/$_can guard non-objects by
+# relying on this death under eval.  (verified vs perl 5.40)
+test_cl('method call on unblessed ref / undef dies (caught by eval)',
+    'my $aref = [42]; my $undef;'
+  . ' my $a = eval { $aref->isa("Foo"); 1 };'
+  . ' my $b = eval { $undef->can("x"); 1 };'
+  . ' print defined($a) ? "lived" : "died", ",",'
+  . '       defined($b) ? "lived" : "died", "\n";',
+    "died,died\n");
