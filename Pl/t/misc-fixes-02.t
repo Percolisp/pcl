@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 78;
+plan tests => 79;
 
 sub run_cl {
     my ($code) = @_;
@@ -797,3 +797,17 @@ test_cl('bitwise/shift operators force scalar context on operands',
   . ' sub g { return join(",", @_) }'
   . ' print g(($z||255)<<8, ($z||7)&3, ($z||4)|1, ($z||4096)>>4), "\n";',
     "65280,3,5,256\n");
+
+# ── session 258b: %INC populated with single-slash keys (was Foo//Bar.pm) ─────
+# p-module-to-path replaced each ':' with '/', so 'Foo::Bar' -> 'Foo//Bar.pm'.
+# The OS tolerates the double slash when opening the file (so loading worked),
+# but %INC's key was wrong, and $INC{"Foo/Bar.pm"} / loaded_filename-style
+# lookups missed.  Fix: collapse '::' to a single '/'.  Also gave keys/values
+# %INC their missing %INC-MARKER% case (they returned empty).  Found via the
+# Class::Inspector test suite (loaded_filename).  (verified vs perl 5.40)
+test_cl('%INC key uses single slash and keys %INC enumerates loaded modules',
+    'use File::Spec;'
+  . ' print exists $INC{"File/Spec.pm"} ? "Y" : "N";'
+  . ' my @f = grep { m{/} } keys %INC;'
+  . ' print scalar(@f) ? "K" : "k"; print "\n";',
+    "YK\n");

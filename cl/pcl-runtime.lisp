@@ -5647,6 +5647,12 @@
                   (when (%p-real-hash-key-p k) (vector-push-extend k result)))
                 collection)
        result))
+    ;; %INC special hash: keys are the loaded modules' relative paths.
+    ((eq (unbox collection) '%INC-MARKER%)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (maphash (lambda (k v) (declare (ignore v)) (vector-push-extend k result))
+                *p-inc-table*)
+       result))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
@@ -5668,6 +5674,12 @@
                   (when (%p-real-hash-key-p k)
                     (vector-push-extend (%p-hash-unbox-elem v) result)))
                 collection)
+       result))
+    ;; %INC special hash: values are the loaded modules' resolved paths.
+    ((eq (unbox collection) '%INC-MARKER%)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (maphash (lambda (k v) (declare (ignore k)) (vector-push-extend v result))
+                *p-inc-table*)
        result))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
@@ -7965,13 +7977,23 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-module-to-path (module-name)
   "Convert Perl module name to relative path.
    Foo::Bar => Foo/Bar.pm
-   Foo/Bar.pm => Foo/Bar.pm (unchanged)"
+   Foo/Bar.pm => Foo/Bar.pm (unchanged)
+   The `::` separator collapses to a SINGLE `/` — a naive per-char substitute
+   turns `::` into `//`, which the OS tolerates when opening the file but leaves
+   a wrong %INC key (Foo//Bar.pm), so $INC{'Foo/Bar.pm'} lookups miss."
   (let ((name (to-string module-name)))
     (if (search ".pm" name)
         name
-        (concatenate 'string
-                     (substitute #\/ #\: name)
-                     ".pm"))))
+        (let ((out (make-string-output-stream))
+              (i 0)
+              (len (length name)))
+          (loop while (< i len) do
+                (if (and (char= (char name i) #\:)
+                         (< (1+ i) len)
+                         (char= (char name (1+ i)) #\:))
+                    (progn (write-char #\/ out) (incf i 2))
+                    (progn (write-char (char name i) out) (incf i))))
+          (concatenate 'string (get-output-stream-string out) ".pm")))))
 
 (defun p-find-module-in-inc (rel-path)
   "Search @INC for module file, return absolute path or nil."
