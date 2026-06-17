@@ -4,6 +4,19 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 258c (2026-06-17) — strategy agreed (CPAN breadth, ask-before-install); started new modules; `@ISA = qw/.../` non-bracket-delimiter bug fixed. Gate 95/3480.
+
+**Strategy (user asked "what should we do now to reach 'run arbitrary Perl'?"):** agreed to **lead with CPAN breadth survey** — widen past the Moo cluster, harvest the GENERAL bug each new module exposes, track distinct bug-CLASSES to measure convergence. Fuzzer = the automated tier-(a) basics net; one robustness investment worth doing = per-statement `handler-case` (graceful degradation, unblocks crash files). SKIP: importing more perl-core test files (low new-bug yield, s237b) and grinding documented not-supported. **Target decomposes:** (a) primitives [fuzzer, long tail], (b) idioms/mechanisms [CPAN, converging], (c) interp internals [SV-identity/ties/DESTROY/formats/XS — out of scope]. **STANDING RULE (user): ASK before installing any CPAN module** — smoke-test what's already installed; ask before fetching a dist tarball for its `t/`.
+
+**Started breadth survey with YAML::PP** (installed, pure-Perl, totally different code shape from the OO cluster). Immediately exposed a GENERAL bug:
+**`@ISA = qw/.../` with a non-bracket delimiter (commit `2c74f3d`).** `_extract_parent_classes` (`Pl/Parser.pm`) stripped only the bracket qw delimiters `( [ { <`, so `our @ISA = qw/ Parent /` (slash — or `! | #` …) kept its `qw/` prefix and `/` suffix and split into bogus parents `("qw/","Parent","/")`, emitting `(defclass ... (qw/::plc-qw/ ... /::plc-/) ())` → READ error "Package QW/ does not exist". `qw(Parent)` always worked. Fixed by stripping `qw` + ANY non-word delimiter (mirrors the existing general strip in `_process_use_base`). **General:** every module using a non-bracket qw delimiter for inheritance was affected. Test in misc-fixes-02.t (79→80). Gate 95/3480.
+
+**YAML::PP next walls (NOT fixed, deeper):** (1) `Handle single node of unknown type: ref=''` ×7 (a transpile-time codegen warning — some PExpr node type unhandled in YAML::PP); (2) **dynamic `Module::Load::load` with a computed/empty name** → `Can't locate .pm in @INC` / `NIL is not a STRING` (YAML::PP::Schema loads schema modules by computed name; Module::Load-shim / dynamic-require territory). YAML::PP is a good convergence probe — pick it back up after the `single node of unknown type` codegen gap.
+
+**NEXT (tomorrow):** continue CPAN breadth — finish probing already-installed non-Moo modules (Test::Deep, Hook::LexWrap, Sub::Uplevel, PPI itself = the biggest pure-Perl breadth test), harvesting general bugs. Ask before installing anything new. Track bug-classes for convergence.
+
+---
+
 ## Session 258b (2026-06-17) — CPAN re-survey after the func-arg fix; %INC double-slash bug fixed. Gate 95/3479.
 
 User: "see how the CPAN modules we checked tests for are now." Re-ran the dist suites (`tools/run-dist-t.pl <dist> t/foo.t --summary`).
