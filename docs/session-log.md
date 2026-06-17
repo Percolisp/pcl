@@ -4,6 +4,26 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 257 (2026-06-17) — block-scoped package @ISA wall DOWN; Safe::Isa 0→63/68, Class::Inspector runs. Gate 95/3475.
+
+Goal (user): keep driving diverse CPAN module test suites; fix the general bugs.
+Resumed at the s256 NEXT marker — the **block-scoped `{ package X; @ISA=... }` CLOS crash** blocking Class::Inspector / Safe::Isa. Four general fixes, all gate-green, regression tests in `Pl/t/misc-fixes-02.t` (70→75). Three commits + one flagged to re-examine (per user).
+
+**1. Block-scoped `{ package X; our @ISA=(...) }` inheritance (commit `24f9da8`).** Worked at file scope, silently broke in a block. Root: the block path emits the whole package as ONE wrapped `(let ...)` top-level form, so the inner `(in-package :X)` does NOT take effect at READ time (unlike file scope, where in-package is its own top-level form). Three sub-bugs in `Pl/Parser.pm`:
+   - *defclass clobber*: bare `(defclass plc-dog () ())` emitted INLINE in the block, but the parented "Redefine" defclass was hoisted to the package PREAMBLE (earlier) → clobbered. Fix: emit the parented defclass inline when `_block_depth > 0` (`_process_isa_declaration`).
+   - *@ISA in wrong package*: `(defvar @ISA …)` went unqualified to declarations → `MAIN::@ISA`, but `(p-push @ISA …)` runs under `(in-package :Dog)` → `Dog::@ISA`. `%pcl-isa-ancestry` reads `Dog::@ISA` (empty). Fix: package-qualify `@ISA` (new `_qualified_isa_symbol`) when in a sub OR a block.
+   - *forward-referenced CLOS class crash*: bare `(defclass plc-foo () ())` interned `plc-foo` in the read-time package, but a sibling naming it as super (`(defclass plc-bar (Foo::plc-foo) ())`) uses the QUALIFIED symbol → `FOO::PLC-FOO` left forward-referenced → `FINALIZE-INHERITANCE` crash on the next method call to Foo. Fix: qualify the class name in the block path (new `_qualified_clos_class`).
+
+**2. Method call on undef / unblessed ref dies (commit `5e9a527`, `cl/pcl-runtime.lisp`).** Must die "Can't call method X on unblessed reference" / "...on an undefined value". PCL computed a nil class → fell through `"" → "main"` → dispatched against main and lived. Safe::Isa's `$_isa/$_can` guard non-objects by catching this under eval. Fix in `p-method-call`: when invocant yields no class, die if it unboxes to undef or `(p-ref …)` non-empty; a plain string/number still falls through as a class name.
+
+**3. Method-call arguments are LIST context (commit `e005e37`, `Pl/PExpr.pm`).** `child_context` had no `methodcall` case → method-call args inherited caller context. `File::Spec->catfile( split /(?:'|::)/, $name )` ran split in scalar context → field COUNT (2) → Class::Inspector `->filename` returned "2.pm". Fix: methodcall args (`child_index >= 2`) get `LIST_CTX`.
+
+**⚠ RE-EXAMINE NEXT SESSION (user explicitly flagged twice):** the SIBLING of #3 — a plain UNPROTOTYPED user *function* call — has the same Perl semantics (args flatten into `@_` → LIST) and is STILL WRONG (`myfunc(split /,/, $s)` gives count `2`, not the fields). I tried defaulting all unprototyped non-builtin funcall args to LIST → **regressed the sweep ~170 tests** (die_exit.t + 4 other fully-passing files broke; `test.pl` helpers like `plan`/`ok` and `system(qq{…})` subprocess exit codes went wrong). REVERTED that part; only the method path shipped. The function-call default needs a **narrower discriminator** — study WHY the 170 broke (which call sites + which arg positions) before re-attempting. This is the open thread.
+
+**Results:** Safe::Isa `t/safe_isa.t` 0 (crash) → **63/68** (remaining 5 = wantarray / `is_deeply` context propagation, deferred). Class::Inspector now RUNS (was crash): `class_inspector.t` 50/54, `class_inspector_functions.t` 13/19, `01_use.t` 3/3 — remaining need the function-call LIST-ctx fix above + an `->subclasses`/evil-`->isa` crash (~line 769). Gate 95/3475 green. Full sweep **18048 pass / 66 fully-passing held / 0 real regressions** (the 7 sweep-diff "new" all reproduce at HEAD = stale baseline from s256's committed prototype work; verified by stashing my changes and re-running the 7 files).
+
+---
+
 ## Session 256 (2026-06-16) — Try::Tiny t/basic.t 1→25/25; FIVE general bugs fixed. Gate 3470/3470.
 
 Goal (user): keep running diverse CPAN module test suites; fix the general bugs they expose.
