@@ -4,6 +4,24 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 258b (2026-06-17) — CPAN re-survey after the func-arg fix; %INC double-slash bug fixed. Gate 95/3479.
+
+User: "see how the CPAN modules we checked tests for are now." Re-ran the dist suites (`tools/run-dist-t.pl <dist> t/foo.t --summary`).
+
+**Survey (after `96a111b`):**
+- **Class::Inspector**: `01_use` 3/0 ✓; `class_inspector.t` **50→53/1** (only the evil-`->isa` stress crash, test 54, remains); `class_inspector_functions.t` **13→16/3** (tests 7-9 = `Class::Inspector::Functions` export-not-found). The func-arg LIST fix + the %INC fix below drove these.
+- **Safe::Isa**: `safe_isa.t` 63/5 (held; remaining = wantarray/`is_deeply` ctx); `safe_does.t` crashes after 9.
+- **Try::Tiny**: `basic.t` **25/0** ✓; `context.t` 5/8 (VOID-in-catch = wantarray propagation, deferred); `named.t` 0/3 (needs `Sub::Util::set_subname` + `caller(0)[3]` name — XS/introspection); `finally.t` 11/4 (finally = DESTROY-via-GC, not-supported).
+- **Role::Tiny**: `role-tiny.t` **22/0** ✓, `proto.t` **5/0** ✓, `does.t` 13/1.
+- **Data::Dump**: `dump.t`/`quote.t` = `use Test` (the ANCIENT pre-Test::More module) → `TEST::_` unbound; pre-existing (s254), not the func-arg fix.
+- **Class::Method::Modifiers**: load-crashes (eval-lexical-capture wall, documented).
+
+**General bug fixed — %INC keys had a DOUBLE slash (commit `64c1438`).** `p-module-to-path` did `(substitute #\/ #\: name)`, replacing each `:` individually, so `Foo::Bar` → `Foo//Bar.pm`. The OS collapses `//` when opening the file (so module *loading* always worked), but %INC was keyed by the wrong string → `$INC{"Foo/Bar.pm"}` and `Class::Inspector->loaded_filename` (which does `$INC{$class->_inc_filename}`) missed. Fixed by collapsing `::`→ a single `/`. Also gave `keys %INC`/`values %INC` their missing `%INC-MARKER%` case in `p-keys`/`p-values` (they fell to the empty-array branch → `keys %INC` always returned `()`, breaking plugin-loader-style walks). **General:** every multi-segment module had a wrong %INC key. Gate 95/3479 (misc-fixes-02.t 78→79), sweep 18088/66-held/0-regress (identical — no perl-tests touched it because they rarely read %INC). loaded_filename now works.
+
+**Remaining fixable-looking (next):** Class::Inspector test 54 evil-`->isa` CRASH (aborts the file); `Class::Inspector::Functions` export-not-found (7-9). Deferred/hard: Try::Tiny context VOID (wantarray), named (set_subname), finally (DESTROY); Data::Dump `use Test` shim; CMM eval-lexical-capture.
+
+---
+
 ## Session 258 (2026-06-17) — s257 OPEN THREAD CLOSED: unprototyped user-function args are LIST context. Gate 95/3478, sweep +40.
 
 Goal (user): keep driving CPAN modules; specifically re-examine the s257 open thread (flagged twice). Closed it.
