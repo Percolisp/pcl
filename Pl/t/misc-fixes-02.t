@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 51;
+plan tests => 80;
 
 sub run_cl {
     my ($code) = @_;
@@ -576,3 +576,253 @@ test_cl('\\$href->{k} is a live ref (tracks later writes)',
 test_cl('\\$aref->[i] is a live ref (tracks later writes)',
     'my $a = [10, 20]; my $r = \$a->[1]; $a->[1] = 99; print "$$r\n";',
     "99\n");
+
+# ── session 255b: the six sweep-crash fixes (see docs/session-log.md) ──────────
+
+# A lone bareword in a deref block is a symbolic ref to the package variable,
+# NOT a sub call.  @{foo} / "$x->@{foo}" used to emit (pl-foo) → UNDEFINED-FUNCTION
+# (crashed postfixderef.t and magic.t at *@{HASH}).
+test_cl('@{bareword} is the symbolic array @bareword (interpolated)',
+    'our @foo = (7,8,9); $_ = "foo"; print "$_->@{foo}\n";',
+    "foo->7 8 9\n");
+test_cl('@{bareword} is the symbolic array @bareword (non-interpolated)',
+    'our @foo = (7,8,9); print join(",", @{foo}), "\n";',
+    "7,8,9\n");
+
+# $^H (hint bits) and %^H (hints hash) are inert always-bound empties — \%^H,
+# keys %^H, $^H & MASK no longer crash with an unbound variable (eval.t RT 63110).
+test_cl('$^H / %^H are inert, always-bound specials',
+    'print "h=", ($^H & 0x20000), " k=", scalar(keys %^H), " r=", ref(\%^H), "\n";',
+    "h=0 k=0 r=HASH\n");
+
+# An embedded `our $var` in a use-constant value (\our $referent) declares the
+# package global — previously dropped, leaving $referent unbound (index.t).
+test_cl('embedded `our $var` in a use constant value is declared',
+    'use constant riffraff => \our $referent; $referent = 42;'
+  . ' print ref(riffraff), " ", ${riffraff()}, "\n";',
+    "SCALAR 42\n");
+
+# A bareword filehandle argument to select is a filehandle, not a value — was
+# emitted as an unbound bareword symbol (scalar.t `select STDERR`).
+test_cl('select BAREWORD does not evaluate an unbound symbol',
+    'select STDERR; select STDOUT; print "ok\n";',
+    "ok\n");
+
+# A parenthesised scalar arrow-deref base — ($r//0)->[i]... = v — must not be
+# treated as a list (rendered (vector ...)); it autovivified into a bogus
+# 1-element vector → p-autoviv-aref-for-hash TYPE-ERROR (multideref.t).
+test_cl('parenthesised scalar deref base autovivifies through the referent',
+    'my $r = [[0]]; ($r // 0)->[0][0] = 9; print $r->[0][0], "\n";',
+    "9\n");
+
+# ── session 256: scalar(eval{die}) is a single undef element, not empty list ──
+# scalar(EXPR) always produces exactly one scalar.  scalar(eval{die}) was
+# returning raw nil, which p-flatten-args (used by `return (LIST)` in list
+# context) splices away — so `return (scalar(eval{...}), $@)` dropped the undef
+# and shifted the list.  This is the Try::Tiny / Test helper `_eval` idiom.
+test_cl('scalar(eval{die}) contributes one undef element in a returned list',
+    'sub f { return ( scalar(eval { die "boom\n"; 1 }), $@ ); }'
+  . ' my @x = f(); print "n=", scalar(@x), " d0=", (defined $x[0]?1:0), " e=$x[1]";',
+    "n=2 d0=0 e=boom\n");
+
+# ── session 256: a ($)/($$) prototype imposes SCALAR context on its arguments ──
+# child_context honors the scalar/ref slots of an old-style prototype, so an
+# argument that lands in a $ slot is evaluated in scalar context even when the
+# call is at statement level (void).  Without this, wantarray() reports void/
+# undef inside the callee — e.g. Test::More's is($$;$) made `is(try {42}, 42)`
+# evaluate try in void context and return undef.  Self-contained repro (no
+# Test::More): the arg in a $ slot sees scalar context, the slurpy @ sees list.
+test_cl('a ($$;@) prototype imposes scalar context on its $ args, list on @ tail',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub probe ($$;@) { print "a=$_[0] b=$_[1] c=$_[2]\n" }'
+  . ' probe( wa(), wa(), wa() );',
+    "a=S b=S c=L\n");
+
+# Edge cases of prototype-driven argument context (all verified vs perl 5.40):
+
+# A ($) unary-scalar prototype forces scalar context on its single argument.
+test_cl('($) prototype forces scalar context on the argument',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub p1 ($) { print "$_[0]\n" } p1( wa() );',
+    "S\n");
+
+# ($@): the leading $ is scalar, the slurpy @ tail is list — within one call.
+test_cl('($@) prototype: scalar head arg, list slurpy tail',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub psl ($@) { print "a=$_[0] rest=", join(",", @_[1..$#_]), "\n" }'
+  . ' psl( wa(), wa(), wa() );',
+    "a=S rest=L,L\n");
+
+# ($$$;$) — every mandatory/optional scalar slot is scalar context (cmp_ok shape).
+test_cl('($$$;$) prototype forces scalar context on all $ slots',
+    'sub wa { wantarray ? "L" : defined(wantarray) ? "S" : "V" }'
+  . ' sub p3 ($$$;$) { print join(",", @_), "\n" } p3( wa(), wa(), wa() );',
+    "S,S,S\n");
+
+# A (\@) reference prototype: the argument is taken as a ref (scalar slot).
+test_cl('(\\@) reference prototype takes the argument as an array ref',
+    'sub pref (\@) { print ref($_[0]), "\n" } my @b = (1, 2); pref(@b);',
+    "ARRAY\n");
+
+# ── session 256: die preserves ANY reference (blessed OR not) in $@ ──────────
+# Perl's `die REF` keeps the reference verbatim as the exception — no
+# stringification, no " at FILE line N." suffix.  p-die used to preserve only
+# BLESSED refs; an unblessed hashref (`die { prev => $@ }`, Try::Tiny basic.t)
+# fell to the string branch and became "HASH(0x..) at line N".
+test_cl('die with an unblessed hashref preserves it as $@ (ref, not string)',
+    'eval { die { prev => "bar\n" } }; print ref($@), " ", $@->{prev};',
+    "HASH bar\n");
+test_cl('die with an unblessed arrayref preserves it as $@',
+    'eval { die [10, 20, 30] }; print ref($@), " ", join("-", @{$@});',
+    "ARRAY 10-20-30");
+
+# ── session 256: `my $x = EXPR if COND` = `my $x; $x = EXPR if COND` ─────────
+# A statement modifier on a `my` declaration: the lexical is declared
+# unconditionally (its let is opened by the block scanner), only the
+# initializer assignment is conditional, and the lexical is re-bound per call
+# (no stale carryover).  Was: the modifier tokens stayed in the RHS — a bare
+# list-op RHS (`my $c = shift if @_>1`) crashed with a malformed (p-if ...),
+# and a literal RHS dropped the initializer.  Found in File::Spec via
+# Class::Inspector.  (verified vs perl 5.40)
+test_cl('my $x = shift if COND — assigns when true (list-op RHS, no crash)',
+    'sub f { my $c = shift if @_ > 1; return defined $c ? "c=$c" : "u" }'
+  . ' print f(10, 20);',
+    "c=10");
+test_cl('my $x = shift if COND — undef when false',
+    'sub f { my $c = shift if @_ > 1; return defined $c ? "c=$c" : "u" }'
+  . ' print f();',
+    "u");
+test_cl('my $x = LITERAL if COND — initializer kept when true',
+    'sub f { my $c = 5 if @_ > 1; return defined $c ? "c=$c" : "u" }'
+  . ' print f(10, 20);',
+    "c=5");
+# Re-bound per call: a false COND on a later call must NOT see the earlier value.
+test_cl('my $x = EXPR if COND re-binds per call (no stale carryover)',
+    'sub f { my $c = "set" if $_[0]; return defined $c ? $c : "undef" }'
+  . ' print f(1), ",", f(0), ",", f(1);',
+    "set,undef,set");
+
+# ── session 256: interpolated @ISA element (runtime parent class name) ───────
+# `our @ISA = ("Base::$impl")` names a parent only known at run time.  It must
+# NOT be baked into the compile-time CLOS defclass (it would store the literal
+# "Base::$impl"); instead it is pushed onto @ISA at run time and resolved by the
+# %pcl-isa-ancestry method-dispatch walk.  This is the mechanism the real (pure-
+# Perl) File::Spec uses to dispatch to File::Spec::Unix.
+test_cl('interpolated @ISA parent (runtime class name) resolves inherited methods',
+    'package Base::Impl; sub greet { "hi from impl" }'
+  . ' package Front; my $impl = "Impl"; our @ISA = ("Base::$impl");'
+  . ' package main; print Front->greet, "\n";',
+    "hi from impl\n");
+
+# ── session 257: block-scoped `{ package X; our @ISA = (...) }` inheritance ──
+# Two bugs made a block-scoped package's @ISA inheritance silently break (while
+# the same code at file scope worked).  (1) The package's bare `(defclass X ())`
+# is emitted INLINE inside the runtime block, but the parented "Redefine"
+# defclass was hoisted to the package PREAMBLE — emitted earlier, then clobbered
+# by the inline bare one.  (2) The `(defvar @ISA ...)` was unqualified → landed
+# in MAIN::@ISA, but the `(p-push @ISA ...)` ran under `(in-package :X)` → wrote
+# X::@ISA; %pcl-isa-ancestry reads X::@ISA, which stayed empty.  Both now key off
+# _block_depth: parented defclass emitted inline, @ISA package-qualified.  This
+# was the wall blocking Class::Inspector / Safe::Isa.  (verified vs perl 5.40)
+test_cl('block-scoped package @ISA — inherited method dispatch',
+    '{ package Animal; sub new { bless {}, shift } sub speak { "generic" } }'
+  . '{ package Dog; our @ISA = ("Animal"); sub bark { "woof" } }'
+  . ' my $d = Dog->new; print $d->speak, "-", $d->bark, "\n";',
+    "generic-woof\n");
+test_cl('block-scoped package @ISA — isa() and can()',
+    '{ package Animal; sub new { bless {}, shift } sub legs { 4 } }'
+  . '{ package Dog; our @ISA = ("Animal"); }'
+  . ' my $d = Dog->new;'
+  . ' print +($d->isa("Animal") ? "y" : "n"), ($d->can("legs") ? "y" : "n"), "\n";',
+    "yy\n");
+test_cl('block-scoped package @ISA — SUPER:: dispatch',
+    '{ package Animal; sub new { bless {}, shift } sub speak { "generic" } }'
+  . '{ package Dog; our @ISA = ("Animal");'
+  . '  sub speak { my $s = shift; "woof+" . $s->SUPER::speak() } }'
+  . ' print Dog->new->speak, "\n";',
+    "woof+generic\n");
+
+# ── session 257: method call on undef / unblessed ref is a fatal error ───────
+# `$ref->method` where $ref is an unblessed reference dies "Can't call method X
+# on unblessed reference"; on undef it dies "...on an undefined value".  Was: the
+# invocant yielded a nil class which fell through to "main", so the call silently
+# dispatched against main (lived).  Safe::Isa's $_isa/$_can guard non-objects by
+# relying on this death under eval.  (verified vs perl 5.40)
+test_cl('method call on unblessed ref / undef dies (caught by eval)',
+    'my $aref = [42]; my $undef;'
+  . ' my $a = eval { $aref->isa("Foo"); 1 };'
+  . ' my $b = eval { $undef->can("x"); 1 };'
+  . ' print defined($a) ? "lived" : "died", ",",'
+  . '       defined($b) ? "lived" : "died", "\n";',
+    "died,died\n");
+
+# ── session 257: method-call arguments are LIST context ──────────────────────
+# A Perl method call passes its args as a flat list (methods can't have
+# prototypes), so a list-returning arg must run in LIST context.  Was: a
+# method-call arg inherited the caller's (scalar) context, so
+# `$obj->m(split /::/, $s)` evaluated split in scalar context → it returned the
+# field COUNT (2) instead of the fields.  This was the Class::Inspector
+# ->filename bug: File::Spec->catfile(split /::/, $name) gave "2".  (Plain
+# unprototyped FUNCTION calls are deliberately NOT changed here — forcing LIST on
+# all user-sub args regressed the sweep; only the method path is fixed.)
+test_cl('method-call arg gets list context (split returns fields, not count)',
+    'package Cat; sub j { shift; return join("/", @_) }'
+  . ' package main; my $name = "Class::Inspector";'
+  . ' print Cat->j(split /(?:\'|::)/, $name), "\n";',
+    "Class/Inspector\n");
+
+# ── session 258: unprototyped user-function args are LIST context ────────────
+# Sibling of the s257 methodcall rule: Perl flattens a function call's args into
+# @_, so a list-returning arg (split, etc.) must run in LIST context.  Was: such
+# args inherited the caller's (scalar/void) context → split returned its field
+# COUNT.  Made safe by extracting the TAP assertions' real ($$@) prototypes from
+# test.pl/Test::More so is(unpack(...), …) etc. stay scalar.  (verified vs perl 5.40)
+test_cl('unprototyped user-function arg gets list context (split → fields)',
+    'sub myf { return scalar(@_) }'
+  . ' print myf(split /,/, "a,b,c"), "\n";',
+    "3\n");
+
+test_cl('user-function arg list-context preserves all split fields',
+    'sub cat { shift; return join("/", @_) }'
+  . ' print cat("x", split /::/, "Foo::Bar::Baz"), "\n";',
+    "Foo/Bar/Baz\n");
+
+# Bit-shift and bitwise operators force SCALAR context on their operands.  This
+# latent bug surfaced once list context could reach them: `($x || 255) << 8`
+# evaluated the `||` RHS in list context and the shift/bitwise op yielded 0.
+# << >> & | ^ are numeric scalar operators — operands must be scalar even when
+# the op sits in an unprototyped funcall's (now list-context) argument slot.
+test_cl('bitwise/shift operators force scalar context on operands',
+    'my $z = 0;'
+  . ' sub g { return join(",", @_) }'
+  . ' print g(($z||255)<<8, ($z||7)&3, ($z||4)|1, ($z||4096)>>4), "\n";',
+    "65280,3,5,256\n");
+
+# ── session 258b: %INC populated with single-slash keys (was Foo//Bar.pm) ─────
+# p-module-to-path replaced each ':' with '/', so 'Foo::Bar' -> 'Foo//Bar.pm'.
+# The OS tolerates the double slash when opening the file (so loading worked),
+# but %INC's key was wrong, and $INC{"Foo/Bar.pm"} / loaded_filename-style
+# lookups missed.  Fix: collapse '::' to a single '/'.  Also gave keys/values
+# %INC their missing %INC-MARKER% case (they returned empty).  Found via the
+# Class::Inspector test suite (loaded_filename).  (verified vs perl 5.40)
+test_cl('%INC key uses single slash and keys %INC enumerates loaded modules',
+    'use File::Spec;'
+  . ' print exists $INC{"File/Spec.pm"} ? "Y" : "N";'
+  . ' my @f = grep { m{/} } keys %INC;'
+  . ' print scalar(@f) ? "K" : "k"; print "\n";',
+    "YK\n");
+
+# ── session 258b: @ISA = qw/.../ with a NON-bracket delimiter ────────────────
+# _extract_parent_classes stripped only bracket qw delimiters ( [ { < — so
+# `our @ISA = qw/ Parent /` (slash, or !|#, etc.) kept its "qw/" prefix and "/"
+# suffix and split into bogus parent names ("qw/", "Parent", "/"), emitting a
+# (defclass ... (qw/::plc-qw/ ... /::plc-/)) that failed to READ ("Package QW/
+# does not exist").  qw(Parent) always worked.  Found in YAML::PP::Reader
+# (`our @ISA = qw/ YAML::PP::Reader /`).  Fix: strip qw + ANY delimiter.
+test_cl('@ISA = qw/.../ (slash/non-bracket delimiter) sets inheritance',
+    'package P; sub new { bless {}, shift } sub hi { "hi" }'
+  . ' package C; our @ISA = qw/ P /;'
+  . ' package D; our @ISA = qw! P !;'
+  . ' package main;'
+  . ' print ref(C->new), ":", C->new->hi, ":", ref(D->new), "\n";',
+    "C:hi:D\n");

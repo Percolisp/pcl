@@ -136,7 +136,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+|
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
@@ -517,6 +517,13 @@
   #+windows "MSWin32"
   #-(or linux darwin windows) "unknown"
   "Operating system name")
+
+;;; Lexical hints — $^H (hint bits) and %^H (the hints hash). PCL does not model
+;;; compile-time hints; expose them as inert always-bound empties so `$^H & MASK`,
+;;; `\%^H` and `keys %^H` never hit an unbound variable (eval.t RT 63110 / the
+;;; "use feature" hint-transmission tests). Nothing ever writes meaningful data.
+(defvar |$^H| 0 "Perl $^H - lexical hint bits (inert 0 in PCL)")
+(defvar |%^H| (make-hash-table :test 'equal) "Perl %^H - hints hash (inert empty in PCL)")
 
 ;;; Perl version ($^V) - we report as PCL
 (defvar |$^V| "v5.30.0" "Perl version (compatibility)")
@@ -5640,6 +5647,12 @@
                   (when (%p-real-hash-key-p k) (vector-push-extend k result)))
                 collection)
        result))
+    ;; %INC special hash: keys are the loaded modules' relative paths.
+    ((eq (unbox collection) '%INC-MARKER%)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (maphash (lambda (k v) (declare (ignore v)) (vector-push-extend k result))
+                *p-inc-table*)
+       result))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
@@ -5661,6 +5674,12 @@
                   (when (%p-real-hash-key-p k)
                     (vector-push-extend (%p-hash-unbox-elem v) result)))
                 collection)
+       result))
+    ;; %INC special hash: values are the loaded modules' resolved paths.
+    ((eq (unbox collection) '%INC-MARKER%)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (maphash (lambda (k v) (declare (ignore k)) (vector-push-extend v result))
+                *p-inc-table*)
        result))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
@@ -6348,12 +6367,24 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (multiple-value-bind (args loc) (%p-extract-loc raw-args)
     (if (and (= (length args) 1)
              (let ((obj (car args)))
-               ;; Check if it's a blessed hash or blessed box
+               ;; Perl's `die REF` preserves ANY reference (blessed or not) as
+               ;; the exception object — $@/$_ in the catcher IS that reference,
+               ;; with no stringification and no " at FILE line N." suffix (the
+               ;; suffix is only for string dies).  So preserve: a blessed raw
+               ;; hash, a scalar/glob ref box (p-box-is-ref), or a box wrapping a
+               ;; reference container (hashref/arrayref/coderef/ref-to-ref).
+               ;; Without this, `die { prev => $@ }` (an UNBLESSED hashref) fell
+               ;; to the string branch and stringified to "HASH(0x..) at line N".
                (or (and (hash-table-p obj) (gethash :__class__ obj))
                    (and (p-box-p obj)
-                        (let ((inner (p-box-value obj)))
-                          (or (p-box-class obj)
-                              (and (hash-table-p inner) (gethash :__class__ inner))))))))
+                        (or (p-box-class obj)
+                            (p-box-is-ref obj)
+                            (let ((inner (p-box-value obj)))
+                              (or (hash-table-p inner)
+                                  (and (vectorp inner) (not (stringp inner)))
+                                  (functionp inner)
+                                  (p-box-p inner)
+                                  (p-typeglob-p inner))))))))
         ;; Object exception - preserve for $@
         (error 'p-exception :object (car args))
         ;; String exception
@@ -7946,13 +7977,23 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-module-to-path (module-name)
   "Convert Perl module name to relative path.
    Foo::Bar => Foo/Bar.pm
-   Foo/Bar.pm => Foo/Bar.pm (unchanged)"
+   Foo/Bar.pm => Foo/Bar.pm (unchanged)
+   The `::` separator collapses to a SINGLE `/` — a naive per-char substitute
+   turns `::` into `//`, which the OS tolerates when opening the file but leaves
+   a wrong %INC key (Foo//Bar.pm), so $INC{'Foo/Bar.pm'} lookups miss."
   (let ((name (to-string module-name)))
     (if (search ".pm" name)
         name
-        (concatenate 'string
-                     (substitute #\/ #\: name)
-                     ".pm"))))
+        (let ((out (make-string-output-stream))
+              (i 0)
+              (len (length name)))
+          (loop while (< i len) do
+                (if (and (char= (char name i) #\:)
+                         (< (1+ i) len)
+                         (char= (char name (1+ i)) #\:))
+                    (progn (write-char #\/ out) (incf i 2))
+                    (progn (write-char (char name i) out) (incf i))))
+          (concatenate 'string (get-output-stream-string out) ".pm")))))
 
 (defun p-find-module-in-inc (rel-path)
   "Search @INC for module file, return absolute path or nil."
@@ -8288,6 +8329,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   TAP layer ON DEMAND (p-ensure-test-lib), so a non-test program never pulls in
   the test infrastructure, and a .t file is self-contained.")
 
+(defparameter *p-pragma-modules*
+  '("strict" "warnings" "feature" "utf8" "open" "bytes"
+    "locale" "integer" "re" "overloading" "warnings::register")
+  "Lexical pragmas: they manipulate compile-time hint bitmasks ($^H,
+  ${^WARNING_BITS}) that PCL does not model.  Bareword `use strict` is already a
+  parser no-op, but a STRING require — the `if` pragma does `require \"strict.pm\"`
+  — or an explicit `require strict` reaches p-use, where loading the real .pm
+  would hit `STRICT::$^H unbound`.  So skip the load entirely (the import/unimport
+  methods are separately stubbed as no-ops below).")
+
 (defvar *pcl-test-lib-loaded* nil
   "T once cl/pcl-test.lisp has been loaded — by the harness preloading it, or
   on demand from `use Test::More`.  Guards against re-loading.")
@@ -8318,6 +8369,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; .pm; load PCL's TAP layer on demand instead (no-op if already loaded).
   (when (member module-name *p-pcl-provided-modules* :test #'string=)
     (p-ensure-test-lib)
+    (return-from p-use t))
+  ;; Lexical pragmas (strict/warnings/feature/...): never load the core .pm —
+  ;; PCL doesn't model the hint bitmasks they touch.  Reached only via a string
+  ;; require (the `if` pragma) or an explicit `require strict`.
+  (when (member module-name *p-pragma-modules* :test #'string-equal)
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
         (caller-pkg *package*))
@@ -8365,25 +8421,46 @@ buffer's fill-pointer; everything else falls back to file-length."
     (error () nil)))
 
 (defun p-require-file (path)
-  "Perl require with file path - load a .pl file by path.
-   Resolves relative paths against current directory."
-  (let* ((path-str (unbox path))
-         ;; Check if already loaded (Perl tracks this in %INC by path)
-         (abs-path (if (char= (char path-str 0) #\/)
-                       path-str
-                       ;; Relative path - resolve against current dir
-                       (merge-pathnames path-str (truename *default-pathname-defaults*)))))
-    ;; Check %INC to avoid reloading
+  "Perl require with a string/path argument.
+   A `.pm` path (Foo/Bar.pm) is a MODULE require: resolve through @INC and the
+   lib/ shims exactly like a bareword `require Foo::Bar`.  This is what the `if`
+   pragma's `use if COND, MODULE` does — it builds \"MODULE.pm\" (`::`->`/`) and
+   string-requires it; routing through p-require also makes the XS-only and
+   PCL-provided (Test::More) shortcuts in p-use fire, which key on the `::` name.
+   A non-.pm path (./test.pl) is loaded literally, relative to the current dir,
+   with an @INC fallback (Perl searches @INC for all string requires)."
+  (let ((path-str (unbox path)))
+    ;; Check %INC to avoid reloading (Perl keys %INC by the string used).
     (when (gethash path-str *p-inc-table*)
       (return-from p-require-file t))
-    ;; Load the file using pl2cl
-    (unless (probe-file abs-path)
-      (error "Can't locate ~A" path-str))
-    ;; Transpile and load
-    (p-load-module-cached abs-path)
-    ;; Update %INC
-    (setf (gethash path-str *p-inc-table*) (namestring abs-path))
-    t))
+    ;; A `.pm` path is a module require — delegate to the bareword machinery.
+    (when (and (>= (length path-str) 3)
+               (string= path-str ".pm" :start1 (- (length path-str) 3)))
+      (let* ((bare (subseq path-str 0 (- (length path-str) 3)))
+             (module-name (with-output-to-string (s)
+                            (loop for ch across bare
+                                  do (if (char= ch #\/)
+                                         (write-string "::" s)
+                                         (write-char ch s))))))
+        (p-require module-name)
+        ;; p-use already records the rel-path (= path-str for a .pm) in %INC;
+        ;; set it too so the guard above fires on a literal repeat.
+        (setf (gethash path-str *p-inc-table*) path-str)
+        (return-from p-require-file t)))
+    ;; Non-.pm: literal file load (e.g. ./test.pl), cwd-relative, @INC fallback.
+    (let ((abs-path (if (char= (char path-str 0) #\/)
+                        path-str
+                        (let ((cwd-path (merge-pathnames
+                                         path-str
+                                         (truename *default-pathname-defaults*))))
+                          (if (probe-file cwd-path)
+                              cwd-path
+                              (or (p-find-module-in-inc path-str) cwd-path))))))
+      (unless (probe-file abs-path)
+        (error "Can't locate ~A" path-str))
+      (p-load-module-cached abs-path)
+      (setf (gethash path-str *p-inc-table*) (namestring abs-path))
+      t)))
 
 ;;; ============================================================
 ;;; List Functions
@@ -10003,6 +10080,14 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((and (vectorp v) (adjustable-array-p v)) (length v))
       ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count
       ((and (hash-table-p v) (not (p-box-p val))) (%p-hash-user-count v))
+      ;; An undef result is the scalar undef: return the *p-undef* sentinel, not
+      ;; raw nil.  scalar(EXPR) ALWAYS produces a single scalar, so e.g.
+      ;; `scalar(eval { die })` must contribute exactly one undef element to a
+      ;; surrounding list.  Raw nil is ambiguous with the empty list and gets
+      ;; spliced away by p-flatten-args (the `return (scalar(eval{...}), $@)`
+      ;; idiom in Try::Tiny / test helpers); the sentinel survives like literal
+      ;; undef does.
+      ((null v) *p-undef*)
       ;; Everything else (numbers, hash refs, etc.) returns as-is
       (t v))))
 
@@ -10218,6 +10303,20 @@ buffer's fill-pointer; everything else falls back to file-length."
                          (t c)))))
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
+
+    ;; A method call on undef or an UNBLESSED reference is a fatal Perl error
+    ;; ("Can't call method X on an undefined value" / "on unblessed reference").
+    ;; Real code relies on this firing under eval — e.g. Safe::Isa's $_isa/$_can
+    ;; guard `$thing->$_isa(...)` against non-objects.  raw-class is nil for undef,
+    ;; unblessed refs, AND plain strings/numbers; only the first two die — a plain
+    ;; string is a legitimate class name (e.g. `my $c="Foo"; $c->m`), handled below.
+    (when (null raw-class)
+      (let ((uv (unbox resolved-obj)))
+        (cond
+          ((or (null uv) (eq uv *p-undef*))
+           (error "Can't call method ~A on an undefined value" method-name))
+          ((plusp (length (the string (p-ref resolved-obj))))
+           (error "Can't call method ~A on unblessed reference" method-name)))))
 
     ;; Auto-load the package if it doesn't exist yet.
     ;; This mirrors how Perl automatically has core modules (like version.pm)
@@ -11431,9 +11530,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; method resolve to a no-op (and find-symbol-first prevents the core file from
 ;;; being loaded), so we never have to model $^H at all.
 (eval-when (:load-toplevel :execute)
-  (dolist (p '("STRICT" "WARNINGS" "FEATURE" "UTF8" "OPEN" "BYTES"
-               "LOCALE" "INTEGER" "RE" "OVERLOADING" "WARNINGS::REGISTER"))
-    (let ((pkg (or (find-package p) (make-package p :use '(:cl :pcl)))))
+  (dolist (pragma *p-pragma-modules*)
+    (let* ((p (string-upcase pragma))
+           (pkg (or (find-package p) (make-package p :use '(:cl :pcl)))))
       (dolist (m '("PL-IMPORT" "PL-UNIMPORT"))
         (let ((sym (intern m pkg)))
           (setf (fdefinition sym) (lambda (&rest a) (declare (ignore a)) nil))

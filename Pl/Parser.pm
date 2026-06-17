@@ -777,6 +777,29 @@ sub _insert_variable_forward_declarations {
     }
   }
 
+  # Embedded `our $var` declarations (e.g. \our $referent, bless \our $x) — the
+  # package global is referenced only inside a generated body, so the file-scope
+  # scan below misses it. Emit one idempotent defvar each (matching the sigil's
+  # container), skipping any already declared.
+  if ($self->environment) {
+    my $eov = $self->environment->expression_our_vars;
+    my @eov_decls;
+    for my $cl_var (sort keys %$eov) {
+      next if $declared{$cl_var};
+      my $sigil = $eov->{$cl_var};
+      my $init = $sigil eq '@' ? "(make-array 0 :adjustable t :fill-pointer 0)"
+               : $sigil eq '%' ? "(make-hash-table :test 'equal)"
+               :                 "(make-p-box nil)";
+      push @eov_decls, "(defvar $cl_var $init)";
+      $declared{$cl_var} = 1;
+    }
+    if (@eov_decls) {
+      push @$decls, ";; Embedded `our \$var` declarations (\\our \$x, use constant => \\our \$v).";
+      push @$decls, @eov_decls;
+      push @$decls, "";
+    }
+  }
+
   my %forced_sort_var;  # $a/$b force-declared here (vs. user-declared via my)
   unless ($declared{'$a'}) {
     push @$decls, "(defvar \$a (make-p-box nil))";
@@ -1408,6 +1431,35 @@ sub _process_variable_statement {
   my $declarator = '';
   if (ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content =~ /^(my|our|state|local)$/) {
     $declarator = $1;
+  }
+
+  # Statement modifier on a `my` declaration inside a sub:
+  #   my $x = EXPR if COND;   my @a = LIST unless COND;   my $c = shift if @_;
+  # The lexical is declared UNCONDITIONALLY — its `let` is opened by the block
+  # scanner from the `my` — and only the initializer assignment is conditional.
+  # Strip the declarator and route `$x = EXPR if COND` through the expression-
+  # statement path, which already lowers if/unless/while/until/for modifiers.
+  # Without this the modifier tokens stayed in @parts and the RHS parser choked
+  # (`my $c = shift if @_>1` → (p-shift (p-if ...)) crash; `my $c = 5 if @_>1`
+  # → dropped initializer).  Scoped to in-sub `my`: top-level my/our/local/state
+  # emit their declaration inline (not via the scanner), so they keep their own
+  # paths.
+  if ($declarator eq 'my' && $self->environment->in_subroutine > 0) {
+    my $mod_idx = -1;
+    for my $i (1 .. $#parts) {
+      next unless ref($parts[$i]) eq 'PPI::Token::Word';
+      if ($parts[$i]->content =~ /^(?:if|unless|while|until|for|foreach)$/) {
+        $mod_idx = $i;
+        last;
+      }
+    }
+    if ($mod_idx > 0) {
+      $self->_emit(";; $perl_code");
+      my $synth = PPI::Statement->new();
+      $synth->add_element($_->clone) for @parts[1 .. $#parts];
+      $self->_process_expression_statement($synth);
+      return;
+    }
   }
 
   # Handle 'our' declarations - package variables
@@ -2142,17 +2194,23 @@ sub _process_isa_declaration {
 
   my $pkg = $self->environment->current_package;
 
-  # Extract parent class names from RHS
+  # Extract parent class names from RHS.  Split into LITERAL parents (known at
+  # compile time → baked into the CLOS defclass supers + MRO) and INTERPOLATED
+  # parents (a runtime-only class name, e.g. File::Spec's
+  # `our @ISA = ("File::Spec::$module")`).  An interpolated parent can't go in
+  # the defclass — its name isn't known until run time — so it is only pushed
+  # onto @ISA at run time, and method dispatch resolves it via the runtime
+  # %pcl-isa-ancestry walk (verified: a string pushed onto @ISA dispatches).
   my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
   @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
 
-  my @parents = $self->_extract_parent_classes(\@rhs_parts);
+  my ($parents, $expr_parents) = $self->_classify_isa_parents(\@rhs_parts);
 
   $self->_with_bucket('declarations', sub {
     $self->_emit(";; $perl_code");
   });
 
-  if (@parents) {
+  if (@$parents) {
     # Emit CLOS class with parent classes for MRO tracking
     my $cl_class = $self->_pkg_to_clos_class($pkg);
     # Package-qualify parent class symbols so they resolve correctly regardless
@@ -2163,32 +2221,98 @@ sub _process_isa_declaration {
       my $cls = $self->_pkg_to_clos_class($_);
       my $pkg_prefix = ($_ =~ /::/) ? "|$_|" : $_;
       "$pkg_prefix\:\:$cls"
-    } @parents);
+    } @$parents);
 
     # Store parent list in environment for later use
-    $self->environment->set_isa($pkg, \@parents);
+    $self->environment->set_isa($pkg, $parents);
 
-    # Redefine the CLOS class with parents in preamble (package-setup form)
-    $self->_with_bucket('preamble', sub {
+    # Redefine the CLOS class with parents for MRO.  Normally this goes in the
+    # package's preamble (hoisted before runtime code).  But inside a runtime
+    # block ({ package X; our @ISA=... }), the package's *bare* defclass is
+    # emitted inline (see _emit_package_preamble), so a preamble "Redefine" would
+    # be hoisted BEFORE that bare defclass and then get clobbered by it.  Emit the
+    # parented defclass inline instead, so it follows the bare one in the stream.
+    if ($self->_block_depth > 0) {
+      # Qualify the class name (same read-time-package reason as the bare
+      # defclass in _emit_package_preamble's block branch).
+      my $q_class = $self->_qualified_clos_class($pkg);
       $self->_emit(";; Redefine CLOS class with parents for MRO");
-      $self->_emit("(defclass $cl_class ($parents_cl) ())");
-    });
+      $self->_emit("(defclass $q_class ($parents_cl) ())");
+    }
+    else {
+      $self->_with_bucket('preamble', sub {
+        $self->_emit(";; Redefine CLOS class with parents for MRO");
+        $self->_emit("(defclass $cl_class ($parents_cl) ())");
+      });
+    }
   }
 
-  # Declare @ISA in declarations bucket, initialize at runtime
-  # When inside a sub (inline package with no (in-package) context change),
-  # qualify @ISA with the package name so it lands in the right package.
-  my $isa_sym = ($self->environment->in_subroutine > 0)
-    ? "${pkg}::\@ISA"
-    : "\@ISA";
+  # Declare @ISA in declarations bucket, initialize at runtime.
+  # When inside a sub OR a runtime block (an inline package whose @ISA push runs
+  # under (in-package :Pkg)), qualify @ISA with the package name so the defvar
+  # lands in the SAME package the push targets — otherwise the runtime
+  # %pcl-isa-ancestry walk reads an unpopulated Pkg::@ISA and inheritance breaks.
+  my $qualify = ($self->environment->in_subroutine > 0
+                 || $self->_block_depth > 0);
+  my $isa_sym = $qualify ? $self->_qualified_isa_symbol($pkg) : "\@ISA";
   $self->_with_bucket('declarations', sub {
     $self->_emit("(defvar $isa_sym (make-array 0 :adjustable t :fill-pointer 0))");
   });
-  for my $parent (@parents) {
+  for my $parent (@$parents) {
     $self->_emit("(p-push $isa_sym \"$parent\")");
+  }
+  # Interpolated parents: push the runtime-evaluated class-name string.
+  for my $expr_cl (@$expr_parents) {
+    $self->_emit("(p-push $isa_sym $expr_cl)");
   }
 
   $self->_emit("");
+}
+
+# Classify @ISA RHS elements into literal parent names (compile-time, for the
+# CLOS defclass) and interpolated parent expressions (runtime CL strings, for a
+# runtime push).  Returns (\@literal_names, \@expr_cl).  An interpolating quote
+# (double-quoted / qq) that actually contains a sigil is treated as runtime;
+# everything else (qw, single-quoted, sigil-free double-quoted) is literal.
+sub _classify_isa_parents {
+  my ($self, $parts) = @_;
+  my (@literal, @expr);
+
+  for my $part (@$parts) {
+    my $ref = ref($part);
+    if ($ref eq 'PPI::Token::Quote::Double'
+        || $ref eq 'PPI::Token::Quote::Interpolate') {
+      if ($part->string =~ /[\$\@]/) {
+        # Interpolated, runtime-only class name → (p-string-concat ...).
+        my $cl = $self->_parse_expression([$part]);
+        $cl =~ s/^[ \t]+//;
+        push @expr, $cl if defined $cl && length $cl;
+        next;
+      }
+      push @literal, $part->string;       # double-quoted but no sigil
+    }
+    elsif ($ref eq 'PPI::Structure::List') {
+      for my $child ($part->schildren) {
+        if ($child->isa('PPI::Statement::Expression')) {
+          my ($l, $e) = $self->_classify_isa_parents([$child->schildren]);
+          push @literal, @$l;
+          push @expr,    @$e;
+        }
+        elsif ($child->isa('PPI::Token::Quote')) {
+          my ($l, $e) = $self->_classify_isa_parents([$child]);
+          push @literal, @$l;
+          push @expr,    @$e;
+        }
+      }
+    }
+    else {
+      # qw(...), single-quoted, etc. — all literal: reuse the existing extractor.
+      push @literal, $self->_extract_parent_classes([$part]);
+    }
+  }
+
+  @literal = grep { defined $_ && $_ ne '' } @literal;
+  return (\@literal, \@expr);
 }
 
 # Process 'use base' / 'use parent' - equivalent to push @ISA, ...
@@ -2281,10 +2405,14 @@ sub _extract_parent_classes {
     my $ref = ref($part);
 
     if ($ref eq 'PPI::Token::QuoteLike::Words') {
-      # qw(Parent1 Parent2)
+      # qw(Parent1 Parent2) — strip the qw and ANY delimiter, not just brackets.
+      # `our @ISA = qw/ Foo /` (slash, or !|#, etc.) must work too; the old
+      # bracket-only strip left "qw/" and "/" as bogus parent names → a broken
+      # (defclass ... (qw/::plc-qw/ ... /::plc-/)) that fails to READ.
+      # Mirrors the general strip in _process_use_base.
       my $content = $part->content;
-      $content =~ s/^qw\s*[\(\[\{<]//;
-      $content =~ s/[\)\]\}>]$//;
+      $content =~ s/^qw\s*[^\w\s]//;
+      $content =~ s/[^\w\s]$//;
       push @parents, split(/\s+/, $content);
     }
     elsif ($ref eq 'PPI::Token::Quote::Single'
@@ -5741,6 +5869,30 @@ sub _cl_pkg_designator {
   return ($pkg_name =~ /::/) ? ":|$pkg_name|" : ":$pkg_name";
 }
 
+# The package-qualified CL symbol for a package's @ISA array, e.g.
+# Dog::@ISA for single-segment, |Foo::Bar|::@ISA for multi-segment.  Built from
+# the package designator so it reads into the SAME package the runtime resolves
+# via perl-pkg-to-cl-pkg-name (and that %pcl-isa-ancestry searches).
+sub _qualified_isa_symbol {
+  my ($self, $pkg_name) = @_;
+  (my $prefix = $self->_cl_pkg_designator($pkg_name)) =~ s/^://;
+  return "${prefix}::\@ISA";
+}
+
+# The package-qualified CLOS class symbol for a package, e.g. Foo::plc-foo (or
+# |Foo::Bar|::plc-foo--bar).  Used INSIDE a runtime block, where the whole
+# package is one top-level (let ...) form: the inner (in-package :Foo) does not
+# take effect at READ time, so a bare `(defclass plc-foo ...)` would intern
+# plc-foo in the read-time package instead of :Foo.  A sibling class that names
+# this one as a superclass (`(defclass plc-bar (Foo::plc-foo) ())`) DOES use the
+# qualified symbol, so without qualifying the definition the two diverge and the
+# referenced class is left FORWARD-REFERENCED (finalize-inheritance crash).
+sub _qualified_clos_class {
+  my ($self, $pkg_name) = @_;
+  (my $prefix = $self->_cl_pkg_designator($pkg_name)) =~ s/^://;
+  return "${prefix}::" . $self->_pkg_to_clos_class($pkg_name);
+}
+
 sub _emit_package_preamble {
   my $self     = shift;
   my $pkg_name = shift;
@@ -5757,7 +5909,10 @@ sub _emit_package_preamble {
     $self->_emit("(p-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
-    $self->_emit("(defclass $cl_class () ())");
+    # Qualify the class name: the inline (in-package) above has not taken effect
+    # at READ time (the whole block is one top-level form), so a bare class name
+    # would intern in the wrong package — see _qualified_clos_class.
+    $self->_emit("(defclass @{[ $self->_qualified_clos_class($pkg_name) ]} () ())");
     # Declare $a/$b as special in this package using fully-qualified names in the
     # top-level declarations bucket.  Using pkg::$a at top level (where the reader's
     # *package* is whatever the enclosing section uses) ensures SBCL sees these as
@@ -5925,14 +6080,31 @@ sub _process_include_statement {
         return;
       }
 
-      # Check if it's a simple string literal (compile-time)
+      # Check if it's a simple string literal (compile-time).  An INTERPOLATING
+      # quote with variables — require "File/Spec/$module.pm" (the real
+      # File::Spec OS-dispatch) — must NOT be emitted as a raw literal: the
+      # $module is only known at runtime.  Treat it as compile-time literal only
+      # when the quote does not interpolate (single-quoted / q{}) OR has no
+      # sigils; otherwise fall through to the runtime expression path below,
+      # which lowers the interpolation to (p-string-concat ...).
       if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
-        my $path = $tokens[0]->string;
-        $self->_emit(";; $perl_code");
-        $self->_emit("(p-eval-always");
-        $self->_emit("  (p-require-file \"$path\"))");
-        $self->_emit("");
-        return;
+        my $q = $tokens[0];
+        my $interpolating = $q->isa('PPI::Token::Quote::Double')
+                         || $q->isa('PPI::Token::Quote::Interpolate');
+        my $path = $q->string;
+        if (!$interpolating || $path !~ /[\$\@]/) {
+          # Learn prototypes declared in the required file (e.g. test.pl's
+          # `sub is ($$@)`) so child_context can impose SCALAR context on the
+          # leading args — same mechanism as `use Module` -> shim prototypes.
+          my $file_env = $self->_extract_file_prototypes($path);
+          $self->_merge_module_prototypes($file_env, undef) if $file_env;
+          $self->_emit(";; $perl_code");
+          $self->_emit("(p-eval-always");
+          $self->_emit("  (p-require-file \"$path\"))");
+          $self->_emit("");
+          return;
+        }
+        # interpolating with variables → fall through to the expression path
       }
 
       # Otherwise, parse as expression (runtime)
@@ -6279,9 +6451,18 @@ sub _extract_module_prototypes {
   # (List::Util is intentionally NOT skipped: its shim declares block
   # prototypes — first/any/reduce/pair* (&@) — that the block-form parser
   # needs, so its prototypes must be extracted from lib/List/Util.pm.)
-  if ($module =~ /^(Test2?::|Carp|Scalar::Util|Time::HiRes|
+  if ($module =~ /^(Carp|Scalar::Util|Time::HiRes|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
+    return $cache->{$module} = undef;
+  }
+  # Skip the heavy Test2 stack and Test:: internals — EXCEPT Test::More and
+  # Test::Simple, whose tiny lib/ shims declare the assertion prototypes
+  # (is($$;$), ok($;$), like($$;$), …) that child_context needs to impose
+  # SCALAR context on their arguments.  The shims win in @INC, so we read the
+  # prototype stub, never the real Test2 stack.
+  if (($module =~ /^Test2::/ || $module =~ /^Test::/)
+      && $module !~ /^Test::(?:More|Simple)$/) {
     return $cache->{$module} = undef;
   }
 
@@ -6317,6 +6498,55 @@ sub _extract_module_prototypes {
 }
 
 
+# Extract prototypes from a file required by literal path (require "./test.pl").
+# This is the require-equivalent of _extract_module_prototypes: perl-tests load
+# their assertion helpers via `require './test.pl'` (not `use Test::More`), and
+# that file declares the real prototypes (sub is ($$@), ...) which child_context
+# needs to impose SCALAR context on the leading args.  Nested requires in the
+# parsed file recurse through this same path, so the test.pl -> t/test.pl
+# redirect is followed automatically.
+sub _extract_file_prototypes {
+  my ($self, $path) = @_;
+  state $cache = {};
+
+  # Resolve the path: relative to cwd first, then to the source file's dir.
+  my @candidates = ($path);
+  if ($self->filename) {
+    require File::Basename;
+    my $dir = File::Basename::dirname($self->filename);
+    push @candidates, "$dir/$path" if defined $dir && length $dir;
+  }
+  my $resolved;
+  for my $c (@candidates) {
+    if (-f $c) { $resolved = $c; last; }
+  }
+  return undef unless $resolved;
+
+  require Cwd;
+  my $abs = Cwd::abs_path($resolved) // $resolved;
+  return $cache->{$abs} if exists $cache->{$abs};
+
+  # Cycle detection (shared across the require chain)
+  return undef if $self->_parsing_modules->{"file:$abs"};
+  local $self->_parsing_modules->{"file:$abs"} = 1;
+
+  my $doc = PPI::Document->new($abs);
+  return $cache->{$abs} = undef unless $doc;
+
+  my $file_env = Pl::Environment->new();
+  my $file_parser = Pl::Parser->new(
+    filename                => $abs,
+    environment             => $file_env,
+    inc_paths               => $self->inc_paths,
+    _parsing_modules        => $self->_parsing_modules,
+    collect_prototypes_only => 1,
+  );
+  eval { $file_parser->parse($doc) };
+  return $cache->{$abs} = undef if $@;
+  return $cache->{$abs} = $file_env;
+}
+
+
 # Merge prototypes from another environment (only exported ones)
 sub _merge_module_prototypes {
   my ($self, $module_env, $imports) = @_;
@@ -6336,6 +6566,10 @@ sub _merge_module_prototypes {
   # For now, import all prototypes that affect code generation:
   # - has_block_arg: requires &{} wrapping
   # - reference params (\@, \%, \$): require auto-boxing
+  # - scalar params ($): impose SCALAR context on that argument (child_context),
+  #   so e.g. Test::More's is($$;$) evaluates `is(try {...}, ...)` in scalar
+  #   context.  Any old-style prototype ($-proto) is a context signal now, so a
+  #   plain ($$) sub propagates too — not just block/ref prototypes.
   # This is a simplification - full implementation would track @EXPORT
   for my $name (keys %{$module_env->prototypes}) {
     my $proto = $module_env->get_prototype($name);
@@ -6345,11 +6579,13 @@ sub _merge_module_prototypes {
     my $needs_import = 0;
     $needs_import = 1 if $proto->{has_block_arg};
 
-    # Check for reference parameters (proto_type starts with \)
-    if ($proto->{params} && @{$proto->{params}}) {
+    # An old-style prototype with explicit parameter slots affects argument
+    # context (scalar $, ref \X, or slurpy @/%) — import it so child_context
+    # can apply the right wantarray to each argument.
+    if ($proto->{is_proto} && $proto->{params} && @{$proto->{params}}) {
       for my $param (@{$proto->{params}}) {
-        my $ptype = $param->{proto_type} // $param->{name};
-        if ($ptype && $ptype =~ /^\\/) {
+        my $ptype = $param->{proto_type} // $param->{name} // '';
+        if ($ptype =~ /^\\/ || $ptype eq '$' || $ptype eq '@' || $ptype eq '%') {
           $needs_import = 1;
           last;
         }
@@ -6656,7 +6892,23 @@ sub _compile_constant_value {
       environment => $self->environment,
       parser      => $self,
     );
-    my $node_id = $expr_o->parse_expr_to_tree($parts);
+    my ($node_id, $cdecls) = $expr_o->parse_expr_to_tree($parts);
+    # An embedded `our $var` in the constant value (e.g. use constant K => \our
+    # $v) is stripped by extract_declarations and otherwise lost: this value
+    # compiles to a sub body, so the file-scope forward-declaration scan never
+    # sees the reference and the package global is never defvar'd. Register each
+    # `our` here (BEFORE generate, so non-main packages qualify consistently) and
+    # queue a file-level defvar via expression_our_vars.
+    if ($cdecls && $self->environment) {
+      my $pkg = $self->environment->current_package;
+      for my $d (@$cdecls) {
+        next unless ($d->{type} // '') eq 'our';
+        my $var = $d->{var} // '';
+        next unless $var =~ /^([\$\@\%])\w+$/;
+        $self->environment->add_our_variable($pkg, $var);
+        $self->environment->expression_our_vars->{ $self->_our_var_cl_name($pkg, $var) } = $1;
+      }
+    }
     my $gen = Pl::ExprToCL->new(
       expr_o       => $expr_o,
       environment  => $self->environment,

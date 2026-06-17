@@ -212,6 +212,11 @@ my %SPECIAL_VARS = (
   # ${^...} caret variables — stub implementations (return undef)
   '${^WARNING_BITS}' => '(p-undef)',   # warning bits bitmask (Perl internal)
   '${^LAST_FH}'      => '(p-undef)',   # last filehandle used (Perl internal)
+  # Lexical hints: $^H (hint bits) and %^H (hints hash). PCL does not model
+  # compile-time hints, so these are inert always-bound empties — 0 and an empty
+  # hash — so `$^H & MASK`, `\%^H` and `keys %^H` never crash with an unbound var.
+  '$^H' => '|$^H|',
+  '%^H' => '|%^H|',
 );
 
 # Generate CL operator/function name from Perl name
@@ -1484,6 +1489,27 @@ sub gen_funcall {
     }
   }
 
+  # Special handling for select(BAREWORD): the single argument is a filehandle,
+  # not a value — quote it so CL does not evaluate an unbound bareword symbol
+  # (e.g. `select STDERR`). p-select is a no-op stub, so the quoted name is
+  # harmless; select($fh) and 4-arg select(...) are unaffected (@$kids != 2 or
+  # the arg is not a bareword).
+  if ($func_name eq 'select' && @$kids == 2) {
+    my $fh_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
+      return "(p-select '" . ($fh_node->content() // '') . ")";
+    }
+    if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
+      my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$fh_kids == 1) {
+        my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
+        if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
+          return "(p-select '" . ($word_node->content() // '') . ")";
+        }
+      }
+    }
+  }
+
   # Special handling for tied(): needs the box, not the unboxed value.
   # p-aref normally unboxes (which would call FETCH on tied vars), so we use
   # p-aref-box to get the box at the array index without triggering FETCH.
@@ -2418,6 +2444,36 @@ sub gen_hash_access {
 }
 
 
+# True when NODE is a parenthesised single-value base — a tree_val or progn with
+# exactly one child, e.g. the `($r//0)` in `($r//0)->[i]`. Such a base is a
+# scalar REF being dereferenced, not a list.
+sub _is_paren_scalar_base {
+  my ($self, $node_id) = @_;
+  my $node = $self->expr_o->get_a_node($node_id);
+  return 0 unless $self->expr_o->is_internal_node_type($node);
+  my $type = $node->{type} // '';
+  return 0 unless $type eq 'tree_val' || $type eq 'progn';
+  my $kids = $self->expr_o->get_node_children($node_id);
+  return $kids && @$kids == 1;
+}
+
+# Generate a parenthesised arrow-deref base in SCALAR context, so a single-child
+# tree_val/progn renders as the bare scalar ref rather than (vector ...) (which
+# happens under LIST_CTX — gen_tree_val — or lvalue — gen_progn). The base is a
+# scalar REF that is READ to obtain the pointer; autoviv of the indexed slot is
+# still performed by the -box runtime fn at the call site.
+sub _gen_scalar_deref_base {
+  my ($self, $base_id) = @_;
+  my $saved_ctx = $self->expr_o->get_node_context($base_id);
+  $self->expr_o->set_node_context($base_id, 0);   # SCALAR_CTX
+  my $saved_lv = $self->lvalue_context;
+  $self->lvalue_context(0);
+  my $cl = $self->gen_node($base_id);
+  $self->lvalue_context($saved_lv);
+  $self->expr_o->set_node_context($base_id, $saved_ctx);
+  return $cl;
+}
+
 # Array ref access: (p-aref-deref ref idx)
 sub gen_array_ref_access {
   my $self    = shift;
@@ -2433,13 +2489,21 @@ sub gen_array_ref_access {
   # Also handle qw[...][idx]: child 0 is a 'progn' (qw words), always LIST_CTX.
   my $is_list_subscript = $self->expr_o->node_tree->get_metadata($node_id, 'list_ctx_subscript');
   my $child0_node = $self->expr_o->get_a_node($kids->[0]);
-  if ($is_list_subscript
-      || ($self->expr_o->is_internal_node_type($child0_node)
-          && $child0_node->{type} eq 'progn')) {
+  # A parenthesised single-value base — ($r//0)->[N] — is a scalar ref, NOT a
+  # list subscript. Without this, the base is forced to LIST_CTX/lvalue and
+  # renders as (vector ...), so `($r//0)->[i]{k}...=v` autovivified into a bogus
+  # 1-element vector (p-autoviv-aref-for-hash TYPE-ERROR, multideref.t).
+  my $paren_scalar_base = !$is_list_subscript && $self->_is_paren_scalar_base($kids->[0]);
+  if (!$paren_scalar_base
+      && ($is_list_subscript
+          || ($self->expr_o->is_internal_node_type($child0_node)
+              && $child0_node->{type} eq 'progn'))) {
     $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
   }
 
-  my $ref = $self->gen_node($kids->[0]);
+  my $ref = $paren_scalar_base
+            ? $self->_gen_scalar_deref_base($kids->[0])
+            : $self->gen_node($kids->[0]);
   my $idx = $self->gen_node($kids->[1]);
 
   # In l-value context (e.g. \$ref->[i], or a modifying op) return the LIVE box
@@ -2457,7 +2521,13 @@ sub gen_hash_ref_access {
   my $node_id = shift;
   my $kids    = shift;
 
-  my $ref = $self->gen_node($kids->[0]);
+  # A parenthesised scalar base — ($r//0)->{k} — is a scalar ref, so generate it
+  # in scalar context rather than letting it render as (vector ...). (Hash-ref
+  # access has no list-subscript form, so a single-value paren base here is always
+  # a scalar arrow-deref base.)
+  my $ref = $self->_is_paren_scalar_base($kids->[0])
+            ? $self->_gen_scalar_deref_base($kids->[0])
+            : $self->gen_node($kids->[0]);
 
   # $href->{a, b} → key is join($;, a, b) (SUBSEP multi-key)
   my $key_node = $self->expr_o->get_a_node($kids->[1]);

@@ -440,6 +440,16 @@ sub parse {
 
     # Handle Block structures (used in braced derefs like ${$ref}, @{$expr})
     if (ref($e1) eq 'PPI::Structure::Block') {
+      # Perl: a LONE bareword in a deref block is autoquoted — ${foo}/@{foo}/
+      # %{foo} mean the symbolic refs ${"foo"}/@{"foo"}/%{"foo"} (the package
+      # variable named foo), NEVER a sub call (you must write {foo()} to call).
+      # PPI would otherwise parse the bareword as a function call (pl-foo), which
+      # is undefined at runtime.  Replace it with a string literal so the cast
+      # (p-cast-@ / p-cast-$ / p-cast-%) does the symbolic deref.
+      if (defined(my $bw = _block_sole_bareword($e1))) {
+        my $str = PPI::Token::Quote::Single->new("'$bw'");
+        return $self->make_node($str);
+      }
       # If the block looks like a hash constructor ({ key => val }), treat as hash_init
       if (_block_is_hash_constructor($e1)) {
         my @list    = $e1->children();
@@ -1913,6 +1923,23 @@ sub _block_is_hash_constructor {
       && $ch[1]->content() eq '=>';
 }
 
+# If a deref BLOCK contains exactly one bareword identifier (e.g. the `foo` in
+# ${foo} / @{foo} / %{foo}), return that identifier — Perl autoquotes it into a
+# symbolic ref to the package variable of that name.  Returns undef for anything
+# else (a sub call `foo()` has a trailing List; `$ref`/`[...]`/`\ ...` are not a
+# lone Word; multi-token blocks are expressions), so those keep their normal
+# parse.
+sub _block_sole_bareword {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return undef unless @ch == 1 && ref($ch[0]) eq 'PPI::Token::Word';
+  my $w = $ch[0]->content();
+  return ($w =~ /\A\w+(?:::\w+)*\z/ && $w !~ /\A\d/) ? $w : undef;
+}
+
 
 # This replaces all sub calls in an expression.
 # It use known number of parameters for subs and priorities.
@@ -2416,7 +2443,22 @@ sub handle_subcalls {
         # For grep/map/sort: parse remaining elements as the list to process.
         # For eval/do: the block is the only argument; don't consume what follows.
         # $deref_skip: number of extra elements already consumed by -> deref chain.
-        if ($func_name ne 'eval' && $func_name ne 'do' && $i + 2 + $deref_skip < scalar(@$e)) {
+        #
+        # For a user (&;@)-prototype sub (Try::Tiny's try/catch/finally), the
+        # slurpy @ consumes only JUXTAPOSED trailing terms; a comma immediately
+        # after the block terminates the slurp and belongs to the enclosing list.
+        # Perl: `try {42}, 42, "d"` → try gets ONLY the block (the 42,"d" are
+        # siblings), whereas `try {} catch {}` (no comma) → catch{} is slurped.
+        # grep/map/sort are true list-ops whose list starts juxtaposed and then
+        # continues across commas, so this only applies to $has_block_proto subs.
+        my $next_after = $e->[$i + 2 + $deref_skip];
+        my $comma_stops = $has_block_proto
+          && $next_after
+          && $next_after->isa('PPI::Token::Operator')
+          && ($next_after->content eq ',' || $next_after->content eq '=>');
+
+        if ($func_name ne 'eval' && $func_name ne 'do' && !$comma_stops
+            && $i + 2 + $deref_skip < scalar(@$e)) {
           my @rest = @$e[$i + 2 + $deref_skip .. $#$e];
           my $rest_list = $self->cleanup_for_parsing(\@rest);
           # Parse rest as comma-separated list (usually just one element)
@@ -3597,6 +3639,20 @@ sub child_context {
             if $child_index >= 2;  # List argument(s)
       }
 
+      # chop/chomp operate on a LIST of lvalues (chop @array, chop @h{@keys},
+      # chop($a,$b)) and must evaluate their argument(s) in list context — even
+      # when the call itself sits in scalar context (e.g. is(chop(@slice), 't'),
+      # where Test::More's $-proto forces the result scalar).  Without this the
+      # slice collapses via p-list-scalar and chop sees a single string.
+      # NB: this lives here (a context-only hint) rather than as a (@) entry in
+      # _builtin_prototypes because the prototype table is also read by codegen
+      # paths, and giving chomp a prototype there changes how `chomp @a`
+      # compiles (breaks chop.t).
+      if ($func_name && $func_name =~ /^(chop|chomp)$/) {
+        return LIST_CTX
+            if $child_index >= 1;
+      }
+
       # print/say force list context on all arguments
       if ($func_name && $func_name =~ /^(print|say)$/) {
         return LIST_CTX
@@ -3684,8 +3740,46 @@ sub child_context {
           }
           return LIST_CTX
             if defined($slurpy_at) && ($child_index - 1) >= $slurpy_at;
+
+          # A scalar ($) — or reference (\$, \@, \%, \&, \*) — prototype slot
+          # imposes SCALAR context on that argument, even when the call sits in
+          # void/list context.  This is what makes Test::More's is($$;$) /
+          # ok($;$) / like($$;$) evaluate `is(try {42}, 42)` with try in scalar
+          # context (so it returns 42, not undef).  Without it the arg inherits
+          # the caller's context — VOID at statement level — and wantarray()
+          # reports undef inside the callee.
+          my $pidx = $child_index - 1;
+          if (!defined($slurpy_at) || $pidx < $slurpy_at) {
+            my $pt = ($pidx <= $#p) ? ($p[$pidx]{proto_type} // '') : '';
+            return SCALAR_CTX if $pt eq '$' || $pt =~ /^\\/;
+          }
         }
       }
+
+      # A call to an unprototyped, non-builtin (user) function evaluates its
+      # arguments in LIST context: Perl flattens the argument list into @_, so a
+      # context-sensitive argument — myfunc(split /::/, $name), catfile(split …)
+      # — must run as a list, not collapse to a scalar (e.g. split's field
+      # count).  This is the sibling of the methodcall rule below.  It is SAFE
+      # only because prototyped subs are handled by the block above: the TAP
+      # assertions (is/ok/like/…) carry real ($$@)-style prototypes — extracted
+      # from test.pl (require) or the Test::More shim (use) — so their leading
+      # scalar slots still impose SCALAR context (keeping is(unpack(...), …)
+      # scalar).  Builtins are excluded via known_no_of_params (they have their
+      # own context rules above).
+      if ($func_name && $child_index >= 1
+          && !exists $self->known_no_of_params->{$func_name}) {
+        return LIST_CTX;
+      }
+    }
+
+    # Method-call arguments are always LIST context: a Perl method call passes
+    # its args as a flat list (methods cannot have prototypes), so a
+    # context-sensitive arg — `$obj->m(split /,/, $s)`, File::Spec->catfile(split
+    # /::/, $name) — must run in list context.  kids[0]=invocant, kids[1]=method,
+    # kids[2+]=args.
+    if ($type eq 'methodcall') {
+      return LIST_CTX if $child_index >= 2;
     }
     # progn (comma operator) forces list context
     if ($type eq 'progn') {
@@ -3781,6 +3875,15 @@ sub child_context {
 
     # Arithmetic operators produce scalar results.
     if ($op =~ /^([+\-*\/%]|\*\*|x)$/) {
+      return SCALAR_CTX;
+    }
+
+    # Bit-shift and bitwise operators are numeric/string scalar operators:
+    # their operands must be scalar even when the operator sits in list
+    # context (e.g. an unprototyped funcall arg).  Without this,
+    # `($x || 255) << 8` evaluates the `||` RHS in list context and the shift
+    # yields 0.  Includes the bitwise-string variants (&. |. ^.).
+    if ($op =~ /^(<<|>>|&|\||\^|&\.|\|\.|\^\.)$/) {
       return SCALAR_CTX;
     }
   }

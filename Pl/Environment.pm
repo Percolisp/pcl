@@ -185,6 +185,24 @@ has caret_globals => (
     default => sub { {} },
 );
 
+=head2 expression_our_vars
+
+Accumulates C<our $var> declarations encountered in EXPRESSION context (e.g.
+C<\our $referent>, C<bless \our $x>, C<use constant K =E<gt> \our $v>) rather
+than as a top-level statement. A statement-level C<our> emits its defvar via
+C<_process_our_declaration>, but an embedded C<our> is otherwise reduced to a
+bare variable reference, leaving the package global undeclared (it is referenced
+inside a generated sub body, so the file-scope forward-declaration scan misses
+it). Keyed on the CL symbol (e.g. C<$referent> or C<|Foo|::$x>) → sigil, so the
+forward-declaration pass can emit one idempotent file-level defvar each.
+
+=cut
+
+has expression_our_vars => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 =head2 in_subroutine
 
 Counter tracking subroutine nesting depth. 0 = top level, >0 = inside sub.

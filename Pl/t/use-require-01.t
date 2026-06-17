@@ -628,4 +628,57 @@ say \$Dual::other;
        'use Moo::Role: no "??? Term" parser-crash dump in output');
 }
 
+# Test: string require `require "Foo/Bar.pm"` resolves through @INC (not just the
+# current dir) — session 255. Previously p-require-file only checked the cwd and
+# died "Can't locate Foo/Bar.pm". This is the mechanism the `if` pragma uses.
+{
+  my $mod = File::Spec->catfile($tempdir, "StrReq.pm");
+  open my $fh, '>', $mod or die;
+  print $fh <<'EOF';
+package StrReq;
+sub hello { return "string-require-works"; }
+1;
+EOF
+  close $fh;
+
+  my $output = run_pl(qq{
+use lib "$tempdir";
+require "StrReq.pm";
+print StrReq::hello(), "\\n";
+});
+  like($output, qr/string-require-works/,
+       'string require "Foo.pm" resolves via \@INC');
+}
+
+# Test: `use if COND, MODULE, ARGS` true branch loads + imports (the if pragma
+# string-requires "MODULE.pm") — session 255.
+{
+  my $mod = File::Spec->catfile($tempdir, "IfTarget.pm");
+  open my $fh, '>', $mod or die;
+  print $fh <<'EOF';
+package IfTarget;
+use Exporter 'import';
+our @EXPORT = qw(if_target_fn);
+sub if_target_fn { return "if-true-branch"; }
+1;
+EOF
+  close $fh;
+
+  my $out_true = run_pl(qq{
+use lib "$tempdir";
+use if 1, "IfTarget";
+print if_target_fn(), "\\n";
+});
+  like($out_true, qr/if-true-branch/,
+       'use if 1, MODULE: true branch loads and imports');
+
+  # A pragma module on the true branch must NOT load the real .pm (no $^H crash).
+  my $out_pragma = run_pl(qq{
+use if 1, "strict";
+print "pragma-ok\\n";
+});
+  like($out_pragma, qr/pragma-ok/,
+       'use if 1, "strict": pragma string-require is a no-op, no \$^H crash');
+}
+
 done_testing();
