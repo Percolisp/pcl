@@ -12,6 +12,24 @@ our $IS_ASCII = (ord('A') == 65);
 
 # plan - provided by pcl-test.lisp, do NOT define here or it will override
 
+# TAP assertions are provided by pcl-test.lisp at runtime (pl-is/pl-ok/...).
+# We declare ONLY their prototypes here (no bodies — bodies would override the
+# runtime versions) so the transpiler's prototype extractor learns them.  These
+# match perl-core t/test.pl exactly (`sub is ($$@)`, etc.).  The leading scalar
+# ($) slots impose SCALAR context on those arguments in PExpr.pm::child_context,
+# so e.g. `is(unpack(...), $exp)` evaluates unpack in scalar context — matching
+# real Perl, and preventing the generic "unprototyped funcall args are LIST"
+# rule from list-ifying a context-sensitive first argument.
+sub ok         ($@);
+sub is         ($$@);
+sub isnt       ($$@);
+sub like       ($$@);
+sub unlike     ($$@);
+sub cmp_ok     ($$$@);
+sub can_ok     ($@);
+sub require_ok ($);
+sub use_ok     ($);
+
 sub set_up_inc {
     # No-op for PCL - @INC is set up differently
 }

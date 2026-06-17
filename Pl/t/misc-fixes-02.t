@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 75;
+plan tests => 78;
 
 sub run_cl {
     my ($code) = @_;
@@ -770,3 +770,30 @@ test_cl('method-call arg gets list context (split returns fields, not count)',
   . ' package main; my $name = "Class::Inspector";'
   . ' print Cat->j(split /(?:\'|::)/, $name), "\n";',
     "Class/Inspector\n");
+
+# ── session 258: unprototyped user-function args are LIST context ────────────
+# Sibling of the s257 methodcall rule: Perl flattens a function call's args into
+# @_, so a list-returning arg (split, etc.) must run in LIST context.  Was: such
+# args inherited the caller's (scalar/void) context → split returned its field
+# COUNT.  Made safe by extracting the TAP assertions' real ($$@) prototypes from
+# test.pl/Test::More so is(unpack(...), …) etc. stay scalar.  (verified vs perl 5.40)
+test_cl('unprototyped user-function arg gets list context (split → fields)',
+    'sub myf { return scalar(@_) }'
+  . ' print myf(split /,/, "a,b,c"), "\n";',
+    "3\n");
+
+test_cl('user-function arg list-context preserves all split fields',
+    'sub cat { shift; return join("/", @_) }'
+  . ' print cat("x", split /::/, "Foo::Bar::Baz"), "\n";',
+    "Foo/Bar/Baz\n");
+
+# Bit-shift and bitwise operators force SCALAR context on their operands.  This
+# latent bug surfaced once list context could reach them: `($x || 255) << 8`
+# evaluated the `||` RHS in list context and the shift/bitwise op yielded 0.
+# << >> & | ^ are numeric scalar operators — operands must be scalar even when
+# the op sits in an unprototyped funcall's (now list-context) argument slot.
+test_cl('bitwise/shift operators force scalar context on operands',
+    'my $z = 0;'
+  . ' sub g { return join(",", @_) }'
+  . ' print g(($z||255)<<8, ($z||7)&3, ($z||4)|1, ($z||4096)>>4), "\n";',
+    "65280,3,5,256\n");

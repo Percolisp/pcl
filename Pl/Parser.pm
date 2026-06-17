@@ -6089,6 +6089,11 @@ sub _process_include_statement {
                          || $q->isa('PPI::Token::Quote::Interpolate');
         my $path = $q->string;
         if (!$interpolating || $path !~ /[\$\@]/) {
+          # Learn prototypes declared in the required file (e.g. test.pl's
+          # `sub is ($$@)`) so child_context can impose SCALAR context on the
+          # leading args — same mechanism as `use Module` -> shim prototypes.
+          my $file_env = $self->_extract_file_prototypes($path);
+          $self->_merge_module_prototypes($file_env, undef) if $file_env;
           $self->_emit(";; $perl_code");
           $self->_emit("(p-eval-always");
           $self->_emit("  (p-require-file \"$path\"))");
@@ -6486,6 +6491,55 @@ sub _extract_module_prototypes {
   }
 
   return $cache->{$module} = $module_env;
+}
+
+
+# Extract prototypes from a file required by literal path (require "./test.pl").
+# This is the require-equivalent of _extract_module_prototypes: perl-tests load
+# their assertion helpers via `require './test.pl'` (not `use Test::More`), and
+# that file declares the real prototypes (sub is ($$@), ...) which child_context
+# needs to impose SCALAR context on the leading args.  Nested requires in the
+# parsed file recurse through this same path, so the test.pl -> t/test.pl
+# redirect is followed automatically.
+sub _extract_file_prototypes {
+  my ($self, $path) = @_;
+  state $cache = {};
+
+  # Resolve the path: relative to cwd first, then to the source file's dir.
+  my @candidates = ($path);
+  if ($self->filename) {
+    require File::Basename;
+    my $dir = File::Basename::dirname($self->filename);
+    push @candidates, "$dir/$path" if defined $dir && length $dir;
+  }
+  my $resolved;
+  for my $c (@candidates) {
+    if (-f $c) { $resolved = $c; last; }
+  }
+  return undef unless $resolved;
+
+  require Cwd;
+  my $abs = Cwd::abs_path($resolved) // $resolved;
+  return $cache->{$abs} if exists $cache->{$abs};
+
+  # Cycle detection (shared across the require chain)
+  return undef if $self->_parsing_modules->{"file:$abs"};
+  local $self->_parsing_modules->{"file:$abs"} = 1;
+
+  my $doc = PPI::Document->new($abs);
+  return $cache->{$abs} = undef unless $doc;
+
+  my $file_env = Pl::Environment->new();
+  my $file_parser = Pl::Parser->new(
+    filename                => $abs,
+    environment             => $file_env,
+    inc_paths               => $self->inc_paths,
+    _parsing_modules        => $self->_parsing_modules,
+    collect_prototypes_only => 1,
+  );
+  eval { $file_parser->parse($doc) };
+  return $cache->{$abs} = undef if $@;
+  return $cache->{$abs} = $file_env;
 }
 
 

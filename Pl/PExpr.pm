@@ -3639,6 +3639,20 @@ sub child_context {
             if $child_index >= 2;  # List argument(s)
       }
 
+      # chop/chomp operate on a LIST of lvalues (chop @array, chop @h{@keys},
+      # chop($a,$b)) and must evaluate their argument(s) in list context — even
+      # when the call itself sits in scalar context (e.g. is(chop(@slice), 't'),
+      # where Test::More's $-proto forces the result scalar).  Without this the
+      # slice collapses via p-list-scalar and chop sees a single string.
+      # NB: this lives here (a context-only hint) rather than as a (@) entry in
+      # _builtin_prototypes because the prototype table is also read by codegen
+      # paths, and giving chomp a prototype there changes how `chomp @a`
+      # compiles (breaks chop.t).
+      if ($func_name && $func_name =~ /^(chop|chomp)$/) {
+        return LIST_CTX
+            if $child_index >= 1;
+      }
+
       # print/say force list context on all arguments
       if ($func_name && $func_name =~ /^(print|say)$/) {
         return LIST_CTX
@@ -3740,6 +3754,22 @@ sub child_context {
             return SCALAR_CTX if $pt eq '$' || $pt =~ /^\\/;
           }
         }
+      }
+
+      # A call to an unprototyped, non-builtin (user) function evaluates its
+      # arguments in LIST context: Perl flattens the argument list into @_, so a
+      # context-sensitive argument — myfunc(split /::/, $name), catfile(split …)
+      # — must run as a list, not collapse to a scalar (e.g. split's field
+      # count).  This is the sibling of the methodcall rule below.  It is SAFE
+      # only because prototyped subs are handled by the block above: the TAP
+      # assertions (is/ok/like/…) carry real ($$@)-style prototypes — extracted
+      # from test.pl (require) or the Test::More shim (use) — so their leading
+      # scalar slots still impose SCALAR context (keeping is(unpack(...), …)
+      # scalar).  Builtins are excluded via known_no_of_params (they have their
+      # own context rules above).
+      if ($func_name && $child_index >= 1
+          && !exists $self->known_no_of_params->{$func_name}) {
+        return LIST_CTX;
       }
     }
 
@@ -3845,6 +3875,15 @@ sub child_context {
 
     # Arithmetic operators produce scalar results.
     if ($op =~ /^([+\-*\/%]|\*\*|x)$/) {
+      return SCALAR_CTX;
+    }
+
+    # Bit-shift and bitwise operators are numeric/string scalar operators:
+    # their operands must be scalar even when the operator sits in list
+    # context (e.g. an unprototyped funcall arg).  Without this,
+    # `($x || 255) << 8` evaluates the `||` RHS in list context and the shift
+    # yields 0.  Includes the bitwise-string variants (&. |. ^.).
+    if ($op =~ /^(<<|>>|&|\||\^|&\.|\|\.|\^\.)$/) {
       return SCALAR_CTX;
     }
   }
