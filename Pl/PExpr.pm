@@ -3742,6 +3742,15 @@ sub child_context {
         }
       }
     }
+
+    # Method-call arguments are always LIST context: a Perl method call passes
+    # its args as a flat list (methods cannot have prototypes), so a
+    # context-sensitive arg — `$obj->m(split /,/, $s)`, File::Spec->catfile(split
+    # /::/, $name) — must run in list context.  kids[0]=invocant, kids[1]=method,
+    # kids[2+]=args.
+    if ($type eq 'methodcall') {
+      return LIST_CTX if $child_index >= 2;
+    }
     # progn (comma operator) forces list context
     if ($type eq 'progn') {
       return LIST_CTX;

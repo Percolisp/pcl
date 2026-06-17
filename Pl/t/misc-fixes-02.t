@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 74;
+plan tests => 75;
 
 sub run_cl {
     my ($code) = @_;
@@ -755,3 +755,18 @@ test_cl('method call on unblessed ref / undef dies (caught by eval)',
   . ' print defined($a) ? "lived" : "died", ",",'
   . '       defined($b) ? "lived" : "died", "\n";',
     "died,died\n");
+
+# ── session 257: method-call arguments are LIST context ──────────────────────
+# A Perl method call passes its args as a flat list (methods can't have
+# prototypes), so a list-returning arg must run in LIST context.  Was: a
+# method-call arg inherited the caller's (scalar) context, so
+# `$obj->m(split /::/, $s)` evaluated split in scalar context → it returned the
+# field COUNT (2) instead of the fields.  This was the Class::Inspector
+# ->filename bug: File::Spec->catfile(split /::/, $name) gave "2".  (Plain
+# unprototyped FUNCTION calls are deliberately NOT changed here — forcing LIST on
+# all user-sub args regressed the sweep; only the method path is fixed.)
+test_cl('method-call arg gets list context (split returns fields, not count)',
+    'package Cat; sub j { shift; return join("/", @_) }'
+  . ' package main; my $name = "Class::Inspector";'
+  . ' print Cat->j(split /(?:\'|::)/, $name), "\n";',
+    "Class/Inspector\n");
