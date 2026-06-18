@@ -6451,18 +6451,20 @@ sub _extract_module_prototypes {
   # (List::Util is intentionally NOT skipped: its shim declares block
   # prototypes — first/any/reduce/pair* (&@) — that the block-form parser
   # needs, so its prototypes must be extracted from lib/List/Util.pm.)
-  if ($module =~ /^(Carp|Scalar::Util|Time::HiRes|
+  if ($module =~ /^(Carp|Scalar::Util|Time::HiRes|Cwd|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;
   }
-  # Skip the heavy Test2 stack and Test:: internals — EXCEPT Test::More and
-  # Test::Simple, whose tiny lib/ shims declare the assertion prototypes
-  # (is($$;$), ok($;$), like($$;$), …) that child_context needs to impose
-  # SCALAR context on their arguments.  The shims win in @INC, so we read the
-  # prototype stub, never the real Test2 stack.
+  # Skip the heavy Test2 stack and Test:: internals — EXCEPT Test::More, whose
+  # tiny lib/Test/More.pm shim declares the assertion prototypes (is($$;$),
+  # ok($;$), like($$;$), …) that child_context needs to impose SCALAR context on
+  # their arguments.  The shim wins in @INC, so we read the prototype stub, never
+  # the real Test2 stack.  (Test::Simple has no scalar-forcing prototypes — its
+  # only export, ok, is satisfied by the internal TAP layer — so it is skipped
+  # like every other Test:: module.)
   if (($module =~ /^Test2::/ || $module =~ /^Test::/)
-      && $module !~ /^Test::(?:More|Simple)$/) {
+      && $module !~ /^Test::More$/) {
     return $cache->{$module} = undef;
   }
 

@@ -23,8 +23,13 @@ be implemented*:
 This split already exists in practice — it just isn't named:
 
 - **`lib/`** (pure-Perl shims, transpiled on demand): `Config`, `POSIX`,
-  `Errno`, `Cwd`, `version`, `File::Spec`, `File::Spec::Functions`,
-  `Scalar::Util`, `List::Util`, `Test::Simple`.
+  `Errno`, `version`, `File::Spec`, `File::Spec::Functions`,
+  `Scalar::Util`, `List::Util`, `Carp`, `Sub::Util`, `Fcntl`, `mro`,
+  `Math::BigInt::Calc`, `Test::More` (prototype-only).
+  (`Cwd` and `Test::Simple` shims were **removed** session 259 — the real CPAN
+  `Cwd` works under PCL, and `Test::Simple` is supplied by the internal TAP
+  layer (`cl/pcl-test.lisp`), so neither shim was needed. Verified: full gate
+  3480/3480, sweep 66 fully-passing held.)
 - **CL-backed** (today flat in `cl/`, to move under `cl/modules/`):
   `cl/pcl-pack.lisp` (`pack`/`unpack`), `cl/pcl-test.lisp`
   (`Test::More`/`Test::Simple` TAP).
