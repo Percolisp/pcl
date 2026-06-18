@@ -4,6 +4,30 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 259 (2026-06-19) — deleted 2 unused shims (Cwd, Test::Simple); fixed `"$x"` interpolation stringify (overload `""` / refs) → `version` module works. Gate 95/3482.
+
+**User asked: (1) check for shims in `lib/` no longer needed (hypothesis: some predate string-eval support); (2) keep finding/fixing bugs via CPAN modules.** Refined live: "delete shims that aren't needed because the normal CPAN module works without the shim — run the tests, sweep, and CPAN modules before deciding."
+
+**Shim audit (empirical, not by reading headers):** for each pure-Perl candidate, removed the shim, re-ran its perl-tests files + CPAN spot-checks, kept only if the real module regressed.
+- **`lib/Cwd.pm` — DELETED.** Real CPAN Cwd works under PCL: chdir.t stays 25/0, Pl/t transpile-test-04/04b (`use Cwd`) 135/135. Added `Cwd` to `_extract_module_prototypes` skip-list (no codegen-affecting prototypes).
+- **`lib/Test/Simple.pm` — DELETED.** Never loaded at runtime (`p-use` intercepts Test::Simple → internal TAP layer `cl/pcl-test.lisp`), 0 test files `use` it, and it declared NO prototypes (the extractor exception for it was a no-op). Dropped the stale `Test::Simple` exception in the extractor (kept `Test::More`, which DOES carry the scalar-forcing assertion prototypes).
+- **KEPT (real module regresses or is XS):** `File::Spec`(+Functions) — chdir.t drops 25→3 without it; `Errno` — scalar.t/do.t regress/crash; `Carp` — real one emits a wrong `at <lispfile> line N` suffix; `version` — real version.pm fails to transpile-load; plus all XS shims (POSIX/Fcntl/Scalar::Util/List::Util/Sub::Util[Moo]/Math::BigInt::Calc/mro).
+- **Fixed pre-existing bug:** `lib/File/Spec.pm` `rel2abs` called `Cwd::cwd()` without ever loading Cwd → UNDEFINED-FUNCTION (even WITH the old shim). Now lazily `require Cwd` (matches real File::Spec::Unix).
+- Commit `53668fc`.
+
+**BUG (found while testing the `version` shim) — `"$x"` interpolation dropped the stringify coercion. Commit `16dad8c`.** `parse_interpolated_string` returned the **bare variable node** for a single-variable interpolation (`"$x"`), so the value was never stringified. Invisible for plain scalars, but:
+- an **overloaded object**'s `""` overload never fired → in the `version`/`vcmp` idiom `$a="$a"; … $a cmp $b`, `$a` stayed an object so the overloaded `cmp`/`<=>` re-dispatched forever → **BINDING-STACK-EXHAUSTED**. Broke `use version` comparisons and any stringify-then-compare overloaded class.
+- a **reference** produced no `ARRAY(0x..)` text.
+Fix: return bare ONLY for a single plain string literal (`PPI::Token::Quote::Double`); any single variable/element/expr now flows through `string_concat` → `to-string` → `box-sv` (fires `""`), like a multi-part interpolation. The real `version` module now works (`version->new("1.2.3") < version->new("2.0.0")`). The `version` shim's recursion is gone too.
+- Regression tests: overload-01.t +2 (version-style cmp; `"$ref"`→ARRAY). Updated string-interp-01.t + regexp-subst-01.t (they asserted the OLD bare-node AST/codegen shape).
+- Sole sweep delta: substr.t test 380 ("4-arg substr … UTF8ness turning off when stringified") was passing **by accident** under the old bare interpolation; now it correctly stringifies but still can't reproduce the SvUTF8-flag clearing PCL doesn't model → registered `:utf8` in skip-registry.
+
+**Verified:** full gate **95/3482 PASS**; full sweep **18087 pass / 1056 fail / 66 fully-passing** (held), no registry-stale. (Pass 18088→18087 = the one accidental UTF8-flag pass now a correct skip.)
+
+**NEXT:** resume CPAN breadth survey (s258c plan — YAML::PP `single node of unknown type` codegen gap, then Test::Deep/PPI). The `version` module is now usable, widening what loads.
+
+---
+
 ## Session 258c (2026-06-17) — strategy agreed (CPAN breadth, ask-before-install); started new modules; `@ISA = qw/.../` non-bracket-delimiter bug fixed. Gate 95/3480.
 
 **Strategy (user asked "what should we do now to reach 'run arbitrary Perl'?"):** agreed to **lead with CPAN breadth survey** — widen past the Moo cluster, harvest the GENERAL bug each new module exposes, track distinct bug-CLASSES to measure convergence. Fuzzer = the automated tier-(a) basics net; one robustness investment worth doing = per-statement `handler-case` (graceful degradation, unblocks crash files). SKIP: importing more perl-core test files (low new-bug yield, s237b) and grinding documented not-supported. **Target decomposes:** (a) primitives [fuzzer, long tail], (b) idioms/mechanisms [CPAN, converging], (c) interp internals [SV-identity/ties/DESTROY/formats/XS — out of scope]. **STANDING RULE (user): ASK before installing any CPAN module** — smoke-test what's already installed; ask before fetching a dist tarball for its `t/`.
