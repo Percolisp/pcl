@@ -213,7 +213,15 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  "DESTROY must fire when the object held by a substr-lvalue target is overwritten — PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
                 ;; 4-arg substr replacement on a tied (Tie::StdScalar) magical value.
                 (142 :tie
-                     "substr($tied,0,5,'') must STORE back through the tie so the tied value becomes 'last' — 4-arg substr does not write through tie magic. not-supported.md: 'DESTROY/tie magic' (tie write-through)."))
+                     "substr($tied,0,5,'') must STORE back through the tie so the tied value becomes 'last' — 4-arg substr does not write through tie magic. not-supported.md: 'DESTROY/tie magic' (tie write-through).")
+                ;; UTF8-flag toggling: $refee blessed into a Unicode-named class,
+                ;; stringified so its SvUTF8 flag flips, then 4-arg substr.  PCL has
+                ;; no per-scalar UTF-8 flag (CL strings are always Unicode), so the
+                ;; "flag turning off" comparison cannot reproduce.  (The companion
+                ;; "turning on" row passes; only this one depends on the flag clearing.)
+                ("4-arg substr with target UTF8ness turning off when stringified"
+                 :utf8
+                 "4-arg substr after stringifying a blessed ref whose class name clears the SvUTF8 flag — PCL has no per-scalar UTF-8 flag. not-supported.md: 'Unicode semantics differences'."))
 
 ;; length.t — UTF-8 / `use bytes` / `pack "U"` byte-vs-character tests.  PCL has
 ;; no per-scalar UTF-8 flag (CL strings are always Unicode), `use bytes` is not
