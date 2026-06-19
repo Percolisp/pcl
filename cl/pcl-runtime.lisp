@@ -10122,7 +10122,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (current-level 0)
          (target-level (+ level 2)))  ; Skip p-caller itself and its caller
     ;; Walk the backtrace for best-effort filename/line (documented unreliable).
-    (sb-debug:map-backtrace
+    (sb-debug::map-backtrace
      (lambda (frame)
        (when (= current-level target-level)
          (let ((code-loc (sb-di:frame-code-location frame)))
@@ -11422,7 +11422,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-group-struct-to-vec (g)
   "Convert sb-posix group struct to a 4-element Perl list vector: (name passwd gid members)."
-  (let ((members (sb-posix:group-mem g)))
+  (let ((members (sb-posix::group-mem g)))
     (vector
      (make-p-box (sb-posix:group-name g))
      (make-p-box (sb-posix:group-passwd g))
@@ -11434,7 +11434,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (declare (ignore wantarray))
   (setf *p-group-list* nil)
   (handler-case
-      (sb-posix:do-groups (g)
+      (sb-posix::do-groups (g)
         (push (p-group-struct-to-vec g) *p-group-list*))
     (sb-posix:syscall-error ()))   ; ignore EOF/ENOENT thrown at end of db
   (setf *p-group-list* (nreverse *p-group-list*))
