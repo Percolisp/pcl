@@ -4544,6 +4544,10 @@ sub _fix_ppi_glob_after_block {
       # by a value token (symbol/number/string/structure) — those indicate < is
       # the less-than operator, not the readline diamond.
       my $is_bare_fh = ($glob_content =~ /^[A-Za-z_][A-Za-z0-9_:]*$/);
+      # Scalar filehandle readline <$fh>: a single scalar variable between < and >.
+      # PPI misparses this as `< $fh >` (two operators) whenever it follows a
+      # bareword that could take an operand — print/return/scalar/sort <$fh>.
+      my $is_scalar_fh = ($glob_content =~ /^\$[A-Za-z_]\w*$/);
       my $prev = @result ? $result[-1] : undef;
       # A simple value (symbol/number/string) before < means it's definitely lt, not glob.
       # e.g. $a<$b?1:$a>$b: the < is less-than, not a glob opener.
@@ -4551,8 +4555,8 @@ sub _fix_ppi_glob_after_block {
       my $prev_is_simple_value = $prev && ref($prev) =~ /^PPI::Token::(Symbol|Number|Quote)/;
       my $prev_is_value = $prev_is_simple_value || ($prev && ref($prev) =~ /^PPI::Structure/);
 
-      # If we found a valid-looking glob pattern or bare filehandle, reconstruct it
-      if ($found_close && !$prev_is_simple_value && ($has_glob_chars || ($is_bare_fh && !$prev_is_value)) && $glob_content ne '') {
+      # If we found a valid-looking glob pattern or bare/scalar filehandle, reconstruct it
+      if ($found_close && !$prev_is_simple_value && ($has_glob_chars || (($is_bare_fh || $is_scalar_fh) && !$prev_is_value)) && $glob_content ne '') {
         # Create a proper readline token
         my $glob_token = bless {
           content => "<$glob_content>"

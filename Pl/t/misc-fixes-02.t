@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 80;
+plan tests => 83;
 
 sub run_cl {
     my ($code) = @_;
@@ -38,6 +38,15 @@ sub test_cl {
     my ($name, $code, $expected) = @_;
     my $got = run_cl($code);
     is($got, $expected, $name);
+}
+
+# Transpile only — return the generated CL string (for codegen-shape assertions).
+sub transpile_to_cl {
+    my ($code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    return scalar `$pl2cl $pl_file 2>/dev/null`;
 }
 
 # ── difftest-ops fuzzer finds (session 241): operator bugs perl-tests/ missed ──
@@ -558,6 +567,19 @@ test_cl('empty array flattens to nothing (not a spurious undef)',
 test_cl('chained < > comparison is not misparsed as a glob/readline',
     'my $x=[1,5,3]; print join(",", "a", ($x->[0] < $x->[1] > $x->[2]), "b"), "\n";',
     "a,1,b\n");
+
+# `scalar <$fh>` / `print <$fh>` (a scalar-filehandle readline after a bareword):
+# PPI misparses `<$fh>` as the two operators `< $fh >` whenever it follows a word
+# that could take an operand (print/return/scalar/sort).  The glob-fixup pass now
+# reconstructs the readline token.  (YAML::PP's `return scalar <$fh>` hit this:
+# the unhandled `<`/`>` operand became an undef "single node of unknown type".)
+like(transpile_to_cl('my $line = scalar <$fh>;'), qr/\(p-scalar \(p-readline \$fh\)\)/,
+    'scalar <$fh> parses as a readline, not < > operators');
+like(transpile_to_cl('print <$fh>;'), qr/\(p-print \(p-readline \$fh\)\)/,
+    'print <$fh> parses as a readline');
+# Guard the comparison sibling: `$a < $b` (no closing >) stays a less-than.
+like(transpile_to_cl('my $r = $a < $b;'), qr/\(p-< \$a \$b\)/,
+    '$a < $b stays a comparison (not reconstructed as readline)');
 
 # $$ref->() must parse as (${$ref})->() — deref the scalar-ref-to-coderef, THEN
 # call — not ${ $ref->() }.  Was mis-associated in PExpr (the leading scalar Cast
