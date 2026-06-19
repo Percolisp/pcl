@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 85;
+plan tests => 87;
 
 sub run_cl {
     my ($code) = @_;
@@ -613,6 +613,17 @@ test_cl('\\$href->{k} is a live ref (tracks later writes)',
 test_cl('\\$aref->[i] is a live ref (tracks later writes)',
     'my $a = [10, 20]; my $r = \$a->[1]; $a->[1] = 99; print "$$r\n";',
     "99\n");
+
+# Postfix deref X->$#* is the last index of an arrayref (= $#{X}). The other
+# postfix derefs (->@*/->%*/->$*) already worked; ->$#* was unrecognised
+# (PPI tokenises it as a single Cast '$#*') and yielded undef.
+# Found by tools/difftest-ops.pl axis 23.
+test_cl('$ar->$#* is the last index of an arrayref',
+    'my $ar = [10, 20, 30]; print $ar->$#*, "\n";',
+    "2\n");
+test_cl('$ar->$#* in arithmetic (named-unary-free) gives count',
+    'my $ar = [1, 2, 3, 4]; print $ar->$#* + 1, "\n";',
+    "4\n");
 
 # ── session 255b: the six sweep-crash fixes (see docs/session-log.md) ──────────
 

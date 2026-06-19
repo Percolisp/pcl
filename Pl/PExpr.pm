@@ -1035,6 +1035,21 @@ sub parse {
         $i--;
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
+               && $nxt->content() eq '$#*') {
+        # Postfix deref: X->$#* — last index of an arrayref (Perl 5.20+).
+        # Equivalent to $#{X}; build the same $# prefix_op the braced form uses
+        # ($# op token + ref operand) so codegen emits (p-array-last-index X).
+        my $pre_id   = $self->parse([$pre]);
+        my $cast_tok = PPI::Token::Cast->new('$#');
+        my ($node, $id) = $self->make_node_insert('prefix_op');
+        my $op_id    = $self->make_node($cast_tok);
+        $self->add_child_to_node($id, $op_id);   # $# operator
+        $self->add_child_to_node($id, $pre_id);  # Arrayref being dereferenced
+        $e->[$i-1] = $node;
+        splice @$e, $i, 2;  # Remove -> and Cast($#*)
+        $i--;
+        next;
+      } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() =~ /^([@%])$/
                && defined($nxt_2)
                && (ref($nxt_2) eq 'PPI::Structure::Subscript'
