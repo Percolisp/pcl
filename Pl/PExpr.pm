@@ -3019,6 +3019,32 @@ sub handle_subcalls {
             }
             $end_pars = $j;
         }
+
+        # Named unary operators bind LOOSER than the high-precedence binary ops
+        # (. + - * / % x ** =~ !~ << >>, all prec >= 55) but TIGHTER than
+        # comparison/logical/assignment. Whichever branch above set $end_pars to
+        # the end of the first operand term (symbol, cast, subscript chain, or
+        # literal), keep consuming through any prec>=55 binary operator and its
+        # right operand, stopping before comparison/comma/etc. So `length $s + 1`
+        # => length($s + 1) and `uc $x . "y"` => uc($x . "y"), matching Perl's
+        # named-unary precedence. (Idempotent for the literal branch above, which
+        # already extended; this fixes the symbol/cast/subscript branches, which
+        # previously stopped at the first term.)
+        {
+            my $j = $end_pars;
+            while ($j + 1 < scalar(@$e)) {
+                my $nxt = $e->[$j + 1];
+                if (ref($nxt) eq 'PPI::Token::Operator') {
+                    my $op_str = $nxt->content();
+                    unless ($op_str eq '->') {
+                        my $op_info = $self->config->precedences->{$op_str};
+                        last unless defined $op_info && $op_info->{prec} >= 55;
+                    }
+                }
+                $j++;
+            }
+            $end_pars = $j;
+        }
     }
 
     # Functions taking EXACTLY 1 param need Cast+Symbol handling (e.g., shift @$arr)
