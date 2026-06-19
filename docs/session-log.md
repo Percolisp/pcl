@@ -4,6 +4,22 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 260 (2026-06-19) — scalar-filehandle readline `<$fh>` after a bareword (PPI misparse) fixed → YAML::PP "single node of unknown type" gap closed. Gate 95/3485.
+
+**Goal (user): keep finding/fixing bugs via CPAN modules.** Resumed at the s259 NEXT marker — YAML::PP's `Handle single node of unknown type: ref=''` codegen warning (×7).
+
+**Root cause (general PPI bug, commit `66f11e7`).** Instrumented the warn (`full_PPI` + Carp trace) → the offending source was **`return scalar <$fh>`**. PPI tokenizes `<$fh>` as the three tokens `<` (Operator), `$fh` (Symbol), `>` (Operator) — i.e. less-than/greater-than around a symbol — **whenever it follows a bareword that can take an operand**: `print <$fh>`, `return <$fh>`, `scalar <$fh>`, `sort <$fh>` all misparse (verified with a PPI probe). After `=` or `(` PPI gets it right (`QuoteLike::Readline`), which is why `my $x = <$fh>` and `scalar(<$fh>)` always worked. The stray `<`/`>` operands left an undef "single node of unknown type" in PExpr's single-node parse.
+
+**Fix:** `_fix_ppi_glob_after_block` (`Pl/PExpr.pm`) already reconstructs `<*.txt>` globs and bare-`<FH>` readlines from a misparsed `< … >` token run; extended it to a **single scalar variable** `<$fh>` (`$is_scalar_fh = $glob_content =~ /^\$\w+$/`), guarded identically to the bare-FH case (`!$prev_is_value`, so `$a < $fh > $b` — prev is a value — stays a comparison; `$a < $b` with no closing `>` never matches). Verified: `scalar`/`print`/`return`/`sort`/ternary `<$fh>` → `(p-readline $fh)`; functional read of /etc/hostname via `scalar <$fh>` works.
+
+**Verified clean:** Gate **95/3485** PASS (+3 regression tests in `Pl/t/misc-fixes-02.t`, plan 80→83, added a `transpile_to_cl` helper). Full sweep **18087 pass / 1056 fail / 66 fully-passing** — IDENTICAL to s259 (the readline-after-bareword idiom isn't exercised in perl-tests). sweep-diff's 8 "regressions" all verified stale-baseline (baseline dates 2026-06-07): spot-checked `defins.t` test 16 (`glob hash while() ternary`) — fails at HEAD too with my change reverted, so not mine. No registry-stale.
+
+**YAML::PP next wall (unchanged from s258c, deeper):** with the readline gap closed, YAML::PP transpiles further and now hits **dynamic `Module::Load::load` with a computed/empty name → `Can't locate .pm in @INC`** (YAML::PP::Schema loads schema modules by computed name). Dynamic-require territory — separate, deferred.
+
+**NEXT:** continue CPAN breadth survey — YAML::PP dynamic-require wall, or move to Test::Deep/PPI. Ask before installing anything new.
+
+---
+
 ## Session 259 (2026-06-19) — deleted 2 unused shims (Cwd, Test::Simple); fixed `"$x"` interpolation stringify (overload `""` / refs) → `version` module works. Gate 95/3482.
 
 **User asked: (1) check for shims in `lib/` no longer needed (hypothesis: some predate string-eval support); (2) keep finding/fixing bugs via CPAN modules.** Refined live: "delete shims that aren't needed because the normal CPAN module works without the shim — run the tests, sweep, and CPAN modules before deciding."
