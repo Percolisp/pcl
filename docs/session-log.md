@@ -4,7 +4,13 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 260 (2026-06-19) — scalar-filehandle readline `<$fh>` after a bareword (PPI misparse) fixed → YAML::PP "single node of unknown type" gap closed. Gate 95/3485.
+## Session 260 (2026-06-19) — TWO general parser bugs: scalar-fh readline `<$fh>` after a bareword + paren-less list-op swallowing the ternary `:`. defins.t now fully passes. Gate 95/3487, sweep 18088 / 67 fully-passing.
+
+**Bug 2 (commit `2f30718`) — paren-less list operator in a ternary true-branch swallowed the `:` and false branch.** Answering the user's "what is the dynamic-require wall?" question, traced YAML::PP's `Module::Load::load($computed_name)` → "Can't locate **.pm**" to its true root cause, which has **nothing to do with dynamic require**: `Module::Load::_to_file` does `$^O eq 'MSWin32' ? join "/", @parts : File::Spec->catfile(@parts)`. The paren-less list operator `join "/", @parts` collected ALL trailing tokens as its args — including the ternary `:` and the false branch — so its second comma-arg became `@parts : File::Spec->...`, the orphaned colon fell through to a "Missing case" parse-error, and the whole ternary evaluated to empty → empty module path → `require ".pm"`. Minimal repro: `0 ? join "-", @p : "FB"` gave `""` (perl: `"FB"`). `handle_subcalls` (`Pl/PExpr.pm`) only terminated a list-op's args at `and`/`or`/`xor`; extended the `$end_pars` computation to also stop at a ternary `:` that closes an **enclosing** ternary, tracking ternary depth so a **nested** ternary's own `:` (`join "-", $c ? "A" : "B", "Z"`) is still consumed. Verified vs perl 5.40. **`Module::Load::load("List::Util")` now works end-to-end**, and **`defins.t` went fully-passing** (its `($s ? $d : $n) = glob('*')` lvalue-ternary hit the same bug — the s258 "stale-baseline artifact" was actually this fixable bug). YAML::PP's NEXT wall is now `B::svp_iok` — the `B` module's XS introspection of internal SV type-flags (genuine interpreter-internals / XS, out of scope).
+
+---
+
+## Session 260a (2026-06-19) — scalar-filehandle readline `<$fh>` after a bareword (PPI misparse) fixed → YAML::PP "single node of unknown type" gap closed. Gate 95/3485.
 
 **Goal (user): keep finding/fixing bugs via CPAN modules.** Resumed at the s259 NEXT marker — YAML::PP's `Handle single node of unknown type: ref=''` codegen warning (×7).
 
