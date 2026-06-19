@@ -22,7 +22,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 18;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -156,3 +156,17 @@ test_cl('sort single element',
     'my @s = sort { $a <=> $b } (42);
      print join(" ", @s), "\n";',
     "42\n");
+
+# Tests 15-16: sort of a postfix-deref list (sort $ar->@*). A scalar
+# immediately followed by -> is one term (postfix deref), NOT a bare
+# comparator, so this sorts the elements of $ar. Previously the
+# sort-$scalar-comparator detection mis-fired and parse-errored.
+# Found by tools/difftest-ops.pl axis 23.
+test_cl('sort $ar->@* sorts the arrayref elements (no comparator)',
+    'my $ar = [3, 1, 2];
+     print join(",", sort $ar->@*), "\n";',
+    "1,2,3\n");
+test_cl('sort {block} $ar->@* (block comparator + postfix-deref list)',
+    'my $ar = [[3],[1],[2]];
+     print join(",", map { $_->[0] } sort { $a->[0] <=> $b->[0] } $ar->@*), "\n";',
+    "1,2,3\n");

@@ -2564,9 +2564,15 @@ sub handle_subcalls {
 
     # Handle sort $scalar LIST — scalar variable as comparator (coderef, string, glob, glob ref)
     # e.g. sort $sortsub 4,1,3,2  →  (p-sort (lambda ($a $b) (funcall (p-sort-get-fn $sortsub) $a $b)) ...)
+    # But a scalar immediately followed by -> is one term (method call / postfix
+    # deref), NOT a bare comparator: sort $ar->@* sorts the elements of $ar, with
+    # no comparator. Skip the comparator form so it falls through to list parsing.
     if ($now->isa('PPI::Token::Word') && $now->content() eq 'sort'
         && $next->isa('PPI::Token::Symbol')
-        && substr($next->content(), 0, 1) eq '$') {
+        && substr($next->content(), 0, 1) eq '$'
+        && !($i + 2 <= $#$e
+             && $e->[$i + 2]->isa('PPI::Token::Operator')
+             && $e->[$i + 2]->content() eq '->')) {
       my($top_node, $top_id) = $self->make_node_insert('funcall');
       my $sort_id = $self->make_node($now);
       $self->add_child_to_node($top_id, $sort_id);
