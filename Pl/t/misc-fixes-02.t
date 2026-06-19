@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 83;
+plan tests => 85;
 
 sub run_cl {
     my ($code) = @_;
@@ -580,6 +580,21 @@ like(transpile_to_cl('print <$fh>;'), qr/\(p-print \(p-readline \$fh\)\)/,
 # Guard the comparison sibling: `$a < $b` (no closing >) stays a less-than.
 like(transpile_to_cl('my $r = $a < $b;'), qr/\(p-< \$a \$b\)/,
     '$a < $b stays a comparison (not reconstructed as readline)');
+
+# A paren-less list operator in a ternary TRUE branch must stop its argument
+# list at the ':' that closes the enclosing ternary — `cond ? join "-", @a : $fb`
+# is `cond ? (join "-", @a) : $fb`, NOT join swallowing `: $fb` (which orphaned
+# the colon → "Missing case" parse-error → empty result).  This is the root
+# cause of the YAML::PP "dynamic require" wall: Module::Load's `_to_file` does
+# `$^O eq 'MSWin32' ? join "/", @parts : File::Spec->catfile(@parts)`.
+test_cl('paren-less list-op in ternary true-branch stops at enclosing colon',
+    'my @p=("L","U"); my $y = 0 ? join "-", @p : "FB"; my $z = 1 ? join "-", @p : "FB"; print "$y|$z\n";',
+    "FB|L-U\n");
+# A NESTED ternary inside the list-op args must still be consumed (its own '?'
+# raises the depth so its ':' is not mistaken for the enclosing boundary).
+test_cl('nested ternary inside list-op args is not cut at its own colon',
+    'my $c=1; my $v = join "-", $c ? "A" : "B", "Z"; print "$v\n";',
+    "A-Z\n");
 
 # $$ref->() must parse as (${$ref})->() — deref the scalar-ref-to-coderef, THEN
 # call — not ${ $ref->() }.  Was mis-associated in PExpr (the leading scalar Cast

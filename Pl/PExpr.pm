@@ -2911,6 +2911,26 @@ sub handle_subcalls {
     $end_pars   = $last_low_prio_op-1
         if defined $last_low_prio_op;
 
+    # A ternary ':' that closes an ENCLOSING ternary terminates this list
+    # operator's argument list: `cond ? join "-", @a : $fb` must parse as
+    # `cond ? (join "-", @a) : $fb`, not let join swallow `: $fb` (which then
+    # orphans the colon and the whole expression falls through).  Walk the arg
+    # region tracking ternary depth so a NESTED ternary's own ':' (whose '?' is
+    # inside the args, e.g. `join "-", $c ? @a : @b`) is NOT treated as a
+    # boundary and stays part of the args.
+    {
+      my $tern_depth = 0;
+      for (my $j = $i + 1; $j <= $end_pars; $j++) {
+        my $jop = $self->is_token_operator($e->[$j]) // '';
+        if ($jop eq '?') {
+          $tern_depth++;
+        } elsif ($jop eq ':') {
+          if ($tern_depth == 0) { $end_pars = $j - 1; last; }
+          $tern_depth--;
+        }
+      }
+    }
+
     # Named unary operators only take the next single term
     # But Cast + Symbol (like @$list) counts as one term
     # And Symbol + Subscript (like $h{key} or $a[0]) counts as one term
