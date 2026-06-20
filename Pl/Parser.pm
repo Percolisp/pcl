@@ -192,6 +192,49 @@ sub _preprocess_source {
   return $src;
 }
 
+# PPI tokenizes `%-` / `%+` (the named-capture magic hashes) greedily, so `7%-3`
+# becomes [Number 7][Magic %-][Number 3] — losing the modulo operator and giving
+# a PARSE ERROR. But the magic hashes can never legally be *followed* by an
+# operand and only ever *follow* a non-term (operator, comma, `(`, list-op word,
+# or start-of-expression). So when a `%-`/`%+` Magic token directly follows a
+# TERM (number, variable, string, `$#a`, or a closing `(...)`/`[...]`/`{...}`),
+# it is really the modulo operator applied to a signed operand. We re-split it
+# by inserting a space (`%-` -> `% -`) and re-parse. Working on the PPI tree
+# (not the raw source) means strings and regex bodies — already their own token
+# types — are never touched.
+sub _fix_modulo_magic {
+  my ($doc) = @_;
+  my $changed = 0;
+  for my $tok (@{ $doc->find('PPI::Token::Magic') || [] }) {
+    my $c = $tok->content;
+    next unless $c eq '%-' || $c eq '%+';
+    my $prev = $tok->sprevious_sibling;
+    next unless $prev;
+    my $is_term =
+         $prev->isa('PPI::Token::Number')
+      || $prev->isa('PPI::Token::Symbol')
+      || $prev->isa('PPI::Token::Magic')
+      || $prev->isa('PPI::Token::Quote')
+      || $prev->isa('PPI::Token::ArrayIndex')
+      || $prev->isa('PPI::Structure');   # closing (...) / [...] / {...}
+    next unless $is_term;
+    $tok->set_content('% ' . substr($c, 1));
+    $changed = 1;
+  }
+  return $changed;
+}
+
+sub _ppi_parse {
+  my ($self, $src) = @_;
+  my $doc = PPI::Document->new(\$src);
+  if ($doc && _fix_modulo_magic($doc)) {
+    my $fixed = $doc->serialize;
+    my $redo  = PPI::Document->new(\$fixed);
+    $doc = $redo if $redo;
+  }
+  return $doc;
+}
+
 sub _build_ppi_doc {
   my $self = shift;
 
@@ -200,14 +243,14 @@ sub _build_ppi_doc {
       or die "Failed to open file: " . $self->filename;
     my $src = _preprocess_source(do { local $/; <$fh> });
     close $fh;
-    my $doc = PPI::Document->new(\$src);
+    my $doc = $self->_ppi_parse($src);
     return $doc if $doc;
     die "Failed to parse file: " . $self->filename unless $self->lenient_ppi;
     return $self->_ppi_with_fallback($src);
   }
   elsif ($self->has_code) {
     my $code = _preprocess_source($self->code);
-    my $doc = PPI::Document->new(\$code);
+    my $doc = $self->_ppi_parse($code);
     return $doc if $doc;
     die "Failed to parse code" unless $self->lenient_ppi;
     return $self->_ppi_with_fallback($code);

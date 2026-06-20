@@ -7,7 +7,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 2;
+use Test::More tests => 3;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -40,5 +40,18 @@ sub toks {
     my @nums = grep { /^PPI::Token::Number/ } @t;
     is( scalar(@nums), 1,
         '0x1.8p+1 should be a single numeric token' )
+        or diag "got: @t";
+}
+
+# ── Bug 3: 7%-3 mis-tokenized as the magic hash %- (modulo operator lost) ──────
+#
+# `%-`/`%+` are the named-capture magic *hashes*; they only ever appear in term
+# position.  In `7%-3` the `%` follows a term (7) so it is the modulo operator
+# and `-3` is its operand — exactly what PPI gives for the spaced form `7 % -3`.
+# PPI instead emits Magic `%-`, losing the `%` operator.
+{
+    my @t = toks('7%-3');
+    ok( !grep(/^PPI::Token::Magic=\%-$/, @t),
+        '7%-3 should tokenize as 7 % -3, not as the magic hash %-' )
         or diag "got: @t";
 }

@@ -85,6 +85,31 @@ glob/readline") so we notice if either PPI or PCL regresses.
 
 ---
 
+## 4. `7%-3` tokenized as the magic hash `%-` (modulo lost)  [CONFIRMED 1.291]
+
+**Perl:** `7%-3` is `7 % -3` → `-2`. `%+`/`%-` are the named-capture magic
+*hashes*; they only appear in term position, never right after a term.
+
+**PPI:** with no space, `%-` (and `%+`) tokenizes as `PPI::Token::Magic`, losing
+the `%` operator:
+
+```
+PPI::Token::Number  7        # PPI gives the spaced form 7 % -3 correctly:
+PPI::Token::Magic   %-       #   Number 7 / Operator % / Number -3
+PPI::Token::Number  3
+```
+
+**Repro + ready-to-send report:** `docs/ppi-bug-modulo-magic.md`. Failing test is
+Bug 3 in `docs/ppi-bug-report.t`.
+
+**Impact:** any `term%-operand` / `term%+operand` is a PCL PARSE ERROR. PCL works
+around it in `Pl/Parser.pm` (`_fix_modulo_magic`): a `%-`/`%+` Magic token that
+directly follows a term is re-split into `% -`/`% +` on the PPI tree, then
+re-parsed (so strings/regexes are untouched). Regression guard in
+`Pl/t/misc-fixes-02.t`.
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it
