@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 89;
+plan tests => 90;
 
 sub run_cl {
     my ($code) = @_;
@@ -889,3 +889,12 @@ test_cl('modulo with glued negative/positive operand (PPI %-/%+ workaround)',
 test_cl('named-capture %+ hash element still works after the %- workaround',
     '"foo42" =~ /(?<n>\d+)/; print "$+{n}\n";',
     "42\n");
+
+# ── runtime warning strings used CL "...\n", but \n in a CL string literal is a
+# bare 'n' (backslash only escapes " and \), so the join uninit warning rendered
+# as "...joinn at unknown line 0." (no real newline → the location suffix was
+# appended too). Fixed by emitting a real newline (~%). PCL can't produce a line
+# number, so the message just ends after the text — matching Perl's wording.
+test_cl('uninitialized-in-join warning renders cleanly (no "joinn" / no bogus line)',
+    'print join(",", 1, undef, 3), "\n";',
+    "Use of uninitialized value in join or string\n1,,3\n");

@@ -1890,11 +1890,11 @@
                         ((< ln-raw 0) (max st (+ slen ln-raw)))
                         (t (max 0 (min (+ adj-st ln-raw) slen))))))
     (when undef-len-p
-      (p-warn "Use of uninitialized value in substr\n"))
+      (p-warn (format nil "Use of uninitialized value in substr~%")))
     (when oob
       (if replacement
           (error "substr outside of string")
-          (p-warn "substr outside of string\n")))
+          (p-warn (format nil "substr outside of string~%"))))
     (if replacement
         ;; 4-arg form (or lvalue): replace and return the replaced portion
         (let* (;; Warn when target is a reference being coerced to string —
@@ -1906,7 +1906,7 @@
                                      (hash-table-p v)
                                      (functionp v))
                                  (not (p-find-overload str "\"\"")))
-                        (p-warn "Attempt to use reference as lvalue in substr\n")))))
+                        (p-warn (format nil "Attempt to use reference as lvalue in substr~%"))))))
                (replaced-part (subseq s (min st slen) end-pos))
                (new-str (concatenate 'string
                                      (subseq s 0 (min st slen))
@@ -7468,7 +7468,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                             (let ((v (p-box-value dir)))
                               (and (consp v) (integerp (car v))))))
                    ;; It's a filehandle or dirhandle: fchdir not implemented
-                   (p-die "The fchdir function is unimplemented at pcl line 0.\n")
+                   (p-die (format nil "The fchdir function is unimplemented at pcl line 0.~%"))
                    (to-string dir))))))
     (handler-case
         (progn
@@ -8610,7 +8610,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; Skip for tied sep to avoid premature FETCH before item-count check.
          (_ (when (and (not (and (p-box-p sep) (p-tie-proxy-p (p-box-value sep))))
                        (not (%pcl-definedp sep)))
-              (p-warn "Use of uninitialized value in join\n")))
+              (p-warn (format nil "Use of uninitialized value in join or string~%"))))
          ;; Pre-count items WITHOUT calling FETCH (to decide sep evaluation)
          ;; Tied scalars in items are counted as 1 without fetching
          (item-count (loop for item in items
@@ -8639,7 +8639,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                          else
                          collect (progn
                                    (when (or (null val) (eq val *p-undef*))
-                                     (p-warn "Use of uninitialized value in join\n"))
+                                     (p-warn (format nil "Use of uninitialized value in join or string~%")))
                                    val))))
     (declare (ignore _))
     (if s
