@@ -475,16 +475,20 @@
 (defvar @_ (make-array 0 :adjustable t :fill-pointer 0)
   "Perl @_ - current subroutine arguments")
 
-;;; Regex capture group variables ($1, $2, ... $9) and named captures (%+)
-(defvar $1 nil "Regex capture group 1")
-(defvar $2 nil "Regex capture group 2")
-(defvar $3 nil "Regex capture group 3")
-(defvar $4 nil "Regex capture group 4")
-(defvar $5 nil "Regex capture group 5")
-(defvar $6 nil "Regex capture group 6")
-(defvar $7 nil "Regex capture group 7")
-(defvar $8 nil "Regex capture group 8")
-(defvar $9 nil "Regex capture group 9")
+;;; Regex capture group variables ($1, $2, ... $9) and named captures (%+).
+;;; A non-participating group is Perl undef, represented as *p-undef* (NOT raw
+;;; nil): %p-flatten-list drops raw nil as an array-hole/empty-list marker, so a
+;;; nil here would make an undef capture VANISH from a list (e.g.
+;;; `my ($a,$b)=($3,$4,...)`).  *p-undef* survives flattening as one undef slot.
+(defvar $1 *p-undef* "Regex capture group 1")
+(defvar $2 *p-undef* "Regex capture group 2")
+(defvar $3 *p-undef* "Regex capture group 3")
+(defvar $4 *p-undef* "Regex capture group 4")
+(defvar $5 *p-undef* "Regex capture group 5")
+(defvar $6 *p-undef* "Regex capture group 6")
+(defvar $7 *p-undef* "Regex capture group 7")
+(defvar $8 *p-undef* "Regex capture group 8")
+(defvar $9 *p-undef* "Regex capture group 9")
 (defvar |$&| nil "Regex MATCH - the whole matched string")
 (defvar |$`| nil "Regex PREMATCH - everything before the match")
 (defvar |$'| nil "Regex POSTMATCH - everything after the match")
@@ -10912,9 +10916,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     options))
 
 (defun clear-capture-groups ()
-  "Reset all capture group variables to nil"
-  (setf $1 nil $2 nil $3 nil $4 nil $5 nil
-        $6 nil $7 nil $8 nil $9 nil
+  "Reset all capture group variables.  $1..$9 reset to *p-undef* (Perl undef),
+   NOT raw nil — see the defvar note: a raw-nil capture vanishes when flattened
+   into a list (%p-flatten-list treats raw nil as an empty-list/hole marker)."
+  (setf $1 *p-undef* $2 *p-undef* $3 *p-undef* $4 *p-undef* $5 *p-undef*
+        $6 *p-undef* $7 *p-undef* $8 *p-undef* $9 *p-undef*
         |$&| nil |$`| nil |$'| nil |$+| nil)
   (clrhash %+))
 
@@ -10950,7 +10956,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
   `(let ((rs (aref ,starts ,idx)) (re (aref ,ends ,idx)))
-     (setf ,var (if (and rs re) (subseq ,str rs re) nil))))
+     (setf ,var (if (and rs re) (subseq ,str rs re) *p-undef*))))
 
 (defun set-capture-groups (str reg-starts reg-ends &optional reg-names)
   "Set capture group variables $1..$9 and named captures %+ from regex match results.

@@ -1,5 +1,32 @@
 # PCL Sweep Bug Catalog
 
+## Real CPAN-module test-suite findings (session 262)
+
+Strategy: run a real pure-Perl module's *own* `.t` suite through PCL (the module
+ships in the perl source tree, e.g.
+`perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/cpan/<Mod>/t/`), using `is`/`ok`
+as the oracle — a far deeper compositional fuzzer than single-expression tests.
+First target **Text::ParseWords** surfaced two real bugs:
+
+- **Undef regex captures vanish in a `my (...) = (...)` list — FIXED.** A
+  non-participating capture group was raw `nil`, but `%p-flatten-list` (the
+  `p-list-=` flattener) drops raw `nil` as an array-hole/empty-list marker, so
+  `my ($a,$b)=($3,$4,'Z')` shifted `'Z'` into `$a`. (`p-array-=` kept it, so
+  `my @x=(...)` was unaffected — the inconsistency.) Fix: capture-group undef is
+  now `*p-undef*` (`clear-capture-groups`, `%set-cap`, the `$1..$9` defvars), per
+  the flattener's own convention ("Perl undef comes as `*p-undef*`, not raw
+  nil"). Regression tests in `Pl/t/misc-fixes-02.t`.
+
+- **cl-ppcre `/x` + scoped `(?-x:…)` — OPEN (cl-ppcre bug, needs PCL workaround).**
+  `:extended-mode` is not restored after an inline `(?-x:…)` group, so trailing
+  whitespace/comments become literal and the match fails. Blocks
+  `Text::ParseWords::parse_line` (and any `/x` regex using `(?x:)`/`(?-x:)`).
+  Full writeup + minimal repro: `docs/clppcre-extended-mode-modifier-bug.md`.
+  Workaround = PCL-side `/x` normaliser (strip insignificant ws/comments
+  ourselves, honour `[…]`/escapes/mode-scopes, drop `:extended-mode`). Safest to
+  engage the normaliser ONLY when the pattern contains a `(?x`/`(?-x` modifier,
+  bounding the blast radius to the already-broken case.
+
 ## Differential-fuzzer findings (session 241, `tools/difftest-ops.pl`)
 
 The operator/precedence fuzzer (PCL vs real perl 5.40) surfaced 5 bugs that the

@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 90;
+plan tests => 92;
 
 sub run_cl {
     my ($code) = @_;
@@ -898,3 +898,21 @@ test_cl('named-capture %+ hash element still works after the %- workaround',
 test_cl('uninitialized-in-join warning renders cleanly (no "joinn" / no bogus line)',
     'print join(",", 1, undef, 3), "\n";',
     "Use of uninitialized value in join or string\n1,,3\n");
+
+# ── undef regex capture vars vanished in a list assignment ───────────────────
+# Non-participating capture groups were raw nil, but %p-flatten-list (used by
+# p-list-= `my (...) = (...)`) drops raw nil as an array-hole/empty-list marker,
+# so `my ($a,$b)=($3,$4,'Z')` shifted 'Z' into $a. Fixed: capture-group undef is
+# now *p-undef* (survives flattening). Found via Text::ParseWords::parse_line.
+test_cl('undef regex capture in a list assignment keeps its slot',
+    '"ab" =~ /(a)(b)/;'                       # $1=a $2=b, $3/$4 do not participate
+  . ' my ($p,$q,$r) = ($3, $4, "Z");'
+  . ' print "p=",(defined $p?$p:"U")," q=",(defined $q?$q:"U")," r=",(defined $r?$r:"U"),"\n";',
+    "p=U q=U r=Z\n");
+
+# Same, after a substitution (s/// sets undef captures via a different path).
+test_cl('undef capture after s/// keeps its slot in a list (ternary-list form)',
+    'my $s = "ab"; $s =~ s/(a)(b)/x/;'
+  . ' my ($p,$q,$r,$t) = (($9 ? (1,2) : ($3,$4)), "A", "B");'
+  . ' print join(",", map { defined $_ ? $_ : "U" } $p,$q,$r,$t), "\n";',
+    "U,U,A,B\n");
