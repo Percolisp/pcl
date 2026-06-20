@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 262 (2026-06-20) — real pure-Perl core-module `.t` suites as a fuzzer: `7%-3`, CL-`"\n"` warning render, undef regex captures, cl-ppcre `/x` workaround, and `\G` anchor support. Gate 95/3504.
+## Session 262 (2026-06-20) — real pure-Perl core-module `.t` suites as a fuzzer: `7%-3`, CL-`"\n"` render, undef regex captures, cl-ppcre `/x`, `\G` anchor, `local *glob` eval-order/conditional, and a general loop-body wantarray-context fix (Text::Balanced unhang). Gate 99/3528.
 
 **User: keep finding/fixing bugs via CPAN modules + fuzzing; ask before installing.** Strategy this session = run real core-module `.t` suites through PCL (no install — they live in the perlbrew build tree). Five fixes landed; the last (`\G`) was in progress when the machine hung and is recovered + completed here.
 
@@ -29,7 +29,15 @@ Verified vs perl 5.40 (anchoring-vs-skipping, list context, scalar count, interp
 
 NOTE the **scalar** `local $x = E if COND` has the same statement-modifier-swallowing gap (different code branch, pre-existing) — left as a known gap; only `local *glob` was in scope (it's what real code uses). New regression file **`Pl/t/local-glob-01.t` (8 tests)**; `Text::ParseWords.t` now 27/27. Existing glob/local tests (glob-01, local-elem-01/02, our-local-01, eval-named-sub-01) all green.
 
-**NEXT:** continue running real core-module `.t` suites (Text::Balanced next); the scalar conditional-`local` gap if it shows up in real code; keep fuzzing axes / CPAN breadth.
+**Text::Balanced → core `extract_*` functions now work (was an infinite HANG). General wantarray-context fix.** `extract_bracketed`/`extract_delimited`/`extract_quotelike` hung. Backtrace pinned it to a `while (pos<len) { … m/\G…/gcs }` tokenizer in `_match_bracketed`: the bare `m//g` statement in the loop body ran in **list** context (match-all, no pos advance) instead of **void/scalar** (single match, advance pos) → pos never moved → infinite loop. Root cause: when the sub was called via `my @m = …` (list), PCL propagated the sub's `wantarray` **into the loop body's statements**.
+- **The defect:** `tail_position` (true ⇒ a statement's value flows to the sub return ⇒ propagate caller wantarray; false ⇒ wrap in `(let ((*wantarray* :void)) …)`) was set for the last statement of **every** block when `in_subroutine>0`. Wrong for blocks whose value is discarded — **loop bodies** and **non-tail if/else branches**.
+- **Fix (`Pl/Parser.pm`):** (1) `_process_block` gained a `$void_body` param; while/for/foreach + continue blocks pass it (their statements are never tail). (2) `_process_block` now sets `tail_position` **explicitly per child** — 0 for non-tail (was *left*, which leaked), 1 only for a real tail child — and **saves/restores** it around the loop (the leak fix: a value-position tail child was leaving `tail_position=1` for the next top-level statement, breaking `wantarray-01.t` test 3). (3) `_generate_if_clauses` (shared by tail & non-tail if/else) reads the now-accurate `tail_position` once and threads void-ness to its branches + recursive elsif. Tail propagation preserved (verified `sub{ @list }` and `sub{ if(1){wantarray?…} }` both list in list ctx).
+- **Hardened my new `\G` list path (`cl/pcl-runtime.lisp`):** `%pcl-scan-anchored-list` left `*p-match-pos*` stale; now `remhash`es it after (Perl resets pos() after a list-ctx /g) so a genuine list-ctx `\G…/g` with a pre-set pos doesn't hang and matches Perl (`pos`→undef).
+- This bug class is **general** (any context-sensitive op in a loop body of a list-called sub, not just regex); the fix covers loops + if/else. **Bare blocks `{…}`** remain a lower-probability instance of the same shape (left for when a real module hits it).
+
+New regression file **`Pl/t/loop-body-context-01.t` (5 tests)**. Gate **99 files / 3528 tests PASS**. **Text::Balanced STILL open:** `extract_tagged`→`_match_tagged` uses intra-sub `goto LABEL` (forward gotos to error labels), which PCL only wraps in a `tagbody` at top level, not inside a sub body (harder gap); plus a `croak` import issue.
+
+**NEXT:** intra-sub `goto LABEL` → tagbody (for `_match_tagged`); the scalar conditional-`local` and bare-block context gaps if real code hits them; keep CPAN breadth / fuzzing.
 
 ---
 

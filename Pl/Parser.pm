@@ -3279,6 +3279,16 @@ sub _process_if_statement {
 sub _generate_if_clauses {
   my $self    = shift;
   my $clauses = shift;
+  # $void: are this if/else's branches in void context?  Computed once on the
+  # initial call from whether the if-statement itself is in value/tail position
+  # (this same generator serves both a tail if-with-else, whose branches DO
+  # propagate the caller's wantarray, and a non-tail/void if, whose branches must
+  # NOT — else a branch's /g regex inherits list context).  Threaded through the
+  # recursive elsif chain.
+  my $void = shift;
+  $void = ($self->environment->in_subroutine > 0
+           && !$self->environment->tail_position) ? 1 : 0
+    unless defined $void;
 
   return unless @$clauses;
 
@@ -3307,7 +3317,7 @@ sub _generate_if_clauses {
   $self->_emit("(progn");
   $self->indent_level($self->indent_level + 1);
   $self->_with_declarations($first->{block}, sub {
-    $self->_process_block($first->{block});
+    $self->_process_block($first->{block}, $void);
   });
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");
@@ -3321,14 +3331,14 @@ sub _generate_if_clauses {
       $self->_emit("(progn");
       $self->indent_level($self->indent_level + 1);
       $self->_with_declarations($next->{block}, sub {
-        $self->_process_block($next->{block});
+        $self->_process_block($next->{block}, $void);
       });
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
     }
     else {
       # elsif - recursive
-      $self->_generate_if_clauses($rest);
+      $self->_generate_if_clauses($rest, $void);
     }
   }
   else {
@@ -3665,6 +3675,14 @@ sub _process_block_in_tail_context {
 sub _process_block {
   my $self  = shift;
   my $block = shift;
+  # $void_body: the block's value is discarded (a loop body — while/for/foreach
+  # and continue blocks).  Such a block is NEVER in value/tail position, so its
+  # last statement must NOT inherit the enclosing sub's wantarray (otherwise a
+  # statement-level `m//g` in a loop body would run in list context — e.g.
+  # Text::Balanced::_match_bracketed's tokenizer loop, which then never advances
+  # pos() and hangs).  Defaults to false to preserve the value-position behavior
+  # for sub bodies and other callers.
+  my $void_body = shift;
 
   # Isolate _pending_let_closes so that inner _process_block calls (e.g.
   # for if/while/bare block bodies) cannot accidentally flush pending let
@@ -3686,7 +3704,7 @@ sub _process_block {
   # the condition value.  This implements Perl's "last expression evaluated"
   # return semantics for bare-if.
   my ($tail_ret_var, $tail_last_sig, $tail_sig);
-  if ($self->environment->in_subroutine > 0) {
+  if (!$void_body && $self->environment->in_subroutine > 0) {
     my @sig = $block->schildren;
     # Skip BEGIN/END/INIT/CHECK blocks — they produce no runtime code,
     # so the tail is the last *runtime* significant statement.
@@ -3710,6 +3728,13 @@ sub _process_block {
     $self->indent_level($self->indent_level + 1);
   }
   # ─────────────────────────────────────────────────────────────────────────
+
+  # Save/restore tail_position around child processing: the per-child loop sets
+  # it explicitly (0 for non-tail), so without restoring, a value-position tail
+  # child would leave tail_position=1 leaking into whatever the caller processes
+  # next (e.g. the next top-level statement, making a void call wrongly propagate
+  # the ambient wantarray).
+  my $saved_tail_position = $self->environment->tail_position;
 
   my @children = $block->children;
   my %skip;
@@ -3795,11 +3820,17 @@ sub _process_block {
 
     # Set tail_position so gen_funcall/gen_methodcall propagate *wantarray*
     # instead of overriding it — allowing context to flow from the call site.
-    my $is_tail = defined $tail_sig && $child == $tail_sig;
-    $self->environment->tail_position(1) if $is_tail;
+    # Non-tail statements are void, so set tail_position EXPLICITLY to 0 for them
+    # (not merely leave it): otherwise a nested dynamic-context op like /g regex in
+    # a non-tail statement inherits the sub's list wantarray.  $void_body (loop
+    # bodies) forces every statement void.  tail_position now accurately reflects
+    # "the current statement is in value/return position", which _generate_if_clauses
+    # reads to decide whether its branches propagate context or are void.
+    my $is_tail = !$void_body && defined $tail_sig && $child == $tail_sig;
+    $self->environment->tail_position($is_tail ? 1 : 0);
     $self->_process_element($child);
-    $self->environment->tail_position(0) if $is_tail;
   }
+  $self->environment->tail_position($saved_tail_position);
 
   # Flush let forms opened by _emit_scoped_block's hook (innermost first).
   # Must happen here, inside _process_block, so the closes land BEFORE any
@@ -5054,13 +5085,13 @@ sub _process_while_statement {
     $self->indent_level($self->indent_level + 1);
     if ($block) {
       $self->_with_declarations($block, sub {
-        $self->_process_block($block);
+        $self->_process_block($block, 1);
       });
     }
     if ($continue_block) {
       $self->_emit(":continue (progn");
       $self->indent_level($self->indent_level + 1);
-      $self->_process_block($continue_block);
+      $self->_process_block($continue_block, 1);
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
     }
@@ -5191,7 +5222,7 @@ sub _process_c_style_for {
     $self->indent_level($self->indent_level + 1);
     if ($block) {
       $self->_with_declarations($block, sub {
-        $self->_process_block($block);
+        $self->_process_block($block, 1);
       });
     }
     $self->indent_level($self->indent_level - 1);
@@ -5360,7 +5391,7 @@ sub _process_foreach_loop {
       $self->{_let_bound_vars} = { %{$saved_let_bound // {}}, $cl_loop_var => 1 };
     }
     $self->_with_declarations($block, sub {
-      $self->_process_block($block);
+      $self->_process_block($block, 1);
     });
     $self->{_let_bound_vars} = $saved_let_bound;
     if (defined $saved_loop_var_rename) {
@@ -5371,7 +5402,7 @@ sub _process_foreach_loop {
   if ($continue_block) {
     $self->_emit(":continue (progn");
     $self->indent_level($self->indent_level + 1);
-    $self->_process_block($continue_block);
+    $self->_process_block($continue_block, 1);
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");
   }

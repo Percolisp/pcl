@@ -11252,8 +11252,14 @@ buffer's fill-pointer; everything else falls back to file-length."
           (cond
             ;; /\G.../g in list context: contiguous anchored matches from pos
             ((and global-p (eq *wantarray* t) anchored-g)
-             (%pcl-scan-anchored-list scanner str reg-names
-                                      (or (gethash string *p-match-pos*) 0)))
+             (prog1
+                 (%pcl-scan-anchored-list scanner str reg-names
+                                          (or (gethash string *p-match-pos*) 0))
+               ;; Perl resets pos() after a list-context /g match exhausts.  This
+               ;; path STARTS from pos, so leaving a stale pos would make a
+               ;; `while (pos < len) { @m = /\G.../g }` loop never terminate;
+               ;; clearing it matches Perl (pos() becomes undef).
+               (remhash string *p-match-pos*)))
             ;; /g in list context: return all matches at once, no pos tracking
             ;; :void is NOT list context — only (eq *wantarray* t) is list context
             ((and global-p (eq *wantarray* t))
