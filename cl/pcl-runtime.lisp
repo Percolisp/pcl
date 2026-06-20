@@ -111,7 +111,7 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
-   #:p-glob-slot #:p-glob-undef-name #:p-local-glob
+   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
@@ -9647,52 +9647,71 @@ buffer's fill-pointer; everything else falls back to file-length."
         ((string= slot-s "GLOB")    glob)
         (t *p-undef*)))))
 
+(defun %p-glob-syms (pkg-str name-str)
+  "Resolve the four slot symbols of typeglob *PKG::NAME (creating the package if
+   needed).  Returns (values code-sym scalar-sym array-sym hash-sym)."
+  (let* ((pkg   (or (%pcl-find-package pkg-str)
+                    (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
+         (uname (string-upcase name-str)))
+    (values (intern (concatenate 'string "PL-" uname) pkg)
+            (intern (concatenate 'string "$"   uname) pkg)
+            (intern (concatenate 'string "@"   uname) pkg)
+            (intern (concatenate 'string "%"   uname) pkg))))
+
+(defun %p-glob-save (code-sym scalar-sym array-sym hash-sym)
+  "Snapshot the four glob slots for a later local restore.  Returns an opaque
+   vector of had-bound flags + saved values."
+  (vector (fboundp code-sym)   (when (fboundp code-sym)   (fdefinition code-sym))
+          (boundp scalar-sym)  (when (boundp scalar-sym)  (symbol-value scalar-sym))
+          (boundp array-sym)   (when (boundp array-sym)   (symbol-value array-sym))
+          (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))))
+
+(defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym)
+  "Reset the four glob slots to fresh empties (Perl: local *foo starts fresh)."
+  (when (fboundp code-sym) (fmakunbound code-sym))
+  (setf (symbol-value scalar-sym) (make-p-box *p-undef*))
+  (setf (symbol-value array-sym)  (make-array 0 :adjustable t :fill-pointer 0))
+  (setf (symbol-value hash-sym)   (make-hash-table :test 'equal)))
+
+(defun %p-glob-restore (saved code-sym scalar-sym array-sym hash-sym)
+  "Restore the four glob slots from a %p-glob-save snapshot."
+  (if (aref saved 0) (setf (fdefinition code-sym) (aref saved 1))
+      (when (fboundp code-sym) (fmakunbound code-sym)))
+  (if (aref saved 2) (setf (symbol-value scalar-sym) (aref saved 3)) (makunbound scalar-sym))
+  (if (aref saved 4) (setf (symbol-value array-sym)  (aref saved 5)) (makunbound array-sym))
+  (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym)))
+
 (defmacro p-local-glob (pkg-str name-str &body body)
   "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
    execute body, restore on exit."
-  (let ((pkg-var        (gensym "PKG"))
-        (uname-var      (gensym "UNAME"))
-        (saved-had-code (gensym "HAD-CODE"))
-        (saved-code     (gensym "SAVED-CODE"))
-        (saved-scalar   (gensym "SAVED-SCALAR"))
-        (saved-array    (gensym "SAVED-ARRAY"))
-        (saved-hash     (gensym "SAVED-HASH"))
-        (had-scalar     (gensym "HAD-SCALAR"))
-        (had-array      (gensym "HAD-ARRAY"))
-        (had-hash       (gensym "HAD-HASH")))
-    `(let* ((,pkg-var   (or (%pcl-find-package ,pkg-str)
-                            (make-package (perl-pkg-to-cl-pkg-name ,pkg-str) :use '(:cl :pcl))))
-            (,uname-var (string-upcase ,name-str))
-            (code-sym   (intern (concatenate 'string "PL-"  ,uname-var) ,pkg-var))
-            (scalar-sym (intern (concatenate 'string "$"    ,uname-var) ,pkg-var))
-            (array-sym  (intern (concatenate 'string "@"    ,uname-var) ,pkg-var))
-            (hash-sym   (intern (concatenate 'string "%"    ,uname-var) ,pkg-var))
-            (,saved-had-code (fboundp code-sym))
-            (,saved-code     (when ,saved-had-code (fdefinition code-sym)))
-            (,had-scalar     (boundp scalar-sym))
-            (,saved-scalar   (when ,had-scalar (symbol-value scalar-sym)))
-            (,had-array      (boundp array-sym))
-            (,saved-array    (when ,had-array  (symbol-value array-sym)))
-            (,had-hash       (boundp hash-sym))
-            (,saved-hash     (when ,had-hash   (symbol-value hash-sym))))
-       ;; Clear all slots so local *foo starts fresh (Perl semantics)
-       (when ,saved-had-code (fmakunbound code-sym))
-       (setf (symbol-value scalar-sym) (make-p-box *p-undef*))
-       (setf (symbol-value array-sym)  (make-array 0 :adjustable t :fill-pointer 0))
-       (setf (symbol-value hash-sym)   (make-hash-table :test 'equal))
-       (unwind-protect (progn ,@body)
-         (if ,saved-had-code
-             (setf (fdefinition code-sym) ,saved-code)
-             (when (fboundp code-sym) (fmakunbound code-sym)))
-         (if ,had-scalar
-             (setf (symbol-value scalar-sym) ,saved-scalar)
-             (makunbound scalar-sym))
-         (if ,had-array
-             (setf (symbol-value array-sym) ,saved-array)
-             (makunbound array-sym))
-         (if ,had-hash
-             (setf (symbol-value hash-sym) ,saved-hash)
-             (makunbound hash-sym))))))
+  (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
+        (sv (gensym "SAVED")))
+    `(multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
+       (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
+         (%p-glob-clear ,cs ,ss ,as ,hs)
+         (unwind-protect (progn ,@body)
+           (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
+
+(defmacro p-local-glob-if (cond-form pkg-str name-str rhs-form &body body)
+  "The deprecated conditional-local idiom `local *foo = RHS if COND`
+   (e.g. Text::ParseWords::old_shellwords: `local *_ = \\join('',@_) if @_`).
+   Perl does NOT localize at all when COND is false (the rest of the scope sees
+   the outer slots); when COND is true it localizes+assigns for the rest of the
+   scope.  We always save+restore (a no-op when COND is false, since the slots
+   are untouched), but only clear+assign when COND is true.  RHS-FORM is
+   evaluated while the slots are still intact — so an RHS that reads @_ (which
+   *foo's localization would otherwise clear) sees the pre-local @_.  COND-FORM
+   is already a CL boolean (the codegen wraps it in p-true-p / its negation)."
+  (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
+        (sv (gensym "SAVED")) (rv (gensym "RHS")))
+    `(multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
+       (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
+         (when ,cond-form
+           (let ((,rv ,rhs-form))
+             (%p-glob-clear ,cs ,ss ,as ,hs)
+             (p-glob-assign ,pkg-str ,name-str ,rv)))
+         (unwind-protect (progn ,@body)
+           (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
 
 ;;; Helper functions for p-local-hash-elem macros.
 ;;; Delegating to functions keeps macro expansions compact, preventing heap

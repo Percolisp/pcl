@@ -2535,24 +2535,62 @@ sub _process_local_declaration {
     my $has_init = grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq '=' } @non_ws;
     if ($has_init) {
       my @rhs_parts;
+      my @cond_parts;
+      my $modifier;        # 'if' / 'unless' statement modifier, if present
       my $past_eq = 0;
       for my $p (@non_ws) {
         if (!$past_eq && ref($p) eq 'PPI::Token::Operator' && $p->content eq '=') {
           $past_eq = 1;
           next;
         }
-        push @rhs_parts, $p if $past_eq;
+        next unless $past_eq;
+        # A trailing `if`/`unless` bareword is the statement modifier (it cannot
+        # appear inside a value expression): `local *_ = RHS if COND`.
+        if (!$modifier && ref($p) eq 'PPI::Token::Word'
+            && $p->content =~ /^(?:if|unless)$/) {
+          $modifier = $p->content;
+          next;
+        }
+        if ($modifier) { push @cond_parts, $p; }
+        else           { push @rhs_parts,  $p; }
       }
       my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-      $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
-      $self->indent_level($self->indent_level + 1);
-      $self->_emit("(p-glob-assign \"$pkg\" \"$name\" $rhs_cl)");
+      if ($modifier) {
+        # Conditional local (`local *foo = RHS if COND`): only localize+assign
+        # when COND is true; otherwise the rest of the scope keeps the outer
+        # slots.  p-local-glob-if always saves/restores but evaluates RHS (while
+        # the slots are still intact, so it can read @_) and clears+assigns only
+        # when COND holds.  Push truthiness into a p-true-p test here.
+        my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt) // 'nil';
+        my $test = $modifier eq 'unless'
+                 ? "(not (p-true-p $cond_cl))" : "(p-true-p $cond_cl)";
+        $self->_emit("(p-local-glob-if $test \"$pkg\" \"$name\" $rhs_cl");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth}++;
+      } else {
+        # Perl evaluates the RHS of `local *foo = EXPR` in the ENCLOSING scope,
+        # BEFORE *foo is localized.  This matters because localizing *_ clears the
+        # @_ slot too, so an RHS that reads @_ (e.g. local *_ = \join('', @_), the
+        # Text::ParseWords idiom) must see the old @_.  Bind the RHS in a wrapping
+        # let so it is computed before p-local-glob clears slots.
+        $self->{_local_glob_counter} //= 0;
+        my $rhs_tmp = '--local-glob-rhs--' . $self->{_local_glob_counter}++;
+        $self->_emit("(let (($rhs_tmp $rhs_cl))");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(p-glob-assign \"$pkg\" \"$name\" $rhs_tmp)");
+        # Two wrapping forms (let + p-local-glob) → two closing parens at scope end.
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth} += 2;
+      }
     } else {
       $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
       $self->indent_level($self->indent_level + 1);
+      $self->{_local_let_depth} //= 0;
+      $self->{_local_let_depth}++;
     }
-    $self->{_local_let_depth} //= 0;
-    $self->{_local_let_depth}++;
     $self->_emit("");
     return;
   }

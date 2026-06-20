@@ -23,7 +23,13 @@ cl-ppcre has no `\G`. Implemented in `cl/pcl-runtime.lisp`:
 
 Verified vs perl 5.40 (anchoring-vs-skipping, list context, scalar count, interpolated `qr//` non-leading `\G`, key=value tokenizer — all byte-identical). New regression file **`Pl/t/regex-gpos-01.t` (7 tests)**. Regex-heavy regression subset (match-vars, named-capture, regexp-subst, split, tr, extended-mode, misc-fixes-01/02) all green.
 
-**NEXT:** continue running real core-module `.t` suites (Text::Balanced / Text::ParseWords now that `/x`+`\G` are in); keep fuzzing axes / CPAN breadth.
+**Text::ParseWords.t suite → 26/27, then `local *_` fix → 27/27.** With `/x`+`\G` in, the real Text::ParseWords runs; `ParseWords.t` passed 26/27. The last failure (`Text::ParseWords::old_shellwords("foo\\")` → 1 word) traced to `local *_ = \join('', @_) if @_` — TWO bugs in `local *glob` codegen:
+- **RHS eval order.** Localizing `*_` clears *all* slots of `_`, **including `@_`** (Perl: `local *foo` installs a fresh glob). PCL cleared the slots *then* evaluated the RHS, so an RHS reading `@_` (`\join('',@_)`, `\$_[0]`, `\"@_"`) saw an empty `@_`. Fix: the parser binds the RHS in a wrapping `let` (`--local-glob-rhs--N`) so it is computed in the enclosing scope, before `p-local-glob` clears.
+- **Conditional form (the deprecated `local … if COND`).** `_process_local_declaration` swallowed the `if @_` statement modifier into the RHS → parse error. New runtime macro `p-local-glob-if`: always saves+restores the slots, but only evaluates RHS (while slots are intact, so it can read `@_`), clears, and assigns **when COND is true** — matching Perl, where a false condition does NOT localize at all (the rest of the scope keeps the outer `$_`/`@_`; this is exactly how old_shellwords falls through to the caller's `$_` when called with no args). The old 45-line `p-local-glob` macro was refactored into four shared helpers (`%p-glob-syms`/`-save`/`-clear`/`-restore`) so the conditional macro reuses them (no copy-paste). Parser strips the `if`/`unless` modifier and emits a `(p-true-p …)` / negated test.
+
+NOTE the **scalar** `local $x = E if COND` has the same statement-modifier-swallowing gap (different code branch, pre-existing) — left as a known gap; only `local *glob` was in scope (it's what real code uses). New regression file **`Pl/t/local-glob-01.t` (8 tests)**; `Text::ParseWords.t` now 27/27. Existing glob/local tests (glob-01, local-elem-01/02, our-local-01, eval-named-sub-01) all green.
+
+**NEXT:** continue running real core-module `.t` suites (Text::Balanced next); the scalar conditional-`local` gap if it shows up in real code; keep fuzzing axes / CPAN breadth.
 
 ---
 
