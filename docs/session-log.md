@@ -4,6 +4,27 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 263 (2026-06-21) — intra-sub `goto LABEL` (partial) + top-level goto-in-if fix + do-block `my`-scoping leak fix. Gate 100/3535. Remaining `_match_tagged` blockers documented in `docs/intra-sub-goto-plan.md`.
+
+**User: keep finding/fixing bugs via CPAN modules + fuzzing; the remaining item from s262 was Text::Balanced `_match_tagged` → intra-sub `goto LABEL`.** Then user asked (mid-session) whether the declaration/goto codegen area is worth reviewing/refactoring → **yes** (below), then asked to (1) fix the do-block leak now, (2) update the plans, and to end the session with a saved plan for the general problem.
+
+**Shipped (commit `a0fa56a`) — intra-sub `goto LABEL` + top-level goto-in-if.**
+- **Top-level bug too:** `goto` nested inside a multi-line form (`if (…) { goto X }`) never wrapped — the old line-granular `_wrap_runtime_labels` skipped indented lines, so the `(go :X)` inside `(p-if (progn (go :X)))` was invisible.
+- **New `_scan_lisp_lines`** (`Pl/Parser.pm`): paren/string/comment/`#\`-aware scan → per-line `{depth, in_lambda}` (`in_lambda` = inside a `(lambda`/`(p-sub`; `go` can't cross a function boundary).
+- **`_wrap_runtime_labels` rewritten to COMPLETE-FORM granularity:** groups lines into balanced forms, finds labels (region depth 0) + reachable gotos (any depth, not in_lambda), wraps the minimal form-range spanning each label+goto in `(tagbody …)`, hoists definition forms out, leaves post-label forms outside (implicit-return value preserved). Handles forward error-goto, backward retry, multiple labels, goto out of a `while`.
+- **`_process_block`** captures its emitted statement region and runs the wrapper (tagbody lands *inside* the declaration `let`). **`_block_has_standalone_label`** forces the flat-let path for sub bodies with a standalone `LABEL:` so labels+siblings share one scope. New `Pl/t/goto-label-01.t` (7 tests). Gate 100/3535.
+
+**Shipped — do-block `my`-scoping leak (`_find_all_declarations`).** It recursed into `do { my $x; … }` and hoisted `$x` to the enclosing sub's let → double-bind + the hoisted let stayed open nesting every following statement. Fix: exclude a `do`-prev-sibling block from hoisting recursion (same as `sub`/`eval`). Independent correctness fix; also drops `_match_tagged`'s trailing labels from paren depth ~9 → 4 (the flat-let body level), making all gotos reachable.
+
+**STILL BROKEN — `_match_tagged` (Text::Balanced `extract_tagged`) aborts `GO to nonexistent tag :MATCHED`.** Two layered blockers, both in the declaration/section machinery, NOT the goto logic — full diagnosis + plan in **`docs/intra-sub-goto-plan.md`**:
+- **A:** in the 2-pass `pl2cl` path the wrapper *does* insert a tagbody (verified on the dumped region) but the in-place `splice` on the `definitions` bucket is discarded downstream (named-sub-body bucket routing / temp-section collection). 0 tagbody in final output.
+- **B:** codegen differs between 1-pass `parse()` (46-line region, unwrappable) and 2-pass `parse_file()` (57-line region, wrappable) — the flat-vs-two-phase choice / `_find_all_declarations` results depend on whether the prototype pre-pass ran. Codegen must be pass-independent.
+- Also latent: `map`/`grep`/`sort` block bodies still hoist their `my` vars (same shape as the do bug, not yet fixed).
+
+**Refactor verdict (user's question): YES.** Declarations are an interleaved stream of `let` opens with deferred closes — there is no scope tree, so control-flow insertion (tagbody) is paren-archaeology on generated text, and three heuristics pick the declaration path (sometimes pass-dependently). This is exactly what `docs/codegen-rewrite-spec.md` / `docs/type-flow-and-codegen-plan.md` target: declarations as IR scope nodes, control flow (labels/goto/next/last/redo/loops) as first-class IR nodes lowered structurally, `my`-scope boundaries (do/eval/map/grep/sort/anon) resolved on the IR. The goto work is a clean north-star + acceptance test for that rewrite. **NEXT:** Blocker A (trace bucket arrayref splice→assemble), then B (pass-independence), then map/grep/sort hoist exclusion, then real Text::Balanced regression.
+
+---
+
 ## Session 262 (2026-06-20) — real pure-Perl core-module `.t` suites as a fuzzer: `7%-3`, CL-`"\n"` render, undef regex captures, cl-ppcre `/x`, `\G` anchor, `local *glob` eval-order/conditional, and a general loop-body wantarray-context fix (Text::Balanced unhang). Gate 99/3528.
 
 **User: keep finding/fixing bugs via CPAN modules + fuzzing; ask before installing.** Strategy this session = run real core-module `.t` suites through PCL (no install — they live in the perlbrew build tree). Five fixes landed; the last (`\G`) was in progress when the machine hung and is recovered + completed here.

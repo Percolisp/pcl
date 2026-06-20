@@ -8,6 +8,15 @@
   representation; this doc decides the surrounding code shape.**
 - `docs/two-phase-compiler.md`, `docs/ast-annotation-plan.md` — the analysis
   passes that supply the facts these transforms consume.
+- `docs/intra-sub-goto-plan.md` — **a concrete motivating case (session 263).**
+  Intra-sub `goto LABEL` needs a `(tagbody …)` at statement-sibling level, which
+  today requires paren-archaeology on generated text because declarations are an
+  interleaved `let`-open stream with no scope tree. It documents two blockers
+  (wrap-result discarded in the 2-pass path; codegen differing between
+  `parse()` and `parse_file()`) and the `do`/`eval`/`map`/`grep`/`sort` scope-leak
+  class. Use its examples as **acceptance tests** for the IR rewrite: labels,
+  `goto`, and `my`-scope boundaries must be IR nodes resolved before any text
+  exists.
 
 This document has two layers, on purpose:
 - **§Why** — the rationale, for a human deciding whether the plan is sound.

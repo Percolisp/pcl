@@ -4415,9 +4415,13 @@ sub _find_all_declarations {
     #   - Named sub definitions (PPI::Statement::Sub)
     #   - BEGIN/END/etc blocks (PPI::Statement::Scheduled)
     #   - Anonymous sub bodies: PPI::Structure::Block whose prev sibling is 'sub'
-    #   - eval { } blocks: PPI::Structure::Block whose prev sibling is 'eval'
-    #     (my vars inside eval { } are scoped to that eval; hoisting them to the
-    #     enclosing let would shadow outer vars of the same name)
+    #   - eval { } / do { } blocks: PPI::Structure::Block whose prev sibling is
+    #     'eval' or 'do'.  Each becomes its own CL lambda scope — `my` vars
+    #     inside are scoped to that block, so hoisting them to the enclosing let
+    #     would (a) shadow outer vars of the same name and (b) leave the
+    #     hoisted let open around the rest of the enclosing body (the do-block's
+    #     own (let …) then double-binds and the outer one nests every following
+    #     statement, breaking e.g. intra-sub goto/label tagbody wrapping).
     # For bare blocks (no prev non-whitespace sibling): recurse but only keep
     #   'state' declarations — 'my' vars in bare blocks are scoped to the block
     #   by _process_bare_block/_with_declarations and must NOT be hoisted to the
@@ -4428,7 +4432,8 @@ sub _find_all_declarations {
         && !($ref eq 'PPI::Structure::Block' && do {
                my $prev = $child->sprevious_sibling;
                $prev && ref($prev) eq 'PPI::Token::Word'
-                     && ($prev->content eq 'sub' || $prev->content eq 'eval')
+                     && ($prev->content eq 'sub' || $prev->content eq 'eval'
+                         || $prev->content eq 'do')
              })) {
       my $is_bare_block = $ref eq 'PPI::Structure::Block' && do {
         my $prev = $child->sprevious_sibling;
