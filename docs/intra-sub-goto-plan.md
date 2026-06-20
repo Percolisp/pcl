@@ -1,5 +1,11 @@
 # Intra-sub `goto LABEL` + declaration codegen — status & plan
 
+> **Read `docs/goto-and-declaration-codegen.md` first** — it is the polished,
+> self-contained write-up (problem with worked code examples + three-layer root
+> cause + the tiered Tier-0/1/2 plan with the release-1 line). This file is the
+> terse working status.
+
+
 **Session 263 (2026-06-21).** Started from "make Text::Balanced's `_match_tagged`
 work" (intra-sub forward `goto LABEL`). Shipped partial support; hit a deeper
 declaration-codegen tangle. This doc records exactly where we are, the general
