@@ -4,6 +4,29 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 262 (2026-06-20) — real pure-Perl core-module `.t` suites as a fuzzer: `7%-3`, CL-`"\n"` warning render, undef regex captures, cl-ppcre `/x` workaround, and `\G` anchor support. Gate 95/3504.
+
+**User: keep finding/fixing bugs via CPAN modules + fuzzing; ask before installing.** Strategy this session = run real core-module `.t` suites through PCL (no install — they live in the perlbrew build tree). Five fixes landed; the last (`\G`) was in progress when the machine hung and is recovered + completed here.
+
+**Committed earlier this session (recovered from git log — these had no log entry yet):**
+- **`7%-3` parses as modulo (`7a00928`).** PPI mis-tokenizes `%-`/`%+` as the magic-hash sigils even in `EXPR % -EXPR`; fixed in the parser.
+- **Runtime warning strings used CL `"\n"` (`2f38c97`).** A literal backslash-n in a CL string is a bare `n`, not a newline — warning text rendered wrong.
+- **Undef regex capture vars vanished in `my (...) = (...)` list assignment (`880ab6e`).**
+- **README prose tightening (`6288d91`).**
+- **cl-ppcre `/x` extended-mode workaround with scoped `(?-x:)`/`(?x:)` (`96e9f17`).** PCL strips the `/x` layer itself for patterns containing an `x` mode-modifier; see `docs/clppcre-extended-mode-modifier-bug.md`, `Pl/t/regex-extended-mode-01.t`.
+
+**This turn — `\G` anchor support (the regexp problem in progress at the hang).**
+cl-ppcre has no `\G`. Implemented in `cl/pcl-runtime.lisp`:
+- **`%pcl-strip-gpos`** removes `\G` from the pattern (char-class- and escape-aware), so the cleaned pattern compiles on cl-ppcre. A shorter result flags that the pattern was `\G`-anchored. Also catches the non-leading `qr//` form `(?^:\G(...))` that Text::Balanced emits.
+- **`do-regex-match`** then requires every match to BEGIN exactly at the current `pos()` (`(/= match-start start) → nil`), so `\G` anchors at the previous endpoint and **stops at the first gap** instead of skipping ahead the way plain `/g` does. Threaded through all three paths: scalar `/g` loop, single-match (no `/g`, anchored at pos), and list context.
+- **`%pcl-scan-anchored-list`** handles `\G…/g` in list context — collects the contiguous run from `pos`, stopping at the first non-adjacent match, and sets `$1..`/`%+`/`$&` from the last match.
+
+Verified vs perl 5.40 (anchoring-vs-skipping, list context, scalar count, interpolated `qr//` non-leading `\G`, key=value tokenizer — all byte-identical). New regression file **`Pl/t/regex-gpos-01.t` (7 tests)**. Regex-heavy regression subset (match-vars, named-capture, regexp-subst, split, tr, extended-mode, misc-fixes-01/02) all green.
+
+**NEXT:** continue running real core-module `.t` suites (Text::Balanced / Text::ParseWords now that `/x`+`\G` are in); keep fuzzing axes / CPAN breadth.
+
+---
+
 ## Session 261 (2026-06-20) — SBCL-compat `::` fold; verified the sort "bug" is NOT a bug; 3 real parser fixes via the difftest fuzzer. Gate 95/3497.
 
 **User had two warm-up tasks, then "keep finding/fixing bugs via fuzzing or CPAN".**

@@ -11151,6 +11151,59 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (when (and rs re)
                      (setf (gethash name %+) (subseq str rs re)))))))))
 
+(defun %pcl-strip-gpos (pattern)
+  "Remove \\G anchors from PATTERN.  cl-ppcre has no \\G; \\G is zero-width and
+   means 'match at the current pos', so PCL drops it and anchors the whole match
+   at the /g start position instead (see the anchored-g handling in
+   do-regex-match).  This also catches the qr// form `(?^:\\G(...))` that
+   Text::Balanced and friends produce, where \\G is not pattern-leading.  Escaped
+   backslashes (\\\\) and char-class contents are left untouched.  Returns the
+   stripped pattern; a shorter result signals that a \\G was present."
+  (let ((out (make-string-output-stream))
+        (in-class nil) (i 0) (n (length pattern)))
+    (loop while (< i n) do
+          (let ((c (char pattern i)))
+            (cond
+              ((char= c #\\)
+               (if (and (not in-class) (< (1+ i) n) (char= (char pattern (1+ i)) #\G))
+                   (incf i 2)                       ; drop \G
+                   (progn                            ; copy the escape pair verbatim
+                     (write-char c out)
+                     (when (< (1+ i) n) (write-char (char pattern (1+ i)) out))
+                     (incf i 2))))
+              ((char= c #\[) (setf in-class t) (write-char c out) (incf i))
+              ((char= c #\]) (setf in-class nil) (write-char c out) (incf i))
+              (t (write-char c out) (incf i)))))
+    (get-output-stream-string out)))
+
+(defun %pcl-scan-anchored-list (scanner str reg-names start)
+  "Emulate /\\G.../g in list context: collect contiguous matches starting at
+   START, stopping at the first position where the pattern does not match exactly
+   there.  Returns an adjustable vector of capture strings (whole matches when the
+   pattern has no captures) and sets $1.., %+, $& from the LAST match."
+  (let ((items nil) (pos start) (slen (length str))
+        (last-rs nil) (last-re nil) (last-ms nil) (last-me nil) (any nil))
+    (loop
+     (multiple-value-bind (ms me rs re) (cl-ppcre:scan scanner str :start pos)
+       (unless (and ms (= ms pos)) (return))
+       (setf any t last-rs rs last-re re last-ms ms last-me me)
+       (if (> (length rs) 0)
+           (dotimes (i (length rs))
+             (push (if (and (aref rs i) (aref re i))
+                       (subseq str (aref rs i) (aref re i)) nil)
+                   items))
+           (push (subseq str ms me) items))
+       (setf pos (if (= me ms) (1+ me) me))
+       (when (> pos slen) (return))))
+    (let* ((lst (nreverse items))
+           (result (make-array (length lst) :adjustable t :fill-pointer t)))
+      (loop for it in lst for i from 0 do (setf (aref result i) it))
+      (when any
+        (clear-capture-groups)
+        (set-capture-groups str last-rs last-re reg-names)
+        (set-match-vars str last-ms last-me last-rs last-re))
+      result)))
+
 (defun do-regex-match (string op)
   "Perform regex match.
    In scalar context: return t if matched, nil otherwise.
@@ -11161,7 +11214,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    /g in list context: returns all matches at once (no pos tracking).
    /gc: keeps pos on failure instead of resetting it."
   (let* ((str (to-string string))   ; to-string handles unboxing via box-sv (preserves class)
-         (pattern (p-regex-match-pattern op))
+         (raw-pattern (p-regex-match-pattern op))
+         ;; \G anchors the match at the current pos.  cl-ppcre has no \G, so we
+         ;; strip it and require the match to START at the /g position.  A shorter
+         ;; stripped pattern means a \G was present (anchored).
+         (pattern (%pcl-strip-gpos raw-pattern))
+         (anchored-g (< (length pattern) (length raw-pattern)))
          (modifiers (p-regex-match-modifiers op))
          (options (build-ppcre-options modifiers))
          (global-p (getf modifiers :g))
@@ -11173,6 +11231,10 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; $1..$9 are only cleared/set on successful matches.
           (clrhash %+)
           (cond
+            ;; /\G.../g in list context: contiguous anchored matches from pos
+            ((and global-p (eq *wantarray* t) anchored-g)
+             (%pcl-scan-anchored-list scanner str reg-names
+                                      (or (gethash string *p-match-pos*) 0)))
             ;; /g in list context: return all matches at once, no pos tracking
             ;; :void is NOT list context — only (eq *wantarray* t) is list context
             ((and global-p (eq *wantarray* t))
@@ -11200,6 +11262,9 @@ buffer's fill-pointer; everything else falls back to file-length."
              (let ((start (or (gethash string *p-match-pos*) 0)))
                (multiple-value-bind (match-start match-end reg-starts reg-ends)
                    (cl-ppcre:scan scanner str :start start)
+                 ;; \G: the match must begin exactly at the start position.
+                 (when (and anchored-g match-start (/= match-start start))
+                   (setf match-start nil))
                  (if match-start
                      (progn
                        (setf (gethash string *p-match-pos*) match-end)
@@ -11211,27 +11276,30 @@ buffer's fill-pointer; everything else falls back to file-length."
                        (unless cont-p
                          (remhash string *p-match-pos*))
                        nil)))))
-            ;; No /g: single match
+            ;; No /g: single match.  With \G, anchor at the current pos.
             (t
-             (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                 (cl-ppcre:scan scanner str)
-               (when match-start
-                 (clear-capture-groups)
-                 (set-capture-groups str reg-starts reg-ends reg-names)
-                 (set-match-vars str match-start match-end reg-starts reg-ends)
-                 (if (eq *wantarray* t)
-                     (let* ((num-groups (length reg-starts))
-                            (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
-                       (if (zerop num-groups)
-                           ;; No capture groups: Perl returns (1) in list context on success
-                           (setf (aref captures 0) 1)
-                           (dotimes (i num-groups)
-                             (setf (aref captures i)
-                                   (if (and (aref reg-starts i) (aref reg-ends i))
-                                       (subseq str (aref reg-starts i) (aref reg-ends i))
-                                       nil))))
-                       captures)
-                     t))))))
+             (let ((start (if anchored-g (or (gethash string *p-match-pos*) 0) 0)))
+               (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                   (cl-ppcre:scan scanner str :start start)
+                 (when (and anchored-g match-start (/= match-start start))
+                   (setf match-start nil))
+                 (when match-start
+                   (clear-capture-groups)
+                   (set-capture-groups str reg-starts reg-ends reg-names)
+                   (set-match-vars str match-start match-end reg-starts reg-ends)
+                   (if (eq *wantarray* t)
+                       (let* ((num-groups (length reg-starts))
+                              (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                         (if (zerop num-groups)
+                             ;; No capture groups: Perl returns (1) in list context on success
+                             (setf (aref captures 0) 1)
+                             (dotimes (i num-groups)
+                               (setf (aref captures i)
+                                     (if (and (aref reg-starts i) (aref reg-ends i))
+                                         (subseq str (aref reg-starts i) (aref reg-ends i))
+                                         nil))))
+                         captures)
+                       t)))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))
