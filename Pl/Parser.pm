@@ -499,53 +499,115 @@ sub _assemble_output {
 #   3. Build [min(label_pos, last_goto_pos), max(...)] ranges, merge overlaps.
 #   4. Wrap each range in (tagbody ...), hoisting definition elements out.
 #   5. Everything outside the ranges is emitted as independent top-level forms.
+# Scan a list of generated CL lines and return, for the START of each line:
+#   { depth => <paren depth>, in_lambda => <bool: inside a nested lambda/p-sub> }
+# plus a trailing entry (index == #lines) holding the final paren depth.
+# String-, comment- and #\char-literal-aware (mirrors the paren checker in
+# CLAUDE.md).  A line is "in_lambda" when a `(lambda` or `(p-sub` form opened
+# earlier and has not yet closed — used to exclude gotos in nested function
+# scopes (CL `go` cannot lexically reach a tag across a lambda boundary).
+sub _scan_lisp_lines {
+  my $lines = shift;
+  my @info;
+  my $depth = 0;
+  my @lambda_at;   # stack of paren depths at which a lambda/p-sub opened
+  for my $i (0 .. $#$lines) {
+    push @info, { depth => $depth, in_lambda => (@lambda_at ? 1 : 0) };
+    my @c = split //, $lines->[$i];
+    my ($j, $in_str) = (0, 0);
+    while ($j <= $#c) {
+      my $ch = $c[$j];
+      if ($in_str) {
+        if    ($ch eq '\\') { $j += 2; next; }
+        elsif ($ch eq '"')  { $in_str = 0; }
+        $j++; next;
+      }
+      if    ($ch eq '"') { $in_str = 1; }
+      elsif ($ch eq ';') { last; }                         # comment to EOL
+      elsif ($ch eq '#' && $j < $#c && $c[$j+1] eq '\\') { $j += 3; next; } # #\X
+      elsif ($ch eq '(') {
+        my $rest = join '', @c[$j+1 .. $#c];
+        push @lambda_at, $depth if $rest =~ /^\s*(?:lambda|p-sub)\b/;
+        $depth++;
+      }
+      elsif ($ch eq ')') {
+        $depth--;
+        pop @lambda_at while @lambda_at && $lambda_at[-1] >= $depth;
+      }
+      $j++;
+    }
+  }
+  push @info, { depth => $depth, in_lambda => (@lambda_at ? 1 : 0) };
+  return \@info;
+}
+
+# Wrap the minimal run of COMPLETE top-level forms that participate in a
+# goto/label pair in a (tagbody ...).  Works at form granularity (not line
+# granularity) so a goto nested inside a multi-line form (e.g. inside a
+# `(p-if … (progn (go :X)))`) is wrapped together with its enclosing form,
+# never splitting parens.  Used for both top-level runtime lines and sub
+# bodies (lines may be indented).
 sub _wrap_runtime_labels {
   my $rt_ref = shift;
   my @rt = @$rt_ref;
 
-  # Quick exit: no real label sentinels.
-  return @rt unless grep { /^:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ } @rt;
+  # Quick exit: no real label sentinels (allow leading indentation).
+  return @rt unless grep { /^\s*:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ } @rt;
 
-  # Definition elements must stay outside any tagbody (same test used in pass 2).
+  # Definition lines must stay outside any tagbody (eval-when etc. need
+  # top-level context).  Allow leading indentation (sub bodies are indented).
   my $is_definition = sub {
-    $_[0] =~ /^\((?:p-sub|eval-when|defvar|defpackage|in-package|p-defpackage|p-BEGIN)\b/;
+    $_[0] =~ /^\s*\((?:p-sub|eval-when|defvar|defpackage|in-package|p-defpackage|p-BEGIN)\b/;
   };
 
-  # Collect real labels: name → first-occurrence index.
-  my %label_first;
+  # Group lines into complete forms: [start_line, end_line].  A form closes
+  # when the running paren depth returns to 0.  Depth-0 blank/comment lines
+  # become their own trivial single-line forms.
+  my $info = _scan_lisp_lines(\@rt);
+  my @forms;
+  my $start;
   for my $i (0 .. $#rt) {
-    if ($rt[$i] =~ /^:([A-Za-z][A-Za-z0-9_]*)\s*;; pcl-label/) {
-      $label_first{$1} //= $i;
+    $start = $i unless defined $start;
+    if ($info->[$i + 1]{depth} == 0) {     # depth after line $i
+      push @forms, [ $start, $i ];
+      $start = undef;
+    }
+  }
+  push @forms, [ $start, $#rt ] if defined $start;   # unbalanced tail (defensive)
+
+  # Per-form: label name (if any), and the set of qualifying goto labels.
+  my %label_first;   # label name → first form index defining it
+  my %last_goto;     # label name → last form index with a reachable goto
+  for my $fi (0 .. $#forms) {
+    my ($s, $e) = @{$forms[$fi]};
+    for my $i ($s .. $e) {
+      # A label only belongs to THIS region when it is a direct sibling
+      # (paren depth 0).  A label nested inside a child form (depth > 0) is
+      # handled by that child's own _process_block wrapping pass.
+      if ($info->[$i]{depth} == 0
+          && $rt[$i] =~ /^\s*:([A-Za-z][A-Za-z0-9_]*)\s*;; pcl-label/) {
+        $label_first{$1} //= $fi;
+      }
+      next if $info->[$i]{in_lambda};   # goto inside a nested lambda → unreachable
+      while ($rt[$i] =~ /\(go\s+:([A-Za-z][A-Za-z0-9_]*)\)/g) {
+        my $lbl    = $1;
+        my $prefix = substr($rt[$i], 0, $-[0]);
+        next if $prefix =~ /\b(?:lambda|p-sub)\b/;  # opened+used on same line
+        $last_goto{$lbl} = $fi;
+      }
     }
   }
 
-  # Find the last qualifying (go :LABEL) for each known label.
-  # "Qualifying" = not inside a lambda or function definition scope.
-  my %last_goto;
-  for my $i (0 .. $#rt) {
-    next if $rt[$i] =~ /^\s/;         # starts indented → inside a nested form
-    next if $is_definition->($rt[$i]);# definition → different function scope
-    while ($rt[$i] =~ /\(go\s+:([A-Za-z][A-Za-z0-9_]*)\)/g) {
-      my $lbl    = $1;
-      my $prefix = substr($rt[$i], 0, $-[0]);
-      next if $prefix =~ /\blambda\b/;  # goto is inside a lambda → not reachable
-      $last_goto{$lbl} = $i if exists $label_first{$lbl};
-    }
-  }
-
-  # Drop labels that have no qualifying goto (nothing to wrap).
+  # Keep only labels that have a matching reachable goto.
   delete $label_first{$_} for grep { !exists $last_goto{$_} } keys %label_first;
   return @rt unless %label_first;
 
-  # Build minimal [start, end] ranges (covers both the label and its goto).
+  # Minimal [start_form, end_form] ranges covering each label and its goto.
   my @ranges;
   for my $lbl (keys %label_first) {
-    my ($lpos, $gpos) = ($label_first{$lbl}, $last_goto{$lbl});
-    push @ranges, [ ($lpos < $gpos ? $lpos : $gpos),
-                    ($lpos > $gpos ? $lpos : $gpos) ];
+    my ($lf, $gf) = ($label_first{$lbl}, $last_goto{$lbl});
+    push @ranges, [ ($lf < $gf ? $lf : $gf), ($lf > $gf ? $lf : $gf) ];
   }
-
-  # Merge overlapping / adjacent ranges.
   @ranges = sort { $a->[0] <=> $b->[0] } @ranges;
   my @merged;
   for my $r (@ranges) {
@@ -556,33 +618,32 @@ sub _wrap_runtime_labels {
     }
   }
 
-  # Assemble result.
+  # Assemble result, wrapping each form range in (tagbody ...) and hoisting
+  # definition forms out of the tagbody.
   my @result;
-  my $pos = 0;
+  my $fpos = 0;
   for my $region (@merged) {
-    my ($start, $end) = @$region;
-
-    # Independent forms before this region.
-    push @result, @rt[$pos .. $start - 1] if $start > $pos;
-
-    # Wrap [start, end] in (tagbody ...), hoisting definition lines out.
+    my ($fs, $fe) = @$region;
+    # Forms before this region, emitted as-is.
+    push @result, map { @rt[$forms[$_][0] .. $forms[$_][1]] } ($fpos .. $fs - 1)
+      if $fs > $fpos;
     my @tb;
-    for my $i ($start .. $end) {
-      if ($is_definition->($rt[$i])) {
+    for my $fi ($fs .. $fe) {
+      my @flines = @rt[$forms[$fi][0] .. $forms[$fi][1]];
+      if ($is_definition->($rt[$forms[$fi][0]])) {
         push @result, "(tagbody", @tb, ")" if @tb;
         @tb = ();
-        push @result, $rt[$i];
+        push @result, @flines;
       } else {
-        push @tb, $rt[$i];
+        push @tb, @flines;
       }
     }
     push @result, "(tagbody", @tb, ")" if @tb;
-
-    $pos = $end + 1;
+    $fpos = $fe + 1;
   }
-
-  # Independent forms after the last region.
-  push @result, @rt[$pos .. $#rt] if $pos <= $#rt;
+  # Forms after the last region.
+  push @result, map { @rt[$forms[$_][0] .. $forms[$_][1]] } ($fpos .. $#forms)
+    if $fpos <= $#forms;
 
   return @result;
 }
@@ -3790,6 +3851,17 @@ sub _process_block {
     }
   }
 
+  # Capture the bucket + start index of this block's emitted statements so we
+  # can post-process any goto/label pairs that are direct siblings here into a
+  # (tagbody …).  CL `go` needs a lexically-enclosing tagbody; labels emitted
+  # as statement siblings (e.g. an intra-sub `LABEL:` jumped to by `goto LABEL`)
+  # would otherwise have no tagbody.  Capturing here (around the child loop)
+  # places the tagbody INSIDE any wrapping (let …) for declarations, so the tag
+  # is reachable.  No-op unless a label sentinel is emitted as a direct sibling.
+  my $lbl_sec    = $self->_cur_section;
+  my $lbl_bucket = $self->_cur_bucket;
+  my $lbl_start  = scalar @{$self->_sections->[$lbl_sec]{$lbl_bucket}};
+
   for my $i (0 .. $#children) {
     next if $skip{$i};
     my $child = $children[$i];
@@ -3831,6 +3903,20 @@ sub _process_block {
     $self->_process_element($child);
   }
   $self->environment->tail_position($saved_tail_position);
+
+  # Wrap any goto/label pairs that are direct siblings in this block into a
+  # (tagbody …).  Only when the block stayed in the same section/bucket and a
+  # label sentinel was actually emitted (the helper no-ops otherwise).
+  if ($self->_cur_section == $lbl_sec && $self->_cur_bucket eq $lbl_bucket) {
+    my $arr = $self->_sections->[$lbl_sec]{$lbl_bucket};
+    my $end = $#$arr;
+    if ($end >= $lbl_start
+        && grep { /^\s*:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ }
+               @{$arr}[$lbl_start .. $end]) {
+      my @wrapped = _wrap_runtime_labels([ @{$arr}[$lbl_start .. $end] ]);
+      splice @$arr, $lbl_start, ($end - $lbl_start + 1), @wrapped;
+    }
+  }
 
   # Flush let forms opened by _emit_scoped_block's hook (innermost first).
   # Must happen here, inside _process_block, so the closes land BEFORE any
@@ -4643,6 +4729,22 @@ sub _emit_scoped_block {
 # Common helper: wrap emitted code with let for any 'my' declarations
 # Usage: $self->_with_declarations($ppi_elements, sub { ... emit code ... });
 # $ppi_elements can be a single PPI element or arrayref of elements to scan
+# True if the block has a standalone statement label (`LABEL:` with no block of
+# its own — i.e. a goto target, not a loop/bare-block label).  Such a body uses
+# the flat-let declaration path (not the two-phase per-statement scoped lets) so
+# the label and its sibling statements share one lexical scope, letting
+# _process_block wrap them in a single (tagbody …) for `goto LABEL`.
+sub _block_has_standalone_label {
+  my $block = shift;
+  return 0 unless ref($block) eq 'PPI::Structure::Block';
+  for my $c ($block->schildren) {
+    next unless ref($c) eq 'PPI::Statement::Compound';
+    next unless $c->find_first('PPI::Token::Label');
+    return 1 unless $c->find_first('PPI::Structure::Block');
+  }
+  return 0;
+}
+
 sub _with_declarations {
   my $self = shift;
   my $elements = shift;  # PPI element(s) to scan for declarations
@@ -4664,7 +4766,8 @@ sub _with_declarations {
   # and inline-let semantics interact badly with defvar + _process_my_toplevel_declaration.
   if (ref($elements) eq 'PPI::Structure::Block'
       && $self->environment->in_subroutine > 0
-      && $is_sub_body) {
+      && $is_sub_body
+      && !_block_has_standalone_label($elements)) {
     require Pl::BlockAnalyzer;
     my $outer    = $self->_current_outer_scope();
     my $analysis = Pl::BlockAnalyzer->analyze($elements, $outer);
