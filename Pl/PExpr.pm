@@ -1035,6 +1035,21 @@ sub parse {
         $i--;
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
+               && $nxt->content() eq '$#*') {
+        # Postfix deref: X->$#* — last index of an arrayref (Perl 5.20+).
+        # Equivalent to $#{X}; build the same $# prefix_op the braced form uses
+        # ($# op token + ref operand) so codegen emits (p-array-last-index X).
+        my $pre_id   = $self->parse([$pre]);
+        my $cast_tok = PPI::Token::Cast->new('$#');
+        my ($node, $id) = $self->make_node_insert('prefix_op');
+        my $op_id    = $self->make_node($cast_tok);
+        $self->add_child_to_node($id, $op_id);   # $# operator
+        $self->add_child_to_node($id, $pre_id);  # Arrayref being dereferenced
+        $e->[$i-1] = $node;
+        splice @$e, $i, 2;  # Remove -> and Cast($#*)
+        $i--;
+        next;
+      } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() =~ /^([@%])$/
                && defined($nxt_2)
                && (ref($nxt_2) eq 'PPI::Structure::Subscript'
@@ -2549,9 +2564,15 @@ sub handle_subcalls {
 
     # Handle sort $scalar LIST — scalar variable as comparator (coderef, string, glob, glob ref)
     # e.g. sort $sortsub 4,1,3,2  →  (p-sort (lambda ($a $b) (funcall (p-sort-get-fn $sortsub) $a $b)) ...)
+    # But a scalar immediately followed by -> is one term (method call / postfix
+    # deref), NOT a bare comparator: sort $ar->@* sorts the elements of $ar, with
+    # no comparator. Skip the comparator form so it falls through to list parsing.
     if ($now->isa('PPI::Token::Word') && $now->content() eq 'sort'
         && $next->isa('PPI::Token::Symbol')
-        && substr($next->content(), 0, 1) eq '$') {
+        && substr($next->content(), 0, 1) eq '$'
+        && !($i + 2 <= $#$e
+             && $e->[$i + 2]->isa('PPI::Token::Operator')
+             && $e->[$i + 2]->content() eq '->')) {
       my($top_node, $top_id) = $self->make_node_insert('funcall');
       my $sort_id = $self->make_node($now);
       $self->add_child_to_node($top_id, $sort_id);
@@ -2911,6 +2932,26 @@ sub handle_subcalls {
     $end_pars   = $last_low_prio_op-1
         if defined $last_low_prio_op;
 
+    # A ternary ':' that closes an ENCLOSING ternary terminates this list
+    # operator's argument list: `cond ? join "-", @a : $fb` must parse as
+    # `cond ? (join "-", @a) : $fb`, not let join swallow `: $fb` (which then
+    # orphans the colon and the whole expression falls through).  Walk the arg
+    # region tracking ternary depth so a NESTED ternary's own ':' (whose '?' is
+    # inside the args, e.g. `join "-", $c ? @a : @b`) is NOT treated as a
+    # boundary and stays part of the args.
+    {
+      my $tern_depth = 0;
+      for (my $j = $i + 1; $j <= $end_pars; $j++) {
+        my $jop = $self->is_token_operator($e->[$j]) // '';
+        if ($jop eq '?') {
+          $tern_depth++;
+        } elsif ($jop eq ':') {
+          if ($tern_depth == 0) { $end_pars = $j - 1; last; }
+          $tern_depth--;
+        }
+      }
+    }
+
     # Named unary operators only take the next single term
     # But Cast + Symbol (like @$list) counts as one term
     # And Symbol + Subscript (like $h{key} or $a[0]) counts as one term
@@ -2986,6 +3027,32 @@ sub handle_subcalls {
             # . + - * / % x ** =~ !~ << >>), stop before comparison/logical/assignment.
             # E.g.: eval 'a' . $x . 'b' → eval('a' . $x . 'b'), not (eval 'a') . $x . 'b'
             my $j = $i + 1;
+            while ($j + 1 < scalar(@$e)) {
+                my $nxt = $e->[$j + 1];
+                if (ref($nxt) eq 'PPI::Token::Operator') {
+                    my $op_str = $nxt->content();
+                    unless ($op_str eq '->') {
+                        my $op_info = $self->config->precedences->{$op_str};
+                        last unless defined $op_info && $op_info->{prec} >= 55;
+                    }
+                }
+                $j++;
+            }
+            $end_pars = $j;
+        }
+
+        # Named unary operators bind LOOSER than the high-precedence binary ops
+        # (. + - * / % x ** =~ !~ << >>, all prec >= 55) but TIGHTER than
+        # comparison/logical/assignment. Whichever branch above set $end_pars to
+        # the end of the first operand term (symbol, cast, subscript chain, or
+        # literal), keep consuming through any prec>=55 binary operator and its
+        # right operand, stopping before comparison/comma/etc. So `length $s + 1`
+        # => length($s + 1) and `uc $x . "y"` => uc($x . "y"), matching Perl's
+        # named-unary precedence. (Idempotent for the literal branch above, which
+        # already extended; this fixes the symbol/cast/subscript branches, which
+        # previously stopped at the first term.)
+        {
+            my $j = $end_pars;
             while ($j + 1 < scalar(@$e)) {
                 my $nxt = $e->[$j + 1];
                 if (ref($nxt) eq 'PPI::Token::Operator') {
@@ -4544,6 +4611,10 @@ sub _fix_ppi_glob_after_block {
       # by a value token (symbol/number/string/structure) — those indicate < is
       # the less-than operator, not the readline diamond.
       my $is_bare_fh = ($glob_content =~ /^[A-Za-z_][A-Za-z0-9_:]*$/);
+      # Scalar filehandle readline <$fh>: a single scalar variable between < and >.
+      # PPI misparses this as `< $fh >` (two operators) whenever it follows a
+      # bareword that could take an operand — print/return/scalar/sort <$fh>.
+      my $is_scalar_fh = ($glob_content =~ /^\$[A-Za-z_]\w*$/);
       my $prev = @result ? $result[-1] : undef;
       # A simple value (symbol/number/string) before < means it's definitely lt, not glob.
       # e.g. $a<$b?1:$a>$b: the < is less-than, not a glob opener.
@@ -4551,8 +4622,8 @@ sub _fix_ppi_glob_after_block {
       my $prev_is_simple_value = $prev && ref($prev) =~ /^PPI::Token::(Symbol|Number|Quote)/;
       my $prev_is_value = $prev_is_simple_value || ($prev && ref($prev) =~ /^PPI::Structure/);
 
-      # If we found a valid-looking glob pattern or bare filehandle, reconstruct it
-      if ($found_close && !$prev_is_simple_value && ($has_glob_chars || ($is_bare_fh && !$prev_is_value)) && $glob_content ne '') {
+      # If we found a valid-looking glob pattern or bare/scalar filehandle, reconstruct it
+      if ($found_close && !$prev_is_simple_value && ($has_glob_chars || (($is_bare_fh || $is_scalar_fh) && !$prev_is_value)) && $glob_content ne '') {
         # Create a proper readline token
         my $glob_token = bless {
           content => "<$glob_content>"

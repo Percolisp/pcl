@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 21;
 
 sub run_cl {
     my ($code) = @_;
@@ -288,3 +288,29 @@ test_cl('division overload /',
      my $o = MyDiv->new(10);
      print $o / 2, "\n";',
     "5\n");
+
+# ── "$obj" interpolation must STRINGIFY (fire the "" overload) ─────────────
+# Regression: single-variable interpolation "$x" used to return the bare
+# variable, dropping the stringify coercion.  For an overloaded object, $x="$x"
+# then left $x an object, so a later overloaded cmp/<=> re-dispatched forever
+# (BINDING-STACK-EXHAUSTED).  This mirrors the version.pm vcmp idiom.
+test_cl('"$obj" interpolation fires "" overload (version-style cmp, no recursion)',
+    'package Ver;
+     use overload q("") => \&str, "cmp" => \&vcmp, "<=>" => \&vcmp, fallback => 1;
+     sub new { bless { s => $_[1] }, $_[0] }
+     sub str { $_[0]->{s} }
+     sub vcmp { my ($a,$b,$sw)=@_; $a="$a"; $b=ref($b)?"$b":$b; ($a,$b)=($b,$a) if $sw; return $a cmp $b; }
+     package main;
+     my $a = Ver->new("1.2.3");
+     my $b = Ver->new("2.0.0");
+     print(($a <=> $b), "\n");
+     print(($a < $b ? "less" : "ge"), "\n");',
+    "-1\nless\n");
+
+# A reference interpolated as a single part stringifies to ARRAY(0x..), not the
+# bare ref.
+test_cl('"$ref" interpolation stringifies a reference',
+    'my $r = [1, 2];
+     my $s = "$r";
+     print(($s =~ /^ARRAY\(0x[0-9a-f]+\)$/ ? "ok" : "bad:$s"), "\n");',
+    "ok\n");

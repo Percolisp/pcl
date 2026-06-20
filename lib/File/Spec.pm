@@ -86,7 +86,10 @@ sub catpath {
 sub rel2abs {
     my ($class, $path, $base) = @_;
     return $path if $path =~ m{^/};
-    $base //= Cwd::cwd();
+    unless (defined $base) {
+        require Cwd;            # real File::Spec::Unix loads Cwd lazily here too
+        $base = Cwd::cwd();
+    }
     return $base . '/' . $path;
 }
 

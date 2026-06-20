@@ -16,7 +16,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 80;
+plan tests => 92;
 
 sub run_cl {
     my ($code) = @_;
@@ -38,6 +38,15 @@ sub test_cl {
     my ($name, $code, $expected) = @_;
     my $got = run_cl($code);
     is($got, $expected, $name);
+}
+
+# Transpile only — return the generated CL string (for codegen-shape assertions).
+sub transpile_to_cl {
+    my ($code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    return scalar `$pl2cl $pl_file 2>/dev/null`;
 }
 
 # ── difftest-ops fuzzer finds (session 241): operator bugs perl-tests/ missed ──
@@ -559,6 +568,34 @@ test_cl('chained < > comparison is not misparsed as a glob/readline',
     'my $x=[1,5,3]; print join(",", "a", ($x->[0] < $x->[1] > $x->[2]), "b"), "\n";',
     "a,1,b\n");
 
+# `scalar <$fh>` / `print <$fh>` (a scalar-filehandle readline after a bareword):
+# PPI misparses `<$fh>` as the two operators `< $fh >` whenever it follows a word
+# that could take an operand (print/return/scalar/sort).  The glob-fixup pass now
+# reconstructs the readline token.  (YAML::PP's `return scalar <$fh>` hit this:
+# the unhandled `<`/`>` operand became an undef "single node of unknown type".)
+like(transpile_to_cl('my $line = scalar <$fh>;'), qr/\(p-scalar \(p-readline \$fh\)\)/,
+    'scalar <$fh> parses as a readline, not < > operators');
+like(transpile_to_cl('print <$fh>;'), qr/\(p-print \(p-readline \$fh\)\)/,
+    'print <$fh> parses as a readline');
+# Guard the comparison sibling: `$a < $b` (no closing >) stays a less-than.
+like(transpile_to_cl('my $r = $a < $b;'), qr/\(p-< \$a \$b\)/,
+    '$a < $b stays a comparison (not reconstructed as readline)');
+
+# A paren-less list operator in a ternary TRUE branch must stop its argument
+# list at the ':' that closes the enclosing ternary — `cond ? join "-", @a : $fb`
+# is `cond ? (join "-", @a) : $fb`, NOT join swallowing `: $fb` (which orphaned
+# the colon → "Missing case" parse-error → empty result).  This is the root
+# cause of the YAML::PP "dynamic require" wall: Module::Load's `_to_file` does
+# `$^O eq 'MSWin32' ? join "/", @parts : File::Spec->catfile(@parts)`.
+test_cl('paren-less list-op in ternary true-branch stops at enclosing colon',
+    'my @p=("L","U"); my $y = 0 ? join "-", @p : "FB"; my $z = 1 ? join "-", @p : "FB"; print "$y|$z\n";',
+    "FB|L-U\n");
+# A NESTED ternary inside the list-op args must still be consumed (its own '?'
+# raises the depth so its ':' is not mistaken for the enclosing boundary).
+test_cl('nested ternary inside list-op args is not cut at its own colon',
+    'my $c=1; my $v = join "-", $c ? "A" : "B", "Z"; print "$v\n";',
+    "A-Z\n");
+
 # $$ref->() must parse as (${$ref})->() — deref the scalar-ref-to-coderef, THEN
 # call — not ${ $ref->() }.  Was mis-associated in PExpr (the leading scalar Cast
 # swallowed the postfix call).  Class::Method::Modifiers' $$wrapped->(@_) needs it.
@@ -576,6 +613,17 @@ test_cl('\\$href->{k} is a live ref (tracks later writes)',
 test_cl('\\$aref->[i] is a live ref (tracks later writes)',
     'my $a = [10, 20]; my $r = \$a->[1]; $a->[1] = 99; print "$$r\n";',
     "99\n");
+
+# Postfix deref X->$#* is the last index of an arrayref (= $#{X}). The other
+# postfix derefs (->@*/->%*/->$*) already worked; ->$#* was unrecognised
+# (PPI tokenises it as a single Cast '$#*') and yielded undef.
+# Found by tools/difftest-ops.pl axis 23.
+test_cl('$ar->$#* is the last index of an arrayref',
+    'my $ar = [10, 20, 30]; print $ar->$#*, "\n";',
+    "2\n");
+test_cl('$ar->$#* in arithmetic (named-unary-free) gives count',
+    'my $ar = [1, 2, 3, 4]; print $ar->$#* + 1, "\n";',
+    "4\n");
 
 # ── session 255b: the six sweep-crash fixes (see docs/session-log.md) ──────────
 
@@ -826,3 +874,45 @@ test_cl('@ISA = qw/.../ (slash/non-bracket delimiter) sets inheritance',
   . ' package main;'
   . ' print ref(C->new), ":", C->new->hi, ":", ref(D->new), "\n";',
     "C:hi:D\n");
+
+# ── PPI bug workaround: 7%-3 mis-tokenized as the magic hash %- ───────────────
+# PPI 1.291 reads `%-`/`%+` glued to a preceding term as the named-capture magic
+# hash, dropping the modulo operator (PARSE ERROR).  _fix_modulo_magic re-splits
+# `%-`/`%+` after a term into `% -`/`% +`.  See docs/ppi-bug-modulo-magic.md.
+test_cl('modulo with glued negative/positive operand (PPI %-/%+ workaround)',
+    'my $y = 3; my @a = (7, 8);'
+  . ' print join(",", 7%-3, 7 %-3, 7%+3, $a[0]%-2, (5+5)%-3, 8%-$y), "\n";',
+    "-2,-2,1,-1,-2,-1\n");
+
+# The genuine magic hashes %-/%+ must still parse as hashes (not be rewritten):
+# `keys %-` keeps `%-` because it follows the list-op word `keys`, not a term.
+test_cl('named-capture %+ hash element still works after the %- workaround',
+    '"foo42" =~ /(?<n>\d+)/; print "$+{n}\n";',
+    "42\n");
+
+# ── runtime warning strings used CL "...\n", but \n in a CL string literal is a
+# bare 'n' (backslash only escapes " and \), so the join uninit warning rendered
+# as "...joinn at unknown line 0." (no real newline → the location suffix was
+# appended too). Fixed by emitting a real newline (~%). PCL can't produce a line
+# number, so the message just ends after the text — matching Perl's wording.
+test_cl('uninitialized-in-join warning renders cleanly (no "joinn" / no bogus line)',
+    'print join(",", 1, undef, 3), "\n";',
+    "Use of uninitialized value in join or string\n1,,3\n");
+
+# ── undef regex capture vars vanished in a list assignment ───────────────────
+# Non-participating capture groups were raw nil, but %p-flatten-list (used by
+# p-list-= `my (...) = (...)`) drops raw nil as an array-hole/empty-list marker,
+# so `my ($a,$b)=($3,$4,'Z')` shifted 'Z' into $a. Fixed: capture-group undef is
+# now *p-undef* (survives flattening). Found via Text::ParseWords::parse_line.
+test_cl('undef regex capture in a list assignment keeps its slot',
+    '"ab" =~ /(a)(b)/;'                       # $1=a $2=b, $3/$4 do not participate
+  . ' my ($p,$q,$r) = ($3, $4, "Z");'
+  . ' print "p=",(defined $p?$p:"U")," q=",(defined $q?$q:"U")," r=",(defined $r?$r:"U"),"\n";',
+    "p=U q=U r=Z\n");
+
+# Same, after a substitution (s/// sets undef captures via a different path).
+test_cl('undef capture after s/// keeps its slot in a list (ternary-list form)',
+    'my $s = "ab"; $s =~ s/(a)(b)/x/;'
+  . ' my ($p,$q,$r,$t) = (($9 ? (1,2) : ($3,$4)), "A", "B");'
+  . ' print join(",", map { defined $_ ? $_ : "U" } $p,$q,$r,$t), "\n";',
+    "U,U,A,B\n");

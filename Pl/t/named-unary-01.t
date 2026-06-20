@@ -13,7 +13,7 @@ use lib ".";
 use Data::Dump qw/dump/;
 use PPI;
 use PPI::Dumper;
-use Test::More tests => 26;
+use Test::More tests => 32;
 
 BEGIN { use_ok('Pl::PExpr') };
 
@@ -208,4 +208,50 @@ diag "-------- defined \$x && defined \$y";
   # Both children should be funcalls
   ok($expr_o->is_internal_node_type($kid_nodes[0]), 'defined $x && defined $y: lhs is funcall');
   ok($expr_o->is_internal_node_type($kid_nodes[1]), 'defined $x && defined $y: rhs is funcall');
+}
+
+
+# ======================================================================
+# Named unary binds LOOSER than high-precedence binary ops (+ - . * etc.)
+#   length $s + 1   parses as  length($s + 1)   (Perl precedence: named
+#   unary ops are below "+ - ." but above comparison). Regression: symbol
+#   and subscript operands previously stopped at the first term, yielding
+#   the wrong (length $s) + 1.  Found by tools/difftest-ops.pl (axis 4).
+# ======================================================================
+
+diag "-------- length \$s + 1  (named unary looser than +)";
+{
+  my ($expr_o, $node_id) = parse_expr('length $s + 1');
+  my ($type, $content, $kids, $node) = get_node_info($expr_o, $node_id);
+  is($type, 'internal', 'length $s + 1: top is the length funcall, not +');
+  my @kid_nodes = $expr_o->get_nodes(@$kids);
+  is($kid_nodes[1]->content(), '+', 'length $s + 1: funcall arg is the $s + 1 subtree');
+}
+
+diag "-------- length \$s . \"x\"  (named unary looser than .)";
+{
+  my ($expr_o, $node_id) = parse_expr('length $s . "x"');
+  my ($type, $content, $kids, $node) = get_node_info($expr_o, $node_id);
+  is($type, 'internal', 'length $s . "x": top is the length funcall, not .');
+}
+
+diag "-------- length \$h{k} + 1  (subscript operand, looser than +)";
+{
+  my ($expr_o, $node_id) = parse_expr('length $h{k} + 1');
+  my ($type, $content, $kids, $node) = get_node_info($expr_o, $node_id);
+  is($type, 'internal', 'length $h{k} + 1: top is the length funcall, not +');
+}
+
+diag "-------- length \$s == 4  (comparison: named unary binds TIGHTER)";
+{
+  my ($expr_o, $node_id) = parse_expr('length $s == 4');
+  my ($type, $content, $kids, $node) = get_node_info($expr_o, $node_id);
+  is($content, '==', 'length $s == 4: top is == (length grabs only $s)');
+}
+
+diag "-------- length(\$s) + 1  (explicit parens keep + outside)";
+{
+  my ($expr_o, $node_id) = parse_expr('length($s) + 1');
+  my ($type, $content, $kids, $node) = get_node_info($expr_o, $node_id);
+  is($content, '+', 'length($s) + 1: explicit parens => top is +');
 }

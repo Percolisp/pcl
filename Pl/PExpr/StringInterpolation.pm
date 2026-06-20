@@ -147,22 +147,24 @@ sub parse_interpolated_string {
     return $self->make_string_literal_node($parser, "");
   }
 
-  # If only one part, check if it's a simple string literal
-  # Array variables AND slices need the string_concat wrapper for proper join
-  # handling (gen_string_concat wraps them in (p-join |$"| ...) and forces list
-  # context).  A whole array is a PPI::Token::Symbol "@x"; a slice is an internal
-  # node (slice_a_acc / slice_h_acc).  Without this, a single-slice string like
-  # "@a[1..2]" returned the bare slice node — no join, and it inherited the
-  # surrounding context (so `my $s = "@a[1..2]"` reduced to the last element).
+  # If the whole string is ONE part, the only case we may return bare is a plain
+  # string literal (no interpolation happened — e.g. "foo"); that needs neither a
+  # join nor a stringify.  Every other single part — a scalar/element/expression,
+  # a whole array, or a slice — must still flow through string_concat:
+  #   * a scalar "$x" must be STRINGIFIED.  Returning the bare variable node drops
+  #     the coercion, which matters when $x is an overloaded object (the "" /
+  #     stringify overload never fires) or a reference (no "ARRAY(0x..)" text).
+  #     E.g. `$x = "$x"` on a version/overloaded object used to leave $x an
+  #     object, so a later overloaded `cmp`/`<=>` re-dispatched forever
+  #     (BINDING-STACK-EXHAUSTED).  gen_string_concat emits (p-string-concat $x)
+  #     → to-string → box-sv, which fires the "" overload exactly like Perl.
+  #   * a whole array "@x" / a slice "@a[1..2]" needs the (p-join |$"| ...) join
+  #     AND list context; returning the bare node skipped the join and let the
+  #     element inherit the surrounding scalar context.
   if (@parts == 1) {
     my $part_node = $parser->get_a_node($parts[0]);
-    my $is_array_sym = (ref($part_node) eq 'PPI::Token::Symbol'
-                        && $part_node->content() =~ /^@/);
-    my $itype = $parser->is_internal_node_type($part_node);
-    my $is_slice = (defined $itype
-                    && ($itype eq 'slice_a_acc' || $itype eq 'slice_h_acc'));
-    return $parts[0] unless $is_array_sym || $is_slice;
-    # Fall through to create string_concat for arrays/slices
+    return $parts[0] if ref($part_node) eq 'PPI::Token::Quote::Double';
+    # Fall through to create string_concat for everything else.
   }
 
   # Build string_concat node with all parts

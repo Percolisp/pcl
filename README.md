@@ -17,12 +17,11 @@ Two reasons:
 
 #### The hard part — Perl's runtime *magic*
 
-Perl is "hard" to parse, you really need to execute code to do that. PCL avoids the problem by not solving it, reproducing the same magic in the Common Lisp runtime. The constructs that are hard because they must execute, will simply execute on the CL side with the same semantics.
+Perl is genuinely hard to parse — much of its behaviour only exists while the program runs, so you practically have to *execute* it. PCL sidesteps this instead of solving it: it reproduces the same magic in the Common Lisp runtime. Constructs that are hard precisely because they must execute simply execute on the CL side, with the same semantics.
 
 ### There is no bytecode engine
 
 This is a genuinely new implementation. PCL does **not** embed, link, or reimplement Perl's runtime or opcode interpreter. It is a from-scratch source-to-source compiler: Perl code in, Common Lisp code out.
-
 
 ## Quick Start
 
@@ -38,8 +37,7 @@ echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtim
 prove -j8 Pl/t/
 ```
 
-(PCL is a bit sensitive for the Common Lisp versions, it will be examined before first release.)
-
+(PCL is currently a little sensitive to the Common Lisp version it runs on; this will be sorted out before the first release.)
 
 ## Example
 
@@ -95,9 +93,9 @@ A few of the biggest items:
 
 ## How It Is Tested
 
-Right now, testing is mostly with CPAN modules and with a fuzzer.
+Testing currently leans on real CPAN modules and a differential fuzzer.
 
-During most of the development time, testing has been done with Perl's excellent and thorough test suite (`t/op/`, `t/base/`, …). PCL compiles those test files to Common Lisp and runs them — using Perl's own expectations as the oracle for compatibility.
+For most of development, though, the workhorse has been Perl's own excellent, thorough test suite (`t/op/`, `t/base/`, …): PCL compiles those test files to Common Lisp and runs them, using Perl's own expectations as the oracle for compatibility.
 
 Some tests exercise features that are deliberately out of scope (e.g. CL-PPCRE has no executable code blocks inside regexes, `(?{...})`, and removed/experimental features aren't implemented). Those tests have to be skipped — which means some features can quietly end up *under-covered*, something that has to be reviewed with care rather than assumed away.
 
@@ -125,7 +123,7 @@ Generated code is intentionally readable: Perl variables keep their sigils (`$x`
 
 ## Status
 
-This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the end should be in weeks not months.
+This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the finish line now looks like weeks away, not months.
 
 Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **69 files passing completely**. Several pure-Perl CPAN modules now run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process.
 
@@ -136,7 +134,6 @@ A small illustration of how it gets done: when implementing `pack()` in CL prove
 My own Common Lisp experience is from long ago; that side of the work is essentially all Claude.
 
 *(It'll go on CPAN later, once it's closer to ready.)*
-
 
 ## Roadmap — after it works reliably
 
@@ -164,7 +161,6 @@ interpreter-internals items they are a matter of *when*, not *whether*:
 - **Richer `caller()`.** Package and sub-name depth for `caller(N)` are
   reachable via SBCL frame walking (behind a debug flag). Accurate file/line
   still waits on the source-map work that the smarter code generator brings.
-
 
 ## License
 

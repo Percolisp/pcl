@@ -146,11 +146,16 @@ verify_string_concat($expr_o, $node_id, ['"Hello "', '$name'],
 verify_string_concat($expr_o, $node_id, ['$first', '" "', '$last'], 
                      "Multiple variables");
 
-# Just a variable
+# Just a variable — now a single-part string_concat.  The lone variable must be
+# STRINGIFIED (firing the "" overload / ref stringification); the old bare-node
+# optimization dropped that coercion, which made `$x = "$x"` on an overloaded
+# object leave $x an object and loop forever (see overload-01.t).
 ($expr_o, $node_id) = parse_expr('"$var"');
 $node = $expr_o->get_a_node($node_id);
-ok($node->can('content'), "Just a variable returns variable node");
-is($node->content(), '$var', "Variable content correct");
+is($node->{type}, 'string_concat', "Just a variable is a stringifying string_concat");
+my $just_var_kids = $expr_o->get_node_children($node_id);
+is($expr_o->get_a_node($just_var_kids->[0])->content(), '$var',
+   "Variable content correct");
 
 
 diag "";

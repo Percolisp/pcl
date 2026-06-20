@@ -475,16 +475,20 @@
 (defvar @_ (make-array 0 :adjustable t :fill-pointer 0)
   "Perl @_ - current subroutine arguments")
 
-;;; Regex capture group variables ($1, $2, ... $9) and named captures (%+)
-(defvar $1 nil "Regex capture group 1")
-(defvar $2 nil "Regex capture group 2")
-(defvar $3 nil "Regex capture group 3")
-(defvar $4 nil "Regex capture group 4")
-(defvar $5 nil "Regex capture group 5")
-(defvar $6 nil "Regex capture group 6")
-(defvar $7 nil "Regex capture group 7")
-(defvar $8 nil "Regex capture group 8")
-(defvar $9 nil "Regex capture group 9")
+;;; Regex capture group variables ($1, $2, ... $9) and named captures (%+).
+;;; A non-participating group is Perl undef, represented as *p-undef* (NOT raw
+;;; nil): %p-flatten-list drops raw nil as an array-hole/empty-list marker, so a
+;;; nil here would make an undef capture VANISH from a list (e.g.
+;;; `my ($a,$b)=($3,$4,...)`).  *p-undef* survives flattening as one undef slot.
+(defvar $1 *p-undef* "Regex capture group 1")
+(defvar $2 *p-undef* "Regex capture group 2")
+(defvar $3 *p-undef* "Regex capture group 3")
+(defvar $4 *p-undef* "Regex capture group 4")
+(defvar $5 *p-undef* "Regex capture group 5")
+(defvar $6 *p-undef* "Regex capture group 6")
+(defvar $7 *p-undef* "Regex capture group 7")
+(defvar $8 *p-undef* "Regex capture group 8")
+(defvar $9 *p-undef* "Regex capture group 9")
 (defvar |$&| nil "Regex MATCH - the whole matched string")
 (defvar |$`| nil "Regex PREMATCH - everything before the match")
 (defvar |$'| nil "Regex POSTMATCH - everything after the match")
@@ -1890,11 +1894,11 @@
                         ((< ln-raw 0) (max st (+ slen ln-raw)))
                         (t (max 0 (min (+ adj-st ln-raw) slen))))))
     (when undef-len-p
-      (p-warn "Use of uninitialized value in substr\n"))
+      (p-warn (format nil "Use of uninitialized value in substr~%")))
     (when oob
       (if replacement
           (error "substr outside of string")
-          (p-warn "substr outside of string\n")))
+          (p-warn (format nil "substr outside of string~%"))))
     (if replacement
         ;; 4-arg form (or lvalue): replace and return the replaced portion
         (let* (;; Warn when target is a reference being coerced to string —
@@ -1906,7 +1910,7 @@
                                      (hash-table-p v)
                                      (functionp v))
                                  (not (p-find-overload str "\"\"")))
-                        (p-warn "Attempt to use reference as lvalue in substr\n")))))
+                        (p-warn (format nil "Attempt to use reference as lvalue in substr~%"))))))
                (replaced-part (subseq s (min st slen) end-pos))
                (new-str (concatenate 'string
                                      (subseq s 0 (min st slen))
@@ -7468,7 +7472,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                             (let ((v (p-box-value dir)))
                               (and (consp v) (integerp (car v))))))
                    ;; It's a filehandle or dirhandle: fchdir not implemented
-                   (p-die "The fchdir function is unimplemented at pcl line 0.\n")
+                   (p-die (format nil "The fchdir function is unimplemented at pcl line 0.~%"))
                    (to-string dir))))))
     (handler-case
         (progn
@@ -8610,7 +8614,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; Skip for tied sep to avoid premature FETCH before item-count check.
          (_ (when (and (not (and (p-box-p sep) (p-tie-proxy-p (p-box-value sep))))
                        (not (%pcl-definedp sep)))
-              (p-warn "Use of uninitialized value in join\n")))
+              (p-warn (format nil "Use of uninitialized value in join or string~%"))))
          ;; Pre-count items WITHOUT calling FETCH (to decide sep evaluation)
          ;; Tied scalars in items are counted as 1 without fetching
          (item-count (loop for item in items
@@ -8639,7 +8643,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                          else
                          collect (progn
                                    (when (or (null val) (eq val *p-undef*))
-                                     (p-warn "Use of uninitialized value in join\n"))
+                                     (p-warn (format nil "Use of uninitialized value in join or string~%")))
                                    val))))
     (declare (ignore _))
     (if s
@@ -8723,7 +8727,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                            ;; Use :with-registers-p t so capture groups in pattern
                            ;; are included in results (Perl behavior)
                            (handler-case
-                               (let ((scanner (apply #'cl-ppcre:create-scanner pat ppcre-options)))
+                               (let ((scanner (%pcl-create-scanner pat ppcre-options)))
                                  (cl-ppcre:split scanner s :limit ppcre-limit :with-registers-p t))
                              (cl-ppcre:ppcre-syntax-error (e)
                                (warn "Regex syntax error in split: ~A" e)
@@ -10122,7 +10126,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (current-level 0)
          (target-level (+ level 2)))  ; Skip p-caller itself and its caller
     ;; Walk the backtrace for best-effort filename/line (documented unreliable).
-    (sb-debug:map-backtrace
+    (sb-debug::map-backtrace
      (lambda (frame)
        (when (= current-level target-level)
          (let ((code-loc (sb-di:frame-code-location frame)))
@@ -10898,6 +10902,173 @@ buffer's fill-pointer; everything else falls back to file-length."
                 :to (to-string to)
                 :modifiers modifiers))
 
+;;; ---------------------------------------------------------------------------
+;;; /x extended-mode normaliser — works around a cl-ppcre bug where extended
+;;; mode is NOT restored after an inline `(?-x:...)` / `(?x:...)` mode group, so
+;;; whitespace/comments after the group are wrongly kept (or wrongly stripped).
+;;; See docs/clppcre-extended-mode-modifier-bug.md.  We strip insignificant
+;;; whitespace/comments ourselves (honouring [...], escapes and (?x)/(?-x)
+;;; scopes), rewrite the x flag out of every mode group, and pass the result
+;;; WITHOUT :extended-mode.  Engaged ONLY when the pattern actually contains an
+;;; x mode-modifier, so ordinary /x patterns keep using cl-ppcre's (correct)
+;;; extended mode and never regress.
+;;; ---------------------------------------------------------------------------
+(defun %pcl-parse-x-flag-group (pat i cur-x)
+  "PAT[i] is #\(.  If this opens a (?flags:) / (?flags) MODE group, return
+   (values T end-index emit-string terminator newx); else (values NIL ...).
+   x is removed from the emitted flags; NEWX is the x state it selects."
+  (let ((n (length pat)))
+    (when (and (< (+ i 1) n) (char= (char pat (+ i 1)) #\?))
+      (let ((j (+ i 2)) (caret nil) (on "") (off "") (seen-dash nil))
+        (when (and (< j n) (char= (char pat j) #\^)) (setf caret t) (incf j))
+        (loop while (< j n) do
+              (let ((c (char pat j)))
+                (cond
+                  ((char= c #\-) (if seen-dash (return) (progn (setf seen-dash t) (incf j))))
+                  ((find c "imsxadlupn")
+                   (if seen-dash (setf off (concatenate 'string off (string c)))
+                       (setf on (concatenate 'string on (string c))))
+                   (incf j))
+                  (t (return)))))
+        (when (and (< j n) (or (char= (char pat j) #\:) (char= (char pat j) #\)))
+                   (or caret (> (length on) 0) (> (length off) 0)))
+          (let* ((term (char pat j))
+                 (base (if caret nil cur-x))
+                 (newx (cond ((find #\x on) t) ((find #\x off) nil) (t base)))
+                 (on2 (remove #\x on)) (off2 (remove #\x off))
+                 (flags (concatenate 'string (if caret "^" "") on2
+                                     (if (> (length off2) 0) (concatenate 'string "-" off2) "")))
+                 (emit (if (char= term #\:)
+                           (if (= 0 (length flags)) "(?:" (format nil "(?~a:" flags))
+                           (if (= 0 (length flags)) "" (format nil "(?~a)" flags)))))
+            (return-from %pcl-parse-x-flag-group (values t (1+ j) emit term newx))))))
+    (values nil nil nil nil nil)))
+
+(defun %pcl-has-x-modifier (pat)
+  "True if PAT contains an x mode-modifier group, e.g. (?x:..)/(?-x:..)/(?ix:..)."
+  (let ((i 0) (n (length pat)))
+    (loop while (< i n) do
+          (let ((c (char pat i)))
+            (cond
+              ((char= c #\\) (incf i 2))
+              ((char= c #\()
+               (multiple-value-bind (flag-p end emit term newx)
+                   (%pcl-parse-x-flag-group pat i t)
+                 (declare (ignore end emit term))
+                 (if (and flag-p
+                          ;; only a group that actually mentions x is interesting:
+                          ;; newx differs from the "no x flag" outcome.  Detect by
+                          ;; re-checking the raw flag text for an x.
+                          (%pcl-flag-text-has-x pat i))
+                     (return-from %pcl-has-x-modifier t)
+                     (incf i))))
+              (t (incf i)))))
+    nil))
+
+(defun %pcl-flag-text-has-x (pat i)
+  "Does the (?...) flag run starting at PAT[i] (a #\() contain the letter x?"
+  (let ((n (length pat)) (j (+ i 2)))
+    (when (and (< (1+ i) n) (char= (char pat (1+ i)) #\?))
+      (loop while (< j n) do
+            (let ((c (char pat j)))
+              (cond
+                ((char= c #\x) (return-from %pcl-flag-text-has-x t))
+                ((or (find c "imsadlupn") (char= c #\^) (char= c #\-)) (incf j))
+                (t (return))))))
+    nil))
+
+(defun %pcl-normalize-extended (pat base-x)
+  "Strip insignificant whitespace/comments per /x scope and rewrite x mode
+   modifiers away.  BASE-X = is the whole pattern extended (/x flag set)?"
+  (let ((out (make-string-output-stream)) (i 0) (n (length pat))
+        (xstack (list base-x)) (in-class nil))
+    (flet ((curx () (car xstack)))
+      (loop while (< i n) do
+            (let ((c (char pat i)))
+              (cond
+                ((char= c #\\)
+                 (write-char c out)
+                 (when (< (1+ i) n) (write-char (char pat (1+ i)) out))
+                 (incf i 2))
+                (in-class
+                 (write-char c out)
+                 (when (char= c #\]) (setf in-class nil))
+                 (incf i))
+                ((char= c #\[)
+                 (write-char c out) (incf i) (setf in-class t)
+                 (when (and (< i n) (char= (char pat i) #\^)) (write-char #\^ out) (incf i))
+                 (when (and (< i n) (char= (char pat i) #\])) (write-char #\] out) (incf i)))
+                ;; (?#...) comment group: content is literal up to the first
+                ;; unescaped ) — copy it verbatim so its `#`/spaces are NOT
+                ;; treated as an /x comment/whitespace.
+                ((and (char= c #\()
+                      (< (+ i 2) n)
+                      (char= (char pat (+ i 1)) #\?)
+                      (char= (char pat (+ i 2)) #\#))
+                 (write-string "(?#" out) (incf i 3)
+                 (loop while (and (< i n) (not (char= (char pat i) #\)))) do
+                       (when (char= (char pat i) #\\)
+                         (write-char #\\ out) (incf i))
+                       (when (< i n) (write-char (char pat i) out) (incf i)))
+                 (when (< i n) (write-char #\) out) (incf i)))
+                ((char= c #\()
+                 (multiple-value-bind (flag-p end emit term newx)
+                     (%pcl-parse-x-flag-group pat i (curx))
+                   (cond
+                     ((not flag-p) (write-char #\( out) (incf i) (push (curx) xstack))
+                     ((char= term #\:) (write-string emit out) (setf i end) (push newx xstack))
+                     (t (write-string emit out) (setf i end) (setf (car xstack) newx)))))
+                ((char= c #\))
+                 (write-char c out) (incf i) (when (cdr xstack) (pop xstack)))
+                ((curx)
+                 (cond
+                   ((member c '(#\Space #\Tab #\Newline #\Return #\Page)) (incf i))
+                   ((char= c #\#)
+                    (loop while (and (< i n) (not (char= (char pat i) #\Newline))) do (incf i)))
+                   (t (write-char c out) (incf i))))
+                (t (write-char c out) (incf i))))))
+    (get-output-stream-string out)))
+
+(defun %pcl-build-scanner (pattern options)
+  "cl-ppcre:create-scanner wrapper.  Why this exists (yes, it looks stupid):
+   cl-ppcre has a bug — after an inline `(?-x:...)`/`(?x:...)` mode group it does
+   NOT restore the surrounding extended-mode state, so the rest of the pattern's
+   whitespace/comments are handled in the wrong mode and the match silently
+   breaks (e.g. Text::ParseWords' parse_line).  Rather than rely on cl-ppcre's
+   broken extended-mode for such patterns, we do the /x stripping OURSELVES
+   (%pcl-normalize-extended), delete the x flag from every mode group, and hand
+   cl-ppcre a pattern that needs no extended-mode at all.  We only do this when
+   the pattern actually contains an x mode-modifier; every other /x pattern keeps
+   using cl-ppcre's (correct, faster) native extended-mode and is untouched.
+   See docs/clppcre-extended-mode-modifier-bug.md."
+  (if (%pcl-has-x-modifier pattern)
+      (apply #'cl-ppcre:create-scanner
+             (%pcl-normalize-extended pattern (getf options :extended-mode))
+             ;; drop :extended-mode (and its value) from the options plist —
+             ;; we have already applied it by hand, so cl-ppcre must not.
+             (loop for (k v) on options by #'cddr
+                   unless (eq k :extended-mode) nconc (list k v)))
+      (apply #'cl-ppcre:create-scanner pattern options)))
+
+(defvar *pcl-scanner-cache* (make-hash-table :test 'equal)
+  "Memoizes (pattern + options) -> (scanner . reg-names).  cl-ppcre compiles a
+   fresh scanner on every create-scanner call and PCL builds one per match, so
+   without this a regex used in a loop recompiles every iteration.  Also
+   amortizes the /x normaliser (%pcl-build-scanner) to once per distinct pattern.
+   Scanners are stateless closures (match state lives in the registers passed to
+   scan), so sharing one is safe.  The cache is per-process; PCL runs one program
+   per image, so distinct patterns are bounded and there is no staleness.")
+
+(defun %pcl-create-scanner (pattern options)
+  "Memoized %pcl-build-scanner.  Returns (values scanner reg-names)."
+  (let* ((key (format nil "~A~C~{~A~^ ~}" pattern #\Nul options))
+         (hit (gethash key *pcl-scanner-cache*)))
+    (if hit
+        (values (car hit) (cdr hit))
+        (multiple-value-bind (scanner reg-names) (%pcl-build-scanner pattern options)
+          (setf (gethash key *pcl-scanner-cache*) (cons scanner reg-names))
+          (values scanner reg-names)))))
+
 (defun build-ppcre-options (modifiers)
   "Convert Perl regex modifiers to CL-PPCRE options plist"
   (let ((options nil))
@@ -10912,9 +11083,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     options))
 
 (defun clear-capture-groups ()
-  "Reset all capture group variables to nil"
-  (setf $1 nil $2 nil $3 nil $4 nil $5 nil
-        $6 nil $7 nil $8 nil $9 nil
+  "Reset all capture group variables.  $1..$9 reset to *p-undef* (Perl undef),
+   NOT raw nil — see the defvar note: a raw-nil capture vanishes when flattened
+   into a list (%p-flatten-list treats raw nil as an empty-list/hole marker)."
+  (setf $1 *p-undef* $2 *p-undef* $3 *p-undef* $4 *p-undef* $5 *p-undef*
+        $6 *p-undef* $7 *p-undef* $8 *p-undef* $9 *p-undef*
         |$&| nil |$`| nil |$'| nil |$+| nil)
   (clrhash %+))
 
@@ -10950,7 +11123,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
   `(let ((rs (aref ,starts ,idx)) (re (aref ,ends ,idx)))
-     (setf ,var (if (and rs re) (subseq ,str rs re) nil))))
+     (setf ,var (if (and rs re) (subseq ,str rs re) *p-undef*))))
 
 (defun set-capture-groups (str reg-starts reg-ends &optional reg-names)
   "Set capture group variables $1..$9 and named captures %+ from regex match results.
@@ -10995,7 +11168,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (cont-p (getf modifiers :c)))
     (handler-case
         (multiple-value-bind (scanner reg-names)
-            (apply #'cl-ppcre:create-scanner pattern options)
+            (%pcl-create-scanner pattern options)
           ;; Perl clears %+ on every match attempt, even failures.
           ;; $1..$9 are only cleared/set on successful matches.
           (clrhash %+)
@@ -11107,7 +11280,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                                 (when multi-line '(:multi-line-mode t))
                                 (when extended '(:extended-mode t)))))
           (multiple-value-bind (scanner reg-names)
-              (apply #'cl-ppcre:create-scanner pattern options)
+              (%pcl-create-scanner pattern options)
             (let* ((count 0)
                    (result nil))
               (if eval-p
@@ -11422,7 +11595,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-group-struct-to-vec (g)
   "Convert sb-posix group struct to a 4-element Perl list vector: (name passwd gid members)."
-  (let ((members (sb-posix:group-mem g)))
+  (let ((members (sb-posix::group-mem g)))
     (vector
      (make-p-box (sb-posix:group-name g))
      (make-p-box (sb-posix:group-passwd g))
@@ -11434,7 +11607,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (declare (ignore wantarray))
   (setf *p-group-list* nil)
   (handler-case
-      (sb-posix:do-groups (g)
+      (sb-posix::do-groups (g)
         (push (p-group-struct-to-vec g) *p-group-list*))
     (sb-posix:syscall-error ()))   ; ignore EOF/ENOENT thrown at end of db
   (setf *p-group-list* (nreverse *p-group-list*))

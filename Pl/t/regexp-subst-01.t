@@ -160,9 +160,10 @@ test_codegen('$+{year}',
              '(p-gethash %+ "year")',
              '$+{name} generates hash access on %+');
 
-# $+{name} in string interpolation
+# $+{name} in string interpolation — wrapped in p-string-concat so the captured
+# value is stringified (interpolation always stringifies its single part).
 test_codegen('"$+{year}"',
-             '(p-gethash %+ "year")',
+             '(p-string-concat (p-gethash %+ "year"))',
              '"$+{name}" interpolates via p-gethash');
 
 diag "";
