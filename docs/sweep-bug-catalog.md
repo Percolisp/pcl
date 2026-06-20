@@ -17,15 +17,15 @@ First target **Text::ParseWords** surfaced two real bugs:
   the flattener's own convention ("Perl undef comes as `*p-undef*`, not raw
   nil"). Regression tests in `Pl/t/misc-fixes-02.t`.
 
-- **cl-ppcre `/x` + scoped `(?-x:…)` — OPEN (cl-ppcre bug, needs PCL workaround).**
-  `:extended-mode` is not restored after an inline `(?-x:…)` group, so trailing
-  whitespace/comments become literal and the match fails. Blocks
-  `Text::ParseWords::parse_line` (and any `/x` regex using `(?x:)`/`(?-x:)`).
-  Full writeup + minimal repro: `docs/clppcre-extended-mode-modifier-bug.md`.
-  Workaround = PCL-side `/x` normaliser (strip insignificant ws/comments
-  ourselves, honour `[…]`/escapes/mode-scopes, drop `:extended-mode`). Safest to
-  engage the normaliser ONLY when the pattern contains a `(?x`/`(?-x` modifier,
-  bounding the blast radius to the already-broken case.
+- **cl-ppcre `/x` + scoped `(?-x:…)` — FIXED (PCL workaround).** `:extended-mode`
+  was not restored after an inline `(?-x:…)` group, so trailing whitespace/comments
+  became literal and the match failed (blocked `Text::ParseWords::parse_line`).
+  Fixed by a PCL-side `/x` normaliser (`%pcl-normalize-extended`) engaged only when
+  the pattern has an `x` mode-modifier (so plain `/x` never regresses); scanner
+  builds are memoized (`*pcl-scanner-cache*`). Text::ParseWords 6→26/27 (the last
+  is `old_shellwords`, a separate niche). Writeup:
+  `docs/clppcre-extended-mode-modifier-bug.md`; tests `Pl/t/regex-extended-mode-01.t`.
+  Pre-existing residual (NOT introduced): whitespace inside `\x{ … }` under `/x`.
 
 ## Differential-fuzzer findings (session 241, `tools/difftest-ops.pl`)
 

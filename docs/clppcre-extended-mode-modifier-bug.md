@@ -30,14 +30,26 @@ prime example — its `parse_line` regex is `/…/x` with inline comments and a
 `(?-x:$delimiter)` span, so every `quotewords`/`shellwords`/`parse_line` call
 mis-parses.
 
-## Workaround (PCL side, not yet implemented)
+## Workaround (PCL side — IMPLEMENTED, session 262)
 
-Do PCL's own `/x` normalisation before handing the pattern to cl-ppcre: strip
-insignificant whitespace and `#`…EOL comments **ourselves**, honouring
-`(?x:…)`/`(?-x:…)`/`(?x)`/`(?-x)` scope toggles, character classes `[…]` (where
-whitespace is literal), and backslash escapes — then pass the cleaned pattern
-**without** `:extended-mode`. With no insignificant whitespace left, cl-ppcre's
-broken mode-restoration is never exercised.
+`%pcl-create-scanner` in `cl/pcl-runtime.lisp`. When (and only when) a pattern
+contains an `x` mode-modifier (`%pcl-has-x-modifier`), PCL does its own `/x`
+normalisation (`%pcl-normalize-extended`): it strips insignificant whitespace and
+`#`…EOL comments itself, honouring `(?x:…)`/`(?-x:…)`/`(?x)`/`(?-x)` scope
+toggles, character classes `[…]` (whitespace literal), `(?#…)` comment groups,
+and backslash escapes — then hands cl-ppcre the cleaned pattern **without**
+`:extended-mode`, so the broken mode-restoration is never exercised. Plain `/x`
+patterns (no `x` modifier) keep using cl-ppcre's native extended mode untouched,
+so this can never regress them. Regression tests: `Pl/t/regex-extended-mode-01.t`.
+
+Scanner builds are memoized (`*pcl-scanner-cache*`, keyed on pattern+options), so
+the normaliser runs once per distinct pattern and repeated matches don't
+recompile — a general speedup independent of this workaround.
+
+**Out of scope (pre-existing cl-ppcre limitation, NOT introduced here):**
+whitespace *inside* `\x{ … }` / `\N{ … }` under `/x` (e.g. `/\x{ 263a }/x`) is not
+stripped by cl-ppcre and fails to match even without any modifier group. Real
+code virtually never writes spaces inside a hex/name escape.
 
 ## Upstream
 
