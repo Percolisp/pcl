@@ -11653,6 +11653,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun pl-__SUB__ ()
   (lambda (&rest args) (declare (ignore args)) nil))
 
+;; utf8::unicode_to_native / native_to_unicode map between Unicode and the
+;; platform's native code point.  On any ASCII (non-EBCDIC) platform — which is
+;; all PCL ever targets — both are the identity.  JSON::PP builds its
+;; invalid-char regex with chr(utf8::unicode_to_native($i)), so these must exist
+;; in the production runtime (not just the test library).  Defined in :pcl and
+;; exported so the :utf8 package (which (:use :pcl)) inherits them — this also
+;; avoids a name-conflict with cl/pcl-test.lisp, which defines the same names in
+;; :pcl for charset_tools.pl (it then just redefines the same symbol).
+(in-package :pcl)
+(defun pl-unicode_to_native (&optional cp) cp)
+(defun pl-native_to_unicode (&optional cp) cp)
+(export '(pl-unicode_to_native pl-native_to_unicode))
+
 ;; utf8 module stub - on non-EBCDIC systems, uni_to_native/native_to_uni are identity.
 ;; Note: PCL generates pl- prefix for user function calls (e.g. utf8::upgrade → utf8::pl-upgrade),
 ;; so stubs in user-accessible packages must use pl- prefix (not p- which is for pcl builtins).

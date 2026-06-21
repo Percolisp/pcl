@@ -4251,6 +4251,12 @@ sub _bareword_subscript_autoquotes {
   for my $s (@{ $env->get_declared_subs || [] }) {
     return 0 if defined $s->{name} && $s->{name} eq $name;
   }
+  # In eval-string mode the prototype table is empty, but constants/subs from the
+  # enclosing program DO exist at runtime as zero-arg subs. Perl only autoquotes
+  # barewords in HASH subscripts — `$a[FOO]` is always a sub call — so an ALL-CAPS
+  # bareword here (the convention for constants, matching the handle_subcalls
+  # heuristic) must stay callable, not be stringified to a 0 index.
+  return 0 if $self->parser->eval_mode && $name =~ /^[A-Z][A-Z0-9_]*$/;
   return 1;                                         # unknown bareword: string index
 }
 
