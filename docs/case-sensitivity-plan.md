@@ -1,8 +1,12 @@
 # Plan: resolving Perl/CL identifier case clashes
 
-**Status:** plan only (2026-06-16). Targeted collision-only fix shipped s252; the
-general fix below is deferred to the compiler rewrite. See
-`memory/project_case_sensitivity_general_fix.md` for the s252 details.
+**Status:** plan only (2026-06-16; updated s264 2026-06-21). Targeted
+collision-only fix shipped s252; the general fix below is deferred to the
+compiler rewrite. See `memory/project_case_sensitivity_general_fix.md` for the
+s252 details, and the **s264 addendum at the bottom** for a new real-CPAN
+datapoint (Getopt::Long) that the s252 rename *cannot* reach, plus a refinement
+to the `:invert` analysis (the runtime symbolic-ref resolvers are a third
+identifier→symbol chokepoint).
 
 ## The problem, precisely
 
@@ -148,3 +152,104 @@ audit is cheap to fold in and there's a single identifier→symbol chokepoint.
    and the `__pcl_ci_N` machinery once green.
 5. **Regression test** in `Pl/t/misc-fixes-02.t`: `$base_len`/`$BASE_LEN` **and**
    `sub foo`/`sub FOO` both round-trip.
+
+---
+
+## s264 addendum (2026-06-21): the runtime symbolic-ref path is a third chokepoint
+
+### New real-CPAN datapoint — Getopt::Long (the s252 rename can't reach this)
+
+Running Getopt::Long's own test suite through PCL, `gol-basic.t`/`gol-oo.t`
+tests 2/3/5 fail. The legacy "no linkage" mode stores results into package
+globals `$main::opt_<name>` built **at runtime by symbolic reference**:
+
+```perl
+# inside Getopt::Long, roughly:
+${ $pkg . "::opt_" . $name } = $value;   # $name comes from @ARGV at runtime
+```
+
+With options `"foo"` and `"Foo=s"` this writes `${"main::opt_foo"}` and
+`${"main::opt_Foo"}`. `%p-symref-box` does `(string-upcase "opt_foo")` →
+`$OPT_FOO` for **both** → they collide on one CL symbol; last write wins.
+
+Why s252's compile-time rename does **not** help here:
+- The s252 rename rewrites the *test's direct token* refs: `$opt_foo` →
+  `$opt_foo__pcl_ci_1`, `$opt_Foo` kept. So the two *reads* in the test are now
+  distinct symbols. Good.
+- But the *writes* come from Getopt::Long via a **runtime-constructed string**
+  (`"opt_$name"`), which `%p-symref-box` upcases — it has never heard of the
+  rename table. Both writes still land on the unrenamed `$OPT_FOO`.
+- Net: the renamed var (`opt_foo__pcl_ci_1`) is never written (reads undef →
+  tests 2/3 fail), and the kept var (`$OPT_FOO`) is clobbered by *both* writes,
+  so it holds `1` instead of `"-baR"` (test 5 fails).
+
+**This is the first observed CPAN case where the collision lives in the runtime
+symbolic-ref path, not in direct token refs.** It proves the symref resolvers
+are an independent identifier→symbol site that any complete fix must cover.
+
+### The identifier→symbol chokepoints (complete list)
+
+1. **The CL reader** — direct token refs in generated code (`$opt_foo`,
+   `pl-foo`). Governed by `readtable-case`.
+2. **Runtime symbolic-ref / introspection resolvers** — build a CL symbol from a
+   *runtime string*: `%p-symref-box` / `%p-symref-array` / `%p-symref-hash`
+   (all `string-upcase`), `p-get-coderef`, plus method dispatch, `*glob`
+   install, `can`, stash walking. These do **not** go through the reader.
+3. **Compile-time deliberate-upcase sites** — package names, `use constant`
+   (`+PI+`), glob slot names, `%SPECIAL_VARS`.
+
+The s252 rename touches only (1) (via token mutation). The Getopt::Long bug is
+in (2).
+
+### Refinement to the `:invert` analysis: it is NOT "zero runtime change"
+
+The body of this doc says `:invert` needs "zero per-site codegen change." True
+for chokepoint (1). But chokepoint (2) is a real, bounded amount of runtime
+work under `:invert`:
+
+- The symref resolvers currently do `(string-upcase var-str)`. Under `:invert`,
+  a direct ref `$opt_Foo` reads to the symbol **named** `$opt_Foo` (mixed case
+  preserved), so the runtime must produce that *same* name from the string
+  `"opt_Foo"` — i.e. replace `string-upcase` with an **`invert-case`** transform
+  (flip case iff the letters are uniformly one case; else preserve). Equivalent
+  to `(read-from-string (concatenate 'string "|...|"))`-style exact interning
+  *only* for mixed-case; cleanest is a small `%pcl-invert-case` string helper
+  applied uniformly at all chokepoint-(2) sites.
+- Empirically verified (s264) that this is consistent: all-lowercase names are
+  invariant between `:upcase` and `:invert` (`opt_foo`→`OPT_FOO` under both),
+  so the bulk of the runtime (lowercase symbols) is untouched; only the names
+  carrying uppercase need `invert-case`, and those are exactly the collisions.
+
+| token     | `:upcase` | `:invert` |
+|-----------|-----------|-----------|
+| `opt_foo` | `OPT_FOO` | `OPT_FOO`  (lower → upper, same as today) |
+| `opt_Foo` | `OPT_FOO` | `opt_Foo`  (mixed preserved → **distinct**) |
+| `pl-foo`  | `PL-FOO`  | `PL-FOO`   (runtime agrees) |
+
+So the `:invert` phased plan above gains a step: **2b. Swap `string-upcase` →
+`%pcl-invert-case` at every chokepoint-(2) resolver**, and add a Getopt::Long-
+style symref-collision regression.
+
+### Cheap interim (if a fix is needed before the rewrite)
+
+If Getopt::Long-class breakage needs fixing *without* committing to `:invert`:
+extend the existing s252 mechanism into chokepoint (2). The compiler already
+computes `environment->case_renames` (`opt_foo → opt_foo__pcl_ci_1`); emit it
+into the generated output as a **package-scoped runtime registration**
+(`(p-register-case-renames "main" '(("opt_foo" . "opt_foo__pcl_ci_1") …)))`) and
+have the symref resolvers consult that map *before* `string-upcase`. Localized to
+the four resolvers + one emit; reuses the rename machinery. Covers the common
+case (a collision pair that *also* appears as direct refs — exactly
+Getopt::Long, since the test reads both `$opt_foo` and `$opt_Foo`). It does
+**not** cover a collision that exists *only* in runtime symref strings (no direct
+ref to trigger a rename) — that residual case still wants `:invert`.
+
+### Recommendation (unchanged, sharpened)
+
+`:invert` remains the right end-state and the right home is the compiler rewrite,
+now with chokepoint (2) explicitly in scope (step 2b). Until then: if
+Getopt::Long-class failures must go green sooner, do the **cheap interim** above;
+otherwise leave it. Do **not** flip the global readtable as a standalone change —
+the deliberate-upcase audit (chokepoint 3) and the load/eval/saved-core readtable
+orchestration are exactly the cross-cutting work the rewrite is structured to
+absorb.
