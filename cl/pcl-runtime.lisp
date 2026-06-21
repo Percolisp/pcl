@@ -134,7 +134,7 @@
    #:p-hash-deref-= #:p-array-deref-=
    ;; OO
    #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant
-   #:p-super-call #:perl-pkg-to-clos-class #:clos-class-to-pkg
+   #:p-super-call #:perl-pkg-to-clos-class
    #:p-can #:p-isa
    ;; use overload — operator overloading registry
    #:*p-overload-table* #:p-register-overloads
@@ -469,7 +469,7 @@
                 object-address looks-like-number
                 p-typeglob-p p-typeglob-name p-typeglob-package
                 p-regex-match-p p-regex-match-pattern p-regex-match-modifiers
-                clos-class-to-pkg perl-pkg-to-clos-class
+                perl-pkg-to-clos-class
                 p-get-coderef))
 (declaim (ftype (function (t t) t) p-can p-isa p-glob-slot))
 (declaim (ftype (function (&rest t) t)
@@ -10661,22 +10661,6 @@ buffer's fill-pointer; everything else falls back to file-length."
    COMMON-LISP/SBCL symbol (e.g. `package If` -> CL:IF would die in defclass).
    MUST stay in lock-step with _pkg_to_clos_class in Pl/Parser.pm."
   (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
-
-(defun clos-class-to-pkg (cls-name)
-  "Convert CLOS class name back to CL package name for lookup.
-   plc-foo-bar -> FOO-BAR.  Strips the plc- class prefix first (see
-   perl-pkg-to-clos-class), then maps - to the package name."
-  (let* ((stripped (if (and (>= (length cls-name) 4)
-                            (string-equal (subseq cls-name 0 4) "plc-"))
-                       (subseq cls-name 4)
-                       cls-name))
-         (upcase-name (string-upcase stripped))
-         ;; Try direct mapping first (for simple package names)
-         (pkg (find-package upcase-name)))
-    (if pkg
-        upcase-name
-        ;; Try converting - to :: for nested packages
-        (substitute #\: #\- upcase-name))))
 
 ;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
 (defun %pcl-super-indirect (method cur-pkg inv-args-vec)
