@@ -4,6 +4,16 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 264 (2026-06-21) — indirect-object `new ClassName(ARGS)` with explicit parens. Gate 100/3538.
+
+**User: keep finding/fixing bugs via CPAN modules + fuzzing; do a DIFFERENT module this session (Text::Balanced/goto continues later).** Picked Getopt::Long (its real lib is in @INC, so PCL transpiles it like user code).
+
+**Found (gol-oo.t crash) + fixed (commit `64d57be`):** `new Getopt::Long::Parser(config => [...])` — indirect-object constructor with EXPLICIT parens — mis-parsed as `new(Getopt::Long::Parser(config => ...))` (a funcall), crashing with `|Getopt::Long|::PL-PARSER is undefined`. Root cause in `Pl/PExpr.pm handle_subcalls`: the dedicated `new ClassName ARGS` pre-pass ran AFTER the `fun(list)` loop that collapses `ClassName(ARGS)`→funcall, so the parens form was destroyed first (only no-paren `new Foo`/`new Foo 1,2` worked). Fix: moved the `new` pre-pass to run BEFORE the fun(list) loop; when args are in an explicit `Structure::List` it stops there (so `new Foo(1), $x` doesn't swallow `$x`). Kept it dedicated (the general indirect pre-pass skips all-caps invocants like `new CGI` unless known packages; after `new`, all-caps is unambiguously a class). 3 regression tests in `transpile-test-05.t`. gol-oo crash→11/14.
+
+**NOT fixed (known deep bug, both gol-basic & gol-oo tests 2/3/5):** `$opt_foo` vs `$opt_Foo` case-collision. Getopt::Long stores legacy results via symbolic ref `${"main::opt_$name"}`; `%p-symref-box` upcases → both `opt_foo`/`opt_Foo` hit the same CL symbol `$OPT_FOO`. The s252 compile-time case-rename (`_compute_and_apply_case_renames`) fixes DIRECT reads (`$opt_foo`→`$opt_foo__pcl_ci_1`) but the RUNTIME symref write path doesn't honor the rename → renamed var never written, kept var clobbered. This is the documented case-sensitivity compiler-rewrite TODO (`project_case_sensitivity_general_fix`); left for the rewrite. gol-basic 15/18, gol-linkage 37/37, gol-xargv/gol-xstring have more (case-collision-related) fails.
+
+---
+
 ## Session 263 (2026-06-21) — intra-sub `goto LABEL` (partial) + top-level goto-in-if fix + do-block `my`-scoping leak fix. Gate 100/3535. Remaining `_match_tagged` blockers documented in `docs/intra-sub-goto-plan.md`.
 
 **User: keep finding/fixing bugs via CPAN modules + fuzzing; the remaining item from s262 was Text::Balanced `_match_tagged` → intra-sub `goto LABEL`.** Then user asked (mid-session) whether the declaration/goto codegen area is worth reviewing/refactoring → **yes** (below), then asked to (1) fix the do-block leak now, (2) update the plans, and to end the session with a saved plan for the general problem.
