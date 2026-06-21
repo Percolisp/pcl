@@ -12,6 +12,16 @@
 ;;; Load sb-posix for process ID
 (require :sb-posix)
 
+;;; --- :invert spike (case-sensitivity experiment) -----------------------
+;;; All third-party libs (cl-ppcre, asdf, sb-posix) are loaded ABOVE under the
+;;; standard :upcase readtable.  From here on, read PCL's own runtime AND all
+;;; subsequently-loaded generated code under :invert so that Perl identifiers
+;;; differing only in case map to distinct CL symbols.  Lower-case tokens
+;;; (defun, let, p-box) invert to UPPER (standard CL); all-UPPER Perl names
+;;; (STDERR, BASE_LEN) invert to lower; mixed-case (pl-FOO, Foo::Bar) preserved.
+(setf (readtable-case *readtable*) :invert)
+;;; ----------------------------------------------------------------------
+
 (defpackage :pcl
   (:use :cl)
   (:export
@@ -111,7 +121,7 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
-   #:p-glob-slot #:p-glob-undef-name #:p-local-glob
+   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
@@ -124,7 +134,7 @@
    #:p-hash-deref-= #:p-array-deref-=
    ;; OO
    #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant
-   #:p-super-call #:perl-pkg-to-clos-class #:clos-class-to-pkg
+   #:p-super-call #:perl-pkg-to-clos-class
    #:p-can #:p-isa
    ;; use overload — operator overloading registry
    #:*p-overload-table* #:p-register-overloads
@@ -264,9 +274,14 @@
    Recorded on *pcl-caller-subname-stack* at p-sub entry for (caller(N))[3]."
   (if (and name (symbolp name))
       (let* ((sname (symbol-name name))
-             (bare  (if (and (>= (length sname) 3)
-                             (string= (subseq sname 0 3) "PL-"))
-                        (subseq sname 3)
+             ;; Reverse the :invert reader transform to recover the emitted
+             ;; `pl-<perlname>` token (invert is its own inverse), then strip the
+             ;; now-lowercase prefix.  Recovers original sub-name case, e.g.
+             ;; PL-BAR -> bar, pl-Foo -> Foo, pl-FOO -> FOO.
+             (inv   (%pcl-invert-case sname))
+             (bare  (if (and (>= (length inv) 3)
+                             (string= (subseq inv 0 3) "pl-"))
+                        (subseq inv 3)
                         sname)))
         (concatenate 'string (pcl-pkg-perl-name (symbol-package name)) "::" bare))
       (and name (format nil "~A" name))))
@@ -284,7 +299,7 @@
      (handler-bind ((warning #'muffle-warning))
        (defpackage ,name ,@(or options '((:use :cl :pcl)))))
      (let* ((pkg (find-package ,(string name)))
-            (isa-sym (when pkg (intern "@ISA" pkg))))
+            (isa-sym (when pkg (intern "@isa" pkg))))
        (when (and isa-sym (not (boundp isa-sym)))
          (proclaim (list 'special isa-sym))
          (setf (symbol-value isa-sym)
@@ -297,10 +312,55 @@
 ;;; lookups must follow the SAME rule, or e.g. a glob/symbolic-ref op on a
 ;;; multi-segment package would create/find a wrong-case empty "TRY::TINY"
 ;;; that shadows the real "Try::Tiny".
+;;; %pcl-invert-case: mirror the CL :invert readtable-case transform on a
+;;; string.  Generated code is read under (readtable-case :invert): an
+;;; all-lowercase token is upcased, an all-uppercase token is downcased, a
+;;; mixed-case token is preserved.  Every runtime site that builds a CL symbol
+;;; (or package name) from a Perl identifier *string* must apply this SAME
+;;; transform so it lands on the symbol the reader produced.  (Replaces the old
+;;; blanket string-upcase, which only agreed for all-lowercase names.)
+(defun %pcl-invert-case (s)
+  (let ((s (string s)) (has-upper nil) (has-lower nil))
+    (loop for c across s do
+          (cond ((upper-case-p c) (setf has-upper t))
+                ((lower-case-p c) (setf has-lower t))))
+    (cond ((and has-upper (not has-lower)) (string-downcase s))
+          ((and has-lower (not has-upper)) (string-upcase s))
+          (t s))))
+
 (defun perl-pkg-to-cl-pkg-name (pkg-str)
   (if (search "::" pkg-str)
       (string pkg-str)
-      (string-upcase pkg-str)))
+      (%pcl-invert-case pkg-str)))
+
+;;; %pcl-cl-sub-name: CL symbol-NAME for a Perl sub/method NAME, matching the
+;;; token `pl-<name>` the codegen emits and the :invert reader interns.  The
+;;; "pl-" prefix participates in the case-uniformity test, so it must be
+;;; lower-case and inverted together with NAME (NOT "PL-" + upcase NAME, which
+;;; mis-resolves any non-lowercase method such as DESTROY / AUTOLOAD / Foo).
+(defun %pcl-cl-sub-name (name)
+  (%pcl-invert-case (concatenate 'string "pl-" (string name))))
+
+;;; %pcl-loop-tag: catch/throw tag for a labeled loop or block.  PREFIX is the
+;;; literal "LAST"/"NEXT"/"REDO" (a string, so readtable-case never touches it);
+;;; LABEL is the loop label as a SYMBOL (compile-time, already :invert-read) or a
+;;; STRING (runtime dynamic — inverted to match the symbol form).  Both the
+;;; codegen-emitted catch and every runtime throw build the tag through here, so
+;;; they agree for ALL label cases (uniform-case like SKIP and mixed like MyLoop).
+(defun %pcl-loop-tag (prefix label)
+  (intern (concatenate 'string (string prefix) "-"
+                       (if (symbolp label)
+                           (symbol-name label)
+                           (%pcl-invert-case (string label))))
+          :pcl))
+
+;;; %pcl-uname-to-sub: CODE-slot sub symbol-NAME for a typeglob whose stored
+;;; (already :invert-cased) variable name is UNAME.  Glob var slots are
+;;; sigil+UNAME (correct, sigils carry no case), but the CODE slot is the
+;;; `pl-<name>` sub, whose prefix participates in the case fold — so recover the
+;;; original name (invert is its own inverse) and rebuild via %pcl-cl-sub-name.
+(defun %pcl-uname-to-sub (uname)
+  (%pcl-cl-sub-name (%pcl-invert-case uname)))
 
 ;;; A blessed HASH ref stores its class in the hash under the keyword key
 ;;; :__class__ (so it survives unboxing).  Real Perl hash keys are always
@@ -409,7 +469,7 @@
                 object-address looks-like-number
                 p-typeglob-p p-typeglob-name p-typeglob-package
                 p-regex-match-p p-regex-match-pattern p-regex-match-modifiers
-                clos-class-to-pkg perl-pkg-to-clos-class
+                perl-pkg-to-clos-class
                 p-get-coderef))
 (declaim (ftype (function (t t) t) p-can p-isa p-glob-slot))
 (declaim (ftype (function (&rest t) t)
@@ -1064,8 +1124,8 @@
   ;; use overload: cycle guard
   (when (member cls visited :test #'equal)
     (return-from %p-find-overload-mro nil))
-  (let* ((pkg      (find-package (string-upcase cls)))
-         (isa-sym  (when pkg (find-symbol "@ISA" pkg)))
+  (let* ((pkg      (find-package (%pcl-invert-case cls)))
+         (isa-sym  (when pkg (find-symbol "@isa" pkg)))
          (isa-val  (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym))))
     (when (and isa-val (vectorp isa-val))
       (let ((new-visited (cons cls visited)))
@@ -5224,13 +5284,13 @@
        (when (find #\Nul h) (return-from p-ensure-hashref
                               (make-hash-table :test 'equal)))
        (let* ((pos (search "::" h :from-end t))
-              (pkg-str (if pos (string-upcase (subseq h 0 pos)) nil))
+              (pkg-str (if pos (%pcl-invert-case (subseq h 0 pos)) nil))
               (var-str (if pos (subseq h (+ pos 2)) h))
               (pkg     (if pkg-str
                            (or (find-package pkg-str)
                                (make-package pkg-str :use '(:cl :pcl)))
                            *package*))
-              (sym-name (concatenate 'string "%" (string-upcase var-str)))
+              (sym-name (concatenate 'string "%" (%pcl-invert-case var-str)))
               (sym      (or (find-symbol sym-name pkg) (intern sym-name pkg))))
          (proclaim `(special ,sym))
          (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
@@ -5256,13 +5316,13 @@
          (return-from p-ensure-arrayref
            (make-array 0 :adjustable t :fill-pointer 0)))
        (let* ((pos (search "::" a :from-end t))
-              (pkg-str (if pos (string-upcase (subseq a 0 pos)) nil))
+              (pkg-str (if pos (%pcl-invert-case (subseq a 0 pos)) nil))
               (var-str (if pos (subseq a (+ pos 2)) a))
               (pkg     (if pkg-str
                            (or (find-package pkg-str)
                                (make-package pkg-str :use '(:cl :pcl)))
                            *package*))
-              (sym-name (concatenate 'string "@" (string-upcase var-str)))
+              (sym-name (concatenate 'string "@" (%pcl-invert-case var-str)))
               (sym      (or (find-symbol sym-name pkg) (intern sym-name pkg))))
          (proclaim `(special ,sym))
          (unless (and (boundp sym) (vectorp (symbol-value sym)))
@@ -5890,7 +5950,7 @@
   (let* ((pkg-str (if (or (string= (string-downcase pkg-name) "main")
                           (string= pkg-name ""))
                       "MAIN"
-                      (string-upcase pkg-name)))
+                      (%pcl-invert-case pkg-name)))
          (pkg (or (find-package pkg-str) (find-package pkg-name)))
          (h (make-hash-table :test 'equal)))
     (when pkg
@@ -5907,9 +5967,11 @@
                    (not (eq (gethash sym *p-declared-subs*) :stub)))
           (let* ((name (symbol-name sym))
                  (n (length name)))
-            ;; PL-xxx → Perl sub "xxx"
-            (when (and (>= n 4) (string= (subseq name 0 3) "PL-"))
-              (let ((perl-name (string-downcase (subseq name 3))))
+            ;; PL-xxx → Perl sub "xxx".  Reverse the :invert reader transform
+            ;; (invert is its own inverse) then strip the now-lowercase prefix,
+            ;; so a mixed/upper sub name keeps its case (Bar→Bar, QUUX→QUUX).
+            (when (and (>= n 4) (string-equal (subseq name 0 3) "PL-"))
+              (let ((perl-name (subseq (%pcl-invert-case name) 3)))
                 (setf (gethash perl-name h)
                       (make-p-box (symbol-function sym)))))))))
     (%p-stash-add-child-namespaces pkg-name h)
@@ -5947,8 +6009,8 @@
 ;;; and unlabeled (simple tagbody) variants.
 (defun make-loop-iteration-body (label body)
   (if label
-      (let ((next-tag (intern (format nil "NEXT-~A" label) :pcl))
-            (redo-tag (intern (format nil "REDO-~A" label) :pcl))
+      (let ((next-tag (%pcl-loop-tag "NEXT" label))
+            (redo-tag (%pcl-loop-tag "REDO" label))
             (iter-block (gensym "ITER")))
         `(catch ',next-tag
            (block ,iter-block
@@ -5971,7 +6033,7 @@ Labeled form adds (catch 'pcl::LAST-LABEL ...) so that 'last LABEL' works
 dynamically (across function calls), matching p-next/p-redo behavior."
   (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
     (let ((block-name (or label (gensym "WHILE")))
-          (last-tag (when label (intern (format nil "LAST-~A" label) :pcl))))
+          (last-tag (when label (%pcl-loop-tag "LAST" label))))
       `(block ,block-name
          ,(let ((inner `(block nil    ; for unlabeled p-last
                           (tagbody
@@ -5994,7 +6056,7 @@ Uses tagbody/go instead of loop — see p-while for rationale."
   (multiple-value-bind (label _continue body) (parse-loop-keys body-and-keys)
     (declare (ignore _continue))
     (let ((block-name (or label (gensym "FOR")))
-          (last-tag (when label (intern (format nil "LAST-~A" label) :pcl))))
+          (last-tag (when label (%pcl-loop-tag "LAST" label))))
       `(block ,block-name
          ,init
          ,(let ((inner `(block nil    ; for unlabeled p-last
@@ -6056,7 +6118,7 @@ Uses tagbody/go instead of loop — see p-while for rationale."
 Uses tagbody/go instead of loop -- see p-while for rationale."
   (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
     (let ((block-name (or label (gensym "FOREACH")))
-          (last-tag (when label (intern (format nil "LAST-~A" label) :pcl)))
+          (last-tag (when label (%pcl-loop-tag "LAST" label)))
           (vec (gensym))
           (raw (gensym))
           (i (gensym)))
@@ -6200,24 +6262,26 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
   "Perl last (break) - optionally with label to exit specific loop.
 Labeled form uses throw so it works across function calls (like p-next/p-redo)."
   (if label
-      `(throw ',(intern (format nil "LAST-~A" label) :pcl) nil)
+      `(throw ',(%pcl-loop-tag "LAST" label) nil)
       `(return nil)))
 
 (defun p-last-dynamic (label-name)
   "Dynamic (cross-function) labeled last: throws to LAST-<LABEL> catch tag.
 Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
-  (throw (intern (format nil "LAST-~A" label-name) :pcl) nil))
+  ;; The loop's catch tag is built from the label SYMBOL (LAST-<sym-name>), whose
+  ;; name is the :invert-read form; invert the runtime string label to match.
+  (throw (%pcl-loop-tag "LAST" label-name) nil))
 
 (defmacro p-next (&optional label)
   "Perl next (continue) - optionally with label to continue specific loop"
   (if label
-      `(throw ',(intern (format nil "NEXT-~A" label) :pcl) nil)
+      `(throw ',(%pcl-loop-tag "NEXT" label) nil)
       `(go :next)))
 
 (defmacro p-redo (&optional label)
   "Perl redo - optionally with label to redo specific loop"
   (if label
-      `(throw ',(intern (format nil "REDO-~A" label) :pcl) nil)
+      `(throw ',(%pcl-loop-tag "REDO" label) nil)
       `(go :redo)))
 
 (defun p-continue ()
@@ -6482,7 +6546,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((cell (assoc name *p-eval-lex-alist* :test #'string=)))
     (cond
       (cell (cdr cell))
-      (t (let ((sym (intern (string-upcase name) *package*))
+      (t (let ((sym (intern (%pcl-invert-case name) *package*))
                (sigil (char name 0)))
            (cond
              ((boundp sym) (symbol-value sym))
@@ -6896,8 +6960,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           (symbolp (car fh-form))
           (let ((name (symbol-name (car fh-form))))
             (and (> (length name) 3)
-                 (string= (subseq name 0 3) "PL-"))))
-     `',(intern (subseq (symbol-name (car fh-form)) 3)))
+                 (string-equal (subseq name 0 3) "PL-"))))
+     ;; Recover the bareword FH name: reverse the :invert read, then strip the
+     ;; now-lowercase pl- prefix (LOG stays LOG, a lowercase fh round-trips too).
+     `',(intern (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3)))
     ;; (let (BINDINGS) (pl-NAME)) — wantarray-wrapped bareword FH.
     ;; Sessions 162+ wrap scalar-context user sub calls in (let ((*wantarray* V)) ...).
     ;; Unwrap the let and extract the bare filehandle name.
@@ -6909,8 +6975,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                  (= (length body) 1)
                  (symbolp (car body))
                  (> (length (symbol-name (car body))) 3)
-                 (string= (subseq (symbol-name (car body)) 0 3) "PL-"))))
-     `',(intern (subseq (symbol-name (car (caddr fh-form))) 3)))
+                 (string-equal (subseq (symbol-name (car body)) 0 3) "PL-"))))
+     `',(intern (subseq (%pcl-invert-case (symbol-name (car (caddr fh-form)))) 3)))
     ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
     (t fh-form)))
 
@@ -8185,7 +8251,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Find CL package for a Perl module.
    Tries: uppercase name, exact-case name (for Foo::Bar packages)."
   (or (find-package (perl-pkg-to-cl-pkg-name module-name))
-      (find-package (string-upcase module-name))
+      (find-package (%pcl-invert-case module-name))
       (find-package module-name)))
 
 (defun p-perl-symbol-to-cl-name (sym-name)
@@ -8197,7 +8263,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (first-char (if (plusp (length name))
                          (char name 0)
                          nil)))
-    (string-upcase
+    (%pcl-invert-case
      (cond
        ((eql first-char #\$) name)
        ((eql first-char #\@) name)
@@ -8254,14 +8320,14 @@ buffer's fill-pointer; everything else falls back to file-length."
             (let ((tag (subseq name 1)))
               (cond
                 ((string= tag "DEFAULT")
-                 (let ((lst (%p-get-export-list pkg "@EXPORT")))
+                 (let ((lst (%p-get-export-list pkg "@export")))
                    (when lst (setf result (append result lst)))))
                 ((string= tag "ALL")
-                 (let ((lst (%p-get-export-list pkg "@EXPORT_OK")))
+                 (let ((lst (%p-get-export-list pkg "@export_ok")))
                    (when lst (setf result (append result lst)))))
                 (t
                  ;; Look up %EXPORT_TAGS{tag}
-                 (let ((tags-sym (find-symbol "%EXPORT_TAGS" pkg)))
+                 (let ((tags-sym (find-symbol "%export_tags" pkg)))
                    (when (and tags-sym (boundp tags-sym))
                      (let* ((tags-hash (symbol-value tags-sym))
                             (tag-val (when (hash-table-p tags-hash)
@@ -8279,7 +8345,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((pkg (p-find-module-package module-name)))
     (when pkg
       (let* ((raw-imports (or specific-imports
-                              (%p-get-export-list pkg "@EXPORT")))
+                              (%p-get-export-list pkg "@export")))
              (imports (if specific-imports
                           (%p-expand-import-tags raw-imports pkg)
                           raw-imports)))
@@ -8797,7 +8863,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
          (cl-pkg (find-package (perl-pkg-to-cl-pkg-name perl-pkg))))
     (when cl-pkg
-      (find-symbol (concatenate 'string "PL-" (string-upcase bare-name)) cl-pkg))))
+      (find-symbol (%pcl-cl-sub-name bare-name) cl-pkg))))
 
 (defun p-funcall-ref (ref &rest args)
   "Call a code reference or a symbolic sub name (no-strict-refs semantics)."
@@ -8816,10 +8882,9 @@ buffer's fill-pointer; everything else falls back to file-length."
                              (let ((cpkg (package-name *package*)))
                                (if (string= cpkg "MAIN") "main" cpkg))))
                (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
-               (cl-pkg (find-package (string-upcase perl-pkg)))
+               (cl-pkg (find-package (%pcl-invert-case perl-pkg)))
                (sym (when cl-pkg
-                      (find-symbol (concatenate 'string "PL-"
-                                                (string-upcase bare-name))
+                      (find-symbol (%pcl-cl-sub-name bare-name)
                                    cl-pkg)))
                (fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
           (if fn-val
@@ -9003,7 +9068,7 @@ buffer's fill-pointer; everything else falls back to file-length."
      (let ((pkg *package*))
        (lambda (&rest args)
          (declare (ignore args))
-         (let ((al (intern "PL-AUTOLOAD" pkg)))
+         (let ((al (intern (%pcl-cl-sub-name "AUTOLOAD") pkg)))
            (if (fboundp al)
                (funcall (symbol-function al))
                (error 'undefined-function :name sym))))))))
@@ -9028,14 +9093,14 @@ buffer's fill-pointer; everything else falls back to file-length."
              ;; multi-seg name, missed the |Data::Dump| package, and returned nil
              ;; (so \&{"Data::Dump::pp"} came back as a SCALAR ref to nil).
              (let* ((pkg-str (perl-pkg-to-cl-pkg-name (subseq s 0 last-sep)))
-                    (func-str (string-upcase (subseq s (+ last-sep 2))))
-                    (cl-func-name (concatenate 'string "PL-" func-str))
+                    (func-str (subseq s (+ last-sep 2)))
+                    (cl-func-name (%pcl-cl-sub-name func-str))
                     (pkg (find-package pkg-str)))
                (when pkg
                  (let ((sym (intern cl-func-name pkg)))
                    (and (fboundp sym) (symbol-function sym)))))
              ;; Unqualified: "name" -> PL-NAME in current package
-             (let* ((cl-func-name (concatenate 'string "PL-" (string-upcase s)))
+             (let* ((cl-func-name (%pcl-cl-sub-name s))
                     (sym (intern cl-func-name *package*)))
                (and (fboundp sym) (symbol-function sym)))))))))
 
@@ -9118,7 +9183,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
          (pkg (if pkg-str (find-package pkg-str) *package*)))
     (when pkg
-      (let ((sym (find-symbol (concatenate 'string "$" (string-upcase var-str)) pkg)))
+      (let ((sym (find-symbol (concatenate 'string "$" (%pcl-invert-case var-str)) pkg)))
         (when (and sym (boundp sym))
           (let ((v (symbol-value sym)))
             (when (p-box-p v) v)))))))
@@ -9136,7 +9201,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (or (find-package pkg-str)
                       (make-package pkg-str :use '(:cl :pcl)))
                   *package*)))
-    (let* ((sym-name (concatenate 'string "$" (string-upcase var-str)))
+    (let* ((sym-name (concatenate 'string "$" (%pcl-invert-case var-str)))
            (sym (or (find-symbol sym-name pkg)
                     (intern sym-name pkg))))
       (proclaim `(special ,sym))
@@ -9160,7 +9225,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (or (find-package pkg-str)
                       (make-package pkg-str :use '(:cl :pcl)))
                   *package*))
-         (sym-name (concatenate 'string "@" (string-upcase var-str)))
+         (sym-name (concatenate 'string "@" (%pcl-invert-case var-str)))
          (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
     (proclaim `(special ,sym))
     (unless (and (boundp sym)
@@ -9185,7 +9250,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (or (find-package pkg-str)
                       (make-package pkg-str :use '(:cl :pcl)))
                   *package*))
-         (sym-name (concatenate 'string "%" (string-upcase var-str)))
+         (sym-name (concatenate 'string "%" (%pcl-invert-case var-str)))
          (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
     (proclaim `(special ,sym))
     (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
@@ -9491,7 +9556,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((pkg (or (%pcl-find-package pkg-str)
                  ;; Package may not exist yet; create it lazily
                  (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
-    (make-p-typeglob pkg (string-upcase name-str))))
+    (make-p-typeglob pkg (%pcl-invert-case name-str))))
 
 (defun %p-glob-assign-slots (pkg uname rhs)
   "Assign RHS to the appropriate slot of typeglob (PKG package-object, UNAME
@@ -9506,7 +9571,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
       ;; *foo = \&sub or *foo = sub{} — CODE slot
       ((functionp inner)
-       (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
+       (setf (fdefinition (intern (%pcl-uname-to-sub uname) pkg))
              inner))
 
       ;; *foo = \$scalar — SCALAR slot (inner is the p-box = the variable itself)
@@ -9526,7 +9591,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
       ;; *foo = 'name' — symbolic alias: copy slots from *pkg::name
       ((stringp inner)
-       (let ((src-name (string-upcase inner)))
+       (let ((src-name (%pcl-invert-case inner)))
          (p-glob-copy pkg uname (make-p-typeglob pkg src-name))))
 
       ;; *foo = undef — no-op
@@ -9534,14 +9599,14 @@ buffer's fill-pointer; everything else falls back to file-length."
 
       ;; Fallback: try as CODE if rhs is directly a function
       ((functionp rhs)
-       (setf (fdefinition (intern (concatenate 'string "PL-" uname) pkg))
+       (setf (fdefinition (intern (%pcl-uname-to-sub uname) pkg))
              rhs)))))
 
 (defun p-glob-assign (pkg-str name-str rhs)
   "Assign RHS to the appropriate slot of typeglob *pkg::name (by name strings)."
   (let ((pkg   (or (%pcl-find-package pkg-str)
                    (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
-        (uname (string-upcase name-str)))
+        (uname (%pcl-invert-case name-str)))
     (%p-glob-assign-slots pkg uname rhs)))
 
 (defun p-glob-assign-dynamic (name-box rhs)
@@ -9572,16 +9637,16 @@ buffer's fill-pointer; everything else falls back to file-length."
                (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
                (pkg (or (%pcl-find-package pkg-str)
                         (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
-          (make-p-typeglob pkg (string-upcase bare-str))))))
+          (make-p-typeglob pkg (%pcl-invert-case bare-str))))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
   "Copy all slots from src-glob into dst (pkg, uname)."
   (let ((sp (p-typeglob-package src-glob))
         (sn (p-typeglob-name src-glob)))
     ;; CODE
-    (let ((src-sym (intern (concatenate 'string "PL-" sn) sp)))
+    (let ((src-sym (intern (%pcl-uname-to-sub sn) sp)))
       (when (fboundp src-sym)
-        (setf (fdefinition (intern (concatenate 'string "PL-" dst-uname) dst-pkg))
+        (setf (fdefinition (intern (%pcl-uname-to-sub dst-uname) dst-pkg))
               (fdefinition src-sym))))
     ;; SCALAR
     (let ((src-sym (intern (concatenate 'string "$" sn) sp)))
@@ -9601,10 +9666,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-glob-undef-name (pkg-str name-str)
   "undef *foo — clear all slots."
-  (let* ((pkg   (find-package (string-upcase pkg-str)))
-         (uname (string-upcase name-str)))
+  (let* ((pkg   (find-package (%pcl-invert-case pkg-str)))
+         (uname (%pcl-invert-case name-str)))
     (when pkg
-      (let ((sym (intern (concatenate 'string "PL-" uname) pkg)))
+      (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
         (when (fboundp sym) (fmakunbound sym)))
       (dolist (prefix (list "$" "@" "%"))
         (let ((sym (intern (concatenate 'string prefix uname) pkg)))
@@ -9625,8 +9690,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (flet ((find-sym (prefix)
              ;; Use find-symbol (not intern) to locate inherited symbols,
              ;; e.g. @_ is pcl::@_ inherited into main — intern would create main::@_.
-             (or (find-symbol (concatenate 'string prefix uname) pkg)
-                 (intern  (concatenate 'string prefix uname) pkg))))
+             (let ((nm (if (string= prefix "PL-") (%pcl-uname-to-sub uname) (concatenate 'string prefix uname)))) (or (find-symbol nm pkg) (intern nm pkg)))))
       (cond
         ((string= slot-s "CODE")
          (let ((sym (find-sym "PL-")))
@@ -9647,52 +9711,71 @@ buffer's fill-pointer; everything else falls back to file-length."
         ((string= slot-s "GLOB")    glob)
         (t *p-undef*)))))
 
+(defun %p-glob-syms (pkg-str name-str)
+  "Resolve the four slot symbols of typeglob *PKG::NAME (creating the package if
+   needed).  Returns (values code-sym scalar-sym array-sym hash-sym)."
+  (let* ((pkg   (or (%pcl-find-package pkg-str)
+                    (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
+         (uname (%pcl-invert-case name-str)))
+    (values (intern (%pcl-uname-to-sub uname) pkg)
+            (intern (concatenate 'string "$"   uname) pkg)
+            (intern (concatenate 'string "@"   uname) pkg)
+            (intern (concatenate 'string "%"   uname) pkg))))
+
+(defun %p-glob-save (code-sym scalar-sym array-sym hash-sym)
+  "Snapshot the four glob slots for a later local restore.  Returns an opaque
+   vector of had-bound flags + saved values."
+  (vector (fboundp code-sym)   (when (fboundp code-sym)   (fdefinition code-sym))
+          (boundp scalar-sym)  (when (boundp scalar-sym)  (symbol-value scalar-sym))
+          (boundp array-sym)   (when (boundp array-sym)   (symbol-value array-sym))
+          (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))))
+
+(defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym)
+  "Reset the four glob slots to fresh empties (Perl: local *foo starts fresh)."
+  (when (fboundp code-sym) (fmakunbound code-sym))
+  (setf (symbol-value scalar-sym) (make-p-box *p-undef*))
+  (setf (symbol-value array-sym)  (make-array 0 :adjustable t :fill-pointer 0))
+  (setf (symbol-value hash-sym)   (make-hash-table :test 'equal)))
+
+(defun %p-glob-restore (saved code-sym scalar-sym array-sym hash-sym)
+  "Restore the four glob slots from a %p-glob-save snapshot."
+  (if (aref saved 0) (setf (fdefinition code-sym) (aref saved 1))
+      (when (fboundp code-sym) (fmakunbound code-sym)))
+  (if (aref saved 2) (setf (symbol-value scalar-sym) (aref saved 3)) (makunbound scalar-sym))
+  (if (aref saved 4) (setf (symbol-value array-sym)  (aref saved 5)) (makunbound array-sym))
+  (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym)))
+
 (defmacro p-local-glob (pkg-str name-str &body body)
   "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
    execute body, restore on exit."
-  (let ((pkg-var        (gensym "PKG"))
-        (uname-var      (gensym "UNAME"))
-        (saved-had-code (gensym "HAD-CODE"))
-        (saved-code     (gensym "SAVED-CODE"))
-        (saved-scalar   (gensym "SAVED-SCALAR"))
-        (saved-array    (gensym "SAVED-ARRAY"))
-        (saved-hash     (gensym "SAVED-HASH"))
-        (had-scalar     (gensym "HAD-SCALAR"))
-        (had-array      (gensym "HAD-ARRAY"))
-        (had-hash       (gensym "HAD-HASH")))
-    `(let* ((,pkg-var   (or (%pcl-find-package ,pkg-str)
-                            (make-package (perl-pkg-to-cl-pkg-name ,pkg-str) :use '(:cl :pcl))))
-            (,uname-var (string-upcase ,name-str))
-            (code-sym   (intern (concatenate 'string "PL-"  ,uname-var) ,pkg-var))
-            (scalar-sym (intern (concatenate 'string "$"    ,uname-var) ,pkg-var))
-            (array-sym  (intern (concatenate 'string "@"    ,uname-var) ,pkg-var))
-            (hash-sym   (intern (concatenate 'string "%"    ,uname-var) ,pkg-var))
-            (,saved-had-code (fboundp code-sym))
-            (,saved-code     (when ,saved-had-code (fdefinition code-sym)))
-            (,had-scalar     (boundp scalar-sym))
-            (,saved-scalar   (when ,had-scalar (symbol-value scalar-sym)))
-            (,had-array      (boundp array-sym))
-            (,saved-array    (when ,had-array  (symbol-value array-sym)))
-            (,had-hash       (boundp hash-sym))
-            (,saved-hash     (when ,had-hash   (symbol-value hash-sym))))
-       ;; Clear all slots so local *foo starts fresh (Perl semantics)
-       (when ,saved-had-code (fmakunbound code-sym))
-       (setf (symbol-value scalar-sym) (make-p-box *p-undef*))
-       (setf (symbol-value array-sym)  (make-array 0 :adjustable t :fill-pointer 0))
-       (setf (symbol-value hash-sym)   (make-hash-table :test 'equal))
-       (unwind-protect (progn ,@body)
-         (if ,saved-had-code
-             (setf (fdefinition code-sym) ,saved-code)
-             (when (fboundp code-sym) (fmakunbound code-sym)))
-         (if ,had-scalar
-             (setf (symbol-value scalar-sym) ,saved-scalar)
-             (makunbound scalar-sym))
-         (if ,had-array
-             (setf (symbol-value array-sym) ,saved-array)
-             (makunbound array-sym))
-         (if ,had-hash
-             (setf (symbol-value hash-sym) ,saved-hash)
-             (makunbound hash-sym))))))
+  (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
+        (sv (gensym "SAVED")))
+    `(multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
+       (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
+         (%p-glob-clear ,cs ,ss ,as ,hs)
+         (unwind-protect (progn ,@body)
+           (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
+
+(defmacro p-local-glob-if (cond-form pkg-str name-str rhs-form &body body)
+  "The deprecated conditional-local idiom `local *foo = RHS if COND`
+   (e.g. Text::ParseWords::old_shellwords: `local *_ = \\join('',@_) if @_`).
+   Perl does NOT localize at all when COND is false (the rest of the scope sees
+   the outer slots); when COND is true it localizes+assigns for the rest of the
+   scope.  We always save+restore (a no-op when COND is false, since the slots
+   are untouched), but only clear+assign when COND is true.  RHS-FORM is
+   evaluated while the slots are still intact — so an RHS that reads @_ (which
+   *foo's localization would otherwise clear) sees the pre-local @_.  COND-FORM
+   is already a CL boolean (the codegen wraps it in p-true-p / its negation)."
+  (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
+        (sv (gensym "SAVED")) (rv (gensym "RHS")))
+    `(multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
+       (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
+         (when ,cond-form
+           (let ((,rv ,rhs-form))
+             (%p-glob-clear ,cs ,ss ,as ,hs)
+             (p-glob-assign ,pkg-str ,name-str ,rv)))
+         (unwind-protect (progn ,@body)
+           (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
 
 ;;; Helper functions for p-local-hash-elem macros.
 ;;; Delegating to functions keeps macro expansions compact, preventing heap
@@ -9944,8 +10027,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl exists &funcname — true if sub has been declared or defined."
   (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
-                (find-symbol (concatenate 'string "PL-"
-                                          (string-upcase name-str))
+                (find-symbol (%pcl-cl-sub-name name-str)
                              pkg))))
     (if (and sym
              (or (gethash sym *p-declared-subs*)
@@ -9957,8 +10039,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl defined &funcname — true only if sub has an actual body (not a stub)."
   (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
-                (find-symbol (concatenate 'string "PL-"
-                                          (string-upcase name-str))
+                (find-symbol (%pcl-cl-sub-name name-str)
                              pkg))))
     (if (and sym
              (eq (gethash sym *p-declared-subs*) :defined))
@@ -9969,8 +10050,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl undef &funcname — remove sub body; sub still 'exists' afterward."
   (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
-                (find-symbol (concatenate 'string "PL-"
-                                          (string-upcase name-str))
+                (find-symbol (%pcl-cl-sub-name name-str)
                              pkg))))
     (when sym
       (when (fboundp sym) (fmakunbound sym))
@@ -10255,7 +10335,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    In Perl, Foo->bar() checks if sub Foo exists first:
    - If pl-Foo is a user-defined function in current package → call it, return result (object)
    - Otherwise → return the string as a class name"
-  (let* ((func-name (format nil "PL-~A" (string-upcase name)))
+  (let* ((func-name (%pcl-cl-sub-name name))
          ;; Look in current package for user-defined sub, NOT in :pcl (which has built-ins)
          (func-sym (find-symbol func-name *package*)))
     (if (and func-sym (eq (symbol-package func-sym) *package*) (fboundp func-sym))
@@ -10269,7 +10349,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    Tries upcase first (single-word packages defined via :Foo keyword), then
    exact case (multi-level packages defined via :|Foo::Bar| notation)."
   (or (find-package (perl-pkg-to-cl-pkg-name pkg-str))
-      (find-package (string-upcase pkg-str))
+      (find-package (%pcl-invert-case pkg-str))
       (find-package pkg-str)))
 
 (defun p-method-call (obj method &rest args)
@@ -10377,7 +10457,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                  ((string-equal meth-part "isa")  (apply #'p-isa  resolved-obj args))
                  ((string-equal meth-part "DOES") (apply #'p-isa  resolved-obj args))
                  (t (when target-pkg
-                      (let ((fn (find-symbol (format nil "PL-~A" (string-upcase meth-part))
+                      (let ((fn (find-symbol (%pcl-cl-sub-name meth-part)
                                              target-pkg)))
                         (when (and fn (fboundp fn))
                           (return-from p-method-call (apply fn resolved-obj args)))))
@@ -10397,7 +10477,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (p-die (format nil "CORE::~A is not a known built-in" meth-part))))))
             ;; General PKG::method — look up pl-METHOD in that package
             (target-pkg
-             (let ((fn (find-symbol (format nil "PL-~A" (string-upcase meth-part))
+             (let ((fn (find-symbol (%pcl-cl-sub-name meth-part)
                                     target-pkg)))
                (when (and fn (fboundp fn))
                  (return-from p-method-call (apply fn resolved-obj args)))))
@@ -10411,7 +10491,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; and runtime push/assignment, which CLOS cannot see).  CLOS is a fallback for
     ;; classes that have never had @ISA set (e.g. leaf classes with no parents).
     (let* ((pkg (%pcl-find-package class-name))
-           (isa-sym (when pkg (find-symbol "@ISA" pkg)))
+           (isa-sym (when pkg (find-symbol "@isa" pkg)))
            (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
            (isa-non-empty (and isa-val
                                (vectorp isa-val) (not (stringp isa-val))
@@ -10426,12 +10506,13 @@ buffer's fill-pointer; everything else falls back to file-length."
           (let ((mro (progn (sb-mop:finalize-inheritance clos-class)
                             (sb-mop:class-precedence-list clos-class))))
             (dolist (cls mro)
-              (let* ((cls-sym-name (symbol-name (class-name cls)))
-                     ;; Convert CLOS class name back to CL package name
-                     (pkg-name (clos-class-to-pkg cls-sym-name))
+              (let* (;; Recover the user package directly from the CLOS class
+                     ;; symbol's home package — case-safe under :invert (the
+                     ;; lowercased plc- class name cannot round-trip case).
+                     (pkg-name (package-name (symbol-package (class-name cls))))
                      (pkg (find-package pkg-name)))
                 (when pkg
-                  (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) pkg)))
+                  (let ((fn (find-symbol (%pcl-cl-sub-name method-name) pkg)))
                     ;; Only dispatch to methods LOCAL to this class package.
                     ;; Inherited symbols (e.g. pcl:p-push) must be ignored so
                     ;; that a class without a PUSH method doesn't accidentally
@@ -10446,11 +10527,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                            (return-from find-in-u nil))
                          (let* ((pkg2 (%pcl-find-package cls-str))
                                 (fn2 (when pkg2
-                                       (find-symbol (format nil "PL-~A" (string-upcase method-name))
+                                       (find-symbol (%pcl-cl-sub-name method-name)
                                                     pkg2))))
                            (if (and fn2 (eq (symbol-package fn2) pkg2) (fboundp fn2))
                                (return-from p-method-call (apply fn2 resolved-obj args))
-                               (let* ((isa2 (when pkg2 (find-symbol "@ISA" pkg2)))
+                               (let* ((isa2 (when pkg2 (find-symbol "@isa" pkg2)))
                                       (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
                                  (when (and isa2v (vectorp isa2v))
                                    (loop for p across isa2v
@@ -10486,13 +10567,12 @@ buffer's fill-pointer; everything else falls back to file-length."
                            (return-from p-method-call (apply fn resolved-obj args)))))
                      (let* ((pkg (%pcl-find-package cls-str))
                             (fn  (when pkg
-                                   (find-symbol (string-upcase
-                                                 (format nil "PL-~A" method-name))
+                                   (find-symbol (%pcl-cl-sub-name method-name)
                                                 pkg))))
                        (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                            (return-from p-method-call (apply fn resolved-obj args))
                            ;; Recurse through @ISA
-                           (let* ((isa-sym (when pkg (find-symbol "@ISA" pkg)))
+                           (let* ((isa-sym (when pkg (find-symbol "@isa" pkg)))
                                   (isa-val (when (and isa-sym (boundp isa-sym))
                                              (symbol-value isa-sym))))
                              (when (and isa-val (vectorp isa-val))
@@ -10539,11 +10619,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    Returns (cons pkg-name-str fn) or NIL."
   (labels ((walk (cls visited)
              (when (member cls visited :test #'equal) (return-from walk nil))
-             (let* ((pkg (find-package (string-upcase cls)))
-                    (al (when pkg (find-symbol "PL-AUTOLOAD" pkg))))
+             (let* ((pkg (find-package (%pcl-invert-case cls)))
+                    (al (when pkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") pkg))))
                (if (and al (eq (symbol-package al) pkg) (fboundp al))
                    (cons cls al)
-                   (let* ((isa-sym (when pkg (find-symbol "@ISA" pkg)))
+                   (let* ((isa-sym (when pkg (find-symbol "@isa" pkg)))
                           (isa-val (when (and isa-sym (boundp isa-sym))
                                      (symbol-value isa-sym))))
                      (when (and isa-val (vectorp isa-val))
@@ -10554,8 +10634,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %pcl-set-autoload-var (pkg-name full-method-name)
   "Set $PKG::AUTOLOAD to FULL-METHOD-NAME in package PKG-NAME."
-  (let* ((pkg (find-package (string-upcase pkg-name)))
-         (sym (when pkg (intern "$AUTOLOAD" pkg))))
+  (let* ((pkg (find-package (%pcl-invert-case pkg-name)))
+         (sym (when pkg (intern "$autoload" pkg))))
     (when sym
       (unless (boundp sym) (setf (symbol-value sym) (make-p-box nil)))
       (unless (p-box-p (symbol-value sym))
@@ -10582,22 +10662,6 @@ buffer's fill-pointer; everything else falls back to file-length."
    MUST stay in lock-step with _pkg_to_clos_class in Pl/Parser.pm."
   (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
 
-(defun clos-class-to-pkg (cls-name)
-  "Convert CLOS class name back to CL package name for lookup.
-   plc-foo-bar -> FOO-BAR.  Strips the plc- class prefix first (see
-   perl-pkg-to-clos-class), then maps - to the package name."
-  (let* ((stripped (if (and (>= (length cls-name) 4)
-                            (string-equal (subseq cls-name 0 4) "plc-"))
-                       (subseq cls-name 4)
-                       cls-name))
-         (upcase-name (string-upcase stripped))
-         ;; Try direct mapping first (for simple package names)
-         (pkg (find-package upcase-name)))
-    (if pkg
-        upcase-name
-        ;; Try converting - to :: for nested packages
-        (substitute #\: #\- upcase-name))))
-
 ;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
 (defun %pcl-super-indirect (method cur-pkg inv-args-vec)
   "Handle SUPER::method{@array} indirect-object syntax.
@@ -10623,7 +10687,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; raw upcase lookup silently misses them and the SUPER walk dead-ends
          ;; (Moo: Animal's SUPER::new -> Moo::Object::new was "not found").
          (pkg (%pcl-find-package current-class))
-         (isa-sym (when pkg (find-symbol "@ISA" pkg)))
+         (isa-sym (when pkg (find-symbol "@isa" pkg)))
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
          (isa-non-empty (and isa-val (vectorp isa-val) (> (length isa-val) 0)))
          (clos-class (when (and pkg (not isa-non-empty))
@@ -10635,11 +10699,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                           (sb-mop:class-precedence-list clos-class)))
               (parent-mro (cdr mro)))
          (dolist (cls parent-mro)
-           (let* ((cls-sym-name (symbol-name (class-name cls)))
-                  (pkg-name (clos-class-to-pkg cls-sym-name))
+           (let* ((pkg-name (package-name (symbol-package (class-name cls))))
                   (cpkg (find-package pkg-name)))
              (when cpkg
-               (let ((fn (find-symbol (format nil "PL-~A" (string-upcase method-name)) cpkg)))
+               (let ((fn (find-symbol (%pcl-cl-sub-name method-name) cpkg)))
                  (when (and fn (fboundp fn))
                    (return-from p-super-call (apply fn obj args)))))))
          (error "No SUPER::~A found from ~A" method-name current-class)))
@@ -10649,11 +10712,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (unless (member cls-str visited :test #'equal)
                     (let* ((cpkg (%pcl-find-package cls-str))
                            (fn (when cpkg
-                                 (find-symbol (string-upcase (format nil "PL-~A" method-name))
+                                 (find-symbol (%pcl-cl-sub-name method-name)
                                               cpkg))))
                       (if (and fn (eq (symbol-package fn) cpkg) (fboundp fn))
                           (return-from p-super-call (apply fn obj args))
-                          (let* ((isa2 (when cpkg (find-symbol "@ISA" cpkg)))
+                          (let* ((isa2 (when cpkg (find-symbol "@isa" cpkg)))
                                  (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
                             (when (and isa2v (vectorp isa2v))
                               (loop for p across isa2v
@@ -10664,12 +10727,12 @@ buffer's fill-pointer; everything else falls back to file-length."
          (labels ((find-al (cls-str visited)
                     (unless (member cls-str visited :test #'equal)
                       (let* ((cpkg (%pcl-find-package cls-str))
-                             (al (when cpkg (find-symbol "PL-AUTOLOAD" cpkg))))
+                             (al (when cpkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") cpkg))))
                         (if (and al (eq (symbol-package al) cpkg) (fboundp al))
                             (progn
                               (%pcl-set-autoload-var cls-str method-name)
                               (return-from p-super-call (apply al obj args)))
-                            (let* ((isa2 (when cpkg (find-symbol "@ISA" cpkg)))
+                            (let* ((isa2 (when cpkg (find-symbol "@isa" cpkg)))
                                    (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
                               (when (and isa2v (vectorp isa2v))
                                 (loop for p across isa2v
@@ -10695,7 +10758,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                            (member cls out :test #'equal))
                  (setf out (nconc out (list cls)))
                  (let* ((pkg (%pcl-find-package cls))
-                        (isa-sym (when pkg (find-symbol "@ISA" pkg)))
+                        (isa-sym (when pkg (find-symbol "@isa" pkg)))
                         (isa-val (when (and isa-sym (boundp isa-sym))
                                    (symbol-value isa-sym))))
                    (when (and isa-val (vectorp isa-val) (not (stringp isa-val)))
@@ -10718,7 +10781,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (return-from p-can nil))
     (dolist (cls (%pcl-isa-ancestry class-name) nil)
       (let* ((pkg (%pcl-find-package cls))
-             (fn  (when pkg (find-symbol (format nil "PL-~A" (string-upcase method-str)) pkg))))
+             (fn  (when pkg (find-symbol (%pcl-cl-sub-name method-str) pkg))))
         (when (and fn (eq (symbol-package fn) pkg) (fboundp fn)
                    ;; A forward-declaration STUB is fboundp but not a real method
                    ;; (Perl wouldn't have compiled it yet) — ignore it, matching
@@ -10737,7 +10800,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
     ;; If the object's class defines a custom isa() method (PL-ISA), call it.
     ;; Perl's infix isa operator delegates to ->isa if the class overrides it.
-    (let* ((pkg (find-package (string-upcase obj-class)))
+    (let* ((pkg (find-package (%pcl-invert-case obj-class)))
            (custom-isa (when pkg (find-symbol "PL-ISA" pkg))))
       (when (and custom-isa (eq (symbol-package custom-isa) pkg) (fboundp custom-isa))
         (return-from p-isa (funcall custom-isa invocant check-class))))
@@ -11151,6 +11214,59 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (when (and rs re)
                      (setf (gethash name %+) (subseq str rs re)))))))))
 
+(defun %pcl-strip-gpos (pattern)
+  "Remove \\G anchors from PATTERN.  cl-ppcre has no \\G; \\G is zero-width and
+   means 'match at the current pos', so PCL drops it and anchors the whole match
+   at the /g start position instead (see the anchored-g handling in
+   do-regex-match).  This also catches the qr// form `(?^:\\G(...))` that
+   Text::Balanced and friends produce, where \\G is not pattern-leading.  Escaped
+   backslashes (\\\\) and char-class contents are left untouched.  Returns the
+   stripped pattern; a shorter result signals that a \\G was present."
+  (let ((out (make-string-output-stream))
+        (in-class nil) (i 0) (n (length pattern)))
+    (loop while (< i n) do
+          (let ((c (char pattern i)))
+            (cond
+              ((char= c #\\)
+               (if (and (not in-class) (< (1+ i) n) (char= (char pattern (1+ i)) #\G))
+                   (incf i 2)                       ; drop \G
+                   (progn                            ; copy the escape pair verbatim
+                     (write-char c out)
+                     (when (< (1+ i) n) (write-char (char pattern (1+ i)) out))
+                     (incf i 2))))
+              ((char= c #\[) (setf in-class t) (write-char c out) (incf i))
+              ((char= c #\]) (setf in-class nil) (write-char c out) (incf i))
+              (t (write-char c out) (incf i)))))
+    (get-output-stream-string out)))
+
+(defun %pcl-scan-anchored-list (scanner str reg-names start)
+  "Emulate /\\G.../g in list context: collect contiguous matches starting at
+   START, stopping at the first position where the pattern does not match exactly
+   there.  Returns an adjustable vector of capture strings (whole matches when the
+   pattern has no captures) and sets $1.., %+, $& from the LAST match."
+  (let ((items nil) (pos start) (slen (length str))
+        (last-rs nil) (last-re nil) (last-ms nil) (last-me nil) (any nil))
+    (loop
+     (multiple-value-bind (ms me rs re) (cl-ppcre:scan scanner str :start pos)
+       (unless (and ms (= ms pos)) (return))
+       (setf any t last-rs rs last-re re last-ms ms last-me me)
+       (if (> (length rs) 0)
+           (dotimes (i (length rs))
+             (push (if (and (aref rs i) (aref re i))
+                       (subseq str (aref rs i) (aref re i)) nil)
+                   items))
+           (push (subseq str ms me) items))
+       (setf pos (if (= me ms) (1+ me) me))
+       (when (> pos slen) (return))))
+    (let* ((lst (nreverse items))
+           (result (make-array (length lst) :adjustable t :fill-pointer t)))
+      (loop for it in lst for i from 0 do (setf (aref result i) it))
+      (when any
+        (clear-capture-groups)
+        (set-capture-groups str last-rs last-re reg-names)
+        (set-match-vars str last-ms last-me last-rs last-re))
+      result)))
+
 (defun do-regex-match (string op)
   "Perform regex match.
    In scalar context: return t if matched, nil otherwise.
@@ -11161,7 +11277,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    /g in list context: returns all matches at once (no pos tracking).
    /gc: keeps pos on failure instead of resetting it."
   (let* ((str (to-string string))   ; to-string handles unboxing via box-sv (preserves class)
-         (pattern (p-regex-match-pattern op))
+         (raw-pattern (p-regex-match-pattern op))
+         ;; \G anchors the match at the current pos.  cl-ppcre has no \G, so we
+         ;; strip it and require the match to START at the /g position.  A shorter
+         ;; stripped pattern means a \G was present (anchored).
+         (pattern (%pcl-strip-gpos raw-pattern))
+         (anchored-g (< (length pattern) (length raw-pattern)))
          (modifiers (p-regex-match-modifiers op))
          (options (build-ppcre-options modifiers))
          (global-p (getf modifiers :g))
@@ -11173,6 +11294,16 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; $1..$9 are only cleared/set on successful matches.
           (clrhash %+)
           (cond
+            ;; /\G.../g in list context: contiguous anchored matches from pos
+            ((and global-p (eq *wantarray* t) anchored-g)
+             (prog1
+                 (%pcl-scan-anchored-list scanner str reg-names
+                                          (or (gethash string *p-match-pos*) 0))
+               ;; Perl resets pos() after a list-context /g match exhausts.  This
+               ;; path STARTS from pos, so leaving a stale pos would make a
+               ;; `while (pos < len) { @m = /\G.../g }` loop never terminate;
+               ;; clearing it matches Perl (pos() becomes undef).
+               (remhash string *p-match-pos*)))
             ;; /g in list context: return all matches at once, no pos tracking
             ;; :void is NOT list context — only (eq *wantarray* t) is list context
             ((and global-p (eq *wantarray* t))
@@ -11200,6 +11331,9 @@ buffer's fill-pointer; everything else falls back to file-length."
              (let ((start (or (gethash string *p-match-pos*) 0)))
                (multiple-value-bind (match-start match-end reg-starts reg-ends)
                    (cl-ppcre:scan scanner str :start start)
+                 ;; \G: the match must begin exactly at the start position.
+                 (when (and anchored-g match-start (/= match-start start))
+                   (setf match-start nil))
                  (if match-start
                      (progn
                        (setf (gethash string *p-match-pos*) match-end)
@@ -11211,27 +11345,30 @@ buffer's fill-pointer; everything else falls back to file-length."
                        (unless cont-p
                          (remhash string *p-match-pos*))
                        nil)))))
-            ;; No /g: single match
+            ;; No /g: single match.  With \G, anchor at the current pos.
             (t
-             (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                 (cl-ppcre:scan scanner str)
-               (when match-start
-                 (clear-capture-groups)
-                 (set-capture-groups str reg-starts reg-ends reg-names)
-                 (set-match-vars str match-start match-end reg-starts reg-ends)
-                 (if (eq *wantarray* t)
-                     (let* ((num-groups (length reg-starts))
-                            (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
-                       (if (zerop num-groups)
-                           ;; No capture groups: Perl returns (1) in list context on success
-                           (setf (aref captures 0) 1)
-                           (dotimes (i num-groups)
-                             (setf (aref captures i)
-                                   (if (and (aref reg-starts i) (aref reg-ends i))
-                                       (subseq str (aref reg-starts i) (aref reg-ends i))
-                                       nil))))
-                       captures)
-                     t))))))
+             (let ((start (if anchored-g (or (gethash string *p-match-pos*) 0) 0)))
+               (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                   (cl-ppcre:scan scanner str :start start)
+                 (when (and anchored-g match-start (/= match-start start))
+                   (setf match-start nil))
+                 (when match-start
+                   (clear-capture-groups)
+                   (set-capture-groups str reg-starts reg-ends reg-names)
+                   (set-match-vars str match-start match-end reg-starts reg-ends)
+                   (if (eq *wantarray* t)
+                       (let* ((num-groups (length reg-starts))
+                              (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                         (if (zerop num-groups)
+                             ;; No capture groups: Perl returns (1) in list context on success
+                             (setf (aref captures 0) 1)
+                             (dotimes (i num-groups)
+                               (setf (aref captures i)
+                                     (if (and (aref reg-starts i) (aref reg-ends i))
+                                         (subseq str (aref reg-starts i) (aref reg-ends i))
+                                         nil))))
+                         captures)
+                       t)))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))
@@ -11498,7 +11635,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; This includes all functions, macros, and variables with p- prefix
 (do-symbols (sym (find-package :pcl))
   (when (and (>= (length (symbol-name sym)) 3)
-             (string= "PL-" (subseq (symbol-name sym) 0 3)))
+             (string-equal "PL-" (subseq (symbol-name sym) 0 3)))
     (export sym :pcl)))
 
 ;; Perl uses double-precision floats everywhere.
@@ -11515,6 +11652,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; CORE::__SUB__ stub — returns a no-op lambda (PCL does not track current sub)
 (defun pl-__SUB__ ()
   (lambda (&rest args) (declare (ignore args)) nil))
+
+;; utf8::unicode_to_native / native_to_unicode map between Unicode and the
+;; platform's native code point.  On any ASCII (non-EBCDIC) platform — which is
+;; all PCL ever targets — both are the identity.  JSON::PP builds its
+;; invalid-char regex with chr(utf8::unicode_to_native($i)), so these must exist
+;; in the production runtime (not just the test library).  Defined in :pcl and
+;; exported so the :utf8 package (which (:use :pcl)) inherits them — this also
+;; avoids a name-conflict with cl/pcl-test.lisp, which defines the same names in
+;; :pcl for charset_tools.pl (it then just redefines the same symbol).
+(in-package :pcl)
+(defun pl-unicode_to_native (&optional cp) cp)
+(defun pl-native_to_unicode (&optional cp) cp)
+(export '(pl-unicode_to_native pl-native_to_unicode))
 
 ;; utf8 module stub - on non-EBCDIC systems, uni_to_native/native_to_uni are identity.
 ;; Note: PCL generates pl- prefix for user function calls (e.g. utf8::upgrade → utf8::pl-upgrade),

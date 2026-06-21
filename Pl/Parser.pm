@@ -309,9 +309,6 @@ sub parse {
     $self->_emit("");
   });
 
-  # Disambiguate case-colliding identifiers before any codegen sees them.
-  $self->_compute_and_apply_case_renames($doc);
-
   $self->_process_children($doc);
 
   # Close any local let forms opened at file level (e.g. local $^W at file scope).
@@ -499,53 +496,115 @@ sub _assemble_output {
 #   3. Build [min(label_pos, last_goto_pos), max(...)] ranges, merge overlaps.
 #   4. Wrap each range in (tagbody ...), hoisting definition elements out.
 #   5. Everything outside the ranges is emitted as independent top-level forms.
+# Scan a list of generated CL lines and return, for the START of each line:
+#   { depth => <paren depth>, in_lambda => <bool: inside a nested lambda/p-sub> }
+# plus a trailing entry (index == #lines) holding the final paren depth.
+# String-, comment- and #\char-literal-aware (mirrors the paren checker in
+# CLAUDE.md).  A line is "in_lambda" when a `(lambda` or `(p-sub` form opened
+# earlier and has not yet closed — used to exclude gotos in nested function
+# scopes (CL `go` cannot lexically reach a tag across a lambda boundary).
+sub _scan_lisp_lines {
+  my $lines = shift;
+  my @info;
+  my $depth = 0;
+  my @lambda_at;   # stack of paren depths at which a lambda/p-sub opened
+  for my $i (0 .. $#$lines) {
+    push @info, { depth => $depth, in_lambda => (@lambda_at ? 1 : 0) };
+    my @c = split //, $lines->[$i];
+    my ($j, $in_str) = (0, 0);
+    while ($j <= $#c) {
+      my $ch = $c[$j];
+      if ($in_str) {
+        if    ($ch eq '\\') { $j += 2; next; }
+        elsif ($ch eq '"')  { $in_str = 0; }
+        $j++; next;
+      }
+      if    ($ch eq '"') { $in_str = 1; }
+      elsif ($ch eq ';') { last; }                         # comment to EOL
+      elsif ($ch eq '#' && $j < $#c && $c[$j+1] eq '\\') { $j += 3; next; } # #\X
+      elsif ($ch eq '(') {
+        my $rest = join '', @c[$j+1 .. $#c];
+        push @lambda_at, $depth if $rest =~ /^\s*(?:lambda|p-sub)\b/;
+        $depth++;
+      }
+      elsif ($ch eq ')') {
+        $depth--;
+        pop @lambda_at while @lambda_at && $lambda_at[-1] >= $depth;
+      }
+      $j++;
+    }
+  }
+  push @info, { depth => $depth, in_lambda => (@lambda_at ? 1 : 0) };
+  return \@info;
+}
+
+# Wrap the minimal run of COMPLETE top-level forms that participate in a
+# goto/label pair in a (tagbody ...).  Works at form granularity (not line
+# granularity) so a goto nested inside a multi-line form (e.g. inside a
+# `(p-if … (progn (go :X)))`) is wrapped together with its enclosing form,
+# never splitting parens.  Used for both top-level runtime lines and sub
+# bodies (lines may be indented).
 sub _wrap_runtime_labels {
   my $rt_ref = shift;
   my @rt = @$rt_ref;
 
-  # Quick exit: no real label sentinels.
-  return @rt unless grep { /^:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ } @rt;
+  # Quick exit: no real label sentinels (allow leading indentation).
+  return @rt unless grep { /^\s*:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ } @rt;
 
-  # Definition elements must stay outside any tagbody (same test used in pass 2).
+  # Definition lines must stay outside any tagbody (eval-when etc. need
+  # top-level context).  Allow leading indentation (sub bodies are indented).
   my $is_definition = sub {
-    $_[0] =~ /^\((?:p-sub|eval-when|defvar|defpackage|in-package|p-defpackage|p-BEGIN)\b/;
+    $_[0] =~ /^\s*\((?:p-sub|eval-when|defvar|defpackage|in-package|p-defpackage|p-BEGIN)\b/;
   };
 
-  # Collect real labels: name → first-occurrence index.
-  my %label_first;
+  # Group lines into complete forms: [start_line, end_line].  A form closes
+  # when the running paren depth returns to 0.  Depth-0 blank/comment lines
+  # become their own trivial single-line forms.
+  my $info = _scan_lisp_lines(\@rt);
+  my @forms;
+  my $start;
   for my $i (0 .. $#rt) {
-    if ($rt[$i] =~ /^:([A-Za-z][A-Za-z0-9_]*)\s*;; pcl-label/) {
-      $label_first{$1} //= $i;
+    $start = $i unless defined $start;
+    if ($info->[$i + 1]{depth} == 0) {     # depth after line $i
+      push @forms, [ $start, $i ];
+      $start = undef;
+    }
+  }
+  push @forms, [ $start, $#rt ] if defined $start;   # unbalanced tail (defensive)
+
+  # Per-form: label name (if any), and the set of qualifying goto labels.
+  my %label_first;   # label name → first form index defining it
+  my %last_goto;     # label name → last form index with a reachable goto
+  for my $fi (0 .. $#forms) {
+    my ($s, $e) = @{$forms[$fi]};
+    for my $i ($s .. $e) {
+      # A label only belongs to THIS region when it is a direct sibling
+      # (paren depth 0).  A label nested inside a child form (depth > 0) is
+      # handled by that child's own _process_block wrapping pass.
+      if ($info->[$i]{depth} == 0
+          && $rt[$i] =~ /^\s*:([A-Za-z][A-Za-z0-9_]*)\s*;; pcl-label/) {
+        $label_first{$1} //= $fi;
+      }
+      next if $info->[$i]{in_lambda};   # goto inside a nested lambda → unreachable
+      while ($rt[$i] =~ /\(go\s+:([A-Za-z][A-Za-z0-9_]*)\)/g) {
+        my $lbl    = $1;
+        my $prefix = substr($rt[$i], 0, $-[0]);
+        next if $prefix =~ /\b(?:lambda|p-sub)\b/;  # opened+used on same line
+        $last_goto{$lbl} = $fi;
+      }
     }
   }
 
-  # Find the last qualifying (go :LABEL) for each known label.
-  # "Qualifying" = not inside a lambda or function definition scope.
-  my %last_goto;
-  for my $i (0 .. $#rt) {
-    next if $rt[$i] =~ /^\s/;         # starts indented → inside a nested form
-    next if $is_definition->($rt[$i]);# definition → different function scope
-    while ($rt[$i] =~ /\(go\s+:([A-Za-z][A-Za-z0-9_]*)\)/g) {
-      my $lbl    = $1;
-      my $prefix = substr($rt[$i], 0, $-[0]);
-      next if $prefix =~ /\blambda\b/;  # goto is inside a lambda → not reachable
-      $last_goto{$lbl} = $i if exists $label_first{$lbl};
-    }
-  }
-
-  # Drop labels that have no qualifying goto (nothing to wrap).
+  # Keep only labels that have a matching reachable goto.
   delete $label_first{$_} for grep { !exists $last_goto{$_} } keys %label_first;
   return @rt unless %label_first;
 
-  # Build minimal [start, end] ranges (covers both the label and its goto).
+  # Minimal [start_form, end_form] ranges covering each label and its goto.
   my @ranges;
   for my $lbl (keys %label_first) {
-    my ($lpos, $gpos) = ($label_first{$lbl}, $last_goto{$lbl});
-    push @ranges, [ ($lpos < $gpos ? $lpos : $gpos),
-                    ($lpos > $gpos ? $lpos : $gpos) ];
+    my ($lf, $gf) = ($label_first{$lbl}, $last_goto{$lbl});
+    push @ranges, [ ($lf < $gf ? $lf : $gf), ($lf > $gf ? $lf : $gf) ];
   }
-
-  # Merge overlapping / adjacent ranges.
   @ranges = sort { $a->[0] <=> $b->[0] } @ranges;
   my @merged;
   for my $r (@ranges) {
@@ -556,33 +615,32 @@ sub _wrap_runtime_labels {
     }
   }
 
-  # Assemble result.
+  # Assemble result, wrapping each form range in (tagbody ...) and hoisting
+  # definition forms out of the tagbody.
   my @result;
-  my $pos = 0;
+  my $fpos = 0;
   for my $region (@merged) {
-    my ($start, $end) = @$region;
-
-    # Independent forms before this region.
-    push @result, @rt[$pos .. $start - 1] if $start > $pos;
-
-    # Wrap [start, end] in (tagbody ...), hoisting definition lines out.
+    my ($fs, $fe) = @$region;
+    # Forms before this region, emitted as-is.
+    push @result, map { @rt[$forms[$_][0] .. $forms[$_][1]] } ($fpos .. $fs - 1)
+      if $fs > $fpos;
     my @tb;
-    for my $i ($start .. $end) {
-      if ($is_definition->($rt[$i])) {
+    for my $fi ($fs .. $fe) {
+      my @flines = @rt[$forms[$fi][0] .. $forms[$fi][1]];
+      if ($is_definition->($rt[$forms[$fi][0]])) {
         push @result, "(tagbody", @tb, ")" if @tb;
         @tb = ();
-        push @result, $rt[$i];
+        push @result, @flines;
       } else {
-        push @tb, $rt[$i];
+        push @tb, @flines;
       }
     }
     push @result, "(tagbody", @tb, ")" if @tb;
-
-    $pos = $end + 1;
+    $fpos = $fe + 1;
   }
-
-  # Independent forms after the last region.
-  push @result, @rt[$pos .. $#rt] if $pos <= $#rt;
+  # Forms after the last region.
+  push @result, map { @rt[$forms[$_][0] .. $forms[$_][1]] } ($fpos .. $#forms)
+    if $fpos <= $#forms;
 
   return @result;
 }
@@ -2535,24 +2593,62 @@ sub _process_local_declaration {
     my $has_init = grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq '=' } @non_ws;
     if ($has_init) {
       my @rhs_parts;
+      my @cond_parts;
+      my $modifier;        # 'if' / 'unless' statement modifier, if present
       my $past_eq = 0;
       for my $p (@non_ws) {
         if (!$past_eq && ref($p) eq 'PPI::Token::Operator' && $p->content eq '=') {
           $past_eq = 1;
           next;
         }
-        push @rhs_parts, $p if $past_eq;
+        next unless $past_eq;
+        # A trailing `if`/`unless` bareword is the statement modifier (it cannot
+        # appear inside a value expression): `local *_ = RHS if COND`.
+        if (!$modifier && ref($p) eq 'PPI::Token::Word'
+            && $p->content =~ /^(?:if|unless)$/) {
+          $modifier = $p->content;
+          next;
+        }
+        if ($modifier) { push @cond_parts, $p; }
+        else           { push @rhs_parts,  $p; }
       }
       my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
-      $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
-      $self->indent_level($self->indent_level + 1);
-      $self->_emit("(p-glob-assign \"$pkg\" \"$name\" $rhs_cl)");
+      if ($modifier) {
+        # Conditional local (`local *foo = RHS if COND`): only localize+assign
+        # when COND is true; otherwise the rest of the scope keeps the outer
+        # slots.  p-local-glob-if always saves/restores but evaluates RHS (while
+        # the slots are still intact, so it can read @_) and clears+assigns only
+        # when COND holds.  Push truthiness into a p-true-p test here.
+        my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt) // 'nil';
+        my $test = $modifier eq 'unless'
+                 ? "(not (p-true-p $cond_cl))" : "(p-true-p $cond_cl)";
+        $self->_emit("(p-local-glob-if $test \"$pkg\" \"$name\" $rhs_cl");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth}++;
+      } else {
+        # Perl evaluates the RHS of `local *foo = EXPR` in the ENCLOSING scope,
+        # BEFORE *foo is localized.  This matters because localizing *_ clears the
+        # @_ slot too, so an RHS that reads @_ (e.g. local *_ = \join('', @_), the
+        # Text::ParseWords idiom) must see the old @_.  Bind the RHS in a wrapping
+        # let so it is computed before p-local-glob clears slots.
+        $self->{_local_glob_counter} //= 0;
+        my $rhs_tmp = '--local-glob-rhs--' . $self->{_local_glob_counter}++;
+        $self->_emit("(let (($rhs_tmp $rhs_cl))");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
+        $self->indent_level($self->indent_level + 1);
+        $self->_emit("(p-glob-assign \"$pkg\" \"$name\" $rhs_tmp)");
+        # Two wrapping forms (let + p-local-glob) → two closing parens at scope end.
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth} += 2;
+      }
     } else {
       $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
       $self->indent_level($self->indent_level + 1);
+      $self->{_local_let_depth} //= 0;
+      $self->{_local_let_depth}++;
     }
-    $self->{_local_let_depth} //= 0;
-    $self->{_local_let_depth}++;
     $self->_emit("");
     return;
   }
@@ -3089,19 +3185,19 @@ sub _process_bare_block {
     # Wrap contents in LAST-LABEL catch so p-last-dynamic can throw to exit the block.
     # Mirrors how p-next/p-redo use throw for dynamic (cross-function) labeled exits.
     # e.g. Test::More's skip() calls (last SKIP) from inside a called function.
-    $self->_emit("(catch 'pcl::LAST-$label");
+    $self->_emit("(catch (pcl::%pcl-loop-tag \"LAST\" '$label)");
     $self->indent_level($self->indent_level + 1);
     # Always wrap tagbody in NEXT-LABEL catch so that (p-next LABEL) works even
     # without a continue block.  When next LABEL is thrown from an inner function
     # (e.g. eval { next $label }), the throw lands here; when there is a continue
     # block it runs after the catch returns, just as in the continue case.
-    $self->_emit("(catch 'pcl::NEXT-$label");
+    $self->_emit("(catch (pcl::%pcl-loop-tag \"NEXT\" '$label)");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(tagbody");
     $self->indent_level($self->indent_level + 1);
     $self->_emit(":redo");
     # Use pcl:: prefix to match the package used by p-redo macro's throw
-    $self->_emit("(catch 'pcl::REDO-$label");
+    $self->_emit("(catch (pcl::%pcl-loop-tag \"REDO\" '$label)");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(progn");
     $self->indent_level($self->indent_level + 1);
@@ -3241,6 +3337,16 @@ sub _process_if_statement {
 sub _generate_if_clauses {
   my $self    = shift;
   my $clauses = shift;
+  # $void: are this if/else's branches in void context?  Computed once on the
+  # initial call from whether the if-statement itself is in value/tail position
+  # (this same generator serves both a tail if-with-else, whose branches DO
+  # propagate the caller's wantarray, and a non-tail/void if, whose branches must
+  # NOT — else a branch's /g regex inherits list context).  Threaded through the
+  # recursive elsif chain.
+  my $void = shift;
+  $void = ($self->environment->in_subroutine > 0
+           && !$self->environment->tail_position) ? 1 : 0
+    unless defined $void;
 
   return unless @$clauses;
 
@@ -3269,7 +3375,7 @@ sub _generate_if_clauses {
   $self->_emit("(progn");
   $self->indent_level($self->indent_level + 1);
   $self->_with_declarations($first->{block}, sub {
-    $self->_process_block($first->{block});
+    $self->_process_block($first->{block}, $void);
   });
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");
@@ -3283,14 +3389,14 @@ sub _generate_if_clauses {
       $self->_emit("(progn");
       $self->indent_level($self->indent_level + 1);
       $self->_with_declarations($next->{block}, sub {
-        $self->_process_block($next->{block});
+        $self->_process_block($next->{block}, $void);
       });
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
     }
     else {
       # elsif - recursive
-      $self->_generate_if_clauses($rest);
+      $self->_generate_if_clauses($rest, $void);
     }
   }
   else {
@@ -3627,6 +3733,14 @@ sub _process_block_in_tail_context {
 sub _process_block {
   my $self  = shift;
   my $block = shift;
+  # $void_body: the block's value is discarded (a loop body — while/for/foreach
+  # and continue blocks).  Such a block is NEVER in value/tail position, so its
+  # last statement must NOT inherit the enclosing sub's wantarray (otherwise a
+  # statement-level `m//g` in a loop body would run in list context — e.g.
+  # Text::Balanced::_match_bracketed's tokenizer loop, which then never advances
+  # pos() and hangs).  Defaults to false to preserve the value-position behavior
+  # for sub bodies and other callers.
+  my $void_body = shift;
 
   # Isolate _pending_let_closes so that inner _process_block calls (e.g.
   # for if/while/bare block bodies) cannot accidentally flush pending let
@@ -3648,7 +3762,7 @@ sub _process_block {
   # the condition value.  This implements Perl's "last expression evaluated"
   # return semantics for bare-if.
   my ($tail_ret_var, $tail_last_sig, $tail_sig);
-  if ($self->environment->in_subroutine > 0) {
+  if (!$void_body && $self->environment->in_subroutine > 0) {
     my @sig = $block->schildren;
     # Skip BEGIN/END/INIT/CHECK blocks — they produce no runtime code,
     # so the tail is the last *runtime* significant statement.
@@ -3672,6 +3786,13 @@ sub _process_block {
     $self->indent_level($self->indent_level + 1);
   }
   # ─────────────────────────────────────────────────────────────────────────
+
+  # Save/restore tail_position around child processing: the per-child loop sets
+  # it explicitly (0 for non-tail), so without restoring, a value-position tail
+  # child would leave tail_position=1 leaking into whatever the caller processes
+  # next (e.g. the next top-level statement, making a void call wrongly propagate
+  # the ambient wantarray).
+  my $saved_tail_position = $self->environment->tail_position;
 
   my @children = $block->children;
   my %skip;
@@ -3727,6 +3848,17 @@ sub _process_block {
     }
   }
 
+  # Capture the bucket + start index of this block's emitted statements so we
+  # can post-process any goto/label pairs that are direct siblings here into a
+  # (tagbody …).  CL `go` needs a lexically-enclosing tagbody; labels emitted
+  # as statement siblings (e.g. an intra-sub `LABEL:` jumped to by `goto LABEL`)
+  # would otherwise have no tagbody.  Capturing here (around the child loop)
+  # places the tagbody INSIDE any wrapping (let …) for declarations, so the tag
+  # is reachable.  No-op unless a label sentinel is emitted as a direct sibling.
+  my $lbl_sec    = $self->_cur_section;
+  my $lbl_bucket = $self->_cur_bucket;
+  my $lbl_start  = scalar @{$self->_sections->[$lbl_sec]{$lbl_bucket}};
+
   for my $i (0 .. $#children) {
     next if $skip{$i};
     my $child = $children[$i];
@@ -3757,10 +3889,30 @@ sub _process_block {
 
     # Set tail_position so gen_funcall/gen_methodcall propagate *wantarray*
     # instead of overriding it — allowing context to flow from the call site.
-    my $is_tail = defined $tail_sig && $child == $tail_sig;
-    $self->environment->tail_position(1) if $is_tail;
+    # Non-tail statements are void, so set tail_position EXPLICITLY to 0 for them
+    # (not merely leave it): otherwise a nested dynamic-context op like /g regex in
+    # a non-tail statement inherits the sub's list wantarray.  $void_body (loop
+    # bodies) forces every statement void.  tail_position now accurately reflects
+    # "the current statement is in value/return position", which _generate_if_clauses
+    # reads to decide whether its branches propagate context or are void.
+    my $is_tail = !$void_body && defined $tail_sig && $child == $tail_sig;
+    $self->environment->tail_position($is_tail ? 1 : 0);
     $self->_process_element($child);
-    $self->environment->tail_position(0) if $is_tail;
+  }
+  $self->environment->tail_position($saved_tail_position);
+
+  # Wrap any goto/label pairs that are direct siblings in this block into a
+  # (tagbody …).  Only when the block stayed in the same section/bucket and a
+  # label sentinel was actually emitted (the helper no-ops otherwise).
+  if ($self->_cur_section == $lbl_sec && $self->_cur_bucket eq $lbl_bucket) {
+    my $arr = $self->_sections->[$lbl_sec]{$lbl_bucket};
+    my $end = $#$arr;
+    if ($end >= $lbl_start
+        && grep { /^\s*:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ }
+               @{$arr}[$lbl_start .. $end]) {
+      my @wrapped = _wrap_runtime_labels([ @{$arr}[$lbl_start .. $end] ]);
+      splice @$arr, $lbl_start, ($end - $lbl_start + 1), @wrapped;
+    }
   }
 
   # Flush let forms opened by _emit_scoped_block's hook (innermost first).
@@ -4260,9 +4412,13 @@ sub _find_all_declarations {
     #   - Named sub definitions (PPI::Statement::Sub)
     #   - BEGIN/END/etc blocks (PPI::Statement::Scheduled)
     #   - Anonymous sub bodies: PPI::Structure::Block whose prev sibling is 'sub'
-    #   - eval { } blocks: PPI::Structure::Block whose prev sibling is 'eval'
-    #     (my vars inside eval { } are scoped to that eval; hoisting them to the
-    #     enclosing let would shadow outer vars of the same name)
+    #   - eval { } / do { } blocks: PPI::Structure::Block whose prev sibling is
+    #     'eval' or 'do'.  Each becomes its own CL lambda scope — `my` vars
+    #     inside are scoped to that block, so hoisting them to the enclosing let
+    #     would (a) shadow outer vars of the same name and (b) leave the
+    #     hoisted let open around the rest of the enclosing body (the do-block's
+    #     own (let …) then double-binds and the outer one nests every following
+    #     statement, breaking e.g. intra-sub goto/label tagbody wrapping).
     # For bare blocks (no prev non-whitespace sibling): recurse but only keep
     #   'state' declarations — 'my' vars in bare blocks are scoped to the block
     #   by _process_bare_block/_with_declarations and must NOT be hoisted to the
@@ -4273,7 +4429,8 @@ sub _find_all_declarations {
         && !($ref eq 'PPI::Structure::Block' && do {
                my $prev = $child->sprevious_sibling;
                $prev && ref($prev) eq 'PPI::Token::Word'
-                     && ($prev->content eq 'sub' || $prev->content eq 'eval')
+                     && ($prev->content eq 'sub' || $prev->content eq 'eval'
+                         || $prev->content eq 'do')
              })) {
       my $is_bare_block = $ref eq 'PPI::Structure::Block' && do {
         my $prev = $child->sprevious_sibling;
@@ -4474,8 +4631,10 @@ sub _emit_scoped_block {
     return;
   }
 
-  # Compute renames: closure-captured vars → __lex__N, case-collision → __case__N.
-  my (%new_renames, %old_renames, %cl_sym_seen);
+  # Compute renames: closure-captured vars → __lex__N.  (Case-collision
+  # renaming retired 2026-06-21 — under (readtable-case :invert) lexicals that
+  # differ only in case, e.g. $T and $t, already map to distinct CL symbols.)
+  my (%new_renames, %old_renames);
   my $existing = $self->environment->state_var_renames // {};
   for my $var (@all_my_vars) {
     my $vinfo = $vars->{$var} // {};
@@ -4486,19 +4645,6 @@ sub _emit_scoped_block {
       my $u = sprintf('%s%s__lex__%d', $sigil, $slug, ++$lex_var_counter);
       $new_renames{$var} = $u;
       $old_renames{$var} = $existing->{$var};
-    }
-    my $cl_name = $new_renames{$var} // $var;
-    my $lc = lc($cl_name);
-    if ($cl_sym_seen{$lc}) {
-      my ($sigil, $bare) = ($cl_name =~ /^([\$\@\%])(.+)$/);
-      ($sigil, $bare) = ('$', $cl_name) unless defined $bare;
-      (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
-      my $r = sprintf('%s%s__case__%d', $sigil, $slug, ++$lex_var_counter);
-      $new_renames{$var} = $r;
-      $old_renames{$var} //= $existing->{$var};
-      $cl_sym_seen{lc($r)} = $var;
-    } else {
-      $cl_sym_seen{$lc} = $var;
     }
   }
 
@@ -4574,6 +4720,22 @@ sub _emit_scoped_block {
 # Common helper: wrap emitted code with let for any 'my' declarations
 # Usage: $self->_with_declarations($ppi_elements, sub { ... emit code ... });
 # $ppi_elements can be a single PPI element or arrayref of elements to scan
+# True if the block has a standalone statement label (`LABEL:` with no block of
+# its own — i.e. a goto target, not a loop/bare-block label).  Such a body uses
+# the flat-let declaration path (not the two-phase per-statement scoped lets) so
+# the label and its sibling statements share one lexical scope, letting
+# _process_block wrap them in a single (tagbody …) for `goto LABEL`.
+sub _block_has_standalone_label {
+  my $block = shift;
+  return 0 unless ref($block) eq 'PPI::Structure::Block';
+  for my $c ($block->schildren) {
+    next unless ref($c) eq 'PPI::Statement::Compound';
+    next unless $c->find_first('PPI::Token::Label');
+    return 1 unless $c->find_first('PPI::Structure::Block');
+  }
+  return 0;
+}
+
 sub _with_declarations {
   my $self = shift;
   my $elements = shift;  # PPI element(s) to scan for declarations
@@ -4595,7 +4757,8 @@ sub _with_declarations {
   # and inline-let semantics interact badly with defvar + _process_my_toplevel_declaration.
   if (ref($elements) eq 'PPI::Structure::Block'
       && $self->environment->in_subroutine > 0
-      && $is_sub_body) {
+      && $is_sub_body
+      && !_block_has_standalone_label($elements)) {
     require Pl::BlockAnalyzer;
     my $outer    = $self->_current_outer_scope();
     my $analysis = Pl::BlockAnalyzer->analyze($elements, $outer);
@@ -4676,29 +4839,9 @@ sub _with_declarations {
       $new_renames{$var} = $unique;
       $old_renames{$var} = $existing->{$var};  # undef if no prior rename
     }
-
-    # CL reads unquoted symbols case-insensitively (upcase mode), so Perl variables
-    # that differ only in case (e.g. $T and $t) map to the same CL symbol and cause
-    # "variable occurs more than once in the LET" errors. Detect these collisions and
-    # rename the later occurrence to $name__uc__ to make it distinct.
-    my %cl_sym_seen;  # lc(cl_name) → first perl var with that cl symbol
-    for my $var (@my_vars) {
-      my $cl_name = $new_renames{$var} // $var;
-      my $lc = lc($cl_name);
-      if (exists $cl_sym_seen{$lc}) {
-        # Collision: $var has same CL symbol as $cl_sym_seen{$lc}
-        # Rename the later one (whichever $var this is)
-        my ($sigil, $bare) = ($cl_name =~ /^([\$\@\%])(.+)$/);
-        $sigil //= '$'; $bare //= $cl_name;
-        (my $slug = $bare) =~ s/[^a-zA-Z0-9]/_/g;
-        my $renamed = sprintf('%s%s__case__%d', $sigil, $slug, ++$lex_var_counter);
-        $new_renames{$var} = $renamed;
-        $old_renames{$var} //= $existing->{$var};
-        $cl_sym_seen{lc($renamed)} = $var;
-      } else {
-        $cl_sym_seen{$lc} = $var;
-      }
-    }
+    # (Case-collision renaming retired 2026-06-21: under (readtable-case
+    # :invert) lexicals that differ only in case — e.g. $T and $t — already
+    # map to distinct CL symbols, so no disambiguation pass is needed.)
   }
 
   # Wrap in let if we have declarations
@@ -5016,13 +5159,13 @@ sub _process_while_statement {
     $self->indent_level($self->indent_level + 1);
     if ($block) {
       $self->_with_declarations($block, sub {
-        $self->_process_block($block);
+        $self->_process_block($block, 1);
       });
     }
     if ($continue_block) {
       $self->_emit(":continue (progn");
       $self->indent_level($self->indent_level + 1);
-      $self->_process_block($continue_block);
+      $self->_process_block($continue_block, 1);
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
     }
@@ -5153,7 +5296,7 @@ sub _process_c_style_for {
     $self->indent_level($self->indent_level + 1);
     if ($block) {
       $self->_with_declarations($block, sub {
-        $self->_process_block($block);
+        $self->_process_block($block, 1);
       });
     }
     $self->indent_level($self->indent_level - 1);
@@ -5322,7 +5465,7 @@ sub _process_foreach_loop {
       $self->{_let_bound_vars} = { %{$saved_let_bound // {}}, $cl_loop_var => 1 };
     }
     $self->_with_declarations($block, sub {
-      $self->_process_block($block);
+      $self->_process_block($block, 1);
     });
     $self->{_let_bound_vars} = $saved_let_bound;
     if (defined $saved_loop_var_rename) {
@@ -5333,7 +5476,7 @@ sub _process_foreach_loop {
   if ($continue_block) {
     $self->_emit(":continue (progn");
     $self->indent_level($self->indent_level + 1);
-    $self->_process_block($continue_block);
+    $self->_process_block($continue_block, 1);
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");
   }
@@ -7100,76 +7243,6 @@ sub parse_file {
     %opts,
   );
   return $parser->parse;
-}
-
-
-# ------------------------------------------------------------------
-# Case-disambiguation: Perl identifiers are case-sensitive, but PCL emits bare
-# CL symbols and relies on the reader, which upcases them — so $BASE_LEN and
-# $base_len would collide onto one symbol (the lexical shadows the file-`my`,
-# breaking Math::BigInt::Calc). When a file actually contains such a collision
-# we rename all-but-one member to a reader-safe, distinct name (a digit-bearing
-# suffix survives upcasing). Token contents are rewritten in place so all code
-# paths (declarations, references, element access) see the new name; string
-# interpolation, which builds fresh Symbol nodes from raw text, is handled by a
-# matching lookup in ExprToCL::_convert_node via environment->case_renames.
-#
-# This is a targeted, collision-only fix; the general solution (a case-safe
-# symbol-naming scheme) belongs in the compiler rewrite — see docs.
-sub _bare_ident_of_token {
-  my $tok = shift;
-  my $c   = $tok->content;
-  return undef unless defined $c;
-  return $1 if $c =~ /^\$#.*?([A-Za-z_]\w*)\z/;          # $#arr / $#Pkg::arr
-  return $1 if $c =~ /^[\$\@\%\&\*].*?([A-Za-z_]\w*)\z/; # $x @x %x &x *x (opt pkg::)
-  return undef;
-}
-
-sub _compute_and_apply_case_renames {
-  my ($self, $doc) = @_;
-  return unless $doc;
-
-  # Identifiers with dedicated CL handling (special vars, sort vars, @ISA, the
-  # %ENV/@ARGV/... families, bareword filehandles) must never be renamed: their
-  # emission does not flow through the mutated token, so a rename would desync.
-  my %skip = map { $_ => 1 } qw(
-    _ a b ISA ENV ARGV ARGVOUT INC SIG STDIN STDOUT STDERR DATA
-  );
-
-  my @tokens;
-  for my $cls (qw(PPI::Token::Symbol PPI::Token::Magic PPI::Token::ArrayIndex)) {
-    my $found = $doc->find($cls) || [];
-    push @tokens, @$found;
-  }
-
-  my %spellings;  # uc(name) => { name => 1 }
-  for my $tok (@tokens) {
-    my $name = _bare_ident_of_token($tok);
-    next unless defined $name;
-    next if $skip{$name};
-    $spellings{uc $name}{$name} = 1;
-  }
-
-  my %renames;
-  for my $uc (sort keys %spellings) {
-    my @sp = sort keys %{ $spellings{$uc} };
-    next if @sp < 2;                 # no case collision
-    # Keep the first spelling unchanged; rename the rest.
-    for my $i (1 .. $#sp) {
-      $renames{$sp[$i]} = $sp[$i] . "__pcl_ci_$i";
-    }
-  }
-
-  $self->environment->case_renames(\%renames) if $self->environment;
-  return unless %renames;
-
-  for my $tok (@tokens) {
-    my $name = _bare_ident_of_token($tok);
-    next unless defined $name && exists $renames{$name};
-    my $content = $tok->content;
-    (my $new = $content) =~ s/\Q$name\E\z/$renames{$name}/;
-    $tok->set_content($new) if $new ne $content;
-  }
 }
 
 sub parse_code {

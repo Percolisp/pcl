@@ -463,6 +463,39 @@ my $w = new WIDGET;
 print $w->ping(), "\n";
 ', "pong\n");
 
+# ── new ClassName(ARGS) — indirect object with EXPLICIT parens ────────────────
+# The `new ClassName(ARGS)` form mis-parsed as `new(ClassName(ARGS))` because the
+# fun(list) loop collapsed ClassName(ARGS) into a funcall before the `new`
+# pre-pass ran.  Now the `new` pre-pass runs first.  Covers single- and
+# multi-segment class names (e.g. Getopt::Long::Parser).
+
+test_transpile('new ClassName(ARGS) with explicit parens', '
+package Widget;
+sub new { my ($c, %a) = @_; bless { %a }, $c }
+sub size { $_[0]->{size} }
+package main;
+my $w = new Widget(size => 7);
+print $w->size, "\n";
+', "7\n");
+
+test_transpile('new Multi::Seg::Class(ARGS) with explicit parens', '
+package Foo::Bar::Baz;
+sub new { my ($c, @a) = @_; bless { n => scalar(@a) }, $c }
+sub n { $_[0]->{n} }
+package main;
+my $o = new Foo::Bar::Baz(10, 20, 30);
+print $o->n, "\n";
+', "3\n");
+
+test_transpile('new ClassName(ARGS) passes args as a flat list', '
+package Pt;
+sub new { my ($c, $x, $y) = @_; bless { x => $x, y => $y }, $c }
+sub str { my $s = shift; $s->{x} . "," . $s->{y} }
+package main;
+my $p = new Pt(3, 4);
+print $p->str, "\n";
+', "3,4\n");
+
 # ── grep/map {HASH}->{key} — block and paren form deref ──────────────────────
 # Fixes:
 #  1. Block-form: inner `my $deref_skip` shadowed outer, leaving -> in rest-list

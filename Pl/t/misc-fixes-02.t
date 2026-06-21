@@ -464,12 +464,11 @@ test_cl('refaddr returns undef for non-ref scalars (strings included)',
     . '            ("hello", "42", "0xff", 7, undef)), "\n");',
     "uuuuu\n");
 
-# ── Case-sensitive identifiers must not collide on the case-folding CL reader ──
-# Perl is case-sensitive; PCL emits bare CL symbols which the reader upcases, so
-# $base_len and $BASE_LEN would otherwise map to one symbol (the lexical shadows
-# the file-`my`, which is exactly what broke Math::BigInt::Calc). Targeted
-# collision-only rename keeps the two distinct. See Parser::_compute_and_apply_
-# case_renames + ExprToCL::_case_renamed.
+# ── Case-sensitive identifiers must not collide on the CL reader ──
+# Perl is case-sensitive; PCL reads its generated code under (readtable-case
+# :invert) so $base_len and $BASE_LEN map to DISTINCT CL symbols (without it the
+# lexical would shadow the file-`my`, which is what broke Math::BigInt::Calc).
+# More case-sensitivity regression coverage lives in Pl/t/case-invert-01.t.
 test_cl('case-colliding scalars stay distinct (plain refs)',
     'my $base_len = 1; my $BASE_LEN = 2;'
     . ' print "$base_len $BASE_LEN\n";',
