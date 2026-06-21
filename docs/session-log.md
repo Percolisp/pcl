@@ -4,6 +4,24 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 265 (2026-06-21) — case-sensitivity SHIPPED via `(readtable-case :invert)`. Gate 101/3551, sweep at parity.
+
+**User: try the `:invert` general fix as a spike, see how it goes with tests + small fixes.** It went well enough to adopt — committed to `main`, no branch (the revert fears proved unwarranted).
+
+**What shipped (`cl/pcl-runtime.lisp`):** set `(readtable-case *readtable*) :invert)` once after the `(require …)` lines (cl-ppcre/asdf/sb-posix load under standard `:upcase` first), so the runtime + all generated code read under `:invert`. Lower→UPPER (std CL still works), UPPER→lower, **mixed preserved**. The `p-`/`pl-`/`plc-` prefix makes every uppercase Perl name a mixed token → subs/classes/packages/methods/labels become case-distinct **for free** (the gap s252 left). `$base_len`/`$BASE_LEN`, `sub foo`/`FOO`, `package Aa`/`AA` all distinct.
+
+**One rule + helpers:** every runtime string→symbol site (and Perl-name-from-symbol reverse-map) applies the reader's transform. New helpers near `perl-pkg-to-cl-pkg-name`: `%pcl-invert-case` (mirrors `:invert`, its own inverse), `%pcl-cl-sub-name` (`invert("pl-"+name)` — `PL-`+upcase is WRONG for DESTROY/AUTOLOAD), `%pcl-loop-tag` (shared by codegen catch + runtime throw), `%pcl-uname-to-sub` (glob CODE slot). ~40 `string-upcase`→`%pcl-invert-case`; `@ISA`/`@EXPORT`/`@EXPORT_OK`/`%EXPORT_TAGS`/`$AUTOLOAD` literals lowercased; `PL-` prefix CHECKS→`string-equal`; `caller()[3]`/stash/bareword-FH reverse-maps invert-then-strip; `clos-class-to-pkg` callers→`(symbol-package (class-name cls))`. Codegen: `Pl/Parser.pm` bare-block label catch tags emit `(pcl::%pcl-loop-tag "LAST" 'LABEL)`.
+
+**Bugs found in code-review + fixed (all regression-tested):** AUTOLOAD fully broken (`PL-AUTOLOAD`≠`pl-AUTOLOAD`); stash keys lost case (`keys %Pkg::` gave `bar` for `sub Bar` — was `string-downcase`); uniform-case loop labels (`SKIP`) broke (codegen baked `pcl::LAST-SKIP` token folds vs runtime `"LAST-"` literal). New `Pl/t/case-invert-01.t` (13 differential-vs-perl) + kept 4 collision tests in `misc-fixes-02.t`.
+
+**CPAN validated under :invert:** Carp (caller-heavy), Scalar/List::Util, `use parent`, `use overload`, Exporter constant import (Fcntl SEEK_SET), tie (uppercase TIESCALAR/FETCH/STORE), Getopt::Long symref collision (s264) fixed for free. Data::Dumper `Dumpxs` crashes = PRE-EXISTING XS-fallback bug on HEAD too, not case.
+
+**s252 retired:** removed `_compute_and_apply_case_renames` + `_bare_ident_of_token` + call (Parser.pm), `_case_renamed` + 2 calls (ExprToCL.pm), `case_renames` attr (Environment.pm). Zero `__pcl_ci_` artifacts.
+
+**NEXT TIME (the "last garbage"):** (1) scoped readtable + FASL/saved-core cache invalidation (currently set process-globally; fine for dev/sweep, fails loud on stale `:upcase` FASLs); (2) retire the older `__case__N` lexical rename in `_with_declarations` (redundant under :invert, self-consistent/harmless, entangled with `__lex__N`); (3) `clos-class-to-pkg` now dead. See `docs/case-sensitivity-plan.md` + `memory/project_case_sensitivity_general_fix.md`.
+
+---
+
 ## Session 264 (2026-06-21) — indirect-object `new ClassName(ARGS)` with explicit parens. Gate 100/3538.
 
 **User: keep finding/fixing bugs via CPAN modules + fuzzing; do a DIFFERENT module this session (Text::Balanced/goto continues later).** Picked Getopt::Long (its real lib is in @INC, so PCL transpiles it like user code).

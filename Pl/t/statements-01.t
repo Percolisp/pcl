@@ -220,12 +220,12 @@ output_contains('{ next; } continue { $ok = 1; }',
 
 # Regression: labeled bare block with continue - PPI keeps continue as child
 output_contains('LABEL: { next LABEL; } continue { $ok = 1; }',
-                "pcl::NEXT-LABEL",
+                "pcl::%pcl-loop-tag \"NEXT\" 'LABEL",
                 'labeled bare block continue uses pcl:: qualified catch tag');
 
 # Regression: labeled bare block with redo catch tag
 output_contains('LABEL: { redo LABEL; }',
-                "pcl::REDO-LABEL",
+                "pcl::%pcl-loop-tag \"REDO\" 'LABEL",
                 'labeled bare block has pcl:: qualified redo catch tag');
 
 # Regression: bare block continue - trailing tokens after continue block

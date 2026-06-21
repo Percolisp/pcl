@@ -224,15 +224,6 @@ my %SPECIAL_VARS = (
 # - Operator exceptions → from %OP_EXCEPTIONS (all runtime → p-)
 # - Runtime built-in functions → p-<name>  (from %RUNTIME_NAMES)
 # - User-defined functions → p-<name>
-# Map a bare identifier through the file-global case-disambiguation table (see
-# Pl::Parser::_compute_and_apply_case_renames). Returns the name unchanged when
-# there is no collision rename for it.
-sub _case_renamed {
-  my ($self, $name) = @_;
-  return $name unless $self->environment;
-  my $cr = $self->environment->case_renames;
-  return ($cr && exists $cr->{$name}) ? $cr->{$name} : $name;
-}
 
 sub cl_name {
   my $self       = shift;
@@ -497,9 +488,6 @@ sub gen_leaf {
       my ($sigil, $pkg, $name) = ($1, $2, $3);
       # Empty package means main (e.g., $::foo = $main::foo)
       $pkg = 'main' if $pkg eq '';
-      # Case-disambiguation rename (interpolation-origin nodes only; code-origin
-      # tokens were already rewritten in the PPI doc).
-      $name = $self->_case_renamed($name);
       # Track referenced package
       $self->environment->add_referenced_package($pkg) if $self->environment;
       # Use pipe quoting for nested packages
@@ -580,13 +568,6 @@ sub gen_leaf {
       my $sym = "|$content|";
       $self->environment->add_caret_global($sym) if $self->environment;
       return $sym;
-    }
-    # Case-disambiguation rename for simple vars (interpolation-origin nodes;
-    # code-origin tokens were already rewritten in the PPI doc, so their renamed
-    # names are not in the map and this is a no-op for them).
-    if ($content =~ /^([\$\@\%\&\*])([A-Za-z_]\w*)\z/) {
-      my $renamed = $self->_case_renamed($2);
-      return "$1$renamed" if $renamed ne $2;
     }
     return $content;
   }

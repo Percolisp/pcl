@@ -1,5 +1,45 @@
 # Plan: resolving Perl/CL identifier case clashes
 
+**Status: SHIPPED 2026-06-21 — approach (b) `:invert` is implemented and green**
+(working tree, uncommitted on `main`). The body below is retained as the
+analysis/rationale that led here; the s252-deferred framing it opens with is now
+historical. See `memory/project_case_sensitivity_general_fix.md` for the live
+summary.
+
+## What was actually done (the SHIPPED solution)
+- `cl/pcl-runtime.lisp` sets `(readtable-case *readtable*) :invert)` once, after
+  the `(require …)` lines (3rd-party libs load under standard `:upcase` first),
+  so the runtime + ALL generated code read under `:invert`.
+- **One rule:** every runtime site that builds a CL symbol from a *string* (or
+  reconstructs a Perl name from a symbol) applies the same transform via helpers
+  `%pcl-invert-case`, `%pcl-cl-sub-name`, `%pcl-loop-tag`, `%pcl-uname-to-sub`.
+  ~40 `string-upcase`→`%pcl-invert-case`; `@ISA`/`@EXPORT`/… literals lowercased;
+  `PL-` prefix checks → `string-equal`; `caller`/stash/bareword-FH reverse-maps
+  invert-then-strip; loop-label catch/throw unified through `%pcl-loop-tag`.
+- **Fixes subs/classes/packages/labels for free** (prefix discipline makes upper
+  Perl names mixed-case tokens, which `:invert` preserves) — the gap s252 left.
+- **Bugs found + fixed in review:** AUTOLOAD (`PL-AUTOLOAD`≠`pl-AUTOLOAD`), stash
+  key case, uniform-case loop labels. Regression tests in
+  `Pl/t/case-invert-01.t` (13) + kept collision tests in `misc-fixes-02.t` (4).
+- **s252 retired** (`__pcl_ci_N` rename machinery removed from Parser/ExprToCL/
+  Environment). The Getopt::Long s264 symref collision is fixed for free.
+- Validation: Pl/t gate green (101/3551); full sweep at parity (~18017 vs ~18088).
+
+## Remaining follow-ups (not blockers)
+1. **Scoped readtable + FASL/saved-core cache invalidation** — the readtable is
+   currently set process-globally. Fine for the dev/sweep paths (runtime loads
+   first), but the `pcl`-runner saved core and the FASL caches need the binding
+   scoped and stale-cache invalidation (fails loud: stale `:upcase` FASLs throw
+   undefined-function — clear `~/.pcl-cache`). Do this with the `pcl`-runner work.
+2. **Retire the older `__case__N` lexical rename** (Parser.pm `_with_declarations`)
+   — now redundant under `:invert`, but self-consistent/harmless and entangled
+   with `__lex__N` closure renaming; remove when that area is next touched.
+3. `clos-class-to-pkg` is now dead (callers use `symbol-package`); harmless.
+
+---
+
+## (Historical) Plan as written before implementation
+
 **Status:** plan only (2026-06-16; updated s264 2026-06-21). Targeted
 collision-only fix shipped s252; the general fix below is deferred to the
 compiler rewrite. See `memory/project_case_sensitivity_general_fix.md` for the
