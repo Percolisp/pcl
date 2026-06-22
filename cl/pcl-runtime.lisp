@@ -11819,8 +11819,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defpackage :XSLoader (:use :cl :pcl))
 (in-package :XSLoader)
-;; XSLoader::load('Module', $version) — no-op, XS cannot be loaded by PCL
-(defun pl-load (&rest args) (declare (ignore args)) nil)
+;; XSLoader::load('Module', $version) — PCL cannot load XS, so this MUST fail
+;; exactly as it would on a system where the loadable object is missing.  The
+;; standard dual-life idiom `eval { require XSLoader; XSLoader::load(...); 1 }
+;; or $Useperl = 1;` (Data::Dumper, Time::HiRes, etc.) then falls back to the
+;; pure-Perl implementation.  A no-op success would leave $Useperl=0 and call
+;; the nonexistent XS sub (e.g. Data::Dumper::Dumpxs).
+(defun pl-load (&rest args)
+  (let ((mod (if args (to-string (first args)) "this module")))
+    (p-die (format nil "Can't locate loadable object for module ~A in @INC" mod))))
 (defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
 ;;; UNIVERSAL package methods — callable as UNIVERSAL::can($obj, $m) etc.
 (defpackage :UNIVERSAL (:use :cl :pcl))
