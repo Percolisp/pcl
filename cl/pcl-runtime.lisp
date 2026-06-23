@@ -4083,12 +4083,14 @@
          (old (gensym "OLD"))
          (box (gensym "BOX")))
     (cond
-      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
+      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it.
+      ;; Return the RAW old value: unlike ++, postfix -- on undef returns undef
+      ;; (Perl: `$x--` with $x undef yields undef, then sets $x to -1).
       ((and (listp real-place)
             (member (car real-place) '(p-aref-box p-gethash-box)))
        `(let* ((,box ,real-place)
-               (,old (to-number ,box)))
-          (box-set ,box (1- ,old))
+               (,old (unbox ,box)))
+          (box-set ,box (1- (to-number ,box)))
           ,old))
       ;; p-cast-$ (scalar deref): may return a mutable box — capture VALUE before mutation
       ((and (listp real-place) (eq (car real-place) 'p-cast-$))
@@ -4102,10 +4104,12 @@
        `(let ((,old ,real-place))
           (decf ,real-place)
           ,old))
-      ;; Boxed scalar
-      (t `(let ((,old (to-number ,real-place)))
-            (box-set ,real-place (1- ,old))
-            ,old)))))
+      ;; Boxed scalar — return the RAW old value (string or number).  Postfix --
+      ;; on undef returns undef (NOT 0 like ++), so do not numify the old value.
+      (t (let ((val (gensym "VAL")))
+           `(let ((,val (unbox ,real-place)))
+              (box-set ,real-place (1- (to-number ,real-place)))
+              ,val))))))
 
 ;;; ------------------------------------------------------------
 ;;; Compound Assignment Operators
@@ -6024,8 +6028,11 @@
                 (go :redo)
               :next))))
       (let ((iter-block (gensym "ITER")))
+        ;; Wrap body in progn: an atom body form (e.g. a bare literal loop body
+        ;; like `"foo" for (1)`) spliced straight into a tagbody would be read as
+        ;; a go-tag ("not a legal go tag"), not a value.
         `(block ,iter-block
-           (tagbody :redo ,@body :next)))))
+           (tagbody :redo (progn ,@body) :next)))))
 
 (defmacro p-while (condition &rest body-and-keys)
   "Perl while loop with optional :label and :continue.

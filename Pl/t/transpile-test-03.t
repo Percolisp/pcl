@@ -396,4 +396,12 @@ test_transpile("sprintf %g fixed vs exponential boundary", '
 printf "%g %g %g\n", 999999, 1000000, 0.00001;
 ');
 
+# Postfix -- on undef returns undef (NOT 0, unlike ++); then sets to -1.
+test_transpile("postdec of undef returns undef", '
+my $a; my $y = $a--;
+printf "y=%s a=%s\n", (defined $y ? $y : "undef"), $a;
+my @x; my $z = $x[0]--;
+printf "z=%s x0=%s\n", (defined $z ? $z : "undef"), $x[0];
+');
+
 done_testing();
