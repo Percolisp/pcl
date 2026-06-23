@@ -122,6 +122,21 @@ sub is_named_unary {
   return $self->named_unary->{$name};
 }
 
+# True if TOKEN is an operator that acts as a unary PREFIX operator: the prefix
+# set (! ~ \ ++ -- and the file-test ops -e/-f/-d/…) — i.e. operators whose
+# operand is to their right.  Used to reduce a run of adjacent prefix operators
+# inner-first (`!-e $x` => `!(-e $x)`).
+sub _is_prefix_op_token {
+  my ($self, $tok) = @_;
+  my $name = $self->is_token_operator($tok);
+  return 0 unless defined $name;
+  my $info = $self->op_info($tok);
+  return 0 unless $info && ($info->{no} // 0) == 1;
+  return 1 if exists $self->prefix->{$name};   # ! ~ \ ++ -- -e -f …
+  return 1 if $name =~ /^-[A-Za-z]$/;          # any file-test operator
+  return 0;
+}
+
 # Token utilities for type checking
 has token_utils => (
   is       => 'ro',
@@ -385,6 +400,7 @@ sub parse {
   }
 
   $e            = $self->cleanup_for_parsing($e);
+  $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
   # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
   # as its argument (e.g. `defined *{$g}{CODE}` in Sub::Override) instead of just
@@ -1479,6 +1495,28 @@ sub parse {
       }
     }
 
+    # Adjacent prefix operators must reduce INNER-first, regardless of their
+    # precedence numbers: `!-e $x` is `!(-e $x)` and `! -d $x` is `!(-d $x)`.
+    # The loop picks the highest-precedence op, which for `! -e` is `!` (90) —
+    # but `!`'s operand is the not-yet-reduced `-e $x`, so reducing `!` first
+    # strands `$x` and the parse falls through.  When the selected op is a
+    # prefix operator whose right neighbour is ALSO a prefix operator, walk to
+    # the RIGHTMOST operator in that consecutive run and reduce it first.
+    if ($self->_is_prefix_op_token($op)) {
+      my $j = $hi_ix;
+      while ($j + 1 < scalar(@$e)
+             && $self->_is_prefix_op_token($e->[$j + 1])) {
+        $j++;
+      }
+      if ($j != $hi_ix) {
+        $hi_ix   = $j;
+        $op      = $e->[$j];
+        $op_info = $self->op_info($op);
+        $op_name = $self->is_token_operator($op);
+        $hi_prio = $op_info->{prec};
+      }
+    }
+
     say "++++++ Found an op to replace. Got ", $op->content(),
         ", precedence: $hi_prio"                     if 2 & DEBUG;
 
@@ -2357,7 +2395,7 @@ sub handle_subcalls {
             my $params = ($func_name eq 'sort') ? ['$a', '$b'] : ['$_'];
             my $body_cl = _block_is_hash_constructor($block)
               ? $self->parser->parse_hash_block_to_cl_string($block)
-              : $self->parser->parse_block_to_cl_string($block);
+              : $self->parser->parse_block_to_cl_string($block, $func_name);
 
             # Handle -> deref chain after block in paren form: grep({HASH}->{key}, LIST)
             # @rest_ch starts with -> subscript pairs; consume them into body_cl.
@@ -2443,7 +2481,7 @@ sub handle_subcalls {
             # Parse block body as CL string
             my $body_cl = _block_is_hash_constructor($next)
               ? $self->parser->parse_hash_block_to_cl_string($next)
-              : $self->parser->parse_block_to_cl_string($next);
+              : $self->parser->parse_block_to_cl_string($next, $func_name);
 
             # Handle -> deref chain after block: grep {HASH}->{key}, LIST
             # Consume any leading '-> subscript' pairs from @$e[$i+2..], wrapping body_cl.
@@ -2878,8 +2916,11 @@ sub handle_subcalls {
       my $next = $e->[$i + 1];
       my $next_op = $self->is_token_operator($next);
       my %can_be_prefix = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+      # Filetest operators (-e, -f, -d, …) are always unary prefix: they start
+      # an argument expression, not a binary op (e.g. `print -e $f`).
       if ($next_op && ref($next) ne 'PPI::Token::Cast'
-          && !$can_be_prefix{$next_op}) {
+          && !$can_be_prefix{$next_op}
+          && $next_op !~ /^-[A-Za-z]$/) {
         # Function followed by binary-only operator - treat as zero params
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $node_id = $self->make_node($now);
@@ -2911,7 +2952,9 @@ sub handle_subcalls {
         my $is_cast = ref($next) eq 'PPI::Token::Cast';
         # Operators that can be unary prefix: + - ! ~ ~. \ not
         my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '~.', '\\', 'not', '++', '--');
-        my $is_unary = $is_cast || $can_be_unary_op{$next_op};
+        # Filetest operators (-e, -f, -d, …) are always unary prefix.
+        my $is_unary = $is_cast || $can_be_unary_op{$next_op}
+            || $next_op =~ /^-[A-Za-z]$/;
         if (!$is_unary) {
           # Binary-only operator - treat bareword as zero-arg function.
           # BUT: if the word is not a known function (not in known_no_of_params,
@@ -3175,7 +3218,15 @@ sub handle_subcalls {
         if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())
           my $after_fh = $e->[$fh_end + 1];
-          $is_fh = 1 unless $after_fh && $self->is_arrow_op($after_fh);
+          # A comma/fat-comma right after the bareword means it is a LIST
+          # element, not a filehandle: `print FOO, $x` (FOO is a constant/
+          # string).  The filehandle form has NO separator between the handle
+          # and the list (`print FH LIST`).
+          my $after_op = $after_fh ? $self->is_token_operator($after_fh) : undef;
+          my $blocks_fh = $after_fh
+              && ($self->is_arrow_op($after_fh)
+                  || (defined($after_op) && ($after_op eq ',' || $after_op eq '=>')));
+          $is_fh = 1 unless $blocks_fh;
         }
       }
       # Check for block filehandle syntax: print {$expr} LIST
@@ -3536,6 +3587,26 @@ sub is_op_prefix {
 
 # After "print $var TOKEN", determine if TOKEN starts a new term
 # (making $var a filehandle) or is an operator (making $var an argument).
+# Filetest operators (-e, -f, -d, …) default their operand to $_ when no term
+# follows: `grep { -e } @files`, `print -e ? ...`, bare `-e`.  Perl treats them
+# like the named-unary functions that default to $_ (uc/lc/length/…); the only
+# difference is PPI tokenises them as Operators, not Words, so the normal
+# default-$_ machinery (the [1,-2] spec) never sees them.  Insert an explicit
+# `$_` token after such a bare filetest so both the single-element and the
+# operator-precedence parse paths handle it uniformly with no special-casing.
+sub _default_filetest_operand {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e); $i++) {
+    my $tok = $e->[$i];
+    next unless ref($tok) eq 'PPI::Token::Operator'
+             && $tok->content =~ /^-[A-Za-z]$/;
+    my $next = $e->[$i + 1];   # undef past end
+    next if defined $next && $self->_is_print_term_start($next);
+    splice @$e, $i + 1, 0, PPI::Token::Symbol->new('$_');
+    $i++;   # skip the token we just inserted
+  }
+}
+
 sub _is_print_term_start {
   my ($self, $token) = @_;
   my $ref = ref($token);

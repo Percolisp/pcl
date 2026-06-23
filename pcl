@@ -84,6 +84,26 @@ exec_sbcl($lisp, \@script_args);   # never returns
 # Helpers
 # ===========================================================================
 
+# Build the `use`/`no` line for one -M argument, matching perl(1) semantics:
+#   Module            → use Module;
+#   Module=a,b        → use Module split(/,/,q{a,b});  (i.e. import a, b)
+#   -Module           → no Module;
+#   -Module=a,b       → no Module split(/,/,q{a,b});
+sub _use_line_for_M {
+  my ($spec) = @_;
+  my $verb = 'use';
+  if ($spec =~ s/^-//) { $verb = 'no'; }
+  if ($spec =~ /^([\w:]+)=(.*)$/s) {
+    my ($mod, $imports) = ($1, $2);
+    # Perl passes the import list as split(/,/, "...").  Emit explicit
+    # quoted args so the module's import() sees the same list.
+    my @args = split /,/, $imports, -1;
+    my $list = join(', ', map { my $a = $_; $a =~ s/(['\\])/\\$1/g; "'$a'" } @args);
+    return "$verb $mod ($list);\n";
+  }
+  return "$verb $spec;\n";
+}
+
 # Transpile $source (a file) or $inline (a code string), honouring -M.
 # Returns the path to a temp .lisp (cleaned up at exit).
 sub transpile {
@@ -94,7 +114,12 @@ sub transpile {
   # -M Module  →  prepend `use Module;` lines. If any are present (or we're in
   # -e mode), assemble the full source text and transpile that; otherwise
   # transpile the file directly so line numbers and the source dir are preserved.
-  my $use_prefix = join('', map { "use $_;\n" } @use_mods);
+  # Match perl's -M semantics:
+  #   -MModule              → use Module;
+  #   -MModule=arg1,arg2    → use Module split(/,/,q{arg1,arg2});
+  #   -M-Module             → no Module;        (leading '-')
+  #   -M-Module=arg1,arg2   → no Module split(...);
+  my $use_prefix = join('', map { _use_line_for_M($_) } @use_mods);
 
   my @inc_args = map { ("-I", $_) } ($ROOT, @inc_dirs);   # -I dirs ride pl2cl's @INC
 

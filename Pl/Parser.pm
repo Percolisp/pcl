@@ -1146,6 +1146,19 @@ sub _process_children {
     }
 
     $self->_process_element($child);
+
+    # Flush any BEGIN blocks hoisted out of an expression-level do{}/eval{} that
+    # sat inside this top-level statement (see parse_block_as_function).  Doing
+    # it here — once the statement is fully emitted and we are back at file
+    # scope — appends the BEGIN to `definitions` AFTER the enclosing form
+    # (no mid-form interleaving) yet still before any later runtime code.
+    if ($self->environment->in_subroutine == 0
+        && $self->{_pending_hoisted_defs}
+        && @{$self->{_pending_hoisted_defs}}) {
+      my $section = $self->_sections->[$self->_cur_section];
+      push @{$section->{'definitions'}}, @{$self->{_pending_hoisted_defs}};
+      $self->{_pending_hoisted_defs} = [];
+    }
   }
 }
 
@@ -1492,8 +1505,14 @@ sub _process_expression_statement {
     }
   }
   else {
-    # No modifier - bare expression statement; result is discarded (void context)
-    $cl_code = $self->_parse_expression(\@parts, $stmt, VOID_CTX);
+    # No modifier - bare expression statement; result is normally discarded
+    # (void context).  Exception: the tail statement of a map { } block, whose
+    # value IS consumed in LIST context — parse it that way so `..` is a range,
+    # an @array flattens, etc.
+    my $stmt_ctx = ($self->environment->tail_position
+                    && $self->environment->tail_wants_list)
+        ? LIST_CTX : VOID_CTX;
+    $cl_code = $self->_parse_expression(\@parts, $stmt, $stmt_ctx);
   }
 
   # Emit as comment + code.
@@ -2570,8 +2589,20 @@ sub _process_local_declaration {
         push @flat, $child;
       }
     }
+    my $has_comma = grep {
+      ref($_) eq 'PPI::Token::Operator' && $_->content eq ','
+    } @flat;
     if (@flat == 1 && ref($flat[0]) eq 'PPI::Token::Symbol') {
       # local(*foo) or local($scalar) with no subscript — unwrap the parens
+      splice(@non_ws, 0, 1, @flat);
+    }
+    elsif (@flat >= 2 && !$has_comma
+           && ref($flat[0]) eq 'PPI::Token::Symbol') {
+      # local($h{k}) / local($a[i]) / local($ref->{k}) / local($ref->[i]) —
+      # a single subscripted lvalue in parens.  Unwrap so the subscript-aware
+      # handlers below (Symbol+Subscript / Symbol+'->'+Subscript) fire; without
+      # this it falls through to the generic list-local path which clobbers the
+      # base scalar (e.g. `local($s->{apad}) = ...` overwrote $s).
       splice(@non_ws, 0, 1, @flat);
     }
   }
@@ -4104,10 +4135,24 @@ sub parse_block_as_function {
     $self->_cur_section($saved_cur_section);
     $self->_cur_bucket($saved_cur_bucket);
     $self->indent_level($saved_indent);
-    # Re-emit hoisted definitions (BEGIN blocks, etc.) into the real sections
+    # Re-emit hoisted definitions (BEGIN blocks, etc.) into the real sections.
+    # Interleaving guard: since s253b a top-level sub body is emitted
+    # incrementally into the `definitions` bucket.  If a do{}/eval{} block sits
+    # in that sub (e.g. inside an elsif CONDITION) and contains a BEGIN, naively
+    # appending the hoisted BEGIN to `definitions` drops it between the lines of
+    # the in-progress form — landing a stray (p-BEGIN ...) between two p-if
+    # branches and corrupting the macro call.  When the bucket currently being
+    # emitted to IS `definitions`, DEFER the hoist into a pending buffer that
+    # _process_children flushes once the current top-level statement is fully
+    # emitted (so the BEGIN lands AFTER the enclosing sub, where the constants it
+    # references — also in `definitions`, earlier in source — already exist).
     if (@hoisted_defs) {
       my $section = $self->_sections->[$self->_cur_section];
-      push @{$section->{'definitions'}}, @hoisted_defs;
+      if ($self->_cur_bucket eq 'definitions') {
+        push @{$self->{_pending_hoisted_defs} //= []}, @hoisted_defs;
+      } else {
+        push @{$section->{'definitions'}}, @hoisted_defs;
+      }
     }
     # Re-emit hoisted declarations (our $var defvars, etc.) into the real sections
     if (@hoisted_decls) {
@@ -4125,8 +4170,13 @@ sub parse_block_as_function {
 # Parse a block and return its body as CL code string (for inline lambdas)
 # Returns the CL code string for the block body
 sub parse_block_to_cl_string {
-  my $self   = shift;
-  my $block  = shift;  # PPI::Structure::Block
+  my $self     = shift;
+  my $block    = shift;  # PPI::Structure::Block
+  my $for_func = shift // '';  # 'map'/'grep'/'sort'/... — selects tail context
+
+  # map { ... } evaluates its block in LIST context (so `..` is range, an @array
+  # tail flattens, etc.).  grep/sort blocks stay scalar/boolean (their default).
+  my $tail_wants_list = ($for_func eq 'map');
 
   # Save current bucket state and indent; set up a fresh temp section
   my $saved_sections    = $self->_sections;
@@ -4169,8 +4219,10 @@ sub parse_block_to_cl_string {
 
     my $is_tail = defined $last_sig && $child == $last_sig;
     $self->environment->tail_position(1) if $is_tail;
+    $self->environment->tail_wants_list(1) if $is_tail && $tail_wants_list;
     $self->_process_element($child);
     $self->environment->tail_position(0) if $is_tail;
+    $self->environment->tail_wants_list(0) if $is_tail && $tail_wants_list;
     $has_content = 1;
   }
 

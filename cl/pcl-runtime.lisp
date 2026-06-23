@@ -2478,10 +2478,13 @@
                (s (sprintf-format-float-f num f-prec)))
           (if alt-form-p
               s
-              ;; Strip trailing zeros, then trailing dot
-              (let* ((trimmed (string-right-trim "0" s))
-                     (trimmed (string-right-trim "." trimmed)))
-                trimmed))))))
+              ;; Strip trailing zeros from the FRACTIONAL part only: integer
+              ;; digits are significant (e.g. "100000" must not become "1").
+              (if (find #\. s)
+                  (let* ((trimmed (string-right-trim "0" s))
+                         (trimmed (string-right-trim "." trimmed)))
+                    trimmed)
+                  s))))))
 
 (defun sprintf-apply-width (str width left-justify-p zero-pad-p sign-str)
   "Apply width/padding to formatted string. SIGN-STR is the sign prefix (if any).
@@ -4080,12 +4083,14 @@
          (old (gensym "OLD"))
          (box (gensym "BOX")))
     (cond
-      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it
+      ;; Box-returning accessors (p-aref-box, p-gethash-box) - get box and modify it.
+      ;; Return the RAW old value: unlike ++, postfix -- on undef returns undef
+      ;; (Perl: `$x--` with $x undef yields undef, then sets $x to -1).
       ((and (listp real-place)
             (member (car real-place) '(p-aref-box p-gethash-box)))
        `(let* ((,box ,real-place)
-               (,old (to-number ,box)))
-          (box-set ,box (1- ,old))
+               (,old (unbox ,box)))
+          (box-set ,box (1- (to-number ,box)))
           ,old))
       ;; p-cast-$ (scalar deref): may return a mutable box — capture VALUE before mutation
       ((and (listp real-place) (eq (car real-place) 'p-cast-$))
@@ -4099,10 +4104,12 @@
        `(let ((,old ,real-place))
           (decf ,real-place)
           ,old))
-      ;; Boxed scalar
-      (t `(let ((,old (to-number ,real-place)))
-            (box-set ,real-place (1- ,old))
-            ,old)))))
+      ;; Boxed scalar — return the RAW old value (string or number).  Postfix --
+      ;; on undef returns undef (NOT 0 like ++), so do not numify the old value.
+      (t (let ((val (gensym "VAL")))
+           `(let ((,val (unbox ,real-place)))
+              (box-set ,real-place (1- (to-number ,real-place)))
+              ,val))))))
 
 ;;; ------------------------------------------------------------
 ;;; Compound Assignment Operators
@@ -6021,8 +6028,11 @@
                 (go :redo)
               :next))))
       (let ((iter-block (gensym "ITER")))
+        ;; Wrap body in progn: an atom body form (e.g. a bare literal loop body
+        ;; like `"foo" for (1)`) spliced straight into a tagbody would be read as
+        ;; a go-tag ("not a legal go tag"), not a value.
         `(block ,iter-block
-           (tagbody :redo ,@body :next)))))
+           (tagbody :redo (progn ,@body) :next)))))
 
 (defmacro p-while (condition &rest body-and-keys)
   "Perl while loop with optional :label and :continue.
@@ -11344,7 +11354,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (progn
                        (unless cont-p
                          (remhash string *p-match-pos*))
-                       nil)))))
+                       ;; scalar/void /g no-match → Perl's '' (defined false)
+                       "")))))
             ;; No /g: single match.  With \G, anchor at the current pos.
             (t
              (let ((start (if anchored-g (or (gethash string *p-match-pos*) 0) 0)))
@@ -11352,23 +11363,27 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (cl-ppcre:scan scanner str :start start)
                  (when (and anchored-g match-start (/= match-start start))
                    (setf match-start nil))
-                 (when match-start
-                   (clear-capture-groups)
-                   (set-capture-groups str reg-starts reg-ends reg-names)
-                   (set-match-vars str match-start match-end reg-starts reg-ends)
-                   (if (eq *wantarray* t)
-                       (let* ((num-groups (length reg-starts))
-                              (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
-                         (if (zerop num-groups)
-                             ;; No capture groups: Perl returns (1) in list context on success
-                             (setf (aref captures 0) 1)
-                             (dotimes (i num-groups)
-                               (setf (aref captures i)
-                                     (if (and (aref reg-starts i) (aref reg-ends i))
-                                         (subseq str (aref reg-starts i) (aref reg-ends i))
-                                         nil))))
-                         captures)
-                       t)))))))
+                 (if match-start
+                     (progn
+                       (clear-capture-groups)
+                       (set-capture-groups str reg-starts reg-ends reg-names)
+                       (set-match-vars str match-start match-end reg-starts reg-ends)
+                       (if (eq *wantarray* t)
+                           (let* ((num-groups (length reg-starts))
+                                  (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                             (if (zerop num-groups)
+                                 ;; No capture groups: Perl returns (1) in list context on success
+                                 (setf (aref captures 0) 1)
+                                 (dotimes (i num-groups)
+                                   (setf (aref captures i)
+                                         (if (and (aref reg-starts i) (aref reg-ends i))
+                                             (subseq str (aref reg-starts i) (aref reg-ends i))
+                                             nil))))
+                             captures)
+                           t))
+                     ;; No match: scalar/void context returns Perl's '' (defined
+                     ;; false), not undef; list context returns the empty list.
+                     (if (eq *wantarray* t) nil "")))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))
@@ -11594,8 +11609,10 @@ buffer's fill-pointer; everything else falls back to file-length."
        nil))))
 
 (defun p-!~ (string operation)
-  "Perl !~ negative binding operator"
-  (not (p-=~ string operation)))
+  "Perl !~ negative binding operator.  Uses Perl truthiness, not CL nil-ness:
+   a failed m// now returns the defined-false \"\" (not nil), so test with
+   p-true-p, returning Perl's 1 (true) / \"\" (false)."
+  (if (p-true-p (p-=~ string operation)) "" 1))
 
 ;;; ============================================================
 ;;; Helper to create Perl-style arrays
@@ -11819,8 +11836,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defpackage :XSLoader (:use :cl :pcl))
 (in-package :XSLoader)
-;; XSLoader::load('Module', $version) — no-op, XS cannot be loaded by PCL
-(defun pl-load (&rest args) (declare (ignore args)) nil)
+;; XSLoader::load('Module', $version) — PCL cannot load XS, so this MUST fail
+;; exactly as it would on a system where the loadable object is missing.  The
+;; standard dual-life idiom `eval { require XSLoader; XSLoader::load(...); 1 }
+;; or $Useperl = 1;` (Data::Dumper, Time::HiRes, etc.) then falls back to the
+;; pure-Perl implementation.  A no-op success would leave $Useperl=0 and call
+;; the nonexistent XS sub (e.g. Data::Dumper::Dumpxs).
+(defun pl-load (&rest args)
+  (let ((mod (if args (to-string (first args)) "this module")))
+    (p-die (format nil "Can't locate loadable object for module ~A in @INC" mod))))
 (defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
 ;;; UNIVERSAL package methods — callable as UNIVERSAL::can($obj, $m) etc.
 (defpackage :UNIVERSAL (:use :cl :pcl))

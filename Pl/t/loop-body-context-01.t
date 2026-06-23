@@ -39,7 +39,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 5;
+plan tests => 6;
 
 # 1. The core bug: a \G/gc tokenizer loop in a sub called in LIST context must
 #    terminate (each m//g in the void loop body advances pos by one token).
@@ -105,4 +105,12 @@ sub pick { if (1) { wantarray ? "L" : "S" } else { "x" } }
 my @l = pick();
 my $s = pick();
 print "$l[0]|$s\n";
+PL
+
+# 6. A bare literal as a loop body (`EXPR for LIST`) must not be read as a
+# tagbody go-tag ("not a legal go tag" compile crash).  From t/cmd/mod.t.
+is(run_pl(<<'PL'), "x=ok\n", 'literal loop body is not a tagbody tag');
+my $x = "".("".do{ "foo" for (1) });
+my $c = 0; $c++ for (1..5);
+print "x=", ($c == 5 ? "ok" : "bad"), "\n";
 PL
