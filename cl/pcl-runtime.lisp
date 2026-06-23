@@ -11344,7 +11344,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (progn
                        (unless cont-p
                          (remhash string *p-match-pos*))
-                       nil)))))
+                       ;; scalar/void /g no-match → Perl's '' (defined false)
+                       "")))))
             ;; No /g: single match.  With \G, anchor at the current pos.
             (t
              (let ((start (if anchored-g (or (gethash string *p-match-pos*) 0) 0)))
@@ -11352,23 +11353,27 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (cl-ppcre:scan scanner str :start start)
                  (when (and anchored-g match-start (/= match-start start))
                    (setf match-start nil))
-                 (when match-start
-                   (clear-capture-groups)
-                   (set-capture-groups str reg-starts reg-ends reg-names)
-                   (set-match-vars str match-start match-end reg-starts reg-ends)
-                   (if (eq *wantarray* t)
-                       (let* ((num-groups (length reg-starts))
-                              (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
-                         (if (zerop num-groups)
-                             ;; No capture groups: Perl returns (1) in list context on success
-                             (setf (aref captures 0) 1)
-                             (dotimes (i num-groups)
-                               (setf (aref captures i)
-                                     (if (and (aref reg-starts i) (aref reg-ends i))
-                                         (subseq str (aref reg-starts i) (aref reg-ends i))
-                                         nil))))
-                         captures)
-                       t)))))))
+                 (if match-start
+                     (progn
+                       (clear-capture-groups)
+                       (set-capture-groups str reg-starts reg-ends reg-names)
+                       (set-match-vars str match-start match-end reg-starts reg-ends)
+                       (if (eq *wantarray* t)
+                           (let* ((num-groups (length reg-starts))
+                                  (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                             (if (zerop num-groups)
+                                 ;; No capture groups: Perl returns (1) in list context on success
+                                 (setf (aref captures 0) 1)
+                                 (dotimes (i num-groups)
+                                   (setf (aref captures i)
+                                         (if (and (aref reg-starts i) (aref reg-ends i))
+                                             (subseq str (aref reg-starts i) (aref reg-ends i))
+                                             nil))))
+                             captures)
+                           t))
+                     ;; No match: scalar/void context returns Perl's '' (defined
+                     ;; false), not undef; list context returns the empty list.
+                     (if (eq *wantarray* t) nil "")))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))
@@ -11594,8 +11599,10 @@ buffer's fill-pointer; everything else falls back to file-length."
        nil))))
 
 (defun p-!~ (string operation)
-  "Perl !~ negative binding operator"
-  (not (p-=~ string operation)))
+  "Perl !~ negative binding operator.  Uses Perl truthiness, not CL nil-ness:
+   a failed m// now returns the defined-false \"\" (not nil), so test with
+   p-true-p, returning Perl's 1 (true) / \"\" (false)."
+  (if (p-true-p (p-=~ string operation)) "" 1))
 
 ;;; ============================================================
 ;;; Helper to create Perl-style arrays

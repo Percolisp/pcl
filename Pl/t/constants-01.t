@@ -10,7 +10,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 17;
+use Test::More tests => 20;
 BEGIN { use_ok('Pl::Parser') };
 BEGIN { use_ok('Pl::Environment') };
 
@@ -88,6 +88,29 @@ output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
                 '(box-set $size (p-* (let ((*wantarray* nil)) (pl-WIDTH)) (let ((*wantarray* nil)) (pl-HEIGHT))))',
                 'Multiple constants in expression');
+
+
+# ========================================
+diag "";
+diag "-------- Constant after print is a list element, not a filehandle:";
+
+# `print FOO, ...` — a comma right after the ALL-CAPS bareword means FOO is a
+# list element (here a constant), NOT a filehandle.  Regression: PCL used to
+# swallow FOO as a filehandle and print nothing for it.
+{
+    my $cl = parse_code('use constant FOO => 1; print FOO, "x";');
+    like($cl, qr/\(p-print \(let \(\(\*wantarray\* t\)\) \(pl-FOO\)\) "x"\)/,
+         'print FOO, ... treats FOO as a list element (constant), not a filehandle');
+    unlike($cl, qr/p-print :fh.*pl-FOO/,
+           'print FOO, ... does NOT route FOO as a filehandle');
+}
+
+# A bareword filehandle with NO comma is still a filehandle: `print STDERR LIST`.
+{
+    my $cl = parse_code('print STDERR "x";');
+    like($cl, qr/\(p-print :fh 'STDERR "x"\)/,
+         'print STDERR LIST still routes STDERR as a filehandle');
+}
 
 
 # ========================================

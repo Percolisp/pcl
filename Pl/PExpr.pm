@@ -3175,7 +3175,15 @@ sub handle_subcalls {
         if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())
           my $after_fh = $e->[$fh_end + 1];
-          $is_fh = 1 unless $after_fh && $self->is_arrow_op($after_fh);
+          # A comma/fat-comma right after the bareword means it is a LIST
+          # element, not a filehandle: `print FOO, $x` (FOO is a constant/
+          # string).  The filehandle form has NO separator between the handle
+          # and the list (`print FH LIST`).
+          my $after_op = $after_fh ? $self->is_token_operator($after_fh) : undef;
+          my $blocks_fh = $after_fh
+              && ($self->is_arrow_op($after_fh)
+                  || (defined($after_op) && ($after_op eq ',' || $after_op eq '=>')));
+          $is_fh = 1 unless $blocks_fh;
         }
       }
       # Check for block filehandle syntax: print {$expr} LIST

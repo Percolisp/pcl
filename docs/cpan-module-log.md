@@ -10,6 +10,41 @@ Status legend: ✅ works · 🟡 partial · ❌ blocked · 🔧 fixed-this-sessi
 
 ---
 
+## Module survey 2026-06-23 (session after s264) — 3 general bugs fixed
+
+Batch-tested core/CPAN modules through `./runpl`. Most work
+(List::Util incl. `pairs`/`reduce`/`uniq`, Scalar::Util, POSIX, Getopt::Long,
+overload, `use constant`, Data::Dump). Surfaced **three general bugs**, all
+fixed (none module-specific):
+
+1. **`print FOO, LIST` swallowed `FOO` as a filehandle.** An ALL-CAPS bareword
+   right after `print`/`say`/`printf` was always treated as a filehandle, even
+   when a comma followed it (`print FOO, $x` where FOO is a constant). In Perl
+   the filehandle form has NO separator between handle and list; a comma means
+   FOO is a list element. **Fix:** `Pl/PExpr.pm` — a `,`/`=>` immediately after
+   the bareword blocks the filehandle interpretation. Tests: `constants-01.t`.
+
+2. **Failed `=~` returned `undef` instead of `''`.** In scalar context a
+   non-matching `m//` returns Perl's defined-false `''`, not undef; PCL returned
+   nil → undef, so `defined($x =~ /no/)` was false (perl: true). Surfaced via
+   `Scalar::Util::looks_like_number("xx")` returning undef. **Fix:**
+   `do-regex-match` in `cl/pcl-runtime.lisp` returns `""` on no-match in
+   scalar/void context (list context still returns the empty list).
+
+3. **`pcl -MModule=imports` ignored the import list.** The `pcl` runner turned
+   `-MData::Dump=dump` into `use Data::Dump=dump;` (invalid) so `dump` was never
+   imported → "function pl-dump is undefined". **Fix:** `pcl` now parses perl's
+   `-M` syntax (`-MMod=a,b` → `use Mod (a, b)`, `-M-Mod` → `no Mod`). Test:
+   `pcl-dash-m-01.t`.
+
+### Not fixed (out of scope / deep)
+- **Storable / Time::HiRes / Hash::Util** — XS modules, no pure-Perl fallback
+  (correctly die "Can't locate loadable object", per not-supported.md XS).
+- **Text::Wrap** — dies "This shouldn't happen". Root cause: cl-ppcre has **no
+  `\p{...}` / `\pL` / `\PM` Unicode-property support** (verified `"a"=~/\pL/`
+  fails). Text::Wrap's wrap regex uses `\PM\pM*`. Broad regex-engine gap; left
+  as a known limitation for now (would need a property resolver / cl-unicode).
+
 ## Data::Dumper — ✅ WORKS (as of 2026-06-22, session after s264)
 
 `use Data::Dumper; print Dumper($ref)` now produces **byte-identical** output to
