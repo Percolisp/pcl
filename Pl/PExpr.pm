@@ -122,6 +122,21 @@ sub is_named_unary {
   return $self->named_unary->{$name};
 }
 
+# True if TOKEN is an operator that acts as a unary PREFIX operator: the prefix
+# set (! ~ \ ++ -- and the file-test ops -e/-f/-d/…) — i.e. operators whose
+# operand is to their right.  Used to reduce a run of adjacent prefix operators
+# inner-first (`!-e $x` => `!(-e $x)`).
+sub _is_prefix_op_token {
+  my ($self, $tok) = @_;
+  my $name = $self->is_token_operator($tok);
+  return 0 unless defined $name;
+  my $info = $self->op_info($tok);
+  return 0 unless $info && ($info->{no} // 0) == 1;
+  return 1 if exists $self->prefix->{$name};   # ! ~ \ ++ -- -e -f …
+  return 1 if $name =~ /^-[A-Za-z]$/;          # any file-test operator
+  return 0;
+}
+
 # Token utilities for type checking
 has token_utils => (
   is       => 'ro',
@@ -1477,6 +1492,28 @@ sub parse {
         $op_info  = $rn_info;
         $op_name  = $rn_str;
         $hi_prio  = $rn_info->{prec};
+      }
+    }
+
+    # Adjacent prefix operators must reduce INNER-first, regardless of their
+    # precedence numbers: `!-e $x` is `!(-e $x)` and `! -d $x` is `!(-d $x)`.
+    # The loop picks the highest-precedence op, which for `! -e` is `!` (90) —
+    # but `!`'s operand is the not-yet-reduced `-e $x`, so reducing `!` first
+    # strands `$x` and the parse falls through.  When the selected op is a
+    # prefix operator whose right neighbour is ALSO a prefix operator, walk to
+    # the RIGHTMOST operator in that consecutive run and reduce it first.
+    if ($self->_is_prefix_op_token($op)) {
+      my $j = $hi_ix;
+      while ($j + 1 < scalar(@$e)
+             && $self->_is_prefix_op_token($e->[$j + 1])) {
+        $j++;
+      }
+      if ($j != $hi_ix) {
+        $hi_ix   = $j;
+        $op      = $e->[$j];
+        $op_info = $self->op_info($op);
+        $op_name = $self->is_token_operator($op);
+        $hi_prio = $op_info->{prec};
       }
     }
 

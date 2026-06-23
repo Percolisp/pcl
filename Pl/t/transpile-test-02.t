@@ -444,5 +444,11 @@ test_transpile('filetest -d leads print args',
     'print -d "/" ? "dir" : "nodir";');
 test_transpile('filetest -e with concat precedence',
     'print -e "/" . "zzz" ? "exists" : "absent";');
+# A prefix !/~ immediately before a filetest must reduce inner-first:
+# `!-e $f` is `!(-e $f)`.  (Was a PARSE ERROR — also blocked Perl's test.pl.)
+test_transpile('negated filetest !-e',
+    'my $f="/nonexistent_zzz"; print( (!-e $f) ? "absent" : "present" );');
+test_transpile('negated filetest ! -d with space',
+    'my $f="/nonexistent_zzz"; print( (! -d $f) ? "notdir" : "dir" );');
 
 done_testing();
