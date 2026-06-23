@@ -2358,7 +2358,7 @@ sub handle_subcalls {
             my $params = ($func_name eq 'sort') ? ['$a', '$b'] : ['$_'];
             my $body_cl = _block_is_hash_constructor($block)
               ? $self->parser->parse_hash_block_to_cl_string($block)
-              : $self->parser->parse_block_to_cl_string($block);
+              : $self->parser->parse_block_to_cl_string($block, $func_name);
 
             # Handle -> deref chain after block in paren form: grep({HASH}->{key}, LIST)
             # @rest_ch starts with -> subscript pairs; consume them into body_cl.
@@ -2444,7 +2444,7 @@ sub handle_subcalls {
             # Parse block body as CL string
             my $body_cl = _block_is_hash_constructor($next)
               ? $self->parser->parse_hash_block_to_cl_string($next)
-              : $self->parser->parse_block_to_cl_string($next);
+              : $self->parser->parse_block_to_cl_string($next, $func_name);
 
             # Handle -> deref chain after block: grep {HASH}->{key}, LIST
             # Consume any leading '-> subscript' pairs from @$e[$i+2..], wrapping body_cl.

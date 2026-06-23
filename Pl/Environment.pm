@@ -228,6 +228,22 @@ has tail_position => (
     default => 0,
 );
 
+=head2 tail_wants_list
+
+Set to 1 while processing the tail (last) statement of a block whose value is
+consumed in LIST context — currently a C<map { ... }> block, which Perl
+evaluates in list context.  A bare expression statement at tail position
+normally compiles in VOID_CTX; when this flag is set it compiles in LIST_CTX
+instead, so e.g. C<map { 1..$_ }> treats C<..> as the range operator (not the
+flip-flop, which is what scalar/boolean context would select).
+
+=cut
+
+has tail_wants_list => (
+    is      => 'rw',
+    default => 0,
+);
+
 =head2 lvalue_subs
 
 Hash reference of subroutines declared with :lvalue attribute.

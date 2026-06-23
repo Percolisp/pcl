@@ -2478,10 +2478,13 @@
                (s (sprintf-format-float-f num f-prec)))
           (if alt-form-p
               s
-              ;; Strip trailing zeros, then trailing dot
-              (let* ((trimmed (string-right-trim "0" s))
-                     (trimmed (string-right-trim "." trimmed)))
-                trimmed))))))
+              ;; Strip trailing zeros from the FRACTIONAL part only: integer
+              ;; digits are significant (e.g. "100000" must not become "1").
+              (if (find #\. s)
+                  (let* ((trimmed (string-right-trim "0" s))
+                         (trimmed (string-right-trim "." trimmed)))
+                    trimmed)
+                  s))))))
 
 (defun sprintf-apply-width (str width left-justify-p zero-pad-p sign-str)
   "Apply width/padding to formatted string. SIGN-STR is the sign prefix (if any).

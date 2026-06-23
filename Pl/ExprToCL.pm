@@ -2075,6 +2075,15 @@ sub gen_ternary {
   my $node_id = shift;
   my $kids    = shift;
 
+  # The ternary's value is its chosen branch, so the branches inherit the
+  # ternary's own context (the condition stays boolean/scalar).  Without this a
+  # range in a branch — `wantarray ? (1..3) : "x"` in list context — sees a
+  # non-list context and is mis-emitted as a flip-flop.
+  my $ctx = $self->expr_o->get_node_context($node_id);
+  if (defined $ctx) {
+    $self->expr_o->set_node_context($kids->[1], $ctx);
+    $self->expr_o->set_node_context($kids->[2], $ctx);
+  }
   my $cond = $self->gen_node($kids->[0]);
   my $then  = $self->gen_node($kids->[1]);
   my $else  = $self->gen_node($kids->[2]);
@@ -2737,7 +2746,25 @@ sub gen_progn {
   # In list context, generate a vector instead of progn
   # This handles: @a = (1,2,3), etc.
   if ($ctx == 1) {  # LIST_CTX = 1
-    return "(vector $forms_str)";
+    # Perl flattens a parenthesised list: any element that yields a list (an
+    # @array, a range 1..3, a list-returning call like reverse/map/sort, a
+    # nested (...), ...) spreads into the outer list.  A plain (vector ...) does
+    # NOT flatten, so e.g. (1..3, 9) wrongly nests the range as one element.
+    # Flatten at RUNTIME via p-flatten-args, which spreads any raw vector and
+    # keeps scalars/refs/blessed as-is — so it is correct for EVERY list-valued
+    # element without enumerating node types.  Keep the fast plain-vector path
+    # only when every child is a provably-scalar leaf (number/string/$scalar),
+    # which covers the common (1,2,3)/($x,$y) literal-list case.
+    my $all_scalar = 1;
+    for my $kid_id (@$kids) {
+      unless ($self->_node_is_definitely_scalar($kid_id)) {
+        $all_scalar = 0;
+        last;
+      }
+    }
+    return $all_scalar
+        ? "(vector $forms_str)"
+        : "(p-flatten-args (list $forms_str))";
   }
 
   # In non-list context with multiple forms, check wantarray at runtime.
@@ -2775,6 +2802,26 @@ sub _is_array_expr_node {
       my $cast = $self->expr_o->get_a_node($kids->[0]);
       return ref($cast) eq 'PPI::Token::Cast' && $cast->content() eq '@';
     }
+  }
+  return 0;
+}
+
+# Returns true only when a node is PROVABLY a single scalar (a number/string
+# literal or a $-sigiled scalar/element).  Used to decide whether a list literal
+# needs runtime flattening: a false answer just means "flatten to be safe"
+# (always correct, slightly slower), so this must NEVER return true for anything
+# that could yield a list at runtime.
+sub _node_is_definitely_scalar {
+  my ($self, $node_id) = @_;
+  my $node = $self->expr_o->get_a_node($node_id);
+  # Internal (non-leaf) nodes can produce lists (ranges, calls, nested (...),
+  # ternaries, …) — treat them all as "not provably scalar".
+  return 0 if $self->expr_o->is_internal_node_type($node);
+  my $ref = ref($node);
+  return 1 if $ref eq 'PPI::Token::Number'
+           || $ref =~ /^PPI::Token::Quote\b/;       # 'str', "str"
+  if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
+    return substr($node->content() // '', 0, 1) eq '$';  # $x, $a[0], $h{k}, $_
   }
   return 0;
 }
@@ -2893,13 +2940,18 @@ sub gen_tree_val {
   # If single child in scalar context, just return it
   # But in list context, we need (vector $x) for proper list assignment
   if (scalar(@$kids) == 1) {
-    # In list context, propagate to child so split/funcs return lists not scalars
-    if ($ctx == 1) {  # LIST_CTX = 1
-      $self->expr_o->set_node_context($kids->[0], 1);
+    # Propagate context to the child so split/funcs return lists not scalars,
+    # and a range (..) emits its runtime wantarray check rather than defaulting
+    # to flip-flop.  A single-child (EXPR) is transparent: the child shares the
+    # paren's context (LIST, or INHERIT for a ternary branch in a sub tail).
+    if ($ctx == LIST_CTX || $ctx == INHERIT_CTX) {
+      $self->expr_o->set_node_context($kids->[0], $ctx);
     }
     # Check at AST level (before codegen) whether child is a list-returning expr.
-    # If so, we must NOT wrap it in (vector ...) — the child already returns a vector.
-    my $child_is_list = ($ctx == 1) && $self->_child_is_list_expr($kids->[0]);
+    # If so, we must NOT wrap it in (vector ...) — the child already returns a
+    # vector.  Use the range-aware predicate so a single paren'd range like
+    # (10..12) (e.g. the RHS of @a[..] = (10..12)) is not nested as one element.
+    my $child_is_list = ($ctx == 1) && $self->_is_list_node_for_refgen($kids->[0]);
     my $child = $self->gen_node($kids->[0]);
     if ($ctx == 1) {  # LIST_CTX = 1
       # Special case: regex match already returns captures in list context

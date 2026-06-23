@@ -1505,8 +1505,14 @@ sub _process_expression_statement {
     }
   }
   else {
-    # No modifier - bare expression statement; result is discarded (void context)
-    $cl_code = $self->_parse_expression(\@parts, $stmt, VOID_CTX);
+    # No modifier - bare expression statement; result is normally discarded
+    # (void context).  Exception: the tail statement of a map { } block, whose
+    # value IS consumed in LIST context — parse it that way so `..` is a range,
+    # an @array flattens, etc.
+    my $stmt_ctx = ($self->environment->tail_position
+                    && $self->environment->tail_wants_list)
+        ? LIST_CTX : VOID_CTX;
+    $cl_code = $self->_parse_expression(\@parts, $stmt, $stmt_ctx);
   }
 
   # Emit as comment + code.
@@ -4164,8 +4170,13 @@ sub parse_block_as_function {
 # Parse a block and return its body as CL code string (for inline lambdas)
 # Returns the CL code string for the block body
 sub parse_block_to_cl_string {
-  my $self   = shift;
-  my $block  = shift;  # PPI::Structure::Block
+  my $self     = shift;
+  my $block    = shift;  # PPI::Structure::Block
+  my $for_func = shift // '';  # 'map'/'grep'/'sort'/... — selects tail context
+
+  # map { ... } evaluates its block in LIST context (so `..` is range, an @array
+  # tail flattens, etc.).  grep/sort blocks stay scalar/boolean (their default).
+  my $tail_wants_list = ($for_func eq 'map');
 
   # Save current bucket state and indent; set up a fresh temp section
   my $saved_sections    = $self->_sections;
@@ -4208,8 +4219,10 @@ sub parse_block_to_cl_string {
 
     my $is_tail = defined $last_sig && $child == $last_sig;
     $self->environment->tail_position(1) if $is_tail;
+    $self->environment->tail_wants_list(1) if $is_tail && $tail_wants_list;
     $self->_process_element($child);
     $self->environment->tail_position(0) if $is_tail;
+    $self->environment->tail_wants_list(0) if $is_tail && $tail_wants_list;
     $has_content = 1;
   }
 

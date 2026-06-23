@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 23;
 
 sub run_cl {
     my ($code) = @_;
@@ -72,6 +72,24 @@ test_cl('my $s = @a[..] is last element',
 test_cl('my $s = @h{..} is last value',
     'my %h=(x=>10,y=>20,z=>30); my $s = @h{qw(x y z)}; print "$s\n";',
     "30\n");
+
+# ── nested parenthesised list flattens list-valued elements (ranges, arrays,
+#    list-returning calls) in list context — was nesting them as one element ───
+test_cl('range inside nested () flattens',
+    'print join(",", (1..3, 5..7)), "\n";',
+    "1,2,3,5,6,7\n");
+test_cl('range mixed with scalar inside nested () flattens',
+    'print join(",", (1..3, 9)), "\n";',
+    "1,2,3,9\n");
+test_cl('array inside nested () flattens',
+    'my @b=(1,2); print join(",", (0, @b, 3)), "\n";',
+    "0,1,2,3\n");
+test_cl('list-returning call inside nested () flattens',
+    'print join(",", (reverse(1,2,3), 9)), "\n";',
+    "3,2,1,9\n");
+test_cl('nested () of nested () flattens',
+    'print join("-", (("a","b"), "c")), "\n";',
+    "a-b-c\n");
 
 # ── slices stay full lists in list context ───────────────────────────────────
 test_cl('@a[..] in list assignment keeps all elements',
