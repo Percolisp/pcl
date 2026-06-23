@@ -8,6 +8,13 @@ $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
 2,4,6,8,10
 ```
 
+The `pcl` command runs one-liners directly, including `-M` imports of pure-Perl CPAN modules:
+
+```bash
+$ pcl -MData::Dump=dump -E '@q=(1 .. 5); @w = map { $_, ":", $_ ** $_ } @q; say dump \@w;'
+[1, ":", 1, 2, ":", 4, 3, ":", 27, 4, ":", 256, 5, ":", 3125]
+```
+
 ### Why Common Lisp?
 
 Two reasons:
