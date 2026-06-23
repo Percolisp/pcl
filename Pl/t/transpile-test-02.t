@@ -434,4 +434,15 @@ $x *= 2;
 say $x;
 ');
 
+# ============ FILETEST OPS AS LIST-OP ARGS ============
+# A filetest operator (-e/-f/-d/...) leading the args of a list operator
+# (print/say/return) was mistaken for a binary op, making the list op zero-arg
+# and falling through to a PARSE ERROR.  Filetests are always unary prefix.
+test_transpile('filetest -e as sole print arg',
+    'print((-e "/") ? "y" : "n"); print " "; print -e "/" ? "yes" : "no";');
+test_transpile('filetest -d leads print args',
+    'print -d "/" ? "dir" : "nodir";');
+test_transpile('filetest -e with concat precedence',
+    'print -e "/" . "zzz" ? "exists" : "absent";');
+
 done_testing();

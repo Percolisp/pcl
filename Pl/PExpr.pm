@@ -385,6 +385,7 @@ sub parse {
   }
 
   $e            = $self->cleanup_for_parsing($e);
+  $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
   # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
   # as its argument (e.g. `defined *{$g}{CODE}` in Sub::Override) instead of just
@@ -2878,8 +2879,11 @@ sub handle_subcalls {
       my $next = $e->[$i + 1];
       my $next_op = $self->is_token_operator($next);
       my %can_be_prefix = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
+      # Filetest operators (-e, -f, -d, …) are always unary prefix: they start
+      # an argument expression, not a binary op (e.g. `print -e $f`).
       if ($next_op && ref($next) ne 'PPI::Token::Cast'
-          && !$can_be_prefix{$next_op}) {
+          && !$can_be_prefix{$next_op}
+          && $next_op !~ /^-[A-Za-z]$/) {
         # Function followed by binary-only operator - treat as zero params
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $node_id = $self->make_node($now);
@@ -2911,7 +2915,9 @@ sub handle_subcalls {
         my $is_cast = ref($next) eq 'PPI::Token::Cast';
         # Operators that can be unary prefix: + - ! ~ ~. \ not
         my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '~.', '\\', 'not', '++', '--');
-        my $is_unary = $is_cast || $can_be_unary_op{$next_op};
+        # Filetest operators (-e, -f, -d, …) are always unary prefix.
+        my $is_unary = $is_cast || $can_be_unary_op{$next_op}
+            || $next_op =~ /^-[A-Za-z]$/;
         if (!$is_unary) {
           # Binary-only operator - treat bareword as zero-arg function.
           # BUT: if the word is not a known function (not in known_no_of_params,
@@ -3544,6 +3550,26 @@ sub is_op_prefix {
 
 # After "print $var TOKEN", determine if TOKEN starts a new term
 # (making $var a filehandle) or is an operator (making $var an argument).
+# Filetest operators (-e, -f, -d, …) default their operand to $_ when no term
+# follows: `grep { -e } @files`, `print -e ? ...`, bare `-e`.  Perl treats them
+# like the named-unary functions that default to $_ (uc/lc/length/…); the only
+# difference is PPI tokenises them as Operators, not Words, so the normal
+# default-$_ machinery (the [1,-2] spec) never sees them.  Insert an explicit
+# `$_` token after such a bare filetest so both the single-element and the
+# operator-precedence parse paths handle it uniformly with no special-casing.
+sub _default_filetest_operand {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e); $i++) {
+    my $tok = $e->[$i];
+    next unless ref($tok) eq 'PPI::Token::Operator'
+             && $tok->content =~ /^-[A-Za-z]$/;
+    my $next = $e->[$i + 1];   # undef past end
+    next if defined $next && $self->_is_print_term_start($next);
+    splice @$e, $i + 1, 0, PPI::Token::Symbol->new('$_');
+    $i++;   # skip the token we just inserted
+  }
+}
+
 sub _is_print_term_start {
   my ($self, $token) = @_;
   my $ref = ref($token);

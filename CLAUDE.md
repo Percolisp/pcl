@@ -73,6 +73,37 @@ This file provides guidance to Claude Code when working with this repository.
     perl .claude/hooks/split-lisp.pl FILENAME.lisp   # writes /tmp/defun-FUNCNAME.lisp for each defun
     ```
 
+11. **Reuse, Don't Duplicate — find the existing mechanism before adding code.**
+    Before writing a fix, ask: *does this behaviour already exist for a sibling
+    case, and can I route mine through the same path?* Most Perl features come in
+    families (the named-unary `$_`-default family `uc`/`lc`/`length`/…; the
+    list-operator filehandle family `print`/`say`/`printf`; the block-arg
+    prototype family `grep`/`map`/`first`). A fix that copies a special-case
+    branch for one member of a family is almost always wrong: it will miss the
+    other parse paths the same input flows through, and it duplicates logic that
+    will drift.
+
+    **Procedure when fixing a bug:**
+    - **Grep first.** Search for the data table, helper, or marker that already
+      drives the sibling behaviour (e.g. the `[1,-2]` "defaults to `$_`" spec,
+      `_is_print_term_start`, `add_implicit_default_param`). Read how a working
+      sibling is handled end-to-end.
+    - **Normalise into the existing path** rather than branching beside it. Often
+      the smallest correct fix is a *single* pre-pass that rewrites your odd input
+      into the shape the generic machinery already consumes (worked example: a
+      bare filetest `-e` is tokenised as an Operator, not a Word, so it never hit
+      the `$_`-default machinery — the fix inserts a `$_` token after it in one
+      `_default_filetest_operand` pass, so *both* the single-element and
+      operator-precedence parse paths handle it with zero new special cases,
+      instead of duplicating the default in each path).
+    - **Count the parse paths.** If the same input can arrive via more than one
+      route (single-element dispatch, operator loop, funcall args, block body),
+      a per-path fix is a smell — push the fix earlier, to the one place they all
+      pass through.
+    - **Smell test (hard stop):** if your diff adds the *same* logic in two
+      places, or copies an existing branch with one token changed, stop and find
+      the shared upstream point instead.
+
 ## Quick Reference
 
 ```bash
