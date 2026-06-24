@@ -429,4 +429,11 @@ test_transpile('eval "__PACKAGE__" inside package block resolves to that package
 test_transpile('nested package blocks: __PACKAGE__ via string eval',
     q{$main::r=""; package Foo { $main::r.=eval("__PACKAGE__"); package Bar::Baz { $main::r.=eval("__PACKAGE__"); } } print "$main::r\n";});
 
+# A main-package global ($::x / $main::x) referenced ONLY inside a sub must get
+# a forward defvar (undef when unset), not crash with an unbound variable.
+test_transpile('main-package global used only in a sub is undef, not unbound',
+    q{sub f { return $::TODO ? "y" : "n"; } print f(), "\n";});
+test_transpile('$main::x set at top level, read only inside a sub',
+    q{$main::g = 42; sub get { return $main::g; } print get(), "\n";});
+
 done_testing();

@@ -866,11 +866,19 @@ sub _insert_variable_forward_declarations {
     # Skip special packages (ENV, INC, SIG, pcl, main) and already-defvar'd forms.
     # Also handles pipe-quoted multi-component package names: |do::not::overwrite|::$this
     unless ($line =~ /^\s*\(defvar\s/) {
-      my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl main);
+      # ENV/INC/SIG/pcl are runtime pseudo-packages, never user globals.
+      # `main` is NOT skipped wholesale: a main-package global referenced ONLY
+      # inside a sub (e.g. $::TODO -> main::$TODO) would otherwise get no defvar
+      # and crash at runtime with an unbound variable — the file-scope
+      # %referenced scan only runs at sub_depth==0.  But main-qualified RUNTIME
+      # specials (main::@ARGV, main::%ENV, …) must still be skipped so we don't
+      # shadow the live runtime ones.
+      my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
       while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][a-zA-Z_]\w*)/g) {
         my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
         my $bare_pkg = defined($1) ? $1 : $2;
         next if $skip_pkg{$bare_pkg};
+        next if $bare_pkg eq 'main' && $runtime_vars{$var};
         next if $var =~ /^[\$\@\%][0-9]/;  # special: $1, $2...
         $cross_pkg_vars{"$pkg\::$var"} = [$pkg, $var];
       }
