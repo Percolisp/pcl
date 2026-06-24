@@ -4,6 +4,23 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 266 (2026-06-24) — Perl's own t/ suite as a bug finder: 7 bugs (2 crash-aborts) from base/cmd/comp; started t/re (gated behind `test.pl`, fixed 2 of its 3 parse errors).
+
+**User: keep finding/fixing bugs via CPAN modules + sweep crashes + fuzzing; continue running Perl's own t/ files (the non-`t/op` dirs) through PCL — that survey was giving results.** Used `tools/run-perl-suite.pl` + `docs/perl-test-suite-survey.md`.
+
+**5 commits, 7 real bugs (all with regression tests + survey-doc rows updated):**
+- `e40d9d2` — `do BLOCK while/until COND` was PRE-test; now POST-test (body runs ≥1×) via new `p-do-while`/`p-do-until` macros (`cmd/mod.t` 11→14). AND `eval "{ 'a','b' }"` (literal key + comma) is an anon hash, not a bare block — PPI only treats `=>` as the hash signal; added `_bare_block_is_anon_hash` to reroute (`comp/term.t`→23/0). Logged **PPI upstream bug #5**.
+- `6e64eb2` — `eval "__PACKAGE__"` inside `package Foo{}` returned "main": the eval transpiler injected an `(in-package …)` preamble but the parser's Environment still started in main. Now `p-eval` passes `*pcl-current-package*`, pl2cl seeds the package_stack (`eval_pkg` attr), preamble uses the designator rule. AND `package NAME VERSION` now sets `$NAME::VERSION` (guarded vs PPI's `->version` returning the block body). `comp/package_block.t` 2→3.
+- `b20eda9` — **crash-abort**: a main-pkg global (`$::TODO`→`main::$TODO`) used ONLY inside a sub got no forward defvar (file-scope scan is sub_depth==0; `main` was skipped in the cross-pkg scan) → unbound abort killing all 36 of `comp/opsubs.t` (→32/4).
+- `a24caed` — **crash-abort**: `$#[0]` is elem 0 of array `@#` (the removed `$#` magic + subscript; verified `@{"#"}=(10,20,30); $#[0]==10` — **NOT a PPI bug**, I checked before logging). `@#`'s name isn't a word char → escaped forward-decl → unbound abort killing `base/lex.t` (1→18). Fixed via `environment->register_punct_global` at the codegen emit site — **user feedback: collect via data structures, NEVER regex generated CL text** ([[feedback_ast_vs_string_matching]] updated).
+- `559d3be` — started **t/re**, which is GATED behind Perl's `test.pl` harness (2069 lines; nearly transpiles, 3 parse errors blocked loading). Fixed 2: (1) conditional `local $x/$h{k}/@a = … if COND` — a documented deferred gap (glob form had `p-local-glob-if`; scalar/elem left "if real code hits it" — test.pl hits it); value = `COND ? RHS : current`, reuses ordinary local-init machinery. (2) loop-modifier `EXPR foreach LIST` in tail-`if` position — `_process_tail_stmt` tried to `(setf ret_var …)` the loop; now emits the loop, ret_var "".
+
+**TODO (3rd test.pl parse error):** `system { PROG } LIST` indirect block form. system/exec are BUILTINS (`Config.pm` `system => -1`) → they take the list-operator path, NOT the generic-funcall paren handler (where I first hooked it — reverted, dead code). Fix belongs in the builtin list-op arg parsing. Then reassess test.pl runtime + the CWD/`re_tests`/`charset_tools.pl`/`loc_tools.pl` fixtures. Details in `docs/perl-test-suite-survey.md` + [[project_perl_suite_survey]].
+
+**Process notes (user-flagged):** corrected a mistaken "PPI bug" call before logging it; switched from regex-scanning generated CL to a `register_*` data-structure path per the established `caret_globals`/`expression_our_vars` pattern.
+
+---
+
 ## Session 265 (2026-06-21) — case-sensitivity SHIPPED via `(readtable-case :invert)`. Gate 101/3551, sweep at parity.
 
 **User: try the `:invert` general fix as a spike, see how it goes with tests + small fixes.** It went well enough to adopt — committed to `main`, no branch (the revert fears proved unwarranted).
