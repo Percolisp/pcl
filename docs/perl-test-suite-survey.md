@@ -27,7 +27,7 @@ P=perl `ok/notok`, C=PCL `ok/notok` at survey time (2026-06-23).
 | `pat.t`       | 2/0   | 2/0   | ✅ | |
 | `while.t`     | 4/0   | 4/0   | ✅ | |
 | `translate.t` | 257/0 | 257/0 | ✅ | `tr///` |
-| `term.t`      | 7/0   | 6/0   | 🐞 | one crash (`simple-error`) — investigate |
+| `term.t`      | 7/0   | 6/0   | ✅* | NOT a PCL bug: test 7 opens a relative `harness` file that only exists in perl's `t/` CWD; the runner runs sbcl from the PCL root, so `open` fails and `die`s. Fixture dependency. |
 | `lex.t`       | 120/0 | 1/0   | 🐞 | **aborts at test 2**: `$x = $#[0]` mis-parses to an unbound `@#` array (obscure `$#`-lexing). The whole file dies on the unbound-var crash. Niche syntax, but the crash-abort kills 119 good tests. |
 | `rs.t`        | 41/0  | 6/35  | 🟡 | `$/` record separator (incl. paragraph mode `$/=""`, fixed-record `$/=\N`, and `*FH` glob passed to a sub). Real I/O feature gap. |
 
@@ -38,7 +38,7 @@ P=perl `ok/notok`, C=PCL `ok/notok` at survey time (2026-06-23).
 | `elsif.t`  | 4/0  | 4/0  | ✅ | |
 | `switch.t` | 18/0 | 18/0 | ✅ | (despite the name, no `given/when`) |
 | `for.t`    | 16/0 | 11/0 | 🚧 | aborts on `Internals::stack_refcounted` — `Internals::*` is not-supported (`not-supported.md`). |
-| `mod.t`    | 15/0 | 10/2 | 🐞 | statement-modifier edge cases; one `compiled-program-error` crash — investigate. |
+| `mod.t`    | 15/0 | 14/1 | ✅* | **FIXED 2026-06-24**: `do BLOCK while/until COND` is now a POST-test loop (body runs at least once) via new `p-do-while`/`p-do-until` macros. Remaining 1 fail = test 8 opens a relative `TEST` fixture file that only exists in perl's `t/` CWD (not a PCL bug). |
 | `subval.t` | 36/0 | 12/0 | 🟡 | aborts `unbound:$level`. `$level` is a file-lexical `my` mutated by recursive subs; the abort is a closure/recursion capture interaction (cf. fold.t). |
 
 ## t/comp — compilation / parsing
@@ -47,7 +47,7 @@ P=perl `ok/notok`, C=PCL `ok/notok` at survey time (2026-06-23).
 |------|---|---|--------|-------|
 | `cmdopt.t`       | 44/0   | 44/0   | ✅ | constant-folding of comparisons |
 | `multiline.t`    | 6/0    | 6/0    | ✅ | |
-| `term.t`         | 23/0   | 20/3   | 🐞 | term parsing; 3 fails — investigate |
+| `term.t`         | 23/0   | 23/0   | ✅ | **FIXED 2026-06-24**: `eval "{ LITERAL , ... }"` anon-hash (string/number key + comma) — PPI mis-tokenized as a bare block (only `=>` triggered its Constructor). New `_bare_block_is_anon_hash` reroute. PPI bug #5 logged. |
 | `colon.t`        | 25/0   | 14/11  | 🚧 | almost all fails are `eval "<invalid perl>"` returning undef = **error-detection of invalid Perl** (principle 9 / `not-supported.md`). PCL doesn't reject invalid Perl. |
 | `bproto.t`       | 16/0   | 10/6   | 🚧 | `prototype()` introspection — returns undef in PCL (`not-supported.md`). |
 | `uproto.t`       | 32/0   | 13/21  | 🚧 | same: prototype introspection + invalid-Perl rejection. |

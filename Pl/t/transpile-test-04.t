@@ -394,4 +394,28 @@ $h{a} = {b => "found"};
 print "$h{a}{b}\n";
 ');
 
+# ============ ANON-HASH vs BARE-BLOCK DISAMBIGUATION ============
+# PPI mis-tokenizes `{ LITERAL , ... }` (string/number literal then comma) as a
+# bare block; Perl treats it as an anon-hash constructor in term context.
+# (Barewords/variables stay blocks; map-block `{ 'a', $_ }` stays a code block.)
+# (keys are double-quoted so the code survives the run_perl `perl -e '...'` wrapper)
+test_transpile('anon-hash: eval string literal-comma is HASH',
+    q{$a = eval "{ \"a\" , \"foo\" }"; print ref($a), "\n";});
+test_transpile('anon-hash: eval "{ 1 , 2 }" is HASH',
+    q{$a = eval "{ 1 , 2 }"; print ref($a), "\n";});
+test_transpile('anon-hash: eval comma chain is HASH and keeps pairs',
+    q{$a = eval "{ \"a\" , \"b\" , \"c\" , \"d\" }"; print ref($a), ":", $a->{a}, $a->{c}, "\n";});
+
+# ============ do BLOCK while/until — POST-test loops ============
+# `do {} while/until COND` must run the body at least once (condition tested
+# afterwards), unlike the pre-test while/until statement modifier.
+test_transpile('do-while: false cond still runs body once',
+    q{my $x=0; do { ++$x } while 0; print "$x\n";});
+test_transpile('do-until: true cond still runs body once',
+    q{my $y=0; do { ++$y } until 1; print "$y\n";});
+test_transpile('do-while: iterates until cond false',
+    q{my $z=0; do { ++$z } while $z<3; print "$z\n";});
+test_transpile('do-while: post-increment cond fills array incl. last',
+    q{my $x=0; my @a; do { $a[$x]=$x } while ($x++)<5; print join(" ",@a), "\n";});
+
 done_testing();

@@ -750,6 +750,29 @@ sub _block_is_anon_sub {
   return $s && $s->isa('PPI::Token::Word') && $s->content eq 'sub';
 }
 
+# True if a leading-`{` statement that PPI tokenized as a bare block
+# (PPI::Statement::Compound → PPI::Structure::Block) is really an anonymous
+# hash constructor.  PPI only classifies `{...}` as a Constructor when the
+# first separator is `=>`; Perl's parser also treats `{ LITERAL , ... }` —
+# a string or number literal followed by a comma — as a hashref in term
+# context (e.g. `eval "{ 'a', 'b' }"`).  Barewords (`{ foo, 1 }`) and
+# variables (`{ $x, 1 }`) stay blocks, matching Perl.  This is deliberately
+# narrower than `_block_is_hash_constructor` (used for map/grep blocks, where
+# `{ 'a', $_ }` IS a code block, not a hash).
+sub _bare_block_is_anon_hash {
+  my ($block) = @_;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  return 0 unless @ch == 1 && ref($ch[0]) eq 'PPI::Statement';
+  my @sig = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  return 0 unless @sig >= 2;
+  my $r0 = ref($sig[0]);
+  return 0 unless $r0 =~ /^PPI::Token::Quote::(?:Single|Double|Literal|Interpolate)$/
+               || $r0 =~ /^PPI::Token::Number/;
+  return 0 unless ref($sig[1]) eq 'PPI::Token::Operator'
+               && ($sig[1]->content eq ',' || $sig[1]->content eq '=>');
+  return 1;
+}
+
 sub _insert_variable_forward_declarations {
   my $self = shift;
 
@@ -1501,7 +1524,19 @@ sub _process_expression_statement {
           $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
         }
       }
-      $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
+      # `do BLOCK while/until COND` is a POST-test loop in Perl: BLOCK always
+      # runs at least once and the condition is tested afterwards.  Detect the
+      # `do { ... }` expression (Word 'do' + Structure::Block) and emit the
+      # post-test macro instead of the pre-test p-while/p-until.
+      if (($cl_modifier eq 'while' || $cl_modifier eq 'until')
+          && @expr_parts == 2
+          && ref($expr_parts[0]) eq 'PPI::Token::Word'
+          && $expr_parts[0]->content eq 'do'
+          && ref($expr_parts[1]) eq 'PPI::Structure::Block') {
+        $cl_code = "(p-do-$cl_modifier $cond_cl $expr_cl)";
+      } else {
+        $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
+      }
     }
   }
   else {
@@ -3124,6 +3159,17 @@ sub _process_compound_statement {
       $first_block = $child;
       last;  # Found the block - don't scan further (avoid picking up 'continue' as first_word)
     }
+  }
+
+  if (!$first_word && $first_block && !$label
+      && _bare_block_is_anon_hash($first_block)) {
+    # PPI mis-tokenized an anon-hash constructor `{ LITERAL , ... }` as a bare
+    # block.  Emit it as a hash-constructor expression (its value is discarded
+    # in void context, or returned as the last statement of a string eval).
+    $self->_emit(";; { ... } (anon hash constructor)");
+    $self->_emit($self->parse_hash_block_to_cl_string($first_block));
+    $self->_emit("");
+    return;
   }
 
   if (!$first_word && $first_block) {

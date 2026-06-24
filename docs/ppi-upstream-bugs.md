@@ -110,6 +110,42 @@ re-parsed (so strings/regexes are untouched). Regression guard in
 
 ---
 
+## 5. `{ LITERAL , ... }` (anon hash, comma-separated) misclassified as a Block  [CONFIRMED 1.291]
+
+**Perl:** in term context, a leading `{` whose first element is a *string or
+number literal* followed by `,` is an anonymous-hash constructor, exactly like the
+`=>` form.  `eval "{ 'a' , 'foo' }"` returns a HASH ref (`{a => 'foo'}`); `{ 1, 2 }`
+likewise.  (Barewords `{ foo, 1 }` and variables `{ $x, 1 }` stay code blocks —
+Perl only promotes a *literal* first element.)
+
+**PPI:** only `=>` triggers Constructor classification.  With a comma it returns a
+`PPI::Statement::Compound` wrapping a `PPI::Structure::Block`, i.e. a code block:
+
+```perl
+use PPI;
+for my $src ("{ 'a' , 'foo' }", "{ 'a' => 'foo' }") {
+  my ($c) = PPI::Document->new(\$src)->schildren;
+  printf "%-18s -> %s :: %s\n", $src, ref($c), join(",", map ref, $c->schildren);
+}
+# { 'a' , 'foo' }   -> PPI::Statement::Compound :: PPI::Structure::Block
+# { 'a' => 'foo' }  -> PPI::Statement          :: PPI::Structure::Constructor
+```
+
+**Expected:** both should be `PPI::Structure::Constructor` (anon hash), since Perl
+treats `{ LITERAL , ... }` and `{ LITERAL => ... }` identically in term context.
+
+**Impact:** `eval "{ 'a', 'b' }"`-style hash construction (and any rvalue
+`{ LITERAL, ... }` PPI happens to flatten to a Compound) was generated as a bare
+block.  Surfaced via Perl's own `t/comp/term.t` tests 15/17/19.  PCL works around
+it in `Pl/Parser.pm` (`_bare_block_is_anon_hash`, used from
+`_process_compound_statement`): a leading-`{` Compound whose body is a single
+expression statement starting with a `Quote`/`Number` literal followed by `,`/`=>`
+is re-routed to the anon-hash constructor codegen.  Deliberately narrower than the
+map/grep block detector (`_block_is_hash_constructor`), where `{ 'a', $_ }` is a
+genuine code block.  Regression guard in `Pl/t/transpile-test-04.t`.
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it

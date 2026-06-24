@@ -80,7 +80,7 @@
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
-   #:p-if #:p-unless #:p-while #:p-until #:p-for #:p-foreach
+   #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach
    #:p-return #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
    #:p-continue #:p-break
    ;; I/O
@@ -6059,6 +6059,22 @@ dynamically (across function calls), matching p-next/p-redo behavior."
 (defmacro p-until (condition &body body)
   "Perl until loop"
   `(p-while (p-! ,condition) ,@body))
+
+(defmacro p-do-while (condition &body body)
+  "Perl post-test loop: `do BLOCK while COND` — BODY always runs at least once,
+the condition is tested afterwards.  Per perlsyn, `do {} while/until` takes no
+loop-control statements (no last/next/redo, no labels), so this is a plain
+tagbody with no (block nil ...) — a p-return from a sub called inside BODY
+propagates up unhindered."
+  (let ((g (gensym "DOWHILE")))
+    `(tagbody
+        ,g
+        (progn ,@body)
+        (when (p-true-p ,condition) (go ,g)))))
+
+(defmacro p-do-until (condition &body body)
+  "Perl post-test loop: `do BLOCK until COND` = `do BLOCK while (not COND)`."
+  `(p-do-while (p-! ,condition) ,@body))
 
 (defmacro p-for ((&optional init) (test) (&optional step) &rest body-and-keys)
   "Perl C-style for loop with optional :label.
