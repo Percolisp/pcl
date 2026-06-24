@@ -436,4 +436,11 @@ test_transpile('main-package global used only in a sub is undef, not unbound',
 test_transpile('$main::x set at top level, read only inside a sub',
     q{$main::g = 42; sub get { return $main::g; } print get(), "\n";});
 
+# `$#[0]` is the removed `$#` magic taking a subscript = element 0 of @#.
+# An undeclared @# must read as empty (undef), not crash unbound.
+test_transpile('$#[0] on empty @# is undef, not a crash',
+    q{$x = $#[0]; print "[$x]\n";});
+test_transpile('$#[N] indexes array @#',
+    q{@{"#"}=(10,20,30); print $#[0], " ", $#[2], "\n";});
+
 done_testing();

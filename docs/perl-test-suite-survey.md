@@ -28,7 +28,7 @@ P=perl `ok/notok`, C=PCL `ok/notok` at survey time (2026-06-23).
 | `while.t`     | 4/0   | 4/0   | ✅ | |
 | `translate.t` | 257/0 | 257/0 | ✅ | `tr///` |
 | `term.t`      | 7/0   | 6/0   | ✅* | NOT a PCL bug: test 7 opens a relative `harness` file that only exists in perl's `t/` CWD; the runner runs sbcl from the PCL root, so `open` fails and `die`s. Fixture dependency. |
-| `lex.t`       | 120/0 | 1/0   | 🐞 | **aborts at test 2**: `$x = $#[0]` mis-parses to an unbound `@#` array (obscure `$#`-lexing). The whole file dies on the unbound-var crash. Niche syntax, but the crash-abort kills 119 good tests. |
+| `lex.t`       | 120/0 | 18/1  | 🟡 | **CRASH FIXED 2026-06-24**: `$#[0]` (removed `$#` magic + subscript) is element 0 of array `@#` (NOT a PPI bug — verified `@{"#"}=(10,20,30); $#[0]==10`). `@#`'s name isn't a word char, so it escaped forward-declaration → unbound abort killing 119 tests. Codegen registers `@#`/`%#` via `environment->register_punct_global` so a defvar is emitted (undef/empty). Now runs to ~test 18, then a separate `undef-fn:pl-ok` (later `ok()` call) + heredoc gaps cap it. |
 | `rs.t`        | 41/0  | 6/35  | 🟡 | `$/` record separator (incl. paragraph mode `$/=""`, fixed-record `$/=\N`, and `*FH` glob passed to a sub). Real I/O feature gap. |
 
 ## t/cmd — control flow

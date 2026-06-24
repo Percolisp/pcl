@@ -969,6 +969,20 @@ sub _insert_variable_forward_declarations {
     push @undeclared, $var;
   }
 
+  # Punctuation-named `#` globals ($#, @#, %#) that the word-char reference scan
+  # misses are registered explicitly by codegen when it emits them (see
+  # environment->register_punct_global), so we consume that set here rather than
+  # re-scanning generated text.  They arise from the removed `$#` magic taking a
+  # subscript: Perl parses `$#[0]` as element 0 of @# (verified vs perl:
+  # `@{"#"}=(10,20,30); $#[0]==10`).  An undeclared Perl global reads as
+  # empty/undef, so forward-declare them instead of crashing on an unbound
+  # symbol.  The runtime never provides @#/%#/$#, so nothing is shadowed.
+  for my $var (sort keys %{ $self->environment->punct_globals }) {
+    next if $declared{$var};
+    $declared{$var} = 1;
+    push @undeclared, $var;
+  }
+
   # Emit defvars for cross-package variable references (e.g. o::$str used in
   # overload handlers). These are declared in the global section 0 defvar block;
   # CL defvar doesn't require the current package to match — pkg::$var works.
