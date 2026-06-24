@@ -57,7 +57,7 @@ P=perl `ok/notok`, C=PCL `ok/notok` at survey time (2026-06-23).
 | `form_scope.t`   | 14/0   | 0/0    | 🚧 | `format`/`write` — not-supported. |
 | `opsubs.t`       | 36/0   | 0/0    | 🟡 | aborts `unbound:$TODO` — `$::TODO` read inside a sub generated bare `$TODO` with no defvar. Narrow codegen gap (NOT the general undeclared-global case, which returns undef correctly). |
 | `fold.t`         | 35/0   | 11/9   | 🟡 | aborts `unbound:$test` — a file-lexical `my $test` interacts with the surrounding `eval q{...}` string-eval blocks (string-eval lexical capture is only partial — `eval-lexical-capture.md`). |
-| `package_block.t`| 7/0    | 2/5    | 🐞 | `package NAME { BLOCK }` block-form scoping — 5 fails, investigate. |
+| `package_block.t`| 7/0    | 3/4    | 🟡 | **PARTIAL FIX 2026-06-24**: (a) `eval "__PACKAGE__"` inside a package block now resolves to that package (string-eval now inherits the caller's *Perl* package via `eval_pkg`, not just CL `*package*`); (b) `package NAME VERSION [{}]` now sets `$NAME::VERSION`. Remaining: test 2 = `$VERSION` read BEFORE the `package` stmt (perl sets it at COMPILE time; PCL emits in source order — needs cross-section BEGIN-phase emit); tests 4/7 = "Missing right curly"/`goto` warning **text** detection (not-supported, principle 9); test 6 = `goto LABEL` across package blocks. |
 | `utf.t`          | 4216/0 | 12/4204| 🟡 | Unicode source / wide-char identifiers; massive divergence, likely one early cascade. Unicode-semantics bucket (`not-supported.md`). |
 
 ---

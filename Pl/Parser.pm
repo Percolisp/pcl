@@ -51,6 +51,16 @@ has eval_mode => (
   default => sub { 0 },
 );
 
+# eval_pkg: the Perl package in effect at the `eval "..."` call site (e.g.
+# "Foo" when the eval runs inside `package Foo { ... }`).  Seeds the
+# Environment's package_stack so __PACKAGE__ (and other compile-time package
+# references) inside the eval string resolve to the caller's package rather
+# than defaulting to "main".  Set via pl2cl --eval-pkg / --server.
+has eval_pkg => (
+  is      => 'ro',
+  default => sub { undef },
+);
+
 has ppi_doc => (
   is        => 'lazy',
 );
@@ -292,7 +302,7 @@ sub parse {
   #     first pass bleeds into second-pass foreach/bare-block uses of $f)
   #   - Counters must restart at 0 so defvar names match usage names in the
   #     second pass (both are generated fresh, in the same order)
-  $self->environment->package_stack(['main']);
+  $self->environment->package_stack([$self->eval_pkg // 'main']);
   $self->environment->state_var_renames({});
   $anon_block_counter = 0;
   $state_var_counter  = 0;
@@ -6029,11 +6039,39 @@ sub _process_sub_statement {
 
 
 # Process package declaration
+# `package NAME VERSION [{...}]` sets $NAME::VERSION to VERSION (perlfunc).
+# Emit the qualified $VERSION box (defvar, idempotent — the cross-package dedup
+# scan keys on the same `(defvar PKG::$var` shape) plus the assignment.  Numeric
+# version literals (`11`, `1.23`) are emitted as CL numbers; anything else
+# (v-strings) falls back to a string, which stringifies the same way for the
+# common comparisons.
+sub _emit_package_version {
+  my ($self, $pkg_name, $version) = @_;
+  return unless defined $version && $version ne '';
+  # PPI's ->version returns the BLOCK content (`{ ... }`) for a block-form
+  # `package Foo { ... }` with no version, so only accept genuine version
+  # literals: an optional leading `v`, digits, dots and underscores.
+  return unless $version =~ /^v?\d+(?:[._]\d+)*$/;
+  (my $prefix = $self->_cl_pkg_designator($pkg_name)) =~ s/^://;
+  my $sym = "$prefix\::\$VERSION";
+  my $ver_cl = ($version =~ /^\d+(?:\.\d+)?$/) ? $version : "\"$version\"";
+  # NOTE: Perl sets $NAME::VERSION at COMPILE time (visible even on a source line
+  # BEFORE the `package` statement).  PCL emits it in source order, so the
+  # value is correct from the `package` statement onward — which covers the
+  # normal "read $VERSION after the module is loaded" case but not the rare
+  # read-before-declaration-in-the-same-unit pattern (perl-tests package_block.t
+  # test 2).  Matching that needs cross-section BEGIN-phase emission.
+  $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+  $self->_emit("  (defvar $sym (make-p-box nil)))");
+  $self->_emit("(p-scalar-= $sym $ver_cl)");
+}
+
 sub _process_package_statement {
   my $self = shift;
   my $stmt = shift;
 
   my $pkg_name = $stmt->namespace // 'main';
+  my $pkg_version = eval { $stmt->version };
 
   # Register package as a known class/package for method call resolution
   $self->environment->add_package($pkg_name);
@@ -6074,6 +6112,7 @@ sub _process_package_statement {
       $self->_emit("");
 
       $self->environment->push_package($pkg_name);
+      $self->_emit_package_version($pkg_name, $pkg_version);
       # Increment _block_depth so sub names become fully qualified (e.g. |Point|::p-new)
       $self->_block_depth($self->_block_depth + 1);
 
@@ -6089,6 +6128,7 @@ sub _process_package_statement {
       # Top-level block form: push package, process block, pop
       $self->_emit_package_preamble($pkg_name);
       $self->environment->push_package($pkg_name);
+      $self->_emit_package_version($pkg_name, $pkg_version);
 
       # Process the block contents
       for my $child ($block->schildren) {
@@ -6123,9 +6163,11 @@ sub _process_package_statement {
       # The setf is restored on sub exit via p-sub's dynamic binding.
       $self->_emit("(p-set-current-package " . $self->_cl_pkg_designator($pkg_name) .
                    " \"$pkg_name\")");
+      $self->_emit_package_version($pkg_name, $pkg_version);
     } else {
       $self->_emit_package_preamble($pkg_name);
       $self->environment->push_package($pkg_name);
+      $self->_emit_package_version($pkg_name, $pkg_version);
       # Note: no pop - package remains active until next package declaration
     }
   }

@@ -418,4 +418,15 @@ test_transpile('do-while: iterates until cond false',
 test_transpile('do-while: post-increment cond fills array incl. last',
     q{my $x=0; my @a; do { $a[$x]=$x } while ($x++)<5; print join(" ",@a), "\n";});
 
+# ============ package NAME VERSION + __PACKAGE__ in string eval ============
+test_transpile('package VERSION (non-block) sets $Pkg::VERSION',
+    q{package Foo 3.5; package main; print "$Foo::VERSION\n";});
+test_transpile('package VERSION (block) sets $Pkg::VERSION',
+    q{package Foo 11 { } print "$Foo::VERSION\n";});
+# string eval inside a package block sees the enclosing package (not main).
+test_transpile('eval "__PACKAGE__" inside package block resolves to that package',
+    q{package Foo { my $p = eval("__PACKAGE__"); print "$p\n"; }});
+test_transpile('nested package blocks: __PACKAGE__ via string eval',
+    q{$main::r=""; package Foo { $main::r.=eval("__PACKAGE__"); package Bar::Baz { $main::r.=eval("__PACKAGE__"); } } print "$main::r\n";});
+
 done_testing();

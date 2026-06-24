@@ -6599,7 +6599,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when (string= s "")
       (box-set $@ "")
       (return-from p-eval nil))
-    (let* ((pkg-name  (package-name *package*))
+    ;; Use the Perl-level current package (e.g. "Foo" inside `package Foo {}`),
+    ;; not (package-name *package*): the eval'd code must transpile __PACKAGE__
+    ;; and bareword qualifiers relative to the caller's PERL package, and the
+    ;; preamble's (in-package ...) is derived from the same name.  *package* may
+    ;; be MAIN here even when the Perl current package is Foo.
+    (let* ((pkg-name  *pcl-current-package*)
            (cache-key (cons s pkg-name))
            (cached    (gethash cache-key *p-eval-string-cache*)))
       (handler-case

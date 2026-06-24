@@ -115,8 +115,13 @@ sub build_preamble {
 # etc.) is already live in the running SBCL image.
 sub build_eval_preamble {
   my ($pkg_name) = @_;
-  # Always use :|PKGNAME| pipe-quoting — works for both MAIN and Foo::Bar
-  return "(p-defpackage :|$pkg_name|)\n(in-package :|$pkg_name|)";
+  # $pkg_name is the Perl package name (e.g. "main", "Foo", "Bar::Baz").  Apply
+  # the same single-vs-multi-segment designator rule as Parser::_cl_pkg_designator
+  # so the eval'd code lands in the SAME CL package the rest of the codegen uses:
+  # single-segment names stay bare (reader case-folds, :main -> MAIN, :Foo -> Foo),
+  # multi-segment names are pipe-quoted to preserve '::' and case.
+  my $desig = ($pkg_name =~ /::/) ? ":|$pkg_name|" : ":$pkg_name";
+  return "(p-defpackage $desig)\n(in-package $desig)";
 }
 
 sub _run_server {
@@ -143,7 +148,7 @@ sub _run_server {
     last unless defined $got && $got == $len;
 
     my $cl = eval {
-      my $output = Pl::Parser->parse_code($code, eval_mode => 1);
+      my $output = Pl::Parser->parse_code($code, eval_mode => 1, eval_pkg => $pkg);
       my $preamble = build_eval_preamble($pkg);
       $output =~ s/\(in-package :pcl\)/$preamble/;
       $output
@@ -299,7 +304,7 @@ elsif (!-t STDIN) {
   local $/;
   $code = <STDIN>;
   my $output = Pl::Parser->parse_code($code,
-                 (defined $eval_pkg ? (eval_mode => 1) : ()));
+                 (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 
   if (defined $eval_pkg) {
     # eval-string mode: REPLACE (in-package :pcl) with just the package switch.
