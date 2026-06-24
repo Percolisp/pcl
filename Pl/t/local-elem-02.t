@@ -32,7 +32,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 31;
+plan tests => 35;
 
 # ─── Group A: (setf p-aref) intermediate slots must be nil, not boxes ───
 # When @a=('a','b','c') and we assign $a[4], slot 3 should !exist.
@@ -524,4 +524,40 @@ say $a->[1];
 });
     is($out, "99\n20\n",
        'J2: local $ref->[N] = v installs then restores the array elem');
+}
+
+# ─── Group K: conditional `local X = V if/unless COND` (statement modifier) ───
+# Previously the modifier leaked into the RHS parse and died ("Missing case").
+# True cond: localize+assign then restore.  False cond: value unchanged.
+{
+    my $out = run_pl(q{
+our %h = (k => 7);
+{ local $h{k} = 99 if 1; say "in=$h{k}"; }
+say "out=$h{k}";
+});
+    is($out, "in=99\nout=7\n", 'K1: local $h{k}=V if TRUE installs then restores');
+}
+{
+    my $out = run_pl(q{
+our %h = (k => 7);
+{ local $h{k} = 99 if 0; say "in=$h{k}"; }
+say "out=$h{k}";
+});
+    is($out, "in=7\nout=7\n", 'K2: local $h{k}=V if FALSE leaves value unchanged');
+}
+{
+    my $out = run_pl(q{
+our $x = 3;
+{ local $x = 9 unless 0; say "in=$x"; }
+say "out=$x";
+});
+    is($out, "in=9\nout=3\n", 'K3: local $x=V unless FALSE installs then restores');
+}
+{
+    my $out = run_pl(q{
+our @y = (1, 2);
+{ local @y = (8, 9) if 0; say "in=@y"; }
+say "out=@y";
+});
+    is($out, "in=1 2\nout=1 2\n", 'K4: local @y=LIST if FALSE leaves array unchanged');
 }

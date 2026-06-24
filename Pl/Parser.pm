@@ -2625,6 +2625,42 @@ sub _extract_parent_classes {
 
 # Process 'local' variable declaration - dynamic scoping
 # Emits a (let ...) that stays open until block end
+# Split a trailing `if`/`unless` statement modifier off the RHS parts of a
+# `local LHS = RHS if/unless COND` declaration.  A bare `if`/`unless` Word can
+# only be the statement modifier here (ternaries use `?:`, hash keys live inside
+# a Subscript), so the first one ends the value expression.  Truncates
+# @$rhs_parts to just the value and returns ($modifier, \@cond_parts); ('', [])
+# when there is no modifier.
+sub _split_local_init_modifier {
+  my ($self, $rhs_parts) = @_;
+  for my $i (0 .. $#$rhs_parts) {
+    my $p = $rhs_parts->[$i];
+    if (ref($p) eq 'PPI::Token::Word' && $p->content =~ /^(?:if|unless)$/) {
+      my $mod  = $p->content;
+      my @cond = @$rhs_parts[$i + 1 .. $#$rhs_parts];
+      splice(@$rhs_parts, $i);
+      return ($mod, \@cond);
+    }
+  }
+  return ('', []);
+}
+
+# Build the init form for a conditional `local LHS = RHS if/unless COND`.
+# Perl localizes only when the condition selects RHS; otherwise the slot keeps
+# its current value.  We always localize and make the *value* conditional:
+# `COND ? RHS : <current value of LHS>` (swapped for `unless`).  Localizing to
+# the current value is observationally identical to not localizing (it is
+# saved and restored unchanged), and reuses the ordinary local-init machinery —
+# no special macro (cf. p-local-glob-if, which a glob needs because it has no
+# single rvalue).  $lhs_rval_cl reads the LHS as an rvalue (old value).
+sub _conditional_local_init {
+  my ($self, $modifier, $cond_cl, $rhs_cl, $lhs_rval_cl) = @_;
+  my $test = "(p-true-p $cond_cl)";
+  return $modifier eq 'unless'
+    ? "(if $test $lhs_rval_cl $rhs_cl)"
+    : "(if $test $rhs_cl $lhs_rval_cl)";
+}
+
 sub _process_local_declaration {
   my $self = shift;
   my $stmt = shift;
@@ -2843,6 +2879,10 @@ sub _process_local_declaration {
           last;
         }
       }
+      # Strip a trailing `if`/`unless` statement modifier from the RHS so it does
+      # not leak into the value parse (which fell through to a "Missing case" die).
+      my ($ld_mod, $ld_cond) = $has_init
+        ? $self->_split_local_init_modifier(\@rhs_parts) : ('', []);
       my $init_cl = $has_init ? ($self->_parse_expression(\@rhs_parts, $stmt) // 'nil') : undef;
 
       $self->_emit(";; $perl_code");
@@ -2852,6 +2892,19 @@ sub _process_local_declaration {
       # of a flip-flop (which would trigger $SIG{__WARN__} via uninitialized $..).
       my $sub_ctx = ($open eq '[') ? 1 : 0;
       my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) } @key_groups;
+
+      # Conditional `local $h{k} = V if COND`: make the value conditional on COND,
+      # falling back to the element's current value (read before the fresh box is
+      # installed by the *-init macro).
+      if ($ld_mod && defined $init_cl) {
+        my $cond_cl = $self->_parse_expression($ld_cond, $stmt) // 'nil';
+        my $lhs_rval = @key_cls == 1
+          ? ($open eq '{' ? "(p-gethash $cl_var $key_cls[0])"
+                          : "(p-aref $cl_var $key_cls[0])")
+          : ($open eq '{' ? "(p-hslice $cl_var " . join(' ', @key_cls) . ")"
+                          : "(p-aslice $cl_var " . join(' ', @key_cls) . ")");
+        $init_cl = $self->_conditional_local_init($ld_mod, $cond_cl, $init_cl, $lhs_rval);
+      }
 
       # Choose the macro based on subscript type.
       # p-local-array-slice handles both scalar and vector (range) indices.
@@ -2958,6 +3011,9 @@ sub _process_local_declaration {
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
 
+    # Strip a trailing `if`/`unless` statement modifier (see element branch).
+    my ($lmod, $lcond) = $self->_split_local_init_modifier(\@rhs_parts);
+
     my $var = $vars[0];
     # For qualified vars (e.g. A::@ISA), the sigil is embedded after '::'.
     # For simple vars (e.g. @arr), it is the first character.
@@ -2966,6 +3022,14 @@ sub _process_local_declaration {
     # Use LIST_CTX for array/hash RHS so '..' generates a range, not a flip-flop
     my $rhs_ctx = ($sigil eq '@' || $sigil eq '%') ? 1 : 0;
     my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, $rhs_ctx) // 'nil';
+
+    # Conditional `local $x = V if COND`: value is COND ? RHS : current value, so
+    # a false condition localizes to (and restores) the unchanged current value.
+    if ($lmod) {
+      my $cond_cl  = $self->_parse_expression($lcond, $stmt) // 'nil';
+      my $lhs_rval = $sigil eq '$' ? "(unbox $var)" : $var;
+      $init_cl = $self->_conditional_local_init($lmod, $cond_cl, $init_cl, $lhs_rval);
+    }
 
     if ($var eq '$!' || $var eq '|$!|') {
       # local $! = N: bind *p-stored-errno* (auto-restored by let) and set C errno
@@ -3645,6 +3709,17 @@ sub _process_tail_stmt {
         && $r ne 'PPI::Token::Comment'
         && !($r eq 'PPI::Token::Structure' && $_->content eq ';')
     } $stmt->children;
+    # A trailing for/foreach/while/until modifier (`EXPR foreach LIST`) makes
+    # this a loop, not a value: its result in Perl is the empty list.  Don't try
+    # to wrap it in (setf ret_var ...) — that fed the modifier tokens into the
+    # value parser and fell through to the "Missing case" die.  Emit the loop via
+    # the normal statement path and leave ret_var holding "" (empty).
+    if (grep { ref($_) eq 'PPI::Token::Word'
+               && $_->content =~ /^(?:for|foreach|while|until)$/ } @parts) {
+      $self->_emit("(setf $ret_var \"\")");
+      $self->_process_expression_statement($stmt);
+      return;
+    }
     if (@parts) {
       my $cl = $self->_parse_expression(\@parts, $stmt);
       $cl =~ s/^[ \t]+// if defined $cl;  # drop inline-leading indent (setf gap)

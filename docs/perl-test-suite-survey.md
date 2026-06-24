@@ -95,9 +95,33 @@ Most non-✅ rows fall into already-documented buckets — **do not re-triage th
 5. **`comp/term.t` (3) / `cmd/mod.t` (2) / `base/term.t` (1)** — small crash/fail
    counts, individually investigable.
 
+### t/re — gated behind Perl's `test.pl` harness (2026-06-24)
+
+Almost all of `t/re` either `do './re/regexp.t'` (which reads the `re_tests`
+data file) or `require './test.pl'` — i.e. they need Perl's test harness +
+fixtures at a specific CWD, so the runner's 0/0 is a harness miss, NOT regex
+bugs.  The real unlock is getting `test.pl` (2069 lines) to transpile+load,
+which gates a huge swath of Perl's suite.  It nearly transpiles — **3 parse
+errors** blocked it; **2 fixed 2026-06-24**, 1 left:
+
+1. ✅ `local $h{k}=V if COND` / `local $x=V if COND` — conditional `local`
+   (scalar/array/hash-elem).  The `if`/`unless` modifier leaked into the RHS
+   parse.  Fixed via `_split_local_init_modifier` + `_conditional_local_init`
+   (value = `COND ? RHS : current`; the glob form already had `p-local-glob-if`).
+2. ✅ `EXPR foreach LIST` in TAIL position of an `if` block — the if-return
+   transform tried to wrap the loop in `(setf ret_var …)`.  Fixed in
+   `_process_tail_stmt`: emit the loop, set ret_var "".
+3. ⬜ **TODO** `system { PROG } LIST` / `system({ PROG } argv…)` — the indirect
+   block form.  `system`/`exec` are BUILTINS (`Config.pm` `system => -1`), so
+   they take the list-operator path, NOT the generic-funcall paren handler — the
+   leading `PPI::Structure::Block` falls through there.  Fix belongs in the
+   builtin list-op arg parsing (lower `{PROG}` to a first ordinary arg → roughly
+   `system(PROG, LIST)`; argv[0]-override nuance lost, acceptable).  After this,
+   reassess test.pl runtime + the CWD/`re_tests`/`charset_tools.pl` fixtures.
+
 ### Not yet surveyed (next sessions)
 
-`t/re/` (80), `t/io/` (44 — partly tracked in `project_io_tests_and_open_errors`),
+`t/re/` (80, harness-gated — see above), `t/io/` (44 — partly tracked in `project_io_tests_and_open_errors`),
 `t/uni/` (30), `t/mro/` (73), `t/class/` (10), and the rest of `t/op/` not in
 `perl-tests/`. Import the highest-signal ones the same way.
 

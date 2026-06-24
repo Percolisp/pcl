@@ -21,7 +21,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 22;
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -132,3 +132,10 @@ test_cl('sub f { 5 if 1 } print f()',   "5",  'postfix if true returns expr');
 
 # Test 20: postfix unless, true cond (body skipped) — returns cond
 test_cl('sub f { 5 unless 1 } print f()', "1",  'postfix unless true returns cond');
+
+# Tests 21-22: a loop statement-modifier (EXPR foreach LIST) in tail position of
+# an if-block must emit the loop, not parse-error trying to wrap it in setf.
+test_cl('sub f { if(1) { print "$_-" foreach (1,2,3); } } f()', "1-2-3-",
+        'foreach-modifier in tail-if emits the loop');
+test_cl('sub f { my @w=(7,8); if(@w) { print "w$_ " foreach @w; } } f()', "w7 w8 ",
+        'foreach-modifier over array in tail-if');
