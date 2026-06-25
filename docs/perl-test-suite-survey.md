@@ -189,7 +189,7 @@ loaded harness runs them. First probe (P = perl ok/notok, C = PCL):
 | `read.t` | 2 | 0/2 | 🟡 small |
 | `errno.t` | 16 | 0/16 | 🐞 total fail — `$!` errno text/preservation after reads |
 | `paragraph_mode.t` | 80 | 16 | 🐞 `$/=""` paragraph mode (same `$/` gap as `base/rs.t` — convergent) |
-| `binmode.t` | 9 | 1 +CRASH | 🐞 crash to localise |
+| `binmode.t` | 9 | **8/1** | 🐞→✅ FIXED (this session): crash + EBADF; last fail = `$!` dualvar-through-`@_` |
 | `scalar.t` | 128 | skip-all | 🟡 in-memory `open(\$scalar)` filehandles (128 tests behind one feature) |
 | `iprefix.t` | 2 | 0/2 | 🟡 |
 
@@ -208,11 +208,22 @@ loaded harness runs them. First probe (P = perl ok/notok, C = PCL):
 - Guard `Pl/t/format-skip-01.t`. Remaining fail (test 7 `$-`) is real format
   dependence: perl runs `write()` which sets lines-left; PCL can't.
 
-NEXT t/io (high-leverage order): `errno.t` (clean 0/16, `$!` semantics) → the
-`binmode.t` crash → `$/` record/paragraph modes (recovers `paragraph_mode.t` +
-`base/rs.t` together) → `scalar.t` in-memory filehandles (128 behind one feature).
-Many files also use fork/pipe/socket (`open.t`, `pipe.t`, `socket.t`, …) — lower
-priority, system-dependent.
+**`binmode.t` fixed → 8/9** (commit this session): aborted at test 2 on
+`find PerlIO::Layer 'perlio'` (indirect method call on a core package PCL didn't
+ship → uncaught "Can't locate object method"). Shipped `lib/PerlIO/Layer.pm`
+(picked up by the existing method-call auto-require, `p-method-call`→`p-require`
+on an unknown class); `find` reports the standard core layer names as known.
+Also `binmode` on an unopened handle now fails with errno EBADF. Guard
+`Pl/t/binmode-01.t`. Last fail (test 9) is a **`$!` dualvar bug**: `$!` survives
+a plain copy and string-eval but loses its numeric side when passed through
+`@_` (verified: `sub f{my($g)=@_; $g==9}` fed `$!` fails) — fix it as part of
+errno.t.
+
+NEXT t/io (high-leverage order): `errno.t` (clean 0/16, `$!` semantics — and the
+dualvar-through-`@_` lead above is likely central) → `$/` record/paragraph modes
+(recovers `paragraph_mode.t` + `base/rs.t` together) → `scalar.t` in-memory
+filehandles (128 behind one feature). Many files also use fork/pipe/socket
+(`open.t`, `pipe.t`, `socket.t`, …) — lower priority, system-dependent.
 
 ### Not yet surveyed (next sessions)
 
