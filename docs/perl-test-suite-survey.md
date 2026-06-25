@@ -162,13 +162,18 @@ the function and loads the rest, and `watchdog()` is only called on timeout — 
   stash snapshot (`p-glob-slot` got a hash-table, wants a typeglob) — both the
   stash/typeglob + Internals not-supported areas. The whole-file crash is the
   damage; a catch/no-op would recover the non-Internals tests.
-- ❓ 0/0 (early abort — need a look): `recompile.t`, `reg_fold.t` (6786 tests!),
-  `opt.t` (639), `anyof.t` (1187), `reg_nc_tie.t`. High test counts → high payoff
-  if the early abort is one shared cause.
+- ⏭️ 0/0 = **legitimate `1..0 # Skip`, NOT bugs** (verified): `opt.t`/
+  `recompile.t`/`anyof.t` need the `re` module (re::optimization/debug introspection);
+  `reg_fold.t` needs `File::Spec`; `reg_nc_tie.t` needs `Tie::Hash::NamedCapture`.
+  PCL behaves like miniperl (no dynamic loading) and skips, matching perl's own
+  miniperl path. Don't chase these — they require XS/`re`-introspection modules.
 
-NEXT t/re: implement `/n` (clean win), then triage the 0/0 early-aborts
-(`anyof.t`/`opt.t`/`reg_fold.t` are big). The `re_tests`-driven `regexp*.t`
-family still needs the `re_tests` fixture wired (separate effort).
+NEXT t/re: implement `/n` (the only clean fixable win left in this batch, but
+note it's bigger than it looks — scoped `(?n:)`/`(?-n:)`, named-capture
+exemption, and stringification must preserve the original `(...)`), then triage
+the partials (`reg_pmod`/`reg_posixcc`/`script_run`/`rxcode`). The
+`re_tests`-driven `regexp*.t` family still needs the `re_tests` fixture wired
+(separate effort).
 
 ### Not yet surveyed (next sessions)
 
