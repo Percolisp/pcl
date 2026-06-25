@@ -14,15 +14,42 @@
 use strict;
 use warnings;
 
-# REBUILD PROCEDURE: after running ./pl2cl < cl/pack-impl.pl to regenerate cl/pcl-pack.lisp:
-#   1. Keep the manually-maintained header in cl/pcl-pack.lisp (lines up to and including
-#      the @INC setup). The header begins with (in-package :pcl) and must stay in :pcl.
-#   2. Remove the generated (p-defpackage :main) and (in-package :main) lines — pack-impl.pl
-#      has no `package` declaration, so PCL defaults to :main. Those two lines must be deleted
-#      so all functions stay in the :pcl package (matching pcl-pack.lisp.bak behavior).
-#      Switching to :main causes "MAIN also shadows" SBCL warnings in subsequent test code.
-#   3. Ensure the p-pack / p-unpack wrapper defuns are appended at the end (they call
-#      pl-p_pack / pl-p_unpack, the transpiled names of p_pack / p_unpack below).
+# ============================================================================
+# REBUILD PROCEDURE for cl/pcl-pack.lisp  (read this; it is self-contained)
+# ============================================================================
+# cl/pcl-pack.lisp = [ transpiled output of THIS file ] + [ a hand-written
+# appendix that is NOT generated from this file ].  To regenerate it after
+# editing this file, run exactly these four steps from the repo root:
+#
+#   # 1. Save the hand-written appendix (float helpers + p-pack/p-unpack
+#   #    wrappers) — everything from the first such defun to EOF:
+#   sed -n '/^(defun pl-_pack_float32 /,$p' cl/pcl-pack.lisp > /tmp/pack-appendix.lisp
+#   # 2. Transpile this file (its output IS the new header + body, used verbatim):
+#   ./pl2cl cl/pack-impl.pl > /tmp/pack-body.lisp
+#   # 3. Reassemble (body, blank line, blank line, appendix):
+#   { cat /tmp/pack-body.lisp; echo; echo; cat /tmp/pack-appendix.lisp; } > cl/pcl-pack.lisp
+#   # 4. Verify: paren depth must be 0, and counts must not drop:
+#   perl sweep-perl-tests.pl --jobs 1 perl-tests/pack.t   # expect pass=5638 fail=87 (2026-06-25)
+#
+# WHY there is an appendix: the four float routines (pl-_pack_float32/64,
+# pl-_unpack_float32/64) do IEEE-754 bit twiddling via sb-kernel:* that cannot
+# be written in portable Perl, and p-pack / p-unpack are the pcl: entry points
+# (they delegate to pl-p_pack / pl-p_unpack, the transpiled names of the
+# p_pack / p_unpack subs defined below).  These live ONLY in cl/pcl-pack.lisp.
+#
+# PACKAGE NOTE: do NOT strip the generated `(p-defpackage :main)` /
+# `(in-package :main)` lines from the output (an older version of this note told
+# you to — it was WRONG and the shipped file keeps them).  This file has no
+# `package` statement, so PCL emits :main, and the appendix is written in :main
+# too.  Because :main :use's :pcl and p-pack/p-unpack are exported from :pcl,
+# defining them while in :main resolves to (and redefines) the exported pcl:
+# symbols — exactly what the self-loading stub in pcl-runtime.lisp expects.  So
+# just transpile and reassemble verbatim; no hand-editing of the output.
+#
+# BOUNDARY MARKERS (only needed if the structure ever drifts): the transpiled
+# body ends with the two lines `;; 1` then `1` (this file's trailing `1;`); the
+# appendix begins at `(defun pl-_pack_float32 ...)`.
+# ============================================================================
 
 my $CAN_ENDIAN = 'sSiIlLqQjJfFdDpP';
 my $CAN_SHRIEK = 'sSiIlLnNvVxX.@';
