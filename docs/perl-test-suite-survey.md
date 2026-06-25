@@ -175,11 +175,50 @@ NEXT t/re: triage the partials (`reg_pmod` 59/88, `reg_posixcc` 1544/2560,
 now documented not-supported, see above.) The `re_tests`-driven `regexp*.t`
 family still needs the `re_tests` fixture wired (separate effort).
 
+## t/io — I/O (started 2026-06-25; run with CWD = perl's `t/`)
+
+All 44 files use `test.pl` (+ `chdir 't'`, a no-op when already in `t/`), so the
+loaded harness runs them. First probe (P = perl ok/notok, C = PCL):
+
+| file | P | C | status |
+|------|---|---|--------|
+| `defout.t` | 22 | **21/1** | 🐞→✅ FIXED (this session): see below; last fail `$-` is format-dependent |
+| `print.t` | 24 | 21/1 | 🟡 close (3 diffs) |
+| `say.t` | 13 | 8/1 | 🟡 |
+| `tell.t` | 36 | 28/8 | 🟡 |
+| `read.t` | 2 | 0/2 | 🟡 small |
+| `errno.t` | 16 | 0/16 | 🐞 total fail — `$!` errno text/preservation after reads |
+| `paragraph_mode.t` | 80 | 16 | 🐞 `$/=""` paragraph mode (same `$/` gap as `base/rs.t` — convergent) |
+| `binmode.t` | 9 | 1 +CRASH | 🐞 crash to localise |
+| `scalar.t` | 128 | skip-all | 🟡 in-memory `open(\$scalar)` filehandles (128 tests behind one feature) |
+| `iprefix.t` | 2 | 0/2 | 🟡 |
+
+**`defout.t` fixed → 21/22** (commit this session). The hooks were a parse error
++ two crashes, all from `format`/`write` (not-supported) but mis-handled:
+- `format NAME = … .` is now stripped in `_preprocess_source` (PPI swallowed the
+  next statement → unknown-`.`-operator PARSE ERROR). Generic: any file with a
+  stray format block now parses cleanly.
+- `write()` → no-op `p-write` stub (was undefined-function crash).
+- `close()` (no args) → `p-close` `&optional` success no-op (was an arg-count
+  macroexpand crash).
+- `select()` → returns `"main::STDOUT"` not raw nil (raw nil drops from a
+  flattened list — **same class as the `pos()` fix**; the recurring lesson:
+  builtins must return `*p-undef*`/a real value for undef, never bare CL nil).
+- `$~`/`$^` format-var defaults set to `STDOUT`/`STDOUT_TOP`.
+- Guard `Pl/t/format-skip-01.t`. Remaining fail (test 7 `$-`) is real format
+  dependence: perl runs `write()` which sets lines-left; PCL can't.
+
+NEXT t/io (high-leverage order): `errno.t` (clean 0/16, `$!` semantics) → the
+`binmode.t` crash → `$/` record/paragraph modes (recovers `paragraph_mode.t` +
+`base/rs.t` together) → `scalar.t` in-memory filehandles (128 behind one feature).
+Many files also use fork/pipe/socket (`open.t`, `pipe.t`, `socket.t`, …) — lower
+priority, system-dependent.
+
 ### Not yet surveyed (next sessions)
 
-`t/re/` (80, harness-gated — see above), `t/io/` (44 — partly tracked in `project_io_tests_and_open_errors`),
-`t/uni/` (30), `t/mro/` (73), `t/class/` (10), and the rest of `t/op/` not in
-`perl-tests/`. Import the highest-signal ones the same way.
+`t/io/` remainder (34 of 44 — fork/pipe/socket-heavy), `t/uni/` (30),
+`t/mro/` (73), `t/class/` (10), and the rest of `t/op/` not in `perl-tests/`.
+Import the highest-signal ones the same way.
 
 ## How to re-run
 

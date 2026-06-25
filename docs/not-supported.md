@@ -264,13 +264,24 @@ have no clean mapping to CL-PPCRE's interface.
 `write()` fills it in and sends it to a filehandle.  `$^A` accumulates
 the formatted text.
 
-**PCL behaviour:** Not implemented.  `format` blocks are not parsed or
-emitted.
+**PCL behaviour:** Not implemented.  A `format NAME = … .` block is **stripped at
+the source level** (`_preprocess_source`, session 2026-06-25) so it does nothing
+but, crucially, does not corrupt the surrounding code — PPI does not recognise the
+`format` keyword and otherwise swallows the picture lines *and the following
+statement* into one bogus statement, surfacing the `.` terminator as an unknown
+operator (a PARSE ERROR that loses the next real statement).  `write()` is a
+no-op runtime stub returning `1` (Perl's success value) rather than an
+undefined-function crash.  The format-control specials exist as writable globals
+with Perl-like defaults (`$~`→`"STDOUT"`, `$^`→`"STDOUT_TOP"`, `$=`→60, `$-`/`$%`
+→0) so reading/setting them never crashes — but since `write()` does nothing,
+values that Perl updates *as a side effect of writing* (e.g. `$-` lines-left)
+stay at their defaults.
 
 **Rationale:** Perl's report-formatting system is essentially unused in
 modern CPAN code.  No maintained module targets it.
 
-**Affected tests:** None in `perl-tests/` (no format.t in the suite).
+**Affected tests:** None in `perl-tests/`.  `t/io/defout.t` reaches 21/22 (the
+one fail is `$-`, which only changes once a real `write()` has run).
 
 ---
 
