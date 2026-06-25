@@ -367,6 +367,38 @@ matching.
 
 ---
 
+## Regex `/n` modifier — non-capturing groups
+
+**Perl behaviour:** Perl 5.22+ added the `/n` modifier, which makes the grouping
+metacharacters `( )` *not* capture: `"hello" =~ /(hi|hello)/n` matches but leaves
+`$1` undef.  It has three non-trivial wrinkles:
+- **Named captures are exempt**: `(?<a>.)` under `/n` *still* captures (sets `$1`
+  and `%+`), so `/n` cannot be a blanket "make every group non-capturing".
+- **Scoped overrides**: `(?n:…)` turns nocapture *on* for a sub-pattern even
+  without the flag, and `(?-n:…)` turns it *off* inside an otherwise-`/n` pattern.
+  Correctly honouring these needs a real modifier-scope stack while scanning the
+  pattern.
+- **Stringification preserves the original**: `qr/(what)/n` stringifies as
+  `(?^n:(what))` — the literal `(what)` is kept; only *matching* must skip the
+  capture.  So any rewrite has to be match-time only, not alter the stored
+  pattern text.
+
+**PCL behaviour:** `/n` is accepted in the source but silently ignored — groups
+capture as usual.  CL-PPCRE has no `/n` equivalent.
+
+**Rationale:** Faithful `/n` would require a mini regex-pattern rewriter that
+(a) converts only *unescaped, non-special, non-named* `(` to `(?:` while skipping
+character classes and `\(`, (b) tracks `(?n:)`/`(?-n:)` scope, and (c) compiles
+the rewritten pattern for matching while keeping the original for stringification
+— a sizeable, self-contained feature.  `/n` is rare in real CPAN code (the common
+way to avoid a capture is to just write `(?:…)`), so the payoff does not justify
+the machinery.  Revisit if a real module is shown to depend on it.
+
+**Affected tests:** `t/re/reg_nocapture.t` (the `/n`, `(?n:)`, `(?-n:)` rows),
+parts of `t/re/rxcode.t`.
+
+---
+
 ## `reset()` for one-match `?pattern?` and named captures
 
 **Perl behaviour:** `reset()` clears all `?pattern?` patterns so they can

@@ -150,10 +150,12 @@ the function and loads the rest, and `watchdog()` is only called on timeout — 
   was the instance; watch for other builtins returning bare nil for undef.)
 - ✅ already pass: `reg_eval.t` 8/8, `rt122747.t` 3/3, `pat_special_cc.t` 9/9,
   `qrstack.t` 1/1.
-- 🐞 **`/n` no-capture modifier** (real, fixable): `reg_nocapture.t` (16/25),
-  parts of `rxcode.t`. `/n` makes `(...)` non-capturing; cl-ppcre has no `/n`, so
-  rewrite the pattern's unescaped capturing `(` → `(?:` when `/n` is set (a
-  generic pattern pre-pass, same shape as `%pcl-strip-gpos`). Best next t/re win.
+- 🚧 **`/n` no-capture modifier** → **documented not-supported** (`not-supported.md`).
+  `reg_nocapture.t` (16/25), parts of `rxcode.t`. Looked like a clean pattern
+  pre-pass but isn't: named captures `(?<a>…)` stay capturing under `/n`, the
+  scoped `(?n:)`/`(?-n:)` overrides need a modifier-scope stack, and `qr/(x)/n`
+  must stringify as `(?^n:(x))` (original preserved) while *matching* skips the
+  capture — i.e. a match-time-only rewrite. Sizeable + rare → deferred.
 - 🟡 partial (regex-semantics divergences, triage individually): `reg_pmod.t`
   59/88, `reg_posixcc.t` 1544/2560, `script_run.t` 71/185, `rxcode.t` 25/42,
   `qr.t` 3/4, `reg_60508.t` 0/1.
@@ -168,12 +170,10 @@ the function and loads the rest, and `watchdog()` is only called on timeout — 
   PCL behaves like miniperl (no dynamic loading) and skips, matching perl's own
   miniperl path. Don't chase these — they require XS/`re`-introspection modules.
 
-NEXT t/re: implement `/n` (the only clean fixable win left in this batch, but
-note it's bigger than it looks — scoped `(?n:)`/`(?-n:)`, named-capture
-exemption, and stringification must preserve the original `(...)`), then triage
-the partials (`reg_pmod`/`reg_posixcc`/`script_run`/`rxcode`). The
-`re_tests`-driven `regexp*.t` family still needs the `re_tests` fixture wired
-(separate effort).
+NEXT t/re: triage the partials (`reg_pmod` 59/88, `reg_posixcc` 1544/2560,
+`script_run` 71/185, `rxcode` 25/42) for isolable regex-semantics bugs. (`/n` is
+now documented not-supported, see above.) The `re_tests`-driven `regexp*.t`
+family still needs the `re_tests` fixture wired (separate effort).
 
 ### Not yet surveyed (next sessions)
 
