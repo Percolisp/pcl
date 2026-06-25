@@ -92,7 +92,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
-   #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select
+   #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
    #:p-truncate #:p-stat #:p-lstat
    ;; File test operators
@@ -798,7 +798,7 @@
 ;;; Perl version number ($])
 (defvar |$]| (make-p-box "5.030000") "Perl version number")
 ;;; Format/write special variables (rarely used in modern code)
-(defvar |$~| (make-p-box "") "FORMAT_NAME - name of current report format for write")
+(defvar |$~| (make-p-box "STDOUT") "FORMAT_NAME - name of current report format for write (defaults to the selected handle's name, like Perl)")
 (defvar |$=| (make-p-box 60) "FORMAT_LINES_PER_PAGE - page length for write")
 (defvar |$-| (make-p-box 0) "FORMAT_LINES_LEFT - lines left on page for write")
 (defvar |$%| (make-p-box 0) "FORMAT_PAGE_NUMBER - current page number for write")
@@ -810,7 +810,7 @@
 (defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
 (defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")
 (defvar |$^M| (make-p-box *p-undef*) "emergency memory pool")
-(defvar |$^| (make-p-box "") "FORMAT_TOP_NAME - top-of-page format name")
+(defvar |$^| (make-p-box "STDOUT_TOP") "FORMAT_TOP_NAME - top-of-page format name (defaults to <handle>_TOP, like Perl)")
 ;; %SIG: signal/exception handler hash
 ;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
 (defvar %SIG (make-hash-table :test 'equal) "Perl %SIG - signal handlers")
@@ -6960,9 +6960,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (remhash fh *p-filehandles*)
          t)))))
 
-(defmacro p-close (fh)
-  "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box."
-  `(%p-close-impl (%p-fh-arg ,fh)))
+(defmacro p-close (&optional fh)
+  "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box.
+   With no argument, Perl closes the currently-selected default output handle.
+   PCL does not track a selected handle (p-select is a stub), and actually
+   closing STDOUT/STDERR would break the program's own output, so the no-arg form
+   is a success no-op returning 1 (Perl's true)."
+  (if fh
+      `(%p-close-impl (%p-fh-arg ,fh))
+      1))
 
 (defun %p-eof-impl (&optional fh)
   "Perl eof implementation — fh must already be a symbol or stream"
@@ -7960,9 +7966,23 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-pipe-impl (%p-fh-arg ,read-fh) (%p-fh-arg ,write-fh)))
 
 (defun p-select (&optional fh)
-  "Perl select - set default output filehandle (stub, returns previous handle)"
+  "Perl select - set default output filehandle (stub).
+   Perl's select returns the *name* of the previously-selected default handle
+   (e.g. \"main::STDOUT\"), which is always a true value — never undef.  Return
+   that string rather than raw nil: a nil here is dropped during Perl list
+   flattening (it reads as the empty list), so `ok(select(), 'name')` would lose
+   its description argument.  See %p-flatten-list — undef must be a real value."
   (declare (ignore fh))
-  nil)
+  "main::STDOUT")
+
+(defun p-write (&optional fh)
+  "Perl write - emit a report via the current `format` (stub).
+   format/write report templates are deliberately not-supported
+   (docs/not-supported.md) and are stripped at the source level, so there is
+   nothing to write.  Return 1 (Perl's success value) rather than crashing, so a
+   stray write() call does not abort the whole program."
+  (declare (ignore fh))
+  1)
 
 (defun p-exit (&optional code)
   "Perl exit - terminate program with exit code."

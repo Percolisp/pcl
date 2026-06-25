@@ -199,6 +199,20 @@ sub _preprocess_source {
   # Perl allows `for my ClassName $var` but PPI can't parse the ClassName and stops,
   # producing a broken AST. PCL ignores type constraints anyway, so just drop them.
   $src =~ s/\b(for(?:each)?\s+(?:my|our))\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\s+(\$)/$1 $2/g;
+  # Remove `format NAME = ... .` report templates.  `format`/`write` are
+  # deliberately not-supported (docs/not-supported.md), but PPI does not
+  # recognise the keyword: it swallows the picture lines AND the following
+  # statement into one bogus PPI::Statement, so the `.` terminator surfaces as
+  # an unknown Operator and the next real statement is lost (a PARSE ERROR that
+  # corrupts the rest of the file).  Strip the whole block at the source level
+  # so the surrounding code parses cleanly; the format simply does nothing.
+  # The header is `format [NAME] =` on its own line; the body is terminated by a
+  # line containing only `.`.  The leading $str_re alternative passes quoted
+  # strings (incl. multi-line ones) through untouched so a format-like pattern
+  # inside a string literal is never stripped.
+  $src =~ s{($str_re)|^[ \t]*format(?:[ \t]+[A-Za-z_]\w*)?[ \t]*=[^\n]*\n.*?^\.[ \t]*$}{
+    defined $1 ? $1 : ''
+  }gems;
   return $src;
 }
 

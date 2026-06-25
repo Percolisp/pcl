@@ -118,7 +118,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
-  while xor ||
+  while write xor ||
   overloaded overload-strval
 );
 
