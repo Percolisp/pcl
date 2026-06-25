@@ -2348,10 +2348,15 @@
       (if (p-box-p var)
           (setf (gethash var *p-match-pos*) (truncate (to-number new-pos)))
           new-pos)
-      ;; Getter: pos($str)
+      ;; Getter: pos($str).  Return the canonical undef marker (not raw CL nil)
+      ;; when there is no recorded position, so the value survives Perl list
+      ;; flattening — a raw nil spread into @_ or an assigned list is treated as
+      ;; the empty list and silently dropped (e.g. `is(pos($s), undef, $name)`
+      ;; would lose an argument).  *p-undef* is still false under p-true-p and
+      ;; undefined under p-defined.
       (if (p-box-p var)
-          (gethash var *p-match-pos*)
-          nil)))
+          (or (gethash var *p-match-pos*) *p-undef*)
+          *p-undef*)))
 
 (defun sprintf-inf-nan-p (num)
   "Check if num is infinity or NaN. Returns :pos-inf, :neg-inf, :nan, or nil."

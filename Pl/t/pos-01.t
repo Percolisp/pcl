@@ -37,7 +37,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 9;
+plan tests => 10;
 
 # Basic /g pos tracking
 is run_cl(<<'END'), "2\n", '/g match sets pos';
@@ -91,4 +91,17 @@ END
 is run_cl(<<'END'), "3\n", 'pos $_[N] parsed correctly (magic+subscript)';
 sub check_pos { pos $_[0] = 3; return pos $_[0]; }
 my $x = "hello"; print check_pos($x), "\n";
+END
+
+# undef pos() as a NON-final list element must not be dropped.  p-pos returned
+# raw CL nil for "no position"; nil is spread as the empty list during Perl list
+# flattening, so `f(pos($x), undef, $name)` silently lost the middle argument
+# (broke t/re/pos.t's `is(pos($str), undef, 'desc')`).  Returning *p-undef*
+# keeps it as one element.  (found via Perl's t/re/pos.t through test.pl)
+is run_cl(<<'END'), "n=3 a=U b=U c=tail\n", 'undef pos() survives list flattening';
+sub f { my ($a, $b, $c) = @_;
+        printf "n=%d a=%s b=%s c=%s\n", scalar(@_),
+               defined($a)?$a:"U", defined($b)?$b:"U", defined($c)?$c:"U"; }
+my $x = "bird"; $x =~ /i/g; $x =~ /nomatchhere/g;
+f(pos($x), undef, "tail");
 END
