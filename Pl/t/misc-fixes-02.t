@@ -572,9 +572,15 @@ test_cl('chained < > comparison is not misparsed as a glob/readline',
 # that could take an operand (print/return/scalar/sort).  The glob-fixup pass now
 # reconstructs the readline token.  (YAML::PP's `return scalar <$fh>` hit this:
 # the unhandled `<`/`>` operand became an undef "single node of unknown type".)
-like(transpile_to_cl('my $line = scalar <$fh>;'), qr/\(p-scalar \(p-readline \$fh\)\)/,
+# readline is wantarray-sensitive, so it is emitted inside a `(let ((*wantarray*
+# …)) …)` context wrapper (see docs/wantarray-leak-review.md) — the assertion
+# tolerates that wrapper but still pins that <$fh> parsed as a p-readline (not
+# the `<`/`>` operators).
+like(transpile_to_cl('my $line = scalar <$fh>;'),
+    qr/\(p-scalar \((?:let \(\(\*wantarray\* nil\)\) )?\(p-readline \$fh\)/,
     'scalar <$fh> parses as a readline, not < > operators');
-like(transpile_to_cl('print <$fh>;'), qr/\(p-print \(p-readline \$fh\)\)/,
+like(transpile_to_cl('print <$fh>;'),
+    qr/\(p-print \((?:let \(\(\*wantarray\* t\)\) )?\(p-readline \$fh\)/,
     'print <$fh> parses as a readline');
 # Guard the comparison sibling: `$a < $b` (no closing >) stays a less-than.
 like(transpile_to_cl('my $r = $a < $b;'), qr/\(p-< \$a \$b\)/,
@@ -626,13 +632,15 @@ test_cl('$ar->$#* in arithmetic (named-unary-free) gives count',
 
 # ── session 255b: the six sweep-crash fixes (see docs/session-log.md) ──────────
 
-# A lone bareword in a deref block is a symbolic ref to the package variable,
-# NOT a sub call.  @{foo} / "$x->@{foo}" used to emit (pl-foo) → UNDEFINED-FUNCTION
-# (crashed postfixderef.t and magic.t at *@{HASH}).
-test_cl('@{bareword} is the symbolic array @bareword (interpolated)',
+# A lone bareword in a deref block is the variable @bareword itself (here a
+# package @foo), NOT a sub call.  @{foo} / "$x->@{foo}" used to emit (pl-foo) →
+# UNDEFINED-FUNCTION (crashed postfixderef.t and magic.t at *@{HASH}).  Since
+# 2026-06-25d it resolves the variable directly (also fixing the lexical case;
+# see braced-bareword-deref-01.t) rather than a package-only symbolic deref.
+test_cl('@{bareword} is the array @bareword (interpolated)',
     'our @foo = (7,8,9); $_ = "foo"; print "$_->@{foo}\n";',
     "foo->7 8 9\n");
-test_cl('@{bareword} is the symbolic array @bareword (non-interpolated)',
+test_cl('@{bareword} is the array @bareword (non-interpolated)',
     'our @foo = (7,8,9); print join(",", @{foo}), "\n";',
     "7,8,9\n");
 

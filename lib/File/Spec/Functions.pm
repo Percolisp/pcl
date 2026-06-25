@@ -7,7 +7,7 @@ use strict;
 
 our @EXPORT = qw(
     catfile catdir splitdir splitpath rel2abs curdir updir rootdir
-    file_name_is_absolute no_upwards path
+    file_name_is_absolute no_upwards path devnull tmpdir
 );
 our @EXPORT_OK = @EXPORT;
 our %EXPORT_TAGS = ( DEFAULT => \@EXPORT, ALL => \@EXPORT );
@@ -53,6 +53,13 @@ sub rel2abs {
 sub curdir  { return '.'; }
 sub updir   { return '..'; }
 sub rootdir { return '/'; }
+sub devnull { return '/dev/null'; }
+
+sub tmpdir {
+    my $t = $ENV{TMPDIR};
+    return $t if defined $t && length $t && $t =~ m{^/};
+    return '/tmp';
+}
 
 sub file_name_is_absolute {
     my ($path) = @_;

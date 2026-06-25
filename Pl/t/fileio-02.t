@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 15;
+plan tests => 29;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -295,5 +295,238 @@ seek($rwh, 0, SEEK_END);
 print $rwh "!";                      # append at end
 print "readback=[$first] rw=[$rw]\n";
 close $rwh;
+PERL
+}
+
+# --- Test 16: read(FH, BUF, LEN [, OFFSET]) writes BUF and returns the count ---
+# Regression: read() used to ignore its buffer and return the read STRING (so
+# $n got "hello" and $buf stayed empty).  It must fill BUF in place, return the
+# byte count, NUL-pad/append at a positive OFFSET, and report EBADF on an
+# unopened handle.
+{
+    test_io('read fills buffer, returns count, honours OFFSET', <<'PERL');
+my $path = "/tmp/pcl_read_test_$$.dat";
+open(my $w, '>', $path) or die "open: $!";
+print $w "abcdef";
+close $w;
+
+open(my $in, '<', $path) or die "open: $!";
+my $buf = "";
+my $n = read($in, $buf, 3);
+print "n=$n buf=[$buf]\n";
+# read 2 more at offset 5 — chars 0..2 kept, gap NUL-filled to offset 5
+my $n2 = read($in, $buf, 2, 5);
+(my $shown = $buf) =~ s/\0/./g;
+print "n2=$n2 buf2=[$shown]\n";
+close $in;
+unlink $path;
+PERL
+}
+
+# --- Test 17: print/say with no list argument default to $_ ---
+# Regression: bare `print;` / `say;` / `print STDOUT;` used to emit nothing.
+{
+    test_io('print/say with no args default to $_', <<'PERL');
+use feature "say";
+$_ = "deefolt";
+say;
+say STDOUT;
+print;
+print "\n";
+print STDOUT;
+print "\n";
+PERL
+}
+
+# --- Test 18: print/say to an unopened handle fails with EBADF, prints nothing ---
+# Regression: an unresolved filehandle silently fell through to STDOUT (CL's
+# (princ x nil) writes to *standard-output*).  Now it must set $!=EBADF and emit
+# nothing.  Also: a string/scalar holding a handle NAME ('STDOUT') resolves.
+{
+    test_io('print to unopened handle = EBADF + no output; named handle resolves', <<'PERL');
+use feature "say";
+no warnings 'unopened';
+$! = 0;
+print NOPE "should-not-appear\n";
+print "ebadf=", ($! ? "yes" : "no"), "\n";
+my $h = "STDOUT";
+print $h "via-string-handle\n";   # scalar holding a handle name
+say {"STDOUT"} "via-block-string"; # block string handle
+PERL
+}
+
+# --- Test 19: open(FH, ">-") / open(FH, "<-") use STDOUT/STDIN ---
+# The magic filename "-" is a standard stream (Perl dups it), not a file named
+# "-".  Previously PCL created a literal file called "-".
+{
+    test_io('open(FH, ">-") writes to STDOUT', <<'PERL');
+open(FOO, ">-") or die "open: $!";
+print FOO "to-stdout-via-dash\n";
+open(my $bar, ">-") or die "open: $!";
+print $bar "to-stdout-via-dash-lexical\n";
+PERL
+}
+
+# --- Test 20: $/ = \N — fixed-length record mode ---
+# Regression: get-input-record-separator returned nil (slurp) for a ref, so
+# $/ = \N read the whole file instead of N-char records.
+{
+    test_io('$/ = \N reads fixed-length records', <<'PERL');
+open(my $w, '>', "/tmp/pcl_rec_$$.dat") or die; print $w "abcdefgh"; close $w;
+open(my $in, '<', "/tmp/pcl_rec_$$.dat") or die;
+local $/ = \3;
+my @recs;
+while (my $r = <$in>) { push @recs, $r; }
+print "n=", scalar(@recs), " recs=", join('|', @recs), "\n";
+close $in;
+unlink "/tmp/pcl_rec_$$.dat";
+PERL
+}
+
+# --- Test 21: paragraph mode keeps the file's final newline state ---
+# Regression: paragraph mode ($/ = "") always appended a trailing \n at EOF,
+# inventing one for a file whose last line had none.
+{
+    test_io('paragraph mode does not invent a trailing newline at EOF', <<'PERL');
+open(my $w, '>', "/tmp/pcl_para_$$.dat") or die;
+print $w "a1\na2\n\nb1\nb2";   # last record "b1\nb2" has NO trailing newline
+close $w;
+open(my $in, '<', "/tmp/pcl_para_$$.dat") or die;
+local $/ = "";
+while (my $r = <$in>) {
+    (my $s = $r) =~ s/\n/N/g;
+    print "rec=[$s] len=", length($r), "\n";
+}
+close $in;
+unlink "/tmp/pcl_para_$$.dat";
+PERL
+}
+
+# --- Test 22: glob filehandle aliasing (*FH = $glob) ---
+# Regression: p-glob-copy copied CODE/SCALAR/ARRAY/HASH slots but not the IO
+# (filehandle) slot, so `*FH = shift` (a passed *HANDLE glob) then <FH> read
+# nothing.  Used by base/rs.t's test_string/test_record helpers.
+{
+    test_io('glob assignment aliases the filehandle (*FH = $glob)', <<'PERL');
+open(SRC, '>', "/tmp/pcl_glob_$$.dat") or die;
+print SRC "line1\nline2\nline3\n";
+close SRC;
+open(SRC, '<', "/tmp/pcl_glob_$$.dat") or die;
+sub read_two { *FH = shift; my $a = <FH>; my $b = <FH>; return "$a$b"; }
+print "got: ", read_two(*SRC);
+close SRC;
+unlink "/tmp/pcl_glob_$$.dat";
+PERL
+}
+
+# --- Test 23: symbolic filehandle — open($scalar) where $scalar holds a NAME ---
+# `$TST = "TST"; open($TST, ...)` opens the *named* glob (*TST) and leaves $TST
+# holding the string — it does NOT autovivify a lexical handle.  Both the
+# bareword form (<TST>, eof(TST)) and the scalar form (<$TST>) reach the handle.
+# (tell.t / old-style perl idiom.)
+{
+    test_io('open($s) with $s holding a NAME opens the symbolic glob', <<'PERL');
+my $path = "/tmp/pcl_sym_$$.dat";
+open(my $w, '>', $path) or die; print $w "aaa\nbbb\n"; close $w;
+$TST = "TST";
+open($TST, '<', $path) or die "open: $!";
+print "still-string=", ($TST eq "TST" ? 1 : 0), "\n";
+print "eof-fresh=", (eof(TST) ? 1 : 0), "\n";        # 0 — file is non-empty
+my $l1 = <TST>;                                       # via bareword
+my $l2 = <$TST>;                                      # via the scalar name
+print "l1=$l1l2=$l2";
+print "eof-end=", (eof(TST) ? 1 : 0), "\n";          # 1 — both lines consumed
+close TST;
+unlink $path;
+PERL
+}
+
+# --- Test 24: argument-less eof tests the LAST filehandle read ---
+# Bare `eof` (and `eof` inside `while (<FH>)`) refers to the last file read, not
+# STDIN.  Regression: %p-eof-impl used *standard-input* for the no-arg form.
+{
+    test_io('argument-less eof tests the last handle read', <<'PERL');
+my $path = "/tmp/pcl_eof_$$.dat";
+open(my $w, '>', $path) or die; print $w "x\ny\nz\n"; close $w;
+open(IN, '<', $path) or die;
+my $n = 0;
+while (<IN>) { $n++ if eof; }    # eof (no arg) = eof(IN)
+print "eofs-seen=$n\n";          # exactly 1, on the last line
+close IN;
+unlink $path;
+PERL
+}
+
+# --- Test 25: bareword FH whose open went through the scalar form still reads ---
+# Mixed/lower-case names round-trip: open($h="Log123", ...) then <Log123> must
+# resolve the SAME handle (the funcall-wrapped bareword case-recovery in
+# %p-fh-arg).
+{
+    test_io('symbolic-open then bareword read agree on the handle name', <<'PERL');
+my $path = "/tmp/pcl_name_$$.dat";
+open(my $w, '>', $path) or die; print $w "one\ntwo\n"; close $w;
+my $h = "Log123";
+open($h, '<', $path) or die "open: $!";
+print "a=", scalar(<Log123>);
+print "b=", scalar(<Log123>);
+close Log123;
+unlink $path;
+PERL
+}
+
+# --- Test 26: umask round-trips and returns the previous mask ---
+{
+    test_io('umask sets and returns the previous mask', <<'PERL');
+my $old = umask(0022);
+printf "set=%04o prev_is_num=%d cur=%04o\n", umask(), ($old =~ /^\d+$/ ? 1 : 0), umask();
+umask($old);
+PERL
+}
+
+# --- Test 27: link / symlink / readlink ---
+{
+    test_io('link, symlink and readlink', <<'PERL');
+my $f = "/tmp/pcl_lnk_$$"; my $hard = "$f.hard"; my $sym = "$f.sym";
+open(my $w, '>', $f) or die; print $w "data\n"; close $w;
+print "link=",    (link($f, $hard)    ? 1 : 0), "\n";
+print "symlink=", (symlink($f, $sym)  ? 1 : 0), "\n";
+# Compare to $f (not the raw path) — the path embeds $$, which differs between
+# the perl and pcl processes the harness runs.
+print "readlink-ok=", (readlink($sym) eq $f ? 1 : 0), "\n";
+print "hard-content=", do { open(my $r, '<', $hard); my $l = <$r>; close $r; $l };
+unlink $f, $hard, $sym;
+PERL
+}
+
+# --- Test 28: stat reports real fields (size, Unix-epoch atime/mtime) ---
+# Regression: stat used CL's 1900-epoch file-write-date for both atime and
+# mtime (off by 2208988800 and identical), and stubbed inode/size/mode.
+{
+    test_io('stat returns real size + Unix-epoch atime/mtime after utime', <<'PERL');
+my $f = "/tmp/pcl_stat_$$";
+open(my $w, '>', $f) or die; print $w "hello"; close $w;
+utime(500000001, 500000002, $f);
+my @s = stat($f);
+printf "size=%d atime=%d mtime=%d ino_nonzero=%d nlink=%d\n",
+       $s[7], $s[8], $s[9], ($s[1] ? 1 : 0), $s[3];
+# a filehandle stats the same open file
+open(my $r, '<', $f) or die; my @h = stat($r); close $r;
+print "fh_size=$h[7]\n";
+unlink $f;
+PERL
+}
+
+# --- Test 29: truncate by name and by filehandle; bareword no path fallback ---
+# A bareword filehandle that is not open must FAIL rather than truncate a file
+# named after the bareword.
+{
+    test_io('truncate(name) and truncate($fh) shrink the file', <<'PERL');
+my $f = "/tmp/pcl_trunc_$$";
+open(my $w, '>', $f) or die; print $w "x" x 200; close $w;
+truncate($f, 5);
+print "by_name=", -s $f, "\n";
+open(my $rw, '+<', $f) or die; truncate($rw, 2); close $rw;
+print "by_fh=", -s $f, "\n";
+unlink $f;
 PERL
 }

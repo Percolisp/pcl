@@ -108,6 +108,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   getgrent getgrgid getgrnam endgrent setgrent
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
+  link symlink readlink chown utime
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
   alarm mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
@@ -116,10 +117,28 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   sprintf sqrt srand stat str-cmp str-eq str-ge str-gt str-le str-lt str-ne str-x str-x=
   string-concat study sub sub-defined sub-exists subst substr super-call sysread system syswrite
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
-  truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
+  truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst umask undef undef-sub unless
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
   while write xor ||
   overloaded overload-strval
+);
+
+# Wantarray-sensitive built-ins: their RETURN VALUE depends on the caller's
+# list-vs-scalar context, which they read at runtime from the *wantarray*
+# dynamic var (e.g. `(if (eq *wantarray* t) <list> <scalar>)` in pcl-runtime).
+# Because *wantarray* is the ENCLOSING SUB's context, a call to one of these in
+# a statically-known context (the RHS of `my $x = …`, a boolean position, …)
+# must bind *wantarray* to that static context or the sub's context leaks in
+# (the recurring "wantarray leak" bug: `my $e = each %h` inside a list-context
+# sub wrongly returns the (k,v) pair).  gen_funcall wraps every call to one of
+# these in `(let ((*wantarray* t/nil)) …)` per the node's annotated context.
+#
+# INVARIANT: this set must list EVERY runtime builtin that branches on
+# *wantarray*.  When you add such a builtin to pcl-runtime.lisp, add it here.
+# (readline `<FH>` and the file-glob `<pat>` are separate PPI node types, not
+# funcalls — they apply the same wrapper in gen_readline / gen_glob.)
+my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
+  reverse localtime gmtime caller unpack each splice
 );
 
 # Only exceptions that need different CL names than p-<perl-op>
@@ -1875,15 +1894,14 @@ sub gen_funcall {
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
 
-  # reverse/localtime/gmtime/caller/unpack are wantarray-sensitive built-ins: they use
-  # *wantarray* internally (or propagate it to do-file code).
-  # Explicitly bind for all contexts so the outer dynamic scope can't leak into them.
-  # unpack: scalar unpack() in list-context assignment (@a = scalar unpack()) must
-  # force scalar context so p-unpack returns $result[0] not @result.
-  if ($func_name =~ /^(reverse|localtime|gmtime|caller|unpack)$/) {
-    return $ctx == LIST_CTX
-        ? "(let ((*wantarray* t)) $call)"
-        : "(let ((*wantarray* nil)) $call)";
+  # Wantarray-sensitive built-ins (reverse/localtime/gmtime/caller/unpack/each/
+  # splice): their result depends on *wantarray*, which they read at runtime.
+  # Bind it explicitly to the node's static context so the enclosing sub's
+  # *wantarray* can't leak in (see %WANTARRAY_SENSITIVE).  unpack: scalar
+  # unpack() in a list-context assignment (@a = scalar unpack()) must force
+  # scalar so p-unpack returns $result[0] not @result.
+  if ($WANTARRAY_SENSITIVE{$func_name}) {
+    return $self->_wrap_wantarray_ctx($call, $ctx);
   }
 
   # join always evaluates its list arguments in list context (args after sep),
@@ -1911,6 +1929,22 @@ sub gen_funcall {
   return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $call)" : $call;
 }
 
+
+# Wrap a wantarray-sensitive CALL in `(let ((*wantarray* t/nil)) …)` for the
+# given static context CTX, so the enclosing sub's *wantarray* cannot leak into
+# it.  Shared by gen_funcall (built-ins in %WANTARRAY_SENSITIVE), gen_readline
+# (<FH>) and gen_glob (<pat>) — the three syntactic forms whose result depends
+# on *wantarray*.  INHERIT_CTX or a tail-call position is left UNWRAPPED so the
+# real caller's dynamic binding flows through (these built-ins treat :void like
+# scalar, so a 2-way t/nil mapping is sufficient).
+sub _wrap_wantarray_ctx {
+  my ($self, $call, $ctx) = @_;
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  return $ctx == LIST_CTX
+      ? "(let ((*wantarray* t)) $call)"
+      : "(let ((*wantarray* nil)) $call)";
+}
 
 # Build the lexical-capture alist passed as the 2nd arg to (p-eval STRING ...).
 # Each in-scope lexical becomes (cons "$name" $name), mapping its Perl name to
@@ -3038,16 +3072,27 @@ sub gen_readline {
   my $kids    = shift;
 
   # Readline may have a filehandle child, or none (for <>)
+  my $call;
   if (@$kids) {
     my $fh = $self->gen_node($kids->[0]);
     # Quote bareword filehandles (any word not starting with $ or ( )
-    if ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
-      return "(p-readline '$fh)";
-    }
-    return "(p-readline $fh)";
+    $call = ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/)
+            ? "(p-readline '$fh)"
+            : "(p-readline $fh)";
+  } else {
+    # Empty <> reads from ARGV or STDIN
+    $call = "(p-readline)";
   }
-  # Empty <> reads from ARGV or STDIN
-  return "(p-readline)";
+
+  # <FH> is wantarray-sensitive (list context reads all records, scalar reads
+  # one), exactly like reverse/unpack in gen_funcall.  Bind *wantarray* for the
+  # node's annotated context so the enclosing sub's context can't leak in — e.g.
+  # `my $a = <FH>` inside a sub called in list context must still read ONE line.
+  # (The p-readline macro's *p-in-list-assign-rhs* guard still wins for
+  # `while (($x) = <FH>)`.)
+  my $ctx = defined $node_id
+            ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+  return $self->_wrap_wantarray_ctx($call, $ctx);
 }
 
 
@@ -3099,9 +3144,12 @@ sub gen_glob {
     }
   }
 
-  # Wrap in dynamic wantarray binding for list context
-  my $ctx = $self->expr_o->get_node_context($node_id);
-  my $is_list_ctx = ($ctx == 1);  # LIST_CTX = 1
+  # The file glob <pat> is wantarray-sensitive (list returns all matches, scalar
+  # iterates one per call), so bind *wantarray* to the node's static context the
+  # same way gen_readline / gen_funcall do — otherwise the enclosing sub's
+  # context leaks in (`my $first = <*.c>` inside a list-context sub).
+  my $ctx = defined $node_id
+            ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
 
   if ($needs_filter) {
     # Generate: (remove-if (lambda (f) (find (char basename 0) "negated")) (p-glob pattern))
@@ -3112,16 +3160,10 @@ sub gen_glob {
                . qq{(and (> (length --name--) 0) }
                . qq{(find (char --name-- 0) "$negated_chars")))) }
                . qq{$call)};
-    if ($is_list_ctx) {
-      return "(let ((*wantarray* t)) $filter)";
-    }
-    return $filter;
+    return $self->_wrap_wantarray_ctx($filter, $ctx);
   }
 
-  if ($is_list_ctx) {
-    return "(let ((*wantarray* t)) $call)";
-  }
-  return $call;
+  return $self->_wrap_wantarray_ctx($call, $ctx);
 }
 
 

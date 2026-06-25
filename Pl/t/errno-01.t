@@ -105,4 +105,64 @@ PERL
     like($output, qr/p-errno-string/, '$! is interpolated in string');
 }
 
+diag '-------- $! dualvar survives @_, array, and hash:';
+
+# Test 8: $! keeps its numeric (errno) half when passed through @_, stored in an
+# array/hash, or copied.  Regression: p-aref-unbox-elem / %p-flatten-list /
+# %p-array-store-scalar / %p-make-hash-entry used to unbox the dualvar to its
+# string value, dropping the numeric side (so $!+0 became 0 downstream).
+{
+    my $code = <<'PERL';
+open(my $fh, "<", "/nonexistent/xyz/12345") or 1;
+my $en = $! + 0;                      # the numeric errno (e.g. 2)
+print "direct:$en\n";
+sub thru { my ($g) = @_; return $g + 0; }
+print "thru_at:", thru($!), "\n";
+sub elem0 { return $_[0] + 0; }
+print "elem0:", elem0($!), "\n";
+my @a = ($!);
+print "array:", $a[0] + 0, "\n";
+my %h = (e => $!);
+print "hash:", $h{e} + 0, "\n";
+PERL
+    my $parser = Pl::Parser->new(code => $code);
+    my $lisp_code = join("\n", $parser->parse());
+    my $result = run_lisp($lisp_code);
+    my ($direct) = $result =~ /direct:(\d+)/;
+    ok($direct && $direct > 0, "errno is non-zero after failed open (got $direct)");
+    like($result, qr/thru_at:$direct/, '$! numeric survives passing through @_ (my ($g)=@_)');
+    like($result, qr/elem0:$direct/,   '$! numeric survives $_[0] read');
+    like($result, qr/array:$direct/,   '$! numeric survives storage in an array');
+    like($result, qr/hash:$direct/,    '$! numeric survives storage in a hash');
+}
+
+diag '-------- Scalar::Util::dualvar:';
+
+# Test 9: Scalar::Util::dualvar builds a real dualvar (numeric AND string), and
+# the two halves survive arrays, hashes and @_ (regression: the shim used to
+# return only the string).  Uses ./runpl because `use Scalar::Util` needs the
+# module-loading path that the bare run_lisp helper does not set up.
+{
+    my $code = <<'PERL';
+use Scalar::Util qw(dualvar);
+my $dv = dualvar(42, "forty-two");
+print "n:", $dv + 0, " s:$dv\n";
+my @a = ($dv);
+print "an:", $a[0] + 0, " as:$a[0]\n";
+my %h = (k => $dv);
+print "hn:", $h{k} + 0, " hs:$h{k}\n";
+sub g { my ($x) = @_; print "gn:", $x + 0, " gs:$x\n"; }
+g($dv);
+PERL
+    my ($cfh, $cfile) = tempfile(SUFFIX => '.pl');
+    print $cfh $code;
+    close $cfh;
+    my $result = `./runpl "$cfile" 2>&1`;
+    unlink $cfile;
+    like($result, qr/n:42 s:forty-two/,   'dualvar: direct numeric + string');
+    like($result, qr/an:42 as:forty-two/, 'dualvar: survives array storage');
+    like($result, qr/hn:42 hs:forty-two/, 'dualvar: survives hash storage');
+    like($result, qr/gn:42 gs:forty-two/, 'dualvar: survives @_');
+}
+
 done_testing();

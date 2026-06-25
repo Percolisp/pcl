@@ -104,6 +104,7 @@
    #:p-glob
    ;; File/Directory operations
    #:p-chdir #:p-set_up_inc #:p-mkdir #:p-rmdir #:p-getcwd #:p-cwd #:p-rename #:p-chmod
+   #:p-umask #:p-link #:p-symlink #:p-readlink #:p-chown #:p-utime
    ;; Time functions
    #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
@@ -817,12 +818,16 @@
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
-   Returns nil for undef (slurp mode) or when $/ is a reference."
+   Returns nil for undef (slurp mode), a positive INTEGER record length for
+   $/ = \\N (fixed-length record mode), or the separator STRING otherwise.
+   A non-positive record length behaves like slurp (nil), matching Perl."
   (let ((val (unbox |$/|)))
     (cond
       ((eq val *p-undef*) nil)
-      ;; $/ = \N (reference to number) means record mode — chomp does nothing
-      ((p-box-p val) nil)
+      ;; $/ = \N (reference to a number) → fixed-length record mode.
+      ((p-box-p val)
+       (let ((n (truncate (to-number (unbox val)))))
+         (if (> n 0) n nil)))
       (t (to-string val)))))
 
 ;;; Match position tracking for pos() — must precede box-set which uses it
@@ -2005,6 +2010,8 @@
     (cond
       ;; $/ = undef (slurp mode): chomp does nothing
       ((null sep) (cons s 0))
+      ;; $/ = \N (record mode): $/ is a ref, so chomp removes nothing
+      ((integerp sep) (cons s 0))
       ;; $/ = "" (paragraph mode): remove all trailing newlines
       ((string= sep "")
        (let ((end len))
@@ -3145,6 +3152,15 @@
    assignment intent explicit for other compiler backends reading the IR."
   `(box-set ,place ,value))
 
+(defun %p-dualvar-copy (item)
+  "Fresh box copying a genuine dualvar ITEM, keeping both its numeric and string
+   halves (a bare make-p-box around its string value would drop the numeric)."
+  (let ((s (p-box-value item))
+        (nb (make-p-box (p-box-value item))))
+    (setf (p-box-nv nb) (p-box-nv item) (p-box-nv-ok nb) t
+          (p-box-sv nb) s (p-box-sv-ok nb) t)
+    nb))
+
 (defun %p-array-store-scalar (arr item)
   "Store a scalar ITEM into ARR, preserving blessed objects and references."
   (if (p-box-p item)
@@ -3169,6 +3185,9 @@
                (p-typeglob-p inner)
                (p-regex-match-p inner))
            (vector-push-extend (make-p-box inner) arr))
+          ;; Dualvar ($!/Scalar::Util::dualvar): copy keeping both halves.
+          ((%p-dualvar-box-p item)
+           (vector-push-extend (%p-dualvar-copy item) arr))
           ;; Plain scalar box: copy into new box
           (t (vector-push-extend (make-p-box inner) arr))))
       (vector-push-extend (make-p-box item) arr)))
@@ -3189,12 +3208,17 @@
    Plain scalars and blessed objects keep copy semantics (unbox+rewrap, copying the
    bless class).  Array/hash refs don't set is-ref (a box wrapping a vector/
    hash-table is unambiguously a ref), so they take the plain branch unchanged."
-  (if (and (p-box-p v) (p-box-is-ref v))
-      (make-p-box v)
-      (let ((b (make-p-box (unbox v))))
-        (when (and (p-box-p v) (p-box-class v))
-          (setf (p-box-class b) (p-box-class v)))
-        b)))
+  (cond
+    ((and (p-box-p v) (p-box-is-ref v))
+     (make-p-box v))
+    ;; Dualvar ($!/Scalar::Util::dualvar): keep both numeric and string halves.
+    ((%p-dualvar-box-p v)
+     (%p-dualvar-copy v))
+    (t
+     (let ((b (make-p-box (unbox v))))
+       (when (and (p-box-p v) (p-box-class v))
+         (setf (p-box-class b) (p-box-class v)))
+       b))))
 
 (defun %p-snapshot-array-rhs (src)
   "Snapshot SRC for use as the RHS of an array assignment.
@@ -3361,6 +3385,18 @@
 ;; Flatten a Perl-style value (vector/list/hash/scalar) to a flat vector
 ;; for use in list-assignment RHS. Hash tables expand to key-value pairs;
 ;; nested vectors are flattened (like p-array-= does).
+(defun %p-dualvar-box-p (box)
+  "True when BOX is a genuine dualvar: an explicit numeric value (nv-ok) sitting
+   alongside a STRING primary value whose own numification differs from that
+   numeric (e.g. $! errno, Scalar::Util::dualvar).  Such a box must stay intact
+   when an array/hash/list would otherwise unbox it to a single scalar value —
+   unboxing to the string drops the numeric half, and vice-versa.  A plain
+   numified string ('5' carrying a cached nv of 5.0) is NOT a dualvar."
+  (and (p-box-p box)
+       (p-box-nv-ok box)
+       (stringp (p-box-value box))
+       (/= (p-box-nv box) (parse-perl-number (p-box-value box)))))
+
 (defun %p-flatten-list (src)
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (labels ((add (item)
@@ -3398,8 +3434,9 @@
                          (if (or (p-box-p inner)
                                  (p-box-class item)
                                  (and (vectorp inner) (not (stringp inner)))  ; array ref
-                                 (hash-table-p inner))  ; hash ref
-                             item   ; reference or blessed: preserve the box
+                                 (hash-table-p inner)  ; hash ref
+                                 (%p-dualvar-box-p item))  ; $!/dualvar: keep both halves
+                             item   ; reference, blessed, or dualvar: preserve the box
                              inner))  ; plain scalar: snapshot value
                        item)
                    result)))))
@@ -4778,8 +4815,9 @@
         (if (or (and (vectorp v) (not (stringp v)))  ; arrayref
                 (hash-table-p v)                      ; hashref
                 (functionp v)                          ; coderef
-                (p-box-p v))                           ; scalar ref (box-in-box)
-            elem   ; reference: return the box so to-number → object-address
+                (p-box-p v)                            ; scalar ref (box-in-box)
+                (%p-dualvar-box-p elem))               ; $!/dualvar: keep both halves
+            elem   ; reference or dualvar: return the box so both halves survive
             v))))  ; scalar: return unboxed value
 
 (defun %p-hash-unbox-elem (elem)
@@ -4794,7 +4832,8 @@
       (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
-                (and (vectorp v) (not (stringp v))))      ; array-ref
+                (and (vectorp v) (not (stringp v)))       ; array-ref
+                (%p-dualvar-box-p elem))                  ; $!/dualvar: keep both halves
             elem   ; keep box: box-set would convert these to count/length
             v))))
 
@@ -6335,8 +6374,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((fh *standard-output*))
     ;; Check for :fh keyword
     (when (and (>= (length args) 2) (eq (first args) :fh))
-      (setf fh (p-get-stream (second args)))
-      (setf args (cddr args)))
+      (let ((desig (second args)))
+        (setf args (cddr args))
+        (cond
+          ;; :fh nil = bare `print { }`/empty filehandle node → the default
+          ;; (currently-selected) output handle, i.e. STDOUT.
+          ((null desig) (setf fh *standard-output*))
+          ;; A named/lexical handle that resolves to a real stream.
+          ((p-get-stream desig) (setf fh (p-get-stream desig)))
+          ;; A handle was named but is not open: Perl print/say fails with
+          ;; errno EBADF, prints nothing, and returns false.
+          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
+             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+             (return-from p-print "")))))
+    ;; No list to print (bare `print;` / `print FH;` / `say;`) defaults to $_,
+    ;; like the named-unary $_-default family (uc/length/…).
+    (when (null args)
+      (setf args (list $_)))
     ;; Flatten raw @array / %hash args (print takes a LIST): a bare vector/hash
     ;; spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar
     ;; (so `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
@@ -6356,9 +6410,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-say (&rest args)
   "Perl say (print with newline)"
   (let ((fh *standard-output*))
-    ;; Check for :fh keyword to get the right stream
+    ;; Resolve the target handle once (same rules as p-print); bail with EBADF
+    ;; on a named-but-unopened handle so we don't emit a stray newline.
     (when (and (>= (length args) 2) (eq (first args) :fh))
-      (setf fh (p-get-stream (second args))))
+      (let ((desig (second args)))
+        (cond
+          ((null desig) (setf fh *standard-output*))
+          ((p-get-stream desig) (setf fh (p-get-stream desig)))
+          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
+             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+             (return-from p-say "")))))
     (apply #'p-print args)
     (terpri fh)
     t))
@@ -6705,6 +6766,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; Filehandle storage - maps symbols to CL streams
 (defvar *p-filehandles* (make-hash-table :test 'eq))
 
+;; The stream most recently read by readline/<FH>.  Perl's argument-less `eof`
+;; (and `eof` inside a `while (<FH>)` loop) tests "the last file read", not
+;; STDIN — so readline records the handle here and %p-eof-impl falls back to it.
+(defvar *p-last-read-handle* nil)
+
 ;; Standard filehandles
 (setf (gethash 'STDIN *p-filehandles*) *standard-input*)
 (setf (gethash 'STDOUT *p-filehandles*) *standard-output*)
@@ -6724,9 +6790,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          ;; `print STDERR ...` actually reach *error-output* instead of stdout.
          (let ((canon (find-symbol (symbol-name fh) :pcl)))
            (and canon (not (eq canon fh)) (gethash canon *p-filehandles*)))))
+    ((stringp fh)
+     ;; A string filehandle name — e.g. print {"STDOUT"} ..., or a scalar
+     ;; holding a handle name (my $fh = 'STDOUT'; print $fh ...).  Strip an
+     ;; optional package qualifier, then resolve by name.  Barewords reach
+     ;; *p-filehandles* under their :invert-readtable-cased symbol (STDOUT →
+     ;; |stdout|), so invert the string name the same way before find-symbol.
+     (let* ((sep (search "::" fh :from-end t))
+            (name (if sep (subseq fh (+ sep 2)) fh))
+            (sym (find-symbol (%pcl-invert-case name) :pcl)))
+       (and sym (gethash sym *p-filehandles*))))
     ((p-box-p fh)
      (let ((v (p-box-value fh)))
-       (if (streamp v) v nil)))   ; only return if it IS a stream
+       (cond
+         ((streamp v) v)
+         ;; Scalar holding a handle NAME ('STDOUT', 'FOO'): resolve by name.
+         ((stringp v) (p-get-stream v))
+         (t nil))))
     (t nil)))
 
 (defun %p-open-parse-2arg (expr)
@@ -6908,6 +6988,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (file-str (to-string filename))
          (stream
           (cond
+            ;; The magic filename "-" means a standard stream (Perl dups it):
+            ;; "<-" / "<","-" → STDIN; ">-" / ">","-" → STDOUT.
+            ((and (string= file-str "-") (string= mode-str "<"))
+             *standard-input*)
+            ((and (string= file-str "-")
+                  (member mode-str '(">" ">>") :test #'string=))
+             *standard-output*)
             ((string= mode-str "<")
              (open file-str :direction :input :if-does-not-exist nil))
             ((string= mode-str ">")
@@ -6932,6 +7019,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (if stream
         (progn
           (cond
+            ;; Symbolic filehandle: open($fh, ...) where $fh already holds a
+            ;; defined handle-NAME string (e.g. $TST = "TST"; open($TST, ...)).
+            ;; Perl opens the named glob (*TST) and leaves $fh holding the
+            ;; string — it does NOT autovivify a lexical handle into $fh.
+            ;; Register under the by-name :pcl symbol (invert-cased, package
+            ;; qualifier stripped) so BOTH the bareword form (<TST>/eof(TST))
+            ;; and the scalar form (<$TST>) resolve it via p-get-stream.
+            ;; (An undef/empty box is the modern `open my $fh, ...` autoviv.)
+            ((and (p-box-p fh)
+                  (stringp (p-box-value fh))
+                  (plusp (length (p-box-value fh))))
+             (let* ((nm  (p-box-value fh))
+                    (sep (search "::" nm :from-end t))
+                    (name (if sep (subseq nm (+ sep 2)) nm)))
+               (setf (gethash (intern (%pcl-invert-case name) :pcl)
+                              *p-filehandles*)
+                     stream)))
             ((p-box-p fh) (box-set fh stream))
             (t             (setf (gethash fh *p-filehandles*) stream))))
         (%pcl-save-errno))  ; capture C errno (ENOENT etc.) before SBCL overwrites it
@@ -6974,8 +7078,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       1))
 
 (defun %p-eof-impl (&optional fh)
-  "Perl eof implementation — fh must already be a symbol or stream"
-  (let ((stream (if fh (p-get-stream fh) *standard-input*)))
+  "Perl eof implementation — fh must already be a symbol or stream.
+   Argument-less `eof` tests the last filehandle read (Perl semantics), so it
+   falls back to *p-last-read-handle* (then STDIN) rather than STDIN directly."
+  (let ((stream (if fh (p-get-stream fh) (or *p-last-read-handle* *standard-input*))))
     (if stream
         (let ((ch (peek-char nil stream nil :eof)))
           (if (eq ch :eof) t nil))
@@ -7006,9 +7112,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           (let ((name (symbol-name (car fh-form))))
             (and (> (length name) 3)
                  (string-equal (subseq name 0 3) "PL-"))))
-     ;; Recover the bareword FH name: reverse the :invert read, then strip the
-     ;; now-lowercase pl- prefix (LOG stays LOG, a lowercase fh round-trips too).
-     `',(intern (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3)))
+     ;; Recover the bareword FH name and intern the SAME symbol the direct
+     ;; bareword path produces.  A direct bareword `X` becomes
+     ;; (intern (%pcl-invert-case "X")) — the reader applies :invert.  Here we
+     ;; first un-invert the read symbol-name and strip the pl- prefix to get the
+     ;; original Perl name, then invert it again to match.  (Skipping the final
+     ;; invert mis-cased `eof(TST)`/`<TST>` derived FHs: "TST" vs the readline's
+     ;; "tst" — symbolic-FH open(\$TST="TST") then bareword use.)
+     `',(intern (%pcl-invert-case
+                 (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3))))
     ;; (let (BINDINGS) (pl-NAME)) — wantarray-wrapped bareword FH.
     ;; Sessions 162+ wrap scalar-context user sub calls in (let ((*wantarray* V)) ...).
     ;; Unwrap the let and extract the bare filehandle name.
@@ -7021,7 +7133,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                  (symbolp (car body))
                  (> (length (symbol-name (car body))) 3)
                  (string-equal (subseq (symbol-name (car body)) 0 3) "PL-"))))
-     `',(intern (subseq (%pcl-invert-case (symbol-name (car (caddr fh-form)))) 3)))
+     `',(intern (%pcl-invert-case
+                 (subseq (%pcl-invert-case (symbol-name (car (caddr fh-form)))) 3))))
     ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
     (t fh-form)))
 
@@ -7083,16 +7196,37 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-binmode-impl (%p-fh-arg ,fh) ,@args))
 
 (defun %p-read-impl (fh buf len &optional offset)
-  "Perl read - read bytes into buffer. Returns nil on stream error."
-  (declare (ignore buf offset))  ; Buffer semantics differ in CL
+  "Perl read(FH, BUF, LEN [, OFFSET]) — read up to LEN chars from FH into the
+   lvalue BUF, returning the number of chars actually read (0 at EOF, undef on
+   error).  BUF is modified in place.  With OFFSET, the read data is placed at
+   that position in BUF: a positive offset keeps (NUL-padding to) the first
+   OFFSET chars of BUF's old value; a negative offset counts back from the end
+   of BUF's current length.  An unopened handle fails with errno EBADF."
+  (let ((stream (p-get-stream fh)))
+    (unless stream
+      (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
+      (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+      (return-from %p-read-impl *p-undef*)))
   (handler-case
-      (let ((stream (p-get-stream fh))
-            (n (to-number len)))
-        (when stream
-          (let ((result (make-string n)))
-            (read-sequence result stream)
-            result)))
-    (error () nil)))
+      (let* ((stream (p-get-stream fh))
+             (n (max 0 (truncate (to-number len))))
+             (tmp (make-string n))
+             (got (read-sequence tmp stream))
+             (data (subseq tmp 0 got)))
+        (when (p-box-p buf)
+          (if offset
+              (let* ((old (to-string (unbox buf)))
+                     (off (truncate (to-number offset)))
+                     (off (if (< off 0) (max 0 (+ (length old) off)) off))
+                     (head (if (<= off (length old))
+                               (subseq old 0 off)
+                               (concatenate 'string old
+                                            (make-string (- off (length old))
+                                                         :initial-element #\Nul)))))
+                (box-set buf (concatenate 'string head data)))
+              (box-set buf data)))
+        got)
+    (error () *p-undef*)))
 
 (defmacro p-read (fh &rest args)
   "Perl read — bareword filehandle is auto-quoted."
@@ -7126,40 +7260,83 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl syswrite — bareword filehandle is auto-quoted."
   `(%p-syswrite-impl (%p-fh-arg ,fh) ,@args))
 
-(defun p-truncate (fh-or-file size)
-  "Perl truncate - truncate file (limited support)"
-  (declare (ignore fh-or-file size))
-  ;; Standard CL doesn't support truncate - would need SBCL extension
-  (warn "truncate not implemented in standard CL")
-  nil)
+(defun %p-truncate-impl (fh-or-file size)
+  "Truncate a file (named or open) to SIZE bytes. Returns 1 on success, '' on
+   failure.  A filehandle is truncated via ftruncate(fd) after flushing buffered
+   output; a path string via truncate(2).  A BAREWORD filehandle (symbol) that is
+   not open FAILS — it must NOT fall back to truncating a file named after it."
+  (let* ((len (%pcl-to-integer (to-number size)))
+         (v (if (p-box-p fh-or-file) (p-box-value fh-or-file) fh-or-file))
+         (stream (cond ((streamp v) v)
+                       ((or (symbolp v) (stringp v)) (p-get-stream v))
+                       (t nil))))
+    (handler-case
+        (cond
+          (stream (finish-output stream)
+                  (sb-posix:ftruncate (sb-sys:fd-stream-fd stream) len)
+                  1)
+          ;; Bareword FH that is not open → fail (no file-name fallback).
+          ((symbolp v) (%pcl-save-errno) "")
+          (t (sb-posix:truncate (to-string v) len) 1))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-truncate (fh-or-file size)
+  "Perl truncate FH/EXPR, LENGTH — the first operand is filehandle-like, so a
+   bareword must be quoted (otherwise it is an unbound variable reference)."
+  `(%p-truncate-impl (%p-fh-arg ,fh-or-file) ,size))
+
+(defun %p-stat-vector (st)
+  "Build Perl's 13-element stat list from an sb-posix stat struct.  Times are
+   Unix-epoch seconds (time_t), matching Perl (NOT CL's 1900-epoch universal
+   time)."
+  (vector (sb-posix:stat-dev st)
+          (sb-posix:stat-ino st)
+          (sb-posix:stat-mode st)
+          (sb-posix:stat-nlink st)
+          (sb-posix:stat-uid st)
+          (sb-posix:stat-gid st)
+          (sb-posix:stat-rdev st)
+          (sb-posix:stat-size st)
+          (sb-posix:stat-atime st)
+          (sb-posix:stat-mtime st)
+          (sb-posix:stat-ctime st)
+          ;; sb-posix exposes no stat-blksize/stat-blocks accessor in the
+          ;; supported SBCL range, so derive sensible values: a 512-byte block
+          ;; count and the conventional 4096 preferred I/O block size.
+          4096
+          (ceiling (sb-posix:stat-size st) 512)))
+
+(defun %p-stat-arg (file-or-fh)
+  "Resolve a stat/lstat argument to either a CL stream (filehandle) or a path
+   string.  Accepts a stream, a box holding a stream, a bareword/symbol or
+   string naming a filehandle, or a plain path string."
+  (let ((v (if (p-box-p file-or-fh) (p-box-value file-or-fh) file-or-fh)))
+    (cond
+      ((streamp v) v)
+      ((or (symbolp v) (stringp v))
+       (or (p-get-stream v) (to-string v)))  ; FH name → stream, else path
+      (t (to-string v)))))
 
 (defun p-stat (file-or-fh)
-  "Perl stat - get file status. Returns list of file info."
-  (let ((path (if (streamp file-or-fh)
-                  (pathname file-or-fh)
-                  (to-string file-or-fh))))
-    (if (probe-file path)
-        ;; Return simplified stat: (dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks)
-        ;; Most values are stubs since CL doesn't provide all of them
-        (let ((write-date (file-write-date path)))
-          (vector 0              ; dev
-                  0              ; ino
-                  #o644          ; mode (stub)
-                  1              ; nlink
-                  0              ; uid
-                  0              ; gid
-                  0              ; rdev
-                  (with-open-file (s path) (file-length s))  ; size
-                  write-date     ; atime
-                  write-date     ; mtime
-                  write-date     ; ctime
-                  4096           ; blksize (stub)
-                  0))            ; blocks (stub)
-        nil)))
+  "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
+   size atime mtime ctime blksize blocks).  Follows symlinks.  nil on failure."
+  (let ((arg (%p-stat-arg file-or-fh)))
+    (handler-case
+        (%p-stat-vector
+         (if (streamp arg)
+             (sb-posix:fstat (sb-sys:fd-stream-fd arg))
+             (sb-posix:stat arg)))
+      (error () (%pcl-save-errno) nil))))
 
 (defun p-lstat (file)
-  "Perl lstat - stat without following symlinks (same as stat in CL)"
-  (p-stat file))
+  "Perl lstat — like stat but does NOT follow a symlink (reports the link)."
+  (let ((arg (%p-stat-arg file)))
+    (handler-case
+        (%p-stat-vector
+         (if (streamp arg)
+             (sb-posix:fstat (sb-sys:fd-stream-fd arg))
+             (sb-posix:lstat arg)))
+      (error () (%pcl-save-errno) nil))))
 
 ;;; ============================================================
 ;;; File Test Operators (-e, -d, -f, -r, -w, -x, -s, -z)
@@ -7278,6 +7455,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    Updates $. (input line number) on each successful read."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
+    ;; Remember the handle so a later argument-less `eof` tests THIS stream.
+    (when stream (setf *p-last-read-handle* stream))
     (when stream
       (handler-case
           (cond
@@ -7290,24 +7469,39 @@ buffer's fill-pointer; everything else falls back to file-length."
                      do (vector-push-extend char content))
                (if (zerop (length content)) nil (coerce content 'string))))
 
+            ;; Record mode: $/ = \N - read exactly N characters per record.
+            ((integerp sep)
+             (let* ((buf (make-string sep))
+                    (got (read-sequence buf stream)))
+               (if (zerop got) nil (subseq buf 0 got))))
+
             ;; Paragraph mode: $/ = "" - read until blank line
             ((string= sep "")
              (let ((lines nil)
-                   (seen-content nil))
+                   (seen-content nil)
+                   (last-missing-nl nil))
                (loop
                 (multiple-value-bind (line missing-nl) (read-line stream nil nil)
-                  (declare (ignore missing-nl))
                   (cond
                     ((null line)
-                     (return (if lines
-                                 (format nil "~{~A~^~%~}~%" (nreverse lines))
-                                 nil)))
+                     ;; EOF: rebuild the record.  Only append the final newline
+                     ;; if the last content line actually had one — a file whose
+                     ;; last line lacks a trailing newline keeps it that way
+                     ;; (Perl does not invent one).
+                     (return
+                       (if lines
+                           (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
+                             (if last-missing-nl
+                                 body
+                                 (concatenate 'string body (string #\Newline))))
+                           nil)))
                     ((string= line "")
                      (if seen-content
                          (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
                          nil))  ; Skip leading blank lines
                     (t
-                     (setf seen-content t)
+                     (setf seen-content t
+                           last-missing-nl missing-nl)
                      (push line lines)))))))
 
             ;; Single character separator (common case, optimized)
@@ -7642,12 +7836,88 @@ buffer's fill-pointer; everything else falls back to file-length."
     (error () nil)))
 
 (defun p-chmod (mode &rest files)
-  "Perl chmod - change file permissions. Returns count of successfully changed files."
+  "Perl chmod MODE, LIST — change permissions. Returns count changed.
+   A filehandle in the LIST is fchmod'd by descriptor; everything else is a path.
+   (Only an actual open stream is treated as a handle — a plain string is always
+   a filename, so chmod 0644, 'a' is never mistaken for a handle named 'a'.)"
   (let ((m (truncate (to-number mode)))
         (count 0))
     (dolist (f files count)
+      (let ((v (if (p-box-p f) (p-box-value f) f)))
+        (handler-case
+            (progn
+              (if (streamp v)
+                  (sb-posix:fchmod (sb-sys:fd-stream-fd v) m)
+                  (sb-posix:chmod (to-string v) m))
+              (incf count))
+          (error () (%pcl-save-errno) nil))))))
+
+(defun p-umask (&optional mode)
+  "Perl umask [EXPR] — set the file-creation mask and return the PREVIOUS value.
+   With no argument, return the current mask without changing it (sb-posix:umask
+   always sets, so we set-then-restore to read it non-destructively)."
+  (if mode
+      (sb-posix:umask (%pcl-to-integer (to-number mode)))
+      (let ((cur (sb-posix:umask 0)))
+        (sb-posix:umask cur)
+        cur)))
+
+(defun p-link (old new)
+  "Perl link OLD, NEW — create a hard link. Returns 1 on success, '' on failure."
+  (handler-case (progn (sb-posix:link (to-string old) (to-string new)) 1)
+    (error () (%pcl-save-errno) "")))
+
+(defun p-symlink (old new)
+  "Perl symlink OLD, NEW — create a symbolic link. Returns 1 on success, 0 on failure."
+  (handler-case (progn (sb-posix:symlink (to-string old) (to-string new)) 1)
+    (error () (%pcl-save-errno) 0)))
+
+(defun p-readlink (path)
+  "Perl readlink EXPR — return the target of a symbolic link (undef on failure).
+   EXPR defaults to $_ (the codegen supplies it for the no-arg form)."
+  (handler-case (sb-posix:readlink (to-string path))
+    (error () (%pcl-save-errno) *p-undef*)))
+
+(defun %pcl-chown-id (x)
+  "Map a Perl chown uid/gid to sb-posix's UNSIGNED argument.  Perl's -1 ('leave
+   unchanged') must reach the C layer as (uid_t)-1 = #xFFFFFFFF; sb-posix's FFI
+   rejects a negative integer outright."
+  (let ((n (%pcl-to-integer (to-number x))))
+    (if (minusp n) (logand n #xFFFFFFFF) n)))
+
+(defun p-chown (uid gid &rest files)
+  "Perl chown UID, GID, LIST — change owner/group. Returns count changed.
+   A UID or GID of -1 leaves that attribute unchanged.  A filehandle in the LIST
+   is fchown'd by descriptor."
+  (let ((u (%pcl-chown-id uid))
+        (g (%pcl-chown-id gid))
+        (count 0))
+    (dolist (f files count)
+      (let ((v (if (p-box-p f) (p-box-value f) f)))
+        (handler-case
+            (progn
+              (if (streamp v)
+                  (sb-posix:fchown (sb-sys:fd-stream-fd v) u g)
+                  (sb-posix:chown (to-string v) u g))
+              (incf count))
+          (error () (%pcl-save-errno) nil))))))
+
+(defun p-utime (atime mtime &rest files)
+  "Perl utime ATIME, MTIME, LIST — set access/modification times. Returns count.
+   Times are Unix-epoch seconds (same convention as sb-posix:utime).  undef
+   ATIME/MTIME means 'now', which sb-posix:utime uses when the times are omitted."
+  (let ((a (unless (or (null atime) (eq atime *p-undef*))
+             (%pcl-to-integer (to-number atime))))
+        (m (unless (or (null mtime) (eq mtime *p-undef*))
+             (%pcl-to-integer (to-number mtime))))
+        (count 0))
+    (dolist (f files count)
       (handler-case
-          (progn (sb-posix:chmod (to-string f) m) (incf count))
+          (progn
+            (if (and a m)
+                (sb-posix:utime (to-string f) a m)
+                (sb-posix:utime (to-string f)))
+            (incf count))
         (error () nil)))))
 
 ;;; ============================================================
@@ -9592,6 +9862,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (def "WEAKEN"   (lambda (r) (p-weaken r)))
     (def "UNWEAKEN" (lambda (r) (declare (ignore r)) *p-undef*))
     (def "IS_WEAK"  (lambda (r) (p-isweak r)))
+    (def "DUALVAR"  (lambda (num str) (p-dualvar num str)))
     (def "BLESSED"  #'%p-builtin-blessed)
     (def "REFADDR"  #'%p-builtin-refaddr)
     (def "REFTYPE"  #'%p-builtin-reftype)
@@ -9731,7 +10002,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let ((src-sym (intern (concatenate 'string "%" sn) sp)))
       (when (boundp src-sym)
         (setf (symbol-value (intern (concatenate 'string "%" dst-uname) dst-pkg))
-              (symbol-value src-sym))))))
+              (symbol-value src-sym))))
+    ;; IO (filehandle): copy the open-stream registration so *DST = *SRC
+    ;; aliases the filehandle — e.g. `*FH = shift` in a sub that then reads
+    ;; <FH>.  The handle is keyed in *p-filehandles* by the bareword symbol,
+    ;; same naming convention as the scalar/array/hash slots above.
+    (let ((src-sym (intern sn sp)))
+      (multiple-value-bind (stream present) (gethash src-sym *p-filehandles*)
+        (when present
+          (setf (gethash (intern dst-uname dst-pkg) *p-filehandles*) stream))))))
 
 (defun p-glob-undef-name (pkg-str name-str)
   "undef *foo — clear all slots."
@@ -11892,6 +12171,16 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun pl-dl_load_file (&rest args) (declare (ignore args)) nil)
 (defun pl-dl_find_symbol (&rest args) (declare (ignore args)) nil)
 (defun pl-dl_undef_symbols (&rest args) (declare (ignore args)) nil)
+
+;; Mark the DynaLoader XS boot stubs as genuinely *defined* (not mere forward
+;; declarations) so `defined &DynaLoader::boot_DynaLoader` is true.  PCL is a
+;; full perl-equivalent, not miniperl — and test.pl's is_miniperl() gates many
+;; t/ files (io/scalar.t, …) on exactly this check.  Real perl always has
+;; DynaLoader's XS boot routine present in a non-mini build.
+(dolist (s '(pl-boot_DynaLoader pl-dl_error pl-dl_load_flags pl-bootstrap
+             pl-bootstrap_inherit pl-dl_load_file pl-dl_find_symbol
+             pl-dl_undef_symbols))
+  (setf (gethash s pcl::*p-declared-subs*) :defined))
 
 (defpackage :XSLoader (:use :cl :pcl))
 (in-package :XSLoader)

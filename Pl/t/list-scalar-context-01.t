@@ -24,7 +24,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 27;
 
 sub run_cl {
     my ($code) = @_;
@@ -157,3 +157,24 @@ test_cl('bless \(map ...) is a blessed SCALAR ref',
 test_cl('\(map ...) in list context = one ref per element',
     q{my @r = \(map "$_", "a", "b"); print scalar(@r), " ", ref($r[0]), " ", ${$r[1]}, "\n";},
     "2 SCALAR b\n");
+
+# ── wantarray-leak family: a wantarray-sensitive builtin in a scalar position
+#    (my $x = …) must NOT inherit the enclosing sub's list context. These all
+#    failed before %WANTARRAY_SENSITIVE / _wrap_wantarray_ctx covered them. ────
+test_cl('scalar each inside list-context sub = key',
+    q{sub f { my %h=(a=>1); my $e = each %h; return "$e"; } my @r=(f()); print "$r[0]\n";},
+    "a\n");
+
+test_cl('scalar splice inside list-context sub = last removed elem',
+    q{sub f { my @a=(10,20,30,40); my $s = splice(@a,1,2); return "$s"; } my @r=(f()); print "$r[0]\n";},
+    "30\n");
+
+test_cl('scalar readline inside list-context sub reads ONE line',
+    q{open my $w,'>','/tmp/pcl_wal.dat'; print $w "L1\nL2\nL3\n"; close $w;
+      sub f { open my $fh,'<','/tmp/pcl_wal.dat'; my $a=<$fh>; my $b=<$fh>; close $fh; return "$a$b"; }
+      my @r=(f()); print $r[0]; unlink '/tmp/pcl_wal.dat';},
+    "L1\nL2\n");
+
+test_cl('scalar reverse inside list-context sub = reversed string',
+    q{sub f { my $s = reverse("abc"); return "$s"; } my @r=(f()); print "$r[0]\n";},
+    "cba\n");

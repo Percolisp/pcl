@@ -1558,18 +1558,7 @@ sub _process_expression_statement {
       $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
       # Apply Perl's auto-defined() insertion for while-modifier loops.
       # while ($x = readdir/each/readline/glob) terminates on undef, not on false.
-      if ($cl_modifier eq 'while') {
-        my $auto_pat = 'p-each|p-readdir|p-readline|p-glob';
-        if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\((?:$auto_pat)\b/) {
-          my $var = $1;
-          $cond_cl = "(progn $cond_cl (p-defined $var))";
-        } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
-          $cond_cl = "(p-defined $cond_cl)";
-        } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
-          # Bare call: assign to $_ and defined-check
-          $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
-        }
-      }
+      $cond_cl = $self->_auto_defined_cond($cond_cl) if $cl_modifier eq 'while';
       # `do BLOCK while/until COND` is a POST-test loop in Perl: BLOCK always
       # runs at least once and the condition is tested afterwards.  Detect the
       # `do { ... }` expression (Word 'do' + Structure::Block) and emit the
@@ -5348,21 +5337,7 @@ sub _process_while_statement {
   #   (p-setf (p-gethash/aref ...) (p-each/readdir/...))  → (p-defined COND)
   #   Bare (p-readdir/p-glob ...)   → (progn (p-setf $_ COND) (p-defined $_))
   #   Bare (p-each ...)             → same (sets $_ to each's return value)
-  if ($keyword ne 'until') {
-    my $auto_pat = 'p-each|p-readdir|p-readline|p-glob';
-    if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\((?:$auto_pat)\b/) {
-      my $var = $1;
-      $cond_cl = "(progn $cond_cl (p-defined $var))";
-    } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
-      $cond_cl = "(p-defined $cond_cl)";
-    } elsif ($cond_cl =~ /^\(p-setf\s+\$_\s+\((?:$auto_pat)\b/) {
-      # (p-setf $_ (p-readline ...)) — implicit $_ assign, terminate on undef
-      $cond_cl = "(progn $cond_cl (p-defined \$_))";
-    } elsif ($cond_cl =~ /^\((?:$auto_pat)\b/) {
-      # Bare call: assign to $_ and use defined-check (Perl's implicit $_ aliasing)
-      $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
-    }
-  }
+  $cond_cl = $self->_auto_defined_cond($cond_cl) if $keyword ne 'until';
 
   # Handle 'until' by negating
   if ($keyword eq 'until') {
@@ -5397,6 +5372,30 @@ sub _process_while_statement {
 
 
 # Process for/foreach loop
+# Apply Perl's implicit defined() insertion to a loop CONDITION whose value is
+# the result of each / readdir / readline(<FH>) / glob — these terminate the
+# loop on *undef*, not on a false-but-defined value (each's index 0, a "0" line,
+# an empty record).  The call may be wrapped in `(let ((*wantarray* nil/t)) …)`
+# (the wantarray-leak fix, see docs/wantarray-leak-review.md), so the detection
+# sees through that optional wrapper.  Shared by the while, while-modifier and
+# C-style-for condition handlers.  Returns the (possibly rewritten) condition.
+sub _auto_defined_cond {
+  my ($self, $cond_cl) = @_;
+  return $cond_cl unless defined $cond_cl;
+  my $auto_pat = qr/p-each|p-readdir|p-readline|p-glob/;
+  my $waw      = qr/(?:\(let \(\(\*wantarray\* (?:nil|t)\)\) )?/;
+  if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+$waw\((?:$auto_pat)\b/) {
+    return "(progn $cond_cl (p-defined $1))";
+  } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
+    return "(p-defined $cond_cl)";
+  } elsif ($cond_cl =~ /^\(p-setf\s+\$_\s+$waw\((?:$auto_pat)\b/) {
+    return "(progn $cond_cl (p-defined \$_))";
+  } elsif ($cond_cl =~ /^$waw\((?:$auto_pat)\b/) {
+    return "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
+  }
+  return $cond_cl;
+}
+
 sub _process_for_statement {
   my $self    = shift;
   my $stmt    = shift;
@@ -5485,12 +5484,10 @@ sub _process_c_style_for {
     } $statements[1]->children;
     if (@parts) {
       $cond_cl = $self->_parse_expression(\@parts, $stmt) // 't';
-      # Perl special case: for(; $k = each COLL ;) is treated as defined()
-      # Prevents loop exit when each returns index 0 (falsy).
-      if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+\(p-each\b/) {
-        my $var = $1;
-        $cond_cl = "(progn $cond_cl (p-defined $var))";
-      }
+      # Perl special case: for(; $k = each/readline/glob COLL ;) terminates on
+      # undef, not on a false-but-defined value (each's index 0).  Shared with
+      # the while handlers; also sees through the wantarray-leak `(let …)` wrap.
+      $cond_cl = $self->_auto_defined_cond($cond_cl);
     }
   }
 

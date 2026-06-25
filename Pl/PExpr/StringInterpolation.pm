@@ -301,9 +301,40 @@ sub parse_interpolated_variable {
         if ($depth == 0) {
           my $arr_name = substr($content, $brace_start, $i - $brace_start - 1);
           if ($arr_name =~ /^\w+$/) {
-            my $var_token = PPI::Token::ArrayIndex->new('$#{' . $arr_name . '}');
+            # $#{name} with a bareword is $#name (the lexical/package @name),
+            # NOT a symbolic deref — drop the braces so codegen emits
+            # (p-array-last-index @name), not the bogus symbol @{name}.
+            my $var_token = PPI::Token::ArrayIndex->new('$#' . $arr_name);
             my $var_id = $parser->make_node($var_token);
             return ($var_id, $i);
+          }
+          # $#{EXPR} expression deref (e.g. "$#{$ar}") — last index of the
+          # array referenced by EXPR.  Parse via PPI so PExpr handles the
+          # Cast '$#' + Block and emits (p-array-last-index EXPR).
+          my $doc = PPI::Document->new(\('$#{' . $arr_name . '}'));
+          $self->{_ppi_docs} //= [];
+          push @{$self->{_ppi_docs}}, $doc;
+          my $stmt = $doc->find_first('PPI::Statement');
+          if ($stmt) {
+            my @parts = $stmt->children();
+            my $expr_id = $parser->parse(\@parts);
+            return ($expr_id, $i);
+          }
+        }
+      }
+      # $#$ar sigil form — last index of the array referenced by $ar.
+      if (substr($content, $pos + 2, 1) eq '$') {
+        pos($content) = $pos + 2;
+        if ($content =~ /\G(\$\w+(?:::\w+)*)/gc) {
+          my $end_pos = pos($content);
+          my $doc = PPI::Document->new(\('$#' . $1));
+          $self->{_ppi_docs} //= [];
+          push @{$self->{_ppi_docs}}, $doc;
+          my $stmt = $doc->find_first('PPI::Statement');
+          if ($stmt) {
+            my @parts = $stmt->children();
+            my $expr_id = $parser->parse(\@parts);
+            return ($expr_id, $end_pos);
           }
         }
       }
@@ -545,12 +576,13 @@ sub parse_array_braced_interpolation {
   # Unescape \"-style escapes that were raw in the containing string
   $expr_str = $self->unescape_string($expr_str);
 
-  # @{foo} with a LONE bareword is the array @foo (symbolic ref), NOT a call to
-  # foo(). Autoquote it so the standard path below yields (p-cast-@ "foo") — the
-  # same shape the explicit @{"foo"} produces. (A sub call must be written
-  # @{foo()}, which has parens and so is not a lone bareword.)
+  # @{foo} with a LONE bareword is the array @foo itself (the lexical, or the
+  # package array if no lexical) — NOT a symbolic ref and NOT a call to foo().
+  # Rewrite to the plain @foo Symbol so it resolves the lexical correctly.
+  # (A symbolic deref must be written @{"foo"}/@{$ref}; a sub call @{foo()} —
+  # both of which have non-bareword content and so skip this branch.)
   if ($expr_str =~ /\A[a-zA-Z_]\w*(?:::\w+)*\z/) {
-    $expr_str = "'" . $expr_str . "'";
+    $expr_str = '@' . $expr_str;
   }
 
   my $doc = PPI::Document->new(\$expr_str);

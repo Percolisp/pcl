@@ -44,10 +44,10 @@ sub tainted  { 0 }
 
 sub dualvar {
     my ($num, $str) = @_;
-    # Return a scalar whose string value is $str and numeric value is $num.
-    # PCL: not($dualvar) uses string truthiness, so returning $str is correct
-    # for boolean operations. Full NV/SV dualvar semantics are in p-dualvar (CL).
-    return $str;
+    # A genuine dualvar: numeric value $num, string value $str.  Pure Perl can't
+    # construct one, so route to the runtime primitive (p-dualvar) via the
+    # builtin:: dispatch namespace, exactly as weaken/blessed/reftype do.
+    return builtin::dualvar($num, $str);
 }
 
 sub isdual    { 0 }
