@@ -632,13 +632,15 @@ test_cl('$ar->$#* in arithmetic (named-unary-free) gives count',
 
 # ── session 255b: the six sweep-crash fixes (see docs/session-log.md) ──────────
 
-# A lone bareword in a deref block is a symbolic ref to the package variable,
-# NOT a sub call.  @{foo} / "$x->@{foo}" used to emit (pl-foo) → UNDEFINED-FUNCTION
-# (crashed postfixderef.t and magic.t at *@{HASH}).
-test_cl('@{bareword} is the symbolic array @bareword (interpolated)',
+# A lone bareword in a deref block is the variable @bareword itself (here a
+# package @foo), NOT a sub call.  @{foo} / "$x->@{foo}" used to emit (pl-foo) →
+# UNDEFINED-FUNCTION (crashed postfixderef.t and magic.t at *@{HASH}).  Since
+# 2026-06-25d it resolves the variable directly (also fixing the lexical case;
+# see braced-bareword-deref-01.t) rather than a package-only symbolic deref.
+test_cl('@{bareword} is the array @bareword (interpolated)',
     'our @foo = (7,8,9); $_ = "foo"; print "$_->@{foo}\n";',
     "foo->7 8 9\n");
-test_cl('@{bareword} is the symbolic array @bareword (non-interpolated)',
+test_cl('@{bareword} is the array @bareword (non-interpolated)',
     'our @foo = (7,8,9); print join(",", @{foo}), "\n";',
     "7,8,9\n");
 

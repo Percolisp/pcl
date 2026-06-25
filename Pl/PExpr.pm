@@ -746,6 +746,19 @@ sub parse {
   }
 
 
+  # - - - Pre-pass: collapse ${name}/@{name}/%{name}/$#{name} (a Cast sigil
+  # followed by a Block whose sole content is a bare identifier) into the plain
+  # variable token $name/@name/%name/$#name.  In Perl a *bareword* in a deref
+  # block is NOT a symbolic ref — `${name}` is exactly `$name` (the lexical, or
+  # the package var if no lexical), and `${name}[0]` is `$name[0]`.  Only a
+  # quoted string (`${"name"}`) or an expression (`${$ref}`) is a real deref.
+  # Rewriting the two tokens into one Symbol/ArrayIndex routes the whole thing
+  # through the ordinary variable path, so lexicals resolve correctly and any
+  # trailing subscript is handled by the normal element-access machinery (rather
+  # than emitting a package-only symbolic `(p-cast-$ "name")`).
+  $self->_collapse_braced_bareword_derefs($e);
+
+
   # - - - Are there any ","? Make it a (progn ... ) case.
   # XXXXX Bad? Not compatible with what () code do!!
   if (grep { my $tmp = $self->is_token_operator($_) // '';
@@ -1982,6 +1995,29 @@ sub _block_is_hash_constructor {
 # else (a sub call `foo()` has a trailing List; `$ref`/`[...]`/`\ ...` are not a
 # lone Word; multi-token blocks are expressions), so those keep their normal
 # parse.
+# Collapse a Cast sigil + Block-of-sole-bareword into a single variable token.
+# ${name} → $name, @{name} → @name, %{name} → %name, $#{name} → $#name.
+# Operates in place on the token list $e.  See the call site for rationale.
+sub _collapse_braced_bareword_derefs {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e) - 1; $i++) {
+    my $cast = $e->[$i];
+    next unless ref($cast) eq 'PPI::Token::Cast';
+    my $sigil = $cast->content();
+    next unless $sigil eq '$' || $sigil eq '@' || $sigil eq '%'
+             || $sigil eq '$#';
+    my $blk = $e->[$i+1];
+    next unless ref($blk) eq 'PPI::Structure::Block' && $blk->start() eq '{';
+    my $bw = _block_sole_bareword($blk);
+    next unless defined $bw;
+    my $tok = $sigil eq '$#'
+      ? PPI::Token::ArrayIndex->new('$#' . $bw)
+      : PPI::Token::Symbol->new($sigil . $bw);
+    splice @$e, $i, 2, $tok;
+  }
+}
+
+
 sub _block_sole_bareword {
   my $block = shift;
   my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
