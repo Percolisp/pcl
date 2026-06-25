@@ -119,8 +119,56 @@ errors** blocked it; **2 fixed 2026-06-24**, 1 left:
    `{ PROG }` inside parens as a `PPI::Structure::Constructor` (anon-hash), not a
    `Block`, so the paren branch accepts either when it opens with `{`.  Regression
    guard: `Pl/t/system-block-01.t`.  **`test.pl` now transpiles with 0 parse
-   errors** (`./pl2cl < t/test.pl`).  NEXT: reassess test.pl *runtime* load + the
-   CWD/`re_tests`/`charset_tools.pl` fixtures to unlock the `t/re` swath.
+   errors** (`./pl2cl < t/test.pl`).
+
+#### test.pl now LOADS and works as a harness (2026-06-25)
+
+`require './test.pl'` transpiles+loads end-to-end and provides a working harness
+(`plan`/`ok`/`is`/`like`/`done_testing`/… all defined; verified a 3-test probe
+matches perl exactly).  Run a t/re file with **CWD = perl's `t/` dir** so the
+`require './test.pl'` resolves:
+
+```bash
+T=/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t
+./pl2cl "$T/re/pos.t" > /tmp/x.lisp
+( cd "$T" && sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /tmp/x.lisp )
+```
+
+One **compile-time** ERROR remains inside test.pl: `pl-watchdog` has a forward
+`goto WATCHDOG_VIA_ALARM` that is NOT wrapped in a `(tagbody …)` →
+"attempt to GO to nonexistent tag". This is **intra-sub-goto Blocker A**
+(`docs/intra-sub-goto-plan.md`: 2-pass wrap result discarded). SBCL still defines
+the function and loads the rest, and `watchdog()` is only called on timeout — so
+**the harness is fully usable despite it**. Fixing it = the parked goto work.
+
+#### t/re landscape (first pass, 2026-06-25) — bugs found via the loaded harness
+
+- 🐞 **FIXED**: `pos.t` — failed `/g` match must reset `pos()` to undef; the
+  undef must survive list flattening (was raw CL nil → dropped from `@_`). Fix:
+  `p-pos` returns `*p-undef*`. Guard `Pl/t/pos-01.t`. (Also exposed that a raw
+  CL nil scalar anywhere in a flattened Perl list silently vanishes — `p-pos`
+  was the instance; watch for other builtins returning bare nil for undef.)
+- ✅ already pass: `reg_eval.t` 8/8, `rt122747.t` 3/3, `pat_special_cc.t` 9/9,
+  `qrstack.t` 1/1.
+- 🐞 **`/n` no-capture modifier** (real, fixable): `reg_nocapture.t` (16/25),
+  parts of `rxcode.t`. `/n` makes `(...)` non-capturing; cl-ppcre has no `/n`, so
+  rewrite the pattern's unescaped capturing `(` → `(?:` when `/n` is set (a
+  generic pattern pre-pass, same shape as `%pcl-strip-gpos`). Best next t/re win.
+- 🟡 partial (regex-semantics divergences, triage individually): `reg_pmod.t`
+  59/88, `reg_posixcc.t` 1544/2560, `script_run.t` 71/185, `rxcode.t` 25/42,
+  `qr.t` 3/4, `reg_60508.t` 0/1.
+- 🚧 not-supported buckets: `qr-72922.t` crash = `weaken`/`Internals::SvREFCNT`
+  refcount introspection; `subst.t` crash = `*Config::{NAME}` glob-slot on a
+  stash snapshot (`p-glob-slot` got a hash-table, wants a typeglob) — both the
+  stash/typeglob + Internals not-supported areas. The whole-file crash is the
+  damage; a catch/no-op would recover the non-Internals tests.
+- ❓ 0/0 (early abort — need a look): `recompile.t`, `reg_fold.t` (6786 tests!),
+  `opt.t` (639), `anyof.t` (1187), `reg_nc_tie.t`. High test counts → high payoff
+  if the early abort is one shared cause.
+
+NEXT t/re: implement `/n` (clean win), then triage the 0/0 early-aborts
+(`anyof.t`/`opt.t`/`reg_fold.t` are big). The `re_tests`-driven `regexp*.t`
+family still needs the `re_tests` fixture wired (separate effort).
 
 ### Not yet surveyed (next sessions)
 
