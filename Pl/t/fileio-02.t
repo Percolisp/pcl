@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 16;
+plan tests => 19;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -320,5 +320,49 @@ my $n2 = read($in, $buf, 2, 5);
 print "n2=$n2 buf2=[$shown]\n";
 close $in;
 unlink $path;
+PERL
+}
+
+# --- Test 17: print/say with no list argument default to $_ ---
+# Regression: bare `print;` / `say;` / `print STDOUT;` used to emit nothing.
+{
+    test_io('print/say with no args default to $_', <<'PERL');
+use feature "say";
+$_ = "deefolt";
+say;
+say STDOUT;
+print;
+print "\n";
+print STDOUT;
+print "\n";
+PERL
+}
+
+# --- Test 18: print/say to an unopened handle fails with EBADF, prints nothing ---
+# Regression: an unresolved filehandle silently fell through to STDOUT (CL's
+# (princ x nil) writes to *standard-output*).  Now it must set $!=EBADF and emit
+# nothing.  Also: a string/scalar holding a handle NAME ('STDOUT') resolves.
+{
+    test_io('print to unopened handle = EBADF + no output; named handle resolves', <<'PERL');
+use feature "say";
+no warnings 'unopened';
+$! = 0;
+print NOPE "should-not-appear\n";
+print "ebadf=", ($! ? "yes" : "no"), "\n";
+my $h = "STDOUT";
+print $h "via-string-handle\n";   # scalar holding a handle name
+say {"STDOUT"} "via-block-string"; # block string handle
+PERL
+}
+
+# --- Test 19: open(FH, ">-") / open(FH, "<-") use STDOUT/STDIN ---
+# The magic filename "-" is a standard stream (Perl dups it), not a file named
+# "-".  Previously PCL created a literal file called "-".
+{
+    test_io('open(FH, ">-") writes to STDOUT', <<'PERL');
+open(FOO, ">-") or die "open: $!";
+print FOO "to-stdout-via-dash\n";
+open(my $bar, ">-") or die "open: $!";
+print $bar "to-stdout-via-dash-lexical\n";
 PERL
 }

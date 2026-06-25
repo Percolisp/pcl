@@ -6367,8 +6367,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((fh *standard-output*))
     ;; Check for :fh keyword
     (when (and (>= (length args) 2) (eq (first args) :fh))
-      (setf fh (p-get-stream (second args)))
-      (setf args (cddr args)))
+      (let ((desig (second args)))
+        (setf args (cddr args))
+        (cond
+          ;; :fh nil = bare `print { }`/empty filehandle node → the default
+          ;; (currently-selected) output handle, i.e. STDOUT.
+          ((null desig) (setf fh *standard-output*))
+          ;; A named/lexical handle that resolves to a real stream.
+          ((p-get-stream desig) (setf fh (p-get-stream desig)))
+          ;; A handle was named but is not open: Perl print/say fails with
+          ;; errno EBADF, prints nothing, and returns false.
+          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
+             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+             (return-from p-print "")))))
+    ;; No list to print (bare `print;` / `print FH;` / `say;`) defaults to $_,
+    ;; like the named-unary $_-default family (uc/length/…).
+    (when (null args)
+      (setf args (list $_)))
     ;; Flatten raw @array / %hash args (print takes a LIST): a bare vector/hash
     ;; spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar
     ;; (so `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
@@ -6388,9 +6403,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-say (&rest args)
   "Perl say (print with newline)"
   (let ((fh *standard-output*))
-    ;; Check for :fh keyword to get the right stream
+    ;; Resolve the target handle once (same rules as p-print); bail with EBADF
+    ;; on a named-but-unopened handle so we don't emit a stray newline.
     (when (and (>= (length args) 2) (eq (first args) :fh))
-      (setf fh (p-get-stream (second args))))
+      (let ((desig (second args)))
+        (cond
+          ((null desig) (setf fh *standard-output*))
+          ((p-get-stream desig) (setf fh (p-get-stream desig)))
+          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
+             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+             (return-from p-say "")))))
     (apply #'p-print args)
     (terpri fh)
     t))
@@ -6756,9 +6778,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          ;; `print STDERR ...` actually reach *error-output* instead of stdout.
          (let ((canon (find-symbol (symbol-name fh) :pcl)))
            (and canon (not (eq canon fh)) (gethash canon *p-filehandles*)))))
+    ((stringp fh)
+     ;; A string filehandle name — e.g. print {"STDOUT"} ..., or a scalar
+     ;; holding a handle name (my $fh = 'STDOUT'; print $fh ...).  Strip an
+     ;; optional package qualifier, then resolve by name.  Barewords reach
+     ;; *p-filehandles* under their :invert-readtable-cased symbol (STDOUT →
+     ;; |stdout|), so invert the string name the same way before find-symbol.
+     (let* ((sep (search "::" fh :from-end t))
+            (name (if sep (subseq fh (+ sep 2)) fh))
+            (sym (find-symbol (%pcl-invert-case name) :pcl)))
+       (and sym (gethash sym *p-filehandles*))))
     ((p-box-p fh)
      (let ((v (p-box-value fh)))
-       (if (streamp v) v nil)))   ; only return if it IS a stream
+       (cond
+         ((streamp v) v)
+         ;; Scalar holding a handle NAME ('STDOUT', 'FOO'): resolve by name.
+         ((stringp v) (p-get-stream v))
+         (t nil))))
     (t nil)))
 
 (defun %p-open-parse-2arg (expr)
@@ -6940,6 +6976,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (file-str (to-string filename))
          (stream
           (cond
+            ;; The magic filename "-" means a standard stream (Perl dups it):
+            ;; "<-" / "<","-" → STDIN; ">-" / ">","-" → STDOUT.
+            ((and (string= file-str "-") (string= mode-str "<"))
+             *standard-input*)
+            ((and (string= file-str "-")
+                  (member mode-str '(">" ">>") :test #'string=))
+             *standard-output*)
             ((string= mode-str "<")
              (open file-str :direction :input :if-does-not-exist nil))
             ((string= mode-str ">")
