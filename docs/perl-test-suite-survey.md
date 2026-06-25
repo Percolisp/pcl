@@ -185,7 +185,7 @@ loaded harness runs them. First probe (P = perl ok/notok, C = PCL):
 | `defout.t` | 22 | **21/1** | 🐞→✅ FIXED (this session): see below; last fail `$-` is format-dependent |
 | `print.t` | 24 | 21/1 | 🟡 close (3 diffs) |
 | `say.t` | 13 | 8/1 | 🟡 |
-| `tell.t` | 36 | 28/8 | 🟡 |
+| `tell.t` | 36 | **32/4** | 🐞→🟡 (2026-06-26): old-style symbolic filehandles. (1) `open($s,...)` where `$s` holds a NAME ("TST") now opens the *named* glob (`*TST`) instead of autovivifying a lexical into `$s` — both `<TST>`/`eof(TST)` and `<$TST>` reach it. (2) `%p-fh-arg` mis-cased the FH name recovered from a funcall-wrapped bareword (`eof(TST)`→`(pl-TST)`): "TST" vs readline's "tst" — fixed with a final `%pcl-invert-case` so it matches the direct bareword symbol. (3) argument-less `eof` now tests `*p-last-read-handle*` (last FH read) not STDIN. Remaining 4: per-handle `$.` line-number magic + `tell FH` setting the current handle (15/19/21), coercible-glob (29). |
 | `read.t` | 2 | **2/2** | 🐞→✅ FIXED (2026-06-25b): `read()` was fundamentally broken (ignored its BUF, returned the read STRING not the count); now fills BUF in place, returns the count, NUL-pads at a positive OFFSET, EBADF on unopened handle |
 | `errno.t` | 16 | n/a | 🚧 uses `runperl` (spawns a real `./perl` subprocess) — fixture dependency, not a PCL semantics gap |
 | `paragraph_mode.t` | 80 | 16 | 🐞 `$/=""` paragraph mode (same `$/` gap as `base/rs.t` — convergent) |

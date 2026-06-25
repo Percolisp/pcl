@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 22;
+plan tests => 25;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -416,5 +416,60 @@ sub read_two { *FH = shift; my $a = <FH>; my $b = <FH>; return "$a$b"; }
 print "got: ", read_two(*SRC);
 close SRC;
 unlink "/tmp/pcl_glob_$$.dat";
+PERL
+}
+
+# --- Test 23: symbolic filehandle — open($scalar) where $scalar holds a NAME ---
+# `$TST = "TST"; open($TST, ...)` opens the *named* glob (*TST) and leaves $TST
+# holding the string — it does NOT autovivify a lexical handle.  Both the
+# bareword form (<TST>, eof(TST)) and the scalar form (<$TST>) reach the handle.
+# (tell.t / old-style perl idiom.)
+{
+    test_io('open($s) with $s holding a NAME opens the symbolic glob', <<'PERL');
+my $path = "/tmp/pcl_sym_$$.dat";
+open(my $w, '>', $path) or die; print $w "aaa\nbbb\n"; close $w;
+$TST = "TST";
+open($TST, '<', $path) or die "open: $!";
+print "still-string=", ($TST eq "TST" ? 1 : 0), "\n";
+print "eof-fresh=", (eof(TST) ? 1 : 0), "\n";        # 0 — file is non-empty
+my $l1 = <TST>;                                       # via bareword
+my $l2 = <$TST>;                                      # via the scalar name
+print "l1=$l1l2=$l2";
+print "eof-end=", (eof(TST) ? 1 : 0), "\n";          # 1 — both lines consumed
+close TST;
+unlink $path;
+PERL
+}
+
+# --- Test 24: argument-less eof tests the LAST filehandle read ---
+# Bare `eof` (and `eof` inside `while (<FH>)`) refers to the last file read, not
+# STDIN.  Regression: %p-eof-impl used *standard-input* for the no-arg form.
+{
+    test_io('argument-less eof tests the last handle read', <<'PERL');
+my $path = "/tmp/pcl_eof_$$.dat";
+open(my $w, '>', $path) or die; print $w "x\ny\nz\n"; close $w;
+open(IN, '<', $path) or die;
+my $n = 0;
+while (<IN>) { $n++ if eof; }    # eof (no arg) = eof(IN)
+print "eofs-seen=$n\n";          # exactly 1, on the last line
+close IN;
+unlink $path;
+PERL
+}
+
+# --- Test 25: bareword FH whose open went through the scalar form still reads ---
+# Mixed/lower-case names round-trip: open($h="Log123", ...) then <Log123> must
+# resolve the SAME handle (the funcall-wrapped bareword case-recovery in
+# %p-fh-arg).
+{
+    test_io('symbolic-open then bareword read agree on the handle name', <<'PERL');
+my $path = "/tmp/pcl_name_$$.dat";
+open(my $w, '>', $path) or die; print $w "one\ntwo\n"; close $w;
+my $h = "Log123";
+open($h, '<', $path) or die "open: $!";
+print "a=", scalar(<Log123>);
+print "b=", scalar(<Log123>);
+close Log123;
+unlink $path;
 PERL
 }

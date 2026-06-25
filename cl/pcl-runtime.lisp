@@ -6765,6 +6765,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; Filehandle storage - maps symbols to CL streams
 (defvar *p-filehandles* (make-hash-table :test 'eq))
 
+;; The stream most recently read by readline/<FH>.  Perl's argument-less `eof`
+;; (and `eof` inside a `while (<FH>)` loop) tests "the last file read", not
+;; STDIN — so readline records the handle here and %p-eof-impl falls back to it.
+(defvar *p-last-read-handle* nil)
+
 ;; Standard filehandles
 (setf (gethash 'STDIN *p-filehandles*) *standard-input*)
 (setf (gethash 'STDOUT *p-filehandles*) *standard-output*)
@@ -7013,6 +7018,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (if stream
         (progn
           (cond
+            ;; Symbolic filehandle: open($fh, ...) where $fh already holds a
+            ;; defined handle-NAME string (e.g. $TST = "TST"; open($TST, ...)).
+            ;; Perl opens the named glob (*TST) and leaves $fh holding the
+            ;; string — it does NOT autovivify a lexical handle into $fh.
+            ;; Register under the by-name :pcl symbol (invert-cased, package
+            ;; qualifier stripped) so BOTH the bareword form (<TST>/eof(TST))
+            ;; and the scalar form (<$TST>) resolve it via p-get-stream.
+            ;; (An undef/empty box is the modern `open my $fh, ...` autoviv.)
+            ((and (p-box-p fh)
+                  (stringp (p-box-value fh))
+                  (plusp (length (p-box-value fh))))
+             (let* ((nm  (p-box-value fh))
+                    (sep (search "::" nm :from-end t))
+                    (name (if sep (subseq nm (+ sep 2)) nm)))
+               (setf (gethash (intern (%pcl-invert-case name) :pcl)
+                              *p-filehandles*)
+                     stream)))
             ((p-box-p fh) (box-set fh stream))
             (t             (setf (gethash fh *p-filehandles*) stream))))
         (%pcl-save-errno))  ; capture C errno (ENOENT etc.) before SBCL overwrites it
@@ -7055,8 +7077,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       1))
 
 (defun %p-eof-impl (&optional fh)
-  "Perl eof implementation — fh must already be a symbol or stream"
-  (let ((stream (if fh (p-get-stream fh) *standard-input*)))
+  "Perl eof implementation — fh must already be a symbol or stream.
+   Argument-less `eof` tests the last filehandle read (Perl semantics), so it
+   falls back to *p-last-read-handle* (then STDIN) rather than STDIN directly."
+  (let ((stream (if fh (p-get-stream fh) (or *p-last-read-handle* *standard-input*))))
     (if stream
         (let ((ch (peek-char nil stream nil :eof)))
           (if (eq ch :eof) t nil))
@@ -7087,9 +7111,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           (let ((name (symbol-name (car fh-form))))
             (and (> (length name) 3)
                  (string-equal (subseq name 0 3) "PL-"))))
-     ;; Recover the bareword FH name: reverse the :invert read, then strip the
-     ;; now-lowercase pl- prefix (LOG stays LOG, a lowercase fh round-trips too).
-     `',(intern (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3)))
+     ;; Recover the bareword FH name and intern the SAME symbol the direct
+     ;; bareword path produces.  A direct bareword `X` becomes
+     ;; (intern (%pcl-invert-case "X")) — the reader applies :invert.  Here we
+     ;; first un-invert the read symbol-name and strip the pl- prefix to get the
+     ;; original Perl name, then invert it again to match.  (Skipping the final
+     ;; invert mis-cased `eof(TST)`/`<TST>` derived FHs: "TST" vs the readline's
+     ;; "tst" — symbolic-FH open(\$TST="TST") then bareword use.)
+     `',(intern (%pcl-invert-case
+                 (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3))))
     ;; (let (BINDINGS) (pl-NAME)) — wantarray-wrapped bareword FH.
     ;; Sessions 162+ wrap scalar-context user sub calls in (let ((*wantarray* V)) ...).
     ;; Unwrap the let and extract the bare filehandle name.
@@ -7102,7 +7132,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                  (symbolp (car body))
                  (> (length (symbol-name (car body))) 3)
                  (string-equal (subseq (symbol-name (car body)) 0 3) "PL-"))))
-     `',(intern (subseq (%pcl-invert-case (symbol-name (car (caddr fh-form)))) 3)))
+     `',(intern (%pcl-invert-case
+                 (subseq (%pcl-invert-case (symbol-name (car (caddr fh-form)))) 3))))
     ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
     (t fh-form)))
 
@@ -7380,6 +7411,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    Updates $. (input line number) on each successful read."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
+    ;; Remember the handle so a later argument-less `eof` tests THIS stream.
+    (when stream (setf *p-last-read-handle* stream))
     (when stream
       (handler-case
           (cond
