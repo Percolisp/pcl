@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 19;
+plan tests => 22;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -364,5 +364,57 @@ open(FOO, ">-") or die "open: $!";
 print FOO "to-stdout-via-dash\n";
 open(my $bar, ">-") or die "open: $!";
 print $bar "to-stdout-via-dash-lexical\n";
+PERL
+}
+
+# --- Test 20: $/ = \N — fixed-length record mode ---
+# Regression: get-input-record-separator returned nil (slurp) for a ref, so
+# $/ = \N read the whole file instead of N-char records.
+{
+    test_io('$/ = \N reads fixed-length records', <<'PERL');
+open(my $w, '>', "/tmp/pcl_rec_$$.dat") or die; print $w "abcdefgh"; close $w;
+open(my $in, '<', "/tmp/pcl_rec_$$.dat") or die;
+local $/ = \3;
+my @recs;
+while (my $r = <$in>) { push @recs, $r; }
+print "n=", scalar(@recs), " recs=", join('|', @recs), "\n";
+close $in;
+unlink "/tmp/pcl_rec_$$.dat";
+PERL
+}
+
+# --- Test 21: paragraph mode keeps the file's final newline state ---
+# Regression: paragraph mode ($/ = "") always appended a trailing \n at EOF,
+# inventing one for a file whose last line had none.
+{
+    test_io('paragraph mode does not invent a trailing newline at EOF', <<'PERL');
+open(my $w, '>', "/tmp/pcl_para_$$.dat") or die;
+print $w "a1\na2\n\nb1\nb2";   # last record "b1\nb2" has NO trailing newline
+close $w;
+open(my $in, '<', "/tmp/pcl_para_$$.dat") or die;
+local $/ = "";
+while (my $r = <$in>) {
+    (my $s = $r) =~ s/\n/N/g;
+    print "rec=[$s] len=", length($r), "\n";
+}
+close $in;
+unlink "/tmp/pcl_para_$$.dat";
+PERL
+}
+
+# --- Test 22: glob filehandle aliasing (*FH = $glob) ---
+# Regression: p-glob-copy copied CODE/SCALAR/ARRAY/HASH slots but not the IO
+# (filehandle) slot, so `*FH = shift` (a passed *HANDLE glob) then <FH> read
+# nothing.  Used by base/rs.t's test_string/test_record helpers.
+{
+    test_io('glob assignment aliases the filehandle (*FH = $glob)', <<'PERL');
+open(SRC, '>', "/tmp/pcl_glob_$$.dat") or die;
+print SRC "line1\nline2\nline3\n";
+close SRC;
+open(SRC, '<', "/tmp/pcl_glob_$$.dat") or die;
+sub read_two { *FH = shift; my $a = <FH>; my $b = <FH>; return "$a$b"; }
+print "got: ", read_two(*SRC);
+close SRC;
+unlink "/tmp/pcl_glob_$$.dat";
 PERL
 }

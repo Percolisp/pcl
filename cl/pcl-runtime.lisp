@@ -817,12 +817,16 @@
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
-   Returns nil for undef (slurp mode) or when $/ is a reference."
+   Returns nil for undef (slurp mode), a positive INTEGER record length for
+   $/ = \\N (fixed-length record mode), or the separator STRING otherwise.
+   A non-positive record length behaves like slurp (nil), matching Perl."
   (let ((val (unbox |$/|)))
     (cond
       ((eq val *p-undef*) nil)
-      ;; $/ = \N (reference to number) means record mode — chomp does nothing
-      ((p-box-p val) nil)
+      ;; $/ = \N (reference to a number) → fixed-length record mode.
+      ((p-box-p val)
+       (let ((n (truncate (to-number (unbox val)))))
+         (if (> n 0) n nil)))
       (t (to-string val)))))
 
 ;;; Match position tracking for pos() — must precede box-set which uses it
@@ -2005,6 +2009,8 @@
     (cond
       ;; $/ = undef (slurp mode): chomp does nothing
       ((null sep) (cons s 0))
+      ;; $/ = \N (record mode): $/ is a ref, so chomp removes nothing
+      ((integerp sep) (cons s 0))
       ;; $/ = "" (paragraph mode): remove all trailing newlines
       ((string= sep "")
        (let ((end len))
@@ -7386,24 +7392,39 @@ buffer's fill-pointer; everything else falls back to file-length."
                      do (vector-push-extend char content))
                (if (zerop (length content)) nil (coerce content 'string))))
 
+            ;; Record mode: $/ = \N - read exactly N characters per record.
+            ((integerp sep)
+             (let* ((buf (make-string sep))
+                    (got (read-sequence buf stream)))
+               (if (zerop got) nil (subseq buf 0 got))))
+
             ;; Paragraph mode: $/ = "" - read until blank line
             ((string= sep "")
              (let ((lines nil)
-                   (seen-content nil))
+                   (seen-content nil)
+                   (last-missing-nl nil))
                (loop
                 (multiple-value-bind (line missing-nl) (read-line stream nil nil)
-                  (declare (ignore missing-nl))
                   (cond
                     ((null line)
-                     (return (if lines
-                                 (format nil "~{~A~^~%~}~%" (nreverse lines))
-                                 nil)))
+                     ;; EOF: rebuild the record.  Only append the final newline
+                     ;; if the last content line actually had one — a file whose
+                     ;; last line lacks a trailing newline keeps it that way
+                     ;; (Perl does not invent one).
+                     (return
+                       (if lines
+                           (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
+                             (if last-missing-nl
+                                 body
+                                 (concatenate 'string body (string #\Newline))))
+                           nil)))
                     ((string= line "")
                      (if seen-content
                          (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
                          nil))  ; Skip leading blank lines
                     (t
-                     (setf seen-content t)
+                     (setf seen-content t
+                           last-missing-nl missing-nl)
                      (push line lines)))))))
 
             ;; Single character separator (common case, optimized)
@@ -9828,7 +9849,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let ((src-sym (intern (concatenate 'string "%" sn) sp)))
       (when (boundp src-sym)
         (setf (symbol-value (intern (concatenate 'string "%" dst-uname) dst-pkg))
-              (symbol-value src-sym))))))
+              (symbol-value src-sym))))
+    ;; IO (filehandle): copy the open-stream registration so *DST = *SRC
+    ;; aliases the filehandle — e.g. `*FH = shift` in a sub that then reads
+    ;; <FH>.  The handle is keyed in *p-filehandles* by the bareword symbol,
+    ;; same naming convention as the scalar/array/hash slots above.
+    (let ((src-sym (intern sn sp)))
+      (multiple-value-bind (stream present) (gethash src-sym *p-filehandles*)
+        (when present
+          (setf (gethash (intern dst-uname dst-pkg) *p-filehandles*) stream))))))
 
 (defun p-glob-undef-name (pkg-str name-str)
   "undef *foo — clear all slots."

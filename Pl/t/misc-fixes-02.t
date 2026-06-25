@@ -572,9 +572,15 @@ test_cl('chained < > comparison is not misparsed as a glob/readline',
 # that could take an operand (print/return/scalar/sort).  The glob-fixup pass now
 # reconstructs the readline token.  (YAML::PP's `return scalar <$fh>` hit this:
 # the unhandled `<`/`>` operand became an undef "single node of unknown type".)
-like(transpile_to_cl('my $line = scalar <$fh>;'), qr/\(p-scalar \(p-readline \$fh\)\)/,
+# readline is wantarray-sensitive, so it is emitted inside a `(let ((*wantarray*
+# …)) …)` context wrapper (see docs/wantarray-leak-review.md) — the assertion
+# tolerates that wrapper but still pins that <$fh> parsed as a p-readline (not
+# the `<`/`>` operators).
+like(transpile_to_cl('my $line = scalar <$fh>;'),
+    qr/\(p-scalar \((?:let \(\(\*wantarray\* nil\)\) )?\(p-readline \$fh\)/,
     'scalar <$fh> parses as a readline, not < > operators');
-like(transpile_to_cl('print <$fh>;'), qr/\(p-print \(p-readline \$fh\)\)/,
+like(transpile_to_cl('print <$fh>;'),
+    qr/\(p-print \((?:let \(\(\*wantarray\* t\)\) )?\(p-readline \$fh\)/,
     'print <$fh> parses as a readline');
 # Guard the comparison sibling: `$a < $b` (no closing >) stays a less-than.
 like(transpile_to_cl('my $r = $a < $b;'), qr/\(p-< \$a \$b\)/,
