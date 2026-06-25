@@ -681,4 +681,26 @@ print "pragma-ok\\n";
        'use if 1, "strict": pragma string-require is a no-op, no \$^H crash');
 }
 
+# ============================================================
+# DynaLoader boot stub is "defined" — PCL is a full perl, not miniperl.
+# perl's own test harness (test.pl) gates many t/ files on
+# `is_miniperl() = !defined &DynaLoader::boot_DynaLoader`; if that reports
+# miniperl, those files skip_all (io/scalar.t was 0/128 before this).
+# ============================================================
+note "-------- DynaLoader boot stub / is_miniperl:";
+{
+  my $out = run_pl(qq{
+print defined(&DynaLoader::boot_DynaLoader) ? "defined\\n" : "undef\\n";
+print defined(&DynaLoader::dl_error)        ? "dl_error-defined\\n" : "dl_error-undef\\n";
+my \$mini = !defined &DynaLoader::boot_DynaLoader;
+print "miniperl=", (\$mini ? 1 : 0), "\\n";
+});
+  like($out, qr/^defined$/m,
+       'defined &DynaLoader::boot_DynaLoader is true (PCL is not miniperl)');
+  like($out, qr/^dl_error-defined$/m,
+       'defined &DynaLoader::dl_error is true');
+  like($out, qr/^miniperl=0$/m,
+       'is_miniperl() is false');
+}
+
 done_testing();

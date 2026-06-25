@@ -12019,6 +12019,16 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun pl-dl_find_symbol (&rest args) (declare (ignore args)) nil)
 (defun pl-dl_undef_symbols (&rest args) (declare (ignore args)) nil)
 
+;; Mark the DynaLoader XS boot stubs as genuinely *defined* (not mere forward
+;; declarations) so `defined &DynaLoader::boot_DynaLoader` is true.  PCL is a
+;; full perl-equivalent, not miniperl — and test.pl's is_miniperl() gates many
+;; t/ files (io/scalar.t, …) on exactly this check.  Real perl always has
+;; DynaLoader's XS boot routine present in a non-mini build.
+(dolist (s '(pl-boot_DynaLoader pl-dl_error pl-dl_load_flags pl-bootstrap
+             pl-bootstrap_inherit pl-dl_load_file pl-dl_find_symbol
+             pl-dl_undef_symbols))
+  (setf (gethash s pcl::*p-declared-subs*) :defined))
+
 (defpackage :XSLoader (:use :cl :pcl))
 (in-package :XSLoader)
 ;; XSLoader::load('Module', $version) — PCL cannot load XS, so this MUST fail

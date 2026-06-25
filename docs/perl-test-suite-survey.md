@@ -190,7 +190,7 @@ loaded harness runs them. First probe (P = perl ok/notok, C = PCL):
 | `errno.t` | 16 | n/a | 🚧 uses `runperl` (spawns a real `./perl` subprocess) — fixture dependency, not a PCL semantics gap |
 | `paragraph_mode.t` | 80 | 16 | 🐞 `$/=""` paragraph mode (same `$/` gap as `base/rs.t` — convergent) |
 | `binmode.t` | 9 | **9/9** | 🐞→✅ FIXED (2026-06-25b): test 9 (last fail) was the `$!` dualvar-through-`@_` bug — now fixed (see below) |
-| `scalar.t` | 128 | skip-all | 🟡 in-memory `open(\$scalar)` filehandles (128 tests behind one feature) |
+| `scalar.t` | 128 | **89/39** | 🐞→🟡 UNBLOCKED (2026-06-25e): was `skip_all` because `is_miniperl()` reported true. Fix: mark the runtime DynaLoader XS boot stubs (`pl-boot_DynaLoader` etc.) as `:defined` in `*p-declared-subs*` so `defined &DynaLoader::boot_DynaLoader` is true — PCL is a full perl, not miniperl. In-memory `open(\$scalar)` read/write/append/tell all work. Remaining 39 = not-supported buckets: tie/magic backing scalars, fd-dup (`+<&`/`>&=`), wide-char (>0xff) open-should-fail + errno/warning detection, scalar SV-identity (ref-to-ref, numeric/overload write), live external-modification of the backing SV. |
 | `iprefix.t` | 2 | 0/2 | 🟡 |
 
 **`defout.t` fixed → 21/22** (commit this session). The hooks were a parse error
@@ -243,12 +243,19 @@ char count (0 at EOF, undef + EBADF on an unopened handle), and honour a
 positive/negative OFFSET (NUL-padding the gap). `io/read.t` 0/2 → 2/2. Guard:
 `Pl/t/fileio-02.t` test 16.
 
-NEXT t/io (high-leverage order): `$/` record/paragraph modes (recovers
-`paragraph_mode.t` + `base/rs.t` together) → `scalar.t` in-memory filehandles
-(128 behind one feature) → `print.t`/`say.t`/`tell.t` partial diffs. Many files
-also use fork/pipe/socket (`open.t`, `pipe.t`, `socket.t`, …) — lower priority,
-system-dependent. (`errno.t` itself spawns `./perl` via `runperl`, so it is a
-fixture dependency, not a PCL gap.)
+NEXT t/io (high-leverage order): ~~`$/` record/paragraph modes~~ DONE
+(`paragraph_mode.t` 80/80, `base/rs.t` improved) → ~~`scalar.t` in-memory
+filehandles~~ DONE (89/128, unblocked via is_miniperl; rest are not-supported) →
+`print.t`/`say.t`/`tell.t` partial diffs. Many files also use fork/pipe/socket
+(`open.t`, `pipe.t`, `socket.t`, …) — lower priority, system-dependent.
+(`errno.t` itself spawns `./perl` via `runperl`, so it is a fixture dependency,
+not a PCL gap.)
+
+**is_miniperl() fixed (2026-06-25e):** `defined &DynaLoader::boot_DynaLoader` now
+true (runtime stubs marked `:defined`), so test.pl's `is_miniperl()` reports
+false. This un-`skip_all`s every t/ file gated on it (54 files reference
+miniperl; `scalar.t` is the big concrete win). Note `scalar_ungetc.t` is still
+blocked separately by `use IO` (XS module).
 
 ### Not yet surveyed (next sessions)
 
