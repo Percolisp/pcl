@@ -111,13 +111,16 @@ errors** blocked it; **2 fixed 2026-06-24**, 1 left:
 2. ✅ `EXPR foreach LIST` in TAIL position of an `if` block — the if-return
    transform tried to wrap the loop in `(setf ret_var …)`.  Fixed in
    `_process_tail_stmt`: emit the loop, set ret_var "".
-3. ⬜ **TODO** `system { PROG } LIST` / `system({ PROG } argv…)` — the indirect
-   block form.  `system`/`exec` are BUILTINS (`Config.pm` `system => -1`), so
-   they take the list-operator path, NOT the generic-funcall paren handler — the
-   leading `PPI::Structure::Block` falls through there.  Fix belongs in the
-   builtin list-op arg parsing (lower `{PROG}` to a first ordinary arg → roughly
-   `system(PROG, LIST)`; argv[0]-override nuance lost, acceptable).  After this,
-   reassess test.pl runtime + the CWD/`re_tests`/`charset_tools.pl` fixtures.
+3. ✅ `system { PROG } LIST` / `system({ PROG } argv…)` — the indirect block
+   form (2026-06-25).  Both shapes are now lowered in `handle_subcalls` to the
+   ordinary list form `system(PROG, LIST)` (argv[0]-override nuance dropped,
+   acceptable).  Two parse paths: the **bare** `WORD { Block } LIST` branch and
+   the **paren** `WORD ( Block|Constructor LIST )` branch — note PPI tokenises
+   `{ PROG }` inside parens as a `PPI::Structure::Constructor` (anon-hash), not a
+   `Block`, so the paren branch accepts either when it opens with `{`.  Regression
+   guard: `Pl/t/system-block-01.t`.  **`test.pl` now transpiles with 0 parse
+   errors** (`./pl2cl < t/test.pl`).  NEXT: reassess test.pl *runtime* load + the
+   CWD/`re_tests`/`charset_tools.pl` fixtures to unlock the `t/re` swath.
 
 ### Not yet surveyed (next sessions)
 
