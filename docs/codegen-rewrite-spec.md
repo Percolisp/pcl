@@ -117,6 +117,20 @@ paths start short-circuiting, so unboxing doesn't only save the box alloc — it
 *activates* every overload/coercion bypass already in the runtime. Tier 3 (#12
 especially) and the type-flow work reinforce each other.
 
+**Confirmed by measurement (2026-06-25, see `type-flow-and-codegen-plan.md`
+"Measured payoff").** Bracketing the fib/intmath loops as compiled CL showed the
+box *wrapper* is cheap: a minimal box-struct (alloc+read per op) runs fib in
+0.067 s — 8× faster than Perl — while current PCL takes ~1.6 s. So ~95% of the
+overhead is the *generic dispatch* these fast paths guard, exactly the
+compounding effect above. Concretely, generic-unboxed CL vs current PCL is ~300×
+on intmath, but generic-unboxed vs *native-fixnum* CL is only ~1.6× — i.e. the
+win is almost entirely "stop running `p-+`/`p-<` dispatch", not "shave the alloc"
+or "declare `fixnum`". This is why **#6 should specialize the *operator* (native
+arithmetic on raw CL numbers) before worrying about `fixnum`/`float` declarations
+or the box allocation** — and why Phase 4's payoff is so lopsided toward
+arithmetic/loop-bound code (blended mixed-code expectation ≈ 2–4× overall; tight
+numeric loops drop below Perl).
+
 ---
 
 ## §North-star output
@@ -201,6 +215,15 @@ not asserted:
 - `pl-fib` of a large n (Tier 1/2 combined).
 - `pack "A*", $big` / a `B`-format loop (accumulator + counters; reads pack
   directly as the codegen oracle).
+
+**Baseline targets (2026-06-25, pure compute, startup excluded — beat these):**
+fib(32) PCL ~1.6 s vs Perl 0.55 s; the intmath loop (`$sum += ($i*3+7)%100`, 5M
+iters) PCL 2.27 s vs Perl 0.229 s. Hand-written compiled-CL floors for the same
+loops: fib generic-unboxed 0.026 s / native-fixnum 0.013 s; intmath
+generic-unboxed 0.0072 s / native-fixnum 0.0045 s. **A Phase-4 fib that emits
+native arithmetic on raw `$n` should land in the low tens of milliseconds (≪
+Perl), not merely "faster than 1.6 s".** Full method + per-workload table in
+`type-flow-and-codegen-plan.md` "Measured payoff".
 
 Regenerate `cl/pcl-pack.lisp` from `cl/pack-impl.pl` after codegen changes (see
 its header REBUILD PROCEDURE) and re-run the pack.t sweep — pass count must not

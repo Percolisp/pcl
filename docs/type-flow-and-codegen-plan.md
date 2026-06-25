@@ -38,6 +38,75 @@ Everything in this report falls out of that asymmetry.
 
 ---
 
+## Measured payoff: where the time actually goes (2026-06-25)
+
+Before designing the analysis, it is worth knowing what unboxing can *and cannot*
+buy, measured rather than guessed. Microbenchmarks were run perl-vs-PCL with
+**startup excluded** (each runtime's empty-program time subtracted), then the
+representation cost was bracketed by hand-writing the same loop as compiled CL at
+three levels. All times are pure compute (seconds).
+
+**Current gap (PCL / Perl, startup excluded):** regex 3.7×, strings 4.8×, hashes
+6.4×, fib 7.1×, intmath 10.0×, arrays (push+`sort`) 15.0× slower. Geometric mean
+≈ **6.7× slower than Perl**.
+
+**The representation brackets** (same workload, all compiled CL):
+
+| | intmath (5M) | fib(32) |
+|---|---:|---:|
+| current PCL | 2.27 s | ~1.6 s |
+| **minimal box-struct** (alloc+read each op) | — | **0.067 s** |
+| unboxed, *generic* CL arithmetic | 0.0072 s | 0.026 s |
+| native fixnum + type decls | 0.0045 s | 0.013 s |
+| Perl (reference) | 0.229 s | 0.55 s |
+
+**The decisive finding: the box *wrapper* is not the cost.** A minimal box-struct
+(allocate + read on every op) in compiled CL runs fib in 0.067 s — already **8×
+faster than Perl** — yet current PCL takes ~1.6 s. So ~95% of PCL's overhead is
+*not* `make-p-box`; it is what the box model **forces**:
+
+1. **Generic operator dispatch** — every `p-+`/`p-<`/`p-%` unboxes both sides,
+   checks undef, checks `use overload`, checks string-vs-number, then dispatches.
+   Dozens of instructions where native CL emits one.
+2. **Calling convention** — `p-flatten-args` builds an adjustable vector per call,
+   plus the `*wantarray*` dynamic binding and context-sensitive `p-return-value`.
+3. **`p-box` is a heavy struct** — class slot, magic/tie hooks, NV cache —
+   `make-p-box` ≫ a bare struct.
+
+This pipeline's `repr`/`unboxable` work attacks **#1 and #3**: when a value is
+provably numeric *and consumed numerically*, skip the box and emit a native
+arithmetic op instead of the generic `p-` one. It does **not** by itself fix #2
+(the calling convention is a separate axis — see "sequencing" below).
+
+**Realistic recovery, by workload shape:**
+
+| workload | now vs Perl | with full unboxing | why |
+|---|---|---|---|
+| arithmetic inner loops | 10× slower | **faster than Perl** (10–100×) | fully unboxable; SBCL native math wins outright |
+| numeric call-bound (fib) | 7× slower | ~2–4× (≈10× if the calling convention is also leaned out) | arithmetic unboxes; `@_`/wantarray/return remain |
+| string code | 5× slower | ~1.5–2.5× | strings are *already* CL strings; the box is a thin wrapper |
+| array/hash code | 6–15× slower | ~2–4× | comparator/`+=` unbox; element *storage* stays boxed |
+| regex | 3.7× slower | ~1.2–1.5× | already native-bound (cl-ppcre); little headroom |
+
+**Blended expectation for mixed CPAN-style code: ~2–4× overall** — moving PCL from
+~6.7× slower to roughly **2–3× slower than Perl**, with any tight numeric inner
+loop dropping *below* Perl. The eye-popping per-benchmark numbers (intmath 500×)
+are pure micro-loops; real code rarely spends all its time in one unboxable loop,
+so the blended figure is the weighted average over the hot path.
+
+**Sequencing consequence (highest ROI first).** Because the wrapper itself is
+cheap, the biggest, most *local* win is **operator specialization** — emit native
+arithmetic when both operands are provably numeric — *before* threading unboxed
+representations through the whole pipeline. The intmath bracket shows native vs
+generic-unboxed is only ~1.6× apart (0.0045 vs 0.0072 s), but generic-unboxed vs
+current PCL is ~300×: nearly all the win is in *replacing generic `p-+`/`p-<`
+dispatch with a native op*, not in shaving the box allocation or adding `fixnum`
+declarations. This directly supports keeping `repr=number` as a boxed-but-
+native-arithmetic first cut (see open question 2) and deferring `fixnum`/`float`
+declarations until a specific hot path demands them.
+
+---
+
 ## 0. Where this fits the pipeline
 
 ```
@@ -847,7 +916,12 @@ an optimization, never correctness. That property is why this order is safe.
    overflow (`docs/sweep-bug-catalog.md` `**` issue) means `fixnum` is only safe
    when overflow is provably impossible. Probably keep `number` (boxed CL number,
    no SV) for the first cut and skip declared `double-float` until a hot path
-   asks for it.
+   asks for it. **The 2026-06-25 brackets (see "Measured payoff") settle this for
+   the first cut:** native-fixnum vs generic-unboxed CL is only ~1.6× apart, while
+   generic-unboxed vs current PCL is ~300× — so almost the entire win is in
+   *replacing generic `p-+`/`p-<` dispatch with a native op on raw CL numbers*,
+   not in the `fixnum`/`float` declaration. Keep `number` and defer the split,
+   which also sidesteps the bigint-overflow safety problem.
 3. **Interaction with `*wantarray*`/context eval** — `not-supported.md`
    §"Context propagation into string eval" wants a `(let ((*wantarray* ctx)) …)`
    wrapper around `p-eval` once context annotations exist. That is the same
