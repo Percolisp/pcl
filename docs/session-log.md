@@ -4,6 +4,28 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 267 (2026-06-25) — `test.pl` LOADS as a harness → t/re + t/io become runnable bug-finders; 6 fixes (4 crashes); pack regenerated; measured the unboxing payoff.
+
+**User: keep finding/fixing bugs (CPAN + sweep crashes + fuzzing + Perl's own t/ suite); then regenerate pack(); then a for-fun speed comparison (no startup).** Continued the `docs/perl-test-suite-survey.md` survey.
+
+**Headline unlock:** `require './test.pl'` now transpiles **and loads** end-to-end (run sbcl with **CWD = perl's `t/` dir**). This turns ~450 of Perl's own test files (t/re 80, t/io 44, rest of t/op 221, t/uni, t/mro, t/class) into runnable comparisons. One residual compile-ERROR in test.pl = `pl-watchdog`'s forward `goto WATCHDOG_VIA_ALARM` not wrapped in a tagbody (= intra-sub-goto **Blocker A**); harness fully usable anyway (watchdog only fires on timeout).
+
+**8 commits, 6 real fixes (4 crashes), all with regression tests + survey rows:**
+- `132ef17` — `system { PROG } LIST` / paren `system({PROG} LIST)` indirect-object block form (the 3rd test.pl parse error). Lowered both shapes to `system(PROG,LIST)` in `handle_subcalls`; PPI tokenises `{PROG}` in parens as an anon-hash **Constructor**, not a Block. Guard `Pl/t/system-block-01.t`. → test.pl transpiles 0 errors.
+- `514071c` — `pos()` returned raw CL `nil` for "no position"; a bare nil is dropped during Perl list flattening (`%p-flatten-list` treats nil = empty list **by design** — undef must be `*p-undef*`), so `is(pos($s), undef, $name)` lost its description arg. Now returns `*p-undef*`. Found via `t/re/pos.t`. Guard `Pl/t/pos-01.t`.
+- `f6dcd21` — `format NAME = … .` stripped in `_preprocess_source` (PPI swallows the next statement → unknown-`.`-operator PARSE ERROR that corrupts the file). + `write()` no-op stub, `close()` no-arg `&optional` no-op (was arg-count macroexpand crash), `select()` returns `"main::STDOUT"` not nil (same nil-drop class as pos), `$~`/`$^` defaults STDOUT/STDOUT_TOP. `t/io/defout.t` 0→21/22. Guard `Pl/t/format-skip-01.t`.
+- `8a71970` — **crash**: `find PerlIO::Layer 'perlio'` (indirect method call on a core pkg PCL didn't ship) died "Can't locate object method", aborting `t/io/binmode.t`. Shipped `lib/PerlIO/Layer.pm` (picked up by the existing method-call auto-require `p-method-call`→`p-require`); `find` reports the standard core layer names. + binmode on an unopened handle now sets `$!`=EBADF. 1→8/9. Guard `Pl/t/binmode-01.t`.
+- `1631ac2` — **crash**: `$h{k} += 5` / `$a[i] += 5` onto an ABSENT element aborted `(SB-KERNEL:TWO-ARG-+ 5 :UNDEF)`. `p-incf`/`p-decf` coerced undef→0 on the scalar path but used raw `(incf …)` on the hash/array path. Now `to-number` both. Found via a hash-accumulation microbenchmark. Guard +2 in `Pl/t/hashassign-01.t`.
+- `dad20e0` — regenerated `cl/pcl-pack.lisp` with current codegen (pack.t unchanged 5638/87); **rewrote the REBUILD PROCEDURE comment in `cl/pack-impl.pl`** — the old one was WRONG (said to strip the `:main` lines; shipped file keeps them, works because `:main` :use's `:pcl`). New comment = exact 4-command reproducible procedure + why-the-appendix + boundary markers.
+
+**Survey docs:** `/n` no-capture modifier → **not-supported** (scoped `(?n:)`/`(?-n:)` + named-capture exemption + stringify-preserves-original = mini-feature). t/re 0/0 files (opt/anyof/recompile/reg_fold/reg_nc_tie) = legit `1..0 # Skip` (need re/File::Spec/Tie modules), NOT bugs.
+
+**Speed comparison (for fun, startup excluded via empty-program baseline subtraction):** PCL is geomean ~6.7× slower than Perl (regex 3.7× best, arrays 15× worst). Hand-wrote compiled-CL brackets → **key finding: the box *wrapper* is cheap** (minimal box-struct runs fib 8× faster than Perl); ~95% of overhead is the generic operator dispatch + calling convention the box model *forces*. Recorded as "Measured payoff" in `docs/type-flow-and-codegen-plan.md` (+ settles open-q2: keep `repr=number`, defer fixnum split) and confirming note + baseline targets in `docs/codegen-rewrite-spec.md`. Also documented (open-q4) the **inter- vs intra-procedural boundary**: intra-sub unboxing (the win) is safe under runtime sub-replacement; only inlining / return-type-propagation / devirt is capped → optional sound per-call-site guard (default) or a "sealed" opt-in (whole-program flag **or** a per-sub `# pcl: sealed` comment, comment chosen so stock perl still runs the source).
+
+**OPEN leads for next session (t/io):** `errno.t` 0/16 — central root is the **`$!` dualvar losing its numeric side when passed through `@_`** (verified: `sub f{my($g)=@_; $g==9}` fed `$!` fails; plain copy + string-eval keep it). Then `$/` record/paragraph modes (recovers `paragraph_mode.t` 16/80 + `base/rs.t` together), `scalar.t` in-memory `open(\$s)` (128 behind 1 feature). Gate: 107 files / 3622 tests green.
+
+---
+
 ## Session 266 (2026-06-24) — Perl's own t/ suite as a bug finder: 7 bugs (2 crash-aborts) from base/cmd/comp; started t/re (gated behind `test.pl`, fixed 2 of its 3 parse errors).
 
 **User: keep finding/fixing bugs via CPAN modules + sweep crashes + fuzzing; continue running Perl's own t/ files (the non-`t/op` dirs) through PCL — that survey was giving results.** Used `tools/run-perl-suite.pl` + `docs/perl-test-suite-survey.md`.
