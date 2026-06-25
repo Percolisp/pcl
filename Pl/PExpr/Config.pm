@@ -389,6 +389,12 @@ has known_no_of_params => (
       rmdir      => 1,            # rmdir DIR
       rename     => 2,            # rename OLD, NEW
       chmod      => -12,          # chmod MODE, LIST (1 before list)
+      umask      => [0, 1],       # umask or umask EXPR
+      link       => 2,            # link OLD, NEW
+      symlink    => 2,            # symlink OLD, NEW
+      readlink   => [1, -2],      # readlink EXPR or readlink (uses $_)
+      chown      => -1,           # chown UID, GID, LIST
+      utime      => -1,           # utime ATIME, MTIME, LIST
       getcwd     => 0,            # getcwd() - Cwd module but common
       cwd        => 0,            # cwd() - alias for getcwd
 

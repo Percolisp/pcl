@@ -104,6 +104,7 @@
    #:p-glob
    ;; File/Directory operations
    #:p-chdir #:p-set_up_inc #:p-mkdir #:p-rmdir #:p-getcwd #:p-cwd #:p-rename #:p-chmod
+   #:p-umask #:p-link #:p-symlink #:p-readlink #:p-chown #:p-utime
    ;; Time functions
    #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
@@ -7259,40 +7260,83 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl syswrite — bareword filehandle is auto-quoted."
   `(%p-syswrite-impl (%p-fh-arg ,fh) ,@args))
 
-(defun p-truncate (fh-or-file size)
-  "Perl truncate - truncate file (limited support)"
-  (declare (ignore fh-or-file size))
-  ;; Standard CL doesn't support truncate - would need SBCL extension
-  (warn "truncate not implemented in standard CL")
-  nil)
+(defun %p-truncate-impl (fh-or-file size)
+  "Truncate a file (named or open) to SIZE bytes. Returns 1 on success, '' on
+   failure.  A filehandle is truncated via ftruncate(fd) after flushing buffered
+   output; a path string via truncate(2).  A BAREWORD filehandle (symbol) that is
+   not open FAILS — it must NOT fall back to truncating a file named after it."
+  (let* ((len (%pcl-to-integer (to-number size)))
+         (v (if (p-box-p fh-or-file) (p-box-value fh-or-file) fh-or-file))
+         (stream (cond ((streamp v) v)
+                       ((or (symbolp v) (stringp v)) (p-get-stream v))
+                       (t nil))))
+    (handler-case
+        (cond
+          (stream (finish-output stream)
+                  (sb-posix:ftruncate (sb-sys:fd-stream-fd stream) len)
+                  1)
+          ;; Bareword FH that is not open → fail (no file-name fallback).
+          ((symbolp v) (%pcl-save-errno) "")
+          (t (sb-posix:truncate (to-string v) len) 1))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-truncate (fh-or-file size)
+  "Perl truncate FH/EXPR, LENGTH — the first operand is filehandle-like, so a
+   bareword must be quoted (otherwise it is an unbound variable reference)."
+  `(%p-truncate-impl (%p-fh-arg ,fh-or-file) ,size))
+
+(defun %p-stat-vector (st)
+  "Build Perl's 13-element stat list from an sb-posix stat struct.  Times are
+   Unix-epoch seconds (time_t), matching Perl (NOT CL's 1900-epoch universal
+   time)."
+  (vector (sb-posix:stat-dev st)
+          (sb-posix:stat-ino st)
+          (sb-posix:stat-mode st)
+          (sb-posix:stat-nlink st)
+          (sb-posix:stat-uid st)
+          (sb-posix:stat-gid st)
+          (sb-posix:stat-rdev st)
+          (sb-posix:stat-size st)
+          (sb-posix:stat-atime st)
+          (sb-posix:stat-mtime st)
+          (sb-posix:stat-ctime st)
+          ;; sb-posix exposes no stat-blksize/stat-blocks accessor in the
+          ;; supported SBCL range, so derive sensible values: a 512-byte block
+          ;; count and the conventional 4096 preferred I/O block size.
+          4096
+          (ceiling (sb-posix:stat-size st) 512)))
+
+(defun %p-stat-arg (file-or-fh)
+  "Resolve a stat/lstat argument to either a CL stream (filehandle) or a path
+   string.  Accepts a stream, a box holding a stream, a bareword/symbol or
+   string naming a filehandle, or a plain path string."
+  (let ((v (if (p-box-p file-or-fh) (p-box-value file-or-fh) file-or-fh)))
+    (cond
+      ((streamp v) v)
+      ((or (symbolp v) (stringp v))
+       (or (p-get-stream v) (to-string v)))  ; FH name → stream, else path
+      (t (to-string v)))))
 
 (defun p-stat (file-or-fh)
-  "Perl stat - get file status. Returns list of file info."
-  (let ((path (if (streamp file-or-fh)
-                  (pathname file-or-fh)
-                  (to-string file-or-fh))))
-    (if (probe-file path)
-        ;; Return simplified stat: (dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks)
-        ;; Most values are stubs since CL doesn't provide all of them
-        (let ((write-date (file-write-date path)))
-          (vector 0              ; dev
-                  0              ; ino
-                  #o644          ; mode (stub)
-                  1              ; nlink
-                  0              ; uid
-                  0              ; gid
-                  0              ; rdev
-                  (with-open-file (s path) (file-length s))  ; size
-                  write-date     ; atime
-                  write-date     ; mtime
-                  write-date     ; ctime
-                  4096           ; blksize (stub)
-                  0))            ; blocks (stub)
-        nil)))
+  "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
+   size atime mtime ctime blksize blocks).  Follows symlinks.  nil on failure."
+  (let ((arg (%p-stat-arg file-or-fh)))
+    (handler-case
+        (%p-stat-vector
+         (if (streamp arg)
+             (sb-posix:fstat (sb-sys:fd-stream-fd arg))
+             (sb-posix:stat arg)))
+      (error () (%pcl-save-errno) nil))))
 
 (defun p-lstat (file)
-  "Perl lstat - stat without following symlinks (same as stat in CL)"
-  (p-stat file))
+  "Perl lstat — like stat but does NOT follow a symlink (reports the link)."
+  (let ((arg (%p-stat-arg file)))
+    (handler-case
+        (%p-stat-vector
+         (if (streamp arg)
+             (sb-posix:fstat (sb-sys:fd-stream-fd arg))
+             (sb-posix:lstat arg)))
+      (error () (%pcl-save-errno) nil))))
 
 ;;; ============================================================
 ;;; File Test Operators (-e, -d, -f, -r, -w, -x, -s, -z)
@@ -7792,12 +7836,88 @@ buffer's fill-pointer; everything else falls back to file-length."
     (error () nil)))
 
 (defun p-chmod (mode &rest files)
-  "Perl chmod - change file permissions. Returns count of successfully changed files."
+  "Perl chmod MODE, LIST — change permissions. Returns count changed.
+   A filehandle in the LIST is fchmod'd by descriptor; everything else is a path.
+   (Only an actual open stream is treated as a handle — a plain string is always
+   a filename, so chmod 0644, 'a' is never mistaken for a handle named 'a'.)"
   (let ((m (truncate (to-number mode)))
         (count 0))
     (dolist (f files count)
+      (let ((v (if (p-box-p f) (p-box-value f) f)))
+        (handler-case
+            (progn
+              (if (streamp v)
+                  (sb-posix:fchmod (sb-sys:fd-stream-fd v) m)
+                  (sb-posix:chmod (to-string v) m))
+              (incf count))
+          (error () (%pcl-save-errno) nil))))))
+
+(defun p-umask (&optional mode)
+  "Perl umask [EXPR] — set the file-creation mask and return the PREVIOUS value.
+   With no argument, return the current mask without changing it (sb-posix:umask
+   always sets, so we set-then-restore to read it non-destructively)."
+  (if mode
+      (sb-posix:umask (%pcl-to-integer (to-number mode)))
+      (let ((cur (sb-posix:umask 0)))
+        (sb-posix:umask cur)
+        cur)))
+
+(defun p-link (old new)
+  "Perl link OLD, NEW — create a hard link. Returns 1 on success, '' on failure."
+  (handler-case (progn (sb-posix:link (to-string old) (to-string new)) 1)
+    (error () (%pcl-save-errno) "")))
+
+(defun p-symlink (old new)
+  "Perl symlink OLD, NEW — create a symbolic link. Returns 1 on success, 0 on failure."
+  (handler-case (progn (sb-posix:symlink (to-string old) (to-string new)) 1)
+    (error () (%pcl-save-errno) 0)))
+
+(defun p-readlink (path)
+  "Perl readlink EXPR — return the target of a symbolic link (undef on failure).
+   EXPR defaults to $_ (the codegen supplies it for the no-arg form)."
+  (handler-case (sb-posix:readlink (to-string path))
+    (error () (%pcl-save-errno) *p-undef*)))
+
+(defun %pcl-chown-id (x)
+  "Map a Perl chown uid/gid to sb-posix's UNSIGNED argument.  Perl's -1 ('leave
+   unchanged') must reach the C layer as (uid_t)-1 = #xFFFFFFFF; sb-posix's FFI
+   rejects a negative integer outright."
+  (let ((n (%pcl-to-integer (to-number x))))
+    (if (minusp n) (logand n #xFFFFFFFF) n)))
+
+(defun p-chown (uid gid &rest files)
+  "Perl chown UID, GID, LIST — change owner/group. Returns count changed.
+   A UID or GID of -1 leaves that attribute unchanged.  A filehandle in the LIST
+   is fchown'd by descriptor."
+  (let ((u (%pcl-chown-id uid))
+        (g (%pcl-chown-id gid))
+        (count 0))
+    (dolist (f files count)
+      (let ((v (if (p-box-p f) (p-box-value f) f)))
+        (handler-case
+            (progn
+              (if (streamp v)
+                  (sb-posix:fchown (sb-sys:fd-stream-fd v) u g)
+                  (sb-posix:chown (to-string v) u g))
+              (incf count))
+          (error () (%pcl-save-errno) nil))))))
+
+(defun p-utime (atime mtime &rest files)
+  "Perl utime ATIME, MTIME, LIST — set access/modification times. Returns count.
+   Times are Unix-epoch seconds (same convention as sb-posix:utime).  undef
+   ATIME/MTIME means 'now', which sb-posix:utime uses when the times are omitted."
+  (let ((a (unless (or (null atime) (eq atime *p-undef*))
+             (%pcl-to-integer (to-number atime))))
+        (m (unless (or (null mtime) (eq mtime *p-undef*))
+             (%pcl-to-integer (to-number mtime))))
+        (count 0))
+    (dolist (f files count)
       (handler-case
-          (progn (sb-posix:chmod (to-string f) m) (incf count))
+          (progn
+            (if (and a m)
+                (sb-posix:utime (to-string f) a m)
+                (sb-posix:utime (to-string f)))
+            (incf count))
         (error () nil)))))
 
 ;;; ============================================================

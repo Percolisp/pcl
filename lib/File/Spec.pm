@@ -96,6 +96,15 @@ sub rel2abs {
 sub curdir  { return '.'; }
 sub updir   { return '..'; }
 sub rootdir { return '/'; }
+sub devnull { return '/dev/null'; }
+
+sub tmpdir {
+    # File::Spec::Unix prefers $ENV{TMPDIR} (when it is a usable absolute dir),
+    # falling back to /tmp.  A simplified, deterministic version is enough here.
+    my $t = $ENV{TMPDIR};
+    return $t if defined $t && length $t && $t =~ m{^/};
+    return '/tmp';
+}
 
 sub file_name_is_absolute {
     my ($class, $path) = @_;

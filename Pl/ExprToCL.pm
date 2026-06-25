@@ -108,6 +108,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   getgrent getgrgid getgrnam endgrent setgrent
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
+  link symlink readlink chown utime
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
   alarm mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
@@ -116,7 +117,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   sprintf sqrt srand stat str-cmp str-eq str-ge str-gt str-le str-lt str-ne str-x str-x=
   string-concat study sub sub-defined sub-exists subst substr super-call sysread system syswrite
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
-  truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
+  truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst umask undef undef-sub unless
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
   while write xor ||
   overloaded overload-strval

@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 25;
+plan tests => 29;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -471,5 +471,62 @@ print "a=", scalar(<Log123>);
 print "b=", scalar(<Log123>);
 close Log123;
 unlink $path;
+PERL
+}
+
+# --- Test 26: umask round-trips and returns the previous mask ---
+{
+    test_io('umask sets and returns the previous mask', <<'PERL');
+my $old = umask(0022);
+printf "set=%04o prev_is_num=%d cur=%04o\n", umask(), ($old =~ /^\d+$/ ? 1 : 0), umask();
+umask($old);
+PERL
+}
+
+# --- Test 27: link / symlink / readlink ---
+{
+    test_io('link, symlink and readlink', <<'PERL');
+my $f = "/tmp/pcl_lnk_$$"; my $hard = "$f.hard"; my $sym = "$f.sym";
+open(my $w, '>', $f) or die; print $w "data\n"; close $w;
+print "link=",    (link($f, $hard)    ? 1 : 0), "\n";
+print "symlink=", (symlink($f, $sym)  ? 1 : 0), "\n";
+# Compare to $f (not the raw path) — the path embeds $$, which differs between
+# the perl and pcl processes the harness runs.
+print "readlink-ok=", (readlink($sym) eq $f ? 1 : 0), "\n";
+print "hard-content=", do { open(my $r, '<', $hard); my $l = <$r>; close $r; $l };
+unlink $f, $hard, $sym;
+PERL
+}
+
+# --- Test 28: stat reports real fields (size, Unix-epoch atime/mtime) ---
+# Regression: stat used CL's 1900-epoch file-write-date for both atime and
+# mtime (off by 2208988800 and identical), and stubbed inode/size/mode.
+{
+    test_io('stat returns real size + Unix-epoch atime/mtime after utime', <<'PERL');
+my $f = "/tmp/pcl_stat_$$";
+open(my $w, '>', $f) or die; print $w "hello"; close $w;
+utime(500000001, 500000002, $f);
+my @s = stat($f);
+printf "size=%d atime=%d mtime=%d ino_nonzero=%d nlink=%d\n",
+       $s[7], $s[8], $s[9], ($s[1] ? 1 : 0), $s[3];
+# a filehandle stats the same open file
+open(my $r, '<', $f) or die; my @h = stat($r); close $r;
+print "fh_size=$h[7]\n";
+unlink $f;
+PERL
+}
+
+# --- Test 29: truncate by name and by filehandle; bareword no path fallback ---
+# A bareword filehandle that is not open must FAIL rather than truncate a file
+# named after the bareword.
+{
+    test_io('truncate(name) and truncate($fh) shrink the file', <<'PERL');
+my $f = "/tmp/pcl_trunc_$$";
+open(my $w, '>', $f) or die; print $w "x" x 200; close $w;
+truncate($f, 5);
+print "by_name=", -s $f, "\n";
+open(my $rw, '+<', $f) or die; truncate($rw, 2); close $rw;
+print "by_fh=", -s $f, "\n";
+unlink $f;
 PERL
 }
