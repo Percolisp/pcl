@@ -3921,8 +3921,10 @@
   "Perl += - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
            (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element - use incf (these return raw values, not boxes)
-      `(incf ,place (to-number ,delta))
+      ;; Hash/array element (returns a raw value, not a box).  Coerce the current
+      ;; value through to-number BEFORE adding: an absent key/slot reads as
+      ;; *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
+      `(setf ,place (+ (to-number ,place) (to-number ,delta)))
       ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
       `(box-set ,place (+ (to-number ,place) (to-number ,delta)))))
 
@@ -3930,8 +3932,9 @@
   "Perl -= - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
            (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element - use decf (these return raw values, not boxes)
-      `(decf ,place (to-number ,delta))
+      ;; Hash/array element — coerce the current value (undef → 0) before
+      ;; subtracting; see p-incf.
+      `(setf ,place (- (to-number ,place) (to-number ,delta)))
       ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
       `(box-set ,place (- (to-number ,place) (to-number ,delta)))))
 
