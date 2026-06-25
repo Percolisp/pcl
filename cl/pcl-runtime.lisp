@@ -80,7 +80,7 @@
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
-   #:p-if #:p-unless #:p-while #:p-until #:p-for #:p-foreach
+   #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach
    #:p-return #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
    #:p-continue #:p-break
    ;; I/O
@@ -92,7 +92,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
-   #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select
+   #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
    #:p-truncate #:p-stat #:p-lstat
    ;; File test operators
@@ -798,7 +798,7 @@
 ;;; Perl version number ($])
 (defvar |$]| (make-p-box "5.030000") "Perl version number")
 ;;; Format/write special variables (rarely used in modern code)
-(defvar |$~| (make-p-box "") "FORMAT_NAME - name of current report format for write")
+(defvar |$~| (make-p-box "STDOUT") "FORMAT_NAME - name of current report format for write (defaults to the selected handle's name, like Perl)")
 (defvar |$=| (make-p-box 60) "FORMAT_LINES_PER_PAGE - page length for write")
 (defvar |$-| (make-p-box 0) "FORMAT_LINES_LEFT - lines left on page for write")
 (defvar |$%| (make-p-box 0) "FORMAT_PAGE_NUMBER - current page number for write")
@@ -810,7 +810,7 @@
 (defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
 (defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")
 (defvar |$^M| (make-p-box *p-undef*) "emergency memory pool")
-(defvar |$^| (make-p-box "") "FORMAT_TOP_NAME - top-of-page format name")
+(defvar |$^| (make-p-box "STDOUT_TOP") "FORMAT_TOP_NAME - top-of-page format name (defaults to <handle>_TOP, like Perl)")
 ;; %SIG: signal/exception handler hash
 ;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
 (defvar %SIG (make-hash-table :test 'equal) "Perl %SIG - signal handlers")
@@ -2348,10 +2348,15 @@
       (if (p-box-p var)
           (setf (gethash var *p-match-pos*) (truncate (to-number new-pos)))
           new-pos)
-      ;; Getter: pos($str)
+      ;; Getter: pos($str).  Return the canonical undef marker (not raw CL nil)
+      ;; when there is no recorded position, so the value survives Perl list
+      ;; flattening — a raw nil spread into @_ or an assigned list is treated as
+      ;; the empty list and silently dropped (e.g. `is(pos($s), undef, $name)`
+      ;; would lose an argument).  *p-undef* is still false under p-true-p and
+      ;; undefined under p-defined.
       (if (p-box-p var)
-          (gethash var *p-match-pos*)
-          nil)))
+          (or (gethash var *p-match-pos*) *p-undef*)
+          *p-undef*)))
 
 (defun sprintf-inf-nan-p (num)
   "Check if num is infinity or NaN. Returns :pos-inf, :neg-inf, :nan, or nil."
@@ -3916,8 +3921,10 @@
   "Perl += - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
            (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element - use incf (these return raw values, not boxes)
-      `(incf ,place (to-number ,delta))
+      ;; Hash/array element (returns a raw value, not a box).  Coerce the current
+      ;; value through to-number BEFORE adding: an absent key/slot reads as
+      ;; *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
+      `(setf ,place (+ (to-number ,place) (to-number ,delta)))
       ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
       `(box-set ,place (+ (to-number ,place) (to-number ,delta)))))
 
@@ -3925,8 +3932,9 @@
   "Perl -= - works on boxed values, hash/array elements, and derefs"
   (if (and (listp place)
            (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element - use decf (these return raw values, not boxes)
-      `(decf ,place (to-number ,delta))
+      ;; Hash/array element — coerce the current value (undef → 0) before
+      ;; subtracting; see p-incf.
+      `(setf ,place (- (to-number ,place) (to-number ,delta)))
       ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
       `(box-set ,place (- (to-number ,place) (to-number ,delta)))))
 
@@ -6060,6 +6068,22 @@ dynamically (across function calls), matching p-next/p-redo behavior."
   "Perl until loop"
   `(p-while (p-! ,condition) ,@body))
 
+(defmacro p-do-while (condition &body body)
+  "Perl post-test loop: `do BLOCK while COND` — BODY always runs at least once,
+the condition is tested afterwards.  Per perlsyn, `do {} while/until` takes no
+loop-control statements (no last/next/redo, no labels), so this is a plain
+tagbody with no (block nil ...) — a p-return from a sub called inside BODY
+propagates up unhindered."
+  (let ((g (gensym "DOWHILE")))
+    `(tagbody
+        ,g
+        (progn ,@body)
+        (when (p-true-p ,condition) (go ,g)))))
+
+(defmacro p-do-until (condition &body body)
+  "Perl post-test loop: `do BLOCK until COND` = `do BLOCK while (not COND)`."
+  `(p-do-while (p-! ,condition) ,@body))
+
 (defmacro p-for ((&optional init) (test) (&optional step) &rest body-and-keys)
   "Perl C-style for loop with optional :label.
 Uses tagbody/go instead of loop — see p-while for rationale."
@@ -6583,7 +6607,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when (string= s "")
       (box-set $@ "")
       (return-from p-eval nil))
-    (let* ((pkg-name  (package-name *package*))
+    ;; Use the Perl-level current package (e.g. "Foo" inside `package Foo {}`),
+    ;; not (package-name *package*): the eval'd code must transpile __PACKAGE__
+    ;; and bareword qualifiers relative to the caller's PERL package, and the
+    ;; preamble's (in-package ...) is derived from the same name.  *package* may
+    ;; be MAIN here even when the Perl current package is Foo.
+    (let* ((pkg-name  *pcl-current-package*)
            (cache-key (cons s pkg-name))
            (cached    (gethash cache-key *p-eval-string-cache*)))
       (handler-case
@@ -6934,9 +6963,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (remhash fh *p-filehandles*)
          t)))))
 
-(defmacro p-close (fh)
-  "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box."
-  `(%p-close-impl (%p-fh-arg ,fh)))
+(defmacro p-close (&optional fh)
+  "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box.
+   With no argument, Perl closes the currently-selected default output handle.
+   PCL does not track a selected handle (p-select is a stub), and actually
+   closing STDOUT/STDERR would break the program's own output, so the no-arg form
+   is a success no-op returning 1 (Perl's true)."
+  (if fh
+      `(%p-close-impl (%p-fh-arg ,fh))
+      1))
 
 (defun %p-eof-impl (&optional fh)
   "Perl eof implementation — fh must already be a symbol or stream"
@@ -7029,9 +7064,19 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-seek-impl (%p-fh-arg ,fh) ,@args))
 
 (defun %p-binmode-impl (fh &optional encoding)
-  "Perl binmode - set binary mode or encoding (stub)"
-  (declare (ignore fh encoding))
-  t)
+  "Perl binmode - set binary mode or encoding.
+   PCL builds on SBCL streams (which handle encoding natively) and does not
+   model PerlIO layers, so for an already-open handle this is a no-op returning
+   true.  But binmode on a filehandle that is NOT open fails in Perl with errno
+   EBADF (bad file descriptor); replicate that — set $! and return false — so
+   error-checking code (io/binmode.t test 9) observes the right $!."
+  (declare (ignore encoding))
+  (if (p-get-stream fh)
+      t
+      (progn
+        (setf *p-stored-errno* 9)                                  ; EBADF (Linux)
+        (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+        nil)))
 
 (defmacro p-binmode (fh &rest args)
   "Perl binmode — bareword filehandle is auto-quoted."
@@ -7934,9 +7979,23 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-pipe-impl (%p-fh-arg ,read-fh) (%p-fh-arg ,write-fh)))
 
 (defun p-select (&optional fh)
-  "Perl select - set default output filehandle (stub, returns previous handle)"
+  "Perl select - set default output filehandle (stub).
+   Perl's select returns the *name* of the previously-selected default handle
+   (e.g. \"main::STDOUT\"), which is always a true value — never undef.  Return
+   that string rather than raw nil: a nil here is dropped during Perl list
+   flattening (it reads as the empty list), so `ok(select(), 'name')` would lose
+   its description argument.  See %p-flatten-list — undef must be a real value."
   (declare (ignore fh))
-  nil)
+  "main::STDOUT")
+
+(defun p-write (&optional fh)
+  "Perl write - emit a report via the current `format` (stub).
+   format/write report templates are deliberately not-supported
+   (docs/not-supported.md) and are stripped at the source level, so there is
+   nothing to write.  Return 1 (Perl's success value) rather than crashing, so a
+   stray write() call does not abort the whole program."
+  (declare (ignore fh))
+  1)
 
 (defun p-exit (&optional code)
   "Perl exit - terminate program with exit code."

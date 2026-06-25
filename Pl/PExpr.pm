@@ -2320,6 +2320,53 @@ sub handle_subcalls {
     #   Structure::List → Statement → [Block, rest...]
     if ($self->is_list($next)) {
       my $func_name = $now->content();
+      # Paren-wrapped indirect-object block form:
+      #   system({ PROG } LIST) / exec({ PROG } argv...)
+      # The leading brace block is the program path, the rest is argv.  Lower to
+      # the ordinary list form system(PROG, LIST) (argv[0]-override nuance lost).
+      if ($func_name eq 'system' || $func_name eq 'exec') {
+        my @outer_ch = grep { ref($_) !~ /Whitespace/ } $next->children();
+        my @inner_ch;
+        if (@outer_ch == 1 && $outer_ch[0]->isa('PPI::Statement')) {
+          @inner_ch = grep { ref($_) !~ /Whitespace/ } $outer_ch[0]->children();
+        } else {
+          @inner_ch = @outer_ch;
+        }
+        # Inside parens, PPI tokenises `{ PROG }` as an anon-hash Constructor,
+        # not a Block — accept either, as long as it opens with `{`.
+        if (@inner_ch
+            && ref($inner_ch[0]) =~ /^PPI::Structure::(?:Block|Constructor)$/
+            && $inner_ch[0]->start && $inner_ch[0]->start->content eq '{') {
+          my $block = $inner_ch[0];
+          my @rest_ch = @inner_ch[1 .. $#inner_ch];
+          if (@rest_ch && ref($rest_ch[0]) eq 'PPI::Token::Operator'
+              && $rest_ch[0]->content eq ',') {
+            shift @rest_ch;
+          }
+
+          my($top_node, $top_id) = $self->make_node_insert('funcall');
+          my $node_id = $self->make_node($now);
+          $self->add_child_to_node($top_id, $node_id);
+
+          # Block inner expression → program argument.
+          my @bc = grep { ref($_) !~ /Whitespace/ } $block->children();
+          if (@bc == 1 && ref($bc[0]) eq 'PPI::Statement') {
+            my @sc = grep { ref($_) !~ /Whitespace/ } $bc[0]->children();
+            @bc = @sc if @sc;
+          }
+          my $prog_expr = $self->cleanup_for_parsing(\@bc);
+          $self->add_child_to_node($top_id, $self->parse($prog_expr));
+
+          if (@rest_ch) {
+            my $rest_expr = $self->cleanup_for_parsing(\@rest_ch);
+            my $rest_ids  = $self->parse_list($rest_expr);
+            $self->add_child_to_node($top_id, $_) for @$rest_ids;
+          }
+
+          splice @$e, $i, 2, $top_node;
+          next;
+        }
+      }
       if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort') {
         # PPI wraps the list content in a Statement — unwrap it
         my @outer_ch = grep { ref($_) !~ /Whitespace/ } $next->children();
@@ -2453,6 +2500,39 @@ sub handle_subcalls {
       if ($self->environment) {
         my $proto = $self->environment->get_prototype($func_name);
         $has_block_proto = $proto && $proto->{has_block_arg};
+      }
+
+      # Indirect-object block form: system { PROG } LIST / exec { PROG } LIST.
+      # Here the brace block is NOT a code block — it is the real program path,
+      # while LIST supplies the argv (whose first element may differ from PROG,
+      # a nuance we drop).  Lower to the ordinary list form system(PROG, LIST)
+      # so the builtin's normal arg machinery handles it.
+      if ($func_name eq 'system' || $func_name eq 'exec') {
+        my($top_node, $top_id) = $self->make_node_insert('funcall');
+        my $node_id = $self->make_node($now);
+        $self->add_child_to_node($top_id, $node_id);
+
+        # Parse the block's inner expression as the program argument.
+        my @bc = grep { ref($_) !~ /Whitespace/ } $next->children();
+        if (@bc == 1 && ref($bc[0]) eq 'PPI::Statement') {
+          my @sc = grep { ref($_) !~ /Whitespace/ } $bc[0]->children();
+          @bc = @sc if @sc;
+        }
+        my $prog_expr = $self->cleanup_for_parsing(\@bc);
+        my $prog_id   = $self->parse($prog_expr);
+        $self->add_child_to_node($top_id, $prog_id);
+
+        # Parse the remaining elements (the LIST → argv) and append them.
+        if ($i + 2 < scalar(@$e)) {
+          my @rest = @$e[$i + 2 .. $#$e];
+          my $rest_list = $self->cleanup_for_parsing(\@rest);
+          my $rest_ids = $self->parse_list($rest_list);
+          $self->add_child_to_node($top_id, $_) for @$rest_ids;
+        }
+
+        splice @$e, $i, scalar(@$e) - $i;
+        $e->[$i] = $top_node;
+        next;
       }
 
       if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'

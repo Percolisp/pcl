@@ -22,6 +22,8 @@ Two reasons:
 1. **Compiling to a high-level language keeps the compiler tractable.** CL is expressive enough to model Perl's semantics directly, so PCL can stay a manageable size instead of growing into a full interpreter.
 2. **Lisp is trivial to parse**, which makes the generated CL a good *intermediate representation* — a stepping stone for compiling Perl onward to other environments.
 
+Since SBCL ships a genuinely good optimizing compiler that turns the generated CL into native code, there is real performance headroom to draw on once the code generator gets smarter (see the roadmap).
+
 #### The hard part — Perl's runtime *magic*
 
 Perl is genuinely hard to parse — much of its behaviour only exists while the program runs, so you practically have to *execute* it. PCL sidesteps this instead of solving it: it reproduces the same magic in the Common Lisp runtime. Constructs that are hard precisely because they must execute simply execute on the CL side, with the same semantics.

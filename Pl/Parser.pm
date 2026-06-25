@@ -51,6 +51,16 @@ has eval_mode => (
   default => sub { 0 },
 );
 
+# eval_pkg: the Perl package in effect at the `eval "..."` call site (e.g.
+# "Foo" when the eval runs inside `package Foo { ... }`).  Seeds the
+# Environment's package_stack so __PACKAGE__ (and other compile-time package
+# references) inside the eval string resolve to the caller's package rather
+# than defaulting to "main".  Set via pl2cl --eval-pkg / --server.
+has eval_pkg => (
+  is      => 'ro',
+  default => sub { undef },
+);
+
 has ppi_doc => (
   is        => 'lazy',
 );
@@ -189,6 +199,20 @@ sub _preprocess_source {
   # Perl allows `for my ClassName $var` but PPI can't parse the ClassName and stops,
   # producing a broken AST. PCL ignores type constraints anyway, so just drop them.
   $src =~ s/\b(for(?:each)?\s+(?:my|our))\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\s+(\$)/$1 $2/g;
+  # Remove `format NAME = ... .` report templates.  `format`/`write` are
+  # deliberately not-supported (docs/not-supported.md), but PPI does not
+  # recognise the keyword: it swallows the picture lines AND the following
+  # statement into one bogus PPI::Statement, so the `.` terminator surfaces as
+  # an unknown Operator and the next real statement is lost (a PARSE ERROR that
+  # corrupts the rest of the file).  Strip the whole block at the source level
+  # so the surrounding code parses cleanly; the format simply does nothing.
+  # The header is `format [NAME] =` on its own line; the body is terminated by a
+  # line containing only `.`.  The leading $str_re alternative passes quoted
+  # strings (incl. multi-line ones) through untouched so a format-like pattern
+  # inside a string literal is never stripped.
+  $src =~ s{($str_re)|^[ \t]*format(?:[ \t]+[A-Za-z_]\w*)?[ \t]*=[^\n]*\n.*?^\.[ \t]*$}{
+    defined $1 ? $1 : ''
+  }gems;
   return $src;
 }
 
@@ -292,7 +316,7 @@ sub parse {
   #     first pass bleeds into second-pass foreach/bare-block uses of $f)
   #   - Counters must restart at 0 so defvar names match usage names in the
   #     second pass (both are generated fresh, in the same order)
-  $self->environment->package_stack(['main']);
+  $self->environment->package_stack([$self->eval_pkg // 'main']);
   $self->environment->state_var_renames({});
   $anon_block_counter = 0;
   $state_var_counter  = 0;
@@ -750,6 +774,29 @@ sub _block_is_anon_sub {
   return $s && $s->isa('PPI::Token::Word') && $s->content eq 'sub';
 }
 
+# True if a leading-`{` statement that PPI tokenized as a bare block
+# (PPI::Statement::Compound → PPI::Structure::Block) is really an anonymous
+# hash constructor.  PPI only classifies `{...}` as a Constructor when the
+# first separator is `=>`; Perl's parser also treats `{ LITERAL , ... }` —
+# a string or number literal followed by a comma — as a hashref in term
+# context (e.g. `eval "{ 'a', 'b' }"`).  Barewords (`{ foo, 1 }`) and
+# variables (`{ $x, 1 }`) stay blocks, matching Perl.  This is deliberately
+# narrower than `_block_is_hash_constructor` (used for map/grep blocks, where
+# `{ 'a', $_ }` IS a code block, not a hash).
+sub _bare_block_is_anon_hash {
+  my ($block) = @_;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  return 0 unless @ch == 1 && ref($ch[0]) eq 'PPI::Statement';
+  my @sig = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  return 0 unless @sig >= 2;
+  my $r0 = ref($sig[0]);
+  return 0 unless $r0 =~ /^PPI::Token::Quote::(?:Single|Double|Literal|Interpolate)$/
+               || $r0 =~ /^PPI::Token::Number/;
+  return 0 unless ref($sig[1]) eq 'PPI::Token::Operator'
+               && ($sig[1]->content eq ',' || $sig[1]->content eq '=>');
+  return 1;
+}
+
 sub _insert_variable_forward_declarations {
   my $self = shift;
 
@@ -833,11 +880,19 @@ sub _insert_variable_forward_declarations {
     # Skip special packages (ENV, INC, SIG, pcl, main) and already-defvar'd forms.
     # Also handles pipe-quoted multi-component package names: |do::not::overwrite|::$this
     unless ($line =~ /^\s*\(defvar\s/) {
-      my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl main);
+      # ENV/INC/SIG/pcl are runtime pseudo-packages, never user globals.
+      # `main` is NOT skipped wholesale: a main-package global referenced ONLY
+      # inside a sub (e.g. $::TODO -> main::$TODO) would otherwise get no defvar
+      # and crash at runtime with an unbound variable — the file-scope
+      # %referenced scan only runs at sub_depth==0.  But main-qualified RUNTIME
+      # specials (main::@ARGV, main::%ENV, …) must still be skipped so we don't
+      # shadow the live runtime ones.
+      my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
       while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][a-zA-Z_]\w*)/g) {
         my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
         my $bare_pkg = defined($1) ? $1 : $2;
         next if $skip_pkg{$bare_pkg};
+        next if $bare_pkg eq 'main' && $runtime_vars{$var};
         next if $var =~ /^[\$\@\%][0-9]/;  # special: $1, $2...
         $cross_pkg_vars{"$pkg\::$var"} = [$pkg, $var];
       }
@@ -925,6 +980,20 @@ sub _insert_variable_forward_declarations {
     # Safe to skip when it's foreach-only (not also bound by other let forms).
     next if $lex_foreach{$var} && $foreach_let_bound{$var} && !$other_let_bound{$var};
     next if $var =~ /^[\$\@\%]state__/;  # state vars use outer let binding, not defvar
+    push @undeclared, $var;
+  }
+
+  # Punctuation-named `#` globals ($#, @#, %#) that the word-char reference scan
+  # misses are registered explicitly by codegen when it emits them (see
+  # environment->register_punct_global), so we consume that set here rather than
+  # re-scanning generated text.  They arise from the removed `$#` magic taking a
+  # subscript: Perl parses `$#[0]` as element 0 of @# (verified vs perl:
+  # `@{"#"}=(10,20,30); $#[0]==10`).  An undeclared Perl global reads as
+  # empty/undef, so forward-declare them instead of crashing on an unbound
+  # symbol.  The runtime never provides @#/%#/$#, so nothing is shadowed.
+  for my $var (sort keys %{ $self->environment->punct_globals }) {
+    next if $declared{$var};
+    $declared{$var} = 1;
     push @undeclared, $var;
   }
 
@@ -1501,7 +1570,19 @@ sub _process_expression_statement {
           $cond_cl = "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
         }
       }
-      $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
+      # `do BLOCK while/until COND` is a POST-test loop in Perl: BLOCK always
+      # runs at least once and the condition is tested afterwards.  Detect the
+      # `do { ... }` expression (Word 'do' + Structure::Block) and emit the
+      # post-test macro instead of the pre-test p-while/p-until.
+      if (($cl_modifier eq 'while' || $cl_modifier eq 'until')
+          && @expr_parts == 2
+          && ref($expr_parts[0]) eq 'PPI::Token::Word'
+          && $expr_parts[0]->content eq 'do'
+          && ref($expr_parts[1]) eq 'PPI::Structure::Block') {
+        $cl_code = "(p-do-$cl_modifier $cond_cl $expr_cl)";
+      } else {
+        $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
+      }
     }
   }
   else {
@@ -2558,6 +2639,42 @@ sub _extract_parent_classes {
 
 # Process 'local' variable declaration - dynamic scoping
 # Emits a (let ...) that stays open until block end
+# Split a trailing `if`/`unless` statement modifier off the RHS parts of a
+# `local LHS = RHS if/unless COND` declaration.  A bare `if`/`unless` Word can
+# only be the statement modifier here (ternaries use `?:`, hash keys live inside
+# a Subscript), so the first one ends the value expression.  Truncates
+# @$rhs_parts to just the value and returns ($modifier, \@cond_parts); ('', [])
+# when there is no modifier.
+sub _split_local_init_modifier {
+  my ($self, $rhs_parts) = @_;
+  for my $i (0 .. $#$rhs_parts) {
+    my $p = $rhs_parts->[$i];
+    if (ref($p) eq 'PPI::Token::Word' && $p->content =~ /^(?:if|unless)$/) {
+      my $mod  = $p->content;
+      my @cond = @$rhs_parts[$i + 1 .. $#$rhs_parts];
+      splice(@$rhs_parts, $i);
+      return ($mod, \@cond);
+    }
+  }
+  return ('', []);
+}
+
+# Build the init form for a conditional `local LHS = RHS if/unless COND`.
+# Perl localizes only when the condition selects RHS; otherwise the slot keeps
+# its current value.  We always localize and make the *value* conditional:
+# `COND ? RHS : <current value of LHS>` (swapped for `unless`).  Localizing to
+# the current value is observationally identical to not localizing (it is
+# saved and restored unchanged), and reuses the ordinary local-init machinery —
+# no special macro (cf. p-local-glob-if, which a glob needs because it has no
+# single rvalue).  $lhs_rval_cl reads the LHS as an rvalue (old value).
+sub _conditional_local_init {
+  my ($self, $modifier, $cond_cl, $rhs_cl, $lhs_rval_cl) = @_;
+  my $test = "(p-true-p $cond_cl)";
+  return $modifier eq 'unless'
+    ? "(if $test $lhs_rval_cl $rhs_cl)"
+    : "(if $test $rhs_cl $lhs_rval_cl)";
+}
+
 sub _process_local_declaration {
   my $self = shift;
   my $stmt = shift;
@@ -2776,6 +2893,10 @@ sub _process_local_declaration {
           last;
         }
       }
+      # Strip a trailing `if`/`unless` statement modifier from the RHS so it does
+      # not leak into the value parse (which fell through to a "Missing case" die).
+      my ($ld_mod, $ld_cond) = $has_init
+        ? $self->_split_local_init_modifier(\@rhs_parts) : ('', []);
       my $init_cl = $has_init ? ($self->_parse_expression(\@rhs_parts, $stmt) // 'nil') : undef;
 
       $self->_emit(";; $perl_code");
@@ -2785,6 +2906,19 @@ sub _process_local_declaration {
       # of a flip-flop (which would trigger $SIG{__WARN__} via uninitialized $..).
       my $sub_ctx = ($open eq '[') ? 1 : 0;
       my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) } @key_groups;
+
+      # Conditional `local $h{k} = V if COND`: make the value conditional on COND,
+      # falling back to the element's current value (read before the fresh box is
+      # installed by the *-init macro).
+      if ($ld_mod && defined $init_cl) {
+        my $cond_cl = $self->_parse_expression($ld_cond, $stmt) // 'nil';
+        my $lhs_rval = @key_cls == 1
+          ? ($open eq '{' ? "(p-gethash $cl_var $key_cls[0])"
+                          : "(p-aref $cl_var $key_cls[0])")
+          : ($open eq '{' ? "(p-hslice $cl_var " . join(' ', @key_cls) . ")"
+                          : "(p-aslice $cl_var " . join(' ', @key_cls) . ")");
+        $init_cl = $self->_conditional_local_init($ld_mod, $cond_cl, $init_cl, $lhs_rval);
+      }
 
       # Choose the macro based on subscript type.
       # p-local-array-slice handles both scalar and vector (range) indices.
@@ -2891,6 +3025,9 @@ sub _process_local_declaration {
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
 
+    # Strip a trailing `if`/`unless` statement modifier (see element branch).
+    my ($lmod, $lcond) = $self->_split_local_init_modifier(\@rhs_parts);
+
     my $var = $vars[0];
     # For qualified vars (e.g. A::@ISA), the sigil is embedded after '::'.
     # For simple vars (e.g. @arr), it is the first character.
@@ -2899,6 +3036,14 @@ sub _process_local_declaration {
     # Use LIST_CTX for array/hash RHS so '..' generates a range, not a flip-flop
     my $rhs_ctx = ($sigil eq '@' || $sigil eq '%') ? 1 : 0;
     my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, $rhs_ctx) // 'nil';
+
+    # Conditional `local $x = V if COND`: value is COND ? RHS : current value, so
+    # a false condition localizes to (and restores) the unchanged current value.
+    if ($lmod) {
+      my $cond_cl  = $self->_parse_expression($lcond, $stmt) // 'nil';
+      my $lhs_rval = $sigil eq '$' ? "(unbox $var)" : $var;
+      $init_cl = $self->_conditional_local_init($lmod, $cond_cl, $init_cl, $lhs_rval);
+    }
 
     if ($var eq '$!' || $var eq '|$!|') {
       # local $! = N: bind *p-stored-errno* (auto-restored by let) and set C errno
@@ -3124,6 +3269,17 @@ sub _process_compound_statement {
       $first_block = $child;
       last;  # Found the block - don't scan further (avoid picking up 'continue' as first_word)
     }
+  }
+
+  if (!$first_word && $first_block && !$label
+      && _bare_block_is_anon_hash($first_block)) {
+    # PPI mis-tokenized an anon-hash constructor `{ LITERAL , ... }` as a bare
+    # block.  Emit it as a hash-constructor expression (its value is discarded
+    # in void context, or returned as the last statement of a string eval).
+    $self->_emit(";; { ... } (anon hash constructor)");
+    $self->_emit($self->parse_hash_block_to_cl_string($first_block));
+    $self->_emit("");
+    return;
   }
 
   if (!$first_word && $first_block) {
@@ -3567,6 +3723,17 @@ sub _process_tail_stmt {
         && $r ne 'PPI::Token::Comment'
         && !($r eq 'PPI::Token::Structure' && $_->content eq ';')
     } $stmt->children;
+    # A trailing for/foreach/while/until modifier (`EXPR foreach LIST`) makes
+    # this a loop, not a value: its result in Perl is the empty list.  Don't try
+    # to wrap it in (setf ret_var ...) — that fed the modifier tokens into the
+    # value parser and fell through to the "Missing case" die.  Emit the loop via
+    # the normal statement path and leave ret_var holding "" (empty).
+    if (grep { ref($_) eq 'PPI::Token::Word'
+               && $_->content =~ /^(?:for|foreach|while|until)$/ } @parts) {
+      $self->_emit("(setf $ret_var \"\")");
+      $self->_process_expression_statement($stmt);
+      return;
+    }
     if (@parts) {
       my $cl = $self->_parse_expression(\@parts, $stmt);
       $cl =~ s/^[ \t]+// if defined $cl;  # drop inline-leading indent (setf gap)
@@ -5983,11 +6150,39 @@ sub _process_sub_statement {
 
 
 # Process package declaration
+# `package NAME VERSION [{...}]` sets $NAME::VERSION to VERSION (perlfunc).
+# Emit the qualified $VERSION box (defvar, idempotent — the cross-package dedup
+# scan keys on the same `(defvar PKG::$var` shape) plus the assignment.  Numeric
+# version literals (`11`, `1.23`) are emitted as CL numbers; anything else
+# (v-strings) falls back to a string, which stringifies the same way for the
+# common comparisons.
+sub _emit_package_version {
+  my ($self, $pkg_name, $version) = @_;
+  return unless defined $version && $version ne '';
+  # PPI's ->version returns the BLOCK content (`{ ... }`) for a block-form
+  # `package Foo { ... }` with no version, so only accept genuine version
+  # literals: an optional leading `v`, digits, dots and underscores.
+  return unless $version =~ /^v?\d+(?:[._]\d+)*$/;
+  (my $prefix = $self->_cl_pkg_designator($pkg_name)) =~ s/^://;
+  my $sym = "$prefix\::\$VERSION";
+  my $ver_cl = ($version =~ /^\d+(?:\.\d+)?$/) ? $version : "\"$version\"";
+  # NOTE: Perl sets $NAME::VERSION at COMPILE time (visible even on a source line
+  # BEFORE the `package` statement).  PCL emits it in source order, so the
+  # value is correct from the `package` statement onward — which covers the
+  # normal "read $VERSION after the module is loaded" case but not the rare
+  # read-before-declaration-in-the-same-unit pattern (perl-tests package_block.t
+  # test 2).  Matching that needs cross-section BEGIN-phase emission.
+  $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
+  $self->_emit("  (defvar $sym (make-p-box nil)))");
+  $self->_emit("(p-scalar-= $sym $ver_cl)");
+}
+
 sub _process_package_statement {
   my $self = shift;
   my $stmt = shift;
 
   my $pkg_name = $stmt->namespace // 'main';
+  my $pkg_version = eval { $stmt->version };
 
   # Register package as a known class/package for method call resolution
   $self->environment->add_package($pkg_name);
@@ -6028,6 +6223,7 @@ sub _process_package_statement {
       $self->_emit("");
 
       $self->environment->push_package($pkg_name);
+      $self->_emit_package_version($pkg_name, $pkg_version);
       # Increment _block_depth so sub names become fully qualified (e.g. |Point|::p-new)
       $self->_block_depth($self->_block_depth + 1);
 
@@ -6043,6 +6239,7 @@ sub _process_package_statement {
       # Top-level block form: push package, process block, pop
       $self->_emit_package_preamble($pkg_name);
       $self->environment->push_package($pkg_name);
+      $self->_emit_package_version($pkg_name, $pkg_version);
 
       # Process the block contents
       for my $child ($block->schildren) {
@@ -6077,9 +6274,11 @@ sub _process_package_statement {
       # The setf is restored on sub exit via p-sub's dynamic binding.
       $self->_emit("(p-set-current-package " . $self->_cl_pkg_designator($pkg_name) .
                    " \"$pkg_name\")");
+      $self->_emit_package_version($pkg_name, $pkg_version);
     } else {
       $self->_emit_package_preamble($pkg_name);
       $self->environment->push_package($pkg_name);
+      $self->_emit_package_version($pkg_name, $pkg_version);
       # Note: no pop - package remains active until next package declaration
     }
   }

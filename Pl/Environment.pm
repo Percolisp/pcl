@@ -203,6 +203,25 @@ has expression_our_vars => (
     default => sub { {} },
 );
 
+=head2 punct_globals
+
+Accumulates punctuation-named C<#> globals (C<$#>, C<@#>, C<%#>) emitted during
+code generation.  These arise from the removed C<$#> magic taking a subscript:
+Perl parses C<$#[0]> as element 0 of C<@#> and C<$#{k}> as a slice of C<@#>
+(verified vs perl: C<@{"#"}=(10,20,30); $#[0]==10>).  Their names are not word
+characters, so the file-scope forward-declaration scan misses them; codegen
+registers each one here so the forward-declaration pass can emit one file-level
+defvar (matching the sigil's container).  An undeclared Perl global reads as
+empty/undef, so this avoids an unbound-symbol crash.  Keyed on the CL symbol
+(e.g. C<@#>) so duplicates collapse.
+
+=cut
+
+has punct_globals => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 =head2 in_subroutine
 
 Counter tracking subroutine nesting depth. 0 = top level, >0 = inside sub.
@@ -595,6 +614,18 @@ that needs a file-level defvar.
 sub add_caret_global {
     my ($self, $sym) = @_;
     $self->caret_globals->{$sym} = 1;
+}
+
+=head2 register_punct_global($sym)
+
+Record a punctuation-named C<#> global (C<$#>/C<@#>/C<%#>) seen during codegen so
+the forward-declaration pass emits a defvar for it.  See L</punct_globals>.
+
+=cut
+
+sub register_punct_global {
+    my ($self, $sym) = @_;
+    $self->punct_globals->{$sym} = 1;
 }
 
 =head2 get_caret_globals()

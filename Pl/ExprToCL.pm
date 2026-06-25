@@ -118,7 +118,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst undef undef-sub unless
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
-  while xor ||
+  while write xor ||
   overloaded overload-strval
 );
 
@@ -2372,6 +2372,13 @@ sub gen_array_access {
   # $0[n] parses as @0[n] but @0 is never a real variable; return undef.
   return '(p-undef)' if $arr =~ /^@\d+$/;
 
+  # Punctuation-named `#` array (@#) comes from `$#[idx]` — the removed `$#`
+  # magic taking a subscript, which Perl reads as element idx of @#.  Its name
+  # is not a word char, so the forward-declaration scan misses it; register it
+  # so a file-level defvar is emitted (undef/empty, not an unbound crash).
+  $self->environment->register_punct_global($arr)
+    if $self->environment && $arr eq '@#';
+
   # Apply rename map for @varname (closure/state variable captures)
   if ($self->environment) {
     my $renames = $self->environment->state_var_renames;
@@ -2421,6 +2428,10 @@ sub gen_hash_access {
       || ref($hash_node) eq 'PPI::Token::Magic') {
     $hash =~ s/(^|::)\$/$1%/;
   }
+
+  # Punctuation-named `#` hash (%#) from `$#{key}` — see gen_array_access.
+  $self->environment->register_punct_global($hash)
+    if $self->environment && $hash eq '%#';
 
   # Apply rename map for %varname (closure/state variable captures)
   if ($self->environment) {

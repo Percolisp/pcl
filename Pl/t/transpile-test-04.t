@@ -394,4 +394,53 @@ $h{a} = {b => "found"};
 print "$h{a}{b}\n";
 ');
 
+# ============ ANON-HASH vs BARE-BLOCK DISAMBIGUATION ============
+# PPI mis-tokenizes `{ LITERAL , ... }` (string/number literal then comma) as a
+# bare block; Perl treats it as an anon-hash constructor in term context.
+# (Barewords/variables stay blocks; map-block `{ 'a', $_ }` stays a code block.)
+# (keys are double-quoted so the code survives the run_perl `perl -e '...'` wrapper)
+test_transpile('anon-hash: eval string literal-comma is HASH',
+    q{$a = eval "{ \"a\" , \"foo\" }"; print ref($a), "\n";});
+test_transpile('anon-hash: eval "{ 1 , 2 }" is HASH',
+    q{$a = eval "{ 1 , 2 }"; print ref($a), "\n";});
+test_transpile('anon-hash: eval comma chain is HASH and keeps pairs',
+    q{$a = eval "{ \"a\" , \"b\" , \"c\" , \"d\" }"; print ref($a), ":", $a->{a}, $a->{c}, "\n";});
+
+# ============ do BLOCK while/until — POST-test loops ============
+# `do {} while/until COND` must run the body at least once (condition tested
+# afterwards), unlike the pre-test while/until statement modifier.
+test_transpile('do-while: false cond still runs body once',
+    q{my $x=0; do { ++$x } while 0; print "$x\n";});
+test_transpile('do-until: true cond still runs body once',
+    q{my $y=0; do { ++$y } until 1; print "$y\n";});
+test_transpile('do-while: iterates until cond false',
+    q{my $z=0; do { ++$z } while $z<3; print "$z\n";});
+test_transpile('do-while: post-increment cond fills array incl. last',
+    q{my $x=0; my @a; do { $a[$x]=$x } while ($x++)<5; print join(" ",@a), "\n";});
+
+# ============ package NAME VERSION + __PACKAGE__ in string eval ============
+test_transpile('package VERSION (non-block) sets $Pkg::VERSION',
+    q{package Foo 3.5; package main; print "$Foo::VERSION\n";});
+test_transpile('package VERSION (block) sets $Pkg::VERSION',
+    q{package Foo 11 { } print "$Foo::VERSION\n";});
+# string eval inside a package block sees the enclosing package (not main).
+test_transpile('eval "__PACKAGE__" inside package block resolves to that package',
+    q{package Foo { my $p = eval("__PACKAGE__"); print "$p\n"; }});
+test_transpile('nested package blocks: __PACKAGE__ via string eval',
+    q{$main::r=""; package Foo { $main::r.=eval("__PACKAGE__"); package Bar::Baz { $main::r.=eval("__PACKAGE__"); } } print "$main::r\n";});
+
+# A main-package global ($::x / $main::x) referenced ONLY inside a sub must get
+# a forward defvar (undef when unset), not crash with an unbound variable.
+test_transpile('main-package global used only in a sub is undef, not unbound',
+    q{sub f { return $::TODO ? "y" : "n"; } print f(), "\n";});
+test_transpile('$main::x set at top level, read only inside a sub',
+    q{$main::g = 42; sub get { return $main::g; } print get(), "\n";});
+
+# `$#[0]` is the removed `$#` magic taking a subscript = element 0 of @#.
+# An undeclared @# must read as empty (undef), not crash unbound.
+test_transpile('$#[0] on empty @# is undef, not a crash',
+    q{$x = $#[0]; print "[$x]\n";});
+test_transpile('$#[N] indexes array @#',
+    q{@{"#"}=(10,20,30); print $#[0], " ", $#[2], "\n";});
+
 done_testing();

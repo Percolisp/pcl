@@ -15,7 +15,7 @@ my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 11;
 
 sub run_cl {
     my ($code) = @_;
@@ -113,3 +113,17 @@ test_cl('hash self-assign from own scalar element',
      %h = $h{a};
      print join(":", %h), "\n";',
     "x:\n");
+
+# Compound assignment (+=, -=) onto an ABSENT hash/array element: the element
+# reads as undef, which Perl treats as 0.  p-incf/p-decf on the hash/array path
+# used raw CL (incf …) which fed *p-undef* straight into (+ …) and crashed
+# ("(SB-KERNEL:TWO-ARG-+ N :UNDEF)").  Now they coerce via to-number first.
+# (found via a hash-accumulation benchmark, 2026-06-25)
+test_cl('+= onto absent hash element treats undef as 0',
+    'my %h; $h{a} += 5; $h{b} -= 3; $h{a} += 2;
+     print "$h{a} $h{b}\n";',
+    "7 -3\n");
+test_cl('+= onto absent array element treats undef as 0',
+    'my @a; $a[2] += 5; $a[2] += 4; $a[5] -= 1;
+     print "$a[2] $a[5]\n";',
+    "9 -1\n");
