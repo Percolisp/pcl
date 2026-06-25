@@ -7061,9 +7061,19 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-seek-impl (%p-fh-arg ,fh) ,@args))
 
 (defun %p-binmode-impl (fh &optional encoding)
-  "Perl binmode - set binary mode or encoding (stub)"
-  (declare (ignore fh encoding))
-  t)
+  "Perl binmode - set binary mode or encoding.
+   PCL builds on SBCL streams (which handle encoding natively) and does not
+   model PerlIO layers, so for an already-open handle this is a no-op returning
+   true.  But binmode on a filehandle that is NOT open fails in Perl with errno
+   EBADF (bad file descriptor); replicate that — set $! and return false — so
+   error-checking code (io/binmode.t test 9) observes the right $!."
+  (declare (ignore encoding))
+  (if (p-get-stream fh)
+      t
+      (progn
+        (setf *p-stored-errno* 9)                                  ; EBADF (Linux)
+        (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+        nil)))
 
 (defmacro p-binmode (fh &rest args)
   "Perl binmode — bareword filehandle is auto-quoted."
