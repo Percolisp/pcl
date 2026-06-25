@@ -928,6 +928,37 @@ an optimization, never correctness. That property is why this order is safe.
    `context` metadata this pipeline already produces (`annotate_contexts`), so
    step 1 likely unblocks kvhslice.t 9–12/25–28 as a side effect — worth
    verifying.
+4. **Inter- vs intra-procedural boundary, and a "sealed sub" opt-in.** Everything
+   above is **intra-procedural** and therefore safe no matter what is redefined
+   at runtime: redefining `g` can't change the dataflow inside `f`, so unboxing
+   locals + specializing operators *within a sub body* needs no guard. Runtime
+   sub replacement (`*foo = sub{…}`, `local *foo`, AUTOLOAD, glob/stash writes)
+   only caps the **inter-procedural** layer — inlining a callee, propagating a
+   callee's return type into the caller (the Tier-3 return-type table, §A4, is
+   deferred for exactly this reason), and devirtualizing method dispatch. Note
+   SBCL gives us the safe default for free: ordinary calls go through the
+   symbol's function cell, so a replaced sub is picked up automatically and
+   nothing is inlined — we already pay the indirect call and already lose
+   inlining. Two ways to opt back into the inter-procedural wins:
+   - **(c) per-call-site guard (sound, preferred default):** specialize against
+     the callee's *current* code object and emit one pointer-compare before the
+     fast path — same code object → specialized; else → generic call. No deopt
+     machinery; monkey-patching just falls back automatically.
+   - **(b) a "sealed" promise (fast, unsound if violated) at two granularities:**
+     a **whole-program compiler flag** (closed-world: assume no sub is redefined,
+     inline/specialize freely), and a **per-sub marker**. The per-sub marker
+     should be a **comment**, e.g. `sub fib { # pcl: sealed` …, *not* a sub
+     attribute: a comment is invisible to stock perl, so the identical source
+     still runs under real Perl (preserving "transpiler for valid Perl input"),
+     while PCL reads it as a hint to seal just that sub. (A `:sealed` attribute
+     is the fallback if a structured form is ever wanted, but it risks warnings
+     under stock perl unless declared.) Decision: ship (c) as the default; add
+     the seal flag/comment only for the last few percent on a proven hot path.
+   Other hazards in the same callee-identity-dependent bucket (record here so the
+   guard covers them too): `goto &sub`, tie/overload installation,
+   `wantarray`-sensitive callees, `local` on globals. Escape/aliasing facts that
+   do **not** depend on the callee's body (e.g. "the call didn't receive `\$x`,
+   so `$x` is still a number after") stay valid across a call and need no guard.
 
 ## See also
 - `docs/codegen-rewrite-spec.md` — the *code-shape* spec (this doc decides
