@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 15;
+plan tests => 16;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -295,5 +295,30 @@ seek($rwh, 0, SEEK_END);
 print $rwh "!";                      # append at end
 print "readback=[$first] rw=[$rw]\n";
 close $rwh;
+PERL
+}
+
+# --- Test 16: read(FH, BUF, LEN [, OFFSET]) writes BUF and returns the count ---
+# Regression: read() used to ignore its buffer and return the read STRING (so
+# $n got "hello" and $buf stayed empty).  It must fill BUF in place, return the
+# byte count, NUL-pad/append at a positive OFFSET, and report EBADF on an
+# unopened handle.
+{
+    test_io('read fills buffer, returns count, honours OFFSET', <<'PERL');
+my $path = "/tmp/pcl_read_test_$$.dat";
+open(my $w, '>', $path) or die "open: $!";
+print $w "abcdef";
+close $w;
+
+open(my $in, '<', $path) or die "open: $!";
+my $buf = "";
+my $n = read($in, $buf, 3);
+print "n=$n buf=[$buf]\n";
+# read 2 more at offset 5 — chars 0..2 kept, gap NUL-filled to offset 5
+my $n2 = read($in, $buf, 2, 5);
+(my $shown = $buf) =~ s/\0/./g;
+print "n2=$n2 buf2=[$shown]\n";
+close $in;
+unlink $path;
 PERL
 }

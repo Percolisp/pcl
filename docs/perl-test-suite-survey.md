@@ -186,10 +186,10 @@ loaded harness runs them. First probe (P = perl ok/notok, C = PCL):
 | `print.t` | 24 | 21/1 | 🟡 close (3 diffs) |
 | `say.t` | 13 | 8/1 | 🟡 |
 | `tell.t` | 36 | 28/8 | 🟡 |
-| `read.t` | 2 | 0/2 | 🟡 small |
-| `errno.t` | 16 | 0/16 | 🐞 total fail — `$!` errno text/preservation after reads |
+| `read.t` | 2 | **2/2** | 🐞→✅ FIXED (2026-06-25b): `read()` was fundamentally broken (ignored its BUF, returned the read STRING not the count); now fills BUF in place, returns the count, NUL-pads at a positive OFFSET, EBADF on unopened handle |
+| `errno.t` | 16 | n/a | 🚧 uses `runperl` (spawns a real `./perl` subprocess) — fixture dependency, not a PCL semantics gap |
 | `paragraph_mode.t` | 80 | 16 | 🐞 `$/=""` paragraph mode (same `$/` gap as `base/rs.t` — convergent) |
-| `binmode.t` | 9 | **8/1** | 🐞→✅ FIXED (this session): crash + EBADF; last fail = `$!` dualvar-through-`@_` |
+| `binmode.t` | 9 | **9/9** | 🐞→✅ FIXED (2026-06-25b): test 9 (last fail) was the `$!` dualvar-through-`@_` bug — now fixed (see below) |
 | `scalar.t` | 128 | skip-all | 🟡 in-memory `open(\$scalar)` filehandles (128 tests behind one feature) |
 | `iprefix.t` | 2 | 0/2 | 🟡 |
 
@@ -219,11 +219,36 @@ a plain copy and string-eval but loses its numeric side when passed through
 `@_` (verified: `sub f{my($g)=@_; $g==9}` fed `$!` fails) — fix it as part of
 errno.t.
 
-NEXT t/io (high-leverage order): `errno.t` (clean 0/16, `$!` semantics — and the
-dualvar-through-`@_` lead above is likely central) → `$/` record/paragraph modes
-(recovers `paragraph_mode.t` + `base/rs.t` together) → `scalar.t` in-memory
-filehandles (128 behind one feature). Many files also use fork/pipe/socket
-(`open.t`, `pipe.t`, `socket.t`, …) — lower priority, system-dependent.
+**`$!`/dualvar-through-aggregate FIXED (2026-06-25b).** The `binmode.t` test-9
+lead was a general dualvar bug, not errno-specific: a dualvar box ($! errno or
+`Scalar::Util::dualvar`) carries an independent numeric value alongside a string
+value, but *every* place that unboxes a box to a scalar *value* for storage in an
+array/hash/`@_` dropped the numeric half (unboxed to the string), so `$!+0`
+downstream became 0. Root cause was four convergent chokepoints in
+`cl/pcl-runtime.lisp` that all snapshot `(p-box-value box)` / `(unbox box)`:
+`p-aref-unbox-elem` (reading `$_[0]`/`$a[i]`), `%p-flatten-list` (list-assign
+RHS), `%p-array-store-scalar` (`@a=(…)`/`push`), `%p-make-hash-entry`
+(`%h=(k=>…)`). Fix: a `%p-dualvar-box-p` predicate (nv-ok + string primary value
+whose own numification ≠ the nv → a *genuine* dualvar, excluding plain numified
+strings like `"5"`) plus a `%p-dualvar-copy` helper; each chokepoint now
+preserves both halves. Also wired `Scalar::Util::dualvar` to actually build a
+dualvar (`builtin::dualvar` → runtime `p-dualvar`; the shim previously returned
+only the string). Guards: `Pl/t/errno-01.t` tests 8–9.
+
+**`read()` FIXED (2026-06-25b).** `read(FH,BUF,LEN[,OFFSET])` was fundamentally
+broken: `%p-read-impl` ignored BUF entirely and returned the read *string*
+instead of the count, so `my $n = read($fh,$buf,5)` set `$n="hello"` and left
+`$buf` empty. Rewrote it to fill BUF in place (via `box-set`), return the
+char count (0 at EOF, undef + EBADF on an unopened handle), and honour a
+positive/negative OFFSET (NUL-padding the gap). `io/read.t` 0/2 → 2/2. Guard:
+`Pl/t/fileio-02.t` test 16.
+
+NEXT t/io (high-leverage order): `$/` record/paragraph modes (recovers
+`paragraph_mode.t` + `base/rs.t` together) → `scalar.t` in-memory filehandles
+(128 behind one feature) → `print.t`/`say.t`/`tell.t` partial diffs. Many files
+also use fork/pipe/socket (`open.t`, `pipe.t`, `socket.t`, …) — lower priority,
+system-dependent. (`errno.t` itself spawns `./perl` via `runperl`, so it is a
+fixture dependency, not a PCL gap.)
 
 ### Not yet surveyed (next sessions)
 

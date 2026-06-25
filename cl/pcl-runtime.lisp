@@ -3145,6 +3145,15 @@
    assignment intent explicit for other compiler backends reading the IR."
   `(box-set ,place ,value))
 
+(defun %p-dualvar-copy (item)
+  "Fresh box copying a genuine dualvar ITEM, keeping both its numeric and string
+   halves (a bare make-p-box around its string value would drop the numeric)."
+  (let ((s (p-box-value item))
+        (nb (make-p-box (p-box-value item))))
+    (setf (p-box-nv nb) (p-box-nv item) (p-box-nv-ok nb) t
+          (p-box-sv nb) s (p-box-sv-ok nb) t)
+    nb))
+
 (defun %p-array-store-scalar (arr item)
   "Store a scalar ITEM into ARR, preserving blessed objects and references."
   (if (p-box-p item)
@@ -3169,6 +3178,9 @@
                (p-typeglob-p inner)
                (p-regex-match-p inner))
            (vector-push-extend (make-p-box inner) arr))
+          ;; Dualvar ($!/Scalar::Util::dualvar): copy keeping both halves.
+          ((%p-dualvar-box-p item)
+           (vector-push-extend (%p-dualvar-copy item) arr))
           ;; Plain scalar box: copy into new box
           (t (vector-push-extend (make-p-box inner) arr))))
       (vector-push-extend (make-p-box item) arr)))
@@ -3189,12 +3201,17 @@
    Plain scalars and blessed objects keep copy semantics (unbox+rewrap, copying the
    bless class).  Array/hash refs don't set is-ref (a box wrapping a vector/
    hash-table is unambiguously a ref), so they take the plain branch unchanged."
-  (if (and (p-box-p v) (p-box-is-ref v))
-      (make-p-box v)
-      (let ((b (make-p-box (unbox v))))
-        (when (and (p-box-p v) (p-box-class v))
-          (setf (p-box-class b) (p-box-class v)))
-        b)))
+  (cond
+    ((and (p-box-p v) (p-box-is-ref v))
+     (make-p-box v))
+    ;; Dualvar ($!/Scalar::Util::dualvar): keep both numeric and string halves.
+    ((%p-dualvar-box-p v)
+     (%p-dualvar-copy v))
+    (t
+     (let ((b (make-p-box (unbox v))))
+       (when (and (p-box-p v) (p-box-class v))
+         (setf (p-box-class b) (p-box-class v)))
+       b))))
 
 (defun %p-snapshot-array-rhs (src)
   "Snapshot SRC for use as the RHS of an array assignment.
@@ -3361,6 +3378,18 @@
 ;; Flatten a Perl-style value (vector/list/hash/scalar) to a flat vector
 ;; for use in list-assignment RHS. Hash tables expand to key-value pairs;
 ;; nested vectors are flattened (like p-array-= does).
+(defun %p-dualvar-box-p (box)
+  "True when BOX is a genuine dualvar: an explicit numeric value (nv-ok) sitting
+   alongside a STRING primary value whose own numification differs from that
+   numeric (e.g. $! errno, Scalar::Util::dualvar).  Such a box must stay intact
+   when an array/hash/list would otherwise unbox it to a single scalar value —
+   unboxing to the string drops the numeric half, and vice-versa.  A plain
+   numified string ('5' carrying a cached nv of 5.0) is NOT a dualvar."
+  (and (p-box-p box)
+       (p-box-nv-ok box)
+       (stringp (p-box-value box))
+       (/= (p-box-nv box) (parse-perl-number (p-box-value box)))))
+
 (defun %p-flatten-list (src)
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (labels ((add (item)
@@ -3398,8 +3427,9 @@
                          (if (or (p-box-p inner)
                                  (p-box-class item)
                                  (and (vectorp inner) (not (stringp inner)))  ; array ref
-                                 (hash-table-p inner))  ; hash ref
-                             item   ; reference or blessed: preserve the box
+                                 (hash-table-p inner)  ; hash ref
+                                 (%p-dualvar-box-p item))  ; $!/dualvar: keep both halves
+                             item   ; reference, blessed, or dualvar: preserve the box
                              inner))  ; plain scalar: snapshot value
                        item)
                    result)))))
@@ -4778,8 +4808,9 @@
         (if (or (and (vectorp v) (not (stringp v)))  ; arrayref
                 (hash-table-p v)                      ; hashref
                 (functionp v)                          ; coderef
-                (p-box-p v))                           ; scalar ref (box-in-box)
-            elem   ; reference: return the box so to-number → object-address
+                (p-box-p v)                            ; scalar ref (box-in-box)
+                (%p-dualvar-box-p elem))               ; $!/dualvar: keep both halves
+            elem   ; reference or dualvar: return the box so both halves survive
             v))))  ; scalar: return unboxed value
 
 (defun %p-hash-unbox-elem (elem)
@@ -4794,7 +4825,8 @@
       (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
-                (and (vectorp v) (not (stringp v))))      ; array-ref
+                (and (vectorp v) (not (stringp v)))       ; array-ref
+                (%p-dualvar-box-p elem))                  ; $!/dualvar: keep both halves
             elem   ; keep box: box-set would convert these to count/length
             v))))
 
@@ -7083,16 +7115,37 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-binmode-impl (%p-fh-arg ,fh) ,@args))
 
 (defun %p-read-impl (fh buf len &optional offset)
-  "Perl read - read bytes into buffer. Returns nil on stream error."
-  (declare (ignore buf offset))  ; Buffer semantics differ in CL
+  "Perl read(FH, BUF, LEN [, OFFSET]) — read up to LEN chars from FH into the
+   lvalue BUF, returning the number of chars actually read (0 at EOF, undef on
+   error).  BUF is modified in place.  With OFFSET, the read data is placed at
+   that position in BUF: a positive offset keeps (NUL-padding to) the first
+   OFFSET chars of BUF's old value; a negative offset counts back from the end
+   of BUF's current length.  An unopened handle fails with errno EBADF."
+  (let ((stream (p-get-stream fh)))
+    (unless stream
+      (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
+      (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+      (return-from %p-read-impl *p-undef*)))
   (handler-case
-      (let ((stream (p-get-stream fh))
-            (n (to-number len)))
-        (when stream
-          (let ((result (make-string n)))
-            (read-sequence result stream)
-            result)))
-    (error () nil)))
+      (let* ((stream (p-get-stream fh))
+             (n (max 0 (truncate (to-number len))))
+             (tmp (make-string n))
+             (got (read-sequence tmp stream))
+             (data (subseq tmp 0 got)))
+        (when (p-box-p buf)
+          (if offset
+              (let* ((old (to-string (unbox buf)))
+                     (off (truncate (to-number offset)))
+                     (off (if (< off 0) (max 0 (+ (length old) off)) off))
+                     (head (if (<= off (length old))
+                               (subseq old 0 off)
+                               (concatenate 'string old
+                                            (make-string (- off (length old))
+                                                         :initial-element #\Nul)))))
+                (box-set buf (concatenate 'string head data)))
+              (box-set buf data)))
+        got)
+    (error () *p-undef*)))
 
 (defmacro p-read (fh &rest args)
   "Perl read — bareword filehandle is auto-quoted."
@@ -9592,6 +9645,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (def "WEAKEN"   (lambda (r) (p-weaken r)))
     (def "UNWEAKEN" (lambda (r) (declare (ignore r)) *p-undef*))
     (def "IS_WEAK"  (lambda (r) (p-isweak r)))
+    (def "DUALVAR"  (lambda (num str) (p-dualvar num str)))
     (def "BLESSED"  #'%p-builtin-blessed)
     (def "REFADDR"  #'%p-builtin-refaddr)
     (def "REFTYPE"  #'%p-builtin-reftype)
