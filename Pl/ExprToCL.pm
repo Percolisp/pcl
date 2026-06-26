@@ -205,6 +205,7 @@ my %SPECIAL_VARS = (
   '$^O' => '|$^O|',
   '$^V' => '|$^V|',
   '$^X' => '|$^X|',
+  '$^I' => '|$^I|',   # INPLACE_EDIT - in-place edit extension (<> / perl -i)
   '$/'  => '|$/|',
   '$\\' => '|$\\\\|',   # $\ (ORS): backslash must be escaped INSIDE the |...| symbol;
                         # |$\| would escape the closing pipe -> unreadable form

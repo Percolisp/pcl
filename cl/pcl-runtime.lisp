@@ -114,7 +114,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file
+   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file
    ;; Functions
    #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
@@ -7585,14 +7585,145 @@ buffer's fill-pointer; everything else falls back to file-length."
            (vector-push-extend (make-p-box line) result)
            (return result))))))
 
+;;; ----------------------------------------------------------------
+;;; Diamond operator <> / <ARGV>: read records across the files named in
+;;; @ARGV, falling back to STDIN when @ARGV is empty.  $ARGV holds the current
+;;; filename ("-" for STDIN).  Unlike a plain filehandle, $. is *cumulative*
+;;; across the @ARGV files (Perl never implicitly closes ARGV), so when we move
+;;; to the next file we seed its line counter with the previous file's count.
+(declaim (special @ARGV $ARGV |$^I|))
+(defvar *p-argv-stream* nil "Currently-open <> input stream, or nil before/after.")
+(defvar *p-argv-started* nil "T once <> has begun consuming @ARGV (or chosen STDIN).")
+(defvar *p-argv-last-count* 0 "Cumulative $. carried from the previous <> file.")
+
+;;; In-place editing ($^I / perl -i): while <> reads a real file, the default
+;;; output (print/printf with no handle, i.e. *standard-output*) is redirected
+;;; to a temp file; when that file is finished the temp replaces the original
+;;; (renaming the original to a backup first when $^I carries an extension).
+;;; STDIN ("-") is never edited in place.
+(defvar *p-inplace-out* nil "Temp output stream for in-place editing of the current <> file.")
+(defvar *p-inplace-orig* nil "Original path of the file being edited in place.")
+(defvar *p-inplace-tmp* nil "Temp file path used for in-place editing.")
+(defvar *p-inplace-saved-out* nil "*standard-output* saved across an in-place edit.")
+
+(defun %p-inplace-ext ()
+  "Backup extension string if $^I is defined (\"\" = edit with no backup), else
+   nil (in-place editing off)."
+  (let ((v (unbox |$^I|)))
+    (if (or (null v) (eq v *p-undef*)) nil (to-string v))))
+
+(defun %p-inplace-begin (orig-path)
+  "Redirect default output to a fresh temp file alongside ORIG-PATH."
+  (let* ((tmp (format nil "~A.pcl-inplace-~36,8,'0R" orig-path (random (expt 36 8))))
+         (out (open tmp :direction :output :if-exists :supersede
+                    :if-does-not-exist :create)))
+    (setf *p-inplace-orig* orig-path
+          *p-inplace-tmp* tmp
+          *p-inplace-out* out
+          *p-inplace-saved-out* *standard-output*
+          *standard-output* out)))
+
+(defun %p-inplace-finish ()
+  "Close the redirected output, restore *standard-output*, back up the original
+   when $^I has an extension, then move the temp file over the original.  No-op
+   when no in-place edit is active."
+  (when *p-inplace-out*
+    (close *p-inplace-out*)
+    (setf *standard-output* *p-inplace-saved-out*)
+    (let ((ext (%p-inplace-ext)) (orig *p-inplace-orig*) (tmp *p-inplace-tmp*))
+      (if (and ext (plusp (length ext)))
+          ;; '*' in the extension is replaced by the original name; else appended.
+          (let ((backup (if (find #\* ext)
+                            (with-output-to-string (s)
+                              (loop for ch across ext
+                                    do (if (char= ch #\*) (write-string orig s)
+                                           (write-char ch s))))
+                            (concatenate 'string orig ext))))
+            ;; If the backup rename fails, Perl skips the file: leave the
+            ;; original untouched and discard the edited temp.
+            (handler-case
+                (progn (sb-posix:rename orig backup)
+                       (sb-posix:rename tmp orig))
+              (error ()
+                (p-warn (format nil "Can't rename ~A to ~A: No such file or directory, skipping file"
+                                orig backup))
+                (ignore-errors (delete-file tmp)))))
+          (ignore-errors (sb-posix:rename tmp orig)))) ; no backup: replace original
+    (setf *p-inplace-out* nil *p-inplace-orig* nil
+          *p-inplace-tmp* nil *p-inplace-saved-out* nil)))
+
+(defun %p-argv-open-next ()
+  "Shift the next filename off @ARGV, open it, set $ARGV, and return its stream.
+   Empty @ARGV on the first call yields STDIN.  Unopenable files warn and are
+   skipped (Perl behaviour).  Returns nil when the file sequence is exhausted."
+  (loop
+   (when (zerop (length @ARGV))
+     (return
+       (cond
+         (*p-argv-started* nil)                       ; all files consumed
+         (t (setf *p-argv-started* t)                 ; bare <> with empty @ARGV
+            (box-set $ARGV "-")
+            *standard-input*))))
+   (setf *p-argv-started* t)
+   (let ((fname (to-string (unbox (p-shift @ARGV)))))
+     (box-set $ARGV fname)
+     (cond
+       ((string= fname "-") (return *standard-input*))
+       (t (let ((s (ignore-errors
+                     (open fname :direction :input :if-does-not-exist nil))))
+            (cond
+              ((null s)
+               (p-warn (format nil "Can't open ~A: No such file or directory"
+                               fname)))                ; skip to next file
+              (t (when (%p-inplace-ext) (%p-inplace-begin fname))
+                 (return s)))))))))
+
+(defun %p-readline-argv ()
+  "Scalar-context <> : read one record across the @ARGV file sequence."
+  (loop
+   (unless *p-argv-stream*
+     (setf *p-argv-stream* (%p-argv-open-next))
+     (unless *p-argv-stream* (return nil))
+     ;; Seed the new file's $. with the cumulative count from prior files.
+     (setf (gethash *p-argv-stream* *p-fh-lines*) *p-argv-last-count*))
+   (let ((line (%p-readline-impl *p-argv-stream*)))   ; sets last-handle, bumps $.
+     (setf *p-argv-last-count* (gethash *p-argv-stream* *p-fh-lines* 0))
+     (if line
+         (return line)
+         (progn                                        ; current file at EOF
+           (when (not (eq *p-argv-stream* *standard-input*))
+             (ignore-errors (close *p-argv-stream*)))
+           (%p-inplace-finish)                          ; commit in-place edit (if any)
+           (setf *p-argv-stream* nil))))))             ; advance on next turn
+
+(defun %p-readline-argv-all ()
+  "List-context <> : read every remaining record across @ARGV into a vector."
+  (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+    (loop
+     (let ((line (%p-readline-argv)))
+       (if line
+           (vector-push-extend (make-p-box line) result)
+           (return result))))))
+
+(defun %p-readline-argv-form-p (form)
+  "True if FORM is the diamond marker (quote ARGV) emitted by codegen for <ARGV>."
+  (and (consp form) (eq (car form) 'quote)
+       (symbolp (cadr form))
+       (string-equal (symbol-name (cadr form)) "ARGV")))
+
 (defmacro p-readline (&rest args)
   "Perl readline / <FH> — in list context reads all records; in scalar reads one.
    When *p-in-list-assign-rhs* is t (inside p-list-= RHS), always use scalar mode
    so that while (($x) = <FH>) reads one line per iteration, not the whole file.
+   No filehandle (<>) or the bareword ARGV (<ARGV>) is the diamond operator.
    %p-readline-impl bumps $. (per-handle line counter) on each successful read."
-  `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
-       (%p-readline-all ,(if args (car args) nil))
-       (%p-readline-impl ,@args)))
+  (if (or (null args) (%p-readline-argv-form-p (car args)))
+      `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
+           (%p-readline-argv-all)
+           (%p-readline-argv))
+      `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
+           (%p-readline-all ,(car args))
+           (%p-readline-impl ,@args))))
 
 ;;; ============================================================
 ;;; Directory I/O Functions
@@ -8389,6 +8520,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                     :initial-contents args)
         (make-array 0 :adjustable t :fill-pointer 0)))
   "Perl @ARGV - command line arguments")
+
+;; $ARGV: name of the file currently being read by the <> (diamond) operator.
+(defvar $ARGV (make-p-box *p-undef*)
+  "Perl $ARGV - current filename of the <> diamond operator (\"-\" for STDIN)")
 
 ;; Cache configuration
 (defparameter *pcl-cache-dir*
