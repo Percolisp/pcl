@@ -122,7 +122,7 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
-   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if
+   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if #:p-local-dot
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
@@ -780,8 +780,38 @@
 (defvar $_ (make-p-box nil) "Perl's $_ - default variable")
 ;;; Process ID ($$) - p-box so Perl-side `$$ = N` works (assignable since 5.16).
 (defvar $$ (make-p-box (sb-posix:getpid)) "Process ID")
-;;; Input line number ($.) - p-box so box-set / let dynamic binding works
-(defvar |$.| (make-p-box nil) "Input line number of last filehandle read")
+;;; Input line number ($.) — Perl's $. is not a plain scalar: it reflects the
+;;; line counter (IoLINES) of the *last-accessed* filehandle.  Reading $.
+;;; returns that handle's counter; writing $. sets it; `tell`/`seek`/`eof`/a
+;;; read all make their handle the current one.  We model this with a per-handle
+;;; counter table keyed on the CL stream, plus a magic p-box whose getter/setter
+;;; dispatch to *p-last-read-handle* (the handle $. refers to).
+(declaim (special *p-last-read-handle*))
+(defvar *p-fh-lines* (make-hash-table :test 'eq)
+  "Per-filehandle input line counter (Perl IoLINES): stream -> line count.")
+(defun %p-dot-get ()
+  "Getter for $.: the last-accessed handle's line counter, or undef if none."
+  (if *p-last-read-handle*
+      (gethash *p-last-read-handle* *p-fh-lines* 0)
+      nil))
+(defun %p-dot-set (new-val)
+  "Setter for $.: store NEW-VAL as the last-accessed handle's line counter."
+  (let ((n (truncate (to-number new-val))))
+    (when *p-last-read-handle*
+      (setf (gethash *p-last-read-handle* *p-fh-lines*) n))
+    n))
+(defvar |$.| (make-p-box (make-p-magic-cell :getter #'%p-dot-get
+                                            :setter #'%p-dot-set))
+  "Input line number of last filehandle accessed (magic — see above).")
+(defmacro p-local-dot (&body body)
+  "Localize $. (Perl `local $.`).  Perl localizes only the *current filehandle*
+   that $. refers to (PL_last_in_gv), not the per-handle line counter: on scope
+   exit the previously-current handle is restored, but any IoLINES changes made
+   to a handle inside BODY persist.  Modelled as a dynamic rebinding of
+   *p-last-read-handle* (reads/writes inside reach the current handle's counter;
+   the pointer reverts on exit)."
+  `(let ((*p-last-read-handle* *p-last-read-handle*))
+     ,@body))
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
 (defvar $@ (make-p-box "") "Error from last eval")
 ;;; Input record separator ($/)
@@ -7082,6 +7112,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    Argument-less `eof` tests the last filehandle read (Perl semantics), so it
    falls back to *p-last-read-handle* (then STDIN) rather than STDIN directly."
   (let ((stream (if fh (p-get-stream fh) (or *p-last-read-handle* *standard-input*))))
+    ;; eof FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
+    (when (and fh stream) (setf *p-last-read-handle* stream))
     (if stream
         (let ((ch (peek-char nil stream nil :eof)))
           (if (eq ch :eof) t nil))
@@ -7141,6 +7173,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 (defun %p-tell-impl (&optional fh)
   "Perl tell - return current file position"
   (let ((stream (if fh (p-get-stream fh) *standard-input*)))
+    ;; tell FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
+    (when (and fh stream) (setf *p-last-read-handle* stream))
     (if stream (file-position stream) -1)))
 
 (defmacro p-tell (&rest args)
@@ -7152,6 +7186,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((stream (p-get-stream fh))
         (position (to-number pos))
         (w (to-number whence)))
+    ;; seek FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
+    (when stream (setf *p-last-read-handle* stream))
     (when stream
       (let ((new-pos
              (cond
@@ -7455,106 +7491,108 @@ buffer's fill-pointer; everything else falls back to file-length."
    Updates $. (input line number) on each successful read."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
-    ;; Remember the handle so a later argument-less `eof` tests THIS stream.
+    ;; Remember the handle so a later argument-less `eof` tests THIS stream and
+    ;; $. reports THIS handle's line counter.
     (when stream (setf *p-last-read-handle* stream))
-    (when stream
-      (handler-case
-          (cond
-            ;; Slurp mode: $/ = undef - read entire file
-            ((null sep)
-             (let ((content (make-array 4096 :element-type 'character
-                                        :adjustable t :fill-pointer 0)))
-               (loop for char = (read-char stream nil nil)
-                     while char
-                     do (vector-push-extend char content))
-               (if (zerop (length content)) nil (coerce content 'string))))
+    (let ((%rl-result
+           (when stream
+             (handler-case
+                 (cond
+                   ;; Slurp mode: $/ = undef - read entire file
+                   ((null sep)
+                    (let ((content (make-array 4096 :element-type 'character
+                                               :adjustable t :fill-pointer 0)))
+                      (loop for char = (read-char stream nil nil)
+                            while char
+                            do (vector-push-extend char content))
+                      (if (zerop (length content)) nil (coerce content 'string))))
 
-            ;; Record mode: $/ = \N - read exactly N characters per record.
-            ((integerp sep)
-             (let* ((buf (make-string sep))
-                    (got (read-sequence buf stream)))
-               (if (zerop got) nil (subseq buf 0 got))))
+                   ;; Record mode: $/ = \N - read exactly N characters per record.
+                   ((integerp sep)
+                    (let* ((buf (make-string sep))
+                           (got (read-sequence buf stream)))
+                      (if (zerop got) nil (subseq buf 0 got))))
 
-            ;; Paragraph mode: $/ = "" - read until blank line
-            ((string= sep "")
-             (let ((lines nil)
-                   (seen-content nil)
-                   (last-missing-nl nil))
-               (loop
-                (multiple-value-bind (line missing-nl) (read-line stream nil nil)
-                  (cond
-                    ((null line)
-                     ;; EOF: rebuild the record.  Only append the final newline
-                     ;; if the last content line actually had one — a file whose
-                     ;; last line lacks a trailing newline keeps it that way
-                     ;; (Perl does not invent one).
-                     (return
-                       (if lines
-                           (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
-                             (if last-missing-nl
-                                 body
-                                 (concatenate 'string body (string #\Newline))))
-                           nil)))
-                    ((string= line "")
-                     (if seen-content
-                         (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
-                         nil))  ; Skip leading blank lines
-                    (t
-                     (setf seen-content t
-                           last-missing-nl missing-nl)
-                     (push line lines)))))))
+                   ;; Paragraph mode: $/ = "" - read until blank line
+                   ((string= sep "")
+                    (let ((lines nil)
+                          (seen-content nil)
+                          (last-missing-nl nil))
+                      (loop
+                       (multiple-value-bind (line missing-nl) (read-line stream nil nil)
+                         (cond
+                           ((null line)
+                            ;; EOF: rebuild the record.  Only append the final newline
+                            ;; if the last content line actually had one — a file whose
+                            ;; last line lacks a trailing newline keeps it that way
+                            ;; (Perl does not invent one).
+                            (return
+                              (if lines
+                                  (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
+                                    (if last-missing-nl
+                                        body
+                                        (concatenate 'string body (string #\Newline))))
+                                  nil)))
+                           ((string= line "")
+                            (if seen-content
+                                (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
+                                nil))  ; Skip leading blank lines
+                           (t
+                            (setf seen-content t
+                                  last-missing-nl missing-nl)
+                            (push line lines)))))))
 
-            ;; Single character separator (common case, optimized)
-            ((= (length sep) 1)
-             (let ((sep-char (char sep 0))
-                   (result (make-array 256 :element-type 'character
-                                       :adjustable t :fill-pointer 0)))
-               (loop for char = (read-char stream nil nil)
-                     while char
-                     do (vector-push-extend char result)
-                     when (char= char sep-char)
-                     do (loop-finish))
-               (if (zerop (length result)) nil (coerce result 'string))))
+                   ;; Single character separator (common case, optimized)
+                   ((= (length sep) 1)
+                    (let ((sep-char (char sep 0))
+                          (result (make-array 256 :element-type 'character
+                                              :adjustable t :fill-pointer 0)))
+                      (loop for char = (read-char stream nil nil)
+                            while char
+                            do (vector-push-extend char result)
+                            when (char= char sep-char)
+                            do (loop-finish))
+                      (if (zerop (length result)) nil (coerce result 'string))))
 
-            ;; Multi-character separator
-            (t
-             (let ((result (make-array 256 :element-type 'character
-                                       :adjustable t :fill-pointer 0))
-                   (sep-len (length sep)))
-               (loop for char = (read-char stream nil nil)
-                     while char
-                     do (vector-push-extend char result)
-                     when (and (>= (length result) sep-len)
-                               (string= result sep
-                                        :start1 (- (length result) sep-len)))
-                     do (loop-finish))
-               (if (zerop (length result)) nil (coerce result 'string)))))
-        ;; Any stream error (e.g. reading from a directory) → return nil like Perl
-        (stream-error () nil)
-        (error () nil)))))
+                   ;; Multi-character separator
+                   (t
+                    (let ((result (make-array 256 :element-type 'character
+                                              :adjustable t :fill-pointer 0))
+                          (sep-len (length sep)))
+                      (loop for char = (read-char stream nil nil)
+                            while char
+                            do (vector-push-extend char result)
+                            when (and (>= (length result) sep-len)
+                                      (string= result sep
+                                               :start1 (- (length result) sep-len)))
+                            do (loop-finish))
+                      (if (zerop (length result)) nil (coerce result 'string)))))
+               ;; Any stream error (e.g. reading from a directory) → return nil like Perl
+               (stream-error () nil)
+               (error () nil)))))
+      ;; A successful record read bumps THIS handle's line counter ($.).
+      (when (and stream %rl-result)
+        (incf (gethash stream *p-fh-lines* 0)))
+      %rl-result)))
 
 (defun %p-readline-all (fh)
   "Read all remaining records from FH into an adjustable vector of boxed strings.
-   Updates $. for each line. Used by p-readline in list context."
+   %p-readline-impl bumps $. (the per-handle line counter) on each read."
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (loop
      (let ((line (%p-readline-impl fh)))
        (if line
-           (progn
-             (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|)))))
-             (vector-push-extend (make-p-box line) result))
+           (vector-push-extend (make-p-box line) result)
            (return result))))))
 
 (defmacro p-readline (&rest args)
   "Perl readline / <FH> — in list context reads all records; in scalar reads one.
    When *p-in-list-assign-rhs* is t (inside p-list-= RHS), always use scalar mode
-   so that while (($x) = <FH>) reads one line per iteration, not the whole file."
+   so that while (($x) = <FH>) reads one line per iteration, not the whole file.
+   %p-readline-impl bumps $. (per-handle line counter) on each successful read."
   `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
        (%p-readline-all ,(if args (car args) nil))
-       (let ((%rl-val (%p-readline-impl ,@args)))
-         (when %rl-val
-           (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|))))))
-         %rl-val)))
+       (%p-readline-impl ,@args)))
 
 ;;; ============================================================
 ;;; Directory I/O Functions

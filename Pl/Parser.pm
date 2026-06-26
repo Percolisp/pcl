@@ -3006,6 +3006,18 @@ sub _process_local_declaration {
 
   $self->_emit(";; $perl_code");
 
+  # local $. — the line-number magic refers to the last-accessed filehandle, so
+  # localizing it must save/restore (current handle, its line counter), not
+  # rebind a plain box (which would read undef inside the scope).  p-local-dot
+  # wraps the rest of the block; closed by _local_let_depth at block end.
+  if (@vars == 1 && ($vars[0] eq '$.' || $vars[0] eq '|$.|') && $init_idx < 0) {
+    $self->_emit("(p-local-dot");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+    return;
+  }
+
   # Build let bindings
   my @bindings;
   my $use_let_star = 0;
