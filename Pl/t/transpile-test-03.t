@@ -439,4 +439,20 @@ print(($^T > 1000000000 ? "yes" : "no"), "\n");
 print((localtime($^T))[5] + 1900 >= 2020 ? "ok\n" : "bad\n");
 ');
 
+# `undef` placeholder in a my-list LHS occupies a position; with a single declared
+# var the (vector $x) shortcut used to DROP a leading/middle undef and misalign
+# the assignment (my (undef, $b) = (10,20) wrongly gave $b=10).  Found while
+# writing Pl/t/socket-01.t (getpeername unpack).
+test_transpile("my-list leading undef placeholder", '
+my (undef, $b) = (10, 20);
+my (undef, undef, $c) = (1, 2, 3);
+my @a = (5, 6, 7); my (undef, $x) = @a;
+print "$b $c $x\n";
+');
+test_transpile("my-list interleaved undef placeholders and array slurp", '
+my ($a, undef, $c, undef, $e) = (1 .. 5);
+my (undef, @rest) = (9, 8, 7);
+print "$a$c$e | @rest\n";
+');
+
 done_testing();
