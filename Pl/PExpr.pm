@@ -312,10 +312,12 @@ sub extract_declarations {
       }
       push @result, @rest;
     }
-    # Check for standalone declarator word at start of expression
+    # Check for standalone declarator word at start of expression.
+    # Accept an explicit CORE:: prefix (CORE::state $y = ...) — PCL has no
+    # overridable builtins, so CORE::<declarator> is the bare declarator.
     elsif (ref($item) eq 'PPI::Token::Word'
-           && $item->content() =~ /^(my|our|state|local)$/) {
-      my $decl_type = $item->content();
+           && $item->content() =~ /^(?:CORE::)?(my|our|state|local)$/) {
+      my $decl_type = $1;
 
       # Look ahead for the variable in the next items
       # (This handles cases where expression is a flat array of tokens)
@@ -2049,7 +2051,9 @@ sub handle_subcalls {
   for my $tok (@$e) {
     next unless ref($tok) eq 'PPI::Token::Word';
     my $c = $tok->content();
-    if ($c =~ /^CORE::(\w+)$/ && exists $self->known_no_of_params->{$1}) {
+    if ($c =~ /^CORE::(\w+)$/
+        && (exists $self->known_no_of_params->{$1}
+            || $1 =~ /^(?:my|our|state|local)$/)) {
       $tok->set_content($1);
     }
   }

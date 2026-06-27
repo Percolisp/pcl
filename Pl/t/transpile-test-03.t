@@ -404,4 +404,55 @@ my @x; my $z = $x[0]--;
 printf "z=%s x0=%s\n", (defined $z ? $z : "undef"), $x[0];
 ');
 
+# Nested compound-assignment lvalue chains: each compound op returns its LHS as
+# an lvalue, so the place form is shared.  The runtime must evaluate the place
+# exactly once per op — otherwise the inner assignment re-runs and the result
+# grows exponentially.  (opbasic/concat.t test 242.)
+test_transpile("nested .= lvalue chain evaluates place once", '
+my $a = "a";
+(($a .= $a) .= $a) .= $a;
+print "$a\n";
+');
+test_transpile("nested += lvalue chain evaluates place once", '
+my $n = 1;
+(($n += $n) += $n) += $n;
+print "$n\n";
+');
+
+# CORE::<declarator> in expression context (CORE::my / CORE::state) names the
+# bare declarator (PCL has no overridable builtins).  Without normalization it
+# parsed as a function call and crashed.  (opbasic/concat.t.)
+test_transpile("CORE::my declarator in expression context", '
+my $h = { a => 1 };
+print ref(CORE::my $x = $h), "\n";
+');
+test_transpile("CORE::state declarator in expression context", '
+use feature "state";
+sub f { my $r = (CORE::state $y = 7); $y }
+print f(), f(), "\n";
+');
+
+# $^T (BASETIME) is the program start time in Unix seconds — must be a sane
+# positive epoch value, not an unbound variable.  (op/lex_assign.t.)
+test_transpile("\$^T is a positive epoch value", '
+print(($^T > 1000000000 ? "yes" : "no"), "\n");
+print((localtime($^T))[5] + 1900 >= 2020 ? "ok\n" : "bad\n");
+');
+
+# `undef` placeholder in a my-list LHS occupies a position; with a single declared
+# var the (vector $x) shortcut used to DROP a leading/middle undef and misalign
+# the assignment (my (undef, $b) = (10,20) wrongly gave $b=10).  Found while
+# writing Pl/t/socket-01.t (getpeername unpack).
+test_transpile("my-list leading undef placeholder", '
+my (undef, $b) = (10, 20);
+my (undef, undef, $c) = (1, 2, 3);
+my @a = (5, 6, 7); my (undef, $x) = @a;
+print "$b $c $x\n";
+');
+test_transpile("my-list interleaved undef placeholders and array slurp", '
+my ($a, undef, $c, undef, $e) = (1 .. 5);
+my (undef, @rest) = (9, 8, 7);
+print "$a$c$e | @rest\n";
+');
+
 done_testing();

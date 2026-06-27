@@ -2199,6 +2199,12 @@ sub _process_my_toplevel_declaration {
   # comma operator / array-in-scalar count).  Without this, my ($x) = @a wrongly
   # compiled to (box-set $x @a) → element count, and my ($x) = (a,b) → last elem.
   my $lhs_is_list = 0;
+  # An `undef` placeholder in the LHS list — my (undef, $x) = … — occupies a
+  # position but is not a declared symbol, so @vars under-counts it.  The
+  # single-var `(vector $x)` shortcut below would then misalign ($x would take
+  # the FIRST RHS element); detect placeholders so that case routes through the
+  # general list-assignment path, which emits (vector (p-undef) $x) in position.
+  my $lhs_has_placeholder = 0;
 
   for my $i (0 .. $#$parts) {
     my $p = $parts->[$i];
@@ -2211,6 +2217,7 @@ sub _process_my_toplevel_declaration {
       # List declaration: my ($x, $y) — or a parenthesized single var my ($x)
       $lhs_is_list = 1;
       push @vars, $self->_find_symbols_in_list($p);
+      $lhs_has_placeholder = 1 if $self->_list_has_undef_placeholder($p);
     }
     elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
       $init_idx = $i;
@@ -2334,7 +2341,7 @@ sub _process_my_toplevel_declaration {
         }
       }
 
-      if (@vars == 1) {
+      if (@vars == 1 && !$lhs_has_placeholder) {
         my $var = $vars[0];
         my $sigil = substr($var, 0, 1);
 
@@ -2359,7 +2366,10 @@ sub _process_my_toplevel_declaration {
           }
         }
       } else {
-        # Multiple variables: parse full statement through expression parser
+        # Multiple variables, OR a single var with an `undef` placeholder
+        # (my (undef, $x) = …): parse the full statement through the expression
+        # parser, which builds the LHS vector with placeholders in position
+        # ((vector (p-undef) $x)) so the RHS elements line up.
         my $cl_code = $self->_parse_expression($parts, $stmt);
         $self->_emit($cl_code) if defined $cl_code;
       }
@@ -3005,6 +3015,18 @@ sub _process_local_declaration {
   return unless @vars;
 
   $self->_emit(";; $perl_code");
+
+  # local $. — the line-number magic refers to the last-accessed filehandle, so
+  # localizing it must save/restore (current handle, its line counter), not
+  # rebind a plain box (which would read undef inside the scope).  p-local-dot
+  # wraps the rest of the block; closed by _local_let_depth at block end.
+  if (@vars == 1 && ($vars[0] eq '$.' || $vars[0] eq '|$.|') && $init_idx < 0) {
+    $self->_emit("(p-local-dot");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+    return;
+  }
 
   # Build let bindings
   my @bindings;
@@ -4692,6 +4714,26 @@ sub _find_symbols_in_list {
   }
 
   return @vars;
+}
+
+# True if the declaration list contains an `undef` placeholder — my (undef, $x).
+# Such a placeholder occupies a position in the list assignment but is not a
+# declared symbol, so it must be preserved positionally (the single-var
+# (vector $x) shortcut drops it).  Walks nested structures like _find_symbols.
+sub _list_has_undef_placeholder {
+  my $self = shift;
+  my $list = shift;
+
+  for my $child ($list->children) {
+    my $ref = ref($child);
+    if ($ref eq 'PPI::Token::Word' && $child->content eq 'undef') {
+      return 1;
+    }
+    elsif ($ref && $child->can('children')) {
+      return 1 if $self->_list_has_undef_placeholder($child);
+    }
+  }
+  return 0;
 }
 
 # Like _find_symbols_in_list but also includes undef placeholders.

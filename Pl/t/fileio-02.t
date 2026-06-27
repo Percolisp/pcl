@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 29;
+plan tests => 30;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -528,5 +528,33 @@ print "by_name=", -s $f, "\n";
 open(my $rw, '+<', $f) or die; truncate($rw, 2); close $rw;
 print "by_fh=", -s $f, "\n";
 unlink $f;
+PERL
+}
+
+# --- Test 30: $. is the line counter of the LAST-ACCESSED filehandle ---
+# Perl's $. is not a global counter: it tracks IoLINES of whichever handle was
+# last read/tell/seek/eof'd, and `local $.` saves/restores that association.
+{
+    test_io('$. tracks last-accessed handle; local $. saves/restores it', <<'PERL');
+my $f = "/tmp/pcl_dot_$$";
+open(my $w, '>', $f) or die; print $w "1\n2\n3\n4\n5\n"; close $w;
+open(my $A, '<', $f) or die;
+open(my $B, '<', $f) or die;
+scalar <$A>; scalar <$A>;             # $A at line 2
+print "A=$.\n";                       # 2 (A is current)
+scalar <$B>;                          # $B at line 1
+print "B=$.\n";                       # 1 (B is current now)
+{
+    local $.;
+    print "loc_before=$.\n";          # still B's count (1) — B stays current
+    $. = 41; scalar <$B>;             # B -> 42
+    print "loc_after=$.\n";           # 42
+}
+# local $. restores only the CURRENT-HANDLE pointer, not the line counter, so
+# B's counter (42) persists; B was current at exit, so $. still reads 42.
+print "restored=$.\n";                # 42
+tell $A;                              # make A current again without reading
+print "A_again=$.\n";                 # 2
+close $A; close $B; unlink $f;
 PERL
 }

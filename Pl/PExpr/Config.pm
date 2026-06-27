@@ -371,6 +371,22 @@ has known_no_of_params => (
       syswrite   => [2, 3, 4],    # syswrite FH, SCALAR [, LENGTH [, OFFSET]]
       sysseek    => 3,            # sysseek FH, POS, WHENCE
 
+      # Socket operations (AF_INET/AF_UNIX, SOCK_STREAM/DGRAM via sb-bsd-sockets)
+      socket     => 4,            # socket SOCK, DOMAIN, TYPE, PROTOCOL
+      socketpair => 5,            # socketpair S1, S2, DOMAIN, TYPE, PROTOCOL
+      bind       => 2,            # bind SOCK, NAME
+      connect    => 2,            # connect SOCK, NAME
+      listen     => 2,            # listen SOCK, QUEUESIZE
+      accept     => 2,            # accept NEWSOCK, GENERICSOCK
+      send       => [3, 4],       # send SOCK, MSG, FLAGS [, TO]
+      recv       => 4,            # recv SOCK, SCALAR, LEN, FLAGS
+      shutdown   => 2,            # shutdown SOCK, HOW
+      getsockname => 1,           # getsockname SOCK
+      getpeername => 1,           # getpeername SOCK
+      getprotobyname => 1,        # getprotobyname NAME
+      setsockopt => 4,            # setsockopt SOCK, LEVEL, OPTNAME, OPTVAL
+      getsockopt => 3,            # getsockopt SOCK, LEVEL, OPTNAME
+
       # Directory operations
       opendir    => 2,            # opendir DH, DIRNAME
       readdir    => 1,            # readdir DH

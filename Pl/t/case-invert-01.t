@@ -119,4 +119,19 @@ test_case('tie dispatches to uppercase TIESCALAR/FETCH/STORE',
   . ' sub STORE { my ($s, $v) = @_; $$s = $v * 2 }'
   . ' package main; tie my $x, "Counter"; $x = 21; print "$x\n";');
 
+# --- \u/\l composed with \U/\L case-span escapes (op/lex_assign.t test 1) -----
+# \u\L$x and \L\u$x both mean ucfirst(lc($x)) — the one-shot \u/\l applies to the
+# first character of the span's OUTPUT, not the first element inside it (which
+# would give lc(ucfirst($x)), with the span's lc overriding the ucfirst).
+test_case('backslash-u backslash-L composes as ucfirst(lc(...))',
+    'my $a = "AB"; print "[", "\u\L$a", "]\n";');
+test_case('backslash-L backslash-u composes as ucfirst(lc(...))',
+    'my $a = "AB"; print "[", "\L\u$a", "]\n";');
+test_case('backslash-u backslash-L with literal text and trailing E',
+    'print "[", "\u\LJOHN\E SMITH", "]\n";');
+test_case('backslash-l backslash-U composes as lcfirst(uc(...))',
+    'my $a = "ab"; print "[", "\l\U$a", "]\n";');
+test_case('plain backslash-u and U-span unaffected',
+    'my $a = "hELLo"; print "[", "\u$a", "][", "\U$a\E-x", "]\n";');
+
 done_testing();

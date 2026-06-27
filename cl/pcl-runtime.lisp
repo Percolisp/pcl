@@ -12,6 +12,9 @@
 ;;; Load sb-posix for process ID
 (require :sb-posix)
 
+;;; Load sb-bsd-sockets for socket builtins (socket/bind/connect/accept/…)
+(require :sb-bsd-sockets)
+
 ;;; --- :invert spike (case-sensitivity experiment) -----------------------
 ;;; All third-party libs (cl-ppcre, asdf, sb-posix) are loaded ABOVE under the
 ;;; standard :upcase readtable.  From here on, read PCL's own runtime AND all
@@ -94,6 +97,10 @@
    ;; File I/O
    #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
+   ;; Socket builtins
+   #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
+   #:p-send #:p-recv #:p-shutdown #:p-getsockname #:p-getpeername
+   #:p-getprotobyname #:p-setsockopt #:p-getsockopt
    #:p-truncate #:p-stat #:p-lstat
    ;; File test operators
    #:p--e #:p--d #:p--f #:p--r #:p--w #:p--x #:p--s #:p--z
@@ -114,7 +121,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file
+   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file
    ;; Functions
    #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
@@ -122,7 +129,7 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
-   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if
+   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if #:p-local-dot
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
@@ -147,7 +154,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+|
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
@@ -780,8 +787,38 @@
 (defvar $_ (make-p-box nil) "Perl's $_ - default variable")
 ;;; Process ID ($$) - p-box so Perl-side `$$ = N` works (assignable since 5.16).
 (defvar $$ (make-p-box (sb-posix:getpid)) "Process ID")
-;;; Input line number ($.) - p-box so box-set / let dynamic binding works
-(defvar |$.| (make-p-box nil) "Input line number of last filehandle read")
+;;; Input line number ($.) — Perl's $. is not a plain scalar: it reflects the
+;;; line counter (IoLINES) of the *last-accessed* filehandle.  Reading $.
+;;; returns that handle's counter; writing $. sets it; `tell`/`seek`/`eof`/a
+;;; read all make their handle the current one.  We model this with a per-handle
+;;; counter table keyed on the CL stream, plus a magic p-box whose getter/setter
+;;; dispatch to *p-last-read-handle* (the handle $. refers to).
+(declaim (special *p-last-read-handle*))
+(defvar *p-fh-lines* (make-hash-table :test 'eq)
+  "Per-filehandle input line counter (Perl IoLINES): stream -> line count.")
+(defun %p-dot-get ()
+  "Getter for $.: the last-accessed handle's line counter, or undef if none."
+  (if *p-last-read-handle*
+      (gethash *p-last-read-handle* *p-fh-lines* 0)
+      nil))
+(defun %p-dot-set (new-val)
+  "Setter for $.: store NEW-VAL as the last-accessed handle's line counter."
+  (let ((n (truncate (to-number new-val))))
+    (when *p-last-read-handle*
+      (setf (gethash *p-last-read-handle* *p-fh-lines*) n))
+    n))
+(defvar |$.| (make-p-box (make-p-magic-cell :getter #'%p-dot-get
+                                            :setter #'%p-dot-set))
+  "Input line number of last filehandle accessed (magic — see above).")
+(defmacro p-local-dot (&body body)
+  "Localize $. (Perl `local $.`).  Perl localizes only the *current filehandle*
+   that $. refers to (PL_last_in_gv), not the per-handle line counter: on scope
+   exit the previously-current handle is restored, but any IoLINES changes made
+   to a handle inside BODY persist.  Modelled as a dynamic rebinding of
+   *p-last-read-handle* (reads/writes inside reach the current handle's counter;
+   the pointer reverts on exit)."
+  `(let ((*p-last-read-handle* *p-last-read-handle*))
+     ,@body))
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
 (defvar $@ (make-p-box "") "Error from last eval")
 ;;; Input record separator ($/)
@@ -3954,26 +3991,33 @@
       `(setf ,place ,new)
       `(box-set ,place ,new)))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %store-back-form (place build)
+    "Build a read-modify-write expansion that evaluates PLACE exactly once.
+     BUILD is a function of one argument — a form that reads the current place —
+     returning the new-value form.  For a boxed scalar place, PLACE is bound to a
+     temp box once and BUILD reads through that temp, so a nested compound-assign
+     lvalue chain like (($a .= $a) .= $a) runs PLACE's side effects only once
+     (otherwise each textual reference to PLACE re-ran the inner assignment,
+     growing the result exponentially).  For accessor places ($h{k}/$a[i]/derefs)
+     SETF is used on the syntactic place form."
+    (if (%p-accessor-place-p place)
+        `(setf ,place ,(funcall build place))
+        (let ((b (gensym "PLACE")))
+          `(let ((,b ,place))
+             (box-set ,b ,(funcall build b)))))))
+
 (defmacro p-incf (place &optional (delta 1))
-  "Perl += - works on boxed values, hash/array elements, and derefs"
-  (if (and (listp place)
-           (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element (returns a raw value, not a box).  Coerce the current
-      ;; value through to-number BEFORE adding: an absent key/slot reads as
-      ;; *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
-      `(setf ,place (+ (to-number ,place) (to-number ,delta)))
-      ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
-      `(box-set ,place (+ (to-number ,place) (to-number ,delta)))))
+  "Perl += - works on boxed values, hash/array elements, and derefs.
+   Coerce the current value through to-number BEFORE adding: an absent key/slot
+   reads as *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
+   PLACE is evaluated once (see %store-back-form)."
+  (%store-back-form place (lambda (cur) `(+ (to-number ,cur) (to-number ,delta)))))
 
 (defmacro p-decf (place &optional (delta 1))
-  "Perl -= - works on boxed values, hash/array elements, and derefs"
-  (if (and (listp place)
-           (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element — coerce the current value (undef → 0) before
-      ;; subtracting; see p-incf.
-      `(setf ,place (- (to-number ,place) (to-number ,delta)))
-      ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
-      `(box-set ,place (- (to-number ,place) (to-number ,delta)))))
+  "Perl -= - works on boxed values, hash/array elements, and derefs.
+   PLACE is evaluated once (see %store-back-form)."
+  (%store-back-form place (lambda (cur) `(- (to-number ,cur) (to-number ,delta)))))
 
 (defun magical-string-increment (s)
   "Perl's magical string increment: 'a0' -> 'a1', 'Az' -> 'Ba', 'zz' -> 'aaa'"
@@ -4162,54 +4206,59 @@
 
 (defmacro p-*= (place value)
   "Perl *= (multiply-assign)"
-  `(%p-store-back ,place (* (to-number ,place) (to-number ,value))))
+  (%store-back-form place (lambda (cur) `(* (to-number ,cur) (to-number ,value)))))
 
 (defmacro p-/= (place value)
   "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
   a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
-  `(%p-store-back ,place (p-/ ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-/ ,cur ,value))))
 
 (defmacro p-%= (place value)
   "Perl %= (modulo-assign)"
-  `(%p-store-back ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  (%store-back-form place
+                    (lambda (cur) `(mod (truncate (to-number ,cur)) (truncate (to-number ,value))))))
 
 (defmacro p-**= (place value)
   "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
   float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
-  `(%p-store-back ,place (p-** ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-** ,cur ,value))))
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign)"
-  `(%p-store-back ,place (concatenate 'string (to-string ,place) (to-string ,value))))
+  (%store-back-form place
+                    (lambda (cur) `(concatenate 'string (to-string ,cur) (to-string ,value)))))
 
 (defmacro p-str-x= (place value)
   "Perl x= (repeat-assign)"
-  (let ((s (gensym "S"))
-        (n (gensym "N")))
-    `(let ((,s (to-string ,place))
-           (,n (truncate (to-number ,value))))
-       (%p-store-back ,place (if (<= ,n 0) ""
-                                 (apply #'concatenate 'string (make-list ,n :initial-element ,s)))))))
+  (let ((n (gensym "N")))
+    (%store-back-form place
+                      (lambda (cur)
+                        `(let ((,n (truncate (to-number ,value))))
+                           (if (<= ,n 0) ""
+                               (apply #'concatenate 'string
+                                      (make-list ,n :initial-element (to-string ,cur)))))))))
 
 (defmacro p-bit-and= (place value)
   "Perl &= (bitwise-and-assign)"
-  `(%p-store-back ,place (p-bit-and ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-bit-and ,cur ,value))))
 
 (defmacro p-bit-or= (place value)
   "Perl |= (bitwise-or-assign)"
-  `(%p-store-back ,place (p-bit-or ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-bit-or ,cur ,value))))
 
 (defmacro p-bit-xor= (place value)
   "Perl ^= (bitwise-xor-assign)"
-  `(%p-store-back ,place (p-bit-xor ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-bit-xor ,cur ,value))))
 
 (defmacro p-<<= (place value)
   "Perl <<= (left-shift-assign)"
-  `(%p-store-back ,place (ash (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  (%store-back-form place
+                    (lambda (cur) `(ash (truncate (to-number ,cur)) (truncate (to-number ,value))))))
 
 (defmacro p->>= (place value)
   "Perl >>= (right-shift-assign)"
-  `(%p-store-back ,place (ash (truncate (to-number ,place)) (- (truncate (to-number ,value))))))
+  (%store-back-form place
+                    (lambda (cur) `(ash (truncate (to-number ,cur)) (- (truncate (to-number ,value)))))))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -6776,10 +6825,43 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (setf (gethash 'STDOUT *p-filehandles*) *standard-output*)
 (setf (gethash 'STDERR *p-filehandles*) *error-output*)
 
-(defun p-get-stream (fh)
-  "Get CL stream from Perl filehandle (symbol, box, or stream)"
+;;; --- Socket filehandle plumbing -------------------------------------------
+;;; A Perl socket IS a filehandle: after connect/accept you print $sock / <$sock>
+;;; / close $sock.  But bind/connect/listen/accept operate on the sb-bsd-sockets
+;;; SOCKET OBJECT, while print/readline need a STREAM.  We store the socket object
+;;; as the filehandle value (via %p-install-fh, same as open stores a stream), and
+;;; lazily wrap it in a cached bidirectional stream the first time it is used for
+;;; I/O.  The stream is cached per socket because re-making it would lose buffered
+;;; data.
+(defvar *p-socket-streams* (make-hash-table :test 'eq)
+  "Cache mapping an sb-bsd-sockets:socket object to its lazily-made stream.")
+
+(defun %p-socket-p (x)
+  "True if X is an sb-bsd-sockets socket object."
+  (typep x 'sb-bsd-sockets:socket))
+
+(defun %p-socket-stream (sock)
+  "Lazily make (and cache) a bidirectional character stream over socket SOCK.
+   :buffering :none so writes hit the wire immediately (line protocols)."
+  (or (gethash sock *p-socket-streams*)
+      (setf (gethash sock *p-socket-streams*)
+            (sb-bsd-sockets:socket-make-stream
+             sock :input t :output t :buffering :none :element-type 'character))))
+
+(defun %p-as-stream (v)
+  "Coerce a resolved filehandle value to a CL stream: pass a stream through,
+   lazily wrap a socket object in its cached stream, else nil."
+  (cond ((streamp v) v)
+        ((%p-socket-p v) (%p-socket-stream v))
+        (t nil)))
+
+(defun %p-resolve-fh (fh)
+  "Resolve a Perl filehandle designator to its STORED value — a CL stream or an
+   sb-bsd-sockets socket object — or nil.  Does NOT coerce sockets to streams (so
+   the socket builtins can get the object); p-get-stream does the coercion."
   (cond
     ((streamp fh) fh)
+    ((%p-socket-p fh) fh)
     ((symbolp fh)
      (or (gethash fh *p-filehandles*)
          ;; The standard handles STDIN/STDOUT/STDERR are registered under the
@@ -6804,10 +6886,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      (let ((v (p-box-value fh)))
        (cond
          ((streamp v) v)
+         ((%p-socket-p v) v)
          ;; Scalar holding a handle NAME ('STDOUT', 'FOO'): resolve by name.
-         ((stringp v) (p-get-stream v))
+         ((stringp v) (%p-resolve-fh v))
          (t nil))))
     (t nil)))
+
+(defun p-get-stream (fh)
+  "Get CL stream from Perl filehandle (symbol, box, stream, or socket object).
+   A socket handle is lazily wrapped in a cached bidirectional stream so that
+   print/readline/read/eof/close all work through the normal stream paths."
+  (%p-as-stream (%p-resolve-fh fh)))
+
+(defun %p-get-socket (fh)
+  "Resolve a Perl filehandle to its underlying sb-bsd-sockets socket object (for
+   bind/connect/listen/accept/…), or nil if it is not a socket handle."
+  (let ((v (%p-resolve-fh fh)))
+    (and (%p-socket-p v) v)))
 
 (defun %p-open-parse-2arg (expr)
   "Parse a 2-arg open expression into (mode . filename).
@@ -7051,21 +7146,32 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       `(let ((%parsed (%p-open-parse-2arg ,mode)))
          (%p-open-impl (%p-fh-arg ,fh) (car %parsed) (cdr %parsed)))))
 
+(defun %p-close-socket (sock)
+  "Close a socket: close its cached stream (which closes the fd) if one was made,
+   else socket-close the object directly.  Drop it from the stream cache."
+  (let ((stream (gethash sock *p-socket-streams*)))
+    (if stream
+        (progn (ignore-errors (close stream)) (remhash sock *p-socket-streams*))
+        (ignore-errors (sb-bsd-sockets:socket-close sock))))
+  t)
+
 (defun %p-close-impl (fh)
-  "Implementation of Perl close"
+  "Implementation of Perl close (file or socket handle)."
   (cond
     ((p-box-p fh)
-     (let ((stream (p-box-value fh)))
-       (when (streamp stream)
-         (close stream)
-         (box-set fh *p-undef*)
-         t)))
+     (let ((v (p-box-value fh)))
+       (cond
+         ((%p-socket-p v) (%p-close-socket v) (box-set fh *p-undef*) t)
+         ((streamp v)     (close v)           (box-set fh *p-undef*) t)
+         (t nil))))
     (t
-     (let ((stream (p-get-stream fh)))
-       (when stream
-         (close stream)
-         (remhash fh *p-filehandles*)
-         t)))))
+     (let ((v (%p-resolve-fh fh)))
+       (cond
+         ((%p-socket-p v) (%p-close-socket v)
+          (when (symbolp fh) (remhash fh *p-filehandles*)) t)
+         ((streamp v)     (close v)
+          (when (symbolp fh) (remhash fh *p-filehandles*)) t)
+         (t nil))))))
 
 (defmacro p-close (&optional fh)
   "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box.
@@ -7082,6 +7188,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    Argument-less `eof` tests the last filehandle read (Perl semantics), so it
    falls back to *p-last-read-handle* (then STDIN) rather than STDIN directly."
   (let ((stream (if fh (p-get-stream fh) (or *p-last-read-handle* *standard-input*))))
+    ;; eof FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
+    (when (and fh stream) (setf *p-last-read-handle* stream))
     (if stream
         (let ((ch (peek-char nil stream nil :eof)))
           (if (eq ch :eof) t nil))
@@ -7141,6 +7249,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 (defun %p-tell-impl (&optional fh)
   "Perl tell - return current file position"
   (let ((stream (if fh (p-get-stream fh) *standard-input*)))
+    ;; tell FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
+    (when (and fh stream) (setf *p-last-read-handle* stream))
     (if stream (file-position stream) -1)))
 
 (defmacro p-tell (&rest args)
@@ -7152,6 +7262,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((stream (p-get-stream fh))
         (position (to-number pos))
         (w (to-number whence)))
+    ;; seek FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
+    (when stream (setf *p-last-read-handle* stream))
     (when stream
       (let ((new-pos
              (cond
@@ -7284,6 +7396,306 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl truncate FH/EXPR, LENGTH — the first operand is filehandle-like, so a
    bareword must be quoted (otherwise it is an unbound variable reference)."
   `(%p-truncate-impl (%p-fh-arg ,fh-or-file) ,size))
+
+;;; ============================================================
+;;; Socket builtins (AF_INET / AF_UNIX, SOCK_STREAM / SOCK_DGRAM via
+;;; sb-bsd-sockets).  The filehandle plumbing (%p-resolve-fh / %p-get-socket /
+;;; socket→stream caching) lives up by p-get-stream.  See docs/socket-impl-plan.md.
+;;; The address-packing helpers (inet_aton/sockaddr_in/…) are pure Perl in
+;;; lib/Socket.pm; the runtime only handles ALREADY-PACKED sockaddr byte-strings,
+;;; matching Perl's core calling convention.
+;;; ============================================================
+
+(defun %p-pack-sockaddr-in (addr port)
+  "Re-pack an (addr-vector . port) into a 16-byte struct sockaddr_in byte string
+   so Perl's unpack_sockaddr_in / Socket.pm can read it back: family AF_INET=2
+   (native little-endian on x86-64), port in network order, 4 address bytes, 8 NUL
+   pad."
+  (let ((s (make-string 16 :initial-element #\Nul))
+        (p (logand (truncate port) #xffff)))
+    (setf (char s 0) (code-char 2)                               ; AF_INET lo (LE)
+          (char s 1) (code-char 0)                               ; AF_INET hi
+          (char s 2) (code-char (logand (ash p -8) #xff))        ; port hi (network)
+          (char s 3) (code-char (logand p #xff))                 ; port lo (network)
+          (char s 4) (code-char (logand (aref addr 0) #xff))
+          (char s 5) (code-char (logand (aref addr 1) #xff))
+          (char s 6) (code-char (logand (aref addr 2) #xff))
+          (char s 7) (code-char (logand (aref addr 3) #xff)))
+    s))
+
+(defun %p-parse-sockaddr (name)
+  "Parse a packed sockaddr byte-string from Perl (Socket.pm's pack_sockaddr_in /
+   pack_sockaddr_un).  Returns (values :inet addr-vector port) for sockaddr_in, or
+   (values :unix path nil) for sockaddr_un.  Family is bytes 0-1 native order
+   (AF_INET=2, AF_UNIX=1); port is network order; addr is 4 bytes."
+  (let* ((s (to-string name))
+         (len (length s))
+         (fam (if (>= len 2)
+                  (logior (char-code (char s 0)) (ash (char-code (char s 1)) 8))
+                  2)))
+    (cond
+      ((= fam 1)                                          ; AF_UNIX: family + path
+       (let ((nul (or (position #\Nul s :start 2) len)))
+         (values :unix (subseq s 2 nul) nil)))
+      (t                                                  ; AF_INET (default)
+       (let ((port (if (>= len 4)
+                       (logior (ash (char-code (char s 2)) 8) (char-code (char s 3)))
+                       0))
+             (addr (if (>= len 8)
+                       (vector (char-code (char s 4)) (char-code (char s 5))
+                               (char-code (char s 6)) (char-code (char s 7)))
+                       (vector 0 0 0 0))))
+         (values :inet addr port))))))
+
+(defun %p-socket-impl (fh domain type protocol)
+  "Perl socket(SOCK, DOMAIN, TYPE, PROTOCOL): create an unconnected socket object
+   and install it as the filehandle SOCK.  1 on success, '' (and sets $!) on
+   failure."
+  (let ((dom   (truncate (to-number domain)))            ; AF_INET=2 AF_UNIX=1
+        (typ   (truncate (to-number type)))              ; SOCK_STREAM=1 SOCK_DGRAM=2
+        (proto (truncate (to-number protocol))))
+    (handler-case
+        (let* ((stype (if (= typ 2) :datagram :stream))
+               (sock (if (= dom 1)
+                         (make-instance 'sb-bsd-sockets:local-socket :type stype)
+                         (make-instance 'sb-bsd-sockets:inet-socket :type stype
+                                        :protocol (cond ((= proto 17) :udp)
+                                                        ((= proto 6) :tcp)
+                                                        ((= typ 2) :udp)
+                                                        (t :tcp))))))
+          (%p-install-fh fh sock)
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-socket (fh domain type protocol)
+  "Perl socket — bareword filehandle is auto-quoted."
+  `(%p-socket-impl (%p-fh-arg ,fh) ,domain ,type ,protocol))
+
+(defun %p-bind-impl (fh name)
+  "Perl bind(SOCK, NAME): NAME is a packed sockaddr.  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-bind-impl ""))
+    (handler-case
+        (multiple-value-bind (kind a b) (%p-parse-sockaddr name)
+          (if (eq kind :unix)
+              (sb-bsd-sockets:socket-bind sock a)
+              (sb-bsd-sockets:socket-bind sock a b))
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-bind (fh name)
+  "Perl bind — bareword filehandle is auto-quoted."
+  `(%p-bind-impl (%p-fh-arg ,fh) ,name))
+
+(defun %p-connect-impl (fh name)
+  "Perl connect(SOCK, NAME): NAME is a packed sockaddr.  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-connect-impl ""))
+    (handler-case
+        (multiple-value-bind (kind a b) (%p-parse-sockaddr name)
+          (if (eq kind :unix)
+              (sb-bsd-sockets:socket-connect sock a)
+              (sb-bsd-sockets:socket-connect sock a b))
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-connect (fh name)
+  "Perl connect — bareword filehandle is auto-quoted."
+  `(%p-connect-impl (%p-fh-arg ,fh) ,name))
+
+(defun %p-listen-impl (fh queue)
+  "Perl listen(SOCK, QUEUESIZE).  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-listen-impl ""))
+    (handler-case
+        (progn (sb-bsd-sockets:socket-listen sock (max 0 (truncate (to-number queue)))) 1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-listen (fh queue)
+  "Perl listen — bareword filehandle is auto-quoted."
+  `(%p-listen-impl (%p-fh-arg ,fh) ,queue))
+
+(defun %p-accept-impl (newfh serverfh)
+  "Perl accept(NEWSOCK, GENERICSOCK): block, accept a connection on the server
+   socket, install the new socket as NEWSOCK, return the packed peer sockaddr
+   (a true value).  '' (and sets $!) on failure."
+  (let ((server (%p-get-socket serverfh)))
+    (unless server (return-from %p-accept-impl ""))
+    (handler-case
+        (let ((new (sb-bsd-sockets:socket-accept server)))
+          (%p-install-fh newfh new)
+          (multiple-value-bind (addr port) (sb-bsd-sockets:socket-peername new)
+            (%p-pack-sockaddr-in addr port)))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-accept (newfh serverfh)
+  "Perl accept — both filehandles are auto-quoted (the new socket is written
+   through NEWSOCK, like read writes through its buffer)."
+  `(%p-accept-impl (%p-fh-arg ,newfh) (%p-fh-arg ,serverfh)))
+
+(defun %p-shutdown-impl (fh how)
+  "Perl shutdown(SOCK, HOW): HOW 0=read 1=write 2=both.  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-shutdown-impl ""))
+    (handler-case
+        (let ((dir (case (truncate (to-number how))
+                     (0 :input) (1 :output) (t :io))))
+          (sb-bsd-sockets:socket-shutdown sock :direction dir)
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-shutdown (fh how)
+  "Perl shutdown — bareword filehandle is auto-quoted."
+  `(%p-shutdown-impl (%p-fh-arg ,fh) ,how))
+
+(defun %p-send-impl (fh msg flags &optional to)
+  "Perl send(SOCK, MSG, FLAGS [, TO]): send MSG; with TO (packed sockaddr) for a
+   datagram socket.  Returns the number of bytes sent, or '' + $! on failure."
+  (declare (ignore flags))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-send-impl ""))
+    (handler-case
+        (let ((data (to-string msg)))
+          (if to
+              (multiple-value-bind (kind a b) (%p-parse-sockaddr to)
+                (declare (ignore kind))
+                (sb-bsd-sockets:socket-send sock data nil :address (list a b)))
+              (sb-bsd-sockets:socket-send sock data nil)))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-send (fh msg flags &optional to)
+  "Perl send — bareword filehandle is auto-quoted."
+  (if to
+      `(%p-send-impl (%p-fh-arg ,fh) ,msg ,flags ,to)
+      `(%p-send-impl (%p-fh-arg ,fh) ,msg ,flags)))
+
+(defun %p-recv-impl (fh buf len flags)
+  "Perl recv(SOCK, SCALAR, LEN, FLAGS): receive up to LEN bytes into SCALAR;
+   return the sender's packed address (for a datagram) or '' for a connected
+   socket.  '' + $! on failure."
+  (declare (ignore flags))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-recv-impl ""))
+    (handler-case
+        (multiple-value-bind (data nbytes addr port)
+            (sb-bsd-sockets:socket-receive sock nil (max 0 (truncate (to-number len)))
+                                           :element-type 'character)
+          ;; socket-receive returns the whole allocated buffer plus the actual
+          ;; byte count — truncate to what was read (else the unfilled tail leaks).
+          (let ((s (if (stringp data) data (coerce data 'string))))
+            (when (and (integerp nbytes) (<= 0 nbytes (length s)))
+              (setf s (subseq s 0 nbytes)))
+            (when (p-box-p buf) (box-set buf s)))
+          (if (and addr (not (every #'zerop addr)))
+              (%p-pack-sockaddr-in addr port)
+              ""))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-recv (fh buf len flags)
+  "Perl recv — bareword filehandle is auto-quoted; the buffer is written through."
+  `(%p-recv-impl (%p-fh-arg ,fh) ,buf ,len ,flags))
+
+(defun %p-getsockname-impl (fh)
+  "Perl getsockname(SOCK): packed local address, or '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-getsockname-impl ""))
+    (handler-case
+        (multiple-value-bind (addr port) (sb-bsd-sockets:socket-name sock)
+          (%p-pack-sockaddr-in addr port))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-getsockname (fh)
+  "Perl getsockname — bareword filehandle is auto-quoted."
+  `(%p-getsockname-impl (%p-fh-arg ,fh)))
+
+(defun %p-getpeername-impl (fh)
+  "Perl getpeername(SOCK): packed peer address, or '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-getpeername-impl ""))
+    (handler-case
+        (multiple-value-bind (addr port) (sb-bsd-sockets:socket-peername sock)
+          (%p-pack-sockaddr-in addr port))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-getpeername (fh)
+  "Perl getpeername — bareword filehandle is auto-quoted."
+  `(%p-getpeername-impl (%p-fh-arg ,fh)))
+
+(defun p-getprotobyname (name)
+  "Perl getprotobyname(NAME): the protocol number.  Real code only ever asks for
+   tcp/udp/icmp; a tiny static table suffices."
+  (let ((n (string-downcase (to-string name))))
+    (cond ((string= n "tcp") 6)
+          ((string= n "udp") 17)
+          ((string= n "icmp") 1)
+          ((string= n "ip") 0)
+          (t *p-undef*))))
+
+(defun %p-setsockopt-impl (fh level optname optval)
+  "Perl setsockopt(SOCK, LEVEL, OPTNAME, OPTVAL).  Only SO_REUSEADDR (the one real
+   server code uses) is wired; others succeed as no-ops.  1 on success, '' + $!."
+  (declare (ignore level))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-setsockopt-impl ""))
+    (handler-case
+        (progn
+          (when (= (truncate (to-number optname)) 2)        ; SO_REUSEADDR
+            (setf (sb-bsd-sockets:sockopt-reuse-address sock)
+                  (/= 0 (truncate (to-number optval)))))
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-setsockopt (fh level optname optval)
+  "Perl setsockopt — bareword filehandle is auto-quoted."
+  `(%p-setsockopt-impl (%p-fh-arg ,fh) ,level ,optname ,optval))
+
+(defun %p-getsockopt-impl (fh level optname)
+  "Perl getsockopt(SOCK, LEVEL, OPTNAME): return the option value packed as a
+   native int.  Only SO_REUSEADDR is wired; others read 0."
+  (declare (ignore level))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-getsockopt-impl ""))
+    (handler-case
+        (let ((v (if (= (truncate (to-number optname)) 2)
+                     (if (sb-bsd-sockets:sockopt-reuse-address sock) 1 0)
+                     0)))
+          ;; pack 'i' — native 4-byte int, little-endian on x86-64.
+          (let ((s (make-string 4 :initial-element #\Nul)))
+            (setf (char s 0) (code-char (logand v #xff))
+                  (char s 1) (code-char (logand (ash v -8) #xff))
+                  (char s 2) (code-char (logand (ash v -16) #xff))
+                  (char s 3) (code-char (logand (ash v -24) #xff)))
+            s))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-getsockopt (fh level optname)
+  "Perl getsockopt — bareword filehandle is auto-quoted."
+  `(%p-getsockopt-impl (%p-fh-arg ,fh) ,level ,optname))
+
+(defun %p-socketpair-impl (fh1 fh2 domain type protocol)
+  "Perl socketpair(S1, S2, DOMAIN, TYPE, PROTOCOL).  sb-bsd-sockets has no direct
+   socketpair; emulate an AF_UNIX/AF_INET stream pair over a bound loopback
+   listener so S1<->S2 are connected.  1 on success, '' + $!."
+  (declare (ignore domain type protocol))
+  (handler-case
+      (let ((srv (make-instance 'sb-bsd-sockets:inet-socket :type :stream :protocol :tcp)))
+        (setf (sb-bsd-sockets:sockopt-reuse-address srv) t)
+        (sb-bsd-sockets:socket-bind srv #(127 0 0 1) 0)
+        (sb-bsd-sockets:socket-listen srv 1)
+        (multiple-value-bind (host port) (sb-bsd-sockets:socket-name srv)
+          (declare (ignore host))
+          (let ((a (make-instance 'sb-bsd-sockets:inet-socket :type :stream :protocol :tcp)))
+            (sb-bsd-sockets:socket-connect a #(127 0 0 1) port)
+            (let ((b (sb-bsd-sockets:socket-accept srv)))
+              (ignore-errors (sb-bsd-sockets:socket-close srv))
+              (%p-install-fh fh1 a)
+              (%p-install-fh fh2 b)
+              1))))
+    (error () (%pcl-save-errno) "")))
+
+(defmacro p-socketpair (fh1 fh2 domain type protocol)
+  "Perl socketpair — both filehandles are auto-quoted."
+  `(%p-socketpair-impl (%p-fh-arg ,fh1) (%p-fh-arg ,fh2) ,domain ,type ,protocol))
 
 (defun %p-stat-vector (st)
   "Build Perl's 13-element stat list from an sb-posix stat struct.  Times are
@@ -7455,106 +7867,239 @@ buffer's fill-pointer; everything else falls back to file-length."
    Updates $. (input line number) on each successful read."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
-    ;; Remember the handle so a later argument-less `eof` tests THIS stream.
+    ;; Remember the handle so a later argument-less `eof` tests THIS stream and
+    ;; $. reports THIS handle's line counter.
     (when stream (setf *p-last-read-handle* stream))
-    (when stream
-      (handler-case
-          (cond
-            ;; Slurp mode: $/ = undef - read entire file
-            ((null sep)
-             (let ((content (make-array 4096 :element-type 'character
-                                        :adjustable t :fill-pointer 0)))
-               (loop for char = (read-char stream nil nil)
-                     while char
-                     do (vector-push-extend char content))
-               (if (zerop (length content)) nil (coerce content 'string))))
+    (let ((%rl-result
+           (when stream
+             (handler-case
+                 (cond
+                   ;; Slurp mode: $/ = undef - read entire file
+                   ((null sep)
+                    (let ((content (make-array 4096 :element-type 'character
+                                               :adjustable t :fill-pointer 0)))
+                      (loop for char = (read-char stream nil nil)
+                            while char
+                            do (vector-push-extend char content))
+                      (if (zerop (length content)) nil (coerce content 'string))))
 
-            ;; Record mode: $/ = \N - read exactly N characters per record.
-            ((integerp sep)
-             (let* ((buf (make-string sep))
-                    (got (read-sequence buf stream)))
-               (if (zerop got) nil (subseq buf 0 got))))
+                   ;; Record mode: $/ = \N - read exactly N characters per record.
+                   ((integerp sep)
+                    (let* ((buf (make-string sep))
+                           (got (read-sequence buf stream)))
+                      (if (zerop got) nil (subseq buf 0 got))))
 
-            ;; Paragraph mode: $/ = "" - read until blank line
-            ((string= sep "")
-             (let ((lines nil)
-                   (seen-content nil)
-                   (last-missing-nl nil))
-               (loop
-                (multiple-value-bind (line missing-nl) (read-line stream nil nil)
-                  (cond
-                    ((null line)
-                     ;; EOF: rebuild the record.  Only append the final newline
-                     ;; if the last content line actually had one — a file whose
-                     ;; last line lacks a trailing newline keeps it that way
-                     ;; (Perl does not invent one).
-                     (return
-                       (if lines
-                           (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
-                             (if last-missing-nl
-                                 body
-                                 (concatenate 'string body (string #\Newline))))
-                           nil)))
-                    ((string= line "")
-                     (if seen-content
-                         (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
-                         nil))  ; Skip leading blank lines
-                    (t
-                     (setf seen-content t
-                           last-missing-nl missing-nl)
-                     (push line lines)))))))
+                   ;; Paragraph mode: $/ = "" - read until blank line
+                   ((string= sep "")
+                    (let ((lines nil)
+                          (seen-content nil)
+                          (last-missing-nl nil))
+                      (loop
+                       (multiple-value-bind (line missing-nl) (read-line stream nil nil)
+                         (cond
+                           ((null line)
+                            ;; EOF: rebuild the record.  Only append the final newline
+                            ;; if the last content line actually had one — a file whose
+                            ;; last line lacks a trailing newline keeps it that way
+                            ;; (Perl does not invent one).
+                            (return
+                              (if lines
+                                  (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
+                                    (if last-missing-nl
+                                        body
+                                        (concatenate 'string body (string #\Newline))))
+                                  nil)))
+                           ((string= line "")
+                            (if seen-content
+                                (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
+                                nil))  ; Skip leading blank lines
+                           (t
+                            (setf seen-content t
+                                  last-missing-nl missing-nl)
+                            (push line lines)))))))
 
-            ;; Single character separator (common case, optimized)
-            ((= (length sep) 1)
-             (let ((sep-char (char sep 0))
-                   (result (make-array 256 :element-type 'character
-                                       :adjustable t :fill-pointer 0)))
-               (loop for char = (read-char stream nil nil)
-                     while char
-                     do (vector-push-extend char result)
-                     when (char= char sep-char)
-                     do (loop-finish))
-               (if (zerop (length result)) nil (coerce result 'string))))
+                   ;; Single character separator (common case, optimized)
+                   ((= (length sep) 1)
+                    (let ((sep-char (char sep 0))
+                          (result (make-array 256 :element-type 'character
+                                              :adjustable t :fill-pointer 0)))
+                      (loop for char = (read-char stream nil nil)
+                            while char
+                            do (vector-push-extend char result)
+                            when (char= char sep-char)
+                            do (loop-finish))
+                      (if (zerop (length result)) nil (coerce result 'string))))
 
-            ;; Multi-character separator
-            (t
-             (let ((result (make-array 256 :element-type 'character
-                                       :adjustable t :fill-pointer 0))
-                   (sep-len (length sep)))
-               (loop for char = (read-char stream nil nil)
-                     while char
-                     do (vector-push-extend char result)
-                     when (and (>= (length result) sep-len)
-                               (string= result sep
-                                        :start1 (- (length result) sep-len)))
-                     do (loop-finish))
-               (if (zerop (length result)) nil (coerce result 'string)))))
-        ;; Any stream error (e.g. reading from a directory) → return nil like Perl
-        (stream-error () nil)
-        (error () nil)))))
+                   ;; Multi-character separator
+                   (t
+                    (let ((result (make-array 256 :element-type 'character
+                                              :adjustable t :fill-pointer 0))
+                          (sep-len (length sep)))
+                      (loop for char = (read-char stream nil nil)
+                            while char
+                            do (vector-push-extend char result)
+                            when (and (>= (length result) sep-len)
+                                      (string= result sep
+                                               :start1 (- (length result) sep-len)))
+                            do (loop-finish))
+                      (if (zerop (length result)) nil (coerce result 'string)))))
+               ;; Any stream error (e.g. reading from a directory) → return nil like Perl
+               (stream-error () nil)
+               (error () nil)))))
+      ;; A successful record read bumps THIS handle's line counter ($.).
+      (when (and stream %rl-result)
+        (incf (gethash stream *p-fh-lines* 0)))
+      %rl-result)))
 
 (defun %p-readline-all (fh)
   "Read all remaining records from FH into an adjustable vector of boxed strings.
-   Updates $. for each line. Used by p-readline in list context."
+   %p-readline-impl bumps $. (the per-handle line counter) on each read."
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (loop
      (let ((line (%p-readline-impl fh)))
        (if line
-           (progn
-             (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|)))))
-             (vector-push-extend (make-p-box line) result))
+           (vector-push-extend (make-p-box line) result)
            (return result))))))
+
+;;; ----------------------------------------------------------------
+;;; Diamond operator <> / <ARGV>: read records across the files named in
+;;; @ARGV, falling back to STDIN when @ARGV is empty.  $ARGV holds the current
+;;; filename ("-" for STDIN).  Unlike a plain filehandle, $. is *cumulative*
+;;; across the @ARGV files (Perl never implicitly closes ARGV), so when we move
+;;; to the next file we seed its line counter with the previous file's count.
+(declaim (special @ARGV $ARGV |$^I|))
+(defvar *p-argv-stream* nil "Currently-open <> input stream, or nil before/after.")
+(defvar *p-argv-started* nil "T once <> has begun consuming @ARGV (or chosen STDIN).")
+(defvar *p-argv-last-count* 0 "Cumulative $. carried from the previous <> file.")
+
+;;; In-place editing ($^I / perl -i): while <> reads a real file, the default
+;;; output (print/printf with no handle, i.e. *standard-output*) is redirected
+;;; to a temp file; when that file is finished the temp replaces the original
+;;; (renaming the original to a backup first when $^I carries an extension).
+;;; STDIN ("-") is never edited in place.
+(defvar *p-inplace-out* nil "Temp output stream for in-place editing of the current <> file.")
+(defvar *p-inplace-orig* nil "Original path of the file being edited in place.")
+(defvar *p-inplace-tmp* nil "Temp file path used for in-place editing.")
+(defvar *p-inplace-saved-out* nil "*standard-output* saved across an in-place edit.")
+
+(defun %p-inplace-ext ()
+  "Backup extension string if $^I is defined (\"\" = edit with no backup), else
+   nil (in-place editing off)."
+  (let ((v (unbox |$^I|)))
+    (if (or (null v) (eq v *p-undef*)) nil (to-string v))))
+
+(defun %p-inplace-begin (orig-path)
+  "Redirect default output to a fresh temp file alongside ORIG-PATH."
+  (let* ((tmp (format nil "~A.pcl-inplace-~36,8,'0R" orig-path (random (expt 36 8))))
+         (out (open tmp :direction :output :if-exists :supersede
+                    :if-does-not-exist :create)))
+    (setf *p-inplace-orig* orig-path
+          *p-inplace-tmp* tmp
+          *p-inplace-out* out
+          *p-inplace-saved-out* *standard-output*
+          *standard-output* out)))
+
+(defun %p-inplace-finish ()
+  "Close the redirected output, restore *standard-output*, back up the original
+   when $^I has an extension, then move the temp file over the original.  No-op
+   when no in-place edit is active."
+  (when *p-inplace-out*
+    (close *p-inplace-out*)
+    (setf *standard-output* *p-inplace-saved-out*)
+    (let ((ext (%p-inplace-ext)) (orig *p-inplace-orig*) (tmp *p-inplace-tmp*))
+      (if (and ext (plusp (length ext)))
+          ;; '*' in the extension is replaced by the original name; else appended.
+          (let ((backup (if (find #\* ext)
+                            (with-output-to-string (s)
+                              (loop for ch across ext
+                                    do (if (char= ch #\*) (write-string orig s)
+                                           (write-char ch s))))
+                            (concatenate 'string orig ext))))
+            ;; If the backup rename fails, Perl skips the file: leave the
+            ;; original untouched and discard the edited temp.
+            (handler-case
+                (progn (sb-posix:rename orig backup)
+                       (sb-posix:rename tmp orig))
+              (error ()
+                (p-warn (format nil "Can't rename ~A to ~A: No such file or directory, skipping file"
+                                orig backup))
+                (ignore-errors (delete-file tmp)))))
+          (ignore-errors (sb-posix:rename tmp orig)))) ; no backup: replace original
+    (setf *p-inplace-out* nil *p-inplace-orig* nil
+          *p-inplace-tmp* nil *p-inplace-saved-out* nil)))
+
+(defun %p-argv-open-next ()
+  "Shift the next filename off @ARGV, open it, set $ARGV, and return its stream.
+   Empty @ARGV on the first call yields STDIN.  Unopenable files warn and are
+   skipped (Perl behaviour).  Returns nil when the file sequence is exhausted."
+  (loop
+   (when (zerop (length @ARGV))
+     (return
+       (cond
+         (*p-argv-started* nil)                       ; all files consumed
+         (t (setf *p-argv-started* t)                 ; bare <> with empty @ARGV
+            (box-set $ARGV "-")
+            *standard-input*))))
+   (setf *p-argv-started* t)
+   (let ((fname (to-string (unbox (p-shift @ARGV)))))
+     (box-set $ARGV fname)
+     (cond
+       ((string= fname "-") (return *standard-input*))
+       (t (let ((s (ignore-errors
+                     (open fname :direction :input :if-does-not-exist nil))))
+            (cond
+              ((null s)
+               (p-warn (format nil "Can't open ~A: No such file or directory"
+                               fname)))                ; skip to next file
+              (t (when (%p-inplace-ext) (%p-inplace-begin fname))
+                 (return s)))))))))
+
+(defun %p-readline-argv ()
+  "Scalar-context <> : read one record across the @ARGV file sequence."
+  (loop
+   (unless *p-argv-stream*
+     (setf *p-argv-stream* (%p-argv-open-next))
+     (unless *p-argv-stream* (return nil))
+     ;; Seed the new file's $. with the cumulative count from prior files.
+     (setf (gethash *p-argv-stream* *p-fh-lines*) *p-argv-last-count*))
+   (let ((line (%p-readline-impl *p-argv-stream*)))   ; sets last-handle, bumps $.
+     (setf *p-argv-last-count* (gethash *p-argv-stream* *p-fh-lines* 0))
+     (if line
+         (return line)
+         (progn                                        ; current file at EOF
+           (when (not (eq *p-argv-stream* *standard-input*))
+             (ignore-errors (close *p-argv-stream*)))
+           (%p-inplace-finish)                          ; commit in-place edit (if any)
+           (setf *p-argv-stream* nil))))))             ; advance on next turn
+
+(defun %p-readline-argv-all ()
+  "List-context <> : read every remaining record across @ARGV into a vector."
+  (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+    (loop
+     (let ((line (%p-readline-argv)))
+       (if line
+           (vector-push-extend (make-p-box line) result)
+           (return result))))))
+
+(defun %p-readline-argv-form-p (form)
+  "True if FORM is the diamond marker (quote ARGV) emitted by codegen for <ARGV>."
+  (and (consp form) (eq (car form) 'quote)
+       (symbolp (cadr form))
+       (string-equal (symbol-name (cadr form)) "ARGV")))
 
 (defmacro p-readline (&rest args)
   "Perl readline / <FH> — in list context reads all records; in scalar reads one.
    When *p-in-list-assign-rhs* is t (inside p-list-= RHS), always use scalar mode
-   so that while (($x) = <FH>) reads one line per iteration, not the whole file."
-  `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
-       (%p-readline-all ,(if args (car args) nil))
-       (let ((%rl-val (%p-readline-impl ,@args)))
-         (when %rl-val
-           (box-set |$.| (make-p-box (1+ (to-number (unbox |$.|))))))
-         %rl-val)))
+   so that while (($x) = <FH>) reads one line per iteration, not the whole file.
+   No filehandle (<>) or the bareword ARGV (<ARGV>) is the diamond operator.
+   %p-readline-impl bumps $. (per-handle line counter) on each successful read."
+  (if (or (null args) (%p-readline-argv-form-p (car args)))
+      `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
+           (%p-readline-argv-all)
+           (%p-readline-argv))
+      `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
+           (%p-readline-all ,(car args))
+           (%p-readline-impl ,@args))))
 
 ;;; ============================================================
 ;;; Directory I/O Functions
@@ -7931,6 +8476,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-time ()
   "Perl time - return seconds since Unix epoch."
   (- (get-universal-time) +unix-epoch-offset+))
+
+;;; $^T (BASETIME) - the time the program started, as Unix seconds.  Used by the
+;;; -M/-A/-C file-test operators (file age relative to program start).  Set once
+;;; at load time, like Perl sets it at interpreter startup.
+(defvar |$^T| (- (get-universal-time) +unix-epoch-offset+)
+  "Perl $^T - program start time (seconds since Unix epoch)")
 
 (defun p-times (&key wantarray)
   "Perl times - return process times (user, system, child-user, child-system).
@@ -8351,6 +8902,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                     :initial-contents args)
         (make-array 0 :adjustable t :fill-pointer 0)))
   "Perl @ARGV - command line arguments")
+
+;; $ARGV: name of the file currently being read by the <> (diamond) operator.
+(defvar $ARGV (make-p-box *p-undef*)
+  "Perl $ARGV - current filename of the <> diamond operator (\"-\" for STDIN)")
 
 ;; Cache configuration
 (defparameter *pcl-cache-dir*
