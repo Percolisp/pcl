@@ -404,4 +404,32 @@ my @x; my $z = $x[0]--;
 printf "z=%s x0=%s\n", (defined $z ? $z : "undef"), $x[0];
 ');
 
+# Nested compound-assignment lvalue chains: each compound op returns its LHS as
+# an lvalue, so the place form is shared.  The runtime must evaluate the place
+# exactly once per op — otherwise the inner assignment re-runs and the result
+# grows exponentially.  (opbasic/concat.t test 242.)
+test_transpile("nested .= lvalue chain evaluates place once", '
+my $a = "a";
+(($a .= $a) .= $a) .= $a;
+print "$a\n";
+');
+test_transpile("nested += lvalue chain evaluates place once", '
+my $n = 1;
+(($n += $n) += $n) += $n;
+print "$n\n";
+');
+
+# CORE::<declarator> in expression context (CORE::my / CORE::state) names the
+# bare declarator (PCL has no overridable builtins).  Without normalization it
+# parsed as a function call and crashed.  (opbasic/concat.t.)
+test_transpile("CORE::my declarator in expression context", '
+my $h = { a => 1 };
+print ref(CORE::my $x = $h), "\n";
+');
+test_transpile("CORE::state declarator in expression context", '
+use feature "state";
+sub f { my $r = (CORE::state $y = 7); $y }
+print f(), f(), "\n";
+');
+
 done_testing();

@@ -3984,26 +3984,33 @@
       `(setf ,place ,new)
       `(box-set ,place ,new)))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %store-back-form (place build)
+    "Build a read-modify-write expansion that evaluates PLACE exactly once.
+     BUILD is a function of one argument — a form that reads the current place —
+     returning the new-value form.  For a boxed scalar place, PLACE is bound to a
+     temp box once and BUILD reads through that temp, so a nested compound-assign
+     lvalue chain like (($a .= $a) .= $a) runs PLACE's side effects only once
+     (otherwise each textual reference to PLACE re-ran the inner assignment,
+     growing the result exponentially).  For accessor places ($h{k}/$a[i]/derefs)
+     SETF is used on the syntactic place form."
+    (if (%p-accessor-place-p place)
+        `(setf ,place ,(funcall build place))
+        (let ((b (gensym "PLACE")))
+          `(let ((,b ,place))
+             (box-set ,b ,(funcall build b)))))))
+
 (defmacro p-incf (place &optional (delta 1))
-  "Perl += - works on boxed values, hash/array elements, and derefs"
-  (if (and (listp place)
-           (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element (returns a raw value, not a box).  Coerce the current
-      ;; value through to-number BEFORE adding: an absent key/slot reads as
-      ;; *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
-      `(setf ,place (+ (to-number ,place) (to-number ,delta)))
-      ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
-      `(box-set ,place (+ (to-number ,place) (to-number ,delta)))))
+  "Perl += - works on boxed values, hash/array elements, and derefs.
+   Coerce the current value through to-number BEFORE adding: an absent key/slot
+   reads as *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
+   PLACE is evaluated once (see %store-back-form)."
+  (%store-back-form place (lambda (cur) `(+ (to-number ,cur) (to-number ,delta)))))
 
 (defmacro p-decf (place &optional (delta 1))
-  "Perl -= - works on boxed values, hash/array elements, and derefs"
-  (if (and (listp place)
-           (member (car place) '(p-gethash p-aref p-gethash-deref p-aref-deref)))
-      ;; Hash/array element — coerce the current value (undef → 0) before
-      ;; subtracting; see p-incf.
-      `(setf ,place (- (to-number ,place) (to-number ,delta)))
-      ;; Boxed scalar or scalar deref (p-$ / p-cast-$): read numerically, write back
-      `(box-set ,place (- (to-number ,place) (to-number ,delta)))))
+  "Perl -= - works on boxed values, hash/array elements, and derefs.
+   PLACE is evaluated once (see %store-back-form)."
+  (%store-back-form place (lambda (cur) `(- (to-number ,cur) (to-number ,delta)))))
 
 (defun magical-string-increment (s)
   "Perl's magical string increment: 'a0' -> 'a1', 'Az' -> 'Ba', 'zz' -> 'aaa'"
@@ -4192,54 +4199,59 @@
 
 (defmacro p-*= (place value)
   "Perl *= (multiply-assign)"
-  `(%p-store-back ,place (* (to-number ,place) (to-number ,value))))
+  (%store-back-form place (lambda (cur) `(* (to-number ,cur) (to-number ,value)))))
 
 (defmacro p-/= (place value)
   "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
   a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
-  `(%p-store-back ,place (p-/ ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-/ ,cur ,value))))
 
 (defmacro p-%= (place value)
   "Perl %= (modulo-assign)"
-  `(%p-store-back ,place (mod (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  (%store-back-form place
+                    (lambda (cur) `(mod (truncate (to-number ,cur)) (truncate (to-number ,value))))))
 
 (defmacro p-**= (place value)
   "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
   float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
-  `(%p-store-back ,place (p-** ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-** ,cur ,value))))
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign)"
-  `(%p-store-back ,place (concatenate 'string (to-string ,place) (to-string ,value))))
+  (%store-back-form place
+                    (lambda (cur) `(concatenate 'string (to-string ,cur) (to-string ,value)))))
 
 (defmacro p-str-x= (place value)
   "Perl x= (repeat-assign)"
-  (let ((s (gensym "S"))
-        (n (gensym "N")))
-    `(let ((,s (to-string ,place))
-           (,n (truncate (to-number ,value))))
-       (%p-store-back ,place (if (<= ,n 0) ""
-                                 (apply #'concatenate 'string (make-list ,n :initial-element ,s)))))))
+  (let ((n (gensym "N")))
+    (%store-back-form place
+                      (lambda (cur)
+                        `(let ((,n (truncate (to-number ,value))))
+                           (if (<= ,n 0) ""
+                               (apply #'concatenate 'string
+                                      (make-list ,n :initial-element (to-string ,cur)))))))))
 
 (defmacro p-bit-and= (place value)
   "Perl &= (bitwise-and-assign)"
-  `(%p-store-back ,place (p-bit-and ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-bit-and ,cur ,value))))
 
 (defmacro p-bit-or= (place value)
   "Perl |= (bitwise-or-assign)"
-  `(%p-store-back ,place (p-bit-or ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-bit-or ,cur ,value))))
 
 (defmacro p-bit-xor= (place value)
   "Perl ^= (bitwise-xor-assign)"
-  `(%p-store-back ,place (p-bit-xor ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-bit-xor ,cur ,value))))
 
 (defmacro p-<<= (place value)
   "Perl <<= (left-shift-assign)"
-  `(%p-store-back ,place (ash (truncate (to-number ,place)) (truncate (to-number ,value)))))
+  (%store-back-form place
+                    (lambda (cur) `(ash (truncate (to-number ,cur)) (truncate (to-number ,value))))))
 
 (defmacro p->>= (place value)
   "Perl >>= (right-shift-assign)"
-  `(%p-store-back ,place (ash (truncate (to-number ,place)) (- (truncate (to-number ,value))))))
+  (%store-back-form place
+                    (lambda (cur) `(ash (truncate (to-number ,cur)) (- (truncate (to-number ,value)))))))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;

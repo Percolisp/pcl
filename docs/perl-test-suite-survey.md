@@ -175,6 +175,41 @@ NEXT t/re: triage the partials (`reg_pmod` 59/88, `reg_posixcc` 1544/2560,
 now documented not-supported, see above.) The `re_tests`-driven `regexp*.t`
 family still needs the `re_tests` fixture wired (separate effort).
 
+## t/opbasic — minimal-dependency op tests (surveyed 2026-06-27)
+
+`t/opbasic` holds op tests written to avoid the full harness. All use
+`test.pl`, so run with CWD = perl's `t/`.
+
+| file | P | C | status |
+|------|---|---|--------|
+| `arith.t` | 183 | 183/0 | ✅ |
+| `cmp.t` | 12078 | 12078/0 | ✅ |
+| `qq.t` | 30 | 30/0 | ✅ |
+| `concat.t` | 254 | **247/7** | 🐞→🟡 (2026-06-27): two real bugs fixed; remaining 7 are not-supported buckets |
+| `magic_phase.t` | 7 | 0/7 | 🚧 `${^GLOBAL_PHASE}` phase tracking + CHECK/INIT phasers + DESTROY-via-GC — not-supported bucket |
+
+**`concat.t` 31→247 (2026-06-27).** Two genuinely fixable bugs:
+- 🐞→✅ **`CORE::<declarator>` in expression context crashed.**
+  `ref(CORE::state $y = …)` parsed `CORE::state` as a function call → undefined
+  `pl-state`/`p-UNDEFINED` abort that killed ~215 remaining tests. Fix:
+  `extract_declarations` (`Pl/PExpr.pm`) now accepts an optional `CORE::` prefix
+  on `my`/`our`/`state`/`local` (PCL has no overridable builtins, so
+  `CORE::<declarator>` == the bare declarator). Guard:
+  `Pl/t/transpile-test-03.t`.
+- 🐞→✅ **Compound-assign operators double-evaluated their place.**
+  `(($a .= $a) .= $a) .= $a` gave 128 a's instead of 8: every compound-assign
+  macro (`p-.=`, `p-*=`, `p-incf`, `p-str-x=`, …) textually expanded `place`
+  2+ times, so a nested lvalue chain (each `.=` returns its LHS as an lvalue)
+  re-ran the inner assignment exponentially. Fixed at the shared point with a new
+  `%store-back-form` helper (`cl/pcl-runtime.lisp`) that binds a box place to a
+  temp once; all compound-assign macros now route through it. Guard:
+  `Pl/t/transpile-test-03.t`.
+
+Remaining 7 `concat.t` fails are not-supported / niche: `use bytes` (23–24),
+overloaded `.` fired by string interpolation (34), deref-assign through a `qr//`
+ref (236), `@_` element aliasing / PVLV (237), typeglob string concat-alias
+(239), tie arg-evaluation order (253).
+
 ## t/io — I/O (started 2026-06-25; run with CWD = perl's `t/`)
 
 All 44 files use `test.pl` (+ `chdir 't'`, a no-op when already in `t/`), so the
