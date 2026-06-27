@@ -147,7 +147,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+|
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
@@ -8112,6 +8112,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-time ()
   "Perl time - return seconds since Unix epoch."
   (- (get-universal-time) +unix-epoch-offset+))
+
+;;; $^T (BASETIME) - the time the program started, as Unix seconds.  Used by the
+;;; -M/-A/-C file-test operators (file age relative to program start).  Set once
+;;; at load time, like Perl sets it at interpreter startup.
+(defvar |$^T| (- (get-universal-time) +unix-epoch-offset+)
+  "Perl $^T - program start time (seconds since Unix epoch)")
 
 (defun p-times (&key wantarray)
   "Perl times - return process times (user, system, child-user, child-system).

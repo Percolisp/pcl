@@ -210,6 +210,26 @@ overloaded `.` fired by string interpolation (34), deref-assign through a `qr//`
 ref (236), `@_` element aliasing / PVLV (237), typeglob string concat-alias
 (239), tie arg-evaluation order (253).
 
+## t/op extras (not in `perl-tests/`) — surveyed 2026-06-27
+
+`op/lex_assign.t` (353 perl ok) reached **348** after two fixes; remaining 5 are
+not-supported buckets (DESTROY-via-GC reassignment, `select`/`utime` arg-count
+error-message detection, `getpriority` — a niche unimplemented POSIX builtin).
+Two genuinely fixable bugs found here:
+- 🐞→✅ **`$^T` (BASETIME) was unbound** → `localtime $^T` / `gmtime $^T` aborted.
+  Added the special var: `|$^T|` defvar (program start, Unix seconds) in
+  `cl/pcl-runtime.lisp` + `:export`, and `'$^T'` in `%SPECIAL_VARS`
+  (`Pl/ExprToCL.pm`). Used by the `-M`/`-A`/`-C` file-test operators.
+- 🐞→✅ **`\u\L` / `\l\U` case-escape composition was inverted.** `"\u\L$a"`
+  (and `"\L\u$a"`) gave `lc(ucfirst($a))` = "ab" instead of `ucfirst(lc($a))`
+  = "Ab": the one-shot `\u`/`\l` leaked *inside* the `\L`/`\U` span and wrapped
+  the first element, so the span's `lc`/`uc` then overrode it. Fix
+  (`Pl/PExpr/StringInterpolation.pm`): a `\u`/`\l` that opens before a span, or
+  at the very start of one, is stashed as the span's `outer_char` and applied to
+  the span's OUTPUT at close. Guard: `Pl/t/case-invert-01.t`. (Known remaining
+  gap: a `\u` *mid*-span, `"\Lfoo\uBar"`, still lowercases the protected char —
+  needs per-character span handling; rare.)
+
 ## t/io — I/O (started 2026-06-25; run with CWD = perl's `t/`)
 
 All 44 files use `test.pl` (+ `chdir 't'`, a no-op when already in `t/`), so the

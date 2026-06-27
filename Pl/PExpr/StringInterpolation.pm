@@ -92,9 +92,13 @@ sub parse_interpolated_string {
             $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
             # Wrap group's parts in the appropriate function
             my $wrapped = $self->_wrap_case_group($parser, $group);
-            if ($pending_char_transform) {
+            # A \u/\l that opened before this group (\u\L...\E) applies to the
+            # group's output.  A \u/\l still pending here appeared with no
+            # following content inside the group; apply it to the output too.
+            my $oc = $group->{outer_char} || $pending_char_transform;
+            if ($oc) {
               $wrapped = $self->_wrap_case_func($parser,
-                $pending_char_transform eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
+                $oc eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
               $pending_char_transform = undef;
             }
             push @$cur_parts, $wrapped;
@@ -102,11 +106,27 @@ sub parse_interpolated_string {
           # \E also cancels any pending \u or \l with no content
           $pending_char_transform = undef;
         } elsif ($case_cmd eq 'u' || $case_cmd eq 'l') {
-          $pending_char_transform = $case_cmd;
+          # A \u/\l at the very START of an open \U/\L group ("\L\u$x") modifies
+          # the first character of the group's OUTPUT — ucfirst(lc($x)), not
+          # lc(ucfirst($x)) (the group's lc would otherwise override the inner
+          # ucfirst).  Record it on the group like the \u\L case above.
+          # (A mid-group \u still applies to the next character locally.)
+          if (@case_stack && @{$case_stack[-1]{parts}} == 0
+              && !$case_stack[-1]{outer_char}) {
+            $case_stack[-1]{outer_char} = $case_cmd;
+          } else {
+            $pending_char_transform = $case_cmd;
+          }
         } else {
-          # \U, \L, \Q, \F — push a new group
+          # \U, \L, \Q, \F — push a new group.  A pending \u/\l (e.g. the common
+          # \u\L idiom) applies to the FIRST CHARACTER OF THE GROUP'S OUTPUT, not
+          # to the first element inside it: "\u\L$a" is ucfirst(lc($a)), not
+          # lc(ucfirst($a)).  Stash it on the group so it wraps the result when
+          # the group closes, and clear it so it doesn't leak onto the contents.
           my $new_parts = [];
-          push @case_stack, { mode => $case_cmd, parts => $new_parts };
+          push @case_stack, { mode => $case_cmd, parts => $new_parts,
+                              outer_char => $pending_char_transform };
+          $pending_char_transform = undef;
           $cur_parts = $new_parts;
         }
         next;
@@ -139,6 +159,11 @@ sub parse_interpolated_string {
     my $group = pop @case_stack;
     $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
     my $wrapped = $self->_wrap_case_group($parser, $group);
+    # Apply a \u/\l that opened before this group (\u\L$a with no closing \E).
+    if ($group->{outer_char}) {
+      $wrapped = $self->_wrap_case_func($parser,
+        $group->{outer_char} eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
+    }
     push @$cur_parts, $wrapped;
   }
   

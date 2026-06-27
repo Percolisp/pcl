@@ -432,4 +432,11 @@ sub f { my $r = (CORE::state $y = 7); $y }
 print f(), f(), "\n";
 ');
 
+# $^T (BASETIME) is the program start time in Unix seconds — must be a sane
+# positive epoch value, not an unbound variable.  (op/lex_assign.t.)
+test_transpile("\$^T is a positive epoch value", '
+print(($^T > 1000000000 ? "yes" : "no"), "\n");
+print((localtime($^T))[5] + 1900 >= 2020 ? "ok\n" : "bad\n");
+');
+
 done_testing();
