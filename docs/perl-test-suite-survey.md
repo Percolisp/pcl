@@ -210,6 +210,60 @@ overloaded `.` fired by string interpolation (34), deref-assign through a `qr//`
 ref (236), `@_` element aliasing / PVLV (237), typeglob string concat-alias
 (239), tie arg-evaluation order (253).
 
+## t/op extras (not in `perl-tests/`) — survey continued 2026-06-28
+
+**Runner fix (2026-06-28):** `tools/run-perl-suite.pl` now runs sbcl with
+CWD = perl's `t/` dir (it previously didn't `cd`, so every `test.pl`-dependent
+file reported a *false* `crash:simple-error`). Re-run any earlier op row.
+
+Batch-surveyed ~25 `t/op` files via the fixed runner. Most divergences are
+already-documented not-supported buckets — **do not re-triage**:
+- warning-*emission/text* detection (`numify.t` all 12 fails = "Argument isn't
+  numeric"; `protowarn.t`; `redef.t`), invalid-Perl rejection (`my.t` 51-57 =
+  `my $x if 0`; `mydef.t` = `my $_`), `@_`/element aliasing + SV-identity
+  (`repeat.t` 46-47, `delete.t` 26/54/56), tie (`repeat.t` 43), prototype
+  introspection (`gv.t`), `use B`/XS (`svflags.t`), `@INC` coderef hooks
+  (`do.t` test at line 238 → `do '/eval_do'` via a sub in `@INC`).
+
+| file | P | C | status |
+|------|---|---|--------|
+| `context.t` | 8 | 8/0 | ✅ |
+| `defined.t` | 5 | 5/0 | ✅ |
+| `dor.t` | 34 | 32/2 | 🚧 2 fails = "Search pattern not terminated" error-text |
+| `numify.t` | 32 | 4/12 | 🚧 all 12 = "isn't numeric" warning-emission |
+| `my.t` | 59 | 52/7 | 🚧 7 = `my $x if 0` invalid-Perl rejection |
+| `mydef.t` | 2 | 0/2 | 🚧 `my $_` invalid-Perl rejection |
+| `repeat.t` | 50 | 47/3 | 🚧 tie / @_ alias / lvalue-x aliasing |
+| `delete.t` | 56 | 53/3 | 🚧 SV-identity + element-free (GC) |
+| `each_array.t` | 65 | 64/1 | 🟡 test 24 = cross-`require` `$$` proto context (see below) |
+| `do.t` | 71 | 54+crash | 🚧 `@INC` coderef hook returning a filehandle |
+| `svflags.t` | 16 | crash | 🚧 `use B` (XS) |
+| `ref.t` | 257 | 172/65 | 🟡 65 = deref-error-text + glob FORMAT/IO slots + REGEXP-ref edge + DESTROY (all not-supported) |
+
+**🐞→✅ scalar `($)` prototype now imposes SCALAR context (e51b6fa).** A user
+sub with an old-style `$` prototype slot evaluates that argument in scalar
+context: `takes(@a)` yields the count, `one(keys %h)` the count, `is2(each
+@h,0)` the index — instead of flattening. Fix in `Pl/ExprToCL.pm` gen_funcall
+arg loop: `$` slot sets SCALAR_CTX on the node before gen_node (handles
+wantarray-sensitive `each`) and wraps non-obviously-scalar args (aggregates,
+`keys`/`values`) in `(p-scalar …)` (skips number/string/`$`-symbol literals to
+keep codegen clean). Guards: `transpile-test-03.t`; `bop-01.t` 1,3 exercise it.
+**Only fires for same-compilation-unit prototypes** — cross-`require`
+prototypes (perl's `test.pl` `is ($$@)`) aren't known at transpile time, so
+`each_array.t` test 24 still fails. Making `require`d prototypes visible at
+compile time is the remaining (larger) gap.
+
+**Crucial guard (else it breaks `test.pl`):** the scalar imposition only fires
+when the call supplies **≥ min_params** syntactic args. A call with fewer args
+than mandatory slots means an array is *flattening* to fill them — Perl does
+NOT scalarize it. The canonical case is `sub like ($$@) { like_yn(0, @_) }`
+where `like_yn ($$$@)` has 3 mandatory slots but the call passes 2 args; `@_`
+must spread, not collapse to its count. Without the guard, `@_` became
+`(p-scalar @_)` = 3 and every `test.pl`-based file crashed in `like()`. (Found
+because a *stale `~/.pcl-cache` entry* for the transpiled `test.pl` masked the
+fix until cleared — when codegen changes affect a `require`d module, clear
+`~/.pcl-cache`.)
+
 ## t/op extras (not in `perl-tests/`) — surveyed 2026-06-27
 
 `op/lex_assign.t` (353 perl ok) reached **348** after two fixes; remaining 5 are
