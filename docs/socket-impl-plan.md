@@ -1,8 +1,30 @@
 # Socket support — implementation plan (socket-only)
 
-**Status:** planned, not started. `<>`-diamond + `$^I` shipped 2026-06-27
-(commit 8a305a3); sockets are the next clean I/O item per
-`project_io_subprocess_features`.
+**Status:** ✅ SHIPPED 2026-06-27 (scope 1 — TCP — plus UNIX-domain + send/recv).
+AF_INET SOCK_STREAM client+server verified byte-identical to real perl in a
+single-process ephemeral-port loopback (`Pl/t/socket-01.t`). The full builtin set
+landed: `socket`/`bind`/`connect`/`listen`/`accept`/`send`/`recv`/`shutdown`/
+`getsockname`/`getpeername`/`getprotobyname`/`setsockopt`/`getsockopt`/
+`socketpair`, backed by `sb-bsd-sockets`; `lib/Socket.pm` ships the constants +
+pure-Perl `inet_aton`/`inet_ntoa`/`sockaddr_in`/`sockaddr_un` helpers. The
+filehandle layer lazily wraps a socket object in a cached bidirectional stream so
+`print $sock`/`<$sock>`/`syswrite`/`read`/`eof`/`close` all just work.
+
+**Known gaps (follow-ups, not blockers):**
+- `$sock->autoflush(1)` / other IO::Handle *methods* on a handle are unimplemented
+  (PCL sockets are `:buffering :none`, so flushing is moot, but the method call
+  itself errors — that is IO::Handle territory, separate feature).
+- `t/io/socket.t`'s server/client split uses real `fork`; our regression uses the
+  single-process pattern instead. The perl-file fork parts stay gated on fork.
+- `getsockopt` only wires SO_REUSEADDR; UDP `send`/`recv` with an explicit peer
+  addr work but are lightly tested.
+
+---
+
+## Original plan (kept for reference)
+
+`<>`-diamond + `$^I` shipped 2026-06-27 (commit 8a305a3); sockets were the next
+clean I/O item per `project_io_subprocess_features`.
 
 **De-risk (verified 2026-06-27):** SBCL's `sb-bsd-sockets` does a full
 single-process TCP loopback (server bind/listen + client connect + accept +

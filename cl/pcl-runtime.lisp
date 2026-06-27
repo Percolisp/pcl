@@ -12,6 +12,9 @@
 ;;; Load sb-posix for process ID
 (require :sb-posix)
 
+;;; Load sb-bsd-sockets for socket builtins (socket/bind/connect/accept/…)
+(require :sb-bsd-sockets)
+
 ;;; --- :invert spike (case-sensitivity experiment) -----------------------
 ;;; All third-party libs (cl-ppcre, asdf, sb-posix) are loaded ABOVE under the
 ;;; standard :upcase readtable.  From here on, read PCL's own runtime AND all
@@ -94,6 +97,10 @@
    ;; File I/O
    #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
+   ;; Socket builtins
+   #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
+   #:p-send #:p-recv #:p-shutdown #:p-getsockname #:p-getpeername
+   #:p-getprotobyname #:p-setsockopt #:p-getsockopt
    #:p-truncate #:p-stat #:p-lstat
    ;; File test operators
    #:p--e #:p--d #:p--f #:p--r #:p--w #:p--x #:p--s #:p--z
@@ -6818,10 +6825,43 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (setf (gethash 'STDOUT *p-filehandles*) *standard-output*)
 (setf (gethash 'STDERR *p-filehandles*) *error-output*)
 
-(defun p-get-stream (fh)
-  "Get CL stream from Perl filehandle (symbol, box, or stream)"
+;;; --- Socket filehandle plumbing -------------------------------------------
+;;; A Perl socket IS a filehandle: after connect/accept you print $sock / <$sock>
+;;; / close $sock.  But bind/connect/listen/accept operate on the sb-bsd-sockets
+;;; SOCKET OBJECT, while print/readline need a STREAM.  We store the socket object
+;;; as the filehandle value (via %p-install-fh, same as open stores a stream), and
+;;; lazily wrap it in a cached bidirectional stream the first time it is used for
+;;; I/O.  The stream is cached per socket because re-making it would lose buffered
+;;; data.
+(defvar *p-socket-streams* (make-hash-table :test 'eq)
+  "Cache mapping an sb-bsd-sockets:socket object to its lazily-made stream.")
+
+(defun %p-socket-p (x)
+  "True if X is an sb-bsd-sockets socket object."
+  (typep x 'sb-bsd-sockets:socket))
+
+(defun %p-socket-stream (sock)
+  "Lazily make (and cache) a bidirectional character stream over socket SOCK.
+   :buffering :none so writes hit the wire immediately (line protocols)."
+  (or (gethash sock *p-socket-streams*)
+      (setf (gethash sock *p-socket-streams*)
+            (sb-bsd-sockets:socket-make-stream
+             sock :input t :output t :buffering :none :element-type 'character))))
+
+(defun %p-as-stream (v)
+  "Coerce a resolved filehandle value to a CL stream: pass a stream through,
+   lazily wrap a socket object in its cached stream, else nil."
+  (cond ((streamp v) v)
+        ((%p-socket-p v) (%p-socket-stream v))
+        (t nil)))
+
+(defun %p-resolve-fh (fh)
+  "Resolve a Perl filehandle designator to its STORED value — a CL stream or an
+   sb-bsd-sockets socket object — or nil.  Does NOT coerce sockets to streams (so
+   the socket builtins can get the object); p-get-stream does the coercion."
   (cond
     ((streamp fh) fh)
+    ((%p-socket-p fh) fh)
     ((symbolp fh)
      (or (gethash fh *p-filehandles*)
          ;; The standard handles STDIN/STDOUT/STDERR are registered under the
@@ -6846,10 +6886,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      (let ((v (p-box-value fh)))
        (cond
          ((streamp v) v)
+         ((%p-socket-p v) v)
          ;; Scalar holding a handle NAME ('STDOUT', 'FOO'): resolve by name.
-         ((stringp v) (p-get-stream v))
+         ((stringp v) (%p-resolve-fh v))
          (t nil))))
     (t nil)))
+
+(defun p-get-stream (fh)
+  "Get CL stream from Perl filehandle (symbol, box, stream, or socket object).
+   A socket handle is lazily wrapped in a cached bidirectional stream so that
+   print/readline/read/eof/close all work through the normal stream paths."
+  (%p-as-stream (%p-resolve-fh fh)))
+
+(defun %p-get-socket (fh)
+  "Resolve a Perl filehandle to its underlying sb-bsd-sockets socket object (for
+   bind/connect/listen/accept/…), or nil if it is not a socket handle."
+  (let ((v (%p-resolve-fh fh)))
+    (and (%p-socket-p v) v)))
 
 (defun %p-open-parse-2arg (expr)
   "Parse a 2-arg open expression into (mode . filename).
@@ -7093,21 +7146,32 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       `(let ((%parsed (%p-open-parse-2arg ,mode)))
          (%p-open-impl (%p-fh-arg ,fh) (car %parsed) (cdr %parsed)))))
 
+(defun %p-close-socket (sock)
+  "Close a socket: close its cached stream (which closes the fd) if one was made,
+   else socket-close the object directly.  Drop it from the stream cache."
+  (let ((stream (gethash sock *p-socket-streams*)))
+    (if stream
+        (progn (ignore-errors (close stream)) (remhash sock *p-socket-streams*))
+        (ignore-errors (sb-bsd-sockets:socket-close sock))))
+  t)
+
 (defun %p-close-impl (fh)
-  "Implementation of Perl close"
+  "Implementation of Perl close (file or socket handle)."
   (cond
     ((p-box-p fh)
-     (let ((stream (p-box-value fh)))
-       (when (streamp stream)
-         (close stream)
-         (box-set fh *p-undef*)
-         t)))
+     (let ((v (p-box-value fh)))
+       (cond
+         ((%p-socket-p v) (%p-close-socket v) (box-set fh *p-undef*) t)
+         ((streamp v)     (close v)           (box-set fh *p-undef*) t)
+         (t nil))))
     (t
-     (let ((stream (p-get-stream fh)))
-       (when stream
-         (close stream)
-         (remhash fh *p-filehandles*)
-         t)))))
+     (let ((v (%p-resolve-fh fh)))
+       (cond
+         ((%p-socket-p v) (%p-close-socket v)
+          (when (symbolp fh) (remhash fh *p-filehandles*)) t)
+         ((streamp v)     (close v)
+          (when (symbolp fh) (remhash fh *p-filehandles*)) t)
+         (t nil))))))
 
 (defmacro p-close (&optional fh)
   "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box.
@@ -7332,6 +7396,306 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl truncate FH/EXPR, LENGTH — the first operand is filehandle-like, so a
    bareword must be quoted (otherwise it is an unbound variable reference)."
   `(%p-truncate-impl (%p-fh-arg ,fh-or-file) ,size))
+
+;;; ============================================================
+;;; Socket builtins (AF_INET / AF_UNIX, SOCK_STREAM / SOCK_DGRAM via
+;;; sb-bsd-sockets).  The filehandle plumbing (%p-resolve-fh / %p-get-socket /
+;;; socket→stream caching) lives up by p-get-stream.  See docs/socket-impl-plan.md.
+;;; The address-packing helpers (inet_aton/sockaddr_in/…) are pure Perl in
+;;; lib/Socket.pm; the runtime only handles ALREADY-PACKED sockaddr byte-strings,
+;;; matching Perl's core calling convention.
+;;; ============================================================
+
+(defun %p-pack-sockaddr-in (addr port)
+  "Re-pack an (addr-vector . port) into a 16-byte struct sockaddr_in byte string
+   so Perl's unpack_sockaddr_in / Socket.pm can read it back: family AF_INET=2
+   (native little-endian on x86-64), port in network order, 4 address bytes, 8 NUL
+   pad."
+  (let ((s (make-string 16 :initial-element #\Nul))
+        (p (logand (truncate port) #xffff)))
+    (setf (char s 0) (code-char 2)                               ; AF_INET lo (LE)
+          (char s 1) (code-char 0)                               ; AF_INET hi
+          (char s 2) (code-char (logand (ash p -8) #xff))        ; port hi (network)
+          (char s 3) (code-char (logand p #xff))                 ; port lo (network)
+          (char s 4) (code-char (logand (aref addr 0) #xff))
+          (char s 5) (code-char (logand (aref addr 1) #xff))
+          (char s 6) (code-char (logand (aref addr 2) #xff))
+          (char s 7) (code-char (logand (aref addr 3) #xff)))
+    s))
+
+(defun %p-parse-sockaddr (name)
+  "Parse a packed sockaddr byte-string from Perl (Socket.pm's pack_sockaddr_in /
+   pack_sockaddr_un).  Returns (values :inet addr-vector port) for sockaddr_in, or
+   (values :unix path nil) for sockaddr_un.  Family is bytes 0-1 native order
+   (AF_INET=2, AF_UNIX=1); port is network order; addr is 4 bytes."
+  (let* ((s (to-string name))
+         (len (length s))
+         (fam (if (>= len 2)
+                  (logior (char-code (char s 0)) (ash (char-code (char s 1)) 8))
+                  2)))
+    (cond
+      ((= fam 1)                                          ; AF_UNIX: family + path
+       (let ((nul (or (position #\Nul s :start 2) len)))
+         (values :unix (subseq s 2 nul) nil)))
+      (t                                                  ; AF_INET (default)
+       (let ((port (if (>= len 4)
+                       (logior (ash (char-code (char s 2)) 8) (char-code (char s 3)))
+                       0))
+             (addr (if (>= len 8)
+                       (vector (char-code (char s 4)) (char-code (char s 5))
+                               (char-code (char s 6)) (char-code (char s 7)))
+                       (vector 0 0 0 0))))
+         (values :inet addr port))))))
+
+(defun %p-socket-impl (fh domain type protocol)
+  "Perl socket(SOCK, DOMAIN, TYPE, PROTOCOL): create an unconnected socket object
+   and install it as the filehandle SOCK.  1 on success, '' (and sets $!) on
+   failure."
+  (let ((dom   (truncate (to-number domain)))            ; AF_INET=2 AF_UNIX=1
+        (typ   (truncate (to-number type)))              ; SOCK_STREAM=1 SOCK_DGRAM=2
+        (proto (truncate (to-number protocol))))
+    (handler-case
+        (let* ((stype (if (= typ 2) :datagram :stream))
+               (sock (if (= dom 1)
+                         (make-instance 'sb-bsd-sockets:local-socket :type stype)
+                         (make-instance 'sb-bsd-sockets:inet-socket :type stype
+                                        :protocol (cond ((= proto 17) :udp)
+                                                        ((= proto 6) :tcp)
+                                                        ((= typ 2) :udp)
+                                                        (t :tcp))))))
+          (%p-install-fh fh sock)
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-socket (fh domain type protocol)
+  "Perl socket — bareword filehandle is auto-quoted."
+  `(%p-socket-impl (%p-fh-arg ,fh) ,domain ,type ,protocol))
+
+(defun %p-bind-impl (fh name)
+  "Perl bind(SOCK, NAME): NAME is a packed sockaddr.  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-bind-impl ""))
+    (handler-case
+        (multiple-value-bind (kind a b) (%p-parse-sockaddr name)
+          (if (eq kind :unix)
+              (sb-bsd-sockets:socket-bind sock a)
+              (sb-bsd-sockets:socket-bind sock a b))
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-bind (fh name)
+  "Perl bind — bareword filehandle is auto-quoted."
+  `(%p-bind-impl (%p-fh-arg ,fh) ,name))
+
+(defun %p-connect-impl (fh name)
+  "Perl connect(SOCK, NAME): NAME is a packed sockaddr.  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-connect-impl ""))
+    (handler-case
+        (multiple-value-bind (kind a b) (%p-parse-sockaddr name)
+          (if (eq kind :unix)
+              (sb-bsd-sockets:socket-connect sock a)
+              (sb-bsd-sockets:socket-connect sock a b))
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-connect (fh name)
+  "Perl connect — bareword filehandle is auto-quoted."
+  `(%p-connect-impl (%p-fh-arg ,fh) ,name))
+
+(defun %p-listen-impl (fh queue)
+  "Perl listen(SOCK, QUEUESIZE).  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-listen-impl ""))
+    (handler-case
+        (progn (sb-bsd-sockets:socket-listen sock (max 0 (truncate (to-number queue)))) 1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-listen (fh queue)
+  "Perl listen — bareword filehandle is auto-quoted."
+  `(%p-listen-impl (%p-fh-arg ,fh) ,queue))
+
+(defun %p-accept-impl (newfh serverfh)
+  "Perl accept(NEWSOCK, GENERICSOCK): block, accept a connection on the server
+   socket, install the new socket as NEWSOCK, return the packed peer sockaddr
+   (a true value).  '' (and sets $!) on failure."
+  (let ((server (%p-get-socket serverfh)))
+    (unless server (return-from %p-accept-impl ""))
+    (handler-case
+        (let ((new (sb-bsd-sockets:socket-accept server)))
+          (%p-install-fh newfh new)
+          (multiple-value-bind (addr port) (sb-bsd-sockets:socket-peername new)
+            (%p-pack-sockaddr-in addr port)))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-accept (newfh serverfh)
+  "Perl accept — both filehandles are auto-quoted (the new socket is written
+   through NEWSOCK, like read writes through its buffer)."
+  `(%p-accept-impl (%p-fh-arg ,newfh) (%p-fh-arg ,serverfh)))
+
+(defun %p-shutdown-impl (fh how)
+  "Perl shutdown(SOCK, HOW): HOW 0=read 1=write 2=both.  1 on success, '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-shutdown-impl ""))
+    (handler-case
+        (let ((dir (case (truncate (to-number how))
+                     (0 :input) (1 :output) (t :io))))
+          (sb-bsd-sockets:socket-shutdown sock :direction dir)
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-shutdown (fh how)
+  "Perl shutdown — bareword filehandle is auto-quoted."
+  `(%p-shutdown-impl (%p-fh-arg ,fh) ,how))
+
+(defun %p-send-impl (fh msg flags &optional to)
+  "Perl send(SOCK, MSG, FLAGS [, TO]): send MSG; with TO (packed sockaddr) for a
+   datagram socket.  Returns the number of bytes sent, or '' + $! on failure."
+  (declare (ignore flags))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-send-impl ""))
+    (handler-case
+        (let ((data (to-string msg)))
+          (if to
+              (multiple-value-bind (kind a b) (%p-parse-sockaddr to)
+                (declare (ignore kind))
+                (sb-bsd-sockets:socket-send sock data nil :address (list a b)))
+              (sb-bsd-sockets:socket-send sock data nil)))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-send (fh msg flags &optional to)
+  "Perl send — bareword filehandle is auto-quoted."
+  (if to
+      `(%p-send-impl (%p-fh-arg ,fh) ,msg ,flags ,to)
+      `(%p-send-impl (%p-fh-arg ,fh) ,msg ,flags)))
+
+(defun %p-recv-impl (fh buf len flags)
+  "Perl recv(SOCK, SCALAR, LEN, FLAGS): receive up to LEN bytes into SCALAR;
+   return the sender's packed address (for a datagram) or '' for a connected
+   socket.  '' + $! on failure."
+  (declare (ignore flags))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-recv-impl ""))
+    (handler-case
+        (multiple-value-bind (data nbytes addr port)
+            (sb-bsd-sockets:socket-receive sock nil (max 0 (truncate (to-number len)))
+                                           :element-type 'character)
+          ;; socket-receive returns the whole allocated buffer plus the actual
+          ;; byte count — truncate to what was read (else the unfilled tail leaks).
+          (let ((s (if (stringp data) data (coerce data 'string))))
+            (when (and (integerp nbytes) (<= 0 nbytes (length s)))
+              (setf s (subseq s 0 nbytes)))
+            (when (p-box-p buf) (box-set buf s)))
+          (if (and addr (not (every #'zerop addr)))
+              (%p-pack-sockaddr-in addr port)
+              ""))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-recv (fh buf len flags)
+  "Perl recv — bareword filehandle is auto-quoted; the buffer is written through."
+  `(%p-recv-impl (%p-fh-arg ,fh) ,buf ,len ,flags))
+
+(defun %p-getsockname-impl (fh)
+  "Perl getsockname(SOCK): packed local address, or '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-getsockname-impl ""))
+    (handler-case
+        (multiple-value-bind (addr port) (sb-bsd-sockets:socket-name sock)
+          (%p-pack-sockaddr-in addr port))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-getsockname (fh)
+  "Perl getsockname — bareword filehandle is auto-quoted."
+  `(%p-getsockname-impl (%p-fh-arg ,fh)))
+
+(defun %p-getpeername-impl (fh)
+  "Perl getpeername(SOCK): packed peer address, or '' + $!."
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-getpeername-impl ""))
+    (handler-case
+        (multiple-value-bind (addr port) (sb-bsd-sockets:socket-peername sock)
+          (%p-pack-sockaddr-in addr port))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-getpeername (fh)
+  "Perl getpeername — bareword filehandle is auto-quoted."
+  `(%p-getpeername-impl (%p-fh-arg ,fh)))
+
+(defun p-getprotobyname (name)
+  "Perl getprotobyname(NAME): the protocol number.  Real code only ever asks for
+   tcp/udp/icmp; a tiny static table suffices."
+  (let ((n (string-downcase (to-string name))))
+    (cond ((string= n "tcp") 6)
+          ((string= n "udp") 17)
+          ((string= n "icmp") 1)
+          ((string= n "ip") 0)
+          (t *p-undef*))))
+
+(defun %p-setsockopt-impl (fh level optname optval)
+  "Perl setsockopt(SOCK, LEVEL, OPTNAME, OPTVAL).  Only SO_REUSEADDR (the one real
+   server code uses) is wired; others succeed as no-ops.  1 on success, '' + $!."
+  (declare (ignore level))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-setsockopt-impl ""))
+    (handler-case
+        (progn
+          (when (= (truncate (to-number optname)) 2)        ; SO_REUSEADDR
+            (setf (sb-bsd-sockets:sockopt-reuse-address sock)
+                  (/= 0 (truncate (to-number optval)))))
+          1)
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-setsockopt (fh level optname optval)
+  "Perl setsockopt — bareword filehandle is auto-quoted."
+  `(%p-setsockopt-impl (%p-fh-arg ,fh) ,level ,optname ,optval))
+
+(defun %p-getsockopt-impl (fh level optname)
+  "Perl getsockopt(SOCK, LEVEL, OPTNAME): return the option value packed as a
+   native int.  Only SO_REUSEADDR is wired; others read 0."
+  (declare (ignore level))
+  (let ((sock (%p-get-socket fh)))
+    (unless sock (return-from %p-getsockopt-impl ""))
+    (handler-case
+        (let ((v (if (= (truncate (to-number optname)) 2)
+                     (if (sb-bsd-sockets:sockopt-reuse-address sock) 1 0)
+                     0)))
+          ;; pack 'i' — native 4-byte int, little-endian on x86-64.
+          (let ((s (make-string 4 :initial-element #\Nul)))
+            (setf (char s 0) (code-char (logand v #xff))
+                  (char s 1) (code-char (logand (ash v -8) #xff))
+                  (char s 2) (code-char (logand (ash v -16) #xff))
+                  (char s 3) (code-char (logand (ash v -24) #xff)))
+            s))
+      (error () (%pcl-save-errno) ""))))
+
+(defmacro p-getsockopt (fh level optname)
+  "Perl getsockopt — bareword filehandle is auto-quoted."
+  `(%p-getsockopt-impl (%p-fh-arg ,fh) ,level ,optname))
+
+(defun %p-socketpair-impl (fh1 fh2 domain type protocol)
+  "Perl socketpair(S1, S2, DOMAIN, TYPE, PROTOCOL).  sb-bsd-sockets has no direct
+   socketpair; emulate an AF_UNIX/AF_INET stream pair over a bound loopback
+   listener so S1<->S2 are connected.  1 on success, '' + $!."
+  (declare (ignore domain type protocol))
+  (handler-case
+      (let ((srv (make-instance 'sb-bsd-sockets:inet-socket :type :stream :protocol :tcp)))
+        (setf (sb-bsd-sockets:sockopt-reuse-address srv) t)
+        (sb-bsd-sockets:socket-bind srv #(127 0 0 1) 0)
+        (sb-bsd-sockets:socket-listen srv 1)
+        (multiple-value-bind (host port) (sb-bsd-sockets:socket-name srv)
+          (declare (ignore host))
+          (let ((a (make-instance 'sb-bsd-sockets:inet-socket :type :stream :protocol :tcp)))
+            (sb-bsd-sockets:socket-connect a #(127 0 0 1) port)
+            (let ((b (sb-bsd-sockets:socket-accept srv)))
+              (ignore-errors (sb-bsd-sockets:socket-close srv))
+              (%p-install-fh fh1 a)
+              (%p-install-fh fh2 b)
+              1))))
+    (error () (%pcl-save-errno) "")))
+
+(defmacro p-socketpair (fh1 fh2 domain type protocol)
+  "Perl socketpair — both filehandles are auto-quoted."
+  `(%p-socketpair-impl (%p-fh-arg ,fh1) (%p-fh-arg ,fh2) ,domain ,type ,protocol))
 
 (defun %p-stat-vector (st)
   "Build Perl's 13-element stat list from an sb-posix stat struct.  Times are
