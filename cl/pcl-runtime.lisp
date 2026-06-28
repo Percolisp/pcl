@@ -133,6 +133,7 @@
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
+   #:p-local-deref-scalar #:p-local-deref-array #:p-local-deref-hash
    #:p-copy-array #:p-copy-hash
    #:p-pack #:p-unpack #:p-load-extension
    #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-reverse
@@ -6747,8 +6748,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  ;; — so catch :p-return here.  Without this, `_sub_attrs`'s
                  ;; `(eval 'return 1; ...') ? ':lvalue' : ''` let the `return 1`
                  ;; unwind the whole sub, which returned 1 instead of the ternary.
+                 ;; Also rebind *pcl-current-package* (the Perl package name):
+                 ;; a `package Foo;` inside the eval string setf's it (see
+                 ;; p-defpackage), and without a fresh binding that switch leaks
+                 ;; into the caller's dynamic scope — so a later `eval "bar()"`
+                 ;; would resolve bar() in Foo instead of the caller's package.
+                 ;; Mirrors *package* above and the module-load rebind in p-require.
                  (result   (catch :p-return
                              (let ((*package* *package*)
+                                   (*pcl-current-package* *pcl-current-package*)
                                    (eof '#:eof))
                                (with-input-from-string (in cl-text)
                                  (loop with r = nil
@@ -10814,6 +10822,74 @@ buffer's fill-pointer; everything else falls back to file-length."
             (,sv (%p-lhe-init ,hv ,kv ,iv)))
        (unwind-protect (progn ,@body)
          (%p-lhe-restore ,hv ,kv ,sv)))))
+
+;;; ── local on a deref / symbolic ref: local ${$x}, local @{$x}, local %$x ──
+;;; Perl allows `local` through a *symbolic* reference (a string naming a package
+;;; variable): it saves/restores that package variable.  Localizing through a
+;;; *hard* reference is a fatal error ("Can't localize through a reference").
+
+(defun %p-local-deref-resolve-scalar-box (val)
+  "For local ${EXPR}: VAL must unbox to a symbolic-ref STRING; resolve to the
+   package scalar box (vivifying if absent).  A hard reference is fatal."
+  (let ((inner (unbox val)))
+    (if (and inner (stringp inner))
+        (or (%p-symref-box inner)
+            (setf (%p-symref-box inner) (make-p-box nil)))
+        (p-die "Can't localize through a reference"))))
+
+(defun %p-local-deref-resolve-array (val)
+  "For local @{EXPR}: VAL must unbox to a symbolic-ref STRING; a hard reference
+   is fatal."
+  (let ((inner (unbox val)))
+    (if (and inner (stringp inner))
+        (%p-symref-array inner)
+        (p-die "Can't localize through a reference"))))
+
+(defun %p-local-deref-resolve-hash (val)
+  "For local %{EXPR}: VAL must unbox to a symbolic-ref STRING; a hard reference
+   is fatal."
+  (let ((inner (unbox val)))
+    (if (and inner (stringp inner))
+        (%p-symref-hash inner)
+        (p-die "Can't localize through a reference"))))
+
+(defmacro p-local-deref-scalar (ref-form &body body)
+  "local ${EXPR} / local $$ref — save/restore a symbolic-ref'd package scalar.
+   Mutates the box in place (the symbol is only known at run time), so caches
+   must be invalidated on both the clear and the restore — otherwise a stale
+   nv/sv cache makes the box read back its pre-restore value."
+  (let ((box (gensym "BOX")) (saved (gensym "SV")))
+    `(let* ((,box (%p-local-deref-resolve-scalar-box ,ref-form))
+            (,saved (p-box-value ,box)))
+       (setf (p-box-value ,box) nil
+             (p-box-nv-ok ,box) nil
+             (p-box-sv-ok ,box) nil)
+       (unwind-protect (progn ,@body)
+         (setf (p-box-value ,box) ,saved
+               (p-box-nv-ok ,box) nil
+               (p-box-sv-ok ,box) nil)))))
+
+(defmacro p-local-deref-array (ref-form &body body)
+  "local @{EXPR} / local @$ref — save/restore a symbolic-ref'd package array."
+  (let ((vec (gensym "VEC")) (saved (gensym "SV")))
+    `(let* ((,vec (%p-local-deref-resolve-array ,ref-form))
+            (,saved (coerce ,vec 'list)))
+       (setf (fill-pointer ,vec) 0)
+       (unwind-protect (progn ,@body)
+         (setf (fill-pointer ,vec) 0)
+         (dolist (e ,saved) (vector-push-extend e ,vec))))))
+
+(defmacro p-local-deref-hash (ref-form &body body)
+  "local %{EXPR} / local %$ref — save/restore a symbolic-ref'd package hash."
+  (let ((h (gensym "H")) (saved (gensym "SV")))
+    `(let* ((,h (%p-local-deref-resolve-hash ,ref-form))
+            (,saved (let ((a '()))
+                      (maphash (lambda (k v) (push (cons k v) a)) ,h)
+                      a)))
+       (clrhash ,h)
+       (unwind-protect (progn ,@body)
+         (clrhash ,h)
+         (dolist (kv ,saved) (setf (gethash (car kv) ,h) (cdr kv)))))))
 
 (defun %p-local-array-slice-nested (arr vec pos thunk)
   "Helper: save/restore arr[idx] for each idx in vec[pos..end], then call thunk."

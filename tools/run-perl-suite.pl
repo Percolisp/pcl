@@ -63,7 +63,7 @@ for my $rel (@files) {
 
   my $lisp = "/tmp/run-perl-suite_$$.lisp";
   my $terr = system("perl -I$root $pl2cl '$f' > $lisp 2>/tmp/run-perl-suite_$$.err");
-  my $pcl = `timeout 90 sbcl --noinform --non-interactive --load $runtime --load $lisp 2>&1`;
+  my $pcl = `cd "$tdir" && timeout 90 sbcl --noinform --non-interactive --load $runtime --load $lisp 2>&1`;
   my $c_ok    = () = $pcl =~ /^ok /mg;
   my $c_notok = () = $pcl =~ /^not ok /mg;
 

@@ -455,4 +455,35 @@ my (undef, @rest) = (9, 8, 7);
 print "$a$c$e | @rest\n";
 ');
 
+# A user sub with an old-style scalar prototype ($) imposes SCALAR context on
+# the corresponding argument: an array yields its element count, a hash its
+# bucket-ratio-ish scalar, and a wantarray-sensitive builtin (each/keys) its
+# scalar value — rather than flattening into the arg list.  perl's t/test.pl
+# `sub is ($$@)` relies on this so `is(@a, 3)` / `is(each @h, 0)` work.
+test_transpile("scalar prototype (\$) imposes scalar context on array arg", '
+sub takes ($) { return $_[0]; }
+my @a = (10, 20, 30);
+print takes(@a), "\n";
+');
+test_transpile("scalar prototype (\$\$) imposes scalar ctx on each slot", '
+sub two ($$) { return "$_[0]|$_[1]"; }
+my @a = (10, 20, 30);
+print two(@a, 99), "\n";
+');
+test_transpile("scalar prototype (\$) collapses keys() to its count", '
+sub one ($) { return $_[0]; }
+my %h = (a => 1, b => 2, c => 3);
+print one(keys %h), "\n";
+');
+# Guard: when a call passes FEWER args than the prototype mandates, an array
+# argument is flattening to fill the slots — it must NOT be scalarized.  This
+# is perl test.pl`s `sub like ($$@) { like_yn(0, @_) }` / `like_yn ($$$@)`
+# pattern; collapsing @_ to its count breaks every test.pl-based file.
+test_transpile("scalar prototype does not collapse a flattening \@_", '
+sub f ($$@) { return g(0, @_); }
+sub g ($$$@) { my ($flip, undef, $expected, $name, @mess) = @_;
+               return "$expected|$name|@mess"; }
+print f("got", "EXP", "nm", "x", "y"), "\n";
+');
+
 done_testing();

@@ -139,6 +139,23 @@ sub _build_environment {
 }
 
 
+sub _maybe_decode_utf8 {
+  my ($src) = @_;
+  # `use utf8` tells Perl the source is UTF-8: multi-byte sequences in string
+  # literals (and identifiers) are single CHARACTERS, so length/substr/index/
+  # regex see characters, not bytes.  PCL reads the source as raw bytes, so we
+  # must decode it here when the pragma is in effect — otherwise "café" is 5
+  # bytes, not 4 chars.  Only decode raw byte input (an already-decoded char
+  # string is left alone); without `use utf8` Perl treats high bytes as Latin-1,
+  # which matches reading the bytes unchanged.  The pl2cl output is already
+  # written UTF-8, so the wide chars round-trip into the generated CL.
+  if (defined $src && $src =~ /\buse\s+utf8\b/ && !utf8::is_utf8($src)) {
+    my $copy = $src;
+    utf8::decode($copy) and return $copy;   # leaves $src on invalid bytes
+  }
+  return $src;
+}
+
 sub _preprocess_source {
   my ($src) = @_;
   # hex()/oct() on a hex-float mantissa (below) can exceed 0xffffffff (32-bit),
@@ -265,7 +282,7 @@ sub _build_ppi_doc {
   if ($self->has_filename) {
     open(my $fh, '<', $self->filename)
       or die "Failed to open file: " . $self->filename;
-    my $src = _preprocess_source(do { local $/; <$fh> });
+    my $src = _preprocess_source(_maybe_decode_utf8(do { local $/; <$fh> }));
     close $fh;
     my $doc = $self->_ppi_parse($src);
     return $doc if $doc;
@@ -273,7 +290,7 @@ sub _build_ppi_doc {
     return $self->_ppi_with_fallback($src);
   }
   elsif ($self->has_code) {
-    my $code = _preprocess_source($self->code);
+    my $code = _preprocess_source(_maybe_decode_utf8($self->code));
     my $doc = $self->_ppi_parse($code);
     return $doc if $doc;
     die "Failed to parse code" unless $self->lenient_ppi;
@@ -2967,6 +2984,58 @@ sub _process_local_declaration {
       $self->_emit("");
       return;
     }
+  }
+
+  # ── local on a deref / symbolic ref: local ${EXPR}, local $$x, @{…}, %$x, …
+  # PPI gives Cast($/@/%) followed by either a Block ({EXPR}) or a Symbol ($x).
+  # Only the *symbolic* (string) ref form is localizable; localizing through a
+  # hard reference dies at runtime ("Can't localize through a reference").
+  # Resolution + save/restore lives in the p-local-deref-{scalar,array,hash}
+  # runtime macros (the value of EXPR decides symbolic-vs-hard at run time).
+  if (@non_ws >= 2
+      && ref($non_ws[0]) eq 'PPI::Token::Cast'
+      && $non_ws[0]->content =~ /^[\$\@%]$/
+      && (ref($non_ws[1]) eq 'PPI::Structure::Block'
+          || ref($non_ws[1]) eq 'PPI::Token::Symbol')) {
+    my $sigil = $non_ws[0]->content;
+    my $ref_cl;
+    if (ref($non_ws[1]) eq 'PPI::Token::Symbol') {
+      # $$x / @$x / %$x — deref the named scalar
+      $ref_cl = $self->_parse_expression([$non_ws[1]], $stmt) // 'nil';
+    } else {
+      # ${EXPR} — extract the block's inner expression
+      my @inner;
+      for my $child ($non_ws[1]->children) {
+        my $cr = ref($child);
+        next if $cr eq 'PPI::Token::Whitespace';
+        next if $cr eq 'PPI::Token::Structure';   # the { }
+        if ($cr =~ /^PPI::Statement/) {
+          for my $gc ($child->children) {
+            next if ref($gc) eq 'PPI::Token::Whitespace';
+            push @inner, $gc;
+          }
+        } else {
+          push @inner, $child;
+        }
+      }
+      if (@inner == 1 && ref($inner[0]) eq 'PPI::Token::Word') {
+        # ${aa} — a bareword names the package variable; route as a symbolic ref.
+        my $name = $inner[0]->content;
+        $ref_cl = "\"$name\"";
+      } else {
+        $ref_cl = $self->_parse_expression(\@inner, $stmt) // 'nil';
+      }
+    }
+    my $macro = $sigil eq '@' ? 'p-local-deref-array'
+              : $sigil eq '%' ? 'p-local-deref-hash'
+              :                 'p-local-deref-scalar';
+    $self->_emit(";; $perl_code");
+    $self->_emit("($macro $ref_cl");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+    $self->_emit("");
+    return;
   }
 
   # Detect 'local our $var' — the 'our' qualifier means a package variable.

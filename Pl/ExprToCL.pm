@@ -1816,6 +1816,21 @@ sub gen_funcall {
     @ref_params = map { $_->{proto_type} // $_->{name} } @{$proto->{params}};
   }
 
+  # Whether the '$'-slot SCALAR-context imposition (below) may fire for this
+  # call.  When the call supplies FEWER syntactic arguments than the prototype's
+  # mandatory-param count, an array argument is flattening to fill the remaining
+  # mandatory slots (Perl does NOT scalarize it) — e.g. `sub like_yn ($$$@)`
+  # called as `like_yn(0, @_)` where @_ spreads across the trailing $$@.  Only
+  # impose scalar context when args >= min_params.  (This also matches Perl's
+  # rule that a prototype defined LATER than the call site isn't enforced: in
+  # those flatten-into-@_ helpers the count is always short.)
+  my $n_call_args = $#$kids;  # kids[0] is the function word
+  my $may_impose_scalar =
+       @ref_params
+    && defined $proto->{min_params}
+    && $proto->{min_params} >= 0
+    && $n_call_args >= $proto->{min_params};
+
   # Functions that modify their arguments (need l-value access to array/hash elements)
   # undef $hash{k} / undef $arr[i] must receive the box, not the unboxed value
   my %lvalue_funcs = map { $_ => 1 } qw(chop chomp undef);
@@ -1831,14 +1846,44 @@ sub gen_funcall {
 
   my @args;
   for my $i (1 .. $#$kids) {
+    # A plain '$' prototype slot imposes SCALAR context on its argument
+    # (e.g. perl's test.pl `sub is ($$@)` → `is(@a, 3)` counts @a; `is(each
+    # @h, 0)` evaluates each in scalar context).  The '\@'/'\%'/'\$' ref slots
+    # are handled separately below (auto-box, not scalar-context).  Set the
+    # node's context BEFORE gen_node so wantarray-sensitive builtins (each,
+    # keys, ...) are generated in scalar context, not merely wrapped after.
+    my $param_idx = $i - 1;
+    my $impose_scalar = ($may_impose_scalar
+                         && $param_idx < @ref_params
+                         && defined $ref_params[$param_idx]
+                         && $ref_params[$param_idx] eq '$');
+    $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
+
     # Set l-value context for functions that modify their arguments
     my $saved_lvalue = $self->lvalue_context;
     $self->lvalue_context(1) if $needs_lvalue;
     my $arg = $self->gen_node($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
 
+    # An aggregate (@a/%h) or list-returning builtin (keys/values) passed to a
+    # '$' slot must yield its scalar value (count), not flatten into the arg
+    # list — wrap it like the `scalar EXPR` keyword does.  Args that are
+    # already obviously scalar (number/string literals, $-sigil symbols) need
+    # no coercion, and wantarray-sensitive builtins (each/sort/...) are already
+    # handled by the SCALAR_CTX annotation above — so skip the wrap for those
+    # to keep generated code clean.
+    if ($impose_scalar) {
+      my $an = $self->expr_o->get_a_node($kids->[$i]);
+      my $r = ref($an);
+      my $already_scalar =
+           $r eq 'PPI::Token::Number'
+        || $r =~ /^PPI::Token::Quote\b/
+        || ($r eq 'PPI::Token::Symbol' && $an->content() =~ /^\$/)
+        || ($r eq 'PPI::Token::Magic'  && $an->content() =~ /^\$/);
+      $arg = "(p-scalar $arg)" unless $already_scalar;
+    }
+
     # Check if this position has a reference prototype (\@, \%, \$)
-    my $param_idx = $i - 1;  # 0-based index for params
     if ($param_idx < @ref_params) {
       my $param_type = $ref_params[$param_idx];
       if ($param_type =~ /^\\([@%\$])$/) {

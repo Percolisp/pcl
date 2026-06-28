@@ -79,6 +79,22 @@ eval "sub plain { return 7 }";
 print plain(), "\n";
 PL
 
+# ---- a `package` switch inside one eval must NOT leak into later evals ----
+# Regression: 6e64eb2 made p-eval seed the eval's package from
+# *pcl-current-package* but did not rebind it, so a `package X;` executed inside
+# an eval string mutated the global, and the NEXT `eval "foo()"` resolved foo()
+# in X instead of the caller's package ("|X|::pl-foo is undefined").  Cost ~265
+# tests in perl-tests/signatures.t (790->525).  Fixed by rebinding
+# *pcl-current-package* around the eval body (mirrors *package*).
+both_agree('package switch inside an eval does not leak into a later eval', <<'PL');
+use v5.30;
+$main::a = 123;
+sub t001 { $main::a || "z" }
+my $r1 = eval "package T121::Z; ::t001()";   # switches package inside the eval
+my $r2 = eval "t001()";                       # must still resolve main::t001
+print "r1=$r1 r2=", (defined $r2 ? $r2 : "undef"), "\n";
+PL
+
 # ---- free-variable capture by a named sub defined in eval ----
 # Implemented via AST-level scope analysis (docs/eval-free-vars-plan.md):
 # _eval_free_vars_from_ppi descends into named-sub bodies; the call site passes
