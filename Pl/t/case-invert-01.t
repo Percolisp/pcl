@@ -134,4 +134,15 @@ test_case('backslash-l backslash-U composes as lcfirst(uc(...))',
 test_case('plain backslash-u and U-span unaffected',
     'my $a = "hELLo"; print "[", "\u$a", "][", "\U$a\E-x", "]\n";');
 
+# --- mixed-case MODULE function calls (Internals::SvREADONLY/SvREFCNT) ---------
+# A module sub with a mixed-case name (SvREADONLY) is interned by the codegen
+# under :invert as the case-preserved symbol Internals::pl-SvREADONLY.  The
+# runtime stub package and function names must match that exact case, or the call
+# is an undefined-function crash.  (Regressed push.t/unshift.t to a partial stop:
+# the stub was defpackage :INTERNALS + pl-svreadonly, i.e. wrong package + case.)
+test_case('Internals::SvREADONLY mixed-case module call does not crash',
+    'my @a = (10, 11); Internals::SvREADONLY(@a, 1); print "no crash\n";');
+test_case('Internals::SvREFCNT mixed-case module call does not crash',
+    'my $x = 5; my $rc = Internals::SvREFCNT($x); print "survived\n";');
+
 done_testing();
