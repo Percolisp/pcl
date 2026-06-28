@@ -411,4 +411,30 @@ END_CODE
   like($output, qr/2/, 'glob with [^d] negated class works');
 }
 
+# Regression (defins.t test 16): a list-assignment whose RHS is a lone glob, used
+# as a while-condition, must run glob as a SCALAR iterator (one file per loop) not
+# list context (all files at once).  glob is wrapped (let ((*wantarray* t)) ...) on
+# a p-list-= RHS, so p-glob must fall back to scalar mode when *p-in-list-assign-rhs*
+# is set — mirroring p-readline's handling of while (($x) = <FH>).
+{
+  my $output = run_pcl(<<"END_CODE");
+my (\$seen, \$dummy, \$name) = (0, '', '');
+while ((\$seen ? \$dummy : \$name) = glob("$tmpdir/*.txt")) { \$seen++; last if \$seen > 99 }
+print \$seen;
+END_CODE
+
+  # a.txt, b.txt, d.txt = 3 .txt files; iterator visits each once.
+  like($output, qr/\b3\b/, 'while (($x)=glob) iterates one file per loop, not all at once');
+}
+
+# Companion: @a = glob stays LIST context (p-array-=, no scalar fallback).
+{
+  my $output = run_pcl(<<"END_CODE");
+my \@a = glob("$tmpdir/*.txt");
+print scalar(\@a);
+END_CODE
+
+  like($output, qr/\b3\b/, '@a = glob still returns all matches at once');
+}
+
 done_testing();

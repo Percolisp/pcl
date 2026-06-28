@@ -8260,9 +8260,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-glob (&optional pattern)
   "Perl glob / <*.txt> - expand file glob pattern.
    In list context: first call returns all matches; second call with same pattern returns empty.
-   In scalar context: returns one match per call, nil when exhausted; resets for next cycle."
+   In scalar context: returns one match per call, nil when exhausted; resets for next cycle.
+   When *p-in-list-assign-rhs* is t (inside a p-list-= RHS) glob always uses scalar
+   (iterator) mode, so `while (($x) = glob(...))` returns one file per iteration —
+   mirrors p-readline's handling of `while (($x) = <FH>)`."
   (let ((pat (if pattern (to-string pattern) "*")))
-    (if (eq *wantarray* t)
+    (if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
         (p-glob--list-context pat)
         (p-glob--scalar-context pat))))
 
