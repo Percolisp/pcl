@@ -1808,14 +1808,14 @@
                                     (p-if (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a"))
                                       (progn
                                         ;; _pack_str_one($ch, "$actual_count", 1, 0, $result_ref)
-                                        (let ((*wantarray* :void)) (pl-_pack_str_one $ch (p-string-concat $actual_count) 1 0 $result_ref))
+                                        (pl-_pack_str_one $ch (p-string-concat $actual_count) 1 0 $result_ref)
                                         
                                       )
                                       ;; elsif ($ch eq 'Z')
                                       (p-if (p-str-eq $ch "Z")
                                         (progn
                                           ;; _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref)
-                                          (let ((*wantarray* :void)) (pl-_pack_str_one "Z" (p-string-concat $actual_count) (p-+ (p-length (p-string-concat $actual_count)) 1) 0 $result_ref))
+                                          (pl-_pack_str_one "Z" (p-string-concat $actual_count) (p-+ (p-length (p-string-concat $actual_count)) 1) 0 $result_ref)
                                           
                                         )
                                         ;; elsif ($ch eq 'w')
@@ -1875,7 +1875,7 @@
                                   )
                                   
                                   ;; _pack_str_one($dfmt, $darg, $actual_count, 0, $result_ref)
-                                  (let ((*wantarray* :void)) (pl-_pack_str_one $dfmt $darg $actual_count 0 $result_ref))
+                                  (pl-_pack_str_one $dfmt $darg $actual_count 0 $result_ref)
                                   
                                 )
                               )
@@ -1917,14 +1917,14 @@
                                       (p-if (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a"))
                                         (progn
                                           ;; _pack_str_one($ch, "$actual_count", 1, 0, $result_ref)
-                                          (let ((*wantarray* :void)) (pl-_pack_str_one $ch (p-string-concat $actual_count) 1 0 $result_ref))
+                                          (pl-_pack_str_one $ch (p-string-concat $actual_count) 1 0 $result_ref)
                                           
                                         )
                                         ;; elsif ($ch eq 'Z')
                                         (p-if (p-str-eq $ch "Z")
                                           (progn
                                             ;; _pack_str_one('Z', "$actual_count", length("$actual_count") + 1, 0, $result_ref)
-                                            (let ((*wantarray* :void)) (pl-_pack_str_one "Z" (p-string-concat $actual_count) (p-+ (p-length (p-string-concat $actual_count)) 1) 0 $result_ref))
+                                            (pl-_pack_str_one "Z" (p-string-concat $actual_count) (p-+ (p-length (p-string-concat $actual_count)) 1) 0 $result_ref)
                                             
                                           )
                                           ;; elsif ($ch eq 'w')
@@ -2191,7 +2191,7 @@
                                       (p-my-= $iter_base (p-length (p-cast-$ $result_ref)))
                                       
                                       ;; _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1)
-                                      (let ((*wantarray* :void)) (pl-_pack_tmpl $inner $ai_ref $args_ref $result_ref $be $le $iter_base (p-+ $depth 1)))
+                                      (pl-_pack_tmpl $inner $ai_ref $args_ref $result_ref $be $le $iter_base (p-+ $depth 1))
                                       
                                       ;; last if $$ai_ref == $ai_before
                                       (p-if (p-== (p-cast-$ $ai_ref) $ai_before) (p-last))
@@ -2214,7 +2214,7 @@
                                         (p-my-= $iter_base (p-length (p-cast-$ $result_ref)))
                                         
                                         ;; _pack_tmpl($inner, $ai_ref, $args_ref, $result_ref, $be, $le, $iter_base, $depth + 1)
-                                        (let ((*wantarray* :void)) (pl-_pack_tmpl $inner $ai_ref $args_ref $result_ref $be $le $iter_base (p-+ $depth 1)))
+                                        (pl-_pack_tmpl $inner $ai_ref $args_ref $result_ref $be $le $iter_base (p-+ $depth 1))
                                         
                                       )
                                     )
@@ -2528,7 +2528,7 @@
                             (p-my-= $arg (p-if (p-< (p-cast-$ $ai_ref) $nargs) (p-// (p-aref-deref $args_ref (p-post++ (p-cast-$ $ai_ref))) "") ""))
                             
                             ;; _pack_str_one($ch, $arg, $nrep, $star, $result_ref)
-                            (let ((*wantarray* :void)) (pl-_pack_str_one $ch $arg $nrep $star $result_ref))
+                            (pl-_pack_str_one $ch $arg $nrep $star $result_ref)
                             
                             ;; next
                             (p-next)
@@ -2564,7 +2564,7 @@
 ")))
                                   
                                   ;; _pack_utf8_char(int($nv), $result_ref)
-                                  (let ((*wantarray* :void)) (pl-_pack_utf8_char (let ((*wantarray* t)) (p-int $nv)) $result_ref))
+                                  (pl-_pack_utf8_char (let ((*wantarray* t)) (p-int $nv)) $result_ref)
                                   
                                 )
                               )
@@ -2874,7 +2874,7 @@
           (let (($pcl_pack_comma_warned (p-box-for-local 0)))
             
             ;; _pack_check_brackets($tmpl)
-            (let ((*wantarray* :void)) (pl-_pack_check_brackets $tmpl))
+            (pl-_pack_check_brackets $tmpl)
             
             (let (($result (make-p-box nil)))
               ;; my $result = ''
@@ -2885,7 +2885,7 @@
                 (p-my-= $ai 0)
                 
                 ;; _pack_tmpl($tmpl, \$ai, \@args, \$result, 0, 0)
-                (let ((*wantarray* :void)) (pl-_pack_tmpl $tmpl (p-backslash $ai) (p-backslash @args) (p-backslash $result) 0 0))
+                (pl-_pack_tmpl $tmpl (p-backslash $ai) (p-backslash @args) (p-backslash $result) 0 0)
                 
                 ;; return $result
                 (p-return $result)
@@ -3133,7 +3133,7 @@
                                         (p-my-= $b (p-if (p-< (p-+ (p-cast-$ $si_ref__lex__2) (p-int (p-/ $i 8))) $slen__lex__3) (p-ord (p-substr $s__lex__1 (p-+ (p-cast-$ $si_ref__lex__2) (p-int (p-/ $i 8))) 1)) 0))
                                         
                                         ;; $push_val->( ($b>>(7-($i%8))) & 1 )
-                                        (let ((*wantarray* :void)) (p-funcall-ref $push_val (p-bit-and (p->> $b (p-- 7 (p-% $i 8))) 1)))
+                                        (p-funcall-ref $push_val (p-bit-and (p->> $b (p-- 7 (p-% $i 8))) 1))
                                         
                                       )
                                     )
@@ -3164,7 +3164,7 @@
                                   )
                                   
                                   ;; $push_val->($bits)
-                                  (let ((*wantarray* :void)) (p-funcall-ref $push_val $bits))
+                                  (p-funcall-ref $push_val $bits)
                                   
                                 )
                               )
@@ -3197,7 +3197,7 @@
                                           (p-my-= $b (p-if (p-< (p-+ (p-cast-$ $si_ref__lex__2) (p-int (p-/ $i 8))) $slen__lex__3) (p-ord (p-substr $s__lex__1 (p-+ (p-cast-$ $si_ref__lex__2) (p-int (p-/ $i 8))) 1)) 0))
                                           
                                           ;; $push_val->( ($b>>($i%8)) & 1 )
-                                          (let ((*wantarray* :void)) (p-funcall-ref $push_val (p-bit-and (p->> $b (p-% $i 8)) 1)))
+                                          (p-funcall-ref $push_val (p-bit-and (p->> $b (p-% $i 8)) 1))
                                           
                                         )
                                       )
@@ -3228,7 +3228,7 @@
                                     )
                                     
                                     ;; $push_val->($bits)
-                                    (let ((*wantarray* :void)) (p-funcall-ref $push_val $bits))
+                                    (p-funcall-ref $push_val $bits)
                                     
                                   )
                                 )
@@ -3333,7 +3333,7 @@
                                   ;; while ($done < $n && $$si_ref < $slen) { ... }
                                   (p-while (p-&& (p-< $done $n) (p-< (p-cast-$ $si_ref__lex__2) $slen__lex__3))
                                     ;; $push_val->(_unpack_utf8_char($s, $si_ref))
-                                    (let ((*wantarray* :void)) (p-funcall-ref $push_val (let ((*wantarray* :void)) (pl-_unpack_utf8_char $s__lex__1 $si_ref__lex__2))))
+                                    (p-funcall-ref $push_val (pl-_unpack_utf8_char $s__lex__1 $si_ref__lex__2))
                                     
                                     ;; $done++
                                     (p-post++ $done)
@@ -3355,7 +3355,7 @@
                                               ((p-&& (p-< $i $n) (p-< (p-cast-$ $si_ref__lex__2) $slen__lex__3)))
                                               ((p-post++ $i))
                                         ;; $push_val->(ord(substr($s, $$si_ref++, 1)))
-                                        (let ((*wantarray* :void)) (p-funcall-ref $push_val (p-ord (p-substr $s__lex__1 (p-post++ (p-cast-$ $si_ref__lex__2)) 1))))
+                                        (p-funcall-ref $push_val (p-ord (p-substr $s__lex__1 (p-post++ (p-cast-$ $si_ref__lex__2)) 1)))
                                         
                                       )
                                     )
@@ -3395,7 +3395,7 @@
                                           )
                                           
                                           ;; $push_val->($v)
-                                          (let ((*wantarray* :void)) (p-funcall-ref $push_val $v))
+                                          (p-funcall-ref $push_val $v)
                                           
                                           ;; $done++
                                           (p-post++ $done)
@@ -3808,7 +3808,7 @@
                                                       ((p-&& (p-< $i $slash_n) (p-<= (p-+ (p-cast-$ $si_ref) $dnb) $slen)))
                                                       ((p-post++ $i))
                                                 ;; $push_val->(_unpack_read_int($s, $$si_ref, $dnb, $dbe3, $dsig))
-                                                (let ((*wantarray* :void)) (p-funcall-ref $push_val (let ((*wantarray* :void)) (pl-_unpack_read_int $s (p-cast-$ $si_ref) $dnb $dbe3 $dsig))))
+                                                (p-funcall-ref $push_val (pl-_unpack_read_int $s (p-cast-$ $si_ref) $dnb $dbe3 $dsig))
                                                 
                                                 ;; $$si_ref += $dnb
                                                 (p-incf (p-cast-$ $si_ref) $dnb)
@@ -3824,7 +3824,7 @@
                                         (p-if (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-str-eq $dch "A") (p-str-eq $dch "a")) (p-str-eq $dch "Z")) (p-str-eq $dch "B")) (p-str-eq $dch "b")) (p-str-eq $dch "H")) (p-str-eq $dch "h")) (p-str-eq $dch "u")) (p-str-eq $dch "U"))
                                           (progn
                                             ;; _unpack_str($dch, $slash_n, 0, $s, $si_ref, $push_val, $checksum_p)
-                                            (let ((*wantarray* :void)) (pl-_unpack_str $dch $slash_n 0 $s $si_ref $push_val $checksum_p))
+                                            (pl-_unpack_str $dch $slash_n 0 $s $si_ref $push_val $checksum_p)
                                             
                                           )
                                           ;; elsif ($dch eq '(')
@@ -3850,7 +3850,7 @@
                                                       (p-my-= $iter_base (p-cast-$ $si_ref))
                                                       
                                                       ;; _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base, $depth + 1)
-                                                      (let ((*wantarray* :void)) (pl-_unpack_tmpl $inner $s $si_ref $push_val $be $le $checksum_p $iter_base (p-+ $depth 1)))
+                                                      (pl-_unpack_tmpl $inner $s $si_ref $push_val $be $le $checksum_p $iter_base (p-+ $depth 1))
                                                       
                                                     )
                                                   )
@@ -3924,7 +3924,7 @@
                                       (p-my-= $iter_base (p-cast-$ $si_ref))
                                       
                                       ;; _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base, $depth + 1)
-                                      (let ((*wantarray* :void)) (pl-_unpack_tmpl $inner $s $si_ref $push_val $be $le $checksum_p $iter_base (p-+ $depth 1)))
+                                      (pl-_unpack_tmpl $inner $s $si_ref $push_val $be $le $checksum_p $iter_base (p-+ $depth 1))
                                       
                                       ;; last if $$si_ref == $si_before
                                       (p-if (p-== (p-cast-$ $si_ref) $si_before) (p-last))
@@ -3947,7 +3947,7 @@
                                         (p-my-= $iter_base (p-cast-$ $si_ref))
                                         
                                         ;; _unpack_tmpl($inner, $s, $si_ref, $push_val, $be, $le, $checksum_p, $iter_base, $depth + 1)
-                                        (let ((*wantarray* :void)) (pl-_unpack_tmpl $inner $s $si_ref $push_val $be $le $checksum_p $iter_base (p-+ $depth 1)))
+                                        (pl-_unpack_tmpl $inner $s $si_ref $push_val $be $le $checksum_p $iter_base (p-+ $depth 1))
                                         
                                       )
                                     )
@@ -4095,27 +4095,27 @@
                           (p-if $all
                             (progn
                               ;; $push_val->($$si_ref)
-                              (let ((*wantarray* :void)) (p-funcall-ref $push_val (p-cast-$ $si_ref)))
+                              (p-funcall-ref $push_val (p-cast-$ $si_ref))
                               
                             )
                             ;; elsif (defined($count) && $count == 0)
                             (p-if (p-&& (p-defined $count) (p-== $count 0))
                               (progn
                                 ;; $push_val->(0)
-                                (let ((*wantarray* :void)) (p-funcall-ref $push_val 0))
+                                (p-funcall-ref $push_val 0)
                                 
                               )
                               ;; elsif (defined($count) && $count >= 2)
                               (p-if (p-&& (p-defined $count) (p->= $count 2))
                                 (progn
                                   ;; $push_val->($$si_ref)
-                                  (let ((*wantarray* :void)) (p-funcall-ref $push_val (p-cast-$ $si_ref)))
+                                  (p-funcall-ref $push_val (p-cast-$ $si_ref))
                                   
                                 )
                                 ;; else
                                 (progn
                                   ;; $push_val->($$si_ref - $group_base)
-                                  (let ((*wantarray* :void)) (p-funcall-ref $push_val (p-- (p-cast-$ $si_ref) $group_base)))
+                                  (p-funcall-ref $push_val (p-- (p-cast-$ $si_ref) $group_base))
                                   
                                 )
                               )
@@ -4152,7 +4152,7 @@
                                 (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen) (p-last))
                                 
                                 ;; $push_val->(_unpack_read_int($s, $$si_ref, $nb, $be2, $sig))
-                                (let ((*wantarray* :void)) (p-funcall-ref $push_val (let ((*wantarray* :void)) (pl-_unpack_read_int $s (p-cast-$ $si_ref) $nb $be2 $sig))))
+                                (p-funcall-ref $push_val (pl-_unpack_read_int $s (p-cast-$ $si_ref) $nb $be2 $sig))
                                 
                                 ;; $$si_ref += $nb
                                 (p-incf (p-cast-$ $si_ref) $nb)
@@ -4188,7 +4188,7 @@
                                 (p-if (p-> (p-+ (p-cast-$ $si_ref) 4) $slen) (p-last))
                                 
                                 ;; $push_val->(_unpack_float32($s, $$si_ref, $be2))
-                                (let ((*wantarray* :void)) (p-funcall-ref $push_val (let ((*wantarray* :void)) (pl-_unpack_float32 $s (p-cast-$ $si_ref) $be2))))
+                                (p-funcall-ref $push_val (pl-_unpack_float32 $s (p-cast-$ $si_ref) $be2))
                                 
                                 ;; $$si_ref += 4
                                 (p-incf (p-cast-$ $si_ref) 4)
@@ -4224,7 +4224,7 @@
                                 (p-if (p-> (p-+ (p-cast-$ $si_ref) 8) $slen) (p-last))
                                 
                                 ;; $push_val->(_unpack_float64($s, $$si_ref, $be2))
-                                (let ((*wantarray* :void)) (p-funcall-ref $push_val (let ((*wantarray* :void)) (pl-_unpack_float64 $s (p-cast-$ $si_ref) $be2))))
+                                (p-funcall-ref $push_val (pl-_unpack_float64 $s (p-cast-$ $si_ref) $be2))
                                 
                                 ;; $$si_ref += 8
                                 (p-incf (p-cast-$ $si_ref) 8)
@@ -4246,7 +4246,7 @@
                       (p-if (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a")) (p-str-eq $ch "Z")) (p-str-eq $ch "H")) (p-str-eq $ch "h")) (p-str-eq $ch "B")) (p-str-eq $ch "b")) (p-str-eq $ch "u")) (p-str-eq $ch "U")) (p-str-eq $ch "W")) (p-str-eq $ch "w"))
                         (progn
                           ;; _unpack_str($ch, $nrep, $all, $s, $si_ref, $push_val, $checksum_p)
-                          (let ((*wantarray* :void)) (pl-_unpack_str $ch $nrep $all $s $si_ref $push_val $checksum_p))
+                          (pl-_unpack_str $ch $nrep $all $s $si_ref $push_val $checksum_p)
                           
                           ;; next
                           (p-next)
@@ -4331,7 +4331,7 @@
                   )
                   
                   ;; _pack_parse_count($tmpl, \$ti)
-                  (let ((*wantarray* :void)) (pl-_pack_parse_count $tmpl (p-backslash $ti)))
+                  (pl-_pack_parse_count $tmpl (p-backslash $ti))
                   
                   ;; return (substr($tmpl, 0, $ti), substr($tmpl, $ti))
                   (p-return (p-substr $tmpl 0 $ti) (p-substr $tmpl $ti))
@@ -4385,7 +4385,7 @@
                 (p-if $checksum_width (p-=~ $tmpl (p-subst "\\A(?:[ \\t\\n\\r\\f,]|#[^\\n]*\\n?)*" "")))
                 
                 ;; _pack_check_brackets($tmpl)
-                (let ((*wantarray* :void)) (pl-_pack_check_brackets $tmpl))
+                (pl-_pack_check_brackets $tmpl)
                 
                 ;; if ($utf8_mode) { ... }
                 ;; if ($utf8_mode)
@@ -4467,7 +4467,7 @@
                           (p-if (p-length $cs_tmpl)
                             (progn
                               ;; _unpack_tmpl($cs_tmpl, $s, \$si, sub { $checksum += $_[0] }, 0, 0, 1)
-                              (let ((*wantarray* :void)) (pl-_unpack_tmpl $cs_tmpl $s (p-backslash $si) (lambda (&rest %_args)
+                              (pl-_unpack_tmpl $cs_tmpl $s (p-backslash $si) (lambda (&rest %_args)
   (let ((@_ (p-flatten-args %_args))
         (*pcl-caller-wantarray* *wantarray*))
     (catch :p-return
@@ -4480,7 +4480,7 @@
       )
     )
   )
-) 0 0 1))
+) 0 0 1)
                               
                             )
                             nil
@@ -4503,7 +4503,7 @@
                           (p-if (p-length $rest_tmpl)
                             (progn
                               ;; _unpack_tmpl($rest_tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0)
-                              (let ((*wantarray* :void)) (pl-_unpack_tmpl $rest_tmpl $s (p-backslash $si) (lambda (&rest %_args)
+                              (pl-_unpack_tmpl $rest_tmpl $s (p-backslash $si) (lambda (&rest %_args)
   (let ((@_ (p-flatten-args %_args))
         (*pcl-caller-wantarray* *wantarray*))
     (catch :p-return
@@ -4516,7 +4516,7 @@
       )
     )
   )
-) 0 0 0))
+) 0 0 0)
                               
                             )
                             nil
@@ -4527,7 +4527,7 @@
                       ;; else
                       (progn
                         ;; _unpack_tmpl($tmpl, $s, \$si, sub { push @result, $_[0] }, 0, 0, 0)
-                        (let ((*wantarray* :void)) (pl-_unpack_tmpl $tmpl $s (p-backslash $si) (lambda (&rest %_args)
+                        (pl-_unpack_tmpl $tmpl $s (p-backslash $si) (lambda (&rest %_args)
   (let ((@_ (p-flatten-args %_args))
         (*pcl-caller-wantarray* *wantarray*))
     (catch :p-return
@@ -4540,7 +4540,7 @@
       )
     )
   )
-) 0 0 0))
+) 0 0 0)
                         
                       )
                     )

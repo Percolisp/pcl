@@ -234,6 +234,23 @@ has in_subroutine => (
     default => 0,
 );
 
+=head2 wa_void_active
+
+Set to 1 while emitting statements inside a sub-body void regime: the body is
+wrapped in a single C<(let ((*wantarray* :void)) ...)>, so the ambient
+C<*wantarray*> is already C<:void>.  Both the Parser's per-statement wrap site
+and ExprToCL's per-call context wrap read this to SKIP a redundant C<:void>
+binding (binding C<:void> to C<:void> is a no-op).  Cleared at do/eval/map/grep/
+sort boundaries (whose macros rebind C<*wantarray*>, so the ambient is no longer
+C<:void> there).
+
+=cut
+
+has wa_void_active => (
+    is      => 'rw',
+    default => 0,
+);
+
 =head2 tail_position
 
 Set to 1 when the current expression is in tail position (last expression of a

@@ -1287,8 +1287,7 @@ sub gen_funcall {
         my $ctx = $self->expr_o->get_node_context($node_id);
         # INHERIT_CTX: don't override *wantarray*; p-return will restore it
         return "(funcall $func_ref)" if $ctx == INHERIT_CTX;
-        my $wa  = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-        return "(let ((*wantarray* $wa)) (funcall $func_ref))";
+        return $self->_ctx_wrap("(funcall $func_ref)", $ctx);
       }
       elsif ($arg_node->{type} eq 'anon_sub') {
         my $block_kids = $self->expr_o->get_node_children($kids->[1]);
@@ -1304,8 +1303,7 @@ sub gen_funcall {
         my $body = $arg_node->{body_cl} // 'nil';
         my $ctx  = $self->expr_o->get_node_context($node_id);
         return "(progn $body)" if $ctx == INHERIT_CTX;
-        my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-        return "(let ((*wantarray* $wa)) (progn $body))";
+        return $self->_ctx_wrap("(progn $body)", $ctx);
       }
     }
   }
@@ -1319,8 +1317,7 @@ sub gen_funcall {
       my $wrap = sub {
         my ($inner) = @_;
         return $inner if $ctx == INHERIT_CTX;
-        my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-        return "(let ((*wantarray* $wa)) $inner)";
+        return $self->_ctx_wrap($inner, $ctx);
       };
       if ($arg_node->{type} eq 'anon_sub') {
         # eval { block } with inline anon_sub - generate p-eval-block with body
@@ -1959,8 +1956,7 @@ sub gen_funcall {
     return "(let ((*wantarray* t)) $call)";
   }
   if ($func_name eq 'do') {
-    my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-    return "(let ((*wantarray* $wa)) $call)";
+    return $self->_ctx_wrap($call, $ctx);
   }
 
   # User sub calls: always bind *wantarray* so the callee sees the correct
@@ -1969,8 +1965,7 @@ sub gen_funcall {
   # list context (to avoid disturbing wantarray-sensitive built-ins called
   # inside a scalar-context scope).
   if (!exists $RUNTIME_NAMES{$func_name}) {
-    my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-    return "(let ((*wantarray* $wa)) $call)";
+    return $self->_ctx_wrap($call, $ctx);
   }
 
   # Built-in in list context: still wrap so it gets list-context signal
@@ -1993,6 +1988,20 @@ sub _wrap_wantarray_ctx {
   return $ctx == LIST_CTX
       ? "(let ((*wantarray* t)) $call)"
       : "(let ((*wantarray* nil)) $call)";
+}
+
+# Wrap CALL in (let ((*wantarray* WA)) ...) for the node's static context CTX,
+# where WA is t (list) / nil (scalar) / :void (void).  Callers handle INHERIT_CTX
+# themselves (it must NOT reach here).  When CTX is VOID and a sub-body :void
+# regime is active (environment->wa_void_active), the ambient *wantarray* is
+# already :void, so the binding is a no-op and is skipped — this is what keeps
+# nested void-context calls from re-asserting :void on every statement.
+sub _ctx_wrap {
+  my ($self, $call, $ctx) = @_;
+  return $call if $ctx == VOID_CTX
+               && $self->environment && $self->environment->wa_void_active;
+  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+  return "(let ((*wantarray* $wa)) $call)";
 }
 
 # Build the lexical-capture alist passed as the 2nd arg to (p-eval STRING ...).
@@ -2118,8 +2127,7 @@ sub gen_methodcall {
   my $ctx = $self->expr_o->get_node_context($node_id);
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
-  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-  return "(let ((*wantarray* $wa)) $call)";
+  return $self->_ctx_wrap($call, $ctx);
 }
 
 
@@ -2146,8 +2154,7 @@ sub gen_ref_funcall {
   my $ctx = $self->expr_o->get_node_context($node_id);
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
-  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-  return "(let ((*wantarray* $wa)) $call)";
+  return $self->_ctx_wrap($call, $ctx);
 }
 
 
