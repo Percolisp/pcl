@@ -139,6 +139,23 @@ sub _build_environment {
 }
 
 
+sub _maybe_decode_utf8 {
+  my ($src) = @_;
+  # `use utf8` tells Perl the source is UTF-8: multi-byte sequences in string
+  # literals (and identifiers) are single CHARACTERS, so length/substr/index/
+  # regex see characters, not bytes.  PCL reads the source as raw bytes, so we
+  # must decode it here when the pragma is in effect — otherwise "café" is 5
+  # bytes, not 4 chars.  Only decode raw byte input (an already-decoded char
+  # string is left alone); without `use utf8` Perl treats high bytes as Latin-1,
+  # which matches reading the bytes unchanged.  The pl2cl output is already
+  # written UTF-8, so the wide chars round-trip into the generated CL.
+  if (defined $src && $src =~ /\buse\s+utf8\b/ && !utf8::is_utf8($src)) {
+    my $copy = $src;
+    utf8::decode($copy) and return $copy;   # leaves $src on invalid bytes
+  }
+  return $src;
+}
+
 sub _preprocess_source {
   my ($src) = @_;
   # hex()/oct() on a hex-float mantissa (below) can exceed 0xffffffff (32-bit),
@@ -265,7 +282,7 @@ sub _build_ppi_doc {
   if ($self->has_filename) {
     open(my $fh, '<', $self->filename)
       or die "Failed to open file: " . $self->filename;
-    my $src = _preprocess_source(do { local $/; <$fh> });
+    my $src = _preprocess_source(_maybe_decode_utf8(do { local $/; <$fh> }));
     close $fh;
     my $doc = $self->_ppi_parse($src);
     return $doc if $doc;
@@ -273,7 +290,7 @@ sub _build_ppi_doc {
     return $self->_ppi_with_fallback($src);
   }
   elsif ($self->has_code) {
-    my $code = _preprocess_source($self->code);
+    my $code = _preprocess_source(_maybe_decode_utf8($self->code));
     my $doc = $self->_ppi_parse($code);
     return $doc if $doc;
     die "Failed to parse code" unless $self->lenient_ppi;

@@ -161,6 +161,29 @@ exact `" at FILE line N"` format (e.g. `warn.t`, `die.t`, `chop.t`).
 PCL uses SBCL's native Unicode strings and CL-PPCRE's regex engine.  These
 diverge from Perl in several respects:
 
+> **Supported (session 2026-06-28):** `use utf8` now decodes the *source* as
+> UTF-8 before parsing (`_maybe_decode_utf8` in `Pl/Parser.pm`), so multi-byte
+> sequences in string literals — and UTF-8 *identifiers* (`my $café`, `*ワルド`)
+> — are single characters: `use utf8; length("café")` is `4`, `substr`/`index`
+> are character-based.  Without the pragma, high bytes stay Latin-1 (byte
+> semantics), matching Perl.  The items below are the *remaining* divergences.
+>
+> **Caveat — `use utf8` is whole-file, not lexically scoped.**  Perl's `use
+> utf8` is a *lexical* pragma: only literals/identifiers inside its block are
+> UTF-8.  PCL decodes the **entire source** as UTF-8 whenever `use utf8` appears
+> anywhere in the file.  The reason is the *input shape*, not PPI: PCL passes
+> the source to PPI as a single Perl scalar, and a scalar's UTF-8 flag is
+> all-or-nothing (per-scalar), so `utf8::decode` on it is necessarily
+> whole-string.  Honoring lexical scope would mean splitting the source into its
+> `use utf8` regions and decoding each independently — but locating those
+> regions requires parsing the source first, which needs the encoding decided
+> first (circular).  The observable divergence is a file that mixes a `use utf8`
+> block with raw high-byte literals *outside* any such block:
+> `{ use utf8; length("café") }` is `4` in both, but a later unscoped
+> `length("café")` is `5` in Perl (bytes) and `4` in PCL (still decoded).  Real
+> code puts `use utf8` at the top and treats the whole file as UTF-8, so this
+> never bites in practice.
+
 - **`utf8::encode` / `utf8::decode`**: Perl has an internal UTF-8 flag per
   scalar that can be toggled.  CL strings are always Unicode; the flag does not
   exist.  Tests that call `utf8::encode` and then compare the *byte* encoding to

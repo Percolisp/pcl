@@ -240,6 +240,18 @@ already-documented not-supported buckets — **do not re-triage**:
 | `svflags.t` | 16 | crash | 🚧 `use B` (XS) |
 | `ref.t` | 257 | 172/65 | 🟡 65 = deref-error-text + glob FORMAT/IO slots + REGEXP-ref edge + DESTROY (all not-supported) |
 | `localref.t` | 64 | 63/1 | 🟡 was 30/34; FIXED `local` on symbolic deref (below); last fail = DESTROY-during-restore (GC, not-supp) |
+| `substr.t` | 400 | 375/24 | 🟡 was TRANSPILE-FAIL (0/0); unblocked by `use utf8` source-decode (below) |
+
+**🐞→✅ `use utf8` now decodes the SOURCE as UTF-8 (2026-06-28).** PCL read the
+source as raw bytes and ignored `use utf8`, so `use utf8; length("café")` gave
+`5` (bytes) not `4` (chars), and any UTF-8 *identifier* (`my $café`, `*ワルド`)
+parse-errored (PPI saw byte fragments). Fix: `_maybe_decode_utf8` in
+`Pl/Parser.pm` runs `utf8::decode` on the raw source when `use utf8` is present
+(and the string is still bytes) — before `_preprocess_source`/PPI. The pl2cl
+output is already written UTF-8, so the wide chars round-trip into the generated
+CL. Without the pragma, high bytes stay Latin-1 (byte semantics, matches Perl).
+Unblocked `op/substr.t` (0→375/400; remaining = `*MAIN::` vs `*main::` glob-pkg
+upcasing + test.pl watchdog fork). Guard: `Pl/t/utf8-source-01.t`.
 
 **🐞→✅ `local` on a deref / symbolic ref (`local ${$x}`, `$$x`, `@{$x}`, `%$x`, …).**
 These forms (`Cast($/@/%)` + `Block`/`Symbol`) were **silently dropped** — the
