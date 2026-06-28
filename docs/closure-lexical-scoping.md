@@ -273,3 +273,29 @@ closures where the outer function creates per-call closures) requires BOTH:
 - `&$scalar(args)` / `&{expr}(args)` code ref call syntax (PExpr.pm)
 - `map({key=>$_}, LIST)` hash constructor in paren/block form (Parser.pm + PExpr.pm)
 - Anonymous subs → `lambda` instead of `defun` (Parser.pm + ExprToCL.pm + PExpr.pm)
+
+## OPEN: closure capturing a `my` across a PACKAGE boundary (found 2026-06-28)
+
+A `my` lexical whose capturing sub lives in a **different package** breaks. Two
+facets of one architectural conflict:
+
+- **Block form** — `{ my $count=0; package Foo { sub bump { ++$count } } Foo::bump(); print $count }`:
+  the capture *is* recognised (`$count` → `$count__lex__1`, a `let` is opened),
+  but `_process_package_statement`'s top-level block branch emits the package via
+  `_open_section` (a fresh top-level CL chunk). That section switch closes the
+  enclosing closure-`let` early, so the trailing `print $count` references
+  `$count__lex__1` out of scope → `The variable $count__lex__1 is unbound`.
+
+- **Statement form** — `my $count=0; package Foo; sub bump { ++$count }`:
+  the capture is **not** recognised at all; `$count` inside `bump` resolves to the
+  package var `Foo::$count` (also unbound).
+
+**Root cause:** a closure-`let` must span the package block as a *single* lexical
+CL form, but at top level a package block is a *section boundary* (separate
+top-level chunk, for `in-package` correctness). The two models are incompatible.
+
+**Why deferred:** the fix touches both the bucket/section emission model and the
+closure-capture analysis — large and risky (closures are delicate, many tests).
+Found via `t/op/tiehash.t` (`unbound:$count__lex__1`); the immediate triggering
+tests are TIEHASH (partly unsupported), so payoff is currently low. Revisit when
+a real (non-tie) module is shown to depend on cross-package lexical capture.

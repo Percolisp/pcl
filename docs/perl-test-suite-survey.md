@@ -241,6 +241,25 @@ already-documented not-supported buckets — **do not re-triage**:
 | `ref.t` | 257 | 172/65 | 🟡 65 = deref-error-text + glob FORMAT/IO slots + REGEXP-ref edge + DESTROY (all not-supported) |
 | `localref.t` | 64 | 63/1 | 🟡 was 30/34; FIXED `local` on symbolic deref (below); last fail = DESTROY-during-restore (GC, not-supp) |
 | `substr.t` | 400 | 375/24 | 🟡 was TRANSPILE-FAIL (0/0); unblocked by `use utf8` source-decode (below) |
+| `tiehash.t` | 27 | 13/8 | 🐞 `unbound:$count__lex__1` = closure-across-package bug (below); rest = TIEHASH unwired |
+| `each.t` | 65 | 4/crash | 🚧 `require Hash::Util` (XS, not-supp) aborts whole file at test 4 |
+| `pos.t` | 33 | 15/15 | 🚧 defelem aliasing + DESTROY + byte/UTF8 + `pos refuses @/%` error-detect (all not-supp) |
+| `vec.t` | 78 | 73/5 | 🟡 5 = vec-lvalue error-text (RT131083) + DESTROY (all not-supp) |
+
+**🐞 OPEN — closure capturing a `my` across a PACKAGE boundary (found 2026-06-28,
+`tiehash.t`).** A `my $x` whose closure lives in a *different* package fails two
+ways: `my $x; package Foo { sub f { $x } }` recognises the capture (renames to
+`$x__lex__N`) but the top-level `package {…}` block emits via **section-switch**
+(`_open_section` in `_process_package_statement`) — each section is a separate
+top-level CL chunk — which closes the enclosing closure-`let` early, so code
+after the block references the var out of scope (`unbound`). The *statement*
+form `my $x; package Foo; sub f { $x }` is worse: the capture isn't recognised
+at all and `$x` resolves to the package var `Foo::$x` (also unbound). Root cause
+is an architectural conflict: a closure-`let` must span the package block as one
+lexical form, but top-level package blocks are section boundaries. Real fix is
+substantial + risky (touches the bucket/section model + closure capture);
+deferred — see `docs/closure-lexical-scoping.md`. Min repro: `{ my $count=0;
+package Foo { sub bump { ++$count } } Foo::bump(); print $count }`.
 
 **🐞→✅ `use utf8` now decodes the SOURCE as UTF-8 (2026-06-28).** PCL read the
 source as raw bytes and ignored `use utf8`, so `use utf8; length("café")` gave
