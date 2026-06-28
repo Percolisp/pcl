@@ -6748,8 +6748,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  ;; — so catch :p-return here.  Without this, `_sub_attrs`'s
                  ;; `(eval 'return 1; ...') ? ':lvalue' : ''` let the `return 1`
                  ;; unwind the whole sub, which returned 1 instead of the ternary.
+                 ;; Also rebind *pcl-current-package* (the Perl package name):
+                 ;; a `package Foo;` inside the eval string setf's it (see
+                 ;; p-defpackage), and without a fresh binding that switch leaks
+                 ;; into the caller's dynamic scope — so a later `eval "bar()"`
+                 ;; would resolve bar() in Foo instead of the caller's package.
+                 ;; Mirrors *package* above and the module-load rebind in p-require.
                  (result   (catch :p-return
                              (let ((*package* *package*)
+                                   (*pcl-current-package* *pcl-current-package*)
                                    (eof '#:eof))
                                (with-input-from-string (in cl-text)
                                  (loop with r = nil
