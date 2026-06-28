@@ -64,112 +64,112 @@
         (p-if (p-str-eq $ch "c")
           (progn
             ;; return (1, 1, 0)
-            (let ((*wantarray* :void)) (p-return 1 1 0))
+            (p-return 1 1 0)
             
           )
           ;; elsif ($ch eq 'C')
           (p-if (p-str-eq $ch "C")
             (progn
               ;; return (1, 0, 0)
-              (let ((*wantarray* :void)) (p-return 1 0 0))
+              (p-return 1 0 0)
               
             )
             ;; elsif ($ch eq 's')
             (p-if (p-str-eq $ch "s")
               (progn
                 ;; return (2, 1, 0)
-                (let ((*wantarray* :void)) (p-return 2 1 0))
+                (p-return 2 1 0)
                 
               )
               ;; elsif ($ch eq 'S')
               (p-if (p-str-eq $ch "S")
                 (progn
                   ;; return (2, 0, 0)
-                  (let ((*wantarray* :void)) (p-return 2 0 0))
+                  (p-return 2 0 0)
                   
                 )
                 ;; elsif ($ch eq 'n')
                 (p-if (p-str-eq $ch "n")
                   (progn
                     ;; return (2, ($bang ? 1 : 0), 1)
-                    (let ((*wantarray* :void)) (p-return 2 (p-if $bang 1 0) 1))
+                    (p-return 2 (p-if $bang 1 0) 1)
                     
                   )
                   ;; elsif ($ch eq 'v')
                   (p-if (p-str-eq $ch "v")
                     (progn
                       ;; return (2, ($bang ? 1 : 0), 0)
-                      (let ((*wantarray* :void)) (p-return 2 (p-if $bang 1 0) 0))
+                      (p-return 2 (p-if $bang 1 0) 0)
                       
                     )
                     ;; elsif ($ch eq 'i')
                     (p-if (p-str-eq $ch "i")
                       (progn
                         ;; return (4, 1, 0)
-                        (let ((*wantarray* :void)) (p-return 4 1 0))
+                        (p-return 4 1 0)
                         
                       )
                       ;; elsif ($ch eq 'I')
                       (p-if (p-str-eq $ch "I")
                         (progn
                           ;; return (4, 0, 0)
-                          (let ((*wantarray* :void)) (p-return 4 0 0))
+                          (p-return 4 0 0)
                           
                         )
                         ;; elsif ($ch eq 'l')
                         (p-if (p-str-eq $ch "l")
                           (progn
                             ;; return (($bang ? 8 : 4), 1, 0)
-                            (let ((*wantarray* :void)) (p-return (p-if $bang 8 4) 1 0))
+                            (p-return (p-if $bang 8 4) 1 0)
                             
                           )
                           ;; elsif ($ch eq 'L')
                           (p-if (p-str-eq $ch "L")
                             (progn
                               ;; return (($bang ? 8 : 4), 0, 0)
-                              (let ((*wantarray* :void)) (p-return (p-if $bang 8 4) 0 0))
+                              (p-return (p-if $bang 8 4) 0 0)
                               
                             )
                             ;; elsif ($ch eq 'N')
                             (p-if (p-str-eq $ch "N")
                               (progn
                                 ;; return (4, ($bang ? 1 : 0), 1)
-                                (let ((*wantarray* :void)) (p-return 4 (p-if $bang 1 0) 1))
+                                (p-return 4 (p-if $bang 1 0) 1)
                                 
                               )
                               ;; elsif ($ch eq 'V')
                               (p-if (p-str-eq $ch "V")
                                 (progn
                                   ;; return (4, ($bang ? 1 : 0), 0)
-                                  (let ((*wantarray* :void)) (p-return 4 (p-if $bang 1 0) 0))
+                                  (p-return 4 (p-if $bang 1 0) 0)
                                   
                                 )
                                 ;; elsif ($ch eq 'q')
                                 (p-if (p-str-eq $ch "q")
                                   (progn
                                     ;; return (8, 1, 0)
-                                    (let ((*wantarray* :void)) (p-return 8 1 0))
+                                    (p-return 8 1 0)
                                     
                                   )
                                   ;; elsif ($ch eq 'Q')
                                   (p-if (p-str-eq $ch "Q")
                                     (progn
                                       ;; return (8, 0, 0)
-                                      (let ((*wantarray* :void)) (p-return 8 0 0))
+                                      (p-return 8 0 0)
                                       
                                     )
                                     ;; elsif ($ch eq 'j')
                                     (p-if (p-str-eq $ch "j")
                                       (progn
                                         ;; return (8, 1, 0)
-                                        (let ((*wantarray* :void)) (p-return 8 1 0))
+                                        (p-return 8 1 0)
                                         
                                       )
                                       ;; elsif ($ch eq 'J')
                                       (p-if (p-str-eq $ch "J")
                                         (progn
                                           ;; return (8, 0, 0)
-                                          (let ((*wantarray* :void)) (p-return 8 0 0))
+                                          (p-return 8 0 0)
                                           
                                         )
                                         nil
@@ -851,7 +851,7 @@
                 (let ((*wantarray* :void)) (p-post++ (p-cast-$ $ti_ref)))
                 
                 ;; return (1, undef, 1)
-                (let ((*wantarray* :void)) (p-return 1 (p-undef) 1))
+                (p-return 1 (p-undef) 1)
                 
               )
               nil
@@ -918,7 +918,7 @@
                         (p-my-= $n (p-+ $inner 0))
                         
                         ;; return (0, $n, $n)
-                        (let ((*wantarray* :void)) (p-return 0 $n $n))
+                        (p-return 0 $n $n)
                         
                       )
                     )
@@ -937,7 +937,7 @@
                   (p-my-= $n (let ((*wantarray* nil)) (pl-_pack_template_size $inner)))
                   
                   ;; return (0, $n, $n)
-                  (let ((*wantarray* :void)) (p-return 0 $n $n))
+                  (p-return 0 $n $n)
                   
                 )
               )
@@ -963,7 +963,7 @@
                   )
                   
                   ;; return (0, $n, $n)
-                  (let ((*wantarray* :void)) (p-return 0 $n $n))
+                  (p-return 0 $n $n)
                   
                 )
               )

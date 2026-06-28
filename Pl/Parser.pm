@@ -1605,9 +1605,19 @@ sub _process_expression_statement {
   # Emit as comment + code.
   # When inside a sub body and NOT at tail position, wrap in void context so that
   # dynamic operators like /g regex don't inherit the caller's list context.
+  #
+  # Exception: a bare `return EXPR` (no statement modifier) needs no wrap — the
+  # p-return macro re-binds *wantarray* to *pcl-caller-wantarray* before
+  # evaluating EXPR, so an enclosing (let ((*wantarray* :void)) ...) is dead code
+  # (it is shadowed before it is ever read).  Suppressing it keeps the generated
+  # CL readable without any behaviour change.
+  my $is_bare_return = ($modifier_idx < 0)
+      && ref($parts[0]) eq 'PPI::Token::Word'
+      && $parts[0]->content eq 'return';
   if (defined $cl_code
       && $self->environment->in_subroutine > 0
-      && !$self->environment->tail_position) {
+      && !$self->environment->tail_position
+      && !$is_bare_return) {
     $cl_code = "(let ((*wantarray* :void)) $cl_code)";
   }
   $self->_emit(";; $perl_code");
