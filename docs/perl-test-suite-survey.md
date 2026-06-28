@@ -239,6 +239,20 @@ already-documented not-supported buckets — **do not re-triage**:
 | `do.t` | 71 | 54+crash | 🚧 `@INC` coderef hook returning a filehandle |
 | `svflags.t` | 16 | crash | 🚧 `use B` (XS) |
 | `ref.t` | 257 | 172/65 | 🟡 65 = deref-error-text + glob FORMAT/IO slots + REGEXP-ref edge + DESTROY (all not-supported) |
+| `localref.t` | 64 | 63/1 | 🟡 was 30/34; FIXED `local` on symbolic deref (below); last fail = DESTROY-during-restore (GC, not-supp) |
+
+**🐞→✅ `local` on a deref / symbolic ref (`local ${$x}`, `$$x`, `@{$x}`, `%$x`, …).**
+These forms (`Cast($/@/%)` + `Block`/`Symbol`) were **silently dropped** — the
+`_process_local_declaration` fall-through only recognised `Symbol`/`List`, so
+`@vars` was empty and the localize+restore never emitted (the assignment leaked
+out of scope). Fix: a new branch in `Pl/Parser.pm` emits
+`(p-local-deref-{scalar,array,hash} REF …body)`; the macros (`cl/pcl-runtime.lisp`)
+resolve REF **at run time** — a *symbolic* (string) ref resolves the package
+variable and save/restores it, a *hard* reference is the fatal Perl error
+`"Can't localize through a reference"` (so `eval { local $$hardref }` sets `$@`
+matching the test regex). Scalar restore mutates the box in place, so it must
+clear the nv/sv caches on both clear and restore (else the box reads back its
+stale cached value). Guard: `Pl/t/local-symref-01.t`. `op/localref.t` 30→63/64.
 
 **🐞→✅ scalar `($)` prototype now imposes SCALAR context (e51b6fa).** A user
 sub with an old-style `$` prototype slot evaluates that argument in scalar

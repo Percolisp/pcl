@@ -2969,6 +2969,58 @@ sub _process_local_declaration {
     }
   }
 
+  # ── local on a deref / symbolic ref: local ${EXPR}, local $$x, @{…}, %$x, …
+  # PPI gives Cast($/@/%) followed by either a Block ({EXPR}) or a Symbol ($x).
+  # Only the *symbolic* (string) ref form is localizable; localizing through a
+  # hard reference dies at runtime ("Can't localize through a reference").
+  # Resolution + save/restore lives in the p-local-deref-{scalar,array,hash}
+  # runtime macros (the value of EXPR decides symbolic-vs-hard at run time).
+  if (@non_ws >= 2
+      && ref($non_ws[0]) eq 'PPI::Token::Cast'
+      && $non_ws[0]->content =~ /^[\$\@%]$/
+      && (ref($non_ws[1]) eq 'PPI::Structure::Block'
+          || ref($non_ws[1]) eq 'PPI::Token::Symbol')) {
+    my $sigil = $non_ws[0]->content;
+    my $ref_cl;
+    if (ref($non_ws[1]) eq 'PPI::Token::Symbol') {
+      # $$x / @$x / %$x — deref the named scalar
+      $ref_cl = $self->_parse_expression([$non_ws[1]], $stmt) // 'nil';
+    } else {
+      # ${EXPR} — extract the block's inner expression
+      my @inner;
+      for my $child ($non_ws[1]->children) {
+        my $cr = ref($child);
+        next if $cr eq 'PPI::Token::Whitespace';
+        next if $cr eq 'PPI::Token::Structure';   # the { }
+        if ($cr =~ /^PPI::Statement/) {
+          for my $gc ($child->children) {
+            next if ref($gc) eq 'PPI::Token::Whitespace';
+            push @inner, $gc;
+          }
+        } else {
+          push @inner, $child;
+        }
+      }
+      if (@inner == 1 && ref($inner[0]) eq 'PPI::Token::Word') {
+        # ${aa} — a bareword names the package variable; route as a symbolic ref.
+        my $name = $inner[0]->content;
+        $ref_cl = "\"$name\"";
+      } else {
+        $ref_cl = $self->_parse_expression(\@inner, $stmt) // 'nil';
+      }
+    }
+    my $macro = $sigil eq '@' ? 'p-local-deref-array'
+              : $sigil eq '%' ? 'p-local-deref-hash'
+              :                 'p-local-deref-scalar';
+    $self->_emit(";; $perl_code");
+    $self->_emit("($macro $ref_cl");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+    $self->_emit("");
+    return;
+  }
+
   # Detect 'local our $var' — the 'our' qualifier means a package variable.
   # Emit a defvar so the variable is declared as special before local binds it.
   my $has_our = (@non_ws && ref($non_ws[0]) eq 'PPI::Token::Word'
