@@ -1605,10 +1605,35 @@ sub _process_expression_statement {
   # Emit as comment + code.
   # When inside a sub body and NOT at tail position, wrap in void context so that
   # dynamic operators like /g regex don't inherit the caller's list context.
+  #
+  # Exception: a bare `return EXPR` (no statement modifier) needs no wrap — the
+  # p-return macro re-binds *wantarray* to *pcl-caller-wantarray* before
+  # evaluating EXPR, so an enclosing (let ((*wantarray* :void)) ...) is dead code
+  # (it is shadowed before it is ever read).  Suppressing it keeps the generated
+  # CL readable without any behaviour change.
+  my $is_bare_return = ($modifier_idx < 0)
+      && ref($parts[0]) eq 'PPI::Token::Word'
+      && $parts[0]->content eq 'return';
   if (defined $cl_code
       && $self->environment->in_subroutine > 0
-      && !$self->environment->tail_position) {
-    $cl_code = "(let ((*wantarray* :void)) $cl_code)";
+      && !$self->environment->tail_position
+      && !$is_bare_return) {
+    # Non-tail statement runs in void context.  When a sub-body void regime is
+    # active (wa_void_active: *wantarray* already bound to :void once around the
+    # whole body), trust that inherited dynamic binding and emit no wrap.
+    # Otherwise (a do/eval/map/grep/sort boundary, or no regime) wrap this one.
+    $cl_code = "(let ((*wantarray* :void)) $cl_code)"
+      unless $self->environment->wa_void_active;
+  }
+  elsif (defined $cl_code
+         && $self->environment->wa_void_active
+         && $self->environment->tail_position
+         && !$is_bare_return) {
+    # Tail (value/return position) under an active void regime: the body bound
+    # *wantarray* to :void, but the implicit return value must use the CALLER's
+    # context.  Restore it for this one statement (explicit `return` is excluded —
+    # p-return already restores *pcl-caller-wantarray* itself).
+    $cl_code = "(let ((*wantarray* *pcl-caller-wantarray*)) $cl_code)";
   }
   $self->_emit(";; $perl_code");
   $self->_emit($cl_code) if defined $cl_code;
@@ -4320,6 +4345,15 @@ sub parse_block_as_function {
   $self->_emit($loop_transparent ? "(progn" : "(block nil");
   $self->indent_level($self->indent_level + 1);
 
+  # Anon-sub void regime (like named subs): bind *wantarray* :void once around
+  # the body; the tail restores *pcl-caller-wantarray* (bound in the let above).
+  # do{}/eval{} blocks (is_anon_sub=0) are boundaries — they run in their OWN
+  # caller context, so they keep the per-statement wraps (wa_void_active=0).
+  if ($is_anon_sub) {
+    $self->_emit("(let ((*wantarray* :void))");
+    $self->indent_level($self->indent_level + 1);
+  }
+
   # Enter new scope for filehandles; count as a subroutine so 'my'
   # declarations use the let-binding path, not eval-when+defvar.
   $self->environment->push_scope();
@@ -4329,6 +4363,7 @@ sub parse_block_as_function {
   # For anon subs with state vars, set the rename map so _process_state_declaration
   # uses the unique CL names, and set _current_state_vars so it triggers.
   {
+    local $self->environment->{wa_void_active} = $is_anon_sub ? 1 : 0;
     local $self->{_current_state_vars} = \%anon_state_vars_set;
     my $saved_renames = $self->environment->state_var_renames;
     if (%state_renames) {
@@ -4346,6 +4381,11 @@ sub parse_block_as_function {
 
   # Leave scope - removes filehandles added in this block
   $self->environment->pop_scope();
+
+  if ($is_anon_sub) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");  # close (let ((*wantarray* :void)))
+  }
 
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close block nil
@@ -4424,6 +4464,11 @@ sub parse_block_to_cl_string {
   # map { ... } evaluates its block in LIST context (so `..` is range, an @array
   # tail flattens, etc.).  grep/sort blocks stay scalar/boolean (their default).
   my $tail_wants_list = ($for_func eq 'map');
+
+  # Boundary: the map/grep/sort macro rebinds *wantarray* (to list/scalar), so an
+  # enclosing sub-body void regime does NOT reach here.  Clear wa_void_active so
+  # the block's non-tail statements get their own per-statement :void wraps.
+  local $self->environment->{wa_void_active} = 0;
 
   # Save current bucket state and indent; set up a fresh temp section
   my $saved_sections    = $self->_sections;
@@ -6190,10 +6235,20 @@ sub _process_sub_statement {
   $self->_emit("(block nil");
   $self->indent_level($self->indent_level + 1);
 
+  # Sub-body void regime: bind *wantarray* to :void ONCE around the whole body
+  # instead of wrapping every non-tail statement.  Nested if/while/for blocks
+  # inherit this dynamic binding; the tail (implicit return) restores the
+  # caller's context via *pcl-caller-wantarray* (see the wrap site in
+  # _process_expression_statement).  wa_void_active tells statement emitters the
+  # ambient is already :void so they can trust it.
+  $self->_emit("(let ((*wantarray* :void))");
+  $self->indent_level($self->indent_level + 1);
+
   # Track that we're inside a subroutine (for shift/pop @_ vs @ARGV)
   $self->environment->in_subroutine($self->environment->in_subroutine + 1);
 
   if ($block) {
+    local $self->environment->{wa_void_active} = 1;
     # Wrap sub body with let for local variable declarations.
     # Pass state_vars so _with_declarations knows to skip them.
     # Also set rename map in environment so ExprToCL remaps $x -> $state--sub--x--N.
@@ -6225,6 +6280,9 @@ sub _process_sub_statement {
 
   # Leaving subroutine
   $self->environment->in_subroutine($self->environment->in_subroutine - 1);
+
+  $self->indent_level($self->indent_level - 1);
+  $self->_emit(")");  # close (let ((*wantarray* :void)))
 
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close block

@@ -8260,9 +8260,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-glob (&optional pattern)
   "Perl glob / <*.txt> - expand file glob pattern.
    In list context: first call returns all matches; second call with same pattern returns empty.
-   In scalar context: returns one match per call, nil when exhausted; resets for next cycle."
+   In scalar context: returns one match per call, nil when exhausted; resets for next cycle.
+   When *p-in-list-assign-rhs* is t (inside a p-list-= RHS) glob always uses scalar
+   (iterator) mode, so `while (($x) = glob(...))` returns one file per iteration —
+   mirrors p-readline's handling of `while (($x) = <FH>)`."
   (let ((pat (if pattern (to-string pattern) "*")))
-    (if (eq *wantarray* t)
+    (if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
         (p-glob--list-context pat)
         (p-glob--scalar-context pat))))
 
@@ -12699,19 +12702,25 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun pl-WEXITSTATUS (status) (ash (logand (unbox status) #xff00) -8))
 (in-package :pcl)
 
-;; Internals module stubs (CL case-folds Internals → INTERNALS)
-(defpackage :INTERNALS (:use :cl :pcl))
-(in-package :INTERNALS)
+;; Internals module stubs.  The package and the mixed-case function names MUST
+;; match what the codegen emits under the :invert readtable: generated code uses
+;; the package `Internals` (via p-defpackage, case-preserved — NOT the upcased
+;; INTERNALS) and calls each function by its exact Perl-identifier case
+;; (`pl-SvREADONLY`, not `pl-svreadonly`).  Writing the tokens in their true case
+;; here makes :invert intern the same symbols.  (`stack_refcounted` is all-lower
+;; in Perl, so it round-trips either way.)
+(defpackage :Internals (:use :cl :pcl))
+(in-package :Internals)
 ;; Returns 0 — PCL is not a reference-counted stack build
 (defun pl-stack_refcounted () (make-p-box 0))
 ;; Internals::SvREADONLY($ref, $flag) — marks a scalar read-only.
 ;; PCL has no read-only box semantics; this is a documented no-op.
 ;; Returns 0 (not read-only) when called as a getter (1 arg).
-(defun pl-svreadonly (&rest args)
+(defun pl-SvREADONLY (&rest args)
   (declare (ignore args))
   (make-p-box 0))
 ;; Internals::SvREFCNT($ref) — reference count; always 1 in a GC runtime.
-(defun pl-svrefcnt (&rest args)
+(defun pl-SvREFCNT (&rest args)
   (declare (ignore args))
   (make-p-box 1))
 (in-package :pcl)
