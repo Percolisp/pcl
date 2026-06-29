@@ -268,11 +268,19 @@ already-documented not-supported buckets — **do not re-triage**:
    invocant that is immediately followed by parens — that's a function call, not
    a class.  (`new Foo::Bar(…)` stays handled by the dedicated `new` pre-pass.)
 
-   Guards: `Pl/t/transpile-test-03.t` (3 tests).  **Still open in universal.t:**
-   `tie my($x), "Class"` crashes (`p-tie` gets 1 arg — the parenthesised `my($x)`
-   declaration as a funcall arg is mis-split; bare `tie my $x, "Class"` works).
-   Plus `keys %UNIVERSAL::` stash-walk and isa-on-exotic-refs (LVALUE/GLOB)
-   undef-vs-"" — not-supported buckets.
+   Guards: `Pl/t/transpile-test-03.t` (3 tests).  Remaining universal.t fails =
+   `keys %UNIVERSAL::` stash-walk, isa-on-exotic-refs (LVALUE/GLOB) undef-vs-"",
+   and `fresh_perl_is` (test.pl `runperl` spawns a real `./perl`) — all
+   not-supported / fixture buckets.
+
+**🐞→✅ `my(LIST)` as a list-operator funcall argument (2026-06-30).**
+`f my($y), LIST` mis-parsed as `f($y)` with LIST orphaned — after `extract_declarations`
+strips the `my`, the leftover `($y)` Structure::List was mistaken for the call's
+own argument parens.  Now decl-lists are tagged `_pcl_decl_list` and the
+funcall-paren detector in `handle_subcalls` skips them, so the bare list-operator
+pass grabs `f($y, LIST)`.  This also fixed `tie my($x), "Class"` (was a `p-tie`-gets-1-arg
+crash; bare `tie my $x` already worked) → unblocked the universal.t tie block
+(55→59) and catch.t no longer crashes.  Guard: `Pl/t/transpile-test-03.t`.
 
 **🐞→✅ Lower/mixed-case bareword filehandle after print/say (2026-06-30).**
 `open(foo,…); print foo LIST` parse-errored — the print/say filehandle detector

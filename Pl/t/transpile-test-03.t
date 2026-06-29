@@ -517,4 +517,16 @@ package main;
 check Util::thing(1, 2);
 ');
 
+
+# A parenthesised my(...) declaration used as a list-operator argument must not
+# be mistaken for the call's own argument parens: `f my($y), LIST` is
+# f($y, LIST), not f($y).  (Same shape as `tie my($x), "Class".)
+test_transpile("my(\$x) as a list-operator funcall argument", '
+sub f { print "n=", scalar(@_), " v=@_\n" }
+f my($a), "two";
+f(my($b), "three");
+my @c = (my($d), "four");
+print "c=@c\n";
+');
+
 done_testing();

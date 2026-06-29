@@ -301,7 +301,10 @@ sub extract_declarations {
       if (@vars) {
         if ($decl_list) {
           # List-form: my ($k,$v) = expr → keep Structure::List intact so
-          # the binary-op parser sees ($k,$v) as a single LHS unit.
+          # the binary-op parser sees ($k,$v) as a single LHS unit.  Tag it so
+          # the funcall-paren detector won't mistake a stripped `my(...)` for a
+          # call's own argument parens (`f my($y), LIST` → f($y, LIST), not f($y)).
+          $decl_list->{_pcl_decl_list} = 1;
           push @result, $decl_list;
         } else {
           # Scalar-form: my $x = expr → single Symbol token
@@ -373,6 +376,7 @@ sub extract_declarations {
       say "extract_declarations: Found $decl_type for list: ", join(", ", @vars)
           if 1 & DEBUG;
       delete $self->{_pending_decl};
+      $item->{_pcl_decl_list} = 1;  # see note at the Statement::Variable branch
       push @result, $item;  # Keep the list structure
     }
     elsif (ref($item) =~ /::Whitespace$/) {
@@ -2832,6 +2836,12 @@ sub handle_subcalls {
 
     next
         if !$self->is_list($next);
+
+    # A stripped `my(...)`/`our(...)` declaration list is NOT this call's
+    # argument parens: `f my($y), LIST` must parse as f($y, LIST).  Leave it for
+    # the bare list-operator pass below (which grabs args until a low-prio op).
+    next
+        if ref($next) eq 'PPI::Structure::List' && $next->{_pcl_decl_list};
 
     # - - - open
     # Special handling: register bareword filehandle BEFORE parsing args
