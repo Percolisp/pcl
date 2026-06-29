@@ -310,6 +310,7 @@ has known_no_of_params => (
       uc         => [1,  -2],
       ucfirst    => [1,  -2],
       hex        => [1,  -2],
+      glob       => [1,  -2],   # glob EXPR or bare glob (defaults to $_)
       index      => [2,   3],
       lcfirst    => [1,  -2],
       length     => [1,  -2],

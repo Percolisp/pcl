@@ -245,7 +245,8 @@ already-documented not-supported buckets — **do not re-triage**:
 | `each.t` | 65 | 4/crash | 🚧 `require Hash::Util` (XS, not-supp) aborts whole file at test 4 |
 | `pos.t` | 33 | 15/15 | 🚧 defelem aliasing + DESTROY + byte/UTF8 + `pos refuses @/%` error-detect (all not-supp) |
 | `vec.t` | 78 | 73/5 | 🟡 5 = vec-lvalue error-text (RT131083) + DESTROY (all not-supp) |
-| `universal.t` | 142 | 2→55/51 | 🐞→🟡 (2026-06-30): four general fixes below took it from a 2-test crash to 55; rest = `keys %UNIVERSAL::` stash-walk + isa-on-exotic-ref undef-vs-"" + `tie my($x)` crash (below) |
+| `universal.t` | 142 | 2→59/53 | 🐞→🟡 (2026-06-30): five general fixes below took it from a 2-test crash to 59; rest = `keys %UNIVERSAL::` stash-walk + isa-on-exotic-ref undef-vs-"" + `fresh_perl_is` (runperl) |
+| `glob.t` | 18 | 6→16/1 | 🐞→🟡 (2026-06-30): was a `local %Pkg::` crash (6); fixes below recover 16. test 6 (`@x=glob` then `@x=glob` same pattern) = glob iterator keyed by pattern-string not call-site (returns empty 2nd time) — pre-existing limitation; 13/16-18 = File::Glob `~`/CORE::GLOBAL override (not-supp) |
 | `print.t`(op) | 3 | 3/0 | ✅ |
 
 **🐞→✅ Four general method-dispatch / parse fixes (2026-06-30, via `op/universal.t`).**
@@ -281,6 +282,26 @@ funcall-paren detector in `handle_subcalls` skips them, so the bare list-operato
 pass grabs `f($y, LIST)`.  This also fixed `tie my($x), "Class"` (was a `p-tie`-gets-1-arg
 crash; bare `tie my $x` already worked) → unblocked the universal.t tie block
 (55→59) and catch.t no longer crashes.  Guard: `Pl/t/transpile-test-03.t`.
+
+**🐞→✅ Two glob fixes + whole-stash-local crash (2026-06-30, via `op/glob.t`).**
+- **`local %Pkg::` (whole-stash localize) crashed the compile.** `_transform_pkg_var`
+  renders `%File::Glob::` as a `(p-stash …)` form, which `_process_local_declaration`
+  then used as a `let`-binding place → invalid CL → SBCL compile abort killing the
+  file.  Now whole-stash locals (`(p-stash …)` vars) are dropped (stash
+  localization is not supported) and the body runs unshadowed.
+- **`glob "dir/*"` did not match files with extensions.** `p-glob--expand` built
+  a CL wild pathname and called `(directory …)`; CL splits `aaa.txt` into
+  name=`aaa`/type=`txt`, and a glob `*` parses to name=`:wild`/type=NIL — which
+  matches only *extensionless* names.  So `glob("*")` returned 0 against any dir
+  of dotted files.  Rewrote `p-glob--expand` to enumerate the (fixed) directory
+  via `:name :wild :type :wild` and filter leaf names with a glob→regex
+  (`%p-glob-component-regex`), honouring Perl's leading-dot rule and sorting
+  results.  Wildcards in the *directory* portion fall back to the old pathname
+  path.
+- **Bare `glob` (no arg) now defaults to `$_`** — added `glob => [1,-2]` to
+  `known_no_of_params` (`Pl/PExpr/Config.pm`); it was absent, so bare `glob`
+  parsed as the bareword string `"glob"`.
+  Guards: `Pl/t/glob-01.t` (+2).
 
 **🐞→✅ Lower/mixed-case bareword filehandle after print/say (2026-06-30).**
 `open(foo,…); print foo LIST` parse-errored — the print/say filehandle detector

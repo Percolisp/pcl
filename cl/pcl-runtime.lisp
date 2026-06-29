@@ -8242,20 +8242,99 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; Maps pattern string -> (index . results-vector) or :list-done (after list exhaustion).
 (defvar *p-glob-iterators* (make-hash-table :test 'equal))
 
-(defun p-glob--expand (pat)
-  "Expand glob pattern PAT and return a vector of matching filenames."
-  (let* ((expanded-pat (expand-glob-char-ranges pat))
-         (is-relative (not (and (> (length expanded-pat) 0) (char= (char expanded-pat 0) #\/))))
-         (full-pat (if is-relative
+(defun %p-glob-component-regex (glob)
+  "cl-ppcre pattern (whole-string anchored) for one shell-glob filename
+   component: `*` → any run, `?` → any one char, `[..]` char classes kept
+   (ranges already expanded by expand-glob-char-ranges, `!` negation → `^`),
+   every other char escaped literally.  Used to filter a directory listing so
+   `*` matches dotted names too (CL's pathname `*` wrongly requires no
+   extension)."
+  (with-output-to-string (s)
+    (write-char #\^ s)
+    (let ((i 0) (len (length glob)))
+      (loop while (< i len) do
+            (let ((c (char glob i)))
+              (cond
+                ((char= c #\*) (write-string "[^/]*" s) (incf i))
+                ((char= c #\?) (write-string "[^/]" s) (incf i))
+                ((char= c #\[)
+                 (let ((j (1+ i)))
+                   (when (and (< j len) (member (char glob j) '(#\^ #\!))) (incf j))
+                   (when (and (< j len) (char= (char glob j) #\])) (incf j))
+                   (loop while (and (< j len) (not (char= (char glob j) #\]))) do (incf j))
+                   (if (< j len)
+                       (progn (write-string (substitute #\^ #\! (subseq glob i (1+ j))) s)
+                              (setf i (1+ j)))
+                       (progn (write-string "\\[" s) (incf i)))))
+                (t (when (find c ".\\+*?()|{}^$") (write-char #\\ s))
+                   (write-char c s) (incf i))))))
+    (write-char #\$ s)))
+
+(defun %p-glob-leaf-name (path)
+  "Final path component of PATH as a string — the directory name for a
+   directory pathname, else the file name+type."
+  (if (and (null (pathname-name path)) (null (pathname-type path)))
+      (car (last (pathname-directory path)))
+      (file-namestring path)))
+
+(defun %p-glob--expand-dir (dir-prefix file-glob)
+  "Match FILE-GLOB against the leaf names in the fixed directory DIR-PREFIX
+   (\"\" = cwd).  Enumerates every entry (files + dirs, any extension) and
+   filters via a glob→regex, so `*` matches dotted names — honouring Perl's
+   rule that a leading dot is matched only if the pattern starts with one."
+  (let* ((relative (or (string= dir-prefix "") (not (char= (char dir-prefix 0) #\/))))
+         (full-dir (cond ((string= dir-prefix "") (concatenate 'string (sb-posix:getcwd) "/"))
+                         (relative (concatenate 'string (sb-posix:getcwd) "/" dir-prefix))
+                         (t dir-prefix)))
+         (dir-path (handler-case (parse-namestring full-dir) (error () nil)))
+         (entries (when dir-path
+                    (handler-case
+                        (directory (make-pathname :directory (pathname-directory dir-path)
+                                                  :name :wild :type :wild)
+                                   :resolve-symlinks nil)
+                      (error () nil))))
+         (scanner (handler-case
+                      (cl-ppcre:create-scanner (%p-glob-component-regex file-glob))
+                    (error () nil)))
+         (match-dot (and (plusp (length file-glob)) (char= (char file-glob 0) #\.)))
+         (result (make-array 0 :adjustable t :fill-pointer 0)))
+    (when scanner
+      (dolist (p entries)
+        (let ((leaf (%p-glob-leaf-name p)))
+          (when (and leaf
+                     (or match-dot
+                         (not (and (plusp (length leaf)) (char= (char leaf 0) #\.))))
+                     (cl-ppcre:scan scanner leaf))
+            (vector-push-extend (concatenate 'string dir-prefix leaf) result)))))
+    (sort result #'string<)))
+
+(defun %p-glob--expand-pathname (expanded-pat orig-pat)
+  "Fallback: expand via CL pathname wildcarding (used when wildcards appear in
+   the DIRECTORY portion).  Imperfect for dotted names but rare."
+  (let* ((relative (not (and (> (length expanded-pat) 0) (char= (char expanded-pat 0) #\/))))
+         (full-pat (if relative
                        (concatenate 'string (sb-posix:getcwd) "/" expanded-pat)
                        expanded-pat))
-         (dir-prefix (let ((slash-pos (position #\/ pat :from-end t)))
-                       (if slash-pos (subseq pat 0 (1+ slash-pos)) "")))
+         (dir-prefix (let ((slash-pos (position #\/ orig-pat :from-end t)))
+                       (if slash-pos (subseq orig-pat 0 (1+ slash-pos)) "")))
          (all-matches (handler-case (directory (parse-namestring full-pat)) (error () nil)))
          (matches (remove-if (lambda (p) (null (pathname-name p))) all-matches))
          (result (make-array (length matches) :fill-pointer 0)))
     (dolist (path matches result)
       (vector-push (concatenate 'string dir-prefix (file-namestring path)) result))))
+
+(defun p-glob--expand (pat)
+  "Expand glob pattern PAT and return a vector of matching filenames."
+  (let* ((expanded (expand-glob-char-ranges pat))
+         (slash (position #\/ expanded :from-end t))
+         (dir-prefix (if slash (subseq expanded 0 (1+ slash)) ""))
+         (file-glob  (if slash (subseq expanded (1+ slash)) expanded)))
+    (if (or (string= file-glob "")
+            (find-if (lambda (c) (member c '(#\* #\? #\[))) dir-prefix))
+        ;; Wildcard in the directory portion (rare): old pathname behaviour.
+        (%p-glob--expand-pathname expanded pat)
+        ;; Common case: fixed directory, wildcard last component.
+        (%p-glob--expand-dir dir-prefix file-glob))))
 
 (defun p-glob (&optional pattern)
   "Perl glob / <*.txt> - expand file glob pattern.

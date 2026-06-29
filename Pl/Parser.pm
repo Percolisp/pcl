@@ -3108,6 +3108,18 @@ sub _process_local_declaration {
 
   return unless @vars;
 
+  # Whole-stash local — `local %Pkg::` (and `local *Pkg::`) — is stash
+  # localization, which PCL does not support (see not-supported.md "Live
+  # symbol-table hashes").  _transform_pkg_var renders these as a (p-stash ...)
+  # form, which is NOT a valid let-binding place (it crashed the SBCL compile,
+  # aborting the whole file).  Drop such vars; if that leaves nothing to
+  # localize, run the body unshadowed.
+  if (grep { /^\(p-stash / } @vars) {
+    @vars = grep { !/^\(p-stash / } @vars;
+    $self->_emit(";; $perl_code (whole-stash local — not supported, skipped)");
+    return unless @vars;
+  }
+
   $self->_emit(";; $perl_code");
 
   # local $. — the line-number magic refers to the last-accessed filehandle, so

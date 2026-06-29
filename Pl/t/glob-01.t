@@ -437,4 +437,27 @@ END_CODE
   like($output, qr/\b3\b/, '@a = glob still returns all matches at once');
 }
 
+
+# Test: bare `*` matches names WITH extensions and directories (CL's pathname
+# `*` wrongly requires no extension — regression for the directory-listing fix).
+{
+  my $output = run_pcl(<<"END_CODE");
+my \@all = glob("$tmpdir/*");
+print scalar(\@all);
+END_CODE
+
+  like($output, qr/\b5\b/, 'glob(*) matches extensioned files + dirs (a.txt b.txt c.log d.txt sub)');
+}
+
+# Test: bare `glob` (no argument) defaults to \$_.
+{
+  my $output = run_pcl(<<"END_CODE");
+\$_ = "$tmpdir/*.txt";
+my \@f = glob;
+print scalar(\@f);
+END_CODE
+
+  like($output, qr/\b3\b/, 'bare glob defaults to \$_');
+}
+
 done_testing();
