@@ -2080,6 +2080,13 @@ sub gen_methodcall {
     } else {
       $obj = $self->gen_node($kids->[0]);
     }
+  } elsif ($self->_is_paren_scalar_base($kids->[0])) {
+    # A parenthesised single-value invocant — (EXPR)->method — is a scalar, so
+    # generate it in SCALAR context.  Under LIST_CTX (e.g. the call is an
+    # argument to another sub) a paren node otherwise renders as (vector ...),
+    # making the invocant an array ref → "Can't call method on unblessed
+    # reference".  Same fix as the array/hash arrow-deref bases above.
+    $obj = $self->_gen_scalar_deref_base($kids->[0]);
   } else {
     $obj = $self->gen_node($kids->[0]);
   }
@@ -3109,9 +3116,12 @@ sub gen_filehandle {
   # Filehandle has one child - the actual handle name/variable
   if (@$kids) {
     my $fh = $self->gen_node($kids->[0]);
-    # Quote bareword filehandles (FH, STDOUT, etc.) so CL doesn't try to evaluate them
-    # Barewords are uppercase words without sigils
-    if ($fh =~ /^[A-Z][A-Z0-9_]*$/) {
+    # Quote bareword filehandles (FH, STDOUT, foo, etc.) so CL doesn't try to
+    # evaluate them.  Barewords are identifiers without sigils or parens —
+    # Perl allows any-case handles (`open(foo,...); print foo LIST`), so this
+    # covers both all-caps and lower/mixed-case registered handles.  A `$fh`
+    # variable or a parenthesised expression is left to evaluate as-is.
+    if ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
       return ":fh '$fh";
     }
     return ":fh $fh";

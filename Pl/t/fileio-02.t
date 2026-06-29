@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 30;
+plan tests => 31;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -556,5 +556,22 @@ print "restored=$.\n";                # 42
 tell $A;                              # make A current again without reading
 print "A_again=$.\n";                 # 2
 close $A; close $B; unlink $f;
+PERL
+}
+
+# --- Test 31: lower/mixed-case bareword filehandle (print foo LIST) ---
+# Perl allows any-case bareword handles via open(foo,...).  PCL previously only
+# recognised ALL-CAPS barewords after print/say, so `print foo "..."` parse-errored.
+{
+    test_io('lowercase bareword filehandle: open(foo,...); print foo LIST', <<'PERL');
+my $f = "/tmp/pcl_bareword_$$";
+open(foo, '>', $f) or die;
+print foo "line1\n";
+say foo "line2";
+close(foo);
+open(foo, '<', $f) or die;
+print while <foo>;
+close(foo);
+unlink $f;
 PERL
 }

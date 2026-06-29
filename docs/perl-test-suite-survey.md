@@ -245,6 +245,42 @@ already-documented not-supported buckets — **do not re-triage**:
 | `each.t` | 65 | 4/crash | 🚧 `require Hash::Util` (XS, not-supp) aborts whole file at test 4 |
 | `pos.t` | 33 | 15/15 | 🚧 defelem aliasing + DESTROY + byte/UTF8 + `pos refuses @/%` error-detect (all not-supp) |
 | `vec.t` | 78 | 73/5 | 🟡 5 = vec-lvalue error-text (RT131083) + DESTROY (all not-supp) |
+| `universal.t` | 142 | 2→55/51 | 🐞→🟡 (2026-06-30): four general fixes below took it from a 2-test crash to 55; rest = `keys %UNIVERSAL::` stash-walk + isa-on-exotic-ref undef-vs-"" + `tie my($x)` crash (below) |
+| `print.t`(op) | 3 | 3/0 | ✅ |
+
+**🐞→✅ Four general method-dispatch / parse fixes (2026-06-30, via `op/universal.t`).**
+1. **Paren method-call invocant in LIST context wrapped in `(vector …)`.**
+   `(EXPR)->method` where the whole call is an argument to another sub (LIST
+   context) generated `(p-method-call (vector OBJ) "method" …)` → "Can't call
+   method on unblessed reference".  Fix: `gen_methodcall` (`Pl/ExprToCL.pm`) now
+   routes a paren-scalar-base invocant through `_gen_scalar_deref_base` (SCALAR
+   ctx), reusing the same helper the `$x->[i]`/`$x->{k}` arrow-deref bases use.
+   This is the high-leverage one — affects any `(…)->m` inside a list.
+2. **`main::Foo` didn't resolve as a package.** `"main::Alice"->new` failed —
+   `%pcl-find-package` (`cl/pcl-runtime.lisp`) treated `main::Foo` literally; it
+   now retries with the root-stash `main::` prefix stripped (`Foo`).
+3. **`isa("Foo")` on an object blessed into `"main::Foo"` returned false.**
+   `p-isa` compares class names; now normalises a leading `main::` on both
+   sides (`%pcl-normalize-pkg`).
+4. **`is Qualified::name(ARGS)` mis-parsed as indirect object.**
+   `is UNIVERSAL::isa($x,$y)` became `UNIVERSAL::isa->is(…)`.  The general
+   indirect-object pre-pass (`Pl/PExpr.pm`) now skips a qualified-name (`Foo::bar`)
+   invocant that is immediately followed by parens — that's a function call, not
+   a class.  (`new Foo::Bar(…)` stays handled by the dedicated `new` pre-pass.)
+
+   Guards: `Pl/t/transpile-test-03.t` (3 tests).  **Still open in universal.t:**
+   `tie my($x), "Class"` crashes (`p-tie` gets 1 arg — the parenthesised `my($x)`
+   declaration as a funcall arg is mis-split; bare `tie my $x, "Class"` works).
+   Plus `keys %UNIVERSAL::` stash-walk and isa-on-exotic-refs (LVALUE/GLOB)
+   undef-vs-"" — not-supported buckets.
+
+**🐞→✅ Lower/mixed-case bareword filehandle after print/say (2026-06-30).**
+`open(foo,…); print foo LIST` parse-errored — the print/say filehandle detector
+(`Pl/PExpr.pm`) only recognised ALL-CAPS barewords; now also accepts any-case
+barewords already registered as a filehandle via `open`.  `gen_filehandle`
+(`Pl/ExprToCL.pm`) quotes any bareword identifier (not just all-caps) in fh
+position.  `io/print.t` 22→23, `io/say.t` 8→13 (full).  Guard:
+`Pl/t/fileio-02.t` test 31.
 
 **🐞 OPEN — closure capturing a `my` across a PACKAGE boundary (found 2026-06-28,
 `tiehash.t`).** A `my $x` whose closure lives in a *different* package fails two

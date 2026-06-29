@@ -486,4 +486,35 @@ sub g ($$$@) { my ($flip, undef, $expected, $name, @mess) = @_;
 print f("got", "EXP", "nm", "x", "y"), "\n";
 ');
 
+
+# ---- method-call invocant / package-resolution / indirect-object fixes ----
+
+# A parenthesised method-call result used as an invocant in LIST context must
+# stay a scalar invocant, not be wrapped in (vector ...) → "unblessed reference".
+test_transpile("paren method invocant in list context", '
+package Widget; sub new { bless {}, shift } sub name { "wid" }
+package main;
+sub take { print "got=$_[0]\n" }
+take( ("Widget"->new)->name );
+my @r = ( ("Widget"->new)->name );
+print "arr=@r\n";
+');
+
+# main::Foo names the same package as Foo (main:: is the root-stash prefix).
+test_transpile("main::Class->method resolves like Class->method", '
+package Foo; sub new { bless {}, shift } sub hi { "hello" }
+package main;
+print "main::Foo->new->hi = ", ("main::Foo"->new)->hi, "\n";
+print "isa = ", (("main::Foo"->new)->isa("Foo") ? "yes" : "no"), "\n";
+');
+
+# `is Qualified::name(ARGS)` is a function call argument, not the indirect
+# object `Qualified::name->is(ARGS)`.
+test_transpile("qualified-name(args) after a word is a funcall, not indirect obj", '
+sub check { print "check: $_[0]\n" }
+package Util; sub thing { "T:@_" }
+package main;
+check Util::thing(1, 2);
+');
+
 done_testing();

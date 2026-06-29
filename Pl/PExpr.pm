@@ -2105,6 +2105,15 @@ sub handle_subcalls {
       if (ref($invocant) eq 'PPI::Token::Word'
           && !$self->is_token_operator($invocant)
           && $invocant->content =~ /^[A-Z]/) {
+        # A qualified name (Foo::bar) immediately followed by parens is a
+        # function call — `is UNIVERSAL::isa($x,$y)` is `is(UNIVERSAL::isa(...))`,
+        # NOT the indirect-object `UNIVERSAL::isa->is(...)`.  (The `new Foo::Bar(...)`
+        # indirect-with-parens form is handled by the dedicated `new` pre-pass.)
+        if ($invocant->content =~ /::/
+            && $i + 2 <= scalar(@$e) - 1
+            && ref($e->[$i+2]) eq 'PPI::Structure::List') {
+          next;
+        }
         # Skip all-uppercase invocants unless they are known declared packages:
         # unqualified all-caps words are typically filehandles (STDIN/STDOUT),
         # special blocks (BEGIN/END), or constants — not class names.
@@ -3332,10 +3341,14 @@ sub handle_subcalls {
       # Track filehandle expression end position (for multi-token expressions)
       my $fh_end = $i + 1;  # Start at first token after print/say
 
-      # Check for uppercase bareword (STDERR, STDOUT, FH, etc.)
+      # Check for uppercase bareword (STDERR, STDOUT, FH, etc.) or a
+      # lower/mixed-case bareword already registered as a filehandle via
+      # open(foo, ...) — Perl allows `print foo LIST` for any-case handles.
       if ($self->is_word($maybe_fh)) {
         my $fh_name = $maybe_fh->content;
-        if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
+        if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/
+            || ($self->has_environment
+                && $self->environment->is_filehandle($fh_name))) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())
           my $after_fh = $e->[$fh_end + 1];
           # A comma/fat-comma right after the bareword means it is a LIST

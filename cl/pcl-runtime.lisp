@@ -11326,13 +11326,26 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; No user sub - return string as class name
         name)))
 
+(defun %pcl-normalize-pkg (pkg-str)
+  "Strip Perl's root-stash `main::` prefix: `main::Foo` and `Foo` name the same
+   package.  Used so class-name comparisons (isa) agree regardless of prefix."
+  (let ((s (to-string pkg-str)))
+    (if (and (> (length s) 6) (string= (subseq s 0 6) "main::"))
+        (subseq s 6)
+        s)))
+
 (defun %pcl-find-package (pkg-str)
   "Find CL package for Perl package name PKG-STR.
    Tries upcase first (single-word packages defined via :Foo keyword), then
-   exact case (multi-level packages defined via :|Foo::Bar| notation)."
+   exact case (multi-level packages defined via :|Foo::Bar| notation).
+   A leading `main::` is Perl's root-stash prefix: `main::Foo` names the very
+   same package as `Foo` (e.g. `\"main::Alice\"->new`), so retry without it."
   (or (find-package (perl-pkg-to-cl-pkg-name pkg-str))
       (find-package (%pcl-invert-case pkg-str))
-      (find-package pkg-str)))
+      (find-package pkg-str)
+      (when (and (> (length pkg-str) 6)
+                 (string= (subseq pkg-str 0 6) "main::"))
+        (%pcl-find-package (subseq pkg-str 6)))))
 
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
@@ -11791,9 +11804,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; itself and the implicit UNIVERSAL parent).  Uses the same @ISA walk as
     ;; p-can / p-method-call — reflects runtime @ISA and never touches an
     ;; unfinalized CLOS class.
-    (if (member check-class (%pcl-isa-ancestry obj-class) :test #'string-equal)
-        t
-        nil)))
+    (let ((want (%pcl-normalize-pkg check-class)))
+      (if (member want (%pcl-isa-ancestry obj-class)
+                  :test (lambda (a b) (string-equal a (%pcl-normalize-pkg b))))
+          t
+          nil))))
 
 ;;; ============================================================
 ;;; Regex Support (using CL-PPCRE)
