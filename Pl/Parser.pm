@@ -7126,12 +7126,31 @@ sub _extract_file_prototypes {
   my ($self, $path) = @_;
   state $cache = {};
 
-  # Resolve the path: relative to cwd first, then to the source file's dir.
+  # Resolve the path: relative to cwd first, then to the source file's dir,
+  # then walking UP the source file's ancestors.  The ancestor walk handles
+  # Perl's ubiquitous test idiom `chdir 't' if -d 't'; require './test.pl'`:
+  # at RUNTIME the process is in the `t/` dir so `./test.pl` resolves, but at
+  # COMPILE time the source is e.g. `.../t/io/scalar.t` while `test.pl` lives in
+  # the grandparent `.../t/`.  Searching ancestors for the (leading-`./`-stripped)
+  # basename-path finds it, so the required file's prototypes (test.pl's
+  # `sub is ($$@)`) are learned and child_context can impose SCALAR context.
+  my $rel = $path;
+  $rel =~ s{^\./}{};
   my @candidates = ($path);
   if ($self->filename) {
     require File::Basename;
     my $dir = File::Basename::dirname($self->filename);
-    push @candidates, "$dir/$path" if defined $dir && length $dir;
+    if (defined $dir && length $dir) {
+      push @candidates, "$dir/$path";
+      # Walk up to 8 ancestors looking for the (relative) required file.
+      my $up = $dir;
+      for (1 .. 8) {
+        push @candidates, "$up/$rel";
+        my $parent = File::Basename::dirname($up);
+        last if !defined $parent || !length $parent || $parent eq $up;
+        $up = $parent;
+      }
+    }
   }
   my $resolved;
   for my $c (@candidates) {

@@ -7024,8 +7024,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   nil)
 
 (defun %p-install-fh (fh stream)
-  "Bind STREAM to the filehandle FH (a box, or a bareword symbol)."
-  (cond ((p-box-p fh) (box-set fh stream))
+  "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
+   Symbolic filehandle: when FH is a box already holding a non-empty handle-NAME
+   string (e.g. $TST = \"TST\"; open($TST, ...)), Perl opens the named glob (*TST)
+   and leaves $fh holding the string — it does NOT autovivify a lexical handle.
+   Register under the by-name :pcl symbol so BOTH the bareword form (<TST>/eof(TST))
+   and the scalar form (<$TST>) resolve it via %p-resolve-fh."
+  (cond ((and (p-box-p fh)
+              (stringp (p-box-value fh))
+              (plusp (length (p-box-value fh))))
+         (let* ((nm  (p-box-value fh))
+                (sep (search "::" nm :from-end t))
+                (name (if sep (subseq nm (+ sep 2)) nm)))
+           (setf (gethash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)
+                 stream)))
+        ((p-box-p fh) (box-set fh stream))
         (t            (setf (gethash fh *p-filehandles*) stream))))
 
 (defun %p-fresh-adjustable-string (&optional (init ""))
@@ -7120,27 +7133,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              (warn "Unknown open mode: ~A" mode-str)
              nil))))
     (if stream
-        (progn
-          (cond
-            ;; Symbolic filehandle: open($fh, ...) where $fh already holds a
-            ;; defined handle-NAME string (e.g. $TST = "TST"; open($TST, ...)).
-            ;; Perl opens the named glob (*TST) and leaves $fh holding the
-            ;; string — it does NOT autovivify a lexical handle into $fh.
-            ;; Register under the by-name :pcl symbol (invert-cased, package
-            ;; qualifier stripped) so BOTH the bareword form (<TST>/eof(TST))
-            ;; and the scalar form (<$TST>) resolve it via p-get-stream.
-            ;; (An undef/empty box is the modern `open my $fh, ...` autoviv.)
-            ((and (p-box-p fh)
-                  (stringp (p-box-value fh))
-                  (plusp (length (p-box-value fh))))
-             (let* ((nm  (p-box-value fh))
-                    (sep (search "::" nm :from-end t))
-                    (name (if sep (subseq nm (+ sep 2)) nm)))
-               (setf (gethash (intern (%pcl-invert-case name) :pcl)
-                              *p-filehandles*)
-                     stream)))
-            ((p-box-p fh) (box-set fh stream))
-            (t             (setf (gethash fh *p-filehandles*) stream))))
+        ;; Install under the box/bareword/symbolic-name rules — %p-install-fh
+        ;; also handles the symbolic-filehandle case (box already holding a
+        ;; handle-NAME string, e.g. $TST = "TST"; open($TST, ...)): Perl opens
+        ;; the named glob (*TST) and leaves $fh holding the string rather than
+        ;; autovivifying a lexical handle.  (An undef/empty box is the modern
+        ;; `open my $fh, ...` autoviv.)
+        (%p-install-fh fh stream)
         (%pcl-save-errno))  ; capture C errno (ENOENT etc.) before SBCL overwrites it
     (if stream t nil)))
 
@@ -7198,7 +7197,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((stream (if fh (p-get-stream fh) (or *p-last-read-handle* *standard-input*))))
     ;; eof FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
     (when (and fh stream) (setf *p-last-read-handle* stream))
-    (if stream
+    ;; A closed stream reads as EOF in Perl (eof on a closed handle is true).
+    ;; *p-last-read-handle* may still point at a stream that was since closed
+    ;; (`close TRY; ...; eof()`), so guard peek-char against a closed stream to
+    ;; avoid an sb-int:closed-stream-error abort.
+    (if (and stream (open-stream-p stream))
         (let ((ch (peek-char nil stream nil :eof)))
           (if (eq ch :eof) t nil))
         t)))
