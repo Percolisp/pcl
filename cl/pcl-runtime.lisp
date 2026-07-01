@@ -115,7 +115,7 @@
    ;; Time functions
    #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
-   #:p-exit #:p-system #:p-backtick #:p-errno-string #:p-stash
+   #:p-exit #:p-system #:p-fork #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
    #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
    ;; Environment
@@ -8940,6 +8940,20 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (ash (sb-ext:process-exit-code proc) 8)))))
         (setf $? wait-status)
         wait-status)))
+
+(defun p-fork ()
+  "Perl fork - NOT SUPPORTED.  PCL runs as a single SBCL image whose GC and
+   thread state cannot be safely duplicated by a raw fork(2): fork-then-continue
+   running Perl in the child is undefined in a multithreaded Lisp image, and PCL
+   cannot know at the fork() call site whether an exec() follows (only
+   fork+immediate-exec would be safe).  So PCL behaves like a system on which
+   fork always fails: set $! to ENOSYS and return undef.  This makes the
+   idiomatic `defined(my $pid = fork) or die \"cannot fork: $!\"` guard fail
+   cleanly instead of crashing with an undefined-function error.  For
+   subprocesses use system() / exec() / `cmd` / open(FH, '-|', ...)."
+  (setf *p-stored-errno* 38)                            ; ENOSYS (Linux)
+  (setf (sb-alien:extern-alien "errno" sb-alien:int) 38)
+  *p-undef*)
 
 (defun p-backtick (cmd)
   "Perl backticks - execute shell command and capture output.

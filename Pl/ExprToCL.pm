@@ -104,7 +104,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   continue cos crypt cwd decf declare-sub defined defpackage delete delete-array delete-array-slice
   delete-hash-slice delete-kv-hash-slice die do each ensure-arrayref ensure-hashref env-get
   env-set eof eval eval-block eval-direct exception exception-object exists exists-array exit
-  exp fc fileno flatten flatten-args for foreach funcall-ref get-class get-coderef getc getcwd
+  exp fc fileno flatten flatten-args for foreach fork funcall-ref get-class get-coderef getc getcwd
   getgrent getgrgid getgrnam endgrent setgrent
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc

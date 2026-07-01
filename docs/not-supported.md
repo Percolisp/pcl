@@ -378,6 +378,44 @@ longer in this not-supported bucket.
 
 ---
 
+## `fork` (fork-then-continue, i.e. fork *without* an immediate `exec`)
+
+**Perl behaviour:** `fork()` duplicates the current process; the child returns
+`0`, the parent returns the child PID, and *both* processes go on running the
+same Perl program.  It underpins pipe-opens (`open(FH, "-|", …)` / `"cmd|"`),
+`fork; exec` job spawning, and pre-forking servers.
+
+**PCL behaviour:** **Not supported.**  `fork()` sets `$!` to `ENOSYS`
+("Function not implemented") and returns `undef` — it behaves exactly like a
+platform on which `fork(2)` always fails.  So the idiomatic guard
+`defined(my $pid = fork) or die "cannot fork: $!"` fails cleanly; only code that
+never checks the result (assuming the child branch will run) misbehaves.
+`p-fork` (`cl/pcl-runtime.lisp`).  `$Config{d_fork}` is already `''`
+(`lib/Config.pm`).
+
+**Rationale:** PCL runs as a single SBCL image.  A raw `fork(2)` duplicates that
+image *including its GC state and the SBCL runtime's own threads*, and
+continuing to run Lisp/Perl in such a child is undefined (a multithreaded image
+must `exec` promptly after forking, and only async-signal-safe work is legal in
+between).  The **only** safe use of `fork` is `fork` immediately followed by
+`exec` — but nothing at the `fork()` call site tells PCL that an `exec` follows,
+so PCL cannot special-case it.  Therefore the whole "fork, then keep running
+Perl in the child" model is out of scope.
+
+**What IS supported for subprocesses:** anything that spawns a *fresh* program
+image rather than cloning this one — `system LIST`, `exec`-style
+`sb-ext:run-program`, backticks/``qx`` (`p-backtick`), and `open(FH, "-|"/"|-",
+LIST)` where the child is an external command (these go through
+`sb-ext:run-program`, not a raw fork of the Lisp image).
+
+**Affected tests:** `t/io/pipe.t`, `t/io/openpid.t`, `t/io/socket.t`,
+`t/io/socketpair.t`, and any test whose child process runs Perl code after the
+fork rather than `exec`ing a program.  (Perl's `runperl`/`fresh_perl_*` helpers
+spawn a *separate* `./perl` binary and are a different, fixture-level gap — not a
+`fork` gap.)
+
+---
+
 ## Regex encoding modifiers (`/a`, `/d`, `/l`, `/u`)
 
 **Perl behaviour:** Perl 5.14+ added regex modifiers that select which

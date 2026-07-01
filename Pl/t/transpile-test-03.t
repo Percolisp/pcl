@@ -529,4 +529,23 @@ my @c = (my($d), "four");
 print "c=@c\n";
 ');
 
+# fork() is NOT SUPPORTED (docs/not-supported.md): PCL runs as a single SBCL
+# image that cannot be safely fork(2)ed and kept running Perl.  Instead of
+# crashing with an undefined-function error, fork() behaves like a system on
+# which fork always fails — it sets $! to ENOSYS and returns undef — so the
+# idiomatic `defined(my $pid = fork) or die` guard takes the failure branch.
+# (This is a PCL-behaviour test, not a perl-vs-PCL comparison: real perl forks.)
+{
+    my $out = run_cl(<<'PERL');
+my $pid = fork;
+print defined($pid) ? "defined\n" : "undef\n";
+my $r = fork() // "FAILED";
+print "r=$r\n";
+print "errno set\n" if $! ne "";
+PERL
+    like($out, qr/^undef$/m, 'fork() returns undef (not supported, clean failure not a crash)');
+    like($out, qr/r=FAILED/, 'fork() // default takes the undef branch');
+    like($out, qr/errno set/, 'fork() sets $! on failure');
+}
+
 done_testing();

@@ -293,6 +293,7 @@ has known_no_of_params => (
       grep       => -12,        # grep BLOCK|EXPR, LIST (1 before list)
       time       => 0,
       times      => 0,
+      fork       => 0,          # fork() — NOT SUPPORTED, returns undef (see p-fork)
       localtime  => [0,   1],
       gmtime     => [0,   1],
 
