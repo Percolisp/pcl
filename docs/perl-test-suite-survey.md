@@ -404,15 +404,40 @@ loaded harness runs them. First probe (P = perl ok/notok, C = PCL):
 | `defout.t` | 22 | **21/1** | 🐞→✅ FIXED (this session): see below; last fail `$-` is format-dependent |
 | `print.t` | 24 | 21/1 | 🟡 close (3 diffs) |
 | `say.t` | 13 | 8/1 | 🟡 |
-| `tell.t` | 36 | **32/4** | 🐞→🟡 (2026-06-26): old-style symbolic filehandles. (1) `open($s,...)` where `$s` holds a NAME ("TST") now opens the *named* glob (`*TST`) instead of autovivifying a lexical into `$s` — both `<TST>`/`eof(TST)` and `<$TST>` reach it. (2) `%p-fh-arg` mis-cased the FH name recovered from a funcall-wrapped bareword (`eof(TST)`→`(pl-TST)`): "TST" vs readline's "tst" — fixed with a final `%pcl-invert-case` so it matches the direct bareword symbol. (3) argument-less `eof` now tests `*p-last-read-handle*` (last FH read) not STDIN. Remaining 4: per-handle `$.` line-number magic + `tell FH` setting the current handle (15/19/21), coercible-glob (29). |
+| `tell.t` | 36 | **35/1** | 🐞→🟡 (2026-07-01): cross-require proto path fix (below) read `<TST>` in scalar ctx again; only test 29 (coercible glob) left. (2026-06-26): old-style symbolic filehandles. (1) `open($s,...)` where `$s` holds a NAME ("TST") now opens the *named* glob (`*TST`) instead of autovivifying a lexical into `$s` — both `<TST>`/`eof(TST)` and `<$TST>` reach it. (2) `%p-fh-arg` mis-cased the FH name recovered from a funcall-wrapped bareword (`eof(TST)`→`(pl-TST)`): "TST" vs readline's "tst" — fixed with a final `%pcl-invert-case` so it matches the direct bareword symbol. (3) argument-less `eof` now tests `*p-last-read-handle*` (last FH read) not STDIN. Remaining 4: per-handle `$.` line-number magic + `tell FH` setting the current handle (15/19/21), coercible-glob (29). |
 | `read.t` | 2 | **2/2** | 🐞→✅ FIXED (2026-06-25b): `read()` was fundamentally broken (ignored its BUF, returned the read STRING not the count); now fills BUF in place, returns the count, NUL-pads at a positive OFFSET, EBADF on unopened handle |
 | `errno.t` | 16 | n/a | 🚧 uses `runperl` (spawns a real `./perl` subprocess) — fixture dependency, not a PCL semantics gap |
 | `paragraph_mode.t` | 80 | 16 | 🐞 `$/=""` paragraph mode (same `$/` gap as `base/rs.t` — convergent) |
 | `binmode.t` | 9 | **9/9** | 🐞→✅ FIXED (2026-06-25b): test 9 (last fail) was the `$!` dualvar-through-`@_` bug — now fixed (see below) |
-| `scalar.t` | 128 | **89/39** | 🐞→🟡 UNBLOCKED (2026-06-25e): was `skip_all` because `is_miniperl()` reported true. Fix: mark the runtime DynaLoader XS boot stubs (`pl-boot_DynaLoader` etc.) as `:defined` in `*p-declared-subs*` so `defined &DynaLoader::boot_DynaLoader` is true — PCL is a full perl, not miniperl. In-memory `open(\$scalar)` read/write/append/tell all work. Remaining 39 = not-supported buckets: tie/magic backing scalars, fd-dup (`+<&`/`>&=`), wide-char (>0xff) open-should-fail + errno/warning detection, scalar SV-identity (ref-to-ref, numeric/overload write), live external-modification of the backing SV. |
+| `scalar.t` | 128 | **93/35** | 🐞→🟡 (2026-07-01): +4 from the symbolic-fh + cross-require-proto fixes below. (2026-06-25e): UNBLOCKED, was `skip_all` because `is_miniperl()` reported true. Fix: mark the runtime DynaLoader XS boot stubs (`pl-boot_DynaLoader` etc.) as `:defined` in `*p-declared-subs*` so `defined &DynaLoader::boot_DynaLoader` is true — PCL is a full perl, not miniperl. In-memory `open(\$scalar)` read/write/append/tell all work. Remaining 39 = not-supported buckets: tie/magic backing scalars, fd-dup (`+<&`/`>&=`), wide-char (>0xff) open-should-fail + errno/warning detection, scalar SV-identity (ref-to-ref, numeric/overload write), live external-modification of the backing SV. |
 | `iprefix.t` | 2 | 0/2 | 🟡 |
 | `fs.t` | 61 | **53/61** | 🐞→🟡 (2026-06-26): was 0 (crash on `umask`). Added builtins `umask`/`link`/`symlink`/`readlink`/`chown`/`utime` (Config.pm + RUNTIME_NAMES + sb-posix impls); rewrote `p-stat`/`p-lstat` to use real `sb-posix:stat` fields (Unix-epoch atime/mtime, real inode/mode/nlink — was CL `file-write-date`, off by 2208988800; `stat-blksize`/`stat-blocks` absent in SBCL so derived); implemented `p-truncate` (path + ftruncate(fd), was a warn-stub) as a macro quoting the FH arg; `chmod`/`chown` now fchmod/fchown a filehandle in the LIST; Config `d_fchmod`/`d_fchown` = define. Remaining 4: `futimes` (no sb-posix:futimes → error-text, principle 9), `*FH{IO}` glob-IO-slot truncate (51/52, needs glob↔*p-filehandles* wiring), `truncate BAREWORD` parser stringifies the bareword to a filename (53). |
 | `argv.t` | 53 | runperl | 🚧 unblocked the `File::Spec->devnull` crash (added `devnull`/`tmpdir` to the shim) but the tests spawn child perl via `runperl` — fixture dependency. |
+
+**Three t/io fixes (2026-07-01, commit `87d6d3f`).**
+1. **Symbolic in-memory filehandle.** `$TST = "TST"; open($TST, "<", \$data)`
+   short-circuited into the in-memory branch and autovivified a lexical handle
+   *into the box*, so `eof(TST)` (bareword) and `eof($TST)` (scalar holding the
+   name) saw different handles. Perl opens the *named* glob (*TST) and leaves
+   $TST holding the string. Unified the symbolic-handle detection into
+   `%p-install-fh` (was duplicated inline only in the *file* branch of
+   `%p-open-impl`) so the in-memory path gets it too.
+2. **Closed-stream `eof()` crash.** After `close TRY`, `*p-last-read-handle*`
+   still pointed at the closed stream, so a later no-arg `eof()` did `peek-char`
+   on it → `sb-int:closed-stream-error` abort (killed `io/argv.t` at test ~9).
+   `%p-eof-impl` now guards with `open-stream-p`; a closed stream reads as EOF
+   (Perl's eof-on-closed is true). `argv.t` crash moved to test 27 (`close ARGV
+   or die`, diamond-ARGV, separate feature). Most of argv.t is `runperl` anyway.
+3. **Cross-require prototype path (HIGH-LEVERAGE).** `_extract_file_prototypes`
+   only searched cwd + the source file's own dir, so Perl's ubiquitous
+   `chdir 't'; require './test.pl'` idiom missed the harness prototypes when the
+   source is a *subdir* file (`t/io/scalar.t`) and `test.pl` lives in the
+   grandparent `t/`. Without `is($$@)`'s prototype, `is(<$fh>, ...)` read the
+   handle in LIST context (all lines) → wrong value / EOF position. Now walks up
+   to 8 ancestor dirs for the (leading-`./`-stripped) relative path. This helps
+   **every** subdir harness file across the survey (t/op, t/io, t/re, …) where a
+   context-sensitive arg (readline/keys/each) is passed to a `$`-proto assertion.
+   Guard: `Pl/t/fileio-02.t` test 32.
 
 **`defout.t` fixed → 21/22** (commit this session). The hooks were a parse error
 + two crashes, all from `format`/`write` (not-supported) but mis-handled:
