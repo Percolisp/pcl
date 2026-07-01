@@ -3307,6 +3307,25 @@ sub handle_subcalls {
         } elsif ($self->is_internal_node_type($next_term)) {
           # Already-parsed node (e.g., from previous handle_subcalls)
           $end_pars = $i + 1;
+        } elsif ($self->is_word($next_term)) {
+          # A STANDALONE bareword next-term to a strictly-single (max-1-arg)
+          # function is a single argument — typically a bareword filehandle:
+          # `close F, ...` / `fileno F, ...` / `eof FH, ...`.  The function
+          # consumes ONLY the filehandle, so stop before any following comma
+          # (which belongs to the enclosing list, e.g. `ok(close F, 'desc')`),
+          # matching Perl's `(;*)`-prototype close/fileno/eof.
+          # Guard: only treat the bareword as the sole arg when it is followed by
+          # a comma or nothing.  A following parens-list makes it a funcall term
+          # (`close foo()` → i+2); a following OPERATOR means the bareword is part
+          # of a larger expression (`exit FOO + 1`) — leave $end_pars untouched.
+          my $after = $e->[$i + 2];
+          if (defined $after && ref($after) eq 'PPI::Structure::List') {
+            $end_pars = $i + 2;
+          } elsif (!defined $after
+                   || (ref($after) eq 'PPI::Token::Operator'
+                       && $after->content eq ',')) {
+            $end_pars = $i + 1;
+          }
         }
       }
     }
