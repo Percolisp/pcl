@@ -529,23 +529,41 @@ my @c = (my($d), "four");
 print "c=@c\n";
 ');
 
-# fork() is NOT SUPPORTED (docs/not-supported.md): PCL runs as a single SBCL
-# image that cannot be safely fork(2)ed and kept running Perl.  Instead of
-# crashing with an undefined-function error, fork() behaves like a system on
-# which fork always fails — it sets $! to ENOSYS and returns undef — so the
-# idiomatic `defined(my $pid = fork) or die` guard takes the failure branch.
-# (This is a PCL-behaviour test, not a perl-vs-PCL comparison: real perl forks.)
+# `close F, LIST` / `fileno F, LIST`: a bareword filehandle passed to a
+# single-filehandle function (close/fileno/eof) must consume ONLY the
+# filehandle — the trailing comma belongs to the enclosing list, e.g.
+# `ok(close F, 'desc')` is ok(close(F), 'desc'), NOT ok(close(F, 'desc')).
+# Previously `close F, ...` grabbed the comma list → p-close got 2 args → a
+# compile-time macro error that aborted the whole file (io/open.t).
+test_transpile("close/fileno bareword FH consumes only the FH, not the comma list", '
+sub note2 { print "n=", scalar(@_), " last=$_[-1]\n" }
+open(F, ">", "/tmp/pcl_close_reg_$$") or die;
+print F "x\n";
+note2( close F, "desc-close" );
+open(F, "<", "/tmp/pcl_close_reg_$$") or die;
+note2( fileno F, "desc-fileno" );
+close F;
+unlink "/tmp/pcl_close_reg_$$";
+');
+
+# fork()/waitpid()/exec()/kill() — real process control via sb-posix.
+# The parent gets the child PID, the child gets 0, both continue; waitpid sets
+# $? and exec runs a program in the child.  (PCL-behaviour test: real perl forks
+# too, but the child PID differs, so we assert the structural outcome, not exact
+# text vs perl.)
 {
     my $out = run_cl(<<'PERL');
-my $pid = fork;
-print defined($pid) ? "defined\n" : "undef\n";
-my $r = fork() // "FAILED";
-print "r=$r\n";
-print "errno set\n" if $! ne "";
+$| = 1;
+my $pid = fork();
+die "fork failed: $!" unless defined $pid;
+if ($pid == 0) { exec("echo", "child-exec-ok"); die "exec failed"; }
+my $reaped = waitpid($pid, 0);
+print "reaped-ok\n" if $reaped == $pid;
+print "exit-status=", ($? >> 8), "\n";
 PERL
-    like($out, qr/^undef$/m, 'fork() returns undef (not supported, clean failure not a crash)');
-    like($out, qr/r=FAILED/, 'fork() // default takes the undef branch');
-    like($out, qr/errno set/, 'fork() sets $! on failure');
+    like($out, qr/child-exec-ok/,  'fork(): child runs and exec() launches a program');
+    like($out, qr/reaped-ok/,      'waitpid() reaps the forked child');
+    like($out, qr/exit-status=0/,  'waitpid() sets $? from the child exit');
 }
 
 done_testing();

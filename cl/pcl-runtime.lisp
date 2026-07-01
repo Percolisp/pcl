@@ -115,7 +115,8 @@
    ;; Time functions
    #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
-   #:p-exit #:p-system #:p-fork #:p-backtick #:p-errno-string #:p-stash
+   #:p-exit #:p-system #:p-fork #:p-waitpid #:p-wait #:p-getppid #:p-kill #:p-exec
+   #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
    #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
    ;; Environment
@@ -8942,18 +8943,99 @@ buffer's fill-pointer; everything else falls back to file-length."
         wait-status)))
 
 (defun p-fork ()
-  "Perl fork - NOT SUPPORTED.  PCL runs as a single SBCL image whose GC and
-   thread state cannot be safely duplicated by a raw fork(2): fork-then-continue
-   running Perl in the child is undefined in a multithreaded Lisp image, and PCL
-   cannot know at the fork() call site whether an exec() follows (only
-   fork+immediate-exec would be safe).  So PCL behaves like a system on which
-   fork always fails: set $! to ENOSYS and return undef.  This makes the
-   idiomatic `defined(my $pid = fork) or die \"cannot fork: $!\"` guard fail
-   cleanly instead of crashing with an undefined-function error.  For
-   subprocesses use system() / exec() / `cmd` / open(FH, '-|', ...)."
-  (setf *p-stored-errno* 38)                            ; ENOSYS (Linux)
-  (setf (sb-alien:extern-alien "errno" sb-alien:int) 38)
-  *p-undef*)
+  "Perl fork - duplicate the current process via fork(2) (sb-posix:fork).
+   Returns the child PID in the parent, 0 in the child, undef on failure.
+   Both processes continue running the same program from this point (Perl
+   semantics); the child typically exec()s a program or exit()s.
+   Output buffers are flushed first so buffered text is not duplicated into the
+   child.  (Caveat: PCL cannot fork+continue a program that has spawned CL
+   threads — only the forking thread survives in the child — but ordinary
+   single-threaded Perl fork/exec and fork/exit works.)"
+  (finish-output *standard-output*)
+  (finish-output *error-output*)
+  (handler-case (sb-posix:fork)          ; 0 in child, >0 in parent
+    (error ()
+      (%pcl-save-errno)
+      *p-undef*)))
+
+(defun p-waitpid (pid &optional (flags 0))
+  "Perl waitpid(PID, FLAGS) - wait for a child.  Returns the reaped PID (or -1
+   / 0), and sets $? to the child's raw wait status (exit_code << 8 | signal)."
+  (let ((p (truncate (to-number (if (p-box-p pid) (unbox pid) pid))))
+        (f (truncate (to-number (if (p-box-p flags) (unbox flags) flags)))))
+    (handler-case
+        (multiple-value-bind (rpid status) (sb-posix:waitpid p f)
+          (setf $? status)
+          rpid)
+      (error () (%pcl-save-errno) -1))))
+
+(defun p-wait ()
+  "Perl wait - wait for any child.  Returns the reaped PID (or -1), sets $?."
+  (handler-case
+      (multiple-value-bind (rpid status) (sb-posix:wait)
+        (setf $? status)
+        rpid)
+    (error () (%pcl-save-errno) -1)))
+
+(defun p-getppid ()
+  "Perl getppid - parent process id."
+  (sb-posix:getppid))
+
+(defun p-kill (signal &rest pids)
+  "Perl kill SIGNAL, LIST - send SIGNAL to each PID.  SIGNAL may be a number or
+   a name (\"TERM\", \"SIGKILL\", \"KILL\", ...).  Returns the count of
+   processes successfully signalled.  A negative PID signals a process group."
+  (let* ((sig (%p-resolve-signal signal))
+         (targets (p-flatten-args pids))
+         (n 0))
+    (loop for pt across targets do
+          (let ((p (truncate (to-number (if (p-box-p pt) (unbox pt) pt)))))
+            (handler-case (progn (sb-posix:kill p sig) (incf n))
+              (error () (%pcl-save-errno)))))
+    n))
+
+(defun %p-resolve-signal (signal)
+  "Coerce a Perl kill() signal designator (number or name) to an integer."
+  (let ((v (if (p-box-p signal) (unbox signal) signal)))
+    (if (and (stringp v) (not (every #'digit-char-p v)))
+        (let* ((name (string-upcase v))
+               (name (if (and (> (length name) 3)
+                              (string= (subseq name 0 3) "SIG"))
+                         (subseq name 3) name)))
+          (cond ((string= name "HUP") 1)  ((string= name "INT") 2)
+                ((string= name "QUIT") 3) ((string= name "KILL") 9)
+                ((string= name "USR1") 10)((string= name "USR2") 12)
+                ((string= name "PIPE") 13)((string= name "ALRM") 14)
+                ((string= name "TERM") 15)((string= name "CONT") 18)
+                ((string= name "STOP") 19)((string= name "CHLD") 17)
+                ((string= name "ZERO") 0) (t 15)))
+        (truncate (to-number v)))))
+
+(defun p-exec (&rest args)
+  "Perl exec LIST - replace the current process image with a new program.
+   PCL runs the program with inherited stdio (so file descriptors set up before
+   exec, e.g. after a pipe/dup in a forked child, carry through) and then exits
+   with its status — like exec, this call never returns on success.  With a
+   single string containing shell metacharacters it goes through /bin/sh -c."
+  (when (null args)
+    (setf *p-stored-errno* 2) (return-from p-exec *p-undef*))  ; ENOENT
+  (let* ((strs (mapcar (lambda (a) (to-string (if (p-box-p a) (unbox a) a))) args))
+         (shell-p (and (= (length strs) 1)
+                       (find-if (lambda (c) (find c "|&;<>()$`\\\"'*?[]{}~ "))
+                                (first strs)))))
+    (handler-case
+        (let ((proc (if shell-p
+                        (sb-ext:run-program "/bin/sh" (list "-c" (first strs))
+                                            :input t :output t :error t :wait t)
+                        (sb-ext:run-program (first strs) (rest strs)
+                                            :search t :input t :output t
+                                            :error t :wait t))))
+          (finish-output *standard-output*)
+          (finish-output *error-output*)
+          (sb-ext:exit :code (or (sb-ext:process-exit-code proc) 0) :abort t))
+      (error ()
+        (%pcl-save-errno)
+        *p-undef*))))
 
 (defun p-backtick (cmd)
   "Perl backticks - execute shell command and capture output.

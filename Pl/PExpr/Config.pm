@@ -293,7 +293,12 @@ has known_no_of_params => (
       grep       => -12,        # grep BLOCK|EXPR, LIST (1 before list)
       time       => 0,
       times      => 0,
-      fork       => 0,          # fork() — NOT SUPPORTED, returns undef (see p-fork)
+      fork       => 0,          # fork() — real fork(2) via sb-posix (see p-fork)
+      wait       => 0,          # wait() — reap any child, sets $?
+      waitpid    => [1, 2],     # waitpid(PID, FLAGS)
+      getppid    => 0,          # getppid()
+      kill       => -12,        # kill SIGNAL, LIST (1 before list)
+      exec       => -1,         # exec LIST
       localtime  => [0,   1],
       gmtime     => [0,   1],
 
