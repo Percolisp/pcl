@@ -109,6 +109,56 @@ Per-workload, combining the docs' table with the review findings:
 | hash/array code | 6–15× slower | ~2–4× | **≈parity**, faster with element-repr (§3.4) | key stringify + boxed elements remain the floor until aggregates specialize |
 | regex-heavy | 3.7× slower | ~1.2–1.5× | ~1.2–1.5× | **cl-ppcre wall — R1/R2 don't touch it** |
 
+### 3.2b Two proposed compiler flags, measured/assessed (2026-07-02)
+
+Follow-up question: how much would (i) a `--no-overload` guarantee and (ii) a
+"subs are never redefined at runtime" (sealed/closed-world) assumption buy?
+
+**(i) measured.** The intmath loop emulated at operator level (boxes kept,
+same loop skeleton, only the operator pipeline varied; SBCL, 2M iters):
+
+| variant | time | delta |
+|---|---:|---|
+| A — current `p-+` pipeline (2 overload probes + `%pcl-ieee-arith` closure/trap-mask + `to-number`) | 1.432 s | — |
+| B — A minus the overload probes (= the `--no-overload` flag at runtime) | 1.378 s | **−4%** |
+| C — B minus the closure + `with-float-traps-masked` (= R1's slow-path fix) | 0.187 s | **7.4×** |
+| D — C minus boxes (`to-number`/`box-set` gone; = Phase-4 unboxed) | 0.014 s | 13× more (6.5× **faster than Perl's** 0.091 s) |
+
+So a no-overload flag **buys ~4% at runtime — it is not the lever**. The
+probes were already guarded by a cheap `p-box-p`/class-slot fast path; the
+expensive parts are the per-op closure + FPU trap-masking (R1) and the box
+model (Phase 4). The flag's real value is **for the analysis, not the
+runtime**: it closes the §4.1 eager-stringify hole (no overloaded `""` can
+exist) and lets codegen open-code `(+ (to-number a) (to-number b))` at any
+site without an overload fallback. But R1's inline `numberp` guard obtains
+nearly the same code shape *soundly* (overload objects are never `numberp`,
+so they fall to the slow path automatically). Verdict: implement R1; derive
+the no-overload fact **automatically** (PCL transpiles every module it loads,
+so "no `use overload` anywhere in the program" is checkable — spoiled only by
+string `eval`) and use it in Gate 1 rather than as a user-facing flag.
+Caution: it can never be a default for the CPAN goal — Math::BigInt,
+JSON::PP booleans, DateTime, URI all overload.
+
+**(ii) assessed (nothing to measure yet).** This is exactly type-flow §g.4's
+option (b). Key fact: **ordinary calls need no sealing in CL** — SBCL calls
+through the symbol's function cell, which is both redefinition-safe and
+already fast, and the `&optional`/`&rest` calling convention (#3) is uniform
+across subs, so caller-side positional passing survives redefinition too.
+R2's wins therefore do **not** depend on sealing. What sealing actually
+unlocks is the interprocedural layer: (a) **inlining** small subs/accessors —
+the big one for Moo/OO code; (b) the **A4 return-type table** → unboxing
+propagates across call boundaries; (c) **devirtualized method dispatch** —
+`p-method-call`'s string-keyed lookup + MRO walk collapses to a
+class-checked direct call at monomorphic sites; (d) trusting the per-sub
+context-insensitivity bit without guards. Rough sizing: little for
+procedural code beyond R1/R2 (call cells are already cheap), potentially
+**1.5–3× on method-heavy OO code** via (a)+(c). The per-call-site guard
+(§g.4 option (c), one pointer compare) recovers most of it soundly; the flag
+mainly saves building the guard machinery. Like (i), the closed-world fact
+is often **inferable**: no glob assignment (`*foo = …`), no AUTOLOAD, no
+`local *foo`, no string `eval` → sealed for free, per program, no user
+promise needed.
+
 ### 3.3 The regex wall — the one honest "cannot promise faster"
 
 Perl's regex engine is its crown jewel; cl-ppcre is a good portable engine
