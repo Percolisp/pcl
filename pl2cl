@@ -29,6 +29,14 @@ binmode(STDERR, ":utf8");
 use lib dirname(abs_path($0));
 use Pl::Parser;
 
+# PCL_V2=1 selects the v2 structured-emission prototype pipeline
+# (Pl::Parser2 → Pl::CLForm forms; same external API, switch back and forth).
+my $PARSER_CLASS = 'Pl::Parser';
+if ($ENV{PCL_V2}) {
+  require Pl::Parser2;
+  $PARSER_CLASS = 'Pl::Parser2';
+}
+
 # Parse command line options
 my $no_cache = $ENV{PCL_NO_CACHE} // 0;
 my $cache_lisp = 0;
@@ -279,7 +287,7 @@ if ($bundle_mode || $executable_mode) {
 
 if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
-  my $output = Pl::Parser->parse_file($source_file,
+  my $output = $PARSER_CLASS->parse_file($source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
 
   if ($is_module) {
@@ -297,13 +305,13 @@ if (@ARGV && -f $ARGV[0]) {
 elsif (@ARGV) {
   # Treat arguments as code (no @INC init needed for one-liners)
   $code = join(' ', @ARGV);
-  print Pl::Parser->parse_code($code);
+  print $PARSER_CLASS->parse_code($code);
 }
 elsif (!-t STDIN) {
   # Read from stdin
   local $/;
   $code = <STDIN>;
-  my $output = Pl::Parser->parse_code($code,
+  my $output = $PARSER_CLASS->parse_code($code,
                  (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 
   if (defined $eval_pkg) {
