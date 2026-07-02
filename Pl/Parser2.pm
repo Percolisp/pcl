@@ -128,11 +128,14 @@ sub _lower_sub {
     if (!$body_uses_args && !grep { !$vi->{$_}{unboxable} } @$params) {
       # Real lambda list (#3): my ($a,$b) = @_ untouched afterwards, params
       # never written un-arithmetically / ref-taken → bind raw, no p-list-=.
+      # The body provably never reads @_, so skip the p-args-body prologue
+      # (no p-flatten-args per call) and stack-allocate the unused &rest.
       my $ll = ['list', '&optional',
                 (map { ['list', $_, '(p-undef)'] } @$params),
                 '&rest', '%_args'];
       return ['p-sub', $clname, $ll,
-              ['p-args-body', ['block', 'nil', $self->_lower_block(\@body_stmts, $vi)]]];
+              raw('(declare (ignore %_args) (dynamic-extent %_args))'),
+              ['block', 'nil', $self->_lower_block(\@body_stmts, $vi)]];
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;
@@ -204,12 +207,21 @@ sub _lower_stmt {
 
   if ($stmt->isa('PPI::Statement::Break')) {
     my @k = _strip_semi($stmt->schildren);
-    my $kw = shift(@k)->content;
-    die "Parser2 TODO: break statement '$kw'" unless $kw eq 'return';
+    my $kw = $k[0]->content;
+    if ($kw eq 'return') {
+      shift @k;
+      my ($expr, $mod, $cond) = _split_modifier(\@k);
+      my $form = @$expr
+        ? ['p-return', $self->_lower_expr($expr, $stmt)]
+        : ['p-return', '(p-undef)'];
+      return _apply_modifier($form, $mod, $cond, $self, $stmt);
+    }
+    # goto/next/last/redo: keep the keyword and let the ORIGINAL expression
+    # machinery lower the whole thing (goto &sub tail-calls with the LIVE @_;
+    # the $body_uses_args gate in _lower_sub has already kept the @_ binding
+    # for any sub whose body mentions goto, so the forwarded @_ exists).
     my ($expr, $mod, $cond) = _split_modifier(\@k);
-    my $form = @$expr
-      ? ['p-return', $self->_lower_expr($expr, $stmt)]
-      : ['p-return', '(p-undef)'];
+    my $form = $self->_lower_expr($expr, $stmt);
     return _apply_modifier($form, $mod, $cond, $self, $stmt);
   }
 

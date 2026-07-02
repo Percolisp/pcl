@@ -427,32 +427,43 @@
 ;;; create a fresh local symbol; the body's built-in calls (p-shift @_) were
 ;;; already resolved at READ time to pcl::PL-SHIFT and are unaffected.
 (defmacro p-sub (name params &body body)
-  `(eval-when (:compile-toplevel :load-toplevel :execute)
-     ;; Use the symbol's own package (e.g. P1 for P1::p-tmc) so that
-     ;; package-qualified subs are defined in the right package regardless of
-     ;; the current *package*.  Fall back to *package* for unqualified names.
-     (let* ((target-pkg (or (symbol-package ',name) *package*))
-            (sym-name   (symbol-name ',name)))
-       ;; Shadow to prevent user methods from clobbering pcl:: built-ins with
-       ;; the same name (e.g. PUSH/SHIFT in Tie::Array).  The handler-bind
-       ;; muffles SBCL's "package at variance" warning that fires when defpackage
-       ;; is later re-evaluated and sees the extra shadow.
-       (handler-bind ((warning #'muffle-warning))
-         (shadow sym-name target-pkg))
-       (let ((local-sym (intern sym-name target-pkg)))
-         (setf (gethash local-sym *p-declared-subs*) :defined)
-         (setf (symbol-function local-sym)
-               (lambda ,params
-                 (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package*
-                                                      *pcl-caller-pkg-stack*))
-                        (*pcl-caller-subname-stack* (cons (%p-sub-perl-name ',name)
-                                                          *pcl-caller-subname-stack*))
-                        (*pcl-current-package* (pcl-pkg-perl-name
-                                                (symbol-package ',name)))
-                        (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
-                        (*pcl-caller-wantarray* *wantarray*))
-                   (catch :p-return
-                     ,@body))))))))
+  ;; Leading (declare ...) forms are lifted to the lambda head (before the
+  ;; bookkeeping let*), e.g. the v2 pipeline's (declare (ignore %_args)
+  ;; (dynamic-extent %_args)) for subs that never touch @_.
+  (let ((decls (loop while (and (consp (first body))
+                                (eq (first (first body)) 'declare))
+                     collect (pop body))))
+    `(eval-when (:compile-toplevel :load-toplevel :execute)
+       ;; Use the symbol's own package (e.g. P1 for P1::p-tmc) so that
+       ;; package-qualified subs are defined in the right package regardless of
+       ;; the current *package*.  Fall back to *package* for unqualified names.
+       (let* ((target-pkg (or (symbol-package ',name) *package*))
+              (sym-name   (symbol-name ',name)))
+         ;; Shadow to prevent user methods from clobbering pcl:: built-ins with
+         ;; the same name (e.g. PUSH/SHIFT in Tie::Array).  The handler-bind
+         ;; muffles SBCL's "package at variance" warning that fires when defpackage
+         ;; is later re-evaluated and sees the extra shadow.
+         (handler-bind ((warning #'muffle-warning))
+           (shadow sym-name target-pkg))
+         (let ((local-sym (intern sym-name target-pkg))
+               ;; Per-sub constants, computed ONCE at definition: recomputing
+               ;; them per call (case-inversion + concatenate / gethash) was
+               ;; measured at ~150ns per call — the single largest sub-call cost.
+               (%%perl-name (%p-sub-perl-name ',name))
+               (%%home-pkg  (pcl-pkg-perl-name (symbol-package ',name))))
+           (setf (gethash local-sym *p-declared-subs*) :defined)
+           (setf (symbol-function local-sym)
+                 (lambda ,params
+                   ,@decls
+                   (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package*
+                                                        *pcl-caller-pkg-stack*))
+                          (*pcl-caller-subname-stack* (cons %%perl-name
+                                                            *pcl-caller-subname-stack*))
+                          (*pcl-current-package* %%home-pkg)
+                          (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
+                          (*pcl-caller-wantarray* *wantarray*))
+                     (catch :p-return
+                       ,@body)))))))))
 
 (defmacro p-args-body (&body body)
   "Standard named-sub prologue emitted by the code generator: bind Perl's @_

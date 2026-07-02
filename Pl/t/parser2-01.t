@@ -97,6 +97,26 @@ my $cfor2 = Pl::Parser2->parse_code(
 like($cfor2, qr/\(\$j \(make-p-box nil\)\)/, 'C-for ++ step counter stays boxed');
 like($cfor2, qr/\(p-post\+\+ \$j\)/, 'C-for boxed step through p-post++');
 
+# Lean p-sub: a body that never reads @_ skips the p-args-body prologue and
+# stack-allocates the unused &rest.
+like($rec, qr/\(declare \(ignore %_args\) \(dynamic-extent %_args\)\)/,
+     'no-@_ sub: rest ignored + dynamic-extent, no p-args-body');
+unlike($rec, qr/p-args-body/, 'no p-args-body when @_ is unused');
+
+# goto &sub forwards the LIVE @_: a sub containing goto must keep the boxed
+# @_ convention (p-args-body) so p-goto-sub has the full argument list.
+my $goto = Pl::Parser2->parse_code(
+  'sub target { my ($x, $y) = @_; print "$x $y\n"; } sub fwd { my ($a) = @_; goto &target; } fwd(7, 9);');
+like($goto, qr/\(p-sub pl-fwd\s*\n?\s*\(&rest %_args\)\s*\n?\s*\(p-args-body/s,
+     'goto-containing sub keeps p-args-body (@_ live for forwarding)');
+like($goto, qr/\(p-goto-sub #'pl-target\)/, 'goto &sub lowers via p-goto-sub');
+
+# next/last lower through the fallback inside v2 loops.
+my $brk = Pl::Parser2->parse_code(
+  'for my $i (1..10) { next if $i == 2; last if $i > 4; print "$i\n"; }');
+like($brk, qr/p-next/, 'next lowers');
+like($brk, qr/p-last/, 'last lowers');
+
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
   skip 'sbcl not available', 1 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};

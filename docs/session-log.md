@@ -4,6 +4,20 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 268 (2026-07-02) — R1 runtime fast paths SHIPPED (intmath 7.5×→1.5× of perl) + v2 growth (strings/funcall-unboxing/elsif/C-for/goto) + lean p-sub → recursive fib now BEATS perl.
+
+**User: R1 first, then continue the v2 prototype; target = compiler clear and easy to iterate.**
+
+**R1 (`183540d`, cl/pcl-runtime.lisp):** FPU traps masked ONCE at load (`:traps '(:divide-by-zero)` — perl dies on `1/0.0` too, so div-by-zero must stay trapping; the review's "1/0.0→Inf" claim was wrong); `%pcl-ieee-arith` deleted. All hot ops (`+ - * / % == != < > <= >= <=> .` + 6 string cmps + `cmp`) and accessors (`unbox to-number to-string p-true-p p-bool`) became INLINE wrappers with numberp/stringp fast paths over out-of-line `%p-…-slow` overload paths. **Two hard-won lessons:** (1) inline-before-defun / notinline-after / re-inline-at-EOF keeps the runtime source-load at ~1.15 s (naive global inline+speed-2 = ~4.9 s × every SBCL spawn — a 4-file spot check took 553 s before the sandwich); (2) **SBCL 2.6.0 ICEs on `declaim inline` + narrowed return ftype** — ftypes stay `(t) t`.
+
+**v2 growth (`303dcde` + follow-up):** native string literals/`.`/string-cmps; raw-slot rule generalized to "raw CL value" so string scalars unbox; `my $x = f() + 1` unboxes (top-level op coerces the call result; bare `f()` stays boxed; ops inside call args don't count); elsif→nested p-if; C-style for (raw counter when the step is arithmetic, boxed under `++`); goto/next/last/redo lowered via the fallback — **goto &sub forwards the live @_**, so the `$body_uses_args` gate (which includes `\bgoto\b`) keeps `p-args-body` for any goto-containing sub (user question, verified end-to-end).
+
+**Lean p-sub (measured first):** fib(29) component bench exposed the real cost — NOT the 5 dynamic binds (~15 ns) but `p-sub`'s lambda recomputing `%p-sub-perl-name`/`pcl-pkg-perl-name` EVERY CALL (~150 ns, string-alloc + gethash). Hoisted to definition time (helps v1 too); `p-args-body` skipped + `&rest` dynamic-extent'd when the body never reads `@_` (p-sub now lifts leading `declare`s to its lambda head).
+
+**Numbers (whole-program − null baseline):** intmath 0.070 perl / **0.11 v2** (was 0.69); fib(29) 0.138 perl / **0.078 v2** (was 0.72) — **call-bound code beats perl**. Review checkpoint met. Docs: `parser2-prototype.md` (R1-landed + lean-p-sub sections), `where-the-time-goes.md` §5.1/5.2 SHIPPED. Guards: parser2-01.t 13→32. Gate: 113 files / 3740 tests green.
+
+---
+
 ## Session 267 (2026-06-25) — `test.pl` LOADS as a harness → t/re + t/io become runnable bug-finders; 6 fixes (4 crashes); pack regenerated; measured the unboxing payoff.
 
 **User: keep finding/fixing bugs (CPAN + sweep crashes + fuzzing + Perl's own t/ suite); then regenerate pack(); then a for-fun speed comparison (no startup).** Continued the `docs/perl-test-suite-survey.md` survey.

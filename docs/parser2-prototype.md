@@ -128,19 +128,50 @@ non-scalar `my`, `for(;;)` with empty sections; string-eval interplay is
 conservatively boxed). The v1 pipeline is bit-for-bit unaffected —
 `PCL_V2` only switches which class pl2cl instantiates.
 
+## Lean p-sub (same day) — measured, then fixed
+
+Per-component cost of a v2 sub call, measured on fib(29) ≈ 1.66M calls
+(runtime loaded, in-image timing):
+
+| variant | time |
+|---|---:|
+| v2 shape before leaning (full p-sub + p-args-body) | 0.347 s |
+| minus the `@_` bind (`p-args-body`/`p-flatten-args`) | 0.291 s |
+| plain defun + the same 5 special binds + catch | 0.042 s |
+| catch/throw only | 0.027 s |
+| lexical return | 0.009 s |
+
+The dominant cost (~150 ns/call) was **not** the five dynamic binds — it was
+`p-sub`'s lambda recomputing two per-sub *constants* on every call:
+`(%p-sub-perl-name ',name)` (case-inversion + concatenate) and
+`(pcl-pkg-perl-name (symbol-package ',name))` (gethash).  Fixes shipped:
+
+1. **Hoist the constants** to definition time in the `p-sub` macro (helps v1
+   and v2 alike — zero semantic change).
+2. **Skip `p-args-body`** when the body provably never reads `@_` (the same
+   `$body_uses_args` test that gates the real lambda list): Parser2 emits
+   `(declare (ignore %_args) (dynamic-extent %_args))` + a plain block, and
+   `p-sub` now lifts leading declare forms to its lambda head.
+
+Result: **fib(29) v2 ≈ 0.078 s vs perl 0.138 s — call-bound code now BEATS
+perl** (was 0.51 s at the R2-caller stage, 0.29 s after R1).
+
+Remaining per-call cost, in order: the catch/throw for `return` (~18 ns —
+lexical `return-from` needs a "no closure re-throws" analysis), the five
+special binds (~15 ns — a whole-program "nobody calls caller()" bit could
+elide the two stack conses; note `caller()` reads the whole chain, so this
+is NOT a per-sub decision), `&optional` defaulting. All diminishing; measure
+again before touching.
+
 ## Next steps, in leverage order
 
-1. Lean `p-sub`: the five per-call special bindings (caller-pkg/subname
-   stacks, depth, caller-wantarray) are the next call-cost after the caller
-   bind — bind lazily or only for subs that need caller()/wantarray.
-   NOTE: `caller()` reads the whole chain, so per-sub elision needs a
-   whole-program "nobody calls caller()" bit (PCL sees all source; string
-   eval is the spoiler), not a per-sub one.
-2. Grow `ExprToCL2` further: interpolated strings (p-string-concat is a raw
+1. Grow `ExprToCL2` further: interpolated strings (p-string-concat is a raw
    root too), unary `!`, chained/nested funcalls as statement roots.
-3. Statement kinds: package, `use` (module loading through the fallback).
-4. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
+2. Statement kinds: package, `use` (module loading through the fallback).
+3. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
    (`type-flow-and-codegen-plan.md` §(s)) once shapes stabilize.
-5. `++`-step carve-out: let a C-for counter unbox by lowering the step as
+4. `++`-step carve-out: let a C-for counter unbox by lowering the step as
    `(setf $i (p-+ $i 1))` when `++` occurs ONLY in the step slot (needs a
    position-aware annotator, not the text scan).
+5. Lean p-sub round 2 (catch elision / bind elision) — only with fresh
+   measurements, see above.
