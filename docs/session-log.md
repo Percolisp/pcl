@@ -16,6 +16,8 @@ Append new entries at the top. One section per session.
 
 **Numbers (whole-program − null baseline):** intmath 0.070 perl / **0.11 v2** (was 0.69); fib(29) 0.138 perl / **0.078 v2** (was 0.72) — **call-bound code beats perl**. Review checkpoint met. Docs: `parser2-prototype.md` (R1-landed + lean-p-sub sections), `where-the-time-goes.md` §5.1/5.2 SHIPPED. Guards: parser2-01.t 13→32. Gate: 113 files / 3740 tests green.
 
+**Full sweep after R1:** 17933 pass / 1025 fail / **64 fully passing (62→+2**, R1 fixed float-edge files). sweep-diff's 54 "NEW failures" (or/scalar/closure/sort/signatures) verified **stale-baseline drift** — identical counts solo at pre-R1 `9703bac` in a worktree. **ONE real regression, OPEN: `local.t` hard-crashes SBCL at t~129** (pre-R1: 302/319 no crash). Suspects in order: global speed-2/debug-0 declaim on generated code → inline accessor fast paths on tie/magic boxes → FPU traps-off → p-sub hoist. Repro `perl sweep-perl-tests.pl --jobs 1 perl-tests/local.t`. **Fix this FIRST next session; re-bless `docs/fail-baseline.tsv` only after.** (Also: pl2cl `--executable` had a pre-existing multiple-forms-per-`--eval` build failure, fixed `7ac67a9`; its `:toplevel` remains a stub — program runs at build time, standalone mode still unfinished.)
+
 ---
 
 ## Session 267 (2026-06-25) — `test.pl` LOADS as a harness → t/re + t/io become runnable bug-finders; 6 fixes (4 crashes); pack regenerated; measured the unboxing payoff.
