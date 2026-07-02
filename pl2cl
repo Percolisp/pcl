@@ -231,7 +231,9 @@ sub do_bundle {
 
   if ($executable) {
     # Create standalone executable
+    # NOTE: one --eval = ONE expression for SBCL, hence the progn.
     my $save_code = qq{
+      (progn
       (load "$lisp_file")
       (sb-ext:save-lisp-and-die "$output_file"
         :toplevel (lambda ()
@@ -240,7 +242,7 @@ sub do_bundle {
                       (error (e)
                         (format *error-output* "Error: ~A~%" e)
                         (sb-ext:exit :code 1))))
-        :executable t)
+        :executable t))
     };
 
     say STDERR "  Creating executable...";
