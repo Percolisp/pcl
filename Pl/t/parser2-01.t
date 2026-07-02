@@ -49,6 +49,19 @@ my $cl3 = Pl::Parser2->parse_code(
   'my $x = 1; my $r = \$x; print "$x\n";');
 like($cl3, qr/\(\$x \(make-p-box nil\)\)/, 'ref-taken scalar stays boxed');
 
+# Native funcalls + R2 caller half: context-insensitive callee → direct call,
+# no *wantarray* bind; context-sensitive callee keeps the bind.
+my $rec = Pl::Parser2->parse_code(
+  'sub fib { my ($n) = @_; return $n if $n < 2; return fib($n-1) + fib($n-2); } print fib(10), "\n";');
+like($rec, qr/\(p-\+ \(pl-fib \(p-- \$n 1\)\) \(pl-fib \(p-- \$n 2\)\)\)/,
+     'insensitive callee: direct native calls, no *wantarray* bind');
+my $ctx = Pl::Parser2->parse_code(
+  'sub pair { my ($x) = @_; return ($x, $x); } sub inc { my ($x) = @_; return $x + 1; } my $s = 0; $s = inc(pair(7) + 0) + 100;');
+like($ctx, qr/\(let \(\(\*wantarray\* nil\)\) \(pl-pair 7\)\)/,
+     'sensitive callee (returns a list) keeps the *wantarray* bind');
+like($ctx, qr/\(pl-inc \(p-\+/,
+     'insensitive callee called directly even with nested sensitive arg');
+
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
   skip 'sbcl not available', 1 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};

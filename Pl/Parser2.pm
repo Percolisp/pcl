@@ -33,6 +33,9 @@ use Pl::CLForm qw(raw);
 has filename => (is => 'ro', predicate => 1);
 has code     => (is => 'ro', predicate => 1);
 
+# Pre-pass result: perl sub name → { cl_name, insensitive } (see ExprToCL2).
+has sub_info => (is => 'rw', default => sub { {} });
+
 has environment => (is => 'lazy');
 sub _build_environment {
   my $self = shift;
@@ -74,6 +77,16 @@ sub parse {
   my $doc = PPI::Document->new(\$src) or die "Parser2: PPI parse failed";
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
+
+  # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
+  # that precede (or recurse into) a sub's definition see them.
+  for my $child ($doc->schildren) {
+    next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block;
+    $self->sub_info->{ $child->name } = {
+      cl_name     => $self->fallback_parser->_qualified_sub_to_cl($child->name),
+      insensitive => $self->_sub_ctx_insensitive($child),
+    };
+  }
 
   my (@decls, @defs, @top);
   for my $child ($doc->schildren) {
@@ -285,7 +298,8 @@ sub _lower_expr {
       parser      => $self->fallback_parser,
     );
     my ($node_id) = $expr_o->parse_expr_to_tree(\@parts);
-    Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment)
+    Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
+                       sub_info => $self->sub_info)
                  ->gen_form($node_id);
   };
   return $native if defined $native;
@@ -303,6 +317,81 @@ sub _lower_expr {
     $cl =~ s/$pat(?=[\s)])/(p-my-= $var/g;
   }
   return raw($cl);
+}
+
+# ------------------------------------------------------- context sensitivity
+
+# A sub is context-INSENSITIVE when its caller's *wantarray* provably cannot
+# be observed: no `wantarray` in the body, and every value it can return —
+# each explicit `return EXPR` and the implicit last-statement value — is
+# scalar-shaped.  Conservative: any doubt → sensitive (call sites keep the
+# dynamic bind, exactly today's behaviour).
+sub _sub_ctx_insensitive {
+  my ($self, $sub) = @_;
+  my $txt = $sub->block->content;
+  return 0 if $txt =~ /\bwantarray\b/;
+
+  my $breaks = $sub->block->find('PPI::Statement::Break') || [];
+  for my $b (@$breaks) {
+    my @k = _strip_semi($b->schildren);
+    my $kw = shift @k;
+    next unless $kw && $kw->content eq 'return';
+    return 0 unless @k;                        # bare `return;` = () vs undef
+    my ($expr) = _split_modifier(\@k);
+    return 0 unless $self->_expr_scalar_rooted($expr);
+  }
+
+  my @stmts = grep { $_->significant && !$_->isa('PPI::Statement::Null') }
+              $sub->block->schildren;
+  return 0 unless @stmts;
+  my $last = $stmts[-1];
+  return 1 if $last->isa('PPI::Statement::Break');   # checked above
+  if (ref($last) eq 'PPI::Statement' || $last->isa('PPI::Statement::Variable')) {
+    my @k = _strip_semi($last->schildren);
+    shift @k if @k && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my';
+    my ($expr) = _split_modifier(\@k);
+    # for `my $x = INIT` the statement value is the assignment value
+    return $self->_expr_scalar_rooted($expr) ? 1 : 0;
+  }
+  return 0;                                   # compound/other tail → sensitive
+}
+
+# The expression's ROOT forces scalar shape: an arithmetic/comparison operator
+# (coerces its operands, yields one scalar), a scalar variable, a number, or a
+# string literal.  A funcall root propagates the caller's context → NOT scalar.
+# NOT included: && || // (context-transparent to their right operand) and
+# x (repeats lists in list context).
+my %SCALAR_ROOT_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != .
+                                        eq ne lt gt le ge <=> cmp);
+sub _expr_scalar_rooted {
+  my ($self, $parts) = @_;
+  my @parts = _strip_semi(@{ $parts // [] });
+  return 0 unless @parts;
+  my $ok = eval {
+    my $expr_o = Pl::PExpr->new(
+      e           => \@parts,
+      environment => $self->environment,
+      parser      => $self->fallback_parser,
+    );
+    my ($id) = $expr_o->parse_expr_to_tree(\@parts);
+    while (1) {
+      my $node = $expr_o->get_a_node($id);
+      my $kids = $expr_o->get_node_children($id);
+      if ($expr_o->is_internal_node_type($node)) {
+        my $t = $node->{type} // '';
+        if ($t eq 'tree_val' && @$kids == 1) { $id = $kids->[0]; next }
+        return 0;
+      }
+      return 1 if ref($node) eq 'PPI::Token::Operator' && @$kids
+                  && $SCALAR_ROOT_OP{ $node->content };
+      return 1 if ref($node) && $node->isa('PPI::Token::Number');
+      return 1 if ref($node) && $node->isa('PPI::Token::Quote');
+      return 1 if ref($node) eq 'PPI::Token::Symbol' && !@$kids
+                  && $node->content =~ /^\$\w+$/;
+      return 0;
+    }
+  };
+  return $ok ? 1 : 0;
 }
 
 # ---------------------------------------------------------------- small helpers

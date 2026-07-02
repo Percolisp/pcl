@@ -54,8 +54,23 @@ legacy-boundary rules worth knowing:
   bare `(p-my-= $a $b)`;
 - Phase-4 first cut: `my $sum = 0; $sum = $sum + …` → `(let (($sum 0))` +
   `(setf $sum (p-+ …))`;
-- verified end-to-end: fib (recursive + loop) and the intmath loop produce
-  perl-identical output under the runtime.
+- **native funcalls + R2 caller half** (added same day): a pre-pass records
+  per-sub `{ cl_name, insensitive }`; calls to known subs with native args
+  compile to direct `(pl-f …)`, and the `(let ((*wantarray* nil)) …)` bind is
+  emitted **only when the callee can observe context** (`wantarray` in body,
+  or any return value not scalar-rooted — where scalar-rooted = the return
+  expression's tree root is an arith/comparison/`.` operator, a `$scalar`, a
+  number, or a string literal; `&&`/`||`/`//`/`x` roots and funcall roots
+  propagate context, so they stay sensitive, as do bare `return;` and
+  compound tails).  Recursive fib becomes
+  `(p-+ (pl-fib (p-- $n 1)) (pl-fib (p-- $n 2)))` — direct calls, no binds;
+- verified end-to-end: fib (recursive + loop), intmath, and the
+  sensitive/insensitive mix produce perl-identical output under the runtime.
+
+Measured effect of the funcall step (fib(29), startup excluded): v1 ≈ 0.72 s
+→ v2 ≈ 0.51 s compute (~30% on call-bound code) vs perl 0.141 s. The
+remaining gap is `p-sub`'s five per-call special bindings + `p-flatten-args`
++ generic `p-+`/`p-<` — R1 and the p-sub leaning, not the caller side.
 
 Speed note: correctness shapes only — the prototype's intmath is barely
 faster than v1 yet, because `p-+`/`p-foreach` still carry the Tax-3/Tax-2
@@ -71,9 +86,16 @@ conservatively boxed). The v1 pipeline is bit-for-bit unaffected —
 
 ## Next steps, in leverage order
 
-1. R1 in the runtime (independent of Parser2; makes the unboxed shapes fast).
-2. Grow `ExprToCL2` native set: funcalls with static arity (direct
-   `(pl-f …)` + context-insensitivity bit = R2 caller half), string concat.
-3. Statement kinds: elsif, C-style for (`p-for` form), package, `use`.
-4. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
+1. **R1 in the runtime** (next session, user-confirmed): FPU modes at
+   startup + delete `%pcl-ieee-arith`; inline numberp-guarded fast paths on
+   `p-+`/`p-<`/…; Tier-3 declaims. Independent of Parser2; makes the unboxed
+   shapes and direct calls actually fast.
+2. Lean `p-sub`: the five per-call special bindings (caller-pkg/subname
+   stacks, depth, caller-wantarray) are the next call-cost after the caller
+   bind — bind lazily or only for subs that need caller()/wantarray.
+3. Grow `ExprToCL2` native set: string concat/interpolation; let
+   VarAnnotator's `_arith_rhs` accept known-insensitive funcalls so
+   `my $x = f() + 1` can unbox.
+4. Statement kinds: elsif, C-style for (`p-for` form), package, `use`.
+5. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
    (`type-flow-and-codegen-plan.md` §(s)) once shapes stabilize.

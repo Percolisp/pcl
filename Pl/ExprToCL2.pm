@@ -24,6 +24,13 @@ has expr_o       => (is => 'ro', required => 1);
 has environment  => (is => 'ro');
 has indent_level => (is => 'rw', default => 0);
 
+# Per-sub facts collected by Parser2's pre-pass:
+#   { perl_name => { cl_name => 'pl-foo', insensitive => 0|1 } }
+# `insensitive` = the sub provably never observes its caller's context
+# (no wantarray, every return value scalar-shaped), so the call site may
+# skip the (let ((*wantarray* …)) …) dynamic bind — the R2 caller half.
+has sub_info     => (is => 'ro', default => sub { {} });
+
 my %BINOP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == !=);
 
 # Same entry as Pl::ExprToCL::generate — returns a string (or undef when the
@@ -46,6 +53,23 @@ sub gen_form {
     # Parenthesized sub-expression in scalar position: transparent.
     if ($type eq 'tree_val' && @$kids == 1) {
       return $self->gen_form($kids->[0]);
+    }
+    # Native funcall: a KNOWN user sub called with static scalar args →
+    # direct (pl-f a b).  The &optional/&rest calling convention makes any
+    # static arity legal.  Context-insensitive callee → no *wantarray* bind.
+    if ($type eq 'funcall' && @$kids >= 1) {
+      my $fnode = $self->expr_o->get_a_node($kids->[0]);
+      return undef unless ref($fnode) eq 'PPI::Token::Word';
+      my $info = $self->sub_info->{ $fnode->content } or return undef;
+      my @args;
+      for my $kid (@$kids[1 .. $#$kids]) {
+        my $f = $self->gen_form($kid);
+        return undef unless defined $f;
+        push @args, $f;
+      }
+      my $call = [$info->{cl_name}, @args];
+      return $call if $info->{insensitive};
+      return ['let', ['list', ['list', '*wantarray*', 'nil']], $call];
     }
     return undef;
   }
