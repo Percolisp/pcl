@@ -25,6 +25,31 @@
 (setf (readtable-case *readtable*) :invert)
 ;;; ----------------------------------------------------------------------
 
+;;; --- Floating-point model: set ONCE at startup ------------------------
+;;; Perl's float semantics: overflow -> Inf, invalid -> NaN, silently.
+;;; Mask those traps once here instead of per operation (the old
+;;; %pcl-ieee-arith wrapped every arithmetic op in a heap-allocated closure
+;;; plus with-float-traps-masked -- measured 7.4x slower on arithmetic).
+;;; :divide-by-zero stays trapping: Perl dies on 1/0 and 1/0.0 alike.
+(sb-int:set-floating-point-modes :traps '(:divide-by-zero))
+;;; A core saved with sb-ext:save-lisp-and-die (standalone executables)
+;;; resets FP modes at startup -- re-apply them when such a core boots.
+(push (lambda () (sb-int:set-floating-point-modes :traps '(:divide-by-zero)))
+      sb-ext:*init-hooks*)
+
+;;; --- Inline policy: stored now, enabled at end of file ------------------
+;;; Hot operators/accessors below carry (declaim (inline f)) BEFORE their
+;;; defun (SBCL stores the inline expansion only when the proclamation is in
+;;; effect at definition time) and (declaim (notinline f)) right AFTER it.
+;;; The runtime's own thousands of call sites therefore compile as plain
+;;; calls (keeps this file's load/compile time low — every test/process
+;;; spawn recompiles it), while the end of this file re-proclaims them
+;;; INLINE so all GENERATED USER CODE compiled afterwards gets the numberp/
+;;; stringp fast paths open-coded at its call sites.
+;;; The global optimize policy for generated code lives at the end of the
+;;; file for the same reason.
+;;; ----------------------------------------------------------------------
+
 (defpackage :pcl
   (:use :cl)
   (:export
@@ -471,7 +496,12 @@
 (defmacro p-CHECK (&body body)
   `(eval-when (:load-toplevel) ,@body))
 
-;;; Forward declarations to avoid style warnings
+;;; Forward declarations to avoid style warnings.
+;;; NOTE: do NOT tighten the return ftype of to-number/to-string — they are
+;;; declaimed INLINE below, and SBCL 2.6.0 ICEs (type-error in sb-c during
+;;; LENGTH derivation) on an inline function with a declaimed narrower return
+;;; type.  The inline numberp/stringp fast paths already give callers
+;;; branch-local type information, which is what the re-check elision needs.
 (declaim (ftype (function (t) t) to-number to-string unbox p-get-stream))
 ;;; Forward-declare functions defined later in the file to suppress SBCL
 ;;; STYLE-WARNING: "undefined function" during compilation.
@@ -750,6 +780,7 @@
   (kind nil))   ; nil → ref()="SCALAR" (arylen); :lvalue → ref()="LVALUE"
                                         ;   (\substr / \pos / \vec), matching Perl's reftype.
 
+(declaim (inline unbox))
 (defun unbox (val)
   "Extract value from a box, or return val if not boxed.
    If the box contains a p-tie-proxy, dispatches to FETCH.
@@ -763,6 +794,7 @@
            (funcall (p-magic-cell-getter v)))
           (t v)))
       val))
+(declaim (notinline unbox))
 
 (defun ensure-boxed (val)
   "Ensure a value is boxed"
@@ -1586,8 +1618,8 @@
       ;; is a compile-time warning only — at runtime the variable is bound.
       (and (ignore-errors (gethash fh-sym *p-dirhandles*)) t)))
 
-(defun p-true-p (val)
-  "Perl truthiness: false if undef, 0, empty string, empty list, or nil.
+(defun %p-true-p-slow (val)
+  "Perl truthiness slow path: boxes, undef, aggregates, overloads.
 
    A BOXED value is a Perl scalar: if it holds a reference (arrayref/hashref/
    coderef/scalarref/typeglob — represented as a raw container or inner box) it
@@ -1600,7 +1632,7 @@
   (when (p-box-p val)
     (let ((handler (p-find-overload val "bool")))
       (when handler
-        (return-from p-true-p
+        (return-from %p-true-p-slow
           (p-true-p (p-call-overload handler val nil nil))))))
   (if (p-box-p val)
       ;; Boxed = Perl scalar.  A held reference is always true.
@@ -1628,6 +1660,17 @@
         ((and (vectorp val) (not (stringp val))) (> (length val) 0))
         ((hash-table-p val) (> (%p-hash-user-count val) 0))
         (t t))))
+
+(declaim (inline p-true-p))
+(defun p-true-p (val)
+  "Perl truthiness with inline fast paths for raw numbers and strings.
+   Number: false iff zero (NaN is true).  String: false iff \"\" or \"0\".
+   Everything else (boxes, undef, aggregates, overloads) → slow path."
+  (cond
+    ((numberp val) (not (and (not (%pcl-nan-p val)) (zerop val))))
+    ((stringp val) (not (or (string= val "") (string= val "0"))))
+    (t (%p-true-p-slow val))))
+(declaim (notinline p-true-p))
 
 ;;; ============================================================
 ;;; Arithmetic Operators
@@ -1676,63 +1719,78 @@
          (and has-digit (= pos len)))))
 
 ;;; use overload — helper macro for binary arithmetic operators.
-;;; Checks left operand first, then right (reversed), then falls back to CL-OP.
-(defun %pcl-ieee-arith (thunk)
-  "Call THUNK for numeric result; return NaN/Inf on IEEE floating-point exceptions."
-  (sb-int:with-float-traps-masked (:invalid :overflow)
-    (funcall thunk)))
-
+;;; Each op compiles to an INLINE wrapper whose fast path handles two raw CL
+;;; numbers with the native CL op (IEEE Inf/NaN come free — FP traps are
+;;; masked once at startup, see file top).  Everything else (boxes, strings,
+;;; undef, overloaded objects) takes the out-of-line slow path, which checks
+;;; the left operand's overload, then the right (reversed), then coerces.
 (defmacro %def-overloaded-arith (name op-str cl-op)
-  `(defun ,name (a &optional (b nil b-supplied-p))
-     ,(format nil "Perl ~A with use overload dispatch" op-str)
-     (if (not b-supplied-p)
-         ;; Unary form: e.g. +(expr) — return as-is (no overload for unary +)
-         a
-         ;; use overload: check left operand, then right (reversed flag = t)
+  (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl)))
+    `(progn
+       (defun ,slow (a b)
+         ,(format nil "Perl ~A slow path: use overload dispatch, then numeric coercion" op-str)
          (let ((ha (p-find-overload a ,op-str)))
            (if ha (p-call-overload ha a b nil)
                (let ((hb (p-find-overload b ,op-str)))
                  (if hb (p-call-overload hb b a t)
-                     (%pcl-ieee-arith (lambda () (,cl-op (to-number a) (to-number b)))))))))))
+                     (,cl-op (to-number a) (to-number b)))))))
+       (declaim (inline ,name))
+       (defun ,name (a &optional (b nil b-supplied-p))
+         ,(format nil "Perl ~A with numberp fast path + use overload dispatch" op-str)
+         (if (not b-supplied-p)
+             ;; Unary form: e.g. +(expr) — return as-is (no overload for unary +)
+             a
+             (if (and (numberp a) (numberp b))
+                 (,cl-op a b)
+                 (,slow a b))))
+       ;; expansion stored; plain calls inside the runtime (see file top/end)
+       (declaim (notinline ,name)))))
 
 (%def-overloaded-arith p-+ "+" +)
 (%def-overloaded-arith p-* "*" *)
 
-(defun p-- (a &optional b)
-  "Perl subtraction / unary minus with use overload dispatch.
-   Unary: checks 'neg' overload, then applies Perl string-negation rules.
-   Binary: checks '-' overload on either operand."
-  (if (null b)
-      ;; Unary minus
-      (progn
-        ;; use overload "neg": unary minus overload
-        (let ((h-neg (p-find-overload a "neg")))
-          (when h-neg (return-from p-- (p-call-overload h-neg a nil nil))))
-        ;; No overload: apply Perl string-negation rules
-        (let ((val (unbox a)))
-          (if (and (stringp val) (> (length val) 0) (not (looks-like-number val)))
-              ;; Not a pure number — string operations
-              (let ((ch (char val 0)))
-                (cond
-                  ((char= ch #\-) (concatenate 'string "+" (subseq val 1)))
-                  ((char= ch #\+) (concatenate 'string "-" (subseq val 1)))
-                  ;; ASCII alpha/underscore: prepend '-'
-                  ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
-                   (concatenate 'string "-" val))
-                  ;; Starts with digit but not pure number (e.g. "12foo"): numeric
-                  (t (- (to-number a)))))
-              ;; Numeric negation
-              (- (to-number a)))))
-      ;; Binary subtraction
-      ;; use overload "-": binary minus overload
-      (let ((ha (p-find-overload a "-")))
-        (if ha (p-call-overload ha a b nil)
-            (let ((hb (p-find-overload b "-")))
-              (if hb (p-call-overload hb b a t)
-                  (%pcl-ieee-arith (lambda () (- (to-number a) (to-number b))))))))))
+(defun %p-neg (a)
+  "Perl unary minus slow path.
+   Checks 'neg' overload, then applies Perl string-negation rules."
+  ;; use overload "neg": unary minus overload
+  (let ((h-neg (p-find-overload a "neg")))
+    (when h-neg (return-from %p-neg (p-call-overload h-neg a nil nil))))
+  ;; No overload: apply Perl string-negation rules
+  (let ((val (unbox a)))
+    (if (and (stringp val) (> (length val) 0) (not (looks-like-number val)))
+        ;; Not a pure number — string operations
+        (let ((ch (char val 0)))
+          (cond
+            ((char= ch #\-) (concatenate 'string "+" (subseq val 1)))
+            ((char= ch #\+) (concatenate 'string "-" (subseq val 1)))
+            ;; ASCII alpha/underscore: prepend '-'
+            ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
+             (concatenate 'string "-" val))
+            ;; Starts with digit but not pure number (e.g. "12foo"): numeric
+            (t (- (to-number a)))))
+        ;; Numeric negation
+        (- (to-number a)))))
 
-(defun p-/ (a b)
-  "Perl division with use overload '/' dispatch"
+(defun %p---slow (a b)
+  "Perl binary subtraction slow path: use overload dispatch, then coercion."
+  ;; use overload "-": binary minus overload
+  (let ((ha (p-find-overload a "-")))
+    (if ha (p-call-overload ha a b nil)
+        (let ((hb (p-find-overload b "-")))
+          (if hb (p-call-overload hb b a t)
+              (- (to-number a) (to-number b)))))))
+
+(declaim (inline p--))
+(defun p-- (a &optional b)
+  "Perl subtraction / unary minus with numberp fast path + overload dispatch."
+  (cond
+    ((null b) (if (numberp a) (- a) (%p-neg a)))
+    ((and (numberp a) (numberp b)) (- a b))
+    (t (%p---slow a b))))
+(declaim (notinline p--))
+
+(defun %p-/-slow (a b)
+  "Perl division slow path: use overload dispatch, then coercion."
   ;; use overload "/": division overload
   (let ((ha (p-find-overload a "/")))
     (if ha (p-call-overload ha a b nil)
@@ -1741,10 +1799,20 @@
               ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
               ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
               ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
-              (let ((r (%pcl-ieee-arith (lambda () (/ (to-number a) (to-number b))))))
+              (let ((r (/ (to-number a) (to-number b))))
                 (if (typep r 'ratio) (coerce r 'double-float) r)))))))
-(defun p-% (a b)
-  "Perl modulo with use overload '%' dispatch"
+
+(declaim (inline p-/))
+(defun p-/ (a b)
+  "Perl division with numberp fast path + use overload dispatch"
+  (if (and (numberp a) (numberp b))
+      (let ((r (/ a b)))
+        (if (typep r 'ratio) (coerce r 'double-float) r))
+      (%p-/-slow a b)))
+(declaim (notinline p-/))
+
+(defun %p-%-slow (a b)
+  "Perl modulo slow path with use overload '%' dispatch"
   ;; use overload "%": modulo overload
   (let ((ha (p-find-overload a "%")))
     (if ha (p-call-overload ha a b nil)
@@ -1757,6 +1825,14 @@
                         (zerop nb))
                     (sb-kernel:make-double-float #x7FF80000 0)
                     (mod (truncate na) (truncate nb)))))))))
+
+(declaim (inline p-%))
+(defun p-% (a b)
+  "Perl modulo with integer fast path + use overload dispatch"
+  (if (and (integerp a) (integerp b) (not (eql b 0)))
+      (mod a b)
+      (%p-%-slow a b)))
+(declaim (notinline p-%))
 
 (defun p-** (a b)
   "Perl exponentiation with use overload '**' dispatch"
@@ -1845,39 +1921,52 @@
   ;; CL doesn't have portable srand - just return a value
   1)
 
+(defun %to-number-raw (val)
+  "Convert a raw non-number, non-box value to number (Perl semantics)."
+  (cond
+    ((eq val *p-undef*) 0)
+    ((null val) 0)
+    ;; CL's T from comparison operators - Perl true numifies to 1
+    ((eq val t) 1)
+    ((stringp val) (parse-perl-number val))
+    ;; Adjustable vector = Perl @array in scalar context → array length
+    ((and (vectorp val) (adjustable-array-p val)) (length val))
+    ;; Perl 5.26+: plain %hash in numeric context → key count
+    ((hash-table-p val) (%p-hash-user-count val))
+    ;; Compiled regex in numeric context → object address (like a reference)
+    ((p-regex-match-p val) (object-address val))
+    (t 0)))
+
+(declaim (inline to-number))
 (defun to-number (val)
   "Convert value to number (Perl semantics).
-   Uses lazy caching for boxed values."
-  (if (p-box-p val)
-      (box-nv val)
-      ;; Raw value - convert directly
-      (cond
-        ((numberp val) val)
-        ((eq val *p-undef*) 0)
-        ((null val) 0)
-        ;; CL's T from comparison operators - Perl true numifies to 1
-        ((eq val t) 1)
-        ((stringp val) (parse-perl-number val))
-        ;; Adjustable vector = Perl @array in scalar context → array length
-        ((and (vectorp val) (adjustable-array-p val)) (length val))
-        ;; Perl 5.26+: plain %hash in numeric context → key count
-        ((hash-table-p val) (%p-hash-user-count val))
-        ;; Compiled regex in numeric context → object address (like a reference)
-        ((p-regex-match-p val) (object-address val))
-        (t 0))))
+   Inline numberp fast path; lazy caching for boxed values."
+  (cond
+    ((numberp val) val)
+    ((p-box-p val) (box-nv val))
+    (t (%to-number-raw val))))
+(declaim (notinline to-number))
 
 ;;; ============================================================
 ;;; String Operators
 ;;; ============================================================
 
-(defun p-. (a b)
-  "Perl string concatenation operator (.) with use overload '.' dispatch."
+(defun %p-.-slow (a b)
+  "Perl string concatenation slow path with use overload '.' dispatch."
   ;; use overload ".": check left operand then right (reversed)
   (let ((ha (p-find-overload a ".")))
     (if ha (p-call-overload ha a b nil)
         (let ((hb (p-find-overload b ".")))
           (if hb (p-call-overload hb b a t)
               (concatenate 'string (to-string a) (to-string b)))))))
+
+(declaim (inline p-.))
+(defun p-. (a b)
+  "Perl string concatenation operator (.) with stringp fast path."
+  (if (and (stringp a) (stringp b))
+      (concatenate 'string a b)
+      (%p-.-slow a b)))
+(declaim (notinline p-.))
 
 (defun p-string-concat (&rest args)
   "Perl string concatenation for string interpolation (\"$a $b\").
@@ -1946,13 +2035,16 @@
                       :fill-pointer t
                       :initial-contents result-list)))))
 
+(declaim (inline to-string))
 (defun to-string (val)
   "Convert value to string (Perl semantics).
-   Uses lazy caching for boxed values."
-  (if (p-box-p val)
-      (box-sv val)
-      ;; Raw value - convert directly
-      (stringify-value val)))
+   Inline stringp fast path; lazy caching for boxed values."
+  (cond
+    ((stringp val) val)
+    ((p-box-p val) (box-sv val))
+    ;; Raw value - convert directly
+    (t (stringify-value val))))
+(declaim (notinline to-string))
 
 (defun p-length (val)
   "Perl length function - returns undef for undef input.
@@ -4305,40 +4397,59 @@
 ;;; use overload — helper macro for binary comparison operators.
 ;;; Checks op-specific handler first, then falls back to the parent
 ;;; three-way operator (<=> for numeric, cmp for string) if available.
+(declaim (inline %pcl-nan-p))
 (defun %pcl-nan-p (x)
   "True if x is a floating-point NaN."
   (and (floatp x) (sb-ext:float-nan-p x)))
+(declaim (notinline %pcl-nan-p))
 
+(declaim (inline p-bool))
 (defun p-bool (x)
   "Map a CL boolean to a Perl boolean scalar: true → 1, false → \"\".
    Perl comparison operators return 1 for true and the empty string (which is
    *defined*) for false — NOT undef.  This matters for `defined(2==3)` (true)
    and `(2==3) // 4` (yields \"\", not 4)."
   (if x 1 ""))
+(declaim (notinline p-bool))
 
+;;; Each comparison compiles to an INLINE wrapper: two raw CL numbers take
+;;; the native CL test directly (with the IEEE NaN rule); anything else goes
+;;; through the out-of-line overload/coercion slow path.
 (defmacro %def-overloaded-cmp (name op-str fallback-op cl-test nan-result)
-  `(defun ,name (a b)
-     ,(format nil "Perl ~A with use overload dispatch (returns 1 / \"\")" op-str)
-     ;; use overload: check op-specific handler, then fallback to <=> or cmp.
-     ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
-     (p-bool
-      (let ((ha (p-find-overload a ,op-str)))
-        (if ha (p-true-p (p-call-overload ha a b nil))
-            (let ((hb (p-find-overload b ,op-str)))
-              (if hb (p-true-p (p-call-overload hb b a t))
-                  ;; use overload fallback: derive from three-way if available
-                  (let ((fa (p-find-overload a ,fallback-op))
-                        (fb (p-find-overload b ,fallback-op)))
-                    (if (or fa fb)
-                        (,cl-test (to-number (if fa
-                                                 (p-call-overload fa a b nil)
-                                                 (p-call-overload fb b a t)))
-                                  0)
-                        ;; IEEE 754: any comparison with NaN → nan-result
-                        (let ((na (to-number a)) (nb (to-number b)))
-                          (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
-                              ,nan-result
-                              (,cl-test na nb))))))))))))
+  (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl)))
+    `(progn
+       (defun ,slow (a b)
+         ,(format nil "Perl ~A slow path: use overload dispatch (returns 1 / \"\")" op-str)
+         ;; use overload: check op-specific handler, then fallback to <=> or cmp.
+         ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
+         (p-bool
+          (let ((ha (p-find-overload a ,op-str)))
+            (if ha (p-true-p (p-call-overload ha a b nil))
+                (let ((hb (p-find-overload b ,op-str)))
+                  (if hb (p-true-p (p-call-overload hb b a t))
+                      ;; use overload fallback: derive from three-way if available
+                      (let ((fa (p-find-overload a ,fallback-op))
+                            (fb (p-find-overload b ,fallback-op)))
+                        (if (or fa fb)
+                            (,cl-test (to-number (if fa
+                                                     (p-call-overload fa a b nil)
+                                                     (p-call-overload fb b a t)))
+                                      0)
+                            ;; IEEE 754: any comparison with NaN → nan-result
+                            (let ((na (to-number a)) (nb (to-number b)))
+                              (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
+                                  ,nan-result
+                                  (,cl-test na nb)))))))))))
+       (declaim (inline ,name))
+       (defun ,name (a b)
+         ,(format nil "Perl ~A with numberp fast path (returns 1 / \"\")" op-str)
+         (if (and (numberp a) (numberp b))
+             (p-bool (if (or (%pcl-nan-p a) (%pcl-nan-p b))
+                         ,nan-result
+                         (,cl-test a b)))
+             (,slow a b)))
+       ;; expansion stored; plain calls inside the runtime (see file top/end)
+       (declaim (notinline ,name)))))
 
 (%def-overloaded-cmp p-==  "=="  "<=>"  =   nil)   ; NaN==NaN → false
 (%def-overloaded-cmp p-!=  "!="  "<=>"  /=  t)     ; NaN!=NaN → true
@@ -4347,8 +4458,8 @@
 (%def-overloaded-cmp p-<=  "<="  "<=>"  <=  nil)   ; NaN<=x → false
 (%def-overloaded-cmp p->=  ">="  "<=>"  >=  nil)   ; NaN>=x → false
 
-(defun p-<=> (a b)
-  "Perl spaceship operator with use overload '<=>' dispatch"
+(defun %p-<=>-slow (a b)
+  "Perl spaceship slow path with use overload '<=>' dispatch"
   ;; use overload "<=>": check left operand then right (reversed)
   (let ((ha (p-find-overload a "<=>")))
     (if ha (p-call-overload ha a b nil)
@@ -4359,6 +4470,16 @@
                 (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
                     *p-undef*
                     (cond ((< na nb) -1) ((> na nb) 1) (t 0)))))))))
+
+(declaim (inline p-<=>))
+(defun p-<=> (a b)
+  "Perl spaceship operator with numberp fast path"
+  (if (and (numberp a) (numberp b))
+      (if (or (%pcl-nan-p a) (%pcl-nan-p b))
+          *p-undef*
+          (cond ((< a b) -1) ((> a b) 1) (t 0)))
+      (%p-<=>-slow a b)))
+(declaim (notinline p-<=>))
 
 ;;; ============================================================
 ;;; Range Operator
@@ -4574,26 +4695,39 @@
 ;;; STR-TEST applied to (to-string a) (to-string b) for non-overloaded case.
 ;;; CMP-TEST applied to (cmp-result) 0 for the cmp-based fallback.
 ;;; These are distinct because str-test takes strings, cmp-test takes numbers.
+;;; Each string comparison compiles to an INLINE wrapper: two raw CL strings
+;;; take the native CL test directly; anything else (boxes, numbers, undef,
+;;; overloaded objects) goes through the out-of-line slow path.
 (defmacro %def-overloaded-str-cmp (name op-str str-test cmp-test)
-  `(defun ,name (a b)
-     ,(format nil "Perl ~A with use overload dispatch (returns 1 / \"\")" op-str)
-     ;; use overload: check op-specific handler, then fallback to cmp.
-     ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
-     (p-bool
-      (let ((ha (p-find-overload a ,op-str)))
-        (if ha (p-true-p (p-call-overload ha a b nil))
-            (let ((hb (p-find-overload b ,op-str)))
-              (if hb (p-true-p (p-call-overload hb b a t))
-                  (let ((fa (p-find-overload a "cmp"))
-                        (fb (p-find-overload b "cmp")))
-                    (if (or fa fb)
-                        ;; use overload fallback: cmp returns -1/0/1, test against 0
-                        (,cmp-test (to-number (if fa
-                                                  (p-call-overload fa a b nil)
-                                                  (p-call-overload fb b a t)))
-                                   0)
-                        ;; No overload: direct string comparison
-                        (,str-test (to-string a) (to-string b))))))))))) ; t/nil → p-bool
+  (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl)))
+    `(progn
+       (defun ,slow (a b)
+         ,(format nil "Perl ~A slow path: use overload dispatch (returns 1 / \"\")" op-str)
+         ;; use overload: check op-specific handler, then fallback to cmp.
+         ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
+         (p-bool
+          (let ((ha (p-find-overload a ,op-str)))
+            (if ha (p-true-p (p-call-overload ha a b nil))
+                (let ((hb (p-find-overload b ,op-str)))
+                  (if hb (p-true-p (p-call-overload hb b a t))
+                      (let ((fa (p-find-overload a "cmp"))
+                            (fb (p-find-overload b "cmp")))
+                        (if (or fa fb)
+                            ;; use overload fallback: cmp returns -1/0/1, test against 0
+                            (,cmp-test (to-number (if fa
+                                                      (p-call-overload fa a b nil)
+                                                      (p-call-overload fb b a t)))
+                                       0)
+                            ;; No overload: direct string comparison
+                            (,str-test (to-string a) (to-string b)))))))))) ; t/nil → p-bool
+       (declaim (inline ,name))
+       (defun ,name (a b)
+         ,(format nil "Perl ~A with stringp fast path (returns 1 / \"\")" op-str)
+         (if (and (stringp a) (stringp b))
+             (p-bool (,str-test a b))
+             (,slow a b)))
+       ;; expansion stored; plain calls inside the runtime (see file top/end)
+       (declaim (notinline ,name)))))
 
 (%def-overloaded-str-cmp p-str-eq  "eq"  string=   =)
 (%def-overloaded-str-cmp p-str-ne  "ne"  string/=  /=)
@@ -4602,8 +4736,8 @@
 (%def-overloaded-str-cmp p-str-le  "le"  string<=  <=)
 (%def-overloaded-str-cmp p-str-ge  "ge"  string>=  >=)
 
-(defun p-str-cmp (a b)
-  "Perl string comparison (cmp) with use overload 'cmp' dispatch"
+(defun %p-str-cmp-slow (a b)
+  "Perl string comparison (cmp) slow path with use overload 'cmp' dispatch"
   ;; use overload "cmp": check left operand then right (reversed)
   (let ((ha (p-find-overload a "cmp")))
     (if ha (p-call-overload ha a b nil)
@@ -4611,6 +4745,14 @@
           (if hb (p-call-overload hb b a t)
               (let ((sa (to-string a)) (sb (to-string b)))
                 (cond ((string< sa sb) -1) ((string> sa sb) 1) (t 0))))))))
+
+(declaim (inline p-str-cmp))
+(defun p-str-cmp (a b)
+  "Perl string comparison (cmp) with stringp fast path"
+  (if (and (stringp a) (stringp b))
+      (cond ((string< a b) -1) ((string> a b) 1) (t 0))
+      (%p-str-cmp-slow a b)))
+(declaim (notinline p-str-cmp))
 
 ;;; ============================================================
 ;;; Chained Comparison
@@ -13086,6 +13228,19 @@ buffer's fill-pointer; everything else falls back to file-length."
   nil)
 
 ;;; pack/unpack loaded lazily on first call via self-loading stubs above.
+
+;;; --- Policy for GENERATED USER CODE (compiled after this file) ----------
+;;; Re-enable inlining of the hot fast-path operators/accessors (their
+;;; expansions were stored at definition; the runtime itself compiled them
+;;; notinline to keep this file's per-process load cheap — see file top),
+;;; and raise the optimize policy so user call sites open-code the
+;;; numberp/stringp fast paths as native ops.
+(declaim (inline p-+ p-- p-* p-/ p-%
+                 p-== p-!= p-< p-> p-<= p->= p-<=>
+                 p-. p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge
+                 p-str-cmp
+                 unbox to-number to-string p-true-p p-bool %pcl-nan-p))
+(declaim (optimize (speed 2) (safety 1) (debug 0)))
 
 ;; Diagnostic banner on *error-output*, not *standard-output*, so it never
 ;; pollutes a script's stdout when run via the `pcl` command. Test harnesses

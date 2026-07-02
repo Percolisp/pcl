@@ -181,19 +181,29 @@ including everything proposed since, ordered roughly by
 (expected win) ÷ (effort). Items marked ★ are new relative to the review.
 
 ### 5.1 ★ Set the FPU modes once at startup — delete `%pcl-ieee-arith`
-Verified working (§2, Tax 3). One line in the runtime prologue, then remove
-the per-op closure+mask from all arithmetic. **Expected: ~7× on arithmetic-
-heavy paths, for an afternoon of work. Do this first.**
+**SHIPPED 2026-07-02.** The runtime prologue now runs
+`(sb-int:set-floating-point-modes :traps '(:divide-by-zero))` (plus an
+`sb-ext:*init-hooks*` re-apply for saved cores): overflow→Inf and
+invalid→NaN silently, exactly Perl's model, while integer AND float division
+by zero still die (verified: perl dies on `1/0.0` too, so `:divide-by-zero`
+must stay trapping — the review's "`1/0.0` → Inf" claim was wrong).
+`%pcl-ieee-arith` and its per-op closure+mask are deleted.
 
 ### 5.2 R1 — inline fast-path operators
-`(declaim (inline p-+))` with a `numberp`-guard: two plain numbers → native
-`+`; anything else → the slow path (which handles boxes, undef, overload —
-so overloaded objects stay correct *without* any global no-overload
-assumption). Same for `- * < <= > >= == !=`, `p-.`/`p-str-eq` with `stringp`
-guards. Before unboxing, literal operands already take the fast branch;
-after unboxing, nearly everything does. **Expected: large multiplier in
-combination with §5.6; makes `repr=any` (unboxed-but-unproven) nearly as
-fast as proven-numeric.**
+**SHIPPED 2026-07-02** for `+ - * / % == != < > <= >= <=> .` and the six
+string comparisons + `cmp`, plus accessors `unbox to-number to-string
+p-true-p p-bool`: inline wrappers with numberp/stringp fast paths over
+out-of-line `%p-…-slow` overload/coercion paths (overloaded objects stay
+correct — no global no-overload assumption). Two implementation lessons,
+both recorded in `docs/parser2-prototype.md` "R1 landed":
+- **inline-before / notinline-after / re-inline-at-EOF** keeps the runtime's
+  own source-load at ~1.15 s (naive global inline+speed-2 made every SBCL
+  spawn pay ~4.9 s);
+- **SBCL 2.6.0 ICEs** on inline + narrowed return ftype — keep `(t) t`.
+
+Measured (whole-program minus null-baseline, with the v2 prototype shapes):
+intmath **7.5× → 1.5×** of perl, fib(29) **5× → 2.1×** — the Phase-1+R1
+checkpoint (§ headline "≥3×") is met. Gate: 113 files / 3740 tests green.
 
 ### 5.3 ★ Stack-allocate the argument parcel (`dynamic-extent @_`)
 Even before real lambda lists: when the analysis (BlockAnalyzer already
