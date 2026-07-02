@@ -115,7 +115,8 @@
    ;; Time functions
    #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
-   #:p-exit #:p-system #:p-backtick #:p-errno-string #:p-stash
+   #:p-exit #:p-system #:p-fork #:p-waitpid #:p-wait #:p-getppid #:p-kill #:p-exec
+   #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
    #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
    ;; Environment
@@ -7024,8 +7025,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   nil)
 
 (defun %p-install-fh (fh stream)
-  "Bind STREAM to the filehandle FH (a box, or a bareword symbol)."
-  (cond ((p-box-p fh) (box-set fh stream))
+  "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
+   Symbolic filehandle: when FH is a box already holding a non-empty handle-NAME
+   string (e.g. $TST = \"TST\"; open($TST, ...)), Perl opens the named glob (*TST)
+   and leaves $fh holding the string — it does NOT autovivify a lexical handle.
+   Register under the by-name :pcl symbol so BOTH the bareword form (<TST>/eof(TST))
+   and the scalar form (<$TST>) resolve it via %p-resolve-fh."
+  (cond ((and (p-box-p fh)
+              (stringp (p-box-value fh))
+              (plusp (length (p-box-value fh))))
+         (let* ((nm  (p-box-value fh))
+                (sep (search "::" nm :from-end t))
+                (name (if sep (subseq nm (+ sep 2)) nm)))
+           (setf (gethash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)
+                 stream)))
+        ((p-box-p fh) (box-set fh stream))
         (t            (setf (gethash fh *p-filehandles*) stream))))
 
 (defun %p-fresh-adjustable-string (&optional (init ""))
@@ -7120,27 +7134,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              (warn "Unknown open mode: ~A" mode-str)
              nil))))
     (if stream
-        (progn
-          (cond
-            ;; Symbolic filehandle: open($fh, ...) where $fh already holds a
-            ;; defined handle-NAME string (e.g. $TST = "TST"; open($TST, ...)).
-            ;; Perl opens the named glob (*TST) and leaves $fh holding the
-            ;; string — it does NOT autovivify a lexical handle into $fh.
-            ;; Register under the by-name :pcl symbol (invert-cased, package
-            ;; qualifier stripped) so BOTH the bareword form (<TST>/eof(TST))
-            ;; and the scalar form (<$TST>) resolve it via p-get-stream.
-            ;; (An undef/empty box is the modern `open my $fh, ...` autoviv.)
-            ((and (p-box-p fh)
-                  (stringp (p-box-value fh))
-                  (plusp (length (p-box-value fh))))
-             (let* ((nm  (p-box-value fh))
-                    (sep (search "::" nm :from-end t))
-                    (name (if sep (subseq nm (+ sep 2)) nm)))
-               (setf (gethash (intern (%pcl-invert-case name) :pcl)
-                              *p-filehandles*)
-                     stream)))
-            ((p-box-p fh) (box-set fh stream))
-            (t             (setf (gethash fh *p-filehandles*) stream))))
+        ;; Install under the box/bareword/symbolic-name rules — %p-install-fh
+        ;; also handles the symbolic-filehandle case (box already holding a
+        ;; handle-NAME string, e.g. $TST = "TST"; open($TST, ...)): Perl opens
+        ;; the named glob (*TST) and leaves $fh holding the string rather than
+        ;; autovivifying a lexical handle.  (An undef/empty box is the modern
+        ;; `open my $fh, ...` autoviv.)
+        (%p-install-fh fh stream)
         (%pcl-save-errno))  ; capture C errno (ENOENT etc.) before SBCL overwrites it
     (if stream t nil)))
 
@@ -7198,7 +7198,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((stream (if fh (p-get-stream fh) (or *p-last-read-handle* *standard-input*))))
     ;; eof FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
     (when (and fh stream) (setf *p-last-read-handle* stream))
-    (if stream
+    ;; A closed stream reads as EOF in Perl (eof on a closed handle is true).
+    ;; *p-last-read-handle* may still point at a stream that was since closed
+    ;; (`close TRY; ...; eof()`), so guard peek-char against a closed stream to
+    ;; avoid an sb-int:closed-stream-error abort.
+    (if (and stream (open-stream-p stream))
         (let ((ch (peek-char nil stream nil :eof)))
           (if (eq ch :eof) t nil))
         t)))
@@ -8242,20 +8246,99 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; Maps pattern string -> (index . results-vector) or :list-done (after list exhaustion).
 (defvar *p-glob-iterators* (make-hash-table :test 'equal))
 
-(defun p-glob--expand (pat)
-  "Expand glob pattern PAT and return a vector of matching filenames."
-  (let* ((expanded-pat (expand-glob-char-ranges pat))
-         (is-relative (not (and (> (length expanded-pat) 0) (char= (char expanded-pat 0) #\/))))
-         (full-pat (if is-relative
+(defun %p-glob-component-regex (glob)
+  "cl-ppcre pattern (whole-string anchored) for one shell-glob filename
+   component: `*` → any run, `?` → any one char, `[..]` char classes kept
+   (ranges already expanded by expand-glob-char-ranges, `!` negation → `^`),
+   every other char escaped literally.  Used to filter a directory listing so
+   `*` matches dotted names too (CL's pathname `*` wrongly requires no
+   extension)."
+  (with-output-to-string (s)
+    (write-char #\^ s)
+    (let ((i 0) (len (length glob)))
+      (loop while (< i len) do
+            (let ((c (char glob i)))
+              (cond
+                ((char= c #\*) (write-string "[^/]*" s) (incf i))
+                ((char= c #\?) (write-string "[^/]" s) (incf i))
+                ((char= c #\[)
+                 (let ((j (1+ i)))
+                   (when (and (< j len) (member (char glob j) '(#\^ #\!))) (incf j))
+                   (when (and (< j len) (char= (char glob j) #\])) (incf j))
+                   (loop while (and (< j len) (not (char= (char glob j) #\]))) do (incf j))
+                   (if (< j len)
+                       (progn (write-string (substitute #\^ #\! (subseq glob i (1+ j))) s)
+                              (setf i (1+ j)))
+                       (progn (write-string "\\[" s) (incf i)))))
+                (t (when (find c ".\\+*?()|{}^$") (write-char #\\ s))
+                   (write-char c s) (incf i))))))
+    (write-char #\$ s)))
+
+(defun %p-glob-leaf-name (path)
+  "Final path component of PATH as a string — the directory name for a
+   directory pathname, else the file name+type."
+  (if (and (null (pathname-name path)) (null (pathname-type path)))
+      (car (last (pathname-directory path)))
+      (file-namestring path)))
+
+(defun %p-glob--expand-dir (dir-prefix file-glob)
+  "Match FILE-GLOB against the leaf names in the fixed directory DIR-PREFIX
+   (\"\" = cwd).  Enumerates every entry (files + dirs, any extension) and
+   filters via a glob→regex, so `*` matches dotted names — honouring Perl's
+   rule that a leading dot is matched only if the pattern starts with one."
+  (let* ((relative (or (string= dir-prefix "") (not (char= (char dir-prefix 0) #\/))))
+         (full-dir (cond ((string= dir-prefix "") (concatenate 'string (sb-posix:getcwd) "/"))
+                         (relative (concatenate 'string (sb-posix:getcwd) "/" dir-prefix))
+                         (t dir-prefix)))
+         (dir-path (handler-case (parse-namestring full-dir) (error () nil)))
+         (entries (when dir-path
+                    (handler-case
+                        (directory (make-pathname :directory (pathname-directory dir-path)
+                                                  :name :wild :type :wild)
+                                   :resolve-symlinks nil)
+                      (error () nil))))
+         (scanner (handler-case
+                      (cl-ppcre:create-scanner (%p-glob-component-regex file-glob))
+                    (error () nil)))
+         (match-dot (and (plusp (length file-glob)) (char= (char file-glob 0) #\.)))
+         (result (make-array 0 :adjustable t :fill-pointer 0)))
+    (when scanner
+      (dolist (p entries)
+        (let ((leaf (%p-glob-leaf-name p)))
+          (when (and leaf
+                     (or match-dot
+                         (not (and (plusp (length leaf)) (char= (char leaf 0) #\.))))
+                     (cl-ppcre:scan scanner leaf))
+            (vector-push-extend (concatenate 'string dir-prefix leaf) result)))))
+    (sort result #'string<)))
+
+(defun %p-glob--expand-pathname (expanded-pat orig-pat)
+  "Fallback: expand via CL pathname wildcarding (used when wildcards appear in
+   the DIRECTORY portion).  Imperfect for dotted names but rare."
+  (let* ((relative (not (and (> (length expanded-pat) 0) (char= (char expanded-pat 0) #\/))))
+         (full-pat (if relative
                        (concatenate 'string (sb-posix:getcwd) "/" expanded-pat)
                        expanded-pat))
-         (dir-prefix (let ((slash-pos (position #\/ pat :from-end t)))
-                       (if slash-pos (subseq pat 0 (1+ slash-pos)) "")))
+         (dir-prefix (let ((slash-pos (position #\/ orig-pat :from-end t)))
+                       (if slash-pos (subseq orig-pat 0 (1+ slash-pos)) "")))
          (all-matches (handler-case (directory (parse-namestring full-pat)) (error () nil)))
          (matches (remove-if (lambda (p) (null (pathname-name p))) all-matches))
          (result (make-array (length matches) :fill-pointer 0)))
     (dolist (path matches result)
       (vector-push (concatenate 'string dir-prefix (file-namestring path)) result))))
+
+(defun p-glob--expand (pat)
+  "Expand glob pattern PAT and return a vector of matching filenames."
+  (let* ((expanded (expand-glob-char-ranges pat))
+         (slash (position #\/ expanded :from-end t))
+         (dir-prefix (if slash (subseq expanded 0 (1+ slash)) ""))
+         (file-glob  (if slash (subseq expanded (1+ slash)) expanded)))
+    (if (or (string= file-glob "")
+            (find-if (lambda (c) (member c '(#\* #\? #\[))) dir-prefix))
+        ;; Wildcard in the directory portion (rare): old pathname behaviour.
+        (%p-glob--expand-pathname expanded pat)
+        ;; Common case: fixed directory, wildcard last component.
+        (%p-glob--expand-dir dir-prefix file-glob))))
 
 (defun p-glob (&optional pattern)
   "Perl glob / <*.txt> - expand file glob pattern.
@@ -8858,6 +8941,101 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (ash (sb-ext:process-exit-code proc) 8)))))
         (setf $? wait-status)
         wait-status)))
+
+(defun p-fork ()
+  "Perl fork - duplicate the current process via fork(2) (sb-posix:fork).
+   Returns the child PID in the parent, 0 in the child, undef on failure.
+   Both processes continue running the same program from this point (Perl
+   semantics); the child typically exec()s a program or exit()s.
+   Output buffers are flushed first so buffered text is not duplicated into the
+   child.  (Caveat: PCL cannot fork+continue a program that has spawned CL
+   threads — only the forking thread survives in the child — but ordinary
+   single-threaded Perl fork/exec and fork/exit works.)"
+  (finish-output *standard-output*)
+  (finish-output *error-output*)
+  (handler-case (sb-posix:fork)          ; 0 in child, >0 in parent
+    (error ()
+      (%pcl-save-errno)
+      *p-undef*)))
+
+(defun p-waitpid (pid &optional (flags 0))
+  "Perl waitpid(PID, FLAGS) - wait for a child.  Returns the reaped PID (or -1
+   / 0), and sets $? to the child's raw wait status (exit_code << 8 | signal)."
+  (let ((p (truncate (to-number (if (p-box-p pid) (unbox pid) pid))))
+        (f (truncate (to-number (if (p-box-p flags) (unbox flags) flags)))))
+    (handler-case
+        (multiple-value-bind (rpid status) (sb-posix:waitpid p f)
+          (setf $? status)
+          rpid)
+      (error () (%pcl-save-errno) -1))))
+
+(defun p-wait ()
+  "Perl wait - wait for any child.  Returns the reaped PID (or -1), sets $?."
+  (handler-case
+      (multiple-value-bind (rpid status) (sb-posix:wait)
+        (setf $? status)
+        rpid)
+    (error () (%pcl-save-errno) -1)))
+
+(defun p-getppid ()
+  "Perl getppid - parent process id."
+  (sb-posix:getppid))
+
+(defun p-kill (signal &rest pids)
+  "Perl kill SIGNAL, LIST - send SIGNAL to each PID.  SIGNAL may be a number or
+   a name (\"TERM\", \"SIGKILL\", \"KILL\", ...).  Returns the count of
+   processes successfully signalled.  A negative PID signals a process group."
+  (let* ((sig (%p-resolve-signal signal))
+         (targets (p-flatten-args pids))
+         (n 0))
+    (loop for pt across targets do
+          (let ((p (truncate (to-number (if (p-box-p pt) (unbox pt) pt)))))
+            (handler-case (progn (sb-posix:kill p sig) (incf n))
+              (error () (%pcl-save-errno)))))
+    n))
+
+(defun %p-resolve-signal (signal)
+  "Coerce a Perl kill() signal designator (number or name) to an integer."
+  (let ((v (if (p-box-p signal) (unbox signal) signal)))
+    (if (and (stringp v) (not (every #'digit-char-p v)))
+        (let* ((name (string-upcase v))
+               (name (if (and (> (length name) 3)
+                              (string= (subseq name 0 3) "SIG"))
+                         (subseq name 3) name)))
+          (cond ((string= name "HUP") 1)  ((string= name "INT") 2)
+                ((string= name "QUIT") 3) ((string= name "KILL") 9)
+                ((string= name "USR1") 10)((string= name "USR2") 12)
+                ((string= name "PIPE") 13)((string= name "ALRM") 14)
+                ((string= name "TERM") 15)((string= name "CONT") 18)
+                ((string= name "STOP") 19)((string= name "CHLD") 17)
+                ((string= name "ZERO") 0) (t 15)))
+        (truncate (to-number v)))))
+
+(defun p-exec (&rest args)
+  "Perl exec LIST - replace the current process image with a new program.
+   PCL runs the program with inherited stdio (so file descriptors set up before
+   exec, e.g. after a pipe/dup in a forked child, carry through) and then exits
+   with its status — like exec, this call never returns on success.  With a
+   single string containing shell metacharacters it goes through /bin/sh -c."
+  (when (null args)
+    (setf *p-stored-errno* 2) (return-from p-exec *p-undef*))  ; ENOENT
+  (let* ((strs (mapcar (lambda (a) (to-string (if (p-box-p a) (unbox a) a))) args))
+         (shell-p (and (= (length strs) 1)
+                       (find-if (lambda (c) (find c "|&;<>()$`\\\"'*?[]{}~ "))
+                                (first strs)))))
+    (handler-case
+        (let ((proc (if shell-p
+                        (sb-ext:run-program "/bin/sh" (list "-c" (first strs))
+                                            :input t :output t :error t :wait t)
+                        (sb-ext:run-program (first strs) (rest strs)
+                                            :search t :input t :output t
+                                            :error t :wait t))))
+          (finish-output *standard-output*)
+          (finish-output *error-output*)
+          (sb-ext:exit :code (or (sb-ext:process-exit-code proc) 0) :abort t))
+      (error ()
+        (%pcl-save-errno)
+        *p-undef*))))
 
 (defun p-backtick (cmd)
   "Perl backticks - execute shell command and capture output.
@@ -11326,13 +11504,26 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; No user sub - return string as class name
         name)))
 
+(defun %pcl-normalize-pkg (pkg-str)
+  "Strip Perl's root-stash `main::` prefix: `main::Foo` and `Foo` name the same
+   package.  Used so class-name comparisons (isa) agree regardless of prefix."
+  (let ((s (to-string pkg-str)))
+    (if (and (> (length s) 6) (string= (subseq s 0 6) "main::"))
+        (subseq s 6)
+        s)))
+
 (defun %pcl-find-package (pkg-str)
   "Find CL package for Perl package name PKG-STR.
    Tries upcase first (single-word packages defined via :Foo keyword), then
-   exact case (multi-level packages defined via :|Foo::Bar| notation)."
+   exact case (multi-level packages defined via :|Foo::Bar| notation).
+   A leading `main::` is Perl's root-stash prefix: `main::Foo` names the very
+   same package as `Foo` (e.g. `\"main::Alice\"->new`), so retry without it."
   (or (find-package (perl-pkg-to-cl-pkg-name pkg-str))
       (find-package (%pcl-invert-case pkg-str))
-      (find-package pkg-str)))
+      (find-package pkg-str)
+      (when (and (> (length pkg-str) 6)
+                 (string= (subseq pkg-str 0 6) "main::"))
+        (%pcl-find-package (subseq pkg-str 6)))))
 
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
@@ -11791,9 +11982,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; itself and the implicit UNIVERSAL parent).  Uses the same @ISA walk as
     ;; p-can / p-method-call — reflects runtime @ISA and never touches an
     ;; unfinalized CLOS class.
-    (if (member check-class (%pcl-isa-ancestry obj-class) :test #'string-equal)
-        t
-        nil)))
+    (let ((want (%pcl-normalize-pkg check-class)))
+      (if (member want (%pcl-isa-ancestry obj-class)
+                  :test (lambda (a b) (string-equal a (%pcl-normalize-pkg b))))
+          t
+          nil))))
 
 ;;; ============================================================
 ;;; Regex Support (using CL-PPCRE)

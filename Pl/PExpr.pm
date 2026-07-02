@@ -301,7 +301,10 @@ sub extract_declarations {
       if (@vars) {
         if ($decl_list) {
           # List-form: my ($k,$v) = expr → keep Structure::List intact so
-          # the binary-op parser sees ($k,$v) as a single LHS unit.
+          # the binary-op parser sees ($k,$v) as a single LHS unit.  Tag it so
+          # the funcall-paren detector won't mistake a stripped `my(...)` for a
+          # call's own argument parens (`f my($y), LIST` → f($y, LIST), not f($y)).
+          $decl_list->{_pcl_decl_list} = 1;
           push @result, $decl_list;
         } else {
           # Scalar-form: my $x = expr → single Symbol token
@@ -373,6 +376,7 @@ sub extract_declarations {
       say "extract_declarations: Found $decl_type for list: ", join(", ", @vars)
           if 1 & DEBUG;
       delete $self->{_pending_decl};
+      $item->{_pcl_decl_list} = 1;  # see note at the Statement::Variable branch
       push @result, $item;  # Keep the list structure
     }
     elsif (ref($item) =~ /::Whitespace$/) {
@@ -2105,6 +2109,15 @@ sub handle_subcalls {
       if (ref($invocant) eq 'PPI::Token::Word'
           && !$self->is_token_operator($invocant)
           && $invocant->content =~ /^[A-Z]/) {
+        # A qualified name (Foo::bar) immediately followed by parens is a
+        # function call — `is UNIVERSAL::isa($x,$y)` is `is(UNIVERSAL::isa(...))`,
+        # NOT the indirect-object `UNIVERSAL::isa->is(...)`.  (The `new Foo::Bar(...)`
+        # indirect-with-parens form is handled by the dedicated `new` pre-pass.)
+        if ($invocant->content =~ /::/
+            && $i + 2 <= scalar(@$e) - 1
+            && ref($e->[$i+2]) eq 'PPI::Structure::List') {
+          next;
+        }
         # Skip all-uppercase invocants unless they are known declared packages:
         # unqualified all-caps words are typically filehandles (STDIN/STDOUT),
         # special blocks (BEGIN/END), or constants — not class names.
@@ -2824,6 +2837,12 @@ sub handle_subcalls {
     next
         if !$self->is_list($next);
 
+    # A stripped `my(...)`/`our(...)` declaration list is NOT this call's
+    # argument parens: `f my($y), LIST` must parse as f($y, LIST).  Leave it for
+    # the bare list-operator pass below (which grabs args until a low-prio op).
+    next
+        if ref($next) eq 'PPI::Structure::List' && $next->{_pcl_decl_list};
+
     # - - - open
     # Special handling: register bareword filehandle BEFORE parsing args
     my $func_name = $now->can('content') ? $now->content() : '';
@@ -3288,6 +3307,25 @@ sub handle_subcalls {
         } elsif ($self->is_internal_node_type($next_term)) {
           # Already-parsed node (e.g., from previous handle_subcalls)
           $end_pars = $i + 1;
+        } elsif ($self->is_word($next_term)) {
+          # A STANDALONE bareword next-term to a strictly-single (max-1-arg)
+          # function is a single argument — typically a bareword filehandle:
+          # `close F, ...` / `fileno F, ...` / `eof FH, ...`.  The function
+          # consumes ONLY the filehandle, so stop before any following comma
+          # (which belongs to the enclosing list, e.g. `ok(close F, 'desc')`),
+          # matching Perl's `(;*)`-prototype close/fileno/eof.
+          # Guard: only treat the bareword as the sole arg when it is followed by
+          # a comma or nothing.  A following parens-list makes it a funcall term
+          # (`close foo()` → i+2); a following OPERATOR means the bareword is part
+          # of a larger expression (`exit FOO + 1`) — leave $end_pars untouched.
+          my $after = $e->[$i + 2];
+          if (defined $after && ref($after) eq 'PPI::Structure::List') {
+            $end_pars = $i + 2;
+          } elsif (!defined $after
+                   || (ref($after) eq 'PPI::Token::Operator'
+                       && $after->content eq ',')) {
+            $end_pars = $i + 1;
+          }
         }
       }
     }
@@ -3332,10 +3370,14 @@ sub handle_subcalls {
       # Track filehandle expression end position (for multi-token expressions)
       my $fh_end = $i + 1;  # Start at first token after print/say
 
-      # Check for uppercase bareword (STDERR, STDOUT, FH, etc.)
+      # Check for uppercase bareword (STDERR, STDOUT, FH, etc.) or a
+      # lower/mixed-case bareword already registered as a filehandle via
+      # open(foo, ...) — Perl allows `print foo LIST` for any-case handles.
       if ($self->is_word($maybe_fh)) {
         my $fh_name = $maybe_fh->content;
-        if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/) {
+        if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/
+            || ($self->has_environment
+                && $self->environment->is_filehandle($fh_name))) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())
           my $after_fh = $e->[$fh_end + 1];
           # A comma/fat-comma right after the bareword means it is a LIST

@@ -486,4 +486,84 @@ sub g ($$$@) { my ($flip, undef, $expected, $name, @mess) = @_;
 print f("got", "EXP", "nm", "x", "y"), "\n";
 ');
 
+
+# ---- method-call invocant / package-resolution / indirect-object fixes ----
+
+# A parenthesised method-call result used as an invocant in LIST context must
+# stay a scalar invocant, not be wrapped in (vector ...) → "unblessed reference".
+test_transpile("paren method invocant in list context", '
+package Widget; sub new { bless {}, shift } sub name { "wid" }
+package main;
+sub take { print "got=$_[0]\n" }
+take( ("Widget"->new)->name );
+my @r = ( ("Widget"->new)->name );
+print "arr=@r\n";
+');
+
+# main::Foo names the same package as Foo (main:: is the root-stash prefix).
+test_transpile("main::Class->method resolves like Class->method", '
+package Foo; sub new { bless {}, shift } sub hi { "hello" }
+package main;
+print "main::Foo->new->hi = ", ("main::Foo"->new)->hi, "\n";
+print "isa = ", (("main::Foo"->new)->isa("Foo") ? "yes" : "no"), "\n";
+');
+
+# `is Qualified::name(ARGS)` is a function call argument, not the indirect
+# object `Qualified::name->is(ARGS)`.
+test_transpile("qualified-name(args) after a word is a funcall, not indirect obj", '
+sub check { print "check: $_[0]\n" }
+package Util; sub thing { "T:@_" }
+package main;
+check Util::thing(1, 2);
+');
+
+
+# A parenthesised my(...) declaration used as a list-operator argument must not
+# be mistaken for the call's own argument parens: `f my($y), LIST` is
+# f($y, LIST), not f($y).  (Same shape as `tie my($x), "Class".)
+test_transpile("my(\$x) as a list-operator funcall argument", '
+sub f { print "n=", scalar(@_), " v=@_\n" }
+f my($a), "two";
+f(my($b), "three");
+my @c = (my($d), "four");
+print "c=@c\n";
+');
+
+# `close F, LIST` / `fileno F, LIST`: a bareword filehandle passed to a
+# single-filehandle function (close/fileno/eof) must consume ONLY the
+# filehandle — the trailing comma belongs to the enclosing list, e.g.
+# `ok(close F, 'desc')` is ok(close(F), 'desc'), NOT ok(close(F, 'desc')).
+# Previously `close F, ...` grabbed the comma list → p-close got 2 args → a
+# compile-time macro error that aborted the whole file (io/open.t).
+test_transpile("close/fileno bareword FH consumes only the FH, not the comma list", '
+sub note2 { print "n=", scalar(@_), " last=$_[-1]\n" }
+open(F, ">", "/tmp/pcl_close_reg_$$") or die;
+print F "x\n";
+note2( close F, "desc-close" );
+open(F, "<", "/tmp/pcl_close_reg_$$") or die;
+note2( fileno F, "desc-fileno" );
+close F;
+unlink "/tmp/pcl_close_reg_$$";
+');
+
+# fork()/waitpid()/exec()/kill() — real process control via sb-posix.
+# The parent gets the child PID, the child gets 0, both continue; waitpid sets
+# $? and exec runs a program in the child.  (PCL-behaviour test: real perl forks
+# too, but the child PID differs, so we assert the structural outcome, not exact
+# text vs perl.)
+{
+    my $out = run_cl(<<'PERL');
+$| = 1;
+my $pid = fork();
+die "fork failed: $!" unless defined $pid;
+if ($pid == 0) { exec("echo", "child-exec-ok"); die "exec failed"; }
+my $reaped = waitpid($pid, 0);
+print "reaped-ok\n" if $reaped == $pid;
+print "exit-status=", ($? >> 8), "\n";
+PERL
+    like($out, qr/child-exec-ok/,  'fork(): child runs and exec() launches a program');
+    like($out, qr/reaped-ok/,      'waitpid() reaps the forked child');
+    like($out, qr/exit-status=0/,  'waitpid() sets $? from the child exit');
+}
+
 done_testing();

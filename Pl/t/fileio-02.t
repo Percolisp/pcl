@@ -59,7 +59,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 30;
+plan tests => 32;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -556,5 +556,44 @@ print "restored=$.\n";                # 42
 tell $A;                              # make A current again without reading
 print "A_again=$.\n";                 # 2
 close $A; close $B; unlink $f;
+PERL
+}
+
+# --- Test 31: lower/mixed-case bareword filehandle (print foo LIST) ---
+# Perl allows any-case bareword handles via open(foo,...).  PCL previously only
+# recognised ALL-CAPS barewords after print/say, so `print foo "..."` parse-errored.
+{
+    test_io('lowercase bareword filehandle: open(foo,...); print foo LIST', <<'PERL');
+my $f = "/tmp/pcl_bareword_$$";
+open(foo, '>', $f) or die;
+print foo "line1\n";
+say foo "line2";
+close(foo);
+open(foo, '<', $f) or die;
+print while <foo>;
+close(foo);
+unlink $f;
+PERL
+}
+
+# --- Test 32: symbolic filehandle from a scalar holding a name ---
+# `$TST = 'TST'; open($TST, ...)` opens the NAMED glob (*TST), leaving $TST
+# holding the string.  Both the bareword form (<TST>/eof(TST)) and the scalar
+# form (<$TST>/eof($TST)) must resolve the SAME handle, so eof state is shared.
+# Previously the in-memory open branch autovivified a lexical handle into the
+# box, so eof(TST) saw a different (empty→eof) handle than eof($TST).
+{
+    test_io('symbolic filehandle: $TST="TST"; open($TST,...) shares state', <<'PERL');
+my $data = "line1\nline2\nline3\n";
+$TST = 'TST';
+open($TST, '<', \$data) or die "open: $!";
+my $first = <$TST>;         # scalar-form read
+print "first=[$first]";
+seek(TST, 0, 1);            # bareword seek, SEEK_CUR +0 (mid-file)
+print "eof_bareword=", (eof(TST)  ? 1 : 0), "\n";   # 0
+print "eof_scalar=",   (eof($TST) ? 1 : 0), "\n";   # 0
+my $second = <TST>;         # bareword read continues from same position
+print "second=[$second]";
+close(TST);
 PERL
 }

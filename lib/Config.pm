@@ -64,7 +64,7 @@ our %Config = (
     taint_support  => 1,           # Taint support exists (though PCL may not fully implement)
 
     # Capabilities - system calls / features
-    d_fork      => '',              # PCL cannot fork (would crash on pipe/exec)
+    d_fork      => 'define',        # fork(2) via sb-posix:fork (p-fork)
     d_symlink   => 'define',
     d_link      => 'define',
     d_lstat     => 'define',
