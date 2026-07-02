@@ -99,7 +99,7 @@ sub parse {
     next if $child->isa('PPI::Statement::Null');
     push @top, $child;
   }
-  my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top));
+  my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->sub_info));
 
   my @out = ('(in-package :pcl)', '');
   push @out, map { Pl::CLForm::to_string($_, 0) } @decls;
@@ -124,7 +124,7 @@ sub _lower_sub {
   if ($params) {
     my $rest_txt = join("\n", map { $_->content } @body_stmts);
     my $body_uses_args = $rest_txt =~ /\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/;
-    my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params);
+    my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params, $self->sub_info);
     if (!$body_uses_args && !grep { !$vi->{$_}{unboxable} } @$params) {
       # Real lambda list (#3): my ($a,$b) = @_ untouched afterwards, params
       # never written un-arithmetically / ref-taken → bind raw, no p-list-=.
@@ -143,7 +143,7 @@ sub _lower_sub {
                 $self->_lower_block(\@body_stmts, $vi)]]]];
   }
 
-  my $vi = Pl::VarAnnotator->analyze(\@stmts);
+  my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->sub_info);
   return ['p-sub', $clname, ['list', '&rest', '%_args'],
           ['p-args-body', ['block', 'nil', $self->_lower_block(\@stmts, $vi)]]];
 }
@@ -248,14 +248,30 @@ sub _lower_compound {
   my $kw = $k[0]->content;
 
   if ($kw eq 'if' || $kw eq 'unless') {
-    die "Parser2 TODO: elsif" if grep { $_->isa('PPI::Token::Word') && $_->content eq 'elsif' } @k;
-    my ($cond_s) = grep { $_->isa('PPI::Structure::Condition') } @k;
-    my @blocks   = grep { $_->isa('PPI::Structure::Block') } @k;
-    my $cond = $self->_lower_expr([_cond_parts($cond_s)], $stmt);
-    $cond = ['p-!', $cond] if $kw eq 'unless';
-    return ['p-if', $cond,
-            ['progn', $self->_lower_block([$blocks[0]->schildren], $vi)],
-            (@blocks > 1 ? (['progn', $self->_lower_block([$blocks[1]->schildren], $vi)]) : ())];
+    # Collect (keyword, condition, block) clauses: if/unless, elsif*, else?.
+    my (@clauses, $cur_kw, $cur_cond);
+    for my $el (@k) {
+      if    ($el->isa('PPI::Token::Word'))            { $cur_kw = $el->content }
+      elsif ($el->isa('PPI::Structure::Condition'))   { $cur_cond = $el }
+      elsif ($el->isa('PPI::Structure::Block')) {
+        push @clauses, { kw => $cur_kw, cond => $cur_cond, block => $el };
+        $cur_cond = undef;
+      }
+    }
+    # Build nested p-if forms from the tail (else innermost) outward.
+    my $form;
+    if (@clauses && $clauses[-1]{kw} eq 'else') {
+      my $c = pop @clauses;
+      $form = ['progn', $self->_lower_block([$c->{block}->schildren], $vi)];
+    }
+    while (my $c = pop @clauses) {
+      my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt);
+      $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
+      $form = ['p-if', $cond,
+               ['progn', $self->_lower_block([$c->{block}->schildren], $vi)],
+               (defined $form ? ($form) : ())];
+    }
+    return $form;
   }
 
   if ($kw eq 'while' || $kw eq 'until') {
@@ -266,11 +282,43 @@ sub _lower_compound {
     return ['p-while', $cond, $self->_lower_block([$block->schildren], $vi)];
   }
 
+  if (($kw eq 'for' || $kw eq 'foreach')
+      && (my ($for_s) = grep { $_->isa('PPI::Structure::For') } @k)) {
+    # C-style for (INIT; COND; STEP) BLOCK.
+    my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
+    my @sect = grep { $_->isa('PPI::Statement') && !$_->isa('PPI::Statement::Null') }
+               $for_s->children;
+    die "Parser2 TODO: for(;;) with empty/extra sections" unless @sect == 3;
+    my ($init_s, $cond_s, $step_s) = @sect;
+
+    # A `my $i = INIT` init binds the counter in a let AROUND the p-for —
+    # register the name BEFORE lowering cond/step/body so fallback expressions
+    # see it as let-bound.  Unboxable (e.g. step `$i = $i + 1`) → raw slot;
+    # else boxed (a `$i++` step keeps VarAnnotator conservative).
+    my ($name, $init) = $self->_single_scalar_decl($init_s);
+    $self->fallback_parser->{_let_bound_vars}{$name} = 1 if $name;
+
+    my $cond = ['list', $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt)];
+    my $step = ['list', $self->_lower_stmt($step_s, $vi)];
+    my @body = $self->_lower_block([$block->schildren], $vi);
+
+    if ($name) {
+      my $initval = defined $init ? $self->_lower_expr($init, $stmt) : '(p-undef)';
+      if ($vi->{$name} && $vi->{$name}{unboxable}) {
+        return ['let', ['list', ['list', $name, $initval]],
+                ['p-for', ['list'], $cond, $step, @body]];
+      }
+      return ['let', ['list', ['list', $name, '(make-p-box nil)']],
+              ['p-for', ['list', ['p-my-=', $name, $initval]], $cond, $step, @body]];
+    }
+    return ['p-for', ['list', $self->_lower_stmt($init_s, $vi)], $cond, $step, @body];
+  }
+
   if ($kw eq 'for' || $kw eq 'foreach') {
     my ($list) = grep { $_->isa('PPI::Structure::List') } @k;
     my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
-    die "Parser2 TODO: C-style for / foreach without list" unless $list && $block;
+    die "Parser2 TODO: foreach without list" unless $list && $block;
     my $name = $var ? $var->content : '$_';
     $self->fallback_parser->{_let_bound_vars}{$name} = 1;
     my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;

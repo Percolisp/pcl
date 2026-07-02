@@ -15,19 +15,24 @@ package Pl::VarAnnotator;
 #   - never: \$x, $x++/--, compound-assign, =~ target, local, pos($x),
 #     referenced inside any nested sub block, foreach loop variable
 #   - no string `eval` anywhere in the region (session-250 lexical capture)
-#   - the decl init and EVERY `$x = RHS;` write are arithmetic-shaped
-#     (numbers / $vars / + - * / % ** comparisons) with at least one operator,
-#     or a pure numeric literal — so every stored value is a raw CL number
-#     produced by a p-op (never a box that could alias).
+#   - the decl init and EVERY `$x = RHS;` write are RAW-VALUE-shaped: every
+#     p-op below coerces its operands and returns a raw CL number or string
+#     (never a box), so an RHS with at least one top-level operator stores a
+#     raw value no matter what its operands are — including calls to KNOWN
+#     user subs (`my $x = f() + 1`), whose result the operator coerces.
+#     Without an operator only a bare number/string literal qualifies (a bare
+#     `$y` or bare `f()` could alias/return a box).
 
 use v5.30;
 use strict;
 use warnings;
 
-my %ARITH_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == !=);
+# Operators whose p-functions return raw CL values (number / string / 1-or-"").
+my %ARITH_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=>
+                                  . eq ne lt gt le ge cmp);
 
 sub analyze {
-  my ($class, $stmts, $extra_params) = @_;
+  my ($class, $stmts, $extra_params, $known_subs) = @_;
   my @stmts = grep { ref $_ } @$stmts;
   my $text = join("\n", map { $_->content } @stmts);
   my %vi;
@@ -62,7 +67,7 @@ sub analyze {
           }
           push @rhs, $k;
         }
-        $decl_init_ok{$name} = !$seen_eq || _arith_rhs(\@rhs);
+        $decl_init_ok{$name} = !$seen_eq || _arith_rhs(\@rhs, $known_subs);
       } else {
         # my (LIST) — mark every scalar in it as multi-declared (→ boxed)
         my $syms = $d->find('PPI::Token::Symbol') || [];
@@ -118,38 +123,73 @@ sub analyze {
         && $k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '=';
       my $name = $k[0]->content;
       next unless $vi{$name} && $vi{$name}{unboxable};
-      $vi{$name}{unboxable} = 0 unless _arith_rhs([@k[2 .. $#k]]);
+      $vi{$name}{unboxable} = 0 unless _arith_rhs([@k[2 .. $#k]], $known_subs);
     }
   }
 
   return \%vi;
 }
 
-# True when the token list is numbers/$scalars/arith-operators/parens only,
-# AND (contains an operator OR is a bare numeric literal).  Such an expression
-# lowers to p-ops that return raw CL numbers — safe to store in a raw slot.
+# True when the RHS provably stores a RAW CL value (never a box) in the slot:
+#   - it contains at least one TOP-LEVEL %ARITH_OP operator (every such p-op
+#     coerces its operands — boxes, strings, sub results — and returns a raw
+#     number/string), or
+#   - it is a single bare number/string literal.
+# Operands may be numbers, string literals, $scalars, parenthesized
+# subexpressions, and calls to KNOWN user subs (`f(...)` with args of ANY
+# shape — the args only feed the call; the top-level operator coerces its
+# result).  Operators inside call parens do not count as top-level: a bare
+# `f($a + 1)` could still return a box.
 sub _arith_rhs {
-  my ($elems) = @_;
-  my ($ok, $ops, $syms, $nums) = (1, 0, 0, 0);
-  my $walk;
-  $walk = sub {
-    for my $e (@_) {
-      next unless ref $e && $e->significant;
-      my $r = ref $e;
-      if    ($e->isa('PPI::Token::Number'))   { $nums++ }
-      elsif ($r eq 'PPI::Token::Symbol')      { $e->content =~ /^\$\w+$/ ? $syms++ : ($ok = 0) }
-      elsif ($r eq 'PPI::Token::Operator')    { $ARITH_OP{$e->content} ? $ops++ : ($ok = 0) }
-      elsif ($r eq 'PPI::Token::Structure')   { $ok = 0 unless $e->content eq ';' }
-      elsif ($r eq 'PPI::Structure::List' || $e->isa('PPI::Statement')) { $walk->($e->schildren) }
-      else                                    { $ok = 0 }
-      return unless $ok;
-    }
-  };
-  $walk->(@$elems);
+  my ($elems, $known_subs) = @_;
+  my ($ok, $ops, $lits, $others) = _scan($elems, $known_subs);
   return 0 unless $ok;
-  return 1 if $ops;                       # $i * 3 + 7
-  return 1 if $nums == 1 && !$syms;       # my $sum = 0;
-  return 0;                               # bare `$x = $y` would alias a box
+  return 1 if $ops;                                # $i * 3 + 7 / $s . "x"
+  return 1 if $lits == 1 && !$others;              # my $sum = 0; my $s = 'a';
+  return 0;                        # bare `$x = $y` / `$x = f()` may alias a box
+}
+
+# Walk one nesting level; returns (ok, top_level_ops, literals, other_values).
+sub _scan {
+  my ($elems, $known_subs) = @_;
+  my @e = grep { ref $_ && $_->significant } @$elems;
+  my ($ops, $lits, $others) = (0, 0, 0);
+  for (my $i = 0; $i <= $#e; $i++) {
+    my $e = $e[$i];
+    my $r = ref $e;
+    if ($e->isa('PPI::Statement')) {                 # transparent wrapper
+      my ($ok, $o, $l, $v) = _scan([$e->schildren], $known_subs);
+      return 0 unless $ok;
+      $ops += $o; $lits += $l; $others += $v;
+    }
+    elsif ($e->isa('PPI::Token::Number'))            { $lits++ }
+    elsif ($r eq 'PPI::Token::Quote::Single'
+        || $r eq 'PPI::Token::Quote::Double')        { $lits++ }
+    elsif ($r eq 'PPI::Token::Symbol') {
+      return 0 unless $e->content =~ /^\$\w+$/;
+      $others++;
+    }
+    elsif ($r eq 'PPI::Token::Operator') {
+      return 0 unless $ARITH_OP{$e->content};
+      $ops++;
+    }
+    elsif ($r eq 'PPI::Token::Structure') {
+      return 0 unless $e->content eq ';';
+    }
+    elsif ($r eq 'PPI::Token::Word'
+           && $known_subs && $known_subs->{$e->content}
+           && $i < $#e && ref($e[$i+1]) eq 'PPI::Structure::List') {
+      $i++;                                          # skip the arg list
+      $others++;                                     # call result: a value
+    }
+    elsif ($r eq 'PPI::Structure::List') {           # (subexpression)
+      my ($ok, $o, $l, $v) = _scan([$e->children], $known_subs);
+      return 0 unless $ok;
+      $ops += $o; $lits += $l; $others += $v;
+    }
+    else { return 0 }
+  }
+  return (1, $ops, $lits, $others);
 }
 
 1;

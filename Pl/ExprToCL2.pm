@@ -31,7 +31,17 @@ has indent_level => (is => 'rw', default => 0);
 # skip the (let ((*wantarray* …)) …) dynamic bind — the R2 caller half.
 has sub_info     => (is => 'ro', default => sub { {} });
 
-my %BINOP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == !=);
+# Perl binary op → CL runtime function.  All of these coerce their operands
+# and return a RAW CL value (number / string / 1-or-""), which is what makes
+# them safe roots for unboxed slots (see Pl::VarAnnotator).
+my %BINOP = (
+  (map { $_ => "p-$_" } qw(+ - * / % ** < > <= >= == != <=>)),
+  '.'   => 'p-.',
+  'eq'  => 'p-str-eq', 'ne' => 'p-str-ne',
+  'lt'  => 'p-str-lt', 'gt' => 'p-str-gt',
+  'le'  => 'p-str-le', 'ge' => 'p-str-ge',
+  'cmp' => 'p-str-cmp',
+);
 
 # Same entry as Pl::ExprToCL::generate — returns a string (or undef when the
 # expression is outside the native subset; caller then uses the old pipeline).
@@ -84,7 +94,11 @@ sub gen_form {
       push @forms, $f;
     }
     return undef unless @forms == 2 || ($op eq '-' && @forms == 1);
-    return [ "p-$op", @forms ];
+    return [ $BINOP{$op}, @forms ];
+  }
+
+  if (ref($node) && $node->isa('PPI::Token::Quote') && !@$kids) {
+    return _string_literal_form($node);
   }
 
   if (ref($node) && $node->isa('PPI::Token::Number')) {
@@ -101,6 +115,27 @@ sub gen_form {
   }
 
   return undef;
+}
+
+# Non-interpolating string literal → CL string atom, or undef (old pipeline).
+# Single quotes: unescape \' and \\.  Double quotes only when they contain no
+# $ @ or backslash (no interpolation, no escape processing needed).
+sub _string_literal_form {
+  my ($node) = @_;
+  my $r = ref $node;
+  my $s;
+  if ($r eq 'PPI::Token::Quote::Single') {
+    $s = $node->string;
+    $s =~ s/\\([\\'])/$1/g;
+  } elsif ($r eq 'PPI::Token::Quote::Double') {
+    $s = $node->string;
+    return undef if $s =~ /[\$\@\\]/;
+  } else {
+    return undef;
+  }
+  return undef if $s =~ /\n/;      # keep CLForm's one-line logic honest
+  $s =~ s/(["\\])/\\$1/g;
+  return '"' . $s . '"';
 }
 
 1;

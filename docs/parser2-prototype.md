@@ -1,6 +1,7 @@
 # Parser2 — the v2 pipeline prototype (structured emission)
 
-**Written:** 2026-07-02
+**Written:** 2026-07-02 (updated same day: R1 landed in the runtime; native
+strings / funcall-in-arith unboxing / elsif / C-style for added)
 **Status:** working prototype, opt-in via `PCL_V2=1`; v1 untouched
 **Spec it implements a slice of:** `docs/codegen-rewrite-spec.md` (R3 +
 items #1/#2/#3 + a first cut of Phase-4 unboxing), reviewed in
@@ -67,35 +68,79 @@ legacy-boundary rules worth knowing:
 - verified end-to-end: fib (recursive + loop), intmath, and the
   sensitive/insensitive mix produce perl-identical output under the runtime.
 
-Measured effect of the funcall step (fib(29), startup excluded): v1 ≈ 0.72 s
-→ v2 ≈ 0.51 s compute (~30% on call-bound code) vs perl 0.141 s. The
-remaining gap is `p-sub`'s five per-call special bindings + `p-flatten-args`
-+ generic `p-+`/`p-<` — R1 and the p-sub leaning, not the caller side.
+## R1 landed (same day) — measured effect
 
-Speed note: correctness shapes only — the prototype's intmath is barely
-faster than v1 yet, because `p-+`/`p-foreach` still carry the Tax-3/Tax-2
-costs (`docs/where-the-time-goes.md`). The unboxed shapes start paying the
-moment R1 (inline fast-path ops + FPU-modes-at-startup) lands in the runtime.
+The runtime now sets FPU modes ONCE at startup (`:traps '(:divide-by-zero)`,
+matching Perl: overflow→Inf / invalid→NaN silently, division by zero still
+dies), `%pcl-ieee-arith` and its per-op closure+mask are deleted, and the hot
+operators (`p-+ p-- p-* p-/ p-% p-== p-!= p-< p-> p-<= p->= p-<=> p-.
+p-str-*`) plus accessors (`unbox to-number to-string p-true-p p-bool`) are
+INLINE wrappers with numberp/stringp fast paths over out-of-line
+overload/coercion slow paths.
+
+**Inline-policy trick worth knowing:** each wrapper is declaimed `inline`
+*before* its defun (stores the expansion) and `notinline` right *after* it, and
+the END of `pcl-runtime.lisp` re-proclaims them all `inline` plus
+`(declaim (optimize (speed 2) (safety 1) (debug 0)))`.  The runtime's own
+thousands of call sites therefore compile as plain calls — keeping the
+per-process source-load at ~1.15 s (a naive global inline+speed-2 blew it up
+to ~4.9 s, multiplying across every test's SBCL spawn) — while all generated
+user code compiled after load open-codes the fast paths.
+**SBCL 2.6.0 gotcha:** declaiming a *narrower return ftype* on an inline
+function ICEs the compiler (type-error in sb-c during derivation); keep the
+`(function (t) t)` ftypes on the inline wrappers.
+
+Whole-program wall times minus a null-program baseline (fib(29) / intmath 2M,
+same machine as the review):
+
+| bench | perl | v1 before R1 | v1 after R1 | v2 after R1 |
+|---|---:|---:|---:|---:|
+| fib(29) | 0.138 s | ~0.72 s (5×) | ~0.59 s | **~0.29 s (2.1×)** |
+| intmath | 0.070 s | ~0.69 s (7.5×) | ~0.24 s | **~0.11 s (1.5×)** |
+
+The review's Phase-1+R1 checkpoint (“≥3× improvement or re-derive the cost
+model”) is met: intmath 7.5×→1.5×-of-perl, fib 5×→2.1×.
+
+## Native set after the same-day growth pass
+
+- **String literals + `.` concat + string comparisons** (`eq ne lt gt le ge
+  cmp <=>`) are native ops; a `my $s = 'lit'` / `$s = $s . "x"` scalar now
+  **unboxes to a raw string slot** (every `%ARITH_OP` p-op returns a raw CL
+  value — number *or string* — never a box, so the raw-slot invariant is
+  unchanged).
+- **Known-sub calls under a top-level operator unbox**: `my $x = f() + 1`
+  binds `$x` raw as `(p-+ (pl-f …) 1)` — the operator coerces whatever the
+  call returns, so the callee needs no analysis.  A **bare** `my $x = f();`
+  stays boxed (could return a box).  Operators inside the call's argument
+  list don't count as top-level.
+- **elsif chains** lower to nested `p-if` forms (any if/elsif*/else shape).
+- **C-style `for (INIT; COND; STEP)`**: a `my $i` INIT binds the counter in
+  a `let` around the `p-for`; an arithmetic STEP (`$i = $i + 1`) gives a
+  **raw counter with a native `(setf $i (p-+ $i 1))` step**, while `$i++`
+  keeps the counter boxed (VarAnnotator's `++` gate) — correct either way.
+
+Guards for all of the above: `Pl/t/parser2-01.t` (26 tests).
 
 ## Prototype boundaries (deliberate)
 
-Unsupported statement kinds `die "Parser2 TODO: …"` (packages, C-style for,
-elsif chains, modules/`use`, non-scalar `my`, string-eval interplay is
+Unsupported statement kinds `die "Parser2 TODO: …"` (packages, modules/`use`,
+non-scalar `my`, `for(;;)` with empty sections; string-eval interplay is
 conservatively boxed). The v1 pipeline is bit-for-bit unaffected —
 `PCL_V2` only switches which class pl2cl instantiates.
 
 ## Next steps, in leverage order
 
-1. **R1 in the runtime** (next session, user-confirmed): FPU modes at
-   startup + delete `%pcl-ieee-arith`; inline numberp-guarded fast paths on
-   `p-+`/`p-<`/…; Tier-3 declaims. Independent of Parser2; makes the unboxed
-   shapes and direct calls actually fast.
-2. Lean `p-sub`: the five per-call special bindings (caller-pkg/subname
+1. Lean `p-sub`: the five per-call special bindings (caller-pkg/subname
    stacks, depth, caller-wantarray) are the next call-cost after the caller
    bind — bind lazily or only for subs that need caller()/wantarray.
-3. Grow `ExprToCL2` native set: string concat/interpolation; let
-   VarAnnotator's `_arith_rhs` accept known-insensitive funcalls so
-   `my $x = f() + 1` can unbox.
-4. Statement kinds: elsif, C-style for (`p-for` form), package, `use`.
-5. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
+   NOTE: `caller()` reads the whole chain, so per-sub elision needs a
+   whole-program "nobody calls caller()" bit (PCL sees all source; string
+   eval is the spoiler), not a per-sub one.
+2. Grow `ExprToCL2` further: interpolated strings (p-string-concat is a raw
+   root too), unary `!`, chained/nested funcalls as statement roots.
+3. Statement kinds: package, `use` (module loading through the fallback).
+4. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
    (`type-flow-and-codegen-plan.md` §(s)) once shapes stabilize.
+5. `++`-step carve-out: let a C-for counter unbox by lowering the step as
+   `(setf $i (p-+ $i 1))` when `++` occurs ONLY in the step slot (needs a
+   position-aware annotator, not the text scan).

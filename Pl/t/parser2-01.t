@@ -62,6 +62,41 @@ like($ctx, qr/\(let \(\(\*wantarray\* nil\)\) \(pl-pair 7\)\)/,
 like($ctx, qr/\(pl-inc \(p-\+/,
      'insensitive callee called directly even with nested sensitive arg');
 
+# --- Session-265 growth: strings, funcall-in-arith unboxing, elsif, C-for ---
+
+# String literals + `.` concat are native, and string slots unbox.
+my $str = Pl::Parser2->parse_code(
+  q{my $s = 'hello'; my $t = $s . " world"; print "$t\n";});
+like($str, qr/\(let \(\(\$s "hello"\)\)/, 'bare string literal binds raw');
+like($str, qr/\(let \(\(\$t \(p-\. \$s " world"\)\)\)/, 'native p-. concat, raw slot');
+
+# A known-sub call under a top-level operator unboxes (`my $x = f() + 1`).
+my $fca = Pl::Parser2->parse_code(
+  'sub add { my ($a, $b) = @_; return $a + $b; } my $x = add(2, 3) + 1; print "$x\n";');
+like($fca, qr/\(let \(\(\$x \(p-\+ \(pl-add 2 3\) 1\)\)\)/,
+     'funcall under arith op: raw slot, direct native call');
+
+# A BARE known-sub call must NOT unbox (could return a box).
+my $fcb = Pl::Parser2->parse_code(
+  'sub give { my ($a) = @_; return $a; } my $x = give(2); print "$x\n";');
+like($fcb, qr/\(\$x \(make-p-box nil\)\)/, 'bare funcall RHS stays boxed');
+
+# elsif chains lower to nested p-if.
+my $eif = Pl::Parser2->parse_code(
+  'my $x = 5; if ($x > 9) { print "a\n"; } elsif ($x > 4) { print "b\n"; } else { print "c\n"; }');
+like($eif, qr/\(p-if \(p-> \$x 9\)/, 'if head of elsif chain');
+like($eif, qr/\(p-if \(p-> \$x 4\)/, 'elsif lowered as nested p-if');
+
+# C-style for: arith step → raw counter; ++ step → boxed counter.
+my $cfor = Pl::Parser2->parse_code(
+  'for (my $i = 0; $i < 3; $i = $i + 1) { print "$i\n"; }');
+like($cfor, qr/\(let \(\(\$i 0\)\)/, 'C-for arith-step counter binds raw');
+like($cfor, qr/\(\(setf \$i \(p-\+ \$i 1\)\)\)/, 'C-for raw counter native setf step');
+my $cfor2 = Pl::Parser2->parse_code(
+  'for (my $j = 0; $j < 3; $j++) { print "$j\n"; }');
+like($cfor2, qr/\(\$j \(make-p-box nil\)\)/, 'C-for ++ step counter stays boxed');
+like($cfor2, qr/\(p-post\+\+ \$j\)/, 'C-for boxed step through p-post++');
+
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
   skip 'sbcl not available', 1 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
