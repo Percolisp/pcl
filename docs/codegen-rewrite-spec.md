@@ -2,6 +2,11 @@
 
 **Written:** 2026-06-11
 **Status:** Spec — the target output for the compiler rewrite
+**Reviewed 2026-07-02:** `docs/codegen-rewrite-review.md` — go/no-go review.
+Verdict: proceed, but with three additions (R1 inline fast-path operators,
+R2 lean calling convention both halves, R3 structured s-expression emission)
+and the Gate-1 correctness amendments in its §4. Its §6 amends this doc's
+phase table.
 **Reads with:**
 - `docs/type-flow-and-codegen-plan.md` — the *representation* model (boxing axis,
   `repr` lattice, the bool/numify asymmetry). **That doc decides per-variable
