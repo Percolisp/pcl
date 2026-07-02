@@ -314,7 +314,58 @@ and they de-risk the cost model.
 
 ---
 
-## 6. What "faster than Perl" realistically means
+## 6. Q&A: does getting a value from a sub call force boxing? (2026-07-02)
+
+**Question:** isn't boxing largely decided by whether a variable's value
+comes from a sub call — and since subs are replaceable, how much less boxing
+would we get if we could analyze callees and assume they're never redefined?
+
+**Answer: sub calls don't decide boxing at all — boxing is decided by the
+variable's own local uses.** The box is the variable's *cell*, not its
+value: `my $x = f();` stores whatever `f` returned into `$x`'s slot, and
+whether that slot needs to be a box depends only on what *this sub* does
+with `$x` — is `\$x` taken, is it `local`ized/tied, is it a `m//g` target,
+is it written through a closure, is there a string `eval` in scope. (Passing
+`$x` *to* a sub doesn't box either, because PCL deliberately doesn't support
+`@_` aliasing — arguments are copies. If aliasing were ever added, this
+answer would flip.) What an opaque call source blocks is only **Gate 2**,
+the narrower step — proving "this is definitely a number/string" so
+operators compile guard-free-native and coercions can be folded.
+
+**Measured on real CPAN code** (static survey, 2026-07-02, name-based
+heuristic over ~1,400 `my`-scalar declarations in Data::Dumper,
+Text::Balanced, JSON::PP, HTTP::Tiny, Getopt::Long, File::Temp, Text::Wrap,
+Time::Local, Text::ParseWords, and `cl/pack-impl.pl`):
+
+| | share of `my`-scalars |
+|---|---:|
+| Gate-1 disqualified by **local** use (ref-taken/`local`/`pos`/`m//g`) | **~11%** (range 0–32%; Data::Dumper 32% — it passes `\$refs` everywhere; HTTP::Tiny 24% — `\$`-callbacks) |
+| initialized **from a sub call** (= where callee knowledge has any upside) | **~11%** |
+| files containing string `eval` (the §4.2 blanket disqualifier) | 2 of 10 |
+
+Caveats: the heuristic can't see closure-mutation or foreach-alias
+disqualifiers, so true local disqualification is somewhat higher — call it
+**15–25%**. The conclusion survives: **the large majority of scalars unbox
+with purely local analysis, and a sealed-subs assumption adds approximately
+zero additional unboxing.**
+
+What sealed-callee knowledge *does* buy for the ~11% call-sourced scalars is
+Gate-2 narrowing: skip the R1 type-guard and allow folded coercions. The
+brackets bound that upside: guarded-generic vs native on unboxed values is
+only ~1.6× *on pure arithmetic* — and the R1 guard branch-predicts perfectly
+in loops — so the **blended effect on typical code is a few percent**. The
+places sealing genuinely pays are the ones listed in the review §3.2b(ii):
+inlining accessors, devirtualizing method dispatch, trusting the per-sub
+context bit (R2), and return-type propagation for a specific proven-hot
+numeric path. Prioritize accordingly: local analysis first; sealing is an
+OO-dispatch and inlining story, not a boxing story.
+
+One flag from the survey worth acting on: the §4.2 rule "string `eval` in
+scope boxes every visible lexical" hit 2 of 10 modules *at file level*. It
+must be applied per-scope (only lexicals actually visible at the `eval`
+site), or those files lose all unboxing.
+
+## 7. What "faster than Perl" realistically means
 
 With the full menu: arithmetic, loops, string building, sub calls, and OO
 dispatch — the things that make *programs* slow — go at or well below
