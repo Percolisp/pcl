@@ -14,7 +14,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 1. **CPAN Compatibility**: Match Perl semantics exactly. The goal is to run real CPAN modules.
 
-2. **Readable Generated Code**: Keep generated CL readable for Perl programmers. Use Perl-like naming (pl-sub, pl-print, $varname) so the output is recognizable.
+2. **Readable Generated Code — but speed wins**: Keep generated CL readable for Perl programmers where it is free. Use Perl-like naming (pl-sub, pl-print, $varname) so the output is recognizable. **Priority decision (2026-07-02): when readability and performance of the generated code conflict, performance wins** — never sacrifice a speed transform for prettier output. See `docs/where-the-time-goes.md` and `docs/codegen-rewrite-review.md`.
 
 3. **Compile-Time Visibility**: Wrap sub definitions and variable declarations in `eval-when` so BEGIN blocks can call subs and access variables defined before them in source order.
 

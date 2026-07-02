@@ -468,6 +468,11 @@ missed the stated bar, and (b) the three additions above that close the gap
 for everything except regex — where the bar itself should be renegotiated.
 
 ## See also
+- `docs/where-the-time-goes.md` — plain-language deep dive on the four cost
+  "taxes" + the extended speed menu (FPU-modes-at-startup, dynamic-extent `@_`,
+  sort-comparator recognition, method inline caches, map/grep fusion, PGO, …);
+  records the 2026-07-02 user decision that generated-code **speed outranks
+  readability**
 - `docs/codegen-rewrite-spec.md` — the spec this reviews (phases table amended by §6)
 - `docs/type-flow-and-codegen-plan.md` — repr model (Gate 1 amended by §4.1–4.4)
 - `docs/intra-sub-goto-plan.md` — the IR motivation (elevated to scheduled work as R3)
