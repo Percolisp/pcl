@@ -4,6 +4,50 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 269 (2026-07-04) — R1 local.t crash FIXED (was SBCL compiler OOM, not runtime).
+
+**User: fix the bugs from last session's numerical-settings (R1) change.**
+
+The s268 "local.t hard-crashes SBCL at t~129" regression was **compiler heap
+exhaustion**, not a runtime fault: the crash trace was `SB-C::CONSTRAINT-PROPAGATE`
+→ "Heap exhausted, game over". A *direct top-level* `local $m = 5;` has dynamic
+scope to end-of-file, so PCL correctly wraps the whole program remainder in one
+`(let (($m ...)) …)` — in local.t that's 1973 lines / 67 KB, a single enormous
+function. R1 declaims the fast-path operators `inline`; inlining even ~36
+type-dispatch diamonds into a function that large makes constraint propagation
+blow up **superlinearly** — measured **1.2 GB to compile that one form**
+(`notinline` → 95 MB). The sweep and the production `pcl` command use SBCL's
+~1 GB default heap → OOM; `runt` escaped only via `--dynamic-space-size 4096`.
+So a real regression (a big real file with a top-level `local` would crash too),
+not a harness artifact.
+
+**Red herrings ruled out empirically:** `(speed 1)` gave an *identical* 1.2 GB;
+`(debug 1)` still crashed. The FPU-traps change and the optimize-policy level
+were both innocent — it was purely the **inlining**.
+
+**Fix (`37fcf8f`, Pl/Parser.pm):** `_process_local_declaration` emits
+`(declare (notinline pcl::p-+ … pcl::%pcl-nan-p))` at the head of a top-level
+local's `let` body, overriding the global inline proclamation for that one
+cold-run-once scope. Gated on **`in_subroutine == 0 && indent_level == 0`**
+(captured *before* the indent++) — the precise discriminator for scope-to-EOF
+locals: a `local` nested in a top-level loop/if is indented (scope bounded, and
+the loop may be hot) → keeps inlining, as do subs, so R1's speed wins are fully
+preserved. Helper `_notinline_ops_decl` (list MUST track the runtime's
+`(declaim (inline …))`); plus a backstop `_cap_inlining_if_huge` that wraps any
+>20 KB single runtime *expression* form in `(locally (declare (notinline …)) …)`
+(skips eval-when/p-sub/defvar/defpackage — wrapping those would strip
+top-level-ness and break BEGIN-block visibility). Guard:
+`Pl/t/transpile-test-02.t` (top-level local emits the declare; local-in-sub
+does not).
+
+**Result:** local.t CRASH@129 → **302/319, no crash** on the default heap
+(exactly the pre-R1 state; remaining 17 fails are pre-existing `local($#a)`
+arylen-magic + Tie::Array). Full **Pl/t gate 3758/3758 pass**. Still TODO
+(unblocked now): re-bless `docs/fail-baseline.tsv` (54 "new" diff fails =
+verified stale drift, identical pre-R1).
+
+---
+
 ## Session 268 (2026-07-02) — R1 runtime fast paths SHIPPED (intmath 7.5×→1.5× of perl) + v2 growth (strings/funcall-unboxing/elsif/C-for/goto) + lean p-sub → recursive fib now BEATS perl.
 
 **User: R1 first, then continue the v2 prototype; target = compiler clear and easy to iterate.**
