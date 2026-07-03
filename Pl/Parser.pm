@@ -511,11 +511,46 @@ sub _assemble_output {
     # contains each label in a (tagbody ...).  Forms that contain p-sub / eval-when /
     # defvar definitions are kept outside the tagbody to preserve top-level semantics.
     my @rt = @{$section->{runtime}};
-    push @lines, _wrap_runtime_labels(\@rt);
+    push @lines, map { _cap_inlining_if_huge($_) } _wrap_runtime_labels(\@rt);
   }
   return @lines;
 }
 
+
+# A top-level `local $x = ...;` in Perl puts the whole rest of the enclosing
+# block into the dynamic extent of the local, so PCL wraps every subsequent
+# statement in one `(let (($x ...)) ...)`.  At file/package scope that can be
+# thousands of lines — a single enormous CL function.  R1 declaims the hot
+# fast-path operators `inline`, and inlining even a handful of type-dispatch
+# diamonds into a function that large makes SBCL's constraint propagation blow
+# up superlinearly (measured 1.2 GB compiling local.t's tail form, OOM-killing
+# the default 1 GB heap — the s268 R1 crash regression).  Such a form is
+# cold top-level code that runs once, so inlining buys nothing there anyway.
+# Wrap any oversized top-level runtime form in a `(locally (declare (notinline
+# ...)))` so the inline proclamation is suppressed inside it; compilation drops
+# back to ~95 MB while hot code elsewhere keeps open-coding the fast paths.
+# The hot fast-path operators/accessors that R1 declaims `inline` in the
+# runtime (must match the `(declaim (inline ...))` at the end of
+# cl/pcl-runtime.lisp).  A `(declare (notinline ...))` naming these overrides
+# the global inline proclamation for one lexical scope.
+sub _notinline_ops_decl {
+  my $ops = join(' ', map { "pcl::$_" } qw(
+    p-+ p-- p-* p-/ p-% p-== p-!= p-< p-> p-<= p->= p-<=>
+    p-. p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge p-str-cmp
+    unbox to-number to-string p-true-p p-bool %pcl-nan-p));
+  return "(declare (notinline $ops))";
+}
+
+my $HUGE_FORM_CHARS = 20000;
+sub _cap_inlining_if_huge {
+  my ($form) = @_;
+  return $form unless length($form) > $HUGE_FORM_CHARS;
+  # Only wrap plain expression forms; never wrap a top-level definition
+  # (eval-when / p-sub / defvar / defpackage), since (locally ...) would strip
+  # its top-level-ness and break compile-time visibility.
+  return $form if $form =~ /\A\s*\((?:eval-when|pcl:p-sub|pcl:p-defpackage|p-sub|defvar|defparameter|defun|in-package)\b/;
+  return "(locally " . _notinline_ops_decl() . "\n$form)";
+}
 
 # Wrap the minimal set of top-level runtime lines that participate in a
 # goto/label pair in individual (tagbody ...) forms.
@@ -3243,8 +3278,28 @@ sub _process_local_declaration {
 
   my $bindings_str = join("\n        ", @bindings);
   my $let_form = ($rhs_tmp_cl || $use_let_star) ? "let*" : "let";
+  my $at_top_level = ($self->environment->in_subroutine == 0
+                      && $self->indent_level == 0);
   $self->_emit("($let_form ($bindings_str)");
   $self->indent_level($self->indent_level + 1);
+
+  # A `local` that is a DIRECT top-level statement (indent_level 0, not in a
+  # sub) has dynamic scope extending to end of file, so PCL wraps the entire
+  # remainder of the program in this one `let` — potentially thousands of
+  # lines, a single enormous cold-run-once CL function.  R1 declaims the
+  # fast-path operators `inline`; inlining them into a function that large
+  # blows up SBCL's constraint propagation (measured 1.2 GB → OOM compiling
+  # perl-tests/local.t; the session-268 R1 crash regression).  Emit a
+  # `(declare (notinline ...))` at the head of this let body to suppress
+  # inlining here only — it runs once, so nothing is lost.
+  #
+  # `indent_level == 0` is the precise discriminator: a `local` nested inside a
+  # top-level loop/if/block is indented and its scope is bounded by that
+  # construct (a small body that must keep inlining, since the loop may be
+  # hot), so it is correctly excluded.  Subs (indent > 0) also keep inlining.
+  if ($at_top_level) {
+    $self->_emit(_notinline_ops_decl());
+  }
 
   # Track that we have an open let that needs closing
   $self->{_local_let_depth} //= 0;

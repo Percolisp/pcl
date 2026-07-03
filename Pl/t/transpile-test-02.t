@@ -451,4 +451,26 @@ test_transpile('negated filetest !-e',
 test_transpile('negated filetest ! -d with space',
     'my $f="/nonexistent_zzz"; print( (! -d $f) ? "notdir" : "dir" );');
 
+# ============ R1 CRASH REGRESSION: top-level `local` caps inlining ============
+# A top-level `local $x = ...` wraps the entire rest of the file in one giant
+# CL `let`.  R1 declaims the hot fast-path operators `inline`; inlining them
+# into a function that large blows up SBCL's constraint propagation and
+# OOM-crashes compilation (perl-tests/local.t, session 268).  Codegen must emit
+# a `(declare (notinline ...))` at the head of a top-level local's let body to
+# suppress inlining there (cold, runs-once code) — but must NOT do so for a
+# `local` inside a sub, where hot code has to keep open-coding the fast paths.
+sub transpile_only {
+    my ($code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    return scalar `$pl2cl $pl_file 2>/dev/null`;
+}
+like(transpile_only('local $x = 5; my $y = $x + 1; print $y;'),
+     qr/\(declare \(notinline pcl::p-\+/,
+     'top-level local emits notinline declare (R1 OOM guard)');
+unlike(transpile_only('sub f { local $x = 5; my $y = $x + 1; return $y; } print f();'),
+       qr/\(declare \(notinline pcl::p-\+/,
+       'local inside a sub keeps inlining (no notinline declare)');
+
 done_testing();
