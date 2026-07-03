@@ -4,6 +4,62 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 269b (2026-07-04) — v2 growth: coverage (non-scalar my, use/require seam, whole-file fallback) + context-correct native calls + native interp strings + C-for ++ carve-out.
+
+**User: verify R1 fix, then continue the v2 prototype.**
+
+**Coverage (the "run real programs" jump):**
+- **Non-scalar `my`** (`my @a`/`my %h`/`my (LIST)` [= INIT]): let-binds fresh
+  containers, assignment lowered by the ORIGINAL expression machinery
+  (p-array-=/p-hash-=/p-list-=). Self-referential init (`my @a=(@a,1)`) → TODO die.
+- **Statement-level fallback seam** (`_fallback_stmt`): runs one statement
+  through v1's `_process_element` into a scratch section; preamble/decl/def
+  bucket lines hoisted to file top (`_captured_decls`), runtime lines embed
+  in place as raw. Routes Include (use/require/no), Scheduled (BEGIN/END),
+  End/Data. **GOTCHA: PPI::Statement::Scheduled ISA Statement::Sub** — must
+  exclude it in the sub branches or BEGIN becomes a never-run `pl-BEGIN` sub.
+- **Whole-file v1 fallback in pl2cl** (`parse_with_fallback`): any
+  "Parser2 TODO" die → transpile via v1. This is what makes `PCL_V2=1` safe
+  globally — p-use/require SUBPROCESSES inherit the env var, and a module v2
+  can't lower (e.g. `package POSIX;`) still loads via v1. Special modes
+  (eval-pkg, lenient-ppi) go straight to v1.
+- **Gates → v1**: string eval (`eval EXPR` — v2's true lexicals are invisible
+  to separately-compiled eval'd code; v1's my-vars are defvar'd specials),
+  subs with prototypes/signatures (change call-site parsing).
+
+**Correctness (bugs found by running the 11 v2-lowered perl-tests):**
+- **Pre-pass must register subs in the shared Environment**
+  (`add_declared_sub` + default `add_prototype {min_params=>-1}`): PExpr
+  decides bareword-call-vs-string from get_prototype — without it
+  `$h{foo} = foo` lowered `foo` as the STRING "foo" (context.t data loss).
+- **Context-correct native calls**: gen_form takes a position ctx —
+  statement `:void`, funcall arg `t` (flattened into @_ = list), `return` /
+  sub-tail `'inherit'` (NO bind → callee sees caller's *wantarray*), default
+  scalar `nil`. `$tail_ctx` threads _lower_sub → _lower_block ('inherit' for
+  the last statement) → tail if/unless branches; loops don't propagate.
+- **v2 forward-declaration pass** (`_forward_global_decls`): defvars
+  referenced-but-never-let-bound globals (`$false`, `@array` in defined.t)
+  + cross-package refs (`main::$IS_ASCII`) — with the key v2 twist: NEVER
+  defvar a name Parser2 let-binds (would proclaim it special and poison the
+  lexical lets).
+
+**Native set growth:** interpolated strings with plain `$name` scalars →
+`(p-string-concat …)` (raw root; strict: only \n \t \\ \" \$ \@ \' escapes,
+`$1`/subscripts/`@` → fallback); unary `!` (raw, added to ARITH_OP +
+SCALAR_ROOT_OP); **C-for `++`-step carve-out**: pure `$i++`/`--$i` step is
+position-known (value discarded) → re-analyze loop WITHOUT the step; if
+unboxable → raw counter + `(setf $i (p-+ $i 1))`. intmath with `$i++` now
+runs at the noise floor (was the boxed path). CLForm._flat: atoms with
+embedded newlines are not "one line".
+
+**Verified:** parser2-01.t 32→43 guards. 9 v2-lowered perl-tests files at
+FULL v1 parity (chars 34, context 8, defined 5, aassign 162, dor 13, cond 4,
+auto 47, flip 11, anonsub 1); cmpchain/die_exit route to v1 via the eval
+gate. 11/40 sampled perl-tests lower through v2; the other 29 fall back
+wholesale (previously: DIED). fib/intmath/smoke byte-identical to perl.
+
+---
+
 ## Session 269 (2026-07-04) — R1 local.t crash FIXED (was SBCL compiler OOM, not runtime).
 
 **User: fix the bugs from last session's numerical-settings (R1) change.**

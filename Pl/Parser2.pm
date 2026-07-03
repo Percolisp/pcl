@@ -74,39 +74,123 @@ sub _source {
 sub parse {
   my $self = shift;
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
+  # String eval (eval EXPR, not eval BLOCK) captures enclosing my-lexicals via
+  # dynamic lookup (session-250 mechanism) — that requires the v1 shape where
+  # file-scope my-vars are defvar'd specials.  v2's true lexical `let`s are
+  # invisible to separately-compiled eval'd code, so any such file → v1.
+  # (Conservative: also triggers on `eval` in comments/strings.)
+  die "Parser2 TODO: string eval (needs special-var my capture)\n"
+    if $src =~ /\beval\b(?!\s*\{)/;
   my $doc = PPI::Document->new(\$src) or die "Parser2: PPI parse failed";
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
 
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
-  # that precede (or recurse into) a sub's definition see them.
+  # that precede (or recurse into) a sub's definition see them.  Register each
+  # sub in the SHARED Environment too — the fallback expression machinery
+  # decides bareword-vs-string ("foo" vs (pl-foo)) from declared_subs, and
+  # Parser2 never runs v1's _process_sub_statement which normally does this.
   for my $child ($doc->schildren) {
-    next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block;
+    # NB: PPI::Statement::Scheduled (BEGIN/END/…) ISA Statement::Sub — those
+    # are runnable blocks, not sub definitions; they lower via _fallback_stmt.
+    next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block
+      && !$child->isa('PPI::Statement::Scheduled');
+    # A prototype/signature changes how CALL SITES parse (arity, imposed
+    # context) — outside the prototype's native subset.
+    die "Parser2 TODO: sub with prototype/signature: " . $child->name
+      if $child->prototype;
     $self->sub_info->{ $child->name } = {
       cl_name     => $self->fallback_parser->_qualified_sub_to_cl($child->name),
       insensitive => $self->_sub_ctx_insensitive($child),
     };
+    $self->environment->add_declared_sub($child->name,
+                                         $self->environment->current_package);
+    # Same default signature v1's _process_sub_statement registers for a
+    # prototype-less sub: PExpr consults get_prototype() to decide that a
+    # bareword `foo` is a CALL (pl-foo), not the string "foo".
+    $self->environment->add_prototype($child->name,
+                                      { params => [], min_params => -1, is_proto => 0 });
   }
 
   my (@decls, @defs, @top);
+  $self->{_captured_decls} = [];
   for my $child ($doc->schildren) {
-    if ($child->isa('PPI::Statement::Sub') && $child->name) {
+    if ($child->isa('PPI::Statement::Sub') && $child->name
+        && !$child->isa('PPI::Statement::Scheduled')) {
       push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
       push @defs, $self->_lower_sub($child);
       next;
     }
-    next if $child->isa('PPI::Statement::Include');   # use strict/warnings/... (TODO: modules)
+    # `use strict`-family pragmas are pure no-ops; real use/require/BEGIN
+    # statements stay IN the statement stream (position matters: a module
+    # must load before the code that follows it runs) and lower through the
+    # statement fallback in _lower_block.
     next if $child->isa('PPI::Statement::Null');
     push @top, $child;
   }
   my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->sub_info));
 
+  my @def_txt = map { Pl::CLForm::to_string($_, 0) } @defs;
+  my @run_txt = map { Pl::CLForm::to_string($_, 0) } @runtime;
+  my @cap     = @{ $self->{_captured_decls} };
+
   my @out = ('(in-package :pcl)', '');
   push @out, map { Pl::CLForm::to_string($_, 0) } @decls;
   push @out, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))', '';
-  push @out, map { (Pl::CLForm::to_string($_, 0), '') } @defs;
-  push @out, map { (Pl::CLForm::to_string($_, 0), '') } @runtime;
+  # Undeclared package globals referenced anywhere (v1's forward-declaration
+  # pass) — defvar'd so first use isn't an unbound-variable crash.
+  push @out, $self->_forward_global_decls(join("\n", @cap, @def_txt, @run_txt)), '';
+  # Declarations captured by _fallback_stmt during lowering (defvar/
+  # defconstant/eval-when from use/require/BEGIN) — before the definitions
+  # that may reference them.
+  push @out, @cap, '';
+  push @out, map { ($_, '') } @def_txt;
+  push @out, map { ($_, '') } @run_txt;
   return join("\n", @out);
+}
+
+# v2 twin of v1's _insert_variable_forward_declarations, with the key v2
+# difference: any name Parser2 let-binds is a TRUE lexical and must NOT be
+# defvar'd (proclaiming it special would poison every let of that name —
+# closures would capture the symbol, raw slots would break).  So: defvar
+# exactly the referenced sigil-vars that are neither let-bound anywhere in
+# the file nor runtime-owned.
+sub _forward_global_decls {
+  my ($self, $text) = @_;
+  my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
+                                        $a $b @a @b);
+  my $lb = $self->fallback_parser->{_let_bound_vars} // {};
+  my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
+  my (%seen, %cross);
+  for my $line (split /\n/, $text) {
+    next if $line =~ /^\s*;;/;
+    next if $line =~ /^\s*\(defvar\s/;
+    # (?<![\w:|]) skips pkg-qualified Foo::$x / |P|::$x; (?!-) skips runtime
+    # internals like %pcl-cl-sub-name.
+    while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
+      my $v = $1;
+      next if $runtime_vars{$v} || $lb->{$v};
+      $seen{$v} = 1;
+    }
+    # Cross-package refs (main::$IS_ASCII from a required harness, Foo::@bar)
+    # get a defvar in THEIR package — v1's %cross_pkg_vars behaviour.
+    while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
+      my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
+      next if $skip_pkg{ defined($1) ? $1 : $2 };
+      next if $pkg eq 'main' && $runtime_vars{$var};
+      $cross{"$pkg\::$var"} = 1;
+    }
+  }
+  return () unless %seen || %cross;
+  my @decls = (';; Forward declarations for undeclared package globals');
+  for my $v (sort keys %seen) {
+    push @decls, "(defvar $v " . _fresh_container($v) . ")";
+  }
+  for my $qv (sort keys %cross) {
+    (my $var = $qv) =~ s/^.*:://;
+    push @decls, "(defvar $qv " . _fresh_container($var) . ")";
+  }
+  return @decls;
 }
 
 # ---------------------------------------------------------------- subs
@@ -135,7 +219,7 @@ sub _lower_sub {
                 '&rest', '%_args'];
       return ['p-sub', $clname, $ll,
               raw('(declare (ignore %_args) (dynamic-extent %_args))'),
-              ['block', 'nil', $self->_lower_block(\@body_stmts, $vi)]];
+              ['block', 'nil', $self->_lower_block(\@body_stmts, $vi, 'inherit')]];
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;
@@ -143,12 +227,12 @@ sub _lower_sub {
             ['p-args-body', ['block', 'nil',
               ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @$params],
                 raw('(let ((*wantarray* nil)) (p-list-= (vector ' . join(' ', @$params) . ') @_))'),
-                $self->_lower_block(\@body_stmts, $vi)]]]];
+                $self->_lower_block(\@body_stmts, $vi, 'inherit')]]]];
   }
 
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->sub_info);
   return ['p-sub', $clname, ['list', '&rest', '%_args'],
-          ['p-args-body', ['block', 'nil', $self->_lower_block(\@stmts, $vi)]]];
+          ['p-args-body', ['block', 'nil', $self->_lower_block(\@stmts, $vi, 'inherit')]]];
 }
 
 # `my ($a, $b) = @_;` → ['$a','$b'] | undef
@@ -173,36 +257,75 @@ sub _extract_params {
 # Lower a statement list to forms.  A `my` declaration NESTS the remainder of
 # the block inside its `let` — scoping is a property of the tree, never of
 # emitted text (the R3 fix).
+#
+# $tail_ctx: context of the block's LAST statement value.  A sub body passes
+# 'inherit' (its tail is the sub's return value, so a tail call must see the
+# CALLER's *wantarray*); everything else leaves it undef → statement position
+# is void.  Threaded through `my`-let nesting and tail if/unless branches.
 sub _lower_block {
-  my ($self, $stmts, $vi) = @_;
+  my ($self, $stmts, $vi, $tail_ctx) = @_;
   my @s = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
   return () unless @s;
   my ($first, @rest) = @s;
+  my $first_tail = @rest ? undef : $tail_ctx;
 
   # -- my $x [= INIT];  → (let (($x …)) rest...)
   if ($first->isa('PPI::Statement::Variable')) {
     my ($name, $init) = $self->_single_scalar_decl($first);
-    die "Parser2 TODO: unsupported declaration: " . $first->content unless $name;
-    $self->fallback_parser->{_let_bound_vars}{$name} = 1;
-    if ($vi->{$name} && $vi->{$name}{unboxable}) {
-      my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
-      return (['let', ['list', ['list', $name, $initform]],
-               $self->_lower_block(\@rest, $vi)]);
+    if ($name) {
+      $self->fallback_parser->{_let_bound_vars}{$name} = 1;
+      if ($vi->{$name} && $vi->{$name}{unboxable}) {
+        my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
+        return (['let', ['list', ['list', $name, $initform]],
+                 $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+      }
+      return (['let', ['list', ['list', $name, '(make-p-box nil)']],
+               (defined $init ? (['p-my-=', $name, $self->_lower_expr($init, $first)]) : ()),
+               $self->_lower_block(\@rest, $vi, $tail_ctx)]);
     }
-    return (['let', ['list', ['list', $name, '(make-p-box nil)']],
-             (defined $init ? (['p-my-=', $name, $self->_lower_expr($init, $first)]) : ()),
-             $self->_lower_block(\@rest, $vi)]);
+    # -- my @a / my %h / my (LIST) [= INIT];  → fresh containers in a let,
+    # the assignment lowered by the ORIGINAL expression machinery (v1 parses
+    # the whole `my … = …` statement as an expression and produces the
+    # p-array-= / p-hash-= / p-list-= form — same path as Parser.pm's
+    # _process_variable_statement).  All these vars stay boxed/containers.
+    my ($vars, $has_init) = $self->_multi_decl($first);
+    die "Parser2 TODO: unsupported declaration: " . $first->content unless $vars;
+    my @k = _strip_semi($first->schildren);
+    if ($has_init) {
+      # Self-referential init (`my @a = (@a, 1)` — RHS must see the OUTER
+      # var) needs v1's init-in-binding dance; out of the prototype subset.
+      my ($eq_i) = grep { $k[$_]->isa('PPI::Token::Operator') && $k[$_]->content eq '=' } 0 .. $#k;
+      my $rhs_txt = join ' ', map { $_->content } @k[$eq_i + 1 .. $#k];
+      for my $v (@$vars) {
+        die "Parser2 TODO: self-referential init: " . $first->content
+          if $rhs_txt =~ /\Q$v\E\b/;
+      }
+    }
+    $self->fallback_parser->{_let_bound_vars}{$_} = 1 for @$vars;
+    my @binds = map { ['list', $_, _fresh_container($_)] } @$vars;
+    return (['let', ['list', @binds],
+             ($has_init ? ($self->_lower_expr([@k], $first)) : ()),
+             $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+  }
+
+  # -- use/require/no, BEGIN/END blocks, __END__/__DATA__: whole-statement
+  # fallback through the ORIGINAL parser (declarations hoisted to file top).
+  if ($first->isa('PPI::Statement::Include')
+      || $first->isa('PPI::Statement::Scheduled')
+      || $first->isa('PPI::Statement::End')
+      || $first->isa('PPI::Statement::Data')) {
+    return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
 
   # -- everything else appends a form and continues at the same depth.
-  return ($self->_lower_stmt($first, $vi), $self->_lower_block(\@rest, $vi));
+  return ($self->_lower_stmt($first, $vi, $first_tail), $self->_lower_block(\@rest, $vi, $tail_ctx));
 }
 
 sub _lower_stmt {
-  my ($self, $stmt, $vi) = @_;
+  my ($self, $stmt, $vi, $tail_ctx) = @_;
 
   if ($stmt->isa('PPI::Statement::Compound')) {
-    return $self->_lower_compound($stmt, $vi);
+    return $self->_lower_compound($stmt, $vi, $tail_ctx);
   }
 
   if ($stmt->isa('PPI::Statement::Break')) {
@@ -211,8 +334,9 @@ sub _lower_stmt {
     if ($kw eq 'return') {
       shift @k;
       my ($expr, $mod, $cond) = _split_modifier(\@k);
+      # A returned call must see the CALLER's context (no *wantarray* bind).
       my $form = @$expr
-        ? ['p-return', $self->_lower_expr($expr, $stmt)]
+        ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit')]
         : ['p-return', '(p-undef)'];
       return _apply_modifier($form, $mod, $cond, $self, $stmt);
     }
@@ -250,12 +374,14 @@ sub _lower_stmt {
     }
   }
 
-  my $form = $self->_lower_expr($expr, $stmt);
+  # Statement position: the value is discarded (void) — except for a block
+  # tail whose value the enclosing sub returns ($tail_ctx = 'inherit').
+  my $form = $self->_lower_expr($expr, $stmt, $tail_ctx // ':void');
   return _apply_modifier($form, $mod, $cond, $self, $stmt);
 }
 
 sub _lower_compound {
-  my ($self, $stmt, $vi) = @_;
+  my ($self, $stmt, $vi, $tail_ctx) = @_;
   my @k = $stmt->schildren;
   my $kw = $k[0]->content;
 
@@ -271,16 +397,18 @@ sub _lower_compound {
       }
     }
     # Build nested p-if forms from the tail (else innermost) outward.
+    # A tail if/unless is the enclosing block's VALUE — its branch blocks
+    # inherit $tail_ctx (loop/plain compounds don't propagate values).
     my $form;
     if (@clauses && $clauses[-1]{kw} eq 'else') {
       my $c = pop @clauses;
-      $form = ['progn', $self->_lower_block([$c->{block}->schildren], $vi)];
+      $form = ['progn', $self->_lower_block([$c->{block}->schildren], $vi, $tail_ctx)];
     }
     while (my $c = pop @clauses) {
       my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt);
       $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
       $form = ['p-if', $cond,
-               ['progn', $self->_lower_block([$c->{block}->schildren], $vi)],
+               ['progn', $self->_lower_block([$c->{block}->schildren], $vi, $tail_ctx)],
                (defined $form ? ($form) : ())];
     }
     return $form;
@@ -310,8 +438,24 @@ sub _lower_compound {
     my ($name, $init) = $self->_single_scalar_decl($init_s);
     $self->fallback_parser->{_let_bound_vars}{$name} = 1 if $name;
 
+    # ++-step carve-out: when the step is a PURE `$i++`/`++$i` (or --), the ++
+    # is position-known — it IS the step slot, whose value is discarded — so
+    # lower it as the equivalent `(setf $i (p-± $i 1))` and let the counter
+    # unbox, provided a re-analysis of the loop WITHOUT the step (init, cond,
+    # body — where the text-scan gates are trustworthy) approves the name.
+    my $step_form;
+    if ($name && !($vi->{$name} && $vi->{$name}{unboxable})
+        && (my $incr = _pure_incr_step($step_s, $name))) {
+      my $vi2 = Pl::VarAnnotator->analyze(
+        [$init_s, $cond_s, $block->schildren], undef, $self->sub_info);
+      if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
+        $vi = { %$vi, $name => { unboxable => 1 } };
+        $step_form = ['list', ['setf', $name, ["p-$incr", $name, '1']]];
+      }
+    }
+
     my $cond = ['list', $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt)];
-    my $step = ['list', $self->_lower_stmt($step_s, $vi)];
+    my $step = $step_form // ['list', $self->_lower_stmt($step_s, $vi)];
     my @body = $self->_lower_block([$block->schildren], $vi);
 
     if ($name) {
@@ -344,13 +488,19 @@ sub _lower_compound {
 # ---------------------------------------------------------------- expressions
 
 # Native (ExprToCL2 strict subset) or the ORIGINAL expression pipeline.
-# $ctx: 0 scalar (default), 1 list — forwarded to the fallback so e.g. a
-# foreach list `2..$n` parses as a range, not a scalar flip-flop.
+# $ctx describes the expression's position:
+#   undef → scalar; 1 → list (fallback list-parse: e.g. a foreach list
+#   `2..$n` is a range, not a scalar flip-flop; native funcall bind t);
+#   ':void' → statement position; 'inherit' → return/sub-tail (callee sees
+#   the CALLER's *wantarray*).  The fallback only distinguishes scalar/list.
 sub _lower_expr {
   my ($self, $parts, $stmt, $ctx) = @_;
   my @parts = _strip_semi(@$parts);
   die "Parser2: empty expression" unless @parts;
 
+  my $native_ctx = !defined $ctx        ? undef
+                 : "$ctx" eq '1'        ? 't'
+                 :                        $ctx;
   my $native = eval {
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
@@ -360,11 +510,12 @@ sub _lower_expr {
     my ($node_id) = $expr_o->parse_expr_to_tree(\@parts);
     Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
                        sub_info => $self->sub_info)
-                 ->gen_form($node_id);
+                 ->gen_form($node_id, $native_ctx);
   };
   return $native if defined $native;
 
-  my $cl = $self->fallback_parser->_parse_expression(\@parts, $stmt, $ctx // 0);
+  my $fb_ctx = (defined $ctx && "$ctx" eq '1') ? 1 : 0;
+  my $cl = $self->fallback_parser->_parse_expression(\@parts, $stmt, $fb_ctx);
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
     unless defined $cl;
   # Legacy-boundary parity: the old pipeline rewrites (p-scalar-= $x …) to
@@ -422,7 +573,7 @@ sub _sub_ctx_insensitive {
 # NOT included: && || // (context-transparent to their right operand) and
 # x (repeats lists in list context).
 my %SCALAR_ROOT_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != .
-                                        eq ne lt gt le ge <=> cmp);
+                                        eq ne lt gt le ge <=> cmp !);
 sub _expr_scalar_rooted {
   my ($self, $parts) = @_;
   my @parts = _strip_semi(@{ $parts // [] });
@@ -481,6 +632,63 @@ sub _apply_modifier {
   die "Parser2 TODO: statement modifier '$mod'";
 }
 
+# `my @a` / `my %h` / `my ($p, @q)` [= INIT] → (\@var_names, $has_init); else ().
+sub _multi_decl {
+  my ($self, $stmt) = @_;
+  my @k = _strip_semi($stmt->schildren);
+  return () unless @k >= 2
+    && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my';
+  my @vars;
+  if ($k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^[\@\%]\w+$/) {
+    @vars = ($k[1]->content);
+  } elsif ($k[1]->isa('PPI::Structure::List')) {
+    @vars = map  { $_->content }
+            grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
+    return () if !@vars || grep { !/^[\$\@\%]\w+$/ } @vars;
+  } else {
+    return ();
+  }
+  return (\@vars, 0) if @k == 2;
+  return () unless $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '=';
+  return (\@vars, 1);
+}
+
+sub _fresh_container {
+  my ($var) = @_;
+  my $sigil = substr($var, 0, 1);
+  return '(make-array 0 :adjustable t :fill-pointer 0)' if $sigil eq '@';
+  return "(make-hash-table :test 'equal)"               if $sigil eq '%';
+  return '(make-p-box nil)';
+}
+
+# Whole-statement fallback: run one statement through the ORIGINAL parser's
+# _process_element into a scratch section, then split the buckets — preamble/
+# declarations/definitions lines are hoisted to the file top (they carry
+# defvar/defconstant/eval-when forms that need top-level-ness), runtime lines
+# embed at the statement's position as a raw form.  This is the statement-level
+# twin of the _lower_expr fallback seam.
+sub _fallback_stmt {
+  my ($self, $stmt) = @_;
+  my $p = $self->fallback_parser;
+  my @saved = ($p->_sections, $p->_cur_bucket, $p->indent_level);
+  $p->_sections([]);
+  $p->_cur_bucket('runtime');
+  $p->_open_section('pcl');
+  $p->indent_level(0);
+  $p->_process_element($stmt);
+  my @runtime;
+  for my $sec (@{ $p->_sections }) {
+    push @{ $self->{_captured_decls} },
+      grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}}, @{$sec->{definitions}};
+    push @runtime, grep { /\S/ } @{$sec->{runtime}};
+  }
+  $p->_sections($saved[0]);
+  $p->_cur_bucket($saved[1]);
+  $p->indent_level($saved[2]);
+  return () unless @runtime;
+  return raw(join("\n", @runtime));
+}
+
 # `my $x` / `my $x = INIT` → ($name, \@init_parts | undef); else ().
 sub _single_scalar_decl {
   my ($self, $stmt) = @_;
@@ -497,6 +705,21 @@ sub _single_scalar_decl {
 sub _cond_parts {
   my ($cond) = @_;
   return map { $_->schildren } grep { $_->isa('PPI::Statement') } $cond->children;
+}
+
+# Step statement that is EXACTLY `$i++` / `++$i` / `$i--` / `--$i` for the
+# given counter → '+' or '-'; anything else → undef.
+sub _pure_incr_step {
+  my ($step_s, $name) = @_;
+  my @k = _strip_semi($step_s->schildren);
+  return undef unless @k == 2;
+  my ($a, $b) = @k;
+  ($a, $b) = ($b, $a) if $a->isa('PPI::Token::Operator');   # prefix form
+  return undef unless $a->isa('PPI::Token::Symbol') && $a->content eq $name
+    && $b->isa('PPI::Token::Operator');
+  return '+' if $b->content eq '++';
+  return '-' if $b->content eq '--';
+  return undef;
 }
 
 1;

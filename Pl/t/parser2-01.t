@@ -92,10 +92,17 @@ my $cfor = Pl::Parser2->parse_code(
   'for (my $i = 0; $i < 3; $i = $i + 1) { print "$i\n"; }');
 like($cfor, qr/\(let \(\(\$i 0\)\)/, 'C-for arith-step counter binds raw');
 like($cfor, qr/\(\(setf \$i \(p-\+ \$i 1\)\)\)/, 'C-for raw counter native setf step');
+# ++-step carve-out (session 269): a PURE `$j++` step is position-known (its
+# value is discarded), so it lowers as a native setf and the counter unboxes.
 my $cfor2 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 3; $j++) { print "$j\n"; }');
-like($cfor2, qr/\(\$j \(make-p-box nil\)\)/, 'C-for ++ step counter stays boxed');
-like($cfor2, qr/\(p-post\+\+ \$j\)/, 'C-for boxed step through p-post++');
+like($cfor2, qr/\(let \(\(\$j 0\)\)/, 'C-for pure ++ step: counter unboxes (carve-out)');
+like($cfor2, qr/\(\(setf \$j \(p-\+ \$j 1\)\)\)/, 'C-for pure ++ step lowered as native setf');
+# … but a ++ anywhere ELSE (body) still forces the boxed path.
+my $cfor3 = Pl::Parser2->parse_code(
+  'for (my $j = 0; $j < 6; $j++) { $j++; print "$j\n"; }');
+like($cfor3, qr/\(\$j \(make-p-box nil\)\)/, 'C-for with body ++ keeps counter boxed');
+like($cfor3, qr/\(p-post\+\+ \$j\)/, 'C-for boxed step through p-post++');
 
 # Lean p-sub: a body that never reads @_ skips the p-args-body prologue and
 # stack-allocates the unused &rest.
@@ -116,6 +123,43 @@ my $brk = Pl::Parser2->parse_code(
   'for my $i (1..10) { next if $i == 2; last if $i > 4; print "$i\n"; }');
 like($brk, qr/p-next/, 'next lowers');
 like($brk, qr/p-last/, 'last lowers');
+
+# --- Session-269 growth: non-scalar my, use/require seam, native interp ---
+
+# my @a / my %h / my (LIST) let-bind fresh containers; the assignment lowers
+# through the original expression machinery (p-array-= / p-hash-= / p-list-=).
+my $agg = Pl::Parser2->parse_code(
+  'my @a = (1,2,3); my %h = (x => 9); my ($p, $q) = (4, 5); print $a[0]+$h{x}+$p+$q, "\n";');
+like($agg, qr/\(let \(\(\@a \(make-array 0 :adjustable t :fill-pointer 0\)\)\)/,
+     'my @a binds a fresh adjustable vector');
+like($agg, qr/\(p-array-= \@a \(vector 1 2 3\)\)/, 'array init via p-array-=');
+like($agg, qr/\(let \(\(%h \(make-hash-table :test 'equal\)\)\)/,
+     'my %h binds a fresh hash table');
+like($agg, qr/\(p-list-= \(vector \$p \$q\)/, 'my (LIST) init via p-list-=');
+
+# use/require lower through the statement-level fallback seam: declarations
+# hoisted to the top, runtime effects in statement position.
+my $use = Pl::Parser2->parse_code(
+  'use constant PI => 3; print PI() + 1, "\n";');
+like($use, qr/\(p-sub pl-PI/, 'use constant: captured declaration hoisted');
+# (v1 parity: `require` is an eval-always definition, hoisted ABOVE runtime
+# statements — same bucket ordering as the v1 assembly.)
+my $ord = Pl::Parser2->parse_code(
+  'print "a\n"; require POSIX; print "b\n";');
+like($ord, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"\)\).*\(p-print "a/s,
+     'require hoisted as eval-always declaration (v1 parity)');
+
+# Native interpolated strings: plain $name scalars → p-string-concat form
+# (a raw root — the slot unboxes); fancy interpolations stay on the fallback.
+my $interp = Pl::Parser2->parse_code(
+  'my $x = 5; my $msg = "x is $x!\n"; print $msg;');
+like($interp, qr/\(p-string-concat "x is " \$x "!\s*\n?"\)/,
+     'simple $name interpolation lowers natively to p-string-concat');
+like($interp, qr/\(\$msg\s*\n?\s*\(p-string-concat/, 'interpolated-string slot binds raw');
+
+# Unary ! is native and raw-rooted.
+my $bang = Pl::Parser2->parse_code('my $x = 0; my $y = !$x; print "y=[$y]\n";');
+like($bang, qr/\(let \(\(\$y \(p-! \$x\)\)\)/, 'unary ! native, raw slot');
 
 # End-to-end: v2 output runs and matches perl.
 SKIP: {

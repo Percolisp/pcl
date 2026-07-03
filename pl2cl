@@ -37,6 +37,25 @@ if ($ENV{PCL_V2}) {
   $PARSER_CLASS = 'Pl::Parser2';
 }
 
+# v2 whole-file fallback: anything the prototype can't lower (it dies with
+# "Parser2 TODO: …") transpiles through v1 instead of erroring out.  This is
+# what lets p-use/require subprocesses inherit PCL_V2=1 safely — a module the
+# prototype can't handle (e.g. one with `package` statements) still loads via
+# the original pipeline.  Modes the prototype doesn't implement (eval-string,
+# lenient-ppi) route straight to v1.
+sub parse_with_fallback {
+  my ($method, @args) = @_;
+  if ($PARSER_CLASS eq 'Pl::Parser2') {
+    my %opts = @args[1 .. $#args];
+    if (!%opts) {                       # plain parse only; special modes → v1
+      my $out = eval { Pl::Parser2->$method($args[0]) };
+      return $out if defined $out;
+      print STDERR "pl2cl: v2 fell back to v1: $@" if $ENV{PCL_V2_VERBOSE};
+    }
+  }
+  return Pl::Parser->$method(@args);
+}
+
 # Parse command line options
 my $no_cache = $ENV{PCL_NO_CACHE} // 0;
 my $cache_lisp = 0;
@@ -289,7 +308,7 @@ if ($bundle_mode || $executable_mode) {
 
 if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
-  my $output = $PARSER_CLASS->parse_file($source_file,
+  my $output = parse_with_fallback('parse_file', $source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
 
   if ($is_module) {
@@ -307,13 +326,13 @@ if (@ARGV && -f $ARGV[0]) {
 elsif (@ARGV) {
   # Treat arguments as code (no @INC init needed for one-liners)
   $code = join(' ', @ARGV);
-  print $PARSER_CLASS->parse_code($code);
+  print parse_with_fallback('parse_code', $code);
 }
 elsif (!-t STDIN) {
   # Read from stdin
   local $/;
   $code = <STDIN>;
-  my $output = $PARSER_CLASS->parse_code($code,
+  my $output = parse_with_fallback('parse_code', $code,
                  (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 
   if (defined $eval_pkg) {

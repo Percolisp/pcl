@@ -30,10 +30,12 @@ sub raw {
 
 sub is_raw { ref($_[0]) eq 'Pl::CLForm::Raw' }
 
-# One-line rendering, or undef if the form contains a multi-line raw chunk.
+# One-line rendering, or undef if the form contains a multi-line raw chunk
+# or a string atom with an embedded newline (CL has no \n escape — a literal
+# newline inside a string atom makes the "one line" lie to the indenter).
 sub _flat {
   my ($f) = @_;
-  return $f unless ref $f;
+  if (!ref $f) { return $f =~ /\n/ ? undef : $f }
   if (is_raw($f)) { return $$f =~ /\n/ ? undef : $$f }
   my ($head, @args) = @$f;
   my @parts = $head eq 'list' ? () : ($head);

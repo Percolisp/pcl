@@ -53,16 +53,22 @@ sub generate {
   return ('  ' x $self->indent_level) . Pl::CLForm::to_string($form, $self->indent_level);
 }
 
+# $ctx describes the POSITION of this expression, for the funcall bind only:
+#   undef / 'nil' → scalar (default), 't' → list, ':void' → statement
+#   position, 'inherit' → return/sub-tail position (the callee must see the
+#   CALLER's context, so no bind at all).  Only funcall roots consume it;
+#   operators impose scalar context on their operands (no ctx forwarded),
+#   parens are transparent.
 sub gen_form {
-  my ($self, $node_id) = @_;
+  my ($self, $node_id, $ctx) = @_;
   my $node = $self->expr_o->get_a_node($node_id);
   my $kids = $self->expr_o->get_node_children($node_id);
 
   if ($self->expr_o->is_internal_node_type($node)) {
     my $type = $node->{type} // '';
-    # Parenthesized sub-expression in scalar position: transparent.
+    # Parenthesized sub-expression: transparent (context flows through).
     if ($type eq 'tree_val' && @$kids == 1) {
-      return $self->gen_form($kids->[0]);
+      return $self->gen_form($kids->[0], $ctx);
     }
     # Native funcall: a KNOWN user sub called with static scalar args →
     # direct (pl-f a b).  The &optional/&rest calling convention makes any
@@ -73,26 +79,30 @@ sub gen_form {
       my $info = $self->sub_info->{ $fnode->content } or return undef;
       my @args;
       for my $kid (@$kids[1 .. $#$kids]) {
-        my $f = $self->gen_form($kid);
+        # An argument expression is flattened into @_ → LIST context.
+        my $f = $self->gen_form($kid, 't');
         return undef unless defined $f;
         push @args, $f;
       }
       my $call = [$info->{cl_name}, @args];
       return $call if $info->{insensitive};
-      return ['let', ['list', ['list', '*wantarray*', 'nil']], $call];
+      return $call if ($ctx // '') eq 'inherit';   # callee sees caller's ctx
+      my $bind = (!defined $ctx || $ctx eq 'nil') ? 'nil' : $ctx;
+      return ['let', ['list', ['list', '*wantarray*', $bind]], $call];
     }
     return undef;
   }
 
   if (ref($node) eq 'PPI::Token::Operator' && @$kids) {
     my $op = $node->content;
-    return undef unless $BINOP{$op};
     my @forms;
     for my $kid (@$kids) {
       my $f = $self->gen_form($kid);
       return undef unless defined $f;
       push @forms, $f;
     }
+    return ['p-!', $forms[0]] if $op eq '!' && @forms == 1;
+    return undef unless $BINOP{$op};
     return undef unless @forms == 2 || ($op eq '-' && @forms == 1);
     return [ $BINOP{$op}, @forms ];
   }
@@ -117,23 +127,53 @@ sub gen_form {
   return undef;
 }
 
-# Non-interpolating string literal → CL string atom, or undef (old pipeline).
-# Single quotes: unescape \' and \\.  Double quotes only when they contain no
-# $ @ or backslash (no interpolation, no escape processing needed).
+# String literal → CL form, or undef (old pipeline).
+# Single quotes: unescape \' and \\.  Double quotes: the STRICT native subset —
+# escapes limited to \n \t \\ \" \$ \@ \', interpolations limited to plain
+# `$name` scalars (no subscripts / deref / method chains / `@` arrays); a
+# variable-bearing string lowers to (p-string-concat piece …), which coerces
+# every piece and returns a RAW CL string (a legit raw-slot root, same as the
+# arithmetic ops).  Anything fancier → undef → the original interpolator.
 sub _string_literal_form {
   my ($node) = @_;
   my $r = ref $node;
-  my $s;
   if ($r eq 'PPI::Token::Quote::Single') {
-    $s = $node->string;
+    my $s = $node->string;
     $s =~ s/\\([\\'])/$1/g;
-  } elsif ($r eq 'PPI::Token::Quote::Double') {
-    $s = $node->string;
-    return undef if $s =~ /[\$\@\\]/;
-  } else {
-    return undef;
+    return _cl_string($s);
   }
-  return undef if $s =~ /\n/;      # keep CLForm's one-line logic honest
+  return undef unless $r eq 'PPI::Token::Quote::Double';
+  my $s = $node->string;
+  my (@pieces, $lit);
+  $lit = '';
+  while (length $s) {
+    if ($s =~ s/^\\(.)//s) {                       # escape sequence
+      my $e = $1;
+      if    ($e eq 'n') { $lit .= "\n" }
+      elsif ($e eq 't') { $lit .= "\t" }
+      elsif ($e eq '\\' || $e eq '"' || $e eq '$' || $e eq '@' || $e eq "'") { $lit .= $e }
+      else { return undef }                        # \x{}, \0, \l/\u/\L/\U/… → old pipeline
+    } elsif ($s =~ s/^\$([A-Za-z_]\w*)//) {        # plain scalar interpolation
+      my $name = $1;                               # ($1-style captures → old pipeline)
+      # A following subscript / deref / package qualifier changes meaning.
+      return undef if $s =~ /^(?:\[|\{|->|::|')/;
+      push @pieces, _cl_string($lit) if length $lit;
+      $lit = '';
+      push @pieces, "\$$name";
+    } elsif ($s =~ /^[\$\@]/) {                    # $. $" ${…} @arr … → old pipeline
+      return undef;
+    } else {
+      $lit .= substr($s, 0, 1, '');
+    }
+  }
+  push @pieces, _cl_string($lit) if length $lit;
+  return '""' unless @pieces;
+  return $pieces[0] if @pieces == 1 && $pieces[0] =~ /^"/;   # pure literal
+  return ['p-string-concat', @pieces];             # ≥1 variable → raw string
+}
+
+sub _cl_string {
+  my ($s) = @_;
   $s =~ s/(["\\])/\\$1/g;
   return '"' . $s . '"';
 }

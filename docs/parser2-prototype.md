@@ -163,15 +163,51 @@ elide the two stack conses; note `caller()` reads the whole chain, so this
 is NOT a per-sub decision), `&optional` defaulting. All diminishing; measure
 again before touching.
 
+## Session 269b growth (2026-07-04)
+
+- **Non-scalar `my`** (`my @a`/`my %h`/`my (LIST)`): fresh containers in the
+  `let`, the assignment lowered by the original expression machinery
+  (`p-array-=`/`p-hash-=`/`p-list-=`).
+- **Statement-level fallback seam** (`_fallback_stmt`): one statement through
+  v1's `_process_element` into a scratch section; declaration-bucket lines
+  hoist to file top, runtime lines embed in place.  Routes `use`/`require`/
+  `no`, BEGIN/END, `__END__`.  (PPI gotcha: `Statement::Scheduled` ISA
+  `Statement::Sub` — exclude it from the sub branches.)
+- **Whole-file v1 fallback** in pl2cl (`parse_with_fallback`): any
+  "Parser2 TODO" die → v1 transpile.  `PCL_V2=1` is now safe on any input,
+  including the p-use/require subprocesses that inherit the env var.
+  Gated to v1: string `eval` (v2's true lexicals are invisible to
+  separately-compiled eval'd code) and prototyped/signatured subs.
+- **Environment registration in the pre-pass** (`add_declared_sub` +
+  default prototype): PExpr decides bareword-call-vs-string from
+  `get_prototype`.
+- **Context-correct native calls**: `gen_form($node, $ctx)` — funcall args
+  bind `t` (flattened into `@_` = list), statement position `:void`,
+  `return`/sub-tail `'inherit'` = **no bind** (callee sees the caller's
+  `*wantarray*`); `$tail_ctx` threads sub body → block tail → tail-if
+  branches (loops don't propagate values).
+- **v2 forward-declaration pass** (`_forward_global_decls`): defvars for
+  referenced-never-let-bound globals and cross-package refs — never for a
+  let-bound name (a defvar would proclaim it special and poison the lexical).
+- **Native**: simple interpolated strings (`"x=$x\n"` → `p-string-concat`,
+  strict escape subset), unary `!`, and the **C-for `++`-step carve-out**
+  (pure `$i++` step is position-known → re-analyze the loop without the
+  step; raw counter + `(setf $i (p-+ $i 1))`).
+
+Parity check: the 9 v2-lowered `perl-tests/` files (chars, context, defined,
+aassign, dor, cond, auto, flip, anonsub) all match v1's pass counts exactly;
+11 of the first 40 files lower through v2, the rest fall back wholesale.
+
 ## Next steps, in leverage order
 
-1. Grow `ExprToCL2` further: interpolated strings (p-string-concat is a raw
-   root too), unary `!`, chained/nested funcalls as statement roots.
-2. Statement kinds: package, `use` (module loading through the fallback).
-3. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
+1. **`package` statements** — the real design item: a mid-file
+   `(in-package)` inside v2's nested `let`s is a no-op for the *reader* (the
+   rest of the enclosing top-level form was already read in the old
+   package).  Needs v1-style *section splitting* of the form tree, with
+   my-lexicals that span a package boundary handled explicitly.
+2. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
    (`type-flow-and-codegen-plan.md` §(s)) once shapes stabilize.
-4. `++`-step carve-out: let a C-for counter unbox by lowering the step as
-   `(setf $i (p-+ $i 1))` when `++` occurs ONLY in the step slot (needs a
-   position-aware annotator, not the text scan).
-5. Lean p-sub round 2 (catch elision / bind elision) — only with fresh
+3. Grow the native expression set: hash/array element access ($h{k}, $a[i])
+   is the next perf tier (tight loops over aggregates).
+4. Lean p-sub round 2 (catch elision / bind elision) — only with fresh
    measurements, see above.

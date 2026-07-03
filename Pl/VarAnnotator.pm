@@ -29,7 +29,7 @@ use warnings;
 
 # Operators whose p-functions return raw CL values (number / string / 1-or-"").
 my %ARITH_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=>
-                                  . eq ne lt gt le ge cmp);
+                                  . eq ne lt gt le ge cmp !);
 
 sub analyze {
   my ($class, $stmts, $extra_params, $known_subs) = @_;
