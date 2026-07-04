@@ -140,6 +140,15 @@ sub parse {
   }
   $self->_check_my_spanning(\@segments) if @segments > 1;
 
+  # W5: rewrite file lexicals captured by named subs to fresh package-level
+  # cells (see _rename_captured_file_lexicals).  Runs BEFORE the pre-pass so
+  # every downstream reader (sub_info, _sub_ctx_insensitive, VarAnnotator,
+  # _lower_block) sees the renamed tokens; _file_lex_renamed drives the
+  # defvar-not-let lowering and un-fires the capture gates.
+  $self->{_file_lex_counter} = 0;
+  $self->{_file_lex_renamed} = {};
+  $self->_rename_captured_file_lexicals($_) for @segments;
+
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
   # sub in the SHARED Environment too — the fallback expression machinery
@@ -167,6 +176,16 @@ sub parse {
         # sub_info: ExprToCL2's direct-call path ignores imposed context, so
         # call sites to a prototyped sub must take the fallback funcall path.
         if (defined(my $proto = $self->_proto_or_sig_str($sub))) {
+          # A prototyped/signatured sub's DEFINITION is lowered in ISOLATION via
+          # _fallback_stmt (W4) — a scratch v1 section with no file-scope lexical
+          # context.  A NAMED sub nested inside it is hoisted by Perl to package
+          # scope but captures the outer sub's params/lexicals (signatures.t
+          # `sub t152 ($a=…, @b) { sub t152x { @b = … } }`), which the isolated
+          # lowering can't wire up → unbound at load.  Gate → whole-file v1.
+          die "Parser2 TODO: named sub nested in a prototyped/signatured sub\n"
+            if $sub->block
+            && grep { $_->name && !$_->isa('PPI::Statement::Scheduled') }
+               @{ $sub->block->find('PPI::Statement::Sub') || [] };
           my $sig_info = $self->fallback_parser->parse_prototype_or_signature($proto, $sub);
           $self->environment->add_prototype($sub->name, $sig_info);
           $self->environment->add_declared_sub($sub->name, $seg->{pkg});
@@ -203,6 +222,15 @@ sub parse {
     $self->{_hoisted_decls}  = [];
     $self->{_hoisted_defs}   = [];
     $self->{_live_lex}       = {};
+    # `my` lexicals do not cross a segment (package) boundary in v2 — each
+    # segment is its own top-level section, and a genuine cross-boundary my is
+    # gated by _check_my_spanning.  So the fallback machinery's let-bound set
+    # must start empty per segment; otherwise an earlier segment's file
+    # lexical (e.g. `package Foo { my @a; … }`) leaks into a later segment's
+    # string-eval capture alist as a free (→ unbound) symbol.  (_all_lex stays
+    # file-wide — the forward-decl pass must never defvar a name let-bound
+    # anywhere.)
+    $self->fallback_parser->{_let_bound_vars} = {};
     my (@decls, @defs, @top);
     for my $child (@{ $seg->{stmts} }) {
       if ($child->isa('PPI::Statement::Sub') && $child->name
@@ -411,10 +439,165 @@ sub _check_sub_captures {
       && !$child->isa('PPI::Statement::Scheduled');
     my $txt = $child->block->content;
     for my $bare (sort keys %lex) {
+      # W5: a name already rewritten to a package-level cell ($x__file__N) is
+      # legitimately captured — the hoisted sub and in-place code share the
+      # one defvar'd box, so it must NOT gate.
+      next if $self->{_file_lex_renamed}{"\$$bare"};
       die "Parser2 TODO: file lexical '$bare' captured by sub " . $child->name . "\n"
         if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
     }
   }
+}
+
+# W5: file lexicals captured by named subs.  A named sub hoists into the
+# definitions bucket OUTSIDE the lexical `let`s that bind file `my`-vars, so a
+# sub body that reads such a var would compile a free (→ unbound) symbol —
+# today that gates the whole file to v1 (_check_sub_captures / _hoist_nested_sub).
+# When the capture meets the conservative preconditions below, rewrite the
+# lexical to a fresh package-level name and lower it as a defvar'd box (the
+# `our` shape — no let), so both the hoisted sub and the in-place code share
+# the single cell.  This is exactly what v1 does (it defvar's file lexicals);
+# the fresh NAME additionally avoids proclaiming a common symbol special
+# file-wide, which would poison a true `let $x` elsewhere in the file.
+#
+# Subset (anything outside it keeps the gate → whole-file v1):
+#   - exactly ONE `my $x` scalar declaration of the bare name in the segment,
+#     and NO other my/state declaration of that bare name (shadowing kills it);
+#   - the name is never used in array/hash family form (@x, %x, $#x, $x[…],
+#     $x{…}) nor as a deref-block (${x}) — those share the bare name across
+#     distinct variables and can't be renamed by token content alone;
+#   - the name is actually referenced (as a scalar) inside some named sub body.
+sub _rename_captured_file_lexicals {
+  my ($self, $seg) = @_;
+  my $stmts = $seg->{stmts};
+
+  # Named subs (with a body) anywhere in the segment — Perl subs are
+  # package-global regardless of block nesting.
+  my @subs;
+  for my $child (@$stmts) {
+    push @subs, $child if $child->isa('PPI::Statement::Sub');
+    push @subs, @{ $child->find('PPI::Statement::Sub') || [] };
+  }
+  @subs = grep { $_->name && $_->block && !$_->isa('PPI::Statement::Scheduled') } @subs;
+  return unless @subs;
+
+  # Tally declarations (my/state, by bare name) and disqualify any bare name
+  # ever used in array/hash family form.
+  my (%decl_count, %scalar_decl, %disq);
+  for my $stmt (@$stmts) {
+    my @vstmts = $stmt->isa('PPI::Statement::Variable') ? ($stmt) : ();
+    push @vstmts, @{ $stmt->find('PPI::Statement::Variable') || [] };
+    for my $v (@vstmts) {
+      my $kw = ($v->schildren)[0];
+      next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
+      for my $dn ($self->_declared_names($v)) {
+        (my $bare = $dn) =~ s/^[\$\@\%]//;
+        $decl_count{$bare}++;
+      }
+      my ($name) = $self->_single_scalar_decl($v);
+      if ($name && $kw->content eq 'my' && !_inside_named_sub($v)) {
+        (my $bare = $name) =~ s/^\$//;
+        push @{ $scalar_decl{$bare} }, $v;
+      }
+    }
+    # Any symbol whose canonical form is @x / %x (incl. $x[…] / $x{…} element
+    # access, whose ->symbol resolves to the container) disqualifies bare `x`.
+    for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
+      my $canon = $s->symbol;
+      (my $bare = $canon) =~ s/^[\$\@\%]//;
+      $disq{$bare} = 1 if substr($canon, 0, 1) ne '$';
+    }
+    for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+      (my $bare = $ai->content) =~ s/^\$#//;
+      $disq{$bare} = 1;
+    }
+    # A name INTERPOLATED inside a string/regex/heredoc is not a Symbol token,
+    # so the rewrite below can't reach it — disqualify (renaming would leave the
+    # interpolation pointing at a now-nonexistent variable).
+    _interp_names($stmt, \%disq);
+  }
+
+  my $segtxt = join "\n", map { $_->content } @$stmts;
+  my %rename;
+  for my $bare (keys %scalar_decl) {
+    next if $disq{$bare};
+    next unless @{ $scalar_decl{$bare} } == 1;   # exactly one file-lexical scalar decl
+    next unless ($decl_count{$bare} // 0) == 1;   # and no other decl of the bare name
+    next if $segtxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block → gate
+    # Actually captured? — referenced as a scalar inside some named sub body.
+    my $captured = 0;
+    SUB: for my $sub (@subs) {
+      for my $s (@{ $sub->block->find('PPI::Token::Symbol') || [] }) {
+        next unless $s->symbol eq "\$$bare";
+        $captured = 1; last SUB;
+      }
+    }
+    next unless $captured;
+    $rename{"\$$bare"} = "\$${bare}__file__" . $self->{_file_lex_counter}++;
+  }
+  return unless %rename;
+
+  # Rewrite every plain scalar use (content matches — the disqualifier above
+  # guarantees no element-access token shares the content) to the fresh name.
+  for my $stmt (@$stmts) {
+    for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
+      my $new = $rename{ $s->content } or next;
+      $s->set_content($new);
+      $self->{_file_lex_renamed}{$new} = 1;
+    }
+  }
+}
+
+# Mark (in %$disq) every bare name that appears interpolated ($name / ${name})
+# inside an interpolating token (double-quote, qq, backtick/qx, interpolating
+# heredoc, or a regex match/substitution) anywhere under $node.  Single quotes,
+# q(), qw(), and tr/// do not interpolate and are skipped.
+sub _interp_names {
+  my ($node, $disq) = @_;
+  for my $t (@{ $node->find('PPI::Token') || [] }) {
+    my $c;
+    if ($t->isa('PPI::Token::HereDoc')) {
+      next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;   # non-interpolating
+      $c = join '', $t->heredoc;
+    } elsif ($t->isa('PPI::Token::Quote::Double')
+          || $t->isa('PPI::Token::Quote::Interpolate')
+          || $t->isa('PPI::Token::QuoteLike::Backtick')
+          || $t->isa('PPI::Token::QuoteLike::Command')
+          || $t->isa('PPI::Token::Regexp::Match')
+          || $t->isa('PPI::Token::Regexp::Substitute')) {
+      $c = $t->content;
+    } else {
+      next;
+    }
+    while ($c =~ /(?<!\\)\$\{?\s*([A-Za-z_]\w*)/g) { $disq->{$1} = 1 }
+  }
+  return;
+}
+
+# True when $node is lexically inside a NAMED sub's body (so a `my` there is
+# sub-local, not a file lexical).
+sub _inside_named_sub {
+  my ($node) = @_;
+  my $p = $node->parent;
+  while ($p) {
+    return 1 if $p->isa('PPI::Statement::Sub') && $p->name;
+    $p = $p->parent;
+  }
+  return 0;
+}
+
+# The LHS names a `my`/`state`/`our`/`local` statement DECLARES (before `=`) —
+# a bare Symbol or the Symbols of a parenthesised list.  Excludes RHS uses.
+sub _declared_names {
+  my ($self, $v) = @_;
+  my @k = _strip_semi($v->schildren);
+  return () unless @k >= 2 && $k[0]->isa('PPI::Token::Word');
+  return $k[1]->content if $k[1]->isa('PPI::Token::Symbol');
+  if ($k[1]->isa('PPI::Structure::List')) {
+    return map { $_->content }
+           grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
+  }
+  return ();
 }
 
 # v2 twin of v1's _insert_variable_forward_declarations, with the key v2
@@ -441,6 +624,8 @@ sub _forward_global_decls {
     while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
       my $v = $1;
       next if $runtime_vars{$v} || $lb->{$v};
+      # W5-renamed cells are defvar'd via _captured_decls — don't double-declare.
+      next if $self->{_file_lex_renamed}{$v};
       $seen{$v} = 1;
     }
     # Cross-package refs (main::$IS_ASCII from a required harness, Foo::@bar)
@@ -629,6 +814,15 @@ sub _lower_block {
     my $our = $self->_lower_our_decl($first);
     return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx)) if $our;
     my ($name, $init) = $self->_single_scalar_decl($first);
+    if ($name && $self->{_file_lex_renamed}{$name}) {
+      # W5: a captured file lexical, rewritten to a fresh package-level name —
+      # lower as `our` does: a defvar'd box hoisted to the section top (so the
+      # hoisted named sub that captures it sees the same special symbol) plus a
+      # plain package-var assignment in place.  No let, not let-bound.
+      push @{ $self->{_captured_decls} }, "(defvar $name (make-p-box nil))";
+      return ((defined $init ? (['p-scalar-=', $name, $self->_lower_expr($init, $first)]) : ()),
+              $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
     if ($name) {
       $self->_reg_lex($name);
       if ($vi->{$name} && $vi->{$name}{unboxable}) {
@@ -740,6 +934,7 @@ sub _lower_stmt {
   # proclaiming p-scalar-=).
   if (!$mod && @$expr >= 3
       && $expr->[0]->isa('PPI::Token::Symbol') && $expr->[0]->content =~ /^\$\w+$/
+      && !$self->{_file_lex_renamed}{ $expr->[0]->content }
       && $expr->[1]->isa('PPI::Token::Operator') && $expr->[1]->content eq '=') {
     my $name = $expr->[0]->content;
     my $rhs = [@$expr[2 .. $#$expr]];

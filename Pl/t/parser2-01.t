@@ -187,9 +187,23 @@ is($hi_defs, 2, 'same-named sub defined once per package section');
 my $span = eval { Pl::Parser2->parse_code(qq{my \$x = 1;\npackage Foo;\nprint \$x;\n}) };
 like($@, qr/spans a package boundary/, 'my across a package boundary dies to v1');
 
-# A file lexical captured by a NAMED sub (hoisted out of the lets) → v1.
-my $capt = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print bump(), "\n";}) };
-like($@, qr/captured by sub/, 'file lexical captured by a named sub dies to v1');
+# W5: a single scalar file lexical captured by a NAMED sub is rewritten to a
+# fresh package-level cell ($n__file__N) — defvar'd, NOT let-bound — so the
+# hoisted sub and in-place code share the box.
+my $capt = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print bump(), "\n";});
+like($capt, qr/\(defvar \$n__file__\d+ \(make-p-box nil\)\)/,
+     'W5: captured scalar file lexical gets a defvar cell');
+like($capt, qr/\(p-scalar-= \$n__file__\d+ 1\)/, 'W5: renamed cell assigned in place');
+unlike($capt, qr/\(let \(\(\$n__file__\d+/, 'W5: renamed cell is NOT let-bound');
+
+# …but a case OUTSIDE the subset still gates → whole-file v1: an interpolated
+# use ($n inside a string) can't be rewritten by token content, so it must die.
+my $capt_i = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { "got $n" } print bump(), "\n";}) };
+like($@, qr/captured by sub/, 'interpolated captured lexical still dies to v1');
+
+# …and two declarations of the same name (shadowing) stay gated.
+my $capt_sh = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } my $n = 2; print $n;}) };
+like($@, qr/captured by sub/, 'shadowed captured lexical still dies to v1');
 
 # … but the same name confined to top-level statements is still v2-lowered.
 my $nocapt = Pl::Parser2->parse_code(q{my $n = 1; sub bump { my ($m) = @_; return $m + 1 } print bump($n), "\n";});
@@ -380,9 +394,17 @@ my $nest = Pl::Parser2->parse_code(
 like($nest, qr/\(p-sub pl-geta/, 'nested named sub hoisted to definitions');
 like($nest, qr/\(p-declare-sub pl-geta\)/, 'hoisted sub gets p-declare-sub');
 
-# …but a sub capturing a LIVE block lexical (static-variable idiom) → v1.
-my $capt2 = eval { Pl::Parser2->parse_code(q[{ my $x = 0; sub bump2 { $x++ } } print "ok\n";]) };
-like($@, qr/captured by nested sub/, 'block lexical captured by nested sub dies to v1');
+# W5: the static-variable idiom (block lexical captured by a nested sub) is
+# rewritten to a shared package cell — no gate.
+my $capt2 = Pl::Parser2->parse_code(q[{ my $x = 0; sub bump2 { $x = $x + 1; return $x; } } print bump2(), "\n";]);
+like($capt2, qr/\(defvar \$x__file__\d+ \(make-p-box nil\)\)/,
+     'W5: static-variable idiom gets a defvar cell');
+like($capt2, qr/\(p-sub pl-bump2/, 'W5: capturing nested sub still hoisted');
+
+# …but an array file lexical captured by a nested sub stays gated (the bare
+# name is used in @/element form → can't be renamed by token content).
+my $capt2a = eval { Pl::Parser2->parse_code(q[{ my @x = (0); sub bump2a { push @x, 1 } } print "ok\n";]) };
+like($@, qr/captured by nested sub/, 'array block lexical captured by nested sub dies to v1');
 
 # …and a SIBLING scope's same-named lexical must NOT block the hoist.
 my $sib = Pl::Parser2->parse_code(
@@ -406,7 +428,7 @@ like($shf, qr/\(p-shift \@_\)/, 'bare shift in sub body defaults to @_ (not @ARG
 
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
-  skip 'sbcl not available', 6 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 7 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -465,6 +487,11 @@ print "$x @a\n";
 EOF
   is($run->($evprog), "11 1 2 3 9\n",
      'string eval reads + writes back through captured lexicals');
+  # W5: static-variable idiom — a block lexical captured by a nested named sub
+  # runs through the shared package cell.
+  my $w5prog = Pl::Parser2->parse_code(
+    q[{ my $count = 0; sub bump { $count = $count + 1; return $count; } } print bump(), bump(), bump(), "\n";]);
+  is($run->($w5prog), "123\n", 'W5: captured file lexical runs end-to-end');
 }
 
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).

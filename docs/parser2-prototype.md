@@ -530,6 +530,60 @@ expansion, not count).
 183/183 on both.  Guards: `Pl/t/parser2-01.t` = 114 (proto def via v1 + imposed
 scalar ctx, signature arity-check, oversized-block notinline cap).
 
+## Session 272e (2026-07-05): W5 — file lexicals captured by named subs
+
+**W5 shipped.**  A named sub hoists into the definitions bucket OUTSIDE the
+lexical `let`s that bind file `my`-vars, so a sub body reading such a var used to
+gate the whole file to v1 (`_check_sub_captures` / `_hoist_nested_sub`).  Now,
+when the capture meets a conservative subset, the lexical is rewritten to a fresh
+package-level name and lowered as a defvar'd box (the `our` shape — no let), so
+the hoisted sub and in-place code share the one cell.  This is exactly what v1
+does (it defvar's file lexicals); the fresh NAME additionally avoids proclaiming
+a common symbol special file-wide (which would poison a true `let $x` elsewhere).
+
+- **Detector** (`_rename_captured_file_lexicals`, run per segment BEFORE the
+  pre-pass so every downstream reader sees renamed tokens): a bare name qualifies
+  only when (a) it has exactly ONE `my $x` scalar declaration in the segment and
+  NO other my/state decl of that bare name (shadowing kills it); (b) it is never
+  used in array/hash family form (`@x`/`%x`/`$#x`/`$x[…]`/`$x{…}`, detected via
+  PPI's `->symbol` canonicalization) nor as a deref-block (`${x}`); (c) it is
+  never INTERPOLATED inside a string/regex/heredoc (those uses aren't Symbol
+  tokens, so a token-content rewrite can't reach them — `_interp_names`); and
+  (d) it is actually referenced as a scalar inside some named sub body.  Rewrite
+  is sigil-preserving Symbol `set_content`; the declaration lowers via a new
+  `_file_lex_renamed` branch in `_lower_block` (defvar to `_captured_decls` +
+  `p-scalar-=` in place, no let, not `_reg_lex`'d).  The `_lower_stmt` fast path
+  and `_forward_global_decls` skip renamed names; `_check_sub_captures` no longer
+  gates them.  Anything outside the subset keeps its gate → whole-file v1.
+
+**Two v2 bugs found & fixed during parity triage** (both pre-existing, newly
+reachable because W5 un-gated grep.t / signatures.t):
+
+1. **`_let_bound_vars` leaked across package segments** (grep.t crash: `@b`/`$x`
+   unbound at load).  A file lexical declared in a `package Foo { my @a; … }`
+   segment was registered durably (segment-level `_lower_block` is not wrapped in
+   `_lower_scope`), but `_let_bound_vars` was never reset between segments — so it
+   leaked into a LATER segment's string-eval capture alist as a free symbol.  A
+   genuine cross-boundary `my` is already gated by `_check_my_spanning`, so the
+   fix is to reset `fallback_parser->{_let_bound_vars} = {}` per segment
+   (`_all_lex` stays file-wide for the forward-decl pass).
+
+2. **Nested named sub in a prototyped/signatured sub** (signatures.t crash +
+   regressions on t152–t155).  W4 lowers a signatured sub's DEFINITION in
+   ISOLATION via `_fallback_stmt` (scratch v1 section, no file-scope lexical
+   context).  A NAMED sub nested inside it (`sub t152 ($a=…, @b) { sub t152x {
+   @b = … } }`) is package-global in Perl and captures the outer sub's params —
+   which the isolated lowering can't wire up (unbound at load).  Full v1 handles
+   it; v2 can't, so gate → whole-file v1 (new pre-pass check).
+
+**Parity:** 67 files lower through v2 (was 61) at v1 sweep parity — `_status.tsv`
+byte-identical except the two known deltas (chop skip-registry, sprintf
+v2-better); no crashes.  qq.t and grep.t now fully passing under v2.  Files still
+gated (array/hash captures, multi-declaration, interpolated captures, my spanning
+a package, `package` inside a block) keep their gate correctly.  Guards:
+`Pl/t/parser2-01.t` = 121 (renamed-cell defvar/no-let shape, interpolated +
+shadowed + array captures still gate, static-var idiom end-to-end run).
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is

@@ -641,7 +641,19 @@ scalar-context shape identical to v1's output for the same input (generate
 v1's text in the test and compare the relevant fragment, or pin the
 `(p-scalar` wrap); a runtime test of program (a).
 
-### W5. File lexicals captured by named subs (4 files, incl. qq.t)
+### ~~W5. File lexicals captured by named subs (4 files, incl. qq.t)~~ — DONE (s272e)
+
+**Shipped s272e.** `_rename_captured_file_lexicals` (per-segment, before the
+pre-pass) rewrites a single-scalar captured file lexical to a fresh
+package-level `$x__file__N` cell, lowered as a defvar'd box (the `our` shape).
+Subset: exactly one `my $x` scalar decl, no other decl of the bare name, no
+array/hash-family use (`@x`/`%x`/`$#x`/`$x[…]`/`$x{…}` via PPI `->symbol`), no
+`${x}` deref-block, no INTERPOLATED use (string/regex/heredoc — `_interp_names`);
+anything else keeps the gate. Fixed two pre-existing v2 bugs surfaced by
+un-gating: `_let_bound_vars` leaking across package segments (reset per segment),
+and a named sub nested in a signatured sub (gated → v1). 67 files native (was 61)
+at exact v1 parity; guards `Pl/t/parser2-01.t` = 121. Original plan below.
+
 
 The `{ my $x = 0; sub f { $x++ } }` static-variable idiom and qq.t's
 `my $test = 1; sub is { $test++ }`. Named subs hoist to the definitions

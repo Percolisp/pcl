@@ -4,6 +4,30 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 272e (2026-07-05) — v2 W5: file lexicals captured by named subs.
+
+- **Captured single-scalar file lexicals no longer gate.** A `my $x` captured by
+  a named sub (which hoists OUTSIDE the lexical lets) is rewritten to a fresh
+  package-level `$x__file__N` cell and lowered as a defvar'd box (the `our` shape
+  — no let, shared by the hoisted sub and in-place code). Same effect v1 gets by
+  defvar'ing file lexicals; the fresh NAME avoids proclaiming a common symbol
+  special file-wide. `_rename_captured_file_lexicals` runs per segment before the
+  pre-pass so all downstream readers see renamed tokens.
+- **Conservative subset** (else keep the gate → v1): exactly one `my $x` scalar
+  decl, no other my/state decl of the bare name, no array/hash-family use
+  (`@x`/`%x`/`$#x`/`$x[…]`/`$x{…}`, via PPI `->symbol`), no `${x}` deref-block, no
+  INTERPOLATED use in a string/regex/heredoc (`_interp_names` — those aren't
+  Symbol tokens, so a content rewrite can't reach them).
+- **Two pre-existing v2 bugs fixed** (surfaced by un-gating grep.t/signatures.t):
+  (1) `_let_bound_vars` leaked across package segments — a `package Foo { my @a }`
+  lexical leaked into a later segment's string-eval capture alist (unbound at
+  load); reset it per segment (cross-boundary `my` is already gated). (2) A named
+  sub nested inside a signatured sub captures the outer's params but W4 lowers the
+  signatured sub in isolation → gate → v1.
+- **Parity:** 67 files native (was 61) at exact v1 sweep parity (`_status.tsv`
+  identical bar the known chop skip-registry / sprintf-v2-better deltas). qq.t and
+  grep.t now fully passing under v2. Guards `Pl/t/parser2-01.t` = 121.
+
 ## Session 272d (2026-07-04) — v2 W4: prototype/signature subs.
 
 - **Prototyped/signatured subs no longer gated.** Pre-pass registers the proto
