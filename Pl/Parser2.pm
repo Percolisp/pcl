@@ -28,7 +28,7 @@ use Pl::Environment;
 use Pl::PExpr;
 use Pl::ExprToCL2;
 use Pl::VarAnnotator;
-use Pl::CLForm qw(raw);
+use Pl::CLForm qw(raw raw_wrap);
 
 has filename => (is => 'ro', predicate => 1);
 has code     => (is => 'ro', predicate => 1);
@@ -437,6 +437,14 @@ sub _lower_block {
   my ($first, @rest) = @s;
   my $first_tail = @rest ? undef : $tail_ctx;
 
+  # -- local …;  → v1's local machinery via the fallback seam; the opened
+  # save/restore scope wraps the lowered block remainder (see _lower_local).
+  # Standalone `delete local $h{k};` is a plain PPI::Statement with the same
+  # scope-to-block-end behaviour — same route.
+  if ($self->_is_local_stmt($first)) {
+    return $self->_lower_local($first, \@rest, $vi, $tail_ctx);
+  }
+
   # -- my $x [= INIT];  → (let (($x …)) rest...)
   if ($first->isa('PPI::Statement::Variable')) {
     my $our = $self->_lower_our_decl($first);
@@ -504,6 +512,7 @@ sub _lower_stmt {
     if ($kw eq 'return') {
       shift @k;
       my ($expr, $mod, $cond) = _split_modifier(\@k);
+      return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
       # A returned call must see the CALLER's context (no *wantarray* bind).
       my $form = @$expr
         ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit')]
@@ -515,6 +524,7 @@ sub _lower_stmt {
     # the $body_uses_args gate in _lower_sub has already kept the @_ binding
     # for any sub whose body mentions goto, so the forwarded @_ exists).
     my ($expr, $mod, $cond) = _split_modifier(\@k);
+    return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
     my $form = $self->_lower_expr($expr, $stmt);
     return _apply_modifier($form, $mod, $cond, $self, $stmt);
   }
@@ -526,6 +536,10 @@ sub _lower_stmt {
   # -- plain expression statement
   my @k = _strip_semi($stmt->schildren);
   my ($expr, $mod, $cond) = _split_modifier(\@k);
+  # while/until/for/foreach statement modifiers (and do{}while, which splits
+  # the same way) are outside the native subset — whole-statement fallback
+  # through v1, which owns their loop/do-while semantics.
+  return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
 
   # `$x = RHS;` on a let-bound scalar → native form: `setf` when $x is a raw
   # (unboxed) slot — RHS proven arithmetic by VarAnnotator, so the stored
@@ -585,27 +599,40 @@ sub _lower_compound {
   }
 
   if ($kw eq 'while' || $kw eq 'until') {
+    # `continue` blocks run between iterations (also after `next`) — v1's
+    # p-while :continue plumbing owns that; not lowered natively yet.
+    die "Parser2 TODO: loop with continue block\n"
+      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
     my ($cond_s) = grep { $_->isa('PPI::Structure::Condition') } @k;
     my ($block)  = grep { $_->isa('PPI::Structure::Block') } @k;
     my $cond = $self->_lower_expr([_cond_parts($cond_s)], $stmt);
+    # Perl loop conditions whose value comes from each/readline/readdir/glob
+    # terminate on *undef*, not false-but-defined ("0" line, each's index 0),
+    # and a bare `<FH>` implicitly assigns to $_ — v1's _auto_defined_cond,
+    # applied at the raw seam (native conds can't contain these calls).
+    # v1 skips the rewrite for `until`, matching perl.
+    $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
     $cond = ['p-!', $cond] if $kw eq 'until';
     return ['p-while', $cond, $self->_lower_block([$block->schildren], $vi)];
   }
 
   if (($kw eq 'for' || $kw eq 'foreach')
       && (my ($for_s) = grep { $_->isa('PPI::Structure::For') } @k)) {
-    # C-style for (INIT; COND; STEP) BLOCK.
+    # C-style for (INIT; COND; STEP) BLOCK.  Sections are POSITIONAL: an
+    # empty one is a PPI::Statement::Null (`;`) placeholder, and trailing
+    # empties are simply absent.  Empty init/step → no form; empty cond →
+    # constant true (v1's _process_c_style_for defaults).
     my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
-    my @sect = grep { $_->isa('PPI::Statement') && !$_->isa('PPI::Statement::Null') }
-               $for_s->children;
-    die "Parser2 TODO: for(;;) with empty/extra sections" unless @sect == 3;
-    my ($init_s, $cond_s, $step_s) = @sect;
+    my @sect = grep { $_->isa('PPI::Statement') } $for_s->children;
+    die "Parser2 TODO: for(;;) with extra sections" if @sect > 3;
+    my ($init_s, $cond_s, $step_s) =
+      map { $_ && !$_->isa('PPI::Statement::Null') ? $_ : undef } @sect[0 .. 2];
 
     # A `my $i = INIT` init binds the counter in a let AROUND the p-for —
     # register the name BEFORE lowering cond/step/body so fallback expressions
     # see it as let-bound.  Unboxable (e.g. step `$i = $i + 1`) → raw slot;
     # else boxed (a `$i++` step keeps VarAnnotator conservative).
-    my ($name, $init) = $self->_single_scalar_decl($init_s);
+    my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
     $self->fallback_parser->{_let_bound_vars}{$name} = 1 if $name;
 
     # ++-step carve-out: when the step is a PURE `$i++`/`++$i` (or --), the ++
@@ -614,18 +641,23 @@ sub _lower_compound {
     # unbox, provided a re-analysis of the loop WITHOUT the step (init, cond,
     # body — where the text-scan gates are trustworthy) approves the name.
     my $step_form;
-    if ($name && !($vi->{$name} && $vi->{$name}{unboxable})
+    if ($name && $step_s && !($vi->{$name} && $vi->{$name}{unboxable})
         && (my $incr = _pure_incr_step($step_s, $name))) {
       my $vi2 = Pl::VarAnnotator->analyze(
-        [$init_s, $cond_s, $block->schildren], undef, $self->_cur_sub_info);
+        [(grep { defined } $init_s, $cond_s), $block->schildren],
+        undef, $self->_cur_sub_info);
       if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
         $vi = { %$vi, $name => { unboxable => 1 } };
         $step_form = ['list', ['setf', $name, ["p-$incr", $name, '1']]];
       }
     }
 
-    my $cond = ['list', $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt)];
-    my $step = $step_form // ['list', $self->_lower_stmt($step_s, $vi)];
+    my $cond = $cond_s
+      ? ['list', $self->_auto_defined_raw(
+                   $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt))]
+      : ['list', 't'];
+    my $step = $step_form
+      // ($step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list']);
     my @body = $self->_lower_block([$block->schildren], $vi);
 
     if ($name) {
@@ -637,10 +669,14 @@ sub _lower_compound {
       return ['let', ['list', ['list', $name, '(make-p-box nil)']],
               ['p-for', ['list', ['p-my-=', $name, $initval]], $cond, $step, @body]];
     }
-    return ['p-for', ['list', $self->_lower_stmt($init_s, $vi)], $cond, $step, @body];
+    return ['p-for',
+            ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
+            $cond, $step, @body];
   }
 
   if ($kw eq 'for' || $kw eq 'foreach') {
+    die "Parser2 TODO: loop with continue block\n"
+      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
     my ($list) = grep { $_->isa('PPI::Structure::List') } @k;
     my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
@@ -698,6 +734,17 @@ sub _lower_expr {
     $cl =~ s/$pat(?=[\s)])/(p-my-= $var/g;
   }
   return raw($cl);
+}
+
+# Apply v1's _auto_defined_cond to a loop condition that lowered through the
+# fallback seam: `(p-scalar-= $x (p-each …))` → wrapped in (p-defined $x),
+# bare `(p-readline …)` → `(progn (p-setf $_ …) (p-defined $_))`, etc.
+# Native condition FORMS are returned untouched — the native subset cannot
+# produce each/readline/readdir/glob calls, so only raw text needs it.
+sub _auto_defined_raw {
+  my ($self, $cond) = @_;
+  return $cond unless Pl::CLForm::is_raw($cond);
+  return raw($self->fallback_parser->_auto_defined_cond($$cond));
 }
 
 # ------------------------------------------------------- context sensitivity
@@ -793,13 +840,18 @@ sub _split_modifier {
   return ($parts, undef, undef);
 }
 
+sub _modifier_needs_fallback {
+  my ($mod) = @_;
+  return $mod && $mod !~ /^(?:if|unless)$/;
+}
+
 sub _apply_modifier {
   my ($form, $mod, $cond, $self, $stmt) = @_;
   return $form unless $mod;
   my $condform = $self->_lower_expr($cond, $stmt);
   return ['p-if', $condform, $form]          if $mod eq 'if';
   return ['p-if', ['p-!', $condform], $form] if $mod eq 'unless';
-  die "Parser2 TODO: statement modifier '$mod'";
+  die "Parser2 TODO: statement modifier '$mod'";   # unreachable (callers gate)
 }
 
 # `our $x` / `our @a` / `our (LIST)` [= INIT] → arrayref of runtime forms
@@ -874,15 +926,59 @@ sub _fresh_container {
 # defvar/defconstant/eval-when forms that need top-level-ness), runtime lines
 # embed at the statement's position as a raw form.  This is the statement-level
 # twin of the _lower_expr fallback seam.
+#
+# Statements whose v1 lowering opens a scope spanning to block end (`local`,
+# `delete local` — counted in _local_let_depth) leave the runtime text with
+# open parens; _fallback_stmt_capture reports that surplus so _lower_block can
+# nest the block remainder inside (raw_wrap).  _fallback_stmt itself is for
+# self-contained statements only and treats a surplus as an unsupported shape.
 sub _fallback_stmt {
   my ($self, $stmt) = @_;
+  my ($text, $opens) = $self->_fallback_stmt_capture($stmt);
+  die "Parser2 TODO: statement fallback left $opens open scope(s): " . $stmt->content
+    if $opens;
+  return () unless defined $text;
+  return raw($text);
+}
+
+# A statement v1's local machinery owns: `local …;` (Statement::Variable with
+# declarator `local`) or standalone `delete local …;` (plain Statement).
+sub _is_local_stmt {
+  my ($self, $stmt) = @_;
+  my @k = $stmt->schildren;
+  return 0 unless @k && $k[0]->isa('PPI::Token::Word');
+  return 1 if $stmt->isa('PPI::Statement::Variable') && $k[0]->content eq 'local';
+  return 1 if $k[0]->content eq 'delete'
+    && $k[1] && $k[1]->isa('PPI::Token::Word') && $k[1]->content eq 'local';
+  return 0;
+}
+
+# `local` scopes to the end of the enclosing block: v1 emits the save/restore
+# form(s) OPEN and counts them in _local_let_depth (closed at block end by
+# emit-order bookkeeping).  v2's tree structure does the same thing by
+# construction — nest the lowered block remainder inside the open text via
+# raw_wrap.  Degenerate locals that open no scope (`local $#a = N`, skipped
+# stash locals) come back with 0 opens and embed as a plain raw statement.
+sub _lower_local {
+  my ($self, $stmt, $rest, $vi, $tail_ctx) = @_;
+  my ($text, $opens) = $self->_fallback_stmt_capture($stmt);
+  my @rest_forms = $self->_lower_block($rest, $vi, $tail_ctx);
+  return ((defined $text ? (raw($text)) : ()), @rest_forms) unless $opens;
+  return raw_wrap($text, $opens, @rest_forms);
+}
+
+sub _fallback_stmt_capture {
+  my ($self, $stmt) = @_;
   my $p = $self->fallback_parser;
-  my @saved = ($p->_sections, $p->_cur_bucket, $p->indent_level);
+  my @saved = ($p->_sections, $p->_cur_bucket, $p->indent_level,
+               $p->{_local_let_depth});
   $p->_sections([]);
   $p->_cur_bucket('runtime');
   $p->_open_section('pcl');
   $p->indent_level(0);
+  $p->{_local_let_depth} = 0;
   $p->_process_element($stmt);
+  my $opens = $p->{_local_let_depth};
   my @runtime;
   for my $sec (@{ $p->_sections }) {
     push @{ $self->{_captured_decls} },
@@ -892,8 +988,8 @@ sub _fallback_stmt {
   $p->_sections($saved[0]);
   $p->_cur_bucket($saved[1]);
   $p->indent_level($saved[2]);
-  return () unless @runtime;
-  return raw(join("\n", @runtime));
+  $p->{_local_let_depth} = $saved[3];
+  return (@runtime ? join("\n", @runtime) : undef, $opens);
 }
 
 # `my $x` / `my $x = INIT` → ($name, \@init_parts | undef); else ().

@@ -19,7 +19,7 @@ use v5.30;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(raw is_raw to_string to_program);
+our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_program);
 
 use constant ONE_LINE_MAX => 95;
 
@@ -30,6 +30,22 @@ sub raw {
 
 sub is_raw { ref($_[0]) eq 'Pl::CLForm::Raw' }
 
+# A raw OPEN chunk from the original generator that deliberately leaves
+# $closes forms unclosed (v1's `local` machinery emits `(let ((…))` /
+# `(p-local-… …` opens and defers the closes to block end, counted in
+# _local_let_depth), wrapping @body — the lowered remainder of the enclosing
+# v2 block — in their dynamic extent.  The printer appends exactly $closes
+# `)`s after the body, so balance still holds by construction: the open
+# text's depth surplus comes from the SAME counter v1 itself uses to close
+# these scopes.
+sub raw_wrap {
+  my ($open, $closes, @body) = @_;
+  return bless { open => $open, closes => $closes, body => [@body] },
+    'Pl::CLForm::RawWrap';
+}
+
+sub is_raw_wrap { ref($_[0]) eq 'Pl::CLForm::RawWrap' }
+
 # One-line rendering, or undef if the form contains a multi-line raw chunk
 # or a string atom with an embedded newline (CL has no \n escape — a literal
 # newline inside a string atom makes the "one line" lie to the indenter).
@@ -37,6 +53,7 @@ sub _flat {
   my ($f) = @_;
   if (!ref $f) { return $f =~ /\n/ ? undef : $f }
   if (is_raw($f)) { return $$f =~ /\n/ ? undef : $$f }
+  return undef if is_raw_wrap($f);
   my ($head, @args) = @$f;
   my @parts = $head eq 'list' ? () : ($head);
   for my $a (@args) {
@@ -54,6 +71,12 @@ sub to_string {
   # Raw chunks pass through verbatim: re-indenting would corrupt string
   # literals that contain newlines, and alignment is only cosmetic.
   return $$f if is_raw($f);
+  if (is_raw_wrap($f)) {
+    my $ind1 = '  ' x ($depth + 1);
+    return $f->{open}
+      . join('', map { "\n$ind1" . to_string($_, $depth + 1) } @{ $f->{body} })
+      . (')' x $f->{closes});
+  }
   my $flat = _flat($f);
   return $flat if defined $flat && length($flat) + 2 * $depth <= ONE_LINE_MAX;
 

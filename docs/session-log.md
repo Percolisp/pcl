@@ -4,6 +4,36 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 271 (2026-07-04) — v2: A3 statement-fallback net + two loop-cond bug fixes.
+
+**User: continue the v2 prototype.** Tier-A3 from the s270b plan.
+
+- **`local` statements** (all shapes, incl. standalone `delete local`) lower
+  through v1's `_process_local_declaration` via the fallback seam; the opened
+  save/restore scope wraps the lowered block remainder through a new CLForm
+  node `raw_wrap(open_text, n_closes, body)` — closes counted by v1's own
+  `_local_let_depth`, so balance holds by construction.  `_fallback_stmt`
+  now dies if a non-local statement leaves opens (safety).  s269 OOM
+  notinline guard carries over (scratch runs at indent 0).
+- **while/until/for/foreach statement modifiers + do{}while** → per-statement
+  fallback at the three `_split_modifier` sites.
+- **`for(;;)` empty sections** native: positional section collection
+  (`Statement::Null` = empty), cond defaults `t`.
+- **BUG FIX (latent, silent-wrong-code):** v2 loop conds missed v1's
+  `_auto_defined_cond` — `while (<FH>)` never set `$_` nor tested defined;
+  grent.t "passed" as a false positive (parse loop processed 0 entries).
+  Fixed via `_auto_defined_raw` on raw conds in while + C-for (until
+  exempt, matching perl).  Native conds can't contain each/readline/glob.
+- **BUG FIX (latent, infinite loop):** while/foreach `continue` blocks were
+  silently DROPPED; now an explicit gate → whole-file v1.
+- Census: **14 files fully v2-native** (+errno_test, grent, pow), sweep
+  parity 670/671 = v1 exactly (grent.t t2 env-dependent, fails same under
+  v1).  Remaining gates: eval 65, bare block 17, labels 6, pkg block 4,
+  captures 3, protos 2.  parser2-01.t 61→74.  **NEXT: A2 (bare blocks =
+  loop-once + labels, 23 files).**
+
+---
+
 ## Session 270b (2026-07-04) — v2: `our` declarations.
 
 `_lower_our_decl` (`Pl/Parser2.pm`): `our $x`/`our @a`/`our (LIST)` `[= INIT]`

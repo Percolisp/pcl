@@ -219,9 +219,51 @@ like($our, qr/\(in-package :Dog\).*\(defvar \@ISA /s, 'our @ISA defvar lands in 
 my $ourshadow = eval { Pl::Parser2->parse_code(q{my $x = 1; our $x; print $x;}) };
 like($@, qr/shadows a my-lexical/, 'our shadowing a my-lexical dies to v1');
 
+# --- A3 (session 271): local / statement modifiers / for(;;) ---
+
+# `local` lowers through v1's machinery; the opened save/restore scope wraps
+# the lowered block remainder (raw_wrap), and the printer's appended closes
+# keep the whole output balanced.
+my $loc = Pl::Parser2->parse_code(q{local $/ = undef; my $s = 1; print "$s\n";});
+like($loc, qr/\(let \(\(\$\/ \(p-box-for-local/, 'local $/ = … opens v1 p-box-for-local let');
+like($loc, qr/\(p-box-for-local[^\n]*\n.*\(p-print/s, 'block remainder nested inside the local scope');
+is(paren_balance($loc), 0, 'raw_wrap closes balance the local open');
+
+# Degenerate local that opens no scope embeds as a plain statement.
+my $loclen = Pl::Parser2->parse_code(q{my @a = (1,2,3); local $#a = 1; print "$a[1]\n";});
+is(paren_balance($loclen), 0, 'local $#a (no scope opened) stays balanced');
+
+# while/until/for/foreach statement modifiers route through the per-statement
+# fallback; the written var stays boxed (fallback writes are box-ops).
+my $fe = Pl::Parser2->parse_code(q{my $t = 0; $t = $t + $_ foreach 1..3; print "$t\n";});
+like($fe, qr/\(p-foreach \(\$_ \(p-\.\. 1 3\)\) \(p-my-= \$t/, 'foreach modifier via per-statement fallback');
+unlike($fe, qr/\(let \(\(\$t 0\)\)/, 'modifier-written var stays boxed');
+my $dw = Pl::Parser2->parse_code(q{my $x = 5; do { $x--; } while ($x > 3); print "$x\n";});
+like($dw, qr/p-do-while/, 'do-while via per-statement fallback');
+
+# for(;;) — empty sections are native: no init/step, cond defaults to t.
+my $inf = Pl::Parser2->parse_code(q{for (;;) { last; } print "done\n";});
+like($inf, qr/\(p-for \(\) \(t\) \(\)/, 'for(;;) native: empty init/step, cond t');
+my $nostep = Pl::Parser2->parse_code(q{for (my $i = 0; $i < 3;) { $i = $i + 1; } print "ok\n";});
+like($nostep, qr/\(let \(\(\$i 0\)\)\s*\(p-for \(\) \(\(p-< \$i 3\)\) \(\)/,
+     'for with empty step: raw counter, empty step slot');
+
+# Loop-condition auto-defined rewrites (v1's _auto_defined_cond at the raw
+# seam): bare <FH> assigns $_ implicitly; my-scalar readline gets p-defined.
+my $rl = Pl::Parser2->parse_code(q{while (<STDIN>) { print; }});
+like($rl, qr/\(progn \(p-setf \$_ .*p-readline.*\(p-defined \$_\)\)/s,
+     'bare <FH> while cond: implicit $_ assign + defined wrap');
+my $rl2 = Pl::Parser2->parse_code(q{while (my $l = <STDIN>) { print $l; }});
+like($rl2, qr/\(p-defined \$l\)/, 'while (my $l = <FH>) cond terminates on undef');
+
+# continue blocks are not lowered natively — must die to v1, never be dropped.
+my $cont = eval { Pl::Parser2->parse_code(
+  q{my $i = 0; while ($i < 3) { print $i; } continue { $i = $i + 1; }}) };
+like($@, qr/continue/, 'loop with continue block dies to v1');
+
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
-  skip 'sbcl not available', 2 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 3 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -239,6 +281,37 @@ SKIP: {
   is($last, '832040', 'v2-transpiled loop-fib(30) runs correctly');
   is($run->($pkg), "main-hi\nfoo-hi\nmain-hi\n",
      'package sections run end-to-end: per-package sub dispatch');
+  # local: dynamic binding visible through a call, restored after return.
+  my $locprog = Pl::Parser2->parse_code(<<'EOF');
+sub g { return $val; }
+sub f { local $val = "in"; return g(); }
+$val = "out";
+print f(), "-", g(), "\n";
+EOF
+  is($run->($locprog), "in-out\n", 'local end-to-end: dynamic scope + restore');
+}
+
+# CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).
+# $in_str persists across lines: generated string literals contain newlines.
+sub paren_balance {
+  my ($s) = @_;
+  my ($d, $in_str, $ahb) = (0, 0, 0);
+  for my $line (split /\n/, $s) {
+    my @c = split //, $line;
+    my $i = 0;
+    while ($i < @c) {
+      my $ch = $c[$i];
+      if ($in_str) { if ($ch eq "\\") { $i += 2; next } $in_str = 0 if $ch eq '"' }
+      elsif ($ahb) { $ahb = 0 }
+      elsif ($ch eq '"') { $in_str = 1 }
+      elsif ($ch eq '#' && $i + 1 < @c && $c[$i + 1] eq "\\") { $ahb = 1; $i += 2; next }
+      elsif ($ch eq ';') { last }
+      elsif ($ch eq '(') { $d++ }
+      elsif ($ch eq ')') { $d-- }
+      $i++;
+    }
+  }
+  return $d;
 }
 
 done_testing();

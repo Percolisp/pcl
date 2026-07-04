@@ -266,9 +266,54 @@ alias (v1 has the same divergence).  Verified end-to-end incl. `our @ISA =
 ('Animal')` inheritance across sections.  Didn't unlock new sweep files by
 itself — aassign.t's next gate is the bare `{ … }` loop-once block.
 
+## Session 271 (2026-07-04): A3 — statement-fallback net + loop-cond fixes
+
+**A3 shipped.**  The three "safe per-statement fallback" gates are gone:
+
+- **`local` statements** (any shape: scalar/array/hash/list, `$h{k}` elems,
+  slices, globs, derefs, `local our`, standalone `delete local`) lower
+  through v1's `_process_local_declaration` via the fallback seam.  v1 emits
+  the save/restore form(s) OPEN and counts them in `_local_let_depth`; v2
+  nests the lowered block remainder inside via a new CLForm node
+  (`raw_wrap($open_text, $n_closes, @body)` — printer appends exactly the
+  counted closes, so balance still holds by construction).  Degenerate
+  locals that open no scope (`local $#a = N`, skipped stash locals) embed as
+  plain raw statements.  `_fallback_stmt` (the self-contained-statement
+  seam) now DIES if a statement unexpectedly leaves opens — safety net.
+  The session-269 OOM guard carries over: the scratch runs at indent 0, so a
+  top-level local gets v1's `(declare (notinline …))` automatically.
+- **while/until/for/foreach statement modifiers** (and `do{}while`/`until`,
+  which split identically) → whole-statement fallback at all three
+  `_split_modifier` sites.  Modifier-written vars stay boxed (VarAnnotator
+  is conservative about modifier statements; guard-tested).
+- **`for(;;)` with empty sections** — native: sections are collected
+  POSITIONALLY (a `Statement::Null` `;` placeholder = empty, trailing
+  empties absent), empty init/step → no form, empty cond → `t` (v1's
+  defaults).  The `++`-carve-out re-analysis handles absent sections.
+
+**Two latent v2 loop-condition bugs found & fixed while verifying parity**
+(both would have shipped silently-wrong code, no fallback):
+
+1. **Missing auto-defined/`$_` rewrite on loop conds.**  `while (<FH>)`
+   lowered to a bare truthiness test — no implicit `(p-setf $_ …)`, no
+   `p-defined`, so `$_` stayed unbound and a "0"/"" line ended the loop.
+   grent.t "passed" 3/3 under v2 because its `while (<GR>)` parse loop
+   silently processed zero entries — a false positive vs v1's honest 2/3.
+   Fix: apply v1's `_auto_defined_cond` at the raw seam (`_auto_defined_raw`)
+   in while and C-for conds (skipped for `until`, matching v1/perl); native
+   cond forms can't contain each/readline/readdir/glob, so raw-only is
+   complete.
+2. **`continue` blocks silently dropped.**  v2's while/foreach branches took
+   only the first Block; `while ($i<3) {…} continue { $i++ }` became an
+   infinite loop.  Now an explicit gate → whole-file v1.
+
+Guards: `Pl/t/parser2-01.t` grew to 74 tests (raw_wrap balance via the
+CLAUDE.md paren checker, local end-to-end dynamic-scope run, modifier
+fallbacks, empty for-sections, readline-cond rewrites, continue gate).
+
 ## What's left — the road from prototype to default pipeline
 
-### Where we stand (measured 2026-07-04, session 270b)
+### Where we stand (measured 2026-07-04, session 271, post-A3)
 
 First-gate census over all 111 `perl-tests/*.t` (each file reports only the
 FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
@@ -276,15 +321,12 @@ FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
 | files | first gate |
 |---:|---|
 | 65 | string eval (`eval EXPR`) |
-| 16 | bare block `{ … }` (loop-once) |
+| 17 | bare block `{ … }` (loop-once) |
 | 6 | labeled statement (`SKIP:`, `TODO:`, `TEST1:` …) |
 | 4 | package block form `package Foo { … }` |
 | 3 | file lexical captured by a named sub |
-| 2 | `local` declaration statement (`local $/;`) |
 | 2 | sub with prototype/signature |
-| 1 | statement modifier `foreach` |
-| 1 | `for(;;)` with empty sections |
-| **11** | **(lower fully through v2, 100% parity)** |
+| **14** | **(lower fully through v2: the 12 from s270 minus qq.t which was already capture-gated, plus errno_test.t, grent.t, pow.t — 670/671 sweep parity, the 1 fail being grent.t's environment-dependent test 2 which fails identically under v1)** |
 
 Reproduce with:
 ```bash
@@ -321,19 +363,11 @@ for f in perl-tests/*.t; do PCL_V2=1 PCL_V2_VERBOSE=1 perl -I. pl2cl \
   token in `_lower_stmt` and pass the tag into the loop forms.  aassign.t's
   current gate.
 
-**A3. Statement-level fallback as the safety net (turns many gates into
-  non-events).** Today an unsupported STATEMENT dies → whole-file v1.  Most
-  statement kinds that don't interact with v2's scoping could instead route
-  through the existing `_fallback_stmt` seam (one statement through v1 into
-  the section):
-  - `local $/;` / `local $! = 1;` declaration statements (2 files) — pure
-    runtime effect, safe to fallback per-statement.
-  - unsupported statement modifiers (`EXPR foreach LIST;`) — safe.
-  - `for(;;)` with empty sections — or just implement (trivial: default
-    cond to true, drop empty init/step).
-  NOT safe for per-statement fallback: anything containing `my` (scope
-  shape), loops containing `last`/`next` that must unwind v2 forms, and
-  named subs (definition bucketing) — those keep their explicit gates.
+**A3. Statement-level fallback as the safety net — DONE (session 271, see
+  above).**  `local` (block-remainder raw_wrap), non-if/unless statement
+  modifiers, `for(;;)` empty sections all handled.  Still NOT safe for
+  per-statement fallback: anything containing `my` (scope shape) and named
+  subs (definition bucketing) — those keep their explicit gates.
 
 **A4. Package block form (4 files).** With sections in place this is
   mechanical: block form at top level = open a section for the block's
@@ -386,8 +420,8 @@ for f in perl-tests/*.t; do PCL_V2=1 PCL_V2_VERBOSE=1 perl -I. pl2cl \
 
 ### Suggested order
 
-A3 (one afternoon, converts 4+ gates to per-statement fallbacks) → A2 (bare
-blocks+labels, biggest non-eval coverage jump) → A4 (mechanical) → A1 stage
-1 (cheap eval de-false-positives) → A6 → A1 stage 2/3 + A5 together (same
-renaming machinery) → B1/B2 parity push → C in parallel with B once
-coverage stabilizes.
+~~A3~~ (done, s271) → A2 (bare blocks+labels, biggest non-eval coverage
+jump; 23 files) → A4 (mechanical) → A1 stage 1 (cheap eval
+de-false-positives) → A6 → A1 stage 2/3 + A5 together (same renaming
+machinery) → B1/B2 parity push → C in parallel with B once coverage
+stabilizes.
