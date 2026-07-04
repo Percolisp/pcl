@@ -47,6 +47,11 @@ sub parse_with_fallback {
   my ($method, @args) = @_;
   if ($PARSER_CLASS eq 'Pl::Parser2') {
     my %opts = @args[1 .. $#args];
+    # lenient_ppi only changes behaviour when PPI can't parse the whole file —
+    # and in that case Parser2 dies ("PPI parse failed") and we land in v1
+    # (with the flag) below anyway.  So v2 may safely ignore it; blocking on
+    # it would disable v2 for every runner (runpl/runt/sweep all pass it).
+    delete $opts{lenient_ppi};
     if (!%opts) {                       # plain parse only; special modes → v1
       my $out = eval { Pl::Parser2->$method($args[0]) };
       return $out if defined $out;

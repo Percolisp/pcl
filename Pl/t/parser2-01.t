@@ -161,20 +161,64 @@ like($interp, qr/\(\$msg\s*\n?\s*\(p-string-concat/, 'interpolated-string slot b
 my $bang = Pl::Parser2->parse_code('my $x = 0; my $y = !$x; print "y=[$y]\n";');
 like($bang, qr/\(let \(\(\$y \(p-! \$x\)\)\)/, 'unary ! native, raw slot');
 
+# --- Session-270 growth: `package` statements (section splitting) ---
+
+# Statement-form `package Foo;` opens a new output SECTION whose (in-package)
+# preamble puts the READER in the right CL package (mirrors v1's model).
+my $pkg = Pl::Parser2->parse_code(<<'EOF');
+sub hi { return "main-hi"; }
+print hi(), "\n";
+package Foo;
+sub hi { return "foo-hi"; }
+print hi(), "\n";
+package main;
+print hi(), "\n";
+EOF
+like($pkg, qr/^\(pcl:p-defpackage :Foo\)/m, 'later packages predeclared at file top');
+like($pkg, qr/\(p-defpackage :Foo\)\n\(in-package :Foo\)/, 'package section preamble enters :Foo');
+like($pkg, qr/\(defclass plc-foo \(\) \(\)\)/, 'CLOS class for MRO in the section preamble');
+like($pkg, qr/\(p-set-current-package :Foo "Foo"\)/, 'runtime current-package tracking');
+like($pkg, qr/\(in-package :main\)/, 'package main section returns the reader to :main');
+my $hi_defs = () = $pkg =~ /\(p-sub pl-hi /g;
+is($hi_defs, 2, 'same-named sub defined once per package section');
+
+# A my-lexical spanning a package boundary cannot live in v2's per-section
+# lets → dies → whole-file v1 fallback.
+my $span = eval { Pl::Parser2->parse_code(qq{my \$x = 1;\npackage Foo;\nprint \$x;\n}) };
+like($@, qr/spans a package boundary/, 'my across a package boundary dies to v1');
+
+# A file lexical captured by a NAMED sub (hoisted out of the lets) → v1.
+my $capt = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print bump(), "\n";}) };
+like($@, qr/captured by sub/, 'file lexical captured by a named sub dies to v1');
+
+# … but the same name confined to top-level statements is still v2-lowered.
+my $nocapt = Pl::Parser2->parse_code(q{my $n = 1; sub bump { my ($m) = @_; return $m + 1 } print bump($n), "\n";});
+like($nocapt, qr/\(let \(\(\$n 1\)\)/, 'sub with its own params does not block v2');
+
+# Octal literals must NOT enter the native subset (CL reads 0100 as 100).
+my $oct = Pl::Parser2->parse_code(q{my $o = 0100; print "$o\n";});
+like($oct, qr/\(\$o #o100\)/, 'octal literal routed to fallback (#o100), not bare 0100');
+
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
-  skip 'sbcl not available', 1 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 2 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
-  my $tmp = "/tmp/parser2-01-$$.lisp";
-  open my $fh, '>', $tmp or die $!;
-  my $out = $cl;
-  $out =~ s/\(in-package :pcl\)/(in-package :pcl)\n(p-defpackage :main)\n(in-package :main)/;
-  print $fh $out;
-  close $fh;
-  my $got = `sbcl --control-stack-size 512 --noinform --non-interactive --load "$root/cl/pcl-runtime.lisp" --eval "(setf pcl::*pcl-skip-cache* t)" --load "$tmp" 2>/dev/null | tail -1`;
-  chomp $got;
-  is($got, '832040', 'v2-transpiled loop-fib(30) runs correctly');
-  unlink $tmp;
+  my $run = sub {
+    my ($src) = @_;
+    my $tmp = "/tmp/parser2-01-$$.lisp";
+    open my $fh, '>', $tmp or die $!;
+    (my $out = $src) =~ s/\(in-package :pcl\)/(in-package :pcl)\n(p-defpackage :main)\n(in-package :main)/;
+    print $fh $out;
+    close $fh;
+    my $got = `sbcl --control-stack-size 512 --noinform --non-interactive --load "$root/cl/pcl-runtime.lisp" --eval "(setf pcl::*pcl-skip-cache* t)" --load "$tmp" 2>/dev/null`;
+    unlink $tmp;
+    return $got;
+  };
+  my $got = $run->($cl);
+  chomp(my ($last) = (split /\n/, $got)[-1]);
+  is($last, '832040', 'v2-transpiled loop-fib(30) runs correctly');
+  is($run->($pkg), "main-hi\nfoo-hi\nmain-hi\n",
+     'package sections run end-to-end: per-package sub dispatch');
 }
 
 done_testing();

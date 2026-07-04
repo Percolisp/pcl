@@ -33,8 +33,19 @@ use Pl::CLForm qw(raw);
 has filename => (is => 'ro', predicate => 1);
 has code     => (is => 'ro', predicate => 1);
 
-# Pre-pass result: perl sub name → { cl_name, insensitive } (see ExprToCL2).
+# Pre-pass result, keyed by package: { pkg => { perl sub name →
+# { cl_name, insensitive } } } (see ExprToCL2).  Bareword sub resolution is
+# package-scoped in Perl, so ExprToCL2/VarAnnotator only ever see the CURRENT
+# package's slice (_cur_sub_info).
 has sub_info => (is => 'rw', default => sub { {} });
+
+# Package of the segment currently being lowered (see parse()'s segment split).
+has cur_pkg => (is => 'rw', default => 'main');
+
+sub _cur_sub_info {
+  my $self = shift;
+  return $self->sub_info->{ $self->cur_pkg } //= {};
+}
 
 has environment => (is => 'lazy');
 sub _build_environment {
@@ -84,69 +95,220 @@ sub parse {
   my $doc = PPI::Document->new(\$src) or die "Parser2: PPI parse failed";
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
+  $self->{_referenced_pkgs} = {};
+
+  # ---- Split the top level into PACKAGE SEGMENTS at statement-form
+  # `package Foo;`.  v2 mirrors v1's section model: each segment becomes its
+  # own output section whose (in-package …) preamble puts the READER in the
+  # right CL package — an in-package nested inside a form is a no-op for the
+  # rest of that already-read form, so the switch must happen between
+  # top-level forms.  Block form / versioned `package` stay TODO (whole-file
+  # v1 fallback); `package` inside a block dies in _lower_stmt.
+  my @segments = ({ pkg => 'main', stmts => [] });
+  for my $child ($doc->schildren) {
+    if ($child->isa('PPI::Statement::Package')) {
+      die "Parser2 TODO: package block form\n"
+        if grep { $_->isa('PPI::Structure::Block') } $child->schildren;
+      die "Parser2 TODO: package with version\n" if eval { $child->version };
+      push @segments, { pkg => ($child->namespace // 'main'), stmts => [] };
+      next;
+    }
+    push @{ $segments[-1]{stmts} }, $child;
+  }
+  $self->_check_my_spanning(\@segments) if @segments > 1;
 
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
   # sub in the SHARED Environment too — the fallback expression machinery
   # decides bareword-vs-string ("foo" vs (pl-foo)) from declared_subs, and
   # Parser2 never runs v1's _process_sub_statement which normally does this.
-  for my $child ($doc->schildren) {
-    # NB: PPI::Statement::Scheduled (BEGIN/END/…) ISA Statement::Sub — those
-    # are runnable blocks, not sub definitions; they lower via _fallback_stmt.
-    next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block
-      && !$child->isa('PPI::Statement::Scheduled');
-    # A prototype/signature changes how CALL SITES parse (arity, imposed
-    # context) — outside the prototype's native subset.
-    die "Parser2 TODO: sub with prototype/signature: " . $child->name
-      if $child->prototype;
-    $self->sub_info->{ $child->name } = {
-      cl_name     => $self->fallback_parser->_qualified_sub_to_cl($child->name),
-      insensitive => $self->_sub_ctx_insensitive($child),
-    };
-    $self->environment->add_declared_sub($child->name,
-                                         $self->environment->current_package);
-    # Same default signature v1's _process_sub_statement registers for a
-    # prototype-less sub: PExpr consults get_prototype() to decide that a
-    # bareword `foo` is a CALL (pl-foo), not the string "foo".
-    $self->environment->add_prototype($child->name,
-                                      { params => [], min_params => -1, is_proto => 0 });
-  }
-
-  my (@decls, @defs, @top);
-  $self->{_captured_decls} = [];
-  for my $child ($doc->schildren) {
-    if ($child->isa('PPI::Statement::Sub') && $child->name
-        && !$child->isa('PPI::Statement::Scheduled')) {
-      push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
-      push @defs, $self->_lower_sub($child);
-      next;
+  # Keyed by the segment's package: `sub hi` after `package Foo;` is Foo::hi.
+  for my $seg (@segments) {
+    $self->_set_cur_package($seg->{pkg});
+    for my $child (@{ $seg->{stmts} }) {
+      # NB: PPI::Statement::Scheduled (BEGIN/END/…) ISA Statement::Sub — those
+      # are runnable blocks, not sub definitions; they lower via _fallback_stmt.
+      next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block
+        && !$child->isa('PPI::Statement::Scheduled');
+      # A prototype/signature changes how CALL SITES parse (arity, imposed
+      # context) — outside the prototype's native subset.
+      die "Parser2 TODO: sub with prototype/signature: " . $child->name
+        if $child->prototype;
+      # cl_name stays UNQUALIFIED (pl-foo) for a plain name: the section's
+      # in-package makes the reader intern it in the segment's package —
+      # exactly v1's per-section convention.
+      $self->sub_info->{ $seg->{pkg} }{ $child->name } = {
+        cl_name     => $self->fallback_parser->_qualified_sub_to_cl($child->name),
+        insensitive => $self->_sub_ctx_insensitive($child),
+      };
+      $self->environment->add_declared_sub($child->name, $seg->{pkg});
+      # Same default signature v1's _process_sub_statement registers for a
+      # prototype-less sub: PExpr consults get_prototype() to decide that a
+      # bareword `foo` is a CALL (pl-foo), not the string "foo".
+      $self->environment->add_prototype($child->name,
+                                        { params => [], min_params => -1, is_proto => 0 });
     }
-    # `use strict`-family pragmas are pure no-ops; real use/require/BEGIN
-    # statements stay IN the statement stream (position matters: a module
-    # must load before the code that follows it runs) and lower through the
-    # statement fallback in _lower_block.
-    next if $child->isa('PPI::Statement::Null');
-    push @top, $child;
   }
-  my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->sub_info));
 
-  my @def_txt = map { Pl::CLForm::to_string($_, 0) } @defs;
-  my @run_txt = map { Pl::CLForm::to_string($_, 0) } @runtime;
-  my @cap     = @{ $self->{_captured_decls} };
+  # ---- Lower each segment into a section record.
+  my @sections;
+  for my $seg (@segments) {
+    $self->_check_sub_captures($seg->{stmts});
+    $self->cur_pkg($seg->{pkg});
+    $self->_set_cur_package($seg->{pkg});
+    $self->{_captured_decls} = [];
+    my (@decls, @defs, @top);
+    for my $child (@{ $seg->{stmts} }) {
+      if ($child->isa('PPI::Statement::Sub') && $child->name
+          && !$child->isa('PPI::Statement::Scheduled')) {
+        push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
+        push @defs, $self->_lower_sub($child);
+        next;
+      }
+      # `use strict`-family pragmas are pure no-ops; real use/require/BEGIN
+      # statements stay IN the statement stream (position matters: a module
+      # must load before the code that follows it runs) and lower through the
+      # statement fallback in _lower_block.
+      next if $child->isa('PPI::Statement::Null');
+      push @top, $child;
+    }
+    my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info));
+    push @sections, {
+      pkg      => $seg->{pkg},
+      decls    => [map { Pl::CLForm::to_string($_, 0) } @decls],
+      defs     => [map { Pl::CLForm::to_string($_, 0) } @defs],
+      run      => [map { Pl::CLForm::to_string($_, 0) } @runtime],
+      captured => [@{ $self->{_captured_decls} }],
+    };
+  }
+
+  # ---- Assemble the sections.
+  my @body;
+  for my $i (0 .. $#sections) {
+    my $sec = $sections[$i];
+    my $pkg = $sec->{pkg};
+    my $cl_pkg = $self->fallback_parser->_cl_pkg_designator($pkg);
+    if ($i > 0) {
+      # v1's package-section preamble: create/enter the CL package, CLOS
+      # class for MRO, original-case registration, per-package $a/$b
+      # specials (sort comparator lambdas bind them dynamically).
+      my $cl_class = $self->fallback_parser->_pkg_to_clos_class($pkg);
+      push @body, ";;; package $pkg",
+                  "(p-defpackage $cl_pkg)",
+                  "(in-package $cl_pkg)",
+                  "(defclass $cl_class () ())",
+                  "(p-register-pkg-name $cl_pkg \"$pkg\")", '';
+    }
+    push @body, @{ $sec->{decls} };
+    push @body, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))', '';
+    # Undeclared package globals referenced in this section (v1's forward-
+    # declaration pass) — defvar'd so first use isn't an unbound-variable
+    # crash.  Per-section: the same unqualified $x names DIFFERENT vars in
+    # different packages, and the defvar must be read under this section's
+    # in-package.
+    push @body, $self->_forward_global_decls(join("\n", @{ $sec->{captured} },
+                                                        @{ $sec->{defs} },
+                                                        @{ $sec->{run} })), '';
+    # Declarations captured by _fallback_stmt during lowering (defvar/
+    # defconstant/eval-when from use/require/BEGIN) — before the definitions
+    # that may reference them.
+    push @body, @{ $sec->{captured} }, '';
+    push @body, map { ($_, '') } @{ $sec->{defs} };
+    # Runtime current-package tracking (caller()/__PACKAGE__) in execution
+    # order — after this section's definitions load, before its code runs.
+    push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
+    push @body, map { ($_, '') } @{ $sec->{run} };
+  }
 
   my @out = ('(in-package :pcl)', '');
-  push @out, map { Pl::CLForm::to_string($_, 0) } @decls;
-  push @out, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))', '';
-  # Undeclared package globals referenced anywhere (v1's forward-declaration
-  # pass) — defvar'd so first use isn't an unbound-variable crash.
-  push @out, $self->_forward_global_decls(join("\n", @cap, @def_txt, @run_txt)), '';
-  # Declarations captured by _fallback_stmt during lowering (defvar/
-  # defconstant/eval-when from use/require/BEGIN) — before the definitions
-  # that may reference them.
-  push @out, @cap, '';
-  push @out, map { ($_, '') } @def_txt;
-  push @out, map { ($_, '') } @run_txt;
+  # Pre-declare every package a later section opens or a qualified symbol
+  # references: load reads+evaluates one top-level form at a time, so a
+  # p-defpackage up top guarantees Pkg::sym forms further down are readable.
+  my %pre = map { ($_->{pkg} => 1) } @sections[1 .. $#sections];
+  $pre{$_} = 1 for keys %{ $self->{_referenced_pkgs} };
+  delete @pre{qw(main pcl)};
+  push @out, map { "(pcl:p-defpackage " . $self->fallback_parser->_cl_pkg_designator($_) . ")" }
+             sort keys %pre;
+  push @out, '' if %pre;
+  push @out, @body;
   return join("\n", @out);
+}
+
+# Reset the shared Environment's notion of the current package to a segment's
+# package (v1's statement-form `package` pushes with no pop — same effect).
+sub _set_cur_package {
+  my ($self, $pkg) = @_;
+  $self->environment->package_stack(['main']);
+  return if $pkg eq 'main';
+  $self->environment->push_package($pkg);
+  $self->environment->add_package($pkg);
+}
+
+# v2 `let`s CLOSE at a package boundary (each segment is its own top-level
+# section), but Perl file lexicals stay in scope across `package`.  A my-name
+# from an earlier segment mentioned in a later one → die → whole-file v1
+# fallback (v1's file-scope my-vars are defvar'd specials, which DO span
+# sections).  Text-scan conservative: a redeclaration of the same name or a
+# mention in a comment also dies — that only costs the v2 lowering, never
+# correctness.
+sub _check_my_spanning {
+  my ($self, $segments) = @_;
+  my %live;   # bare names (no sigil) of my-vars declared in earlier segments
+  for my $i (0 .. $#$segments) {
+    if ($i && %live) {
+      my $txt = join "\n", map { $_->content } @{ $segments->[$i]{stmts} };
+      for my $bare (sort keys %live) {
+        die "Parser2 TODO: my-lexical '$bare' spans a package boundary\n"
+          if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+      }
+    }
+    $self->_collect_lexical_names($segments->[$i]{stmts}, \%live);
+  }
+}
+
+# Bare names (sigil stripped) of my/state-declared vars among the given
+# TOP-LEVEL statements, added to %$live.  `our`/`local` are skipped — they
+# name package vars, which resolve per-package.
+sub _collect_lexical_names {
+  my ($self, $stmts, $live) = @_;
+  for my $stmt (@$stmts) {
+    next unless ref $stmt && $stmt->isa('PPI::Statement::Variable');
+    my $kw = ($stmt->schildren)[0];
+    next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
+    my ($n)    = $self->_single_scalar_decl($stmt);
+    my ($vars) = $self->_multi_decl($stmt);
+    if ($n)        { $live->{ substr($n, 1) } = 1 }
+    elsif ($vars)  { $live->{ substr($_, 1) } = 1 for @$vars }
+    else {
+      # Unrecognized declaration shape — take every symbol conservatively.
+      my $syms = $stmt->find('PPI::Token::Symbol') || [];
+      $live->{ substr($_->content, 1) } = 1
+        for grep { $_->content =~ /^[\$\@\%]\w+$/ } @$syms;
+    }
+  }
+}
+
+# Named top-level subs are HOISTED into the definitions bucket, OUTSIDE the
+# nested `let`s that bind the file's my-lexicals — a sub body that captures
+# one would compile a free (→ unbound) symbol.  v1 defvar's file lexicals, so
+# the capture works there → die → whole-file v1 fallback.  (Anonymous subs
+# are fine: they are lowered in place, inside the lets.)  Conservative text
+# scan: a sub that re-declares the same name with its own `my` also dies —
+# that only costs the v2 lowering, never correctness.
+sub _check_sub_captures {
+  my ($self, $stmts) = @_;
+  my %lex;
+  $self->_collect_lexical_names($stmts, \%lex);
+  return unless %lex;
+  for my $child (@$stmts) {
+    next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block
+      && !$child->isa('PPI::Statement::Scheduled');
+    my $txt = $child->block->content;
+    for my $bare (sort keys %lex) {
+      die "Parser2 TODO: file lexical '$bare' captured by sub " . $child->name . "\n"
+        if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+    }
+  }
 }
 
 # v2 twin of v1's _insert_variable_forward_declarations, with the key v2
@@ -177,6 +339,9 @@ sub _forward_global_decls {
     while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
       my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
       next if $skip_pkg{ defined($1) ? $1 : $2 };
+      # Referenced packages must exist when the qualified symbol is READ —
+      # parse() pre-declares them at the top of the file.
+      $self->{_referenced_pkgs}{ defined($1) ? $1 : $2 } = 1;
       next if $pkg eq 'main' && $runtime_vars{$var};
       $cross{"$pkg\::$var"} = 1;
     }
@@ -208,7 +373,7 @@ sub _lower_sub {
   if ($params) {
     my $rest_txt = join("\n", map { $_->content } @body_stmts);
     my $body_uses_args = $rest_txt =~ /\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/;
-    my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params, $self->sub_info);
+    my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params, $self->_cur_sub_info);
     if (!$body_uses_args && !grep { !$vi->{$_}{unboxable} } @$params) {
       # Real lambda list (#3): my ($a,$b) = @_ untouched afterwards, params
       # never written un-arithmetically / ref-taken → bind raw, no p-list-=.
@@ -230,7 +395,7 @@ sub _lower_sub {
                 $self->_lower_block(\@body_stmts, $vi, 'inherit')]]]];
   }
 
-  my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->sub_info);
+  my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info);
   return ['p-sub', $clname, ['list', '&rest', '%_args'],
           ['p-args-body', ['block', 'nil', $self->_lower_block(\@stmts, $vi, 'inherit')]]];
 }
@@ -263,6 +428,9 @@ sub _extract_params {
 # CALLER's *wantarray*); everything else leaves it undef → statement position
 # is void.  Threaded through `my`-let nesting and tail if/unless branches.
 sub _lower_block {
+  # One recursion level PER STATEMENT (each `my` nests the block remainder):
+  # a few hundred top-level statements is normal, not runaway recursion.
+  no warnings 'recursion';
   my ($self, $stmts, $vi, $tail_ctx) = @_;
   my @s = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
   return () unless @s;
@@ -447,7 +615,7 @@ sub _lower_compound {
     if ($name && !($vi->{$name} && $vi->{$name}{unboxable})
         && (my $incr = _pure_incr_step($step_s, $name))) {
       my $vi2 = Pl::VarAnnotator->analyze(
-        [$init_s, $cond_s, $block->schildren], undef, $self->sub_info);
+        [$init_s, $cond_s, $block->schildren], undef, $self->_cur_sub_info);
       if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
         $vi = { %$vi, $name => { unboxable => 1 } };
         $step_form = ['list', ['setf', $name, ["p-$incr", $name, '1']]];
@@ -509,7 +677,7 @@ sub _lower_expr {
     );
     my ($node_id) = $expr_o->parse_expr_to_tree(\@parts);
     Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
-                       sub_info => $self->sub_info)
+                       sub_info => $self->_cur_sub_info)
                  ->gen_form($node_id, $native_ctx);
   };
   return $native if defined $native;

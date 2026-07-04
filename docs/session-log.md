@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 270 (2026-07-04) — v2: `package` statements (section splitting) + two exposed-bug fixes.
+
+**User: continue the v2 prototype.** Item #1 from the leverage list: top-level
+statement-form `package Foo;`.
+
+- **Section splitting** (`Pl/Parser2.pm parse()`): top level split into
+  package segments; each becomes its own output section with v1's preamble
+  shape (p-defpackage / in-package / defclass plc-* / p-register-pkg-name /
+  per-package `$a`/`$b`), `p-set-current-package` in runtime order, and
+  top-of-file `(pcl:p-defpackage …)` predeclarations for read-time
+  qualified symbols.  Forward-global-decl pass now runs PER SECTION
+  (unqualified `$x` names different vars per package; defvar must be read
+  under the section's in-package).  sub_info keyed per package
+  (`_cur_sub_info`); cl_names stay unqualified — the section reader package
+  interns them (v1 convention).
+- **Fallback gates (die → whole-file v1)**: block-form / versioned package;
+  `my`-lexical spanning a package boundary (`_check_my_spanning`, text-scan,
+  `our`/`local` exempt); **file lexical captured by a NAMED sub**
+  (`_check_sub_captures`) — named subs hoist outside the nested lets, so
+  `my $test; sub is { $test++ }` (qq.t) compiled a free symbol.  Anonymous
+  subs unaffected (lower in place).
+- **`PCL_V2=1` never reached v2 in ANY runner** (runpl/runt/clt/sweep all
+  pass `--lenient-ppi`, which parse_with_fallback routed straight to v1) —
+  prior sweep "parity" numbers silently measured v1.  Fixed: the flag is
+  ignored for the v2 attempt (it only matters when PPI can't parse, and
+  Parser2 dies to v1 then anyway).
+- **Octal leak** (found by num.t once v2 actually ran): ExprToCL2's number
+  gate accepted `0100` → CL reads decimal 100 (perl: 64).  Leading-zero
+  integers now fall back (v1 emits `#o100`).
+- **Pre-existing v1 BUG found (open)**: `my $g = "hi"; package Foo;
+  print $g;` — v1 defvars `$g` in the :main section but the :Foo section
+  reads `Foo::$g` → unbound-variable crash.  Both plain and interpolated
+  references.  v2 correctly dies to v1, which then crashes; fixing needs
+  v1 to qualify my-var references by their declaring section's package.
+- **Verified**: 12 perl-tests lower via v2 (chars cond context defined dor
+  if num qq sleep translate warn while; qq via capture-fallback) at FULL v1
+  parity 428/428 under `PCL_V2=1 sweep`.  parser2-01.t 43→54 guards incl.
+  package-sections end-to-end.  Deep-recursion warning silenced in
+  _lower_block (one level per statement is by design).
+
+---
+
 ## Session 269b (2026-07-04) — v2 growth: coverage (non-scalar my, use/require seam, whole-file fallback) + context-correct native calls + native interp strings + C-for ++ carve-out.
 
 **User: verify R1 fix, then continue the v2 prototype.**

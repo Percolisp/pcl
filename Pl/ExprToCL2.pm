@@ -113,9 +113,10 @@ sub gen_form {
 
   if (ref($node) && $node->isa('PPI::Token::Number')) {
     my $c = $node->content;
-    return $c if $c =~ /^\d+$/;             # plain decimal integer
-    return $c if $c =~ /^\d+\.\d+$/;        # simple float
-    return undef;                           # octal/hex/exp → old pipeline
+    # No leading zero: Perl reads 0100 as OCTAL (64), the CL reader as 100.
+    return $c if $c =~ /^(?:0|[1-9]\d*)$/;        # plain decimal integer
+    return $c if $c =~ /^(?:0|[1-9]\d*)\.\d+$/;   # simple float
+    return undef;                                 # octal/hex/exp → old pipeline
   }
 
   if (ref($node) eq 'PPI::Token::Symbol' && !@$kids) {

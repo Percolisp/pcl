@@ -198,16 +198,70 @@ Parity check: the 9 v2-lowered `perl-tests/` files (chars, context, defined,
 aassign, dor, cond, auto, flip, anonsub) all match v1's pass counts exactly;
 11 of the first 40 files lower through v2, the rest fall back wholesale.
 
+## Session 270 (2026-07-04): `package` statements — section splitting
+
+Statement-form top-level `package Foo;` is now v2-native, mirroring v1's
+section model:
+
+- **Segment split**: the top level is split into package segments at each
+  `package` statement; every segment becomes its own output *section* whose
+  preamble — `(p-defpackage :Foo)` / `(in-package :Foo)` / `(defclass
+  plc-foo () ())` / `(p-register-pkg-name …)` / per-package `$a`/`$b`
+  defvars — puts the **reader** in the right CL package (an `in-package`
+  nested inside a form is a no-op for the rest of that already-read form,
+  so the switch must happen between top-level forms).
+  `(p-set-current-package …)` is emitted in *runtime* order (after the
+  section's definitions, before its code), and all later-section packages
+  are **pre-declared at the file top** (`(pcl:p-defpackage :Foo)`) so
+  qualified symbols further down are readable — load evaluates one
+  top-level form at a time.
+- **Per-package sub_info**: bareword sub resolution is package-scoped, so
+  the pre-pass keys `{ pkg → { name → {cl_name, insensitive} } }` and each
+  segment is lowered against its own slice; cl_names stay *unqualified*
+  (`pl-foo`) because the section's in-package interns them correctly (v1's
+  convention).  Same-package segments merge their sub facts (a
+  `Foo…main…Foo` file resolves across both Foo sections).
+- **`my`-lexicals may NOT span a package boundary** (v2 `let`s close at the
+  section end; Perl file lexicals don't) — a conservative text scan dies
+  "Parser2 TODO" → whole-file v1 fallback.  `our`/`local` names are exempt
+  (package vars resolve per-package).  **Note: v1 is itself BROKEN for this
+  case** (`my $g; package Foo; print $g;` → defvar'd in `:main`, read as
+  `Foo::$g` → unbound) — a pre-existing v1 bug, logged, not introduced here.
+- **File lexicals captured by NAMED subs die → v1** (same mechanism, no
+  packages needed): named top-level subs are hoisted into the definitions
+  bucket *outside* the nested `let`s, so `my $test = 1; sub is { $test++ }`
+  (perl-tests/qq.t) would compile a free symbol.  v1's defvar'd file-scope
+  my-vars make the capture work there.  Anonymous subs are unaffected —
+  they lower in place, inside the lets.
+- **Forward global decls are now per-section** (the same unqualified `$x`
+  names *different* vars in different packages, and the defvar must be read
+  under the section's in-package).
+- **Octal-literal fix in ExprToCL2**: the native number gate accepted
+  `0100`, which CL reads as decimal 100 (perl: octal 64).  Leading-zero
+  integers now route to the fallback (`#o100`).  Found by num.t under v2.
+- **`PCL_V2=1` now actually reaches v2 in every runner**: runpl/runt/clt/
+  sweep all pass `--lenient-ppi`, which `parse_with_fallback` treated as a
+  "special mode → v1" — so prior sweep "parity" runs silently measured v1.
+  The flag only matters when PPI can't parse the file, and Parser2 dies to
+  v1 in that case anyway, so it is now ignored for the v2 attempt.
+
+Verified: 12 perl-tests files lower through v2 (chars, cond, context,
+defined, dor, if, num, qq→capture-fallback, sleep, translate, warn, while)
+at **full v1 parity, 428/428** via `PCL_V2=1 sweep`; block-form packages,
+versioned packages, `our` declarations, and nested `package` all fall back
+wholesale.  Guards: `Pl/t/parser2-01.t` (54 tests, incl. a package-sections
+end-to-end run).
+
 ## Next steps, in leverage order
 
-1. **`package` statements** — the real design item: a mid-file
-   `(in-package)` inside v2's nested `let`s is a no-op for the *reader* (the
-   rest of the enclosing top-level form was already read in the old
-   package).  Needs v1-style *section splitting* of the form tree, with
-   my-lexicals that span a package boundary handled explicitly.
+1. **`our` declarations at top level** — now the top wholesale-fallback
+   trigger (aassign.t etc.); an `our $x` is just "don't let-bind, defvar in
+   the section package".
 2. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
    (`type-flow-and-codegen-plan.md` §(s)) once shapes stabilize.
 3. Grow the native expression set: hash/array element access ($h{k}, $a[i])
    is the next perf tier (tight loops over aggregates).
 4. Lean p-sub round 2 (catch elision / bind elision) — only with fresh
    measurements, see above.
+5. Package block form `package Foo { … }` (scoped push/pop, v1 has the
+   model) and `package Foo VERSION;`.
