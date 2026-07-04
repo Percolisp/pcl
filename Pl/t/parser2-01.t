@@ -246,9 +246,19 @@ like($ver, qr/\(p-scalar-= Counter::\$VERSION 1\.5\)/,
 # eval BLOCK is fine (no lexical-capture problem) — must lower natively.
 my $eb = eval { Pl::Parser2->parse_code(q{my $x = eval { 1 + 2 }; print "$x\n";}) };
 ok(!$@, 'eval BLOCK does not trip the string-eval gate') or diag($@);
-# eval STRING still gates → v1 (its lexicals are invisible to eval'd code).
-eval { Pl::Parser2->parse_code(q{my $x = eval "1+2"; print "$x\n";}) };
-like($@, qr/string eval/, 'eval STRING still dies to v1');
+# eval STRING now lowers natively (W3): it flows through the expression
+# fallback seam and emits (p-eval STR (list (cons "$x" $x) …)) — no gate.
+my $es = eval { Pl::Parser2->parse_code(q{my $x = 1; print eval '$x + 1', "\n";}) };
+ok(!$@, 'eval STRING no longer gates (W3)') or diag($@);
+like($es, qr/\(p-eval "\$x \+ 1" \(list \(cons "\$x" \$x\)\)\)/,
+     'eval STRING captures the in-scope lexical $x in the alist');
+# A closed sibling scope's lexical must NOT appear in the alist (it would be a
+# free CL symbol → unbound at load).  _let_bound_vars is scoped for this (W3).
+my $ecs = Pl::Parser2->parse_code(
+  q[{ my $dead = 5; print "$dead\n"; } my $y = 2; print eval '$y + 1', "\n";]);
+like($ecs, qr/\(p-eval "\$y \+ 1" \(list \(cons "\$y" \$y\)\)\)/,
+     'eval alist captures $y only — not the closed-scope $dead');
+unlike($ecs, qr/cons "\$dead"/, 'closed-scope lexical excluded from eval alist');
 # The old text scan tripped on `eval` mentions that are not string eval; the
 # PPI walk excludes a `=>` hash key and a `->eval` method call.
 my $ek = eval { Pl::Parser2->parse_code(q{my %h = (eval => 1); print $h{k};}) };
@@ -261,6 +271,23 @@ ok(!$@, 'eval as a method call does not gate') or diag($@);
 my $fwd = Pl::Parser2->parse_code(q{sub t1; sub u; print "hi\n";});
 like($fwd, qr/\(p-declare-sub pl-t1\)/, 'forward-declared sub emits p-declare-sub');
 unlike($fwd, qr/\(p-sub pl-t1\b/, 'forward declaration emits no definition');
+
+# W3 regression: a foreach loop variable must be SCOPED to the loop body.  If it
+# leaked into _let_bound_vars, a later sibling eval's capture alist would list
+# the (now-unbound) loop var → unbound-variable at load (cmpchain.t crash).
+my $fev = Pl::Parser2->parse_code(
+  q[foreach my $e (1,2) { print $e; } my $z = 9; print eval '$z';]);
+like($fev, qr/\(p-eval "\$z" \(list \(cons "\$z" \$z\)\)\)/,
+     'foreach loop var does not leak into a later sibling eval alist');
+unlike($fev, qr/cons "\$e"/, 'closed foreach var excluded from later eval alist');
+
+# W3 regression: the native attempt runs PExpr's cleanup_for_parsing, which
+# mutates the shared `=>` token to `,`.  _lower_expr must restore token content
+# so the fallback still sees `=>` and auto-quotes the bareword (else `(N=>1)`
+# lowers N as a call → undefined-function crash, seen in tr.t).
+my $fc = Pl::Parser2->parse_code(q{%h = (N=>1); print "hi\n";});
+like($fc, qr/\(vector "N" 1\)/, 'fat-comma bareword before => stays a string, not a call');
+unlike($fc, qr/pl-N\b/, 'single-char bareword before => is not lowered as a funcall');
 
 # --- A3 (session 271): local / statement modifiers / for(;;) ---
 
@@ -355,7 +382,7 @@ like($shf, qr/\(p-shift \@_\)/, 'bare shift in sub body defaults to @_ (not @ARG
 
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
-  skip 'sbcl not available', 5 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 6 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -364,7 +391,9 @@ SKIP: {
     (my $out = $src) =~ s/\(in-package :pcl\)/(in-package :pcl)\n(p-defpackage :main)\n(in-package :main)/;
     print $fh $out;
     close $fh;
-    my $got = `sbcl --control-stack-size 512 --noinform --non-interactive --load "$root/cl/pcl-runtime.lisp" --eval "(setf pcl::*pcl-skip-cache* t)" --load "$tmp" 2>/dev/null`;
+    # Set the pl2cl path so `p-eval` (string eval) can spawn the transpiler.
+    my $p2c = "$root/pl2cl";
+    my $got = `sbcl --control-stack-size 512 --noinform --non-interactive --load "$root/cl/pcl-runtime.lisp" --eval "(setf pcl::*pcl-skip-cache* t)" --eval "(setf pcl::*pcl-pl2cl-path* #P\\"$p2c\\")" --load "$tmp" 2>/dev/null`;
     unlink $tmp;
     return $got;
   };
@@ -404,6 +433,14 @@ print __PACKAGE__, "\n";
 EOF
   is($run->($blkprog), "generic rex\nmain\n",
      'block-form packages run end-to-end: dispatch + return to main');
+  # W3: string eval reads AND writes back through the shared captured boxes.
+  my $evprog = Pl::Parser2->parse_code(<<'EOF');
+my $x = 1; my @a = (1,2,3);
+eval '$x = $x + 10; push @a, 9;';
+print "$x @a\n";
+EOF
+  is($run->($evprog), "11 1 2 3 9\n",
+     'string eval reads + writes back through captured lexicals');
 }
 
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).

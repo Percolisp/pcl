@@ -432,6 +432,68 @@ Remaining string-eval files still gate — enabling `eval EXPR` is W3.  Guards:
 `Pl/t/parser2-01.t` = 102 (eval BLOCK native / eval STRING gates / `=>` +
 `->eval` don't gate / bodyless forward decl emits p-declare-sub, no def).
 
+## Session 272c (2026-07-04): W3 — enable `eval EXPR` via the capture seam
+
+**W3 shipped.**  The string-eval gate is gone; `eval EXPR` now lowers through
+the ordinary expression fallback seam, where v1's `gen_funcall` emits
+`(p-eval STR (list (cons "$x" $x) …))` — an alist of in-scope lexical names →
+their live boxes (session-250 capture mechanism, `docs/eval-lexical-capture.md`).
+
+- **Scoped `_let_bound_vars`** (was a never-shrinking accumulator): now snapshot/
+  restored in `_lower_scope` and `_lower_sub`, so the eval capture alist at a
+  call site reflects the LIVE scope — a closed sibling scope's lexical no longer
+  lands in the alist as a free (→ unbound) CL symbol.
+- **`_all_lex`** (new, file-wide, never shrinks): the forward-declaration pass
+  now excludes names let-bound ANYWHERE (a defvar would poison every `let` of
+  that name).  Kept separate from the now-scoped `_let_bound_vars` so
+  forward-decls stay exactly as before (parity) while the eval alist gets scope
+  accuracy.  VarAnnotator's region-wide `$has_eval` (unchanged) keeps every
+  captured var boxed.
+
+**Three v2 bugs found & fixed during parity triage** (all newly reachable
+because eval-heavy files became native):
+
+1. **foreach loop var leaked into eval alists** (cmpchain.t, infnan.t crash:
+   `$e0 is unbound`).  `foreach my $e0` registered `$e0` via `_reg_lex` OUTSIDE
+   `_lower_scope`, so the scope snapshot already contained it → it leaked into
+   `_let_bound_vars` for sibling statements, and a later sibling `eval`'s alist
+   listed `$e0` when it was no longer bound.  Fix: scope the loop var to the
+   body (snapshot/restore `_let_bound_vars`/`_live_lex` around it; `_all_lex`
+   keeps it for forward-decls).  While fixing, also caught a **list-vs-scalar
+   context bug** in the same edit: `my $body = $self->_lower_scope(...)` took the
+   form COUNT (`1`/`2`/`6`) instead of the forms — must be `my @body = …`.
+2. **Native attempt corrupted tokens for the fallback** (tr.t crash: `pl-N`
+   undefined).  `_lower_expr` offers each expression to ExprToCL2 first;
+   ExprToCL2 → `parse_expr_to_tree` → `cleanup_for_parsing` DESTRUCTIVELY
+   rewrites the shared `=>` operator token to `,` (`set_content`).  When the
+   native attempt fails (e.g. a container assignment) and the fallback re-parses
+   the SAME tokens, the lost `=>` defeats the fallback's own fat-comma
+   auto-quote, so `%h = (N=>1)` lowered `N` as a call.  Fix: snapshot every leaf
+   token's content before the native attempt and restore it after.
+
+**Two divergences PROVEN benign (not v2 bugs):**
+
+- **sprintf.t — v2 is MORE correct.** v2 runs 559 tests, v1 552.  sprintf.t
+  builds its plan from `__DATA__`, skipping EBCDIC-only (`e>`) lines when
+  `$::IS_ASCII` and ASCII-only (`a>`) lines when `$::IS_EBCDIC`.  There are 7
+  `a` + 7 `e` lines; with `IS_ASCII=1, IS_EBCDIC=undef` only the 7 `e` lines
+  should skip → plan 559 (independently simulated).  v2 gets 559; v1's 552
+  wrongly skips the 7 ASCII-only lines (a pre-existing v1 bug).  The 7 extra v2
+  tests all pass.
+- **chop.t — documented not-supported aliasing.**  Test 100
+  (`\$a[0] == \$b` after `chomp @a`, the `$/ eq 0` case) exercises SV/element
+  aliasing (`not-supported.md`).  v2-native correctly fails it and the
+  skip-registry skips it (the registry entry was written anticipating exactly
+  this — "the eq 7 sibling legitimately passes"); v1-fallback incidentally
+  passed it.  A 1-test skip on a documented not-supported feature, not a
+  regression.
+
+**Parity:** 60 files lower through v2 (was 40) at v1 sweep parity — every
+per-file delta explained above; `_status.tsv` identical apart from chop
+(skip-registry, actual TAP 100/100) and sprintf (v2 correct).  No crashes.
+Guards: `Pl/t/parser2-01.t` = 110 (eval-STRING native + alist scope, foreach
+var non-leak, fat-comma token-restore, eval read/write-back e2e).
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is
@@ -440,24 +502,24 @@ Remaining string-eval files still gate — enabling `eval EXPR` is W3.  Guards:
 > silent-failure classes, and acceptance criteria. This section stays as
 > the shorter overview.
 
-### Where we stand (measured 2026-07-04, session 272b, post-W2)
+### Where we stand (measured 2026-07-04, session 272c, post-W3)
 
 First-gate census over all 111 `perl-tests/*.t` (each file reports only the
 FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
 
 | files | first gate |
 |---:|---|
-| 53 | string eval (`eval EXPR` — now a precise PPI gate; W3 enables it) |
-| 5 | `package` inside a block (`PPI::Statement::Package` in _lower_stmt) |
-| 6 | sub with prototype/signature (W4) |
-| 4 | lexical captured by a (nested or top-level) sub (W5) |
-| 1 | loop with continue block |
-| 1 | unsupported declaration `my $aa, $bb, $cc;` |
-| **40** | **(lower fully through v2 — 1454/1454 = exact v1 sweep parity: 10 fails identical to v1's own, 36 fully passing on both)** |
+| ~13 | `package` inside a block (`PPI::Statement::Package` in _lower_stmt) |
+| ~6 | sub with prototype/signature (W4) |
+| ~10 | lexical captured by a (nested or top-level) sub (W5) |
+| several | my-lexical spans a package boundary (W10) |
+| 1 | loop with continue block (W6) |
+| 1 | `foreach without list` |
+| 1 | unsupported declaration `my $aa, $bb, $cc;` (W6) |
+| **60** | **(lower fully through v2 — v1 sweep parity, all deltas explained: 3 bugs fixed, sprintf v2-better, chop not-supported-aliasing skip)** |
 
-(W1, s272: package block form is no longer a gate. W2, s272b: the string-eval
-text scan is now a precise PPI walk — 12 files that only *mentioned* eval
-recovered; the 53 remaining genuinely use `eval EXPR` and wait on W3.)
+(W3, s272c: `eval EXPR` is enabled — string eval is no longer a gate; ~20 more
+files became native.  The remaining gates are W4/W5/W6/W10 work.)
 
 Reproduce with:
 ```bash

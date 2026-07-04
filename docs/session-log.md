@@ -4,6 +4,29 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 272c (2026-07-04) — v2 W3: enable `eval EXPR` via the capture seam.
+
+- **String-eval gate removed.** `eval EXPR` lowers through the expression
+  fallback → v1's `gen_funcall` → `(p-eval STR (list (cons "$x" $x) …))` capture
+  alist (session-250 mechanism).  Made `_let_bound_vars` SCOPED (snapshot/restore
+  in `_lower_scope`/`_lower_sub`) so the alist reflects the live scope; added a
+  separate file-wide `_all_lex` accumulator for the forward-decl exclusion (a
+  defvar of a let-bound name would poison the lexical).
+- **3 v2 bugs found & fixed** (newly reachable as eval-heavy files went native):
+  (1) foreach loop var leaked into sibling eval alists → unbound crash
+  (cmpchain/infnan); scoped the loop var to its body — and fixed a list-vs-scalar
+  slip in the same edit (`my @body`, not `my $body`, from `_lower_scope`).
+  (2) the ExprToCL2 native attempt's `cleanup_for_parsing` destructively rewrote
+  the shared `=>` token to `,`, defeating the fallback's fat-comma auto-quote →
+  `%h=(N=>1)` lowered `N` as a call → `pl-N` undefined crash (tr.t); `_lower_expr`
+  now snapshots/restores token content around the native attempt.
+- **2 divergences proven benign:** sprintf.t — v2 MORE correct (559 vs v1's
+  buggy 552; v1 wrongly skips 7 ASCII-only DATA lines, independently verified);
+  chop.t — test 100 `\$a[0]==\$b` element aliasing is documented not-supported,
+  skip-registry catches it under v2-native (v1-fallback incidentally passed).
+- **60 files v2-native** (was 40) at v1 parity, all deltas explained; no crashes.
+  Guards: `Pl/t/parser2-01.t` 102 → 110.
+
 ## Session 272b (2026-07-04) — v2 W2: string-eval gate → PPI walk; bodyless subs.
 
 - **String-eval gate is now a PPI walk** (moved after `PPI::Document->new`): a

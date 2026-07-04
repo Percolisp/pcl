@@ -455,7 +455,7 @@ lowers natively (no die), `eval "str"` still dies with `string eval`, and
 `my %h = (eval => 1); $h{eval};`-style mentions don't gate (adjust to
 whatever exclusions you shipped).
 
-### W3. String eval, stage 2 — enable `eval EXPR` via the existing capture seam
+### ~~W3. String eval, stage 2 — enable `eval EXPR` via the existing capture seam~~ — DONE (s272c, this commit)
 
 **Read first:** `docs/eval-lexical-capture.md`, then
 `Pl/ExprToCL.pm sub _eval_lexical_alist` (short — read the whole sub), and

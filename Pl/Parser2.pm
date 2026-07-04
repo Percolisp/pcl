@@ -87,32 +87,22 @@ sub parse {
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
   my $doc = PPI::Document->new(\$src) or die "Parser2: PPI parse failed";
 
-  # String eval (eval EXPR, not eval BLOCK) captures enclosing my-lexicals via
-  # dynamic lookup (session-250 mechanism) — that requires the v1 shape where
-  # file-scope my-vars are defvar'd specials.  v2's true lexical `let`s are
-  # invisible to separately-compiled eval'd code, so any such file → v1.
-  # PPI-level test (W2): a Word `eval` that is NOT a method call, a hash key,
-  # or `eval { … }` (block form is fine).  Comments/strings/POD never appear as
-  # Word tokens, so the old text-scan false positives (eval in a string, a
-  # `#`-comment, or `eval {` split across lines) vanish for free.
-  my $evals = $doc->find(sub {
-    my $t = $_[1];
-    return 0 unless $t->isa('PPI::Token::Word') && $t->content eq 'eval';
-    my $prev = $t->sprevious_sibling;
-    return 0 if $prev && $prev->isa('PPI::Token::Operator')
-             && $prev->content =~ /^(?:->|=>)$/;         # ->eval / key => eval
-    return 0 if $prev && $prev->isa('PPI::Token::Word')
-             && $prev->content eq 'sub';                 # sub eval (pathological)
-    my $next = $t->snext_sibling;
-    return 0 if $next && $next->isa('PPI::Structure::Block');    # eval { }
-    return 0 if $next && $next->isa('PPI::Token::Operator')
-             && $next->content eq '=>';                  # eval => value (key)
-    return 1;                                            # eval EXPR (string eval)
-  }) || [];
-  die "Parser2 TODO: string eval\n" if @$evals;
+  # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
+  # mechanism).  W3: it lowers through the ordinary expression fallback seam —
+  # v1's gen_funcall emits (p-eval STR (list (cons "$x" $x) …)) reading the
+  # SCOPED _let_bound_vars, so the capture alist reflects the call site's live
+  # scope.  The VarAnnotator's region-wide $has_eval keeps every captured var
+  # boxed (do not narrow it).  No gate here anymore.
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
   $self->{_referenced_pkgs} = {};
+  # File-wide accumulator of EVERY name ever let-bound (never shrinks) — the
+  # forward-declaration pass must never defvar a name let-bound ANYWHERE (a
+  # defvar proclaims the symbol special and poisons every `let` of that name).
+  # This is deliberately separate from the now-SCOPED _let_bound_vars, which
+  # must reflect the call site's live scope so the string-eval capture alist
+  # (_eval_lexical_alist) doesn't list a closed sibling scope's name.
+  $self->{_all_lex} = {};
 
   # ---- Split the top level into PACKAGE SEGMENTS at statement-form
   # `package Foo;`.  v2 mirrors v1's section model: each segment becomes its
@@ -402,7 +392,10 @@ sub _forward_global_decls {
   my ($self, $text) = @_;
   my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
                                         $a $b @a @b);
-  my $lb = $self->fallback_parser->{_let_bound_vars} // {};
+  # Exclude names let-bound ANYWHERE in the file (W3: _all_lex, the cumulative
+  # accumulator — NOT the now-scoped _let_bound_vars, which has shrunk back to
+  # top-level scope by the time this assembly-phase pass runs).
+  my $lb = $self->{_all_lex} // {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
   my (%seen, %cross);
   for my $line (split /\n/, $text) {
@@ -450,9 +443,13 @@ sub _lower_sub {
   my $env = $self->environment;
   $env->in_subroutine($env->in_subroutine + 1);
   my %saved_lex = %{ $self->{_live_lex} // {} };
+  # Scope _let_bound_vars across the sub body too (W3): params + body lexicals
+  # must not leak into a later call site's string-eval capture alist.
+  my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
   my $form = eval { $self->_lower_sub_inner($sub) };
   my $err = $@;
   $self->{_live_lex} = \%saved_lex;
+  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
   $env->in_subroutine($env->in_subroutine - 1);
   die $err if $err;
   return $form;
@@ -507,6 +504,7 @@ sub _reg_lex {
   for my $n (@names) {
     $self->fallback_parser->{_let_bound_vars}{$n} = 1;
     $self->{_live_lex}{$n} = 1;
+    $self->{_all_lex}{$n}  = 1;   # cumulative; drives the forward-decl exclusion
   }
   return;
 }
@@ -515,9 +513,14 @@ sub _reg_lex {
 # inside stop being "live" when it closes.
 sub _lower_scope {
   my ($self, $stmts, $vi, $tail_ctx) = @_;
-  my %saved = %{ $self->{_live_lex} // {} };
+  my %saved     = %{ $self->{_live_lex} // {} };
+  # Scope _let_bound_vars too (W3): a name declared inside this block must not
+  # leak into the string-eval capture alist at a call site AFTER the block
+  # closes.  _all_lex (cumulative) still guards the forward-decl pass.
+  my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
   my @forms = $self->_lower_block($stmts, $vi, $tail_ctx);
   $self->{_live_lex} = \%saved;
+  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
   return @forms;
 }
 
@@ -862,11 +865,22 @@ sub _lower_compound {
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
     die "Parser2 TODO: foreach without list" unless $list && $block;
     my $name = $var ? $var->content : '$_';
-    $self->_reg_lex($name);
+    # The LIST is evaluated in the OUTER scope (the loop var is not yet bound).
     my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;
-    return ['p-foreach', ['list', $name, $self->_lower_expr(\@list_parts, $stmt, 1)],
-            _label_keys($label),
-            $self->_lower_scope([$block->schildren], $vi)];
+    my $list_form  = $self->_lower_expr(\@list_parts, $stmt, 1);
+    # The loop variable is scoped to the BODY only: register it, lower the
+    # body, then restore _let_bound_vars/_live_lex so it does not leak into
+    # sibling statements.  Without this, a later sibling's string-eval capture
+    # alist would list the (now-unbound) loop var → unbound-variable at load
+    # (W3 regression seen in cmpchain.t).  _all_lex keeps it (forward-decl).
+    my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+    my %saved_lex = %{ $self->{_live_lex} // {} };
+    $self->_reg_lex($name);
+    my @body = $self->_lower_scope([$block->schildren], $vi);
+    $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+    $self->{_live_lex} = \%saved_lex;
+    return ['p-foreach', ['list', $name, $list_form],
+            _label_keys($label), @body];
   }
 
   die "Parser2 TODO: compound '$kw'";
@@ -926,6 +940,17 @@ sub _lower_expr {
   my $native_ctx = !defined $ctx        ? undef
                  : "$ctx" eq '1'        ? 't'
                  :                        $ctx;
+  # PExpr's cleanup_for_parsing mutates the shared tokens DESTRUCTIVELY — most
+  # notably it rewrites the `=>` operator to `,` (set_content) as part of
+  # fat-comma auto-quoting.  When the native attempt fails and we re-parse the
+  # SAME tokens through the fallback, that lost `=>` defeats the fallback's own
+  # auto-quote (`(N=>1)` would wrongly lower `N` as a call).  Snapshot every
+  # leaf token's content and restore it after the attempt so the fallback sees
+  # pristine tokens.  (Structural mutations — e.g. `$h{bar}`→`$h{"bar"}` via
+  # replace_child — are idempotent for the fallback, so content-restore is
+  # sufficient.)
+  my @snap = map { [$_, $_->content] }
+             map { $_->isa('PPI::Node') ? $_->tokens : $_ } @parts;
   my $native = eval {
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
@@ -937,6 +962,7 @@ sub _lower_expr {
                        sub_info => $self->_cur_sub_info)
                  ->gen_form($node_id, $native_ctx);
   };
+  $_->[0]->set_content($_->[1]) for @snap;   # restore pristine tokens
   return $native if defined $native;
 
   my $fb_ctx = (defined $ctx && "$ctx" eq '1') ? 1 : 0;
