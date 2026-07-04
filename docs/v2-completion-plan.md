@@ -933,6 +933,47 @@ bind elision needs a whole-program "nobody calls caller()" bit (note
 caller() reads the whole chain — it is NOT a per-sub decision). If the
 numbers haven't changed, expected win is small; prefer W11/W12.
 
+### W14. Tier C4 — `my $x = shift` → `my ($x,…) = @_` normalization (deferred)
+
+**Do this only after the coverage tiers (A/B) are done and the pipeline is the
+default.** Measured motivation (session 272d benchmarks, both pipelines,
+startup subtracted): a sub written `my $n = shift; …` gets only **~1.0×** over
+v1 because bare `shift` forces the `p-args-body`/`@_`-flatten prologue, while
+the identical sub written `my ($n) = @_; …` gets **~5.4×** via the
+`(&optional ($n (p-undef)) …)` lambda list. Same computation, 5× apart. The
+`my $x = shift` / `my $self = shift` idiom is ubiquitous (esp. OO code), so
+this unlocks the fast call path for a large fraction of call-heavy programs.
+
+**Approach — a parse-time normalization into the EXISTING fast path** (CLAUDE.md
+§11), NOT a new codegen path: in `_lower_sub_inner`, detect a *contiguous
+leading run* of `my $SCALAR = shift;` statements and coalesce them into one
+`my ($a,$b,…) = @_;`, after which the current `_extract_params` lambda-list
+optimization takes over unchanged.
+
+**Guard (all must hold — conservative):**
+1. Each rewritten statement is exactly `my $scalar = shift;` with a **bare**
+   `shift` — never `shift @arr`, `shift(@x)`, or `my $x = shift // $default`
+   (those are not a plain first-element bind).
+2. Only a contiguous **leading** run (stop at the first non-matching statement;
+   interleaved non-shift `my`s can be handled later but keep v1 for now).
+3. The **remainder must not use `@_`** — reuse the existing `$body_uses_args`
+   scan (`/\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/`) on the post-run body.
+4. **The remainder must not contain string `eval`.** This is the subtle,
+   shift-specific condition: bare `shift` MUTATES `@_` (drops the first
+   element), whereas `my ($x)=@_` leaves `@_` intact, so the rewrite changes
+   what `@_` holds for the rest of the body. The text scan (3) catches a
+   literal `@_` in the remainder but cannot see inside `eval $code`, so any
+   string eval in the remainder must disqualify the rewrite. (The existing
+   `my ($n)=@_` optimization needs NO eval condition — it never mutates `@_`,
+   so an eval reading `@_` sees the same value either way. The eval disqualifier
+   is unique to the shift rewrite, precisely because of the mutation.)
+
+**Guards to add:** `Pl/t/parser2-01.t` — leading `my $x = shift` (clean body)
+lowers to `(&optional ($x (p-undef)) …)`; a body that still reads `@_`/`$_[N]`
+stays on `(&rest %_args) (p-args-body …)`; a body with `eval '…'` stays on the
+`p-args-body` path. Then the full parity sweep before committing. Re-measure the
+`shift`-fib bench — it should move from ~1.0× to ~5×.
+
 ---
 
 ## 5. Reference

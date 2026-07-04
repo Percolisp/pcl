@@ -639,6 +639,33 @@ for f in perl-tests/*.t; do PCL_V2=1 PCL_V2_VERBOSE=1 perl -I. pl2cl \
    analysis; bind elision needs a whole-program "nobody calls caller()"
    bit) — ONLY with fresh measurements; current per-call residue is
    ~18ns catch + ~15ns binds.
+4. **`my $x = shift` → `my ($x,…) = @_` normalization** (W14 in the completion
+   plan; deferred until the pipeline is the default). Session-272d benches
+   showed a `shift`-arg sub is only ~1.0× over v1 while the `my ($n)=@_` form
+   is ~5.4× — bare `shift` forces the `p-args-body` prologue. Coalesce a leading
+   run of bare `my $x = shift;` into `my (…)=@_` to take the lambda-list fast
+   path. Guard: bare shift only, contiguous leading run, remainder uses neither
+   `@_`/`$_[N]`/`shift`/`goto` NOR string `eval` (shift mutates `@_`, so an eval
+   that could read the un-mutated `@_` must disqualify — unique to this rewrite).
+
+### V1-vs-V2 execution benchmark (session 272d, startup subtracted, best-of-4)
+
+Both pipelines transpiled the same programs; outputs verified identical to perl.
+Speedup = v1 exec ÷ v2 exec (higher = v2 faster):
+
+| program | v1 | v2 | v2 speedup | stresses |
+|---|--:|--:|--:|---|
+| intloop | 0.566s | 0.052s | 10.9× | integer arithmetic loop |
+| nested | 0.423s | 0.063s | 6.8× | nested arith loops |
+| fib (`my ($n)=@_`) | 0.539s | 0.100s | 5.4× | recursive calls (fast path) |
+| strbuild | 0.056s | 0.021s | 2.6× | string concat loop |
+| arrhash | 0.280s | 0.165s | 1.7× | array push + hash ops (→ W11) |
+| mixed (collatz) | 0.397s | 0.295s | 1.35× | calls+while+arith |
+| fib (`shift`) | 0.407s | 0.392s | 1.04× | recursive calls (slow path → W14) |
+
+Takeaways: v2 dominates on unboxed arithmetic; aggregate access (arrhash) lags
+because `$h{k}`/`$a[i]` still round-trip boxes (W11); the `shift`-vs-`@_` call
+gap motivates W14.
 
 ### Suggested order
 
