@@ -731,7 +731,16 @@ messages disappear); parity exact; programs a/b byte-match perl.
 `$test__file__\d+` with a defvar and no let; a two-`my` shadowing case
 still dies to v1.
 
-### W6. Small gates (optional, do only if cheap)
+### ~~W6. Small gates (optional, do only if cheap)~~ — DONE (s272f)
+
+**Shipped s272f.** while/until/foreach `continue` → native `:continue (progn …)`
+key (`_continue_keys`, after the body); C-for+continue and bare-block continue
+stay gated (the latter is loopctl.t's sole blocker, deliberately not chased).
+`my $scalar <non-'=' trailing>;` (`my $aa,$bb,$cc;` / `my $a . $foo;`) → boxed
+`my $scalar` let + discarded void trailing expr. concat.t + or.t net-new native;
+69 files native at v1 parity. Guards → new `Pl/t/parser2-02.t` (10). Original
+plan below.
+
 
 - **continue blocks (1 file):** native lowering is genuinely small: the
   loop macros accept `:continue FORM` (see `parse-loop-keys` in

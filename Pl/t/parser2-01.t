@@ -364,10 +364,16 @@ like($rl, qr/\(progn \(p-setf \$_ .*p-readline.*\(p-defined \$_\)\)/s,
 my $rl2 = Pl::Parser2->parse_code(q{while (my $l = <STDIN>) { print $l; }});
 like($rl2, qr/\(p-defined \$l\)/, 'while (my $l = <FH>) cond terminates on undef');
 
-# continue blocks are not lowered natively — must die to v1, never be dropped.
-my $cont = eval { Pl::Parser2->parse_code(
-  q{my $i = 0; while ($i < 3) { print $i; } continue { $i = $i + 1; }}) };
-like($@, qr/continue/, 'loop with continue block dies to v1');
+# W6: while/foreach continue blocks lower natively to a :continue (progn …)
+# loop key, placed AFTER the body (parse-loop-keys finds it by position).
+my $cont = Pl::Parser2->parse_code(
+  q{my $i = 0; while ($i < 3) { print $i; } continue { $i = $i + 1; }});
+like($cont, qr/\(p-while .*:continue \(progn/s, 'while continue block → :continue key');
+# …but a BARE-block continue (LABEL: { … } continue { … }) stays gated → v1
+# (v1 runs it after the tagbody — different shape).
+my $bcont = eval { Pl::Parser2->parse_code(
+  q{L: { print "x"; } continue { print "y"; }}) };
+like($@, qr/continue/, 'bare-block continue block still dies to v1');
 
 # --- A2 (session 271): bare blocks (loop-once) + labels + nested subs ---
 

@@ -4,6 +4,23 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 272f (2026-07-05) — v2 W6: small gates (continue + odd `my` decls).
+
+- **while/until/foreach `continue` blocks** lower natively to a `:continue
+  (progn …)` loop key (`_continue_keys`), placed after the body (parse-loop-keys
+  finds it by position; v1 emits it there). Bare-block continue (`L: {…} continue
+  {…}`) and C-for+continue stay gated (bare-block runs after the tagbody — a
+  different shape; it's loopctl.t's only remaining blocker, deliberately not
+  chased).
+- **`my $scalar <non-'=' trailing>;`** (`my $aa,$bb,$cc;` / `my $a . $foo;`):
+  Perl declares only the scalar (lexical); the rest is a void expression over
+  package vars. Boxed `my $scalar` let + discarded trailing expr; $scalar forced
+  boxed in the remainder so a later write can't hit the setf raw-slot path.
+- **Parity:** 69 files native (was 67), exact v1 parity (`_status.tsv` identical
+  bar the known chop/sprintf deltas). concat.t + or.t net-new native. Guards
+  moved to new `Pl/t/parser2-02.t` (10) to keep the guard suite split by size;
+  parser2-01.t = 122.
+
 ## Session 272e (2026-07-05) — v2 W5: file lexicals captured by named subs.
 
 - **Captured single-scalar file lexicals no longer gate.** A `my $x` captured by

@@ -834,6 +834,25 @@ sub _lower_block {
                (defined $init ? (['p-my-=', $name, $self->_lower_expr($init, $first)]) : ()),
                $self->_lower_block(\@rest, $vi, $tail_ctx)]);
     }
+    # -- my $scalar <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;`)
+    #    Perl declares ONLY $scalar and evaluates the rest as an ordinary (void)
+    #    expression whose first operand is the fresh lvalue; the other names are
+    #    package vars (it warns "Parenthesize").  Lower as a boxed `my $scalar`
+    #    let + the whole `$scalar <trailing>` expression discarded.  Keep
+    #    $scalar BOXED in the remainder (a later `$scalar = …` must not hit the
+    #    setf raw-slot path — VarAnnotator may have marked it unboxable).
+    my @kd = _strip_semi($first->schildren);
+    if (@kd >= 3 && $kd[0]->content eq 'my'
+        && $kd[1]->isa('PPI::Token::Symbol') && $kd[1]->content =~ /^\$\w+$/
+        && $kd[2]->isa('PPI::Token::Operator') && $kd[2]->content ne '=') {
+      my $sname = $kd[1]->content;
+      $self->_reg_lex($sname);
+      my $vi2 = { %$vi, $sname => { unboxable => 0 } };
+      return (['let', ['list', ['list', $sname, '(make-p-box nil)']],
+               $self->_lower_expr([@kd[1 .. $#kd]], $first, ':void'),
+               $self->_lower_block(\@rest, $vi2, $tail_ctx)]);
+    }
+
     # -- my @a / my %h / my (LIST) [= INIT];  → fresh containers in a let,
     # the assignment lowered by the ORIGINAL expression machinery (v1 parses
     # the whole `my … = …` statement as an expression and produces the
@@ -1010,11 +1029,9 @@ sub _lower_compound {
   }
 
   if ($kw eq 'while' || $kw eq 'until') {
-    # `continue` blocks run between iterations (also after `next`) — v1's
-    # p-while :continue plumbing owns that; not lowered natively yet.
-    die "Parser2 TODO: loop with continue block\n"
-      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
     my ($cond_s) = grep { $_->isa('PPI::Structure::Condition') } @k;
+    # The FIRST Structure::Block is the loop body; a second (after `continue`)
+    # is the continue block, handled by _continue_keys.
     my ($block)  = grep { $_->isa('PPI::Structure::Block') } @k;
     my $cond = $self->_lower_expr([_cond_parts($cond_s)], $stmt);
     # Perl loop conditions whose value comes from each/readline/readdir/glob
@@ -1025,7 +1042,8 @@ sub _lower_compound {
     $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
     $cond = ['p-!', $cond] if $kw eq 'until';
     return ['p-while', $cond, _label_keys($label),
-            $self->_lower_scope([$block->schildren], $vi)];
+            $self->_lower_scope([$block->schildren], $vi),
+            $self->_continue_keys(\@k, $vi)];
   }
 
   if (($kw eq 'for' || $kw eq 'foreach')
@@ -1035,6 +1053,10 @@ sub _lower_compound {
     # empties are simply absent.  Empty init/step → no form; empty cond →
     # constant true (v1's _process_c_style_for defaults).
     my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
+    # p-for IGNORES :continue and C-style-for + continue is invalid Perl anyway
+    # — gate defensively (never legitimately reached).
+    die "Parser2 TODO: C-style for with continue block\n"
+      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
     my @sect = grep { $_->isa('PPI::Statement') } $for_s->children;
     die "Parser2 TODO: for(;;) with extra sections" if @sect > 3;
     my ($init_s, $cond_s, $step_s) =
@@ -1088,8 +1110,6 @@ sub _lower_compound {
   }
 
   if ($kw eq 'for' || $kw eq 'foreach') {
-    die "Parser2 TODO: loop with continue block\n"
-      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
     my ($list) = grep { $_->isa('PPI::Structure::List') } @k;
     my ($block) = grep { $_->isa('PPI::Structure::Block') } @k;
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
@@ -1099,18 +1119,20 @@ sub _lower_compound {
     my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;
     my $list_form  = $self->_lower_expr(\@list_parts, $stmt, 1);
     # The loop variable is scoped to the BODY only: register it, lower the
-    # body, then restore _let_bound_vars/_live_lex so it does not leak into
-    # sibling statements.  Without this, a later sibling's string-eval capture
-    # alist would list the (now-unbound) loop var → unbound-variable at load
-    # (W3 regression seen in cmpchain.t).  _all_lex keeps it (forward-decl).
+    # body (and a continue block, which sees the loop var), then restore
+    # _let_bound_vars/_live_lex so it does not leak into sibling statements.
+    # Without this, a later sibling's string-eval capture alist would list the
+    # (now-unbound) loop var → unbound-variable at load (W3 regression seen in
+    # cmpchain.t).  _all_lex keeps it (forward-decl).
     my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
     my %saved_lex = %{ $self->{_live_lex} // {} };
     $self->_reg_lex($name);
     my @body = $self->_lower_scope([$block->schildren], $vi);
+    my @cont = $self->_continue_keys(\@k, $vi);
     $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
     return ['p-foreach', ['list', $name, $list_form],
-            _label_keys($label), @body];
+            _label_keys($label), @body, @cont];
   }
 
   die "Parser2 TODO: compound '$kw'";
@@ -1122,6 +1144,19 @@ sub _label_keys {
   my ($label) = @_;
   return () unless defined $label;
   return (':label', $label);
+}
+
+# `:continue (progn …)` pair for a while/foreach `continue { … }` block, placed
+# AFTER the loop body (parse-loop-keys finds :continue by position; v1 emits it
+# last), or nothing.  The continue block is its own lexical scope.
+sub _continue_keys {
+  my ($self, $k, $vi) = @_;
+  my ($ci) = grep { $k->[$_]->isa('PPI::Token::Word')
+                    && $k->[$_]->content eq 'continue' } 0 .. $#$k;
+  return () unless defined $ci;
+  my ($cont_block) = grep { $_->isa('PPI::Structure::Block') } @{$k}[$ci + 1 .. $#$k];
+  die "Parser2 TODO: continue without a block\n" unless $cont_block;
+  return (':continue', ['progn', $self->_lower_scope([$cont_block->schildren], $vi)]);
 }
 
 # A bare block is a single-iteration loop: last/next/redo work inside it.

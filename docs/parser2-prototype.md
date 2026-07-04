@@ -584,6 +584,33 @@ a package, `package` inside a block) keep their gate correctly.  Guards:
 `Pl/t/parser2-01.t` = 121 (renamed-cell defvar/no-let shape, interpolated +
 shadowed + array captures still gate, static-var idiom end-to-end run).
 
+## Session 272f (2026-07-05): W6 — small gates (continue blocks + odd `my` decls)
+
+**W6 shipped** (the cheap subset).
+
+- **`continue` blocks on while/until/foreach** lower natively to a `:continue
+  (progn …)` loop key (`_continue_keys`), placed AFTER the body — parse-loop-keys
+  finds `:continue` by position and v1 emits it there too.  The continue block is
+  its own lexical scope; a foreach continue is lowered while the loop var is still
+  registered (it can see it).  C-style-for + continue is invalid Perl (p-for
+  ignores `:continue`) → gated.  **Bare-block continue** (`L: { … } continue { … }`)
+  stays gated (v1 runs it after the tagbody — different shape); it's the sole
+  remaining blocker on loopctl.t, deliberately not chased.
+- **`my $scalar <non-'=' trailing>;`** (`my $aa, $bb, $cc;` / `my $a . $foo;`):
+  Perl declares ONLY the scalar (a lexical) and evaluates the rest as an ordinary
+  void expression whose first operand is the fresh lvalue; the other names are
+  package vars.  Lowered as a boxed `my $scalar` let + the whole `$scalar
+  <trailing>` expression discarded, with $scalar forced boxed in the remainder (a
+  later `$scalar = …` must not hit the setf raw-slot path).
+
+**Parity:** 69 files lower through v2 (was 67) at exact v1 sweep parity —
+`_status.tsv` byte-identical bar the two known deltas (chop skip-registry,
+sprintf v2-better).  concat.t and or.t are the net-new natives.  Still gated by
+design: loopctl.t (bare-block continue), for.t ("foreach without list" — a PPI
+artifact, not a real foreach).  Guards moved to a new file
+`Pl/t/parser2-02.t` (10 tests) so the guard suite stays split by size;
+`parser2-01.t` = 122.
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is
