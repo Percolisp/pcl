@@ -266,15 +266,128 @@ alias (v1 has the same divergence).  Verified end-to-end incl. `our @ISA =
 ('Animal')` inheritance across sections.  Didn't unlock new sweep files by
 itself — aassign.t's next gate is the bare `{ … }` loop-once block.
 
-## Next steps, in leverage order
+## What's left — the road from prototype to default pipeline
 
-1. **Bare blocks `{ … }`** — loop-once semantics (`last`/`next`/`redo` work
-   in them), so not just a scoped progn; now aassign.t's gate.
-2. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
-   (`type-flow-and-codegen-plan.md` §(s)) once shapes stabilize.
-3. Grow the native expression set: hash/array element access ($h{k}, $a[i])
-   is the next perf tier (tight loops over aggregates).
-4. Lean p-sub round 2 (catch elision / bind elision) — only with fresh
-   measurements, see above.
-5. Package block form `package Foo { … }` (scoped push/pop, v1 has the
-   model) and `package Foo VERSION;`.
+### Where we stand (measured 2026-07-04, session 270b)
+
+First-gate census over all 111 `perl-tests/*.t` (each file reports only the
+FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
+
+| files | first gate |
+|---:|---|
+| 65 | string eval (`eval EXPR`) |
+| 16 | bare block `{ … }` (loop-once) |
+| 6 | labeled statement (`SKIP:`, `TODO:`, `TEST1:` …) |
+| 4 | package block form `package Foo { … }` |
+| 3 | file lexical captured by a named sub |
+| 2 | `local` declaration statement (`local $/;`) |
+| 2 | sub with prototype/signature |
+| 1 | statement modifier `foreach` |
+| 1 | `for(;;)` with empty sections |
+| **11** | **(lower fully through v2, 100% parity)** |
+
+Reproduce with:
+```bash
+for f in perl-tests/*.t; do PCL_V2=1 PCL_V2_VERBOSE=1 perl -I. pl2cl \
+  --no-cache --lenient-ppi $f 2>&1 >/dev/null | grep -m1 'fell back'; done
+```
+
+### Tier A — coverage: kill the wholesale-fallback gates
+
+**A1. String eval — THE design item (65 files).** Three stages:
+  1. *Cheap*: replace the text-scan gate (`/\beval\b(?!\s*\{)/` — fires on
+     comments, strings, and `eval {` split across lines) with a PPI-level
+     test: a Word `eval` whose next significant sibling is not a Block.
+     Recovers every file that only *mentions* eval.
+  2. *Scoped demotion*: when a scope (or any scope it encloses) contains a
+     real `eval EXPR` call, demote the my-lexicals **visible at that point**
+     to the v1 shape — boxed, plus registered in the session-250 dynamic
+     capture table (`docs/eval-lexical-capture.md`) so the separately
+     compiled eval'd code can read/write them.  Everything outside such
+     scopes keeps true lexicals and raw slots.  This needs a pre-pass
+     marking eval-tainted scopes before `_lower_block` decides let shapes.
+  3. *Names*: demoted vars that collide with untainted lets of the same
+     name elsewhere must be renamed (v1's `$x__lex__N` closure-rename
+     machinery is the model) — a defvar proclaims the symbol special
+     file-wide and would poison sibling lets.
+
+**A2. Bare blocks `{ … }` + labels (~22 files).** A bare block is a
+  loop-once: `last`/`next`/`redo` work inside it.  So NOT a progn —
+  lower as the loop machinery with a single iteration (v1 has the model;
+  check what `_process_element` emits — reuse its runtime form).  `my`
+  inside scopes naturally via `_lower_block`'s nested lets.  Labels
+  (`PPI::Token::Label` preceding a compound) ride along: v1 lowers labeled
+  loops to `catch 'pcl::LAST-LABEL` tags; v2 needs to accept the label
+  token in `_lower_stmt` and pass the tag into the loop forms.  aassign.t's
+  current gate.
+
+**A3. Statement-level fallback as the safety net (turns many gates into
+  non-events).** Today an unsupported STATEMENT dies → whole-file v1.  Most
+  statement kinds that don't interact with v2's scoping could instead route
+  through the existing `_fallback_stmt` seam (one statement through v1 into
+  the section):
+  - `local $/;` / `local $! = 1;` declaration statements (2 files) — pure
+    runtime effect, safe to fallback per-statement.
+  - unsupported statement modifiers (`EXPR foreach LIST;`) — safe.
+  - `for(;;)` with empty sections — or just implement (trivial: default
+    cond to true, drop empty init/step).
+  NOT safe for per-statement fallback: anything containing `my` (scope
+  shape), loops containing `last`/`next` that must unwind v2 forms, and
+  named subs (definition bucketing) — those keep their explicit gates.
+
+**A4. Package block form (4 files).** With sections in place this is
+  mechanical: block form at top level = open a section for the block's
+  package, lower the block body as a segment, then open a *return* section
+  for the enclosing package (v1's `_process_package_statement` block branch
+  is the template, including `p-set-current-package` restore).  Versioned
+  `package Foo 1.2;` = same + `_emit_package_version` equivalent.
+  Nested-in-sub block form can stay gated (rare).
+
+**A5. File lexicals captured by named subs (3 files, incl. qq.t).**
+  Real design work, same family as A1 stage 2/3: demote exactly the
+  captured names to renamed defvar'd boxes (`$test__file__N`) so the hoisted
+  `p-sub` definitions can reference them; un-captured lexicals stay true.
+  Alternative considered and rejected: emitting subs inside the lets (CL
+  closures) — breaks the definitions-bucket contract and BEGIN visibility.
+
+**A6. Prototype/signature subs (2+ files).** The pre-pass already *sees*
+  `$child->prototype` — register it in the Environment (v1's
+  `_process_sub_statement` does) so call sites parse correctly, and lower
+  the sub DEFINITION via `_fallback_stmt` (v1 handles signature binding).
+  v2-native signature lambda lists come later; correctness first.
+
+### Tier B — make v2 the default
+
+1. **Full-sweep parity**: `PCL_V2=1 perl sweep-perl-tests.pl --jobs 8` vs
+   the v1 baseline (18089 pass / 62 fully passing) — every diff is either a
+   v2 bug or an intentional improvement; triage with `tools/sweep-diff.pl`.
+2. **Gate under v2**: `PCL_V2=1 prove -j8 Pl/t/` must match v1's 113/3780.
+3. Flip the default in pl2cl (`PCL_V1=1` becomes the escape hatch), keep
+   the whole-file fallback for the remaining explicit gates.
+4. Fix properly (not inherit) the v1 bug found in s270: a file lexical
+   referenced after `package Foo;` must still resolve to the declaring
+   scope, not `Foo::$x` — v2's section model + A5's renaming gives the
+   mechanism.
+
+### Tier C — the payoff work (after coverage, measure first)
+
+1. **Native hash/array element access** (`$h{k}`, `$a[$i]`) — the next
+   perf tier: tight loops over aggregates currently round-trip through
+   fallback ops and boxes.  Needs VarAnnotator gates for aggregate
+   contents (an unboxed slot must never receive a box from `$h{k}`).
+2. **OpcodeTree-walk VarAnnotator** replacing the text-scan gates
+   (`type-flow-and-codegen-plan.md` §(s)) — unlocks unboxing in the many
+   places the conservative text scan gives up (shadowing, `++` outside the
+   C-for carve-out, string-eval false positives).
+3. **Lean p-sub round 2** (catch elision needs a "no closure re-throws"
+   analysis; bind elision needs a whole-program "nobody calls caller()"
+   bit) — ONLY with fresh measurements; current per-call residue is
+   ~18ns catch + ~15ns binds.
+
+### Suggested order
+
+A3 (one afternoon, converts 4+ gates to per-statement fallbacks) → A2 (bare
+blocks+labels, biggest non-eval coverage jump) → A4 (mechanical) → A1 stage
+1 (cheap eval de-false-positives) → A6 → A1 stage 2/3 + A5 together (same
+renaming machinery) → B1/B2 parity push → C in parallel with B once
+coverage stabilizes.
