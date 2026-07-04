@@ -439,6 +439,8 @@ sub _lower_block {
 
   # -- my $x [= INIT];  → (let (($x …)) rest...)
   if ($first->isa('PPI::Statement::Variable')) {
+    my $our = $self->_lower_our_decl($first);
+    return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx)) if $our;
     my ($name, $init) = $self->_single_scalar_decl($first);
     if ($name) {
       $self->fallback_parser->{_let_bound_vars}{$name} = 1;
@@ -798,6 +800,43 @@ sub _apply_modifier {
   return ['p-if', $condform, $form]          if $mod eq 'if';
   return ['p-if', ['p-!', $condform], $form] if $mod eq 'unless';
   die "Parser2 TODO: statement modifier '$mod'";
+}
+
+# `our $x` / `our @a` / `our (LIST)` [= INIT] → arrayref of runtime forms
+# (possibly empty), or undef when the statement is not an `our` declaration.
+# `our` names PACKAGE vars: no let — a defvar is hoisted to the section top
+# (`_captured_decls`, read under the section's in-package), and the
+# assignment lowers as a plain package-var assignment through the ordinary
+# expression machinery (p-scalar-= / p-array-= / p-hash-= / p-list-=).
+# NB: like v1, the `our` alias's lexical VISIBILITY is not modelled — the
+# name simply resolves per-package (an `our $x` followed by `package Foo;
+# print $x;` reads Foo::$x in both pipelines; Perl reads the alias).
+sub _lower_our_decl {
+  my ($self, $stmt) = @_;
+  my @k = _strip_semi($stmt->schildren);
+  return undef unless @k >= 2
+    && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'our';
+  my @names;
+  if ($k[1]->isa('PPI::Token::Symbol')) {
+    @names = ($k[1]->content);
+  } elsif ($k[1]->isa('PPI::Structure::List')) {
+    @names = map  { $_->content }
+             grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
+  }
+  my $bad = !@names
+    || (grep { !/^[\$\@\%]\w+$/ } @names)
+    || (@k > 2 && !($k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='));
+  die "Parser2 TODO: unsupported our declaration: " . $stmt->content if $bad;
+  for my $n (@names) {
+    # A defvar of a let-bound name would proclaim it special and poison the
+    # lexical lets (see _forward_global_decls) — shadowing our/my → v1.
+    die "Parser2 TODO: our '$n' shadows a my-lexical\n"
+      if $self->fallback_parser->{_let_bound_vars}{$n};
+    push @{ $self->{_captured_decls} }, "(defvar $n " . _fresh_container($n) . ")";
+  }
+  return [] if @k == 2;
+  # `NAMES = RHS` minus the `our` keyword is a plain (list) assignment.
+  return [ $self->_lower_expr([@k[1 .. $#k]], $stmt) ];
 }
 
 # `my @a` / `my %h` / `my ($p, @q)` [= INIT] → (\@var_names, $has_init); else ().

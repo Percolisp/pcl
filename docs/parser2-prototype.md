@@ -252,11 +252,24 @@ versioned packages, `our` declarations, and nested `package` all fall back
 wholesale.  Guards: `Pl/t/parser2-01.t` (54 tests, incl. a package-sections
 end-to-end run).
 
+### Same day: `our` declarations (v2-native)
+
+`our $x` / `our @a` / `our (LIST)` `[= INIT]` — anywhere a statement lowers
+(top level, blocks, sub bodies): package vars, so **no let** — a defvar is
+hoisted to the section top (`_captured_decls`, read under the section's
+in-package) and the INIT lowers as a plain package-var assignment
+(`p-scalar-=`/`p-array-=`/`p-list-=`) through the ordinary machinery.
+`our $x` shadowing a my-lexical dies → v1 (the defvar would proclaim the
+let-bound name special).  Like v1, the `our` alias's *lexical* visibility is
+not modelled: after a later `package Foo;` the name reads `Foo::$x`, not the
+alias (v1 has the same divergence).  Verified end-to-end incl. `our @ISA =
+('Animal')` inheritance across sections.  Didn't unlock new sweep files by
+itself — aassign.t's next gate is the bare `{ … }` loop-once block.
+
 ## Next steps, in leverage order
 
-1. **`our` declarations at top level** — now the top wholesale-fallback
-   trigger (aassign.t etc.); an `our $x` is just "don't let-bind, defvar in
-   the section package".
+1. **Bare blocks `{ … }`** — loop-once semantics (`last`/`next`/`redo` work
+   in them), so not just a scoped progn; now aassign.t's gate.
 2. Replace VarAnnotator's text-scan gates with the OpcodeTree walk
    (`type-flow-and-codegen-plan.md` §(s)) once shapes stabilize.
 3. Grow the native expression set: hash/array element access ($h{k}, $a[i])

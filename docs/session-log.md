@@ -4,6 +4,22 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 270b (2026-07-04) — v2: `our` declarations.
+
+`_lower_our_decl` (`Pl/Parser2.pm`): `our $x`/`our @a`/`our (LIST)` `[= INIT]`
+→ defvar hoisted to the section top via `_captured_decls` (no let; package
+var), INIT lowered as a plain assignment through the ordinary machinery.
+Shadowing a my-lexical dies → v1 (defvar would proclaim the lexical special).
+Alias's lexical visibility across a later `package` NOT modelled (v1 same).
+Verified: our1 composite incl. `our @ISA` cross-section inheritance
+byte-identical to perl; 11 v2-lowered perl-tests still 100% parity;
+parser2-01.t 54→61.  GOTCHA (cost 20 min): `die if !@names || grep {…}
+@names || (…)` — the trailing `||` gets slurped into grep's LIST arg;
+parenthesize grep or restructure.  aassign.t's next v2 gate = bare `{…}`
+loop-once block (leverage item #1 now).
+
+---
+
 ## Session 270 (2026-07-04) — v2: `package` statements (section splitting) + two exposed-bug fixes.
 
 **User: continue the v2 prototype.** Item #1 from the leverage list: top-level

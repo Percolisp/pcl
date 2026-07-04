@@ -199,6 +199,26 @@ like($nocapt, qr/\(let \(\(\$n 1\)\)/, 'sub with its own params does not block v
 my $oct = Pl::Parser2->parse_code(q{my $o = 0100; print "$o\n";});
 like($oct, qr/\(\$o #o100\)/, 'octal literal routed to fallback (#o100), not bare 0100');
 
+# --- `our` declarations: package vars — defvar hoisted to the section top,
+# no let, assignment through the ordinary machinery.
+my $our = Pl::Parser2->parse_code(<<'EOF');
+our $count = 3;
+our @list = (1, 2);
+our ($p, $q) = (7, 8);
+sub show { return $count + $p + $q; }
+print show(), "\n";
+package Dog;
+our @ISA = ('Animal');
+EOF
+like($our, qr/^\(defvar \$count \(make-p-box nil\)\)/m, 'our $x defvar hoisted');
+like($our, qr/^\(defvar \@list /m, 'our @a defvar hoisted');
+like($our, qr/\(p-scalar-= \$count 3\)/, 'our $x init is a plain package-var assignment');
+like($our, qr/\(p-list-= \(vector \$p \$q\)/, 'our (LIST) init via p-list-=');
+unlike($our, qr/\(let \(\(\$count/, 'our vars are not let-bound');
+like($our, qr/\(in-package :Dog\).*\(defvar \@ISA /s, 'our @ISA defvar lands in its package section');
+my $ourshadow = eval { Pl::Parser2->parse_code(q{my $x = 1; our $x; print $x;}) };
+like($@, qr/shadows a my-lexical/, 'our shadowing a my-lexical dies to v1');
+
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
   skip 'sbcl not available', 2 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
