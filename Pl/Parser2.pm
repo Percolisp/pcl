@@ -85,14 +85,31 @@ sub _source {
 sub parse {
   my $self = shift;
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
+  my $doc = PPI::Document->new(\$src) or die "Parser2: PPI parse failed";
+
   # String eval (eval EXPR, not eval BLOCK) captures enclosing my-lexicals via
   # dynamic lookup (session-250 mechanism) — that requires the v1 shape where
   # file-scope my-vars are defvar'd specials.  v2's true lexical `let`s are
   # invisible to separately-compiled eval'd code, so any such file → v1.
-  # (Conservative: also triggers on `eval` in comments/strings.)
-  die "Parser2 TODO: string eval (needs special-var my capture)\n"
-    if $src =~ /\beval\b(?!\s*\{)/;
-  my $doc = PPI::Document->new(\$src) or die "Parser2: PPI parse failed";
+  # PPI-level test (W2): a Word `eval` that is NOT a method call, a hash key,
+  # or `eval { … }` (block form is fine).  Comments/strings/POD never appear as
+  # Word tokens, so the old text-scan false positives (eval in a string, a
+  # `#`-comment, or `eval {` split across lines) vanish for free.
+  my $evals = $doc->find(sub {
+    my $t = $_[1];
+    return 0 unless $t->isa('PPI::Token::Word') && $t->content eq 'eval';
+    my $prev = $t->sprevious_sibling;
+    return 0 if $prev && $prev->isa('PPI::Token::Operator')
+             && $prev->content =~ /^(?:->|=>)$/;         # ->eval / key => eval
+    return 0 if $prev && $prev->isa('PPI::Token::Word')
+             && $prev->content eq 'sub';                 # sub eval (pathological)
+    my $next = $t->snext_sibling;
+    return 0 if $next && $next->isa('PPI::Structure::Block');    # eval { }
+    return 0 if $next && $next->isa('PPI::Token::Operator')
+             && $next->content eq '=>';                  # eval => value (key)
+    return 1;                                            # eval EXPR (string eval)
+  }) || [];
+  die "Parser2 TODO: string eval\n" if @$evals;
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
   $self->{_referenced_pkgs} = {};
@@ -152,12 +169,21 @@ sub parse {
         ? ($child)
         : @{ $child->find('PPI::Statement::Sub') || [] };
       for my $sub (@subs) {
-        next unless $sub->name && $sub->block
-          && !$sub->isa('PPI::Statement::Scheduled');
+        next unless $sub->name && !$sub->isa('PPI::Statement::Scheduled');
         # A prototype/signature changes how CALL SITES parse (arity, imposed
         # context) — outside the prototype's native subset.
         die "Parser2 TODO: sub with prototype/signature: " . $sub->name
           if $sub->prototype;
+        $self->environment->add_declared_sub($sub->name, $seg->{pkg});
+        # Same default signature v1's _process_sub_statement registers for a
+        # prototype-less sub: PExpr consults get_prototype() to decide that a
+        # bareword `foo` is a CALL (pl-foo), not the string "foo".
+        $self->environment->add_prototype($sub->name,
+                                          { params => [], min_params => -1, is_proto => 0 });
+        # Forward declaration `sub foo;` (no block) reserves the name only — v1
+        # emits (p-declare-sub) and no definition.  No sub_info: there is
+        # nothing to direct-call, so any call takes the fallback funcall path.
+        next unless $sub->block;
         # cl_name stays UNQUALIFIED (pl-foo) for a plain name: the section's
         # in-package makes the reader intern it in the segment's package —
         # exactly v1's per-section convention.
@@ -165,12 +191,6 @@ sub parse {
           cl_name     => $self->fallback_parser->_qualified_sub_to_cl($sub->name),
           insensitive => $self->_sub_ctx_insensitive($sub),
         };
-        $self->environment->add_declared_sub($sub->name, $seg->{pkg});
-        # Same default signature v1's _process_sub_statement registers for a
-        # prototype-less sub: PExpr consults get_prototype() to decide that a
-        # bareword `foo` is a CALL (pl-foo), not the string "foo".
-        $self->environment->add_prototype($sub->name,
-                                          { params => [], min_params => -1, is_proto => 0 });
       }
     }
   }
@@ -190,7 +210,8 @@ sub parse {
       if ($child->isa('PPI::Statement::Sub') && $child->name
           && !$child->isa('PPI::Statement::Scheduled')) {
         push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
-        push @defs, $self->_lower_sub($child);
+        # Forward declaration `sub foo;` reserves the name only (no definition).
+        push @defs, $self->_lower_sub($child) if $child->block;
         next;
       }
       # `use strict`-family pragmas are pure no-ops; real use/require/BEGIN
@@ -617,9 +638,15 @@ sub _lower_block {
 
   # -- a named sub nested inside a block: package-global in Perl (the block
   # only bounds lexical capture, which _hoist_nested_sub gates on) — hoist
-  # the definition into the section's decl/def buckets.
-  if ($first->isa('PPI::Statement::Sub') && $first->name && $first->block) {
-    $self->_hoist_nested_sub($first);
+  # the definition into the section's decl/def buckets.  A bodyless forward
+  # declaration (`sub foo;`) hoists only a p-declare-sub (no definition).
+  if ($first->isa('PPI::Statement::Sub') && $first->name) {
+    if ($first->block) {
+      $self->_hoist_nested_sub($first);
+    } else {
+      push @{ $self->{_hoisted_decls} },
+        ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($first->name)];
+    }
     return $self->_lower_block(\@rest, $vi, $tail_ctx);
   }
 

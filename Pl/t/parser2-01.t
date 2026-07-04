@@ -241,6 +241,27 @@ like($ver, qr/\(defvar Counter::\$VERSION \(make-p-box nil\)\)/,
 like($ver, qr/\(p-scalar-= Counter::\$VERSION 1\.5\)/,
      'versioned package assigns $VERSION in source order');
 
+# --- W2 (session 272): string-eval gate is now a PPI walk, not a text scan ---
+
+# eval BLOCK is fine (no lexical-capture problem) — must lower natively.
+my $eb = eval { Pl::Parser2->parse_code(q{my $x = eval { 1 + 2 }; print "$x\n";}) };
+ok(!$@, 'eval BLOCK does not trip the string-eval gate') or diag($@);
+# eval STRING still gates → v1 (its lexicals are invisible to eval'd code).
+eval { Pl::Parser2->parse_code(q{my $x = eval "1+2"; print "$x\n";}) };
+like($@, qr/string eval/, 'eval STRING still dies to v1');
+# The old text scan tripped on `eval` mentions that are not string eval; the
+# PPI walk excludes a `=>` hash key and a `->eval` method call.
+my $ek = eval { Pl::Parser2->parse_code(q{my %h = (eval => 1); print $h{k};}) };
+ok(!$@, 'eval as a fat-comma hash key does not gate') or diag($@);
+my $em = eval { Pl::Parser2->parse_code(q{my $r = 0; my $v = $r->eval();}) };
+ok(!$@, 'eval as a method call does not gate') or diag($@);
+
+# Bodyless forward declaration `sub foo;` — v1 emits (p-declare-sub); v2 must
+# too (not crash on $sub->block), with NO definition.
+my $fwd = Pl::Parser2->parse_code(q{sub t1; sub u; print "hi\n";});
+like($fwd, qr/\(p-declare-sub pl-t1\)/, 'forward-declared sub emits p-declare-sub');
+unlike($fwd, qr/\(p-sub pl-t1\b/, 'forward declaration emits no definition');
+
 # --- A3 (session 271): local / statement modifiers / for(;;) ---
 
 # `local` lowers through v1's machinery; the opened save/restore scope wraps

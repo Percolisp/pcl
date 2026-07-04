@@ -4,6 +4,23 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 272b (2026-07-04) — v2 W2: string-eval gate → PPI walk; bodyless subs.
+
+- **String-eval gate is now a PPI walk** (moved after `PPI::Document->new`): a
+  Word `eval` gates only when it is genuine string eval — excludes `->eval`
+  method, `eval =>`/`sub eval`, and `eval { }` block form.  The old text scan
+  false-fired on `eval` in comments/strings/POD/hash-keys and `eval {` split
+  across lines; those 12 files recover for free.
+- **Bodyless forward declarations** (`sub foo;`, `sub u;`) exposed by W2 (they
+  reached `_lower_sub` once eval stopped gating and crashed on `$sub->block`):
+  now emit `(p-declare-sub pl-foo)` (v1's shape) with no definition; name
+  registered in the Environment but NO sub_info (calls take the fallback
+  path).  Prototyped bodyless subs gate cleanly into W4.  Fixed in the
+  pre-pass, top-level lowering loop, and `_lower_block`'s nested-sub branch.
+- **40 files v2-native** (was 34) at **exact v1 sweep parity** (1454/10/2612,
+  36 fully-passing, `_status.tsv` byte-identical).  53 files still genuinely
+  use `eval EXPR` → W3.  Guards: `Pl/t/parser2-01.t` 96 → 102.
+
 ## Session 272 (2026-07-04) — v2 W1: package block form + versioned packages.
 
 - **`package Foo { … }` block form** and **versioned `package Foo 1.5;`** now

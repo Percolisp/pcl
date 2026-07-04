@@ -403,6 +403,35 @@ gate's 4 files (the others hit a later gate).  Guards: `Pl/t/parser2-01.t` = 96
 (block-form preamble-once + return-section shape, version defvar+assign,
 block-form e2e dispatch-and-return).
 
+## Session 272b (2026-07-04): W2 — string-eval gate becomes a PPI walk
+
+**W2 shipped.**  The wholesale string-eval gate was a text scan
+(`/\beval\b(?!\s*\{)/`) that false-fired on `eval` in comments, strings, POD,
+hash keys, and `eval {` split across lines.  Replaced with a PPI walk (moved
+AFTER `PPI::Document->new`): a Word `eval` gates only when it is real string
+eval — not a `->eval` method, not an `eval =>`/`sub eval`, and not `eval { }`
+(block form is fine).  Comments/strings/POD never tokenize as Word, so those
+false positives vanish for free.
+
+**Bodyless forward declarations fixed (exposed by W2).**  With eval no longer
+gating, `exists_sub.t` and `reset.t` reached `_lower_sub` on a bodyless
+`sub foo;` / `sub u;` and CRASHED (`$sub->block->schildren` on undef).  Now a
+bodyless named sub emits `(p-declare-sub pl-foo)` — v1's exact shape for a
+forward declaration — and no definition; the name is still registered in the
+Environment (so bareword calls parse as calls) but gets NO `sub_info` (there is
+nothing to direct-call, so any call takes the fallback funcall path).
+Prototyped bodyless subs (`sub t4 ($);`) gate cleanly into W4 instead of
+crashing.  Fixed in the pre-pass, the top-level lowering loop, and
+`_lower_block`'s nested-sub branch.
+
+**Parity:** 40 files lower through v2 (was 34) at **exact v1 sweep parity —
+1454 pass / 10 fail / 2612 skip, 36 fully-passing, `_status.tsv` byte-identical
+on both pipelines**.  The 6 net-new natives (die, kvaslice, lc, lex, negate,
+and others that only *mention* eval) were already fully-passing under v1.
+Remaining string-eval files still gate — enabling `eval EXPR` is W3.  Guards:
+`Pl/t/parser2-01.t` = 102 (eval BLOCK native / eval STRING gates / `=>` +
+`->eval` don't gate / bodyless forward decl emits p-declare-sub, no def).
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is
@@ -411,23 +440,24 @@ block-form e2e dispatch-and-return).
 > silent-failure classes, and acceptance criteria. This section stays as
 > the shorter overview.
 
-### Where we stand (measured 2026-07-04, session 272, post-W1)
+### Where we stand (measured 2026-07-04, session 272b, post-W2)
 
 First-gate census over all 111 `perl-tests/*.t` (each file reports only the
 FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
 
 | files | first gate |
 |---:|---|
-| 65 | string eval (`eval EXPR`) |
-| 3 | `package` inside a block (`PPI::Statement::Package` in _lower_stmt) |
-| 2 | sub with prototype/signature |
-| 4 | lexical captured by a (nested or top-level) sub |
+| 53 | string eval (`eval EXPR` — now a precise PPI gate; W3 enables it) |
+| 5 | `package` inside a block (`PPI::Statement::Package` in _lower_stmt) |
+| 6 | sub with prototype/signature (W4) |
+| 4 | lexical captured by a (nested or top-level) sub (W5) |
 | 1 | loop with continue block |
 | 1 | unsupported declaration `my $aa, $bb, $cc;` |
-| **34** | **(lower fully through v2 — 1227/1227 = exact v1 sweep parity: 9 fails identical to v1's own, 31 fully passing on both)** |
+| **40** | **(lower fully through v2 — 1454/1454 = exact v1 sweep parity: 10 fails identical to v1's own, 36 fully passing on both)** |
 
-(W1, s272: package block form is no longer a gate. The 3 `package`-inside-a-
-block files use `{ package Foo; … }` and stay gated by design.)
+(W1, s272: package block form is no longer a gate. W2, s272b: the string-eval
+text scan is now a precise PPI walk — 12 files that only *mentioned* eval
+recovered; the 53 remaining genuinely use `eval EXPR` and wait on W3.)
 
 Reproduce with:
 ```bash

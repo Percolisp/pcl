@@ -405,7 +405,7 @@ for Foo and the return section uses only `(in-package`; a versioned-pkg
 shape test for the `$VERSION` defvar+assign pair; program (a) as an
 end-to-end run.
 
-### W2. String eval, stage 1 — replace the text-scan gate with a PPI test
+### ~~W2. String eval, stage 1 — replace the text-scan gate with a PPI test~~ — DONE (s272b, this commit)
 
 **Files:** `Pl/Parser2.pm`.
 **Anchor:** in `parse()`, `die … if $src =~ /\beval\b(?!\s*\{)/` (near the
