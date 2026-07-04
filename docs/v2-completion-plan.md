@@ -946,16 +946,34 @@ this unlocks the fast call path for a large fraction of call-heavy programs.
 
 **Approach — a parse-time normalization into the EXISTING fast path** (CLAUDE.md
 §11), NOT a new codegen path: in `_lower_sub_inner`, detect a *contiguous
-leading run* of `my $SCALAR = shift;` statements and coalesce them into one
-`my ($a,$b,…) = @_;`, after which the current `_extract_params` lambda-list
-optimization takes over unchanged.
+leading run* of `my $SCALAR = shift;` statements and coalesce the WHOLE run into
+one `my ($a,$b,…) = @_;`, after which the current `_extract_params` lambda-list
+optimization takes over unchanged. The run length is arbitrary — a single
+`my $n = shift;` and a multi-arg `my $self = shift; my $x = shift; my $y = shift;`
+are the same transform, just runs of length 1 and 3:
+
+```perl
+sub f { my $x = shift; my $z = shift; return $x + $z; }   # →
+sub f { my ($x, $z) = @_;              return $x + $z; }   # (&optional ($x …) ($z …) …)
+```
+
+The order is preserved (the Nth bare `shift` binds `@_[N-1]`, exactly the Nth
+slot of the list assignment), so the coalesce is value-identical whenever the
+guard below holds. It is safe precisely because the guard forbids the remainder
+from observing `@_` — the one thing the run of `shift`s mutated that the single
+`my (…) = @_` does not.
 
 **Guard (all must hold — conservative):**
 1. Each rewritten statement is exactly `my $scalar = shift;` with a **bare**
    `shift` — never `shift @arr`, `shift(@x)`, or `my $x = shift // $default`
    (those are not a plain first-element bind).
-2. Only a contiguous **leading** run (stop at the first non-matching statement;
-   interleaved non-shift `my`s can be handled later but keep v1 for now).
+2. Only a contiguous **leading** run — collect `my $x = shift;` statements from
+   the top of the body and STOP at the first statement that is not one (any
+   number qualify, so `my $x=shift; my $z=shift;` → `my ($x,$z)=@_;`). An
+   *interleaved* non-shift statement (`my $x=shift; my $t=1; my $z=shift;`)
+   ends the run at `$t` — the trailing `my $z=shift;` is NOT folded in for now
+   (it could be, since `$t` doesn't consume `@_`, but that needs care and is a
+   later refinement; keeping only the leading run is the conservative version).
 3. The **remainder must not use `@_`** — reuse the existing `$body_uses_args`
    scan (`/\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/`) on the post-run body.
 4. **The remainder must not contain string `eval`.** This is the subtle,
@@ -968,10 +986,14 @@ optimization takes over unchanged.
    so an eval reading `@_` sees the same value either way. The eval disqualifier
    is unique to the shift rewrite, precisely because of the mutation.)
 
-**Guards to add:** `Pl/t/parser2-01.t` — leading `my $x = shift` (clean body)
-lowers to `(&optional ($x (p-undef)) …)`; a body that still reads `@_`/`$_[N]`
+**Guards to add:** `Pl/t/parser2-01.t` — single leading `my $x = shift` (clean
+body) lowers to `(&optional ($x (p-undef)) …)`; a MULTI run `my $x=shift;
+my $z=shift;` lowers to `(&optional ($x (p-undef)) ($z (p-undef)) …)` and runs
+end-to-end matching perl for `f(1,2)`; a body that still reads `@_`/`$_[N]`
 stays on `(&rest %_args) (p-args-body …)`; a body with `eval '…'` stays on the
-`p-args-body` path. Then the full parity sweep before committing. Re-measure the
+`p-args-body` path; an interleaved `my $x=shift; my $t=1; my $z=shift;` folds
+only `$x` (or, in the conservative version, keeps v1). Then the full parity
+sweep before committing. Re-measure the
 `shift`-fib bench — it should move from ~1.0× to ~5×.
 
 ---
