@@ -11,9 +11,11 @@ $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
 The `pcl` command runs one-liners directly, including `-M` imports of pure-Perl CPAN modules:
 
 ```bash
-$ pcl -MData::Dump=dump -E '@q=(1 .. 5); @w = map { $_, ":", $_ ** $_ } @q; say dump \@w;'
+$ ./pcl -MData::Dump=dump -E '@q=(1 .. 5); @w = map { $_, ":", $_ ** $_ } @q; say dump \@w;'
 [1, ":", 1, 2, ":", 4, 3, ":", 27, 4, ":", 256, 5, ":", 3125]
 ```
+
+Right now, the compiler is being reworked a bit. Uploads would be messy, so they will wait for a few week or so.
 
 ### Why Common Lisp?
 
@@ -102,9 +104,7 @@ A few of the biggest items:
 
 ## How It Is Tested
 
-Testing currently leans on real CPAN modules and a differential fuzzer.
-
-For most of development, though, the workhorse has been Perl's own excellent, thorough test suite (`t/op/`, `t/base/`, …): PCL compiles those test files to Common Lisp and runs them, using Perl's own expectations as the oracle for compatibility.
+Testing is done with CPAN modules, a differential fuzzer and Perl's own excellent test suite (`t/op/`, `t/base/`, …): PCL compiles those test files to Common Lisp and runs them, using Perl's own expectations as the oracle for compatibility.
 
 Some tests exercise features that are deliberately out of scope (e.g. CL-PPCRE has no executable code blocks inside regexes, `(?{...})`, and removed/experimental features aren't implemented). Those tests have to be skipped — which means some features can quietly end up *under-covered*, something that has to be reviewed with care rather than assumed away.
 
@@ -132,13 +132,15 @@ Generated code is intentionally readable: Perl variables keep their sigils (`$x`
 
 ## Status
 
+With temporary access to Fable 5, it was used to plan the rewrite of the compiler. This has been going well.
+
 This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the finish line now looks like weeks away, not months.
 
 Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **69 files passing completely**. Several pure-Perl CPAN modules now run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process.
 
-As an aside - Claude suggested doing "fuzzing", between PCL and Perl. It generated different expressions and evaluated them in both environments. It was valuable, found both real bugs and formatting differences etc. (It seems to be a common procedure in compilers? I didn't know, if compilers were my job I would have another hobby. :-) )
+As an aside - Claude suggested doing "fuzzing", between PCL and Perl. It generated different expressions and evaluated them in both environments. It was valuable in finding bugs. (It seems to be standard procedure when building compilers. :-) )
 
-A small illustration of how it gets done: when implementing `pack()` in CL proved fiddly even with the original C source in hand, the trick was to write `pack` *in Perl* and let PCL translate it to CL. It worked — eating our own dog food.
+There was a fun roundabout when implementing `pack()` in CL. It proved fiddly for CLaude, even with the original C source in hand. It worked to write `pack` *in Perl* and let PCL translate it to CL. It worked — eating our own dog food.
 
 My own Common Lisp experience is from long ago; that side of the work is essentially all Claude.
 
