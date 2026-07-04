@@ -369,6 +369,12 @@ no-flatten, shift-in-sub).
 
 ## What's left — the road from prototype to default pipeline
 
+> **The detailed, prescriptive implementation plan for everything below is
+> `docs/v2-completion-plan.md`** (written session 271b): per-item approach,
+> file/function anchors, the mandatory verification loop, the five
+> silent-failure classes, and acceptance criteria. This section stays as
+> the shorter overview.
+
 ### Where we stand (measured 2026-07-04, session 271b, post-A2+A3)
 
 First-gate census over all 111 `perl-tests/*.t` (each file reports only the
