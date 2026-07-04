@@ -161,9 +161,17 @@ sub parse {
       for my $sub (@subs) {
         next unless $sub->name && !$sub->isa('PPI::Statement::Scheduled');
         # A prototype/signature changes how CALL SITES parse (arity, imposed
-        # context) — outside the prototype's native subset.
-        die "Parser2 TODO: sub with prototype/signature: " . $sub->name
-          if $sub->prototype;
+        # context like `($)` → scalar, block-form `(&@)`).  Register it so the
+        # fallback PExpr parses call sites correctly; the DEFINITION is lowered
+        # by v1 via _fallback_stmt (signature binding + arity checks).  NO
+        # sub_info: ExprToCL2's direct-call path ignores imposed context, so
+        # call sites to a prototyped sub must take the fallback funcall path.
+        if (defined(my $proto = $self->_proto_or_sig_str($sub))) {
+          my $sig_info = $self->fallback_parser->parse_prototype_or_signature($proto, $sub);
+          $self->environment->add_prototype($sub->name, $sig_info);
+          $self->environment->add_declared_sub($sub->name, $seg->{pkg});
+          next;
+        }
         $self->environment->add_declared_sub($sub->name, $seg->{pkg});
         # Same default signature v1's _process_sub_statement registers for a
         # prototype-less sub: PExpr consults get_prototype() to decide that a
@@ -199,6 +207,14 @@ sub parse {
     for my $child (@{ $seg->{stmts} }) {
       if ($child->isa('PPI::Statement::Sub') && $child->name
           && !$child->isa('PPI::Statement::Scheduled')) {
+        # Prototyped/signatured sub: v1 owns the whole definition.
+        # _fallback_stmt runs v1's _process_sub_statement, which emits the
+        # p-declare-sub + p-sub into its declaration/definition buckets (→
+        # _captured_decls).  Any runtime raw it returns (rare) goes to @defs.
+        if (defined $self->_proto_or_sig_str($child)) {
+          push @defs, $self->_fallback_stmt($child);
+          next;
+        }
         push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
         # Forward declaration `sub foo;` reserves the name only (no definition).
         push @defs, $self->_lower_sub($child) if $child->block;
@@ -222,7 +238,12 @@ sub parse {
       version  => $seg->{version},
       decls    => [map { Pl::CLForm::to_string($_, 0) } @decls],
       defs     => [map { Pl::CLForm::to_string($_, 0) } @defs],
-      run      => [map { Pl::CLForm::to_string($_, 0) } @runtime],
+      # A top-level `my` nests its whole block remainder in ONE `let` form; for
+      # a large block (arith.t's ~180 `$T++` calls) that single form exhausts
+      # SBCL's compiler heap when the R1 hot ops open-code inline.  v1 caps this
+      # by wrapping any oversized top-level runtime form in a
+      # `(locally (declare (notinline …)))` — reuse that mechanism verbatim.
+      run      => [map { Pl::Parser::_cap_inlining_if_huge(Pl::CLForm::to_string($_, 0)) } @runtime],
       captured => [@{ $self->{_captured_decls} }],
     };
   }
@@ -366,6 +387,20 @@ sub _collect_lexical_names {
 # are fine: they are lowered in place, inside the lets.)  Conservative text
 # scan: a sub that re-declares the same name with its own `my` also dies —
 # that only costs the v2 lowering, never correctness.
+# The prototype/signature string of a named sub, or undef if it is plain.
+# PPI represents an old-style prototype as a PPI::Token::Prototype (reachable
+# via ->prototype), but a real signature (when `use feature 'signatures'` is in
+# the document) as a PPI::Structure::Signature child — for which ->prototype is
+# undef.  Both must route the sub's DEFINITION through v1's _process_sub_statement
+# (imposed context / signature binding + arity checks).
+sub _proto_or_sig_str {
+  my ($self, $sub) = @_;
+  my $p = $sub->prototype;
+  return $p if defined $p;
+  my ($sig) = grep { $_->isa('PPI::Structure::Signature') } $sub->children;
+  return $sig ? $sig->content : undef;
+}
+
 sub _check_sub_captures {
   my ($self, $stmts) = @_;
   my %lex;

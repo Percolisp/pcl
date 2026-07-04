@@ -565,7 +565,7 @@ a–c byte-match perl; census jump; exact parity on newly-native files.
 **Guards:** shape test for (b) (alist excludes closed-scope names);
 end-to-end run of (a); a test that `eval EXPR` no longer dies.
 
-### W4. Prototype/signature subs (2 files)
+### ~~W4. Prototype/signature subs (2 files)~~ — DONE (s272d, this commit)
 
 **Files:** `Pl/Parser2.pm`.
 **Anchors:** the pre-pass die (`"sub with prototype/signature"`); the

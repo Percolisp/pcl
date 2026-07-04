@@ -289,6 +289,30 @@ my $fc = Pl::Parser2->parse_code(q{%h = (N=>1); print "hi\n";});
 like($fc, qr/\(vector "N" 1\)/, 'fat-comma bareword before => stays a string, not a call');
 unlike($fc, qr/pl-N\b/, 'single-char bareword before => is not lowered as a funcall');
 
+# --- W4 (session 272d): prototype/signature subs ---
+
+# A prototyped sub is lowered by v1 via the fallback (imposed context); its
+# definition lands in the captured-decls / definitions region, not a native
+# (p-sub) from _lower_sub.  The `($)` prototype imposes scalar context on the arg.
+my $pr = Pl::Parser2->parse_code(
+  q{sub takes_scalar ($) { my ($n) = @_; return $n; } my @l=(7,8,9); print takes_scalar(@l);});
+like($pr, qr/\(p-sub pl-takes_scalar/, 'prototyped sub definition still emitted (via v1)');
+like($pr, qr/\(p-scalar .*pl-takes_scalar|pl-takes_scalar.*p-scalar|p-scalar/,
+     'prototype `($)` imposes scalar context at the call site');
+# A signature sub (PPI::Structure::Signature, ->prototype undef) also routes to
+# v1 — which emits the arity check + @_ binding, not a bare (&rest %_args).
+my $sig = Pl::Parser2->parse_code(
+  qq{use feature 'signatures';\nsub greet (\$name, \$g = "hi") { return "\$g \$name"; }\nprint greet("bob");});
+like($sig, qr/p-check-arity/, 'signature sub gets v1 arity-check binding (not a bare &rest)');
+
+# W4 regression (arith.t): a top-level `my` nests its whole block in one `let`;
+# an oversized body must be wrapped in (locally (declare (notinline …))) so the
+# R1 inline hot ops do not blow up SBCL's compiler (v1's _cap_inlining_if_huge).
+my $big = "my \$T = 0;\n" . ("\$T = \$T + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9;\n" x 400);
+my $bigcl = Pl::Parser2->parse_code($big);
+like($bigcl, qr/\(locally \(declare \(notinline/,
+     'oversized top-level my-block is wrapped to cap inline expansion');
+
 # --- A3 (session 271): local / statement modifiers / for(;;) ---
 
 # `local` lowers through v1's machinery; the opened save/restore scope wraps

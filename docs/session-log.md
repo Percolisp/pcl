@@ -4,6 +4,28 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 272d (2026-07-04) — v2 W4: prototype/signature subs.
+
+- **Prototyped/signatured subs no longer gated.** Pre-pass registers the proto
+  (`parse_prototype_or_signature` → add_prototype/add_declared_sub) so call
+  sites parse (imposed `($)`→scalar, block-form `(&@)`); the DEFINITION routes
+  through `_fallback_stmt` (v1 owns signature binding + arity checks); no
+  sub_info (call sites take the fallback funcall path).
+- **Signature detection** (`_proto_or_sig_str`): PPI marks a real signature
+  (with `use feature 'signatures'` in the document) as a
+  `PPI::Structure::Signature` child, for which `->prototype` is undef — must
+  detect both, else a signature took the native path with no `@_` binding.
+- **arith.t giant-form crash fixed** (unrelated to prototypes; arith.t just went
+  native): `my $T=1;` + ~180 `try $T++,…` nests all statements in ONE top-level
+  `let`, and R1 inline hot ops open-coding across it exhausts SBCL's compiler
+  heap.  Fix: reuse v1's `_cap_inlining_if_huge` — wrap oversized (>20k char)
+  top-level runtime forms in `(locally (declare (notinline …)))`.  A
+  statement-count gate was tried and reverted (over-fired on chop/infnan/tr/…
+  which have 120–306 statements but compile fine — the trigger is inline
+  expansion, not count).
+- **61 files v2-native at v1 parity** (only known chop/sprintf deltas; no
+  crashes; arith.t 183/183 both).  Guards: `Pl/t/parser2-01.t` 110 → 114.
+
 ## Session 272c (2026-07-04) — v2 W3: enable `eval EXPR` via the capture seam.
 
 - **String-eval gate removed.** `eval EXPR` lowers through the expression

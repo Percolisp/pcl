@@ -494,6 +494,42 @@ per-file delta explained above; `_status.tsv` identical apart from chop
 Guards: `Pl/t/parser2-01.t` = 110 (eval-STRING native + alist scope, foreach
 var non-leak, fat-comma token-restore, eval read/write-back e2e).
 
+## Session 272d (2026-07-04): W4 — prototype/signature subs
+
+**W4 shipped.**  Prototyped/signatured subs are no longer gated.  The pre-pass
+registers the prototype (`parse_prototype_or_signature` → `add_prototype` +
+`add_declared_sub`) so CALL SITES parse correctly (imposed context like `($)`→
+scalar, block-form `(&@)`); the DEFINITION routes through `_fallback_stmt`, so
+v1's `_process_sub_statement` owns signature binding + arity checks.  No
+`sub_info` entry — ExprToCL2's direct-call path ignores imposed context, so
+call sites take the fallback funcall path.
+
+- **Signatures vs prototypes** (`_proto_or_sig_str`): PPI represents an
+  old-style prototype as a `PPI::Token::Prototype` (via `->prototype`), but a
+  real signature — when `use feature 'signatures'` is in the DOCUMENT — as a
+  `PPI::Structure::Signature` child, for which `->prototype` is undef.  Detect
+  both; a signature routed through `->prototype` alone silently took the native
+  path and emitted a body with no `@_` binding.
+
+**arith.t giant-form crash (found & fixed).**  arith.t went native and CRASHED
+with SBCL heap exhaustion — `sub with prototype` was its gate, but the real
+issue is unrelated to prototypes: `my $T = 1;` followed by ~180 `try $T++, …`
+statements nests them ALL in ONE top-level `let` form, and the R1 inline hot
+ops (`p-post++` etc.) open-coding across ~180 statements in a single form
+exhausts the compiler's heap.  v1 never hits this (top-level `my` → defvar,
+each statement a separate top-level form) and already caps it for its own huge
+forms.  Fix: reuse v1's `_cap_inlining_if_huge` — wrap any oversized (>20 000
+char) top-level runtime form in `(locally (declare (notinline …)))`, which
+overrides the global inline proclamation for that scope.  A first attempt at a
+statement-COUNT gate was reverted: it over-fired on chop/infnan/tr/sort/… which
+have 120–306 top-level statements but compile fine (the trigger is inline
+expansion, not count).
+
+**Parity:** 61 files lower through v2 at v1 sweep parity — only the known chop
+(skip-registry) and sprintf (v2-better) deltas remain; no crashes; arith.t now
+183/183 on both.  Guards: `Pl/t/parser2-01.t` = 114 (proto def via v1 + imposed
+scalar ctx, signature arity-check, oversized-block notinline cap).
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is
@@ -516,10 +552,11 @@ FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
 | 1 | loop with continue block (W6) |
 | 1 | `foreach without list` |
 | 1 | unsupported declaration `my $aa, $bb, $cc;` (W6) |
-| **60** | **(lower fully through v2 — v1 sweep parity, all deltas explained: 3 bugs fixed, sprintf v2-better, chop not-supported-aliasing skip)** |
+| **61** | **(lower fully through v2 — v1 sweep parity, all deltas explained: sprintf v2-better, chop not-supported-aliasing skip)** |
 
-(W3, s272c: `eval EXPR` is enabled — string eval is no longer a gate; ~20 more
-files became native.  The remaining gates are W4/W5/W6/W10 work.)
+(W3, s272c: `eval EXPR` enabled.  W4, s272d: prototype/signature subs enabled
+(pre-pass registers the proto; v1 owns the definition) + arith.t giant-form
+crash fixed via v1's notinline cap.  Remaining gates are W5/W6/W10 work.)
 
 Reproduce with:
 ```bash
