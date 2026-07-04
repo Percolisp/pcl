@@ -367,6 +367,42 @@ Guards: parser2-01.t = 90 (bare-block/label shapes + e2e, hoisted nested
 subs + capture gate + sibling-scope non-gate, list-assign boxing, comment
 no-flatten, shift-in-sub).
 
+## Session 272 (2026-07-04): W1 — package block form + versioned packages
+
+**W1 shipped.**  Statement-form `package Foo;` already worked (s270); now the
+BLOCK form `package Foo { … }` and versioned `package Foo 1.5;` lower natively.
+
+- **Segment split** (`parse()`): the top-level split loop now tracks a
+  `$cur_pkg` and an `%opened` set.  A block-form `package Foo { … }` pushes a
+  segment for Foo (its stmts = `$block->schildren`) followed by a short-form
+  **return** segment for the enclosing package (`reopen => 1`).  A
+  statement-form `package Foo;` pushes one segment and advances `$cur_pkg`.
+  Each segment carries `reopen` (this package already had a section → emit the
+  short preamble) and `version`.
+- **Assembly**: a non-first, non-reopen section emits v1's full preamble
+  (`p-defpackage`/`in-package`/`defclass`/`p-register-pkg-name`); a reopen
+  section emits only `;;; back to package X` + `(in-package X)` — no
+  re-defpackage, and the per-package `$a`/`$b` defvars are skipped (already
+  emitted once).  Both keep the runtime `(p-set-current-package …)`.
+- **Versioned packages**: `version` is validated against
+  `/^v?\d+(?:[._]\d+)*$/` at split time (PPI's `->version` returns the BLOCK
+  text for an unversioned block form — same guard v1 uses).  A set version
+  emits the eval-when `$VERSION` defvar into decls and a `(p-scalar-= …)` at
+  the front of run (source-order set, not BEGIN — v1 has the same divergence).
+- **Nested `package` inside a bare block** (`{ package Foo; … }`, block-form
+  nested) stays gated in `_lower_stmt` → v1.  The 3 census files that hit it
+  (concat2.t, hash.t, vec.t) all use `{ package Class; DESTROY {…} }`, need
+  environment-only package tracking v2's section model can't do (the CL reader
+  can't switch package mid-form), and carry DESTROY-via-GC deps anyway.
+  Decision recorded: keep the gate.
+
+**Parity:** 34 files lower through v2 (was 32) at **exact v1 sweep parity —
+1227 pass / 9 fail / 35 skip, 31 fully-passing, `_status.tsv` byte-identical
+on both pipelines**.  The 2 net-new natives are among the former block-form
+gate's 4 files (the others hit a later gate).  Guards: `Pl/t/parser2-01.t` = 96
+(block-form preamble-once + return-section shape, version defvar+assign,
+block-form e2e dispatch-and-return).
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is
@@ -375,7 +411,7 @@ no-flatten, shift-in-sub).
 > silent-failure classes, and acceptance criteria. This section stays as
 > the shorter overview.
 
-### Where we stand (measured 2026-07-04, session 271b, post-A2+A3)
+### Where we stand (measured 2026-07-04, session 272, post-W1)
 
 First-gate census over all 111 `perl-tests/*.t` (each file reports only the
 FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
@@ -383,13 +419,15 @@ FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
 | files | first gate |
 |---:|---|
 | 65 | string eval (`eval EXPR`) |
-| 4 | package block form `package Foo { … }` |
-| 2 | `package` inside a block (`PPI::Statement::Package` in _lower_stmt) |
+| 3 | `package` inside a block (`PPI::Statement::Package` in _lower_stmt) |
 | 2 | sub with prototype/signature |
 | 4 | lexical captured by a (nested or top-level) sub |
 | 1 | loop with continue block |
 | 1 | unsupported declaration `my $aa, $bb, $cc;` |
-| **32** | **(lower fully through v2 — 1175/1175 = exact v1 sweep parity: 9 fails identical to v1's own, 29 fully passing on both)** |
+| **34** | **(lower fully through v2 — 1227/1227 = exact v1 sweep parity: 9 fails identical to v1's own, 31 fully passing on both)** |
+
+(W1, s272: package block form is no longer a gate. The 3 `package`-inside-a-
+block files use `{ package Foo; … }` and stay gated by design.)
 
 Reproduce with:
 ```bash

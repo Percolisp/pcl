@@ -4,6 +4,24 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 272 (2026-07-04) — v2 W1: package block form + versioned packages.
+
+- **`package Foo { … }` block form** and **versioned `package Foo 1.5;`** now
+  lower natively (v2 completion plan W1).  Segment-split loop tracks `$cur_pkg`
+  + `%opened`: a block form pushes a Foo segment plus a short-form **return**
+  segment for the enclosing package (`reopen`); assembly emits v1's full
+  preamble only for a package's first section, `;;; back to package X` +
+  `(in-package X)` for reopens (no re-defpackage, no duplicate `$a`/`$b`).
+  Versioned packages emit the eval-when `$VERSION` defvar + a source-order
+  `(p-scalar-= …)` (v1's `_emit_package_version` shapes, incl. its version
+  regex guard for PPI's block-text `->version` quirk).
+- **`{ package Foo; … }` (package inside a bare block) stays gated** → v1
+  (concat2.t, hash.t, vec.t; reader can't switch package mid-form, DESTROY-GC
+  deps anyway).  Decision recorded in `docs/parser2-prototype.md`.
+- **34 files v2-native** (was 32) at **exact v1 sweep parity** (1227/9/35, 31
+  fully-passing, `_status.tsv` byte-identical both pipelines).  Guards:
+  `Pl/t/parser2-01.t` 90→96.
+
 ## Session 271b (2026-07-04) — v2: A2 bare blocks + labels + nested subs; 3 more latent bugs.
 
 - **Bare blocks = loop-once** (v1's exact runtime shapes: unlabeled

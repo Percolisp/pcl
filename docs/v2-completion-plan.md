@@ -255,7 +255,7 @@ runtime tests inside the existing `SKIP:` block at the bottom via the
 `paren_balance()` helper there guards raw seams — use it whenever your
 feature involves raw text.
 
-### W1. Package block form `package Foo { … }` (4 files) + versioned packages
+### ~~W1. Package block form `package Foo { … }` (4 files) + versioned packages~~ — DONE (s272, this commit)
 
 **Files:** `Pl/Parser2.pm` only.
 **Anchors:** in `parse()`, the segment-split loop (search

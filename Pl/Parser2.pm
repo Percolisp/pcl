@@ -104,13 +104,29 @@ sub parse {
   # rest of that already-read form, so the switch must happen between
   # top-level forms.  Block form / versioned `package` stay TODO (whole-file
   # v1 fallback); `package` inside a block dies in _lower_stmt.
-  my @segments = ({ pkg => 'main', stmts => [] });
+  my @segments = ({ pkg => 'main', stmts => [], reopen => 0 });
+  my $cur_pkg = 'main';
+  my %opened  = (main => 1);   # packages whose full preamble was already emitted
   for my $child ($doc->schildren) {
     if ($child->isa('PPI::Statement::Package')) {
-      die "Parser2 TODO: package block form\n"
-        if grep { $_->isa('PPI::Structure::Block') } $child->schildren;
-      die "Parser2 TODO: package with version\n" if eval { $child->version };
-      push @segments, { pkg => ($child->namespace // 'main'), stmts => [] };
+      my ($block) = grep { $_->isa('PPI::Structure::Block') } $child->schildren;
+      my $pkg = $child->namespace // 'main';
+      my $version = eval { $child->version };
+      # PPI quirk (see v1 _emit_package_version): ->version returns the BLOCK
+      # text for an unversioned block form — accept only real version literals.
+      undef $version unless defined $version && $version =~ /^v?\d+(?:[._]\d+)*$/;
+      if ($block) {
+        # Block form `package Foo { … }`: a section for Foo, then a short-form
+        # RETURN section that puts the reader back in the enclosing package
+        # (which already has its own section — hence reopen).
+        push @segments, { pkg => $pkg, stmts => [$block->schildren],
+                          reopen => ($opened{$pkg}++ ? 1 : 0), version => $version };
+        push @segments, { pkg => $cur_pkg, stmts => [], reopen => 1 };
+        next;                                 # $cur_pkg unchanged
+      }
+      push @segments, { pkg => $pkg, stmts => [],
+                        reopen => ($opened{$pkg}++ ? 1 : 0), version => $version };
+      $cur_pkg = $pkg;
       next;
     }
     push @{ $segments[-1]{stmts} }, $child;
@@ -191,6 +207,8 @@ sub parse {
     push @defs,  @{ $self->{_hoisted_defs} };
     push @sections, {
       pkg      => $seg->{pkg},
+      reopen   => $seg->{reopen},
+      version  => $seg->{version},
       decls    => [map { Pl::CLForm::to_string($_, 0) } @decls],
       defs     => [map { Pl::CLForm::to_string($_, 0) } @defs],
       run      => [map { Pl::CLForm::to_string($_, 0) } @runtime],
@@ -204,19 +222,40 @@ sub parse {
     my $sec = $sections[$i];
     my $pkg = $sec->{pkg};
     my $cl_pkg = $self->fallback_parser->_cl_pkg_designator($pkg);
-    if ($i > 0) {
-      # v1's package-section preamble: create/enter the CL package, CLOS
-      # class for MRO, original-case registration, per-package $a/$b
-      # specials (sort comparator lambdas bind them dynamically).
+    if ($i > 0 && !$sec->{reopen}) {
+      # First section for this package: v1's full package-section preamble —
+      # create/enter the CL package, CLOS class for MRO, original-case
+      # registration, per-package $a/$b specials (sort comparator lambdas bind
+      # them dynamically).
       my $cl_class = $self->fallback_parser->_pkg_to_clos_class($pkg);
       push @body, ";;; package $pkg",
                   "(p-defpackage $cl_pkg)",
                   "(in-package $cl_pkg)",
                   "(defclass $cl_class () ())",
                   "(p-register-pkg-name $cl_pkg \"$pkg\")", '';
+    } elsif ($i > 0) {
+      # Reopened (return) section: the package's section already exists, so
+      # just put the CL reader back into it (v1's block-form return branch).
+      push @body, ";;; back to package $pkg",
+                  "(in-package $cl_pkg)", '';
     }
     push @body, @{ $sec->{decls} };
-    push @body, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))', '';
+    # Versioned `package Foo 1.5;`: $VERSION defvar in decls, assignment at the
+    # front of run (v1's _emit_package_version — set in source order, not BEGIN).
+    my @ver_run;
+    if (defined $sec->{version}) {
+      (my $prefix = $cl_pkg) =~ s/^://;
+      my $sym    = "$prefix\::\$VERSION";
+      my $ver_cl = ($sec->{version} =~ /^\d+(?:\.\d+)?$/) ? $sec->{version}
+                                                          : "\"$sec->{version}\"";
+      push @body, "(eval-when (:compile-toplevel :load-toplevel :execute)",
+                  "  (defvar $sym (make-p-box nil)))";
+      @ver_run = ("(p-scalar-= $sym $ver_cl)", '');
+    }
+    # Per-package $a/$b specials: once per package (not on reopen — duplicate
+    # defvars are noisy).
+    push @body, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))', ''
+      unless $sec->{reopen};
     # Undeclared package globals referenced in this section (v1's forward-
     # declaration pass) — defvar'd so first use isn't an unbound-variable
     # crash.  Per-section: the same unqualified $x names DIFFERENT vars in
@@ -233,6 +272,7 @@ sub parse {
     # Runtime current-package tracking (caller()/__PACKAGE__) in execution
     # order — after this section's definitions load, before its code runs.
     push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
+    push @body, @ver_run;
     push @body, map { ($_, '') } @{ $sec->{run} };
   }
 

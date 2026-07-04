@@ -219,6 +219,28 @@ like($our, qr/\(in-package :Dog\).*\(defvar \@ISA /s, 'our @ISA defvar lands in 
 my $ourshadow = eval { Pl::Parser2->parse_code(q{my $x = 1; our $x; print $x;}) };
 like($@, qr/shadows a my-lexical/, 'our shadowing a my-lexical dies to v1');
 
+# --- W1 (session 272): package block form `package Foo { … }` + versions ---
+
+# Block form: full preamble ONCE for the block's package, then a short-form
+# RETURN section that only re-enters the enclosing package's reader.
+my $blk = Pl::Parser2->parse_code(<<'EOF');
+package Animal { sub speak { return "generic" } }
+print __PACKAGE__, "\n";
+EOF
+my $animal_pre = () = $blk =~ /\(p-defpackage :Animal\)\n\(in-package :Animal\)/g;
+is($animal_pre, 1, 'block-form package emits its full preamble exactly once');
+like($blk, qr/;;; back to package main\n\(in-package :main\)/,
+     'return section uses only (in-package) — no re-defpackage of main');
+unlike($blk, qr/;;; back to package main\n\(p-defpackage/,
+       'return section does NOT re-emit p-defpackage for the enclosing package');
+
+# Versioned package: $VERSION defvar (eval-when) + a source-order assignment.
+my $ver = Pl::Parser2->parse_code(qq{package Counter 1.5;\nprint \$Counter::VERSION;\n});
+like($ver, qr/\(defvar Counter::\$VERSION \(make-p-box nil\)\)/,
+     'versioned package defvars $VERSION');
+like($ver, qr/\(p-scalar-= Counter::\$VERSION 1\.5\)/,
+     'versioned package assigns $VERSION in source order');
+
 # --- A3 (session 271): local / statement modifiers / for(;;) ---
 
 # `local` lowers through v1's machinery; the opened save/restore scope wraps
@@ -312,7 +334,7 @@ like($shf, qr/\(p-shift \@_\)/, 'bare shift in sub body defaults to @_ (not @ARG
 
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
-  skip 'sbcl not available', 4 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 5 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -352,6 +374,15 @@ my $r = 0;
 print "$x $n $r\n";
 EOF
   is($run->($blocks), "1 3 3\n", 'bare blocks + labels end-to-end');
+  # W1: block-form package + return-to-main + cross-package dispatch.
+  my $blkprog = Pl::Parser2->parse_code(<<'EOF');
+package Animal { sub speak { return "generic" } }
+package Dog { our @ISA = ('Animal'); sub name { return "rex" } }
+print Dog->speak(), " ", Dog->name(), "\n";
+print __PACKAGE__, "\n";
+EOF
+  is($run->($blkprog), "generic rex\nmain\n",
+     'block-form packages run end-to-end: dispatch + return to main');
 }
 
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).
