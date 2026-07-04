@@ -49,10 +49,29 @@ sub is_raw_wrap { ref($_[0]) eq 'Pl::CLForm::RawWrap' }
 # One-line rendering, or undef if the form contains a multi-line raw chunk
 # or a string atom with an embedded newline (CL has no \n escape — a literal
 # newline inside a string atom makes the "one line" lie to the indenter).
+# A chunk containing a `;` comment (outside a string literal) can never be
+# joined onto one line either: the comment would swallow every sibling that
+# follows it on that line (v1's fallback emits `;; source-echo` raws).
+sub _no_flat {
+  my ($s) = @_;
+  return 1 if $s =~ /\n/;
+  return 0 unless $s =~ /;/;
+  my @c = split //, $s;
+  my ($in_str, $i) = (0, 0);
+  while ($i < @c) {
+    my $ch = $c[$i];
+    if ($in_str) { if ($ch eq "\\") { $i += 2; next } $in_str = 0 if $ch eq '"' }
+    elsif ($ch eq '"') { $in_str = 1 }
+    elsif ($ch eq ';') { return 1 }
+    $i++;
+  }
+  return 0;
+}
+
 sub _flat {
   my ($f) = @_;
-  if (!ref $f) { return $f =~ /\n/ ? undef : $f }
-  if (is_raw($f)) { return $$f =~ /\n/ ? undef : $$f }
+  if (!ref $f) { return _no_flat($f) ? undef : $f }
+  if (is_raw($f)) { return _no_flat($$f) ? undef : $$f }
   return undef if is_raw_wrap($f);
   my ($head, @args) = @$f;
   my @parts = $head eq 'list' ? () : ($head);

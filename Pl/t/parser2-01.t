@@ -261,9 +261,58 @@ my $cont = eval { Pl::Parser2->parse_code(
   q{my $i = 0; while ($i < 3) { print $i; } continue { $i = $i + 1; }}) };
 like($@, qr/continue/, 'loop with continue block dies to v1');
 
+# --- A2 (session 271): bare blocks (loop-once) + labels + nested subs ---
+
+# Unlabeled bare block = single-iteration loop: last/next/redo must work.
+my $bare = Pl::Parser2->parse_code(q[{ my $y = 5; print "$y\n"; last; } print "after\n";]);
+like($bare, qr/\(block nil\s*\n?\s*\(tagbody :redo/, 'bare block lowers to loop-once tagbody');
+like($bare, qr/\(tagbody :redo.*\(let \(\(\$y.*:next/s, 'my inside bare block nests inside the tagbody');
+
+# Labeled bare block gets the LAST/NEXT/REDO catch tags for dynamic throws.
+my $skip = Pl::Parser2->parse_code(q[SKIP: { last SKIP; print "no\n"; } print "yes\n";]);
+like($skip, qr/\(block SKIP/, 'labeled bare block: (block LABEL)');
+like($skip, qr/\(catch \(pcl::%pcl-loop-tag "LAST" 'SKIP\)/, 'LAST catch tag present');
+like($skip, qr/\(catch \(pcl::%pcl-loop-tag "REDO" 'SKIP\)/, 'REDO catch tag present');
+
+# Loop labels ride into the loop macros as :label keys.
+my $lw = Pl::Parser2->parse_code(q[OUTER: while (1) { last OUTER; }]);
+like($lw, qr/\(p-while 1 :label OUTER/, 'labeled while: :label key');
+my $lf = Pl::Parser2->parse_code(q[LOOP: for my $i (1..3) { next LOOP; }]);
+like($lf, qr/\(p-foreach \(\$i \(p-\.\. 1 3\)\) :label LOOP/, 'labeled foreach: :label key');
+
+# Named subs nested in blocks are package-global: hoisted to the defs bucket.
+my $nest = Pl::Parser2->parse_code(
+  q[{ sub geta { return getb() + 0; } sub getb { return 7; } my $x = geta(); print "$x\n"; }]);
+like($nest, qr/\(p-sub pl-geta/, 'nested named sub hoisted to definitions');
+like($nest, qr/\(p-declare-sub pl-geta\)/, 'hoisted sub gets p-declare-sub');
+
+# …but a sub capturing a LIVE block lexical (static-variable idiom) → v1.
+my $capt2 = eval { Pl::Parser2->parse_code(q[{ my $x = 0; sub bump2 { $x++ } } print "ok\n";]) };
+like($@, qr/captured by nested sub/, 'block lexical captured by nested sub dies to v1');
+
+# …and a SIBLING scope's same-named lexical must NOT block the hoist.
+my $sib = Pl::Parser2->parse_code(
+  q[{ my $u = 1; print "$u\n"; } { sub getu { my $u = 2; return $u; } print getu(), "\n"; }]);
+like($sib, qr/\(p-sub pl-getu/, 'closed sibling-scope lexical does not block sub hoist');
+
+# VarAnnotator: a list-assignment LHS is a write — the var must stay boxed
+# (a raw slot in (vector $a $b) would silently drop the p-list-= write).
+my $la = Pl::Parser2->parse_code(q[my $a = 7; my $b = 0; ($a, $b) = (1, 2); print "$a $b\n";]);
+unlike($la, qr/\(let \(\(\$a 7\)\)/, 'list-assigned scalar stays boxed');
+
+# CLForm: a raw `;;` comment chunk must never be flattened onto one line
+# with following siblings (the comment would swallow them).
+my $cmt = Pl::Parser2->parse_code(q[{ no warnings 'syntax'; print "x\n"; }]);
+is(paren_balance($cmt), 0, 'raw comment chunk inside a form stays balanced');
+unlike($cmt, qr/;;[^\n]*\(p-print/, 'no code swallowed after a raw comment');
+
+# in_subroutine: bare shift inside a v2-lowered sub body defaults to @_.
+my $shf = Pl::Parser2->parse_code(q[sub take { my $r = shift; return $r; } print take(5), "\n";]);
+like($shf, qr/\(p-shift \@_\)/, 'bare shift in sub body defaults to @_ (not @ARGV)');
+
 # End-to-end: v2 output runs and matches perl.
 SKIP: {
-  skip 'sbcl not available', 3 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 4 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -289,6 +338,20 @@ $val = "out";
 print f(), "-", g(), "\n";
 EOF
   is($run->($locprog), "in-out\n", 'local end-to-end: dynamic scope + restore');
+  # Bare blocks + labels: last-in-block, last LABEL, next OUTER, redo count.
+  my $blocks = Pl::Parser2->parse_code(<<'EOF');
+my $x = 0;
+{ $x = $x + 1; last if $x > 0; $x = 100; }
+SKIP: { last SKIP; $x = 200; }
+my $n = 0;
+OUTER: for (my $i = 0; $i < 3; $i++) {
+  for (my $j = 0; $j < 3; $j++) { next OUTER if $j == 1; $n = $n + 1; }
+}
+my $r = 0;
+{ $r = $r + 1; redo if $r < 3; }
+print "$x $n $r\n";
+EOF
+  is($run->($blocks), "1 3 3\n", 'bare blocks + labels end-to-end');
 }
 
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).

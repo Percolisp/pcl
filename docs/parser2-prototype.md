@@ -311,9 +311,65 @@ Guards: `Pl/t/parser2-01.t` grew to 74 tests (raw_wrap balance via the
 CLAUDE.md paren checker, local end-to-end dynamic-scope run, modifier
 fallbacks, empty for-sections, readline-cond rewrites, continue gate).
 
+## Session 271b (2026-07-04): A2 — bare blocks (loop-once) + labels
+
+**A2 shipped.**  32 files now lower fully through v2 (was 14) at **exact v1
+sweep parity: 1175 pass / 9 fail / 29 fully-passing on both pipelines** (the
+9 are identical pre-existing v1 failures — flip.t/delete.t were never fully
+passing under v1 either).
+
+- **Bare block `{ … }` = loop-once**, replicating v1's runtime shapes:
+  unlabeled → `(block nil (tagbody :redo <body> :next))`; labeled →
+  `(block L (catch LAST-L (catch NEXT-L (tagbody :redo (catch REDO-L (progn
+  <body> (go :next))) (go :redo) :next))))` so cross-function `last SKIP`
+  throws (Test::More's skip()) unwind correctly.  Both under a
+  `(let ((*package* *package*)))` guard.  `my` scoping needs no bookkeeping:
+  the nested lets sit inside the tagbody and `(go …)` legally jumps out.
+  Anon-hash-mistokenized bare blocks (`{ LITERAL, … };`) → v1's detector +
+  statement fallback.  In-statement `continue` → gate; the sibling-split
+  `{ } continue { }` form lands on a `continue` compound → gate.
+- **Labels**: leading `PPI::Token::Label` accepted on bare blocks and loops;
+  loop labels ride into p-while/p-for/p-foreach as leading `:label L` keys
+  (parse-loop-keys expects them first).  Standalone labels (goto targets)
+  and labels on if/unless stay gated.
+- **Named subs nested inside blocks** (recurse.t's mutually-recursive pairs)
+  are package-global in Perl → pre-pass now registers subs found ANYWHERE in
+  a segment (`find('PPI::Statement::Sub')`), and `_lower_block` hoists their
+  v2-lowered definitions into the section's decl/def buckets.  A sub whose
+  body mentions a lexical LIVE at that point (the
+  `{ my $x = 0; sub X::DESTROY { $x++ } }` static-variable idiom, delete.t)
+  → v1, whose defvar'd my-vars make the capture work.  Live-ness is tracked
+  by `_live_lex` (registered with `_let_bound_vars`, restored at scope exit
+  by `_lower_scope`/`_lower_sub`) so a *closed sibling scope's* same-named
+  lexical doesn't over-fire the gate.
+
+**Three more latent v2 bugs found & fixed during parity triage:**
+
+3. **CLForm one-line flattening vs `;;` comment raws** (unshift.t read-EOF):
+   a raw chunk containing a comment, flattened onto one line, swallowed every
+   sibling after it — `(tagbody :redo ;; no warnings … (p-unshift @alpha)
+   :next)))` lost the code AND the parens.  `_flat` now refuses any chunk
+   with a `;` outside a string literal.
+4. **`in_subroutine` never set** (exp.t): bare `shift`/`pop` in a v2-lowered
+   sub body defaulted to `@ARGV` instead of `@_` (the shared Environment's
+   counter drives that fallback decision, plus my-qualification and the
+   notinline guard).  `_lower_sub` now bumps it around body lowering.
+5. **VarAnnotator missed list-assignment writes** (each_array.t): `my $a = 7;
+   … ($a, $b) = each @a` left `$a` a raw slot, and the p-list-= write into
+   `(vector 7 …)` vanished silently.  New conservative gates: `($x,…) =`
+   LHS, mutating builtin args (chomp/chop/undef/read/sysread/recv), and
+   non-my `foreach $x` alias vars.
+   Also: qualified-call packages (`PerlIO::get_layers`) are now pre-declared
+   at the file top via the Environment's undeclared-package list (readline.t
+   read-time "Package PerlIO does not exist").
+
+Guards: parser2-01.t = 90 (bare-block/label shapes + e2e, hoisted nested
+subs + capture gate + sibling-scope non-gate, list-assign boxing, comment
+no-flatten, shift-in-sub).
+
 ## What's left — the road from prototype to default pipeline
 
-### Where we stand (measured 2026-07-04, session 271, post-A3)
+### Where we stand (measured 2026-07-04, session 271b, post-A2+A3)
 
 First-gate census over all 111 `perl-tests/*.t` (each file reports only the
 FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
@@ -321,12 +377,13 @@ FIRST gate it hits; fixing one reveals the next, so counts are lower bounds):
 | files | first gate |
 |---:|---|
 | 65 | string eval (`eval EXPR`) |
-| 17 | bare block `{ … }` (loop-once) |
-| 6 | labeled statement (`SKIP:`, `TODO:`, `TEST1:` …) |
 | 4 | package block form `package Foo { … }` |
-| 3 | file lexical captured by a named sub |
+| 2 | `package` inside a block (`PPI::Statement::Package` in _lower_stmt) |
 | 2 | sub with prototype/signature |
-| **14** | **(lower fully through v2: the 12 from s270 minus qq.t which was already capture-gated, plus errno_test.t, grent.t, pow.t — 670/671 sweep parity, the 1 fail being grent.t's environment-dependent test 2 which fails identically under v1)** |
+| 4 | lexical captured by a (nested or top-level) sub |
+| 1 | loop with continue block |
+| 1 | unsupported declaration `my $aa, $bb, $cc;` |
+| **32** | **(lower fully through v2 — 1175/1175 = exact v1 sweep parity: 9 fails identical to v1's own, 29 fully passing on both)** |
 
 Reproduce with:
 ```bash
@@ -353,15 +410,7 @@ for f in perl-tests/*.t; do PCL_V2=1 PCL_V2_VERBOSE=1 perl -I. pl2cl \
      machinery is the model) — a defvar proclaims the symbol special
      file-wide and would poison sibling lets.
 
-**A2. Bare blocks `{ … }` + labels (~22 files).** A bare block is a
-  loop-once: `last`/`next`/`redo` work inside it.  So NOT a progn —
-  lower as the loop machinery with a single iteration (v1 has the model;
-  check what `_process_element` emits — reuse its runtime form).  `my`
-  inside scopes naturally via `_lower_block`'s nested lets.  Labels
-  (`PPI::Token::Label` preceding a compound) ride along: v1 lowers labeled
-  loops to `catch 'pcl::LAST-LABEL` tags; v2 needs to accept the label
-  token in `_lower_stmt` and pass the tag into the loop forms.  aassign.t's
-  current gate.
+**A2. Bare blocks `{ … }` + labels — DONE (session 271b, see above).**
 
 **A3. Statement-level fallback as the safety net — DONE (session 271, see
   above).**  `local` (block-remainder raw_wrap), non-if/unless statement
@@ -420,8 +469,8 @@ for f in perl-tests/*.t; do PCL_V2=1 PCL_V2_VERBOSE=1 perl -I. pl2cl \
 
 ### Suggested order
 
-~~A3~~ (done, s271) → A2 (bare blocks+labels, biggest non-eval coverage
-jump; 23 files) → A4 (mechanical) → A1 stage 1 (cheap eval
+~~A3~~ ~~A2~~ (done, s271) → A4 (mechanical; 4 block-form files + the 2
+`package`-inside-a-block files) → A1 stage 1 (cheap eval
 de-false-positives) → A6 → A1 stage 2/3 + A5 together (same renaming
 machinery) → B1/B2 parity push → C in parallel with B once coverage
 stabilizes.

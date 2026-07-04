@@ -4,6 +4,33 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 271b (2026-07-04) — v2: A2 bare blocks + labels + nested subs; 3 more latent bugs.
+
+- **Bare blocks = loop-once** (v1's exact runtime shapes: unlabeled
+  `(block nil (tagbody :redo … :next))`, labeled + LAST/NEXT/REDO catch
+  tags for dynamic throws) under a `*package*` guard; anon-hash-mistokenized
+  blocks → statement fallback; continue → gate.  **Labels** on loops ride as
+  leading `:label` keys into p-while/p-for/p-foreach.
+- **Named subs nested in blocks are package-global** → pre-pass finds subs
+  anywhere in a segment; `_lower_block` hoists v2-lowered defs into the
+  section buckets.  Real captures (`{ my $x = 0; sub X::DESTROY { $x++ } }`,
+  delete.t) die → v1; live-ness via `_live_lex` (scope-restored by
+  `_lower_scope`/`_lower_sub`) so closed sibling scopes don't over-fire
+  (recurse.t's twin `my $u`s).
+- **3 latent v2 bugs fixed:** (3) CLForm flattened raw `;;` comment chunks
+  onto one line, swallowing siblings + parens (unshift.t EOF) — `_flat`
+  refuses chunks with a `;` outside strings; (4) `in_subroutine` never set →
+  bare `shift` in sub bodies read `@ARGV` (exp.t silently 0.0) — bumped in
+  `_lower_sub`; (5) VarAnnotator missed `($a,$b)=…` list-assign writes →
+  raw slot dropped the write (each_array.t '7 7') — new gates for
+  list-assign LHS / mutating builtins / non-my foreach vars.  Plus:
+  qualified-call packages (PerlIO::) now pre-declared (readline.t).
+- **32 files fully v2-native** (was 14) at **exact v1 parity: 1175/9/29
+  on both pipelines**.  parser2-01.t 74→90.  **NEXT: A4 (package block
+  form + package-inside-block, ~6 files), then A1 stage 1.**
+
+---
+
 ## Session 271 (2026-07-04) — v2: A3 statement-fallback net + two loop-cond bug fixes.
 
 **User: continue the v2 prototype.** Tier-A3 from the s270b plan.

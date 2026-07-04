@@ -126,27 +126,36 @@ sub parse {
   for my $seg (@segments) {
     $self->_set_cur_package($seg->{pkg});
     for my $child (@{ $seg->{stmts} }) {
+      # Named subs anywhere in the statement — top-level or nested inside a
+      # block (Perl subs are package-global regardless of nesting; the nested
+      # ones hoist via _hoist_nested_sub during lowering).
       # NB: PPI::Statement::Scheduled (BEGIN/END/…) ISA Statement::Sub — those
       # are runnable blocks, not sub definitions; they lower via _fallback_stmt.
-      next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block
-        && !$child->isa('PPI::Statement::Scheduled');
-      # A prototype/signature changes how CALL SITES parse (arity, imposed
-      # context) — outside the prototype's native subset.
-      die "Parser2 TODO: sub with prototype/signature: " . $child->name
-        if $child->prototype;
-      # cl_name stays UNQUALIFIED (pl-foo) for a plain name: the section's
-      # in-package makes the reader intern it in the segment's package —
-      # exactly v1's per-section convention.
-      $self->sub_info->{ $seg->{pkg} }{ $child->name } = {
-        cl_name     => $self->fallback_parser->_qualified_sub_to_cl($child->name),
-        insensitive => $self->_sub_ctx_insensitive($child),
-      };
-      $self->environment->add_declared_sub($child->name, $seg->{pkg});
-      # Same default signature v1's _process_sub_statement registers for a
-      # prototype-less sub: PExpr consults get_prototype() to decide that a
-      # bareword `foo` is a CALL (pl-foo), not the string "foo".
-      $self->environment->add_prototype($child->name,
-                                        { params => [], min_params => -1, is_proto => 0 });
+      # NB2: PPI find returns 0 (not undef) when nothing matches → `|| []`.
+      my @subs = $child->isa('PPI::Statement::Sub')
+        ? ($child)
+        : @{ $child->find('PPI::Statement::Sub') || [] };
+      for my $sub (@subs) {
+        next unless $sub->name && $sub->block
+          && !$sub->isa('PPI::Statement::Scheduled');
+        # A prototype/signature changes how CALL SITES parse (arity, imposed
+        # context) — outside the prototype's native subset.
+        die "Parser2 TODO: sub with prototype/signature: " . $sub->name
+          if $sub->prototype;
+        # cl_name stays UNQUALIFIED (pl-foo) for a plain name: the section's
+        # in-package makes the reader intern it in the segment's package —
+        # exactly v1's per-section convention.
+        $self->sub_info->{ $seg->{pkg} }{ $sub->name } = {
+          cl_name     => $self->fallback_parser->_qualified_sub_to_cl($sub->name),
+          insensitive => $self->_sub_ctx_insensitive($sub),
+        };
+        $self->environment->add_declared_sub($sub->name, $seg->{pkg});
+        # Same default signature v1's _process_sub_statement registers for a
+        # prototype-less sub: PExpr consults get_prototype() to decide that a
+        # bareword `foo` is a CALL (pl-foo), not the string "foo".
+        $self->environment->add_prototype($sub->name,
+                                          { params => [], min_params => -1, is_proto => 0 });
+      }
     }
   }
 
@@ -157,6 +166,9 @@ sub parse {
     $self->cur_pkg($seg->{pkg});
     $self->_set_cur_package($seg->{pkg});
     $self->{_captured_decls} = [];
+    $self->{_hoisted_decls}  = [];
+    $self->{_hoisted_defs}   = [];
+    $self->{_live_lex}       = {};
     my (@decls, @defs, @top);
     for my $child (@{ $seg->{stmts} }) {
       if ($child->isa('PPI::Statement::Sub') && $child->name
@@ -173,6 +185,10 @@ sub parse {
       push @top, $child;
     }
     my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info));
+    # Named subs found nested inside blocks during lowering (package-global
+    # in Perl) hoist into the same decl/def buckets as top-level subs.
+    push @decls, @{ $self->{_hoisted_decls} };
+    push @defs,  @{ $self->{_hoisted_defs} };
     push @sections, {
       pkg      => $seg->{pkg},
       decls    => [map { Pl::CLForm::to_string($_, 0) } @decls],
@@ -226,6 +242,10 @@ sub parse {
   # p-defpackage up top guarantees Pkg::sym forms further down are readable.
   my %pre = map { ($_->{pkg} => 1) } @sections[1 .. $#sections];
   $pre{$_} = 1 for keys %{ $self->{_referenced_pkgs} };
+  # Packages referenced via qualified CALLS (PerlIO::get_layers($fh)) register
+  # in the shared Environment as the fallback expressions parse — v1 pre-
+  # declares these the same way (get_undeclared_packages).
+  $pre{$_} = 1 for @{ $self->environment->get_undeclared_packages() };
   delete @pre{qw(main pcl)};
   push @out, map { "(pcl:p-defpackage " . $self->fallback_parser->_cl_pkg_designator($_) . ")" }
              sort keys %pre;
@@ -360,7 +380,24 @@ sub _forward_global_decls {
 
 # ---------------------------------------------------------------- subs
 
+# The shared Environment's in_subroutine counter drives fallback-expression
+# decisions (bare shift/pop default to @_ inside a sub, @ARGV at top level;
+# my-var qualification; the top-level notinline guard) — v1 bumps it around
+# sub bodies, so v2 must too.
 sub _lower_sub {
+  my ($self, $sub) = @_;
+  my $env = $self->environment;
+  $env->in_subroutine($env->in_subroutine + 1);
+  my %saved_lex = %{ $self->{_live_lex} // {} };
+  my $form = eval { $self->_lower_sub_inner($sub) };
+  my $err = $@;
+  $self->{_live_lex} = \%saved_lex;
+  $env->in_subroutine($env->in_subroutine - 1);
+  die $err if $err;
+  return $form;
+}
+
+sub _lower_sub_inner {
   my ($self, $sub) = @_;
   my $clname = $self->fallback_parser->_qualified_sub_to_cl($sub->name);
   my @stmts = $sub->block->schildren;
@@ -368,7 +405,7 @@ sub _lower_sub {
   my $params = $self->_extract_params($stmts[0]);
   my @body_stmts = @stmts;
   shift @body_stmts if $params;
-  $self->fallback_parser->{_let_bound_vars}{$_} = 1 for @{ $params // [] };
+  $self->_reg_lex(@{ $params // [] });
 
   if ($params) {
     my $rest_txt = join("\n", map { $_->content } @body_stmts);
@@ -398,6 +435,49 @@ sub _lower_sub {
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info);
   return ['p-sub', $clname, ['list', '&rest', '%_args'],
           ['p-args-body', ['block', 'nil', $self->_lower_block(\@stmts, $vi, 'inherit')]]];
+}
+
+# Register a `my`-declared name: for the fallback machinery's my-vs-package
+# decisions (`_let_bound_vars`, never shrinks — mirrors v1's accumulator) and
+# for the LIVE lexical-scope set (`_live_lex`, restored at scope exit by
+# _lower_scope/_lower_sub) that the nested-sub capture check reads.
+sub _reg_lex {
+  my ($self, @names) = @_;
+  for my $n (@names) {
+    $self->fallback_parser->{_let_bound_vars}{$n} = 1;
+    $self->{_live_lex}{$n} = 1;
+  }
+  return;
+}
+
+# Lower a Structure::Block's statements: a lexical scope — names declared
+# inside stop being "live" when it closes.
+sub _lower_scope {
+  my ($self, $stmts, $vi, $tail_ctx) = @_;
+  my %saved = %{ $self->{_live_lex} // {} };
+  my @forms = $self->_lower_block($stmts, $vi, $tail_ctx);
+  $self->{_live_lex} = \%saved;
+  return @forms;
+}
+
+# A named sub nested inside a block hoists to the section's definitions
+# bucket, OUTSIDE any lexical `let`s — safe only when its body provably
+# references no lexical LIVE at this point (a real capture, e.g. the
+# `{ my $x = 0; sub X::DESTROY { $x++ } }` static-variable idiom, must fall
+# back to v1, whose defvar'd my-vars make the capture work).  Conservative
+# text scan; over-firing only costs the v2 lowering, never correctness.
+sub _hoist_nested_sub {
+  my ($self, $sub) = @_;
+  my $txt = $sub->block->content;
+  for my $var (sort keys %{ $self->{_live_lex} // {} }) {
+    (my $bare = $var) =~ s/^[\$\@\%]//;
+    die "Parser2 TODO: lexical '$bare' possibly captured by nested sub " . $sub->name . "\n"
+      if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+  }
+  push @{ $self->{_hoisted_decls} },
+    ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($sub->name)];
+  push @{ $self->{_hoisted_defs} }, $self->_lower_sub($sub);
+  return;
 }
 
 # `my ($a, $b) = @_;` → ['$a','$b'] | undef
@@ -451,7 +531,7 @@ sub _lower_block {
     return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx)) if $our;
     my ($name, $init) = $self->_single_scalar_decl($first);
     if ($name) {
-      $self->fallback_parser->{_let_bound_vars}{$name} = 1;
+      $self->_reg_lex($name);
       if ($vi->{$name} && $vi->{$name}{unboxable}) {
         my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
         return (['let', ['list', ['list', $name, $initform]],
@@ -479,7 +559,7 @@ sub _lower_block {
           if $rhs_txt =~ /\Q$v\E\b/;
       }
     }
-    $self->fallback_parser->{_let_bound_vars}{$_} = 1 for @$vars;
+    $self->_reg_lex(@$vars);
     my @binds = map { ['list', $_, _fresh_container($_)] } @$vars;
     return (['let', ['list', @binds],
              ($has_init ? ($self->_lower_expr([@k], $first)) : ()),
@@ -493,6 +573,14 @@ sub _lower_block {
       || $first->isa('PPI::Statement::End')
       || $first->isa('PPI::Statement::Data')) {
     return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
+
+  # -- a named sub nested inside a block: package-global in Perl (the block
+  # only bounds lexical capture, which _hoist_nested_sub gates on) — hoist
+  # the definition into the section's decl/def buckets.
+  if ($first->isa('PPI::Statement::Sub') && $first->name && $first->block) {
+    $self->_hoist_nested_sub($first);
+    return $self->_lower_block(\@rest, $vi, $tail_ctx);
   }
 
   # -- everything else appends a form and continues at the same depth.
@@ -567,7 +655,30 @@ sub _lower_stmt {
 sub _lower_compound {
   my ($self, $stmt, $vi, $tail_ctx) = @_;
   my @k = $stmt->schildren;
+
+  # Optional leading `LABEL:` — rides along on loops (`OUTER: while …`) and
+  # bare blocks (`SKIP: { … }`).  Standalone labels (goto targets) and
+  # labeled if/unless stay TODO → v1.
+  my $label;
+  if (@k && $k[0]->isa('PPI::Token::Label')) {
+    ($label = (shift @k)->content) =~ s/\s*:$//;
+  }
+  die "Parser2 TODO: standalone label\n" unless @k;
+
+  # Bare block { … } = a loop-once: last/next/redo all work inside it.
+  if ($k[0]->isa('PPI::Structure::Block')) {
+    die "Parser2 TODO: loop with continue block\n"
+      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
+    # PPI mis-tokenizes an anon-hash constructor statement `{ LITERAL , … };`
+    # as a bare block — v1's detector + statement fallback handle it.
+    return $self->_fallback_stmt($stmt)
+      if Pl::Parser::_bare_block_is_anon_hash($k[0]);
+    return $self->_lower_bare_block($k[0], $label, $vi);
+  }
+
   my $kw = $k[0]->content;
+  die "Parser2 TODO: label on non-loop compound '$kw'\n"
+    if defined $label && $kw !~ /^(?:while|until|for|foreach)$/;
 
   if ($kw eq 'if' || $kw eq 'unless') {
     # Collect (keyword, condition, block) clauses: if/unless, elsif*, else?.
@@ -586,13 +697,13 @@ sub _lower_compound {
     my $form;
     if (@clauses && $clauses[-1]{kw} eq 'else') {
       my $c = pop @clauses;
-      $form = ['progn', $self->_lower_block([$c->{block}->schildren], $vi, $tail_ctx)];
+      $form = ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)];
     }
     while (my $c = pop @clauses) {
       my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt);
       $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
       $form = ['p-if', $cond,
-               ['progn', $self->_lower_block([$c->{block}->schildren], $vi, $tail_ctx)],
+               ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)],
                (defined $form ? ($form) : ())];
     }
     return $form;
@@ -613,7 +724,8 @@ sub _lower_compound {
     # v1 skips the rewrite for `until`, matching perl.
     $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
     $cond = ['p-!', $cond] if $kw eq 'until';
-    return ['p-while', $cond, $self->_lower_block([$block->schildren], $vi)];
+    return ['p-while', $cond, _label_keys($label),
+            $self->_lower_scope([$block->schildren], $vi)];
   }
 
   if (($kw eq 'for' || $kw eq 'foreach')
@@ -633,7 +745,7 @@ sub _lower_compound {
     # see it as let-bound.  Unboxable (e.g. step `$i = $i + 1`) → raw slot;
     # else boxed (a `$i++` step keeps VarAnnotator conservative).
     my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
-    $self->fallback_parser->{_let_bound_vars}{$name} = 1 if $name;
+    $self->_reg_lex($name) if $name;
 
     # ++-step carve-out: when the step is a PURE `$i++`/`++$i` (or --), the ++
     # is position-known — it IS the step slot, whose value is discarded — so
@@ -658,20 +770,21 @@ sub _lower_compound {
       : ['list', 't'];
     my $step = $step_form
       // ($step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list']);
-    my @body = $self->_lower_block([$block->schildren], $vi);
+    my @body = $self->_lower_scope([$block->schildren], $vi);
 
     if ($name) {
       my $initval = defined $init ? $self->_lower_expr($init, $stmt) : '(p-undef)';
       if ($vi->{$name} && $vi->{$name}{unboxable}) {
         return ['let', ['list', ['list', $name, $initval]],
-                ['p-for', ['list'], $cond, $step, @body]];
+                ['p-for', ['list'], $cond, $step, _label_keys($label), @body]];
       }
       return ['let', ['list', ['list', $name, '(make-p-box nil)']],
-              ['p-for', ['list', ['p-my-=', $name, $initval]], $cond, $step, @body]];
+              ['p-for', ['list', ['p-my-=', $name, $initval]], $cond, $step,
+               _label_keys($label), @body]];
     }
     return ['p-for',
             ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
-            $cond, $step, @body];
+            $cond, $step, _label_keys($label), @body];
   }
 
   if ($kw eq 'for' || $kw eq 'foreach') {
@@ -682,13 +795,52 @@ sub _lower_compound {
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
     die "Parser2 TODO: foreach without list" unless $list && $block;
     my $name = $var ? $var->content : '$_';
-    $self->fallback_parser->{_let_bound_vars}{$name} = 1;
+    $self->_reg_lex($name);
     my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;
     return ['p-foreach', ['list', $name, $self->_lower_expr(\@list_parts, $stmt, 1)],
-            $self->_lower_block([$block->schildren], $vi)];
+            _label_keys($label),
+            $self->_lower_scope([$block->schildren], $vi)];
   }
 
   die "Parser2 TODO: compound '$kw'";
+}
+
+# `:label NAME` pair for the loop macros' parse-loop-keys (must come first in
+# the body-and-keys tail), or nothing.
+sub _label_keys {
+  my ($label) = @_;
+  return () unless defined $label;
+  return (':label', $label);
+}
+
+# A bare block is a single-iteration loop: last/next/redo work inside it.
+# The shapes replicate v1's _process_bare_block exactly — unlabeled uses the
+# plain (block nil (tagbody :redo … :next)) that unlabeled p-last/p-next/
+# p-redo target; labeled adds the LAST/NEXT/REDO catch tags that the
+# *-dynamic throws (e.g. Test::More's skip() doing `last SKIP` from inside a
+# called sub) unwind to.  The (let ((*package* *package*))) wrapper stops an
+# (in-package …) reached inside the block (module loads via the statement
+# fallback) from leaking to subsequent top-level forms.  `my` scoping needs
+# no bookkeeping: _lower_block's nested lets sit inside the tagbody, and a
+# (go …) legally jumps out of them.
+sub _lower_bare_block {
+  my ($self, $block, $label, $vi) = @_;
+  my @body = $self->_lower_scope([$block->schildren], $vi);
+  my $inner;
+  if (defined $label) {
+    $inner =
+      ['block', $label,
+        ['catch', "(pcl::%pcl-loop-tag \"LAST\" '$label)",
+          ['catch', "(pcl::%pcl-loop-tag \"NEXT\" '$label)",
+            ['tagbody', ':redo',
+              ['catch', "(pcl::%pcl-loop-tag \"REDO\" '$label)",
+                ['progn', @body, '(go :next)']],
+              '(go :redo)',
+              ':next']]]];
+  } else {
+    $inner = ['block', 'nil', ['tagbody', ':redo', @body, ':next']];
+  }
+  return ['let', ['list', ['list', '*package*', '*package*']], $inner];
 }
 
 # ---------------------------------------------------------------- expressions
