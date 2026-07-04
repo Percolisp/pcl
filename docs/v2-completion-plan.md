@@ -67,7 +67,31 @@ update docs (§6). Never batch two work items into one commit.
 - Commands run from the repo root (`/home/bernt/pcl`). The Bash tool resets
   CWD between calls — do not rely on a `cd` from a previous call.
 
-### 0.5 Glossary
+### 0.5 Know your risk profile — and when to escalate
+
+The work items are not uniformly hard. **W1, W4, W6, W9 are mechanical**:
+the steps below plus the working loop should carry you through. **W2's
+aftermath, W7, and W12 are not** — they are open-ended debugging/triage
+over dozens of files, where the plan can scaffold judgment but not replace
+it:
+
+- **W2 aftermath**: many files become v2-native at once and hit v2 paths
+  nothing has exercised before. Expect novel failures of the §3 classes.
+- **W7**: full-sweep parity triage — every delta needs a root cause.
+- **W12**: annotator equivalence proofs.
+
+**Escalation rule:** if you have spent more than ~3 focused
+attempt-analyze-retry cycles on a single file's divergence without a root
+cause, or you notice you are *rationalizing* a delta ("probably flaky",
+"close enough", "v2 is just better here") instead of proving it — STOP.
+Do not paper over it, do not weaken a test, do not accept the delta.
+Commit the good work you have, write the open question into
+`docs/parser2-prototype.md` (file, symptom, what you ruled out, generated
+CL diff location), and tell the user that this item needs a stronger
+model or their input. An honest handoff of a hard bug is a good outcome;
+a plausible-looking wrong explanation is the worst possible one.
+
+### 0.6 Glossary
 
 - **v1** — `Pl::Parser` + `Pl::ExprToCL`, the original text-stream pipeline.
 - **v2** — `Pl::Parser2` + `Pl::ExprToCL2` + `Pl::VarAnnotator` +
@@ -422,7 +446,8 @@ of the 65 recover (expect a large fraction — most test files only use
 highest-exposure step in the plan** — dozens of files newly exercise v2
 paths. Budget real time for triage and expect to find more class-1/class-5
 bugs (§3). Work through failures one file at a time with the §5.4
-cookbook; do not move on with unexplained deltas.
+cookbook; do not move on with unexplained deltas — and apply the §0.5
+escalation rule when a file resists root-causing.
 
 **Acceptance:** census jump; exact parity on every newly-native file.
 **Guards:** three parse_code shape tests — a file with only `eval { }`
@@ -754,7 +779,9 @@ Procedure:
      exclude from the comparison.
 4. Iterate to zero unexplained deltas. Budget: this is the longest item;
    several find-fix-resweep cycles at ~20 min a sweep. Run file-subset
-   sweeps while iterating; full sweeps only to confirm.
+   sweeps while iterating; full sweeps only to confirm. This item is
+   squarely in §0.5 territory — escalate stubborn files rather than
+   classifying them as (b) or (c) without proof.
 
 ### W8. Tier B2 — the Pl/t gate under v2
 
