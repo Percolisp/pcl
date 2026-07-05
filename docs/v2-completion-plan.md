@@ -1156,7 +1156,26 @@ bind elision needs a whole-program "nobody calls caller()" bit (note
 caller() reads the whole chain — it is NOT a per-sub decision). If the
 numbers haven't changed, expected win is small; prefer W11/W12.
 
-### W14. Tier C4 — `my $x = shift` → `my ($x,…) = @_` normalization (deferred)
+### ~~W14. Tier C4 — `my $x = shift` → `my ($x,…) = @_` normalization~~ — DONE (s274)
+
+**Shipped s274.** `_leading_shift_params` in `Pl/Parser2.pm`, wired into
+`_lower_sub_inner` right after `_extract_params` fails: a contiguous leading run
+of exactly `my $scalar = shift;` (bare shift only; distinct names — a duplicate
+would be an illegal CL lambda list) becomes the params list for the EXISTING
+`(&optional ($x (p-undef)) …)` fast path.  Guards exactly as specified below:
+remainder must not observe `@_` (the shared `\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b`
+scan — any later shift disqualifies the WHOLE run, the conservative variant of
+the interleaved case) and must not contain string eval (PPI walk; eval-blocks
+fine).  Measured shift-fib(29), startup-subtracted: v2 0.28 s → **0.04 s**
+(v1 0.27 s, perl 0.14 s) — the idiom went from 1.04× to ~6× over v1 and beats
+perl.  parser2-01.t's old `(p-shift @_)` shape test updated to a
+non-coalescible body (remainder reads `$_[0]`) — same invariant, still
+seam-exercised.  Guards parser2-02.t +6 shape +1 runtime (incl. the
+mutation-semantics case: `g("h","r1","r2")` where join must NOT see "h").
+Census 66 unchanged; parity sweep exact vs same-day v1 baseline (sprintf
+delta only).  Cache gen v2-4.  Original plan below.
+
+### W14. Tier C4 — `my $x = shift` → `my ($x,…) = @_` normalization (original)
 
 **Do this only after the coverage tiers (A/B) are done and the pipeline is the
 default.** Measured motivation (session 272d benchmarks, both pipelines,
@@ -1218,6 +1237,66 @@ stays on `(&rest %_args) (p-args-body …)`; a body with `eval '…'` stays on t
 only `$x` (or, in the conservative version, keeps v1). Then the full parity
 sweep before committing. Re-measure the
 `shift`-fib bench — it should move from ~1.0× to ~5×.
+
+### W15. Future perf extensions (analysis s274, not yet scheduled)
+
+Where the remaining speed lives after the W11+W14 perf pair, ranked by
+effort-to-payoff.  Context for all of it: fib and shift-fib now BEAT perl;
+the arrhash bench is v2 0.21 s vs perl 0.17 s — the residue is inside the
+runtime element functions, not in the emitted shapes.
+
+1. **Drop the `boundp` arm on element writes to let-bound containers**
+   (v2-only, ~10 lines).  The `p-setf` macro guards every
+   `(setf (p-gethash %h k) v)` with `(unless (boundp '%h) …auto-declare…)`
+   because v1 cannot know whether the container is a package global that
+   needs vivifying.  W11's native write path fires ONLY for let-bound
+   containers, which are bound by construction — v2 can emit the bare
+   `(setf (p-gethash …))` and skip the check on every write.  (Keep the
+   macro itself unchanged — the fallback still needs the arm.)
+2. **R1-style inline fast paths for `p-gethash` / `(setf p-gethash)` /
+   `p-aref` / `(setf p-aref)`** (runtime-only).  The read path pays
+   unbox + `to-string` + a marker-cond (`%ENV-MARKER%`/`%INC-MARKER%`/
+   symbolic-ref-string) before the real `gethash`; the write path adds
+   box-create-or-set + cache invalidation.  An inlined early-exit for the
+   common case (raw hash-table, string key, existing p-box element) should
+   take a real bite out of the 0.21-vs-0.17 gap.  Measure first, exactly
+   like R1 — and remember the R1 gotchas (inline-sandwich load blowup;
+   SBCL 2.6.0 ICE on inline + narrow ftype — memory
+   project_r1_runtime_fast_paths_done).
+3. **W13 as already written** (catch/throw elision ~18 ns/call, special-bind
+   elision ~15 ns/call) — see its section above; needs the no-rethrow and
+   whole-program no-`caller()` analyses.
+4. **Method-dispatch hoist** — hoist the `%pcl-cl-sub-name` lookup out of
+   the MRO walk (memory project_method_dispatch_subname_hoist).  Invisible
+   in the current benches, real for OO-heavy CPAN code.
+5. **W12 is indirectly perf**: the text-scan disqualifiers over-fire (an
+   `eval` in a comment boxes a whole region; shadowing boxes both scopes),
+   so the OpcodeTree annotator un-boxes variables that are boxed today for
+   no reason — and unlocks the C-for rename-poison carve-out (W8.5 open
+   item 2).
+6. **Integer type declarations — the narrow, sound form only.**  The
+   general "annotate integer variables as fixnum" idea is BLOCKED on
+   semantics, not effort: a Perl IV that overflows silently promotes to a
+   double, so declaring a raw slot `fixnum` makes overflow either a type
+   error (safety > 0) or silent wraparound (safety 0) — both wrong — and
+   unbounded `integer` buys little open-coding.  Sound general inference =
+   the range/type lattice of `docs/type-flow-and-codegen-plan.md`, with
+   W12's structural annotator as prerequisite; that is a big item, not an
+   easy one.  The EASY sound subset: a **C-for counter with literal bounds
+   and a pure `+1` step** (the existing carve-out) has a provable range —
+   emit `(declare (type (integer LO HI) $i))` in the carve-out's `let` and
+   SBCL open-codes the compare/increment entirely.  Mind the SBCL 2.6.0
+   inline+narrow-ftype ICE when combining this with inlined ops.
+7. Smaller / bench-first: native `keys`/`values`/`each` iteration (W11 §5
+   note); shift-coalesce through interleaved non-`@_` statements (W14's
+   deferred refinement); `p-string-concat` fast paths if a string bench
+   ever says so.
+
+Rule unchanged from the rest of this plan: **measure before and after every
+item**, one commit per item, parity sweep after anything that changes
+emission (1, 6, 7 do; 2, 3, 4 are runtime-only — but 2 and 3 still need the
+full Pl/t gate + a sweep because runtime behaviour changes can surface
+anywhere).
 
 ---
 

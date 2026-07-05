@@ -440,7 +440,11 @@ is(paren_balance($cmt), 0, 'raw comment chunk inside a form stays balanced');
 unlike($cmt, qr/;;[^\n]*\(p-print/, 'no code swallowed after a raw comment');
 
 # in_subroutine: bare shift inside a v2-lowered sub body defaults to @_.
-my $shf = Pl::Parser2->parse_code(q[sub take { my $r = shift; return $r; } print take(5), "\n";]);
+# The remainder reads $_[0] so the W14 coalesce is disqualified and the
+# statement still lowers through the seam (a plain `my $r = shift;` run now
+# coalesces to a lambda list and emits no p-shift at all — see parser2-02.t).
+my $shf = Pl::Parser2->parse_code(
+  q[sub take { my $r = shift; return $r + $_[0]; } print take(5, 2), "\n";]);
 like($shf, qr/\(p-shift \@_\)/, 'bare shift in sub body defaults to @_ (not @ARGV)');
 
 # End-to-end: v2 output runs and matches perl.

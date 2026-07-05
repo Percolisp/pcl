@@ -115,10 +115,40 @@ like($eb, qr/\(\$v \(make-p-box nil\)\)/, 'W11: bare element-read init stays box
 my $ec = Pl::Parser2->parse_code(q{$G::h{k} = 1; print $G::h{k};});
 unlike($ec, qr/\(p-gethash %h /, 'W11: package-hash element access not native-lowered');
 
+# ---- W14: leading `my $x = shift;` run coalesces into the @_ fast path ----
+
+# Single leading shift, clean body → real lambda list, no p-args-body.
+my $s1 = Pl::Parser2->parse_code(q{sub f { my $x = shift; return $x + 1; } print f(1);});
+like($s1, qr/\(&optional \(\$x \(p-undef\)\) &rest %_args\)/,
+     'W14: single my $x = shift → &optional lambda list');
+unlike($s1, qr/pl-f[\s\S]*p-args-body/, 'W14: coalesced sub skips p-args-body');
+
+# Multi-statement run → one slot per shift, in order.
+my $s2 = Pl::Parser2->parse_code(
+  q{sub f { my $x = shift; my $z = shift; return $x + $z; } print f(1,2);});
+like($s2, qr/\(&optional \(\$x \(p-undef\)\) \(\$z \(p-undef\)\) &rest %_args\)/,
+     'W14: shift run coalesces in order');
+
+# Remainder reading @_ → the rewrite is illegal (shift mutated @_) → old path.
+my $s3 = Pl::Parser2->parse_code(
+  q{sub g { my $a = shift; return join(",", @_); } print g(1,2);});
+like($s3, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: remainder reads @_ → p-args-body kept');
+
+# Remainder with string eval (can observe @_ / lexicals invisibly) → old path.
+my $s4 = Pl::Parser2->parse_code(
+  q{sub e2 { my $a = shift; return eval "1"; } print e2(1);});
+like($s4, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: string eval in remainder → p-args-body kept');
+
+# Interleaved run (`my $t = 1` between shifts): the trailing shift is in the
+# remainder → whole rewrite disqualified (conservative version).
+my $s5 = Pl::Parser2->parse_code(
+  q{sub h3 { my $x = shift; my $t = 1; my $z = shift; return $x + $t + $z; } print h3(1,2);});
+like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run stays on old path');
+
 # ---- runtime ----
 
 SKIP: {
-  skip 'sbcl not available', 9 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 10 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -225,6 +255,16 @@ print $v, " ", $h{5}, " ", $a[0], " ", $a[-1], " ", $$g, " ", $z, " ",
       (exists $h{nope} ? "viv" : "noviv"), "\n";
 EOF
   is($run->($elm), "5 6 14 7 9 1 noviv\n", 'W11: element read/write semantics match perl');
+
+  # W14 end-to-end: coalesced multi-shift sub, missing arg = undef, extra
+  # args ignored; a shift-then-@_ sub keeps mutation semantics (join must NOT
+  # see the shifted "h").
+  my $shf = Pl::Parser2->parse_code(<<'EOF');
+sub f { my $x = shift; my $z = shift; return $x + $z; }
+sub g { my $a = shift; return $a . "|" . join(",", @_); }
+print f(1,2), " ", f(5) + 0, " ", g("h","r1","r2"), "\n";
+EOF
+  is($run->($shf), "3 5 h|r1,r2\n", 'W14: coalesced and non-coalesced shift subs match perl');
 }
 
 done_testing();

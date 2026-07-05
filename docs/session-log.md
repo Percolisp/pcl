@@ -4,6 +4,20 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 274c (2026-07-05) — W14: shift-coalesce (perf pair complete).
+
+- `_leading_shift_params`: a leading run of exactly `my $x = shift;` becomes
+  the params of the existing `(&optional …)` lambda-list fast path. Guards:
+  bare shift only, distinct names, remainder never observes `@_` (later
+  shift kills the whole run — conservative interleaved answer), no string
+  eval in remainder. Shift-fib(29) startup-subtracted: v2 0.28→**0.04s**
+  (v1 0.27, perl 0.14) — the idiom now beats perl.
+- Probes byte-match perl incl. mutation semantics (shift-then-join must not
+  see the shifted element) and the OO `my $self = shift` pattern.
+- parser2-01.t p-shift shape test re-anchored to a non-coalescible body
+  (same invariant). Guards parser2-02.t +7. Census 66 unchanged; parity
+  exact (sprintf delta only). Cache gen v2-4. NEXT: W12.
+
 ## Session 274b (2026-07-05) — W11: native element access (perf).
 
 - ExprToCL2 `_elem_place` + `=` arm: `$h{k}`/`$a[i]` on let-bound containers

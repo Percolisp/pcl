@@ -775,6 +775,45 @@ the rest of the gap living inside the (already-decent) fallback shapes.
 
 **NEXT:** W14 (shift-coalesce, the other perf half) → W12.
 
+## Session 274c (2026-07-05): W14 — leading `my $x = shift;` run → `@_` fast path
+
+`_leading_shift_params` (Pl/Parser2.pm), consulted by `_lower_sub_inner` when
+`_extract_params` finds no `my (LIST) = @_;` first statement: a contiguous
+LEADING run of exactly `my $scalar = shift;` statements becomes the params
+list for the existing `(&optional ($x (p-undef)) … &rest %_args)` lambda-list
+fast path — the Nth bare shift binds `@_[N-1]`, exactly the Nth list slot, so
+the coalesce is value-identical whenever the guards hold.
+
+- **Guards (all conservative, any doubt → today's p-args-body path):** each
+  statement is exactly `my $x = shift;` with a BARE shift (no `shift @arr`,
+  no `shift()`, no `// $default`, no modifier); names distinct (duplicate =
+  illegal CL lambda list); the remainder never observes `@_` — bare shift
+  MUTATED it (dropped N elements) where `my (LIST) = @_` does not, so any
+  later `@_` / `$_[i]` / `shift` / `goto` disqualifies (a later shift kills
+  the WHOLE run — the conservative answer to the interleaved case); no
+  string eval in the remainder (eval'd code reads `@_` invisibly to the text
+  scan; eval-BLOCKS fine).
+- **Measured** (shift-fib(29), pre-transpiled sbcl-load, startup-subtracted):
+  v2 0.28 s → **0.04 s**; v1 0.27 s; perl 0.14 s. The `my $n = shift` idiom
+  goes from 1.04× over v1 to ~6×, and beats perl — same league as the
+  `my ($n) = @_` form (0.06 s). The 3-shift OO-style bench (1M calls) drops
+  to noise level vs v1's 0.35 s.
+- **Semantics probes byte-match perl**, including the mutation cases: a
+  shift-then-`join(",",@_)` sub (must NOT coalesce — join must not see the
+  shifted element), `shift @_` in the remainder, missing/extra call args,
+  and the `Counter` OO pattern (`my $class = shift; my $start = shift` +
+  `my $self = shift` with W11 element access in the body).
+- parser2-01.t's `(p-shift @_)` in_subroutine shape test updated to a
+  non-coalescible body (remainder reads `$_[0]`) — same invariant, still
+  exercises the seam. Guards parser2-02.t +6 shape +1 runtime.
+- Census 66 native (unchanged); parity sweep exact vs the same-day v1
+  baseline (sole delta = documented sprintf.t v2-better). Cache generation
+  v2-3 → v2-4.
+
+**NEXT:** W12 (OpcodeTree-walk VarAnnotator — retire the text-scan
+disqualifiers; checklist in the VarAnnotator header + the D-log) → W13 only
+if fresh measurements justify.
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is

@@ -1058,6 +1058,18 @@ sub _lower_sub_inner {
   my $params = $self->_extract_params($stmts[0]);
   my @body_stmts = @stmts;
   shift @body_stmts if $params;
+  if (!$params) {
+    # W14: coalesce a contiguous LEADING run of `my $x = shift;` statements
+    # into the same `my (LIST) = @_` fast path (the Nth bare shift binds
+    # @_[N-1] = the Nth list slot).  _leading_shift_params owns the guards —
+    # the rewrite is legal only when the remainder provably never observes
+    # @_, because the shifts MUTATED it and the list assign does not.
+    my ($sp, $n) = $self->_leading_shift_params(\@stmts);
+    if ($sp) {
+      $params = $sp;
+      splice(@body_stmts, 0, $n);
+    }
+  }
   $self->_reg_lex(@{ $params // [] });
 
   if ($params) {
@@ -1161,6 +1173,50 @@ sub _extract_params {
                map { $_->tokens } $k[1];
   return undef unless @params && !grep { !/^\$\w+$/ } @params;
   return \@params;
+}
+
+# W14: detect a contiguous LEADING run of exactly `my $scalar = shift;` at the
+# top of a sub body → (\@param_names, $run_length), or () when the rewrite is
+# not provably safe.  Guards (all conservative — any doubt keeps today's
+# p-args-body path):
+#   - each statement is `my $x = shift;` with a BARE shift — no `shift @arr`,
+#     no `shift()`, no `// $default`, no modifier, nothing else in the stmt;
+#   - the names are distinct (a duplicate would be an illegal CL lambda list);
+#   - the REMAINDER never observes @_: bare `shift` mutated @_ (dropped the
+#     first element) where `my (LIST) = @_` does not, so any later @_ / $_[i]
+#     / shift / goto (forwards @_) disqualifies (wantarray rides along in the
+#     shared scan — harmless over-fire);
+#   - the remainder has no string eval: eval'd code can read @_ (and captures
+#     lexicals by name) invisibly to the text scan.  eval-BLOCKS are fine.
+sub _leading_shift_params {
+  my ($self, $stmts) = @_;
+  my (@params, %seen);
+  my $n = 0;
+  for my $s (@$stmts) {
+    last unless ref $s && $s->isa('PPI::Statement::Variable');
+    my @k = _strip_semi($s->schildren);
+    last unless @k == 4
+      && $k[0]->isa('PPI::Token::Word')     && $k[0]->content eq 'my'
+      && $k[1]->isa('PPI::Token::Symbol')   && $k[1]->content =~ /^\$\w+$/
+      && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='
+      && $k[3]->isa('PPI::Token::Word')     && $k[3]->content eq 'shift';
+    return () if $seen{ $k[1]->content }++;
+    push @params, $k[1]->content;
+    $n++;
+  }
+  return () unless $n;
+  my @rest = @$stmts[$n .. $#$stmts];
+  my $rest_txt = join("\n", map { ref $_ ? $_->content : '' } @rest);
+  return () if $rest_txt =~ /\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/;
+  for my $s (@rest) {
+    next unless ref $s && $s->isa('PPI::Node');
+    for my $w (@{ $s->find(sub { $_[1]->isa('PPI::Token::Word')
+                                 && $_[1]->content eq 'eval' }) || [] }) {
+      my $nx = $w->snext_sibling;
+      return () unless $nx && $nx->isa('PPI::Structure::Block');
+    }
+  }
+  return (\@params, $n);
 }
 
 # ---------------------------------------------------------------- blocks
