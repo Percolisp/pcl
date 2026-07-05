@@ -24,6 +24,13 @@ has expr_o       => (is => 'ro', required => 1);
 has environment  => (is => 'ro');
 has indent_level => (is => 'rw', default => 0);
 
+# Live let-bound lexical set at this expression's position (sigiled names:
+# '$x', '@a', '%h') — Parser2 passes fallback_parser->{_let_bound_vars}.
+# W11 element access is native ONLY for let-bound containers: they are
+# guaranteed bound (no boundp/auto-declare arm needed) and are never
+# state-renamed package cells.
+has lexicals     => (is => 'ro', default => sub { {} });
+
 # Per-sub facts collected by Parser2's pre-pass:
 #   { perl_name => { cl_name => 'pl-foo', insensitive => 0|1 } }
 # `insensitive` = the sub provably never observes its caller's context
@@ -70,6 +77,16 @@ sub gen_form {
     if ($type eq 'tree_val' && @$kids == 1) {
       return $self->gen_form($kids->[0], $ctx);
     }
+    # W11: element READ — $h{k} / $a[i] on a let-bound container →
+    # (p-gethash %h KEY) / (p-aref @a IDX).  Both runtime fns return the
+    # UNBOXED element value (v1 emits the same forms in rvalue position), so
+    # the result is safe as an operand anywhere a value is expected.  NB: the
+    # value can still BE a p-box when the element holds a reference — which
+    # is why VarAnnotator counts element reads as `others` (a bare
+    # `my $x = $h{k}` stays boxed; only an operator-coerced RHS may unbox).
+    if ($type eq 'h_acc' || $type eq 'a_acc') {
+      return $self->_elem_place($node_id);
+    }
     # Native funcall: a KNOWN user sub called with static scalar args →
     # direct (pl-f a b).  The &optional/&rest calling convention makes any
     # static arity legal.  Context-insensitive callee → no *wantarray* bind.
@@ -95,6 +112,17 @@ sub gen_form {
 
   if (ref($node) eq 'PPI::Token::Operator' && @$kids) {
     my $op = $node->content;
+    # W11: element WRITE — `$h{k} = RHS` / `$a[i] = RHS` → v1's exact shape
+    # (p-setf (p-gethash %h K) RHS); the p-setf macro owns auto-declare /
+    # box-or-create / tie semantics.  Only a direct single-element place:
+    # list-assign LHS and chained/deref places fall back.
+    if ($op eq '=' && @$kids == 2) {
+      my $place = $self->_elem_place($kids->[0]);
+      return undef unless defined $place;
+      my $rhs = $self->gen_form($kids->[1]);
+      return undef unless defined $rhs;
+      return ['p-setf', $place, $rhs];
+    }
     my @forms;
     for my $kid (@$kids) {
       my $f = $self->gen_form($kid);
@@ -126,6 +154,33 @@ sub gen_form {
   }
 
   return undef;
+}
+
+# W11: `(p-gethash %h KEY)` / `(p-aref @a IDX)` form for an h_acc/a_acc node,
+# or undef (→ fallback).  Native subset: the container is a PLAIN Symbol
+# (`$h{...}` — not a chained/deref/qualified base) whose %h/@a is a let-bound
+# lexical, and the key/index lowers natively (PExpr has already auto-quoted
+# bareword hash keys into Quote nodes; multi-key `$h{a,b}` arrives as a progn
+# → gen_form undef → fallback).
+sub _elem_place {
+  my ($self, $node_id) = @_;
+  my $node = $self->expr_o->get_a_node($node_id);
+  return undef unless $self->expr_o->is_internal_node_type($node);
+  my $type = $node->{type} // '';
+  return undef unless $type eq 'h_acc' || $type eq 'a_acc';
+  my $kids = $self->expr_o->get_node_children($node_id);
+  return undef unless $kids && @$kids == 2;
+  my $base = $self->expr_o->get_a_node($kids->[0]);
+  return undef unless ref($base) eq 'PPI::Token::Symbol'
+    && $base->content =~ /^\$(\w+)$/;
+  my $container = ($type eq 'h_acc' ? '%' : '@') . $1;
+  return undef unless $self->lexicals->{$container};
+  # state-renamed containers must go through v1's rename map.
+  return undef if $self->environment
+    && exists +($self->environment->state_var_renames // {})->{$container};
+  my $key = $self->gen_form($kids->[1]);
+  return undef unless defined $key;
+  return [$type eq 'h_acc' ? 'p-gethash' : 'p-aref', $container, $key];
 }
 
 # String literal → CL form, or undef (old pipeline).

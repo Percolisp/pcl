@@ -94,10 +94,31 @@ my $cc = Pl::Parser2->parse_code(
   q{my @l = (1,2); while (my $line = shift @l) { print "$line\n"; }});
 unlike($cc, qr/__cond__/, 'self-contained condition-my not renamed');
 
+# ---- W11: native hash/array element access on let-bound containers ----
+
+# Element READ in an operator RHS lowers natively and the accumulator becomes
+# a raw slot (the write is arith-shaped; the element read coerces via p-+).
+my $ea = Pl::Parser2->parse_code(
+  q{my %h; my @a; my $s = 0; $h{x} = 1; $a[3] = 2; $s = $s + $h{x} + $a[3]; print $s;});
+like($ea, qr/\(setf \$s \(p-\+ \(p-\+ \$s \(p-gethash %h "x"\)\) \(p-aref \@a 3\)\)\)/,
+     'W11: element reads native in arith RHS; accumulator unboxed');
+like($ea, qr/\(p-setf \(p-gethash %h "x"\) 1\)/, 'W11: hash element write = v1 p-setf shape');
+like($ea, qr/\(p-setf \(p-aref \@a 3\) 2\)/, 'W11: array element write = v1 p-setf shape');
+
+# A BARE element read as a my-init stays boxed: the element value can itself
+# be a reference box (class-5: a raw slot must never receive a box).
+my $eb = Pl::Parser2->parse_code(q{my %h; $h{k} = 5; my $v = $h{k}; print $v;});
+like($eb, qr/\(\$v \(make-p-box nil\)\)/, 'W11: bare element-read init stays boxed');
+
+# A non-let-bound (package) container falls back — v1 owns the boundp/
+# auto-declare arm.
+my $ec = Pl::Parser2->parse_code(q{$G::h{k} = 1; print $G::h{k};});
+unlike($ec, qr/\(p-gethash %h /, 'W11: package-hash element access not native-lowered');
+
 # ---- runtime ----
 
 SKIP: {
-  skip 'sbcl not available', 8 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 9 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -190,6 +211,20 @@ package main;
 print $c, " ", Foo::get(), "\n";
 EOF
   is($run->($spn), "3 3\n", 'W10: my spanning package boundaries reads/writes one cell');
+
+  # W11 element access, end-to-end: var keys, ref-valued elements through a
+  # bare (boxed) read, no autoviv on read, negative index — must match perl.
+  my $elm = Pl::Parser2->parse_code(<<'EOF');
+my %h; my @a; my $y = 9;
+$h{x} = 5; $a[2] = 7; $a[0] = $a[2] * 2;
+my $v = $h{x};
+$h{$v} = $h{x} + 1;
+$h{r} = \$y; my $g = $h{r};
+my $z = $h{nope} + 1;
+print $v, " ", $h{5}, " ", $a[0], " ", $a[-1], " ", $$g, " ", $z, " ",
+      (exists $h{nope} ? "viv" : "noviv"), "\n";
+EOF
+  is($run->($elm), "5 6 14 7 9 1 noviv\n", 'W11: element read/write semantics match perl');
 }
 
 done_testing();

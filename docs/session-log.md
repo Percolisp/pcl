@@ -4,6 +4,21 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 274b (2026-07-05) — W11: native element access (perf).
+
+- ExprToCL2 `_elem_place` + `=` arm: `$h{k}`/`$a[i]` on let-bound containers
+  (new `lexicals` attr) → v1's exact `(p-gethash/p-aref …)` read forms and
+  `(p-setf …)` write shape. Everything else (package containers, chains,
+  derefs, multi-key, compound/++/`\` targets) still falls back.
+- VarAnnotator: Symbol+Subscript chain = one `others` value (bare
+  `my $x = $h{k}` stays boxed — element can hold a reference box; only
+  operator-coerced RHS unboxes).
+- Arrhash bench (2M, startup-subtracted): perl 0.17 / v1 0.39 / v2 0.25 →
+  **0.21 s** (accumulator now a raw slot, loop fully native).
+- Census 66 unchanged; parity sweep EXACT except documented sprintf.t
+  v2-better (532/525 = the +7 total). Guards parser2-02.t +6. Cache gen
+  v2-3. NEXT: W14 shift-coalesce.
+
 ## Session 274 (2026-07-05) — W10: my-across-package fixed on the v2 side.
 
 - `_rename_spanning_lexicals` pre-pass (Pl/Parser2.pm): a qualifying spanning

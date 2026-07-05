@@ -1048,7 +1048,26 @@ declaration; no `{name}` brace-deref usages); shadowing spans stay gated.
 pinned by a guard test; `_check_my_spanning`'s die only fires for the
 still-gated shapes; parity holds.
 
-### W11. Tier C1 — native hash/array element access (measure first)
+### ~~W11. Tier C1 — native hash/array element access~~ — DONE (s274)
+
+**Shipped s274.** Measured first (2M-iteration arrhash bench, startup-subtracted):
+perl 0.17 s, v1 0.39 s, v2-before 0.25 s.  ExprToCL2 `_elem_place`: `$h{k}`/`$a[i]`
+on a PLAIN Symbol base whose `%h`/`@a` is **let-bound** (new `lexicals` attr =
+`fallback_parser->{_let_bound_vars}`; package containers keep the fallback's
+boundp/auto-declare arm; state-renamed containers excluded) → native READ
+`(p-gethash %h K)`/`(p-aref @a I)` (v1's exact rvalue forms — both return the
+UNBOXED element value) and native WRITE `=` arm `(p-setf (p-gethash %h K) RHS)`
+(v1's exact macro shape owns autoviv/tie/auto-declare).  Chained/deref/multi-key
+(progn)/list-assign places all still fall back.  VarAnnotator `_scan`: a Symbol's
+trailing Subscript chain is consumed as ONE `others` value (element value may be
+a reference box → bare `my $x = $h{k}` stays boxed; only operator-coerced RHS
+unboxes — the class-5 rule).  Result: the bench's accumulator became a raw slot
+and the loop fully native → **v2 0.21 s** (was 0.25; v1 0.39; perl 0.17).
+Census 66 unchanged; parity sweep EXACT (sole delta = documented sprintf.t
+v2-better 532/525).  Guards parser2-02.t +5 shape +1 runtime.  Cache gen v2-3.
+keys/values/each native iteration NOT done (bench first if ever).  Original below.
+
+### W11. Tier C1 — native hash/array element access (original)
 
 **Do not start until W1–W6 are done and W7 parity holds.**
 

@@ -204,6 +204,14 @@ sub _scan {
         || $r eq 'PPI::Token::Quote::Double')        { $lits++ }
     elsif ($r eq 'PPI::Token::Symbol') {
       return 0 unless $e->content =~ /^\$\w+$/;
+      # W11: element access `$h{k}` / `$a[i]` — the Symbol plus its subscript
+      # chain is ONE value (the element).  Consume the trailing Subscript(s)
+      # without scanning inside (the key only selects the slot; writes inside
+      # it are caught by the step-3 text regexes).  p-gethash/p-aref return
+      # the element VALUE, which may itself be a reference box — so this
+      # counts as `others` (like a sub call): only an operator-coerced RHS
+      # may unbox, a bare `$x = $h{k}` stays boxed.
+      $i++ while $i < $#e && ref($e[$i+1]) eq 'PPI::Structure::Subscript';
       $others++;
     }
     elsif ($r eq 'PPI::Token::Operator') {

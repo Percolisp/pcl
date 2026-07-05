@@ -742,6 +742,39 @@ that reuses W5's machinery (facts scan extracted into the shared
 
 **NEXT:** W11+W14 (the perf pair) → W12.
 
+## Session 274b (2026-07-05): W11 — native element access on let-bound containers
+
+Measured first (plan §W11.1): 2M-iteration arrhash bench (`$h{x}=$i; $a[3]=$i+1;
+$s=$s+$h{x}+$a[3]`), startup-subtracted: perl 0.17 s, v1 0.39 s, v2 0.25 s.
+Instrumented cause: the statements fell back whole (element access non-native),
+so `$s` stayed boxed (`p-my-=`) — a hand-edited raw-`$s` variant measured 0.22 s,
+the rest of the gap living inside the (already-decent) fallback shapes.
+
+- **ExprToCL2 `_elem_place`** — `$h{k}` / `$a[i]` where the base is a PLAIN
+  Symbol and `%h`/`@a` is **let-bound** (new `lexicals` attr, fed from
+  `fallback_parser->{_let_bound_vars}`) lowers natively: READ →
+  `(p-gethash %h K)` / `(p-aref @a I)` (v1's exact rvalue forms; both return
+  the UNBOXED element value), WRITE (`=` operator arm) →
+  `(p-setf (p-gethash %h K) RHS)` (v1's exact macro shape — autoviv, tie,
+  auto-declare all live in the macro).  Package containers, chained/deref
+  bases, multi-key `$h{a,b}` (progn), state-renamed containers, list-assign
+  places, compound assigns, `++/--`, `\$h{k}` all still fall back.
+- **VarAnnotator `_scan`**: a Symbol's trailing Subscript chain is consumed as
+  ONE `others` value.  Class-5 note: p-gethash/p-aref return the element
+  VALUE, which may itself be a reference box — `others` classification means
+  a bare `my $x = $h{k}` stays boxed and only an operator-coerced RHS can
+  unbox (same rule as sub-call results).
+- **Result:** the bench lowers fully native with a raw-slot accumulator —
+  **v2 0.21 s** vs perl 0.17 s (v1 0.39 s; arrhash v2/v1 1.7×→1.9×).
+- Census 66 native (unchanged list).  Parity sweep over all 66, both
+  pipelines: v2 6209/80, v1 6202/80, 53 fully-passing both, `_status.tsv`
+  identical except sprintf.t 532/525 = the documented v2-better delta
+  (exactly the +7).  Guards parser2-02.t: +5 shape, +1 runtime (var keys,
+  ref-valued element via boxed bare read, no autoviv-on-read, negative
+  index).  Cache generation v2-2 → v2-3.
+
+**NEXT:** W14 (shift-coalesce, the other perf half) → W12.
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is

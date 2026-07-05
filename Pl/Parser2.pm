@@ -1804,7 +1804,8 @@ sub _lower_expr {
     );
     my ($node_id) = $expr_o->parse_expr_to_tree(\@parts);
     Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
-                       sub_info => $self->_cur_sub_info)
+                       sub_info => $self->_cur_sub_info,
+                       lexicals => $self->fallback_parser->{_let_bound_vars} // {})
                  ->gen_form($node_id, $native_ctx);
   };
   $_->[0]->set_content($_->[1]) for @snap;   # restore pristine tokens
