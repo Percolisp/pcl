@@ -4,6 +4,21 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 274d (2026-07-05) — W15.1: bare setf on let-bound element writes + W12 prep.
+
+- W12 prep note committed into plan §W12 (0bec3d4): event vocabulary per
+  text-scan regex, analyze()-side parse-pass architecture (D7/D14 hazards),
+  PCL_W12_DIFF dual-run bring-up protocol.
+- W15 menu added to the plan (perf extensions; integer-annotation analysis:
+  general form blocked by IV→NV overflow semantics, sound subset = C-for
+  literal-bounds counter decl).
+- W15.1: W11's `=` arm emits bare `(setf (p-gethash/p-aref …))` instead of
+  the p-setf macro (container proven let-bound). **Measured perf-NEUTRAL**
+  (boundp is ns-cheap) — kept because the skipped arm proclaims the lexical
+  container name SPECIAL on first write (defvar-poisoning class; still
+  latent in v1/fallback, logged in plan §W15.1). Guards re-pinned. Cache
+  gen v2-5.
+
 ## Session 274c (2026-07-05) — W14: shift-coalesce (perf pair complete).
 
 - `_leading_shift_params`: a leading run of exactly `my $x = shift;` becomes

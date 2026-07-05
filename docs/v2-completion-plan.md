@@ -1306,14 +1306,20 @@ effort-to-payoff.  Context for all of it: fib and shift-fib now BEAT perl;
 the arrhash bench is v2 0.21 s vs perl 0.17 s — the residue is inside the
 runtime element functions, not in the emitted shapes.
 
-1. **Drop the `boundp` arm on element writes to let-bound containers**
-   (v2-only, ~10 lines).  The `p-setf` macro guards every
-   `(setf (p-gethash %h k) v)` with `(unless (boundp '%h) …auto-declare…)`
-   because v1 cannot know whether the container is a package global that
-   needs vivifying.  W11's native write path fires ONLY for let-bound
-   containers, which are bound by construction — v2 can emit the bare
-   `(setf (p-gethash …))` and skip the check on every write.  (Keep the
-   macro itself unchanged — the fallback still needs the arm.)
+1. ~~**Drop the `boundp` arm on element writes to let-bound containers**~~ —
+   **DONE (s274d) — measured perf-NEUTRAL, kept for the hazard removal.**
+   W11's native `=` arm now emits the bare `(setf (p-gethash %h k) v)` /
+   `(setf (p-aref @a i) v)` (legal because `_elem_place` guarantees the
+   container is let-bound; the p-setf macro itself is unchanged — the
+   fallback still needs its arm).  The arrhash bench did NOT move (`boundp`
+   on a constant symbol is a few ns; within run noise), so the perf claim
+   below was wrong.  The change stays because the skipped arm's first
+   execution `proclaim`s the LEXICAL container name **special** globally —
+   the defvar-poisoning hazard class (a later `let` of `%h` compiled after
+   that write becomes a dynamic binding; closures over it capture the shared
+   dynamic cell).  v1 (and v2's fallback path) still carry that hazard —
+   recorded here as a known v1-side latent bug, same family as the
+   defvar-shadow bugs in `docs/closure-lexical-scoping.md`.
 2. **R1-style inline fast paths for `p-gethash` / `(setf p-gethash)` /
    `p-aref` / `(setf p-aref)`** (runtime-only).  The read path pays
    unbox + `to-string` + a marker-cond (`%ENV-MARKER%`/`%INC-MARKER%`/

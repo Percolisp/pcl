@@ -102,8 +102,11 @@ my $ea = Pl::Parser2->parse_code(
   q{my %h; my @a; my $s = 0; $h{x} = 1; $a[3] = 2; $s = $s + $h{x} + $a[3]; print $s;});
 like($ea, qr/\(setf \$s \(p-\+ \(p-\+ \$s \(p-gethash %h "x"\)\) \(p-aref \@a 3\)\)\)/,
      'W11: element reads native in arith RHS; accumulator unboxed');
-like($ea, qr/\(p-setf \(p-gethash %h "x"\) 1\)/, 'W11: hash element write = v1 p-setf shape');
-like($ea, qr/\(p-setf \(p-aref \@a 3\) 2\)/, 'W11: array element write = v1 p-setf shape');
+# Plain setf, not the p-setf macro: _elem_place guarantees a let-bound
+# container, so the macro's boundp/auto-declare arm is skipped (W15.1).
+like($ea, qr/\(setf \(p-gethash %h "x"\) 1\)/, 'W11: hash element write = bare setf (no boundp arm)');
+like($ea, qr/\(setf \(p-aref \@a 3\) 2\)/, 'W11: array element write = bare setf (no boundp arm)');
+unlike($ea, qr/\(p-setf \(p-gethash/, 'W11: no p-setf macro on let-bound hash writes');
 
 # A BARE element read as a my-init stays boxed: the element value can itself
 # be a reference box (class-5: a raw slot must never receive a box).

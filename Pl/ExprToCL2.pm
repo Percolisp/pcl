@@ -112,16 +112,21 @@ sub gen_form {
 
   if (ref($node) eq 'PPI::Token::Operator' && @$kids) {
     my $op = $node->content;
-    # W11: element WRITE — `$h{k} = RHS` / `$a[i] = RHS` → v1's exact shape
-    # (p-setf (p-gethash %h K) RHS); the p-setf macro owns auto-declare /
-    # box-or-create / tie semantics.  Only a direct single-element place:
-    # list-assign LHS and chained/deref places fall back.
+    # W11: element WRITE — `$h{k} = RHS` / `$a[i] = RHS` → plain CL
+    # (setf (p-gethash %h K) RHS).  v1's p-setf macro adds only a per-write
+    # `(unless (boundp 'CONTAINER) proclaim+vivify)` arm around this exact
+    # setf — dead weight here because _elem_place already guarantees the
+    # container is LET-BOUND (and skipping it avoids the arm's latent
+    # special-proclaim of a lexical name on first write — W15 item 1).  The
+    # (setf p-gethash)/(setf p-aref) functions own box-or-create / tie /
+    # autoviv semantics.  Only a direct single-element place: list-assign
+    # LHS and chained/deref places fall back.
     if ($op eq '=' && @$kids == 2) {
       my $place = $self->_elem_place($kids->[0]);
       return undef unless defined $place;
       my $rhs = $self->gen_form($kids->[1]);
       return undef unless defined $rhs;
-      return ['p-setf', $place, $rhs];
+      return ['setf', $place, $rhs];
     }
     my @forms;
     for my $kid (@$kids) {
