@@ -4,6 +4,44 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 273 (2026-07-05) — v2 W8 FINISHED: review of s272h–i, D20 reverted, D23–D28.
+
+- Reviewed Opus 4.8's W8 batch (D1–D22, commits 5947c47…4108d43) decision by
+  decision against real perl + code. Verdict: sound EXCEPT **D20, reverted**
+  (`docs/v2-w8-session-decisions.md` D23): its driving test
+  (decl-ordering-01 "BEGIN calls sub…") pinned v1's divergence, not perl —
+  runtime `our $x = RHS` DOES clobber a BEGIN-set value in source order; the
+  raw `(setf (p-box-value …))` shape only "worked" via a stale sv-cache read.
+  Test fixed to `our $result;` (no init). **v1 keeps the stale-cache
+  divergence — logged as an open v1 bug (completion plan W8.5 notes).**
+- Handoff said 3 Pl/t files remained; full v2 gate showed **5**. All fixed:
+  bop-01 (D24: bitwise `&=|=^=` missing from VarAnnotator compound-assign
+  class), misc-fixes-02 t27 (D25: paren-less `\substr $t`), fileio-02 t25
+  (D26: `open($h,…)` writes its FH arg), closure-01 t17 (D27: self-ref
+  `my $i = $i` init now a let-BINDING init via new `p-box-init` — CL let
+  init-forms evaluate in the outer env), begin-end-01 (the D20 revert).
+- **D28 — new gate, biggest find:** `map { my $x = … }` / `do { my $x = … }`
+  falling back over a live outer `$x` wrote through the OUTER lexical
+  (silently wrong on a common idiom). `_gate_seam_my_shadow` (my/state inside
+  a Block within a fallback, name live) → v1. Reclaim = plan W8.5 (PPI-level
+  rename, W5 pattern).
+- **First full-green v2 gate: 114 files / 3866 tests ALL PASS** (v1 gate
+  re-verified 100%). Parity sweep then caught defins.t PARTIAL under v2 →
+  **W8.5 done same session (D29/D30)**: shared shadow-rename machinery
+  (`_rename_decl_within`+`_shadow_rename_blocker`). Seam my-shadows renamed
+  `$x__shadow__N` (D28 gate now fallback; do.t/vec.t reclaimed; yadayada.t
+  stays gated on interpolation; map probe now perl-CORRECT `2 4 6 outer`,
+  better than v1). Poisoned condition-mys renamed `$name__cond__N` in a
+  pre-pass (defins.t unbound-global crash; self-contained loops untouched).
+  Known open siblings logged in plan W8.5: interp-token rename, C-for
+  carve-out poison (needs vi-key mapping, → W12).
+- Guards: parser2-02.t → 24 tests. Plan updated (`docs/v2-completion-plan.md`):
+  W8 definition-of-done, W8.5 strike-through + leftovers, W9 cache-hazard
+  note, W11/W14 perf-priority note, W12 disqualifier checklist.
+  NEXT: W8 re-sweep verify → W9 (cache keying first).
+
+---
+
 ## Session 272g (2026-07-05) — v2 W7 (done) + W8 (in progress).
 
 - **W7 full-sweep parity: CLEAN.** Full 108-file sweep v1 vs v2. Only 4 deltas,

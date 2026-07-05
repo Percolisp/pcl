@@ -226,7 +226,7 @@ our @ISA = ('Animal');
 EOF
 like($our, qr/^\(defvar \$count \(make-p-box nil\)\)/m, 'our $x defvar hoisted');
 like($our, qr/^\(defvar \@list /m, 'our @a defvar hoisted');
-like($our, qr/\(setf \(p-box-value \$count\) 3\)/, 'our $x scalar init sets the box value directly (source-order-safe vs BEGIN)');
+like($our, qr/\(p-scalar-= \$count 3\)/, 'our $x init via p-scalar-= (box-set clears sv/nv caches; a raw p-box-value setf reads back stale — D23)');
 like($our, qr/\(p-list-= \(vector \$p \$q\)/, 'our (LIST) init via p-list-=');
 unlike($our, qr/\(let \(\(\$count/, 'our vars are not let-bound');
 like($our, qr/\(in-package :Dog\).*\(defvar \@ISA /s, 'our @ISA defvar lands in its package section');

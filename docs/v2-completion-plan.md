@@ -115,6 +115,14 @@ a plausible-looking wrong explanation is the worst possible one.
 
 ## 1. Where things stand
 
+> **s273 update:** W1–W8 are DONE (W8 pending its final re-sweep, see the W8
+> box). 69 files were v2-native after W6; re-census after the D28 gate. The
+> remaining road to "working v2 compiler" is, in order: **W8 re-sweep → W9
+> (flip the default; cache keying FIRST) → W8.5/W10 as cleanup → W11 + W14
+> (the two big PERF items) → W12 (the annotator rewrite that retires the
+> text-scan disqualifiers) → W13 (only if measurements justify)**. The list
+> below this note describes the pre-W1 state and is kept for history.
+
 - `PCL_V2=1` selects `Pl::Parser2` in `pl2cl` (see `parse_with_fallback`
   there; eval-mode and any special opts always route to v1; `--lenient-ppi`
   is deliberately ignored for the v2 attempt — it only matters when PPI
@@ -811,18 +819,33 @@ Procedure:
    squarely in §0.5 territory — escalate stubborn files rather than
    classifying them as (b) or (c) without proof.
 
-### W8. Tier B2 — the Pl/t gate under v2 — IN PROGRESS (s272g)
+### ~~W8. Tier B2 — the Pl/t gate under v2~~ — DONE code-wise (s272g–s273); re-sweep = first task below
 
-**~23 of 114 Pl/t files fail under `PCL_V2=1`.**  Critical realization: full
-perl-tests parity does NOT mean v2 is correct — those files gate to v1 for other
-reasons, MASKING native-lowering gaps that the smaller Pl/t snippets (v2-native)
-expose.  Pl/t under v2 is the stricter gate.  Fixed s272g: BEGIN/END ordering
-(`_sched_defs` bucket) + BEGIN-refs-file-my gate; native bare-tail-if return
-(`--pcl-if-ret--` via `$tail_ctx`); foreach-aliasable-lvalue gate.  **~19 files
-remain** (closure/wantarray/state/match-vars/lvalue-ref/use-require/decl-ordering-
-01+02/misc-fixes-01+02/transpile-test-01..05/bop-01/socket-01/pcl-dash-m/fileio-02).
-Per file: reproduce → compare v2/perl/v1 → fix native / gate→v1 / pipeline-aware
-(never weaken), keeping native perl-tests parity.  Original guidance below.
+**~23 of 114 Pl/t files failed under `PCL_V2=1`** at the start.  Critical
+realization: full perl-tests parity does NOT mean v2 is correct — those files
+gate to v1 for other reasons, MASKING native-lowering gaps that the smaller
+Pl/t snippets (v2-native) expose.  Pl/t under v2 is the stricter gate.
+
+- s272g: BEGIN/END ordering (`_sched_defs` bucket) + BEGIN-refs-file-my gate;
+  native bare-tail-if return; foreach-aliasable-lvalue gate.
+- s272h–i (Opus): the D1–D22 batch — see `docs/v2-w8-session-decisions.md`.
+- s273 (review pass): D20 REVERTED (it was wrong vs real perl — read D23, it
+  is a case study in "the test can be the bug"), and the last 5 failing files
+  fixed: bop-01 (D24 bitwise `&=` boxing), begin-end-01 (D23 revert),
+  misc-fixes-02 (D25 paren-less `\substr`), fileio-02 (D26 `open($h,…)`
+  boxing), closure-01 (D27 `my $i = $i` self-ref init via `p-box-init`).
+  Plus D28: the seam my-shadow GATE (`map { my $x … }`/`do { my $x … }` over a
+  live outer `$x` silently corrupted the outer lexical — gate → v1; reclaim in
+  W8.5). Guards added to parser2-02.t (7 shape + 1 runtime).
+
+**Definition of done for W8 (verify before starting W9):**
+1. `PCL_V2=1 prove -j8 Pl/t/` — zero failing files.
+2. `prove -j8 Pl/t/` (v1) — still 100%.
+3. Census + v2-native parity sweep vs same-day v1 baseline — EXACT (the D28
+   gate may have knocked some files off native; that is a coverage loss, not a
+   parity loss — record the new census number).
+   s273 left this running; if the numbers in `docs/parser2-prototype.md` are
+   already updated with a s273 sweep block, trust them; otherwise re-run (§2).
 
 ### W8. Tier B2 — the Pl/t gate under v2
 
@@ -846,6 +869,74 @@ PCL_V2=1 prove -j8 Pl/t/     # ~6 min; must match v1's file/test counts
     environment — that is intended; don't strip it.
 - `Pl/t/parser2-01.t` calls `Pl::Parser2` directly and is env-independent.
 
+### ~~W8.5 — reclaim the D28-gated files~~ — DONE (s273, decisions D29+D30)
+
+**Shipped s273.** Option 1 below was implemented as `_rename_decl_within` +
+`_shadow_rename_blocker` (shared machinery), used by BOTH:
+- `_gate_seam_my_shadow` — renames the fallback-block shadow to
+  `$x__shadow__N`; blockers (interpolation, re-shadow, `${x}`, string eval,
+  state, non-scalar) still die → v1. do.t/vec.t reclaimed; yadayada.t stays
+  gated (interpolated `"($err)"`). The map probe is perl-correct under
+  v2-native (`2 4 6 outer`) — deliberately BETTER than v1's defvar-shadow
+  `2 4 6 6`; proof recorded in D29.
+- `_rename_poisoned_cond_mys` — segment pre-pass renaming condition-my names
+  to `$name__cond__N` ONLY when the name is also used outside the construct
+  (the defins.t unbound-global crash, D30). Self-contained loops keep their
+  names (zero churn, interpolation untouched).
+
+**Still open in this family (for a later session):**
+1. yadayada.t-class reclaim needs renaming INSIDE interpolating tokens
+   (guarded `s/\$\Qname\E\b/…/` on Quote::Double etc.; gate on any
+   backslash-adjacent or `${name}` occurrence). Only do it if the census
+   shows real files blocked on the interpolation blocker.
+2. The single-counter C-for carve-out has the same poison conflict
+   (`for (my $i…)` + global `$i` elsewhere → unbound). Renaming there must
+   carry the VarAnnotator vi verdict across the rename or the intloop
+   unboxing optimization is lost. Cleanest under W12's structural events.
+3. v1-side bugs found and deliberately NOT fixed (parity behaviour): the raw
+   `(setf (p-box-value …))` our-init stale-sv-cache read after a BEGIN write,
+   and the defvar-shadow map corruption (`docs/closure-lexical-scoping.md`).
+   Both are reasons v2 exists.
+
+Original design notes below (kept for reference):
+
+The D28 gate sends a whole file to v1 whenever a fallback block
+re-declares a live lexical (`my $x = …; my @r = map { my $x = … } …`). Two
+ways to reclaim, in order of preference:
+
+1. **Rename at the PPI level, before lowering (recommended — reuses W5's
+   machinery).** In `_gate_seam_my_shadow`, instead of dying: rewrite the
+   inner declaration and every reference to it WITHIN that block to a fresh
+   name (`$x__shadow__N`) via `set_content`, exactly the W5 rename pattern
+   (sigil-preserving, skip if the block also contains `${x}`-style
+   brace-derefs or string interpolation of the name — then keep the die; read
+   `_rename_captured_file_lexicals` first and factor out its token-walk
+   helper rather than copying it — CLAUDE.md §11). After the rename there is
+   no collision: the seam sees a NEW name, registers it let-bound inside its
+   own scope handling, and the outer lexical is untouched. Subtlety: the
+   rename must NOT leak outside the block (a shadow is block-scoped by
+   definition, so rewriting only tokens inside the Block subtree is exactly
+   right). Interpolation: `"$x"` inside the block refers to the shadow —
+   `_interp_names` decides whether to rename-in-string or keep the gate; keep
+   the gate for interpolated cases in round 1.
+2. **Lower map/grep/sort blocks natively** (bigger; overlaps W11's "consider
+   keys/values/each native" note). Not worth it for this alone.
+
+**Also fold in here (same family, found s273):** the do-block/anon-sub cases
+(t9/t11 in the s273 scratch probes). And note two v1-side bugs found during
+the D20 investigation that this workstream must NOT try to fix (they are v1
+parity behaviour, record only): (a) v1's raw `(setf (p-box-value …))` our-init
+reads back stale sv caches after a BEGIN wrote the box; (b) v1's
+defvar-based lexicals make a map-block shadow write through the file-level
+`my` (`docs/closure-lexical-scoping.md`). Both are reasons v2 exists; both
+are pinned pipeline-aware where tests cover them.
+
+**Acceptance:** the census count recovers to ≥ the pre-D28 number with the
+gate replaced by renames; a guard in parser2-02.t runs the map probe
+end-to-end and byte-matches **perl** (`2 4 6 outer`) — note: matching perl
+here means v2-native output BEATS v1; per §2 rule 1 that requires the written
+proof, which is this section.
+
 ### W9. Tier B3 — flip the default
 
 1. **Cache keying FIRST** (hard prerequisite). The module cache
@@ -866,7 +957,12 @@ PCL_V2=1 prove -j8 Pl/t/     # ~6 min; must match v1's file/test counts
 
    Also mix in the pipeline OVERRIDE when the escape hatch is set
    (`(sb-ext:posix-getenv "PCL_V1")` → append `"|v1"`), so a user flipping
-   back and forth doesn't cross-contaminate. Paren-check the file after
+   back and forth doesn't cross-contaminate. NOTE this hazard already exists
+   TODAY in the opposite direction: a `PCL_V2=1` run with caching enabled
+   shares `~/.pcl-cache` with v1 runs (only `--no-cache` invocations are
+   safe). So implement this step as the very FIRST thing in W9 — mix in the
+   *effective pipeline* (v1/v2), not just the escape hatch — and `rm -rf
+   ~/.pcl-cache/*` once after deploying it. Paren-check the file after
    editing (§0.2 step 2). Verify: transpile a module-using file, flip the
    env var, re-run — it must RE-transpile (watch timing or add
    `PCL_V2_VERBOSE`).
@@ -914,6 +1010,15 @@ still-gated shapes; parity holds.
 
 **Do not start until W1–W6 are done and W7 parity holds.**
 
+> **Perf priority note (s273):** W11 and W14 are the two items that make v2
+> visibly faster on real code, per the s272d bench table in
+> `docs/parser2-prototype.md`: arith already dominates (6.8–10.9×), but
+> arrhash is only 1.7× (→ W11) and `my $x = shift`-style subs only 1.04×
+> (→ W14). Real CPAN/OO code is exactly hash-element + shift-heavy, so these
+> two unlock the headline win. W12 is a *correctness/maintainability*
+> rewrite (it retires the text-scan disqualifiers) — do it after the perf
+> pair unless disqualifier over-fire is measurably costing coverage.
+
 1. Write the bench first:
 
    ```perl
@@ -952,7 +1057,23 @@ still-gated shapes; parity holds.
 
 Replace the text-scan gates with facts from the PExpr OpcodeTree that
 ExprToCL2 already builds per expression (design context:
-`docs/type-flow-and-codegen-plan.md` §(s)). Sketch: per statement, after
+`docs/type-flow-and-codegen-plan.md` §(s)).
+
+**The shape checklist is maintained in two places — W12 must reproduce every
+entry structurally:** the disqualifier list in `Pl/VarAnnotator.pm`'s header
+(s272h/s273 entries) and the boxing decisions in
+`docs/v2-w8-session-decisions.md` (D2, D11, D12, D15, D24, D25, D26 — plus
+the pre-existing step-3 regexes). Each regex = one "write/alias event" the
+tree walk must emit: lvalue-assign, list-assign target, conditional init,
+magic-ref target (`\substr`/`\vec`/`\pos`, paren-less included), bitwise and
+string-bitwise compound assigns, handle-vivifying builtin args, mutating
+builtin args, `local`, `pos`, foreach alias, `=~`, `++/--`, `\$x`. The
+per-name gates D27/D28 (self-ref init, seam shadow) are SCOPING facts, not
+boxing facts — the tree walk should also expose "declaration whose init
+references the declared name" and "my nested inside a block that lowers via
+the seam" so those two stop being text scans as well.
+
+Sketch: per statement, after
 `parse_expr_to_tree`, walk the tree collecting per-name (read, write,
 ref-taken, magic-target) events; aggregate per block; keep the same
 conservative rules keyed on AST facts instead of regexes. The win is

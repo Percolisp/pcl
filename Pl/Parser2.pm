@@ -196,6 +196,19 @@ sub parse {
   $self->{_file_lex_renamed} = {};
   $self->_rename_captured_file_lexicals($_) for @segments;
 
+  # W8.5: a condition-`my` name (while (my $name = …)) is registered let-bound
+  # (_all_lex) so it is never defvar'd — but when the SAME name is also used as
+  # a package global elsewhere in the segment (defins.t: a later
+  # `($seen ? $dummy : $name) = <FILE>`), that exclusion leaves the global
+  # unbound.  Rename the condition-declared lexical (its construct is its whole
+  # scope) to a fresh `$x__cond__N` so the global keeps its name and gets its
+  # forward defvar.  Only POISONED names are renamed (any use outside all of
+  # that name's cond-my constructs); self-contained loops keep their names —
+  # zero churn.  Runs here, pre-analysis, for the same reason as W5 above.
+  $self->{_cond_rename_counter} = 0;
+  $self->{_shadow_rename_counter} = 0;
+  $self->_rename_poisoned_cond_mys($_) for @segments;
+
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
   # sub in the SHARED Environment too — the fallback expression machinery
@@ -616,6 +629,154 @@ sub _rename_captured_file_lexicals {
   }
 }
 
+# ---- W8.5 shared shadow-rename machinery ----------------------------------
+# A `my $x` whose scope is a subtree we can delimit (a fallback block, a
+# condition-my's construct) can be renamed to a fresh name so it stops
+# colliding with an outer lexical or a package global of the same name.
+# Perl visibility rule honoured: uses in the SAME statement after the `my`
+# (`my $x = $x`) still see the OUTER variable, so only the declared symbol
+# itself and symbols AFTER the declaration statement are renamed.
+
+# Reasons renaming `my $x` within $root is NOT safe; undef when safe.
+sub _shadow_rename_blocker {
+  my ($self, $root, $sym) = @_;
+  my $old = $sym->content;
+  return "non-scalar" unless $old =~ /^\$\w+$/;
+  (my $bare = $old) =~ s/^\$//;
+  # More than one my/state declaring this name in $root → nested re-shadow;
+  # a single positional rename would merge the scopes.
+  my $decls = 0;
+  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                                  && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
+    my $nx = $w->snext_sibling or next;
+    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+             : ();
+    $decls++ if grep { $_->content eq $old } @syms;
+  }
+  return "multiple declarations" if $decls != 1;
+  # Interpolated use ("$x" / /$x/ / heredoc) — the token rewrite can't reach it.
+  my %interp;
+  _interp_names($root, \%interp);
+  return "interpolated use" if $interp{$bare};
+  return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
+  # String eval captures lexicals BY NAME (session-250 alist) — the eval'd
+  # code would look for the original name.  eval-BLOCKS are fine.
+  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                                  && $_[1]->content eq 'eval' }) || [] }) {
+    my $nx = $w->snext_sibling;
+    return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
+  }
+  return undef;
+}
+
+# Rename the declaration $sym (a `my $x` Symbol) and every post-declaration
+# scalar use of it within $root to $new.  Symbols whose ->symbol resolves to
+# a container (`$x[0]` → @x, `$x{k}` → %x) are left alone — they are element
+# accesses of DIFFERENT variables.
+sub _rename_decl_within {
+  my ($self, $root, $sym, $new) = @_;
+  my $old  = $sym->content;
+  my $decl = $sym->statement;
+  my ($seen_sym, $past_decl) = (0, 0);
+  for my $t ($root->tokens) {
+    if (!$seen_sym) {
+      next unless $t == $sym;
+      $t->set_content($new);
+      $seen_sym = 1;
+      next;
+    }
+    if (!$past_decl) {
+      my ($p, $inside) = ($t->parent, 0);
+      while ($p) { if ($p == $decl) { $inside = 1; last } $p = $p->parent; }
+      next if $inside;   # decl RHS: `my $x = $x` reads the OUTER $x
+      $past_decl = 1;
+    }
+    next unless $t->isa('PPI::Token::Symbol') && $t->symbol eq $old;
+    $t->set_content($new);
+  }
+  return $new;
+}
+
+# W8.5 pre-pass: rename POISONED condition-my names (see the parse() comment).
+sub _rename_poisoned_cond_mys {
+  my ($self, $seg) = @_;
+  my $stmts = $seg->{stmts};
+
+  # 1. Collect condition-my declaration sites: [construct, my-word, symbol].
+  #    Conditions of if/unless/while/until (Structure::Condition) and all three
+  #    sections of a C-for (Structure::For) — a `my` there scopes to the whole
+  #    construct.  A `my` nested in a deeper Block inside the condition is that
+  #    block's business, not a condition-my.
+  my @sites;
+  for my $top (@$stmts) {
+    next unless ref $top && $top->isa('PPI::Node');
+    my @compounds = $top->isa('PPI::Statement::Compound') ? ($top) : ();
+    push @compounds, @{ $top->find('PPI::Statement::Compound') || [] };
+    for my $c (@compounds) {
+      for my $cond (grep { $_->isa('PPI::Structure::Condition')
+                        || $_->isa('PPI::Structure::For') } $c->schildren) {
+        for my $w (@{ $cond->find(sub { $_[1]->isa('PPI::Token::Word')
+                                        && $_[1]->content eq 'my' }) || [] }) {
+          my ($p, $nested) = ($w->parent, 0);
+          while ($p && $p != $cond) {
+            if ($p->isa('PPI::Structure::Block')) { $nested = 1; last }
+            $p = $p->parent;
+          }
+          next if $nested;
+          my $nx = $w->snext_sibling or next;
+          my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+                   : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+                   : ();
+          push @sites, [$c, $w, $_] for grep { $_->content =~ /^\$\w+$/ } @syms;
+        }
+      }
+    }
+  }
+  return unless @sites;
+
+  my %by_name;
+  push @{ $by_name{ $_->[2]->content } }, $_ for @sites;
+
+  for my $old (sort keys %by_name) {
+    (my $bare = $old) =~ s/^\$//;
+    my %in_construct = map { ($_->[0] => 1) } @{ $by_name{$old} };
+
+    # 2. Poison test: any use of the name OUTSIDE all of its cond-my constructs?
+    #    Symbols are checked exactly; interpolated uses approximately (a name
+    #    interpolated both inside AND outside constructs under-detects — that
+    #    case crashes at runtime exactly as before this pass, no worse).
+    my ($seg_uses, $in_uses) = (0, 0);
+    my (%interp_all, %interp_in);
+    _interp_names($_->[0], \%interp_in) for @{ $by_name{$old} };
+    for my $top (@$stmts) {
+      next unless ref $top && $top->isa('PPI::Node');
+      _interp_names($top, \%interp_all);
+      for my $s (@{ $top->find('PPI::Token::Symbol') || [] }) {
+        next unless $s->symbol eq $old;
+        $seg_uses++;
+        my $p = $s;
+        while ($p) { if ($in_construct{$p}) { $in_uses++; last } $p = $p->parent; }
+      }
+    }
+    my $poisoned = ($seg_uses > $in_uses)
+                || ($interp_all{$bare} && !$interp_in{$bare});
+    next unless $poisoned;
+
+    # 3. All of this name's constructs must be renameable, else gate → v1
+    #    (leaving it un-renamed would leave the global unbound at runtime).
+    for my $site (@{ $by_name{$old} }) {
+      if (my $why = $self->_shadow_rename_blocker($site->[0], $site->[2])) {
+        die "Parser2 TODO: poisoned condition-my $old ($why)\n";
+      }
+    }
+    for my $site (@{ $by_name{$old} }) {
+      $self->_rename_decl_within($site->[0], $site->[2],
+        $old . '__cond__' . $self->{_cond_rename_counter}++);
+    }
+  }
+}
+
 # Mark (in %$disq) every bare name that appears interpolated ($name / ${name})
 # inside an interpolating token (double-quote, qq, backtick/qx, interpolating
 # heredoc, or a regex match/substitution) anywhere under $node.  Single quotes,
@@ -926,12 +1087,31 @@ sub _lower_block {
       if ($imod && _modifier_needs_fallback($imod)) {
         return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
       }
+      # Self-referencing init (`my $i = $i;` / `my $s = "$s-x";`): the RHS must
+      # read the OUTER (shadowed) variable.  The boxed emission runs p-my-=
+      # INSIDE the new let, where $i already refers to the fresh nil box — so
+      # move the init into the let BINDING (a CL let init-form is evaluated in
+      # the OUTER environment) via (p-box-init INIT).  Lower the init BEFORE
+      # _reg_lex so the fallback sees the outer scope's registration state.
+      # Text-scan over-fire is harmless: p-box-init is semantically identical
+      # to (make-p-box nil)+(p-my-=).  (The unboxable raw-slot path below is
+      # already correct — its init sits in the let binding.)  Combined with a
+      # modifier, `my $x = $x if C` is perl-undefined behaviour — not handled.
+      my $self_init;
+      if (defined $init && !$imod
+          && join('', map { $_->content } @$init) =~ /\Q$name\E\b/) {
+        $self_init = ['p-box-init', $self->_lower_expr($init, $first)];
+      }
       $self->_reg_lex($name);
       # A conditional init MUST keep $c boxed (the assignment writes through the
       # box; a false cond leaves it undef) — never the unboxable raw-slot path.
       if (!$imod && $vi->{$name} && $vi->{$name}{unboxable}) {
         my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
         return (['let', ['list', ['list', $name, $initform]],
+                 $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+      }
+      if ($self_init) {
+        return (['let', ['list', ['list', $name, $self_init]],
                  $self->_lower_block(\@rest, $vi, $tail_ctx)]);
       }
       my @assign;
@@ -1510,6 +1690,7 @@ sub _lower_expr {
              : "$ctx" eq 'inherit'  ? 3
              : "$ctx" eq ':void'    ? 2
              :                        0;
+  $self->_gate_seam_my_shadow(@parts);
   # A block-form-prototype arg (`first { … } @list`, `reduce { … } …`) makes v1
   # EMIT a top-level `(defun --anon-block-N-- …)` into its definitions bucket
   # while the expression string only *references* `#'--anon-block-N--`.  Drain
@@ -1708,19 +1889,15 @@ sub _lower_our_decl {
     push @{ $self->{_captured_decls} }, "(defvar $n " . _fresh_container($n) . ")";
   }
   return [] if @k == 2;
-  # Single scalar `our $x = RHS`: set the defvar'd box's value DIRECTLY (v1's
-  # `(setf (p-box-value $x) RHS)` shape), NOT via p-scalar-=.  p-scalar-='s
-  # `unless (boundp …)` re-init path interacts badly with a BEGIN block that
-  # assigned the var at compile time — the runtime p-scalar-= then ran AFTER the
-  # BEGIN and overwrote it (`our $r=""; BEGIN{ $r=greet() } print $r` gave ""
-  # instead of "hello").  A direct box-value setf preserves source-order
-  # semantics.  (Array/hash/list `our` inits keep the generic p-*-= path.)
-  if (@names == 1 && $names[0] =~ /^\$/) {
-    my ($eq) = grep { $k[$_]->isa('PPI::Token::Operator') && $k[$_]->content eq '=' } 0 .. $#k;
-    my $rhs = $self->_lower_expr([@k[$eq + 1 .. $#k]], $stmt);
-    return [ ['setf', ['p-box-value', $names[0]], $rhs] ];
-  }
-  # `NAMES = RHS` (array/hash/list) minus the `our` keyword is a plain assignment.
+  # `NAMES = RHS` minus the `our` keyword is a plain (list) assignment.
+  # NOTE (D20 reverted, D23): a single-scalar init MUST go through p-scalar-=
+  # (box-set invalidates the box's sv/nv caches), NOT `(setf (p-box-value …))`.
+  # The raw setf bypasses cache invalidation, so a value a BEGIN block set at
+  # compile time was still read back from the stale string cache
+  # (begin-end-01 t13/14: `our $c = "default"; BEGIN { $c = "x" }` printed "x";
+  # real perl prints "default" — the runtime our-init runs in source order and
+  # clobbers the BEGIN value).  v1 emits the raw setf and has this stale-cache
+  # divergence; v2 deliberately matches perl here, not v1.
   return [ $self->_lower_expr([@k[1 .. $#k]], $stmt) ];
 }
 
@@ -1765,8 +1942,57 @@ sub _fresh_container {
 # open parens; _fallback_stmt_capture reports that surplus so _lower_block can
 # nest the block remainder inside (raw_wrap).  _fallback_stmt itself is for
 # self-contained statements only and treats a surplus as an unsupported shape.
+# A `my` INSIDE a fallback expression/statement that re-declares a name
+# already live in v2's scope must NOT reach the seam under that name: v1's
+# seam machinery consults _let_bound_vars (which v2 pre-populated with the
+# outer name), so the inner `my $x` emits a plain (p-my-= $x …) ASSIGNMENT
+# instead of a fresh binding — the "shadow" writes through the OUTER lexical.
+# Observed: `my $x = "outer"; my @r = map { my $x = $_ * 2; $x } (1,2,3);`
+# left $x == 6; same for `do { my $x = …; }` and anon-sub bodies.
+# W8.5: RENAME the shadow to a fresh `$x__shadow__N` within its Block (its
+# whole Perl scope) when safe; otherwise die → v1 (interpolated uses,
+# re-shadows, string eval — see _shadow_rename_blocker).  A same-level `my`
+# in a fallback statement stays untouched: that is the sanctioned seam
+# contract (v2 registered the name; v1 assigns into the existing binding).
+sub _gate_seam_my_shadow {
+  my ($self, @parts) = @_;
+  my $live = $self->{_live_lex};
+  return unless $live && %$live;
+  for my $part (@parts) {
+    next unless ref $part && $part->isa('PPI::Node');
+    my @words = @{ $part->find(sub {
+          $_[1]->isa('PPI::Token::Word') && $_[1]->content =~ /^(?:my|state)$/;
+        }) || [] };
+    for my $w (@words) {
+      my ($anc, $block) = ($w->parent, undef);
+      while ($anc) {
+        if ($anc->isa('PPI::Structure::Block')) { $block = $anc; last }
+        last if $anc == $part;   # stop at the fallback root (checked for Block above)
+        $anc = $anc->parent;
+      }
+      next unless $block;
+      my $nx = $w->snext_sibling or next;
+      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+               : ();
+      for my $s (@syms) {
+        next unless $live->{$s->content};
+        # `state` has per-instance semantics driven by state_var_renames —
+        # renaming the token would bypass that machinery; always gate.
+        my $why = $w->content eq 'state' ? 'state'
+                : $self->_shadow_rename_blocker($block, $s);
+        die "Parser2 TODO: my-shadow of live lexical " . $s->content
+          . " inside fallback block ($why)\n" if $why;
+        $self->_rename_decl_within($block, $s,
+          $s->content . '__shadow__' . $self->{_shadow_rename_counter}++);
+      }
+    }
+  }
+}
+
 sub _fallback_stmt {
   my ($self, $stmt, %opt) = @_;
+  $self->_gate_seam_my_shadow($stmt);
   my ($text, $opens) = $self->_fallback_stmt_capture($stmt, %opt);
   die "Parser2 TODO: statement fallback left $opens open scope(s): " . $stmt->content
     if $opens;

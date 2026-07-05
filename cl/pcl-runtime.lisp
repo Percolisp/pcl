@@ -210,7 +210,7 @@
    ;; Assignment forms (distinct from p-setf for clarity)
    #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-= #:p-array-fill #:p-hash-fill
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
-   #:p-my-=))
+   #:p-my-= #:p-box-init))
 
 (in-package :pcl)
 
@@ -3296,6 +3296,16 @@
    as an lvalue: ($x = 5)++ / ++($x = 5) / ($x = expr) .= \"s\". box-set unboxes
    a box VALUE argument, so returning the box is safe when chained as a value."
   `(progn (box-set ,place ,value) ,place))
+
+(defun p-box-init (value)
+  "Fresh box initialized with Perl copy semantics (my $x = VALUE).
+   Used as a LET binding init-form when the init expression references the
+   declared name itself (my $i = $i): a let init-form is evaluated in the
+   OUTER environment, so the reference reads the outer/shadowed variable,
+   whereas a body-position (p-my-= $i INIT) would read the fresh nil box."
+  (let ((b (make-p-box nil)))
+    (box-set b value)
+    b))
 
 (defun %p-dualvar-copy (item)
   "Fresh box copying a genuine dualvar ITEM, keeping both its numeric and string

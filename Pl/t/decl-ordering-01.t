@@ -566,9 +566,14 @@ note "-------- Runtime: cross-package interactions";
 note "-------- Runtime: BEGIN + sub interactions";
 
 # Test: BEGIN calls sub defined before it (source order)
+# NB: deliberately `our $result;` with NO runtime init.  With `our $result = "";`
+# real perl prints "" — the runtime init runs in source order AFTER the
+# compile-time BEGIN and clobbers it (that ordering is pinned pipeline-aware in
+# begin-end-01 t13/14; v1 diverges from perl there via a stale box sv-cache).
+# This test verifies only what it names: the BEGIN can CALL an earlier sub.
 {
     my $output = run_pcl(q{
-        our $result = "";
+        our $result;
         sub greet { return "hello"; }
         BEGIN { $result = greet(); }
         print $result;

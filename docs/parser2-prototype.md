@@ -630,6 +630,68 @@ artifact, not a real foreach).  Guards moved to a new file
   reproduce → compare v2/perl/v1 → fix natively, gate → v1, or make the assertion
   pipeline-aware (never weaken), always preserving native perl-tests parity.
 
+## Session 272h–i (2026-07-05, Opus 4.8): W8 big push — D1–D22
+
+19 → 5 failing `Pl/t` files under `PCL_V2=1` (commits 5947c47…4108d43). Every
+box/gate/lowering decision is logged with rationale in
+**`docs/v2-w8-session-decisions.md`** (D1–D22) — read that, not this summary.
+Highlights: `p-my-=` returns the box (lvalue assigns); condition-`my` scoping;
+per-block pragma scope (`push_scope`); fat-comma token-restore in
+`_expr_scalar_rooted` (every OO `bless { key => shift }` was mis-keying);
+`return if COND`; inherit/void ctx mapping; broadened list-assign disqualifier;
+`__lex__N` never defvar'd (map-closure capture); `my $x = INIT if COND`;
+`_ppi_parse` reuse; `\substr/\vec/\pos` boxing; caret-var forward-decl;
+return-list flatten gate; fallback bucket drain (block-form `first{}` defuns);
+void `m//g` :void wrap; BEGIN-introspection gate; state-in-anon-block gate.
+
+## Session 273 (2026-07-05): W8 finished — review pass, D20 reverted, D23–D28
+
+Review of the s272h–i work (all decisions verified against real perl + code):
+
+- **D20 was wrong and is REVERTED (D23).** Its driving test
+  (decl-ordering-01 "BEGIN calls sub defined before it") asserted v1's
+  divergence from perl; real perl lets the runtime `our $x = RHS` init clobber
+  a BEGIN-set value in source order. The raw `(setf (p-box-value …))` shape
+  "preserved" the BEGIN value only via a stale sv-cache read (the value slot
+  was correct all along). Test fixed to `our $result;` (no init — tests what
+  it names); begin-end-01 t13/14 pass again. **v1 carries the stale-cache
+  divergence — open v1 bug.**
+- The handoff's "3 files remain" was an undercount: the full v2 gate showed 5
+  (`bop-01`, `begin-end-01` in addition). All 5 fixed: D24 bitwise `&=`/`|=`/
+  `^=` boxing (bop-01), D25 paren-less `\substr $t` boxing (misc-fixes-02),
+  D26 `open($h,…)` FH-arg boxing (fileio-02), D27 self-ref `my $i = $i` init
+  via new `p-box-init` let-binding init-form (closure-01).
+- **D28 (found extending D27's guard): the seam my-shadow gate.** A `my $x`
+  inside a map/grep/do/anon-sub block that falls back, shadowing a live outer
+  `$x`, wrote through the OUTER lexical (`my @r = map { my $x = $_*2; $x } …`
+  left `$x == 6`) — silently wrong output on a common idiom, never caught by
+  any gate. Now gated → v1 (v1's own defvar-shadow divergence remains, at
+  parity). Reclaim plan: completion plan W8.5 (rename at PPI level, W5-style).
+- Guards: +7 shape / +1 runtime in parser2-02.t.
+- **First full-green v2 gate:** `PCL_V2=1 prove -j8 Pl/t/` = 114 files /
+  3866 tests, ALL PASS (and v1 gate re-verified 100%).
+- **W8.5 same session (D29+D30):** the parity sweep caught defins.t PARTIAL
+  under v2 — D4's condition-my registration excluded `$name` from forward
+  defvars while defins also uses `$name` as a package global (unbound crash).
+  Fixed by shared shadow-rename machinery (`_rename_decl_within` +
+  `_shadow_rename_blocker`): (a) seam my-shadows renamed `$x__shadow__N`
+  (D28's gate now the fallback — do.t/vec.t reclaimed, yadayada.t stays gated
+  on interpolation); (b) POISONED condition-mys renamed `$name__cond__N` in a
+  segment pre-pass (self-contained loops untouched — zero churn). The map
+  shadow probe is now perl-CORRECT under v2-native (`2 4 6 outer` vs v1's
+  `2 4 6 6` defvar-shadow bug) — documented v2>v1 divergence. Guards
+  parser2-02.t → 24 tests.
+
+**W8 definition-of-done VERIFIED (s273 final):** v2 gate 114 files/3873 tests
+PASS; v1 gate 114/3872 PASS; census 66 native of 111 (do.t/vec.t moved past
+the shadow gate to their next gates — nested-sub capture / package-in-block;
+yadayada.t gated on the interpolation blocker; defins.t native); parity sweep
+over all natives EXACT — 53 fully passing on both, only deltas: sprintf.t
+532/525 (documented v2-better) and an assignwarn.t v1-side parallel-load
+flake (116/116 isolated on both).
+
+**NEXT:** W9 (flip default; CACHE KEYING FIRST) → W10 → W11+W14 (perf) → W12.
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is

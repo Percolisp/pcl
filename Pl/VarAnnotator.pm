@@ -49,6 +49,10 @@ package Pl::VarAnnotator;
 #     following ++/--/.=/op (`++($x = 5)`, `($x = 5)++`).  Regex is anchored on
 #     `(` immediately before the name so `for (my $i = 0; …)` counters (which
 #     have `my` between `(` and the name) stay unboxable.
+#   - s273: bitwise compound assigns `&=` `|=` `^=` (and string-bitwise `&.=`
+#     `|.=` `^.=`) added to the compound-assign class — they were missing, so
+#     `$s &= "AAAAA"` was an unseen write and $s became a raw slot (bop-01
+#     t17/18: p-bit-and= no-op'd on the raw string).
 
 use v5.30;
 use strict;
@@ -128,10 +132,10 @@ sub analyze {
       && !$has_eval
       && !$in_nested_sub{$name}
       && $text !~ /\\\s*$bare\b/                                   # \$x
-      && $text !~ /\\\s*(?:substr|vec|pos)\s*\(\s*$bare\b/         # \substr($x,…)/\vec/\pos — magic write-through ref needs the box
+      && $text !~ /\\\s*(?:substr|vec|pos)\s*\(?\s*$bare\b/        # \substr($x,…) / paren-less \substr $x — magic write-through ref needs the box
       && $text !~ /$bare\s*(?:\+\+|--)/                            # $x++
       && $text !~ /(?:\+\+|--)\s*$bare\b/                          # ++$x
-      && $text !~ /$bare\s*(?:[-+*\/.%x]|\*\*|\|\||&&|\/\/|<<|>>)=(?!=)/  # $x +=
+      && $text !~ /$bare\s*(?:[-+*\/.%x&|^]|\*\*|\|\||&&|\/\/|<<|>>|[&|^]\.)=(?!=)/  # $x += (incl. bitwise &= |= ^= and string-bitwise &.= etc.)
       && $text !~ /$bare\s*=~/                                     # $x =~ ...
       && $text !~ /\(\s*$bare\s*=[^=~]/                            # ($x = …) lvalue-assign (++($x=5), ($x=5).=…)
       && $text !~ /\blocal\b[^;]*$bare\b/                          # local $x
@@ -140,6 +144,7 @@ sub analyze {
       && $text !~ /\bforeach?\s+$bare\b/                           # for $x (…) aliases
       && $text !~ /\([^=]*$bare\b[^=]*\)\s*=[^=]/                  # ($x,…) = list-assign (any nesting: (($x)xN,$y)=…)
       && $text !~ /\b(?:chomp|chop|undef|read|sysread|recv)\b[^;]*$bare\b/  # mutating builtin arg
+      && $text !~ /\b(?:open|opendir|sysopen|pipe|socket|socketpair|accept)\s*\(?\s*$bare\b/  # handle-vivifying builtin writes its FH arg (open($h,…))
       ? 1 : 0;
     $vi{$name} = { unboxable => $unboxable };
   }

@@ -368,7 +368,164 @@ f1's count). Getting nested-block state right is its own feature → gate → v1
 which handles it. Detection: a `state` declarator whose ancestor Block is
 preceded by `sub`/`map`/`grep`/`sort`.
 
-## Session end state (handoff)
+---
+
+# s273 review pass (Fable 5) — corrections and additions
+
+The s273 session reviewed D1–D22 and the handoff below. Verdict: the decisions
+are sound EXCEPT D20, which was wrong and is reverted (D23). The handoff's
+"3 files remain" undercounted — the full `PCL_V2=1 prove -j8 Pl/t/` run showed
+**5**: the 3 listed plus `bop-01` t17–18 (was on the earlier ~19 list, never
+addressed) and `begin-end-01` t13–14 (REGRESSED by D20). All 5 are fixed below.
+
+## D23 — REVERT of D20: scalar `our $x = RHS` back to `p-scalar-=`
+
+**D20 was a wrong decision, driven by a wrong test.** The evidence chain:
+
+- Real perl for D20's own example prints **""**, not "hello"
+  (`perl -e 'our $r = ""; sub greet { return "hello" } BEGIN { $r = greet() } print $r'`):
+  the runtime `our` init executes in source order AFTER the compile-time BEGIN
+  and clobbers it. The pre-D20 v2 behaviour ("" ) was CORRECT.
+- The test that drove D20 — decl-ordering-01 "BEGIN calls sub defined before
+  it" (`our $result = ""; … BEGIN { $result = greet() } print $result` expecting
+  "hello") — asserts v1's divergence-from-perl, not perl. It has been fixed to
+  use `our $result;` (no init), which tests exactly what its name says and is
+  perl-correct under both pipelines.
+- The mechanism by which `(setf (p-box-value $x) RHS)` "preserved" the BEGIN
+  value is a **stale-cache artifact**, not source-order semantics: the raw setf
+  bypasses `box-set`'s sv/nv cache invalidation, so the box's VALUE slot held
+  the new value while `p-print`/stringify read the old cached string.
+  (Instrumented: `(p-box-value $config)` returned "default" immediately before
+  a print that output "from_begin".) v1 emits this raw-setf shape and therefore
+  carries the same latent stale-cache divergence — **open v1 bug, logged in the
+  completion plan (W10 area)**.
+- begin-end-01 t13/14 (added earlier in W8, pipeline-aware, pinning the
+  perl-correct order for v2) failed under D20 and pass again after the revert.
+
+Guards: parser2-01 t59 reverted to pin `p-scalar-=`; parser2-02 pins both the
+positive (`p-scalar-=`) and negative (no raw `p-box-value` setf) shape.
+
+**Lesson recorded for future sessions:** when a Pl/t expectation and real perl
+disagree, perl wins — run the snippet under `perl` BEFORE "fixing" the
+transpiler to satisfy the test (CLAUDE.md §5 cuts both ways: the test itself
+can be the bug, and then it gets fixed to assert perl's behaviour, not
+weakened).
+
+## D24 — bitwise compound assigns are writes (`&=` `|=` `^=`, `&.=` `|.=` `^.=`)
+
+**File:** `Pl/VarAnnotator.pm`. The compound-assign disqualifier class listed
+arithmetic/string ops but not the bitwise family, so `$s &= "AAAAA"` was an
+unseen write → `$s` became a raw slot → `p-bit-and=` (a box op) silently
+no-op'd (bop-01 t17/18: "zzzzz" unchanged). Added to the class; logged in the
+header checklist for W12.
+
+## D25 — paren-less `\substr $x` / `\vec` / `\pos` also force the box
+
+**File:** `Pl/VarAnnotator.pm`. D15's regex required a literal `(` after the
+builtin name; the named-unary paren-less form `${\substr $t, 0} = …` slipped
+through → `$t` raw → the magic-cell write vanished (misc-fixes-02 t27: `[$t]`
+empty while the "" overload still fired). Paren made optional (`\(?`), same as
+the existing `pos` gate.
+
+## D26 — handle-vivifying builtins write their FH argument
+
+**File:** `Pl/VarAnnotator.pm`. `open($h, '<', $path)` (and opendir, sysopen,
+pipe, socket, socketpair, accept) mutates/associates through `$h`; a raw slot
+loses the handle association (fileio-02 t25: both reads returned undef). New
+disqualifier for the family; logged for W12.
+
+## D27 — self-referencing `my $i = $i` init reads the OUTER variable (native path)
+
+**Files:** `Pl/Parser2.pm` (`_lower_block` scalar branch), `cl/pcl-runtime.lisp`
+(`p-box-init`, exported). The boxed emission ran `(p-my-= $i INIT)` INSIDE the
+new `let`, so `my $i = $i;` read the fresh nil box (closure-01 t17: else-branch
+closures returned undef). A CL `let` init-form is evaluated in the OUTER
+environment, so the fix moves the init into the binding:
+`(let (($i (p-box-init INIT))) …)` — `p-box-init` = fresh box + `box-set`
+(Perl copy semantics). Applied only when the init text mentions the declared
+name (over-fire harmless: the shape is semantically identical to the p-my-=
+form). The raw-slot (unboxable) path was already correct — its init always sat
+in the binding. `my $x = $x if COND` (shadow + modifier) is perl-undefined
+behaviour and is not special-cased.
+
+## D28 — gate: `my`-shadow of a live lexical inside a FALLBACK block → v1
+
+**File:** `Pl/Parser2.pm` (`_gate_seam_my_shadow`, called from `_lower_expr`'s
+fallback and `_fallback_stmt`). Found while extending D27's guard to the
+`do {}` form: a `my $x` inside a Block WITHIN a fallback expression/statement
+(map/grep/do/anon-sub bodies), where `$x` is already live in v2's scope, does
+NOT create a fresh binding — v1's seam machinery consults `_let_bound_vars`
+(which v2 pre-populated with the outer name) and emits a plain assignment, so
+the "shadow" writes through the OUTER lexical. Observed corruption:
+`my $x = "outer"; my @r = map { my $x = $_ * 2; $x } (1,2,3);` left `$x == 6`;
+same for `do { my $x = …; }`. This was **silently wrong output** on a COMMON
+idiom — worse than any of the 5 failing files.
+
+Gate rule: a `my`/`state` whose declared name is in `_live_lex` AND whose
+ancestry crosses a `PPI::Structure::Block` at-or-below the fallback root →
+die → v1. A same-level `my` in a fallback statement stays allowed — that is
+the sanctioned seam contract (v2 registers the name, v1 assigns into the
+existing binding; container decls rely on it).
+
+Note: v1 (and therefore the post-gate pipeline) still diverges from perl on
+the map case via its own defvar-shadow limitation
+(`docs/closure-lexical-scoping.md`) — prints "2 4 6 6" vs perl "2 4 6 outer".
+That is the long-known pre-existing v1 bug, now at exact v1 parity. Reclaiming
+these gated files natively (v2's real lets shadow correctly!) is a cheap,
+high-value follow-up — see the completion plan's W8.5.
+
+## D29 — W8.5: seam my-shadow RENAMED (`$x__shadow__N`) instead of gated
+
+**File:** `Pl/Parser2.pm` (`_gate_seam_my_shadow` now renames when safe;
+`_rename_decl_within` + `_shadow_rename_blocker` shared helpers).
+D28's gate is now the FALLBACK, not the outcome: a `my $x` shadowing a live
+lexical inside a fallback Block is renamed to a fresh `$x__shadow__N` across
+its Block (= its whole Perl scope), so the seam sees a non-colliding name and
+handles it as an ordinary block lexical.  **Perl visibility rule honoured:**
+only the declared symbol and symbols AFTER the declaration statement are
+renamed — `my $x = $x` / `my $foo = vec($foo,…)` RHS still reads the OUTER
+variable (same-statement uses see the old binding, perlsub).  Element
+accesses `$x[0]`/`$x{k}` are skipped via `->symbol` (they are @x/%x, not the
+scalar).  Blockers (→ still die → v1): interpolated use of the name in the
+block ("$x" — the token rewrite can't reach it; yadayada.t stays gated),
+multiple declarations of the name in the block (re-shadow), `${x}`
+brace-deref, string eval in the block (captures lexicals BY NAME), `state`
+(per-instance semantics via state_var_renames), non-scalar.
+**Result: the map probe is perl-CORRECT under v2-native (`2 4 6 outer`),
+BETTER than v1 (`2 4 6 6`, its defvar-shadow bug) — documented v2>v1
+divergence per the §2 rule.** do.t/vec.t reclaimed native; yadayada.t
+stays v1 (interpolated `"($err)"`).
+
+## D30 — W8.5: POISONED condition-my renamed in a pre-pass (defins.t crash)
+
+**File:** `Pl/Parser2.pm` (`_rename_poisoned_cond_mys`, run per segment right
+after the W5 rename, pre-analysis).
+**The bug (found in the s273 parity sweep — v2 PARTIAL on defins.t):** D4
+registers a condition-`my` name in `_all_lex`, which excludes it from
+`_forward_global_decls` (the defvar-poison rule).  But defins.t ALSO uses the
+same name as a package GLOBAL elsewhere (`($seen ? $dummy : $name) = <FILE>`)
+— that global then has no defvar → unbound-variable crash at test 6.  W7 never
+saw it because pre-D4 the condition-my leaked into a defvar'd global
+(wrong scoping, right defvar) — D4 fixed the scoping and exposed the
+exclusion conflict.
+**Fix:** a segment pre-pass finds all condition-my declaration sites
+(Structure::Condition of if/unless/while/until + Structure::For sections,
+`my` not nested in a deeper Block) and, for each name **used anywhere outside
+all of its cond-my constructs** (Symbol-exact; interpolated uses
+approximately), renames the construct-scoped lexical to `$name__cond__N`
+via the shared D29 machinery.  Un-poisoned (self-contained) loops are NOT
+renamed — zero churn on the common `while (my $line = <FH>) { print "$line" }`
+(whose interpolated body would otherwise force a gate).  If any of a poisoned
+name's constructs is un-renameable (blocker) → die → v1 (leaving it would
+crash at runtime).
+**Known remaining sibling (logged, NOT fixed):** the single-counter C-for
+carve-out (`for (my $i…)`) has the same _all_lex-vs-global conflict; renaming
+it must map the VarAnnotator vi key through the rename or the intloop
+unboxing is lost — left for W12 (structural events make it trivial).  Also
+the interp-both-inside-and-outside approximation under-detects poison — that
+case crashes exactly as before this pass (no worse).
+
+## Session end state (handoff — superseded by s273 above for the failure list)
 
 **Committed this session (all on `main`, v1 Pl/t gate stayed 100%):** 19 → a
 handful of Pl/t files under `PCL_V2=1`. Root-cause fixes: lvalue-assign boxing
