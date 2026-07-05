@@ -22,6 +22,33 @@ package Pl::VarAnnotator;
 #     user subs (`my $x = f() + 1`), whose result the operator coerces.
 #     Without an operator only a bare number/string literal qualifies (a bare
 #     `$y` or bare `f()` could alias/return a box).
+#
+# ── MAINTENANCE NOTE: the disqualifier list is a growing smell (W12 replaces it)
+#
+# The per-name gates in step 3 are TEXT-SCAN regexes.  Every time a new syntactic
+# shape is found that writes/aliases a scalar without matching an existing
+# pattern (e.g. an embedded lvalue-assignment `++($x = 5)`, a slice write, a
+# `substr($x,…) = …` target), the safe fix is to ADD another disqualifier — it
+# only ever KEEPS a box, so it can never make output wrong, only slightly slower.
+# But that means the list grows one special-case regex at a time, and there is no
+# upper bound on the shapes; we could accumulate dozens.  That is acceptable as a
+# *stopgap* but is NOT the end state.
+#
+# The principled replacement is **W12** (docs/v2-completion-plan.md): a VarAnnotator
+# that walks the PExpr OpcodeTree ExprToCL2 already builds and collects real
+# per-name events (read / write / ref-taken / magic-target) instead of guessing
+# from source text.  A structural "is this scalar ever a write/lvalue target?"
+# fact subsumes EVERY regex here in one pass.  When adding a disqualifier, log it
+# in the list below so W12 has a checklist of shapes to reproduce structurally;
+# do NOT invent a clever new regex that tries to cover several shapes at once
+# (that is how the text-scan `_preprocess_source` bugs happened — see memory
+# project_preprocess_source_strings).  Over-fire narrowly and move on.
+#
+# Disqualifiers added AFTER the s272 prototype (each = one shape W12 must cover):
+#   - s272h: `($x = …)` parenthesized lvalue-assignment — used as an lvalue by a
+#     following ++/--/.=/op (`++($x = 5)`, `($x = 5)++`).  Regex is anchored on
+#     `(` immediately before the name so `for (my $i = 0; …)` counters (which
+#     have `my` between `(` and the name) stay unboxable.
 
 use v5.30;
 use strict;
@@ -105,6 +132,7 @@ sub analyze {
       && $text !~ /(?:\+\+|--)\s*$bare\b/                          # ++$x
       && $text !~ /$bare\s*(?:[-+*\/.%x]|\*\*|\|\||&&|\/\/|<<|>>)=(?!=)/  # $x +=
       && $text !~ /$bare\s*=~/                                     # $x =~ ...
+      && $text !~ /\(\s*$bare\s*=[^=~]/                            # ($x = …) lvalue-assign (++($x=5), ($x=5).=…)
       && $text !~ /\blocal\b[^;]*$bare\b/                          # local $x
       && $text !~ /\bpos\s*\(?\s*$bare\b/                          # pos($x)
       && $text !~ /\bforeach?\s+my\s+$bare\b/                      # loop var

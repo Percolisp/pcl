@@ -3291,8 +3291,11 @@
   "Assign to a lexically-bound 'my' variable. Unlike p-scalar-=, does not
    auto-declare the variable as special — the enclosing let binding (emitted by
    _with_declarations in Parser.pm) already handles scoping. This makes the
-   assignment intent explicit for other compiler backends reading the IR."
-  `(box-set ,place ,value))
+   assignment intent explicit for other compiler backends reading the IR.
+   Returns the PLACE (the box), like p-scalar-=, so the assignment can be used
+   as an lvalue: ($x = 5)++ / ++($x = 5) / ($x = expr) .= \"s\". box-set unboxes
+   a box VALUE argument, so returning the box is safe when chained as a value."
+  `(progn (box-set ,place ,value) ,place))
 
 (defun %p-dualvar-copy (item)
   "Fresh box copying a genuine dualvar ITEM, keeping both its numeric and string

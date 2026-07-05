@@ -93,6 +93,19 @@ sub parse {
   # SCOPED _let_bound_vars, so the capture alist reflects the call site's live
   # scope.  The VarAnnotator's region-wide $has_eval keeps every captured var
   # boxed (do not narrow it).  No gate here anymore.
+  # `CORE::my`/`CORE::our`/`CORE::state`/`CORE::local` declarators: v1's PExpr
+  # normalizes `CORE::<decl>` → `<decl>` in a recursive pre-pass that reaches
+  # tokens nested inside parens; v2's native expression seam hands PExpr a
+  # peeled sub-token-list, so a CORE:: declarator inside a parenthesized RHS
+  # (`my $r = (CORE::state $y = 7)`) is never normalized and mis-lowers to a
+  # p-UNDEFINED funcall.  Plain `state`/`my` in the same position work — only
+  # the CORE:: spelling is affected.  It is a torture-test artifact; gate → v1
+  # rather than add a recursive stringify to the hot expression parser.
+  die "Parser2 TODO: CORE:: declarator prefix\n"
+    if @{ $doc->find(sub {
+         $_[1]->isa('PPI::Token::Word')
+           && $_[1]->content =~ /^CORE::(?:my|our|state|local)$/;
+       }) || [] };
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
   $self->{_referenced_pkgs} = {};
@@ -760,7 +773,14 @@ sub _lower_scope {
   # leak into the string-eval capture alist at a call site AFTER the block
   # closes.  _all_lex (cumulative) still guards the forward-decl pass.
   my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  # Push an Environment scope frame around the block so LEXICAL PRAGMAS set by a
+  # fallback-emitted statement inside the block (`use integer` / `no integer`)
+  # are saved and restored — v1 relies on push_scope/pop_scope for this, and
+  # without it a nested `no integer` leaks out to the enclosing scope
+  # (transpile-test-01 "no integer restores float division").
+  $self->environment->push_scope;
   my @forms = $self->_lower_block($stmts, $vi, $tail_ctx);
+  $self->environment->pop_scope;
   $self->{_live_lex} = \%saved;
   $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
   return @forms;
@@ -1050,6 +1070,17 @@ sub _lower_compound {
         $cur_cond = undef;
       }
     }
+    # A `my` declared in any condition head scopes to the whole construct —
+    # register the names as let-bound around cond+body lowering, then wrap the
+    # result in a fresh boxed let (lexical shadow of any outer same-named var).
+    my @cond_mys = $self->_cond_my_names(map { $_->{cond} } @clauses);
+    my (%sv_live, %sv_lb);
+    if (@cond_mys) {
+      %sv_live = %{ $self->{_live_lex} // {} };
+      %sv_lb   = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+      $self->_reg_lex(@cond_mys);
+    }
+    my $result;
     # A bare if/unless (no else) whose value is the enclosing sub's return
     # ($tail_ctx defined) returns, in Perl, the CONDITION value when false
     # (`sub f { if(0){5} }` → 0) and the body value when true.  Replicate v1's
@@ -1068,24 +1099,32 @@ sub _lower_compound {
                   ['setf', $ret, ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)]],
                   $chain];
       }
-      return ['let', ['list', ['list', $ret, 'nil']], $chain, $ret];
+      $result = ['let', ['list', ['list', $ret, 'nil']], $chain, $ret];
     }
-    # Build nested p-if forms from the tail (else innermost) outward.
-    # A tail if/unless is the enclosing block's VALUE — its branch blocks
-    # inherit $tail_ctx (loop/plain compounds don't propagate values).
-    my $form;
-    if (@clauses && $clauses[-1]{kw} eq 'else') {
-      my $c = pop @clauses;
-      $form = ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)];
+    else {
+      # Build nested p-if forms from the tail (else innermost) outward.
+      # A tail if/unless is the enclosing block's VALUE — its branch blocks
+      # inherit $tail_ctx (loop/plain compounds don't propagate values).
+      my $form;
+      if (@clauses && $clauses[-1]{kw} eq 'else') {
+        my $c = pop @clauses;
+        $form = ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)];
+      }
+      while (my $c = pop @clauses) {
+        my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt);
+        $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
+        $form = ['p-if', $cond,
+                 ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)],
+                 (defined $form ? ($form) : ())];
+      }
+      $result = $form;
     }
-    while (my $c = pop @clauses) {
-      my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt);
-      $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
-      $form = ['p-if', $cond,
-               ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)],
-               (defined $form ? ($form) : ())];
+    if (@cond_mys) {
+      $self->{_live_lex} = \%sv_live;
+      $self->fallback_parser->{_let_bound_vars} = \%sv_lb;
+      $result = $self->_wrap_cond_mys($result, @cond_mys);
     }
-    return $form;
+    return $result;
   }
 
   if ($kw eq 'while' || $kw eq 'until') {
@@ -1093,6 +1132,14 @@ sub _lower_compound {
     # The FIRST Structure::Block is the loop body; a second (after `continue`)
     # is the continue block, handled by _continue_keys.
     my ($block)  = grep { $_->isa('PPI::Structure::Block') } @k;
+    # `my` in the loop condition scopes to the loop — register + wrap (as for if).
+    my @cond_mys = $self->_cond_my_names($cond_s);
+    my (%sv_live, %sv_lb);
+    if (@cond_mys) {
+      %sv_live = %{ $self->{_live_lex} // {} };
+      %sv_lb   = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+      $self->_reg_lex(@cond_mys);
+    }
     my $cond = $self->_lower_expr([_cond_parts($cond_s)], $stmt);
     # Perl loop conditions whose value comes from each/readline/readdir/glob
     # terminate on *undef*, not false-but-defined ("0" line, each's index 0),
@@ -1101,9 +1148,15 @@ sub _lower_compound {
     # v1 skips the rewrite for `until`, matching perl.
     $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
     $cond = ['p-!', $cond] if $kw eq 'until';
-    return ['p-while', $cond, _label_keys($label),
-            $self->_lower_scope([$block->schildren], $vi),
-            $self->_continue_keys(\@k, $vi)];
+    my $result = ['p-while', $cond, _label_keys($label),
+                  $self->_lower_scope([$block->schildren], $vi),
+                  $self->_continue_keys(\@k, $vi)];
+    if (@cond_mys) {
+      $self->{_live_lex} = \%sv_live;
+      $self->fallback_parser->{_let_bound_vars} = \%sv_lb;
+      $result = $self->_wrap_cond_mys($result, @cond_mys);
+    }
+    return $result;
   }
 
   if (($kw eq 'for' || $kw eq 'foreach')
@@ -1121,6 +1174,25 @@ sub _lower_compound {
     die "Parser2 TODO: for(;;) with extra sections" if @sect > 3;
     my ($init_s, $cond_s, $step_s) =
       map { $_ && !$_->isa('PPI::Statement::Null') ? $_ : undef } @sect[0 .. 2];
+
+    # Multiple `my` decls in the init (`for (my $i = 0, my $j = 10; …)`) are the
+    # comma operator: `(my $i = 0), (my $j = 10)`.  _single_scalar_decl would
+    # misparse the whole comma-list as $i's RHS, so bind ALL declared counters in
+    # a boxed let and lower the init as one expression (a progn of assignments,
+    # matching v1) — no unboxing carve-out for the multi-counter case.
+    my @init_mys = $init_s ? $self->_cond_my_names($init_s) : ();
+    if (@init_mys >= 2) {
+      $self->_reg_lex(@init_mys);
+      my $initform = ['list', $self->_lower_expr([_strip_semi($init_s->schildren)], $stmt)];
+      my $cond = $cond_s
+        ? ['list', $self->_auto_defined_raw(
+                     $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt))]
+        : ['list', 't'];
+      my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
+      my @body = $self->_lower_scope([$block->schildren], $vi);
+      return ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @init_mys],
+              ['p-for', $initform, $cond, $step, _label_keys($label), @body]];
+    }
 
     # A `my $i = INIT` init binds the counter in a let AROUND the p-for —
     # register the name BEFORE lowering cond/step/body so fallback expressions
@@ -1594,6 +1666,51 @@ sub _single_scalar_decl {
 sub _cond_parts {
   my ($cond) = @_;
   return map { $_->schildren } grep { $_->isa('PPI::Statement') } $cond->children;
+}
+
+# Scalar names declared by `my` in a condition head (`if (my $x = …)`,
+# `while (my $i = …)`, chained `my $x = my $y`, list `my ($p,$q) = …`).  Perl
+# scopes such a declaration to the whole construct (condition + branches/body),
+# NOT to the enclosing block — so we wrap the lowered construct in a fresh
+# `(let ((name (make-p-box nil)) …) …)` that lexically shadows any outer
+# same-named var (v2 uses real lexical lets, so shadowing needs no renaming).
+# Returns a deduped list of $names.  A `my` nested inside a block/anon-sub in the
+# condition is NOT hoisted.  Dies (→ v1) on an array/hash my (needs a container
+# init, not a boxed scalar cell).
+sub _cond_my_names {
+  my ($self, @conds) = @_;
+  my (@names, %seen);
+  for my $cond (grep { defined } @conds) {
+    for my $t (@{ $cond->find('PPI::Token::Word') || [] }) {
+      next unless $t->content eq 'my';
+      # skip a `my` inside a nested block/anon-sub within the condition
+      my $p = $t->parent; my $nested = 0;
+      while ($p && $p != $cond) {
+        if ($p->isa('PPI::Structure::Block')) { $nested = 1; last }
+        $p = $p->parent;
+      }
+      next if $nested;
+      my $nx = $t->snext_sibling or next;
+      my @syms = $nx->isa('PPI::Token::Symbol')     ? ($nx)
+               : $nx->isa('PPI::Structure::List')   ? @{ $nx->find('PPI::Token::Symbol') || [] }
+               : ();
+      for my $s (@syms) {
+        die "Parser2 TODO: my array/hash in condition\n"
+          unless $s->content =~ /^\$\w+$/;
+        next if $seen{$s->content}++;
+        push @names, $s->content;
+      }
+    }
+  }
+  return @names;
+}
+
+# Wrap a lowered construct FORM in a fresh let binding boxed cells for the
+# condition-declared @names (empty → FORM unchanged).
+sub _wrap_cond_mys {
+  my ($self, $form, @names) = @_;
+  return $form unless @names;
+  return ['let', ['list', map { ['list', $_, ['make-p-box', 'nil']] } @names], $form];
 }
 
 # Step statement that is EXACTLY `$i++` / `++$i` / `$i--` / `--$i` for the
