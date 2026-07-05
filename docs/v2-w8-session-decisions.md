@@ -319,10 +319,47 @@ preamble/decls/definitions/runtime into `_captured_decls` (mirrors
 `_fallback_stmt_capture`); a self-contained anon-block is safe hoisted to the
 section top.
 
+## D19 — void `m//g` statement binds `*wantarray* :void` (narrowed)
+
+**File:** `Pl/Parser2.pm` (plain expression statement + `_stmt_has_global_match`).
+A void `$a =~ /(.)/g;` in a list-called sub inherited the caller's LIST context
+dynamically → global match → `$1` was the LAST char, not the first. v1 wraps void
+statements in `(let ((*wantarray* :void)) …)`; v2 didn't. Fix: wrap the raw form
+in `:void`, but ONLY when the statement has an `m//g` match — wrapping EVERY void
+statement over-scopes wantarray and is needless overhead (it perturbed
+`print $i;` shapes; the guard pins the unwrapped form). s///g / tr///g act
+globally in any context, so they're excluded. Not a boxing decision.
+
+## D20 — scalar `our $x = RHS` init uses `(setf (p-box-value $x) RHS)` (BEGIN-safe)
+
+**File:** `Pl/Parser2.pm` (`_lower_our_decl`).  Not a boxing decision, but a
+subtle load-order one.  v2 emitted `(p-scalar-= $x RHS)`; its `unless (boundp …)`
+re-init path interacts badly with a BEGIN block that assigned the var at compile
+time — the runtime p-scalar-= then ran AFTER the BEGIN and clobbered it
+(`our $r=""; sub greet{…} BEGIN{ $r=greet() } print $r` gave "" not "hello").
+Direct box-value setf (v1's shape, verified byte-for-byte across value/ref/expr
+inits) preserves source-order semantics. Array/hash/list `our` inits keep the
+generic `p-*-=` path. Guard parser2-01 t59 updated to pin the new shape.
+
+## D21 — gate a BEGIN doing sub-existence introspection (def-ordering) → v1
+
+**File:** `Pl/Parser2.pm` (scheduled-block branch).
+**LIMITATION, gated:** v2 assembles ALL sub definitions before ANY scheduled
+block, so a BEGIN sees subs defined LATER in source too. Perl runs BEGIN at
+compile time, seeing only subs defined *before* it — so compile-time
+introspection that snapshots which subs exist (`main->can("later")`,
+`defined &{"Pkg::$_"}`, `keys %Pkg::` — the Moo::Role make_role pattern) gets the
+wrong answer under v2. The correct fix is interleaving defs and BEGINs in SOURCE
+ORDER — an assembly-model change beyond W8. Gate a BEGIN whose body does
+can/isa/DOES, `defined &`, or `%Pkg::` stash introspection → v1 (correct order).
+A BEGIN that merely CALLS a sub (the s272g "BEGIN calls sub defined before it"
+case) is unaffected and stays native. **Revisit in a later work item: proper
+source-order interleaving of sub defs and BEGIN blocks.**
+
 ## Pending / under investigation
 
-Remaining W8 files: state-01, decl-ordering-01/02, wantarray-01 (/g void),
-fileio-02 (symbolic-open handle name), closure-01 t17 (nested my-shadow across
-if/else), misc-fixes-02 t27 (box-set class identity on blessed substr).
+Remaining W8 files: state-01 (10,25,26), fileio-02 (25 symbolic-open handle
+name), closure-01 t17 (nested my-shadow across if/else), misc-fixes-02 t27
+(box-set class identity on blessed substr).
 decl-ordering-01/02, closure/state/wantarray/match-vars/lvalue-ref/bop/socket/
 use-require/pcl-dash-m/fileio-02.

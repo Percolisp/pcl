@@ -976,6 +976,19 @@ sub _lower_block {
   # call a sub defined before it) and BEFORE the runtime (Perl runs all
   # compile-phase blocks before runtime code) — route via _sched_defs.
   if ($first->isa('PPI::Statement::Scheduled')) {
+    # LIMITATION: v2 assembles ALL sub definitions before ANY scheduled block,
+    # so a BEGIN sees subs defined LATER in source too — wrong for introspection
+    # that snapshots which subs exist at compile time (`main->can("later")` at
+    # BEGIN, Moo::Role's make_role).  Getting this right needs interleaving defs
+    # and BEGINs in SOURCE ORDER — an assembly-model change out of W8 scope.
+    # Gate a BEGIN that does method-existence introspection → v1 (correct order).
+    # A BEGIN that merely CALLS a sub (the s272g case) is unaffected.
+    my $bt = $first->content;
+    die "Parser2 TODO: BEGIN block with sub-existence introspection (def-ordering)\n"
+      if $bt =~ /->\s*(?:can|isa|DOES)\b/     # $obj->can("m") / ->isa
+      || $bt =~ /\b(?:can|isa)\s*\(/          # can(...) / isa(...)
+      || $bt =~ /\bdefined\s*&/               # defined &sub / defined &{"Pkg::$_"}
+      || $bt =~ /%[\w:]+::/;                  # keys %Pkg:: stash walk
     return ($self->_fallback_stmt($first, sched => 1),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
@@ -1100,8 +1113,31 @@ sub _lower_stmt {
 
   # Statement position: the value is discarded (void) — except for a block
   # tail whose value the enclosing sub returns ($tail_ctx = 'inherit').
-  my $form = $self->_lower_expr($expr, $stmt, $tail_ctx // ':void');
+  my $vctx = $tail_ctx // ':void';
+  my $form = $self->_lower_expr($expr, $stmt, $vctx);
+  # A void FALLBACK `m//g` match must bind *wantarray* :void explicitly: v1 adds
+  # this wrap at the statement level, but _parse_expression(VOID_CTX) does not, so
+  # the /g match would inherit the CALLER's list context dynamically and match
+  # GLOBALLY (`$a =~ /(.)/g;` in a list-called sub advanced through the whole
+  # string, so `$1` was the LAST char, not the first).  Narrowed to g-matches
+  # only — wrapping EVERY void statement is both wrong (over-scopes wantarray)
+  # and needless overhead (it perturbed `print $i;` shapes and every call).
+  if ($vctx eq ':void' && Pl::CLForm::is_raw($form) && _stmt_has_global_match($stmt)) {
+    $form = raw("(let ((*wantarray* :void))\n" . ${$form} . ")");
+  }
   return _apply_modifier($form, $mod, $cond, $self, $stmt);
+}
+
+# True if the statement contains an `m//g` match (list-vs-scalar context
+# sensitive).  s///g / tr///g are not context-sensitive (they act globally in
+# any context), so they are excluded.
+sub _stmt_has_global_match {
+  my ($stmt) = @_;
+  for my $t (@{ $stmt->find('PPI::Token::Regexp::Match') || [] }) {
+    my %m = $t->get_modifiers;
+    return 1 if $m{g};
+  }
+  return 0;
 }
 
 sub _lower_compound {
@@ -1650,7 +1686,19 @@ sub _lower_our_decl {
     push @{ $self->{_captured_decls} }, "(defvar $n " . _fresh_container($n) . ")";
   }
   return [] if @k == 2;
-  # `NAMES = RHS` minus the `our` keyword is a plain (list) assignment.
+  # Single scalar `our $x = RHS`: set the defvar'd box's value DIRECTLY (v1's
+  # `(setf (p-box-value $x) RHS)` shape), NOT via p-scalar-=.  p-scalar-='s
+  # `unless (boundp …)` re-init path interacts badly with a BEGIN block that
+  # assigned the var at compile time — the runtime p-scalar-= then ran AFTER the
+  # BEGIN and overwrote it (`our $r=""; BEGIN{ $r=greet() } print $r` gave ""
+  # instead of "hello").  A direct box-value setf preserves source-order
+  # semantics.  (Array/hash/list `our` inits keep the generic p-*-= path.)
+  if (@names == 1 && $names[0] =~ /^\$/) {
+    my ($eq) = grep { $k[$_]->isa('PPI::Token::Operator') && $k[$_]->content eq '=' } 0 .. $#k;
+    my $rhs = $self->_lower_expr([@k[$eq + 1 .. $#k]], $stmt);
+    return [ ['setf', ['p-box-value', $names[0]], $rhs] ];
+  }
+  # `NAMES = RHS` (array/hash/list) minus the `our` keyword is a plain assignment.
   return [ $self->_lower_expr([@k[1 .. $#k]], $stmt) ];
 }
 
