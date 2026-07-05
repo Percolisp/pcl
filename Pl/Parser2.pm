@@ -219,6 +219,7 @@ sub parse {
     $self->cur_pkg($seg->{pkg});
     $self->_set_cur_package($seg->{pkg});
     $self->{_captured_decls} = [];
+    $self->{_sched_defs}     = [];   # BEGIN/END p-BEGIN blocks (after defs, before run)
     $self->{_hoisted_decls}  = [];
     $self->{_hoisted_defs}   = [];
     $self->{_live_lex}       = {};
@@ -273,6 +274,7 @@ sub parse {
       # `(locally (declare (notinline …)))` — reuse that mechanism verbatim.
       run      => [map { Pl::Parser::_cap_inlining_if_huge(Pl::CLForm::to_string($_, 0)) } @runtime],
       captured => [@{ $self->{_captured_decls} }],
+      sched    => [@{ $self->{_sched_defs} }],
     };
   }
 
@@ -323,12 +325,17 @@ sub parse {
     # in-package.
     push @body, $self->_forward_global_decls(join("\n", @{ $sec->{captured} },
                                                         @{ $sec->{defs} },
+                                                        @{ $sec->{sched} },
                                                         @{ $sec->{run} })), '';
     # Declarations captured by _fallback_stmt during lowering (defvar/
     # defconstant/eval-when from use/require/BEGIN) — before the definitions
     # that may reference them.
     push @body, @{ $sec->{captured} }, '';
     push @body, map { ($_, '') } @{ $sec->{defs} };
+    # BEGIN/END/… blocks: after every sub definition (so a BEGIN can call a sub
+    # defined before it), before the runtime (Perl runs all compile-phase
+    # blocks before runtime code).
+    push @body, map { ($_, '') } @{ $sec->{sched} };
     # Runtime current-package tracking (caller()/__PACKAGE__) in execution
     # order — after this section's definitions load, before its code runs.
     push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
@@ -435,6 +442,20 @@ sub _check_sub_captures {
   $self->_collect_lexical_names($stmts, \%lex);
   return unless %lex;
   for my $child (@$stmts) {
+    # BEGIN/END/CHECK/UNITCHECK/INIT blocks are hoisted to compile time
+    # (eval-when, via v1's p-BEGIN) OUTSIDE the runtime `let`s, so a file `my`
+    # var they reference is unbound there.  v1 defvar's file lexicals for exactly
+    # this compile-time visibility (CLAUDE.md §3) → die → whole-file v1.
+    if ($child->isa('PPI::Statement::Scheduled') && $child->block) {
+      my $txt = $child->block->content;
+      for my $bare (sort keys %lex) {
+        next if $self->{_file_lex_renamed}{"\$$bare"};
+        die "Parser2 TODO: file lexical '$bare' referenced in a "
+            . $child->type . " block\n"
+          if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+      }
+      next;
+    }
     next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block
       && !$child->isa('PPI::Statement::Scheduled');
     my $txt = $child->block->content;
@@ -878,10 +899,17 @@ sub _lower_block {
              $self->_lower_block(\@rest, $vi, $tail_ctx)]);
   }
 
-  # -- use/require/no, BEGIN/END blocks, __END__/__DATA__: whole-statement
-  # fallback through the ORIGINAL parser (declarations hoisted to file top).
+  # -- BEGIN/END/CHECK/… blocks: v1's p-BEGIN goes to the definitions bucket,
+  # which for v2 must be assembled AFTER the native sub defs (so a BEGIN can
+  # call a sub defined before it) and BEFORE the runtime (Perl runs all
+  # compile-phase blocks before runtime code) — route via _sched_defs.
+  if ($first->isa('PPI::Statement::Scheduled')) {
+    return ($self->_fallback_stmt($first, sched => 1),
+            $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
+  # -- use/require/no, __END__/__DATA__: whole-statement fallback through the
+  # ORIGINAL parser (declarations hoisted to file top).
   if ($first->isa('PPI::Statement::Include')
-      || $first->isa('PPI::Statement::Scheduled')
       || $first->isa('PPI::Statement::End')
       || $first->isa('PPI::Statement::Data')) {
     return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
@@ -1443,8 +1471,8 @@ sub _fresh_container {
 # nest the block remainder inside (raw_wrap).  _fallback_stmt itself is for
 # self-contained statements only and treats a surplus as an unsupported shape.
 sub _fallback_stmt {
-  my ($self, $stmt) = @_;
-  my ($text, $opens) = $self->_fallback_stmt_capture($stmt);
+  my ($self, $stmt, %opt) = @_;
+  my ($text, $opens) = $self->_fallback_stmt_capture($stmt, %opt);
   die "Parser2 TODO: statement fallback left $opens open scope(s): " . $stmt->content
     if $opens;
   return () unless defined $text;
@@ -1478,7 +1506,7 @@ sub _lower_local {
 }
 
 sub _fallback_stmt_capture {
-  my ($self, $stmt) = @_;
+  my ($self, $stmt, %opt) = @_;
   my $p = $self->fallback_parser;
   my @saved = ($p->_sections, $p->_cur_bucket, $p->indent_level,
                $p->{_local_let_depth});
@@ -1489,10 +1517,20 @@ sub _fallback_stmt_capture {
   $p->{_local_let_depth} = 0;
   $p->_process_element($stmt);
   my $opens = $p->{_local_let_depth};
+  # A BEGIN/END/… block's p-BEGIN lands in v1's `definitions` bucket, alongside
+  # sub definitions.  v2 emits native sub defs to @defs and this fallback's
+  # `definitions` to _captured_decls, which is assembled BEFORE @defs — so a
+  # plain route would run the BEGIN before the subs it calls exist.  For a
+  # scheduled block, route its definitions to _sched_defs (assembled AFTER defs,
+  # before runtime), so every sub is defined before any BEGIN runs and every
+  # BEGIN runs before the runtime code (matching v1/Perl).  preamble/
+  # declarations (defvars from an inner `our`, etc.) still go to _captured_decls.
+  my $defs_target = $opt{sched} ? $self->{_sched_defs} : $self->{_captured_decls};
   my @runtime;
   for my $sec (@{ $p->_sections }) {
     push @{ $self->{_captured_decls} },
-      grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}}, @{$sec->{definitions}};
+      grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}};
+    push @$defs_target, grep { /\S/ } @{$sec->{definitions}};
     push @runtime, grep { /\S/ } @{$sec->{runtime}};
   }
   $p->_sections($saved[0]);
