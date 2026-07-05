@@ -611,6 +611,25 @@ artifact, not a real foreach).  Guards moved to a new file
 `Pl/t/parser2-02.t` (10 tests) so the guard suite stays split by size;
 `parser2-01.t` = 122.
 
+## Session 272g (2026-07-05): W7 done (parity clean) + W8 in progress
+
+- **W7 — full-sweep parity: CLEAN.**  Full 108-file v1-vs-v2 sweep; the only
+  `_status.tsv` deltas are the two documented ones (chop skip-registry; sprintf
+  where v2 is more correct) plus int.t/assignwarn.t (parallel-load flakiness,
+  identical 19/19 and 116/116 isolated on both pipelines).  No v2-native
+  regressions.
+- **W8 — `PCL_V2=1 prove -j8 Pl/t/` (STARTED, not finished).**  ~23 of the 114
+  `Pl/t` files fail under v2.  **Key insight: perl-tests parity does NOT imply
+  v2 is correct** — the perl-tests files that use a broken construct gate to v1
+  for *other* reasons, masking the gap; the smaller `Pl/t` snippets are
+  v2-native and expose it.  So `Pl/t` under v2 is the stricter gate.  Fixed this
+  session: BEGIN/END block ordering (new `_sched_defs` bucket, after defs / before
+  run) + a gate for BEGIN referencing a file `my`; native bare-tail-if return via
+  the `--pcl-if-ret--` transform (driven by `$tail_ctx`; perl-correct); a gate for
+  `foreach` over an aliasable lvalue element.  **~19 files remain** — each needs
+  reproduce → compare v2/perl/v1 → fix natively, gate → v1, or make the assertion
+  pipeline-aware (never weaken), always preserving native perl-tests parity.
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is

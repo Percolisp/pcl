@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 272g (2026-07-05) — v2 W7 (done) + W8 (in progress).
+
+- **W7 full-sweep parity: CLEAN.** Full 108-file sweep v1 vs v2. Only 4 deltas,
+  all explained: chop.t (not-supported aliasing skip-registry, v2 95 vs v1 96),
+  sprintf.t (v2 MORE correct, 532 vs 525), int.t + assignwarn.t (parallel-load
+  flakiness — both 19/19 and 116/116 isolated on BOTH pipelines). No v2-native
+  regressions.
+- **W8 (Pl/t gate under v2) STARTED — NOT finished.** `PCL_V2=1 prove -j8 Pl/t/`
+  vs v1 (114 files/3858 tests, all pass under v1). ~23 files fail under v2 —
+  these are v2 native-lowering gaps that the perl-tests sweep MASKS (those files
+  gate to v1 for other reasons; the smaller Pl/t snippets are v2-native and
+  expose the gap). Fixed so far:
+  - **BEGIN/END ordering** (see s272g commit 9f9da70): p-BEGIN now emitted after
+    defs, before run (subs defined before BEGIN runs). + gate for BEGIN
+    referencing a file `my` var. begin-end-01 passes both pipelines; found v2
+    MORE correct than v1 on runtime-our-init-vs-compile-BEGIN (pipeline-aware).
+  - **bare tail if/unless return value** (09e507c): native `--pcl-if-ret--`
+    transform driven by $tail_ctx — false tail-if returns cond, true returns
+    body; perl-correct even on empty-true-body (v1 wrong there). bareif-01
+    passes both.
+  - **foreach over aliasable lvalue element** (`for($a[i])`): gate → v1 (needs
+    p-aref-box aliasing). foreach-aliasing-01 passes.
+- **NEXT (W8 remainder): ~19 Pl/t files still fail under v2** — closure-01,
+  wantarray-01, state-01, match-vars-01, lvalue-ref-01, use-require-01,
+  decl-ordering-01/02, misc-fixes-01/02, transpile-test-01..05, bop-01,
+  socket-01, pcl-dash-m-01, fileio-02. Each needs the same triage: reproduce the
+  construct, compare v2 vs perl vs v1, then FIX natively / GATE → v1 / make the
+  Pl/t assertion pipeline-aware (never weaken). Native perl-tests parity is the
+  invariant to preserve on every change. THEN W9 (flip default — cache keying
+  first). See docs/v2-completion-plan.md W8/W9.
+
 ## Session 272f (2026-07-05) — v2 W6: small gates (continue + odd `my` decls).
 
 - **while/until/foreach `continue` blocks** lower natively to a `:continue

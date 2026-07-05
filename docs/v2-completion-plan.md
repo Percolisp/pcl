@@ -769,6 +769,13 @@ plan below.
 - **Standalone labels / computed goto:** keep gated. Intra-sub goto is
   v1-partial (memory: project_intra_sub_goto); do not open it here.
 
+### ~~W7. Tier B1 — full-sweep parity~~ — DONE (s272g): CLEAN
+
+Full 108-file v1-vs-v2 sweep matched exactly bar the two documented deltas (chop
+skip-registry; sprintf v2-better) and int/assignwarn parallel-load flakiness
+(identical isolated on both pipelines). No v2-native regressions. Original steps
+below.
+
 ### W7. Tier B1 — full-sweep parity
 
 ```bash
@@ -803,6 +810,19 @@ Procedure:
    sweeps while iterating; full sweeps only to confirm. This item is
    squarely in §0.5 territory — escalate stubborn files rather than
    classifying them as (b) or (c) without proof.
+
+### W8. Tier B2 — the Pl/t gate under v2 — IN PROGRESS (s272g)
+
+**~23 of 114 Pl/t files fail under `PCL_V2=1`.**  Critical realization: full
+perl-tests parity does NOT mean v2 is correct — those files gate to v1 for other
+reasons, MASKING native-lowering gaps that the smaller Pl/t snippets (v2-native)
+expose.  Pl/t under v2 is the stricter gate.  Fixed s272g: BEGIN/END ordering
+(`_sched_defs` bucket) + BEGIN-refs-file-my gate; native bare-tail-if return
+(`--pcl-if-ret--` via `$tail_ctx`); foreach-aliasable-lvalue gate.  **~19 files
+remain** (closure/wantarray/state/match-vars/lvalue-ref/use-require/decl-ordering-
+01+02/misc-fixes-01+02/transpile-test-01..05/bop-01/socket-01/pcl-dash-m/fileio-02).
+Per file: reproduce → compare v2/perl/v1 → fix native / gate→v1 / pipeline-aware
+(never weaken), keeping native perl-tests parity.  Original guidance below.
 
 ### W8. Tier B2 — the Pl/t gate under v2
 
