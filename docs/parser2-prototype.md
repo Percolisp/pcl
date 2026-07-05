@@ -2,7 +2,10 @@
 
 **Written:** 2026-07-02 (updated same day: R1 landed in the runtime; native
 strings / funcall-in-arith unboxing / elsif / C-style for added)
-**Status:** working prototype, opt-in via `PCL_V2=1`; v1 untouched
+**Status:** **v2 is the DEFAULT pipeline since s273c (W9, 2026-07-05).**
+`PCL_V1=1` is the escape hatch back to v1; `PCL_V2=1` is accepted as a no-op.
+Cache paths are keyed by `*pcl-cache-generation*` + the effective pipeline —
+bump the generation on any emission-changing commit.
 **Spec it implements a slice of:** `docs/codegen-rewrite-spec.md` (R3 +
 items #1/#2/#3 + a first cut of Phase-4 unboxing), reviewed in
 `docs/codegen-rewrite-review.md`.
@@ -10,10 +13,13 @@ items #1/#2/#3 + a first cut of Phase-4 unboxing), reviewed in
 ## Switch
 
 ```bash
-./pl2cl < prog.pl              # v1 (unchanged, default)
-PCL_V2=1 ./pl2cl < prog.pl     # v2 prototype
-PCL_V2=1 ./runpl prog.pl       # runs through the same env switch
+./pl2cl < prog.pl              # v2 (default since W9)
+PCL_V1=1 ./pl2cl < prog.pl     # v1 escape hatch
+PCL_V1=1 ./runpl prog.pl       # runs through the same env switch
 ```
+
+(Older sections below still say "opt-in via PCL_V2" — they describe the
+pre-flip state and are kept as history.)
 
 Same external API: `Pl::Parser2->parse_file/parse_code/parse` return the same
 CL-text-with-`(in-package :pcl)`-marker contract as `Pl::Parser`, so pl2cl's

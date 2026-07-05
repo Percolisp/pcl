@@ -115,13 +115,16 @@ a plausible-looking wrong explanation is the worst possible one.
 
 ## 1. Where things stand
 
-> **s273 update:** W1–W8 are DONE (W8 pending its final re-sweep, see the W8
-> box). 69 files were v2-native after W6; re-census after the D28 gate. The
-> remaining road to "working v2 compiler" is, in order: **W8 re-sweep → W9
-> (flip the default; cache keying FIRST) → W8.5/W10 as cleanup → W11 + W14
-> (the two big PERF items) → W12 (the annotator rewrite that retires the
-> text-scan disqualifiers) → W13 (only if measurements justify)**. The list
-> below this note describes the pre-W1 state and is kept for history.
+> **s273 update:** W1–W9 are DONE — **v2 is the default pipeline**
+> (`PCL_V1=1` = escape hatch). W8's definition of done was verified (v2 gate
+> 114/3873 PASS, v1 gate PASS, census 66 native of 111, parity sweep exact);
+> W8.5 shipped the shadow-rename machinery; W9 flipped the default with
+> generation+pipeline cache keying. The remaining road: **W10 (v1
+> my-across-package bug — v2 side now mostly covered by the rename
+> machinery, re-read the item) → W11 + W14 (the two big PERF items) → W12
+> (the annotator rewrite that retires the text-scan disqualifiers) → W13
+> (only if measurements justify)**. The list below this note describes the
+> pre-W1 state and is kept for history.
 
 - `PCL_V2=1` selects `Pl::Parser2` in `pl2cl` (see `parse_with_fallback`
   there; eval-mode and any special opts always route to v1; `--lenient-ppi`
@@ -937,7 +940,21 @@ end-to-end and byte-matches **perl** (`2 4 6 outer`) — note: matching perl
 here means v2-native output BEATS v1; per §2 rule 1 that requires the written
 proof, which is this section.
 
-### W9. Tier B3 — flip the default
+### ~~W9. Tier B3 — flip the default~~ — DONE (s273c)
+
+**Shipped s273c.** `pl2cl` defaults to `Pl::Parser2`; `PCL_V1=1` is the
+escape hatch; `PCL_V2=1` stays a no-op. Cache keying done FIRST:
+`*pcl-cache-generation*` ("v2-1") + the effective pipeline (`PCL_V1` env)
+mixed into `p-compute-cache-path`'s hash; `~/.pcl-cache` cleared once.
+Verified: per-pipeline cache separation (same module cached separately under
+each pipeline, cache hit on same-pipeline re-run); begin-end-01's
+pipeline-aware branch re-keyed from `$ENV{PCL_V2}` to `!$ENV{PCL_V1}`; bench
+(startup-subtracted) fib(29) v2 ≈0.05 s vs v1 ≈0.15 s vs perl 0.14 s — v2
+beats perl, no regression; clean-env + PCL_V1 gates re-run green.
+**Bump `*pcl-cache-generation*` on every future emission-changing commit.**
+Original steps below for reference.
+
+### W9. Tier B3 — flip the default (original steps)
 
 1. **Cache keying FIRST** (hard prerequisite). The module cache
    (`~/.pcl-cache`) is keyed by `sxhash` of the source file's absolute

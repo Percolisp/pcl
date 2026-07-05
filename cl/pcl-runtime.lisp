@@ -9266,6 +9266,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
+(defparameter *pcl-cache-generation* "v2-1"
+  "Mixed into cache paths together with the effective pipeline; bump on any
+   codegen change that invalidates cached module transpiles (pipeline flips,
+   major emission changes).")
 (defparameter *pcl-cache-max-age* (* 7 24 60 60)
   "Max cache age in seconds (default: 1 week)")
 (defparameter *pcl-skip-cache* nil
@@ -9336,10 +9340,15 @@ buffer's fill-pointer; everything else falls back to file-length."
   (ensure-directories-exist *pcl-cache-dir*))
 
 (defun p-compute-cache-path (source-path &optional lisp-p)
-  "Compute cache path for a source file using hash of absolute path.
+  "Compute cache path for a source file: hash of the absolute path, the cache
+   GENERATION (*pcl-cache-generation*), and the EFFECTIVE pipeline (v2 default
+   vs the PCL_V1 escape hatch) — so flipping PCL_V1 back and forth never
+   reuses the other pipeline's cached transpiles.
    LISP-P: if true, return .lisp path; else .fasl"
   (let* ((abs-path (namestring (truename source-path)))
-         (hash (sxhash abs-path))
+         (pipeline (if (sb-ext:posix-getenv "PCL_V1") "v1" "v2"))
+         (hash (sxhash (concatenate 'string abs-path "|" *pcl-cache-generation*
+                                    "|" pipeline)))
          (ext (if lisp-p ".lisp" ".fasl")))
     (p-ensure-cache-dir)
     (merge-pathnames (format nil "~16,'0X~A" (logand hash #xFFFFFFFFFFFFFFFF) ext)

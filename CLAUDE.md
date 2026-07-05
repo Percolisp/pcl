@@ -117,6 +117,16 @@ prove -v Pl/t/codegen-01.t
 echo 'my $x = 1 + 2;' | ./pl2cl
 ```
 
+**Pipelines:** the v2 structured-emission pipeline (`Pl/Parser2.pm` +
+`Pl/ExprToCL2.pm` + `Pl/VarAnnotator.pm` + `Pl/CLForm.pm`) is the **default**
+since 2026-07-05 (W9); anything it can't lower dies "Parser2 TODO: …" and
+falls back to v1 per file. `PCL_V1=1` forces the original v1 pipeline
+(`Pl/Parser.pm` text-stream emission); `PCL_V2=1` is a no-op kept for old
+scripts. Module-cache paths are keyed by `cl/pcl-runtime.lisp`'s
+`*pcl-cache-generation*` **plus the effective pipeline** — bump the
+generation string on any emission-changing commit, or stale cached module
+transpiles will be reused. Plan/status: `docs/v2-completion-plan.md`.
+
 ## Architecture
 
 ### Core Pipeline

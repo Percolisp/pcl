@@ -29,12 +29,17 @@ binmode(STDERR, ":utf8");
 use lib dirname(abs_path($0));
 use Pl::Parser;
 
-# PCL_V2=1 selects the v2 structured-emission prototype pipeline
-# (Pl::Parser2 → Pl::CLForm forms; same external API, switch back and forth).
-my $PARSER_CLASS = 'Pl::Parser';
-if ($ENV{PCL_V2}) {
+# v2 (Pl::Parser2 → Pl::CLForm structured emission) is the DEFAULT pipeline
+# (flipped session 273, W9 — see docs/v2-completion-plan.md).  PCL_V1=1 is the
+# escape hatch back to the original text-stream pipeline; PCL_V2=1 is accepted
+# as a harmless no-op so existing scripts keep working.  The cache key mixes in
+# the effective pipeline (see p-compute-cache-path), so flipping PCL_V1 never
+# reuses the other pipeline's cached module transpiles.
+my $PARSER_CLASS = 'Pl::Parser2';
+if ($ENV{PCL_V1}) {
+  $PARSER_CLASS = 'Pl::Parser';
+} else {
   require Pl::Parser2;
-  $PARSER_CLASS = 'Pl::Parser2';
 }
 
 # v2 whole-file fallback: anything the prototype can't lower (it dies with

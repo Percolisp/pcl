@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 # Pl/t/parser2-01.t — v2 pipeline prototype (Pl::Parser2 / Pl::ExprToCL2 /
 # Pl::VarAnnotator / Pl::CLForm).  Shape checks on generated CL + one
-# end-to-end run.  The v2 pipeline is opt-in (PCL_V2=1); these tests pin the
+# end-to-end run.  The v2 pipeline is the DEFAULT (W9; PCL_V1=1 = v1 escape
+# hatch); these tests call Parser2 directly regardless of env and pin the
 # north-star shapes from docs/codegen-rewrite-spec.md so they can't silently
 # regress while v2 grows.
 use v5.30;

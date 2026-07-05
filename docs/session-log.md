@@ -4,6 +4,22 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 273c (2026-07-05) — W9: v2 IS NOW THE DEFAULT PIPELINE.
+
+- **Cache keying first** (the W9 prerequisite): `*pcl-cache-generation*`
+  ("v2-1") + the effective pipeline (`PCL_V1` env) mixed into
+  `p-compute-cache-path`'s sxhash; `~/.pcl-cache` cleared. Verified: the same
+  module cached separately per pipeline; cache hit on same-pipeline re-run.
+  **Bump the generation string on any future emission-changing commit.**
+- `pl2cl`: `$PARSER_CLASS` defaults to `Pl::Parser2`; `PCL_V1=1` = escape
+  hatch to v1; `PCL_V2=1` accepted as a no-op. begin-end-01's pipeline-aware
+  branch re-keyed `$ENV{PCL_V2}` → `!$ENV{PCL_V1}`.
+- Bench (startup-subtracted, runpl): fib(29) v2 ≈0.05 s / v1 ≈0.15 s /
+  perl 0.14 s — v2 beats perl; intloop noise-level fast. No regression.
+- Gates re-run clean-env (v2 default) and `PCL_V1=1` (v1 baseline): both
+  green (114 files). CLAUDE.md + parser2-prototype.md + completion plan
+  updated. NEXT: W10 → W11+W14 (perf pair) → W12.
+
 ## Session 273 (2026-07-05) — v2 W8 FINISHED: review of s272h–i, D20 reverted, D23–D28.
 
 - Reviewed Opus 4.8's W8 batch (D1–D22, commits 5947c47…4108d43) decision by
