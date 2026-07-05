@@ -109,6 +109,28 @@ sub parse {
          $_[1]->isa('PPI::Token::Word')
            && $_[1]->content =~ /^CORE::(?:my|our|state|local)$/;
        }) || [] };
+  # `state` inside an ANON sub or a map/grep/sort block: each closure / block
+  # invocation needs its own per-instance state cell (`sub { ++state $x }`
+  # returned from a factory → independent state per returned closure; `map {
+  # state $x = … }` → one persistent cell across iterations).  v2's state-var
+  # rename doesn't scope these per-closure (it shared one cell across all
+  # instances).  `state` in a NAMED sub body (the common case) works and is NOT
+  # gated.  Getting nested-block state right is its own feature → v1 for now.
+  for my $st (@{ $doc->find(sub {
+        $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'state' }) || [] }) {
+    my $nx = $st->snext_sibling;
+    next unless $nx && ($nx->isa('PPI::Token::Symbol') || $nx->isa('PPI::Structure::List'));
+    my $anc = $st->parent;
+    while ($anc && !$anc->isa('PPI::Document')) {
+      if ($anc->isa('PPI::Structure::Block')) {
+        my $prev = $anc->sprevious_sibling;
+        die "Parser2 TODO: state in anon-sub / map-grep-sort block (per-closure)\n"
+          if $prev && $prev->isa('PPI::Token::Word')
+          && $prev->content =~ /^(?:sub|map|grep|sort)$/;
+      }
+      $anc = $anc->parent;
+    }
+  }
   # Bare `$#` (PPI::Token::Magic) — the deprecated last-index / `$#[…]` on the
   # oddly-named `@#` array.  v2 mis-parses it (element access, and never
   # forward-declares `@#`) → unbound crash.  `$#array` is a distinct ArrayIndex

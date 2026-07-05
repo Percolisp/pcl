@@ -356,10 +356,40 @@ A BEGIN that merely CALLS a sub (the s272g "BEGIN calls sub defined before it"
 case) is unaffected and stays native. **Revisit in a later work item: proper
 source-order interleaving of sub defs and BEGIN blocks.**
 
-## Pending / under investigation
+## D22 — gate `state` in an anon-sub / map-grep-sort block → v1
 
-Remaining W8 files: state-01 (10,25,26), fileio-02 (25 symbolic-open handle
-name), closure-01 t17 (nested my-shadow across if/else), misc-fixes-02 t27
-(box-set class identity on blessed substr).
+**File:** `Pl/Parser2.pm` (early gate in `parse()`).  Not a boxing decision.
+`state` in a NAMED sub body works in v2. But `state` inside an anonymous sub
+(`sub { ++state $x }` returned from a factory → independent state per returned
+closure) or a map/grep/sort block (`map { state $x = … }` → one persistent cell
+across iterations) needs per-instance state scoping that v2's state-var rename
+doesn't provide (it shared one cell across all closure instances — f2 continued
+f1's count). Getting nested-block state right is its own feature → gate → v1,
+which handles it. Detection: a `state` declarator whose ancestor Block is
+preceded by `sub`/`map`/`grep`/`sort`.
+
+## Session end state (handoff)
+
+**Committed this session (all on `main`, v1 Pl/t gate stayed 100%):** 19 → a
+handful of Pl/t files under `PCL_V2=1`. Root-cause fixes: lvalue-assign boxing
+(p-my-= returns box), condition-`my` scoping, per-block pragma scope, C-for
+multi-decl, fat-comma token-restore (every OO constructor), return-if modifier,
+inherit/void ctx map, list-assign boxing (broadened detector), map-closure
+per-iteration capture (`__lex__N` no-defvar), `my $x=INIT if COND`, modulo PPI
+workaround, `\substr`/`\vec`/`\pos` boxing, caret-var forward-decl, return-list
+flatten gate, block-form anon-block defun collection, void `m//g` context,
+`our`-init BEGIN-order (setf), BEGIN-introspection gate, state-in-block gate.
+
+**Remaining Pl/t failures under v2 (NOT yet addressed):**
+- `fileio-02` t25 — symbolic-open then bareword read agree on handle name.
+- `closure-01` t17 — nested my-shadow capture across if/else branches.
+- `misc-fixes-02` t27 — box-set class identity on blessed substr (may be the
+  documented scalar-SV-identity not-supported case — check `not-supported.md`
+  "Scalar copy does not preserve reference/SV identity" before fixing).
+
+**Next:** finish those 3 files, then re-run the FULL `PCL_V2=1 prove -j8 Pl/t/`
+to confirm, and a perl-tests parity sweep (the broad changes — `_lower_expr`
+bucket drain, void-wrap, our-init, push_scope — need a full v1-vs-v2 sweep to
+confirm W7 parity still holds). Then W9 (flip default; CACHE KEYING FIRST).
 decl-ordering-01/02, closure/state/wantarray/match-vars/lvalue-ref/bop/socket/
 use-require/pcl-dash-m/fileio-02.
