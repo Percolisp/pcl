@@ -1443,6 +1443,15 @@ sub _expr_scalar_rooted {
   my ($self, $parts) = @_;
   my @parts = _strip_semi(@{ $parts // [] });
   return 0 unless @parts;
+  # parse_expr_to_tree runs cleanup_for_parsing, which DESTRUCTIVELY rewrites the
+  # `=>` operator to `,` (fat-comma auto-quote) on the SHARED PPI tokens.  This
+  # analysis runs during sub pre-registration, BEFORE the body is lowered — if we
+  # don't restore, the later _lower_expr sees `,` instead of `=>` and the fat
+  # comma's key auto-quote never fires (`bless { key => shift }` lowers `key` as a
+  # funcall — every OO constructor broke).  Snapshot + restore token content,
+  # exactly as _lower_expr does around its own native attempt.
+  my @snap = map { [$_, $_->content] }
+             map { $_->isa('PPI::Node') ? $_->tokens : $_ } @parts;
   my $ok = eval {
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
@@ -1467,6 +1476,7 @@ sub _expr_scalar_rooted {
       return 0;
     }
   };
+  $_->[0]->set_content($_->[1]) for @snap;   # restore pristine tokens (cleanup mutates =>→,)
   return $ok ? 1 : 0;
 }
 

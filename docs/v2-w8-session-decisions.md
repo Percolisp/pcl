@@ -136,8 +136,35 @@ recurse) adds a per-structure `->content` stringify to the HOT expression parser
 for a torture-test-only construct — a bad speed trade (CLAUDE.md §2). Gating has
 zero hot-path cost. Not a boxing decision; logged for completeness.
 
+## D7 — restore shared PPI tokens after `_expr_scalar_rooted`'s pre-parse (fat-comma corruption)
+
+**File:** `Pl/Parser2.pm` (`_expr_scalar_rooted`).
+**Not a boxing decision** — a destructive-shared-state bug, but high-impact so logged.
+
+**Symptom:** `bless { key => shift }, $class` (every OO constructor) lowered the
+hash KEY as a funcall (`(p-hash (Item::pl-val) …)` / `(p-hash (p-length $_) …)`)
+instead of the auto-quoted string `"key"`, whenever `key` is also a known
+sub/builtin name. Objects then had the wrong key → methods returned undef → `0`.
+
+**Root cause:** `_sub_ctx_insensitive` (sub pre-registration) calls
+`_expr_scalar_rooted` on the sub body's last statement, which runs
+`parse_expr_to_tree` → `cleanup_for_parsing`. That pass DESTRUCTIVELY rewrites the
+`=>` operator to `,` (`set_content`) on the SHARED PPI tokens as part of
+fat-comma auto-quoting — and never restored them. So by the time `_lower_expr`
+lowered the statement, the `=>` was already `,`, the fat-comma key auto-quote
+never fired, and the fallback resolved the bareword as a function call.
+
+**Fix:** snapshot every leaf token's content before the pre-parse and restore it
+after (mirrors the exact protection `_lower_expr` already had around its own
+native attempt). `bless { key => shift }` now emits `(p-hash "key" …)`.
+
+**Lesson for future v2 work:** ANY code path that hands shared PPI tokens to
+`parse_expr_to_tree`/`cleanup_for_parsing` for *analysis* (not final lowering)
+must snapshot+restore, because cleanup mutates `=>`→`,` in place. Grep for
+`parse_expr_to_tree` callers when adding analysis passes.
+
 ## Pending / under investigation
 
-Working through remaining W8 files: transpile-test-02/04/05, misc-fixes-01/02,
+Working through remaining W8 files: transpile-test-04/05, misc-fixes-01/02,
 decl-ordering-01/02, closure/state/wantarray/match-vars/lvalue-ref/bop/socket/
 use-require/pcl-dash-m/fileio-02.
