@@ -669,6 +669,13 @@ sub _forward_global_decls {
       next if $runtime_vars{$v} || $lb->{$v};
       # W5-renamed cells are defvar'd via _captured_decls — don't double-declare.
       next if $self->{_file_lex_renamed}{$v};
+      # `$x__lex__N` is v1's per-scope closure-capture RENAME (emitted by the
+      # fallback's _with_declarations for a `my` captured by a nested sub, e.g.
+      # in a map/grep block).  It is always a TRUE lexical, let-bound inside the
+      # generated code — defvar'ing it would proclaim it special and collapse
+      # every per-iteration let into one shared dynamic cell (map closures all
+      # saw the LAST value).  Never forward-declare it.
+      next if $v =~ /__lex__\d+$/;
       $seen{$v} = 1;
     }
     # Cross-package refs (main::$IS_ASCII from a required harness, Foo::@bar)
@@ -874,14 +881,39 @@ sub _lower_block {
               $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
     if ($name) {
+      # A postfix modifier on the init (`my $c = shift if @_ > 1`): Perl declares
+      # $c ALWAYS and makes the ASSIGNMENT conditional (undef when the cond is
+      # false; re-bound fresh each call, which a fresh boxed let already gives).
+      # Split the modifier off the init; while/until/for/foreach → whole-stmt v1.
+      my ($imod, $icond);
+      if (defined $init) {
+        (my $iexpr, $imod, $icond) = _split_modifier($init);
+        $init = @$iexpr ? $iexpr : undef if defined $imod;
+      }
+      if ($imod && _modifier_needs_fallback($imod)) {
+        return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
+      }
       $self->_reg_lex($name);
-      if ($vi->{$name} && $vi->{$name}{unboxable}) {
+      # A conditional init MUST keep $c boxed (the assignment writes through the
+      # box; a false cond leaves it undef) — never the unboxable raw-slot path.
+      if (!$imod && $vi->{$name} && $vi->{$name}{unboxable}) {
         my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
         return (['let', ['list', ['list', $name, $initform]],
                  $self->_lower_block(\@rest, $vi, $tail_ctx)]);
       }
+      my @assign;
+      if (defined $init) {
+        my $set = ['p-my-=', $name, $self->_lower_expr($init, $first)];
+        if ($imod) {
+          my $cf = $self->_lower_expr($icond, $first);
+          $cf = ['p-!', $cf] if $imod eq 'unless';
+          @assign = (['p-if', $cf, $set]);
+        } else {
+          @assign = ($set);
+        }
+      }
       return (['let', ['list', ['list', $name, '(make-p-box nil)']],
-               (defined $init ? (['p-my-=', $name, $self->_lower_expr($init, $first)]) : ()),
+               @assign,
                $self->_lower_block(\@rest, $vi, $tail_ctx)]);
     }
     # -- my $scalar <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;`)

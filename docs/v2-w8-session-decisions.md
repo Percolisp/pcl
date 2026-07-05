@@ -231,8 +231,46 @@ still lowers to `(let (($i 0)) …)`, run gives the right answer).
 **Still a text-scan heuristic** → W12 (OpcodeTree walk) is the real fix; a
 structural "is this name an lvalue target of a list-assign?" fact subsumes it.
 
+## D12 — `my $x = INIT if COND` splits the modifier; conditional-init stays BOXED
+
+**File:** `Pl/Parser2.pm` (scalar variable-decl branch of `_lower_block`).
+
+**Why:** v2 absorbed the postfix `if COND` as an ARGUMENT to the init
+(`my $c = shift if @_>1` → `(p-my-= $c (p-shift (p-if …)))`, a malformed p-if
+that crashed). Perl: the `my` declares ALWAYS, the ASSIGNMENT is conditional
+(undef when false, re-bound fresh each call). Now the modifier is split off the
+init and lowered as `(p-if COND (p-my-= $c INIT))`.
+
+**Boxing decision:** a conditionally-initialized `my` scalar **must stay boxed**
+— the unboxable raw-slot path is skipped whenever a modifier is present. Reasons:
+(1) the conditional assignment writes through the box; (2) when the cond is
+false the box must read as undef, which a boxed `(make-p-box nil)` gives for
+free (a raw slot would hold a stale/garbage value). Loop modifiers
+(while/until/for/foreach) on a decl → whole-statement v1 fallback.
+
+## D13 — never forward-declare `$x__lex__N` (fallback closure-capture renames)
+
+**File:** `Pl/Parser2.pm` (`_forward_global_decls`).
+
+**Why:** the fallback's `_with_declarations` renames a `my` captured by a nested
+sub to `$x__lex__N` (v1's per-scope closure-capture convention), e.g. inside a
+`map { my $x=$_; sub {$x} }` block. v2's forward-decl pass didn't recognize the
+name (it's created inside the fallback, never `_reg_lex`'d), so it defvar'd it at
+top level. A defvar proclaims the symbol **special**, which collapses every
+per-iteration `(let (($x__lex__N …)))` into ONE shared DYNAMIC cell → all map
+closures saw the LAST element's value ("ccc" instead of "abc"). Fix: never
+forward-declare a `*__lex__\d+` name — it is always a true lexical, let-bound in
+the generated code.
+
+**This is a boxing-adjacent invariant:** "a name let-bound anywhere must never be
+defvar'd" (the special-proclaim poison). `__lex__N` names are let-bound by the
+fallback, so they belong to the same exclusion set as `_all_lex`, just via a
+name-pattern instead of a registration (they aren't visible to `_reg_lex`).
+
 ## Pending / under investigation
 
-Working through remaining W8 files: misc-fixes-01/02,
+Working through remaining W8 files: state-01, decl-ordering-01/02, lvalue-ref-01,
+match-vars-01, fileio-02, wantarray-01, and residual misc-fixes-01/02 (modulo
+glued operand, etc.).
 decl-ordering-01/02, closure/state/wantarray/match-vars/lvalue-ref/bop/socket/
 use-require/pcl-dash-m/fileio-02.
