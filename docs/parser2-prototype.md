@@ -698,6 +698,50 @@ flake (116/116 isolated on both).
 
 **NEXT:** W9 (flip default; CACHE KEYING FIRST) → W10 → W11+W14 (perf) → W12.
 
+## Session 274 (2026-07-05): W10 — my-across-package via spanning rename
+
+The s270 v1 bug (`my $g; package Foo; print $g;` → v1 defvars `$g` under the
+declaring package, Foo's section reads `Foo::$g` → unbound crash) is fixed on
+the v2 side: `_rename_spanning_lexicals`, a pre-pass BEFORE `_check_my_spanning`
+that reuses W5's machinery (facts scan extracted into the shared
+`_scan_lex_facts`; positional decl rename via `_rename_decl_within`).
+
+- A qualifying spanning lexical → `$x__file__N` in the declaring segment
+  (defvar'd box, the existing `_file_lex_renamed` lowering) and the
+  package-qualified `$Pkg::x__file__N` in later segments (their reader sits in
+  their own CL package; the declaring section's defvar has already loaded —
+  sections load in order). `_forward_global_decls`' cross-pkg branch emits a
+  harmless duplicate defvar in reading sections.
+- **Perl's visibility rule preserved:** references BEFORE the declaration
+  (earlier segments, earlier statements, the decl's own RHS) are the package
+  GLOBAL — a different variable — and stay untouched. Verified:
+  `our $g = 99; my $g = 5; package Foo; print $g, $main::g;` → `5 99`,
+  byte-matching perl (v1 can't run this shape at all).
+- Subset = W5's (single `my $x` scalar decl of the bare name file-wide; no
+  array/hash-family/`$#x`/`${x}`/interpolated use) **plus**: the declaring
+  segment is not a package-BLOCK segment (block `my`s don't span in Perl), and
+  no string eval from the declaring segment on (the s250 capture alist finds
+  lexicals BY NAME in `_let_bound_vars`; a renamed package cell is invisible
+  to it — eval'd `$x` would silently read the wrong variable).
+- W5's candidate loop now (a) skips names the spanning pass already renamed
+  (a second rename would orphan the qualified refs) and (b) iterates
+  **sorted** — found while proving parity: unsorted hash iteration made
+  `__file__N` numbering nondeterministic per process (args.t emission churned
+  run-to-run; also a cache-stability hazard).
+- Census: 66 native, unchanged — the 4 remaining spanning-gated files fail
+  the subset legitimately (ref.t re-declares `$test` in a nested scope;
+  sprintf2.t/undef.t/caller.t hit the interp/eval disqualifiers) and keep the
+  gate → v1, the pre-existing baseline. Parity proven the strong way:
+  emission of all 66 native files byte-identical vs HEAD (modulo the
+  path-bearing @INC preamble), so no re-sweep needed.
+- Guards: parser2-01.t — qualifying shape lowers with the defvar +
+  qualified-ref shapes, interpolated spanning still dies; parser2-02.t —
+  end-to-end declare-in-main / write-in-Foo / capture-by-Foo-sub /
+  read-in-reopened-main → `3 3` (v1 crashes here; v2 is deliberately better,
+  proof = this section). `*pcl-cache-generation*` bumped v2-1 → v2-2.
+
+**NEXT:** W11+W14 (the perf pair) → W12.
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is

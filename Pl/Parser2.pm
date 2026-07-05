@@ -174,7 +174,8 @@ sub parse {
         # RETURN section that puts the reader back in the enclosing package
         # (which already has its own section — hence reopen).
         push @segments, { pkg => $pkg, stmts => [$block->schildren],
-                          reopen => ($opened{$pkg}++ ? 1 : 0), version => $version };
+                          reopen => ($opened{$pkg}++ ? 1 : 0), version => $version,
+                          blockform => 1 };
         push @segments, { pkg => $cur_pkg, stmts => [], reopen => 1 };
         next;                                 # $cur_pkg unchanged
       }
@@ -185,6 +186,19 @@ sub parse {
     }
     push @{ $segments[-1]{stmts} }, $child;
   }
+  $self->{_file_lex_counter} = 0;
+  $self->{_file_lex_renamed} = {};
+
+  # W10: a file lexical declared in one segment and used in a later one spans
+  # a package boundary.  v1 has an OPEN BUG here (it defvars the name under
+  # the declaring package; the later segment reads Pkg::$name → unbound), so
+  # gating to v1 crashes at runtime.  When the W5 subset holds, rewrite the
+  # lexical to a fresh package-level cell instead: unqualified $x__file__N in
+  # the declaring segment (defvar'd box via _file_lex_renamed), and the
+  # package-qualified $Pkg::x__file__N in later segments.  Must run BEFORE
+  # _check_my_spanning (renamed names no longer span) and before the W5 pass
+  # (which skips already-renamed names).
+  $self->_rename_spanning_lexicals(\@segments) if @segments > 1;
   $self->_check_my_spanning(\@segments) if @segments > 1;
 
   # W5: rewrite file lexicals captured by named subs to fresh package-level
@@ -192,8 +206,6 @@ sub parse {
   # every downstream reader (sub_info, _sub_ctx_insensitive, VarAnnotator,
   # _lower_block) sees the renamed tokens; _file_lex_renamed drives the
   # defvar-not-let lowering and un-fires the capture gates.
-  $self->{_file_lex_counter} = 0;
-  $self->{_file_lex_renamed} = {};
   $self->_rename_captured_file_lexicals($_) for @segments;
 
   # W8.5: a condition-`my` name (while (my $name = …)) is registered let-bound
@@ -530,6 +542,148 @@ sub _check_sub_captures {
   }
 }
 
+# Shared fact scan for the W5/W10 lexical-rename passes.  Accumulates into
+# $f (so callers can scan one segment or the whole file):
+#   decl_count{bare}   — count of my/state declarations of the bare name;
+#   scalar_decl{bare}  — the `my $x` single-scalar declaration STATEMENTS
+#                        outside named subs (rename candidates);
+#   disq{bare}         — names unrenameable by Symbol-token content: used in
+#                        array/hash family form (@x, %x, $#x, $x[…], $x{…})
+#                        or interpolated in a string/regex/heredoc.
+sub _scan_lex_facts {
+  my ($self, $stmts, $f) = @_;
+  $f->{$_} //= {} for qw(decl_count scalar_decl disq);
+  for my $stmt (@$stmts) {
+    my @vstmts = $stmt->isa('PPI::Statement::Variable') ? ($stmt) : ();
+    push @vstmts, @{ $stmt->find('PPI::Statement::Variable') || [] };
+    for my $v (@vstmts) {
+      my $kw = ($v->schildren)[0];
+      next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
+      for my $dn ($self->_declared_names($v)) {
+        (my $bare = $dn) =~ s/^[\$\@\%]//;
+        $f->{decl_count}{$bare}++;
+      }
+      my ($name) = $self->_single_scalar_decl($v);
+      if ($name && $kw->content eq 'my' && !_inside_named_sub($v)) {
+        (my $bare = $name) =~ s/^\$//;
+        push @{ $f->{scalar_decl}{$bare} }, $v;
+      }
+    }
+    # Any symbol whose canonical form is @x / %x (incl. $x[…] / $x{…} element
+    # access, whose ->symbol resolves to the container) disqualifies bare `x`.
+    for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
+      my $canon = $s->symbol;
+      (my $bare = $canon) =~ s/^[\$\@\%]//;
+      $f->{disq}{$bare} = 1 if substr($canon, 0, 1) ne '$';
+    }
+    for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+      (my $bare = $ai->content) =~ s/^\$#//;
+      $f->{disq}{$bare} = 1;
+    }
+    # A name INTERPOLATED inside a string/regex/heredoc is not a Symbol token,
+    # so a token rewrite can't reach it — disqualify (renaming would leave the
+    # interpolation pointing at a now-nonexistent variable).
+    _interp_names($stmt, $f->{disq});
+  }
+}
+
+# W10: my-lexical spanning a package boundary (see the parse() comment).
+# Subset (anything outside it keeps the _check_my_spanning gate → v1):
+#   - exactly ONE my/state declaration of the bare name in the whole file,
+#     and it is a top-level `my $x` scalar declaration (same as W5);
+#   - never used in array/hash family form, ${x} deref-block, or interpolated
+#     — anywhere in the file (Symbol-content rename must reach every use);
+#   - the declaring segment is not a package-BLOCK segment (a block-scoped
+#     `my` does NOT span in Perl — later same-name uses are package globals);
+#   - no string eval from the declaring segment on (the session-250 capture
+#     alist finds lexicals BY NAME in _let_bound_vars; a renamed package cell
+#     is invisible to it, so eval'd code reading $x would silently miss).
+# References BEFORE the declaration (earlier segments, or earlier statements
+# of the declaring segment, or the decl's own RHS) are package globals of a
+# DIFFERENT variable — left untouched, exactly Perl's visibility rule.
+sub _rename_spanning_lexicals {
+  my ($self, $segments) = @_;
+
+  # Spanning names, detected exactly as _check_my_spanning does: declared in
+  # an earlier segment, textually used in a later one.
+  my (%decl_seg, %spanning, %live);
+  for my $i (0 .. $#$segments) {
+    if ($i && %live) {
+      my $txt = join "\n", map { $_->content } @{ $segments->[$i]{stmts} };
+      for my $bare (keys %live) {
+        $spanning{$bare} = 1 if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+      }
+    }
+    my %seg_lex;
+    $self->_collect_lexical_names($segments->[$i]{stmts}, \%seg_lex);
+    for my $bare (keys %seg_lex) {
+      $decl_seg{$bare} //= $i;
+      $live{$bare} = 1;
+    }
+  }
+  return unless %spanning;
+
+  my $f = {};
+  $self->_scan_lex_facts($_->{stmts}, $f) for @$segments;
+  my $alltxt = join "\n", map { map { $_->content } @{ $_->{stmts} } } @$segments;
+
+  # String eval anywhere at/after the earliest declaring segment → no rename
+  # for any spanning name (cheap and conservative; eval-BLOCKS are fine).
+  my $min_seg = (sort { $a <=> $b } map { $decl_seg{$_} } keys %spanning)[0];
+  for my $j ($min_seg .. $#$segments) {
+    for my $stmt (@{ $segments->[$j]{stmts} }) {
+      next unless ref $stmt && $stmt->isa('PPI::Node');
+      for my $w (@{ $stmt->find(sub { $_[1]->isa('PPI::Token::Word')
+                                      && $_[1]->content eq 'eval' }) || [] }) {
+        my $nx = $w->snext_sibling;
+        return unless $nx && $nx->isa('PPI::Structure::Block');
+      }
+    }
+  }
+
+  for my $bare (sort keys %spanning) {
+    next if $f->{disq}{$bare};
+    my $sdecls = $f->{scalar_decl}{$bare};
+    next unless $sdecls && @$sdecls == 1
+             && ($f->{decl_count}{$bare} // 0) == 1;
+    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block
+    my $di = $decl_seg{$bare};
+    next if $segments->[$di]{blockform};
+    my $decl  = $sdecls->[0];
+    my $stmts = $segments->[$di]{stmts};
+    my ($idx) = grep { $stmts->[$_] == $decl } 0 .. $#$stmts;
+    next unless defined $idx;   # decl not a top-level statement of its segment
+    my ($sym) = grep { $_->content eq "\$$bare" }
+                @{ $decl->find('PPI::Token::Symbol') || [] };
+    next unless $sym;
+
+    my $newbare = $bare . '__file__' . $self->{_file_lex_counter}++;
+    # Declaring segment: the decl symbol itself (its RHS reads the outer
+    # global — _rename_decl_within's rule), then every use in later
+    # statements of the segment.
+    $self->_rename_decl_within($decl, $sym, "\$$newbare");
+    for my $j ($idx + 1 .. $#$stmts) {
+      next unless ref $stmts->[$j] && $stmts->[$j]->isa('PPI::Node');
+      for my $s (@{ $stmts->[$j]->find('PPI::Token::Symbol') || [] }) {
+        $s->set_content("\$$newbare") if $s->symbol eq "\$$bare";
+      }
+    }
+    # Later segments: the package-qualified form — their sections' reader
+    # sits in THEIR package; the qualified symbol reaches the declaring
+    # section's defvar (which has already loaded — sections load in order).
+    my $qual = '$' . $segments->[$di]{pkg} . '::' . $newbare;
+    for my $j ($di + 1 .. $#$segments) {
+      for my $stmt (@{ $segments->[$j]{stmts} }) {
+        next unless ref $stmt && $stmt->isa('PPI::Node');
+        for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
+          $s->set_content($qual) if $s->symbol eq "\$$bare";
+        }
+      }
+    }
+    $self->{_file_lex_renamed}{"\$$newbare"} = 1;
+  }
+}
+
 # W5: file lexicals captured by named subs.  A named sub hoists into the
 # definitions bucket OUTSIDE the lexical `let`s that bind file `my`-vars, so a
 # sub body that reads such a var would compile a free (→ unbound) symbol —
@@ -564,44 +718,21 @@ sub _rename_captured_file_lexicals {
 
   # Tally declarations (my/state, by bare name) and disqualify any bare name
   # ever used in array/hash family form.
-  my (%decl_count, %scalar_decl, %disq);
-  for my $stmt (@$stmts) {
-    my @vstmts = $stmt->isa('PPI::Statement::Variable') ? ($stmt) : ();
-    push @vstmts, @{ $stmt->find('PPI::Statement::Variable') || [] };
-    for my $v (@vstmts) {
-      my $kw = ($v->schildren)[0];
-      next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
-      for my $dn ($self->_declared_names($v)) {
-        (my $bare = $dn) =~ s/^[\$\@\%]//;
-        $decl_count{$bare}++;
-      }
-      my ($name) = $self->_single_scalar_decl($v);
-      if ($name && $kw->content eq 'my' && !_inside_named_sub($v)) {
-        (my $bare = $name) =~ s/^\$//;
-        push @{ $scalar_decl{$bare} }, $v;
-      }
-    }
-    # Any symbol whose canonical form is @x / %x (incl. $x[…] / $x{…} element
-    # access, whose ->symbol resolves to the container) disqualifies bare `x`.
-    for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-      my $canon = $s->symbol;
-      (my $bare = $canon) =~ s/^[\$\@\%]//;
-      $disq{$bare} = 1 if substr($canon, 0, 1) ne '$';
-    }
-    for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
-      (my $bare = $ai->content) =~ s/^\$#//;
-      $disq{$bare} = 1;
-    }
-    # A name INTERPOLATED inside a string/regex/heredoc is not a Symbol token,
-    # so the rewrite below can't reach it — disqualify (renaming would leave the
-    # interpolation pointing at a now-nonexistent variable).
-    _interp_names($stmt, \%disq);
-  }
+  my $f = {};
+  $self->_scan_lex_facts($stmts, $f);
+  my %decl_count  = %{ $f->{decl_count}  };
+  my %scalar_decl = %{ $f->{scalar_decl} };
+  my %disq        = %{ $f->{disq}        };
 
   my $segtxt = join "\n", map { $_->content } @$stmts;
   my %rename;
-  for my $bare (keys %scalar_decl) {
+  # sorted: __file__N numbering must be deterministic across runs (hash order
+  # is per-process random — unsorted iteration made cached transpiles churn).
+  for my $bare (sort keys %scalar_decl) {
     next if $disq{$bare};
+    # Already rewritten to a package-level cell by the W10 spanning pass —
+    # renaming it AGAIN would orphan the qualified refs in later segments.
+    next if $self->{_file_lex_renamed}{"\$$bare"};
     next unless @{ $scalar_decl{$bare} } == 1;   # exactly one file-lexical scalar decl
     next unless ($decl_count{$bare} // 0) == 1;   # and no other decl of the bare name
     next if $segtxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block → gate

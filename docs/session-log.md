@@ -4,6 +4,25 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 274 (2026-07-05) — W10: my-across-package fixed on the v2 side.
+
+- `_rename_spanning_lexicals` pre-pass (Pl/Parser2.pm): a qualifying spanning
+  `my` becomes a `$x__file__N` defvar cell in the declaring segment and the
+  package-qualified `$Pkg::x__file__N` in later segments. Pre-declaration
+  references stay the package global (Perl's visibility rule; verified vs
+  perl). Subset = W5's + not-a-package-block-segment + no string eval from
+  the declaring segment on. Non-qualifying shapes keep the gate → v1.
+- The s270 repro (`my $g = 5; package Foo; print $g;` → `5`) now runs under
+  v2; v1 still crashes on it (open v1 bug, unchanged — v2 is the fix).
+- W5 facts scan extracted to `_scan_lex_facts` (shared); W5 candidate loop
+  skips spanning-renamed names and iterates SORTED (its unsorted hash walk
+  made `__file__N` numbering nondeterministic per process — args.t emission
+  churned; also a cache hazard). `*pcl-cache-generation*` v2-1 → v2-2.
+- Census 66 native (unchanged; remaining 4 spanning files fail the subset
+  legitimately). Parity: all 66 native emissions byte-identical vs HEAD.
+  Guards: parser2-01.t +3 reshaped, parser2-02.t +1 runtime. Detail:
+  `docs/parser2-prototype.md` §274.
+
 ## Session 273c (2026-07-05) — W9: v2 IS NOW THE DEFAULT PIPELINE.
 
 - **Cache keying first** (the W9 prerequisite): `*pcl-cache-generation*`

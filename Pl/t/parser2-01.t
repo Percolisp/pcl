@@ -183,10 +183,20 @@ like($pkg, qr/\(in-package :main\)/, 'package main section returns the reader to
 my $hi_defs = () = $pkg =~ /\(p-sub pl-hi /g;
 is($hi_defs, 2, 'same-named sub defined once per package section');
 
-# A my-lexical spanning a package boundary cannot live in v2's per-section
-# lets → dies → whole-file v1 fallback.
+# W10: a qualifying my-lexical spanning a package boundary is renamed to a
+# package-level cell (defvar'd in the declaring section; package-qualified in
+# later sections) instead of gating — v1 CRASHES on this shape (s270 bug).
+# A non-qualifying shape (interpolated use — the token rename can't reach it)
+# still dies → v1.
 my $span = eval { Pl::Parser2->parse_code(qq{my \$x = 1;\npackage Foo;\nprint \$x;\n}) };
-like($@, qr/spans a package boundary/, 'my across a package boundary dies to v1');
+is($@, '', 'W10: qualifying my across a package boundary lowers natively');
+like($span, qr/\(defvar \$x__file__\d+ \(make-p-box nil\)\)/,
+     'W10: spanning lexical gets a defvar cell in the declaring section');
+like($span, qr/main::\$x__file__\d+/,
+     'W10: later section reads the package-qualified cell');
+my $span_interp = eval { Pl::Parser2->parse_code(qq{my \$x = 1;\npackage Foo;\nprint "\$x";\n}) };
+like($@, qr/spans a package boundary/,
+     'W10: interpolated spanning lexical still dies to v1');
 
 # W5: a single scalar file lexical captured by a NAMED sub is rewritten to a
 # fresh package-level cell ($n__file__N) — defvar'd, NOT let-bound — so the

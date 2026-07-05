@@ -1002,7 +1002,32 @@ Original steps below for reference.
    (project_parser2_prototype + MEMORY.md), and any runner comments
    mentioning PCL_V2 (grep the repo).
 
-### W10. Tier B4 — fix the v1 my-across-package bug properly
+### ~~W10. Tier B4 — fix the v1 my-across-package bug properly~~ — DONE (s274)
+
+**Shipped s274.** `_rename_spanning_lexicals` pre-pass (before `_check_my_spanning`,
+sharing W5's facts scan via the extracted `_scan_lex_facts`): a qualifying spanning
+lexical becomes `$x__file__N` in the declaring segment (defvar'd box via
+`_file_lex_renamed`) and the package-qualified `$Pkg::x__file__N` in later segments
+(their sections' reader sits in their own package; the declaring section's defvar
+has already loaded).  Pre-declaration references (earlier segments / earlier
+statements / the decl's own RHS) stay untouched — they are the package GLOBAL, which
+is exactly Perl's visibility rule (verified: `our $g = 99; my $g = 5; package Foo;
+print $g, $main::g` → `5 99`, byte-matching perl).  Subset beyond W5's: declaring
+segment not a package-BLOCK segment (block `my`s don't span), and NO string eval
+from the declaring segment on (the session-250 capture alist finds lexicals by name
+in `_let_bound_vars`; a renamed package cell would be invisible to it).  W5's
+candidate loop now skips already-renamed names (double-rename would orphan the
+qualified refs) and iterates SORTED (found while proving parity: unsorted hash
+iteration made `__file__N` numbering nondeterministic per process — args.t emission
+churned).  Census stays 66 native (the 4 remaining spanning-gated files fail the
+subset legitimately: ref.t shadows `$test`, sprintf2/undef/caller hit
+interp/eval disqualifiers); parity proven by byte-identical emission of all 66
+native files vs HEAD (modulo the path-bearing preamble).  Guards: parser2-01.t
+(qualifying shape lowers + defvar/qualified-ref shapes; interpolated still dies),
+parser2-02.t end-to-end (declare in main / write in Foo / capture by Foo sub /
+read in reopened main — v1 CRASHES on this, the s270 bug).  Original plan below.
+
+### W10. Tier B4 — fix the v1 my-across-package bug properly (original)
 
 The open v1 bug (found s270): `my $g; package Foo; print $g;` — v1 defvars
 `$g` under `:main` but the Foo section reads it as `Foo::$g` → unbound

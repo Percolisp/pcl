@@ -97,7 +97,7 @@ unlike($cc, qr/__cond__/, 'self-contained condition-my not renamed');
 # ---- runtime ----
 
 SKIP: {
-  skip 'sbcl not available', 7 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 8 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -177,6 +177,19 @@ $name = "G";
 print "$seen $name\n";
 EOF
   is($run->($pcm), "1 G\n", 'poisoned condition-my: lexical loop var + package global coexist');
+
+  # W10 spanning lexical, end-to-end: declared in main, written in Foo,
+  # captured by Foo's sub, read back in reopened main (v1 CRASHES here —
+  # the s270 unbound-variable bug; v2's rename is deliberately better).
+  my $spn = Pl::Parser2->parse_code(<<'EOF');
+my $c = 1;
+package Foo;
+$c = $c + 2;
+sub get { return $c; }
+package main;
+print $c, " ", Foo::get(), "\n";
+EOF
+  is($run->($spn), "3 3\n", 'W10: my spanning package boundaries reads/writes one cell');
 }
 
 done_testing();
