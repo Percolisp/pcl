@@ -1029,6 +1029,18 @@ sub _lower_stmt {
         ($expr, $mod, $cond) = _split_modifier(\@k);
       }
       return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
+      # A parenthesized multi-element return list with a LIST-VALUED element
+      # (@array / %hash / map / grep / sort / …) mixes scalars with flatten
+      # markers: v2's native list construction emits (vector … (p-flatten @a) …),
+      # which p-return does NOT splice — the marker leaks (`return (0,@a)` gave
+      # `0,#S(p-flatten-marker…)`).  v1 instead spreads the elements as separate
+      # p-return args, which flatten correctly.  Gate → v1 (whole stmt, so a
+      # trailing if/unless modifier rides along).  Single list-valued returns
+      # (`return @a` / `return map …`) are NOT wrapped in a vector and work.
+      my $etxt = join ' ', map { $_->content } @$expr;
+      return $self->_fallback_stmt($stmt)
+        if $etxt =~ /,/
+        && $etxt =~ /[\@%][\w{\$]|\b(?:map|grep|sort|reverse|keys|values|split)\b/;
       # A returned call must see the CALLER's context (no *wantarray* bind).
       my $form = @$expr
         ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit')]
@@ -1440,7 +1452,29 @@ sub _lower_expr {
              : "$ctx" eq 'inherit'  ? 3
              : "$ctx" eq ':void'    ? 2
              :                        0;
-  my $cl = $self->fallback_parser->_parse_expression(\@parts, $stmt, $fb_ctx);
+  # A block-form-prototype arg (`first { … } @list`, `reduce { … } …`) makes v1
+  # EMIT a top-level `(defun --anon-block-N-- …)` into its definitions bucket
+  # while the expression string only *references* `#'--anon-block-N--`.  Drain
+  # the fallback parser's buckets (as _fallback_stmt_capture does) so that defun
+  # reaches _captured_decls — otherwise the funcall names an undefined function.
+  my $p = $self->fallback_parser;
+  my @sv = ($p->_sections, $p->_cur_bucket, $p->indent_level);
+  $p->_sections([]);
+  # Use the 'definitions' bucket so a block-form arg's anon-block defun (emitted
+  # via _emit to the CURRENT bucket during parsing) lands where the drain below
+  # hoists it (a self-contained --anon-block-N-- is safe at the section top).
+  $p->_cur_bucket('definitions');
+  $p->_open_section('pcl');
+  $p->_cur_bucket('definitions');
+  $p->indent_level(0);
+  my $cl = $p->_parse_expression(\@parts, $stmt, $fb_ctx);
+  for my $sec (@{ $p->_sections }) {
+    push @{ $self->{_captured_decls} },
+      grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}}, @{$sec->{definitions}}, @{$sec->{runtime}};
+  }
+  $p->_sections($sv[0]);
+  $p->_cur_bucket($sv[1]);
+  $p->indent_level($sv[2]);
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
     unless defined $cl;
   # Legacy-boundary parity: the old pipeline rewrites (p-scalar-= $x …) to

@@ -295,9 +295,34 @@ scan's `[A-Za-z_]` couldn't match the `{^`, so it was never defvar'd → unbound
 crash. Added a caret-symbol scan; sigil (box/array/hash) taken from the char
 after the leading `|`.
 
+## D17 — gate a return-LIST with a list-valued element → v1
+
+**File:** `Pl/Parser2.pm` (return branch).  Not a boxing decision.
+`return (0, @a)` / `return ($i, map …)` — a parenthesized multi-element list
+mixing scalars with a list-valued element — lowered natively to
+`(p-return (if *wantarray* (vector 0 (p-flatten @a)) …))`; p-return does NOT
+splice the flatten-marker inside a vector (`0,#S(p-flatten-marker…)`). v1 spreads
+the elements as separate p-return args, which flatten. Gate → v1 when the return
+expr has a comma AND an `@`/`%` sigil or a list-op (map/grep/sort/…). Single
+list-valued returns (`return @a`, `return map …`) are not wrapped and work.
+
+## D18 — drain the fallback's buckets after `_lower_expr`'s `_parse_expression`
+
+**File:** `Pl/Parser2.pm` (`_lower_expr` fallback).  Not a boxing decision.
+A block-form-prototype arg (`first { … } @list`, `reduce { … } …`;
+List::Util `(&@)` protos) makes v1 EMIT a top-level `(defun --anon-block-N-- …)`
+into a bucket during PARSING, while the returned expression string only
+*references* `#'--anon-block-N--`. `_lower_expr` took only the string, dropping
+the defun → "undefined function --anon-block-N--". Fix: run `_parse_expression`
+with the fallback's `definitions` bucket active and drain
+preamble/decls/definitions/runtime into `_captured_decls` (mirrors
+`_fallback_stmt_capture`); a self-contained anon-block is safe hoisted to the
+section top.
+
 ## Pending / under investigation
 
-Working through remaining W8 files: state-01, decl-ordering-01/02, wantarray-01
-(/g void), fileio-02 (symbolic-open handle name).
+Remaining W8 files: state-01, decl-ordering-01/02, wantarray-01 (/g void),
+fileio-02 (symbolic-open handle name), closure-01 t17 (nested my-shadow across
+if/else), misc-fixes-02 t27 (box-set class identity on blessed substr).
 decl-ordering-01/02, closure/state/wantarray/match-vars/lvalue-ref/bop/socket/
 use-require/pcl-dash-m/fileio-02.
