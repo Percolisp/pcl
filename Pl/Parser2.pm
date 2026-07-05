@@ -103,6 +103,7 @@ sub parse {
   # must reflect the call site's live scope so the string-eval capture alist
   # (_eval_lexical_alist) doesn't list a closed sibling scope's name.
   $self->{_all_lex} = {};
+  $self->{_if_ret_counter} = 0;   # unique --pcl-if-ret--N per tail bare-if
 
   # ---- Split the top level into PACKAGE SEGMENTS at statement-form
   # `package Foo;`.  v2 mirrors v1's section model: each segment becomes its
@@ -974,6 +975,17 @@ sub _lower_stmt {
   # the same way) are outside the native subset — whole-statement fallback
   # through v1, which owns their loop/do-while semantics.
   return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
+  # A postfix `EXPR if/unless COND` whose value is the sub's return ($tail_ctx
+  # defined) yields the COND value when the body is skipped (`sub f { 5 if 0 }`
+  # → 0), like a block bare-if — same ret-var transform as the block form.
+  if (defined $tail_ctx && $mod && $mod =~ /^(?:if|unless)$/) {
+    my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
+    my $test = ['setf', $ret, $self->_lower_expr($cond, $stmt)];
+    $test = ['p-!', $test] if $mod eq 'unless';
+    return ['let', ['list', ['list', $ret, 'nil']],
+            ['p-if', $test, ['setf', $ret, $self->_lower_expr($expr, $stmt)], 'nil'],
+            $ret];
+  }
 
   # `$x = RHS;` on a let-bound scalar → native form: `setf` when $x is a raw
   # (unboxed) slot — RHS proven arithmetic by VarAnnotator, so the stored
@@ -1037,6 +1049,26 @@ sub _lower_compound {
         push @clauses, { kw => $cur_kw, cond => $cur_cond, block => $el };
         $cur_cond = undef;
       }
+    }
+    # A bare if/unless (no else) whose value is the enclosing sub's return
+    # ($tail_ctx defined) returns, in Perl, the CONDITION value when false
+    # (`sub f { if(0){5} }` → 0) and the body value when true.  Replicate v1's
+    # `--pcl-if-ret--` ret-var transform natively: each cond is captured into
+    # RET *and* used as the test (so a false chain leaves RET = the last cond),
+    # each taken branch overwrites RET with its body value, and the whole form
+    # yields RET.  (An empty true branch → RET = nil = undef, matching perl; v1
+    # wrongly keeps the cond there — the documented not-supported corner.)
+    if (defined $tail_ctx && (!@clauses || $clauses[-1]{kw} ne 'else')) {
+      my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
+      my $chain = 'nil';
+      for my $c (reverse @clauses) {
+        my $test = ['setf', $ret, $self->_lower_expr([_cond_parts($c->{cond})], $stmt)];
+        $test = ['p-!', $test] if $c->{kw} eq 'unless';
+        $chain = ['p-if', $test,
+                  ['setf', $ret, ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)]],
+                  $chain];
+      }
+      return ['let', ['list', ['list', $ret, 'nil']], $chain, $ret];
     }
     # Build nested p-if forms from the tail (else innermost) outward.
     # A tail if/unless is the enclosing block's VALUE — its branch blocks
@@ -1145,6 +1177,12 @@ sub _lower_compound {
     my $name = $var ? $var->content : '$_';
     # The LIST is evaluated in the OUTER scope (the loop var is not yet bound).
     my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;
+    # A single aliasable lvalue list element (`for ($a[i])`, `for ($h{k})`,
+    # `for (substr(...))`) needs the loop var to ALIAS the live container so a
+    # `$_ = …` writes through (v1: p-aref-box / p-gethash-box / *-lvalue-cell).
+    # v2's native list lowering binds the VALUE, dropping the write — gate → v1.
+    die "Parser2 TODO: foreach over an aliasable lvalue element\n"
+      if Pl::Parser::_foreach_alias_rewrite(\@list_parts);
     my $list_form  = $self->_lower_expr(\@list_parts, $stmt, 1);
     # The loop variable is scoped to the BODY only: register it, lower the
     # body (and a continue block, which sees the loop var), then restore
