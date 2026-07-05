@@ -1116,6 +1116,67 @@ keys/values/each native iteration NOT done (bench first if ever).  Original belo
 
 ### W12. Tier C2 — OpcodeTree-walk VarAnnotator
 
+> **PREP NOTE (s274, written before starting — read together with the
+> original section below):**
+>
+> **Architecture decision to make FIRST.** VarAnnotator runs BEFORE lowering
+> (per sub body / per region, on PPI statements), but the OpcodeTree is built
+> per-EXPRESSION inside `_lower_expr` — later, and only for expressions that
+> reach the seam. So W12 must run its own `parse_expr_to_tree` passes inside
+> `analyze()` (one per statement/expression region, mirroring what
+> `_lower_expr` will do later). Costs a second parse per expression unless
+> cached — consider keying a tree cache by statement refaddr and letting
+> `_lower_expr` reuse it (measure transpile time before bothering). Mind two
+> known hazards of pre-parsing shared PPI tokens: `cleanup_for_parsing`
+> DESTRUCTIVELY rewrites `=>` (D7 — snapshot/restore, `_lower_expr` has the
+> pattern) and `_ppi_parse` must be the entry (D14).
+>
+> **Event vocabulary the walk emits per name** (supersedes each regex; the
+> regex list in VarAnnotator's header + D2/D11/D12/D15/D24/D25/D26 is the
+> acceptance checklist):
+> - `decl` (my/state, with init shape), `decl-self-ref` (D27: init reads the
+>   declared name — scoping fact),
+> - `write` (`=` target; includes `($x = …)` D2), `write-list` (in a
+>   list-assign LHS, any nesting — D11), `write-cond` (modifier-conditional
+>   init — D12), `write-compound` (ALL compound assigns incl. bitwise +
+>   string-bitwise — D24), `write-incdec` (`++`/`--`, either side),
+> - `ref-taken` (`\$x`), `magic-ref` (`\substr/\vec/\pos`, paren-less too —
+>   D15+D25), `regex-target` (`=~`), `local`, `pos-arg`,
+> - `mutating-builtin-arg` (chomp/chop/undef/read/sysread/recv),
+>   `handle-viv-arg` (open/opendir/sysopen/pipe/socket/socketpair/accept —
+>   D26), `foreach-alias` (my and plain), `nested-sub-ref` (name appears
+>   inside any sub Block), `eval-string-in-region` (region fact, not per
+>   name), `seam-shadow-my` (D28/D29 — my inside a Block that lowers via the
+>   fallback; scoping fact).
+> - RHS classification stays: `arith-rooted` (top-level %ARITH_OP op) /
+>   `single-literal` / `other` — same rule, computed on the tree (h_acc/a_acc
+>   and known-funcall nodes count as `others`, W11).
+>
+> **What the tree canNOT see — keep as region text-scans:** string
+> INTERPOLATION writes nothing (reads only) so it never boxes — fine; but
+> `eval "…"` reachability and heredoc bodies still need the conservative
+> region scan (the tree has them as opaque quote tokens). Do NOT try to be
+> clever there in round 1: keep `$has_eval` as-is (its false-fire on
+> comments is exactly the W12 un-boxing win to demonstrate, so make the
+> comment case work via PPI — eval as a Word token — without parsing quote
+> INNARDS).
+>
+> **Bring-up protocol (from the section below, made concrete):** add
+> `PCL_W12_DIFF=1` that runs BOTH annotators in `analyze()` and prints one
+> line per verdict difference (file, name, text-verdict, tree-verdict,
+> reason). Run over the census corpus + Pl/t. Every `text-boxed →
+> tree-unboxable` needs a written justification (these are the wins; expect:
+> eval-in-comment, `"$x"`-only names, `++` on a DIFFERENT same-named var in
+> a sibling scope). Any `text-unboxable → tree-boxed` is free (more
+> conservative). Swap defaults only at zero unexplained diffs; keep the text
+> annotator behind `PCL_W12_OLD=1` for one session, then delete.
+>
+> **Acceptance additions:** the D-log checklist above reproduced as guard
+> tests (most already exist in parser2-01/02.t — re-point them, do not
+> weaken); census must not drop; parity sweep exact; the two W8.5 open items
+> (interp-token rename, C-for carve-out poison rename carrying the vi
+> verdict) become POSSIBLE after this but are separate commits.
+
 Replace the text-scan gates with facts from the PExpr OpcodeTree that
 ExprToCL2 already builds per expression (design context:
 `docs/type-flow-and-codegen-plan.md` §(s)).
