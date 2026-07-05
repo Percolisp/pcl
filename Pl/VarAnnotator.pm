@@ -128,6 +128,7 @@ sub analyze {
       && !$has_eval
       && !$in_nested_sub{$name}
       && $text !~ /\\\s*$bare\b/                                   # \$x
+      && $text !~ /\\\s*(?:substr|vec|pos)\s*\(\s*$bare\b/         # \substr($x,…)/\vec/\pos — magic write-through ref needs the box
       && $text !~ /$bare\s*(?:\+\+|--)/                            # $x++
       && $text !~ /(?:\+\+|--)\s*$bare\b/                          # ++$x
       && $text !~ /$bare\s*(?:[-+*\/.%x]|\*\*|\|\||&&|\/\/|<<|>>)=(?!=)/  # $x +=

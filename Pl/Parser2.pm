@@ -85,7 +85,10 @@ sub _source {
 sub parse {
   my $self = shift;
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
-  my $doc = PPI::Document->new(\$src) or die "Parser2: PPI parse failed";
+  # Route through v1's _ppi_parse so the shared PPI-bug workarounds apply — most
+  # importantly _fix_modulo_magic (`7%-3` mis-tokenized as the magic hash %-,
+  # dropping the modulo → PARSE ERROR).  A bare PPI::Document->new skipped it.
+  my $doc = $self->fallback_parser->_ppi_parse($src) or die "Parser2: PPI parse failed";
 
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —
@@ -658,10 +661,15 @@ sub _forward_global_decls {
   # top-level scope by the time this assembly-phase pass runs).
   my $lb = $self->{_all_lex} // {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
-  my (%seen, %cross);
+  my (%seen, %cross, %caret);
   for my $line (split /\n/, $text) {
     next if $line =~ /^\s*;;/;
     next if $line =~ /^\s*\(defvar\s/;
+    # Caret specials (${^MPE}, ${^WARNING_BITS}, …) compile to the pipe-delimited
+    # CL symbol |${^MPE}| — the [A-Za-z_] scan below can't match the `{^`.  They
+    # are user-writable globals; defvar any that appear.  Keyed on the full
+    # pipe-wrapped symbol; sigil (for container choice) is the char after `|`.
+    $caret{$1} = 1 while $line =~ /(\|[\$\@\%]\{\^[A-Za-z_]\w*\}\|)/g;
     # (?<![\w:|]) skips pkg-qualified Foo::$x / |P|::$x; (?!-) skips runtime
     # internals like %pcl-cl-sub-name.
     while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
@@ -690,10 +698,13 @@ sub _forward_global_decls {
       $cross{"$pkg\::$var"} = 1;
     }
   }
-  return () unless %seen || %cross;
+  return () unless %seen || %cross || %caret;
   my @decls = (';; Forward declarations for undeclared package globals');
   for my $v (sort keys %seen) {
     push @decls, "(defvar $v " . _fresh_container($v) . ")";
+  }
+  for my $sym (sort keys %caret) {
+    push @decls, "(defvar $sym " . _fresh_container(substr($sym, 1)) . ")";
   }
   for my $qv (sort keys %cross) {
     (my $var = $qv) =~ s/^.*:://;

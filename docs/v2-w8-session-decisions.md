@@ -267,10 +267,37 @@ defvar'd" (the special-proclaim poison). `__lex__N` names are let-bound by the
 fallback, so they belong to the same exclusion set as `_all_lex`, just via a
 name-pattern instead of a registration (they aren't visible to `_reg_lex`).
 
+## D14 — route v2's PPI parse through `_ppi_parse` (shared PPI-bug workarounds)
+
+**File:** `Pl/Parser2.pm` (`parse()`).  Not a boxing decision.
+v2 called `PPI::Document->new` directly, skipping `_fix_modulo_magic` (`7%-3`
+mis-tokenized as the magic hash `%-`, dropping the modulo → PARSE ERROR). Now it
+calls `$self->fallback_parser->_ppi_parse($src)` (reuse, not duplicate), so all
+of v1's PPI workarounds apply.
+
+## D15 — `\substr($x,…)` / `\vec` / `\pos` ref forces the variable BOXED
+
+**File:** `Pl/VarAnnotator.pm` (new disqualifier).
+
+**Why:** `my $r = \substr($s,0,1); $$r = "J"` writes back into `$s` through a
+magic-cell lvalue ref (`p-substr-ref`). That cell aliases `$s`'s **box**; if `$s`
+is a raw slot (VarAnnotator saw only `my $s = "hello"`, a single literal init, no
+detected write) there is no box to alias and the write vanished (`$s` stayed
+"hello"). Same family as the plain `\$x` disqualifier — a reference taken to the
+variable (even indirectly, via substr/vec/pos) means it needs a real cell.
+Disqualifier: `\\\s*(?:substr|vec|pos)\s*\(\s*$bare`. Logged for W12.
+
+## D16 — forward-declare caret specials (`${^MPE}` → `|${^MPE}|`)
+
+**File:** `Pl/Parser2.pm` (`_forward_global_decls`).  Not a boxing decision.
+`${^MPE}` compiles to the pipe-delimited CL symbol `|${^MPE}|`; the forward-decl
+scan's `[A-Za-z_]` couldn't match the `{^`, so it was never defvar'd → unbound
+crash. Added a caret-symbol scan; sigil (box/array/hash) taken from the char
+after the leading `|`.
+
 ## Pending / under investigation
 
-Working through remaining W8 files: state-01, decl-ordering-01/02, lvalue-ref-01,
-match-vars-01, fileio-02, wantarray-01, and residual misc-fixes-01/02 (modulo
-glued operand, etc.).
+Working through remaining W8 files: state-01, decl-ordering-01/02, wantarray-01
+(/g void), fileio-02 (symbolic-open handle name).
 decl-ordering-01/02, closure/state/wantarray/match-vars/lvalue-ref/bop/socket/
 use-require/pcl-dash-m/fileio-02.
