@@ -163,8 +163,76 @@ native attempt). `bless { key => shift }` now emits `(p-hash "key" …)`.
 must snapshot+restore, because cleanup mutates `=>`→`,` in place. Grep for
 `parse_expr_to_tree` callers when adding analysis passes.
 
+## D8 — fallback context mapping: `'inherit'`→INHERIT_CTX, `':void'`→VOID_CTX
+
+**File:** `Pl/Parser2.pm` (`_lower_expr` fallback ctx map).
+**Not a boxing decision.**
+
+**Why:** `_lower_expr`'s fallback previously mapped every non-list ctx to
+SCALAR_CTX (0). A `return EXPR` passes `'inherit'`; when EXPR falls back (e.g.
+`return 1..4` — `..` isn't native), the collapse to scalar made `..` always emit
+flip-flop. Perl: `return 1..4` is a RANGE in list context (`my ($a,$b)=f()` →
+`1,2`), flip-flop in scalar. Now `'inherit'`→3 (INHERIT_CTX) so the operator
+emits its runtime `(if (eq *wantarray* t) (p-.. 1 4) (p-flipflop…))` check;
+`':void'`→2. (The flip-flop's compile-time state ID differs from v1's — that's a
+per-flip-flop counter, semantically irrelevant.)
+
+## D9 — bare `$#` magic (`$#[0]` on `@#`) → gate → v1
+
+**File:** `Pl/Parser2.pm` (early gate).  Torture-test-only; v2 mis-parses it as
+element access and never forward-declares `@#` → unbound crash. `$#array` is a
+distinct ArrayIndex token, unaffected. Not a boxing decision.
+
+## D10 — `return if COND` / `return unless COND` leading-modifier fix
+
+**File:** `Pl/Parser2.pm` (`_lower_stmt` return branch).
+**Not a boxing decision, but an important correctness bug.**
+
+**Why:** `_split_modifier` scans from index 1 (so a leading compound keyword
+isn't misread). The return path `shift`s `return` first, moving the modifier to
+index 0, where the scan missed it — `return if $$r >= $n` mis-lowered to
+`(p-return (p-if COND))` (malformed p-if, compile error; broke every guard-clause
+recursion). Now the return branch detects a leading modifier explicitly (empty
+return value). `return if` is extremely common, so this mattered broadly.
+
+## D11 — list-assignment target must stay BOXED (broadened the existing detector)
+
+**File:** `Pl/VarAnnotator.pm` — broadened the list-assign disqualifier from
+`\([^()]*$bare…` to `\([^=]*$bare\b[^=]*\)\s*=[^=]` (now crosses nested parens).
+
+**The user asked: why must a list-assignment target be boxed? It looks weird.**
+Here is the reasoning, because it is the crux of the whole box/raw-slot model:
+
+- A scalar may become a **raw slot** (a bare CL number/string in a `let`, no
+  box) ONLY when *every* write to it is a simple `$x = <arithmetic>` statement
+  that the codegen rewrites to `(setf $x <value>)`. That is the *only* write form
+  that can target a raw `let` binding directly.
+- A **list assignment** `($a, $b) = LIST` does NOT write via `setf`. It calls the
+  runtime `p-list-=`, which walks the LHS vector and writes each value into the
+  corresponding target **through box-set** — i.e. it expects each target to be a
+  **box** (a mutable cell it can store into and that aliases the variable). A raw
+  slot is just a value in a `let`; `p-list-=` has nothing to write *through*, so
+  the assignment silently vanishes (the symptom: `(($a)x3,$b)=1..10` left `$a`,
+  `$b` empty).
+- So "list-assignment target ⇒ boxed" is not an arbitrary rule — it falls out of
+  the runtime calling convention: `p-list-=` / `p-list-x` operate on boxes, full
+  stop. Same reason `$x++`, `\$x`, `local $x`, `$x =~`, and `pos($x)` force a box
+  (each needs a mutable cell, not a value).
+
+**Why broaden the regex instead of adding a new disqualifier:** the write shape
+was ALREADY meant to be caught ("`($x,…) = list-assign`"); the old `[^()]*`
+simply couldn't reach a name behind a nested paren (`(($a)x3, $b) =`). Broadening
+to `[^=]*` (anything up to the assignment's `=`) is the *same* rule, made
+correct — not a new special case. Verified it does NOT disqualify the C-for
+counter (`for (my $i = 0; …)`): the `=` inside `$i = 0` stops `[^=]*` before it
+can span to a `)`, so the intloop unboxing fast path is preserved (checked: `$i`
+still lowers to `(let (($i 0)) …)`, run gives the right answer).
+
+**Still a text-scan heuristic** → W12 (OpcodeTree walk) is the real fix; a
+structural "is this name an lvalue target of a list-assign?" fact subsumes it.
+
 ## Pending / under investigation
 
-Working through remaining W8 files: transpile-test-04/05, misc-fixes-01/02,
+Working through remaining W8 files: misc-fixes-01/02,
 decl-ordering-01/02, closure/state/wantarray/match-vars/lvalue-ref/bop/socket/
 use-require/pcl-dash-m/fileio-02.

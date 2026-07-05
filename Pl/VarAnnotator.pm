@@ -137,7 +137,7 @@ sub analyze {
       && $text !~ /\bpos\s*\(?\s*$bare\b/                          # pos($x)
       && $text !~ /\bforeach?\s+my\s+$bare\b/                      # loop var
       && $text !~ /\bforeach?\s+$bare\b/                           # for $x (…) aliases
-      && $text !~ /\([^()]*$bare\b[^()]*\)\s*=[^=]/                # ($x,…) = list-assign
+      && $text !~ /\([^=]*$bare\b[^=]*\)\s*=[^=]/                  # ($x,…) = list-assign (any nesting: (($x)xN,$y)=…)
       && $text !~ /\b(?:chomp|chop|undef|read|sysread|recv)\b[^;]*$bare\b/  # mutating builtin arg
       ? 1 : 0;
     $vi{$name} = { unboxable => $unboxable };

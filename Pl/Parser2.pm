@@ -106,6 +106,14 @@ sub parse {
          $_[1]->isa('PPI::Token::Word')
            && $_[1]->content =~ /^CORE::(?:my|our|state|local)$/;
        }) || [] };
+  # Bare `$#` (PPI::Token::Magic) — the deprecated last-index / `$#[…]` on the
+  # oddly-named `@#` array.  v2 mis-parses it (element access, and never
+  # forward-declares `@#`) → unbound crash.  `$#array` is a distinct ArrayIndex
+  # token and is NOT affected.  Torture-test-only; gate → v1.
+  die "Parser2 TODO: bare \$# magic\n"
+    if @{ $doc->find(sub {
+         $_[1]->isa('PPI::Token::Magic') && $_[1]->content eq '$#';
+       }) || [] };
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
   $self->{_referenced_pkgs} = {};
@@ -966,7 +974,17 @@ sub _lower_stmt {
     my $kw = $k[0]->content;
     if ($kw eq 'return') {
       shift @k;
-      my ($expr, $mod, $cond) = _split_modifier(\@k);
+      # `return if COND` / `return unless COND`: after shifting `return` the
+      # modifier keyword is at index 0, which _split_modifier (scans from 1)
+      # would miss — mis-lowering to (p-return (p-if COND)).  Detect a leading
+      # modifier here; the value expr is then empty (return undef/()).
+      my ($expr, $mod, $cond);
+      if (@k && $k[0]->isa('PPI::Token::Word')
+          && $k[0]->content =~ /^(?:if|unless|while|until|for|foreach)$/) {
+        ($expr, $mod, $cond) = ([], $k[0]->content, [@k[1 .. $#k]]);
+      } else {
+        ($expr, $mod, $cond) = _split_modifier(\@k);
+      }
       return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
       # A returned call must see the CALLER's context (no *wantarray* bind).
       my $form = @$expr
@@ -1368,7 +1386,17 @@ sub _lower_expr {
   $_->[0]->set_content($_->[1]) for @snap;   # restore pristine tokens
   return $native if defined $native;
 
-  my $fb_ctx = (defined $ctx && "$ctx" eq '1') ? 1 : 0;
+  # Map v2's ctx to the fallback's numeric context (Pl::PExpr constants:
+  # SCALAR_CTX 0, LIST_CTX 1, VOID_CTX 2, INHERIT_CTX 3).  'inherit' MUST map to
+  # INHERIT_CTX so a context-sensitive operator emits its runtime *wantarray*
+  # check (e.g. `return 1..4` → `(if (eq *wantarray* t) (p-.. 1 4) (p-flipflop…))`
+  # — a range in list context, flip-flop in scalar).  Collapsing it to scalar
+  # (the old behaviour) always produced flip-flop.
+  my $fb_ctx = !defined $ctx        ? 0
+             : "$ctx" eq '1'        ? 1
+             : "$ctx" eq 'inherit'  ? 3
+             : "$ctx" eq ':void'    ? 2
+             :                        0;
   my $cl = $self->fallback_parser->_parse_expression(\@parts, $stmt, $fb_ctx);
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
     unless defined $cl;
