@@ -9,6 +9,26 @@ Historical implementation notes live in `docs/session-log.md`.
 
 ---
 
+## IR cleanups (deferred by user decision, 2026-07-07)
+
+### Bare `print;`/`say;` should emit `(p-print $_)` explicitly
+
+**What's inconsistent:** the transpiler materializes every implicit `$_`
+operand at parse time (`add_implicit_default_param` — `uc;` → `(p-uc $_)`)
+**except** bare `print`/`say`, which emit `(p-print)` and rely on a
+runtime-side default inside `p-print` (the "bare `print;`" branch in
+`cl/pcl-runtime.lisp`).  `docs/ir-spec.md` §1/§8 documents this as the sole
+exception to "the tree is explicit".
+
+**Fix:** route `print`/`say`'s empty-list case through the same parse-time
+insertion as the named-unary family, then delete the runtime default.
+Mind the filehandle forms: `print FH;` (`:fh` + empty list) and
+`print { EXPR };` must also receive `$_`.  Emission-changing → bump
+`*pcl-cache-generation*`, full parity sweep.  Update ir-spec.md's two
+"sole exception" mentions when done.
+
+---
+
 ## Infrastructure Bugs
 
 ### "Fully passing" files may be false positives — crash-before-failure masking

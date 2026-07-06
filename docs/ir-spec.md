@@ -149,6 +149,128 @@ Strings are host Unicode strings (character, not byte, semantics — see
 integers (arbitrary precision) and IEEE doubles; `*read-default-float-format*`
 is double-float, i.e. every float literal in the output is a double.
 
+## 2b. Declarations, scoping, and the rename families
+
+How a Perl declaration becomes CL is the one place where the transpiler
+does real *surgery* on the program: some variables are silently renamed to
+fresh unique names. A consumer will meet symbols like `$tick__file__0` and
+`$x__shadow__1` in the output; this section explains why they exist, what
+each family means, and the rules that keep the surgery sound.
+
+### 2b.1 The fundamental tension
+
+Perl file/block lexicals (`my`) and CL top-level forms don't line up:
+
+- In Perl, a **named sub sees file lexicals declared above it**, and
+  `BEGIN` blocks can run code that touches variables mid-file.
+- In PCL's output, named subs are **hoisted** into the definitions bucket
+  (so calls work regardless of definition order), and each top-level form
+  is loaded independently — a CL lexical `let` cannot span top-level
+  forms, and a hoisted `defun` cannot see a `let` in the runtime bucket.
+
+The **v1 pipeline** resolved this with a hammer: every `my` became a
+global `defvar`'d box (dynamically scoped). That makes hoisted subs and
+BEGIN blocks work, but it breaks real lexical semantics — `defvar`
+*proclaims the symbol special globally*, so **every** later `let` of the
+same name in the file silently becomes a dynamic binding: closures
+capture one shared cell instead of per-instance cells, and a `my $x`
+inside a `map` block writes through to the outer `$x`
+(`docs/closure-lexical-scoping.md`). v1 patched the worst of this by
+renaming *closure-captured* block lexicals to fresh `$x__lex__N` names
+(fresh ⇒ never `defvar`'d ⇒ the `let` stays truly lexical).
+
+The **v2 pipeline** (the default) inverts the model: a `my` is a true CL
+lexical — `(let (($x INIT)) …rest-of-block…)` — and the hard cases are
+handled by *renaming the variable to a fresh package-level cell* instead
+of poisoning the name. The prime invariant, worth memorizing:
+
+> **A let-bound name is never `defvar`'d.** (`_forward_global_decls`
+> excludes every name in the cumulative lexical set `_all_lex`.)
+> When a lexical must be globally visible after all, it gets a **fresh
+> unique name** first, so the `defvar` cannot poison any other `let`.
+
+### 2b.2 The declaration forms
+
+| Perl | v2 emission |
+|---|---|
+| `my $x = INIT;` (boxed) | `(let (($x (make-p-box nil))) (p-my-= $x INIT) …rest…)` |
+| `my $x = INIT;` (raw slot, §2.2) | `(let (($x INIT)) …rest…)` |
+| `my $i = $i + 1;` (self-ref init) | `(let (($i (p-box-init $i))) …)` — CL `let` inits evaluate in the *outer* environment, matching Perl's "RHS sees the outer variable" rule |
+| `my @a; my %h;` | `let` binding to a fresh vector / hash table |
+| `our $g = V;` | `(defvar $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place. `our` shadowing a `my` gates to v1 |
+| `state $n = 0;` | **v2 gates `state` entirely → v1**, which emits a hoisted cell + once-flag pair: `(let (($state__<sub>__n__N (make-p-box nil)) ($state__<sub>__n__N__init nil)) (p-sub …))` — the body runs the init only when the flag is unset |
+| undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced-but-never-let-bound name gets `(defvar NAME <fresh container>)` under "Forward declarations"; package-qualified refs get the defvar in *their* package |
+
+The rest-of-block nesting means scope is structural (review doc §2.3):
+reading a `)` closes a scope. At file level the `let`s nest the remaining
+*runtime* statements of the section — the hoisted definitions sit outside,
+which is exactly why the rename families below exist.
+
+Bookkeeping a consumer can ignore but a debugger should know: every `my`
+registers in three sets (`_reg_lex`) — `_let_bound_vars` (scoped, drives
+the seam's my-vs-package decisions and the string-eval capture alist),
+`_live_lex` (scoped, drives capture *gates*), `_all_lex` (cumulative,
+drives the never-defvar exclusion).
+
+### 2b.3 The rename families
+
+All renames happen **at the PPI token level, before lowering**
+(`set_content` on the parse tree), so the native path, the v1 fallback
+seam, and every analysis pass see the new name with no further plumbing.
+Numbering comes from per-file counters iterated in **sorted order** —
+hash-order iteration once made the numbering nondeterministic per process,
+churning the module cache. Every rename preserves one Perl visibility
+rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
+(`_rename_decl_within` skips tokens inside the declaration statement).
+
+| symbol shape | family | meaning |
+|---|---|---|
+| `$x__file__N` | v2 file-cell promotion (W5/W10) | a file lexical that must be visible outside the `let`s — because a named sub captures it, or because it spans a `package` boundary — promoted to a `defvar`'d package-level box (the `our` shape: defvar + `p-scalar-=`, no `let`). The fresh name is the whole point: `defvar $x__file__0` cannot poison an unrelated `let $x` |
+| `$Pkg::x__file__N` | v2 spanning refs (W10) | uses of the above from *later package segments* — package-qualified so their section's reader (sitting in its own package) reaches the declaring section's cell |
+| `$x__shadow__N` | v2 seam-shadow rename (W8.5) | a `my $x` *inside a block that lowers through the v1 seam* (`map { my $x = … }`, `do { my $x … }`) while an outer lexical `$x` is live. Unrenamed, the seam's defvar-based handling would write through the outer variable (the v1 bug); renamed, the inner block gets its own unique cell |
+| `$x__cond__N` | v2 poisoned-condition rename (W8.5) | `if (my $x = …)` / `for (my $x…)` where the *same bare name* is also used outside the construct as a package global. The construct's lexical takes the fresh name so the global keeps `$x` and gets its forward defvar |
+| `$x__lex__N` | v1 closure-capture rename | v1's fix for defvar-poisoned closures: a block `my` captured by a nested sub becomes a fresh, never-defvar'd name so its `let` stays truly lexical. Appears in v2 output too, inside seam-lowered map/grep bodies |
+| `$state__<sub>__<name>__N` (+ `…__init`) | v1 state cells | `state` variable storage + its has-run-once flag (see table above) |
+| `--anon-block-N--` | both | hoisted anonymous-block functions (block-form prototype args: `first { … }`, `sort` comparators via the seam) |
+| `--pcl-if-ret--N`, `%_args`, `$state…` | both | compiler temporaries; never user-visible names |
+
+For a translator the practical takeaway is reassuring: **renames need no
+special handling**. By the time the tree reaches you, a renamed variable
+is just an ordinary variable with an unusual name — read its kind off the
+emitted shape exactly as for any other name (§2b.2): `__file__` cells are
+defvar'd package vars; `__cond__`/`__lex__` are `let`-bound lexicals;
+`__shadow__` is whichever the lowering path produced (observed: the v1
+seam emits it as a defvar'd cell — sound *because* the name is unique).
+The suffixes matter only for mapping output back to source (strip
+`__family__N` to recover the Perl name).
+
+### 2b.4 The guard rails (when renaming refuses)
+
+Renaming by token rewrite is only sound when the token walk can *reach
+every use*. Each pass checks blockers (`_shadow_rename_blocker`,
+`_scan_lex_facts` disqualifiers) and, on any hit, falls back to v1 for
+the whole file (the sanctioned gate) rather than renaming unsoundly:
+
+- **Interpolated uses** — `"$x"`, `/$x/`, heredocs: the name lives inside
+  a quote token the Symbol walk can't rewrite.
+- **Brace-deref** — `${x}`: same reason.
+- **Shadowing / multiple declarations** of the bare name: a single
+  positional rename would merge distinct scopes.
+- **Array/hash family sharing the bare name** — `@x`, `%x`, `$#x`,
+  `$x[i]`, `$x{k}` are *different variables* whose element-access tokens
+  share the `$x…` spelling.
+- **String `eval` in scope** — the eval capture alist (§9) finds lexicals
+  *by source name* in `_let_bound_vars`; eval'd code reading `$x` would
+  silently miss a renamed cell.
+- **`state`** — its per-instance semantics run through the separate
+  `state_var_renames` machinery; token-renaming would bypass it.
+
+Where no rename applies and the capture would misbehave, the same
+conditions exist as hard *gates* (`_check_sub_captures`,
+`_check_my_spanning`, the block-form-arg capture gate): the file lowers
+through v1, whose defvar model handles the capture — with v1's known
+closure caveats.
+
 ## 3. Coercion — the heart of Perl semantics
 
 Every op coerces its operands itself. The three canonical functions:
