@@ -37,6 +37,10 @@ itself carries no host-specific semantics beyond them.
   review doc §3.2).
 - **Comments (`;` to end of line) are non-semantic** — source echoes for
   humans.
+- **The tree is explicit.** Perl's implicit operands are materialized at
+  parse time: `$_` defaults (§8), `@_`/`@ARGV` for bare `shift`/`pop`,
+  filetest operands. What you see in the tree is the complete argument
+  list; the one runtime-side default is bare `p-print`/`p-say` → `$_`.
 - **`(declare …)` forms are host compiler advice** — droppable wholesale.
 - **Order is the program.** A file is a sequence of top-level forms
   executed in order by `load`. There is no linker step: a name must be
@@ -392,7 +396,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 
 | var | semantics |
 |---|---|
-| `$_` | default topic; ops with an omitted operand read/write it |
+| `$_` | default topic. **The transpiler materializes it explicitly at parse time** (`add_implicit_default_param` / `_default_filetest_operand` in `Pl/PExpr.pm`): Perl's omitted-operand forms — `uc;`, `chomp;`, `length;`, bare `-e`, a bare `/re/` match — arrive in the tree as `(p-uc $_)`, `(p-=~ $_ …)`, etc. **A translator implements no per-op defaulting.** Sole exception: `(p-print)`/`(p-say)` with an empty argument list default to `$_` inside the runtime (`p-print`, the "bare `print;`" case) |
 | `@_` | current sub's args (lexical per `p-args-body`, §5.2) |
 | `$@` | last eval error (§6.3) |
 | `$1`…`$N`, `%+` | capture groups; set by the most recent successful match (`p-=~` family); dynamically saved/restored around scopes like Perl |
@@ -427,7 +431,7 @@ function's docstring states its Perl contract. The families:
 |---|---|---|
 | numeric ops | `p-+ p-- p-* p-/ p-% p-** p-<< p->> p-& p-\| p-^` | numify operands (§3.1), return raw number; overload hook first; `/` yields a double when inexact; `%` follows Perl sign rules; bitwise ops truncate to integer (Inf→0) |
 | numeric compare | `p-== p-!= p-< p-> p-<= p->= p-<=>` | numify; return `1`/`""` (`<=>` −1/0/1; NaN comparisons → `""`/undef) |
-| string ops | `p-. p-x p-lc p-uc p-lcfirst p-ucfirst p-length p-substr p-index p-reverse p-sprintf p-join` | stringify operands (§3.2), return raw string; `$_`-defaulting members read `$_` when no arg |
+| string ops | `p-. p-x p-lc p-uc p-lcfirst p-ucfirst p-length p-substr p-index p-reverse p-sprintf p-join` | stringify operands (§3.2), return raw string; Perl's `$_`-default forms arrive with `$_` already explicit in the tree (§8) |
 | string compare | `p-eq p-ne p-lt p-gt p-le p-ge p-cmp` | stringify; return `1`/`""` |
 | logical | `p-&& p-\|\| p-// p-! p-not` | short-circuit macros returning operand values (§3.4) |
 | assignment | `p-my-=` (boxed lexical) `p-scalar-=` (package) `setf` (raw slot) `p-array-= p-hash-= p-list-=` | store per §2.2; list-assign in scalar context yields the RHS element count; all return the assigned target/value per Perl |
