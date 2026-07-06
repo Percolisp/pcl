@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 277 (2026-07-06) — block-form capture gate; W12_OLD hatch deleted; IR review doc.
+
+- **Fixed the s276b catalogued v2 bug** (Try-Tiny basic.t t24–25): a
+  block-form-prototype arg body (`catch { $caught = $_ }`) hoists as a
+  top-level `--anon-block-N--` defun via the `_lower_expr` bucket drain,
+  OUTSIDE the lexical lets → unbound `$caught`.  Fix = the sanctioned gate:
+  the drain now runs `_hoist_nested_sub`'s conservative capture scan over
+  the drained text against `_live_lex` and dies
+  `Parser2 TODO: block-form arg body captures live lexical '…'` → v1.
+  Census stays 66 native (zero perl-tests files fire it — pure correctness
+  win); **Try-Tiny basic.t now 25/25** (was 23).  Guards parser2-02.t +2
+  (gate fires on capture; non-capturing block-form still lowers natively).
+  Cache gen v2-6 → v2-7 (gated files previously cached broken v2 output).
+- **Deleted the `PCL_W12_OLD` escape hatch** (s276's "next session" note):
+  `_analyze_text` remains only as the no-host / tree-crash fallback.
+  `PCL_W12_DIFF` kept.
+- **New doc `docs/generated-cl-ir-review.md`** — review of the generated CL
+  as an intermediate representation (audience: people + AIs): what to keep
+  (S-exprs, closed p-* vocabulary, structural scope, explicit context),
+  ranked friction list with zero-runtime-cost fixes (seam text islands →
+  CLForm-total + canonical re-print; raw control chars in strings → p-esc
+  macro; delimiter-bearing regex strings → structured p-regex; host-idiom
+  constructors → p-new-av/hv/sv; *wantarray* let-noise → p-*-ctx macros;
+  dedupe double defvars), and the minimal consumer contract for translating
+  to other targets.  Verified en route: the sort-vs-map lambda asymmetry is
+  CORRECT (perldoc -f return: return exits a sort block but returns from
+  the enclosing sub inside map/grep — tested vs perl 5.40).  Referenced
+  from CLAUDE.md; notes CODEGEN_DESIGN.md is stale (pl-setf era).
+
+---
+
 ## Session 276b (2026-07-06) — post-W12 bench + CPAN suites; eager TAP export fix.
 
 - **Bench (fasl-compiled, execution-only, best-of-4, startup subtracted):
