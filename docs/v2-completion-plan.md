@@ -1410,8 +1410,30 @@ runtime element functions, not in the emitted shapes.
    inline+narrow-ftype ICE when combining this with inlined ops.
 7. Smaller / bench-first: native `keys`/`values`/`each` iteration (W11 §5
    note); shift-coalesce through interleaved non-`@_` statements (W14's
-   deferred refinement); `p-string-concat` fast paths if a string bench
-   ever says so.
+   deferred refinement).
+8. **String-append is the ONE bench where PCL loses to perl — measured
+   s276, and it is not close.**  100k-iteration `$s = $s . "x"`
+   (fasl-compiled, execution only): perl 0.005 s, v2 **1.72 s (~380×)**.
+   Perl appends in amortized O(1) (`.=` and the `$s = $s . EXPR` form when
+   the target IS the left operand — SvPVX realloc-append); the raw-slot
+   emission `(setf $s (p-. $s "x"))` allocates a fresh simple-string per
+   iteration = O(n²), so the gap GROWS with string length.  A `p-.` fast
+   path cannot fix asymptotics — the fix is the append PATTERN:
+   - Codegen: when the annotator proves a raw let-bound scalar and the
+     statement-root write is `$x = $x . EXPR` / `$x .= EXPR` (target =
+     leftmost operand), emit an in-place append (`p-str-append!`) on an
+     ADJUSTABLE fill-pointer string instead of `(setf $x (p-. …))`.
+   - Runtime: `p-str-append!` = `vector-push-extend` loop / `replace` after
+     `adjust-array` doubling; reads of the slot must tolerate a
+     non-simple string ((vectorp s) callers already must — audit the
+     `(simple-string)` ftype declarations from R1 before shipping).
+   - Boxed path gets the same via a box-level append (the SV-cache already
+     invalidates on box-set; an append-in-place must do the same).
+   All other benches (intloop/nested/cfor/fib×2/arrhash/collatz) BEAT perl
+   at execution (s276 fasl method, compile time excluded) — the s274
+   "arrhash 0.21 vs 0.17" loss was an artifact of timing per-form compile
+   in the source-load method; fasl-compiled arrhash is 0.088 s vs perl
+   0.152 s.
 
 Rule unchanged from the rest of this plan: **measure before and after every
 item**, one commit per item, parity sweep after anything that changes
