@@ -82,6 +82,41 @@ sub _source {
   return scalar <$fh>;
 }
 
+# D7 (extended): a PExpr parse mutates shared PPI state in TWO ways — token
+# CONTENT (the fat-comma `=>` → `,` rewrite) and ad-hoc parse-state keys
+# stored on the PPI elements themselves.  `_bareword_string` is the toxic
+# one: it means "this word was UNKNOWN at parse time, emit it as a string",
+# so an analysis parse that runs BEFORE a `use constant`/sub registration
+# poisons the later real parse (found via split.t: `my $w = nought;` after
+# `use constant nought => 0;` emitted `(pl-"nought")`).  Snapshot both;
+# restore puts back the exact prior state, deleting keys that did not exist.
+# Used by _lower_expr's native attempt AND VarAnnotator's analysis parses.
+our @PPI_ADHOC_KEYS = qw(_bareword_string _has_match_context _pcl_decl_list);
+
+sub _ppi_state_snapshot {
+  my @parts = grep { ref $_ } @_;
+  my @elems = map { $_->isa('PPI::Node') ? ($_, @{ $_->find(sub { 1 }) || [] }) : $_ }
+              @parts;
+  return [ map {
+    my $el = $_;
+    [ $el,
+      $el->isa('PPI::Node') ? undef : $el->content,
+      { map { exists $el->{$_} ? ($_ => $el->{$_}) : () } @PPI_ADHOC_KEYS } ]
+  } @elems ];
+}
+
+sub _ppi_state_restore {
+  my ($snap) = @_;
+  for my $s (@$snap) {
+    my ($el, $content, $keys) = @$s;
+    $el->set_content($content) if defined $content;
+    for my $k (@PPI_ADHOC_KEYS) {
+      if (exists $keys->{$k}) { $el->{$k} = $keys->{$k} }
+      else                    { delete $el->{$k} }
+    }
+  }
+}
+
 sub parse {
   my $self = shift;
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
@@ -328,7 +363,7 @@ sub parse {
       next if $child->isa('PPI::Statement::Null');
       push @top, $child;
     }
-    my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info));
+    my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info, $self));
     # Named subs found nested inside blocks during lowering (package-global
     # in Perl) hoist into the same decl/def buckets as top-level subs.
     push @decls, @{ $self->{_hoisted_decls} };
@@ -1075,7 +1110,7 @@ sub _lower_sub_inner {
   if ($params) {
     my $rest_txt = join("\n", map { $_->content } @body_stmts);
     my $body_uses_args = $rest_txt =~ /\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/;
-    my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params, $self->_cur_sub_info);
+    my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params, $self->_cur_sub_info, $self);
     if (!$body_uses_args && !grep { !$vi->{$_}{unboxable} } @$params) {
       # Real lambda list (#3): my ($a,$b) = @_ untouched afterwards, params
       # never written un-arithmetically / ref-taken → bind raw, no p-list-=.
@@ -1097,7 +1132,7 @@ sub _lower_sub_inner {
                 $self->_lower_block(\@body_stmts, $vi, 'inherit')]]]];
   }
 
-  my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info);
+  my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
   return ['p-sub', $clname, ['list', '&rest', '%_args'],
           ['p-args-body', ['block', 'nil', $self->_lower_block(\@stmts, $vi, 'inherit')]]];
 }
@@ -1709,7 +1744,7 @@ sub _lower_compound {
         && (my $incr = _pure_incr_step($step_s, $name))) {
       my $vi2 = Pl::VarAnnotator->analyze(
         [(grep { defined } $init_s, $cond_s), $block->schildren],
-        undef, $self->_cur_sub_info);
+        undef, $self->_cur_sub_info, $self);
       if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
         $vi = { %$vi, $name => { unboxable => 1 } };
         $step_form = ['list', ['setf', $name, ["p-$incr", $name, '1']]];
@@ -1843,15 +1878,13 @@ sub _lower_expr {
                  :                        $ctx;
   # PExpr's cleanup_for_parsing mutates the shared tokens DESTRUCTIVELY — most
   # notably it rewrites the `=>` operator to `,` (set_content) as part of
-  # fat-comma auto-quoting.  When the native attempt fails and we re-parse the
-  # SAME tokens through the fallback, that lost `=>` defeats the fallback's own
-  # auto-quote (`(N=>1)` would wrongly lower `N` as a call).  Snapshot every
-  # leaf token's content and restore it after the attempt so the fallback sees
-  # pristine tokens.  (Structural mutations — e.g. `$h{bar}`→`$h{"bar"}` via
-  # replace_child — are idempotent for the fallback, so content-restore is
-  # sufficient.)
-  my @snap = map { [$_, $_->content] }
-             map { $_->isa('PPI::Node') ? $_->tokens : $_ } @parts;
+  # fat-comma auto-quoting — and stores parse-state keys on the elements
+  # (see _ppi_state_snapshot).  When the native attempt fails and we re-parse
+  # the SAME tokens through the fallback, that lost `=>` defeats the fallback's
+  # own auto-quote (`(N=>1)` would wrongly lower `N` as a call).  Snapshot and
+  # restore so the fallback sees pristine state.  (Structural mutations — e.g.
+  # `$h{bar}`→`$h{"bar"}` via replace_child — are idempotent for the fallback.)
+  my $snap = _ppi_state_snapshot(@parts);
   my $native = eval {
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
@@ -1864,7 +1897,7 @@ sub _lower_expr {
                        lexicals => $self->fallback_parser->{_let_bound_vars} // {})
                  ->gen_form($node_id, $native_ctx);
   };
-  $_->[0]->set_content($_->[1]) for @snap;   # restore pristine tokens
+  _ppi_state_restore($snap);   # restore pristine tokens + parse-state keys
   return $native if defined $native;
 
   # Map v2's ctx to the fallback's numeric context (Pl::PExpr constants:

@@ -466,6 +466,30 @@ sub transpile_only {
     close $fh;
     return scalar `$pl2cl $pl_file 2>/dev/null`;
 }
+# W12 raw-slot seam writes: the text-scan VarAnnotator missed embedded writes
+# (no statement-root `$x = RHS` shape), so the name stayed a raw let slot while
+# the write lowered through the v1 seam as (p-my-= ...) = box-set on a raw
+# value — a silent no-op.  The W12 tree annotator boxes them (write-embedded).
+test_transpile("W12: chained assignment writes the inner var",
+    'my $y = 0; my $x = 0; $x = $y = 5; print "y=", $y+1, " x=", $x+1, "\n";');
+test_transpile("W12: write inside do-block reaches the outer var",
+    'my $x = 0; my $z = do { $x = 5 }; print "x=", $x+1, " z=", $z+1, "\n";');
+test_transpile("W12: write inside map-block reaches the outer var",
+    'my $y = 3; my $x = 0; map { $x = $y * 2 } (1,2,3); print "x=", $x+1, "\n";');
+# tie attaches magic to the box: a tied my-scalar must never unbox, even when
+# the only visible write is a shape-clean `$x = literal` (STORE doubles it).
+test_transpile("W12: tie on a pre-declared my scalar keeps FETCH/STORE magic",
+    'package Counter; sub TIESCALAR { my $c = shift; my $v = 0; bless \$v, $c }'
+  . ' sub FETCH { my $s = shift; $$s } sub STORE { my ($s, $v) = @_; $$s = $v * 2 }'
+  . ' package main; my $x; tie $x, "Counter"; $x = 21; print "$x\n";');
+# The tree annotator's analysis parses run BEFORE `use constant` registers the
+# constant; PExpr marked the then-unknown bareword `_bareword_string` ON the
+# shared PPI token, and the stale flag made the real parse emit the constant
+# call as (pl-"nought") — an undefined-function crash (found via split.t).
+test_transpile("W12: constant used after use-constant survives analysis parses",
+    'use constant nought => 0; my $w = nought; my $z = nought + 1;'
+  . ' print "w=", $w+1, " z=$z\n";');
+
 like(transpile_only('local $x = 5; my $y = $x + 1; print $y;'),
      qr/\(declare \(notinline pcl::p-\+/,
      'top-level local emits notinline declare (R1 OOM guard)');

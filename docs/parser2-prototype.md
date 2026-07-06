@@ -814,6 +814,41 @@ the coalesce is value-identical whenever the guards hold.
 disqualifiers; checklist in the VarAnnotator header + the D-log) → W13 only
 if fresh measurements justify.
 
+## Sessions 275–276 (2026-07-06): W12 — OpcodeTree-walk VarAnnotator, now the default
+
+Bring-up (s275, dual-run behind `PCL_W12_DIFF`/`PCL_W12_TREE`) and swap
+(s276) — full log in `docs/v2-completion-plan.md` §W12 BRING-UP LOG.
+
+- `Pl/VarAnnotator.pm`: `_analyze_tree` = per-statement `parse_expr_to_tree`
+  + structural event walk (vocabulary in the module header); DEFAULT since
+  s276. `_analyze_text` remains as the parse-failure fallback and behind
+  `PCL_W12_OLD=1` (delete next session). `analyze()` takes a 4th arg `$host`.
+- **Four live v2 miscompiles found & fixed** (guards: transpile-test-02.t
+  "W12:" prefix): embedded writes ×3 (`$x = $y = 5` / `do { $x = 5 }` /
+  `map { $x = $y * 2 }` — seam box-set on a raw slot = silent no-op; new
+  `write-embedded` event) and `tie my $x` (tie magic needs the box; fixed in
+  BOTH annotators).
+- Census (all 111 perl-tests, diff mode): 12 verdict diffs, 0 crashes, all
+  justified — wins include eval-in-comment, gates firing inside string
+  literals, fat-comma `( $A =>`, cross-statement regex spans.
+- **Swap fallout caught by the parity sweep (s276): the split.t `nought`
+  bug.** The analysis parses run BEFORE `use constant`/sub registrations, and
+  PExpr stores `_bareword_string` ON the shared PPI token when a word is
+  unknown *at that parse's time* — the stale flag made the real parse emit a
+  registered constant as `(pl-"nought")` (undefined function). Fix: the D7
+  snapshot became `Parser2::_ppi_state_snapshot/_restore` — token content
+  PLUS the ad-hoc parse-state keys (`_bareword_string`,
+  `_has_match_context`, `_pcl_decl_list`) — shared by the analysis parses
+  and `_lower_expr`'s native attempt. Guard: transpile-test-02.t
+  "W12: constant used after use-constant survives analysis parses".
+- Canonical bench shapes generate byte-identical CL under the tree
+  annotator; dual-run transpile cost was ~8–12%, tree-only after the swap is
+  less. Cache generation v2-5 → v2-6.
+
+**NEXT:** W15 menu items by measurement (element-access runtime fast paths
+first); W8.5 leftovers (interp-token rename, C-for carve-out poison) now
+unblocked by structural verdicts.
+
 ## What's left — the road from prototype to default pipeline
 
 > **The detailed, prescriptive implementation plan for everything below is

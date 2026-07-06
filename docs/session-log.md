@@ -4,6 +4,90 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 276 (2026-07-06) — W12 SWAPPED: tree annotator is the default.
+
+- `analyze()` default → tree verdicts; `_analyze_text` stays as the
+  parse-failure fallback / no-`$host` path and behind `PCL_W12_OLD=1`
+  (**delete next session**). Tree-crash fallback warns only under
+  `PCL_W12_DIFF` (stderr leaks into generated CL via 2>&1 test helpers).
+  Cache generation v2-5 → v2-6, local `~/.pcl-cache` cleared.
+- **Parity sweep caught one regression the s275 census missed: split.t
+  crashed at t145** (`use constant nought => 0; … my $w = nought;` →
+  `(pl-"nought")` undefined function). Root cause: PExpr stores
+  `_bareword_string` ON the shared PPI token when a word is unknown *at that
+  parse's time*; the tree annotator's analysis parses run BEFORE `use
+  constant`/sub registration, and the D7 snapshot only restored token
+  CONTENT, so the stale flag survived into the real parse (it is also read
+  back as parse INPUT at PExpr.pm ~3519). Fix at the shared point:
+  `Parser2::_ppi_state_snapshot/_restore` — content + ad-hoc parse-state
+  keys (`_bareword_string`, `_has_match_context`, `_pcl_decl_list`) — used
+  by BOTH the analysis parses and `_lower_expr`'s native attempt. Guard
+  test in transpile-test-02.t ("W12: constant used after use-constant…").
+- Pre-fix gates for the swap itself were green (Pl/t 114/3895 incl. the 4
+  new W12 tests; smoke of all four s275 miscompile fixes correct at
+  runtime). Post-fix: split.t back to baseline 185/8 full run; full Pl/t +
+  full sweep re-run green (see below).
+- Tie-FETCH-in-interpolation smoke prints empty — pre-existing (identical
+  under PCL_W12_OLD=1 and PCL_V1=1), unrelated to W12.
+
+## Session 275 (2026-07-06) — W12 bring-up: OpcodeTree-walk VarAnnotator (dual-run; DEFAULT NOT YET SWAPPED).
+
+**State at break: worktree DIRTY, nothing committed.** Next session: swap the
+default (see checklist below), run the full plain gates, ONE commit.
+
+- `Pl/VarAnnotator.pm` now holds BOTH annotators. `analyze()` gained a 4th
+  arg `$host` (= the Parser2 object; all 4 call sites updated — needed for
+  environment + fallback_parser in the analysis parses). Default = text.
+  `PCL_W12_TREE=1` returns tree verdicts; `PCL_W12_DIFF=1` (or `=/abs/path`
+  to append to a file — pl2cl stderr is merged into generated CL by several
+  test helpers) prints one line per verdict difference.
+- Tree annotator: per-statement `parse_expr_to_tree` + event walk
+  (vocabulary in the module header; D7 token snapshot/restore; bucket
+  save/DISCARD around analysis parses; `$SIG{__WARN__}` silenced there —
+  PExpr warns before dying on unsupported shapes; parse failure → text
+  gates on that statement's source + a bare `$x =` gate). Expression-
+  embedded blocks (do/map/grep/eval{}) are walked structurally under a
+  `seam` flag because inline_lambda bodies are pre-generated CL strings.
+- **FOUR live miscompiles found & fixed by the tree rules** (regression
+  tests: transpile-test-02.t "W12:" prefix, pass only under tree):
+  1–3: embedded writes on raw slots (`$x = $y = 5`, `do { $x = 5 }`,
+  `map { $x = $y * 2 }`) — seam lowers them to `(p-my-= …)` = box-set on a
+  raw value = silent no-op; text step 4 only classifies statement-root
+  writes → new `write-embedded` boxing event (only the statement-root
+  `$x = RHS` Parser2 natively setfs may stay raw).
+  4: `tie my $x/my $x; tie $x` — tie magic needs the box; NEITHER annotator
+  had a tie gate (text survived the inline form only because step 1 never
+  counted the inline decl). Fixed in BOTH (`tie-target` event + text regex).
+- **perl-tests census (PCL_W12_DIFF over all 111): 12 diffs, 0 crashes, all
+  justified** — full log in plan §W12 BRING-UP LOG. Wins: eval-in-comment,
+  `\$x`/gates firing inside string literals, fat-comma `( $A =>`,
+  cross-statement regex spans, `undef`-as-value, W5-renamed names (vi never
+  consulted — Parser2 checks `_file_lex_renamed` first).
+- **Full Pl/t under PCL_W12_TREE=1: 114 files/3895 tests, all pass** after
+  the tie + warn-leak fixes (the logged run's 2 fails were re-verified green;
+  a clean full rerun still pending → next session's swap gate). 85 Pl/t
+  diffs classified: 48 were handle-viv over-marking ALL open() args →
+  refined to first-arg-only (mutating builtins keep all-args: read/sysread
+  write arg 2); rest = win/free classes as in the census.
+- Perf: canonical bench shapes (intloop, both fibs, arrhash, C-for
+  carve-out, `while`-modifier strbuild) generate BYTE-IDENTICAL CL under
+  tree. Transpile-time cost of dual mode ~8–12% (tree-only after swap is
+  less); no tree cache added (prep note says measure first — done, cheap).
+- **NEXT-SESSION SWAP CHECKLIST (task #22):**
+  1. `analyze()`: default → tree (text behind `PCL_W12_OLD=1`, delete next
+     session); keep the crash-fallback warn out of stderr.
+  2. Bump `*pcl-cache-generation*` v2-5 → v2-6 (emission changes: new
+     boxing verdicts) + `rm -rf ~/.pcl-cache/*` locally.
+  3. Plain full gates: `prove -j8 Pl/t/` (expect 114/3895+5 new), parity
+     sweep vs `.faillog/_status.tsv` baseline copy in scratchpad
+     (`status-baseline-6a32848.tsv`, also == the committed .faillog state).
+  4. Re-point the W12 checklist note in VarAnnotator's header (retire the
+     "text-scan is a stopgap" maintenance note), update
+     `docs/parser2-prototype.md` W12 section + MEMORY, one commit.
+- Also fixed while here: `_diff_report`/analysis-parse stderr hygiene (see
+  above); `_text_gate_tags` factored out (shared by text step 3 + tree
+  fallback); text annotator now records per-name `reasons` under diff mode.
+
 ## Session 274d (2026-07-05) — W15.1: bare setf on let-bound element writes + W12 prep.
 
 - W12 prep note committed into plan §W12 (0bec3d4): event vocabulary per

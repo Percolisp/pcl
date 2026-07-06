@@ -1177,6 +1177,60 @@ keys/values/each native iteration NOT done (bench first if ever).  Original belo
 > (interp-token rename, C-for carve-out poison rename carrying the vi
 > verdict) become POSSIBLE after this but are separate commits.
 
+> **BRING-UP LOG (s275, implementation session):**
+>
+> **Three live v2 miscompiles found during design** — the text scan has NO
+> gate for a bare embedded `$x =` write (step 4 only classifies the
+> statement-root shape), so the name stayed a raw let slot while the write
+> lowered through the v1 seam as `(p-my-= …)` = `box-set` on a raw value =
+> silent no-op:
+> - `$x = $y = 5;` — inner chained write lost ($y stayed 0)
+> - `my $z = do { $x = 5 };` — do-block body is v1-compiled inside the seam
+> - `map { $x = $y * 2 } @l;` — same for map/grep block bodies (an
+>   inline_lambda body is a pre-generated CL STRING, `body_cl`, invisible to
+>   any tree walk — the annotator walks those block statements STRUCTURALLY
+>   with a `seam` flag instead)
+> Fix = the `write-embedded` event: ONLY a statement-root `$x = RHS` (the one
+> shape Parser2 lowers natively as raw `setf`/let-init) is a non-boxing
+> write; everything else boxes. Regression tests: `Pl/t/transpile-test-02.t`
+> ("W12:" prefix).
+>
+> **Census diff run (all 111 perl-tests, PCL_W12_DIFF=1): 12 diffs, 0 tree
+> crashes, all explained.** text-boxed → tree-unboxable (9, the wins):
+> - each.t/join.t: `eval` in comments only (flagship win — Word-token test)
+> - args.t `$foo`: `\$foo` inside a string literal fired the `\\$x` regex
+> - each.t `$A`: fat comma `( $A => "utf8")` fired the paren-assign regex
+> - hash.t `$desc`, reverse.t `$a`: the list-assign regex `\([^=]*$x…\)=`
+>   matched ACROSS statements/strings ([^=] spans newlines)
+> - array.t `$desc`: `undef` as a VALUE (not a call) fired the
+>   mutating-builtin regex on a later arg in the same statement
+> - scalar.t `$fetch__file__0`, each.t `$c__file__0`: W5-renamed captured
+>   file-lexicals — verdict never consulted (Parser2 checks
+>   `_file_lex_renamed` at the decl branch BEFORE vi; both annotators skip
+>   named-sub bodies identically)
+> tree-boxed where text-unboxable (3, free): grep.t `$count__file__1`
+> (write-embedded = the bug class above), array.t `$ref` (`$#$ref = N` LHS
+> subtree marking), bless.t `$object` (`ref($object) =~ …` — the walk marks
+> the whole `=~` LHS subtree; refinable later).
+>
+> Deliberate round-1 conservatisms kept for text parity (documented, each a
+> possible later win): block `eval {}` still sets the region eval fact;
+> Magic tokens ($_, $1) rejected in RHS shapes (ref() not isa — _scan
+> parity); statements whose parse dies fall back to the text gates on that
+> statement's source PLUS a bare `$x =` write gate (unparsed writes cannot
+> be seam-classified).
+>
+> **SWAP DONE (s276).** Tree = default; text behind `PCL_W12_OLD=1` (delete
+> next session). Cache gen v2-6. The parity sweep caught ONE regression the
+> census missed — split.t `use constant nought => 0; my $w = nought;` →
+> `(pl-"nought")`: PExpr's `_bareword_string` flag lives ON the shared PPI
+> token and encodes "unknown AT PARSE TIME"; analysis parses run before
+> registrations, and the D7 content-only snapshot let the stale flag reach
+> the real parse. Fix = `Parser2::_ppi_state_snapshot/_restore` (content +
+> `_bareword_string`/`_has_match_context`/`_pcl_decl_list`), shared by the
+> analysis parses and `_lower_expr`'s native attempt. Guard in
+> transpile-test-02.t.
+
 Replace the text-scan gates with facts from the PExpr OpcodeTree that
 ExprToCL2 already builds per expression (design context:
 `docs/type-flow-and-codegen-plan.md` §(s)).
