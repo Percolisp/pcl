@@ -333,6 +333,12 @@ there is exactly one place the IR is defined. Cheap, high leverage — for
 AI consumers it is the difference between inferring the rules from samples
 and being told.
 
+> **DONE (s277):** `docs/ir-spec.md` exists — the translator's manual
+> covering the data model, coercion, context, calling convention, control
+> flow, OO, magic globals, load model, and op family rules, each claim
+> verified against the runtime. Read it first; this review remains the
+> roadmap for *improving* the output.
+
 ---
 
 ## 4. Recommended order of work
@@ -354,7 +360,8 @@ must pass before landing.
 
 ## 5. What a translator to another environment must implement
 
-The minimal consumer contract, today (write this into `ir-spec.md`):
+The minimal consumer contract — the checklist below; the full semantics of
+each item are specified in **`docs/ir-spec.md`** (the translator's manual):
 
 1. An S-expression reader (symbols may contain `$ @ % + - . < > = ~ ! : #`).
 2. The `p-box` cell type and the §1.2 shape table (boxed/raw/package).

@@ -20,6 +20,28 @@ Append new entries at the top. One section per session.
 - **Deleted the `PCL_W12_OLD` escape hatch** (s276's "next session" note):
   `_analyze_text` remains only as the no-host / tree-crash fallback.
   `PCL_W12_DIFF` kept.
+- **New doc `docs/ir-spec.md` — THE translator's manual** (follow-up to the
+  review; user asked for semantics, not idioms): normative spec of what the
+  generated CL *means*, precise enough to reimplement in another
+  environment without reading Lisp.  Data model (box fields; **undef =
+  `:undef` singleton ≠ `nil` = array hole**; arrays/hashes hold boxes,
+  element reads unbox scalars but keep reference boxes for identity-`==`);
+  coercion tables (to-number leading-prefix parse, to-string, p-true-p
+  incl. NaN-is-true, "0.0"-is-true); ops return raw values, compares
+  return 1/"", logicals return operand values, overload hook order;
+  *wantarray* protocol (t/nil/:void, caller-wantarray snapshot); p-sub
+  calling convention (two body shapes, flattening, no @_ aliasing,
+  :p-return catch incl. eval{}'s own frame); loop-control tag table
+  (labeled = dynamic throw, works cross-function); die/eval/$@; C3
+  string-name method dispatch; magic globals; load model + string-eval
+  runtime-compiler caveat; op-FAMILY rules table (~500 exports covered by
+  family + docstring rule); worked Perl→CL→JS example.  Every claim
+  verified against pcl-runtime.lisp this session (p-box struct, p-true-p,
+  %to-number-raw, p-aref-unbox-elem, p-gethash, p-backslash, p-sub/
+  p-args-body, p-eval-block, p-last/next, p-foreach ensure-boxed,
+  p-return-value, p-wantarray, p-/ ratio→double, p-list-= scalar-ctx
+  count, string increment, END LIFO).  Cross-linked from CLAUDE.md and
+  the review doc (R-1 marked DONE).
 - **New doc `docs/generated-cl-ir-review.md`** — review of the generated CL
   as an intermediate representation (audience: people + AIs): what to keep
   (S-exprs, closed p-* vocabulary, structural scope, explicit context),
