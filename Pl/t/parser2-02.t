@@ -148,6 +148,34 @@ my $s5 = Pl::Parser2->parse_code(
   q{sub h3 { my $x = shift; my $t = 1; my $z = shift; return $x + $t + $z; } print h3(1,2);});
 like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run stays on old path');
 
+# ---- block-form-arg capture gate (Try-Tiny `catch { $caught = $_ }` class) ----
+
+# A block-form-prototype arg's body hoists as a top-level --anon-block-N--
+# defun, OUTSIDE the lexical lets; if it references a live lexical, the file
+# must gate to v1 (v2 would read an unbound global from the hoisted defun).
+{
+  my $src_cap = q{
+    sub try2 (&;@) { my ($t, @h) = @_; my @r = eval { $t->() }; if ($@) { for my $h (@h) { return $h->($@) } } return @r; }
+    sub catch2 (&;@) { my ($b, @rest) = @_; return ($b, @rest); }
+    my $caught = "none";
+    try2 { die "boom\n" } catch2 { $caught = $_[0] };
+    print $caught;
+  };
+  my $cl = eval { Pl::Parser2->parse_code($src_cap) };
+  like($@, qr/block-form arg body captures live lexical 'caught'/,
+       'block-form arg body capturing a live lexical gates to v1');
+
+  # Same shape with NO lexical capture in the block → still lowers natively.
+  my $src_ok = q{
+    sub try2 (&;@) { my ($t, @h) = @_; my @r = eval { $t->() }; if ($@) { for my $h (@h) { return $h->($@) } } return @r; }
+    sub catch2 (&;@) { my ($b, @rest) = @_; return ($b, @rest); }
+    try2 { die "boom\n" } catch2 { print "caught" };
+  };
+  my $ok = eval { Pl::Parser2->parse_code($src_ok) };
+  ok(defined $ok && $ok =~ /--anon-block-/, 'non-capturing block-form arg still lowers natively')
+    or diag($@);
+}
+
 # ---- runtime ----
 
 SKIP: {

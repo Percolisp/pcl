@@ -1928,13 +1928,28 @@ sub _lower_expr {
   $p->_cur_bucket('definitions');
   $p->indent_level(0);
   my $cl = $p->_parse_expression(\@parts, $stmt, $fb_ctx);
+  my @drained;
   for my $sec (@{ $p->_sections }) {
-    push @{ $self->{_captured_decls} },
+    push @drained,
       grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}}, @{$sec->{definitions}}, @{$sec->{runtime}};
   }
   $p->_sections($sv[0]);
   $p->_cur_bucket($sv[1]);
   $p->indent_level($sv[2]);
+  # Everything drained hoists to _captured_decls = the section TOP, outside
+  # every lexical `let`.  A block-form arg body that references a lexical LIVE
+  # here (`catch { $caught = $_ }` under a let-bound $caught) would read an
+  # unbound global from the hoisted defun.  Same conservative text scan as
+  # _hoist_nested_sub; over-firing only costs the v2 lowering, never correctness.
+  if (@drained && %{ $self->{_live_lex} // {} }) {
+    my $txt = join "\n", @drained;
+    for my $var (sort keys %{ $self->{_live_lex} }) {
+      (my $bare = $var) =~ s/^[\$\@\%]//;
+      die "Parser2 TODO: block-form arg body captures live lexical '$bare'\n"
+        if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+    }
+  }
+  push @{ $self->{_captured_decls} }, @drained;
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
     unless defined $cl;
   # Legacy-boundary parity: the old pipeline rewrites (p-scalar-= $x …) to
