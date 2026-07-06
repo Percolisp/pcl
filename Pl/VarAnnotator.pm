@@ -9,9 +9,8 @@ package Pl::VarAnnotator;
 #
 # The tree annotator (_analyze_tree) is the DEFAULT since W12 (s276).
 # _analyze_text — the s272 name-keyed TEXT-SCAN prototype — remains only as
-# the fallback when a statement parse dies inside the tree walk, when no
-# $host is supplied, and behind PCL_W12_OLD=1 for one session (then it is
-# reduced to the parse-failure fallback path only).
+# the fallback when a statement parse dies inside the tree walk or when no
+# $host is supplied (the PCL_W12_OLD=1 escape hatch was deleted in s277).
 #
 #   _analyze_tree — the W12 annotator: per-statement parse_expr_to_tree
 #     (the same OpcodeTree ExprToCL2 consumes) + a structural event walk.
@@ -54,7 +53,6 @@ package Pl::VarAnnotator;
 #
 # Runtime switches (bring-up history: docs/v2-completion-plan.md §W12):
 #   default            = tree verdicts
-#   PCL_W12_OLD=1      = text verdicts (escape hatch; delete next session)
 #   PCL_W12_DIFF=1     = run BOTH, print one W12DIFF line per verdict
 #                        difference to STDERR, still return tree verdicts
 #
@@ -93,7 +91,7 @@ my %TIE_FN        = map { $_ => 1 } qw(tie untie);
 
 sub analyze {
   my ($class, $stmts, $extra_params, $known_subs, $host) = @_;
-  if ($ENV{PCL_W12_OLD} || !$host) {
+  if (!$host) {
     return _analyze_text($stmts, $extra_params, $known_subs);
   }
   my $tree_vi = eval { _analyze_tree($stmts, $extra_params, $known_subs, $host) };
