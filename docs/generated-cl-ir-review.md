@@ -358,6 +358,59 @@ Items 2–5 are emission-changing: each needs the full parity discipline
 None of them changes what the compiled code *does* — that is the test each
 must pass before landing.
 
+## 4b. Addendum (s277b) — findings from the declarations/renaming deep-dive
+
+Writing `ir-spec.md` §2b (declarations and rename families) surfaced three
+clarity items the original review missed, plus a reframing of priorities.
+All are emit-time only; none costs runtime speed.
+
+### 4b.1 The two-dialect problem — now the #1 clarity cost
+
+The review treated raw seams as the structural problem. The deep-dive
+showed it is bigger: **the corpus speaks two dialects.** A file that hits
+any whole-file gate is emitted entirely in the v1 dialect —
+`defvar`-based `my`, `(p-eval-always …)` wrappers, `(let ((*wantarray*
+:void)) …)` statement wraps — while v2-native files use let-based
+lexicals and no void wraps. A consumer must implement *both models* until
+fallbacks are rare. So the clarity ranking for future work is: (1) retire
+the *whole-file* gates (the largest named one is `state`, which sends any
+file using it to v1; then the interp-token rename family), (2) retire the
+seams. Every gate removed shrinks the v1-dialect surface a consumer must
+know.
+
+### 4b.2 No pipeline marker in the output
+
+Verified: the v2-native and v1-fallback headers are byte-identical — a
+consumer *cannot tell which dialect they are reading* without recognizing
+shapes. Fix: one header comment line, e.g.
+`;;; pcl: pipeline=v2 cache-gen=v2-7 src=<file>`. Trivial, zero cost,
+and tooling can dispatch on it immediately. Do this before anything else
+in this addendum.
+
+### 4b.3 Rename manifest
+
+The rename surgery (ir-spec §2b.3) is invisible in the output — a reader
+meets `$tick__file__0` and must infer the provenance from the suffix
+convention. Emit a manifest as header comments in files where renames
+fired: `;;; rename: $tick -> $tick__file__0 (captured by named sub)`.
+Makes source-mapping mechanical, documents the surgery in-band,
+transpile-time only.
+
+### 4b.4 Seam-emitted declarations execute per call
+
+Observed shape: a renamed shadow cell inside a `map` lambda is emitted by
+the seam as `(p-eval-always (defvar $x__shadow__0 …))` *inside the lambda
+body* — a boundp check on every call, and a declaration buried
+mid-expression. Hoisting it to the declarations bucket is clearer **and**
+removes per-call work (speed-positive). Disappears with seam retirement;
+cheap to fix earlier if a probe shows it on hot paths.
+
+### 4b.5 Minor: fresh-name collision guard
+
+`$x__file__N` etc. are chosen without checking that user code doesn't
+already contain that exact token (legal Perl). Theoretical today; a
+one-line scan of the segment text before picking `N` closes it.
+
 ## 5. What a translator to another environment must implement
 
 The minimal consumer contract — the checklist below; the full semantics of
