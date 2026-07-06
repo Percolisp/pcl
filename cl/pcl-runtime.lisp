@@ -53,6 +53,20 @@
 (defpackage :pcl
   (:use :cl)
   (:export
+   ;; TAP layer (cl/pcl-test.lisp, loaded ON DEMAND by p-ensure-test-lib).
+   ;; The NAMES are exported eagerly so user packages inherit pcl::pl-ok etc.
+   ;; from the start: v2 hoists definition-bucket forms (anon-block defuns)
+   ;; ABOVE the runtime `use Test::More` form, so a pl-diag reference can be
+   ;; READ before the test lib loads — without the eager export that interns
+   ;; a distinct main::pl-diag and the test lib's own (export …) then dies
+   ;; with SB-EXT:NAME-CONFLICT (and the compiled call would name the wrong
+   ;; symbol anyway).  Definitions still load lazily; fboundp is untouched.
+   #:pl-plan #:pl-done_testing #:pl-ok #:pl-is #:pl-isnt
+   #:pl-like #:pl-unlike #:pl-cmp_ok #:pl-pass #:pl-fail
+   #:pl-skip #:pl-skip_all #:pl-diag #:pl-note #:pl-BAIL_OUT
+   #:pl-eq_array #:pl-curr_test
+   #:pl-is_deeply #:pl-use_ok #:pl-require_ok #:pl-isa_ok #:pl-can_ok
+   #:pl-explain #:pl-locales_enabled #:pl-_diag
    ;; Value boxing
    #:p-box #:make-p-box #:p-box-p #:p-box-value
    #:unbox #:ensure-boxed #:p-copy-scalar-arg

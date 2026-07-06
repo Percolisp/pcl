@@ -703,4 +703,35 @@ print "miniperl=", (\$mini ? 1 : 0), "\\n";
        'is_miniperl() is false');
 }
 
+# Test: TAP names are inherited from :pcl BEFORE the on-demand test-lib load.
+# v2 hoists definition-bucket forms (block-form-arg anon defuns) ABOVE the
+# runtime `use Test::More` form; a diag() reference read at that point used to
+# intern a distinct main::pl-diag, and pcl-test.lisp's later (export pl-diag)
+# died with SB-EXT:NAME-CONFLICT (found via Try::Tiny's suite, session 276).
+{
+  my $test_code = q{
+use List::Util qw(first);
+use Test::More tests => 1;
+my $x = first { diag("checking $_"); $_ > 1 } (1, 2);
+ok($x == 2, "block-form arg body may reference diag before test-lib load");
+};
+
+  my ($fh, $pl_file) = tempfile(SUFFIX => '.pl');
+  print $fh $test_code;
+  close $fh;
+
+  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
+  print $cl_fh $cl_code;
+  close $cl_fh;
+
+  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  unlike($output, qr/name-conflict/i,
+         'no pl-diag name conflict when test lib loads on demand');
+  like($output, qr/^ok 1\b/m,
+       'assertion ran after on-demand test-lib load');
+
+  unlink $pl_file, $cl_file;
+}
+
 done_testing();

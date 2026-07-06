@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 276b (2026-07-06) — post-W12 bench + CPAN suites; eager TAP export fix.
+
+- **Bench (fasl-compiled, execution-only, best-of-4, startup subtracted):
+  PCL beats perl on 7 of 8 canonical shapes** — intloop/nested/cfor ~0.03 s
+  vs perl ~0.08–0.09 s; fib both forms 0.029 s vs 0.14 s; collatz 0.079 s
+  vs 0.695 s; arrhash 0.088 s vs 0.152 s (the s274 "arrhash loses" was an
+  artifact of timing per-form COMPILE in the source-load method).  The ONE
+  loss: 100k-iteration string append `$s = $s . "x"` — perl 0.005 s, v2
+  1.72 s (O(n²) fresh-copy `p-.` vs perl's realloc-append).  Fix plan =
+  **plan §W15.8** (append-pattern → `p-str-append!` on adjustable
+  fill-pointer strings; audit R1 simple-string ftypes first).
+- **CPAN suites (task: rerun under v2 default) exposed a v2 ordering bug:**
+  v2 hoists definition-bucket forms (block-form-arg anon defuns) ABOVE the
+  runtime `use Test::More`, so a `diag` read interned main::pl-diag before
+  the on-demand test-lib load → pcl-test.lisp's `(export pl-diag)` died
+  SB-EXT:NAME-CONFLICT (every Try::Tiny file crashed).  Fix: TAP names are
+  now exported EAGERLY from :pcl in pcl-runtime.lisp (defs still lazy) —
+  identical end state to the preloaded (runt/sweep) flow, just earlier.
+  Guards in use-require-01.t (+2).  Gate 114/3898 PASS.
+- Suite results (vs the s243 survey, all improved): Try-Tiny 5 PASS /
+  3 PARTIAL / 3 FAIL of 11 (was 2/2/7); Scalar-List-Utils 7/22/9 of 38
+  (was 4/8/26); Role-Tiny 4/6/13 of 23 (was 1/0/22).
+- **New v2 bug catalogued (NOT fixed, pre-dates W12; Try-Tiny basic.t
+  t24–25):** a block-form-arg body (`catch { $caught = $_ }`) hoists to a
+  top-level defun while the captured `my ($caught, …)` stays a plain
+  lexical let → unbound $caught at call time.  v1 passes 25/25.  Same
+  family as the W5/W8.5 capture work — needs the file-lex/defvar treatment
+  for BLOCK-level lexicals captured by hoisted anon-block defuns.
+- NOT done (next session): perl t/ dirs not yet surveyed — t/mro (PCL has
+  C3!) and t/class are the promising untried ones (base/cmd/comp/re/io/
+  opbasic/op-extras already in `docs/perl-test-suite-survey.md`).
+
 ## Session 276 (2026-07-06) — W12 SWAPPED: tree annotator is the default.
 
 - `analyze()` default → tree verdicts; `_analyze_text` stays as the
