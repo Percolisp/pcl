@@ -236,6 +236,15 @@ sub parse {
   $self->_rename_spanning_lexicals(\@segments) if @segments > 1;
   $self->_check_my_spanning(\@segments) if @segments > 1;
 
+  # state in a NAMED sub: rename to a per-sub package cell `$x__state__N`
+  # (+ once-flag) — see _rename_state_vars.  Runs FIRST among the segment-
+  # local rename passes so the later passes' facts scans (decl_count in
+  # _scan_lex_facts counts my AND state) see state decls already off the
+  # bare name.  Anything outside the subset dies → v1; the pre-pass is
+  # authoritative — no un-renamed declarator-shaped `state` survives into
+  # lowering.
+  $self->_rename_state_vars($_) for @segments;
+
   # W5: rewrite file lexicals captured by named subs to fresh package-level
   # cells (see _rename_captured_file_lexicals).  Runs BEFORE the pre-pass so
   # every downstream reader (sub_info, _sub_ctx_insensitive, VarAnnotator,
@@ -864,6 +873,80 @@ sub _rename_decl_within {
   return $new;
 }
 
+# state in a NAMED sub (the common case): `state $x [= INIT];` at block level
+# becomes a defvar'd package cell `$x__state__N` — one instance per named sub,
+# which IS Perl's named-sub state semantics (named subs are single-instance).
+# An initialized decl additionally gets a raw once-flag `$x__state__N__init`;
+# the decl statement lowers to v1's exact guarded-init shape
+# (`(unless FLAG (box-set CELL INIT) (setf FLAG t))` + the bare cell as the
+# statement value).  Every post-decl use in the sub is token-renamed — the
+# same machinery as the other rename families (_rename_decl_within), so the
+# decl's own RHS still reads the OUTER variable (`state $x = $x`).
+#
+# The pass is AUTHORITATIVE for the segment: every declarator-shaped `state`
+# token is either renamed here or dies → v1.  Outside the subset:
+#   - state outside a named sub (file/block level: the cell must persist
+#     across loop iterations at file scope — a different feature, v1 owns it);
+#   - expression-position state (`my $r = (state $y = 7)` — the decl is not
+#     at block level, so the guarded init can't be a statement);
+#   - non-scalar / list state (`state @a`, `state ($x, $y)`);
+#   - the _shadow_rename_blocker set: interpolated use of the name, a second
+#     my/state declaration of it in the sub, `${x}` brace-deref, string eval
+#     in the sub (the eval capture alist finds lexicals BY SOURCE NAME — a
+#     renamed cell would be invisible to eval'd code).
+# state inside ANON subs / map-grep-sort blocks (per-closure instances) died
+# earlier, in parse()'s document-level gate.
+sub _rename_state_vars {
+  my ($self, $seg) = @_;
+  my @words;
+  for my $top (@{ $seg->{stmts} }) {
+    next unless ref $top && $top->isa('PPI::Node');
+    push @words, @{ $top->find(sub {
+      $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'state' }) || [] };
+  }
+  for my $w (@words) {
+    # Non-declarator uses of the word (hash key `state =>`, method ->state,
+    # `sub state`): same exclusions as the W2 eval walk.
+    my $prev = $w->sprevious_sibling;
+    next if $prev && $prev->isa('PPI::Token::Operator')
+         && $prev->content =~ /^(?:->|=>)$/;
+    next if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+    my $nx = $w->snext_sibling;
+    next unless $nx && ($nx->isa('PPI::Token::Symbol')
+                     || $nx->isa('PPI::Structure::List'));
+    my $stmt = $w->parent;
+    die "Parser2 TODO: state outside a block-level declaration\n"
+      unless $stmt && $stmt->isa('PPI::Statement::Variable')
+          && $stmt->parent
+          && ($stmt->parent->isa('PPI::Structure::Block')
+              || $stmt->parent->isa('PPI::Document'));
+    my ($anc, $sub) = ($stmt->parent, undef);
+    while ($anc) {
+      if ($anc->isa('PPI::Statement::Sub') && !$anc->isa('PPI::Statement::Scheduled')
+          && $anc->name) { $sub = $anc; last }
+      $anc = $anc->parent;
+    }
+    die "Parser2 TODO: state outside a named sub\n" unless $sub;
+    my @k = _strip_semi($stmt->schildren);
+    die "Parser2 TODO: non-scalar state declaration: " . $stmt->content . "\n"
+      unless @k >= 2 && $k[1]->isa('PPI::Token::Symbol')
+          && $k[1]->content =~ /^\$\w+$/
+          && (@k == 2
+              || ($k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='));
+    if (my $why = $self->_shadow_rename_blocker($sub->block, $k[1])) {
+      die "Parser2 TODO: state " . $k[1]->content . " in named sub ($why)\n";
+    }
+    my $new = $k[1]->content . '__state__' . $self->{_state_rename_counter}++;
+    $self->_rename_decl_within($sub->block, $k[1], $new);
+    $self->{_state_renamed}{$new} = @k > 2 ? 'init' : 'plain';
+    # Both symbols are defvar'd via _captured_decls at lowering time; the
+    # marker keeps _forward_global_decls from emitting a competing defvar
+    # (its box-shaped default would load FIRST and leave the flag truthy).
+    $self->{_file_lex_renamed}{$new} = 1;
+    $self->{_file_lex_renamed}{ $new . '__init' } = 1;
+  }
+}
+
 # W8.5 pre-pass: rename POISONED condition-my names (see the parse() comment).
 sub _rename_poisoned_cond_mys {
   my ($self, $seg) = @_;
@@ -1284,6 +1367,28 @@ sub _lower_block {
 
   # -- my $x [= INIT];  → (let (($x …)) rest...)
   if ($first->isa('PPI::Statement::Variable')) {
+    # -- state $x [= INIT];  (renamed to $x__state__N by _rename_state_vars)
+    #    → hoisted cell defvar (+ raw once-flag defvar) and v1's exact
+    #    guarded-init shape in place; the bare cell is the statement value
+    #    (`sub { state $n }` returns undef via the nil box).
+    my @sk = _strip_semi($first->schildren);
+    if (@sk >= 2 && $sk[0]->isa('PPI::Token::Word') && $sk[0]->content eq 'state') {
+      my $name = $sk[1]->content;
+      my $kind = $self->{_state_renamed}{$name}
+        or die "Parser2 TODO: unrenamed state declaration: " . $first->content . "\n";
+      push @{ $self->{_captured_decls} }, "(defvar $name (make-p-box nil))";
+      my @forms;
+      if ($kind eq 'init') {
+        my $flag = $name . '__init';
+        push @{ $self->{_captured_decls} }, "(defvar $flag nil)";
+        push @forms, ['unless', $flag,
+                      ['box-set', $name,
+                       $self->_lower_expr([@sk[3 .. $#sk]], $first)],
+                      ['setf', $flag, 't']];
+      }
+      push @forms, $name;
+      return (@forms, $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
     my $our = $self->_lower_our_decl($first);
     return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx)) if $our;
     my ($name, $init) = $self->_single_scalar_decl($first);

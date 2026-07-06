@@ -62,10 +62,17 @@ sub test_cl {
 
 # ── Transpilation tests ──────────────────────────────────────────────────────
 
-# Test 1: state var generates outer let wrapper
+# Test 1: state var storage cell carries a unique renamed name.
+# v1: outer (let (($state__f__x…)) (p-sub …)); v2 (default since s277c):
+# per-sub defvar'd cell $x__state__N + raw once-flag (docs/ir-spec.md §2b).
 {
     my $cl = transpile('use feature ":5.10"; sub f { state $x = 1; $x }');
-    like($cl, qr/let.*state__f__x/s, 'state var generates outer let with unique name');
+    if ($ENV{PCL_V1}) {
+        like($cl, qr/let.*state__f__x/s, 'state var generates outer let with unique name');
+    } else {
+        like($cl, qr/\(defvar \$x__state__\d+ \(make-p-box nil\)\)/,
+             'state var generates a defvar cell with unique name');
+    }
 }
 
 # Test 2: state var generates init guard

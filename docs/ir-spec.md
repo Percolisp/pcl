@@ -198,7 +198,7 @@ of poisoning the name. The prime invariant, worth memorizing:
 | `my $i = $i + 1;` (self-ref init) | `(let (($i (p-box-init $i))) …)` — CL `let` inits evaluate in the *outer* environment, matching Perl's "RHS sees the outer variable" rule |
 | `my @a; my %h;` | `let` binding to a fresh vector / hash table |
 | `our $g = V;` | `(defvar $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place. `our` shadowing a `my` gates to v1 |
-| `state $n = 0;` | **v2 gates `state` entirely → v1**, which emits a hoisted cell + once-flag pair: `(let (($state__<sub>__n__N (make-p-box nil)) ($state__<sub>__n__N__init nil)) (p-sub …))` — the body runs the init only when the flag is unset |
+| `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(defvar $n__state__K (make-p-box nil))` + raw once-flag `(defvar $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. `state` *outside* named subs, in anon subs / map-grep-sort blocks (per-closure instances), list/non-scalar `state`, and blocked renames still gate → v1, which uses its own `$state__<sub>__<name>__N` cells |
 | undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced-but-never-let-bound name gets `(defvar NAME <fresh container>)` under "Forward declarations"; package-qualified refs get the defvar in *their* package |
 
 The rest-of-block nesting means scope is structural (review doc §2.3):
@@ -230,7 +230,8 @@ rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
 | `$x__shadow__N` | v2 seam-shadow rename (W8.5) | a `my $x` *inside a block that lowers through the v1 seam* (`map { my $x = … }`, `do { my $x … }`) while an outer lexical `$x` is live. Unrenamed, the seam's defvar-based handling would write through the outer variable (the v1 bug); renamed, the inner block gets its own unique cell |
 | `$x__cond__N` | v2 poisoned-condition rename (W8.5) | `if (my $x = …)` / `for (my $x…)` where the *same bare name* is also used outside the construct as a package global. The construct's lexical takes the fresh name so the global keeps `$x` and gets its forward defvar |
 | `$x__lex__N` | v1 closure-capture rename | v1's fix for defvar-poisoned closures: a block `my` captured by a nested sub becomes a fresh, never-defvar'd name so its `let` stays truly lexical. Appears in v2 output too, inside seam-lowered map/grep bodies |
-| `$state__<sub>__<name>__N` (+ `…__init`) | v1 state cells | `state` variable storage + its has-run-once flag (see table above) |
+| `$x__state__N` (+ `…__init`) | v2 state cells (s277c) | a named sub's `state` variable promoted to a per-sub package cell + raw once-flag (see the declarations table above); same blockers as the other renames |
+| `$state__<sub>__<name>__N` (+ `…__init`) | v1 state cells | same idea, v1's spelling — seen in v1-dialect files |
 | `--anon-block-N--` | both | hoisted anonymous-block functions (block-form prototype args: `first { … }`, `sort` comparators via the seam) |
 | `--pcl-if-ret--N`, `%_args`, `$state…` | both | compiler temporaries; never user-visible names |
 

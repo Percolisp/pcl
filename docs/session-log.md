@@ -4,6 +4,39 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 277c (2026-07-07) — state native in v2; transfer plan written.
+
+- **`state` in NAMED subs is v2-native** (was: any `state` → whole-file v1,
+  the largest named gate).  New rename family `$x__state__N`
+  (`_rename_state_vars`, first among the segment-local rename passes so
+  later facts scans see state decls off the bare name): per-sub defvar'd
+  box cell + raw once-flag `…__init`; decl lowers to v1's exact guarded
+  init `(unless FLAG (box-set CELL INIT) (setf FLAG t))` + bare cell as
+  statement value; post-decl uses token-renamed via `_rename_decl_within`
+  (decl RHS reads outer — `state $s = $g` verified).  Blockers reuse
+  `_shadow_rename_blocker` (interp/re-decl/brace-deref/string-eval) +
+  non-scalar/list, expression-position, outside-named-sub, per-closure
+  (anon/map-grep-sort, pre-existing document gate).  The pre-pass is
+  AUTHORITATIVE: every declarator-shaped `state` renames or dies.  Both
+  cell+flag marked `_file_lex_renamed` — a forward-decl box-shaped defvar
+  for the FLAG would load first and leave it truthy (init would never
+  run).  Probes byte-match perl (counter 123; no-init; loop-once-init;
+  init-reads-global; `state` hash key doesn't gate).  Guards
+  parser2-02.t +7 (5 shape/gate + skip-count bump + 1 runtime).  Census
+  66 unchanged (perl-tests never used named-sub state — the win is real
+  code/CPAN).  Cache gen v2-8.  ir-spec §2b updated ($x__state__N family;
+  state row rewritten); review §4b.1 updated.
+- **`docs/v2-transfer-plan.md`** — the roadmap to ONE pipeline (user
+  direction): T0 measurement (pipeline marker; seam census; CPAN module
+  transpile audit), T-A whole-file gate retirement (census 2026-07-07:
+  18× package-in-block = the big item; ~11 capture-family blocked mostly
+  on interp-rename; singles), T-B eval-mode on v2, T-C seam retirement
+  (port the frequency head; recommend re-housing the tail as a CLForm
+  emitter), T-D deletion endgame (v1 delete, cache-key simplify,
+  oracle shift to perl-diff + fuzzer — strengthen difftest FIRST).
+
+---
+
 ## Session 277 (2026-07-06) — block-form capture gate; W12_OLD hatch deleted; IR review doc.
 
 - **Fixed the s276b catalogued v2 bug** (Try-Tiny basic.t t24–25): a

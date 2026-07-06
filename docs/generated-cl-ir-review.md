@@ -373,10 +373,12 @@ any whole-file gate is emitted entirely in the v1 dialect —
 :void)) …)` statement wraps — while v2-native files use let-based
 lexicals and no void wraps. A consumer must implement *both models* until
 fallbacks are rare. So the clarity ranking for future work is: (1) retire
-the *whole-file* gates (the largest named one is `state`, which sends any
-file using it to v1; then the interp-token rename family), (2) retire the
-seams. Every gate removed shrinks the v1-dialect surface a consumer must
-know.
+the *whole-file* gates, (2) retire the seams. Every gate removed shrinks
+the v1-dialect surface a consumer must know.
+
+> **Update (s277c):** `state` in named subs — previously the largest named
+> gate — is now v2-native (ir-spec §2b, the `$x__state__N` family). The
+> full gate-retirement roadmap now lives in `docs/v2-transfer-plan.md`.
 
 ### 4b.2 No pipeline marker in the output
 

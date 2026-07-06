@@ -176,10 +176,37 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
     or diag($@);
 }
 
+# ---- state in named subs: native per-sub cell (rename family __state__N) ----
+
+{
+  my $st = Pl::Parser2->parse_code(
+    q{use feature 'state'; sub c { state $n = 0; $n = $n + 1; return $n; } print c();});
+  like($st, qr/\(defvar \$n__state__0 \(make-p-box nil\)\)/,
+       'state: per-sub cell hoisted as a defvar box');
+  like($st, qr/\(unless \$n__state__0__init \(box-set \$n__state__0 0\) \(setf \$n__state__0__init t\)\)/,
+       'state: guarded once-init in v1 shape');
+  unlike($st, qr/\(let \(\(\$n__state__0/, 'state: cell is never let-bound');
+
+  # No init → cell only, no flag.
+  my $sp = Pl::Parser2->parse_code(
+    q{use feature 'state'; sub t2 { state $k; return $k; } print t2();});
+  like($sp, qr/\(defvar \$k__state__0 /, 'state without init: cell defvar');
+  unlike($sp, qr/__init/, 'state without init: no once-flag');
+
+  # Out-of-subset shapes still gate.
+  my $g1 = eval { Pl::Parser2->parse_code(
+    q{use feature 'state'; sub s2 { my $n = 1; state $n = 2; return $n; } print s2();}) };
+  like($@, qr/state \$n in named sub \(multiple declarations\)/,
+       'state shadowing a my in the same sub gates to v1');
+  my $g2 = eval { Pl::Parser2->parse_code(
+    q{use feature 'state'; for (1..3) { state $x = 0; } print 1;}) };
+  like($@, qr/state outside a named sub/, 'file-level state gates to v1');
+}
+
 # ---- runtime ----
 
 SKIP: {
-  skip 'sbcl not available', 10 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  skip 'sbcl not available', 11 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
   my $root = "$FindBin::Bin/../..";
   my $run = sub {
     my ($src) = @_;
@@ -296,6 +323,20 @@ sub g { my $a = shift; return $a . "|" . join(",", @_); }
 print f(1,2), " ", f(5) + 0, " ", g("h","r1","r2"), "\n";
 EOF
   is($run->($shf), "3 5 h|r1,r2\n", 'W14: coalesced and non-coalesced shift subs match perl');
+
+  # state end-to-end: counter persists across calls; no-init state starts
+  # undef; a state inside a loop inits once (not per iteration or per call);
+  # init RHS reads the outer scope.
+  my $ste = Pl::Parser2->parse_code(<<'EOF');
+use feature 'state';
+sub c { state $n = 0; $n = $n + 1; return $n; }
+sub tally { state $k; $k = ($k // 0) + 2; return $k; }
+sub looped { my ($x) = @_; for my $i (1..3) { state $acc = 100; $acc = $acc + $x; } return 1; }
+our $g = "outer";
+sub echo { state $s = $g; $g = "changed"; return $s; }
+print c(), c(), c(), " ", tally(), tally(), " ", looped(5), " ", echo(), echo(), "\n";
+EOF
+  is($run->($ste), "123 24 1 outerouter\n", 'state: persistence, once-init, outer-reading init match perl');
 }
 
 done_testing();
