@@ -4,7 +4,23 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 278c (2026-07-07) — v2 typed lexicals; W10 unmangle-when-unique; can/isa fix; blocker analysis.
+## Session 278c (2026-07-07) — v2 typed lexicals; unmangle; can/isa fix; container-cond-my.
+
+- **Container `my` in a condition head** (commit a8ebbf7, gen v2-15): `if (my
+  @x = f())`, `while (my %h = g())`, `while (my ($k,$v) = each %h)` died "my
+  array/hash in condition" → v1.  `_cond_my_names` now returns @a/%h names;
+  `_wrap_cond_mys` binds each via `_fresh_container` (box/vector/table by
+  sigil) instead of always a box.  Scalar path byte-identical.  Removes a gate
+  from Test::Builder / Test2::Event / Carp / Text::CSV; **de-gates
+  Test2::Event::Ok.pm** (its sole gate — verified: `if (my @extra_amnesty =
+  ...)` lowers to make-array-let + p-array-= cond, CL compiles clean, unlike
+  method.t no observable regression).  perl-tests census unchanged at 75 (none
+  use it).  Regression tests in misc-fixes-02.t.  **This is the "safe
+  groundwork" contrast to container-spanning: it only makes a previously-DYING
+  construct work, so it cannot regress a passing file — the one de-gate
+  (Ok.pm) was checked and is clean.**
+
+### Session 278c (earlier) — typed lexicals; W10 unmangle-when-unique; can/isa fix.
 
 - **Runtime fix — can/isa/DOES on an undeclared package** (commit fafd0f9,
   helps BOTH pipelines): `p-method-call` died "Can't locate object method
