@@ -2,7 +2,11 @@
 
 **Goal:** Enable any CPAN module with XS/C code to run on Common Lisp.
 
-**Status:** Research/Design phase
+**Status:** SUPERSEDED — see `docs/xs-shim-design.md` for the full,
+implementation-ready design (source-recompile against replacement headers +
+`libperlshim` + host-neutral vtable). This file is kept for history; its
+"store a CL object pointer inside each SV" approach is rejected there (§4.2:
+moving GC, host lock-in).
 
 ---
 

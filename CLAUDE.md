@@ -256,7 +256,7 @@ When resuming work:
 3. `CODEGEN_DESIGN.md` - Code generation design notes
 
 Not relevant now:
-1. `XS_BRIDGE_DESIGN.md` - Future XS/C extension plans
+1. `XS_BRIDGE_DESIGN.md` - superseded XS sketch; the active design is `docs/xs-shim-design.md` (libperlshim + host vtable, ready for implementation)
 2. `MOO_MOOSE_DESIGN.md` - Future Moo/Moose OO framework support plan
 2. `SESSION_SUMMARY.md` - Older detailed session history, use `docs/session-log.md` now
 
