@@ -110,6 +110,12 @@ This file provides guidance to Claude Code when working with this repository.
 # Run all tests (from project root) — always use -j8 for parallel execution
 prove -j8 Pl/t/
 
+# ~3.4x faster (8:18 -> 2:30): run against a saved SBCL core (runtime
+# pre-compiled in). tools/prove-core rebuilds a FRESH core every run (never
+# stale) then runs prove. Identical results; core is purely a speed cache.
+tools/prove-core                 # == prove -j8 Pl/t/
+tools/prove-core Pl/t/foo-01.t   # any prove args
+
 # Test single file
 prove -v Pl/t/codegen-01.t
 
