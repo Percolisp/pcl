@@ -467,4 +467,23 @@ my $z = Z->new();
 print $z->hello(), $z->world(), "\n";
 ');
 
+# T-A1 regression (s278b): a top-level `{ package X; … }` helper block is
+# flattened into the segment stream.  An embedded `my` there (`tie my $t`) is
+# forward-defvar'd as X::$t; the forward-decl exclusion must be PACKAGE-AWARE,
+# so a `let`-bound `$t` in a DIFFERENT package block does not suppress it (the
+# join.t 42–43 unbound-$t miscompile).
+test_transpile("T-A1: embedded-my in flattened package block, name reused as let elsewhere", '
+{ package X;
+  sub TIESCALAR { my $x = 7; bless \\$x }
+  sub FETCH { my $y = shift; $$y += 5 }
+  tie my $t, "X";
+  my $r = join ":", $t, 99, $t, 99;
+  print "$r\n";
+}
+{ package main;
+  my $t = "own-lexical";
+  print "$t\n";
+}
+');
+
 done_testing();

@@ -178,10 +178,14 @@ sub parse {
   $self->environment->state_var_renames({});
   $self->{_referenced_pkgs} = {};
   # File-wide accumulator of EVERY name ever let-bound (never shrinks) — the
-  # forward-declaration pass must never defvar a name let-bound ANYWHERE (a
-  # defvar proclaims the symbol special and poisons every `let` of that name).
-  # This is deliberately separate from the now-SCOPED _let_bound_vars, which
-  # must reflect the call site's live scope so the string-eval capture alist
+  # forward-declaration pass must never defvar a name let-bound in the SAME
+  # package (a defvar proclaims that package's symbol special and poisons every
+  # `let` of that name read under the same in-package).  Keyed name → pkg → 1:
+  # a `my $t` let-bound only in `main` must NOT suppress an `X::$t` forward
+  # defvar in a package-X section — they are different CL symbols (join.t's
+  # `{ package X; tie my $t … }` helper block, flattened by T-A1).  This is
+  # deliberately separate from the now-SCOPED _let_bound_vars, which must
+  # reflect the call site's live scope so the string-eval capture alist
   # (_eval_lexical_alist) doesn't list a closed sibling scope's name.
   $self->{_all_lex} = {};
   $self->{_if_ret_counter} = 0;   # unique --pcl-if-ret--N per tail bare-if
@@ -242,14 +246,12 @@ sub parse {
     # subset) or dies → v1, exactly like a file lexical — and the blk tags
     # bound both the check and the rewrite to the block's extent.
     #
-    # OFF BY DEFAULT (PCL_V2_PKGBLOCK=1 to enable) until the join.t
-    # section-ordering bug is fixed — see docs/v2-transfer-plan.md §T-A1
-    # STATUS.  With the flag off these files keep gating to v1 (the
-    # pre-existing behaviour); flipping it on clears concat2/exists_sub/
-    # join/parent's gates but join.t then loses its last two tests to a
-    # section-ordering miscompile.  Fix, verify parity, then remove the flag.
-    if ($ENV{PCL_V2_PKGBLOCK}
-        and my $inner = $self->_flattenable_pkg_block($child)) {
+    # DEFAULT ON since s278b (was gated behind PCL_V2_PKGBLOCK until the
+    # join.t miscompile — an X::$t forward-defvar wrongly suppressed by a
+    # main-package `let` of the same bare name — was fixed via the
+    # package-aware _all_lex exclusion).  Full-sweep parity vs v1 on all 18
+    # package-in-block files, and corpus-wide (identical fully-passing set).
+    if (my $inner = $self->_flattenable_pkg_block($child)) {
       my $outer_pkg = $cur_pkg;
       $cur_blk = ++$blk_counter;
       # The block's leading statements (before its first `package`) get their
@@ -488,7 +490,7 @@ sub parse {
     push @body, $self->_forward_global_decls(join("\n", @{ $sec->{captured} },
                                                         @{ $sec->{defs} },
                                                         @{ $sec->{sched} },
-                                                        @{ $sec->{run} })), '';
+                                                        @{ $sec->{run} }), $pkg), '';
     # Declarations captured by _fallback_stmt during lowering (defvar/
     # defconstant/eval-when from use/require/BEGIN) — before the definitions
     # that may reference them.
@@ -1218,12 +1220,16 @@ sub _declared_names {
 # exactly the referenced sigil-vars that are neither let-bound anywhere in
 # the file nor runtime-owned.
 sub _forward_global_decls {
-  my ($self, $text) = @_;
+  my ($self, $text, $pkg) = @_;
+  $pkg //= 'main';
   my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
                                         $a $b @a @b);
-  # Exclude names let-bound ANYWHERE in the file (W3: _all_lex, the cumulative
-  # accumulator — NOT the now-scoped _let_bound_vars, which has shrunk back to
-  # top-level scope by the time this assembly-phase pass runs).
+  # Exclude names let-bound in THIS section's package (W3: _all_lex, the
+  # cumulative accumulator — NOT the now-scoped _let_bound_vars, which has
+  # shrunk back to top-level scope by the time this assembly-phase pass runs).
+  # Package-aware: a defvar poisons only its own package's symbol, so a name
+  # let-bound solely in a different package's section is still safe to declare
+  # here (see the _all_lex comment in parse()).
   my $lb = $self->{_all_lex} // {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
   my (%seen, %cross, %caret);
@@ -1239,7 +1245,7 @@ sub _forward_global_decls {
     # internals like %pcl-cl-sub-name.
     while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
       my $v = $1;
-      next if $runtime_vars{$v} || $lb->{$v};
+      next if $runtime_vars{$v} || ($lb->{$v} && $lb->{$v}{$pkg});
       # W5-renamed cells are defvar'd via _captured_decls — don't double-declare.
       next if $self->{_file_lex_renamed}{$v};
       # `$x__lex__N` is v1's per-scope closure-capture RENAME (emitted by the
@@ -1362,7 +1368,9 @@ sub _reg_lex {
   for my $n (@names) {
     $self->fallback_parser->{_let_bound_vars}{$n} = 1;
     $self->{_live_lex}{$n} = 1;
-    $self->{_all_lex}{$n}  = 1;   # cumulative; drives the forward-decl exclusion
+    # cumulative, keyed by the segment's package — drives the (package-aware)
+    # forward-decl exclusion.  cur_pkg is the segment package during lowering.
+    $self->{_all_lex}{$n}{ $self->cur_pkg // 'main' } = 1;
   }
   return;
 }

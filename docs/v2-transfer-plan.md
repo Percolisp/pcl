@@ -1,11 +1,40 @@
 # V2 Transfer Plan — finishing the move to one pipeline
 
-> ## SESSION 278 STATUS (2026-07-07, Fable → Opus 4.8 handoff)
+> ## SESSION 278b STATUS (2026-07-07, Opus 4.8)
 >
+> **T-A1 is DONE and DEFAULT-ON** (flag `PCL_V2_PKGBLOCK` removed).  The
+> join.t miscompile was NOT a section-ordering bug (the s278 diagnosis was a
+> red herring — package sections were already in source order).  Root cause:
+> the block `{ package X; … tie my $t, 'X'; … }` declares `$t` embedded in a
+> statement; v2 forward-defvars such embedded-`my` names, but the
+> forward-decl exclusion (`_all_lex`) was keyed on the BARE name file-wide,
+> so the `let`-bound `$t` in join.t's later `package main` S/SM blocks
+> suppressed the `X::$t` defvar in the X section → unbound at load (tests
+> 42–43).  Fix: make `_all_lex` and the `_forward_global_decls` exclusion
+> **package-aware** (name → pkg → 1) — a defvar poisons only its own
+> package's symbol, so a name `let`-bound solely in a different package's
+> section is safe to declare.  join.t 43/43; parity on all 18 files
+> (byte-identical to v1); corpus-wide full sweep identical (12475 pass / 955
+> fail / 64 fully-passing) OFF vs ON.  Cache gen bumped **v2-9 → v2-10**.
+> Census after: **70 v2-native** (was 66); package-in-block gate down to **5**
+> (bless/index/local/magic/reset — the nested/in-sub-body/direct-`local`
+> residue, design (b) territory; discuss permanent-gate vs port with user).
+>
+> **NEXT FRONTIER (measured by the s278b census):** the top whole-file gate is
+> now **"my-lexical spans a package boundary" — 16 files** (array, bop,
+> caller, do, each, eval, length, method, pos, ref, scalar, sort, sprintf2,
+> substr, undef, vec).  That is the W10-ext worklist below (§"next-gate
+> worklist"): block-scoped facts (W10-ext-1) clears sort/method; container
+> spanning (W10-ext-3) clears each; multi-decl spanning (W10-ext-2) clears
+> vec; string-eval blanket (W10-ext-4) clears pos; typed-my clears
+> multideref.  **START HERE next.**
+>
+> ---
+> ### (historical) SESSION 278 STATUS (Fable → Opus 4.8 handoff)
 > T0 is **DONE** (marker, seam census, module census — data below and in
-> `docs/v2-census-2026-07-07.md`).  T-A1 is **IMPLEMENTED BUT FLAGGED OFF**
-> (`PCL_V2_PKGBLOCK=1`) with one open miscompile; one real pre-existing
-> annotator bug found and fixed on the way.  **START HERE → §T-A1 STATUS.**
+> `docs/v2-census-2026-07-07.md`).  T-A1 was IMPLEMENTED BUT FLAGGED OFF
+> (`PCL_V2_PKGBLOCK=1`) with one open miscompile (now fixed — see s278b
+> above).  One real pre-existing annotator bug found and fixed on the way.
 >
 > ### What landed this session
 > 1. **T0.1 pipeline marker** — every transpile starts with
