@@ -4,7 +4,25 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 278c (2026-07-07) — v2 typed lexicals; spanning-file blockers measured.
+## Session 278c (2026-07-07) — v2 typed lexicals; W10 unmangle-when-unique; blocker analysis.
+
+- **W10 unmangle-when-unique** (commit 793563a, gen v2-14): a file-unique
+  spanning my-lexical was renamed to a MANGLED cell (`$x__file__N`), and any
+  dynamic `eval $var` in scope forced the whole file to v1 (the mangled name
+  is invisible to eval'd code that names the bare `$x`).  The mangle only
+  guards against a sibling `let $x`; when decl_count==1 file-wide there is
+  none, so rename to the plain `$Pkg::name` global — eval'd code in package
+  Pkg then resolves `$x` to the same cell.  Cleared the eval_unsafe blocker on
+  bop.t (`$strval`) and sprintf2.t (`$doubledouble`); both advance to a
+  DIFFERENT second gate (W5-capture of `$res`; container `@hexfloat`), so
+  census stays 75 native but the correctness gate is gone.  **Retracts my
+  earlier "correctness wall / impossible" claim** — the user pushed back and
+  tracing the mechanism showed it was just the mangle; see
+  [[feedback_dont_write_off_fixable]].  Parity unchanged on join/concat2/
+  exists_sub/each/parent/method (v2==v1); parser2-01.t updated to the
+  unmangled shape; runtime regression in transpile-test-04.t.
+
+### Session 278c (earlier) — v2 typed lexicals; spanning-file blockers measured.
 
 - **Typed lexicals `my Foo $f`** (commit f88accb, gen v2-13): PPI keeps the
   class name as an inert bare Word token between the declarator and the
