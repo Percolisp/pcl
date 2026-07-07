@@ -7,11 +7,14 @@ use warnings;
 use Test::More;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 
 # Path to pl2cl and runtime
 my $project_root = "$RealBin/../..";
 my $pl2cl = "$project_root/pl2cl";
 my $runtime = "$project_root/cl/pcl-runtime.lisp";
+my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 # Check dependencies
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
@@ -42,7 +45,7 @@ sub run_cl {
     close $cl_fh;
 
     # Run with sbcl
-    my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+    my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
 
     # Filter out warnings and "PCL Runtime loaded"
     $output =~ s/^;.*\n//gm;

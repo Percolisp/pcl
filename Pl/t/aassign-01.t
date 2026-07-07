@@ -9,10 +9,13 @@ use warnings;
 use Test::More;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 
 my $project_root = "$RealBin/../..";
 my $pl2cl        = "$project_root/pl2cl";
 my $runtime      = "$project_root/cl/pcl-runtime.lisp";
+my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
@@ -28,7 +31,7 @@ sub run_cl {
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
     close $cl_fh;
-    my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+    my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
     $output =~ s/^;.*\n//gm;
     $output =~ s/^PCL Runtime loaded\n//gm;
     $output =~ s/^\s*\n//gm;

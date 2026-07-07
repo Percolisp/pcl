@@ -44,9 +44,21 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
 
-# Run the internal test suite (93 files, 3392 tests)
+# Run the internal test suite (114 files, 3916 tests)
 prove -j8 Pl/t/
+
+# Faster: run it against a saved SBCL core (runtime pre-compiled in).
+# Each test otherwise recompiles the ~1.2s runtime on every sbcl spawn;
+# a core cuts that to ~0.003s. tools/prove-core rebuilds a FRESH core on
+# every run (so tests never see a stale image), then runs the suite:
+tools/prove-core                 # == prove -j8 Pl/t/, but ~4x faster
+tools/prove-core Pl/t/foo-01.t   # any prove args work
 ```
+
+The two commands are equivalent in *what* they check — the core is purely a
+speed cache. Plain `prove -j8 Pl/t/` always works and stays the reference; the
+core path is opt-in via `tools/prove-core` (or by setting `PCL_TEST_CORE` to a
+core path yourself).
 
 (PCL is currently a little sensitive to the Common Lisp version it runs on; this will be sorted out before the first release.)
 

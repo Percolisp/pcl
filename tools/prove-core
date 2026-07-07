@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Run the PCL test suite against a FRESH saved SBCL core.
+#
+# `--load`ing cl/pcl-runtime.lisp recompiles it (~1.2s) on every sbcl spawn;
+# the big transpile-test files spawn sbcl once per test, so runtime compilation
+# dominates the gate.  This builds the runtime into an SBCL core ONCE, then runs
+# the suite with PCL_TEST_CORE pointing at it — test files that use PCLCore load
+# the core (~0.003s) instead of recompiling.
+#
+# The core is rebuilt on EVERY invocation (into a fresh temp file, removed on
+# exit) so the suite can never run against a stale image — correctness first.
+#
+# Usage:
+#   tools/prove-core                 # == prove -j8 Pl/t/
+#   tools/prove-core Pl/t/foo-01.t   # any prove args
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+runtime="cl/pcl-runtime.lisp"
+core="$(mktemp -t pcl-test-core.XXXXXX)"
+trap 'rm -f "$core"' EXIT
+
+echo "prove-core: building fresh core from $runtime ..." >&2
+if ! sbcl --noinform --non-interactive --load "$runtime" \
+        --eval "(sb-ext:save-lisp-and-die \"$core\" :executable nil)" >/dev/null 2>&1; then
+    echo "prove-core: core build FAILED — falling back to source-load" >&2
+    core=""
+fi
+[ -n "$core" ] && echo "prove-core: core built ($(du -h "$core" | cut -f1)); running suite" >&2
+
+if [ $# -eq 0 ]; then set -- -j8 Pl/t/; fi
+PCL_TEST_CORE="$core" prove "$@"
