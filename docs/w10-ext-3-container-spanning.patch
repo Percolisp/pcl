@@ -1,0 +1,118 @@
+diff --git a/Pl/Parser2.pm b/Pl/Parser2.pm
+index 49f9f1e..cbbda0b 100644
+--- a/Pl/Parser2.pm
++++ b/Pl/Parser2.pm
+@@ -882,7 +882,7 @@ sub _check_sub_captures {
+ #                        or interpolated in a string/regex/heredoc.
+ sub _scan_lex_facts {
+   my ($self, $stmts, $f) = @_;
+-  $f->{$_} //= {} for qw(decl_count scalar_decl disq);
++  $f->{$_} //= {} for qw(decl_count scalar_decl disq container_decl interp);
+   for my $stmt (@$stmts) {
+     my @vstmts = $stmt->isa('PPI::Statement::Variable') ? ($stmt) : ();
+     push @vstmts, @{ $stmt->find('PPI::Statement::Variable') || [] };
+@@ -898,6 +898,15 @@ sub _scan_lex_facts {
+         (my $bare = $name) =~ s/^\$//;
+         push @{ $f->{scalar_decl}{$bare} }, $v;
+       }
++      # W10-ext-3: a single-container no-init `my %h` / `my @a` (outside a named
++      # sub) is a span-rename candidate — recorded with its sigil so the rename
++      # can emit the defvar container and rewrite element/whole/slice uses.
++      my ($cvars, $chas_init) = $self->_multi_decl($v);
++      if ($cvars && @$cvars == 1 && $cvars->[0] =~ /^[\@\%]\w+$/ && !$chas_init
++          && $kw->content eq 'my' && !_inside_named_sub($v)) {
++        (my $bare = $cvars->[0]) =~ s/^[\@\%]//;
++        push @{ $f->{container_decl}{$bare} }, [$v, $cvars->[0]];
++      }
+     }
+     # Any symbol whose canonical form is @x / %x (incl. $x[…] / $x{…} element
+     # access, whose ->symbol resolves to the container) disqualifies bare `x`.
+@@ -912,8 +921,13 @@ sub _scan_lex_facts {
+     }
+     # A name INTERPOLATED inside a string/regex/heredoc is not a Symbol token,
+     # so a token rewrite can't reach it — disqualify (renaming would leave the
+-    # interpolation pointing at a now-nonexistent variable).
+-    _interp_names($stmt, $f->{disq});
++    # interpolation pointing at a now-nonexistent variable).  Recorded in BOTH
++    # `disq` (the scalar path's blanket blocker) and `interp` (the container
++    # path, which treats container-family uses as renameable and so cannot use
++    # `disq` — it must check interpolation on its own).
++    my %ih;
++    _interp_names($stmt, \%ih);
++    for my $n (keys %ih) { $f->{disq}{$n} = 1; $f->{interp}{$n} = 1; }
+   }
+ }
+ 
+@@ -1091,6 +1105,55 @@ sub _rename_spanning_lexicals {
+     }
+     $self->{_file_lex_renamed}{"\$$newbare"} = 1;
+   }
++
++  # W10-ext-3: containers (%h / @a).  Same span rename as the scalar loop above,
++  # but the container-family uses (%h, $h{k}, @h{...}, $#a, $a[i]) resolve via
++  # ->symbol to the container yet carry DIFFERENT leading sigils in their token
++  # content — so the rewrite preserves each token's own sigil and replaces only
++  # the NAME.  File-unique only: a container is never the "sibling let to
++  # protect", so it always takes the plain (unmangled) $Pkg::name cell and needs
++  # no eval guard (same reasoning as the scalar unmangle case).  The `our`-style
++  # defvar container lowering already exists (_fresh_container); the renamed decl
++  # routes through _file_lex_renamed just like the scalar cell.
++  for my $bare (sort keys %spanning) {
++    next unless ($f->{decl_count}{$bare} // 0) == 1;   # file-unique only
++    my $di = $decl_seg{$bare};
++    my $hi = _blk_extent($segments, $di);
++    my ($dc, $interp, @cdecls) = (0, 0);
++    for my $j ($di .. $hi) {
++      $dc     += $sf[$j]{decl_count}{$bare} // 0;
++      $interp ||= $sf[$j]{interp}{$bare};
++      push @cdecls, @{ $sf[$j]{container_decl}{$bare} || [] };
++    }
++    next if $interp;                       # can't rewrite a name inside a string
++    next unless @cdecls == 1 && $dc == 1;
++    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
++    next if $segments->[$di]{blockform};
++    my ($decl, $csym) = @{ $cdecls[0] };   # $csym e.g. '%methods' / '@hexfloat'
++    my $stmts = $segments->[$di]{stmts};
++    next unless grep { $stmts->[$_] == $decl } 0 .. $#$stmts;   # top-level of segment
++
++    # Unmangled: `my %methods` stays and is defvar-lowered via _file_lex_renamed;
++    # same-package uses already resolve to that cell, so only later segments need
++    # the package-qualified form (harmless where the package already matches).
++    my $qname = $segments->[$di]{pkg} . '::' . $bare;
++    for my $j ($di + 1 .. $hi) {
++      for my $stmt (@{ $segments->[$j]{stmts} }) {
++        next unless ref $stmt && $stmt->isa('PPI::Node');
++        for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
++          my $canon = $s->symbol;
++          next unless $canon eq "\%$bare" || $canon eq "\@$bare";
++          (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1 . $qname/e;
++          $s->set_content($c);
++        }
++        for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
++          my $c = $ai->content;
++          $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
++        }
++      }
++    }
++    $self->{_file_lex_renamed}{$csym} = 1;
++  }
+ }
+ 
+ # W5: file lexicals captured by named subs.  A named sub hoists into the
+@@ -1853,6 +1916,16 @@ sub _lower_block {
+     # _process_variable_statement).  All these vars stay boxed/containers.
+     my ($vars, $has_init) = $self->_multi_decl($first);
+     die "Parser2 TODO: unsupported declaration: " . $first->content unless $vars;
++    # W10-ext-3: a single container rewritten to a package cell by the span
++    # rename (`my %methods` captured across a package boundary) lowers as `our`
++    # does — a defvar'd container hoisted to the section top so the hoisted
++    # named sub that captures it shares the one cell — not a let.  Only the
++    # no-init single-container shape ever reaches the rename pass.
++    if (@$vars == 1 && $self->{_file_lex_renamed}{$vars->[0]}) {
++      push @{ $self->{_captured_decls} },
++        "(defvar $vars->[0] " . _fresh_container($vars->[0]) . ")";
++      return ($self->_lower_block(\@rest, $vi, $tail_ctx));
++    }
+     my @k = _strip_semi($first->schildren);
+     if ($has_init) {
+       # Self-referential init (`my @a = (@a, 1)` — RHS must see the OUTER

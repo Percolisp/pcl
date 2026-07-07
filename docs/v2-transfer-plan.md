@@ -1,5 +1,38 @@
 # V2 Transfer Plan — finishing the move to one pipeline
 
+> ## SESSION 278c ADDENDUM — W10-ext-3 container spanning: IMPLEMENTED but PARKED
+>
+> **Container spanning works (%h/@a span rename) — the patch is saved at
+> `docs/w10-ext-3-container-spanning.patch` — but it is NOT applied**, because
+> its only census effect is to de-gate method.t, and de-gating method.t is a
+> **net regression** (v2 stops at test 122 / 95 pass; v1 recovers to 157 / 98).
+> method.t was the ONLY file whose sole gate was a container span; the other
+> container files (sprintf2 `@hexfloat`, sort `@list`/`@output`, scalar, ref)
+> have OTHER first-gates, so the patch doesn't de-gate them.
+>
+> **The patch itself is correct** (verified: `%methods` emits a defvar hash
+> cell + package-qualified `main::%methods{k}` element/whole/slice uses; the
+> three edits — `container_decl`+`interp` facts, a separate container rename
+> loop with sigil-preserving rewrite, and the renamed-container defvar
+> lowering — parallel the scalar path and don't touch it).  It is parked ONLY
+> because method.t has a **cascade of independent v2 gaps** that de-gating
+> exposes, and the parity rule forbids shipping method.t below its v1 number.
+>
+> **method.t's cascade (fix these, THEN apply the patch):**
+> 1. ✅ FIXED this session (commit fafd0f9, runtime, helps both pipelines):
+>    `Foo->can`/`->isa`/`->DOES` on an UNDECLARED package died "Can't locate
+>    object method" instead of returning undef/false.
+> 2. ⛔ OPEN (test 122, the next stop): indirect/block method syntax
+>    `SUPER::m{@a}` / `SUPER::m{}@a` / `SUPER::m{@a}"more"` (method.t lines
+>    536–546) — exotic, likely a v2 (maybe v1) expression-seam gap.
+> 3. ⛔ unmeasured: whatever sits between test 123 and v1's stop at 157.
+>
+> **To land container spanning:** fix method.t's cascade (2,3) until native v2
+> ≥ v1, then `git apply docs/w10-ext-3-container-spanning.patch`, bump cache
+> gen, add the parser2-01.t/method.t guards, full parity sweep.  Do NOT apply
+> the patch before the cascade is cleared.
+>
+> ---
 > ## SESSION 278c STATUS (2026-07-07, Opus 4.8) — typed-my done; spanning-file blockers measured
 >
 > **Census now 75 v2-native / 36 gated** (cache gen **v2-13**).  Two W10-ext
