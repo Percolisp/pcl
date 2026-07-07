@@ -1480,6 +1480,10 @@
     ((p-typeglob-p v) (format nil "*~A::~A"
                               (package-name (p-typeglob-package v))
                               (p-typeglob-name v)))
+    ;; A raw I/O stream is a lexical filehandle (`open my $fh, …`), which in
+    ;; Perl is a GLOB ref — stringify as GLOB(0xADDR), not SBCL's #<fd-stream …>.
+    ;; (Named handles reach here as typeglobs, handled above.)
+    ((streamp v) (format nil "GLOB(0x~(~X~))" (object-address v)))
     ;; Code reference - stringify as CODE(0xADDR) like Perl
     ((functionp v) (format nil "CODE(0x~(~X~))" (object-address v)))
     ;; Compiled regex (qr//) — stringify as (?^modifiers:pattern) like Perl 5.14+

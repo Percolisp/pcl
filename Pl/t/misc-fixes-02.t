@@ -19,7 +19,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 97;
+plan tests => 98;
 
 sub run_cl {
     my ($code) = @_;
@@ -958,3 +958,11 @@ test_cl('bare print/say/printf all default to $_ consistently',
     'use feature "say"; $_ = "hi";'
   . ' print; print "-"; printf; print "-"; say;',
     "hi-hi-hi\n");
+
+# A lexical filehandle (`open my $fh, …`) is a GLOB ref in Perl and stringifies
+# as GLOB(0xADDR) — not SBCL's raw #<fd-stream …> (stringify-value had no stream
+# clause and fell through to the ~A catch-all).
+test_cl('lexical filehandle stringifies as GLOB(0x..)',
+    'my $buf = ""; open(my $fh, ">", \$buf) or die;'
+  . ' my $s = "$fh"; print $s =~ /^GLOB\(0x[0-9a-f]+\)$/ ? "ok\n" : "bad:$s\n";',
+    "ok\n");
