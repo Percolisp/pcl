@@ -171,15 +171,16 @@ sub exec_sbcl {
          . qq{ (load #P"$file"}.')))';
   };
 
-  my @cmd = ('sbcl', '--control-stack-size', '512',
-             '--noinform', '--non-interactive');
-
+  # SBCL splits argv into RUNTIME options and TOPLEVEL options: every runtime
+  # option (--core, --control-stack-size, --noinform) must precede the first
+  # toplevel option (--non-interactive, --eval, --load), or SBCL aborts with
+  # "C runtime option --core in the middle of Lisp options."  So --core goes
+  # up front with the other runtime options, not after --non-interactive.
   my $core = find_core();
-  if ($core) {
-    push @cmd, '--core', $core;
-  } else {
-    push @cmd, '--eval', $quiet_load->($RUNTIME);
-  }
+  my @cmd = ('sbcl');
+  push @cmd, '--core', $core if $core;
+  push @cmd, '--control-stack-size', '512', '--noinform', '--non-interactive';
+  push @cmd, '--eval', $quiet_load->($RUNTIME) unless $core;
   push @cmd, '--eval', $argv_form;
   push @cmd, '--eval', $quiet_load->($lisp);
 
