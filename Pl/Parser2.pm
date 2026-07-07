@@ -1026,8 +1026,18 @@ sub _rename_spanning_lexicals {
   };
 
   for my $bare (sort keys %spanning) {
-    next if $eval_unsafe->($bare, $decl_seg{$bare});
     my $di = $decl_seg{$bare};
+    # A name with exactly ONE my/state binding file-wide can be renamed to the
+    # PLAIN package global $Pkg::name (no __file__N mangle): there is no other
+    # `let $name` in the file for the defvar to poison.  The unmangle also
+    # neutralises the string-eval hazard — a dynamic `eval $var` whose runtime
+    # text references the bare `$name`, running in the declaring package,
+    # resolves to $Pkg::name (the same cell), so the mangle-driven eval guard
+    # is unnecessary here (a cross-package eval matches v1, which likewise
+    # defvars file lexicals — not a regression).  Only the NON-unique case
+    # must mangle (to protect the sibling `let`) and therefore keep the guard.
+    my $unique = (($f->{decl_count}{$bare} // 0) == 1);
+    next if !$unique && $eval_unsafe->($bare, $di);
     # Facts scoped to the declaration's live extent: the block's segment run for
     # a flattened-block decl, else all later segments (file lexical).  Decls or
     # disqualifying uses outside that range belong to a different variable.
@@ -1050,7 +1060,8 @@ sub _rename_spanning_lexicals {
                 @{ $decl->find('PPI::Token::Symbol') || [] };
     next unless $sym;
 
-    my $newbare = $bare . '__file__' . $self->{_file_lex_counter}++;
+    my $newbare = $unique ? $bare
+                          : $bare . '__file__' . $self->{_file_lex_counter}++;
     # Declaring segment: the decl symbol itself (its RHS reads the outer
     # global — _rename_decl_within's rule), then every use in later
     # statements of the segment.

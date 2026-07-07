@@ -15,14 +15,24 @@
 > **THE 8 SPANNING FILES ARE MEASURED — don't re-derive.**  Added a
 > temporary `PCL_V2_RENAME_DEBUG` probe (removed after use) reporting which
 > `next` in `_rename_spanning_lexicals` refuses each spanning name.  Results:
-> - **`eval_unsafe` (dominant)**: bop.t `$strval`, caller.t `$i`, sprintf2.t
+ > - **`eval_unsafe` (dominant)**: bop.t `$strval`, caller.t `$i`, sprintf2.t
 >   (`$doubledouble`/`$hexfloat`/`$tests`), eval.t (many), ref.t `$x`.  The
->   rename mangles the name (`$x__file__N`); a string eval that references
->   the bare name by content would break.  For a **dynamic** eval
->   (`eval $var`) the contents are opaque, so this CANNOT be safely narrowed
->   — narrowing it is a silent-miscompile risk (violates §0.4).  bop.t and
->   sprintf2.t are blocked **only** by this ⇒ effectively stuck behind a real
->   correctness wall, not a missing feature.  Leave gated.
+>   rename **mangles** the name (`$x__file__N`); a dynamic `eval $var` whose
+>   runtime string references the bare `$x` can't see the mangled cell (the
+>   session-250 capture alist keys on the original name).  **CORRECTION (do
+>   not repeat the earlier "correctness wall / impossible" claim — it was
+>   wrong, see [[feedback_dont_write_off_fixable]]):** the mangle is the
+>   cause, not a barrier.  The `__file__N` suffix only exists to avoid
+>   poisoning some *other* `let $x` in the file.  **bop.t and sprintf2.t each
+>   have exactly ONE binding of the name** — so renaming to the plain
+>   `$Pkg::name` global (no mangle) makes eval'd code in package Pkg resolve
+>   `$name` to the same cell, and the guard becomes unnecessary.  Fix:
+>   *unmangle-when-unique* (rename to `$Pkg::name` when the bare name has no
+>   other lexical binding file-wide).  Clears bop.t + sprintf2.t; check
+>   caller/eval/ref per-file for a competing binding or cross-package eval.
+>   Residual divergence (dynamic eval in a *different* package referencing
+>   the bare name) is IDENTICAL to v1's behaviour (v1 defvars file lexicals),
+>   so not a regression.
 > - **container / multi-decl (`disq` + `dc>1`)**: method.t `%methods`
 >   (hash), sort.t `@list`/`@output` (arrays), scalar.t `$fh`/`$x`
 >   (dc=6/dc=4 — multiple file-level decls), ref.t `$test` (dc=2).  These
@@ -36,10 +46,10 @@
 > - **caller.t `$line`**: `dc=2` (two file-level decls) — genuinely two
 >   variables, needs shadow-aware extent scoping.
 >
-> Recommended next: **W10-ext-3 container spanning** (clears method.t, dents
-> sort/scalar/ref).  The `eval_unsafe`-only files (bop, sprintf2) should be
-> discussed as **permanent gates** with the user — they are a correctness
-> wall (dynamic eval + name mangling), not a feature gap.
+> Recommended next: **unmangle-when-unique** (clears bop.t + sprintf2.t — see
+> the `eval_unsafe` bullet above) and **W10-ext-3 container spanning** (clears
+> method.t, dents sort/scalar/ref).  NEITHER is a permanent gate; the earlier
+> "correctness wall" claim was retracted.
 >
 > ---
 > ## SESSION 278b STATUS (2026-07-07, Opus 4.8)

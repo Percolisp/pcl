@@ -467,4 +467,12 @@ test_transpile('typed lexical my Foo $f is a plain scalar',
 test_transpile('typed lexical without init',
     q{package Dog; package main; my Dog $spot; $spot = "rex"; print "$spot\n";});
 
+# W10 unmangle-when-unique (s278c): a file-unique my-lexical spanning a package
+# boundary is renamed to the PLAIN $Pkg::name global (no __file__N mangle), so a
+# dynamic string eval that names the bare var — in the declaring package — sees
+# the same cell.  Regression: the old unconditional mangle forced the whole file
+# to v1 whenever any dynamic eval was in scope.
+test_transpile('spanning lexical stays visible to a dynamic eval that names it',
+    q{my $strval = "init"; { package Bar; sub show { $strval } } $strval = "changed"; my $code = q<$strval>; print eval($code), "\n"; print Bar::show(), "\n";});
+
 done_testing();
