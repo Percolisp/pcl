@@ -594,34 +594,165 @@ sub _set_cur_package {
 # correctness.
 sub _check_my_spanning {
   my ($self, $segments) = @_;
-  my %live;       # bare names (no sigil) of my-vars declared in earlier segments
-  my %live_blk;   # bare name → blk id of its declaring segment (undef = file)
+  # Keyed by CANONICAL (sigil-qualified) variable — `my %h` and `my $h` are
+  # different variables, so the span check is a PPI decision (uses ->symbol to
+  # resolve $h{k}→%h, $a[0]→@a), not a bare-name text scan.  See _canon_refs_in.
+  my %live;       # canonical name → 1, declared in earlier segments
+  my %live_blk;   # canonical name → blk id of its declaring segment (undef = file)
   for my $i (0 .. $#$segments) {
     my $blk = $segments->[$i]{blk};
     # A lexical declared inside a flattened bare block (blk-tagged segment)
     # scopes to the BLOCK: once the segment run leaves that blk, the name is
-    # dead — later same-name text is a different variable (or a comment).
-    for my $bare (keys %live) {
-      delete $live{$bare}
-        if defined $live_blk{$bare}
-        && !(defined $blk && $blk == $live_blk{$bare});
+    # dead — a later same-name reference is a different variable.
+    for my $c (keys %live) {
+      delete $live{$c}
+        if defined $live_blk{$c}
+        && !(defined $blk && $blk == $live_blk{$c});
     }
     if ($i && %live) {
-      my $txt = join "\n", map { $_->content } @{ $segments->[$i]{stmts} };
-      for my $bare (sort keys %live) {
-        die "Parser2 TODO: my-lexical '$bare' spans a package boundary\n"
-          if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+      my $hit = $self->_canon_refs_in($segments->[$i]{stmts}, \%live);
+      for my $c (sort keys %$hit) {
+        (my $bare = $c) =~ s/^[\$\@\%]//;
+        die "Parser2 TODO: my-lexical '$bare' spans a package boundary\n";
       }
     }
     my %seg_lex;
-    $self->_collect_lexical_names($segments->[$i]{stmts}, \%seg_lex);
-    for my $bare (keys %seg_lex) {
+    $self->_collect_lexical_canon($segments->[$i]{stmts}, \%seg_lex);
+    for my $c (keys %seg_lex) {
       # A name already live as a FILE lexical keeps the wider scope even when
       # redeclared inside a block (shadowing) — over-checks, never under.
-      $live_blk{$bare} = $blk unless $live{$bare} && !defined $live_blk{$bare};
-      $live{$bare} = 1;
+      $live_blk{$c} = $blk unless $live{$c} && !defined $live_blk{$c};
+      $live{$c} = 1;
     }
   }
+}
+
+# Canonical (sigil-qualified) names of my/state-declared vars among the given
+# TOP-LEVEL statements, added to %$live (e.g. $x, %h, @a).  The sigil-aware
+# sibling of _collect_lexical_names: the span check must not conflate the
+# distinct variables $h and %h.  `our`/`local` are skipped (package vars).
+sub _collect_lexical_canon {
+  my ($self, $stmts, $live) = @_;
+  for my $stmt (@$stmts) {
+    next unless ref $stmt && $stmt->isa('PPI::Statement::Variable');
+    my $kw = ($stmt->schildren)[0];
+    next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
+    my @names = grep { /^[\$\@\%]\w+$/ } $self->_declared_names($stmt);
+    if (@names) { $live->{$_} = 1 for @names }
+    else {
+      # Unrecognized declaration shape — every symbol, canonicalized.
+      my $syms = $stmt->find('PPI::Token::Symbol') || [];
+      $live->{ $_->symbol } = 1 for grep { $_->content =~ /^[\$\@\%]\w+$/ } @$syms;
+    }
+  }
+  return;
+}
+
+# Which of the live CANONICAL variables %$live are REFERENCED by the segment's
+# statements — a PPI decision.  A Symbol's ->symbol resolves $h{k}→%h and
+# $a[0]→@a, so $h and %h are never conflated; $#x references @x.  A reference
+# can still hide from tokenisation in two places, matched conservatively by
+# bare name against the live set (over-gates, never under):
+#   - interpolation inside strings/regex/heredoc (_interp_names), and
+#   - a string eval's (possibly single-quoted) literal, which defers a
+#     reference no Symbol token covers (eval '$x').
+sub _canon_refs_in {
+  my ($self, $stmts, $live) = @_;
+  my (%hit, %live_bare);
+  for my $c (keys %$live) { (my $b = $c) =~ s/^[\$\@\%]//; push @{ $live_bare{$b} }, $c }
+  # The segment's statements share one PPI parent (the Document, or the `{}` of
+  # a flattened block).  Shadow analysis stops there: a `my` in a DIFFERENT
+  # segment under the same parent is the span source, not a shadow.
+  my ($seg_parent) = map { $_->parent } grep { ref && $_->isa('PPI::Node') } @$stmts;
+  for my $stmt (@$stmts) {
+    next unless ref $stmt && $stmt->isa('PPI::Node');
+    # String eval anywhere in the statement → conservative bare-name scan of
+    # the whole statement (a single-quoted eval body is a real deferred use).
+    my $has_str_eval = $stmt->find_any(sub {
+      $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval'
+        && do { my $n = $_[1]->snext_sibling;
+                $n && ($n->isa('PPI::Token::Quote')
+                       || ($n->isa('PPI::Structure::List')
+                           && $n->find_any('PPI::Token::Quote'))) } });
+    if ($has_str_eval) {
+      my $txt = $stmt->content;
+      for my $b (keys %live_bare) {
+        next unless $txt =~ /(?:[\$\@\%]|\$\#)\Q$b\E\b/;
+        $hit{$_} = 1 for @{ $live_bare{$b} };
+      }
+      next;
+    }
+    for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
+      my $canon = $s->symbol;
+      next unless $live->{$canon};
+      next if $self->_symbol_is_declarator($s);              # a decl, not a use
+      next if $self->_ref_shadowed($s, $canon, $stmts, $seg_parent);
+      $hit{$canon} = 1;
+    }
+    for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+      (my $b = $ai->content) =~ s/^\$#//;
+      $hit{"\@$b"} = 1
+        if $live->{"\@$b"} && !$self->_ref_shadowed($ai, "\@$b", $stmts, $seg_parent);
+    }
+    my %interp; _interp_names($stmt, \%interp);
+    for my $b (keys %interp) { $hit{$_} = 1 for @{ $live_bare{$b} || [] } }
+  }
+  return \%hit;
+}
+
+# Is this Symbol token the variable being DECLARED by an enclosing
+# my/state/our/local (the declarator), rather than a use of it?
+sub _symbol_is_declarator {
+  my ($self, $sym) = @_;
+  my $stmt = $sym;
+  $stmt = $stmt->parent while $stmt && !$stmt->isa('PPI::Statement');
+  return 0 unless $stmt && $stmt->isa('PPI::Statement::Variable');
+  my $kw = ($stmt->schildren)[0];
+  return 0 unless $kw && $kw->isa('PPI::Token::Word')
+    && $kw->content =~ /^(?:my|state|our|local)$/;
+  # Declared names occupy the tokens BEFORE the statement's top-level `=`.
+  for my $child ($stmt->schildren) {
+    last if $child->isa('PPI::Token::Operator') && $child->content eq '=';
+    return 1 if $child == $sym;                              # my $x
+    return 1 if $child->isa('PPI::Structure::List')          # my ($x, $y)
+      && grep { $_ == $sym } @{ $child->find('PPI::Token::Symbol') || [] };
+  }
+  return 0;
+}
+
+# Is the reference $sym (canonical $canon) shadowed by an earlier `my`/`state`
+# declaration of $canon in an enclosing block of the SAME segment?  Same-
+# segment is the crux: under flattening a `my` in an earlier segment sharing
+# the PPI block parent is the span SOURCE, not a shadow (method.t's `my $o`).
+# Only the clear case returns true; when unsure it returns false so the span
+# gate still fires (soundness: never wrongly clear a genuine span).
+sub _ref_shadowed {
+  my ($self, $sym, $canon, $stmts, $seg_parent) = @_;
+  my $node = $sym;
+  while (my $parent = $node->parent) {
+    my $at_seg = defined $seg_parent && $parent == $seg_parent;
+    if ($parent->isa('PPI::Structure::Block')
+        || $parent->isa('PPI::Statement::Sub') || $at_seg) {
+      for my $sib ($parent->schildren) {
+        last if $sib == $node;
+        # At the shared parent, only THIS segment's own declarations shadow.
+        next if $at_seg && !grep { $_ == $sib } @$stmts;
+        return 1 if $self->_stmt_declares_canon($sib, $canon);
+      }
+    }
+    last if $at_seg;                     # do not climb above the segment
+    $node = $parent;
+  }
+  return 0;
+}
+
+# Does $stmt declare canonical $canon (sigil-qualified) via my/state?
+sub _stmt_declares_canon {
+  my ($self, $stmt, $canon) = @_;
+  return 0 unless ref $stmt && $stmt->isa('PPI::Statement::Variable');
+  my $kw = ($stmt->schildren)[0];
+  return 0 unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
+  return scalar grep { $_ eq $canon } $self->_declared_names($stmt);
 }
 
 # Bare names (sigil stripped) of my/state-declared vars among the given
