@@ -486,4 +486,22 @@ test_transpile("T-A1: embedded-my in flattened package block, name reused as let
 }
 ');
 
+# W10 span-detection is a PPI decision (s278b): these go v2-NATIVE and must
+# match perl.  Each targets a soundness boundary of _canon_refs_in.
+test_transpile("W10: genuine my-lexical span across a package boundary", '
+my $x = 10;
+{ package Foo; sub g { $x + 1 } }
+print Foo::g(), "\n";
+');
+test_transpile("W10-ext-4: string eval that does NOT name the spanning var is safe", '
+my $x = 7;
+{ package Q; eval q(my $z = 1;); sub g { $x } }
+print Q::g(), "\n";
+');
+test_transpile("W10 sigil-distinct: my %h (main) vs interpolated \$h (block) are different vars", '
+my %h = (a => 1);
+print "$h{a}\n";
+{ package Bar; my $h = "S"; print "$h\n"; }
+');
+
 done_testing();

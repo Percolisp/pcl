@@ -694,10 +694,42 @@ sub _canon_refs_in {
       $hit{"\@$b"} = 1
         if $live->{"\@$b"} && !$self->_ref_shadowed($ai, "\@$b", $stmts, $seg_parent);
     }
-    my %interp; _interp_names($stmt, \%interp);
-    for my $b (keys %interp) { $hit{$_} = 1 for @{ $live_bare{$b} || [] } }
+    _interp_canon($stmt, $live, \%live_bare, \%hit);
   }
   return \%hit;
+}
+
+# Canonical variables referenced by interpolation inside a string/regex/heredoc,
+# added to %$hit if live.  Sigil-AWARE (unlike _interp_names, which only grabs
+# the bare name and would conflate $h/%h): "$h"→$h, "$h{k}"→%h, "$h[0]"→@h,
+# "@h"→@h, "$#h"→@h.  Only the ambiguous brace-deref forms (${…}, @{…}) fall
+# back to bare-name matching against the live set (over-gates, never under).
+sub _interp_canon {
+  my ($node, $live, $live_bare, $hit) = @_;
+  for my $t (@{ $node->find('PPI::Token') || [] }) {
+    my $c;
+    if ($t->isa('PPI::Token::HereDoc')) {
+      next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;   # non-interpolating
+      $c = join '', $t->heredoc;
+    } elsif ($t->isa('PPI::Token::Quote::Double')
+          || $t->isa('PPI::Token::Quote::Interpolate')
+          || $t->isa('PPI::Token::QuoteLike::Backtick')
+          || $t->isa('PPI::Token::QuoteLike::Command')
+          || $t->isa('PPI::Token::Regexp::Match')
+          || $t->isa('PPI::Token::Regexp::Substitute')) {
+      $c = $t->content;
+    } else { next; }
+    while ($c =~ /(?<!\\)\$#(\w+)/g) { $hit->{"\@$1"} = 1 if $live->{"\@$1"} }
+    while ($c =~ /(?<!\\)[\$\@]\s*\{\s*(\w+)/g) {                    # ${x}/@{x} deref
+      $hit->{$_} = 1 for @{ $live_bare->{$1} || [] };
+    }
+    while ($c =~ /(?<!\\)\@(\w+)/g) { $hit->{"\@$1"} = 1 if $live->{"\@$1"} }
+    while ($c =~ /(?<!\\)\$(\w+)(\s*[\[\{])?/g) {                    # $x / $x[.] / $x{.}
+      my $sig = !$2 ? '$' : $2 =~ /\[/ ? '@' : '%';
+      $hit->{"$sig$1"} = 1 if $live->{"$sig$1"};
+    }
+  }
+  return;
 }
 
 # Is this Symbol token the variable being DECLARED by an enclosing
@@ -891,6 +923,20 @@ sub _scan_lex_facts {
 # References BEFORE the declaration (earlier segments, or earlier statements
 # of the declaring segment, or the decl's own RHS) are package globals of a
 # DIFFERENT variable — left untouched, exactly Perl's visibility rule.
+# The last segment index in the same flattened-block run as segment $di (its
+# blk tag), i.e. the extent a block-scoped `my` from $di stays live over.  For
+# a file-level decl (no blk) the extent is all later segments.
+sub _blk_extent {
+  my ($segments, $di) = @_;
+  my $blk = $segments->[$di]{blk};
+  return $#$segments unless defined $blk;
+  my $last = $di;
+  $last++ while $last < $#$segments
+    && defined $segments->[$last + 1]{blk}
+    && $segments->[$last + 1]{blk} == $blk;
+  return $last;
+}
+
 sub _rename_spanning_lexicals {
   my ($self, $segments) = @_;
 
@@ -924,31 +970,71 @@ sub _rename_spanning_lexicals {
 
   my $f = {};
   $self->_scan_lex_facts($_->{stmts}, $f) for @$segments;
+  # Per-segment facts too (W10-ext-1): a `my $x` in a flattened block scopes to
+  # that block, so the eligibility facts for a block-declared span need only
+  # hold over the block's segment run — a same-name re-declaration in a
+  # DIFFERENT block (method.t's second `my $o`) is a distinct variable the
+  # block-bounded rewrite never touches, so it must not inflate decl_count.
+  my @sf;
+  for my $i (0 .. $#$segments) {
+    my $g = {};
+    $self->_scan_lex_facts($segments->[$i]{stmts}, $g);
+    $sf[$i] = $g;
+  }
   my $alltxt = join "\n", map { map { $_->content } @{ $_->{stmts} } } @$segments;
 
-  # String eval anywhere at/after the earliest declaring segment → no rename
-  # for any spanning name (cheap and conservative; eval-BLOCKS are fine).
-  my $min_seg = (sort { $a <=> $b } map { $decl_seg{$_} } keys %spanning)[0];
-  for my $j ($min_seg .. $#$segments) {
-    for my $stmt (@{ $segments->[$j]{stmts} }) {
+  # W10-ext-4: a rename is unsafe w.r.t. a string eval only if the eval could
+  # NAME the renamed lexical — the session-250 capture alist finds lexicals by
+  # name, and a renamed package cell is invisible to it.  Per segment, record
+  # (a) the literal text of each string eval's argument, and (b) whether a
+  # DYNAMIC string eval (eval of a non-literal expression) appears — the latter
+  # could reference anything, so it stays conservative.  eval BLOCKS are fine.
+  my (@eval_lit, @eval_dyn);
+  for my $i (0 .. $#$segments) {
+    my ($lit, $dyn) = ('', 0);
+    for my $stmt (@{ $segments->[$i]{stmts} }) {
       next unless ref $stmt && $stmt->isa('PPI::Node');
       for my $w (@{ $stmt->find(sub { $_[1]->isa('PPI::Token::Word')
                                       && $_[1]->content eq 'eval' }) || [] }) {
         my $nx = $w->snext_sibling;
-        return unless $nx && $nx->isa('PPI::Structure::Block');
+        next if !$nx || $nx->isa('PPI::Structure::Block');   # eval { } — fine
+        my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
+              : $nx->isa('PPI::Structure::List')
+                ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
+        if (@q) { $lit .= $_->content for @q } else { $dyn = 1 }
       }
     }
+    ($eval_lit[$i], $eval_dyn[$i]) = ($lit, $dyn);
   }
+  # True if renaming $bare (declared in segment $di) could be seen by a string
+  # eval in scope (at/after the declaration).
+  my $eval_unsafe = sub {
+    my ($bare, $di) = @_;
+    for my $j ($di .. $#$segments) {
+      return 1 if $eval_dyn[$j];
+      return 1 if $eval_lit[$j] =~ /(?:[\$\@\%]|\$\#)\s*\{?\s*\Q$bare\E\b/;
+    }
+    return 0;
+  };
 
   for my $bare (sort keys %spanning) {
-    next if $f->{disq}{$bare};
-    my $sdecls = $f->{scalar_decl}{$bare};
-    next unless $sdecls && @$sdecls == 1
-             && ($f->{decl_count}{$bare} // 0) == 1;
-    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block
+    next if $eval_unsafe->($bare, $decl_seg{$bare});
     my $di = $decl_seg{$bare};
+    # Facts scoped to the declaration's live extent: the block's segment run for
+    # a flattened-block decl, else all later segments (file lexical).  Decls or
+    # disqualifying uses outside that range belong to a different variable.
+    my $hi = _blk_extent($segments, $di);
+    my ($dc, $disq, @sdecls) = (0, 0);
+    for my $j ($di .. $hi) {
+      $dc  += $sf[$j]{decl_count}{$bare} // 0;
+      $disq ||= $sf[$j]{disq}{$bare};
+      push @sdecls, @{ $sf[$j]{scalar_decl}{$bare} || [] };
+    }
+    next if $disq;
+    next unless @sdecls == 1 && $dc == 1;
+    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block
     next if $segments->[$di]{blockform};
-    my $decl  = $sdecls->[0];
+    my $decl  = $sdecls[0];
     my $stmts = $segments->[$di]{stmts};
     my ($idx) = grep { $stmts->[$_] == $decl } 0 .. $#$stmts;
     next unless defined $idx;   # decl not a top-level statement of its segment
@@ -972,15 +1058,9 @@ sub _rename_spanning_lexicals {
     # section's defvar (which has already loaded — sections load in order).
     # A block lexical's rewrite stops at its blk run's end: text after the
     # block is out of the lexical's Perl scope (a same-name mention there is
-    # a different variable) and must NOT be rewritten.
-    my $decl_blk = $segments->[$di]{blk};
-    my $last_j = $#$segments;
-    if (defined $decl_blk) {
-      $last_j = $di;
-      $last_j++ while $last_j < $#$segments
-        && defined $segments->[$last_j + 1]{blk}
-        && $segments->[$last_j + 1]{blk} == $decl_blk;
-    }
+    # a different variable) and must NOT be rewritten — the same extent the
+    # eligibility facts above were scoped to.
+    my $last_j = $hi;
     my $qual = '$' . $segments->[$di]{pkg} . '::' . $newbare;
     for my $j ($di + 1 .. $last_j) {
       for my $stmt (@{ $segments->[$j]{stmts} }) {
