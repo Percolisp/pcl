@@ -59,11 +59,40 @@ sub parse_with_fallback {
     delete $opts{lenient_ppi};
     if (!%opts) {                       # plain parse only; special modes → v1
       my $out = eval { Pl::Parser2->$method($args[0]) };
-      return $out if defined $out;
+      return pipeline_marker(v2 => $out) if defined $out;
       print STDERR "pl2cl: v2 fell back to v1: $@" if $ENV{PCL_V2_VERBOSE};
     }
   }
-  return Pl::Parser->$method(@args);
+  return pipeline_marker(v1 => Pl::Parser->$method(@args));
+}
+
+# T0.1 pipeline marker (docs/v2-transfer-plan.md): every transpile carries one
+# leading comment line naming the pipeline that produced it, so the dialect
+# mix of a corpus — and of ~/.pcl-cache — is auditable.  gen= is read from the
+# runtime's *pcl-cache-generation* (the single source of truth; do NOT
+# duplicate the string here — a wrong gen in the marker would be worse than
+# none when debugging stale-cache problems).
+my $CACHE_GEN;
+sub cache_generation {
+  return $CACHE_GEN if defined $CACHE_GEN;
+  $CACHE_GEN = 'unknown';
+  my $rt = dirname(abs_path($0)) . '/cl/pcl-runtime.lisp';
+  if (open my $fh, '<', $rt) {
+    while (my $line = <$fh>) {
+      if ($line =~ /\(defparameter\s+\*pcl-cache-generation\*\s+"([^"]+)"/) {
+        $CACHE_GEN = $1;
+        last;
+      }
+    }
+    close $fh;
+  }
+  return $CACHE_GEN;
+}
+
+sub pipeline_marker {
+  my ($pipeline, $out) = @_;
+  return $out unless defined $out;
+  return ";;; pcl: pipeline=$pipeline gen=" . cache_generation() . "\n" . $out;
 }
 
 # Parse command line options
@@ -185,7 +214,8 @@ sub _run_server {
     last unless defined $got && $got == $len;
 
     my $cl = eval {
-      my $output = Pl::Parser->parse_code($code, eval_mode => 1, eval_pkg => $pkg);
+      my $output = pipeline_marker(v1 =>
+        Pl::Parser->parse_code($code, eval_mode => 1, eval_pkg => $pkg));
       my $preamble = build_eval_preamble($pkg);
       $output =~ s/\(in-package :pcl\)/$preamble/;
       $output
@@ -234,7 +264,10 @@ sub do_bundle {
   say STDERR "Bundling: $source_file -> $output_file";
 
   # Transpile the main file (this recursively processes dependencies)
-  my $transpiled = Pl::Parser->parse_file($source_file);
+  # NOTE (v2-transfer): bundle mode is a v1-ONLY path today — parse_file here
+  # bypasses parse_with_fallback entirely.  Catalogued in
+  # docs/v2-transfer-plan.md; route through parse_with_fallback at T-D.
+  my $transpiled = pipeline_marker(v1 => Pl::Parser->parse_file($source_file));
 
   # Inject preamble
   my $preamble = build_preamble($source_file);
