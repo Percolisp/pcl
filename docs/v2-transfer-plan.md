@@ -1,5 +1,141 @@
 # V2 Transfer Plan — finishing the move to one pipeline
 
+> ## SESSION 278 STATUS (2026-07-07, Fable → Opus 4.8 handoff)
+>
+> T0 is **DONE** (marker, seam census, module census — data below and in
+> `docs/v2-census-2026-07-07.md`).  T-A1 is **IMPLEMENTED BUT FLAGGED OFF**
+> (`PCL_V2_PKGBLOCK=1`) with one open miscompile; one real pre-existing
+> annotator bug found and fixed on the way.  **START HERE → §T-A1 STATUS.**
+>
+> ### What landed this session
+> 1. **T0.1 pipeline marker** — every transpile starts with
+>    `;;; pcl: pipeline=v2 gen=v2-9`.  One chokepoint (`pipeline_marker` in
+>    pl2cl's `parse_with_fallback`) + the two direct-v1 sites (server mode,
+>    bundle mode — NOTE: **bundle mode is v1-only today**, route it through
+>    `parse_with_fallback` at T-D).  gen= is read from the runtime's
+>    `*pcl-cache-generation*` (bumped v2-8 → **v2-9**).
+> 2. **T0.2 seam census instrumentation** — `PCL_V2_SEAM_CENSUS=1` makes
+>    Parser2 dump per-file TSV histograms to stderr (`pcl-seam` lines): the
+>    statement seam, fallen-back expression roots, and the **blame frontier**
+>    (per fallen-back tree, re-run `gen_form` post-order; blame nodes that
+>    fail while all their children succeed — the exact constructs whose
+>    porting unblocks expressions).  Zero cost when unset.  Driver:
+>    `perl tools/v2-census.pl [--jobs N] [files...]` → markdown report
+>    (defaults to perl-tests/*.t; give it .pm paths for the module corpus).
+>    Note when reading: a `word:NAME` blame row means "call to NAME"
+>    (unknown/builtin callee — the Word leaf is blamed, not the funcall).
+> 3. **T0.3 module census** run over cpan-tests/modules + Try-Tiny +
+>    Role-Tiny + Scalar-List-Utils + lib/*.pm.
+> 4. **VarAnnotator fix (default-on, real bug)**: a chained deref write
+>    `$r->{A}[0] = 5` left `$r` **unboxed** (`(p-undef)` raw let) because the
+>    `=`-handler's h_acc/a_acc branch treated every element write as
+>    "container write, keys are reads".  With `$r` unboxed, autovivification
+>    cannot write the vivified hash back through the box → every deref
+>    re-vivifies a fresh hash (exists_sub.t t13 returned false).  Fix: when
+>    the access BASE is not a plain %h/@a Symbol (checked via PPI
+>    `->symbol`), `_tw_mark` the base subtree `write-deref-viv`.
+>    Single-level `$r->{a}` was never affected (h_ref_acc root → write-list
+>    branch).  exists_sub.t: 12+1F → **18/18**.
+>
+> ### Census headlines (full data: docs/v2-census-2026-07-07.md)
+> - perl-tests: **66 native / 45 gated** (bit-identical to the s277c
+>   baseline).  Gates: 18× package-in-block, 4× spanning-my, 6× capture
+>   family, 2× CORE::, + singles.
+> - modules (119 files): **94 native / 25 gated** — and ZERO
+>   package-in-block: real-module gates are **17× "file lexical captured by
+>   sub"** (the W5 subset misses), 2× BEGIN-introspection, 2× **"my
+>   array/hash in condition"** (a gate the perl-tests census never shows!),
+>   2× poisoned-cond-my-interp.  **For CPAN value, A2 (capture family)
+>   outranks A1.**
+> - Expression seam: **88.9%** of expressions fall back (perl-tests corpus),
+>   **81.2%** (module corpus).  The v1 expression generator is v2's main
+>   backend, not an edge case → T-C option (ii) (re-house ExprToCL.pm's
+>   emitters as CLForm producers) is confirmed as the strategy; per-op
+>   porting can never cover this.  Module-corpus frontier top: `sym:@`,
+>   `op:+` (the `+{…}` disambiguator), `node:h_ref_acc` ($self->{k}!),
+>   `cast` (%$self), `magic:@_`, `word:shift` — the OO family; that subset
+>   is ALSO the perf-relevant one (extends W11/W14).
+> - Statement seam is small and closed-class: use/no/require, BEGIN family,
+>   `local`, proto/sig `sub` — structural, handled by re-housing, not
+>   per-op ports.
+>
+> ### T-A1 STATUS — implemented, flagged off, one bug to fix
+> Implementation (all in `Pl/Parser2.pm`): `_flattenable_pkg_block`
+> (predicate + conservative refusals: labeled block; `last/next/redo/goto`
+> that could target the block — a bare block is a one-iteration loop;
+> direct-child `local`), the `$consume_pkg` closure (shared package-stmt
+> consumer for top level and flattened blocks), blk-tagged segments +
+> restore segment, and **blk-extent live-ranges** in `_check_my_spanning` /
+> `_rename_spanning_lexicals` (a block lexical dies at its block's end —
+> both for spanning detection and for bounding the qualified rewrite; this
+> is what stops whole-file text-scan false positives on short names like
+> `$r`).  Enable with `PCL_V2_PKGBLOCK=1`.
+>
+> Verified with the flag on: concat2 4/4, exists_sub 18/18, parent 7+2F
+> (**identical to v1**, pre-existing), spanning + closure-write reductions
+> match perl.  **Open bug (the reason for the flag): join.t 41/43.**
+> Diagnosis so far: in the full join.t transpile the `package o { use
+> overload … }` section and the final bare block (tests 42–43) are emitted
+> **out of source order** — they appear at output lines ~262–295, BEFORE
+> the SM sections (~307+), and the two `pl-is` forms abort at load
+> (`p-load-with-recovery` reports "2 top-level form(s) aborted").  In
+> isolation the same code transpiles and runs correctly, so it is an
+> interaction with the preceding flattened blocks/segments — suspect the
+> section-assembly bookkeeping (`_captured_decls`/`_sched_defs` snapshots
+> per section) or the leading/restore segments my flattening inserts.
+> Repro:
+> ```
+> PCL_V2_PKGBLOCK=1 perl -I. pl2cl --no-cache perl-tests/join.t > /tmp/j.lisp
+> grep -n ';;; package' /tmp/j.lisp   # o-section sits before SM-sections
+> ```
+> Also note: `(defvar $overloaded …)` gets forward-declared from a TEST
+> DESCRIPTION string ("join, $overloaded, LIST") — the forward-global text
+> scan reads string contents; harmless here, but a known sharp edge.
+>
+> **Definition of done for T-A1:** fix the ordering bug → full-sweep parity
+> on all 18 files (each must be ≥ its v1 numbers) → remove the
+> `PCL_V2_PKGBLOCK` flag (default on) → bump `*pcl-cache-generation*` →
+> census re-run shows package-in-block ≤ 5 (bless/index/local/magic/reset
+> stay gated: nested-compound/in-sub-body/direct-local cases — design (b)
+> territory, likely not worth it; discuss permanent gates with the user).
+>
+> ### The next-gate worklist behind T-A1 (measured, in leverage order)
+> With flattening on, 13 files slide from "package-in-block" to
+> **"my-lexical spans a package boundary"** — the W10 rename subset
+> refusals, each classified this session:
+> - **W10-ext-1 — block-scoped facts** (clears sort.t, method.t, more): the
+>   subset demands `decl_count == 1` FILE-wide; for a blk-tagged declaring
+>   segment the facts (decl_count, disq) only need to hold over the block's
+>   extent, since the rewrite already stops there.  sort.t has two
+>   `my $answer` in different blocks; method.t two `my $o`.
+> - **W10-ext-2 — multi-decl spanning** `my ($bar, $baz)` (vec.t): extend
+>   `scalar_decl` to per-name positions inside a multi-decl.
+> - **W10-ext-3 — container spanning** `my %h` (each.t, hash.t): rename to
+>   a defvar'd vector/table package cell — same mechanism, `@/%` sigils.
+> - **W10-ext-4 — narrow the string-eval blanket refusal** (pos.t): today
+>   ANY `eval STRING` at/after the declaring segment refuses every rename;
+>   only evals that could SEE the renamed name matter (same-scope test, or
+>   at least skip when the eval'd literal never mentions it).
+> - **typed `my Foo $f;`** (multideref.t): unsupported-declaration die in
+>   `_lower_stmt`; lower by ignoring the class name (v1 does).
+> - length.t's `$u`: subset refusal not yet classified — debug first
+>   (likely tie/interp disq).
+>
+> ### Rules that bit this session (don't relearn them)
+> - **Sweep parallel runs are flaky** (known): parallel `--jobs 4` gave
+>   exists_sub 12+1F while `--jobs 1` gave 18/18.  ALWAYS re-verify a
+>   suspicious per-file result with `--jobs 1` before debugging it.
+> - The v1-comparison sweep run **overwrites `.faillog/`** — capture v2's
+>   faillog before running the v1 baseline.
+> - `./runpl perl-tests/foo.t` cannot run test.pl-based files (BEGIN
+>   `require './test.pl'` needs CWD=perl-tests and the sweep's pcl-test.lisp
+>   provides plan/is/ok) — reproduce sweep failures with the sweep line:
+>   `timeout 60 sbcl --control-stack-size 512 --noinform --non-interactive
+>   --load cl/pcl-runtime.lisp --eval '(setf pcl::*pcl-skip-cache* t)'
+>   --load cl/pcl-test.lisp --load cl/skip-registry.lisp --eval
+>   '(pcl::p-load-with-recovery "/tmp/foo.lisp")'`
+>
+
 **Written:** 2026-07-07 (session 277c), immediately after `state`-in-named-subs
 went native. **Baseline:** cache generation v2-8, census **66 of 111
 perl-tests fully v2-native**, 45 gated to v1; Pl/t gate 114 files green.

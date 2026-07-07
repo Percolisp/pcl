@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 278 (2026-07-07) — transfer-plan T0 done; T-A1 built (flagged); annotator deref-viv fix.
+
+- **T0.1 pipeline marker**: every transpile begins
+  `;;; pcl: pipeline=v2|v1 gen=v2-9` (chokepoint `pipeline_marker` in
+  pl2cl; gen read from the runtime's `*pcl-cache-generation*`, bumped
+  v2-8→v2-9).  Catalogued: **bundle mode is a v1-only path** (direct
+  `Pl::Parser->parse_file`), fix at T-D.
+- **T0.2/T0.3 census machinery + data**: `PCL_V2_SEAM_CENSUS=1` seam
+  histograms in Parser2 (stmt seam, expr roots, **blame frontier** =
+  post-order per-node gen_form re-runs, blaming failure nodes whose
+  children all succeed); driver `tools/v2-census.pl`; data in
+  `docs/v2-census-2026-07-07.md`.  Headlines: expression seam = **88.9%**
+  (perl-tests) / **81.2%** (modules) of expressions → T-C(ii) re-housing
+  confirmed; module corpus has ZERO package-in-block gates — real-module
+  gates are 17× W5-capture misses (+2 "my array/hash in condition", a
+  gate invisible in perl-tests); module blame frontier = the OO family
+  (`h_ref_acc`, casts, `@_`/shift, `+{…}`).
+- **T-A1 package-in-block flattening IMPLEMENTED, flagged off**
+  (`PCL_V2_PKGBLOCK=1`): `_flattenable_pkg_block` + shared `$consume_pkg`
+  + blk-tagged segments + restore segment + **blk-extent live-ranges** in
+  both spanning passes (block lexicals die at block end — kills the
+  whole-file text-scan false positives).  Verified: concat2 4/4,
+  exists_sub 18/18, parent = v1 exactly; **open: join.t 41/43 — the
+  `package o` section + final block emit OUT OF SOURCE ORDER (before the
+  SM sections) and 2 forms abort at load**; isolation works, so it's an
+  interaction with preceding flattened segments (suspect section-assembly
+  `_captured_decls`/`_sched_defs` snapshots or the inserted
+  leading/restore segments).  DoD + repro + next-gate worklist (W10-ext-1
+  … -4, typed-my) in `docs/v2-transfer-plan.md` §SESSION 278 STATUS.
+- **VarAnnotator bug (pre-existing, default-path FIX)**: chained deref
+  write `$r->{A}[0]=5` left `$r` unboxed → autoviv wrote into a transient
+  hash, every deref re-vivified (exists_sub.t t13 "references to
+  subroutines exist" false).  The `=`-handler's h_acc/a_acc branch now
+  marks the base subtree `write-deref-viv` unless the base is a plain
+  %h/@a Symbol (PPI `->symbol`).  Regression tests in
+  `Pl/t/transpile-test-16.t`.
+- Gotchas re-learned: sweep parallel flakiness (verify with --jobs 1);
+  v1-baseline sweep run overwrites `.faillog/`; runpl can't run
+  test.pl-based perl-tests (use the sweep's sbcl line).
+
+---
+
 ## Session 277c (2026-07-07) — state native in v2; transfer plan written.
 
 - **`state` in NAMED subs is v2-native** (was: any `state` → whole-file v1,

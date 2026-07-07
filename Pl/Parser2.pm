@@ -191,32 +191,78 @@ sub parse {
   # own output section whose (in-package …) preamble puts the READER in the
   # right CL package — an in-package nested inside a form is a no-op for the
   # rest of that already-read form, so the switch must happen between
-  # top-level forms.  Block form / versioned `package` stay TODO (whole-file
-  # v1 fallback); `package` inside a block dies in _lower_stmt.
+  # top-level forms.  A `package` nested deeper than the positions handled
+  # here dies in _lower_stmt (whole-file v1 fallback).
   my @segments = ({ pkg => 'main', stmts => [], reopen => 0 });
   my $cur_pkg = 'main';
   my %opened  = (main => 1);   # packages whose full preamble was already emitted
+  # T-A1 block extents: segments born from a flattened bare block carry
+  # `blk => ID`.  A my-lexical declared in a blk-tagged segment is live only
+  # while later segments carry the SAME blk (its Perl scope ends at the
+  # block) — the spanning check/rename passes use this to (a) not flag names
+  # that merely recur after the block, (b) stop the qualified rewrite at the
+  # block end.  Flattened-block segment runs are contiguous by construction.
+  my $cur_blk;
+  my $blk_counter = 0;
+  # One consumer for `package` statements, shared by the top level and the
+  # T-A1 bare-block flattening below (both forms, identical semantics).
+  my $consume_pkg = sub {
+    my ($child) = @_;
+    return 0 unless $child->isa('PPI::Statement::Package');
+    my ($block) = grep { $_->isa('PPI::Structure::Block') } $child->schildren;
+    my $pkg = $child->namespace // 'main';
+    my $version = eval { $child->version };
+    # PPI quirk (see v1 _emit_package_version): ->version returns the BLOCK
+    # text for an unversioned block form — accept only real version literals.
+    undef $version unless defined $version && $version =~ /^v?\d+(?:[._]\d+)*$/;
+    if ($block) {
+      # Block form `package Foo { … }`: a section for Foo, then a short-form
+      # RETURN section that puts the reader back in the enclosing package
+      # (which already has its own section — hence reopen).
+      push @segments, { pkg => $pkg, stmts => [$block->schildren],
+                        reopen => ($opened{$pkg}++ ? 1 : 0), version => $version,
+                        blockform => 1, blk => $cur_blk };
+      push @segments, { pkg => $cur_pkg, stmts => [], reopen => 1, blk => $cur_blk };
+      return 1;                             # $cur_pkg unchanged
+    }
+    push @segments, { pkg => $pkg, stmts => [],
+                      reopen => ($opened{$pkg}++ ? 1 : 0), version => $version,
+                      blk => $cur_blk };
+    $cur_pkg = $pkg;
+    return 1;
+  };
   for my $child ($doc->schildren) {
-    if ($child->isa('PPI::Statement::Package')) {
-      my ($block) = grep { $_->isa('PPI::Structure::Block') } $child->schildren;
-      my $pkg = $child->namespace // 'main';
-      my $version = eval { $child->version };
-      # PPI quirk (see v1 _emit_package_version): ->version returns the BLOCK
-      # text for an unversioned block form — accept only real version literals.
-      undef $version unless defined $version && $version =~ /^v?\d+(?:[._]\d+)*$/;
-      if ($block) {
-        # Block form `package Foo { … }`: a section for Foo, then a short-form
-        # RETURN section that puts the reader back in the enclosing package
-        # (which already has its own section — hence reopen).
-        push @segments, { pkg => $pkg, stmts => [$block->schildren],
-                          reopen => ($opened{$pkg}++ ? 1 : 0), version => $version,
-                          blockform => 1 };
-        push @segments, { pkg => $cur_pkg, stmts => [], reopen => 1 };
-        next;                                 # $cur_pkg unchanged
+    next if $consume_pkg->($child);
+    # T-A1: a top-level bare block with direct-child `package` statements —
+    # the helper-class idiom `{ package Foo; sub new {…} … }`.  Flatten its
+    # children into the segment stream so the normal machinery applies; then
+    # restore the enclosing package (statement-form `package` inside a block
+    # is block-scoped).  Lexical safety: flattening runs BEFORE the rename
+    # passes, so a `my` spanning the intra-block segments is renamed (W10
+    # subset) or dies → v1, exactly like a file lexical — and the blk tags
+    # bound both the check and the rewrite to the block's extent.
+    #
+    # OFF BY DEFAULT (PCL_V2_PKGBLOCK=1 to enable) until the join.t
+    # section-ordering bug is fixed — see docs/v2-transfer-plan.md §T-A1
+    # STATUS.  With the flag off these files keep gating to v1 (the
+    # pre-existing behaviour); flipping it on clears concat2/exists_sub/
+    # join/parent's gates but join.t then loses its last two tests to a
+    # section-ordering miscompile.  Fix, verify parity, then remove the flag.
+    if ($ENV{PCL_V2_PKGBLOCK}
+        and my $inner = $self->_flattenable_pkg_block($child)) {
+      my $outer_pkg = $cur_pkg;
+      $cur_blk = ++$blk_counter;
+      # The block's leading statements (before its first `package`) get their
+      # own blk-tagged segment so their `my`s die at the block end too.
+      push @segments, { pkg => $outer_pkg, stmts => [], reopen => 1, blk => $cur_blk };
+      for my $c (@$inner) {
+        next if $consume_pkg->($c);
+        push @{ $segments[-1]{stmts} }, $c;
       }
-      push @segments, { pkg => $pkg, stmts => [],
-                        reopen => ($opened{$pkg}++ ? 1 : 0), version => $version };
-      $cur_pkg = $pkg;
+      $cur_blk = undef;
+      # Restore segment: plain enclosing scope (no blk).
+      push @segments, { pkg => $outer_pkg, stmts => [], reopen => 1 };
+      $cur_pkg = $outer_pkg;
       next;
     }
     push @{ $segments[-1]{stmts} }, $child;
@@ -474,7 +520,57 @@ sub parse {
              sort keys %pre;
   push @out, '' if %pre;
   push @out, @body;
+  $self->_seam_census_dump if _seam_census();
   return join("\n", @out);
+}
+
+# T-A1 (docs/v2-transfer-plan.md): is this top-level statement a bare block
+# whose direct children include `package` statements?  Returns the block's
+# significant children for flattening, or undef when the block must stay a
+# single statement (its nested `package` then dies in _lower_stmt →
+# whole-file v1, exactly as before this feature).
+#
+# Refusals — all conservative, cost is only the v2 lowering, never
+# correctness:
+#   - labeled block (a label makes it a by-name loop-control target);
+#   - `last`/`next`/`redo`/`goto` that could target the block itself: any
+#     LABELED one anywhere in the subtree, or an unlabeled one with no
+#     intervening loop compound / sub body between it and the block — a
+#     bare block IS a one-iteration loop in Perl, and flattening dissolves
+#     the (block nil) exit that v1 gives loop control to land on;
+#   - a direct-child `local` (its restore scope is the block end, which
+#     flattening dissolves; deeper `local`s keep their own inner blocks).
+sub _flattenable_pkg_block {
+  my ($self, $child) = @_;
+  return undef unless $child->isa('PPI::Statement::Compound');
+  my @k = $child->schildren;
+  return undef unless @k == 1 && $k[0]->isa('PPI::Structure::Block');
+  my $block = $k[0];
+  my @inner = grep { $_->significant } $block->children;
+  return undef unless grep { $_->isa('PPI::Statement::Package') } @inner;
+  return undef if grep { $self->_is_local_stmt($_) } @inner;
+  for my $br (@{ $block->find('PPI::Statement::Break') || [] }) {
+    my @bk = $br->schildren;
+    next unless @bk && $bk[0]->isa('PPI::Token::Word')
+      && $bk[0]->content =~ /^(?:last|next|redo|goto)$/;
+    return undef if @bk > 1 && $bk[1]->isa('PPI::Token::Word');   # labeled
+    my $safe = 0;
+    for (my $p = $br->parent; $p && $p != $block; $p = $p->parent) {
+      if ($p->isa('PPI::Statement::Sub')) { $safe = 1; last }     # named sub body
+      if ($p->isa('PPI::Statement::Compound')
+          && ($p->type // '') =~ /^(?:for|foreach|while|until)$/) {
+        $safe = 1; last;                                          # real loop
+      }
+      if ($p->isa('PPI::Structure::Block')) {
+        my $prev = $p->sprevious_sibling;                          # anon sub body
+        if ($prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub') {
+          $safe = 1; last;
+        }
+      }
+    }
+    return undef unless $safe;
+  }
+  return \@inner;
 }
 
 # Reset the shared Environment's notion of the current package to a segment's
@@ -496,8 +592,18 @@ sub _set_cur_package {
 # correctness.
 sub _check_my_spanning {
   my ($self, $segments) = @_;
-  my %live;   # bare names (no sigil) of my-vars declared in earlier segments
+  my %live;       # bare names (no sigil) of my-vars declared in earlier segments
+  my %live_blk;   # bare name → blk id of its declaring segment (undef = file)
   for my $i (0 .. $#$segments) {
+    my $blk = $segments->[$i]{blk};
+    # A lexical declared inside a flattened bare block (blk-tagged segment)
+    # scopes to the BLOCK: once the segment run leaves that blk, the name is
+    # dead — later same-name text is a different variable (or a comment).
+    for my $bare (keys %live) {
+      delete $live{$bare}
+        if defined $live_blk{$bare}
+        && !(defined $blk && $blk == $live_blk{$bare});
+    }
     if ($i && %live) {
       my $txt = join "\n", map { $_->content } @{ $segments->[$i]{stmts} };
       for my $bare (sort keys %live) {
@@ -505,7 +611,14 @@ sub _check_my_spanning {
           if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
       }
     }
-    $self->_collect_lexical_names($segments->[$i]{stmts}, \%live);
+    my %seg_lex;
+    $self->_collect_lexical_names($segments->[$i]{stmts}, \%seg_lex);
+    for my $bare (keys %seg_lex) {
+      # A name already live as a FILE lexical keeps the wider scope even when
+      # redeclared inside a block (shadowing) — over-checks, never under.
+      $live_blk{$bare} = $blk unless $live{$bare} && !defined $live_blk{$bare};
+      $live{$bare} = 1;
+    }
   }
 }
 
@@ -649,9 +762,17 @@ sub _rename_spanning_lexicals {
   my ($self, $segments) = @_;
 
   # Spanning names, detected exactly as _check_my_spanning does: declared in
-  # an earlier segment, textually used in a later one.
-  my (%decl_seg, %spanning, %live);
+  # an earlier segment, textually used in a later one — with the same
+  # blk-extent rule (a block lexical dies at its block's end, so it can only
+  # span within its own blk run).
+  my (%decl_seg, %spanning, %live, %live_blk);
   for my $i (0 .. $#$segments) {
+    my $blk = $segments->[$i]{blk};
+    for my $bare (keys %live) {
+      delete $live{$bare}
+        if defined $live_blk{$bare}
+        && !(defined $blk && $blk == $live_blk{$bare});
+    }
     if ($i && %live) {
       my $txt = join "\n", map { $_->content } @{ $segments->[$i]{stmts} };
       for my $bare (keys %live) {
@@ -662,6 +783,7 @@ sub _rename_spanning_lexicals {
     $self->_collect_lexical_names($segments->[$i]{stmts}, \%seg_lex);
     for my $bare (keys %seg_lex) {
       $decl_seg{$bare} //= $i;
+      $live_blk{$bare} = $blk unless $live{$bare} && !defined $live_blk{$bare};
       $live{$bare} = 1;
     }
   }
@@ -715,8 +837,19 @@ sub _rename_spanning_lexicals {
     # Later segments: the package-qualified form — their sections' reader
     # sits in THEIR package; the qualified symbol reaches the declaring
     # section's defvar (which has already loaded — sections load in order).
+    # A block lexical's rewrite stops at its blk run's end: text after the
+    # block is out of the lexical's Perl scope (a same-name mention there is
+    # a different variable) and must NOT be rewritten.
+    my $decl_blk = $segments->[$di]{blk};
+    my $last_j = $#$segments;
+    if (defined $decl_blk) {
+      $last_j = $di;
+      $last_j++ while $last_j < $#$segments
+        && defined $segments->[$last_j + 1]{blk}
+        && $segments->[$last_j + 1]{blk} == $decl_blk;
+    }
     my $qual = '$' . $segments->[$di]{pkg} . '::' . $newbare;
-    for my $j ($di + 1 .. $#$segments) {
+    for my $j ($di + 1 .. $last_j) {
       for my $stmt (@{ $segments->[$j]{stmts} }) {
         next unless ref $stmt && $stmt->isa('PPI::Node');
         for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
@@ -1990,6 +2123,7 @@ sub _lower_expr {
   # restore so the fallback sees pristine state.  (Structural mutations — e.g.
   # `$h{bar}`→`$h{"bar"}` via replace_child — are idempotent for the fallback.)
   my $snap = _ppi_state_snapshot(@parts);
+  my ($census_expr_o, $census_root);   # T0.2: tree refs for the seam census
   my $native = eval {
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
@@ -1997,11 +2131,21 @@ sub _lower_expr {
       parser      => $self->fallback_parser,
     );
     my ($node_id) = $expr_o->parse_expr_to_tree(\@parts);
+    ($census_expr_o, $census_root) = ($expr_o, $node_id);
     Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
                        sub_info => $self->_cur_sub_info,
                        lexicals => $self->fallback_parser->{_let_bound_vars} // {})
                  ->gen_form($node_id, $native_ctx);
   };
+  if (_seam_census()) {
+    if (defined $native) { $self->{_seam_native_expr}++ }
+    else {
+      # Census walk MUST run before _ppi_state_restore: the tree's PPI tokens
+      # are in their parsed state (fat-comma rewrite, adhoc keys), which is
+      # what the per-node gen_form re-runs in _seam_note_expr expect to see.
+      $self->_seam_note_expr($census_expr_o, $census_root);
+    }
+  }
   _ppi_state_restore($snap);   # restore pristine tokens + parse-state keys
   return $native if defined $native;
 
@@ -2369,6 +2513,7 @@ sub _lower_local {
 
 sub _fallback_stmt_capture {
   my ($self, $stmt, %opt) = @_;
+  $self->_seam_note_stmt($stmt) if _seam_census();
   my $p = $self->fallback_parser;
   my @saved = ($p->_sections, $p->_cur_bucket, $p->indent_level,
                $p->{_local_let_depth});
@@ -2464,6 +2609,102 @@ sub _wrap_cond_mys {
   return $form unless @names;
   return ['let', ['list', map { ['list', $_, ['make-p-box', 'nil']] } @names], $form];
 }
+
+# ============================================================ T0.2 seam census
+# (docs/v2-transfer-plan.md T0.2.)  Under PCL_V2_SEAM_CENSUS=1, count every
+# statement and expression that lowers through the v1 seam, keyed by
+# construct, and dump a TSV block to STDERR at the end of parse().  The
+# `blame` histogram is the T-C port-priority worklist: for each fallen-back
+# expression tree we re-run gen_form per node, post-order, and blame exactly
+# the FRONTIER nodes — gen_form fails on the node but succeeds on all its
+# children — i.e. the constructs whose porting unblocks expressions.  Zero
+# cost when the env var is unset.
+
+sub _seam_census { $ENV{PCL_V2_SEAM_CENSUS} ? 1 : 0 }
+
+sub _seam_note_stmt {
+  my ($self, $stmt) = @_;
+  (my $class = ref $stmt) =~ s/^PPI::Statement(?:::)?//;
+  $class = 'Plain' if $class eq '';
+  my @k = $stmt->schildren;
+  my $head = (@k && $k[0]->isa('PPI::Token::Word')) ? ':' . $k[0]->content : '';
+  $self->{_seam_stmt}{"$class$head"}++;
+}
+
+sub _seam_note_expr {
+  my ($self, $expr_o, $root_id) = @_;
+  $self->{_seam_fallback_expr}++;
+  if (!$expr_o || !defined $root_id) {
+    $self->{_seam_expr_root}{'(unparsed)'}++;
+    return;
+  }
+  $self->{_seam_expr_root}{ _seam_node_desc($expr_o, $root_id) }++;
+  my $gen = Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
+                               sub_info => $self->_cur_sub_info,
+                               lexicals => $self->fallback_parser->{_let_bound_vars} // {});
+  my $depth = 0;
+  $self->_seam_blame($gen, $expr_o, $root_id, \$depth);
+}
+
+# Post-order: returns 1 when gen_form succeeds on this subtree.  Blames the
+# node when it fails but every child succeeded (the porting frontier).
+sub _seam_blame {
+  my ($self, $gen, $expr_o, $id, $depth_ref) = @_;
+  return 1 if ++$$depth_ref > 400;              # pathological-tree safety
+  my $kids = $expr_o->get_node_children($id) || [];
+  my $kids_ok = 1;
+  for my $k (@$kids) {
+    $kids_ok = 0 unless $self->_seam_blame($gen, $expr_o, $k, $depth_ref);
+  }
+  my $ok = defined eval { $gen->gen_form($id) };
+  $self->{_seam_expr_blame}{ _seam_node_desc($expr_o, $id) }++
+    if !$ok && $kids_ok;
+  return $ok;
+}
+
+sub _seam_node_desc {
+  my ($expr_o, $id) = @_;
+  my $node = eval { $expr_o->get_a_node($id) };
+  return '(?)' unless $node;
+  if ($expr_o->is_internal_node_type($node)) {
+    my $type = $node->{type} // '?';
+    if ($type eq 'funcall') {
+      my $kids = $expr_o->get_node_children($id) || [];
+      my $f = @$kids ? eval { $expr_o->get_a_node($kids->[0]) } : undef;
+      return 'funcall:' . ((ref($f) && $f->isa('PPI::Token::Word')) ? $f->content : '(expr)');
+    }
+    return "node:$type";
+  }
+  my $r = ref $node;
+  return "raw:$node" unless $r;                  # non-ref scratch nodes
+  if ($r =~ /^PPI::Token::(.+)$/) {
+    my $t = $1;
+    return 'op:' . $node->content    if $t eq 'Operator';
+    return 'word:' . $node->content  if $t eq 'Word';
+    return 'magic:' . $node->content if $t eq 'Magic';
+    return 'sym:' . substr($node->content, 0, 1) if $t eq 'Symbol';
+    (my $short = lc $t) =~ s/::/-/g;
+    return $short;                               # quote-double, regexp-match, number, cast…
+  }
+  return $r;
+}
+
+sub _seam_census_dump {
+  my ($self) = @_;
+  my $tag = $self->has_filename ? $self->filename : '-';
+  print STDERR join("\t", 'pcl-seam', 'totals', $tag,
+                    'native-expr=' . ($self->{_seam_native_expr} // 0),
+                    'seam-expr='   . ($self->{_seam_fallback_expr} // 0),
+                    'seam-stmt='   . _hist_total($self->{_seam_stmt})), "\n";
+  for my $cat (qw(stmt root blame)) {
+    my $h = { stmt => $self->{_seam_stmt}, root => $self->{_seam_expr_root},
+              blame => $self->{_seam_expr_blame} }->{$cat} or next;
+    print STDERR join("\t", 'pcl-seam', $cat, $_, $h->{$_}), "\n"
+      for sort { $h->{$b} <=> $h->{$a} || $a cmp $b } keys %$h;
+  }
+}
+
+sub _hist_total { my ($h) = @_; my $n = 0; $n += $_ for values %{ $h // {} }; return $n }
 
 # Step statement that is EXACTLY `$i++` / `++$i` / `$i--` / `--$i` for the
 # given counter → '+' or '-'; anything else → undef.
