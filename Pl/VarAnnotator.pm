@@ -660,8 +660,25 @@ sub _tw_walk {
           unless _tw_shape_ok($ctx, $xo, $kids->[1]);
       }
       elsif ($ltype && ($ltype eq 'h_acc' || $ltype eq 'a_acc')) {
-        # container element write — not a scalar-slot event; keys are reads
-        _tw_walk($ctx, $xo, $kids->[0], 0);
+        # Container element write.  For a PLAIN container base (a Symbol
+        # whose ->symbol is %h/@a) no scalar is written — keys are reads.
+        # But a deref-CHAIN base ($r->{A}[0]: a_acc over h_ref_acc($r))
+        # autovivifies THROUGH the root scalar — the runtime writes the
+        # vivified container back into $r's box, so $r must stay boxed
+        # (exists_sub.t t13: unboxed $r made every deref re-vivify a fresh
+        # hash).  Mark every $scalar under the base as written; a nested
+        # plain access ($h{a}{b}) over-marks token '$h' — over-boxing only,
+        # never correctness.
+        my $base = $lkids->[0];
+        my $bn   = defined $base ? $xo->get_a_node($base) : undef;
+        if (ref($bn) && !$xo->is_internal_node_type($bn)
+            && $bn->isa('PPI::Token::Symbol')
+            && $bn->symbol =~ /^[\@\%]/) {
+          _tw_walk($ctx, $xo, $kids->[0], 0);
+        } else {
+          _tw_mark($ctx, $xo, $base, 'write-deref-viv') if defined $base;
+          _tw_walk($ctx, $xo, $kids->[0], 0);
+        }
       }
       else {
         # list assign / paren-wrapped / lvalue-fn target (D11): every

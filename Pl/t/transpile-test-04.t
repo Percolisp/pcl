@@ -443,4 +443,17 @@ test_transpile('$#[0] on empty @# is undef, not a crash',
 test_transpile('$#[N] indexes array @#',
     q{@{"#"}=(10,20,30); print $#[0], " ", $#[2], "\n";});
 
+# ============ chained deref-write autoviv keeps the root scalar boxed ======
+# s278 VarAnnotator fix (write-deref-viv): `$r->{A}[0] = V` autovivifies
+# THROUGH $r — an unboxed $r made every deref re-vivify a fresh container
+# (exists_sub.t t13: the stored coderef "vanished").
+test_transpile('chained deref write $r->{A}[0] persists through the root scalar',
+    q{my $r; $r->{A}[0] = 5; print $r->{A}[0], "\n";});
+test_transpile('coderef stored via chained deref write is found again',
+    q{sub t4; my $r; $r->{A}[0] = \&t4; print( (exists &{$r->{A}[0]}) ? "yes\n" : "no\n");});
+test_transpile('array-of-hash chained write',
+    q{my $r; $r->[1]{k} = "v"; print $r->[1]{k}, "\n";});
+test_transpile('plain container element writes stay correct beside chained ones',
+    q{my $h; my %t; $t{x} = 1; $h->{a}{b} = 2; my $n = $t{x} + 1; print "$h->{a}{b} $n\n";});
+
 done_testing();
