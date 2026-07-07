@@ -1,5 +1,47 @@
 # V2 Transfer Plan — finishing the move to one pipeline
 
+> ## SESSION 278c STATUS (2026-07-07, Opus 4.8) — typed-my done; spanning-file blockers measured
+>
+> **Census now 75 v2-native / 36 gated** (cache gen **v2-13**).  Two W10-ext
+> items had already landed before this session (commits 0f0af0f, 04480ef:
+> AST-based span detection + block-extent facts + per-name eval narrowing),
+> which cleared each.t and others (66→74).  **This session: typed lexicals
+> `my Foo $f`** (commit f88accb) — PPI keeps the class name as an inert Word
+> token between declarator and symbol; a normalization pass
+> (`_strip_typed_lexical_classes`, run right after PPI parse) removes it so
+> downstream sees `my $f`.  Cleared **multideref.t** (parity 43+9/65,
+> byte-identical v2==v1).
+>
+> **THE 8 SPANNING FILES ARE MEASURED — don't re-derive.**  Added a
+> temporary `PCL_V2_RENAME_DEBUG` probe (removed after use) reporting which
+> `next` in `_rename_spanning_lexicals` refuses each spanning name.  Results:
+> - **`eval_unsafe` (dominant)**: bop.t `$strval`, caller.t `$i`, sprintf2.t
+>   (`$doubledouble`/`$hexfloat`/`$tests`), eval.t (many), ref.t `$x`.  The
+>   rename mangles the name (`$x__file__N`); a string eval that references
+>   the bare name by content would break.  For a **dynamic** eval
+>   (`eval $var`) the contents are opaque, so this CANNOT be safely narrowed
+>   — narrowing it is a silent-miscompile risk (violates §0.4).  bop.t and
+>   sprintf2.t are blocked **only** by this ⇒ effectively stuck behind a real
+>   correctness wall, not a missing feature.  Leave gated.
+> - **container / multi-decl (`disq` + `dc>1`)**: method.t `%methods`
+>   (hash), sort.t `@list`/`@output` (arrays), scalar.t `$fh`/`$x`
+>   (dc=6/dc=4 — multiple file-level decls), ref.t `$test` (dc=2).  These
+>   need **W10-ext-3 (container spanning)** — rename `%h`/`@a` file-lexicals
+>   to a defvar'd table/vector cell (the scalar path already lowers renamed
+>   decls as defvar boxes: Parser2.pm:1760, verified).  method.t's ONLY
+>   blocker is `%methods` ⇒ **W10-ext-3 clears method.t cleanly** and is the
+>   best next single-file target.  sort.t needs BOTH containers and the
+>   `dc>1` block-shadow fix (a file-level decl's extent wrongly counts a
+>   block-nested `my $answer` of the same name as a second decl).
+> - **caller.t `$line`**: `dc=2` (two file-level decls) — genuinely two
+>   variables, needs shadow-aware extent scoping.
+>
+> Recommended next: **W10-ext-3 container spanning** (clears method.t, dents
+> sort/scalar/ref).  The `eval_unsafe`-only files (bop, sprintf2) should be
+> discussed as **permanent gates** with the user — they are a correctness
+> wall (dynamic eval + name mangling), not a feature gap.
+>
+> ---
 > ## SESSION 278b STATUS (2026-07-07, Opus 4.8)
 >
 > **T-A1 is DONE and DEFAULT-ON** (flag `PCL_V2_PKGBLOCK` removed).  The
