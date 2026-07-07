@@ -40,7 +40,9 @@ itself carries no host-specific semantics beyond them.
 - **The tree is explicit.** Perl's implicit operands are materialized at
   parse time: `$_` defaults (§8), `@_`/`@ARGV` for bare `shift`/`pop`,
   filetest operands. What you see in the tree is the complete argument
-  list; the one runtime-side default is bare `p-print`/`p-say` → `$_`.
+  list — there is **no** runtime-side argument default (bare
+  `print;`/`say;`/`printf;` arrive as `(p-print $_)` etc., materialized by
+  the codegen like every other `$_`-default form).
 - **`(declare …)` forms are host compiler advice** — droppable wholesale.
 - **Order is the program.** A file is a sequence of top-level forms
   executed in order by `load`. There is no linker step: a name must be
@@ -519,7 +521,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 
 | var | semantics |
 |---|---|
-| `$_` | default topic. **The transpiler materializes it explicitly at parse time** (`add_implicit_default_param` / `_default_filetest_operand` in `Pl/PExpr.pm`): Perl's omitted-operand forms — `uc;`, `chomp;`, `length;`, bare `-e`, a bare `/re/` match — arrive in the tree as `(p-uc $_)`, `(p-=~ $_ …)`, etc. **A translator implements no per-op defaulting.** Sole exception: `(p-print)`/`(p-say)` with an empty argument list default to `$_` inside the runtime (`p-print`, the "bare `print;`" case) |
+| `$_` | default topic. **The transpiler materializes it explicitly at parse time** (`add_implicit_default_param` / `_default_filetest_operand` in `Pl/PExpr.pm`, and the print family in `ExprToCL` `gen_funcall`): Perl's omitted-operand forms — `uc;`, `chomp;`, `length;`, bare `-e`, a bare `/re/` match, and bare `print;`/`say;`/`printf;` — arrive in the tree as `(p-uc $_)`, `(p-=~ $_ …)`, `(p-print $_)`, etc. **A translator implements no per-op defaulting** — there is no longer any runtime-side `$_` default. |
 | `@_` | current sub's args (lexical per `p-args-body`, §5.2) |
 | `$@` | last eval error (§6.3) |
 | `$1`…`$N`, `%+` | capture groups; set by the most recent successful match (`p-=~` family); dynamically saved/restored around scopes like Perl |

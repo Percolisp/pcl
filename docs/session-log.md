@@ -4,7 +4,22 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 278c (2026-07-07) — v2 typed lexicals; unmangle; can/isa fix; container-cond-my.
+## Session 278c (2026-07-07) — typed lexicals; unmangle; can/isa; container-cond-my; bare-print $_.
+
+- **Bare print/say/printf → explicit `$_` in codegen** (commit TBD, gen v2-16):
+  `print;`/`say;`/`printf;` (and `print FH;`) defaulted to `$_` in the RUNTIME
+  (`p-print`), but `printf` had no such default → bare `printf;` printed
+  nothing (inconsistent).  Moved the default to the codegen (`ExprToCL`
+  `gen_funcall`): for print/say/printf with no LIST arg (a `:fh …` marker is
+  not a list arg), append `$_` → `(p-print $_)`, `(p-printf :fh 'STDERR $_)`.
+  Removed the runtime `(when (null args) (setf args (list $_)))`.  Fixes bare
+  `printf;` and makes the generated CL self-describing (IR review goal — no
+  hidden runtime default; updated ir-spec.md §data-model + §magic-vars, which
+  had called this "the sole exception").  `print @empty` still prints nothing
+  (has a list arg, never hit null-args).  244 transpile tests + $_-default
+  guards green; regression tests in misc-fixes-02.t.
+
+### Session 278c (earlier) — typed lexicals; unmangle; can/isa fix; container-cond-my.
 
 - **Container `my` in a condition head** (commit a8ebbf7, gen v2-15): `if (my
   @x = f())`, `while (my %h = g())`, `while (my ($k,$v) = each %h)` died "my

@@ -19,7 +19,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 95;
+plan tests => 97;
 
 sub run_cl {
     my ($code) = @_;
@@ -948,3 +948,13 @@ test_cl('hash my in a while-each condition',
     'my %d = (a=>1, b=>2, c=>3); my $s = 0;'
   . ' while (my ($k, $v) = each %d) { $s += $v } print "$s\n";',
     "6\n");
+
+# Bare print/say/printf default to $_ — emitted EXPLICITLY by the codegen (no
+# hidden runtime default), so the family is consistent.  Regression: bare
+# `printf;` printed nothing (only print/say had the runtime default).
+like(transpile_to_cl('$_ = "x"; printf;'), qr/\(p-printf \$_\)/,
+    'bare printf emits explicit $_ (codegen, not runtime default)');
+test_cl('bare print/say/printf all default to $_ consistently',
+    'use feature "say"; $_ = "hi";'
+  . ' print; print "-"; printf; print "-"; say;',
+    "hi-hi-hi\n");

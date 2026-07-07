@@ -6618,10 +6618,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
              (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
              (return-from p-print "")))))
-    ;; No list to print (bare `print;` / `print FH;` / `say;`) defaults to $_,
-    ;; like the named-unary $_-default family (uc/length/…).
-    (when (null args)
-      (setf args (list $_)))
+    ;; The bare-form $_ default (`print;` / `print FH;` / `say;` / `printf;`)
+    ;; is supplied EXPLICITLY by the codegen (ExprToCL gen_funcall emits
+    ;; `(p-print … $_)`), so the generated CL is self-describing and there is no
+    ;; hidden runtime default here.  A genuinely empty LIST (`print @empty`)
+    ;; correctly prints nothing — it never reaches this function with null args.
     ;; Flatten raw @array / %hash args (print takes a LIST): a bare vector/hash
     ;; spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar
     ;; (so `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
@@ -9280,7 +9281,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-15"
+(defparameter *pcl-cache-generation* "v2-16"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

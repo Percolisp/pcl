@@ -1900,6 +1900,16 @@ sub gen_funcall {
     push @args, $arg;
   }
 
+  # Bare print/say/printf (no LIST after the optional filehandle) defaults to
+  # $_ — emitted EXPLICITLY so the generated CL is self-describing (the runtime
+  # no longer supplies a hidden $_ default; see docs/generated-cl-ir-review.md).
+  # A `:fh …` marker is not a list arg, so `print STDERR;` / `printf STDERR;`
+  # also get the default.  This is what fixes bare `printf;` (which had no
+  # runtime default and printed nothing), making the family consistent.
+  if ($func_name eq 'print' || $func_name eq 'say' || $func_name eq 'printf') {
+    push @args, '$_' unless grep { $_ !~ /^:fh\b/ } @args;
+  }
+
   # Restore tail_position before the tail-call context check below.
   $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
 
