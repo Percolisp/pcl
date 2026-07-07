@@ -19,7 +19,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 93;
+plan tests => 95;
 
 sub run_cl {
     my ($code) = @_;
@@ -936,3 +936,15 @@ test_cl('can/isa/DOES on an undeclared package return false, do not die',
   . ' print NoSuchPkg->isa("Bar") ? "y":"n";'
   . ' print NoSuchPkg->DOES("Bar") ? "y":"n"; print "\n";',
     "nnn\n");
+
+# A container `my @a` / `my %h` declared in a condition head scopes to the whole
+# construct and gets a fresh container cell (regression: v2 died "my array/hash
+# in condition" → v1).  `if (my @x = ...)` is the Test::Builder / Test2 idiom;
+# `while (my ($k,$v) = each %h)` is the canonical hash walk.
+test_cl('array my in an if-condition (Test2 idiom)',
+    'sub amn { return (1,2,3) } if (my @a = amn()) { print scalar(@a), ":@a\n"; }',
+    "3:1 2 3\n");
+test_cl('hash my in a while-each condition',
+    'my %d = (a=>1, b=>2, c=>3); my $s = 0;'
+  . ' while (my ($k, $v) = each %d) { $s += $v } print "$s\n";',
+    "6\n");

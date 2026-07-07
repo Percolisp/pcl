@@ -2849,8 +2849,10 @@ sub _cond_my_names {
                : $nx->isa('PPI::Structure::List')   ? @{ $nx->find('PPI::Token::Symbol') || [] }
                : ();
       for my $s (@syms) {
-        die "Parser2 TODO: my array/hash in condition\n"
-          unless $s->content =~ /^\$\w+$/;
+        # Scalar ($x) or container (@a / %h) — both scope to the whole construct
+        # and are wrapped in a fresh let by _wrap_cond_mys (_fresh_container picks
+        # the box/vector/table by sigil).
+        next unless $s->content =~ /^[\$\@\%]\w+$/;
         next if $seen{$s->content}++;
         push @names, $s->content;
       }
@@ -2864,7 +2866,7 @@ sub _cond_my_names {
 sub _wrap_cond_mys {
   my ($self, $form, @names) = @_;
   return $form unless @names;
-  return ['let', ['list', map { ['list', $_, ['make-p-box', 'nil']] } @names], $form];
+  return ['let', ['list', map { ['list', $_, _fresh_container($_)] } @names], $form];
 }
 
 # ============================================================ T0.2 seam census
