@@ -11943,15 +11943,24 @@ buffer's fill-pointer; everything else falls back to file-length."
                                                        (cons cls-str visited)))))))))
             (let ((pkg (%pcl-find-package class-name)))
               (unless pkg
-                ;; Perl special case: ->import and ->unimport on unknown packages return nothing
-                (if (or (string-equal method-name "import") (string-equal method-name "unimport"))
-                    (return-from p-method-call
-                      (if (eq *wantarray* t)
-                          (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
-                          nil))
-                    ;; Package unknown (never blessed into, never declared): add "perhaps" hint
-                    (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" (perhaps you forgot to load \"~A\"?) at - line 1.~%"
-                                   method-name class-name class-name)))))
+                (cond
+                  ;; ->import / ->unimport on unknown packages return nothing.
+                  ((or (string-equal method-name "import") (string-equal method-name "unimport"))
+                   (return-from p-method-call
+                     (if (eq *wantarray* t)
+                         (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
+                         nil)))
+                  ;; UNIVERSAL methods (can/isa/DOES) are valid on ANY class name,
+                  ;; even one never declared: `Foo->can("x")` is undef, `Foo->isa(...)`
+                  ;; is false — NOT a "can't locate" error.  Fall through to the
+                  ;; universal-fallback cond below (find-in-class with a nil pkg is a
+                  ;; harmless no-op) rather than dying here.
+                  ((or (string-equal method-name "can")
+                       (string-equal method-name "isa")
+                       (string-equal method-name "DOES")))
+                  ;; Package unknown (never blessed into, never declared): add "perhaps" hint
+                  (t (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" (perhaps you forgot to load \"~A\"?) at - line 1.~%"
+                                    method-name class-name class-name))))))
             (find-in-class class-name nil)
             ;; UNIVERSAL is an implicit parent of all Perl classes.
             ;; After exhausting the class's own @ISA chain, try UNIVERSAL's @ISA
@@ -11962,6 +11971,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             ;; Not found anywhere in @ISA chain - check UNIVERSAL fallbacks, then AUTOLOAD
             (cond
               ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
+              ((string-equal method-name "DOES") (apply #'p-isa resolved-obj args))
               ((string-equal method-name "can") (apply #'p-can resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return nothing
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))

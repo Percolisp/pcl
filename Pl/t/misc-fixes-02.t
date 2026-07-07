@@ -19,7 +19,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 92;
+plan tests => 93;
 
 sub run_cl {
     my ($code) = @_;
@@ -926,3 +926,13 @@ test_cl('undef capture after s/// keeps its slot in a list (ternary-list form)',
   . ' my ($p,$q,$r,$t) = (($9 ? (1,2) : ($3,$4)), "A", "B");'
   . ' print join(",", map { defined $_ ? $_ : "U" } $p,$q,$r,$t), "\n";',
     "U,U,A,B\n");
+
+# UNIVERSAL methods (can/isa/DOES) are valid on ANY class name, even a package
+# that was never declared: `Undefined->can("x")` is undef, `->isa`/`->DOES` are
+# false — NOT a "Can't locate object method" die (regression: p-method-call died
+# for an unknown package before checking the universal fallbacks).
+test_cl('can/isa/DOES on an undeclared package return false, do not die',
+    'print NoSuchPkg->can("boogie") ? "y":"n";'
+  . ' print NoSuchPkg->isa("Bar") ? "y":"n";'
+  . ' print NoSuchPkg->DOES("Bar") ? "y":"n"; print "\n";',
+    "nnn\n");
