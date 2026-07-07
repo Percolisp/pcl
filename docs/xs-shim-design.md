@@ -36,6 +36,28 @@ below the vtable.
 - `@_` element aliasing through XS (PCL already doesn't alias `@_`;
   `docs/not-supported.md`).
 
+### 0.1 Where the bridge sits among module providers
+
+The shim does **not** replace the existing provider kinds
+(`docs/shipped-modules.md`); it adds one. Per module, the decision order is:
+
+1. **Native CL / pure-Perl `lib/` shim exists and is good** → keep it
+   (List::Util, POSIX stub, Scalar::Util…). The bridge is not a reason to
+   delete working shims; some XS (List::Util's `MULTICALL`) is Tier X
+   anyway, and a native implementation is usually faster than crossing the
+   vtable.
+2. **Dual-life module with a pure-Perl fallback** (Data::Dumper, JSON::PP
+   path…) → nothing to do; the `XSLoader::load` die keeps triggering the
+   fallback until someone builds the XS side, after which the XS side wins —
+   both routes stay correct.
+3. **XS-only module, uses the documented API** → shim-XS build (this
+   design).
+4. **XS-only, pokes internals (Tier X)** → hand shim in `lib/` or declare
+   not-supported, exactly as today.
+
+So yes: `lib/` shims remain a permanent, first-class provider; the bridge
+only shrinks the set of modules that *require* hand-shimming.
+
 **Prior art to keep in mind** (this is a well-trodden problem class):
 - **HPy** (Python): handle-based C API designed so PyPy/GraalPython can run C
   extensions. Key lessons we adopt: *handles, not pointers* (GC can move
@@ -527,6 +549,39 @@ Source layout: `xs/src/sv.c` (SV lifecycle, coercions bridge),
   everything above the floor saved by the matching `SAVETMPS`. `ENTER/LEAVE`
   maintain the save-stack floor exactly like perl.
 
+**The refcount↔GC contract in one paragraph:** there are two ownership
+domains that never manage each other's memory. Shim SVs are refcounted in C,
+exactly like perl. Host objects are owned solely by the host GC. They meet at
+the handle table (§7.1), which is a **non-weak** root: while C holds a
+handle, the object is reachable and cannot be collected — a live handle *is*
+the C side's strong reference. `SvREFCNT_dec` reaching zero translates to
+"drop the GC root" (`host->release`); the actual freeing is always the GC's,
+at a time of its choosing. Cycles cannot span the boundary because the host
+never holds a pointer to a `struct sv` — only C points at the host, never
+the reverse.
+
+**Deliberate divergences from perl's refcount semantics** (document these in
+`docs/not-supported.md` when the bridge ships; none of them block the module
+ladder):
+
+1. **`SvREFCNT(sv)` values are shim-local.** Host-side references to the
+   same underlying value are invisible to C, so observed counts are lower
+   than real perl's global truth. Only introspection/test code
+   (`Internals::SvREFCNT`, `Devel::*`) reads counts as *values* — already
+   not-supported territory.
+2. **Refcount→0 does not fire `DESTROY`.** In perl, decrementing a blessed
+   object's last reference calls `DESTROY` synchronously. Here it merely
+   drops the root; PCL does not call `DESTROY` from GC at all
+   (`docs/not-supported.md` §DESTROY). XS modules that free C resources in
+   `DESTROY` leak them on drop — same status as pure-Perl DESTROY users,
+   not a new gap.
+3. **`sv_rvweaken` (the engine under `Scalar::Util::weaken`) is Tier 2.**
+   When implemented, it becomes a vtable callback and can only be as weak as
+   the host's own weaken support (PCL's is limited — hash.t weak-ref tests
+   are not-supported today). A weakened proxy's handle-table slot would need
+   to become a weak slot — one flag per slot, cheap, but defer until a
+   ladder module demands it.
+
 ### 6.2 Strings: the byte boundary (R6)
 
 Perl XS is byte-oriented: `SvPV` returns `char*` + length, `SvUTF8` says how
@@ -771,15 +826,44 @@ producing a broken `.so`.
 pcl-xs-build [--perl /usr/bin/perl] path/to/Unpacked-Dist-1.23/
 ```
 
+**Local build only — no prebuilt binaries (decision, 2026-07-07).** PCL
+must run across Linux and BSD variants (and eventually macOS); shipping
+per-platform `.so`s is a distribution and trust burden we refuse. Both
+`libperlshim.so` and every module `.so` are compiled **on the target
+machine**. Portability rules:
+
+- **Steal the toolchain knowledge from the system perl's `%Config`**: use
+  `$Config{cc}`, `$Config{cccdlflags}` (the platform's `-fPIC` equivalent),
+  and `$Config{lddlflags}` (the platform's `-shared` equivalent), plus
+  `$Config{dlext}`. The system perl already encodes how to build a loadable
+  object on this exact OS — that is literally how it builds its own XS — so
+  we inherit Linux/FreeBSD/OpenBSD/NetBSD support without maintaining a
+  per-OS flag table. Only the *include path* differs from a normal XS build
+  (ours, never perl's CORE).
+- **Only POSIX `dlopen`/`dlsym` in the shim's loader** (all ELF platforms;
+  macOS works too, revisit `.dylib`/`dlext` naming when it matters).
+- **Platform-key the artifacts**: the ABI tag (§7.4) includes
+  `PERLSHIM_ABI_VERSION` **and** `$Config{archname}`-style OS/arch, so a
+  home directory or repo shared across machines (NFS, dotfile sync) never
+  loads a foreign-platform or stale-ABI object; on mismatch the loader
+  falls through to the pure-Perl path and reports why.
+- `libperlshim` itself is a bootstrap `make`-style step of the PCL install
+  (a `tools/build-perlshim` wrapper using the same `%Config`-derived
+  flags); `pcl-xs-build` refuses to run until it exists.
+
+Steps per dist:
+
 1. Run `perl Makefile.PL` in a scratch dir only to *harvest metadata* (or
    parse `META.json` + `MANIFEST`): XS file list, extra C files/libs
    (`MYEXTLIB`, `LIBS`, `INC`), custom typemaps. Do not trust its generated
-   Makefile for compilation flags — we supply our own.
+   Makefile for compilation flags — we supply our own (`%Config`-derived,
+   above).
 2. For each `.xs`: `perl -MExtUtils::ParseXS -e '...'` (i.e. run xsubpp under
    the **system perl**) with the standard typemap + dist typemaps → `.c`.
-3. Compile all `.c` with `-I xs/include/perlshim -fPIC`, **no perl CORE
-   includes anywhere**, link `cc -shared ... -lperlshim` →
-   `blib-pcl/auto/Foo/Bar/Bar.pcl.so` (plus the ABI tag from §7.4).
+3. Compile all `.c` with `$Config{cc} $Config{cccdlflags} -I
+   xs/include/perlshim`, **no perl CORE includes anywhere**, link with
+   `$Config{lddlflags} -lperlshim` →
+   `blib-pcl/auto/Foo/Bar/Bar.pcl.so` (plus the platform+ABI tag from §7.4).
 4. Transpile the dist's `.pm` files with `pl2cl` as usual (they're ordinary
    Perl; their `XSLoader::load` now finds the `.so`).
 5. Emit a report: unresolved perlapi symbols (census input, §10.1), Tier X
@@ -902,9 +986,10 @@ deliverable that makes the "other scripting languages" goal real.
 
 ## 14. Open questions (decide with the user before the relevant phase)
 
-1. **Ship prebuilt `.so`s for popular modules** in the PCL tree (like
-   `lib/*.pm` shims), or always build locally? (Affects §9 install layout;
-   local-build-only is simpler and avoids binary distribution.)
+1. ~~Ship prebuilt `.so`s or build locally?~~ **RESOLVED (user,
+   2026-07-07): local build only.** XS objects cannot be meaningfully
+   precompiled across the Linux/BSD spread PCL targets; §9 now specifies
+   the `%Config`-derived portable toolchain and platform-keyed artifacts.
 2. **Time::HiRes**: PCL may grow a native implementation first — if so, swap
    another syscall-ish module into Phase 4 (e.g. `Cwd`'s XS path or
    `Digest::SHA`).
