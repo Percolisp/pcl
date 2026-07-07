@@ -4,6 +4,35 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 278c (2026-07-07) — v2 typed lexicals; spanning-file blockers measured.
+
+- **Typed lexicals `my Foo $f`** (commit f88accb, gen v2-13): PPI keeps the
+  class name as an inert bare Word token between the declarator and the
+  sigil symbol.  It broke every v2 decl-shape matcher → `my Foo $f` died
+  "Parser2 TODO: unsupported declaration" in `_multi_decl` and sent the
+  whole file to v1.  New pass `_strip_typed_lexical_classes($doc)` (run
+  right after PPI parse, before any facts/span/lowering pass) removes the
+  class Word so downstream sees plain `my $f`.  Cleared **multideref.t**
+  (parity 43+9/65 byte-identical v2==v1).  Census **74→75 native**.
+  Regression tests in `transpile-test-04.t`.  (Note: v1 already discards
+  the class; real perl rejects an *undeclared* class at compile time, but
+  PCL assumes valid input §9.)
+- **The 8 spanning files are now MEASURED** (temporary `PCL_V2_RENAME_DEBUG`
+  probe, removed after use — see `docs/v2-transfer-plan.md` §s278c):
+  - `eval_unsafe` (dominant): bop/caller/sprintf2/eval/ref.  The rename
+    mangles the name; a *dynamic* `eval $var` referencing the bare name
+    would break and its contents are opaque → CANNOT be safely narrowed
+    (silent-miscompile risk).  bop.t/sprintf2.t blocked ONLY by this =
+    correctness wall → **candidate permanent gates, discuss with user**.
+  - container/multi-decl: method.t `%methods`, sort.t `@list`/`@output`,
+    scalar.t, ref.t `$test` → **W10-ext-3 container spanning** (the
+    `our %h`→defvar container lowering already exists via `_fresh_container`;
+    renamed-scalar decls already lower as defvar boxes at Parser2.pm:1760).
+    **method.t's only blocker is `%methods` ⇒ cleanest next single-file win.**
+- **Recommended next**: W10-ext-3 (clears method.t; dents sort/scalar/ref).
+  Blast radius = the shared rename core (all 8 files) → verify parity on all
+  of them.
+
 ## Session 278 (2026-07-07) — transfer-plan T0 done; T-A1 built (flagged); annotator deref-viv fix.
 
 - **T0.1 pipeline marker**: every transpile begins
