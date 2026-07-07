@@ -4,7 +4,29 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 278c (2026-07-07) — v2 typed lexicals; W10 unmangle-when-unique; blocker analysis.
+## Session 278c (2026-07-07) — v2 typed lexicals; W10 unmangle-when-unique; can/isa fix; blocker analysis.
+
+- **Runtime fix — can/isa/DOES on an undeclared package** (commit fafd0f9,
+  helps BOTH pipelines): `p-method-call` died "Can't locate object method
+  'can' via package Foo" when the class package was unknown; but can/isa/DOES
+  are UNIVERSAL methods valid on any class name (Perl returns undef/false).
+  The unknown-package early-die exempted only import/unimport — added
+  can/isa/DOES (fall through to the universal-fallback cond → p-can/p-isa,
+  which already return nil for undefined classes) + DOES→p-isa in that cond.
+  Regression test in misc-fixes-02.t.  Found while attempting W10-ext-3.
+- **W10-ext-3 container spanning — IMPLEMENTED, PARKED** (patch saved:
+  `docs/w10-ext-3-container-spanning.patch`; commit 2a1039d).  The rename of a
+  file-unique `my %h`/`my @a` spanning a package boundary works (verified:
+  method.t's `%methods` → defvar hash cell + qualified `main::%methods{k}`),
+  but it de-gates ONLY method.t, and de-gating method.t is a NET REGRESSION
+  (v2 stops 122 / v1 157) because method.t has a cascade of independent v2
+  gaps.  Cascade: (1) Foo->can FIXED above; (2) OPEN test 122 — indirect
+  method syntax `SUPER::m{@a}`; (3) unmeasured 123–157.  Parity rule forbids
+  shipping the regression → patch parked until the cascade clears, then
+  reapply.  **Lesson: de-gating a whole-file gate exposes the file to ALL its
+  latent v2 bugs at once; verify parity BEFORE assuming a gate-clear is a win.**
+
+### Session 278c (earlier) — v2 typed lexicals; W10 unmangle-when-unique; blocker analysis.
 
 - **W10 unmangle-when-unique** (commit 793563a, gen v2-14): a file-unique
   spanning my-lexical was renamed to a MANGLED cell (`$x__file__N`), and any
