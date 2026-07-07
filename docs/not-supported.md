@@ -365,9 +365,10 @@ CPAN modules use XS.
 `use` that ultimately calls `DynaLoader::bootstrap` fails or is silently
 skipped by the stub.
 
-**Rationale:** XS bridge support is a planned future phase (see
-`XS_BRIDGE_DESIGN.md`).  Until then, POSIX and other XS modules must be
-stubbed in `lib/` by hand.
+**Rationale:** XS bridge support is a designed future phase (see
+`docs/xs-shim-design.md` — source-recompile against `libperlshim` shim
+headers; `XS_BRIDGE_DESIGN.md` is the superseded sketch).  Until the bridge
+ships, POSIX and other XS modules must be stubbed in `lib/` by hand.
 
 Note (session 223c): individual XS *functions* can be bridged directly via
 `sb-alien` when there is a stable libc entry point.  `crypt()` is now
@@ -375,6 +376,66 @@ implemented (`p-crypt` → system `crypt(3)` in `libcrypt.so.1`), so it is no
 longer in this not-supported bucket.
 
 **Affected tests:** `perl-tests/chdir.t` (uses POSIX).
+
+---
+
+## Source filters (`Filter::Util::Call`, `Filter::Simple`, `use Switch`, …)
+
+**Perl behaviour:** A source filter is code installed by a module's `import`
+(via `filter_add` from `Filter::Util::Call`, or the `Filter::Simple` sugar on
+top of it) that intercepts and rewrites the *source text* of the file being
+compiled, from the line after the `use` to end-of-file (or until
+`filter_del`).  The filter hooks perl's parser reader: as the interpreter
+reads each source line, the filter gets to transform it before compilation.
+Classic users: `Switch` (removed from core in 5.14), `Filter::cpp`,
+obfuscators/decryptors, and legacy syntax-extension modules.
+
+**PCL behaviour:** Not supported.  A filter module's `import` runs, but
+`filter_add` does not exist (Filter::Util::Call is XS), and there is no
+parser reader to hook: PCL parses the whole file with PPI at transpile time.
+Code that relies on a filter rewriting subsequent source will be transpiled
+from the *unfiltered* text and misbehave or fail to parse.
+
+**Could it be done?**  Two distinct routes, one dead and one live:
+
+- **At runtime — no, and the planned XS bridge does not change that.**
+  `Filter::Util::Call`'s XS talks to perl parser internals (the
+  `PL_parser`/`PL_rsfp_filters` filter stack), which are exactly the
+  internals `docs/xs-shim-design.md` classifies as Tier X (§8.6): the shim
+  exposes the documented value API, not the parser, and PCL's "parser" is
+  PPI in a separate process — there is nothing at runtime for a filter to
+  hook.
+
+- **At transpile time — yes, faithfully, if ever needed.**  Source filters
+  run at *compile* time in perl too, so applying the filter to the remaining
+  source text during transpilation and then transpiling the result is
+  semantically correct.  The transpiler runs under real perl, so the
+  mechanism is: on `use Foo ARGS` where `Foo` installs a filter, have the
+  system perl execute the real filter over the rest of the file (build a
+  temp program of `use Foo ARGS;` + remaining text and capture the
+  post-filter source via a `filter_read` loop — the `Filter::ExtractSource`
+  technique), splice the filtered text back, and continue the normal PPI
+  parse.  Caveats: the filter module itself runs under the *system* perl
+  (it must be installed there, and its XS runs natively — which is fine,
+  that is where it ran for real perl too); filters that consult program
+  compile-time state beyond their import arguments (variables set by
+  earlier `BEGIN` blocks of the *user* program) would not see it; and
+  detecting "is `Foo` a filter module?" requires actually running its
+  import under real perl, so it would be driven by a known-filter-modules
+  list rather than general detection.
+
+**Rationale for not implementing now:** source filters are rare, fragile,
+and actively discouraged in modern Perl (`Switch` was expelled from core;
+`Filter::Simple`'s own docs warn against filters; the ecosystem moved to
+keyword plugins, which are a different, also-unsupported mechanism).  No
+CPAN module in PCL's scope uses one.  The transpile-time route above is
+recorded so that if a real module ever needs it, the feasible design is
+already on file — revisit then, not before.
+
+**Affected tests:** `perl-tests/closure.t` — the `[perl #114888]` block
+(a perl-internals pad-name regression test that builds a filter inside
+`fresh_perl_is`; it is skipped territory anyway since `fresh_perl_*` spawns
+a separate perl binary).  No other test or in-scope module uses a filter.
 
 ---
 
