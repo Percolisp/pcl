@@ -125,6 +125,14 @@ sub parse {
   # dropping the modulo → PARSE ERROR).  A bare PPI::Document->new skipped it.
   my $doc = $self->fallback_parser->_ppi_parse($src) or die "Parser2: PPI parse failed";
 
+  # Typed lexicals (`my Dog $spot;`, `my Foo $f = …;`): PPI keeps the class
+  # name as a bare Word token between the declarator and the sigil symbol.  It
+  # only informs field access in the (removed) pseudo-hashes era; runtime-wise
+  # it is inert — v1 drops it.  Strip it here so every downstream pass (facts,
+  # span/rename, lowering) sees a plain `my $f` decl instead of dying in
+  # _multi_decl "unsupported declaration".
+  $self->_strip_typed_lexical_classes($doc);
+
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —
   # v1's gen_funcall emits (p-eval STR (list (cons "$x" $x) …)) reading the
@@ -2782,6 +2790,25 @@ sub _single_scalar_decl {
 sub _cond_parts {
   my ($cond) = @_;
   return map { $_->schildren } grep { $_->isa('PPI::Statement') } $cond->children;
+}
+
+# Strip the optional class-name Word from typed lexical declarations
+# (`my Foo $f` → `my $f`, `our Foo $g = …` → `our $g = …`).  In a Variable
+# statement the shape `<my|our|state> <Word> <Symbol>` is unambiguously a
+# typed lexical (the bare Word can only be the class); it is runtime-inert
+# (v1 discards it) but breaks every decl-shape matcher (_single_scalar_decl /
+# _multi_decl), so remove it before any downstream pass runs.
+sub _strip_typed_lexical_classes {
+  my ($self, $doc) = @_;
+  for my $v (@{ $doc->find('PPI::Statement::Variable') || [] }) {
+    my @k = $v->schildren;
+    next unless @k >= 3
+      && $k[0]->isa('PPI::Token::Word') && $k[0]->content =~ /^(?:my|our|state)$/
+      && $k[1]->isa('PPI::Token::Word')
+      && $k[2]->isa('PPI::Token::Symbol');
+    $k[1]->remove;
+  }
+  return;
 }
 
 # Scalar names declared by `my` in a condition head (`if (my $x = …)`,

@@ -459,4 +459,12 @@ test_transpile('array-of-hash chained write',
 test_transpile('plain container element writes stay correct beside chained ones',
     q{my $h; my %t; $t{x} = 1; $h->{a}{b} = 2; my $n = $t{x} + 1; print "$h->{a}{b} $n\n";});
 
+# Typed lexicals (`my Foo $f`): the class name is runtime-inert and must be
+# dropped, leaving a plain scalar lexical (regression: v2 died "unsupported
+# declaration" in _multi_decl — see multideref.t).
+test_transpile('typed lexical my Foo $f is a plain scalar',
+    q{package Foo; sub new { bless {}, shift } package main; my Foo $f = Foo->new; $f->{c} = 7; print $f->{c}, "\n";});
+test_transpile('typed lexical without init',
+    q{package Dog; package main; my Dog $spot; $spot = "rex"; print "$spot\n";});
+
 done_testing();
