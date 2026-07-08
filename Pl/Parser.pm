@@ -216,6 +216,20 @@ sub _preprocess_source {
   # Perl allows `for my ClassName $var` but PPI can't parse the ClassName and stops,
   # producing a broken AST. PCL ignores type constraints anyway, so just drop them.
   $src =~ s/\b(for(?:each)?\s+(?:my|our))\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\s+(\$)/$1 $2/g;
+  # `CORE::my`/`CORE::our`/`CORE::state`/`CORE::local` → drop the `CORE::`.  The
+  # prefix forces the core builtin meaning over a same-named user sub, but a
+  # declarator can NEVER be shadowed by a user sub (they are grammar keywords,
+  # not overridable functions), so `CORE::my` is exactly `my` in every context.
+  # It MUST be normalised at the source level rather than on the PPI tree: PPI
+  # does not recognise the CORE::-prefixed declarator and mis-structures the
+  # enclosing construct (`for CORE::my $v (@l) {…}` yields a `for` compound with
+  # NO list/block child — the loop is lost).  The leading $str_re alternative
+  # passes quoted strings through untouched, so the identical text inside a
+  # string literal is never rewritten.  The negative lookbehind keeps a package
+  # variable like `$CORE::my` intact (only a bare declarator word is a target),
+  # and the lookahead requires the declarator context (whitespace then a sigil
+  # or `(`), so only an actual `CORE::my $x` / `CORE::our (@a)` form is rewritten.
+  $src =~ s/($str_re)|(?<![\w\$\@\%:])CORE::(my|our|state|local)\b(?=\s*[\$\@\%\(])/ defined $1 ? $1 : $2 /ge;
   # Remove `format NAME = ... .` report templates.  `format`/`write` are
   # deliberately not-supported (docs/not-supported.md), but PPI does not
   # recognise the keyword: it swallows the picture lines AND the following

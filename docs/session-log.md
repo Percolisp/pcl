@@ -4,7 +4,24 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 279 (2026-07-08, Opus 4.8) — v2 self-referential container init; p-copy-hash box-sharing fix.
+## Session 279 (2026-07-08, Opus 4.8) — v2 self-ref container init; p-copy-hash fix; CORE:: declarator strip.
+
+- **CORE:: declarator prefix (`CORE::my`/`our`/`state`/`local`)** → strip at the
+  SOURCE level (`Pl::Parser::_preprocess_source`).  The prefix forces the core
+  builtin over a same-named user sub, but a declarator is a grammar keyword that
+  can't be shadowed, so `CORE::my` ≡ `my` in every context.  Must be normalized
+  BEFORE PPI parses: PPI mis-structures `for CORE::my $v (@l) {…}` — the `for`
+  compound gets NO list/block child (loop lost), so a post-parse token rename
+  (my first attempt, reverted) is too late.  Regex guarded by the existing
+  `$str_re` alternative (a literal `"CORE::my"` in a string survives) plus a
+  negative lookbehind (`$CORE::my` package var untouched) and a declarator-context
+  lookahead (`\s*[\$\@\%\(]`).  Removed the blanket "Parser2 TODO: CORE::
+  declarator prefix" gate.  **De-gates for.t → v2-native** (census 75→**76**),
+  still fully-passing 129/130.  Also fixes v1 (which silently dropped the loop).
+  Regression tests in transpile-test-04.t.  Naming note: PCL's `p-`/`pl-` scheme
+  already disambiguates CORE:: for *function* builtins (different symbols), but
+  declarators aren't calls (they lower to let/defvar), so that's irrelevant here
+  — the fix rests on the language fact + the PPI-structure requirement.
 
 - **Self-referential container init `my @a = (@a,…)` / `my %h = (%h,…)`**
   (gen v2-17): the simple single-container self-ref form died "Parser2 TODO:

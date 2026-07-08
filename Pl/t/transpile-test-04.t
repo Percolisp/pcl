@@ -494,4 +494,19 @@ test_transpile('self-ref array init is a copy, not an alias',
 test_transpile('self-ref hash init is a copy, not an alias',
     q{my %g = (a=>1); { my %g = %g; $g{a} = 42; $g{z} = 9; } print "$g{a}\n";});
 
+# CORE:: declarator prefix (my/our/state/local): the prefix forces the core
+# builtin over a same-named user sub, but a declarator can't be shadowed, so
+# CORE::my ≡ my.  Normalized at source level (Pl::Parser::_preprocess_source)
+# because PPI mis-structures `for CORE::my $v (@l) {…}` otherwise.  Regression:
+# v2 died "CORE:: declarator prefix" / "foreach without list"; v1 dropped the
+# whole for-loop.
+test_transpile('for CORE::my loop variable',
+    q{my @o = (1,2,3); my @r; for CORE::my $v (@o) { push @r, $v } print "@r\n";});
+test_transpile('CORE::my list declaration',
+    q{CORE::my ($a,$b) = (7,8); print "$a,$b\n";});
+test_transpile('literal CORE::my inside a string is not rewritten',
+    q{my $s = "keep CORE::my literal"; print "$s\n";});
+test_transpile('CORE::our scalar and $CORE:: package var coexist',
+    q{CORE::our $y = 9; $CORE::keep = 5; print "$y $CORE::keep\n";});
+
 done_testing();

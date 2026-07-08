@@ -139,19 +139,9 @@ sub parse {
   # SCOPED _let_bound_vars, so the capture alist reflects the call site's live
   # scope.  The VarAnnotator's region-wide $has_eval keeps every captured var
   # boxed (do not narrow it).  No gate here anymore.
-  # `CORE::my`/`CORE::our`/`CORE::state`/`CORE::local` declarators: v1's PExpr
-  # normalizes `CORE::<decl>` → `<decl>` in a recursive pre-pass that reaches
-  # tokens nested inside parens; v2's native expression seam hands PExpr a
-  # peeled sub-token-list, so a CORE:: declarator inside a parenthesized RHS
-  # (`my $r = (CORE::state $y = 7)`) is never normalized and mis-lowers to a
-  # p-UNDEFINED funcall.  Plain `state`/`my` in the same position work — only
-  # the CORE:: spelling is affected.  It is a torture-test artifact; gate → v1
-  # rather than add a recursive stringify to the hot expression parser.
-  die "Parser2 TODO: CORE:: declarator prefix\n"
-    if @{ $doc->find(sub {
-         $_[1]->isa('PPI::Token::Word')
-           && $_[1]->content =~ /^CORE::(?:my|our|state|local)$/;
-       }) || [] };
+  # (`CORE::my`/`CORE::our`/`CORE::state`/`CORE::local` are normalised to the
+  # bare declarator in Pl::Parser::_preprocess_source, before PPI parses — a
+  # token rename here is too late, PPI already mis-structures the for-head.)
   # `state` inside an ANON sub or a map/grep/sort block: each closure / block
   # invocation needs its own per-instance state cell (`sub { ++state $x }`
   # returned from a factory → independent state per returned closure; `map {
