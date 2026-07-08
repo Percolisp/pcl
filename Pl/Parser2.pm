@@ -917,6 +917,14 @@ sub _scan_lex_facts {
     my %ih;
     _interp_names($stmt, \%ih);
     for my $n (keys %ih) { $f->{disq}{$n} = 1; $f->{interp}{$n} = 1; }
+    # A CONTAINER also interpolates as @x / @{x} / @x{…} — NOT caught by the
+    # scalar-sigil scan above, and a token rewrite cannot reach inside a string.
+    # Record it in `interp` (the container-promotion guard) so a name used that
+    # way is never renamed; leave `disq` (the scalar guard) untouched so the
+    # scalar path's behaviour — and its byte-for-byte output — is unchanged.
+    my %ah;
+    _interp_names($stmt, \%ah, '\@');
+    for my $n (keys %ah) { $f->{interp}{$n} = 1 }
   }
 }
 
@@ -1113,19 +1121,60 @@ sub _elem_within {
   return 0;
 }
 
+# Nearest enclosing Structure::Block of $elem (its lexical scope), or undef when
+# $elem sits at segment top level (scope = the whole segment).
+sub _enclosing_block {
+  my ($elem) = @_;
+  my $p = $elem->parent;
+  while ($p) { return $p if $p->isa('PPI::Structure::Block'); $p = $p->parent }
+  return undef;
+}
+
+# Count my/state declarations of the bare name within $scope, which is either a
+# PPI node (a block — search its descendants) or an arrayref of statements (the
+# whole segment).  Used to check a candidate is the SOLE declaration in its own
+# lexical extent — a same-name `my` in a DIFFERENT block is a distinct variable.
+sub _count_name_decls {
+  my ($self, $scope, $bare) = @_;
+  my @vs;
+  if (ref $scope eq 'ARRAY') {
+    for my $stmt (@$scope) {
+      push @vs, $stmt if ref $stmt && $stmt->isa('PPI::Statement::Variable');
+      push @vs, @{ $stmt->find('PPI::Statement::Variable') || [] } if ref $stmt && $stmt->isa('PPI::Node');
+    }
+  } else {
+    push @vs, @{ $scope->find('PPI::Statement::Variable') || [] };
+  }
+  my $n = 0;
+  for my $v (@vs) {
+    my $kw = ($v->schildren)[0];
+    next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
+    for my $dn ($self->_declared_names($v)) {
+      (my $b = $dn) =~ s/^[\$\@\%]//;
+      $n++ if $b eq $bare;
+    }
+  }
+  return $n;
+}
+
+# Sigil-aware rename of every use of ONE variable.  When $within (a block node)
+# is given, only tokens inside it are rewritten — the variable's lexical extent,
+# so a same-name variable in a sibling block is untouched.
 sub _rewrite_var_uses {
-  my ($self, $stmts, $canon, $newbare) = @_;
+  my ($self, $stmts, $canon, $newbare, $within) = @_;
   my $sigil = substr($canon, 0, 1);
   (my $bare = $canon) =~ s/^[\$\@\%]//;
   for my $stmt (@$stmts) {
     next unless ref $stmt && $stmt->isa('PPI::Node');
     for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
       next unless $s->symbol eq $canon;
+      next if $within && !_elem_within($s, $within);
       (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/;
       $s->set_content($c);
     }
     next unless $sigil eq '@';
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+      next if $within && !_elem_within($ai, $within);
       my $c = $ai->content;
       $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1$newbare/;
     }
@@ -1176,106 +1225,77 @@ sub _rename_captured_file_lexicals {
   my %interp         = %{ $f->{interp}         };
 
   my $segtxt = join "\n", map { $_->content } @$stmts;
-  my %rename;
-  # sorted: __file__N numbering must be deterministic across runs (hash order
-  # is per-process random — unsorted iteration made cached transpiles churn).
-  for my $bare (sort keys %scalar_decl) {
-    next if $disq{$bare};
-    # Already rewritten to a package-level cell by the W10 spanning pass —
-    # renaming it AGAIN would orphan the qualified refs in later segments.
-    next if $self->{_file_lex_renamed}{"\$$bare"};
-    next unless @{ $scalar_decl{$bare} } == 1;   # exactly one file-lexical scalar decl
-    next unless ($decl_count{$bare} // 0) == 1;   # and no other decl of the bare name
-    next if $segtxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block → gate
-    # Actually captured? — referenced as a scalar inside some named sub body.
-    my $captured = 0;
-    SUB: for my $sub (@subs) {
-      for my $s (@{ $sub->block->find('PPI::Token::Symbol') || [] }) {
-        next unless $s->symbol eq "\$$bare";
-        $captured = 1; last SUB;
-      }
-    }
-    next unless $captured;
-    $rename{"\$$bare"} = "\$${bare}__file__" . $self->{_file_lex_counter}++;
-  }
-  # Rewrite every plain scalar use (content matches — the disqualifier above
-  # guarantees no element-access token shares the content) to the fresh name.
-  if (%rename) {
-    for my $stmt (@$stmts) {
-      for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-        my $new = $rename{ $s->content } or next;
-        $s->set_content($new);
-        $self->{_file_lex_renamed}{$new} = 1;
-      }
-    }
-  }
 
-  # Containers (@a / %h) captured by a named sub — the array/hash analogue of
-  # the scalar case above.  Same shape (promote to a defvar'd cell so the
-  # hoisted sub and the in-place code share one container), but the rename is
-  # SIGIL-AWARE (_rewrite_var_uses) since a container is used as @a / $a[i] /
-  # @a{…} / $#a — tokens with different leading sigils that all resolve to the
-  # one variable.  Guards mirror the scalar path: exactly one no-init container
-  # decl of the bare name, no OTHER decl of that name (decl_count==1, so the
-  # name denotes a single variable and the sigil-aware rewrite is unambiguous),
-  # never interpolated, never a ${x}/@{x} deref-block.  NOTE: this is a
-  # per-segment (single-package) promotion; a container that also SPANS a
-  # package boundary (method.t's %methods) is handled by the spanning pass, not
-  # here, and stays gated until that path lands.
-  for my $bare (sort keys %container_decl) {
-    next if $interp{$bare};
-    next unless @{ $container_decl{$bare} } == 1;
-    next unless ($decl_count{$bare} // 0) == 1;
-    my ($decl, $csym) = @{ $container_decl{$bare}[0] };   # $csym e.g. '@stack'
-    next if $self->{_file_lex_renamed}{$csym};            # already promoted (spanning)
-    next if $segtxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;      # ${x}/@{x}/%{x} deref-block
-    my $sig = substr($csym, 0, 1);
-    # BLOCK-EXTENT GUARD (correctness — the sharp edge of this promotion): a
-    # block-scoped `my @a` dies at its block's end, so a family-use of the SAME
-    # name AFTER the block is a DIFFERENT variable (the package @a).  Promoting
-    # to a single defvar cell + renaming every segment use would wrongly MERGE
-    # the two.  So if the decl sits inside a block, every family-use of the name
-    # must sit inside that same block (the capturing subs live inside it in the
-    # encapsulated-state idiom); an escaping use ⇒ refuse (gate → v1).  A
-    # segment-top-level decl (no enclosing block) has no such boundary — all its
-    # uses are the one file-scoped variable.
-    my $declblk;
-    { my $p = $decl->parent;
-      while ($p) { $declblk = $p, last if $p->isa('PPI::Structure::Block'); $p = $p->parent } }
-    if ($declblk) {
-      my $escapes = 0;
-      ESC: for my $stmt (@$stmts) {
-        next unless ref $stmt && $stmt->isa('PPI::Node');
-        for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-          next unless $s->symbol eq $csym;
-          ($escapes = 1), last ESC unless _elem_within($s, $declblk);
-        }
-        next unless $sig eq '@';
-        for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
-          next unless $ai->content eq "\$#$bare";
-          ($escapes = 1), last ESC unless _elem_within($ai, $declblk);
-        }
-      }
-      next if $escapes;
+  # ONE promotion mechanism for scalars and containers, PER-DECLARATION and
+  # EXTENT-scoped.  The extent of a `my` is its nearest enclosing block (or the
+  # whole segment at top level); a same-name `my` in a DIFFERENT block is a
+  # distinct variable.  So a candidate is promoted iff, WITHIN ITS OWN EXTENT, it
+  # is the sole declaration of the bare name and is captured by a named sub in
+  # that extent — and the rewrite is confined to that extent (block-scoped), so
+  # a sibling-block same-name variable and a post-block package global of the
+  # same name are never touched.  This is what makes the block-local static-var
+  # idiom (`{ my $n; sub inc{$n++} } { my $n; sub dec{$n--} }`) safe.  Scalars
+  # first, then containers, in bare-sorted / source order → deterministic
+  # __file__N numbering (matters for the cache key).
+  # sorted keys: hash order is per-process random — unsorted made cached
+  # transpiles churn.
+  for my $bare (sort keys %scalar_decl) {
+    next if $disq{$bare};                                   # used as @x/%x/$#x → not a plain scalar
+    next if $self->{_file_lex_renamed}{"\$$bare"};          # already promoted by the spanning pass
+    for my $decl (@{ $scalar_decl{$bare} }) {
+      $self->_promote_captured($stmts, \@subs, $decl, "\$$bare", $bare);
     }
-    # Actually captured? — a container-family use inside some named sub body.
-    my $captured = 0;
-    SUBC: for my $sub (@subs) {
-      for my $s (@{ $sub->block->find('PPI::Token::Symbol') || [] }) {
-        next unless $s->symbol eq $csym;
-        $captured = 1; last SUBC;
-      }
-      next unless $sig eq '@';
-      for my $ai (@{ $sub->block->find('PPI::Token::ArrayIndex') || [] }) {
-        next unless $ai->content eq "\$#$bare";
-        $captured = 1; last SUBC;
-      }
-    }
-    next unless $captured;
-    my $newbare = $bare . '__file__' . $self->{_file_lex_counter}++;
-    $self->_rewrite_var_uses($stmts, $csym, $newbare);   # rewrites the decl too
-    $self->{_file_lex_renamed}{ $sig . $newbare } = 1;   # drives the defvar lowering
   }
+  for my $bare (sort keys %container_decl) {
+    next if $interp{$bare};                                 # interpolated → token rewrite can't reach it
+    for my $cd (@{ $container_decl{$bare} }) {
+      my ($decl, $csym) = @$cd;
+      next if $self->{_file_lex_renamed}{$csym};            # already promoted by the spanning pass
+      $self->_promote_captured($stmts, \@subs, $decl, $csym, $bare);
+    }
+  }
+}
+
+# Promote ONE captured file-lexical declaration ($decl, canonical symbol $canon
+# — '$x' | '@a' | '%h') to a defvar'd cell, IF it is the sole declaration of the
+# bare name within its lexical extent and is captured by a named sub in that
+# extent.  Confines the sigil-aware rewrite to the extent.  No-op when the
+# guards fail (→ the file keeps its capture gate → v1).
+sub _promote_captured {
+  my ($self, $stmts, $subs, $decl, $canon, $bare) = @_;
+  my $sig    = substr($canon, 0, 1);
+  my $extent = _enclosing_block($decl);                     # block, or undef = segment
+  # Sole declaration of the bare name in this extent (a same-name `my` in
+  # another block is a distinct variable).  Counting ALL sigils also refuses the
+  # ambiguous case where the one name denotes >1 variable ($x beside @x).
+  return unless $self->_count_name_decls($extent // $stmts, $bare) == 1;
+  my $etxt = $extent ? $extent->content : join("\n", map { $_->content } @$stmts);
+  return if $etxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;         # ${x}/@{x}/%{x} deref-block → can't rewrite
+  return unless $self->_captured_in_subs($subs, $canon, $extent);
+  my $newbare = $bare . '__file__' . $self->{_file_lex_counter}++;
+  $self->_rewrite_var_uses($stmts, $canon, $newbare, $extent);   # rewrites the decl too
+  $self->{_file_lex_renamed}{ $sig . $newbare } = 1;             # drives the defvar lowering
+  return;
+}
+
+# True when $canon (sigil-aware, via ->symbol) is used inside a NAMED sub whose
+# body lies within $extent (any sub in the segment when $extent is undef).  A
+# block-scoped lexical can only be captured by a sub textually inside its block.
+sub _captured_in_subs {
+  my ($self, $subs, $canon, $extent) = @_;
+  my $sig = substr($canon, 0, 1);
+  (my $bare = $canon) =~ s/^[\$\@\%]//;
+  for my $sub (@$subs) {
+    next if $extent && !_elem_within($sub, $extent);
+    for my $s (@{ $sub->block->find('PPI::Token::Symbol') || [] }) {
+      return 1 if $s->symbol eq $canon;
+    }
+    next unless $sig eq '@';
+    for my $ai (@{ $sub->block->find('PPI::Token::ArrayIndex') || [] }) {
+      return 1 if $ai->content eq "\$#$bare";
+    }
+  }
+  return 0;
 }
 
 # ---- W8.5 shared shadow-rename machinery ----------------------------------
@@ -1505,7 +1525,8 @@ sub _rename_poisoned_cond_mys {
 # heredoc, or a regex match/substitution) anywhere under $node.  Single quotes,
 # q(), qw(), and tr/// do not interpolate and are skipped.
 sub _interp_names {
-  my ($node, $disq) = @_;
+  my ($node, $disq, $sigils) = @_;
+  $sigils //= '\$';   # default: scalar-sigil forms ($name, ${name}, $name[…])
   for my $t (@{ $node->find('PPI::Token') || [] }) {
     my $c;
     if ($t->isa('PPI::Token::HereDoc')) {
@@ -1521,7 +1542,7 @@ sub _interp_names {
     } else {
       next;
     }
-    while ($c =~ /(?<!\\)\$\{?\s*([A-Za-z_]\w*)/g) { $disq->{$1} = 1 }
+    while ($c =~ /(?<!\\)[$sigils]\{?\s*([A-Za-z_]\w*)/g) { $disq->{$1} = 1 }
   }
   return;
 }

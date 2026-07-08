@@ -4,6 +4,31 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 279 (2026-07-08, Opus 4.8) — capture: block-extent consolidation (de-gates do.t + delete.t).
+
+- **Unified the scalar + container capture into ONE per-declaration,
+  EXTENT-scoped promotion** (`_promote_captured`).  A `my`'s extent is its
+  nearest enclosing block (or the segment at top level); a same-name `my` in a
+  DIFFERENT block is a distinct variable.  A candidate promotes iff, WITHIN ITS
+  OWN EXTENT, it is the sole decl of the bare name (`_count_name_decls`) and is
+  captured by a named sub in that extent (`_captured_in_subs`) — and the rewrite
+  is confined to the extent (block-scoped `_rewrite_var_uses`).  This replaces
+  the file-wide `decl_count==1` guard (which conflated same-name vars in
+  different blocks) and the container escape-guard.  **De-gates do.t (`my
+  $called` ×3 in separate blocks) and delete.t (`X::DESTROY` static-var idiom)**
+  → census **76→78**; both at exact v1 parity (do.t 64/73, delete.t 53/56).
+- **Silent-miscompile caught + fixed during dev**: `_interp_names` only detected
+  `$name` interpolation, so an interpolated ARRAY `"@x"` set no guard — a
+  container promotion then renamed the decl/writes to `@x__file__N` while the
+  interpolated read stayed bare `@x` (empty) → split.  Fix: `_interp_names`
+  takes a sigil set; `@`-forms are recorded in `interp` (the container guard)
+  only, NOT `disq`, so the scalar path stays byte-identical.
+- **Corpus byte-identical to HEAD except the 2 de-gated files** (109/111
+  unchanged) — previously-native output untouched; fully-passing stays 64.  Gate
+  114/3942 green.  Remaining capture blockers (task #44): multi-scalar
+  `my ($a,$b)` (push.t), `_hoist_nested_sub` over-broad text scan (wantarray.t),
+  container SPANNING (method.t, with #40).
+
 ## Session 279 (2026-07-08, Opus 4.8) — capture consolidation: shared sigil-aware rewrite + container capture.
 
 - **Consolidation groundwork toward killing the lexical-promotion house of

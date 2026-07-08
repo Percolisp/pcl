@@ -524,5 +524,17 @@ test_transpile('captured array element + $#array follow the promoted cell',
 # captured @data and an unrelated scalar $data coexist.
 test_transpile('captured @x does not conflate a sibling scalar $x',
     q{my $data = "S"; { my @data; sub feed { push @data, $_[0] } sub dump_it { "@data" } } feed(1); feed(2); print "$data ", dump_it(), "\n";});
+# Block-local static vars: the SAME name declared in two separate blocks are
+# DISTINCT variables — each promotion is scoped to its own block's extent, so
+# they must not merge (regression: file-wide decl_count gated both — do.t idiom).
+test_transpile('same-name captured scalar in two blocks stays distinct',
+    q{{ my $n; sub a1 { $n++ } sub g1 { $n } } { my $n; sub a2 { $n += 10 } sub g2 { $n } } a1(); a1(); a2(); print g1(), " ", g2(), "\n";});
+test_transpile('same-name captured array in two blocks stays distinct',
+    q{{ my @x; sub p1 { push @x, $_[0] } sub s1 { join(",",@x) } } { my @x; sub p2 { push @x, $_[0] } sub s2 { join(",",@x) } } p1(1); p1(2); p2(9); print s1(), "|", s2(), "\n";});
+# An interpolated container ("@x") can't be reached by a token rewrite → the
+# interp guard must REFUSE promotion (regression: only $-sigil interpolation was
+# detected, so a bare @x read stayed unrenamed → split from the renamed writes).
+test_transpile('interpolated captured array is not promoted (stays correct)',
+    q{{ my @y; sub q1 { push @y, $_[0] } sub d1 { "@y" } } q1(3); q1(4); print d1(), "\n";});
 
 done_testing();
