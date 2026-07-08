@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 279 (2026-07-08, Opus 4.8) — capture consolidation: shared sigil-aware rewrite + container capture.
+
+- **Consolidation groundwork toward killing the lexical-promotion house of
+  cards** (4 order-dependent passes — spanning/state/W5-capture/cond-my — each
+  with its own subset test + blunt token-content rewrite, all mutating the same
+  PPI tokens + `_file_lex_renamed`; a wrong-sigil or double rewrite is a SILENT
+  miscompile).  Extracted the ONE sharp primitive into `_rewrite_var_uses`: a
+  sigil-aware rename keyed on `->symbol` (so `@a`/`$a[i]`/`@a{…}`/`$#a` all
+  follow the ONE array, and a sibling `$a`/`%a` is never touched), each token
+  keeping its own sigil.  This replaces the "rewrite by content, only safe
+  because `disq` happened to exclude element forms" hazard with a principled
+  rewrite.
+- **Container capture** (`{ my %cache; sub get{…} sub set{…} }` — the ubiquitous
+  CPAN encapsulated-state idiom): a single no-init `my @a`/`my %h` captured by a
+  NAMED sub is now promoted to a shared `defvar` container cell (the array/hash
+  analogue of W5's scalar box), via the shared rewrite + the container-decl fact
+  and defvar-container lowering lifted from the parked W10-ext-3 patch.
+  **Block-extent guard (the sharp edge)**: refuse if any family-use of the name
+  escapes the decl's enclosing block — a use after the block is a DIFFERENT
+  variable (package @a) that a single-cell promotion would wrongly merge.  Guards:
+  one no-init container decl, `decl_count==1`, not interpolated, not `${x}`
+  deref-block, all uses within the declaring block.
+- **method.t stays gated by design**: its `%methods` is captured ACROSS a
+  package boundary (decl in `main`, use in `AutoloadDestroy2::AUTOLOAD`), so it
+  needs container *spanning* (cross-segment), not this per-segment capture pass —
+  deferred with the rest of the method.t cascade (#40).
+- **Corpus byte-identical to HEAD** (all 111 perl-tests) — purely additive: the
+  pass only fires on already-gated files (still v1) or on patterns absent from
+  the torture corpus, so census stays 76 and fully-passing stays 64.  Real gain
+  is the CPAN idiom, verified by synthetic tests (transpile-test-04.t).  Gate
+  114/3939 green.  **Remaining capture blockers** (separate extensions): the
+  block-shadow `decl_count` false positive (do.t: `my $called` ×3 file-wide),
+  multi-scalar list-decl capture (push.t: `my ($first,$second)`), and
+  `_hoist_nested_sub`'s over-broad text scan (wantarray.t).
+
 ## Session 279 (2026-07-08, Opus 4.8) — v2 self-ref container init; p-copy-hash fix; CORE:: declarator strip.
 
 - **CORE:: declarator prefix (`CORE::my`/`our`/`state`/`local`)** → strip at the

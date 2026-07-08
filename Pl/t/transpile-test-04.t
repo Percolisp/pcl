@@ -509,4 +509,20 @@ test_transpile('literal CORE::my inside a string is not rewritten',
 test_transpile('CORE::our scalar and $CORE:: package var coexist',
     q{CORE::our $y = 9; $CORE::keep = 5; print "$y $CORE::keep\n";});
 
+# Container captured by a named sub (the `{ my %cache; sub get{} sub set{} }`
+# encapsulated-state idiom): promoted to a shared defvar container cell, so the
+# hoisted subs and in-place code share one @/%.  Regression: v2 gated the whole
+# file ("possibly captured by nested sub").  Sigil-aware rename via the shared
+# _rewrite_var_uses helper.
+test_transpile('array captured by named subs (static-var idiom)',
+    q{{ my @stack; sub push_it { push @stack, $_[0] } sub all { return @stack } } push_it($_) for (10,20,30); print join(",", all()), "\n";});
+test_transpile('hash captured by named subs',
+    q{{ my %seen; sub mark { $seen{$_[0]}++ } sub cnt { scalar keys %seen } } mark("a"); mark("b"); mark("a"); print cnt(), "\n";});
+test_transpile('captured array element + $#array follow the promoted cell',
+    q{{ my @q; sub add { push @q, $_[0] } sub last_i { return $#q } } add(5); add(6); print "$q[0] $q[1] ", last_i(), "\n";});
+# A scalar $x beside a captured @x must NOT be conflated (sigil-aware): here the
+# captured @data and an unrelated scalar $data coexist.
+test_transpile('captured @x does not conflate a sibling scalar $x',
+    q{my $data = "S"; { my @data; sub feed { push @data, $_[0] } sub dump_it { "@data" } } feed(1); feed(2); print "$data ", dump_it(), "\n";});
+
 done_testing();
