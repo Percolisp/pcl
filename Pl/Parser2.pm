@@ -1856,12 +1856,31 @@ sub _lower_block {
     my @k = _strip_semi($first->schildren);
     if ($has_init) {
       # Self-referential init (`my @a = (@a, 1)` — RHS must see the OUTER
-      # var) needs v1's init-in-binding dance; out of the prototype subset.
+      # `@a`, not the freshly-declared one).  Perl's rule: the new lexical is
+      # not in scope until AFTER the statement, so the RHS names the enclosing
+      # scope's variable.  The fresh-container-then-`p-array-=` shape below
+      # binds `@a` to an EMPTY container first, so the RHS would read that
+      # empty one — wrong.  v1's fix is the "init in let binding" dance:
+      # bind `@a` directly to `(p-copy-array <RHS>)`, with the RHS lowered in
+      # the let's BINDING position where CL's parallel-let still resolves `@a`
+      # to the outer scope.  We mirror that for the simple single-container
+      # form `my @x = …@x…` / `my %h = …%h…`; the list form (`my (undef,@a)`)
+      # and a nested declarator in the RHS (`my @a = my @a = …`) still need
+      # v1's fuller machinery → fall back the whole file.
       my ($eq_i) = grep { $k[$_]->isa('PPI::Token::Operator') && $k[$_]->content eq '=' } 0 .. $#k;
-      my $rhs_txt = join ' ', map { $_->content } @k[$eq_i + 1 .. $#k];
-      for my $v (@$vars) {
-        die "Parser2 TODO: self-referential init: " . $first->content
-          if $rhs_txt =~ /\Q$v\E\b/;
+      my @rhs     = @k[$eq_i + 1 .. $#k];
+      my $rhs_txt = join ' ', map { $_->content } @rhs;
+      my $self_ref = grep { $rhs_txt =~ /\Q$_\E\b/ } @$vars;
+      if ($self_ref) {
+        my $simple = @$vars == 1
+          && $k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^[\@\%]\w+$/
+          && $rhs_txt !~ /(?<![-\w])(?:my|our|local|state)\b/;
+        die "Parser2 TODO: self-referential init: " . $first->content unless $simple;
+        my $var  = $vars->[0];
+        my $copy = substr($var, 0, 1) eq '@' ? 'p-copy-array' : 'p-copy-hash';
+        $self->_reg_lex($var);
+        return (['let', ['list', ['list', $var, [$copy, $self->_lower_expr(\@rhs, $first, 1)]]],
+                 $self->_lower_block(\@rest, $vi, $tail_ctx)]);
       }
     }
     $self->_reg_lex(@$vars);

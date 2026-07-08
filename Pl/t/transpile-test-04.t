@@ -475,4 +475,23 @@ test_transpile('typed lexical without init',
 test_transpile('spanning lexical stays visible to a dynamic eval that names it',
     q{my $strval = "init"; { package Bar; sub show { $strval } } $strval = "changed"; my $code = q<$strval>; print eval($code), "\n"; print Bar::show(), "\n";});
 
+# Self-referential container init (`my @a = (@a, …)` / `my %h = (%h, …)`): the
+# RHS must see the OUTER var (Perl scopes the new lexical from the NEXT
+# statement).  v2 now binds the container to (p-copy-array/-hash <RHS>) in the
+# let BINDING position, where the outer var is still visible — mirroring v1's
+# "init in let binding" dance.  Regression: v2 died "self-referential init".
+test_transpile('self-ref array init reads the outer array',
+    q{my @bee = (1,2,3); { my @bee = (@bee, 4); print "@bee\n"; } print "@bee\n";});
+test_transpile('self-ref array init with element inserted around it',
+    q{my @bee = ('bar','burbl'); { my @bee = ('XXX',@bee,'YYY'); print "@bee\n"; }});
+test_transpile('self-ref hash init reads the outer hash',
+    q{my %h = (a=>1); { my %h = (%h, c=>3); print join(",", map {"$_=$h{$_}"} sort keys %h), "\n"; }});
+# Copy semantics: the inner container is a COPY — mutating it must NOT leak into
+# the outer one (regression: p-copy-hash's hash-table branch shared value boxes,
+# so `$h{a}=…` mutated the source hash; hit v1's `local %h = %h` too).
+test_transpile('self-ref array init is a copy, not an alias',
+    q{my @a = (1,2,3); { my @a = @a; push @a, 99; $a[0] = 'X'; } print "@a\n";});
+test_transpile('self-ref hash init is a copy, not an alias',
+    q{my %g = (a=>1); { my %g = %g; $g{a} = 42; $g{z} = 9; } print "$g{a}\n";});
+
 done_testing();

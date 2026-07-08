@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 279 (2026-07-08, Opus 4.8) — v2 self-referential container init; p-copy-hash box-sharing fix.
+
+- **Self-referential container init `my @a = (@a,…)` / `my %h = (%h,…)`**
+  (gen v2-17): the simple single-container self-ref form died "Parser2 TODO:
+  self-referential init" → whole-file v1.  Perl scopes the new lexical from the
+  NEXT statement, so the RHS must read the OUTER var.  v2's normal path binds
+  the container to a fresh EMPTY one first, then `p-array-=` — so the RHS read
+  the empty container (wrong).  Fix mirrors v1's "init in let binding": bind the
+  container directly to `(p-copy-array <RHS>)` / `(p-copy-hash <RHS>)` with the
+  RHS lowered in the let's BINDING position, where CL parallel-let still resolves
+  the name to the outer scope (Parser2.pm ~1857).  Restricted to the SIMPLE form
+  (`$k[1]` a Symbol `@x`/`%x`, no nested `my`/`our`/`local`/`state` in the RHS);
+  the list form (`my (undef,@a) = @a`) and nested-declarator form
+  (`my @a = my @a = …`) still fall back to v1 (rarer, need v1's fuller list-assign
+  dance).  **Safe groundwork**: previously-dying construct → cannot regress a
+  passing file.  Census unchanged at 75 (array.t still gates on its list-form
+  self-ref at line 162), but the idiom is now native in any otherwise-native
+  file/module.  Regression tests in transpile-test-04.t.
+- **p-copy-hash box-sharing bug (PRE-EXISTING, both pipelines)**: found while
+  testing the above.  `my %h = %h; $h{k}=…` mutated the SOURCE hash (perl copies).
+  `p-copy-hash`'s hash-table-input branch did a shallow `(setf (gethash k copy) v)`
+  that SHARED the value p-boxes; a later in-place `box-set` then hit both hashes.
+  (The vector-input branch was already correct via `%p-make-hash-entry`.)  Fix:
+  mint a fresh entry box per real key in the hash-table branch too; copy the
+  internal `:__class__` bless-key verbatim (`cl/pcl-runtime.lisp` p-copy-hash).
+  Also corrects v1's `local %h = %h`.  Verified: ref values stay refs (share
+  referent, correct), blessed-hash deref-copy keeps values.
+- **Full Pl/t gate green** (114 files / 3931 tests) with saved-core fast path.
+  Targeted hash-sweep stable (array 165, hashassign 305/309, each 51/65,
+  delete 53/56, hash 7/14).  Cache gen **v2-16 → v2-17**.
+
 ## Session 278c (2026-07-07) — typed lexicals; unmangle; can/isa; container-cond-my; bare-print $_.
 
 - **Bare print/say/printf → explicit `$_` in codegen** (commit TBD, gen v2-16):

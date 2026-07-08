@@ -9285,7 +9285,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-16"
+(defparameter *pcl-cache-generation* "v2-17"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11363,7 +11363,15 @@ buffer's fill-pointer; everything else falls back to file-length."
          (copy (make-hash-table :test 'equal)))
     (cond
       ((hash-table-p raw)
-       (maphash (lambda (k v) (setf (gethash k copy) v)) raw))
+       ;; Value entries are p-boxes; a plain (setf (gethash k copy) v) would
+       ;; SHARE those boxes, so `my %h = %h; $h{k}=…` would mutate the source
+       ;; (perl copies).  Mint a fresh entry box per real key (same copy the
+       ;; vector branch below gets via %p-make-hash-entry); the internal
+       ;; :__class__ bless-key is a plain value → copy verbatim.
+       (maphash (lambda (k v)
+                  (setf (gethash k copy)
+                        (if (%p-real-hash-key-p k) (%p-make-hash-entry v) v)))
+                raw))
       ((and (vectorp raw) (not (stringp raw)))
        (let ((flat (%p-flatten-list raw)))
          (loop for i from 0 below (length flat) by 2
