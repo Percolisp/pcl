@@ -426,6 +426,11 @@ session cycle with `PCL_V1` unused and the v1 sweep baseline retired.
 
 ## Sequencing and effort
 
+> **SUPERSEDED (2026-07-10, s280):** calibrated session estimates, the
+> end-state simplicity contract, and the user decision points now live in
+> **`docs/v2-endgame-plan.md`** (phases E1–E5).  The table below is the
+> original rough sizing, kept for history.
+
 | phase | size | depends on |
 |---|---|---|
 | T0.1 marker | hours | — |
