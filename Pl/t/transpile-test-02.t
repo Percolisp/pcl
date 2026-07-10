@@ -500,4 +500,37 @@ unlike(transpile_only('sub f { local $x = 5; my $y = $x + 1; return $y; } print 
        qr/\(declare \(notinline pcl::p-\+/,
        'local inside a sub keeps inlining (no notinline declare)');
 
+# Session 280: shadow-aware capture gates + multi-scalar capture promotion.
+# A nested named sub whose $a is its OWN `my` must not false-positive the
+# capture gate against the outer file lexicals $a/@a (wantarray.t's inline).
+test_transpile("capture: sub-local my shadows outer file lexical",
+    'my $a = 5; my @a = (9); { sub inline2 { my $a = 7; return $a; } }'
+  . ' print inline2(), " ", $a, "\n";');
+# The RHS of the shadowing decl still sees the OUTER variable — that IS a
+# capture, so the shadow analysis must keep the gate (NOTE: v1's runtime
+# handling of this idiom is itself wrong — prints 1, perl prints 6 — a
+# pre-existing v1 bug out of scope here; the guard is the GATE, not the value).
+like(transpile_only('my $x = 5; { sub g2 { my $x = $x + 1; return $x } } print g2(), "\n";'),
+     qr/pipeline=v1/,
+     'capture: shadowing decl RHS counts as a capture -> gates to v1');
+# push.t idiom: multi-scalar list decl captured by a named sub, with the
+# scalars ALSO read via interpolation (the interp rewrite must follow).
+test_transpile("capture: multi-scalar list decl captured by named sub",
+    '{ my ($first, $second) = ([1], [2]);'
+  . ' sub two_things2 { return +($first, $second) }'
+  . ' push @{ two_things2() }, 3;'
+  . ' print join(":", @$first), " [@$second]", "\n"; }');
+# A promoted captured scalar interpolated in qr// follows the rename
+# (QuoteLike::Regexp is covered by the interpolation rewriter).
+test_transpile("capture: renamed scalar followed into qr// interpolation",
+    '{ my $pat = "ab+c";'
+  . ' sub matches2 { my $s = shift; return "u" unless defined $pat;'
+  . '   return $s =~ qr/$pat/ ? "y" : "n"; }'
+  . ' print matches2("xabbc"), matches2("xac"), "\n"; }');
+# Interpolated postfix deref emits literal text in the v2 string lowering —
+# must gate the whole file to v1 (postfixderef.t cascade guard).
+like(transpile_only('use feature q(postderef_qq); my $r = [1,2,3]; print "$r->@*\n";'),
+     qr/pipeline=v1/,
+     'interpolated postfix deref gates the file to v1');
+
 done_testing();

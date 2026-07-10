@@ -379,6 +379,7 @@ sub parse {
   my @sections;
   for my $seg (@segments) {
     $self->_check_sub_captures($seg->{stmts});
+    $self->_check_interp_postderef($seg->{stmts});
     $self->cur_pkg($seg->{pkg});
     $self->_set_cur_package($seg->{pkg});
     $self->{_captured_decls} = [];
@@ -611,6 +612,12 @@ sub _check_my_spanning {
     if ($i && %live) {
       my $hit = $self->_canon_refs_in($segments->[$i]{stmts}, \%live);
       for my $c (sort keys %$hit) {
+        # An IDENTITY-unmangled spanning lexical (unique name, promoted to a
+        # defvar under its OWN name by _rename_spanning_lexicals) is handled:
+        # later-segment uses — including interpolated ones the rename could
+        # not rewrite — resolve to the defvar'd global.  Mangled renames never
+        # match here (the tokens carry the new name).
+        next if $self->{_file_lex_renamed}{$c};
         (my $bare = $c) =~ s/^[\$\@\%]//;
         die "Parser2 TODO: my-lexical '$bare' spans a package boundary\n";
       }
@@ -714,6 +721,8 @@ sub _interp_canon {
           || $t->isa('PPI::Token::Quote::Interpolate')
           || $t->isa('PPI::Token::QuoteLike::Backtick')
           || $t->isa('PPI::Token::QuoteLike::Command')
+          || $t->isa('PPI::Token::QuoteLike::Regexp')      # qr/$x/
+          || $t->isa('PPI::Token::QuoteLike::Readline')    # <$fh>
           || $t->isa('PPI::Token::Regexp::Match')
           || $t->isa('PPI::Token::Regexp::Substitute')) {
       $c = $t->content;
@@ -827,6 +836,33 @@ sub _proto_or_sig_str {
   return $p if defined $p;
   my ($sig) = grep { $_->isa('PPI::Structure::Signature') } $sub->children;
   return $sig ? $sig->content : undef;
+}
+
+# Postfix deref INSIDE an interpolating string ("$ref->@*" / "$s->$*" under
+# `use feature 'postderef_qq'`) is not implemented by the string-interpolation
+# lowering — it emits the arrow part as literal text, a silent miscompile →
+# gate the file.  (v1 has the same gap but its whole-file emission aborts the
+# enclosing form at load instead of printing wrong values.)  Conservative:
+# fires on the text pattern whether or not the feature is enabled — without
+# the feature the construct is genuinely literal text, so over-firing only
+# costs the v2 lowering, never correctness.
+sub _check_interp_postderef {
+  my ($self, $stmts) = @_;
+  for my $stmt (@$stmts) {
+    next unless ref $stmt && $stmt->isa('PPI::Node');
+    for my $t (@{ $stmt->find('PPI::Token') || [] }) {
+      my $c;
+      if ($t->isa('PPI::Token::HereDoc')) {
+        next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;
+        $c = join '', $t->heredoc;
+      } elsif ($t->isa('PPI::Token::Quote::Double')
+            || $t->isa('PPI::Token::Quote::Interpolate')) {
+        $c = $t->content;
+      } else { next; }
+      die "Parser2 TODO: interpolated postfix deref (postderef_qq)\n"
+        if $c =~ /->\s*(?:\$\#?\*|\@\*|\%\*|\@\[|\@\{|\%\{)/;
+    }
+  }
 }
 
 sub _check_sub_captures {
@@ -958,7 +994,8 @@ sub _block_captures_name {
 #                        or interpolated in a string/regex/heredoc.
 sub _scan_lex_facts {
   my ($self, $stmts, $f) = @_;
-  $f->{$_} //= {} for qw(decl_count scalar_decl disq container_decl interp);
+  $f->{$_} //= {} for qw(decl_count scalar_decl disq container_decl interp
+                         family mscalar_decl);
   for my $stmt (@$stmts) {
     my @vstmts = $stmt->isa('PPI::Statement::Variable') ? ($stmt) : ();
     push @vstmts, @{ $stmt->find('PPI::Statement::Variable') || [] };
@@ -983,17 +1020,33 @@ sub _scan_lex_facts {
         (my $bare = $cvars->[0]) =~ s/^[\@\%]//;
         push @{ $f->{container_decl}{$bare} }, [$v, $cvars->[0]];
       }
+      # An all-scalar list decl `my ($a, $b) [= INIT]` (outside a named sub):
+      # each name is its own per-name promotion candidate (push.t's
+      # `my ($first,$second)=…; sub two_things { ($first,$second) }`).  A
+      # mixed list (`my ($a, @rest)`) is deferred — the mixed lowering would
+      # work, but the rewrite facts have only been proven for scalars.
+      if ($cvars && @$cvars > 1 && !(grep { !/^\$\w+$/ } @$cvars)
+          && $kw->content eq 'my' && !_inside_named_sub($v)) {
+        for my $mv (@$cvars) {
+          (my $bare = $mv) =~ s/^\$//;
+          push @{ $f->{mscalar_decl}{$bare} }, $v;
+        }
+      }
     }
     # Any symbol whose canonical form is @x / %x (incl. $x[…] / $x{…} element
     # access, whose ->symbol resolves to the container) disqualifies bare `x`.
     for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
       my $canon = $s->symbol;
       (my $bare = $canon) =~ s/^[\$\@\%]//;
-      $f->{disq}{$bare} = 1 if substr($canon, 0, 1) ne '$';
+      if (substr($canon, 0, 1) ne '$') {
+        $f->{disq}{$bare}   = 1;
+        $f->{family}{$bare} = 1;   # family-form use, independent of interp
+      }
     }
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
       (my $bare = $ai->content) =~ s/^\$#//;
-      $f->{disq}{$bare} = 1;
+      $f->{disq}{$bare}   = 1;
+      $f->{family}{$bare} = 1;
     }
     # A name INTERPOLATED inside a string/regex/heredoc is not a Symbol token,
     # so a token rewrite can't reach it.  Recorded in BOTH `disq` (the scalar
@@ -1139,13 +1192,23 @@ sub _rename_spanning_lexicals {
     # a flattened-block decl, else all later segments (file lexical).  Decls or
     # disqualifying uses outside that range belong to a different variable.
     my $hi = _blk_extent($segments, $di);
-    my ($dc, $disq, @sdecls) = (0, 0);
+    my ($dc, $family, $interp, @sdecls) = (0, 0, 0);
     for my $j ($di .. $hi) {
-      $dc  += $sf[$j]{decl_count}{$bare} // 0;
-      $disq ||= $sf[$j]{disq}{$bare};
+      $dc     += $sf[$j]{decl_count}{$bare} // 0;
+      $family ||= $sf[$j]{family}{$bare};
+      $interp ||= $sf[$j]{interp}{$bare};
       push @sdecls, @{ $sf[$j]{scalar_decl}{$bare} || [] };
     }
-    next if $disq;
+    next if $family;
+    # An interpolated use is text a rename cannot rewrite.  It is safe ONLY on
+    # the identity-unmangle path (the name is unchanged, so interpolation
+    # keeps resolving to the defvar'd global) and only where the interpolating
+    # segment is the DECLARING package — a bare `$x` interpolated in another
+    # package's segment would read THAT package's symbol, not the cell.
+    next if $interp
+      && (!$unique
+          || grep { $sf[$_]{interp}{$bare}
+                    && $segments->[$_]{pkg} ne $segments->[$di]{pkg} } $di .. $hi);
     next unless @sdecls == 1 && $dc == 1;
     next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block
     next if $segments->[$di]{blockform};
@@ -1250,6 +1313,14 @@ sub _rewrite_var_uses {
   my ($self, $stmts, $canon, $newbare, $within) = @_;
   my $sigil = substr($canon, 0, 1);
   (my $bare = $canon) =~ s/^[\$\@\%]//;
+  # Scalar interpolation rewriter: `$bare` inside interpolating text reads the
+  # SAME scalar and must follow the rename.  Backslash-parity guard (an escaped
+  # \$x is literal text; \\$x interpolates); `$x[`/`$x{` are ELEMENT
+  # interpolations of @x/%x — different variables, skipped; the `${x}`
+  # deref-block form never reaches here (_promote_captured refuses it).
+  my $interp_fix = $sigil eq '$' ? sub {
+    $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E\b(?![\[\{])/$1\$$newbare/g;
+  } : undef;
   for my $stmt (@$stmts) {
     next unless ref $stmt && $stmt->isa('PPI::Node');
     for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
@@ -1257,6 +1328,25 @@ sub _rewrite_var_uses {
       next if $within && !_elem_within($s, $within);
       (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/;
       $s->set_content($c);
+    }
+    if ($interp_fix) {
+      for my $t (@{ $stmt->find('PPI::Token') || [] }) {
+        next if $within && !_elem_within($t, $within);
+        if ($t->isa('PPI::Token::HereDoc')) {
+          next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;  # non-interpolating
+          $interp_fix->($_) for @{ $t->{_heredoc} || [] };
+        } elsif ($t->isa('PPI::Token::Quote::Double')
+              || $t->isa('PPI::Token::Quote::Interpolate')
+              || $t->isa('PPI::Token::QuoteLike::Backtick')
+              || $t->isa('PPI::Token::QuoteLike::Command')
+              || $t->isa('PPI::Token::QuoteLike::Regexp')
+              || $t->isa('PPI::Token::QuoteLike::Readline')
+              || $t->isa('PPI::Token::Regexp::Match')
+              || $t->isa('PPI::Token::Regexp::Substitute')) {
+          my $c = $t->content;
+          $t->set_content($c) if $interp_fix->($c);
+        }
+      }
     }
     next unless $sigil eq '@';
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
@@ -1304,13 +1394,11 @@ sub _rename_captured_file_lexicals {
   # ever used in array/hash family form.
   my $f = {};
   $self->_scan_lex_facts($stmts, $f);
-  my %decl_count     = %{ $f->{decl_count}     };
   my %scalar_decl    = %{ $f->{scalar_decl}    };
-  my %disq           = %{ $f->{disq}           };
+  my %family         = %{ $f->{family}         };
   my %container_decl = %{ $f->{container_decl} };
+  my %mscalar_decl   = %{ $f->{mscalar_decl}   };
   my %interp         = %{ $f->{interp}         };
-
-  my $segtxt = join "\n", map { $_->content } @$stmts;
 
   # ONE promotion mechanism for scalars and containers, PER-DECLARATION and
   # EXTENT-scoped.  The extent of a `my` is its nearest enclosing block (or the
@@ -1321,14 +1409,25 @@ sub _rename_captured_file_lexicals {
   # a sibling-block same-name variable and a post-block package global of the
   # same name are never touched.  This is what makes the block-local static-var
   # idiom (`{ my $n; sub inc{$n++} } { my $n; sub dec{$n--} }`) safe.  Scalars
-  # first, then containers, in bare-sorted / source order → deterministic
-  # __file__N numbering (matters for the cache key).
+  # first, then multi-scalar list decls, then containers, in bare-sorted /
+  # source order → deterministic __file__N numbering (matters for the cache
+  # key).  Scalars guard on FAMILY use only (@x/%x/$#x — the one bare name
+  # would denote >1 variable): interpolated scalar uses follow the rename via
+  # _rewrite_var_uses's interpolation rewriter.  Containers still refuse
+  # interpolation (@x in a string is an ELEMENT-JOIN whose rewrite is untested).
   # sorted keys: hash order is per-process random — unsorted made cached
   # transpiles churn.
   for my $bare (sort keys %scalar_decl) {
-    next if $disq{$bare};                                   # used as @x/%x/$#x → not a plain scalar
+    next if $family{$bare};                                 # used as @x/%x/$#x → not a plain scalar
     next if $self->{_file_lex_renamed}{"\$$bare"};          # already promoted by the spanning pass
     for my $decl (@{ $scalar_decl{$bare} }) {
+      $self->_promote_captured($stmts, \@subs, $decl, "\$$bare", $bare);
+    }
+  }
+  for my $bare (sort keys %mscalar_decl) {
+    next if $family{$bare};
+    next if $self->{_file_lex_renamed}{"\$$bare"};
+    for my $decl (@{ $mscalar_decl{$bare} }) {
       $self->_promote_captured($stmts, \@subs, $decl, "\$$bare", $bare);
     }
   }
@@ -1622,6 +1721,8 @@ sub _interp_names {
           || $t->isa('PPI::Token::Quote::Interpolate')
           || $t->isa('PPI::Token::QuoteLike::Backtick')
           || $t->isa('PPI::Token::QuoteLike::Command')
+          || $t->isa('PPI::Token::QuoteLike::Regexp')      # qr/$x/
+          || $t->isa('PPI::Token::QuoteLike::Readline')    # <$fh>
           || $t->isa('PPI::Token::Regexp::Match')
           || $t->isa('PPI::Token::Regexp::Substitute')) {
       $c = $t->content;
@@ -2115,6 +2216,24 @@ sub _lower_block {
         return (['let', ['list', ['list', $var, [$copy, $self->_lower_expr(\@rhs, $first, 1)]]],
                  $self->_lower_block(\@rest, $vi, $tail_ctx)]);
       }
+    }
+    # Promoted (captured) names in a MULTI-decl lower as defvar'd package
+    # cells hoisted to the section top, like the single-scalar/-container
+    # branches above; unpromoted siblings keep their let.  The assignment is
+    # the whole `my (...) = (...)` statement through the expression machinery
+    # (same form the plain path emits inside its let) — it writes THROUGH the
+    # boxes, so defvar'd cells and let-bound cells both receive their values.
+    my @renamed = grep { $self->{_file_lex_renamed}{$_} } @$vars;
+    if (@renamed) {
+      push @{ $self->{_captured_decls} },
+        "(defvar $_ " . _fresh_container($_) . ")" for @renamed;
+      my @unren  = grep { !$self->{_file_lex_renamed}{$_} } @$vars;
+      $self->_reg_lex(@unren);
+      my @assign = $has_init ? ($self->_lower_expr([@k], $first)) : ();
+      return (@assign, $self->_lower_block(\@rest, $vi, $tail_ctx)) unless @unren;
+      return (['let', ['list', map { ['list', $_, _fresh_container($_)] } @unren],
+               @assign,
+               $self->_lower_block(\@rest, $vi, $tail_ctx)]);
     }
     $self->_reg_lex(@$vars);
     my @binds = map { ['list', $_, _fresh_container($_)] } @$vars;
