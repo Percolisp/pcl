@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 280 (2026-07-10, Fable) — capture task #44 finished: shadow-aware gates + multi-scalar/interp promotion (census 80).
+
+- **Verified s278b–279 (Opus 4.8) work first**: Pl/t gate 114/3942 green;
+  do.t 64/73, delete.t 53/56, for.t 129/130 v2-native at exact claimed parity;
+  cache gen v2-17 consistent.  (Stray file `bar` containing "pcl" left in repo
+  root — user to confirm deletion.)
+- **Shadow-aware capture gates** (c58a77d, de-gates wantarray.t → census 79):
+  `_block_captures_name` replaces the raw text scan in `_check_sub_captures` +
+  `_hoist_nested_sub`.  A Symbol/ArrayIndex use is discounted when a preceding
+  same-CANON my/state decl in the sub's own scope shadows it (decl targets are
+  not uses; the RHS of the shadowing decl still sees the OUTER var and counts).
+  Quoted/regex/heredoc text always counts (heredoc BODIES now scanned — the old
+  `block->content` scan missed them).  Canon-aware for the nested gate.
+  wantarray.t 27/28 = v1 parity (fail = context-into-string-eval, deferred).
+- **Multi-scalar + interpolation-following capture promotion** (1f49c3d,
+  de-gates push.t → census 80): (1) `mscalar_decl` fact — each name of an
+  all-scalar `my ($a,$b) [=init]` is a per-name candidate through the SAME
+  `_promote_captured`; mixed lowering branch defvars promoted names, lets the
+  rest, lowers the whole `my(...)=(...)` as the assignment.  (2)
+  `_rewrite_var_uses` now rewrites `$bare` inside interpolating
+  quote/qr//readline/heredoc text (backslash-parity; `$x[`/`$x{` element forms
+  skipped), so the scalar capture path guards on the new `family` fact only
+  (split out of `disq`) — interp'd captured scalars promote.  **CPAN win:
+  Test::Tester de-gates** ($colour, interp'd, captured by cmp_result) — the
+  17× module-census W5-capture family.  push.t 31/32(+1 skip) = v1 parity.
+- **qr//+readline added to `_interp_names`/`_interp_canon`** (real split vector
+  both scanners missed).  Fallout: vec.t's unique unmangled `$exception_134139`
+  is qr-interp'd — spanning pass now splits family/interp facts and allows
+  interp ONLY on the identity-unmangle path with same-pkg interp segments;
+  `_check_my_spanning` skips identity-unmangled canons.  vec.t byte-identical.
+- **New gate `_check_interp_postderef`**: interpolated postfix deref
+  (`"$r->@*"` postderef_qq) emits LITERAL TEXT in the v2 string lowering
+  (silent miscompile; v1 aborts the form at load instead — both wrong vs perl).
+  Keeps **postfixderef.t gated — it is a v2 CASCADE file** (premature de-gate
+  scored 16/10 vs v1's 83/36): unbound `@a` (`@a`/`@b` are in
+  `_forward_global_decls`' runtime_vars exclusion but the runtime never defines
+  them as arrays), nested-sub def ordering (pl-foo undefined), interp
+  postderef.  Logged as fix-target task #45.
+- **Pre-existing v1 bug found** (test guard adjusted, not fixed): file lexical
+  + nested `sub g { my $x = $x + 1; return $x }` — v1 prints 1 (RHS reads the
+  fresh box), perl prints 6.  The v2 gate is correct; v1's runtime handling of
+  the self-ref shadow inside a sub is wrong.
+- Corpus byte-diff HEAD-relative: only wantarray.t / push.t (+ Test::Tester)
+  changed.  Gate 114 files / **3947** tests green (5 new tests in
+  transpile-test-02.t).  Cache gen v2-17 → **v2-19**.  Remaining capture work =
+  container SPANNING (method.t, tasks #39/#40).
+
 ## Session 279 (2026-07-08, Opus 4.8) — capture: block-extent consolidation (de-gates do.t + delete.t).
 
 - **Unified the scalar + container capture into ONE per-declaration,
