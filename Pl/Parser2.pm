@@ -1769,8 +1769,11 @@ sub _declared_names {
 sub _forward_global_decls {
   my ($self, $text, $pkg) = @_;
   $pkg //= 'main';
+  # $a/$b are runtime-owned (the sort lowering defvars them); @a/@b are NOT —
+  # nothing defines them, so excluding them left `\@a` before any assignment
+  # unbound at load (postfixderef.t; v1's list never had them).
   my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
-                                        $a $b @a @b);
+                                        $a $b);
   # Exclude names let-bound in THIS section's package (W3: _all_lex, the
   # cumulative accumulator — NOT the now-scoped _let_bound_vars, which has
   # shrunk back to top-level scope by the time this assembly-phase pass runs).

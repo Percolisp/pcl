@@ -50,6 +50,15 @@ Append new entries at the top. One section per session.
   changed.  Gate 114 files / **3947** tests green (5 new tests in
   transpile-test-02.t).  Cache gen v2-17 → **v2-19**.  Remaining capture work =
   container SPANNING (method.t, tasks #39/#40).
+- **Small end-of-session fix — task #45 item (1): `@a`/`@b` removed from
+  `_forward_global_decls`' runtime-owned exclusion.**  Only `$a`/`$b` are
+  runtime-owned (the sort lowering defvars them); nothing ever defines `@a`/`@b`
+  (v1's list never had them), so package `@a` referenced before assignment
+  (`$r = \@a`) was unbound at load.  7 perl-tests files gain a pure
+  `(defvar @a/@b …)` line, all swept `--jobs 1` at exact parity; module corpus
+  marker-only.  Regression test in transpile-test-02.t.  Gen v2-19 → **v2-20**.
+  #45 remaining: nested-sub def ordering (pl-foo), interp postderef
+  (StringInterpolation.pm ~line 443, both pipelines).
 
 ## Session 279 (2026-07-08, Opus 4.8) — capture: block-extent consolidation (de-gates do.t + delete.t).
 

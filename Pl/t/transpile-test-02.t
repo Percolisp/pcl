@@ -527,6 +527,11 @@ test_transpile("capture: renamed scalar followed into qr// interpolation",
   . ' sub matches2 { my $s = shift; return "u" unless defined $pat;'
   . '   return $s =~ qr/$pat/ ? "y" : "n"; }'
   . ' print matches2("xabbc"), matches2("xac"), "\n"; }');
+# @a/@b sat in _forward_global_decls' runtime-owned exclusion but nothing
+# defines them (only $a/$b are; v1's list never had them): package @a taken
+# by reference BEFORE any assignment was unbound at load (postfixderef.t).
+test_transpile("forward decl: ref to package \@a before any assignment",
+    'no strict; $r = \@a; push @$r, 7; print "@a\n";');
 # Interpolated postfix deref emits literal text in the v2 string lowering —
 # must gate the whole file to v1 (postfixderef.t cascade guard).
 like(transpile_only('use feature q(postderef_qq); my $r = [1,2,3]; print "$r->@*\n";'),
