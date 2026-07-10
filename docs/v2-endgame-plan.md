@@ -149,11 +149,15 @@ bit-for-bit).  Keeps a per-eval v1 retry until E4.
   sessions, folded into E1) — since unshimmed Carp-family and DBIC are
   squarely in PCL's CPAN ambition.  The 5 torture files come along for
   free.
-- **D2 — `postderef_qq` interpolation**: implement (~1 session, fixes both
-  pipelines, unblocks postfixderef.t) vs not-supported.  Recommendation:
-  implement — it is real 5.24+ syntax CPAN uses.
-- **D3 — fuzzer depth before E4** (how much oracle insurance to buy):
-  minimum is E4.0 above; more is safer, unbounded.
+- **D2 — `postderef_qq` interpolation**: **DECIDED (user, 2026-07-11):
+  implement** (~1 session, in E1.4).  Extend StringInterpolation.pm's
+  arrow handling to the `->$*`/`->@*`/`->%*`/`->$#*`/slice forms,
+  conditioned on the feature being enabled (it is in the `:5.24` bundle,
+  so any `use v5.24;` module has it silently); fixes both pipelines,
+  removes the `_check_interp_postderef` stopgap gate.
+- **D3 — fuzzer timing/depth**: **DECIDED (user, 2026-07-11): after
+  E1–E3, before E4.1** — fuzz hard while v1 still exists as the parity
+  oracle, then delete.  Depth to be sized when we get there.
 - **D4 — W15 perf items** interleave freely; not counted here.
 
 ---
