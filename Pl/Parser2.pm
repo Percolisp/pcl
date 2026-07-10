@@ -21,6 +21,7 @@ package Pl::Parser2;
 use v5.30;
 use strict;
 use warnings;
+use Scalar::Util qw(refaddr);
 use Moo;
 use PPI;
 use Pl::Parser;
@@ -839,27 +840,112 @@ sub _check_sub_captures {
     # var they reference is unbound there.  v1 defvar's file lexicals for exactly
     # this compile-time visibility (CLAUDE.md §3) → die → whole-file v1.
     if ($child->isa('PPI::Statement::Scheduled') && $child->block) {
-      my $txt = $child->block->content;
       for my $bare (sort keys %lex) {
         next if $self->{_file_lex_renamed}{"\$$bare"};
         die "Parser2 TODO: file lexical '$bare' referenced in a "
             . $child->type . " block\n"
-          if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+          if $self->_block_captures_name($child->block, $bare);
       }
       next;
     }
     next unless $child->isa('PPI::Statement::Sub') && $child->name && $child->block
       && !$child->isa('PPI::Statement::Scheduled');
-    my $txt = $child->block->content;
     for my $bare (sort keys %lex) {
       # W5: a name already rewritten to a package-level cell ($x__file__N) is
       # legitimately captured — the hoisted sub and in-place code share the
       # one defvar'd box, so it must NOT gate.
       next if $self->{_file_lex_renamed}{"\$$bare"};
       die "Parser2 TODO: file lexical '$bare' captured by sub " . $child->name . "\n"
-        if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+        if $self->_block_captures_name($child->block, $bare);
     }
   }
+}
+
+# Shadow-aware capture test — the precise replacement for the raw text scan
+# both capture gates used (`sub f { my $a = …; $a }` must NOT gate on an outer
+# $a: the sub's $a is its own shadow, not a capture).  True iff $block contains
+# a use of bare name $bare that resolves OUTSIDE the block:
+#   - a Symbol/ArrayIndex use is DISCOUNTED when a my/state declaration of the
+#     SAME canonical symbol inside the block strictly precedes it and the
+#     declaring statement's parent scope contains the use (Perl's shadowing
+#     rule; the RHS of the shadowing decl itself still sees the OUTER variable,
+#     so `my $a = $a + 1` inside the sub still counts as a capture);
+#   - declaration targets themselves are not uses;
+#   - any occurrence inside quoted/regex/heredoc text ALWAYS counts —
+#     interpolation and string eval reach names invisibly to token analysis
+#     (this includes non-interpolating quotes, which can feed `eval`);
+#   - `foreach my $x` loop-var decls are NOT recognized as shadows (they are
+#     Compound-statement tokens, not Statement::Variable) — over-fires → gate
+#     stays → v1; conservative, never a miscompile.
+# $canons (optional hashref of '$x'/'@x'/'%x'): restrict token uses to those
+# canonical symbols — a use of @a matters only when the live lexical IS @a.
+# Text matches can't be canon-resolved and always count.
+sub _block_captures_name {
+  my ($self, $block, $bare, $canons) = @_;
+  my $re = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+  my @heredocs = @{ $block->find('PPI::Token::HereDoc') || [] };
+  # Cheap early-out: the bare name appears nowhere in the text (common case).
+  return 0 unless $block->content =~ $re
+    || grep { join('', $_->heredoc) =~ $re } @heredocs;
+
+  # my/state declarations of the bare name inside the block:
+  # canon → [decl-statement, ord of its last token]; plus the declaring Symbol
+  # tokens themselves (declaration targets, not uses).
+  my (%decl, %decl_tok, %ord);
+  my $i = 0;
+  $ord{ refaddr $_ } = $i++ for $block->tokens;
+  for my $d (@{ $block->find('PPI::Statement::Variable') || [] }) {
+    my @k = _strip_semi($d->schildren);
+    next unless @k >= 2 && $k[0]->isa('PPI::Token::Word')
+      && $k[0]->content =~ /^(?:my|state)$/;
+    my @tgt = $k[1]->isa('PPI::Token::Symbol')   ? ($k[1])
+            : $k[1]->isa('PPI::Structure::List')
+              ? (grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1])
+            : ();
+    my $last = $ord{ refaddr( ($d->tokens)[-1] ) };
+    for my $t (@tgt) {
+      next unless substr($t->content, 1) eq $bare;
+      $decl_tok{ refaddr $t } = 1;
+      push @{ $decl{ $t->content } }, [$d, $last];
+    }
+  }
+
+  my $shadowed = sub {
+    my ($tok, $canon) = @_;
+    my $u = $ord{ refaddr $tok };
+    return 0 unless defined $u;
+    for my $dd (@{ $decl{$canon} || [] }) {
+      my ($d, $dlast) = @$dd;
+      next unless $dlast < $u;                    # decl strictly precedes use
+      my $scope = $d->parent or next;             # decl's enclosing scope
+      for (my $p = $tok->parent; $p; $p = $p->parent) {
+        return 1 if refaddr($p) == refaddr($scope);
+        last if refaddr($p) == refaddr($block);
+      }
+    }
+    return 0;
+  };
+
+  for my $t ($block->tokens) {
+    if ($t->isa('PPI::Token::Symbol')) {
+      next if $decl_tok{ refaddr $t };
+      my $canon = $t->symbol;
+      next unless $canon =~ /^[\$\@\%]\Q$bare\E$/;
+      next if $canons && !$canons->{$canon};
+      return 1 unless $shadowed->($t, $canon);
+    } elsif ($t->isa('PPI::Token::ArrayIndex')) {
+      next unless $t->content eq "\$#$bare";
+      next if $canons && !$canons->{"\@$bare"};
+      return 1 unless $shadowed->($t, "\@$bare");
+    } elsif ($t->isa('PPI::Token::HereDoc')) {
+      return 1 if join('', $t->heredoc) =~ $re;
+    } elsif ($t->isa('PPI::Token::Quote')
+          || $t->isa('PPI::Token::QuoteLike')
+          || $t->isa('PPI::Token::Regexp')) {
+      return 1 if $t->content =~ $re;
+    }
+  }
+  return 0;
 }
 
 # Shared fact scan for the W5/W10 lexical-rename passes.  Accumulates into
@@ -1765,11 +1851,17 @@ sub _lower_scope {
 # text scan; over-firing only costs the v2 lowering, never correctness.
 sub _hoist_nested_sub {
   my ($self, $sub) = @_;
-  my $txt = $sub->block->content;
-  for my $var (sort keys %{ $self->{_live_lex} // {} }) {
+  # Group the live lexicals by bare name; a sub-body use gates only when its
+  # canonical symbol is actually live (and is not the sub's own shadow —
+  # _block_captures_name).
+  my %by_bare;
+  for my $var (keys %{ $self->{_live_lex} // {} }) {
     (my $bare = $var) =~ s/^[\$\@\%]//;
+    $by_bare{$bare}{$var} = 1;
+  }
+  for my $bare (sort keys %by_bare) {
     die "Parser2 TODO: lexical '$bare' possibly captured by nested sub " . $sub->name . "\n"
-      if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+      if $self->_block_captures_name($sub->block, $bare, $by_bare{$bare});
   }
   push @{ $self->{_hoisted_decls} },
     ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($sub->name)];
