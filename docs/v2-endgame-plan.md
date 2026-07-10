@@ -69,9 +69,9 @@ Current gate families (census 2026-07-10) and their fixes:
 | E1.2 capture refusals (closure, my, hash, sub, chdir, hashassign, bop, undef, aassign) | 9 | per-file triage; several likely clearable by s280's interp rewrite + per-extent facts | 2–3 |
 | E1.3 singles: continue-block, foreach-aliasable-element ×2, state ×2, self-ref list init, END-block lexical, yadayada/pack interp-shadow | 8 | one commit each; interp-shadow ones may fall out of E1.2 | 3–4 |
 | E1.4 postfixderef cascade (#45 items 2–3) | 1 | sub-def ordering + `postderef_qq` in StringInterpolation.pm (fixes BOTH pipelines) | 1–2 |
-| E1.5 pkg-in-block residue (bless, index, local, magic, reset) | 5 | **user decision D1** (§3) | 0 or 2–3 |
+| E1.5 nested `package` statements (bless, index, local, magic, reset — **and real Carp / Sub::Uplevel / DBIx::Class::_Util**) | 5+ | design (b): Environment-tracked package + qualified emission — see **D1** (§3, evidence revised 2026-07-11: recommendation is now IMPLEMENT) | 2–3 |
 
-**E1 subtotal: 8–12 sessions** (plus 2–3 if D1 = port).
+**E1 subtotal: 10–15 sessions** (E1.5 now included per revised D1).
 Acceptance: census 111 minus blessed-permanent; every de-gate at
 byte-diff + `--jobs 1` parity; hidden-second-gate rule applies (each
 de-gate can reveal the next gate — the census after every session is the
@@ -127,12 +127,28 @@ bit-for-bit).  Keeps a per-eval v1 retry until E4.
 
 ## 3. User decisions needed (block estimates, not work)
 
-- **D1 — pkg-in-block residue (5 files).**  "Permanent gate" stops being
-  an option the day v1 dies: after deletion a gate is a hard failure.
-  Choose: (a) port design (b) qualification (+2–3 sessions), or
-  (b) declare nested/in-sub `package` statements not-supported
-  (sweep losses in 5 torture files; the module census found **zero**
-  real-CPAN uses).  Recommendation: **(b)**, revisit on real-module evidence.
+- **D1 — nested `package` statements (pkg-in-block residue, 5 files).**
+  "Permanent gate" stops being an option the day v1 dies: after deletion
+  a gate is a hard failure.
+  **Evidence update (2026-07-11, wider-corpus PPI scan — the first-gate
+  census had HIDDEN these behind earlier gates):** the construct IS used
+  by real CPAN code, in two narrow static idioms:
+  - **`package DB;` inside a sub** around a `caller($i)` call (the
+    @DB::args protocol): real Carp, Sub::Uplevel, **DBIx::Class::_Util
+    (×2 — and that file's FIRST gate is exactly this statement)**.  Note
+    PCL never populates @DB::args, but these callers all detect that and
+    degrade gracefully — so *statement* support alone makes them compile
+    and run their fallback path.
+  - **PAUSE-hidden helper package in a BEGIN** (`package\n X::_Private;`):
+    Moo's Method::Generate::Accessor, DBIx::Class::_ENV_.
+  Framework *class creation* (Moo/Moose/DBIC result classes) never hits
+  this: it is runtime string-eval / glob assignment, where `package X;`
+  is top-level in its own compilation unit.
+  **Revised recommendation: implement design (b)** — Environment-tracked
+  current package + qualified emission for the scope remainder (+2–3
+  sessions, folded into E1) — since unshimmed Carp-family and DBIC are
+  squarely in PCL's CPAN ambition.  The 5 torture files come along for
+  free.
 - **D2 — `postderef_qq` interpolation**: implement (~1 session, fixes both
   pipelines, unblocks postfixderef.t) vs not-supported.  Recommendation:
   implement — it is real 5.24+ syntax CPAN uses.
@@ -146,12 +162,12 @@ bit-for-bit).  Keeps a per-eval v1 retry until E4.
 
 | phase | sessions |
 |---|---|
-| E1 gates | 8–12 (+2–3 if D1=port) |
+| E1 gates (incl. E1.5 nested-package per revised D1) | 10–15 |
 | E2 seam re-housing | 8–12 |
 | E3 eval-mode | 1–2 |
 | E4 fuzzer + deletion | 2–4 |
 | E5 simplification | 2–4 |
-| **total** | **21–34** (~expected 27) |
+| **total** | **23–37** (~expected 29) |
 
 Calibration sources: capture-family burn-down ran 66→80 native across
 sessions 278b–280 ≈ **2.8 files/session including mechanism-building**
