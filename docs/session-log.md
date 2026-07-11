@@ -4,6 +4,62 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 281 (2026-07-11, Fable) — E1.5 nested `package` shipped as D1-lite (census 84, gate 114/3948, gen v2-21).
+
+- **D1 rethought per user question ("could it be simpler if slower?"): yes,
+  and it isn't even slower.**  v1's own working mechanism for a nested
+  statement-form `package X;` is just *shared-Environment push + one inline
+  `(p-set-current-package …)`* — the "qualified emission" design (b) budgeted
+  2–3 sessions for already falls out of every Environment-driven emitter.
+  Implemented as a `_lower_block` branch: push the package, lower the
+  REMAINDER of the enclosing block under it (Perl's block scoping = the
+  recursion), pop, emit enter/restore current-package forms (restore skipped
+  when the block tail value is used — p-sub's dynamic binding covers subs,
+  v1's shape).  Block form (`package o { … }` in a sub, index.t) lowers its
+  own block the same way plus v1's inline `(p-defpackage)` + **qualified**
+  `(defclass X::plc-x)` trio (v1's in-sub path emits the defclass unqualified
+  — a dormant wrong-package bug not copied).  Support pieces:
+  `_sub_name_for_emission` (hoisted subs qualify when Environment ≠ segment
+  pkg), `_effective_pkg` (pre-pass `add_declared_sub`/sub_info honour nested
+  switches; no direct-call sub_info for such subs), and **every
+  `Statement::Package` namespace in the doc joins `%pre`** — this also fixes
+  a real pre-existing v2 LOAD bug: a package declared inside a BEGIN (Moo
+  M::G::Accessor idiom) emitted qualified symbols with **no p-defpackage**
+  (read error).  Full D1 write-up: `docs/v2-endgame-plan.md` §3.
+- **De-gates + parity (all `--jobs 1`)**: bless.t **106/106 FULLY PASSING**
+  (v1: 99+7), local.t 302+17 with a fail-list **byte-identical** to v1's,
+  magic.t 133+30@181 (v1: 130+29@181), reset.t 41+0 parity.  index.t moved
+  families (next gate = `$store` captured by nested sub STORE, E1.2).
+  Census 80 → **84 native / 27 gated**; nested-package gate family GONE.
+  Corpus byte-diff vs HEAD: only the four de-gated files differ.
+- **Three pre-existing bugs exposed by de-gating, all fixed:**
+  1. `my (...) = delete local @a[…]` lost the block-end restore (v2's `my`
+     path lowered the init as a self-contained expression).  Fix:
+     `_is_local_stmt` also routes a my/our decl whose top-level tokens
+     contain adjacent `delete local` through the local seam (v1 owns the
+     open-scope bookkeeping).  Residue: delete-local nested deeper in an
+     init expression (call argument) still unrouted — same as before.
+  2. **`$^S` was unbound everywhere** (missing from `%SPECIAL_VARS` → emitted
+     unpiped, case-inverted to `$^s`; and missing from the runtime).  Added
+     `'$^S' => '|$^S|'`, runtime `(defvar |$^S| 0)` + export, and
+     `p-eval-block`/`p-eval` now bind it to 1 (perl: 0 runtime, 1 in eval).
+     In v1 this aborted one small form; in v2 the top-level-`local` raw_wrap
+     made the whole rest of magic.t one form → 85 tests lost.
+  3. **CLForm raw_wrap closers swallowed by comments**: closers were appended
+     to the last body line; when that line ends in a `;;` comment (v1 echoes
+     skipped statements, e.g. stash delete-local), the `)`s were commented
+     out → truncated unreadable file.  Printer now drops closers to their own
+     line iff the text ends inside a comment (`_ends_in_comment`) —
+     byte-identical everywhere else.
+- Regression tests: 6 added to `Pl/t/transpile-test-04b.t` (nested pkg
+  statement/block/BEGIN forms, delete-local-in-my restore, `$^S`).
+  Gate 114 files / 3948 tests green (`tools/prove-core`).  Cache gen
+  **v2-21**.
+- **NEXT**: E1 continues — biggest family = container/multi spanning (7
+  files, #39/#40), capture refusals (E1.2, now incl. index.t), postderef
+  cascade (E1.4/#45, D2 approved) — or start E2.0 dual-run scaffold
+  (alternate E1/E2 per plan).
+
 ## Session 280 (2026-07-10, Fable) — capture task #44 finished: shadow-aware gates + multi-scalar/interp promotion (census 80).
 
 - **Verified s278b–279 (Opus 4.8) work first**: Pl/t gate 114/3942 green;

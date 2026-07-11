@@ -128,8 +128,32 @@ bit-for-bit).  Keeps a per-eval v1 retry until E4.
 ## 3. User decisions needed (block estimates, not work)
 
 - **D1 — nested `package` statements (pkg-in-block residue, 5 files).**
-  "Permanent gate" stops being an option the day v1 dies: after deletion
-  a gate is a hard failure.
+  **RESOLVED (session 281, 2026-07-11): implemented as design (b-lite)** —
+  the user asked whether D1 could be simpler if the construct were allowed
+  to be slower, and inspection of v1 showed the answer is *yes, and it is
+  not even slower*: v1's own working mechanism for the statement form is
+  just "push the shared Environment package + emit one
+  `(p-set-current-package …)`" — the qualified emission that design (b)
+  budgeted 2–3 sessions for already happens wherever the Environment drives
+  emission (`our`, hoisted sub names, `use overload`, 1-arg bless).  v2's
+  transplant lives in `_lower_block`: on a nested statement-form
+  `package X;`, push the Environment package, lower the REMAINDER of the
+  enclosing block under it (Perl's block scoping falls out of the
+  recursion), pop, and emit enter/restore `p-set-current-package` forms;
+  the block form lowers its own block the same way, plus v1's inline
+  `(p-defpackage)` + qualified `(defclass)` trio, re-executed each run —
+  the "accept slower" concession, costing one defclass re-eval per
+  execution of a rare construct.  Unqualified *globals* after the switch
+  keep the section package — exactly v1's documented divergence, no worse.
+  Supporting pieces: `_sub_name_for_emission` (hoisted subs qualify against
+  the Environment package when it differs from the segment), `_effective_pkg`
+  (pre-pass sub registration honours nested switches; no direct-call
+  sub_info for such subs), and every `Statement::Package` namespace in the
+  document joins the `%pre` p-defpackage set (also fixes a real load bug:
+  BEGIN-nested packages — the Moo M::G::Accessor idiom — emitted qualified
+  symbols with no p-defpackage).  Actual cost: **1 session** including the
+  exposed pre-existing bugs it un-gated (delete-local-in-my restore, `$^S`,
+  raw_wrap closers swallowed by comment echoes).
   **Evidence update (2026-07-11, wider-corpus PPI scan — the first-gate
   census had HIDDEN these behind earlier gates):** the construct IS used
   by real CPAN code, in two narrow static idioms:

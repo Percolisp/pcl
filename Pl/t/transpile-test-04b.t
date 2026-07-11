@@ -508,4 +508,43 @@ print "$h{a}\n";
 { package Bar; my $h = "S"; print "$h\n"; }
 ');
 
+# D1/E1.5 (session 281): nested `package` statements — v1-shape transplant in
+# _lower_block.  Statement form scopes to the enclosing block remainder;
+# block form to its own block; subs after the switch install qualified.
+test_transpile("nested package: statement form in sub scopes to sub end, block restores", '
+sub f { package X; return __PACKAGE__; }
+sub g { { package Y; } return __PACKAGE__; }
+print f(), "-", g(), "\n";
+');
+test_transpile("nested package: sub defined after nested package installs qualified (bless.t F shape)", '
+{ { package F; sub hello { return "F-hello" } } }
+print F::hello(), "\n";
+');
+test_transpile("nested package: block form inside a sub body (index.t shape)", '
+sub f { package P2 { sub m2 { return "m2v" } } return P2::m2(); }
+print f(), "\n";
+');
+test_transpile("nested package in BEGIN gets a p-defpackage pre-declaration (Moo idiom)", '
+BEGIN { package Foo::_Private; sub hidden { return 42 } }
+print Foo::_Private::hidden(), "\n";
+');
+
+# delete-local inside a my-init opens a restore scope (local.t shape); the
+# whole statement routes through the local seam (_is_local_stmt).
+test_transpile("my = delete local restores the deleted elements at block end", '
+our @a = ("a", "b", "c");
+$a[4] = "d";
+{
+    my $c = delete local $a[2];
+    my ($d, $zzz) = delete local @a[4, 999];
+    print "in=$c$d\n";
+}
+print "out=$a[2]$a[4]\n";
+');
+
+# $^S eval-state variable (was unbound: missing from %SPECIAL_VARS + runtime).
+test_transpile("\$^S is 0 at runtime and 1 inside eval", '
+print $^S, ";", eval { $^S }, "\n";
+');
+
 done_testing();

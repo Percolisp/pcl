@@ -351,10 +351,10 @@ sub parse {
                @{ $sub->block->find('PPI::Statement::Sub') || [] };
           my $sig_info = $self->fallback_parser->parse_prototype_or_signature($proto, $sub);
           $self->environment->add_prototype($sub->name, $sig_info);
-          $self->environment->add_declared_sub($sub->name, $seg->{pkg});
+          $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}));
           next;
         }
-        $self->environment->add_declared_sub($sub->name, $seg->{pkg});
+        $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}));
         # Same default signature v1's _process_sub_statement registers for a
         # prototype-less sub: PExpr consults get_prototype() to decide that a
         # bareword `foo` is a CALL (pl-foo), not the string "foo".
@@ -364,6 +364,11 @@ sub parse {
         # emits (p-declare-sub) and no definition.  No sub_info: there is
         # nothing to direct-call, so any call takes the fallback funcall path.
         next unless $sub->block;
+        # A sub living in a NESTED package (D1/E1.5) is emitted with a
+        # qualified name (_sub_name_for_emission); the unqualified cl_name
+        # convention below would direct-call the wrong symbol → no sub_info,
+        # calls take the fallback funcall path.
+        next if $self->_effective_pkg($sub, $seg->{pkg}) ne $seg->{pkg};
         # cl_name stays UNQUALIFIED (pl-foo) for a plain name: the section's
         # in-package makes the reader intern it in the segment's package —
         # exactly v1's per-section convention.
@@ -513,6 +518,13 @@ sub parse {
   # p-defpackage up top guarantees Pkg::sym forms further down are readable.
   my %pre = map { ($_->{pkg} => 1) } @sections[1 .. $#sections];
   $pre{$_} = 1 for keys %{ $self->{_referenced_pkgs} };
+  # A package DECLARED below the top level (nested `package X;` in a
+  # sub/block — D1/E1.5 — or inside a BEGIN lowered whole through v1) has no
+  # section, but its emission carries X-qualified symbols that must be
+  # READABLE when the enclosing top-level form is read → pre-declare every
+  # Statement::Package namespace in the document (top-level ones dedup here).
+  $pre{ $_->namespace // 'main' } = 1
+    for @{ $doc->find('PPI::Statement::Package') || [] };
   # Packages referenced via qualified CALLS (PerlIO::get_layers($fh)) register
   # in the shared Environment as the fallback expressions parse — v1 pre-
   # declares these the same way (get_undeclared_packages).
@@ -1857,9 +1869,44 @@ sub _lower_sub {
   return $form;
 }
 
+# After a nested `package X;` switch (D1/E1.5) the Environment's current
+# package differs from the segment package whose section this output is read
+# in — an unqualified sub name would intern in the SECTION's package, so
+# qualify it against the Environment package first.  Top-level lowering has
+# current == segment (via _set_cur_package), where this is the identity.
+sub _sub_name_for_emission {
+  my ($self, $name) = @_;
+  my $cur = $self->environment->current_package // 'main';
+  $name = "${cur}::${name}"
+    if $name !~ /::|'/ && $cur ne ($self->cur_pkg // 'main');
+  return $self->fallback_parser->_qualified_sub_to_cl($name);
+}
+
+# The Perl package an element sits in, honouring NESTED `package` statements
+# (D1/E1.5): the innermost win is either a block-form `package X { … }`
+# ancestor, or the nearest PRECEDING statement-form `package X;` sibling at
+# any ancestor level (a statement-form switch scopes to the remainder of its
+# enclosing block).  Used by the pre-pass, which runs before lowering and so
+# cannot read the Environment's live package stack.
+sub _effective_pkg {
+  my ($self, $elem, $default) = @_;
+  for (my $n = $elem; $n && !$n->isa('PPI::Document'); $n = $n->parent) {
+    if ($n->isa('PPI::Structure::Block') && $n->parent
+        && $n->parent->isa('PPI::Statement::Package')) {
+      return $n->parent->namespace // $default;
+    }
+    for (my $p = $n->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
+      next unless $p->isa('PPI::Statement::Package');
+      next if grep { $_->isa('PPI::Structure::Block') } $p->schildren;
+      return $p->namespace // $default;
+    }
+  }
+  return $default;
+}
+
 sub _lower_sub_inner {
   my ($self, $sub) = @_;
-  my $clname = $self->fallback_parser->_qualified_sub_to_cl($sub->name);
+  my $clname = $self->_sub_name_for_emission($sub->name);
   my @stmts = $sub->block->schildren;
 
   my $params = $self->_extract_params($stmts[0]);
@@ -1968,7 +2015,7 @@ sub _hoist_nested_sub {
       if $self->_block_captures_name($sub->block, $bare, $by_bare{$bare});
   }
   push @{ $self->{_hoisted_decls} },
-    ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($sub->name)];
+    ['p-declare-sub', $self->_sub_name_for_emission($sub->name)];
   push @{ $self->{_hoisted_defs} }, $self->_lower_sub($sub);
   return;
 }
@@ -2283,9 +2330,65 @@ sub _lower_block {
       $self->_hoist_nested_sub($first);
     } else {
       push @{ $self->{_hoisted_decls} },
-        ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($first->name)];
+        ['p-declare-sub', $self->_sub_name_for_emission($first->name)];
     }
     return $self->_lower_block(\@rest, $vi, $tail_ctx);
+  }
+
+  # -- nested `package NAME;` / `package NAME { … }` (D1/E1.5,
+  # docs/v2-endgame-plan.md): a package switch below the top level never
+  # opens a section.  v1's shape: track the package in the shared Environment
+  # so everything Environment-driven (hoisted sub names, 1-arg bless,
+  # __PACKAGE__, `use overload`) attributes to NAME, and reflect the switch
+  # at runtime (caller()) via p-set-current-package.  The statement form
+  # scopes to the REMAINDER OF THE ENCLOSING BLOCK — lowering @rest under the
+  # push gives Perl's scoping for free; the block form scopes to its own
+  # block.  The package + CLOS class are (re)created inline each execution —
+  # cheap enough for this rare construct.  defclass is QUALIFIED: the reader
+  # consumes the whole enclosing top-level form before any of it runs, so a
+  # bare class name would intern in the READING (section) package; NAME
+  # itself is readable because parse() pre-declares every Statement::Package
+  # namespace in the document.  Unqualified GLOBALS after the switch keep the
+  # section package — v1's exact (documented) divergence.
+  if ($first->isa('PPI::Statement::Package')) {
+    my $pkg = $first->namespace // 'main';
+    my $version = eval { $first->version };
+    # PPI quirk (see $consume_pkg): ->version returns the BLOCK text for an
+    # unversioned block form — accept only real version literals.
+    undef $version unless defined $version && $version =~ /^v?\d+(?:[._]\d+)*$/;
+    die "Parser2 TODO: versioned nested package statement\n" if defined $version;
+    my ($blk) = grep { $_->isa('PPI::Structure::Block') } $first->schildren;
+    my $env  = $self->environment;
+    my $fp   = $self->fallback_parser;
+    $env->add_package($pkg);
+    my $prev    = $env->current_package;
+    my $cl_pkg  = $fp->_cl_pkg_designator($pkg);
+    my $cl_prev = $fp->_cl_pkg_designator($prev);
+    (my $sym = $cl_pkg) =~ s/^://;
+    # Per-package $a/$b specials (sort comparators) — v1 emits these from its
+    # package preamble; hoisted to the section's declarations like `our`.
+    push @{ $self->{_captured_decls} },
+      "(defvar ${sym}::\$a (make-p-box nil))",
+      "(defvar ${sym}::\$b (make-p-box nil))";
+    my @enter = (raw("(p-defpackage $cl_pkg)"),
+                 raw("(defclass ${sym}::" . $fp->_pkg_to_clos_class($pkg) . " () ())"),
+                 raw("(p-set-current-package $cl_pkg \"$pkg\")"));
+    my $restore = raw("(p-set-current-package $cl_prev \"$prev\")");
+    if ($blk) {
+      $env->push_package($pkg);
+      my @inner = $self->_lower_scope([grep { $_->significant } $blk->children], $vi, undef);
+      $env->pop_package;
+      return (@enter, @inner, $restore,
+              $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
+    $env->push_package($pkg);
+    my @rest_forms = $self->_lower_block(\@rest, $vi, $tail_ctx);
+    $env->pop_package;
+    # The runtime restore would REPLACE the block's tail value — when the
+    # remainder's value is used (sub-body tail), skip it and rely on p-sub's
+    # dynamic *pcl-current-package* binding instead (v1's shape).
+    push @rest_forms, $restore unless defined $tail_ctx;
+    return (@enter, @rest_forms);
   }
 
   # -- everything else appends a form and continues at the same depth.
@@ -3106,6 +3209,20 @@ sub _is_local_stmt {
   return 1 if $stmt->isa('PPI::Statement::Variable') && $k[0]->content eq 'local';
   return 1 if $k[0]->content eq 'delete'
     && $k[1] && $k[1]->isa('PPI::Token::Word') && $k[1]->content eq 'local';
+  # `my (...) = delete local ...`: the INIT opens a local scope (the deleted
+  # element is restored at block end) — v2's plain `my` path would lower the
+  # init as a self-contained expression and drop the restore.  v1's statement
+  # machinery owns the open-scope bookkeeping (defvar'd my-vars +
+  # p-local-*-elem wrapping the block remainder), so route the whole
+  # statement through the local seam.  Top-level adjacent `delete local`
+  # tokens only: a delete-local nested deeper in the init expression (e.g.
+  # as a call argument) is not detected — same-shape residue as before.
+  if ($stmt->isa('PPI::Statement::Variable') && $k[0]->content =~ /^(?:my|our)$/) {
+    for my $i (0 .. $#k - 1) {
+      return 1 if $k[$i]->isa('PPI::Token::Word')   && $k[$i]->content eq 'delete'
+        && $k[$i + 1]->isa('PPI::Token::Word') && $k[$i + 1]->content eq 'local';
+    }
+  }
   return 0;
 }
 
