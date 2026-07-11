@@ -547,4 +547,11 @@ test_transpile("\$^S is 0 at runtime and 1 inside eval", '
 print $^S, ";", eval { $^S }, "\n";
 ');
 
+# `our` inside a nested-package region declares (and uses) the SWITCHED
+# package cell — v1 mechanism: add_our_variable/is_our_variable qualification.
+test_transpile("our inside nested package region binds the switched package cell", '
+sub f { package X; our $v; $v = 5; return $X::v // "X-undef"; }
+print f(), "\n";
+');
+
 done_testing();

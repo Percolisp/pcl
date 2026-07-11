@@ -3086,7 +3086,21 @@ sub _lower_our_decl {
     # lexical lets (see _forward_global_decls) — shadowing our/my → v1.
     die "Parser2 TODO: our '$n' shadows a my-lexical\n"
       if $self->fallback_parser->{_let_bound_vars}{$n};
-    push @{ $self->{_captured_decls} }, "(defvar $n " . _fresh_container($n) . ")";
+    # Inside a nested-`package X;` region (D1/E1.5) the declared cell belongs
+    # to X, but this defvar is read in the SECTION's package — qualify it, and
+    # register the our-variable so the fallback expression path qualifies
+    # unqualified USES identically (v1's mechanism: ExprToCL "Qualify `our`
+    # variables", keyed on the Environment's current package, which pops back
+    # at the block end).  Segment-level `our` stays bare — the section's
+    # in-package already reads it into the right package — so emission
+    # everywhere else is byte-identical.
+    my $cur = $self->environment->current_package // 'main';
+    my $prefix = '';
+    if ($cur ne ($self->cur_pkg // 'main')) {
+      $self->environment->add_our_variable($cur, $n);
+      $prefix = ($cur =~ /::/ ? "|$cur|" : $cur) . '::';
+    }
+    push @{ $self->{_captured_decls} }, "(defvar ${prefix}${n} " . _fresh_container($n) . ")";
   }
   return [] if @k == 2;
   # `NAMES = RHS` minus the `our` keyword is a plain (list) assignment.
