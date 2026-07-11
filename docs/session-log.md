@@ -4,6 +4,42 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 282c (2026-07-11, Fable) — E1.2 investigation: exact culprit per spanning-gated file + plan (groundwork committed, 41881c0).
+
+**Investigation complete, implementation NOT started (session ended).  The
+plan below is ready to execute.**
+
+- **New diagnostics**: `PCL_SPAN_DEBUG=1` warns every `_canon_refs_in` gate
+  hit with path/line/statement.  Culprits for the 5 spanning-gated files:
+  | file | hit | shape |
+  |---|---|---|
+  | caller.t | `my ($pkg,$file,$line) = caller` in a BEGIN (line 371) | list-decl symbol misclassified as use — FIXED (41881c0); file STILL gates for an unidentified further reason — rerun with `PCL_V2_VERBOSE=1` first thing |
+  | eval.t | `sub db1 { $x; eval '$x' }` ×2 (363–364) | GENUINE span + eval-by-name; non-unique 'x' (12 decls) → can't unmangle → correctly refused.  Fix = teach the s250 capture alist to carry original-name→renamed-cell, or leave gated (own task) |
+  | ref.t | `$test = curr_test();` (382, 415) | genuine span; refused because re-decl `my $test` at 432 (inside a block) inflates extent dc to 2 |
+  | scalar.t | `open $fh…` (97) genuine + many false hits | `open my $fh` = expression-embedded decl: no Statement::Variable, so neither declarator- nor shadow-detection sees it |
+  | sort.t | `sub foo { $answer = … }` in OtherPack (853) | genuine span; re-decl at 866 (in a block) inflates dc — same family as ref.t |
+- **Plan (mechanisms, in order):**
+  - **M1 DONE (41881c0)**: `_symbol_is_declarator` climbs nested
+    Statement::Expression (list-decl parens).  **GOTCHA recorded**:
+    PPI::Statement::Variable ISA Statement::Expression — the climb MUST use
+    exact `ref() eq`, an isa() climb re-gated do/each/vec/sprintf2.
+  - **M2**: recognize expression-embedded `my` (`open my $fh, …`) in both
+    `_symbol_is_declarator` and the shadow scan (`_stmt_declares_canon`
+    handles only Statement::Variable) → kills scalar.t's false hits.
+  - **M3 (the real work)**: shadow-aware extent facts + rewrite in
+    `_rename_spanning_lexicals` — (a) dc counting excludes block-nested
+    re-decls in later segments (distinct shadowing vars); (b) the
+    later-segment qualified rewrite must SKIP scopes that re-declare the
+    name (reuse `_ref_shadowed` per candidate token).  These names are
+    non-unique → mangled path → eval-guard stays.  Unlocks ref.t + sort.t
+    (+ scalar.t's genuine span after M2).
+  - **eval.t**: defer to its own task (capture-alist-under-original-name).
+- **De-gate parity baselines (v1 fallback, today)**: caller.t 16+49/112
+  stop@65; eval.t 121+39/169 stop@163; ref.t 183+19/245 stop@237;
+  scalar.t 81+35+12/128; sort.t 202+2+1/205.
+- 41881c0 verified corpus-byte-identical (all 111 files, pipeline markers
+  unchanged) + parser2 guards pass; no gen bump needed.
+
 ## Session 282b (2026-07-11, Fable) — E1.1: container spanning + method.t cascade (tasks #39/#40), census 86, gen v2-24.
 
 - **W10-ext-3 container spanning (task #39) landed.**  The parked patch
