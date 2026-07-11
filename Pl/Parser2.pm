@@ -721,6 +721,9 @@ sub _canon_refs_in {
       for my $b (keys %live_bare) {
         next unless $txt =~ /(?:[\$\@\%]|\$\#)\Q$b\E\b/;
         $hit{$_} = 1 for @{ $live_bare{$b} };
+        warn sprintf("SPANHIT eval-scan %s line=%s stmt=%.70s\n", $b,
+                     ($stmt->location||['?'])->[0], $stmt->content =~ s/\s+/ /gr)
+          if $ENV{PCL_SPAN_DEBUG};
       }
       next;
     }
@@ -730,13 +733,26 @@ sub _canon_refs_in {
       next if $self->_symbol_is_declarator($s);              # a decl, not a use
       next if $self->_ref_shadowed($s, $canon, $stmts, $seg_parent);
       $hit{$canon} = 1;
+      warn sprintf("SPANHIT symbol %s line=%s stmt=%.70s\n", $canon,
+                   ($s->location||['?'])->[0], $stmt->content =~ s/\s+/ /gr)
+        if $ENV{PCL_SPAN_DEBUG};
     }
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
       (my $b = $ai->content) =~ s/^\$#//;
-      $hit{"\@$b"} = 1
-        if $live->{"\@$b"} && !$self->_ref_shadowed($ai, "\@$b", $stmts, $seg_parent);
+      next unless $live->{"\@$b"} && !$self->_ref_shadowed($ai, "\@$b", $stmts, $seg_parent);
+      $hit{"\@$b"} = 1;
+      warn sprintf("SPANHIT arylen \@%s line=%s\n", $b, ($ai->location||['?'])->[0])
+        if $ENV{PCL_SPAN_DEBUG};
     }
+    my %before = %hit;
     _interp_canon($stmt, $live, \%live_bare, \%hit);
+    if ($ENV{PCL_SPAN_DEBUG}) {
+      for my $c (keys %hit) {
+        warn sprintf("SPANHIT interp %s line=%s stmt=%.70s\n", $c,
+                     ($stmt->location||['?'])->[0], $stmt->content =~ s/\s+/ /gr)
+          unless $before{$c};
+      }
+    }
   }
   return \%hit;
 }
@@ -785,6 +801,20 @@ sub _symbol_is_declarator {
   my ($self, $sym) = @_;
   my $stmt = $sym;
   $stmt = $stmt->parent while $stmt && !$stmt->isa('PPI::Statement');
+  # The contents of `my (LIST)`'s parens parse as a nested
+  # Statement::Expression — the walk above stops there and the
+  # Statement::Variable test below failed for EVERY list-decl symbol
+  # (caller.t's `my ($pkg, $file, $line) = caller` gated the file).
+  # Climb through Expression wrappers to the enclosing statement.
+  # EXACT class match: PPI::Statement::Variable ISA Statement::Expression,
+  # so an isa() climb would walk OUT of genuine decl statements (that bug
+  # gated do.t/each.t/vec.t/sprintf2.t when first tried with isa).
+  while ($stmt && ref($stmt) eq q{PPI::Statement::Expression}) {
+    my $p = $stmt->parent or last;
+    $p = $p->parent while $p && !$p->isa(q{PPI::Statement});
+    last unless $p;
+    $stmt = $p;
+  }
   return 0 unless $stmt && $stmt->isa('PPI::Statement::Variable');
   my $kw = ($stmt->schildren)[0];
   return 0 unless $kw && $kw->isa('PPI::Token::Word')
