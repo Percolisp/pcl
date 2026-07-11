@@ -55,10 +55,28 @@ Append new entries at the top. One section per session.
   statement/block/BEGIN forms, delete-local-in-my restore, `$^S`).
   Gate 114 files / 3948 tests green (`tools/prove-core`).  Cache gen
   **v2-21**.
-- **NEXT**: E1 continues — biggest family = container/multi spanning (7
-  files, #39/#40), capture refusals (E1.2, now incl. index.t), postderef
-  cascade (E1.4/#45, D2 approved) — or start E2.0 dual-run scaffold
-  (alternate E1/E2 per plan).
+- **Post-session isolation review (user question)**: `our` inside a nested
+  package region was a real v1-parity gap — v2 wrote `main::$v` where v1/perl
+  write `X::$v`.  Fixed (87a2c73): `_lower_our_decl` emits a QUALIFIED defvar
+  and calls `add_our_variable($cur,$n)` when Environment pkg ≠ segment pkg,
+  so the fallback's existing our-qualification (ExprToCL "Qualify `our`
+  variables") covers uses; scoped so all other emission is byte-identical.
+  Also learned: unqualified CALLS inside a switched region error in perl too
+  (`Undefined subroutine &X5::cpkg`) — that residue can't bite valid input.
+- **OPEN BUG (task #49, found by edge-case probes, PRE-EXISTING, not E1.5):**
+  `do { package X8; … }` in expression position leaks the Environment
+  package — PExpr::handle_subcalls:417 → parse_block_as_function:2658 →
+  v1 `_process_package_statement`:6519 pushes X8 with no pop, and the block
+  is parsed ~3× by pre-passes, so under v2 even calls BEFORE the statement
+  emit `(X8::pl-f5)` (undefined function at runtime); v1 leaks only after.
+  Repro inline in task #49; identical at d7cac4f.  Fix idea:
+  save/restore package_stack around parse_block_as_function.  The edge2.pl
+  probe battery (caller pkg, 1-arg bless, eval-in-region, do-tail,
+  compound scoping, package reopen) is blocked on this — re-run after.
+- **NEXT**: fix task #49 + finish the edge-case battery; then E1 continues —
+  biggest family = container/multi spanning (7 files, #39/#40), capture
+  refusals (E1.2, now incl. index.t), postderef cascade (E1.4/#45, D2
+  approved) — or start E2.0 dual-run scaffold (alternate E1/E2 per plan).
 
 ## Session 280 (2026-07-10, Fable) — capture task #44 finished: shadow-aware gates + multi-scalar/interp promotion (census 80).
 
