@@ -68,6 +68,26 @@ sub _no_flat {
   return 0;
 }
 
+# Does the text END inside a line comment?  Tracks string literals and #\
+# character literals like the paren checker; comment state resets at newline.
+sub _ends_in_comment {
+  my ($s) = @_;
+  my @c = split //, $s;
+  my ($in_str, $com, $ahb, $i) = (0, 0, 0, 0);
+  while ($i < @c) {
+    my $ch = $c[$i];
+    if ($ch eq "\n") { $com = 0; $i++; next }
+    if ($com) { $i++; next }
+    if ($in_str) { if ($ch eq "\\") { $i += 2; next } $in_str = 0 if $ch eq '"' }
+    elsif ($ahb) { $ahb = 0 }
+    elsif ($ch eq '"') { $in_str = 1 }
+    elsif ($ch eq '#' && $i + 1 < @c && $c[$i + 1] eq "\\") { $ahb = 1; $i += 2; next }
+    elsif ($ch eq ';') { $com = 1 }
+    $i++;
+  }
+  return $com;
+}
+
 sub _flat {
   my ($f) = @_;
   if (!ref $f) { return _no_flat($f) ? undef : $f }
@@ -92,9 +112,14 @@ sub to_string {
   return $$f if is_raw($f);
   if (is_raw_wrap($f)) {
     my $ind1 = '  ' x ($depth + 1);
-    return $f->{open}
-      . join('', map { "\n$ind1" . to_string($_, $depth + 1) } @{ $f->{body} })
-      . (')' x $f->{closes});
+    my $out = $f->{open}
+      . join('', map { "\n$ind1" . to_string($_, $depth + 1) } @{ $f->{body} });
+    # Closers appended to text that ends inside a `;` comment are swallowed
+    # by the comment (v1's fallback echoes skipped statements as `;; …` raw
+    # lines — local.t's stash delete-local) — drop them to their own line
+    # then.  Byte-identical everywhere else.
+    $out .= "\n" . ('  ' x $depth) if _ends_in_comment($out);
+    return $out . (')' x $f->{closes});
   }
   my $flat = _flat($f);
   return $flat if defined $flat && length($flat) + 2 * $depth <= ONE_LINE_MAX;
