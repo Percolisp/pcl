@@ -209,6 +209,7 @@ my %SPECIAL_VARS = (
   '$^V' => '|$^V|',
   '$^X' => '|$^X|',
   '$^T' => '|$^T|',   # BASETIME - program start time (Unix seconds; used by -M/-A/-C)
+  '$^S' => '|$^S|',   # Eval state: 0 runtime, 1 inside eval (bound by p-eval/-block)
   '$^I' => '|$^I|',   # INPLACE_EDIT - in-place edit extension (<> / perl -i)
   '$/'  => '|$/|',
   '$\\' => '|$\\\\|',   # $\ (ORS): backslash must be escaped INSIDE the |...| symbol;

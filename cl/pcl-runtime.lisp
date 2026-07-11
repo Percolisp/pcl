@@ -196,7 +196,7 @@
    #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
-   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
    #:*pcl-caller-wantarray*
@@ -674,6 +674,11 @@
 
 ;;; Regex code-block result ($^R) - result of last successful (?{...}) eval
 (defvar |$^R| nil "Result of last successful (?{...}) regex code block")
+
+;;; Interpreter state ($^S): 0 at runtime, 1 while executing an eval body
+;;; (p-eval-block / p-eval rebind it), undef during BEGIN — PCL runs BEGIN
+;;; bodies through the same eval machinery, so that case reads 1, not undef.
+(defvar |$^S| 0 "Perl $^S - eval state: 0 runtime, 1 inside eval")
 
 ;;; System error ($!) - dualvar: numeric = errno integer, string = strerror
 ;;; We cache the errno in *p-stored-errno* so that SBCL's internal C calls
@@ -6899,6 +6904,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Binds *pcl-caller-wantarray* so wantarray() in the eval'd code reflects context."
   (let ((*pcl-caller-wantarray* *wantarray*)
         (*p-eval-lex-alist* lex-alist)
+        (|$^S| 1)
         (s (to-string (unbox string))))
     ;; eval undef / eval "" -> nil (undef), $@ = ""
     (when (string= s "")
@@ -6986,7 +6992,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; enclosing sub — so catch :p-return here, letting the eval evaluate to the
   ;; returned value rather than unwinding the whole sub.
   `(handler-case
-       (prog1 (catch :p-return ,@body)
+       (prog1 (let ((|$^S| 1)) (catch :p-return ,@body))
          (box-set $@ ""))
      (p-exception (e)
        ;; Object exception - preserve the object in $@
@@ -9285,7 +9291,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-20"
+(defparameter *pcl-cache-generation* "v2-21"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
