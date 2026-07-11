@@ -569,4 +569,99 @@ PERL
     like($out, qr/exit-status=0/,  'waitpid() sets $? from the child exit');
 }
 
+# ============ M-C/M-D CAPTURE-PROMOTION TESTS (session 284) ============
+# Shadow-aware, position-aware promotion of lexicals captured by named subs
+# (Pl/Parser2.pm _promote_captured); these shapes previously gated whole
+# files to v1 (closure.t/index.t/undef.t/hashassign.t families).
+
+# A re-decl of the same name inside another named sub is a distinct shadow —
+# it must not block promoting the file-level $i captured by foo.
+test_transpile("capture: shadow decl in sibling sub does not block promotion", '
+my $i = 1;
+sub foo { $i = shift if @_; $i }
+sub foo2 { my $i = shift; return $i }
+foo(2);
+print foo(), " ", foo2(9), "\n";
+');
+
+# Perl visibility: uses BEFORE the decl and the decl RHS read the global.
+test_transpile("capture: pre-decl use and decl RHS read the package global", '
+$v = "G";
+print "pre=$v\n";
+my $v = $v . "L";
+sub getv { $v }
+print "post=$v get=", getv(), "\n";
+');
+
+# Container decl WITH init captured by named subs (chdir.t %Saved_Env shape).
+test_transpile("capture: hash with init captured by named subs", '
+my %saved = (a => 1);
+sub stash { $saved{$_[0]} = $_[1] }
+sub fetch { $saved{$_[0]} }
+stash("b", 2);
+print "a=$saved{a} b=", fetch("b"), " n=", scalar(keys %saved), "\n";
+');
+
+# Multi-container list decl (undef.t/hashassign.t shape).
+test_transpile("capture: multi-container list decl captured by named sub", '
+my (%names, %copy);
+%names = (x => "X");
+%copy = %names;
+sub inm { return $names{$_[0]} . $copy{$_[0]} }
+print "r=", inm("x"), "\n";
+');
+
+# Mixed scalar+array list decl, sub called BEFORE the decl statement runs,
+# plus "@a" / "$a[i]" / "$#a" interpolation following the rename (aassign.t).
+test_transpile("capture: mixed list decl + array interpolation follows rename", '
+my $ra = f1();
+my ($x, @a) = @$ra;
+sub f1 { $x = 1; @a = 2..4; return \\@a }
+print "x=$x a=@a first=$a[0] last=$#a\n";
+');
+
+# Hash element and slice interpolation follow a container rename.
+test_transpile("capture: hash element/slice interpolation follows rename", '
+my %h = (k => "V", j => "W");
+sub geth { $h{$_[0]} }
+my @ks = ("k","j");
+print "el=$h{k} slice=@h{@ks} get=", geth("j"), "\n";
+');
+
+# M-D (index.t shape): a lexical inside a named sub captured by a NESTED
+# named sub shares one cell with the enclosing body.
+test_transpile("capture: nested named sub captures enclosing sub lexical", '
+sub run {
+  my $store = 100;
+  sub setter { $store = $_[0] }
+  setter(7);
+  print "store=$store\n";
+}
+run();
+');
+
+# Identity promotion: a file-unique name keeps its own name, so a DYNAMIC
+# string eval still resolves it (hashassign.t %names + eval $tempval shape).
+test_transpile("capture: file-unique name stays visible to dynamic string eval", '
+my %names = (a => 1, b => 2);
+sub geta { $names{a} }
+my $tv = q{$names{b}};
+print "e=", eval($tv), " g=", geta(), " k=", scalar(keys %names), "\n";
+');
+
+# Expression-embedded my (weaken(my $p = \%tb)) is block-scoped and boxed via
+# p-my-= — reference identity must survive (hashassign.t 217/218).
+test_transpile("embedded my decl: weak ref keeps hash identity", '
+{
+    my %tb;
+    no warnings;
+    use builtin qw(weaken);
+    weaken(my $p = \\%tb);
+    %tb = ();
+    print "eq1=", ($p eq \\%tb ? "Y" : "N"), "\n";
+    undef %tb;
+    print "eq2=", ($p eq \\%tb ? "Y" : "N"), "\n";
+}
+');
+
 done_testing();

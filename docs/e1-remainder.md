@@ -1,5 +1,19 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s284, 2026-07-12): M-C + M-D SHIPPED — census 92 native / 19
+> gated, gen v2-26.**  De-gated: **hashassign.t, index.t, undef.t** (exact
+> sweep parity).  The M-C hypotheses below were partly wrong (the CAPREFUSE
+> diagnostics proved it): my.t was a canon-conflation false positive (now
+> fixed, file re-gates on `standalone label` — a new M-E single); chdir.t's
+> capture cleared, re-gates on `BEGIN sub-existence introspection`; aassign.t
+> + sub.t captures cleared, both re-gate on the M-E `foreach over an
+> aliasable lvalue element`; closure.t's real blocker is the **string-eval
+> guard** (dynamic `eval $code` after the decl — joins the eval.t family,
+> M-F).  Remaining 19 gates: M-A (pack, yadayada), M-B (ref, scalar, sort),
+> M-E (chop, substr, loopctl, array, aassign, sub, my[label],
+> chdir[BEGIN-introspection], postfixderef #45), M-F (state, signatures,
+> eval+closure, lfs).  s284 detail in `docs/session-log.md` §284.
+
 **State:** census **89 v2-native / 22 gated**, gen v2-25, gate 114/3979 PASS
 (after session 283, commit cd9dd3b).  This doc is the per-file triage of every
 remaining gate, grouped by the *mechanism* that clears it, so the next E1

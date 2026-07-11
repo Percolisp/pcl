@@ -507,12 +507,13 @@ test_transpile("capture: sub-local my shadows outer file lexical",
     'my $a = 5; my @a = (9); { sub inline2 { my $a = 7; return $a; } }'
   . ' print inline2(), " ", $a, "\n";');
 # The RHS of the shadowing decl still sees the OUTER variable — that IS a
-# capture, so the shadow analysis must keep the gate (NOTE: v1's runtime
-# handling of this idiom is itself wrong — prints 1, perl prints 6 — a
-# pre-existing v1 bug out of scope here; the guard is the GATE, not the value).
-like(transpile_only('my $x = 5; { sub g2 { my $x = $x + 1; return $x } } print g2(), "\n";'),
-     qr/pipeline=v1/,
-     'capture: shadowing decl RHS counts as a capture -> gates to v1');
+# capture.  s284 (M-C): the shadow-aware promotion lowers this NATIVELY and
+# CORRECTLY — the outer $x promotes to a cell, the sub's shadow keeps its own
+# let, and the shadow's RHS follows the rename to the outer cell.  perl
+# prints 6; the old "gates to v1" expectation preserved v1's pre-existing
+# MISCOMPILE (it printed 1).
+test_transpile("capture: shadowing decl RHS reads the outer (promoted) lexical",
+    'my $x = 5; { sub g2 { my $x = $x + 1; return $x } } print g2(), "\n";');
 # push.t idiom: multi-scalar list decl captured by a named sub, with the
 # scalars ALSO read via interpolation (the interp rewrite must follow).
 test_transpile("capture: multi-scalar list decl captured by named sub",

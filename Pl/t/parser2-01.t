@@ -204,13 +204,24 @@ like($@, qr/spans a package boundary/,
      'W10: interpolated spanning lexical still dies to v1');
 
 # W5: a single scalar file lexical captured by a NAMED sub is rewritten to a
-# fresh package-level cell ($n__file__N) — defvar'd, NOT let-bound — so the
-# hoisted sub and in-place code share the box.
+# package-level cell — defvar'd, NOT let-bound — so the hoisted sub and
+# in-place code share the box.  A FILE-UNIQUE name keeps its own name
+# (identity, like the span pass — no __file__N mangle), so string eval and
+# interp text keep resolving.
 my $capt = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print bump(), "\n";});
-like($capt, qr/\(defvar \$n__file__\d+ \(make-p-box nil\)\)/,
-     'W5: captured scalar file lexical gets a defvar cell');
-like($capt, qr/\(p-scalar-= \$n__file__\d+ 1\)/, 'W5: renamed cell assigned in place');
-unlike($capt, qr/\(let \(\(\$n__file__\d+/, 'W5: renamed cell is NOT let-bound');
+like($capt, qr/\(defvar \$n \(make-p-box nil\)\)/,
+     'W5: captured file-unique scalar gets an identity defvar cell');
+unlike($capt, qr/\$n__file__\d+/, 'W5: file-unique captured name is NOT mangled');
+unlike($capt, qr/\(let \(\(\$n\b/, 'W5: promoted cell is NOT let-bound');
+# A NON-unique name (block-nested shadow elsewhere) takes the mangled path;
+# the shadow scope keeps its own name (M-C shadow-aware count + rewrite).
+my $captm = Pl::Parser2->parse_code(
+  q{my $n = 1; sub bump { $n + 1 } { my $n = 9; print $n; } print bump(), "\n";});
+like($captm, qr/\(defvar \$n__file__\d+ \(make-p-box nil\)\)/,
+     'W5: shadowed captured lexical gets a MANGLED defvar cell');
+like($captm, qr/\(p-scalar-= \$n__file__\d+ 1\)/, 'W5: renamed cell assigned in place');
+like($captm, qr/\(let \(\(\$n (?:9|\(make-p-box)/,
+     'W5: the block shadow keeps its own let-bound $n');
 
 # …but a case OUTSIDE the subset still gates → whole-file v1: an interpolated
 # use ($n inside a string) can't be rewritten by token content, so it must die.
@@ -423,10 +434,15 @@ like($capt2, qr/\(defvar \$x__file__\d+ \(make-p-box nil\)\)/,
      'W5: static-variable idiom gets a defvar cell');
 like($capt2, qr/\(p-sub pl-bump2/, 'W5: capturing nested sub still hoisted');
 
-# …but an array file lexical captured by a nested sub stays gated (the bare
-# name is used in @/element form → can't be renamed by token content).
-my $capt2a = eval { Pl::Parser2->parse_code(q[{ my @x = (0); sub bump2a { push @x, 1 } } print "ok\n";]) };
-like($@, qr/captured by nested sub/, 'array block lexical captured by nested sub dies to v1');
+# …and an array block lexical captured by a nested sub (with init) is now
+# promoted too (M-D, task #50): sigil-aware rename + init kept as a
+# write-through assignment.  This shape used to gate → v1, which MISCOMPILED
+# it (s282b edge probes).
+my $capt2a = Pl::Parser2->parse_code(q[{ my @x = (0); sub bump2a { push @x, 1 } } print "ok\n";]);
+like($capt2a, qr/\(defvar \@x__file__\d+ /,
+     'M-D: array block lexical captured by nested sub gets a defvar container');
+like($capt2a, qr/\(p-array-= \@x__file__\d+ /,
+     'M-D: promoted container keeps its init as a write-through assignment');
 
 # …and a SIBLING scope's same-named lexical must NOT block the hoist.
 my $sib = Pl::Parser2->parse_code(

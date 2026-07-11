@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 284 (2026-07-12, Fable) — E1 M-C + M-D: shadow-aware/positional capture promotion, identity path, embedded-my let-hoist — census 92, gen v2-26.
+
+Executed steps 1–2 of `docs/e1-remainder.md`.  **hashassign.t, index.t,
+undef.t now v2-native** (exact sweep parity: 305/4, 109+1, 30/0-full).
+Corpus byte-diff: 25 files changed emission, HEAD-vs-new sweeps of all of
+them **line-for-line identical** (4140 pass / 466 fail both sides).
+
+- **CAPREFUSE diagnostics** (`_caprefuse`, PCL_SPAN_DEBUG): every refusal in
+  `_promote_captured` + caller-loop skips now prints canon + reason.  Proved
+  two survey hypotheses wrong before any mechanism work (my.t = false
+  positive, closure.t = eval guard, not decl inflation).
+- **Canon-aware capture gates** (`_check_sub_captures` → `_block_captures_name`
+  with canons from `_collect_lexical_names`): a file `my @x` no longer gates
+  on a sub touching only the package global `$x`.  Text matches are now
+  restricted by SIGIL SHAPE per canon (`$x->` can only be scalar $x; `$x[`
+  an @x element; `$x{`/`@x{` the hash) incl. `${x}`-brace forms — a
+  single-quoted `'$x…'` test description no longer gates @x's file.
+- **`_promote_captured` rewritten** (M-C): per-declaration, extent-scoped,
+  **shadow-aware** (`_hard_decl_count` — deeper-nested re-decls are distinct
+  shadows whose scopes the rewrite skips via `_symbol_is_declarator` +
+  `_ref_shadowed`) and **positional** (uses BEFORE the decl and the decl's
+  own RHS keep reading the OUTER variable — `_rename_decl_within` declarator
+  rename first, then post-decl statements only; capture must be by a
+  POST-decl sub).  New guards: interp+shadows refuses (M-A will lift);
+  post-decl string eval naming the lexical refuses (dynamic eval = blanket);
+  extent-scoped family check (segment-wide guard removed — aassign f17).
+- **Identity promotion**: a FILE-UNIQUE name declared at segment top level
+  promotes under its OWN name (span pass's unmangle rule; `_file_decl_count`
+  precomputed over all segments).  Neutralises every text hazard at once —
+  interp, `${x}`, string eval (v1's defvar-under-original-name model).
+  Explains most of the 25-file corpus diff (mangles → plain names).
+- **M-D (task #50)**: decls INSIDE named subs are candidates now
+  (`_inside_named_sub` exclusion dropped) — a nested named sub capturing an
+  enclosing sub's lexical promotes (index.t tie-STORE, undef.t X::DESTROY).
+  Container candidacy extended: init'd single containers (`my %h = ()` —
+  chdir shape; the SPAN loop still refuses init'd decls), and mixed/any-sigil
+  list decls (`my (%hash, %mirror)`, `my ($x, @a)`) — the promoted multi-decl
+  lowering was already sigil-generic.  parser2-01 t114 updated: the shape is
+  now POSITIVE (was "dies to v1", which v1 miscompiled per s282b).
+- **Container interp rewrite** (M-A piece): `_rewrite_var_uses` interp fixer
+  now sigil-aware — `@a` (join) / `@a[…]` / `$a[` / `$#a` for arrays,
+  `$h{` / `@h{` for hashes, backslash-parity guarded.  `"@a"`-style interp no
+  longer blocks container promotion (aassign f1, sub.t @scratch family).
+- **Embedded-my let-hoist** (found by the ONE sweep-parity loss, hashassign
+  217/218): `weaken(my $p = \%tb)` — v2 treated the expression-embedded `my`
+  as a package global → `p-scalar-=` stored the ref **box-in-box** → `$p`
+  stringified `REF(…)` ≠ `HASH(…)` and weak-ref identity broke.  Plain
+  statements with top-level embedded `my` now let-bind the names around the
+  statement + block remainder (`_embedded_my_names`), `_reg_lex`'d so both
+  native and seam paths emit `p-my-=`.  VETO when another named sub in the
+  segment references the name (those shapes relied on the shared global —
+  `_seg_named_subs`).
+- Gate strings that MOVED (files still gated, new causes): my.t →
+  `standalone label` (`loop:` + `goto loop`, M-E single); chdir.t → `BEGIN
+  block with sub-existence introspection`; aassign.t + sub.t → `foreach over
+  an aliasable lvalue element` (M-E, same as chop/substr); closure.t →
+  dynamic-string-eval guard (eval.t family, M-F — also carries the known
+  per-iteration closure limitation).
+- 9 runtime tests → `Pl/t/transpile-test-03.t` (perl-vs-CL compare); guard
+  updates in `Pl/t/parser2-01.t` (identity + mangled-shadow + M-D positive).
+  Cache gen **v2-26**.  e1-remainder.md updated in place (s284 header note).
+
 ## Session 283 (2026-07-11, Fable) — E1.2 execution: caller.t de-gated (+bop/hash bonus), M2+M3 shadow-aware spans, gen v2-25.
 
 Executed the §282c plan.  **caller.t, bop.t, hash.t now v2-native**; ref.t /
