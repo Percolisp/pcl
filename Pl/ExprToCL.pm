@@ -1192,7 +1192,10 @@ sub gen_funcall {
                     ? ($self->environment->current_package // 'main')
                     : 'main';
     if (@$kids >= 2) {
-      my $arg_str = $self->gen_node($kids->[1]);
+      # ALL args: the trailing-LIST shapes (SUPER::m{}@a, SUPER::m{@a}"b")
+      # parse to multiple kids; the runtime flattens and takes the first
+      # element of the combined list as the invocant.
+      my $arg_str = join ' ', map { $self->gen_node($_) } @{$kids}[1 .. $#$kids];
       return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" $arg_str)";
     }
     # No args — call without invocant (will signal error at runtime)

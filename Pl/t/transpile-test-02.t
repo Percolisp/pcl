@@ -538,4 +538,77 @@ like(transpile_only('use feature q(postderef_qq); my $r = [1,2,3]; print "$r->@*
      qr/pipeline=v1/,
      'interpolated postfix deref gates the file to v1');
 
+# E1.1 / W10-ext-3 (s282): containers (%h/@a) spanning a package boundary are
+# span-renamed to a defvar package cell (was a whole-file v1 gate).
+test_transpile("container spanning: %h element access from another package", '
+my %h;
+{ package X; sub g { $h{a} } }
+$h{a} = 5;
+print X::g(), "\n";
+');
+test_transpile('container spanning: @list whole/last-index across a package boundary', '
+my @list;
+push @list, "a", "b";
+{ package Y; sub n { $#list + scalar(@list) } }
+print Y::n(), "\n";
+');
+
+# PPI splits `sub main::::flomp` into two Word tokens; v2 read only the first
+# (emitted unreadable pl-main::, aborting the section — method.t test 122).
+test_transpile("sub main::::flomp — PPI-split name reassembled", '
+sub flomp { "flimp" }
+sub main::::flomp { "flump" }
+print "::"->flomp, "-", "::main"->flomp, "\n";
+');
+
+# Guard edges of the container-spanning rename (each `next` in the loop):
+# an edge the rename must REFUSE still runs correctly via the v1 fallback.
+test_transpile('container spanning guard: interpolated "@list" refuses rename, stays correct', '
+my @ilist = (1,2,3);
+{ package EI; sub s1 { "@ilist" } }
+print "interp: ", EI::s1(), "\n";
+');
+test_transpile('container spanning guard: $mix scalar + %mix hash share the bare name — refused', '
+my $mix = "s";
+my %mix = (k => "h");
+{ package E5; sub g5 { $mix . $mix{k} } }
+print "mix: ", E5::g5(), "\n";
+');
+test_transpile("container spanning: hash and array SLICES across the boundary", '
+my %sh = (a => 1, b => 2);
+my @sa = (10, 20, 30);
+{ package E6; sub g6 { my @v = @sh{qw(a b)}; my @w = @sa[0,2]; "@v|@w" } }
+print "slice: ", E6::g6(), "\n";
+');
+
+# Forward declaration with a PPI-split name must merge too.
+test_transpile("sub main::::fwd; forward decl then definition", '
+sub main::::fwd;
+sub main::::fwd { "F" }
+print "fwd: ", "::"->fwd, "\n";
+');
+
+# Indirect-object SUPER block forms (method.t 120-122): block list and
+# trailing LIST concatenate; first element of the combined list = invocant.
+test_transpile("SUPER::m indirect block forms incl. trailing LIST", '
+package egakacp {
+  our @ISA = q(ASI);
+  sub ASI::m { shift; "@_" };
+  my @a = (bless([]), q(arg));
+  my $r = SUPER::m{@a};
+  print "r1=$r\n";
+  $r = SUPER::m{}@a;
+  print "r2=$r\n";
+  $r = SUPER::m{@a}"b";
+  print "r3=$r\n";
+}
+');
+test_transpile("SUPER indirect: scalar-invocant block + multi-element trailing LIST", '
+package ASI2; sub m2 { shift; join("+", @_) }
+package egak2; our @ISA = "ASI2";
+my @a = (bless([], "egak2"), "z");
+my $r = SUPER::m2{$a[0]} "x", "y";
+print "multi: $r\n";
+');
+
 done_testing();

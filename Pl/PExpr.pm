@@ -2588,6 +2588,42 @@ sub handle_subcalls {
         next;
       }
 
+      # Indirect-object block form with a SUPER::-qualified method:
+      #   SUPER::m {@a}       — block list = (invocant, args...)
+      #   SUPER::m {} @a      — trailing LIST appended to the (empty) block list
+      #   SUPER::m {@a} "b"   — both concatenate
+      # Perl semantics (verified vs perl 5.40): the block's list value and the
+      # trailing LIST concatenate, and the INVOCANT is the first element of
+      # the combined list — exactly %pcl-super-indirect's calling convention
+      # (ExprToCL's SUPER:: funcall special case), so lower all three shapes
+      # to funcall(SUPER::m, BLOCK-ARGS..., LIST...).  Without this, a
+      # trailing element after the block fell through to the parse-error die.
+      if ($func_name =~ /^SUPER::\w+$/) {
+        my($top_node, $top_id) = $self->make_node_insert('funcall');
+        my $node_id = $self->make_node($now);
+        $self->add_child_to_node($top_id, $node_id);
+
+        my @bc = grep { ref($_) !~ /Whitespace|Comment/ } $next->children();
+        if (@bc == 1 && ref($bc[0]) eq 'PPI::Statement') {
+          my @sc = grep { ref($_) !~ /Whitespace|Comment/ } $bc[0]->children();
+          @bc = @sc if @sc;
+        }
+        if (@bc) {
+          my $blk_expr = $self->cleanup_for_parsing(\@bc);
+          my $blk_ids  = $self->parse_list($blk_expr);
+          $self->add_child_to_node($top_id, $_) for @$blk_ids;
+        }
+        if ($i + 2 < scalar(@$e)) {
+          my @rest = @$e[$i + 2 .. $#$e];
+          my $rest_list = $self->cleanup_for_parsing(\@rest);
+          my $rest_ids  = $self->parse_list($rest_list);
+          $self->add_child_to_node($top_id, $_) for @$rest_ids;
+        }
+        splice @$e, $i, scalar(@$e) - $i;
+        $e->[$i] = $top_node;
+        next;
+      }
+
       if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
           || $func_name eq 'eval' || $func_name eq 'do' || $has_block_proto) {
 

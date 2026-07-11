@@ -134,6 +134,30 @@ sub parse {
   # _multi_decl "unsupported declaration".
   $self->_strip_typed_lexical_classes($doc);
 
+  # PPI splits an oddly-spelled qualified sub name into ADJACENT Word tokens
+  # (`sub main::::flomp` → 'main::' + '::flomp'), and Statement::Sub->name
+  # returns only the FIRST — every downstream consumer (prototype registry,
+  # sub_info, p-declare-sub, p-sub emission) would see the truncated name and
+  # emit an unreadable symbol (`pl-main::` — a read error that aborts the
+  # section; method.t stopped at test 122 on this).  Merge each run into ONE
+  # Word token here; v1's own name-concatenation loop sees the single token
+  # and behaves identically (v1 handles the split by concatenating).
+  for my $sub (@{ $doc->find('PPI::Statement::Sub') || [] }) {
+    next if $sub->isa('PPI::Statement::Scheduled');
+    my @words;
+    for my $child ($sub->children) {
+      last if $child->isa('PPI::Structure::Block')
+           || $child->isa('PPI::Token::Prototype')
+           || $child->isa('PPI::Token::Attribute');
+      push @words, $child
+        if $child->isa('PPI::Token::Word')
+        && $child->content !~ /^(?:sub|my|our|state)$/;
+    }
+    next unless @words > 1;
+    $words[0]->set_content(join '', map { $_->content } @words);
+    $_->delete for @words[1 .. $#words];
+  }
+
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —
   # v1's gen_funcall emits (p-eval STR (list (cons "$x" $x) …)) reading the
@@ -745,8 +769,11 @@ sub _interp_canon {
     }
     while ($c =~ /(?<!\\)\@(\w+)/g) { $hit->{"\@$1"} = 1 if $live->{"\@$1"} }
     while ($c =~ /(?<!\\)\$(\w+)(\s*[\[\{])?/g) {                    # $x / $x[.] / $x{.}
-      my $sig = !$2 ? '$' : $2 =~ /\[/ ? '@' : '%';
-      $hit->{"$sig$1"} = 1 if $live->{"$sig$1"};
+      # Copy captures FIRST: the inner `=~ /\[/` on success resets $1 to undef
+      # (no groups), which silently dropped every interpolated "$x[i]" hit.
+      my ($nm, $br) = ($1, $2);
+      my $sig = !$br ? '$' : $br =~ /\[/ ? '@' : '%';
+      $hit->{"$sig$nm"} = 1 if $live->{"$sig$nm"};
     }
   }
   return;
@@ -1262,6 +1289,58 @@ sub _rename_spanning_lexicals {
       }
     }
     $self->{_file_lex_renamed}{"\$$newbare"} = 1;
+  }
+
+  # W10-ext-3: containers (%h / @a) spanning a package boundary.  Same span
+  # rename as the scalar loop above, but container-family uses (%h, $h{k},
+  # @h{@ks}, $#a, $a[i]) resolve via ->symbol to the container while carrying
+  # DIFFERENT leading sigils in their token content — the rewrite preserves
+  # each token's sigil and replaces only the NAME.  File-unique only, so the
+  # cell keeps the PLAIN (unmangled) name: a container is never the sibling
+  # `let` the mangle exists to protect, and — as with unique scalars — the
+  # identity name neutralises the string-eval hazard, so no eval guard is
+  # needed.  The decl lowers via _file_lex_renamed as a hoisted defvar
+  # container (see _lower_block's no-init single-container branch).
+  for my $bare (sort keys %spanning) {
+    next unless ($f->{decl_count}{$bare} // 0) == 1;   # file-unique only
+    my $di = $decl_seg{$bare};
+    my $hi = _blk_extent($segments, $di);
+    my ($dc, $interp, @cdecls) = (0, 0);
+    for my $j ($di .. $hi) {
+      $dc     += $sf[$j]{decl_count}{$bare} // 0;
+      $interp ||= $sf[$j]{interp}{$bare};
+      push @cdecls, @{ $sf[$j]{container_decl}{$bare} || [] };
+    }
+    next if $interp;             # @x in a string is an element-join — rewrite untested
+    next unless @cdecls == 1 && $dc == 1;
+    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
+    next if $segments->[$di]{blockform};
+    my ($decl, $csym) = @{ $cdecls[0] };   # $csym e.g. '%methods' / '@list'
+    my $stmts = $segments->[$di]{stmts};
+    next unless grep { $stmts->[$_] == $decl } 0 .. $#$stmts;  # top-level of segment
+    next if $self->{_file_lex_renamed}{$csym};
+
+    # Identity-unmangled: the decl stays `my %methods` and defvar-lowers via
+    # _file_lex_renamed; same-package uses already resolve to that cell, so
+    # only later segments need the package-qualified form (harmless where the
+    # package already matches).
+    my $qname = $segments->[$di]{pkg} . '::' . $bare;
+    for my $j ($di + 1 .. $hi) {
+      for my $stmt (@{ $segments->[$j]{stmts} }) {
+        next unless ref $stmt && $stmt->isa('PPI::Node');
+        for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
+          my $canon = $s->symbol;
+          next unless $canon eq "\%$bare" || $canon eq "\@$bare";
+          (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1 . $qname/e;
+          $s->set_content($c);
+        }
+        for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+          my $c = $ai->content;
+          $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
+        }
+      }
+    }
+    $self->{_file_lex_renamed}{$csym} = 1;
   }
 }
 

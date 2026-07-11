@@ -9291,7 +9291,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-23"
+(defparameter *pcl-cache-generation* "v2-24"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -12054,16 +12054,21 @@ buffer's fill-pointer; everything else falls back to file-length."
   (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
 
 ;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
-(defun %pcl-super-indirect (method cur-pkg inv-args-vec)
-  "Handle SUPER::method{@array} indirect-object syntax.
-   inv-args-vec: a vector where element 0 is the invocant; rest are args."
-  (let ((vec (cond ((vectorp inv-args-vec) inv-args-vec)
-                   ((null inv-args-vec)    (vector))
-                   (t                      (vector inv-args-vec)))))
-    (when (zerop (length vec))
+(defun %pcl-super-indirect (method cur-pkg &rest inv-args)
+  "Handle SUPER::method{@array} indirect-object syntax, incl. the trailing-
+   LIST shapes SUPER::m{}@a and SUPER::m{@a}\"b\": the block's list and the
+   trailing LIST concatenate (arrays flatten, perl list semantics), and the
+   FIRST element of the combined list is the invocant."
+  (let ((flat '()))
+    (dolist (a inv-args)
+      (cond ((and (vectorp a) (not (stringp a)))
+             (loop for x across a do (push x flat)))
+            ((null a))
+            (t (push a flat))))
+    (setf flat (nreverse flat))
+    (when (null flat)
       (p-die (format nil "Can't call method \"~A\" without a package or object reference" method)))
-    (apply #'p-super-call (elt vec 0) method cur-pkg
-           (coerce (subseq vec 1) 'list))))
+    (apply #'p-super-call (first flat) method cur-pkg (rest flat))))
 
 ;;; SUPER:: method calls
 (defun p-super-call (obj method current-class &rest args)

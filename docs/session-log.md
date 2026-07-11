@@ -4,6 +4,61 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 282b (2026-07-11, Fable) — E1.1: container spanning + method.t cascade (tasks #39/#40), census 86, gen v2-24.
+
+- **W10-ext-3 container spanning (task #39) landed.**  The parked patch
+  (`docs/w10-ext-3-container-spanning.patch`) was 3/4 already in tree via
+  s280's consolidation (container_decl/interp facts, capture promotion, the
+  renamed-container defvar lowering in _lower_block); only the container
+  loop in `_rename_spanning_lexicals` was missing.  Ported it adapted to
+  the current scalar loop (file-unique → identity-unmangled package cell,
+  no eval guard needed; refuses interpolated names; sigil-preserving
+  NAME-only rewrite of later-segment Symbol/ArrayIndex tokens).
+  **De-gates method.t AND sprintf2.t** (census 84 → 86 native / 25 gated);
+  remaining spanning gates (caller/eval/ref/scalar/sort) are SCALAR spans
+  refused by other guards → E1.2.
+- **_interp_canon capture-clobber bug** (pre-existing, W10 gate scan): in
+  `$c =~ /\$(\w+)([\[\{])?/`, the inner `$2 =~ /\[/` on SUCCESS resets $1 →
+  every interpolated `"$x[i]"` hit was silently dropped (under-gating; the
+  `{` branch survived only because a FAILED match preserves captures).
+  Copy captures before the inner match.
+- **method.t cascade (task #40), v2 ≥ v1 achieved:**
+  1. `sub main::::flomp` — PPI splits the name into two Word tokens
+     ('main::' + '::flomp') and ->name returns only the first; v2 emitted
+     unreadable `pl-main::`, aborting the section (the test-122 stop).
+     New doc-normalization pass in Parser2::parse merges the run into one
+     Word token (v1's own concatenation loop is unaffected).
+  2. **Indirect SUPER block forms implemented for real** (both pipelines):
+     `SUPER::m{@a}` / `SUPER::m{}@a` / `SUPER::m{@a}"b"`.  Perl semantics
+     (verified): block list + trailing LIST concatenate; invocant = first
+     element of the combined list.  New PExpr Word+Block branch (modeled on
+     the `system {PROG} LIST` sibling) lowers all three to
+     funcall(SUPER::m, args…); ExprToCL now emits ALL kids (was: only
+     kids[1], silently dropping trailing args); `%pcl-super-indirect`
+     takes &rest and flattens (v1 "passed" test 121 only by accident — its
+     statement-level parse error skipped the assignment, leaving $r at the
+     coincidentally-expected previous value).
+  - method.t: v2 **102+29/163**, v1 99+32, both stop at 157 (shared
+    pre-existing stop, next fix target); v2 fail list ⊂ v1 fail list
+    (v2 additionally passes 77/78/90).  sprintf2.t: 1619+33/1678, fail
+    list byte-identical v1 vs v2.
+- Corpus byte-diff vs HEAD (111 perl-tests + 16 lib shims): only method.t
+  (intended emission changes) and sprintf2.t (pipeline flip) differ.
+- **Guard-edge battery** (each `next` in the rename loop probed vs perl):
+  interp-refusal, mixed-sigil ($x+%x) refusal, slices-across-boundary,
+  SUPER multi-arg trailing LIST, split-name forward decl — all match perl.
+  Three probes diverge but are **byte-identical at HEAD = pre-existing v1-
+  fallback bugs** (E1.2 hunting ground, NOT this session's regressions):
+  block-scoped `my @dup` captured by named sub → empty (two blocks, v1
+  drops both); symbolic `@{$n}` sees the defvar'd file lexical (known v1
+  defvar artifact); block-scoped container capture returns the global
+  (`{ my @blist=("lex"); package E4; sub g4 {$blist[0]} }` → "global").
+- 9 regression tests → `Pl/t/transpile-test-02.t` (73 total, pass):
+  %h/@list spanning, 3 guard edges, main::::flomp + forward decl, the
+  three SUPER indirect forms + multi-arg.  Cache gen **v2-24**.
+  Gate `tools/prove-core`: **114 files / 3966 tests PASS** (5 edge tests
+  added after the gate run; the file re-proved standalone 73/73).
+
 ## Session 282 (2026-07-11, Fable) — task #49: expression-block `package` scoping (do/eval/anon-sub/map-grep-sort), gen v2-23.
 
 - **Task #49 fixed — `do { package X8; 1 }` no longer leaks.**  Two seam
