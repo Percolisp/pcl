@@ -992,6 +992,57 @@ compatibility for invalid Perl input".
 
 ---
 
+## Value of a block whose LAST statement is a `package` declaration
+
+**Perl behaviour:** A `package NAME;` statement is a declaration, not an
+expression — it contributes no value.  When it is the *last* statement of a
+value-producing block, the block's value is that of the last *expression*
+statement before it: `my $t = do { 42; package XT; }` assigns `42`.
+
+**PCL behaviour:** The inline package switch compiles to a
+`(p-set-current-package ...)` form; when it is the block's tail form, its
+return value (the package name, `"XT"` above) becomes the block's value.
+All *scoping* of the switch is correct (compile-time and runtime state
+revert at block end — session 282); only the block's *value* diverges, and
+only when the trailing statement is the package declaration itself.
+
+**Rationale:** Matching Perl would require per-statement value tracking in
+block lowering (save every expression statement's value so a trailing
+declaration can be skipped) — the same cost class as the documented "bare
+`if` with empty true branch" corner.  A trailing `package` in a
+value-consumed `do`/`eval` block is essentially never written intentionally:
+the switch has nothing left to apply to.  Decision confirmed 2026-07-11.
+
+**Affected tests:** None in `perl-tests/` (found by the session-282 edge
+probe battery, `Pl/t/transpile-test-04b.t` covers the supported shapes).
+
+---
+
+## `sort` comparator `$a`/`$b` re-homing after an inline `package` switch
+
+**Perl behaviour:** `$a` and `$b` in a sort comparator are the globals of the
+package the comparator block was *compiled* in.  A `package` statement at the
+start of the block re-homes them: `sort { package XO; $b <=> $a } @list`
+makes the comparator read `$XO::a`/`$XO::b`, which sort never sets — every
+comparison warns "uninitialized value" and returns 0, so the list comes back
+in its original order.
+
+**PCL behaviour:** PCL's comparator lambda receives its two elements as
+`$a`/`$b` parameters regardless of an inline package switch inside the block,
+so the comparator actually works: the example above *sorts* the list
+descending (and emits no warnings).
+
+**Rationale:** Faithfully replicating this means making a working comparator
+silently non-functional to honour a package-visibility artifact of Perl's
+implementation — a pure foot-gun with no conceivable intentional use (code
+that wants package-switched comparator helpers calls a named sub instead).
+Decision confirmed 2026-07-11.
+
+**Affected tests:** None in `perl-tests/` (found by the session-282 edge
+probe battery).
+
+---
+
 ## `mro` pragma — DFS default, ordering switch, and full API
 
 **Perl behaviour:** `mro` selects a class's method resolution order. Perl's
