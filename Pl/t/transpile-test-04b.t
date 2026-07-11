@@ -554,4 +554,48 @@ sub f { package X; our $v; $v = 5; return $X::v // "X-undef"; }
 print f(), "\n";
 ');
 
+# Task #49 (s282): `package NAME;` inside an EXPRESSION block (do/eval/anon
+# sub/map-grep-sort) is block-scoped.  parse_block_as_function leaked the
+# Environment push (pre-passes parse the block 3x, so calls BEFORE the
+# statement were qualified too); parse_block_to_cl_string dropped the whole
+# body (the top-level package path opens a new section the string collector
+# never reads).  Runtime *package*/*pcl-current-package* now revert via a
+# let binding that passes the tail value through.
+test_transpile("do-block package is block-scoped: calls before/after stay unqualified", '
+sub f5 { return 7 }
+print f5(), "-";
+my $r = do { package X8; 1 };
+print f5(), "-", $r, "\n";
+');
+test_transpile("eval-block with package statement keeps its body (was (p-eval-block nil))", '
+my $v = eval { package XV; bless {} };
+print ref($v), "\n";
+');
+test_transpile("runtime current package reverts after do/eval blocks", '
+sub who { return (caller())[0]; }
+my $c = do { package XC; main::who() };
+my $e = eval { package XE; eval q{__PACKAGE__} };
+print $c, "-", $e, "-", main::who(), "-", eval(q{__PACKAGE__}), "\n";
+');
+test_transpile("named sub after package inside do-block installs qualified", '
+my $o = do { package XD; sub mk { bless {}, "XD" } XD::mk(); };
+print ref($o), "\n";
+');
+test_transpile("anon sub with package statement: switch scoped to sub body", '
+my $s = sub { package XS; __PACKAGE__ };
+print $s->(), "-", eval(q{__PACKAGE__}), "\n";
+');
+test_transpile("map/grep blocks with package statement keep body and revert package", '
+my @r = map { package XM; $_ * 2 } (1, 2, 3);
+my @g = grep { package XG; $_ > 2 } @r;
+print "@r|@g|", eval(q{__PACKAGE__}), "\n";
+');
+test_transpile("last unwinds out of a do-block that switched package, binding reverts", '
+for my $i (1..3) {
+    my $x = do { package XL; last if $i == 2; $i };
+    print "x=$x;";
+}
+print eval(q{__PACKAGE__}), "\n";
+');
+
 done_testing();

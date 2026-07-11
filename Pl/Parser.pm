@@ -4418,6 +4418,18 @@ sub parse_block_as_function {
     $self->indent_level($self->indent_level + 1);
   }
 
+  # Perl block-scopes `package NAME;`: the switch reverts when the block
+  # ends.  When the body contains a package statement, bind
+  # *pcl-current-package* around the body so the runtime switch
+  # (p-set-current-package) reverts on exit too — a let passes the block's
+  # tail value through, unlike an appended restore form which would become
+  # the do-block's value.  (PPI find returns 0, not undef, when empty.)
+  my $bind_cur_pkg = $block && @{$block->find('PPI::Statement::Package') || []};
+  if ($bind_cur_pkg) {
+    $self->_emit("(let ((*pcl-current-package* *pcl-current-package*))");
+    $self->indent_level($self->indent_level + 1);
+  }
+
   # A do{} block is loop-transparent: wrap in (progn ...) so an unlabeled
   # last/next/redo (return-from nil / go :next / go :redo) escapes to the
   # ENCLOSING loop instead of being caught here.  A (block nil) would shadow
@@ -4439,6 +4451,20 @@ sub parse_block_as_function {
   # declarations use the let-binding path, not eval-when+defvar.
   $self->environment->push_scope();
   $self->environment->in_subroutine($self->environment->in_subroutine + 1);
+
+  # A bare `package NAME;` inside a do{}/eval{}/anon-sub body is block-scoped
+  # in Perl: the switch reverts when the block ends.  Snapshot the package
+  # stack and restore after processing so the switch cannot leak into code
+  # after the block — and, because expression blocks are parsed repeatedly by
+  # pre-passes, even into code BEFORE it (task #49: `do { package X8; 1 }`
+  # made an unrelated earlier call emit as X8::pl-f5).
+  my $saved_pkg_stack = [@{$self->environment->package_stack}];
+  # Bump _block_depth so a named sub defined after the inline switch gets a
+  # fully-qualified p-sub name (the emitted form is read in the ENCLOSING
+  # section's CL package, where a bare name would intern) — matching the
+  # XD::pl-mk qualification its call sites get.  Gated on $bind_cur_pkg so
+  # blocks without a package statement emit byte-identically to before.
+  $self->_block_depth($self->_block_depth + 1) if $bind_cur_pkg;
 
   # Wrap body in let for any 'my' declarations, then process contents.
   # For anon subs with state vars, set the rename map so _process_state_declaration
@@ -4462,6 +4488,9 @@ sub parse_block_as_function {
 
   # Leave scope - removes filehandles added in this block
   $self->environment->pop_scope();
+  # Revert any inline `package NAME;` switch made inside the block (see above)
+  $self->_block_depth($self->_block_depth - 1) if $bind_cur_pkg;
+  $self->environment->package_stack($saved_pkg_stack);
 
   if ($is_anon_sub) {
     $self->indent_level($self->indent_level - 1);
@@ -4470,6 +4499,11 @@ sub parse_block_as_function {
 
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close block nil
+
+  if ($bind_cur_pkg) {
+    $self->indent_level($self->indent_level - 1);
+    $self->_emit(")");  # close (let ((*pcl-current-package* ...)))
+  }
 
   if ($is_anon_sub) {
     $self->indent_level($self->indent_level - 1);
@@ -4568,6 +4602,18 @@ sub parse_block_to_cl_string {
   # Enter new scope for filehandles
   $self->environment->push_scope();
 
+  # A bare `package NAME;` inside this block is block-scoped in Perl.  Bump
+  # _block_depth so the package statement emits INLINE — the top-level path
+  # opens a new SECTION, whose lines this string collector silently drops
+  # (`eval { package X; ... }` lost its entire body and became
+  # `(p-eval-block nil)`).  Snapshot the package stack for the compile-time
+  # revert; the runtime revert is the *package*/*pcl-current-package*
+  # binding wrapped around the returned body below.  (PPI find returns 0,
+  # not undef, when nothing matches.)
+  my $has_pkg_stmt = @{$block->find('PPI::Statement::Package') || []};
+  my $saved_pkg_stack = [@{$self->environment->package_stack}];
+  $self->_block_depth($self->_block_depth + 1) if $has_pkg_stmt;
+
   # Per-iteration closure capture: if a `my` var declared in this block is
   # captured by a nested anon sub, wrap the body in a `let` of a fresh lexical
   # so each block invocation (the block is a (lambda ($_) ...) called once per
@@ -4613,6 +4659,10 @@ sub parse_block_to_cl_string {
   # Close the per-iteration closure-capture let (if one was opened).
   $self->_end_block_closure_scope($clo_scope);
 
+  # Revert any `package NAME;` switch made inside the block (see above)
+  $self->_block_depth($self->_block_depth - 1) if $has_pkg_stmt;
+  $self->environment->package_stack($saved_pkg_stack);
+
   # Leave scope
   $self->environment->pop_scope();
 
@@ -4633,7 +4683,15 @@ sub parse_block_to_cl_string {
 
   # Return body as string (or "nil" if empty)
   if (@body_lines) {
-    return join("\n", @body_lines);
+    my $body = join("\n", @body_lines);
+    # Runtime revert of an inline package switch: the body contains
+    # (in-package X) + (p-set-current-package ...); bind both specials so
+    # they restore at block exit while the tail value passes through the let.
+    $body = "(let ((*package* *package*)\n"
+          . "      (*pcl-current-package* *pcl-current-package*))\n"
+          . "$body)"
+      if $has_pkg_stmt;
+    return $body;
   } else {
     return "nil";
   }

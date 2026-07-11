@@ -4,7 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 281 (2026-07-11, Fable) — E1.5 nested `package` shipped as D1-lite (census 84, gate 114/3948, gen v2-21).
+## Session 282 (2026-07-11, Fable) — task #49: expression-block `package` scoping (do/eval/anon-sub/map-grep-sort), gen v2-23.
+
+- **Task #49 fixed — `do { package X8; 1 }` no longer leaks.**  Two seam
+  functions in `Pl/Parser.pm` handled a nested `package NAME;` wrong:
+  1. `parse_block_as_function` (do{}/eval-lambda/anon-sub bodies, reached
+     from PExpr::handle_subcalls): the `_process_package_statement` in-sub
+     path pushed the Environment package and never popped.  Pre-passes parse
+     the block 3x, so calls even BEFORE the statement emitted qualified
+     (`X8::pl-f5` → undefined function).  Fix: snapshot/restore
+     `package_stack` around body processing (same pattern as sub bodies,
+     bare blocks, BEGIN/END — sites that already did this).
+  2. `parse_block_to_cl_string` (eval{}/map/grep/sort block bodies):
+     **`eval { package XV; bless {} }` lost its ENTIRE body** — with
+     in_subroutine==0 the package statement took the top-level path, which
+     opens a new *section*; the string collector only reads section 0, so
+     the block emitted as `(p-eval-block nil)`.  Fix: bump `_block_depth`
+     (package emits inline) + same stack snapshot/restore.
+- **Runtime revert**: both functions now wrap the emitted body in
+  `(let ((*pcl-current-package* *pcl-current-package*) [(*package* *package*)]))`
+  when (and only when) the block contains a `PPI::Statement::Package` — the
+  let passes the do/eval tail value through, unlike an appended restore
+  form.  This makes `caller`/`eval-string`/`__PACKAGE__` revert to the
+  enclosing package after the block, matching perl (edge2 probes).
+- **Qualified nested subs**: `do { package XD; sub mk {...} XD::mk() }`
+  crashed (call `XD::pl-mk`, definition bare `pl-mk` read in main).
+  `parse_block_as_function` now bumps `_block_depth` when the block has a
+  package statement, so the existing `_process_sub_statement` qualification
+  emits `(p-sub XD::pl-mk ...)`.  Gated on has-package-stmt → all other
+  blocks emit byte-identically.
+- **edge2 probe battery (task-#49 backlog) recreated and run vs perl**:
+  bless1/caller/eval/compound/reopen/anon-sub/last-unwind/eval-block/map/
+  grep/do-with-sub ALL match perl now (v2; the shared-seam fixes repair v1's
+  after-the-statement leak too).  Two divergences left, both deliberate
+  deferrals pending discussion:
+  * **do-tail**: `do { 42; package XT; }` returns "XT" (p-set-current-package
+    value), perl returns 42 (package stmt contributes no value).  Fixing
+    needs per-statement value tracking — same class as the documented
+    "bare if with empty true branch" corner.
+  * **sort $a/$b re-homing**: `sort { package XO; $b <=> $a }` — perl
+    re-homes $a/$b to $XO::a/$XO::b (uninit warnings, comparator no-ops);
+    PCL still sorts.  Pathological; not worth matching.
+- Corpus byte-diff vs HEAD (111 perl-tests + 16 lib shims, marker/path
+  normalized): only `caller.lisp` differs — the intended wrapper lets plus
+  a real fix (a `pass()` call after a `package DB;` anon-sub had leaked as
+  `DB::pl-pass`).
+- 7 regression tests → `Pl/t/transpile-test-04b.t` (73 total, pass): leak
+  before/after, eval-block body, runtime revert, qualified nested sub,
+  anon-sub scope, map/grep blocks, last-unwind through the binding.
+  Cache gen **v2-23**.  Gate `tools/prove-core`: **114 files / 3960 tests
+  PASS**.
 
 - **D1 rethought per user question ("could it be simpler if slower?"): yes,
   and it isn't even slower.**  v1's own working mechanism for a nested
