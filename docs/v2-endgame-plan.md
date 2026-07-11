@@ -61,6 +61,12 @@ Net: ~22k lines → ~14k, one dialect, one printer, zero text islands.
 
 ### E1 — Whole-file gate burn-down (31 → ~5, the blessed residue)
 
+> **Living worklist: `docs/e1-remainder.md`** (s283, census 89/22) — per-file
+> triage of the last 22 gates grouped by clearing mechanism (M-A interp
+> rewrite, M-B per-declaration span tracking, M-C/M-D shadow-aware capture
+> promotion, M-E singles, M-F residue candidates), with a recommended order.
+> The table below is the original s280 estimate, kept for calibration.
+
 Current gate families (census 2026-07-10) and their fixes:
 
 | item | files | mechanism | sessions |

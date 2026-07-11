@@ -68,6 +68,11 @@ scalar.t / sort.t remain gated with precise, sound refusal reasons (below).
   flips, parity+), signatures (t085 fix), pack ($^R repair), vec (rename,
   fully passing).  9 regression tests → `Pl/t/transpile-test-05.t` (72 total).
   Cache gen **v2-25**.
+- **End-of-session survey: `docs/e1-remainder.md`** — all 22 remaining gates
+  triaged per file with exact gate strings, grouped into mechanisms M-A…M-F
+  with a recommended implementation order (~4–7 sessions to E1 done).
+  **Next E1 session: start there** (step 1 = SPANREFUSE-style diagnostics in
+  `_promote_captured`, then M-C/M-D).
 
 ## Session 282c (2026-07-11, Fable) — E1.2 investigation: exact culprit per spanning-gated file + plan (groundwork committed, 41881c0).
 
