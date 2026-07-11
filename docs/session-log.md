@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 283 (2026-07-11, Fable) — E1.2 execution: caller.t de-gated (+bop/hash bonus), M2+M3 shadow-aware spans, gen v2-25.
+
+Executed the §282c plan.  **caller.t, bop.t, hash.t now v2-native**; ref.t /
+scalar.t / sort.t remain gated with precise, sound refusal reasons (below).
+
+- **Any-sigil `_file_lex_renamed` lookup in `_check_sub_captures`** (both the
+  Scheduled-block and named-sub gates): container promotions record
+  `@x__file__N`/`%x__file__N`, but the skip looked up only `"\$$bare"` — a
+  promoted container re-tripped the capture gate under its renamed name.
+  Safe because every promotion path guarantees the bare name denotes one
+  variable.  De-gates caller.t AND (bonus) bop.t + hash.t.
+- **`_fix_spaced_sigils` in the shared `_ppi_parse`** (Pl/Parser.pm, benefits
+  BOTH pipelines): perl allows `my $ bits = …` (whitespace between sigil and
+  name — perl's own caller.t:279).  PPI tokenizes Cast+Word; PCL emitted
+  *wrong code* (`print $ arr[1]` → undefined `pl-arr`).  Cast+Word is
+  unambiguous (a real deref cast is never followed by a bare Word) → merge and
+  re-parse.  Deliberately Word-only: `$ x` (Operator), `$ s` (swallowed subst),
+  `foreach my $ i` (PPI parse failure) stay unsupported torture cases.  Also
+  fixes signatures.t t085–t087 (spaced-sigil signatures: arity was 0 with
+  unbound params; now binds `$a`,`$b=333` correctly).
+- **C-style `for (my $i…)` counter leaked scope** (two sites): v2's native
+  branch `_reg_lex`'d the counter without restore (the foreach branch already
+  restored — W3), and `_fallback_stmt_capture` didn't restore
+  `_let_bound_vars` around seam-lowered Compound statements.  A later
+  sibling's string-eval capture alist then referenced the counter after its
+  `let` closed → unbound-variable abort.  In bop.t this killed the whole
+  `%res` for-loop (260 tests).  bop.t v2 now **exact v1 parity 252/507**.
+- **5 caret vars added to `%SPECIAL_VARS`** (`$^P $^D $^F $^M $^R`): runtime
+  defvars them as `|$^P|` etc., but bare `$^P` under the :invert readtable
+  reads as `$^p` — unbound in BOTH pipelines (v1 merely confined the abort to
+  a smaller top-level form).  pack.t's `$^R` also repaired.
+- **caller.t: v2 18+47 / ran 65 of 112 vs v1 16+49 / ran 65 — v2 fail set is
+  a strict subset** (v2 additionally passes both `eval 'pb()'` name tests).
+- **M2**: expression-embedded decls (`open my $fh`, `func(my $x)`) recognized
+  by `_symbol_is_declarator` (prev-sibling declarator check) and
+  `_stmt_declares_canon` (plain-Statement scan; exact-class so a Compound
+  head `foreach my $x` — loop-scoped — never shadows sibling-level refs).
+  Kills scalar.t's false span hits.
+- **M3**: shadow-aware span rename — new `_hard_decl_count` counts only
+  same-level (segment top-level) or unscopeable (Compound-head) re-decls
+  against the `dc == 1` rule; block/sub-nested re-decls are distinct shadowing
+  variables whose scopes the rewrite now SKIPS (`_symbol_is_declarator` +
+  `_ref_shadowed` per candidate token, both segment loops).  Probes verified
+  vs perl: pre-decl use sees outer, shadow RHS reads outer, sub-nested shadow,
+  mangled (non-unique) path.  De-gates the plan's block-nested-shadow family;
+  vec.t emission changed (span rename now fires) — still fully passing.
+- **New refusal diagnostics**: `PCL_SPAN_DEBUG=1` now also prints
+  `SPANREFUSE <name>: <reason>` for every scalar-loop refusal.
+- **Remaining gates (correctly refused, next steps):**
+  - ref.t `$test` + sort.t `$answer` + scalar.t `$fh`: the shadow re-decl sits
+    at the TOP of a *flattened blk segment* (its block contains a `package`
+    statement), so the shadow itself spans segments within its blk run —
+    needs **per-declaration span tracking** (bare-name-keyed %live/%spanning
+    conflates outer var and shadow; `_ref_shadowed`'s at_seg rule is blind to
+    cross-segment shadows by design).  ref.t additionally interp (`"…$test"`
+    at 437, inside the shadow's scope) and scalar.t interp + `$fh` readline
+    text — the mangled path cannot rewrite interpolated/readline text (the
+    capture-promotion `_rewrite_var_uses` interp rewriter is the mechanism to
+    reuse WITH shadow awareness).
+  - eval.t: deferred (capture-alist-under-original-name, own task).
+- Corpus byte-diff vs HEAD: 6 files, all verified — caller/bop/hash (pipeline
+  flips, parity+), signatures (t085 fix), pack ($^R repair), vec (rename,
+  fully passing).  9 regression tests → `Pl/t/transpile-test-05.t` (72 total).
+  Cache gen **v2-25**.
+
 ## Session 282c (2026-07-11, Fable) — E1.2 investigation: exact culprit per spanning-gated file + plan (groundwork committed, 41881c0).
 
 **Investigation complete, implementation NOT started (session ended).  The

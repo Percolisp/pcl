@@ -242,6 +242,14 @@ my %SPECIAL_VARS = (
   # hash — so `$^H & MASK`, `\%^H` and `keys %^H` never crash with an unbound var.
   '$^H' => '|$^H|',
   '%^H' => '|%^H|',
+  # Remaining caret vars with runtime defvars.  These MUST be pipe-quoted:
+  # generated code loads under :invert, so a bare `$^P` token (all-upper) reads
+  # as the symbol `$^p` — never the runtime's |$^P| — and aborts unbound.
+  '$^P' => '|$^P|',   # PERLDB - debugger flag
+  '$^D' => '|$^D|',   # DEBUGGING flags
+  '$^F' => '|$^F|',   # SYSTEM_FD_MAX
+  '$^M' => '|$^M|',   # emergency memory pool
+  '$^R' => '|$^R|',   # last (?{...}) result
 );
 
 # Generate CL operator/function name from Perl name

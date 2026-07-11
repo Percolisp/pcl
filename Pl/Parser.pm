@@ -279,10 +279,39 @@ sub _fix_modulo_magic {
   return $changed;
 }
 
+# Perl allows whitespace between a sigil and its identifier (`my $ bits = …`
+# is the variable $bits — perl's own caller.t line 279 uses this).  PPI
+# tokenizes that as a Cast token followed by a bare Word, and PCL then emits
+# WRONG code (`print $ arr[1]` called an undefined function `pl-arr`).  A
+# genuine dereference Cast is always followed by a Symbol, Magic token, or
+# {...} block — never a bare Word — so Cast+Word is unambiguously the
+# spaced-sigil form.  Merge the name into the Cast; the caller re-parses, and
+# the serialized `$bits` re-tokenizes as one ordinary Symbol.  Working on the
+# PPI tree means strings/regex bodies are never touched.  Deliberately Word
+# ONLY: names PPI tokenizes as something else (`$ x` → Operator, `$ s` →
+# a swallowed substitution) are unsalvageable-torture territory and stay
+# unsupported, as does `foreach my $ i` (PPI fails the whole parse).
+sub _fix_spaced_sigils {
+  my ($doc) = @_;
+  my $changed = 0;
+  for my $tok (@{ $doc->find('PPI::Token::Cast') || [] }) {
+    my $sig = $tok->content;
+    next unless $sig eq '$' || $sig eq '@' || $sig eq '%';
+    my $next = $tok->snext_sibling;
+    next unless $next && $next->isa('PPI::Token::Word');
+    my $name = $next->content;
+    next unless $name =~ /^(?:::)?\w+(?:(?:::|')\w+)*$/;
+    $tok->set_content($sig . $name);
+    $next->delete;
+    $changed = 1;
+  }
+  return $changed;
+}
+
 sub _ppi_parse {
   my ($self, $src) = @_;
   my $doc = PPI::Document->new(\$src);
-  if ($doc && _fix_modulo_magic($doc)) {
+  if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc))) {
     my $fixed = $doc->serialize;
     my $redo  = PPI::Document->new(\$fixed);
     $doc = $redo if $redo;

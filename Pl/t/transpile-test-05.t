@@ -584,4 +584,93 @@ $$r = 99;
 print "@a\n";
 ', "1 99 3\n");
 
+# ── Spaced sigils: whitespace between sigil and name (perl caller.t line 279
+# uses `my $ bits = …`).  PPI tokenizes as Cast+Word; _fix_spaced_sigils in
+# _ppi_parse merges them — previously PCL emitted a call to an undefined
+# function (`$ arr[1]` → pl-arr).
+
+test_transpile('spaced sigil: my $ name declares and reads $name', '
+my $ bits = 41;
+$ bits++;
+print $ bits, "\n";
+', "42\n");
+
+test_transpile('spaced sigil: array decl and element access', '
+my @ arr = (1, 2, 3);
+print $ arr[1], "\n";
+print scalar(@ arr), "\n";
+', "2\n3\n");
+
+test_transpile('spaced sigil: signature params still bind (perl signatures.t t085)', '
+use feature "signatures"; no warnings;
+sub t ($ a, $ b = 33) { return $a + $b }
+print t(1), " ", t(1, 2), "\n";
+', "34 3\n");
+
+# ── Caret vars with runtime defvars must be pipe-quoted: generated code loads
+# under :invert, so a bare $^P read as `$^p` — unbound-variable abort that
+# swallowed the rest of the enclosing form (caller.t $^P section).
+
+test_transpile('caret var $^P: read, set, restore', '
+my $saved = $^P;
+$^P = 16;
+print $^P + 0, "\n";
+$^P = $saved;
+print "restored\n";
+', "16\nrestored\n");
+
+# ── C-style for counter is scoped to the loop: it must NOT leak into a later
+# sibling string-eval capture alist (bop.t %res section: alist referenced the
+# counter after its let closed → unbound-variable abort killed 260 tests).
+
+test_transpile('for counter does not leak into later eval capture alist', '
+my $bits = 0;
+for (my $i = ~0; $i; $i >>= 1) { $bits++ }
+my $x = 7;
+print eval q{$x + 1}, "\n";
+print $bits > 0 ? "counted\n" : "zero\n";
+', "8\ncounted\n");
+
+# ── Container promoted to a package cell (captured by a named sub) must not
+# re-trip the sub-capture gate under its renamed name (the gate looked the
+# renamed name up under the $ sigil only — @/% promotions were missed).
+
+test_transpile('array captured by named sub: writes visible outside', '
+my @c;
+sub setc { @c = (1, 2) }
+setc();
+print "$c[0]$c[1]\n";
+', "12\n");
+
+# ── M3 shadow-aware span rename: a lexical spanning a package boundary can be
+# renamed even when a block-nested re-decl (a distinct shadowing variable)
+# exists — the shadow scope is skipped, not refused (previously the whole
+# file fell back to v1 on the inflated decl count).
+
+test_transpile('span rename skips block-nested shadow scope', '
+my $x = "outer";
+{ package Q; sub grab { $x } }
+{
+    my $x = "shadow";
+    print "in=", $x, "\n";
+}
+print "grab=", Q::grab(), " out=", $x, "\n";
+', "in=shadow\ngrab=outer out=outer\n");
+
+test_transpile('span rename: pre-decl use, shadow RHS reads outer, sub-nested shadow', '
+my $x = "outer";
+{ package Q; sub grab { $x } }
+{
+    print "pre=", $x, "\n";
+    my $x = "shadow";
+    print "in=", $x, "\n";
+}
+{
+    my $x = $x . "+rhs";
+    print "rhs=", $x, "\n";
+}
+{ package R; sub own { my $x = "sub-own"; return $x } }
+print "grab=", Q::grab(), " own=", R::own(), " out=", $x, "\n";
+', "pre=outer\nin=shadow\nrhs=outer+rhs\ngrab=outer own=sub-own out=outer\n");
+
 done_testing;

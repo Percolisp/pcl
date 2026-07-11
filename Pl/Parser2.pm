@@ -799,6 +799,13 @@ sub _interp_canon {
 # my/state/our/local (the declarator), rather than a use of it?
 sub _symbol_is_declarator {
   my ($self, $sym) = @_;
+  # Expression-embedded declaration (`open my $fh, …`, `func(my $x)`,
+  # `foreach my $i`): the declarator keyword is the symbol's immediately
+  # preceding significant sibling — there is no Statement::Variable wrapper
+  # for the statement-walk below to find (M2, scalar.t's false span hits).
+  my $prev = $sym->sprevious_sibling;
+  return 1 if $prev && $prev->isa('PPI::Token::Word')
+    && $prev->content =~ /^(?:my|state|our|local)$/;
   my $stmt = $sym;
   $stmt = $stmt->parent while $stmt && !$stmt->isa('PPI::Statement');
   # The contents of `my (LIST)`'s parens parse as a nested
@@ -858,10 +865,36 @@ sub _ref_shadowed {
 # Does $stmt declare canonical $canon (sigil-qualified) via my/state?
 sub _stmt_declares_canon {
   my ($self, $stmt, $canon) = @_;
-  return 0 unless ref $stmt && $stmt->isa('PPI::Statement::Variable');
-  my $kw = ($stmt->schildren)[0];
-  return 0 unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
-  return scalar grep { $_ eq $canon } $self->_declared_names($stmt);
+  return 0 unless ref $stmt;
+  if ($stmt->isa('PPI::Statement::Variable')) {
+    my $kw = ($stmt->schildren)[0];
+    return 0 unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
+    return scalar grep { $_ eq $canon } $self->_declared_names($stmt);
+  }
+  # Expression-embedded `my`/`state` in a PLAIN expression statement
+  # (`open my $fh, …`, `func(my $x)`) declares into the enclosing scope
+  # exactly like a my-statement (M2).  Exact-class check: a Compound
+  # statement's head decl (`foreach my $x`) is scoped to the LOOP and must
+  # NOT shadow later same-name references at the sibling level.  A `my`
+  # nested inside a block within the statement is likewise block-scoped —
+  # skipped by the nested-block climb.
+  return 0 unless ref($stmt) eq 'PPI::Statement'
+               || ref($stmt) eq 'PPI::Statement::Expression';
+  for my $w (@{ $stmt->find(sub {
+        $_[1]->isa('PPI::Token::Word') && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
+    my ($p, $nested) = ($w->parent, 0);
+    while ($p && $p != $stmt) {
+      if ($p->isa('PPI::Structure::Block')) { $nested = 1; last }
+      $p = $p->parent;
+    }
+    next if $nested;
+    my $nx = $w->snext_sibling or next;
+    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+             : ();
+    return 1 if grep { $_->content eq $canon } @syms;
+  }
+  return 0;
 }
 
 # Bare names (sigil stripped) of my/state-declared vars among the given
@@ -946,7 +979,7 @@ sub _check_sub_captures {
     # this compile-time visibility (CLAUDE.md §3) → die → whole-file v1.
     if ($child->isa('PPI::Statement::Scheduled') && $child->block) {
       for my $bare (sort keys %lex) {
-        next if $self->{_file_lex_renamed}{"\$$bare"};
+        next if grep { $self->{_file_lex_renamed}{"$_$bare"} } '$', '@', '%';
         die "Parser2 TODO: file lexical '$bare' referenced in a "
             . $child->type . " block\n"
           if $self->_block_captures_name($child->block, $bare);
@@ -958,8 +991,10 @@ sub _check_sub_captures {
     for my $bare (sort keys %lex) {
       # W5: a name already rewritten to a package-level cell ($x__file__N) is
       # legitimately captured — the hoisted sub and in-place code share the
-      # one defvar'd box, so it must NOT gate.
-      next if $self->{_file_lex_renamed}{"\$$bare"};
+      # one defvar'd box, so it must NOT gate.  Any sigil: container
+      # promotions record '@x__file__N'/'%x__file__N', and every promotion
+      # path guarantees the bare name denotes only that one variable.
+      next if grep { $self->{_file_lex_renamed}{"$_$bare"} } '$', '@', '%';
       die "Parser2 TODO: file lexical '$bare' captured by sub " . $child->name . "\n"
         if $self->_block_captures_name($child->block, $bare);
     }
@@ -1164,6 +1199,50 @@ sub _blk_extent {
   return $last;
 }
 
+# Declarations of bare name $bare among a segment's statements that must count
+# against the span-rename's "sole binding in its extent" rule (M3):
+#   - a decl at the segment's TOP LEVEL (same scope level as the span decl:
+#     a genuine same-level re-binding);
+#   - a decl in a Compound statement's HEAD (`foreach my $x`, `if (my $x…)`)
+#     — its scope is the construct, which _ref_shadowed cannot delimit, so it
+#     cannot be safely skipped by the rewrite (poisoned cond-mys are usually
+#     pre-renamed to $x__cond__N, in which case they no longer carry $bare).
+# NOT counted: a decl nested inside a Structure::Block or a named sub — a
+# distinct shadowing variable whose scope the rewrite skips via
+# _symbol_is_declarator + _ref_shadowed.  Both Statement::Variable decls and
+# expression-embedded ones (`open my $fh`) are recognized.
+sub _hard_decl_count {
+  my ($self, $stmts, $bare) = @_;
+  my $hard = 0;
+  for my $stmt (@$stmts) {
+    next unless ref $stmt && $stmt->isa('PPI::Node');
+    for my $w (@{ $stmt->find(sub {
+          $_[1]->isa('PPI::Token::Word')
+          && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
+      # Declared names directly following this declarator keyword.
+      my $nx = $w->snext_sibling or next;
+      my @names = $nx->isa('PPI::Token::Symbol')   ? ($nx->content)
+                : $nx->isa('PPI::Structure::List')
+                  ? (map { $_->content } @{ $nx->find('PPI::Token::Symbol') || [] })
+                : ();
+      next unless grep { /^[\$\@\%]\Q$bare\E$/ } @names;
+      # Classify by enclosure: block/sub-nested → scopeable shadow (skip);
+      # Compound-enclosed (head position, no block in between) → hard;
+      # else (statement top level of the segment) → hard.
+      my ($p, $kind) = ($w->parent, 'top');
+      while ($p && $p != $stmt) {
+        if ($p->isa('PPI::Structure::Block'))    { $kind = 'shadow'; last }
+        if ($p->isa('PPI::Statement::Sub'))      { $kind = 'shadow'; last }
+        $p = $p->parent;
+      }
+      $kind = 'hard'
+        if $kind eq 'top' && $stmt->isa('PPI::Statement::Compound');
+      $hard++ unless $kind eq 'shadow';
+    }
+  }
+  return $hard;
+}
+
 sub _rename_spanning_lexicals {
   my ($self, $segments) = @_;
 
@@ -1256,19 +1335,31 @@ sub _rename_spanning_lexicals {
     # defvars file lexicals — not a regression).  Only the NON-unique case
     # must mangle (to protect the sibling `let`) and therefore keep the guard.
     my $unique = (($f->{decl_count}{$bare} // 0) == 1);
-    next if !$unique && $eval_unsafe->($bare, $di);
+    my $refuse = sub {
+      warn "SPANREFUSE $bare: $_[0]\n" if $ENV{PCL_SPAN_DEBUG};
+      return 1;
+    };
+    next if !$unique && $eval_unsafe->($bare, $di) && $refuse->('eval-unsafe (non-unique)');
     # Facts scoped to the declaration's live extent: the block's segment run for
     # a flattened-block decl, else all later segments (file lexical).  Decls or
     # disqualifying uses outside that range belong to a different variable.
+    # Shadow-aware (M3): a re-declaration NESTED in a block (or sub) within the
+    # extent is a DISTINCT shadowing variable — it does not block the rename;
+    # the rewrite below skips its scope instead (declarator skip +
+    # _ref_shadowed).  Only a same-level (segment top-level) re-decl, or a
+    # decl form the shadow machinery cannot scope (a Compound head like
+    # `foreach my $x`), refuses.
     my $hi = _blk_extent($segments, $di);
     my ($dc, $family, $interp, @sdecls) = (0, 0, 0);
     for my $j ($di .. $hi) {
-      $dc     += $sf[$j]{decl_count}{$bare} // 0;
+      my $top = $segments->[$j]{stmts};
+      $dc     += $self->_hard_decl_count($top, $bare);
       $family ||= $sf[$j]{family}{$bare};
       $interp ||= $sf[$j]{interp}{$bare};
-      push @sdecls, @{ $sf[$j]{scalar_decl}{$bare} || [] };
+      push @sdecls, grep { my $v = $_; grep { $_ == $v } @$top }
+                    @{ $sf[$j]{scalar_decl}{$bare} || [] };
     }
-    next if $family;
+    next if $family && $refuse->('family use (@x/%x/$#x)');
     # An interpolated use is text a rename cannot rewrite.  It is safe ONLY on
     # the identity-unmangle path (the name is unchanged, so interpolation
     # keeps resolving to the defvar'd global) and only where the interpolating
@@ -1277,28 +1368,45 @@ sub _rename_spanning_lexicals {
     next if $interp
       && (!$unique
           || grep { $sf[$_]{interp}{$bare}
-                    && $segments->[$_]{pkg} ne $segments->[$di]{pkg} } $di .. $hi);
-    next unless @sdecls == 1 && $dc == 1;
-    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x} deref-block
-    next if $segments->[$di]{blockform};
+                    && $segments->[$_]{pkg} ne $segments->[$di]{pkg} } $di .. $hi)
+      && $refuse->('interpolated use');
+    next if !(@sdecls == 1 && $dc == 1)
+      && $refuse->('sdecls=' . scalar(@sdecls) . " dc=$dc");
+    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/
+      && $refuse->('${x} deref-block');
+    next if $segments->[$di]{blockform} && $refuse->('blockform decl segment');
     my $decl  = $sdecls[0];
     my $stmts = $segments->[$di]{stmts};
     my ($idx) = grep { $stmts->[$_] == $decl } 0 .. $#$stmts;
-    next unless defined $idx;   # decl not a top-level statement of its segment
+    next if !defined $idx && $refuse->('decl not top-level in its segment');
     my ($sym) = grep { $_->content eq "\$$bare" }
                 @{ $decl->find('PPI::Token::Symbol') || [] };
-    next unless $sym;
+    next if !$sym && $refuse->('decl symbol not found');
 
     my $newbare = $unique ? $bare
                           : $bare . '__file__' . $self->{_file_lex_counter}++;
+    # A use inside a shadowing scope (block-nested re-decl of the same bare
+    # name — a DISTINCT variable) must keep its original name (M3): skip the
+    # shadow decl's own declarator symbol and every use _ref_shadowed
+    # attributes to it.  The extent dc above counted only same-level /
+    # unscopeable re-decls, so everything skipped here is a genuine shadow.
+    my $skip_shadowed = sub {
+      my ($s, $seg_stmts, $seg_parent) = @_;
+      return 1 if $self->_symbol_is_declarator($s);
+      return 1 if $self->_ref_shadowed($s, "\$$bare", $seg_stmts, $seg_parent);
+      return 0;
+    };
     # Declaring segment: the decl symbol itself (its RHS reads the outer
     # global — _rename_decl_within's rule), then every use in later
     # statements of the segment.
     $self->_rename_decl_within($decl, $sym, "\$$newbare");
+    my ($dsp) = map { $_->parent } grep { ref && $_->isa('PPI::Node') } @$stmts;
     for my $j ($idx + 1 .. $#$stmts) {
       next unless ref $stmts->[$j] && $stmts->[$j]->isa('PPI::Node');
       for my $s (@{ $stmts->[$j]->find('PPI::Token::Symbol') || [] }) {
-        $s->set_content("\$$newbare") if $s->symbol eq "\$$bare";
+        next unless $s->symbol eq "\$$bare";
+        next if $skip_shadowed->($s, $stmts, $dsp);
+        $s->set_content("\$$newbare");
       }
     }
     # Later segments: the package-qualified form — their sections' reader
@@ -1311,10 +1419,14 @@ sub _rename_spanning_lexicals {
     my $last_j = $hi;
     my $qual = '$' . $segments->[$di]{pkg} . '::' . $newbare;
     for my $j ($di + 1 .. $last_j) {
-      for my $stmt (@{ $segments->[$j]{stmts} }) {
+      my $seg_stmts = $segments->[$j]{stmts};
+      my ($sp) = map { $_->parent } grep { ref && $_->isa('PPI::Node') } @$seg_stmts;
+      for my $stmt (@$seg_stmts) {
         next unless ref $stmt && $stmt->isa('PPI::Node');
         for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-          $s->set_content($qual) if $s->symbol eq "\$$bare";
+          next unless $s->symbol eq "\$$bare";
+          next if $skip_shadowed->($s, $seg_stmts, $sp);
+          $s->set_content($qual);
         }
       }
     }
@@ -2793,6 +2905,12 @@ sub _lower_compound {
     # register the name BEFORE lowering cond/step/body so fallback expressions
     # see it as let-bound.  Unboxable (e.g. step `$i = $i + 1`) → raw slot;
     # else boxed (a `$i++` step keeps VarAnnotator conservative).
+    # The counter is scoped to the loop (head + body): restore
+    # _let_bound_vars/_live_lex before returning, exactly like the foreach
+    # branch below — a leak puts the (unbound-after-the-let) name into a later
+    # sibling's string-eval capture alist (bop.t %res section abort).
+    my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+    my %saved_lex = %{ $self->{_live_lex} // {} };
     my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
     $self->_reg_lex($name) if $name;
 
@@ -2821,19 +2939,25 @@ sub _lower_compound {
       // ($step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list']);
     my @body = $self->_lower_scope([$block->schildren], $vi);
 
+    my $form;
     if ($name) {
       my $initval = defined $init ? $self->_lower_expr($init, $stmt) : '(p-undef)';
       if ($vi->{$name} && $vi->{$name}{unboxable}) {
-        return ['let', ['list', ['list', $name, $initval]],
-                ['p-for', ['list'], $cond, $step, _label_keys($label), @body]];
+        $form = ['let', ['list', ['list', $name, $initval]],
+                 ['p-for', ['list'], $cond, $step, _label_keys($label), @body]];
+      } else {
+        $form = ['let', ['list', ['list', $name, '(make-p-box nil)']],
+                 ['p-for', ['list', ['p-my-=', $name, $initval]], $cond, $step,
+                  _label_keys($label), @body]];
       }
-      return ['let', ['list', ['list', $name, '(make-p-box nil)']],
-              ['p-for', ['list', ['p-my-=', $name, $initval]], $cond, $step,
-               _label_keys($label), @body]];
+    } else {
+      $form = ['p-for',
+               ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
+               $cond, $step, _label_keys($label), @body];
     }
-    return ['p-for',
-            ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
-            $cond, $step, _label_keys($label), @body];
+    $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+    $self->{_live_lex} = \%saved_lex;
+    return $form;
   }
 
   if ($kw eq 'for' || $kw eq 'foreach') {
@@ -3369,6 +3493,17 @@ sub _fallback_stmt_capture {
   my $p = $self->fallback_parser;
   my @saved = ($p->_sections, $p->_cur_bucket, $p->indent_level,
                $p->{_local_let_depth});
+  # A Compound statement (for/foreach/while/if/bare block) confines every
+  # `my` inside it — Perl scopes even a loop-head decl (`for (my $i = …;…)`)
+  # to the statement.  v1's _process_element registers such decls in its
+  # never-shrinking _let_bound_vars accumulator; without a restore the name
+  # leaks into later seam lowerings at this level, and the string-eval
+  # capture alist would reference a `let` variable whose binding has closed
+  # (unbound-variable abort at load — bop.t's %res section).  Non-Compound
+  # statements (`my $x = …;` at this level) must keep their registrations.
+  my $confines = $stmt->isa('PPI::Statement::Compound');
+  my %saved_lb;
+  %saved_lb = %{ $p->{_let_bound_vars} // {} } if $confines;
   $p->_sections([]);
   $p->_cur_bucket('runtime');
   $p->_open_section('pcl');
@@ -3396,6 +3531,7 @@ sub _fallback_stmt_capture {
   $p->_cur_bucket($saved[1]);
   $p->indent_level($saved[2]);
   $p->{_local_let_depth} = $saved[3];
+  $p->{_let_bound_vars} = \%saved_lb if $confines;
   return (@runtime ? join("\n", @runtime) : undef, $opens);
 }
 
