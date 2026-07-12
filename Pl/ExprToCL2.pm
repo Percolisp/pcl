@@ -104,6 +104,11 @@ sub gen_form {
       my $call = [$info->{cl_name}, @args];
       return $call if $info->{insensitive};
       return $call if ($ctx // '') eq 'inherit';   # callee sees caller's ctx
+      # Under the sub-body :void regime the ambient *wantarray* is already
+      # :void — skip the per-statement re-bind (task #60; the seam's
+      # _ctx_wrap does the same).
+      return $call if ($ctx // '') eq ':void'
+        && $self->environment && $self->environment->wa_void_active;
       my $bind = (!defined $ctx || $ctx eq 'nil') ? 'nil' : $ctx;
       return ['let', ['list', ['list', '*wantarray*', $bind]], $call];
     }

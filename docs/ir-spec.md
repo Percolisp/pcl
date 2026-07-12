@@ -340,11 +340,29 @@ The dynamic variable `*wantarray*` carries the calling context:
 | `:void` | void context |
 
 **Call sites bind it** where the callee is context-sensitive:
-`(let ((*wantarray* t)) (pl-f …))`. Statement position emits no bind
-(void by convention); `return EXPR` and sub-tail positions inherit the
-frame's context. `p-sub` snapshots the value at entry into
+`(let ((*wantarray* t)) (pl-f …))`. `return EXPR` and sub-tail positions
+inherit the frame's context. `p-sub` snapshots the value at entry into
 `*pcl-caller-wantarray*` so nested binds inside the body don't lie to
 `(p-wantarray)`, which maps t→`1`, nil→`""`, :void→`undef`.
+
+**Statement (void) position — the sub-body regime.** A sub body with more
+than one statement (or a single compound) is wrapped ONCE in
+`(let ((*wantarray* :void)) …)`; every non-tail statement inside then
+trusts that ambient and emits no bind of its own.  The tail (implicit
+return) statement restores the caller's context at the innermost
+expression-statement level: `(let ((*wantarray* *pcl-caller-wantarray*))
+TAIL-FORM)` — a compound tail (if/elsif chain) carries the restore on each
+branch's leaf value statement, never around the whole compound (its
+non-tail inner statements stay in the :void ambient).  Explicit `return`
+needs no restore: the `p-return` macro evaluates its values under
+`*pcl-caller-wantarray*` itself.  A body that is a single non-compound
+statement skips the regime entirely (no binds at all — the tail already
+inherits the caller's dynamic context).  `do{}`/`eval{}` blocks and
+map/grep/sort bodies are regime *boundaries*: they run in their own
+caller's context, so void statements inside them carry per-statement
+`(let ((*wantarray* :void)) …)` wraps.  Toplevel (non-sub) statement
+position emits per-statement binds only where the form is
+context-sensitive (user funcalls, g-modifier matches).
 
 For a translator: this is a hidden argument threaded through every call,
 defaulting to "inherit". Context-sensitivity is *observable* — `wantarray`,

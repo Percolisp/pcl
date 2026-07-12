@@ -2359,7 +2359,7 @@ sub _lower_sub_inner {
                 '&rest', '%_args'];
       return ['p-sub', $clname, $ll,
               raw('(declare (ignore %_args) (dynamic-extent %_args))'),
-              ['block', 'nil', $self->_lower_block(\@body_stmts, $vi, 'inherit')]];
+              ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi)]];
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;
@@ -2367,12 +2367,36 @@ sub _lower_sub_inner {
             ['p-args-body', ['block', 'nil',
               ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @$params],
                 raw('(let ((*wantarray* nil)) (p-list-= (vector ' . join(' ', @$params) . ') @_))'),
-                $self->_lower_block(\@body_stmts, $vi, 'inherit')]]]];
+                $self->_lower_body_regime(\@body_stmts, $vi)]]]];
   }
 
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
   return ['p-sub', $clname, ['list', '&rest', '%_args'],
-          ['p-args-body', ['block', 'nil', $self->_lower_block(\@stmts, $vi, 'inherit')]]];
+          ['p-args-body', ['block', 'nil', $self->_lower_body_regime(\@stmts, $vi)]]];
+}
+
+# Sub-body :void regime (task #60 — v1's wa_void_active model): bind
+# *wantarray* to :void ONCE around the body instead of wrapping every
+# void-position statement.  wa_void_active=1 tells every void emitter the
+# ambient is already :void so it may skip its own bind (the seam's
+# _ctx_wrap, ExprToCL2's funcall bind, _lower_stmt's g-match wrap); the
+# tail statement restores the caller's context via *pcl-caller-wantarray*
+# (bound at entry by the p-sub macro) — the leaf-level wrap in _lower_stmt.
+# Without the hoist, SBCL's compiler exhausts the sweep's 1GB heap on large
+# sub bodies (substr.t run_tests: 425 per-statement dynamic binds vs v1's
+# 30).  A body that is a single non-compound statement has no non-tail
+# statements at any depth, so the regime would be two pure-overhead dynamic
+# binds per call (accessors!) — it keeps the direct per-expression scheme.
+sub _lower_body_regime {
+  my ($self, $stmts, $vi) = @_;
+  my @live = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
+  if (@live == 0
+      || (@live == 1 && !$live[0]->isa('PPI::Statement::Compound'))) {
+    return $self->_lower_block($stmts, $vi, 'inherit');
+  }
+  local $self->environment->{wa_void_active} = 1;
+  return ['let', ['list', ['list', '*wantarray*', ':void']],
+          $self->_lower_block($stmts, $vi, 'inherit')];
 }
 
 # Register a `my`-declared name: for the fallback machinery's my-vs-package
@@ -3078,9 +3102,10 @@ sub _lower_stmt {
     my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
     my $test = ['setf', $ret, $self->_lower_expr($cond, $stmt)];
     $test = ['p-!', $test] if $mod eq 'unless';
-    return ['let', ['list', ['list', $ret, 'nil']],
+    return $self->_restore_caller_wa($tail_ctx,
+           ['let', ['list', ['list', $ret, 'nil']],
             ['p-if', $test, ['setf', $ret, $self->_lower_expr($expr, $stmt)], 'nil'],
-            $ret];
+            $ret]);
   }
 
   # `$x = RHS;` on a let-bound scalar → native form: `setf` when $x is a raw
@@ -3112,10 +3137,30 @@ sub _lower_stmt {
   # string, so `$1` was the LAST char, not the first).  Narrowed to g-matches
   # only — wrapping EVERY void statement is both wrong (over-scopes wantarray)
   # and needless overhead (it perturbed `print $i;` shapes and every call).
-  if ($vctx eq ':void' && Pl::CLForm::is_raw($form) && _stmt_has_global_match($stmt)) {
+  # Under an active sub-body :void regime the ambient is already :void.
+  if ($vctx eq ':void' && Pl::CLForm::is_raw($form) && _stmt_has_global_match($stmt)
+      && !$self->environment->wa_void_active) {
     $form = raw("(let ((*wantarray* :void))\n" . ${$form} . ")");
   }
-  return _apply_modifier($form, $mod, $cond, $self, $stmt);
+  return $self->_restore_caller_wa($tail_ctx,
+         _apply_modifier($form, $mod, $cond, $self, $stmt));
+}
+
+# Leaf-level tail wrap under the sub-body :void regime (task #60): the body
+# bound *wantarray* to :void once, but a tail (implicit-return) statement's
+# value must be computed in the CALLER's context — restore it from
+# *pcl-caller-wantarray* for this one statement.  Applied at the innermost
+# expression statement (compound tails thread $tail_ctx down to their branch
+# leaves), never around a whole compound — its non-tail inner statements must
+# stay in the :void ambient.  Explicit `return` never reaches here (Break
+# branch; the p-return macro restores the caller context itself).
+sub _restore_caller_wa {
+  my ($self, $tail_ctx, @forms) = @_;
+  return @forms
+    unless defined $tail_ctx && "$tail_ctx" eq 'inherit'
+    && $self->environment->wa_void_active && @forms;
+  return ['let', ['list', ['list', '*wantarray*', '*pcl-caller-wantarray*']],
+          @forms];
 }
 
 # True if the statement contains an `m//g` match (list-vs-scalar context

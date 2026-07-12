@@ -31,8 +31,15 @@ my $c_boxes = () = $cl =~ /\(\$c \(make-p-box/g;
 is($c_boxes, 0, '$c is unboxed (single arith write)');
 like($cl, qr/\(let \(\(\$c \(p-\+ \$a \$b\)\)\)/, '$c bound raw at its declaration site');
 
-# Spec #2: no VOID *wantarray* wrap around the sub body or plain assignments.
-unlike($cl, qr/\(let \(\(\*wantarray\* :void\)\)/, 'no VOID context wrap');
+# Spec #2 (amended by task #60): exactly ONE :void bind — the hoisted
+# sub-body regime (`(let ((*wantarray* :void))` once around fib's body,
+# v1's wa_void_active model) — and never per-statement wraps around plain
+# assignments.  Pre-hoist this asserted zero wraps; the regime traded that
+# for suppressing every per-statement bind (SBCL heap blowup on large subs).
+my $void_wraps = () = $cl =~ /\(let \(\(\*wantarray\* :void\)\)/g;
+is($void_wraps, 1, 'exactly one :void bind: the hoisted sub-body regime');
+like($cl, qr/\(let \(\(\*wantarray\* :void\)\)\s*\n?\s*\(let \(\(\$a/,
+     'the :void regime wraps the body once, directly above the first decl');
 like($cl, qr/\(p-my-= \$a \$b\)/, 'boxed var copy is plain p-my-= (no wrap, no p-scalar-=)');
 unlike($cl, qr/p-scalar-=/, 'no special-proclaiming p-scalar-= anywhere');
 

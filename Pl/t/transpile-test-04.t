@@ -577,4 +577,35 @@ test_transpile('standalone label with backward goto',
     goto again unless $i++;
     print "@a\n"; }});
 
+# s288 — sub-body :void regime (task #60): *wantarray* bound :void once
+# around a multi-statement body, tail restores the caller's context via
+# *pcl-caller-wantarray*.  Covers: context-sensitive builtin tail (keys),
+# wantarray() mid-body and in tail, a void-position call observing :void,
+# tail `EXPR if COND`, a compound (if/else) tail's branch leaves, and a
+# g-match in void statement position (must not see the caller's list ctx).
+test_transpile('sub-body void regime: contexts across tails and void calls',
+    q{our @CTX;
+my %H = (a=>1, b=>2, c=>3);
+sub tailkeys { my $x = shift; $x++; keys %H }
+my $s = tailkeys(1); my @l = sort(tailkeys(1));
+print "tail: $s|@l\n";
+sub wa { my $d = shift; $d++; wantarray ? "L" : defined(wantarray) ? "S" : "V" }
+my @wl = wa(0);
+print "wa: ", scalar(wa(0)), " $wl[0]\n";
+sub inner { push @CTX, wantarray ? "L" : defined(wantarray) ? "S" : "V"; return }
+sub voidwa { my $q = shift; $q++; inner(); return "ok" }
+my @r = voidwa(5);
+sub single { inner() }
+single(); my $sx = single(); my @sy = single();
+print "ctx: @CTX\n";
+sub tmod { my $c = shift; $c += 0; 5 if $c }
+my @t2 = tmod(1);
+print "tmod: ", scalar(tmod(1)), " @t2\n";
+sub condtail { my $c = shift; $c++; if ($c > 1) { keys %H } else { "no" } }
+my $cs = condtail(1); my @cl = sort(condtail(1));
+print "condtail: $cs|@cl\n";
+sub gm { my ($str) = @_; $str =~ /(.)/g; return $1 }
+my @g = gm("xyz");
+print "gmatch: $g[0]\n";});
+
 done_testing();

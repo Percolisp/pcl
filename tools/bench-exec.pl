@@ -48,6 +48,9 @@ my @benches = (
   ['cfor',      "$HN my \$s=0; for (my \$i=0; \$i<\$n; \$i++) { \$s = \$s + \$i } print \"\$s\\n\";", 5_000_000, 0],
   ['arrhash',   "$HN my (\@a,\%h,\$s); for (1..\$n) { \$h{x}=\$_; \$a[3]=\$_+1; \$s=\$s+\$h{x}+\$a[3] } print \"\$s\\n\";", 2_000_000, 0],
   ['fib(27)x',  "$HN sub fib { my \$m=shift; \$m<2 ? \$m : fib(\$m-1)+fib(\$m-2) } my \$r=0; \$r=fib(27) for 1..\$n; print \"\$r\\n\";", 30, 0],
+  # Multi-statement recursive sub: exercises the sub-body :void regime
+  # (task #60) — fib above coalesces to a single-statement body and skips it.
+  ['gcdrec',    "$HN sub gcd { my (\$x,\$y)=\@_; return gcd(\$x-\$y,\$y) if \$x>\$y; return gcd(\$x,\$y-\$x) if \$x<\$y; \$x } my \$r=0; \$r += gcd(\$_ % 97 + 1, 89) for 1..\$n; print \"\$r\\n\";", 100_000, 0],
   ['collatz',   "$HN my \$c=0; for my \$i (1..\$n) { my \$m=\$i; while (\$m>1) { \$m = \$m%2 ? 3*\$m+1 : \$m/2; \$c++ } } print \"\$c\\n\";", 300_000, 0],
   ['strcat',    "$HN my \$s=''; for (1..\$n) { \$s .= 'x' } print length(\$s), \"\\n\";", 100_000, 0],
 );

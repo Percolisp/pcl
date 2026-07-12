@@ -38,7 +38,7 @@ qq.t, quotemeta.t, recurse.t, reverse.t, sleep.t, study.t, translate.t, warn.t, 
 | **lfs.t** (0/0) | Self-skip: `plan 0 # Skip no 64-bit file offsets` | Platform skip |
 | **length.t** (0/?) | `use bytes` + `pack "U"` format not supported | See `docs/not-supported.md` |
 | **pack.t** (14099/14722) | 8771 SKIP, 623 fail (see docs/pack-attack-plan.md). Runs to completion. | Partial — see session-log §196 |
-| **print.t** (0/3) | All 3 tests use `fresh_perl_is` | Cannot run in PCL |
+| **print.t** (3/3) | ✅ FULLY PASSES (s288 audit) — `fresh_perl_is` works via `perl-tests/t/test.pl`'s subprocess `_fresh_perl_run`; the old "cannot run" claim was stale.  NB: flaky under heavy parallel load (subprocess spawns can time out → INCOMPLETE 0/3) | Passes |
 | **signatures.t** (0/0) | Self-skip via `skip_all` — uses `eval $data` (string eval) | Self-skips |
 | **sprintf.t** (0/0) | Self-skip via `skip_all` — uses `eval $data` (string eval) | Self-skips |
 
@@ -122,7 +122,7 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 | **kvhslice.t** | ✅ 39/39 | Session 188: `%{$ref}{"keys"}` parse error fixed (Cast+Block+Block now handled); restored test; fixed SKIP stub count; plan corrected 38→39. Session 187 had reduced plan to 38 (dropped one stub). |
 | **lex.t** | 11+12/53 | ✅ evalbytes stub added (session 127) — was CRASH(2+4). Remaining: XS::APItest stubs, string interpolation edge cases, error-message matching |
 | **pos.t** | 12+18/33 | Crash at test 17+: `pos $_[N]` — subscript arg bleed in parser. `pos $x` OK; `pos $_[N]` passes subscript as extra arg to `pos`. Tests 9-15: DESTROY/defelems not-supported |
-| **print.t** | 0+0/3 | All `fresh_perl_is` |
+| **print.t** | ✅ 3/3 | `fresh_perl_is` supported (subprocess helper in `perl-tests/t/test.pl`); stale "0/3 cannot run" row corrected s288.  Flaky under heavy parallel load only |
 | **qr.t** | 19+17/37 | Tests 3,6,9: ref equality (`==` on regex objects → 0). Tests 12,13,14,18: pattern matching with qr// objects. Test 22: tied var for regex |
 | **range.t** | 144+17/162 | Test 4: array slice LHS; tests 62-65: string range edge cases; large integer overflow; some `sprintf "%g"` crash |
 | **sort.t** | ✅ 205/205 | Session 187: all failures commented out with SKIP stubs. Fixed test 55 (Backwards_stacked `$$` prototype now passes `$a/$b` via @_). Regressions from session 186 also fixed. |

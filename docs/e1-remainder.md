@@ -1,5 +1,19 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s288, 2026-07-13, Fable 5): E2-prereq void-wrap hoist SHIPPED
+> (task #60), gen v2-30 — census unchanged (97 native / 14 gated; the hoist
+> de-gates nothing by itself).**  v2 sub bodies now carry v1's :void regime
+> (one `(let ((*wantarray* :void))` around a multi-statement body,
+> `wa_void_active` suppresses every per-statement bind, tail restores
+> `*pcl-caller-wantarray*` at the leaf; single non-compound-statement
+> bodies skip the regime).  **This removes the large-sub SBCL heap blowup
+> — substr.t's E2 blocker is gone; its only remaining gate is the
+> magic-lvalue foreach.**  Also: v2 regenerates `cl/pcl-pack.lisp`
+> byte-functionally identically (pack.t 5638/87, same 87 test numbers);
+> new task #64 (bare-block sub tail loses its value, BOTH pipelines,
+> pre-existing).  Full sweep parity vs HEAD (only flaky print.t differed
+> under load; passes standalone).  s288 detail in `docs/session-log.md`.
+
 > **UPDATE (s287, 2026-07-12, Fable 5): M-E singles SHIPPED — census 97
 > native / 14 gated, gen v2-29.**  De-gated **loopctl.t** (67/67, fully
 > passing) and **my.t** (49/1, exact v1 parity on the pre-existing test-46
@@ -144,7 +158,7 @@ returns the global).  Fixing it in v2 removes silent wrong answers.
 | file | exact gate | mechanism |
 |---|---|---|
 | ~~chop.t~~ **DONE s285** | element alias | de-gated: `p-gethash-box`/`p-aref-box` head-swap |
-| substr.t | `foreach over a magic-lvalue element (substr/pos/vec)` | narrowed gate (s285): needs scalar force-boxed + blocked by the per-statement void-wrap heap issue (E2 void-wrap hoist) + 1 user-`:lvalue` test loss |
+| substr.t | `foreach over a magic-lvalue element (substr/pos/vec)` | narrowed gate (s285): needs scalar force-boxed + 1 user-`:lvalue` test loss.  **The per-statement void-wrap heap blocker is FIXED (s288, task #60 regime hoist)** — only the magic-lvalue gate remains |
 | ~~loopctl.t~~ **DONE s287** | bare-block continue | de-gated 67/67: the gate was the BARE-block `LABEL: { } continue { }` (while/until continue already worked); labeled in-compound + orphan-sibling join |
 | array.t | ~~self-ref init~~ → `forward goto to a standalone label` (s287) | list self-ref + chained-my + capture de-conflation all shipped s287; residual = `goto` out of a map LAMBDA to a later label — needs a DYNAMIC goto (throw/catch), and v1 CRASHES on it today (compile error); file also stops at t114 at HEAD.  A design item, not a single |
 | postfixderef.t | `interpolated postfix deref (postderef_qq)` | task #45 / plan E1.4: implement `postderef_qq` in `StringInterpolation.pm` — fixes BOTH pipelines (v1 has the same gap) |
