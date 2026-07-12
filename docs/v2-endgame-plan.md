@@ -6,6 +6,12 @@ table of `docs/v2-transfer-plan.md` (whose T-A/T-B/T-C/T-D framework this
 plan inherits — read that for mechanism detail; this doc adds calibrated
 estimates, the end-state definition, and the user decision points).
 
+> **Current state lives elsewhere** — the numbers above are this plan's
+> birth snapshot.  For the live census run `perl tools/v2-census.pl`; for
+> the current worklist, per-session checklist, and guardrails see
+> `docs/v2-opus48-execution-plan.md` (state header kept current) and
+> `docs/e1-remainder.md`.
+
 **The user's goal (2026-07-10):** v2 ends up a **simple and well-structured
 end product** — not merely "v1 deleted", but a codebase a newcomer can read.
 Simplicity is therefore a deliverable with its own acceptance criteria

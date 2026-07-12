@@ -50,7 +50,8 @@ session, every item:
    - **Full gate**: `tools/prove-core` (== `prove -j8 Pl/t/`, ~2:30).
 2. **Bump `*pcl-cache-generation*`** (`cl/pcl-runtime.lisp`) on every
    emission-changing commit — stale module caches otherwise reuse old
-   transpiles.  Current: v2-26.
+   transpiles.  (Don't trust a "Current:" snapshot here — read the
+   defparameter and bump from whatever it says.)
 3. **Gate, don't half-implement.**  If a construct can't be lowered fully
    correctly, `die "Parser2 TODO: …"` with a precise reason.  No silent
    miscompiles by construction.
@@ -157,8 +158,10 @@ pre-existing failure).
 ## 2. Phase worklist
 
 Default cadence per the endgame plan: **alternate E1 and E2 sessions** so
-gate wins keep landing while the structural work proceeds.  E1 first
-session below is the recommended opener (highest file yield).
+gate wins keep landing while the structural work proceeds.  As of s287 the
+recommended next session is **E1-d M-A** (interp rewrite → pack.t,
+yadayada.t) or **E2.0 + the void-wrap hoist** (task #60 — unblocks
+substr.t and every large file); E1-a/E1-b are done except chdir.t.
 
 ### E1 — remaining 14 gates (~3–5 sessions)
 

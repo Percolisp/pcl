@@ -131,7 +131,12 @@ falls back to v1 per file. `PCL_V1=1` forces the original v1 pipeline
 scripts. Module-cache paths are keyed by `cl/pcl-runtime.lisp`'s
 `*pcl-cache-generation*` **plus the effective pipeline** — bump the
 generation string on any emission-changing commit, or stale cached module
-transpiles will be reused. Plan/status: `docs/v2-completion-plan.md`.
+transpiles will be reused. **Plan/status: `docs/v2-endgame-plan.md` (E1–E5)
++ `docs/v2-opus48-execution-plan.md` (the ordered worklist, per-session
+checklist §1b, guardrails) + `docs/e1-remainder.md` (per-file gate
+triage).** `docs/v2-completion-plan.md` is the older W-phase plan
+(background). Verify emission changes with `tools/corpus-diff.pl`; track
+gates with `perl tools/v2-census.pl`.
 
 ## Architecture
 
@@ -234,10 +239,13 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **90 test files, 3151 tests** (Pl/t gate, as of session 228)
+- **114 test files, 4034 tests** (Pl/t gate, as of session 287)
 - **All passing**
-- **Runtime: ~5 min with `prove -j8`** (each test spawns a new SBCL process)
+- **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
+  each test file spawns a new SBCL process)
 - Full `perl-tests/` sweep: 66 files fully passing; see `docs/sweep-bug-catalog.md`
+- v2 pipeline census: 97 files v2-native / 14 gated to v1
+  (`perl tools/v2-census.pl` for the live numbers)
 
 ## Common Pitfalls
 
