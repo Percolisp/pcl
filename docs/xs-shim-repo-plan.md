@@ -97,6 +97,9 @@ host, so contributors and CI can exercise every vtable entry without PCL:
 - **Scope guard:** refhost is NOT a perl. It implements exactly the vtable
   + coercion table, nothing else. Feature requests against it that exceed
   the vtable are misfiled shim requests.
+- refhost is also the seed of the **host conformance suite** (§11) — the
+  structural feature that makes pclxs reusable by other XS porting
+  projects.
 
 The differential oracle (§13) stays: every `t/` case that can also compile
 against real perl (`perl.h` from `libperl-dev`) runs both ways and diffs
@@ -149,11 +152,11 @@ is not installed**.  The user has approved installing from apt/CPAN.
    `perl -MExtUtils::ParseXS -e 'print $ExtUtils::ParseXS::VERSION'`.
 2. **Auth (user action):** `gh auth login` is interactive — the user runs
    it themselves (in a Claude Code session: type `! gh auth login`).
-3. **Create the repo:** `gh repo create <owner>/pclxs --public
+3. **Create the repo:** `gh repo create percolisp/pclxs --public
    --description "Run CPAN XS extensions on non-perl hosts: a
-   source-recompile shim with a host-neutral C vtable"` — owner + license
-   are user decisions (§8).  Protect `main` (PRs + CI required) once CI
-   exists.
+   source-recompile shim with a host-neutral C vtable"` (owner
+   `percolisp` — user decision 2026-07-12, account verified).  Protect
+   `main` (PRs + CI required) once CI exists.
 4. **Initial commit** (skeleton, no functionality yet):
    - `README.md`: the §0/§4 pitch condensed — what it is, the
      handles-not-pointers idea, HPy/JNI prior art, status table of the
@@ -215,16 +218,18 @@ is not installed**.  The user has approved installing from apt/CPAN.
   requiring the `xs-build` report output (design §9 step 5), which
   already classifies Tier X symbol usage.
 
-## 8. User decisions needed before session 0
+## 8. User decisions (mostly resolved 2026-07-12)
 
-1. **GitHub owner:** personal account or a new org?  (Repo name:
-   **decided, `pclxs`** — verified free.)
-2. **License:** recommendation **MIT** — maximally simple for a C library
-   meant to be embedded by many hosts.  Alternative: perl's own
-   "GPL-1.0-or-later OR Artistic-1.0-Perl" dual license for perl-community
-   familiarity.  (No perl code is copied — the headers reimplement a
-   documented API; xsubpp runs as an external tool from the user's system
-   perl and its output is compiled, not vendored.)
+1. **GitHub owner: DECIDED — `percolisp`** (the user's account, verified
+   to exist).  Repo name: **decided, `pclxs`** (verified free).
+2. **License: DECIDED — the Perl license** ("same terms as Perl itself":
+   dual **Artistic-1.0-Perl OR GPL-1.0-or-later**), matching pcl's own
+   LICENSE.  User rationale: pcl uses it, and this *is* a Perl project.
+   Bonus fit: it is the same license as nearly all the `.xs` code the
+   shim compiles ("same terms as Perl" is CPAN's default), so downstream
+   XS-porting projects (§11) inherit maximal ecosystem compatibility.
+   Copy pcl's LICENSE file text; declare
+   `Artistic-1.0-Perl OR GPL-1.0-or-later` as the SPDX expression.
 3. **Public from day one, or after Phase 1?**  Recommendation: public
    from day one — the vtable header + design doc + refhost are exactly
    what attracts early host-author feedback, and there is nothing secret.
@@ -240,7 +245,7 @@ Same phases and acceptance as design §12, with each split into a
 | phase | pclxs repo (CI acceptance) | pcl repo (local acceptance) |
 |---|---|---|
 | **0 census & skeleton** | repo bootstrap §5; headers compile standalone; `xs-api-census.pl` + `census/` for the ladder (built against real perl — needs `libperl-dev`) | sibling checkout + resolver + `xs-pin` wired; `tools/build-pclxs` builds it |
-| **1 hand-written XSUB e2e** | native SVs, stacks, `pclxs_init/invoke_xsub`, croak/setjmp, ~20 scalar vtable entries; **refhost**; `t/arith.t` green via refhost AND differential-vs-perl | `cl/pcl-xs.lisp` (handle table + callables + trampoline); `Pl/t/xs-01.t` green incl. croak-catch + callback |
+| **1 hand-written XSUB e2e** | native SVs, stacks, `pclxs_init/invoke_xsub`, croak/setjmp, ~20 scalar vtable entries; **refhost**; `t/arith.t` green via refhost AND differential-vs-perl — written **host-parameterized from the start** (§11.2 conformance harness) | `cl/pcl-xs.lisp` (handle table + callables + trampoline); `Pl/t/xs-01.t` green incl. croak-catch + callback |
 | **2 xsubpp + build tool** | `tools/xs-build` one-command dist build; `t/coerce.t` (C-side coercions vs real perl over the nasty-input table) | `tools/pcl-xs-build` wrapper (+ `.pm` transpile); coerce answers also diffed vs PCL runtime |
 | **3 aggregates + Digest::MD5** | AV/HV group, refs/bless/isa, `get_global`, `sv_setref_pv`; refhost grows aggregates; Digest::MD5 *builds* in CI | loader integration (§7.4); Digest::MD5's own `t/*.t` run under the PCL sweep |
 | **4 callbacks + string-heavy** | `call` flags complete, `eval_string`, SvGROW/SvPVX hardening; Time::HiRes (or swap per design §14.2) builds | module dist tests pass-rate reported; JSON::XS stretch, failures census-classified |
@@ -268,3 +273,73 @@ boundary — treat any "it seems to survive" shortcut as a bug).
 calibration unit.  Phase 1 dominates: three interacting mechanisms —
 stacks, croak/setjmp, handle lifecycle — must land together before
 anything runs.)
+
+## 11. pclxs as a basis for other XS porting projects
+
+**Question (user, 2026-07-12):** can the shim be structured so another
+project — "run CPAN XS on Ruby/Python/JS/..." — can build on it?
+**Answer: yes, and mostly it already is; one addition makes it real.**
+
+### 11.1 What the design already guarantees
+
+The repo split (§1–2) IS the reuse structure.  Everything in the pclxs
+repo — headers, the C core, `xs-build`, the census tooling, refhost, the
+tests — contains zero PCL knowledge by construction (R5); every
+PCL-specific line lives in the pcl repo.  So a downstream project does
+**not fork pclxs — it depends on it**, exactly the way pcl does:
+
+1. implement the ~55 `pclxs_host.h` callbacks against its own runtime's
+   C API (its handle table, its coercions per the design's coercion
+   table, its die/exception mapping to the two-status protocol);
+2. link `libpclxs` and call `pclxs_init(vtable)`;
+3. reuse `xs-build`, the census, the typemap story, and the whole test
+   corpus unchanged.
+
+That is the same relationship refhost has to the core — which is why
+refhost doubles as the downstream template (§3), with
+`docs/porting-a-host.md` as the instructions.
+
+### 11.2 The one addition: a host conformance suite (a TCK)
+
+Structure `t/` from Phase 1 onward so the vtable-exercising cases are
+**host-parameterized**: a conformance harness (driver + the test-XSUB
+corpus + expected outputs) that runs against *any* vtable implementation,
+selected by pointing the harness at a host adapter binary/library.
+
+- refhost is host #0 and must stay green in CI;
+- pcl runs the same suite locally as part of its gate;
+- a new host's port is **defined as done when the conformance suite
+  passes** — including the coercion-table cases (design §5.2 puts
+  coercions host-side, so they are precisely what a new host is most
+  likely to get subtly wrong).
+
+This converts "port a host" from "read the docs and hope" into "make
+this suite green", which is the strongest form of reusability a project
+can offer.  Cost: near zero if `t/` is written host-parameterized from
+the start (it needs a driver abstraction anyway to run refhost vs real
+perl); retrofitting later would be a rewrite.
+
+### 11.3 Host-neutrality rules to enforce in-repo
+
+- **No host-project constants in pclxs**: artifact suffix (pcl uses
+  `.pcl.so`), search roots, and install layout are *host-project
+  parameters* to `xs-build` (`--suffix`, `--out`), never defaults baked
+  into the tool.
+- **Declare the tracked perlapi surface**: the headers implement the
+  census-driven subset of the perl 5.40-era documented API; keep that
+  statement (and the census files) current so downstreams know exactly
+  what they are getting and what Tier X excludes.
+- **The contract is the header + porting guide + conformance suite**,
+  versioned together by `PCLXS_ABI_VERSION`.  A vtable change without a
+  version bump + conformance-suite update fails review (§7).
+
+### 11.4 What we deliberately do NOT do now
+
+No pre-emptive "neutral core" extraction, no second repo, no
+generic-sounding rename (that decision is closed — the name is `pclxs`).
+Downstream projects linking a library named after its origin project is
+normal and harmless.  If a real multi-host community ever forms and wants
+neutral governance, the escape hatch is mechanical *because of* the
+layering above: extraction would be a rename + repo move, cheap then,
+speculative work now.  Until a second host actually exists, the reuse
+story is: implement the vtable, pass the conformance suite.
