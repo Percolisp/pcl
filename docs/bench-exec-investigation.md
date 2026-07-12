@@ -42,12 +42,31 @@ path effectively open-codes the add; generic dispatch is not a dominant cost
 when operands are raw.
 
 **Fix menu (leverage order):**
-1. **Counting-loop lowering for `for [my $v] (A..B)`** when the list is
-   exactly one range: emit a `p-foreach-range`-style loop — endpoints
-   evaluated ONCE (also neutralizes tax 2 for range loops), no vector.
-   Semantics to respect: range elements are READ-ONLY aliases in perl
-   (writing `$_` dies), so no write-through needed; keep last/next/redo +
-   labels + continue via the same loop-macro protocol.  W15 perf-menu item.
+1. **Counting-loop lowering for `for [my $v] (A..B)` — SHIPPED (s286).**
+   Sole-range foreach lists lower to `p-foreach-range` / `-raw`:
+   - `Pl::VarAnnotator::foreach_range_split` = the ONE definition of "the
+     list is one range" (top-level token scan; rejects comma lists, `? :`,
+     assignments, and any bare Word — `reverse 1..3` is a list op that
+     swallows the range; only `word(...)` calls and `->method` words pass).
+   - Endpoints are lowered separately and evaluated ONCE at runtime;
+     `%p-range-classify` (extracted from `p-..`, shared) decides
+     numeric-vs-magical-string at RUNTIME — numeric counting-loops with no
+     vector and no 100M cap, string ranges fall back to iterating the
+     materialized vector inside the same skeleton (body appears once).
+   - **RAW loop var** (`p-foreach-range-raw`, no per-iteration box) when the
+     annotator proves the `my` var unboxable.  Enabler: the annotator's
+     blanket `foreach-alias` veto is refined — a sole-range list has nothing
+     to alias, so `for my $v (A..B)` now counts as the region's DECLARATION
+     of the name instead of vetoing; captures/`\$v`/`local`/eval still veto
+     via the normal body walk.  `$_` and plain (global) loop vars always
+     stay boxed (s///-on-$_ writes through the box; globals are dynamically
+     scoped).
+   - Postfix `EXPR for A..B` is a different lowering site — still the old
+     path (future extension).
+   **Measured (@2M/@5M, best-of-5, startup subtracted): `for my $i (1..5M)`
+   0.021s vs perl 0.058s = 2.8× FASTER (was 0.50s = 7.8× slower — a 24×
+   swing); range-2M 0.008s vs 0.018s.  The `for (1..N) { $s += $_ }` shape
+   remains ~3.6× (boxed `$_` is mandatory; `+=` boxing is item 2/3).**
 2. **Annotator: treat `$s += NUMERIC` / `$s -= …` like `$s = $s + …`** for
    the raw-slot verdict (tax 3).
 3. **`raw-numeric` / `raw-string` verdicts** — use-proven eager coercion for

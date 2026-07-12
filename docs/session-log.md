@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 286b (2026-07-12, Fable 5) — counting-loop range foreach SHIPPED: `for my $i (1..5M)` now 2.8× FASTER than perl (was 7.8× slower).
+
+- **`p-foreach-range` / `p-foreach-range-raw`** (cl/pcl-runtime.lisp, gen
+  v2-28): sole-range foreach lists counting-loop — endpoints evaluated ONCE,
+  numeric ranges allocate NO vector (and lose the 100M cap); the
+  numeric-vs-magical-string decision is **`%p-range-classify`**, extracted
+  from `p-..` (one definition, p-.. now consumes it); string ranges fall back
+  to iterating the materialized vector inside the SAME skeleton (body appears
+  once — the per-iteration value source branches).  Same :label/:continue/
+  next/redo protocol and lexical structure as p-foreach.
+- **Parser2**: `_lower_compound` foreach detects the sole-range list at the
+  AST level via **`Pl::VarAnnotator::foreach_range_split`** (top-level token
+  scan; rejects comma lists, ternaries, assignments, and any bare Word —
+  `reverse 1..3` is a list op that SWALLOWS the range, caught during bring-up;
+  only `word(...)` calls and `->method` words pass) and lowers the two
+  endpoints separately (split BEFORE whole-list lowering — PExpr cleanup
+  mutates shared tokens; eval-guarded so an unlowerable endpoint falls back).
+  Postfix `EXPR for A..B` = different site, old path, future extension.
+- **RAW loop var** when the annotator proves it: the blanket `foreach-alias`
+  veto in VarAnnotator is refined — `for my $v (A..B)` has nothing to alias
+  (range elements are fresh; perl-side read-only), so it now counts as the
+  region's DECLARATION of the name instead of vetoing; capture/`\$v`/local/
+  eval vetoes still apply from the body walk.  `$_` (s/// writes through the
+  global box) and plain global loop vars (dynamic scope) always stay boxed.
+- **Measured** (startup-subtracted, best-of-5): `for my $i (1..5M)` 0.021s vs
+  perl 0.058s = **0.36× (2.8× faster)**; @2M 0.008s vs 0.018s.  Before:
+  0.50s = 7.8× slower — a **24× swing**.  `for (1..N){ $s += $_ }` remains
+  ~3.6× (boxed `$_` mandatory; `+=` boxing = the open annotator item).
+- **Verified**: 20-program perl-vs-PCL battery (labels/continue/redo/magic
+  strings/closure-per-iter/endpoint-once/floats/reversed/undef ends) 20/20;
+  full gate **114 files / 4023 tests PASS** (+20 new guards: parser2-01.t
+  emission ×9, transpile-test-02.t runtime ×11; 2 stale p-foreach-shape
+  guards updated); 8-file range-heavy sweep (for/cmpchain/index/closure/each/
+  concat/sort/lop) **byte-identical status vs pristine-HEAD baseline**
+  (2311 pass / 10 fail / 27 skip both sides).
+- Left open on #61: `+=` arith-write raw-slot verdict; postfix-for range.
+
 ## Session 286 (2026-07-12, Fable 5) — s285 verified; exec-speed "regression" RESOLVED: nothing regressed.
 
 - **Verified Opus 4.8's s285 batch** (26640d2): full gate rerun with fresh core

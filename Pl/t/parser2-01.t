@@ -36,8 +36,9 @@ unlike($cl, qr/\(let \(\(\*wantarray\* :void\)\)/, 'no VOID context wrap');
 like($cl, qr/\(p-my-= \$a \$b\)/, 'boxed var copy is plain p-my-= (no wrap, no p-scalar-=)');
 unlike($cl, qr/p-scalar-=/, 'no special-proclaiming p-scalar-= anywhere');
 
-# Foreach list is list-context: a range, not a flip-flop.
-like($cl, qr/\(p-foreach \(\$i \(p-\.\. 2 \$n\)\)/, 'foreach range in list context');
+# Foreach list is list-context: a range, not a flip-flop.  (s286: a sole
+# range now lowers to the counting-loop macro with split endpoints.)
+like($cl, qr/\(p-foreach-range(?:-raw)? \(\$i 2 \$n\)/, 'foreach range in list context');
 
 # Unboxed accumulator: my $sum = 0; $sum = $sum + ...;
 my $cl2 = Pl::Parser2->parse_code(
@@ -419,7 +420,7 @@ like($skip, qr/\(catch \(pcl::%pcl-loop-tag "REDO" 'SKIP\)/, 'REDO catch tag pre
 my $lw = Pl::Parser2->parse_code(q[OUTER: while (1) { last OUTER; }]);
 like($lw, qr/\(p-while 1 :label OUTER/, 'labeled while: :label key');
 my $lf = Pl::Parser2->parse_code(q[LOOP: for my $i (1..3) { next LOOP; }]);
-like($lf, qr/\(p-foreach \(\$i \(p-\.\. 1 3\)\) :label LOOP/, 'labeled foreach: :label key');
+like($lf, qr/\(p-foreach-range(?:-raw)? \(\$i 1 3\) :label LOOP/, 'labeled foreach: :label key');
 
 # Named subs nested in blocks are package-global: hoisted to the defs bucket.
 my $nest = Pl::Parser2->parse_code(
@@ -554,6 +555,37 @@ EOF
   my $br = Pl::Parser2->parse_code(q[sub f { return; }]);
   like($br, qr/\(p-return\)/, 'bare return emits zero-arg (p-return)');
   unlike($br, qr/\(p-return \(p-undef\)\)/, 'bare return is not (p-return (p-undef))');
+}
+
+# s286 — foreach over a SINGLE range lowers to the counting-loop macro
+# (p-foreach-range / -raw): endpoints once, numeric ranges never materialize
+# the p-.. vector.  RAW variant only when the annotator proves the my-var
+# unboxable; $_/captures/refs/eval keep the boxed variant; non-sole-range
+# lists (reverse, comma, bare list-op words) keep p-foreach untouched.
+{
+  my $sum = Pl::Parser2->parse_code(q[my $s=0; for my $i (1..9) { $s += $i }]);
+  like($sum, qr/\(p-foreach-range-raw \(\$i 1 9\)/,
+       'clean my-var range foreach goes raw counting loop');
+  my $us = Pl::Parser2->parse_code(q[for (1..3) { print $_ }]);
+  like($us, qr/\(p-foreach-range \(\$_ 1 3\)/,
+       '$_ range foreach counting-loops but stays boxed');
+  my $cap = Pl::Parser2->parse_code(q[my @s; for my $i (1..3) { push @s, sub { $i } }]);
+  like($cap, qr/\(p-foreach-range \(\$i 1 3\)/,
+       'closure-captured range var stays boxed variant');
+  my $ref = Pl::Parser2->parse_code(q[for my $i (1..3) { my $r = \$i }]);
+  like($ref, qr/\(p-foreach-range \(\$i 1 3\)/,
+       '\\$i in body keeps boxed variant');
+  my $rev = Pl::Parser2->parse_code(q[for my $i (reverse 1..3) { print $i }]);
+  like($rev, qr/\(p-foreach \(/,
+       'reverse 1..3 is NOT split (bare list-op swallows the range)');
+  unlike($rev, qr/p-foreach-range/, 'reverse range never counting-loops');
+  my $two = Pl::Parser2->parse_code(q[for my $i (1..3, 7) { print $i }]);
+  unlike($two, qr/p-foreach-range/, 'comma list with a range keeps p-foreach');
+  my $tern = Pl::Parser2->parse_code(q[my $x=1; for my $i (1..$x ? 3 : 5) { print $i }]);
+  unlike($tern, qr/p-foreach-range/, 'range-in-ternary keeps p-foreach');
+  my $arylast = Pl::Parser2->parse_code(q[my @a=(1,2); my $s=0; for my $i (0..$#a) { $s += $i }]);
+  like($arylast, qr/\(p-foreach-range-raw \(\$i 0 \(p-array-last-index \@a\)\)/,
+       '0..$#a splits with lowered endpoint');
 }
 
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).

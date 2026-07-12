@@ -612,4 +612,66 @@ my $r = SUPER::m2{$a[0]} "x", "y";
 print "multi: $r\n";
 ');
 
+# foreach over a SINGLE range lowers to the counting-loop macro
+# p-foreach-range(-raw) — endpoints evaluated once, numeric ranges never
+# materialize the vector (s286, docs/bench-exec-investigation.md).  These
+# cover the semantic edges of the new path; emission guards in parser2-01.t.
+test_transpile("range foreach: sum + loop control", '
+my $s = 0;
+for my $i (1..10) { next if $i % 2; last if $i > 8; $s += $i }
+print "$s\n";
+');
+test_transpile("range foreach: labeled next/last from inner loop", '
+OUTER: for my $i (1..3) {
+  for my $j (1..3) { next OUTER if $j == 2; print "$i$j " }
+}
+print "\n";
+');
+test_transpile("range foreach: continue block runs per iteration", '
+my $log = "";
+for my $i (1..3) { $log .= "b$i " } continue { $log .= "c$i " }
+print "$log\n";
+');
+test_transpile("range foreach: endpoint side effect evaluated once", '
+my $calls = 0;
+sub f { $calls++; return 3 }
+my $n = 0;
+for my $i (1..f()) { $n++ }
+print "n=$n calls=$calls\n";
+');
+test_transpile("range foreach: closure captures per-iteration value", '
+my @subs;
+for my $i (1..3) { push @subs, sub { $i } }
+print join(",", map { $_->() } @subs), "\n";
+');
+test_transpile("range foreach: magic string range falls back at runtime", '
+my $out = "";
+for my $c ("ay".."bc") { $out .= "$c " }
+print "$out\n";
+');
+test_transpile("range foreach: reversed bounds iterate zero times", '
+my $n = 0;
+for my $i (5..1) { $n++ }
+print "n=$n\n";
+');
+test_transpile("range foreach: float endpoints truncate like perl", '
+my $out = "";
+for my $i (1.7..4.2) { $out .= "$i " }
+print "$out\n";
+');
+test_transpile("range foreach: \$_ form with regex on \$_ stays boxed", '
+my $out = "";
+for (1..3) { $out .= $_ }
+print "$out\n";
+');
+test_transpile("reverse range still iterates descending (not split)", '
+my $out = "";
+for my $i (reverse 1..4) { $out .= "$i " }
+print "$out\n";
+');
+test_transpile("range foreach: \\\$i in body reads through (var stays boxed)", '
+for my $i (1..2) { my $r = \$i; print $$r, " " }
+print "\n";
+');
+
 done_testing();

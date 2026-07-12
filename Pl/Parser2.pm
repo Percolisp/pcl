@@ -3232,10 +3232,41 @@ sub _lower_compound {
     my @alias_hd = Pl::Parser::_foreach_alias_rewrite(\@list_parts);
     die "Parser2 TODO: foreach over a magic-lvalue element (substr/pos/vec)\n"
       if @alias_hd && $alias_hd[0] =~ /^p-(?:substr|pos|vec)$/;
-    my $list_form  = $self->_lower_expr(\@list_parts, $stmt, 1);
-    if (@alias_hd) {
-      $list_form = _alias_box_form($list_form, @alias_hd)
-        // die "Parser2 TODO: foreach over an aliasable lvalue element\n";
+    # A list that is EXACTLY one range (`for $v (A..B)`) lowers to the
+    # counting-loop macro p-foreach-range: endpoints evaluated once, numeric
+    # ranges never materialize the vector (perl's own foreach-range
+    # optimization; docs/bench-exec-investigation.md).  Detection is AST-level
+    # (_foreach_range_split over the top-level PPI tokens) and must run
+    # BEFORE whole-list lowering — PExpr's cleanup mutates the shared tokens
+    # destructively, so each token list is lowered exactly once.  The
+    # numeric-vs-magical-string decision happens at RUNTIME inside the macro
+    # (%p-range-classify), so 'a'..'e' takes the same route and falls back
+    # internally.  Shapes the guard rejects (`reverse 1..9`, `1..3, 7`,
+    # `1..$x ? 3 : 5`) and endpoints the native lowerer can't do (eval-guard)
+    # keep the p-foreach path — a skip is a missed optimization, never a
+    # miscompile.  (Postfix `EXPR for A..B` is a different lowering site,
+    # not covered here.)
+    my ($from_form, $to_form, $range_raw);
+    my @range = @alias_hd ? () : _foreach_range_split(\@list_parts);
+    if (@range) {
+      ($from_form, $to_form) = eval {
+        ($self->_lower_expr($range[0], $stmt), $self->_lower_expr($range[1], $stmt));
+      };
+      # RAW loop var (no per-iteration box) when the segment VarAnnotator
+      # proved the name unboxable — the same name-keyed verdict every other
+      # raw-slot decision consults ($vi is conservative: a capture/\$i/local
+      # of the name ANYWHERE in the segment vetoes it).  Never for $_: the
+      # global must stay a box (s///, chomp write through it).
+      $range_raw = 1
+        if defined $to_form && $var && $vi->{$name} && $vi->{$name}{unboxable};
+    }
+    my $list_form;
+    unless (defined $to_form) {
+      $list_form = $self->_lower_expr(\@list_parts, $stmt, 1);
+      if (@alias_hd) {
+        $list_form = _alias_box_form($list_form, @alias_hd)
+          // die "Parser2 TODO: foreach over an aliasable lvalue element\n";
+      }
     }
     # The loop variable is scoped to the BODY only: register it, lower the
     # body (and a continue block, which sees the loop var), then restore
@@ -3250,12 +3281,22 @@ sub _lower_compound {
     my @cont = $self->_continue_keys(\@k, $vi);
     $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
-    return ['p-foreach', ['list', $name, $list_form],
-            _label_keys($label), @body, @cont];
+    return defined $to_form
+      ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
+         ['list', $name, $from_form, $to_form],
+         _label_keys($label), @body, @cont]
+      : ['p-foreach', ['list', $name, $list_form],
+         _label_keys($label), @body, @cont];
   }
 
   die "Parser2 TODO: compound '$kw'";
 }
+
+# Sole-range foreach-list detection lives in Pl::VarAnnotator
+# (foreach_range_split) — the annotator uses the SAME test to decide that the
+# loop var aliases nothing (→ raw-slot candidate), so there is exactly one
+# definition of "the list is one range".
+sub _foreach_range_split { Pl::VarAnnotator::foreach_range_split(@_) }
 
 # Rewrite a lowered foreach-list element's call head FROM → TO (its box-
 # returning form) so the loop var aliases the live container slot.  The two

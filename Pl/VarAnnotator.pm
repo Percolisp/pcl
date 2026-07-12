@@ -357,6 +357,53 @@ sub _ev {
   $ctx->{ev}{$name}{$event}++;
 }
 
+# Is a foreach LIST exactly one range expression `A..B` / `A...B`?  Takes the
+# TOP-LEVEL PPI token list (structures like parens are single nested elements,
+# so scanning the list IS the depth-0 scan).  Returns ([FROM tokens], [TO
+# tokens]) or the empty list.  Shared oracle: Parser2 uses it to emit
+# p-foreach-range(-raw), THIS module uses it to skip the foreach-alias veto —
+# one definition of "the list is one range".
+#
+# Guard: exactly one top-level `..`/`...` operator, non-empty sides, and NO
+# other top-level operator of lower-or-equal precedence — comma/fat-comma (a
+# multi-element list), `? :` (range binds tighter than ternary: `1..$x ? 3 :
+# 5` is `(1..$x) ? 3 : 5`), and assignments.
+#
+# Top-level WORDS: a bare list operator (`reverse 1..3`, `sort`, `join`) has
+# the LOWEST precedence — it swallows the range (`reverse (1..3)`), so
+# splitting at `..` would miscompile.  Named unaries (`length $s`) bind
+# tighter and would be safe, but telling the two apart needs the param-spec
+# table; a Word is accepted only in the two provably-tight shapes — an
+# explicit-paren call `scalar(@a)` (Word followed by a Structure::List) or a
+# method name (Word preceded by `->`).  Everything else rejects (including
+# and/or/not/xor): a bare-word miss is only a skipped optimization.
+my %RANGE_SPLIT_STOP = map { $_ => 1 }
+  (',', '=>', '?', ':',
+   '=', '+=', '-=', '*=', '/=', '.=', '%=', 'x=', '**=',
+   '//=', '||=', '&&=', '|=', '&=', '^=', '<<=', '>>=');
+sub foreach_range_split {
+  my ($parts) = @_;
+  my @p = @$parts;
+  my @at;
+  for my $i (0 .. $#p) {
+    my $e = $p[$i];
+    if (ref($e) eq 'PPI::Token::Operator') {
+      my $c = $e->content;
+      push @at, $i and next if $c eq '..' || $c eq '...';
+      return () if $RANGE_SPLIT_STOP{$c};
+    }
+    elsif (ref($e) eq 'PPI::Token::Word') {
+      my $tight_call = $i < $#p && ref($p[$i + 1]) eq 'PPI::Structure::List';
+      my $method     = $i > 0
+        && ref($p[$i - 1]) eq 'PPI::Token::Operator'
+        && $p[$i - 1]->content eq '->';
+      return () unless $tight_call || $method;
+    }
+  }
+  return () unless @at == 1 && $at[0] > 0 && $at[0] < $#p;
+  return ([@p[0 .. $at[0] - 1]], [@p[$at[0] + 1 .. $#p]]);
+}
+
 # Region facts for one top-level statement (find() descends everywhere,
 # including nested sub bodies — same coverage as the text region scan).
 sub _tw_region_facts {
@@ -425,9 +472,32 @@ sub _tw_stmt {
     my @k = $s->schildren;
     my ($kw) = grep { $_->isa('PPI::Token::Word') } @k;
     if ($kw && $kw->content =~ /^for(?:each)?$/) {
-      # foreach loop variable (my or plain) is an ALIAS into the list
+      # foreach loop variable (my or plain) is an ALIAS into the list —
+      # EXCEPT `for my $v (A..B)`: a sole-range list has nothing to alias
+      # (range elements are fresh values, perl-side read-only), so count it
+      # as this region's declaration of the name instead of vetoing.  That
+      # lets the counting-loop lowering bind the var RAW
+      # (p-foreach-range-raw); every other veto (capture, \$v, local,
+      # eval-in-region, multi-decl/shadowing) still applies from the body
+      # walk.  Plain (non-my) loop vars are dynamically-scoped globals a
+      # callee can see — always the alias veto, never raw.
       my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
-      _ev($ctx, $var->content, 'foreach-alias') if $var;
+      if ($var) {
+        my $is_my = do {
+          my $prev;
+          for my $e (@k) { last if $e == $var; $prev = $e }
+          $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'my';
+        };
+        my ($list) = grep { $_->isa('PPI::Structure::List') } @k;
+        my @lp = $list
+          ? (map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children)
+          : ();
+        if ($is_my && @lp && foreach_range_split(\@lp)) {
+          $ctx->{decl_count}{$var->content}++;
+        } else {
+          _ev($ctx, $var->content, 'foreach-alias');
+        }
+      }
     }
     for my $k (@k) {
       if ($k->isa('PPI::Structure::Condition')

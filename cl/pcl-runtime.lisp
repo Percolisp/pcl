@@ -122,7 +122,7 @@
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
-   #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach
+   #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach #:p-foreach-range #:p-foreach-range-raw
    #:p-return #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
    #:p-continue #:p-break
    ;; I/O
@@ -4532,80 +4532,79 @@
 ;;; Range Operator
 ;;; ============================================================
 
+(defun %p-range-numeric-string-p (str)
+  "Is STR a numeric-like range operand? (non-zero-padded numeric string;
+   surrounding whitespace allowed: Perl numifies \"-4\\n\" as -4)."
+  (let ((ts (string-trim '(#\Space #\Tab #\Newline #\Return) str)))
+    (and (not (and (> (length ts) 1) (char= (char ts 0) #\0)))
+         (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" ts)
+         t)))
+
+(defun %p-range-classify (start end)
+  "Shared range-operator classifier for p-.. and p-foreach-range — the ONE
+   place the numeric-vs-string(magical) range decision lives.
+   Returns (values :numeric NS NE) with integer (truncated) bounds, or
+   (values :string SV EV) with string bounds (undef → \"\")."
+  (let* ((s (unbox start))
+         (e (unbox end))
+         ;; Treat *p-undef* as undef (nil) for range logic
+         (s-undef (or (null s) (eq s *p-undef*)))
+         (e-undef (or (null e) (eq e *p-undef*)))
+         (s-num-p (or (numberp s) (and (stringp s) (%p-range-numeric-string-p s))))
+         (e-num-p (or (numberp e) (and (stringp e) (%p-range-numeric-string-p e))))
+         ;; String range when at least one side is a genuine non-numeric string,
+         ;; or both are undef (undef..undef). Excludes undef+numeric (→ numeric).
+         (use-string-range
+          (and (or s-undef (stringp s))
+               (or e-undef (stringp e))
+               (or (and (stringp s) (not s-num-p))
+                   (and (stringp e) (not e-num-p))
+                   (and s-undef e-undef)))))
+    (if use-string-range
+        (values :string (if s-undef "" s) (if e-undef "" e))
+        (let ((ns (to-number s))
+              (ne (to-number e)))
+          ;; Inf/NaN endpoints: Perl dies "Range iterator outside integer range"
+          (when (or (and (floatp ns) (or (%pcl-nan-p ns) (sb-ext:float-infinity-p ns)))
+                    (and (floatp ne) (or (%pcl-nan-p ne) (sb-ext:float-infinity-p ne))))
+            (p-die (make-p-box "Range iterator outside integer range") nil))
+          (values :numeric (truncate ns) (truncate ne))))))
+
 (defun p-.. (start end)
   "Perl range operator .. - returns a vector from start to end (inclusive).
    Works with numbers, single characters, and multi-character strings
-   (magical string increment: 'aa'..'zz', 'A'..'ZZ', etc.)"
-  (let ((s (unbox start))
-        (e (unbox end)))
-    (let* (;; Treat *p-undef* as undef (nil) for range logic
-           (s-undef (or (null s) (eq s *p-undef*)))
-           (e-undef (or (null e) (eq e *p-undef*)))
-           ;; Is value a numeric-like thing for range? (number or non-zero-padded numeric string)
-           ;; Allow surrounding whitespace: Perl numifies "-4\n" as -4 (strips whitespace).
-           (s-num-p (or (numberp s)
-                        (and (stringp s)
-                             (let ((ts (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
-                               (and (not (and (> (length ts) 1) (char= (char ts 0) #\0)))
-                                    (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" ts))))))
-           (e-num-p (or (numberp e)
-                        (and (stringp e)
-                             (let ((te (string-trim '(#\Space #\Tab #\Newline #\Return) e)))
-                               (and (not (and (> (length te) 1) (char= (char te 0) #\0)))
-                                    (ppcre:scan "^[+-]?\\d+(\\.\\d+)?([Ee][+-]?\\d+)?$" te))))))
-           ;; Use string range when at least one side is a genuine non-numeric string,
-           ;; or both are undef (undef..undef). Excludes undef+numeric (→ fallback numeric).
-           (use-string-range
-            (and (or s-undef (stringp s))
-                 (or e-undef (stringp e))
-                 (or (and (stringp s) (not s-num-p))    ; s is a non-numeric string
-                     (and (stringp e) (not e-num-p))    ; e is a non-numeric string
-                     (and s-undef e-undef)))))           ; undef..undef
-      (cond
-        ;; Numeric range: both operands are numeric (number or numeric string)
-        ((and s-num-p e-num-p)
-         (let ((ns (to-number s))
-               (ne (to-number e)))
-           ;; Inf/NaN endpoints: Perl dies "Range iterator outside integer range"
-           (when (or (and (floatp ns) (or (%pcl-nan-p ns) (sb-ext:float-infinity-p ns)))
-                     (and (floatp ne) (or (%pcl-nan-p ne) (sb-ext:float-infinity-p ne))))
-             (p-die (make-p-box "Range iterator outside integer range") nil))
-           (setf ns (truncate ns) ne (truncate ne))
-           (when (> (- ne ns) 100000000)
-             (error "Integer overflow in range (~A .. ~A): range too large" ns ne))
-           (if (<= ns ne)
-               (coerce (loop for i from ns to ne collect i) 'vector)
-               (make-array 0))))
-        ;; String range: undef→"", handle magical vs non-magical starts
-        (use-string-range
-         (let* ((sv (if s-undef "" s))
-                (ev (if e-undef "" e)))
-           (if (and (> (length sv) 0) (ppcre:scan "^[a-zA-Z0-9]+$" sv))
-               ;; Magical string range (all alphanumeric start)
-               (if (> (length sv) (length ev))
-                   (make-array 0)
-                   (let ((result (make-array 0 :adjustable t :fill-pointer 0))
-                         (current (copy-seq sv))
-                         (max-len (length ev)))
-                     (loop
-                      (vector-push-extend current result)
-                      (when (string= current ev) (return))
-                      (setf current (magical-string-increment current))
-                      ;; If magical-string-increment returned a number, stop
-                      (unless (stringp current) (return))
-                      (when (> (length current) max-len) (return)))
-                     result))
-               ;; Non-magical or empty start: return (sv) if sv <= ev, else empty
-               (if (string<= sv ev)
-                   (vector sv)
-                   (make-array 0)))))
-        ;; Fallback: treat as numbers (handles undef+number, etc.)
-        (t
-         (let ((ns (truncate (to-number s)))
-               (ne (truncate (to-number e))))
-           (if (<= ns ne)
-               (coerce (loop for i from ns to ne collect i) 'vector)
-               (make-array 0))))))))
+   (magical string increment: 'aa'..'zz', 'A'..'ZZ', etc.)
+   NOTE: `for $v (A..B)` does NOT call this for numeric ranges — the
+   p-foreach-range macro counting-loops without materializing the vector."
+  (multiple-value-bind (kind a b) (%p-range-classify start end)
+    (if (eq kind :string)
+        ;; String range: magical vs non-magical starts
+        (if (and (> (length a) 0) (ppcre:scan "^[a-zA-Z0-9]+$" a))
+            ;; Magical string range (all alphanumeric start)
+            (if (> (length a) (length b))
+                (make-array 0)
+                (let ((result (make-array 0 :adjustable t :fill-pointer 0))
+                      (current (copy-seq a))
+                      (max-len (length b)))
+                  (loop
+                   (vector-push-extend current result)
+                   (when (string= current b) (return))
+                   (setf current (magical-string-increment current))
+                   ;; If magical-string-increment returned a number, stop
+                   (unless (stringp current) (return))
+                   (when (> (length current) max-len) (return)))
+                  result))
+            ;; Non-magical or empty start: return (a) if a <= b, else empty
+            (if (string<= a b)
+                (vector a)
+                (make-array 0)))
+        ;; Numeric range (materialized — only reached outside foreach)
+        (progn
+          (when (> (- b a) 100000000)
+            (error "Integer overflow in range (~A .. ~A): range too large" a b))
+          (if (<= a b)
+              (coerce (loop for i from a to b collect i) 'vector)
+              (make-array 0))))))
 
 (defun p-... (start end)
   "Perl three-dot range operator ... - same as .. in list context."
@@ -6451,6 +6450,62 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
               (if label
                   `(catch ',last-tag ,inner)
                   inner)))))))
+
+(defun %expand-foreach-range (rawp var from to body-and-keys)
+  "Shared expander for p-foreach-range / p-foreach-range-raw.  RAWP selects the
+loop-var binding: NIL binds a fresh box per iteration (like p-foreach's
+ensure-boxed — required for $_ and any var the annotator could not prove
+unboxable), T binds the raw counter value (annotator-approved named vars; the
+string-range fallback vector holds raw strings, also fine in a raw slot)."
+  (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
+    (let ((block-name (or label (gensym "FOREACH")))
+          (last-tag (when label (%pcl-loop-tag "LAST" label)))
+          (kind (gensym))
+          (a (gensym))
+          (b (gensym))
+          (vec (gensym))
+          (i (gensym))
+          (hi (gensym)))
+      `(block ,block-name
+         (multiple-value-bind (,kind ,a ,b)
+             (let ((*wantarray* t))    ; endpoints in the list's context, like p-foreach's list
+               (%p-range-classify ,from ,to))
+           (let* ((,vec (when (eq ,kind :string) (p-.. ,a ,b)))
+                  (,i (if ,vec 0 ,a))
+                  (,hi (if ,vec (1- (length ,vec)) ,b)))
+             ,(let ((inner `(block nil    ; for unlabeled p-last
+                              (tagbody
+                               :next
+                                 (when (> ,i ,hi) (return-from ,block-name ""))
+                                 (let ((,var ,(if rawp
+                                                  `(if ,vec (aref ,vec ,i) ,i)
+                                                  `(if ,vec
+                                                       (ensure-boxed (aref ,vec ,i))
+                                                       (make-p-box ,i)))))
+                                   (incf ,i)
+                                   ,(make-loop-iteration-body label body)
+                                   ,@(when continue-form (list continue-form)))
+                                 (go :next)))))
+                (if label
+                    `(catch ',last-tag ,inner)
+                    inner))))))))
+
+(defmacro p-foreach-range ((var from to) &rest body-and-keys)
+  "Perl foreach over a SINGLE range (`for $v (A..B)`) — perl's own counting-loop
+optimization: numeric ranges iterate a counter and never materialize the range
+vector (p-.. would allocate B-A+1 elements).  Endpoints are evaluated ONCE, up
+front; the numeric-vs-magical-string decision is %p-range-classify (shared with
+p-..), made at RUNTIME, so string ranges ('a'..'e') fall back to iterating the
+materialized vector.  Same :label/:continue protocol and lexical skeleton as
+p-foreach (unlabeled p-next/p-last are a lexical (go :next)/(return nil)); the
+body appears ONCE — only the per-iteration value source branches on the vec."
+  (%expand-foreach-range nil var from to body-and-keys))
+
+(defmacro p-foreach-range-raw ((var from to) &rest body-and-keys)
+  "p-foreach-range with a RAW loop-var binding (no per-iteration box).  Emitted
+only when the VarAnnotator proves the body never captures/aliases the var —
+and never for $_, which must stay a box (s///, chomp write through it)."
+  (%expand-foreach-range t var from to body-and-keys))
 
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
@@ -9291,7 +9346,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-27"
+(defparameter *pcl-cache-generation* "v2-28"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
