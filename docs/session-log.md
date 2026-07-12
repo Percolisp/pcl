@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 285 (2026-07-12, Opus 4.8) — E1-a M-E: element foreach-alias de-gate (chop/aassign/sub) + bare-return fix — census 95, gen v2-27.
+
+Executed step E1-a of `docs/v2-opus48-execution-plan.md`.  **chop.t, aassign.t,
+sub.t now v2-native** (census 92→95, gen v2-27).  substr.t re-gated on a
+**narrower** cause; the M-E item's remaining pieces (loopctl continue, array
+list-self-ref) not yet started.
+
+- **Element foreach-alias lowered natively** (`for ($h{k})` / `for ($a[i])`):
+  `_alias_box_form` (new, Parser2.pm) swaps the lowered element's call head to
+  its box-returning form — `p-gethash`→`p-gethash-box`, `p-aref`→`p-aref-box`
+  — so a write through `$_` persists.  `_lower_expr` returns these element
+  shapes as a native list form `['p-gethash', @args]`, so the swap is a **pure
+  AST-level head change** (box head takes the identical args); a Raw-seam branch
+  replicates v1's first-`(FROM ` rewrite defensively.  The container (%h/@a) is
+  already a box → **no VarAnnotator change needed**.
+- **Gate narrowed to the MAGIC-lvalue shape** (`for (substr/pos/vec(…))`, used
+  ONLY by substr.t): `die "Parser2 TODO: foreach over a magic-lvalue element
+  (substr/pos/vec)"` when `_foreach_alias_rewrite`'s FROM-head is p-substr/pos/
+  vec.  This shape additionally needs the scalar arg force-boxed (VarAnnotator)
+  AND substr.t's huge `run_tests` **exhausts the sweep's default 1GB heap** —
+  its body wraps EVERY void statement in its own `(let ((*wantarray* :void)))`
+  (425 vs v1's 30; v1 binds the regime ONCE and sets `wa_void_active` so
+  `_ctx_wrap` skips per-statement wraps).  That per-statement void-wrap is the
+  **CLAUDE.md #8 "VOID_CTX wrap too broad" issue**, a v2-wide compile-memory
+  scaling problem — deferred to E2's void-wrap hoist (mirror v1's
+  `wa_void_active` + one outer bind + tail-restore; delicate wantarray work).
+- **Real bug fixed (found de-gating sub.t):** bare `return;` emitted
+  `(p-return (p-undef))` — a spurious **1-element list in list context**.  Now
+  emits the zero-arg `(p-return)` (context-sensitive: `()` list, undef scalar/
+  void), matching v1.  sub.t `check_ret(-1/-1,5) list` flip to pass; corpus
+  byte-diff shows method.t + undef.t change ONLY this head (both still fully
+  green).
+- **Why NOT substr.t this session:** besides the heap issue it also loses one
+  test (347 = `is(bar,'XXX')` over a user `sub bar :lvalue`, a not-supported
+  construct v1 passes by luck).  Both point to keeping substr.t on v1.
+- **Verification triple:** corpus byte-diff = 5 files, all explained (3
+  de-gates + method/undef bare-return-only).  `--jobs 1` sweep parity vs HEAD:
+  chop/sub/method/undef **identical**, aassign **+1 pass / -1 fail** (v2 ⊇ v1
+  by passing-description multiset — no regression), substr unchanged.  Full
+  gate **114 files / 4003 tests PASS** (+24 new regression tests:
+  transpile-test-03.t perl-vs-CL alias + bare-return, parser2-01.t shape
+  guards incl. substr-still-gates).  Commit 26640d2.
+- **NEXT E1**: finish M-E singles — loopctl.t `while…continue`, array.t
+  list-form self-ref init (`docs/e1-remainder.md` M-E).  substr.t + the
+  void-wrap hoist is an E2 prerequisite worth doing early (unblocks every large
+  file's de-gate).
+
 ## Session 284 (2026-07-12, Fable) — E1 M-C + M-D: shadow-aware/positional capture promotion, identity path, embedded-my let-hoist — census 92, gen v2-26.
 
 Executed steps 1–2 of `docs/e1-remainder.md`.  **hashassign.t, index.t,

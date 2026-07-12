@@ -1,5 +1,20 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s285, 2026-07-12, Opus 4.8): M-E element foreach-alias SHIPPED —
+> census 95 native / 16 gated, gen v2-27.**  De-gated **chop.t, aassign.t,
+> sub.t** (element `for ($h{k})`/`for ($a[i])` → `p-gethash-box`/`p-aref-box`
+> head-swap; container already boxed → no annotator change).  Also fixed a real
+> bug: bare `return;` was `(p-return (p-undef))` (1-elem list in list ctx) → now
+> zero-arg `(p-return)`.  **substr.t re-gated on the narrower `foreach over a
+> magic-lvalue element (substr/pos/vec)`** — it needs the scalar force-boxed AND
+> its huge run_tests exhausts the sweep's 1GB heap via the per-statement
+> `(let ((*wantarray* :void)))` wrap (425 vs v1's 30 — the CLAUDE.md #8 VOID_CTX
+> over-broad wrap; fix = hoist the regime once + `wa_void_active`, an E2 task
+> that unblocks every large file).  substr.t also loses 1 test on a user
+> `:lvalue` sub (not-supported).  **Remaining M-E**: loopctl.t (`while…continue`),
+> array.t (list-form self-ref init), postfixderef #45.  s285 detail in
+> `docs/session-log.md` §285.
+>
 > **UPDATE (s284, 2026-07-12): M-C + M-D SHIPPED — census 92 native / 19
 > gated, gen v2-26.**  De-gated: **hashassign.t, index.t, undef.t** (exact
 > sweep parity).  The M-C hypotheses below were partly wrong (the CAPREFUSE
@@ -105,7 +120,8 @@ returns the global).  Fixing it in v2 removes silent wrong answers.
 
 | file | exact gate | mechanism |
 |---|---|---|
-| chop.t, substr.t | `foreach over an aliasable lvalue element` | native foreach must bind the loop var as an ALIAS to a live container slot (`for ($h{k})`, `for (substr(…))`); v1 uses `p-aref-box`/`p-gethash-box`/lvalue cells — port that binding into the native `p-foreach` lowering |
+| ~~chop.t~~ **DONE s285** | element alias | de-gated: `p-gethash-box`/`p-aref-box` head-swap |
+| substr.t | `foreach over a magic-lvalue element (substr/pos/vec)` | narrowed gate (s285): needs scalar force-boxed + blocked by the per-statement void-wrap heap issue (E2 void-wrap hoist) + 1 user-`:lvalue` test loss |
 | loopctl.t | `loop with continue block` | `while … { } continue { }` (line 59/84, with `last`/`redo` from inside the continue): foreach already lowers `:continue` (`_continue_keys`); extend to the while/until branch and make loop-control exits from the continue block correct |
 | array.t | `self-referential init: my (undef,@bee) = @bee` | s282b shipped self-ref init for the single-container form; extend to LIST-form decls (v1's "init in let binding" dance for lists) |
 | postfixderef.t | `interpolated postfix deref (postderef_qq)` | task #45 / plan E1.4: implement `postderef_qq` in `StringInterpolation.pm` — fixes BOTH pipelines (v1 has the same gap) |
