@@ -99,6 +99,31 @@ asymmetric case — the classic trap:**
 - any call argument (unknown callee), `\$q`, `local`, tie/glob contact,
   closure capture (the existing box vetoes all still apply first).
 
+## Checked coercion — die loud when the assumption is violated (user, s286)
+
+The write wrapper is the perfect checkpoint: writes are rare, uses are hot, so
+a defensive check at the write costs ~nothing while the uses stay
+unconditionally fast.  The wrappers are therefore **strict**:
+`%pcl-to-number-strict` / `%pcl-to-string-strict` inspect the incoming value
+and **die** (hard, with the variable name and coercion kind in the message)
+instead of silently discarding information when:
+
+1. **an overload-capable blessed ref arrives** — a class with `""`/`0+`
+   overload.  This catches at runtime the one hole in the corpus scan: a
+   string `eval` that loaded `use overload` after transpile time.  Plain and
+   blessed-but-unoverloaded refs pass (stable-ID argument, table above).
+2. **a genuine dualvar arrives** — detectable as: p-box with `sv-ok` ∧
+   `nv-ok` ∧ `nv ≠ (to-number sv)` (ordinary cache-warm boxes have consistent
+   caches; share this predicate with `Scalar::Util::isdual`, one definition).
+   Strictly, the use-proof makes dualvars *safe* to coerce (every licensed
+   use would pick the same side) — but eager coercion irreversibly destroys
+   the other side, so if the use-classifier ever has a bug, the failure would
+   be silent data corruption.  Dying is the honest mode: same philosophy as
+   the pipeline's "gates die hard" invariant.
+
+If the die ever fires on real code, that is the signal to either fix the
+classifier bug it exposed or re-box that variable — never to weaken the check.
+
 ## Known residual divergence: warning fidelity (values all match)
 
 Perl warns "isn't numeric" / "Use of uninitialized value" **per conversion**:
