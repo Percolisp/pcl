@@ -1,6 +1,10 @@
 # XS Shim Design — running CPAN XS/C extensions on PCL (and other hosts)
 
 **Status:** Design complete, ready for implementation.
+**Project structure / GitHub:** the shim is built as a **standalone public
+repo (`perlshim`)** with PCL keeping only the host adapter — repo layout,
+bootstrap steps, CI, and the per-phase two-repo split are in
+`docs/xs-shim-repo-plan.md` (2026-07-12). Read that before Phase 0.
 **Implementer:** Opus 4.8 — this document is written to be executed phase by
 phase; every phase has an acceptance test. Read §2 (how XS really works) and
 §4 (the architecture decision) before writing any code.
