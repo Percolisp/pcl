@@ -53,6 +53,12 @@ my @benches = (
   ['gcdrec',    "$HN sub gcd { my (\$x,\$y)=\@_; return gcd(\$x-\$y,\$y) if \$x>\$y; return gcd(\$x,\$y-\$x) if \$x<\$y; \$x } my \$r=0; \$r += gcd(\$_ % 97 + 1, 89) for 1..\$n; print \"\$r\\n\";", 100_000, 0],
   ['collatz',   "$HN my \$c=0; for my \$i (1..\$n) { my \$m=\$i; while (\$m>1) { \$m = \$m%2 ? 3*\$m+1 : \$m/2; \$c++ } } print \"\$c\\n\";", 300_000, 0],
   ['strcat',    "$HN my \$s=''; for (1..\$n) { \$s .= 'x' } print length(\$s), \"\\n\";", 100_000, 0],
+  # pack/unpack: perl's is C (pp_pack.c); PCL's is the TRANSPILED pure-Perl
+  # oracle (cl/pack-impl.pl → cl/pcl-pack.lisp), which re-parses the template
+  # string per call — expect a big ratio; this row tracks oracle overhead,
+  # not codegen quality.  Small N accordingly.
+  ['pack',      "$HN my \$s=0; for (1..\$n) { \$s += length(pack('N n C a3', \$_, \$_ % 65536, \$_ % 256, 'abc')) + length(pack('V d', \$_, \$_ * 1.5)) } print \"\$s\\n\";", 20_000, 0],
+  ['packunpk',  "$HN my \$s=0; for (1..\$n) { my (\$x,\$y,\$z) = unpack('N n C', pack('N n C', \$_, \$_ % 65536, \$_ % 256)); \$s += \$x + \$z } print \"\$s\\n\";", 20_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
