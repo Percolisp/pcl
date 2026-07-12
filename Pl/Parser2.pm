@@ -2898,9 +2898,13 @@ sub _lower_stmt {
         if $etxt =~ /,/
         && $etxt =~ /[\@%][\w{\$]|\b(?:map|grep|sort|reverse|keys|values|split)\b/;
       # A returned call must see the CALLER's context (no *wantarray* bind).
+      # Bare `return;` must be a ZERO-arg (p-return): in list context it
+      # contributes 0 elements (`()`), scalar/void → undef.  `(p-return
+      # (p-undef))` would wrongly yield a 1-element list in list context
+      # (v1 emits the bare `(p-return)` — sub.t check_ret(-1) list).
       my $form = @$expr
         ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit')]
-        : ['p-return', '(p-undef)'];
+        : ['p-return'];
       return _apply_modifier($form, $mod, $cond, $self, $stmt);
     }
     # goto/next/last/redo: keep the keyword and let the ORIGINAL expression
@@ -3213,13 +3217,26 @@ sub _lower_compound {
     my $name = $var ? $var->content : '$_';
     # The LIST is evaluated in the OUTER scope (the loop var is not yet bound).
     my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;
-    # A single aliasable lvalue list element (`for ($a[i])`, `for ($h{k})`,
-    # `for (substr(...))`) needs the loop var to ALIAS the live container so a
-    # `$_ = …` writes through (v1: p-aref-box / p-gethash-box / *-lvalue-cell).
-    # v2's native list lowering binds the VALUE, dropping the write — gate → v1.
-    die "Parser2 TODO: foreach over an aliasable lvalue element\n"
-      if Pl::Parser::_foreach_alias_rewrite(\@list_parts);
+    # A single aliasable lvalue ELEMENT (`for ($a[i])`, `for ($h{k})`) must bind
+    # the loop var to a box that WRITES THROUGH to the live container.
+    # _foreach_alias_rewrite gives (FROM-HEAD, TO-HEAD), AST-guarded on the
+    # sole-element shape; swap the lowered element's call head to its box-
+    # returning form (v1's mechanism, docs/foreach-aliasing.md).  The container
+    # (%h/@a) is already a box, so no extra VarAnnotator work is needed.
+    #
+    # The MAGIC-lvalue shape (`for (substr($s,..))` / pos / vec) additionally
+    # needs the scalar arg force-boxed and is used only by substr.t — which also
+    # over-taxes the compiler's default heap through the per-statement void-wrap
+    # (a v2-wide issue, CLAUDE.md #8 / s285).  Keep it gated to v1 until both are
+    # addressed (E2 void-wrap hoist).
+    my @alias_hd = Pl::Parser::_foreach_alias_rewrite(\@list_parts);
+    die "Parser2 TODO: foreach over a magic-lvalue element (substr/pos/vec)\n"
+      if @alias_hd && $alias_hd[0] =~ /^p-(?:substr|pos|vec)$/;
     my $list_form  = $self->_lower_expr(\@list_parts, $stmt, 1);
+    if (@alias_hd) {
+      $list_form = _alias_box_form($list_form, @alias_hd)
+        // die "Parser2 TODO: foreach over an aliasable lvalue element\n";
+    }
     # The loop variable is scoped to the BODY only: register it, lower the
     # body (and a continue block, which sees the loop var), then restore
     # _let_bound_vars/_live_lex so it does not leak into sibling statements.
@@ -3238,6 +3255,29 @@ sub _lower_compound {
   }
 
   die "Parser2 TODO: compound '$kw'";
+}
+
+# Rewrite a lowered foreach-list element's call head FROM → TO (its box-
+# returning form) so the loop var aliases the live container slot.  The two
+# representations `_lower_expr` produces for these shapes:
+#   - native list form `['p-gethash', @args]` / `['p-aref', @args]` — pure
+#     AST head-swap (the box head takes the identical args);
+#   - a Raw seam chunk for substr/pos/vec (wrapped in a `(let ((*wantarray* t))
+#     …)`) — swap the FIRST `(FROM ` head token, exactly as v1 does (the outer
+#     call precedes its args in prefix notation, so the first is the right one).
+# Returns undef if the lowering was neither shape (the AST check disagreed with
+# the emission) so the caller can gate cleanly rather than miscompile.
+sub _alias_box_form {
+  my ($form, $from, $to) = @_;
+  if (ref($form) eq 'ARRAY' && @$form && $form->[0] eq $from) {
+    return [$to, @{$form}[1 .. $#$form]];
+  }
+  if (Pl::CLForm::is_raw($form)) {
+    my $text = $$form;
+    return undef unless $text =~ s/\(\Q$from\E /($to /;
+    return Pl::CLForm::raw($text);
+  }
+  return undef;
 }
 
 # `:label NAME` pair for the loop macros' parse-loop-keys (must come first in

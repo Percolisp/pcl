@@ -664,4 +664,42 @@ test_transpile("embedded my decl: weak ref keeps hash identity", '
 }
 ');
 
+# foreach over a single aliasable ELEMENT ($h{k} / $a[i]) binds the loop var as
+# an ALIAS to the live container slot, so a write through $_ persists (v2 native
+# via p-gethash-box / p-aref-box, s285 — was gated to v1).
+test_transpile("foreach-alias: hash element writes through", '
+my %h = (k => 1);
+for ($h{k}) { $_ += 40 }
+print $h{k}, "\n";
+');
+test_transpile("foreach-alias: array element writes through", '
+my @a = (1, 2, 3);
+for ($a[1]) { $_ *= 10 }
+print "@a\n";
+');
+test_transpile("foreach-alias: array element regex subst in place", '
+my @a = ("foo", "bar");
+for ($a[0]) { s/o/0/g }
+print "@a\n";
+');
+
+# Bare `return;` (no value) is context-sensitive: 0 elements in list context,
+# undef in scalar/void (v2 emitted (p-return (p-undef)) → a spurious 1-element
+# list; now emits the zero-arg (p-return) — sub.t check_ret(-1) list, s285).
+test_transpile("bare return: empty list in list context", '
+sub f { return; }
+my @r = f();
+print "count=", scalar(@r), "\n";
+');
+test_transpile("bare return: undef in scalar context", '
+sub f { return; }
+my $s = f();
+print "def=", (defined $s ? "Y" : "N"), "\n";
+');
+test_transpile("bare return from nested for in list context", '
+sub g { for ("x") { return if $_[0] < 0; } return 99; }
+my @r = g(-1);
+print "count=", scalar(@r), "\n";
+');
+
 done_testing();

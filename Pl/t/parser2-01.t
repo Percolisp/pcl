@@ -536,6 +536,26 @@ EOF
   is($run->($w5prog), "123\n", 'W5: captured file lexical runs end-to-end');
 }
 
+# s285 — foreach over a single aliasable ELEMENT ($h{k} / $a[i]) binds the loop
+# var to the box-returning form so a write persists.  Element shapes de-gate
+# natively; the MAGIC-lvalue shape (substr/pos/vec) still gates to v1.
+{
+  my $he = Pl::Parser2->parse_code(q[my %h = (k=>1); for ($h{k}) { $_++ }]);
+  like($he, qr/\(p-foreach \(\$_ \(p-gethash-box %h "k"\)\)/,
+       'hash-element foreach aliases via p-gethash-box');
+  my $ae = Pl::Parser2->parse_code(q[my @a = (1,2,3); for ($a[1]) { $_++ }]);
+  like($ae, qr/\(p-foreach \(\$_ \(p-aref-box \@a 1\)\)/,
+       'array-element foreach aliases via p-aref-box');
+  # substr/pos/vec magic-lvalue aliasing is still gated → dies to v1.
+  my $sub = eval { Pl::Parser2->parse_code(q[my $s="hi"; for (substr($s,0,1)) { $_="J" }]); };
+  ok(!defined $sub, 'magic-lvalue foreach (substr) still gates to v1');
+  # Bare `return;` is the zero-arg (p-return) (context-sensitive empty/undef),
+  # never (p-return (p-undef)) which leaks a 1-element list in list context.
+  my $br = Pl::Parser2->parse_code(q[sub f { return; }]);
+  like($br, qr/\(p-return\)/, 'bare return emits zero-arg (p-return)');
+  unlike($br, qr/\(p-return \(p-undef\)\)/, 'bare return is not (p-return (p-undef))');
+}
+
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).
 # $in_str persists across lines: generated string literals contain newlines.
 sub paren_balance {
