@@ -2,7 +2,7 @@
 
 **Status:** Design complete, ready for implementation.
 **Project structure / GitHub:** the shim is built as a **standalone public
-repo (`perlshim`)** with PCL keeping only the host adapter — repo layout,
+repo (`pclxs`)** with PCL keeping only the host adapter — repo layout,
 bootstrap steps, CI, and the per-phase two-repo split are in
 `docs/xs-shim-repo-plan.md` (2026-07-12). Read that before Phase 0.
 **Implementer:** Opus 4.8 — this document is written to be executed phase by
@@ -25,7 +25,7 @@ so that transpiled Perl code calls the XS subs exactly as it would under perl.
 
 **Portability goal (explicit user requirement):** the C side must be
 **host-language-neutral**. The shim talks to its host exclusively through a
-versioned vtable of ~60 C function pointers (`perlshim_host.h`). PCL/SBCL is
+versioned vtable of ~60 C function pointers (`pclxs_host.h`). PCL/SBCL is
 the first host; a Python, Ruby, or JS host could implement the same vtable and
 run the same recompiled XS modules. No CL type, symbol, or assumption may leak
 below the vtable.
@@ -71,7 +71,7 @@ only shrinks the set of modules that *require* hand-shimming.
   pointer-based API cost years and is still slow. We do not attempt the
   analogous emulation of perl's SV memory layout.
 - **JNI**: the `JNIEnv*` first-argument-is-a-vtable pattern is exactly the
-  shape of our `perlshim_ctx`.
+  shape of our `pclxs_ctx`.
 
 ---
 
@@ -228,7 +228,7 @@ pattern without magic).
 hidden first argument when perl is built threaded: `pTHX_` (in prototypes),
 `aTHX_` (at call sites), `dTHX` (fetch it from TLS). XS source is written
 with these macros everywhere, so **our headers control what they mean**. We
-define `pTHX` to pass our `perlshim_ctx*`. This is the JNI/HPy context
+define `pTHX` to pass our `pclxs_ctx*`. This is the JNI/HPy context
 pattern falling out of perl's own API for free — do not throw it away by
 making everything a global, even though v1 has exactly one context.
 
@@ -287,7 +287,7 @@ memory layout *and* refcount lifecycle — the cpyext trap. **Rejected.**
 
 Instead we recompile from source. CPAN ships source by definition; the build
 tool (§9) makes recompilation one command. Our replacement `perl.h` defines
-every macro as a call into `libperlshim`, and `libperlshim` delegates to the
+every macro as a call into `libpclxs`, and `libpclxs` delegates to the
 host vtable. XS authors' C code compiles unmodified because it was written
 against the *documented macro API*, not the struct layout.
 
@@ -298,13 +298,13 @@ each SV. That breaks under a moving GC and welds the shim to one host.
 Instead:
 
 ```c
-typedef int64_t perlshim_handle;   /* index into a host-side object table */
+typedef int64_t pclxs_handle;   /* index into a host-side object table */
 
 struct sv {                        /* the real definition of SV* in shim */
     uint32_t refcnt;
     uint16_t kind;                 /* SVK_NATIVE_* | SVK_PROXY | SVK_AV | SVK_HV | SVK_CV | SVK_RV */
     uint16_t flags;                /* SVf_IOK|NOK|POK|ROK|UTF8|READONLY|BLESSED... */
-    perlshim_handle h;             /* 0 unless proxy/aggregate/code/rv */
+    pclxs_handle h;             /* 0 unless proxy/aggregate/code/rv */
     int64_t  iv;                   /* native/cached integer view */
     double   nv;                   /* native/cached float view */
     char    *pv; size_t cur, len;  /* native/cached byte buffer (SvPVX/SvCUR/SvLEN) */
@@ -312,7 +312,7 @@ struct sv {                        /* the real definition of SV* in shim */
 ```
 
 The host never sees `struct sv`; the shim never sees a host object. They meet
-only at `perlshim_handle`.
+only at `pclxs_handle`.
 
 ### 4.3 Decision D3 — two kinds of scalar: **native** and **proxy** (the perf-critical idea)
 
@@ -347,13 +347,13 @@ Most SVs inside an XSUB are *temporaries the host never needs to know about*
 │  Recompiled XS module (Foo.so)                                │
 │  — author's C + xsubpp output, compiled against layer below   │
 ├───────────────────────────────────────────────────────────────┤
-│  xs/include/perlshim/{EXTERN.h, perl.h, XSUB.h}               │
+│  xs/include/pclxs/{EXTERN.h, perl.h, XSUB.h}               │
 │  — macro layer: stack macros, ST(), croak, pTHX, typedefs     │
 ├───────────────────────────────────────────────────────────────┤
-│  libperlshim.so  (xs/src/*.c — pure C, no host references)    │
+│  libpclxs.so  (xs/src/*.c — pure C, no host references)    │
 │  — SV structs, arg/mortal/scope stacks, setjmp frames,        │
 │    refcounts, ~200 Perl_* functions                           │
-├───────────────  perlshim_host.h vtable (§5)  ─────────────────┤
+├───────────────  pclxs_host.h vtable (§5)  ─────────────────┤
 │  Host adapter: cl/pcl-xs.lisp (SBCL alien-callables)          │
 │  — handle table, p-box/vector/hash mapping, wantarray, die    │
 ├───────────────────────────────────────────────────────────────┤
@@ -363,94 +363,94 @@ Most SVs inside an XSUB are *temporaries the host never needs to know about*
 
 ---
 
-## 5. The host vtable (`xs/include/perlshim/perlshim_host.h`)
+## 5. The host vtable (`xs/include/pclxs/pclxs_host.h`)
 
 This header is the **portability contract**. It must compile standalone with
 no perl or CL includes. All strings crossing it are `(const char*, size_t,
-int utf8)` byte buffers. All object references are `perlshim_handle`
-(`int64_t`, 0 = null/none). All fallible entries return `perlshim_status`.
+int utf8)` byte buffers. All object references are `pclxs_handle`
+(`int64_t`, 0 = null/none). All fallible entries return `pclxs_status`.
 
 ```c
-#define PERLSHIM_ABI_VERSION 1
+#define PCLXS_ABI_VERSION 1
 
-typedef int64_t perlshim_handle;
-typedef enum { PS_OK = 0, PS_DIED = 1 } perlshim_status;
-typedef enum { PS_VOID, PS_SCALAR, PS_LIST } perlshim_gimme;
+typedef int64_t pclxs_handle;
+typedef enum { PS_OK = 0, PS_DIED = 1 } pclxs_status;
+typedef enum { PS_VOID, PS_SCALAR, PS_LIST } pclxs_gimme;
 typedef enum { PS_REF_NONE, PS_REF_SCALAR, PS_REF_ARRAY, PS_REF_HASH,
-               PS_REF_CODE, PS_REF_GLOB } perlshim_reftype;
+               PS_REF_CODE, PS_REF_GLOB } pclxs_reftype;
 
 /* Host allocates the buffer for outgoing strings via this callback so the
    shim never guesses lifetimes: shim passes a writer, host calls it once. */
-typedef void (*perlshim_str_sink)(void *ud, const char *bytes, size_t len, int utf8);
+typedef void (*pclxs_str_sink)(void *ud, const char *bytes, size_t len, int utf8);
 
-typedef struct perlshim_host_vtable {
-    uint32_t abi_version;               /* must equal PERLSHIM_ABI_VERSION */
+typedef struct pclxs_host_vtable {
+    uint32_t abi_version;               /* must equal PCLXS_ABI_VERSION */
 
     /* -- handle lifecycle ------------------------------------------------ */
-    void (*release)(perlshim_handle h);        /* drop host strong ref      */
-    perlshim_handle (*dup)(perlshim_handle h); /* second strong ref, same obj */
+    void (*release)(pclxs_handle h);        /* drop host strong ref      */
+    pclxs_handle (*dup)(pclxs_handle h); /* second strong ref, same obj */
 
     /* -- scalar construction (host returns new strong handle) ------------ */
-    perlshim_handle (*new_undef)(void);
-    perlshim_handle (*new_iv)(int64_t v);
-    perlshim_handle (*new_nv)(double v);
-    perlshim_handle (*new_pvn)(const char *bytes, size_t len, int utf8);
+    pclxs_handle (*new_undef)(void);
+    pclxs_handle (*new_iv)(int64_t v);
+    pclxs_handle (*new_nv)(double v);
+    pclxs_handle (*new_pvn)(const char *bytes, size_t len, int utf8);
 
     /* -- scalar reads (host applies ir-spec §3 coercions) ---------------- */
-    int64_t (*get_iv)(perlshim_handle h);
-    double  (*get_nv)(perlshim_handle h);
-    void    (*get_pvn)(perlshim_handle h, perlshim_str_sink sink, void *ud);
-    int     (*get_bool)(perlshim_handle h);    /* p-true-p                  */
-    int     (*is_defined)(perlshim_handle h);
-    int     (*looks_like_number)(perlshim_handle h);
+    int64_t (*get_iv)(pclxs_handle h);
+    double  (*get_nv)(pclxs_handle h);
+    void    (*get_pvn)(pclxs_handle h, pclxs_str_sink sink, void *ud);
+    int     (*get_bool)(pclxs_handle h);    /* p-true-p                  */
+    int     (*is_defined)(pclxs_handle h);
+    int     (*looks_like_number)(pclxs_handle h);
 
     /* -- scalar writes ---------------------------------------------------- */
-    void (*set_iv)(perlshim_handle h, int64_t v);
-    void (*set_nv)(perlshim_handle h, double v);
-    void (*set_pvn)(perlshim_handle h, const char *bytes, size_t len, int utf8);
-    void (*set_undef)(perlshim_handle h);
-    void (*set_sv)(perlshim_handle dst, perlshim_handle src);  /* sv_setsv  */
+    void (*set_iv)(pclxs_handle h, int64_t v);
+    void (*set_nv)(pclxs_handle h, double v);
+    void (*set_pvn)(pclxs_handle h, const char *bytes, size_t len, int utf8);
+    void (*set_undef)(pclxs_handle h);
+    void (*set_sv)(pclxs_handle dst, pclxs_handle src);  /* sv_setsv  */
 
     /* -- references / blessing -------------------------------------------- */
-    perlshim_handle (*new_ref)(perlshim_handle target);       /* \X         */
-    perlshim_reftype (*ref_type)(perlshim_handle h);          /* NONE if not a ref */
-    perlshim_handle (*ref_target)(perlshim_handle h);         /* deref one level  */
-    void (*bless)(perlshim_handle ref, const char *cls, size_t len);
-    int  (*blessed_class)(perlshim_handle h, perlshim_str_sink sink, void *ud);
-    int  (*isa)(perlshim_handle h, const char *cls, size_t len); /* sv_derived_from */
+    pclxs_handle (*new_ref)(pclxs_handle target);       /* \X         */
+    pclxs_reftype (*ref_type)(pclxs_handle h);          /* NONE if not a ref */
+    pclxs_handle (*ref_target)(pclxs_handle h);         /* deref one level  */
+    void (*bless)(pclxs_handle ref, const char *cls, size_t len);
+    int  (*blessed_class)(pclxs_handle h, pclxs_str_sink sink, void *ud);
+    int  (*isa)(pclxs_handle h, const char *cls, size_t len); /* sv_derived_from */
 
     /* -- arrays ------------------------------------------------------------ */
-    perlshim_handle (*new_av)(void);
-    int64_t (*av_len)(perlshim_handle av);                    /* count, not top index */
-    perlshim_handle (*av_fetch)(perlshim_handle av, int64_t i, int lval);
-    void (*av_store)(perlshim_handle av, int64_t i, perlshim_handle v); /* consumes v? NO — host dups (§5.1) */
-    void (*av_push)(perlshim_handle av, perlshim_handle v);
-    perlshim_handle (*av_pop)(perlshim_handle av);
-    perlshim_handle (*av_shift)(perlshim_handle av);
-    void (*av_unshift_n)(perlshim_handle av, int64_t n);      /* prepend n undefs */
-    void (*av_clear)(perlshim_handle av);
+    pclxs_handle (*new_av)(void);
+    int64_t (*av_len)(pclxs_handle av);                    /* count, not top index */
+    pclxs_handle (*av_fetch)(pclxs_handle av, int64_t i, int lval);
+    void (*av_store)(pclxs_handle av, int64_t i, pclxs_handle v); /* consumes v? NO — host dups (§5.1) */
+    void (*av_push)(pclxs_handle av, pclxs_handle v);
+    pclxs_handle (*av_pop)(pclxs_handle av);
+    pclxs_handle (*av_shift)(pclxs_handle av);
+    void (*av_unshift_n)(pclxs_handle av, int64_t n);      /* prepend n undefs */
+    void (*av_clear)(pclxs_handle av);
 
     /* -- hashes ------------------------------------------------------------ */
-    perlshim_handle (*new_hv)(void);
-    perlshim_handle (*hv_fetch)(perlshim_handle hv, const char *k, size_t kl,
+    pclxs_handle (*new_hv)(void);
+    pclxs_handle (*hv_fetch)(pclxs_handle hv, const char *k, size_t kl,
                                 int utf8, int lval);
-    void (*hv_store)(perlshim_handle hv, const char *k, size_t kl, int utf8,
-                     perlshim_handle v);
-    int  (*hv_exists)(perlshim_handle hv, const char *k, size_t kl, int utf8);
-    perlshim_handle (*hv_delete)(perlshim_handle hv, const char *k, size_t kl, int utf8);
-    void (*hv_clear)(perlshim_handle hv);
-    int64_t (*hv_count)(perlshim_handle hv);
-    perlshim_handle (*hv_iter_new)(perlshim_handle hv);       /* snapshot iterator */
-    int (*hv_iter_next)(perlshim_handle it, perlshim_str_sink keysink, void *kud,
-                        perlshim_handle *val_out);            /* 0 = exhausted */
+    void (*hv_store)(pclxs_handle hv, const char *k, size_t kl, int utf8,
+                     pclxs_handle v);
+    int  (*hv_exists)(pclxs_handle hv, const char *k, size_t kl, int utf8);
+    pclxs_handle (*hv_delete)(pclxs_handle hv, const char *k, size_t kl, int utf8);
+    void (*hv_clear)(pclxs_handle hv);
+    int64_t (*hv_count)(pclxs_handle hv);
+    pclxs_handle (*hv_iter_new)(pclxs_handle hv);       /* snapshot iterator */
+    int (*hv_iter_next)(pclxs_handle it, pclxs_str_sink keysink, void *kud,
+                        pclxs_handle *val_out);            /* 0 = exhausted */
 
     /* -- symbol table / globals -------------------------------------------- */
     /* sigil: '$' '@' '%' '&'; create != 0 => autovivify (GV_ADD).           */
-    perlshim_handle (*get_global)(char sigil, const char *name, size_t len, int create);
+    pclxs_handle (*get_global)(char sigil, const char *name, size_t len, int create);
 
     /* -- sub registration & calls ------------------------------------------ */
     /* Host defines a Perl-visible sub NAME that, when called, re-enters the
-       shim via perlshim_invoke_xsub (§6.5) with this fnptr.                 */
+       shim via pclxs_invoke_xsub (§6.5) with this fnptr.                 */
     void (*define_xsub)(const char *name, size_t len, void *xsub_fnptr,
                         const char *filename);
     /* call_pv/call_sv/call_method + eval_pv unified.  code: a CODE-ref
@@ -460,36 +460,36 @@ typedef struct perlshim_host_vtable {
        PS_DIED without unwinding the shim.  If !trap_errors and the sub dies,
        host must ALSO return PS_DIED (never unwind through C frames);
        the shim then croak-longjmps from its side (§6.6).                    */
-    perlshim_status (*call)(perlshim_handle code,
+    pclxs_status (*call)(pclxs_handle code,
                             const char *name, size_t namelen,
                             int is_method,
-                            const perlshim_handle *args, size_t nargs,
-                            perlshim_gimme gimme, int trap_errors,
-                            void (*push_result)(void *ud, perlshim_handle h),
+                            const pclxs_handle *args, size_t nargs,
+                            pclxs_gimme gimme, int trap_errors,
+                            void (*push_result)(void *ud, pclxs_handle h),
                             void *ud);
-    perlshim_status (*eval_string)(const char *code, size_t len,
-                            perlshim_gimme gimme,
-                            void (*push_result)(void *ud, perlshim_handle h),
+    pclxs_status (*eval_string)(const char *code, size_t len,
+                            pclxs_gimme gimme,
+                            void (*push_result)(void *ud, pclxs_handle h),
                             void *ud);
 
     /* -- errors / warnings --------------------------------------------------- */
     void (*set_errsv)(const char *bytes, size_t len, int utf8); /* $@ = msg  */
-    void (*set_errsv_h)(perlshim_handle h);                     /* $@ = obj  */
-    perlshim_handle (*get_errsv)(void);
+    void (*set_errsv_h)(pclxs_handle h);                     /* $@ = obj  */
+    pclxs_handle (*get_errsv)(void);
     void (*warn)(const char *bytes, size_t len, int utf8);      /* honors $SIG{__WARN__} */
-} perlshim_host_vtable;
+} pclxs_host_vtable;
 
 /* The context every pTHX_ threads around.  v1: one global instance. */
-typedef struct perlshim_ctx perlshim_ctx;   /* opaque; holds vtable + stacks */
+typedef struct pclxs_ctx pclxs_ctx;   /* opaque; holds vtable + stacks */
 
-/* Host entry points exported by libperlshim.so: */
-perlshim_ctx *perlshim_init(const perlshim_host_vtable *vt);   /* checks ABI */
-perlshim_status perlshim_boot(perlshim_ctx *, const char *so_path,
+/* Host entry points exported by libpclxs.so: */
+pclxs_ctx *pclxs_init(const pclxs_host_vtable *vt);   /* checks ABI */
+pclxs_status pclxs_boot(pclxs_ctx *, const char *so_path,
                               const char *boot_symbol);         /* dlopen+boot */
-perlshim_status perlshim_invoke_xsub(perlshim_ctx *, void *xsub_fnptr,
-                              const perlshim_handle *args, size_t nargs,
-                              perlshim_gimme gimme,
-                              void (*push_result)(void *ud, perlshim_handle h),
+pclxs_status pclxs_invoke_xsub(pclxs_ctx *, void *xsub_fnptr,
+                              const pclxs_handle *args, size_t nargs,
+                              pclxs_gimme gimme,
+                              void (*push_result)(void *ud, pclxs_handle h),
                               void *ud);                        /* §6.5 */
 ```
 
@@ -513,9 +513,9 @@ perlshim_status perlshim_invoke_xsub(perlshim_ctx *, void *xsub_fnptr,
    callback that can observe a Perl-level `die` returns `PS_DIED` instead
    (only `call` / `eval_string` can). Symmetrically the shim never longjmps
    through a host frame — `croak` unwinds only to the shim's own `setjmp`
-   at the innermost `perlshim_invoke_xsub` / `perlshim_boot` (§6.6).
+   at the innermost `pclxs_invoke_xsub` / `pclxs_boot` (§6.6).
 5. All byte buffers passed into callbacks are valid only for the duration of
-   the call (host copies); buffers passed out use `perlshim_str_sink` so the
+   the call (host copies); buffers passed out use `pclxs_str_sink` so the
    host controls allocation on its side and the shim copies into SV buffers
    it owns.
 
@@ -534,7 +534,7 @@ over a table of nasty inputs ("0 but true", "1e3", " 12", "0x10", "inf",
 
 ---
 
-## 6. libperlshim internals
+## 6. libpclxs internals
 
 Source layout: `xs/src/sv.c` (SV lifecycle, coercions bridge),
 `xs/src/stack.c` (arg/mark/tmps/save stacks), `xs/src/av_hv.c`,
@@ -619,7 +619,7 @@ to satisfy all of them forever is to *be* the same design.
 
 ### 6.4 Context (`GIMME_V`)
 
-`perlshim_invoke_xsub` receives `gimme` from the host (PCL: from
+`pclxs_invoke_xsub` receives `gimme` from the host (PCL: from
 `*wantarray*` at the call site — t/nil/:void → `PS_LIST/PS_SCALAR/PS_VOID`)
 and stores it in the ctx frame; `GIMME_V` reads it. `call/eval_string` pass
 the XS caller's requested gimme back up to the host, which binds
@@ -632,9 +632,9 @@ host (pl-sub trampoline for Foo::bar):
   1. flatten PCL args (ir-spec §5.2), one handle per scalar
      (aggregates were already flattened by Perl call semantics)
   2. gimme := *wantarray* mapping
-  3. rc := perlshim_invoke_xsub(ctx, fnptr, argv, n, gimme, collect, ud)
+  3. rc := pclxs_invoke_xsub(ctx, fnptr, argv, n, gimme, collect, ud)
 
-shim perlshim_invoke_xsub:
+shim pclxs_invoke_xsub:
   4. ENTER; SAVETMPS
   5. PUSHMARK; for each handle: push proxy-SV(dup(h)) as mortal
   6. frame.jmp := setjmp(...)          ── croak target
@@ -688,7 +688,7 @@ case-by-case decision.
 ## 7. The SBCL host adapter (`cl/pcl-xs.lisp`)
 
 New extension, loaded per `docs/extensions.md` (eager line at the bottom of
-`pcl-runtime.lisp` **only when** `libperlshim.so` is present; plus a
+`pcl-runtime.lisp` **only when** `libpclxs.so` is present; plus a
 self-loading stub in `XSLoader::load`).
 
 ### 7.1 Handle table
@@ -711,7 +711,7 @@ functions (code), iterator closures.
 
 One `sb-alien:define-alien-callable` per vtable entry (~55). Build the vtable
 struct with `sb-alien` struct support, populate with
-`alien-callable-function`, call `perlshim_init`. Each callable body is a thin
+`alien-callable-function`, call `pclxs_init`. Each callable body is a thin
 adapter onto existing runtime functions — **no new semantics in this file**:
 `get_iv` = `(truncate (to-number (unbox obj)))` (with the IV-range clamp perl
 applies), `get_bool` = `p-true-p`, `bless` = set `p-box-class`, `isa` =
@@ -744,7 +744,7 @@ convention). Also mark it `:defined` in `*p-declared-subs*`.
 
 `xs-invoke`: allocate ids for each flattened arg (scalars boxed if raw),
 stack-allocate the `int64` argv with `sb-alien`, map `*wantarray*` → gimme,
-call `perlshim_invoke_xsub`, collect result handles via the `push_result`
+call `pclxs_invoke_xsub`, collect result handles via the `push_result`
 callable into a list, convert per gimme (list → fresh adjustable vector of
 boxes; scalar → last/only value's box contents), release the transient arg
 ids, and `p-die` on `PS_DIED`.
@@ -758,18 +758,18 @@ Replace the body of `XSLoader::pl-load` (keep the die as fallback):
    PCL's module path (same roots as `lib/` resolution in
    `docs/shipped-modules.md`), **plus** a version/ABI tag in the filename or
    a sidecar file — refuse to load on ABI mismatch.
-2. Found → ensure `pcl-xs` extension + `libperlshim.so` are initialized,
-   `perlshim_boot(ctx, path, "boot_Foo__Bar")`, return 1.
+2. Found → ensure `pcl-xs` extension + `libpclxs.so` are initialized,
+   `pclxs_boot(ctx, path, "boot_Foo__Bar")`, return 1.
 3. Not found → existing die (pure-Perl fallback keeps working).
 4. Remove the module from `*p-xs-only-modules*` handling only when a shim
    build exists — the pure-perl skip list logic stays for everything else.
 
-`dlopen` note: load `libperlshim.so` with `sb-alien:load-shared-object`
-first; the module `.so` is dlopened *by the shim* (`perlshim_boot`) with
-`RTLD_NOW | RTLD_LOCAL` — module symbols resolve against libperlshim because
-the module links `-lperlshim` at build time with a DT_NEEDED entry, not via
+`dlopen` note: load `libpclxs.so` with `sb-alien:load-shared-object`
+first; the module `.so` is dlopened *by the shim* (`pclxs_boot`) with
+`RTLD_NOW | RTLD_LOCAL` — module symbols resolve against libpclxs because
+the module links `-lpclxs` at build time with a DT_NEEDED entry, not via
 global namespace pollution. Symbols in our headers are prefixed
-(`perlshim_sv_iv` etc.) with `#define SvIV(sv) perlshim_sv_iv(aTHX_ sv)` so a
+(`pclxs_sv_iv` etc.) with `#define SvIV(sv) pclxs_sv_iv(aTHX_ sv)` so a
 process that somehow also embeds real perl cannot collide.
 
 ---
@@ -833,7 +833,7 @@ pcl-xs-build [--perl /usr/bin/perl] path/to/Unpacked-Dist-1.23/
 **Local build only — no prebuilt binaries (decision, 2026-07-07).** PCL
 must run across Linux and BSD variants (and eventually macOS); shipping
 per-platform `.so`s is a distribution and trust burden we refuse. Both
-`libperlshim.so` and every module `.so` are compiled **on the target
+`libpclxs.so` and every module `.so` are compiled **on the target
 machine**. Portability rules:
 
 - **Steal the toolchain knowledge from the system perl's `%Config`**: use
@@ -847,12 +847,12 @@ machine**. Portability rules:
 - **Only POSIX `dlopen`/`dlsym` in the shim's loader** (all ELF platforms;
   macOS works too, revisit `.dylib`/`dlext` naming when it matters).
 - **Platform-key the artifacts**: the ABI tag (§7.4) includes
-  `PERLSHIM_ABI_VERSION` **and** `$Config{archname}`-style OS/arch, so a
+  `PCLXS_ABI_VERSION` **and** `$Config{archname}`-style OS/arch, so a
   home directory or repo shared across machines (NFS, dotfile sync) never
   loads a foreign-platform or stale-ABI object; on mismatch the loader
   falls through to the pure-Perl path and reports why.
-- `libperlshim` itself is a bootstrap `make`-style step of the PCL install
-  (a `tools/build-perlshim` wrapper using the same `%Config`-derived
+- `libpclxs` itself is a bootstrap `make`-style step of the PCL install
+  (a `tools/build-pclxs` wrapper using the same `%Config`-derived
   flags); `pcl-xs-build` refuses to run until it exists.
 
 Steps per dist:
@@ -865,15 +865,15 @@ Steps per dist:
 2. For each `.xs`: `perl -MExtUtils::ParseXS -e '...'` (i.e. run xsubpp under
    the **system perl**) with the standard typemap + dist typemaps → `.c`.
 3. Compile all `.c` with `$Config{cc} $Config{cccdlflags} -I
-   xs/include/perlshim`, **no perl CORE includes anywhere**, link with
-   `$Config{lddlflags} -lperlshim` →
+   xs/include/pclxs`, **no perl CORE includes anywhere**, link with
+   `$Config{lddlflags} -lpclxs` →
    `blib-pcl/auto/Foo/Bar/Bar.pcl.so` (plus the platform+ABI tag from §7.4).
 4. Transpile the dist's `.pm` files with `pl2cl` as usual (they're ordinary
    Perl; their `XSLoader::load` now finds the `.so`).
 5. Emit a report: unresolved perlapi symbols (census input, §10.1), Tier X
    verdicts, warnings for `Makefile.PL` features we ignored.
 
-Cache/invalidations: a shim `.so` is keyed by `PERLSHIM_ABI_VERSION`; the
+Cache/invalidations: a shim `.so` is keyed by `PCLXS_ABI_VERSION`; the
 transpiled `.pm` cache keys by `*pcl-cache-generation*` as today (memory
 note: bump it when the loader changes emission — this feature shouldn't, but
 `XSLoader::load`'s new body lives in the runtime, so a runtime edit → the
@@ -894,7 +894,7 @@ nm -u --defined-only=false auto/Foo/Foo.so | perl -ne 'print "$1\n" if /\b(Perl_
 
 Union across the ladder = the *demanded* API, typically 80–150 symbols —
 implement exactly these plus the macro layer, stub the rest of perl.h behind
-`#error "perlshim: unimplemented API Perl_xxx — see docs/xs-shim-design.md §10"`
+`#error "pclxs: unimplemented API Perl_xxx — see docs/xs-shim-design.md §10"`
 so gaps fail at *compile* time with a searchable message, never at runtime.
 Keep the census script as `tools/xs-api-census.pl` and its output per module
 in `xs/census/` — it is the living prioritization list.
@@ -933,12 +933,12 @@ in `xs/census/` — it is the living prioritization list.
 
 **Phase 0 — census & skeleton.** Write `tools/xs-api-census.pl`; run it over
 the ladder modules built against real perl; check results into `xs/census/`.
-Create `xs/include/perlshim/*.h` with types, vtable, macro layer stubbed.
+Create `xs/include/pclxs/*.h` with types, vtable, macro layer stubbed.
 *Acceptance:* census files exist; a trivial `.c` including our `perl.h`
 compiles.
 
 **Phase 1 — hand-written XSUB end to end.** Implement native SVs, the
-stacks, `perlshim_init/invoke_xsub`, croak/setjmp, and the ~20 scalar vtable
+stacks, `pclxs_init/invoke_xsub`, croak/setjmp, and the ~20 scalar vtable
 entries; `cl/pcl-xs.lisp` with handle table + callables; hand-write
 `xs/t/Arith/Arith.c` (no xsubpp yet: add(IV,IV), concat(PV,PV),
 list-return under G_LIST, a croak path, a call_pv callback path).
