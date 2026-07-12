@@ -4,6 +4,34 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 286 (2026-07-12, Fable 5) — s285 verified; exec-speed "regression" RESOLVED: nothing regressed.
+
+- **Verified Opus 4.8's s285 batch** (26640d2): full gate rerun with fresh core
+  = **114 files / 4003 tests, all PASS** (matches claim); chop/aassign/sub
+  transpile `pipeline=v2`, substr.t still `pipeline=v1` as documented; cache
+  generation bumped v2-26→v2-27; `_alias_box_form` head-swap + zero-arg
+  `(p-return)` diffs reviewed, sound (clean gate-fallback on shape mismatch;
+  guards added in parser2-01.t + transpile-test-03.t).
+- **Exec-speed question ("faster than perl → multiple times slower?!")
+  RESOLVED — no regression, ever.**  Proof triple: (a) loop-shape emission
+  byte-identical s276b(9ca0026)↔HEAD; (b) same generated lisp under an
+  s276b-runtime core vs HEAD core = 0.397s vs 0.400s; (c) canonical
+  literal-bound shapes STILL beat perl today @2M — while 3.5×, cfor 2.4×,
+  nested 2× FASTER; only `for my $i (1..2M)` is 7.6× slower.  The new
+  `tools/bench-exec.pl` numbers reflect three SHAPE taxes, not a regression:
+  (1) `for (1..N)` materializes the range vector (`p-..`) — perl's fastest
+  loop is PCL's slowest, DOMINANT; (2) bench-exec's own `$ENV{N}` method keeps
+  `$n` boxed → generic `(p-< $i $n)` every iter (cfor @2M 0.017s→0.073s,
+  ~4×/iter — this is also R1's old "1.5× intmath", same tax); (3) `+=` keeps
+  the accumulator boxed (annotator raw-slot verdict only fires on
+  `$s = $s + X`), minor.  s285's "p-+ generic dispatch" concern was
+  overstated: raw-slot cfor runs 8.5ns/iter (R1 inline fast path).
+  **Fix menu** (doc §top, task #61): counting-loop lowering
+  `for [my $v] (A..B)` → endpoints-once no-vector loop (perl range elements
+  are read-only, so no write-through needed; kills tax 1 and, for range
+  loops, tax 2); annotator `+=`/`-=` numeric → raw slot; strcat = §W15.8
+  unchanged.  `docs/bench-exec-investigation.md` updated with the resolution.
+
 ## Session 285 (2026-07-12, Opus 4.8) — E1-a M-E: element foreach-alias de-gate (chop/aassign/sub) + bare-return fix — census 95, gen v2-27.
 
 Executed step E1-a of `docs/v2-opus48-execution-plan.md`.  **chop.t, aassign.t,
