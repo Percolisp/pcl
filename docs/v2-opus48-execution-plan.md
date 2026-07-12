@@ -36,13 +36,17 @@ These are the reason the burn-down has produced zero regressions.  Every
 session, every item:
 
 1. **Verification triple** for any emission-affecting change:
-   - **Corpus byte-diff vs HEAD** in a worktree: transpile the perl-tests
-     corpus under both trees, normalize paths, strip the
-     `;;; pcl: pipeline=…` marker line **with perl, not grep** (NUL bytes
-     silence grep), diff.  Every changed file must be explained.
+   - **Corpus byte-diff vs HEAD**: run **`tools/corpus-diff.pl`** (built
+     s287 — handles the worktree, the dual-root normalization, and the
+     perl-not-grep marker strip; exit 1 when files differ).  Acceptance
+     for a de-gate session: ONLY the de-gated files appear, each explained.
+     Do not re-derive this by hand — the hand-rolled version got the
+     normalization wrong twice.
    - **`--jobs 1` sweep parity** (`perl sweep-perl-tests.pl --jobs 1 <files>`)
      of every changed/de-gated file, HEAD vs new.  *A de-gate that loses even
      one test vs the v1 fallback is a regression, not a win* (bop.t, s283).
+     Compare against `.faillog/` / `docs/fail-baseline.tsv`: a de-gated file
+     matching v1's OLD failures exactly (same test numbers) is parity.
    - **Full gate**: `tools/prove-core` (== `prove -j8 Pl/t/`, ~2:30).
 2. **Bump `*pcl-cache-generation*`** (`cl/pcl-runtime.lisp`) on every
    emission-changing commit — stale module caches otherwise reuse old
@@ -118,6 +122,37 @@ Guardrails added from s286–s287 experience:
 Estimate calibration note: all session counts below were calibrated on
 Fable throughput (~2.5 de-gates/session incl. mechanism work).  Treat them
 as effort ratios, not promises; the census is the real tracker.
+
+## 1b. The per-session checklist (mechanical — follow it in order)
+
+Every E1/E2 session runs this loop.  Steps 1–3 cost minutes and prevent
+the two classic wasted sessions (building on a stale survey; "fixing" a
+pre-existing failure).
+
+1. **Re-census**: `perl tools/v2-census.pl` → current native/gated + gate
+   reasons.  Pick the target from `docs/e1-remainder.md` reconciled
+   against this output (the census wins).
+2. **Reproduce the gate**: `PCL_V2_VERBOSE=1 ./pl2cl < perl-tests/X.t`
+   and, for capture/span gates, `PCL_SPAN_DEBUG=1` refusal traces.  If the
+   gate fires somewhere unexpected, prefix-bisect the file to the exact
+   statement; dump the PPI tree of that statement before theorizing.
+3. **Record the baseline**: what does the file do TODAY (sweep counts,
+   `.faillog/` rows, stop-points)?  What does V1 emit for the shape
+   (`PCL_V1=1 ./pl2cl`)?  Copy v1's emitted shape — do not invent one.
+4. **Implement**, gating everything you cannot lower fully correctly
+   (`die "Parser2 TODO: <precise reason>"`).  Minimal probes first
+   (perl vs `./runpl` on scratch files), then the real file.
+5. **Verification triple** (§1 rule 1): `tools/corpus-diff.pl`, sweeps of
+   changed files, `tools/prove-core`.
+6. **Regression guards**: emission shapes → `Pl/t/parser2-01.t`
+   (grep it FIRST for stale "still dies to v1" guards of the gate you
+   removed — flip them); perl-vs-CL behavior → a bundled battery in the
+   smallest `transpile-test-NN.t` (never -01).
+7. **Bump `*pcl-cache-generation*`** if emission changed.
+8. **Commit** (one commit per item, to main), then update:
+   `docs/session-log.md` (new § at top), `docs/e1-remainder.md` (header
+   note + per-file rows), memory STATE line, this doc's state header.
+   New found-but-not-fixed problems become tasks, not TODO comments.
 
 ## 2. Phase worklist
 
