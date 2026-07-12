@@ -397,11 +397,12 @@ like($rl2, qr/\(p-defined \$l\)/, 'while (my $l = <FH>) cond terminates on undef
 my $cont = Pl::Parser2->parse_code(
   q{my $i = 0; while ($i < 3) { print $i; } continue { $i = $i + 1; }});
 like($cont, qr/\(p-while .*:continue \(progn/s, 'while continue block → :continue key');
-# …but a BARE-block continue (LABEL: { … } continue { … }) stays gated → v1
-# (v1 runs it after the tagbody — different shape).
-my $bcont = eval { Pl::Parser2->parse_code(
-  q{L: { print "x"; } continue { print "y"; }}) };
-like($@, qr/continue/, 'bare-block continue block still dies to v1');
+# …and a BARE-block continue (LABEL: { … } continue { … }) lowers natively
+# too since s287 — v1's shape, run after the tagbody (see the s287 block
+# near the end of this file for the placement guards).
+my $bcont = Pl::Parser2->parse_code(
+  q{L: { print "x"; } continue { print "y"; }});
+like($bcont, qr/\(p-print "y"\)/, 'bare-block continue block lowers natively');
 
 # --- A2 (session 271): bare blocks (loop-once) + labels + nested subs ---
 
@@ -586,6 +587,46 @@ EOF
   my $arylast = Pl::Parser2->parse_code(q[my @a=(1,2); my $s=0; for my $i (0..$#a) { $s += $i }]);
   like($arylast, qr/\(p-foreach-range-raw \(\$i 0 \(p-array-last-index \@a\)\)/,
        '0..$#a splits with lowered endpoint');
+}
+
+# s287 — bare-block `{ … } continue { … }` (loopctl.t): labeled keeps the
+# continue INSIDE the compound; the unlabeled form arrives as an ORPHAN
+# sibling statement (PPI split) that may glom the next statement's tokens.
+# Placement per v1: after the tagbody (unlabeled) / after the NEXT catch
+# inside the LAST catch (labeled) — `last` skips it, `next` reaches it,
+# `redo` re-runs the body only.
+{
+  my $ul = Pl::Parser2->parse_code(q[{ print "x"; } continue { print "c"; } print "t";]);
+  like($ul, qr/\(block nil \(tagbody :redo.*:next\)\s*\(progn\s*\(p-print "c"\)\)\)/s,
+       'unlabeled bare-block continue placed after the tagbody');
+  like($ul, qr/\(p-print "t"\)/, 'statement glommed into the orphan continue is lowered');
+  my $lb = Pl::Parser2->parse_code(q[L: { print "x"; } continue { print "c"; }]);
+  like($lb, qr/\(catch \(pcl::%pcl-loop-tag "NEXT" 'L\).*\(progn\s*\(p-print "c"\)\)\)/s,
+       'labeled bare-block continue sits after the NEXT catch, inside LAST');
+}
+
+# s287 — standalone label (a goto target) lowers to (tagbody :label …) over
+# the block remainder; `goto LABEL` reaches the tag as a lexical (go …).
+# Value position and forward gotos keep the whole-file gate.
+{
+  my $g = Pl::Parser2->parse_code(q[my $i; again: my @a=(1); goto again unless $i++;]);
+  like($g, qr/\(tagbody :again/, 'standalone label opens a tagbody');
+  like($g, qr/\(go :again\)/, 'goto LABEL lowers to (go :label)');
+  eval { Pl::Parser2->parse_code(q[goto fwd; print 1; fwd: print 2;]) };
+  like($@, qr/forward goto/, 'forward goto to a standalone label stays gated');
+}
+
+# s287 — list-form self-referential my init + chained declarators (array.t):
+# a self-referenced container binds to a COPY of its outer self in the let
+# binding (outer env), the whole-statement assignment then reads the copy;
+# chained `my … = my … = …` collapses to one let + chained assignment.
+{
+  my $ls = Pl::Parser2->parse_code(q[my @bee=(1,2); { my (undef,@bee) = @bee; }]);
+  like($ls, qr/\(let \(\(\@bee \(p-copy-array \@bee\)\)\)/,
+       'list self-ref container binds to p-copy-array of outer self');
+  my $ch = Pl::Parser2->parse_code(q[my @bee = my @bee = (1,2);]);
+  like($ch, qr/\(p-array-= \@bee \(p-array-= \@bee/,
+       'chained my declarators collapse to chained assignments');
 }
 
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).

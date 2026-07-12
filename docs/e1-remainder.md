@@ -1,5 +1,28 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s287, 2026-07-12, Fable 5): M-E singles SHIPPED — census 97
+> native / 14 gated, gen v2-29.**  De-gated **loopctl.t** (67/67, fully
+> passing) and **my.t** (49/1, exact v1 parity on the pre-existing test-46
+> failure).  Shipped: bare-block `continue { }` (labeled in-compound +
+> PPI's orphan-sibling unlabeled form with glommed-trailing join — the
+> unlabeled form was a SILENT v2 miscompile before: the continue block was
+> dropped with only a PARSE-ERROR comment); **standalone label** lowered to
+> `(tagbody :label <block-remainder>)` (backward `goto LABEL` = lexical
+> `(go :label)`; value-position labels and FORWARD gotos stay gated — this
+> replaces v1's text-level `_wrap_runtime_labels` for the v2 path); list-form
+> self-ref init `my (undef,@bee) = @bee` (per-variable copy-binding dance);
+> chained declarators `my @a = my @a = …`; container-capture de-conflation
+> (`_hard_decl_count`/`_count_name_decls` sigil-aware for container canons —
+> `my $x` beside `my %x` no longer blocks promoting `%x`).
+> **array.t re-gates on `forward goto to a standalone label`**: line 663
+> `map { …; goto aftermap; } @a; aftermap:` — goto out of a LAMBDA needs a
+> dynamic unwind (throw), not lexical `(go)`.  NOTE: **v1 crashes on that
+> shape today** (compile error on the `(go :aftermap)` inside the lambda),
+> and array.t already stops at test 114 at HEAD — so the v1 fallback is
+> byte-identical and nothing regressed; clearing array.t needs the dynamic
+> goto mechanism (new design item, both pipelines), not an M-E single.
+> Remaining M-E singles: chdir.t BEGIN-introspection, postderef #45.
+
 > **UPDATE (s285, 2026-07-12, Opus 4.8): M-E element foreach-alias SHIPPED —
 > census 95 native / 16 gated, gen v2-27.**  De-gated **chop.t, aassign.t,
 > sub.t** (element `for ($h{k})`/`for ($a[i])` → `p-gethash-box`/`p-aref-box`
@@ -97,7 +120,7 @@ inspection, not verified refusal traces).
 | file | exact gate | hypothesis |
 |---|---|---|
 | closure.t | `file lexical 'i' captured by sub foo` | `my $i` at 17 + re-decls inside subs (39, 52, …) inflate the count; NOTE closure.t also contains the known `for my $n (0..4) { sub { $n } }` per-iteration-binding limitation (CLAUDE.md TODO) — de-gating may still leave those tests failing in both pipelines |
-| my.t | `file lexical 'x' captured by sub foo` | file `my $x` + `++my $x->{foo}` inside sub foo3 (line 131) inflates count |
+| ~~my.t~~ **DONE s287** | was `standalone label` after s284 | de-gated 49/1 (v1-parity, pre-existing t46 fail) via the standalone-label tagbody lowering |
 | chdir.t | `file lexical 'Saved_Env' captured by sub clean_env` | `%Saved_Env` container + hash-slice uses `@Saved_Env{@magic_envs}`; sigil-aware rewrite exists, count likely inflated or slice-form refusal |
 | hashassign.t | `file lexical 'names' captured by sub in` | `my (%names, %names_copy)` — a **multi-container list decl**: the multi-decl promotion only handles all-scalar lists; extend to all-container lists |
 
@@ -122,8 +145,8 @@ returns the global).  Fixing it in v2 removes silent wrong answers.
 |---|---|---|
 | ~~chop.t~~ **DONE s285** | element alias | de-gated: `p-gethash-box`/`p-aref-box` head-swap |
 | substr.t | `foreach over a magic-lvalue element (substr/pos/vec)` | narrowed gate (s285): needs scalar force-boxed + blocked by the per-statement void-wrap heap issue (E2 void-wrap hoist) + 1 user-`:lvalue` test loss |
-| loopctl.t | `loop with continue block` | `while … { } continue { }` (line 59/84, with `last`/`redo` from inside the continue): foreach already lowers `:continue` (`_continue_keys`); extend to the while/until branch and make loop-control exits from the continue block correct |
-| array.t | `self-referential init: my (undef,@bee) = @bee` | s282b shipped self-ref init for the single-container form; extend to LIST-form decls (v1's "init in let binding" dance for lists) |
+| ~~loopctl.t~~ **DONE s287** | bare-block continue | de-gated 67/67: the gate was the BARE-block `LABEL: { } continue { }` (while/until continue already worked); labeled in-compound + orphan-sibling join |
+| array.t | ~~self-ref init~~ → `forward goto to a standalone label` (s287) | list self-ref + chained-my + capture de-conflation all shipped s287; residual = `goto` out of a map LAMBDA to a later label — needs a DYNAMIC goto (throw/catch), and v1 CRASHES on it today (compile error); file also stops at t114 at HEAD.  A design item, not a single |
 | postfixderef.t | `interpolated postfix deref (postderef_qq)` | task #45 / plan E1.4: implement `postderef_qq` in `StringInterpolation.pm` — fixes BOTH pipelines (v1 has the same gap) |
 
 ### M-F — Design items / blessed-residue candidates (decide, don't grind)

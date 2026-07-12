@@ -1271,7 +1271,11 @@ sub _blk_extent {
 # _symbol_is_declarator + _ref_shadowed.  Both Statement::Variable decls and
 # expression-embedded ones (`open my $fh`) are recognized.
 sub _hard_decl_count {
-  my ($self, $stmts, $bare) = @_;
+  my ($self, $stmts, $bare, $sig) = @_;
+  # $sig: count declarations of ONE canonical variable (e.g. '%' → only
+  # `my %x`).  Default counts every sigil of the bare name — the conflated
+  # mode the scalar-promotion ambiguity gate relies on.
+  my $sigpat = defined $sig ? quotemeta($sig) : '[\$\@\%]';
   my $hard = 0;
   for my $stmt (@$stmts) {
     next unless ref $stmt && $stmt->isa('PPI::Node');
@@ -1284,7 +1288,7 @@ sub _hard_decl_count {
                 : $nx->isa('PPI::Structure::List')
                   ? (map { $_->content } @{ $nx->find('PPI::Token::Symbol') || [] })
                 : ();
-      next unless grep { /^[\$\@\%]\Q$bare\E$/ } @names;
+      next unless grep { /^$sigpat\Q$bare\E$/ } @names;
       # Classify by enclosure: block/sub-nested → scopeable shadow (skip);
       # Compound-enclosed (head position, no block in between) → hard;
       # else (statement top level of the segment) → hard.
@@ -1576,7 +1580,10 @@ sub _enclosing_block {
 # whole segment).  Used to check a candidate is the SOLE declaration in its own
 # lexical extent — a same-name `my` in a DIFFERENT block is a distinct variable.
 sub _count_name_decls {
-  my ($self, $scope, $bare) = @_;
+  # $sig: count only declarations of that one canonical variable (see
+  # _hard_decl_count — same rule: container canons must not treat a sibling
+  # `my $x` as a shadow of `%x`/`@x`).  Default counts every sigil.
+  my ($self, $scope, $bare, $sig) = @_;
   my @vs;
   if (ref $scope eq 'ARRAY') {
     for my $stmt (@$scope) {
@@ -1591,6 +1598,7 @@ sub _count_name_decls {
     my $kw = ($v->schildren)[0];
     next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
     for my $dn ($self->_declared_names($v)) {
+      next if defined $sig && substr($dn, 0, 1) ne $sig;
       (my $b = $dn) =~ s/^[\$\@\%]//;
       $n++ if $b eq $bare;
     }
@@ -1804,10 +1812,15 @@ sub _promote_captured {
   }
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
-  # Compound head like `foreach my $x`), blocks the rename.  Counting ALL
-  # sigils also refuses the ambiguous case where the one name denotes >1
-  # variable at the same level ($x beside @x).
-  my $hard = $self->_hard_decl_count($estmts, $bare);
+  # Compound head like `foreach my $x`), blocks the rename.  For a SCALAR
+  # canon, count ALL sigils — that also refuses the ambiguous case where the
+  # one name denotes >1 variable at the same level ($x beside @x), where the
+  # interp rewrite for `$x` text cannot be trusted.  A CONTAINER canon counts
+  # only its own sigil: its rewrite shapes (`%x`, `$x{`, `@x{` resp. `@x`,
+  # `$x[`, `$#x`) are syntactically disjoint from a sibling scalar/other-
+  # family variable (token rewrites key on ->symbol), so `my $x` beside
+  # `my %x` does not block promoting %x (array.t bug-70171 block).
+  my $hard = $self->_hard_decl_count($estmts, $bare, $sig eq '$' ? undef : $sig);
   return if $hard != 1 && _caprefuse($canon, "hard-decls=$hard in extent");
   # A scalar promotion refuses when the bare name is ALSO used in container-
   # family form within the extent (@x, %x, $#x) — the interp rewriter's
@@ -1827,7 +1840,8 @@ sub _promote_captured {
     }
     return if $fam && _caprefuse($canon, 'family use (@x/%x/$#x) in extent');
   }
-  my $shadows = $self->_count_name_decls($extent // $stmts, $bare) > 1;
+  my $shadows = $self->_count_name_decls($extent // $stmts, $bare,
+                                         $sig eq '$' ? undef : $sig) > 1;
   if ($shadows) {
     # Interpolated text inside a shadow's scope must keep the original name,
     # and the interp rewriter cannot skip scopes — refuse the combination
@@ -2660,17 +2674,79 @@ sub _lower_block {
       # v1's fuller machinery → fall back the whole file.
       my ($eq_i) = grep { $k[$_]->isa('PPI::Token::Operator') && $k[$_]->content eq '=' } 0 .. $#k;
       my @rhs     = @k[$eq_i + 1 .. $#k];
+      # Chained declarators (`my @bee = my @bee = qw(…)`, `my (@bim) = my(@bee)
+      # = LIST`, array.t): a nested `my` in the RHS declares its names in the
+      # SAME enclosing scope (perl warns "masks earlier declaration" for a
+      # duplicate but keeps one variable).  v1 collapses the chain into ONE
+      # let binding every name fresh — the declarators reduce to chained
+      # assignments in the expression machinery.  Consume the chain head(s),
+      # collect their names, and require the FINAL RHS to be self-ref-free.
+      my @chain_names;
+      {
+        my @r = @rhs;
+        while (@r >= 3
+               && $r[0]->isa('PPI::Token::Word') && $r[0]->content eq 'my') {
+          my @syms = $r[1]->isa('PPI::Token::Symbol')   ? ($r[1])
+                   : $r[1]->isa('PPI::Structure::List') ? (grep { $_->isa('PPI::Token::Symbol') }
+                                                           map { $_->tokens } $r[1])
+                   : ();
+          my @names = grep { /^[\$\@\%]\w+$/ } map { $_->content } @syms;
+          last unless @names == @syms && @names
+            && $r[2]->isa('PPI::Token::Operator') && $r[2]->content eq '=';
+          push @chain_names, @names;
+          @r = @r[3 .. $#r];
+        }
+        if (@chain_names) {
+          my $final_txt = join ' ', map { $_->content } @r;
+          my %seen;
+          my @all = grep { !$seen{$_}++ } (@$vars, @chain_names);
+          die "Parser2 TODO: self-referential init: " . $first->content
+            if $final_txt =~ /(?<![-\w])(?:my|our|local|state)\b/
+            || (grep { $final_txt =~ /\Q$_\E\b/ } @all)
+            || (grep { $self->{_file_lex_renamed}{$_} } @all);
+          $self->_reg_lex(@all);
+          return (['let', ['list', map { ['list', $_, _fresh_container($_)] } @all],
+                   $self->_lower_expr([@k], $first),
+                   $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+        }
+      }
       my $rhs_txt = join ' ', map { $_->content } @rhs;
-      my $self_ref = grep { $rhs_txt =~ /\Q$_\E\b/ } @$vars;
-      if ($self_ref) {
-        my $simple = @$vars == 1
-          && $k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^[\@\%]\w+$/
-          && $rhs_txt !~ /(?<![-\w])(?:my|our|local|state)\b/;
-        die "Parser2 TODO: self-referential init: " . $first->content unless $simple;
-        my $var  = $vars->[0];
-        my $copy = substr($var, 0, 1) eq '@' ? 'p-copy-array' : 'p-copy-hash';
-        $self->_reg_lex($var);
-        return (['let', ['list', ['list', $var, [$copy, $self->_lower_expr(\@rhs, $first, 1)]]],
+      my @self_ref = grep { $rhs_txt =~ /\Q$_\E\b/ } @$vars;
+      if (@self_ref) {
+        # A nested declarator in the RHS (`my @a = my @a = …`) or a var already
+        # promoted to a renamed package cell still needs v1's fuller machinery.
+        die "Parser2 TODO: self-referential init: " . $first->content
+          if $rhs_txt =~ /(?<![-\w])(?:my|our|local|state)\b/
+          || grep { $self->{_file_lex_renamed}{$_} } @$vars;
+        if (@$vars == 1
+            && $k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^[\@\%]\w+$/) {
+          my $var  = $vars->[0];
+          my $copy = substr($var, 0, 1) eq '@' ? 'p-copy-array' : 'p-copy-hash';
+          $self->_reg_lex($var);
+          return (['let', ['list', ['list', $var, [$copy, $self->_lower_expr(\@rhs, $first, 1)]]],
+                   $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+        }
+        # LIST form (`my (undef,@bee) = @bee`, `my ($x,@a) = ($a[0],@a)`): the
+        # same dance per variable — every SELF-REFERENCED name binds to a copy
+        # of its outer self (container copy / fresh box with the outer value;
+        # a let init-form evaluates in the OUTER environment), the rest bind
+        # fresh, and the ordinary whole-statement assignment below reads the
+        # copies, which hold the outer values.  A name mentioned only inside
+        # interpolated RHS text also reads the copy — still correct.  (A var
+        # read only via `$#name` is missed by the text scan — the same rare
+        # limitation as the single-container path above.)
+        $self->_reg_lex(@$vars);
+        my %sref = map { $_ => 1 } @self_ref;
+        my @binds;
+        for my $v (@$vars) {
+          my $init = !$sref{$v}             ? _fresh_container($v)
+                   : substr($v, 0, 1) eq '@' ? ['p-copy-array', $v]
+                   : substr($v, 0, 1) eq '%' ? ['p-copy-hash',  $v]
+                   :                           ['p-box-init',   $v];
+          push @binds, ['list', $v, $init];
+        }
+        return (['let', ['list', @binds],
+                 $self->_lower_expr([@k], $first),
                  $self->_lower_block(\@rest, $vi, $tail_ctx)]);
       }
     }
@@ -2831,6 +2907,73 @@ sub _lower_block {
     }
   }
 
+  # -- standalone label `AGAIN:` (a goto target, PPI: a Compound holding ONLY
+  # the Label; the labeled statements are its SIBLINGS): lower the block
+  # remainder inside (tagbody :again …) so a later `goto AGAIN` — lowered to
+  # a raw `(go :again)` by the expression machinery — reaches the tag
+  # lexically.  Perl re-executes `my` declarations jumped back over; the
+  # remainder's nested lets sit inside the tagbody, so a backward go re-binds
+  # them fresh — the same semantics.  Kept gated: a label in VALUE position
+  # (tagbody yields nil, the remainder's tail value would be lost) and a
+  # FORWARD goto (its `(go …)` was already emitted before the tagbody opens,
+  # where CL cannot reach the tag).  Atom forms in the remainder (a void bare
+  # read like `$x;` / a state-decl cell name) become tagbody TAGS — skipped
+  # unevaluated, which for a void variable read is equivalent.
+  if ($first->isa('PPI::Statement::Compound')) {
+    my @lk = $first->schildren;
+    if (@lk == 1 && $lk[0]->isa('PPI::Token::Label')) {
+      (my $lbl = $lk[0]->content) =~ s/\s*:\s*$//;
+      die "Parser2 TODO: standalone label\n"
+        if defined $tail_ctx || $lbl !~ /^\w+$/;
+      for (my $p = $first->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
+        die "Parser2 TODO: forward goto to a standalone label\n"
+          if ref $p && $p->isa('PPI::Node')
+          && $p->content =~ /\bgoto\s+\Q$lbl\E\b/;
+      }
+      return (['tagbody', ':' . $lbl,
+               $self->_lower_block(\@rest, $vi, undef)]);
+    }
+  }
+
+  # -- unlabeled `{ … } continue { … }`: PPI splits the continue off into an
+  # ORPHAN sibling PPI::Statement (a labeled bare block keeps it inside the
+  # compound) and may glom the NEXT statement's tokens into that orphan after
+  # the continue block (there is no `;` to end it).  Join the continue back
+  # onto the compound and lower the glommed trailing tokens as a synthetic
+  # statement — v1's _find_continue_sibling + _process_trailing_tokens.
+  if ($first->isa('PPI::Statement::Compound') && @rest
+      && ref($rest[0]) eq 'PPI::Statement') {
+    my @ck = $first->schildren;
+    shift @ck if @ck && $ck[0]->isa('PPI::Token::Label');
+    my @ok = $rest[0]->schildren;
+    if (@ck && $ck[0]->isa('PPI::Structure::Block')
+        && !Pl::Parser::_bare_block_is_anon_hash($ck[0])
+        && @ok >= 2
+        && $ok[0]->isa('PPI::Token::Word') && $ok[0]->content eq 'continue'
+        && $ok[1]->isa('PPI::Structure::Block')) {
+      my @och = $rest[0]->children;
+      my ($bi) = grep { $och[$_] == $ok[1] } 0 .. $#och;
+      my @trail = @och[$bi + 1 .. $#och];
+      my @tsig  = grep { $_->significant
+                         && !($_->isa('PPI::Token::Structure') && $_->content eq ';') } @trail;
+      my @rest2 = @rest[1 .. $#rest];
+      my @tforms;
+      if (@tsig) {
+        # Only a plain expression statement can ride here — a declarator or
+        # compound keyword needs its real statement machinery → v1.
+        die "Parser2 TODO: non-expression statement after bare-block continue\n"
+          if join(' ', map { $_->content } @tsig)
+             =~ /(?<![-\$\@\%\w])(?:my|our|local|state|sub|package|use|no|require|if|unless|while|until|for|foreach)\b/;
+        my $synth = PPI::Statement->new;
+        $synth->add_element($_->clone) for @trail;
+        @tforms = $self->_lower_stmt($synth, $vi, @rest2 ? undef : $tail_ctx);
+      }
+      return ($self->_lower_compound($first, $vi, undef, $ok[1]),
+              @tforms,
+              $self->_lower_block(\@rest2, $vi, $tail_ctx));
+    }
+  }
+
   # -- everything else appends a form and continues at the same depth.
   return ($self->_lower_stmt($first, $vi, $first_tail), $self->_lower_block(\@rest, $vi, $tail_ctx));
 }
@@ -2988,7 +3131,7 @@ sub _stmt_has_global_match {
 }
 
 sub _lower_compound {
-  my ($self, $stmt, $vi, $tail_ctx) = @_;
+  my ($self, $stmt, $vi, $tail_ctx, $sib_cont) = @_;
   my @k = $stmt->schildren;
 
   # Optional leading `LABEL:` — rides along on loops (`OUTER: while …`) and
@@ -3002,13 +3145,21 @@ sub _lower_compound {
 
   # Bare block { … } = a loop-once: last/next/redo all work inside it.
   if ($k[0]->isa('PPI::Structure::Block')) {
-    die "Parser2 TODO: loop with continue block\n"
-      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @k;
+    # `LABEL: { … } continue { … }` keeps the continue INSIDE the compound;
+    # the unlabeled form arrives as an ORPHAN sibling statement instead,
+    # joined back by _lower_block's lookahead into $sib_cont.
+    my $cont = $sib_cont;
+    my ($ci) = grep { $k[$_]->isa('PPI::Token::Word')
+                      && $k[$_]->content eq 'continue' } 0 .. $#k;
+    if (defined $ci) {
+      ($cont) = grep { $_->isa('PPI::Structure::Block') } @k[$ci + 1 .. $#k];
+      die "Parser2 TODO: continue without a block\n" unless $cont;
+    }
     # PPI mis-tokenizes an anon-hash constructor statement `{ LITERAL , … };`
     # as a bare block — v1's detector + statement fallback handle it.
     return $self->_fallback_stmt($stmt)
       if Pl::Parser::_bare_block_is_anon_hash($k[0]);
-    return $self->_lower_bare_block($k[0], $label, $vi);
+    return $self->_lower_bare_block($k[0], $label, $vi, $cont);
   }
 
   my $kw = $k[0]->content;
@@ -3353,8 +3504,16 @@ sub _continue_keys {
 # no bookkeeping: _lower_block's nested lets sit inside the tagbody, and a
 # (go …) legally jumps out of them.
 sub _lower_bare_block {
-  my ($self, $block, $label, $vi) = @_;
+  my ($self, $block, $label, $vi, $cont) = @_;
   my @body = $self->_lower_scope([$block->schildren], $vi);
+  # `{ … } continue { … }` — the continue block (its own lexical scope) runs
+  # after normal completion or `next`, is skipped by `last` (which exits the
+  # enclosing block/LAST catch), and is not re-run by `redo` (which re-enters
+  # the tagbody).  v1's placement: after the tagbody, inside the block (or
+  # inside the LAST catch, after the NEXT catch, for the labeled shape).
+  my @cont = defined $cont
+    ? (['progn', $self->_lower_scope([$cont->schildren], $vi)])
+    : ();
   my $inner;
   if (defined $label) {
     $inner =
@@ -3365,9 +3524,10 @@ sub _lower_bare_block {
               ['catch', "(pcl::%pcl-loop-tag \"REDO\" '$label)",
                 ['progn', @body, '(go :next)']],
               '(go :redo)',
-              ':next']]]];
+              ':next']],
+          @cont]];
   } else {
-    $inner = ['block', 'nil', ['tagbody', ':redo', @body, ':next']];
+    $inner = ['block', 'nil', ['tagbody', ':redo', @body, ':next'], @cont];
   }
   return ['let', ['list', ['list', '*package*', '*package*']], $inner];
 }

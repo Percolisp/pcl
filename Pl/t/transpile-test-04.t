@@ -537,4 +537,44 @@ test_transpile('same-name captured array in two blocks stays distinct',
 test_transpile('interpolated captured array is not promoted (stays correct)',
     q{{ my @y; sub q1 { push @y, $_[0] } sub d1 { "@y" } } q1(3); q1(4); print d1(), "\n";});
 
+# s287 — bare-block continue (loopctl.t): continue runs after normal exit or
+# next, is skipped by last, and redo re-runs the body without it; the labeled
+# form keeps its continue inside the compound, the unlabeled form is joined
+# from PPI's orphan sibling statement (with a trailing glommed statement).
+test_transpile('bare-block continue: labeled/unlabeled, last/next/redo paths',
+    q{my $ok = 0;
+{ print "x"; } continue { print "c"; } $ok = 1; print "t$ok";
+L1: { print "A"; last L1; } continue { print "NO"; }
+my $first = 1;
+L2: { print "B"; if ($first) { $first = 0; redo L2; } } continue { print "C"; }
+L3: { print "D"; next L3; print "NO2"; } continue { print "E"; }
+OUT: { L4: { print "F"; } continue { print "G"; last OUT; } print "NO3"; }
+print "\n";});
+
+# s287 — list-form self-referential my init (array.t bug 70171 family) + the
+# chained-declarator forms: the self-referenced container binds to a copy of
+# its outer self; chained `my ... = my ... = LIST` collapses to one binding.
+test_transpile('list self-ref my init and chained my declarators',
+    q{my @bee = qw(foo bar burbl blah);
+{ my (undef,@bee) = @bee; print "1:@bee\n"; }
+{ my ($x, @bee) = ('X', @bee); print "2:$x|@bee\n"; }
+my ($p, $q) = (1, 2);
+{ my ($p, $q) = ($q, $p); print "3:$p$q\n"; }
+print "4:$p$q\n";
+{ my @bee = my @bee = qw(fee fie); print "5:@bee\n"; }
+{ my (@bim) = my(@bee) = (7, 8); print "6:@bee|@bim\n"; }
+print "7:@bee\n";});
+
+# s287 — standalone label as a backward goto target (array.t/my.t goto
+# variants): (tagbody :label ...) over the block remainder; a my jumped back
+# over re-initializes.
+test_transpile('standalone label with backward goto',
+    q{{ my ($i, $ra);
+  again:
+    my @a = @$ra;
+    @a = (1, 2, 3, 4);
+    $ra = \@a;
+    goto again unless $i++;
+    print "@a\n"; }});
+
 done_testing();

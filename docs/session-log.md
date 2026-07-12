@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 287 (2026-07-12, Fable 5) — E1 M-E singles: loopctl.t + my.t de-gated; census 97 native / 14 gated, gen v2-29.
+
+- **Bare-block `continue { }` native** → de-gates **loopctl.t (67/67, fully
+  passing)**.  Labeled `L: { … } continue { … }` keeps the continue INSIDE the
+  PPI compound (extracted in `_lower_compound`); the unlabeled form arrives as
+  an ORPHAN sibling `PPI::Statement` that may glom the NEXT statement's tokens
+  after the block — `_lower_block`'s lookahead joins it back and lowers the
+  trailing tokens as a synthetic statement (v1's `_find_continue_sibling` +
+  `_process_trailing_tokens`; declarator/compound trailing → gate).  Placement
+  copies v1: after the tagbody (unlabeled) / after the NEXT catch inside the
+  LAST catch (labeled) — `last` skips the continue, `next` reaches it, `redo`
+  re-runs the body only.  **Fixed a silent v2 miscompile**: the unlabeled form
+  previously DROPPED the continue block entirely (only a `;; PARSE ERROR`
+  comment was emitted — no gate).
+- **Standalone label** (`again:` goto target) lowers to
+  `(tagbody :again <block-remainder>)` → de-gates **my.t (49 pass / 1 fail =
+  exact v1 parity; t46 is the pre-existing autoviv failure in both
+  pipelines)**.  `goto LABEL` already lowers to `(go :label)` (ExprToCL), so
+  backward gotos work lexically; a `my` jumped back over re-binds fresh (its
+  let is inside the tagbody) — Perl's semantics.  This replaces v1's
+  text-level `_wrap_runtime_labels` post-pass on the v2 path.  Still gated:
+  label in VALUE position (tagbody yields nil) and FORWARD gotos (the go is
+  emitted before the tagbody opens).
+- **List-form self-referential init** (`my (undef,@bee) = @bee`, array.t bug
+  70171): v1's dance generalized per variable — every self-referenced name
+  binds to a COPY of its outer self in the let BINDING position
+  (`p-copy-array`/`p-copy-hash`/`p-box-init`), the rest bind fresh, and the
+  ordinary whole-statement assignment reads the copies.  Names mentioned only
+  in interpolated RHS text also read the copy (correct).
+- **Chained declarators** (`my @bee = my @bee = qw(…)`,
+  `my (@bim) = my(@bee) = LIST`): the nested `my` declares into the SAME
+  scope → one let binds all chain names fresh; the expression machinery emits
+  the chained `p-array-=` (v1's collapse).  **GOTCHA fixed along the way**:
+  `die … if A || grep {…} @all || grep {…} @all` — a MID-position grep parses
+  the rest (`@all || grep …`) as its LIST, i.e. the array's COUNT (`1`), so
+  the grep tested `/\b1\b/` against the RHS text and spuriously gated any
+  chain with a digit — parenthesize greps inside `||` chains.
+- **Container capture de-conflation**: `_hard_decl_count` and
+  `_count_name_decls` take an optional sigil — a CONTAINER canon (`%x`, `@y`)
+  now counts only same-sigil declarations/shadows, because its rewrite shapes
+  (`%x`/`$x{`/`@x{` resp. `@y`/`$y[`/`$#y`) are syntactically disjoint from a
+  sibling scalar of the same bare name (token rewrites key on `->symbol`;
+  `_ref_shadowed` was already canon-exact).  SCALAR canons keep the conflated
+  count + the family-use refusal ($x-text interp beside `@x` is genuinely
+  ambiguous).  Clears array.t's `my $x … my %x … sub get_x { %x … }` block.
+- **array.t re-gates on `forward goto to a standalone label`**: line 663
+  `map { …; goto aftermap; } @a; aftermap:` — a goto out of a map LAMBDA
+  needs a DYNAMIC unwind (throw/catch), not lexical `(go)`.  New finding:
+  **v1 CRASHES on this shape today** (sb-int:compiled-program-error on the
+  `(go :aftermap)` inside the lambda), and array.t already stops at t114 at
+  HEAD — so keeping the v1 fallback is byte-identical, nothing regressed.
+  Clearing array.t = implement dynamic goto (both pipelines), a design item
+  logged in `docs/e1-remainder.md`, not an M-E single.
+- **Verified** (triple): corpus byte-diff HEAD-vs-worktree = only loopctl.t +
+  my.t differ (path-normalized, marker stripped with perl); `--jobs 1` sweeps
+  loopctl 67/0/0 (fully passing), my.t 49/1 same failing test as the HEAD
+  faillog; full gate `tools/prove-core` **114 files / 4034 tests PASS**.
+  Cache gen v2-28→v2-29.  Guards: parser2-01.t +8 (continue placement ×3,
+  label tagbody ×3, self-ref copy, chain collapse; 1 stale continue
+  gate-guard updated), transpile-test-04.t +3 perl-vs-CL batteries
+  (continue last/next/redo paths, self-ref+chain forms, backward goto).
+
 ## Session 286b (2026-07-12, Fable 5) — counting-loop range foreach SHIPPED: `for my $i (1..5M)` now 2.8× FASTER than perl (was 7.8× slower).
 
 - **`p-foreach-range` / `p-foreach-range-raw`** (cl/pcl-runtime.lisp, gen
