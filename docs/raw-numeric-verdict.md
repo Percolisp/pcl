@@ -1,8 +1,31 @@
-# The `raw-numeric` verdict — use-proven eager numeric coercion
+# The `raw-numeric` and `raw-string` verdicts — use-proven eager coercion
 
 Design note (s286, discussed with user).  Status: **designed, not implemented**;
 scheduled after the counting-loop lowering (`docs/bench-exec-investigation.md`
 fix menu).  Companion to the existing box/raw split in `docs/ir-spec.md` §2.2.
+
+Two symmetric verdicts: if every use of a lexical is provably a *numeric*
+operation, coerce non-plain writes eagerly with the `+ 0` equivalent
+(`%pcl-to-number`) and keep the slot a host number (**raw-numeric**); if every
+use is a *string* operation, coerce with the `. ""` equivalent (`to-string`)
+and keep the slot a host string (**raw-string**).  Both are Perl's own SV
+conversion caches (NOK/POK) pre-filled at compile time.
+
+**Key fact that makes both sound for references** (checked s286,
+`cl/pcl-runtime.lisp:1206`): PCL ref identity — `==` on refs, refaddr, and the
+`0x…` in `ARRAY(0x…)` stringification — is **not a memory address**; it is a
+monotonic counter ID from a weak eq-table, stable for the object's lifetime
+and never reused.  Nothing ever parses the string back to reach the data (and
+couldn't — the layout is different anyway); real code only uses these values
+as *identity tokens* (`$seen{$ref}++`, `"$a" eq "$b"`, `$r1 == $r2`).  Frozen
+at the write or computed at each use, the token is byte-identical.  Therefore
+**neither verdict needs a "no references" guarantee** — the only per-use
+machinery an eager freeze skips is `use overload` (`""`/`0+` are code that
+must run per use), so the gate is only:
+
+> **Flag / closed-world condition:** no `use overload` in the transpiled
+> corpus and no string `eval` in scope (an eval'd string could introduce
+> one); manual override flag for programs the scan can't clear.
 
 ## Problem
 
@@ -36,33 +59,43 @@ compiler proves the cache can be pre-filled at the write.
 
 ## Soundness — each condition kills a different hazard
 
-| value class | hazard under eager `+0` | killed by |
+| value class | hazard under eager coercion | killed by |
 |---|---|---|
-| plain number/string | none — numification of an immutable plain value is pure and stable, so once-at-write ≡ at-each-use | — |
-| dualvar (`$!`-family) | none **given (b)**: every use would have picked the numeric side anyway | use-proof |
-| undef | value-safe (0 everywhere a numeric use would see 0); see warning caveat | use-proof (`defined` disqualifies) |
-| reference | `$q == $r` with `$r` a second live handle: frozen-at-write address vs live address can disagree after a GC move where Perl says equal; `0+` overload would run early | **the flag** — no use-analysis can see this |
+| plain number/string | none — conversion of an immutable plain value is pure and stable, so once-at-write ≡ at-each-use | — |
+| dualvar (`$!`-family) | none given the use-proof: every use would have picked the same (numeric resp. string) side anyway | use-proof |
+| undef | value-safe (`0` resp. `""` everywhere the licensed uses would see them); see warning caveat | use-proof (`defined` disqualifies) |
+| reference | identity is a **stable counter ID** (see above), so frozen ≡ live for `==`, `eq`, hash-keying; only `use overload` (per-use code) can observe the freeze | **the flag** (no-overload corpus scan) |
+| blessed ref (no overload) | `Class=HASH(0x…)` bakes the class name in at the write; a later cross-handle `bless` diverges — but re-bless visibility through scalar copies is already documented not-supported (`docs/not-supported.md` §scalar copy), and `ref($x)` uses disqualify | footnote, accepted |
 
-The flag's semantics: "no reference values reach raw-numeric slots."  It can
-default ON when the closed world allows it — the transpiled corpus contains no
-`use overload` and no string `eval` in scope (an eval'd string can introduce
-anything) — with a manual override for programs the heuristic can't clear.
+## The use-sets — and the boolean-context asymmetry
 
-## The use-set — and the boolean-context trap
-
-**Licensing (numeric) uses:** `+ - * / % **`, `++/--`, `== != < <= > >= <=>`,
+**raw-numeric licensing uses:** `+ - * / % **`, `++/--`, `== != < <= > >= <=>`,
 bitwise ops, range endpoints (`A..$n`), array index (`$a[$q]`), repeat count
 (`LIST x $q`).
 
-**Disqualifying uses** (any one → verdict stays boxed/raw as today):
+**raw-string licensing uses:** interpolation `"$q"`, `.`/`.=`,
+`eq ne lt gt le ge cmp`, `length`, rvalue `substr`/`index`, `lc uc lcfirst
+ucfirst`, hash-key `$h{$q}`, regex match/subst *target* (`$q =~ …` reading),
+`split` target, `print`/`say`/`join`/sprintf-`%s` argument — **and boolean
+context** (see below).
 
-- string uses: interpolation `"$q"`, `.`, `.=`, `eq ne lt gt cmp`, `length`,
-  hash-key `$h{$q}`, `print`/`join`/any list-op arg;
-- **boolean context** — `if ($q)` / `while ($q)` / `&&` / `||` / `?:`
-  condition position.  This is the classic trap: Perl truthiness is defined on
-  the *string* form, so `"0.0"`, `"00"`, `"0E0"`, `" "` are **true**, but
-  their numified `0` is false.  A boolean test is NOT a numeric use;
-- `defined($q)` — eager coercion turns undef into a defined `0`;
+**Boolean context (`if ($q)` / `while` / `&& || !` / `?:` condition) is the
+asymmetric case — the classic trap:**
+
+- For **raw-numeric** it DISQUALIFIES: Perl truthiness is defined on the
+  *string* form, so `"0.0"`, `"00"`, `"0E0"`, `" "` are **true**, but their
+  numified `0` is false.  A boolean test is NOT a numeric use.
+- For **raw-string** it is LICENSED: truthiness of the string form is
+  truthiness of the value, for every value class — `"0.0"` stays true,
+  `0`→`"0"` stays false, undef→`""` stays false, any ref→`"ARRAY(…)"` stays
+  true.
+
+**Disqualifying uses for both** (any one → verdict stays boxed/raw as today):
+
+- the *other* verdict's coercions (a numeric op disqualifies raw-string and
+  vice versa — mixed-use variables stay as they are);
+- `defined($q)` — eager coercion turns undef into a defined `0`/`""`;
+- `ref($q)`, any dereference (`$$q`, `$q->…`), `bless`;
 - any call argument (unknown callee), `\$q`, `local`, tie/glob contact,
   closure capture (the existing box vetoes all still apply first).
 
@@ -79,16 +112,21 @@ divergence, don't weaken the verdict.
 
 1. `Pl/VarAnnotator.pm` already walks every use of each lexical (that's how
    the `\$q`/capture vetoes work).  Add a per-variable use-classification
-   against the table above; verdict `raw-numeric` when all writes are
-   {coerced ∪ wrappable} and all uses are numeric and the flag allows.
+   against the tables above; verdict `raw-numeric` (all uses numeric) or
+   `raw-string` (all uses string/boolean) when all writes are
+   {coerced ∪ wrappable} and the flag allows.
 2. Codegen: raw slot as today; wrap each non-coerced write RHS in
-   `%pcl-to-number` (exists; the `+ 0` path).  Coerced writes (already
-   numeric-op results) stay bare.
+   `%pcl-to-number` resp. `to-string` (both exist; the `+ 0` / `. ""` paths).
+   Coerced writes (already operator results of the right family) stay bare.
 3. Flag plumbing: corpus scan (no `use overload`, no string-eval) sets the
    default; `PCL_ASSUME_PLAIN=0/1` (name TBD) overrides.
-4. Guards: Pl/t transpile tests for the `"0.0"`-truthiness disqualifier, the
-   `defined` disqualifier, and the `$ENV{N}` bench shape going raw-numeric;
-   `tools/difftest-ops.pl` fuzz pass over the numeric-use axis.
+4. Guards: Pl/t transpile tests for the `"0.0"`-truthiness disqualifier (bool
+   blocks raw-numeric, licenses raw-string), the `defined` disqualifier, the
+   `$ENV{N}` bench shape going raw-numeric, and a `$seen{$ref}` string-identity
+   round-trip under raw-string; `tools/difftest-ops.pl` fuzz over both axes.
+5. Synergy: a `raw-string` accumulator whose writes are `.=`-shaped is exactly
+   the slot the W15.8 append fix wants to make an adjustable fill-pointer
+   string — implement the verdict first, the append transform rides on it.
 
 ## Relation to the alternatives considered (s286 discussion)
 
@@ -101,7 +139,8 @@ divergence, don't weaken the verdict.
   branches absorb it): needs no flag and no use-proof, degrades per-value not
   per-variable — but relaxes the normative ir-spec §2.2 invariant ("a raw slot
   never holds a box or a reference") and so requires a consumer audit + fuzz.
-  Keep as a separate, later option for *string*-used element-seeded scalars.
+  Mostly subsumed now that raw-string covers the string-used case; keep only
+  for genuinely mixed-use element-seeded scalars if they ever show up hot.
 - **Counting-loop lowering** (`for (A..B)` → endpoints-once, no vector): still
   first — it kills the dominant range-materialization tax AND coerces hot loop
   bounds once as a side effect, independent of any verdict change.

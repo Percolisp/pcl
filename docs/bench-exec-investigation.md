@@ -50,12 +50,14 @@ when operands are raw.
    labels + continue via the same loop-macro protocol.  W15 perf-menu item.
 2. **Annotator: treat `$s += NUMERIC` / `$s -= …` like `$s = $s + …`** for
    the raw-slot verdict (tax 3).
-3. **`raw-numeric` verdict** — use-proven eager numeric coercion for
+3. **`raw-numeric` / `raw-string` verdicts** — use-proven eager coercion for
    element-seeded scalars (`my $n = $ENV{N}` with numeric-only uses →
-   `(setf $n (%pcl-to-number …))`, real host number in the slot).  Full
-   design incl. the boolean-context trap, flag semantics, and warning-count
-   caveat: `docs/raw-numeric-verdict.md`.  Kills tax 2 generally (not just
-   for range loops).
+   `(setf $n (%pcl-to-number …))`, real host number in the slot; symmetric
+   string verdict via `to-string`, sound for refs because PCL ref identity is
+   a stable counter ID, not an address).  Full design incl. the
+   boolean-context asymmetry, flag semantics (no-overload corpus scan only),
+   and warning-count caveat: `docs/raw-numeric-verdict.md`.  Kills tax 2
+   generally (not just for range loops).
 4. strcat `.=` O(n²) — already planned, §W15.8 (unchanged).
 
 The original s285 notes follow (historical).
