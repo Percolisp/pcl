@@ -1,10 +1,14 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-State at handoff: **census 92 v2-native / 19 gated**, cache gen **v2-26**,
-Pl/t gate green (114 files), commit b648bfd.  This doc is the ordered,
-session-sized worklist for finishing v2; it packages — it does not replace —
-the governing docs below.  When this doc and a governing doc disagree, the
+**State updated s287 (2026-07-12, Fable): census 97 v2-native / 14 gated,
+cache gen v2-29, Pl/t gate green (114 files / 4034 tests), commit 8bb3792.**
+E1-a is DONE (s285: element foreach-alias; s286b: counting-loop range
+foreach perf; s287: bare-block continue, standalone label, list self-ref +
+chained my, container capture de-conflation — §"E1-a" and §"E1-b" below
+carry per-item DONE marks).  This doc is the ordered, session-sized
+worklist for finishing v2; it packages — it does not replace — the
+governing docs below.  When this doc and a governing doc disagree, the
 governing doc wins; update this one.
 
 ## 0. Required reading, in order (do not skip)
@@ -68,6 +72,49 @@ session, every item:
    trace before building anything (s284 disproved two survey hypotheses
    this way).
 
+Guardrails added from s286–s287 experience:
+
+10. **Perl trap — `grep` mid-`||`-chain**: in
+    `die … if A || grep {…} @x || B;` the grep's LIST is `@x || B`
+    (evaluates to the array's *count*), so the grep silently tests the
+    wrong thing.  s287 lost an hour to a spurious gate from exactly this
+    (`/\b1\b/` matching digit-y RHS text).  Parenthesize every grep that
+    is not the last term: `(grep {…} @x)`.
+11. **Corpus byte-diff normalization**: the HEAD worktree embeds ITS OWN
+    root in emitted `@INC`/path forms.  Map BOTH roots to one placeholder
+    (`s{$worktree}{ROOT}g; s{/home/bernt/pcl}{ROOT}g`) or every file
+    "differs".  Strip the pipeline marker with perl, not grep (NULs).
+    A correct diff for an E1 session shows ONLY the de-gated files.
+12. **Stale gate-guards**: `Pl/t/parser2-0*.t` contains guards of the form
+    "construct X still dies to v1".  When you implement X, that guard
+    FAILS — flip it to assert the new lowering (keep the assertion
+    strength; never delete or weaken).  Budget for it: grep parser2 tests
+    for the gate string you are removing before running the gate.
+13. **Dump PPI before trusting statement boundaries.**  PPI splits an
+    unlabeled bare-block `continue {}` into an orphan sibling statement
+    and gloms the FOLLOWING statement's tokens into it (no `;` ends it);
+    the labeled form keeps it in-compound.  This class of quirk (split /
+    glom / mis-typed statements) is why a construct can pass a minimal
+    probe yet gate — or silently miscompile — in the real file.  Bisect
+    the real file to the exact statement (perl prefix-bisect with
+    `PCL_V2_VERBOSE=1`) before concluding anything.
+14. **"Falls back to v1" ≠ "v1 handles it."**  Verify what v1 actually
+    does with a gated shape: array.t's `goto` out of a `map` lambda
+    CRASHES v1 (compile error on the emitted `(go …)`).  Byte-identical
+    fallback is still parity — but log such shapes as crash-fix items
+    (task #63), and never assume the fallback is semantically complete.
+15. **Raw-slot soundness comes in two regimes — don't mix them.**  The
+    shipped `p-foreach-range-raw` loop var needs NO overload/dualvar
+    analysis: range elements are fresh plain scalars by construction,
+    writes must be arith-shaped, and any `eval` in the region vetoes raw
+    (see `docs/ir-spec.md` §6.2).  The PLANNED raw-numeric/raw-string
+    verdict (task #62) is the opposite regime: values from arbitrary
+    expressions, so it requires the no-overload corpus scan AND the
+    strict write-site check that dies on an overloaded ref / genuine
+    dualvar (`docs/raw-numeric-verdict.md` §"Scope boundary" +
+    §"Checked coercion").  If the strict check ever fires, fix the
+    classifier or re-box the variable — never weaken the check.
+
 Estimate calibration note: all session counts below were calibrated on
 Fable throughput (~2.5 de-gates/session incl. mechanism work).  Treat them
 as effort ratios, not promises; the census is the real tracker.
@@ -78,36 +125,39 @@ Default cadence per the endgame plan: **alternate E1 and E2 sessions** so
 gate wins keep landing while the structural work proceeds.  E1 first
 session below is the recommended opener (highest file yield).
 
-### E1 — remaining 19 gates (~4–6 sessions)
+### E1 — remaining 14 gates (~3–5 sessions)
 
-#### E1-a. M-E: foreach over an aliasable lvalue element (1 session, clears 4 files) — START HERE
+#### E1-a. M-E: foreach over an aliasable lvalue element — **DONE (s285 + s287)**
 
-Gate: `foreach over an aliasable lvalue element` — now blocks **chop.t,
-substr.t, aassign.t, sub.t** (the latter two re-gated onto it in s284), the
-single highest-yield item left.  `for ($h{k})`, `for ($a[$i])`,
-`for (substr($s,0,3))` must bind the loop var as an **alias to the live
-container slot** so mutation writes through.  v1's mechanism:
-`p-aref-box` / `p-gethash-box` / lvalue cells (`p-magic-cell` for
-substr/pos/vec) — port that binding into the native foreach lowering in
-Parser2.  Study v1's emission for each element shape first and copy it.
-Same session if time allows (each is small):
-- **loopctl.t** — `while … {} continue {}`: foreach already lowers
-  `:continue` (`_continue_keys`); extend to while/until, and make
-  `last`/`redo` from inside the continue block correct (lines 59/84).
-- **array.t** — self-ref LIST init `my (undef,@bee) = @bee`: s282b shipped
-  the single-container form; extend to list-form decls (v1's
-  init-in-let-binding dance).
+s285 shipped the element foreach-alias (chop/aassign/sub de-gated;
+substr.t re-gated on the narrower magic-lvalue gate + the E2 void-wrap
+heap issue).  s287 shipped the rest of this batch:
+- ~~loopctl.t~~ **DONE** — the actual gate was the BARE-block
+  `LABEL: { } continue { }` (while/until `:continue` already worked);
+  67/67 fully passing.  The unlabeled form was a **silent v2 miscompile**
+  (continue block dropped) — fixed by the orphan-sibling join.
+- ~~array.t list self-ref~~ **DONE** (`my (undef,@bee) = @bee` per-var
+  copy-binding dance + chained `my @a = my @a = …`), but the file
+  **re-gated on `forward goto to a standalone label`** — see task #63
+  below; array.t is NOT expected to de-gate in E1.
 
-#### E1-b. M-E singles, second batch (1 session, clears 2 files)
+#### E1-b. M-E singles, second batch (part done s287)
 
-- **my.t** — `standalone label` (`loop:` + `goto loop`): intra-sub label
-  `goto` is partially supported in v1 ([project_intra_sub_goto]); lower the
-  standalone-label statement + tagbody/go shape natively, or gate narrower.
+- ~~my.t~~ **DONE (s287)** — standalone label lowered to
+  `(tagbody :label <block-remainder>)`; 49/1 = exact v1 parity (t46 is a
+  pre-existing failure in both pipelines — do not chase it as a
+  regression).
 - **chdir.t** — `BEGIN block with sub-existence introspection`: read the
   refusal trace first; likely needs the BEGIN-time visibility the eval-when
   wrapping already provides — verify what exactly is introspected before
   building.
-- If time remains, start E1-c.
+- **Task #63 (new, s287): dynamic `goto LABEL`** — `map { …; goto X } @a;
+  X:` needs a throw-based unwind (a lexical `(go)` cannot escape the
+  lambda).  **v1 CRASHES on this shape today** (compile error), so this is
+  a crash-fix for BOTH pipelines, not merely a de-gate; array.t also stops
+  at t114 at HEAD for an unrelated reason.  Design sketch in the task.
+  Do NOT try to clear array.t by widening the s287 tagbody lowering — the
+  forward-goto gate is what keeps the file on byte-identical v1 fallback.
 
 #### E1-c. E1.4 postderef_qq — task #45, decision D2 = implement (1 session, clears 1 file, fixes BOTH pipelines)
 

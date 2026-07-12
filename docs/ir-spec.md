@@ -449,6 +449,40 @@ writes through to the array, matching Perl's foreach aliasing (raw
 elements get a fresh box; files where that aliasing would be observable
 gate to the v1 pipeline).
 
+**Counting-loop range foreach** (s286b): a foreach whose list is a **sole
+range** `A..B` lowers to `(p-foreach-range ((VAR A B)) body…)` or its
+`-raw` variant instead of materializing the range vector.  Semantics:
+
+- **Endpoints are evaluated exactly once, before the first iteration** —
+  this is Perl's own behavior (perl builds the foreach list first;
+  assigning to `$w` inside `for my $i ($q..$w)` never changes the trip
+  count), verified against perl.  Numeric ranges allocate no list at all;
+  a magical *string* range (classified by `%p-range-classify`, the same
+  oracle `p-..` uses) falls back to iterating a materialized vector inside
+  the same skeleton.
+- Same `:label`/`:continue`/`next`/`redo` protocol as `p-foreach`.
+- `p-foreach-range-raw` binds VAR as a **raw host value** (no box).  This
+  is sound without any overload/dualvar analysis because range elements
+  are **fresh plain scalars by construction** (perl numifies/stringifies
+  the endpoints when building the range — even an overloaded endpoint is
+  coerced once, at construction), every body write to VAR must be
+  arith-shaped (VarAnnotator), and any `eval` word in the region vetoes
+  the raw variant entirely (`eval-in-region`).  Contrast with the
+  *planned* raw-numeric verdict for arbitrary-source variables, which DOES
+  need a no-overload scan plus a strict checked write —
+  `docs/raw-numeric-verdict.md` §"Scope boundary".
+- Known divergence: perl's range elements are read-only (`$i = 9` in the
+  body dies in perl); PCL permits the write (next iteration rebinds) —
+  same family as the `!0`/`!1` read-only non-emulation in
+  `docs/not-supported.md`.
+
+**Bare-block `continue`** (s287): `{ … } continue { … }` places the
+lowered continue block **after the tagbody, inside the loop-once block**
+(labeled shape: after the NEXT catch, inside the LAST catch).  Effect:
+`last` skips the continue, `next` (and normal completion) reaches it,
+`redo` re-runs the body without it — Perl's semantics.  The continue
+block is its own lexical scope.
+
 ### 6.3 Exceptions: `die` / `eval { }` / `$@`
 
 `die` signals a `p-exception` carrying either a string or an arbitrary
@@ -471,6 +505,18 @@ to string messages (documented divergence).
 `goto &sub` (tail call) is supported — it re-dispatches with the current
 `@_`. Computed `goto LABEL` is a no-op (documented divergence); intra-sub
 `goto LABEL` is partial.
+
+**Standalone labels** (s287): a goto-target label statement (`again:`)
+lowers to `(tagbody :again <remainder of the enclosing block>)`, and
+`goto again` lowers to the lexical `(go :again)` — so **backward** gotos
+(the loop-retry idiom) work natively; a `my` jumped back over re-binds
+fresh (its `let` sits inside the tagbody), matching Perl.  Not lowered
+natively (v1 fallback via gate): a label in **value position** (tagbody
+yields `nil`) and a **forward** goto (its `(go)` is emitted before the
+tagbody opens).  A `goto LABEL` from inside a *lambda* (e.g. out of a
+`map` block) compiles to a `(go)` that cannot lexically reach the tag —
+**both pipelines currently crash on that shape** (compile error); the fix
+is a dynamic throw-based goto, tracked as task #63.
 
 ## 7. Packages, variables, and OO
 

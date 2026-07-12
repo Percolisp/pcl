@@ -27,6 +27,43 @@ must run per use), so the gate is only:
 > corpus and no string `eval` in scope (an eval'd string could introduce
 > one); manual override flag for programs the scan can't clear.
 
+## Scope boundary — this verdict vs the SHIPPED counting-loop raw var (s287 Q&A)
+
+Do not conflate the two regimes (user question, answered s287):
+
+- **`p-foreach-range-raw` (shipped, s286b) needs NO flag, no scan, no
+  strict check.**  Its raw slot is sound by *construction + veto*:
+  (a) the values bound to the loop var come only from the range, and range
+  elements are fresh plain scalars — perl numifies/stringifies the
+  endpoints once at range construction, so even `(1..$overloaded_obj)`
+  yields plain integers; no ref, overloaded object, or dualvar can ever BE
+  a range element, regardless of what a runtime `eval` loads later;
+  (b) every body write must be arith-shaped or the verdict is refused;
+  (c) any `eval` word in the region sets `eval-in-region` and the loop
+  falls back to the boxed `p-foreach-range` — the eval hole is closed by
+  REFUSING the optimization, not by trusting an assumption.  (Verified:
+  `for my $i (1..3) { eval q[$i+1] }` emits the boxed variant.)
+- **THIS verdict (raw-numeric/raw-string, unimplemented) is the opposite
+  regime**: the initial value comes from an arbitrary expression
+  (`$ENV{N}`, `$h{k}`, `$s += $_` accumulators) and CAN be a ref, an
+  overloaded object, or a dualvar.  That is why it needs the no-overload
+  corpus scan (the "flag" above) — and because a string `eval` can load
+  `use overload` AFTER the scan ran, the scan alone is unsound: the
+  strict checked coercion (§below) at every raw write is the non-optional
+  backstop that turns the remaining hole into a loud die instead of
+  silent corruption.
+
+Rule of thumb for implementers: a raw slot is either **provenance-pure**
+(all reaching values proven plain by construction, evals vetoed — no
+runtime check needed) or **scan-licensed** (arbitrary provenance — scan +
+strict checked write, and the check is never weakened).  Nothing in
+between ships.
+
+Related: perl's own endpoints-once semantics make the counting loop
+observably identical to perl even when the end variable is assigned inside
+the body (verified vs perl 5.40; see `docs/ir-spec.md` §6.2, including the
+one divergence: range elements are read-only in perl, writable in PCL).
+
 ## Problem
 
 The VarAnnotator's raw-slot verdict is **write-provenance-driven**: a `my`
