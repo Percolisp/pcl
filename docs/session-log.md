@@ -49,6 +49,17 @@ Append new entries at the top. One section per session.
 - **Found, logged, not fixed**: task #64 — a bare block as sub TAIL loses
   its value in BOTH pipelines (`sub f { …; { @x } }` → empty; perl returns
   the list).  Pre-existing; if/else tails work.
+- **s288b addendum — artifact review + pack benches.**  Reviewed the
+  regenerated `cl/pcl-pack.lisp`: no correctness problems; filed task #65
+  (v1-seam anon subs: flush-left raw-text lambdas + full regime on
+  single-statement callbacks = 2 wasted binds per unpacked value) and
+  task #66 (forward-decl scan false positives: `%x` matched inside
+  `sprintf "%x%x"` STRING LITERAL, `$i` from lambda-locals, `our` +
+  forward-decl double defvar).  Also noted: `p-length`/`p-ord`/`p-scalar`
+  missing from the raw-root set keeps provably-raw locals boxed (→ #62).
+  New `pack`/`packunpk` bench rows (933284e): ~1500× vs perl, decomposed
+  as ~110× pure-Perl-oracle-vs-C (measured under real perl) × ~13× PCL
+  executing the oracle (the actionable part: boxing + string append).
 
 ## Session 287 (2026-07-12, Fable 5) — E1 M-E singles: loopctl.t + my.t de-gated; census 97 native / 14 gated, gen v2-29.
 
