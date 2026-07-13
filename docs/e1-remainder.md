@@ -1,5 +1,29 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s289, 2026-07-14, Fable 5): M-A SHIPPED — census 99 native /
+> 12 gated, gen v2-31.**  De-gated **pack.t** (5638/87, SAME 87 test
+> numbers as the v1 fallback) and **yadayada.t** (21/15 parity).  Three
+> mechanisms: (1) the M-A interp rewrite — `_interp_fixer` /
+> `_fix_interp_token` factored out of `_rewrite_var_uses` and wired into
+> `_rename_decl_within`, so ALL `_shadow_rename_blocker` callers
+> (poisoned cond-my, seam my-shadow, state-in-named-sub) now rename
+> interpolated uses instead of refusing (`${x}` brace-deref still
+> refuses); (2) oversized-extent flattening — top-level `my` decls whose
+> post-decl source remainder > `$RUN_NEST_MAX` (20k) are force-promoted
+> to defvar cells (v1's model) via `_promote_captured`, because pack.t's
+> nested-let emission was ONE 162k-char form that OOMs SBCL's register
+> allocator; `_gate_oversized_run_form` ($RUN_FORM_MAX = 64k) makes the
+> OOM class unreachable by construction (flattening also re-emitted
+> split/sprintf/sprintf2 — exact HEAD parity verified); (3)
+> `_premerge_include_prototypes` — cross-require prototypes (test.pl's
+> `sub is ($$@)`) are merged BEFORE sub lowering / VarAnnotator
+> pre-parse, fixing a silent v2 wrong-context class (`is($be,
+> reverse($le))` list-reversed in v2-lowered sub bodies at HEAD).
+> **sub.t's M-A table row below was stale — it de-gated in s285.**
+> M-A's job is done; ref.t/scalar.t still need M-B (their interp is
+> inside shadow scopes — the span path's per-declaration re-keying).
+> s289 detail in `docs/session-log.md`.
+
 > **UPDATE (s288, 2026-07-13, Fable 5): E2-prereq void-wrap hoist SHIPPED
 > (task #60), gen v2-30 — census unchanged (97 native / 14 gated; the hoist
 > de-gates nothing by itself).**  v2 sub bodies now carry v1's :void regime

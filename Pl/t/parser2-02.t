@@ -72,11 +72,16 @@ my $sr = Pl::Parser2->parse_code(
   q{my $x = "outer"; my @r = map { my $x = $_ * 2; $x } (1,2,3); print "@r $x";});
 like($sr, qr/\$x__shadow__\d+/, 'seam my-shadow renamed, file stays native');
 
-# An INTERPOLATED use of the shadow inside the block still gates → v1.
-my $si = eval { Pl::Parser2->parse_code(
-  q{my $e = "o"; my @r = map { my $e = $_; "($e)" } (1,2); print "@r $e";}) };
-like($@, qr/my-shadow of live lexical \$e.*interpolated/,
-     'interpolated seam shadow still dies to v1');
+# An INTERPOLATED use of the shadow inside the block FOLLOWS the rename
+# (M-A: _rename_decl_within rewrites interp text via _interp_fixer) — the
+# file stays native instead of gating.  Interp text outside the shadow's
+# block keeps the OUTER name.
+my $si = Pl::Parser2->parse_code(
+  q{my $e = "o"; my @r = map { my $e = $_; "($e)" } (1,2); print "@r $e";});
+like($si, qr/"\(" \$e__shadow__\d+ "\)"/,
+     'interpolated seam-shadow use follows the rename (M-A)');
+like($si, qr/\(p-join \|\$"\| \@r\) " " \$e\)/,
+     'interp text outside the shadow block keeps the outer $e');
 
 # Poisoned condition-my (same name later used as a package global) is renamed
 # to $x__cond__N so the global gets its forward defvar (defins.t crash).

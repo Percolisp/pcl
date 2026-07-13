@@ -75,6 +75,48 @@ sub _build_fallback_parser {
 sub parse_file { my ($class, $fn, %opts) = @_; return $class->new(filename => $fn)->parse }
 sub parse_code { my ($class, $code, %opts) = @_; return $class->new(code => $code)->parse }
 
+# Merge prototypes declared by every use/require in the document (nested ones
+# included — pack.t's `BEGIN { require './test.pl' }`) into the shared
+# Environment, mirroring v1's statement-time extraction (use →
+# _extract_module_prototypes with the import list; require → module form, or
+# literal non-interpolating file path via _extract_file_prototypes).  See the
+# parse() call-site comment for why this must run before expression parsing.
+sub _premerge_include_prototypes {
+  my ($self, $doc) = @_;
+  my $fp = $self->fallback_parser;
+  # Modules v1's use-branch short-circuits BEFORE its extraction call —
+  # never extract these (v1 order: version pragma / overload / base+parent /
+  # the pragma list / lib).  `use feature` in particular reaches PPI shapes
+  # the module transpiler warns about ("Handle single node of unknown
+  # type") — and pl2cl's stderr must stay clean: test harnesses capture it.
+  my $skip = qr/^(?:overload|base|parent|lib|strict|warnings|warnings::register|
+                   feature|utf8|open|bytes|locale|integer|builtin|overloading|
+                   XSLoader|DynaLoader|re)$/x;
+  for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    my $type = $inc->type // '';
+    if ($type eq 'use') {
+      my $module = $inc->module or next;
+      next if $module =~ $skip;
+      my $menv = $fp->_extract_module_prototypes($module) or next;
+      $fp->_merge_module_prototypes($menv, [ $fp->_parse_use_import_list($inc) ]);
+    } elsif ($type eq 'require') {
+      if (my $module = $inc->module) {
+        my $menv = $fp->_extract_module_prototypes($module) or next;
+        $fp->_merge_module_prototypes($menv, undef);
+        next;
+      }
+      my ($q) = grep { $_->isa('PPI::Token::Quote') } $inc->schildren;
+      next unless $q;
+      my $interpolating = $q->isa('PPI::Token::Quote::Double')
+                       || $q->isa('PPI::Token::Quote::Interpolate');
+      my $path = $q->string;
+      next if $interpolating && $path =~ /[\$\@]/;   # runtime-computed → v1 rule: skip
+      my $fenv = $fp->_extract_file_prototypes($path) or next;
+      $fp->_merge_module_prototypes($fenv, undef);
+    }
+  }
+}
+
 sub _source {
   my $self = shift;
   return $self->code if $self->has_code;
@@ -157,6 +199,17 @@ sub parse {
     $words[0]->set_content(join '', map { $_->content } @words);
     $_->delete for @words[1 .. $#words];
   }
+
+  # Cross-file prototypes must be in the shared Environment BEFORE any
+  # expression parses: v2 lowers named subs ahead of the statement stream and
+  # pre-parses the stream through VarAnnotator, both of which run before the
+  # use/require statement FALLBACKS through which v1 learns prototypes.  A
+  # `sub is ($$@)` from a required test.pl otherwise never imposes scalar
+  # context inside v2-lowered code (`is($be, reverse($le))` list-reversed —
+  # pack.t s289).  Mirror v1's two extraction sites up front; extraction is
+  # memoized and add_prototype idempotent, so the later statement-fallback
+  # re-merge is harmless.
+  $self->_premerge_include_prototypes($doc);
 
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —
@@ -490,7 +543,12 @@ sub parse {
       # SBCL's compiler heap when the R1 hot ops open-code inline.  v1 caps this
       # by wrapping any oversized top-level runtime form in a
       # `(locally (declare (notinline …)))` — reuse that mechanism verbatim.
-      run      => [map { Pl::Parser::_cap_inlining_if_huge(Pl::CLForm::to_string($_, 0)) } @runtime],
+      # Past ~3x that size even the notinline form OOMs the compiler's
+      # register allocator outright (pack.t s289: one 162k-char form died at
+      # the sweep's 1 GB heap; the corpus' largest WORKING form is ~55k).
+      # _oversized_top_decls flattens the common cause pre-emptively; this
+      # gate is the by-construction backstop — die → v1, never an OOM crash.
+      run      => [map { $self->_gate_oversized_run_form(Pl::Parser::_cap_inlining_if_huge(Pl::CLForm::to_string($_, 0))) } @runtime],
       captured => [@{ $self->{_captured_decls} }],
       sched    => [@{ $self->{_sched_defs} }],
     };
@@ -1611,21 +1669,23 @@ sub _count_name_decls {
 # so a same-name variable in a sibling block is untouched.  When $skip (a
 # coderef) is given, Symbol/ArrayIndex tokens it accepts are left alone — the
 # promotion pass uses it to keep shadow-scope uses on their original name.
-sub _rewrite_var_uses {
-  my ($self, $stmts, $canon, $newbare, $within, $skip) = @_;
+# Interpolation rewriter: uses of the SAME variable inside interpolating
+# text must follow a rename.  Backslash-parity guard (an escaped \$x is
+# literal text; \\$x interpolates).  Sigil-aware per canon:
+#   $x  → `$x` not followed by [ / { (those are @x/%x ELEMENT interpolations
+#         — different variables);
+#   @a  → `@a` (join) and `@a[…]` (slice) but not `@a{…}` (%a slice);
+#         `$a[` (element — immediate `[`: `$a [` does not interpolate as an
+#         element, and `$a->[` is a deref of scalar $a); `$#a`;
+#   %h  → `$h{` (element) and `@h{` (slice); bare %h never interpolates.
+# The `${x}` deref-block form never reaches here (every caller's blocker
+# refuses it first — it is invisible to these regexes).
+# Returns a closure over ONE text argument; truthy result = text changed.
+sub _interp_fixer {
+  my ($canon, $newbare) = @_;
   my $sigil = substr($canon, 0, 1);
   (my $bare = $canon) =~ s/^[\$\@\%]//;
-  # Interpolation rewriter: uses of the SAME variable inside interpolating
-  # text must follow the rename.  Backslash-parity guard (an escaped \$x is
-  # literal text; \\$x interpolates).  Sigil-aware per canon:
-  #   $x  → `$x` not followed by [ / { (those are @x/%x ELEMENT interpolations
-  #         — different variables);
-  #   @a  → `@a` (join) and `@a[…]` (slice) but not `@a{…}` (%a slice);
-  #         `$a[` (element — immediate `[`: `$a [` does not interpolate as an
-  #         element, and `$a->[` is a deref of scalar $a); `$#a`;
-  #   %h  → `$h{` (element) and `@h{` (slice); bare %h never interpolates.
-  # The `${x}` deref-block form never reaches here (_promote_captured refuses).
-  my $interp_fix =
+  return
     $sigil eq '$' ? sub {
       $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E\b(?![\[\{])/$1\$$newbare/g;
     }
@@ -1641,6 +1701,34 @@ sub _rewrite_var_uses {
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)([\$\@])\Q$bare\E(?=\{)/$1$2$newbare/g;
       return $n;
     };
+}
+
+# Apply an _interp_fixer closure to ONE token, iff it is interpolating text
+# (double/qq/backtick/qx/regex/readline, or an interpolating heredoc's body).
+sub _fix_interp_token {
+  my ($t, $fix) = @_;
+  if ($t->isa('PPI::Token::HereDoc')) {
+    return if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;  # non-interpolating
+    $fix->($_) for @{ $t->{_heredoc} || [] };
+  } elsif ($t->isa('PPI::Token::Quote::Double')
+        || $t->isa('PPI::Token::Quote::Interpolate')
+        || $t->isa('PPI::Token::QuoteLike::Backtick')
+        || $t->isa('PPI::Token::QuoteLike::Command')
+        || $t->isa('PPI::Token::QuoteLike::Regexp')
+        || $t->isa('PPI::Token::QuoteLike::Readline')
+        || $t->isa('PPI::Token::Regexp::Match')
+        || $t->isa('PPI::Token::Regexp::Substitute')) {
+    my $c = $t->content;
+    $t->set_content($c) if $fix->($c);
+  }
+  return;
+}
+
+sub _rewrite_var_uses {
+  my ($self, $stmts, $canon, $newbare, $within, $skip) = @_;
+  my $sigil = substr($canon, 0, 1);
+  (my $bare = $canon) =~ s/^[\$\@\%]//;
+  my $interp_fix = _interp_fixer($canon, $newbare);
   for my $stmt (@$stmts) {
     next unless ref $stmt && $stmt->isa('PPI::Node');
     for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
@@ -1650,24 +1738,9 @@ sub _rewrite_var_uses {
       (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/;
       $s->set_content($c);
     }
-    if ($interp_fix) {
-      for my $t (@{ $stmt->find('PPI::Token') || [] }) {
-        next if $within && !_elem_within($t, $within);
-        if ($t->isa('PPI::Token::HereDoc')) {
-          next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;  # non-interpolating
-          $interp_fix->($_) for @{ $t->{_heredoc} || [] };
-        } elsif ($t->isa('PPI::Token::Quote::Double')
-              || $t->isa('PPI::Token::Quote::Interpolate')
-              || $t->isa('PPI::Token::QuoteLike::Backtick')
-              || $t->isa('PPI::Token::QuoteLike::Command')
-              || $t->isa('PPI::Token::QuoteLike::Regexp')
-              || $t->isa('PPI::Token::QuoteLike::Readline')
-              || $t->isa('PPI::Token::Regexp::Match')
-              || $t->isa('PPI::Token::Regexp::Substitute')) {
-          my $c = $t->content;
-          $t->set_content($c) if $interp_fix->($c);
-        }
-      }
+    for my $t (@{ $stmt->find('PPI::Token') || [] }) {
+      next if $within && !_elem_within($t, $within);
+      _fix_interp_token($t, $interp_fix);
     }
     next unless $sigil eq '@';
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
@@ -1712,7 +1785,20 @@ sub _rename_captured_file_lexicals {
     push @subs, @{ $child->find('PPI::Statement::Sub') || [] };
   }
   @subs = grep { $_->name && $_->block && !$_->isa('PPI::Statement::Scheduled') } @subs;
-  return unless @subs;
+
+  # Oversized-extent flattening (v1's defvar model, size-triggered): a
+  # segment-top-level `my` nests the WHOLE segment remainder in one `let`,
+  # and SBCL compiles that as a single function — past ~60k chars of source
+  # remainder the register allocator's memory use grows superlinearly and
+  # exhausts the default 1 GB heap even under the notinline sandwich
+  # (pack.t: 63k source → one 162k-char form → compiler OOM).  Any top-level
+  # decl whose post-decl runtime remainder (hoisted subs excluded — they
+  # leave the run bucket) exceeds $RUN_NEST_MAX MUST therefore be promoted
+  # to a defvar cell exactly like a captured lexical; a decl the promotion
+  # machinery refuses dies → v1 (never a silent giant form; the assembly
+  # gate on $RUN_FORM_MAX is the backstop).
+  my %forced = map { (refaddr($_) => 1) } $self->_oversized_top_decls($stmts);
+  return unless @subs || %forced;
 
   # Tally declarations (my/state, by bare name) and disqualify any bare name
   # ever used in array/hash family form.
@@ -1739,26 +1825,91 @@ sub _rename_captured_file_lexicals {
   # "$a[i]" element interpolations are rewritten sigil-aware; M-A).
   # sorted keys: hash order is per-process random — unsorted made cached
   # transpiles churn.
+  my $promote = sub {
+    my ($decl, $canon, $bare) = @_;
+    my $force = $forced{ refaddr($decl) };
+    my $ok = $self->_promote_captured($stmts, \@subs, $decl, $canon, $bare,
+                                      $force);
+    die "Parser2 TODO: oversized top-level my extent: $canon not promotable\n"
+      if $force && !$ok;
+  };
   for my $bare (sort keys %scalar_decl) {
     next if $self->{_file_lex_renamed}{"\$$bare"};          # already promoted by the spanning pass
     for my $decl (@{ $scalar_decl{$bare} }) {
-      $self->_promote_captured($stmts, \@subs, $decl, "\$$bare", $bare);
+      $promote->($decl, "\$$bare", $bare);
     }
   }
   for my $bare (sort keys %mlist_decl) {
     for my $md (@{ $mlist_decl{$bare} }) {
       my ($decl, $msym) = @$md;
       next if $self->{_file_lex_renamed}{$msym};            # already promoted by the spanning pass
-      $self->_promote_captured($stmts, \@subs, $decl, $msym, $bare);
+      $promote->($decl, $msym, $bare);
     }
   }
   for my $bare (sort keys %container_decl) {
     for my $cd (@{ $container_decl{$bare} }) {
       my ($decl, $csym) = @$cd;
       next if $self->{_file_lex_renamed}{$csym};            # already promoted by the spanning pass
-      $self->_promote_captured($stmts, \@subs, $decl, $csym, $bare);
+      $promote->($decl, $csym, $bare);
     }
   }
+}
+
+# The segment-top-level my/state declarations whose post-decl runtime
+# remainder (statement source length, minus hoisted named-sub bodies)
+# exceeds $RUN_NEST_MAX — each such decl would nest an oversized `let`.
+# Returns the decl statement NODES (callers key sets by refaddr — PPI
+# stringification is overloaded to content and must not be a hash key).
+# Emitted CL runs 2.2–3.2x the statement source across the corpus, so the
+# source-side trigger must sit at ~$RUN_FORM_MAX / 3.2 for the flattening to
+# actually keep every emitted form under the gate (pack.t s289: a 37k source
+# remainder emitted a 96k form).
+our $RUN_NEST_MAX = 20_000;   # chars of post-decl source remainder
+sub _oversized_top_decls {
+  my ($self, $stmts) = @_;
+  my @only = grep { ref $_ && $_->isa('PPI::Statement') } @$stmts;
+  # Runtime source weight per top-level statement: named-sub definitions
+  # hoist out of the run bucket entirely; subs nested deeper hoist too.
+  my @w;
+  for my $st (@only) {
+    if ($st->isa('PPI::Statement::Sub') && !$st->isa('PPI::Statement::Scheduled')) {
+      push @w, 0;
+      next;
+    }
+    my $len = length($st->content);
+    for my $sub (@{ $st->find('PPI::Statement::Sub') || [] }) {
+      $len -= length($sub->content)
+        unless $sub->isa('PPI::Statement::Scheduled');
+    }
+    push @w, $len;
+  }
+  my @tail;   # tail[i] = sum of w[i+1 ..]
+  my $acc = 0;
+  for my $i (reverse 0 .. $#only) { $tail[$i] = $acc; $acc += $w[$i] }
+  my @forced;
+  for my $i (0 .. $#only) {
+    next unless $only[$i]->isa('PPI::Statement::Variable');
+    my $kw = $only[$i]->schild(0);
+    next unless $kw && $kw->content =~ /^(?:my|state)$/;
+    push @forced, $only[$i] if $tail[$i] > $RUN_NEST_MAX;
+  }
+  return @forced;
+}
+
+# By-construction backstop for the compiler-heap OOM class: a single emitted
+# top-level runtime form past $RUN_FORM_MAX chars is not loadable under the
+# standard 1 GB heap (SB-REGALLOC grows superlinearly; pack.t's 162k-char
+# form OOMed, the corpus' largest passing form is ~55k) — die → v1 rather
+# than emit a form that crashes SBCL at load.
+our $RUN_FORM_MAX = 64_000;
+sub _gate_oversized_run_form {
+  my ($self, $text) = @_;
+  if (length($text) > $RUN_FORM_MAX) {
+    (my $head = substr($text, 0, 120)) =~ s/\s+/ /g;
+    die 'Parser2 TODO: oversized top-level run form (' . length($text)
+      . " chars > $RUN_FORM_MAX) — would exhaust the SBCL compiler heap: $head\n";
+  }
+  return $text;
 }
 
 # Refusal diagnostic for the capture-promotion path (CAPREFUSE, the analogue of
@@ -1781,7 +1932,7 @@ sub _caprefuse {
 # the rewrite skips its scope (_symbol_is_declarator + _ref_shadowed).  No-op
 # when the guards fail (→ the file keeps its capture gate → v1).
 sub _promote_captured {
-  my ($self, $stmts, $subs, $decl, $canon, $bare) = @_;
+  my ($self, $stmts, $subs, $decl, $canon, $bare, $force) = @_;
   my $sig    = substr($canon, 0, 1);
   my $extent = _enclosing_block($decl);                     # block, or undef = segment
   my $estmts = $extent ? [ grep { $_->isa('PPI::Statement') } $extent->schildren ]
@@ -1796,7 +1947,10 @@ sub _promote_captured {
     push @psubs, $sub
       if grep { ref $_ && ($sub == $_ || _elem_within($sub, $_)) } @post;
   }
-  return if !$self->_captured_in_subs(\@psubs, $canon, $extent)
+  # A $force decl (oversized top-level extent — see _oversized_top_decls)
+  # must be promoted regardless of capture; every other safety rule below
+  # still applies, and the caller gates the file when we return falsy.
+  return if !$force && !$self->_captured_in_subs(\@psubs, $canon, $extent)
     && _caprefuse($canon, 'not captured by a named sub after the decl');
   # File-unique name declared at segment top level: promote under its OWN
   # name (the span pass's identity-unmangle rule).  The defvar cannot poison
@@ -1808,7 +1962,7 @@ sub _promote_captured {
   # capture post-block package-global uses of the name.
   if (!$extent && ($self->{_file_decl_count}{$bare} // 0) == 1) {
     $self->{_file_lex_renamed}{$canon} = 1;
-    return;
+    return 1;
   }
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
@@ -1891,7 +2045,7 @@ sub _promote_captured {
   $self->_rename_decl_within($decl, $dsym, $sig . $newbare);
   $self->_rewrite_var_uses(\@post, $canon, $newbare, $extent, $skip);
   $self->{_file_lex_renamed}{ $sig . $newbare } = 1;             # drives the defvar lowering
-  return;
+  return 1;
 }
 
 # True when $canon (sigil-aware, via ->symbol) is used inside a NAMED sub whose
@@ -1940,10 +2094,9 @@ sub _shadow_rename_blocker {
     $decls++ if grep { $_->content eq $old } @syms;
   }
   return "multiple declarations" if $decls != 1;
-  # Interpolated use ("$x" / /$x/ / heredoc) — the token rewrite can't reach it.
-  my %interp;
-  _interp_names($root, \%interp);
-  return "interpolated use" if $interp{$bare};
+  # Interpolated uses ("$x" / /$x/ / heredoc / <$x>) are handled: the rename
+  # (_rename_decl_within) rewrites them via _interp_fixer (M-A).  Only the
+  # `${x}` brace-deref form is invisible to the rewrite — refuse that.
   return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
   # String eval captures lexicals BY NAME (session-250 alist) — the eval'd
   # code would look for the original name.  eval-BLOCKS are fine.
@@ -1956,13 +2109,20 @@ sub _shadow_rename_blocker {
 }
 
 # Rename the declaration $sym (a `my $x` Symbol) and every post-declaration
-# scalar use of it within $root to $new.  Symbols whose ->symbol resolves to
-# a container (`$x[0]` → @x, `$x{k}` → %x) are left alone — they are element
-# accesses of DIFFERENT variables.
+# scalar use of it within $root to $new — including uses inside interpolating
+# text ("$x", /$x/, heredocs, <$fh>; via _interp_fixer, M-A).  Symbols whose
+# ->symbol resolves to a container (`$x[0]` → @x, `$x{k}` → %x) are left
+# alone — they are element accesses of DIFFERENT variables; the interp fixer
+# skips those forms for the same reason.  The positional walk keeps interp
+# text BEFORE the decl (and in the decl's own RHS) on the outer variable.
+# Every caller's blocker guarantees a single declaration of the name in
+# $root, so there is no shadow scope to skip.
 sub _rename_decl_within {
   my ($self, $root, $sym, $new) = @_;
   my $old  = $sym->content;
   my $decl = $sym->statement;
+  (my $newbare = $new) =~ s/^[\$\@\%]//;
+  my $interp_fix = _interp_fixer($old, $newbare);
   my ($seen_sym, $past_decl) = (0, 0);
   for my $t ($root->tokens) {
     if (!$seen_sym) {
@@ -1977,6 +2137,7 @@ sub _rename_decl_within {
       next if $inside;   # decl RHS: `my $x = $x` reads the OUTER $x
       $past_decl = 1;
     }
+    _fix_interp_token($t, $interp_fix);
     next unless $t->isa('PPI::Token::Symbol') && $t->symbol eq $old;
     $t->set_content($new);
   }
