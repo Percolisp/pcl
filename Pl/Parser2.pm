@@ -75,6 +75,42 @@ sub _build_fallback_parser {
 sub parse_file { my ($class, $fn, %opts) = @_; return $class->new(filename => $fn)->parse }
 sub parse_code { my ($class, $code, %opts) = @_; return $class->new(code => $code)->parse }
 
+# Pre-pass: `goto LABEL` (plain-word label form) whose nearest sub-like
+# barrier — named sub body, anon `sub {}` block, or a `sort {}` comparator
+# block — contains NO such label can never reach it: Perl raises the runtime
+# error "Can't find label LABEL" (a sort block additionally forbids the jump
+# outright).  Rewrite the two tokens to `die "Can't find label LABEL"` —
+# byte-equivalent Perl semantics (the " at FILE line N" suffix is documented
+# not-supported) that every lowering path consumes without special cases.
+# map/grep/eval blocks are NOT barriers: Perl allows goto to leave those, so
+# such gotos are genuine (the standalone-label pass gates the forward ones).
+# Only the v2 PPI document is touched; a later gate re-parses the source.
+sub _rewrite_unreachable_gotos {
+  my ($self, $doc) = @_;
+  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
+                                 && $_[1]->content eq 'goto' }) || [] }) {
+    my $nx = $w->snext_sibling or next;
+    next unless $nx->isa('PPI::Token::Word')
+      && $nx->content =~ /^\w+$/ && $nx->content ne 'sub';
+    my $lbl = $nx->content;
+    my $barrier;
+    for (my $p = $w->parent; $p; $p = $p->parent) {
+      if ($p->isa('PPI::Statement::Sub')) { $barrier = $p; last }
+      if ($p->isa('PPI::Structure::Block')) {
+        my $prev = $p->sprevious_sibling;
+        if ($prev && $prev->isa('PPI::Token::Word')
+            && $prev->content =~ /^(?:sub|sort)$/) { $barrier = $p; last }
+      }
+    }
+    next unless $barrier;
+    next if $barrier->find_any(sub { $_[1]->isa('PPI::Token::Label')
+                                     && $_[1]->content =~ /^\Q$lbl\E\s*:/ });
+    $w->set_content('die');
+    $nx->insert_before(PPI::Token::Quote::Double->new(qq{"Can't find label $lbl"}));
+    $nx->delete;
+  }
+}
+
 # Merge prototypes declared by every use/require in the document (nested ones
 # included — pack.t's `BEGIN { require './test.pl' }`) into the shared
 # Environment, mirroring v1's statement-time extraction (use →
@@ -211,6 +247,16 @@ sub parse {
   # re-merge is harmless.
   $self->_premerge_include_prototypes($doc);
 
+  # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort
+  # comparator counts: "Can't goto out of a pseudo block") — when no such
+  # label exists inside that barrier, the goto is a GUARANTEED runtime error
+  # ("Can't find label LABEL").  Rewrite it to the equivalent `die` up front,
+  # so every lowering path (named-sub body, anon sub, sort block, seam)
+  # consumes plain Perl and the standalone-label pass never mistakes it for
+  # a genuine forward goto (sort.t lines 809/813; v1 emits a naked (go :tag)
+  # here that only survives because the calls sit under eval).
+  $self->_rewrite_unreachable_gotos($doc);
+
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —
   # v1's gen_funcall emits (p-eval STR (list (cons "$x" $x) …)) reading the
@@ -253,17 +299,18 @@ sub parse {
   $self->environment->package_stack(['main']);
   $self->environment->state_var_renames({});
   $self->{_referenced_pkgs} = {};
-  # File-wide accumulator of EVERY name ever let-bound (never shrinks) — the
-  # forward-declaration pass must never defvar a name let-bound in the SAME
-  # package (a defvar proclaims that package's symbol special and poisons every
-  # `let` of that name read under the same in-package).  Keyed name → pkg → 1:
-  # a `my $t` let-bound only in `main` must NOT suppress an `X::$t` forward
-  # defvar in a package-X section — they are different CL symbols (join.t's
-  # `{ package X; tie my $t … }` helper block, flattened by T-A1).  This is
+  # The forward-declaration exclusion set is PER SECTION (_seg_lex, reset in
+  # the segment loop, accumulated by _reg_lex, never shrinks within its
+  # section): a section must not defvar a name it let-binds itself (a defvar
+  # proclaims the symbol special and poisons the section's own `let`s), but a
+  # name let-bound only in some OTHER section must still get this section's
+  # defvar when used as a package global here (sort.t @a — see the segment
+  # loop comment).  Formerly a file-wide pkg-keyed accumulator (_all_lex);
+  # the per-package keying (join.t: a main `my $t` must not suppress an
+  # `X::$t` defvar) is subsumed — a section has exactly one package.  This is
   # deliberately separate from the now-SCOPED _let_bound_vars, which must
   # reflect the call site's live scope so the string-eval capture alist
   # (_eval_lexical_alist) doesn't list a closed sibling scope's name.
-  $self->{_all_lex} = {};
   $self->{_if_ret_counter} = 0;   # unique --pcl-if-ret--N per tail bare-if
 
   # ---- Split the top level into PACKAGE SEGMENTS at statement-form
@@ -325,7 +372,7 @@ sub parse {
     # DEFAULT ON since s278b (was gated behind PCL_V2_PKGBLOCK until the
     # join.t miscompile — an X::$t forward-defvar wrongly suppressed by a
     # main-package `let` of the same bare name — was fixed via the
-    # package-aware _all_lex exclusion).  Full-sweep parity vs v1 on all 18
+    # package-aware (now per-section _seg_lex) exclusion).  Full-sweep parity vs v1 on all 18
     # package-in-block files, and corpus-wide (identical fully-passing set).
     if (my $inner = $self->_flattenable_pkg_block($child)) {
       my $outer_pkg = $cur_pkg;
@@ -390,7 +437,7 @@ sub parse {
   $self->_rename_captured_file_lexicals($_) for @segments;
 
   # W8.5: a condition-`my` name (while (my $name = …)) is registered let-bound
-  # (_all_lex) so it is never defvar'd — but when the SAME name is also used as
+  # (_seg_lex) so it is never defvar'd by its section — but when the SAME name is also used as
   # a package global elsewhere in the segment (defins.t: a later
   # `($seen ? $dummy : $name) = <FILE>`), that exclusion leaves the global
   # unbound.  Rename the condition-declared lexical (its construct is its whole
@@ -482,6 +529,7 @@ sub parse {
     $self->{_hoisted_decls}  = [];
     $self->{_hoisted_defs}   = [];
     $self->{_live_lex}       = {};
+    $self->{_seg_lex}        = {};   # every name let-bound in THIS section (forward-decl exclusion)
     # Named subs + Scheduled blocks of this segment — the embedded-my
     # let-hoist consults these (a sub referencing the name vetoes the hoist).
     {
@@ -499,9 +547,15 @@ sub parse {
     # gated by _check_my_spanning.  So the fallback machinery's let-bound set
     # must start empty per segment; otherwise an earlier segment's file
     # lexical (e.g. `package Foo { my @a; … }`) leaks into a later segment's
-    # string-eval capture alist as a free (→ unbound) symbol.  (_all_lex stays
-    # file-wide — the forward-decl pass must never defvar a name let-bound
-    # anywhere.)
+    # string-eval capture alist as a free (→ unbound) symbol.  The forward-
+    # decl exclusion (_seg_lex) is per-section too: a name let-bound ONLY in
+    # another section must still get this section's defvar when used as a
+    # package global here (sort.t: top-level `sort {…} @a` beside later
+    # block-scoped `my @a`s — the suppressed defvar left @a unbound at load).
+    # The defvar makes the other sections' uncaptured lets dynamic, which is
+    # exactly v1's file-lexical model for the colliding name; captured
+    # lexicals are renamed (promotion passes / the seam's __lex__N) or gated,
+    # so the per-iteration-closure hazard cannot reach this path.
     $self->fallback_parser->{_let_bound_vars} = {};
     my (@decls, @defs, @top);
     for my $child (@{ $seg->{stmts} }) {
@@ -551,6 +605,7 @@ sub parse {
       run      => [map { $self->_gate_oversized_run_form(Pl::Parser::_cap_inlining_if_huge(Pl::CLForm::to_string($_, 0))) } @runtime],
       captured => [@{ $self->{_captured_decls} }],
       sched    => [@{ $self->{_sched_defs} }],
+      seg_lex  => $self->{_seg_lex},
     };
   }
 
@@ -602,7 +657,8 @@ sub parse {
     push @body, $self->_forward_global_decls(join("\n", @{ $sec->{captured} },
                                                         @{ $sec->{defs} },
                                                         @{ $sec->{sched} },
-                                                        @{ $sec->{run} }), $pkg), '';
+                                                        @{ $sec->{run} }),
+                                             $pkg, $sec->{seg_lex}), '';
     # Declarations captured by _fallback_stmt during lowering (defvar/
     # defconstant/eval-when from use/require/BEGIN) — before the definitions
     # that may reference them.
@@ -640,6 +696,38 @@ sub parse {
   push @out, map { "(pcl:p-defpackage " . $self->fallback_parser->_cl_pkg_designator($_) . ")" }
              sort keys %pre;
   push @out, '' if %pre;
+  # Cross-section forward sub calls: Perl compiles every sub before any
+  # top-level code runs, so an earlier section's load-time code may call a
+  # sub a LATER section defines (sort.t bug-36430: main's comparator calls
+  # A::min from the flattened block's package-A segment).  v1 puts every
+  # p-declare-sub no-op stub at the file top; mirror that ON DEMAND — only
+  # for declare-subs whose bare cl-name is mentioned in an earlier section's
+  # emitted text — so files without such calls keep byte-identical output.
+  # Qualified read (Pkg::pl-name) under :pcl; the packages exist (%pre, and
+  # :main via the idempotent defpackage below).
+  {
+    my (@stubs, %stub_seen, $need_main, @earlier);
+    for my $i (0 .. $#sections) {
+      my $sec = $sections[$i];
+      my $earlier = join "\n", @earlier;
+      (my $prefix = $self->fallback_parser->_cl_pkg_designator($sec->{pkg})) =~ s/^://;
+      for my $line (@{ $sec->{decls} }, @{ $sec->{captured} }) {
+        next unless $i > 0 && $line =~ /^\(p-declare-sub\s+(\S+?)\)\s*$/;
+        my $name = $1;
+        (my $bare = $name) =~ s/^.*:://;
+        next unless index($earlier, $bare) >= 0;
+        my $q = $name =~ /::/ ? $name : "$prefix\::$name";
+        next if $stub_seen{$q}++;
+        $need_main = 1 if $q =~ /^main::/;
+        push @stubs, "(pcl:p-declare-sub $q)";
+      }
+      push @earlier, @{ $sec->{$_} } for qw(decls captured defs sched run);
+    }
+    if (@stubs) {
+      push @out, '(pcl:p-defpackage :main)' if $need_main;
+      push @out, @stubs, '';
+    }
+  }
   push @out, @body;
   $self->_seam_census_dump if _seam_census();
   return join("\n", @out);
@@ -1210,8 +1298,8 @@ sub _block_captures_name {
 #                        or interpolated in a string/regex/heredoc.
 sub _scan_lex_facts {
   my ($self, $stmts, $f) = @_;
-  $f->{$_} //= {} for qw(decl_count scalar_decl disq container_decl interp
-                         family mlist_decl);
+  $f->{$_} //= {} for qw(decl_count canon_decl_count scalar_decl disq
+                         container_decl interp family mlist_decl);
   for my $stmt (@$stmts) {
     my @vstmts = $stmt->isa('PPI::Statement::Variable') ? ($stmt) : ();
     push @vstmts, @{ $stmt->find('PPI::Statement::Variable') || [] };
@@ -1221,6 +1309,10 @@ sub _scan_lex_facts {
       for my $dn ($self->_declared_names($v)) {
         (my $bare = $dn) =~ s/^[\$\@\%]//;
         $f->{decl_count}{$bare}++;
+        # Sigil-exact count: `my @x` and `my $x` are different variables AND
+        # different CL symbols — the container span path's file-uniqueness
+        # rule needs the count of THIS canon only (nested shadows included).
+        $f->{canon_decl_count}{$dn}++;
       }
       my ($name) = $self->_single_scalar_decl($v);
       if ($name && $kw->content eq 'my') {
@@ -1445,7 +1537,65 @@ sub _rename_spanning_lexicals {
   };
 
   for my $bare (sort keys %spanning) {
-    my $di = $decl_seg{$bare};
+    # M-B (per-declaration span tracking): a spanning bare name can carry
+    # SEVERAL declaration instances — the file lexical plus a same-name
+    # re-decl at the TOP of a flattened blk segment (its shadow itself spans
+    # segments within its blk run, e.g. sort.t's second `my $answer`).  The
+    # bare-name model conflated them (dc=2 → refuse → die → v1).  Instead,
+    # enumerate every top-level single-scalar decl instance and process them
+    # INNERMOST/LATEST FIRST: renaming the later instance consumes its uses
+    # (its extent is its blk run), so when the earlier instance's facts are
+    # re-scanned it sees only its own decl and uses — every eligibility rule
+    # below then applies per instance unchanged.  A refused spanning name
+    # previously always died (whole-file v1), so multi-instance promotion can
+    # only change files that were gated — never a v2-native file's emission.
+    my @inst;
+    for my $i (0 .. $#$segments) {
+      my $top = $segments->[$i]{stmts};
+      for my $v (@{ $sf[$i]{scalar_decl}{$bare} || [] }) {
+        my ($ix) = grep { $top->[$_] == $v } 0 .. $#$top;
+        push @inst, [$i, $ix, $v] if defined $ix;
+      }
+    }
+    @inst = sort { $b->[0] <=> $a->[0] || $b->[1] <=> $a->[1] } @inst;
+    @inst = ([$decl_seg{$bare}, undef, undef]) unless @inst;  # keep bare-name refusal traces
+    my $multi = @inst > 1;
+    # Multi-instance: if ANY instance spans, EVERY instance must be renamed —
+    # a sibling left under the original name would (a) keep the spanning
+    # instance's dc at 2 and (b) sit exposed to its qualified rewrite (it is
+    # segment-top-level, invisible to the block-shadow skip).  If none spans
+    # (%spanning was a text false positive from this bare name's other
+    # sigils/packages), leave everything byte-untouched.  (scalar.t: file
+    # `my $fh` spans; a second `my $fh` at the top of a flattened blk run
+    # doesn't — both rename, each within its own extent.)
+    if ($multi) {
+      my $any = 0;
+      for my $in (@inst) {
+        my $ihi = _blk_extent($segments, $in->[0]);
+        $any ||= grep {
+          my $txt = join "\n", map { $_->content } @{ $segments->[$_]{stmts} };
+          $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+        } $in->[0] + 1 .. $ihi;
+        last if $any;
+      }
+      next unless $any;
+    }
+    # Facts view for the eligibility checks: the shared pre-scan for the
+    # single-instance case (byte-identical to the bare-name model), a fresh
+    # local re-scan per instance in the multi case (must see prior renames).
+    my ($cf, $csf, $ctxt) = ($f, \@sf, $alltxt);
+    for my $in (@inst) {
+    my ($di, $inst_idx, $inst_decl) = @$in;
+    if ($multi) {
+      $cf = {}; $self->_scan_lex_facts($_->{stmts}, $cf) for @$segments;
+      $csf = [];
+      for my $i (0 .. $#$segments) {
+        my $g = {};
+        $self->_scan_lex_facts($segments->[$i]{stmts}, $g);
+        $csf->[$i] = $g;
+      }
+      $ctxt = join "\n", map { map { $_->content } @{ $_->{stmts} } } @$segments;
+    }
     # A name with exactly ONE my/state binding file-wide can be renamed to the
     # PLAIN package global $Pkg::name (no __file__N mangle): there is no other
     # `let $name` in the file for the defvar to poison.  The unmangle also
@@ -1455,9 +1605,9 @@ sub _rename_spanning_lexicals {
     # is unnecessary here (a cross-package eval matches v1, which likewise
     # defvars file lexicals — not a regression).  Only the NON-unique case
     # must mangle (to protect the sibling `let`) and therefore keep the guard.
-    my $unique = (($f->{decl_count}{$bare} // 0) == 1);
+    my $unique = (($cf->{decl_count}{$bare} // 0) == 1);
     my $refuse = sub {
-      warn "SPANREFUSE $bare: $_[0]\n" if $ENV{PCL_SPAN_DEBUG};
+      warn "SPANREFUSE $bare\@seg$di: $_[0]\n" if $ENV{PCL_SPAN_DEBUG};
       return 1;
     };
     next if !$unique && $eval_unsafe->($bare, $di) && $refuse->('eval-unsafe (non-unique)');
@@ -1475,10 +1625,10 @@ sub _rename_spanning_lexicals {
     for my $j ($di .. $hi) {
       my $top = $segments->[$j]{stmts};
       $dc     += $self->_hard_decl_count($top, $bare);
-      $family ||= $sf[$j]{family}{$bare};
-      $interp ||= $sf[$j]{interp}{$bare};
+      $family ||= $csf->[$j]{family}{$bare};
+      $interp ||= $csf->[$j]{interp}{$bare};
       push @sdecls, grep { my $v = $_; grep { $_ == $v } @$top }
-                    @{ $sf[$j]{scalar_decl}{$bare} || [] };
+                    @{ $csf->[$j]{scalar_decl}{$bare} || [] };
     }
     next if $family && $refuse->('family use (@x/%x/$#x)');
     # An interpolated use is text a rename cannot rewrite.  It is safe ONLY on
@@ -1486,14 +1636,22 @@ sub _rename_spanning_lexicals {
     # keeps resolving to the defvar'd global) and only where the interpolating
     # segment is the DECLARING package — a bare `$x` interpolated in another
     # package's segment would read THAT package's symbol, not the cell.
+    # STAGED (M-B session 3): the rename loops below already carry the M-A
+    # interp fixer (mangled + cross-package identity), so this refusal can be
+    # DROPPED once the scalar.t divergence it exposed is fixed — de-gated
+    # scalar.t ran 78+36/128 PARTIAL (early stop after t126, new fail t64
+    # "new value preserved") vs the v1 baseline 81/35/12 complete.  Debug
+    # that first; sort.t needs no interp and is unaffected either way.
     next if $interp
       && (!$unique
-          || grep { $sf[$_]{interp}{$bare}
+          || grep { $csf->[$_]{interp}{$bare}
                     && $segments->[$_]{pkg} ne $segments->[$di]{pkg} } $di .. $hi)
       && $refuse->('interpolated use');
     next if !(@sdecls == 1 && $dc == 1)
       && $refuse->('sdecls=' . scalar(@sdecls) . " dc=$dc");
-    next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/
+    next if $multi && $sdecls[0] != $inst_decl
+      && $refuse->('extent sole decl is not this instance');
+    next if $ctxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/
       && $refuse->('${x} deref-block');
     next if $segments->[$di]{blockform} && $refuse->('blockform decl segment');
     my $decl  = $sdecls[0];
@@ -1522,12 +1680,22 @@ sub _rename_spanning_lexicals {
     # statements of the segment.
     $self->_rename_decl_within($decl, $sym, "\$$newbare");
     my ($dsp) = map { $_->parent } grep { ref && $_->isa('PPI::Node') } @$stmts;
+    my $decl_fix = $unique ? undef : _interp_fixer("\$$bare", $newbare);
     for my $j ($idx + 1 .. $#$stmts) {
       next unless ref $stmts->[$j] && $stmts->[$j]->isa('PPI::Node');
       for my $s (@{ $stmts->[$j]->find('PPI::Token::Symbol') || [] }) {
         next unless $s->symbol eq "\$$bare";
         next if $skip_shadowed->($s, $stmts, $dsp);
         $s->set_content("\$$newbare");
+      }
+      # Mangled path: interp text must follow the rename (identity keeps the
+      # name, so same-package interp needs nothing).  Shadow scopes keep the
+      # outer text: their $bare is a different variable.
+      if ($decl_fix) {
+        for my $t (@{ $stmts->[$j]->find('PPI::Token') || [] }) {
+          next if $self->_ref_shadowed($t, "\$$bare", $stmts, $dsp);
+          _fix_interp_token($t, $decl_fix);
+        }
       }
     }
     # Later segments: the package-qualified form — their sections' reader
@@ -1539,9 +1707,14 @@ sub _rename_spanning_lexicals {
     # eligibility facts above were scoped to.
     my $last_j = $hi;
     my $qual = '$' . $segments->[$di]{pkg} . '::' . $newbare;
+    my $qual_fix = _interp_fixer("\$$bare", $segments->[$di]{pkg} . '::' . $newbare);
     for my $j ($di + 1 .. $last_j) {
       my $seg_stmts = $segments->[$j]{stmts};
       my ($sp) = map { $_->parent } grep { ref && $_->isa('PPI::Node') } @$seg_stmts;
+      # Identity path + same package: interp already resolves to the defvar'd
+      # global under the unchanged name — leave the text byte-untouched.
+      my $do_interp = !$unique
+        || $segments->[$j]{pkg} ne $segments->[$di]{pkg};
       for my $stmt (@$seg_stmts) {
         next unless ref $stmt && $stmt->isa('PPI::Node');
         for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
@@ -1549,9 +1722,16 @@ sub _rename_spanning_lexicals {
           next if $skip_shadowed->($s, $seg_stmts, $sp);
           $s->set_content($qual);
         }
+        if ($do_interp) {
+          for my $t (@{ $stmt->find('PPI::Token') || [] }) {
+            next if $self->_ref_shadowed($t, "\$$bare", $seg_stmts, $sp);
+            _fix_interp_token($t, $qual_fix);
+          }
+        }
       }
     }
     $self->{_file_lex_renamed}{"\$$newbare"} = 1;
+    }   # per-declaration instance
   }
 
   # W10-ext-3: containers (%h / @a) spanning a package boundary.  Same span
@@ -1565,22 +1745,57 @@ sub _rename_spanning_lexicals {
   # needed.  The decl lowers via _file_lex_renamed as a hoisted defvar
   # container (see _lower_block's no-init single-container branch).
   for my $bare (sort keys %spanning) {
-    next unless ($f->{decl_count}{$bare} // 0) == 1;   # file-unique only
-    my $di = $decl_seg{$bare};
-    my $hi = _blk_extent($segments, $di);
-    my ($dc, $interp, @cdecls) = (0, 0);
-    for my $j ($di .. $hi) {
-      $dc     += $sf[$j]{decl_count}{$bare} // 0;
-      $interp ||= $sf[$j]{interp}{$bare};
-      push @cdecls, @{ $sf[$j]{container_decl}{$bare} || [] };
+    # Per-declaration instances (M-B), like the scalar loop: every top-level
+    # single-container decl of the bare name, each with its OWN segment — the
+    # bare-keyed %decl_seg could point at a sibling `my $x` scalar's segment.
+    # Uniqueness is per CANON (sigil-exact): a sibling `my $x` is a different
+    # variable and a different CL symbol — it neither poisons the identity
+    # defvar nor is touched by the sigil-aware rewrite, so it must not block
+    # promoting @x/%x.  Nested same-canon shadows DO block (canon_decl_count
+    # counts them): a nested `let @x` under the defvar'd special is the
+    # poison the file-uniqueness rule exists to prevent.
+    my @cinst;
+    for my $i (0 .. $#$segments) {
+      my $top = $segments->[$i]{stmts};
+      for my $cd (@{ $sf[$i]{container_decl}{$bare} || [] }) {
+        push @cinst, [$i, $cd] if grep { $top->[$_] == $cd->[0] } 0 .. $#$top;
+      }
     }
-    next if $interp;             # @x in a string is an element-join — rewrite untested
-    next unless @cdecls == 1 && $dc == 1;
+    for my $ci (@cinst) {
+    my ($di, $cd) = @$ci;
+    my ($decl, $csym) = @$cd;              # $csym e.g. '%methods' / '@list'
+    next unless ($f->{canon_decl_count}{$csym} // 0) == 1;   # sole binding of THIS canon
+    my $hi = _blk_extent($segments, $di);
+    # Canon-exact span test (%spanning is bare-keyed TEXT — a sibling `$x`
+    # in a later segment must not promote an un-spanning @x): promote only
+    # when a later extent segment really uses THIS container (->symbol
+    # resolves $x[i]/@x{…} to it; $#x via ArrayIndex).  Canon-unique
+    # file-wide, so any such use is this variable, shadows impossible.
+    my $spans = 0;
+  SPANSCAN:
+    for my $j ($di + 1 .. $hi) {
+      for my $stmt (@{ $segments->[$j]{stmts} }) {
+        next unless ref $stmt && $stmt->isa('PPI::Node');
+        last SPANSCAN if $spans =
+          grep { $_->symbol eq $csym } @{ $stmt->find('PPI::Token::Symbol') || [] };
+        last SPANSCAN if $spans = ($csym =~ /^\@/)
+          && grep { $_->content eq '$#' . $bare } @{ $stmt->find('PPI::Token::ArrayIndex') || [] };
+      }
+    }
+    next unless $spans;
+    my $interp = 0;
+    $interp ||= $sf[$_]{interp}{$bare} for $di .. $hi;
+    # An interpolated use ("@x" element-join, "$x[0]" element) is text the
+    # rename cannot rewrite — but this path is IDENTITY-ONLY (the cell keeps
+    # the plain name), so interpolation keeps resolving, exactly as on the
+    # scalar unique path: safe iff every interpolating segment is the
+    # DECLARING package (elsewhere the bare name reads THAT package's symbol).
+    next if $interp
+      && grep { $sf[$_]{interp}{$bare}
+                && $segments->[$_]{pkg} ne $segments->[$di]{pkg} } $di .. $hi;
     next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
     next if $segments->[$di]{blockform};
-    my ($decl, $csym) = @{ $cdecls[0] };   # $csym e.g. '%methods' / '@list'
     my $stmts = $segments->[$di]{stmts};
-    next unless grep { $stmts->[$_] == $decl } 0 .. $#$stmts;  # top-level of segment
     next if $self->{_file_lex_renamed}{$csym};
 
     # Identity-unmangled: the decl stays `my %methods` and defvar-lowers via
@@ -1592,11 +1807,13 @@ sub _rename_spanning_lexicals {
       for my $stmt (@{ $segments->[$j]{stmts} }) {
         next unless ref $stmt && $stmt->isa('PPI::Node');
         for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
-          my $canon = $s->symbol;
-          next unless $canon eq "\%$bare" || $canon eq "\@$bare";
+          # Canon-exact: only uses of THIS container — a sibling %x beside a
+          # promoted @x is a different, unpromoted variable.
+          next unless $s->symbol eq $csym;
           (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1 . $qname/e;
           $s->set_content($c);
         }
+        next unless $csym =~ /^\@/;   # $#x belongs to the array only
         for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
           my $c = $ai->content;
           $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
@@ -1604,6 +1821,7 @@ sub _rename_spanning_lexicals {
       }
     }
     $self->{_file_lex_renamed}{$csym} = 1;
+    }   # per-declaration instance
   }
 }
 
@@ -2359,20 +2577,20 @@ sub _declared_names {
 # exactly the referenced sigil-vars that are neither let-bound anywhere in
 # the file nor runtime-owned.
 sub _forward_global_decls {
-  my ($self, $text, $pkg) = @_;
+  my ($self, $text, $pkg, $seg_lex) = @_;
   $pkg //= 'main';
   # $a/$b are runtime-owned (the sort lowering defvars them); @a/@b are NOT —
   # nothing defines them, so excluding them left `\@a` before any assignment
   # unbound at load (postfixderef.t; v1's list never had them).
   my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
                                         $a $b);
-  # Exclude names let-bound in THIS section's package (W3: _all_lex, the
-  # cumulative accumulator — NOT the now-scoped _let_bound_vars, which has
-  # shrunk back to top-level scope by the time this assembly-phase pass runs).
-  # Package-aware: a defvar poisons only its own package's symbol, so a name
-  # let-bound solely in a different package's section is still safe to declare
-  # here (see the _all_lex comment in parse()).
-  my $lb = $self->{_all_lex} // {};
+  # Exclude names let-bound in THIS section ($seg_lex, recorded by _reg_lex
+  # during the section's lowering — NOT the now-scoped _let_bound_vars, which
+  # has shrunk back to top-level scope by the time this assembly-phase pass
+  # runs).  Per-section, not file-cumulative: a name let-bound only in some
+  # OTHER section but used as a package global here still needs this
+  # section's defvar (see the parse() comment at the _seg_lex reset).
+  my $lb = $seg_lex // {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
   my (%seen, %cross, %caret);
   for my $line (split /\n/, $text) {
@@ -2387,7 +2605,7 @@ sub _forward_global_decls {
     # internals like %pcl-cl-sub-name.
     while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
       my $v = $1;
-      next if $runtime_vars{$v} || ($lb->{$v} && $lb->{$v}{$pkg});
+      next if $runtime_vars{$v} || $lb->{$v};
       # W5-renamed cells are defvar'd via _captured_decls — don't double-declare.
       next if $self->{_file_lex_renamed}{$v};
       # `$x__lex__N` is v1's per-scope closure-capture RENAME (emitted by the
@@ -2569,9 +2787,10 @@ sub _reg_lex {
   for my $n (@names) {
     $self->fallback_parser->{_let_bound_vars}{$n} = 1;
     $self->{_live_lex}{$n} = 1;
-    # cumulative, keyed by the segment's package — drives the (package-aware)
-    # forward-decl exclusion.  cur_pkg is the segment package during lowering.
-    $self->{_all_lex}{$n}{ $self->cur_pkg // 'main' } = 1;
+    # Per-section accumulator — drives the forward-decl exclusion (a name
+    # let-bound in THIS section is never defvar'd by this section; other
+    # sections decide for themselves — see the parse() _seg_lex comment).
+    $self->{_seg_lex}{$n} = 1;
   }
   return;
 }
@@ -2583,7 +2802,8 @@ sub _lower_scope {
   my %saved     = %{ $self->{_live_lex} // {} };
   # Scope _let_bound_vars too (W3): a name declared inside this block must not
   # leak into the string-eval capture alist at a call site AFTER the block
-  # closes.  _all_lex (cumulative) still guards the forward-decl pass.
+  # closes.  _seg_lex (cumulative within the section) still guards the
+  # forward-decl pass.
   my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
   # Push an Environment scope frame around the block so LEXICAL PRAGMAS set by a
   # fallback-emitted statement inside the block (`use integer` / `no integer`)
@@ -3630,7 +3850,7 @@ sub _lower_compound {
     # _let_bound_vars/_live_lex so it does not leak into sibling statements.
     # Without this, a later sibling's string-eval capture alist would list the
     # (now-unbound) loop var → unbound-variable at load (W3 regression seen in
-    # cmpchain.t).  _all_lex keeps it (forward-decl).
+    # cmpchain.t).  _seg_lex keeps it (forward-decl).
     my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
     my %saved_lex = %{ $self->{_live_lex} // {} };
     $self->_reg_lex($name);

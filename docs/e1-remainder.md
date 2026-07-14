@@ -1,5 +1,26 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s290, 2026-07-14, Fable 5): M-B session 1 SHIPPED — census
+> 100 native / 11 gated, gen v2-32.**  De-gated **sort.t** (202/2/1 of
+> 205, SAME failing tests 170/177 as the v1 fallback — exact parity) via
+> per-declaration span instances (scalar loop innermost-first with
+> re-scanned facts; any-instance-spans → rename-all), canon-exact
+> container uniqueness/span-test/rewrite (`canon_decl_count`), the
+> `_rewrite_unreachable_gotos` pre-pass (goto-in-sub/sort-block with no
+> in-barrier label → perl's runtime `die "Can't find label …"`), the
+> per-section forward-decl exclusion (`_seg_lex` — sort.t's global `@a`
+> was left unbound by the file-wide `_all_lex` rule), and the on-demand
+> file-top `p-declare-sub` stub sweep (cross-section forward sub calls —
+> v1 stubs everything at top).  **STAGED for M-B session 3: the interp
+> fixer is wired into the span rename loops but the "interpolated use"
+> refusal is restored** — dropping it de-gates scalar.t at 78+36/128
+> PARTIAL (early stop after t126, new fail t64) vs v1's 81/35/12: debug
+> that divergence first, then remove the one `next if` (marked STAGED in
+> `_rename_spanning_lexicals`).  **ref.t re-triaged → M-F eval family**
+> (its `$test` clears; it re-gates on `$x` named in a string eval —
+> eval-unsafe is a correct refusal until the s250 capture alist carries
+> renamed cells).  s290 detail in `docs/session-log.md`.
+
 > **UPDATE (s289, 2026-07-14, Fable 5): M-A SHIPPED — census 99 native /
 > 12 gated, gen v2-31.**  De-gated **pack.t** (5638/87, SAME 87 test
 > numbers as the v1 fallback) and **yadayada.t** (21/15 parity).  Three

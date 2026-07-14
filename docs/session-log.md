@@ -4,6 +4,103 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 290 (2026-07-14, Fable 5) — E1 M-B per-declaration span tracking; sort.t de-gated (census 100/11); unreachable-goto rewrite; per-section forward-decl exclusion; on-demand p-declare-sub stub sweep; gen v2-32.
+
+Also (pre-M-B, committed separately): docs handoff refresh for Opus 4.8
+(3cb5c48) and the E4.0b requirement — external corpora (non-sweep perl t/
+dirs incl. t/mro+t/class, CPAN suites vs baselines) must re-run before v1
+deletion, as an E4.1 precondition (2d541d6, both plan docs + task #25).
+
+**M-B (task #51): sort.t DE-GATED — 202/2/1 of 205, complete run, SAME two
+failing tests (170 "sorted!", 177 "AUTOLOAD without stub") as the v1
+fallback baseline = exact parity.**  Five mechanisms, in dependency order:
+
+1. **Scalar span loop re-keyed per DECLARATION INSTANCE** (the M-B core):
+   enumerate every top-level single-scalar `my` decl of a spanning bare
+   name (from the per-segment `scalar_decl` facts), process
+   innermost/latest FIRST — renaming the later instance consumes its uses,
+   and the earlier instance's facts are RE-SCANNED (fresh `$cf/$csf/$ctxt`
+   per instance when multi) so its sdecls/dc checks see only itself.  If
+   ANY instance spans, ALL instances rename (a sibling left under the
+   original name keeps dc at 2 AND sits exposed to the spanning instance's
+   qualified rewrite — it is segment-top-level, invisible to the
+   block-shadow skip); if none spans (bare-keyed %spanning text false
+   positive), everything stays byte-untouched.  sort.t: file `my $answer`
+   @846 (spans into the flattened OtherPack block) + independent `my
+   $answer` @866 at the top of the second blk run (spans into package A) —
+   the old bare-name model conflated them (sdecls=2 dc=2 → refuse → die).
+   After the inner rename the outer becomes file-unique → identity path.
+2. **Container span loop: per-instance + CANON-EXACT uniqueness** — new
+   `canon_decl_count` fact (sigil-exact, nested shadows included): sibling
+   `my $output` scalars no longer block promoting the file-unique
+   `@output` (decl_count was bare-conflated).  Segment derived from the
+   decl instance itself (bare-keyed %decl_seg could point at the sibling
+   scalar's segment).  Canon-exact SPAN TEST via PPI ->symbol/$#x
+   ArrayIndex (the bare-keyed text test promoted un-spanning containers on
+   sibling-sigil false positives — do.t's @x churned 372 diff lines until
+   this).  Rewrite + $#x rewrite canon-exact too (a sibling %x must not be
+   qualified when @x promotes).  Interp allowed when every interpolating
+   segment is the DECLARING package (identity path — same rule as the
+   scalar unique path; clears `"@output"`).
+3. **`_rewrite_unreachable_gotos` pre-pass** (parse(), after prototype
+   pre-merge): `goto LABEL` (plain-word form) whose nearest sub-like
+   barrier — named sub body, anon `sub {}` block, or `sort {}` comparator
+   block — contains no such label is a GUARANTEED perl runtime error;
+   rewrite the two tokens to `die "Can't find label LABEL"` (the " at FILE
+   line N" suffix is documented not-supported).  map/grep/eval blocks are
+   NOT barriers (perl allows goto to leave them — array.t's map-goto stays
+   gated, task #63).  Lifts sort.t's false "forward goto to a standalone
+   label" gate (lines 809/813 — v1 emits a naked `(go :label)` there that
+   only survives because the calls sit under eval).
+4. **Forward-decl exclusion made PER-SECTION** (`_seg_lex` replaces the
+   file-wide pkg-keyed `_all_lex`): a name let-bound ONLY in another
+   section still gets this section's defvar when used as a package global
+   here.  sort.t: top-level `sort {…} @a` beside later block-scoped `my
+   @a`s left `@a` UNBOUND at load — a latent v2-native crash class (the
+   join.t per-package rationale is subsumed: a section has one package).
+   The defvar makes other sections' uncaptured lets dynamic = v1's model
+   for the colliding name; captured lexicals are renamed (promotion / seam
+   `__lex__N`) or gated, so the closure hazard cannot reach this path.
+5. **On-demand `p-declare-sub` stub sweep at file top**: Perl compiles
+   every sub before any top-level code runs, so an earlier section's
+   load-time code may call a sub a LATER section defines (bug 36430:
+   main's comparator calls A::min from the flattened block's package-A
+   segment — undefined function under v2's per-section decls).  v1 puts
+   every no-op stub at the file top (the call hits the stub → nil → the
+   test passes vacuously, same as needed); v2 now mirrors that ON DEMAND —
+   only for declare-subs whose bare cl-name appears in an earlier
+   section's emitted text (qualified `(pcl:p-declare-sub Pkg::pl-name)`
+   under :pcl, packages pre-declared, deduped) — so files without such
+   calls keep byte-identical output.
+
+**Verification**: corpus-diff vs HEAD = exactly 13 files — sort.t (the
+de-gate) + 12 v2-native files with ADDITIVE-ONLY diffs (stub-sweep lines
+and/or new forward defvars: caller do each hash join local method pos
+sprintf2 sub undef vec); 12-file sweep HEAD-worktree vs new = EXACT parity
+(2386/154/82, same per-file rows, same partial stops).  Full Pl/t gate
+green.  Gen bumped v2-32.
+
+**STAGED, NOT ACTIVE — M-B session 3 starts here**: the M-A interp fixer
+is wired into the scalar span rename loops (declaring segment on the
+mangled path; later segments mangled + cross-package identity, shadow
+scopes skipped via `_ref_shadowed`), but the "interpolated use" refusal
+was RESTORED before commit: dropping it de-gates scalar.t, which ran
+**78+36/128 PARTIAL (early stop after t126, new fail t64 "new value
+preserved") vs the v1 baseline 81/35/12 complete** — a real divergence to
+debug FIRST (likely in the in-memory-filehandle / `open $fh, '<', \$p`
+tie-proxy region; the `$fh` mangled rename + readline interp rewrite is
+the new variable).  The refusal is ONE `next if` in
+`_rename_spanning_lexicals` (marked STAGED in the comment).  Multi-
+instance machinery already handles scalar.t's second `my $fh`/`my $x`
+(the any-instance-spans → rename-all rule was added for exactly that).
+
+**ref.t re-triaged**: its `$test` span now clears; the file re-gates on
+`x` — `eval '\($x, $y) = (1, 2)'` is a string eval NAMING the lexical, so
+the mangled rename is correctly refused (eval-unsafe).  ref.t therefore
+belongs to the **eval/closure M-F family** (s250 capture alist must carry
+orig-name → renamed-cell pairs), NOT M-B.  M-B's remaining target is
+scalar.t only; eval.t unchanged.
+
 ## Session 289 (2026-07-13/14, Fable 5) — E1 M-A interp rewrite; pack.t + yadayada.t de-gated (census 99/12); oversized-extent flattening + RUN_FORM_MAX gate; cross-require prototype pre-merge; gen v2-31.
 
 - **M-A interpolated-text rewrite (task #67)**: `_rewrite_var_uses`'s
