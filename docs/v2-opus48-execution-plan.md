@@ -29,12 +29,16 @@ governing doc wins; update this one.
    §1.2 = the five acceptance invariants, calibrated estimates, decisions
    D1–D3 all resolved).
 2. `docs/e1-remainder.md` — the living E1 worklist (per-file triage of the
-   19 remaining gates by clearing mechanism; **the s284 header note is the
-   current state** — several s283 hypotheses were disproven, read it).
-3. `docs/session-log.md` §283–§284 — the mechanisms you will be extending
-   (`_promote_captured` shadow-aware/positional model, identity promotion,
-   `_hard_decl_count`, container interp rewrite, embedded-my let-hoist,
-   CAPREFUSE/SPANREFUSE diagnostics).
+   remaining gates by clearing mechanism; **the newest header note (s289)
+   is the current state** — the per-file table rows lower down can lag the
+   header notes, and several s283 hypotheses were later disproven; read the
+   header notes top-down first).
+3. `docs/session-log.md` §283–§284 + §289 — the mechanisms you will be
+   extending (`_promote_captured` shadow-aware/positional model, identity
+   promotion, `_hard_decl_count`, container interp rewrite, embedded-my
+   let-hoist, CAPREFUSE/SPANREFUSE diagnostics; s289 added
+   `_interp_fixer`/`_fix_interp_token`, oversized-extent flattening with
+   `$RUN_NEST_MAX`/`$RUN_FORM_MAX`, and `_premerge_include_prototypes`).
 4. `docs/v2-transfer-plan.md` — mechanism detail for E2 (T-C(ii)), E3 (T-B),
    E4 (T-D).  Its sequencing table is superseded; its mechanics are not.
 5. `docs/ir-spec.md` — normative semantics of the generated CL.  **Update it
@@ -171,13 +175,15 @@ pre-existing failure).
 
 Default cadence per the endgame plan: **alternate E1 and E2 sessions** so
 gate wins keep landing while the structural work proceeds.  s288 did the
-void-wrap hoist (task #60 — DONE; substr.t's heap blocker is gone).  As
-of s288 the recommended next session is **E1-d M-A** (interp rewrite →
-pack.t, yadayada.t) or **E1-a finish: the magic-lvalue foreach**
-(substr.t's last gate, now unblocked) or **E2.0 dual-run scaffold**
-(task #57); E1-a/E1-b are done except chdir.t.
+void-wrap hoist (task #60 — DONE; substr.t's heap blocker is gone); s289
+did E1-d session 1 (M-A — pack.t + yadayada.t de-gated, task #67).  As
+of s289 the recommended next session is **E1-d session 2: M-B
+per-declaration spans** (sort.t first — no interp; then ref.t/scalar.t,
+whose interp prerequisite M-A is now done) or **E1-a finish: the
+magic-lvalue foreach** (substr.t's last gate) or **E2.0 dual-run
+scaffold** (task #57); E1-a/E1-b are done except chdir.t.
 
-### E1 — remaining 14 gates (~3–5 sessions)
+### E1 — remaining 12 gates (~2–4 sessions)
 
 #### E1-a. M-E: foreach over an aliasable lvalue element — **DONE (s285 + s287)**
 
@@ -220,9 +226,12 @@ the `:5.24` bundle — any `use v5.24;` module has it silently).  Remove the
 `_check_interp_postderef` stopgap gate.  De-gates postfixderef.t; v1 gains
 the same fix.
 
-#### E1-d. M-A interp-rewrite generalization + M-B per-declaration spans (2 sessions, clears 5 files)
+#### E1-d. M-A interp-rewrite generalization + M-B per-declaration spans (2 sessions, clears 5 files) — session 1 DONE (s289)
 
-Session 1 — **M-A** (clears pack.t, yadayada.t; prerequisite for ref/scalar):
+Session 1 — **M-A — DONE (s289, task #67)** (cleared pack.t, yadayada.t;
+prerequisite for ref/scalar; shipped as `_interp_fixer`/`_fix_interp_token`
+wired into `_rename_decl_within`, plus oversized-extent flattening and
+`_premerge_include_prototypes` — see session log §289).  Original spec:
 generalize `_rewrite_var_uses`'s interpolation rewriter (already sigil- and
 shadow-aware after s284) so the OTHER rename passes consume it: the
 condition-my rename (pack.t `foreach my $base (split '', …)` @224), the

@@ -106,7 +106,7 @@ each family below needs a real mechanism, not per-file patching.
 
 ## The 22 files, by clearing mechanism
 
-### M-A — Interpolated-text rewrite for renames (~1–2 sessions, clears 3 files, unblocks 2 more)
+### M-A — Interpolated-text rewrite for renames — **DONE (s289, task #67)**
 
 The single most repeated refusal: a rename pass (span rename, cond-my rename,
 shadow rename, container promotion) refuses because the name appears inside
@@ -119,11 +119,11 @@ rename passes.
 
 | file | exact gate | note |
 |---|---|---|
-| pack.t | `poisoned condition-my $base (interpolated use)` | `foreach my $base (split '', …)` at 224; the cond/loop-head rename refuses because `$base` is interpolated somewhere in scope |
-| yadayada.t | `my-shadow of live lexical $err inside fallback block (interpolated use)` | shadow-rename refusal, same root |
-| sub.t | `file lexical 'scratch' captured by sub a` | `my @scratch` + `"@scratch"` at line 94 — **container** interp is an element-join; either implement the join-aware rewrite or use the identity-name trick: a *file-unique* captured container could be promoted under its own name (like the span loop's unique path) so interp text keeps resolving — cheaper and proven |
-| (ref.t) | see M-B | its `$test` is interpolated at 437 *inside the shadow scope* — M-A is a prerequisite for the mangled-path rename |
-| (scalar.t) | see M-B | `$fh` appears in readline `<$fh>` text — same prerequisite, plus the rewriter must handle `QuoteLike::Readline` tokens |
+| ~~pack.t~~ | **DONE (s289)** | de-gated 5638/87, same 87 test numbers as the v1 fallback (also needed oversized-extent flattening + `_premerge_include_prototypes`, see s289 header note) |
+| ~~yadayada.t~~ | **DONE (s289)** | de-gated 21/15, exact v1 parity |
+| ~~sub.t~~ | **DONE (s285)** | cleared earlier via container capture work; this row had been stale |
+| (ref.t) | see M-B | its `$test` is interpolated at 437 *inside the shadow scope* — M-A (now done) was the prerequisite for the mangled-path rename |
+| (scalar.t) | see M-B | `$fh` appears in readline `<$fh>` text — same prerequisite; the rewriter's `_fix_interp_token` handles readline tokens (s289) |
 
 ### M-B — Per-declaration span tracking (~1–2 sessions, clears 3 files)
 
