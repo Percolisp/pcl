@@ -122,6 +122,12 @@ bit-for-bit).  Keeps a per-eval v1 retry until E4.
 - E4.0 **strengthen the fuzzer first** (oracle handover, invariant 5):
   extend `tools/difftest-ops.pl` axes to cover what the v1-parity oracle
   was catching (promotion/rename cases, context, interp) — **1–2 sessions**
+- E4.0b **external corpora re-run (user requirement, 2026-07-14)** — not
+  fuzzing alone: (1) perl's own `t/` subdirs that are NOT in the sweep
+  (`tools/run-perl-suite.pl` — re-run the surveyed dirs, cover t/mro and
+  t/class); (2) the CPAN module suites, compared against their recorded
+  baselines.  Divergences are E4-blocking fixes while v1 is still the
+  oracle.  Detail in `docs/v2-opus48-execution-plan.md` §E4.
 - E4.1 gates → hard errors; delete `PCL_V1`, pipeline cache key,
   `Pl/Parser.pm`, ExprToCL text emission; purge dual-dialect docs/tests;
   re-baseline sweeps — **1–2 sessions**

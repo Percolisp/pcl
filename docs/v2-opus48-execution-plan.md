@@ -298,15 +298,31 @@ preamble/section assembly, capture alist names pre-registered as let-bound,
 bodies are arbitrary user code).  Gate: `Pl/t/eval-capture-01.t` identical
 under both pipelines + eval.t parity.
 
-### E4 — fuzz, then delete v1 (2–4 sessions; E4.1 is the one irreversible step)
+### E4 — fuzz + external corpora, then delete v1 (2–4 sessions; E4.1 is the one irreversible step)
 
 - **E4.0 first (1–2 sessions): strengthen `tools/difftest-ops.pl`** while
   v1 still exists as the parity oracle (decision D3).  Extend axes to what
   the v1-parity oracle has been catching: promotion/rename shapes (shadows,
   spans, captures, interp), context (`ctx-*`), interpolation forms.  Fuzz
   hard; fix what falls out.
+- **E4.0b (user requirement, 2026-07-14): don't rely on fuzzing alone —
+  re-run the external test corpora on the v2 default before deletion:**
+  1. **Perl's own `t/` subdirectories that are NOT in the sweep**
+     (`tools/run-perl-suite.pl --dir <subdir>`, sbcl CWD = perl's t/ dir):
+     re-run the surveyed dirs (base, cmd, comp, re, io, opbasic) and cover
+     the never-surveyed ones — **t/mro and t/class first** (task #25),
+     per `docs/perl-test-suite-survey.md` / `docs/perl-test-suite-coverage.md`.
+  2. **CPAN module suites** under the v2 default: at minimum the tracked
+     set (Try::Tiny, Sub::Uplevel, Role::Tiny, Data::Dumper, JSON::PP,
+     Test::More self-tests — see `docs/cpan-module-blockers.md` and the
+     memory CPAN-suite entries); compare pass counts against the recorded
+     baselines (s276b), not against zero.
+  Any divergence found here is an E4-blocking bug to fix while v1 still
+  exists as the parity oracle — that is the whole point of running these
+  *before* E4.1, not after.
 - **E4.1 (1–2 sessions): deletion**, only when: census at target, eval-mode
-  native, one full session cycle with `PCL_V1` unused.  Steps (T-D):
+  native, E4.0b corpora re-run clean (or divergences fixed/user-blessed),
+  one full session cycle with `PCL_V1` unused.  Steps (T-D):
   gates → hard errors (remove `parse_with_fallback`; count must already be
   zero); delete `PCL_V1` from pl2cl + runners; delete pipeline component
   from `p-compute-cache-path` (bump generation); delete `Pl/Parser.pm`
