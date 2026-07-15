@@ -464,9 +464,13 @@ sub parse {
       # NB: PPI::Statement::Scheduled (BEGIN/END/…) ISA Statement::Sub — those
       # are runnable blocks, not sub definitions; they lower via _fallback_stmt.
       # NB2: PPI find returns 0 (not undef) when nothing matches → `|| []`.
-      my @subs = $child->isa('PPI::Statement::Sub')
-        ? ($child)
-        : @{ $child->find('PPI::Statement::Sub') || [] };
+      # $child itself (when a named sub) AND any subs nested INSIDE it: a named
+      # sub nested in another named sub (`sub run_tests { sub bar {…} }`,
+      # substr.t) is still package-global, so its bareword call sites must
+      # resolve to (pl-bar), not the string "bar".  `find` returns descendants
+      # only, so a top-level `sub` $child needs `($child, @{find})`.
+      my @subs = ($child->isa('PPI::Statement::Sub') ? ($child) : (),
+                  @{ $child->find('PPI::Statement::Sub') || [] });
       for my $sub (@subs) {
         next unless $sub->name && !$sub->isa('PPI::Statement::Scheduled');
         # A prototype/signature changes how CALL SITES parse (arity, imposed
@@ -3806,8 +3810,6 @@ sub _lower_compound {
     # (a v2-wide issue, CLAUDE.md #8 / s285).  Keep it gated to v1 until both are
     # addressed (E2 void-wrap hoist).
     my @alias_hd = Pl::Parser::_foreach_alias_rewrite(\@list_parts);
-    die "Parser2 TODO: foreach over a magic-lvalue element (substr/pos/vec)\n"
-      if @alias_hd && $alias_hd[0] =~ /^p-(?:substr|pos|vec)$/;
     # A list that is EXACTLY one range (`for $v (A..B)`) lowers to the
     # counting-loop macro p-foreach-range: endpoints evaluated once, numeric
     # ranges never materialize the vector (perl's own foreach-range

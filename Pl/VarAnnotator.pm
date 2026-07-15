@@ -498,6 +498,22 @@ sub _tw_stmt {
           _ev($ctx, $var->content, 'foreach-alias');
         }
       }
+      # A magic-lvalue foreach alias — `for (substr($x,…))` / pos / vec — binds
+      # the loop var to a write-through cell (p-substr-lvalue-cell), so a write
+      # to the loop var mutates the SCALAR ARG $x.  VarAnnotator otherwise sees
+      # no write to $x and would raw-slot it, leaving the cell nothing to write
+      # back into.  Veto $x's raw slot (force-box) so the write-through works.
+      my ($list2) = grep { $_->isa('PPI::Structure::List') } @k;
+      my @lp2 = $list2
+        ? (map { $_->schildren } grep { $_->isa('PPI::Statement') } $list2->children)
+        : ();
+      my @ah = @lp2 ? Pl::Parser::_foreach_alias_rewrite(\@lp2) : ();
+      if (@ah && $ah[0] =~ /^p-(?:substr|pos|vec)$/) {
+        my ($inner) = grep { $_->isa('PPI::Structure::List') } @lp2;
+        my $arg = $inner && $inner->find_first('PPI::Token::Symbol');
+        _ev($ctx, $arg->content, 'magic-lvalue-arg')
+          if $arg && $arg->content =~ /^\$/;
+      }
     }
     for my $k (@k) {
       if ($k->isa('PPI::Structure::Condition')

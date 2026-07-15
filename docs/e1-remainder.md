@@ -1,5 +1,19 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s292, 2026-07-16, Opus 4.8): M-E substr.t SHIPPED — census
+> 102 native / 9 gated, gen v2-34.**  De-gated **substr.t** (OK 374/8/397,
+> IDENTICAL fail set to v1 = exact parity) — the `for (substr($x,…))`
+> magic-lvalue foreach gate.  `_alias_box_form` already head-swapped to
+> `p-substr-lvalue-cell` (the gate was residue; the void-wrap heap blocker it
+> cited was fixed s288).  Two GENERAL fixes it needed: (a) **nested-sub
+> bareword registration** — the sub pre-pass stopped at a top-level `sub
+> run_tests` and never registered `sub bar` nested inside, so `is(bar,…)`
+> resolved to the string "bar" not `(pl-bar)`; now recurses
+> (`($child,@{find})`).  (b) **magic-lvalue-arg force-box** — VarAnnotator
+> `_ev`s the scalar arg of `for(substr/pos/vec($x,…))` so `$x` stays boxed and
+> the write-through cell works (top-level `$x` was raw-slotted).  corpus-diff:
+> only substr.t.  s292 detail in `docs/session-log.md`.
+
 > **UPDATE (s291, 2026-07-15, Opus 4.8): M-B session 3 SHIPPED — census
 > 101 native / 10 gated, gen v2-33.**  De-gated **scalar.t** (OK 81/35/12
 > of 128, IDENTICAL fail set to the v1 fallback = exact parity) by dropping

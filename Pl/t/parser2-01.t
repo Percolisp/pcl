@@ -570,8 +570,9 @@ EOF
 }
 
 # s285 — foreach over a single aliasable ELEMENT ($h{k} / $a[i]) binds the loop
-# var to the box-returning form so a write persists.  Element shapes de-gate
-# natively; the MAGIC-lvalue shape (substr/pos/vec) still gates to v1.
+# var to the box-returning form so a write persists.  s292: the MAGIC-lvalue
+# shape (substr/pos/vec) de-gates too, now that the per-statement void-wrap
+# heap blocker is fixed (s288) — the loop var binds to the write-through cell.
 {
   my $he = Pl::Parser2->parse_code(q[my %h = (k=>1); for ($h{k}) { $_++ }]);
   like($he, qr/\(p-foreach \(\$_ \(p-gethash-box %h "k"\)\)/,
@@ -579,9 +580,21 @@ EOF
   my $ae = Pl::Parser2->parse_code(q[my @a = (1,2,3); for ($a[1]) { $_++ }]);
   like($ae, qr/\(p-foreach \(\$_ \(p-aref-box \@a 1\)\)/,
        'array-element foreach aliases via p-aref-box');
-  # substr/pos/vec magic-lvalue aliasing is still gated → dies to v1.
+  # substr magic-lvalue aliasing now lowers natively: the loop var binds to the
+  # write-through cell p-substr-lvalue-cell (v1's mechanism, head-swapped).
   my $sub = eval { Pl::Parser2->parse_code(q[my $s="hi"; for (substr($s,0,1)) { $_="J" }]); };
-  ok(!defined $sub, 'magic-lvalue foreach (substr) still gates to v1');
+  like($sub, qr/\(p-foreach \(\$_ .*\(p-substr-lvalue-cell \$s 0 1\)/,
+       'magic-lvalue foreach (substr) lowers natively via p-substr-lvalue-cell');
+  # s292 — a named sub nested INSIDE another named sub is still package-global,
+  # so a bareword call to it (from a KNOWN funcall) resolves to (pl-name), not
+  # the string "name".  The pre-pass sub-registration must recurse into a
+  # top-level sub $child, not stop at it (substr.t's `sub run_tests { sub bar {…}
+  # is(bar,…) }`).
+  my $nsub = Pl::Parser2->parse_code(q[sub k {} sub outer { sub inner { 7 } k(inner); }]);
+  like($nsub, qr/\(pl-k \(pl-inner\)\)/,
+       'bareword call to a sub nested inside another sub resolves to (pl-inner)');
+  unlike($nsub, qr/pl-"inner"|\(pl-k "inner"/,
+       'nested-sub bareword is not left as the string "inner"');
   # Bare `return;` is the zero-arg (p-return) (context-sensitive empty/undef),
   # never (p-return (p-undef)) which leaks a 1-element list in list context.
   my $br = Pl::Parser2->parse_code(q[sub f { return; }]);

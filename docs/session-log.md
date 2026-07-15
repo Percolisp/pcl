@@ -4,6 +4,61 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 292 (2026-07-16, Opus 4.8) — E1 M-E: substr.t DE-GATED (magic-lvalue foreach) at exact v1 parity (census 102/9); nested-sub bareword registration + magic-lvalue-arg force-box; gen v2-34.
+
+**substr.t DE-GATED — v2-native OK 374/8/397, IDENTICAL fail set to the v1
+fallback = exact parity.**  The gate was `for (substr($x,…)) { $_=… }`
+(foreach aliasing `$_` to a magic substr lvalue).  Three changes:
+
+1. **Removed the substr/pos/vec foreach gate** (`_lower_compound`).
+   `_alias_box_form` already handled the Raw-seam head-swap (`(p-substr …)` →
+   `(p-substr-lvalue-cell …)`, v1's mechanism) for BOTH the native-AST and
+   seam shapes — the gate fired before reaching it, and the void-wrap heap
+   blocker it also cited was fixed in s288.  So the gate was pure residue.
+
+2. **Nested-sub bareword registration** (Parser2 sub pre-pass, `_analyze`
+   §sub-collection).  The pre-pass registered a top-level `sub run_tests` but
+   `? ($child) : @{find}` STOPPED at it — never recursing to find `sub bar`
+   nested inside.  So a bareword call to `bar` inside run_tests
+   (`is(bar, …)`, substr.t) resolved to the STRING "bar", not `(pl-bar)` — a
+   wrong-value divergence from v1 (which registers all subs).  Fix: collect
+   `($child->isa(Sub) ? ($child) : (), @{$child->find(Sub)})` so a top-level
+   sub's OWN nested subs register too.  (Named subs are package-global
+   regardless of nesting.)  **Known latent edge (not in corpus, not fixed):**
+   a nested-sub bareword passed to an UNKNOWN paren-funcall
+   (`frobnicate(bar)`) now emits malformed `(pl-"bar")` — the funcall-arg
+   `_bareword_string` mark and the pl- prefix collide; harmless because real
+   test files' funcalls (is/ok/…) are always known, and an unknown funcall is
+   a runtime error in valid Perl anyway.
+
+3. **Magic-lvalue-arg force-box** (VarAnnotator foreach walk).  `for
+   (substr($x,…))` binds the loop var to a write-through cell, so a write to
+   `$_` mutates `$x` — but VarAnnotator saw no write to `$x` and raw-slotted
+   it (`(let (($x "abcdef")) …)`), leaving the cell nothing to write back
+   into (top-level `$x`; substr.t's `$x` survived only via its other direct
+   writes).  Fix: on a `for(substr/pos/vec($x,…))` alias, `_ev` the scalar arg
+   with a `magic-lvalue-arg` boxing event so it stays boxed.  This is the
+   "force-box the scalar arg" the gate comment named; it fixed the
+   lvalue-ref-01 `for(substr)` write-through rows the de-gate first exposed.
+
+**Verification:** substr.t v2 == v1 exact fail-set (the 8 fails are the
+documented not-supported rows — user `:lvalue` subs, arylen magic, tie
+write-through — all skip-registered).  corpus-diff: **only substr.t differs**
+vs HEAD (nested-sub registration + the veto touch nothing else).  Full Pl/t
+gate GREEN: **114 files, 4043 tests** (parser2-01 t138 stale-gate assertion
+updated to the native lowering; +3 regression tests: nested-sub bareword,
+substr foreach native; lvalue-ref-01's `for(substr)` rows now run under v2).
+gen v2-33 → v2-34.
+
+**Remaining 9 gates:** array (goto #63), chdir (BEGIN introspection + POSIX),
+closure (M-C capture + per-iteration binding), eval/ref (M-F eval family),
+lfs (END+hang, residue), postfixderef (postderef_qq #45), signatures/state
+(M-F).  **NEXT:** per the E1/E2 alternation, an E2 session is due (E2.0
+dual-run scaffold, task #57); or postfixderef.t (#45, postderef_qq — but v1
+itself only reaches 83/36 there, so not a clean parity de-gate).
+
+---
+
 ## Session 291 (2026-07-15, Opus 4.8) — E1 M-B session 3: scalar.t DE-GATED at exact v1 parity (census 101/10); dropped the STAGED interp refusal + fixed two general v2 bugs it exposed; gen v2-33.
 
 **M-B (task #51): scalar.t DE-GATED — v2-native OK 81/35/12 of 128, IDENTICAL
