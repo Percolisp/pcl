@@ -2922,15 +2922,25 @@ sub handle_subcalls {
     #   print($fh LIST)  print(STDERR LIST)  print({EXPR} LIST)
     # Extract the filehandle from the front of the list (it has no separating
     # comma) and prepend it as the funcall's first child.
-    my $paren_fh_id;
+    my ($paren_fh_id, $fh_heal);
     if ($func_name eq 'print' || $func_name eq 'say' || $func_name eq 'printf') {
-      $paren_fh_id = $self->_extract_paren_filehandle($next);
+      ($paren_fh_id, $fh_heal) = $self->_extract_paren_filehandle($next);
     }
 
     # Replace the two items in expr with a subtree:
     my($top_node, $top_id) = $self->make_node_insert('funcall');
 
     my $c_ids   = $self->make_nodes_from_list($next);
+    # Args are built (make_nodes_from_list copies before mutating): re-attach the
+    # pruned filehandle token so the shared PPI tree is pristine for any re-parse.
+    if ($fh_heal) {
+      my ($fh_el, $anchor) = @$fh_heal;
+      if ($anchor && $anchor->parent) { $anchor->insert_before($fh_el) }
+      elsif ($next->isa('PPI::Node')) {
+        my ($expr) = grep { $_->isa('PPI::Statement') } $next->children;
+        ($expr || $next)->add_element($fh_el);
+      }
+    }
     my $node_id = $self->make_node($now);
 
     $self->add_child_to_node($top_id, $node_id);
@@ -3878,8 +3888,16 @@ sub _extract_paren_filehandle {
   }
 
   # Prune the filehandle token from the PPI list so the rest parses as args.
+  # This mutates the SHARED PPI tree, which is a problem because v2 parses the
+  # same statement twice (VarAnnotator's analysis pass, then the emission pass):
+  # after the first prune the second parse no longer sees the filehandle and
+  # drops it (`print($fh …)` → `(p-print …)` with no fh).  So return a heal token
+  # `[$first, $anchor]` the caller re-inserts once it has built the arg nodes —
+  # leaving the tree pristine after each parse.  ($anchor is the sibling the fh
+  # preceded, or undef if it was last.)
+  my $anchor = $first->next_sibling || undef;
   $first->remove;
-  return $fh_id;
+  return ($fh_id, [$first, $anchor]);
 }
 
 

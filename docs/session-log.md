@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 291 (2026-07-15, Opus 4.8) — E1 M-B session 3: scalar.t DE-GATED at exact v1 parity (census 101/10); dropped the STAGED interp refusal + fixed two general v2 bugs it exposed; gen v2-33.
+
+**M-B (task #51): scalar.t DE-GATED — v2-native OK 81/35/12 of 128, IDENTICAL
+fail set to the v1 fallback baseline = exact parity** (like sort.t s290).
+Three changes, in the order the divergences surfaced:
+
+1. **Dropped the STAGED "interpolated use" refusal in
+   `_rename_spanning_lexicals`** (Parser2.pm).  The span rename's M-A interp
+   fixer already rewrites interpolated uses (mangled + cross-package
+   identity), so the blanket refusal was unnecessary — `my $x=1; package Foo;
+   print "$x"` now lowers natively and correctly: the interpolated `"$x"` in
+   the Foo segment is rewritten to the QUALIFIED declaring-package cell
+   `main::$x` (not the unbound `Foo::x`), runtime-verified.  This de-gated
+   scalar.t but exposed two pre-existing v2 bugs (below).
+
+2. **`require Module` nested in a block/sub now stays INLINE.**  v1
+   (Parser.pm:6941) emits a runtime `(p-require …)` — NOT a hoisted
+   `(p-eval-always (p-require …))` — when `in_subroutine>0 || _block_depth>0`,
+   precisely so a `SKIP:`/`if`-guarded require doesn't load unconditionally at
+   file top.  v2's `_fallback_stmt_capture` processed the require in an
+   ISOLATED context with `_block_depth` reset to 0, so v1's hoist branch
+   fired; scalar.t's `require B` / `require threads` (both XS, both inside
+   `SKIP:` blocks that skip) then loaded at top level and DIED (`XSLoader`).
+   Fix: `_fallback_stmt_capture` now reflects the statement's real PPI
+   block-nesting (`$stmt->parent` chain has a `PPI::Structure::Block`) into
+   the fallback parser's `_block_depth` for the duration.  Also correctly
+   qualifies `use base`/`parent` @ISA for nested statements (same
+   `_block_depth>0` branch) — strictly more faithful.
+
+3. **Paren-form `print($fh LIST)` keeps its filehandle across v2's
+   double-parse.**  PExpr's `_extract_paren_filehandle` prunes the fh token
+   from the SHARED PPI tree (`$first->remove`) so the args parse cleanly.
+   v2 parses each statement TWICE (VarAnnotator analysis pass, then emission);
+   the analysis prune left the fh gone, so the emission parse dropped it →
+   `(p-print "ABC")` with no `:fh`.  For scalar.t's tie block this printed the
+   payload to stdout with no newline, concatenating onto the next `ok N` TAP
+   line → tests 61/62 silently uncounted, and the tie STORE never fired.
+   Fix: `_extract_paren_filehandle` returns a heal token `[$first,$anchor]`
+   the caller re-inserts once `make_nodes_from_list` (which copies) has built
+   the args, leaving the tree pristine for the re-parse.  (An earlier attempt
+   to make `_ppi_state_snapshot`/`-restore` structure-aware was REVERTED — a
+   blanket re-attach of detached nodes wrongly resurrected the
+   `replace_child`'d bareword in `$h{a}`→`{"a"}`, corrupting every hash access
+   with a bareword key.)
+
+**Verification:** scalar.t v2 == v1 exact fail-set diff (empty).  corpus-diff:
+10 files differ vs HEAD, all explained + no runtime regression (before/after
+sweep identical on all 10): scalar.t (de-gated), method.t/aassign.t
+(require Fcntl/Count/List::Util now inline — block/sub-nested), magic.t
+(`print SCRIPT …` now keeps the bareword fh — a correctness improvement),
+vec.t (span-rename naming).  Full Pl/t gate GREEN: **114 files, 4041 tests**
+(parser2-01 test 54 was the stale assertion of the dropped refusal — updated
+to assert the new native+qualified lowering; +3 regression tests for
+require-in-block-inline and paren-print-fh).  gen bumped v2-32 → v2-33.
+
+**NEXT (M-B continues):** ref.t (M-F eval family — `eval '\($x,…)'` names the
+lexical; eval-unsafe refusal is correct until the s250 capture alist carries
+renamed cells).  Or E2.0 scaffold (task #57, cadence overdue).  Or method.t
+stop@157 / substr.t magic-lvalue foreach.
+
+---
+
 ## Session 290 (2026-07-14, Fable 5) — E1 M-B per-declaration span tracking; sort.t de-gated (census 100/11); unreachable-goto rewrite; per-section forward-decl exclusion; on-demand p-declare-sub stub sweep; gen v2-32.
 
 Also (pre-M-B, committed separately): docs handoff refresh for Opus 4.8

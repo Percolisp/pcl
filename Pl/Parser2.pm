@@ -1642,11 +1642,10 @@ sub _rename_spanning_lexicals {
     # scalar.t ran 78+36/128 PARTIAL (early stop after t126, new fail t64
     # "new value preserved") vs the v1 baseline 81/35/12 complete.  Debug
     # that first; sort.t needs no interp and is unaffected either way.
-    next if $interp
-      && (!$unique
-          || grep { $csf->[$_]{interp}{$bare}
-                    && $segments->[$_]{pkg} ne $segments->[$di]{pkg} } $di .. $hi)
-      && $refuse->('interpolated use');
+    # STAGED DROP (M-B session 3): the interp fixer in the rename loops below
+    # rewrites interpolated uses (mangled + cross-package identity), so the old
+    # blanket 'interpolated use' refusal is removed.  See the block comment
+    # above.
     next if !(@sdecls == 1 && $dc == 1)
       && $refuse->('sdecls=' . scalar(@sdecls) . " dc=$dc");
     next if $multi && $sdecls[0] != $inst_decl
@@ -4416,6 +4415,20 @@ sub _fallback_stmt_capture {
   my $confines = $stmt->isa('PPI::Statement::Compound');
   my %saved_lb;
   %saved_lb = %{ $p->{_let_bound_vars} // {} } if $confines;
+  # Reflect the statement's REAL block-nesting into the isolated capture: v1's
+  # _process_element keys several bucket decisions on `_block_depth > 0` — most
+  # importantly a bareword `require Module` nested in a block/sub stays INLINE
+  # (runtime `(p-require …)`) instead of being hoisted to the definitions bucket
+  # as `(p-eval-always (p-require …))`.  Hoisting is fatal for a `require` guarded
+  # by an enclosing `SKIP:`/`if` block (scalar.t's `require B` / `require threads`)
+  # — the module then loads unconditionally at top level and dies (XS).  The fresh
+  # capture context resets _block_depth to 0, so without this the nesting is lost.
+  my $saved_bd = $p->_block_depth;
+  my $in_block = 0;
+  for (my $a = $stmt->parent; $a; $a = $a->parent) {
+    ($in_block = 1), last if $a->isa('PPI::Structure::Block');
+  }
+  $p->_block_depth($in_block ? 1 : 0);
   $p->_sections([]);
   $p->_cur_bucket('runtime');
   $p->_open_section('pcl');
@@ -4443,6 +4456,7 @@ sub _fallback_stmt_capture {
   $p->_cur_bucket($saved[1]);
   $p->indent_level($saved[2]);
   $p->{_local_let_depth} = $saved[3];
+  $p->_block_depth($saved_bd);
   $p->{_let_bound_vars} = \%saved_lb if $confines;
   return (@runtime ? join("\n", @runtime) : undef, $opens);
 }

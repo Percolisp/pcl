@@ -239,12 +239,12 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **114 test files, 4037 tests** (Pl/t gate, as of session 289)
+- **114 test files, 4041 tests** (Pl/t gate, as of session 291)
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
 - Full `perl-tests/` sweep: 66 files fully passing; see `docs/sweep-bug-catalog.md`
-- v2 pipeline census: 100 files v2-native / 11 gated to v1
+- v2 pipeline census: 101 files v2-native / 10 gated to v1
   (`perl tools/v2-census.pl` for the live numbers)
 
 ## Common Pitfalls

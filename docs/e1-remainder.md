@@ -1,5 +1,21 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s291, 2026-07-15, Opus 4.8): M-B session 3 SHIPPED — census
+> 101 native / 10 gated, gen v2-33.**  De-gated **scalar.t** (OK 81/35/12
+> of 128, IDENTICAL fail set to the v1 fallback = exact parity) by dropping
+> the STAGED "interpolated use" refusal in `_rename_spanning_lexicals` (the
+> M-A interp fixer rewrites cross-package interpolated uses to the QUALIFIED
+> cell `main::$x`, runtime-verified) + fixing two GENERAL v2 bugs it exposed:
+> (a) `require Module` nested in a block/sub now stays INLINE (v1's
+> `_block_depth>0` branch — `_fallback_stmt_capture` reflects the statement's
+> real PPI block-nesting, so `SKIP:`-guarded `require B`/`require threads`
+> don't load unconditionally at file top and crash on XS); (b) paren-form
+> `print($fh LIST)` keeps its filehandle across v2's analysis+emission
+> double-parse (`_extract_paren_filehandle`'s destructive `$first->remove`
+> now self-heals via a returned `[$first,$anchor]` token the caller
+> re-inserts).  parser2-01 t54 (asserted the dropped refusal) updated; +3
+> regression tests.  s291 detail in `docs/session-log.md`.
+
 > **UPDATE (s290, 2026-07-14, Fable 5): M-B session 1 SHIPPED — census
 > 100 native / 11 gated, gen v2-32.**  De-gated **sort.t** (202/2/1 of
 > 205, SAME failing tests 170/177 as the v1 fallback — exact parity) via

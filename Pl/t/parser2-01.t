@@ -158,6 +158,24 @@ my $ord = Pl::Parser2->parse_code(
 like($ord, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"\)\).*\(p-print "a/s,
      'require hoisted as eval-always declaration (v1 parity)');
 
+# M-B session 3: a `require` NESTED in a block/sub stays INLINE (runtime
+# p-require, not hoisted to eval-always) — Perl runs it at runtime, so a
+# `SKIP:`/`if`-guarded require (scalar.t's `require B`) must not load
+# unconditionally at file top.  The isolated fallback capture now reflects the
+# statement's real block nesting so v1's `_block_depth > 0` branch fires.
+my $req_blk = Pl::Parser2->parse_code('if ($x) { require POSIX; }');
+like($req_blk, qr/\(p-require "POSIX"\)/, 'require in a block lowers inline');
+unlike($req_blk, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"/,
+       'require in a block is NOT hoisted to eval-always');
+
+# M-B session 3: paren-form `print($fh LIST)` keeps its filehandle.  PExpr's
+# `_extract_paren_filehandle` prunes the fh token from the shared PPI tree; v2
+# parses each statement twice (analysis + emission), so the prune must self-heal
+# or the second parse drops the fh (→ `(p-print …)` with no :fh).
+my $pfh = Pl::Parser2->parse_code('my $fh; print($fh "hi");');
+like($pfh, qr/\(p-print :fh \$fh "hi"\)/,
+     'paren-form print keeps its filehandle across the analysis/emission re-parse');
+
 # Native interpolated strings: plain $name scalars → p-string-concat form
 # (a raw root — the slot unboxes); fancy interpolations stay on the fallback.
 my $interp = Pl::Parser2->parse_code(
@@ -207,9 +225,15 @@ unlike($span, qr/\$x__file__\d+/,
      'W10: a file-unique spanning name is NOT mangled (plain $Pkg::name)');
 like($span, qr/main::\$x\b/,
      'W10: later section reads the package-qualified cell');
+# M-B session 3: an interpolated spanning lexical no longer dies to v1 — the
+# span rename's M-A interp fixer rewrites the interpolated use in the later
+# (different-package) segment to the QUALIFIED declaring-package cell, so it
+# resolves to the same box the defvar created (`print "$x"` in Foo reads
+# main::$x, not the unbound Foo::x).  Lowers natively AND correctly.
 my $span_interp = eval { Pl::Parser2->parse_code(qq{my \$x = 1;\npackage Foo;\nprint "\$x";\n}) };
-like($@, qr/spans a package boundary/,
-     'W10: interpolated spanning lexical still dies to v1');
+is($@, '', 'W10/M-B: interpolated spanning lexical lowers natively (no v1 gate)');
+like($span_interp, qr/\(p-string-concat main::\$x\)/,
+     'W10/M-B: cross-package interpolated use rewritten to the qualified cell');
 
 # W5: a single scalar file lexical captured by a NAMED sub is rewritten to a
 # package-level cell — defvar'd, NOT let-bound — so the hoisted sub and
