@@ -1211,8 +1211,7 @@ sub gen_array_str_interp {
 # the form handler declines them (before any side effect) so the text
 # emitter below runs unchanged.  Shrink this list as branches convert.
 my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
-  require next last redo goto do eval grep map bless push unshift
-  readline select tied pos delete exists defined undef chop chomp
+  goto do eval grep map tied pos delete exists defined undef chop chomp
 );
 
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
@@ -1272,6 +1271,128 @@ sub gen_funcall_form {
   return undef if $FUNCALL_FORM_DECLINES{$func_name};
 
   my $cl_func = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
+
+  # ---- converted special branches (same order as the text emitter; a
+  # ---- non-matching shape FALLS THROUGH to the generic tail, exactly
+  # ---- like the text branches do) ----
+
+  # require BAREWORD in expression context → (p-require "Module")
+  if ($func_name eq 'require' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    my $mod;
+    if (ref($arg_node) eq 'PPI::Token::Word') {
+      $mod = $arg_node->content;
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node)
+           && $arg_node->{type} eq 'funcall') {
+      my $ak = $self->expr_o->get_node_children($kids->[1]);
+      if (@$ak == 1) {
+        my $w = $self->expr_o->get_a_node($ak->[0]);
+        $mod = $w->content if ref($w) eq 'PPI::Token::Word';
+      }
+    }
+    if (defined $mod && $mod =~ /^\w+(?:::\w+)*$/) {
+      return ['p-require', "\"$mod\""];
+    }
+  }
+
+  # next/last/redo LABEL → (p-next LABEL) etc.  (goto stays declined.)
+  if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo')
+      && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'funcall') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids == 1) {
+        my $label_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        if (ref($label_node) eq 'PPI::Token::Word') {
+          return [$cl_func, $label_node->content()];
+        }
+      }
+    }
+  }
+
+  # bless(REF, CLASSNAME): bareword class → string; default = current pkg.
+  if ($func_name eq 'bless' && @$kids >= 2) {
+    my $ref_arg = $self->gen_node_form($kids->[1]);
+    my $cur_pkg = $self->environment ? $self->environment->current_package : 'main';
+    my $class_arg = "\"$cur_pkg\"";
+    if (@$kids >= 3) {
+      my $class_node = $self->expr_o->get_a_node($kids->[2]);
+      my $is_bareword = 0;
+      if ($self->expr_o->is_internal_node_type($class_node) &&
+          $class_node->{type} eq 'funcall') {
+        my $class_kids = $self->expr_o->get_node_children($kids->[2]);
+        if (@$class_kids == 1) {
+          my $word_node = $self->expr_o->get_a_node($class_kids->[0]);
+          if (ref($word_node) eq 'PPI::Token::Word') {
+            my $classname = $word_node->content();
+            if ($classname eq '__PACKAGE__') {
+              my $pkg = $self->environment
+                  ? $self->environment->current_package : 'main';
+              $pkg //= 'main';
+              $class_arg = qq{"$pkg"};
+              $is_bareword = 1;
+            } elsif ($classname eq 'undef') {
+              # fall through: gen_node_form gives (p-undef); runtime handles it
+            } else {
+              $classname =~ s/::$//;
+              $class_arg = qq{"$classname"};
+              $is_bareword = 1;
+            }
+          }
+        }
+      }
+      $class_arg = $self->gen_node_form($kids->[2]) if !$is_bareword;
+    }
+    return ['p-bless', $ref_arg, $class_arg];
+  }
+
+  # push/unshift: flatten @-sigiled / @-deref arguments.
+  if (($func_name eq 'push' || $func_name eq 'unshift') && @$kids >= 2) {
+    my $target = $self->gen_node_form($kids->[1]);
+    my @items;
+    for my $i (2 .. $#$kids) {
+      my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
+      my $arg = $self->gen_node_form($kids->[$i]);
+      my $should_flatten = 0;
+      if (ref($arg_node) eq 'PPI::Token::Symbol') {
+        my $sigil = substr($arg_node->content(), 0, 1);
+        $should_flatten = 1 if $sigil eq '@';
+      }
+      elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+             $arg_node->{type} eq 'prefix_op') {
+        my $arg_kids = $self->expr_o->get_node_children($kids->[$i]);
+        if (@$arg_kids >= 1) {
+          my $cast_node = $self->expr_o->get_a_node($arg_kids->[0]);
+          if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '@') {
+            $should_flatten = 1;
+          }
+        }
+      }
+      $arg = ['p-flatten', $arg] if $should_flatten;
+      push @items, $arg;
+    }
+    return [$cl_func, $target, @items];
+  }
+
+  # readline(BAREWORD) / select(BAREWORD): the arg is a filehandle name.
+  if (($func_name eq 'readline' || $func_name eq 'select') && @$kids == 2) {
+    my $head = $func_name eq 'readline' ? 'p-readline' : 'p-select';
+    my $fh_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
+      return [$head, "'" . ($fh_node->content() // '')];
+    }
+    if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
+      my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$fh_kids == 1) {
+        my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
+        if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
+          return [$head, "'" . ($word_node->content() // '')];
+        }
+      }
+    }
+  }
 
   # ---- from here on: the text emitter's generic tail, form-shaped ----
 
