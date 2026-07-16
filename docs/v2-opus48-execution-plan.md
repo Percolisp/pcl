@@ -1,7 +1,17 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s290 (2026-07-14, Fable): census 100 v2-native / 11
+**State updated s293 (2026-07-16, Fable): census 102 v2-native / 9 gated,
+cache gen v2-34, Pl/t gate green (115 files / 4053 tests).  E2.0 SHIPPED
+(task #57): the emitter-conversion scaffold (CLForm::to_flat +
+ExprToCL form_handlers/gen_node_form + corpus-diff --show) and the first
+3 emitters converted at byte parity on BOTH pipelines (gen_ternary,
+gen_string_concat, gen_array_str_interp) — see §E2.0 below for the
+per-step recipe.  Cadence: an E1 session is next (postderef_qq #45,
+chdir.t #55, or the M-F user-decision session #56); E2.1 (funcall family,
+declining form handler on gen_funcall) can interleave.  Before that,
+s291–s292 (Opus 4.8) de-gated scalar.t (M-B) and substr.t (M-E).**
+**Previous state s290: census 100 v2-native / 11
 gated, cache gen v2-32, Pl/t gate green.  M-B session 1 SHIPPED (task
 #51): sort.t de-gated (202/2/1, same fails 170/177 as v1 — exact parity)
 via per-declaration span instances + canon-exact container promotion +
@@ -282,9 +292,53 @@ This phase delivers invariants 1–2 of the simplicity contract (no text CL
 between parse and print; one printer).  Mechanism = the W12 dual-run
 playbook (see `docs/v2-transfer-plan.md` T-C(ii)):
 
-- **E2.0 (1 session): dual-run scaffold.**  Every emitter conversion runs
-  old-text vs new-form-printed side by side with a corpus-wide byte-diff
-  per step.  Build this FIRST; it is what makes the rest mechanical.
+- **E2.0 (1 session): dual-run scaffold — DONE (s293, task #57).**  The
+  "old" side of every step's dual run is git HEAD via `tools/corpus-diff.pl`
+  (no in-tree duplicate emitters, no in-process double-run of side-effectful
+  emitters — the s287 tool already runs both compilers side by side).  What
+  shipped:
+  - `Pl::CLForm::to_flat($form)` — EXACT flat rendering (one line, single
+    spaces, raw atoms verbatim, dies on raw_wrap): the boundary every
+    converted emitter is byte-parity-checked through.
+  - `Pl::ExprToCL`: `form_handlers` table beside `handlers` (same node-type
+    keys, same `($self,$node,$node_id,$kids)` signature).  A form handler
+    WINS for its type but may DECLINE a not-yet-converted shape by
+    returning undef → the text emitter runs as before (so big emitters
+    convert branch by branch).  **Convention: decline BEFORE any side
+    effect** (gensym counters, _emit, environment mutation) — the text path
+    re-runs the node.  `gen_internal_node` = form dispatch + flat-print;
+    `gen_internal_node_text` = the pre-E2 dispatch; `gen_node_form` = what
+    converted emitters call on their children (form when converted, else
+    the child's v1 text as an opaque raw atom — bytes preserved verbatim).
+  - `tools/corpus-diff.pl --show[=N|all]` — prints the normalized diff
+    hunks per changed file (localizes a parity break to the exact
+    expression without hand-diffing temp trees).
+  - First conversions at byte parity: `gen_ternary` (the pilot),
+    `gen_string_concat` + `gen_array_str_interp` (frontier rank 4 —
+    `node:string_concat`, 882 seam expressions).  Pattern each time:
+    handlers entry moved to form_handlers, body returns a nested-array
+    form with `gen_node_form` children; old text body deleted — HEAD
+    keeps it.  Guards: `Pl/t/clform-01.t` (to_flat contract +
+    converted-in-converted nesting + raw-child embedding + string_concat
+    shapes; pure perl, no SBCL spawn).
+
+  **Per-step conversion recipe (E2.1–E2.n):** (1) move the emitter's
+  `handlers` entry to `form_handlers` (or add a declining form handler
+  beside a kept text one for partial coverage); (2) rewrite the body to
+  return a CLForm — children via `gen_node_form`, text fragments you can't
+  structure yet via `Pl::CLForm::raw`; (3) `tools/corpus-diff.pl --show`
+  must show ZERO files (byte parity — flat print == old text), and
+  `PCL_V1=1 tools/corpus-diff.pl` likewise (ExprToCL is shared; v1 must
+  stay the parity oracle); (4) `tools/prove-core` green + `PCL_V1=1
+  tools/prove-core` failure set IDENTICAL to HEAD's known 7-test set
+  (transpile-test-02 #60/62/72, -04 #102/120, -04b #69, -05 #72 — v2-only
+  feature tests that legitimately fail through v1; s293 verified all 7
+  pre-exist at HEAD.  "100% green under PCL_V1" is a stale W9-era claim);
+  (5) no cache-gen bump needed while parity holds
+  (emission unchanged); (6) once a type's text handler is deleted its form
+  handler must NEVER decline.  A parity break that v1's text can't express
+  structurally (e.g. layout inside multi-line raws) is a finding to bring
+  back to the plan, not to paper over.
 - **E2.1–E2.n: convert the 69 emitters in frontier order:**
   1. funcall family first — `word:*` is one generic emitter covering
      is/ok/cmp_ok/join/… (biggest coverage per step),

@@ -4,6 +4,67 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 293 (2026-07-16, Fable) — E2.0 SHIPPED (task #57): emitter-conversion scaffold + first 3 ExprToCL emitters → CLForm at byte parity (ternary, string_concat, array_str_interp).
+
+**E2 (seam re-housing) is now open for business.**  The scaffold that makes
+E2.1–E2.n mechanical, per the endgame plan:
+
+- **Dual-run = worktree-vs-HEAD, not in-process.**  The "old text" side of
+  every conversion step is git HEAD via `tools/corpus-diff.pl` (the s287
+  tool already runs both compilers side by side over the corpus).  This
+  deliberately avoids in-tree duplicate emitters AND the in-process
+  double-run hazard (emitters have side effects: gensym counters, `_emit`,
+  environment mutation — running old+new per node would corrupt both).
+- **`Pl::CLForm::to_flat($form)`** — EXACT flat renderer: one line, single
+  spaces, raw atoms verbatim (even multi-line — v1 interpolates child text
+  the same way), never declines, dies on raw_wrap.  This is the boundary a
+  converted emitter's form is printed through inside text context, which is
+  what makes byte parity with the old string-building achievable.
+- **`Pl::ExprToCL` form dispatch**: `form_handlers` table beside `handlers`
+  (same keys, same signature).  Form handler WINS for its type; may DECLINE
+  a not-yet-covered shape by returning undef → text emitter runs (big
+  emitters convert branch by branch).  Convention: decline BEFORE any side
+  effect.  `gen_internal_node` = form dispatch + to_flat;
+  `gen_internal_node_text` = the pre-E2 dispatch (called by gen_node_form
+  on decline, so a declining handler is never run twice);
+  **`gen_node_form`** = what converted emitters call on children (form when
+  converted, else the child's v1 text as a raw atom — bytes preserved).
+- **`tools/corpus-diff.pl --show[=N|all]`** — prints normalized diff hunks
+  per changed file (localizes a parity break to the exact expression).
+- **Converted at byte parity: `gen_ternary` (pilot), `gen_string_concat` +
+  `gen_array_str_interp`** (frontier rank 4, `node:string_concat`, 882 seam
+  expressions).  Old text bodies deleted (HEAD keeps them); form handlers
+  for these types must never decline.
+- **Verification**: corpus-diff **byte-identical across all 111 files on
+  BOTH pipelines** (default v2 and `PCL_V1=1` — ExprToCL is shared, v1
+  stays the parity oracle); full v2 Pl/t gate green (115 files/4053
+  tests).  **PCL_V1 gate finding (stale expectation corrected):** the
+  full suite under `PCL_V1=1` fails 7 tests in 4 files
+  (transpile-test-02 #60/62/72, -04 #102/120, -04b #69, -05 #72) —
+  ALL reproduce identically at a HEAD worktree, i.e. pre-existing:
+  they assert v2-only features (capture-promotion shapes, SUPER::m
+  indirect blocks, package revert after do/eval, spanning-lexical
+  dynamic eval) through pl2cl, which under PCL_V1 emits v1.  The E2
+  v1-gate criterion is therefore "failure set identical to HEAD's
+  7-test set", not "100% green" (that claim dates from W9).  No
+  cache-gen bump — emission is byte-identical by construction.
+- **New guard: `Pl/t/clform-01.t`** (pure perl, no SBCL spawn): to_flat
+  contract (nesting, 'list' head, raw verbatim incl. multi-line, raw_wrap
+  dies), converted-in-converted ternary nesting, raw-child embedding,
+  string_concat shapes (scalar/array-join/`@{[…]}`-cast/slice-join).
+- **Per-step recipe recorded in `docs/v2-opus48-execution-plan.md` §E2.0**
+  (move handler entry → rewrite body to form → corpus-diff both pipelines →
+  both gates → no bump while parity holds).
+
+Also this session: **verified s292** (substr.t sweep 374/8 exact parity,
+census 102/9, full gate 4043 green) before starting.
+
+**NEXT session (alternation says E1): postderef_qq #45, chdir.t #55, or the
+M-F decision session #56; or continue E2.1 (funcall family — gen_funcall
+branch-by-branch with a declining form handler).**
+
+---
+
 ## Session 292 (2026-07-16, Opus 4.8) — E1 M-E: substr.t DE-GATED (magic-lvalue foreach) at exact v1 parity (census 102/9); nested-sub bareword registration + magic-lvalue-arg force-box; gen v2-34.
 
 **substr.t DE-GATED — v2-native OK 374/8/397, IDENTICAL fail set to the v1

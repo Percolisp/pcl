@@ -19,7 +19,7 @@ use v5.30;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_program);
+our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_flat to_program);
 
 use constant ONE_LINE_MAX => 95;
 
@@ -100,6 +100,26 @@ sub _flat {
     return undef unless defined $p;
     push @parts, $p;
   }
+  return '(' . join(' ', @parts) . ')';
+}
+
+# EXACT flat rendering — the E2 emitter-conversion boundary.  One line,
+# single spaces, no length limit, raw atoms embedded verbatim (even
+# multi-line ones: v1's text emitters interpolate child text the same
+# way).  A converted (form-producing) ExprToCL emitter inside a text
+# context is printed with THIS, so byte-parity with the old text emitter
+# is checkable per step (tools/corpus-diff.pl).  Unlike _flat above this
+# never declines — flat is the contract, not an optimization.  raw_wrap
+# is a statement-level device and cannot appear inside an expression
+# form; a loud die beats silently mangling its deferred closers.
+sub to_flat {
+  my ($f) = @_;
+  return $f unless ref $f;
+  return $$f if is_raw($f);
+  die "CLForm::to_flat: raw_wrap inside an expression form" if is_raw_wrap($f);
+  my ($head, @args) = @$f;
+  my @parts = ($head eq 'list' ? () : $head);
+  push @parts, map { to_flat($_) } @args;
   return '(' . join(' ', @parts) . ')';
 }
 

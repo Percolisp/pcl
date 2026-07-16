@@ -12,6 +12,7 @@ use Moo;
 
 use Scalar::Util qw/looks_like_number/;
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
+use Pl::CLForm ();
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
 my $g_flipflop_count = 0;
@@ -59,13 +60,26 @@ has handlers => (
   builder => '_build_handlers',
 );
 
+# E2 seam re-housing (docs/v2-endgame-plan.md E2): emitters converted from
+# text-producing to CLForm-producing register here, keyed by the same node
+# type as `handlers`.  A form handler WINS over the text handler for its
+# type, but may DECLINE a shape it does not cover yet by returning undef —
+# the text emitter then runs exactly as before.  Convention: a form handler
+# must decline BEFORE causing any side effect (gensym counters, _emit,
+# environment mutation), because the text path re-runs the node from
+# scratch.  A type whose text handler has been deleted must never decline.
+has form_handlers => (
+  is      => 'ro',
+  lazy    => 1,
+  builder => '_build_form_handlers',
+);
+
 sub _build_handlers {
   my $self = shift;
   return {
     'funcall'       => \&gen_funcall,
     'methodcall'    => \&gen_methodcall,
     'ref_funcall'   => \&gen_ref_funcall,
-    'ternary'       => \&gen_ternary,
     'prefix_op'     => \&gen_prefix_op,
     'postfix_op'    => \&gen_postfix_op,
     'a_acc'         => \&gen_array_access,
@@ -87,9 +101,16 @@ sub _build_handlers {
     'anon_sub'      => \&gen_anon_sub,
     'func_ref'      => \&gen_func_ref,
     'inline_lambda' => \&gen_inline_lambda,
+    'glob_slot'        => \&gen_glob_slot,
+  };
+}
+
+sub _build_form_handlers {
+  my $self = shift;
+  return {
+    'ternary'          => \&gen_ternary,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
-    'glob_slot'        => \&gen_glob_slot,
   };
 }
 
@@ -389,6 +410,30 @@ sub gen_internal_node {
 
   my $type    = $node->{type};
 
+  # E2: a converted (form-producing) emitter wins when one exists for the
+  # type.  Flat-printing the form here keeps every unconverted text caller
+  # byte-identical to the pre-conversion output (to_flat embeds raw child
+  # text verbatim), so byte-parity per conversion step is checkable with
+  # tools/corpus-diff.pl.  undef = the handler declined this shape.
+  if (my $fh = $self->form_handlers->{$type}) {
+    my $form = $fh->($self, $node, $node_id, $kids);
+    return Pl::CLForm::to_flat($form) if defined $form;
+  }
+
+  return $self->gen_internal_node_text($node, $node_id, $kids);
+}
+
+# The text-emitter dispatch (pre-E2 shape).  Called directly by
+# gen_node_form when a form handler declines, so a declining handler is
+# never consulted twice for the same node.
+sub gen_internal_node_text {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  my $type    = $node->{type};
+
   # Dispatch based on node type
   my $handler = $self->handlers->{$type};
 
@@ -398,6 +443,29 @@ sub gen_internal_node {
 
   # Assume it's a binary operator (operators stored with operator as type)
   return $self->gen_binary_op($type, $kids, $node_id);
+}
+
+# E2: form-of-node, for CONVERTED emitters generating their children.
+# Returns the child's CLForm when its emitter is converted (and does not
+# decline), otherwise the child's v1 text embedded as an opaque raw atom —
+# so a converted parent over unconverted children still reproduces v1's
+# bytes exactly under to_flat, and under the real printer once the seam
+# root goes structural (E2.final).
+sub gen_node_form {
+  my $self    = shift;
+  my $node_id = shift;
+
+  my $node = $self->expr_o->get_a_node($node_id);
+  if ($self->expr_o->is_internal_node_type($node)) {
+    my $type = $node->{type};
+    my $kids = $self->expr_o->get_node_children($node_id);
+    if (my $fh = $self->form_handlers->{$type}) {
+      my $form = $fh->($self, $node, $node_id, $kids);
+      return $form if defined $form;
+    }
+    return Pl::CLForm::raw($self->gen_internal_node_text($node, $node_id, $kids));
+  }
+  return Pl::CLForm::raw($self->gen_node($node_id));
 }
 
 
@@ -1091,6 +1159,7 @@ sub cl_op_name {
 
 # String concatenation with multiple parts
 # Handles array interpolation: "@arr" joins elements with $" (default: space)
+# Form-producing (E2-converted).  Never declines.
 sub gen_string_concat {
   my $self    = shift;
   my $node    = shift;
@@ -1109,7 +1178,7 @@ sub gen_string_concat {
                    && ($kid_node->{type} eq 'slice_a_acc'
                        || $kid_node->{type} eq 'slice_h_acc');
     $self->expr_o->set_node_context($kid_id, LIST_CTX) if $is_slice;
-    my $generated = $self->gen_node($kid_id) // '';
+    my $generated = $self->gen_node_form($kid_id);
 
     # Check if this is an array variable (@arr) - needs to be joined
     my $kid_content = (ref($kid_node) eq 'PPI::Token::Symbol' && $kid_node->can('content'))
@@ -1117,21 +1186,21 @@ sub gen_string_concat {
     if ($kid_content =~ /^@/ || $is_slice) {
       # In Perl, "@arr" in string interpolation joins with $" (default space)
       # Use |$"| which is the CL variable for Perl's $" list separator
-      push @parts, '(p-join |$"| ' . $generated . ')';
+      push @parts, ['p-join', '|$"|', $generated];
     } else {
       push @parts, $generated;
     }
   }
-  return "(p-string-concat " . join(" ", @parts) . ")";
+  return ['p-string-concat', @parts];
 }
 
 
 # Array interpolation in string: "@{[expr]}" or "@{$ref}" → (p-join |$"| (p-cast-@ EXPR))
+# Form-producing (E2-converted).  Never declines.
 sub gen_array_str_interp {
   my ($self, $node, $node_id, $kids) = @_;
   return '""' unless @$kids;
-  my $expr = $self->gen_node($kids->[0]) // '""';
-  return '(p-join |$"| (p-cast-@ ' . $expr . '))';
+  return ['p-join', '|$"|', ['p-cast-@', $self->gen_node_form($kids->[0])]];
 }
 
 
@@ -2189,6 +2258,7 @@ sub gen_ref_funcall {
 
 
 # Ternary: (p-if cond then else)
+# Form-producing (E2-converted; the E2.0 pilot).  Never declines.
 sub gen_ternary {
   my $self    = shift;
   my $node    = shift;
@@ -2204,11 +2274,11 @@ sub gen_ternary {
     $self->expr_o->set_node_context($kids->[1], $ctx);
     $self->expr_o->set_node_context($kids->[2], $ctx);
   }
-  my $cond = $self->gen_node($kids->[0]);
-  my $then  = $self->gen_node($kids->[1]);
-  my $else  = $self->gen_node($kids->[2]);
+  my $cond = $self->gen_node_form($kids->[0]);
+  my $then  = $self->gen_node_form($kids->[1]);
+  my $else  = $self->gen_node_form($kids->[2]);
 
-  return "(p-if $cond $then $else)";
+  return ['p-if', $cond, $then, $else];
 }
 
 

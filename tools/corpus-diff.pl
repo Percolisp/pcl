@@ -7,6 +7,9 @@
 #   tools/corpus-diff.pl                    # working tree vs HEAD, whole corpus
 #   tools/corpus-diff.pl HEAD~1             # vs another ref
 #   tools/corpus-diff.pl HEAD f1.t f2.t     # subset of perl-tests files
+#   tools/corpus-diff.pl --show ...         # also print the diff hunks
+#                                           # (first 60 lines/file; --show=all
+#                                           # for everything, --show=N to cap)
 #
 # For an E1 de-gate session the acceptance is: ONLY the de-gated files
 # appear in the output, and each diff is explained.  Exit status: 0 when
@@ -33,6 +36,13 @@ use Cwd          qw(abs_path);
 
 my $root = abs_path("$RealBin/..");
 chdir $root or die "chdir $root: $!";
+
+my $show;   # undef = filenames only; 0 = unlimited; N = first N diff lines
+for my $i (reverse 0 .. $#ARGV) {
+    next unless $ARGV[$i] =~ /^--show(?:=(\w+))?$/;
+    $show = !defined $1 ? 60 : $1 eq 'all' ? 0 : $1 + 0;
+    splice @ARGV, $i, 1;
+}
 
 my $ref = (@ARGV && $ARGV[0] !~ /\.t$/) ? shift @ARGV : 'HEAD';
 system("git rev-parse --verify --quiet \Q$ref\E^{commit} >/dev/null") == 0
@@ -89,7 +99,24 @@ for my $f (@files) {
 if (@changed) {
     printf "%d of %d files differ vs %s:\n", scalar @changed, scalar @files, $ref;
     print "  $_\n" for @changed;
-    print "(inspect: diff the normalized outputs; every changed file must be explained)\n";
+    if (defined $show) {
+        for my $base (@changed) {
+            for my $side (qw(ref new)) {
+                open my $fh, '>', "$tmp/$side.norm" or die "write $side.norm: $!";
+                print $fh $norm->("$tmp/$side/$base.lisp");
+                close $fh;
+            }
+            my @lines = qx(diff -u \Q$tmp\E/ref.norm \Q$tmp\E/new.norm);
+            splice @lines, 0, 2;   # drop the +++/--- tempfile header
+            my $n = @lines;
+            splice @lines, $show if $show && $n > $show;
+            print "\n=== $base (-ref +new, $n diff lines"
+                . ($show && $n > $show ? ", first $show shown" : '') . ")\n";
+            print @lines;
+        }
+    } else {
+        print "(inspect: diff the normalized outputs; every changed file must be explained)\n";
+    }
     exit 1;
 }
 printf "emission identical to %s across %d files\n", $ref, scalar @files;
