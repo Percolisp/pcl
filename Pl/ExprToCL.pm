@@ -108,6 +108,7 @@ sub _build_handlers {
 sub _build_form_handlers {
   my $self = shift;
   return {
+    'funcall'          => \&gen_funcall_form,
     'ternary'          => \&gen_ternary,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
@@ -1205,6 +1206,190 @@ sub gen_array_str_interp {
 
 
 # Function call: (p-FUNC args...)
+# ---- E2.1: form-producing funcall (the generic call path) ------------------
+# Names whose gen_funcall handling is still a special-cased TEXT branch —
+# the form handler declines them (before any side effect) so the text
+# emitter below runs unchanged.  Shrink this list as branches convert.
+my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
+  require next last redo goto do eval grep map bless push unshift
+  readline select tied pos delete exists defined undef chop chomp
+);
+
+# Form-producing (E2-converted).  Covers the GENERIC call path — user subs
+# (word:is/ok/… = the seam frontier head) and non-special builtins —
+# including the prototype machinery ('$'-slot scalar imposition, \@/\%/\$
+# auto-boxing), the print-family $_ default, die/warn :loc, my/our
+# identity, the split/join wraps, and the *wantarray* context wraps.
+# Byte-for-byte the text emitter's shapes.  Declines (undef) every name in
+# %FUNCALL_FORM_DECLINES plus -bareword/SUPER:: heads; all decline
+# decisions come from the name + arity BEFORE argument generation (the
+# only pre-decline effect is gen_node on the name Word, which is pure for
+# Words — see gen_leaf — and idempotent package-reference set-adds).
+sub gen_funcall_form {
+  my $self    = shift;
+  my $node    = shift;
+  my $node_id = shift;
+  my $kids    = shift;
+
+  # Zero-arg special words (Parser wraps them in funcall when followed by
+  # operators) and -bareword strings: pure atoms, same bytes as the text
+  # emitter's early branch.
+  if (@$kids == 1) {
+    my $func_node = $self->expr_o->get_a_node($kids->[0]);
+    if (ref($func_node) eq 'PPI::Token::Word' && $func_node->can('content')) {
+      my $content = $func_node->content() // '';
+      if ($content eq '__FILE__') {
+        my $source_file = $self->environment
+            ? $self->environment->source_file : '-';
+        $source_file //= '-';
+        return qq{"$source_file"};
+      }
+      if ($content eq '__LINE__') {
+        return $func_node->line_number // 0;
+      }
+      if ($content eq '__PACKAGE__') {
+        my $pkg = $self->environment
+            ? $self->environment->current_package : 'main';
+        $pkg //= 'main';
+        return qq{"$pkg"};
+      }
+      # Perl: -bareword produces string "-bareword"
+      if ($content =~ /^-[A-Za-z_]\w*$/) {
+        return qq{"$content"};
+      }
+    }
+  }
+
+  # Only plain Word heads: gen_node on a Word is pure (gen_leaf), so the
+  # decline→re-run of the text path repeats no side effect.  Non-Word
+  # heads (Symbol '&foo' etc.) stay on the text path entirely.
+  return undef unless ref($self->expr_o->get_a_node($kids->[0])) eq 'PPI::Token::Word';
+
+  my $func_name = $self->gen_node($kids->[0]);
+
+  return undef if $func_name =~ /^-/;                    # unary-minus-of-call
+  return undef if $func_name =~ /^SUPER::/;              # indirect super call
+  return undef if $FUNCALL_FORM_DECLINES{$func_name};
+
+  my $cl_func = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
+
+  # ---- from here on: the text emitter's generic tail, form-shaped ----
+
+  my $proto = $self->environment ? $self->environment->get_prototype($func_name) : undef;
+  my @ref_params;
+  if ($proto && $proto->{is_proto} && $proto->{params}) {
+    @ref_params = map { $_->{proto_type} // $_->{name} } @{$proto->{params}};
+  }
+
+  # '$'-slot scalar imposition only when args >= mandatory-param count
+  # (fewer args = an array is flattening across the slots; see the text
+  # emitter's comment for the full rule).
+  my $n_call_args = $#$kids;
+  my $may_impose_scalar =
+       @ref_params
+    && defined $proto->{min_params}
+    && $proto->{min_params} >= 0
+    && $n_call_args >= $proto->{min_params};
+
+  # Arguments are NOT the tail call: clear tail_position around their
+  # generation so they get their own annotated context.
+  my $saved_tail = $self->environment ? $self->environment->tail_position : 0;
+  $self->environment->tail_position(0) if $self->environment && $saved_tail;
+
+  my @args;
+  for my $i (1 .. $#$kids) {
+    my $param_idx = $i - 1;
+    my $impose_scalar = ($may_impose_scalar
+                         && $param_idx < @ref_params
+                         && defined $ref_params[$param_idx]
+                         && $ref_params[$param_idx] eq '$');
+    $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
+
+    my $arg = $self->gen_node_form($kids->[$i]);
+
+    if ($impose_scalar) {
+      my $an = $self->expr_o->get_a_node($kids->[$i]);
+      my $r = ref($an);
+      my $already_scalar =
+           $r eq 'PPI::Token::Number'
+        || $r =~ /^PPI::Token::Quote\b/
+        || ($r eq 'PPI::Token::Symbol' && $an->content() =~ /^\$/)
+        || ($r eq 'PPI::Token::Magic'  && $an->content() =~ /^\$/);
+      $arg = ['p-scalar', $arg] unless $already_scalar;
+    }
+
+    # Reference prototype slot (\@, \%, \$): auto-box a matching bare var.
+    if ($param_idx < @ref_params) {
+      my $param_type = $ref_params[$param_idx];
+      if ($param_type =~ /^\\([@%\$])$/) {
+        my $expected_sigil = $1;
+        my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
+        if (ref($arg_node) eq 'PPI::Token::Symbol') {
+          my $arg_sigil = substr($arg_node->content(), 0, 1);
+          if ($arg_sigil eq $expected_sigil) {
+            $arg = ['p-backslash', $arg];
+          }
+        }
+      }
+    }
+    push @args, $arg;
+  }
+
+  # Bare print/say/printf defaults to $_ (a `:fh …` marker is not a list
+  # arg).  The text emitter's regex runs on arg text; to_flat gives the
+  # same text for form args (a form never starts with ':fh').
+  if ($func_name eq 'print' || $func_name eq 'say' || $func_name eq 'printf') {
+    push @args, '$_'
+      unless grep { Pl::CLForm::to_flat($_) !~ /^:fh\b/ } @args;
+  }
+
+  $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
+
+  my $call;
+  if ($cl_func eq 'p-die' || $cl_func eq 'p-warn') {
+    my $word = $self->expr_o->get_a_node($kids->[0]);
+    my $line = (ref($word) && $word->can('line_number')) ? ($word->line_number // 0) : 0;
+    my $file = ($self->environment && $self->environment->source_file) || '-';
+    $file =~ s/(["\\])/\\$1/g;
+    $call = [$cl_func, ':loc', "\"$file line $line\"", @args];
+  } else {
+    $call = [$cl_func, @args];
+  }
+
+  # 'my'/'our' in expression context is an identity.
+  if (($func_name eq 'my' || $func_name eq 'our') && @args == 1) {
+    return $args[0];
+  }
+
+  my $ctx = $self->expr_o->get_node_context($node_id);
+
+  # split: p-split always returns a vector; scalar context takes its length.
+  if ($func_name eq 'split') {
+    return $ctx == 0 ? ['length', $call] : $call;
+  }
+
+  # INHERIT_CTX or tail position: let the caller's *wantarray* flow through.
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+
+  if ($WANTARRAY_SENSITIVE{$func_name}) {
+    return $self->_wrap_wantarray_ctx_form($call, $ctx);
+  }
+
+  # join always evaluates its list arguments in list context.
+  if ($func_name eq 'join') {
+    return ['let', ['list', ['list', '*wantarray*', 't']], $call];
+  }
+
+  # User sub calls: always bind *wantarray*; built-ins only in list context.
+  if (!exists $RUNTIME_NAMES{$func_name}) {
+    return $self->_ctx_wrap_form($call, $ctx);
+  }
+  return $ctx == LIST_CTX
+      ? ['let', ['list', ['list', '*wantarray*', 't']], $call]
+      : $call;
+}
+
 sub gen_funcall {
   my $self    = shift;
   my $node    = shift;
@@ -2094,6 +2279,25 @@ sub _ctx_wrap {
                && $self->environment && $self->environment->wa_void_active;
   my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
   return "(let ((*wantarray* $wa)) $call)";
+}
+
+# Form variants of _wrap_wantarray_ctx / _ctx_wrap for E2-converted
+# emitters: same logic, CLForm output (flat-prints to the same bytes).
+sub _wrap_wantarray_ctx_form {
+  my ($self, $call, $ctx) = @_;
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  return ['let',
+          ['list', ['list', '*wantarray*', $ctx == LIST_CTX ? 't' : 'nil']],
+          $call];
+}
+
+sub _ctx_wrap_form {
+  my ($self, $call, $ctx) = @_;
+  return $call if $ctx == VOID_CTX
+               && $self->environment && $self->environment->wa_void_active;
+  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
+  return ['let', ['list', ['list', '*wantarray*', $wa]], $call];
 }
 
 # Build the lexical-capture alist passed as the 2nd arg to (p-eval STRING ...).

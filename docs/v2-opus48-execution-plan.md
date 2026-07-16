@@ -1,16 +1,20 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s293 (2026-07-16, Fable): census 102 v2-native / 9 gated,
-cache gen v2-34, Pl/t gate green (115 files / 4053 tests).  E2.0 SHIPPED
-(task #57): the emitter-conversion scaffold (CLForm::to_flat +
+**State updated s293+s293b (2026-07-16, Fable): census 102 v2-native / 9
+gated, cache gen v2-34, v2 gate green (115 files / 4058 tests).  E2.0
+SHIPPED (task #57): the emitter-conversion scaffold (CLForm::to_flat +
 ExprToCL form_handlers/gen_node_form + corpus-diff --show) and the first
 3 emitters converted at byte parity on BOTH pipelines (gen_ternary,
-gen_string_concat, gen_array_str_interp) — see §E2.0 below for the
-per-step recipe.  Cadence: an E1 session is next (postderef_qq #45,
-chdir.t #55, or the M-F user-decision session #56); E2.1 (funcall family,
-declining form handler on gen_funcall) can interleave.  Before that,
-s291–s292 (Opus 4.8) de-gated scalar.t (M-B) and substr.t (M-E).**
+gen_string_concat, gen_array_str_interp).  E2.1 STEP 1 SHIPPED (s293b,
+task #68 in progress): gen_funcall's GENERIC path is form-producing
+(word:is/ok frontier head re-housed); `%FUNCALL_FORM_DECLINES` in
+ExprToCL.pm = the live remaining-branch worklist.  PCL_V1 gate = 7
+pre-existing v2-only-test fails (identical at HEAD) — the v1-gate
+criterion is failure-set-identical, see §E2.0 recipe.  Cadence: an E1
+session is next (postderef_qq #45, chdir.t #55, or the M-F user-decision
+session #56); further E2.1 branches interleave.  Before this, s291–s292
+(Opus 4.8) de-gated scalar.t (M-B) and substr.t (M-E).**
 **Previous state s290: census 100 v2-native / 11
 gated, cache gen v2-32, Pl/t gate green.  M-B session 1 SHIPPED (task
 #51): sort.t de-gated (202/2/1, same fails 170/177 as v1 — exact parity)
@@ -341,7 +345,18 @@ playbook (see `docs/v2-transfer-plan.md` T-C(ii)):
   back to the plan, not to paper over.
 - **E2.1–E2.n: convert the 69 emitters in frontier order:**
   1. funcall family first — `word:*` is one generic emitter covering
-     is/ok/cmp_ok/join/… (biggest coverage per step),
+     is/ok/cmp_ok/join/… (biggest coverage per step).  **Step 1 DONE
+     (s293b): `gen_funcall_form` covers the GENERIC call path** (user
+     subs + non-special builtins, prototype machinery `(p-scalar …)`/
+     `(p-backslash …)`, print-family `$_` default, die/warn `:loc`,
+     my/our identity, split/join wraps, `%WANTARRAY_SENSITIVE` +
+     `_ctx_wrap_form` context binds) at byte parity on both pipelines.
+     **`%FUNCALL_FORM_DECLINES` in ExprToCL.pm is the live remaining
+     worklist** — require, next/last/redo/goto, do, eval, grep/map,
+     bless, push/unshift, readline/select, tied/pos, delete/exists/
+     defined/undef, chop/chomp, plus -bareword/SUPER::/non-Word heads;
+     each stays on the kept text gen_funcall until its branch converts
+     (shrink the list branch by branch, one verification cycle each),
   2. sym/magic reads, `string_concat`, literals (`quote-double`,
      `number-hex`),
   3. `op:=`/`++`/`!` families, regex forms,

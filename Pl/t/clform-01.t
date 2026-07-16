@@ -48,4 +48,27 @@ my $sc = Pl::Parser2->parse_code(
 like($sc, qr/\(p-string-concat "x " \$a " " \(p-join \|\$"\| \@arr\) " " \(p-join \|\$"\| \(p-cast-@ \(make-p-box \(p-array-init \(p-\+ 1 2\)\)\)\)\) " " \(p-join \|\$"\| \(p-aslice \@arr \(p-\.\. 0 1\)\)\) " y"\)/,
      'string_concat form: scalar, @arr join, @{[...]} cast, slice join, literals');
 
+# --- converted: gen_funcall_form (E2.1, generic path) ------------------------
+
+my $fc = Pl::Parser2->parse_code(<<'EOT');
+sub two ($$) { my ($a, $b) = @_; return $a + $b }
+my @a = (1, 2, 3);
+my $r = two(@a, 3);
+my $j = join(",", 1, 2);
+print STDERR "e";
+print;
+warn "w";
+EOT
+
+like($fc, qr/\(pl-two \(p-scalar \@a\) 3\)/,
+     'funcall form: prototype $-slot imposes (p-scalar @a), literal skipped');
+like($fc, qr/\(let \(\(\*wantarray\* t\)\) \(p-join "," 1 2\)\)/,
+     'funcall form: join gets its list-context bind');
+like($fc, qr/\(p-print :fh 'STDERR "e"\)/,
+     'funcall form: print filehandle marker passes through untouched');
+like($fc, qr/\(p-print \$_\)/,
+     'funcall form: bare print gets the explicit $_ default');
+like($fc, qr/\(p-warn :loc "- line \d+" "w"\)/,
+     'funcall form: warn carries the :loc source-location marker');
+
 done_testing();

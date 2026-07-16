@@ -239,7 +239,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **115 test files, 4053 tests** (Pl/t gate, as of session 293)
+- **115 test files, 4058 tests** (Pl/t gate, as of session 293)
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)

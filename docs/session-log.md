@@ -4,6 +4,42 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 293b (2026-07-16, Fable) — E2.1 step 1: gen_funcall GENERIC path → CLForm at byte parity (declining form handler; the word:is/ok frontier head re-housed).
+
+First real E2.1 conversion on the s293 scaffold, same session:
+
+- **`gen_funcall_form` registered as the `funcall` form handler.**  Covers
+  the GENERIC call path — user subs (word:is/ok/cmp_ok/… = the top of the
+  seam blame frontier) and non-special builtins — including: the prototype
+  machinery ('$'-slot scalar imposition → `(p-scalar …)` with the
+  already-scalar skip, `\@`/`\%`/`\$` slots → `(p-backslash …)`, the
+  min_params flatten guard), the print/say/printf explicit `$_` default
+  (the `:fh` marker test runs on `to_flat` of each arg — same text the
+  old regex saw), die/warn `:loc` source location, my/our identity,
+  split's scalar `(length …)` wrap, join's list bind, the
+  `%WANTARRAY_SENSITIVE` wraps, INHERIT/tail passthrough, and the
+  user-sub/built-in *wantarray* binds — via `_ctx_wrap_form` /
+  `_wrap_wantarray_ctx_form` (form twins of the text wrappers, same
+  bytes).  Zero-arg `__FILE__`/`__LINE__`/`__PACKAGE__`/`-bareword`
+  specials implemented directly (pure atoms).
+- **DECLINES (all decided from name+arity BEFORE argument generation):**
+  `%FUNCALL_FORM_DECLINES` = require, next/last/redo/goto, do, eval,
+  grep/map, bless, push/unshift, readline/select, tied/pos,
+  delete/exists/defined/undef, chop/chomp — plus `-bareword`/`SUPER::`
+  heads and **non-Word heads** (gen_node on a Word is pure per gen_leaf,
+  so the decline→text re-run repeats no side effect; non-Word heads
+  never enter the form path at all).  The decline hash IS the remaining
+  E2.1 worklist — shrink it branch by branch, one verification cycle
+  each.
+- **Verification**: corpus-diff byte-identical across all 111 files on
+  BOTH pipelines (run twice: mid-development and on the final tree); v2
+  gate green (115 files / 4058 tests); PCL_V1 gate failure set identical
+  to HEAD's known 7-test set.  No cache-gen bump (byte-identical).
+- **Guards**: clform-01.t +5 funcall shapes (prototype p-scalar, join
+  bind, print `:fh` passthrough, bare-print `$_` default, warn `:loc`).
+
+---
+
 ## Session 293 (2026-07-16, Fable) — E2.0 SHIPPED (task #57): emitter-conversion scaffold + first 3 ExprToCL emitters → CLForm at byte parity (ternary, string_concat, array_str_interp).
 
 **E2 (seam re-housing) is now open for business.**  The scaffold that makes
