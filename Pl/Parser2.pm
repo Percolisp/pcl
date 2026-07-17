@@ -394,6 +394,19 @@ sub parse {
   }
   $self->{_file_lex_counter} = 0;
   $self->{_file_lex_renamed} = {};
+  # M-F: renamed-cell declarations emit a p-alias-eval-cell only when the
+  # file contains a string eval somewhere — the alias can only be observed
+  # through an eval in THIS file (lexicals never cross files), and skipping
+  # the inert call keeps eval-free files byte-identical.  Non-eval uses of
+  # the word (`->eval`, `eval =>`, hash keys) over-fire harmlessly.
+  $self->{_file_has_str_eval} = 0;
+  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
+                                 && $_[1]->content eq 'eval' }) || [] }) {
+    my $nx = $w->snext_sibling;
+    next if $nx && $nx->isa('PPI::Structure::Block');
+    $self->{_file_has_str_eval} = 1;
+    last;
+  }
 
   # W10: a file lexical declared in one segment and used in a later one spans
   # a package boundary.  v1 has an OPEN BUG here (it defvars the name under
@@ -561,6 +574,15 @@ sub parse {
     # lexicals are renamed (promotion passes / the seam's __lex__N) or gated,
     # so the per-iteration-closure hazard cannot reach this path.
     $self->fallback_parser->{_let_bound_vars} = {};
+    # M-F: this segment's span-mangled cells, visible to string evals by
+    # their ORIGINAL name via the capture alist (_eval_lexical_alist).
+    # These per-site pairs cover CROSS-PACKAGE sites (the eval-time lookup
+    # interns the name in the SITE's package, where a cell aliased in the
+    # declaring package is invisible).  Same-package resolution — promoted
+    # cells, and nested/late evals with no site alist at all — goes through
+    # the alias rule instead (p-alias-eval-cell at the decl's run position;
+    # ir-spec §9.1).
+    $self->fallback_parser->{_eval_span_captures} = $seg->{eval_span_captures} // {};
     my (@decls, @defs, @top);
     for my $child (@{ $seg->{stmts} }) {
       if ($child->isa('PPI::Statement::Sub') && $child->name
@@ -611,6 +633,14 @@ sub parse {
       sched    => [@{ $self->{_sched_defs} }],
       seg_lex  => $self->{_seg_lex},
     };
+  }
+
+  # M-F backstop: every promoted cell whose eval refusals were waived must
+  # have registered its capture pair at its defvar lowering.  A decl that
+  # instead lowered inside a v1-seam expression never registered — the eval
+  # would silently read the wrong variable → die → whole-file v1.
+  if (my ($miss) = sort keys %{ $self->{_pending_eval_caps} // {} }) {
+    die "Parser2 TODO: promoted cell $miss never registered for eval capture\n";
   }
 
   # ---- Assemble the sections.
@@ -1212,20 +1242,33 @@ sub _check_sub_captures {
 sub _block_captures_name {
   my ($self, $block, $bare, $canons) = @_;
   my $re = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
-  my $text_re = $re;
+  # Per-CANON text patterns, so a string/heredoc/regex mention can be
+  # attributed to one canonical variable and shadow-checked like a Symbol
+  # use (M-F: `eval('$zzz')` under the sub's own preceding `my $zzz` refers
+  # to the shadow — the eval capture alist binds it let-bound-first — not a
+  # capture of the file lexical).  Without canon info the mention stays
+  # unattributable and is conservatively a capture, as before.
+  my %canon_pat;
   if ($canons) {
-    my @pat;
-    push @pat, qr/\$\Q$bare\E\b(?!\s*[\[\{])/, qr/\$\{\s*\Q$bare\E\s*\}(?![\[\{])/
-      if $canons->{"\$$bare"};
-    push @pat, qr/\@\Q$bare\E\b(?!\s*\{)/, qr/\$\Q$bare\E\s*\[/, qr/\$\#\Q$bare\E\b/,
-               qr/[\$\@]\{\s*\Q$bare\E\s*\}\s*\[/, qr/\@\{\s*\Q$bare\E\s*\}(?!\s*\{)/,
-               qr/\$\#\{\s*\Q$bare\E\s*\}/
-      if $canons->{"\@$bare"};
-    push @pat, qr/\%\Q$bare\E\b/, qr/[\$\@]\Q$bare\E\s*\{/,
-               qr/[\$\@]\{\s*\Q$bare\E\s*\}\s*\{/, qr/\%\{\s*\Q$bare\E\s*\}/
-      if $canons->{"\%$bare"};
-    my $u = join '|', @pat;
-    $text_re = qr/$u/;
+    if ($canons->{"\$$bare"}) {
+      my $u = join '|', qr/\$\Q$bare\E\b(?!\s*[\[\{])/, qr/\$\{\s*\Q$bare\E\s*\}(?![\[\{])/;
+      $canon_pat{"\$$bare"} = qr/$u/;
+    }
+    if ($canons->{"\@$bare"}) {
+      my $u = join '|',
+        qr/\@\Q$bare\E\b(?!\s*\{)/, qr/\$\Q$bare\E\s*\[/, qr/\$\#\Q$bare\E\b/,
+        qr/[\$\@]\{\s*\Q$bare\E\s*\}\s*\[/, qr/\@\{\s*\Q$bare\E\s*\}(?!\s*\{)/,
+        qr/\$\#\{\s*\Q$bare\E\s*\}/;
+      $canon_pat{"\@$bare"} = qr/$u/;
+    }
+    if ($canons->{"\%$bare"}) {
+      my $u = join '|',
+        qr/\%\Q$bare\E\b/, qr/[\$\@]\Q$bare\E\s*\{/,
+        qr/[\$\@]\{\s*\Q$bare\E\s*\}\s*\{/, qr/\%\{\s*\Q$bare\E\s*\}/;
+      $canon_pat{"\%$bare"} = qr/$u/;
+    }
+  } else {
+    $canon_pat{''} = $re;   # canon unknown → unattributable, never discounted
   }
   my @heredocs = @{ $block->find('PPI::Token::HereDoc') || [] };
   # Cheap early-out: the bare name appears nowhere in the text (common case).
@@ -1282,11 +1325,18 @@ sub _block_captures_name {
       next if $canons && !$canons->{"\@$bare"};
       return 1 unless $shadowed->($t, "\@$bare");
     } elsif ($t->isa('PPI::Token::HereDoc')) {
-      return 1 if join('', $t->heredoc) =~ $text_re;
+      my $txt = join('', $t->heredoc);
+      for my $c (sort keys %canon_pat) {
+        next unless $txt =~ $canon_pat{$c};
+        return 1 if !length($c) || !$shadowed->($t, $c);
+      }
     } elsif ($t->isa('PPI::Token::Quote')
           || $t->isa('PPI::Token::QuoteLike')
           || $t->isa('PPI::Token::Regexp')) {
-      return 1 if $t->content =~ $text_re;
+      for my $c (sort keys %canon_pat) {
+        next unless $t->content =~ $canon_pat{$c};
+        return 1 if !length($c) || !$shadowed->($t, $c);
+      }
     }
   }
   return 0;
@@ -1388,13 +1438,15 @@ sub _scan_lex_facts {
 # Subset (anything outside it keeps the _check_my_spanning gate → v1):
 #   - exactly ONE my/state declaration of the bare name in the whole file,
 #     and it is a top-level `my $x` scalar declaration (same as W5);
-#   - never used in array/hash family form, ${x} deref-block, or interpolated
-#     — anywhere in the file (Symbol-content rename must reach every use);
+#   - never used as a ${x} deref-block (text the interp fixer cannot
+#     attribute).  Sibling @x/%x family uses are fine (M-F): Symbol rewrites
+#     key on ->symbol and the interp fixer skips `$x[`/`$x{`.  Interpolated
+#     `$x` uses are rewritten by the fixer (M-A);
 #   - the declaring segment is not a package-BLOCK segment (a block-scoped
 #     `my` does NOT span in Perl — later same-name uses are package globals);
-#   - no string eval from the declaring segment on (the session-250 capture
-#     alist finds lexicals BY NAME in _let_bound_vars; a renamed package cell
-#     is invisible to it, so eval'd code reading $x would silently miss).
+#   - a string eval naming the original `$x` is handled (M-F): each extent
+#     segment records original→cell in eval_span_captures, and the capture
+#     alist carries the pair (see _eval_lexical_alist).
 # References BEFORE the declaration (earlier segments, or earlier statements
 # of the declaring segment, or the decl's own RHS) are package globals of a
 # DIFFERENT variable — left untouched, exactly Perl's visibility rule.
@@ -1506,39 +1558,12 @@ sub _rename_spanning_lexicals {
   }
   my $alltxt = join "\n", map { map { $_->content } @{ $_->{stmts} } } @$segments;
 
-  # W10-ext-4: a rename is unsafe w.r.t. a string eval only if the eval could
-  # NAME the renamed lexical — the session-250 capture alist finds lexicals by
-  # name, and a renamed package cell is invisible to it.  Per segment, record
-  # (a) the literal text of each string eval's argument, and (b) whether a
-  # DYNAMIC string eval (eval of a non-literal expression) appears — the latter
-  # could reference anything, so it stays conservative.  eval BLOCKS are fine.
-  my (@eval_lit, @eval_dyn);
-  for my $i (0 .. $#$segments) {
-    my ($lit, $dyn) = ('', 0);
-    for my $stmt (@{ $segments->[$i]{stmts} }) {
-      next unless ref $stmt && $stmt->isa('PPI::Node');
-      for my $w (@{ $stmt->find(sub { $_[1]->isa('PPI::Token::Word')
-                                      && $_[1]->content eq 'eval' }) || [] }) {
-        my $nx = $w->snext_sibling;
-        next if !$nx || $nx->isa('PPI::Structure::Block');   # eval { } — fine
-        my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
-              : $nx->isa('PPI::Structure::List')
-                ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
-        if (@q) { $lit .= $_->content for @q } else { $dyn = 1 }
-      }
-    }
-    ($eval_lit[$i], $eval_dyn[$i]) = ($lit, $dyn);
-  }
-  # True if renaming $bare (declared in segment $di) could be seen by a string
-  # eval in scope (at/after the declaration).
-  my $eval_unsafe = sub {
-    my ($bare, $di) = @_;
-    for my $j ($di .. $#$segments) {
-      return 1 if $eval_dyn[$j];
-      return 1 if $eval_lit[$j] =~ /(?:[\$\@\%]|\$\#)\s*\{?\s*\Q$bare\E\b/;
-    }
-    return 0;
-  };
+  # (W10-ext-4's per-segment eval scan and its 'eval-unsafe (non-unique)'
+  # refusal were REMOVED in M-F: a mangled rename now registers an
+  # original-name → cell pair on each extent segment (see the registration
+  # at the bottom of the instance loop), so a string eval naming the
+  # original `$x` — literal or dynamic — captures the renamed cell through
+  # the s250 alist.)
 
   for my $bare (sort keys %spanning) {
     # M-B (per-declaration span tracking): a spanning bare name can carry
@@ -1614,7 +1639,6 @@ sub _rename_spanning_lexicals {
       warn "SPANREFUSE $bare\@seg$di: $_[0]\n" if $ENV{PCL_SPAN_DEBUG};
       return 1;
     };
-    next if !$unique && $eval_unsafe->($bare, $di) && $refuse->('eval-unsafe (non-unique)');
     # Facts scoped to the declaration's live extent: the block's segment run for
     # a flattened-block decl, else all later segments (file lexical).  Decls or
     # disqualifying uses outside that range belong to a different variable.
@@ -1634,7 +1658,13 @@ sub _rename_spanning_lexicals {
       push @sdecls, grep { my $v = $_; grep { $_ == $v } @$top }
                     @{ $csf->[$j]{scalar_decl}{$bare} || [] };
     }
-    next if $family && $refuse->('family use (@x/%x/$#x)');
+    # (The old blanket 'family use (@x/%x/$#x)' refusal was REMOVED in M-F:
+    # Symbol rewrites key on ->symbol (a sibling @x/%x is never touched),
+    # $#x is an ArrayIndex token the scalar loops never rewrite, and the
+    # interp fixer's scalar pattern skips `$x[`/`$x{` — which is also
+    # Perl-correct, since "$x[0]" interpolates @x's element, never the
+    # scalar.  The ${x} deref-block refusal below still guards the one text
+    # shape the fixer cannot attribute.)
     # An interpolated use is text a rename cannot rewrite.  It is safe ONLY on
     # the identity-unmangle path (the name is unchanged, so interpolation
     # keeps resolving to the defvar'd global) and only where the interpolating
@@ -1734,6 +1764,24 @@ sub _rename_spanning_lexicals {
       }
     }
     $self->{_file_lex_renamed}{"\$$newbare"} = 1;
+    # M-F: a MANGLED rename is invisible to a string eval that names the
+    # original `$x` (the s250 capture alist finds lexicals by name).  Record
+    # original→cell on every segment of the extent; the section driver
+    # publishes the current segment's map to the fallback parser, and
+    # _eval_lexical_alist appends the pairs (after let-bound ones, so a live
+    # shadow wins by assoc order).  The package-QUALIFIED spelling is valid
+    # in every segment (same symbol the later-segment token rewrite uses).
+    # `//=` keeps the innermost instance's cell where extents overlap (the
+    # instance loop runs innermost-first).  Identity renames need no pair:
+    # the unchanged name resolves to the defvar'd global (see the $unique
+    # comment above).
+    if (!$unique) {
+      my $pkg = $segments->[$di]{pkg};
+      my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+      for my $j ($di .. $hi) {
+        $segments->[$j]{eval_span_captures}{"\$$bare"} //= "${cl_pkg}::\$$newbare";
+      }
+    }
     }   # per-declaration instance
   }
 
@@ -2232,15 +2280,28 @@ sub _promote_captured {
   my $etxt = $extent ? $extent->content : join("\n", map { $_->content } @$stmts);
   return if $etxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/          # ${x}/@{x}/%{x} deref-block → can't rewrite
     && _caprefuse($canon, '${x} deref-block');
-  # A renamed cell is invisible to string eval's by-name lexical capture
-  # (session-250 alist) — refuse when a post-decl string eval could name it.
-  # eval BLOCKS are fine; a literal eval that never mentions the name is fine.
+  # M-F: a promoted SCALAR cell becomes eval-visible when its renamed decl
+  # LOWERS — _reg_eval_capture at the defvar branches emits the alias call
+  # (p-alias-eval-cell, ir-spec §9.1) at the decl's run position, and string
+  # eval — literal AND dynamic — then reaches the cell by its original name
+  # through the lookup's global fall-through.  So no eval refusal is needed,
+  # EXCEPT for: containers (only scalar cells are aliased/alist-carried) and
+  # the enclosing-outer-lexical shape (an outer `my $x` around the extent —
+  # the site alist's let-bound pair precedes the global in lookup order, so
+  # the deeper cell could never win; aliasing skips it, so keep the
+  # refusal).  For those, a renamed cell stays invisible to string eval's
+  # by-name lexical capture — refuse when a post-decl string eval could name
+  # it.  eval BLOCKS are fine; a literal eval that never mentions the name
+  # is fine.
+  my $eval_pair = $sig eq '$' && !$self->_enclosing_lex_decl($extent, $bare);
+  my $post_eval = 0;
   for my $st (@post) {
     next unless ref $st && $st->isa('PPI::Node');
     for my $w (@{ $st->find(sub { $_[1]->isa('PPI::Token::Word')
                                   && $_[1]->content eq 'eval' }) || [] }) {
       my $nx = $w->snext_sibling;
       next if !$nx || $nx->isa('PPI::Structure::Block');    # eval { } — fine
+      if ($eval_pair) { $post_eval = 1; next }
       my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
             : $nx->isa('PPI::Structure::List')
               ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
@@ -2266,6 +2327,16 @@ sub _promote_captured {
   $self->_rename_decl_within($decl, $dsym, $sig . $newbare);
   $self->_rewrite_var_uses(\@post, $canon, $newbare, $extent, $skip);
   $self->{_file_lex_renamed}{ $sig . $newbare } = 1;             # drives the defvar lowering
+  # M-F backstop: the eval refusals above were waived on the promise that
+  # _reg_eval_capture runs when this decl lowers to its defvar.  If the decl
+  # instead lowers inside a v1-seam expression (do-block, anon-sub body, …)
+  # the defvar branch never runs and the promise breaks — the end-of-parse
+  # check dies (→ v1) on any name still pending.  Only armed when a post-decl
+  # string eval actually exists.
+  $self->{_pending_eval_caps}{ $sig . $newbare } = 1 if $eval_pair && $post_eval;
+  warn "CAPPROMOTE $canon -> $sig$newbare (extent="
+    . ($extent ? "block@" . $extent->location->[0] : 'segment')
+    . ", eval_pair=$eval_pair, post_eval=$post_eval)\n" if $ENV{PCL_SPAN_DEBUG};
   return 1;
 }
 
@@ -2281,12 +2352,79 @@ sub _captured_in_subs {
     for my $s (@{ $sub->block->find('PPI::Token::Symbol') || [] }) {
       return 1 if $s->symbol eq $canon;
     }
-    next unless $sig eq '@';
-    for my $ai (@{ $sub->block->find('PPI::Token::ArrayIndex') || [] }) {
-      return 1 if $ai->content eq "\$#$bare";
+    if ($sig eq '@') {
+      for my $ai (@{ $sub->block->find('PPI::Token::ArrayIndex') || [] }) {
+        return 1 if $ai->content eq "\$#$bare";
+      }
+    }
+    # M-F: a quoted/heredoc/regex mention is a capture too — string eval
+    # reaches the lexical by NAME (`eval '$yyy'`).  _block_captures_name
+    # attributes the mention per-canon and shadow-checks it, so a sub-local
+    # shadow of the name does not count.  Without this an eval-string-only
+    # capture is invisible to promotion while _check_sub_captures DOES count
+    # it — the refusal here would leave the file gated forever (eval.t fred4).
+    return 1 if $self->_block_captures_name($sub->block, $bare, { $canon => 1 });
+  }
+  return 0;
+}
+
+# M-F: any my/state declaration of $bare at a scope ENCLOSING $extent — an
+# outer lexical the promoted cell would nest inside.  The flat eval-capture
+# alist puts let-bound pairs first, so a cell nested inside the outer
+# lexical's scope could never win the by-name lookup; the caller then keeps
+# the eval refusals for this (rare) shape instead of registering a pair.
+# Only DIRECT children of enclosing blocks/document count (same-level decls);
+# a decl inside a sibling block is a different, non-overlapping scope.
+# An enclosing decl ALREADY RENAMED by an earlier pass instance (its content
+# is now `$x__file__0`/`$x__lex__2`/…) still counts: it declares the same
+# bare name in an enclosing scope, and the outer/inner precedence problem is
+# identical.  Without the suffix-strip, promotion order decides whether the
+# refusal fires (outer-promotes-first hid the decl from this scan — the encl
+# probe's silent "2 2" miscompile, s295).
+sub _enclosing_lex_decl {
+  my ($self, $extent, $bare) = @_;
+  return 0 unless $extent;
+  for (my $p = $extent->parent; $p; $p = $p->parent) {
+    next unless $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
+    for my $st (grep { $_->isa('PPI::Statement::Variable') } $p->schildren) {
+      my @k = _strip_semi($st->schildren);
+      next unless @k >= 2 && $k[0]->isa('PPI::Token::Word')
+        && $k[0]->content =~ /^(?:my|state)$/;
+      my @syms = $k[1]->isa('PPI::Token::Symbol') ? ($k[1])
+               : $k[1]->isa('PPI::Structure::List')
+                 ? (grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1])
+               : ();
+      return 1 if grep {
+        (my $n = $_->content) =~ s/__(?:file|lex|shadow|cond)__\d+$//;
+        $n eq "\$$bare"
+      } @syms;
     }
   }
   return 0;
+}
+
+# M-F (s295 ALIAS rule, ir-spec §9.1): make a renamed (mangled) SCALAR cell
+# reachable by string eval under its ORIGINAL name — including from code the
+# eval transpile itself emitted (a sub defined inside an eval string whose
+# nested eval names it), which no codegen-site alist can ever know about.
+# Emits (p-alias-eval-cell '$x $x__file__N) for the decl's RUN position: the
+# quoted UNQUALIFIED symbol is interned by the reader under the section's
+# in-package = the declaring package, so the alias writes the original-name
+# global there — the very slot p-eval-lex-lookup's global fall-through (and
+# any plain un-renamed defvar'd lexical) uses.  One storage location per
+# name, TIME-ORDERED exactly like v1's defvar model: a later same-name
+# declaration takes over the name from the moment it executes.  Returns the
+# CLForms.
+sub _reg_eval_capture {
+  my ($self, @vars) = @_;
+  my @forms;
+  for my $var (@vars) {
+    next unless $var =~ /^\$\w+__file__\d+$/;
+    (my $orig = $var) =~ s/__file__\d+$//;
+    push @forms, ['p-alias-eval-cell', "'$orig", $var];
+    delete $self->{_pending_eval_caps}{$var} if $self->{_pending_eval_caps};
+  }
+  return @forms;
 }
 
 # ---- W8.5 shared shadow-rename machinery ----------------------------------
@@ -2299,7 +2437,7 @@ sub _captured_in_subs {
 
 # Reasons renaming `my $x` within $root is NOT safe; undef when safe.
 sub _shadow_rename_blocker {
-  my ($self, $root, $sym) = @_;
+  my ($self, $root, $sym, $eval_ok) = @_;
   my $old = $sym->content;
   return "non-scalar" unless $old =~ /^\$\w+$/;
   (my $bare = $old) =~ s/^\$//;
@@ -2320,11 +2458,18 @@ sub _shadow_rename_blocker {
   # `${x}` brace-deref form is invisible to the rewrite — refuse that.
   return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
   # String eval captures lexicals BY NAME (session-250 alist) — the eval'd
-  # code would look for the original name.  eval-BLOCKS are fine.
-  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
-                                  && $_[1]->content eq 'eval' }) || [] }) {
-    my $nx = $w->snext_sibling;
-    return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
+  # code would look for the original name.  eval-BLOCKS are fine.  $eval_ok
+  # waives this (M-F): the seam my-shadow rename produces a LET-BOUND
+  # `$x__shadow__N`, which _eval_lexical_alist strips back to the original
+  # key (innermost-first), so string eval — literal and dynamic — still
+  # reaches the shadow.  state/cond renames produce cells the alist does not
+  # carry, so they keep the refusal.
+  unless ($eval_ok) {
+    for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                                    && $_[1]->content eq 'eval' }) || [] }) {
+      my $nx = $w->snext_sibling;
+      return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
+    }
   }
   return undef;
 }
@@ -2660,7 +2805,19 @@ sub _lower_sub {
   my %saved_lex = %{ $self->{_live_lex} // {} };
   # Scope _let_bound_vars across the sub body too (W3): params + body lexicals
   # must not leak into a later call site's string-eval capture alist.
+  # _eval_extra_captures likewise (M-F): a promoted cell declared inside the
+  # sub body dies with it.
   my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  # A named sub is HOISTED outside the file's lexical `let`s, so an OUTER
+  # let-bound name is unbound inside its body — it must not reach a body
+  # eval's capture alist (eval.t recurse: the alist's `(cons "$curr_test"
+  # $curr_test)` crashed unbound at call time; the eval never even named
+  # it).  Start the body from an empty set: params + body lexicals
+  # re-register during lowering; promoted/span cells are defvars — globally
+  # bound — reachable via the span pairs and the alias rule (ir-spec §9.1).
+  # A sub that genuinely REFERENCES an outer lexical is the capture family:
+  # promoted or gated before lowering ever gets here.
+  $self->fallback_parser->{_let_bound_vars} = {};
   my $form = eval { $self->_lower_sub_inner($sub) };
   my $err = $@;
   $self->{_live_lex} = \%saved_lex;
@@ -2969,7 +3126,11 @@ sub _lower_block {
       # hoisted named sub that captures it sees the same special symbol) plus a
       # plain package-var assignment in place.  No let, not let-bound.
       push @{ $self->{_captured_decls} }, "(defvar $name (make-p-box nil))";
+      # Register AFTER the assignment: the decl's own RHS (incl. an eval in
+      # it) still resolves the original name to the OUTER variable.
+      my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture($name) : ();
       return ((defined $init ? (['p-scalar-=', $name, $self->_lower_expr($init, $first)]) : ()),
+              @reg,
               $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
     if ($name) {
@@ -3168,12 +3329,14 @@ sub _lower_block {
     if (@renamed) {
       push @{ $self->{_captured_decls} },
         "(defvar $_ " . _fresh_container($_) . ")" for @renamed;
+      # Register AFTER the assignment (the decl's RHS reads the outer vars).
+      my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture(@renamed) : ();
       my @unren  = grep { !$self->{_file_lex_renamed}{$_} } @$vars;
       $self->_reg_lex(@unren);
       my @assign = $has_init ? ($self->_lower_expr([@k], $first)) : ();
-      return (@assign, $self->_lower_block(\@rest, $vi, $tail_ctx)) unless @unren;
+      return (@assign, @reg, $self->_lower_block(\@rest, $vi, $tail_ctx)) unless @unren;
       return (['let', ['list', map { ['list', $_, _fresh_container($_)] } @unren],
-               @assign,
+               @assign, @reg,
                $self->_lower_block(\@rest, $vi, $tail_ctx)]);
     }
     $self->_reg_lex(@$vars);
@@ -4340,7 +4503,7 @@ sub _gate_seam_my_shadow {
         # `state` has per-instance semantics driven by state_var_renames —
         # renaming the token would bypass that machinery; always gate.
         my $why = $w->content eq 'state' ? 'state'
-                : $self->_shadow_rename_blocker($block, $s);
+                : $self->_shadow_rename_blocker($block, $s, 'eval_ok');
         die "Parser2 TODO: my-shadow of live lexical " . $s->content
           . " inside fallback block ($why)\n" if $why;
         $self->_rename_decl_within($block, $s,

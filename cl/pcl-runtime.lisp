@@ -131,6 +131,7 @@
    #:p-do
    ;; Exception handling
    #:p-eval #:p-eval-block #:p-eval-thunk #:p-eval-lex-lookup
+   #:p-alias-eval-cell
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
@@ -571,6 +572,29 @@
 (defvar *p-eval-lex-alist* nil
   "Alist (var-name-string . box/array/hash) of the caller's in-scope lexicals,
    bound by p-eval and consumed by p-eval-thunk.")
+
+;;; M-F (v2, s295 — the ALIAS rule, ir-spec §9.1): a file lexical the v2
+;;; pipeline RENAMES to a package cell ($x -> $x__file__N) is invisible to
+;;; eval'd code that names the original $x — including code the eval
+;;; TRANSPILE emitted itself (a sub defined inside an eval string whose
+;;; nested eval mentions $x), where no codegen-site alist can ever know the
+;;; cell.  v1 never has this problem because it defvars file lexicals under
+;;; their ORIGINAL names, so p-eval-lex-lookup's global fall-through finds
+;;; them.  The alias restores exactly that visibility: codegen emits
+;;; (p-alias-eval-cell '$x $x__file__N) at the declaration's RUN position —
+;;; the quoted symbol is read under the declaring section's in-package, so
+;;; it IS the original-name global of the declaring package.  ONE storage
+;;; location per name, deliberately: a side registry (tried s294) lets a
+;;; stale entry permanently shadow a live global; writing the one symbol
+;;; both passes and plain defvar'd lexicals use gives v1's time-ordered
+;;; last-declaration-wins model with no lifetime bookkeeping.
+(defun p-alias-eval-cell (sym cell)
+  "Store CELL (a renamed file-lexical's container) as the value of SYM, the
+   variable's ORIGINAL-name symbol in its declaring package, so string eval
+   resolves the name through the global fall-through exactly as under v1.
+   Called where the renamed declaration executes; last execution wins."
+  (setf (symbol-value sym) cell)
+  cell)
 
 ;;; Persistent transpiler subprocess for p-eval
 (defvar *p-transpiler-process* nil
@@ -9346,7 +9370,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-34"
+(defparameter *pcl-cache-generation* "v2-35"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

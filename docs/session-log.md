@@ -4,6 +4,166 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 295 (2026-07-18, Fable) — E1 M-F SHIPPED: the ALIAS rule replaces the s294 registry; eval.t + ref.t DE-GATED (census 104/7); eval.t BEATS v1 by 5 tests with a strict-subset fail set; all gates green.
+
+**Design review verdict (user question: "simpler way to do evals?"):** the
+s294 registry's shadow-poisoning regression was *structural* — a second
+storage location for the same name with fixed precedence lets any stale
+entry permanently shadow the live binding.  The fix collapses eval
+visibility back to v1's ONE-location model: **the alias rule**, now
+normative in **ir-spec §9.1** (the full 3-piece protocol: site alist /
+free-name thunk lambda / 3-stop lookup, written for implementers).
+
+- **Runtime** (net simpler than both s294 and the plan's two-tier sketch):
+  `p-alias-eval-cell` = `(setf (symbol-value sym) cell)` — codegen emits
+  `(p-alias-eval-cell '$x $x__file__N)` at the renamed decl's run position
+  (after the init assignment; the quoted UNQUALIFIED symbol is read under
+  the section's in-package = the declaring package's original-name global,
+  the very slot the lookup's stop-2 fall-through and plain defvar'd
+  lexicals use).  DELETED: `*p-eval-file-cells*`, the lookup's registry
+  stop, p-eval's permanent alist registration.  `p-eval-lex-lookup` and
+  `p-eval` are byte-reverted to v1.  Time-ordering = v1's
+  last-declaration-wins for free.  Eval-free files: byte-identical, zero
+  cost (`_file_has_str_eval` gate); dark/dynamic evals: zero extra cost
+  over literal (nothing inspects the eval text at compile time).
+- **One new bug found & fixed via fresh probe battery** (perl as oracle,
+  this session's scratchpad): `_enclosing_lex_decl` missed an enclosing
+  decl that an EARLIER promotion instance had already renamed (content
+  `$x__file__0` ≠ `$x`) — promotion ORDER decided whether the
+  outer-my-encloses-inner-cell refusal fired (encl probe: silent "2 2" vs
+  perl/v1 "2 1").  Fix: strip `__(file|lex|shadow|cond)__N` before
+  comparing → the shape now gates to v1 as designed.
+- **Probes** (all match perl, except the two documented v1-parity classes):
+  evalspan 42/6/84/99/84 ✓ (v1 CRASHES on the spanning print — its known
+  W10 cross-pkg defvar bug; v2 better); recurse ✓; evaldef (do_eval1
+  class: sub-defined-in-eval, nested dark eval) aa/ab/zz ✓; dbblock (the
+  s294 poisoning class) 3/2/3/4 ✓; dofile inc/main = v1-identical (perl
+  prints undef first — dead-pad subtlety, v1-parity divergence); encl 2/1
+  ✓ (via gate); ctxcap L ✓ (= perl here).
+- **Sweeps**: eval.t v2-native **126+34/163** vs v1 121+39/163 — fail set
+  is a STRICT SUBSET (fixes t27/28/81/84/97, zero regressions).  ref.t
+  v2-native 183+19/245, fail set IDENTICAL to v1.  **Census 102/9 →
+  104/7** (remaining gates: chdir, lfs, array, postfixderef, state,
+  signatures, closure).
+- **corpus-diff**: v1 pipeline byte-identical (111 files).  v2: 14 files
+  differ — eval.t/ref.t (de-gates) + 12 files with alias-call additions /
+  new promotions+span pairs / fwd-decl defvars of original names (bless,
+  caller, do, grep, index, method, push, qr, sort, sub, substr, undef);
+  ALL 12 sweep-identical to HEAD (same pass/fail/skip/stop per file,
+  verified in a HEAD worktree).
+- **Gates**: v2 prove-core ALL PASS (115 files / 4064 tests — +6 new
+  guards).  PCL_V1 prove-core fails exactly the known 7 v2-only tests
+  (02 #60/62/72, 04 #102/120, 04b #69, 05 #72) — criterion met.
+- **Guards added**: transpile-test-01b.t +4 (promoted-cell eval
+  read/write-back/dynamic/shadow, sub-defined-in-eval nested dark eval,
+  encl scope split); parser2-01.t test 65 updated — the interpolated
+  captured lexical no longer dies to v1 (identity promotion: defvar under
+  the ORIGINAL name), guard now asserts the new boundary.
+- **Docs**: ir-spec §9.1 (normative protocol) + §2b.4 narrowed eval
+  bullet; exec-plan header + E1-e row; eval-lexical-capture.md pointer;
+  cache-gen v2-34→v2-35.
+
+---
+
+## Session 294 (2026-07-17, Fable) — E1 M-F CONTINUED: design pivot to a runtime eval-cell REGISTRY; ref.t reached exact v1 parity mid-session; ONE open regression (registry shadow-poisoning) at session end.  **[SUPERSEDED by s295: the registry was replaced by the alias rule before commit — this entry is design history.]**
+
+**Read task #69's description first — it is the authoritative, detailed resume
+state for this work (what's in the tree, the open regression, the full
+verification checklist).**  Summary:
+
+- **Discovery chain**: (1) `_captured_in_subs` didn't count eval-string
+  mentions → taught it (shadow-checked, via `_block_captures_name`); (2)
+  hoisted named subs inherited outer let-bound names into body eval alists →
+  unbound-variable CRASH at call time (eval.t `recurse`/`$curr_test`) → fix:
+  `_lower_sub` resets `_let_bound_vars` for the body; (3) per-site alist
+  pairs can NEVER cover code the eval transpile itself emits (a sub defined
+  inside an eval string whose nested eval names a main-file lexical —
+  fred3/do_eval1 classes) — v1 passes these because it defvars file lexicals
+  under their ORIGINAL names, giving `p-eval-lex-lookup`'s global
+  fall-through a time-ordered one-cell-per-name model for free.
+- **Pivot**: reproduce v1's visibility with a runtime registry
+  `*p-eval-file-cells*` — `(p-register-eval-cell "$x" $x__file__N)` emitted
+  at the mangled decl's RUN position (time-ordered like v1's defvar
+  overwrites; emitted only when the file contains a string eval —
+  `_file_has_str_eval` — so eval-free files stay byte-identical), plus
+  p-eval PERMANENTLY registering its incoming alist pairs (code defined
+  inside an eval outlives it).  Lookup: site alist → registry → global →
+  fresh.  This REPLACED the `_eval_extra_captures` scoped-map built and then
+  deleted within this session.
+- **State at stop**: probes evaldef/dofile/recurse-class fixed; **open
+  regression** — p-eval's permanent registration of let-bound SHADOW pairs
+  poisons later evals of promoted cells (evalspan write-back 84→42,
+  dbblock).  Sketch: two-tier registry (decl cells vs eval snapshots).
+- eval.t v2-native (all gate layers cleared) but fail set not yet at v1
+  parity; **ref.t verified at EXACT v1 parity earlier in the session**
+  (183+19/245, only cosmetic lambda-print diffs) — re-verify after the
+  runtime changes.  NO corpus-diff/gate runs yet; **cache-gen bump v2-35 +
+  ir-spec §eval update required before commit.**
+
+---
+
+## Session 293c (2026-07-16/17, Fable) — E1 M-F IN PROGRESS, ⚠ UNCOMMITTED: eval-capture of span-mangled lexicals (task #69).  ref.t transpiles v2-native; eval.t 3 gate layers peeled, stopped at the $yyy genuine eval-string capture.
+
+**Direction change mid-session (user): E2 is the mechanical part — spend the
+capable-model time on the hard E1 gates.**  Target picked: M-F eval family
+(clears eval.t + ref.t, protects the dynamic-eval HARD REQUIREMENT).
+
+**State: the worktree carries UNCOMMITTED, probe-verified M-F work** (E2.1
+batches before it are committed: c946c1b).  What's in the tree:
+
+1. **`ExprToCL::_eval_lexical_alist`** appends the fallback parser's
+   `_eval_span_captures` pairs (original `"$x"` → qualified mangled cell
+   `Pkg::$x__file__N`) AFTER the let-bound pairs — `p-eval-lex-lookup` is
+   assoc/first-match, so a live let-bound shadow wins; a key already
+   let-bound is skipped.  v1 byte-neutral (no map → no pairs; final
+   `return '' unless @pairs`).
+2. **`Parser2::_rename_spanning_lexicals`**: every MANGLED rename registers
+   the pair on each extent segment (`$segments->[$j]{eval_span_captures}
+   {"\$$bare"} //= "Pkg::\$$newbare"`, innermost instance wins); the
+   section-lowering driver publishes the current segment's map on
+   `fallback_parser->{_eval_span_captures}`.
+3. **Removed two span-pass refusals**: `eval-unsafe (non-unique)` (+ its
+   whole W10-ext-4 per-segment eval scan) — the capture pair makes mangles
+   eval-visible, literal AND dynamic `eval $code`; and `family use
+   (@x/%x/$#x)` — stale since the s289 fixer (Symbol rewrites key on
+   ->symbol; the scalar interp pattern skips `$x[`/`$x{`, which is also
+   Perl-correct; `${x}` deref-block refusal kept).  A refused spanning name
+   always died → only GATED files can change emission.
+4. **`_block_captures_name`**: string/heredoc/regex mentions are now
+   attributed per-canon (split the merged `$text_re` into `%canon_pat`) and
+   SHADOW-CHECKED like Symbol uses — `eval('$zzz')` under the sub's own
+   preceding `my $zzz` is the shadow, not a capture (eval.t do_sort).  All
+   three callers are whole-file gates, so native files can't change.
+
+**Probe green** (`scratchpad/evalspan.pl`): mangled `$x` + sibling shadow +
+`eval '$x+1'` read + `eval '$x=42'` write-back + dynamic `eval $code` →
+output identical to perl (`42 6 84 99`).
+
+**Where it stopped**: eval.t peeled `eval-unsafe` → `family use` → `zzz
+capture` layers; now gates on **`file lexical 'yyy' captured by sub fred4`**
+(eval.t:326 `my $yyy = 2;` / :332 `is(eval '$yyy', 2)` inside fred4) — a
+GENUINE capture, by eval-string only.  **Diagnosis**: `_captured_in_subs`
+counts only Symbol tokens → `_promote_captured` never sees the eval-string
+capture and refuses ('not captured by a named sub after the decl'), while
+the `_check_sub_captures` GATE does count string mentions → die.  **Next
+step**: (a) teach `_captured_in_subs` to count eval/quote-string mentions
+(reuse the per-canon + shadow logic from _block_captures_name), so $yyy
+promotes; (b) `_promote_captured`'s MANGLED renames must register
+`eval_span_captures` pairs exactly like the span pass (without this a
+promoted mangled cell is invisible to the eval — same bug, other pass).
+Expect more layers after (rule 8).
+
+**Verification NOT yet run** (all of it): eval.t/ref.t `--jobs 1` sweeps vs
+baselines (recorded this session, v1 fallback: eval.t 121+39/169 PARTIAL
+stop@163; ref.t 183+19/245 PARTIAL) — de-gates should match or beat;
+corpus-diff both pipelines (diffs allowed ONLY in de-gated files);
+both gates (v1 criterion = HEAD's known 7-test set); **cache-gen bump
+REQUIRED before commit** (emission changes); guard battery (mangled-cell
+eval read/write-back/dynamic/shadow → smallest transpile-test-NN.t); grep
+parser2-01/02 for stale 'eval-unsafe' gate guards; docs + e1-remainder.
+
+---
+
 ## Session 293b (2026-07-16, Fable) — E2.1 step 1: gen_funcall GENERIC path → CLForm at byte parity (declining form handler; the word:is/ok frontier head re-housed).
 
 First real E2.1 conversion on the s293 scaffold, same session:

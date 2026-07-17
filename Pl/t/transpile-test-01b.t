@@ -458,4 +458,50 @@ test_transpile("map over a hash flattens it", '
   print join(",", sort @r), "\n";
 ', "1,A\n");
 
+# ── M-F (s295) string-eval alias rule (ir-spec §9.1): a promoted/renamed
+# file cell stays visible to string eval by its ORIGINAL name — read,
+# write-back, dynamic (dark) eval — and a sibling block shadow neither
+# hides it afterwards nor leaks into later evals (the s294 registry bug).
+
+test_transpile("promoted cell: eval read/write-back survives sibling shadow", '
+  my $x = 3;
+  sub capx { $x }
+  print eval(q{$x}), "\n";
+  { my $x = 2; print eval(q{$x}), "\n"; }
+  print eval(q{$x}), "\n";
+  eval q{$x = 4};
+  print "$x\n";
+', "3\n2\n3\n4\n");
+
+test_transpile("promoted cell: dynamic eval + write-back by original name", '
+  my $x = 42;
+  sub keepx { $x }
+  my $code = q{$x + 15};
+  print eval($code), "\n";
+  eval q{$x = 84};
+  print "$x\n";
+', "57\n84\n");
+
+test_transpile("sub defined in eval: nested dark eval reaches promoted cell", '
+  my $x = "aa";
+  sub touchx { $x }
+  eval q{ sub do_ev { eval $_[0]; die $@ if $@ } };
+  die $@ if $@;
+  do_ev(q{print "$x\n"});
+  $x++;
+  do_ev(q{print "$x\n"});
+  do_ev(q{$x = "zz"});
+  print "$x\n";
+', "aa\nab\nzz\n");
+
+test_transpile("outer my enclosing same-name captured cell: evals see each scope", '
+  my $x = 1;
+  {
+    my $x = 2;
+    sub capinner { $x }
+    print eval(q{$x}), "\n";
+  }
+  print eval(q{$x}), "\n";
+', "2\n1\n");
+
 done_testing();

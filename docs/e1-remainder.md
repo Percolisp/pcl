@@ -1,5 +1,28 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s295, 2026-07-18, Fable 5): M-F eval family SHIPPED — census
+> 104 native / 7 gated, gen v2-35.**  De-gated **eval.t** (126+34/163 —
+> BEATS v1's 121+39 with a strict-SUBSET fail set, fixes t27/28/81/84/97)
+> and **ref.t** (183+19/245, IDENTICAL fail set = exact parity) via the
+> **alias rule** (normative: **ir-spec §9.1**): renamed file cells become
+> string-eval-visible under their ORIGINAL names through
+> `(p-alias-eval-cell '$x $x__file__N)` at the decl's run position —
+> writing the cell into the original-name global, v1's one-storage-location
+> lookup model — plus site-alist pairs for let-bound shadows
+> (innermost-first) and package-qualified span pairs for cross-package
+> sites.  Only emitted when the file has a string eval
+> (`_file_has_str_eval`): eval-free files byte-identical.  Dynamic
+> `eval $code` (the HARD REQUIREMENT) is native — nothing inspects the
+> eval text at compile time.  The s294 registry interim design (and its
+> structural stale-shadow regression) was replaced before commit; also
+> fixed `_enclosing_lex_decl` blindness to already-renamed enclosing decls
+> (promotion order no longer decides the outer-my refusal — encl probe).
+> Gates: v2 ALL PASS, PCL_V1 = known 7 v2-only set, v1 corpus byte-identical.
+> **Remaining 7 gates: chdir (M-E #55), lfs (bless as residue, #56), array
+> (#63), postfixderef (#45), state + signatures (#56), closure
+> (per-iteration closure binding + own remaining decl gate).**
+> s295 detail in `docs/session-log.md`.
+
 > **UPDATE (s292, 2026-07-16, Opus 4.8): M-E substr.t SHIPPED — census
 > 102 native / 9 gated, gen v2-34.**  De-gated **substr.t** (OK 374/8/397,
 > IDENTICAL fail set to v1 = exact parity) — the `for (substr($x,…))`

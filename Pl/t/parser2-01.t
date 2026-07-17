@@ -255,10 +255,15 @@ like($captm, qr/\(p-scalar-= \$n__file__\d+ 1\)/, 'W5: renamed cell assigned in 
 like($captm, qr/\(let \(\(\$n (?:9|\(make-p-box)/,
      'W5: the block shadow keeps its own let-bound $n');
 
-# …but a case OUTSIDE the subset still gates → whole-file v1: an interpolated
-# use ($n inside a string) can't be rewritten by token content, so it must die.
+# An interpolated use ($n inside a string) once forced whole-file v1 (text a
+# token rename can't rewrite).  Since M-A/M-F the unique-name case promotes on
+# the IDENTITY path instead: $n keeps its original name and is defvar'd under
+# it, so both the interpolation and any string eval keep resolving to the same
+# cell — no gate, no mangle.
 my $capt_i = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { "got $n" } print bump(), "\n";}) };
-like($@, qr/captured by sub/, 'interpolated captured lexical still dies to v1');
+is($@, '', 'interpolated captured lexical lowers natively (identity promotion)');
+like($capt_i, qr/\(defvar \$n \(make-p-box/, 'identity promotion: defvar under the ORIGINAL name');
+like($capt_i, qr/\(p-scalar-= \$n 1\)/, 'identity promotion: assigned in place, no mangle');
 
 # …and two declarations of the same name (shadowing) stay gated.
 my $capt_sh = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } my $n = 2; print $n;}) };

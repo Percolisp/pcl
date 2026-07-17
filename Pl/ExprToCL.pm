@@ -2433,17 +2433,52 @@ sub _eval_lexical_alist {
                 && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
   return '' unless $parser;
   my $lb = $parser->{_let_bound_vars} // {};
-  my @vars = sort keys %$lb;
-  return '' unless @vars;
   # The alist KEY is the original Perl name; the VALUE is the live CL symbol.
   # Closure-captured lexicals are renamed to $name__lex__N (so per-call let
   # bindings stay lexical); strip that suffix so the key matches the bare name
-  # the eval body uses (the eval string never sees the rename).
-  my @pairs;
+  # the eval body uses (the eval string never sees the rename).  Same for the
+  # v2 seam my-shadow renames $name__shadow__N — and within one stripped key
+  # the DEEPEST shadow must come FIRST (p-eval-lex-lookup assoc takes the
+  # first match = the innermost live binding).  Shadow counters increase with
+  # nesting depth (roots rename outer-first), so descending N is innermost-
+  # first; the plain name (depth -1) comes last.  Keys v1 can mint (__lex__,
+  # plain) keep the plain sort order — v1 emissions stay byte-identical.
+  my $skey = sub {
+    my ($v) = @_;
+    $v =~ s/__lex__\d+$//;
+    my $d = $v =~ s/__shadow__(\d+)$// ? $1 : -1;
+    return ($v, $d);
+  };
+  my @vars = sort {
+    my ($ka, $da) = $skey->($a);
+    my ($kb, $db) = $skey->($b);
+    $ka cmp $kb || $db <=> $da || $a cmp $b
+  } keys %$lb;
+  my (@pairs, %seen);
   for my $v (@vars) {
-    (my $key = $v) =~ s/__lex__\d+$//;
+    my ($key) = $skey->($v);
     push @pairs, "(cons \"$key\" $v)";
+    $seen{$key} = 1;
   }
+  # Span-mangled file cells (v2's _rename_spanning_lexicals): the eval body
+  # names the ORIGINAL `$x`, but the file lexical was renamed to a package
+  # cell `Pkg::$x__file__N`.  The rename pass records original→cell per
+  # segment; the section driver publishes the current segment's map here.
+  # APPENDED after the let-bound pairs so a live lexical shadow of the same
+  # name wins (p-eval-lex-lookup assoc takes the first match); a key already
+  # let-bound is skipped outright.  The cell is a defvar'd box, so eval
+  # writes propagate back exactly like let-bound captures.
+  # (Promoted — captured-lexical — cells carry no per-site pairs: they reach
+  # evals through the alias rule (p-alias-eval-cell writes the cell into the
+  # original-name global, found by p-eval-lex-lookup's global fall-through;
+  # ir-spec §9.1).  Only SPAN cells keep emitted pairs, package-qualified
+  # for the cross-segment case.)
+  my $span = $parser->{_eval_span_captures} // {};
+  for my $key (sort keys %$span) {
+    next if $seen{$key};
+    push @pairs, "(cons \"$key\" $span->{$key})";
+  }
+  return '' unless @pairs;
   return '(list ' . join(' ', @pairs) . ')';
 }
 

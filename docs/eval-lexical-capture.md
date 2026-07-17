@@ -4,6 +4,16 @@
 formerly described in `docs/not-supported.md` → "Context propagation into
 string eval" (the lexical half of it).
 
+> **v2 extension (s295):** the v2 pipeline *renames* some file-scope
+> lexicals (`$x__file__N` cells), which this design's by-name alist and
+> global fall-through cannot see. The extension — ordered shadow pairs in
+> the alist, cross-package span pairs, and the **alias rule**
+> (`p-alias-eval-cell` writing the cell into the original-name global at
+> the declaration's run position) — is specified normatively in
+> `docs/ir-spec.md` §9.1. This file remains the design rationale for the
+> underlying capture mechanism (the thunk protocol, the lookup, `our`, and
+> the edge cases below), which is unchanged.
+
 ## The problem
 
 Perl's `eval "CODE"` can see the enclosing sub's `my` lexicals:

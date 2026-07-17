@@ -262,9 +262,16 @@ the whole file (the sanctioned gate) rather than renaming unsoundly:
 - **Array/hash family sharing the bare name** — `@x`, `%x`, `$#x`,
   `$x[i]`, `$x{k}` are *different variables* whose element-access tokens
   share the `$x…` spelling.
-- **String `eval` in scope** — the eval capture alist (§9) finds lexicals
-  *by source name* in `_let_bound_vars`; eval'd code reading `$x` would
-  silently miss a renamed cell.
+- **String `eval` in scope** — *narrowed (s294/295)*: a renamed cell is
+  made reachable by its original source name (the alias rule + span
+  pairs, §9.1), so string eval alone no longer refuses a rename. What
+  still refuses: a **container** (`@x`/`%x`) promotion with a post-decl
+  string eval (only scalar cells are aliased today), and a renamed decl
+  **nested inside an outer `my` of the same bare name** (the site
+  alist's let-bound pair precedes the global in resolution order, so
+  the deeper cell could never win the by-name lookup). The `cond`/
+  `state` rename families also keep the blanket string-eval refusal —
+  their cells are neither alist-carried nor aliased.
 - **`state`** — its per-instance semantics run through the separate
   `state_var_renames` machinery; token-renaming would bypass it.
 
@@ -602,12 +609,139 @@ match leaves `$1` from the previous successful match intact.
 Generated files are loaded form-by-form; a `use`/`require` triggers
 transpilation (or cache lookup) of the target module and loads it inline,
 recursively. `eval "string"` calls the transpiler *at runtime* on the
-string, with an alist of the call site's lexical boxes passed in so the
-eval'd code reads/writes the enclosing scope's `my` variables
-(`docs/eval-lexical-capture.md`); calling context does not propagate into
+string (`docs/eval-lexical-capture.md` is the original design note;
+§9.1 below is normative). Calling context does not propagate into
 string eval (documented divergence). Translators targeting environments
 without a runtime compiler must either bundle one or reject `eval EXPR`
 programs — there is no static escape.
+
+### 9.1 The string-eval protocol (normative, s295)
+
+String eval must let the eval'd code *read and write* the enclosing
+scope's `my` variables by their **source names**, even though the
+compiler may have let-bound, renamed, or package-promoted those
+variables. Perl's own mechanism is pad lookup at the eval site; PCL
+reproduces it with three cooperating pieces. An implementer in another
+language needs exactly these three; each is described by its observable
+contract.
+
+**Piece 1 — the eval site: `(p-eval STRING ALIST)`.** At every `eval
+EXPR` call site (literal or dark/dynamic string — the two are handled
+identically), codegen passes an alist literal of the **let-bound**
+lexicals in scope:
+
+```lisp
+(p-eval $code
+  (list (cons "$x" $x__shadow__2) (cons "$x" $x) (cons "$y" $y__lex__0)))
+```
+
+Each key is the variable's *original Perl source name* (the string the
+eval'd code will use); each value is the live container — a scalar box,
+array, or hash — that the compiled code binds under its (possibly
+renamed) symbol. Keys may repeat: resolution is first-match, so the
+alist is ordered **innermost binding first**. Concretely,
+`_eval_lexical_alist` strips the `__lex__N`/`__shadow__N` rename
+suffixes to recover the key and, within one key, orders shadow renames
+by descending `N` (deeper shadows have higher counters) with the plain
+unrenamed name last. After the let-bound pairs it appends the
+**cross-package span pairs** (see piece 3). The alist is rebuilt at each
+call — it snapshots which bindings are live at that site, not their
+values (values live in the shared containers).
+
+**Piece 2 — the eval body: free variables become parameters.** The
+runtime transpiles the string in the caller's Perl package (result
+cached under `(string . package)`), then reads and evaluates the
+generated forms one at a time (so an `(in-package …)` inside the eval
+text takes effect before later forms are read). Variables that are
+*free* in the eval'd code — used but not declared by it — are compiled
+to parameters of a wrapper lambda:
+
+```lisp
+(p-eval-thunk '("$x" "$y") (lambda ($x $y) …body…))
+```
+
+`p-eval-thunk` resolves each name via `p-eval-lex-lookup` (piece 3) and
+applies the lambda to the resulting containers. Because the containers
+are bound as ordinary lexical parameters, everything inside the body —
+including closures and **named subs the eval defines**, which outlive
+the eval — captures the *containers themselves*. Writes (`$x = 84`
+box-sets the scalar box) are visible to the enclosing compiled code and
+vice versa, with no copy-back step.
+
+**Piece 3 — name resolution: `(p-eval-lex-lookup NAME)`.** Exactly
+three stops, in order:
+
+1. **The site alist** (`*p-eval-lex-alist*`, dynamically bound by
+   `p-eval` for the extent of the eval): first `string=` match wins.
+   This is how let-bound lexicals — including seam shadows — are found,
+   and why alist order encodes shadowing depth.
+2. **The named global of the current package**: intern NAME (through the
+   same case transform the reader applies to generated code) in the
+   package current at the eval site; if that symbol is bound, its value
+   is the container. This is how file-scope lexicals are found — see
+   the alias rule below.
+3. **Autovivify**: an unbound name yields a fresh container chosen by
+   sigil (`$` → undef box, `@` → empty array, `%` → empty hash),
+   matching Perl's global autovivification inside eval.
+
+**The alias rule (v2 renamed cells).** v1 `defvar`s every file-scope
+lexical under its *original* name, so stop 2 finds it for free. v2
+renames such cells (`$x__file__N`, §2b.3) precisely so they cannot
+poison unrelated `let`s — which would make them invisible to stop 2.
+The fix is one runtime primitive:
+
+```lisp
+(p-alias-eval-cell '$x $x__file__0)   ; (setf (symbol-value '$x) cell)
+```
+
+emitted by codegen **at the renamed declaration's run position,
+immediately after its initializing assignment** (after, so the decl's
+own RHS — including an eval in it — still resolves the name to the
+*outer* variable). It stores the cell's container as the value of the
+original-name symbol in the declaring section's package (the quoted
+symbol is unqualified: the reader interns it under the section's
+`in-package`, which is by construction the declaring package). Both
+rename families that produce file cells flow through it: span promotion
+(W10) and capture promotion (M-C/M-F).
+
+Consequences an implementer must preserve:
+
+- **One storage location per name.** The alias target is the *same*
+  global slot a plain un-renamed file lexical or package global uses.
+  There is deliberately no side registry: two storage locations with a
+  fixed precedence would let a stale entry in one permanently shadow a
+  live binding in the other (the s294 registry bug). Any later
+  declaration of the same name — renamed (re-alias) or plain (defvar +
+  assign on the same symbol) — takes the slot over from the moment it
+  *executes*, giving v1's time-ordered last-declaration-wins model.
+- **Emission is gated per file** (`_file_has_str_eval`): the alias call
+  is emitted only when the file contains at least one non-block `eval`.
+  A file without string eval is **byte-identical** to before and pays
+  zero runtime cost; the gate may over-fire on non-eval uses of the
+  word (`->eval`, `eval =>` …), which adds only an inert one-write
+  call. Dark strings cost nothing beyond literal ones — the mechanism
+  never inspects the eval'd text at compile time.
+- **Nested/late evals work with an empty alist.** A sub defined inside
+  an eval string, called later, whose body does `eval '$x'`: the site
+  alist is empty by then, and stop 2 finds the aliased cell — the same
+  path v1 takes. Nothing from any site alist is ever persisted.
+- **Cross-package spans still need site pairs.** Stop 2 interns in the
+  *eval site's* package, so a cell aliased in the declaring package is
+  invisible to an eval in a later `package` segment. For those, the
+  span pass records original-name → package-qualified-cell pairs per
+  extent segment, and piece 1 appends them after the let-bound pairs
+  (`(cons "$x" MAIN::$x__file__0)`). They are position-static and carry
+  no lifetime hazard.
+
+**Deliberate divergences** (all shared with v1, listed in
+`docs/not-supported.md` where user-visible): after the alias executes,
+an explicit fully-qualified `$Pkg::x` names the lexical's cell rather
+than a distinct package global — exactly v1's defvar-under-original-name
+behaviour. Calling context (`wantarray`) does not propagate into the
+eval. Only scalar cells are aliased today; a file needing
+container-capture-by-eval, or a renamed cell nested inside an outer
+`my` of the same name (whose alist pair would always win stop 1), gates
+to v1 (§2b.4).
 
 ## 10. Op inventory — family rules
 

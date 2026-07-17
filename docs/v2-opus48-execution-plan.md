@@ -1,7 +1,13 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s293+s293b (2026-07-16, Fable): census 102 v2-native / 9
+**State updated s295 (2026-07-18, Fable): census 104 v2-native / 7 gated,
+cache gen v2-35, v2 gate green (115 files / 4064 tests).  M-F eval family
+SHIPPED: eval.t de-gated at BETTER-than-v1 (126+34/163, strict-subset fail
+set) and ref.t at exact parity, via the ALIAS rule — normative spec
+ir-spec §9.1; remaining gates: chdir, lfs, array, postfixderef, state,
+signatures, closure (see e1-remainder.md s295 update).**
+**Previous state s293+s293b (2026-07-16, Fable): census 102 v2-native / 9
 gated, cache gen v2-34, v2 gate green (115 files / 4058 tests).  E2.0
 SHIPPED (task #57): the emitter-conversion scaffold (CLForm::to_flat +
 ExprToCL form_handlers/gen_node_form + corpus-diff --show) and the first
@@ -11,10 +17,14 @@ task #68 in progress): gen_funcall's GENERIC path is form-producing
 (word:is/ok frontier head re-housed); `%FUNCALL_FORM_DECLINES` in
 ExprToCL.pm = the live remaining-branch worklist.  PCL_V1 gate = 7
 pre-existing v2-only-test fails (identical at HEAD) — the v1-gate
-criterion is failure-set-identical, see §E2.0 recipe.  Cadence: an E1
-session is next (postderef_qq #45, chdir.t #55, or the M-F user-decision
-session #56); further E2.1 branches interleave.  Before this, s291–s292
-(Opus 4.8) de-gated scalar.t (M-B) and substr.t (M-E).**
+criterion is failure-set-identical, see §E2.0 recipe.  **Cadence rule
+(user, 2026-07-17, supersedes "alternate E1/E2" for Fable sessions):
+hard parts first — E2 conversion steps are now mechanical (§E2.0 recipe)
+and are OPUS 4.8 material; Fable sessions take the hard problems (E1
+M-F eval family SHIPPED s295 — the ALIAS rule, ir-spec §9.1; remaining
+hard problems: closure, state #56, dynamic goto #63, chdir #55,
+method.t stop@157).**  Before this,
+s291–s292 (Opus 4.8) de-gated scalar.t (M-B) and substr.t (M-E).**
 **Previous state s290: census 100 v2-native / 11
 gated, cache gen v2-32, Pl/t gate green.  M-B session 1 SHIPPED (task
 #51): sort.t de-gated (202/2/1, same fails 170/177 as v1 — exact parity)
@@ -284,7 +294,7 @@ Present these to the user before implementing; the recommendations:
 |---|---|---|
 | state.t | `state` in anon-sub / map-grep-sort block | **implement** (~1 session): per-closure state cell allocation in the lowering.  state is common in modern Perl. |
 | signatures.t | `state` inside a signature default | bless as residue unless it falls out of state.t work |
-| eval.t, closure.t | my-lexical spans + **dynamic `eval $code` after decl** | scheduled own task (s282c decision): the s250 capture alist must carry original-name → renamed-cell pairs.  Interacts with the dynamic-eval HARD REQUIREMENT — v1 fallback keeps these working meanwhile.  closure.t also carries the known per-iteration closure-binding limitation (CLAUDE.md TODO) — de-gating may leave those tests failing in both pipelines. |
+| eval.t, closure.t | my-lexical spans + **dynamic `eval $code` after decl** | own task = #69 (s293c–s295, in progress): renamed cells become eval-visible by original name via (a) the site alist carrying let-bound + cross-package span pairs and (b) the **alias rule** — `(p-alias-eval-cell '$x $x__file__N)` at the decl's run position writes the cell into the original-name global, restoring v1's stop-2 lookup visibility with ONE storage location (no side registry — the s294 registry design was replaced after its structural stale-shadow regression).  Normative spec: ir-spec §9.1.  Satisfies the dynamic-eval HARD REQUIREMENT natively (dark strings need no compile-time inspection).  closure.t still carries the known per-iteration closure-binding limitation (CLAUDE.md TODO) — de-gating may leave those tests failing in both pipelines. |
 | lfs.t | file lexical in END + heredoc interp | **bless as residue** (file is in the sweep's known-hang skip list — a de-gate is unverifiable end-to-end) |
 
 E1 acceptance: census ≈ 106–108 native + small user-blessed residue
