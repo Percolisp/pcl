@@ -336,6 +336,49 @@ sub parse {
   # variable.  Requalify them to the declaring package's spelling up front.
   $self->_requalify_block_our_after_pkg_switch($doc);
 
+  # Runtime-gap gate (s295c): BARE fork-pipe open — the 2-arg `open FH, "|-"`
+  # (or "-|") that forks and returns pid/0 with no command.  %p-open-impl
+  # cannot fork-pipe yet (the parked t/io pipe-open feature), so this open
+  # fails and the idiom's standard `die … unless defined($pid = open …)`
+  # fires at runtime — in BOTH pipelines, but under the sweep's
+  # p-load-with-recovery v1's flat top-level forms lose only that one
+  # statement while v2's nested lets would lose the whole remainder of the
+  # file (closure.t: 17 tests of coverage, silently reported as a full
+  # PASS).  Gate → v1 until pipe-open ships, then delete this scan.
+  # Not gated: the 3-arg command form `open(FH, "|-", $cmd)` and a bare
+  # form whose failure is handled gracefully (`… // skip "cannot fork"`,
+  # magic.t) — those fail as undef at runtime and the file keeps running
+  # v2-native.  Only bare form + `die` on its failure in the SAME statement
+  # (the idiom's standard spelling) has the load-abort blast radius.
+  for my $q (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Quote') }) || [] }) {
+    next unless $q->can('string') && do { my $s = $q->string;
+                                          $s eq '|-' || $s eq '-|' };
+    my $stmt = $q->statement or next;
+    next unless grep { $_->isa('PPI::Token::Word') && $_->content eq 'open' }
+                $stmt->schildren;
+    # Bare form only: the mode quote is the statement's last significant
+    # token (trailing `)`/`;` ignored) — a following command argument means
+    # the graceful 3-arg form.
+    my @toks = grep { $_->significant
+                      && $_->content ne ';' && $_->content ne ')' }
+               $stmt->tokens;
+    next unless @toks && $toks[-1] == $q;
+    # The die usually wraps the open (`die … unless defined($pid = open …)`)
+    # — climb to the outermost SIMPLE statement (stop at block boundaries:
+    # a die elsewhere in an enclosing compound is not this open's handler).
+    my $top = $stmt;
+    while ($top->parent
+           && !$top->parent->isa('PPI::Structure::Block')
+           && !$top->parent->isa('PPI::Document')) {
+      my $up = $top->parent->statement or last;
+      last if $up == $top;
+      $top = $up;
+    }
+    die "Parser2 TODO: bare fork pipe-open with die-on-failure — runtime gap\n"
+      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'die' }
+         $top->tokens;
+  }
+
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —
   # v1's gen_funcall emits (p-eval STR (list (cons "$x" $x) …)) reading the
@@ -2126,13 +2169,19 @@ sub _rename_captured_file_lexicals {
   my $stmts = $seg->{stmts};
 
   # Named subs (with a body) anywhere in the segment — Perl subs are
-  # package-global regardless of block nesting.
+  # package-global regardless of block nesting.  BEGIN/END/… Scheduled
+  # blocks count as capturers too (s295c): their p-BEGIN forms hoist to the
+  # section's compile-phase position OUTSIDE the runtime `let`s (via
+  # _sched_defs), so a lexical they reference needs the same package-cell
+  # promotion as one captured by a named sub — the classic
+  # `my $x; BEGIN { $x = … }` idiom (closure.t newsub block).
   my @subs;
   for my $child (@$stmts) {
     push @subs, $child if $child->isa('PPI::Statement::Sub');
     push @subs, @{ $child->find('PPI::Statement::Sub') || [] };
   }
-  @subs = grep { $_->name && $_->block && !$_->isa('PPI::Statement::Scheduled') } @subs;
+  @subs = grep { $_->block
+                 && ($_->isa('PPI::Statement::Scheduled') || $_->name) } @subs;
 
   # Oversized-extent flattening (v1's defvar model, size-triggered): a
   # segment-top-level `my` nests the WHOLE segment remainder in one `let`,
@@ -3248,7 +3297,11 @@ sub _lower_block {
     }
     my $our = $self->_lower_our_decl($first);
     return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx)) if $our;
-    my ($name, $init) = $self->_single_scalar_decl($first);
+    my ($name, $init, $declmod_cond) = $self->_single_scalar_decl($first);
+    # Decl-level modifier (`my $x if @_;`): evaluate the condition for its
+    # side effects, in void, BEFORE the let (the outer $x is what it sees).
+    my @declmod_eval = $declmod_cond
+      ? ($self->_lower_expr($declmod_cond, $first, ':void')) : ();
     if ($name && $self->{_file_lex_renamed}{$name}) {
       # W5: a captured file lexical, rewritten to a fresh package-level name —
       # lower as `our` does: a defvar'd box hoisted to the section top (so the
@@ -3258,7 +3311,8 @@ sub _lower_block {
       # Register AFTER the assignment: the decl's own RHS (incl. an eval in
       # it) still resolves the original name to the OUTER variable.
       my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture($name) : ();
-      return ((defined $init ? (['p-scalar-=', $name, $self->_lower_expr($init, $first)]) : ()),
+      return (@declmod_eval,
+              (defined $init ? (['p-scalar-=', $name, $self->_lower_expr($init, $first)]) : ()),
               @reg,
               $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
@@ -3295,7 +3349,8 @@ sub _lower_block {
       # box; a false cond leaves it undef) — never the unboxable raw-slot path.
       if (!$imod && $vi->{$name} && $vi->{$name}{unboxable}) {
         my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
-        return (['let', ['list', ['list', $name, $initform]],
+        return (@declmod_eval,
+                ['let', ['list', ['list', $name, $initform]],
                  $self->_lower_block(\@rest, $vi, $tail_ctx)]);
       }
       if ($self_init) {
@@ -3313,7 +3368,8 @@ sub _lower_block {
           @assign = ($set);
         }
       }
-      return (['let', ['list', ['list', $name, '(make-p-box nil)']],
+      return (@declmod_eval,
+              ['let', ['list', ['list', $name, '(make-p-box nil)']],
                @assign,
                $self->_lower_block(\@rest, $vi, $tail_ctx)]);
     }
@@ -4770,6 +4826,19 @@ sub _single_scalar_decl {
     && $k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^\$\w+$/;
   my $name = $k[1]->content;
   return ($name, undef) if @k == 2;
+  # `my $x if COND;` / `unless COND` (no init) — the legal non-constant-cond
+  # stale-var idiom (closure.t mosquito/staleval).  Perl declares $x
+  # unconditionally at COMPILE time; at runtime only COND is evaluated (with
+  # the OUTER $x still visible — my-visibility starts after the statement).
+  # The accidental cross-call value persistence when COND is false is
+  # perl-undefined behaviour and not emulated (a fresh per-entry binding is
+  # what the let gives; the tests only assert same-variable consistency).
+  # Return the condition tokens (3rd value) so the caller void-evaluates them
+  # BEFORE the let.  while/until/for stay unmatched → whole-file gate.
+  if (@k >= 4 && $k[2]->isa('PPI::Token::Word')
+      && $k[2]->content =~ /^(?:if|unless)$/) {
+    return ($name, undef, [@k[3 .. $#k]]);
+  }
   return () unless $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '=';
   return ($name, [@k[3 .. $#k]]);
 }

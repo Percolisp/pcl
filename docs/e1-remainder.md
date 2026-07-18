@@ -1,5 +1,20 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s295c-2, 2026-07-18, Fable 5): conditional-my + Scheduled-block
+> capture promotion SHIPPED — census 106 native / 5 gated, gen v2-37.**
+> **lfs.t DE-GATED** (its real gate was `file lexical 'big0' referenced in
+> a END block` — the "bless as residue" note below was stale): Scheduled
+> blocks (BEGIN/END/…) now count as capturers in the promotion pass, so
+> `my $x; BEGIN { $x = … }` / END-cleanup lexicals promote to package
+> cells (probe-parity vs perl).  `my $x if COND;` (closure.t
+> mosquito/staleval) lowers natively: unconditional decl + void cond eval
+> (v1 drops the cond — v2 is MORE faithful).  **closure.t's remaining gate
+> is now a narrow runtime gap**: bare fork-pipe `open FH, "|-"` +
+> die-on-failure — de-gate path = task #70 (fork-pipe/dup-open/which_perl;
+> full analysis in the task).  **Remaining 5 gates: chdir (M-E #55),
+> postfixderef (#45), state + signatures (#56), closure (#70).**
+> s295c-2 detail in `docs/session-log.md`.
+
 > **UPDATE (s295b+c, 2026-07-18, Fable 5): #63 dynamic goto SHIPPED —
 > census 105 native / 6 gated, gen v2-36.**  De-gated **array.t**
 > (167+15+13skip/195, COMPLETE run — BEATS v1's 166+16 with a

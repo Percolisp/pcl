@@ -673,4 +673,42 @@ my $x = "outer";
 print "grab=", Q::grab(), " own=", R::own(), " out=", $x, "\n";
 ', "pre=outer\nin=shadow\nrhs=outer+rhs\ngrab=outer own=sub-own out=outer\n");
 
+# s295c: conditional-my (`my $x if COND;` — the legal non-constant-cond
+# stale-var idiom, closure.t mosquito/staleval).  The declaration is
+# unconditional; the condition is evaluated (side effects included, seeing
+# the OUTER $x) in void before the binding.  The tests assert perl's
+# observable behavior: same-variable consistency between outer code and a
+# closure, and the condition's side effect firing per call.
+
+test_transpile('conditional-my: closure sees same var, decl unconditional', '
+sub moz { my $x if @_; return if @_; $x = 17;
+          print "moz=", (sub { $x }->() == $x ? "same" : "DIFF"), ":$x\n" }
+moz(1); moz();
+', "moz=same:17\n");
+
+test_transpile('conditional-my: condition side effects run each call, unless form', '
+my $n = 0;
+sub se { my $y if $n++; print "n=$n y=", (defined $y ? $y : "u"), "\n" }
+se(); se();
+sub um { my $z unless @_; $z = 9 unless @_; print "um=", (defined $z ? $z : "u"), "\n" }
+um(); um(1);
+', "n=1 y=u\nn=2 y=u\num=9\num=u\n");
+
+# s295c: block lexical captured by a BEGIN block (`my $x; BEGIN { $x = … }`
+# — the classic compile-time-init idiom, closure.t newsub block).  The
+# Scheduled block hoists outside the runtime lets, so the lexical must be
+# promoted to a package cell exactly like a named-sub capture; the BEGIN's
+# write is visible at runtime.
+
+test_transpile('my lexical captured by BEGIN promotes to shared cell', '
+{
+    my $x;
+    BEGIN { $x = 5 }
+    print "x=$x\n";
+    $x = 7;
+    print "x2=$x\n";
+}
+print "done\n";
+', "x=5\nx2=7\ndone\n");
+
 done_testing;

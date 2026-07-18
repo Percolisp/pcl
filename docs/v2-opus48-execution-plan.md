@@ -1,7 +1,13 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s295b+c (2026-07-18, Fable): census 105 v2-native / 6 gated,
+**State updated s295c-2 (2026-07-18, Fable): census 106 v2-native / 5 gated,
+cache gen v2-37, v2 gate green (115 files / 4073 tests).  Conditional-my +
+Scheduled-block (BEGIN/END) capture promotion shipped; lfs.t de-gated;
+closure.t's residual gate = bare fork-pipe open (runtime gap, task #70 =
+the de-gate path); remaining gates: chdir, postfixderef, state,
+signatures, closure (see e1-remainder.md s295c-2 update).**
+**Previous state s295b+c (2026-07-18, Fable): census 105 v2-native / 6 gated,
 cache gen v2-36, v2 gate green (115 files / 4070 tests).  #63 dynamic goto
 SHIPPED: array.t de-gated at BETTER-than-v1 (167+15+13skip/195 complete run,
 strict-subset fail set) via the forward-goto catch-wrap (porter spec ir-spec

@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 295c-2 (2026-07-18, Fable) — closure-gate session: conditional-my + Scheduled-block capture promotion SHIPPED; lfs.t DE-GATED as a bonus (census 106/5); closure.t stays v1 on a narrow fork-pipe-open runtime-gap gate (task #70 = the de-gate path).
+
+Two general mechanisms + one temporary gate:
+1. **Conditional-my** (`my $x if COND;` / `unless` — closure.t
+   mosquito/staleval, legal for non-constant conds): `_single_scalar_decl`
+   returns the modifier condition (3rd value); the decl branch
+   void-evaluates COND before the unconditional let (outer $x visible to
+   the cond, side effects fire per call — probe-parity vs perl; the
+   undefined-behaviour cross-call stale persistence is not emulated).
+   NB v1 silently DROPS the condition (side effects lost) — the guard in
+   transpile-test-05.t is v2-only.
+2. **Scheduled blocks are capturers** in `_rename_captured_file_lexicals`:
+   BEGIN/END/… hoist to compile-phase position outside the runtime lets
+   (p-BEGIN via _sched_defs), so a lexical they reference now promotes to
+   a package cell exactly like a named-sub capture — the classic
+   `my $x; BEGIN { $x = 5 }` / END-cleanup idioms (probe-parity vs perl,
+   incl. END seeing the final value).  Previously the shape crashed
+   unbound at load for BLOCK lexicals (latent — masked by earlier gates)
+   and gated whole-file for segment lexicals.  **De-gates lfs.t** (its
+   gate was `file lexical 'big0' referenced in a END block`); lfs.t stays
+   on the sweep hang-skip list (pre-existing, both pipelines).
+3. **closure.t stays v1** via a narrow runtime-gap gate: bare fork-pipe
+   `open FH, "|-"` with die-on-failure in the same statement.  The runtime
+   lacks fork-pipe (both pipelines die at closure.t:414), and under the
+   sweep's p-load-with-recovery v1's flat forms lose 1 statement (63+7/71)
+   while v2's nested lets would lose the whole remainder (53+0/54 —
+   falsely entering the fully-passing list on truncated coverage).  The
+   gate excludes the graceful 3-arg/`// skip` forms (magic.t stays
+   native).  **Task #70** (fork-pipe + dup-open ">&FH" + which_perl) is
+   the de-gate path — full findings in its description.
+Also: stale-cache lesson re-learned mid-session (sweep reused v2-36 cached
+transpiles across uncommitted compiler edits) — gen bumped to v2-37.
+Guards: transpile-test-05.t +3 (conditional-my ×2, my-BEGIN cell).
+Verified: corpus-diff v2 = only lfs.t (the de-gate, inspected), PCL_V1
+byte-identical; v2 gate 115/4073 all pass; PCL_V1 gate = known 7 + 4
+v2-only feature guards (3 goto + the new my-BEGIN cell test, which v1
+SILENTLY MISCOMPILES — same class as the #50 block-capture family);
+census 106/5 (remaining: chdir/postfixderef/state/signatures/closure);
+closure.t sweep at v1 numbers (63+7/71).
+
+---
+
 ## Session 295b+c (2026-07-18, Fable) — #63 dynamic goto LABEL SHIPPED + array.t DE-GATED at better-than-v1 (census 105/6); s295c verification pass found and fixed 3 latent defects in the s295b tree.
 
 **The feature (s295b):** (1) **catch-wrap forward-goto lowering** —
