@@ -161,4 +161,24 @@ like($do, qr/\(p-do \(p-get-coderef \$ref\)\)/,
 like($do, qr/\(let \(\(\*wantarray\* nil\)\) \(funcall \(lambda/,
      'do block gets its scalar-context wantarray bind');
 
+# --- converted: gen_funcall_form grep/map (E2.1) ----------------------------
+# EXPRESSION form gets the (lambda ($_) EXPR) wrap in the form path; the
+# BLOCK form rides the generic tail (lambda child stays a raw atom until the
+# inline_lambda emitter converts — E2's last step).
+
+my $gm = Pl::Parser2->parse_code(<<'EOT');
+my @a = (1, 2, 3, 4);
+my @d = grep $_ > 2, @a;
+my @e = map $_ + 1, @a;
+my @b = grep { $_ > 2 } @a;
+print "@b @d @e";
+EOT
+
+like($gm, qr/\(p-grep \(lambda \(\$_\) \(p-> \$_ 2\)\) \@a\)/,
+     'grep EXPR, LIST → (p-grep (lambda ($_) EXPR) @a)');
+like($gm, qr/\(p-map \(lambda \(\$_\) \(p-\+ \$_ 1\)\) \@a\)/,
+     'map EXPR, LIST → (p-map (lambda ($_) EXPR) @a)');
+like($gm, qr/\(p-grep \(lambda \(\$_\)/,
+     'grep { BLOCK } @a → generic-tail funcall with lambda child');
+
 done_testing();

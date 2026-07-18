@@ -1213,7 +1213,7 @@ sub gen_array_str_interp {
 # the form handler declines them (before any side effect) so the text
 # emitter below runs unchanged.  Shrink this list as branches convert.
 my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
-  eval grep map
+  eval
 );
 
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
@@ -1388,6 +1388,26 @@ sub gen_funcall_form {
         return ['progn', Pl::CLForm::raw($body)] if $ctx == INHERIT_CTX;
         return $self->_ctx_wrap_form(['progn', Pl::CLForm::raw($body)], $ctx);
       }
+    }
+  }
+
+  # grep/map EXPRESSION form: grep EXPR, LIST → (p-grep (lambda ($_) EXPR) LIST).
+  # The BLOCK/lambda form (first arg is inline_lambda/func_ref/anon_sub) is NOT
+  # handled here — it is a plain funcall that rides the generic tail, which
+  # gen_node_form's the lambda child (the inline_lambda emitter's output,
+  # embedded as a raw atom until THAT emitter is converted — E2's final step —
+  # at which point grep/map go structural with no change here).  Exactly the
+  # text emitter's split: only the non-lambda first arg gets the lambda wrap.
+  if (($func_name eq 'grep' || $func_name eq 'map') && @$kids >= 2) {
+    my $first_arg_node = $self->expr_o->get_a_node($kids->[1]);
+    my $is_lambda_form = $self->expr_o->is_internal_node_type($first_arg_node) &&
+                         ($first_arg_node->{type} eq 'inline_lambda' ||
+                          $first_arg_node->{type} eq 'func_ref' ||
+                          $first_arg_node->{type} eq 'anon_sub');
+    if (!$is_lambda_form) {
+      my $expr_form = $self->gen_node_form($kids->[1]);
+      my @rest = map { $self->gen_node_form($kids->[$_]) } 2 .. $#$kids;
+      return [$cl_func, ['lambda', ['list', '$_'], $expr_form], @rest];
     }
   }
 

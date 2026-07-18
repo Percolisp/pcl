@@ -50,8 +50,23 @@ the explicit `do` case the text tail has at what is now line ~2680).
 `body_cl` embeds as a raw atom — the structural inline_lambda conversion is
 E2's LAST step; this just moves the funcall node to a form.  Same
 corpus-diff verification both pipelines; 3 more `clform-01.t` guards.
-Remaining funcall declines: `eval grep map` (grep/map = inline_lambda, the
-hairiest, LAST; eval ties to E3 eval-mode).
+
+Fifth commit — `grep`/`map` (declines now `eval` only).  **The better-way
+insight (user prompt):** the text grep/map branch only handles the
+*expression* form (`grep EXPR, LIST` → `(p-grep (lambda ($_) EXPR) LIST)`);
+the *block* form (`grep { … } LIST`, first arg an inline_lambda/func_ref/
+anon_sub) was never in that branch — it already falls through to the
+generic tail as a plain funcall.  So the conversion does NOT pull `body_cl`
+into a grep/map-specific branch (the naive route): it ports only the clean
+expression-form lambda-wrap, and the block form rides the generic tail,
+whose `gen_node_form` embeds the inline_lambda emitter's output as a raw
+atom — and goes fully structural for free once THAT emitter converts (E2's
+final step).  Zero `body_cl` handling here.  Same corpus-diff verification
+both pipelines (the degenerate empty-list `grep EXPR` trailing-space
+text-wart does not occur in the corpus); 3 more `clform-01.t` guards.
+Remaining funcall decline: `eval` only — left for E3 eval-mode per the
+user (the `eval BLOCK` form is do-like; `eval STRING` is the E3 coupling
+and the dynamic-string-eval hard requirement).
 
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
