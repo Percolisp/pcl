@@ -4,12 +4,40 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), five
+**On branch `wip/s296-state-family` (atop the parked s296 state work), six
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change.
+
+**Sixth commit — `gen_binary_op` → `gen_binary_op_form` (the big one:
+EVERY operator).**  DECLINES the operand-text-inspecting families BEFORE
+any side effect (decision is purely the op string): `=` (assignment — its
+LHS-sigil / magic-lvalue / typeglob dispatch greps generated `$left`) and
+`=~`/`!~` (the s///-vs-match wantarray wrap greps generated `$right`).
+Converts everything else structurally, mirroring gen_binary_op
+branch-for-branch (same generation ORDER so the shared `$g_flipflop_count`
+matches): arithmetic / comparison / logical / string / `.` / `x`
+(list-repeat + str-x + INHERIT runtime split) / `..`/`...` (range +
+flip-flop, all num/dyn/bool + INHERIT variants) / `isa` (bareword RHS →
+string) / use-integer arithmetic.  **Dual-representation wiring** (the
+caution logged last commit): a binary op reaches codegen as a
+`PPI::Token::Operator`/`Word` WITH children AND as an internal-node type,
+so `gen_binary_op_form` is wired at THREE dispatch points — `gen_internal_node`
+(text-context, `!exists handlers{type}` → to_flat), `gen_node_form`'s
+internal-node branch (same guard), and `gen_node_form`'s Operator/Word-
+with-children branch (replacing the old `raw(gen_node)`).  Each is guarded
+so a decline (`=`/`=~`/`!~`) falls through to the unchanged text path with
+no double-generation (decline precedes all side effects).  Verification:
+`tools/corpus-diff.pl` (v2) and `PCL_V1=1 tools/corpus-diff.pl` both
+identical to HEAD across all 111 files, PLUS a direct HEAD-worktree
+byte-diff on two operator-heavy probes (arith/compare/logical/string/`.`/`x`
+list+scalar/`..` num+string+flip-flop+list+return-ctx/`isa`/use-integer,
+AND the declined `=`/`=~`/`!~`/`s///`/`tr///`/`$#a=`) — identical.  No
+cache-gen bump.  16 new `clform-01.t` guards (137 total).
+
+**Fifth commit — `ref_funcall` → `gen_ref_funcall_form`.**
 
 **Fifth commit — `ref_funcall` → `gen_ref_funcall_form`.**  Clean, no
 operand-text inspection: `$cref->(args)` / `&$cref(args)` →

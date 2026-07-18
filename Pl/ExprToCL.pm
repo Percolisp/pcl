@@ -442,6 +442,13 @@ sub gen_internal_node {
     return Pl::CLForm::to_flat($form) if defined $form;
   }
 
+  # E2: a type with no named handler is a binary operator (gen_binary_op) —
+  # try the form emitter (declines =/=~/!~, converts the rest).
+  if (!exists $self->handlers->{$type}) {
+    my $form = $self->gen_binary_op_form($type, $kids, $node_id);
+    return Pl::CLForm::to_flat($form) if defined $form;
+  }
+
   return $self->gen_internal_node_text($node, $node_id, $kids);
 }
 
@@ -485,16 +492,27 @@ sub gen_node_form {
       my $form = $fh->($self, $node, $node_id, $kids);
       return $form if defined $form;
     }
+    # Internal-node-typed binary op (type not a named handler) → form emitter.
+    if (!exists $self->handlers->{$type}) {
+      my $form = $self->gen_binary_op_form($type, $kids, $node_id);
+      return $form if defined $form;
+    }
     return Pl::CLForm::raw($self->gen_internal_node_text($node, $node_id, $kids));
   }
   # A PPI::Token::Operator/Word WITH children is a binary op (gen_node's
-  # gen_binary_op case), NOT a leaf — leave those on the raw(gen_node) path.
-  # Only a genuine leaf (no children) goes to gen_leaf_form: a converted leaf
-  # emitter returns a CLForm; anything not yet converted declines (undef) and
-  # the leaf's v1 text is embedded as a raw atom.  gen_leaf's leaf side effects
-  # (idempotent package/caret set-adds, read-only rename lookups) make the
-  # decline→re-run through gen_node safe.
+  # gen_binary_op case), NOT a leaf → the binary-op form emitter (declines
+  # =/=~/!~ before any side effect, so the raw(gen_node) fallback re-runs
+  # gen_binary_op cleanly).  A genuine leaf (no children) goes to
+  # gen_leaf_form: a converted leaf returns a CLForm; anything not yet
+  # converted declines (undef) and the leaf's v1 text is embedded as a raw
+  # atom.  gen_leaf's leaf side effects (idempotent package/caret set-adds,
+  # read-only rename lookups) make the decline→re-run through gen_node safe.
   my $kids = $self->expr_o->get_node_children($node_id) || [];
+  if (@$kids
+      && (ref($node) eq 'PPI::Token::Operator' || ref($node) eq 'PPI::Token::Word')) {
+    my $form = $self->gen_binary_op_form($node->content(), $kids, $node_id);
+    return $form if defined $form;
+  }
   if (!@$kids && defined(my $lf = $self->gen_leaf_form($node))) {
     return $lf;
   }
@@ -1255,6 +1273,121 @@ sub gen_binary_op {
   }
 
   return "($cl_op $left $right)";
+}
+
+# E2 form variant of gen_binary_op.  DECLINES the operand-text-inspecting
+# operator families BEFORE any side effect (the decision is purely the op
+# string): `=` (assignment — its LHS-sigil / magic-lvalue / typeglob dispatch
+# greps the generated $left) and `=~`/`!~` (the s///-vs-match wantarray wrap
+# greps the generated $right).  Their AST-level rewrite is a later E2 step.
+# Everything else — arithmetic / comparison / logical / string / `.` / `x` /
+# `..` flip-flop+range / `isa` / use-integer — is AST + context only and
+# converts structurally, mirroring gen_binary_op branch-for-branch (same
+# generation ORDER, so the shared $g_flipflop_count and any gensyms match).
+sub gen_binary_op_form {
+  my ($self, $op, $kids, $node_id) = @_;
+
+  return undef if $op eq '=' || $op eq '=~' || $op eq '!~';
+
+  my $cl_op = $self->cl_op_name($op);
+
+  # '..'/'...' — range in list context, flip-flop in scalar context.
+  if (($op eq '..' || $op eq '...') && defined $node_id) {
+    my $ctx = $self->expr_o->get_node_context($node_id);
+    my $left_node  = $self->expr_o->get_a_node($kids->[0]);
+    my $right_node = $self->expr_o->get_a_node($kids->[1]);
+    my $both_int  = _is_integer_literal_node($left_node) && _is_integer_literal_node($right_node);
+    my $both_literal = ($both_int
+                        || (_is_string_literal_node($left_node) && _is_string_literal_node($right_node)));
+    my $effective_ctx = $ctx;
+    $effective_ctx = SCALAR_CTX if $ctx == INHERIT_CTX && !$both_literal;
+    if ($effective_ctx != LIST_CTX && $effective_ctx != INHERIT_CTX) {
+      my $ff_id = $g_flipflop_count++;
+      my $left  = $self->gen_node_form($kids->[0]);
+      my $right = $self->gen_node_form($kids->[1]);
+      my $macro = $both_int
+                ? (($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num')
+                : $both_literal
+                ? (($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn')
+                : (($op eq '...') ? 'p-flipflop-3' : 'p-flipflop');
+      return [$macro, $ff_id, $left, $right];
+    }
+    if ($effective_ctx == INHERIT_CTX) {
+      my $ff_id = $g_flipflop_count++;
+      my $left  = $self->gen_node_form($kids->[0]);
+      my $right = $self->gen_node_form($kids->[1]);
+      my $ff_macro = $both_int
+                   ? (($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num')
+                   : (($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn');
+      my $range_fn = ($op eq '...') ? 'p-...' : 'p-..';
+      return ['if', ['eq', '*wantarray*', 't'],
+                    [$range_fn, $left, $right],
+                    [$ff_macro, $ff_id, $left, $right]];
+    }
+    # List context: range endpoints are always scalars, not lists.  Fall through.
+    $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
+    $self->expr_o->set_node_context($kids->[1], SCALAR_CTX);
+  }
+
+  # 'x' — list repeat when LHS is parenthesized and in list context.
+  if ($op eq 'x' && defined $node_id) {
+    my $lhs_node = $self->expr_o->get_a_node($kids->[0]);
+    my $lhs_is_paren = $self->expr_o->is_internal_node_type($lhs_node) &&
+                       ($lhs_node->{type} eq 'tree_val' || $lhs_node->{type} eq 'progn');
+    my $ctx = $self->expr_o->get_node_context($node_id);
+    if ($lhs_is_paren && $ctx == LIST_CTX) {
+      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
+      my $left  = $self->gen_node_form($kids->[0]);
+      my $right = $self->gen_node_form($kids->[1]);
+      return ['p-list-x', $left, $right];
+    }
+    if ($lhs_is_paren && $ctx == INHERIT_CTX) {
+      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
+      my $left_list   = $self->gen_node_form($kids->[0]);
+      $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
+      my $left_scalar = $self->gen_node_form($kids->[0]);
+      my $right = $self->gen_node_form($kids->[1]);
+      return ['if', ['eq', '*wantarray*', 't'],
+                    ['p-list-x', $left_list, $right],
+                    ['p-str-x', $left_scalar, $right]];
+    }
+  }
+
+  my $left = $self->gen_node_form($kids->[0]);
+
+  # 'isa' — RHS bareword class name must be a string literal.
+  if ($op eq 'isa') {
+    my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
+    my $right;
+    if (ref($rhs_node) eq 'PPI::Token::Word' && !$self->expr_o->get_node_children($kids->[1])) {
+      my $class_name = $rhs_node->content();
+      $right = qq{"$class_name"};
+    } else {
+      $right = $self->gen_node_form($kids->[1]);
+    }
+    return ['p-isa', $left, $right];
+  }
+
+  my $right = $self->gen_node_form($kids->[1]);
+
+  # 'use integer' pragma: truncate operands first, then operate.
+  if ($self->environment && $self->environment->has_pragma('use_integer')) {
+    return ['truncate', ['p-int', $left], ['p-int', $right]]  if $op eq '/';
+    return ['rem',      ['p-int', $left], ['p-int', $right]]  if $op eq '%';
+    return ['+',        ['p-int', $left], ['p-int', $right]]  if $op eq '+';
+    return ['-',        ['p-int', $left], ['p-int', $right]]  if $op eq '-';
+    return ['*',        ['p-int', $left], ['p-int', $right]]  if $op eq '*';
+    return ['p-to-s64', ['logand', ['pcl::%pcl-to-integer', ['to-number', $left]],
+                                   ['pcl::%pcl-to-integer', ['to-number', $right]]]] if $op eq '&';
+    return ['p-to-s64', ['logior', ['pcl::%pcl-to-integer', ['to-number', $left]],
+                                   ['pcl::%pcl-to-integer', ['to-number', $right]]]] if $op eq '|';
+    return ['p-to-s64', ['logxor', ['pcl::%pcl-to-integer', ['to-number', $left]],
+                                   ['pcl::%pcl-to-integer', ['to-number', $right]]]] if $op eq '^';
+    return ['p-<<-int', $left, $right] if $op eq '<<';
+    return ['p->>-int', $left, $right] if $op eq '>>';
+  }
+
+  return [$cl_op, $left, $right];
 }
 
 # Generate CL name for an OPERATOR

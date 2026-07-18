@@ -477,4 +477,54 @@ like($rf, qr/\(let \(\(\*wantarray\* t\)\) \(p-funcall-ref \$c 1 2 3\)\)/,
 like($rf, qr/\(let \(\(\*wantarray\* :void\)\) \(p-funcall-ref \$c\)\)/,
      'void-ctx code-ref call → (let ((*wantarray* :void)) (p-funcall-ref $c))');
 
+# --- converted: gen_binary_op_form (E2.1) -----------------------------------
+# arithmetic / comparison / logical / string / . / x / .. / isa convert; the
+# operand-text-inspecting families =/=~/!~ DECLINE to the kept text emitter.
+
+my $bo = Pl::Parser2->parse_code(<<'EOT');
+my ($x, $y) = (5, 3); my @a = (1, 2, 3); my $o = bless {}, 'Foo';
+my $s1 = $x + $y * 2;
+my $s2 = $x . $y . "z";
+my $b1 = $x == $y;
+my $b2 = $x <= $y && $y > 1;
+my $b3 = $x eq "5" || $y ne "3";
+my $sh = $x << 2;
+my $rep = "a" x 3;
+my @lr = (1, 2) x 2;
+my @rng = (1 .. 5);
+my $isa = $o isa Foo;
+print $s1;
+EOT
+
+like($bo, qr/\(p-\+ \$x \(p-\* \$y 2\)\)/,      'arith precedence → (p-+ $x (p-* $y 2))');
+like($bo, qr/\(p-\. \(p-\. \$x \$y\) "z"\)/,    'string concat . → nested (p-. …)');
+like($bo, qr/\(p-== \$x \$y\)/,                 'numeric compare → (p-== $x $y)');
+like($bo, qr/\(p-&& \(p-<= \$x \$y\) \(p-> \$y 1\)\)/, 'logical && over comparisons');
+like($bo, qr/\(p-\|\| \(p-str-eq \$x "5"\) \(p-str-ne \$y "3"\)\)/, 'string eq/ne under ||');
+like($bo, qr/\(p-<< \$x 2\)/,                   'bit shift → (p-<< $x 2)');
+like($bo, qr/\(p-str-x "a" 3\)/,                'scalar x → (p-str-x "a" 3)');
+like($bo, qr/\(p-list-x \(vector 1 2\) 2\)/,    'list (…) x N → (p-list-x (vector …) N)');
+like($bo, qr/\(p-\.\. 1 5\)/,                   'list-context range → (p-.. 1 5)');
+like($bo, qr/\(p-isa \$o "Foo"\)/,              'isa bareword RHS → (p-isa $o "Foo")');
+
+# flip-flop (scalar-context ..) still emits the p-flipflop macro with an id
+my $ff = Pl::Parser2->parse_code('while (<STDIN>) { my $f = /a/ .. /b/; print $f; }');
+like($ff, qr/\(p-flipflop \d+ /, 'scalar-context .. → (p-flipflop ID …)');
+
+# declines: =/=~/!~ keep their text shapes (LHS/RHS text-dispatch preserved)
+my $bd = Pl::Parser2->parse_code(<<'EOT');
+my ($x, $y) = (1, 2); my @a; my %h;
+$x = $y; @a = (1, 2); %h = (k => 1);
+my $m = $x =~ /1/; my $nm = $x !~ /z/;
+print $x;
+EOT
+# (a bare lexical scalar `$x = $y` is lowered by Parser2's NATIVE assignment
+# path to (p-my-= …), never reaching gen_binary_op; the array/hash `=` DO
+# reach the declined gen_binary_op text branch → (p-array-=)/(p-hash-=).)
+like($bd, qr/\(p-my-= \$x \$y\)/,       'scalar = uses the native (p-my-= …) path');
+like($bd, qr/\(p-array-= \@a /,         '= array assign declines → (p-array-= …)');
+like($bd, qr/\(p-hash-= %h /,           '= hash assign declines → (p-hash-= …)');
+like($bd, qr/\(p-=~ \$x /,              '=~ declines → (p-=~ …) text');
+like($bd, qr/\(p-!~ \$x /,              '!~ declines → (p-!~ …) text');
+
 done_testing();
