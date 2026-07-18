@@ -111,6 +111,7 @@ sub _build_form_handlers {
     'funcall'          => \&gen_funcall_form,
     'methodcall'       => \&gen_methodcall_form,
     'ref_funcall'      => \&gen_ref_funcall_form,
+    'anon_sub'         => \&gen_anon_sub_form,
     'prefix_op'        => \&gen_prefix_op_form,
     'postfix_op'       => \&gen_postfix_op_form,
     'tree_val'         => \&gen_tree_val_form,
@@ -4901,6 +4902,16 @@ sub gen_anon_sub {
   my $body = join(' ', @body_parts);
 
   return "(lambda () $body)";
+}
+
+# E2 form variant of gen_anon_sub: sub { … } → (lambda () body…).  Clean, no
+# text inspection.  Empty body declines (the text emitter emits "(lambda () )"
+# with a trailing space a form cannot reproduce).
+sub gen_anon_sub_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef unless @$kids;
+  my @body = map { $self->gen_node_form($_) } @$kids;
+  return ['lambda', ['list'], @body];
 }
 
 

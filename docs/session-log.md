@@ -11,6 +11,13 @@ E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change.
 
+**Eighth commit — `anon_sub` → `gen_anon_sub_form`.**  `sub { … }` reached
+via the expr path (its real site is the `s/PAT/CODE/e` replacement block →
+`(lambda () CODE)`; plain `sub {}` uses Parser2's native
+`(lambda (&rest %_args) …)` lowering) → `['lambda', ['list'], @body]`.
+Empty body declines (text `(lambda () )` trailing space).  Both pipelines
+byte-identical to HEAD; 1 new `clform-01.t` guard (144 total).
+
 **Seventh commit — un-decline `=~`/`!~` in `gen_binary_op_form`.**  The only
 reason they declined was the text check `$right !~ /^\(p-(subst|tr|translate)/`
 (skip the *wantarray* wrap when the RHS is a scalar-returning s///-/tr///).

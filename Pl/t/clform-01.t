@@ -553,4 +553,12 @@ like($rx, qr/\(p-=~ \$x \(p-tr "a" "b"\)\)/,
 unlike($rx, qr/\(let \(\(\*wantarray\* \w+\)\) \(p-=~ \$x \(p-subst/,
      's/// RHS is never wantarray-wrapped');
 
+# --- converted: gen_anon_sub_form (E2.1) ------------------------------------
+# The anon_sub internal node's real site is the s///e replacement code block:
+# s/PAT/CODE/e wraps CODE in (lambda () …).  (Plain sub { … } uses Parser2's
+# native (lambda (&rest %_args) …) lowering, a different path.)
+my $an = Pl::Parser2->parse_code('my $x = "ab"; $x =~ s/(a)/$1 . "z"/e; print $x;');
+like($an, qr/\(lambda \(\) \(p-\. \$1 "z"\)\)/,
+     's///e replacement → (lambda () CODE) via gen_anon_sub_form');
+
 done_testing();
