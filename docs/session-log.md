@@ -146,6 +146,22 @@ pipelines.  6 `clform-01.t` guards.  Remaining internal nodes:
 first), `methodcall`/`prefix_op`/`postfix_op`, then `inline_lambda` (E2
 final).
 
+Twelfth commit — **`progn` + small I/O nodes**: `progn`, `backtick`,
+`readline`, `filehandle`, `glob_slot`.  `progn` uses AST-level predicates
+(`_node_is_definitely_scalar`/`_is_array_expr_node`), no generated-text
+inspection, so it converts (unlike `tree_val`, which inspects `$child =~
+/\(p-=~/`); empty `()` declines (text `(vector )`/`(progn )` trailing
+space).  readline/glob context-bound via `_wrap_wantarray_ctx_form`;
+filehandle returns the `:fh …` marker string.  **CLForm gotcha found &
+fixed:** `progn`'s list-context path emits a REAL CL `(list …)`, but
+`'list'` is CLForm's RESERVED headless-list head — `['list', @forms]`
+dropped the head (`(f1 f2)`, 31 files diverged); fixed with the headless
+idiom `['list', 'list', @forms]` → `(list …)`.  Corpus-diff clean both
+pipelines after the fix; 6 `clform-01.t` guards.  Deferred (inspect
+generated text — need AST rewrite): `tree_val`, `postfix_op` (`$#arr++`),
+`glob` (negated-class analysis).  Then `methodcall`/`prefix_op`, and
+`inline_lambda` (E2 final).
+
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
 anyway), structural children use `gen_node_form`.  Non-matching shapes fall

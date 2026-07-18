@@ -123,6 +123,11 @@ sub _build_form_handlers {
     'slice_h_acc'      => \&gen_hash_slice_form,
     'kv_slice_h_acc'   => \&gen_kv_hash_slice_form,
     'kv_slice_a_acc'   => \&gen_kv_array_slice_form,
+    'progn'            => \&gen_progn_form,
+    'backtick'         => \&gen_backtick_form,
+    'readline'         => \&gen_readline_form,
+    'filehandle'       => \&gen_filehandle_form,
+    'glob_slot'        => \&gen_glob_slot_form,
   };
 }
 
@@ -3791,6 +3796,84 @@ sub gen_kv_array_slice_form {
     push @indices, $self->gen_node_form($kids->[$i]);
   }
   return ['p-kv-aslice', $arr_form, @indices];
+}
+
+# --- E2 form variants: progn + the small I/O nodes --------------------------
+
+# Comma/list expression.  AST-level classification (_node_is_definitely_scalar
+# / _is_array_expr_node), no generated-text inspection.  EMPTY () declines: the
+# text emitter's "(vector )" / "(progn )" carry a trailing space a form cannot
+# reproduce.
+sub gen_progn_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef unless @$kids;
+  my $ctx = $self->expr_o->get_node_context($node_id);
+  if ($ctx == 1) {  # LIST_CTX
+    $self->expr_o->set_node_context($_, 1) for @$kids;
+  }
+  my @forms = map { $self->gen_node_form($_) } @$kids;
+  if ($ctx == 1) {
+    my $all_scalar = 1;
+    for my $kid_id (@$kids) {
+      unless ($self->_node_is_definitely_scalar($kid_id)) { $all_scalar = 0; last }
+    }
+    # NB: a real CL (list …) call — 'list' is CLForm's RESERVED headless-list
+    # head, so emit it as a headless list whose first atom is the symbol `list`.
+    return $all_scalar ? ['vector', @forms]
+                       : ['p-flatten-args', ['list', 'list', @forms]];
+  }
+  if (@forms > 1 && $ctx != LIST_CTX) {
+    my @flat;
+    for my $i (0 .. $#$kids) {
+      my $kid_node = $self->expr_o->get_a_node($kids->[$i]);
+      push @flat, $self->_is_array_expr_node($kid_node, $kids->[$i])
+                  ? ['p-flatten', $forms[$i]] : $forms[$i];
+    }
+    return ['if', '*wantarray*', ['vector', @flat], ['progn', @forms]];
+  }
+  return ['progn', @forms];
+}
+
+sub gen_backtick_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return ['p-backtick', $self->gen_node_form($kids->[0])];
+}
+
+# <FH> / <$fh> / <> — wantarray-sensitive, context-bound like the text emitter.
+sub gen_readline_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $call;
+  if (@$kids) {
+    my $fh = $self->gen_node($kids->[0]);
+    $call = ['p-readline', ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) ? "'$fh" : $fh];
+  } else {
+    $call = ['p-readline'];
+  }
+  my $ctx = defined $node_id
+            ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+  return $self->_wrap_wantarray_ctx_form($call, $ctx);
+}
+
+# Filehandle marker for the print/say/printf family: :fh 'NAME / :fh $fh / :fh
+# nil (a bare marker string, rendered verbatim inside the parent call form).
+sub gen_filehandle_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  if (@$kids) {
+    my $fh = $self->gen_node($kids->[0]);
+    return ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) ? ":fh '$fh" : ":fh $fh";
+  }
+  return ':fh nil';
+}
+
+# *glob{SLOT} → (p-glob-slot glob "SLOT") or computed (p-glob-slot glob EXPR).
+sub gen_glob_slot_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $glob = $self->gen_node_form($kids->[0]);
+  if ($node->{slot_is_expr}) {
+    return ['p-glob-slot', $glob, $self->gen_node_form($kids->[1])];
+  }
+  my $slot_name = uc($node->{slot_name} // 'SCALAR');
+  return ['p-glob-slot', $glob, "\"$slot_name\""];
 }
 
 

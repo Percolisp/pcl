@@ -297,4 +297,26 @@ like($sl, qr/\(p-gethash-deref \$hr "x"\)/,  'hash-ref access → (p-gethash-der
 like($sl, qr/\(p-gethash-deref \$hr \(p-join \|\$;\| \(vector "p" "q"\)\)\)/,
      'multi-key hash-ref → (p-join |$;| (vector …))');
 
+# --- converted: progn + small I/O nodes (E2.1) ------------------------------
+
+my $ms = Pl::Parser2->parse_code(<<'EOT');
+my @a = (1, 2, 3);
+my @e = ();
+my $s = ("a", "b", "c");
+print STDERR "err\n";
+my $out = `echo hi`;
+my $line = <$fh>;
+my @lines = <STDIN>;
+print "@a $s $out $line @lines @e";
+EOT
+
+like($ms, qr/\(vector 1 2 3\)/,            'list-context progn → (vector 1 2 3)');
+like($ms, qr/\(vector \)/,                 'empty () declines to text (trailing space)');
+like($ms, qr/\(p-print :fh 'STDERR /,      'filehandle marker → :fh \x27STDERR');
+like($ms, qr/\(p-backtick "echo hi"\)/,    'backtick → (p-backtick "echo hi")');
+like($ms, qr/\(let \(\(\*wantarray\* nil\)\) \(p-readline \$fh\)\)/,
+     'readline <$fh> scalar-context bound');
+like($ms, qr/\(let \(\(\*wantarray\* t\)\) \(p-readline 'STDIN\)\)/,
+     'readline <STDIN> list-context bound + bareword quote');
+
 done_testing();
