@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 297 (2026-07-18, Opus 4.8) — E2.1 introspection family: exists/delete/defined/tied/pos → CLForm (task #68), byte parity both pipelines.
+
+**On branch `wip/s296-state-family` (atop the parked s296 state work), one
+E2 commit.**  The E1 state-family business on this branch (eval.t
+regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
+untouched and left as-is — those two gate failures are pre-existing E1 WIP,
+not from this change.
+
+Converted five more `gen_funcall` special-cased text branches to
+form-producing in `gen_funcall_form` and removed them from
+`%FUNCALL_FORM_DECLINES` (now: `goto do eval grep map undef chop chomp`):
+
+- `tied($a[i])` / `tied($h{k})` → `(p-tied (p-aref-box …))` / `(p-tied (p-gethash-box …))`
+- `pos(…)` → `(p-pos (p-aref-box …))` / `(p-pos (p-gethash-box …))`
+- `delete` — element (`p-delete-array`/`p-delete`), the four slice forms
+  (`p-delete-{hash,array,kv-hash,kv-array}-slice`), and the hash-ref form
+- `exists` — element (`p-exists-array`/`p-exists`), the `unbox`-ref forms,
+  and `&sub`/`&{…}` existence (`p-sub-exists`/`p-coderef-exists-p`)
+- `defined` — `&sub` (`p-sub-defined`), `&{…}` (`p-coderef-defined-p`), and
+  bareword filehandle (`p-defined-fh`)
+
+Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
+needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
+anyway), structural children use `gen_node_form`.  Non-matching shapes fall
+through to the already-form-producing generic tail, exactly like the text
+branches did.
+
+Verification: `tools/corpus-diff.pl` (v2) **and** `PCL_V1=1
+tools/corpus-diff.pl` both report emission IDENTICAL to HEAD across all 111
+files.  No cache-gen bump (emission unchanged).  New shape guards in
+`Pl/t/clform-01.t` (12 new `like`s, all pass).  Full gate: green except the
+two pre-existing E1 state-family fails noted above.
+
+---
+
 ## Session 296 (2026-07-18, Fable) — #56 state family source-rewrite: state.t DE-GATED at 157+0/166; WIP branch, NOT yet merged (eval.t regression open).
 
 **All work is on branch `wip/s296-state-family` (commit 97d8ca9), NOT on

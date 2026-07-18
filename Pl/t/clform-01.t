@@ -71,4 +71,37 @@ like($fc, qr/\(p-print \$_\)/,
 like($fc, qr/\(p-warn :loc "- line \d+" "w"\)/,
      'funcall form: warn carries the :loc source-location marker');
 
+# --- converted: gen_funcall_form introspection family (E2.1) -----------------
+# exists / delete / defined / tied / pos — element/slice/ref/sub shapes now
+# emit via the form path (removed from %FUNCALL_FORM_DECLINES).
+
+my $ix = Pl::Parser2->parse_code(<<'EOT');
+my %h = (a => 1); my @a = (1, 2, 3);
+my $r = { x => 1 }; my $ar = [1, 2];
+my $e1 = exists $h{a};   my $e2 = exists $a[0];
+my $e3 = exists $r->{x}; my $e4 = exists $ar->[0];
+my $ef = exists &foo;
+delete $h{a};   delete $a[0];
+delete @h{'a','b'}; delete @a[0,1];
+delete $r->{x};
+my $d1 = defined &foo; my $d2 = defined FILE;
+print $e1;
+EOT
+
+like($ix, qr/\(p-exists %h "a"\)/,          'exists $h{k} → (p-exists %h key)');
+like($ix, qr/\(p-exists-array \@a 0\)/,      'exists $a[i] → (p-exists-array @a i)');
+like($ix, qr/\(p-exists \(unbox \$r\) "x"\)/, 'exists $r->{k} → (p-exists (unbox ref) key)');
+like($ix, qr/\(p-exists-array \(unbox \$ar\) 0\)/,
+     'exists $ar->[i] → (p-exists-array (unbox ref) i)');
+like($ix, qr/\(p-sub-exists "main" "foo"\)/, 'exists &sub → (p-sub-exists pkg name)');
+like($ix, qr/\(p-delete %h "a"\)/,           'delete $h{k} → (p-delete %h key)');
+like($ix, qr/\(p-delete-array \@a 0\)/,       'delete $a[i] → (p-delete-array @a i)');
+like($ix, qr/\(p-delete-hash-slice %h "a" "b"\)/,
+     'delete @h{...} → (p-delete-hash-slice %h keys)');
+like($ix, qr/\(p-delete-array-slice \@a 0 1\)/,
+     'delete @a[...] → (p-delete-array-slice @a idxs)');
+like($ix, qr/\(p-delete \(unbox \$r\) "x"\)/, 'delete $r->{k} → (p-delete (unbox ref) key)');
+like($ix, qr/\(p-sub-defined "main" "foo"\)/, 'defined &sub → (p-sub-defined pkg name)');
+like($ix, qr/\(p-defined-fh 'FILE\)/,         'defined BAREWORD → (p-defined-fh name)');
+
 done_testing();

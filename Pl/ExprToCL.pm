@@ -1213,7 +1213,7 @@ sub gen_array_str_interp {
 # the form handler declines them (before any side effect) so the text
 # emitter below runs unchanged.  Shrink this list as branches convert.
 my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
-  goto do eval grep map tied pos delete exists defined undef chop chomp
+  goto do eval grep map undef chop chomp
 );
 
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
@@ -1391,6 +1391,239 @@ sub gen_funcall_form {
         my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
         if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
           return [$head, "'" . ($word_node->content() // '')];
+        }
+      }
+    }
+  }
+
+  # tied($a[i]) / tied($h{k}): needs the box for identity tracking.
+  if ($func_name eq 'tied' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my $idx = $self->gen_node_form($arg_kids->[1]);
+        $arr =~ s/(^|::)\$/${1}\@/;
+        return ['p-tied', ['p-aref-box', $arr, $idx]];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my $key  = $self->gen_node_form($arg_kids->[1]);
+        $hash =~ s/(^|::)\$/${1}%/;
+        return ['p-tied', ['p-gethash-box', $hash, $key]];
+      }
+    }
+  }
+
+  # pos($a[i]) / pos($h{k}): needs the box for *p-match-pos* tracking.
+  if ($func_name eq 'pos' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my $idx = $self->gen_node_form($arg_kids->[1]);
+        $arr =~ s/(^|::)\$/${1}\@/;
+        return ['p-pos', ['p-aref-box', $arr, $idx]];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my $key  = $self->gen_node_form($arg_kids->[1]);
+        $hash =~ s/(^|::)\$/${1}%/;
+        return ['p-pos', ['p-gethash-box', $hash, $key]];
+      }
+    }
+  }
+
+  # delete on array/hash elements and slices: pass container + key/index.
+  if ($func_name eq 'delete' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        my $arr = $self->gen_node($arg_kids->[0]);
+        if ((ref($arr_node) eq 'PPI::Token::Symbol'
+             || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
+          $arr =~ s/(^|::)\$/${1}\@/;
+        }
+        my $idx = $self->gen_node_form($arg_kids->[1]);
+        return ['p-delete-array', $arr, $idx];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        my $hash = $self->gen_node($arg_kids->[0]);
+        if ((ref($hash_node) eq 'PPI::Token::Symbol'
+             || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
+          $hash =~ s/(^|::)\$/${1}%/;
+        }
+        my $key = $self->gen_node_form($arg_kids->[1]);
+        return ['p-delete', $hash, $key];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'slice_h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 1) {
+        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        my $hash = $self->gen_node($arg_kids->[0]);
+        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /(?:^|::)\@/) {
+          $hash =~ s/(^|::)\@/${1}%/;
+        }
+        my @keys = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
+        return ['p-delete-hash-slice', $hash, @keys];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'slice_a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        my @indices = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
+        return ['p-delete-array-slice', $arr, @indices];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'kv_slice_h_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $hash = $self->gen_node($arg_kids->[0]);
+        my @keys = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
+        return ['p-delete-kv-hash-slice', $hash, @keys];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'kv_slice_a_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 1) {
+        my $arr = $self->gen_node($arg_kids->[0]);
+        $arr =~ s/(^|::)\%/${1}\@/;
+        my @indices = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
+        return ['p-delete-kv-array-slice', $arr, @indices];
+      }
+    }
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'h_ref_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $ref = $self->gen_node_form($arg_kids->[0]);
+        my $key = $self->gen_node_form($arg_kids->[1]);
+        return ['p-delete', ['unbox', $ref], $key];
+      }
+    }
+  }
+
+  # exists on array/hash elements, refs, and sub/coderef existence.
+  if ($func_name eq 'exists' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($arg_node) eq 'PPI::Token::Symbol') {
+      my $sym = $arg_node->content();
+      if ($sym =~ /^&(.+)$/) {
+        my ($pkg, $name) = $self->_split_func_sym($1);
+        return ['p-sub-exists', "\"$pkg\"", "\"$name\""];
+      }
+    }
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'prefix_op') {
+      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids2 >= 2) {
+        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
+        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
+          my $inner = $self->gen_node_form($arg_kids2->[1]);
+          return ['p-coderef-exists-p', $inner];
+        }
+      }
+    }
+    if ($self->expr_o->is_internal_node_type($arg_node)) {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        if ($arg_node->{type} eq 'a_acc') {
+          my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
+          my $arr = $self->gen_node($arg_kids->[0]);
+          if ((ref($arr_node) eq 'PPI::Token::Symbol'
+               || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
+            $arr =~ s/(^|::)\$/${1}\@/;
+          }
+          my $idx = $self->gen_node_form($arg_kids->[1]);
+          return ['p-exists-array', $arr, $idx];
+        }
+        elsif ($arg_node->{type} eq 'h_acc') {
+          my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
+          my $hash = $self->gen_node($arg_kids->[0]);
+          if ((ref($hash_node) eq 'PPI::Token::Symbol'
+               || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
+            $hash =~ s/(^|::)\$/${1}%/;
+          }
+          my $key = $self->gen_node_form($arg_kids->[1]);
+          return ['p-exists', $hash, $key];
+        }
+        elsif ($arg_node->{type} eq 'h_ref_acc') {
+          my $ref = $self->gen_node_form($arg_kids->[0]);
+          my $key = $self->gen_node_form($arg_kids->[1]);
+          return ['p-exists', ['unbox', $ref], $key];
+        }
+        elsif ($arg_node->{type} eq 'a_ref_acc') {
+          my $ref = $self->gen_node_form($arg_kids->[0]);
+          my $idx = $self->gen_node_form($arg_kids->[1]);
+          return ['p-exists-array', ['unbox', $ref], $idx];
+        }
+      }
+    }
+  }
+
+  # defined: sub/coderef defined check, and bareword-filehandle check.
+  if ($func_name eq 'defined' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($arg_node) eq 'PPI::Token::Symbol') {
+      my $sym = $arg_node->content();
+      if ($sym =~ /^&(.+)$/) {
+        my ($pkg, $name) = $self->_split_func_sym($1);
+        return ['p-sub-defined', "\"$pkg\"", "\"$name\""];
+      }
+    }
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'prefix_op') {
+      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids2 >= 2) {
+        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
+        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
+          my $inner = $self->gen_node_form($arg_kids2->[1]);
+          return ['p-coderef-defined-p', $inner];
+        }
+      }
+    }
+    if (ref($arg_node) eq 'PPI::Token::Word') {
+      my $name = $arg_node->content();
+      if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+        return ['p-defined-fh', "'$name"];
+      }
+    }
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'funcall') {
+      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids2 == 1) {
+        my $fn_node = $self->expr_o->get_a_node($arg_kids2->[0]);
+        if (ref($fn_node) eq 'PPI::Token::Word') {
+          my $name = $fn_node->content();
+          if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
+            return ['p-defined-fh', "'$name"];
+          }
         }
       }
     }
