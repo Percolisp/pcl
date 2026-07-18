@@ -4,12 +4,26 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `prefix_op` → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `prefix_op` + `postfix_op` → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), two
+**On branch `wip/s296-state-family` (atop the parked s296 state work), three
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change.
+
+**Third commit — `postfix_op` → `gen_postfix_op_form`.**  The postfix text
+emitter inspects generated operand text only for the `$#array++` arylen
+setter (`$operand =~ /^\(p-array-last-index …/`).  That is AST-detectable —
+the operand is either a `$#arr` `PPI::Token::ArrayIndex` leaf or a
+`$#{ EXPR }` prefix_op — so the new `_operand_is_arylen` predicate lets the
+form handler DECLINE just that case (before any side effect) while
+converting the rest structurally: the chained-comparison container
+(`$x < $y < $z` → `(p-chain-cmp term 'op …)`) and plain `++`/`--`
+(`(p-post++ …)` / `(p-post-- …)`, lvalue container e.g.
+`(p-post++ (p-gethash-box …))`).  Same verification (both pipelines
+byte-identical to HEAD across 111 files); 6 new `clform-01.t` guards.
+
+**Second commit — `prefix_op` → `gen_prefix_op_form` (PARTIAL coverage).**
 
 **Second commit — `prefix_op` → `gen_prefix_op_form` (PARTIAL coverage).**
 The prefix_op text emitter inspects the GENERATED operand TEXT to detect

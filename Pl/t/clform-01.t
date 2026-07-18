@@ -384,4 +384,30 @@ like($pf, qr/\(p-cast-@ \$ref\)/,          '@$ref → (p-cast-@ $ref)');
 like($pf, qr/\(p-backslash \$x\)/,         '\\$x declines → text (p-backslash $x)');
 like($pf, qr/\(p-pre\+\+ \$x\)/,           '++$x declines → text (p-pre++ $x)');
 
+# --- converted: gen_postfix_op_form (E2.1) ----------------------------------
+# plain ++/-- and the chained-comparison container; DECLINES $#array++ (arylen
+# setter form inspects operand text → deferred, AST-detected via _operand_is_arylen).
+
+my $po = Pl::Parser2->parse_code(<<'EOT');
+my $x = 5; my @a = (1, 2, 3); my %h = (k => 1);
+my $p1 = $x++;
+my $p2 = $x--;
+my $p3 = $h{k}++;
+my $p4 = $a[0]--;
+my $c = ($x < 3 < 10);
+$#a++;
+print "$p1$p2";
+EOT
+
+like($po, qr/\(p-post\+\+ \$x\)/,          '$x++ → (p-post++ $x)');
+like($po, qr/\(p-post-- \$x\)/,            '$x-- → (p-post-- $x)');
+like($po, qr/\(p-post\+\+ \(p-gethash-box %h "k"\)\)/,
+     '$h{k}++ → (p-post++ (p-gethash-box …)) lvalue container');
+like($po, qr/\(p-post-- \(p-aref-box \@a 0\)\)/,
+     '$a[0]-- → (p-post-- (p-aref-box …)) lvalue container');
+like($po, qr/\(p-chain-cmp \$x '< 3 '< 10\)/,
+     'chained comparison → (p-chain-cmp term \x27op …)');
+like($po, qr/\(let \(\(_prev \(p-array-last-index \@a\)\)\) \(p-set-array-length \@a \(1\+ _prev\)\) _prev\)/,
+     '$#a++ declines → arylen setter text form');
+
 done_testing();

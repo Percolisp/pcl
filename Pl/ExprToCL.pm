@@ -111,6 +111,7 @@ sub _build_form_handlers {
     'funcall'          => \&gen_funcall_form,
     'methodcall'       => \&gen_methodcall_form,
     'prefix_op'        => \&gen_prefix_op_form,
+    'postfix_op'       => \&gen_postfix_op_form,
     'ternary'          => \&gen_ternary,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
@@ -3530,6 +3531,61 @@ sub gen_postfix_op {
   }
 
   return "($cl_op $operand)";
+}
+
+# True when the node at ID renders to (p-array-last-index …) — i.e. it is a
+# `$#arr` ArrayIndex leaf or a `$#{ EXPR }` prefix_op.  AST-level equivalent of
+# the text check `$operand =~ /^\(p-array-last-index …/`, so a form emitter can
+# route the arylen ++/-- setter to the kept text path without generating the
+# operand first.
+sub _operand_is_arylen {
+  my ($self, $id) = @_;
+  my $n = $self->expr_o->get_a_node($id);
+  return 1 if ref($n) eq 'PPI::Token::ArrayIndex';
+  if ($self->expr_o->is_internal_node_type($n) && ($n->{type} // '') eq 'prefix_op') {
+    my $ck  = $self->expr_o->get_node_children($id);
+    my $opn = $ck && @$ck ? $self->expr_o->get_a_node($ck->[0]) : undef;
+    return 1 if $opn && $opn->content() eq '$#';
+  }
+  return 0;
+}
+
+# E2 form variant of gen_postfix_op.  Converts the chained-comparison container
+# and plain ++/--; DECLINES only `$#array++` / `$#{…}--` (the arylen setter form
+# inspects the operand's generated text — deferred with prefix_op's ++/--, and
+# AST-detectable via _operand_is_arylen so the decline happens before any side
+# effect).
+sub gen_postfix_op_form {
+  my ($self, $node, $node_id, $kids) = @_;
+
+  # Chained comparison ($x < $y < $z): odd kids >= 5, term/op/term/…/term.
+  if (scalar(@$kids) >= 5 && scalar(@$kids) % 2 == 1) {
+    my @parts;
+    for my $i (0 .. $#$kids) {
+      if ($i % 2 == 0) {
+        push @parts, $self->gen_node_form($kids->[$i]);                   # term
+      } else {
+        push @parts, "'" . $self->expr_o->get_a_node($kids->[$i])->content();  # 'op
+      }
+    }
+    return ['p-chain-cmp', @parts];
+  }
+
+  my $op_node = $self->expr_o->get_a_node($kids->[1]);
+  my $op      = $op_node->content();
+
+  return undef if ($op eq '++' || $op eq '--') && $self->_operand_is_arylen($kids->[0]);
+
+  my $needs_lvalue = ($op eq '++' || $op eq '--');
+  my $saved_lvalue = $self->lvalue_context;
+  $self->lvalue_context(1) if $needs_lvalue;
+  my $operand = $self->gen_node_form($kids->[0]);
+  $self->lvalue_context($saved_lvalue);
+
+  my $cl_op = ($op eq '++' || $op eq '--')
+            ? "p-post$op"
+            : $self->cl_name($op) . '-post';
+  return [$cl_op, $operand];
 }
 
 
