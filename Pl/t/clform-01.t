@@ -524,7 +524,33 @@ EOT
 like($bd, qr/\(p-my-= \$x \$y\)/,       'scalar = uses the native (p-my-= …) path');
 like($bd, qr/\(p-array-= \@a /,         '= array assign declines → (p-array-= …)');
 like($bd, qr/\(p-hash-= %h /,           '= hash assign declines → (p-hash-= …)');
-like($bd, qr/\(p-=~ \$x /,              '=~ declines → (p-=~ …) text');
-like($bd, qr/\(p-!~ \$x /,              '!~ declines → (p-!~ …) text');
+like($bd, qr/\(p-=~ \$x /,              '=~ still emits (p-=~ …)');
+like($bd, qr/\(p-!~ \$x /,              '!~ still emits (p-!~ …)');
+
+# --- converted: =~ / !~ context wrap (AST subst/tr detection) ----------------
+# match RHS gets a *wantarray* wrap pinned to the node context; s///-/tr///-RHS
+# (a scalar count) skips it — decided AST-level (RHS node type), not by grepping
+# the generated $right.
+my $rx = Pl::Parser2->parse_code(<<'EOT');
+my $x = "abc"; my @m;
+my $b  = $x =~ /a/;
+my $nb = $x !~ /z/;
+@m = $x =~ /(\w)(\w)/;
+$x =~ s/a/b/;
+$x =~ tr/a/b/;
+print "$b$nb";
+EOT
+like($rx, qr/\(let \(\(\*wantarray\* nil\)\) \(p-=~ \$x \(p-regex "\/a\/"\)\)\)/,
+     'scalar-ctx match → (let ((*wantarray* nil)) (p-=~ …))');
+like($rx, qr/\(let \(\(\*wantarray\* nil\)\) \(p-!~ \$x /,
+     'scalar-ctx !~ match → nil-wrapped');
+like($rx, qr/\(let \(\(\*wantarray\* t\)\) \(p-=~ \$x \(p-regex "\/\(\\\\w\)\(\\\\w\)\/"\)\)\)/,
+     'list-ctx match → (let ((*wantarray* t)) (p-=~ …))');
+like($rx, qr/\(p-=~ \$x \(p-subst "a" "b"\)\)/,
+     's/// RHS → (p-=~ … (p-subst …)) with NO wantarray wrap');
+like($rx, qr/\(p-=~ \$x \(p-tr "a" "b"\)\)/,
+     'tr/// RHS → (p-=~ … (p-tr …)) with NO wantarray wrap');
+unlike($rx, qr/\(let \(\(\*wantarray\* \w+\)\) \(p-=~ \$x \(p-subst/,
+     's/// RHS is never wantarray-wrapped');
 
 done_testing();

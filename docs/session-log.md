@@ -11,6 +11,16 @@ E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change.
 
+**Seventh commit — un-decline `=~`/`!~` in `gen_binary_op_form`.**  The only
+reason they declined was the text check `$right !~ /^\(p-(subst|tr|translate)/`
+(skip the *wantarray* wrap when the RHS is a scalar-returning s///-/tr///).
+That is exactly an AST test — the RHS is a `Regexp::Substitute` /
+`Regexp::Transliterate` node (the only leaves that emit those heads) — so the
+form emitter now converts `=~`/`!~`: a plain match RHS gets
+`(let ((*wantarray* nil/t)) (p-=~/p-!~ …))` for scalar/list context, a
+subst/tr RHS (or INHERIT/VOID) stays bare.  Only `=` remains declined.  Both
+pipelines byte-identical to HEAD; 6 new `clform-01.t` guards (143 total).
+
 **Sixth commit — `gen_binary_op` → `gen_binary_op_form` (the big one:
 EVERY operator).**  DECLINES the operand-text-inspecting families BEFORE
 any side effect (decision is purely the op string): `=` (assignment — its

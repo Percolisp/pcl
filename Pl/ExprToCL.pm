@@ -1275,19 +1275,19 @@ sub gen_binary_op {
   return "($cl_op $left $right)";
 }
 
-# E2 form variant of gen_binary_op.  DECLINES the operand-text-inspecting
-# operator families BEFORE any side effect (the decision is purely the op
-# string): `=` (assignment — its LHS-sigil / magic-lvalue / typeglob dispatch
-# greps the generated $left) and `=~`/`!~` (the s///-vs-match wantarray wrap
-# greps the generated $right).  Their AST-level rewrite is a later E2 step.
-# Everything else — arithmetic / comparison / logical / string / `.` / `x` /
-# `..` flip-flop+range / `isa` / use-integer — is AST + context only and
-# converts structurally, mirroring gen_binary_op branch-for-branch (same
-# generation ORDER, so the shared $g_flipflop_count and any gensyms match).
+# E2 form variant of gen_binary_op.  DECLINES only `=` (assignment) BEFORE any
+# side effect (decision is purely the op string): its LHS-sigil / magic-lvalue
+# / typeglob dispatch greps the generated $left, an AST-level rewrite left for a
+# later E2 step.  Everything else converts structurally, mirroring
+# gen_binary_op branch-for-branch (same generation ORDER, so the shared
+# $g_flipflop_count and any gensyms match): arithmetic / comparison / logical /
+# string / `.` / `x` / `..` flip-flop+range / `isa` / use-integer, and `=~`/`!~`
+# (whose s///-vs-match wantarray wrap is decided AST-level — RHS is a
+# Regexp::Substitute/Transliterate node — instead of grepping the generated $right).
 sub gen_binary_op_form {
   my ($self, $op, $kids, $node_id) = @_;
 
-  return undef if $op eq '=' || $op eq '=~' || $op eq '!~';
+  return undef if $op eq '=';
 
   my $cl_op = $self->cl_op_name($op);
 
@@ -1385,6 +1385,25 @@ sub gen_binary_op_form {
                                    ['pcl::%pcl-to-integer', ['to-number', $right]]]] if $op eq '^';
     return ['p-<<-int', $left, $right] if $op eq '<<';
     return ['p->>-int', $left, $right] if $op eq '>>';
+  }
+
+  # Match operators read *wantarray* at runtime to choose boolean (scalar) vs
+  # capture list (list); pin it to the node's static context so an enclosing
+  # list construct's *wantarray* can't leak in.  A subst/tr RHS returns a scalar
+  # count, so skip the wrapper for those — detected AST-level (the RHS is a
+  # Regexp::Substitute / Regexp::Transliterate node) rather than by grepping the
+  # generated $right for /^\(p-(subst|tr|translate)/.
+  if ($op eq '=~' || $op eq '!~') {
+    my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
+    my $rhs_is_subst_tr = ref($rhs_node) eq 'PPI::Token::Regexp::Substitute'
+                       || ref($rhs_node) eq 'PPI::Token::Regexp::Transliterate';
+    if (!$rhs_is_subst_tr) {
+      my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+      return ['let', ['list', ['list', '*wantarray*', 'nil']], [$cl_op, $left, $right]]
+        if $ctx == SCALAR_CTX;
+      return ['let', ['list', ['list', '*wantarray*', 't']], [$cl_op, $left, $right]]
+        if $ctx == LIST_CTX;
+    }
   }
 
   return [$cl_op, $left, $right];
