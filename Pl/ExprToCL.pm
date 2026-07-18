@@ -110,6 +110,7 @@ sub _build_form_handlers {
   return {
     'funcall'          => \&gen_funcall_form,
     'methodcall'       => \&gen_methodcall_form,
+    'ref_funcall'      => \&gen_ref_funcall_form,
     'prefix_op'        => \&gen_prefix_op_form,
     'postfix_op'       => \&gen_postfix_op_form,
     'tree_val'         => \&gen_tree_val_form,
@@ -3177,6 +3178,20 @@ sub gen_ref_funcall {
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
   return $self->_ctx_wrap($call, $ctx);
+}
+
+# E2 form variant of gen_ref_funcall.  No operand-text inspection; converts
+# fully.  Same ctx-wrap discipline as gen_methodcall_form / gen_funcall_form.
+sub gen_ref_funcall_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $ref  = $self->gen_node_form($kids->[0]);
+  my @args = map { $self->gen_node_form($kids->[$_]) } 1 .. $#$kids;
+  my $call = ['p-funcall-ref', $ref, @args];
+
+  my $ctx = $self->expr_o->get_node_context($node_id);
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  return $self->_ctx_wrap_form($call, $ctx);
 }
 
 

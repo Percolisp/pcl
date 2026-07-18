@@ -4,12 +4,40 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `prefix_op` + `postfix_op` + `tree_val` → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), four
+**On branch `wip/s296-state-family` (atop the parked s296 state work), five
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change.
+
+**Fifth commit — `ref_funcall` → `gen_ref_funcall_form`.**  Clean, no
+operand-text inspection: `$cref->(args)` / `&$cref(args)` →
+`(p-funcall-ref ref args…)` with the same ctx-wrap discipline as
+methodcall/funcall (`_ctx_wrap_form`; INHERIT / tail-position unwrapped).
+Both pipelines byte-identical to HEAD; 3 new `clform-01.t` guards.
+
+**Remaining E2 map (the big one is next):** `gen_binary_op` — every
+operator (`+`/`.`/`==`/`&&`/`x`/`..`/`isa`/… + assignment `=`/`+=`).  Two
+cautions logged for whoever converts it: (1) **dual representation** — a
+binary op reaches codegen both as a `PPI::Token::Operator`/`Word` WITH
+children (gen_node line ~411/417 → gen_binary_op) AND as an internal-node
+type (gen_internal_node_text line ~466 → gen_binary_op); the form wiring
+must cover BOTH the gen_node_form Operator-with-children branch and the
+gen_internal_node binary fallback.  (2) The `=` family does heavy LHS
+GENERATED-TEXT dispatch (`$left =~ /^%/`, `/^\(p-keys/`,
+`/^\(p-array-last-index/`, `/^\(p-make-typeglob/`, `/^\(p-dynamic-typeglob/`,
+`/^\(vector/`, `/^\(p-cast-[@%]/`, `/^\(p-(gethash|aref|aslice|hslice)/`,
+sigil `::@`/`::%`/`::$`) and `=~`/`!~` inspects RHS text
+(`/^\(p-(subst|tr|translate)/`).  Safe first step = decline `=`/`=~`/`!~`
+(known from the op string before any side effect) and convert the rest
+(arithmetic/compare/logical/string/`.`/`x`/`..` flip-flop+range/`isa`/
+use-integer — all AST+context only, zero operand-text inspection).  Then
+`glob` (negated-class text analysis), `anon_sub`, the regex leaves
+(`qr//`/`m//`/`s///`/`tr///` — non-idempotent side effects, excluded from
+the s297 leaf pass), and `inline_lambda` (E2 final).
+
+**Fourth commit — `tree_val` → `gen_tree_val_form`.**
 
 **Fourth commit — `tree_val` → `gen_tree_val_form`.**  The one text
 inspection is `$child =~ /\(p-=~\s/` in the single-child list-context

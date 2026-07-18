@@ -462,4 +462,19 @@ like($tv, qr/\(p-array-= \@m8 \(p-\.\. 10 12\)\)/,'single range child → bare (
 my $tve = Pl::Parser2->parse_code('my @e = (); print scalar(@e);');
 like($tve, qr/\(vector \)/, 'empty () declines → text (vector ) trailing space');
 
+# --- converted: gen_ref_funcall_form (E2.1) ---------------------------------
+my $rf = Pl::Parser2->parse_code(<<'EOT');
+my $c = sub { $_[0] + 1 };
+my $r1 = $c->(5);
+my @l = $c->(1, 2, 3);
+$c->();
+print $r1;
+EOT
+like($rf, qr/\(let \(\(\*wantarray\* nil\)\) \(p-funcall-ref \$c 5\)\)/,
+     'scalar-ctx code-ref call → (let ((*wantarray* nil)) (p-funcall-ref $c 5))');
+like($rf, qr/\(let \(\(\*wantarray\* t\)\) \(p-funcall-ref \$c 1 2 3\)\)/,
+     'list-ctx code-ref call → (let ((*wantarray* t)) (p-funcall-ref …))');
+like($rf, qr/\(let \(\(\*wantarray\* :void\)\) \(p-funcall-ref \$c\)\)/,
+     'void-ctx code-ref call → (let ((*wantarray* :void)) (p-funcall-ref $c))');
+
 done_testing();
