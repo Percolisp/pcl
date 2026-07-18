@@ -44,7 +44,7 @@ sub test_transpile {
     is(run_cl(join("\n", @cl)), run_perl($code), $name);
 }
 
-plan tests => 7;
+plan tests => 9;
 
 # Forward error-goto inside a sub, jumped to from inside an if branch.
 test_transpile('forward goto to error label inside sub',
@@ -78,3 +78,16 @@ test_transpile('top-level goto inside if',
 test_transpile('goto with use pragma in same block',
     'sub u { my $x = shift; unless ($x) { use warnings; goto FAIL; } return "ok"; FAIL: return "fail"; }'
   . ' print u(1), "|", u(0);');
+
+# ── #63 (s295b) top-level forward/backward gotos.  NOTE this file's harness
+# drives Pl::Parser (v1) DIRECTLY — the v2 catch-wrap lowering for gotos
+# from inside map/grep lambdas is guarded in transpile-test-01b.t instead
+# (its harness runs the default pipeline; v1 cannot compile that shape).
+
+# Plain top-level forward goto (no lambda).
+test_transpile('top-level forward goto skips statements',
+    'my $x = 1; goto SKIP; $x = 99; SKIP: print "x=$x\n";');
+
+# Backward goto through the same label machinery still re-executes.
+test_transpile('backward goto at top level still lexical',
+    'my $n = 0; AGAIN: $n++; goto AGAIN if $n < 3; print "n=$n\n";');

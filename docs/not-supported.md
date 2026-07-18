@@ -602,6 +602,15 @@ jump to a label held in a state variable.
 so a label name computed at runtime cannot be resolved to a `tagbody` tag.
 `p-goto-computed` is a no-op.  (`goto &sub` — the tail-call form — *is* supported.)
 
+**Scope note (s295):** this entry covers only the *computed-name* form.  `goto
+LABEL` with a **literal** label is fully supported — backward gotos as lexical
+`(go)` jumps, forward gotos (including from inside a `map`/`grep` lambda) via
+the throw-based `:pcl-goto-<label>` catch-wrap — see `ir-spec.md` §6.4.  That
+mechanism does not extend to computed names: backward targets are still lexical
+`tagbody` tags (not first-class), and the forward catch-wrap is placed at
+compile time per label, which requires knowing the target label at the goto
+site.
+
 **Rationale:** Runtime-computed `goto LABEL` has no clean CL target (tags are lexical,
 not first-class).  It is rare and discouraged in modern Perl.
 
@@ -979,6 +988,19 @@ caller's element, and a hole passed to a sub loses its position.
 **Rationale:** Emulating holes/defelem/SV-identity requires a sparse representation
 with per-element magical lvalues and Perl's SV/refcount lifecycle — a pervasive change
 to the box/vector model for behaviour real CPAN code does not rely on.
+
+> **Revisit sketch (s295b, if ever needed):** the faithful middle path is a *lazy
+> defelem-lite* — when `map`/`grep`/`foreach` flattening visits a nil (hole) slot,
+> mint a **hole-flagged box**, store it into the slot, and alias `$_` to it.  The
+> box then travels with `unshift`/`splice` (position tracking for free), `exists`
+> reports false while flagged, and a write clears the flag.  Rejected because every
+> placement of the flag taxes a hot path: a value sentinel costs every `unbox`, a
+> clear-on-write costs every `box-set`, a side-table can't see writes without
+> hooking `box-set` anyway, and the `p-magic-cell` route collides with the
+> box-set-FETCHes-tie-proxy semantics.  Beneficiaries are only the perl #132729
+> regression rows (array.t t189/t190 and the holes-to-sub family) — decision
+> re-confirmed with the user 2026-07-19: not worth a hot-path tax (CLAUDE.md §2,
+> speed wins).
 
 **Affected tests:** `perl-tests/array.t` — `&PL_sv_undef` exists/identity, `undef
 preserves identity`, `@_ alias to nonexistent elem`, `lazy element creation`,

@@ -111,7 +111,10 @@ ordered, integer-indexed). Elements are boxes (or `nil` for holes;
 elements of proven-safe intermediate lists may be raw values). Negative
 indices count from the end. Reading past the end yields `undef` without
 growing; **writing** past the end extends the vector, filling the gap with
-holes. `p-aref` (read) **unboxes scalar elements but returns reference
+holes.  Growing an array by **assigning to `$#a`** (`p-set-array-length`,
+incl. the `$#a++` idiom) likewise fills the new slots with holes (`nil`),
+never with fresh boxes — `exists $a[$i]` on the new slots must stay false
+(s295; a port that models holes as "slot absent" gets this for free). `p-aref` (read) **unboxes scalar elements but returns reference
 elements still boxed** (`p-aref-unbox-elem`) — so `==` on two references
 compares object identity, not content. An array in numeric/scalar position
 coerces to its length.
@@ -527,21 +530,70 @@ to string messages (documented divergence).
 
 ### 6.4 goto
 
-`goto &sub` (tail call) is supported — it re-dispatches with the current
-`@_`. Computed `goto LABEL` is a no-op (documented divergence); intra-sub
-`goto LABEL` is partial.
+Three source forms, three fates:
 
-**Standalone labels** (s287): a goto-target label statement (`again:`)
-lowers to `(tagbody :again <remainder of the enclosing block>)`, and
-`goto again` lowers to the lexical `(go :again)` — so **backward** gotos
-(the loop-retry idiom) work natively; a `my` jumped back over re-binds
-fresh (its `let` sits inside the tagbody), matching Perl.  Not lowered
-natively (v1 fallback via gate): a label in **value position** (tagbody
-yields `nil`) and a **forward** goto (its `(go)` is emitted before the
-tagbody opens).  A `goto LABEL` from inside a *lambda* (e.g. out of a
-`map` block) compiles to a `(go)` that cannot lexically reach the tag —
-**both pipelines currently crash on that shape** (compile error); the fix
-is a dynamic throw-based goto, tracked as task #63.
+- `goto &sub` (tail call) — supported; re-dispatches with the current `@_`.
+- `goto LABEL` to a **standalone label** in the same statement list —
+  fully lowered (backward and forward; details below).
+- **Computed** `goto EXPR` (label name in a variable) — no-op, documented
+  divergence (`docs/not-supported.md`).
+
+**The lowering has two regimes, chosen by the label's position relative to
+the goto.**  Both start from the same label lowering: a goto-target label
+statement (`again:`) turns the *remainder of its enclosing statement list*
+into `(tagbody :again <remainder>)`.
+
+**Backward goto — a lexical jump.**  A `goto again` textually *after* the
+label sits inside that tagbody and lowers to the lexical `(go :again)`:
+the loop-retry idiom is a plain local branch.  A `my` jumped back over
+re-binds fresh (its `let` sits inside the tagbody), matching Perl.
+*Porter mapping:* any local jump/loop construct — a `while(true)` +
+`continue`, a real label if the target has one.
+
+**Forward goto — a dynamic escape (s295, #63).**  A `goto fwd` textually
+*before* the label cannot be a lexical jump (the jump target does not
+exist yet at that point in the form), and Perl also allows the goto to
+fire from *inside a lambda run during the prefix* — e.g. out of a `map`
+block — unwinding whatever frames are between.  So the prefix statements
+(everything before the label) are wrapped in a **catch** whose tag names
+the label, and the goto lowers to a **throw** to that tag:
+
+```lisp
+;; goto fwd; print 1; fwd: print 2;
+(catch :pcl-goto-fwd
+  (throw :pcl-goto-fwd nil)      ; the goto site — may be nested arbitrarily
+  (p-print 1))                   ; skipped statements
+(tagbody :fwd (p-print 2))       ; the label and everything after it
+```
+
+Semantics of the pair: the throw **unwinds all frames up to the enclosing
+catch** (including any lambda/sub invocations entered during the prefix)
+and control falls out of the catch's end, straight into the tagbody — i.e.
+to the label.  The tag is the keyword `:pcl-goto-<label>`, one per label
+name.  *Porter mapping:* any exception/non-local-unwind mechanism — wrap
+the prefix in `try { … } catch (GotoFwd) {}` and compile the goto as
+`raise GotoFwd`; the fall-through after the handler IS the label.  The
+throw's value is irrelevant (always `nil`): the wrap is only applied in
+statement position, so nothing consumes the catch's value.
+
+Composition rules (what a port must reproduce):
+
+- **Multiple labels**: the wrap applies to the first standalone label of
+  the list and the lowering recurses on `[label..end]` — a second forward
+  label produces its own catch *inside the first label's tagbody*, so
+  sequential forward gotos nest naturally.
+- **Backward gotos are unaffected** by the catch machinery: only gotos
+  lowered *inside a wrapped prefix* consult the label→tag map and become
+  throws; a goto inside the tagbody remainder stays a lexical `(go)`.
+- **Scope guard**: the prefix is only catch-wrapped when it contains no
+  `my`/`state`/`local` declaration — wrapping would cut the declaration's
+  `let`/save scope short (the catch closes before the label).  Such
+  goto-before-declaration shapes are not lowered natively (v1 fallback via
+  gate), as is a label in **value position** (tagbody yields `nil`).
+
+Perl's own restrictions (may not jump *into* a construct, nor into a
+different sub) are assumed, not checked — PCL compiles valid Perl (§design
+rule 9).
 
 ## 7. Packages, variables, and OO
 

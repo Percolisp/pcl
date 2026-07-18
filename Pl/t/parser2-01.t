@@ -656,13 +656,18 @@ EOF
 
 # s287 — standalone label (a goto target) lowers to (tagbody :label …) over
 # the block remainder; `goto LABEL` reaches the tag as a lexical (go …).
-# Value position and forward gotos keep the whole-file gate.
+# s295 (#63) — a FORWARD goto no longer gates the file: the statements before
+# the label are wrapped in (catch :pcl-goto-LBL …) and the goto lowers to a
+# throw, so control transfers over the skipped prefix into the tagbody.
 {
   my $g = Pl::Parser2->parse_code(q[my $i; again: my @a=(1); goto again unless $i++;]);
   like($g, qr/\(tagbody :again/, 'standalone label opens a tagbody');
   like($g, qr/\(go :again\)/, 'goto LABEL lowers to (go :label)');
-  eval { Pl::Parser2->parse_code(q[goto fwd; print 1; fwd: print 2;]) };
-  like($@, qr/forward goto/, 'forward goto to a standalone label stays gated');
+  my $f = Pl::Parser2->parse_code(q[goto fwd; print 1; fwd: print 2;]);
+  like($f, qr/\(catch :pcl-goto-fwd \(throw :pcl-goto-fwd nil\) \(p-print 1\)\)/,
+       'forward goto: prefix catch-wrapped, goto lowers to throw');
+  like($f, qr/\(tagbody :fwd \(p-print 2\)\)/,
+       'forward goto: label opens the tagbody after the catch');
 }
 
 # s287 — list-form self-referential my init + chained declarators (array.t):

@@ -1,7 +1,15 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s295 (2026-07-18, Fable): census 104 v2-native / 7 gated,
+**State updated s295b+c (2026-07-18, Fable): census 105 v2-native / 6 gated,
+cache gen v2-36, v2 gate green (115 files / 4070 tests).  #63 dynamic goto
+SHIPPED: array.t de-gated at BETTER-than-v1 (167+15+13skip/195 complete run,
+strict-subset fail set) via the forward-goto catch-wrap (porter spec ir-spec
+§6.4), the our-alias requalify pre-pass, and the p-set-array-length nil-hole
+fix (runtime, both pipelines); PCL_V1 gate = known 7 + the 3 new v2-only #63
+guards; remaining gates: chdir, lfs, postfixderef, state, signatures,
+closure (see e1-remainder.md s295b+c update).**
+**Previous state s295 (2026-07-18, Fable): census 104 v2-native / 7 gated,
 cache gen v2-35, v2 gate green (115 files / 4064 tests).  M-F eval family
 SHIPPED: eval.t de-gated at BETTER-than-v1 (126+34/163, strict-subset fail
 set) and ref.t at exact parity, via the ALIAS rule — normative spec

@@ -5244,7 +5244,9 @@
 
 (defun p-set-array-length (arr new-last-index)
   "Set array length by setting $#array. Perl semantics:
-   - Growing: extends with undef-boxed elements
+   - Growing: extends with HOLES (nil slots — `$#a++` does not vivify:
+     `exists $a[$i]` is false for the new positions; a nil slot reads as
+     undef and boxes on first write, the runtime's standard hole state)
    - Shrinking: truncates (adjusts fill-pointer)
    - If arr is a scalar box containing undef, auto-vivifies an array ref inside it.
    Returns new-last-index."
@@ -5266,9 +5268,9 @@
          (cur-len (length a)))
     (cond
       ((> new-len cur-len)
-       ;; Grow: extend with undef boxes
+       ;; Grow: extend with holes (nil), NOT boxes — see docstring
        (dotimes (i (- new-len cur-len))
-         (vector-push-extend (make-p-box *p-undef*) a)))
+         (vector-push-extend nil a)))
       ((< new-len cur-len)
        ;; Shrink: adjust fill-pointer (minimum 0)
        (setf (fill-pointer a) (max 0 new-len))))
@@ -9370,7 +9372,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-35"
+(defparameter *pcl-cache-generation* "v2-36"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

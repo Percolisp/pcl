@@ -1,5 +1,29 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s295b+c, 2026-07-18, Fable 5): #63 dynamic goto SHIPPED —
+> census 105 native / 6 gated, gen v2-36.**  De-gated **array.t**
+> (167+15+13skip/195, COMPLETE run — BEATS v1's 166+16 with a
+> strict-subset fail set; remaining 15 = arylen-magic family + t178
+> lazy-refgen, all catalogued).  Three mechanisms: (a) **forward-goto
+> catch-wrap** — prefix statements before a standalone label wrapped in
+> `(catch :pcl-goto-LBL …)`, goto lowers to throw; works out of
+> map/grep lambdas (v1 crashes on that shape); porter spec **ir-spec
+> §6.4**.  (b) **our-alias requalify pre-pass**
+> (`_requalify_block_our_after_pkg_switch`) — `our @a` declared under an
+> in-block `package tmp;` keeps its uses homed to `@tmp::a` after a later
+> in-block package switch; conservative dies on my/our/state re-decl in
+> the switched region (`local` deliberately excluded — it never re-binds
+> lexically).  (c) **`p-set-array-length` grows with nil holes** (runtime,
+> both pipelines; `$#a++` must not vivify — ir-spec §2.3).  Plus an
+> ExprToCL LHS-dispatch fix: qualified-name slice assignment
+> (`@tmp::a[1..5] = …`) was misrouted to `p-array-=` because `(?:^|::)@`
+> matched inside the `(p-aslice tmp::@a …)` form — p-aslice|p-hslice added
+> to the p-gethash/p-aref guard.  Full sweep vs baseline: only array.t
+> moved.  **Remaining 6 gates: chdir (M-E #55), lfs (bless residue, #56),
+> postfixderef (#45), state + signatures (#56), closure (per-iteration
+> closure binding + own remaining decl gate).**  s295b+c detail in
+> `docs/session-log.md`.
+
 > **UPDATE (s295, 2026-07-18, Fable 5): M-F eval family SHIPPED — census
 > 104 native / 7 gated, gen v2-35.**  De-gated **eval.t** (126+34/163 —
 > BEATS v1's 121+39 with a strict-SUBSET fail set, fixes t27/28/81/84/97)

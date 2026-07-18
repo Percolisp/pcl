@@ -598,4 +598,17 @@ for my $i (1..3) {
 print eval(q{__PACKAGE__}), "\n";
 ');
 
+# s295b (#63/t183): `our` declared under an in-block `package` stays aliased
+# to the DECLARING package for the rest of the block — a later in-block
+# `package` switch must not re-home the bare name (requalify pre-pass).
+# Also guards `$#a++` extending with real HOLES (exists false), not boxes.
+test_transpile("our-alias survives an in-block package switch", '
+{
+    package tmp2; our @qa; $#qa++; $qa[1] = 5; package main;
+    my @b = @qa;
+    print 0+@b, ";", (exists $qa[0] ? "viv" : "hole"), ";", $qa[1], "\n";
+}
+print 0+@tmp2::qa, "\n";
+');
+
 done_testing();

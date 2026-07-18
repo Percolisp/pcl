@@ -1082,13 +1082,15 @@ sub gen_binary_op {
     } elsif ($left =~ /^\(p-cast-@ /) {
       # @$ref = (list): assign to a dereferenced array
       return "(p-array-deref-= $left $right)";
-    } elsif ($left =~ /^\(p-(?:gethash|aref) /) {
+    } elsif ($left =~ /^\(p-(?:gethash|aref|aslice|hslice) /) {
       # Single-element store: $h{k} = ... / $a[i] = ...  (via p-setf).  This
       # MUST precede the sigil regexes below: a package-qualified element form
       # like (p-gethash |Foo::Bar|::%H "x") contains "::%" (or "::@" for arrays)
       # which would otherwise be mis-detected as a whole %hash/@array LHS and
       # routed to p-hash-= / p-array-= (which expect a bare symbol place and
-      # crash on the gethash/aref form).
+      # crash on the gethash/aref form).  Same trap for slices with a
+      # package-qualified head: (p-aslice tmp::@a ...) = ... (array.t #8910
+      # block after the our-alias requalify pre-pass).
       return "(p-setf $left $right)";
     } elsif ($left =~ /(?:^|::)@/) {
       return "(p-array-= $left $right)";
@@ -1649,7 +1651,19 @@ sub gen_funcall {
         if (ref($label_node) eq 'PPI::Token::Word') {
           my $label = $label_node->content();
           if ($func_name eq 'goto') {
-            # goto LABEL → (go :label) within tagbody
+            # goto LABEL: a FORWARD goto being catch-wrapped by Parser2's
+            # #63 lowering (flag localized around the prefix lowering, so
+            # it is set exactly while this goto's region is lowered) must
+            # be a dynamic transfer — the tag's tagbody opens later, and
+            # the goto may sit inside a map/grep lambda, both unreachable
+            # by a lexical (go).  Backward gotos keep the (go): the
+            # enclosing (tagbody :label …) re-runs the jumped-to region.
+            my $parser = ($self->expr_o->can('has_parser')
+                          && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+            if ($parser && $parser->{_catch_labels}
+                && $parser->{_catch_labels}{$label}) {
+              return "(throw $parser->{_catch_labels}{$label} nil)";
+            }
             return "(go :$label)";
           }
           return "($cl_func $label)";

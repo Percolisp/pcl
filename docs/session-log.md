@@ -4,6 +4,63 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 295b+c (2026-07-18, Fable) — #63 dynamic goto LABEL SHIPPED + array.t DE-GATED at better-than-v1 (census 105/6); s295c verification pass found and fixed 3 latent defects in the s295b tree.
+
+**The feature (s295b):** (1) **catch-wrap forward-goto lowering** —
+`_lower_block` wraps the statements before a standalone label in
+`(catch :pcl-goto-LBL …)` when the prefix contains `goto LBL`, and the
+ExprToCL goto branch emits `(throw :pcl-goto-LBL nil)` while the
+`local`ized `_catch_labels` flag is set (backward gotos keep lexical
+`(go)`); works from inside map/grep LAMBDAS (dynamic extent) — the shape
+v1 cannot compile.  **Normative porter spec: ir-spec §6.4** (two regimes:
+backward = lexical jump, forward = dynamic escape; composition rules).
+(2) **`_requalify_block_our_after_pkg_switch`** pre-pass: `our` under an
+in-block `package tmp;` stays aliased to tmp::* after a later in-block
+`package main;` (array.t #8910 block) — family tokens in the switched
+region rewritten to `@tmp::a` spellings via _rewrite_var_uses;
+statement-climb for `(\our @a)`-embedded decls.  (3) **`p-set-array-length`
+grows with nil HOLES** (was undef-boxes — `$#a++` must not vivify; RUNTIME
+change, affects both pipelines; ir-spec §2.3 updated).  (4) skip-registry:
+stale array.t rows dropped; t189 pattern extended to the magical sibling
+t190 (only ever passed via the box-filled representation).  (5) guards +5
+across transpile-test-01b/04b + goto-label-01 (NOTE: goto-label-01's
+harness drives v1 DIRECTLY — lambda-goto guards live in 01b).
+
+**s295c verification catches (all would have shipped broken):**
+- **array.t was NOT actually de-gated**: `local` had been added to the
+  requalify pre-pass's re-declaration die AFTER the s295b sweep, and
+  array.t:639 `{local $a[3] = 12; …}` tripped it → silent whole-file v1.
+  Fix: `local` removed from the die list (it never re-binds a name
+  lexically; probe-verified vs perl that post-switch `local $a[2]`
+  operates on @tmp::a).  my/our/state stay.
+- **Qualified-slice-LHS miscompile** (would crash array.t at runtime):
+  `@tmp::a[1..5] = …` emitted `(p-array-= (p-aslice tmp::@a …) …)` — the
+  ExprToCL whole-array LHS regex `(?:^|::)@` matched the qualified name
+  INSIDE the p-aslice form.  Fix: p-aslice|p-hslice added to the existing
+  p-gethash/p-aref guard (→ p-setf).  Shared with v1; v1 corpus stays
+  byte-identical (v1 never requalifies).
+- **stderr pollution**: perl's deep-recursion warning from the per-decl
+  `_lower_scope`→`_lower_block` recursion on array.t's long block; fixed
+  with `no warnings 'recursion'` in _lower_scope (sibling already had it).
+- parser2-01.t t159 ("forward goto stays gated") asserted the OLD gate —
+  replaced with 2 assertions of the new catch/throw lowering (161→162).
+- skip-registry row 184 went stale under v2 (genuinely passes now):
+  dropped.  PCL_V1 array.t truthfully shows it as a 16th fail (v1 lacks
+  the requalify pass; v1 is deletion-bound).
+
+**Verified:** array.t v2-native **167+15+13skip/195 COMPLETE run** (s295b's
+recorded 166+15 was an incomplete 193/195 run) vs v1 166+16 — strict-subset
+fail set (remaining 15 = arylen family + t178 lazy-refgen, all registered
+fix-targets/not-supported).  corpus-diff v2: ONLY array.t differs;
+corpus-diff PCL_V1: byte-identical (111 files).  prove-core v2 gate: ALL
+PASS (115 files / 4070); PCL_V1 gate: known 7 v2-only fails + the 3 new
+v2-only #63 guards, as expected.  Full sweep vs c83a5d6 baseline: no
+regressions (runtime hole change verified against both pipelines).
+Census 105 native / 6 gated (remaining: chdir/lfs/postfixderef/state/
+signatures/closure).  Cache-gen v2-36.
+
+---
+
 ## Session 295 (2026-07-18, Fable) — E1 M-F SHIPPED: the ALIAS rule replaces the s294 registry; eval.t + ref.t DE-GATED (census 104/7); eval.t BEATS v1 by 5 tests with a strict-subset fail set; all gates green.
 
 **Design review verdict (user question: "simpler way to do evals?"):** the

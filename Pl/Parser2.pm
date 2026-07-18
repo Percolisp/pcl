@@ -111,6 +111,77 @@ sub _rewrite_unreachable_gotos {
   }
 }
 
+# Pre-pass (#63/t183): Perl's `our @a` binds the bare name to the variable of
+# the package CURRENT AT THE DECLARATION, for the rest of the enclosing
+# lexical scope — a later `package` statement in the same block does NOT
+# re-home it.  The emission resolves bare names by section package, so a use
+# after an in-block package switch would silently read the wrong package's
+# variable (array.t #8910 block: `package tmp; (\our @a)->$#*++;
+# package main; my @b = @a;` must copy tmp::a).  Requalify the uses in the
+# switched region to the declaring package's Perl spelling (`@a` → `@tmp::a`,
+# `$a[0]` → `$tmp::a[0]`, `$#a` → `$#tmp::a`), reusing the rename passes'
+# family-aware rewriter.  Narrow activation — everything else keeps today's
+# behavior: the our-decl must sit inside a Structure::Block, AFTER an
+# in-block `package` statement (an our that inherits the block's outer
+# package is out of scope here), with a later same-block package switch.
+# Conservative dies (→ whole-file v1) on shapes the flat rewrite cannot
+# honor: a re-declaration of the name, or a nested package statement, in the
+# switched region.
+sub _requalify_block_our_after_pkg_switch {
+  my ($self, $doc) = @_;
+  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
+                                 && $_[1]->content eq 'our' }) || [] }) {
+    my $stmt = $w->statement or next;
+    # An our embedded in a subexpression — `(\our @a)->$#*++` — reports the
+    # INNER Statement::Expression; climb to the statement whose parent is
+    # the enclosing block/document.
+    while ($stmt->parent && !($stmt->parent->isa('PPI::Structure::Block')
+                              || $stmt->parent->isa('PPI::Document'))) {
+      my $up = $stmt->parent->statement or last;
+      last if $up == $stmt;
+      $stmt = $up;
+    }
+    my $blk = $stmt->parent;
+    next unless $blk && $blk->isa('PPI::Structure::Block');
+    my $nx = $w->snext_sibling or next;
+    my @names = $nx->isa('PPI::Token::Symbol') ? ($nx->content)
+              : $nx->isa('PPI::Structure::List')
+                ? (map  { $_->content }
+                   grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $nx)
+              : ();
+    next unless @names && !grep { !/^[\$\@\%]\w+$/ } @names;
+    my $decl_pkg;
+    for (my $p = $stmt->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
+      next unless ref $p;
+      if ($p->isa('PPI::Statement::Package')) { $decl_pkg = $p->namespace; last }
+    }
+    next unless defined $decl_pkg && $decl_pkg =~ /^\w+(?:::\w+)*$/;
+    my ($cur, @switched) = ($decl_pkg);
+    for (my $p = $stmt->snext_sibling; $p; $p = $p->snext_sibling) {
+      next unless ref $p;
+      if ($p->isa('PPI::Statement::Package')) { $cur = $p->namespace; next }
+      next if $cur eq $decl_pkg;
+      die "Parser2 TODO: nested package statement after in-block our-alias\n"
+        if $p->isa('PPI::Node')
+        && $p->find_any(sub { $_[1]->isa('PPI::Statement::Package') });
+      push @switched, $p;
+    }
+    next unless @switched;
+    for my $canon (@names) {
+      (my $bare = $canon) =~ s/^[\$\@\%]//;
+      # local is deliberately NOT in this list: it never re-binds the bare
+      # name lexically — `local $a[3]` in the switched region still operates
+      # on the requalified `@tmp::a` element (probe-verified vs perl), so the
+      # flat rewrite stays correct.  Only my/our/state create new bindings.
+      die "Parser2 TODO: re-declaration of '$bare' after in-block our-alias\n"
+        if grep { $_->isa('PPI::Node')
+                  && $_->content =~ /\b(?:my|our|state)\b[^;=]*[\$\@\%]\Q$bare\E\b/ }
+           @switched;
+      $self->_rewrite_var_uses(\@switched, $canon, "${decl_pkg}::${bare}");
+    }
+  }
+}
+
 # Merge prototypes declared by every use/require in the document (nested ones
 # included — pack.t's `BEGIN { require './test.pl' }`) into the shared
 # Environment, mirroring v1's statement-time extraction (use →
@@ -256,6 +327,14 @@ sub parse {
   # a genuine forward goto (sort.t lines 809/813; v1 emits a naked (go :tag)
   # here that only survives because the calls sit under eval).
   $self->_rewrite_unreachable_gotos($doc);
+
+  # #63/t183: `our @a` declared inside a block AFTER an in-block `package`
+  # statement stays aliased to the DECLARING package's variable until the
+  # block ends — including across a later `package` switch in the same
+  # block.  The emission resolves bare names by the current section package,
+  # so uses in the switched region would silently read the WRONG package's
+  # variable.  Requalify them to the declaring package's spelling up front.
+  $self->_requalify_block_our_after_pkg_switch($doc);
 
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —
@@ -2959,6 +3038,10 @@ sub _reg_lex {
 # inside stop being "live" when it closes.
 sub _lower_scope {
   my ($self, $stmts, $vi, $tail_ctx) = @_;
+  # Same structural recursion as _lower_block (which already silences this):
+  # the per-declaration re-scan recurses once per decl statement, so a long
+  # block legitimately crosses perl's depth-100 report threshold (array.t).
+  no warnings 'recursion';
   my %saved     = %{ $self->{_live_lex} // {} };
   # Scope _let_bound_vars too (W3): a name declared inside this block must not
   # leak into the string-eval capture alist at a call site AFTER the block
@@ -3082,6 +3165,52 @@ sub _lower_block {
   my ($self, $stmts, $vi, $tail_ctx) = @_;
   my @s = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
   return () unless @s;
+
+  # -- #63 forward `goto LABEL` to a standalone label among these statements:
+  # a lexical `(go)` cannot reach a tag whose tagbody opens LATER, and Perl
+  # allows the goto to sit inside a map/grep block (a pseudo-block the jump
+  # may leave) — i.e. inside a LAMBDA here, where only a dynamic transfer
+  # works.  Lowering: wrap the statements before the label in
+  # (catch :pcl-goto-LBL …) falling through to the label point, and lower
+  # every `goto LBL` in that prefix as (throw :pcl-goto-LBL nil) — the
+  # `_catch_labels` flag on the fallback parser, consulted by ExprToCL's
+  # goto branch, is `local`ized around the prefix lowering so backward
+  # gotos (in the tagbody remainder) keep the lexical (go).  Only the FIRST
+  # standalone label of the list is considered (a later label's prefix
+  # would cross this one's tagbody; the recursion inside the tagbody
+  # re-scans).  The wrap is skipped — leaving the label case's forward-goto
+  # gate as the safety net — when the prefix contains a declaration/local
+  # statement (its let/save-restore scope must enclose the label, which the
+  # catch would cut) or when the goto textually precedes such a statement.
+  if (@s >= 2) {
+    my ($k, $lbl);
+    for my $i (1 .. $#s) {
+      next unless $s[$i]->isa('PPI::Statement::Compound');
+      my @lk = $s[$i]->schildren;
+      next unless @lk == 1 && $lk[0]->isa('PPI::Token::Label');
+      ($k, $lbl) = ($i, $lk[0]->content);
+      $lbl =~ s/\s*:\s*$//;
+      last;
+    }
+    if (defined $k && $lbl =~ /^\w+$/) {
+      my @prefix = @s[0 .. $k - 1];
+      my $has_goto = grep { $_->content =~ /\bgoto\s+\Q$lbl\E\b/ } @prefix;
+      my $scope_stmt = grep {
+        $_->isa('PPI::Statement::Variable') || $self->_is_local_stmt($_)
+      } @prefix;
+      if ($has_goto && !$scope_stmt) {
+        my $tag = ':pcl-goto-' . $lbl;
+        my @pre_forms = do {
+          local $self->fallback_parser->{_catch_labels}{$lbl} = $tag;
+          $self->_lower_block(\@prefix, $vi, undef);
+        };
+        $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
+        return (['catch', $tag, @pre_forms],
+                $self->_lower_block([@s[$k .. $#s]], $vi, $tail_ctx));
+      }
+    }
+  }
+
   my ($first, @rest) = @s;
   my $first_tail = @rest ? undef : $tail_ctx;
 
@@ -3496,10 +3625,16 @@ sub _lower_block {
       (my $lbl = $lk[0]->content) =~ s/\s*:\s*$//;
       die "Parser2 TODO: standalone label\n"
         if defined $tail_ctx || $lbl !~ /^\w+$/;
-      for (my $p = $first->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
-        die "Parser2 TODO: forward goto to a standalone label\n"
-          if ref $p && $p->isa('PPI::Node')
-          && $p->content =~ /\bgoto\s+\Q$lbl\E\b/;
+      # Forward gotos handled by the #63 catch-wrap are marked; anything
+      # else that textually targets this label from an earlier sibling is
+      # an unhandled forward shape (goto before a decl, goto from an outer
+      # level across an intervening label, …) → gate.
+      unless (delete $self->{_goto_caught}{ refaddr($first) }) {
+        for (my $p = $first->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
+          die "Parser2 TODO: forward goto to a standalone label\n"
+            if ref $p && $p->isa('PPI::Node')
+            && $p->content =~ /\bgoto\s+\Q$lbl\E\b/;
+        }
       }
       return (['tagbody', ':' . $lbl,
                $self->_lower_block(\@rest, $vi, undef)]);

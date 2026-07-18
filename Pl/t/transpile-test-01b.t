@@ -504,4 +504,22 @@ test_transpile("outer my enclosing same-name captured cell: evals see each scope
   print eval(q{$x}), "\n";
 ', "2\n1\n");
 
+# ── #63 (s295b): forward goto to a standalone label — lowered as
+# (catch :pcl-goto-LBL prefix…) + throw, so the jump works DYNAMICALLY from
+# inside a map/grep lambda (Perl: goto may leave a pseudo-block).
+# perl-tests/array.t #132729 shape; v1 cannot compile it (naked (go)).
+
+test_transpile("forward goto out of map lambda", '
+  my @a = (1, 2, 3); my @r;
+  map { push @r, $_; goto DONE; } @a;
+  DONE: print "r=@r\n";
+', "r=1\n");
+
+test_transpile("two sequential forward-goto labels from lambdas", '
+  map { goto L1; } (1);
+  L1: print "one\n";
+  map { goto L2; } (1);
+  L2: print "two\n";
+', "one\ntwo\n");
+
 done_testing();

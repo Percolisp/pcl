@@ -285,9 +285,8 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("exists returns true for &PL_sv_undef elem"
                  :alias
                  "exists of the shared &PL_sv_undef SV in an array — CL box model has no shared-undef SV. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
-                ("undef preserves identity in array"
-                 :alias
-                 "\\$_[0] aliased to an undef element must keep SV identity (\\$_[0] == \\undef) — box model copies. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ;; ("undef preserves identity in array" …) DROPPED s295b:
+                ;; passes since $#a++ extends with real holes (stale-detector).
                 ;; @_ aliasing to nonexistent (sparse) elements.
                 ("\\@_ alias to nonexistent"
                  :alias
@@ -296,22 +295,27 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("holes passed to sub do not lose their position"
                  :alias
                  "array holes (nonexistent elements) passed to a sub must keep their position — PCL has no defelem/hole. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
-                ("non-elems read from \\@a do not lose their position"
+                ("non-elems read from (magical )?\\@a do not lose their position"
                  :alias
-                 "reading a hole must not vivify or shift later elements — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'. (The 'magical @a' sibling is excluded.)")
+                 "reading a hole must not vivify or shift later elements — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'. (s295b: the 'magical @a' sibling is INCLUDED again — it only ever passed via the pre-hole-fix box-filled $#a++ representation.)")
                 ;; Lazy element creation / map-no-vivify — these share descriptions
                 ;; with PASSING siblings ('copying an array via =', extra refgen/map
                 ;; assertions), so keyed by current TAP number, not regex.
                 (174 :alias
                      "lazy element creation via sub call must autovivify an array hole — sparse arrays/defelem not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
-                (176 :alias
-                     "lazy element creation via refgen (\\$q[$_] address identity) — box model. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ;; (176 …) DROPPED s295b: passes since $#a++ extends with
+                ;; real holes (stale-detector).
                 (179 :alias
                      "lazy element creation via foreach alias — sparse arrays/defelem. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
-                (181 :alias
-                     "map {} over @a must not vivify holes — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
-                (184 :alias
-                     "map {} over a magical @a must not vivify holes — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'."))
+                ;; (181 …) DROPPED s295b: passes since $#a++ extends with
+                ;; real holes (stale-detector).
+                ;; (184 …) DROPPED s295c: passes under the default (v2)
+                ;; pipeline — the our-alias requalify pre-pass homes the
+                ;; magical @a to tmp::a, and the hole-preserving $#a++ makes
+                ;; map{} see the real holes (stale-detector).  PCL_V1=1 still
+                ;; fails this row (v1 has no requalify pass): a truthful
+                ;; v1-only divergence, acceptable on the deletion-bound v1.
+                )
 
 ;; NB qr.t test 6 ("my $b1=$b; bless $b" — $b1 should also be blessed) is the same
 ;; scalar-identity limitation, but its description "object is blessed" is shared with
