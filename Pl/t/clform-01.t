@@ -144,4 +144,21 @@ like($gt, qr/\(p-goto-sub \(p-get-coderef \$c\)\)/,
      'goto &$cref → (p-goto-sub (p-get-coderef $c))');
 like($gt, qr/\(p-goto-computed \$l\)/,        'goto EXPR → (p-goto-computed $l)');
 
+# --- converted: gen_funcall_form do family (E2.1) ---------------------------
+# do { BLOCK } (func_ref / inline_lambda) and do &CODE.  body_cl embeds as a
+# raw atom (structural inline_lambda conversion is E2's last step).
+
+my $do = Pl::Parser2->parse_code(<<'EOT');
+my $x = do { my $a = 1; $a + 2 };
+sub f { 9 } my $ref = \&f;
+my $z = do &$ref;
+print $x + $z;
+EOT
+
+like($do, qr/\(funcall \(lambda \(\)/,   'do { BLOCK } → (funcall (lambda () …))');
+like($do, qr/\(p-do \(p-get-coderef \$ref\)\)/,
+     'do &$cref → generic tail (p-do (p-get-coderef $ref))');
+like($do, qr/\(let \(\(\*wantarray\* nil\)\) \(funcall \(lambda/,
+     'do block gets its scalar-context wantarray bind');
+
 done_testing();

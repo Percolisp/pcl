@@ -40,8 +40,17 @@ forms `goto &sub` → `(p-goto-sub #'target)` and `goto &$cref` →
 branch), and the computed `goto EXPR` → `(p-goto-computed …)`.  Same
 corpus-diff verification both pipelines; 3 more `clform-01.t` guards (the
 LABEL shape is covered by corpus byte-parity — a standalone label hits an
-unrelated Parser2 statement gate in a unit `parse_code`).  Remaining
-funcall declines: `do eval grep map` (grep/map = inline_lambda, the
+unrelated Parser2 statement gate in a unit `parse_code`).
+
+Fourth commit — `do` (declines now `eval grep map`): the `do { BLOCK }`
+special branch (func_ref → `(funcall …)`, anon_sub → `(progn …)`,
+inline_lambda → `(progn <body_cl-as-raw>)`, each with its `_ctx_wrap_form`)
+PLUS the `do FILE` generic-tail ctx-wrap case (the form tail was missing
+the explicit `do` case the text tail has at what is now line ~2680).
+`body_cl` embeds as a raw atom — the structural inline_lambda conversion is
+E2's LAST step; this just moves the funcall node to a form.  Same
+corpus-diff verification both pipelines; 3 more `clform-01.t` guards.
+Remaining funcall declines: `eval grep map` (grep/map = inline_lambda, the
 hairiest, LAST; eval ties to E3 eval-mode).
 
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex

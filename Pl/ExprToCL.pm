@@ -1213,7 +1213,7 @@ sub gen_array_str_interp {
 # the form handler declines them (before any side effect) so the text
 # emitter below runs unchanged.  Shrink this list as branches convert.
 my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
-  do eval grep map
+  eval grep map
 );
 
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
@@ -1360,6 +1360,35 @@ sub gen_funcall_form {
 
     # goto EXPR (computed) — no-op stub (CL tags are not first-class).
     return ['p-goto-computed', $self->gen_node_form($kids->[1])];
+  }
+
+  # do { BLOCK } / do &CODE — inline evaluation, returns last value.  (do FILE
+  # has a non-internal-node arg and falls through to the generic tail, which
+  # carries the do ctx-wrap.)
+  if ($func_name eq 'do' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node)) {
+      if ($arg_node->{type} eq 'func_ref') {
+        my $func_ref = $self->gen_node_form($kids->[1]);
+        my $ctx = $self->expr_o->get_node_context($node_id);
+        return ['funcall', $func_ref] if $ctx == INHERIT_CTX;
+        return $self->_ctx_wrap_form(['funcall', $func_ref], $ctx);
+      }
+      elsif ($arg_node->{type} eq 'anon_sub') {
+        my $block_kids = $self->expr_o->get_node_children($kids->[1]);
+        my @body_parts = map { $self->gen_node_form($_) } @$block_kids;
+        return ['progn', @body_parts];
+      }
+      elsif ($arg_node->{type} eq 'inline_lambda') {
+        # do { BLOCK } parsed as inline_lambda: body_cl is a pre-generated CL
+        # string — embed it as a raw atom (structural conversion is E2's LAST
+        # step); the funcall node itself is now form-producing.
+        my $body = $arg_node->{body_cl} // 'nil';
+        my $ctx  = $self->expr_o->get_node_context($node_id);
+        return ['progn', Pl::CLForm::raw($body)] if $ctx == INHERIT_CTX;
+        return $self->_ctx_wrap_form(['progn', Pl::CLForm::raw($body)], $ctx);
+      }
+    }
   }
 
   # bless(REF, CLASSNAME): bareword class → string; default = current pkg.
@@ -1804,6 +1833,12 @@ sub gen_funcall_form {
   # join always evaluates its list arguments in list context.
   if ($func_name eq 'join') {
     return ['let', ['list', ['list', '*wantarray*', 't']], $call];
+  }
+
+  # do FILE: same ctx-wrap as a user sub (do is a built-in, so it needs an
+  # explicit case ahead of the built-in list-only default below).
+  if ($func_name eq 'do') {
+    return $self->_ctx_wrap_form($call, $ctx);
   }
 
   # User sub calls: always bind *wantarray*; built-ins only in list context.
