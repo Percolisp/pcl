@@ -484,6 +484,21 @@ sub gen_leaf_form {
   my ($self, $node) = @_;
   my $ref = ref($node);
 
+  # Symbol / Magic — the frontier's heaviest leaves ($x/@a/%h, magic vars,
+  # package-qualified, renamed).  gen_leaf's side effects here are idempotent
+  # (referenced-package / caret-global set-adds, read-only rename lookups), so
+  # calling it to obtain the text is safe: a GENUINE ATOM (never starts with
+  # "(") becomes a native CLForm atom; a COMPOUND form (stash / typeglob /
+  # &sub / errno — all "(…)") declines, and the idempotent raw re-run through
+  # gen_node keeps v1's exact bytes.  Structuring those few compound cases is
+  # later leaf work.  Reuses gen_leaf rather than duplicating its ~100 lines
+  # of sigil/package regexes (CLAUDE.md §11).
+  if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
+    my $s = $self->gen_leaf($node);
+    return undef if $s =~ /^\(/;   # compound → decline to raw (safe, idempotent)
+    return $s;                     # genuine atom
+  }
+
   if ($ref =~ /^PPI::Token::Number/) {
     my $num = $node->content();
 

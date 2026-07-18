@@ -78,10 +78,21 @@ atoms stay atoms, radix literals → `#x`/`#b`/`#o` (signed → `(- …)`),
 version → `(p-version-string …)`, float overflow → `(p-double-inf [t])`.
 Pure, no side effects.  Reached only through a CONVERTED parent
 (funcall/ternary/… call `gen_node_form` on a Number child).  Same
-corpus-diff verification both pipelines; 10 `clform-01.t` guards.  Next
-leaf types: `sym`/`magic` (the biggest frontier, but with idempotent
-side-effect sub-cases — stash/typeglob/`&foo`/caret/our-qualify — to port
-faithfully) and the `Quote`/`Word` families.
+corpus-diff verification both pipelines; 10 `clform-01.t` guards.
+
+Seventh commit — **`sym`/`magic` leaves** (the biggest frontier: `sym:@`
+2463, `magic:$_` 805, `sym:%` 497, `magic:$@` 399, `sym:$` 189).  The
+reuse-not-duplicate design (CLAUDE.md §11): `gen_leaf`'s Symbol/Magic side
+effects are all **idempotent** (referenced-package / caret-global set-adds,
+read-only rename lookups), so `gen_leaf_form` *calls* `gen_leaf` to get the
+text — a genuine atom (never `(…)`) becomes a native CLForm atom; a
+compound form (stash / typeglob / `&sub` / errno, all `(…)`) declines, and
+the idempotent `raw` re-run keeps v1's bytes.  No duplication of the ~100
+lines of sigil/package regexes; the compound handful is later structural
+work.  Same corpus-diff verification both pipelines; 5 `clform-01.t`
+guards.  Next leaf types: `Quote`/`Word` (pure), then the compound sym/leaf
+holdouts and the internal-node frontier (`arr_init`/`hash_init`/`a_acc`/
+`h_acc`/`progn`/`tree_val`) via `form_handlers`.
 
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text

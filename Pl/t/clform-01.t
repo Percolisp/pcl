@@ -204,4 +204,22 @@ like($nm, qr/\(pl-f \(p-double-inf\)\)/, 'float overflow → (p-double-inf)');
 like($nm, qr/\(pl-f \(p-double-inf t\)\)/, 'negative float overflow → (p-double-inf t)');
 like($nm, qr/\(pl-f \(p-version-string 1 2 3\)\)/, 'v-string → (p-version-string 1 2 3)');
 
+# --- converted: gen_leaf_form Symbol/Magic family (E2.1 leaf) ----------------
+# Reached through a CONVERTED parent (funcall): genuine atoms become native
+# atoms; compound sym forms (stash/typeglob/&sub) decline to raw (still v1
+# bytes — asserted indirectly: the atom cases carry the frontier weight).
+
+my $sm = Pl::Parser2->parse_code(<<'EOT');
+sub f { $_[0] }
+my $x = 5; my @a = (1); my %h = (k => 1);
+my $r = f($x) + f($a[0]) + f($h{k}) + f($@) + f($.);
+print $r;
+EOT
+
+like($sm, qr/\(pl-f \$x\)/,             'scalar symbol atom: (pl-f $x)');
+like($sm, qr/\(pl-f \(p-aref \@a 0\)\)/, 'array-access child still lowers');
+like($sm, qr/\(pl-f \(p-gethash %h "k"\)\)/, 'hash-access child still lowers');
+like($sm, qr/\(pl-f \$\@\)/,            'magic $@ atom: (pl-f $@)');
+like($sm, qr/\(pl-f \|\$\.\|\)/,        'magic $. → |$.| atom');
+
 done_testing();
