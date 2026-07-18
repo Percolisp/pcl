@@ -90,9 +90,25 @@ compound form (stash / typeglob / `&sub` / errno, all `(…)`) declines, and
 the idempotent `raw` re-run keeps v1's bytes.  No duplication of the ~100
 lines of sigil/package regexes; the compound handful is later structural
 work.  Same corpus-diff verification both pipelines; 5 `clform-01.t`
-guards.  Next leaf types: `Quote`/`Word` (pure), then the compound sym/leaf
-holdouts and the internal-node frontier (`arr_init`/`hash_init`/`a_acc`/
-`h_acc`/`progn`/`tree_val`) via `form_handlers`.
+guards.
+
+Eighth commit — **`Quote::`/`HereDoc`/`Word`/`Operator` leaves** (frontier
+`quote-double` 1009 + friends), same `gen_leaf`-reuse pattern (excludes
+`QuoteLike::` qr//, whose gen_leaf has non-idempotent regex side effects).
+**Latent-bug fix required and included:** `gen_node_form` never mirrored
+`gen_node`'s *binary-op* case — a `PPI::Token::Operator`/`Word` **with
+children** is a binary op (`gen_binary_op`), not a leaf.  It was masked
+while the leaf branch fell through to `raw(gen_node)`; the Operator-leaf
+conversion exposed it (`grep $_ > 2` collapsed to `(lambda ($_) >)`, 86
+files diverged in the first corpus-diff).  Fix: only call `gen_leaf_form`
+for a node with **no children** (`!@$kids`) — so operator/word binary-op
+nodes stay on the `gen_node`/`gen_binary_op` path, and `gen_node_form` now
+faithfully mirrors `gen_node`'s dispatch (also protects every future leaf
+conversion).  Corpus-diff clean both pipelines after the fix; 4
+`clform-01.t` guards.  Next: the compound sym/leaf holdouts
+(stash/typeglob/`&sub`/qr//) and the internal-node frontier
+(`arr_init`/`hash_init`/`a_acc`/`h_acc`/`progn`/`tree_val`) via
+`form_handlers`.
 
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text

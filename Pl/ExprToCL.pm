@@ -466,11 +466,15 @@ sub gen_node_form {
     }
     return Pl::CLForm::raw($self->gen_internal_node_text($node, $node_id, $kids));
   }
-  # Leaf: a converted leaf emitter (gen_leaf_form) returns a CLForm; anything
-  # not yet converted declines (undef) and the leaf's v1 text is embedded as a
-  # raw atom.  gen_leaf's leaf side effects (idempotent package/caret set-adds,
-  # read-only rename lookups) make the decline→re-run through gen_node safe.
-  if (defined(my $lf = $self->gen_leaf_form($node))) {
+  # A PPI::Token::Operator/Word WITH children is a binary op (gen_node's
+  # gen_binary_op case), NOT a leaf — leave those on the raw(gen_node) path.
+  # Only a genuine leaf (no children) goes to gen_leaf_form: a converted leaf
+  # emitter returns a CLForm; anything not yet converted declines (undef) and
+  # the leaf's v1 text is embedded as a raw atom.  gen_leaf's leaf side effects
+  # (idempotent package/caret set-adds, read-only rename lookups) make the
+  # decline→re-run through gen_node safe.
+  my $kids = $self->expr_o->get_node_children($node_id) || [];
+  if (!@$kids && defined(my $lf = $self->gen_leaf_form($node))) {
     return $lf;
   }
   return Pl::CLForm::raw($self->gen_node($node_id));
@@ -497,6 +501,23 @@ sub gen_leaf_form {
     my $s = $self->gen_leaf($node);
     return undef if $s =~ /^\(/;   # compound → decline to raw (safe, idempotent)
     return $s;                     # genuine atom
+  }
+
+  # Pure atom leaves: string literals (Quote::Single/Double/Literal/Interpolate
+  # — NOT QuoteLike:: qr//, whose gen_leaf has non-idempotent regex side
+  # effects and returns a compound form), heredocs, barewords, and operator
+  # tokens.  gen_leaf for these is pure and its output is always an atom (a
+  # "…" literal, a bareword, a number, an operator string), so it never starts
+  # with "(" — the guard below is belt-and-braces only, and there is no
+  # double-run risk because these never decline.  An interpolated string is a
+  # string_concat NODE (already converted), never one of these leaves.
+  if ($ref =~ /^PPI::Token::Quote::/
+      || $ref eq 'PPI::Token::HereDoc'
+      || $ref eq 'PPI::Token::Word'
+      || $ref eq 'PPI::Token::Operator') {
+    my $s = $self->gen_leaf($node);
+    return undef if $s =~ /^\(/;
+    return $s;
   }
 
   if ($ref =~ /^PPI::Token::Number/) {

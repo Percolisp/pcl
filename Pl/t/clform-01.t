@@ -222,4 +222,18 @@ like($sm, qr/\(pl-f \(p-gethash %h "k"\)\)/, 'hash-access child still lowers');
 like($sm, qr/\(pl-f \$\@\)/,            'magic $@ atom: (pl-f $@)');
 like($sm, qr/\(pl-f \|\$\.\|\)/,        'magic $. → |$.| atom');
 
+# --- converted: gen_leaf_form Quote/HereDoc/Word/Operator (E2.1 leaf) --------
+# Pure atom leaves through a converted parent become native atoms.
+
+my $ql = Pl::Parser2->parse_code(<<'EOT');
+sub f { $_[0] }
+my $r = f("hello") . f('single') . f(qq{plain}) . f(q{lit});
+print $r;
+EOT
+
+like($ql, qr/\(pl-f "hello"\)/,  'double-quote literal → "hello" atom');
+like($ql, qr/\(pl-f "single"\)/, 'single-quote literal → "single" atom');
+like($ql, qr/\(pl-f "plain"\)/,  'qq{} literal → "plain" atom');
+like($ql, qr/\(pl-f "lit"\)/,    'q{} literal → "lit" atom');
+
 done_testing();
