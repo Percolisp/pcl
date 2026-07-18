@@ -25,6 +25,14 @@ form-producing in `gen_funcall_form` and removed them from
 - `defined` — `&sub` (`p-sub-defined`), `&{…}` (`p-coderef-defined-p`), and
   bareword filehandle (`p-defined-fh`)
 
+Second commit — the lvalue family `undef` / `chop` / `chomp` (declines now
+`goto do eval grep map`): added the `%lvalue_funcs`/`$needs_lvalue`
+lvalue-context thread to the form generic tail (element args get the box,
+e.g. `undef $h{k}` → `(p-undef (p-gethash-box …))`) and the `undef &sub` →
+`(p-undef-sub …)` branch.  chop/chomp have no special branch — they ride
+the generic tail with lvalue context.  Same corpus-diff verification (both
+pipelines identical to HEAD across 111 files); 8 more `clform-01.t` guards.
+
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
 anyway), structural children use `gen_node_form`.  Non-matching shapes fall

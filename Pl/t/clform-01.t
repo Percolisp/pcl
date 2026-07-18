@@ -104,4 +104,26 @@ like($ix, qr/\(p-delete \(unbox \$r\) "x"\)/, 'delete $r->{k} → (p-delete (unb
 like($ix, qr/\(p-sub-defined "main" "foo"\)/, 'defined &sub → (p-sub-defined pkg name)');
 like($ix, qr/\(p-defined-fh 'FILE\)/,         'defined BAREWORD → (p-defined-fh name)');
 
+# --- converted: gen_funcall_form lvalue family (E2.1) ------------------------
+# undef / chop / chomp — args generated under lvalue context (element args get
+# the box), plus undef &sub.
+
+my $lv = Pl::Parser2->parse_code(<<'EOT');
+my %h = (a => 1); my @a = (1, 2, 3); my $s = "x\n"; my $x = 5;
+undef $h{a}; undef $a[0]; undef $x; undef &foo; undef;
+chomp $s; chop $s; chomp @a;
+print $s;
+EOT
+
+like($lv, qr/\(p-undef \(p-gethash-box %h "a"\)\)/,
+     'undef $h{k} → box (lvalue context)');
+like($lv, qr/\(p-undef \(p-aref-box \@a 0\)\)/,
+     'undef $a[i] → box (lvalue context)');
+like($lv, qr/\(p-undef \$x\)/,           'undef $scalar → (p-undef $x)');
+like($lv, qr/\(p-undef-sub "main" "foo"\)/, 'undef &sub → (p-undef-sub pkg name)');
+like($lv, qr/\(p-undef\)/,               'bare undef → (p-undef)');
+like($lv, qr/\(p-chomp \$s\)/,           'chomp $s → (p-chomp $s)');
+like($lv, qr/\(p-chop \$s\)/,            'chop $s → (p-chop $s)');
+like($lv, qr/\(p-chomp \@a\)/,           'chomp @a → (p-chomp @a)');
+
 done_testing();

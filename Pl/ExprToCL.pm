@@ -1213,7 +1213,7 @@ sub gen_array_str_interp {
 # the form handler declines them (before any side effect) so the text
 # emitter below runs unchanged.  Shrink this list as branches convert.
 my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
-  goto do eval grep map undef chop chomp
+  goto do eval grep map
 );
 
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
@@ -1629,6 +1629,18 @@ sub gen_funcall_form {
     }
   }
 
+  # undef &funcname — undefine a sub (keeps it in the exists table).
+  if ($func_name eq 'undef' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if (ref($arg_node) eq 'PPI::Token::Symbol') {
+      my $sym = $arg_node->content();
+      if ($sym =~ /^&(.+)$/) {
+        my ($pkg, $name) = $self->_split_func_sym($1);
+        return ['p-undef-sub', "\"$pkg\"", "\"$name\""];
+      }
+    }
+  }
+
   # ---- from here on: the text emitter's generic tail, form-shaped ----
 
   my $proto = $self->environment ? $self->environment->get_prototype($func_name) : undef;
@@ -1647,6 +1659,12 @@ sub gen_funcall_form {
     && $proto->{min_params} >= 0
     && $n_call_args >= $proto->{min_params};
 
+  # Functions that modify their arguments (chop/chomp/undef) need l-value
+  # access: undef $hash{k} / undef $arr[i] must receive the box, not the
+  # unboxed value.  Same rule as the text emitter's %lvalue_funcs.
+  my %lvalue_funcs = map { $_ => 1 } qw(chop chomp undef);
+  my $needs_lvalue = $lvalue_funcs{$func_name} // 0;
+
   # Arguments are NOT the tail call: clear tail_position around their
   # generation so they get their own annotated context.
   my $saved_tail = $self->environment ? $self->environment->tail_position : 0;
@@ -1661,7 +1679,10 @@ sub gen_funcall_form {
                          && $ref_params[$param_idx] eq '$');
     $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
 
+    my $saved_lvalue = $self->lvalue_context;
+    $self->lvalue_context(1) if $needs_lvalue;
     my $arg = $self->gen_node_form($kids->[$i]);
+    $self->lvalue_context($saved_lvalue);
 
     if ($impose_scalar) {
       my $an = $self->expr_o->get_a_node($kids->[$i]);
