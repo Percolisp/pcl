@@ -117,6 +117,12 @@ sub _build_form_handlers {
     'hash_init'        => \&gen_hash_init_form,
     'a_acc'            => \&gen_array_access_form,
     'h_acc'            => \&gen_hash_access_form,
+    'a_ref_acc'        => \&gen_array_ref_access_form,
+    'h_ref_acc'        => \&gen_hash_ref_access_form,
+    'slice_a_acc'      => \&gen_array_slice_form,
+    'slice_h_acc'      => \&gen_hash_slice_form,
+    'kv_slice_h_acc'   => \&gen_kv_hash_slice_form,
+    'kv_slice_a_acc'   => \&gen_kv_array_slice_form,
   };
 }
 
@@ -3667,6 +3673,124 @@ sub _slice_in_context {
   return "(p-list-scalar $slice_cl)"  if $ctx == SCALAR_CTX;
   return "(p-slice-result $slice_cl)" if $ctx == INHERIT_CTX;
   return $slice_cl;  # LIST_CTX / VOID_CTX: keep the full slice vector
+}
+
+# E2 form variant of _slice_in_context (same context rule, CLForm in/out).
+sub _slice_in_context_form {
+  my ($self, $slice_form, $node_id) = @_;
+  my $ctx = defined $node_id ? $self->expr_o->get_node_context_raw($node_id) : undef;
+  return $slice_form unless defined $ctx;
+  return ['p-list-scalar',  $slice_form] if $ctx == SCALAR_CTX;
+  return ['p-slice-result', $slice_form] if $ctx == INHERIT_CTX;
+  return $slice_form;
+}
+
+# --- E2 form variants of the access / slice family --------------------------
+
+# $ref->[i] → (p-aref-deref ref i) / (p-aref-deref-box …) in lvalue context.
+sub gen_array_ref_access_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $is_list_subscript =
+      $self->expr_o->node_tree->get_metadata($node_id, 'list_ctx_subscript');
+  my $child0_node = $self->expr_o->get_a_node($kids->[0]);
+  my $paren_scalar_base =
+      !$is_list_subscript && $self->_is_paren_scalar_base($kids->[0]);
+  if (!$paren_scalar_base
+      && ($is_list_subscript
+          || ($self->expr_o->is_internal_node_type($child0_node)
+              && $child0_node->{type} eq 'progn'))) {
+    $self->expr_o->set_node_context($kids->[0], 1);
+  }
+  my $ref = $paren_scalar_base
+            ? Pl::CLForm::raw($self->_gen_scalar_deref_base($kids->[0]))
+            : $self->gen_node_form($kids->[0]);
+  my $idx = $self->gen_node_form($kids->[1]);
+  my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
+  return [$func, $ref, $idx];
+}
+
+# $ref->{k} → (p-gethash-deref ref k) / (p-gethash-deref-box …); multi-key
+# $ref->{a,b} → (p-join |$;| (vector …)).
+sub gen_hash_ref_access_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $ref = $self->_is_paren_scalar_base($kids->[0])
+            ? Pl::CLForm::raw($self->_gen_scalar_deref_base($kids->[0]))
+            : $self->gen_node_form($kids->[0]);
+  my $key_node = $self->expr_o->get_a_node($kids->[1]);
+  my $key;
+  if ($self->expr_o->is_internal_node_type($key_node)
+      && $key_node->{type} eq 'progn') {
+    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
+    if (@$key_kids > 1) {
+      my @parts = map { $self->gen_node_form($_) } @$key_kids;
+      $key = ['p-join', '|$;|', ['vector', @parts]];
+    } else {
+      $key = $self->gen_node_form($kids->[1]);
+    }
+  } else {
+    $key = $self->gen_node_form($kids->[1]);
+  }
+  my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
+  return [$func, $ref, $key];
+}
+
+# @a[i,j] → (p-aslice @a i j), context-wrapped.
+sub gen_array_slice_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef if @$kids < 2;   # empty slice: text emits "(p-aslice @a )" (space)
+  my $arr = $self->gen_node_form($kids->[0]);
+  my @indices;
+  for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
+    push @indices, $self->gen_node_form($kids->[$i]);
+  }
+  return $self->_slice_in_context_form(['p-aslice', $arr, @indices], $node_id);
+}
+
+# @h{a,b} → (p-hslice %h a b), context-wrapped (bare Symbol @→% sigil rewrite).
+sub gen_hash_slice_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef if @$kids < 2;   # empty slice: text emits "(p-hslice %h )" (space)
+  my $hash_node = $self->expr_o->get_a_node($kids->[0]);
+  my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol';
+  my $hash = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
+  if ($is_bare && $hash =~ /(?:^|::)\@/) {
+    $hash =~ s/(^|::)\@/${1}%/;
+  }
+  my @keys;
+  for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
+    push @keys, $self->gen_node_form($kids->[$i]);
+  }
+  return $self->_slice_in_context_form(['p-hslice', $hash, @keys], $node_id);
+}
+
+# %h{a,b} → (p-kv-hslice %h a b)  (no context wrap).
+sub gen_kv_hash_slice_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef if @$kids < 2;   # empty slice: text emits "(p-kv-hslice %h )" (space)
+  my $hash = $self->gen_node_form($kids->[0]);
+  my @keys;
+  for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
+    push @keys, $self->gen_node_form($kids->[$i]);
+  }
+  return ['p-kv-hslice', $hash, @keys];
+}
+
+# %a[i,j] → (p-kv-aslice @a i j)  (%→@ sigil rewrite; $ref base → (unbox …)).
+sub gen_kv_array_slice_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef if @$kids < 2;   # empty slice: text emits "(p-kv-aslice @a )" (space)
+  my $arr = $self->gen_node($kids->[0]);
+  $arr =~ s/(^|::)\%/${1}\@/;
+  my $arr_form = $arr =~ /^\$/ ? ['unbox', $arr] : $arr;
+  my @indices;
+  for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
+    push @indices, $self->gen_node_form($kids->[$i]);
+  }
+  return ['p-kv-aslice', $arr_form, @indices];
 }
 
 

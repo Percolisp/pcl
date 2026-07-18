@@ -275,4 +275,26 @@ like($ac, qr/\(p-gethash %h \(p-join \|\$;\| \(vector "p" "q"\)\)\)/,
 like($ac, qr/\(p-aref \(p-aref-deref \$ref 0\) 1\)/,
      'nested container stays structural');
 
+# --- converted: ref-access + slice family form handlers (E2.1) --------------
+
+my $sl = Pl::Parser2->parse_code(<<'EOT');
+my @a = (1, 2, 3, 4); my %h = (a => 1, b => 2);
+my $ar = [10, 20, 30]; my $hr = { x => 1 };
+my @s1 = @a[0, 2];
+my @s2 = @h{'a', 'b'};
+my %k1 = %h{'a', 'b'};
+my $r1 = $ar->[1];
+my $r2 = $hr->{x};
+my $r3 = $hr->{'p', 'q'};
+print "@s1 @s2 $r1 $r2 $r3";
+EOT
+
+like($sl, qr/\(p-aslice \@a 0 2\)/,          'array slice → (p-aslice @a 0 2)');
+like($sl, qr/\(p-hslice %h "a" "b"\)/,       'hash slice → (p-hslice %h "a" "b")');
+like($sl, qr/\(p-kv-hslice %h "a" "b"\)/,    'kv hash slice → (p-kv-hslice %h "a" "b")');
+like($sl, qr/\(p-aref-deref \$ar 1\)/,       'array-ref access → (p-aref-deref $ar 1)');
+like($sl, qr/\(p-gethash-deref \$hr "x"\)/,  'hash-ref access → (p-gethash-deref $hr "x")');
+like($sl, qr/\(p-gethash-deref \$hr \(p-join \|\$;\| \(vector "p" "q"\)\)\)/,
+     'multi-key hash-ref → (p-join |$;| (vector …))');
+
 done_testing();

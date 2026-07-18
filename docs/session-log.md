@@ -128,9 +128,23 @@ preserved (container before index/key, matching the text emitter's gensym
 order); a BARE-var container is a text atom (so the sigil rewrite and the
 `@N`/`@#`/rename string ops apply), a NESTED container is a structural form
 (`$ref->[0][1]` → `(p-aref (p-aref-deref $ref 0) 1)`).  Same corpus-diff
-verification both pipelines; 6 `clform-01.t` guards.  Remaining internal
-nodes: `progn`/`tree_val` (need the child-text-inspection rewritten to
-AST-level first), then `inline_lambda` (E2 final).
+verification both pipelines; 6 `clform-01.t` guards.
+
+Eleventh commit — **access/slice family completed**: `a_ref_acc`,
+`h_ref_acc`, `slice_a_acc`, `slice_h_acc`, `kv_slice_h_acc`,
+`kv_slice_a_acc` (+ a form variant of `_slice_in_context`).  `$ref->[i]` →
+`(p-aref-deref …)`, `$ref->{k}` → `(p-gethash-deref …)` (lvalue → `-box`
+variants; multi-key → `(p-join |$;| (vector …))`); `@a[…]`/`@h{…}` →
+`(p-aslice …)`/`(p-hslice …)` context-wrapped; `%h{…}`/`%a[…]` →
+`(p-kv-hslice …)`/`(p-kv-aslice …)`.  **First corpus-diff caught 3 files**
+(kvhslice/kvaslice/list) — the EMPTY-slice case: the text emitter emits
+`(p-aslice @a )` with a trailing space a form can't reproduce.  Fix: the
+four slice handlers decline when `@$kids < 2` (container only, no
+indices), keeping the empty case on the text path — then clean on both
+pipelines.  6 `clform-01.t` guards.  Remaining internal nodes:
+`progn`/`tree_val` (need the child-text-inspection rewritten to AST-level
+first), `methodcall`/`prefix_op`/`postfix_op`, then `inline_lambda` (E2
+final).
 
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
