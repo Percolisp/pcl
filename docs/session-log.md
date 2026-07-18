@@ -4,7 +4,80 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 295c-3 (2026-07-18, Fable) — E1-remainder review (decisions only, no code): user-approved completion plan for the last 5 gates.
+## Session 296 (2026-07-18, Fable) — #56 state family source-rewrite: state.t DE-GATED at 157+0/166; WIP branch, NOT yet merged (eval.t regression open).
+
+**All work is on branch `wip/s296-state-family` (commit 97d8ca9), NOT on
+main.**  main is untouched.  Resume by continuing on that branch; fix the
+open items below, re-verify, then squash/ff to main.
+
+SHIPPED (in the WIP commit):
+- **`_rewrite_state_prepass`** (Pl/Parser2.pm, doc-level, reparse-based):
+  rewrites every `state` decl outside the classic subset into plain Perl.
+  Route A (nearest CV = anon sub): decl → guarded-init do-shape (or bare
+  cell), `sub{…}` wrapped `do { my $CELL; my $FLAG; sub{…} }` → per-instance
+  cells via the proven block-my closure seam (state.t generator + both
+  anon-CV-sharing blocks pass).  Route E (named-sub/file CV, incl.
+  map/grep/sort blocks, expr-position `++state $y` / `\state $x` /
+  `my $x = state $y = 42` / `goto state …`, Given conditions): decl site
+  rewritten in place, cells become forward-decl'd package globals (shared
+  cell = per-CV semantics for single-instance CVs).  Reverse-order
+  processing handles the masked `state $x; state $x` block.  Init-end scan:
+  commas end an init only in EXPRESSION position (statement decls own their
+  paren-less list-op commas — `state $c = \substr $tintin, $x, 1`).
+- Normalizations: `:shared`-style attrs stripped; `state ($t) //= 3` →
+  `state $t; $t //= 3;`; `state $z ++` → `state $z; $z ++;`;
+  **`tie my $y, ARGS` → `my $y; tie $y, ARGS`** (embedded decl invisible to
+  capture promotion — the tie statement now promotes like any block my).
+- Classic pass (`_rename_state_vars`): container decls (`state @x/%x
+  [= LIST]`) via _fresh_container defvar + guarded whole-assignment seam;
+  signatured-sub/sig-list skip (v1 owns those defs); _rename_decl_within
+  made container-aware (sigil-preserving rewrite + $#x ArrayIndex).
+- **Flatten refusal** `_pkgblock_shadows_file_lexical`: a pkg-block whose
+  block-level my/state shadows a pre-block file lexical refuses T-A1
+  flattening → D1-lite in-place lowering (state.t countfetches: `tie my $y`
+  vs file `my (…,$y,…)` — span engine can't scope that re-decl).
+- Pl/ExprToCL.pm: `/s` on the `\substr|\pos|\vec` magic-lvalue regexes —
+  a MULTILINE operand (do-block → funcall-lambda) silently degraded to
+  p-backslash-of-copy (no write-through).  Fixes all 5 state.t substr rows.
+- Cache gen bumped v2-37 → v2-38.
+
+RESULTS:
+- **state.t v2-native: 157 pass + 0 fail + 5 skip, ran 162/166** — vs v1
+  141+8, crash-stop at 154.  The 4 unrun = the given/when statement drop
+  (both pipelines parse-error-drop it — v1 parity).  v2 FIXES the 4 tied
+  tests (24–27) and all substr rows.
+- **signatures.t: nested-sub gate STAYS** ("named sub nested in a
+  prototyped/signatured sub").  Measured with the new `PCL_NO_NESTGATE=1`
+  switch: 765+213 vs gated/v1 796+182 — regressions = t146–t161 closure
+  family (nested sub writes outer sig-sub's params), "default expression is
+  scalar in void/scalar/list context" (909–911), "handle commonality" rows
+  (933–935), unnamed 312–317.  De-gate needs the isolated _fallback_stmt
+  lowering to wire nested-sub capture of outer sub params — own task.
+
+OPEN before merge (verification half-done when session ended):
+1. **eval.t REGRESSED v2→v1**: new gate "file lexical 'r' captured by sub
+   terminal" (eval.t:185 `sub terminal { eval '$r . q{!}' }`; $main::r
+   package global + several block-scoped `my $r`).  eval.t has NO state and
+   NO tie-my, so the cause is almost certainly the flatten refusal
+   rerouting one of eval.t's pkg-blocks to D1-lite, changing capture-check
+   outcomes.  FIX DIRECTION: tighten _pkgblock_shadows_file_lexical —
+   refuse only when the shadowed name is also REFERENCED after the block
+   (real spanning), which state.t's $y is and eval.t's case likely is not.
+2. corpus-diff vs HEAD(4f600f2) = {state.t (expected), eval.t (the
+   regression), method.t, sort.t, scalar.t (tie-my emission shape — must
+   sweep those 3 for behavior parity)}.
+3. NOT run yet: tools/prove-core (Pl/t gate), full perl-tests sweep,
+   PCL_V1 corpus-diff (should be byte-identical — v1 path untouched except
+   shared ExprToCL /s fix, which can change v1 output too — CHECK).
+4. Add Pl/t regression tests for: per-instance anon state, generator,
+   classic containers, `state ($t) //= 3`, expr-position shapes, tie-my
+   promotion, \substr-through-do write-through (smallest transpile-test).
+5. skip-registry: 'Reference to state variable' row may now PASS (route E
+   gives a stable cell → stable ref) — check for a stale flag; if stale,
+   drop the row + trim the `\state` mention in not-supported.md's scalar
+   SV-identity section.
+6. Census after merge expected 107/4 (state.t de-gated; chdir #55,
+   postfixderef #45, closure #70, signatures remain).
 
 All 5 live gate reasons re-verified via PCL_V2_VERBOSE (two survey notes had
 been stale — signatures.t's real gate is state-in-signature-defaults, the
