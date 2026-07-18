@@ -33,6 +33,17 @@ e.g. `undef $h{k}` → `(p-undef (p-gethash-box …))`) and the `undef &sub` →
 the generic tail with lvalue context.  Same corpus-diff verification (both
 pipelines identical to HEAD across 111 files); 8 more `clform-01.t` guards.
 
+Third commit — `goto` (declines now `do eval grep map`): the tail-call
+forms `goto &sub` → `(p-goto-sub #'target)` and `goto &$cref` →
+`(p-goto-sub (p-get-coderef …))`, the `goto LABEL` throw-wrap / lexical
+`(go :LABEL)` (reading `$parser->{_catch_labels}` exactly as the text
+branch), and the computed `goto EXPR` → `(p-goto-computed …)`.  Same
+corpus-diff verification both pipelines; 3 more `clform-01.t` guards (the
+LABEL shape is covered by corpus byte-parity — a standalone label hits an
+unrelated Parser2 statement gate in a unit `parse_code`).  Remaining
+funcall declines: `do eval grep map` (grep/map = inline_lambda, the
+hairiest, LAST; eval ties to E3 eval-mode).
+
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
 anyway), structural children use `gen_node_form`.  Non-matching shapes fall

@@ -126,4 +126,22 @@ like($lv, qr/\(p-chomp \$s\)/,           'chomp $s → (p-chomp $s)');
 like($lv, qr/\(p-chop \$s\)/,            'chop $s → (p-chop $s)');
 like($lv, qr/\(p-chomp \@a\)/,           'chomp @a → (p-chomp @a)');
 
+# --- converted: gen_funcall_form goto family (E2.1) --------------------------
+# goto &sub / goto &$cref (tail-calls) and computed goto EXPR.  (The goto
+# LABEL → (go :LABEL) / throw-wrap shape is covered by corpus byte-parity;
+# a standalone label hits an unrelated Parser2 statement gate here.)
+
+my $gt = Pl::Parser2->parse_code(<<'EOT');
+sub bar { 1 }
+my $c = sub { 2 };
+sub foo { goto &bar; }
+sub baz { goto &$c; }
+sub cc  { my $l = "L"; goto $l; }
+EOT
+
+like($gt, qr/\(p-goto-sub #'pl-bar\)/,        'goto &sub → (p-goto-sub #(quote)pl-bar)');
+like($gt, qr/\(p-goto-sub \(p-get-coderef \$c\)\)/,
+     'goto &$cref → (p-goto-sub (p-get-coderef $c))');
+like($gt, qr/\(p-goto-computed \$l\)/,        'goto EXPR → (p-goto-computed $l)');
+
 done_testing();

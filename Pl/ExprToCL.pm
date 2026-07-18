@@ -1213,7 +1213,7 @@ sub gen_array_str_interp {
 # the form handler declines them (before any side effect) so the text
 # emitter below runs unchanged.  Shrink this list as branches convert.
 my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
-  goto do eval grep map
+  do eval grep map
 );
 
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
@@ -1298,7 +1298,7 @@ sub gen_funcall_form {
     }
   }
 
-  # next/last/redo LABEL → (p-next LABEL) etc.  (goto stays declined.)
+  # next/last/redo LABEL → (p-next LABEL) etc.
   if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo')
       && @$kids == 2) {
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
@@ -1312,6 +1312,54 @@ sub gen_funcall_form {
         }
       }
     }
+  }
+
+  # goto — tail-call (&sub / &$cref), goto LABEL (throw-wrap or lexical go),
+  # and computed goto EXPR.  Falls through to the generic tail only for a
+  # shape none of these match (which the text emitter never produced).
+  if ($func_name eq 'goto' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+
+    # goto &funcname — tail-call to a named sub.
+    if (ref($arg_node) eq 'PPI::Token::Symbol' &&
+        $arg_node->content() =~ /^&(.+)$/) {
+      my $target = $self->cl_name($1, 1);
+      return ['p-goto-sub', "#'$target"];
+    }
+
+    # goto &$scalar — tail-call via dynamic coderef (Cast '&' prefix_op).
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'prefix_op') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 1) {
+        my $op_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        if (ref($op_node) eq 'PPI::Token::Cast' && $op_node->content() eq '&') {
+          return ['p-goto-sub', $self->gen_node_form($kids->[1])];
+        }
+      }
+    }
+
+    # goto LABEL — forward (catch-wrapped) throw, else lexical (go).
+    if ($self->expr_o->is_internal_node_type($arg_node) &&
+        $arg_node->{type} eq 'funcall') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids == 1) {
+        my $label_node = $self->expr_o->get_a_node($arg_kids->[0]);
+        if (ref($label_node) eq 'PPI::Token::Word') {
+          my $label = $label_node->content();
+          my $parser = ($self->expr_o->can('has_parser')
+                        && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+          if ($parser && $parser->{_catch_labels}
+              && $parser->{_catch_labels}{$label}) {
+            return ['throw', $parser->{_catch_labels}{$label}, 'nil'];
+          }
+          return ['go', ":$label"];
+        }
+      }
+    }
+
+    # goto EXPR (computed) — no-op stub (CL tags are not first-class).
+    return ['p-goto-computed', $self->gen_node_form($kids->[1])];
   }
 
   # bless(REF, CLASSNAME): bareword class → string; default = current pkg.
