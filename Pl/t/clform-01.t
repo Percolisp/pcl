@@ -236,4 +236,22 @@ like($ql, qr/\(pl-f "single"\)/, 'single-quote literal → "single" atom');
 like($ql, qr/\(pl-f "plain"\)/,  'qq{} literal → "plain" atom');
 like($ql, qr/\(pl-f "lit"\)/,    'q{} literal → "lit" atom');
 
+# --- converted: arr_init / hash_init form handlers (E2.1 internal nodes) -----
+
+my $in = Pl::Parser2->parse_code(<<'EOT');
+my $a = [1, 2, 3];
+my $e = [];
+my $h = { x => 1, y => 2 };
+my $eh = {};
+print "$a $h $e $eh";
+EOT
+
+like($in, qr/\(make-p-box \(p-array-init 1 2 3\)\)/, '[1,2,3] → (make-p-box (p-array-init 1 2 3))');
+like($in, qr/\(make-p-box \(make-array 0 :adjustable t :fill-pointer 0\)\)/,
+     '[] → empty adjustable vector');
+like($in, qr/\(make-p-box \(p-hash "x" 1 "y" 2\)\)/,
+     '{x=>1,y=>2} → (make-p-box (p-hash "x" 1 "y" 2))');
+like($in, qr/\(make-p-box \(p-hash \)\)/,
+     '{} declines to text (trailing-space byte preserved)');
+
 done_testing();

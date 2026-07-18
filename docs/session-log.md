@@ -105,10 +105,20 @@ for a node with **no children** (`!@$kids`) — so operator/word binary-op
 nodes stay on the `gen_node`/`gen_binary_op` path, and `gen_node_form` now
 faithfully mirrors `gen_node`'s dispatch (also protects every future leaf
 conversion).  Corpus-diff clean both pipelines after the fix; 4
-`clform-01.t` guards.  Next: the compound sym/leaf holdouts
-(stash/typeglob/`&sub`/qr//) and the internal-node frontier
-(`arr_init`/`hash_init`/`a_acc`/`h_acc`/`progn`/`tree_val`) via
-`form_handlers`.
+`clform-01.t` guards.
+
+Ninth commit — **internal-node frontier begins** (`form_handlers`
+mechanism): `arr_init` (492), `hash_init` (183), `func_ref` (187).
+`[ … ]` → `(make-p-box (p-array-init …))` (list-context + tail_position
+handling run once, exactly as the text emitter); `{ … }` → `(make-p-box
+(p-hash …))` with the EMPTY case declining to text (the text emitter's
+`(p-hash )` trailing space can't be reproduced by a form — rare, kept on
+the text path for exact bytes); `func_ref` → `#'name` atom (raw_lambda
+stays a raw atom until inline_lambda).  Same corpus-diff verification both
+pipelines; 4 `clform-01.t` guards.  Next internal nodes: `h_acc`/`a_acc`
+(element access), `progn`/`tree_val` (context-dependent — they inspect
+child *text* like `$child =~ /\(p-=~/`, so they need an AST-level rewrite
+of that check before converting), then `inline_lambda` (E2 final).
 
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text

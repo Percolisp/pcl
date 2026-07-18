@@ -112,6 +112,9 @@ sub _build_form_handlers {
     'ternary'          => \&gen_ternary,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
+    'func_ref'         => \&gen_func_ref_form,
+    'arr_init'         => \&gen_array_init_form,
+    'hash_init'        => \&gen_hash_init_form,
   };
 }
 
@@ -4194,6 +4197,44 @@ sub gen_func_ref {
   return $node->{raw_lambda} if $node->{raw_lambda};
   my $func_name = $node->{func_name};
   return "#'$func_name";
+}
+
+# E2 form variant: \&foo → #'name atom; a raw_lambda is a pre-generated CL
+# string (embedded as a raw atom, structuring it is the inline_lambda step).
+sub gen_func_ref_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return Pl::CLForm::raw($node->{raw_lambda}) if $node->{raw_lambda};
+  return "#'" . $node->{func_name};
+}
+
+# E2 form variant of gen_array_init: [ … ] → (make-p-box (p-array-init …)).
+# Same list-context + tail_position handling as the text emitter (run once).
+sub gen_array_init_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $saved_tail = $self->environment ? $self->environment->tail_position : 0;
+  $self->environment->tail_position(0) if $self->environment && $saved_tail;
+  my @elements;
+  for my $kid_id (@$kids) {
+    my $saved_ctx = $self->expr_o->get_node_context($kid_id);
+    $self->expr_o->set_node_context($kid_id, LIST_CTX);
+    push @elements, $self->gen_node_form($kid_id);
+    $self->expr_o->set_node_context($kid_id, $saved_ctx);
+  }
+  $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
+  return @elements
+      ? ['make-p-box', ['p-array-init', @elements]]
+      : ['make-p-box', ['make-array', '0', ':adjustable', 't', ':fill-pointer', '0']];
+}
+
+# E2 form variant of gen_hash_init: { … } → (make-p-box (p-hash …)).  The
+# EMPTY case declines (before any child generation): the text emitter emits
+# "(p-hash )" with a trailing space that a form cannot reproduce; keeping it on
+# the text path preserves v1's exact bytes for the rare empty-hash constructor.
+sub gen_hash_init_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef unless @$kids;
+  my @pairs = map { $self->gen_node_form($_) } @$kids;
+  return ['make-p-box', ['p-hash', @pairs]];
 }
 
 # Generate inline lambda for grep/map/sort blocks
