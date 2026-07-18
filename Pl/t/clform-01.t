@@ -254,4 +254,25 @@ like($in, qr/\(make-p-box \(p-hash "x" 1 "y" 2\)\)/,
 like($in, qr/\(make-p-box \(p-hash \)\)/,
      '{} declines to text (trailing-space byte preserved)');
 
+# --- converted: a_acc / h_acc form handlers (E2.1 internal nodes) ------------
+
+my $ac = Pl::Parser2->parse_code(<<'EOT');
+my @a = (1, 2, 3); my %h = (x => 1);
+my $x = $a[0] + $h{x};
+$a[1] = 5; $h{y} = 6;
+my $m = $h{'p', 'q'};
+my $ref = [[10, 20]];
+my $y = $ref->[0][1];
+print "$x $m $y";
+EOT
+
+like($ac, qr/\(p-aref \@a 0\)/,          'rvalue array access → (p-aref @a 0)');
+like($ac, qr/\(p-gethash %h "x"\)/,      'rvalue hash access → (p-gethash %h "x")');
+like($ac, qr/\(setf \(p-aref \@a 1\) 5\)/, 'lvalue array access → p-aref target');
+like($ac, qr/\(setf \(p-gethash %h "y"\) 6\)/, 'lvalue hash access → p-gethash target');
+like($ac, qr/\(p-gethash %h \(p-join \|\$;\| \(vector "p" "q"\)\)\)/,
+     'multi-key $h{a,b} → (p-join |$;| (vector …))');
+like($ac, qr/\(p-aref \(p-aref-deref \$ref 0\) 1\)/,
+     'nested container stays structural');
+
 done_testing();

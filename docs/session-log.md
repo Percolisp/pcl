@@ -120,6 +120,18 @@ pipelines; 4 `clform-01.t` guards.  Next internal nodes: `h_acc`/`a_acc`
 child *text* like `$child =~ /\(p-=~/`, so they need an AST-level rewrite
 of that check before converting), then `inline_lambda` (E2 final).
 
+Tenth commit — **`a_acc`/`h_acc` element access** (`a_acc` 330, `h_acc`
+371).  `$a[i]` → `(p-aref @a i)` / `(p-aref-box …)` under lvalue context;
+`$h{k}` → `(p-gethash %h k)` / `(p-gethash-box …)`; multi-key `$h{a,b}` →
+`(p-gethash %h (p-join |$;| (vector …)))`.  Container generation ORDER
+preserved (container before index/key, matching the text emitter's gensym
+order); a BARE-var container is a text atom (so the sigil rewrite and the
+`@N`/`@#`/rename string ops apply), a NESTED container is a structural form
+(`$ref->[0][1]` → `(p-aref (p-aref-deref $ref 0) 1)`).  Same corpus-diff
+verification both pipelines; 6 `clform-01.t` guards.  Remaining internal
+nodes: `progn`/`tree_val` (need the child-text-inspection rewritten to
+AST-level first), then `inline_lambda` (E2 final).
+
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
 anyway), structural children use `gen_node_form`.  Non-matching shapes fall

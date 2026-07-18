@@ -115,6 +115,8 @@ sub _build_form_handlers {
     'func_ref'         => \&gen_func_ref_form,
     'arr_init'         => \&gen_array_init_form,
     'hash_init'        => \&gen_hash_init_form,
+    'a_acc'            => \&gen_array_access_form,
+    'h_acc'            => \&gen_hash_access_form,
   };
 }
 
@@ -3408,6 +3410,31 @@ sub gen_array_access {
   return "($func $arr $idx)";
 }
 
+# E2 form variant of gen_array_access.  Same shape/side effects as the text
+# emitter; generation ORDER preserved (container then index).  The container
+# is a text-atom string only for a bare variable (so the sigil rewrite and the
+# @N / @# / rename string ops apply); a nested container is a structural form.
+sub gen_array_access_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $arr_node = $self->expr_o->get_a_node($kids->[0]);
+  my $is_bare = ref($arr_node) eq 'PPI::Token::Symbol'
+             || ref($arr_node) eq 'PPI::Token::Magic';
+  my $arr = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
+  my $idx = $self->gen_node_form($kids->[1]);
+  if ($is_bare) {
+    $arr =~ s/(^|::)\$/$1@/;
+    return ['p-undef'] if $arr =~ /^@\d+$/;
+    $self->environment->register_punct_global($arr)
+      if $self->environment && $arr eq '@#';
+    if ($self->environment) {
+      my $renames = $self->environment->state_var_renames;
+      $arr = $renames->{$arr} if $renames && exists $renames->{$arr};
+    }
+  }
+  my $func = $self->lvalue_context ? 'p-aref-box' : 'p-aref';
+  return [$func, $arr, $idx];
+}
+
 
 # Hash access: (p-gethash hash key) or (p-gethash-box hash key) in l-value context
 # In Perl, $hash{key} accesses %hash, so we convert $sigil to %sigil
@@ -3491,6 +3518,44 @@ sub _gen_scalar_deref_base {
   $self->lvalue_context($saved_lv);
   $self->expr_o->set_node_context($base_id, $saved_ctx);
   return $cl;
+}
+
+# E2 form variant of gen_hash_access.  Container then key (order preserved);
+# multi-key $h{a,b,c} → (p-join |$;| (vector …)); bare-var sigil rewrite /
+# %# register / rename as strings, nested container structural.
+sub gen_hash_access_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $hash_node = $self->expr_o->get_a_node($kids->[0]);
+  my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol'
+             || ref($hash_node) eq 'PPI::Token::Magic';
+  my $hash = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
+
+  my $key_node = $self->expr_o->get_a_node($kids->[1]);
+  my $key;
+  if ($self->expr_o->is_internal_node_type($key_node)
+      && $key_node->{type} eq 'progn') {
+    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
+    if (@$key_kids > 1) {
+      my @parts = map { $self->gen_node_form($_) } @$key_kids;
+      $key = ['p-join', '|$;|', ['vector', @parts]];
+    } else {
+      $key = $self->gen_node_form($kids->[1]);
+    }
+  } else {
+    $key = $self->gen_node_form($kids->[1]);
+  }
+
+  if ($is_bare) {
+    $hash =~ s/(^|::)\$/$1%/;
+    $self->environment->register_punct_global($hash)
+      if $self->environment && $hash eq '%#';
+    if ($self->environment) {
+      my $renames = $self->environment->state_var_renames;
+      $hash = $renames->{$hash} if $renames && exists $renames->{$hash};
+    }
+  }
+  my $func = $self->lvalue_context ? 'p-gethash-box' : 'p-gethash';
+  return [$func, $hash, $key];
 }
 
 # Array ref access: (p-aref-deref ref idx)
