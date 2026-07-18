@@ -4,12 +4,32 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `prefix_op` → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), one
-E2 commit.**  The E1 state-family business on this branch (eval.t
+**On branch `wip/s296-state-family` (atop the parked s296 state work), two
+E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change.
+
+**Second commit — `prefix_op` → `gen_prefix_op_form` (PARTIAL coverage).**
+The prefix_op text emitter inspects the GENERATED operand TEXT to detect
+magic lvalues (`$operand =~ /^\(p-array-last-index …/`, `/^\(p-substr …/`,
+`/^\(p-pos …/`, `/^\(p-vec …/`), all under the `\` / `++` / `--` operators
+— exactly the deferred "rewrite the child-text-inspection to AST first"
+class.  So the form handler DECLINES `\` / `++` / `--` **before any side
+effect** (their AST op is checkable without generating the operand) and
+converts everything else structurally: unary `-`/`!`/`~`/`not`, the sigil
+casts `@`/`%`/`$` (incl. the `$`/`@`/`%`-over-postfix-`++` shunting fixup),
+`&` (`p-get-coderef`), `*` (`p-dynamic-typeglob`), `$#{…}`
+(`p-array-last-index`), the `use integer` `~` s64 form, and unary `+`
+(no-op passthrough with context propagation).  Like `gen_funcall_form`,
+the declined operators keep the kept text emitter until their operand-text
+regexes are rewritten to AST-level (a later E2 step).  Same verification
+(both pipelines byte-identical to HEAD across 111 files); 9 new
+`clform-01.t` guards (converted `p-!`/`p-bit-not`/`p-cast-@`/… + declined
+`p-backslash`/`p-pre++`).
+
+**First commit — `methodcall` → CLForm.**
 
 Converted the `methodcall` internal-node emitter to form-producing
 (`gen_methodcall_form`, registered in `form_handlers`; the text

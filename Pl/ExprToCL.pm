@@ -110,6 +110,7 @@ sub _build_form_handlers {
   return {
     'funcall'          => \&gen_funcall_form,
     'methodcall'       => \&gen_methodcall_form,
+    'prefix_op'        => \&gen_prefix_op_form,
     'ternary'          => \&gen_ternary,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
@@ -3394,6 +3395,99 @@ sub gen_prefix_op {
   }
 
   return "($cl_op $operand)";
+}
+
+# E2 form variant of gen_prefix_op — PARTIAL coverage.  DECLINES (before any
+# side effect) exactly the operators whose text emitter inspects the GENERATED
+# operand TEXT to detect magic lvalues: the whole `\` backslash family (\&func,
+# \(LIST), \$#array→p-arylen-ref, \substr/\pos/\vec→*-ref) and `++`/`--` (which
+# may target $#array→p-set-array-length).  Those need the operand-text regexes
+# rewritten to AST-level first (a deferred E2 step); declining before generating
+# keeps the text-path re-run side-effect-free.  Everything else — sigil casts,
+# !/~/-/not, unary +, &, *, $#{…}, and the $/@/%-over-postfix-++ shunting fixup
+# — has no operand-text inspection and converts structurally.
+sub gen_prefix_op_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $op_node = $self->expr_o->get_a_node($kids->[0]);
+  my $op      = $op_node->content();
+
+  # Text-inspecting operators: decline to the kept text emitter.
+  return undef if $op eq '\\' || $op eq '++' || $op eq '--';
+
+  # $#{ array } — last index of array (braced form of $#array).
+  if ($op eq '$#') {
+    return ['p-array-last-index', $self->gen_node_form($kids->[1])];
+  }
+
+  # ${expr}++ / @{expr}-- shunting-yard fixup: prefix_op($, postfix_op(X, ++))
+  # → (p-post++ (p-cast-$ X)).  Operand read in rvalue context (the ref value,
+  # not the box).
+  if ($op eq '$' || $op eq '@' || $op eq '%') {
+    my $inner_id   = $kids->[1];
+    my $inner_node = $self->expr_o->get_a_node($inner_id);
+    if ($self->expr_o->is_internal_node_type($inner_node)
+        && $inner_node->{type} eq 'postfix_op') {
+      my $po_kids    = $self->expr_o->get_node_children($inner_id);
+      my $po_op_node = $self->expr_o->get_a_node($po_kids->[1]);
+      my $po_op      = $po_op_node->content();
+      if ($po_op eq '++' || $po_op eq '--') {
+        my $saved = $self->lvalue_context;
+        $self->lvalue_context(0);
+        my $inner_expr = $self->gen_node_form($po_kids->[0]);
+        $self->lvalue_context($saved);
+        return ["p-post$po_op", ["p-cast-$op", $inner_expr]];
+      }
+    }
+    # else: fall through to the general sigil-cast handling below.
+  }
+
+  # Unary + — a pure no-op disambiguator: pass the operand through unchanged,
+  # inheriting our context.  `+(EXPR)` unwraps a single-child tree_val.
+  if ($op eq '+') {
+    my $operand_id = $kids->[1];
+    my $my_ctx     = defined $node_id
+                     ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+    my $on = $self->expr_o->get_a_node($operand_id);
+    if ($self->expr_o->is_internal_node_type($on)
+        && ($on->{type} // '') eq 'tree_val') {
+      my $tv_kids = $self->expr_o->get_node_children($operand_id);
+      $operand_id = $tv_kids->[0] if @$tv_kids == 1;
+    }
+    my $saved = $self->expr_o->get_node_context($operand_id);
+    $self->expr_o->set_node_context($operand_id, $my_ctx);
+    my $inner = $self->gen_node_form($operand_id);
+    $self->expr_o->set_node_context($operand_id, $saved);
+    return $inner;
+  }
+
+  # @ needs lvalue context so subscripts return boxes → p-cast-@ can autoviv.
+  # (++/--/\ already declined above.)
+  my $needs_lvalue = ($op eq '@');
+  my $saved_lvalue = $self->lvalue_context;
+  $self->lvalue_context(1) if $needs_lvalue;
+  my $operand = $self->gen_node_form($kids->[1]);
+  $self->lvalue_context($saved_lvalue);
+
+  my $cl_op = $self->cl_name($op);
+
+  # Under 'use integer', ~ returns signed 64-bit complement.
+  if ($op eq '~' && $self->environment && $self->environment->has_pragma('use_integer')) {
+    return ['p-to-s64', ['lognot', ['pcl::%pcl-to-integer', ['to-number', $operand]]]];
+  }
+  # Sigil cast operators (dereference).
+  if ($op eq '@' || $op eq '%' || $op eq '$') {
+    return ["p-cast-$op", $operand];
+  }
+  # & Cast: &{expr} / &$var — dynamic coderef by name.
+  if ($op eq '&') {
+    return ['p-get-coderef', $operand];
+  }
+  # * Cast: *$var — typeglob ref (distinct marker for lvalue detection).
+  if ($op eq '*') {
+    return ['p-dynamic-typeglob', $operand];
+  }
+
+  return [$cl_op, $operand];
 }
 
 

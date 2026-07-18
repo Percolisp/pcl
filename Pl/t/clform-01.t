@@ -354,4 +354,34 @@ like($mc, qr/\(p-method-call \(p-\/\/ \$r 0\) "foo" 7\)/,
 like($mc, qr/\(p-super-call \$self "g" "B" 1 2\)/,
      'SUPER::g → (p-super-call obj "g" "B" args)');
 
+# --- converted: gen_prefix_op_form (E2.1, PARTIAL — text-inspecting ops decline)
+# converts !/~/-/not, sigil casts, unary +, &, *, $#{…}, the cast-over-postfix
+# fixup; DECLINES \ / ++ / -- (magic-lvalue operand-text inspection deferred).
+
+my $pf = Pl::Parser2->parse_code(<<'EOT');
+my $x = 5; my @a = (1, 2, 3); my $ref = \@a; my $cref = sub { 1 };
+my $n = -$x;
+my $b = !$x;
+my $c = ~$x;
+my $d = not $x;
+my $e = $#a;
+my $f = $#{$ref};
+my @g = @$ref;
+my $h = +($x + 1);
+my $bs = \$x;
+my $pp = ++$x;
+print "$n$b$c";
+EOT
+
+like($pf, qr/\(p-- \$x\)/,                 'unary minus → (p-- $x)');
+like($pf, qr/\(p-! \$x\)/,                 'logical not → (p-! $x)');
+like($pf, qr/\(p-bit-not \$x\)/,           'bit complement → (p-bit-not $x)');
+like($pf, qr/\(p-not \$x\)/,               'low-prec not → (p-not $x)');
+like($pf, qr/\(p-array-last-index \@a\)/,  '$#a → (p-array-last-index @a)');
+like($pf, qr/\(p-array-last-index \$ref\)/,'$#{$ref} → (p-array-last-index $ref)');
+like($pf, qr/\(p-cast-@ \$ref\)/,          '@$ref → (p-cast-@ $ref)');
+# declines: the text emitter still owns these (byte-identical fallback).
+like($pf, qr/\(p-backslash \$x\)/,         '\\$x declines → text (p-backslash $x)');
+like($pf, qr/\(p-pre\+\+ \$x\)/,           '++$x declines → text (p-pre++ $x)');
+
 done_testing();
