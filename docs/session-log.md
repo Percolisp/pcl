@@ -68,6 +68,21 @@ Remaining funcall decline: `eval` only — left for E3 eval-mode per the
 user (the `eval BLOCK` form is do-like; `eval STRING` is the E3 coupling
 and the dynamic-string-eval hard requirement).
 
+Sixth commit — **(c): the leaf sub-phase begins** (frontier step 2:
+literals/sym).  New mechanism `gen_leaf_form($node)`: returns a CLForm for
+a converted leaf token, or undef to decline (→ `gen_node_form` embeds the
+v1 text as a raw atom, same as `form_handlers` declines).  `gen_node_form`
+now consults it before the leaf `raw` fallback.  Pilot = the **Number
+family** (frontier `number` 572 + `number-hex` 695): decimal/underscored
+atoms stay atoms, radix literals → `#x`/`#b`/`#o` (signed → `(- …)`),
+version → `(p-version-string …)`, float overflow → `(p-double-inf [t])`.
+Pure, no side effects.  Reached only through a CONVERTED parent
+(funcall/ternary/… call `gen_node_form` on a Number child).  Same
+corpus-diff verification both pipelines; 10 `clform-01.t` guards.  Next
+leaf types: `sym`/`magic` (the biggest frontier, but with idempotent
+side-effect sub-cases — stash/typeglob/`&foo`/caret/our-qualify — to port
+faithfully) and the `Quote`/`Word` families.
+
 Method (E2.0 recipe): sigil-rewritten containers keep `gen_node` (the regex
 needs a string; a leaf symbol's `gen_node` == its `gen_node_form` text
 anyway), structural children use `gen_node_form`.  Non-matching shapes fall

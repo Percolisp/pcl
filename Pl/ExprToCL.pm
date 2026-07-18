@@ -466,7 +466,62 @@ sub gen_node_form {
     }
     return Pl::CLForm::raw($self->gen_internal_node_text($node, $node_id, $kids));
   }
+  # Leaf: a converted leaf emitter (gen_leaf_form) returns a CLForm; anything
+  # not yet converted declines (undef) and the leaf's v1 text is embedded as a
+  # raw atom.  gen_leaf's leaf side effects (idempotent package/caret set-adds,
+  # read-only rename lookups) make the decline→re-run through gen_node safe.
+  if (defined(my $lf = $self->gen_leaf_form($node))) {
+    return $lf;
+  }
   return Pl::CLForm::raw($self->gen_node($node_id));
+}
+
+# E2 leaf conversion (docs/v2-endgame-plan.md E2.1, literal/sym frontier):
+# CLForm for a converted leaf token, or undef to decline (→ raw v1 text).
+# Converted so far: the Number family (number / number-hex / -octal / -binary
+# / -float / -exp / -version).  Byte-for-byte gen_leaf's shapes.
+sub gen_leaf_form {
+  my ($self, $node) = @_;
+  my $ref = ref($node);
+
+  if ($ref =~ /^PPI::Token::Number/) {
+    my $num = $node->content();
+
+    # Version strings: v1.20.300 / 256.65.258 → (p-version-string N N N).
+    if ($ref =~ /::Version$/ || $num =~ /^v(\d[\d.]*)$/) {
+      my $vpart = $num;
+      $vpart =~ s/^v//;
+      return ['p-version-string', split /\./, $vpart];
+    }
+    # Radix literals → CL #x / #b / #o (optional leading - → (- …)).
+    if ($num =~ /^(-?)0[xX]([0-9a-fA-F_]+)$/) {
+      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
+      return $sign ? ['-', "#x$d"] : "#x$d";
+    }
+    if ($num =~ /^(-?)0[bB]([01_]+)$/) {
+      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
+      return $sign ? ['-', "#b$d"] : "#b$d";
+    }
+    if ($num =~ /^(-?)0[oO]([0-7_]+)$/) {
+      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
+      return $sign ? ['-', "#o$d"] : "#o$d";
+    }
+    if ($num =~ /^(-?)0([0-7_]+)$/ && $num ne '0') {
+      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
+      return $sign ? ['-', "#o$d"] : "#o$d";
+    }
+    $num =~ s/_//g;
+    if ($num =~ /[eE.]/) {
+      my $val = eval($num);
+      if (defined $val) {
+        return ['p-double-inf']      if $val == 9**9**9;
+        return ['p-double-inf', 't'] if $val == -(9**9**9);
+      }
+    }
+    return $num;
+  }
+
+  return undef;   # decline: not a converted leaf type
 }
 
 

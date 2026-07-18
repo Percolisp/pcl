@@ -181,4 +181,27 @@ like($gm, qr/\(p-map \(lambda \(\$_\) \(p-\+ \$_ 1\)\) \@a\)/,
 like($gm, qr/\(p-grep \(lambda \(\$_\)/,
      'grep { BLOCK } @a → generic-tail funcall with lambda child');
 
+# --- converted: gen_leaf_form Number family (E2.1 leaf pilot) ----------------
+# Number leaves reached through a CONVERTED parent (here a funcall) go via
+# gen_leaf_form: atoms stay atoms, radix/version/inf become forms/atoms.
+
+my $nm = Pl::Parser2->parse_code(<<'EOT');
+sub f { $_[0] }
+my $c = 1;
+my @z = (f(42), f(0xFF), f(-0x10), f(0b1010), f(0o17), f(0777),
+         f(1_000_000), f(3.14), f(1e9999), f(-1e9999), f(v1.2.3));
+print "@z";
+EOT
+
+like($nm, qr/\(pl-f 42\)/,               'decimal atom: (pl-f 42)');
+like($nm, qr/\(pl-f #xFF\)/,             'hex → #xFF atom');
+like($nm, qr/\(pl-f \(- #x10\)\)/,       'negative hex → (- #x10)');
+like($nm, qr/\(pl-f #b1010\)/,           'binary → #b1010');
+like($nm, qr/\(pl-f #o17\)/,             '0o octal → #o17');
+like($nm, qr/\(pl-f #o777\)/,            'legacy octal → #o777');
+like($nm, qr/\(pl-f 1000000\)/,          'underscores stripped: 1_000_000 → 1000000');
+like($nm, qr/\(pl-f \(p-double-inf\)\)/, 'float overflow → (p-double-inf)');
+like($nm, qr/\(pl-f \(p-double-inf t\)\)/, 'negative float overflow → (p-double-inf t)');
+like($nm, qr/\(pl-f \(p-version-string 1 2 3\)\)/, 'v-string → (p-version-string 1 2 3)');
+
 done_testing();
