@@ -410,4 +410,56 @@ like($po, qr/\(p-chain-cmp \$x '< 3 '< 10\)/,
 like($po, qr/\(let \(\(_prev \(p-array-last-index \@a\)\)\) \(p-set-array-length \@a \(1\+ _prev\)\) _prev\)/,
      '$#a++ declines → arylen setter text form');
 
+# --- converted: gen_tree_val_form (E2.1) ------------------------------------
+# vector / progn / flatten branches, and the single-child list-context regex
+# special case: a (p-=~ …) ANYWHERE in the child (even nested inside a larger
+# expression) suppresses the (vector …) wrap in favour of a bare
+# (let ((*wantarray* t)) child) — the byte-exact to_flat($child) grep.  This
+# is the error-prone case, so the regex-inside-expression shapes are pinned
+# explicitly here.
+
+my $tv = Pl::Parser2->parse_code(<<'EOT');
+my $x = "abc"; my @a = (1, 2, 3);
+my @m1 = ($x =~ /(\w)(\w)/);
+my @m2 = ($x !~ /z/);
+my @m3 = (/foo/);
+my @m4 = (1 + ($x =~ /y/));
+my @m5 = (($a[0] =~ /1/), $a[1]);
+my @m6 = ($x);
+my @m7 = ($x, $x);
+my @m8 = (10 .. 12);
+print "@m1";
+EOT
+
+# regex directly the single child → let-wrap, NEVER (vector …)
+like($tv, qr/\(p-array-= \@m1 \(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$x /,
+     'list-ctx ($x =~ /re/) → let-wrap, no vector');
+unlike($tv, qr/\@m1 \(vector/,
+     '=~ as the sole child of @m1 is NOT wrapped in (vector …)');
+# !~ is boolean (emits p-!~), NOT a p-=~ match → IS vector-wrapped
+like($tv, qr/\(p-array-= \@m2 \(vector \(let \(\(\*wantarray\* t\)\) \(p-!~ \$x /,
+     'list-ctx ($x !~ /re/) → (vector (p-!~ …)) — not the regex special case');
+# bare /foo/ lowers to (p-=~ $_ …) → let-wrap
+like($tv, qr/\(p-array-= \@m3 \(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$_ /,
+     'list-ctx bare (/foo/) → let-wrap ($_ match)');
+# CRITICAL: regex NESTED inside a larger expression still suppresses vector —
+# a naive "child is a =~ node" AST predicate would wrongly emit (vector …) here.
+like($tv, qr/\(p-array-= \@m4 \(let \(\(\*wantarray\* t\)\) \(p-\+ 1 /,
+     'list-ctx (1 + ($x =~ /y/)) → let-wrap (regex nested in expression)');
+unlike($tv, qr/\(p-array-= \@m4 \(vector /,
+     'nested-regex single child is NOT vector-wrapped');
+# multi-child with a regex element is a genuine multi-value list → (vector …);
+# the regex element is itself a single-child tree_val, so it keeps its own
+# (let ((*wantarray* t)) (p-=~ …)) let-wrap inside the vector.
+like($tv, qr/\(p-array-= \@m5 \(vector \(let \(\(\*wantarray\* t\)\) \(p-=~ /,
+     'multi-child list with a regex element → (vector (let … (p-=~ …)) …)');
+# plain single scalar / multi / range branches
+like($tv, qr/\(p-array-= \@m6 \(vector \$x\)/,   'single non-regex child → (vector $x)');
+like($tv, qr/\(p-array-= \@m7 \(vector \$x \$x\)/,'multi child → (vector $x $x)');
+like($tv, qr/\(p-array-= \@m8 \(p-\.\. 10 12\)\)/,'single range child → bare (p-.. …), no vector');
+
+# empty () declines to the text emitter (trailing-space (vector )/(progn ) shape)
+my $tve = Pl::Parser2->parse_code('my @e = (); print scalar(@e);');
+like($tve, qr/\(vector \)/, 'empty () declines → text (vector ) trailing space');
+
 done_testing();

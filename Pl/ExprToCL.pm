@@ -112,6 +112,7 @@ sub _build_form_handlers {
     'methodcall'       => \&gen_methodcall_form,
     'prefix_op'        => \&gen_prefix_op_form,
     'postfix_op'       => \&gen_postfix_op_form,
+    'tree_val'         => \&gen_tree_val_form,
     'ternary'          => \&gen_ternary,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
@@ -4528,6 +4529,52 @@ sub gen_tree_val {
   }
 
   return "(progn $forms_str)";
+}
+
+# E2 form variant of gen_tree_val.  Mirrors the text emitter branch-for-branch.
+# The one text inspection — `$child =~ /\(p-=~\s/` in the single-child
+# list-context branch (a regex match already returns captures in list context,
+# so it is NOT re-wrapped in (vector …)) — is reproduced BYTE-EXACTLY via
+# to_flat($child): the E2 invariant guarantees to_flat(gen_node_form(x)) equals
+# gen_node(x) (corpus-verified every step), so grepping the flat rendering is
+# identical to the text emitter's grep of $child.  (A pure AST walk cannot be
+# sound here: a nested inline_lambda embeds a pre-generated `body_cl` string
+# that may itself contain (p-=~; to_flat sees it, an AST walk would not.
+# Structuring regex emission is a separate roadmap item — until then this
+# single grep is the faithful bridge.)  Empty () declines (its text emitter
+# emits (vector )/(progn ) with a trailing space a form cannot reproduce).
+sub gen_tree_val_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  return undef unless @$kids;   # empty () — trailing-space text, decline
+
+  my $ctx = $self->expr_o->get_node_context($node_id);
+
+  if (scalar(@$kids) == 1) {
+    if ($ctx == LIST_CTX || $ctx == INHERIT_CTX) {
+      $self->expr_o->set_node_context($kids->[0], $ctx);
+    }
+    my $child_is_list = ($ctx == LIST_CTX) && $self->_is_list_node_for_refgen($kids->[0]);
+    my $child = $self->gen_node_form($kids->[0]);
+    if ($ctx == LIST_CTX) {
+      if (Pl::CLForm::to_flat($child) =~ /\(p-=~\s/) {
+        return ['let', ['list', ['list', '*wantarray*', 't']], $child];
+      }
+      return $child_is_list ? $child : ['vector', $child];
+    }
+    return $child;
+  }
+
+  my @forms = map { $self->gen_node_form($_) } @$kids;
+  if ($ctx == LIST_CTX) {
+    return ['vector', @forms];
+  }
+  if (@forms > 1 && $ctx == INHERIT_CTX) {
+    # headless-list idiom ['list','list',…] → (list …); progn head is literal.
+    return ['if', ['eq', '*wantarray*', 't'],
+                  ['p-flatten-args', ['list', 'list', @forms]],
+                  ['progn', @forms]];
+  }
+  return ['progn', @forms];
 }
 
 

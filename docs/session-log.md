@@ -4,12 +4,35 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `prefix_op` + `postfix_op` → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` + `prefix_op` + `postfix_op` + `tree_val` → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), three
+**On branch `wip/s296-state-family` (atop the parked s296 state work), four
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change.
+
+**Fourth commit — `tree_val` → `gen_tree_val_form`.**  The one text
+inspection is `$child =~ /\(p-=~\s/` in the single-child list-context
+branch (a regex match already returns captures in list context, so it is
+NOT re-wrapped in `(vector …)`; instead → `(let ((*wantarray* t)) child)`).
+Reproduced BYTE-EXACTLY via `to_flat($child) =~ /\(p-=~\s/`: the E2
+invariant guarantees `to_flat(gen_node_form(x)) == gen_node(x)`
+(corpus-verified every step), so grepping the flat rendering is identical
+to the text emitter's grep of `$child`.  **A pure AST predicate ("child is
+a `=~` node") is NOT sound** — the check must fire when `(p-=~` appears
+ANYWHERE in the child text, e.g. the regex NESTED in a larger expression
+`(1 + ($x =~ /y/))` (verified: still let-wrapped, no vector), and a nested
+`inline_lambda` embeds an opaque pre-generated `body_cl` string an AST walk
+can't see but `to_flat` renders.  `!~` emits `(p-!~` (boolean) → correctly
+still `(vector …)`.  Empty `()` declines (trailing-space `(vector )`).  The
+`(list …)` in the INHERIT flatten branch uses the headless idiom
+`['list','list',@forms]`.  Verified additionally by a direct HEAD-worktree
+byte-diff on an adversarial probe file (=~ / !~ / bare `/re/` / nested
+regex / grep-block / map-block / split / s///r / tr / refgen `\(LIST)` /
+foreach lists / ternary branches) — IDENTICAL.  13 new `clform-01.t`
+guards, several pinning the regex-inside-expression edge cases explicitly.
+
+**Third commit — `postfix_op` → `gen_postfix_op_form`.**
 
 **Third commit — `postfix_op` → `gen_postfix_op_form`.**  The postfix text
 emitter inspects generated operand text only for the `$#array++` arylen
