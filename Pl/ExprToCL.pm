@@ -2800,10 +2800,13 @@ sub gen_prefix_op {
   # a plain (p-backslash (p-substr ...)) backslashes a COPY of the extracted
   # value, so $$ref = X would not write back. Emit live magic-cell refs instead
   # (getter reads, setter writes through). See docs/sweep-bug-catalog.md.
+  # /s: a complex first argument (e.g. a do-block lowered to a multiline
+  # funcall-lambda) puts newlines in the operand text — without /s the match
+  # failed and the \substr silently degraded to a copy (no write-through).
   if ($op eq '\\') {
-    if ($operand =~ /^\(p-substr (.+)\)$/) { return "(p-substr-ref $1)"; }
-    if ($operand =~ /^\(p-pos (.+)\)$/)    { return "(p-pos-ref $1)"; }
-    if ($operand =~ /^\(p-vec (.+)\)$/)    { return "(p-vec-ref $1)"; }
+    if ($operand =~ /^\(p-substr (.+)\)$/s) { return "(p-substr-ref $1)"; }
+    if ($operand =~ /^\(p-pos (.+)\)$/s)    { return "(p-pos-ref $1)"; }
+    if ($operand =~ /^\(p-vec (.+)\)$/s)    { return "(p-vec-ref $1)"; }
   }
 
   # Get CL name for the operator

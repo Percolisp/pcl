@@ -283,6 +283,19 @@ sub parse {
   # _multi_decl "unsupported declaration".
   $self->_strip_typed_lexical_classes($doc);
 
+  # Statement-level `tie my $y, ARGS;` embeds its declaration inside a plain
+  # statement, where the lexical facts scan (and so capture promotion) cannot
+  # see it — a nested sub capturing $y then gates the file.  Normalize to the
+  # equivalent `my $y; tie $y, ARGS;` so $y is an ordinary block-level decl
+  # (state.t countfetches).  Statement position only: the two forms are
+  # identical there (same decl scope, tie applied to the same variable).
+  $doc = $self->_normalize_tie_my($doc);
+
+  # `state` outside the classic subset (scalar statement-decl in a named sub)
+  # is rewritten at SOURCE level into plain Perl the existing machinery
+  # already lowers, then the document is reparsed — see _rewrite_state_prepass.
+  $doc = $self->_rewrite_state_prepass($doc);
+
   # PPI splits an oddly-spelled qualified sub name into ADJACENT Word tokens
   # (`sub main::::flomp` → 'main::' + '::flomp'), and Statement::Sub->name
   # returns only the FIRST — every downstream consumer (prototype registry,
@@ -388,28 +401,8 @@ sub parse {
   # (`CORE::my`/`CORE::our`/`CORE::state`/`CORE::local` are normalised to the
   # bare declarator in Pl::Parser::_preprocess_source, before PPI parses — a
   # token rename here is too late, PPI already mis-structures the for-head.)
-  # `state` inside an ANON sub or a map/grep/sort block: each closure / block
-  # invocation needs its own per-instance state cell (`sub { ++state $x }`
-  # returned from a factory → independent state per returned closure; `map {
-  # state $x = … }` → one persistent cell across iterations).  v2's state-var
-  # rename doesn't scope these per-closure (it shared one cell across all
-  # instances).  `state` in a NAMED sub body (the common case) works and is NOT
-  # gated.  Getting nested-block state right is its own feature → v1 for now.
-  for my $st (@{ $doc->find(sub {
-        $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'state' }) || [] }) {
-    my $nx = $st->snext_sibling;
-    next unless $nx && ($nx->isa('PPI::Token::Symbol') || $nx->isa('PPI::Structure::List'));
-    my $anc = $st->parent;
-    while ($anc && !$anc->isa('PPI::Document')) {
-      if ($anc->isa('PPI::Structure::Block')) {
-        my $prev = $anc->sprevious_sibling;
-        die "Parser2 TODO: state in anon-sub / map-grep-sort block (per-closure)\n"
-          if $prev && $prev->isa('PPI::Token::Word')
-          && $prev->content =~ /^(?:sub|map|grep|sort)$/;
-      }
-      $anc = $anc->parent;
-    }
-  }
+  # (state decls outside the classic named-sub statement subset were rewritten
+  # away by _rewrite_state_prepass above; _rename_state_vars owns the rest.)
   # Bare `$#` (PPI::Token::Magic) — the deprecated last-index / `$#[…]` on the
   # oddly-named `@#` array.  v2 mis-parses it (element access, and never
   # forward-declares `@#`) → unbound crash.  `$#array` is a distinct ArrayIndex
@@ -480,8 +473,18 @@ sub parse {
     $cur_pkg = $pkg;
     return 1;
   };
+  my %pre_my;   # file-lexical bare names declared by top-level my/state so far
   for my $child ($doc->schildren) {
     next if $consume_pkg->($child);
+    if ($child->isa('PPI::Statement::Variable')) {
+      my $kw = ($child->schildren)[0];
+      if ($kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/) {
+        for ($self->_declared_names($child)) {
+          (my $b = $_) =~ s/^[\$\@\%]//;
+          $pre_my{$b} = 1 if /^[\$\@\%]\w+$/;
+        }
+      }
+    }
     # T-A1: a top-level bare block with direct-child `package` statements —
     # the helper-class idiom `{ package Foo; sub new {…} … }`.  Flatten its
     # children into the segment stream so the normal machinery applies; then
@@ -496,7 +499,19 @@ sub parse {
     # main-package `let` of the same bare name — was fixed via the
     # package-aware (now per-section _seg_lex) exclusion).  Full-sweep parity vs v1 on all 18
     # package-in-block files, and corpus-wide (identical fully-passing set).
-    if (my $inner = $self->_flattenable_pkg_block($child)) {
+    my $inner = $self->_flattenable_pkg_block($child);
+    # Flatten refusal (s296): a my/state decl at the BLOCK's own statement
+    # level (incl. embedded ones like `tie my $y, …`) that shadows a file
+    # lexical declared BEFORE the block would become an unscopeable
+    # segment-top-level re-decl under flattening — the span engine's hard-decl
+    # rule can neither rename nor skip it (state.t: file `my (…, $y, …)` +
+    # `tie my $y` inside the countfetches block).  Lower the block IN PLACE
+    # instead (D1-lite nested-package path), which keeps every lexical's
+    # scope intact by construction.  Files that flatten today cannot contain
+    # this shape (they would be gated), so their output is unchanged.
+    undef $inner
+      if $inner && $self->_pkgblock_shadows_file_lexical($child, \%pre_my);
+    if ($inner) {
       my $outer_pkg = $cur_pkg;
       $cur_blk = ++$blk_counter;
       # The block's leading statements (before its first `package`) get their
@@ -621,7 +636,12 @@ sub parse {
           # scope but captures the outer sub's params/lexicals (signatures.t
           # `sub t152 ($a=…, @b) { sub t152x { @b = … } }`), which the isolated
           # lowering can't wire up → unbound at load.  Gate → whole-file v1.
-          die "Parser2 TODO: named sub nested in a prototyped/signatured sub\n"
+          # PCL_NO_NESTGATE=1 lifts this gate for investigation only: s296
+          # measured signatures.t at 765+213 vs the gated (v1) 796+182 — the
+          # t146–t161 closure-family and default-expression rows regress, so
+          # the gate stays until the isolated _fallback_stmt lowering can
+          # wire a nested named sub's capture of the outer sub's params.
+          $ENV{PCL_NO_NESTGATE} or die "Parser2 TODO: named sub nested in a prototyped/signatured sub\n"
             if $sub->block
             && grep { $_->name && !$_->isa('PPI::Statement::Scheduled') }
                @{ $sub->block->find('PPI::Statement::Sub') || [] };
@@ -936,6 +956,41 @@ sub _flattenable_pkg_block {
     return undef unless $safe;
   }
   return \@inner;
+}
+
+# True when a my/state declaration at the pkg-block's own statement level
+# (its nearest enclosing block is the pkg block itself — this includes decls
+# embedded in a plain statement like `tie my $y, …`) declares a bare name in
+# %$pre (file lexicals declared before the block).  Under flattening such a
+# decl becomes a segment-top-level re-declaration of a live spanning lexical,
+# which the span engine's hard-decl rule can neither rename nor skip — so the
+# caller refuses to flatten and the block lowers in place instead.
+sub _pkgblock_shadows_file_lexical {
+  my ($self, $child, $pre) = @_;
+  return 0 unless %$pre;
+  my ($block) = grep { $_->isa('PPI::Structure::Block') } $child->schildren;
+  return 0 unless $block;
+  for my $w (@{ $block->find(sub { $_[1]->isa('PPI::Token::Word')
+                 && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
+    my ($p, $deep) = ($w->parent, 0);
+    while ($p && $p != $block) {
+      if ($p->isa('PPI::Structure::Block') || $p->isa('PPI::Statement::Sub')) {
+        $deep = 1; last;
+      }
+      $p = $p->parent;
+    }
+    next if $deep;
+    my $nx = $w->snext_sibling or next;
+    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+             : ();
+    for my $s (@syms) {
+      next unless $s->content =~ /^[\$\@\%]\w+$/;
+      (my $bare = $s->content) =~ s/^[\$\@\%]//;
+      return 1 if $pre->{$bare};
+    }
+  }
+  return 0;
 }
 
 # Reset the shared Environment's notion of the current package to a segment's
@@ -2602,6 +2657,33 @@ sub _shadow_rename_blocker {
   return undef;
 }
 
+# Container (`state @x` / `state %h`) variant of _shadow_rename_blocker: same
+# multiple-declaration and brace-deref refusals (keyed on the full sigil'd
+# name), plus the classic string-eval refusal.  Interpolated `@x` text is
+# handled by the rename's interp fixer (M-A), like scalars.
+sub _state_container_blocker {
+  my ($self, $root, $sym) = @_;
+  my $old = $sym->content;
+  (my $bare = $old) =~ s/^[\@\%]//;
+  my $decls = 0;
+  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                 && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
+    my $nx = $w->snext_sibling or next;
+    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+             : ();
+    $decls++ if grep { $_->content eq $old } @syms;
+  }
+  return "multiple declarations" if $decls != 1;
+  return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
+  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                 && $_[1]->content eq 'eval' }) || [] }) {
+    my $nx = $w->snext_sibling;
+    return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
+  }
+  return undef;
+}
+
 # Rename the declaration $sym (a `my $x` Symbol) and every post-declaration
 # scalar use of it within $root to $new — including uses inside interpolating
 # text ("$x", /$x/, heredocs, <$fh>; via _interp_fixer, M-A).  Symbols whose
@@ -2615,6 +2697,8 @@ sub _rename_decl_within {
   my ($self, $root, $sym, $new) = @_;
   my $old  = $sym->content;
   my $decl = $sym->statement;
+  my $sigil = substr($old, 0, 1);
+  (my $bare    = $old) =~ s/^[\$\@\%]//;
   (my $newbare = $new) =~ s/^[\$\@\%]//;
   my $interp_fix = _interp_fixer($old, $newbare);
   my ($seen_sym, $past_decl) = (0, 0);
@@ -2632,10 +2716,289 @@ sub _rename_decl_within {
       $past_decl = 1;
     }
     _fix_interp_token($t, $interp_fix);
+    # `$#x` last-index of a renamed @x (container decls: state @x family)
+    if ($sigil eq '@' && $t->isa('PPI::Token::ArrayIndex')
+        && $t->content eq "\$#$bare") {
+      $t->set_content("\$#$newbare");
+      next;
+    }
     next unless $t->isa('PPI::Token::Symbol') && $t->symbol eq $old;
-    $t->set_content($new);
+    # Sigil-preserving rewrite: a container's element/slice uses keep their
+    # access sigil (`$x[0]`/`$x{k}`/`@x{…}` for @x/%x) — only the NAME part
+    # changes.  For scalars this is the identity replacement (element tokens
+    # of a same-bare container resolve their ->symbol to @x/%x and never
+    # match a scalar $old).
+    (my $c = $t->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/ or next;
+    $t->set_content($c);
   }
   return $new;
+}
+
+# ---- state source rewrite (E1-e, s296) -------------------------------------
+# Perl `state` outside the classic subset (a scalar/container statement-decl
+# at block level in a named sub — _rename_state_vars' territory) is rewritten
+# AT SOURCE LEVEL into plain Perl the existing machinery already lowers
+# correctly, and the document is reparsed.  Decl sites become guarded-init
+# do-blocks over fresh cells:
+#     state $s = EXPR   →  do { unless ($FLAG) { $CELL = EXPR; $FLAG = 1 } $CELL }
+#     state $s          →  $CELL          (bare cell — undef box, ref-stable)
+# with every post-decl use of $s in its scope renamed to $CELL.  Cell
+# OWNERSHIP decides where the cells live:
+#   - nearest enclosing CV is an ANON SUB → the `sub {…}` is wrapped
+#     `do { my $CELL; my $FLAG; sub {…} }`.  The do runs per sub{} EVALUATION,
+#     so each closure instance gets fresh cells (perl's per-instance state
+#     semantics: `push @f, sub { state $x } for 1..2` yields independent
+#     cells) — riding entirely on the proven anon-sub-closes-over-block-my
+#     seam mechanism.  Scalar decls only; containers in anon subs die → v1.
+#   - named sub / file CV (including map/grep/sort blocks, which are NOT CVs)
+#     → no wrap: the fresh unique names are left undeclared and become
+#     defvar'd package globals via _forward_global_decls (boxed cell, raw-nil
+#     flag is a boxed global too — the source-level `unless ($FLAG)` unboxes).
+#     One shared cell = per-CV semantics for single-instance CVs.  This also
+#     covers expression-position decls (`++state $y`, `\state $x`,
+#     `my $x = state $y = 42`, `goto state $l = $f`) and decls inside
+#     Given/When conditions.
+# Not touched here (left for the classic pass or the seam):
+#   - the classic named-sub statement subset (see _rename_state_vars);
+#   - decls inside a SIGNATURED named sub (or inside a signature default):
+#     v1 owns the whole definition (_fallback_stmt), and its own state
+#     machinery handles them (signatures.t t126/t127);
+#   - `state sub NAME` lexical subs (snext is not a Symbol).
+# String eval residue: a renamed cell is NOT reachable by its original name
+# from eval'd code (same gap as v1's own state renames — v1 parity).
+sub _rewrite_state_prepass {
+  my ($self, $doc) = @_;
+  my $has = $doc->find(sub {
+    $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'state' }) || [];
+  return $doc unless ref $has && @$has;
+  $doc = $self->_state_reparse($doc) if $self->_state_normalize_decls($doc);
+  $doc = $self->_state_reparse($doc) if $self->_state_rewrite_routes($doc);
+  return $doc;
+}
+
+sub _state_reparse {
+  my ($self, $doc) = @_;
+  my $new = $self->fallback_parser->_ppi_parse($doc->serialize)
+    or die "Parser2: PPI reparse after state rewrite failed\n";
+  return $new;
+}
+
+# `tie my $y, ARGS;` → `my $y; tie $y, ARGS;` (see the parse() comment).
+sub _normalize_tie_my {
+  my ($self, $doc) = @_;
+  my $changed = 0;
+  for my $stmt (@{ $doc->find('PPI::Statement') || [] }) {
+    next unless ref($stmt) eq 'PPI::Statement';   # plain statements only
+    my @k = _strip_semi($stmt->schildren);
+    next unless @k >= 3
+      && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'tie'
+      && $k[1]->isa('PPI::Token::Word') && $k[1]->content eq 'my'
+      && $k[2]->isa('PPI::Token::Symbol') && $k[2]->content =~ /^\$\w+$/;
+    my $sym = $k[2]->content;
+    $k[0]->set_content('my');
+    $k[1]->delete;
+    $k[2]->set_content("$sym ; tie $sym");
+    $changed++;
+  }
+  return $changed ? $self->_state_reparse($doc) : $doc;
+}
+
+# True for a `state` Word that heads a declaration (mirrors the classic
+# pass's exclusions: `->state`, `state =>`, `sub state`, hash-key uses).
+sub _state_declarator_word {
+  my ($w) = @_;
+  my $prev = $w->sprevious_sibling;
+  return 0 if $prev && $prev->isa('PPI::Token::Operator')
+           && $prev->content =~ /^(?:->|=>)$/;
+  return 0 if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+  return 1;
+}
+
+# Shape normalizations so downstream passes see only `state $x [= INIT];`:
+#   - attributes:  `state $a :shared = 3`  →  `state $a = 3`   (attr dropped —
+#     single-threaded PCL has no shared semantics to honour)
+#   - single-scalar list + compound assign:  `state ($t) //= 3;`
+#       →  `state $t ; $t //= 3;`   (decl + per-call defaulting, perl's rule)
+#   - trailing ++/--:  `state $z ++;`  →  `state $z ; $z ++;`
+sub _state_normalize_decls {
+  my ($self, $doc) = @_;
+  my $changed = 0;
+  for my $stmt (@{ $doc->find('PPI::Statement::Variable') || [] }) {
+    my @k = _strip_semi($stmt->schildren);
+    next unless @k >= 2 && $k[0]->isa('PPI::Token::Word')
+             && $k[0]->content eq 'state' && _state_declarator_word($k[0]);
+    # attribute strip: `: word` pairs directly after the declared symbol/list
+    my $t = $k[1]->snext_sibling;
+    while ($t && $t->isa('PPI::Token::Operator') && $t->content eq ':'
+           && $t->snext_sibling && $t->snext_sibling->isa('PPI::Token::Word')) {
+      my $attr = $t->snext_sibling;
+      my $next = $attr->snext_sibling;
+      $t->delete; $attr->delete;
+      $t = $next; $changed++;
+    }
+    if ($k[1]->isa('PPI::Structure::List')) {
+      # single scalar in parens?
+      my @syms = @{ $k[1]->find('PPI::Token::Symbol') || [] };
+      next unless @syms == 1 && $syms[0]->content =~ /^\$\w+$/
+        && !grep { $_->isa('PPI::Token::Operator') && $_->content eq ',' }
+            map { $_->tokens } $k[1];
+      my $op = $k[1]->snext_sibling;
+      if ($op && $op->isa('PPI::Token::Operator')
+          && $op->content =~ /^(?:\/\/|\|\||&&|<<|>>|[-+.*\/%x&|^]|\*\*)=$/) {
+        $op->set_content('; ' . $syms[0]->content . ' ' . $op->content);
+      }
+      $k[1]->start->set_content('');
+      $k[1]->finish->set_content('') if $k[1]->finish;
+      $changed++;
+    } elsif ($k[1]->isa('PPI::Token::Symbol') && @k >= 3
+             && $k[2]->isa('PPI::Token::Operator')
+             && $k[2]->content =~ /^(?:\+\+|--)$/) {
+      $k[2]->set_content('; ' . $k[1]->content . ' ' . $k[2]->content);
+      $changed++;
+    }
+  }
+  return $changed;
+}
+
+# Route a state decl by ownership.  Returns:
+#   { route => 'skip' }                      — signatured sub / sig default: v1 owns
+#   { route => 'classic' }                   — _rename_state_vars' subset
+#   { route => 'anon', cv_block, subword }   — nearest CV is an anon sub
+#   { route => 'expr' }                      — rewrite with package cells
+sub _state_route {
+  my ($self, $w) = @_;
+  my $stmt = $w->parent;
+  my $stmt_shaped = $stmt && $stmt->isa('PPI::Statement::Variable')
+    && do { my @k = _strip_semi($stmt->schildren); @k && $k[0] == $w }
+    && $stmt->parent
+    && ($stmt->parent->isa('PPI::Structure::Block')
+        || $stmt->parent->isa('PPI::Document'));
+  my $in_mgs = 0;
+  for (my $n = $w->parent; $n && !$n->isa('PPI::Document'); $n = $n->parent) {
+    return { route => 'skip' }
+      if $n->isa('PPI::Structure::List') && $n->parent
+      && $n->parent->isa('PPI::Statement::Sub');
+    if ($n->isa('PPI::Structure::Block')) {
+      my $p = $n->sprevious_sibling;
+      $p = $p->sprevious_sibling
+        while $p && ($p->isa('PPI::Token::Prototype')
+                  || $p->isa('PPI::Token::Attribute')
+                  || ($p->isa('PPI::Token::Operator') && $p->content eq ':'));
+      if ($p && $p->isa('PPI::Token::Word')) {
+        my $c = $p->content;
+        return { route => 'anon', cv_block => $n, subword => $p } if $c eq 'sub';
+        $in_mgs = 1 if $c =~ /^(?:map|grep|sort)$/;
+      }
+    }
+    if ($n->isa('PPI::Statement::Sub') && !$n->isa('PPI::Statement::Scheduled')
+        && $n->name) {
+      return { route => 'skip' } if defined $self->_proto_or_sig_str($n);
+      return { route => ($stmt_shaped && !$in_mgs) ? 'classic' : 'expr' };
+    }
+  }
+  return { route => 'expr' };
+}
+
+# Reasons the source rewrite of one state decl is unsafe; undef when safe.
+# Unlike _shadow_rename_blocker: no string-eval refusal (the cell is a
+# package global the eval could never have reached under v1 either), and
+# sibling STATE re-decls of the name are tolerated — the caller processes
+# decls in REVERSE document order, so an earlier decl's walk finds the later
+# scope already renamed (perl's masking semantics fall out positionally).
+sub _state_rw_blocker {
+  my ($self, $root, $sym) = @_;
+  my $old = $sym->content;
+  (my $bare = $old) =~ s/^\$//;
+  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                 && $_[1]->content =~ /^(?:my|our|local)$/ }) || [] }) {
+    my $nx = $w->snext_sibling or next;
+    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+             : ();
+    return $w->content . " re-declaration of $old in scope"
+      if grep { $_->content eq $old } @syms;
+  }
+  return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
+  return undef;
+}
+
+# The last token of the init expression that starts after `$sym = ` — the
+# sibling run up to a `;`, a low-precedence / statement-modifier word, or the
+# end of the enclosing node (PPI keeps statements flat, so nested structures
+# are single siblings).  A top-level `,` ends the init only in EXPRESSION
+# position (`foo(state $x = 5, $y)`); in a statement-shaped decl the commas
+# belong to a paren-less list operator's arguments and are part of the init
+# (`state $c = \substr $tintin, $x, 1;`).
+sub _state_init_end {
+  my ($self, $sym, $stmt_shaped) = @_;
+  my %stop = map { $_ => 1 } qw(or and xor not if unless while until for foreach when);
+  my $t = $sym->snext_sibling;                 # the `=`
+  $t = $t && $t->snext_sibling;                # first init token
+  my $end;
+  while ($t) {
+    last if $t->isa('PPI::Token::Structure') && $t->content eq ';';
+    last if !$stmt_shaped
+      && $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:,|=>)$/;
+    last if $t->isa('PPI::Token::Word')      && $stop{ $t->content };
+    $end = $t;
+    $t = $t->snext_sibling;
+  }
+  die "Parser2 TODO: empty state initializer\n" unless $end;
+  return $end;
+}
+
+sub _state_rewrite_routes {
+  my ($self, $doc) = @_;
+  my (@sites, %anon);
+  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
+                 && $_[1]->content eq 'state' }) || [] }) {
+    next unless _state_declarator_word($w);
+    my $sym = $w->snext_sibling;
+    next unless $sym && $sym->isa('PPI::Token::Symbol');
+    my $route = $self->_state_route($w);
+    next if $route->{route} eq 'skip' || $route->{route} eq 'classic';
+    die "Parser2 TODO: non-scalar state declaration outside a named-sub statement: "
+      . $sym->content . "\n" unless $sym->content =~ /^\$\w+$/;
+    push @sites, [$w, $sym, $route];
+  }
+  return 0 unless @sites;
+  for my $site (reverse @sites) {
+    my ($w, $sym, $route) = @$site;
+    my $root = _enclosing_block($w) // $doc;
+    if (my $why = $self->_state_rw_blocker($root, $sym)) {
+      die "Parser2 TODO: state " . $sym->content . " rewrite ($why)\n";
+    }
+    (my $bare = $sym->content) =~ s/^\$//;
+    my $n    = $self->{_state_rename_counter}++;
+    my $cell = "\$${bare}__state__${n}";
+    my $flag = "${cell}__init";
+    $self->_rename_decl_within($root, $sym, $cell);
+    my $nx = $sym->snext_sibling;
+    my $has_init = $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=';
+    if ($has_init) {
+      my $stmt = $w->parent;
+      my $stmt_shaped = $stmt && $stmt->isa('PPI::Statement::Variable')
+        && do { my @sk = _strip_semi($stmt->schildren); @sk && $sk[0] == $w };
+      my $end = $self->_state_init_end($sym, $stmt_shaped);
+      $w->set_content("do { unless ($flag) { ");
+      $end->insert_after(PPI::Token::Word->new(" ; $flag = 1 } $cell }"));
+    } else {
+      $w->delete;
+    }
+    if ($route->{route} eq 'anon') {
+      my $a = $anon{ refaddr $route->{cv_block} } //=
+        { subword => $route->{subword}, block => $route->{cv_block}, cells => [] };
+      unshift @{ $a->{cells} }, $cell, ($has_init ? ($flag) : ());
+    }
+  }
+  for my $a (values %anon) {
+    my $fin = $a->{block}->finish
+      or die "Parser2 TODO: unterminated anon sub in state rewrite\n";
+    $a->{subword}->set_content(
+      'do { ' . join('', map { "my $_; " } @{ $a->{cells} }) . 'sub');
+    $fin->set_content('} }');
+  }
+  return 1;
 }
 
 # state in a NAMED sub (the common case): `state $x [= INIT];` at block level
@@ -2648,19 +3011,22 @@ sub _rename_decl_within {
 # same machinery as the other rename families (_rename_decl_within), so the
 # decl's own RHS still reads the OUTER variable (`state $x = $x`).
 #
+# Containers (`state @x [= LIST]`, `state %h [= LIST]`) take the same route:
+# a _fresh_container defvar cell plus a guarded whole-assignment through the
+# expression seam.
+#
 # The pass is AUTHORITATIVE for the segment: every declarator-shaped `state`
-# token is either renamed here or dies → v1.  Outside the subset:
-#   - state outside a named sub (file/block level: the cell must persist
-#     across loop iterations at file scope — a different feature, v1 owns it);
-#   - expression-position state (`my $r = (state $y = 7)` — the decl is not
-#     at block level, so the guarded init can't be a statement);
-#   - non-scalar / list state (`state @a`, `state ($x, $y)`);
-#   - the _shadow_rename_blocker set: interpolated use of the name, a second
-#     my/state declaration of it in the sub, `${x}` brace-deref, string eval
-#     in the sub (the eval capture alist finds lexicals BY SOURCE NAME — a
-#     renamed cell would be invisible to eval'd code).
-# state inside ANON subs / map-grep-sort blocks (per-closure instances) died
-# earlier, in parse()'s document-level gate.
+# token it sees is either renamed here, deliberately skipped (signatured
+# named subs — v1 owns those definitions wholesale), or dies → v1.  Outside
+# the subset:
+#   - list state (`state ($x, $y)` — the initialized forms are invalid perl);
+#   - the blocker set: a second my/state declaration of the name in the sub,
+#     `${x}` brace-deref, string eval in the sub (the eval capture alist
+#     finds lexicals BY SOURCE NAME — a renamed cell would be invisible to
+#     eval'd code).
+# Everything OUTSIDE the named-sub statement subset (anon subs, map/grep/sort
+# blocks, file level, expression position) was already rewritten into plain
+# Perl by _rewrite_state_prepass and never reaches this pass.
 sub _rename_state_vars {
   my ($self, $seg) = @_;
   my @words;
@@ -2679,6 +3045,20 @@ sub _rename_state_vars {
     my $nx = $w->snext_sibling;
     next unless $nx && ($nx->isa('PPI::Token::Symbol')
                      || $nx->isa('PPI::Structure::List'));
+    # Signatured named sub (or a decl inside a signature default): v1 owns the
+    # whole definition via _fallback_stmt — leave the tokens for its state
+    # machinery (signatures.t t126/t127).
+    my ($sanc, $insig) = ($w->parent, 0);
+    while ($sanc && !$sanc->isa('PPI::Document')) {
+      $insig = 1 if $sanc->isa('PPI::Structure::List') && $sanc->parent
+                 && $sanc->parent->isa('PPI::Statement::Sub');
+      last if $sanc->isa('PPI::Statement::Sub');
+      $sanc = $sanc->parent;
+    }
+    next if $insig;
+    next if $sanc && $sanc->isa('PPI::Statement::Sub')
+         && !$sanc->isa('PPI::Statement::Scheduled') && $sanc->name
+         && defined $self->_proto_or_sig_str($sanc);
     my $stmt = $w->parent;
     die "Parser2 TODO: state outside a block-level declaration\n"
       unless $stmt && $stmt->isa('PPI::Statement::Variable')
@@ -2693,14 +3073,15 @@ sub _rename_state_vars {
     }
     die "Parser2 TODO: state outside a named sub\n" unless $sub;
     my @k = _strip_semi($stmt->schildren);
-    die "Parser2 TODO: non-scalar state declaration: " . $stmt->content . "\n"
+    die "Parser2 TODO: unsupported state declaration shape: " . $stmt->content . "\n"
       unless @k >= 2 && $k[1]->isa('PPI::Token::Symbol')
-          && $k[1]->content =~ /^\$\w+$/
+          && $k[1]->content =~ /^[\$\@\%]\w+$/
           && (@k == 2
               || ($k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='));
-    if (my $why = $self->_shadow_rename_blocker($sub->block, $k[1])) {
-      die "Parser2 TODO: state " . $k[1]->content . " in named sub ($why)\n";
-    }
+    my $why = $k[1]->content =~ /^\$/
+      ? $self->_shadow_rename_blocker($sub->block, $k[1])
+      : $self->_state_container_blocker($sub->block, $k[1]);
+    die "Parser2 TODO: state " . $k[1]->content . " in named sub ($why)\n" if $why;
     my $new = $k[1]->content . '__state__' . $self->{_state_rename_counter}++;
     $self->_rename_decl_within($sub->block, $k[1], $new);
     $self->{_state_renamed}{$new} = @k > 2 ? 'init' : 'plain';
@@ -3282,15 +3663,19 @@ sub _lower_block {
       my $name = $sk[1]->content;
       my $kind = $self->{_state_renamed}{$name}
         or die "Parser2 TODO: unrenamed state declaration: " . $first->content . "\n";
-      push @{ $self->{_captured_decls} }, "(defvar $name (make-p-box nil))";
+      push @{ $self->{_captured_decls} },
+        "(defvar $name " . _fresh_container($name) . ")";
       my @forms;
       if ($kind eq 'init') {
         my $flag = $name . '__init';
         push @{ $self->{_captured_decls} }, "(defvar $flag nil)";
-        push @forms, ['unless', $flag,
-                      ['box-set', $name,
-                       $self->_lower_expr([@sk[3 .. $#sk]], $first)],
-                      ['setf', $flag, 't']];
+        # Scalar: guarded box-set.  Container (@x/%x): the whole assignment
+        # `@x__state__N = LIST` through the expression seam — v1 emits the
+        # p-array-= / p-hash-= form (same path the my-container branch uses).
+        my $assign = $name =~ /^\$/
+          ? ['box-set', $name, $self->_lower_expr([@sk[3 .. $#sk]], $first)]
+          : $self->_lower_expr([@sk[1 .. $#sk]], $first);
+        push @forms, ['unless', $flag, $assign, ['setf', $flag, 't']];
       }
       push @forms, $name;
       return (@forms, $self->_lower_block(\@rest, $vi, $tail_ctx));
