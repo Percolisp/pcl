@@ -319,4 +319,39 @@ like($ms, qr/\(let \(\(\*wantarray\* nil\)\) \(p-readline \$fh\)\)/,
 like($ms, qr/\(let \(\(\*wantarray\* t\)\) \(p-readline 'STDIN\)\)/,
      'readline <STDIN> list-context bound + bareword quote');
 
+# --- converted: gen_methodcall_form (E2.1, internal-node frontier) -----------
+# invocant disambiguation (class string / __PACKAGE__ / resolve-invocant /
+# paren-scalar base), dynamic method, SUPER::, and args all via the form path.
+
+my $mc = Pl::Parser2->parse_code(<<'EOT');
+package B; our @ISA = ('A');
+sub g { my $self = shift; $self->SUPER::g(1, 2); }
+package main;
+my $o = B->new();
+my $m = "g";
+my $r = \42;
+my $a = B->g(3);
+my $b = $o->g();
+my $c = $o->$m();
+my $d = __PACKAGE__->g();
+my $e = Unknownpkg->h();
+my $f = ($r // 0)->foo(7);
+print $b;
+EOT
+
+like($mc, qr/\(p-method-call "B" "new"\)/,
+     'class name invocant → "B" string literal');
+like($mc, qr/\(p-method-call \$o "g"\)/,
+     'static method name → quoted string arg');
+like($mc, qr/\(p-method-call \$o \$m\)/,
+     'dynamic method $obj->$m → variable, not quoted');
+like($mc, qr/\(p-method-call "main" "g"\)/,
+     '__PACKAGE__ invocant → current package string');
+like($mc, qr/\(p-method-call \(p-resolve-invocant "Unknownpkg"\) "h"\)/,
+     'unknown bareword invocant → (p-resolve-invocant "name")');
+like($mc, qr/\(p-method-call \(p-\/\/ \$r 0\) "foo" 7\)/,
+     'paren-scalar base → scalar-context deref invocant + args');
+like($mc, qr/\(p-super-call \$self "g" "B" 1 2\)/,
+     'SUPER::g → (p-super-call obj "g" "B" args)');
+
 done_testing();

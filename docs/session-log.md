@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 298 (2026-07-19, Opus 4.8) — E2.1 internal-node frontier: `methodcall` → CLForm, byte parity both pipelines.
+
+**On branch `wip/s296-state-family` (atop the parked s296 state work), one
+E2 commit.**  The E1 state-family business on this branch (eval.t
+regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
+untouched — those are pre-existing E1 WIP, not from this change.
+
+Converted the `methodcall` internal-node emitter to form-producing
+(`gen_methodcall_form`, registered in `form_handlers`; the text
+`gen_methodcall` stays as the decline fallback / HEAD parity oracle, same
+pattern as the other converted internal nodes).  All the invocant
+disambiguation is AST-level (`is_package`/`has_prototype` lookups, node
+ref-type checks) — no generated-text inspection except the SUPER:: prefix
+on a STATIC Word method name (a bareword, never a converted form here):
+
+- class-name invocant → `"Class"` string literal; `__PACKAGE__` → current
+  package string; known-sub invocant → `gen_node_form`; unknown bareword →
+  `(p-resolve-invocant "name")` (built as a form now, not a text atom);
+  paren-scalar base `($r//0)->m` → scalar-context deref via
+  `_gen_scalar_deref_base` wrapped as a raw atom.
+- dynamic `$obj->$m` → `(p-method-call obj $m …)`; static → quoted-string
+  method literal; `SUPER::g` → `(p-super-call obj "g" "PKG" args)`.
+- context bind via `_ctx_wrap_form` (INHERIT / tail-position unwrapped).
+
+The method child is generated exactly ONCE, in the same position (after
+the invocant, before the args), so gensym / side-effect ordering matches
+the text emitter and byte-parity holds.  Verification: `tools/corpus-diff.pl`
+(v2) **and** `PCL_V1=1 tools/corpus-diff.pl` both report emission IDENTICAL
+to HEAD across all 111 files.  No cache-gen bump (emission unchanged).  7
+new `clform-01.t` shape guards (92 total, all pass).  Remaining internal
+nodes: `tree_val`/`postfix_op`/`glob` (need the child-text-inspection
+rewritten to AST-level first), `prefix_op`, then `inline_lambda` (E2 final).
+
+---
+
 ## Session 297 (2026-07-18, Opus 4.8) — E2.1 introspection family: exists/delete/defined/tied/pos → CLForm (task #68), byte parity both pipelines.
 
 **On branch `wip/s296-state-family` (atop the parked s296 state work), one

@@ -109,6 +109,7 @@ sub _build_form_handlers {
   my $self = shift;
   return {
     'funcall'          => \&gen_funcall_form,
+    'methodcall'       => \&gen_methodcall_form,
     'ternary'          => \&gen_ternary,
     'string_concat'    => \&gen_string_concat,
     'array_str_interp' => \&gen_array_str_interp,
@@ -3065,6 +3066,87 @@ sub gen_methodcall {
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
   return $self->_ctx_wrap($call, $ctx);
+}
+
+# E2 form variant of gen_methodcall.  Same invocant disambiguation, dynamic /
+# SUPER:: detection (all AST-level — is_package/has_prototype lookups and node
+# ref-type checks, no generated-text inspection except the SUPER:: prefix on a
+# STATIC Word method name, which is a bareword and never a converted form here).
+# The method child is generated exactly ONCE, in the same position (after the
+# invocant, before the args), so gensym/side-effect ordering matches the text
+# emitter and byte-parity holds on both pipelines.
+sub gen_methodcall_form {
+  my ($self, $node, $node_id, $kids) = @_;
+
+  # --- invocant / object ---
+  my $obj_node = $self->expr_o->get_a_node($kids->[0]);
+  my $obj;
+  if ($self->expr_o->is_internal_node_type($obj_node) &&
+      $obj_node->{type} eq 'funcall') {
+    my $obj_kids = $self->expr_o->get_node_children($kids->[0]);
+    if (@$obj_kids == 1) {
+      my $class_node = $self->expr_o->get_a_node($obj_kids->[0]);
+      if (ref($class_node) eq 'PPI::Token::Word') {
+        my $name = $class_node->content();
+        if ($name eq '__PACKAGE__') {
+          my $pkg = ($self->environment && $self->environment->current_package)
+                      ? $self->environment->current_package : 'main';
+          $obj = '"' . $pkg . '"';
+        } elsif ($self->environment && $self->environment->is_package($name)) {
+          $obj = '"' . $name . '"';
+        } elsif ($self->environment && $self->environment->has_prototype($name)) {
+          $obj = $self->gen_node_form($kids->[0]);
+        } else {
+          $obj = ['p-resolve-invocant', '"' . $name . '"'];
+        }
+      } else {
+        $obj = $self->gen_node_form($kids->[0]);
+      }
+    } else {
+      $obj = $self->gen_node_form($kids->[0]);
+    }
+  } elsif ($self->_is_paren_scalar_base($kids->[0])) {
+    $obj = Pl::CLForm::raw($self->_gen_scalar_deref_base($kids->[0]));
+  } else {
+    $obj = $self->gen_node_form($kids->[0]);
+  }
+
+  # --- method name (generated once, per dynamic/static branch) ---
+  my $method_node = $self->expr_o->get_a_node($kids->[1]);
+  my $is_dynamic_method = 0;
+  if (ref($method_node) eq 'PPI::Token::Symbol' && $method_node->content() =~ /^\$/) {
+    $is_dynamic_method = 1;
+  } elsif ($self->expr_o->is_internal_node_type($method_node)) {
+    $is_dynamic_method = 1;
+  }
+  my ($method_form, $method_text);
+  if ($is_dynamic_method) {
+    $method_form = $self->gen_node_form($kids->[1]);
+  } else {
+    $method_text = $self->gen_node($kids->[1]);
+  }
+
+  # --- arguments ---
+  my @args = map { $self->gen_node_form($kids->[$_]) } 2 .. $#$kids;
+
+  # --- assemble the call form ---
+  my $call;
+  if (!$is_dynamic_method && $method_text =~ /^SUPER(?:::|')(.+)$/) {
+    my $real_method = $1;
+    my $current_pkg = $self->environment ? $self->environment->current_package : 'main';
+    (my $rm_str = $real_method) =~ s/"/\\"/g;
+    $call = ['p-super-call', $obj, "\"$rm_str\"", "\"$current_pkg\"", @args];
+  } elsif ($is_dynamic_method) {
+    $call = ['p-method-call', $obj, $method_form, @args];
+  } else {
+    (my $method_str = $method_text) =~ s/"/\\"/g;
+    $call = ['p-method-call', $obj, "\"$method_str\"", @args];
+  }
+
+  my $ctx = $self->expr_o->get_node_context($node_id);
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  return $self->_ctx_wrap_form($call, $ctx);
 }
 
 
