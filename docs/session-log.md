@@ -4,6 +4,33 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 295c-3 (2026-07-18, Fable) — E1-remainder review (decisions only, no code): user-approved completion plan for the last 5 gates.
+
+All 5 live gate reasons re-verified via PCL_V2_VERBOSE (two survey notes had
+been stale — signatures.t's real gate is state-in-signature-defaults, the
+state family, NOT a scalar-identity bless case; no bless decisions remain in
+#56).  Plan (~3 Fable + 1 parallel Opus sessions), saved to the tasks:
+- **#56 (NEXT): state.t + signatures.t** via a SOURCE-REWRITE pre-pass —
+  `sub { state $s = E; … }` → `do { my $cell; my $flag; sub { unless($flag)
+  {…} … } }` + rename; supersedes the let-over-lambda seam wrap (no seam
+  surgery, no #65 dependency).  signatures.t Route A: skip the rename in
+  signatured subs (v1 already lowers their definitions, W4).  map/grep/sort
+  + file-level = existing shared-defvar mechanism, ownership tweak.
+- **#55: chdir.t** via BEGIN-interleave into the defs stream at source
+  position — deletes the `_sched_defs` bucket (E5 down-payment), makes BEGIN
+  ordering perl-correct by construction; corpus-diff will be wide but
+  positional.  **User constraint: the all-defs-first ordering has been
+  stable from day one → build TESTABLE-FIRST (W12 dual-run playbook):
+  new ordering behind a switch, full battery under the switch, flip the
+  default only after review, delete `_sched_defs` in a later cleanup.**
+- **#70: closure.t** (fork-pipe runtime session) and **#45: postfixderef**
+  (Opus) unchanged.
+Perf framing: de-gating IS the speed win (v1 defvar-special tax → v2
+lexical lets); #62 remains the dedicated perf lever.  Census target after
+the three Fable sessions: 109-111 native.
+
+---
+
 ## Session 295c-2 (2026-07-18, Fable) — closure-gate session: conditional-my + Scheduled-block capture promotion SHIPPED; lfs.t DE-GATED as a bonus (census 106/5); closure.t stays v1 on a narrow fork-pipe-open runtime-gap gate (task #70 = the de-gate path).
 
 Two general mechanisms + one temporary gate:
