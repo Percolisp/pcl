@@ -4,6 +4,36 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 300b (2026-07-20, Fable) — #55 SHIPPED: BEGIN/defs source-order interleave DEFAULT; chdir.t de-gated (census 109/2, gen v2-40).
+
+**The structural fix (s295c-3 review decision, task #55):** scheduled blocks
+(BEGIN/END/…) now interleave with sub definitions at SOURCE POSITION in the
+section assembly, so a BEGIN sees exactly the subs defined above it and none
+below — perl-correct BY CONSTRUCTION; the fragile text-pattern introspection
+gate (`->can|isa|defined&|%Pkg::`) is bypassed.  Mechanism: parallel
+source-position arrays (`def_lines`/`sched_lines`, `_src_pos` = line·1e5+col
+for same-line ties) carried through the section record; assembly merges the
+two streams with a stable two-key sort.  Old all-defs-before-sched path kept
+behind **`PCL_SCHED_OLD=1`**; delete it + the separate `_sched_defs` assembly
+in a later cleanup once the flip survives a full session/sweep cycle
+(E5 down-payment per the plan).
+
+**Testable-first battery per the user constraint (switch-gated before flip):**
+(1) switch-off corpus-diff vs HEAD: **byte-identical, all 111 files** (the
+refactor is neutral); (2) switch-off prove-core: 4236 green; (3) switch-on
+corpus-diff review via line-multiset classifier: **50 files purely positional
++ chdir.t pipeline v1→v2 + 0 unexplained**; (4) switch-on prove-core: 4236
+green; (5) **full corpus sweep off vs on: only chdir.t moves** — PARTIAL
+2+1 crash@t22 (v1) → **OK 25+0/44 complete** (fails.tsv rows identical
+everywhere else mod addresses/tmp-paths).  Only then flipped the default.
+
+**Result:** census 108/3 → **109/2** (remaining: closure #70 runtime
+fork-pipe, signatures nested-sub).  chdir.t beats its v1 baseline outright.
+Cache gen v2-40.  2 new ordering tests in transpile-test-04b.t (BEGIN
+introspection sees earlier subs only; BEGIN calls earlier sub).
+
+---
+
 ## Session 300 (2026-07-20, Fable) — #45 CLOSED: postfixderef.t de-gated (census 108/3, gen v2-39); the 23-file corpus diff fully explained.
 
 **Committed the s299 WIP** (StringInterpolation/PExpr/Parser2, inventory in

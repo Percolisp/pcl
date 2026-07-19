@@ -687,8 +687,10 @@ sub parse {
     $self->_set_cur_package($seg->{pkg});
     $self->{_captured_decls} = [];
     $self->{_sched_defs}     = [];   # BEGIN/END p-BEGIN blocks (after defs, before run)
+    $self->{_sched_lines}    = [];   # source position per _sched_defs entry (#55 interleave)
     $self->{_hoisted_decls}  = [];
     $self->{_hoisted_defs}   = [];
+    $self->{_hoisted_def_lines} = [];  # source position per _hoisted_defs entry
     $self->{_live_lex}       = {};
     $self->{_seg_lex}        = {};   # every name let-bound in THIS section (forward-decl exclusion)
     # Named subs + Scheduled blocks of this segment — the embedded-my
@@ -727,7 +729,7 @@ sub parse {
     # the alias rule instead (p-alias-eval-cell at the decl's run position;
     # ir-spec §9.1).
     $self->fallback_parser->{_eval_span_captures} = $seg->{eval_span_captures} // {};
-    my (@decls, @defs, @top);
+    my (@decls, @defs, @def_lines, @top);
     for my $child (@{ $seg->{stmts} }) {
       if ($child->isa('PPI::Statement::Sub') && $child->name
           && !$child->isa('PPI::Statement::Scheduled')) {
@@ -736,12 +738,17 @@ sub parse {
         # p-declare-sub + p-sub into its declaration/definition buckets (→
         # _captured_decls).  Any runtime raw it returns (rare) goes to @defs.
         if (defined $self->_proto_or_sig_str($child)) {
-          push @defs, $self->_fallback_stmt($child);
+          my @raw = $self->_fallback_stmt($child);
+          push @defs, @raw;
+          push @def_lines, (_src_pos($child)) x @raw;
           next;
         }
         push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
         # Forward declaration `sub foo;` reserves the name only (no definition).
-        push @defs, $self->_lower_sub($child) if $child->block;
+        if ($child->block) {
+          push @defs, $self->_lower_sub($child);
+          push @def_lines, _src_pos($child);
+        }
         next;
       }
       # `use strict`-family pragmas are pure no-ops; real use/require/BEGIN
@@ -756,6 +763,7 @@ sub parse {
     # in Perl) hoist into the same decl/def buckets as top-level subs.
     push @decls, @{ $self->{_hoisted_decls} };
     push @defs,  @{ $self->{_hoisted_defs} };
+    push @def_lines, @{ $self->{_hoisted_def_lines} };
     push @sections, {
       pkg      => $seg->{pkg},
       reopen   => $seg->{reopen},
@@ -775,6 +783,11 @@ sub parse {
       run      => [map { $self->_gate_oversized_run_form(Pl::Parser::_cap_inlining_if_huge(Pl::CLForm::to_string($_, 0))) } @runtime],
       captured => [@{ $self->{_captured_decls} }],
       sched    => [@{ $self->{_sched_defs} }],
+      # Source positions parallel to defs/sched — the #55 interleave assembly
+      # merges the two streams by these (perl compiles subs and runs BEGIN
+      # blocks in source order; a BEGIN must not see a sub defined below it).
+      def_lines   => [@def_lines],
+      sched_lines => [@{ $self->{_sched_lines} }],
       seg_lex  => $self->{_seg_lex},
     };
   }
@@ -841,11 +854,27 @@ sub parse {
     # defconstant/eval-when from use/require/BEGIN) — before the definitions
     # that may reference them.
     push @body, @{ $sec->{captured} }, '';
-    push @body, map { ($_, '') } @{ $sec->{defs} };
-    # BEGIN/END/… blocks: after every sub definition (so a BEGIN can call a sub
-    # defined before it), before the runtime (Perl runs all compile-phase
-    # blocks before runtime code).
-    push @body, map { ($_, '') } @{ $sec->{sched} };
+    if (_sched_interleave_on()) {
+      # #55 interleave (DEFAULT since s300; PCL_SCHED_OLD=1 = escape hatch
+      # until the flip survives a full session/sweep cycle): merge sub defs and
+      # BEGIN/END forms by SOURCE POSITION — perl compiles subs and runs BEGIN
+      # blocks in source order, so a BEGIN sees exactly the subs defined above
+      # it and none below (sub-existence introspection: chdir.t).  Index
+      # tie-break keeps the merge stable for entries with equal positions.
+      my @tagged;
+      push @tagged, [$sec->{def_lines}[$_]   // 0, scalar(@tagged), $sec->{defs}[$_]]
+        for 0 .. $#{ $sec->{defs} };
+      push @tagged, [$sec->{sched_lines}[$_] // 0, scalar(@tagged), $sec->{sched}[$_]]
+        for 0 .. $#{ $sec->{sched} };
+      push @body, map { ($_->[2], '') }
+                  sort { $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] } @tagged;
+    } else {
+      push @body, map { ($_, '') } @{ $sec->{defs} };
+      # BEGIN/END/… blocks: after every sub definition (so a BEGIN can call a
+      # sub defined before it), before the runtime (Perl runs all compile-phase
+      # blocks before runtime code).
+      push @body, map { ($_, '') } @{ $sec->{sched} };
+    }
     # Runtime current-package tracking (caller()/__PACKAGE__) in execution
     # order — after this section's definitions load, before its code runs.
     push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
@@ -3655,7 +3684,26 @@ sub _hoist_nested_sub {
   push @{ $self->{_hoisted_decls} },
     ['p-declare-sub', $self->_sub_name_for_emission($sub->name)];
   push @{ $self->{_hoisted_defs} }, $self->_lower_sub($sub);
+  push @{ $self->{_hoisted_def_lines} }, _src_pos($sub);
   return;
+}
+
+# #55 defs/sched interleave: DEFAULT since s300 (battery: switch-off
+# byte-identical to pre-flip, switch-on = 50 positional moves + chdir.t
+# de-gate, full sweep identical except chdir.t 2+1crash → 25+0).
+# PCL_SCHED_OLD=1 restores the all-defs-before-scheduled assembly; delete the
+# old path (and _sched_defs' separate assembly) in a later cleanup once the
+# flip has survived a full session/sweep cycle.
+sub _sched_interleave_on { !$ENV{PCL_SCHED_OLD} }
+
+# Sortable source position of a statement (line major, column minor) — used
+# by the #55 interleave to merge sub defs and scheduled blocks in source
+# order.  Columns break same-line ties (`BEGIN { f() } sub f {…}`).
+sub _src_pos {
+  my ($stmt) = @_;
+  my $line = $stmt->line_number   // 0;
+  my $col  = $stmt->column_number // 0;
+  return $line * 100000 + ($col < 100000 ? $col : 99999);
 }
 
 # `my ($a, $b) = @_;` → ['$a','$b'] | undef
@@ -4069,12 +4117,17 @@ sub _lower_block {
     # and BEGINs in SOURCE ORDER — an assembly-model change out of W8 scope.
     # Gate a BEGIN that does method-existence introspection → v1 (correct order).
     # A BEGIN that merely CALLS a sub (the s272g case) is unaffected.
-    my $bt = $first->content;
-    die "Parser2 TODO: BEGIN block with sub-existence introspection (def-ordering)\n"
-      if $bt =~ /->\s*(?:can|isa|DOES)\b/     # $obj->can("m") / ->isa
-      || $bt =~ /\b(?:can|isa)\s*\(/          # can(...) / isa(...)
-      || $bt =~ /\bdefined\s*&/               # defined &sub / defined &{"Pkg::$_"}
-      || $bt =~ /%[\w:]+::/;                  # keys %Pkg:: stash walk
+    # Under the #55 interleave the assembly places each p-BEGIN at its source
+    # position among the sub defs, so the ordering is perl-correct BY
+    # CONSTRUCTION and the fragile text-pattern gate is unnecessary.
+    unless (_sched_interleave_on()) {
+      my $bt = $first->content;
+      die "Parser2 TODO: BEGIN block with sub-existence introspection (def-ordering)\n"
+        if $bt =~ /->\s*(?:can|isa|DOES)\b/     # $obj->can("m") / ->isa
+        || $bt =~ /\b(?:can|isa)\s*\(/          # can(...) / isa(...)
+        || $bt =~ /\bdefined\s*&/               # defined &sub / defined &{"Pkg::$_"}
+        || $bt =~ /%[\w:]+::/;                  # keys %Pkg:: stash walk
+    }
     return ($self->_fallback_stmt($first, sched => 1),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
@@ -5331,7 +5384,9 @@ sub _fallback_stmt_capture {
   for my $sec (@{ $p->_sections }) {
     push @{ $self->{_captured_decls} },
       grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}};
-    push @$defs_target, grep { /\S/ } @{$sec->{definitions}};
+    my @d = grep { /\S/ } @{$sec->{definitions}};
+    push @$defs_target, @d;
+    push @{ $self->{_sched_lines} }, (_src_pos($stmt)) x @d if $opt{sched};
     push @runtime, grep { /\S/ } @{$sec->{runtime}};
   }
   $p->_sections($saved[0]);

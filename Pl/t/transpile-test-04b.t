@@ -662,6 +662,24 @@ my $r = [7,8,9];
 print takeit("$r->@[0,1]"), "\n";
 ');
 
+# s300/#55: BEGIN blocks interleave with sub defs at SOURCE POSITION — a
+# BEGIN sees exactly the subs defined above it and none below (perl compiles
+# in source order; sub-existence introspection must not see later subs).
+test_transpile("BEGIN sub-existence introspection sees earlier subs only", '
+sub early { "e" }
+BEGIN {
+    print defined &early ? "early-yes;" : "early-no;";
+    print defined &late  ? "late-yes;"  : "late-no;";
+}
+sub late { "l" }
+print "run\n";
+');
+test_transpile("BEGIN calls a sub defined before it", '
+sub greet { "hi" }
+BEGIN { print greet(), ";"; }
+print "run\n";
+');
+
 # s299/#45: a bare-block my whose name is also a package global elsewhere is
 # renamed (shadow) so the block sees the lexical and the file keeps the global.
 test_transpile("bare-block my shadowing a package global leaves the global intact", '

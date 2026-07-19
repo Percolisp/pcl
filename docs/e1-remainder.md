@@ -1,5 +1,17 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s300b, 2026-07-20, Fable 5): #55 chdir SHIPPED — census 109
+> native / 2 gated, gen v2-40.**  De-gated **chdir.t** (25+0/44 COMPLETE —
+> v1 baseline CRASHED at t22 with 2+1) via the structural fix: BEGIN/END
+> blocks interleave with sub defs at SOURCE POSITION in section assembly
+> (perl-correct by construction; text-pattern introspection gate bypassed).
+> Old ordering behind `PCL_SCHED_OLD=1` until the flip survives a full
+> session cycle, then delete (E5 down-payment).  Battery: switch-off
+> byte-identical corpus-wide; switch-on = 50 purely-positional moves +
+> chdir pipeline switch, 0 unexplained; full sweep — only chdir.t moves.
+> **Remaining 2 gates: closure (#70 fork-pipe runtime), signatures
+> (nested-sub in signatured sub).**  s300b detail in `docs/session-log.md`.
+
 > **UPDATE (s300, 2026-07-20, Fable 5): #45 postfixderef SHIPPED — census
 > 108 native / 3 gated, gen v2-39.**  De-gated **postfixderef.t** (83+36
 > crash@t119 → 94+27 to-EOF, both pipelines): interp postderef
