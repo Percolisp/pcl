@@ -4,13 +4,26 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), seven
+**On branch `wip/s296-state-family` (atop the parked s296 state work), eight
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change (both
 verified failing identically at HEAD via a stash-and-run before commit).
+
+**Tenth commit — `glob` → `gen_glob_form`.**  The file-glob `<*.c>` /
+`<$pat>` node.  Clean, no operand-text dispatch: the pattern is generated as
+a form, and the negated-char-class detection (`[!chars]`/`[^chars]`, which
+SBCL's pathname wildcards can't do) runs on the pattern's FLAT text (== v1's
+`$pattern_str` bytes) exactly like `gen_glob`, so the same globs get the same
+`remove-if` filter — built structurally (`(remove-if (lambda (--f--) …)
+(p-glob "?…"))`, byte-identical to the text template) — over the
+`?`-simplified `(p-glob …)`.  Literal → `(p-glob "*.c")`, interpolated →
+`(p-glob (p-. …))`, empty → `(p-glob)`; wantarray bind via
+`_wrap_wantarray_ctx_form`.  Both pipelines byte-identical to HEAD across all
+111 files; `tools/prove-core` green except the two pre-existing state-family
+fails.  No cache-gen bump.  4 new `clform-01.t` guards (153 total).
 
 **Ninth commit — `=` assignment → `gen_binary_op_form` (the last binary-op
 decline removed; gen_binary_op_form now converts EVERY operator).**  The

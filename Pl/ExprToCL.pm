@@ -130,6 +130,7 @@ sub _build_form_handlers {
     'kv_slice_h_acc'   => \&gen_kv_hash_slice_form,
     'kv_slice_a_acc'   => \&gen_kv_array_slice_form,
     'progn'            => \&gen_progn_form,
+    'glob'             => \&gen_glob_form,
     'backtick'         => \&gen_backtick_form,
     'readline'         => \&gen_readline_form,
     'filehandle'       => \&gen_filehandle_form,
@@ -4966,6 +4967,60 @@ sub gen_glob {
   }
 
   return $self->_wrap_wantarray_ctx($call, $ctx);
+}
+
+# E2 form variant of gen_glob.  No operand-text dispatch: the pattern is
+# generated as a form and the negated-char-class detection runs on its FLAT
+# text (== v1's $pattern_str bytes) exactly like gen_glob, so the same globs
+# get the same filter.  The remove-if filter is built structurally (its
+# to_flat is byte-identical to the text template).  wantarray wrap via the
+# form variant.
+sub gen_glob_form {
+  my ($self, $node, $node_id, $kids) = @_;
+
+  my ($pattern_flat, $call);
+  if (@$kids == 1) {
+    my $pf = $self->gen_node_form($kids->[0]);
+    $pattern_flat = Pl::CLForm::to_flat($pf);
+    $call = ['p-glob', $pf];
+  } elsif (@$kids > 1) {
+    my @parts  = map { $self->gen_node_form($_) } @$kids;
+    my $concat = ['p-.', @parts];
+    $pattern_flat = Pl::CLForm::to_flat($concat);
+    $call = ['p-glob', $concat];
+  } else {
+    $pattern_flat = '"*"';
+    $call = ['p-glob'];
+  }
+
+  # Negated character class [!chars]/[^chars] in a LITERAL pattern: SBCL's
+  # pathname wildcards can't negate, so glob a ?-simplified pattern and filter.
+  my $negated_chars;
+  if ($pattern_flat =~ /^"([^"]*)"$/) {
+    my $pat = $1;
+    if ($pat =~ /\[([!\^])([^\]]+)\]/) {
+      $negated_chars = $2;
+      (my $simple_pat = $pat) =~ s/\[[!\^][^\]]+\]/?/g;
+      $call = ['p-glob', qq{"$simple_pat"}];
+    }
+  }
+
+  my $ctx = defined $node_id
+            ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+
+  if (defined $negated_chars) {
+    my $filter = ['remove-if',
+                  ['lambda', ['list', '--f--'],
+                   ['let', ['list', ['list', '--name--',
+                                     ['file-namestring', ['pathname', '--f--']]]],
+                    ['and', ['>', ['length', '--name--'], '0'],
+                            ['find', ['char', '--name--', '0'],
+                                     qq{"$negated_chars"}]]]],
+                  $call];
+    return $self->_wrap_wantarray_ctx_form($filter, $ctx);
+  }
+
+  return $self->_wrap_wantarray_ctx_form($call, $ctx);
 }
 
 

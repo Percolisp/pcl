@@ -319,6 +319,26 @@ like($ms, qr/\(let \(\(\*wantarray\* nil\)\) \(p-readline \$fh\)\)/,
 like($ms, qr/\(let \(\(\*wantarray\* t\)\) \(p-readline 'STDIN\)\)/,
      'readline <STDIN> list-context bound + bareword quote');
 
+# --- converted: gen_glob_form (E2.1) ----------------------------------------
+# literal / interpolated (p-. concat) / negated-char-class (glob + remove-if
+# filter) patterns, all with the wantarray bind.
+my $gl = Pl::Parser2->parse_code(<<'EOT');
+my $dir = "d";
+my @a = <*.txt>;
+my @b = <$dir/*.c>;
+my @c = <[!._]*>;
+my $one = <*.log>;
+print "@a";
+EOT
+like($gl, qr/\(let \(\(\*wantarray\* t\)\) \(p-glob "\*\.txt"\)\)/,
+     'glob literal → (p-glob "*.txt") list-context bound');
+like($gl, qr/\(p-glob \(p-\. \$dir "\/\*\.c"\)\)/,
+     'glob interpolated → (p-glob (p-. …))');
+like($gl, qr/\(remove-if \(lambda \(--f--\) \(let \(\(--name-- \(file-namestring \(pathname --f--\)\)\)\) \(and \(> \(length --name--\) 0\) \(find \(char --name-- 0\) "\._"\)\)\)\) \(p-glob "\?\*"\)\)/,
+     'glob [!chars] → glob "?"-simplified + remove-if filter');
+like($gl, qr/\(let \(\(\*wantarray\* nil\)\) \(p-glob "\*\.log"\)\)/,
+     'glob scalar-context → (let ((*wantarray* nil)) (p-glob …))');
+
 # --- converted: gen_methodcall_form (E2.1, internal-node frontier) -----------
 # invocant disambiguation (class string / __PACKAGE__ / resolve-invocant /
 # paren-scalar base), dynamic method, SUPER::, and args all via the form path.
