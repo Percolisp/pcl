@@ -4,9 +4,9 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` + non-interp regex/cast/`$#arr` leaves → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` + regex (incl. interpolated) / cast / `$#arr` leaves → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), ten
+**On branch `wip/s296-state-family` (atop the parked s296 state work), eleven
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change (both
@@ -29,6 +29,23 @@ conversion is coupled to E2.final (retire `to_flat` for the multi-line
 structure the VarAnnotator can walk, retiring its `seam` special-case.
 Correctly scheduled last; NOT a standalone byte-parity step.  User chose to
 proceed with the remaining leaf compounds instead.
+
+**Thirteenth commit — interpolated `m//` / `qr//` regex leaves →
+`gen_leaf_form` (refactor `_gen_interp_regex_pattern` to a CLForm).**  The
+shared pattern-parts builder now returns a CLForm (a `"…"` atom, a
+`$var`/`(p-aref …)`/`(p-gethash …)` part, or `(p-string-concat …)` over a
+mix) instead of a text string — one implementation, no duplication (§11).
+Its three text callers wrap the result in `Pl::CLForm::to_flat` (gen_leaf's
+qr// + match branches, and gen_substitution's `$match_cl`); gen_leaf_form's
+regex branches embed it structurally as `(pcl::p-regex-from-parts PAT
+"flags")`.  All the helpers (`_parse_regex_content`,
+`_has_regex_interpolation`, `_gen_interp_regex_pattern`) are pure — no gensym,
+env mutation, or gen_node — so the form path builds directly and never
+declines (no double-run risk).  `s///` / `tr///` still stay on the text path.
+Both pipelines byte-identical to HEAD across all 111 files (this touches a
+SHARED helper — v1 parity matters here); `tools/prove-core` green except the
+two pre-existing state-family fails.  No cache-gen bump.  2 new
+`clform-01.t` guards + richer interp coverage (162 total).
 
 **Twelfth commit — `Cast` atom + `$#arr` (`ArrayIndex`) leaves →
 `gen_leaf_form`.**  A bare deref-sigil `PPI::Token::Cast` (`@`/`%`/`$`/`\`/`&`/

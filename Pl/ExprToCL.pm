@@ -524,10 +524,11 @@ sub gen_node_form {
 # E2 leaf conversion (docs/v2-endgame-plan.md E2.1, literal/sym frontier):
 # CLForm for a converted leaf token, or undef to decline (→ raw v1 text).
 # Converted: Symbol/Magic genuine atoms, string/heredoc/word/operator/cast
-# atoms, the Number family, $#arr (ArrayIndex), and NON-interpolated m// / qr//
-# regex leaves.  Declines (→ text path): Symbol/Magic compounds
-# (stash/typeglob/&sub/errno), interpolated regexes, and s/// / tr/// (side
-# effects, possible /e lambda).  Byte-for-byte gen_leaf's shapes.
+# atoms, the Number family, $#arr (ArrayIndex), and m// / qr// regex leaves
+# (both non-interpolated → (p-regex …)/(pcl::p-qr …) and interpolated →
+# (pcl::p-regex-from-parts …)).  Declines (→ text path): Symbol/Magic compounds
+# (stash/typeglob/&sub/errno) and s/// / tr/// (side effects, possible /e
+# lambda).  Byte-for-byte gen_leaf's shapes.
 sub gen_leaf_form {
   my ($self, $node) = @_;
   my $ref = ref($node);
@@ -616,18 +617,23 @@ sub gen_leaf_form {
     return $num;
   }
 
-  # Regex leaves.  Only the NON-interpolated match m/// and qr// forms convert:
-  # their gen_leaf output is a pure single-level (p-regex "…") / (pcl::p-qr "…")
-  # (content re-escaped, no side effects, no interpolation-time gen).  The
-  # interpolation check (_parse_regex_content + _has_regex_interpolation) is
-  # pure, so declining an interpolated pattern BEFORE any generation is safe
-  # (the raw re-run through gen_node emits the p-regex-from-parts / capture
-  # machinery once).  s/// and tr/// stay on the text path entirely
-  # (gen_substitution / gen_transliteration: side effects, possible /e lambda).
+  # Match m// and qr// regex leaves convert, both non-interpolated and
+  # interpolated.  Non-interp → a single-level (p-regex "…") / (pcl::p-qr "…")
+  # (content re-escaped).  Interp → (pcl::p-regex-from-parts PAT "flags") where
+  # PAT is _gen_interp_regex_pattern's CLForm ("…"/$var/(p-aref …)/(p-gethash …)
+  # / (p-string-concat …)).  All the helpers (_parse_regex_content,
+  # _has_regex_interpolation, _gen_interp_regex_pattern) are pure — no gensym,
+  # no env mutation, no gen_node — so building the form directly (never
+  # declining) has no double-run risk.  s/// and tr/// stay on the text path
+  # entirely (gen_substitution / gen_transliteration: side effects, /e lambda).
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
     my $content = $node->content();
-    my ($pattern) = _parse_regex_content($content, 1);
-    return undef if _has_regex_interpolation($pattern);
+    my ($pattern, $flags) = _parse_regex_content($content, 1);
+    if (_has_regex_interpolation($pattern)) {
+      my $pat_form = _gen_interp_regex_pattern($pattern);
+      (my $esc_flags = $flags) =~ s/"/\\"/g;
+      return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
+    }
     $content =~ s/\\/\\\\/g;
     $content =~ s/"/\\"/g;
     return ['pcl::p-qr', qq{"$content"}];
@@ -636,8 +642,12 @@ sub gen_leaf_form {
                || $ref eq 'PPI::Token::Regexp::Transliterate';
   if ($ref =~ /^PPI::Token::Regexp/) {
     my $content = $node->content();
-    my ($pattern) = _parse_regex_content($content, 0);
-    return undef if _has_regex_interpolation($pattern);
+    my ($pattern, $flags) = _parse_regex_content($content, 0);
+    if (_has_regex_interpolation($pattern)) {
+      my $pat_form = _gen_interp_regex_pattern($pattern);
+      (my $esc_flags = $flags) =~ s/"/\\"/g;
+      return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
+    }
     $content =~ s/\\/\\\\/g;
     $content =~ s/"/\\"/g;
     return ['p-regex', qq{"$content"}];
@@ -670,8 +680,11 @@ sub _has_regex_interpolation {
   return $pattern =~ /(?<!\\)\$[a-zA-Z_{]|(?<!\\)\@[a-zA-Z_{]/;
 }
 
-# Build a CL expression that evaluates to the interpolated pattern string.
-# Handles $scalar_var (simple scalar variables).
+# Build a CLForm that evaluates to the interpolated pattern string: a "…"
+# literal, a $var / (p-aref …) / (p-gethash …) part, or (p-string-concat …)
+# over a mix.  Text callers wrap the result in Pl::CLForm::to_flat; the E2 leaf
+# form path (gen_leaf_form) embeds it structurally.  Handles $scalar_var and
+# $var->[i] / $var->{k} deref chains.
 sub _gen_interp_regex_pattern {
   my ($pattern) = @_;
   my @parts;
@@ -713,7 +726,7 @@ sub _gen_interp_regex_pattern {
           }
           last if $depth != 0;
           my $idx = substr($pattern, $start, $j - $start - 1);
-          $cl_expr = "(p-aref $cl_expr $idx)";
+          $cl_expr = ['p-aref', $cl_expr, $idx];
           $i = $j;
         } elsif ($bracket eq '{') {
           my ($start, $depth, $j) = ($i + 3, 1, $i + 3);
@@ -727,7 +740,7 @@ sub _gen_interp_regex_pattern {
           my $key = substr($pattern, $start, $j - $start - 1);
           $key =~ s/^["']//; $key =~ s/["']$//;
           $key =~ s/\\/\\\\/g; $key =~ s/"/\\"/g;
-          $cl_expr = "(p-gethash $cl_expr \"$key\")";
+          $cl_expr = ['p-gethash', $cl_expr, qq{"$key"}];
           $i = $j;
         } else { last; }
       }
@@ -743,7 +756,7 @@ sub _gen_interp_regex_pattern {
   }
   return @parts == 0 ? '""'
        : @parts == 1 ? $parts[0]
-       : "(p-string-concat " . join(" ", @parts) . ")";
+       : ['p-string-concat', @parts];
 }
 
 sub gen_leaf {
@@ -922,7 +935,7 @@ sub gen_leaf {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 1);
     if (_has_regex_interpolation($pattern)) {
-      my $pat_expr = _gen_interp_regex_pattern($pattern);
+      my $pat_expr = Pl::CLForm::to_flat(_gen_interp_regex_pattern($pattern));
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
     }
@@ -991,7 +1004,7 @@ sub gen_leaf {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 0);
     if (_has_regex_interpolation($pattern)) {
-      my $pat_expr = _gen_interp_regex_pattern($pattern);
+      my $pat_expr = Pl::CLForm::to_flat(_gen_interp_regex_pattern($pattern));
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
     }
@@ -5248,7 +5261,7 @@ sub gen_substitution {
   # Build pattern CL expression (may be a string literal or a runtime string expression)
   my $match_cl;
   if (_has_regex_interpolation($match)) {
-    $match_cl = _gen_interp_regex_pattern($match);  # CL expr evaluating to pattern string
+    $match_cl = Pl::CLForm::to_flat(_gen_interp_regex_pattern($match));  # CL expr → pattern string
   } else {
     $match =~ s/\\/\\\\/g;
     $match =~ s/"/\\"/g;

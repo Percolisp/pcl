@@ -237,13 +237,16 @@ like($ql, qr/\(pl-f "plain"\)/,  'qq{} literal → "plain" atom');
 like($ql, qr/\(pl-f "lit"\)/,    'q{} literal → "lit" atom');
 
 # --- converted: gen_leaf_form regex leaves (E2.1 leaf) ----------------------
-# NON-interpolated m// / qr// become (p-regex "…") / (pcl::p-qr "…") forms;
-# interpolated patterns and s/// / tr/// DECLINE to the text path unchanged.
+# m// / qr// convert both ways: non-interp → (p-regex "…")/(pcl::p-qr "…");
+# interpolated → (pcl::p-regex-from-parts PAT "flags") over a CLForm pattern
+# ("…"/$var/(p-string-concat …)/(p-gethash …)).  s/// and tr/// still decline.
 my $rl = Pl::Parser2->parse_code(<<'EOT');
-my $x = "abc";
+my $x = "abc"; my $r = { k => "z" };
 my $m  = $x =~ /a.c/;
 my $q  = qr/\d+/i;
 my $mi = $x =~ /$x/;
+my $mc = $x =~ /pre${x}post/i;
+my $md = $x =~ /$r->{k}/;
 $x =~ s/a/b/;
 $x =~ tr/a/b/;
 print $m;
@@ -252,10 +255,14 @@ like($rl, qr/\(p-=~ \$x \(p-regex "\/a\.c\/"\)\)/,
      'non-interp m// → (p-regex "/a.c/")');
 like($rl, qr{\(pcl::p-qr "qr/\\\\d\+/i"\)},
      'non-interp qr// → (pcl::p-qr "qr/\\d+/i")');
-like($rl, qr/\(pcl::p-regex-from-parts \$x /,
-     'interpolated /$x/ declines → (pcl::p-regex-from-parts …)');
-like($rl, qr/\(p-subst "a" "b"\)/,  's/// declines → (p-subst …)');
-like($rl, qr/\(p-tr /,              'tr/// declines → (p-tr …)');
+like($rl, qr/\(pcl::p-regex-from-parts \$x ""\)/,
+     'interp /$x/ → (pcl::p-regex-from-parts $x "")');
+like($rl, qr/\(pcl::p-regex-from-parts \(p-string-concat "pre" \$x "post"\) "i"\)/,
+     'interp /pre${x}post/i → concat parts + flags');
+like($rl, qr/\(pcl::p-regex-from-parts \(p-gethash \$r "k"\) ""\)/,
+     'interp /$r->{k}/ → deref-chain (p-gethash …) part');
+like($rl, qr/\(p-subst "a" "b"\)/,  's/// still declines → (p-subst …)');
+like($rl, qr/\(p-tr /,              'tr/// still declines → (p-tr …)');
 
 # --- converted: gen_leaf_form Cast atom + ArrayIndex (E2.1 leaf) -------------
 # @$ref cast sigil → bare atom; $#arr → (p-array-last-index @arr) form.
