@@ -961,10 +961,17 @@ sub _flattenable_pkg_block {
 # True when a my/state declaration at the pkg-block's own statement level
 # (its nearest enclosing block is the pkg block itself — this includes decls
 # embedded in a plain statement like `tie my $y, …`) declares a bare name in
-# %$pre (file lexicals declared before the block).  Under flattening such a
-# decl becomes a segment-top-level re-declaration of a live spanning lexical,
-# which the span engine's hard-decl rule can neither rename nor skip — so the
-# caller refuses to flatten and the block lowers in place instead.
+# %$pre (file lexicals declared before the block) AND that shadowed lexical
+# is still referenced after the block (_lex_referenced_after).  Only then is
+# the file lexical truly SPANNING: under flattening the block's decl becomes
+# a segment-top-level re-declaration of a live spanning lexical, which the
+# span engine's rename machinery cannot scope (state.t: file `my (…,$y,…)` +
+# `tie my $y` in the countfetches block + `$y = 0` after it).  Without a
+# post-block reference the span engine handles the flattened shape exactly
+# as it did before this refusal existed (rename or die → v1, never a
+# miscompile) — and firing anyway rerouted eval.t's DB/Eval1 blocks to
+# in-place lowering, regressing the whole file to v1 via the capture gate
+# (s296's one open regression, fixed s299).
 sub _pkgblock_shadows_file_lexical {
   my ($self, $child, $pre) = @_;
   return 0 unless %$pre;
@@ -987,8 +994,53 @@ sub _pkgblock_shadows_file_lexical {
     for my $s (@syms) {
       next unless $s->content =~ /^[\$\@\%]\w+$/;
       (my $bare = $s->content) =~ s/^[\$\@\%]//;
-      return 1 if $pre->{$bare};
+      return 1 if $pre->{$bare}
+        && $self->_lex_referenced_after($child, $s->content);
     }
+  }
+  return 0;
+}
+
+# True when canonical lexical $canon (e.g. '$y') is REFERENCED in the
+# file-level statements after $child (the pkg-block statement) — i.e. the
+# pre-block file lexical of that name is still live past the block, so it
+# would have to span the block's flattened segments.  Symbol/ArrayIndex uses
+# are declarator- and shadow-discounted via the span engine's own predicates
+# (a post-block `my $x = 3` re-decl and its scoped uses are a NEW variable,
+# not a reference); interpolated mentions count sigil-aware via _interp_canon.
+# Deliberately NO string-eval conservatism here (unlike _canon_refs_in): an
+# eval-string mention post-block (eval.t's `eval '$x'`) is exactly what the
+# rename machinery's M-F alias rule handles under flattening — counting it
+# would over-refuse.  Under-firing is always safe: no refusal = the pre-s296
+# flattening path, whose span engine renames correctly or dies to v1.
+sub _lex_referenced_after {
+  my ($self, $child, $canon) = @_;
+  my @after;
+  for (my $sib = $child->snext_sibling; $sib; $sib = $sib->snext_sibling) {
+    push @after, $sib;
+  }
+  return 0 unless @after;
+  (my $bare = $canon) =~ s/^[\$\@\%]//;
+  my $seg_parent = $child->parent;
+  for my $stmt (@after) {
+    next unless ref $stmt && $stmt->isa('PPI::Node');
+    for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
+      next unless ($s->symbol // '') eq $canon;
+      next if $self->_symbol_is_declarator($s);
+      next if $self->_ref_shadowed($s, $canon, \@after, $seg_parent);
+      return 1;
+    }
+    if ($canon =~ /^\@/) {
+      for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+        (my $b = $ai->content) =~ s/^\$#//;
+        next unless $b eq $bare;
+        next if $self->_ref_shadowed($ai, $canon, \@after, $seg_parent);
+        return 1;
+      }
+    }
+    my %hit;
+    _interp_canon($stmt, { $canon => 1 }, { $bare => [$canon] }, \%hit);
+    return 1 if $hit{$canon};
   }
   return 0;
 }

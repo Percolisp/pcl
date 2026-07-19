@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 299 (2026-07-19, Fable) — #56 CLOSED: eval.t flatten-refusal regression fixed, full verification green, branch merged (census 107/4).
+
+**E2 review first (user request):** independently re-verified Opus 4.8's
+13-commit E2.1 stack (s297+s298) — `tools/corpus-diff.pl 71d2595` and
+`PCL_V1=1` variant both report emission IDENTICAL across all 111 files vs
+the pre-E2 commit, `clform-01.t` 162 guards pass.  Clean scope (only
+ExprToCL.pm + guards + docs).  No issues found.
+
+**The eval.t fix (task #56 item 1).**  Diagnosis: the s296 flatten refusal
+`_pkgblock_shadows_file_lexical` fired on eval.t's DB block (l.361, `my $x=2`
+shadowing file `my $x` l.107) and Eval1 block (l.461, `my $ok`), rerouting
+them to D1-lite in-place lowering → fewer segments → file `$r` never spanned
+→ never renamed → the `_check_sub_captures` gate fired on `sub terminal`'s
+eval-string `$r` → whole-file v1.  KEY EMPIRICAL FACT: the refusal predicate
+over-covered — with the refusal disabled, eval.t flattens and is
+byte-identical to main (`$x` renames to `x__file__7`; the M-B multi-instance
+machinery handles a segment-top re-decl fine), and state.t *safely dies* to
+v1 ("my-lexical 't' spans a package boundary", an eval-scan hit at l.458 —
+NOT a miscompile).  So the refusal is a de-gating aid, not a correctness
+guard, and under-firing is always safe (= pre-s296 main behavior: rename or
+die).
+
+**Fix:** refusal now ALSO requires `_lex_referenced_after` — the shadowed
+file lexical is referenced in file-level statements AFTER the block (only
+then must it span the flattened segments).  Symbol/ArrayIndex uses are
+declarator/shadow-discounted via the span engine's own `_symbol_is_declarator`
+/ `_ref_shadowed`; interpolated mentions count via `_interp_canon`;
+deliberately NO string-eval conservatism (that's what the rename machinery's
+M-F alias rule handles under flattening — counting it would re-break eval.t
+via its post-block `eval '$x'` at l.547).  state.t's `$y = 0` (l.246) still
+fires the refusal → countfetches block lowers in place → state.t stays
+v2-native.
+
+**Verification (task #56 items 2–6):**
+- corpus-diff vs main (4f600f2): v2 differs ONLY in {state.t (the feature),
+  method.t, scalar.t (tie-my normalization)}; eval.t and sort.t back to
+  byte parity.  PCL_V1 corpus-diff: identical across all 111 (the shared
+  ExprToCL `/s` fix changes no v1 bytes).  Runtime diff vs main = cache-gen
+  bump only, so byte-identical emission ⇒ identical behavior for the 108.
+- Behavior sweep of the 3 changed + 2 neighbors vs a main worktree run:
+  `sweep-diff` row-level 0 new / 0 fixed for eval/method/sort/scalar;
+  state.t 141+8 → 157+0 (ran 162/166, 5 skips).
+- Pl/t gate: `tools/prove-core` — 115 files, 4228 tests, ALL PASS.  The two
+  pre-existing branch fails updated to guard the NEW intended shapes:
+  `state-01.t` #3 (state ($t) //= 3 now emits `p-//=` on the persistent
+  cell — the defined-or IS the once-guard, no `__init`) and `parser2-02.t`
+  #39 (file-level state no longer gates; now asserts cell defvar + init
+  guard, +2 tests).
+- skip-registry: 'Reference to state variable' NOT stale (`\state $x` still
+  yields distinct refs — documented SV-identity non-support); row stays.
+- Census 107/4 (state.t de-gated; remaining gates: chdir #55,
+  postfixderef #45, closure #70, signatures nested-sub).
+
+**New regression tests** (`state-01.t` 27→33): per-instance anon-sub state,
+`state @a/%h = LIST` once-init, `my $x = state $y = 42` (pugnax),
+`\state $x` live ref, the full tie-my countfetches shape under the refusal
+(FETCH exactly once), `\substr` on a state var writes through (the `/s`
+fix).  Writing t28 exposed a PRE-EXISTING (on main, both pipelines) bug →
+task #72: `print $f->(), $f->()` where the sub tail is `++$x` prints the
+final value twice — p-pre++ returns the live cell box and print unboxes
+lazily; the test copies each result into a `my` first.
+
+**Merged to main** (fast-forward: state-family + 14 E2.1 commits + docs +
+this fix).  Cache gen v2-38 (bumped in-branch s296).  signatures.t
+nested-sub de-gate remains a future task (see task #56 notes).
+
 ## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` + regex (incl. interpolated) / cast / `$#arr` leaves → CLForm, byte parity both pipelines.
 
 **On branch `wip/s296-state-family` (atop the parked s296 state work), eleven

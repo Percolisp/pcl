@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 33;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -84,10 +84,12 @@ sub test_cl {
     like($cl, qr/unless.*__init/s, 'state var generates unless-init guard');
 }
 
-# Test 3: state ($t) //= expr generates init guard
+# Test 3: state ($t) //= expr — the defined-or on the persistent cell IS the
+# once-guard (assigns only while undef), so no __init flag is emitted (s296).
 {
     my $cl = transpile('use feature ":5.10"; sub f { state ($t) //= 3; $t }');
-    like($cl, qr/unless.*__init/s, 'state list form with //= generates init guard');
+    like($cl, qr/\(p-\/\/= \$t__state__\d+ 3\)/,
+         'state list form with //= applies defined-or to the persistent cell');
 }
 
 # ── Runtime tests ────────────────────────────────────────────────────────────
@@ -344,3 +346,76 @@ test_cl('state var as implicit sub return yields the variable',
      sub g { my $v = shift; state $y = $v; }
      print g(8), g(9), "\n";',
     "88\n");
+
+# ── s296 state-family regression tests ──────────────────────────────────────
+
+# Test 28: per-instance state in anon subs — each `sub {…}` evaluation mints
+# its own state cell (route A do-wrap), so the two closures count separately.
+# Each result is copied into a `my` before the next call: `++$x` returns the
+# live cell box, and holding two un-unboxed results of the same cell shows a
+# separate, PRE-EXISTING aliasing bug (present on main; print $f->(), $f->()
+# prints the final value twice) that is not what this test guards.
+test_cl('anon-sub state is per closure instance',
+    'use feature ":5.10";
+     my @f;
+     push @f, sub { state $x = 0; ++$x } for 1 .. 2;
+     my $a = $f[0]->(); my $b = $f[0]->(); my $c = $f[1]->(); my $d = $f[0]->();
+     print "$a$b$c$d\n";',
+    "1213\n");
+
+# Test 29: classic container state WITH list initializer (once-init guard).
+test_cl('state @a / %h = LIST initialize once and persist',
+    'use feature ":5.10";
+     sub f { state @a = (1, 2); push @a, 9; return scalar(@a) }
+     sub g { state %h = (a => 1); $h{ scalar(keys %h) } = 1; return scalar(keys %h) }
+     print f(), f(), " ", g(), g(), "\n";',
+    "34 23\n");
+
+# Test 30: expression-position chained init `my $x = state $y = 42` — the
+# init runs once; later calls read the persisted (incremented) cell.
+test_cl('my $x = state $y = 42 (state.t pugnax)',
+    'use feature ":5.10";
+     sub pugnax { my $x = state $y = 42; $y++; $x; }
+     print pugnax(), ",", pugnax(), "\n";',
+    "42,43\n");
+
+# Test 31: \state $x in expression position transpiles v2-native and the ref
+# is a live SCALAR ref (ref identity across calls stays not-supported).
+test_cl('\\state $x yields a usable scalar ref',
+    'use feature ":5.10";
+     sub r { \state $x }
+     my $ref = r();
+     $$ref = 7;
+     print ref($ref), " $$ref\n";',
+    "SCALAR 7\n");
+
+# Test 32: `tie my $y` inside a pkg block shadowing a file lexical that IS
+# referenced after the block (state.t countfetches shape): the flatten
+# refusal reroutes to in-place lowering; tie-my normalization + capture
+# promotion keep the tied $y visible to the sub, FETCH fires exactly once
+# for the state init, and the outer $y is untouched.
+test_cl('tie my $y capture promotion under flatten refusal',
+    'use feature ":5.10";
+     my ($w, $y) = (5, 6);
+     {
+         package countfetches;
+         our $fetchcount = 0;
+         sub TIESCALAR { bless {} }
+         sub FETCH { ++$fetchcount; 18 }
+         tie my $y, "countfetches";
+         sub foo { state $x = $y; $x++ }
+         print foo(), "\n";
+         print foo(), "\n";
+         print $fetchcount, "\n";
+     }
+     print "$y\n";',
+    "18\n19\n1\n6\n");
+
+# Test 33: \substr write-through when the operand is a STATE var (its cell
+# access lowers to a multiline do-shape — the ExprToCL magic-lvalue detection
+# needs /s to see it; without write-through this prints "hello").
+test_cl('\\substr on a state var writes through',
+    'use feature ":5.10";
+     sub f { state $s = "hello"; my $r = \substr($s, 0, 1); $$r = "J"; return $s }
+     print f(), "\n";',
+    "Jello\n");

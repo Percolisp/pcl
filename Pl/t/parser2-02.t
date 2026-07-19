@@ -203,9 +203,14 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
     q{use feature 'state'; sub s2 { my $n = 1; state $n = 2; return $n; } print s2();}) };
   like($@, qr/state \$n in named sub \(multiple declarations\)/,
        'state shadowing a my in the same sub gates to v1');
+  # s296: state OUTSIDE a named sub no longer gates — it lowers natively to a
+  # package-cell defvar + __init once-guard (the classic-pass container/scalar
+  # route).
   my $g2 = eval { Pl::Parser2->parse_code(
     q{use feature 'state'; for (1..3) { state $x = 0; } print 1;}) };
-  like($@, qr/state outside a named sub/, 'file-level state gates to v1');
+  is($@, '', 'file-level state no longer gates to v1');
+  like($g2, qr/\(defvar \$x__state__\d+ /, 'file-level state: cell defvar');
+  like($g2, qr/__state__\d+__init/, 'file-level state: once-init guard');
 }
 
 # ---- runtime ----
