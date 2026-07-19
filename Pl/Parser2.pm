@@ -633,21 +633,14 @@ sub parse {
         # sub_info: ExprToCL2's direct-call path ignores imposed context, so
         # call sites to a prototyped sub must take the fallback funcall path.
         if (defined(my $proto = $self->_proto_or_sig_str($sub))) {
-          # A prototyped/signatured sub's DEFINITION is lowered in ISOLATION via
-          # _fallback_stmt (W4) — a scratch v1 section with no file-scope lexical
-          # context.  A NAMED sub nested inside it is hoisted by Perl to package
-          # scope but captures the outer sub's params/lexicals (signatures.t
-          # `sub t152 ($a=…, @b) { sub t152x { @b = … } }`), which the isolated
-          # lowering can't wire up → unbound at load.  Gate → whole-file v1.
-          # PCL_NO_NESTGATE=1 lifts this gate for investigation only: s296
-          # measured signatures.t at 765+213 vs the gated (v1) 796+182 — the
-          # t146–t161 closure-family and default-expression rows regress, so
-          # the gate stays until the isolated _fallback_stmt lowering can
-          # wire a nested named sub's capture of the outer sub's params.
-          $ENV{PCL_NO_NESTGATE} or die "Parser2 TODO: named sub nested in a prototyped/signatured sub\n"
-            if $sub->block
-            && grep { $_->name && !$_->isa('PPI::Statement::Scheduled') }
-               @{ $sub->block->find('PPI::Statement::Sub') || [] };
+          # (s300c) The former whole-file gate for a NAMED sub nested inside a
+          # prototyped/signatured sub is gone: the seam lowering now hoists the
+          # nested sub correctly — top-level prototyped subs lower with the
+          # per-segment fresh _let_bound_vars, and the block-nested route
+          # clears leaked let-bound names it never references (see the
+          # Statement::Sub branch in _lower_block), so v1's nested-named hoist
+          # (`sub t152x` callable before `t152` runs) engages as in whole-file
+          # v1.  signatures.t: 796+182, fail rows identical to v1.
           my $sig_info = $self->fallback_parser->parse_prototype_or_signature($proto, $sub);
           $self->environment->add_prototype($sub->name, $sig_info);
           $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}));
@@ -4144,6 +4137,42 @@ sub _lower_block {
   # the definition into the section's decl/def buckets.  A bodyless forward
   # declaration (`sub foo;`) hoists only a p-declare-sub (no definition).
   if ($first->isa('PPI::Statement::Sub') && $first->name) {
+    # Prototyped/signatured: v1 owns the whole definition, same as the
+    # top-level route (s300c) — the native _lower_sub used to swallow these
+    # and DROP the signature (params fell through to file globals; defaults
+    # never ran: signatures.t t131/t144/t146–t161, sig-r3 probe).  The
+    # p-declare-sub + p-sub land in v1's buckets (→ _captured_decls);
+    # rare runtime raws stay in place here.
+    #
+    # v1 keys its sub bucketing on _let_bound_vars: non-empty forces IN-PLACE
+    # runtime emission (so a closure can capture a let lexical) and — the
+    # trap — suppresses the hoist of named subs NESTED in this sub's body, so
+    # `sub t146 ($a = t146x()) { sub t146x {…} … }` leaves t146x undefined
+    # until t146 first RUNS while the default already calls it (undef).  The
+    # let-bound set here is usually just leakage from earlier file lexicals
+    # this sub never touches: when the sub's text references NONE of the
+    # let-bound names, lower it with an EMPTY set (definitions bucket +
+    # nested-sub hoist, the whole-file-v1 shape); a genuine reference keeps
+    # the in-place capture behavior.
+    if ($first->block && defined $self->_proto_or_sig_str($first)) {
+      my $p    = $self->fallback_parser;
+      my $lb   = $p->{_let_bound_vars} // {};
+      my $text = $first->content;
+      my $refs_letbound = 0;
+      for my $lv (keys %$lb) {
+        (my $bare = $lv) =~ s/^[\$\@\%]//;
+        $bare =~ s/__(?:lex|file|shadow)__\d+$//;
+        if ($text =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/) { $refs_letbound = 1; last }
+      }
+      my @out;
+      if ($refs_letbound) {
+        @out = $self->_fallback_stmt($first);
+      } else {
+        local $p->{_let_bound_vars} = {};
+        @out = $self->_fallback_stmt($first);
+      }
+      return (@out, $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
     if ($first->block) {
       $self->_hoist_nested_sub($first);
     } else {

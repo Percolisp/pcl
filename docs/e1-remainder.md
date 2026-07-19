@@ -1,5 +1,16 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s300c, 2026-07-20, Fable 5): signatures gate GONE — census 110
+> native / 1 gated, gen v2-41.**  The "named sub nested in a
+> prototyped/signatured sub" gate hid a live miscompile: BLOCK-NESTED
+> signatured subs lost their whole signature in v2 (native _lower_sub path).
+> Fixed by routing them through the v1 seam like top-level ones + lowering
+> with an empty _let_bound_vars set when the sub references none of the
+> leaked let-bound names (restores v1's nested-named-sub hoist).  Gate
+> deleted; signatures.t 796+182, fail rows IDENTICAL to v1.  **E1's one
+> remaining whole-file gate: closure.t (#70) — a RUNTIME fork-pipe gap, not
+> a compiler gate.**  s300c detail in `docs/session-log.md`.
+
 > **UPDATE (s300b, 2026-07-20, Fable 5): #55 chdir SHIPPED — census 109
 > native / 2 gated, gen v2-40.**  De-gated **chdir.t** (25+0/44 COMPLETE —
 > v1 baseline CRASHED at t22 with 2+1) via the structural fix: BEGIN/END

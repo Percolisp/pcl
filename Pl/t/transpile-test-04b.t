@@ -680,6 +680,33 @@ BEGIN { print greet(), ";"; }
 print "run\n";
 ');
 
+# s300c (signatures gate): a BLOCK-NESTED signatured sub used to lose its
+# whole signature in v2 (native _lower_sub ignored it — params fell through
+# to file globals, defaults never ran); it now routes through the v1 seam
+# like top-level signatured subs.
+test_transpile("block-nested signatured sub keeps its signature and defaults", '
+use feature q(signatures); no warnings;
+$a = 123;
+{
+    sub t9 ($a = 222, $b = 7) { "$a/$b" }
+}
+print t9(), ";", t9(1), "\n";
+');
+# ... and a named sub nested INSIDE the signatured sub hoists so the
+# signature default can call it before the outer sub ever runs (the former
+# whole-file "named sub nested in a prototyped/signatured sub" gate).
+test_transpile("named sub nested in signatured sub is callable from the default", '
+use feature q(signatures); no warnings;
+my $file_lex = "leak-me";
+{
+    sub t146 ($a = t146x()) {
+        sub t146x { $a = "abc"; 1 }
+        $a;
+    }
+    print t146(), "\n";
+}
+');
+
 # s299/#45: a bare-block my whose name is also a package global elsewhere is
 # renamed (shadow) so the block sees the lexical and the file keeps the global.
 test_transpile("bare-block my shadowing a package global leaves the global intact", '

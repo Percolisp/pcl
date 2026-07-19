@@ -4,6 +4,39 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 300c (2026-07-20, Fable) — signatures gate GONE: block-nested signatured-sub miscompile fixed (census 110/1, gen v2-41).
+
+**The gate's real story:** "named sub nested in a prototyped/signatured sub"
+was hiding a LIVE SILENT MISCOMPILE on main, not gate-only territory: a
+signatured sub nested in a bare block took `_lower_block`'s hoist path →
+native `_lower_sub`, which **dropped the whole signature** — params fell
+through to file globals, defaults never ran (probe: `{ sub t9 ($a=222,$b=7)
+{"$a/$b"} }` → perl `222/7`, v2 `123/`).  All 32 rows that "regressed" in
+the s296 blind-lift measurement (t131 goto-in-default, t144 ctx family,
+t146–t161 closures) trace to this.
+
+**Fix 1 (routing):** block-nested prototyped/signatured subs route through
+the v1 seam (`_fallback_stmt`) exactly like top-level ones.  **Fix 2
+(let-bound leakage):** v1 buckets a sub IN-PLACE (and suppresses its
+nested-named-sub hoist) whenever `_let_bound_vars` is non-empty — in-file
+that set is mostly leakage from earlier file lexicals the sub never touches,
+which left `sub t146x` undefined until `t146` first ran while the signature
+default already called it.  The new route lowers with an EMPTY set when the
+sub's text references none of the let-bound names (original bare names —
+`__lex/file/shadow__N` stripped); a genuine reference keeps the in-place
+closure behavior.  Then the whole-file gate deleted outright.
+
+**Verification:** signatures.t **796+182, fail rows IDENTICAL to v1** (the
+blind lift was 765+213).  Corpus-diff: 4 files — signatures (v1→v2),
+grep/sort/postfixderef (block-nested prototyped subs moved to the seam
+shape); behavior sweeps vs HEAD: all status + fail rows identical.  Full
+gate 115/4238+2 green.  Census 109/2 → **110/1** — E1's only remaining
+whole-file gate is closure.t (#70 fork-pipe RUNTIME gap, not a compiler
+gate).  Cache gen v2-41.  2 tests added (block-nested signature defaults;
+nested-named-sub-in-signatured-sub callable from default).
+
+---
+
 ## Session 300b (2026-07-20, Fable) — #55 SHIPPED: BEGIN/defs source-order interleave DEFAULT; chdir.t de-gated (census 109/2, gen v2-40).
 
 **The structural fix (s295c-3 review decision, task #55):** scheduled blocks
