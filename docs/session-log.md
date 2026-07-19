@@ -4,13 +4,44 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` + non-interp regex leaves → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), eight
+**On branch `wip/s296-state-family` (atop the parked s296 state work), nine
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change (both
 verified failing identically at HEAD via a stash-and-run before commit).
+
+**`inline_lambda` finding (not converted — reported to user, deferred to
+E2.final).**  It is the last non-leaf text emitter, but it CANNOT be
+converted at byte parity within the dual-run scaffold: `map`/`grep`/`sort`
+block bodies are multi-line text carrying `;;` source-echo comments (v1
+statement-emitter output stapled onto the node as the opaque `body_cl`
+string at parse time — even `grep { $_ }` is multi-line with a `;; $_`
+echo).  The E2 parity boundary is `to_flat` (EXACT one-line render), which
+(a) collapses the layout and (b) refuses any chunk containing a `;` comment
+(the comment would swallow the closing parens on one line).  So making
+`inline_lambda` a form breaks parity on every map/grep/sort file — the
+documented "layout inside multi-line raws" parity break.  The real
+conversion is coupled to E2.final (retire `to_flat` for the multi-line
+`to_string` printer at the seam root) AND the E5 statement-layer rework
+(emit CLForm, not bucket text with `;;` echoes) — only then is the body
+structure the VarAnnotator can walk, retiring its `seam` special-case.
+Correctly scheduled last; NOT a standalone byte-parity step.  User chose to
+proceed with the remaining leaf compounds instead.
+
+**Eleventh commit — non-interpolated `m//` / `qr//` regex leaves →
+`gen_leaf_form`.**  Their gen_leaf output is a pure single-level
+`(p-regex "…")` / `(pcl::p-qr "…")` (content re-escaped, no interpolation-time
+gen, no counters), so they structure directly.  The interpolation check
+(`_parse_regex_content` + `_has_regex_interpolation`, both pure) runs first,
+so declining an interpolated pattern happens BEFORE any side effect — the raw
+re-run through gen_node emits the `p-regex-from-parts` / capture machinery
+exactly once.  `s///` and `tr///` stay on the text path entirely
+(gen_substitution / gen_transliteration have side effects and a possible /e
+lambda).  Both pipelines byte-identical to HEAD across all 111 files;
+`tools/prove-core` green except the two pre-existing state-family fails.  No
+cache-gen bump.  5 new `clform-01.t` guards (158 total).
 
 **Tenth commit — `glob` → `gen_glob_form`.**  The file-glob `<*.c>` /
 `<$pat>` node.  Clean, no operand-text dispatch: the pattern is generated as

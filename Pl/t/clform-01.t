@@ -236,6 +236,27 @@ like($ql, qr/\(pl-f "single"\)/, 'single-quote literal → "single" atom');
 like($ql, qr/\(pl-f "plain"\)/,  'qq{} literal → "plain" atom');
 like($ql, qr/\(pl-f "lit"\)/,    'q{} literal → "lit" atom');
 
+# --- converted: gen_leaf_form regex leaves (E2.1 leaf) ----------------------
+# NON-interpolated m// / qr// become (p-regex "…") / (pcl::p-qr "…") forms;
+# interpolated patterns and s/// / tr/// DECLINE to the text path unchanged.
+my $rl = Pl::Parser2->parse_code(<<'EOT');
+my $x = "abc";
+my $m  = $x =~ /a.c/;
+my $q  = qr/\d+/i;
+my $mi = $x =~ /$x/;
+$x =~ s/a/b/;
+$x =~ tr/a/b/;
+print $m;
+EOT
+like($rl, qr/\(p-=~ \$x \(p-regex "\/a\.c\/"\)\)/,
+     'non-interp m// → (p-regex "/a.c/")');
+like($rl, qr{\(pcl::p-qr "qr/\\\\d\+/i"\)},
+     'non-interp qr// → (pcl::p-qr "qr/\\d+/i")');
+like($rl, qr/\(pcl::p-regex-from-parts \$x /,
+     'interpolated /$x/ declines → (pcl::p-regex-from-parts …)');
+like($rl, qr/\(p-subst "a" "b"\)/,  's/// declines → (p-subst …)');
+like($rl, qr/\(p-tr /,              'tr/// declines → (p-tr …)');
+
 # --- converted: arr_init / hash_init form handlers (E2.1 internal nodes) -----
 
 my $in = Pl::Parser2->parse_code(<<'EOT');

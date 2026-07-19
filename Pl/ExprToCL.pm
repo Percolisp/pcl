@@ -523,8 +523,11 @@ sub gen_node_form {
 
 # E2 leaf conversion (docs/v2-endgame-plan.md E2.1, literal/sym frontier):
 # CLForm for a converted leaf token, or undef to decline (→ raw v1 text).
-# Converted so far: the Number family (number / number-hex / -octal / -binary
-# / -float / -exp / -version).  Byte-for-byte gen_leaf's shapes.
+# Converted: Symbol/Magic genuine atoms, string/heredoc/word/operator atoms,
+# the Number family, and NON-interpolated m// / qr// regex leaves.  Declines
+# (→ text path): Symbol/Magic compounds (stash/typeglob/&sub/errno),
+# interpolated regexes, and s/// / tr/// (side effects, possible /e lambda).
+# Byte-for-byte gen_leaf's shapes.
 sub gen_leaf_form {
   my ($self, $node) = @_;
   my $ref = ref($node);
@@ -596,6 +599,33 @@ sub gen_leaf_form {
       }
     }
     return $num;
+  }
+
+  # Regex leaves.  Only the NON-interpolated match m/// and qr// forms convert:
+  # their gen_leaf output is a pure single-level (p-regex "…") / (pcl::p-qr "…")
+  # (content re-escaped, no side effects, no interpolation-time gen).  The
+  # interpolation check (_parse_regex_content + _has_regex_interpolation) is
+  # pure, so declining an interpolated pattern BEFORE any generation is safe
+  # (the raw re-run through gen_node emits the p-regex-from-parts / capture
+  # machinery once).  s/// and tr/// stay on the text path entirely
+  # (gen_substitution / gen_transliteration: side effects, possible /e lambda).
+  if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
+    my $content = $node->content();
+    my ($pattern) = _parse_regex_content($content, 1);
+    return undef if _has_regex_interpolation($pattern);
+    $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
+    return ['pcl::p-qr', qq{"$content"}];
+  }
+  return undef if $ref eq 'PPI::Token::Regexp::Substitute'
+               || $ref eq 'PPI::Token::Regexp::Transliterate';
+  if ($ref =~ /^PPI::Token::Regexp/) {
+    my $content = $node->content();
+    my ($pattern) = _parse_regex_content($content, 0);
+    return undef if _has_regex_interpolation($pattern);
+    $content =~ s/\\/\\\\/g;
+    $content =~ s/"/\\"/g;
+    return ['p-regex', qq{"$content"}];
   }
 
   return undef;   # decline: not a converted leaf type
