@@ -293,6 +293,25 @@ code and the highest-value OO change.
   pattern once at load time** (`load-time-value` scanner) instead of per match;
   then measure how much of the gap is PCL plumbing (capture boxing, `=~`
   `*wantarray*` wrap) vs the engine before considering a PCRE2 FFI.
+  - **FUTURE ITEM — PCRE2 via `sb-alien` (not CFFI).** Investigated 2026-07-19.
+    Feasibility is good; it's scoped as a separate, well-contained project.
+    Findings: `libpcre2-8/16/32.so.0` are already present on the dev box (no
+    `-dev` headers needed — FFI declares its own signatures, the `.so` links at
+    runtime); CFFI is *not* installed and shouldn't be added — PCL already
+    bridges C with SBCL-native `sb-alien` (the `crypt()`→`libcrypt.so.1` path),
+    so hand-bind the handful of PCRE2 entry points (`pcre2_compile_8`,
+    `pcre2_match_8`, `pcre2_get_ovector_pointer_8`, `pcre2_code_free_8`) the same
+    way. **The FFI is the easy part; budget the effort for two things:** (1)
+    string marshalling — SBCL strings are UCS-4, the 8-bit lib matches over a
+    UTF-8 code-unit buffer, so encode the subject once (cache it per subject) and
+    **map returned byte offsets back to char indices** for `$&`/`pos`/captures;
+    (2) compiled-pattern lifetime — wrap the `pcre2_code` so GC finalizes it, and
+    compile constant patterns once (`load-time-value`). **Bonus argument
+    stronger than the ~3.7× speed:** PCRE2 is literally Perl-Compatible, so it
+    would likely *close* correctness gaps (`/n`, `(?{…})`, Unicode property
+    classes — see `not-supported.md`) as a side effect. Do the plumbing/capture
+    measurement above FIRST to confirm the engine (not PCL's own wrapping)
+    dominates before committing.
 - **pack/unpack (1175–1587×).** The transpiled pure-Perl oracle **re-parses the
   template string every call**. **P1: memoize the template parse** keyed on the
   constant template (biggest local win); **P2:** for a literal template, emit a
