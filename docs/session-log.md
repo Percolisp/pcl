@@ -4,6 +4,46 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 300 (2026-07-20, Fable) — #45 CLOSED: postfixderef.t de-gated (census 108/3, gen v2-39); the 23-file corpus diff fully explained.
+
+**Committed the s299 WIP** (StringInterpolation/PExpr/Parser2, inventory in
+task #45): interp postderef (`"$r->@*"` family) via lexical postderef_qq
+feature lookup in the shared interp layer; implicit-arrow `->(){k}`/`->()[i]`
+subscript retag; `{bareword}` autoquote in re-blessed plain-Statement
+subscripts; `array_str_interp` child = LIST_CTX; `_rename_poisoned_block_mys`
+(bare-block `my` colliding with a package global → `__shadow__N` rename).
+postfixderef.t 83+36 crash@t119 → **94+27 to-EOF, BOTH pipelines** (the
+interp + arrow fixes live in the shared expression layer); fixed rows =
+t98–106 interp family; residual fails catalogued in #45 (utf8/symref t42-59,
+'.'-overload t107, bareword symref, PVBM → #66/future).
+
+**The 23-file v2 corpus diff (s299's open question): NOT the LIST_CTX hunk.**
+Classifier (whole-file compare with `__shadow__N` undone + added defvar
+fwd-decls dropped + whitespace collapsed): 17 files RENAME-ONLY, eval/pack =
+rename FLIPS (HEAD's s296 shadow renames no longer fire there — strip both
+sides ⇒ identical), bless.t = self-ref `my $c1 = bless $c1` lost `p-box-init`
+shape after $c1 became a declared global (its rebless rows are the documented
+not-supported family), study.t = `my $a` now a raw-string let (read-only
+lexical, verdict change).  The `child_context` LIST_CTX hunk has ZERO corpus
+footprint outside postfixderef.t — no narrowing needed; it is the semantically
+right rule (interp join is always list ctx).  **Behavior sweep of all 23
+files vs a HEAD worktree: every _status row and fails.tsv row identical**
+(magic.t rows differ only in the embedded /proc-cmdline run path) —
+postfixderef.t is the only mover, strictly better.
+
+**Verification:** corpus-diff v1 clean (only postfixderef.t), v2 = the 23
+explained above; full gate `tools/prove-core` green — 115 files / 4236 tests
+(8 new in transpile-test-04b.t: interp postderef on/off/scope-out + `$*` +
+slice-as-scalar-proto-arg, `->(){k}`/`->()[i]`, `{sub-name}` autoquote,
+block-my-vs-global rename; the transpile-test-02.t t64 guard flipped from
+asserting the v1 gate to asserting v2-native).  Census 107/4 → **108/3**
+(remaining gates: chdir #55, closure #70, signatures nested-sub).  Cache gen
+v2-38 → v2-39.  Tool fix: `corpus-diff.pl --show` now `diff -a` (NUL bytes
+made diff report "binary" and the header-splice ate the message — hunks were
+silently empty).
+
+---
+
 ## Session 299 (2026-07-19, Fable) — #56 CLOSED: eval.t flatten-refusal regression fixed, full verification green, branch merged (census 107/4).
 
 **E2 review first (user request):** independently re-verified Opus 4.8's

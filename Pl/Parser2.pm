@@ -598,6 +598,9 @@ sub parse {
   $self->{_cond_rename_counter} = 0;
   $self->{_shadow_rename_counter} = 0;
   $self->_rename_poisoned_cond_mys($_) for @segments;
+  # s299 sibling pass: nested-bare-block `my` shadowing a package GLOBAL of
+  # the same name (see the sub's comment).
+  $self->_rename_poisoned_block_mys($_) for @segments;
 
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
@@ -680,7 +683,6 @@ sub parse {
   my @sections;
   for my $seg (@segments) {
     $self->_check_sub_captures($seg->{stmts});
-    $self->_check_interp_postderef($seg->{stmts});
     $self->cur_pkg($seg->{pkg});
     $self->_set_cur_package($seg->{pkg});
     $self->{_captured_decls} = [];
@@ -1384,32 +1386,9 @@ sub _proto_or_sig_str {
   return $sig ? $sig->content : undef;
 }
 
-# Postfix deref INSIDE an interpolating string ("$ref->@*" / "$s->$*" under
-# `use feature 'postderef_qq'`) is not implemented by the string-interpolation
-# lowering — it emits the arrow part as literal text, a silent miscompile →
-# gate the file.  (v1 has the same gap but its whole-file emission aborts the
-# enclosing form at load instead of printing wrong values.)  Conservative:
-# fires on the text pattern whether or not the feature is enabled — without
-# the feature the construct is genuinely literal text, so over-firing only
-# costs the v2 lowering, never correctness.
-sub _check_interp_postderef {
-  my ($self, $stmts) = @_;
-  for my $stmt (@$stmts) {
-    next unless ref $stmt && $stmt->isa('PPI::Node');
-    for my $t (@{ $stmt->find('PPI::Token') || [] }) {
-      my $c;
-      if ($t->isa('PPI::Token::HereDoc')) {
-        next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;
-        $c = join '', $t->heredoc;
-      } elsif ($t->isa('PPI::Token::Quote::Double')
-            || $t->isa('PPI::Token::Quote::Interpolate')) {
-        $c = $t->content;
-      } else { next; }
-      die "Parser2 TODO: interpolated postfix deref (postderef_qq)\n"
-        if $c =~ /->\s*(?:\$\#?\*|\@\*|\%\*|\@\[|\@\{|\%\{)/;
-    }
-  }
-}
+# (The s280 `_check_interp_postderef` gate was removed in s299: postderef_qq
+# interpolation is now implemented in Pl/PExpr/StringInterpolation.pm —
+# lexically feature-scoped, shared by both pipelines.)
 
 sub _check_sub_captures {
   my ($self, $stmts) = @_;
@@ -2714,7 +2693,7 @@ sub _shadow_rename_blocker {
 # name), plus the classic string-eval refusal.  Interpolated `@x` text is
 # handled by the rename's interp fixer (M-A), like scalars.
 sub _state_container_blocker {
-  my ($self, $root, $sym) = @_;
+  my ($self, $root, $sym, $eval_ok) = @_;
   my $old = $sym->content;
   (my $bare = $old) =~ s/^[\@\%]//;
   my $decls = 0;
@@ -2728,10 +2707,16 @@ sub _state_container_blocker {
   }
   return "multiple declarations" if $decls != 1;
   return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
-  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
-                 && $_[1]->content eq 'eval' }) || [] }) {
-    my $nx = $w->snext_sibling;
-    return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
+  # $eval_ok (s299, __shadow__ renames only): the eval capture alist strips
+  # the __shadow__N suffix back to the original name sigil-agnostically, so
+  # string eval still reaches a container shadow.  state renames produce
+  # cells the alist does not carry, so they keep the refusal.
+  unless ($eval_ok) {
+    for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                   && $_[1]->content eq 'eval' }) || [] }) {
+      my $nx = $w->snext_sibling;
+      return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
+    }
   }
   return undef;
 }
@@ -3222,6 +3207,110 @@ sub _rename_poisoned_cond_mys {
         $old . '__cond__' . $self->{_cond_rename_counter}++);
     }
   }
+}
+
+# W8.5 sibling (s299): a `my` inside a NESTED BARE BLOCK whose name is ALSO
+# used as a package global elsewhere in the segment (postfixderef.t: global
+# @a at file level + `my ($s,@a,%h)` inside a block).  The block lexical
+# registers in _seg_lex, which suppresses the global's forward defvar — the
+# global is then unbound at load.  Same cure as the cond-my pass: rename the
+# block-scoped lexical (the block is its whole scope) to NAME__shadow__N —
+# the suffix _eval_lexical_alist already strips, so string eval inside the
+# block still reaches the shadow by its original name.  Only poisoned names
+# rename; a blocked site is left untouched (the global stays unbound exactly
+# as before — never worse).  Sub bodies are skipped (their lexicals are the
+# capture machinery's turf); foreach loop-vars and condition-mys are skipped
+# (loop/cond scope, handled by their own machinery).
+sub _rename_poisoned_block_mys {
+  my ($self, $seg) = @_;
+  my $stmts = $seg->{stmts};
+
+  # 1. Collect nested-block my-decl sites: [block, my-word, symbol].
+  my @sites;
+  for my $top (@$stmts) {
+    next unless ref $top && $top->isa('PPI::Node');
+    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
+                                   && $_[1]->content eq 'my' }) || [] }) {
+      # The declaring statement must be a plain variable/expression statement
+      # (excludes `foreach my $x` — parent is the Compound — and other
+      # declarator positions).
+      my $ds = $w->parent;
+      next unless $ds && (ref($ds) eq 'PPI::Statement::Variable'
+                          || ref($ds) eq 'PPI::Statement'
+                          || ref($ds) eq 'PPI::Statement::Expression');
+      my ($p, $block, $bad) = ($w->parent, undef, 0);
+      while ($p && $p != $top) {
+        if ($p->isa('PPI::Structure::Condition')
+            || $p->isa('PPI::Structure::For')) { $bad = 1; last }
+        if ($p->isa('PPI::Structure::Block')) { $block = $p; last }
+        $p = $p->parent;
+      }
+      next if $bad || !$block;
+      my ($q, $in_sub) = ($block, 0);
+      while ($q) {
+        if ($q->isa('PPI::Statement::Sub')) { $in_sub = 1; last }
+        $q = $q->parent;
+      }
+      next if $in_sub;
+      my $nx = $w->snext_sibling or next;
+      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+               : ();
+      push @sites, [$block, $w, $_]
+        for grep { $_->content =~ /^[\$\@\%]\w+$/ } @syms;
+    }
+  }
+  return unless @sites;
+
+  my %by_name;
+  push @{ $by_name{ $_->[2]->content } }, $_ for @sites;
+
+  NAME: for my $old (sort keys %by_name) {
+    my $sigil = substr($old, 0, 1);
+    (my $bare = $old) =~ s/^[\$\@\%]//;
+    my %in_block = map { (refaddr($_->[0]) => 1) } @{ $by_name{$old} };
+
+    # 2. Poison test: a NON-declarator use of the name outside all of its
+    #    blocks.  A my/our/local DECLARATOR outside means the name is a real
+    #    lexical/global declaration elsewhere — the suppression is then that
+    #    declaration's business, not ours: skip the whole name.
+    my $inside_one = sub {
+      my ($tok) = @_;
+      for (my $p = $tok->parent; $p; $p = $p->parent) {
+        return 1 if $p->isa('PPI::Structure::Block') && $in_block{refaddr $p};
+      }
+      return 0;
+    };
+    my $poisoned = 0;
+    for my $top (@$stmts) {
+      next unless ref $top && $top->isa('PPI::Node');
+      for my $s (@{ $top->find('PPI::Token::Symbol') || [] }) {
+        next unless ($s->symbol // '') eq $old;
+        next if $inside_one->($s);
+        next NAME if $self->_symbol_is_declarator($s);
+        $poisoned = 1;
+      }
+      if ($sigil eq '@') {
+        for my $ai (@{ $top->find('PPI::Token::ArrayIndex') || [] }) {
+          next unless $ai->content eq "\$#$bare";
+          $poisoned = 1 unless $inside_one->($ai);
+        }
+      }
+    }
+    next NAME unless $poisoned;
+
+    # 3. Rename each renameable site; leave blocked ones as-is (no worse).
+    for my $site (@{ $by_name{$old} }) {
+      my ($block, $w, $s) = @$site;
+      my $why = $sigil eq '$'
+        ? $self->_shadow_rename_blocker($block, $s, 'eval_ok')
+        : $self->_state_container_blocker($block, $s, 'eval_ok');
+      next if $why;
+      $self->_rename_decl_within($block, $s,
+        $old . '__shadow__' . $self->{_shadow_rename_counter}++);
+    }
+  }
+  return;
 }
 
 # Mark (in %$disq) every bare name that appears interpolated ($name / ${name})

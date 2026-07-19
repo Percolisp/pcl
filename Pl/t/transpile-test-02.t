@@ -533,11 +533,11 @@ test_transpile("capture: renamed scalar followed into qr// interpolation",
 # by reference BEFORE any assignment was unbound at load (postfixderef.t).
 test_transpile("forward decl: ref to package \@a before any assignment",
     'no strict; $r = \@a; push @$r, 7; print "@a\n";');
-# Interpolated postfix deref emits literal text in the v2 string lowering —
-# must gate the whole file to v1 (postfixderef.t cascade guard).
+# Interpolated postfix deref (s300/#45): implemented in the shared interp
+# layer, so the file stays v2-native (this guard used to assert the v1 gate).
 like(transpile_only('use feature q(postderef_qq); my $r = [1,2,3]; print "$r->@*\n";'),
-     qr/pipeline=v1/,
-     'interpolated postfix deref gates the file to v1');
+     qr/pipeline=v2/,
+     'interpolated postfix deref stays v2-native');
 
 # E1.1 / W10-ext-3 (s282): containers (%h/@a) spanning a package boundary are
 # span-renamed to a defvar package cell (was a whole-file v1 gate).

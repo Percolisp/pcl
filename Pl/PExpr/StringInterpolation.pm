@@ -12,6 +12,7 @@ use Moo;
 
 use PPI;
 use PPI::Document;
+use Scalar::Util qw(refaddr);
 
 # This module handles parsing of interpolated strings for Pl::PExpr
 # It takes a string token and returns a node ID for the parsed result
@@ -31,6 +32,15 @@ sub parse_interpolated_string {
   my $self      = shift;
   my $parser    = shift;  # Pl::PExpr object
   my $str_token = shift;
+  # Optional: the ORIGINAL document token when $str_token is a synthetic
+  # Quote::Double built from other source text (heredocs).  Feature scoping
+  # (postderef_qq) is looked up from this token's document position; a
+  # detached synthetic token without an origin simply gets no features.
+  my $origin_tok = shift // $str_token;
+
+  # postderef_qq ("$ref->@*" interpolation) is lexically scoped in Perl;
+  # resolve it once per string from the token's enclosing blocks.
+  $self->{_postderef_qq} = _postderef_qq_active_for($origin_tok);
 
   my $content   = $str_token->content();
 
@@ -141,6 +151,16 @@ sub parse_interpolated_string {
       );
 
       if (defined $var_node_id) {
+        # postderef_qq: the parsed variable is followed by a postfix deref
+        # ("$ref->$*", "$ref->$#*", "$ref->@*", "$ref->@[...]", "$ref->@{...}").
+        # Only under the lexical feature — without it the arrow stays literal
+        # text (and "@{...}" after it interpolates on its own, matching Perl).
+        if ($self->{_postderef_qq}
+            && substr($content, $new_pos, 2) eq '->') {
+          my ($pd_id, $pd_pos) = $self->_parse_postfix_deref(
+              $parser, \$content, $var_start - 1, $new_pos);
+          ($var_node_id, $new_pos) = ($pd_id, $pd_pos) if defined $pd_id;
+        }
         if ($pending_char_transform) {
           $var_node_id = $self->_wrap_case_func($parser,
             $pending_char_transform eq 'u' ? 'ucfirst' : 'lcfirst', $var_node_id);
@@ -510,6 +530,90 @@ sub parse_interpolated_variable {
   return (undef, $pos);
 }
 
+
+# Is the postderef_qq feature lexically enabled at $tok's source position?
+# Perl scopes `use feature` from the statement to the end of its enclosing
+# block, so walk up from the token: at each enclosing Block (and the
+# Document), scan the PRECEDING sibling statements for an enable/disable —
+# the innermost level with a determination wins.  Enablers: `use feature`
+# with postderef_qq or a :5.24+ bundle, `use experimental` with postderef,
+# `use v5.24`+.  Disabler: `no feature` naming postderef_qq / :all / bare.
+# A detached token (no parent — synthetic strings without an origin) gets 0.
+sub _postderef_qq_active_for {
+  my ($tok) = @_;
+  return 0 unless ref $tok && $tok->can('parent');
+  my $node = $tok;
+  while (my $parent = $node->parent) {
+    if ($parent->isa('PPI::Structure::Block')
+        || $parent->isa('PPI::Document')) {
+      my $verdict;
+      for my $sib ($parent->schildren) {
+        last if refaddr($sib) == refaddr($node);
+        next unless $sib->isa('PPI::Statement::Include');
+        my $c = $sib->content;
+        if ($c =~ /^\s*use\s/) {
+          $verdict = 1 if $c =~ /\bpostderef(?:_qq)?\b/
+            || $c =~ /^\s*use\s+feature\b.*:5\.(\d+)/s && $1 >= 24
+            || $c =~ /^\s*use\s+v5\.(\d+)/ && $1 >= 24
+            || $c =~ /^\s*use\s+5\.0*(\d+)/ && $1 >= 24;
+        } elsif ($c =~ /^\s*no\s+feature\b/) {
+          $verdict = 0 if $c =~ /\bpostderef_qq\b/
+            || $c =~ /:all\b/
+            || $c =~ /^\s*no\s+feature\s*;/;
+        }
+      }
+      return $verdict if defined $verdict;
+    }
+    $node = $parent;
+  }
+  return 0;
+}
+
+# Parse a postfix dereference following an interpolated variable, under
+# postderef_qq: ->$* (scalar), ->$#* (last index), ->@* (whole array),
+# ->@[...] (array slice), ->@{...} (hash slice).  %-forms never interpolate.
+# The WHOLE expression text (variable + postfix) is re-parsed as code via a
+# mini PPI document — the code path already handles every postfix-deref form
+# — and list-yielding results are wrapped in array_str_interp so codegen
+# joins them with $" exactly like any other array interpolation.
+# Returns ($node_id, $new_pos), or (undef, $arrow_pos) to leave the arrow as
+# literal text.
+sub _parse_postfix_deref {
+  my ($self, $parser, $content_ref, $expr_start, $arrow_pos) = @_;
+  my $content = $$content_ref;
+  pos($content) = $arrow_pos;
+  return (undef, $arrow_pos)
+    unless $content =~ /\G->(\$\#?\*|\@\*|\@\[|\@\{)/gc;
+  my $what = $1;
+  my $end  = pos($content);
+  if ($what eq '@[' || $what eq '@{') {
+    my ($open, $close) = $what eq '@[' ? ('[', ']') : ('{', '}');
+    my ($depth, $i) = (1, $end);
+    while ($i < length($content) && $depth > 0) {
+      my $ch = substr($content, $i, 1);
+      $depth++ if $ch eq $open;
+      $depth-- if $ch eq $close;
+      $i++;
+    }
+    return (undef, $arrow_pos) if $depth;      # unbalanced: stay literal
+    $end = $i;
+  }
+  my $expr_text = substr($content, $expr_start, $end - $expr_start);
+  my $doc = PPI::Document->new(\$expr_text);
+  $self->{_ppi_docs} //= [];
+  push @{$self->{_ppi_docs}}, $doc;
+  my $stmt = $doc && $doc->find_first('PPI::Statement');
+  return (undef, $arrow_pos) unless $stmt;
+  my @parts   = $stmt->children();
+  my $expr_id = $parser->parse(\@parts);
+  return (undef, $arrow_pos) unless defined $expr_id;
+  if ($what =~ /^\@/) {
+    my ($interp_node, $interp_id) = $parser->make_node_insert('array_str_interp');
+    $parser->add_child_to_node($interp_id, $expr_id);
+    return ($interp_id, $end);
+  }
+  return ($expr_id, $end);
+}
 
 # Parse ${expression} in interpolated string
 sub parse_braced_expression {

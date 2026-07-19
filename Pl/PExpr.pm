@@ -738,7 +738,9 @@ sub parse {
         (my $tmp = $inner) =~ s/\\\\/\x00\x00/g;
         if ($tmp =~ /(?<!\\)[\$\@]/) {
           my $fake_str = PPI::Token::Quote::Double->new(qq{"$inner"});
-          return $self->str_interpol->parse_interpolated_string($self, $fake_str);
+          # Pass the real HereDoc token as origin so lexical feature lookup
+          # (postderef_qq) sees the document position.
+          return $self->str_interpol->parse_interpolated_string($self, $fake_str, $e1);
         }
       }
       my $id = $self->make_node($e1);
@@ -959,14 +961,35 @@ sub parse {
           $self->add_child_to_node($id, $kid_id); # Parameters
         }
 
+        my $np;                  # the new node's position in @$e
         if ($cast_consumed) {
           $e->[$i-2] = $node;
           splice @$e, $i-1, 3;   # remove the ref term, '->', and the param list
+          $np = $i-2;
           $i -= 2;
         } else {
           $e->[$i-1] = $node;
           splice @$e, $i, 2;     # remove '->' and the param list
+          $np = $i-1;
           $i--;
+        }
+        # Implicit arrow after a call: $cr->(){k} / $cr->()[i] mean
+        # $cr->()->{k} / $cr->()->[i].  PPI cannot tell these braces are
+        # subscripts (they follow ')'), so it tags {k} as a Block and [i] as
+        # a Constructor; left alone they match no case and the parse falls
+        # through to the "Missing case" die.  Re-tag each DIRECTLY following
+        # brace as a Subscript so the X[]/X{} machinery below chains them
+        # exactly like the Subscripts in $x->[0]{k} (same fix pattern as
+        # _retag_braced_deref_subscript).
+        for (my $j = $np + 1; $j < scalar(@$e); $j++) {
+          my $t = $e->[$j];
+          if ((ref($t) eq 'PPI::Structure::Block'
+               || ref($t) eq 'PPI::Structure::Constructor')
+              && $t->start && $t->start->content =~ /^[\[{]$/) {
+            bless $t, 'PPI::Structure::Subscript';
+          } else {
+            last;
+          }
         }
         next;
       } elsif ($self->is_internal_node_type($nxt)
@@ -3953,6 +3976,11 @@ sub child_context {
   if ($self->is_internal_node_type($parent_node)) {
     my $type        = $parent_node->{type};
 
+    # Interpolated array/deref/slice ("@arr", "@{...}", "$r->@[...]"): the
+    # joined expression is always a LIST — a slice child left to inherit a
+    # scalar context would yield only its last element.
+    return LIST_CTX if $type eq 'array_str_interp';
+
     # Assignment: RHS context depends on LHS, LHS ctxt depends on lvalue type
     if ($type eq '=') {
       my $children  = $self->get_node_children($parent_id);
@@ -4571,7 +4599,12 @@ sub _subscript_to_cl_str {
 sub _parse_subscript_ix {
   my ($self, $ix, $is_array) = @_;
   my @sig = grep { !$_->isa('PPI::Token::Whitespace') } @$ix;
-  if (@sig == 1 && $sig[0]->isa('PPI::Statement::Expression')) {
+  # A native Subscript wraps its content in a Statement::Expression; a brace
+  # PPI mis-tagged as a Block (re-blessed to Subscript by the implicit-arrow
+  # retag, or the KV-slice Block forms) wraps it in a plain Statement.  A
+  # lone bareword autoquotes in both — Perl's rule is positional.
+  if (@sig == 1 && ($sig[0]->isa('PPI::Statement::Expression')
+                    || ref($sig[0]) eq 'PPI::Statement')) {
     my @ekids = grep { !$_->isa('PPI::Token::Whitespace') } $sig[0]->children();
     if (@ekids == 1 && ref($ekids[0]) eq 'PPI::Token::Word') {
       my $word = $ekids[0]->content();

@@ -106,7 +106,9 @@ if (@changed) {
                 print $fh $norm->("$tmp/$side/$base.lisp");
                 close $fh;
             }
-            my @lines = qx(diff -u \Q$tmp\E/ref.norm \Q$tmp\E/new.norm);
+            # -a: emitted CL can contain NUL bytes; without it diff calls the
+            # files binary and prints no hunks (same trap as grep, see header).
+            my @lines = qx(diff -a -u \Q$tmp\E/ref.norm \Q$tmp\E/new.norm);
             splice @lines, 0, 2;   # drop the +++/--- tempfile header
             my $n = @lines;
             splice @lines, $show if $show && $n > $show;

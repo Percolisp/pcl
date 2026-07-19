@@ -611,4 +611,66 @@ test_transpile("our-alias survives an in-block package switch", '
 print 0+@tmp2::qa, "\n";
 ');
 
+# s299/#45: interpolated postfix deref ("$r->@*" etc.) is gated on the
+# lexical postderef_qq feature; without it the ->@* stays literal text.
+test_transpile(q{interp postderef: ->@* / ->@[slice] / ->@{kslice} / ->$#* with feature on}, '
+use feature "postderef_qq";
+my $r = [7,8,9];
+my $h = {foo=>"oof"};
+print "$r->@*|$r->@[0,1]|$h->@{q(foo)}|$r->$#*\n";
+');
+test_transpile(q{interp postderef: scalar deref ->$* with feature on}, '
+use feature "postderef_qq";
+my $x = 43;
+my $s = \$x;
+print "$s->$*\n";
+');
+test_transpile("interp postderef stays literal without the feature", '
+my $r = "V";
+print "$r->@*\n";
+');
+test_transpile("interp postderef feature is block-scoped: off again after scope exit", '
+my $r = [7,8,9];
+my $p = "V";
+{
+    use feature "postderef_qq";
+    print "$r->@*;";
+}
+print "$p->@*\n";
+');
+
+# s299/#45: implicit arrow after a call — $cr->(){k} / $cr->()[i] chain like
+# ->()->{k} / ->()->[i]; PPI tags the braces Block/Constructor, not Subscript.
+test_transpile("implicit arrow subscript after call: ->(){k} and ->()[i]", '
+my $cr = sub { {k=>42} };
+my $ca = sub { [5,6,7] };
+print $cr->(){k}, ";", $ca->()[1], "\n";
+');
+# ... and a lone bareword in such a brace autoquotes even when it names a sub.
+test_transpile("bareword key autoquotes in ->(){key} even when a sub of that name exists", '
+sub ppp { "qqq" }
+my $cr = sub { {ppp=>31} };
+print $cr->(){ppp}, "\n";
+');
+
+# s299/#45 (child_context): an interpolated slice passed as a scalar-imposing
+# funcall arg must still join ALL elements, not collapse to the last one.
+test_transpile("interp postderef slice as scalar-prototype funcall arg keeps all elements", '
+use feature "postderef_qq";
+sub takeit ($) { return $_[0] }
+my $r = [7,8,9];
+print takeit("$r->@[0,1]"), "\n";
+');
+
+# s299/#45: a bare-block my whose name is also a package global elsewhere is
+# renamed (shadow) so the block sees the lexical and the file keeps the global.
+test_transpile("bare-block my shadowing a package global leaves the global intact", '
+@a = (1,2,3);
+{
+    my ($s, @a) = ("x", 7, 8);
+    print "@a;";
+}
+print "@a\n";
+');
+
 done_testing();

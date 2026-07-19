@@ -1,5 +1,17 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **UPDATE (s300, 2026-07-20, Fable 5): #45 postfixderef SHIPPED — census
+> 108 native / 3 gated, gen v2-39.**  De-gated **postfixderef.t** (83+36
+> crash@t119 → 94+27 to-EOF, both pipelines): interp postderef
+> (`postderef_qq`, lexical feature lookup) in the shared interp layer,
+> implicit-arrow `->(){k}`/`->()[i]` subscript retag, `{bareword}`
+> autoquote, `array_str_interp` child = LIST_CTX,
+> `_rename_poisoned_block_mys` (block-`my` vs package-global collision).
+> Corpus: v1 clean; the 23-file v2 diff = renames/fwd-decls, behavior-swept
+> identical.  **Remaining 3 gates: chdir (M-E #55), closure (#70),
+> signatures (nested-sub in signatured sub).**  s300 detail in
+> `docs/session-log.md`.
+
 > **UPDATE (s295c-2, 2026-07-18, Fable 5): conditional-my + Scheduled-block
 > capture promotion SHIPPED — census 106 native / 5 gated, gen v2-37.**
 > **lfs.t DE-GATED** (its real gate was `file lexical 'big0' referenced in
@@ -298,7 +310,7 @@ returns the global).  Fixing it in v2 removes silent wrong answers.
 | substr.t | `foreach over a magic-lvalue element (substr/pos/vec)` | narrowed gate (s285): needs scalar force-boxed + 1 user-`:lvalue` test loss.  **The per-statement void-wrap heap blocker is FIXED (s288, task #60 regime hoist)** — only the magic-lvalue gate remains |
 | ~~loopctl.t~~ **DONE s287** | bare-block continue | de-gated 67/67: the gate was the BARE-block `LABEL: { } continue { }` (while/until continue already worked); labeled in-compound + orphan-sibling join |
 | array.t | ~~self-ref init~~ → `forward goto to a standalone label` (s287) | list self-ref + chained-my + capture de-conflation all shipped s287; residual = `goto` out of a map LAMBDA to a later label — needs a DYNAMIC goto (throw/catch), and v1 CRASHES on it today (compile error); file also stops at t114 at HEAD.  A design item, not a single |
-| postfixderef.t | `interpolated postfix deref (postderef_qq)` | task #45 / plan E1.4: implement `postderef_qq` in `StringInterpolation.pm` — fixes BOTH pipelines (v1 has the same gap) |
+| ~~postfixderef.t~~ **DONE s300** | ~~interpolated postfix deref (postderef_qq)~~ | de-gated (task #45): `postderef_qq` implemented in the shared interp layer (`StringInterpolation.pm`, lexical feature lookup via PPI up-walk) — fixed BOTH pipelines (83+36 crash@119 → 94+27 to-EOF each); plus implicit-arrow `->(){k}`/`->()[i]` subscript retag, `{bareword}` autoquote in re-blessed Blocks, `array_str_interp` child = LIST_CTX, and `_rename_poisoned_block_mys` (block-`my` vs package-global collision).  Remaining rows (utf8/symref t42-59, `.`-overload interp concat t107, bareword symref `foo->@*`, PVBM) → #66/future |
 
 ### M-F — Design items / blessed-residue candidates (decide, don't grind)
 
