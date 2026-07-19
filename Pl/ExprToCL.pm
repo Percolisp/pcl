@@ -523,11 +523,11 @@ sub gen_node_form {
 
 # E2 leaf conversion (docs/v2-endgame-plan.md E2.1, literal/sym frontier):
 # CLForm for a converted leaf token, or undef to decline (→ raw v1 text).
-# Converted: Symbol/Magic genuine atoms, string/heredoc/word/operator atoms,
-# the Number family, and NON-interpolated m// / qr// regex leaves.  Declines
-# (→ text path): Symbol/Magic compounds (stash/typeglob/&sub/errno),
-# interpolated regexes, and s/// / tr/// (side effects, possible /e lambda).
-# Byte-for-byte gen_leaf's shapes.
+# Converted: Symbol/Magic genuine atoms, string/heredoc/word/operator/cast
+# atoms, the Number family, $#arr (ArrayIndex), and NON-interpolated m// / qr//
+# regex leaves.  Declines (→ text path): Symbol/Magic compounds
+# (stash/typeglob/&sub/errno), interpolated regexes, and s/// / tr/// (side
+# effects, possible /e lambda).  Byte-for-byte gen_leaf's shapes.
 sub gen_leaf_form {
   my ($self, $node) = @_;
   my $ref = ref($node);
@@ -558,10 +558,25 @@ sub gen_leaf_form {
   if ($ref =~ /^PPI::Token::Quote::/
       || $ref eq 'PPI::Token::HereDoc'
       || $ref eq 'PPI::Token::Word'
-      || $ref eq 'PPI::Token::Operator') {
+      || $ref eq 'PPI::Token::Operator'
+      || $ref eq 'PPI::Token::Cast') {   # deref sigil (@/%/$/\/&/*): bare content atom
     my $s = $self->gen_leaf($node);
     return undef if $s =~ /^\(/;
     return $s;
+  }
+
+  # $#arr / $#Pkg::arr → (p-array-last-index @arr).  Single-level form; the
+  # only gen_leaf side effect is an idempotent state-var-rename lookup, so
+  # re-deriving the transformed container atom here is safe.
+  if ($ref eq 'PPI::Token::ArrayIndex') {
+    my $content = $node->content();
+    $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/  # $#A::ISA → A::@ISA
+        || $content =~ s/^\$#/\@/;            # $#arr    → @arr
+    if ($self->environment) {
+      my $renames = $self->environment->state_var_renames;
+      $content = $renames->{$content} if $renames && exists $renames->{$content};
+    }
+    return ['p-array-last-index', $content];
   }
 
   if ($ref =~ /^PPI::Token::Number/) {

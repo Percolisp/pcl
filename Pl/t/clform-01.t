@@ -257,6 +257,18 @@ like($rl, qr/\(pcl::p-regex-from-parts \$x /,
 like($rl, qr/\(p-subst "a" "b"\)/,  's/// declines → (p-subst …)');
 like($rl, qr/\(p-tr /,              'tr/// declines → (p-tr …)');
 
+# --- converted: gen_leaf_form Cast atom + ArrayIndex (E2.1 leaf) -------------
+# @$ref cast sigil → bare atom; $#arr → (p-array-last-index @arr) form.
+my $ci = Pl::Parser2->parse_code(<<'EOT');
+my @a = (1, 2, 3);
+my $r = [4, 5];
+my $n = $#a;
+my @d = @$r;
+print "$n @d";
+EOT
+like($ci, qr/\(p-array-last-index \@a\)/, '$#arr → (p-array-last-index @a)');
+like($ci, qr/\(p-cast-\@ \$r\)/,          '@$ref cast child lowers (p-cast-@ $r)');
+
 # --- converted: arr_init / hash_init form handlers (E2.1 internal nodes) -----
 
 my $in = Pl::Parser2->parse_code(<<'EOT');

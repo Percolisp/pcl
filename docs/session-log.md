@@ -4,9 +4,9 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` + non-interp regex leaves → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) + `glob` + non-interp regex/cast/`$#arr` leaves → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), nine
+**On branch `wip/s296-state-family` (atop the parked s296 state work), ten
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
 untouched — those are pre-existing E1 WIP, not from this change (both
@@ -29,6 +29,16 @@ conversion is coupled to E2.final (retire `to_flat` for the multi-line
 structure the VarAnnotator can walk, retiring its `seam` special-case.
 Correctly scheduled last; NOT a standalone byte-parity step.  User chose to
 proceed with the remaining leaf compounds instead.
+
+**Twelfth commit — `Cast` atom + `$#arr` (`ArrayIndex`) leaves →
+`gen_leaf_form`.**  A bare deref-sigil `PPI::Token::Cast` (`@`/`%`/`$`/`\`/`&`/
+`*`) is a pure content atom — added to the atom branch (gen_leaf for it is
+pure, never `(`).  `$#arr` / `$#Pkg::arr` structures to
+`(p-array-last-index @arr)` (the container transform re-derived from the node;
+the only gen_leaf side effect is an idempotent state-var-rename lookup).  Both
+pipelines byte-identical to HEAD across all 111 files; `tools/prove-core`
+green except the two pre-existing state-family fails.  No cache-gen bump.  2
+new `clform-01.t` guards (160 total).
 
 **Eleventh commit — non-interpolated `m//` / `qr//` regex leaves →
 `gen_leaf_form`.**  Their gen_leaf output is a pure single-level
