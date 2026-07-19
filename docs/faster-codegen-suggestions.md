@@ -180,6 +180,18 @@ constant). This is the highest-value codegen change in the whole catalogue.
 - **S2. Fold wholly-constant interpolation** to one literal at compile time;
   under `raw-string`, parts already in string slots skip the `to-string`
   coercion in `p-string-concat`.
+- **S3. Zero-copy substring *scanning* (narrow, sound).** A read-only rvalue
+  `substr`/`index` used only to *inspect* a slice (a tokenizer walking a buffer,
+  never retaining the substring) can pass `(start,end)` index pairs into the
+  consumer instead of materializing the substring — no copy. This is the *only*
+  sound residue of the "displaced-array substr" idea (assessed in
+  `advice-from-gemini.md`): a `:displaced-to` view is **rejected** for general
+  substr because rvalue `substr` returns an independent copy in Perl (a live
+  view aliases the parent → wrong results) and displaced arrays are non-simple
+  strings that lose SBCL's simple-string fast paths downstream. Only the
+  index-pair form (no view object, no aliasing) is safe, and only when the
+  slice is provably not retained. Niche; the append buffer (S1) is the real
+  string win.
 
 ---
 
