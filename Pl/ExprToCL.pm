@@ -1276,19 +1276,19 @@ sub gen_binary_op {
   return "($cl_op $left $right)";
 }
 
-# E2 form variant of gen_binary_op.  DECLINES only `=` (assignment) BEFORE any
-# side effect (decision is purely the op string): its LHS-sigil / magic-lvalue
-# / typeglob dispatch greps the generated $left, an AST-level rewrite left for a
-# later E2 step.  Everything else converts structurally, mirroring
-# gen_binary_op branch-for-branch (same generation ORDER, so the shared
-# $g_flipflop_count and any gensyms match): arithmetic / comparison / logical /
-# string / `.` / `x` / `..` flip-flop+range / `isa` / use-integer, and `=~`/`!~`
-# (whose s///-vs-match wantarray wrap is decided AST-level — RHS is a
-# Regexp::Substitute/Transliterate node — instead of grepping the generated $right).
+# E2 form variant of gen_binary_op.  Converts every binary op structurally,
+# mirroring gen_binary_op branch-for-branch (same generation ORDER, so the
+# shared $g_flipflop_count and any gensyms match): arithmetic / comparison /
+# logical / string / `.` / `x` / `..` flip-flop+range / `isa` / use-integer,
+# `=~`/`!~` (whose s///-vs-match wantarray wrap is decided AST-level — RHS is a
+# Regexp::Substitute/Transliterate node — instead of grepping the generated
+# $right), and `=` assignment.  The `=` LHS-sigil / magic-lvalue / typeglob
+# dispatch inspects the FLAT text of the (already-generated) left form (== v1's
+# $left bytes by the to_flat contract), so the dispatch decisions match
+# gen_binary_op exactly while the OUTPUT is a form — no raw child re-run, no
+# double generation.
 sub gen_binary_op_form {
   my ($self, $op, $kids, $node_id) = @_;
-
-  return undef if $op eq '=';
 
   my $cl_op = $self->cl_op_name($op);
 
@@ -1355,6 +1355,32 @@ sub gen_binary_op_form {
   }
 
   my $left = $self->gen_node_form($kids->[0]);
+  # Flat text of the left form == v1's $left bytes (to_flat contract); used
+  # only to make the `=` dispatch decisions below, mirroring gen_binary_op.
+  my $left_flat = ($op eq '=') ? Pl::CLForm::to_flat($left) : undef;
+
+  # '=' hash assignment with list — %h = () / %h = (k=>v,…): pass a flat vector
+  # so p-hash-= can count input elements for its scalar-context return.  Runs
+  # BEFORE right-gen (like gen_binary_op), so the RHS kids are generated here
+  # and $right is never produced for this shape (counter order preserved).
+  if ($op eq '=' && $left_flat =~ /^%/) {
+    my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($rhs_node)
+        && ($rhs_node->{type} eq 'tree_val' || $rhs_node->{type} eq 'progn')) {
+      my $rhs_kids = $self->expr_o->get_node_children($kids->[1]);
+      my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
+      my $result = (@$rhs_kids == 0)
+        ? ['p-hash-=', $left,
+           ['make-array', '0', ':adjustable', 't', ':fill-pointer', '0']]
+        : ['p-hash-=', $left,
+           ['vector', map { $self->gen_node_form($_) } @$rhs_kids]];
+      return $ctx == LIST_CTX
+               ? ['let', ['list', ['list', '*wantarray*', 't']],   $result]
+           : $ctx == SCALAR_CTX
+               ? ['let', ['list', ['list', '*wantarray*', 'nil']], $result]
+           : $result;
+    }
+  }
 
   # 'isa' — RHS bareword class name must be a string literal.
   if ($op eq 'isa') {
@@ -1370,6 +1396,76 @@ sub gen_binary_op_form {
   }
 
   my $right = $self->gen_node_form($kids->[1]);
+
+  # '=' assignment: dispatch on LHS shape (mirrors gen_binary_op, same order).
+  if ($op eq '=') {
+    # keys(%h) = N — hash pre-sizing, a no-op in CL: just the RHS value.
+    return $right if $left_flat =~ /^\(p-keys /;
+    # $#arr = N  →  (p-set-array-length @arr N)
+    if ($left_flat =~ /^\(p-array-last-index (.+)\)$/) {
+      return ['p-set-array-length', Pl::CLForm::raw($1), $right];
+    }
+    # *foo = RHS  →  (p-glob-assign "pkg" "name" rhs)
+    if ($left_flat =~ /^\(p-make-typeglob "([^"]+)" "([^"]+)"\)$/) {
+      return ['p-glob-assign', qq{"$1"}, qq{"$2"}, $right];
+    }
+    # *$var = RHS  →  (p-glob-assign-dynamic name-expr rhs)
+    if ($left_flat =~ /^\(p-dynamic-typeglob (.+)\)$/) {
+      return ['p-glob-assign-dynamic', Pl::CLForm::raw($1), $right];
+    }
+    # Assigning to a sub/code-ref CALL is a compile error (no lvalue subs); the
+    # built-in magic lvalues substr/pos/vec ARE allowed.  AST-level, verbatim
+    # from gen_binary_op so eval-string probes see the same failure.
+    if (defined $node_id) {
+      my $lnode = $self->expr_o->get_a_node($kids->[0]);
+      my $bad_lvalue = 0;
+      if ($self->expr_o->is_internal_node_type($lnode)
+          && ($lnode->{type} eq 'funcall' || $lnode->{type} eq 'ref_funcall')) {
+        # foo() = x  /  $cref->() = x
+        $bad_lvalue = 1;
+        if ($lnode->{type} eq 'funcall') {
+          my $fkids = $self->expr_o->get_node_children($kids->[0]);
+          if ($fkids && @$fkids) {
+            my $fn = $self->expr_o->get_a_node($fkids->[0]);
+            my $nm = (ref($fn) && $fn->can('content')) ? $fn->content : '';
+            $bad_lvalue = 0 if $nm =~ /^(?:CORE::)?(?:substr|pos|vec)$/;
+          }
+        }
+      } elsif (ref($lnode) && $lnode->can('content')
+               && $lnode->content =~ /^&/) {
+        # &sub = x  (ampersand call as an lvalue; a leaf Symbol token).
+        $bad_lvalue = 1;
+      }
+      die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
+        if $bad_lvalue;
+    }
+    if ($left_flat =~ /^\(vector /) {
+      my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
+      my $result = ['p-list-=', $left, $right];
+      return $ctx == LIST_CTX
+               ? ['let', ['list', ['list', '*wantarray*', 't']],   $result]
+           : $ctx == SCALAR_CTX
+               ? ['let', ['list', ['list', '*wantarray*', 'nil']], $result]
+           : $result;
+    } elsif ($left_flat =~ /^\(p-cast-% /) {
+      # %$ref = (list): assign to a dereferenced hash
+      return ['p-hash-deref-=', $left, $right];
+    } elsif ($left_flat =~ /^\(p-cast-@ /) {
+      # @$ref = (list): assign to a dereferenced array
+      return ['p-array-deref-=', $left, $right];
+    } elsif ($left_flat =~ /^\(p-(?:gethash|aref|aslice|hslice) /) {
+      # Single-element / slice store: $h{k}=… / $a[i]=… (MUST precede the sigil
+      # regexes: a package-qualified element form contains "::%"/"::@").
+      return ['p-setf', $left, $right];
+    } elsif ($left_flat =~ /(?:^|::)@/) {
+      return ['p-array-=', $left, $right];
+    } elsif ($left_flat =~ /(?:^|::)%/) {
+      return ['p-hash-=', $left, $right];
+    } elsif ($left_flat =~ /(?:^|::)\$/) {
+      return ['p-scalar-=', $left, $right];
+    }
+    # else: fall through to (p-setf $left $right) at the generic tail.
+  }
 
   # 'use integer' pragma: truncate operands first, then operate.
   if ($self->environment && $self->environment->has_pragma('use_integer')) {

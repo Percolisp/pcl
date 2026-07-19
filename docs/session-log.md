@@ -4,12 +4,36 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` → CLForm, byte parity both pipelines.
+## Session 298 (2026-07-19, Opus 4.8) — E2.1: `methodcall` + `ref_funcall` + `prefix_op` + `postfix_op` + `tree_val` + `gen_binary_op` (incl. `=` assignment) → CLForm, byte parity both pipelines.
 
-**On branch `wip/s296-state-family` (atop the parked s296 state work), six
+**On branch `wip/s296-state-family` (atop the parked s296 state work), seven
 E2 commits.**  The E1 state-family business on this branch (eval.t
 regression, the `state-01.t` #3 / `parser2-02.t` #39 gate fails) is
-untouched — those are pre-existing E1 WIP, not from this change.
+untouched — those are pre-existing E1 WIP, not from this change (both
+verified failing identically at HEAD via a stash-and-run before commit).
+
+**Ninth commit — `=` assignment → `gen_binary_op_form` (the last binary-op
+decline removed; gen_binary_op_form now converts EVERY operator).**  The
+sixth commit deferred `=` because its LHS-sigil / magic-lvalue / typeglob
+dispatch greps the generated `$left`.  Resolution: the left form is already
+generated (`gen_node_form`), so the dispatch inspects `Pl::CLForm::to_flat($left)`
+(== v1's `$left` bytes by the to_flat contract) to make the SAME decisions,
+while the OUTPUT is a form — no raw child re-run, no double generation.  All
+branches mirror gen_binary_op in the same ORDER: the `%h=(…)` flat-vector
+hash-assign runs BEFORE right-gen (counter parity), then after right-gen —
+`keys(%h)=N` presize no-op (→ just the RHS), `$#arr=N` → `(p-set-array-length
+… )` (subgroup wrapped in `raw`), `*glob=`/`*$var=` → `(p-glob-assign "pkg"
+"name" …)`/`(p-glob-assign-dynamic …)`, the AST-level bad-lvalue die
+(`foo()=`/`&sub=`, substr/pos/vec allowed), then LHS-shape dispatch:
+`(vector …)` → `(p-list-= …)` with wantarray wrap, `(p-cast-% …)`/`(p-cast-@
+…)` → `(p-hash-deref-= …)`/`(p-array-deref-= …)`, `(p-gethash|aref|aslice|
+hslice …)` → `(p-setf …)`, sigil `@`/`%`/`$` → `(p-array-= …)`/`(p-hash-= …)`/
+`(p-scalar-= …)`, else the generic tail `(p-setf …)`.  Verification triple:
+`tools/corpus-diff.pl` (v2) AND `PCL_V1=1 tools/corpus-diff.pl` both identical
+to HEAD across all 111 files; `tools/prove-core` green except the two
+pre-existing state-family fails.  No cache-gen bump (byte parity).  5 new
+`clform-01.t` guards (149 total; the stale "declines" wording on the `=`/`=~`/
+`!~` guard block updated).
 
 **Eighth commit — `anon_sub` → `gen_anon_sub_form`.**  `sub { … }` reached
 via the expr path (its real site is the `s/PAT/CODE/e` replacement block →

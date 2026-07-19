@@ -478,8 +478,9 @@ like($rf, qr/\(let \(\(\*wantarray\* :void\)\) \(p-funcall-ref \$c\)\)/,
      'void-ctx code-ref call → (let ((*wantarray* :void)) (p-funcall-ref $c))');
 
 # --- converted: gen_binary_op_form (E2.1) -----------------------------------
-# arithmetic / comparison / logical / string / . / x / .. / isa convert; the
-# operand-text-inspecting families =/=~/!~ DECLINE to the kept text emitter.
+# arithmetic / comparison / logical / string / . / x / .. / isa all convert to
+# forms; so do `=` assignment (LHS-shape dispatch inspects the flat left text)
+# and =~/!~ (s///-vs-match wantarray wrap decided AST-level).
 
 my $bo = Pl::Parser2->parse_code(<<'EOT');
 my ($x, $y) = (5, 3); my @a = (1, 2, 3); my $o = bless {}, 'Foo';
@@ -511,7 +512,9 @@ like($bo, qr/\(p-isa \$o "Foo"\)/,              'isa bareword RHS → (p-isa $o 
 my $ff = Pl::Parser2->parse_code('while (<STDIN>) { my $f = /a/ .. /b/; print $f; }');
 like($ff, qr/\(p-flipflop \d+ /, 'scalar-context .. → (p-flipflop ID …)');
 
-# declines: =/=~/!~ keep their text shapes (LHS/RHS text-dispatch preserved)
+# `=` assignment: LHS-shape dispatch (@→p-array-=, %→p-hash-=, sigil-$→
+# p-scalar-=, element→p-setf) now runs through gen_binary_op_form at byte
+# parity; =~/!~ likewise convert.
 my $bd = Pl::Parser2->parse_code(<<'EOT');
 my ($x, $y) = (1, 2); my @a; my %h;
 $x = $y; @a = (1, 2); %h = (k => 1);
@@ -520,12 +523,32 @@ print $x;
 EOT
 # (a bare lexical scalar `$x = $y` is lowered by Parser2's NATIVE assignment
 # path to (p-my-= …), never reaching gen_binary_op; the array/hash `=` DO
-# reach the declined gen_binary_op text branch → (p-array-=)/(p-hash-=).)
+# reach gen_binary_op[_form] → (p-array-=)/(p-hash-=).)
 like($bd, qr/\(p-my-= \$x \$y\)/,       'scalar = uses the native (p-my-= …) path');
-like($bd, qr/\(p-array-= \@a /,         '= array assign declines → (p-array-= …)');
-like($bd, qr/\(p-hash-= %h /,           '= hash assign declines → (p-hash-= …)');
+like($bd, qr/\(p-array-= \@a /,         '= array assign → (p-array-= …)');
+like($bd, qr/\(p-hash-= %h /,           '= hash assign → (p-hash-= …)');
 like($bd, qr/\(p-=~ \$x /,              '=~ still emits (p-=~ …)');
 like($bd, qr/\(p-!~ \$x /,              '!~ still emits (p-!~ …)');
+
+# `=` LHS-shape dispatch — the distinctive form-path branches that DO reach
+# gen_binary_op_form (all byte-parity with the pre-conversion text emitter):
+# list-assign, dereferenced container assign, $#arr length set, typeglob assign.
+# (Bare-statement element stores $h{k}=… / $a[i]=… are lowered by Parser2's
+# native path to (setf (p-gethash …) …), not through gen_binary_op — so they
+# are not asserted here.)
+my $ba = Pl::Parser2->parse_code(<<'EOT');
+our $g; my ($x, $y); my @a; my $ar = [1]; my $hr = {};
+($x, $y) = (1, 2);
+@$ar = (3, 4); %$hr = (k => 1);
+$#a = 2;
+*g = \&main::foo;
+print $x;
+EOT
+like($ba, qr/\(p-list-= \(vector \$x \$y\) /, '(LIST) = … → (p-list-= (vector …) …)');
+like($ba, qr/\(p-array-deref-= \(p-cast-\@ \$ar\) /, '@$ref = … → (p-array-deref-= …)');
+like($ba, qr/\(p-hash-deref-= \(p-cast-% \$hr\) /,  '%$ref = … → (p-hash-deref-= …)');
+like($ba, qr/\(p-set-array-length \@a 2\)/,        '$#arr = N → (p-set-array-length …)');
+like($ba, qr/\(p-glob-assign "main" "g" /,         '*g = … → (p-glob-assign "pkg" "name" …)');
 
 # --- converted: =~ / !~ context wrap (AST subst/tr detection) ----------------
 # match RHS gets a *wantarray* wrap pinned to the node context; s///-/tr///-RHS
