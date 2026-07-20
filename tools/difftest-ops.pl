@@ -29,8 +29,11 @@ make_path($WORK);
 # Snippet generators.  Each snippet ends by printing exactly "[VALUE]\n" so the
 # comparison is robust against surrounding noise; undef prints as [undef].
 # ---------------------------------------------------------------------------
-my @snips;   # {desc, code}
-sub add { push @snips, { desc => $_[0], code => $_[1] }; }
+my @snips;   # {desc, code, mods?}
+# add(desc, code [, {ModName => module_code, ...}]) — mods are written as
+# $WORK/ModName.pm at generation time (two-file module axis); the snippet
+# reaches them via its own `use lib "$WORK"` line.
+sub add { push @snips, { desc => $_[0], code => $_[1], mods => $_[2] }; }
 
 # wrap an expression EXPR into a full program that prints its scalar value
 sub prog {
@@ -629,6 +632,211 @@ for my $p (@postfix) {
     add("postfix $expr", $kind eq 'l' ? prog_list($expr, $pre) : prog($expr, $pre));
 }
 
+# --- Axis 18: call shapes x sub-definition shapes (s304 #80 class) ----------
+# Every caller argument shape against every sub-definition shape: PCL's
+# uniform convention is "callers pass containers raw, the CALLEE flattens";
+# the &optional signature fast path silently broke that for aggregate args
+# (f(@a) / f(@_) delegation) and no gate test covered it.  Perl itself
+# rejects some combinations (($$) prototype vs list args) — the oracle skip
+# handles those.
+{
+    my @subdefs = (
+        [ 'sig',      'sub f2 { my ($x, $y) = @_; return "$x/$y"; }' ],
+        [ 'shiftrun', 'sub f2 { my $x = shift; my $y = shift; return "$x/$y"; }' ],
+        [ 'slurpy',   'sub f2 { my ($x, @r) = @_; return "$x/" . join("+", @r); }' ],
+        [ 'elems',    'sub f2 { return "$_[0]/$_[1]"; }' ],
+        [ 'proto',    'sub f2 ($$) { my ($x, $y) = @_; return "$x/$y"; }' ],
+    );
+    my @callshapes = (
+        [ 'scalars',   'f2(1, 2)',       '' ],
+        [ 'array',     'f2(@aa)',        'my @aa = (1, 2);' ],
+        [ 'mix-post',  'f2(9, @a1)',     'my @a1 = (8);' ],
+        [ 'mix-pre',   'f2(@a1, 7)',     'my @a1 = (6);' ],
+        [ 'hash',      'f2(%hh)',        'my %hh = (k => 3);' ],
+        [ 'empty',     'f2()',           '' ],
+        [ 'one-arg',   'f2(5)',          '' ],
+        [ 'delegate',  'g2(3, 4)',       'sub g2 { return f2(@_); }' ],
+        [ 'coderef',   '$cr->(@aa)',     'my @aa = (1, 2); my $cr = \&f2;' ],
+        [ 'amp-call',  '&f2(@aa)',       'my @aa = (1, 2);' ],
+        [ 'nested',    'f2(f2(1,2), 3)', '' ],
+    );
+    for my $sd (@subdefs) {
+        for my $cs (@callshapes) {
+            add("call $sd->[0]/$cs->[0]",
+                prog($cs->[1], "$cs->[2]\n$sd->[1]\n"));
+        }
+    }
+}
+
+# --- Axis 19: pragma visibility (use strict on/off x bareword shapes) -------
+# PExpr's bareword-after-binary-op disambiguation is strict_subs-gated;
+# s304's _premerge_strict_pragma made the pragma visible to v2's
+# ahead-of-stream lowering.  Same shape with and without strict must both
+# match perl (which resolves barewords against subs LIVE in the stash, so
+# some no-strict rows are expected known divergences — they cluster).
+{
+    my @bareshapes = (
+        [ 'const-match',  'BEGIN { my $rx = qr/^\w+$/; *_cnst = sub () { $rx }; }',
+                          '"Pt" =~ _cnst ? "match" : "nomatch"' ],
+        [ 'const-concat', 'BEGIN { *_cval = sub () { "CV" }; }',
+                          '_cval . "-tail"' ],
+        [ 'const-num',    'BEGIN { *_cnum = sub () { 42 }; }',
+                          '_cnum + 1' ],
+        [ 'use-constant', 'use constant KC => 7;',
+                          'KC * 2' ],
+        [ 'alias-call',   'sub real9 { "R9" } BEGIN { *ali9 = \&real9; }',
+                          'ali9() . "!"' ],
+        [ 'alias-bare',   'sub real8 { "R8" } BEGIN { *ali8 = \&real8; }',
+                          'ali8 . "!"' ],
+    );
+    for my $bs (@bareshapes) {
+        my ($name, $pre, $expr) = @$bs;
+        add("pragma strict/$name",   prog($expr, "use strict; use warnings;\n$pre\n"));
+        add("pragma nostrict/$name", prog($expr, "no strict;\n$pre\n"));
+    }
+}
+
+# --- Axis 20: shadows / captures / interpolation (rename-engine shapes) -----
+# The promotion/rename passes (shadow renames, capture promotion, interp
+# rewrite) are what the v1-parity oracle kept catching by hand in E1.
+sub prog_stmts {   # statements that assign $R; prints [$R]
+    my ($stmts) = @_;
+    return "my \$R;\n$stmts\n\$R = 'undef' unless defined \$R;\nprint \"[\$R]\\n\";\n";
+}
+{
+    my @shapes = (
+        [ 'shadow-basic',
+          'my $x = 1; { my $x = 2; $R .= "i$x"; } $R .= "o$x";' ],
+        [ 'shadow-deep',
+          'my $x = 1; { my $x = 2; { my $x = 3; $R .= $x; } $R .= $x; } $R .= $x;' ],
+        [ 'shadow-if',
+          'my $x = "a"; if (1) { my $x = "b"; $R = $x; } $R .= $x;' ],
+        [ 'capture-read',
+          'my $x = 5; my $c = sub { $x }; $x = 6; $R = $c->();' ],
+        [ 'capture-write',
+          'my $x = 5; my $c = sub { $x++ }; $c->(); $c->(); $R = $x;' ],
+        [ 'capture-shadow',
+          'my $x = 1; my $c; { my $x = 2; $c = sub { $x }; } $x = 9; $R = $c->() . "/$x";' ],
+        [ 'foreach-capture',
+          'my @f; for my $i (1..3) { push @f, sub { $i } } $R = join ",", map { $_->() } @f;' ],
+        [ 'interp-shadow',
+          'my $x = "out"; { my $x = "in"; $R = "v=$x"; } $R .= "+$x";' ],
+        [ 'interp-array',
+          'my @a = (1,2); my $x = 3; $R = "@a-$x-$a[1]-${x}s";' ],
+        [ 'interp-hash',
+          'my %h = (k=>7); $R = "h=$h{k}!";' ],
+        [ 'interp-capture',
+          'my $x = 5; my $c = sub { "cap=$x" }; $x = 8; $R = $c->();' ],
+        [ 'state-in-sub',
+          'use feature "state"; sub tick9 { state $n = 0; return ++$n; } tick9(); $R = tick9();' ],
+        [ 'local-our',
+          'our $g9 = 1; sub rd9 { $g9 } { local $g9 = 2; $R = rd9(); } $R .= "/$g9";' ],
+    );
+    add("rename $_->[0]", prog_stmts($_->[1])) for @shapes;
+}
+
+# --- Axis 21: string-eval shapes (E3 eval-mode coverage) --------------------
+# Runtime `eval "..."` now transpiles through v2 (per-eval v1 retry); these
+# pin the capture protocol end-to-end: read/write-back, closures built inside
+# the eval, subs the eval defines, cross-eval globals, $a/$b in sort.
+{
+    my @shapes = (
+        [ 'read',        'my $x = 5; $R = eval q{$x + 1};' ],
+        [ 'write-back',  'my $x = 5; eval q{$x = 9}; $R = $x;' ],
+        [ 'closure',     'my $x = "S"; my $c = eval q{sub { "got:$x" }}; $R = $c->();' ],
+        [ 'defsub-clo',  'eval q{sub mk9 { my $s = shift; return sub { $s }; }}; $R = mk9("z")->();' ],
+        [ 'glob-persist','eval q{$gp9 = 4}; $R = eval q{$gp9 + 1};' ],
+        [ 'sort-ab',     '$R = eval q{join ",", sort { $b <=> $a } (1,3,2)};' ],
+        [ 'array-read',  'my @a = (1,2); $R = eval q{join "-", @a};' ],
+        [ 'hash-write',  'my %h; eval q{$h{k} = 3}; $R = $h{k};' ],
+        [ 'inner-my',    '$R = eval q{my $z = 7; $z * 2};' ],
+        [ 'die-caught',  '$R = eval q{die "boom\n"}; $R = defined $R ? $R : "E:" . $@;' ],
+        [ 'shadow',      'my $x = 1; { my $x = 2; $R = eval q{$x}; }' ],
+    );
+    add("eval $_->[0]", prog_stmts($_->[1])) for @shapes;
+}
+
+# --- Axis 22: two-file module mode (the Moo-chain class) --------------------
+# Import/export mechanisms cross the module boundary the single-file axes
+# cannot reach: Exporter (direct and glob-aliased import), BEGIN-installed
+# constant subs under strict, and the cross-file calling convention.
+{
+    my $L = "use lib \"$WORK\";\n";
+    add('module exporter-direct',
+        $L . prog_stmts('use TFm1 qw(util1); $R = util1(7);'),
+        { TFm1 => <<'PM' });
+package TFm1;
+use strict; use warnings;
+use Exporter 'import';
+our @EXPORT_OK = qw(util1);
+sub util1 { return "U1:$_[0]"; }
+1;
+PM
+    add('module exporter-globalias',
+        $L . prog_stmts('use TFm2 qw(util2); $R = util2();'),
+        { TFm2 => <<'PM' });
+package TFm2;
+use strict; use warnings;
+use Exporter ();
+BEGIN { *import = \&Exporter::import }
+our @EXPORT_OK = qw(util2);
+sub util2 { return "U2"; }
+1;
+PM
+    add('module exporter-default',
+        $L . prog_stmts('use TFm3; $R = util3("d");'),
+        { TFm3 => <<'PM' });
+package TFm3;
+use strict; use warnings;
+use Exporter 'import';
+our @EXPORT = qw(util3);
+sub util3 { return "U3:$_[0]"; }
+1;
+PM
+    add('module const-sub-strict',
+        $L . prog_stmts('use TFm4 (); $R = TFm4::chk("Word") . "/" . TFm4::chk("no space");'),
+        { TFm4 => <<'PM' });
+package TFm4;
+use strict; use warnings;
+BEGIN { my $rx = qr/\A\w+\z/; *_mrx = sub () { $rx }; }
+sub chk { return $_[0] =~ _mrx ? "ok" : "no"; }
+1;
+PM
+    add('module sig-cross-file-array',
+        $L . prog_stmts('use TFm5 (); my @a = (1, 2); $R = TFm5::pair(@a);'),
+        { TFm5 => <<'PM' });
+package TFm5;
+use strict; use warnings;
+sub pair { my ($x, $y) = @_; return "$x/$y"; }
+1;
+PM
+    add('module sig-cross-file-delegate',
+        $L . prog_stmts('use TFm6 (); $R = TFm6::outer(3, 4);'),
+        { TFm6 => <<'PM' });
+package TFm6;
+use strict; use warnings;
+sub pair6 { my ($x, $y) = @_; return "$x/$y"; }
+sub outer { return pair6(@_); }
+1;
+PM
+    add('module proto-cross-file',
+        $L . prog_stmts('use TFm7 (); $R = TFm7::two(5, 6);'),
+        { TFm7 => <<'PM' });
+package TFm7;
+use strict; use warnings;
+sub two ($$) { my ($x, $y) = @_; return $x + $y; }
+1;
+PM
+    add('module import-into-caller',
+        $L . prog_stmts('use TFm8; $R = defined &gift8 ? gift8() : "missing";'),
+        { TFm8 => <<'PM' });
+package TFm8;
+use strict; use warnings;
+sub import { my $pkg = caller; no strict 'refs'; *{"${pkg}::gift8"} = sub { "G8" }; }
+1;
+PM
+}
+
 $LIMIT and @snips = @snips[0 .. $LIMIT-1];
 
 # ---------------------------------------------------------------------------
@@ -643,6 +851,13 @@ for my $i (0 .. $#snips) {
     open my $fh, '>', $f or die $!;
     print $fh $s->{code};
     close $fh;
+    if ($s->{mods}) {
+        for my $mname (sort keys %{ $s->{mods} }) {
+            open my $mfh, '>', "$WORK/$mname.pm" or die $!;
+            print $mfh $s->{mods}{$mname};
+            close $mfh;
+        }
+    }
     $s->{file} = $f;
     my $out = `perl $f 2>$WORK/s$i.perr`;
     if ($? != 0) { $s->{skip} = 1; next; }   # perl rejected → not valid Perl

@@ -839,4 +839,30 @@ sub d { my $r = \&f; return $r->(@_); }
 print d(4, 2), "\n";
 ');
 
+# ============ GLOB-INSTALLED CONSTANT SUBS (s304 E4.0 fuzzer find) ============
+# `*NAME = sub () {...}` gives NAME an empty prototype perl knows via the live
+# stash; _premerge_glob_const_prototypes registers it so the bareword is a
+# zero-arg call (not a swallowed operand or a string) in every parse branch.
+
+test_transpile("glob constant sub does not swallow + operand", '
+use strict;
+BEGIN { *_kn = sub () { 42 }; }
+my $r = _kn + 1;
+print "$r\n";
+');
+
+test_transpile("glob constant sub as regex operand in ternary", '
+use strict;
+BEGIN { my $rx = qr/^\w+$/; *_krx = sub () { $rx }; }
+my $r = "Pt" =~ _krx ? "match" : "nomatch";
+print "$r\n";
+');
+
+test_transpile("glob constant sub before concat", '
+use strict;
+BEGIN { *_kv = sub () { "CV" }; }
+my $r = _kv . "-tail";
+print "$r\n";
+');
+
 done_testing();

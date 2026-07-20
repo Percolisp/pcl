@@ -110,6 +110,25 @@ Next step in task #80: per-module v1 forcing to bisect the chain.
 E4.0b says exactly this class of divergence must be fixed while v1
 still exists — #80 blocks E4.1.
 
+**Fifth deliverable — E4.0 SHIPPED (task #82): fuzzer axes 18–22 +
+one new root cause fixed.**  `tools/difftest-ops.pl` gains: call
+shapes × sub-definition shapes (the #80 class), pragma visibility
+(strict on/off × bareword shapes), shadows/captures/interp, string-
+eval shapes (E3), and a two-file module mode (`add(desc, code,
+{Mod => code})`) covering Exporter direct/glob-aliased/default,
+constant subs under strict, and the cross-file calling convention.
+1060 valid snippets.  First run: 14 mismatches / 7 clusters → one NEW
+root cause: `*NAME = sub () {…}` glob-installed constant subs had an
+invisible `()` prototype (`_cnum + 1` → `_cnum(+1)`; `=~ _cnst ?` →
+bareword string even under strict — the ternary branch has no strict
+gate).  Fixed with `_premerge_glob_const_prototypes` (third premerge;
+explicit `()` protos only; `local *` skipped); zero corpus diff both
+pipelines; +3 guards in transpile-test-04b.t.  Steady state
+**1053/1060; all 7 residuals known**: 3× parked `**` float
+divergence, 1× documented `() = split`, 2× bare `*alias = \&sub` +
+1× import-into-caller glob-install (→ task #83, stash-visibility
+class).  The fuzzer now encodes every bug class s304 found by hand.
+
 **Fourth deliverable — task #80 FIXED: Moo works on the v2 default
 (gen v2-46).**  The per-module bisect (new debug hook: `PCL_V1_FILES`
 env in Parser2::parse forces matching files through v1) pointed at

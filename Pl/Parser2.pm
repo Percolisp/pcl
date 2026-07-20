@@ -229,6 +229,33 @@ sub _premerge_strict_pragma {
   $self->environment->set_pragma('strict_subs', 1) if $use_strict && !$no_strict;
 }
 
+# Register `*NAME = sub () { ... }` glob-installed constant subs as zero-arg
+# prototypes (see the parse() call site).  Only the EXPLICIT empty prototype
+# registers — a plain `*NAME = sub {...}` or `*NAME = \&other` has no arity
+# contract to learn.  `local *NAME = ...` is skipped (temporary rebind, not a
+# declaration).  Package-qualified targets register under the bare name too:
+# PExpr's known-word checks look up the spelling at the call site.
+sub _premerge_glob_const_prototypes {
+  my ($self, $doc) = @_;
+  for my $stmt (@{ $doc->find('PPI::Statement') || [] }) {
+    my @k = grep { $_->significant } $stmt->children;
+    next if @k < 4;
+    next if !($k[0]->isa('PPI::Token::Symbol')
+              && $k[0]->content =~ /^\*(?:\w+(?:::\w+)*::)?(\w+)$/);
+    my $name = $1;
+    next if !($k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '=');
+    next if !($k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'sub');
+    next if !($k[3]->isa('PPI::Token::Prototype') && $k[3]->content eq '()');
+    $self->environment->add_prototype($name, {
+      params     => [],
+      min_params => 0,
+      max_params => 0,
+      is_proto   => 1,
+      proto_string => '',
+    });
+  }
+}
+
 sub _premerge_include_prototypes {
   my ($self, $doc) = @_;
   my $fp = $self->fallback_parser;
@@ -402,6 +429,14 @@ sub parse {
   # survive into the real parse even after the statement fallback sets the
   # pragma (the s276 stale-stamp family).
   $self->_premerge_strict_pragma($doc);
+
+  # The constant-sub idiom `*NAME = sub () { ... }` (BEGIN-glob-installed,
+  # Moo::_Utils's _module_name_rx/_CAN_SUBNAME family) gives NAME an empty
+  # prototype perl KNOWS at parse time via the live stash.  Register it up
+  # front so PExpr treats the bareword as a zero-arg call everywhere —
+  # without it `_cnum + 1` swallowed the operand (`_cnum(+1)`) and
+  # `X =~ _cnst ? ...` strung the bareword (E4.0 fuzzer, axis 19/22).
+  $self->_premerge_glob_const_prototypes($doc);
 
   # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort
   # comparator counts: "Can't goto out of a pseudo block") — when no such

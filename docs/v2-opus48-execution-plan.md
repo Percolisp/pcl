@@ -460,6 +460,21 @@ eval.t 126+34 = baseline, state.t 157+0, changed-file sweep clean.
   the v1-parity oracle has been catching: promotion/rename shapes (shadows,
   spans, captures, interp), context (`ctx-*`), interpolation forms.  Fuzz
   hard; fix what falls out.
+
+  **STATE (s304): SHIPPED.**  Five new axes (18–22): call shapes × sub
+  definitions (the #80 &optional class), pragma visibility (strict on/off ×
+  bareword shapes), shadows/captures/interp (rename engine), string-eval
+  shapes (E3 coverage), and a two-file module mode (`add(desc, code,
+  {Mod => code})` — Exporter direct/glob-aliased/default, constant subs
+  under strict, cross-file calling convention).  1060 valid snippets.
+  First run found ONE new root cause — glob-installed constant subs
+  (`*_c = sub () {…}`) had an invisible `()` prototype, so `_cnum + 1`
+  swallowed the operand and `=~ _cnst ?` strung the bareword — fixed by
+  `_premerge_glob_const_prototypes` (third member of the premerge family);
+  guards in transpile-test-04b.t.  Steady state: **1053/1060 match; all 7
+  residual mismatches are known** (3× parked `**` float divergence, 1×
+  documented `() = split` count, 2× bare `*alias = \&sub` + 1×
+  import-into-caller glob-install = task #83, the stash-visibility class).
 - **E4.0b (user requirement, 2026-07-14): don't rely on fuzzing alone —
   re-run the external test corpora on the v2 default before deletion:**
   1. **Perl's own `t/` subdirectories that are NOT in the sweep**
