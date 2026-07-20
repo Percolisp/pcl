@@ -376,11 +376,22 @@ playbook (see `docs/v2-transfer-plan.md` T-C(ii)):
      my/our identity, split/join wraps, `%WANTARRAY_SENSITIVE` +
      `_ctx_wrap_form` context binds) at byte parity on both pipelines.
      **`%FUNCALL_FORM_DECLINES` in ExprToCL.pm is the live remaining
-     worklist** — require, next/last/redo/goto, do, eval, grep/map,
-     bless, push/unshift, readline/select, tied/pos, delete/exists/
-     defined/undef, chop/chomp, plus -bareword/SUPER::/non-Word heads;
-     each stays on the kept text gen_funcall until its branch converts
-     (shrink the list branch by branch, one verification cycle each),
+     worklist** — each name stays on the kept text gen_funcall until its
+     branch converts (shrink the list branch by branch, one verification
+     cycle each).  **STATE (s303 survey): the table is down to `eval`
+     alone**, and every internal node type EXCEPT `inline_lambda` has a
+     form handler registered.  The full remaining E2 conversion surface
+     (from `grep -n 'return undef' Pl/ExprToCL.pm`):
+     - `eval` funcall branch (the declines table's last name);
+     - `-bareword` / `SUPER::` / non-Word call heads (gen_funcall_form
+       structural declines, lines ~1687-1692);
+     - prefix `\` / `++` / `--` family (gen_prefix_op_form decline,
+       ~3740) + the arylen `++/--` postfix carve-out (~3901);
+     - non-converted leaf types (gen_leaf decline ~656, incl.
+       `Regexp::Substitute`, ~641);
+     - empty-slice byte quirks (trailing-space text shapes, ~4301-4345)
+       — candidates to normalize at E2.final rather than reproduce;
+     - `inline_lambda` (LAST, per item 4).
   2. sym/magic reads, `string_concat`, literals (`quote-double`,
      `number-hex`),
   3. `op:=`/`++`/`!` families, regex forms,

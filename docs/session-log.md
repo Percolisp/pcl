@@ -56,6 +56,18 @@ Two deliverables:
    path also gained the missing `_wrap_freeze` (a B-verdict counter's init
    stored unfrozen).
 
+4. **Forward-decl scan phantom-defvar fix** (found because the new
+   `%pcl-str-*` runtime names surfaced it): the sigil-name regex
+   backtracked past its `(?!-)` guard and defvar'd truncated phantoms
+   (`%pc` from `%pcl-str-buffer`, `$fo` from `$foo-…` text, `$ma`,
+   `$pvlv_glo`, …) — a pre-existing task-#66-family bug.  Possessive
+   `\w*+` stops the backtracking; 20 corpus files lose phantom defvars.
+
+**DIRECTION (user, end of s303): finish E2→E4 before further generated-
+code optimization.**  E2.1 surveyed: `%FUNCALL_FORM_DECLINES` is down to
+`eval`; only `inline_lambda` lacks a form handler; full remaining-surface
+map written into `docs/v2-opus48-execution-plan.md` §E2.1.
+
 ---
 
 ## Session 302 (2026-07-20, Fable) — task #62 steps 1+A-num: compound assigns & root incdec on raw slots — intloop+= 3.4x->2.0x, carve-out hang fixed (gen v2-43).
