@@ -349,48 +349,11 @@ sub parse {
   # variable.  Requalify them to the declaring package's spelling up front.
   $self->_requalify_block_our_after_pkg_switch($doc);
 
-  # Runtime-gap gate (s295c): BARE fork-pipe open — the 2-arg `open FH, "|-"`
-  # (or "-|") that forks and returns pid/0 with no command.  %p-open-impl
-  # cannot fork-pipe yet (the parked t/io pipe-open feature), so this open
-  # fails and the idiom's standard `die … unless defined($pid = open …)`
-  # fires at runtime — in BOTH pipelines, but under the sweep's
-  # p-load-with-recovery v1's flat top-level forms lose only that one
-  # statement while v2's nested lets would lose the whole remainder of the
-  # file (closure.t: 17 tests of coverage, silently reported as a full
-  # PASS).  Gate → v1 until pipe-open ships, then delete this scan.
-  # Not gated: the 3-arg command form `open(FH, "|-", $cmd)` and a bare
-  # form whose failure is handled gracefully (`… // skip "cannot fork"`,
-  # magic.t) — those fail as undef at runtime and the file keeps running
-  # v2-native.  Only bare form + `die` on its failure in the SAME statement
-  # (the idiom's standard spelling) has the load-abort blast radius.
-  for my $q (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Quote') }) || [] }) {
-    next unless $q->can('string') && do { my $s = $q->string;
-                                          $s eq '|-' || $s eq '-|' };
-    my $stmt = $q->statement or next;
-    next unless grep { $_->isa('PPI::Token::Word') && $_->content eq 'open' }
-                $stmt->schildren;
-    # Bare form only: the mode quote is the statement's last significant
-    # token (trailing `)`/`;` ignored) — a following command argument means
-    # the graceful 3-arg form.
-    my @toks = grep { $_->significant
-                      && $_->content ne ';' && $_->content ne ')' }
-               $stmt->tokens;
-    next unless @toks && $toks[-1] == $q;
-    # The die usually wraps the open (`die … unless defined($pid = open …)`)
-    # — climb to the outermost SIMPLE statement (stop at block boundaries:
-    # a die elsewhere in an enclosing compound is not this open's handler).
-    my $top = $stmt;
-    while ($top->parent
-           && !$top->parent->isa('PPI::Structure::Block')
-           && !$top->parent->isa('PPI::Document')) {
-      my $up = $top->parent->statement or last;
-      last if $up == $top;
-      $top = $up;
-    }
-    die "Parser2 TODO: bare fork pipe-open with die-on-failure — runtime gap\n"
-      if grep { $_->isa('PPI::Token::Word') && $_->content eq 'die' }
-         $top->tokens;
-  }
+  # (s300d) The s295c "bare fork pipe-open with die-on-failure" gate is gone:
+  # %p-open-fork-pipe now implements the 2-arg `open FH, "|-"` / "-|" fork
+  # forms (plus command pipes and ">&" dup-opens) in the runtime, so the
+  # die-on-failure idiom no longer fires and the load-abort blast radius the
+  # gate protected against cannot be reached.
 
   # String eval (`eval EXPR`) captures enclosing my-lexicals (session-250
   # mechanism).  W3: it lowers through the ordinary expression fallback seam —

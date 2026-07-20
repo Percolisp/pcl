@@ -718,4 +718,88 @@ test_transpile("bare-block my shadowing a package global leaves the global intac
 print "@a\n";
 ');
 
+# s300d/#70: fork-pipe opens.  Command pipes (2-arg spellings), the bare
+# "-|" / "|-" fork forms with an in-process child, close-reaps-child ($?),
+# and the closure.t child shape (pipe + bare |- + ">&" dup-open + exec).
+test_transpile("command read-pipe: open FH, \"cmd |\"", '
+open(FH, "echo hello |") or die "nope";
+while (<FH>) { print "got: $_"; }
+my $ok = close FH;
+print "close: ", ($ok ? "true" : "false"), " status: $?\n";
+');
+test_transpile("command write-pipe: open FH, \"| cmd\"", '
+open(FH, "| tr a-z A-Z") or die "nope";
+print FH "shout\n";
+close FH;
+print "done\n";
+');
+test_transpile("bare -| fork-pipe: parent reads in-process child, close sets \$?", '
+my $pid = open CHILD, "-|";
+die "fork failed" unless defined $pid;
+if ($pid) {
+    while (<CHILD>) { print "parent-got: $_"; }
+    close CHILD;
+    print "reaped status $?\n";
+} else {
+    print "hello from child\n";
+    exit 0;
+}
+');
+test_transpile("bare |- fork-pipe: child reads rewired STDIN, exit status through close", '
+my $pid = open KID, "|-";
+die "fork failed" unless defined $pid;
+if ($pid) {
+    print KID "one\n";
+    print KID "two\n";
+    close KID;
+    print "parent done, status $?\n";
+} else {
+    while (<STDIN>) { chomp; print "child-saw: [$_]\n"; }
+    exit 3;
+}
+');
+test_transpile("closure.t child shape: pipe + bare |- + >&dup + exec, parent captures", '
+pipe READ, WRITE or die "no pipe";
+my $pid = open PERL, "|-";
+die "no fork" unless defined $pid;
+unless ($pid) {
+    close READ;
+    open STDOUT, ">&WRITE" or die "no redirect: $!";
+    exec "cat", "-" or die "no exec";
+} else {
+    close WRITE;
+    print PERL "through the child\n";
+    close PERL;
+    local $/;
+    my $out = <READ>;
+    close READ;
+    print "captured: [$out]";
+}
+');
+
+# s301/#70: ">&=" fdopen-style dup — same underlying handle, works on an
+# in-memory (fd-less) filehandle too (scalar.t [perl #113764] shape).
+test_transpile(">&= dup onto an in-memory handle", '
+open FILE, ">", \my $content or die "no open";
+open my $fh, ">&=FILE" or die "no dup: $!";
+print $fh "Foo-Bar\n";
+close $fh;
+close FILE;
+print "content=<$content>";
+');
+
+# s301/#70: an interpolated heredoc whose EVERY sigil is escaped still gets
+# its escapes collapsed (\$ -> $, \\ -> \) — closure.t END_MARK_ONE/TWO shape.
+# Covers both the my-decl RHS (v2-native) and .= (seam) parse paths.
+test_transpile("escape-only interpolated heredoc collapses \\\$ and \\\\", '
+my $c = <<"END_MARK";
+BEGIN { \$SIG{__WARN__} = sub {
+    my \$msg = \$_[0];
+END_MARK
+$c .= <<"END_TWO";
+tail \$x and a literal \\\\n here
+END_TWO
+print $c;
+');
+
 done_testing();

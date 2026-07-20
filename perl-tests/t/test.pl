@@ -199,11 +199,6 @@ sub object_ok {
     }
 }
 
-# watchdog - set alarm for test timeout (no-op in PCL)
-sub watchdog {
-    # No-op - PCL doesn't support alarm signals
-}
-
 # eq_hash - compare two hash refs for equality (from Perl's internal test.pl)
 sub eq_hash {
     my ($a, $b) = @_;
@@ -266,6 +261,53 @@ sub warning_like (&$;$) {
     my ($code, $expected, $name) = @_;
     $code->();
     pass($name // "warning_like");
+}
+
+# ------------------------------------------------------------------------
+# Real-perl fallback (#70).  Some tests (closure.t) fork+exec a REAL perl
+# child whose piped program does `require './test.pl'` — under that perl the
+# prototype declarations above have no bodies.  Under PCL the TAP functions
+# are provided by pcl-test.lisp and registered as defined, so the guard is
+# false and the eval never runs (a body here would override the runtime
+# versions).  The bodies live in a string eval so PCL only ever parses them
+# as data.
+unless (defined &main::is) {
+    eval <<'REAL_PERL_TAP' or die $@;
+my $curr = 1;
+sub curr_test { $curr = shift if @_; $curr }
+sub _tap_line {
+    my ($ok, $name) = @_;
+    print(($ok ? "" : "not "), "ok ", $curr++,
+          (defined $name && $name ne '' ? " - $name" : ""), "\n");
+    $ok;
+}
+sub ok ($@) { my ($t, $name) = @_; _tap_line($t, $name) }
+sub is ($$@) {
+    my ($got, $exp, $name) = @_;
+    my $ok = !defined($exp) ? !defined($got)
+           : defined($got) && $got eq $exp;
+    _tap_line($ok, $name);
+    unless ($ok) {
+        print "# got:      ", (defined $got ? "'$got'" : "undef"), "\n";
+        print "# expected: ", (defined $exp ? "'$exp'" : "undef"), "\n";
+    }
+    $ok;
+}
+sub isnt ($$@) {
+    my ($got, $exp, $name) = @_;
+    my $ok = !defined($exp) ? defined($got)
+           : !defined($got) || $got ne $exp;
+    _tap_line($ok, $name);
+}
+sub like   ($$@) { my ($got, $re, $name) = @_; _tap_line(defined($got) && $got =~ $re, $name) }
+sub unlike ($$@) { my ($got, $re, $name) = @_; _tap_line(!defined($got) || $got !~ $re, $name) }
+sub cmp_ok ($$$@) {
+    my ($l, $op, $r, $name) = @_;
+    my $ok = eval "\$l $op \$r";
+    _tap_line($ok, $name);
+}
+1;
+REAL_PERL_TAP
 }
 
 1;

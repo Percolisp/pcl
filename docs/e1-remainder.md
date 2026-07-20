@@ -1,5 +1,14 @@
 # E1 Remainder — the last 22 whole-file gates (survey, s283)
 
+> **★ E1 COMPLETE (s301, 2026-07-20, Fable 5): census 111 v2-native / 0
+> gated — gen v2-42.**  The last gate (closure.t, #70) fell: fork-pipe
+> (`"|-"`/`"-|"`) + dup-open (`">&FH"`, `">&=FH"`) runtime shipped, the
+> shared-interp heredoc `\$`-escape bug fixed (two stacked causes), and
+> `perl-tests/t/test.pl` got a real-perl TAP fallback so fork+exec'd perl
+> children can actually run — **closure.t 257+0/258 FULL PASS v2-native**
+> (v1 was 81+43).  t/io pipe.t/openpid.t now run (partial; follow-up).
+> s301 detail in `docs/session-log.md`.
+
 > **UPDATE (s300c, 2026-07-20, Fable 5): signatures gate GONE — census 110
 > native / 1 gated, gen v2-41.**  The "named sub nested in a
 > prototyped/signatured sub" gate hid a live miscompile: BLOCK-NESTED

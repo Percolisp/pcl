@@ -4,6 +4,62 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 301 (2026-07-20, Fable) — #70 SHIPPED: fork-pipe/dup-open runtime + closure.t FULL PASS — census 111/0, E1 GATE BURN-DOWN COMPLETE (gen v2-42).
+
+Finished the s300d worktree WIP (fork-pipe open `"|-"`/`"-|"` bare+command,
+dup-open `">&FH"`, gate deletion, 04b pipe tests) by resolving its three
+blockers:
+
+1. **scalar.t "t128 abort" was a misdiagnosis** — the real failure was the
+   `">&=FILE"` fdopen form (t87, perl #113764): parsed as `">&"` + name
+   `"=FILE"`, unresolvable → EBADF → `die` at line 394.  The sweep's
+   `p-load-with-recovery` swallowed the die (losing exactly one test, "ran
+   127/128"); plain `--load` (runt) aborted there.  Fix: `">&="`/`"<&="`
+   parsed as their own modes; `%p-open-dup` handles numeric fd sources,
+   no-dup fdopen for the `=` forms, and — for fd-less sources (in-memory
+   handles) — installs the SAME stream as an alias.  scalar.t 82+34/128
+   COMPLETE (was 81+35 @127).
+2. **magic.t fork-child END pollution**: `pl-plan` records `getpid`; the
+   exit-hook plan-check is skipped when the pid differs (perl's
+   Test::Builder rule).  magic.t 134+30 @181 (+1: t88 "$$ is reset on
+   fork"; the @181 stop is the pre-existing PL_delaymagic one).
+3. **closure.t heredoc `\$` escape bug — TWO stacked causes**, both in the
+   shared interp layer (hit both pipelines):
+   a. `PExpr.pm` heredoc branch only routed through the interpolator when an
+      UNESCAPED sigil was present — an all-escaped heredoc (END_MARK_ONE:
+      `\$SIG`, `\$msg`) fell to the raw-literal path, keeping `\$`/`\\`
+      verbatim.  Now any escape sequence also routes to the interpolator.
+   b. `make_string_literal_node` re-encoded decoded literals WITHOUT
+      escaping sigils, so its fake Quote::Double token was not a faithful
+      dq literal; v1's convert_perl_string didn't care (no interpolation),
+      but ExprToCL2's `_string_literal_form` honours interpolation and
+      re-interpolated the `$msg` away.  Now sigils are escaped in the
+      re-encoding (harmless to v1 — `_process_dq_escape` collapses them).
+   Plus test-infra: real-perl children (closure.t pipes its generated
+   program to `perl -`) `require './test.pl'`, which had prototype decls
+   with NO bodies → every child died ("Undefined subroutine curr_test",
+   exit 255 = the old "65280" tail).  `perl-tests/t/test.pl` now carries a
+   real-perl TAP fallback (curr_test/ok/is/isnt/like/unlike/cmp_ok) inside
+   a string eval guarded by `unless (defined &main::is)`; pcl-test.lisp
+   registers its TAP subs as `:defined` in `*p-declared-subs*` so the guard
+   is false under PCL (and `defined &is` is now true there, matching perl).
+   Also deleted a duplicate `sub watchdog` (child `-w` stderr noise).
+
+**Result: closure.t 257+0/258 FULL PASS v2-native** (v1 baseline was 81+43
+@275; s300d WIP was 71+36).  **Census 111 v2-native / 0 gated — E1
+complete.**  t/io unblocked as predicted: pipe.t runs 6/27
+(crash:sb-int:broken-pipe remains), openpid.t 8/10 — follow-up targets.
+
+**Verification**: Pl/t gate 115 files / 4247 tests ALL PASS (+2 new: `>&=`
+in-memory dup; escape-only heredoc collapse — both in 04b).  Corpus-diff vs
+HEAD: 3 files, all explained (closure.t pipeline flip; magic.t +
+signatures.t expected-error heredocs now correctly collapse `\$` — was a
+live miscompile, no behavior movers).  Full sweep: 18386 pass / 66 fully
+passing incl. closure.t; key-file anchors all match records.  Cache gen
+v2-42.  `docs/fail-baseline.tsv` re-bless still TODO (48 stale rows).
+
+---
+
 ## Session 300c (2026-07-20, Fable) — signatures gate GONE: block-nested signatured-sub miscompile fixed (census 110/1, gen v2-41).
 
 **The gate's real story:** "named sub nested in a prototyped/signatured sub"

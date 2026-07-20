@@ -7161,8 +7161,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      ;; |stdout|), so invert the string name the same way before find-symbol.
      (let* ((sep (search "::" fh :from-end t))
             (name (if sep (subseq fh (+ sep 2)) fh))
-            (sym (find-symbol (%pcl-invert-case name) :pcl)))
-       (and sym (gethash sym *p-filehandles*))))
+            (inv  (%pcl-invert-case name))
+            (sym  (find-symbol inv :pcl)))
+       (or (and sym (gethash sym *p-filehandles*))
+           ;; User handles (pipe READ, WRITE; open FOO, …) are keyed by their
+           ;; USER-package symbol, which a name string can't find-symbol
+           ;; without knowing the caller's package.  Perl handles are by-name:
+           ;; fall back to a name scan of the (small) handle table (#70
+           ;; dup-open ">&WRITE" resolves its source this way).
+           (loop for k being the hash-keys of *p-filehandles*
+                 using (hash-value v)
+                 when (and (symbolp k) (string= (symbol-name k) inv))
+                 return v))))
     ((p-box-p fh)
      (let ((v (p-box-value fh)))
        (cond
@@ -7200,6 +7210,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (cons "|-" (string-left-trim " " (subseq s 2))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "-|"))
        (cons "-|" (string-left-trim " " (subseq s 2))))
+      ;; Classic 2-arg command pipes: "| cmd" writes to cmd's stdin,
+      ;; "cmd |" reads cmd's stdout (#70).
+      ((and (>= (length s) 1) (char= (char s 0) #\|))
+       (cons "|-" (string-left-trim " " (subseq s 1))))
+      ((and (>= (length s) 1)
+            (char= (char s (1- (length s))) #\|))
+       (cons "-|" (string-right-trim " " (subseq s 0 (1- (length s))))))
+      ;; Dup-opens: ">&FH" / "<&FH" duplicate FH's file descriptor; the
+      ;; "=" forms (">&=FH" / ">&=N") are fdopen-style — same fd, no dup (#70).
+      ((and (>= (length s) 3) (string= (subseq s 0 3) ">&="))
+       (cons ">&=" (string-left-trim " " (subseq s 3))))
+      ((and (>= (length s) 3) (string= (subseq s 0 3) "<&="))
+       (cons "<&=" (string-left-trim " " (subseq s 3))))
+      ((and (>= (length s) 2) (string= (subseq s 0 2) ">&"))
+       (cons ">&" (string-left-trim " " (subseq s 2))))
+      ((and (>= (length s) 2) (string= (subseq s 0 2) "<&"))
+       (cons "<&" (string-left-trim " " (subseq s 2))))
       ((and (>= (length s) 1) (char= (char s 0) #\>))
        (cons ">" (string-left-trim " " (subseq s 1))))
       ((and (>= (length s) 1) (char= (char s 0) #\<))
@@ -7366,6 +7393,166 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
        t)
       (t (warn "Unsupported in-memory open mode: ~A" mode-str) nil))))
 
+;;; --- Fork-pipe opens: open FH, "|-" / "-|" [, CMD] (#70) -------------------
+;; Parent-side pipe stream → child PID.  p-close consults this to waitpid the
+;; child and set $? (Perl: close on a pipe returns true only on exit status 0).
+(defvar *p-pipe-pids* (make-hash-table :test 'eq))
+
+(defun %p-open-fork-pipe (fh mode-str cmd-args)
+  "Perl fork-pipe open.  MODE-STR is \"|-\" (parent writes to the child's
+   STDIN) or \"-|\" (parent reads the child's STDOUT).  CMD-ARGS non-nil execs
+   the command in the child (never returns); nil is the BARE form — both
+   processes continue running the program, the parent gets the child PID and
+   the child gets 0 with the filehandle NOT installed (Perl semantics).
+   The child's standard stream is rewired onto the pipe via dup2 so both
+   in-process reads/writes and a later exec see it."
+  (handler-case
+      (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
+        (finish-output *standard-output*)
+        (finish-output *error-output*)
+        (let ((pid (sb-posix:fork)))
+          (cond
+            ((> pid 0)                    ; ---- parent
+             (let ((stream
+                    (if (string= mode-str "|-")
+                        (progn
+                          (sb-posix:close read-fd)
+                          (sb-sys:make-fd-stream write-fd :output t
+                                                 :buffering :full
+                                                 :external-format :utf-8))
+                        (progn
+                          (sb-posix:close write-fd)
+                          (sb-sys:make-fd-stream read-fd :input t
+                                                 :external-format :utf-8)))))
+               (setf (gethash stream *p-pipe-pids*) pid)
+               (%p-install-fh fh stream)
+               pid))
+            (t                            ; ---- child
+             (box-set $$ (sb-posix:getpid))
+             (if (string= mode-str "|-")
+                 (progn                   ; child READS its rewired STDIN
+                   (sb-posix:close write-fd)
+                   (unless (= read-fd 0)
+                     (sb-posix:dup2 read-fd 0)
+                     (sb-posix:close read-fd))
+                   (setf sb-sys:*stdin*
+                         (sb-sys:make-fd-stream 0 :input t
+                                                :external-format :utf-8))
+                   (setf *standard-input* (make-synonym-stream 'sb-sys:*stdin*))
+                   (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
+                 (progn                   ; child WRITES its rewired STDOUT
+                   (sb-posix:close read-fd)
+                   (unless (= write-fd 1)
+                     (sb-posix:dup2 write-fd 1)
+                     (sb-posix:close write-fd))
+                   ;; :line buffering — the parent typically consumes the
+                   ;; child's output (TAP lines) incrementally.
+                   (setf sb-sys:*stdout*
+                         (sb-sys:make-fd-stream 1 :output t :buffering :line
+                                                :external-format :utf-8))
+                   (setf *standard-output*
+                         (make-synonym-stream 'sb-sys:*stdout*))
+                   (setf (gethash 'STDOUT *p-filehandles*) *standard-output*)))
+             (when cmd-args
+               (apply #'p-exec cmd-args)  ; returns only on exec failure
+               (sb-ext:exit :code 127 :abort t))
+             0))))
+    (error () (%pcl-save-errno) *p-undef*)))
+
+(defun %p-close-maybe-pipe (v)
+  "Close stream V; if it is the parent end of a fork-pipe, reap the child and
+   set $?.  Returns Perl's close truth: for a pipe, true only when the child
+   exited 0; for a plain stream, true."
+  (let ((pid (gethash v *p-pipe-pids*)))
+    (close v)
+    (if (null pid)
+        t
+        (progn
+          (remhash v *p-pipe-pids*)
+          (handler-case
+              (multiple-value-bind (rpid status) (sb-posix:waitpid pid 0)
+                (declare (ignore rpid))
+                (setf $? status)
+                (if (zerop status) t nil))
+            (error () (%pcl-save-errno) nil))))))
+
+(defun %p-fd-of-stream (v)
+  "Underlying file descriptor of stream V, following synonym streams; nil when
+   V has no OS fd (string streams etc.)."
+  (let ((s v))
+    (loop while (typep s 'synonym-stream)
+          do (setf s (symbol-value (synonym-stream-symbol s))))
+    (when (sb-sys:fd-stream-p s)
+      (sb-sys:fd-stream-fd s))))
+
+(defun %p-open-dup (fh mode-str src-name)
+  "Dup-open (#70): open FH, \">&SRC\" / \"<&SRC\" — FH becomes a duplicate of
+   SRC's file descriptor.  The \"=\" forms (\">&=SRC\", \">&=N\") are
+   fdopen-style: same fd (or a stream alias), no dup.  SRC may be a handle name
+   or a raw fd number.  When FH is a standard handle (STDOUT/STDERR/STDIN)
+   the dup goes ONTO its well-known fd via dup2 and the CL stream is rebuilt,
+   so in-process prints AND exec'd children both see the redirect (the
+   closure.t child shape).  Any other FH gets a fresh dup'd fd as a new stream."
+  (let* ((eq-form (char= (char mode-str (1- (length mode-str))) #\=))
+         (fd-num  (and (plusp (length src-name))
+                       (every #'digit-char-p src-name)
+                       (parse-integer src-name)))
+         (src     (and (not fd-num) (%p-resolve-fh src-name)))
+         (src-fd  (or fd-num (and src (%p-fd-of-stream src)))))
+    (unless src-fd
+      ;; No OS fd behind SRC.  An in-memory (PerlIO :scalar-alike) handle has
+      ;; none; Perl can still dup it at the PerlIO layer — the closest PCL
+      ;; equivalent is sharing the stream object itself (exact for the "="
+      ;; alias form, an approximation for ">&" which would get its own
+      ;; position in Perl).  scalar.t [perl #113764] \">&=FILE\" lands here.
+      (when (streamp src)
+        (%p-install-fh fh src)
+        (return-from %p-open-dup t))
+      (setf *p-stored-errno* 9)          ; EBADF
+      (return-from %p-open-dup nil))
+    (let ((std (and (symbolp fh)
+                    ;; string-equal: the generated code passes the handle
+                    ;; symbol under :invert readtable case (|stdout|).
+                    (cond ((string-equal (symbol-name fh) "STDOUT") 1)
+                          ((string-equal (symbol-name fh) "STDERR") 2)
+                          ((string-equal (symbol-name fh) "STDIN")  0)))))
+      (handler-case
+          (if std
+              (progn
+                (case std
+                  (1 (finish-output *standard-output*))
+                  (2 (finish-output *error-output*)))
+                (sb-posix:dup2 src-fd std)
+                (case std
+                  (0 (setf sb-sys:*stdin*
+                           (sb-sys:make-fd-stream 0 :input t
+                                                  :external-format :utf-8))
+                     (setf *standard-input*
+                           (make-synonym-stream 'sb-sys:*stdin*))
+                     (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
+                  (1 (setf sb-sys:*stdout*
+                           (sb-sys:make-fd-stream 1 :output t :buffering :line
+                                                  :external-format :utf-8))
+                     (setf *standard-output*
+                           (make-synonym-stream 'sb-sys:*stdout*))
+                     (setf (gethash 'STDOUT *p-filehandles*) *standard-output*))
+                  (2 (setf sb-sys:*stderr*
+                           (sb-sys:make-fd-stream 2 :output t :buffering :line
+                                                  :external-format :utf-8))
+                     (setf *error-output*
+                           (make-synonym-stream 'sb-sys:*stderr*))
+                     (setf (gethash 'STDERR *p-filehandles*) *error-output*)))
+                t)
+              (let* ((new-fd  (if eq-form src-fd (sb-posix:dup src-fd)))
+                     (stream  (if (char= (char mode-str 0) #\>)
+                                  (sb-sys:make-fd-stream new-fd :output t
+                                                         :external-format :utf-8)
+                                  (sb-sys:make-fd-stream new-fd :input t
+                                                         :external-format :utf-8))))
+                (%p-install-fh fh stream)
+                t))
+        (error () (%pcl-save-errno) nil)))))
+
 (defun %p-open-impl (fh mode filename)
   "Implementation of Perl open"
   ;; In-memory filehandle: the target is a SCALAR ref (a box whose value is a box),
@@ -7399,9 +7586,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              (open file-str :direction :io :if-exists :supersede
                    :if-does-not-exist :create))
             ((or (string= mode-str "|-") (string= mode-str "-|"))
-             ;; Pipe - not fully implemented, return nil
-             (warn "Pipe open not implemented: ~A" mode-str)
-             nil)
+             ;; Fork-pipe open (#70): bare when no command text, else the
+             ;; child execs the command.  Returns pid/0/undef directly —
+             ;; the filehandle install happens inside (parent only).
+             (return-from %p-open-impl
+               (%p-open-fork-pipe fh mode-str
+                                  (when (plusp (length file-str))
+                                    (list file-str)))))
+            ((member mode-str '(">&" "<&" ">&=" "<&=") :test #'string=)
+             ;; Dup-open (#70): install/redirect handled inside.
+             (return-from %p-open-impl (%p-open-dup fh mode-str file-str)))
             (t
              (warn "Unknown open mode: ~A" mode-str)
              nil))))
@@ -7442,15 +7636,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
      (let ((v (p-box-value fh)))
        (cond
          ((%p-socket-p v) (%p-close-socket v) (box-set fh *p-undef*) t)
-         ((streamp v)     (close v)           (box-set fh *p-undef*) t)
+         ((streamp v)     (prog1 (%p-close-maybe-pipe v)
+                            (box-set fh *p-undef*)))
          (t nil))))
     (t
      (let ((v (%p-resolve-fh fh)))
        (cond
          ((%p-socket-p v) (%p-close-socket v)
           (when (symbolp fh) (remhash fh *p-filehandles*)) t)
-         ((streamp v)     (close v)
-          (when (symbolp fh) (remhash fh *p-filehandles*)) t)
+         ((streamp v)     (prog1 (%p-close-maybe-pipe v)
+                            (when (symbolp fh) (remhash fh *p-filehandles*))))
          (t nil))))))
 
 (defmacro p-close (&optional fh)
@@ -9372,7 +9567,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-41"
+(defparameter *pcl-cache-generation* "v2-42"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

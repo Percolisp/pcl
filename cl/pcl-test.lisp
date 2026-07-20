@@ -16,6 +16,10 @@
 (defvar *test-count* 0)
 (defvar *test-planned* nil)
 (defvar *test-no-plan* nil)
+;; PID that set the plan: a fork child inherits the exit hook, and must not
+;; run the parent's plan-count check when it exits (perl's Test::Builder
+;; keeps $$ at plan time and skips _ending in children the same way).
+(defvar *test-plan-pid* nil)
 (defvar *test-failures* 0)
 (defvar *test-skipped* 0)
 (defvar *test-todo* 0
@@ -119,6 +123,17 @@
           pl-eq_array pl-curr_test
           pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
 
+;;; Register the TAP functions as DEFINED subs so Perl-level `defined &is`
+;;; introspection reports them — test.pl's real-perl fallback (used when a
+;;; test fork+execs a real perl child that requires './test.pl') keys on
+;;; `unless (defined &main::is)` to decide whether to eval its own bodies.
+(dolist (s '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
+             pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
+             pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
+             pl-eq_array pl-curr_test
+             pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
+  (setf (gethash s *p-declared-subs*) :defined))
+
 ;;; curr_test() - provided here (not as a stub in test.pl) so it reads the
 ;;; real *test-count* counter that pl-ok/pl-is/etc. maintain.
 (defun pl-curr_test (&optional n)
@@ -152,6 +167,7 @@
 
 ;;; plan(N) or plan(tests => N) or plan('no_plan')
 (defun pl-plan (&rest args)
+  (setf *test-plan-pid* (sb-posix:getpid))
   ;; Unbox all args (test scripts pass boxed values)
   (let ((args (mapcar #'unbox args)))
     (cond
@@ -548,23 +564,26 @@
       (dolist (line (split-string (to-string msg) '(#\Newline)))
         (format t "# ~A~%" line)))))
 
-;;; END hook: check test count
+;;; END hook: check test count.  Skipped entirely in a fork child (pid
+;;; differs from plan time) — the parent owns the plan.
 (push (lambda ()
-        (when (and *test-planned* (/= *test-count* *test-planned*))
-          (format t "# Looks like you planned ~A tests but ran ~A.~%"
-                  *test-planned* *test-count*))
-        ;; Crash localization: running FEWER tests than planned means the run is
-        ;; INCOMPLETE.  Emit a neutral, machine-parseable fact (the exit hook
-        ;; fires both on a clean EOF and on an unhandled condition under
-        ;; --non-interactive, and cannot itself tell which).  The *sweep* knows
-        ;; the SBCL exit code and refines this into either "crashed mid-file
-        ;; (crash site ~test N+1)" or "reached EOF but under-counted".
-        (when (and *test-planned* (< *test-count* *test-planned*))
-          (format t "# PCL-INCOMPLETE last=~A planned=~A desc=~A~%"
-                  *test-count* *test-planned* (or *last-test-name* "?"))
-          (force-output))
-        (when *test-no-plan*
-          (format t "1..~A~%" *test-count*)))
+        (unless (and *test-plan-pid*
+                     (/= *test-plan-pid* (sb-posix:getpid)))
+          (when (and *test-planned* (/= *test-count* *test-planned*))
+            (format t "# Looks like you planned ~A tests but ran ~A.~%"
+                    *test-planned* *test-count*))
+          ;; Crash localization: running FEWER tests than planned means the run is
+          ;; INCOMPLETE.  Emit a neutral, machine-parseable fact (the exit hook
+          ;; fires both on a clean EOF and on an unhandled condition under
+          ;; --non-interactive, and cannot itself tell which).  The *sweep* knows
+          ;; the SBCL exit code and refines this into either "crashed mid-file
+          ;; (crash site ~test N+1)" or "reached EOF but under-counted".
+          (when (and *test-planned* (< *test-count* *test-planned*))
+            (format t "# PCL-INCOMPLETE last=~A planned=~A desc=~A~%"
+                    *test-count* *test-planned* (or *last-test-name* "?"))
+            (force-output))
+          (when *test-no-plan*
+            (format t "1..~A~%" *test-count*))))
       sb-ext:*exit-hooks*)
 
 ;;; Stubs for common test-infrastructure functions that may not be loaded yet.

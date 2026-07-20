@@ -1021,6 +1021,11 @@ sub make_string_literal_node {
   $encoded =~ s/\n/\\n/g;    # real newline -> \n sequence
   $encoded =~ s/\r/\\r/g;
   $encoded =~ s/\t/\\t/g;
+  # Sigils too: a decoded literal `$msg` must round-trip as `\$msg`, or the
+  # token is not a faithful dq literal and a downstream consumer that honours
+  # interpolation (ExprToCL2::_string_literal_form) re-interpolates it
+  # (closure.t END_MARK heredocs: `\$msg` text lost its `$msg`).
+  $encoded =~ s/([\$\@])/\\$1/g;
 
   # Create a PPI string token
   my $str_token = PPI::Token::Quote::Double->new('"' . $encoded . '"');

@@ -734,9 +734,12 @@ sub parse {
       my $marker = $e1->content;   # e.g. <<'' or <<"" or <<EOF
       if ($marker !~ /^<<'/) {
         my $inner = join('', $e1->heredoc());
-        # Only use interpolation path if there's actually something to interpolate
+        # Route through interpolation when there's something to interpolate OR
+        # any escape sequence to collapse (\$ \@ \\ \n ...): the raw-literal
+        # fallback below keeps backslashes verbatim, which is only correct for
+        # escape-free text (closure.t END_MARK_ONE: all-escaped \$SIG heredoc).
         (my $tmp = $inner) =~ s/\\\\/\x00\x00/g;
-        if ($tmp =~ /(?<!\\)[\$\@]/) {
+        if ($tmp =~ /(?<!\\)[\$\@]/ or $inner =~ /\\/) {
           my $fake_str = PPI::Token::Quote::Double->new(qq{"$inner"});
           # Pass the real HereDoc token as origin so lexical feature lookup
           # (postderef_qq) sees the document position.
