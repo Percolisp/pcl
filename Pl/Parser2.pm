@@ -3384,8 +3384,10 @@ sub _forward_global_decls {
     # pipe-wrapped symbol; sigil (for container choice) is the char after `|`.
     $caret{$1} = 1 while $line =~ /(\|[\$\@\%]\{\^[A-Za-z_]\w*\}\|)/g;
     # (?<![\w:|]) skips pkg-qualified Foo::$x / |P|::$x; (?!-) skips runtime
-    # internals like %pcl-cl-sub-name.
-    while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
+    # internals like %pcl-cl-sub-name — with a POSSESSIVE \w*+ so the scan
+    # cannot backtrack into a shorter match that dodges the lookahead
+    # (`%pcl-str-buffer` used to shed two chars and defvar a phantom `%pc`).
+    while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*+)(?!-)/g) {
       my $v = $1;
       next if $runtime_vars{$v} || $lb->{$v};
       # W5-renamed cells are defvar'd via _captured_decls — don't double-declare.
@@ -3401,7 +3403,7 @@ sub _forward_global_decls {
     }
     # Cross-package refs (main::$IS_ASCII from a required harness, Foo::@bar)
     # get a defvar in THEIR package — v1's %cross_pkg_vars behaviour.
-    while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][A-Za-z_]\w*)(?!-)/g) {
+    while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][A-Za-z_]\w*+)(?!-)/g) {
       my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
       next if $skip_pkg{ defined($1) ? $1 : $2 };
       # Referenced packages must exist when the qualified symbol is READ —
@@ -4423,6 +4425,11 @@ sub _lower_stmt {
     my $name   = $expr->[0]->content;
     my $rawmac = Pl::VarAnnotator::raw_compound_macro($expr->[1]->content);
     if ($rawmac && $vi->{$name} && $vi->{$name}{unboxable}) {
+      # S1 str-buffer slot: `.=` appends in place (fill-pointer extend)
+      # instead of the allocate-a-fresh-concatenation -raw twin.
+      return ['%pcl-str-append', $name,
+              $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt)]
+        if $vi->{$name}{strbuf} && $expr->[1]->content eq '.=';
       return [$rawmac, $name,
               $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt)];
     }
@@ -4717,7 +4724,9 @@ sub _lower_compound {
     if ($name) {
       my $initval = defined $init ? $self->_lower_expr($init, $stmt) : '(p-undef)';
       if ($vi->{$name} && $vi->{$name}{unboxable}) {
-        $form = ['let', ['list', ['list', $name, $initval]],
+        # a B-verdict/str-buffer counter must freeze/bufferize its init too
+        $form = ['let', ['list', ['list', $name,
+                                  _wrap_freeze($vi->{$name}, $name, $initval)]],
                  ['p-for', ['list'], $cond, $step, _label_keys($label), @body]];
       } else {
         $form = ['let', ['list', ['list', $name, '(make-p-box nil)']],
@@ -5130,9 +5139,14 @@ sub _strip_semi {
 # Plain unboxable entries (no coerce) pass through untouched.
 sub _wrap_freeze {
   my ($vi_entry, $name, $form) = @_;
-  my $c = $vi_entry->{coerce} or return $form;
-  return [$c eq 'num' ? '%pcl-to-number-strict' : '%pcl-to-string-strict',
-          $form, "\"$name\""];
+  if (my $c = $vi_entry->{coerce}) {
+    $form = [$c eq 'num' ? '%pcl-to-number-strict' : '%pcl-to-string-strict',
+             $form, "\"$name\""];
+  }
+  # S1 str-buffer slot: every plain write REPLACES the buffer with a fresh
+  # adjustable fill-pointer string ((%pcl-str-append …) handles `.=`).
+  $form = ['%pcl-str-buffer', $form] if $vi_entry->{strbuf};
+  return $form;
 }
 
 # Split "EXPR if COND" style trailing statement modifiers at the top level.

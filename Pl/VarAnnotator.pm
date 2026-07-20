@@ -453,28 +453,52 @@ sub _analyze_tree {
       my @cls = $uc ? keys %$uc : ();
       my $coerce;
       if (@cls) {
-        if    (!grep { $_ ne 'num' } @cls)                 { $coerce = 'num' }
-        elsif (!grep { $_ ne 'str' && $_ ne 'bool' } @cls) { $coerce = 'str' }
+        if    (!grep { $_ ne 'num' } @cls) { $coerce = 'num' }
+        elsif (!grep { $_ ne 'str' && $_ ne 'bool' && $_ ne 'strkey' } @cls) {
+          $coerce = 'str';    # strkey = stringify use; freeze-safe (simple string)
+        }
       }
       if ($coerce) {
         $vi{$name} = { unboxable => 1, coerce => $coerce,
                        ($ENV{PCL_W12_DIFF} ? (reasons => ["b-$coerce"]) : ()) };
+        _mark_strbuf($ctx, \%vi, $name);
         next;
       }
     }
     $vi{$name} = { unboxable => (@reasons ? 0 : 1),
                    ($ENV{PCL_W12_DIFF} ? (reasons => \@reasons) : ()) };
+    _mark_strbuf($ctx, \%vi, $name) unless @reasons;
   }
   if ($ENV{PCL_B_DEBUG}) {
     for my $name (sort keys %vi) {
-      warn sprintf "B-DEBUG %s unboxable=%d coerce=%s reasons=[%s] uses={%s}\n",
+      warn sprintf "B-DEBUG %s unboxable=%d coerce=%s strbuf=%d reasons=[%s] uses={%s}\n",
         $name, $vi{$name}{unboxable}, $vi{$name}{coerce} // '-',
+        $vi{$name}{strbuf} // 0,
         join(',', @{ $vi{$name}{reasons} // [] }),
         join(',', map { "$_=$ctx->{use_class}{$name}{$_}" }
                   sort keys %{ $ctx->{use_class}{$name} // {} });
     }
   }
   return \%vi;
+}
+
+# S1 str-buffer verdict (task #62; the W15.8 append fix rides on the raw
+# slot): an unboxable slot whose ONLY writes are plain roots and `.=`
+# compounds, and whose every use is a TRANSIENT stringify/boolean read,
+# holds an adjustable fill-pointer buffer — plain writes wrap in
+# %pcl-str-buffer, `.=` becomes in-place %pcl-str-append (O(1) amortized
+# instead of O(n) per append).  'strkey' (hash-key) uses are RETAINED by
+# the table → excluded; foreach range vars are bound by the loop macro,
+# not a buffer init → excluded.
+sub _mark_strbuf {
+  my ($ctx, $vi, $name) = @_;
+  return unless $ctx->{write_ops}{$name}{'.='};
+  return if grep { $_ ne '.=' } keys %{ $ctx->{write_ops}{$name} };
+  return if $ctx->{foreach_var}{$name};
+  my $uc = $ctx->{use_class}{$name};
+  return unless $uc && %$uc;
+  return if grep { $_ ne 'str' && $_ ne 'bool' } keys %$uc;
+  $vi->{$name}{strbuf} = 1;
 }
 
 # Record one classified USE of a plain $scalar (B-regimes).  undef class =
@@ -630,6 +654,9 @@ sub _tw_stmt {
           : ();
         if ($is_my && @lp && foreach_range_split(\@lp)) {
           $ctx->{decl_count}{$var->content}++;
+          # p-foreach-range(-raw) binds this var itself each iteration —
+          # never a str-buffer slot (there is no buffer to append into)
+          $ctx->{foreach_var}{$var->content} = 1;
         } else {
           _ev($ctx, $var->content, 'foreach-alias');
         }
@@ -904,13 +931,17 @@ sub _tw_walk {
       return;
     }
     if ($t eq 'h_acc' || $t eq 'a_acc') {
-      # element READ: the key/index position classifies the key var ($h{$q}
-      # → str, $a[$q] → num) regardless of where the element's value flows.
-      # The base walk stays opaque: a $-Symbol base is either a deref-chain
-      # root (must disqualify) or the '$a'-content token of an @a element
-      # access (over-conservative pollution of a same-named scalar — safe).
+      # element access: the key/index position classifies the key var
+      # ($h{$q} → strkey, $a[$q] → num) regardless of where the element's
+      # value flows.  Hash keys get their OWN class: a stringify use for the
+      # B-verdicts, but the hash RETAINS the key object, so it must block
+      # the str-buffer regime (an in-place-mutated buffer as a stored key
+      # would corrupt the table).  The base walk stays opaque: a $-Symbol
+      # base is either a deref-chain root (must disqualify) or the
+      # '$a'-content token of an @a element access (over-conservative
+      # pollution of a same-named scalar — safe).
       _tw_walk($ctx, $xo, $kids->[0], 0) if @$kids;
-      my $key_uctx = $t eq 'h_acc' ? 'str' : 'num';
+      my $key_uctx = $t eq 'h_acc' ? 'strkey' : 'num';
       _tw_walk($ctx, $xo, $_, 0, $key_uctx) for @$kids[1 .. $#$kids];
       return;
     }
@@ -988,6 +1019,7 @@ sub _tw_walk {
         && $l->content =~ /^\$\w+$/;
       if ($raw_ok) {
         $ctx->{write_fam}{$l->content}{ $NUM_COMPOUND{$op} ? 'num' : 'str' }++;
+        $ctx->{write_ops}{$l->content}{$op}++;   # str-buffer verdict input
         # The compound also READS the old value — classify the LHS use by
         # the op's coercion family.  The bitwise trio (&= |= ^=, and the
         # .-suffixed string forms) is TYPE-SENSITIVE (& | ^ dispatch on

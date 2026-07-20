@@ -73,6 +73,7 @@
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
    #:to-string #:to-number
    #:%pcl-to-number-strict #:%pcl-to-string-strict #:%pcl-dualvar-p
+   #:%pcl-str-buffer #:%pcl-str-append
    #:p-undef #:p-defined #:p-defined-fh #:%pcl-definedp #:p-true-p
    #:p-let #:p-$
    ;; Arithmetic
@@ -2165,6 +2166,41 @@
   "Eager string freeze for a raw-string slot write (`. \"\"`); strict per
    %pcl-raw-coerce-check.  Aggregate collapse as in %pcl-to-number-strict."
   (to-string (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "string")))
+
+;;; S1 str-buffer raw slots (task #62, docs/raw-numeric-verdict.md §S1):
+;;; an accumulator whose only writes are plain roots + `.=` and whose every
+;;; use is a transient stringify/boolean read holds an adjustable
+;;; fill-pointer string, so `.=` appends in place (O(1) amortized) instead
+;;; of allocating a fresh concatenation (O(n) per append — the strcat bench
+;;; tax).  The verdict guarantees the buffer object never escapes into a
+;;; retaining site (no hash-key use, no opaque flow), so in-place mutation
+;;; is unobservable.  All standard string ops respect the fill-pointer.
+
+(defun %pcl-str-buffer (v)
+  "Fresh adjustable fill-pointer buffer holding V's string value — the
+   plain-write store discipline for a str-buffer slot (each `$s = V;`
+   REPLACES the buffer, so stale aliases cannot exist)."
+  (let* ((s (to-string v))
+         (n (length s))
+         (buf (make-array (max n 16) :element-type 'character
+                          :adjustable t :fill-pointer n)))
+    (replace buf s)
+    buf))
+
+(defun %pcl-str-append (buf v)
+  "In-place `$s .= V` on a str-buffer slot: extend and copy V's string
+   value after the fill pointer.  Returns the buffer (the compound assign's
+   value, like the boxed macro returns the variable's new value).
+   Self-append (`$s .= $s`) is safe: the source length is captured first
+   and the copied-from region [0,n) never overlaps the destination [n,2n)."
+  (let* ((s (to-string v))
+         (n (length s))
+         (start (fill-pointer buf)))
+    (when (> (+ start n) (array-total-size buf))
+      (adjust-array buf (max (+ start n) (* 2 (array-total-size buf)))))
+    (setf (fill-pointer buf) (+ start n))
+    (replace buf s :start1 start)
+    buf))
 
 (defun p-length (val)
   "Perl length function - returns undef for undef input.

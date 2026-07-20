@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 24;
 
 sub run_cl {
     my ($code) = @_;
@@ -130,3 +130,39 @@ test_cl('aggregate scalar-context collapse inside the freeze',
 test_cl('undef freeze: numeric slot sees 0, like perl at first numeric use',
     'my %h; my $n=$h{nope}; print $n+1,"\n";',
     "1\n");
+
+# ---- S1 str-buffer (fill-pointer append) ----------------------------------
+
+# Accumulator with only `.=` writes and transient uses → buffer.
+$cl = Pl::Parser2->parse_code(
+  q{my $s = ""; for (my $i=0; $i<10; $i++) { $s .= "ab"; } print "$s\n";});
+like($cl, qr/\(\$s \(%pcl-str-buffer ""\)\)/, 'S1: accumulator init becomes a buffer');
+like($cl, qr/\(%pcl-str-append \$s "ab"\)/,   'S1: .= appends in place');
+
+# A bare-copy alias escape (opaque use) blocks the buffer (the alias must
+# not observe later in-place appends).
+$cl = Pl::Parser2->parse_code(
+  q{my $s=""; $s .= "a"; my $t = $s; print "$t$s\n";});
+unlike($cl, qr/%pcl-str-buffer/, 'S1: alias escape blocks buffer');
+
+# A hash-key use is RETAINED by the table → blocks buffer (still B-str ok).
+$cl = Pl::Parser2->parse_code(
+  q{my $s=""; $s .= "ab"; my %h; $h{$s}=1; print "$s\n";});
+unlike($cl, qr/%pcl-str-buffer/, 'S1: hash-key use blocks buffer');
+
+# Any non-.= compound write (x=) blocks buffer.
+$cl = Pl::Parser2->parse_code(q{my $s="x"; $s .= "y"; $s x= 2; print "$s\n";});
+unlike($cl, qr/%pcl-str-buffer/, 'S1: x= write blocks buffer');
+
+# foreach range var never buffers (bound by the loop macro, not an init).
+$cl = Pl::Parser2->parse_code(q{for my $i (1..3) { $i .= "x"; print "$i\n"; }});
+unlike($cl, qr/%pcl-str-buffer/, 'S1: foreach range var never buffers');
+
+test_cl('S1 runtime: append loop matches perl',
+    'my $s = ""; for (my $i=0; $i<5; $i++) { $s .= "ab"; }
+     print "$s\n"; print length($s), "\n"; print "T\n" if $s;',
+    "ababababab\n10\nT\n");
+
+test_cl('S1 runtime: self-append is safe',
+    'my $s = "ab"; $s .= $s; $s .= $s; print "$s\n"; print "eq\n" if $s eq "abababab";',
+    "abababab\neq\n");

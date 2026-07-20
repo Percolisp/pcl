@@ -39,6 +39,35 @@ notes below.**  Companion to the box/raw split in `docs/ir-spec.md` §2.2.
   bound): boxed 0.128s → frozen 0.027s (4.7×); perl 0.088s — PCL moves from
   ~1.5× slower than perl to ~3× faster on this shape.
 
+## S1 — the str-buffer append slot (shipped s303, same session)
+
+The §Implementation-sketch item 5 synergy, built directly on the
+use-classifier: a raw slot (plain-unboxable or B-str) qualifies as a
+**str-buffer** when
+
+- its writes are ONLY plain roots and `.=` compounds (`write_ops` ⊆ {.=};
+  `x=`/bitwise/incdec block it),
+- every use is a TRANSIENT stringify/boolean read — hash-key uses get their
+  own class `strkey` (licenses B-str, but the table RETAINS the key object,
+  so it must block in-place mutation), and
+- it is not a foreach range var (the loop macro binds the var itself; there
+  is no buffer init to append into).
+
+Emission: plain writes wrap in `(%pcl-str-buffer V)` (fresh adjustable
+fill-pointer string — REPLACING on assignment means stale aliases cannot
+exist), `.=` lowers to `(%pcl-str-append $s V)` (extend + `replace`, O(1)
+amortized; self-append `$s .= $s` is safe — source region [0,n) never
+overlaps destination [n,2n)).  The escape analysis is the same whitelist
+that licenses B-str: returns, call args, box stores, container stores are
+all opaque → a buffer object can never leave the generated code, so host
+CL calling PCL output only ever sees ordinary simple strings (consumer
+contract note in `ir-spec.md` §2.2).
+
+Measured (1M × 8-char appends): pre-S1 this shape was the one bench loss
+(~1050× slower than perl at s302); with the buffer 0.052s vs perl 0.028s —
+**1.9× slower**, a ~500× improvement.  Guards: S1 block in
+`Pl/t/raw-verdict-01.t` (verdict matrix + self-append/alias runtime).
+
 ## Shipped so far (s302) — the provenance-pure extensions
 
 Neither of these needs the flag/scan or the strict coercers — they extend the

@@ -140,6 +140,19 @@ genuine dualvar arrives (never freeze what per-use code must observe).
 Semantics and the full licensing/disqualifier tables:
 `docs/raw-numeric-verdict.md`.
 
+A freeze-licensed slot whose only writes are plain roots + `.=` and whose
+every use is a *transient* stringify/boolean read may further become a
+**str-buffer** (S1): the slot holds an adjustable fill-pointer string,
+plain writes replace it via `(%pcl-str-buffer V)`, and `.=` appends in
+place via `(%pcl-str-append $s V)` — O(1) amortized instead of a fresh
+concatenation per append.  **Consumer contract: the buffer object never
+crosses the IR boundary.**  Every escape channel — sub return, call
+argument, store into a box/container, package var, hash key (the table
+retains the key object) — is an opaque/retaining use that disqualifies
+the verdict, so host code calling PCL-generated CL only ever receives
+ordinary simple strings; and even internally, every standard string
+operation respects the fill pointer.
+
 `box-set` semantics worth knowing: assigning a whole array to a scalar box
 stores its element **count** (Perl array-in-scalar-context); assigning a
 box created by `\` (is-ref) stores the reference value, not the wrapper.

@@ -41,8 +41,20 @@ Two deliverables:
    **Perl-trap note for future annotator work: `grep BLOCK LIST` inside a
    `&&` chain or before `? :` slurps the rest of the expression into its
    LIST — hoist greps into named booleans (bit twice this session).**
-   REMAINING #62: S1 fill-pointer append rides on raw-string family purity
-   (write_fam all-'str' on an unboxable/B-str slot).
+3. **Task #62 S1 SHIPPED — the str-buffer append slot** (same session; doc
+   §S1 in `raw-numeric-verdict.md`).  Rides on the new use-classifier: a raw
+   slot with only plain/`.=` writes and only transient str/bool uses holds
+   an adjustable fill-pointer string — plain writes `(%pcl-str-buffer V)`
+   (replace-on-assign: no stale aliases), `.=` `(%pcl-str-append $s V)`
+   (O(1) amortized; self-append safe).  Hash-key uses get their own class
+   `strkey` (B-str-licensing but buffer-blocking — the table retains the
+   key object); foreach range vars excluded (loop macro binds them).  The
+   escape whitelist doubles as the consumer contract: a buffer never
+   crosses the IR boundary (ir-spec §2.2 note) — host CL calling PCL
+   output only sees simple strings.  Bench 1M×8-char appends: 0.052s vs
+   perl 0.028s — the s302 ~1050× bench loss is now 1.9×.  C-for raw init
+   path also gained the missing `_wrap_freeze` (a B-verdict counter's init
+   stored unfrozen).
 
 ---
 
