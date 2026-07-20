@@ -244,8 +244,10 @@ my %OP_EXCEPTIONS = (
 
 # Magic/special variables that need specific CL output
 # Maps Perl variable name to its CL representation
+# Values are CLForms: atoms (plain strings) or single-level array forms for
+# the compound entries — both leaf paths render via gen_symbol_form.
 my %SPECIAL_VARS = (
-  '$!'  => '(p-errno-string)',
+  '$!'  => ['p-errno-string'],
   '$?'  => '$?',
   '$.'  => '|$.|',
   '$0'  => '$0',
@@ -280,8 +282,8 @@ my %SPECIAL_VARS = (
   '$^A' => '|$^A|',   # ACCUMULATOR (for formline/write)
   '$^'  => '|$^|',    # FORMAT_TOP_NAME
   # ${^...} caret variables — stub implementations (return undef)
-  '${^WARNING_BITS}' => '(p-undef)',   # warning bits bitmask (Perl internal)
-  '${^LAST_FH}'      => '(p-undef)',   # last filehandle used (Perl internal)
+  '${^WARNING_BITS}' => ['p-undef'],   # warning bits bitmask (Perl internal)
+  '${^LAST_FH}'      => ['p-undef'],   # last filehandle used (Perl internal)
   # Lexical hints: $^H (hint bits) and %^H (hints hash). PCL does not model
   # compile-time hints, so these are inert always-bound empties — 0 and an empty
   # hash — so `$^H & MASK`, `\%^H` and `keys %^H` never crash with an unbound var.
@@ -535,18 +537,11 @@ sub gen_leaf_form {
   my $ref = ref($node);
 
   # Symbol / Magic — the frontier's heaviest leaves ($x/@a/%h, magic vars,
-  # package-qualified, renamed).  gen_leaf's side effects here are idempotent
-  # (referenced-package / caret-global set-adds, read-only rename lookups), so
-  # calling it to obtain the text is safe: a GENUINE ATOM (never starts with
-  # "(") becomes a native CLForm atom; a COMPOUND form (stash / typeglob /
-  # &sub / errno — all "(…)") declines, and the idempotent raw re-run through
-  # gen_node keeps v1's exact bytes.  Structuring those few compound cases is
-  # later leaf work.  Reuses gen_leaf rather than duplicating its ~100 lines
-  # of sigil/package regexes (CLAUDE.md §11).
+  # package-qualified, renamed).  gen_symbol_form returns atoms for genuine
+  # variables and single-level array forms for the compound cases (stash /
+  # typeglob / &sub-with-callers-args / errno).  Never declines.
   if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
-    my $s = $self->gen_leaf($node);
-    return undef if $s =~ /^\(/;   # compound → decline to raw (safe, idempotent)
-    return $s;                     # genuine atom
+    return $self->gen_symbol_form($node);
   }
 
   # Pure atom leaves: string literals (Quote::Single/Double/Literal/Interpolate
@@ -763,109 +758,121 @@ sub _gen_interp_regex_pattern {
        : ['p-string-concat', @parts];
 }
 
+# Symbol / Magic leaf → CLForm (E2-converted; shared by gen_leaf and
+# gen_leaf_form).  Genuine variables are atoms; the compound cases — stash,
+# typeglob, &foo-with-callers-args, and the compound %SPECIAL_VARS entries —
+# are single-level array forms.  Side effects (referenced-package /
+# caret-global set-adds, rename lookups) are idempotent.  Never declines.
+sub gen_symbol_form {
+  my $self = shift;
+  my $node = shift;
+
+  my $content = $node->content() // '';
+  # Normalize Perl 4 package separator: $pkg'var -> $pkg::var
+  $content =~ s/^([\$\@\%\*&])([a-zA-Z_]\w*)'/$1$2::/;
+  # Handle magic/special variables via dispatch table
+  return $SPECIAL_VARS{$content} if exists $SPECIAL_VARS{$content};
+  # Handle package-qualified variables: $Pkg::var -> Pkg::$var
+  # Perl: $Config::debug  ->  CL: Config::$debug
+  # Also: $::foo means $main::foo (empty package = main)
+  # Note: Use [^:]+ at the end to avoid matching stash refs like $Pkg::Sub::
+  if ($content =~ /^([\$\@\%])(.*)::([^:]+)$/) {
+    my ($sigil, $pkg, $name) = ($1, $2, $3);
+    # Empty package means main (e.g., $::foo = $main::foo)
+    $pkg = 'main' if $pkg eq '';
+    # Track referenced package
+    $self->environment->add_referenced_package($pkg) if $self->environment;
+    # Use pipe quoting for nested packages
+    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+    return "${cl_pkg}::${sigil}${name}";
+  }
+  # Handle package stash typeglob: *Pkg:: (no variable name) -> (p-stash "Pkg")
+  # Perl: undef *Food:: or *Mover:: = *Mover2::
+  # PCL: stash ops not fully supported but must be syntactically valid CL
+  if ($content =~ /^\*(.*)::$/) {
+    my $pkg = $1;
+    $pkg = 'main' if $pkg eq '';
+    $self->environment->add_referenced_package($pkg) if $self->environment;
+    return ['p-stash', "\"$pkg\""];
+  }
+  # Handle package-qualified typeglobs: *Pkg::foo -> (p-make-typeglob "Pkg" "foo")
+  # Also: *::foo means *main::foo (empty package = main)
+  if ($content =~ /^\*(.*)::([^:]+)$/) {
+    my ($pkg, $name) = ($1, $2);
+    $pkg = 'main' if $pkg eq '';
+    $self->environment->add_referenced_package($pkg) if $self->environment;
+    return ['p-make-typeglob', "\"$pkg\"", "\"$name\""];
+  }
+  # Handle simple typeglob: *foo -> (p-make-typeglob "current-pkg" "foo")
+  if ($content =~ /^\*(\w+)$/) {
+    my $name = $1;
+    my $pkg  = $self->environment ? $self->environment->current_package : 'main';
+    $pkg //= 'main';
+    return ['p-make-typeglob', "\"$pkg\"", "\"$name\""];
+  }
+  # Handle package stash access: $Pkg::Sub:: or %Pkg::Sub::
+  # Perl: $YAML::Tiny:: or %YAML::Tiny:: -> CL: (p-stash "YAML::Tiny")
+  # Also: $:: or %:: means main stash
+  if ($content =~ /^([\$\%])(.*)::$/) {
+    my ($sigil, $pkg) = ($1, $2);
+    # Empty package means main (e.g., $:: = main stash)
+    $pkg = 'main' if $pkg eq '';
+    # Track referenced package
+    $self->environment->add_referenced_package($pkg) if $self->environment;
+    return ['p-stash', "\"$pkg\""];
+  }
+  # &foo (no parens) re-uses the CALLER'S @_ — unlike &foo() which passes an
+  # empty list, or foo() which is a normal call.  At file top level @_ is the
+  # global empty vector, so emitting @_ is always safe.
+  # Note: &foo(@args) is handled as a funcall, not here; \&foo is a refgen.
+  if ($content =~ /^&(.+)$/) {
+    my $func_name = $1;
+    # &NAME (no parens) calls the user sub even when NAME is a builtin.
+    my $cl_func = $self->cl_name($func_name, 1, 1);
+    return [$cl_func, '@_'];
+  }
+  # Check if this var is a state variable that was renamed
+  if ($self->environment) {
+    my $renames = $self->environment->state_var_renames;
+    return $renames->{$content} if $renames && exists $renames->{$content};
+  }
+  # Qualify `our` variables in non-main packages using the fully-qualified name.
+  # When `our $var` is declared in `package Foo { }` the generated defvar uses
+  # `Foo::$var`, but lambdas inside inline package blocks are read/compiled with
+  # *package* = main (since only top-level in-package forms affect the reader).
+  # Emitting `Foo::$var` makes the reference unambiguous regardless of context.
+  if ($self->environment && $content =~ /^([\$\@\%])(\w+)$/) {
+    my ($sigil, $name) = ($1, $2);
+    my $pkg = $self->environment->current_package // 'main';
+    if ($pkg ne 'main' && $self->environment->is_our_variable($pkg, $content)) {
+      my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+      return "${cl_pkg}::${sigil}${name}";
+    }
+  }
+  # Unknown ${^...} caret variables. Perl (perlvar: "alphanumeric strings
+  # preceded by a caret") treats any ${^NAME} without assigned special meaning
+  # as an ordinary, main-forced global scalar: undef until set, autovivifying
+  # (e.g. `is ${^MPE}, undef` then `++${^MPE}` is 1). The reserved names we DO
+  # model live in %SPECIAL_VARS above; everything else degrades to a normal
+  # global here rather than aborting the whole transpile. We register the
+  # symbol so _insert_variable_forward_declarations emits a file-level defvar.
+  if ($content =~ /^\$\{\^/) {
+    my $sym = "|$content|";
+    $self->environment->add_caret_global($sym) if $self->environment;
+    return $sym;
+  }
+  return $content;
+}
+
 sub gen_leaf {
   my $self = shift;
   my $node = shift;
 
   my $ref  = ref($node);
 
-  # Variable (like $x, @arr, %hash)
+  # Variable (like $x, @arr, %hash) — shared form logic, flattened for text
   if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
-    my $content = $node->content() // '';
-    # Normalize Perl 4 package separator: $pkg'var -> $pkg::var
-    $content =~ s/^([\$\@\%\*&])([a-zA-Z_]\w*)'/$1$2::/;
-    # Handle magic/special variables via dispatch table
-    return $SPECIAL_VARS{$content} if exists $SPECIAL_VARS{$content};
-    # Handle package-qualified variables: $Pkg::var -> Pkg::$var
-    # Perl: $Config::debug  ->  CL: Config::$debug
-    # Also: $::foo means $main::foo (empty package = main)
-    # Note: Use [^:]+ at the end to avoid matching stash refs like $Pkg::Sub::
-    if ($content =~ /^([\$\@\%])(.*)::([^:]+)$/) {
-      my ($sigil, $pkg, $name) = ($1, $2, $3);
-      # Empty package means main (e.g., $::foo = $main::foo)
-      $pkg = 'main' if $pkg eq '';
-      # Track referenced package
-      $self->environment->add_referenced_package($pkg) if $self->environment;
-      # Use pipe quoting for nested packages
-      my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
-      return "${cl_pkg}::${sigil}${name}";
-    }
-    # Handle package stash typeglob: *Pkg:: (no variable name) -> (p-stash "Pkg")
-    # Perl: undef *Food:: or *Mover:: = *Mover2::
-    # PCL: stash ops not fully supported but must be syntactically valid CL
-    if ($content =~ /^\*(.*)::$/) {
-      my $pkg = $1;
-      $pkg = 'main' if $pkg eq '';
-      $self->environment->add_referenced_package($pkg) if $self->environment;
-      return "(p-stash \"$pkg\")";
-    }
-    # Handle package-qualified typeglobs: *Pkg::foo -> (p-make-typeglob "Pkg" "foo")
-    # Also: *::foo means *main::foo (empty package = main)
-    if ($content =~ /^\*(.*)::([^:]+)$/) {
-      my ($pkg, $name) = ($1, $2);
-      $pkg = 'main' if $pkg eq '';
-      $self->environment->add_referenced_package($pkg) if $self->environment;
-      return "(p-make-typeglob \"$pkg\" \"$name\")";
-    }
-    # Handle simple typeglob: *foo -> (p-make-typeglob "current-pkg" "foo")
-    if ($content =~ /^\*(\w+)$/) {
-      my $name = $1;
-      my $pkg  = $self->environment ? $self->environment->current_package : 'main';
-      $pkg //= 'main';
-      return "(p-make-typeglob \"$pkg\" \"$name\")";
-    }
-    # Handle package stash access: $Pkg::Sub:: or %Pkg::Sub::
-    # Perl: $YAML::Tiny:: or %YAML::Tiny:: -> CL: (p-stash "YAML::Tiny")
-    # Also: $:: or %:: means main stash
-    if ($content =~ /^([\$\%])(.*)::$/) {
-      my ($sigil, $pkg) = ($1, $2);
-      # Empty package means main (e.g., $:: = main stash)
-      $pkg = 'main' if $pkg eq '';
-      # Track referenced package
-      $self->environment->add_referenced_package($pkg) if $self->environment;
-      return "(p-stash \"$pkg\")";
-    }
-    # &foo (no parens) re-uses the CALLER'S @_ — unlike &foo() which passes an
-    # empty list, or foo() which is a normal call.  At file top level @_ is the
-    # global empty vector, so emitting @_ is always safe.
-    # Note: &foo(@args) is handled as a funcall, not here; \&foo is a refgen.
-    if ($content =~ /^&(.+)$/) {
-      my $func_name = $1;
-      # &NAME (no parens) calls the user sub even when NAME is a builtin.
-      my $cl_func = $self->cl_name($func_name, 1, 1);
-      return "($cl_func \@_)";
-    }
-    # Check if this var is a state variable that was renamed
-    if ($self->environment) {
-      my $renames = $self->environment->state_var_renames;
-      return $renames->{$content} if $renames && exists $renames->{$content};
-    }
-    # Qualify `our` variables in non-main packages using the fully-qualified name.
-    # When `our $var` is declared in `package Foo { }` the generated defvar uses
-    # `Foo::$var`, but lambdas inside inline package blocks are read/compiled with
-    # *package* = main (since only top-level in-package forms affect the reader).
-    # Emitting `Foo::$var` makes the reference unambiguous regardless of context.
-    if ($self->environment && $content =~ /^([\$\@\%])(\w+)$/) {
-      my ($sigil, $name) = ($1, $2);
-      my $pkg = $self->environment->current_package // 'main';
-      if ($pkg ne 'main' && $self->environment->is_our_variable($pkg, $content)) {
-        my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
-        return "${cl_pkg}::${sigil}${name}";
-      }
-    }
-    # Unknown ${^...} caret variables. Perl (perlvar: "alphanumeric strings
-    # preceded by a caret") treats any ${^NAME} without assigned special meaning
-    # as an ordinary, main-forced global scalar: undef until set, autovivifying
-    # (e.g. `is ${^MPE}, undef` then `++${^MPE}` is 1). The reserved names we DO
-    # model live in %SPECIAL_VARS above; everything else degrades to a normal
-    # global here rather than aborting the whole transpile. We register the
-    # symbol so _insert_variable_forward_declarations emits a file-level defvar.
-    if ($content =~ /^\$\{\^/) {
-      my $sym = "|$content|";
-      $self->environment->add_caret_global($sym) if $self->environment;
-      return $sym;
-    }
-    return $content;
+    return Pl::CLForm::to_flat($self->gen_symbol_form($node));
   }
 
   # Array last index ($#arr)
