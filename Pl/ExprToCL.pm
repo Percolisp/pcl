@@ -3740,8 +3740,9 @@ sub gen_prefix_op {
 # FORM's head instead: same generated output inspected, structurally.  A
 # producer that emits a different head (e.g. a user-defined `sub substr` →
 # pl-substr) falls to the generic wrap on both paths, so parity holds by
-# construction.  The ONE remaining decline is the \(LIST) paren-list shape
-# (a pure metadata check, before any generation).
+# construction.  The ONE remaining decline is the \(RANGE, …) range-mix
+# multi-term shape (multiline let text; pure metadata check, before any
+# generation).
 sub gen_prefix_op_form {
   my ($self, $node, $node_id, $kids) = @_;
   my $op_node = $self->expr_o->get_a_node($kids->[0]);
@@ -3756,10 +3757,54 @@ sub gen_prefix_op_form {
       my $cl_func = $self->cl_name($1, 1, 1);
       return ['p-backslash-sub', "'$cl_func"];
     }
-    # \(LIST) — the distribute-over-elements family: still text (declined
-    # on pure metadata, no generation has happened).
-    return undef
-      if $self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list');
+    # \(LIST) — the distribute-over-elements family.  Mirrors the text
+    # emitter branch for branch: single-scalar tree_val → (p-backslash …),
+    # multi-term comma list without ranges → (vector (p-backslash …) …),
+    # general list → (p-refgen-list …) [+ (p-list-scalar …) in scalar/void
+    # ctx].  The ONE remaining decline is the range-mix multi-term shape —
+    # its text is a multiline let + gensym'd loop vars that flat rendering
+    # can't reproduce; the decline is pure metadata (a `..` operator child),
+    # before any generation or counter bump.
+    if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
+      my $inner_node = $self->expr_o->get_a_node($operand_id);
+      if ($self->expr_o->is_internal_node_type($inner_node)
+          && ($inner_node->{type} // '') eq 'tree_val') {
+        my $tv_kids = $self->expr_o->get_node_children($operand_id);
+        if (@$tv_kids == 1 && !$self->_is_list_node_for_refgen($tv_kids->[0])) {
+          # Single scalar child: \(scalar_expr) == \scalar_expr
+          my $saved_ctx = $self->expr_o->get_node_context($operand_id);
+          $self->expr_o->set_node_context($operand_id, 0);
+          my $scalar_form = $self->gen_node_form($operand_id);
+          $self->expr_o->set_node_context($operand_id, $saved_ctx);
+          return ['p-backslash', $scalar_form];
+        }
+        if (@$tv_kids > 1) {
+          for my $kid_id (@$tv_kids) {
+            my $kid_node = $self->expr_o->get_a_node($kid_id);
+            return undef if ref($kid_node) eq 'PPI::Token::Operator'
+                         && ($kid_node->content() // '') eq '..';
+          }
+          # Text's _gen_backslash_multi_term consumes one counter id per
+          # call even when unused (no range) — mirror it so a later
+          # declined range-mix in the same file gets the same id.
+          $g_refgen_count++;
+          return ['vector',
+                  map { ['p-backslash', $self->gen_node_form($_)] } @$tv_kids];
+        }
+      }
+      my $raw_ctx   = $self->expr_o->get_node_context_raw($node_id);
+      my $saved_ctx = $self->expr_o->get_node_context($node_id);
+      $self->expr_o->set_node_context($operand_id, LIST_CTX);
+      my $list_form = $self->gen_node_form($operand_id);
+      $self->expr_o->set_node_context($operand_id, $saved_ctx);
+      # \(LIST) is a list operator: in explicit scalar/void context it yields
+      # a ref to the LAST element (comma-operator semantics); otherwise the
+      # full vector.
+      if (defined $raw_ctx && ($raw_ctx == SCALAR_CTX || $raw_ctx == VOID_CTX)) {
+        return ['p-list-scalar', ['p-refgen-list', $list_form]];
+      }
+      return ['p-refgen-list', $list_form];
+    }
   }
 
   if ($op eq '\\' || $op eq '++' || $op eq '--') {
