@@ -60,17 +60,39 @@ builtin-named user sub); `Pl/t/moo-01.t` 13 → 15 tags (`trig_absent`,
 `trig_flow` — the formerly-unasserted residue).
 
 **New tasks filed**:
-- **#84** container file-lexical package-span: `package Tw; my @h; …
-  package main;` splits `@h` into two per-package defvars — v2 refuses
-  (span instance path is scalar-only: `SPANREFUSE h sdecls=0`) → dies → v1
-  fallback which is SILENTLY WRONG.  Scalars are handled (identity
-  promotion + cross-package `$Pkg::x` interp fix verified).  This — not the
-  trigger — was why the #81 repro variant with a file-lexical `@history`
-  printed nothing.  Repro shape: `my @h; sub add { push @h, $_[0] }` in Tw
-  + interp-only read from main.
+- **#84** container file-lexical package-span — FIXED same session, see
+  below.
 - **#85** `%RUNTIME_NAMES` collision: `sub aslice {…} aslice()` compiles
   the call to `(p-aslice)` (internal helper), both pipelines, pre-existing;
   census lib/ shims (weaken et al.) before narrowing cl_name.
+
+**Second deliverable — task #84 FIXED (container span, interp-only uses;
+gen v2-48).**  The trig.pl silence (file-lexical `@history` pushed from Tw,
+interp-read from main) was NOT missing container spanning — W10-ext-3
+exists — but two narrower gaps in it:
+1. **SPANSCAN missed interp-only spans**: it grepped Symbol/ArrayIndex
+   tokens only, so a later-package use living ONLY inside `"h:[@h]"` text
+   never counted → no promotion → `_check_my_spanning` (which DOES scan
+   interp) died → whole-file v1, which splits the variable into per-package
+   defvars (the silent-wrong class).  Now counts interp spans via the same
+   sigil-aware `_interp_canon` detector.
+2. **Cross-package interp was a REFUSAL** instead of a rewrite: the
+   container loop predates the M-A interp fixer.  Replaced with
+   `_interp_fixer($csym, $qname)` applied to later segments whose package
+   differs from the declaring one — `_interp_fixer` was already sigil-aware
+   (`@x`/`$x[`/`$#x`; `$x{`/`@x{`), it was simply never called here.
+Fallout fix: `"$#Tw::h"` — the qualified arylen text the rewrite now
+produces — was mis-interpolated (`$#Tw` + literal `::h`): the `$#array`
+bare-form pattern in `StringInterpolation.pm` took `\w+` only; now
+`\w+(?:::\w+)*`, the same name grammar the `$#$ref` form already used
+(matches perl, which interpolates the full qualified name).
+Verification: corpus-diff **identical across 111 files** (twice: after the
+Parser2 change and after the interp pattern), census 111/0 unchanged,
+prove-core full gate PASS, probes lex2/lex3/lex5 (scalar + `@h` + `%m` +
+`$#h`, both span directions, cross-package anon-sub call) = perl on v2.
+v1 (`PCL_V1=1`) remains wrong/crashy on these shapes — pre-existing, moot
+at E4.1.  Guard: transpile-test-01b.t test 89 (interp-only container span,
+all three sigils + arylen).  Gen v2-47 → **v2-48**.
 
 ---
 

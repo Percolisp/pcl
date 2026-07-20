@@ -619,6 +619,29 @@ test_transpile("local list/slice RHS keeps list context", '
   slicedemo(); print "out:[@arr]\n";
 ');
 
+# ---- s305 (#84): a file-lexical CONTAINER declared in one package and used
+# ---- from another — including uses that appear ONLY inside interpolated
+# ---- strings — is ONE variable.  The container span promotion now counts
+# ---- interp-only spans and rewrites cross-package interp text to the
+# ---- package-qualified name (the scalar path's M-A fixer).
+
+test_transpile("container file-lexical spans package boundary (interp-only use)", '
+  package Tw;
+  my $x = 5;
+  my @h;
+  my %m = (k => "v");
+  sub add { push @h, $_[0] }
+  my $anon = sub { push @h, "a:$_[0]" };
+  sub get { @h }
+  package main;
+  Tw::add("x");
+  $anon->("y");
+  my @g = Tw::get();
+  print "g:[@g]\n";
+  print "direct:[@h] n=$#h\n";
+  print "x:$x m:$m{k}\n";
+');
+
 # CORE::<builtin> (and a bare builtin name) inside a file that DEFINES a sub
 # of the same name must call the BUILTIN, not direct-call the user sub
 # (lib/Sub/Util.pm's `sub prototype { CORE::prototype($code) }` self-call).

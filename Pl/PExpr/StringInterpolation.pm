@@ -383,9 +383,11 @@ sub parse_interpolated_variable {
           }
         }
       }
-      # $#array bare form
+      # $#array bare form — package-qualified names included ("$#Tw::h"
+      # interpolates the FULL name in perl; the s305 container-span rewrite
+      # produces exactly this text), same name grammar as the $#$ar form.
       pos($content) = $pos + 2;
-      if ($content =~ /\G(\w+)/gc) {
+      if ($content =~ /\G(\w+(?:::\w+)*)/gc) {
         my $arr_name = $1;
         my $var_token = PPI::Token::ArrayIndex->new('$#' . $arr_name);
         my $var_id = $parser->make_node($var_token);

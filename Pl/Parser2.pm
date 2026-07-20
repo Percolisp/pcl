@@ -2153,19 +2153,19 @@ sub _rename_spanning_lexicals {
           grep { $_->symbol eq $csym } @{ $stmt->find('PPI::Token::Symbol') || [] };
         last SPANSCAN if $spans = ($csym =~ /^\@/)
           && grep { $_->content eq '$#' . $bare } @{ $stmt->find('PPI::Token::ArrayIndex') || [] };
+        # Interp-ONLY spans count too ("h:[@h]" in a later package was the
+        # container's sole cross-segment use — s305, task #84): the same
+        # sigil-aware detector _check_my_spanning uses.
+        my %ihit;
+        _interp_canon($stmt, { $csym => 1 }, { $bare => [$csym] }, \%ihit);
+        last SPANSCAN if $spans = $ihit{$csym};
       }
     }
     next unless $spans;
-    my $interp = 0;
-    $interp ||= $sf[$_]{interp}{$bare} for $di .. $hi;
-    # An interpolated use ("@x" element-join, "$x[0]" element) is text the
-    # rename cannot rewrite — but this path is IDENTITY-ONLY (the cell keeps
-    # the plain name), so interpolation keeps resolving, exactly as on the
-    # scalar unique path: safe iff every interpolating segment is the
-    # DECLARING package (elsewhere the bare name reads THAT package's symbol).
-    next if $interp
-      && grep { $sf[$_]{interp}{$bare}
-                && $segments->[$_]{pkg} ne $segments->[$di]{pkg} } $di .. $hi;
+    # Interpolated uses in a NON-declaring package are rewritten to the
+    # package-qualified name by the fixer below (same M-A fixer the scalar
+    # loop carries) — no refusal needed; same-package interp resolves via
+    # the identity name untouched.
     next if $alltxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;   # ${x}/@{x}/%{x} deref-block
     next if $segments->[$di]{blockform};
     my $stmts = $segments->[$di]{stmts};
@@ -2176,7 +2176,14 @@ sub _rename_spanning_lexicals {
     # only later segments need the package-qualified form (harmless where the
     # package already matches).
     my $qname = $segments->[$di]{pkg} . '::' . $bare;
+    my $qfix  = _interp_fixer($csym, $qname);
     for my $j ($di + 1 .. $hi) {
+      # Interp text needs the qualified name only where the reading package
+      # DIFFERS from the declaring one (same package: the identity name
+      # already resolves to the defvar'd cell — leave text byte-untouched,
+      # like the scalar identity path).  Canon-unique file-wide, so no
+      # shadow skip is needed.
+      my $cross = $segments->[$j]{pkg} ne $segments->[$di]{pkg};
       for my $stmt (@{ $segments->[$j]{stmts} }) {
         next unless ref $stmt && $stmt->isa('PPI::Node');
         for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
@@ -2186,10 +2193,14 @@ sub _rename_spanning_lexicals {
           (my $c = $s->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1 . $qname/e;
           $s->set_content($c);
         }
-        next unless $csym =~ /^\@/;   # $#x belongs to the array only
-        for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
-          my $c = $ai->content;
-          $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
+        if ($csym =~ /^\@/) {   # $#x belongs to the array only
+          for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+            my $c = $ai->content;
+            $ai->set_content($c) if $c =~ s/^(\$\#)\Q$bare\E\b/$1 . $qname/e;
+          }
+        }
+        if ($cross) {
+          _fix_interp_token($_, $qfix) for @{ $stmt->find('PPI::Token') || [] };
         }
       }
     }
