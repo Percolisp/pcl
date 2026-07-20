@@ -793,7 +793,14 @@ three stops, in order:
    the alias rule below.
 3. **Autovivify**: an unbound name yields a fresh container chosen by
    sigil (`$` → undef box, `@` → empty array, `%` → empty hash),
-   matching Perl's global autovivification inside eval.
+   matching Perl's global autovivification inside eval. The fresh
+   container is **installed** as the symbol's global value (s304), so a
+   later eval of the same name finds it at stop 2 — a package global
+   used *only* inside eval strings persists across evals, exactly like
+   Perl's autovivified global. (Before s304 this accidentally worked
+   via a phantom `defvar` the enclosing file emitted from scanning the
+   eval string literal's innards; that scan bug is fixed, so the
+   install is now load-bearing.)
 
 **The alias rule (v2 renamed cells).** v1 `defvar`s every file-scope
 lexical under its *original* name, so stop 2 finds it for free. v2

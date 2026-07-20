@@ -381,20 +381,31 @@ playbook (see `docs/v2-transfer-plan.md` T-C(ii)):
      **`%FUNCALL_FORM_DECLINES` in ExprToCL.pm is the live remaining
      worklist** — each name stays on the kept text gen_funcall until its
      branch converts (shrink the list branch by branch, one verification
-     cycle each).  **STATE (s303 survey): the table is down to `eval`
-     alone**, and every internal node type EXCEPT `inline_lambda` has a
-     form handler registered.  The full remaining E2 conversion surface
-     (from `grep -n 'return undef' Pl/ExprToCL.pm`):
-     - `eval` funcall branch (the declines table's last name);
-     - `-bareword` / `SUPER::` / non-Word call heads (gen_funcall_form
-       structural declines, lines ~1687-1692);
-     - prefix `\` / `++` / `--` family (gen_prefix_op_form decline,
-       ~3740) + the arylen `++/--` postfix carve-out (~3901);
-     - non-converted leaf types (gen_leaf decline ~656, incl.
-       `Regexp::Substitute`, ~641);
-     - empty-slice byte quirks (trailing-space text shapes, ~4301-4345)
-       — candidates to normalize at E2.final rather than reproduce;
-     - `inline_lambda` (LAST, per item 4).
+     cycle each).  **STATE (s304): E2.1 IS COMPLETE except
+     `inline_lambda`.**  Converted s304 (all at byte parity, both
+     pipelines): s/// + tr/// leaves (gen_substitution_form /
+     gen_transliteration_form; /e + interp replacement bodies stay raw
+     atoms inside the lambda form); Symbol/Magic compound leaves
+     (gen_symbol_form — stash/typeglob/&sub-callers-args/compound
+     SPECIAL_VARS as single-level forms, shared by both leaf paths);
+     `\(LIST)` family (single-scalar / no-range multi-term with the
+     text emitter's counter-bump mirrored / general list); `-bareword`
+     unary-minus-of-call + `SUPER::` indirect heads; the `eval` funcall
+     branch (block + string with the capture alist —
+     `_eval_lexical_alist` now returns a CLForm) — **the
+     %FUNCALL_FORM_DECLINES table is deleted**.  Remaining declines,
+     all verified by s304 corpus census:
+     - `inline_lambda` (LAST, per item 4) — its body_cl AND the fixed
+       multiline `(lambda (…)\n…)` layouts need the structured
+       block-lowering re-host; parse_block_to_cl_string (Parser.pm
+       text buckets) is the seam;
+     - empty-shape trailing-space quirks (7 sites: 4 empty slices,
+       empty `()`, empty anon-sub body, empty hash-init, empty
+       `eval {}`) — normalize at E2.final;
+     - `\(RANGE, …)` range-mix multi-term (multiline let + gensym'd
+       loop vars);
+     - never-firing safety nets (non-Word call head, unknown leaf
+       type, compound-atom guard) — zero corpus hits.
   2. sym/magic reads, `string_concat`, literals (`quote-double`,
      `number-hex`),
   3. `op:=`/`++`/`!` families, regex forms,
@@ -408,7 +419,7 @@ playbook (see `docs/v2-transfer-plan.md` T-C(ii)):
 Byte-parity per converted step; commit per step or per coherent group.
 E2 sessions interleave with E1 (different files, no conflicts).
 
-### E3 — eval-mode on v2 (1–2 sessions, after E1 is mostly done)
+### E3 — eval-mode on v2 (1–2 sessions, after E1 is mostly done) — **SHIPPED s304**
 
 Parser2 entry point for runtime string-eval: single anonymous segment, no
 preamble/section assembly, capture alist names pre-registered as let-bound,
@@ -416,6 +427,28 @@ preamble/section assembly, capture alist names pre-registered as let-bound,
 `docs/eval-lexical-capture.md`.  Keep a per-eval v1 retry until E4 (eval
 bodies are arbitrary user code).  Gate: `Pl/t/eval-capture-01.t` identical
 under both pipelines + eval.t parity.
+
+**Shipped (s304):** Parser2 `eval_mode`/`eval_pkg` + `_assemble_eval_mode`
+(head/body split, v1's exact thunk wrapper; free vars = AST scope scan ∪
+the text-scan candidates, `$a`/`$b` defvar'd + param when referenced);
+pl2cl admits `eval_mode`/`eval_pkg` into v2 and `--server` routes through
+`parse_with_fallback` (v2-first, per-eval v1 retry).  Retry gates: top-level
+`package` statement in the eval string (multi-segment assembly) and a
+trailing `my`/`our` declaration (v2's empty-body let loses the statement
+value).  Two bugs the switch exposed, both fixed at the right layer:
+(1) the file-level forward-decl text scan matched names inside STRING
+LITERALS (the embedded eval source!) and defvar'd them — proclaiming the
+eval's lexicals special and collapsing its closures to dynamic reads
+(eval.t #39); `_blank_string_innards` now blanks string/comment innards
+(pipe symbols and `#\X` literals preserved) before both scans — this also
+kills task #66's sprintf `%x` phantom (61 corpus files lose only phantom
+defvars; gen bump v2-45).  (2) `p-eval-lex-lookup` now INSTALLS the
+autovivified container as the global value so cross-eval-only globals
+persist (ir-spec §9.1 stop 3).  (3) eval-minted state cells carry a
+source-hash tag (`$s__state__e<md5:8>_0`) so they cannot collide with the
+enclosing file's `__state__N` cells (state.t #148/149).  Gates:
+eval-capture-01.t 32/32 both pipelines (+2 new regression scenarios),
+eval.t 126+34 = baseline, state.t 157+0, changed-file sweep clean.
 
 ### E4 — fuzz + external corpora, then delete v1 (2–4 sessions; E4.1 is the one irreversible step)
 

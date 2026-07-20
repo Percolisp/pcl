@@ -4,6 +4,82 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 304 (2026-07-20, Fable) — E2.1 COMPLETE except inline_lambda (five byte-parity conversions, %FUNCALL_FORM_DECLINES deleted) + E3 SHIPPED (eval-mode on v2, gen v2-45).
+
+Five converted-at-byte-parity steps (zero corpus diff on BOTH pipelines
+per step; commits 7b63c8b →):
+
+1. **s/// + tr/// leaves** — `gen_substitution_form` /
+   `gen_transliteration_form`; text path renders via `to_flat`.  /e and
+   interpolated replacement bodies stay raw atoms inside the
+   `(lambda () …)` form until the inline_lambda step.
+2. **Symbol/Magic compound leaves** — the gen_leaf branch moved to a
+   shared `gen_symbol_form`: atoms for genuine variables; single-level
+   forms for stash / typeglob / `&foo`-callers-args / the compound
+   `%SPECIAL_VARS` entries (now stored as forms in the table).
+3. **`\(LIST)` family** — single-scalar, no-range multi-term
+   (`(vector (p-backslash …) …)`, mirroring the text emitter's
+   `$g_refgen_count` bump so later declined shapes keep identical ids),
+   and general list (`p-refgen-list` ± `p-list-scalar`).  Only the
+   range-mix multi-term still declines (multiline let + gensym'd loop
+   vars; pure-metadata decline).
+4. **`-bareword` + `SUPER::` heads** — corpus census via temporary
+   PCL_E2_DEBUG instrumentation showed these were the only firing
+   structural declines (-splice ×2, SUPER::m ×3; non-Word head: zero).
+5. **`eval` funcall branch** — block (anon_sub children as forms;
+   inline_lambda body_cl as raw; func_ref via funcall) and string
+   (plain + computed, with the capture alist).  `_eval_lexical_alist`
+   returns a CLForm now (`['list', 'list', @pairs]` — a `list` HEAD is
+   CLForm's bare-parens marker, so the literal `(list …)` call is
+   spelled with 'list' as first element).  Empty `eval {}` declines
+   (trailing-space quirk).  **The %FUNCALL_FORM_DECLINES table is
+   deleted.**
+
+Leaf-decline census: ZERO hits across all of perl-tests — the leaf
+frontier is done.  Remaining E2 surface (plan §E2.1 updated): the
+inline_lambda re-host (body_cl + fixed multiline lambda layouts →
+structured block lowering; parse_block_to_cl_string is the seam), the
+7 empty-shape trailing-space quirks + `\(RANGE,…)` (normalize at
+E2.final), and never-firing safety nets.  No cache-gen bump (emission
+byte-identical).
+
+User style note (now in memory): no `unless` in new Perl code — write
+`if (! …)`.
+
+**Second deliverable — E3 SHIPPED (eval-mode on v2, gen v2-45).**
+Parser2 `eval_mode`/`eval_pkg`, `_assemble_eval_mode` (head/body split;
+v1's exact `p-eval-thunk` wrapper; free vars = AST scope scan ∪
+text-scan candidates; `$a`/`$b` defvar + param), pl2cl `--server` and
+`--eval-pkg` route v2-first with per-eval v1 retry (retry gates:
+top-level `package` in the string; trailing `my`/`our` declaration).
+The switch exposed three latent bugs, all fixed at the right layer:
+1. **Forward-decl scan string-literal false positives** (task #66
+   family): the text scan matched `$names` inside string literals —
+   including an embedded eval SOURCE — and defvar'd them, proclaiming
+   the eval's lexicals special and collapsing its closures to dynamic
+   reads (eval.t #39 "closures created within eval bind correctly").
+   `_blank_string_innards` blanks string/comment innards (pipe symbols
+   + `#\X` char literals preserved) before both scans.  61 corpus
+   files change: pure phantom-defvar REMOVALS (verified zero added
+   defvars).
+2. **Cross-eval global persistence**: `p-eval-lex-lookup` stop 3 now
+   INSTALLS the autovivified container as the symbol's global value
+   (was accidentally load-bearing via the phantom defvars) — ir-spec
+   §9.1 updated.
+3. **Eval state-cell collisions**: eval-minted `__state__N` cells now
+   carry a source-hash tag (`__state__e<md5:8>_N`) so they cannot
+   collide with the enclosing file's cells whose `__init` flag is
+   already set (state.t #148/149 read undef).
+Verification: eval-capture-01.t 32/32 BOTH pipelines (+2 new
+regression scenarios: sub_in_eval closure, cross_eval persistence);
+eval.t 126+34 = baseline; state.t 157+0; 59-file changed-emission
+sweep all at baseline; PCL_V1 corpus byte-identical to HEAD; suites:
+gate 116/4284 PASS (pre-E3 run), perl-tests full sweep 18386/66-fully
+= baseline, run-perl-suite 42 OK/52 XDIFF/31 NOTAP/7 TIMEOUT/301 DIFF
+= s303 baseline.  Cache gen v2-44 → v2-45.
+
+---
+
 ## Session 303 (2026-07-20, Fable) — suite shadow-t/ fixture (95→433 runnable) + task #62 B-regimes: scan-licensed raw-numeric/raw-string freeze verdicts (gen v2-44).
 
 Two deliverables:
