@@ -208,6 +208,27 @@ sub _requalify_block_our_after_pkg_switch {
 # _extract_module_prototypes with the import list; require → module form, or
 # literal non-interpolating file path via _extract_file_prototypes).  See the
 # parse() call-site comment for why this must run before expression parsing.
+# Pre-seed the strict_subs pragma from the document's use/no strict includes
+# (see the parse() call site).  Mirrors v1's per-statement rule — bare
+# `use strict` or an arg list mentioning 'subs' counts; `no strict 'refs'`
+# does not.  v1 flips the flag linearly as statements process; up front we
+# can only pick ONE state, so: strict iff a qualifying `use strict` exists
+# and no qualifying `no strict` does (a file that mixes both keeps today's
+# lenient default, exactly what its no-strict regions require).  The
+# in-stream statement fallbacks still re-set the flag at their positions.
+sub _premerge_strict_pragma {
+  my ($self, $doc) = @_;
+  my ($use_strict, $no_strict);
+  for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    next if ($inc->module // '') ne 'strict';
+    my @args = map { $_->string }
+               grep { $_->isa('PPI::Token::Quote') } $inc->children;
+    next if @args && !grep { /\bsubs\b/ } @args;
+    if (($inc->type // '') eq 'no') { $no_strict = 1 } else { $use_strict = 1 }
+  }
+  $self->environment->set_pragma('strict_subs', 1) if $use_strict && !$no_strict;
+}
+
 sub _premerge_include_prototypes {
   my ($self, $doc) = @_;
   my $fp = $self->fallback_parser;
@@ -289,6 +310,14 @@ sub _ppi_state_restore {
 
 sub parse {
   my $self = shift;
+  # Debug/bisect hook: force files whose path contains one of the
+  # comma-separated substrings through the v1 fallback (per-module pipeline
+  # bisection — e.g. PCL_V1_FILES="Moo/_Utils.pm" to isolate which module's
+  # v2 transpile diverges; used to find task #80).
+  die "Parser2: PCL_V1_FILES match\n"
+    if $ENV{PCL_V1_FILES} && $self->has_filename
+    && grep { length && index($self->filename, $_) >= 0 }
+       split /,/, $ENV{PCL_V1_FILES};
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
   # Route through v1's _ppi_parse so the shared PPI-bug workarounds apply — most
   # importantly _fix_modulo_magic (`7%-3` mis-tokenized as the magic hash %-,
@@ -358,6 +387,21 @@ sub parse {
   # memoized and add_prototype idempotent, so the later statement-fallback
   # re-merge is harmless.
   $self->_premerge_include_prototypes($doc);
+
+  # `use strict` must be visible BEFORE the ahead-of-stream parses for the
+  # same reason as the prototypes above: PExpr's bareword disambiguation is
+  # gated on the strict_subs pragma (an unknown bareword after a binary
+  # operator is a FUNCALL under strict, a string without it — PExpr.pm
+  # ~3590), and v1 learns the pragma from the `use strict` statement before
+  # it reaches any sub body.  v2's named-sub lowering and VarAnnotator
+  # pre-parse run first — without this, Moo::_Utils's
+  # `$module =~ _module_name_rx` (a glob-installed constant sub) parsed as
+  # the literal string "_module_name_rx" and _load_module croaked on every
+  # class name (task #80).  The annotator parse also STAMPS
+  # _bareword_string on the shared PPI token, so the mis-decision would
+  # survive into the real parse even after the statement fallback sets the
+  # pragma (the s276 stale-stamp family).
+  $self->_premerge_strict_pragma($doc);
 
   # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort
   # comparator counts: "Can't goto out of a pseudo block") — when no such
@@ -3733,16 +3777,17 @@ sub _lower_sub_inner {
     my $body_uses_args = $rest_txt =~ /\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/;
     my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params, $self->_cur_sub_info, $self);
     if (!$body_uses_args && !grep { !$vi->{$_}{unboxable} } @$params) {
-      # Real lambda list (#3): my ($a,$b) = @_ untouched afterwards, params
-      # never written un-arithmetically / ref-taken → bind raw, no p-list-=.
-      # The body provably never reads @_, so skip the p-args-body prologue
-      # (no p-flatten-args per call) and stack-allocate the unused &rest.
-      my $ll = ['list', '&optional',
-                (map { ['list', $_, '(p-undef)'] } @$params),
-                '&rest', '%_args'];
-      return ['p-sub', $clname, $ll,
-              raw('(declare (ignore %_args) (dynamic-extent %_args))'),
-              ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi)]];
+      # Signature fast path (#3): my ($a,$b) = @_ untouched afterwards, params
+      # never written un-arithmetically / ref-taken → p-raw-params binds them
+      # raw (no boxes, no p-list-=), with the callee-side Perl argument
+      # flattening the uniform calling convention requires.  A plain &optional
+      # lambda list here misbound every f(@args)/f(@_) call — the args vector
+      # landed whole in the first param (task #80: Moo's Sub::Util shim,
+      # reached through _Utils's _subname(@_) delegation).  All-scalar calls
+      # take p-raw-params' no-allocation fast path.
+      return ['p-sub', $clname, ['list', '&rest', '%_args'],
+              ['p-raw-params', ['list', @$params],
+                ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi)]]];
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;

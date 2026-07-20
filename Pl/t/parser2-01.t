@@ -20,9 +20,10 @@ EOF
 
 my $cl = Pl::Parser2->parse_code($fib);
 
-# Spec #3: real lambda list, no p-list-= arg destructuring.
-like($cl, qr/\(p-sub pl-fib\s*\n?\s*\(&optional \(\$n \(p-undef\)\) &rest %_args\)/,
-     'fixed-arity &optional lambda list for my (LIST) = @_');
+# Spec #3: raw param binding (p-raw-params — flatten-honouring signature fast
+# path, s304 task #80), no p-list-= arg destructuring.
+like($cl, qr/\(p-sub pl-fib\s*\n?\s*\(&rest %_args\)\s*\n?\s*\(p-raw-params \(\$n\)/,
+     'p-raw-params signature fast path for my (LIST) = @_');
 unlike($cl, qr/p-list-= \(vector \$n\)/, 'no p-list-= param destructuring');
 
 # Spec #1: no dead hoisted boxes for the loop-body vars.
@@ -132,10 +133,11 @@ my $cfor4 = Pl::Parser2->parse_code(
 like($cfor4, qr/\(\$j \(make-p-box nil\)\)/, 'C-for string-seeded counter keeps the box');
 like($cfor4, qr/\(p-post\+\+ \$j\)/, 'string counter step through p-post++ (magical incr)');
 
-# Lean p-sub: a body that never reads @_ skips the p-args-body prologue and
-# stack-allocates the unused &rest.
-like($rec, qr/\(declare \(ignore %_args\) \(dynamic-extent %_args\)\)/,
-     'no-@_ sub: rest ignored + dynamic-extent, no p-args-body');
+# Lean p-sub: a body that never reads @_ skips the p-args-body prologue —
+# p-raw-params binds the params raw (and spreads aggregate args itself,
+# s304 task #80).
+like($rec, qr/\(p-raw-params \(/,
+     'no-@_ sub: p-raw-params raw binding, no p-args-body');
 unlike($rec, qr/p-args-body/, 'no p-args-body when @_ is unused');
 
 # goto &sub forwards the LIVE @_: a sub containing goto must keep the boxed

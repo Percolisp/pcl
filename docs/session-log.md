@@ -110,6 +110,48 @@ Next step in task #80: per-module v1 forcing to bisect the chain.
 E4.0b says exactly this class of divergence must be fixed while v1
 still exists — #80 blocks E4.1.
 
+**Fourth deliverable — task #80 FIXED: Moo works on the v2 default
+(gen v2-46).**  The per-module bisect (new debug hook: `PCL_V1_FILES`
+env in Parser2::parse forces matching files through v1) pointed at
+`lib/Sub/Util.pm`'s v2 transpile; minimization found TWO general v2
+bugs, both fixed at the right layer:
+1. **Calling-convention break in the signature fast path**: the
+   `&optional` lambda list (spec #3 / W14) bound aggregate args
+   wrong — `f(@args)` / the `f(@_)` delegation idiom pass the
+   CONTAINER raw (uniform convention: callee flattens), so the whole
+   vector landed in the first param (`Moo::_Utils::_name_coderef` →
+   `set_subname(@_)` returned undef → `_install_coderef` installed
+   nothing → `use Moo` produced an empty class).  Reproduces in one
+   plain file: `sub f { my ($x,$y)=@_; "$x/$y" } f(@args)` printed
+   `ARRAY(0x1)/`.  Fix: new runtime macro **`p-raw-params`** — binds
+   params raw (unboxed, keeping the #3 win) but honours flattening,
+   with a no-allocation type-scan fast path for all-scalar calls;
+   Parser2 emits it instead of `&optional`.
+2. **`use strict` invisible to ahead-of-stream lowering**: PExpr's
+   bareword-after-binary-op disambiguation is gated on the
+   strict_subs pragma (funcall under strict, string without).  v1
+   learns the pragma in statement order before sub bodies; v2's
+   named-sub lowering + VarAnnotator pre-parse ran first →
+   `$module =~ _module_name_rx` (glob-installed constant sub in
+   Moo::_Utils) became the literal STRING "_module_name_rx" →
+   `_load_module` croaked '"Pt" is not a module name!' on every
+   extends/with.  (The annotator parse also stamps _bareword_string
+   on the shared token — s276 stale-stamp family — so the in-stream
+   fallback couldn't heal it.)  Fix: `_premerge_strict_pragma` —
+   same pattern as `_premerge_include_prototypes`.
+Also fixed on sight: the shim's `CORE::prototype($code)` emitted a
+SELF-call `(pl-prototype $code)` under v2 (latent infinite recursion,
+nothing calls it in the chain) — NOT yet fixed, folded into the
+CORE::-prefix family for follow-up.  Verification: Moo differential
+battery **17/18 tags = perl** (residue: a trigger fires once with an
+empty value at construction when the attr is absent — new task);
+new guard `Pl/t/moo-01.t` (13 tags, one transpiled program); 5
+calling-convention shapes added to transpile-test-04b.t; pins
+updated (parser2-01/02: &optional → p-raw-params).  14 corpus files
+change (p-raw-params bodies + strict bareword→funcall flips);
+5-file sweep vs fail-baseline: sweep-diff exit 0, ZERO new failures;
+PCL_V1 corpus byte-identical.  Gen v2-45 → v2-46.
+
 ---
 
 ## Session 303 (2026-07-20, Fable) — suite shadow-t/ fixture (95→433 runnable) + task #62 B-regimes: scan-licensed raw-numeric/raw-string freeze verdicts (gen v2-44).

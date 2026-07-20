@@ -227,7 +227,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-sub #:p-args-body #:p-declare-sub
+   #:p-defpackage #:p-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
@@ -497,6 +497,30 @@
    expansion-time package resolution needed."
   `(let ((@_ (p-flatten-args %_args)))
      ,@body))
+
+(defun %p-args-need-flatten (args)
+  "True when the raw &rest ARGS list holds an aggregate that Perl's argument
+   flattening must spread: a raw non-string vector (an array) or a non-blessed
+   hash-table (a hash).  Boxed values — including array/hash REFS, which are
+   boxed — never spread.  Mirrors p-flatten-args' dispatch."
+  (loop for a in args
+        thereis (or (and (vectorp a) (not (stringp a)))
+                    (and (hash-table-p a) (not (gethash :__class__ a))))))
+
+(defmacro p-raw-params ((&rest params) &body body)
+  "Signature fast path for `sub f { my ($a,$b) = @_; … }` whose body provably
+   never observes @_ again: bind PARAMS raw (unboxed, no p-list-= / no boxes)
+   positionally from the enclosing p-sub's &rest %_args, missing args -> undef.
+   Unlike a plain &optional lambda list this HONOURS the uniform calling
+   convention — callers pass containers raw and the CALLEE spreads aggregates
+   (f(@args) / f(@_) delegation; task #80 broke Moo through exactly that) —
+   while the common all-scalar call takes a no-allocation type-scan fast path."
+  `(let ((%_args (if (%p-args-need-flatten %_args)
+                     (coerce (p-flatten-args %_args) 'list)
+                     %_args)))
+     (let* ,(loop for p in params
+                  collect `(,p (if %_args (pop %_args) (p-undef))))
+       ,@body)))
 
 ;;; p-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
@@ -9693,7 +9717,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-45"
+(defparameter *pcl-cache-generation* "v2-46"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

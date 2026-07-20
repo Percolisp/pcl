@@ -802,4 +802,41 @@ END_TWO
 print $c;
 ');
 
+# ============ CALLING CONVENTION: AGGREGATE ARGS TO SIGNATURE SUBS ============
+# s304 task #80: the v2 signature fast path (p-raw-params, formerly a bare
+# &optional lambda list) must honour Perl argument flattening — f(@args) and
+# the f(@_) delegation idiom pass the CONTAINER raw and the callee spreads it.
+# The &optional form bound the whole vector to the first param (broke Moo via
+# Moo::_Utils::_name_coderef -> Sub::Util::set_subname(@_)).
+
+test_transpile("signature sub called with an array flattens", '
+sub f { my ($x, $y) = @_; return "$x/$y"; }
+my @args = (1, 2);
+print f(@args), "\n";
+');
+
+test_transpile("signature sub via @_ delegation flattens", '
+sub f { my ($x, $y) = @_; return "$x/$y"; }
+sub g { return f(@_); }
+print g(3, 4), "\n";
+');
+
+test_transpile("signature sub with hash arg flattens to kv pairs", '
+sub f { my ($k, $v) = @_; return "$k=$v"; }
+my %h = (a => 5);
+print f(%h), "\n";
+');
+
+test_transpile("signature sub mixed scalar + array args", '
+sub f { my ($a, $b, $c) = @_; return join(":", $a, $b, $c); }
+my @rest = (20, 30);
+print f(10, @rest), "\n";
+');
+
+test_transpile("shift-run sub called through a code ref with @_", '
+sub f { my $n = shift; my $m = shift; return $n * 10 + $m; }
+sub d { my $r = \&f; return $r->(@_); }
+print d(4, 2), "\n";
+');
+
 done_testing();

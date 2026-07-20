@@ -139,14 +139,14 @@ unlike($ec, qr/\(p-gethash %h /, 'W11: package-hash element access not native-lo
 
 # Single leading shift, clean body → real lambda list, no p-args-body.
 my $s1 = Pl::Parser2->parse_code(q{sub f { my $x = shift; return $x + 1; } print f(1);});
-like($s1, qr/\(&optional \(\$x \(p-undef\)\) &rest %_args\)/,
-     'W14: single my $x = shift → &optional lambda list');
+like($s1, qr/\(p-raw-params \(\$x\)/,
+     'W14: single my $x = shift → p-raw-params fast path');
 unlike($s1, qr/pl-f[\s\S]*p-args-body/, 'W14: coalesced sub skips p-args-body');
 
 # Multi-statement run → one slot per shift, in order.
 my $s2 = Pl::Parser2->parse_code(
   q{sub f { my $x = shift; my $z = shift; return $x + $z; } print f(1,2);});
-like($s2, qr/\(&optional \(\$x \(p-undef\)\) \(\$z \(p-undef\)\) &rest %_args\)/,
+like($s2, qr/\(p-raw-params \(\$x \$z\)/,
      'W14: shift run coalesces in order');
 
 # Remainder reading @_ → the rewrite is illegal (shift mutated @_) → old path.
