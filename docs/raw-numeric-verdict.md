@@ -1,8 +1,44 @@
 # The `raw-numeric` and `raw-string` verdicts — use-proven eager coercion
 
-Design note (s286, discussed with user).  Status: **designed, not implemented**;
-scheduled after the counting-loop lowering (`docs/bench-exec-investigation.md`
-fix menu).  Companion to the existing box/raw split in `docs/ir-spec.md` §2.2.
+Design note (s286, discussed with user).  Status: **step 1 + A-num SHIPPED
+(s302, task #62); the freeze verdicts below (scan-licensed regime) are still
+unimplemented.**  Companion to the box/raw split in `docs/ir-spec.md` §2.2.
+
+## Shipped so far (s302) — the provenance-pure extensions
+
+Neither of these needs the flag/scan or the strict coercers — they extend the
+write-provenance regime (all stored values operator-coerced raw), so they ship
+first:
+
+1. **Step 1 — coercing compound assigns as raw writes.**  A statement-root
+   `$x OP= RHS` with a coercing op (`+= -= *= /= %= **= x= .= <<= >>= &= |=
+   ^= &.= |.= ^.=`) no longer boxes `$x`; Parser2 lowers it through the op's
+   **`-raw` macro twin** (`p-incf-raw` …), defined by `%define-compound-pair`
+   from the SAME new-value builder as the boxed macro (cannot drift).  `||=
+   &&= //=` store the RHS unchanged (may be a ref) → still box.  Seam/
+   modifier/embedded positions still box (they lower through box-set).
+
+2. **A-num — root `$x++;`/`$x--;` statements on numeric-write-family slots.**
+   The write-shape oracle now returns the stored value's FAMILY ('num' =
+   numeric-op result/number literal/num-family compound; 'str' = `.`-family/
+   quote literal/interpolation/str-family compound).  A root-statement
+   incdec is allowed on a raw slot iff EVERY other write is num-family —
+   then the value can never be a non-numeric string, perl's ++ on it is
+   plain numeric, and `p-incf-raw`/`p-decf-raw` match perl exactly.  Tail
+   position: postfix emits `(prog1 $x (p-incf-raw $x))` (old value).  The
+   `&= |= ^=` bit-compounds count as 'str' (perl dispatches `& | ^` to
+   STRING bitwise when both operands are strings — not provably numeric).
+   This regime **replaced the s286b C-for ++-step carve-out** and fixed its
+   latent bug: a string-seeded counter (`for (my $i = "aa"; $i ne "ad";
+   $i++)`) was numified (0) and the loop HUNG; the family gate keeps it
+   boxed so magical string increment runs.
+
+   Known residual (accepted, also listed under `++/--` licensing below): a
+   var whose writes are all numeric can still magically-increment in perl
+   ONLY via values this regime proves impossible, so A-num itself has no
+   magical-increment divergence.  The scan-licensed B-num regime below DOES
+   carry one (frozen `"5a"` increments numerically, perl magically) — noted
+   for when it is implemented.
 
 Two symmetric verdicts: if every use of a lexical is provably a *numeric*
 operation, coerce non-plain writes eagerly with the `+ 0` equivalent

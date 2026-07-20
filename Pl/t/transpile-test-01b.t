@@ -558,4 +558,24 @@ test_transpile("raw compound exclusion: seam and modifier positions", '
   my $q = 2; $q += 1 if $e; print "$q\n";
 ');
 
+# ---- task #62 A-num: root `$x++;` statements on numeric-write-family raw
+# ---- slots lower via the -raw twins; str-family writes keep the box so
+# ---- perl's MAGICAL string increment still runs.
+
+test_transpile("A-num: counters raw (while/C-for/undef-init/tail)", '
+  my $x = 10; while ($x > 0) { $x--; } print "$x\n";
+  for (my $j = 0; $j < 5; $j++) { print $j; } print "\n";
+  my $n; $n++; $n++; print "$n\n";
+  sub f { my $k = 5; $k++ }  print f(), "\n";
+  sub g { my $k = 5; ++$k }  print g(), "\n";
+');
+
+# The s286b carve-out latent bug (numified a string counter and HUNG this
+# loop): a str-family write vetoes root-incdec, magical increment preserved.
+test_transpile("A-num exclusion: magical string increment counter", '
+  for (my $i = "aa"; $i ne "ad"; $i++) { print "$i "; }
+  print "\n";
+  my $s = "az"; $s++; print "$s\n";
+');
+
 done_testing();

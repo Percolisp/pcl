@@ -72,6 +72,7 @@
    #:unbox #:ensure-boxed #:p-copy-scalar-arg
    #:box-set #:box-nv #:box-sv  ; lazy caching accessors
    #:to-string #:to-number
+   #:%pcl-to-number-strict #:%pcl-to-string-strict #:%pcl-dualvar-p
    #:p-undef #:p-defined #:p-defined-fh #:%pcl-definedp #:p-true-p
    #:p-let #:p-$
    ;; Arithmetic
@@ -2109,6 +2110,48 @@
     ;; Raw value - convert directly
     (t (stringify-value val))))
 (declaim (notinline to-string))
+
+;;; Strict eager coercion for raw-numeric / raw-string slot writes
+;;; (docs/raw-numeric-verdict.md §Checked coercion, task #62 step 2).
+;;; Writes are rare, uses are hot: the check runs once per write so every
+;;; use of the slot stays an unconditional raw read.
+
+(defun %pcl-dualvar-p (v)
+  "True when V is a box carrying a GENUINE dualvar: both caches valid and the
+   numeric side is NOT what numifying the string side would give ($!-family).
+   Ordinary cache-warm boxes have consistent caches and return NIL.  Shared
+   definition for Scalar::Util::isdual and the strict raw-slot coercers."
+  (and (p-box-p v)
+       (p-box-sv-ok v)
+       (p-box-nv-ok v)
+       (let ((n (ignore-errors (to-number (p-box-sv v)))))
+         (and n (/= (p-box-nv v) n)))))
+
+(defun %pcl-raw-coerce-check (v name kind)
+  "Die loudly when eagerly coercing V for raw slot NAME would lose behavior:
+   (1) an overload-capable blessed ref (a \"\" or 0+ handler) — per-use code
+   the frozen value cannot run (catches use-overload loaded by a string eval
+   AFTER the transpile-time corpus scan); (2) a genuine dualvar — coercion
+   irreversibly drops the other side, so a use-classifier bug would corrupt
+   silently.  Never weaken this check; a firing die means fix the classifier
+   or re-box the variable (raw-numeric-verdict.md)."
+  (when (or (p-find-overload v "\"\"") (p-find-overload v "0+"))
+    (error "PCL raw-~a slot ~a: value has use-overload conversion handlers; re-box the variable"
+           kind name))
+  (when (%pcl-dualvar-p v)
+    (error "PCL raw-~a slot ~a: genuine dualvar reached an eager coercion"
+           kind name))
+  v)
+
+(defun %pcl-to-number-strict (v name)
+  "Eager numeric freeze for a raw-numeric slot write (the compile-time
+   equivalent of the user writing `+ 0`); strict per %pcl-raw-coerce-check."
+  (to-number (%pcl-raw-coerce-check v name "numeric")))
+
+(defun %pcl-to-string-strict (v name)
+  "Eager string freeze for a raw-string slot write (`. \"\"`); strict per
+   %pcl-raw-coerce-check."
+  (to-string (%pcl-raw-coerce-check v name "string")))
 
 (defun p-length (val)
   "Perl length function - returns undef for undef input.

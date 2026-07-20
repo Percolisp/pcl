@@ -76,6 +76,18 @@ use Pl::PExpr ();
 my %ARITH_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=>
                                   . eq ne lt gt le ge cmp !);
 
+# Split of %ARITH_OP by the VALUE FAMILY of the op's result: a NUMERIC-valued
+# write can never seed magical string increment, so a var whose every write is
+# num-family may take root `$x++`/`$x--` statements raw (the A-num regime,
+# task #62).  Comparisons and `!` return 1/"" — perl's `""++` is numeric (1),
+# so they count as num.  String-family: `.` and the string comparisons.
+my %NUM_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=> !);
+
+# Coercing compound assigns by stored-value family (see %RAW_COMPOUND below).
+# The bitwise trio &= |= ^= is 'str': perl dispatches & | ^ to STRING bitwise
+# when both operands are strings, so their result is not provably numeric.
+my %NUM_COMPOUND = map { $_ => 1 } qw(+= -= *= /= %= **= <<= >>=);
+
 my %COMPOUND_ASSIGN = map { $_ => 1 }
   qw(+= -= *= /= %= **= x= .= ||= &&= //= <<= >>= &= |= ^= &.= |.= ^.=);
 
@@ -349,7 +361,15 @@ sub _analyze_tree {
     has_eval       => 0,
     nested_sub     => {},
   };
-  $ctx->{decl_count}{$_} = 1 for @{ $extra_params // [] };
+  for my $p (@{ $extra_params // [] }) {
+    $ctx->{decl_count}{$p} = 1;
+    # A sub parameter's initial value is CALLER-SUPPLIED — an unknown write
+    # family.  Record a non-'num' family so the A-num root-incdec gate never
+    # fires on a param: `sub b { my ($pack) = @_; …; $pack++ }` may hold a
+    # package-name STRING that perl magically increments ('a' -> 'b'); the
+    # numeric -raw twin would numify it (caught via sub.t, s302).
+    $ctx->{write_fam}{$p}{caller}++;
+  }
 
   for my $stmt (@stmts) {
     _tw_region_facts($ctx, $stmt);
@@ -363,6 +383,14 @@ sub _analyze_tree {
     push @reasons, 'eval-in-region' if $ctx->{has_eval};
     push @reasons, 'nested-sub-ref' if $ctx->{nested_sub}{$name};
     push @reasons, 'write-shape'    if $ctx->{init_bad}{$name};
+    # Root `$x++;` statements are allowed on a raw slot ONLY when every
+    # other write is numeric-valued (A-num): a str-family write could seed
+    # a string, and perl's ++ on a non-numeric string is the MAGICAL
+    # increment ("aa" -> "ab"), which the numeric -raw twin cannot do.
+    push @reasons, 'write-incdec-root'
+      if $ctx->{incdec_root}{$name}
+      && ($ctx->{init_bad}{$name}
+          || grep { $_ ne 'num' } keys %{ $ctx->{write_fam}{$name} // {} });
     push @reasons, sort keys %{ $ctx->{ev}{$name} // {} };
     push @reasons, map { "fallback:$_" }
       map { _text_gate_tags($name, $_, 1) } @{ $ctx->{fallback_texts} };
@@ -733,7 +761,19 @@ sub _tw_walk {
       my $op = $xo->get_a_node($kids->[$op_i]);
       my $opc = (ref($op) && !$xo->is_internal_node_type($op)) ? $op->content : '';
       if ($opc eq '++' || $opc eq '--') {
-        _tw_mark($ctx, $xo, $kids->[$ex_i], 'write-incdec');
+        my $ex  = $xo->get_a_node($kids->[$ex_i]);
+        my $exk = $xo->get_node_children($kids->[$ex_i]) || [];
+        if ($root_native && ref($ex) eq 'PPI::Token::Symbol' && !@$exk
+            && $ex->content =~ /^\$\w+$/) {
+          # `$x++;` / `++$x;` as its OWN statement (A-num regime, task #62):
+          # a numeric ±1 write Parser2 lowers via the -raw twin.  Recorded
+          # separately, NOT as a boxing event; the verdict allows it only
+          # when every other write to $x is NUMERIC-valued (then magical
+          # string increment is unreachable and the twin matches perl).
+          $ctx->{incdec_root}{$ex->content}++;
+        } else {
+          _tw_mark($ctx, $xo, $kids->[$ex_i], 'write-incdec');
+        }
       } elsif ($opc eq '\\') {
         # the WHOLE operand subtree: covers \$x and \substr($x,…)/\vec/\pos
         _tw_mark($ctx, $xo, $kids->[$ex_i], 'ref-taken');
@@ -763,8 +803,9 @@ sub _tw_walk {
         my $name = $l->content;
         if (!$root_native)     { _ev($ctx, $name, 'write-embedded') }
         elsif ($ctx->{cond})   { _ev($ctx, $name, 'write-cond') }
-        $ctx->{init_bad}{$name} = 1
-          unless _tw_shape_ok($ctx, $xo, $kids->[1]);
+        my $fam = _tw_shape_ok($ctx, $xo, $kids->[1]);
+        if ($fam) { $ctx->{write_fam}{$name}{$fam}++ }
+        else      { $ctx->{init_bad}{$name} = 1 }
       }
       elsif ($ltype && ($ltype eq 'h_acc' || $ltype eq 'a_acc')) {
         # Container element write.  For a PLAIN container base (a Symbol
@@ -808,7 +849,11 @@ sub _tw_walk {
       my $raw_ok = $root_native && @$kids == 2 && $RAW_COMPOUND{$op}
         && ref($l) eq 'PPI::Token::Symbol' && !@$lk
         && $l->content =~ /^\$\w+$/;
-      _tw_mark($ctx, $xo, $kids->[0], 'write-compound') unless $raw_ok;
+      if ($raw_ok) {
+        $ctx->{write_fam}{$l->content}{ $NUM_COMPOUND{$op} ? 'num' : 'str' }++;
+      } else {
+        _tw_mark($ctx, $xo, $kids->[0], 'write-compound');
+      }
       _tw_walk($ctx, $xo, $_, 0) for @$kids;
       return;
     }
@@ -846,6 +891,10 @@ sub _tw_mark {
 # from the allowed vocabulary, or a single number/string literal.
 # string_concat (an interpolated "…") returns a raw string, like the text
 # scanner's Quote::Double-counts-as-literal rule.
+# Returns the stored value's FAMILY — 'num' (numeric-op result / number
+# literal) or 'str' (string-op result / quote literal / interpolation) — or
+# 0 when the shape is unproven (may alias a box).  Truthiness is the old
+# ok/not-ok verdict; the family feeds the A-num root-incdec gate.
 sub _tw_shape_ok {
   my ($ctx, $xo, $id) = @_;
   my $node = $xo->get_a_node($id);
@@ -854,11 +903,11 @@ sub _tw_shape_ok {
   if ($xo->is_internal_node_type($node)) {
     my $t = $node->{type} // '';
     return _tw_shape_ok($ctx, $xo, $kids->[0]) if $t eq 'tree_val' && @$kids == 1;
-    return 1 if $t eq 'string_concat';
+    return 'str' if $t eq 'string_concat';
     if ($t eq 'prefix_op' && @$kids == 2) {          # -$y / +$y / !$y roots
       my $op = $xo->get_a_node($kids->[0]);
       my $opc = (ref($op) && !$xo->is_internal_node_type($op)) ? $op->content : '';
-      return _tw_operand_ok($ctx, $xo, $kids->[1])
+      return (_tw_operand_ok($ctx, $xo, $kids->[1]) ? 'num' : 0)
         if $opc eq '-' || $opc eq '+' || $opc eq '!';
     }
     return 0;               # funcall/h_acc/… root: value may be/alias a box
@@ -869,11 +918,11 @@ sub _tw_shape_ok {
     for my $k (@$kids) {
       return 0 unless _tw_operand_ok($ctx, $xo, $k);
     }
-    return 1;
+    return $NUM_OP{$node->content} ? 'num' : 'str';
   }
-  return 1 if ref($node) && $node->isa('PPI::Token::Number');
-  return 1 if $r eq 'PPI::Token::Quote::Single'
-           || $r eq 'PPI::Token::Quote::Double';
+  return 'num' if ref($node) && $node->isa('PPI::Token::Number');
+  return 'str' if $r eq 'PPI::Token::Quote::Single'
+               || $r eq 'PPI::Token::Quote::Double';
   return 0;                 # bare $y / f() / anything else: may alias a box
 }
 

@@ -117,7 +117,11 @@ construction) lowers to the boxed macro's **`-raw` twin**:
 (`p-incf`, `p-.=`, …) computes, so the two store disciplines cannot
 diverge semantically (task #62; `docs/raw-numeric-verdict.md`).  The
 non-coercing `||= &&= //=` store the RHS unchanged (it may be a
-reference), so their targets never become raw slots.
+reference), so their targets never become raw slots.  A statement-root
+`$x++;`/`$x--;` likewise lowers to `(p-incf-raw $x)`/`(p-decf-raw $x)`
+when every other write to `$x` is numeric-valued (the A-num rule —
+magical string increment is then unreachable); a tail-position postfix
+wraps in `prog1` to return the old value.
 
 **Invariant: a raw slot never holds a box or a reference** — only host
 numbers and strings. Ops always accept either form (they unbox
@@ -840,7 +844,7 @@ function's docstring states its Perl contract. The families:
 | logical | `p-&& p-\|\| p-// p-! p-not` | short-circuit macros returning operand values (§3.4) |
 | assignment | `p-my-=` (boxed lexical) `p-scalar-=` (package) `setf` (raw slot) `p-array-= p-hash-= p-list-=` | store per §2.2; list-assign in scalar context yields the RHS element count; all return the assigned target/value per Perl |
 | compound assignment | `p-incf p-decf p-*= p-/= p-%= p-**= p-.= p-str-x= p-bit-and= p-bit-or= p-bit-xor= p-<<= p->>= p-str-bit-and= p-str-bit-or= p-str-bit-xor=` (any place) · `-raw` twins of each (raw slot, §2.2) · `p-and-assign p-or-assign p-//=` (no raw twin) | read-modify-write; boxed macros store back via box-set/setf per place shape, `-raw` twins are `(setf slot NEW)` with the identical NEW form; `&&=`/`||=`/`//=` short-circuit and store the RHS unchanged |
-| increment | `p-++ p---- p-++-post p----post` | numeric ±1 on the box/slot; `p-++` on a pure-alpha string does Perl string increment (`"az"→"ba"`) |
+| increment | `p-++ p---- p-++-post p----post` · on raw slots `p-incf-raw`/`p-decf-raw` (statement-root only; tail postfix wraps in `prog1` for the old value) | numeric ±1 on the box/slot; `p-++` on a pure-alpha string does Perl string increment (`"az"→"ba"`) — a raw slot only takes root incdec when every write is numeric-valued (A-num), so the raw twins are never asked to do the magical form |
 | elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice` | reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value |
 | array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""` |
 | regex | `p-=~ p-!~` with `(p-regex "/pat/flags") (p-subst …) (p-tr …)` | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split` |

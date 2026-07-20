@@ -4418,6 +4418,27 @@ sub _lower_stmt {
     }
   }
 
+  # `$x++;` / `++$x;` / `--$x;` / `$x--;` as its own statement on a RAW slot
+  # (A-num): VarAnnotator allows the root-incdec event only when every other
+  # write is numeric-valued, so the numeric -raw twin matches perl (magical
+  # string increment is unreachable).  A postfix incdec in TAIL position
+  # returns the OLD value — prog1.
+  if (!$mod && @$expr == 2) {
+    my ($a, $b) = @$expr;
+    my ($name, $opc, $post);
+    if ($a->isa('PPI::Token::Symbol') && $b->isa('PPI::Token::Operator')) {
+      ($name, $opc, $post) = ($a->content, $b->content, 1);
+    } elsif ($a->isa('PPI::Token::Operator') && $b->isa('PPI::Token::Symbol')) {
+      ($name, $opc, $post) = ($b->content, $a->content, 0);
+    }
+    if (defined $name && $name =~ /^\$\w+$/ && ($opc eq '++' || $opc eq '--')
+        && !$self->{_file_lex_renamed}{$name}
+        && $vi->{$name} && $vi->{$name}{unboxable}) {
+      my $form = [$opc eq '++' ? 'p-incf-raw' : 'p-decf-raw', $name];
+      return ($post && defined $tail_ctx) ? ['prog1', $name, $form] : $form;
+    }
+  }
+
   # Statement position: the value is discarded (void) — except for a block
   # tail whose value the enclosing sub returns ($tail_ctx = 'inherit').
   my $vctx = $tail_ctx // ':void';
@@ -4651,29 +4672,33 @@ sub _lower_compound {
     my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
     $self->_reg_lex($name) if $name;
 
-    # ++-step carve-out: when the step is a PURE `$i++`/`++$i` (or --), the ++
-    # is position-known — it IS the step slot, whose value is discarded — so
-    # lower it as the equivalent `(setf $i (p-± $i 1))` and let the counter
-    # unbox, provided a re-analysis of the loop WITHOUT the step (init, cond,
-    # body — where the text-scan gates are trustworthy) approves the name.
-    my $step_form;
-    if ($name && $step_s && !($vi->{$name} && $vi->{$name}{unboxable})
-        && (my $incr = _pure_incr_step($step_s, $name))) {
+    # (The s286b ++-step carve-out — re-analyze WITHOUT the step, emit
+    # `(setf $i (p-± $i 1))` — is gone: the A-num root-incdec regime (task
+    # #62) approves the same counters in the VarAnnotator pass itself, and
+    # its numeric-write-family gate also fixes the carve-out's latent bug:
+    # a string-seeded counter (`my $i = "aa"; …; $i++`) now stays boxed so
+    # perl's MAGICAL string increment still runs — the carve-out numified
+    # it, hanging `for (my $i = "aa"; $i ne "ad"; $i++)`.)
+    #
+    # RENAMED counters (`$x__cond__N` from block-shadow promotion) are
+    # invisible to the block-level $vi (keyed by ORIGINAL names), so re-run
+    # the annotator over just this loop's statements — init/cond/STEP/body,
+    # step INCLUDED (A-num classifies it; the old carve-out had to exclude
+    # it) — and adopt an approving verdict.  The loop var is loop-scoped
+    # (let around p-for), so the loop region is the whole visibility span.
+    if ($name && !($vi->{$name} && $vi->{$name}{unboxable})) {
       my $vi2 = Pl::VarAnnotator->analyze(
-        [(grep { defined } $init_s, $cond_s), $block->schildren],
+        [(grep { defined } $init_s, $cond_s, $step_s), $block->schildren],
         undef, $self->_cur_sub_info, $self);
       if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
         $vi = { %$vi, $name => { unboxable => 1 } };
-        $step_form = ['list', ['setf', $name, ["p-$incr", $name, '1']]];
       }
     }
-
     my $cond = $cond_s
       ? ['list', $self->_auto_defined_raw(
                    $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt))]
       : ['list', 't'];
-    my $step = $step_form
-      // ($step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list']);
+    my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
     my @body = $self->_lower_scope([$block->schildren], $vi);
 
     my $form;
@@ -5565,20 +5590,5 @@ sub _seam_census_dump {
 }
 
 sub _hist_total { my ($h) = @_; my $n = 0; $n += $_ for values %{ $h // {} }; return $n }
-
-# Step statement that is EXACTLY `$i++` / `++$i` / `$i--` / `--$i` for the
-# given counter → '+' or '-'; anything else → undef.
-sub _pure_incr_step {
-  my ($step_s, $name) = @_;
-  my @k = _strip_semi($step_s->schildren);
-  return undef unless @k == 2;
-  my ($a, $b) = @k;
-  ($a, $b) = ($b, $a) if $a->isa('PPI::Token::Operator');   # prefix form
-  return undef unless $a->isa('PPI::Token::Symbol') && $a->content eq $name
-    && $b->isa('PPI::Token::Operator');
-  return '+' if $b->content eq '++';
-  return '-' if $b->content eq '--';
-  return undef;
-}
 
 1;

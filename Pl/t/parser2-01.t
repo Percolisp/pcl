@@ -101,17 +101,24 @@ my $cfor = Pl::Parser2->parse_code(
   'for (my $i = 0; $i < 3; $i = $i + 1) { print "$i\n"; }');
 like($cfor, qr/\(let \(\(\$i 0\)\)/, 'C-for arith-step counter binds raw');
 like($cfor, qr/\(\(setf \$i \(p-\+ \$i 1\)\)\)/, 'C-for raw counter native setf step');
-# ++-step carve-out (session 269): a PURE `$j++` step is position-known (its
-# value is discarded), so it lowers as a native setf and the counter unboxes.
+# A-num root-incdec (task #62, replaced the s269/s286b ++-step carve-out): a
+# `$j++` statement — the step slot AND any root statement in the body — is a
+# numeric write lowered via the -raw twin whenever every write to $j is
+# numeric-valued, so the counter unboxes in both shapes.
 my $cfor2 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 3; $j++) { print "$j\n"; }');
-like($cfor2, qr/\(let \(\(\$j 0\)\)/, 'C-for pure ++ step: counter unboxes (carve-out)');
-like($cfor2, qr/\(\(setf \$j \(p-\+ \$j 1\)\)\)/, 'C-for pure ++ step lowered as native setf');
-# … but a ++ anywhere ELSE (body) still forces the boxed path.
+like($cfor2, qr/\(let \(\(\$j 0\)\)/, 'C-for pure ++ step: counter unboxes (A-num)');
+like($cfor2, qr/\(\(p-incf-raw \$j\)\)/, 'C-for ++ step lowered via the -raw twin');
 my $cfor3 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 6; $j++) { $j++; print "$j\n"; }');
-like($cfor3, qr/\(\$j \(make-p-box nil\)\)/, 'C-for with body ++ keeps counter boxed');
-like($cfor3, qr/\(p-post\+\+ \$j\)/, 'C-for boxed step through p-post++');
+like($cfor3, qr/\(let \(\(\$j 0\)\)/, 'C-for with body ++ also unboxes (A-num)');
+like($cfor3, qr/\(p-incf-raw \$j\)\s*\(p-print/s, 'body ++ lowered via the -raw twin');
+# … but a STR-family write forces the box: perl magically increments a
+# non-numeric string ("aa" -> "ab"), which the numeric twin cannot do.
+my $cfor4 = Pl::Parser2->parse_code(
+  'for (my $j = "aa"; $j ne "ad"; $j++) { print "$j\n"; }');
+like($cfor4, qr/\(\$j \(make-p-box nil\)\)/, 'C-for string-seeded counter keeps the box');
+like($cfor4, qr/\(p-post\+\+ \$j\)/, 'string counter step through p-post++ (magical incr)');
 
 # Lean p-sub: a body that never reads @_ skips the p-args-body prologue and
 # stack-allocates the unused &rest.
