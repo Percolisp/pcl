@@ -810,27 +810,18 @@ sub parse {
     # defconstant/eval-when from use/require/BEGIN) — before the definitions
     # that may reference them.
     push @body, @{ $sec->{captured} }, '';
-    if (_sched_interleave_on()) {
-      # #55 interleave (DEFAULT since s300; PCL_SCHED_OLD=1 = escape hatch
-      # until the flip survives a full session/sweep cycle): merge sub defs and
-      # BEGIN/END forms by SOURCE POSITION — perl compiles subs and runs BEGIN
-      # blocks in source order, so a BEGIN sees exactly the subs defined above
-      # it and none below (sub-existence introspection: chdir.t).  Index
-      # tie-break keeps the merge stable for entries with equal positions.
-      my @tagged;
-      push @tagged, [$sec->{def_lines}[$_]   // 0, scalar(@tagged), $sec->{defs}[$_]]
-        for 0 .. $#{ $sec->{defs} };
-      push @tagged, [$sec->{sched_lines}[$_] // 0, scalar(@tagged), $sec->{sched}[$_]]
-        for 0 .. $#{ $sec->{sched} };
-      push @body, map { ($_->[2], '') }
-                  sort { $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] } @tagged;
-    } else {
-      push @body, map { ($_, '') } @{ $sec->{defs} };
-      # BEGIN/END/… blocks: after every sub definition (so a BEGIN can call a
-      # sub defined before it), before the runtime (Perl runs all compile-phase
-      # blocks before runtime code).
-      push @body, map { ($_, '') } @{ $sec->{sched} };
-    }
+    # #55 interleave: merge sub defs and BEGIN/END forms by SOURCE POSITION —
+    # perl compiles subs and runs BEGIN blocks in source order, so a BEGIN
+    # sees exactly the subs defined above it and none below (sub-existence
+    # introspection: chdir.t).  Index tie-break keeps the merge stable for
+    # entries with equal positions.
+    my @tagged;
+    push @tagged, [$sec->{def_lines}[$_]   // 0, scalar(@tagged), $sec->{defs}[$_]]
+      for 0 .. $#{ $sec->{defs} };
+    push @tagged, [$sec->{sched_lines}[$_] // 0, scalar(@tagged), $sec->{sched}[$_]]
+      for 0 .. $#{ $sec->{sched} };
+    push @body, map { ($_->[2], '') }
+                sort { $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] } @tagged;
     # Runtime current-package tracking (caller()/__PACKAGE__) in execution
     # order — after this section's definitions load, before its code runs.
     push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
@@ -3644,14 +3635,6 @@ sub _hoist_nested_sub {
   return;
 }
 
-# #55 defs/sched interleave: DEFAULT since s300 (battery: switch-off
-# byte-identical to pre-flip, switch-on = 50 positional moves + chdir.t
-# de-gate, full sweep identical except chdir.t 2+1crash → 25+0).
-# PCL_SCHED_OLD=1 restores the all-defs-before-scheduled assembly; delete the
-# old path (and _sched_defs' separate assembly) in a later cleanup once the
-# flip has survived a full session/sweep cycle.
-sub _sched_interleave_on { !$ENV{PCL_SCHED_OLD} }
-
 # Sortable source position of a statement (line major, column minor) — used
 # by the #55 interleave to merge sub defs and scheduled blocks in source
 # order.  Columns break same-line ties (`BEGIN { f() } sub f {…}`).
@@ -4062,28 +4045,10 @@ sub _lower_block {
   }
 
   # -- BEGIN/END/CHECK/… blocks: v1's p-BEGIN goes to the definitions bucket,
-  # which for v2 must be assembled AFTER the native sub defs (so a BEGIN can
-  # call a sub defined before it) and BEFORE the runtime (Perl runs all
-  # compile-phase blocks before runtime code) — route via _sched_defs.
+  # then the #55 assembly interleaves it with the sub defs at its source
+  # position, so a BEGIN sees exactly the subs defined above it — perl-correct
+  # by construction (sub-existence introspection: chdir.t).
   if ($first->isa('PPI::Statement::Scheduled')) {
-    # LIMITATION: v2 assembles ALL sub definitions before ANY scheduled block,
-    # so a BEGIN sees subs defined LATER in source too — wrong for introspection
-    # that snapshots which subs exist at compile time (`main->can("later")` at
-    # BEGIN, Moo::Role's make_role).  Getting this right needs interleaving defs
-    # and BEGINs in SOURCE ORDER — an assembly-model change out of W8 scope.
-    # Gate a BEGIN that does method-existence introspection → v1 (correct order).
-    # A BEGIN that merely CALLS a sub (the s272g case) is unaffected.
-    # Under the #55 interleave the assembly places each p-BEGIN at its source
-    # position among the sub defs, so the ordering is perl-correct BY
-    # CONSTRUCTION and the fragile text-pattern gate is unnecessary.
-    unless (_sched_interleave_on()) {
-      my $bt = $first->content;
-      die "Parser2 TODO: BEGIN block with sub-existence introspection (def-ordering)\n"
-        if $bt =~ /->\s*(?:can|isa|DOES)\b/     # $obj->can("m") / ->isa
-        || $bt =~ /\b(?:can|isa)\s*\(/          # can(...) / isa(...)
-        || $bt =~ /\bdefined\s*&/               # defined &sub / defined &{"Pkg::$_"}
-        || $bt =~ /%[\w:]+::/;                  # keys %Pkg:: stash walk
-    }
     return ($self->_fallback_stmt($first, sched => 1),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
