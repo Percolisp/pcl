@@ -131,7 +131,9 @@ falls back to v1 per file. `PCL_V1=1` forces the original v1 pipeline
 scripts. Module-cache paths are keyed by `cl/pcl-runtime.lisp`'s
 `*pcl-cache-generation*` **plus the effective pipeline** — bump the
 generation string on any emission-changing commit, or stale cached module
-transpiles will be reused. **Plan/status: `docs/v2-endgame-plan.md` (E1–E5)
+transpiles will be reused. **Plan/status: `docs/v2-endgame-plan.md` (E1–E5 + §6 the two product
+targets: beat-perl speed / clear macro-IR — perf worklist in
+`docs/faster-codegen-suggestions.md`)
 + `docs/v2-opus48-execution-plan.md` (the ordered worklist, per-session
 checklist §1b, guardrails) + `docs/e1-remainder.md` (per-file gate
 triage).** `docs/v2-completion-plan.md` is the older W-phase plan

@@ -1,5 +1,11 @@
 # Generating Faster CL — measured variants, per category
 
+> **Status (s301, 2026-07-20):** this catalogue is now the measured basis of
+> **Target A** in `docs/v2-endgame-plan.md` §6 ("general program speed must
+> beat Perl"; acceptance criteria + sequencing there).  Tier-1 items are
+> filed: S1+N1(+N2) = task #62, M1 = #73, P1 = #74; the Target-B rule
+> applies — every new fast shape ships wrapped in its named macro.
+
 **Written:** 2026-07-19 (Opus 4.8), against the v2 default pipeline.
 **Method.** Two layers of measurement:
 1. `perl tools/bench-exec.pl` — whole-program, execution-only, startup

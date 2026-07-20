@@ -236,3 +236,83 @@ after a gen bump) + `--jobs 1` parity sweep after every item; copy v1
 shapes exactly when porting; gate-don't-half-implement; one commit per
 item; bump `*pcl-cache-generation*` on emission changes; v1 stays green
 until E4 (it is the oracle).
+
+---
+
+## 6. After E5 — the two product targets (P-phase)
+
+**Set by the user 2026-07-20 (session 301).**  E1–E5 finish the *compiler*;
+these two targets define what the *product* must be.  They are acceptance
+criteria, not vague aspirations — each has a scoreboard.
+
+### Target A — general program speed must beat Perl
+
+**Acceptance:** `perl tools/bench-exec.pl` — the general-purpose rows beat
+Perl (pcl/perl < 1.0×), and the suite geomean excluding the granted-slack
+rows is < 1.0×.  **Granted slack** (a couple of areas may stay much
+slower): the regex *engine* (cl-ppcre; only #71 PCRE2 could close it) and
+the pack/unpack *oracle* rows (transpiled pure-Perl, tracks oracle
+overhead, not codegen).  Slack means "not release-blocking" — it does NOT
+remove the item from the worklist.  String concatenation nominally has
+slack too, but S1 is Tier 1 anyway: O(n²) append is a complexity class
+that breaks real string-building programs, not a constant factor.
+
+**State (s301 bench):** recursion/calls already beat Perl (fib 0.24×,
+gcdrec 0.42×); the losses are numeric accumulation (3.4–4.0×),
+aggregates (2.0×), collatz (2.0×), strcat (2525×), pack (~1180×).
+
+**Worklist — every item MEASURED in `docs/faster-codegen-suggestions.md`
+(the authoritative catalogue: per-item variant timings, preconditions,
+before/after codegen shapes in its §11, priority in §12):**
+
+| # | item | measured | moves | task |
+|---|---|---:|---|---|
+| A-1 | **S1** raw-string append buffer (fill-pointer `.=`) | ~2400× | strcat 2525×→~1× | #62 |
+| A-2 | **N1** raw-numeric verdict incl. `+=`/`-=`/`*=` as arith writes (+ numeric-string freeze) | ~13× / ~8.5× | intloop+=/=, cfor, collatz →~1× | #62 |
+| A-3 | **M1** method-dispatch monomorphic inline cache | ~15× | all OO/Moo/Moose CPAN | #73 |
+| A-4 | **P1** pack/sprintf constant-template memoization (`load-time-value` plan) | oracle / ~5× | pack rows | #74 |
+| A-5 | Tier 2: A3 push→`vector-push-extend`, A4 raw array elems, A5 sort-comparator idioms, A1 single-lookup hash update | 3.5–7× | arrhash + list/sort code | later |
+| A-6 | Tier 2: F1 `dynamic-extent @_`, F2 real lambda lists, F3 elide `*wantarray*` bind, N2 in-place box write | GC + 1.3× | call-heavy code | later |
+| A-7 | Tier 3: X1 block-compile runtime, O2 const-fold, constant-regex `load-time-value`; #71 PCRE2 (also a *correctness* play) | 1.2–2× | baseline | later |
+
+**Measured dead ends — do NOT spend sessions here** (catalogue §12):
+native `+` for `p-+` (0% — R1 already at the sound ceiling), unboxing
+hash values without removing a lookup, constant-key hashing, IO codegen
+micro-tuning, fixnum-typing without a range proof.
+
+**Sequencing:** A-1..A-4 are independent of E2–E5 (runtime + v2 codegen;
+no seam contact) and may interleave with them at any time — S1+N1 share
+the verdict analysis and pair as one block (task #62 first).  Every item
+lands behind an analysis precondition with the boxed fallback and the
+checked-coercion discipline (`raw-numeric-verdict.md`), and ends with a
+`bench-exec.pl` re-run — the bench is the only scoreboard.
+
+### Target B — the generated IR must be CLEAR, with obvious macros doing the CL-specific stuff
+
+**Acceptance:** a Perl programmer can read the emitted file and see their
+program; every CL-specific mechanism hides behind an obviously-named
+macro from a **closed, documented vocabulary** (`ir-spec.md` is the
+normative list).  Concretely: no raw text islands (E2.final/E5 retire the
+seams), no host-idiom constructors or bare special-variable binds inline
+— `(p-scalar-ctx …)` not `(let ((*wantarray* nil)) …)`, `p-new-av`/`p-vlist`
+not `(make-array … :adjustable t …)`, `(p-esc …)` not raw control bytes,
+structured regex literals not un-parsed Perl source.
+
+**Worklist = `docs/generated-cl-ir-review.md` §4 items 2–6** (constructor
++ context macros; structured regex literals; `p-esc`; dedupe/asymmetry
+cleanups; canonical re-print), plus the §4 item 7 seam retirement that
+E2.final/E5 already deliver.  Each is emission-changing: full parity
+discipline + cache-gen bump; none may change what the code *does*.
+
+**No conflict with CLAUDE.md §2 (speed wins):** the macro layer is free at
+runtime — a macro *expands to* the fast shape, so clarity is bought at
+macroexpansion time, never with slower code.  Where Target A introduces a
+new fast shape (raw slots, fill-pointer buffers, inline-cache cells), it
+must arrive **wrapped in its named macro from day one** (`p-append!`,
+`p-call-cached`, …) so the two targets converge instead of fighting:
+the IR stays readable *because* the CL-specific machinery is named.
+
+**Sequencing:** doc-side items anytime; emission-changing flag-days are
+cheapest AFTER E4 (one pipeline, no dual-dialect parity) — schedule the
+macro-vocabulary flag-day right after E5, folding in the macro names
+Target A's items introduced along the way.
