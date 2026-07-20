@@ -4,6 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 302 (2026-07-20, Fable) — task #62 steps 1+A-num: compound assigns & root incdec on raw slots — intloop+= 3.4x->2.0x, carve-out hang fixed (gen v2-43).
+
+Target-A tier 1 (task #62), the provenance-pure half, in two commits:
+
+1. **Step 1 (2e39657) — coercing compound assigns as raw writes.**
+   `%define-compound-pair` (runtime) defines each boxed compound macro and a
+   `-raw` twin (`p-incf-raw`, `p-.=-raw`, …) from ONE shared new-value
+   builder — the raw store is `(setf slot NEW)` with byte-identical NEW, so
+   the disciplines cannot drift.  VarAnnotator: a coercing compound
+   (`+= -= *= /= %= **= x= .= <<= >>= &= |= ^= &.= |.= ^.=`) on a plain `$x`
+   at NATIVE statement root is no longer a boxing event; `||= &&= //=`
+   (store RHS unchanged) and seam/modifier/embedded positions still box.
+   Parser2 native branch mirrors the `=` branch keying; the op->twin table
+   lives in VarAnnotator (`raw_compound_macro`), one definition.
+
+2. **A-num (dd378d2) — root `$x++;`/`$x--;` on numeric-write-family slots.**
+   `_tw_shape_ok` now returns the stored value's FAMILY (num/str); root
+   incdec is allowed on a raw slot iff every other write is num-family
+   (magical string increment then unreachable; sub params count as unknown
+   family — caught via sub.t, a param can hold a package-name string perl
+   increments magically).  Tail postfix → `(prog1 $x (p-incf-raw $x))`.
+   **Deleted the s286b ++-step carve-out** (subsumed) — and its latent bug:
+   it numified string-seeded counters, so `for (my $i = "aa"; $i ne "ad";
+   $i++)` HUNG; now boxed + magical increment, byte-identical to perl.  A
+   step-INCLUSIVE loop re-analysis stays for renamed `__cond__` counters.
+   Strict freeze coercers (`%pcl-to-number-strict`/`-string-strict`,
+   `%pcl-dualvar-p`) landed in the runtime for the unimplemented
+   scan-licensed B-regimes (unit-verified: dualvar dies, warm box passes).
+
+**Verification:** corpus-diff both rounds fully explained (step 1: 4 files —
+raw `.=`/`*=` accumulators; A-num: 4 files — aassign/local counter wins,
+my/state step spelling `setf p-+` -> `p-incf-raw`; sub.t reverted by the
+param fix); all sweeps baseline-identical vs `docs/fail-baseline.tsv`;
+Pl/t gate 115 files / 4257 tests ALL PASS (+7 new: 5 raw-compound + 2
+A-num in transpile-test-01b; parser2-01/-02 guards updated to the new
+contracts incl. a string-counter box guard).  Census 111/0 unchanged.
+Cache gen v2-43; ir-spec §2.2 + op table synced (compound row, -raw twins,
+A-num rule); `raw-numeric-verdict.md` gained the shipped-regimes section +
+implementer corrections (`& | ^` and range endpoints are TYPE-SENSITIVE —
+must not license the future raw-numeric freeze).
+
+**Bench (best-of-5):** intloop+= 3.37x -> **1.97x**, strcat 2525x ->
+**~1050x** (raw slot; O(n²) remains = S1), collatz 2.02x -> 1.71x; fib
+0.25x / gcdrec 0.45x still beat perl.  **Remaining for #62:** B-num/B-str
+freeze verdicts (use-classification walk; design + deviations recorded in
+raw-numeric-verdict.md) and the S1 fill-pointer append buffer (needs
+raw-string's no-escape proof).
+
+---
+
 ## Session 301 (2026-07-20, Fable) — #70 SHIPPED: fork-pipe/dup-open runtime + closure.t FULL PASS — census 111/0, E1 GATE BURN-DOWN COMPLETE (gen v2-42).
 
 Finished the s300d worktree WIP (fork-pipe open `"|-"`/`"-|"` bare+command,

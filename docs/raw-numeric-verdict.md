@@ -146,6 +146,20 @@ compiler proves the cache can be pre-filled at the write.
 bitwise ops, range endpoints (`A..$n`), array index (`$a[$q]`), repeat count
 (`LIST x $q`).
 
+> **Corrections for the implementer (s302, found while shipping A-num):** two
+> entries above are TYPE-SENSITIVE in perl and must NOT license raw-numeric —
+> freezing flips a runtime dispatch:
+> - `& | ^` dispatch to **string bitwise** when both operands are strings
+>   (`"12" & "3"`); a frozen number turns that into numeric AND.  Only
+>   `<< >>` are safe (always numeric).
+> - **range endpoints**: `$a .. $b` runs perl's **magical string range**
+>   (`"aa".."ad"`) when the endpoints are non-numeric strings; freezing
+>   selects the numeric range.
+> Both must classify as opaque (disqualifying).  Same class of trap, already
+> accepted-and-documented for `++/--`: a frozen non-numeric string increments
+> numerically where perl would do the magical increment (B-num only — the
+> shipped A-num regime proves such strings impossible instead).
+
 **raw-string licensing uses:** interpolation `"$q"`, `.`/`.=`,
 `eq ne lt gt le ge cmp`, `length`, rvalue `substr`/`index`, `lc uc lcfirst
 ucfirst`, hash-key `$h{$q}`, regex match/subst *target* (`$q =~ …` reading),
