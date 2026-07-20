@@ -253,9 +253,10 @@ rows is < 1.0×.  **Granted slack** (a couple of areas may stay much
 slower): the regex *engine* (cl-ppcre; only #71 PCRE2 could close it) and
 the pack/unpack *oracle* rows (transpiled pure-Perl, tracks oracle
 overhead, not codegen).  Slack means "not release-blocking" — it does NOT
-remove the item from the worklist.  String concatenation nominally has
-slack too, but S1 is Tier 1 anyway: O(n²) append is a complexity class
-that breaks real string-building programs, not a constant factor.
+remove the item from the worklist.  String concatenation also has slack
+(§7: S1 may ship as a documented TODO at R2), but stays high on the
+worklist regardless: O(n²) append is a complexity class that breaks real
+string-building programs, not a constant factor.
 
 **State (s301 bench):** recursion/calls already beat Perl (fib 0.24×,
 gcdrec 0.42×); the losses are numeric accumulation (3.4–4.0×),
@@ -316,3 +317,35 @@ the IR stays readable *because* the CL-specific machinery is named.
 cheapest AFTER E4 (one pipeline, no dual-dialect parity) — schedule the
 macro-vocabulary flag-day right after E5, folding in the macro names
 Target A's items introduced along the way.
+
+---
+
+## 7. Release roadmap (user, 2026-07-20, s301)
+
+Two releases, each gated by one of the §6 targets; perf items may slip
+past R2 when documented.
+
+**R1 — the correctness release.**  Ships when:
+1. the rewrite is FINISHED — E2 through E5 complete (one pipeline, v1
+   deleted, simplification done);
+2. the remaining *internal* Perl tests are re-run green-or-explained —
+   the sweep + Pl/t gate as usual, PLUS the perl `t/` subdirs not in the
+   sweep (task #25 / E4.0b: t/mro and t/class have never been surveyed;
+   re-run the previously surveyed dirs);
+3. a selection of CPAN module suites re-run against their recorded
+   baselines (task #25's second half; suite list + baselines in
+   `project_cpan_test_suites` / s276b numbers).
+Speed is NOT an R1 gate — R1 ships with today's profile (calls/recursion
+faster than perl; numeric loops and string append slower).
+
+**R2 — the speed release.**  Ships on Target A acceptance (§6): general
+program speed beats Perl, slack rows excluded.  **Explicitly permitted to
+ship with one or two documented perf TODOs** — the named candidate is the
+**string-concat/append class (S1)**: if it is not done by R2, it ships as
+a documented TODO (`docs/todo-features.md` §Perf) rather than blocking
+the release.  The numeric-loop work (N1) is NOT slippable — the general
+benches can't beat perl without it.
+
+**Post-R2.**  The documented TODOs (S1 if slipped), remaining Tier-2/3
+perf items, #71 PCRE2, Target B's macro flag-day if not already folded
+into E5, and the XS bridge (`pclxs`) as its own track.

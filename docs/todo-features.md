@@ -29,6 +29,21 @@ Mind the filehandle forms: `print FH;` (`:fh` + empty list) and
 
 ---
 
+## Perf TODOs (documented release slack — `v2-endgame-plan.md` §7)
+
+These are *performance* gaps, not correctness gaps; they may ship in a
+release as documented TODOs per the release roadmap.
+
+- **String concat/append is O(n²)** (`$s .= 'x'` copies the whole string
+  per append; bench `strcat` ~2500× slower than perl, and the gap grows
+  with input size).  The designed fix is **S1** (task #62): a
+  `raw-string` verdict representing append-only scalars as adjustable
+  fill-pointer buffers, `.=` → `vector-push-extend` — measured ~2400×,
+  restores O(n).  Details: `docs/faster-codegen-suggestions.md` §4/§11.1.
+- **pack/unpack/sprintf re-parse constant templates per call** (bench
+  `pack` ~1000×; sprintf ~5×).  Fix = template memoization /
+  `load-time-value` field plans (task #74).
+
 ## Infrastructure Bugs
 
 ### "Fully passing" files may be false positives — crash-before-failure masking
