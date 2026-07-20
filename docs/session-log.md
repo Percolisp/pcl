@@ -81,9 +81,34 @@ Verification: eval-capture-01.t 32/32 BOTH pipelines (+2 new
 regression scenarios: sub_in_eval closure, cross_eval persistence);
 eval.t 126+34 = baseline; state.t 157+0; 59-file changed-emission
 sweep all at baseline; PCL_V1 corpus byte-identical to HEAD; suites:
-gate 116/4284 PASS (pre-E3 run), perl-tests full sweep 18386/66-fully
+gate 116/4286 PASS (post-E3), perl-tests full sweep 18386/66-fully
 = baseline, run-perl-suite 42 OK/52 XDIFF/31 NOTAP/7 TIMEOUT/301 DIFF
-= s303 baseline.  Cache gen v2-44 → v2-45.
+= s303 baseline (identical OK sets pre/post-E3).  Cache gen v2-44 →
+v2-45.
+
+**Third deliverable — CPAN re-verification (user request) + one
+E4-BLOCKING finding (task #80).**  CPAN suites on the v2 default, vs
+the s276b baselines: Try-Tiny **5 PASS/3 PARTIAL/3 FAIL = exact
+baseline**; Role-Tiny **10/7/6 (was 4/6/13 — better)**; Scalar-List-
+Utils **8/22/8 (was 7/22/9 — better)**; Sub-Uplevel 2/2/6 (first
+recording).  **Moo is BROKEN on the v2 default — and works fully
+under PCL_V1=1** (differential battery: 18/18 tags correct on v1).
+NOT a session regression: fails identically at s303's HEAD and at
+07-06 commits; v2 became default 2026-07-05 and Moo itself was never
+in the post-W12 CPAN re-run set (task #24 covered Try-Tiny/S-L-U/
+Role-Tiny only).  Symptom: `use Moo` completes (module in %INC,
+make_class ran, @ISA set) but _install_subs installs NOTHING → `has`
+dies "P1::pl-has is undefined".  Ruled out: Moo.pm's own emission
+(call sites byte-similar both pipelines), _Utils's pl-_install_tracked
+defun + @EXPORT_OK (same both), the direct glob-install primitive
+(works), the parenless-call-with-postfix-for shape (works), list-ctx
+method call into %hash (works).  The discriminator is load-time
+behavior of one of the v2-natively-transpiled chain modules
+(_Utils/Object/sification/Method::Generate::*/Sub::Quote/Sub::Defer/
+Role::Tiny; Exporter itself falls back to v1 in both pipelines).
+Next step in task #80: per-module v1 forcing to bisect the chain.
+E4.0b says exactly this class of divergence must be fixed while v1
+still exists — #80 blocks E4.1.
 
 ---
 
