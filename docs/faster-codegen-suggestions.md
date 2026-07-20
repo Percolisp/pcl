@@ -568,6 +568,17 @@ my $s = sprintf("%05d-%s", $i, $name);   # constant format in a loop
 5. **A1/A3 single-lookup + fill-pointer aggregates** (arrhash, push loops).
 6. **F1 `dynamic-extent @_`**, then **F2/F3**.
 7. **N2 in-place box write** (~1.3× on every still-boxed write; cheap).
+7b. **T1 return-family transfer through sub_info** (task #77, user-approved
+   idea s303, **scheduled AFTER E2–E4**): per named sub, classify every
+   `return`/tail expression with `_tw_shape_ok`'s family oracle in the
+   existing sub_info pre-pass; a call site `my $x = f()` with
+   `returns => 'num'/'str'` becomes a PROVEN family write — the slot goes
+   plain raw with NO strict-freeze wrapper (better than the B-verdict).
+   Simple-case boundary: all returns operator-coerced/literal, else record
+   nothing.  Adds NO new soundness assumptions — same closed-world rules as
+   direct calls (no methods/coderefs/AUTOLOAD, bail on glob redefinition).
+   Second phase (larger): caller→callee param use-class transfer so `f($q)`
+   need not be an opaque use of `$q`.
 
 **Tier 3 — free riders / long tail:**
 8. **X1 block-compile the runtime** (broad 1.2–2×, ship anytime — watch the

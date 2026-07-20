@@ -3722,22 +3722,60 @@ sub gen_prefix_op {
   return "($cl_op $operand)";
 }
 
-# E2 form variant of gen_prefix_op — PARTIAL coverage.  DECLINES (before any
-# side effect) exactly the operators whose text emitter inspects the GENERATED
-# operand TEXT to detect magic lvalues: the whole `\` backslash family (\&func,
-# \(LIST), \$#array→p-arylen-ref, \substr/\pos/\vec→*-ref) and `++`/`--` (which
-# may target $#array→p-set-array-length).  Those need the operand-text regexes
-# rewritten to AST-level first (a deferred E2 step); declining before generating
-# keeps the text-path re-run side-effect-free.  Everything else — sigil casts,
-# !/~/-/not, unary +, &, *, $#{…}, and the $/@/%-over-postfix-++ shunting fixup
-# — has no operand-text inspection and converts structurally.
+# E2 form variant of gen_prefix_op.  The `\` backslash family and `++`/`--`
+# — whose TEXT emitter regexes the generated operand text to detect magic
+# lvalues (\$#array→p-arylen-ref, \substr/\pos/\vec→*-ref twins,
+# $#array++→p-set-array-length) — convert by destructuring the operand
+# FORM's head instead: same generated output inspected, structurally.  A
+# producer that emits a different head (e.g. a user-defined `sub substr` →
+# pl-substr) falls to the generic wrap on both paths, so parity holds by
+# construction.  The ONE remaining decline is the \(LIST) paren-list shape
+# (a pure metadata check, before any generation).
 sub gen_prefix_op_form {
   my ($self, $node, $node_id, $kids) = @_;
   my $op_node = $self->expr_o->get_a_node($kids->[0]);
   my $op      = $op_node->content();
 
-  # Text-inspecting operators: decline to the kept text emitter.
-  return undef if $op eq '\\' || $op eq '++' || $op eq '--';
+  if ($op eq '\\') {
+    my $operand_id   = $kids->[1];
+    my $operand_node = $self->expr_o->get_a_node($operand_id);
+    # \&NAME — the sub slot, never a builtin; force the user sub.
+    if (ref($operand_node) eq 'PPI::Token::Symbol'
+        && $operand_node->content() =~ /^&(.+)$/) {
+      my $cl_func = $self->cl_name($1, 1, 1);
+      return ['p-backslash-sub', "'$cl_func"];
+    }
+    # \(LIST) — the distribute-over-elements family: still text (declined
+    # on pure metadata, no generation has happened).
+    return undef
+      if $self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list');
+  }
+
+  if ($op eq '\\' || $op eq '++' || $op eq '--') {
+    # l-value context: \ needs the box (a ref to it, not a copy), ++/--
+    # need writable element boxes — mirrors the text emitter exactly.
+    my $saved_lvalue = $self->lvalue_context;
+    $self->lvalue_context(1);
+    my $operand = $self->gen_node_form($kids->[1]);
+    $self->lvalue_context($saved_lvalue);
+    my $head = (ref($operand) eq 'ARRAY' && !ref($operand->[0]))
+             ? $operand->[0] : '';
+    my @rest = ref($operand) eq 'ARRAY' ? @$operand[1 .. $#$operand] : ();
+    if ($op eq '\\') {
+      # magic-lvalue refs: live cells with write-through setters
+      return ['p-arylen-ref', @rest] if $head eq 'p-array-last-index';
+      return [$head . '-ref', @rest]
+        if $head eq 'p-substr' || $head eq 'p-pos' || $head eq 'p-vec';
+      return [$self->cl_name($op), $operand];
+    }
+    # prefix ++/--: arylen target gets the setter shape (value = new length)
+    if ($head eq 'p-array-last-index') {
+      my $delta_op = ($op eq '++') ? '1+' : '1-';
+      return ['p-set-array-length', @rest,
+              [$delta_op, ['p-array-last-index', @rest]]];
+    }
+    return ["p-pre$op", $operand];
+  }
 
   # $#{ array } — last index of array (braced form of $#array).
   if ($op eq '$#') {
@@ -3857,28 +3895,10 @@ sub gen_postfix_op {
   return "($cl_op $operand)";
 }
 
-# True when the node at ID renders to (p-array-last-index …) — i.e. it is a
-# `$#arr` ArrayIndex leaf or a `$#{ EXPR }` prefix_op.  AST-level equivalent of
-# the text check `$operand =~ /^\(p-array-last-index …/`, so a form emitter can
-# route the arylen ++/-- setter to the kept text path without generating the
-# operand first.
-sub _operand_is_arylen {
-  my ($self, $id) = @_;
-  my $n = $self->expr_o->get_a_node($id);
-  return 1 if ref($n) eq 'PPI::Token::ArrayIndex';
-  if ($self->expr_o->is_internal_node_type($n) && ($n->{type} // '') eq 'prefix_op') {
-    my $ck  = $self->expr_o->get_node_children($id);
-    my $opn = $ck && @$ck ? $self->expr_o->get_a_node($ck->[0]) : undef;
-    return 1 if $opn && $opn->content() eq '$#';
-  }
-  return 0;
-}
-
-# E2 form variant of gen_postfix_op.  Converts the chained-comparison container
-# and plain ++/--; DECLINES only `$#array++` / `$#{…}--` (the arylen setter form
-# inspects the operand's generated text — deferred with prefix_op's ++/--, and
-# AST-detectable via _operand_is_arylen so the decline happens before any side
-# effect).
+# E2 form variant of gen_postfix_op — FULL coverage: the chained-comparison
+# container, plain ++/--/other postfix ops, and the `$#array++` arylen
+# setter (keyed on the generated operand form's head, like
+# gen_prefix_op_form's magic-lvalue routing).
 sub gen_postfix_op_form {
   my ($self, $node, $node_id, $kids) = @_;
 
@@ -3898,13 +3918,24 @@ sub gen_postfix_op_form {
   my $op_node = $self->expr_o->get_a_node($kids->[1]);
   my $op      = $op_node->content();
 
-  return undef if ($op eq '++' || $op eq '--') && $self->_operand_is_arylen($kids->[0]);
-
   my $needs_lvalue = ($op eq '++' || $op eq '--');
   my $saved_lvalue = $self->lvalue_context;
   $self->lvalue_context(1) if $needs_lvalue;
   my $operand = $self->gen_node_form($kids->[0]);
   $self->lvalue_context($saved_lvalue);
+
+  # $#array++ / $#array-- : setter shape returning the OLD length — the
+  # form twin of the text emitter's operand-text arylen check, keyed on
+  # the generated form's head (see gen_prefix_op_form).
+  if (($op eq '++' || $op eq '--')
+      && ref($operand) eq 'ARRAY' && !ref($operand->[0])
+      && $operand->[0] eq 'p-array-last-index') {
+    my @arr = @$operand[1 .. $#$operand];
+    my $delta_op = ($op eq '++') ? '1+' : '1-';
+    return ['let', ['list', ['list', '_prev', ['p-array-last-index', @arr]]],
+            ['p-set-array-length', @arr, [$delta_op, '_prev']],
+            '_prev'];
+  }
 
   my $cl_op = ($op eq '++' || $op eq '--')
             ? "p-post$op"
