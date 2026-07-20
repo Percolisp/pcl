@@ -10,9 +10,11 @@ document without reading Lisp.
 **Companion:** `docs/generated-cl-ir-review.md` (what the output looks like,
 its friction points, and the improvement roadmap). This manual covers what
 the constructs *mean*.
-**Verified against:** cache generation v2-7, 2026-07-06. Each claim below
-was checked against the runtime source; section references name the
-defining function so you can re-verify.
+**Verified against:** full per-claim verification at cache generation
+v2-7 (2026-07-06); maintained incrementally since (each semantic
+emission/runtime change updates its section — standing rule), last
+section-level review at **v2-42, 2026-07-20 (s301)**. Section references
+name the defining function so you can re-verify against the runtime.
 
 ---
 
@@ -51,10 +53,19 @@ itself carries no host-specific semantics beyond them.
   :execute) …)` marks forms that Perl requires visible to `BEGIN` blocks
   earlier in the same file; a translator with no compile/load phase split
   simply executes them in order — but see §9 for `BEGIN` itself.
+- **The first line is the pipeline marker** — `;;; pcl: pipeline=v2
+  gen=v2-NN` — a comment stamping which pipeline and cache generation
+  emitted the file. Non-semantic like all comments, but it is the
+  version key tooling should read.
 - **File layout:** preamble (`in-package`, `@INC` setup) → per-package
   *sections* in source order, each: package preamble → declarations
-  (`p-declare-sub`, `defvar`) → definitions (`p-sub`, scheduled blocks) →
-  runtime (top-level statements). A `package` statement mid-file starts a
+  (`p-declare-sub`, `defvar`) → definitions → runtime (top-level
+  statements). Within the definitions stream, `p-sub` forms and
+  scheduled blocks (`p-BEGIN`/`p-END`/…) are **interleaved by source
+  position** (s300b, #55): a `BEGIN` form loads after exactly the subs
+  defined above it in source and before those below — this ordering is a
+  semantic guarantee (compile-time sub-existence introspection relies on
+  it), not a formatting choice. A `package` statement mid-file starts a
   new section; a reopened package gets only `(in-package …)` +
   `p-set-current-package`.
 
@@ -230,7 +241,7 @@ rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
 
 | symbol shape | family | meaning |
 |---|---|---|
-| `$x__file__N` | v2 file-cell promotion (W5/W10) | a file lexical that must be visible outside the `let`s — because a named sub captures it, because a **BEGIN/END scheduled block references it** (their `p-BEGIN` forms hoist to compile-phase position, s295c: `my $x; BEGIN { $x = 5 }` / END-cleanup idioms), or because it spans a `package` boundary — promoted to a `defvar`'d package-level box (the `our` shape: defvar + `p-scalar-=`, no `let`). The fresh name is the whole point: `defvar $x__file__0` cannot poison an unrelated `let $x` |
+| `$x__file__N` | v2 file-cell promotion (W5/W10) | a file lexical that must be visible outside the `let`s — because a named sub captures it, because a **BEGIN/END scheduled block references it** (their `p-BEGIN` forms live in the definitions stream, outside the runtime `let` chain — s295c, source-position interleaved since s300b: `my $x; BEGIN { $x = 5 }` / END-cleanup idioms), or because it spans a `package` boundary — promoted to a `defvar`'d package-level box (the `our` shape: defvar + `p-scalar-=`, no `let`). The fresh name is the whole point: `defvar $x__file__0` cannot poison an unrelated `let $x` |
 | `$Pkg::x__file__N` | v2 spanning refs (W10) | uses of the above from *later package segments* — package-qualified so their section's reader (sitting in its own package) reaches the declaring section's cell |
 | `$x__shadow__N` | v2 seam-shadow rename (W8.5) | a `my $x` *inside a block that lowers through the v1 seam* (`map { my $x = … }`, `do { my $x … }`) while an outer lexical `$x` is live. Unrenamed, the seam's defvar-based handling would write through the outer variable (the v1 bug); renamed, the inner block gets its own unique cell |
 | `$x__cond__N` | v2 poisoned-condition rename (W8.5) | `if (my $x = …)` / `for (my $x…)` where the *same bare name* is also used outside the construct as a package global. The construct's lexical takes the fresh name so the global keeps `$x` and gets its forward defvar |
@@ -633,10 +644,16 @@ dedicated `p-local-*` macros. Restore also invalidates the box caches.
 
 ### 7.4 Scheduled blocks
 
-`BEGIN`/`CHECK`/`INIT`/`END` compile to definitions-bucket forms that run
+`BEGIN`/`CHECK`/`INIT`/`END` compile to definitions-stream forms that run
 at their Perl-mandated points relative to the *file's* load: `BEGIN`
 bodies execute as soon as their form loads (before later statements),
-`END` blocks run at program exit in LIFO order.
+`END` blocks run at program exit in LIFO order. Since s300b (#55) the
+scheduled forms sit **at their source position among the `p-sub` defs**
+(see §1 file layout), so a `BEGIN` observes exactly the subs defined
+above it — `defined &f`/`->can` snapshots at compile time match Perl.
+In a **fork child**, `END` blocks inherited from the parent still run at
+the child's exit (as in Perl); test-harness plan-checking is pid-guarded
+separately and is not an IR concern.
 
 ## 8. Magic globals
 
@@ -814,7 +831,7 @@ function's docstring states its Perl contract. The families:
 | elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice` | reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value |
 | array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""` |
 | regex | `p-=~ p-!~` with `(p-regex "/pat/flags") (p-subst …) (p-tr …)` | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split` |
-| I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument |
+| I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup |
 | introspection | `p-ref p-bless p-caller p-can p-isa` | §7; `p-caller` returns package but file/line are stubs (divergence) |
 
 Anything not covered: read the `p-NAME` docstring in
