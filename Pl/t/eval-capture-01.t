@@ -62,6 +62,14 @@ sub magic_under   { return join(",", map { eval '$_ * 2' } (1,2,3)); }
 sub magic_args    { return eval 'join ",", @_'; }
 sub magic_cap     { "abc" =~ /(b)/; return eval '$1'; }
 sub eval_in_sort  { return eval 'join ",", sort { $a <=> $b } (3,1,2)'; }
+# s304 regression (eval.t #39): a sub DEFINED by the eval builds a closure over
+# its own lexical.  The enclosing file's forward-decl scan used to defvar $s9
+# from the string literal's innards, proclaiming it special and collapsing the
+# closure to a dynamic read (empty after return).
+sub sub_in_eval   { eval 'sub cgc9 { my $s9 = shift; return sub { $s9 } }'; return cgc9("good")->(); }
+# s304: a package global used ONLY inside eval strings must persist across
+# evals (p-eval-lex-lookup installs the autovivified container).
+sub cross_eval    { eval '$xg9 = 5'; return eval '$xg9 + 1'; }
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -93,6 +101,8 @@ print "magic_under=",   magic_under(),   "\n";
 print "magic_args=",    magic_args(1,2,3),"\n";
 print "magic_cap=",     magic_cap(),     "\n";
 print "eval_in_sort=",  eval_in_sort(),  "\n";
+print "sub_in_eval=",   sub_in_eval(),   "\n";
+print "cross_eval=",    cross_eval(),    "\n";
 PERL
 
 # (tag => expected) — each verified against real perl.
@@ -127,6 +137,8 @@ my %expect = (
     magic_args    => '1,2,3',
     magic_cap     => 'b',
     eval_in_sort  => '1,2,3',
+    sub_in_eval   => 'good',
+    cross_eval    => '6',
 );
 
 plan tests => scalar(keys %expect);

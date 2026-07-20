@@ -7084,11 +7084,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (cell (cdr cell))
       (t (let ((sym (intern (%pcl-invert-case name) *package*))
                (sigil (char name 0)))
-           (cond
-             ((boundp sym) (symbol-value sym))
-             ((char= sigil #\@) (make-array 0 :adjustable t :fill-pointer 0))
-             ((char= sigil #\%) (make-hash-table :test 'equal))
-             (t (make-p-box nil))))))))
+           (if (boundp sym)
+               (symbol-value sym)
+               ;; Autovivify the package global (Perl semantics), INSTALLING the
+               ;; fresh container so a later eval sees this eval's writes — the
+               ;; enclosing file has no defvar for a name only its eval strings
+               ;; use (the s304 string-innard fix removed the phantom one that
+               ;; accidentally provided persistence).
+               (setf (symbol-value sym)
+                     (cond
+                       ((char= sigil #\@) (make-array 0 :adjustable t :fill-pointer 0))
+                       ((char= sigil #\%) (make-hash-table :test 'equal))
+                       (t (make-p-box nil))))))))))
 
 (defun p-eval-thunk (free-names fn)
   "Apply FN (the lambda wrapping a string-eval body) to the containers for its
@@ -9686,7 +9693,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-44"
+(defparameter *pcl-cache-generation* "v2-45"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

@@ -34,6 +34,15 @@ use Pl::CLForm qw(raw raw_wrap);
 has filename => (is => 'ro', predicate => 1);
 has code     => (is => 'ro', predicate => 1);
 
+# E3 eval-mode (docs/v2-opus48-execution-plan.md §E3): set when transpiling a
+# string for runtime `eval "..."` (pl2cl --eval-pkg / --server).  Free
+# variables become p-eval-thunk lambda params instead of forward-decl defvars
+# (docs/eval-lexical-capture.md); eval_pkg seeds the package so __PACKAGE__
+# resolves to the call site's package.  Multi-segment eval strings (top-level
+# `package` statements) die → the per-eval v1 retry (kept until E4).
+has eval_mode => (is => 'ro', default => sub { 0 });
+has eval_pkg  => (is => 'ro', default => sub { undef });
+
 # Pre-pass result, keyed by package: { pkg => { perl sub name →
 # { cl_name, insensitive } } } (see ExprToCL2).  Bareword sub resolution is
 # package-scoped in Perl, so ExprToCL2/VarAnnotator only ever see the CURRENT
@@ -63,6 +72,11 @@ sub _build_fallback_parser {
     ($self->has_filename ? (filename => $self->filename) : ()),
     ($self->has_code     ? (code     => $self->code)     : ()),
     environment => $self->environment,
+    # E3: mirror v1's eval-mode error contract in the expression seam — e.g.
+    # assignment to a non-lvalue sub must DIE (failing the whole eval, the
+    # CMM lvalue-probe idiom) instead of degrading to a PARSE ERROR comment.
+    ($self->eval_mode         ? (eval_mode => 1)               : ()),
+    (defined $self->eval_pkg  ? (eval_pkg  => $self->eval_pkg) : ()),
   );
   # Minimal live state _parse_expression's helpers expect (mirrors parse()).
   $p->_sections([]);
@@ -73,7 +87,13 @@ sub _build_fallback_parser {
 }
 
 sub parse_file { my ($class, $fn, %opts) = @_; return $class->new(filename => $fn)->parse }
-sub parse_code { my ($class, $code, %opts) = @_; return $class->new(code => $code)->parse }
+sub parse_code {
+  my ($class, $code, %opts) = @_;
+  return $class->new(
+    code => $code,
+    map { $_ => $opts{$_} } grep { defined $opts{$_} } qw(eval_mode eval_pkg),
+  )->parse;
+}
 
 # Pre-pass: `goto LABEL` (plain-word label form) whose nearest sub-like
 # barrier — named sub body, anon `sub {}` block, or a `sort {}` comparator
@@ -382,7 +402,11 @@ sub parse {
     if @{ $doc->find(sub {
          $_[1]->isa('PPI::Token::Magic') && $_[1]->content eq '$#';
        }) || [] };
-  $self->environment->package_stack(['main']);
+  # E3 eval-mode: the segment package is the CALL SITE's package, so
+  # __PACKAGE__ (and bare sub/global resolution) inside the eval string
+  # matches the caller.
+  my $root_pkg = $self->eval_mode ? ($self->eval_pkg // 'main') : 'main';
+  $self->environment->package_stack([$root_pkg]);
   $self->environment->state_var_renames({});
   $self->{_referenced_pkgs} = {};
   # The forward-declaration exclusion set is PER SECTION (_seg_lex, reset in
@@ -406,7 +430,7 @@ sub parse {
   # rest of that already-read form, so the switch must happen between
   # top-level forms.  A `package` nested deeper than the positions handled
   # here dies in _lower_stmt (whole-file v1 fallback).
-  my @segments = ({ pkg => 'main', stmts => [], reopen => 0 });
+  my @segments = ({ pkg => $root_pkg, stmts => [], reopen => 0 });
   my $cur_pkg = 'main';
   my %opened  = (main => 1);   # packages whose full preamble was already emitted
   # T-A1 block extents: segments born from a flattened bare block carry
@@ -525,6 +549,35 @@ sub parse {
   # package-qualified $Pkg::x__file__N in later segments.  Must run BEFORE
   # _check_my_spanning (renamed names no longer span) and before the W5 pass
   # (which skips already-renamed names).
+  # E3: an eval string that switches package at top level would need the full
+  # multi-section assembly (head/body split across in-package switches) — the
+  # per-eval v1 retry owns that shape until it proves common.
+  die "Parser2 TODO: eval-mode multi-segment (top-level package statement)\n"
+    if $self->eval_mode && @segments > 1;
+  # E3: `eval '...; my $x = EXPR'` — the eval's VALUE is the assignment's
+  # value, but v2 lowers a trailing declaration as a let with an EMPTY body
+  # (value nil; at file top level the value is never observed, in eval mode
+  # it is).  v1 emits (box-set …) whose value is the assigned value → retry.
+  if ($self->eval_mode) {
+    my ($last) = grep { $_->significant && !$_->isa('PPI::Statement::Null') }
+                 reverse @{ $segments[0]{stmts} };
+    die "Parser2 TODO: eval-mode trailing my/our declaration (value-losing let)\n"
+      if $last && $last->isa('PPI::Statement::Variable');
+    # A lone bareword inside an ARRAY subscript is a sub/constant call in
+    # Perl — usually a `use constant` defined in the ENCLOSING file, which
+    # this transpile cannot see.  v1 emits the runtime call (pl-WORD); v2's
+    # native lowering strings it.  Route to the v1 retry (eval-constant-01.t
+    # #4/#5, the JSON::PP ->canonical shape).
+    for my $sub (@{ $doc->find('PPI::Structure::Subscript') || [] }) {
+      next if !($sub->start && $sub->start->content eq '[');
+      my @k = grep { $_->significant } $sub->children;
+      my @inner = (@k == 1 && $k[0]->isa('PPI::Statement'))
+                ? grep { $_->significant } $k[0]->children : @k;
+      die "Parser2 TODO: eval-mode bareword array subscript (out-of-frame constant)\n"
+        if @inner == 1 && $inner[0]->isa('PPI::Token::Word')
+        && $inner[0]->content =~ /^\w+$/;
+    }
+  }
   $self->_rename_spanning_lexicals(\@segments) if @segments > 1;
   $self->_check_my_spanning(\@segments) if @segments > 1;
 
@@ -764,6 +817,10 @@ sub parse {
     die "Parser2 TODO: promoted cell $miss never registered for eval capture\n";
   }
 
+  # E3 eval-mode: single anonymous segment, head/body split, p-eval-thunk
+  # wrap — no per-package section assembly.
+  return $self->_assemble_eval_mode($sections[0], $doc) if $self->eval_mode;
+
   # ---- Assemble the sections.
   my @body;
   for my $i (0 .. $#sections) {
@@ -823,13 +880,7 @@ sub parse {
     # sees exactly the subs defined above it and none below (sub-existence
     # introspection: chdir.t).  Index tie-break keeps the merge stable for
     # entries with equal positions.
-    my @tagged;
-    push @tagged, [$sec->{def_lines}[$_]   // 0, scalar(@tagged), $sec->{defs}[$_]]
-      for 0 .. $#{ $sec->{defs} };
-    push @tagged, [$sec->{sched_lines}[$_] // 0, scalar(@tagged), $sec->{sched}[$_]]
-      for 0 .. $#{ $sec->{sched} };
-    push @body, map { ($_->[2], '') }
-                sort { $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] } @tagged;
+    push @body, map { ($_, '') } $self->_interleaved_defs($sec);
     # Runtime current-package tracking (caller()/__PACKAGE__) in execution
     # order — after this section's definitions load, before its code runs.
     push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
@@ -2990,7 +3041,7 @@ sub _state_rewrite_routes {
       die "Parser2 TODO: state " . $sym->content . " rewrite ($why)\n";
     }
     (my $bare = $sym->content) =~ s/^\$//;
-    my $n    = $self->{_state_rename_counter}++;
+    my $n    = $self->_state_disambig . $self->{_state_rename_counter}++;
     my $cell = "\$${bare}__state__${n}";
     my $flag = "${cell}__init";
     $self->_rename_decl_within($root, $sym, $cell);
@@ -3103,7 +3154,8 @@ sub _rename_state_vars {
       ? $self->_shadow_rename_blocker($sub->block, $k[1])
       : $self->_state_container_blocker($sub->block, $k[1]);
     die "Parser2 TODO: state " . $k[1]->content . " in named sub ($why)\n" if $why;
-    my $new = $k[1]->content . '__state__' . $self->{_state_rename_counter}++;
+    my $new = $k[1]->content . '__state__' . $self->_state_disambig
+            . $self->{_state_rename_counter}++;
     $self->_rename_decl_within($sub->block, $k[1], $new);
     $self->{_state_renamed}{$new} = @k > 2 ? 'init' : 'plain';
     # Both symbols are defvar'd via _captured_decls at lowering time; the
@@ -3358,9 +3410,161 @@ sub _declared_names {
 # closures would capture the symbol, raw slots would break).  So: defvar
 # exactly the referenced sigil-vars that are neither let-bound anywhere in
 # the file nor runtime-owned.
+# E3: state cells minted while transpiling an EVAL STRING need a
+# disambiguating tag — the eval's counter restarts at 0, so a bare
+# `$s__state__0` could collide with the ENCLOSING file's cell of the same
+# name (whose __init flag is already set → the eval's initializer never
+# runs; state.t #148/149).  The tag is a hash of the eval source, so it is
+# deterministic (stable across the p-eval transpile cache) and unique per
+# distinct eval string.  Empty outside eval mode — file emissions unchanged.
+sub _state_disambig {
+  my $self = shift;
+  return '' if !$self->eval_mode;
+  return $self->{_state_eval_tag} //= do {
+    require Digest::MD5;
+    my $src = $self->has_code ? $self->code : '';
+    utf8::encode($src) if utf8::is_utf8($src);
+    'e' . substr(Digest::MD5::md5_hex($src), 0, 8) . '_';
+  };
+}
+
+# #55 interleave: merge a section's sub defs and BEGIN/END forms by SOURCE
+# POSITION — perl compiles subs and runs BEGIN blocks in source order, so a
+# BEGIN sees exactly the subs defined above it and none below (sub-existence
+# introspection: chdir.t).  Index tie-break keeps the merge stable for
+# entries with equal positions.
+sub _interleaved_defs {
+  my ($self, $sec) = @_;
+  my @tagged;
+  push @tagged, [$sec->{def_lines}[$_]   // 0, scalar(@tagged), $sec->{defs}[$_]]
+    for 0 .. $#{ $sec->{defs} };
+  push @tagged, [$sec->{sched_lines}[$_] // 0, scalar(@tagged), $sec->{sched}[$_]]
+    for 0 .. $#{ $sec->{sched} };
+  return map { $_->[2] }
+         sort { $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] } @tagged;
+}
+
+# E3 eval-mode assembly (docs/v2-opus48-execution-plan.md §E3): one anonymous
+# segment; HEAD = package pre-declares + declarations + $a/$b + the genuine
+# global forward-decls + captured decls; BODY = defs/sched interleave + run.
+# Free variables (AST scope scan of the source ∪ the text-scan candidates
+# _forward_global_decls would have defvar'd) become the p-eval-thunk lambda's
+# parameters — v1's exact wrapper shape (docs/eval-lexical-capture.md), so the
+# runtime binds them to the caller's live containers via p-eval-lex-lookup.
+sub _assemble_eval_mode {
+  my ($self, $sec, $doc) = @_;
+  my $fb = $self->fallback_parser;
+
+  # Free vars, AST-scan half: scope-aware walk of the source (descends into
+  # named subs — the modifier idiom's captures).  Reuses v1's engine.
+  my %free = %{ $fb->_eval_free_vars_from_ppi($doc) };
+
+  # Text-scan half: what _forward_global_decls would defvar.  In eval mode
+  # those names go to %free instead (the defvar would proclaim them special
+  # and defeat the lambda's lexical binding); cross-package + caret vars
+  # still get their defvars here.
+  my @fwd = $self->_forward_global_decls(
+    join("\n", @{ $sec->{captured} }, @{ $sec->{defs} },
+               @{ $sec->{sched} },    @{ $sec->{run} }),
+    $sec->{pkg}, $sec->{seg_lex}, \%free);
+
+  # Names the promotion machinery renamed to defvar'd cells are NOT free —
+  # they resolve through the capture alist / alias rule (ir-spec §9.1).
+  delete $free{$_} for keys %{ $self->{_file_lex_renamed} // {} };
+
+  # $a/$b: kept defvar'd (sort comparators need them special) but ALSO listed
+  # as params when referenced, so a caller's lexical `my $a`/`my $b` is
+  # captured; the param is then a dynamic rebinding (v1's rule).
+  for my $ab ('$a', '$b') {
+    $free{$ab} = 1
+      if @{ $doc->find(sub {
+             ref($_[1]) eq 'PPI::Token::Symbol' && $_[1]->content eq $ab;
+           }) || [] };
+  }
+
+  my @head;
+  # Pre-declare referenced/nested packages so qualified symbols are readable.
+  my %pre;
+  $pre{$_} = 1 for keys %{ $self->{_referenced_pkgs} };
+  $pre{ $_->namespace // 'main' } = 1
+    for @{ $doc->find('PPI::Statement::Package') || [] };
+  $pre{$_} = 1 for @{ $self->environment->get_undeclared_packages() };
+  delete @pre{qw(main pcl)};
+  push @head, map { "(pcl:p-defpackage " . $fb->_cl_pkg_designator($_) . ")" }
+              sort keys %pre;
+  push @head, @{ $sec->{decls} };
+  push @head, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))';
+  push @head, @fwd;
+  push @head, @{ $sec->{captured} };
+
+  my @body = ($self->_interleaved_defs($sec), @{ $sec->{run} });
+
+  my @out = ('(in-package :pcl)', '', grep { length } @head);
+  push @out, '' if @head;
+  my @names = sort keys %free;
+  if (@names) {
+    my $names_str = join(' ', map { "\"$_\"" } @names);
+    my $params    = join(' ', @names);
+    push @out, "(pcl:p-eval-thunk (list $names_str)",
+               " (lambda ($params)",
+               @body,
+               " ))";
+  } else {
+    push @out, @body;
+  }
+  return join("\n", @out);
+}
+
+# Blank the INNARDS of CL string literals and line comments in emitted text
+# (delimiters and newlines kept) so the forward-decl scans below cannot match
+# variable names inside DATA: an eval'd Perl source embedded as a string
+# literal would otherwise defvar its own lexicals in the enclosing file —
+# proclaiming them special and silently breaking closures the eval builds
+# (found by E3: eval.t #39) — and a sprintf "%x" format minted a phantom %x
+# (task #66).  Pipe symbols (|$;|, |${^MPE}|) pass through whole (they are
+# code, and a raw `;`/`"` inside one must not start a comment/string);
+# #\X char literals are skipped so #\" cannot toggle string state.
+sub _blank_string_innards {
+  my ($text) = @_;
+  my @c = split //, $text;
+  my ($in_str, $in_pipe) = (0, 0);
+  for (my $i = 0; $i < @c; $i++) {
+    my $ch = $c[$i];
+    if ($in_str) {
+      if ($ch eq '\\') {
+        $c[$i] = ' ';
+        if ($i + 1 < @c) { $c[$i+1] = ' ' if $c[$i+1] ne "\n"; $i++ }
+        next;
+      }
+      if ($ch eq '"') { $in_str = 0; next }
+      $c[$i] = ' ' if $ch ne "\n";
+      next;
+    }
+    if ($in_pipe) {
+      $in_pipe = 0 if $ch eq '|';
+      next;
+    }
+    if ($ch eq '"') { $in_str = 1; next }
+    if ($ch eq '|') { $in_pipe = 1; next }
+    if ($ch eq '#' && $i + 1 < @c && $c[$i+1] eq '\\') { $i += 2; next }
+    if ($ch eq ';') {
+      while ($i < @c && $c[$i] ne "\n") { $c[$i] = ' '; $i++ }
+      next;
+    }
+  }
+  return join '', @c;
+}
+
+# $free_out (E3 eval-mode only): when given, the plain undeclared sigil-vars
+# (%seen) are recorded there as p-eval-thunk capture candidates INSTEAD of
+# being defvar'd — a defvar would proclaim the name special and defeat the
+# thunk lambda's lexical binding (docs/eval-lexical-capture.md).  Cross-package
+# and caret vars still get their defvars (they are genuine globals, never
+# capturable lexicals).
 sub _forward_global_decls {
-  my ($self, $text, $pkg, $seg_lex) = @_;
+  my ($self, $text, $pkg, $seg_lex, $free_out) = @_;
   $pkg //= 'main';
+  $text = _blank_string_innards($text // '');
   # $a/$b are runtime-owned (the sort lowering defvars them); @a/@b are NOT —
   # nothing defines them, so excluding them left `\@a` before any assignment
   # unbound at load (postfixderef.t; v1's list never had them).
@@ -3413,7 +3617,11 @@ sub _forward_global_decls {
       $cross{"$pkg\::$var"} = 1;
     }
   }
-  return () unless %seen || %cross || %caret;
+  if ($free_out) {
+    $free_out->{$_} = 1 for keys %seen;
+    %seen = ();
+  }
+  return () if !(%seen || %cross || %caret);
   my @decls = (';; Forward declarations for undeclared package globals');
   for my $v (sort keys %seen) {
     push @decls, "(defvar $v " . _fresh_container($v) . ")";

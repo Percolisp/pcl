@@ -433,9 +433,12 @@ under both pipelines + eval.t parity.
 the text-scan candidates, `$a`/`$b` defvar'd + param when referenced);
 pl2cl admits `eval_mode`/`eval_pkg` into v2 and `--server` routes through
 `parse_with_fallback` (v2-first, per-eval v1 retry).  Retry gates: top-level
-`package` statement in the eval string (multi-segment assembly) and a
+`package` statement in the eval string (multi-segment assembly); a
 trailing `my`/`our` declaration (v2's empty-body let loses the statement
-value).  Two bugs the switch exposed, both fixed at the right layer:
+value); a lone bareword in an ARRAY subscript (out-of-frame `use constant`
+— v1 emits the runtime call).  The fallback_parser carries
+eval_mode/eval_pkg so v1's eval-mode error contract holds in the seam
+(`&sub = 1` dies → the eval fails, the CMM lvalue-probe idiom).  Two bugs the switch exposed, both fixed at the right layer:
 (1) the file-level forward-decl text scan matched names inside STRING
 LITERALS (the embedded eval source!) and defvar'd them — proclaiming the
 eval's lexicals special and collapsing its closures to dynamic reads

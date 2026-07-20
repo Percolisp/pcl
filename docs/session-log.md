@@ -51,7 +51,14 @@ Parser2 `eval_mode`/`eval_pkg`, `_assemble_eval_mode` (head/body split;
 v1's exact `p-eval-thunk` wrapper; free vars = AST scope scan ∪
 text-scan candidates; `$a`/`$b` defvar + param), pl2cl `--server` and
 `--eval-pkg` route v2-first with per-eval v1 retry (retry gates:
-top-level `package` in the string; trailing `my`/`our` declaration).
+top-level `package` in the string; trailing `my`/`our` declaration;
+lone bareword inside an ARRAY subscript — an out-of-frame `use
+constant` this transpile can't see, v1 emits the runtime call).  The
+fallback_parser is constructed with eval_mode/eval_pkg so v1's
+eval-mode ERROR CONTRACT holds in the expression seam (`&sub = 1`
+must DIE and fail the eval — the CMM lvalue-probe idiom,
+eval-named-sub-01.t #9 — instead of degrading to a PARSE ERROR
+comment).
 The switch exposed three latent bugs, all fixed at the right layer:
 1. **Forward-decl scan string-literal false positives** (task #66
    family): the text scan matched `$names` inside string literals —

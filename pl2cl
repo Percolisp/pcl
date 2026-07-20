@@ -57,8 +57,11 @@ sub parse_with_fallback {
     # (with the flag) below anyway.  So v2 may safely ignore it; blocking on
     # it would disable v2 for every runner (runpl/runt/sweep all pass it).
     delete $opts{lenient_ppi};
-    if (!%opts) {                       # plain parse only; special modes → v1
-      my $out = eval { Pl::Parser2->$method($args[0]) };
+    # E3: eval-string mode is v2-native (Parser2 eval_mode/eval_pkg); any
+    # other special mode still routes to v1.
+    my %v2_modes = (eval_mode => 1, eval_pkg => 1);
+    if (!grep { !$v2_modes{$_} } keys %opts) {
+      my $out = eval { Pl::Parser2->$method($args[0], %opts) };
       return pipeline_marker(v2 => $out) if defined $out;
       print STDERR "pl2cl: v2 fell back to v1: $@" if $ENV{PCL_V2_VERBOSE};
     }
@@ -214,8 +217,8 @@ sub _run_server {
     last unless defined $got && $got == $len;
 
     my $cl = eval {
-      my $output = pipeline_marker(v1 =>
-        Pl::Parser->parse_code($code, eval_mode => 1, eval_pkg => $pkg));
+      my $output = parse_with_fallback('parse_code', $code,
+                                       eval_mode => 1, eval_pkg => $pkg);
       my $preamble = build_eval_preamble($pkg);
       $output =~ s/\(in-package :pcl\)/$preamble/;
       $output
