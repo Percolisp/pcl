@@ -4833,7 +4833,7 @@ sub _lower_compound {
     # as a bare block — v1's detector + statement fallback handle it.
     return $self->_fallback_stmt($stmt)
       if Pl::Parser::_bare_block_is_anon_hash($k[0]);
-    return $self->_lower_bare_block($k[0], $label, $vi, $cont);
+    return $self->_lower_bare_block($k[0], $label, $vi, $cont, $tail_ctx);
   }
 
   my $kw = $k[0]->content;
@@ -5184,8 +5184,7 @@ sub _continue_keys {
 # no bookkeeping: _lower_block's nested lets sit inside the tagbody, and a
 # (go …) legally jumps out of them.
 sub _lower_bare_block {
-  my ($self, $block, $label, $vi, $cont) = @_;
-  my @body = $self->_lower_scope([$block->schildren], $vi);
+  my ($self, $block, $label, $vi, $cont, $tail_ctx) = @_;
   # `{ … } continue { … }` — the continue block (its own lexical scope) runs
   # after normal completion or `next`, is skipped by `last` (which exits the
   # enclosing block/LAST catch), and is not re-run by `redo` (which re-enters
@@ -5194,6 +5193,16 @@ sub _lower_bare_block {
   my @cont = defined $cont
     ? (['progn', $self->_lower_scope([$cont->schildren], $vi)])
     : ();
+  # Tail position (task #64): tagbody always yields NIL, which dropped the
+  # block's value — Perl returns the last statement's value from a loop-once
+  # bare block in sub-tail position.  Same regime as v1's text emitter:
+  # unlabeled, no continue → bracket the body in (setf RET (progn …)) inside
+  # the tagbody and read RET after the block.  `last` return-from's past the
+  # setf (RET stays nil), `redo` re-runs and re-assigns, `next` skips to
+  # :next — loop-once semantics unchanged.
+  my $value_tail = !defined $label && !@cont && defined $tail_ctx;
+  my @body = $self->_lower_scope([$block->schildren], $vi,
+                                 $value_tail ? $tail_ctx : undef);
   my $inner;
   if (defined $label) {
     $inner =
@@ -5206,6 +5215,15 @@ sub _lower_bare_block {
               '(go :redo)',
               ':next']],
           @cont]];
+  } elsif ($value_tail) {
+    $self->{_blk_ret_counter} //= 0;
+    my $ret = '--pcl-blk-ret--' . $self->{_blk_ret_counter}++;
+    $inner = ['let', ['list', ['list', $ret, 'nil']],
+               ['block', 'nil',
+                 ['tagbody', ':redo',
+                   ['setf', $ret, ['progn', @body]],
+                   ':next']],
+               $ret];
   } else {
     $inner = ['block', 'nil', ['tagbody', ':redo', @body, ':next'], @cont];
   }

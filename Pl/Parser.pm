@@ -3638,15 +3638,42 @@ sub _process_bare_block {
     # Unlabeled bare block: (block nil (tagbody :redo ... :next))
     # Supports redo, next, last without labels
     # Continue block runs after tagbody (after next/normal exit, not after last)
+    #
+    # Tail position (task #64): tagbody always yields NIL, which dropped the
+    # block's value — but Perl returns the last statement's value from a
+    # loop-once bare block that is the sub's tail (`sub f { …; { @x } }`).
+    # Capture it by bracketing the SAME statement emission in
+    # (setf RET (progn …)) inside the tagbody and reading RET after the
+    # block: `last` return-from's past the setf (RET stays nil), `redo`
+    # re-runs and re-assigns, `next` jumps to :next skipping the assignment
+    # — loop-once semantics unchanged.  Scoped to sub-tail without continue
+    # (a continue-block tail keeps the old void shape) so void-position
+    # emission is byte-identical.
+    my $blk_ret;
+    if ($self->environment->in_subroutine > 0
+        && $self->environment->tail_position
+        && !$continue_block) {
+      $blk_ret = '--pcl-blk-ret--' . ($self->{_tail_ret_counter}++);
+      $self->_emit("(let (($blk_ret nil))");
+      $self->indent_level($self->indent_level + 1);
+    }
     $self->_emit("(block nil");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(tagbody :redo");
     $self->indent_level($self->indent_level + 1);
+    if ($blk_ret) {
+      $self->_emit("(setf $blk_ret (progn");
+      $self->indent_level($self->indent_level + 1);
+    }
     $self->_block_depth($self->_block_depth + 1);
     $self->_process_block($block);
     $self->_block_depth($self->_block_depth - 1);
     $self->_cur_section($saved_section);
     $self->environment->package_stack($saved_pkg_stack);
+    if ($blk_ret) {
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit("))");
+    }
     $self->_emit(":next)");
     $self->indent_level($self->indent_level - 1);
     if ($continue_block) {
@@ -3658,6 +3685,11 @@ sub _process_bare_block {
     }
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");
+    if ($blk_ret) {
+      $self->_emit($blk_ret);
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")");
+    }
   }
 
   }); # end _with_declarations

@@ -66,6 +66,27 @@ builtin-named user sub); `Pl/t/moo-01.t` 13 → 15 tags (`trig_absent`,
   the call to `(p-aslice)` (internal helper), both pipelines, pre-existing;
   census lib/ shims (weaken et al.) before narrowing cl_name.
 
+**Third deliverable — task #64 FIXED (bare block as sub tail loses its
+value; gen v2-49).**  `sub f { my @x=(4,5,6); { @x } }` returned empty in
+both contexts on BOTH pipelines: the loop-once lowering
+`(block nil (tagbody :redo … :next))` discards the body value (tagbody
+yields NIL).  Fix in both emitters, same shape: in sub-tail position
+(unlabeled, no `continue`), bracket the UNCHANGED statement emission in
+`(let ((--pcl-blk-ret--N nil)) (block nil (tagbody :redo (setf RET
+(progn …)) :next)) RET)` — `last` return-from's past the setf (RET stays
+nil), `redo` re-runs and re-assigns, `next` jumps to :next skipping the
+assignment, so loop-once semantics are unchanged.  v1:
+`_process_compound_statement`'s unlabeled bare-block branch (tail known
+via `environment->tail_position`); v2: `_lower_compound` now threads
+$tail_ctx into `_lower_bare_block`, whose body lowers with the tail ctx
+(mirroring the tail-if setf/ret shape at _lower_compound §if).  Probe
+battery (plain / `last if` non-firing / firing `last` / `next` / `redo`
+counter) = perl on both pipelines.  corpus-diff: 4 files (index.t,
+loopctl.t, sub.t, substr.t), all the expected ret-var shape on tail bare
+blocks; sweep of the 4 vs fail-baseline: 7 fails, 0 new / 0 fixed.
+Guard: transpile-test-01b.t "bare block as sub tail keeps its value".
+Gen v2-48 → **v2-49**.
+
 **Second deliverable — task #84 FIXED (container span, interp-only uses;
 gen v2-48).**  The trig.pl silence (file-lexical `@history` pushed from Tw,
 interp-read from main) was NOT missing container spanning — W10-ext-3

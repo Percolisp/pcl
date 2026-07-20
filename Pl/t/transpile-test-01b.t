@@ -642,6 +642,23 @@ test_transpile("container file-lexical spans package boundary (interp-only use)"
   print "x:$x m:$m{k}\n";
 ');
 
+# ---- s305 (#64): a bare block as the sub's tail is a loop-once whose VALUE
+# ---- is the sub's return; last/next skip the value, redo re-runs it.
+
+test_transpile("bare block as sub tail keeps its value (loop-ctl shapes)", '
+  sub f { my @x=(4,5,6); { @x } }
+  my @l = f(); my $s = f();
+  print "list:[@l] scalar:$s\n";
+  sub g { my @x=(7,8); { last if $x[0] > 99; @x } }
+  my @m = g(); print "condlast:[@m]\n";
+  sub h { my @x=(7,8); { last; @x } }
+  my @n = h(); print "last:[@n]\n";
+  sub k { my @x=(1,2); { next; @x } }
+  my @o = k(); print "next:[@o]\n";
+  sub r { my $c = 0; { $c++; redo if $c < 3; "c$c" } }
+  print "redo:", r(), "\n";
+');
+
 # CORE::<builtin> (and a bare builtin name) inside a file that DEFINES a sub
 # of the same name must call the BUILTIN, not direct-call the user sub
 # (lib/Sub/Util.pm's `sub prototype { CORE::prototype($code) }` self-call).
