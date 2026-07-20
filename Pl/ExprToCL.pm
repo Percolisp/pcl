@@ -652,7 +652,8 @@ sub gen_leaf_form {
     return ['p-regex', qq{"$content"}];
   }
 
-  return undef;   # decline: not a converted leaf type
+  return undef;   # decline: not a converted leaf type (never fires on the
+                  # corpus — safety net, verified s304 census)
 }
 
 
@@ -1640,23 +1641,15 @@ sub gen_array_str_interp {
 
 # Function call: (p-FUNC args...)
 # ---- E2.1: form-producing funcall (the generic call path) ------------------
-# Names whose gen_funcall handling is still a special-cased TEXT branch —
-# the form handler declines them (before any side effect) so the text
-# emitter below runs unchanged.  Shrink this list as branches convert.
-my %FUNCALL_FORM_DECLINES = map { $_ => 1 } qw(
-  eval
-);
-
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
 # (word:is/ok/… = the seam frontier head) and non-special builtins —
 # including the prototype machinery ('$'-slot scalar imposition, \@/\%/\$
 # auto-boxing), the print-family $_ default, die/warn :loc, my/our
-# identity, the split/join wraps, and the *wantarray* context wraps.
-# Byte-for-byte the text emitter's shapes.  Declines (undef) every name in
-# %FUNCALL_FORM_DECLINES plus -bareword/SUPER:: heads; all decline
-# decisions come from the name + arity BEFORE argument generation (the
-# only pre-decline effect is gen_node on the name Word, which is pure for
-# Words — see gen_leaf — and idempotent package-reference set-adds).
+# identity, the split/join wraps, eval (block + string, with the
+# lexical-capture alist), and the *wantarray* context wraps.
+# Byte-for-byte the text emitter's shapes.  The only remaining decline is
+# a non-Word call head (never fires on the corpus — s304 census); the
+# decline decision precedes any side effect.
 sub gen_funcall_form {
   my $self    = shift;
   my $node    = shift;
@@ -1727,8 +1720,6 @@ sub gen_funcall_form {
     return ['pcl::%pcl-super-indirect', "\"$method\"", "\"$cur_pkg\"", 'nil'];
   }
 
-  return undef if $FUNCALL_FORM_DECLINES{$func_name};
-
   my $cl_func = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
 
   # ---- converted special branches (same order as the text emitter; a
@@ -1752,6 +1743,54 @@ sub gen_funcall_form {
     }
     if (defined $mod && $mod =~ /^\w+(?:::\w+)*$/) {
       return ['p-require', "\"$mod\""];
+    }
+  }
+
+  # eval BLOCK / eval STRING — mirrors the text emitter branch for branch.
+  # Block forms → (p-eval-block …) [inline_lambda bodies stay a raw atom
+  # until that conversion]; string/computed forms → (p-eval …) carrying the
+  # lexical-capture alist (docs/eval-lexical-capture.md).
+  if ($func_name eq 'eval' && @$kids == 2) {
+    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    if ($self->expr_o->is_internal_node_type($arg_node)) {
+      my $ctx = $self->expr_o->get_node_context($node_id);
+      my $wrap = sub {
+        my ($inner) = @_;
+        return $inner if $ctx == INHERIT_CTX;
+        return $self->_ctx_wrap_form($inner, $ctx);
+      };
+      if ($arg_node->{type} eq 'anon_sub') {
+        my $block_kids = $self->expr_o->get_node_children($kids->[1]);
+        # empty eval {}: text emits "(p-eval-block )" (trailing space) —
+        # normalize at E2.final with the other empty-shape quirks
+        return undef if !@$block_kids;
+        my @body_forms = map { $self->gen_node_form($_) } @$block_kids;
+        return $wrap->(['p-eval-block', @body_forms]);
+      }
+      elsif ($arg_node->{type} eq 'inline_lambda') {
+        my $body = $arg_node->{body_cl} // 'nil';
+        return $wrap->(['p-eval-block', Pl::CLForm::raw($body)]);
+      }
+      elsif ($arg_node->{type} eq 'func_ref') {
+        my $func_ref = $self->gen_node_form($kids->[1]);
+        return $wrap->(['p-eval-block', ['funcall', $func_ref]]);
+      }
+      else {
+        # Internal node that is NOT a block form = interpolated/computed
+        # STRING — still eval STRING, must carry the capture alist.
+        my $arg_form = $self->gen_node_form($kids->[1]);
+        my $alist    = $self->_eval_lexical_alist;
+        return $alist ? ['p-eval', $arg_form, $alist]
+                      : ['p-eval', $arg_form];
+      }
+    }
+    else {
+      # eval STRING (plain string literal) with the caller's in-scope
+      # lexicals as an alist (docs/eval-lexical-capture.md).
+      my $arg_form = $self->gen_node_form($kids->[1]);
+      my $alist    = $self->_eval_lexical_alist;
+      return $alist ? ['p-eval', $arg_form, $alist]
+                    : ['p-eval', $arg_form];
     }
   }
 
@@ -2564,7 +2603,9 @@ sub gen_funcall {
         # docs/eval-free-vars-plan.md / docs/eval-lexical-capture.md.
         my $arg_cl = $self->gen_node($kids->[1]);
         my $alist  = $self->_eval_lexical_alist;
-        return $alist ? "(p-eval $arg_cl $alist)" : "(p-eval $arg_cl)";
+        return $alist
+          ? "(p-eval $arg_cl " . Pl::CLForm::to_flat($alist) . ")"
+          : "(p-eval $arg_cl)";
       }
     }
     else {
@@ -2573,7 +2614,9 @@ sub gen_funcall {
       # in a lambda whose params are those vars).  See docs/eval-lexical-capture.md.
       my $arg_cl = $self->gen_node($kids->[1]);
       my $alist  = $self->_eval_lexical_alist;
-      return $alist ? "(p-eval $arg_cl $alist)" : "(p-eval $arg_cl)";
+      return $alist
+        ? "(p-eval $arg_cl " . Pl::CLForm::to_flat($alist) . ")"
+        : "(p-eval $arg_cl)";
     }
   }
 
@@ -3253,8 +3296,9 @@ sub _ctx_wrap_form {
 # Each in-scope lexical becomes (cons "$name" $name), mapping its Perl name to
 # its live CL container (box/array/hash).  The in-scope lexicals are the
 # parser's _let_bound_vars (the rolling set of `my`/let-bound names, saved and
-# restored around every closure).  Returns '' when there are none (top-level
-# eval), so codegen emits a plain (p-eval STRING).
+# restored around every closure).  Returns a CLForm (E2-converted; text
+# callers flatten it), or '' when there are none (top-level eval), so codegen
+# emits a plain (p-eval STRING).
 sub _eval_lexical_alist {
   my $self = shift;
   my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
@@ -3285,7 +3329,7 @@ sub _eval_lexical_alist {
   my (@pairs, %seen);
   for my $v (@vars) {
     my ($key) = $skey->($v);
-    push @pairs, "(cons \"$key\" $v)";
+    push @pairs, ['cons', "\"$key\"", $v];
     $seen{$key} = 1;
   }
   # Span-mangled file cells (v2's _rename_spanning_lexicals): the eval body
@@ -3304,10 +3348,12 @@ sub _eval_lexical_alist {
   my $span = $parser->{_eval_span_captures} // {};
   for my $key (sort keys %$span) {
     next if $seen{$key};
-    push @pairs, "(cons \"$key\" $span->{$key})";
+    push @pairs, ['cons', "\"$key\"", $span->{$key}];
   }
-  return '' unless @pairs;
-  return '(list ' . join(' ', @pairs) . ')';
+  return '' if !@pairs;
+  # NB: a 'list' HEAD is CLForm's bare-parens marker, so the literal CL
+  # (list …) call is spelled with 'list' as the first ELEMENT instead.
+  return ['list', 'list', @pairs];
 }
 
 
