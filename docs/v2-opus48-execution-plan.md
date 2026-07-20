@@ -358,10 +358,13 @@ playbook (see `docs/v2-transfer-plan.md` T-C(ii)):
   must show ZERO files (byte parity — flat print == old text), and
   `PCL_V1=1 tools/corpus-diff.pl` likewise (ExprToCL is shared; v1 must
   stay the parity oracle); (4) `tools/prove-core` green + `PCL_V1=1
-  tools/prove-core` failure set IDENTICAL to HEAD's known 7-test set
-  (transpile-test-02 #60/62/72, -04 #102/120, -04b #69, -05 #72 — v2-only
-  feature tests that legitimately fail through v1; s293 verified all 7
-  pre-exist at HEAD.  "100% green under PCL_V1" is a stale W9-era claim);
+  tools/prove-core` failure set IDENTICAL to HEAD's — the v1-legitimate
+  failures are the V2-ONLY FEATURE tests, and that set GROWS as features
+  ship (s293's "known 7" grew to 14 by s303: state family, capture
+  promotion, forward-goto-from-lambda, span renames, …).  Verify by
+  failure-NAME comparison against a HEAD run, or accept when every failing
+  name is a v2-only feature AND the PCL_V1 corpus byte-diff is zero.
+  "100% green under PCL_V1" is a stale W9-era claim;
   (5) no cache-gen bump needed while parity holds
   (emission unchanged); (6) once a type's text handler is deleted its form
   handler must NEVER decline.  A parity break that v1's text can't express
