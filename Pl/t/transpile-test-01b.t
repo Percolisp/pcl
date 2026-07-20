@@ -659,6 +659,28 @@ test_transpile("bare block as sub tail keeps its value (loop-ctl shapes)", '
   print "redo:", r(), "\n";
 ');
 
+# ---- s305 (#83): stash-visibility pair.  A BEGIN-time `*ali = \&real`
+# ---- makes a later BARE `ali` a sub call (compile-time knowledge); a plain
+# ---- runtime glob-assign leaves the bareword a string (also perl).  And a
+# ---- glob CODE-slot install marks the sub DEFINED for `defined &name`.
+
+test_transpile("BEGIN glob alias: bareword is a call; runtime assign stays string", '
+  sub real { my $n = shift; return "R" . (defined $n ? $n : "") }
+  BEGIN { *ali = \&real }
+  print ali(8), "!\n";
+  print ali . "!\n";
+  sub real2 { return "Q" }
+  *rt = \&real2;
+  print rt . "!\n";
+');
+
+test_transpile("glob CODE-slot install defines the sub for defined &name", '
+  no strict "refs";
+  *{"main::gift"} = sub { return "G" . (defined $_[0] ? $_[0] : "") };
+  print gift(8), "\n";
+  print defined &gift ? "def\n" : "undef\n";
+');
+
 # CORE::<builtin> (and a bare builtin name) inside a file that DEFINES a sub
 # of the same name must call the BUILTIN, not direct-call the user sub
 # (lib/Sub/Util.pm's `sub prototype { CORE::prototype($code) }` self-call).

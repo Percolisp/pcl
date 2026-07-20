@@ -11279,10 +11279,14 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((p-typeglob-p rhs)   (p-glob-copy pkg uname rhs))
       ((p-typeglob-p inner) (p-glob-copy pkg uname inner))
 
-      ;; *foo = \&sub or *foo = sub{} — CODE slot
+      ;; *foo = \&sub or *foo = sub{} — CODE slot.  A CODE-slot install
+      ;; DEFINES the sub: `defined &foo` must see it (p-sub-defined keys on
+      ;; *p-declared-subs* :defined, never fboundp — forward stubs are
+      ;; fbound too).  Task #83 (import-into-caller glob installs).
       ((functionp inner)
-       (setf (fdefinition (intern (%pcl-uname-to-sub uname) pkg))
-             inner))
+       (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
+         (setf (fdefinition sym) inner)
+         (setf (gethash sym *p-declared-subs*) :defined)))
 
       ;; *foo = \$scalar — SCALAR slot (inner is the p-box = the variable itself)
       ((p-box-p inner)
@@ -11309,8 +11313,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 
       ;; Fallback: try as CODE if rhs is directly a function
       ((functionp rhs)
-       (setf (fdefinition (intern (%pcl-uname-to-sub uname) pkg))
-             rhs)))))
+       (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
+         (setf (fdefinition sym) rhs)
+         (setf (gethash sym *p-declared-subs*) :defined))))))
 
 (defun p-glob-assign (pkg-str name-str rhs)
   "Assign RHS to the appropriate slot of typeglob *pkg::name (by name strings)."
@@ -11353,11 +11358,15 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Copy all slots from src-glob into dst (pkg, uname)."
   (let ((sp (p-typeglob-package src-glob))
         (sn (p-typeglob-name src-glob)))
-    ;; CODE
+    ;; CODE — the alias inherits the source's declared/defined status
+    ;; (default :defined for an untracked-but-fbound source), so
+    ;; `defined &dst` matches `defined &src` (task #83).
     (let ((src-sym (intern (%pcl-uname-to-sub sn) sp)))
       (when (fboundp src-sym)
-        (setf (fdefinition (intern (%pcl-uname-to-sub dst-uname) dst-pkg))
-              (fdefinition src-sym))))
+        (let ((dst-sym (intern (%pcl-uname-to-sub dst-uname) dst-pkg)))
+          (setf (fdefinition dst-sym) (fdefinition src-sym))
+          (setf (gethash dst-sym *p-declared-subs*)
+                (or (gethash src-sym *p-declared-subs*) :defined)))))
     ;; SCALAR
     (let ((src-sym (intern (concatenate 'string "$" sn) sp)))
       (when (boundp src-sym)

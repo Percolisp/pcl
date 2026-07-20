@@ -244,6 +244,26 @@ sub _premerge_glob_const_prototypes {
               && $k[0]->content =~ /^\*(?:\w+(?:::\w+)*::)?(\w+)$/);
     my $name = $1;
     next if !($k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '=');
+    # `*NAME = \&OTHER` inside BEGIN (task #83): the glob alias runs during
+    # compilation, so perl treats a later bare `NAME` as a sub CALL, not a
+    # string.  Register NAME with the default prototype-less signature (the
+    # same shape the sub pre-pass gives a plain `sub NAME`); the runtime
+    # glob-assign installs the function the call resolves to.  BEGIN-gated
+    # on purpose: a plain runtime `*NAME = \&OTHER` leaves later barewords
+    # as strings in perl too (no compile-time knowledge) — current behavior
+    # is already correct there.
+    if ($k[2]->isa('PPI::Token::Cast') && $k[2]->content eq '\\'
+        && $k[3]->isa('PPI::Token::Symbol') && $k[3]->content =~ /^&/) {
+      my $in_begin = 0;
+      for (my $p = $stmt->parent; $p; $p = $p->parent) {
+        if ($p->isa('PPI::Statement::Scheduled')
+            && ($p->type // '') eq 'BEGIN') { $in_begin = 1; last }
+      }
+      next unless $in_begin;
+      $self->environment->add_prototype($name,
+        { params => [], min_params => -1, is_proto => 0 });
+      next;
+    }
     next if !($k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'sub');
     next if !($k[3]->isa('PPI::Token::Prototype') && $k[3]->content eq '()');
     $self->environment->add_prototype($name, {

@@ -66,6 +66,30 @@ builtin-named user sub); `Pl/t/moo-01.t` 13 → 15 tags (`trig_absent`,
   the call to `(p-aslice)` (internal helper), both pipelines, pre-existing;
   census lib/ shims (weaken et al.) before narrowing cl_name.
 
+**Fourth deliverable — task #83 FIXED (stash-visibility pair, the last
+non-parked fuzzer residual cluster).**  Two independent gaps:
+1. **BEGIN glob alias** (`BEGIN { *ali = \&real }` then bare `ali`):
+   perl knows `ali` at compile time, PCL stringified the bareword.  Fix =
+   the premerge family's 4th member: `_premerge_glob_const_prototypes`
+   grows a `*NAME = \&OTHER` branch registering NAME with the default
+   prototype-less signature — **BEGIN-gated on purpose**: a plain runtime
+   glob-assign leaves later barewords as strings in perl too (verified),
+   and PCL already matches that.
+2. **`defined &name` after a glob CODE-slot install** (the
+   import-into-caller shape — the CALL itself already worked, narrower
+   than the fuzzer-era task text): `%p-glob-assign-slots`'s CODE branches
+   (+ `p-glob-copy`'s CODE section) fbind the symbol but never marked
+   `*p-declared-subs*` — and `p-sub-defined` keys on `:defined` there,
+   never fboundp (forward stubs are fbound).  All three install paths now
+   mark `:defined` (glob-copy inherits the source's status).
+Verification: corpus-diff identical across 111 files; fuzzer battery
+1053 → **1056/1060** (both #83 clusters cleared — EVERY remaining
+mismatch is now a documented decision: the parked `**` float-vs-bigint
+family ×3 + the not-supported.md `() = split` implicit-LHS-arity row ×1);
+full gate 117/4318 PASS; sub.t/local.t sweep = baseline (17 fails,
+0 new / 0 fixed); guards +2 in transpile-test-01b.t (BEGIN-alias call +
+runtime-assign-stays-string; symbolic CODE-slot install + `defined &`).
+
 **Third deliverable — task #64 FIXED (bare block as sub tail loses its
 value; gen v2-49).**  `sub f { my @x=(4,5,6); { @x } }` returned empty in
 both contexts on BOTH pipelines: the loop-once lowering
