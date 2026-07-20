@@ -13,7 +13,8 @@ the constructs *mean*.
 **Verified against:** full per-claim verification at cache generation
 v2-7 (2026-07-06); maintained incrementally since (each semantic
 emission/runtime change updates its section — standing rule), last
-section-level review at **v2-43, 2026-07-20 (s302: §2.2 raw compound-assign
+section-level review at **v2-44, 2026-07-20 (s303: §2.2 freeze-licensed raw
+slots — B-regime strict coercers); previously v2-43 (s302: §2.2 raw compound-assign
 `-raw` twins, task #62 step 1)**. Section references
 name the defining function so you can re-verify against the runtime.
 
@@ -126,6 +127,18 @@ wraps in `prog1` to return the old value.
 **Invariant: a raw slot never holds a box or a reference** — only host
 numbers and strings. Ops always accept either form (they unbox
 internally), so reads look identical.
+
+A raw slot may also be **freeze-licensed** (the B-regime, s303, task #62):
+when every USE of the variable is provably numeric (resp. string/boolean)
+but a write's value shape is unproven (`my $n = $h{k}`, `$x = $y`, a bare
+sub call), the slot stays raw and every native write routes through
+`(%pcl-to-number-strict V "$n")` / `(%pcl-to-string-strict V "$n")` — an
+eager coercion that preserves the invariant (the stored value is always a
+plain host number/string), applies box-set's aggregate scalar-context
+collapse, and **dies loudly** if an overload-capable blessed ref or a
+genuine dualvar arrives (never freeze what per-use code must observe).
+Semantics and the full licensing/disqualifier tables:
+`docs/raw-numeric-verdict.md`.
 
 `box-set` semantics worth knowing: assigning a whole array to a scalar box
 stores its element **count** (Perl array-in-scalar-context); assigning a

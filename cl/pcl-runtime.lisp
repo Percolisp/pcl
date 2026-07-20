@@ -2143,15 +2143,28 @@
            kind name))
   v)
 
+(defun %pcl-scalar-collapse (v)
+  "Scalar-assignment context for a RAW aggregate value, mirroring box-set's
+   rules: an unwrapped adjustable vector (an @array rvalue / aassign result,
+   e.g. `my $n = @a = split ...`) becomes its element count; an unwrapped
+   hash-table its user key count.  Boxes (array/hash REFS) and every other
+   value pass through untouched."
+  (cond
+    ((and (vectorp v) (not (stringp v)) (adjustable-array-p v)) (length v))
+    ((hash-table-p v) (%p-hash-user-count v))
+    (t v)))
+
 (defun %pcl-to-number-strict (v name)
   "Eager numeric freeze for a raw-numeric slot write (the compile-time
-   equivalent of the user writing `+ 0`); strict per %pcl-raw-coerce-check."
-  (to-number (%pcl-raw-coerce-check v name "numeric")))
+   equivalent of the user writing `+ 0`); strict per %pcl-raw-coerce-check.
+   Applies box-set's scalar-assignment aggregate collapse first, so the
+   wrapper stays equivalent to the boxed write it replaces."
+  (to-number (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "numeric")))
 
 (defun %pcl-to-string-strict (v name)
   "Eager string freeze for a raw-string slot write (`. \"\"`); strict per
-   %pcl-raw-coerce-check."
-  (to-string (%pcl-raw-coerce-check v name "string")))
+   %pcl-raw-coerce-check.  Aggregate collapse as in %pcl-to-number-strict."
+  (to-string (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "string")))
 
 (defun p-length (val)
   "Perl length function - returns undef for undef input.
@@ -9637,7 +9650,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-43"
+(defparameter *pcl-cache-generation* "v2-44"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

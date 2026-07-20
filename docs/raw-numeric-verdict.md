@@ -1,8 +1,43 @@
 # The `raw-numeric` and `raw-string` verdicts — use-proven eager coercion
 
 Design note (s286, discussed with user).  Status: **step 1 + A-num SHIPPED
-(s302, task #62); the freeze verdicts below (scan-licensed regime) are still
-unimplemented.**  Companion to the box/raw split in `docs/ir-spec.md` §2.2.
+(s302); B-num/B-str freeze verdicts SHIPPED (s303, task #62) — implementation
+notes below.**  Companion to the box/raw split in `docs/ir-spec.md` §2.2.
+
+## Implementation notes (s303, as shipped)
+
+- **Use classifier**: `Pl/VarAnnotator.pm` threads a use-class (`num`/`str`/
+  `bool`/opaque-default) through `_tw_walk`; whitelist tables `%USE_NUM_OP`,
+  `%USE_STR_OP`, `%USE_FN` (builtin arg positions), `%USE_BOOL_THROUGH_OP`
+  (&&/|| pass bool through ONLY in bool context).  Reads hidden inside
+  interpolatable quote-like LEAF tokens (regex patterns, backticks, heredocs)
+  are scanned textually → `str`, except deref forms (`"$q->[0]"`) → opaque.
+  Conditions (`if`/`while`/modifiers) walk with a `bool` root.
+- **Verdict**: fires only when the var's ONLY blocking reasons are
+  `write-shape`/`write-incdec-root`, it is not a sub param, and no
+  parse-fallback text mentions it.  `PCL_NO_RAW_VERDICT=1` disables;
+  `PCL_B_DEBUG=1` dumps per-var verdict/uses.  A `use overload` in the FILE
+  disables both verdicts (`Parser2::{_overload_in_file}`); cross-file
+  overloaded arrivals are the strict coercers' job.
+- **Emission**: `Parser2::_wrap_freeze` wraps EVERY native write (decl init
+  + root `$x = RHS;`) uniformly — a proven-arith RHS just pays one typecheck
+  at the rare write.  Compound/incdec writes go through the existing `-raw`
+  twins (a str-family compound like `.=` cannot reach a B-num slot: the
+  compound's own read of `$x` classifies as that family's use and blocks the
+  other verdict).
+- **Runtime**: `%pcl-to-number-strict`/`%pcl-to-string-strict` first apply
+  `%pcl-scalar-collapse` — box-set's scalar-assignment aggregate rule (raw
+  adjustable vector → count, raw hash-table → key count) — so
+  `my $n = @a = split ...` keeps its count semantics under the freeze.
+- **Additional type-sensitive exclusions found while shipping** (beyond the
+  s302 corrections): unary minus (`-"abc"` is string negation → opaque) and
+  `//` (a DEFINED-ness test — frozen undef is a defined `0`/`""` → opaque).
+- Guards: `Pl/t/raw-verdict-01.t` (verdict matrix + runtime fidelity incl.
+  "0.0"-truthiness, ref stable-ID round-trip, aggregate collapse); regime
+  pins updated in `parser2-01.t`/`parser2-02.t`.
+- Measured (bench shape from §Problem, 2M-iteration cfor with `$ENV{N}`
+  bound): boxed 0.128s → frozen 0.027s (4.7×); perl 0.088s — PCL moves from
+  ~1.5× slower than perl to ~3× faster on this shape.
 
 ## Shipped so far (s302) — the provenance-pure extensions
 

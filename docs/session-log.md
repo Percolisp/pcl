@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 303 (2026-07-20, Fable) — suite shadow-t/ fixture (95→433 runnable) + task #62 B-regimes: scan-licensed raw-numeric/raw-string freeze verdicts (gen v2-44).
+
+Two deliverables:
+
+1. **run-perl-suite shadow-t/ fixture (6f72bf7).**  `require './test.pl'` /
+   `chdir 't'` files now RUN: a shadow t/ (real tree symlinked, PCL stubs
+   test.pl/charset_tools/loc_tools overlaid) is built per invocation;
+   transpile + SBCL run with CWD = shadow (cwd-first prototype resolution +
+   cwd-relative p-require-file both hit the stub), perl baseline stays in
+   the real t/.  TAP layer baked into the saved core.  Also landed the
+   crashed s302b session's expected-divergence registry (XDIFF/STALE) and
+   .suitelog.  Stub grew no-op `skip_all_*` guards + `warnings_like`.
+   Snapshot: **433 runnable (was 95): 42 OK / 52 XDIFF / 31 NOTAP /
+   7 TIMEOUT / 301 DIFF** — the task #25 triage surface; no regressions
+   among previously-OK files.
+
+2. **Task #62 B-regimes SHIPPED — the scan-licensed half of
+   `docs/raw-numeric-verdict.md` (see its s303 implementation notes).**
+   VarAnnotator gains a use-classifier (whitelisted num/str/bool classes
+   threaded through `_tw_walk`; default opaque; quote-innard textual scan
+   for regex/backtick/heredoc reads; bool roots for conditions+modifiers).
+   A var whose only blocking reasons are write-shape/write-incdec-root and
+   whose uses all license one family goes RAW; Parser2 wraps every native
+   write in `%pcl-to-number-strict`/`%pcl-to-string-strict` (they die on
+   overload-capable refs + genuine dualvars; now also apply box-set's
+   aggregate scalar-context collapse — caught by split-01.t:
+   `my $n = @a = split` printed ARRAY(0x1) before the fix).  `use overload`
+   in-file disables; `PCL_NO_RAW_VERDICT=1` hatch; `PCL_B_DEBUG=1` dump.
+   Extra type-sensitive exclusions found: unary minus, `//`.  Regime pins
+   updated (parser2-01/02); new guard file `Pl/t/raw-verdict-01.t` (16).
+   Bench (cfor 2M, `$ENV{N}` bound): boxed 0.128s → frozen 0.027s (4.7×),
+   perl 0.088s — the shape flips from 1.5× slower to ~3× faster than perl.
+   Corpus-diff: 15 files change emission, all B-freeze shapes; sweep of all
+   15 vs fail-baseline: zero NEW failures.  Gate 116 files / 4276 ALL PASS.
+   **Perl-trap note for future annotator work: `grep BLOCK LIST` inside a
+   `&&` chain or before `? :` slurps the rest of the expression into its
+   LIST — hoist greps into named booleans (bit twice this session).**
+   REMAINING #62: S1 fill-pointer append rides on raw-string family purity
+   (write_fam all-'str' on an unboxable/B-str slot).
+
+---
+
 ## Session 302 (2026-07-20, Fable) — task #62 steps 1+A-num: compound assigns & root incdec on raw slots — intloop+= 3.4x->2.0x, carve-out hang fixed (gen v2-43).
 
 Target-A tier 1 (task #62), the provenance-pure half, in two commits:

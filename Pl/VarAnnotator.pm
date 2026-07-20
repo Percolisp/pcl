@@ -112,6 +112,39 @@ my %RAW_COMPOUND = (
 
 sub raw_compound_macro { $RAW_COMPOUND{ $_[0] } }
 
+# --- B-regime use-classification tables (docs/raw-numeric-verdict.md, the
+# scan-licensed freeze verdicts, task #62).  WHITELISTS: a read of a plain
+# $scalar is classified by the operator/position that consumes it; any read
+# not proven by a table is 'opaque' and disqualifies both verdicts.
+# TYPE-SENSITIVE ops are deliberately absent — freezing would flip a runtime
+# dispatch: `& | ^` (string bitwise when both operands are strings), range
+# `..` endpoints (magical string range), unary minus ("-abc" string
+# negation), `//` (a DEFINED-ness test — frozen undef becomes defined 0/"").
+my %USE_NUM_OP = map { $_ => 1 } qw(+ - * / % ** == != < <= > >= <=> << >>);
+my %USE_STR_OP = map { $_ => 1 } qw(. eq ne lt gt le ge cmp);
+# Truthiness pass-through: operands of these are truth-TESTED when the whole
+# expression sits in boolean context; outside bool context their value
+# escapes to the consumer → opaque.
+my %USE_BOOL_THROUGH_OP = map { $_ => 1 } qw(&& || and or);
+
+# Builtin funcall arg licensing: name => 'str-all' (every non-filehandle arg
+# is a stringify use: print/say/join) or [per-position class] (undef slots =
+# opaque).  Args of every OTHER callee are opaque — the value escapes.
+# substr appears rvalue-3-arg here; the mutating 4-arg form is already
+# vetoed via mutating-builtin-arg.  sprintf/printf license only the FORMAT
+# (arg values depend on the format string, which this pass does not read).
+my %USE_FN = (
+  print   => 'str-all',  say => 'str-all',  join => 'str-all',
+  length  => ['str'],    lc  => ['str'],    uc   => ['str'],
+  lcfirst => ['str'],    ucfirst => ['str'],
+  ord     => ['str'],    hex => ['str'],    oct  => ['str'],
+  index   => ['str', 'str', 'num'],
+  rindex  => ['str', 'str', 'num'],
+  substr  => ['str', 'num', 'num'],
+  split   => [undef, 'str', 'num'],
+  printf  => ['str'],    sprintf => ['str'],
+);
+
 my %MUTATING_FN   = map { $_ => 1 } qw(chomp chop undef read sysread recv);
 my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
                                        socketpair accept);
@@ -360,6 +393,7 @@ sub _analyze_tree {
     cond           => 0,    # under an if/unless statement modifier
     has_eval       => 0,
     nested_sub     => {},
+    use_class      => {},   # $x => {num|str|bool|opaque => count} (B-regimes)
   };
   for my $p (@{ $extra_params // [] }) {
     $ctx->{decl_count}{$p} = 1;
@@ -377,6 +411,8 @@ sub _analyze_tree {
   _tw_stmts($ctx, \@stmts);
 
   my %vi;
+  my $no_b = $ENV{PCL_NO_RAW_VERDICT}
+          || ($host && $host->{_overload_in_file});
   for my $name (keys %{ $ctx->{decl_count} }) {
     my @reasons;
     push @reasons, 'multi-decl'     if $ctx->{decl_count}{$name} != 1;
@@ -394,10 +430,59 @@ sub _analyze_tree {
     push @reasons, sort keys %{ $ctx->{ev}{$name} // {} };
     push @reasons, map { "fallback:$_" }
       map { _text_gate_tags($name, $_, 1) } @{ $ctx->{fallback_texts} };
+
+    # B-regime (scan-licensed freeze verdicts, docs/raw-numeric-verdict.md):
+    # when the ONLY thing keeping $name boxed is an unproven write shape
+    # (write-shape, or its incdec corollary), and every USE licenses one
+    # family, go raw anyway — Parser2 wraps each native write in the strict
+    # freeze coercer (%pcl-to-number-strict / %pcl-to-string-strict), which
+    # dies loudly on overload-capable refs and genuine dualvars.  Boolean
+    # context licenses raw-string only (perl truthiness is defined on the
+    # STRING form: "0.0"/"00"/" " are true but numify to false).  Sub params
+    # are excluded (their initial value is caller-bound, not a wrappable
+    # write).  A name inside any parse-failure fallback text has uses this
+    # walk never classified → no freeze.
+    # (a grep inside a && chain would slurp the rest of the chain into its
+    # LIST argument — hoist each grep into its own boolean)
+    my $only_liftable
+      = !grep { $_ ne 'write-shape' && $_ ne 'write-incdec-root' } @reasons;
+    my $in_fallback = grep { /\Q$name\E(?!\w)/ } @{ $ctx->{fallback_texts} };
+    if (!$no_b && @reasons && $only_liftable
+        && !$ctx->{write_fam}{$name}{caller} && !$in_fallback) {
+      my $uc = $ctx->{use_class}{$name};
+      my @cls = $uc ? keys %$uc : ();
+      my $coerce;
+      if (@cls) {
+        if    (!grep { $_ ne 'num' } @cls)                 { $coerce = 'num' }
+        elsif (!grep { $_ ne 'str' && $_ ne 'bool' } @cls) { $coerce = 'str' }
+      }
+      if ($coerce) {
+        $vi{$name} = { unboxable => 1, coerce => $coerce,
+                       ($ENV{PCL_W12_DIFF} ? (reasons => ["b-$coerce"]) : ()) };
+        next;
+      }
+    }
     $vi{$name} = { unboxable => (@reasons ? 0 : 1),
                    ($ENV{PCL_W12_DIFF} ? (reasons => \@reasons) : ()) };
   }
+  if ($ENV{PCL_B_DEBUG}) {
+    for my $name (sort keys %vi) {
+      warn sprintf "B-DEBUG %s unboxable=%d coerce=%s reasons=[%s] uses={%s}\n",
+        $name, $vi{$name}{unboxable}, $vi{$name}{coerce} // '-',
+        join(',', @{ $vi{$name}{reasons} // [] }),
+        join(',', map { "$_=$ctx->{use_class}{$name}{$_}" }
+                  sort keys %{ $ctx->{use_class}{$name} // {} });
+    }
+  }
   return \%vi;
+}
+
+# Record one classified USE of a plain $scalar (B-regimes).  undef class =
+# 'opaque' (the default for every read the whitelist tables do not prove).
+sub _use {
+  my ($ctx, $name, $class) = @_;
+  return unless defined $name && $name =~ /^\$\w+$/;
+  $ctx->{use_class}{$name}{$class // 'opaque'}++;
 }
 
 sub _ev {
@@ -499,15 +584,17 @@ sub _tw_region_facts {
 
 # ---------------------------------------------------------- statement walk
 
+# $uctx: use-class for the statements' root expressions ('bool' inside
+# if/while/unless conditions) — consumed by the B-regime read classifier.
 sub _tw_stmts {
-  my ($ctx, $stmts) = @_;
+  my ($ctx, $stmts, $uctx) = @_;
   for my $s (grep { ref $_ && $_->significant } @$stmts) {
-    _tw_stmt($ctx, $s);
+    _tw_stmt($ctx, $s, $uctx);
   }
 }
 
 sub _tw_stmt {
-  my ($ctx, $s) = @_;
+  my ($ctx, $s, $uctx) = @_;
   return unless $s->isa('PPI::Statement');
   my $r = ref $s;
 
@@ -565,8 +652,12 @@ sub _tw_stmt {
       }
     }
     for my $k (@k) {
-      if ($k->isa('PPI::Structure::Condition')
-          || $k->isa('PPI::Structure::For')
+      if ($k->isa('PPI::Structure::Condition')) {
+        # if/while/unless/until condition: the root expression is truth-
+        # tested — 'bool' use class (licenses raw-string, blocks raw-numeric)
+        _tw_stmts($ctx, [$k->schildren], 'bool');
+      }
+      elsif ($k->isa('PPI::Structure::For')
           || $k->isa('PPI::Structure::List')
           || $k->isa('PPI::Structure::Block')) {
         _tw_stmts($ctx, [$k->schildren]);
@@ -590,7 +681,7 @@ sub _tw_stmt {
     # Statement::Expression appears inside conditions/lists — those lower via
     # _lower_expr (seam for any write), not the native statement-root path.
     my $native_root = $r ne 'PPI::Statement::Expression';
-    _tw_stmt_expr($ctx, [$s->schildren], $native_root);
+    _tw_stmt_expr($ctx, [$s->schildren], $native_root, $uctx);
     return;
   }
 
@@ -609,7 +700,7 @@ sub _semi {
 }
 
 sub _tw_stmt_expr {
-  my ($ctx, $parts, $native_root) = @_;
+  my ($ctx, $parts, $native_root, $uctx) = @_;
   my @parts = grep { ref $_ && $_->significant && !_semi($_) } @$parts;
   return unless @parts;
 
@@ -618,16 +709,16 @@ sub _tw_stmt_expr {
   # while/until/for modifiers lower whole-statement via v1 → same treatment.
   my ($expr, $mod, $cond) = Pl::Parser2::_split_modifier(\@parts);
   if ($mod) {
-    _tw_stmt_expr($ctx, $cond, 0);
+    _tw_stmt_expr($ctx, $cond, 0, 'bool');
     local $ctx->{cond} = 1;
     _tw_expr_parse($ctx, $expr, 0);
     return;
   }
-  _tw_expr_parse($ctx, \@parts, $native_root);
+  _tw_expr_parse($ctx, \@parts, $native_root, $uctx);
 }
 
 sub _tw_expr_parse {
-  my ($ctx, $parts, $native_root) = @_;
+  my ($ctx, $parts, $native_root, $uctx) = @_;
   my @parts = grep { ref $_ && $_->significant } @$parts;
   return unless @parts;
 
@@ -681,7 +772,7 @@ sub _tw_expr_parse {
       elsif ($d->{type} eq 'local') { _ev($ctx, $var, 'local') }
       # our/state: package/persistent cells — never raw-let candidates here
     }
-    _tw_walk($ctx, $expr_o, $root, $native_root && !$ctx->{seam});
+    _tw_walk($ctx, $expr_o, $root, $native_root && !$ctx->{seam}, $uctx);
     1;
   };
 
@@ -723,8 +814,14 @@ sub _tw_top_blocks {
 
 # ------------------------------------------------------------- tree walk
 
+# $uctx (B-regimes): the use class this subtree's VALUE is consumed under —
+# 'num' / 'str' / 'bool' / undef (= opaque, the conservative default).  It
+# reaches plain-$scalar Symbol leaves via _use; every consuming node sets its
+# operands' classes from the whitelist tables (its own incoming $uctx only
+# passes through value-transparent wrappers: parens/tree_val, unary +,
+# ternary branches, and &&/||-in-bool).
 sub _tw_walk {
-  my ($ctx, $xo, $id, $root_native) = @_;
+  my ($ctx, $xo, $id, $root_native, $uctx) = @_;
   my $node = $xo->get_a_node($id);
   my $kids = $xo->get_node_children($id) || [];
 
@@ -748,7 +845,7 @@ sub _tw_walk {
                  :                        ($kids->[1] // ());
         _tw_mark($ctx, $xo, $_, $mark) for @args;
       }
-      _tw_walk($ctx, $xo, $_, 0) for @$kids[1 .. $#$kids];
+      _tw_walk_funcall_args($ctx, $xo, $fname, $kids);
       return;
     }
     if ($t eq '=~') {
@@ -770,21 +867,61 @@ sub _tw_walk {
           # separately, NOT as a boxing event; the verdict allows it only
           # when every other write to $x is NUMERIC-valued (then magical
           # string increment is unreachable and the twin matches perl).
+          # For B-num the wrapped writes guarantee a numeric slot, so the
+          # same twin applies — recorded as a 'num' use (which also blocks
+          # B-str: ++ on a frozen string cannot magically increment).
           $ctx->{incdec_root}{$ex->content}++;
-        } else {
-          _tw_mark($ctx, $xo, $kids->[$ex_i], 'write-incdec');
+          _use($ctx, $ex->content, 'num');
+          return;  # the incdec IS the bare symbol's use — nothing to walk
         }
-      } elsif ($opc eq '\\') {
+        _tw_mark($ctx, $xo, $kids->[$ex_i], 'write-incdec');
+        # fall through: the operand subtree (`++($x = 5)`, `++$a[$i]`) can
+        # hold embedded writes/uses that still need the generic walk
+        _tw_walk($ctx, $xo, $kids->[$ex_i], 0);
+        return;
+      }
+      if ($opc eq '\\') {
         # the WHOLE operand subtree: covers \$x and \substr($x,…)/\vec/\pos
         _tw_mark($ctx, $xo, $kids->[$ex_i], 'ref-taken');
       }
-      _tw_walk($ctx, $xo, $kids->[$ex_i], 0) if @$kids > $ex_i;
+      # Operand use class: `!`/`not` truth-test → bool; unary `+` is value-
+      # transparent → pass through; unary `-` is TYPE-SENSITIVE in perl
+      # (string negation: -"abc" eq "-abc") → opaque, like everything else.
+      my $child_uctx = ($opc eq '!' || $opc eq 'not') ? 'bool'
+                     : $opc eq '+'                    ? $uctx
+                     :                                  undef;
+      _tw_walk($ctx, $xo, $kids->[$ex_i], 0, $child_uctx) if @$kids > $ex_i;
       return;
     }
-    # tree_val, progn, ternary, h_acc/a_acc, slices, hash_init/arr_init,
-    # methodcall, string_concat, anon_sub, inline_lambda (list args only —
-    # body is opaque body_cl, covered by the seam block walk), readline,
-    # glob, backtick, filehandle, func_ref, ref_funcall, …: recurse.
+    if ($t eq 'string_concat') {
+      # interpolation stringifies each part → 'str' use of a part's value
+      _tw_walk($ctx, $xo, $_, 0, 'str') for @$kids;
+      return;
+    }
+    if ($t eq 'ternary' && @$kids == 3) {
+      _tw_walk($ctx, $xo, $kids->[0], 0, 'bool');
+      _tw_walk($ctx, $xo, $_, 0, $uctx) for @$kids[1, 2];   # value pass-through
+      return;
+    }
+    if ($t eq 'h_acc' || $t eq 'a_acc') {
+      # element READ: the key/index position classifies the key var ($h{$q}
+      # → str, $a[$q] → num) regardless of where the element's value flows.
+      # The base walk stays opaque: a $-Symbol base is either a deref-chain
+      # root (must disqualify) or the '$a'-content token of an @a element
+      # access (over-conservative pollution of a same-named scalar — safe).
+      _tw_walk($ctx, $xo, $kids->[0], 0) if @$kids;
+      my $key_uctx = $t eq 'h_acc' ? 'str' : 'num';
+      _tw_walk($ctx, $xo, $_, 0, $key_uctx) for @$kids[1 .. $#$kids];
+      return;
+    }
+    if ($t eq 'tree_val' && @$kids == 1) {           # parens: value-transparent
+      _tw_walk($ctx, $xo, $kids->[0], 0, $uctx);
+      return;
+    }
+    # progn, slices, hash_init/arr_init, methodcall, anon_sub, inline_lambda
+    # (list args only — body is opaque body_cl, covered by the seam block
+    # walk), readline, glob, backtick, filehandle, func_ref, ref_funcall, …:
+    # recurse with opaque use class (their operands' values escape).
     # root-nativeness never propagates through a wrapper: Parser2's native
     # setf path requires the bare `$x = RHS` token shape at statement root.
     _tw_walk($ctx, $xo, $_, 0) for @$kids;
@@ -851,10 +988,27 @@ sub _tw_walk {
         && $l->content =~ /^\$\w+$/;
       if ($raw_ok) {
         $ctx->{write_fam}{$l->content}{ $NUM_COMPOUND{$op} ? 'num' : 'str' }++;
+        # The compound also READS the old value — classify the LHS use by
+        # the op's coercion family.  The bitwise trio (&= |= ^=, and the
+        # .-suffixed string forms) is TYPE-SENSITIVE (& | ^ dispatch on
+        # both operands' types) → opaque, blocks both B-verdicts.
+        _use($ctx, $l->content,
+             $op =~ /^[&|^]/     ? undef
+           : $NUM_COMPOUND{$op}  ? 'num'
+           :                       'str');
       } else {
         _tw_mark($ctx, $xo, $kids->[0], 'write-compound');
+        _tw_walk($ctx, $xo, $kids->[0], 0);
       }
-      _tw_walk($ctx, $xo, $_, 0) for @$kids;
+      # RHS operand class follows the op's coercion: += … <<= → num;
+      # .= → str; x= repeat COUNT → num; bitwise/||=/&&=///= → opaque.
+      my $ru = $op =~ /^[&|^]/    ? undef
+             : $NUM_COMPOUND{$op} ? 'num'
+             : $op eq '.='        ? 'str'
+             : $op eq 'x='        ? 'num'
+             :                      undef;
+      _tw_walk($ctx, $xo, $kids->[1], 0, $ru) if @$kids > 1;
+      _tw_walk($ctx, $xo, $_, 0) for @$kids[2 .. $#$kids];   # arity safety
       return;
     }
     if ($op eq '=~' || $op eq '!~') {
@@ -862,17 +1016,85 @@ sub _tw_walk {
       _tw_walk($ctx, $xo, $_, 0) for @$kids;
       return;
     }
-    _tw_walk($ctx, $xo, $_, 0) for @$kids;
+    # Generic operator: classify operands from the whitelist tables.
+    # `x` splits (string/list LHS, numeric repeat count RHS); &&/||/and/or
+    # pass 'bool' through ONLY in bool context (outside it their operand
+    # value escapes to the consumer).  Everything else — `..` endpoints,
+    # `& | ^`, `//` (a defined-test), `,` — stays opaque.
+    if ($op eq 'x' && @$kids == 2) {
+      _tw_walk($ctx, $xo, $kids->[0], 0, 'str');
+      _tw_walk($ctx, $xo, $kids->[1], 0, 'num');
+      return;
+    }
+    my $child_uctx = ($USE_NUM_OP{$op} && @$kids >= 2) ? 'num'
+                   : $USE_STR_OP{$op}                  ? 'str'
+                   : ($USE_BOOL_THROUGH_OP{$op}
+                      && ($uctx // '') eq 'bool')      ? 'bool'
+                   :                                     undef;
+    _tw_walk($ctx, $xo, $_, 0, $child_uctx) for @$kids;
     return;
   }
 
-  # Leaf tokens are reads — except a substitution with /e, whose replacement
-  # is CODE the tree cannot see: apply the text gates to its source.
+  # Leaf tokens are reads.  A plain $scalar records its consumer's use class
+  # (B-regimes; undef = opaque).  Interpolatable quote-likes hide reads the
+  # tree has no Symbol node for (regex patterns, backticks, heredocs) —
+  # scanned textually.  A substitution with /e has CODE in the replacement
+  # the tree cannot see: apply the text gates to its source.
+  if ($r eq 'PPI::Token::Symbol' && !@$kids && $node->content =~ /^\$\w+$/) {
+    _use($ctx, $node->content, $uctx);
+    return;
+  }
   if ($r eq 'PPI::Token::Regexp::Substitute') {
     my %m = $node->get_modifiers;
     push @{ $ctx->{fallback_texts} }, $node->content if $m{e} || $m{ee};
   }
+  if (ref($node)
+      && ($node->isa('PPI::Token::Regexp')
+          || $node->isa('PPI::Token::Quote::Double')
+          || $node->isa('PPI::Token::Quote::Interpolate')
+          || $node->isa('PPI::Token::QuoteLike::Backtick')
+          || $node->isa('PPI::Token::HereDoc'))) {
+    _tw_scan_quote_leaf($ctx, $node);
+  }
   _tw_walk($ctx, $xo, $_, 0) for @$kids;
+}
+
+# Reads hidden inside an interpolatable quote-like LEAF token: interpolation
+# is a stringify use ('str') — except a deref form ("$q->[0]", "$q->{k}"):
+# there the ELEMENT is interpolated and $q's own use is a dereference →
+# opaque.  "$q[0]"/"$q{k}" (element of @q/%q) over-fires on the same-named
+# SCALAR as opaque — over-conservative, safe.  Escaped \$q also over-fires
+# as a str use — same direction.  ${name} spelled with braces is caught.
+sub _tw_scan_quote_leaf {
+  my ($ctx, $node) = @_;
+  my $c = $node->content;
+  $c .= join '', $node->heredoc if $node->isa('PPI::Token::HereDoc');
+  while ($c =~ /\$\{?(\w+)\}?((?:->)?[\[\{])?/g) {
+    _use($ctx, '$' . $1, $2 ? undef : 'str');
+  }
+}
+
+# Classified walk of funcall ARG subtrees (B-regimes): builtins in %USE_FN
+# get their per-position class; args of every other callee — including KNOWN
+# user subs — are opaque (the value escapes into the callee).  'filehandle'
+# nodes (print $fh …) never consume an arg position and their innards are
+# opaque (a handle-carrying scalar must stay boxed).
+sub _tw_walk_funcall_args {
+  my ($ctx, $xo, $fname, $kids) = @_;
+  my $spec = $USE_FN{$fname};
+  my $argi = 0;
+  for my $kid (@$kids[1 .. $#$kids]) {
+    my $n = $xo->get_a_node($kid);
+    if ($xo->is_internal_node_type($n) && ($n->{type} // '') eq 'filehandle') {
+      _tw_walk($ctx, $xo, $kid, 0);
+      next;
+    }
+    my $class = !$spec     ? undef
+              : !ref $spec ? 'str'          # 'str-all'
+              :              $spec->[$argi];
+    _tw_walk($ctx, $xo, $kid, 0, $class);
+    $argi++;
+  }
 }
 
 # Mark every $scalar Symbol in the subtree with a boxing event.

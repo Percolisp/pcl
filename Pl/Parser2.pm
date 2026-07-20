@@ -275,6 +275,14 @@ sub parse {
   # dropping the modulo → PARSE ERROR).  A bare PPI::Document->new skipped it.
   my $doc = $self->fallback_parser->_ppi_parse($src) or die "Parser2: PPI parse failed";
 
+  # B-regime flag (docs/raw-numeric-verdict.md §flag): a `use overload` in
+  # THIS file means blessed values with per-use conversion handlers can flow
+  # into scalars, so the scan-licensed freeze verdicts (raw-numeric/-string)
+  # are disabled file-wide.  Overloaded objects arriving from OTHER files
+  # (modules, string eval) are caught at runtime by the strict write
+  # coercers — the designed backstop, loud die instead of silent corruption.
+  $self->{_overload_in_file} = 1 if $src =~ /\buse\s+overload\b/;
+
   # Typed lexicals (`my Dog $spot;`, `my Foo $f = …;`): PPI keeps the class
   # name as a bare Word token between the declarator and the sigil symbol.  It
   # only informs field access in the (removed) pseudo-hashes era; runtime-wise
@@ -3862,6 +3870,7 @@ sub _lower_block {
       # box; a false cond leaves it undef) — never the unboxable raw-slot path.
       if (!$imod && $vi->{$name} && $vi->{$name}{unboxable}) {
         my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
+        $initform = _wrap_freeze($vi->{$name}, $name, $initform);
         return (@declmod_eval,
                 ['let', ['list', ['list', $name, $initform]],
                  $self->_lower_block(\@rest, $vi, $tail_ctx)]);
@@ -4393,7 +4402,8 @@ sub _lower_stmt {
     my $name = $expr->[0]->content;
     my $rhs = [@$expr[2 .. $#$expr]];
     if ($vi->{$name} && $vi->{$name}{unboxable}) {
-      return ['setf', $name, $self->_lower_expr($rhs, $stmt)];
+      return ['setf', $name,
+              _wrap_freeze($vi->{$name}, $name, $self->_lower_expr($rhs, $stmt))];
     }
     if ($self->fallback_parser->{_let_bound_vars}{$name}) {
       return ['p-my-=', $name, $self->_lower_expr($rhs, $stmt)];
@@ -4691,7 +4701,9 @@ sub _lower_compound {
         [(grep { defined } $init_s, $cond_s, $step_s), $block->schildren],
         undef, $self->_cur_sub_info, $self);
       if ($vi2->{$name} && $vi2->{$name}{unboxable}) {
-        $vi = { %$vi, $name => { unboxable => 1 } };
+        # adopt the WHOLE entry: a B-verdict (coerce => num/str) must keep
+        # its strict-wrap marker or the writes would store unfrozen values
+        $vi = { %$vi, $name => $vi2->{$name} };
       }
     }
     my $cond = $cond_s
@@ -5107,6 +5119,20 @@ sub _expr_scalar_rooted {
 
 sub _strip_semi {
   return grep { !($_->isa('PPI::Token::Structure') && $_->content eq ';') } @_;
+}
+
+# B-regime write freeze (docs/raw-numeric-verdict.md): a raw slot licensed by
+# the USE-proof (coerce => 'num'/'str') stores every native write through the
+# STRICT eager coercer — %pcl-to-number-strict / %pcl-to-string-strict die
+# loudly on overload-capable refs and genuine dualvars instead of freezing
+# them.  Uniform on every root write (a proven-arith RHS passes the check for
+# one cheap typecheck at the rare write; uses stay unconditional raw reads).
+# Plain unboxable entries (no coerce) pass through untouched.
+sub _wrap_freeze {
+  my ($vi_entry, $name, $form) = @_;
+  my $c = $vi_entry->{coerce} or return $form;
+  return [$c eq 'num' ? '%pcl-to-number-strict' : '%pcl-to-string-strict',
+          $form, "\"$name\""];
 }
 
 # Split "EXPR if COND" style trailing statement modifiers at the top level.

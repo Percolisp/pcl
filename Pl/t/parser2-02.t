@@ -118,10 +118,17 @@ like($ea, qr/\(setf \(p-gethash %h "x"\) 1\)/, 'W11: hash element write = bare s
 like($ea, qr/\(setf \(p-aref \@a 3\) 2\)/, 'W11: array element write = bare setf (no boundp arm)');
 unlike($ea, qr/\(p-setf \(p-gethash/, 'W11: no p-setf macro on let-bound hash writes');
 
-# A BARE element read as a my-init stays boxed: the element value can itself
-# be a reference box (class-5: a raw slot must never receive a box).
+# A BARE element read as a my-init: the element value can itself be a
+# reference box, and a raw slot must never receive a box (class-5) — so the
+# B-str freeze (all uses stringify) stores its STRING through the strict
+# coercer instead.  With an opaque use the variable still boxes.
 my $eb = Pl::Parser2->parse_code(q{my %h; $h{k} = 5; my $v = $h{k}; print $v;});
-like($eb, qr/\(\$v \(make-p-box nil\)\)/, 'W11: bare element-read init stays boxed');
+like($eb, qr/\(\$v \(%pcl-to-string-strict \(p-gethash %h "k"\) "\$v"\)\)/,
+     'W11/B-str: element-read init freezes raw when every use stringifies');
+my $eb2 = Pl::Parser2->parse_code(
+  q{my %h; $h{k} = 5; my $v = $h{k}; my $w = $v; print $v;});
+like($eb2, qr/\(\$v \(make-p-box nil\)\)/,
+     'W11: element-read init stays boxed once an opaque use exists');
 
 # A non-let-bound (package) container falls back — v1 owns the boundp/
 # auto-declare arm.

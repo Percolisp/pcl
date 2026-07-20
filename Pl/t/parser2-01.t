@@ -40,7 +40,12 @@ my $void_wraps = () = $cl =~ /\(let \(\(\*wantarray\* :void\)\)/g;
 is($void_wraps, 1, 'exactly one :void bind: the hoisted sub-body regime');
 like($cl, qr/\(let \(\(\*wantarray\* :void\)\)\s*\n?\s*\(let \(\(\$a/,
      'the :void regime wraps the body once, directly above the first decl');
-like($cl, qr/\(p-my-= \$a \$b\)/, 'boxed var copy is plain p-my-= (no wrap, no p-scalar-=)');
+# B-num (task #62 scan-licensed freeze): $a's only uses are numeric ($a + $b),
+# so the bare copy `$a = $b;` goes raw through the strict numeric freeze; $b's
+# `return $b` is an opaque use, so ITS bare copy stays a boxed p-my-=.
+like($cl, qr/\(setf \$a \(%pcl-to-number-strict \$b "\$a"\)\)/,
+     'all-numeric-use var: bare copy freezes raw (B-num)');
+like($cl, qr/\(p-my-= \$b \$c\)/, 'opaque-use var copy is plain p-my-= (no wrap, no p-scalar-=)');
 unlike($cl, qr/p-scalar-=/, 'no special-proclaiming p-scalar-= anywhere');
 
 # Foreach list is list-context: a range, not a flip-flop.  (s286: a sole
@@ -85,10 +90,17 @@ my $fca = Pl::Parser2->parse_code(
 like($fca, qr/\(let \(\(\$x \(p-\+ \(pl-add 2 3\) 1\)\)\)/,
      'funcall under arith op: raw slot, direct native call');
 
-# A BARE known-sub call must NOT unbox (could return a box).
+# A BARE known-sub call could return a box — but $x's only use is string
+# interpolation, so B-str freezes the call's value at the write (strict:
+# dies on overload-capable refs instead of freezing them).
 my $fcb = Pl::Parser2->parse_code(
   'sub give { my ($a) = @_; return $a; } my $x = give(2); print "$x\n";');
-like($fcb, qr/\(\$x \(make-p-box nil\)\)/, 'bare funcall RHS stays boxed');
+like($fcb, qr/\(\$x \(%pcl-to-string-strict \(pl-give 2\) "\$x"\)\)/,
+     'bare funcall RHS with all-string uses freezes raw (B-str)');
+# With an opaque use added (bare return value escapes), the box stays.
+my $fcb2 = Pl::Parser2->parse_code(
+  'sub give { my ($a) = @_; return $a; } my $x = give(2); my $y = $x; print "$x\n";');
+like($fcb2, qr/\(\$x \(make-p-box nil\)\)/, 'bare funcall RHS with an opaque use stays boxed');
 
 # elsif chains lower to nested p-if.
 my $eif = Pl::Parser2->parse_code(
