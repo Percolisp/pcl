@@ -514,7 +514,7 @@ Import the highest-signal ones the same way.
 ```bash
 T=/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t
 perl tools/run-perl-suite.pl base/rs.t            # one file: perl-vs-PCL TAP + crash sig
-perl tools/run-perl-suite.pl --dir comp           # all self-contained files in a dir
+perl tools/run-perl-suite.pl --dir comp           # all runnable files in a dir
 perl tools/run-perl-suite.pl --all                # every default dir, files NOT in the
                                                   # sweep corpus (task #25's companion sweep)
 ```
@@ -527,12 +527,42 @@ core built per invocation (prove-core pattern, ~1.2s/file → ~0.003s), and
 a corpus file from another dir).  `--include-copied` overrides; `--tsv FILE`
 writes a per-file snapshot (`docs/perl-suite-run.tsv` = the s302 run).
 
-**s302 `--all` snapshot (95 runnable / 528 scanned): 12 OK, 82 DIFF, 1 NOTAP.**
-Scan coverage: op 82-in-corpus + 138 need-harness (only 1 extra runnable —
-op is well covered by the sweep); mro 45 runnable (4 OK, rest = the known
-C3-only/`next::method` gap, `docs/mro-plan.md`); re 21 runnable (crashes:
-regex-engine slack + `\p{}` uniprops gap, `docs/unicode-property-regex-plan.md`);
-comp 16, cmd 5, base 3, opbasic 2, run 2.  **Fully harness-dependent (need the
-`require './test.pl'` fixture route before they can run at all): class 10/10,
-uni 30/30, io 43/44, run 24/26, re 59/80, op 138/221.**  Notable movement vs
-the 2026-06-23 rows: `base/rs.t` 6/35 → 26/15.
+**Failure log + not-supported marking (s302b).**  Every DIFF/TIMEOUT file
+writes a per-test log to `.suitelog/<rel>.fails.tsv` (perl TAP joined to PCL
+TAP on test number: `rel, num, perl-verb, pcl-verb, desc`) — the triage input.
+Divergences *explained by* `docs/not-supported.md` are marked in
+**`docs/perl-suite-expected.tsv`** (`rel<TAB>reason`, reason cites the §):
+those files become status **XDIFF** — they still run and print, but don't fail
+the exit code — and if one starts matching perl the row is flagged **STALE**
+and fails the run (skip-registry philosophy: an expectation can never hide a
+fixed feature).  Unexplained crashes must NOT be marked — they stay triage
+targets.  Seeded s302b: 41 `mro/*` (§mro), 10 `re/uniprops*` (§Unicode
+`\p{}`), `cmd/for.t` (§Internals::*).
+
+**Harness fixture — the shadow t/ (s303).**  The `require './test.pl'` /
+`chdir 't'` idiom no longer skips a file.  The runner builds a **shadow t/**
+in its temp dir: every top-level entry of the real tree symlinked in, then
+PCL's transpilable stubs (`perl-tests/t/test.pl`, `charset_tools.pl`,
+`loc_tools.pl`) overlaid.  Transpile and SBCL run with CWD = shadow, so
+`./test.pl` resolves to the stub at transpile time (cwd-first resolution in
+`_extract_file_prototypes` learns the `is ($$@)` prototypes) and at runtime
+(`p-require-file` is cwd-relative), while every other relative path (fixture
+data, `./op/...`) reaches the real tree through the symlinks.  The perl
+baseline runs in the REAL t/ against perl's own `test.pl` — authoritative
+TAP.  `cl/pcl-test.lisp` (plan/is/ok/skip/...) is compiled into the saved
+core, mirroring the sweep's `--load`.  Only BEGIN-time `@INC` fiddlers are
+still skipped (they pull build-tree modules from `../lib`).  This obsoleted
+the s302b `q(./test.pl)` wrinkle: ALL test.pl requires now resolve to the
+stub, including t/mro's `q()` spelling.
+
+**s303 `--all` snapshot (433 runnable / 528 scanned): 42 OK, 52 XDIFF,
+31 NOTAP (threads/taint/dump — perl itself produces no TAP), 7 TIMEOUT (the
+2167-test `re/regexp*` family + `io/openpid.t`), 301 DIFF.**  Coverage vs
+s302: 95 → 433 runnable; the fixture unlocked class 10, uni 30, io 43,
+re 80, run 25, op 137, mro 73 (now stub-run; 41 pre-seeded XDIFF rows for
+the C3-only/`next::method` gap, `docs/mro-plan.md`).  All 12 previously-OK
+files still OK.  Stub additions while landing: no-op `skip_all_if_miniperl`
+/ `skip_all_without_perlio` / `skip_all_without_config` /
+`skip_all_without_dynamic_extension` + `warnings_like` (they unblocked 41
+files that aborted on undef-fn).  The 301 DIFFs are the honest triage
+surface for task #25 — `.suitelog/*.fails.tsv` has the per-test rows.

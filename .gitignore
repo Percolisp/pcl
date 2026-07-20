@@ -4,3 +4,4 @@
 
 # Nested git worktree created by background agents (has its own .git)
 .claude/worktrees/
+.suitelog/

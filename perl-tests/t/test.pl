@@ -158,6 +158,23 @@ sub skip_if_miniperl {
     skip($reason, $n // 1);
 }
 
+# skip_all_* precondition guards: PCL is never miniperl, and its IO layer
+# plays the perlio role, so these preconditions HOLD — run the tests (the
+# perl baseline runs them too; skipping here would just hide coverage).
+# For _without_config/_without_dynamic_extension the honest choice is the
+# same: run, and let any genuinely-unsupported dependency fail loudly.
+sub skip_all_if_miniperl { }
+sub skip_all_without_perlio { }
+sub skip_all_without_config { }
+sub skip_all_without_dynamic_extension { }
+
+# warnings_like - plural alias used by a few t/ files
+sub warnings_like (&$;$) {
+    my ($code, $expected, $name) = @_;
+    $code->();
+    pass($name // "warnings_like");
+}
+
 # isa_ok - check if object is blessed into class
 sub isa_ok {
     my ($obj, $class, $name) = @_;

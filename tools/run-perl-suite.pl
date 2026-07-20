@@ -10,7 +10,7 @@
 #
 # Usage:
 #   tools/run-perl-suite.pl base/rs.t comp/our.t   # specific files (rel to t/)
-#   tools/run-perl-suite.pl --dir comp             # all SELF-CONTAINED files in t/<dir>
+#   tools/run-perl-suite.pl --dir comp             # all runnable files in t/<dir>
 #   tools/run-perl-suite.pl --all                  # every default dir, NOT-copied files only
 #   tools/run-perl-suite.pl                        # == --all
 #
@@ -25,14 +25,44 @@
 #   --no-core          skip the saved-core fast path (source-load the runtime)
 #   --tsv FILE         also write one TSV row per file (rel, P ok/notok,
 #                      C ok/notok, status, signature) for diffing runs
+#   --faillog DIR      per-test failure log dir (default .suitelog, cleared
+#                      each run): for every DIFF/TIMEOUT file, one TSV row per
+#                      diverging TAP test — num, perl-verb, pcl-verb, desc —
+#                      by joining the two TAP streams on test number.  A PCL
+#                      run that produced NO TAP writes one summary row.
+#
+# Expected divergences — marking not-supported dependencies:
+#   docs/perl-suite-expected.tsv maps `rel<TAB>reason` (reason should cite the
+#   docs/not-supported.md section, and the plan doc when one exists).  A
+#   divergent file with a row becomes status XDIFF — still runs, still prints
+#   its row + reason, but does not fail the exit code.  If an expected file
+#   comes back OK the row is STALE (flagged AND fails the run) so a fixed
+#   feature can never hide behind an old expectation — same philosophy as the
+#   sweep's skip-registry (docs/test-skip-registry.md).  Crashing files may be
+#   marked only when the crash itself is the documented gap; everything
+#   UNEXPLAINED stays a fix/triage target.
 #
 # Speed: like tools/prove-core, a FRESH SBCL core with the runtime compiled in
 # is built once per invocation (never stale, removed on exit); each test then
 # starts from the core (~0.003s) instead of recompiling the runtime (~1.2s).
 #
-# "Self-contained" = does not `require './test.pl'`, `chdir`, or fiddle @INC in
-# BEGIN — those need the perl build tree's harness and won't transpile cleanly.
-# Dir scans report how many files each filter dropped, so coverage is visible.
+# Harness fixture (the shadow t/): tests using the classic idiom
+# `chdir 't' if -d 't'; require './test.pl'` are RUN, not skipped.  A shadow
+# copy of the t/ tree is built in the temp dir — every top-level entry of the
+# real t/ symlinked in, then PCL's transpilable stubs (perl-tests/t/test.pl,
+# charset_tools.pl, loc_tools.pl) overlaid on top.  Transpile and SBCL both
+# run with CWD = shadow, so `require './test.pl'` resolves to the stub at
+# transpile time (cwd-first resolution in _extract_file_prototypes learns the
+# `is ($$@)` prototypes) and at runtime (p-require-file is cwd-relative),
+# while every OTHER relative path (fixture data files, ./op/..., ./harness)
+# still reaches the real tree through the symlinks.  The perl baseline runs
+# in the REAL t/ against perl's own test.pl — authoritative TAP.  The TAP
+# layer (cl/pcl-test.lisp: plan/is/ok/skip/...) is compiled into the saved
+# core, mirroring the sweep's `--load` of it.
+#
+# Still skipped as need-harness: files that fiddle @INC in BEGIN — they pull
+# build-tree modules from ../lib that PCL cannot load.  Dir scans report how
+# many files each filter dropped, so coverage is visible.
 #
 # Output columns: P:perl_ok/notok  C:pcl_ok/notok  STATUS  [crash-signature]
 # STATUS: OK (counts match) | DIFF | TRANSPILE | TIMEOUT | NOTAP (perl itself
@@ -49,6 +79,7 @@ use POSIX qw(:sys_wait_h _exit);
 my $root    = abs_path(dirname(abs_path($0)) . "/..");
 my $pl2cl   = "$root/pl2cl";
 my $runtime = "$root/cl/pcl-runtime.lisp";
+my $testlib = "$root/cl/pcl-test.lisp";
 
 # Dirs worth sweeping.  Excluded on purpose: porting (perl-repo hygiene),
 # win32, bigmem (huge memory), perf/benchmark (timing), test_pl (tests the
@@ -59,6 +90,8 @@ my $tdir = "/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t";
 my ($all, $include_copied, $no_core, $tsv_file);
 my $jobs = 8;
 my $timeout = 90;
+my $faillog = "$root/.suitelog";
+my $expected_tsv = "$root/docs/perl-suite-expected.tsv";
 my (@dirs, @files);
 while (@ARGV) {
   my $a = shift @ARGV;
@@ -70,7 +103,21 @@ while (@ARGV) {
   elsif ($a eq '--timeout')        { $timeout = shift @ARGV }
   elsif ($a eq '--no-core')        { $no_core = 1 }
   elsif ($a eq '--tsv')            { $tsv_file = shift @ARGV }
+  elsif ($a eq '--faillog')        { $faillog = shift @ARGV }
   else                             { push @files, $a }
+}
+$faillog = "$root/$faillog" unless $faillog =~ m{^/};
+
+# Expected-divergence registry: rel -> reason (citing docs/not-supported.md).
+my %expected;
+if (open my $ef, '<', $expected_tsv) {
+  while (<$ef>) {
+    chomp;
+    next if /^\s*(?:#|$)/;
+    my ($rel, $reason) = split /\t/, $_, 2;
+    $expected{$rel} = $reason // '';
+  }
+  close $ef;
 }
 -d $tdir or die "perl t/ tree not found: $tdir (pass --tdir)\n";
 $all = 1 if !@files && !@dirs;
@@ -108,10 +155,9 @@ for my $d (@dirs) {
     if (!$include_copied && in_corpus($f)) { $n_copied++; next }
     open my $fh, '<', $f or next;
     local $/; my $src = <$fh>; close $fh;
-    # Skip files needing the perl build-tree harness.
-    if ($src =~ m{require\s+['"]\./test\.pl}
-        || $src =~ m{\bchdir\b}
-        || $src =~ m{BEGIN[^\n]*\@INC}) { $n_harness++; next }
+    # Skip files pulling build-tree modules via @INC fiddling in BEGIN.
+    # (`require './test.pl'` and `chdir 't'` files run via the shadow t/.)
+    if ($src =~ m{BEGIN[^\n]*\@INC}) { $n_harness++; next }
     push @files, "$d/$base";
   }
   printf STDERR "scan t/%-8s %3d files: %3d runnable, %3d need-harness%s\n",
@@ -126,7 +172,7 @@ my $core = "";
 unless ($no_core) {
   (undef, $core) = tempfile("pcl-suite-core.XXXXXX", TMPDIR => 1, OPEN => 0);
   print STDERR "run-perl-suite: building fresh core from cl/pcl-runtime.lisp ...\n";
-  if (system("sbcl --noinform --non-interactive --load \Q$runtime\E "
+  if (system("sbcl --noinform --non-interactive --load \Q$runtime\E --load \Q$testlib\E "
            . "--eval '(sb-ext:save-lisp-and-die \"$core\" :executable nil)' "
            . ">/dev/null 2>&1") != 0) {
     print STDERR "run-perl-suite: core build FAILED — falling back to source-load\n";
@@ -136,10 +182,38 @@ unless ($no_core) {
 END { unlink $core if $core }
 # --core must precede all other toplevel sbcl options.
 my $sbcl = $core ? "sbcl --core \Q$core\E --noinform --non-interactive"
-                 : "sbcl --noinform --non-interactive --load \Q$runtime\E";
+                 : "sbcl --noinform --non-interactive --load \Q$runtime\E --load \Q$testlib\E";
 
 my $tmpdir = tempdir(CLEANUP => 0);
 END { system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir }
+
+# Shadow t/ (see header): real tree symlinked entry-by-entry, PCL stubs on top.
+my $shadow = "$tmpdir/t";
+mkdir $shadow or die "mkdir $shadow: $!\n";
+for my $e (glob "$tdir/*") {
+  symlink $e, "$shadow/" . basename($e)
+    or die "symlink $e: $!\n";
+}
+for my $stub (qw(test.pl charset_tools.pl loc_tools.pl)) {
+  my $src = "$root/perl-tests/t/$stub";
+  -f $src or die "PCL stub missing: $src\n";
+  unlink "$shadow/$stub";
+  symlink $src, "$shadow/$stub" or die "symlink $src: $!\n";
+}
+
+# Fresh per-test failure log each run (mirrors the sweep's .faillog).
+system("rm -rf \Q$faillog\E");
+mkdir $faillog;
+
+# TAP stream -> { test-number => [verb, description] }.
+sub tap_map {
+  my ($out) = @_;
+  my %m;
+  while ($out =~ /^(not ok|ok)\s+(\d+)\s*[-#]?\s*([^\n]*)$/mg) {
+    $m{$2} = [$1, $3];
+  }
+  return \%m;
+}
 
 # ---------------------------------------------------------------- worker
 sub run_one {
@@ -158,15 +232,18 @@ sub run_one {
 
   (my $safe = $rel) =~ s{/}{_}g;
   my $lisp = "$tmpdir/$safe.lisp";
-  my $terr = system("perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
+  # Transpile with CWD = shadow so `require './test.pl'` prototype extraction
+  # (cwd-first) reads the PCL stub, not perl's real harness.
+  my $terr = system("cd \Q$shadow\E && perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
                   . "> \Q$lisp\E 2>\Q$lisp\E.err");
   my $pcl = "";
   my $sbcl_exit = 0;
   if ($terr == 0) {
-    # CWD = perl's t/ dir (fixture files are opened relative to it); timeout(1)
-    # actually kills a hung SBCL (alarm in the parent would leave an orphan).
+    # CWD = shadow t/ (fixture files resolve through the symlinks, test.pl to
+    # the stub); timeout(1) actually kills a hung SBCL (alarm in the parent
+    # would leave an orphan).
     my $out = "$tmpdir/$safe.out";
-    system("cd \Q$tdir\E && timeout $timeout $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
+    system("cd \Q$shadow\E && timeout $timeout $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
     $sbcl_exit = $? >> 8;
     $pcl = do { local $/; my $fh; open($fh, '<', $out) ? (<$fh> // '') : '' };
     $c_ok    = () = $pcl =~ /^ok /mg;
@@ -186,6 +263,31 @@ sub run_one {
           : ($p_ok + $p_notok) == 0                      ? 'NOTAP'
           : ($p_ok == $c_ok && $p_notok == $c_notok && !$sig) ? 'OK'
           :                                                'DIFF';
+
+  # Per-test failure log: join the two TAP streams on test number and record
+  # every diverging test — the triage input for marking not-supported rows.
+  if ($status eq 'DIFF' || $status eq 'TIMEOUT') {
+    my ($pm, $cm) = (tap_map($perl), tap_map($pcl));
+    if (open my $lf, '>', "$faillog/$safe.fails.tsv") {
+      if (!%$cm) {
+        print $lf join("\t", $rel, 0, 'ok*', '(no TAP)',
+                       "PCL produced no TAP output" . ($sig ? " ($sig)" : "")), "\n";
+      } else {
+        my $rows = 0;
+        for my $n (sort { $a <=> $b } keys %$pm) {
+          my $pv = $pm->{$n}[0];
+          my $cv = $cm->{$n} ? $cm->{$n}[0] : '(missing)';
+          next if $pv eq $cv;
+          print $lf join("\t", $rel, $n, $pv, $cv, $pm->{$n}[1]), "\n";
+          last if ++$rows >= 500;
+        }
+        my $extra = grep { !$pm->{$_} } keys %$cm;
+        print $lf join("\t", $rel, 0, '(none)', 'extra',
+                       "$extra PCL-only test numbers"), "\n" if $extra;
+      }
+      close $lf;
+    }
+  }
 
 WRITE:
   open my $rf, '>', $result_file or _exit(1);
@@ -212,6 +314,17 @@ while (@queue || %children) {
     if (open my $rf, '<', $info->{result_file}) { chomp($line = <$rf> // ''); close $rf }
     my @r = split /\t/, $line, 7;
     @r = ($info->{rel}, 0, 0, 0, 0, 'NO-RESULT', '') if @r < 6;
+    # Expected-divergence registry: divergent+expected -> XDIFF (doesn't fail
+    # the run); OK+expected -> STALE (fails the run: remove the stale row).
+    if (my $reason = $expected{$r[0]}) {
+      if ($r[5] =~ /^(?:DIFF|TRANSPILE|TIMEOUT)$/) {
+        $r[5] = 'XDIFF';
+        $r[6] = join(' | ', grep { length } $r[6] // '', $reason);
+      } elsif ($r[5] eq 'OK') {
+        $r[5] = 'STALE';
+        $r[6] = "expected-divergence row now PASSES — remove it from docs/perl-suite-expected.tsv";
+      }
+    }
     $results{$info->{rel}} = \@r;
     printf "%-24s P:%4d/%-3d C:%4d/%-4d %-7s %s\n", @r[0 .. 5], $r[6] // '';
     STDOUT->flush();
@@ -237,10 +350,11 @@ for my $st (sort keys %by_status) {
   printf "%-8s %3d%s\n", $st, scalar @f,
     ($st eq 'OK' ? '' : ':  ' . join(', ', @f));
 }
-my $n_bad = grep { $results{$_}[5] !~ /^(?:OK|NOTAP)$/ } keys %results;
-printf "%d files: %d OK, %d NOTAP, %d divergent\n",
+my $n_bad = grep { $results{$_}[5] !~ /^(?:OK|NOTAP|XDIFF)$/ } keys %results;
+printf "%d files: %d OK, %d NOTAP, %d XDIFF (expected, see docs/perl-suite-expected.tsv), %d UNEXPLAINED\n",
   scalar(keys %results), scalar(@{ $by_status{OK} // [] }),
-  scalar(@{ $by_status{NOTAP} // [] }), $n_bad;
+  scalar(@{ $by_status{NOTAP} // [] }), scalar(@{ $by_status{XDIFF} // [] }), $n_bad;
+print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
 
 if ($tsv_file) {
   open my $tf, '>', $tsv_file or die "write $tsv_file: $!\n";
