@@ -56,7 +56,25 @@ HEAD: 3 files, all explained (closure.t pipeline flip; magic.t +
 signatures.t expected-error heredocs now correctly collapse `\$` — was a
 live miscompile, no behavior movers).  Full sweep: 18386 pass / 66 fully
 passing incl. closure.t; key-file anchors all match records.  Cache gen
-v2-42.  `docs/fail-baseline.tsv` re-bless still TODO (48 stale rows).
+v2-42.
+
+**Session tail (same session):** (1) #55 `PCL_SCHED_OLD` escape hatch +
+bypassed BEGIN text gate DELETED (80a4c78; emission byte-identical across
+all 111 corpus files).  (2) Fresh `bench-exec.pl` run: fib 0.24×, gcdrec
+0.42× (PCL faster); intloop+= 3.37×, strcat 2525×, pack ~1180× (the known
+losses).  (3) **The two PRODUCT TARGETS written into
+`v2-endgame-plan.md` §6** (user decision: general speed must BEAT perl,
+slack only regex-engine + pack-oracle; IR must be clear with obvious
+macros) — measured worklist from `faster-codegen-suggestions.md`, tier 1
+filed as tasks #62 (S1+N1), #73 (M1 inline cache), #74 (P1 template
+memoize), #75 (Target-B macro flag-day) (572245a).  (4) `ir-spec.md`
+synced to v2-42: #55 interleave ordering guarantee, pipeline-marker line,
+s301 pipe/dup-open contract; §12 example re-verified against live
+emission (25f0e08).  (5) `docs/fail-baseline.tsv` RE-BLESSED from the
+verified s301 sweep (666 fails; watchdog now quiet — the pre-R1 baseline
+had 48 stale rows); `test-failures-categorized.md` header refreshed
+(body remains the s156 snapshot; live status = `.faillog/_status.tsv` +
+`sweep-bug-catalog.md`).
 
 ---
 
