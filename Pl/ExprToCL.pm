@@ -1695,12 +1695,38 @@ sub gen_funcall_form {
   # Only plain Word heads: gen_node on a Word is pure (gen_leaf), so the
   # decline→re-run of the text path repeats no side effect.  Non-Word
   # heads (Symbol '&foo' etc.) stay on the text path entirely.
-  return undef unless ref($self->expr_o->get_a_node($kids->[0])) eq 'PPI::Token::Word';
+  if (ref($self->expr_o->get_a_node($kids->[0])) ne 'PPI::Token::Word') {
+    return undef;
+  }
 
   my $func_name = $self->gen_node($kids->[0]);
 
-  return undef if $func_name =~ /^-/;                    # unary-minus-of-call
-  return undef if $func_name =~ /^SUPER::/;              # indirect super call
+  # -funcname with arguments = unary negation of the call (PPI tokenizes
+  # "-splice @a" as one Word).  Known built-ins convert; an unknown -name
+  # falls through to the generic tail exactly like the text emitter.
+  if ($func_name =~ /^-([A-Za-z_]\w*)$/) {
+    my $real_func = $1;
+    if (exists $RUNTIME_NAMES{$real_func}) {
+      my $inner_cl = $self->cl_name($real_func, 1);
+      my @arg_forms = map { $self->gen_node_form($_) } @{$kids}[1 .. $#$kids];
+      return ['p--', [$inner_cl, @arg_forms]];
+    }
+  }
+
+  # SUPER::method(args) — indirect-object super call: all args flatten at
+  # runtime; the first element of the combined list is the invocant.
+  if ($func_name =~ /^SUPER::(.+)$/) {
+    my $method = $1;
+    my $cur_pkg = ($self->environment && $self->environment->can('current_package'))
+                    ? ($self->environment->current_package // 'main')
+                    : 'main';
+    if (@$kids >= 2) {
+      my @arg_forms = map { $self->gen_node_form($_) } @{$kids}[1 .. $#$kids];
+      return ['pcl::%pcl-super-indirect', "\"$method\"", "\"$cur_pkg\"", @arg_forms];
+    }
+    return ['pcl::%pcl-super-indirect', "\"$method\"", "\"$cur_pkg\"", 'nil'];
+  }
+
   return undef if $FUNCALL_FORM_DECLINES{$func_name};
 
   my $cl_func = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
