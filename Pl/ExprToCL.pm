@@ -526,9 +526,10 @@ sub gen_node_form {
 # Converted: Symbol/Magic genuine atoms, string/heredoc/word/operator/cast
 # atoms, the Number family, $#arr (ArrayIndex), and m// / qr// regex leaves
 # (both non-interpolated → (p-regex …)/(pcl::p-qr …) and interpolated →
-# (pcl::p-regex-from-parts …)).  Declines (→ text path): Symbol/Magic compounds
-# (stash/typeglob/&sub/errno) and s/// / tr/// (side effects, possible /e
-# lambda).  Byte-for-byte gen_leaf's shapes.
+# (pcl::p-regex-from-parts …)), and s/// / tr/// (gen_substitution_form /
+# gen_transliteration_form; the /e-lambda body stays a raw atom until the
+# inline_lambda step).  Declines (→ text path): Symbol/Magic compounds
+# (stash/typeglob/&sub/errno).  Byte-for-byte gen_leaf's shapes.
 sub gen_leaf_form {
   my ($self, $node) = @_;
   my $ref = ref($node);
@@ -624,8 +625,9 @@ sub gen_leaf_form {
   # / (p-string-concat …)).  All the helpers (_parse_regex_content,
   # _has_regex_interpolation, _gen_interp_regex_pattern) are pure — no gensym,
   # no env mutation, no gen_node — so building the form directly (never
-  # declining) has no double-run risk.  s/// and tr/// stay on the text path
-  # entirely (gen_substitution / gen_transliteration: side effects, /e lambda).
+  # declining) has no double-run risk.  s/// and tr/// convert via
+  # gen_substitution_form / gen_transliteration_form (never decline, so their
+  # side effects — the /e sub-compile — run exactly once).
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 1);
@@ -638,8 +640,10 @@ sub gen_leaf_form {
     $content =~ s/"/\\"/g;
     return ['pcl::p-qr', qq{"$content"}];
   }
-  return undef if $ref eq 'PPI::Token::Regexp::Substitute'
-               || $ref eq 'PPI::Token::Regexp::Transliterate';
+  return $self->gen_substitution_form($node)
+    if $ref eq 'PPI::Token::Regexp::Substitute';
+  return $self->gen_transliteration_form($node)
+    if $ref eq 'PPI::Token::Regexp::Transliterate';
   if ($ref =~ /^PPI::Token::Regexp/) {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 0);
@@ -5278,43 +5282,53 @@ sub gen_inline_lambda {
 sub gen_substitution {
   my $self = shift;
   my $node = shift;
+  return Pl::CLForm::to_flat($self->gen_substitution_form($node));
+}
+
+# Form-producing (E2-converted).  Never declines.  The /e (and interpolated)
+# replacement body is compiled by _compile_subst_e_expr / _gen_interp_replacement
+# — both still produce text, embedded as a raw atom inside the (lambda () …)
+# form; structuring those bodies is the inline_lambda step (E2 last item).
+sub gen_substitution_form {
+  my $self = shift;
+  my $node = shift;
 
   my $match = $node->get_match_string;
   my $subst = $node->get_substitute_string;
   my $mods  = $node->get_modifiers;
 
-  my @mod_strs;
-  for my $mod (sort keys %$mods) {
-    push @mod_strs, ":$mod";
-  }
-  my $mods_str = @mod_strs ? ' ' . join(' ', @mod_strs) : '';
+  my @mod_strs = map { ":$_" } sort keys %$mods;
 
-  # Build pattern CL expression (may be a string literal or a runtime string expression)
-  my $match_cl;
+  # Pattern: a string literal atom, or the interpolation form ("…"/$var/
+  # (p-string-concat …)) evaluated to the pattern string at runtime.
+  my $match_form;
   if (_has_regex_interpolation($match)) {
-    $match_cl = Pl::CLForm::to_flat(_gen_interp_regex_pattern($match));  # CL expr → pattern string
+    $match_form = _gen_interp_regex_pattern($match);
   } else {
-    $match =~ s/\\/\\\\/g;
-    $match =~ s/"/\\"/g;
-    $match_cl = qq{"$match"};
+    (my $m = $match) =~ s/\\/\\\\/g;
+    $m =~ s/"/\\"/g;
+    $match_form = qq{"$m"};
   }
 
   # s///e: replacement is Perl code — parse it and wrap in a lambda
   if ($mods->{e}) {
     my $cl_expr = $self->_compile_subst_e_expr($subst);
-    return qq{(p-subst $match_cl (lambda () $cl_expr)$mods_str)};
+    return ['p-subst', $match_form, ['lambda', ['list'], Pl::CLForm::raw($cl_expr)],
+            @mod_strs];
   }
 
-  # Replacement with variable interpolation: wrap in a lambda so $varname/$1..$9 evaluate at match time
+  # Replacement with variable interpolation: wrap in a lambda so $varname/$1..$9
+  # evaluate at match time
   if (_has_regex_interpolation($subst)) {
     my $interp_expr = _gen_interp_replacement($subst);
-    return qq{(p-subst $match_cl (lambda () $interp_expr)$mods_str)};
+    return ['p-subst', $match_form, ['lambda', ['list'], Pl::CLForm::raw($interp_expr)],
+            @mod_strs];
   }
 
   # Normal case: escape replacement for CL string literal (perl-to-ppcre-replacement handles $1..$9)
-  $subst =~ s/\\/\\\\/g;
-  $subst =~ s/"/\\"/g;
-  return qq{(p-subst $match_cl "$subst"$mods_str)};
+  (my $s = $subst) =~ s/\\/\\\\/g;
+  $s =~ s/"/\\"/g;
+  return ['p-subst', $match_form, qq{"$s"}, @mod_strs];
 }
 
 # Build a CL expression that evaluates to the interpolated replacement string.
@@ -5454,6 +5468,13 @@ sub _compile_subst_e_expr {
 sub gen_transliteration {
   my $self = shift;
   my $node = shift;
+  return Pl::CLForm::to_flat($self->gen_transliteration_form($node));
+}
+
+# Form-producing (E2-converted).  Never declines; pure (escape expansion only).
+sub gen_transliteration_form {
+  my $self = shift;
+  my $node = shift;
 
   my $from = $node->get_match_string;
   my $to   = $node->get_substitute_string;
@@ -5463,13 +5484,8 @@ sub gen_transliteration {
   my $from_cl = _cl_string_literal(_expand_tr_escapes($from));
   my $to_cl   = _cl_string_literal(_expand_tr_escapes($to));
 
-  my @mod_strs;
-  for my $mod (sort keys %$mods) {
-    push @mod_strs, ":$mod";
-  }
-
-  my $mods_str = @mod_strs ? ' ' . join(' ', @mod_strs) : '';
-  return "(p-tr $from_cl $to_cl$mods_str)";
+  my @mod_strs = map { ":$_" } sort keys %$mods;
+  return ['p-tr', $from_cl, $to_cl, @mod_strs];
 }
 
 # Process tr/// string escape sequences (no interpolation, but \xHH etc. apply)
