@@ -79,6 +79,27 @@ my %ARITH_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=>
 my %COMPOUND_ASSIGN = map { $_ => 1 }
   qw(+= -= *= /= %= **= x= .= ||= &&= //= <<= >>= &= |= ^= &.= |.= ^.=);
 
+# Compound assigns whose macro COERCES the stored value (the new value is an
+# operator result — a raw number or string, never a box), so a statement-root
+# `$x OP= RHS;` may store to a RAW slot via the macro's -raw twin
+# (docs/raw-numeric-verdict.md, task #62 step 1).  ||= &&= //= are absent:
+# they store the RHS value unchanged, which may be/alias a box.  Values are
+# the runtime raw-twin macro names; Parser2's native lowering consults this
+# same table via raw_compound_macro() — one definition of "raw-storable
+# compound op".
+my %RAW_COMPOUND = (
+  '+='  => 'p-incf-raw',         '-='  => 'p-decf-raw',
+  '*='  => 'p-*=-raw',           '/='  => 'p-/=-raw',
+  '%='  => 'p-%=-raw',           '**=' => 'p-**=-raw',
+  '.='  => 'p-.=-raw',           'x='  => 'p-str-x=-raw',
+  '&='  => 'p-bit-and=-raw',     '|='  => 'p-bit-or=-raw',
+  '^='  => 'p-bit-xor=-raw',     '<<=' => 'p-<<=-raw',
+  '>>=' => 'p->>=-raw',          '&.=' => 'p-str-bit-and=-raw',
+  '|.=' => 'p-str-bit-or=-raw',  '^.=' => 'p-str-bit-xor=-raw',
+);
+
+sub raw_compound_macro { $RAW_COMPOUND{ $_[0] } }
+
 my %MUTATING_FN   = map { $_ => 1 } qw(chomp chop undef read sysread recv);
 my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
                                        socketpair accept);
@@ -776,7 +797,18 @@ sub _tw_walk {
       return;
     }
     if ($COMPOUND_ASSIGN{$op}) {
-      _tw_mark($ctx, $xo, $kids->[0], 'write-compound');
+      # A COERCING compound op (%RAW_COMPOUND) writing a plain $scalar at
+      # native statement root stores an operator-coerced raw value, exactly
+      # like a root `$x = ARITH;` — Parser2 lowers it via the -raw macro twin
+      # (raw_compound_macro), so it is NOT a boxing event.  Every other shape
+      # (seam/embedded/modifier position, element or list LHS, ||= &&= //=)
+      # still lowers through box-set machinery → veto as before.
+      my $l  = $xo->get_a_node($kids->[0]);
+      my $lk = $xo->get_node_children($kids->[0]) || [];
+      my $raw_ok = $root_native && @$kids == 2 && $RAW_COMPOUND{$op}
+        && ref($l) eq 'PPI::Token::Symbol' && !@$lk
+        && $l->content =~ /^\$\w+$/;
+      _tw_mark($ctx, $xo, $kids->[0], 'write-compound') unless $raw_ok;
       _tw_walk($ctx, $xo, $_, 0) for @$kids;
       return;
     }

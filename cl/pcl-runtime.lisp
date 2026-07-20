@@ -93,6 +93,12 @@
    #:p-bit-and= #:p-bit-or= #:p-bit-xor= #:p-<<= #:p->>=
    #:p-str-bit-and= #:p-str-bit-or= #:p-str-bit-xor=
    #:p-and-assign #:p-or-assign #:p-//=
+   ;; Raw twins: compound assignment on a raw let-bound lexical slot
+   #:p-incf-raw #:p-decf-raw
+   #:p-*=-raw #:p-/=-raw #:p-%=-raw #:p-**=-raw
+   #:p-.=-raw #:p-str-x=-raw
+   #:p-bit-and=-raw #:p-bit-or=-raw #:p-bit-xor=-raw #:p-<<=-raw #:p->>=-raw
+   #:p-str-bit-and=-raw #:p-str-bit-or=-raw #:p-str-bit-xor=-raw
    ;; Comparison (numeric)
    #:p-== #:p-!= #:p-< #:p-> #:p-<= #:p->= #:p-<=>
    ;; Comparison (string)
@@ -4172,17 +4178,33 @@
           `(let ((,b ,place))
              (box-set ,b ,(funcall build b)))))))
 
-(defmacro p-incf (place &optional (delta 1))
-  "Perl += - works on boxed values, hash/array elements, and derefs.
+(defmacro %define-compound-pair (boxed raw lambda-list doc &body new-value)
+  "Define the BOXED compound-assign macro (any place: boxes, elements, derefs —
+   store-back via %store-back-form) and its RAW twin, which requires the place
+   to be a raw let-bound lexical slot (docs/raw-numeric-verdict.md) and stores
+   with plain SETF.  NEW-VALUE is a form-template expression evaluated with CUR
+   bound to the current-value form and the LAMBDA-LIST names bound to the
+   macro's argument forms.  One builder, two store disciplines — the raw twin
+   cannot drift semantically from the boxed macro."
+  `(progn
+     (defmacro ,boxed (place ,@lambda-list)
+       ,doc
+       (%store-back-form place (lambda (cur) ,@new-value)))
+     (defmacro ,raw (var ,@lambda-list)
+       ,doc
+       (list 'setf var (let ((cur var)) ,@new-value)))))
+
+(%define-compound-pair p-incf p-incf-raw (&optional (delta 1))
+                       "Perl += - works on boxed values, hash/array elements, and derefs.
    Coerce the current value through to-number BEFORE adding: an absent key/slot
    reads as *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
    PLACE is evaluated once (see %store-back-form)."
-  (%store-back-form place (lambda (cur) `(+ (to-number ,cur) (to-number ,delta)))))
+                       `(+ (to-number ,cur) (to-number ,delta)))
 
-(defmacro p-decf (place &optional (delta 1))
-  "Perl -= - works on boxed values, hash/array elements, and derefs.
+(%define-compound-pair p-decf p-decf-raw (&optional (delta 1))
+                       "Perl -= - works on boxed values, hash/array elements, and derefs.
    PLACE is evaluated once (see %store-back-form)."
-  (%store-back-form place (lambda (cur) `(- (to-number ,cur) (to-number ,delta)))))
+                       `(- (to-number ,cur) (to-number ,delta)))
 
 (defun magical-string-increment (s)
   "Perl's magical string increment: 'a0' -> 'a1', 'Az' -> 'Ba', 'zz' -> 'aaa'"
@@ -4369,61 +4391,55 @@
 ;;; Compound Assignment Operators
 ;;; ------------------------------------------------------------
 
-(defmacro p-*= (place value)
-  "Perl *= (multiply-assign)"
-  (%store-back-form place (lambda (cur) `(* (to-number ,cur) (to-number ,value)))))
+(%define-compound-pair p-*= p-*=-raw (value)
+                       "Perl *= (multiply-assign)"
+                       `(* (to-number ,cur) (to-number ,value)))
 
-(defmacro p-/= (place value)
-  "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
+(%define-compound-pair p-/= p-/=-raw (value)
+                       "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
   a float (7/2 -> 3.5, not the leaked ratio \"7/2\") and overload '/' dispatches."
-  (%store-back-form place (lambda (cur) `(p-/ ,cur ,value))))
+                       `(p-/ ,cur ,value))
 
-(defmacro p-%= (place value)
-  "Perl %= (modulo-assign)"
-  (%store-back-form place
-                    (lambda (cur) `(mod (truncate (to-number ,cur)) (truncate (to-number ,value))))))
+(%define-compound-pair p-%= p-%=-raw (value)
+                       "Perl %= (modulo-assign)"
+                       `(mod (truncate (to-number ,cur)) (truncate (to-number ,value))))
 
-(defmacro p-**= (place value)
-  "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
+(%define-compound-pair p-**= p-**=-raw (value)
+                       "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a
   float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
-  (%store-back-form place (lambda (cur) `(p-** ,cur ,value))))
+                       `(p-** ,cur ,value))
 
-(defmacro p-.= (place value)
-  "Perl .= (concat-assign)"
-  (%store-back-form place
-                    (lambda (cur) `(concatenate 'string (to-string ,cur) (to-string ,value)))))
+(%define-compound-pair p-.= p-.=-raw (value)
+                       "Perl .= (concat-assign)"
+                       `(concatenate 'string (to-string ,cur) (to-string ,value)))
 
-(defmacro p-str-x= (place value)
-  "Perl x= (repeat-assign)"
-  (let ((n (gensym "N")))
-    (%store-back-form place
-                      (lambda (cur)
-                        `(let ((,n (truncate (to-number ,value))))
-                           (if (<= ,n 0) ""
-                               (apply #'concatenate 'string
-                                      (make-list ,n :initial-element (to-string ,cur)))))))))
+(%define-compound-pair p-str-x= p-str-x=-raw (value)
+                       "Perl x= (repeat-assign)"
+                       (let ((n (gensym "N")))
+                         `(let ((,n (truncate (to-number ,value))))
+                            (if (<= ,n 0) ""
+                                (apply #'concatenate 'string
+                                       (make-list ,n :initial-element (to-string ,cur)))))))
 
-(defmacro p-bit-and= (place value)
-  "Perl &= (bitwise-and-assign)"
-  (%store-back-form place (lambda (cur) `(p-bit-and ,cur ,value))))
+(%define-compound-pair p-bit-and= p-bit-and=-raw (value)
+                       "Perl &= (bitwise-and-assign)"
+                       `(p-bit-and ,cur ,value))
 
-(defmacro p-bit-or= (place value)
-  "Perl |= (bitwise-or-assign)"
-  (%store-back-form place (lambda (cur) `(p-bit-or ,cur ,value))))
+(%define-compound-pair p-bit-or= p-bit-or=-raw (value)
+                       "Perl |= (bitwise-or-assign)"
+                       `(p-bit-or ,cur ,value))
 
-(defmacro p-bit-xor= (place value)
-  "Perl ^= (bitwise-xor-assign)"
-  (%store-back-form place (lambda (cur) `(p-bit-xor ,cur ,value))))
+(%define-compound-pair p-bit-xor= p-bit-xor=-raw (value)
+                       "Perl ^= (bitwise-xor-assign)"
+                       `(p-bit-xor ,cur ,value))
 
-(defmacro p-<<= (place value)
-  "Perl <<= (left-shift-assign)"
-  (%store-back-form place
-                    (lambda (cur) `(ash (truncate (to-number ,cur)) (truncate (to-number ,value))))))
+(%define-compound-pair p-<<= p-<<=-raw (value)
+                       "Perl <<= (left-shift-assign)"
+                       `(ash (truncate (to-number ,cur)) (truncate (to-number ,value))))
 
-(defmacro p->>= (place value)
-  "Perl >>= (right-shift-assign)"
-  (%store-back-form place
-                    (lambda (cur) `(ash (truncate (to-number ,cur)) (- (truncate (to-number ,value)))))))
+(%define-compound-pair p->>= p->>=-raw (value)
+                       "Perl >>= (right-shift-assign)"
+                       `(ash (truncate (to-number ,cur)) (- (truncate (to-number ,value)))))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -5010,6 +5026,17 @@
 
 (defmacro p-str-bit-xor= (place value)
   `(%p-store-back ,place (p-str-bit-xor ,place ,value)))
+
+;; Raw twins for raw let-bound lexical slots (docs/raw-numeric-verdict.md):
+;; same p-str-bit-* computation, plain SETF store.
+(defmacro p-str-bit-and=-raw (var value)
+  `(setf ,var (p-str-bit-and ,var ,value)))
+
+(defmacro p-str-bit-or=-raw (var value)
+  `(setf ,var (p-str-bit-or ,var ,value)))
+
+(defmacro p-str-bit-xor=-raw (var value)
+  `(setf ,var (p-str-bit-xor ,var ,value)))
 
 (defun %pcl-uv-coerce (n)
   "Coerce float to integer using UV (unsigned) semantics: +Inf=UV_MAX, -Inf=IV_MIN, NaN=0."
@@ -9567,7 +9594,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-42"
+(defparameter *pcl-cache-generation* "v2-43"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

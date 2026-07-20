@@ -4400,6 +4400,24 @@ sub _lower_stmt {
     }
   }
 
+  # `$x OP= RHS;` (coercing compound op) on a RAW slot → the op's -raw macro
+  # twin, e.g. (p-incf-raw $x …) = (setf $x (+ (to-number $x) …)).
+  # VarAnnotator leaves $x unboxable only when EVERY compound write is a
+  # coercing op at native statement root (its %RAW_COMPOUND regime), so this
+  # branch and the verdict key on the same shape; a boxed $x falls through to
+  # the generic path (p-incf … = box-set), unchanged from before task #62.
+  if (!$mod && @$expr >= 3
+      && $expr->[0]->isa('PPI::Token::Symbol') && $expr->[0]->content =~ /^\$\w+$/
+      && !$self->{_file_lex_renamed}{ $expr->[0]->content }
+      && $expr->[1]->isa('PPI::Token::Operator')) {
+    my $name   = $expr->[0]->content;
+    my $rawmac = Pl::VarAnnotator::raw_compound_macro($expr->[1]->content);
+    if ($rawmac && $vi->{$name} && $vi->{$name}{unboxable}) {
+      return [$rawmac, $name,
+              $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt)];
+    }
+  }
+
   # Statement position: the value is discarded (void) — except for a block
   # tail whose value the enclosing sub returns ($tail_ctx = 'inherit').
   my $vctx = $tail_ctx // ':void';

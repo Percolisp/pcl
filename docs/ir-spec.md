@@ -13,7 +13,8 @@ the constructs *mean*.
 **Verified against:** full per-claim verification at cache generation
 v2-7 (2026-07-06); maintained incrementally since (each semantic
 emission/runtime change updates its section — standing rule), last
-section-level review at **v2-42, 2026-07-20 (s301)**. Section references
+section-level review at **v2-43, 2026-07-20 (s302: §2.2 raw compound-assign
+`-raw` twins, task #62 step 1)**. Section references
 name the defining function so you can re-verify against the runtime.
 
 ---
@@ -106,6 +107,17 @@ holding a number or string directly. The shapes tell you which is which:
 | boxed lexical | `(let (($x (make-p-box nil)))` | `(p-my-= $x V)` | `$x` |
 | raw lexical | `(let (($n 10))` | `(setf $n V)` | `$n` |
 | package var | `(defvar $g (make-p-box nil))` | `(p-scalar-= $g V)` | `$g` |
+
+A **coercing compound assignment** on a raw slot (`$n += V` and the whole
+`-= *= /= %= **= x= .= <<= >>= &= |= ^= &.= |.= ^.=` family — every op
+whose stored value is an operator result, so a raw number/string by
+construction) lowers to the boxed macro's **`-raw` twin**:
+`(p-incf-raw $n V)`, `(p-.=-raw $s V)`, … — each expands to
+`(setf slot NEW)` with the *same* new-value form its boxed macro
+(`p-incf`, `p-.=`, …) computes, so the two store disciplines cannot
+diverge semantically (task #62; `docs/raw-numeric-verdict.md`).  The
+non-coercing `||= &&= //=` store the RHS unchanged (it may be a
+reference), so their targets never become raw slots.
 
 **Invariant: a raw slot never holds a box or a reference** — only host
 numbers and strings. Ops always accept either form (they unbox
@@ -827,6 +839,7 @@ function's docstring states its Perl contract. The families:
 | string compare | `p-eq p-ne p-lt p-gt p-le p-ge p-cmp` | stringify; return `1`/`""` |
 | logical | `p-&& p-\|\| p-// p-! p-not` | short-circuit macros returning operand values (§3.4) |
 | assignment | `p-my-=` (boxed lexical) `p-scalar-=` (package) `setf` (raw slot) `p-array-= p-hash-= p-list-=` | store per §2.2; list-assign in scalar context yields the RHS element count; all return the assigned target/value per Perl |
+| compound assignment | `p-incf p-decf p-*= p-/= p-%= p-**= p-.= p-str-x= p-bit-and= p-bit-or= p-bit-xor= p-<<= p->>= p-str-bit-and= p-str-bit-or= p-str-bit-xor=` (any place) · `-raw` twins of each (raw slot, §2.2) · `p-and-assign p-or-assign p-//=` (no raw twin) | read-modify-write; boxed macros store back via box-set/setf per place shape, `-raw` twins are `(setf slot NEW)` with the identical NEW form; `&&=`/`||=`/`//=` short-circuit and store the RHS unchanged |
 | increment | `p-++ p---- p-++-post p----post` | numeric ±1 on the box/slot; `p-++` on a pure-alpha string does Perl string increment (`"az"→"ba"`) |
 | elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice` | reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value |
 | array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""` |

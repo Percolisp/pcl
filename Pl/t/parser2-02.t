@@ -38,9 +38,14 @@ like($dc, qr/\(let \(\(\$a \(make-p-box nil\)\)\)/, 'my $a . $foo : $a let-bound
 
 # ---- W8 tail (s273): VarAnnotator write shapes + self-ref my init + our-init ----
 
-# Bitwise compound assigns are writes: $s must stay boxed (bop-01 t17/18).
+# Bitwise compound assigns are writes; since task #62 a coercing compound op
+# at native statement root stores to a RAW slot via its -raw macro twin (same
+# p-bit-and computation as the boxed macro, so bop-01 t17/18 string-bitwise
+# semantics are preserved) — the write must lower through the twin, never a
+# box-set on the raw slot.
 my $bw = Pl::Parser2->parse_code(q{my $s = "zzzzz"; $s &= "AAAAA"; print $s;});
-like($bw, qr/\(\$s \(make-p-box nil\)\)/, 'bitwise &= target stays boxed');
+like($bw, qr/\(let \(\(\$s "zzzzz"\)\)/, 'bitwise &= target goes raw (task #62)');
+like($bw, qr/\(p-bit-and=-raw \$s "AAAAA"\)/, '&= lowers via the raw macro twin');
 
 # Paren-less \substr $t: magic write-through ref needs the box (misc-fixes-02 t27).
 my $sb = Pl::Parser2->parse_code(q{my $t = ""; ${\substr $t, 0} = "X"; print $t;});

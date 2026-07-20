@@ -522,4 +522,40 @@ test_transpile("two sequential forward-goto labels from lambdas", '
   L2: print "two\n";
 ', "one\ntwo\n");
 
+# ---- task #62 step 1: coercing compound assigns store to RAW slots via the
+# ---- -raw macro twins ((p-incf-raw $s …)); these verify value parity with
+# ---- perl across the raw regime and its exclusions.
+
+# The intloop bench shape: += accumulator in a counting loop goes raw.
+test_transpile("raw compound: += accumulator in range loop", '
+  my $s = 0;
+  for my $i (1..100) { $s += $i; }
+  print "$s\n";
+');
+
+# Compound op family parity on raw slots (%= negative, **= negative, x=, <<=).
+test_transpile("raw compound: op family parity", '
+  my $m = -7; $m %= 3;  print "$m\n";
+  my $p = 2;  $p **= -1; print "$p\n";
+  my $r = "ab"; $r x= 3; print "$r\n";
+  my $b = 6;  $b &= 3; $b <<= 2; print "$b\n";
+  my $u; $u .= "x"; $u .= "y"; print "$u\n";
+');
+
+# ||= stores the RHS UNCHANGED (may be a ref) — must stay boxed/non-raw.
+test_transpile("raw compound exclusion: ||= keeps ref semantics", '
+  my $r; $r ||= [1,2]; push @$r, 3; print scalar(@$r), "\n";
+');
+
+# \$s ref-taken vetoes the raw slot: += must stay visible through the ref.
+test_transpile("raw compound exclusion: ref-taken write-through", '
+  my $s = 1; my $r = \$s; $s += 5; print "$$r\n";
+');
+
+# Seam (map block) and modifier positions keep the boxed compound path.
+test_transpile("raw compound exclusion: seam and modifier positions", '
+  my $e = 0; my @l = map { $e += $_ } (1,2,3); print "$e\n";
+  my $q = 2; $q += 1 if $e; print "$q\n";
+');
+
 done_testing();
