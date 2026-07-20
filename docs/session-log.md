@@ -4,6 +4,76 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 305 (2026-07-21, Fable) — task #81 FIXED: `,` binds tighter than and/or/xor/not (parse_list logical-op reduction) + gen_progn honours static SCALAR_CTX + builtin-named-sub direct-call gate (gen v2-47).
+
+**Root cause of the Moo trigger residue** (task #81): the Sub::Quote'd Moo
+constructor guards each trigger with
+`(exists $args->{"w"} and ($new->{"w"} = $args->{"w"}), ($trigger->(…))),` —
+in perl `,` binds TIGHTER than `and` (perlop), so the trigger is inside the
+guard; PCL comma-split every expression stream BEFORE operator parsing
+(comma effectively loosest), producing `(exists … and assign), trigger` —
+the trigger fired unconditionally with an empty value.  Affected BOTH
+pipelines (the task's "v1 correct" note was wrong — s304 had tested a
+variant masked by the #84 span bug below).
+
+Three fixes, all at single choke points:
+
+1. **`parse_list` logical-op reduction** (`Pl/PExpr.pm`, the one comma-split
+   entry): before splitting on commas, reduce the LOOSEST top-level
+   `and`/`or`/`xor` (rightmost among equals — left assoc; `and => 1`
+   fat-comma keys skipped), each side re-entering `parse()`.  A bare prefix
+   `not` (operand not parenthesized) swallows the comma tail:
+   `(1, not 0, 2)` is `(1, not(0,2))`, while `not(0), 5` stays a call.
+   Ground-truth battery (10 shapes incl. `f(1, 2 and 3, 4)` → `f(3,4)`)
+   matches perl on BOTH pipelines.
+2. **`gen_progn` (text + form variants) honours static SCALAR_CTX**: the
+   runtime `(if *wantarray* (vector …) (progn …))` deferral is now
+   VOID/INHERIT-only — a statically-proven scalar position (and/or LHS, if
+   condition) stays the comma operator even when dynamic *wantarray* is t
+   (same contract gen_tree_val already documented for cmpchain.t).  This
+   exposed the `local(LIST)=(LIST)` / `local(@a[i,j])=(LIST)` lowerings
+   relying on the runtime check: their RHS is now parsed in LIST_CTX
+   (`Pl/Parser.pm`, two sites) and emits a static `(vector …)`.
+3. **ExprToCL2 direct-call builtin gate**: a bare call to a BUILTIN name
+   never direct-calls an in-file `sub` of that name (Perl overrides builtins
+   only via import/&NAME/Pkg::NAME).  Predicate = Config's
+   `known_no_of_params` (the language surface), NOT `%RUNTIME_NAMES` (which
+   also lists internal p-* helpers that are legal user-sub names — see new
+   task #85).  Fixes lib/Sub/Util.pm's `CORE::prototype($code)` self-call
+   (latent infinite recursion; now `(p-prototype …)`, v1 parity) — the
+   second #81 item.
+
+**Verification**: corpus-diff = 6 files, all explained — array.t/
+multideref.t benign static-scalar shapes (same value), bless.t + split.t
+PARSE-ERROR comment text shifts on statements already broken at HEAD
+(split.t's `my ($sp) = grep … or skip …, 9`), local.t/readline.t/split.t
+the static-vector local RHS.  Sweep of all 6 vs fail-baseline: 45 fails,
+0 new / 0 fixed — byte-neutral on test outcomes.  Full gate
+`tools/prove-core`: 117 files / 4314 tests PASS (re-run clean after the
+last edit; includes the 7 new guards).  Fuzzer battery re-run (all axes).  Moo trigger differential:
+no-arg construction fires nothing, with-arg fires once, setter fires —
+= perl on both pipelines.  Gen v2-46 → **v2-47** (emission changed).
+
+**Guards added**: `Pl/t/transpile-test-01b.t` +5 (comma-vs-logical battery,
+`not` shapes, fat-comma keys, local list/slice RHS both directions,
+builtin-named user sub); `Pl/t/moo-01.t` 13 → 15 tags (`trig_absent`,
+`trig_flow` — the formerly-unasserted residue).
+
+**New tasks filed**:
+- **#84** container file-lexical package-span: `package Tw; my @h; …
+  package main;` splits `@h` into two per-package defvars — v2 refuses
+  (span instance path is scalar-only: `SPANREFUSE h sdecls=0`) → dies → v1
+  fallback which is SILENTLY WRONG.  Scalars are handled (identity
+  promotion + cross-package `$Pkg::x` interp fix verified).  This — not the
+  trigger — was why the #81 repro variant with a file-lexical `@history`
+  printed nothing.  Repro shape: `my @h; sub add { push @h, $_[0] }` in Tw
+  + interp-only read from main.
+- **#85** `%RUNTIME_NAMES` collision: `sub aslice {…} aslice()` compiles
+  the call to `(p-aslice)` (internal helper), both pipelines, pre-existing;
+  census lib/ shims (weaken et al.) before narrowing cl_name.
+
+---
+
 ## Session 304 (2026-07-20, Fable) — E2.1 COMPLETE except inline_lambda (five byte-parity conversions, %FUNCALL_FORM_DECLINES deleted) + E3 SHIPPED (eval-mode on v2, gen v2-45).
 
 Five converted-at-byte-parity steps (zero corpus diff on BOTH pipelines

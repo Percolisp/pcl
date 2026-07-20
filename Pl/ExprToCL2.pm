@@ -93,6 +93,16 @@ sub gen_form {
     if ($type eq 'funcall' && @$kids >= 1) {
       my $fnode = $self->expr_o->get_a_node($kids->[0]);
       return undef unless ref($fnode) eq 'PPI::Token::Word';
+      # A bare call to a BUILTIN name is the builtin even when an in-file
+      # `sub NAME` shadows it (Perl overrides builtins only via import /
+      # &NAME / Pkg::NAME) — never direct-call the user sub.  Falls back to
+      # the seam, whose cl_name prefers the builtin (v1 parity: fixes the
+      # lib/Sub/Util.pm `CORE::prototype($code)` self-call, task #81).
+      # The predicate is Config's builtin param-spec table — the LANGUAGE
+      # surface — NOT %RUNTIME_NAMES, which also lists internal p-* helpers
+      # (aslice, gethash, …) that are legal user-sub names.
+      return undef
+        if exists $self->expr_o->known_no_of_params->{ $fnode->content };
       my $info = $self->sub_info->{ $fnode->content } or return undef;
       my @args;
       for my $kid (@$kids[1 .. $#$kids]) {

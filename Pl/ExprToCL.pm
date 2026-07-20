@@ -4537,7 +4537,7 @@ sub gen_progn_form {
     return $all_scalar ? ['vector', @forms]
                        : ['p-flatten-args', ['list', 'list', @forms]];
   }
-  if (@forms > 1 && $ctx != LIST_CTX) {
+  if (@forms > 1 && ($ctx == VOID_CTX || $ctx == INHERIT_CTX)) {
     my @flat;
     for my $i (0 .. $#$kids) {
       my $kid_node = $self->expr_o->get_a_node($kids->[$i]);
@@ -4783,13 +4783,16 @@ sub gen_progn {
         : "(p-flatten-args (list $forms_str))";
   }
 
-  # In non-list context with multiple forms, check wantarray at runtime.
-  # Covers SCALAR_CTX, VOID_CTX, and INHERIT_CTX — all cases where the caller
-  # hasn't explicitly requested a list.  The runtime check handles map blocks
-  # (whose body is compiled in VOID_CTX but whose lambda runs with *wantarray* t).
+  # In VOID/INHERIT context with multiple forms, check wantarray at runtime.
+  # The runtime check handles map blocks (whose body is compiled in VOID_CTX
+  # but whose lambda runs with *wantarray* t) and caller-dependent positions.
+  # Statically-annotated SCALAR_CTX must NOT defer to the dynamic *wantarray*:
+  # a proven-scalar operand position (the LHS of and/or, an if condition, a
+  # cmpchain comparison operand) stays the comma operator (progn) even when
+  # the dynamic *wantarray* happens to be t — same contract as gen_tree_val.
   # Wrap @array items with (p-flatten ...) so %p-collect-list in
   # %p-flatten-for-list can spread @arrays while keeping arrayrefs as scalars.
-  if (@forms > 1 && $ctx != LIST_CTX) {
+  if (@forms > 1 && ($ctx == VOID_CTX || $ctx == INHERIT_CTX)) {
     my @flat_forms;
     for my $i (0 .. $#$kids) {
       my $form = $forms[$i];

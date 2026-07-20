@@ -3016,7 +3016,13 @@ sub _process_local_declaration {
       # not leak into the value parse (which fell through to a "Missing case" die).
       my ($ld_mod, $ld_cond) = $has_init
         ? $self->_split_local_init_modifier(\@rhs_parts) : ('', []);
-      my $init_cl = $has_init ? ($self->_parse_expression(\@rhs_parts, $stmt) // 'nil') : undef;
+      # Slice form (multiple keys): the RHS is a list assignment — parse it in
+      # LIST_CTX so a literal (a, b) emits (vector a b), not a scalar progn.
+      # (The old runtime (if *wantarray* …) shape hid this; gen_progn now
+      # honours the static annotation.)  Single element keeps scalar context.
+      my $init_cl = $has_init
+        ? ($self->_parse_expression(\@rhs_parts, $stmt, (@key_groups > 1 ? 1 : 0)) // 'nil')
+        : undef;
 
       $self->_emit(";; $perl_code");
 
@@ -3312,7 +3318,7 @@ sub _process_local_declaration {
   if ($init_idx >= 0 && @vars > 1) {
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
-    my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
+    my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt, 1) // 'nil';  # 1 = LIST_CTX
     $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
     $self->{_local_counter} //= 0;
     $rhs_tmp_cl = "pcl-local-rhs-" . $self->{_local_counter}++;

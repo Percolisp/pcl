@@ -578,4 +578,54 @@ test_transpile("A-num exclusion: magical string increment counter", '
   my $s = "az"; $s++; print "$s\n";
 ');
 
+# ---- s305 (#81): ',' binds TIGHTER than and/or/xor/not (perlop).  These
+# ---- streams used to be comma-split first, making `A and B, C` parse as
+# ---- `(A and B), C` — the Moo constructor's guarded trigger
+# ---- `exists $a->{w} and (assign), (trigger)` then fired unconditionally.
+
+test_transpile("comma binds tighter than and/or (guard shape)", '
+  my $x = 0; my @r;
+  ($x and push(@r,"b"), push(@r,"c"));
+  print "false:[@r]\n";
+  my $y = 1; my @p;
+  ($y and push(@p,"b"), push(@p,"c"));
+  print "true:[@p]\n";
+');
+
+test_transpile("logical ops own comma lists in args and parens", '
+  sub f { print "f:[@_]\n" }
+  f(1, 2 and 3, 4);
+  my @r = (0, 1 and 2, 3); print "r:[@r]\n";
+  my @s = (5, 0 and 2, 3); print "s:[@s]\n";
+  my @t = (1, 2 or 3, 4); print "t:[@t]\n";
+  my @w = (1 and 2 or 0, 9); print "w:[@w]\n";
+');
+
+test_transpile("not: paren operand vs bare tail-swallow; fat-comma keys", '
+  my @u = (not(0), 5); print "u:[@u] n=", scalar(@u), "\n";
+  my @v = (1, not 0, 2); print "v:[@v]\n";
+  my %h = (and => 1, or => 2); print "h:", $h{and}, $h{or}, "\n";
+');
+
+# gen_progn honours static SCALAR_CTX (no runtime *wantarray* deferral), so
+# the local-list RHS must be parsed in LIST_CTX — both directions guarded.
+test_transpile("local list/slice RHS keeps list context", '
+  our ($a2, $c2) = ("A", "C");
+  sub inner { print "in:$a2 $c2\n" }
+  sub outer { local ($a2, $c2) = ("x 1", "y 2"); inner(); }
+  outer(); print "out:$a2 $c2\n";
+  our @arr = (0..7);
+  sub slicedemo { local (@arr[4,6]) = ("p", "q"); print "in:[@arr]\n" }
+  slicedemo(); print "out:[@arr]\n";
+');
+
+# CORE::<builtin> (and a bare builtin name) inside a file that DEFINES a sub
+# of the same name must call the BUILTIN, not direct-call the user sub
+# (lib/Sub/Util.pm's `sub prototype { CORE::prototype($code) }` self-call).
+test_transpile("builtin-named user sub: bare call is the builtin", '
+  sub prototype { my $c = shift; return CORE::prototype($c); }
+  my $r = prototype(sub {1});
+  print defined $r ? "def\n" : "undef\n";
+');
+
 done_testing();

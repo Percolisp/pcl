@@ -18,9 +18,10 @@
 #     '"Foo" is not a module name!'.
 #
 # One transpiled program prints tag=value lines; we assert one per line.
-# Known residue NOT asserted here: a trigger fires once with an empty value
-# during construction when the attribute is absent from the constructor args
-# (tracked in the task list).
+# trig_absent/trig_flow guard the s305 fix for task #81: the Moo constructor's
+# `exists $args->{w} and (assign), (trigger)` guard used to parse as
+# `(exists and assign), trigger` — comma binds tighter than `and` (perlop) —
+# so the trigger fired unconditionally at construction.
 
 use v5.30;
 use strict;
@@ -57,6 +58,11 @@ package Greeter {
     has greeting => (is => 'rw', default => 'hello');
     sub greet { my $self = shift; $self->greeting . " " . $self->name }
 }
+package Tw {
+    use Moo;
+    has w => (is => 'rw',
+              trigger => sub { push @main::trighist, "t:" . ($_[1] // "u") });
+}
 package Person {
     use Moo;
     has name => (is => 'ro', required => 1);
@@ -91,6 +97,15 @@ print "does=", ($person->does('Greeter') ? 1 : 0), "\n";
 print "modifiers=", $person->greet, "\n";
 print "order=", join(",", @{ $person->calls }), "\n";
 print "role_attr=", $person->greeting, "\n";
+
+our @trighist;
+@trighist = ();
+my $t1 = Tw->new;
+print "trig_absent=", join(",", @trighist), "\n";
+@trighist = ();
+my $t2 = Tw->new(w => 'i');
+$t2->w('s');
+print "trig_flow=", join(",", @trighist), "\n";
 PERL
 
 my %expect = (
@@ -107,6 +122,8 @@ my %expect = (
     modifiers => '<hello ada>',
     order     => 'before,after',
     role_attr => 'hello',
+    trig_absent => '',
+    trig_flow   => 't:i,t:s',
 );
 
 plan tests => scalar(keys %expect);

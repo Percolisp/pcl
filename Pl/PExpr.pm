@@ -1818,6 +1818,59 @@ sub parse_list {
   $e_list       = \@stripped;
   $self->handle_subcalls($e_list, 1); # If a funcall w/o () in the list.
 
+  # Perl precedence: ',' binds TIGHTER than the low-precedence logical
+  # operators (perlop: not > and > or/xor, and all of them are looser than
+  # ',').  These streams reach us comma-first, so a top-level and/or/xor owns
+  # the whole list: `A and B, C` is `A and (B, C)`, and f(1, 2 and 3, 4)
+  # calls f(3, 4).  Reduce the loosest such operator (rightmost among equals
+  # — left assoc) BEFORE any comma split; each side re-enters parse(), where
+  # remaining commas become the usual progn/list handling.  A bare prefix
+  # `not` with commas after it swallows the tail the same way — (1, not 0, 2)
+  # is (1, not(0, 2)) — EXCEPT when its operand is parenthesized: `not(0), 5`
+  # is a func-call-style not((0)) followed by 5.
+  {
+    my %LOGICAL_PREC = (or => 1, xor => 1, and => 2);
+    my ($lo_ix, $lo_prec, $not_ix);
+    for (my $i = 0; $i < scalar(@$e_list); $i++) {
+      my $tok = $e_list->[$i];
+      next if ref($tok) ne 'PPI::Token::Operator';
+      my $op  = $tok->content();
+      # `and => 1` — the fat comma auto-quotes the word; a key, not an op.
+      my $next = $e_list->[$i+1];
+      next if $next && ref($next) eq 'PPI::Token::Operator'
+                    && $next->content() eq '=>';
+      if (exists $LOGICAL_PREC{$op} && $i > 0) {
+        if (!defined $lo_prec || $LOGICAL_PREC{$op} <= $lo_prec) {
+          ($lo_ix, $lo_prec) = ($i, $LOGICAL_PREC{$op});
+        }
+      } elsif ($op eq 'not' && !defined $not_ix && !$self->is_list($next)) {
+        $not_ix = $i;
+      }
+    }
+    if (defined $lo_ix) {
+      my @left  = @$e_list[0 .. $lo_ix - 1];
+      my @right = @$e_list[$lo_ix + 1 .. $#$e_list];
+      my $id_l  = $self->parse(\@left);
+      my $id_r  = $self->parse(\@right);
+      my $n_id  = $self->make_node($e_list->[$lo_ix]);
+      $self->add_child_to_node($n_id, $id_l);
+      $self->add_child_to_node($n_id, $id_r);
+      return [$n_id];
+    }
+    if (defined $not_ix
+        && grep { ref($_) eq 'PPI::Token::Operator' && $_->content() eq ',' }
+                @$e_list[$not_ix + 1 .. $#$e_list]) {
+      my @operand = @$e_list[$not_ix + 1 .. $#$e_list];
+      my $id_term = $self->parse(\@operand);
+      my ($node, $id) = $self->make_node_insert('prefix_op');
+      my $op_id  = $self->make_node($e_list->[$not_ix]);
+      $self->add_child_to_node($id, $op_id);
+      $self->add_child_to_node($id, $id_term);
+      splice @$e_list, $not_ix, scalar(@$e_list) - $not_ix, $node;
+      # fall through to the ordinary comma split with the reduced tail
+    }
+  }
+
   # 1. Split into list with ","-separated. Eval them
   say "Parts in list:\n", dump $e_list         if 4 & DEBUG;
   my $parts     = $self->parse_comma_separated_list($e_list);
