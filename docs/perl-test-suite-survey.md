@@ -515,4 +515,24 @@ Import the highest-signal ones the same way.
 T=/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t
 perl tools/run-perl-suite.pl base/rs.t            # one file: perl-vs-PCL TAP + crash sig
 perl tools/run-perl-suite.pl --dir comp           # all self-contained files in a dir
+perl tools/run-perl-suite.pl --all                # every default dir, files NOT in the
+                                                  # sweep corpus (task #25's companion sweep)
 ```
+
+Since s302 the runner is the **companion sweep** for everything `perl-tests/`
+doesn't cover: parallel (`--jobs`, default 8), runs against a fresh saved SBCL
+core built per invocation (prove-core pattern, ~1.2s/file → ~0.003s), and
+`--all`/`--dir` scans exclude files already copied into the sweep corpus
+(matched by basename + head content — several `t/` files share a basename with
+a corpus file from another dir).  `--include-copied` overrides; `--tsv FILE`
+writes a per-file snapshot (`docs/perl-suite-run.tsv` = the s302 run).
+
+**s302 `--all` snapshot (95 runnable / 528 scanned): 12 OK, 82 DIFF, 1 NOTAP.**
+Scan coverage: op 82-in-corpus + 138 need-harness (only 1 extra runnable —
+op is well covered by the sweep); mro 45 runnable (4 OK, rest = the known
+C3-only/`next::method` gap, `docs/mro-plan.md`); re 21 runnable (crashes:
+regex-engine slack + `\p{}` uniprops gap, `docs/unicode-property-regex-plan.md`);
+comp 16, cmd 5, base 3, opbasic 2, run 2.  **Fully harness-dependent (need the
+`require './test.pl'` fixture route before they can run at all): class 10/10,
+uni 30/30, io 43/44, run 24/26, re 59/80, op 138/221.**  Notable movement vs
+the 2026-06-23 rows: `base/rs.t` 6/35 → 26/15.

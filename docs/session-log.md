@@ -52,6 +52,22 @@ freeze verdicts (use-classification walk; design + deviations recorded in
 raw-numeric-verdict.md) and the S1 fill-pointer append buffer (needs
 raw-string's no-escape proof).
 
+**Session tail — companion sweep for the non-copied perl t/ tests (user
+request):** `tools/run-perl-suite.pl` upgraded in place — same per-file
+output format the survey doc references, plus the sweep's parallel fork
+pool (`--jobs` 8), prove-core's fresh-saved-core fast path, `--all`/
+repeatable `--dir` scans that run exactly the files NOT copied into
+perl-tests/ (corpus match = basename + head content; pure-basename
+matching silently skipped cmd/for.t, class/method.t, most of uni/),
+per-dir scan coverage report, `--tsv` snapshots, NOTAP class (perl itself
+needs the harness — not a divergence).  First `--all` run (docs/
+perl-suite-run.tsv): 95 runnable of 528 scanned — 12 OK, 82 DIFF (mro =
+known C3-only/next::method gap; re = engine slack + `\p{}` uniprops;
+comp/cmd rows match the old survey; base/rs.t improved 6/35 -> 26/15).
+342 files are harness-dependent (`require './test.pl'`): ALL of t/class +
+t/uni, nearly all t/io, 138 of t/op — the fixture route is the next
+coverage unlock for task #25.  Survey doc §How-to-re-run updated.
+
 ---
 
 ## Session 301 (2026-07-20, Fable) — #70 SHIPPED: fork-pipe/dup-open runtime + closure.t FULL PASS — census 111/0, E1 GATE BURN-DOWN COMPLETE (gen v2-42).

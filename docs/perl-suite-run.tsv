@@ -1,0 +1,95 @@
+base/lex.t	120	0	18	1	DIFF	undef-fn:pcl:pl-ok
+base/pat.t	2	0	2	0	OK	
+base/rs.t	41	0	26	15	DIFF	
+cmd/elsif.t	4	0	4	0	OK	
+cmd/for.t	16	0	12	3	DIFF	
+cmd/mod.t	15	0	15	0	OK	
+cmd/subval.t	36	0	26	2	DIFF	unbound:F
+cmd/switch.t	18	0	18	0	OK	
+comp/bproto.t	16	0	10	6	DIFF	
+comp/cmdopt.t	44	0	44	0	OK	
+comp/colon.t	25	0	14	11	DIFF	
+comp/decl.t	9	0	6	0	DIFF	
+comp/final_line_num.t	1	0	0	0	DIFF	
+comp/fold.t	35	0	11	12	DIFF	undef-fn:main::pl-INSTALL
+comp/form_scope.t	14	0	0	2	DIFF	
+comp/multiline.t	6	0	6	0	OK	
+comp/opsubs.t	36	0	31	5	DIFF	
+comp/our.t	7	0	0	7	DIFF	
+comp/package_block.t	7	0	3	4	DIFF	
+comp/redef.t	20	0	1	19	DIFF	
+comp/retainedlines.t	109	0	19	90	DIFF	
+comp/term.t	23	0	23	0	OK	
+comp/uproto.t	32	0	13	21	DIFF	
+comp/utf.t	4216	0	12	4204	DIFF	
+mro/basic_01_c3.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_01_c3_utf8.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_01_dfs.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_01_dfs_utf8.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_02_c3.t	10	0	3	3	DIFF	crash:simple-error
+mro/basic_02_c3_utf8.t	10	0	3	3	DIFF	crash:simple-error
+mro/basic_02_dfs.t	10	0	3	3	DIFF	crash:simple-error
+mro/basic_02_dfs_utf8.t	10	0	3	3	DIFF	crash:simple-error
+mro/basic_03_c3.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_03_c3_utf8.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_03_dfs.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_03_dfs_utf8.t	4	0	0	1	DIFF	crash:simple-error
+mro/basic_04_c3.t	1	0	0	1	DIFF	
+mro/basic_04_c3_utf8.t	1	0	0	1	DIFF	
+mro/basic_04_dfs.t	1	0	0	1	DIFF	
+mro/basic_04_dfs_utf8.t	1	0	0	1	DIFF	
+mro/basic_05_c3.t	2	0	0	1	DIFF	crash:simple-error
+mro/basic_05_c3_utf8.t	2	0	0	1	DIFF	crash:simple-error
+mro/basic_05_dfs.t	2	0	0	1	DIFF	crash:simple-error
+mro/basic_05_dfs_utf8.t	2	0	0	1	DIFF	crash:simple-error
+mro/basic_utf8.t	53	0	0	0	DIFF	crash:sb-c::input-error-in-load
+mro/c3_with_overload.t	7	0	7	0	OK	
+mro/c3_with_overload_utf8.t	7	0	7	0	OK	
+mro/complex_c3.t	12	0	11	0	DIFF	crash:simple-error
+mro/complex_c3_utf8.t	12	0	11	0	DIFF	crash:simple-error
+mro/complex_dfs.t	11	0	9	2	DIFF	
+mro/complex_dfs_utf8.t	11	0	9	2	DIFF	
+mro/dbic_c3.t	1	0	1	0	OK	
+mro/dbic_c3_utf8.t	1	0	1	0	OK	
+mro/dbic_dfs.t	1	0	0	1	DIFF	
+mro/dbic_dfs_utf8.t	1	0	0	1	DIFF	
+mro/next_goto.t	4	0	0	0	DIFF	undef-fn:next::pl-method
+mro/next_goto_utf8.t	4	0	0	0	DIFF	crash:sb-c::input-error-in-load
+mro/next_inanon.t	2	0	0	0	DIFF	crash:simple-error
+mro/next_inanon_utf8.t	2	0	0	0	DIFF	crash:simple-error
+mro/next_ineval.t	1	0	0	1	DIFF	
+mro/next_ineval_utf8.t	1	0	0	0	DIFF	crash:simple-error
+mro/next_method.t	5	0	0	1	DIFF	crash:simple-error
+mro/next_method_utf8.t	5	0	0	1	DIFF	crash:simple-error
+mro/next_skip.t	10	0	0	1	DIFF	crash:simple-error
+mro/next_skip_utf8.t	10	0	0	1	DIFF	crash:simple-error
+mro/vulcan_c3.t	1	0	0	1	DIFF	
+mro/vulcan_c3_utf8.t	1	0	0	1	DIFF	
+mro/vulcan_dfs.t	1	0	0	1	DIFF	
+mro/vulcan_dfs_utf8.t	1	0	0	1	DIFF	
+op/inccode-tie.t	89	0	0	0	DIFF	crash:simple-error
+opbasic/cmp.t	13280	0	12078	0	DIFF	
+opbasic/magic_phase.t	7	0	0	4	DIFF	
+re/alpha_assertions.t	2279	0	468	0	DIFF	crash:simple-error
+re/regex_sets_compat.t	2167	2	98	0	DIFF	crash:simple-error
+re/regexp_noamp.t	2169	0	8	0	DIFF	crash:simple-error
+re/regexp_nonull.t	2167	2	0	0	DIFF	
+re/regexp_normal.t	2169	0	523	0	DIFF	crash:simple-error
+re/regexp_notrie.t	2167	2	8	0	DIFF	crash:simple-error
+re/regexp_qr.t	2167	2	8	0	DIFF	crash:simple-error
+re/regexp_qr_embed.t	2167	2	8	0	DIFF	crash:simple-error
+re/regexp_trielist.t	2167	2	8	0	DIFF	crash:simple-error
+re/substT.t	0	0	0	0	NOTAP	
+re/subst_wamp.t	281	0	0	0	DIFF	
+re/uniprops01.t	39811	0	0	0	DIFF	crash:simple-error
+re/uniprops02.t	39961	0	0	0	DIFF	crash:simple-error
+re/uniprops03.t	39793	0	0	0	DIFF	crash:simple-error
+re/uniprops04.t	39759	0	0	0	DIFF	crash:simple-error
+re/uniprops05.t	17394	0	0	0	DIFF	crash:simple-error
+re/uniprops06.t	31724	0	0	0	DIFF	crash:simple-error
+re/uniprops07.t	29260	0	0	0	DIFF	crash:simple-error
+re/uniprops08.t	30492	0	0	0	DIFF	crash:simple-error
+re/uniprops09.t	29848	0	0	0	DIFF	crash:simple-error
+re/uniprops10.t	26334	0	0	0	DIFF	crash:simple-error
+run/switchF1.t	5	0	5	0	OK	
+run/switchp.t	3	0	1	0	DIFF	
