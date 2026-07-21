@@ -4,9 +4,12 @@
 
 ```bash
 $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
-    | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
+    | ./pl2cl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /dev/stdin
 2,4,6,8,10
 ```
+
+(Not `--script`: that flag skips `~/.sbclrc`, so a Quicklisp-installed cl-ppcre
+becomes invisible to ASDF and the runtime fails to load.)
 
 The `pcl` command runs one-liners directly, including `-M` imports of pure-Perl CPAN modules:
 
@@ -37,14 +40,14 @@ This is a genuinely new implementation. PCL does **not** embed, link, or reimple
 ## Quick Start
 
 ```bash
-# Dependencies: Perl 5.20+, PPI, Moo, SBCL 2.5.2+, cl-ppcre (via Quicklisp)
+# Dependencies: Perl 5.20+, PPI, Moo, SBCL 2.5.2+ (see below), cl-ppcre (via Quicklisp)
 cpanm PPI Moo
 sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 
 # Transpile and run
-echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --load cl/pcl-runtime.lisp --script /dev/stdin
+echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /dev/stdin
 
-# Run the internal test suite (114 files, 3916 tests)
+# Run the internal test suite (117 files, 4330 tests)
 prove -j8 Pl/t/
 
 # Faster: run it against a saved SBCL core (runtime pre-compiled in).
@@ -60,7 +63,17 @@ speed cache. Plain `prove -j8 Pl/t/` always works and stays the reference; the
 core path is opt-in via `tools/prove-core` (or by setting `PCL_TEST_CORE` to a
 core path yourself).
 
-(PCL is currently a little sensitive to the Common Lisp version it runs on; this will be sorted out before the first release.)
+### Minimum SBCL version: 2.5.2
+
+The runtime uses SBCL-internal APIs (`sb-unicode`, float bit accessors, …), and
+the test suite is validated on 2.5.2 and 2.6.0 — so **SBCL 2.5.2 is the hard
+floor**, enforced with a clear error when `cl/pcl-runtime.lisp` loads (the
+`pcl` runner also warns at startup). Distribution packages that qualify:
+**Debian 13 “trixie”** and **Ubuntu 25.10 / 26.04 LTS** ship 2.5.2+; anything
+older (Debian 12: 2.2.9, Ubuntu 24.04 LTS: 2.2.9, Ubuntu 22.04 LTS: 2.1.11)
+does not — on those, install the current binary from
+[sbcl.org](https://www.sbcl.org/platform-table.html) (a home-directory install
+works fine and needs no root).
 
 ## Example
 
@@ -80,7 +93,7 @@ print $d->speak(), "\n";
 ```
 
 ```bash
-$ ./pl2cl input.pl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
+$ ./pl2cl input.pl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /dev/stdin
 I am Rex and I bark
 ```
 

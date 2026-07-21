@@ -154,11 +154,32 @@ sub transpile {
   return $tmp;
 }
 
+# Startup check: warn (do not die) when the system SBCL is below PCL's floor.
+# The runtime load enforces the floor with a hard error; this warning explains
+# the situation BEFORE that error scrolls past.  Distribution packages are the
+# usual culprit (Ubuntu <= 25.04 ships 2.2.9 or older; Debian 12 ships 2.2.9).
+sub check_sbcl_version {
+  my ($line) = `sbcl --version 2>/dev/null`;
+  return unless defined $line && $line =~ /\bSBCL\s+(\d+)\.(\d+)(?:\.(\d+))?/;
+  my @v   = ($1, $2, $3 // 0);
+  my @min = (2, 5, 2);
+  for my $i (0 .. 2) {
+    next if $v[$i] == $min[$i];
+    if ($v[$i] < $min[$i]) {
+      warn "pcl: warning: SBCL $v[0].$v[1].$v[2] is older than PCL's minimum 2.5.2 —\n"
+         . "pcl: the runtime will refuse to load.  Use Debian 13+ / Ubuntu 25.10+,\n"
+         . "pcl: or install a current SBCL binary from https://www.sbcl.org/\n";
+    }
+    last;
+  }
+}
+
 # Build the SBCL command and exec it (replacing this process so the script's
 # exit code becomes pcl's). @ARGV is injected as a fresh vector of raw strings;
 # warnings/verbose load chatter is muffled so only the program's own output shows.
 sub exec_sbcl {
   my ($lisp, $args) = @_;
+  check_sbcl_version();
 
   my $argv_form = '(setf pcl::@ARGV '
     . cl_string_vector(@$args) . ')';
@@ -198,6 +219,7 @@ sub find_core {
 
 sub make_core {
   my $c = $ENV{PCL_CORE} // "$cache_dir/pcl.core";
+  check_sbcl_version();
   mkdir $cache_dir, 0755 unless -d $cache_dir;
   say "pcl: building core $c";
   my $rc = run('sbcl', '--noinform', '--non-interactive',
