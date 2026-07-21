@@ -865,4 +865,36 @@ my $r = _kv . "-tail";
 print "$r\n";
 ');
 
+# ============ EMBEDDED-BLOCK STRUCTURED LOWERING (task #78) ============
+
+test_transpile("eval-block tail inherits call-site context", '
+sub f { wantarray ? ("a","b") : "s" }
+my @x = eval { f() };
+my $y = eval { f() };
+print "@x|$y\n";
+');
+
+test_transpile("map block per-iteration closure capture", '
+my @subs = map { my $n = $_; sub { $n * 10 } } (1,2,3);
+print $subs[0]->(), $subs[1]->(), $subs[2]->(), "\n";
+');
+
+test_transpile("early return from map block leaves the sub", '
+sub outer { my @x = map { return "early" if $_ == 2; $_ } @_; "full:@x" }
+print outer(1,3), "|", outer(2), "\n";
+');
+
+test_transpile("yada-yada statement in a sub body dies Unimplemented", '
+sub u { ... }
+eval { u() };
+print $@ =~ /^Unimplemented/ ? "died\n" : "no:$@\n";
+');
+
+test_transpile("multi-statement sort block with side effects", '
+my %h = (a=>3, b=>1, c=>2);
+my $cmps = 0;
+my @k = sort { $cmps++; $h{$a} <=> $h{$b} } keys %h;
+print "@k|", ($cmps > 0 ? "counted" : "none"), "\n";
+');
+
 done_testing();

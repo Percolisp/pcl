@@ -786,6 +786,11 @@ sub _tw_expr_parse {
     # in the REAL lowering if relevant, and several test helpers merge
     # pl2cl's stderr into the generated CL — so silence warns here.
     local $SIG{__WARN__} = sub { };
+    # No _v2_embed hook (task #78) in analysis parses: it may be live when
+    # this analysis runs inside an embedded-block lowering, and an
+    # analysis-triggered Parser2 lowering would be pure discarded side
+    # effects (worst case unbounded block-in-block recursion).
+    local $p->{_v2_embed};
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
       environment => $ctx->{host}->environment,

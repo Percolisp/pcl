@@ -361,4 +361,42 @@ EOF
   is($run->($ste), "123 24 1 outerouter\n", 'state: persistence, once-init, outer-reading init match perl');
 }
 
+# ---- task #78: embedded map/grep/sort/eval{} blocks lower structurally ----
+# The lambda is a CLForm (one flat form, no ";; echo" comment lines, no
+# fixed multiline layout); declined shapes keep v1's text (body_cl).
+{
+  my $mp = Pl::Parser2->parse_code(
+    q{my @a = (1,2,3); my @b = map { $_ + 1 } @a;});
+  like($mp, qr/\(p-map \(lambda \(\$_\) \(p-\+ \$_ 1\)\) \@a\)/,
+       '#78: map block emits one structured (lambda ($_) …) form');
+  unlike($mp, qr/\(lambda \(\$_\)\n/,
+         '#78: no v1 multiline lambda layout for a native block');
+
+  my $st = Pl::Parser2->parse_code(
+    q{my @a = (3,1); my @s = sort { $a <=> $b } @a;});
+  like($st,
+       qr/\(p-sort \(lambda \(\$a \$b\) \(catch :p-return \(block nil \(let \(\(\*wantarray\* nil\)\) \(p-<=> \$a \$b\)\)\)\)\) \@a\)/,
+       '#78: sort block keeps catch/block/wantarray wrappers, structurally');
+
+  my $ev = Pl::Parser2->parse_code(q{my $e = eval { 42 };});
+  like($ev, qr/\(p-eval-block 42\)/, '#78: eval block body is structural');
+
+  # local inside the block → raw_wrap → decline → v1 text route (multiline).
+  my $lc = Pl::Parser2->parse_code(
+    q{my @a = (1); my @q = map { local $_ = 5; $_ } @a;});
+  like($lc, qr/\(lambda \(\$_\)\n/,
+       '#78: local-in-block declines to the v1 text body');
+
+  # package inside the block → decline (v1 owns the revert wrapper).
+  my $pk = Pl::Parser2->parse_code(
+    q{my @r = map { package XM; $_ * 2 } (1, 2, 3);});
+  like($pk, qr/\(\*pcl-current-package\* \*pcl-current-package\*\)/,
+       '#78: package-in-block keeps v1 revert wrapper');
+
+  # Bare `...` statement lowers natively (was a PARSE ERROR raw at file level).
+  my $yy = Pl::Parser2->parse_code(q{...;});
+  like($yy, qr/\(p-die "Unimplemented" :loc/,
+       '#78: bare yada-yada statement lowers to p-die Unimplemented');
+}
+
 done_testing();

@@ -4,6 +4,84 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 306 (2026-07-21, Fable) — task #78 CORE SHIPPED: embedded-block re-host — map/grep/sort/eval{} bodies lower structurally through Parser2 (gen v2-50); + SBCL 2.5.2 floor check.
+
+**The re-host** (E2's last big decline, `inline_lambda`): in the v2 pipeline,
+PExpr's map/grep/sort/eval{} block sites now call Parser2's
+`lower_embedded_block` (via the fallback parser's `_v2_embed` coderef slot)
+instead of v1's `parse_block_to_cl_string`.  The block's statements lower
+through `_lower_block` (fresh VarAnnotator facts for block-locals — outer
+names conservatively boxed since they carry no in-region decl), and the
+inline_lambda node carries `body_form` (arrayref of CLForms) instead of
+`body_cl` text.  New `gen_inline_lambda_form` (registered in form_handlers)
+emits `(lambda (params) …)` structurally with v1's exact wrappers (sort:
+catch :p-return / block nil / *wantarray* nil; map/grep/eval: none);
+the funcall eval branch emits `(p-eval-block ,@body)` from body_form.
+
+**Hook discipline**: enabled ONLY around real v1 lowering (`_lower_expr`'s
+fallback `_parse_expression` + `_fallback_stmt_capture`'s `_process_element`);
+explicitly cleared in the native attempt and in every analysis parse
+(VarAnnotator `_tw_expr_parse`, `_expr_scalar_rooted`) — a discarded parse
+must not run Parser2 side effects.  Declines are transactional: PPI state
+snapshot/restore, `_live_lex`/`_let_bound_vars`/scope-depth restore,
+`_captured_decls`/hoist-buffer truncation.
+
+**Declined shapes (stay on v1's text route, files never re-gate)**: hash-
+constructor blocks, `->` deref chains after the block, tail statement with
+a modifier / declaration / compound, `package` statement anywhere in the
+block (v1's `(*package* *pcl-current-package*)` revert wrapper vs the native
+nested-package branch that relies on p-sub's dynamic bind — it leaked out of
+a bare lambda), named/scalar sort comparators, and any lowered form
+containing raw_wrap (v1 `local` machinery) or a raw ending in a line
+comment (flat printing would swallow siblings).
+
+**Tail context = 'inherit' (grep/sort/eval), LIST (map)**: v1 suppresses
+every dynamic *wantarray* wrap on the tail's spine call (env tail_position)
+so the enclosing macro's binding flows — p-map t, p-grep nil, eval{} the
+call site's.  A first-cut `:void` tail bind broke `my @x = eval { f() }`
+(collapsed to scalar shape) — caught by probe, fixed, guarded.
+
+**Two v1 latent bugs fixed on v2 en route**: (1) v1's
+parse_block_to_cl_string CLOBBERS env tail_position to 0, so a sub tail
+statement containing an embedded block lost its caller-context restore
+under the void regime (and eval-block/grep tails mis-shaped:
+`my @x = eval { f() }` → "b" under PCL_V1 — still broken there, v2 fixed);
+(2) bare `...` (yada-yada) statement had NO v2 statement handling — even at
+file level it emitted a PARSE ERROR raw; `_lower_stmt` now lowers it
+natively to v1's exact `(p-die "Unimplemented" :loc …)`.  Also silenced
+the `_expr_scalar_rooted` analysis-parse PExpr warn leak (test helpers
+merge pl2cl stderr into the CL).
+
+**Verification**: corpus-diff v2 = 49 of 111 files, classes all identified
+(lambda restructure + dropped `;;` echoes; context binds semantically equal
+to macro flow; tail-restore now correctly applied).  PCL_V1 corpus-diff =
+ZERO (v1 byte-identical).  Sweep of all 49 vs fail-baseline: **0 new /
+0 fixed**; reset.t/state.t PARTIAL early-stops byte-identical to a HEAD
+control sweep.  Fuzzer battery 1056/1060 — same 4 documented residuals.
+Full gate `tools/prove-core`: **117 files / 4330 tests PASS**.  PCL_V1
+gate failure set = HEAD's exactly + the 1 new v2-only guard (eval-block
+tail context — proven broken under v1).  Gen v2-49 → **v2-50**.
+
+**Guards**: `Pl/t/parser2-02.t` +7 (structured lambda shapes, sort wrappers,
+eval-block body, local/package declines, yada native); `Pl/t/
+transpile-test-04b.t` +5 (eval-tail context, per-iteration closure capture
+in map — v1 needed special machinery, v2 gets it from let-per-invocation —
+early return from map, yada in sub body, multi-statement sort block).
+
+**Also (user request)**: `cl/pcl-runtime.lisp` now enforces the SBCL >= 2.5.2
+floor at load with a clear error, and wraps the cl-ppcre ASDF load with a
+diagnostic explaining the `--script`-skips-~/.sbclrc Quicklisp trap
+(docs/error-pcre.txt from the work machine — SBCL 2.1.11 + `--script`).
+
+**NOT yet in #78's scope (remaining for E2.final)**: do{}/anon-sub
+`raw_lambda` bodies (parse_block_as_function), hash-constructor blocks,
+declined shapes above, empty-shape trailing-space quirks, `\(RANGE,…)`
+range-mix, delete of the text printer path + raw/raw_wrap.  VarAnnotator's
+`seam` walk stays (correct-conservative) until every embedded route is
+structural.
+
+---
+
 ## Session 305 (2026-07-21, Fable) — task #81 FIXED: `,` binds tighter than and/or/xor/not (parse_list logical-op reduction) + gen_progn honours static SCALAR_CTX + builtin-named-sub direct-call gate (gen v2-47).
 
 **Root cause of the Moo trigger residue** (task #81): the Sub::Quote'd Moo

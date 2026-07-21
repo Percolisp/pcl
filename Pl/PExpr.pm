@@ -2062,6 +2062,20 @@ sub _attach_glob_slot {
   }
 }
 
+# task #78 (E2): structured lowering of a map/grep/sort/eval{} block body
+# through the v2 statement machinery.  The hook (a plain coderef in the
+# parser's `_v2_embed` slot) is installed by Parser2 around REAL v1 lowering
+# calls only; it returns an arrayref of CLForms for the lambda body, or
+# undef to decline — the caller then produces v1's `body_cl` text as before.
+# Hash-constructor blocks keep their dedicated text route.
+sub _v2_embedded_body {
+  my ($self, $block, $func_name) = @_;
+  return undef unless $self->has_parser;
+  my $hook = $self->parser->{_v2_embed} or return undef;
+  return undef if _block_is_hash_constructor($block);
+  return $hook->($block, $func_name);
+}
+
 sub _block_is_hash_constructor {
   my $block = shift;
   my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
@@ -2572,29 +2586,42 @@ sub handle_subcalls {
 
           if ($self->has_parser) {
             my $params = ($func_name eq 'sort') ? ['$a', '$b'] : ['$_'];
-            my $body_cl = _block_is_hash_constructor($block)
-              ? $self->parser->parse_hash_block_to_cl_string($block)
-              : $self->parser->parse_block_to_cl_string($block, $func_name);
+            # task #78: a following -> deref chain wraps body_cl text — keep
+            # those on the v1 route (checked BEFORE the hook so a declined
+            # block is never lowered twice).
+            my $has_deref = @rest_ch >= 2
+              && ref($rest_ch[0]) eq 'PPI::Token::Operator'
+              && $rest_ch[0]->content eq '->'
+              && ref($rest_ch[1]) eq 'PPI::Structure::Subscript';
+            my $body_form = $has_deref
+              ? undef : $self->_v2_embedded_body($block, $func_name);
+            my $body_cl;
+            if (!$body_form) {
+              $body_cl = _block_is_hash_constructor($block)
+                ? $self->parser->parse_hash_block_to_cl_string($block)
+                : $self->parser->parse_block_to_cl_string($block, $func_name);
 
-            # Handle -> deref chain after block in paren form: grep({HASH}->{key}, LIST)
-            # @rest_ch starts with -> subscript pairs; consume them into body_cl.
-            while (@rest_ch >= 2
-                   && ref($rest_ch[0]) eq 'PPI::Token::Operator'
-                   && $rest_ch[0]->content eq '->'
-                   && ref($rest_ch[1]) eq 'PPI::Structure::Subscript') {
-              my $sub = $rest_ch[1];
-              my $start = $sub->start->content;
-              my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
-              last unless defined $key_cl;
-              $body_cl = ($start eq '{')
-                  ? "(p-gethash-deref $body_cl $key_cl)"
-                  : "(p-aref-deref $body_cl $key_cl)";
-              splice @rest_ch, 0, 2;
+              # Handle -> deref chain after block in paren form: grep({HASH}->{key}, LIST)
+              # @rest_ch starts with -> subscript pairs; consume them into body_cl.
+              while (@rest_ch >= 2
+                     && ref($rest_ch[0]) eq 'PPI::Token::Operator'
+                     && $rest_ch[0]->content eq '->'
+                     && ref($rest_ch[1]) eq 'PPI::Structure::Subscript') {
+                my $sub = $rest_ch[1];
+                my $start = $sub->start->content;
+                my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
+                last unless defined $key_cl;
+                $body_cl = ($start eq '{')
+                    ? "(p-gethash-deref $body_cl $key_cl)"
+                    : "(p-aref-deref $body_cl $key_cl)";
+                splice @rest_ch, 0, 2;
+              }
             }
 
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
-            $lambda_node->{params}   = $params;
-            $lambda_node->{body_cl}  = $body_cl;
+            $lambda_node->{params}    = $params;
+            $lambda_node->{body_cl}   = $body_cl;
+            $lambda_node->{body_form} = $body_form if $body_form;
             $lambda_node->{for_func} = $func_name;
             $self->add_child_to_node($top_id, $lambda_id);
           } else {
@@ -2726,34 +2753,47 @@ sub handle_subcalls {
           # For other blocks, use named function (may need to be called separately)
           if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
               || $func_name eq 'eval') {
-            # Parse block body as CL string
-            my $body_cl = _block_is_hash_constructor($next)
-              ? $self->parser->parse_hash_block_to_cl_string($next)
-              : $self->parser->parse_block_to_cl_string($next, $func_name);
+            # task #78: a following -> deref chain wraps body_cl text — keep
+            # those on the v1 route (checked BEFORE the hook so a declined
+            # block is never lowered twice).
+            my $has_deref = $i + 3 < @$e
+              && ref($e->[$i + 2]) eq 'PPI::Token::Operator'
+              && $e->[$i + 2]->content eq '->'
+              && ref($e->[$i + 3]) eq 'PPI::Structure::Subscript';
+            my $body_form = $has_deref
+              ? undef : $self->_v2_embedded_body($next, $func_name);
+            my $body_cl;
+            if (!$body_form) {
+              # Parse block body as CL string
+              $body_cl = _block_is_hash_constructor($next)
+                ? $self->parser->parse_hash_block_to_cl_string($next)
+                : $self->parser->parse_block_to_cl_string($next, $func_name);
 
-            # Handle -> deref chain after block: grep {HASH}->{key}, LIST
-            # Consume any leading '-> subscript' pairs from @$e[$i+2..], wrapping body_cl.
-            while ($i + 2 + $deref_skip < @$e
-                   && ref($e->[$i + 2 + $deref_skip]) eq 'PPI::Token::Operator'
-                   && $e->[$i + 2 + $deref_skip]->content eq '->'
-                   && $i + 3 + $deref_skip < @$e
-                   && ref($e->[$i + 3 + $deref_skip]) eq 'PPI::Structure::Subscript') {
-              my $sub = $e->[$i + 3 + $deref_skip];
-              my $start = $sub->start->content;
-              my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
-              last unless defined $key_cl;
-              if ($start eq '{') {
-                $body_cl = "(p-gethash-deref $body_cl $key_cl)";
-              } else {
-                $body_cl = "(p-aref-deref $body_cl $key_cl)";
+              # Handle -> deref chain after block: grep {HASH}->{key}, LIST
+              # Consume any leading '-> subscript' pairs from @$e[$i+2..], wrapping body_cl.
+              while ($i + 2 + $deref_skip < @$e
+                     && ref($e->[$i + 2 + $deref_skip]) eq 'PPI::Token::Operator'
+                     && $e->[$i + 2 + $deref_skip]->content eq '->'
+                     && $i + 3 + $deref_skip < @$e
+                     && ref($e->[$i + 3 + $deref_skip]) eq 'PPI::Structure::Subscript') {
+                my $sub = $e->[$i + 3 + $deref_skip];
+                my $start = $sub->start->content;
+                my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
+                last unless defined $key_cl;
+                if ($start eq '{') {
+                  $body_cl = "(p-gethash-deref $body_cl $key_cl)";
+                } else {
+                  $body_cl = "(p-aref-deref $body_cl $key_cl)";
+                }
+                $deref_skip += 2;
               }
-              $deref_skip += 2;
             }
 
             # Create inline_lambda node
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
-            $lambda_node->{params}   = $params;
-            $lambda_node->{body_cl}  = $body_cl;
+            $lambda_node->{params}    = $params;
+            $lambda_node->{body_cl}   = $body_cl;
+            $lambda_node->{body_form} = $body_form if $body_form;
             $lambda_node->{for_func} = $func_name;
             $lambda_node->{deref_skip} = $deref_skip;
             $self->add_child_to_node($top_id, $lambda_id);

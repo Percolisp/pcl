@@ -1,7 +1,21 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s295c-2 (2026-07-18, Fable): census 106 v2-native / 5 gated,
+**State updated s306 (2026-07-21, Fable): task #78 CORE SHIPPED — the
+`inline_lambda` re-host: map/grep/sort/eval{} block bodies lower
+structurally through Parser2's `lower_embedded_block` (PExpr `_v2_embed`
+hook; body_form CLForms on the node; `gen_inline_lambda_form`), with
+transactional declines to v1 text for hash-constructor / deref-chain /
+tail-modifier / tail-decl / tail-compound / package-in-block / raw_wrap
+shapes.  Gen v2-50; gate 117 files / 4330 tests green; PCL_V1 byte-diff
+zero and failure set = HEAD + 1 new v2-only guard; 49-file sweep 0 new/
+0 fixed; fuzzer 1056/1060 (same 4 documented).  REMAINING for E2.final:
+do{}/anon-sub `raw_lambda` bodies, hash-constructor blocks, the declined
+shapes, empty-shape quirks, `\(RANGE,…)`, then delete text printer +
+raw/raw_wrap (ExprToCL2 folds away).  s306 session-log entry has the
+detail (incl. the two v1 latent bugs fixed on v2: tail_position clobber,
+bare `...` statement).**
+**Previous state s295c-2 (2026-07-18, Fable): census 106 v2-native / 5 gated,
 cache gen v2-37, v2 gate green (115 files / 4073 tests).  Conditional-my +
 Scheduled-block (BEGIN/END) capture promotion shipped; lfs.t de-gated;
 closure.t's residual gate = bare fork-pipe open (runtime gap, task #70 =

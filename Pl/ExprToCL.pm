@@ -130,6 +130,7 @@ sub _build_form_handlers {
     'kv_slice_h_acc'   => \&gen_kv_hash_slice_form,
     'kv_slice_a_acc'   => \&gen_kv_array_slice_form,
     'progn'            => \&gen_progn_form,
+    'inline_lambda'    => \&gen_inline_lambda_form,
     'glob'             => \&gen_glob_form,
     'backtick'         => \&gen_backtick_form,
     'readline'         => \&gen_readline_form,
@@ -1768,6 +1769,10 @@ sub gen_funcall_form {
         return $wrap->(['p-eval-block', @body_forms]);
       }
       elsif ($arg_node->{type} eq 'inline_lambda') {
+        # task #78: a Parser2-lowered body arrives structured (body_form).
+        if (my $bf = $arg_node->{body_form}) {
+          return $wrap->(['p-eval-block', @$bf]);
+        }
         my $body = $arg_node->{body_cl} // 'nil';
         return $wrap->(['p-eval-block', Pl::CLForm::raw($body)]);
       }
@@ -2585,8 +2590,13 @@ sub gen_funcall {
         return $wrap->("(p-eval-block $body)");
       }
       elsif ($arg_node->{type} eq 'inline_lambda') {
-        # eval { block } parsed as inline_lambda (avoids defun side-effect)
-        my $body = $arg_node->{body_cl} // 'nil';
+        # eval { block } parsed as inline_lambda (avoids defun side-effect).
+        # task #78 safety net: a Parser2-lowered body has body_form only —
+        # flat-print it (the form branch normally intercepts this shape).
+        my $body = defined $arg_node->{body_cl} ? $arg_node->{body_cl}
+                 : $arg_node->{body_form}
+                 ? join(' ', map { Pl::CLForm::to_flat($_) } @{$arg_node->{body_form}})
+                 : 'nil';
         return $wrap->("(p-eval-block $body)");
       }
       elsif ($arg_node->{type} eq 'func_ref') {
@@ -5346,7 +5356,13 @@ sub gen_inline_lambda {
   my $kids    = shift;
 
   my $params   = join(' ', @{$node->{params} // []});
-  my $body     = $node->{body_cl} // 'nil';
+  # task #78 safety net: a Parser2-lowered body carries body_form only; the
+  # form handler normally intercepts it, but flat-print here too so no text
+  # caller can ever see a bodyless lambda.
+  my $body     = defined $node->{body_cl} ? $node->{body_cl}
+               : $node->{body_form}
+               ? join(' ', map { Pl::CLForm::to_flat($_) } @{$node->{body_form}})
+               : 'nil';
   my $for_func = $node->{for_func} // '';
 
   # Named sort comparator (sort NAME LIST).
@@ -5398,6 +5414,27 @@ sub gen_inline_lambda {
     return "(lambda ($params)\n  (catch :p-return\n    (block nil\n(let ((*wantarray* nil))\n$body))))";
   }
   return "(lambda ($params)\n$body)";
+}
+
+# E2 form variant (task #78): only for a Parser2-lowered body (`body_form`,
+# an arrayref of CLForms — see Pl::Parser2::lower_embedded_block); every
+# other shape (v1 pipeline, named/scalar sort comparators, declined blocks)
+# keeps the text emitter's fixed multiline layouts via body_cl.  Same
+# wrappers as the text emitter: sort comparators get the :p-return catch and
+# the scalar-context *wantarray* bind; grep/map/eval bodies get neither
+# (`return` inside them must propagate to the enclosing sub's catch).
+sub gen_inline_lambda_form {
+  my ($self, $node, $node_id, $kids) = @_;
+  my $bf = $node->{body_form} or return undef;
+  return undef if $node->{comparator_name} || $node->{scalar_cmp};
+  my $params = ['list', @{$node->{params} // []}];
+  if (($node->{for_func} // '') eq 'sort') {
+    return ['lambda', $params,
+            ['catch', ':p-return',
+             ['block', 'nil',
+              ['let', ['list', ['list', '*wantarray*', 'nil']], @$bf]]]];
+  }
+  return ['lambda', $params, @$bf];
 }
 
 

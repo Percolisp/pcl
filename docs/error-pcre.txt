@@ -1,0 +1,59 @@
+   $ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
+This is SBCL 2.1.11.debian, an implementation of ANSI Common Lisp.
+More information about SBCL is available at <http://www.sbcl.org/>.
+
+SBCL is free software, provided as is, with absolutely no warranty.
+It is mostly in the public domain; some portions are provided under
+BSD-style licenses.  See the CREDITS and COPYING files in the
+distribution for more information.
+To load "cl-ppcre":
+  Load 1 ASDF system:
+    cl-ppcre
+; Loading "cl-ppcre"
+..
+
+
+   $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";'   | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --script /dev/stdin
+This is SBCL 2.1.11.debian, an implementation of ANSI Common Lisp.
+More information about SBCL is available at <http://www.sbcl.org/>.
+
+SBCL is free software, provided as is, with absolutely no warranty.
+It is mostly in the public domain; some portions are provided under
+BSD-style licenses.  See the CREDITS and COPYING files in the
+distribution for more information.
+While evaluating the form starting at line 10, column 0
+  of #P"/home/bernt_budde/pcl/cl/pcl-runtime.lisp":
+Unhandled ASDF/FIND-COMPONENT:MISSING-COMPONENT in thread #<SB-THREAD:THREAD "main thread" RUNNING
+                                                             {1001834103}>:
+  Component :CL-PPCRE not found
+
+Backtrace for: #<SB-THREAD:THREAD "main thread" RUNNING {1001834103}>
+0: (SB-DEBUG::DEBUGGER-DISABLED-HOOK Component :CL-PPCRE not found #<unused argument> :QUIT T)
+1: (SB-DEBUG::RUN-HOOK *INVOKE-DEBUGGER-HOOK* Component :CL-PPCRE not found)
+2: (INVOKE-DEBUGGER Component :CL-PPCRE not found)
+3: (ERROR ASDF/FIND-COMPONENT:MISSING-COMPONENT :REQUIRES :CL-PPCRE)
+4: ((:METHOD ASDF/OPERATE:OPERATE (SYMBOL T)) ASDF/LISP-ACTION:LOAD-OP :CL-PPCRE :SILENT T) [fast-method]
+5: ((SB-PCL::EMF ASDF/OPERATE:OPERATE) #<unused argument> #<unused argument> ASDF/LISP-ACTION:LOAD-OP :CL-PPCRE :SILENT T)
+6: ((LAMBDA NIL :IN ASDF/OPERATE:OPERATE))
+7: ((:METHOD ASDF/OPERATE:OPERATE :AROUND (T T)) ASDF/LISP-ACTION:LOAD-OP :CL-PPCRE :SILENT T) [fast-method]
+8: (ASDF/SESSION:CALL-WITH-ASDF-SESSION #<FUNCTION (LAMBDA NIL :IN ASDF/OPERATE:OPERATE) {1004B295AB}> :OVERRIDE T :KEY NIL :OVERRIDE-CACHE T :OVERRIDE-FORCING NIL)
+9: ((LAMBDA NIL :IN ASDF/OPERATE:OPERATE))
+10: (ASDF/SESSION:CALL-WITH-ASDF-SESSION #<FUNCTION (LAMBDA NIL :IN ASDF/OPERATE:OPERATE) {10032EF13B}> :OVERRIDE NIL :KEY NIL :OVERRIDE-CACHE NIL :OVERRIDE-FORCING NIL)
+11: ((:METHOD ASDF/OPERATE:OPERATE :AROUND (T T)) ASDF/LISP-ACTION:LOAD-OP :CL-PPCRE :SILENT T) [fast-method]
+12: (ASDF/OPERATE:LOAD-SYSTEM :CL-PPCRE :SILENT T)
+13: (SB-INT:SIMPLE-EVAL-IN-LEXENV (ASDF/OPERATE:LOAD-SYSTEM :CL-PPCRE :SILENT T) #<NULL-LEXENV>)
+14: (EVAL-TLF (ASDF/OPERATE:LOAD-SYSTEM :CL-PPCRE :SILENT T) 1 NIL)
+15: ((LABELS SB-FASL::EVAL-FORM :IN SB-INT:LOAD-AS-SOURCE) (ASDF/OPERATE:LOAD-SYSTEM :CL-PPCRE :SILENT T) 1)
+16: ((LAMBDA (SB-KERNEL:FORM &KEY :CURRENT-INDEX &ALLOW-OTHER-KEYS) :IN SB-INT:LOAD-AS-SOURCE) (ASDF/OPERATE:LOAD-SYSTEM :CL-PPCRE :SILENT T) :CURRENT-INDEX 1)
+17: (SB-C::%DO-FORMS-FROM-INFO #<FUNCTION (LAMBDA (SB-KERNEL:FORM &KEY :CURRENT-INDEX &ALLOW-OTHER-KEYS) :IN SB-INT:LOAD-AS-SOURCE) {10009BF31B}> #<SB-C::SOURCE-INFO {10009BF2E3}> SB-C::INPUT-ERROR-IN-LOAD)
+18: (SB-INT:LOAD-AS-SOURCE #<SB-INT:FORM-TRACKING-STREAM for "file /home/bernt_budde/pcl/cl/pcl-runtime.lisp" {10009BDBF3}> :VERBOSE NIL :PRINT NIL :CONTEXT "loading")
+19: ((LABELS SB-FASL::LOAD-STREAM-1 :IN LOAD) #<SB-INT:FORM-TRACKING-STREAM for "file /home/bernt_budde/pcl/cl/pcl-runtime.lisp" {10009BDBF3}> NIL)
+20: (SB-FASL::CALL-WITH-LOAD-BINDINGS #<FUNCTION (LABELS SB-FASL::LOAD-STREAM-1 :IN LOAD) {7BB2A852F95B}> #<SB-INT:FORM-TRACKING-STREAM for "file /home/bernt_budde/pcl/cl/pcl-runtime.lisp" {10009BDBF3}> NIL #<SB-INT:FORM-TRACKING-STREAM for "file /home/bernt_budde/pcl/cl/pcl-runtime.lisp" {10009BDBF3}>)
+21: (LOAD #P"cl/pcl-runtime.lisp" :VERBOSE NIL :PRINT NIL :IF-DOES-NOT-EXIST T :EXTERNAL-FORMAT :DEFAULT)
+22: (SB-IMPL::PROCESS-EVAL/LOAD-OPTIONS ((:LOAD . "cl/pcl-runtime.lisp")))
+23: (SB-IMPL::TOPLEVEL-INIT)
+24: ((FLET SB-UNIX::BODY :IN SB-IMPL::START-LISP))
+25: ((FLET "WITHOUT-INTERRUPTS-BODY-3" :IN SB-IMPL::START-LISP))
+26: (SB-IMPL::START-LISP)
+
+unhandled condition in --disable-debugger mode, quitting

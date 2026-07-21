@@ -21,7 +21,7 @@ package Pl::Parser2;
 use v5.30;
 use strict;
 use warnings;
-use Scalar::Util qw(refaddr);
+use Scalar::Util qw(refaddr weaken);
 use Moo;
 use PPI;
 use Pl::Parser;
@@ -4694,6 +4694,16 @@ sub _lower_stmt {
 
   # -- plain expression statement
   my @k = _strip_semi($stmt->schildren);
+
+  # Bare `...` (yada yada): dies "Unimplemented at $0 line N." — a STATEMENT
+  # form v1 handles above its expression parse (Parser.pm), so the seam
+  # cannot lower it.  Native mirror of v1's emission; also fixes the file-
+  # level bare `...` (broken PARSE ERROR raw before task #78).
+  if (@k == 1 && $k[0]->isa('PPI::Token::Operator') && $k[0]->content eq '...') {
+    my $line = $k[0]->line_number // 0;
+    return raw(qq{(p-die "Unimplemented" :loc (format nil "~A line ~D" (to-string (unbox \$0)) $line))});
+  }
+
   my ($expr, $mod, $cond) = _split_modifier(\@k);
   # while/until/for/foreach statement modifiers (and do{}while, which splits
   # the same way) are outside the native subset — whole-statement fallback
@@ -5250,6 +5260,119 @@ sub _lower_bare_block {
   return ['let', ['list', ['list', '*package*', '*package*']], $inner];
 }
 
+# ---------------------------------------- embedded blocks (task #78, E2)
+
+# Structured lowering of an expression-embedded map/grep/sort/eval{} block.
+# PExpr's block sites call this through the fallback parser's `_v2_embed`
+# slot — enabled ONLY around real v1 lowering calls (never analysis parses,
+# never the ExprToCL2 native attempt) by _embed_hook's install sites.  On
+# success the inline_lambda node carries `body_form` (an arrayref of CLForms
+# for the lambda body) instead of v1's `body_cl` text, and ExprToCL's
+# gen_inline_lambda_form emits the whole lambda structurally.  Any decline
+# (undef) keeps v1's parse_block_to_cl_string text for that block — files
+# never re-gate on this path.
+sub lower_embedded_block {
+  my ($self, $block, $for_func) = @_;
+  my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
+              $block->schildren;
+  return ['nil'] unless @stmts;
+
+  # A `package` statement ANYWHERE in the block: v1's machinery wraps the
+  # body in the (*package* / *pcl-current-package*) revert let — the native
+  # nested-package branch instead relies on p-sub's dynamic bind for the
+  # runtime restore, which a bare lambda does not have (the switch leaked
+  # out of `map { package XM; … }`).  Keep v1's route.  (PPI find returns 0,
+  # not undef, when nothing matches.)
+  return undef if @{ $block->find('PPI::Statement::Package') || [] };
+
+  # Tail shapes v1 lowers differently: a tail statement MODIFIER (v1 emits
+  # plain (p-if COND EXPR); v2's defined-tail_ctx ret-var transform differs),
+  # a tail declaration (v2's let loses the statement value — the E3 retry
+  # gate), and compound/scheduled/sub tails (leaf-threading differs).
+  my $tail = $stmts[-1];
+  return undef
+    if !$tail->isa('PPI::Statement')
+    || $tail->isa('PPI::Statement::Compound')
+    || $tail->isa('PPI::Statement::Variable')
+    || $tail->isa('PPI::Statement::Scheduled')
+    || $tail->isa('PPI::Statement::Sub')
+    || $tail->isa('PPI::Statement::Include')
+    || $tail->isa('PPI::Statement::Package');
+  if (!$tail->isa('PPI::Statement::Break')) {
+    my @k = _strip_semi($tail->schildren);
+    my (undef, $mod, undef) = _split_modifier(\@k);
+    return undef if $mod;
+  }
+
+  my $env = $self->environment;
+  # Decline must be side-effect-free: snapshot everything a partial lowering
+  # can touch, restore on failure so v1's re-lowering of the same block does
+  # not duplicate hoists or see fat-comma-rewritten tokens.
+  my $ppi_snap    = _ppi_state_snapshot(@stmts);
+  my %saved_lex   = %{ $self->{_live_lex} // {} };
+  my %saved_lb    = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  my $scope_depth = scalar @{ $env->scope_stack };
+  my @side_snaps  = map { [$_, scalar @{ $self->{$_} // [] }] }
+                    qw(_captured_decls _hoisted_decls _hoisted_defs
+                       _hoisted_def_lines _sched_defs _sched_lines);
+
+  # Tail context.  v1 suppresses EVERY dynamic *wantarray* wrap on the tail
+  # statement's spine call (the env tail_position flag) so the ENCLOSING
+  # binding flows: p-map binds t, p-grep nil, the sort lambda's own
+  # (*wantarray* nil) wrapper nil, and an eval{} inherits its call site's
+  # context (perl: eval BLOCK propagates context — a ':void' tail bind here
+  # broke `my @x = eval { f() }`).  'inherit' reproduces that: no bind
+  # native or seam.  map instead passes LIST (v1 parses map tails LIST_CTX
+  # for the range/flatten structure); its explicit t bind is dynamically
+  # identical to p-map's own.  The enclosing macro rebinds *wantarray*, so
+  # the sub-body :void regime does not reach in here (v1 clears
+  # wa_void_active the same way).
+  my $tail_ctx = $for_func eq 'map' ? 1 : 'inherit';
+  my $forms = eval {
+    local $env->{wa_void_active} = 0;
+    my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
+    $env->push_scope;
+    [ $self->_lower_block(\@stmts, $vi, $tail_ctx) ];
+  };
+  pop @{ $env->scope_stack } while @{ $env->scope_stack } > $scope_depth;
+  $self->{_live_lex} = \%saved_lex;
+  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+
+  if (!$forms || !@$forms || grep { _embed_form_unsafe($_) } @$forms) {
+    for my $s (@side_snaps) {
+      splice @{ $self->{$s->[0]} }, $s->[1] if $self->{$s->[0]};
+    }
+    _ppi_state_restore($ppi_snap);
+    return undef;
+  }
+  return $forms;
+}
+
+# A form the flat printer cannot safely embed in an expression position:
+# raw_wrap (statement-level device, to_flat dies on it) or a raw chunk that
+# ENDS inside a line comment (a sibling or closing paren printed after it on
+# the same line would be swallowed).  Interior newlines/comments are fine —
+# to_flat embeds raw text verbatim, as v1's text emitters always did.
+sub _embed_form_unsafe {
+  my ($f) = @_;
+  return 0 unless ref $f;
+  return 1 if Pl::CLForm::is_raw_wrap($f);
+  return Pl::CLForm::_ends_in_comment($$f) if Pl::CLForm::is_raw($f);
+  return 0 unless ref $f eq 'ARRAY';
+  for my $sub (@$f) { return 1 if _embed_form_unsafe($sub) }
+  return 0;
+}
+
+# Cached self-weakened closure installed as the fallback parser's `_v2_embed`
+# slot (a plain coderef, so PExpr needs no Parser2 knowledge).
+sub _embed_hook {
+  my ($self) = @_;
+  return $self->{_embed_hook} //= do {
+    weaken(my $weak = $self);
+    sub { $weak ? $weak->lower_embedded_block(@_) : undef };
+  };
+}
+
 # ---------------------------------------------------------------- expressions
 
 # Native (ExprToCL2 strict subset) or the ORIGINAL expression pipeline.
@@ -5277,6 +5400,11 @@ sub _lower_expr {
   my $snap = _ppi_state_snapshot(@parts);
   my ($census_expr_o, $census_root);   # T0.2: tree refs for the seam census
   my $native = eval {
+    # No _v2_embed hook during the native attempt (it may be live from an
+    # enclosing fallback when this expression sits inside an embedded
+    # block): a discarded native parse must not run Parser2 lowering side
+    # effects that the fallback re-parse would then duplicate.
+    local $self->fallback_parser->{_v2_embed};
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
       environment => $self->environment,
@@ -5328,7 +5456,13 @@ sub _lower_expr {
   $p->_open_section('pcl');
   $p->_cur_bucket('definitions');
   $p->indent_level(0);
-  my $cl = $p->_parse_expression(\@parts, $stmt, $fb_ctx);
+  my $cl = do {
+    # task #78: embedded map/grep/sort/eval{} blocks in this REAL lowering
+    # parse go structural (body_form via lower_embedded_block).  Analysis
+    # parses and the native attempt above never see the hook.
+    local $p->{_v2_embed} = $self->_embed_hook;
+    $p->_parse_expression(\@parts, $stmt, $fb_ctx);
+  };
   my @drained;
   for my $sec (@{ $p->_sections }) {
     push @drained,
@@ -5434,6 +5568,13 @@ sub _expr_scalar_rooted {
   my @snap = map { [$_, $_->content] }
              map { $_->isa('PPI::Node') ? $_->tokens : $_ } @parts;
   my $ok = eval {
+    # Analysis-only parse — no _v2_embed hook (see _lower_expr's native
+    # attempt for the rationale), and no PExpr warns: test helpers merge
+    # pl2cl's stderr into the generated CL, and any real problem repeats in
+    # the actual lowering (same rationale as VarAnnotator's _tw_expr_parse;
+    # `sub u { ... }` warned "Handle single node of unknown type" here).
+    local $SIG{__WARN__} = sub { };
+    local $self->fallback_parser->{_v2_embed};
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,
       environment => $self->environment,
@@ -5746,7 +5887,12 @@ sub _fallback_stmt_capture {
   $p->_open_section('pcl');
   $p->indent_level(0);
   $p->{_local_let_depth} = 0;
-  $p->_process_element($stmt);
+  {
+    # task #78: embedded blocks inside a whole-statement fallback go
+    # structural too (same hook as _lower_expr's fallback branch).
+    local $p->{_v2_embed} = $self->_embed_hook;
+    $p->_process_element($stmt);
+  }
   my $opens = $p->{_local_let_depth};
   # A BEGIN/END/… block's p-BEGIN lands in v1's `definitions` bucket, alongside
   # sub definitions.  v2 emits native sub defs to @defs and this fallback's
