@@ -4879,6 +4879,40 @@ sub parse_hash_block_to_cl_string {
   return $result // '(make-p-box (p-hash))';
 }
 
+# task #78: CLForm twin of parse_hash_block_to_cl_string, for the v2
+# embedded-block route (`map { {k=>$_} } …` bodies).  Same parse; the
+# generation goes through gen_node_form so a converted emitter yields a
+# structured form (unconverted children embed as raw atoms — the caller
+# runs the embed-safety scan).  undef = decline (caller keeps v1's text).
+sub parse_hash_block_to_cl_form {
+  my ($self, $block) = @_;
+  my @raw = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@raw == 1 && $raw[0]->isa('PPI::Statement')) {
+    @raw = grep { ref($_) !~ /Whitespace|Comment/ } $raw[0]->children();
+  }
+  my $result;
+  eval {
+    my $expr_o = Pl::PExpr->new(
+      e           => \@raw,
+      environment => $self->environment,
+      parser      => $self,
+    );
+    my $pair_ids = $expr_o->parse_list(\@raw);
+    my ($top_node, $top_id) = $expr_o->make_node_insert('hash_init');
+    for my $id (@$pair_ids) {
+      $expr_o->add_child_to_node($top_id, $id);
+    }
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => 0,
+    );
+    $result = $gen->gen_node_form($top_id);
+  };
+  die $@ if $@ && $@ =~ /^PCL:/;
+  return $result;
+}
+
 
 # Return true if the elements contain any standalone bare label statements
 # (PPI::Statement::Compound with only a PPI::Token::Label, no keyword/block).

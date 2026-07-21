@@ -15,6 +15,7 @@ use Scalar::Util qw/looks_like_number/;
 
 use PPI;
 use PPI::Dumper;
+use Pl::CLForm ();
 
 use Data::Dump qw/dump/;
 
@@ -2072,7 +2073,13 @@ sub _v2_embedded_body {
   my ($self, $block, $func_name) = @_;
   return undef unless $self->has_parser;
   my $hook = $self->parser->{_v2_embed} or return undef;
-  return undef if _block_is_hash_constructor($block);
+  if (_block_is_hash_constructor($block)) {
+    # `map { {k=>$_} } …`: the block is one hash-constructor EXPRESSION —
+    # no statement lowering needed; the form twin of the v1 helper suffices.
+    my $f = $self->parser->parse_hash_block_to_cl_form($block);
+    return undef if !$f || Pl::CLForm::embed_unsafe($f);
+    return [$f];
+  }
   return $hook->($block, $func_name);
 }
 

@@ -167,4 +167,20 @@ sub to_program {
   return join("\n", map { ref($_) || $_ ne '' ? to_string($_, 0) : '' } @forms) . "\n";
 }
 
+# A form the FLAT printer cannot safely embed in an expression position
+# (task #78 embed-safety scan, shared by Parser2 and PExpr): raw_wrap
+# (statement-level device, to_flat dies on it) or a raw chunk that ENDS
+# inside a line comment (a sibling or closing paren printed after it on the
+# same line would be swallowed).  Interior newlines/comments are fine —
+# to_flat embeds raw text verbatim, as v1's text emitters always did.
+sub embed_unsafe {
+  my ($f) = @_;
+  return 0 unless ref $f;
+  return 1 if is_raw_wrap($f);
+  return _ends_in_comment($$f) if is_raw($f);
+  return 0 unless ref $f eq 'ARRAY';
+  for my $sub (@$f) { return 1 if embed_unsafe($sub) }
+  return 0;
+}
+
 1;

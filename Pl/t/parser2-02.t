@@ -403,6 +403,10 @@ EOF
   like($do, qr/\(funcall \(lambda \(\) \(progn \(let \(\(\$y 5\)\) \(p-\+ \$y 1\)\)\)\)\)/,
        '#78: do{} body is structural — (funcall (lambda () (progn …)))');
 
+  my $hc = Pl::Parser2->parse_code(q{my @h = map { { k => $_ } } (1);});
+  like($hc, qr/\(p-map \(lambda \(\$_\) \(make-p-box \(p-hash "k" \$_\)\)\)/,
+       '#78: hash-constructor map block body is structural');
+
   my $an = Pl::Parser2->parse_code(q{my $s = sub { 42 };});
   like($an,
        qr/\(lambda \(&rest %_args\) \(let \(\(\@_ \(p-flatten-args %_args\)\) \(\*pcl-caller-wantarray\* \*wantarray\*\)\) \(catch :p-return \(block nil 42\)\)\)\)/,

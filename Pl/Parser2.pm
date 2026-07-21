@@ -5409,20 +5409,9 @@ sub _lower_embedded_anon {
             ['block', 'nil', @$forms]]]];
 }
 
-# A form the flat printer cannot safely embed in an expression position:
-# raw_wrap (statement-level device, to_flat dies on it) or a raw chunk that
-# ENDS inside a line comment (a sibling or closing paren printed after it on
-# the same line would be swallowed).  Interior newlines/comments are fine —
-# to_flat embeds raw text verbatim, as v1's text emitters always did.
-sub _embed_form_unsafe {
-  my ($f) = @_;
-  return 0 unless ref $f;
-  return 1 if Pl::CLForm::is_raw_wrap($f);
-  return Pl::CLForm::_ends_in_comment($$f) if Pl::CLForm::is_raw($f);
-  return 0 unless ref $f eq 'ARRAY';
-  for my $sub (@$f) { return 1 if _embed_form_unsafe($sub) }
-  return 0;
-}
+# Embed-safety scan — shared implementation lives in Pl::CLForm (PExpr's
+# hash-constructor route needs it too and must not depend on Parser2).
+sub _embed_form_unsafe { Pl::CLForm::embed_unsafe($_[0]) }
 
 # Cached self-weakened closure installed as the fallback parser's `_v2_embed`
 # slot (a plain coderef, so PExpr needs no Parser2 knowledge).
