@@ -5,9 +5,40 @@
 ;;;; This is free software; you can redistribute it and/or modify it
 ;;;; under the same terms as the Perl 5 programming language system itself.
 
+;;; PCL requires SBCL >= 2.5.2: the test suite is validated on 2.5.2/2.6.0
+;;; and the runtime uses SBCL-internal symbols (sb-unicode, sb-kernel float
+;;; bits, …).  Check FIRST so an old host fails with one clear message
+;;; instead of a cryptic missing-symbol/missing-component error later
+;;; (docs/error-pcre.txt: Debian's SBCL 2.1.11).
+(let* ((min-version '(2 5 2))
+       (v (lisp-implementation-version))
+       (nums (loop with start = 0
+                   while (< start (length v))
+                   for dot = (position #\. v :start start)
+                   for num = (parse-integer v :start start :end dot
+                                            :junk-allowed t)
+                   while num
+                   collect num
+                   do (setf start (if dot (1+ dot) (length v))))))
+  (when (loop for a in nums
+              for b in min-version
+              do (cond ((< a b) (return t))
+                       ((> a b) (return nil)))
+              finally (return (< (length nums) (length min-version))))
+    (error "PCL requires SBCL >= 2.5.2; this is SBCL ~a.~%~
+            Install a current SBCL (e.g. the binary from sbcl.org) — ~
+            distribution packages are often too old." v)))
+
 ;;; Load CL-PPCRE for regex support
 (require :asdf)
-(asdf:load-system :cl-ppcre :silent t)
+(handler-case (asdf:load-system :cl-ppcre :silent t)
+  (error (e)
+    (error "PCL: ASDF could not load cl-ppcre (~a).~%~
+            If cl-ppcre was installed via Quicklisp, note that `sbcl --script` ~
+            skips ~~/.sbclrc, so Quicklisp never registers with ASDF in that ~
+            mode.  Run via `sbcl --noinform --non-interactive --load ~
+            cl/pcl-runtime.lisp --load FILE` (what ./runpl does) instead of ~
+            --script, or make cl-ppcre visible to plain ASDF." e)))
 
 ;;; Load sb-posix for process ID
 (require :sb-posix)
