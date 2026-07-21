@@ -4,6 +4,31 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 306c (2026-07-21, Fable) — runtime floor check → WARNING-first-form; hash-ctor blocks structural (gen v2-52); E4.0b #25 first surveys (t/mro, t/class).
+
+- Floor check reworked per user: the runtime's `(lisp-implementation-version)`
+  check is the FIRST form and now WARNS (direct `*error-output*` write — the
+  pcl runner's muffle-warning load wrap can't eat it) instead of erroring;
+  the pcl-side `sbcl --version` subprocess check is deleted (redundant).
+- `PCL_ALL_BOXED` uniform-IR mode filed in `docs/todo-features.md`
+  (user-approved, NOT high priority): one choke point in
+  VarAnnotator::analyze + cache-key component + ir-spec "all-boxed dialect"
+  section.
+- E2: hash-constructor map/grep blocks structural via
+  `parse_hash_block_to_cl_form` (+ shared `Pl::CLForm::embed_unsafe`).
+  Corpus grep.t-only whitespace class; PCL_V1 zero; gate 118/4337 PASS.
+- **E4.0b #25 first surveys** (`tools/run-perl-suite.pl --dir …`):
+  **t/mro** 73 files = 6 OK / 41 XDIFF (blessed not-supported mro class) /
+  **26 UNEXPLAINED** — dominated by `undef-fn: mro::get_linear_isa` (the
+  minimal C3-only provider of docs/mro-plan.md is NOT yet built — that
+  shim is the single biggest lever) + one
+  `control-stack-exhausted` crash (mro/recursion_c3.t).  **t/class** 10
+  files = 9 DIFF, all the Perl 5.38 `class`/`field`/`method` core-OO
+  syntax PCL does not parse (feature gap, needs a decision: implement the
+  syntax or bless as not-supported).  Logs in `.suitelog/`.
+
+---
+
 ## Session 306b (2026-07-21, Fable) — task #78 STEP 2: do{} + anonymous-sub raw_lambda re-host (gen v2-51); startup SBCL warning in `pcl`; README floor section; new guard file transpile-test-06.t.
 
 **Step 2 of the re-host** — the `raw_lambda` text seam
