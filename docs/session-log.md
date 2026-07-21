@@ -4,6 +4,27 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 307 (2026-07-22, Fable) — t/mro crash-recovery rerun confirmed 8/65/0; E2 #78: `\(RANGE,…)` range-mix converted (gen v2-53).
+
+- Machine crash recovery: worktree clean, 74f8738 landed; t/mro rerun
+  sequentially (`tools/run-perl-suite.pl --dir mro --jobs 1`) reproduced
+  the blessed baseline exactly — 8 OK / 65 XDIFF / 0 UNEXPLAINED, no
+  stale rows (recursion_c3.t passes; the old stack crash is fixed).
+- **E2 #78: the `\(RANGE, …)` range-mix multi-term converted** —
+  `_gen_backslash_multi_term_form` (form twin of the text emitter: same
+  parts walk, counter ids, token stream), so `gen_prefix_op_form` NEVER
+  DECLINES.  One deliberate byte change: layout only (the hand-rolled
+  multiline let → printer flat).  corpus-diff BOTH pipelines = ref.t
+  only, one layout hunk, ids unchanged; ref.t sweep 183+19/245 with the
+  fail set identical to the s295 baseline; gate 118 files / 4338 green
+  (+1 range-mix guard in transpile-test-06.t, passes both pipelines;
+  PCL_V1 failure set unchanged = the 1 v2-only eval-tail guard).
+  Gen v2-52 → v2-53.  Commit d556acb.
+- #78 remaining: the conservative embedded-block declines (package-in-
+  block, tail modifier/decl/compound) + empty-shape quirks (E2.final).
+
+---
+
 ## Session 306d (2026-07-21, Fable) — class syntax blessed as DEFERRED-future; mro provider SHIPPED (P1+P2-lite).
 
 - Perl 5.38 `class`/`field`/`method`: written up in not-supported.md as

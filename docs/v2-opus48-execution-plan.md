@@ -1,7 +1,15 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s306b (2026-07-21, Fable): task #78 STEP 2 SHIPPED — the
+**State updated s307 (2026-07-22, Fable): `\(RANGE,…)` range-mix
+multi-term CONVERTED (`_gen_backslash_multi_term_form`; gen_prefix_op_form
+never declines; layout-only byte change, corpus-diff both pipelines =
+ref.t only; ref.t fail set = s295 baseline; gen v2-53; gate 118/4338;
+guard in transpile-test-06.t).  E2 REMAINING: the conservative
+embedded-block declines (package-in-block, tail modifier/decl/compound),
+empty-shape quirks, then E2.final (text printer + raw/raw_wrap deletion —
+bulk gated on E4.1).**
+**Previous state s306b (2026-07-21, Fable): task #78 STEP 2 SHIPPED — the
 `raw_lambda` seam: do{} + expression `sub {…}` bodies lower through
 Parser2 too (`_lower_embedded_anon` = named-sub body regime inside v1's
 exact `&rest %_args` wrapper form; do{} = `(funcall (lambda () (progn …)))`
@@ -430,8 +438,8 @@ playbook (see `docs/v2-transfer-plan.md` T-C(ii)):
      - empty-shape trailing-space quirks (7 sites: 4 empty slices,
        empty `()`, empty anon-sub body, empty hash-init, empty
        `eval {}`) — normalize at E2.final;
-     - `\(RANGE, …)` range-mix multi-term (multiline let + gensym'd
-       loop vars);
+     - `\(RANGE, …)` range-mix multi-term — **DONE (s307)**:
+       `_gen_backslash_multi_term_form`, layout-only byte change;
      - never-firing safety nets (non-Word call head, unknown leaf
        type, compound-atom guard) — zero corpus hits.
   2. sym/magic reads, `string_concat`, literals (`quote-double`,
