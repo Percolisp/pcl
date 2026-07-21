@@ -4,6 +4,23 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 306d (2026-07-21, Fable) — class syntax blessed as DEFERRED-future; mro provider SHIPPED (P1+P2-lite).
+
+- Perl 5.38 `class`/`field`/`method`: written up in not-supported.md as
+  [DEFERRED — future version] (surface syntax over existing package/CLOS/
+  p-sub machinery; work = parser desugaring); README roadmap bullet;
+  t/class 9 files blessed in perl-suite-expected.tsv → 0 UNEXPLAINED.
+- **mro provider**: runtime owns the "always loaded" interpreter fact via
+  the p-pack self-loading-stub pattern (MRO pkg + 7 stubs → cl/pcl-mro.lisp,
+  transpiled from lib/mro.pm; regenerate with `./pl2cl lib/mro.pm >
+  cl/pcl-mro.lisp`).  lib/mro.pm: recursion guard (perl-parity die, was
+  stack overflow) + no-crash C3-only Tier-2 (get_mro="c3", set_mro/cache
+  no-ops, get_isarev=[], is_universal).  t/mro 6→8 OK, 26→24 UNEXPLAINED
+  (undef-fn aborts gone; rest = C3-vs-DFS assertion triage, next session).
+  Gate 118/4337 PASS.
+
+---
+
 ## Session 306c (2026-07-21, Fable) — runtime floor check → WARNING-first-form; hash-ctor blocks structural (gen v2-52); E4.0b #25 first surveys (t/mro, t/class).
 
 - Floor check reworked per user: the runtime's `(lisp-implementation-version)`
