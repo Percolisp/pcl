@@ -1139,3 +1139,39 @@ module in scope depends on the field-count of a directly-assigned `split`.
 
 **Found by:** `tools/difftest-ops.pl` context axis (session 241) — `ctx-count
 split /,/, $s` → perl `[1]`, PCL `[3]`.  Logged as a deliberate divergence.
+
+---
+
+## Perl 5.38 `class` / `field` / `method` syntax  [DEFERRED — future version]
+
+**Perl behaviour:** Perl 5.38 introduced native object-oriented syntax as an
+experimental core feature (`use feature 'class'`, stabilizing across 5.40):
+`class Foo { … }` declares a class, `field $x [:param] [= DEFAULT]` declares
+per-instance state, `method m { … }` declares a method with `$self`
+implicitly bound, `ADJUST { … }` blocks run at construction, and `:isa(Base)`
+declares inheritance.  Instances are opaque (not blessed hashes).
+
+**PCL behaviour:** Not implemented.  The `class`/`field`/`method` keywords are
+not recognized; a file using them mis-parses (PPI has only partial knowledge
+of the syntax) and the transpile fails.
+
+**Why deferred, not rejected:** this is the future of Perl OO and PCL should
+support it in a **future version** — but it is a *self-contained surface
+feature*, not a semantic blocker.  Its semantics map cleanly onto machinery
+PCL already has: a `class` is a package + CLOS class (the existing
+`p-defpackage`/`defclass` pair), `field` is per-instance storage (a slot in
+the instance box, like today's blessed-hash fields), `method` is a `p-sub`
+with an implicit `$self = shift`, `ADJUST` is constructor code (the Moo
+`BUILD` shape PCL already exercises), and `:isa` is `@ISA`/C3 (already
+CLOS-backed).  The work is mostly *parsing*: PPI's coverage of the new
+keywords must be assessed (possibly a `_preprocess_source`-level lowering of
+`class`→`package` + `field`/`method` desugaring, the same route `state` and
+hex floats took).  Deliberately postponed until after the v2-pipeline
+endgame (E4/E5) and the compatibility phase: almost no CPAN code targets the
+syntax yet (it went stable only in recent perls), so it blocks nothing
+today.
+
+**Affected tests:** `t/class/*.t` (9 files) — registered as expected
+divergences in `docs/perl-suite-expected.tsv`.  Revisit as a feature project
+(parser desugaring + a `docs/class-feature-plan.md`) once the v2 endgame
+lands.

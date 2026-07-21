@@ -199,6 +199,12 @@ interpreter-internals items they are a matter of *when*, not *whether*:
 - **Richer `caller()`.** Package and sub-name depth for `caller(N)` are
   reachable via SBCL frame walking (behind a debug flag). Accurate file/line
   still waits on the source-map work that the smarter code generator brings.
+- **Perl 5.38 `class`/`field`/`method` syntax.** The new core OO feature is
+  planned for a future version. It is surface syntax over machinery PCL
+  already has (packages + CLOS classes, per-instance fields, methods with an
+  implicit `$self`, `ADJUST` ≈ constructor code, `:isa` ≈ `@ISA`/C3), so the
+  work is chiefly parser desugaring. Deferred because almost no CPAN code
+  targets it yet — see `docs/not-supported.md` §class for the sketch.
 
 ## License
 
