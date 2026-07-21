@@ -1,14 +1,22 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s307 (2026-07-22, Fable): `\(RANGE,…)` range-mix
-multi-term CONVERTED (`_gen_backslash_multi_term_form`; gen_prefix_op_form
-never declines; layout-only byte change, corpus-diff both pipelines =
-ref.t only; ref.t fail set = s295 baseline; gen v2-53; gate 118/4338;
-guard in transpile-test-06.t).  E2 REMAINING: the conservative
-embedded-block declines (package-in-block, tail modifier/decl/compound),
-empty-shape quirks, then E2.final (text printer + raw/raw_wrap deletion —
-bulk gated on E4.1).**
+**State updated s307 (2026-07-22, Fable): (1) `\(RANGE,…)` range-mix
+CONVERTED (gen_prefix_op_form never declines; layout-only byte change,
+ref.t only; gen v2-53).  (2) TAIL-DECL STATEMENT VALUES (29fc500): the
+`$decl_tail` machinery in _lower_block — fixes the LIVE bug `sub f { my
+$x = 5 }` → undef (incl. the shift-elision variant); embedded-block
+tail-decl declines lifted (_tail_decl_convertible; our + bare multi still
+decline); 6-file corpus diff = one explained family; my.t one-row
+re-bless (pre-existing embedded-my veto miss, filed in todo-features.md
+with the p-list-=/p-hash-= tail-value divergence); gen v2-54, gate
+118/4339, fuzzer 1056/1060.  DECLINE CENSUS (corpus): compound tails 40,
+lower-failed 29, modifiers 20, anon-empty 10, Include 4 — **compound
+tails = next E2 lever**.  Follow-up: E3's trailing-my/our eval retry gate
+can likely drop.  USER (s307 end): R1 without speed work reaffirmed (§7);
+prioritize incompatibility fixes (#25 DIFF triage + bug backlog).  E2
+REMAINING: compound/modifier/Include tails, lower-failed declines,
+empty-shape quirks, then E2.final (gated on E4.1).**
 **Previous state s306b (2026-07-21, Fable): task #78 STEP 2 SHIPPED — the
 `raw_lambda` seam: do{} + expression `sub {…}` bodies lower through
 Parser2 too (`_lower_embedded_anon` = named-sub body regime inside v1's

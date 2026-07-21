@@ -20,8 +20,30 @@ Append new entries at the top. One section per session.
   (+1 range-mix guard in transpile-test-06.t, passes both pipelines;
   PCL_V1 failure set unchanged = the 1 v2-only eval-tail guard).
   Gen v2-52 → v2-53.  Commit d556acb.
-- #78 remaining: the conservative embedded-block declines (package-in-
-  block, tail modifier/decl/compound) + empty-shape quirks (E2.final).
+- **Tail-decl statement values (29fc500)**: `$decl_tail` machinery in
+  _lower_block — a declaration ending a value-position block (sub body,
+  embedded block, do{}, eval-mode) now yields its statement value (append
+  the declared var where the let buried it; p-my-=/assignment-last branches
+  already correct; shift-elision run that consumes the whole body returns
+  the last param).  FIXES LIVE BUG: `sub f { my $x = 5 }` returned undef on
+  the default pipeline.  Embedded-block tail-decl declines lifted via
+  _tail_decl_convertible (our + bare multi still decline).  Decline census
+  (temp instrumentation, corpus): compound tails 40, lower-failed 29,
+  modifiers 20, anon-empty 10, Include 4 — compound is the next lever.
+  corpus-diff v2 = 6 files, one explained family (eval-tail decls native);
+  v1 byte-identical; sweeps 0 new (my.t one-row re-bless: pre-existing
+  `++my $x->{foo}` embedded-my VETO miss surfaces as t47 instead of the t46
+  die — root cause + the p-list-=/p-hash-= tail-value divergence FILED in
+  todo-features.md §Infrastructure).  Gate 118/4339; fuzzer 1056/1060
+  (same 4).  Gen v2-54.
+- Follow-up unlocked: the E3 eval retry gate for trailing my/our can
+  likely drop now (tail value is correct) — verify next E2 session.
+- **User decisions (end of session)**: R1 ships WITHOUT the speed work
+  (already plan §7 — reaffirmed); prioritize incompatibility fixes (#25
+  DIFF triage + bug backlog).  Speed worklist stays documented in
+  faster-codegen-suggestions.md (Tier 1 = #62 N1+S1, #73 M1, #74 P1).
+- #78 remaining: compound tails (40), post-lowering declines (29), tail
+  modifiers (20), Include tails (4) + empty-shape quirks (E2.final).
 
 ---
 
