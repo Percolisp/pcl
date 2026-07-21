@@ -46,6 +46,42 @@ release as documented TODOs per the release roadmap.
 
 ## Infrastructure Bugs
 
+### Expression-embedded `my` after a prefix op stays a shared global when the named-sub veto fires (my.t foo3)
+
+**What's broken:** `sub foo3 { ++my $x->{foo}; … }` — v2's embedded-my
+let-bind (`_embedded_my_names` + the let in `_lower_block`) is VETOED when
+any OTHER named sub in the segment textually mentions `$x` (the veto
+protects old shapes that relied on the shared forward-defvar global).  In
+my.t nearly every sub mentions `$x`, so foo3's `my $x` stays the file
+global and persists across calls — the second `foo3()` call sees the first
+call's `$x->{bar}` (my.t test 47, re-blessed s307).  Pre-existing (v1
+identical); surfaced when s307's tail-decl conversion stopped a neighboring
+eval-block from clobbering the global (the old symptom was a
+`value 0 is not of type hash-table` die → my.t test 46).
+
+**Fix area:** narrow the veto — only veto when the OTHER sub does not
+declare the name itself (`my $x` in its own body) and is not lexically
+outside the decl's scope anyway.  Or: track per-sub declared names during
+the segment pre-scan instead of a text match.
+
+### `p-list-=` / `p-hash-=` as a sub/block tail value diverge from perl in list context
+
+**What's broken:** `sub f { my ($a,$b) = (4,5) }` list-returns `(4,5)` in
+perl (list assignment in LIST context yields the LHS lvalues); PCL returns
+the RHS count (2) — `p-list-=` always returns the count.  Likewise
+`sub f { my %h = (k=>1) }` should list-return the k/1 pairs; `p-hash-=`'s
+return value doesn't flatten.  BOTH pipelines, long-standing (v1
+identical, verified s307).  `p-array-=` is fine (returns the container,
+which flattens).
+
+**Fix area:** make `p-list-=`/`p-hash-=` return the LHS (vector of
+elements / the hash-table) and let context decide — but audit existing
+call sites that rely on the scalar-count return (scalar-context list
+assignment `() = f()` counting idiom) first; likely needs a
+`*wantarray*`-sensitive return.
+
+---
+
 ### "Fully passing" files may be false positives — crash-before-failure masking
 
 **What's broken:** `sweep-perl-tests.pl` counts a file as "fully passing" if

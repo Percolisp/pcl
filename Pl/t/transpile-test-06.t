@@ -120,6 +120,22 @@ my $rec; $rec = sub { my $n = shift; $n <= 1 ? 1 : $n * $rec->($n-1) };
 print $rec->(5), "\n";
 ');
 
+test_transpile("tail declaration yields its statement value (s307)", '
+sub f { my $x = 5 }
+sub s1 { my $x = shift }
+sub s2 { my $i = 3; my $j = $i; }
+sub g { my @a = (1,2) }
+sub h { my $y }
+my $e = eval { my $z = 42 };
+my $n = eval { my @a = (7,8,9) };
+my $d = do { my $q = "dq" };
+my @m = map { my $y = $_ * 2 } (1..3);
+my @gr = grep { my $ok = $_ > 1 } (1..3);
+my @so = sort { my $c = $a <=> $b } (3,1,2);
+print f(), "|", s1("v"), "|", s2(), "|", join(",",g()), "|",
+      (defined h() ? "def" : "undef"), "|$e|$n|$d|@m|@gr|@so\n";
+');
+
 test_transpile("backslash-paren list with range mix distributes refs", '
 my @r = \(1..2, 3);
 my $x = 5;

@@ -3823,6 +3823,7 @@ sub _lower_sub_inner {
 
   my $params = $self->_extract_params($stmts[0]);
   my @body_stmts = @stmts;
+  my $tail_param;
   shift @body_stmts if $params;
   if (!$params) {
     # W14: coalesce a contiguous LEADING run of `my $x = shift;` statements
@@ -3834,6 +3835,10 @@ sub _lower_sub_inner {
     if ($sp) {
       $params = $sp;
       splice(@body_stmts, 0, $n);
+      # The run consumed the WHOLE body (`sub f { my $x = shift; }`): the
+      # tail decl's statement value — the last param — is the sub's return
+      # value; an empty (block nil) would lose it (s307 $decl_tail family).
+      $tail_param = $params->[-1] if !@body_stmts;
     }
   }
   $self->_reg_lex(@{ $params // [] });
@@ -3853,7 +3858,8 @@ sub _lower_sub_inner {
       # take p-raw-params' no-allocation fast path.
       return ['p-sub', $clname, ['list', '&rest', '%_args'],
               ['p-raw-params', ['list', @$params],
-                ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi)]]];
+                ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi),
+                  ($tail_param ? ($tail_param) : ())]]];
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;
@@ -3861,7 +3867,8 @@ sub _lower_sub_inner {
             ['p-args-body', ['block', 'nil',
               ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @$params],
                 raw('(let ((*wantarray* nil)) (p-list-= (vector ' . join(' ', @$params) . ') @_))'),
-                $self->_lower_body_regime(\@body_stmts, $vi)]]]];
+                $self->_lower_body_regime(\@body_stmts, $vi),
+                ($tail_param ? ($tail_param) : ())]]]];
   }
 
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
@@ -4111,6 +4118,15 @@ sub _lower_block {
 
   # -- my $x [= INIT];  → (let (($x …)) rest...)
   if ($first->isa('PPI::Statement::Variable')) {
+    # A declaration in TAIL position (last statement of a value-position
+    # block: sub body, embedded map/grep/sort/eval block, do{}, eval-mode)
+    # must yield its statement value — perl's `sub f { my $x = 5 }` returns
+    # 5.  Branches whose last form is the assignment (p-my-=/p-array-=/…
+    # return the place) are already correct; the ones that bury the init in
+    # the let BINDING (unboxable, self-init) or have no init append the
+    # declared variable itself.  File top-level passes tail_ctx=undef, so
+    # statement-position bytes are untouched.
+    my $decl_tail = !@rest && defined $tail_ctx;
     # -- state $x [= INIT];  (renamed to $x__state__N by _rename_state_vars)
     #    → hoisted cell defvar (+ raw once-flag defvar) and v1's exact
     #    guarded-init shape in place; the bare cell is the statement value
@@ -4156,7 +4172,8 @@ sub _lower_block {
       return (@declmod_eval,
               (defined $init ? (['p-scalar-=', $name, $self->_lower_expr($init, $first)]) : ()),
               @reg,
-              $self->_lower_block(\@rest, $vi, $tail_ctx));
+              $self->_lower_block(\@rest, $vi, $tail_ctx),
+              ($decl_tail ? ($name) : ()));
     }
     if ($name) {
       # A postfix modifier on the init (`my $c = shift if @_ > 1`): Perl declares
@@ -4194,11 +4211,13 @@ sub _lower_block {
         $initform = _wrap_freeze($vi->{$name}, $name, $initform);
         return (@declmod_eval,
                 ['let', ['list', ['list', $name, $initform]],
-                 $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+                 $self->_lower_block(\@rest, $vi, $tail_ctx),
+                 ($decl_tail ? ($name) : ())]);
       }
       if ($self_init) {
         return (['let', ['list', ['list', $name, $self_init]],
-                 $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+                 $self->_lower_block(\@rest, $vi, $tail_ctx),
+                 ($decl_tail ? ($name) : ())]);
       }
       my @assign;
       if (defined $init) {
@@ -4214,7 +4233,8 @@ sub _lower_block {
       return (@declmod_eval,
               ['let', ['list', ['list', $name, '(make-p-box nil)']],
                @assign,
-               $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+               $self->_lower_block(\@rest, $vi, $tail_ctx),
+               (($decl_tail && !@assign) ? ($name) : ())]);
     }
     # -- my $scalar <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;`)
     #    Perl declares ONLY $scalar and evaluates the rest as an ordinary (void)
@@ -4232,7 +4252,8 @@ sub _lower_block {
       my $vi2 = { %$vi, $sname => { unboxable => 0 } };
       return (['let', ['list', ['list', $sname, '(make-p-box nil)']],
                $self->_lower_expr([@kd[1 .. $#kd]], $first, ':void'),
-               $self->_lower_block(\@rest, $vi2, $tail_ctx)]);
+               $self->_lower_block(\@rest, $vi2, $tail_ctx),
+               ($decl_tail ? ($sname) : ())]);
     }
 
     # -- my @a / my %h / my (LIST) [= INIT];  → fresh containers in a let,
@@ -4321,7 +4342,8 @@ sub _lower_block {
           my $copy = substr($var, 0, 1) eq '@' ? 'p-copy-array' : 'p-copy-hash';
           $self->_reg_lex($var);
           return (['let', ['list', ['list', $var, [$copy, $self->_lower_expr(\@rhs, $first, 1)]]],
-                   $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+                   $self->_lower_block(\@rest, $vi, $tail_ctx),
+                   ($decl_tail ? ($var) : ())]);
         }
         # LIST form (`my (undef,@bee) = @bee`, `my ($x,@a) = ($a[0],@a)`): the
         # same dance per variable — every SELF-REFERENCED name binds to a copy
@@ -4369,9 +4391,14 @@ sub _lower_block {
     }
     $self->_reg_lex(@$vars);
     my @binds = map { ['list', $_, _fresh_container($_)] } @$vars;
+    # Tail value: with an init the assignment form (last) returns the place;
+    # a bare single container is its own value.  A bare MULTI decl
+    # (`my ($a,@b);` as tail) stays value-less — rare, and the embedded-block
+    # gate declines it (_tail_decl_convertible).
     return (['let', ['list', @binds],
              ($has_init ? ($self->_lower_expr([@k], $first)) : ()),
-             $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+             $self->_lower_block(\@rest, $vi, $tail_ctx),
+             (($decl_tail && !$has_init && @$vars == 1) ? ($vars->[0]) : ())]);
   }
 
   # -- BEGIN/END/CHECK/… blocks: v1's p-BEGIN goes to the definitions bucket,
@@ -5271,6 +5298,27 @@ sub _lower_bare_block {
 # gen_inline_lambda_form emits the whole lambda structurally.  Any decline
 # (undef) keeps v1's parse_block_to_cl_string text for that block — files
 # never re-gate on this path.
+# A tail Statement::Variable whose _lower_block value semantics are known
+# correct (the $decl_tail machinery): `state` (appends its cell, or dies →
+# clean decline via the eval), single-scalar `my` (any init shape), and
+# container/list `my` with an init (the assignment form returns the place)
+# or a bare SINGLE container (appended).  NOT convertible: `our` (no-init
+# returns nil, should be the var) and bare multi decls (`my ($a,@b);` —
+# value would need list construction).  Pure token read, no side effects.
+sub _tail_decl_convertible {
+  my ($self, $stmt) = @_;
+  my @sk = _strip_semi($stmt->schildren);
+  return 0 unless @sk && $sk[0]->isa('PPI::Token::Word');
+  my $kw = $sk[0]->content;
+  return 1 if $kw eq 'state';
+  return 0 unless $kw eq 'my';
+  my ($name) = $self->_single_scalar_decl($stmt);
+  return 1 if $name;
+  my ($vars, $has_init) = $self->_multi_decl($stmt);
+  return 0 unless $vars;
+  return $has_init || @$vars == 1;
+}
+
 sub lower_embedded_block {
   my ($self, $block, $for_func) = @_;
   return $self->_lower_embedded_anon($block) if $for_func eq 'sub';
@@ -5287,14 +5335,16 @@ sub lower_embedded_block {
   return undef if @{ $block->find('PPI::Statement::Package') || [] };
 
   # Tail shapes v1 lowers differently: a tail statement MODIFIER (v1 emits
-  # plain (p-if COND EXPR); v2's defined-tail_ctx ret-var transform differs),
-  # a tail declaration (v2's let loses the statement value — the E3 retry
-  # gate), and compound/scheduled/sub tails (leaf-threading differs).
+  # plain (p-if COND EXPR); v2's defined-tail_ctx ret-var transform differs)
+  # and compound/scheduled/sub tails (leaf-threading differs).  A tail
+  # DECLARATION converts when its value semantics are covered by the
+  # $decl_tail machinery in _lower_block (s307); the rest still decline.
   my $tail = $stmts[-1];
   return undef
     if !$tail->isa('PPI::Statement')
     || $tail->isa('PPI::Statement::Compound')
-    || $tail->isa('PPI::Statement::Variable')
+    || ($tail->isa('PPI::Statement::Variable')
+        && !$self->_tail_decl_convertible($tail))
     || $tail->isa('PPI::Statement::Scheduled')
     || $tail->isa('PPI::Statement::Sub')
     || $tail->isa('PPI::Statement::Include')
@@ -5366,10 +5416,11 @@ sub _lower_embedded_anon {
 
   # Same conservative declines as the block form: package switches need v1's
   # revert wrapper (the native nested-package branch relies on p-sub's
-  # dynamic bind, absent in a bare lambda); a tail declaration loses its
-  # statement value in v2's let lowering.
+  # dynamic bind, absent in a bare lambda); a tail declaration converts when
+  # the $decl_tail machinery covers its value semantics (s307).
   return undef if @{ $block->find('PPI::Statement::Package') || [] };
-  return undef if $stmts[-1]->isa('PPI::Statement::Variable');
+  return undef if $stmts[-1]->isa('PPI::Statement::Variable')
+               && !$self->_tail_decl_convertible($stmts[-1]);
 
   my $env = $self->environment;
   my $ppi_snap    = _ppi_state_snapshot(@stmts);
