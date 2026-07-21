@@ -397,6 +397,18 @@ EOF
   my $yy = Pl::Parser2->parse_code(q{...;});
   like($yy, qr/\(p-die "Unimplemented" :loc/,
        '#78: bare yada-yada statement lowers to p-die Unimplemented');
+
+  # -- step 2: do{} / anonymous sub raw_lambda re-host --
+  my $do = Pl::Parser2->parse_code(q{my $d = do { my $y = 5; $y + 1 };});
+  like($do, qr/\(funcall \(lambda \(\) \(progn \(let \(\(\$y 5\)\) \(p-\+ \$y 1\)\)\)\)\)/,
+       '#78: do{} body is structural — (funcall (lambda () (progn …)))');
+
+  my $an = Pl::Parser2->parse_code(q{my $s = sub { 42 };});
+  like($an,
+       qr/\(lambda \(&rest %_args\) \(let \(\(\@_ \(p-flatten-args %_args\)\) \(\*pcl-caller-wantarray\* \*wantarray\*\)\) \(catch :p-return \(block nil 42\)\)\)\)/,
+       '#78: anon sub emits v1 wrapper shape as one structured form');
+  unlike($an, qr/\(lambda \(&rest %_args\)\n/,
+         '#78: no v1 multiline anon-sub layout for a native body');
 }
 
 done_testing();

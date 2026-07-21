@@ -2810,10 +2810,18 @@ sub handle_subcalls {
             # loop_transparent flag (5th arg) wraps the body in (progn ...) not
             # (block nil ...), so an unlabeled last/next/redo inside the do{}
             # escapes to the enclosing loop, matching Perl.
-            my $lambda_str =
-              $self->parser->parse_block_as_function($next, [], 0, 1, 1);
+            # task #78: with the v2 hook, the body lowers structurally and the
+            # node carries lambda_form (same (funcall (lambda () (progn …)))
+            # shape); the progn — not (block nil) — keeps loop transparency.
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-            $ref_node->{raw_lambda} = $lambda_str;
+            my $body_form = $self->_v2_embedded_body($next, 'do');
+            if ($body_form) {
+              $ref_node->{lambda_form} =
+                ['lambda', ['list'], ['progn', @$body_form]];
+            } else {
+              $ref_node->{raw_lambda} =
+                $self->parser->parse_block_as_function($next, [], 0, 1, 1);
+            }
             $self->add_child_to_node($top_id, $ref_id);
           } else {
             # Parse block as a named function and get its name.
@@ -2880,12 +2888,17 @@ sub handle_subcalls {
       if ($func_name eq 'sub') {
         # Use parser callback if available (handles multi-statement blocks)
         if ($self->has_parser) {
-          # Anonymous subs receive call arguments via @_ (like named subs)
-          my $lambda_str = $self->parser->parse_block_as_function($next, [], 1, 1);
-
-          # Create a func_ref node that holds the lambda string inline
+          # Anonymous subs receive call arguments via @_ (like named subs).
+          # task #78: with the v2 hook, the whole lambda arrives as one
+          # CLForm (v1's exact wrapper shape); otherwise v1's text.
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-          $ref_node->{raw_lambda} = $lambda_str;
+          my $lambda_form = $self->_v2_embedded_body($next, 'sub');
+          if ($lambda_form) {
+            $ref_node->{lambda_form} = $lambda_form;
+          } else {
+            $ref_node->{raw_lambda} =
+              $self->parser->parse_block_as_function($next, [], 1, 1);
+          }
 
           # Replace sub { } with the function reference (4-arg splice preserves comma)
           splice @$e, $i, 2, $ref_node;

@@ -5304,15 +5304,18 @@ sub gen_func_ref {
   my $node_id = shift;
   my $kids    = shift;
 
+  return Pl::CLForm::to_flat($node->{lambda_form}) if $node->{lambda_form};
   return $node->{raw_lambda} if $node->{raw_lambda};
   my $func_name = $node->{func_name};
   return "#'$func_name";
 }
 
-# E2 form variant: \&foo → #'name atom; a raw_lambda is a pre-generated CL
-# string (embedded as a raw atom, structuring it is the inline_lambda step).
+# E2 form variant: \&foo → #'name atom.  A lambda_form is a Parser2-lowered
+# do{}/anon-sub lambda (task #78); a raw_lambda is v1's pre-generated CL
+# string, embedded as a raw atom.
 sub gen_func_ref_form {
   my ($self, $node, $node_id, $kids) = @_;
+  return $node->{lambda_form} if $node->{lambda_form};
   return Pl::CLForm::raw($node->{raw_lambda}) if $node->{raw_lambda};
   return "#'" . $node->{func_name};
 }

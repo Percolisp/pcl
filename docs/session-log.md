@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 306b (2026-07-21, Fable) — task #78 STEP 2: do{} + anonymous-sub raw_lambda re-host (gen v2-51); startup SBCL warning in `pcl`; README floor section; new guard file transpile-test-06.t.
+
+**Step 2 of the re-host** — the `raw_lambda` text seam
+(`parse_block_as_function`): `do { … }` and expression `sub { … }` in the
+v2 pipeline now lower through Parser2 too.  The `_v2_embed` hook gains a
+'sub' dispatch → `_lower_embedded_anon`, which lowers the body like a named
+sub (`_lower_body_regime`: void regime + tail caller-restore; fresh
+VarAnnotator facts — anon params via `my $x = shift` get the same raw-slot
+verdicts named subs get) and returns v1's exact wrapper as ONE CLForm:
+`(lambda (&rest %_args) (let ((@_ (p-flatten-args %_args))
+(*pcl-caller-wantarray* *wantarray*)) (catch :p-return (block nil …))))`.
+Unlike `_lower_sub`, `_let_bound_vars`/`_live_lex` are KEPT (anon subs
+close over enclosing lexicals), with body-local additions unwound;
+`in_subroutine` bumped; ambient `wa_void_active` cleared (the lambda's
+dynamic *wantarray* at call time is its caller's).  `do{}` reuses
+`lower_embedded_block` with tail 'inherit'; the func_ref node carries
+`lambda_form` = `(lambda () (progn …))` — progn, not block nil, keeps
+last/next/redo loop-transparent (lexical exits cross the funcall'd lambda
+legally).  gen_func_ref/_form prefer lambda_form.  Declines mirror step 1
+(package-in-block, tail decl, unsafe raws; empty `sub {}` keeps the v1
+trailing-space quirk).  Single-statement anon bodies get the task-#60
+direct scheme (no regime binds) — dynamically equal to v1's
+:void + caller-restore pair, two fewer binds.
+
+**Verification**: corpus-diff v2 = 55 of 111 files (49 from step 1 + the
+anon/do class), PCL_V1 byte-diff ZERO; sweep of all 55 vs fail-baseline
+0 new / 0 fixed (pack.t "timeout" under --jobs 8 was load flakiness —
+solo re-run = exact baseline 5638+87); fuzzer 1056/1060 (same 4); gate
+117 files → **118 files / 4336 tests PASS**; PCL_V1 failure set = HEAD's
+exactly + the relocated v2-only eval-tail guard.  Gen v2-50 → **v2-51**.
+
+**Guards**: parser2-02.t +3 (do progn shape, anon wrapper shape, no
+multiline layout); behavioral guards moved to NEW `Pl/t/
+transpile-test-06.t` (user request: 04b is large/slow — one SBCL spawn per
+test — future tests go in 06/07): the 5 step-1 tests + closure-in-loop,
+last-escapes-do, closed-over-ref recursion.
+
+**raw_lambda remains** for: `&`-prototype block args (try/catch — named
+defun route), the no-parser PExpr fallback, and all declined shapes.
+
+---
+
 ## Session 306 (2026-07-21, Fable) — task #78 CORE SHIPPED: embedded-block re-host — map/grep/sort/eval{} bodies lower structurally through Parser2 (gen v2-50); + SBCL 2.5.2 floor check.
 
 **The re-host** (E2's last big decline, `inline_lambda`): in the v2 pipeline,

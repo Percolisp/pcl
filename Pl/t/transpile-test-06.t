@@ -1,0 +1,123 @@
+#!/usr/bin/env perl
+# Transpile tests part 6: embedded-block structured lowering (task #78) and
+# onward.  NEW TESTS GO HERE (or a future -07) — 04b and earlier are large
+# and slow (one SBCL spawn per test); keep per-file test counts small.
+
+use v5.30;
+use strict;
+use warnings;
+use Test::More;
+use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
+
+# Path to pl2cl and runtime
+my $project_root = "$RealBin/../..";
+my $pl2cl = "$project_root/pl2cl";
+my $runtime = "$project_root/cl/pcl-runtime.lisp";
+# Optional saved-core fast path (PCL_TEST_CORE=1); source-load otherwise.
+my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
+
+# Check dependencies
+plan skip_all => "pl2cl not found" unless -x $pl2cl;
+plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
+
+# Run a Perl snippet and return output
+sub run_perl {
+    my ($code) = @_;
+    # Add common 'use' statements for features we support
+    my $full_code = 'use feature "state"; use Cwd; ' . $code;
+    my $output = `perl -e '$full_code' 2>&1`;
+    return $output;
+}
+
+# Transpile and run CL, return output
+sub run_cl {
+    my ($code) = @_;
+
+    # Write Perl code to temp file
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+
+    # Transpile
+    my $cl_code = `$pl2cl $pl_file 2>&1`;
+
+    # Write CL to temp file
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl_code;
+    close $cl_fh;
+
+    # Run with sbcl (saved core if PCL_TEST_CORE is set, else --load the runtime)
+    my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
+
+    # Filter out warnings and "PCL Runtime loaded"
+    $output =~ s/^;.*\n//gm;
+    $output =~ s/^caught .*\n//gm;
+    $output =~ s/^compilation unit.*\n//gm;
+    $output =~ s/^\s*Undefined.*\n//gm;
+    $output =~ s/^-->.*\n//gm;
+    $output =~ s/^==>.*\n//gm;
+    $output =~ s/^PCL Runtime loaded\n//gm;
+    $output =~ s/^\s*\n//gm;
+
+    return $output;
+}
+
+# Test helper: compare Perl and CL output
+sub test_transpile {
+    my ($name, $code) = @_;
+    my $perl_out = run_perl($code);
+    my $cl_out = run_cl($code);
+    is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL: $cl_out");
+}
+
+# ============ EMBEDDED-BLOCK STRUCTURED LOWERING (task #78) ============
+
+test_transpile("eval-block tail inherits call-site context", '
+sub f { wantarray ? ("a","b") : "s" }
+my @x = eval { f() };
+my $y = eval { f() };
+print "@x|$y\n";
+');
+
+test_transpile("map block per-iteration closure capture", '
+my @subs = map { my $n = $_; sub { $n * 10 } } (1,2,3);
+print $subs[0]->(), $subs[1]->(), $subs[2]->(), "\n";
+');
+
+test_transpile("early return from map block leaves the sub", '
+sub outer { my @x = map { return "early" if $_ == 2; $_ } @_; "full:@x" }
+print outer(1,3), "|", outer(2), "\n";
+');
+
+test_transpile("yada-yada statement in a sub body dies Unimplemented", '
+sub u { ... }
+eval { u() };
+print $@ =~ /^Unimplemented/ ? "died\n" : "no:$@\n";
+');
+
+test_transpile("multi-statement sort block with side effects", '
+my %h = (a=>3, b=>1, c=>2);
+my $cmps = 0;
+my @k = sort { $cmps++; $h{$a} <=> $h{$b} } keys %h;
+print "@k|", ($cmps > 0 ? "counted" : "none"), "\n";
+');
+
+test_transpile("anon sub closure assigned inside a loop keeps its iteration", '
+my $c; for my $i (1..3) { my $n = $i; $c = sub { $n } if $i == 2; }
+print $c->(), "\n";
+');
+
+test_transpile("last escapes a do-block condition (loop transparency)", '
+my @acc; for my $i (1..3) { last if do { push @acc, $i; $i == 2 }; }
+print "@acc\n";
+');
+
+test_transpile("anon sub recursion through the closed-over ref", '
+my $rec; $rec = sub { my $n = shift; $n <= 1 ? 1 : $n * $rec->($n-1) };
+print $rec->(5), "\n";
+');
+
+done_testing();

@@ -5273,6 +5273,7 @@ sub _lower_bare_block {
 # never re-gate on this path.
 sub lower_embedded_block {
   my ($self, $block, $for_func) = @_;
+  return $self->_lower_embedded_anon($block) if $for_func eq 'sub';
   my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
               $block->schildren;
   return ['nil'] unless @stmts;
@@ -5346,6 +5347,66 @@ sub lower_embedded_block {
     return undef;
   }
   return $forms;
+}
+
+# task #78 step 2: anonymous `sub { … }` in expression position — the
+# raw_lambda sibling of the map/grep/sort/eval re-host.  Returns v1's exact
+# lambda WRAPPER as one CLForm (`&rest %_args` + `@_` flatten +
+# *pcl-caller-wantarray* snapshot + the :p-return catch), with the body
+# lowered like a named sub body (_lower_body_regime: void regime + tail
+# caller-context restore).  Unlike a NAMED sub (hoisted, so _lower_sub
+# clears _let_bound_vars), an anon sub CLOSES OVER the enclosing lexicals —
+# the live sets are kept, only body-local additions are unwound.  undef =
+# decline (v1's parse_block_as_function text as before).
+sub _lower_embedded_anon {
+  my ($self, $block) = @_;
+  my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
+              $block->schildren;
+  return undef unless @stmts;   # empty: v1 emits "(lambda () )" — E2.final quirk
+
+  # Same conservative declines as the block form: package switches need v1's
+  # revert wrapper (the native nested-package branch relies on p-sub's
+  # dynamic bind, absent in a bare lambda); a tail declaration loses its
+  # statement value in v2's let lowering.
+  return undef if @{ $block->find('PPI::Statement::Package') || [] };
+  return undef if $stmts[-1]->isa('PPI::Statement::Variable');
+
+  my $env = $self->environment;
+  my $ppi_snap    = _ppi_state_snapshot(@stmts);
+  my %saved_lex   = %{ $self->{_live_lex} // {} };
+  my %saved_lb    = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  my $scope_depth = scalar @{ $env->scope_stack };
+  my @side_snaps  = map { [$_, scalar @{ $self->{$_} // [] }] }
+                    qw(_captured_decls _hoisted_decls _hoisted_defs
+                       _hoisted_def_lines _sched_defs _sched_lines);
+
+  $env->in_subroutine($env->in_subroutine + 1);
+  my $forms = eval {
+    # Fresh context: the enclosing sub's :void regime does not reach into
+    # the lambda (its dynamic *wantarray* at call time is the CALLER's).
+    local $env->{wa_void_active} = 0;
+    my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
+    $env->push_scope;
+    [ $self->_lower_body_regime(\@stmts, $vi) ];
+  };
+  $env->in_subroutine($env->in_subroutine - 1);
+  pop @{ $env->scope_stack } while @{ $env->scope_stack } > $scope_depth;
+  $self->{_live_lex} = \%saved_lex;
+  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+
+  if (!$forms || !@$forms || grep { _embed_form_unsafe($_) } @$forms) {
+    for my $s (@side_snaps) {
+      splice @{ $self->{$s->[0]} }, $s->[1] if $self->{$s->[0]};
+    }
+    _ppi_state_restore($ppi_snap);
+    return undef;
+  }
+  return ['lambda', ['list', '&rest', '%_args'],
+          ['let', ['list',
+                   ['list', '@_', ['p-flatten-args', '%_args']],
+                   ['list', '*pcl-caller-wantarray*', '*wantarray*']],
+           ['catch', ':p-return',
+            ['block', 'nil', @$forms]]]];
 }
 
 # A form the flat printer cannot safely embed in an expression position:

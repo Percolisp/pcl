@@ -1,7 +1,21 @@
 # v2 Remaining Work — Execution Plan for Opus 4.8
 
 **Written:** 2026-07-12 (session 285, Fable), for **Opus 4.8 to execute**.
-**State updated s306 (2026-07-21, Fable): task #78 CORE SHIPPED — the
+**State updated s306b (2026-07-21, Fable): task #78 STEP 2 SHIPPED — the
+`raw_lambda` seam: do{} + expression `sub {…}` bodies lower through
+Parser2 too (`_lower_embedded_anon` = named-sub body regime inside v1's
+exact `&rest %_args` wrapper form; do{} = `(funcall (lambda () (progn …)))`
+with loop transparency; func_ref carries `lambda_form`).  Gen v2-51; gate
+118 files / 4336 green; PCL_V1 byte-diff zero, failure set = HEAD + the 1
+relocated v2-only guard; 55-file sweep 0 new/0 fixed; fuzzer 1056/1060.
+NEW: guard file `Pl/t/transpile-test-06.t` — future transpile guards go
+there (04b and earlier are large/slow).  raw_lambda remains only for
+&-prototype block args (named-defun route), the no-parser fallback, and
+declined shapes.  E2 REMAINING: hash-constructor blocks, declined shapes,
+empty-shape quirks, `\(RANGE,…)`, then E2.final (text printer +
+raw/raw_wrap deletion — bulk gated on E4.1 since the seam's
+_parse_expression contract is v1 text).**
+**Previous state s306 (2026-07-21, Fable): task #78 CORE SHIPPED — the
 `inline_lambda` re-host: map/grep/sort/eval{} block bodies lower
 structurally through Parser2's `lower_embedded_block` (PExpr `_v2_embed`
 hook; body_form CLForms on the node; `gen_inline_lambda_form`), with
