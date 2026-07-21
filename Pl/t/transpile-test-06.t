@@ -120,4 +120,12 @@ my $rec; $rec = sub { my $n = shift; $n <= 1 ? 1 : $n * $rec->($n-1) };
 print $rec->(5), "\n";
 ');
 
+test_transpile("backslash-paren list with range mix distributes refs", '
+my @r = \(1..2, 3);
+my $x = 5;
+my @s = \($x, 1..3);
+${$s[0]} = 7;
+print scalar(@r), "|", scalar(@s), "|", ${$r[0]}, ${$r[2]}, ${$s[3]}, "|", $x, "\n";
+');
+
 done_testing();

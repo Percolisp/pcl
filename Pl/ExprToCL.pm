@@ -3822,9 +3822,8 @@ sub gen_prefix_op {
 # FORM's head instead: same generated output inspected, structurally.  A
 # producer that emits a different head (e.g. a user-defined `sub substr` →
 # pl-substr) falls to the generic wrap on both paths, so parity holds by
-# construction.  The ONE remaining decline is the \(RANGE, …) range-mix
-# multi-term shape (multiline let text; pure metadata check, before any
-# generation).
+# construction.  Never declines (the last decline — the \(RANGE, …)
+# range-mix multi-term — converted via _gen_backslash_multi_term_form).
 sub gen_prefix_op_form {
   my ($self, $node, $node_id, $kids) = @_;
   my $op_node = $self->expr_o->get_a_node($kids->[0]);
@@ -3841,12 +3840,9 @@ sub gen_prefix_op_form {
     }
     # \(LIST) — the distribute-over-elements family.  Mirrors the text
     # emitter branch for branch: single-scalar tree_val → (p-backslash …),
-    # multi-term comma list without ranges → (vector (p-backslash …) …),
-    # general list → (p-refgen-list …) [+ (p-list-scalar …) in scalar/void
-    # ctx].  The ONE remaining decline is the range-mix multi-term shape —
-    # its text is a multiline let + gensym'd loop vars that flat rendering
-    # can't reproduce; the decline is pure metadata (a `..` operator child),
-    # before any generation or counter bump.
+    # multi-term comma list (with or without ranges) →
+    # _gen_backslash_multi_term_form, general list → (p-refgen-list …)
+    # [+ (p-list-scalar …) in scalar/void ctx].
     if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
       my $inner_node = $self->expr_o->get_a_node($operand_id);
       if ($self->expr_o->is_internal_node_type($inner_node)
@@ -3861,17 +3857,7 @@ sub gen_prefix_op_form {
           return ['p-backslash', $scalar_form];
         }
         if (@$tv_kids > 1) {
-          for my $kid_id (@$tv_kids) {
-            my $kid_node = $self->expr_o->get_a_node($kid_id);
-            return undef if ref($kid_node) eq 'PPI::Token::Operator'
-                         && ($kid_node->content() // '') eq '..';
-          }
-          # Text's _gen_backslash_multi_term consumes one counter id per
-          # call even when unused (no range) — mirror it so a later
-          # declined range-mix in the same file gets the same id.
-          $g_refgen_count++;
-          return ['vector',
-                  map { ['p-backslash', $self->gen_node_form($_)] } @$tv_kids];
+          return $self->_gen_backslash_multi_term_form($tv_kids);
         }
       }
       my $raw_ctx   = $self->expr_o->get_node_context_raw($node_id);
@@ -4954,6 +4940,54 @@ sub _gen_backslash_multi_term {
   my $stmts_str = join("\n  ", @stmts);
   return "(let (($result_var (make-array 4 :adjustable t :fill-pointer 0)))\n  "
        . "$stmts_str\n  $result_var)";
+}
+
+# Form twin of _gen_backslash_multi_term (E2): same parts walk, same counter
+# id, same token stream — but a CLForm, so the range-mix multi-term no longer
+# declines to the text path.  Layout is the printer's (flat under to_flat,
+# depth-indented under to_string), not the text twin's hand-rolled multiline
+# let — the one deliberate byte change of the conversion.
+sub _gen_backslash_multi_term_form {
+  my ($self, $tv_kids) = @_;
+  my $id = $g_refgen_count++;
+
+  my @parts;  # each is ['single', FORM] or ['range', FORM]
+  for my $kid_id (@$tv_kids) {
+    my $kid_node = $self->expr_o->get_a_node($kid_id);
+    my $is_range = ref($kid_node) eq 'PPI::Token::Operator'
+                && ($kid_node->content() // '') eq '..';
+    if ($is_range) {
+      my $saved = $self->expr_o->get_node_context($kid_id);
+      $self->expr_o->set_node_context($kid_id, LIST_CTX);
+      my $kid_form = $self->gen_node_form($kid_id);
+      $self->expr_o->set_node_context($kid_id, $saved);
+      push @parts, ['range', ['p-refgen-list', $kid_form]];
+    } else {
+      push @parts, ['single', ['p-backslash', $self->gen_node_form($kid_id)]];
+    }
+  }
+
+  my $has_range = grep { $_->[0] eq 'range' } @parts;
+  if (!$has_range) {
+    return ['vector', map { $_->[1] } @parts];
+  }
+
+  my $result_var = "|--pcl-bsl-r$id--|";
+  my $iter_var   = "|--pcl-bsl-x$id--|";
+  my @stmts;
+  for my $part (@parts) {
+    if ($part->[0] eq 'range') {
+      push @stmts, ['loop', 'for', $iter_var, 'across', $part->[1],
+                    'do', ['vector-push-extend', $iter_var, $result_var]];
+    } else {
+      push @stmts, ['vector-push-extend', $part->[1], $result_var];
+    }
+  }
+  return ['let',
+          ['list', ['list', $result_var,
+                    ['make-array', '4', ':adjustable', 't', ':fill-pointer', '0']]],
+          @stmts,
+          $result_var];
 }
 
 
