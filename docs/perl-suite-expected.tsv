@@ -66,3 +66,27 @@ class/inherit.t	not-supported.md §Perl 5.38 class/field/method — deferred to 
 class/method.t	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 class/phasers.t	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 class/utf8.t	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+mro/basic.t	not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
+mro/inconsistent_c3.t	not-supported.md §mro + §error-text — C3 merge-failure error wording differs
+mro/inconsistent_c3_utf8.t	not-supported.md §mro + §error-text — C3 merge-failure error wording differs (utf8 pkg names)
+mro/isa_aliases.t	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes)
+mro/isa_aliases_utf8.t	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes, utf8)
+mro/isa_c3.t	not-supported.md §symbol-table hashes + §mro — *ISA glob manipulation / ISA magic internals
+mro/isa_c3_utf8.t	not-supported.md §symbol-table hashes + §mro — *ISA glob manipulation / ISA magic internals (utf8)
+mro/isa_dfs.t	not-supported.md §mro — DFS ordering spec tests (C3-only by design)
+mro/isa_dfs_utf8.t	not-supported.md §mro — DFS ordering spec tests (C3-only by design, utf8)
+mro/isarev.t	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally)
+mro/isarev_utf8.t	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally, utf8)
+mro/method_caching.t	not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)
+mro/method_caching_utf8.t	not-supported.md §mro — perl method-cache semantics (utf8)
+mro/next_NEXT.t	not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
+mro/next_NEXT_utf8.t	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
+mro/next_edgecases.t	not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
+mro/next_edgecases_utf8.t	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
+mro/overload_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant (non-utf8 twin passes)
+mro/package_aliases.t	not-supported.md §symbol-table hashes — glob package aliasing + isarev
+mro/package_aliases_utf8.t	not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8)
+mro/pkg_gen.t	not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
+mro/pkg_gen_utf8.t	not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
+mro/recursion_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
+mro/recursion_dfs_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
