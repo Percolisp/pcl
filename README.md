@@ -4,7 +4,7 @@
 
 ```bash
 $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' \
-    | ./pl2cl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /dev/stdin
+    | ./pl2cl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --eval '(load *standard-input*)'
 2,4,6,8,10
 ```
 
@@ -45,7 +45,7 @@ cpanm PPI Moo
 sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 
 # Transpile and run
-echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /dev/stdin
+echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --eval '(load *standard-input*)'
 
 # Run the internal test suite (117 files, 4330 tests)
 prove -j8 Pl/t/
@@ -93,7 +93,7 @@ print $d->speak(), "\n";
 ```
 
 ```bash
-$ ./pl2cl input.pl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /dev/stdin
+$ ./pl2cl input.pl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --eval '(load *standard-input*)'
 I am Rex and I bark
 ```
 
