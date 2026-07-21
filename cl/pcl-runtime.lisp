@@ -7,9 +7,12 @@
 
 ;;; PCL requires SBCL >= 2.5.2: the test suite is validated on 2.5.2/2.6.0
 ;;; and the runtime uses SBCL-internal symbols (sb-unicode, sb-kernel float
-;;; bits, …).  Check FIRST so an old host fails with one clear message
-;;; instead of a cryptic missing-symbol/missing-component error later
-;;; (docs/error-pcre.txt: Debian's SBCL 2.1.11).
+;;; bits, …).  This check is deliberately the FIRST code to execute, so on
+;;; an old host the load fails right under a message explaining why, not
+;;; with a cryptic missing-symbol/missing-component error later
+;;; (docs/error-pcre.txt: Debian's SBCL 2.1.11).  A WARNING, not an error
+;;; (and written directly to *error-output* — the pcl runner load-wraps
+;;; with muffle-warning, which must not eat it).
 (let* ((min-version '(2 5 2))
        (v (lisp-implementation-version))
        (nums (loop with start = 0
@@ -25,9 +28,13 @@
               do (cond ((< a b) (return t))
                        ((> a b) (return nil)))
               finally (return (< (length nums) (length min-version))))
-    (error "PCL requires SBCL >= 2.5.2; this is SBCL ~a.~%~
-            Install a current SBCL (e.g. the binary from sbcl.org) — ~
-            distribution packages are often too old." v)))
+    (format *error-output*
+            "~&WARNING: PCL requires SBCL >= 2.5.2; this is SBCL ~a.~%~
+             WARNING: Loading will very likely fail below this message.~%~
+             WARNING: Debian 13+ / Ubuntu 25.10+ package a new enough SBCL;~%~
+             WARNING: otherwise install the binary from https://www.sbcl.org/~%"
+            v)
+    (force-output *error-output*)))
 
 ;;; Load CL-PPCRE for regex support
 (require :asdf)

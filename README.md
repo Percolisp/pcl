@@ -67,8 +67,10 @@ core path yourself).
 
 The runtime uses SBCL-internal APIs (`sb-unicode`, float bit accessors, …), and
 the test suite is validated on 2.5.2 and 2.6.0 — so **SBCL 2.5.2 is the hard
-floor**, enforced with a clear error when `cl/pcl-runtime.lisp` loads (the
-`pcl` runner also warns at startup). Distribution packages that qualify:
+floor**. The very first form of `cl/pcl-runtime.lisp` checks
+`(lisp-implementation-version)` and prints a loud warning on an older host,
+so the load failure that follows explains itself. Distribution packages that
+qualify:
 **Debian 13 “trixie”** and **Ubuntu 25.10 / 26.04 LTS** ship 2.5.2+; anything
 older (Debian 12: 2.2.9, Ubuntu 24.04 LTS: 2.2.9, Ubuntu 22.04 LTS: 2.1.11)
 does not — on those, install the current binary from

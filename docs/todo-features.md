@@ -263,3 +263,19 @@ and similar recursive helpers that save/restore indent state.
 | `DESTROY` finalizers | rare | 3 |
 | `concat2.t` (re-sweep needed) | 3? | 3 |
 | `indent_level` negative (cosmetic) | — | — |
+
+## PCL_ALL_BOXED — uniform-IR mode (user-approved todo, 2026-07-21, NOT high priority)
+
+A flag (env `PCL_ALL_BOXED=1` / `pl2cl --all-boxed`) that forces every
+VarAnnotator verdict conservative, so **every scalar is a p-box** — no raw
+let-slots, no `-raw` compound macros, no `p-raw-params` signature fast path,
+no leading-shift coalesce.  One choke point: zero the verdicts where
+`Pl::VarAnnotator::analyze` returns (every consumer keys on that table).
+Purpose: a maximally REGULAR generated-CL IR for compiling onward to other
+targets (Raku, JavaScript, …) that lack CL's number tower — the Target-B
+direction.  Requirements: fold the flag into the module-cache key
+(`p-compute-cache-path`, next to the pipeline component), a guard test, and
+an **IR-docs extension**: a short "all-boxed dialect" section in
+`docs/ir-spec.md` (+ a note in `docs/generated-cl-ir-review.md`'s consumer
+contract) stating the invariant "every scalar slot holds a p-box" and which
+op families disappear in this mode.
