@@ -13506,6 +13506,36 @@ buffer's fill-pointer; everything else falls back to file-length."
                (or *pcl-runtime-directory* "(no runtime dir)")))))
 
 ;;; ============================================================
+;;; mro — always-available core facility (perl >= 5.10)
+;;; ============================================================
+;;; In perl, `mro::get_linear_isa` exists WITHOUT any `require mro` — the
+;;; facility is built into the interpreter (t/mro/*.t call it bare).  The
+;;; IMPLEMENTATION stays at the right layer (lib/mro.pm, transpiled to
+;;; cl/pcl-mro.lisp like pack-impl); the runtime owns only the interpreter
+;;; fact "always loaded", via the same self-loading-stub pattern as p-pack.
+;;; Regenerate after editing the shim:  ./pl2cl lib/mro.pm > cl/pcl-mro.lisp
+
+(p-defpackage :mro)
+
+(defmacro %pcl-def-mro-stub (name)
+  ;; Self-loading stub: loads pcl-mro.lisp on first call then delegates to
+  ;; the real definition the extension just installed over this stub.
+  `(defun ,name (&rest args)
+     (let ((loaded (p-load-extension "pcl-mro")))
+       (if loaded
+           (apply (symbol-function ',name) args)
+           (error "mro: cl/pcl-mro.lisp not found in ~a"
+                  (or *pcl-runtime-directory* "(no runtime dir)"))))))
+
+(%pcl-def-mro-stub mro::pl-get_linear_isa)
+(%pcl-def-mro-stub mro::pl-get_mro)
+(%pcl-def-mro-stub mro::pl-set_mro)
+(%pcl-def-mro-stub mro::pl-get_isarev)
+(%pcl-def-mro-stub mro::pl-is_universal)
+(%pcl-def-mro-stub mro::pl-invalidate_all_method_caches)
+(%pcl-def-mro-stub mro::pl-method_changed_in)
+
+;;; ============================================================
 ;;; Package initialization
 ;;; ============================================================
 

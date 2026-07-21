@@ -31,17 +31,50 @@ sub get_linear_isa {
     return _c3_linearize($class);
 }
 
+# --- Tier 2, C3-only no-crash versions (t/mro files call these bare; an
+# --- undefined-function abort would kill the whole file).  Values are
+# --- honest for a C3-only world; DFS answers are a documented divergence.
+sub get_mro { return 'c3' }             # PCL is always C3
+sub set_mro { return }                  # ordering is not switchable — no-op
+
+# Reverse-ISA would need to enumerate every known package (live stash
+# support, deferred — docs/not-supported.md §symbol-table hashes); an empty
+# list keeps callers running.
+sub get_isarev { return [] }
+
+sub is_universal {
+    my ($class) = @_;
+    return 1 if $class eq 'UNIVERSAL';
+    no strict 'refs';
+    for my $u (@{"UNIVERSAL::ISA"}) {
+        return 1 if $u eq $class;
+    }
+    return 0;
+}
+
+# CLOS has no perl-style method cache to poke.
+sub invalidate_all_method_caches { return }
+sub method_changed_in { return }
+
 # Standard C3 linearization over @ISA:
 #   L[C] = C  followed by  merge( L[P1], ..., L[Pn], [P1, ..., Pn] )
 sub _c3_linearize {
-    my ($class) = @_;
+    my ($class, $seen) = @_;
     no strict 'refs';
+
+    # Recursive @ISA (a class inheriting from itself, directly or through a
+    # cycle) must die like perl, not exhaust the stack (t/mro/recursion_c3.t).
+    $seen = { %{ $seen || {} } };
+    if ($seen->{$class}++) {
+        die "Recursive inheritance detected in package '$class'\n";
+    }
+
     my @parents = @{"${class}::ISA"};
 
     # Leaf class: just itself.
     return [$class] unless @parents;
 
-    my @seqs = map { [ @{ _c3_linearize($_) } ] } @parents;
+    my @seqs = map { [ @{ _c3_linearize($_, $seen) } ] } @parents;
     push @seqs, [@parents];
 
     my @result = ($class);
