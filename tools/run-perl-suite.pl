@@ -274,6 +274,17 @@ sub run_one {
   $sig ||= "parse-error"      if $pcl =~ /PARSE ERROR/;
   $sig ||= "crash:$1"         if $pcl =~ /Unhandled ([^\s:]+(?::[^\s]+)?)/;
   $sig ||= "crash:$1"         if $pcl =~ /debugger invoked on a (\S+)/;
+  # Generic crash classes (SIMPLE-ERROR etc.) subgroup by their message: first
+  # line after the condition header, numbers/addresses normalized to N.
+  if ($sig =~ /^crash:/
+      && $pcl =~ /(?:Unhandled \S+|debugger invoked on a \S+).*?>:\s*\n\s+([^\n]+(?:\n[^\n]+){0,4})/s) {
+    my $msg = $1;
+    $msg =~ s/\n\s*Backtrace.*//s;
+    $msg =~ s/[0-9]+/N/g;
+    $msg =~ s/\s+/ /g;
+    $msg =~ s/\t/ /g;
+    $sig .= ": " . substr($msg, 0, 90);
+  }
 
   $status = $terr != 0                                   ? 'TRANSPILE'
           : $sbcl_exit == 124                            ? 'TIMEOUT'
