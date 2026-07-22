@@ -653,15 +653,18 @@ sub parse {
   # per-eval v1 retry owns that shape until it proves common.
   die "Parser2 TODO: eval-mode multi-segment (top-level package statement)\n"
     if $self->eval_mode && @segments > 1;
-  # E3: `eval '...; my $x = EXPR'` — the eval's VALUE is the assignment's
-  # value, but v2 lowers a trailing declaration as a let with an EMPTY body
-  # (value nil; at file top level the value is never observed, in eval mode
-  # it is).  v1 emits (box-set …) whose value is the assigned value → retry.
+  # E3: `eval '...; my $x = EXPR'` — the eval's VALUE is the trailing
+  # declaration's statement value.  Eval mode lowers the top level with
+  # tail_ctx='inherit' (s308b), so the $decl_tail machinery covers the same
+  # shapes it covers in sub bodies; only the shapes it declines (`our`
+  # without the assignment value, bare multi `my ($a,@b);`) still retry
+  # through v1.
   if ($self->eval_mode) {
     my ($last) = grep { $_->significant && !$_->isa('PPI::Statement::Null') }
                  reverse @{ $segments[0]{stmts} };
     die "Parser2 TODO: eval-mode trailing my/our declaration (value-losing let)\n"
-      if $last && $last->isa('PPI::Statement::Variable');
+      if $last && $last->isa('PPI::Statement::Variable')
+      && !$self->_tail_decl_convertible($last);
     # A lone bareword inside an ARRAY subscript is a sub/constant call in
     # Perl — usually a `use constant` defined in the ENCLOSING file, which
     # this transpile cannot see.  v1 emits the runtime call (pl-WORD); v2's
@@ -874,7 +877,14 @@ sub parse {
       next if $child->isa('PPI::Statement::Null');
       push @top, $child;
     }
-    my @runtime = $self->_lower_block(\@top, Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info, $self));
+    # File top level has no consumer of the last statement's value — except
+    # EVAL MODE, where the eval's value IS the tail statement's value:
+    # 'inherit' turns on the tail machinery ($decl_tail for trailing
+    # declarations, the ret-var transform for tail if-modifiers/compounds)
+    # exactly as in a sub body (s308b, drops the E3 trailing-decl retry).
+    my @runtime = $self->_lower_block(\@top,
+        Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info, $self),
+        $self->eval_mode ? 'inherit' : undef);
     # Named subs found nested inside blocks during lowering (package-global
     # in Perl) hoist into the same decl/def buckets as top-level subs.
     push @decls, @{ $self->{_hoisted_decls} };
