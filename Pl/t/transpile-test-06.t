@@ -169,6 +169,17 @@ print join(",", map { d($_) } @a), "|", join(",", map { d($_) } @b),
       "|", d($c), "|@h|", d($g), "|@f\n";
 ');
 
+test_transpile("string-eval value is the tail statement value (s308b E3)", '
+sub d { defined $_[0] ? "<$_[0]>" : "U" }
+my $a = eval q{my $x = 42};
+my $b = eval q{my @a = (7,8,9)};
+my $e = eval q{my $x = 5; my $y = $x + 1};
+my $g = eval q{if (0) { 5 }};
+my $h = eval q{"x" if 0};
+my $j = eval q{local $main::lv = 9; my $t = $main::lv * 2};
+print join("|", map { d($_) } ($a,$b,$e,$g,$h,$j,$main::lv)), "\n";
+');
+
 test_transpile("range endpoints outside IV range die like perl (s308)", '
 my $MAX_INT = ~0 >> 1;
 for my $ii (~0, ~0+1) {

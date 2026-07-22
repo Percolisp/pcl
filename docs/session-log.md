@@ -30,6 +30,15 @@ Append new entries at the top. One section per session.
   "depth 1" mystery).  Reports extra-`)` at its line, missing-`)` as the
   line of the form that never closes; exit 0 iff balanced.  CLAUDE.md §10
   updated — do not use textual scanners.
+- **E3 follow-up landed (f0a346c): eval-mode top level lowers with
+  tail_ctx='inherit'** — the eval's value is its tail statement's value, so
+  the sub-body tail machinery ($decl_tail, ret-var transforms) applies; the
+  trailing my/our retry gate NARROWS to _tail_decl_convertible's declines
+  (bare `our`, bare multi `my`).  `eval 'my $x = 42'` → native
+  `(let (($x 42)) $x)`, no v1 retry.  11-probe eval-tail battery matches
+  perl (incl. bare-if/modifier cond values and local restore); corpus
+  byte-identical (eval mode only); p-eval's cache is in-memory so no
+  generation bump needed.  Guard added (transpile-test-06.t, 15 tests).
 - Remaining #78 declines: lower-failed ~37, anon-empty 10, Include 4,
   Variable 2.
 
