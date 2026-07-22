@@ -226,7 +226,10 @@ sub run_one {
     goto WRITE;
   }
 
-  my $perl = `cd \Q$tdir\E && timeout 30 perl \Q$f\E 2>/dev/null`;
+  # ulimit -v: fork-heavy tests can orphan children past the timeout; the cap
+  # stops any single perl from eating the machine (a 6 GB leak OOM-killed the
+  # whole desktop session twice before group-reaping was added).
+  my $perl = `ulimit -v 4194304 2>/dev/null; cd \Q$tdir\E && timeout 30 perl \Q$f\E 2>/dev/null`;
   $p_ok    = () = $perl =~ /^ok /mg;
   $p_notok = () = $perl =~ /^not ok /mg;
 
@@ -234,7 +237,8 @@ sub run_one {
   my $lisp = "$tmpdir/$safe.lisp";
   # Transpile with CWD = shadow so `require './test.pl'` prototype extraction
   # (cwd-first) reads the PCL stub, not perl's real harness.
-  my $terr = system("cd \Q$shadow\E && perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
+  my $terr = system("ulimit -v 4194304 2>/dev/null; cd \Q$shadow\E && "
+                  . "timeout $timeout perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
                   . "> \Q$lisp\E 2>\Q$lisp\E.err");
   my $pcl = "";
   my $sbcl_exit = 0;
@@ -250,7 +254,7 @@ sub run_one {
     $c_notok = () = $pcl =~ /^not ok /mg;
   }
 
-  $sig = "TRANSPILE-FAIL"     if $terr != 0;
+  $sig = (($terr >> 8) == 124 ? "transpile-timeout" : "TRANSPILE-FAIL") if $terr != 0;
   $sig ||= "timeout"          if $sbcl_exit == 124;
   $sig ||= "unbound:$1"       if $pcl =~ /The variable (\S+) is unbound/;
   $sig ||= "undef-fn:$1"      if $pcl =~ /The function (\S+) is undefined/;
@@ -293,18 +297,30 @@ WRITE:
   open my $rf, '>', $result_file or _exit(1);
   print $rf join("\t", $rel, $p_ok, $p_notok, $c_ok, $c_notok, $status, $sig), "\n";
   close $rf;
+  # Reap everything this worker's process group spawned — timeout(1) kills
+  # only its direct child, so fork-heavy tests leave orphaned grandchildren.
+  # This kills the worker itself too; the parent reads only the result file
+  # (already written), never the exit status.
+  kill 'KILL', -$$;
 }
 
 # ---------------------------------------------------- parallel dispatch
 my @queue = @files;
 my (%children, %results);
+# Workers sit in their own process groups, so terminal SIGINT no longer
+# reaches them — forward it (exit() still runs the END tmpdir cleanup).
+for my $s ('INT', 'TERM') {
+  $SIG{$s} = sub { kill 'KILL', map { -$_ } keys %children; exit 130 };
+}
 while (@queue || %children) {
   while (@queue && keys(%children) < $jobs) {
     my $rel = shift @queue;
     my (undef, $result_file) = tempfile(DIR => $tmpdir, SUFFIX => '.res', OPEN => 0);
     my $pid = fork();
     die "fork: $!" unless defined $pid;
-    if ($pid == 0) { run_one($rel, $result_file); _exit(0) }
+    # Each worker leads its own process group so the group (worker + every
+    # grandchild spawned via system/backticks) can be killed as a unit.
+    if ($pid == 0) { setpgrp(0, 0); run_one($rel, $result_file); _exit(0) }
     $children{$pid} = { rel => $rel, result_file => $result_file, start => time() };
   }
   for my $pid (keys %children) {
@@ -333,7 +349,7 @@ while (@queue || %children) {
   for my $pid (keys %children) {
     my $info = $children{$pid};
     next unless time() - $info->{start} > $timeout + 40;
-    kill 'KILL', $pid; waitpid($pid, 0);
+    kill 'KILL', -$pid; waitpid($pid, 0);
     $results{$info->{rel}} = [$info->{rel}, 0, 0, 0, 0, 'TIMEOUT', '(killed)'];
     printf "%-24s %s\n", $info->{rel}, 'TIMEOUT (killed)';
     delete $children{$pid};
