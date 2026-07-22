@@ -3917,6 +3917,11 @@ sub _lower_body_regime {
 sub _reg_lex {
   my ($self, @names) = @_;
   for my $n (@names) {
+    # Package-qualified names are never lexicals (`my $Foo::x` is a perl
+    # compile error) — registering one (e.g. `for $main::x` loop var) makes
+    # the string-eval capture alist emit the raw unreadable perl-order
+    # symbol.  Globals are reachable inside eval by name anyway.
+    next if $n =~ /::/;
     $self->fallback_parser->{_let_bound_vars}{$n} = 1;
     $self->{_live_lex}{$n} = 1;
     # Per-section accumulator — drives the forward-decl exclusion (a name
@@ -5130,6 +5135,10 @@ sub _lower_compound {
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
     die "Parser2 TODO: foreach without list" unless $list && $block;
     my $name = $var ? $var->content : '$_';
+    # `for $Pkg::x (...)`: the BINDING must be the CL-ordered global
+    # (Pkg::$x) — the raw perl order is unreadable ($MAIN package error) —
+    # while $name stays the perl name for $vi/_reg_lex bookkeeping.
+    my $cl_name = Pl::ExprToCL::qualified_var_to_cl($name, $self->environment);
     # The LIST is evaluated in the OUTER scope (the loop var is not yet bound).
     my @list_parts = map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children;
     # A single aliasable lvalue ELEMENT (`for ($a[i])`, `for ($h{k})`) must bind
@@ -5196,9 +5205,9 @@ sub _lower_compound {
     $self->{_live_lex} = \%saved_lex;
     return defined $to_form
       ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
-         ['list', $name, $from_form, $to_form],
+         ['list', $cl_name, $from_form, $to_form],
          _label_keys($label), @body, @cont]
-      : ['p-foreach', ['list', $name, $list_form],
+      : ['p-foreach', ['list', $cl_name, $list_form],
          _label_keys($label), @body, @cont];
   }
 

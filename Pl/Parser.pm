@@ -489,7 +489,10 @@ sub _assemble_output {
   for my $section (@{$self->_sections}) {
     for my $bucket (qw(preamble declarations definitions runtime)) {
       for my $line (@{$section->{$bucket}}) {
-        while ($line =~ /\b([A-Za-z_][A-Za-z0-9_]*)::/g) {
+        # [^\W\d]\w* = \w-word not starting with a digit — NOT [A-Za-z_]:
+        # Unicode package names (use utf8; package 닌g난ㄬ) must be collected
+        # too, or their qualified symbols are unreadable (uni/attrs.t s309).
+        while ($line =~ /\b([^\W\d]\w*)::/g) {
           my $pkg = $1;
           next if lc($pkg) eq 'pcl';  # our runtime package
           $needed_packages{$pkg} = 1 unless $declared_pkgs{$pkg};
@@ -6017,7 +6020,8 @@ sub _process_foreach_loop {
   my $renames = $self->environment->state_var_renames // {};
   my $candidate = $renames->{$loop_var};
   my $cl_loop_var = (defined $candidate && $candidate =~ /__lex__\d+$/)
-                  ? $candidate : $loop_var;
+                  ? $candidate
+                  : Pl::ExprToCL::qualified_var_to_cl($loop_var, $self->environment);
   # Also track renamed name as lexical foreach var to skip defvar generation
   if ($cl_loop_var ne $loop_var) {
     $self->{_lexical_foreach_vars}{$cl_loop_var} = 1;

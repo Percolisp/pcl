@@ -777,16 +777,8 @@ sub gen_symbol_form {
   # Handle package-qualified variables: $Pkg::var -> Pkg::$var
   # Perl: $Config::debug  ->  CL: Config::$debug
   # Also: $::foo means $main::foo (empty package = main)
-  # Note: Use [^:]+ at the end to avoid matching stash refs like $Pkg::Sub::
-  if ($content =~ /^([\$\@\%])(.*)::([^:]+)$/) {
-    my ($sigil, $pkg, $name) = ($1, $2, $3);
-    # Empty package means main (e.g., $::foo = $main::foo)
-    $pkg = 'main' if $pkg eq '';
-    # Track referenced package
-    $self->environment->add_referenced_package($pkg) if $self->environment;
-    # Use pipe quoting for nested packages
-    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
-    return "${cl_pkg}::${sigil}${name}";
+  if ($content =~ /^[\$\@\%].*::[^:]+$/) {
+    return qualified_var_to_cl($content, $self->environment);
   }
   # Handle package stash typeglob: *Pkg:: (no variable name) -> (p-stash "Pkg")
   # Perl: undef *Food:: or *Mover:: = *Mover2::
@@ -4164,6 +4156,26 @@ sub gen_array_access_form {
 # rendered symbol may be pipe-quoted (|$-|, |$^H|) when the name needs CL
 # escaping — swap inside the pipes, keeping them (harmless when unneeded).
 # Package-qualified renders (|Pkg|::$h) hit the first branch via `::$`.
+# Package function (not a method): render a package-qualified Perl variable
+# name in CL order — `$Pkg::var` -> `Pkg::$var`, `$::foo` -> `main::$foo`,
+# nested `$A::B::x` -> `|A::B|::$x`.  Unqualified names (and stash refs like
+# `$Pkg::Sub::`, excluded by the [^:]+ tail) return unchanged.  Registers the
+# package with ENV (optional) so the preamble pre-declares it.  Used by
+# gen_symbol_form and by both pipelines' loop-variable bindings, which take
+# the name from raw token content (a raw `$main::x` binding is UNREADABLE —
+# the CL reader parses `$MAIN` as a package; comp/require.t s309).
+sub qualified_var_to_cl {
+  my ($name_in, $env) = @_;
+  if ($name_in =~ /^([\$\@\%])(.*)::([^:]+)$/) {
+    my ($sigil, $pkg, $name) = ($1, $2, $3);
+    $pkg = 'main' if $pkg eq '';
+    $env->add_referenced_package($pkg) if $env;
+    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+    return "${cl_pkg}::${sigil}${name}";
+  }
+  return $name_in;
+}
+
 sub _swap_elem_sigil {
   my ($sym, $sigil) = @_;
   $sym =~ s/(^|::)\$/$1$sigil/

@@ -214,4 +214,26 @@ print scalar(@-), " ", $+[3] // "U", "|";
 print join(",", sort keys %-), "|", scalar @{$-{first}}, "\n";
 ');
 
+test_transpile("package-qualified foreach loop var binds the CL-ordered global (s309)", '
+our $tm;
+for $main::tm (1..3) { print $main::tm, "-" }
+sub f { $main::tm }
+for $main::tm ("a".."c") { print f(), "+" }
+print "after:", $main::tm // "undef", "\n";
+');
+
+test_transpile("unicode package in nested block is pre-declared (s309)", '
+use utf8;
+binmode STDOUT, ":utf8";
+{
+  package 닌g난ㄬ;
+  sub who { "korean" }
+}
+{
+  package Càt;
+  sub who { "cat" }
+}
+print 닌g난ㄬ::who(), "|", Càt::who(), "\n";
+');
+
 done_testing();
