@@ -4751,13 +4751,16 @@ sub _lower_stmt {
   # A postfix `EXPR if/unless COND` whose value is the sub's return ($tail_ctx
   # defined) yields the COND value when the body is skipped (`sub f { 5 if 0 }`
   # → 0), like a block bare-if — same ret-var transform as the block form.
+  # The body lowers in the TAIL's context like a plain expression tail would
+  # (s308b): a map tail is LIST, so `map { (A, B) if C }` keeps both
+  # elements — the default lowering flattened the list to its last element.
   if (defined $tail_ctx && $mod && $mod =~ /^(?:if|unless)$/) {
     my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
     my $test = ['setf', $ret, $self->_lower_expr($cond, $stmt)];
     $test = ['p-!', $test] if $mod eq 'unless';
     return $self->_restore_caller_wa($tail_ctx,
            ['let', ['list', ['list', $ret, 'nil']],
-            ['p-if', $test, ['setf', $ret, $self->_lower_expr($expr, $stmt)], 'nil'],
+            ['p-if', $test, ['setf', $ret, $self->_lower_expr($expr, $stmt, $tail_ctx)], 'nil'],
             $ret]);
   }
 
@@ -5346,13 +5349,15 @@ sub lower_embedded_block {
   # not undef, when nothing matches.)
   return undef if @{ $block->find('PPI::Statement::Package') || [] };
 
-  # Tail shapes v1 lowers differently: a tail statement MODIFIER (v1 emits
-  # plain (p-if COND EXPR); v2's defined-tail_ctx ret-var transform differs)
-  # and scheduled/sub tails.  A tail DECLARATION converts when its value
-  # semantics are covered by the $decl_tail machinery in _lower_block (s307).
-  # A tail COMPOUND converts (s308): _lower_compound threads $tail_ctx to its
-  # branch leaves — the bare-if ret-var transform even fixes v1's dropped
-  # false-cond map element (`map { if C {X} }` yields "" like perl, not nil).
+  # Tail shapes v1 lowers differently: scheduled/sub tails still decline.
+  # A tail DECLARATION converts when its value semantics are covered by the
+  # $decl_tail machinery in _lower_block (s307).  A tail COMPOUND converts
+  # (s308): _lower_compound threads $tail_ctx to its branch leaves.  A tail
+  # if/unless statement MODIFIER converts (s308b): _lower_stmt's
+  # defined-tail_ctx ret-var transform yields the cond value when the body
+  # is skipped — v1's plain (p-if COND EXPR) wrongly dropped it (`map
+  # { X if C }` lost the "" element perl produces); loop modifiers take the
+  # statement-level _fallback_stmt inside the converted block.
   my $tail = $stmts[-1];
   return undef
     if !$tail->isa('PPI::Statement')
@@ -5362,12 +5367,6 @@ sub lower_embedded_block {
     || $tail->isa('PPI::Statement::Sub')
     || $tail->isa('PPI::Statement::Include')
     || $tail->isa('PPI::Statement::Package');
-  if (!$tail->isa('PPI::Statement::Break')
-      && !$tail->isa('PPI::Statement::Compound')) {
-    my @k = _strip_semi($tail->schildren);
-    my (undef, $mod, undef) = _split_modifier(\@k);
-    return undef if $mod;
-  }
 
   my $env = $self->environment;
   # Decline must be side-effect-free: snapshot everything a partial lowering

@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 308b (2026-07-22, Fable) — E2 #78: tail statement MODIFIERS convert (20-decline bucket); reader-based paren checker (gen v2-56).
+
+- **Tail-modifier embedded blocks convert** (the second `lower_embedded_block`
+  decline lifted this session): a block ending in `EXPR if/unless COND`
+  lowers through _lower_stmt's existing ret-var transform — perl-correct
+  where v1's plain `(p-if COND EXPR)` dropped the false-cond value (probe:
+  `map { $_*2 if $_>1 }` loses the `""` element on v1, matches perl on v2).
+  Loop modifiers (`EXPR for LIST`) ride as statement-level _fallback_stmt
+  raws inside the converted block.  ONE FIX en route: the transform now
+  lowers the body in the TAIL's context (`_lower_expr(..., $tail_ctx)`) —
+  the default lowering flattened a list body to its last element
+  (`map { (A,B) if C }` lost A).  8-probe battery matches perl.
+- Verification: corpus-diff v2 = 10 files all explained (postfix-if
+  ret-var natives in do{}/eval{}/lambdas, loop-modifier raws, dropped
+  scalar over-binds now inherit, more eval-block `my`→let); PCL_V1
+  byte-diff ZERO; 10-file sweep 0 new (tr.t PARTIAL 241+3/317 verified
+  pre-existing at HEAD); gate 118/4343 green (+1 guard
+  transpile-test-06.t); fuzzer same 4.  Gen v2-55 → v2-56.
+- **Paren checker replaced (user request): `tools/check-parens.lisp`** —
+  `sbcl --script tools/check-parens.lisp FILE.lisp`, the real reader under
+  `*read-suppress*` (nothing evaluated/interned).  Exact where the perl
+  scanner false-positived: the runtime's `|$"|` pipe-symbol contains a
+  literal `"` that put the scanner in string mode (that was the s308
+  "depth 1" mystery).  Reports extra-`)` at its line, missing-`)` as the
+  line of the form that never closes; exit 0 iff balanced.  CLAUDE.md §10
+  updated — do not use textual scanners.
+- Remaining #78 declines: lower-failed ~37, anon-empty 10, Include 4,
+  Variable 2.
+
+---
+
 ## Session 308 (2026-07-22, Fable) — E2 #78: embedded-block tail COMPOUNDS convert (the 40-decline bucket); two exposed bugs fixed (gen v2-55).
 
 - **Tail-compound embedded blocks convert** (`lower_embedded_block` decline
@@ -42,8 +73,8 @@ Append new entries at the top. One section per session.
   118 files / 4342 green (+3 guards in transpile-test-06.t; PCL_V1 failure
   set = HEAD + 1 new v2-only guard); fuzzer unchanged.  Gen v2-54 → v2-55.
 - Note: the CLAUDE.md paren-checker one-liner false-positives on committed
-  `cl/pcl-runtime.lisp` (reports depth 1; SBCL loads it fine) — trust SBCL,
-  not the checker, on that file.
+  `cl/pcl-runtime.lisp` (reports depth 1; SBCL loads it fine) — root cause
+  found and checker replaced in s308b (`tools/check-parens.lisp`).
 - #78 remaining declines (re-measured post-conversion): lower-failed 37
   (was 29 — ~8 ex-compound blocks now attempt and fail in lowering; net
   ~32 blocks converted), tail modifiers 20, anon-empty 10, Include tails 4,

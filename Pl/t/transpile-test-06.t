@@ -157,6 +157,18 @@ my @l = two(); my $s = two();
 print "C:@l,$s\n";
 ');
 
+test_transpile("embedded-block tail statement modifiers yield perl values (s308b)", '
+sub d { defined $_[0] ? "<$_[0]>" : "U" }
+my @a = map { $_ * 2 if $_ > 1 } (1,2,3);
+my @b = map { $_ * 2 unless $_ > 1 } (1,2,3);
+my $c = eval { "x" if 0 };
+my @h = map { ($_, $_+10) if $_ > 1 } (1,2);
+my $g = do { "v" if 1 };
+my @f = grep { 1 if $_ > 1 } (1,2,3);
+print join(",", map { d($_) } @a), "|", join(",", map { d($_) } @b),
+      "|", d($c), "|@h|", d($g), "|@f\n";
+');
+
 test_transpile("range endpoints outside IV range die like perl (s308)", '
 my $MAX_INT = ~0 >> 1;
 for my $ii (~0, ~0+1) {

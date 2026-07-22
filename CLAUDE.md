@@ -46,24 +46,15 @@ This file provides guidance to Claude Code when working with this repository.
 
    See `docs/shipped-modules.md` for the module-override architecture.
 
-10. **Lisp Parenthesis Discipline**: After every Write or Edit to a `.lisp` file, immediately run the paren checker and fix any non-zero result before reporting done:
+10. **Lisp Parenthesis Discipline**: After every Write or Edit to a `.lisp` file, immediately run the paren checker and fix any failure before reporting done:
     ```bash
-    perl -e '
-    my ($d,$in_str,$ahb)=(0,0,0);
-    while(<>){ my @c=split//; my $i=0;
-      while($i<@c){ my $ch=$c[$i];
-        if($in_str){ if($ch eq "\\"){$i+=2;next} $in_str=0 if $ch eq q{"} }
-        elsif($ahb){ $ahb=0 }
-        elsif($ch eq q{"}){ $in_str=1 }
-        elsif($ch eq "#" && $i+1<@c && $c[$i+1] eq "\\"){ $ahb=1;$i+=2;next }
-        elsif($ch eq ";"){ last }
-        elsif($ch eq "("){ $d++ }
-        elsif($ch eq ")"){ $d-- }
-        $i++ } }
-    print "depth: $d\n"
-    ' FILENAME.lisp
+    sbcl --script tools/check-parens.lisp FILENAME.lisp   # "balanced: ..." + exit 0, or an UNBALANCED line
     ```
-    **Important:** The simple one-liner checker (used in older sessions) does NOT handle `#\(` and `#\)` character literals — it gives a wrong result when those appear in the file. Always use the version above.
+    It uses SBCL's own reader (`*read-suppress*`, nothing evaluated), so it is
+    exact: pipe-quoted symbols (`|$"|`), `#| |#` block comments, `#\(` char
+    literals and `#.(...)` are all handled.  Do NOT use a textual/perl paren
+    scanner — the old one-liner false-positived on `cl/pcl-runtime.lisp`
+    (its `|$"|` symbol reads as an unterminated string to a scanner, s308).
     Never write a Lisp function body longer than ~80 lines. If a function needs deeply nested dispatch (e.g. a `case` with many arms inside several `let`s), extract the arms into named helper functions first, then write the short dispatcher. A function that fits on one screen has countable parens; a 300-line function does not.
 
     **Indentation must encode depth**: Use exactly 2 spaces per paren level. A line's indentation column divided by 2 equals the paren depth it runs at. This makes depth visually checkable without counting parens. When writing or reviewing CL code, if the indentation looks wrong, the parens are wrong. Never write a closing `)` on a line that is indented deeper than the line that opened its form.
