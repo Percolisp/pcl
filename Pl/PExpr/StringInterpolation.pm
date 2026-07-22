@@ -424,9 +424,17 @@ sub parse_interpolated_variable {
     if ($next_char =~ /^[!\?\.\@\/\\&\'\`\+;\,\|:\%=\-<>\(\)\[\]~"]$/) {
       my $full_var = '$' . $next_char;
       my $end_pos = $pos + 2;
-      # $+{key} is a hash subscript on %+ (named captures)
-      if ($next_char eq '+' && substr($content, $end_pos, 1) eq '{') {
-        return $self->parse_hash_subscript($parser, $content_ref, $pos, $full_var);
+      # $+/$- with a subscript are the magic aggregate pairs: $+{k}/$-{k} are
+      # %+/%- elements (named captures), $+[i]/$-[i] are @+/@- elements
+      # (match offsets).  Perl interpolates all four as element accesses.
+      if ($next_char eq '+' || $next_char eq '-') {
+        my $follow = substr($content, $end_pos, 1);
+        if ($follow eq '{') {
+          return $self->parse_hash_subscript($parser, $content_ref, $pos, $full_var);
+        }
+        elsif ($follow eq '[') {
+          return $self->parse_array_subscript($parser, $content_ref, $pos, $full_var);
+        }
       }
       my $var_token = PPI::Token::Magic->new($full_var);
       my $var_id = $parser->make_node($var_token);

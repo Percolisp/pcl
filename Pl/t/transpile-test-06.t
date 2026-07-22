@@ -205,4 +205,13 @@ ${$s[0]} = 7;
 print scalar(@r), "|", scalar(@s), "|", ${$r[0]}, ${$r[2]}, ${$s[3]}, "|", $x, "\n";
 ');
 
+test_transpile("magic aggregate elements: @-/@+/%-/%+ swap, interp, exists, truncation (s309)", '
+"xfoobar" =~ /(?<first>foo)(?<second>bar)?(?<none>zzz)?/;
+print "$+{first}|$-{first}[0]|", defined $-{second}[0] ? $-{second}[0] : "U", "|";
+print exists $-{none} ? (defined $-{none}[0] ? "D" : "U") : "NOKEY", "|";
+print "$-[0] $+[0] $-[1] $+[1]|";
+print scalar(@-), " ", $+[3] // "U", "|";
+print join(",", sort keys %-), "|", scalar @{$-{first}}, "\n";
+');
+
 done_testing();

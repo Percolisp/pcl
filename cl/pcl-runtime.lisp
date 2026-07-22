@@ -240,7 +240,7 @@
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
-   #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+|
+   #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+| #:|%-| #:|$^H| #:|%^H|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
@@ -713,6 +713,15 @@
 (defvar |$'| nil "Regex POSTMATCH - everything after the match")
 (defvar |$+| nil "Regex - last (highest-numbered) capture group that matched")
 (defvar %+ (make-hash-table :test 'equal) "Perl %+ - named regex captures")
+(defvar |%-| (make-hash-table :test 'equal)
+  "Perl %- - named regex captures, each value an ARRAY of all buffers with
+   that name (undef elements for non-participating buffers).")
+;; Compile-time hints: $^H (bitmask) and %^H (hints hash).  PCL keeps them as
+;; ordinary globals — the perl lexical save/restore-at-scope-exit semantics
+;; (and (caller)[10] exposure) are NOT implemented; see docs/perl-suite-triage.md.
+(defvar |$^H| 0 "Perl $^H - compile-time hint bits (no lexical scoping in PCL)")
+(defvar |%^H| (make-hash-table :test 'equal)
+  "Perl %^H - compile-time hints hash (no lexical scoping in PCL)")
 ;; @- (@LAST_MATCH_START) and @+ (@LAST_MATCH_END): offset arrays from the last
 ;; successful match.  Element 0 is the whole-match start/end; element N is the
 ;; start/end of capture group N.  Non-participating groups hold undef (nil).
@@ -9764,7 +9773,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-57"
+(defparameter *pcl-cache-generation* "v2-58"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -13032,7 +13041,8 @@ buffer's fill-pointer; everything else falls back to file-length."
   (setf $1 *p-undef* $2 *p-undef* $3 *p-undef* $4 *p-undef* $5 *p-undef*
         $6 *p-undef* $7 *p-undef* $8 *p-undef* $9 *p-undef*
         |$&| nil |$`| nil |$'| nil |$+| nil)
-  (clrhash %+))
+  (clrhash %+)
+  (clrhash |%-|))
 
 (defun set-match-vars (str match-start match-end reg-starts reg-ends)
   "Set the match position variables from a successful match:
@@ -13050,23 +13060,37 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (return)))))
   ;; @- / @+ : offset arrays.  Element 0 is the whole-match start/end; element
   ;; N (1-based) is capture group N's start/end (nil for groups that did not
-  ;; participate).  Elements are boxed integers like any other array element.
+  ;; participate).  Perl truncates after the LAST participating group ($#- =
+  ;; last matched paren), so trailing non-participants are not pushed.
+  ;; Elements are boxed integers like any other array element.
   (when (and match-start match-end)
     (setf (fill-pointer |@-|) 0
           (fill-pointer |@+|) 0)
     (vector-push-extend (make-p-box match-start) |@-|)
     (vector-push-extend (make-p-box match-end)   |@+|)
     (when (and reg-starts reg-ends)
-      (loop for i from 0 below (length reg-starts)
-            for rs = (aref reg-starts i)
-            for re = (aref reg-ends i)
-            do (vector-push-extend (make-p-box rs) |@-|)
-            (vector-push-extend (make-p-box re) |@+|)))))
+      (let ((last-matched -1))
+        (loop for i from (1- (length reg-starts)) downto 0
+              when (aref reg-starts i)
+              do (setf last-matched i) (return))
+        (loop for i from 0 to last-matched
+              for rs = (aref reg-starts i)
+              for re = (aref reg-ends i)
+              do (vector-push-extend (make-p-box rs) |@-|)
+              (vector-push-extend (make-p-box re) |@+|))))))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
   `(let ((rs (aref ,starts ,idx)) (re (aref ,ends ,idx)))
      (setf ,var (if (and rs re) (subseq ,str rs re) *p-undef*))))
+
+(defun %pcl-push-named-buffer (name val)
+  "Append VAL to %-'s array for NAME (Perl %-: every buffer with that name,
+   undef for non-participating ones).  Elements boxed like array elements."
+  (let ((v (or (gethash name |%-|)
+               (setf (gethash name |%-|)
+                     (make-array 0 :adjustable t :fill-pointer 0)))))
+    (vector-push-extend (make-p-box val) v)))
 
 (defun set-capture-groups (str reg-starts reg-ends &optional reg-names)
   "Set capture group variables $1..$9 and named captures %+ from regex match results.
@@ -13086,13 +13110,16 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Populate %+ with named captures
       ;; reg-names is a list from cl-ppcre:create-scanner, e.g. ("year" "month" NIL)
       (when reg-names
+        (clrhash |%-|)
         (loop for name in reg-names
               for i from 0
               when (and name (< i num-groups))
               do (let ((rs (aref reg-starts i))
                        (re (aref reg-ends   i)))
                    (when (and rs re)
-                     (setf (gethash name %+) (subseq str rs re)))))))))
+                     (setf (gethash name %+) (subseq str rs re)))
+                   (%pcl-push-named-buffer name
+                                           (if (and rs re) (subseq str rs re) *p-undef*))))))))
 
 (defun %pcl-strip-gpos (pattern)
   "Remove \\G anchors from PATTERN.  cl-ppcre has no \\G; \\G is zero-width and
@@ -13170,9 +13197,10 @@ buffer's fill-pointer; everything else falls back to file-length."
     (handler-case
         (multiple-value-bind (scanner reg-names)
             (%pcl-create-scanner pattern options)
-          ;; Perl clears %+ on every match attempt, even failures.
+          ;; Perl clears %+/%- on every match attempt, even failures.
           ;; $1..$9 are only cleared/set on successful matches.
           (clrhash %+)
+          (clrhash |%-|)
           (cond
             ;; /\G.../g in list context: contiguous anchored matches from pos
             ((and global-p (eq *wantarray* t) anchored-g)
@@ -13321,14 +13349,16 @@ buffer's fill-pointer; everything else falls back to file-length."
                                   (when (>= (length groups) 7) (setf $7 (or (nth 6 groups) *p-undef*)))
                                   (when (>= (length groups) 8) (setf $8 (or (nth 7 groups) *p-undef*)))
                                   (when (>= (length groups) 9) (setf $9 (or (nth 8 groups) *p-undef*)))
-                                  ;; Populate %+ from named groups using reg-names from outer scope
+                                  ;; Populate %+/%- from named groups using reg-names from outer scope
                                   (clrhash %+)
+                                  (clrhash |%-|)
                                   (when reg-names
                                     (loop for name in reg-names
                                           for i from 0
                                           when (and name (< i (length groups)))
                                           do (let ((val (nth i groups)))
-                                               (when val (setf (gethash name %+) val)))))
+                                               (when val (setf (gethash name %+) val))
+                                               (%pcl-push-named-buffer name (or val *p-undef*)))))
                                   (to-string (funcall raw-replacement)))))
                     (setf result (if global-p
                                      (cl-ppcre:regex-replace-all scanner str rep-fn :simple-calls t)

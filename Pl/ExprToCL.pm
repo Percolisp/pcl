@@ -2003,7 +2003,7 @@ sub gen_funcall_form {
       if (@$arg_kids >= 2) {
         my $arr = $self->gen_node($arg_kids->[0]);
         my $idx = $self->gen_node_form($arg_kids->[1]);
-        $arr =~ s/(^|::)\$/${1}\@/;
+        $arr = _swap_elem_sigil($arr, q(@));
         return ['p-tied', ['p-aref-box', $arr, $idx]];
       }
     }
@@ -2013,7 +2013,7 @@ sub gen_funcall_form {
       if (@$arg_kids >= 2) {
         my $hash = $self->gen_node($arg_kids->[0]);
         my $key  = $self->gen_node_form($arg_kids->[1]);
-        $hash =~ s/(^|::)\$/${1}%/;
+        $hash = _swap_elem_sigil($hash, q(%));
         return ['p-tied', ['p-gethash-box', $hash, $key]];
       }
     }
@@ -2028,7 +2028,7 @@ sub gen_funcall_form {
       if (@$arg_kids >= 2) {
         my $arr = $self->gen_node($arg_kids->[0]);
         my $idx = $self->gen_node_form($arg_kids->[1]);
-        $arr =~ s/(^|::)\$/${1}\@/;
+        $arr = _swap_elem_sigil($arr, q(@));
         return ['p-pos', ['p-aref-box', $arr, $idx]];
       }
     }
@@ -2038,7 +2038,7 @@ sub gen_funcall_form {
       if (@$arg_kids >= 2) {
         my $hash = $self->gen_node($arg_kids->[0]);
         my $key  = $self->gen_node_form($arg_kids->[1]);
-        $hash =~ s/(^|::)\$/${1}%/;
+        $hash = _swap_elem_sigil($hash, q(%));
         return ['p-pos', ['p-gethash-box', $hash, $key]];
       }
     }
@@ -2054,8 +2054,8 @@ sub gen_funcall_form {
         my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $arr = $self->gen_node($arg_kids->[0]);
         if ((ref($arr_node) eq 'PPI::Token::Symbol'
-             || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
-          $arr =~ s/(^|::)\$/${1}\@/;
+             || ref($arr_node) eq 'PPI::Token::Magic')) {
+          $arr = _swap_elem_sigil($arr, q(@));
         }
         my $idx = $self->gen_node_form($arg_kids->[1]);
         return ['p-delete-array', $arr, $idx];
@@ -2068,8 +2068,8 @@ sub gen_funcall_form {
         my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
         my $hash = $self->gen_node($arg_kids->[0]);
         if ((ref($hash_node) eq 'PPI::Token::Symbol'
-             || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
-          $hash =~ s/(^|::)\$/${1}%/;
+             || ref($hash_node) eq 'PPI::Token::Magic')) {
+          $hash = _swap_elem_sigil($hash, q(%));
         }
         my $key = $self->gen_node_form($arg_kids->[1]);
         return ['p-delete', $hash, $key];
@@ -2155,8 +2155,8 @@ sub gen_funcall_form {
           my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $arr = $self->gen_node($arg_kids->[0]);
           if ((ref($arr_node) eq 'PPI::Token::Symbol'
-               || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
-            $arr =~ s/(^|::)\$/${1}\@/;
+               || ref($arr_node) eq 'PPI::Token::Magic')) {
+            $arr = _swap_elem_sigil($arr, q(@));
           }
           my $idx = $self->gen_node_form($arg_kids->[1]);
           return ['p-exists-array', $arr, $idx];
@@ -2165,8 +2165,8 @@ sub gen_funcall_form {
           my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
           my $hash = $self->gen_node($arg_kids->[0]);
           if ((ref($hash_node) eq 'PPI::Token::Symbol'
-               || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
-            $hash =~ s/(^|::)\$/${1}%/;
+               || ref($hash_node) eq 'PPI::Token::Magic')) {
+            $hash = _swap_elem_sigil($hash, q(%));
           }
           my $key = $self->gen_node_form($arg_kids->[1]);
           return ['p-exists', $hash, $key];
@@ -2791,7 +2791,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $arr = $self->gen_node($arg_kids->[0]);
         my $idx = $self->gen_node($arg_kids->[1]);
-        $arr =~ s/(^|::)\$/${1}\@/;
+        $arr = _swap_elem_sigil($arr, q(@));
         return "(p-tied (p-aref-box $arr $idx))";
       }
     }
@@ -2801,7 +2801,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $hash = $self->gen_node($arg_kids->[0]);
         my $key  = $self->gen_node($arg_kids->[1]);
-        $hash =~ s/(^|::)\$/${1}%/;
+        $hash = _swap_elem_sigil($hash, q(%));
         return "(p-tied (p-gethash-box $hash $key))";
       }
     }
@@ -2818,7 +2818,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $arr = $self->gen_node($arg_kids->[0]);
         my $idx = $self->gen_node($arg_kids->[1]);
-        $arr =~ s/(^|::)\$/${1}\@/;
+        $arr = _swap_elem_sigil($arr, q(@));
         return "(p-pos (p-aref-box $arr $idx))";
       }
     }
@@ -2828,7 +2828,7 @@ sub gen_funcall {
       if (@$arg_kids >= 2) {
         my $hash = $self->gen_node($arg_kids->[0]);
         my $key  = $self->gen_node($arg_kids->[1]);
-        $hash =~ s/(^|::)\$/${1}%/;
+        $hash = _swap_elem_sigil($hash, q(%));
         return "(p-pos (p-gethash-box $hash $key))";
       }
     }
@@ -2847,8 +2847,8 @@ sub gen_funcall {
         my $arr = $self->gen_node($arg_kids->[0]);
         # Convert $a to @a for array (Symbol or Magic like $_)
         if ((ref($arr_node) eq 'PPI::Token::Symbol'
-             || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
-          $arr =~ s/(^|::)\$/${1}\@/;
+             || ref($arr_node) eq 'PPI::Token::Magic')) {
+          $arr = _swap_elem_sigil($arr, q(@));
         }
         my $idx = $self->gen_node($arg_kids->[1]);
         return "(p-delete-array $arr $idx)";
@@ -2863,8 +2863,8 @@ sub gen_funcall {
         my $hash = $self->gen_node($arg_kids->[0]);
         # Convert $h to %h for hash (Symbol or Magic like $_)
         if ((ref($hash_node) eq 'PPI::Token::Symbol'
-             || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
-          $hash =~ s/(^|::)\$/${1}%/;
+             || ref($hash_node) eq 'PPI::Token::Magic')) {
+          $hash = _swap_elem_sigil($hash, q(%));
         }
         my $key = $self->gen_node($arg_kids->[1]);
         return "(p-delete $hash $key)";
@@ -2980,8 +2980,8 @@ sub gen_funcall {
           # bare ($a -> @a) or package-qualified (Foo::$a / |Foo::Bar|::$a ->
           # ...::@a). The `$` to rewrite is at the start or right after `::`.
           if ((ref($arr_node) eq 'PPI::Token::Symbol'
-               || ref($arr_node) eq 'PPI::Token::Magic') && $arr =~ /(?:^|::)\$/) {
-            $arr =~ s/(^|::)\$/${1}\@/;
+               || ref($arr_node) eq 'PPI::Token::Magic')) {
+            $arr = _swap_elem_sigil($arr, q(@));
           }
           my $idx = $self->gen_node($arg_kids->[1]);
           return "(p-exists-array $arr $idx)";
@@ -2994,8 +2994,8 @@ sub gen_funcall {
           # bare ($h -> %h) or package-qualified (Foo::$h / |Foo::Bar|::$h ->
           # ...::%h). The `$` to rewrite is at the start or right after `::`.
           if ((ref($hash_node) eq 'PPI::Token::Symbol'
-               || ref($hash_node) eq 'PPI::Token::Magic') && $hash =~ /(?:^|::)\$/) {
-            $hash =~ s/(^|::)\$/${1}%/;
+               || ref($hash_node) eq 'PPI::Token::Magic')) {
+            $hash = _swap_elem_sigil($hash, q(%));
           }
           my $key = $self->gen_node($arg_kids->[1]);
           return "(p-exists $hash $key)";
@@ -4107,7 +4107,7 @@ sub gen_array_access {
   # the `::$` alternative.
   if (ref($arr_node) eq 'PPI::Token::Symbol'
       || ref($arr_node) eq 'PPI::Token::Magic') {
-    $arr =~ s/(^|::)\$/$1@/;
+    $arr = _swap_elem_sigil($arr, q(@));
   }
 
   # Numeric-named arrays like @0, @1 are not valid Perl identifiers.
@@ -4144,7 +4144,7 @@ sub gen_array_access_form {
   my $arr = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
   my $idx = $self->gen_node_form($kids->[1]);
   if ($is_bare) {
-    $arr =~ s/(^|::)\$/$1@/;
+    $arr = _swap_elem_sigil($arr, q(@));
     return ['p-undef'] if $arr =~ /^@\d+$/;
     $self->environment->register_punct_global($arr)
       if $self->environment && $arr eq '@#';
@@ -4160,6 +4160,17 @@ sub gen_array_access_form {
 
 # Hash access: (p-gethash hash key) or (p-gethash-box hash key) in l-value context
 # In Perl, $hash{key} accesses %hash, so we convert $sigil to %sigil
+# Perl's element-access sigil swap: $h{k} reads %h, $a[i] reads @a.  The
+# rendered symbol may be pipe-quoted (|$-|, |$^H|) when the name needs CL
+# escaping — swap inside the pipes, keeping them (harmless when unneeded).
+# Package-qualified renders (|Pkg|::$h) hit the first branch via `::$`.
+sub _swap_elem_sigil {
+  my ($sym, $sigil) = @_;
+  $sym =~ s/(^|::)\$/$1$sigil/
+    or $sym =~ s/^\|\$(.*)\|$/|$sigil$1|/;
+  return $sym;
+}
+
 sub gen_hash_access {
   my $self    = shift;
   my $node    = shift;
@@ -4193,7 +4204,7 @@ sub gen_hash_access {
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   if (ref($hash_node) eq 'PPI::Token::Symbol'
       || ref($hash_node) eq 'PPI::Token::Magic') {
-    $hash =~ s/(^|::)\$/$1%/;
+    $hash = _swap_elem_sigil($hash, q(%));
   }
 
   # Punctuation-named `#` hash (%#) from `$#{key}` — see gen_array_access.
@@ -4268,7 +4279,7 @@ sub gen_hash_access_form {
   }
 
   if ($is_bare) {
-    $hash =~ s/(^|::)\$/$1%/;
+    $hash = _swap_elem_sigil($hash, q(%));
     $self->environment->register_punct_global($hash)
       if $self->environment && $hash eq '%#';
     if ($self->environment) {
