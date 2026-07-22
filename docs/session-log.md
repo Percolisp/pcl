@@ -4,6 +4,35 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
+
+- **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB
+  `perl` each night (Jul 22 00:13, Jul 23 00:19) inside the terminal cgroup,
+  taking GNOME session + Claude Code with it.  The process was the
+  `pl2cl --server` eval-transpiler spawned by SBCL (pcl-runtime ~:9902),
+  ballooning on `op/cond.t`'s 20,000-deep nested-ternary `eval` — the
+  transpile needs 6.75 GB because **PExpr's recursive descent copies each
+  paren subexpression per nesting level → O(n²) live memory** (measured
+  335 MB/785 MB/2.1 GB/6.75 GB at depths 2.5k/5k/10k/20k; PPI linear and
+  innocent; generated CL ~12 B/level, SBCL fails only by control-stack at
+  20k).  Fix candidates filed in `docs/perl-suite-triage.md`.
+- **`tools/run-perl-suite.pl` hardened** (852d260, 41ebd45, 0605cf6, 8881a15):
+  workers = process-group leaders that KILL their own group after writing
+  results (reaps orphans from fork-heavy tests); straggler kill targets the
+  group; pl2cl step gets `timeout`; `ulimit -v 4G` on perl steps; SIGINT/TERM
+  forwarded; whole sweep re-execs into `systemd-run --user` scope with
+  `MemoryMax=10G` (desktop can never be collateral again); `%HEAVY` files
+  (op/cond.t) run in a solo phase after the parallel bulk; crash signatures
+  now append the normalized condition MESSAGE (numbers→N) so sweeps
+  self-triage.
+- **#25 triage surface mapped** (`docs/perl-suite-triage.md`): full 433-file
+  sweep re-run chunked; 167 crash files classified into ~12 real families —
+  top actionable: `%^H`/`%+` magic-hash type-error (10), generated-lisp
+  read-error-during-load (8), builtin arity (6), p-box leaking into @INC +
+  missing Config.pm shim (4), `nil is not of type real` (4), `(go :Arg_loop)`
+  outside tagbody (3).  16 threads files = oracle-also-NOTAP, not a PCL gap.
+- No emission changes; no cache-generation bump needed.
+
 ## Session 308b (2026-07-22, Fable) — E2 #78: tail statement MODIFIERS convert (20-decline bucket); reader-based paren checker (gen v2-56).
 
 - **Tail-modifier embedded blocks convert** (the second `lower_embedded_block`
