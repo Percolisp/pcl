@@ -76,6 +76,19 @@ use File::Temp qw(tempfile tempdir);
 use Cwd qw(abs_path);
 use POSIX qw(:sys_wait_h _exit);
 
+# Contain the whole sweep in its own memory-capped cgroup: a runaway child
+# (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
+# then OOMs only this scope, never the desktop session.  PCL_SUITE_SCOPED
+# guards re-exec recursion; skipped when systemd-run is unavailable.
+if (!$ENV{PCL_SUITE_SCOPED}
+    && system('systemd-run --user --scope -q -p MemoryMax=1G true 2>/dev/null') == 0) {
+  $ENV{PCL_SUITE_SCOPED} = 1;
+  exec('systemd-run', '--user', '--scope', '-q',
+       '-p', 'MemoryMax=10G', '-p', 'MemorySwapMax=1G',
+       $^X, $0, @ARGV)
+    or die "systemd-run re-exec failed: $!\n";
+}
+
 my $root    = abs_path(dirname(abs_path($0)) . "/..");
 my $pl2cl   = "$root/pl2cl";
 my $runtime = "$root/cl/pcl-runtime.lisp";
