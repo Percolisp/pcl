@@ -4683,18 +4683,30 @@ sub _lower_stmt {
         ($expr, $mod, $cond) = _split_modifier(\@k);
       }
       return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
-      # A parenthesized multi-element return list with a LIST-VALUED element
-      # (@array / %hash / map / grep / sort / …) mixes scalars with flatten
-      # markers: v2's native list construction emits (vector … (p-flatten @a) …),
-      # which p-return does NOT splice — the marker leaks (`return (0,@a)` gave
-      # `0,#S(p-flatten-marker…)`).  v1 instead spreads the elements as separate
-      # p-return args, which flatten correctly.  Gate → v1 (whole stmt, so a
-      # trailing if/unless modifier rides along).  Single list-valued returns
+      # A multi-element return list gates to v1, whose expression machinery
+      # knows list-operator arity and spreads true top-level commas as
+      # separate p-return args.  v2's native lowering gets both variants
+      # wrong: a LIST-VALUED element makes the native list construction emit
+      # (vector … (p-flatten @a) …), which p-return does NOT splice
+      # (`return (0,@a)` leaked the marker); an all-scalar comma list emits
+      # one (if *wantarray* (vector …) (progn …)) arg, which wrongly treats
+      # a :void caller context — toplevel, sort comparator — as list where
+      # the macro's spread dispatch is (eq *wantarray* t) (sort.t "Ret: blk
+      # ret", s308).  Detection is STRUCTURAL — a comma among the statement's
+      # own tokens (`return $a, $b` and `return bless \$x, "C"` both gate;
+      # only the expression parser could tell them apart) or inside a lone
+      # parenthesized list (`return ($a, $b)`).  Commas nested in call
+      # parens (`return f($a, $b)`) stay native.  Whole-stmt gate, so a
+      # trailing if/unless modifier rides along.  Single list-valued returns
       # (`return @a` / `return map …`) are NOT wrapped in a vector and work.
-      my $etxt = join ' ', map { $_->content } @$expr;
-      return $self->_fallback_stmt($stmt)
-        if $etxt =~ /,/
-        && $etxt =~ /[\@%][\w{\$]|\b(?:map|grep|sort|reverse|keys|values|split)\b/;
+      my $is_comma = sub { $_[0]->isa('PPI::Token::Operator')
+                           && ($_[0]->content eq ',' || $_[0]->content eq '=>') };
+      my $top_comma = grep { $is_comma->($_) } @$expr;
+      if (!$top_comma && @$expr == 1 && $expr->[0]->isa('PPI::Structure::List')) {
+        my ($inner) = grep { $_->isa('PPI::Statement') } $expr->[0]->schildren;
+        $top_comma = $inner && grep { $is_comma->($_) } $inner->schildren;
+      }
+      return $self->_fallback_stmt($stmt) if $top_comma;
       # A returned call must see the CALLER's context (no *wantarray* bind).
       # Bare `return;` must be a ZERO-arg (p-return): in list context it
       # contributes 0 elements (`()`), scalar/void → undef.  `(p-return
@@ -5336,20 +5348,22 @@ sub lower_embedded_block {
 
   # Tail shapes v1 lowers differently: a tail statement MODIFIER (v1 emits
   # plain (p-if COND EXPR); v2's defined-tail_ctx ret-var transform differs)
-  # and compound/scheduled/sub tails (leaf-threading differs).  A tail
-  # DECLARATION converts when its value semantics are covered by the
-  # $decl_tail machinery in _lower_block (s307); the rest still decline.
+  # and scheduled/sub tails.  A tail DECLARATION converts when its value
+  # semantics are covered by the $decl_tail machinery in _lower_block (s307).
+  # A tail COMPOUND converts (s308): _lower_compound threads $tail_ctx to its
+  # branch leaves — the bare-if ret-var transform even fixes v1's dropped
+  # false-cond map element (`map { if C {X} }` yields "" like perl, not nil).
   my $tail = $stmts[-1];
   return undef
     if !$tail->isa('PPI::Statement')
-    || $tail->isa('PPI::Statement::Compound')
     || ($tail->isa('PPI::Statement::Variable')
         && !$self->_tail_decl_convertible($tail))
     || $tail->isa('PPI::Statement::Scheduled')
     || $tail->isa('PPI::Statement::Sub')
     || $tail->isa('PPI::Statement::Include')
     || $tail->isa('PPI::Statement::Package');
-  if (!$tail->isa('PPI::Statement::Break')) {
+  if (!$tail->isa('PPI::Statement::Break')
+      && !$tail->isa('PPI::Statement::Compound')) {
     my @k = _strip_semi($tail->schildren);
     my (undef, $mod, undef) = _split_modifier(\@k);
     return undef if $mod;

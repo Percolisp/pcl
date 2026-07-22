@@ -136,6 +136,37 @@ print f(), "|", s1("v"), "|", s2(), "|", join(",",g()), "|",
       (defined h() ? "def" : "undef"), "|$e|$n|$d|@m|@gr|@so\n";
 ');
 
+test_transpile("embedded-block tail compounds yield their perl values (s308)", '
+my @a = map { if ($_ > 1) { "big" } else { "small" } } (1,2,3);
+my @b = map { if ($_ > 1) { "big" } } (1,2,3);
+my @c = map { unless ($_ > 1) { "small" } } (1,2,3);
+my $k = eval { if (0) { "yes" } };
+my @m = map { my $v = $_; { $v * 2; } } (1,2);
+my @e = map { my $s = 0; for my $i (1..$_) { $s += $i } } (2,3);
+my @g = grep { if ($_ > 1) { 1 } } (1,2,3);
+sub d { defined $_[0] ? "<$_[0]>" : "U" }
+print "@a|", join(",", map { d($_) } @b), "|", join(",", map { d($_) } @c),
+      "|", d($k), "|@m|", join(",", map { d($_) } @e), "|@g\n";
+');
+
+test_transpile("multi-value return spreads under a :void caller (s308)", '
+print "A:", join("-", sort { return ($b <=> $a, $a <=> $b) } 3,1,2,4), "|";
+print "B:", join("-", sort { for ($b <=> $a) { return ($b <=> $a, $a <=> $b) } } 3,1,2,4), "|";
+sub two { return (7, 9) }
+my @l = two(); my $s = two();
+print "C:@l,$s\n";
+');
+
+test_transpile("range endpoints outside IV range die like perl (s308)", '
+my $MAX_INT = ~0 >> 1;
+for my $ii (~0, ~0+1) {
+  eval { my $lim = 0; for ($MAX_INT-10 .. $ii) { last if $lim++ > 100 } };
+  print $@ =~ /^Range iterator outside integer range/ ? "died|" : "lived|";
+}
+eval { my @r = (9999999999999999999 .. 10000000000000000001) };
+print $@ =~ /^Range iterator outside integer range/ ? "died\n" : "lived\n";
+');
+
 test_transpile("backslash-paren list with range mix distributes refs", '
 my @r = \(1..2, 3);
 my $x = 5;

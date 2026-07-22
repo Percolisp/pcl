@@ -697,21 +697,18 @@ tools and test infrastructure.
 
 ---
 
-## Bare `if` with empty true branch
+## Bare `if` with empty true branch  [RESOLVED on the default v2 pipeline]
 
 **Perl behaviour:** `sub f { if(1) {} }` returns `undef`.  When the condition is
 true but the branch body is empty, the last expression evaluated is the empty block,
 which produces `undef`.
 
-**PCL behaviour:** PCL returns the condition value (`1`).  The tail-if transform
-saves the condition into `--pcl-if-ret--N` before testing it; when the branch body
-is empty, nothing overwrites that variable, so the condition value is returned.
-
-**Rationale:** This is an obscure corner case (an empty true branch whose return
-value the caller inspects) that is essentially never written intentionally in CPAN
-code.  Fixing it would require detecting the empty-branch case and emitting an
-explicit `(setf ret_var nil)` inside the then-block — extra complexity for zero
-practical gain.
+**PCL behaviour:** The default (v2) pipeline matches perl: its `--pcl-if-ret--N`
+ret-var transform overwrites the saved condition with the branch body's value
+(`(progn)` = `nil` = undef for an empty branch), so `f()` is `undef`.  Only the
+legacy `PCL_V1=1` pipeline still returns the condition value (`1`) — its tail-if
+transform saves the condition into the ret-var and an empty branch never
+overwrites it.
 
 **Affected tests:** None in `perl-tests/` (no test exercises this combination).
 

@@ -4,6 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 308 (2026-07-22, Fable) — E2 #78: embedded-block tail COMPOUNDS convert (the 40-decline bucket); two exposed bugs fixed (gen v2-55).
+
+- **Tail-compound embedded blocks convert** (`lower_embedded_block` decline
+  lifted): a map/grep/sort/eval{}/do{} block ending in if/unless/loops/bare
+  blocks now lowers natively — `_lower_compound` already threads `$tail_ctx`
+  to branch leaves (sub bodies used it since the void-wrap regime).  An
+  18-probe battery vs perl shows the conversion FIXES four live v1
+  divergences: bare-if tail yields the false-cond value (`map { if C {X} }`
+  → `""` element like perl, v1 dropped it), unless-true yields the cond
+  value, eval bare-if false → cond value, and a tail BARE BLOCK yields its
+  value (v1 dropped it).  Empty-true-branch corner now matches perl on v2 —
+  not-supported.md entry re-scoped to PCL_V1-only.
+- **Exposed bug 1 (sort.t "Ret: blk ret"): multi-value `return` under a
+  :void caller.**  v2's native `return (A, B)` emitted one
+  `(if *wantarray* (vector…) (progn…))` arg; p-return re-binds *wantarray*
+  to *pcl-caller-wantarray*, which is :void (truthy) at toplevel and in
+  sort comparators → returned a vector where perl's comma-in-scalar gives
+  the last element.  First fix attempt (token-level comma split into spread
+  p-return args) was WRONG — `return bless \$x, "C"` has no top-level
+  comma, only the expression parser knows list-operator arity (caught by
+  hash.t/or.t corpus diff: bless got one arg + a stray return value).
+  Final fix: STRUCTURAL gate → v1 seam — comma among the statement's own
+  tokens or inside a lone parenthesized list; commas nested in call parens
+  (`return f($a,$b)`) stay native.  More precise both ways than the old
+  textual list-valued pattern (hashassign.t/pack.t sigil-in-call-args
+  returns un-gated → native).
+- **Exposed bug 2 (range.t ×6): counting-loop range misses perl's IV-range
+  check.**  `p-foreach-range` never materializes, so v1's accidental guard
+  (p-..'s 100M "range too large" cap) vanished.  Real perl rule added to
+  the shared `%p-range-classify`: endpoints outside [-2^63, 2^63-1] die
+  "Range iterator outside integer range".  Once per range at loop entry
+  (two integer compares) — counting-loop fast path unaffected.
+- Verification: corpus-diff v2 = 17 files, all explained (12 tail-compound
+  conversions + 5 return-gate reshapes); PCL_V1 byte-diff ZERO; 17-file
+  sweep vs baseline 0 new (range.t now FULLY passing 158+0/162); gate
+  118 files / 4342 green (+3 guards in transpile-test-06.t; PCL_V1 failure
+  set = HEAD + 1 new v2-only guard); fuzzer unchanged.  Gen v2-54 → v2-55.
+- Note: the CLAUDE.md paren-checker one-liner false-positives on committed
+  `cl/pcl-runtime.lisp` (reports depth 1; SBCL loads it fine) — trust SBCL,
+  not the checker, on that file.
+- #78 remaining declines (re-measured post-conversion): lower-failed 37
+  (was 29 — ~8 ex-compound blocks now attempt and fail in lowering; net
+  ~32 blocks converted), tail modifiers 20, anon-empty 10, Include tails 4,
+  Variable tails 2 (our/bare-multi).  Compound bucket: GONE.  (+ E3
+  trailing-my/our retry-gate drop to verify next session.)
+
+---
+
 ## Session 307 (2026-07-22, Fable) — t/mro crash-recovery rerun confirmed 8/65/0; E2 #78: `\(RANGE,…)` range-mix converted (gen v2-53).
 
 - Machine crash recovery: worktree clean, 74f8738 landed; t/mro rerun

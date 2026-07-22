@@ -4762,7 +4762,16 @@
           (when (or (and (floatp ns) (or (%pcl-nan-p ns) (sb-ext:float-infinity-p ns)))
                     (and (floatp ne) (or (%pcl-nan-p ne) (sb-ext:float-infinity-p ne))))
             (p-die (make-p-box "Range iterator outside integer range") nil))
-          (values :numeric (truncate ns) (truncate ne))))))
+          (let ((ns-i (truncate ns))
+                (ne-i (truncate ne)))
+            ;; Endpoints outside perl's IV range [-2^63, 2^63-1] die the same
+            ;; way — SBCL bignums would otherwise iterate past 2^63 where perl
+            ;; refuses (range.t bound-rejected rows).  Once per range, not per
+            ;; iteration, so the counting-loop fast path is unaffected.
+            (when (or (< ns-i #.(- (expt 2 63))) (> ns-i #.(1- (expt 2 63)))
+                      (< ne-i #.(- (expt 2 63))) (> ne-i #.(1- (expt 2 63))))
+              (p-die (make-p-box "Range iterator outside integer range") nil))
+            (values :numeric ns-i ne-i))))))
 
 (defun p-.. (start end)
   "Perl range operator .. - returns a vector from start to end (inclusive).
@@ -9755,7 +9764,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-54"
+(defparameter *pcl-cache-generation* "v2-55"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

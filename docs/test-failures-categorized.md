@@ -129,8 +129,8 @@ Fix requires returning settable locations from `p-aref` — a pervasive change.
 | **pos.t** | 12+18/33 | Crash at test 17+: `pos $_[N]` — subscript arg bleed in parser. `pos $x` OK; `pos $_[N]` passes subscript as extra arg to `pos`. Tests 9-15: DESTROY/defelems not-supported |
 | **print.t** | ✅ 3/3 | `fresh_perl_is` supported (subprocess helper in `perl-tests/t/test.pl`); stale "0/3 cannot run" row corrected s288.  Flaky under heavy parallel load only |
 | **qr.t** | 19+17/37 | Tests 3,6,9: ref equality (`==` on regex objects → 0). Tests 12,13,14,18: pattern matching with qr// objects. Test 22: tied var for regex |
-| **range.t** | 144+17/162 | Test 4: array slice LHS; tests 62-65: string range edge cases; large integer overflow; some `sprintf "%g"` crash |
-| **sort.t** | ✅ 205/205 | Session 187: all failures commented out with SKIP stubs. Fixed test 55 (Backwards_stacked `$$` prototype now passes `$a/$b` via @_). Regressions from session 186 also fixed. |
+| **range.t** | ✅ 158+0/162 (4 skip) | Fully passing as of s308 — IV-range endpoint check added to `%p-range-classify` ("Range iterator outside integer range" now dies on the counting-loop path too) |
+| **sort.t** | 202+2/205 | Tests 170 (`sorted!`) and 177 (AUTOLOAD without stub) — in the blessed baseline. s308 fixed "Ret: blk ret" (multi-value return under :void caller) |
 | **split.t** | 214+5/219 | 5 tests skip "need dynamic loading". "planned 219 but ran 214" is from skip count mismatch, not a crash. Tests 32,58-59,73: see "Failing Without Crash" section. |
 | **sub.t** | ✅ 65/65 | Session 187/188: `my sub`, `@_` aliasing, RT124156, DESTROY-GC, Internals, CORE::__SUB__ — all SKIPped. Session 188: `*_{ARRAY}` SKIP comment updated (was "parse error", now explains XS+undef*_ requirement). |
 | **time.t** | 52+19/72 | All `scalar gmtime(...)` / `scalar localtime(...)` — wantarray issue (deferred by policy) |
