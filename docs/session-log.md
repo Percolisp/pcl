@@ -63,6 +63,16 @@ Append new entries at the top. One section per session.
   (+2 guards).  REMAINING: 5 family files read-error only in-harness
   (runtime-required fixture code — need in-harness stderr capture to
   diagnose); uni/gv.t = binding-stack-exhausted (separate).
+- **Third #25 family: warnings:: shim (5024a59)**: `warnings::enabled`
+  called at runtime by perl's real _charnames.pm, but `use warnings` is a
+  skipped pragma so nothing loads a warnings package.  `lib/warnings.pm`
+  shim (all categories enabled, none fatal — no lexical warning bits) via
+  mro-style always-available self-loading stubs; `%pcl-def-mro-stub`
+  generalized to `%pcl-def-ext-stub`.  op/split_unicode.t 0→107 ok,
+  regex_sets.t 0→21, pat_rt_report.t 0→68.  GOTCHA learned: perl's
+  `warnings::enabled` walks callers past same-package frames — from
+  top-level or a same-package sub it answers FALSE; the guard uses the
+  cross-package module shape.  Gate 118/4349.
 
 ## Session 308b (2026-07-22, Fable) — E2 #78: tail statement MODIFIERS convert (20-decline bucket); reader-based paren checker (gen v2-56).
 
