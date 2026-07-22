@@ -39,8 +39,21 @@ Append new entries at the top. One section per session.
   perl (incl. bare-if/modifier cond values and local restore); corpus
   byte-identical (eval mode only); p-eval's cache is in-memory so no
   generation bump needed.  Guard added (transpile-test-06.t, 15 tests).
-- Remaining #78 declines: lower-failed ~37, anon-empty 10, Include 4,
-  Variable 2.
+- **Lower-failed bucket DIAGNOSED and largest sub-bucket fixed**: refined
+  census (temp instrumentation → `_census_unsafe_why`) split the 37 into
+  comment-tail pragma raws 27, `local` raw_wraps 9, state-rename die 1.
+  Fix: `_fallback_stmt` drops COMMENT-ONLY raws (`;; use integer (pragma)`
+  / `;; no strict (no-op)` markers — the pragma's compile-side effect
+  happens during the capture; the comment is v1 cosmetics and comment-tail
+  raws are embed-unsafe).  corpus-diff v2 = 71 files — verified
+  MECHANICALLY: 58 pure comment-line deletions, 12 structural = the
+  formerly-declined blocks now converting (bop.t's `use integer` family
+  the biggest); PCL_V1 byte-diff ZERO; 14-file sweep (12 structural + 2
+  sanity) 0 new failures; guard (pragma-in-block semantics) added.  Gen
+  v2-56 → v2-57.
+- Remaining #78 declines: `local` raw_wraps 9 (E2.final territory —
+  raw_wrap embedding is the open-let shape), anon-empty 10, Include tails
+  4, Variable tails 2, state-rename 1.
 
 ---
 

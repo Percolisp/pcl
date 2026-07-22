@@ -5932,6 +5932,15 @@ sub _fallback_stmt {
   die "Parser2 TODO: statement fallback left $opens open scope(s): " . $stmt->content
     if $opens;
   return () unless defined $text;
+  # A COMMENT-ONLY raw — pragma markers like ";; use integer (pragma)" /
+  # ";; no strict (no-op)" — carries no code; the pragma's compile-side
+  # effect happened during the capture above.  Drop it entirely: the
+  # comment is v1 cosmetics, and a comment-tail raw is embed-unsafe, so
+  # these markers declined 27 embedded blocks on the corpus (s308b).
+  {
+    (my $code = $text) =~ s/^\s*;;[^\n]*$//mg;
+    return () if $code !~ /\S/;
+  }
   return raw($text);
 }
 

@@ -169,6 +169,13 @@ print join(",", map { d($_) } @a), "|", join(",", map { d($_) } @b),
       "|", d($c), "|@h|", d($g), "|@f\n";
 ');
 
+test_transpile("pragmas inside embedded blocks convert and still apply (s308b)", '
+my @x = map { use integer; $_ / 2 } (5,7,9);
+my @y = grep { no strict; $_ > 1 } (1,2,3);
+my $z = do { no warnings; 6 / 4 };
+print "@x|@y|$z\n";
+');
+
 test_transpile("string-eval value is the tail statement value (s308b E3)", '
 sub d { defined $_[0] ? "<$_[0]>" : "U" }
 my $a = eval q{my $x = 42};
