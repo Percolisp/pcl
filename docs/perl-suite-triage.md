@@ -20,7 +20,7 @@ time with `tools/run-perl-suite.pl --all --tsv FILE`.
 | 4 | `Can't locate Config.pm` (note: `@INC contains: #S(p-box ...)`) | run/runenv*, run/switchM | Two bugs: missing lib/Config.pm shim AND a p-box leaking un-stringified into @INC (the `-I` path push). Fix the box leak first — it is generic. |
 | 4 | `type-error: The value nil is not of type real` | op/inc, op/stash, re/pat_re_eval, run/switchd | undef reaches arithmetic in the runtime — nil box where number expected. Reproduce with op/inc.t first divergence. |
 | 3 | `compiled-program-error ... (go :Arg_loop)` | io/msg, io/sem, io/shm | Codegen emits `(go :Arg_loop)` outside its tagbody (SysV IPC files). Generic control-flow bug worth a look despite niche files. |
-| 3 | `control-stack-exhausted` | op/cond, op/utf8cache, re/speed | Deep-nesting family — see below. |
+| 3 | `control-stack-exhausted` | op/cond, op/utf8cache, re/speed | op/cond = deep-nesting, blessed XDIFF + deferred post-R1 (see below). utf8cache + re/speed share only the *signature* — triage separately as real bugs (utf8cache dies after 2 tests on ordinary code; re/speed likely cl-ppcre recursion on long strings). |
 | 2 | `loadable object for module Storable` | uni/greek, uni/latin2 | Storable XS gap → pclxs or pure-perl shim. |
 | 2 | `Can't locate Foo.pm` | op/overload_integer, op/override | Test-fixture .pm files not found — shadow-t @INC/cwd issue in the harness fixture, not PCL semantics. |
 
@@ -31,6 +31,10 @@ semantics), op/cmpchain.t (274 rows, chained comparisons), op/const-optree.t
 (146 rows), comp/retainedlines.t (90 rows, `@{"_<..."}` debugger lines).
 
 ## The op/cond.t deep-nesting bug (root cause of the s308/s309 desktop OOM kills)
+
+**DECISION (user, s309): deferred until after Release 1** — blessed as
+expected-divergence; full verdict + the post-R1 revisit checklist (flat-width
+quadratic check, index-range fix) in `not-supported.md` §pathological-nesting.
 
 `t/op/cond.t` builds a 20,000-deep right-nested ternary string (220 KB) and
 `eval`s it.  Measured (2026-07-23, tern-N files = the exact cond.t shape):

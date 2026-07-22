@@ -1172,3 +1172,43 @@ today.
 divergences in `docs/perl-suite-expected.tsv`.  Revisit as a feature project
 (parser desugaring + a `docs/class-feature-plan.md`) once the v2 endgame
 lands.
+
+## Pathological expression nesting depth (≥ ~10k)  [DEFERRED — revisit after Release 1]
+
+**What:** expressions nested thousands of levels deep — the canonical case is
+`t/op/cond.t`, which `eval`s a **20,000-deep right-nested ternary** (220 KB
+string) as a regression comment on a historical perl SEGV.
+
+**Behavior:** the transpile itself succeeds but needs quadratic memory and
+time — PExpr's recursive descent copies each paren subexpression per nesting
+level, so live memory ≈ n²/2 array slots (measured 2026-07-23: 335 MB /
+785 MB / 2.1 GB / 6.75 GB at depths 2.5k / 5k / 10k / 20k, ~36 s at 20k) —
+and SBCL then exhausts its control stack compiling the 20k-deep nested form.
+PPI is linear and innocent (~10 KB/level); the generated CL is lean
+(~12 B/level) and at depth 2,500 loads and runs correctly.
+
+**Why deferred (user decision, s309):** no real code nests 20k deep — perl's
+own compiler goes quadratic on this input (its comment says so), which is why
+the test caps at 20k.  Genuine incompatibility families (the
+`docs/perl-suite-triage.md` table) take priority.  The sweep runs op/cond.t
+safely regardless: it is in `tools/run-perl-suite.pl`'s `%HEAVY` set (solo
+phase, nothing running beside it) and the sweep is contained in a
+`systemd-run` scope with `MemoryMax=10G`.
+
+**Revisit AFTER RELEASE 1 (the noted discussion, s309):**
+1. **Flat-width check first:** verify whether long *flat* expressions
+   (`a + a + … ` ×10k, machine-generated-code territory — far more plausible
+   in the wild than deep nesting) hit the same quadratic via the
+   per-reduction operator scan.  If they do, the fix gains real-world value
+   and should be scheduled; if not, deep nesting alone stays parked.
+2. **The known fix** (moderate, not a rewrite): parse index ranges over a
+   shared element array instead of copying `@$e[...]` slices per level
+   (ternary arm `@condition/@true_expr/@false_expr` and the paren-structure
+   path); also fixes the quadratic wall time.  SBCL side: larger
+   `--control-stack-size` for generated-code compiles, or flatten deep
+   right-nested ternary/if chains in codegen.
+3. **Not covered by this verdict:** `op/utf8cache.t` and `re/speed.t` share
+   the control-stack-exhausted *signature* but almost certainly not the
+   cause (utf8cache dies after 2 tests on ordinary code; re/speed smells
+   like cl-ppcre recursion on long strings).  Triage those separately as
+   real bugs.
