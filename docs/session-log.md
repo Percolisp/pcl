@@ -49,6 +49,20 @@ Append new entries at the top. One section per session.
   now shows its true next blocker — nil-not-real, warnings::enabled shim,
   Tie::Hash::NamedCapture).  corpus-diff byte-identical v2+PCL_V1; gate
   118/4346 (+1 guard transpile-test-06.t).
+- **Second #25 family: 2 of 8 read-error-in-load files fixed (01a2de5, gen
+  v2-59)**: (1) v1 `_assemble_output` package collection was ASCII-only
+  (`[A-Za-z_]\w*::`) — unicode packages (`package 닌g난ㄬ`) never
+  pre-declared → reader error; now `[^\W\d]\w*`.  uni/attrs.t runs.
+  (2) `for $main::x (...)` emitted the raw perl-order binding (reader
+  parses `$MAIN` as a package) in BOTH pipelines; new shared
+  `Pl::ExprToCL::qualified_var_to_cl` (gen_symbol_form refactored onto it)
+  used by v1 cl_loop_var + Parser2 foreach binding; `_reg_lex` skips
+  qualified names (never lexicals — one leaked the raw symbol into
+  string-eval capture alists).  comp/require.t runs to a distinct `%INC`
+  type-error.  corpus byte-identical both pipelines; gate 118/4348
+  (+2 guards).  REMAINING: 5 family files read-error only in-harness
+  (runtime-required fixture code — need in-harness stderr capture to
+  diagnose); uni/gv.t = binding-stack-exhausted (separate).
 
 ## Session 308b (2026-07-22, Fable) — E2 #78: tail statement MODIFIERS convert (20-decline bucket); reader-based paren checker (gen v2-56).
 
