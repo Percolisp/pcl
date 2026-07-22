@@ -31,7 +31,24 @@ Append new entries at the top. One section per session.
   read-error-during-load (8), builtin arity (6), p-box leaking into @INC +
   missing Config.pm shim (4), `nil is not of type real` (4), `(go :Arg_loop)`
   outside tagbody (3).  16 threads files = oracle-also-NOTAP, not a PCL gap.
-- No emission changes; no cache-generation bump needed.
+- **op/cond.t deferred post-R1 (user decision)**: expected-tsv row +
+  `not-supported.md §pathological-nesting` with the revisit checklist
+  (flat-width quadratic check first; index-range PExpr fix; utf8cache/re-speed
+  share only the SIGNATURE — triage separately as real bugs).
+- **First #25 family FIXED (4ba5fb0, gen v2-58)**: the 10-file "value N is
+  not of type hash-table" group.  Root cause: the element-access sigil swap
+  ran on the RENDERED symbol and silently failed on pipe-quoted magics
+  (`|$-|`, `|$^H|`) — `$-{x}` read scalar `$-` where a hash was expected.
+  20 copy-pasted swap sites + 8 guarded exists/delete variants →
+  one `_swap_elem_sigil` helper (swaps inside pipes); StringInterpolation
+  gains `$-{k}/$-[i]/$+[i]` (only `$+{k}` was special-cased).  Runtime:
+  `|%-|` defined+populated (every named buffer, undef non-participants),
+  `|@-|/|@+|` truncate after last participating group (perl `$#-`),
+  `|$^H|`/`|%^H|` globals (NO lexical hint scoping — documented caveat).
+  Family verified gone (hints.t 0→16 ok, inc.t 46, stash.t 37; each file
+  now shows its true next blocker — nil-not-real, warnings::enabled shim,
+  Tie::Hash::NamedCapture).  corpus-diff byte-identical v2+PCL_V1; gate
+  118/4346 (+1 guard transpile-test-06.t).
 
 ## Session 308b (2026-07-22, Fable) — E2 #78: tail statement MODIFIERS convert (20-decline bucket); reader-based paren checker (gen v2-56).
 
