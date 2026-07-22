@@ -318,15 +318,24 @@ WRITE:
 }
 
 # ---------------------------------------------------- parallel dispatch
-my @queue = @files;
+# Files whose run needs most of the machine by itself get a solo phase after
+# the parallel bulk drains, so their peak doesn't stack on 7 other SBCLs.
+my %HEAVY = map { $_ => 1 } (
+  'op/cond.t',   # 20k-nested-ternary eval: pl2cl server peaks ~6.6 GB
+);
+my @heavy = grep { $HEAVY{$_} } @files;
 my (%children, %results);
 # Workers sit in their own process groups, so terminal SIGINT no longer
 # reaches them — forward it (exit() still runs the END tmpdir cleanup).
 for my $s ('INT', 'TERM') {
   $SIG{$s} = sub { kill 'KILL', map { -$_ } keys %children; exit 130 };
 }
+for my $phase ([[grep { !$HEAVY{$_} } @files], $jobs], [\@heavy, 1]) {
+my ($phase_files, $slots) = @$phase;
+my @queue = @$phase_files;
+print "-- solo phase: @queue\n" if @queue && $slots == 1 && @heavy;
 while (@queue || %children) {
-  while (@queue && keys(%children) < $jobs) {
+  while (@queue && keys(%children) < $slots) {
     my $rel = shift @queue;
     my (undef, $result_file) = tempfile(DIR => $tmpdir, SUFFIX => '.res', OPEN => 0);
     my $pid = fork();
@@ -368,6 +377,7 @@ while (@queue || %children) {
     delete $children{$pid};
   }
   select(undef, undef, undef, 0.1) if @queue || %children;
+}
 }
 
 # ----------------------------------------------------------- summary
