@@ -13555,24 +13555,37 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; Regenerate after editing the shim:  ./pl2cl lib/mro.pm > cl/pcl-mro.lisp
 
 (p-defpackage :mro)
+(p-defpackage :warnings)
 
-(defmacro %pcl-def-mro-stub (name)
-  ;; Self-loading stub: loads pcl-mro.lisp on first call then delegates to
+(defmacro %pcl-def-ext-stub (name ext)
+  ;; Self-loading stub: loads cl/EXT.lisp on first call then delegates to
   ;; the real definition the extension just installed over this stub.
   `(defun ,name (&rest args)
-     (let ((loaded (p-load-extension "pcl-mro")))
+     (let ((loaded (p-load-extension ,ext)))
        (if loaded
            (apply (symbol-function ',name) args)
-           (error "mro: cl/pcl-mro.lisp not found in ~a"
+           (error "~a: cl/~a.lisp not found in ~a" ,ext ,ext
                   (or *pcl-runtime-directory* "(no runtime dir)"))))))
 
-(%pcl-def-mro-stub mro::pl-get_linear_isa)
-(%pcl-def-mro-stub mro::pl-get_mro)
-(%pcl-def-mro-stub mro::pl-set_mro)
-(%pcl-def-mro-stub mro::pl-get_isarev)
-(%pcl-def-mro-stub mro::pl-is_universal)
-(%pcl-def-mro-stub mro::pl-invalidate_all_method_caches)
-(%pcl-def-mro-stub mro::pl-method_changed_in)
+(%pcl-def-ext-stub mro::pl-get_linear_isa "pcl-mro")
+(%pcl-def-ext-stub mro::pl-get_mro "pcl-mro")
+(%pcl-def-ext-stub mro::pl-set_mro "pcl-mro")
+(%pcl-def-ext-stub mro::pl-get_isarev "pcl-mro")
+(%pcl-def-ext-stub mro::pl-is_universal "pcl-mro")
+(%pcl-def-ext-stub mro::pl-invalidate_all_method_caches "pcl-mro")
+(%pcl-def-ext-stub mro::pl-method_changed_in "pcl-mro")
+
+;;; warnings:: query/emit API (charnames' `warnings::enabled('utf8')` etc.) —
+;;; `use warnings` is a skipped pragma, so lib/warnings.pm is reached only via
+;;; these always-available stubs.  Shim doc: lib/warnings.pm header.
+;;; Regenerate after editing the shim:  ./pl2cl lib/warnings.pm > cl/pcl-warnings.lisp
+(%pcl-def-ext-stub warnings::pl-enabled "pcl-warnings")
+(%pcl-def-ext-stub warnings::pl-fatal_enabled "pcl-warnings")
+(%pcl-def-ext-stub warnings::pl-enabled_at_level "pcl-warnings")
+(%pcl-def-ext-stub warnings::pl-fatal_enabled_at_level "pcl-warnings")
+(%pcl-def-ext-stub warnings::pl-register_categories "pcl-warnings")
+(%pcl-def-ext-stub warnings::pl-warn "pcl-warnings")
+(%pcl-def-ext-stub warnings::pl-warnif "pcl-warnings")
 
 ;;; ============================================================
 ;;; Package initialization

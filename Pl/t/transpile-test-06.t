@@ -236,4 +236,13 @@ binmode STDOUT, ":utf8";
 print 닌g난ㄬ::who(), "|", Càt::who(), "\n";
 ');
 
+test_transpile("warnings:: query API via always-available shim stubs (s309)", '
+use warnings;
+package MyMod;
+sub check { return warnings::enabled("utf8") ? "on" : "off" }
+sub checkf { return warnings::fatal_enabled("utf8") ? "F" : "nf" }
+package main;
+print MyMod::check(), "|", MyMod::checkf(), "\n";
+');
+
 done_testing();
