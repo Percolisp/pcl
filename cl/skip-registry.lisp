@@ -331,3 +331,32 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("computed goto"
                  :feature
                  "goto EXPR to a runtime-computed label is not implementable in CL (tags are lexical, not first-class). not-supported.md: 'Computed goto (goto EXPR)'."))
+
+;; lex.t — perl-lexer torture rows.  The five "<sigil> <null> ident" tests use
+;; a NUL byte as the first identifier character ($\0eq is a variable literally
+;; named "\0eq"); PPI cannot tokenize that and no real code writes it —
+;; decision 2026-07-24.  The two [perl #NNNNN] rows expect perl's exact
+;; compile-error text ("Bareword found ...", "Not enough arguments for flock")
+;; for invalid input.
+(register-skips "lex.t"
+                ("^\\$ <null> ident$"
+                 :feature
+                 "NUL byte as first identifier char ($\\0eq) -- PPI cannot tokenize it; no real code. not-supported.md: 'NUL bytes (and other control characters) in identifiers'.")
+                ("^@ <null> ident$"
+                 :feature
+                 "NUL byte as first identifier char (@\\0eq). not-supported.md: 'NUL bytes (and other control characters) in identifiers'.")
+                ("^% <null> ident$"
+                 :feature
+                 "NUL byte as first identifier char (%\\0eq). not-supported.md: 'NUL bytes (and other control characters) in identifiers'.")
+                ("^& <null> ident$"
+                 :feature
+                 "NUL byte as first identifier char (&\\0eq). not-supported.md: 'NUL bytes (and other control characters) in identifiers'.")
+                ("^\\* <null> ident$"
+                 :feature
+                 "NUL byte as first identifier char (*\\0eq). not-supported.md: 'NUL bytes (and other control characters) in identifiers'.")
+                ("Assert failure when mentioning a constant twice"
+                 :error-msg
+                 "expects perl's exact 'Bareword found where operator expected' compile error for invalid input. not-supported.md: 'Error message text and format' / 'Error compatibility for invalid Perl input'.")
+                ("intuit_method\\(\\) invalidates PL_bufptr"
+                 :error-msg
+                 "expects perl's exact 'Not enough arguments for flock' compile error for invalid input. not-supported.md: 'Error message text and format'."))

@@ -239,8 +239,15 @@ Append new entries at the top. One section per session.
   which did module-name string ops on the box and crashed.
 - lex.t 46/7; the remaining 7 = 5 NUL-byte-in-identifier rows
   (`$\0eq` etc — PPI cannot tokenize NUL identifiers; no real code) and
-  2 exact-error-text rows — skip-registry candidates pending user
-  sign-off.  Corpus emission identical (111 files); gate 118/4360.
+  2 exact-error-text rows.  Corpus emission identical (111 files); gate
+  118/4360.
+- **USER DECISION: skip NUL-in-identifiers** (note: perl doesn't ignore
+  the NUL — `$\0eq` IS a variable named "\0eq" via the old
+  control-char-variable lexer path; faking it = a PPI token class for
+  names nothing real writes).  New not-supported.md §NUL-bytes-in-
+  identifiers + 7 lex.t skip-registry rows (5 NUL + 2 error-text under
+  the long-settled §error-text).  **lex.t FULLY PASSING (46+7skip) →
+  62 fully passing**; baseline rows dropped, CLAUDE.md count updated.
 
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 

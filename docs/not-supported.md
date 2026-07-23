@@ -1173,6 +1173,29 @@ divergences in `docs/perl-suite-expected.tsv`.  Revisit as a feature project
 (parser desugaring + a `docs/class-feature-plan.md`) once the v2 endgame
 lands.
 
+## NUL bytes (and other control characters) in identifiers
+
+**Perl behaviour:** perl's lexer accepts control characters — including NUL —
+as the *first* character of an identifier (the old "control-character
+variable" path that gives `$^W`-style names their storage): `$\0eq` is a real
+variable whose name is the two-character string `"\0eq"`, `&\0eq` calls the
+sub of that name, and so on for every sigil.
+
+**PCL behaviour:** Not supported.  PPI does not tokenize a NUL inside an
+identifier (the statement mis-parses), and PCL makes no attempt to repair it.
+Related existing behaviour: a NUL in a *symbolic reference* string is a
+silent no-op (`${"a\0b"}`).
+
+**Rationale (decision confirmed 2026-07-24):** no human-written code names a
+variable with a NUL byte; the construct exists only in perl-lexer torture
+tests.  Faking it would mean teaching a PPI pre-pass a token class for names
+nothing real ever uses.
+
+**Affected tests:** `perl-tests/lex.t` — the five `<sigil> <null> ident`
+rows (registered in `cl/skip-registry.lisp`).
+
+---
+
 ## Pathological expression nesting depth (≥ ~10k)  [DEFERRED — revisit after Release 1]
 
 **What:** expressions nested thousands of levels deep — the canonical case is
