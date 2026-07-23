@@ -90,4 +90,5 @@ mro/pkg_gen.t	not-supported.md §mro — mro::get_pkg_gen method-cache generatio
 mro/pkg_gen_utf8.t	not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
 mro/recursion_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
 mro/recursion_dfs_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
+op/current_sub.t	not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)
 op/cond.t	not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)

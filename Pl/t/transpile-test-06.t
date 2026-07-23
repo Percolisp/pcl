@@ -245,4 +245,68 @@ package main;
 print MyMod::check(), "|", MyMod::checkf(), "\n";
 ');
 
+test_transpile("whitespace between m/qr operator and delimiter (s310)", '
+my $s = "hello world";
+print +($s =~ m /wor/ ? "m" : "-");
+print +($s =~ qr /o w/ ? "q" : "-");
+my $w = "wor";
+print +($s =~ m /$w/ ? "i" : "-");
+print +($s =~ m {hello} ? "b" : "-"), "\n";
+');
+
+test_transpile("qr deref stringifies/numifies like perl REGEXP sv (s310)", '
+my $q = qr/abc/;
+print "[${$q}]|[${qr /abc/i}]|";
+print 0 + ${qr //}, "|";
+$_ = ${qr //};
+$_--;
+print $_, "\n";
+');
+
+test_transpile("plain string scalar as =~ pattern compiles (s310)", '
+my $pat = "b.d";
+print "s1=", ("xbcd" =~ $pat ? "y" : "n"), "|";
+my $p2 = "(?^i:bcd)";
+print "s2=", ("xBCd" =~ $p2 ? "y" : "n"), "|";
+my $q = qr/b(c)d/i;
+my $d = $$q;
+print "deref-match=", ("xBCd" =~ $d ? "y$1" : "n"), "|";
+print "neg=", ("zzz" !~ $pat ? "y" : "n"), "\n";
+');
+
+test_transpile("builtin arity family: bare mkdir/rmdir, chown(), 4-arg select, evalbytes unary (s310)", '
+$_ = "pcl-t06-arity-dir";
+rmdir;
+print "mk=", (mkdir ? 1 : 0), "|rm=", (rmdir ? 1 : 0), "|";
+print "chown=", chown(+()), "|";
+my $blank = "";
+eval { select $blank, undef, $blank, 0 };
+print "sel=[$@]|";
+use feature "evalbytes";
+my @r = (evalbytes("3+4"), "x");
+print "eb=", join(",", @r), "\n";
+');
+
+test_transpile("sysread/syswrite LEN/OFFSET semantics incl. perl errors (s310)", '
+my $f = "/tmp/pcl-t06-sysio-$$";
+open my $o, ">", $f or die;
+my $x = "abc";
+eval { syswrite($o, $x, -1) };  print +($@ =~ /^Negative length / ? "e1" : "B1:$@"), "|";
+eval { syswrite($o, $x, 1, 4) }; print +($@ =~ /^Offset outside string / ? "e2" : "B2:$@"), "|";
+syswrite($o, $x, 1, 3);
+print "w1=", syswrite($o, "0123456789", 2, 5), "|";
+print "w2=", syswrite($o, "0123456789", 5, -3), "\n";
+close $o;
+open my $i, "<", $f or die;
+my $a = "0123456789";
+eval { sysread($i, $a, -1) };    print +($@ =~ /^Negative length / ? "e3" : "B3:$@"), "|";
+eval { sysread($i, $a, 1, -40) }; print +($@ =~ /^Offset outside string / ? "e4" : "B4:$@"), "|[$a]|";
+sysread($i, $a, 2);
+sysread($i, $a, 2, 5);
+sysread($i, $a, 3, -2);
+print "[$a]\n";
+close $i;
+unlink $f;
+');
+
 done_testing();

@@ -163,12 +163,22 @@ sub build_preamble {
   }
 
   # Add Perl's @INC paths
+  my @core_inc;
+  push @core_inc, $pcl_lib if -d $pcl_lib;
   for my $path (@perl_inc) {
     # Escape backslashes and quotes
     $path =~ s/\\/\\\\/g;
     $path =~ s/"/\\"/g;
     push @lines, "(vector-push-extend \"$path\" pcl::\@INC)";
+    push @core_inc, $path;
   }
+
+  # Record the "built-in" module paths (PCL lib/ shims + system perl's libs).
+  # They play the role of perl's compiled-in default @INC: user code that
+  # REPLACES @INC (`BEGIN { @INC = '../lib' }` in t/run/*) must still resolve
+  # core modules, whose PCL equivalents live in these dirs.
+  push @lines, "(setf pcl::*p-core-inc-dirs* (list "
+    . join(" ", map { "\"$_\"" } @core_inc) . "))";
 
   # Switch to main package for user code (Perl's default package)
   # main uses :cl and :pcl so runtime functions are accessible

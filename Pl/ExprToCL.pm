@@ -666,6 +666,9 @@ sub _parse_regex_content {
   my ($content, $is_qr) = @_;
   my $prefix_len = $is_qr ? 2 : 0;
   $prefix_len++ if !$is_qr && $content =~ /^m/;
+  # Perl allows whitespace between the operator and its delimiter: `qr //`
+  $prefix_len++ while $prefix_len < length($content)
+    && substr($content, $prefix_len, 1) =~ /\s/;
   my $open_ch = substr($content, $prefix_len, 1);
   my %pairs = ('{' => '}', '(' => ')', '[' => ']', '<' => '>');
   my $close_ch = $pairs{$open_ch} // $open_ch;

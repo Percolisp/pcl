@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 310 (2026-07-23, Fable) — #25 families: nil-not-real (qr-whitespace) + builtin arity CLEARED; string patterns in =~; gen v2-60.
+
+- **Fourth #25 family FIXED: "nil is not of type real" (op/inc, op/stash,
+  re/pat_re_eval, run/switchd)**.  Root cause: perl allows whitespace between
+  a regex operator and its delimiter (`qr //`, `m {x}` — op/inc.t line 332
+  `$_ = ${qr //}`), but all three raw-text regex parsers assumed the
+  delimiter at a fixed index — `end-delim` came back nil and arithmetic on
+  it crashed.  Fixed at the shared parse points: `_parse_regex_content`
+  (ExprToCL, both pipelines) skips whitespace after the prefix, and runtime
+  `p-qr`/`p-regex` share a new `%pcl-regex-delim-start` helper.  corpus-diff:
+  only bop.t differs, and that diff is the fix itself (bop.t's multi-line
+  `qr /.../ ` literal was silently mis-split into pattern `/^Use…not` +
+  flags `allowed/`).  All 4 family files now run past the old crash.
+- **`${qr//}` deref = the REGEXP-sv view**: PCL merges perl's Regexp ref and
+  its referent into one struct (numifies as address — right for the REF
+  level), so `p-cast-$` now returns the `"(?^:...)"` string form for a
+  regex-match — stringify AND numify (0) match perl (`$_ = ${qr //}; $_--`
+  → -1, inc.t "regexp--").  Residual divergence: `ref \${$qr}` is SCALAR
+  not REGEXP (documented scalar-SV-identity family).
+- **String scalars as `=~` patterns compile (pre-existing bug surfaced by
+  the above)**: `my $pat = "b.d"; "xbcd" =~ $pat` warned "Unknown regex
+  operation type" and never matched — `p-=~` had no string arm.  Now
+  strings/numbers compile via `p-regex-from-parts` (also the path a
+  dereffed qr takes).
+- **Fifth #25 family FIXED: builtin arity (io/fs, op/current_sub,
+  op/evalbytes, op/mkdir, op/sselect, op/sysio)**, per-builtin:
+  - `mkdir`/`rmdir` bare → `$_` default via parser insertion (Config.pm
+    specs `[0,1,2,-2]`/`[0,1,-2]`, the stat pattern); failure now sets `$!`
+    (syscall-errno capture).  mkdir.t 11→15.
+  - `sysread`/`syswrite` LEN/OFFSET: negative-length + offset-outside-string
+    perl errors, negative offsets from end, zero-pad past end; sysread's
+    redundant swallow-wrapper removed (string dies are plain CL errors —
+    a type-based re-signal CANNOT distinguish them; validate OUTSIDE the
+    swallow instead).  sysio.t 2→39 (now unbound:I, distinct).
+  - `chown` with empty list (io/fs.t `map chown(+()), ('')x68`) → 0.
+    fs.t 53→54 (now a tempfile-stub collision, distinct).
+  - 4-arg `select(R,W,E,T)`: real select(2) via `sb-unix:unix-fast-select`
+    (NOT unix-select — doesn't exist) with vec-order mask pack/unpack +
+    write-back, pure-sleep when masks empty, timeout FETCHed exactly once
+    (RT#120102 tie test).  sselect.t 0→12 (now in-harness read-error,
+    distinct).
+  - `evalbytes` was swallowing the whole `is()` arg list — added to the
+    `named_unary` table (the mechanism lc/uc/eval already use) + `[0,1,-2]`
+    spec.  evalbytes.t 4→5; rest is error-compat/utf8-flag territory.
+  - op/current_sub.t = `__SUB__`, deferred by design → expected-tsv row
+    citing not-supported.md §__SUB__.
+- **Sixth #25 family FIXED: core modules unfindable after user code replaces
+  @INC (run/runenv*, run/switchM — the `BEGIN { @INC = '../lib'; require
+  Config }` preamble)**: perl's `../lib` IS its core lib, PCL's equivalents
+  are lib/ shims + the system perl libs — so the pl2cl preamble now records
+  those dirs in `pcl::*p-core-inc-dirs*` (perl's "compiled-in default
+  paths" role) and `p-find-module-in-inc` falls back to them when @INC
+  misses (backstop: lib/ derived from `*pcl-runtime-directory*`); the two
+  @INC probe loops now share one `%p-inc-dir-file` helper, and the
+  "Can't locate" message stringifies boxed entries.  lib/Config.pm gains
+  `non_bincompat_options`/`bincompat_options` (empty — honest for PCL).
+  runenv.t 0→plans 106 / switchM.t past Config: both now block on the
+  known runperl/fresh_perl real-perl-spawn harness gap (documented in
+  not-supported.md §fork; NOT part of this family).
+- Gen v2-59 → v2-60 (emission changes: qr-whitespace parse, $_ insertion,
+  evalbytes unary, *p-core-inc-dirs* preamble line).  Guards:
+  transpile-test-06.t +5 tests.  Verified: corpus-diff v2 = bop.t + the
+  one-line preamble addition on all files (both explained), PCL_V1 =
+  ditto; full Pl/t gate green (118 files / 4354 tests).
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB

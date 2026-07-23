@@ -109,6 +109,7 @@ has named_unary => (
       'caller'  => 1,
       'do'      => 1,
       'eval'    => 1,
+      'evalbytes' => 1,
       'wantarray' => 1,
       'prototype' => 1,
       # use overload introspection
@@ -408,8 +409,8 @@ has known_no_of_params => (
 
       # File/directory operations
       chdir      => [0, 1],       # chdir or chdir DIR
-      mkdir      => [1, 2],       # mkdir DIR or mkdir DIR, MODE
-      rmdir      => 1,            # rmdir DIR
+      mkdir      => [0, 1, 2, -2], # mkdir [DIR [, MODE]] defaults to $_
+      rmdir      => [0, 1, -2],   # rmdir [DIR] defaults to $_
       rename     => 2,            # rename OLD, NEW
       chmod      => -12,          # chmod MODE, LIST (1 before list)
       umask      => [0, 1],       # umask or umask EXPR
@@ -496,7 +497,7 @@ has known_no_of_params => (
       # Misc
       sleep      => [0, 1],     # sleep or sleep EXPR
       alarm      => [0, 1],     # alarm or alarm EXPR
-      evalbytes  => 1,          # evalbytes EXPR
+      evalbytes  => [0, 1, -2], # evalbytes [EXPR] defaults to $_
       print      => -1,         # print [FH] LIST (special handling)
       say        => -1,         # say [FH] LIST (special handling)
       printf     => -12,        # printf [FH] FORMAT, LIST

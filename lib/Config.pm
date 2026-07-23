@@ -174,6 +174,19 @@ sub myconfig {
     return "PCL fake Config.pm - 64-bit Linux compatible";
 }
 
+# non_bincompat_options - compile-time options that don't affect binary
+# compatibility.  A stock perl build has a few; PCL has none of them, and
+# callers only scan the list for specific names (e.g. PERL_DISABLE_PMC in
+# t/run/switchM.t), so the empty list is the honest answer.
+sub non_bincompat_options {
+    return ();
+}
+
+# bincompat_options - same shape, binary-compatibility-affecting options.
+sub bincompat_options {
+    return ();
+}
+
 # import - called by "import Config" or "use Config"
 # PCL doesn't actually support symbol import, so this is a no-op
 # No custom import: PCL imports @EXPORT (%Config) automatically on `use Config`.

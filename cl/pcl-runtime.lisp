@@ -8004,54 +8004,69 @@ buffer's fill-pointer; everything else falls back to file-length."
       (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
       (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
       (return-from %p-read-impl *p-undef*)))
-  (handler-case
-      (let* ((stream (p-get-stream fh))
-             (n (max 0 (truncate (to-number len))))
-             (tmp (make-string n))
-             (got (read-sequence tmp stream))
-             (data (subseq tmp 0 got)))
-        (when (p-box-p buf)
-          (if offset
-              (let* ((old (to-string (unbox buf)))
-                     (off (truncate (to-number offset)))
-                     (off (if (< off 0) (max 0 (+ (length old) off)) off))
-                     (head (if (<= off (length old))
-                               (subseq old 0 off)
-                               (concatenate 'string old
-                                            (make-string (- off (length old))
-                                                         :initial-element #\Nul)))))
-                (box-set buf (concatenate 'string head data)))
-              (box-set buf data)))
-        got)
-    (error () *p-undef*)))
+  (let ((n (truncate (to-number len)))
+        (off (and offset (truncate (to-number offset))))
+        (old (if (p-box-p buf) (to-string (unbox buf)) "")))
+    (when (< n 0) (p-die "Negative length"))
+    (when (and off (< off 0))
+      (when (< (+ (length old) off) 0) (p-die "Offset outside string"))
+      (setf off (+ (length old) off)))
+    (handler-case
+        (let* ((stream (p-get-stream fh))
+               (tmp (make-string n))
+               (got (read-sequence tmp stream))
+               (data (subseq tmp 0 got)))
+          (when (p-box-p buf)
+            (if off
+                (let ((head (if (<= off (length old))
+                                (subseq old 0 off)
+                                (concatenate 'string old
+                                             (make-string (- off (length old))
+                                                          :initial-element #\Nul)))))
+                  (box-set buf (concatenate 'string head data)))
+                (box-set buf data)))
+          got)
+      (p-exception (e) (error e))
+      (error () *p-undef*))))
 
 (defmacro p-read (fh &rest args)
   "Perl read — bareword filehandle is auto-quoted."
   `(%p-read-impl (%p-fh-arg ,fh) ,@args))
 
-(defun %p-sysread-impl (fh buf len)
-  "Perl sysread - low-level read (same as read for now). Returns nil on error."
-  (handler-case (%p-read-impl fh buf len)
-    (error () nil)))
+(defun %p-sysread-impl (fh buf len &optional offset)
+  "Perl sysread - low-level read (same as read for now).  IO errors return
+   undef (caught inside %p-read-impl); perl-semantic errors (negative length,
+   offset outside string) die out of it."
+  (%p-read-impl fh buf len offset))
 
 (defmacro p-sysread (fh &rest args)
   "Perl sysread — bareword filehandle is auto-quoted."
   `(%p-sysread-impl (%p-fh-arg ,fh) ,@args))
 
-(defun %p-syswrite-impl (fh data &optional len)
-  "Perl syswrite - write data to filehandle. Unbuffered (flushes immediately) so a
-   readline on the other end of a pipe sees the data. Returns nil on stream/encode error."
-  (handler-case
-      (let ((stream (p-get-stream fh))
-            (str (to-string data)))
-        (when stream
-          (let ((out (if len
-                         (subseq str 0 (min (to-number len) (length str)))
-                         str)))
-            (write-string out stream)
-            (finish-output stream)
-            (length out))))
-    (error () nil)))
+(defun %p-syswrite-impl (fh data &optional len offset)
+  "Perl syswrite FH, SCALAR [, LEN [, OFFSET]] - write data to filehandle.
+   Unbuffered (flushes immediately) so a readline on the other end of a pipe
+   sees the data.  Writes LEN chars of SCALAR starting at OFFSET (negative
+   offset counts from the end).  Returns nil on stream/encode error; perl-
+   semantic errors (negative length, offset outside string) die."
+  (let ((str (to-string data))
+        (n (and len (truncate (to-number len))))
+        (off (if offset (truncate (to-number offset)) 0)))
+    (when (and n (< n 0)) (p-die "Negative length"))
+    (when (< off 0)
+      (when (< (+ (length str) off) 0) (p-die "Offset outside string"))
+      (setf off (+ (length str) off)))
+    (when (> off (length str)) (p-die "Offset outside string"))
+    (handler-case
+        (let ((stream (p-get-stream fh)))
+          (when stream
+            (let ((out (if n
+                           (subseq str off (min (+ off n) (length str)))
+                           str)))
+              (write-string out stream)
+              (finish-output stream)
+              (length out))))
+      (error () nil))))
 
 (defmacro p-syswrite (fh &rest args)
   "Perl syswrite — bareword filehandle is auto-quoted."
@@ -9120,17 +9135,23 @@ buffer's fill-pointer; everything else falls back to file-length."
   t)
 
 (defun p-mkdir (dir &optional mode)
-  "Perl mkdir - create directory. Returns true on success."
+  "Perl mkdir - create directory. Returns true on success, sets $! on failure."
   (let ((path (to-string dir))
         (m (if mode (truncate (to-number mode)) #o755)))
     (handler-case
         (progn (sb-posix:mkdir path m) t)
+      (sb-posix:syscall-error (e)
+        (setf *p-stored-errno* (sb-posix:syscall-errno e))
+        nil)
       (error () nil))))
 
 (defun p-rmdir (dir)
-  "Perl rmdir - remove empty directory. Returns true on success."
+  "Perl rmdir - remove empty directory. Returns true on success, sets $! on failure."
   (handler-case
       (progn (sb-posix:rmdir (to-string dir)) t)
+    (sb-posix:syscall-error (e)
+      (setf *p-stored-errno* (sb-posix:syscall-errno e))
+      nil)
     (error () nil)))
 
 (defun p-getcwd ()
@@ -9197,10 +9218,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((n (%pcl-to-integer (to-number x))))
     (if (minusp n) (logand n #xFFFFFFFF) n)))
 
-(defun p-chown (uid gid &rest files)
+(defun p-chown (&optional (uid nil uid-p) (gid nil gid-p) &rest files)
   "Perl chown UID, GID, LIST — change owner/group. Returns count changed.
    A UID or GID of -1 leaves that attribute unchanged.  A filehandle in the LIST
-   is fchown'd by descriptor."
+   is fchown'd by descriptor.  An empty argument list (chown +()) is 0 files."
+  (unless (and uid-p gid-p) (return-from p-chown 0))
   (let ((u (%pcl-chown-id uid))
         (g (%pcl-chown-id gid))
         (count 0))
@@ -9566,15 +9588,62 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl pipe - bareword filehandles are auto-quoted; lexical $fh passed as box."
   `(%p-pipe-impl (%p-fh-arg ,read-fh) (%p-fh-arg ,write-fh)))
 
-(defun p-select (&optional fh)
-  "Perl select - set default output filehandle (stub).
-   Perl's select returns the *name* of the previously-selected default handle
-   (e.g. \"main::STDOUT\"), which is always a true value — never undef.  Return
-   that string rather than raw nil: a nil here is dropped during Perl list
-   flattening (it reads as the empty list), so `ok(select(), 'name')` would lose
-   its description argument.  See %p-flatten-list — undef must be a real value."
-  (declare (ignore fh))
-  "main::STDOUT")
+(defun %pcl-fdmask-int (v)
+  "Perl 4-arg select bit-mask scalar → integer fd mask.
+   vec() bit order: fd N lives in byte N>>3, bit N&7 — so the integer mask is
+   the string's bytes assembled little-endian.  undef/empty → 0."
+  (let ((mask 0))
+    (unless (or (null v) (eq v :undef))
+      (let ((s (to-string v)))
+        (dotimes (i (length s))
+          (setf mask (logior mask (ash (char-code (char s i)) (* 8 i)))))))
+    mask))
+
+(defun %pcl-fdmask-writeback (arg mask nbytes)
+  "Write an integer fd mask back into a select() bit-mask scalar (if a box)."
+  (when (p-box-p arg)
+    (let ((s (make-string nbytes :initial-element #\Nul)))
+      (dotimes (i nbytes)
+        (setf (char s i) (code-char (ldb (byte 8 (* 8 i)) mask))))
+      (box-set arg s))))
+
+(defun %p-select-4arg (rbits wbits ebits timeout)
+  "Perl select RBITS, WBITS, EBITS, TIMEOUT — wait for ready fds / sleep.
+   Timeout is fetched exactly once (tied timeouts, RT#120102).  With no fds in
+   any mask this is a (fractional-second) sleep; with fds it is a real
+   select(2) via sb-unix, and the found masks are written back.  Returns the
+   number of ready fds."
+  (let ((rm (%pcl-fdmask-int rbits))
+        (wm (%pcl-fdmask-int wbits))
+        (em (%pcl-fdmask-int ebits))
+        (to (unless (or (null timeout) (eq timeout :undef))
+              (to-number timeout))))
+    (if (and (zerop rm) (zerop wm) (zerop em))
+        (progn (when (and to (> to 0)) (sleep to)) 0)
+        (handler-case
+            (multiple-value-bind (n rr ww ee)
+                (sb-unix:unix-fast-select (integer-length (logior rm wm em))
+                                          rm wm em
+                                          (and to (truncate to))
+                                          (if to
+                                              (truncate (* (- to (truncate to))
+                                                           1000000))
+                                              0))
+              (when (and n (> n 0))
+                (let ((nbytes (ceiling (integer-length (logior rm wm em)) 8)))
+                  (%pcl-fdmask-writeback rbits (or rr 0) nbytes)
+                  (%pcl-fdmask-writeback wbits (or ww 0) nbytes)
+                  (%pcl-fdmask-writeback ebits (or ee 0) nbytes)))
+              (or n 0))
+          (error () 0)))))
+
+(defun p-select (&optional (fh nil) (wbits nil) (ebits nil) (timeout nil timeout-p))
+  "Perl select - one-arg form sets the default output filehandle (stub that
+   returns the previous handle's *name*, always a true value — never undef,
+   see %p-flatten-list); four-arg form is select(2) (%p-select-4arg)."
+  (if timeout-p
+      (%p-select-4arg fh wbits ebits timeout)
+      "main::STDOUT"))
 
 (defun p-write (&optional fh)
   "Perl write - emit a report via the current `format` (stub).
@@ -9773,7 +9842,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-59"
+(defparameter *pcl-cache-generation* "v2-60"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -9825,20 +9894,38 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (progn (write-char (char name i) out) (incf i))))
           (concatenate 'string (get-output-stream-string out) ".pm")))))
 
+(defvar *p-core-inc-dirs* nil
+  "PCL's built-in module paths (lib/ shims + the system perl's libs), set by
+   the pl2cl preamble.  They play the role of perl's compiled-in default
+   @INC: user code that REPLACES @INC to point at perl's core lib
+   (`BEGIN { @INC = '../lib' }`, the t/run/* preamble) must still resolve
+   core modules, whose PCL equivalents live here.")
+
+(defun %p-inc-dir-file (dir rel-path)
+  "Probe DIR (string/pathname/box) for REL-PATH; absolute path or nil."
+  (let* ((d (unbox dir))
+         ;; Ensure dir ends with / so merge-pathnames treats it as directory
+         (s (if (stringp d) d (namestring d)))
+         (s (if (and (> (length s) 0)
+                     (char/= (char s (1- (length s))) #\/))
+                (concatenate 'string s "/")
+                s))
+         (full-path (merge-pathnames rel-path (pathname s))))
+    (when (probe-file full-path)
+      (namestring (truename full-path)))))
+
 (defun p-find-module-in-inc (rel-path)
-  "Search @INC for module file, return absolute path or nil."
-  (loop for dir-raw across @INC
-        ;; Unbox if dir is stored as a box (l-value array storage)
-        for dir = (unbox dir-raw)
-        ;; Ensure dir ends with / so merge-pathnames treats it as directory
-        for dir-str = (let ((s (if (stringp dir) dir (namestring dir))))
-                        (if (and (> (length s) 0)
-                                 (char/= (char s (1- (length s))) #\/))
-                            (concatenate 'string s "/")
-                            s))
-        for full-path = (merge-pathnames rel-path (pathname dir-str))
-        when (probe-file full-path)
-        return (namestring (truename full-path))))
+  "Search @INC for module file, return absolute path or nil.
+   Falls back to *p-core-inc-dirs* (see its docstring); when the preamble
+   never ran, PCL's lib/ beside the runtime's cl/ is the backstop."
+  (or
+   (loop for dir across @INC
+         thereis (%p-inc-dir-file dir rel-path))
+   (loop for dir in (or *p-core-inc-dirs*
+                        (when *pcl-runtime-directory*
+                          (list (merge-pathnames "../lib/"
+                                                 *pcl-runtime-directory*))))
+         thereis (%p-inc-dir-file dir rel-path))))
 
 ;;; --- Cache Management ---
 
@@ -10226,7 +10313,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let ((abs-path (p-find-module-in-inc rel-path)))
       (unless abs-path
         (error "Can't locate ~A in @INC (@INC contains: ~{~A~^ ~})"
-               rel-path (coerce @INC 'list)))
+               rel-path (map 'list #'to-string @INC)))
       ;; Load with circular detection
       (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
         (p-load-module-cached abs-path))
@@ -11038,6 +11125,11 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; Symbolic reference: ${"varname"}
        (let ((box (%p-symref-box inner)))
          (if box (p-box-value box) nil)))
+      ;; ${qr//}: perl's REGEXP sv stringifies as "(?^:...)" and numifies
+      ;; through that string (0).  PCL merges the Regexp ref and its referent
+      ;; into one struct (which numifies as an address, correct for the REF
+      ;; level), so the deref site is where the referent view is produced.
+      ((p-regex-match-p inner) (to-string inner))
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val)
@@ -12800,12 +12892,21 @@ buffer's fill-pointer; everything else falls back to file-length."
              (string #\?)))) ; fallback for out-of-range
      :simple-calls t)))
 
+(defun %pcl-regex-delim-start (str prefix-len)
+  "Index of the delimiter after a regex operator prefix.  Perl allows
+   whitespace between the operator and its delimiter: `qr //`, `m {x}`."
+  (or (position-if-not (lambda (c)
+                         (member c '(#\Space #\Tab #\Newline #\Return)))
+                       str :start prefix-len)
+      prefix-len))
+
 (defun p-regex (pattern-string)
   "Parse /pattern/modifiers and return a regex-match struct.
    Pattern-string is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'"
   (let* ((str (to-string pattern-string))
          (first-char (char str 0))
-         (start-delim (if (char= first-char #\m) 1 0))
+         (start-delim (%pcl-regex-delim-start
+                       str (if (char= first-char #\m) 1 0)))
          (open-delim (char str start-delim))
          (close-delim (get-closing-delim open-delim))
          (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
@@ -12826,8 +12927,8 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Parse qr/pattern/modifiers and return a compiled regex (regex-match struct).
    Pattern-string is like 'qr/foo/i' or 'qr{pattern}i'"
   (let* ((str (to-string pattern-string))
-         ;; Skip past 'qr' prefix
-         (start-delim 2)
+         ;; Skip past 'qr' prefix and any whitespace before the delimiter
+         (start-delim (%pcl-regex-delim-start str 2))
          (open-delim (char str start-delim))
          (close-delim (get-closing-delim open-delim))
          (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
@@ -13504,6 +13605,11 @@ buffer's fill-pointer; everything else falls back to file-length."
        (do-regex-subst string operation))
       ((p-tr-op-p operation)
        (do-tr string operation))
+      ;; $x =~ $pat with a plain string/number pattern: perl compiles the
+      ;; stringified value as a regex (also reached by ${qr//} deref, which
+      ;; produces the "(?^:...)" string form).
+      ((or (stringp operation) (numberp operation))
+       (do-regex-match string (p-regex-from-parts operation "")))
       (t
        (warn "Unknown regex operation type: ~A" (type-of operation))
        nil))))
