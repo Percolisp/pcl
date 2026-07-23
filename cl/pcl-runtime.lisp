@@ -837,18 +837,28 @@
 (defvar *check-blocks* nil "CHECK thunks (push = LIFO = perl's reverse order)")
 (defvar *init-blocks* nil "INIT thunks (pushed; run in reverse-of-LIFO = source order)")
 
+(defvar *p-compile-phase-done* nil
+  "True once the main program's compile->run boundary has been crossed.
+   p-exit consults it: exit during the compile phase must still drain
+   pending UNITCHECK/CHECK blocks (perl runs them before the ENDs), while
+   blocks registered after the boundary are 'too late' and never run.")
+
+(defun %p-drain-compile-blocks ()
+  "Run pending UNITCHECK then CHECK thunks, pop-as-we-go so an exit (or
+   error) inside one still lets the REMAINING thunks run on the way out."
+  (loop while *unitcheck-blocks* do (funcall (pop *unitcheck-blocks*)))
+  (loop while *check-blocks* do (funcall (pop *check-blocks*))))
+
 (defun p-run-compile-phase-blocks ()
   "The compile->run boundary of the main program: run UNITCHECK blocks
    (reverse order), then CHECK blocks (reverse order), then INIT blocks
-   (source order), clearing each list.  Emitted once, before the first
-   runtime section.  Blocks registered later (a runtime require or eval)
-   are perl's 'too late to run' case — they never fire."
-  (let ((ucs *unitcheck-blocks*) (cks *check-blocks*)
-        (ins (reverse *init-blocks*)))
-    (setf *unitcheck-blocks* nil *check-blocks* nil *init-blocks* nil)
-    (dolist (f ucs) (funcall f))
-    (dolist (f cks) (funcall f))
-    (dolist (f ins) (funcall f))))
+   (source order).  Emitted once, before the first runtime section.
+   Blocks registered later (a runtime require or eval) are perl's 'too
+   late to run' case — they never fire."
+  (%p-drain-compile-blocks)
+  (setf *p-compile-phase-done* t)
+  (setf *init-blocks* (reverse *init-blocks*))
+  (loop while *init-blocks* do (funcall (pop *init-blocks*))))
 
 ;; Register exit hook to run END blocks
 (pushnew (lambda ()
@@ -9776,7 +9786,12 @@ buffer's fill-pointer; everything else falls back to file-length."
   1)
 
 (defun p-exit (&optional code)
-  "Perl exit - terminate program with exit code."
+  "Perl exit - terminate program with exit code.
+   exit during the COMPILE phase (inside BEGIN/UNITCHECK/CHECK) still runs
+   the remaining UNITCHECK/CHECK blocks before the exit hooks run the ENDs
+   — perl's phase semantics; INIT and main are skipped.  Once per program,
+   so the flag check costs nothing."
+  (unless *p-compile-phase-done* (%p-drain-compile-blocks))
   (sb-ext:exit :code (if code (truncate (to-number code)) 0)))
 
 (defun p-system (&rest args)

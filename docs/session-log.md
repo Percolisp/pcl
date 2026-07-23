@@ -249,6 +249,28 @@ Append new entries at the top. One section per session.
   the long-settled §error-text).  **lex.t FULLY PASSING (46+7skip) →
   62 fully passing**; baseline rows dropped, CLAUDE.md count updated.
 
+## Session 310i (2026-07-24, Fable) — exit during compile phase drains UNITCHECK/CHECK; lex.t skips registered.
+
+- **Phase-aware exit was CHEAP, not the complexity I flagged** (user
+  asked; measured: ~12 runtime lines, zero codegen, one special-var read
+  on a once-per-program path).  `p-exit` drains pending UNITCHECK/CHECK
+  before exiting when `*p-compile-phase-done*` is nil; the drain is
+  pop-as-we-go so an exit INSIDE a CHECK still runs the remaining CHECKs
+  (perl: check3→check2(exit)→check1 all print).  INIT/main skipped;
+  ENDs via the existing exit hook.  Probes byte-identical to perl,
+  including the subtlety that blocks AFTER an exiting BEGIN never exist
+  (perl stops compiling; PCL's load stops the same way for free).
+  blocks.t 10 → 16 (session total 5 → 16); left = die-in-BEGIN
+  "compilation aborted" messages (§error-text), warning rows, one (?{}).
+- **lex.t skips registered (user decision)**: not-supported.md
+  §NUL-bytes-in-identifiers (perl does NOT ignore the NUL — `$\0eq` is a
+  variable literally named "\0eq"; faking it = a PPI token class for
+  names nothing writes) + 7 registry rows (5 NUL, 2 under the settled
+  §error-text).  **lex.t FULLY PASSING → 62 fully passing**; baseline
+  rows dropped; CLAUDE.md updated.
+- runpl NOTE: the wrapper swallows child exit codes generally
+  (pre-existing); pclperl-for-tests propagates them correctly.
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB

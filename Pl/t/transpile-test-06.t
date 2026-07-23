@@ -380,4 +380,15 @@ END { print ":end\n" }
 print ":main2";
 ');
 
+test_transpile("exit during compile phase drains UNITCHECK/CHECK, skips INIT/main (s310)", '
+UNITCHECK { print "u\n" }
+CHECK { print "c1\n" }
+CHECK { print "c2\n"; exit 0 }
+CHECK { print "c3\n" }
+INIT { print "i\n" }
+END { print "e\n" }
+BEGIN { print "b\n" }
+print "main\n";
+');
+
 done_testing();
