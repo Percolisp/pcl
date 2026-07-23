@@ -316,7 +316,41 @@ sub _ppi_parse {
     my $redo  = PPI::Document->new(\$fixed);
     $doc = $redo if $redo;
   }
+  _merge_unicode_symbols($doc) if $doc;
   return $doc;
+}
+
+# PPI's Symbol regex is ASCII-bounded: a unicode variable name splits into
+# Cast + Word ($ᕘ → `$` + `ᕘ`) or Symbol + Word ($main::ᕘ → `$main::` + `ᕘ`).
+# The stray Word then parses as a bareword — worst case a CALL of a
+# same-named sub ($ᕘ inside `sub ᕘ` = infinite recursion, uni/gv.t).  Merge
+# the abutting fragments back into one Symbol.  Runs on the FINAL document
+# (a serialize+reparse would just re-split); mutation is token-local.
+# Adjacency is required — an intervening whitespace token blocks the merge —
+# and in valid perl a bareword never directly abuts a variable name.
+sub _merge_unicode_symbols {
+  my ($doc) = @_;
+  for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
+    next unless $cast->content =~ /^(?:[\$\@\%\&\*]|\$\#)$/;
+    my $next = $cast->next_sibling;
+    next unless $next && $next->isa('PPI::Token::Word');
+    my $sym = PPI::Token::Symbol->new($cast->content . $next->content);
+    $cast->insert_before($sym);
+    $next->delete;
+    $cast->delete;
+  }
+  for my $sym (@{ $doc->find('PPI::Token::Symbol') || [] }) {
+    while (1) {
+      my $next = $sym->next_sibling;
+      last unless $next && $next->isa('PPI::Token::Word');
+      last unless $sym->content =~ /::$/
+               || $next->content =~ /^::/
+               || $next->content =~ /^[^\x00-\x7F]/;
+      $sym->add_content($next->content);
+      $next->delete;
+    }
+  }
+  return 1;
 }
 
 sub _build_ppi_doc {
@@ -358,7 +392,9 @@ sub _ppi_with_fallback {
   }
   warn "PCL [lenient-ppi]: truncating at line $lo due to PPI parse failure\n";
   my $partial = join("\n", @lines[0..($lo-1)]);
-  return PPI::Document->new(\$partial);
+  my $doc = PPI::Document->new(\$partial);
+  _merge_unicode_symbols($doc) if $doc;
+  return $doc;
 }
 
 

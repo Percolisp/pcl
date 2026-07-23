@@ -342,4 +342,17 @@ my ($rgid) = split " ", $(;
 print "num=", ($< =~ /^\d+$/ ? "y" : "n"), ($rgid =~ /^\d+$/ ? "y" : "n"), "\n";
 ');
 
+test_transpile("unicode variable names merge into one Symbol (PPI split gap, s310)", '
+use utf8;
+binmode STDOUT, ":utf8";
+$ᕘ = "val"; my $ᴮᛅ = "lex";
+print "a=$ᕘ|b=$ᴮᛅ|";
+sub ᕘ { return "sub-" . $ᕘ }
+print "c=", ᕘ(), "|";
+$main::ᕘ = "qual";
+print "d=$main::ᕘ|";
+my %h온 = (k => 5); my @a온 = (7);
+print "e=$h온{k}$a온[0]\n";
+');
+
 done_testing();

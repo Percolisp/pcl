@@ -140,6 +140,25 @@ Append new entries at the top. One section per session.
   uni/gv.t = binding-stack-exhausted (separate).
 - Gen v2-62 → v2-63.  Guard +1 (transpile-test-06.t, 28 tests).
 
+## Session 310e (2026-07-24, Fable) — PPI unicode-symbol merge pass: uni/gv.t infinite recursion killed.
+
+- **uni/gv.t binding-stack-exhausted root-caused**: PPI's Symbol regex is
+  ASCII-bounded — `$ᕘ` tokenizes as Cast `$` + Word `ᕘ`, `$main::ᕘ` as
+  Symbol `$main::` + Word `ᕘ`.  The stray Word parses as a bareword; with
+  a same-named sub in scope (`sub ᕘ { ... $ᕘ ... }`), reading the
+  VARIABLE becomes a CALL of the enclosing sub → infinite recursion, and
+  the sub's `local()` makes it exhaust the BINDING stack.
+- **Fix: `_merge_unicode_symbols`** — a document-level pass in
+  `_ppi_parse` (beside the `_fix_modulo_magic`/`_fix_spaced_sigils`
+  family, but mutation-only: a serialize+reparse would just re-split):
+  Cast sigil + abutting Word → one Symbol; Symbol + abutting Word
+  fragment (`::`-joined or unicode-initial) extends the Symbol.
+  Adjacency required; in valid perl a bareword never directly abuts a
+  variable name.  Also covers the `$온ꪵ::{…}` stash shape (now the same
+  Symbol+Subscript form as ASCII `$main::{x}`).
+- uni/gv.t 0 → 36 ok (file now RUNS; next blocker = an in-test die +
+  glob-in-scalar `ref \$x` REF-vs-GLOB semantics).  uni/stash.t 41 ok.
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB
