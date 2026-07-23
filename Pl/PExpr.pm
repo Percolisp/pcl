@@ -407,6 +407,7 @@ sub parse {
   }
 
   $e            = $self->cleanup_for_parsing($e);
+  $self->_merge_split_qualified_words($e);
   $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
   # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
@@ -3941,6 +3942,20 @@ sub is_op_prefix {
 # default-$_ machinery (the [1,-2] spec) never sees them.  Insert an explicit
 # `$_` token after such a bare filetest so both the single-element and the
 # operator-precedence parse paths handle it uniformly with no special-casing.
+# PPI splits a call into a trailing-:: package (`Bear::::baz`, perl: sub baz
+# in package "Bear::") into TWO Words, `Bear::` + `::baz`.  Merge them back
+# into one Word so every downstream path sees the qualified name whole.
+sub _merge_split_qualified_words {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e) - 1; $i++) {
+    my ($a, $b) = ($e->[$i], $e->[$i + 1]);
+    next unless ref($a) eq 'PPI::Token::Word' && ref($b) eq 'PPI::Token::Word'
+             && $a->content =~ /::$/ && $b->content =~ /^::/;
+    splice @$e, $i, 2, PPI::Token::Word->new($a->content . $b->content);
+    $i--;   # re-examine: the merged word may join a further ::-fragment
+  }
+}
+
 sub _default_filetest_operand {
   my ($self, $e) = @_;
   for (my $i = 0; $i < scalar(@$e); $i++) {

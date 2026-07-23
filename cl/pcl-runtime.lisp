@@ -181,7 +181,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
-   #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-pipe #:p-select #:p-write
+   #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
    ;; Socket builtins
    #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
@@ -7996,6 +7996,31 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl seek — bareword filehandle is auto-quoted."
   `(%p-seek-impl (%p-fh-arg ,fh) ,@args))
 
+(defun %p-sysseek-impl (fh pos whence)
+  "Perl sysseek FH, POS, WHENCE — position the handle, bypassing buffering.
+   Returns the NEW position; a new position of 0 returns \"0 but true\"
+   (true in boolean, 0 in numeric context); a negative target returns undef."
+  (let ((stream (p-get-stream fh))
+        (position (to-number pos))
+        (w (to-number whence)))
+    (when stream (setf *p-last-read-handle* stream))
+    (if (not stream)
+        *p-undef*
+        (let ((new-pos
+               (cond
+                 ((= w 0) position)                              ; SEEK_SET
+                 ((= w 1) (+ (file-position stream) position))   ; SEEK_CUR
+                 ((= w 2) (+ (%p-stream-length stream) position)); SEEK_END
+                 (t position))))
+          (if (or (not (integerp new-pos)) (minusp new-pos)
+                  (not (file-position stream new-pos)))
+              *p-undef*
+              (if (zerop new-pos) "0 but true" new-pos))))))
+
+(defmacro p-sysseek (fh &rest args)
+  "Perl sysseek — bareword filehandle is auto-quoted."
+  `(%p-sysseek-impl (%p-fh-arg ,fh) ,@args))
+
 (defun %p-binmode-impl (fh &optional encoding)
   "Perl binmode - set binary mode or encoding.
    PCL builds on SBCL streams (which handle encoding natively) and does not
@@ -9865,7 +9890,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-61"
+(defparameter *pcl-cache-generation* "v2-62"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

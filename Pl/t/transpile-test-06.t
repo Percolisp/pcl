@@ -321,4 +321,18 @@ eval { require $ver };    print "e=", ($@ =~ /^Perl v10\.200\.0 required/ ? "ok"
 print "inc=", scalar(keys %INC), "\n";
 ');
 
+test_transpile("sysseek builtin + trailing-:: package call Bear::::baz (s310)", '
+my $f = "/tmp/pcl-t06-sysseek-$$";
+open my $o, ">", $f or die; print $o "#!/pcl"; close $o;
+open(I, "<", $f) or die;
+print "a=", sysseek(I, 2, 0), "|";
+sysread(I, my $x, 1);
+print "b=", sysseek(I, -2, 1), "|";
+print "c=", (sysseek(I, 0, 0) eq "0 but true" ? "ok" : "no"), "|";
+print "d=", (defined sysseek(I, -1, 1) ? "def" : "undef"), "|";
+close I; unlink $f;
+{ package Bear::; sub baz {7} package main; }
+print "e=", (eval { Bear::::baz() } // "undef"), "\n";
+');
+
 done_testing();

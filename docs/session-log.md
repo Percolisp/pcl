@@ -93,6 +93,28 @@ Append new entries at the top. One section per session.
   `::bleah` ban = invalid-input detection, require() context) — distinct
   smaller items.  Gen v2-60 → v2-61; guard +1 (transpile-test-06.t, 26).
 
+## Session 310c (2026-07-23, Fable) — sysseek builtin; trailing-:: package calls (op/stash read-error root cause); gen v2-62.
+
+- **op/sysio.t FULLY PASSING** (was 2 ok + arity crash at session start):
+  `sysseek` had a Config.pm spec but was missing the other 3 of the 4
+  file-op edits — added to `%RUNTIME_NAMES`, implemented
+  `%p-sysseek-impl`/`p-sysseek` (returns the NEW position, "0 but true"
+  at 0, undef for negative/failed; bareword FH auto-quoting), exported.
+- **op/stash.t read-error root-caused and FIXED** (42+crash → 50/4 clean):
+  `Bear::::baz()` (sub baz in the trailing-:: package "Bear::") — PPI
+  tokenizes it as TWO Words `Bear::` + `::baz`; the funcall path emitted
+  the symbol `pl-Bear::`, which SBCL's reader rejects (trailing colons),
+  killing the WHOLE file at load.  Fix at the one shared point: new
+  `_merge_split_qualified_words` pre-pass in PExpr::parse (beside
+  `_default_filetest_operand`) merges adjacent `X::`+`::y` Words; the
+  existing qualified-name machinery then does the rest — last-:: split
+  gives package "Bear::"/sub "baz", and the symbol renderer pipe-quotes
+  `|Bear::|::pl-baz` for free.  `package Bear::;` itself already worked.
+  So this "in-harness read-error" family member reproduced fine outside
+  the harness — re-check the other 4 (op/groups, uni/caller, uni/gv,
+  uni/stash) before building runner stderr capture.
+- Gen v2-61 → v2-62.  Guard +1 (transpile-test-06.t, 27 tests).
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB

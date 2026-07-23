@@ -162,7 +162,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   rename require require-file reset resolve-invocant return reverse rewinddir rindex rmdir say
   evalbytes scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split
   sprintf sqrt srand stat str-cmp str-eq str-ge str-gt str-le str-lt str-ne str-x str-x=
-  string-concat study sub sub-defined sub-exists subst substr super-call sysread system syswrite
+  string-concat study sub sub-defined sub-exists subst substr super-call sysread sysseek system syswrite
   socket socketpair bind connect listen accept send recv shutdown getsockname getpeername
   getprotobyname setsockopt getsockopt
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
