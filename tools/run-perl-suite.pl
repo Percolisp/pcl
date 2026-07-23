@@ -260,7 +260,12 @@ sub run_one {
     # the stub); timeout(1) actually kills a hung SBCL (alarm in the parent
     # would leave an orphan).
     my $out = "$tmpdir/$safe.out";
-    system("cd \Q$shadow\E && timeout $timeout $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
+    # PCLPERL: fresh_perl_*/runperl children in the PCL stub test.pl run
+    # under PCL (tools/pclperl-for-tests) instead of the real perl; the
+    # fresh core doubles as the children's startup image.
+    my $childenv = "PCLPERL=\Q$root\E/tools/pclperl-for-tests"
+                 . ($core ? " PCL_TEST_CORE=\Q$core\E" : "");
+    system("cd \Q$shadow\E && $childenv timeout $timeout $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
     $sbcl_exit = $? >> 8;
     $pcl = do { local $/; my $fh; open($fh, '<', $out) ? (<$fh> // '') : '' };
     $c_ok    = () = $pcl =~ /^ok /mg;

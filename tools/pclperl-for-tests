@@ -1,0 +1,199 @@
+#!/usr/bin/env perl
+# pclperl-for-tests — a perl-lookalike CLI that runs the program under PCL.
+#
+# FOR THE TEST HARNESS ONLY.  test.pl's fresh_perl_*/runperl helpers spawn a
+# child "perl"; historically that was $^X (the real perl), which made every
+# child assertion compare perl-to-perl — passing by construction and testing
+# nothing about PCL.  The harness now points those helpers here (via the
+# PCLPERL env var, see perl-tests/t/test.pl), so the child program is
+# transpiled and executed under PCL.  This is NOT a general perl replacement:
+# it supports exactly the switch set the runperl call-site census uses.
+#
+# Supported: -e/-E CODE (repeatable), -I DIR, -M/-m MODULE[=args], -n, -p,
+# -a, -l[NNN], -0[NNN], -c (transpile-only check), -x, clustered bundles
+# (-wl, -lXMfeature=:all), `--`, script file or stdin, trailing @ARGV.
+# Accepted and IGNORED (children exercising them fail their assertions but
+# must not crash the harness): -w/-W/-X/-s/-T/-t/-u/-U/-v/-V, -d[:Module]
+# (debugger), -C* (unicode IO layers), -i[ext] (in-place).
+# PERL5OPT is honored (switches prepended), matching perl; PERL5LIB reaches
+# the child's @INC for free because the perl that runs pl2cl honors it.
+#
+# SBCL startup: reuses PCLCore::sbcl_prefix — a fresh PCL_TEST_CORE (as built
+# by tools/prove-core or tools/run-perl-suite.pl) makes each child ~0.2s;
+# without one the runtime is source-loaded (~1.2s/child).
+use strict;
+use warnings;
+use File::Temp qw(tempdir);
+use FindBin qw($RealBin);
+use lib "$RealBin/../Pl/t";
+use PCLCore;
+
+my $root    = "$RealBin/..";
+my $pl2cl   = "$root/pl2cl";
+my $runtime = "$root/cl/pcl-runtime.lisp";
+
+my @args = @ARGV;
+unshift @args, split(' ', $ENV{PERL5OPT}) if defined $ENV{PERL5OPT} && length $ENV{PERL5OPT};
+
+my (@code, @incs, @uses, @rest);
+my ($opt_n, $opt_p, $opt_a, $opt_l, $opt_c, $opt_x, $l_arg, $zero_arg);
+
+sub _q { my $s = shift // ""; $s =~ s/'/\\'/g; "'$s'" }
+
+while (@args) {
+  my $a = shift @args;
+  if ($a eq '--')     { push @rest, @args; last }
+  if ($a !~ /^-./)    { push @rest, $a, @args; last }
+  $a =~ s/^-//;
+  while (length $a) {
+    my $c = substr($a, 0, 1, '');
+    if ($c eq 'e' || $c eq 'E') {
+      push @code, length($a) ? $a : shift(@args); $a = '';
+    } elsif ($c eq 'I') {
+      push @incs, length($a) ? $a : shift(@args); $a = '';
+    } elsif ($c eq 'M' || $c eq 'm') {
+      my $m = length($a) ? $a : shift(@args); $a = '';
+      next if !defined $m || $m =~ /^-/;          # -M-mod (unimport): skip
+      if ($m =~ s/=(.*)//s) {
+        push @uses, "use $m (" . join(",", map { _q($_) } split /,/, $1) . ");";
+      } else {
+        push @uses, $c eq 'M' ? "use $m;" : "use $m ();";
+      }
+    } elsif ($c eq '0') {
+      ($zero_arg) = $a =~ /^([0-7]*)/; $a =~ s/^[0-7]*//;
+    } elsif ($c eq 'l') {
+      $opt_l = 1; ($l_arg) = $a =~ /^([0-7]+)/; $a =~ s/^[0-7]+//;
+    } elsif ($c eq 'n') { $opt_n = 1 }
+      elsif ($c eq 'p') { $opt_p = 1 }
+      elsif ($c eq 'a') { $opt_a = 1 }
+      elsif ($c eq 'c') { $opt_c = 1 }
+      elsif ($c eq 'x') { $opt_x = 1 }
+      elsif ($c eq 'd') { $a =~ s/^:\S*//; }      # -d / -d:Module — ignored
+      elsif ($c eq 'C') { $a =~ s/^[A-Za-z0-9]*// }
+      elsif ($c eq 'i') { $a = '' }               # -i[ext] — extension consumed
+      elsif ($c =~ /^[wWXsTtuUvV]$/) { }          # accepted no-ops
+      # anything else: silently ignored (harness must not crash)
+  }
+}
+
+# --- Assemble the program source -------------------------------------------
+my ($src, $progname);
+if (@code) {
+  $src = join("\n", @code);
+  $progname = '-e';
+} else {
+  $progname = @rest ? shift(@rest) : '-';
+  if ($progname eq '-') {
+    local $/; $src = <STDIN> // '';
+  } else {
+    open(my $fh, '<', $progname)
+      or do { print STDERR "Can't open perl script \"$progname\": $!\n"; exit 2 };
+    local $/; $src = <$fh>; close $fh;
+  }
+}
+
+# -x: skip leading garbage up to the #!...perl line
+if ($opt_x) {
+  $src =~ s/\A.*?^(#!.*perl.*)$/$1/ms;
+}
+
+# Switch semantics that perl implements by rewriting the program: do the same.
+my @prelude = @uses;
+if (defined $zero_arg) {
+  push @prelude, !length($zero_arg)      ? '$/ = "\0";'
+               : oct($zero_arg) > 0377   ? 'undef $/;'      # -0777 slurp
+               : oct($zero_arg) == 0     ? '$/ = "";'       # -00 paragraph
+               :                           sprintf('$/ = chr(0%s);', $zero_arg);
+}
+if ($opt_l) {
+  push @prelude, defined $l_arg && length $l_arg
+    ? sprintf('$\ = chr(0%s);', $l_arg)
+    : '$\ = $/;';
+}
+if ($opt_n || $opt_p) {
+  my $head = ($opt_l ? "chomp; " : "") . ($opt_a ? 'our @F = split; ' : "");
+  my $cont = $opt_p ? " continue { print }" : "";
+  $src = "LINE: while (<>) { $head\n$src\n}$cont";
+}
+$src = join("\n", @prelude, $src);
+
+# --- Transpile --------------------------------------------------------------
+# When the program is an unmodified FILE, transpile it in place so error
+# locations carry the caller's own path (which test.pl's fresh_perl helpers
+# normalize).  Otherwise (-e, stdin, or any wrapping) write a temp copy and
+# rewrite its path to "-e" in stderr, like perl reports for -e programs.
+my $dir  = tempdir(CLEANUP => 1);
+my $lisp = "$dir/prog.lisp";
+my $wrapped = @code || @prelude || $opt_n || $opt_p || $opt_x
+              || !defined $progname || $progname eq '-';
+my $pl;
+if ($wrapped) {
+  $pl = "$dir/prog.pl";
+  open(my $ofh, '>', $pl) or die "pclperl-for-tests: $pl: $!\n";
+  print $ofh $src; close $ofh;
+} else {
+  $pl = $progname;
+}
+
+my @inc_flags = map { "-I$_" } @incs;
+my $tr = system(join(' ',
+  map { "\Q$_\E" } ($^X, @inc_flags, $pl2cl, '--no-cache', '--lenient-ppi', $pl))
+  . " > \Q$lisp\E 2> \Q$dir\E/terr");
+if ($tr != 0) {
+  open(my $efh, '<', "$dir/terr");
+  print STDERR do { local $/; <$efh> // '' } if $efh;
+  exit 255;                                       # perl's compile-error exit
+}
+if ($opt_c) {
+  print STDERR "$progname syntax OK\n";
+  exit 0;
+}
+
+# --- Run --------------------------------------------------------------------
+# Stdout passes through untouched; stderr is captured and scrubbed of
+# SBCL/runtime noise (compiler notes, style-warnings, "PCL Runtime loaded")
+# before re-emission — fresh_perl_is compares EXACT child output (usually
+# with 2>&1), and a real perl child prints none of that.  The cost is
+# stdout/stderr interleaving, which no runperl caller depends on (perl's own
+# runperl_and_capture separates the streams anyway).
+my @sbcl = ('sbcl', PCLCore::sbcl_prefix($runtime));
+my @argv_form = @rest
+  ? ('--eval', '(setf pcl::@ARGV (make-array ' . scalar(@rest)
+       . ' :adjustable t :fill-pointer ' . scalar(@rest) . ' :initial-contents (list '
+       . join(' ', map { my $s = $_; $s =~ s/(["\\])/\\$1/g; "\"$s\"" } @rest) . ')))')
+  : ();
+# An uncaught die must behave like perl: the message alone on stderr, exit
+# 255 — not an SBCL backtrace with exit 1.  The load is wrapped so the
+# condition's report (the die string, already carrying perl's " at FILE
+# line N." suffix) is printed and the exit code forced.
+# Errors escaping a toplevel form arrive wrapped in sb-c::input-error-in-load,
+# whose report prepends "While evaluating the form ..." — unwrap to the
+# original condition so only the perl-shaped message prints.
+my $load_form = sprintf(
+  '(handler-case (load "%s") (error (e) (when (typep e (quote sb-int:encapsulated-condition)) (setf e (sb-int:encapsulated-condition e))) (format *error-output* "~A" e) (finish-output *error-output*) (sb-ext:exit :code 255)))',
+  $lisp);
+my $cmd = join(' ', map { "\Q$_\E" } (@sbcl, @argv_form, '--eval', $load_form))
+        . " 2> \Q$dir\E/err";
+system($cmd);
+my $status = ($? >> 8) & 0xFF;
+if (open(my $efh, '<', "$dir/err")) {
+  my $skip_block = 0;
+  while (my $line = <$efh>) {
+    # Multi-line compiler-note blocks: "; ..." bodies, "compilation unit
+    # finished" trailers, and their indented continuation lines.
+    if ($line =~ /^;/ or $line =~ /^compilation unit/ or $line =~ /^caught \d/) {
+      $skip_block = 1; next;
+    }
+    if ($skip_block and $line =~ /^\s(?:\s|caught|Undefined|%|p-|\S+$)/) { next }
+    $skip_block = 0;
+    next if $line =~ /^PCL Runtime loaded$/;
+    next if $line =~ /^STYLE-WARNING:/;
+    # SBCL's loader prints an eager two-line context note when an error
+    # escapes a toplevel form; the second line's tail is the real message.
+    next if $line =~ /^While evaluating the form starting at line/;
+    $line =~ s/^\s+of #P"[^"]*"://;
+    $line =~ s/\Q$pl\E/-e/g if $wrapped;   # perl reports "-e" for -e programs
+    print STDERR $line;
+  }
+}
+exit($status);

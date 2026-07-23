@@ -159,6 +159,38 @@ Append new entries at the top. One section per session.
 - uni/gv.t 0 → 36 ok (file now RUNS; next blocker = an in-test die +
   glob-in-scalar `ref \$x` REF-vs-GLOB semantics).  uni/stash.t 41 ok.
 
+## Session 310f (2026-07-24, Fable) — tools/pclperl-for-tests: fresh_perl/runperl children now run under PCL (user decision).
+
+- **The blind spot (user-confirmed fix direction)**: test.pl's
+  fresh_perl_*/runperl helpers spawned `$^X` — the REAL perl — so all
+  child assertions compared perl-to-perl and passed by construction.
+  Census: t/-suite sweep dirs = 121 files / ~740 call-sites (op 71/412,
+  run 13/171, re 13/67, io 13/52); old perl-tests/ sweep = 37 files /
+  218 call-sites.
+- **`tools/pclperl-for-tests`** (test-harness-only perl-lookalike CLI):
+  switch set from the call-site census — -e/-E, -I, -M/-m[=args], -n,
+  -p, -a, -l/-0 (source-wrapping like perl), -c (transpile-check), -x,
+  clustered bundles, PERL5OPT honored; -w/-X/-d*/-C*/-i accepted+ignored.
+  Reuses PCLCore::sbcl_prefix (PCL_TEST_CORE fresh-core convention).
+  Fidelity work: uncaught die = message-only + exit 255 (loader's eager
+  "While evaluating" context stripped; input-error-in-load unwrapped);
+  unmodified script FILES transpile in place so error locations carry
+  the caller's path (which fresh_perl normalizes); -e programs report
+  "at -e line N".  KNOWN LIMIT: stderr is captured/scrubbed of SBCL
+  noise and replayed after stdout — 2>&1 interleaving is lost.
+- **Wiring**: stub test.pl `_pcl_child_perl` (PCLPERL env → the tool;
+  unset → $^X, so the ORACLE real perl is unaffected;
+  PCL_FRESH_PERL=real = comparison escape hatch) + new
+  runperl_and_capture (runenv.t).  run-perl-suite.pl passes PCLPERL +
+  its fresh core to the SBCL step; sweep-perl-tests.pl builds a child
+  core per run (prove-core policy) and exports PCLPERL/PCL_TEST_CORE
+  (it has no oracle-perl step — TAP self-checking — so global env is
+  safe).
+- **Honest fallout begins (expected, user-accepted)**: blocks.t 25/1 →
+  5/21 (child ~0.25s with core); run/runenv.t 0 emitted → 106 run
+  (11 ok / 95 real divergences).  Old-sweep fully-passing baseline WILL
+  drop — re-bless deliberately after the full-sweep measurement.
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB

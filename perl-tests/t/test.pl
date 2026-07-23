@@ -41,6 +41,17 @@ sub skip_all_without_unicode_tables {
     # No-op - we'll handle unicode tests differently
 }
 
+# _pcl_child_perl: which "perl" runs fresh_perl_*/runperl children.
+# Under the PCL harness, PCLPERL points at tools/pclperl-for-tests so the
+# child actually runs under PCL (historically children ran under $^X = the
+# real perl, which made every child assertion compare perl-to-perl and test
+# nothing).  Under the oracle real perl PCLPERL is unset -> $^X as before.
+# PCL_FRESH_PERL=real forces the real perl even under PCL (comparison mode).
+sub _pcl_child_perl {
+    return $^X if ($ENV{PCL_FRESH_PERL} // '') eq 'real';
+    return $ENV{PCLPERL} || $^X;
+}
+
 # _fresh_perl_run: shared helper — runs code in a fresh Perl, returns normalized output.
 # Mirrors Perl t/test.pl _fresh_perl: captures stderr by default, strips trailing newlines,
 # normalises temp-file paths in error messages.
@@ -54,7 +65,7 @@ sub _fresh_perl_run {
     open(my $fh, '>', $tmpfile) or return "";
     print $fh $code;
     close $fh;
-    my $perl = $^X;
+    my $perl = _pcl_child_perl();
     my $sw = join(' ', @switches);
     my $got;
     if (defined $opts->{stdin}) {
@@ -119,7 +130,7 @@ sub run_perl {
     open(my $fh, '>', $tmpfile) or return "";
     print $fh $prog;
     close $fh;
-    my $perl = $^X;
+    my $perl = _pcl_child_perl();
     my $sw   = join(' ', @switches);
     my $argv = join(' ', map { quotemeta($_) } @{$opts{args} // []});
     my $got;
@@ -144,6 +155,24 @@ sub run_perl {
 # runperl - alias for run_perl (legacy name used in some test files)
 sub runperl {
     return run_perl(@_);
+}
+
+# runperl_and_capture - run a child perl with env overrides; return
+# (stdout, stderr) separately.  Used by t/run/runenv.t's try().
+sub runperl_and_capture {
+    my ($env, $args) = @_;
+    my $perl = _pcl_child_perl();
+    my $out = "/tmp/pcl_rc_out_$$" . int(rand(99999));
+    my $err = "$out.err";
+    my $envstr = join(' ', map {
+        my $v = $env->{$_} // ''; $v =~ s/'/'\\''/g; "$_='$v'"
+    } sort keys %$env);
+    my $argstr = join(' ', map { my $a = $_; $a =~ s/'/'\\''/g; "'$a'" } @$args);
+    system("$envstr $perl $argstr > $out 2> $err");
+    my $so = do { local $/; open(my $f, '<', $out) ? <$f> // '' : '' };
+    my $se = do { local $/; open(my $f, '<', $err) ? <$f> // '' : '' };
+    unlink $out, $err;
+    return ($so, $se);
 }
 
 # is_miniperl - check if running miniperl (always false for PCL)

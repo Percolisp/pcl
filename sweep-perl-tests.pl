@@ -64,6 +64,22 @@ $log_dir = "$project_root/$log_dir" unless $log_dir =~ m{^/};
 system("rm -rf \Q$log_dir\E"); mkdir $log_dir;
 $ENV{PCL_TEST_LOG_DIR} = $log_dir;   # inherited by all forked children / system() calls
 
+# Fresh saved core for the fresh_perl_*/runperl CHILDREN (see PCLPERL below):
+# without it every child source-loads the runtime (~1.2s+), and files with
+# many fresh_perl calls would blow their timeout.  Same fresh-every-run
+# policy as tools/prove-core — a stale core would test old runtime code.
+my $child_core = "$tmpdir/pclperl.core";
+print "Building child core for fresh_perl/runperl (pclperl-for-tests)...\n";
+if (system("sbcl --noinform --non-interactive --load \Q$runtime\E --load \Q$testlib\E "
+         . "--eval '(sb-ext:save-lisp-and-die \"$child_core\" :executable nil)' "
+         . ">/dev/null 2>&1") != 0) {
+    print "  core build FAILED - children will source-load (slow)\n";
+    $child_core = "";
+}
+$ENV{PCLPERL} = "$project_root/tools/pclperl-for-tests"
+    unless ($ENV{PCL_FRESH_PERL} // '') eq 'real';
+$ENV{PCL_TEST_CORE} = $child_core if $child_core;
+
 print "Running $total tests with $JOBS parallel jobs (timeout=${TIMEOUT}s)\n";
 print "Skipping: ", join(', ', @SKIP), "\n";
 print "Failure log: $log_dir/*.fails.tsv\n\n";
