@@ -92,3 +92,4 @@ mro/recursion_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant
 mro/recursion_dfs_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
 op/current_sub.t	not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)
 op/cond.t	not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)
+re/pat_re_eval.t	not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
