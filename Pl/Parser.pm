@@ -6918,11 +6918,14 @@ sub _process_include_statement {
     pop @tokens while @tokens && $tokens[-1]->isa('PPI::Token::Whitespace');
 
     if (@tokens) {
-      # Check if it's a version number (require 5.007, require v5.10, etc.) - no-op
+      # Version number (require 5.007, require v5.10, require 10.0.2): a
+      # runtime check that dies when the version exceeds the running perl's.
       if (@tokens == 1 && ($tokens[0]->isa('PPI::Token::Number')
                            || ($tokens[0]->isa('PPI::Token::Word')
                                && $tokens[0]->content =~ /^v\d/))) {
-        $self->_emit(";; $perl_code (version requirement, no-op)");
+        my $lit = $tokens[0]->content;
+        $lit =~ s/(["\\])/\\$1/g;
+        $self->_emit("(p-require-version \"$lit\")");
         $self->_emit("");
         return;
       }

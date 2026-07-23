@@ -309,4 +309,16 @@ close $i;
 unlink $f;
 ');
 
+test_transpile("require VERSION dies past current perl; %INC = () clears (s310)", '
+eval { require 5.005 };   print "a=[$@]|";
+eval { require 10.2 };    print "b=", ($@ =~ /^Perl v10\.200\.0 required/ ? "ok" : "BAD:$@"), "|";
+eval { require 10.0.2 };  print "c=", ($@ =~ /^Perl v10\.0\.2 required/ ? "ok" : "BAD:$@"), "|";
+my $ver = 5.005_63;
+eval { require $ver };    print "d=[$@]|";
+$ver = 10.2;
+eval { require $ver };    print "e=", ($@ =~ /^Perl v10\.200\.0 required/ ? "ok" : "BAD:$@"), "|";
+%INC = ();
+print "inc=", scalar(keys %INC), "\n";
+');
+
 done_testing();

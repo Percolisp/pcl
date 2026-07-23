@@ -208,7 +208,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file
+   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file #:p-require-version
    ;; Functions
    #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
    ;; Typeglob support
@@ -3721,12 +3721,35 @@
                  ;; odd element).
                  (t (%p-flatten-list (vector value)))))
          (cnt (length flat)))
-    (clrhash place)
-    (loop for i from 0 below cnt by 2
-          do (setf (gethash (to-string (aref flat i)) place)
-                   (if (< (1+ i) cnt)
-                       (%p-make-hash-entry (aref flat (1+ i)))
-                       *p-undef*)))
+    (cond
+      ;; %INC = (...): the marker's backing store; values stay raw strings
+      ;; (p-gethash's %INC arm returns them unboxed).
+      ((eq place '%INC-MARKER%)
+       (clrhash *p-inc-table*)
+       (loop for i from 0 below cnt by 2
+             do (setf (gethash (to-string (aref flat i)) *p-inc-table*)
+                      (if (< (1+ i) cnt)
+                          (to-string (aref flat (1+ i)))
+                          ""))))
+      ;; %ENV = (...): clear the process environment, then set the pairs.
+      ((eq place '%ENV-MARKER%)
+       (dolist (entry (sb-ext:posix-environ))
+         (let ((eq-pos (position #\= entry)))
+           (when eq-pos
+             (sb-posix:unsetenv (subseq entry 0 eq-pos)))))
+       (loop for i from 0 below cnt by 2
+             do (sb-posix:setenv (to-string (aref flat i))
+                                 (if (< (1+ i) cnt)
+                                     (to-string (aref flat (1+ i)))
+                                     "")
+                                 1)))
+      (t
+       (clrhash place)
+       (loop for i from 0 below cnt by 2
+             do (setf (gethash (to-string (aref flat i)) place)
+                      (if (< (1+ i) cnt)
+                          (%p-make-hash-entry (aref flat (1+ i)))
+                          *p-undef*)))))
     cnt))
 
 (defmacro p-hash-= (place value)
@@ -9842,7 +9865,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-60"
+(defparameter *pcl-cache-generation* "v2-61"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -9902,7 +9925,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    core modules, whose PCL equivalents live here.")
 
 (defun %p-inc-dir-file (dir rel-path)
-  "Probe DIR (string/pathname/box) for REL-PATH; absolute path or nil."
+  "Probe DIR (string/pathname/box) for REL-PATH; absolute path or nil.
+   For a .pm, a .pmc beside it wins (perl's PMC preference — modern .pmc
+   files are just alternative source, which PCL transpiles like any .pm)."
   (let* ((d (unbox dir))
          ;; Ensure dir ends with / so merge-pathnames treats it as directory
          (s (if (stringp d) d (namestring d)))
@@ -9910,9 +9935,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (char/= (char s (1- (length s))) #\/))
                 (concatenate 'string s "/")
                 s))
-         (full-path (merge-pathnames rel-path (pathname s))))
-    (when (probe-file full-path)
-      (namestring (truename full-path)))))
+         (full-path (merge-pathnames rel-path (pathname s)))
+         (pmc (and (>= (length rel-path) 3)
+                   (string= rel-path ".pm" :start1 (- (length rel-path) 3))
+                   (probe-file (concatenate 'string (namestring full-path)
+                                            "c")))))
+    (cond
+      (pmc (namestring (truename pmc)))
+      ((probe-file full-path)
+       (namestring (truename full-path))))))
 
 (defun p-find-module-in-inc (rel-path)
   "Search @INC for module file, return absolute path or nil.
@@ -10342,6 +10373,47 @@ buffer's fill-pointer; everything else falls back to file-length."
   (handler-case (progn (p-use module-name) t)
     (error () nil)))
 
+(defun %p-parse-require-version (ver)
+  "Parse a require-VERSION argument to a (major minor patch) triple.
+   VER: a number (decimal form, 5.00563 = v5.5.630) or the literal source
+   text of a version literal (\"v5.5.630\", \"10.0.2\", \"5.005_63\")."
+  (if (numberp ver)
+      (let* ((maj (floor ver))
+             (milli (floor (+ (* (- ver maj) 1000) 1/1000000)))
+             (patch (floor (+ (* (- (* (- ver maj) 1000) milli) 1000)
+                              1/1000))))
+        (values maj milli patch))
+      ;; Text: a v-prefix or >=2 dots is a literal component triple
+      ;; ("v5.5.630", "v10.2", "10.0.2"); otherwise it reads as a decimal
+      ;; number ("10.2" = v10.200.0, "5.005_63" = v5.5.630).
+      (let* ((s (remove #\_ (to-string ver)))
+             (v-p (and (> (length s) 0) (char-equal (char s 0) #\v)))
+             (body (if v-p (subseq s 1) s)))
+        (if (or v-p (>= (count #\. body) 2))
+            (let ((parts (loop with start = 0
+                               for dot = (position #\. body :start start)
+                               collect (parse-integer
+                                        body :start start
+                                        :end (or dot (length body)))
+                               while dot do (setf start (1+ dot)))))
+              (values (or (first parts) 0) (or (second parts) 0)
+                      (or (third parts) 0)))
+            (%p-parse-require-version (to-number body))))))
+
+(defun p-require-version (ver)
+  "Perl `require VERSION` — die when VERSION exceeds the running version,
+   else return 1.  Emitted by codegen for version-literal requires; also the
+   runtime path for `require $v` with a numeric $v."
+  (multiple-value-bind (maj min pat) (%p-parse-require-version ver)
+    (multiple-value-bind (cmaj cmin cpat)
+        (%p-parse-require-version (to-number (unbox |$]|)))
+      (if (or (> maj cmaj)
+              (and (= maj cmaj) (> min cmin))
+              (and (= maj cmaj) (= min cmin) (> pat cpat)))
+          (p-die (format nil "Perl v~D.~D.~D required--this is only v~D.~D.~D, stopped"
+                         maj min pat cmaj cmin cpat))
+          1))))
+
 (defun p-require-file (path)
   "Perl require with a string/path argument.
    A `.pm` path (Foo/Bar.pm) is a MODULE require: resolve through @INC and the
@@ -10352,6 +10424,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    A non-.pm path (./test.pl) is loaded literally, relative to the current dir,
    with an @INC fallback (Perl searches @INC for all string requires)."
   (let ((path-str (unbox path)))
+    ;; `require $v` with a NUMERIC $v is a version check, not a file load
+    ;; (a numeric-looking STRING still names a file, matching perl).
+    (when (numberp path-str)
+      (return-from p-require-file (p-require-version path-str)))
     ;; Check %INC to avoid reloading (Perl keys %INC by the string used).
     (when (gethash path-str *p-inc-table*)
       (return-from p-require-file t))

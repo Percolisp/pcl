@@ -69,6 +69,30 @@ Append new entries at the top. One section per session.
   one-line preamble addition on all files (both explained), PCL_V1 =
   ditto; full Pl/t gate green (118 files / 4354 tests).
 
+## Session 310b (2026-07-23, Fable) — comp/require.t family: %INC/%ENV whole-hash assignment, require VERSION, .pmc preference (gen v2-61).
+
+- **`%INC = ()` crashed** (unhandled type-error on the `%INC-MARKER%` symbol):
+  `p-hash-fill` lacked the marker dispatch the element ops have.  Added
+  `%INC-MARKER%` (backing `*p-inc-table*`, raw string values) and
+  `%ENV-MARKER%` (unsetenv the current environment, setenv the pairs) arms.
+- **`require VERSION` implemented**: new `p-require-version` +
+  `%p-parse-require-version` (decimal 5.00563 = v5.5.630; literal
+  "v5.5.630"/"10.0.2"/"5.005_63" forms), compares to `$]`, dies
+  "Perl vX.Y.Z required--this is only vA.B.C, stopped".  Codegen
+  (Parser.pm, both pipelines ride it) emits it instead of the old
+  ";; version requirement, no-op" comment — perl DIES on `require 10.2`,
+  the no-op silently passed.  `require $ver` with a NUMERIC value routes
+  there from p-require-file (a numeric-looking STRING still names a file,
+  matching perl).  NOT covered: paren form `require(v5.5.630)` — the
+  v-string reaches p-require-file as a char string with no v-string flag.
+- **.pmc preference** (perl loads Foo.pmc over Foo.pm; modern .pmc = plain
+  alternative source): `%p-inc-dir-file` probes `<path>c` first for .pm
+  rel-paths.  Kills require.t's urkkk/krunch/whap crash.
+- require.t: crash-at-`%INC =` → runs to ~45 rows; remaining fails are
+  finer require semantics (require-returning-0, %INC-after-failed-load,
+  `::bleah` ban = invalid-input detection, require() context) — distinct
+  smaller items.  Gen v2-60 → v2-61; guard +1 (transpile-test-06.t, 26).
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB
