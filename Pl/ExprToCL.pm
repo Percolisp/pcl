@@ -1753,6 +1753,10 @@ sub gen_funcall_form {
     if (defined $mod && $mod =~ /^\w+(?:::\w+)*$/) {
       return ['p-require', "\"$mod\""];
     }
+    # Non-bareword `require EXPR` (a variable, e.g. the inserted bare-require
+    # $_): perl's EXPR form has FILENAME semantics — and p-require-file also
+    # dispatches a numeric value to the version check.
+    return ['p-require-file', $self->gen_node_form($kids->[1])];
   }
 
   # eval BLOCK / eval STRING — mirrors the text emitter branch for branch.
@@ -2476,6 +2480,9 @@ sub gen_funcall {
     if (defined $mod && $mod =~ /^\w+(?:::\w+)*$/) {
       return qq{(p-require "$mod")};
     }
+    # Non-bareword `require EXPR`: perl's EXPR form has FILENAME semantics
+    # (numeric values dispatch to the version check in p-require-file).
+    return "(p-require-file " . $self->gen_node($kids->[1]) . ")";
   }
 
   # Special handling for next/last/redo/goto with label argument

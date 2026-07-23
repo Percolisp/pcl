@@ -490,7 +490,7 @@ has known_no_of_params => (
       system     => -1,         # system CMD or system PROG, ARGS
       do         => 1,          # do BLOCK or do FILE (always 1 arg)
       eval       => [0, 1, -2], # eval EXPR or eval BLOCK or eval (defaults to $_)
-      require    => [0, 1],     # require or require VERSION or require MODULE
+      require    => [0, 1, -2], # require [VERSION|MODULE|FILE]; bare = $_ as file
 
       vec        => 3,          # vec EXPR, OFFSET, BITS
 

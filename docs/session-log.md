@@ -227,6 +227,21 @@ Append new entries at the top. One section per session.
   INIT/main), warning-text, and a (?{}) regex row — deeper tiers.
   Guard +1 (transpile-test-06.t, 31 tests).
 
+## Session 310h (2026-07-24, Fable) — bare require = $_ as FILE; require-EXPR filename routing (gen v2-65).
+
+- **`1 ? require : die` (lex.t [perl #128307])**: bare `require` defaults
+  to `$_` as a FILENAME.  Config spec `require => [0,1,-2]` (the parser
+  $_-insertion family), and the ExprToCL require special-cases (both
+  CLForm and text branches) now route NON-bareword `require EXPR` to
+  `p-require-file` — perl's EXPR form has filename semantics, and
+  p-require-file dispatches numeric values to the version check.
+  Previously the expression path fell through to `(p-require $var)`,
+  which did module-name string ops on the box and crashed.
+- lex.t 46/7; the remaining 7 = 5 NUL-byte-in-identifier rows
+  (`$\0eq` etc — PPI cannot tokenize NUL identifiers; no real code) and
+  2 exact-error-text rows — skip-registry candidates pending user
+  sign-off.  Corpus emission identical (111 files); gate 118/4360.
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB
