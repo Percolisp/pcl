@@ -236,7 +236,10 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
-- Full `perl-tests/` sweep: 66 files fully passing; see `docs/sweep-bug-catalog.md`
+- Full `perl-tests/` sweep: 60 files fully passing (s310f honest baseline —
+  fresh_perl/runperl children now run under PCL via `tools/pclperl-for-tests`,
+  not real perl; `PCL_FRESH_PERL=real` restores the old compare mode); see
+  `docs/sweep-bug-catalog.md`
 - v2 pipeline census: 111 files v2-native / 0 gated to v1 — E1 complete
   (`perl tools/v2-census.pl` for the live numbers)
 
