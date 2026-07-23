@@ -273,6 +273,12 @@ my %SPECIAL_VARS = (
   '$;'  => '|$;|',
   '$,'  => '|$,|',
   '$]'  => '|$]|',
+  # Process credentials — MUST be pipe-quoted: a bare $( / $) unbalances
+  # the emitted form (op/groups.t read-error family, s310)
+  '$<'  => '|$<|',
+  '$>'  => '|$>|',
+  '$('  => '|$(|',
+  '$)'  => '|$)|',
   # Format/write special variables (rarely used; declare to prevent CL read errors)
   '$~'  => '|$~|',    # FORMAT_NAME
   '$='  => '|$=|',    # FORMAT_LINES_PER_PAGE
@@ -336,8 +342,10 @@ sub cl_name {
     }
     # Record package reference for pre-declaration
     $self->environment->add_referenced_package($pkg) if $self->environment;
-    # Use pipe-quoting if package contains :: (e.g., |Foo::Bar|::pl-func)
-    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
+    # Pipe-quote a package with ANY colon (Foo::Bar, but also the trailing-:
+    # residue of odd names like a:::b) — a bare colon misreads as a package
+    # marker and kills the whole file at load.
+    my $cl_pkg = $pkg =~ /:/ ? "|$pkg|" : $pkg;
     return "${cl_pkg}::pl-${func}";
   }
 
@@ -353,11 +361,16 @@ sub cl_name {
   my $cur_pkg = ($self->environment && $self->environment->can('current_package'))
                   ? $self->environment->current_package()
                   : 'main';
+  # Reader-safety net: a residual colon in the NAME position (e.g. the Word
+  # `온ꪵ::` from a unicode stash access PPI can't tokenize as one Symbol)
+  # would misread as a package marker — pipe-quote the whole symbol so a bad
+  # shape fails as ONE undefined-function, never a whole-file read error.
+  my $fn = $perl_name =~ /:/ ? "|pl-$perl_name|" : "pl-$perl_name";
   if ($cur_pkg && $cur_pkg ne 'main') {
-    my $cl_pkg = $cur_pkg =~ /::/ ? "|$cur_pkg|" : $cur_pkg;
-    return "${cl_pkg}::pl-${perl_name}";
+    my $cl_pkg = $cur_pkg =~ /:/ ? "|$cur_pkg|" : $cur_pkg;
+    return "${cl_pkg}::${fn}";
   }
-  return "pl-$perl_name";
+  return $fn;
 }
 
 

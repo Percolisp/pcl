@@ -242,7 +242,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+| #:|%-| #:|$^H| #:|%^H|
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
    ;; Context
    #:*wantarray*
@@ -1010,6 +1010,31 @@
 (defvar |$:| (make-p-box " \n-") "FORMAT_LINE_BREAK_CHARACTERS - word-break chars for write")
 (defvar |$^L| (make-p-box (string #\Page)) "FORMAT_FORMFEED - formfeed char for write")
 (defvar |$^A| (make-p-box "") "ACCUMULATOR - for formline/write output")
+;;; Process credentials ($< $> $( $)).  The GID forms are perl's
+;;; "gid sup1 sup2 ..." space-joined string.  Snapshots taken at load;
+;;; assignment writes the box but does not change process credentials.
+(defun %pcl-getgroups-string (lead-gid)
+  "LEAD-GID followed by the supplementary group ids, space-joined."
+  (let* ((n (sb-alien:alien-funcall
+             (sb-alien:extern-alien
+              "getgroups" (function sb-alien:int sb-alien:int (* (sb-alien:unsigned 32))))
+             0 (sb-alien:sap-alien (sb-sys:int-sap 0)
+                                   (* (sb-alien:unsigned 32)))))
+         (ids (when (> n 0)
+                (sb-alien:with-alien ((buf (sb-alien:array (sb-alien:unsigned 32) 256)))
+                  (let ((got (sb-alien:alien-funcall
+                              (sb-alien:extern-alien
+                               "getgroups" (function sb-alien:int sb-alien:int (* (sb-alien:unsigned 32))))
+                              (min n 256) (sb-alien:cast buf (* (sb-alien:unsigned 32))))))
+                    (loop for i from 0 below (max got 0)
+                          collect (sb-alien:deref buf i)))))))
+    (format nil "~D~{ ~D~}" lead-gid ids)))
+(defvar |$<| (make-p-box (sb-posix:getuid))  "Real user id")
+(defvar |$>| (make-p-box (sb-posix:geteuid)) "Effective user id")
+(defvar |$(| (make-p-box (%pcl-getgroups-string (sb-posix:getgid)))
+  "Real gid + supplementary groups, space-joined")
+(defvar |$)| (make-p-box (%pcl-getgroups-string (sb-posix:getegid)))
+  "Effective gid + supplementary groups, space-joined")
 (defvar |$^P| (make-p-box 0)  "PERLDB - internal debugger flag (0 = not debugging)")
 (defvar |$^D| (make-p-box 0)  "DEBUGGING - debugging flags")
 (defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
@@ -9890,7 +9915,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-62"
+(defparameter *pcl-cache-generation* "v2-63"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

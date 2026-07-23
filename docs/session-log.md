@@ -115,6 +115,31 @@ Append new entries at the top. One section per session.
   uni/stash) before building runner stderr capture.
 - Gen v2-61 → v2-62.  Guard +1 (transpile-test-06.t, 27 tests).
 
+## Session 310d (2026-07-24, Fable) — read-error family ELIMINATED: credential specials $< $> $( $) + cl_name reader-safety net (gen v2-63).
+
+- **Root cause of op/groups.t (and part of uni/caller/uni/stash):** the
+  process-credential specials were entirely absent — a bare `$)` in the
+  emitted form is a CLOSE PAREN, killing the whole file at read.  Added
+  `%SPECIAL_VARS` pipe-quoted entries for `$< $> $( $)` + runtime defvar
+  boxes: uid/euid via sb-posix; the gid forms are perl's "gid sup1 sup2…"
+  space-joined string via alien getgroups(2) (sb-posix has no getgroups)
+  — byte-identical to perl's `$(`/`$)` on this machine.  Snapshots at
+  load; assignment writes the box only (no setuid emulation).
+- **cl_name reader-safety net (the family-closer):** ANY residual colon
+  in a name position now pipe-quotes the symbol (`|pl-온ꪵ::|`), and
+  package parts quote on ANY colon not just `::`.  A bad shape (e.g. the
+  unicode stash access `$온ꪵ::{…}` that PPI can't tokenize as one
+  Symbol) now fails as ONE contained undefined-function instead of a
+  whole-file read error.  uni/stash.t 4→40 ok clean; uni/caller.t runs
+  to `undef-fn:|pl-ｍａｉｎ::|` (the PPI-unicode stash gap — deferred
+  §symbol-table-hashes territory).
+- **The s309 "read-error 5 left, only in-harness" note was WRONG** — all
+  reproduced fine outside the harness (s310c stash.t = trailing-::
+  package calls; here = credential vars + unicode stash shapes).  No
+  runner stderr capture needed.  Remaining from the original 8:
+  uni/gv.t = binding-stack-exhausted (separate).
+- Gen v2-62 → v2-63.  Guard +1 (transpile-test-06.t, 28 tests).
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB

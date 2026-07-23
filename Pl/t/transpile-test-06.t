@@ -335,4 +335,11 @@ close I; unlink $f;
 print "e=", (eval { Bear::::baz() } // "undef"), "\n";
 ');
 
+test_transpile("process-credential specials \$< \$> \$( \$) (s310)", '
+print "u=", ($< == $>) ? "same" : "diff", "|";
+print "ids=[$(]==[$)]", ($( eq $)) ? "y" : "n", "|";
+my ($rgid) = split " ", $(;
+print "num=", ($< =~ /^\d+$/ ? "y" : "n"), ($rgid =~ /^\d+$/ ? "y" : "n"), "\n";
+');
+
 done_testing();
