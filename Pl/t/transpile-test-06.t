@@ -355,4 +355,16 @@ my %h온 = (k => 5); my @a온 = (7);
 print "e=$h온{k}$a온[0]\n";
 ');
 
+test_transpile("keys/values/each %ENV iterate the process environment (s310)", '
+$ENV{PCL_T06_ENV} = "v1";
+my @k = keys %ENV;
+print "haskey=", (grep { $_ eq "PCL_T06_ENV" } @k) ? 1 : 0, "|";
+print "nonzero=", (@k > 0 ? 1 : 0), "|";
+my %seen;
+while (my ($k, $v) = each %ENV) { $seen{$k} = $v }
+print "each=", ($seen{PCL_T06_ENV} // "miss"), "|";
+print "hasval=", (grep { $_ eq "v1" } values %ENV) ? 1 : 0, "\n";
+delete $ENV{PCL_T06_ENV};
+');
+
 done_testing();

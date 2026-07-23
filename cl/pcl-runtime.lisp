@@ -6255,6 +6255,24 @@
              (if (eq *wantarray* t)
                  (vector key (%p-hash-unbox-elem val))
                  (make-p-box key))))))
+    ;; %ENV / %INC special hashes: iterate a keys snapshot, iterator state
+    ;; keyed by the marker symbol itself.
+    ((member (unbox collection) '(%ENV-MARKER% %INC-MARKER%))
+     (let ((marker (unbox collection)))
+       (multiple-value-bind (remaining exists-p) (gethash marker *hash-iterators*)
+         (unless exists-p
+           (setf remaining (coerce (p-keys marker) 'list))
+           (setf (gethash marker *hash-iterators*) remaining))
+         (if (null remaining)
+             (progn
+               (remhash marker *hash-iterators*)
+               (if (eq *wantarray* t) (vector) *p-undef*))
+             (let* ((key (car remaining))
+                    (val (p-gethash marker key)))
+               (setf (gethash marker *hash-iterators*) (cdr remaining))
+               (if (eq *wantarray* t)
+                   (vector key val)
+                   (make-p-box key)))))))
     ;; Neither — return empty
     (t (vector))))
 
@@ -6283,6 +6301,13 @@
        (maphash (lambda (k v) (declare (ignore v)) (vector-push-extend k result))
                 *p-inc-table*)
        result))
+    ;; %ENV special hash: keys from the process environment.
+    ((eq (unbox collection) '%ENV-MARKER%)
+     (remhash '%ENV-MARKER% *hash-iterators*)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (dolist (entry (sb-ext:posix-environ) result)
+         (let ((p (position #\= entry)))
+           (when p (vector-push-extend (subseq entry 0 p) result))))))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
@@ -6311,6 +6336,12 @@
        (maphash (lambda (k v) (declare (ignore k)) (vector-push-extend v result))
                 *p-inc-table*)
        result))
+    ;; %ENV special hash: values from the process environment.
+    ((eq (unbox collection) '%ENV-MARKER%)
+     (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
+       (dolist (entry (sb-ext:posix-environ) result)
+         (let ((p (position #\= entry)))
+           (when p (vector-push-extend (subseq entry (1+ p)) result))))))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
