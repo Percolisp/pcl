@@ -271,6 +271,20 @@ Append new entries at the top. One section per session.
 - runpl NOTE: the wrapper swallows child exit codes generally
   (pre-existing); pclperl-for-tests propagates them correctly.
 
+## Session 310j (2026-07-24, Fable) — underscore in named-capture group names; op/groups.t OK.
+
+- **cl-ppcre rejects `_` in named-register names** (its charset is
+  alphanumerics + `-`; perl's is `\w`) — `(?<gr_name>…)` threw "Invalid
+  character in named register group", silently failing every match that
+  used an underscored name (op/groups.t's id-output parser).
+- **Fix — collision-free bijection**: perl names can never contain `-`,
+  so `perl-regex-to-ppcre` rewrites `_`→`-` in `(?<name>` and `\k<name>`
+  positions (the name charset excludes the `(?<=`/`(?<!` lookbehind
+  heads), and `set-capture-groups` maps `-`→`_` back when populating
+  `%+`/`%-`.  Probes byte-identical to perl incl. backrefs.
+- **op/groups.t 0 → OK (fully passing)** — the s310d credential specials
+  plus this were its only blockers.  Guard +1 (transpile-test-06.t).
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB

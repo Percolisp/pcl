@@ -13033,6 +13033,26 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these
   (let* ((pat (cl-ppcre:regex-replace-all "\\(\\?\\?\\{[^}]*\\}\\)" pattern ""))
          (pat (cl-ppcre:regex-replace-all "\\(\\?\\{[^}]*\\}\\)" pat ""))
+         ;; Named-group names: perl allows \w (underscore); cl-ppcre allows
+         ;; only alphanumerics and #\-.  Perl names can never contain '-', so
+         ;; _ <-> - is a collision-free bijection: rewrite here, map back when
+         ;; populating %+ (set-capture-groups).  Covers (?<name>) and the
+         ;; \k<name> backref; the name charset excludes the (?<= (?<!
+         ;; lookbehind heads.
+         (pat (cl-ppcre:regex-replace-all
+               "\\(\\?<([a-zA-Z_][a-zA-Z0-9_]*)>"
+               pat
+               (lambda (match name)
+                 (declare (ignore match))
+                 (concatenate 'string "(?<" (substitute #\- #\_ name) ">"))
+               :simple-calls t))
+         (pat (cl-ppcre:regex-replace-all
+               "\\\\k<([a-zA-Z_][a-zA-Z0-9_]*)>"
+               pat
+               (lambda (match name)
+                 (declare (ignore match))
+                 (concatenate 'string "\\k<" (substitute #\- #\_ name) ">"))
+               :simple-calls t))
          ;; Perl's (?^flags:...) is the stringified form of qr//.
          ;; The '^' means "reset all flags to defaults".  CL-PPCRE uses (?flags:...)
          ;; without '^'.  Simply remove the '^'; at the top level (no enclosing flags)
@@ -13405,10 +13425,13 @@ buffer's fill-pointer; everything else falls back to file-length."
               for i from 0
               when (and name (< i num-groups))
               do (let ((rs (aref reg-starts i))
-                       (re (aref reg-ends   i)))
+                       (re (aref reg-ends   i))
+                       ;; Reverse the _ <-> - name mapping perl-regex-to-ppcre
+                       ;; applied (cl-ppcre rejects _ in register names).
+                       (pname (substitute #\_ #\- name)))
                    (when (and rs re)
-                     (setf (gethash name %+) (subseq str rs re)))
-                   (%pcl-push-named-buffer name
+                     (setf (gethash pname %+) (subseq str rs re)))
+                   (%pcl-push-named-buffer pname
                                            (if (and rs re) (subseq str rs re) *p-undef*))))))))
 
 (defun %pcl-strip-gpos (pattern)

@@ -391,4 +391,10 @@ BEGIN { print "b\n" }
 print "main\n";
 ');
 
+test_transpile("underscore in named-capture group names (cl-ppcre gap, s310)", '
+my $s = "1000(bernt)";
+if ($s =~ /^(?<gid>\d+)\((?<gr_name>.+)\)$/x) { print "a=$+{gr_name},$+{gid}|" } else { print "a=no|" }
+if ("abcabc" =~ /(?<my_grp>abc)\k<my_grp>/) { print "b=$+{my_grp}\n" } else { print "b=no\n" }
+');
+
 done_testing();
