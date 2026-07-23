@@ -254,7 +254,8 @@
    #:*pcl-current-package* #:*pcl-caller-pkg-stack* #:*pcl-caller-subname-stack*
    #:p-set-current-package #:p-register-pkg-name
    ;; END blocks
-   #:*end-blocks*
+   #:*end-blocks* #:*unitcheck-blocks* #:*check-blocks* #:*init-blocks*
+   #:p-run-compile-phase-blocks
    ;; Subroutine reflection (exists &sub, defined &sub, undef &sub)
    #:p-sub-exists #:p-sub-defined #:p-undef-sub
    #:p-coderef-exists-p #:p-coderef-defined-p
@@ -832,6 +833,22 @@
 
 ;;; END blocks - executed in reverse order at program exit
 (defvar *end-blocks* nil "List of END block thunks to execute at exit")
+(defvar *unitcheck-blocks* nil "UNITCHECK thunks (push = LIFO = perl's reverse order)")
+(defvar *check-blocks* nil "CHECK thunks (push = LIFO = perl's reverse order)")
+(defvar *init-blocks* nil "INIT thunks (pushed; run in reverse-of-LIFO = source order)")
+
+(defun p-run-compile-phase-blocks ()
+  "The compile->run boundary of the main program: run UNITCHECK blocks
+   (reverse order), then CHECK blocks (reverse order), then INIT blocks
+   (source order), clearing each list.  Emitted once, before the first
+   runtime section.  Blocks registered later (a runtime require or eval)
+   are perl's 'too late to run' case — they never fire."
+  (let ((ucs *unitcheck-blocks*) (cks *check-blocks*)
+        (ins (reverse *init-blocks*)))
+    (setf *unitcheck-blocks* nil *check-blocks* nil *init-blocks* nil)
+    (dolist (f ucs) (funcall f))
+    (dolist (f cks) (funcall f))
+    (dolist (f ins) (funcall f))))
 
 ;; Register exit hook to run END blocks
 (pushnew (lambda ()
@@ -9946,7 +9963,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-63"
+(defparameter *pcl-cache-generation* "v2-64"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

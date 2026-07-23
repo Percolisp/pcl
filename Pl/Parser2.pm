@@ -932,6 +932,7 @@ sub parse {
 
   # ---- Assemble the sections.
   my @body;
+  my $phase_boundary_emitted = 0;
   for my $i (0 .. $#sections) {
     my $sec = $sections[$i];
     my $pkg = $sec->{pkg};
@@ -994,8 +995,16 @@ sub parse {
     # order — after this section's definitions load, before its code runs.
     push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
     push @body, @ver_run;
+    # The compile->run boundary: UNITCHECK/CHECK (reverse) then INIT (source
+    # order) run once before the first runtime code — perl's phase order
+    # (v1's _assemble_output emits the same call at the same seam).
+    if (!$phase_boundary_emitted && grep { /\S/ } @{ $sec->{run} }) {
+      push @body, "(p-run-compile-phase-blocks)", '';
+      $phase_boundary_emitted = 1;
+    }
     push @body, map { ($_, '') } @{ $sec->{run} };
   }
+  push @body, "(p-run-compile-phase-blocks)", '' unless $phase_boundary_emitted;
 
   my @out = ('(in-package :pcl)', '');
   # Pre-declare every package a later section opens or a qualified symbol

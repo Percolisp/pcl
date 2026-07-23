@@ -584,10 +584,21 @@ sub _assemble_output {
 
   # Assemble: for each section emit preamble → declarations → definitions → runtime
   my @lines;
+  my $boundary_emitted = 0;
   for my $section (@{$self->_sections}) {
     push @lines, @{$section->{preamble}};
     push @lines, @{$section->{declarations}};
     push @lines, @{$section->{definitions}};
+    # The compile->run boundary: UNITCHECK/CHECK (reverse) then INIT (source
+    # order) run once, before the first runtime code — perl's phase order.
+    # Emitted before the FIRST non-empty runtime section; later sections'
+    # compile-phase blocks approximate (PCL interleaves sections that perl
+    # compiles wholly before running).  Eval-mode assembly never emits this,
+    # so blocks registered inside eval are perl's "too late" case.
+    if (!$boundary_emitted && grep { /\S/ } @{$section->{runtime}}) {
+      push @lines, "(p-run-compile-phase-blocks)";
+      $boundary_emitted = 1;
+    }
     # If the runtime section contains bare top-level labels (standalone :WORD lines
     # not inside a tagbody), wrap the contiguous run of expression-only forms that
     # contains each label in a (tagbody ...).  Forms that contain p-sub / eval-when /
@@ -595,6 +606,7 @@ sub _assemble_output {
     my @rt = @{$section->{runtime}};
     push @lines, map { _cap_inlining_if_huge($_) } _wrap_runtime_labels(\@rt);
   }
+  push @lines, "(p-run-compile-phase-blocks)" unless $boundary_emitted;
   return @lines;
 }
 
@@ -7180,22 +7192,33 @@ sub _process_scheduled_block {
     });
   }
   elsif ($type eq 'CHECK' || $type eq 'UNITCHECK') {
-    # CHECK runs after compile, before execute — route to definitions bucket.
+    # Collected during load (compile phase), run in reverse order at the
+    # compile->run boundary by (p-run-compile-phase-blocks) — the same
+    # thunk-collector pattern END blocks use (push = LIFO = reverse).
+    my $list = $type eq 'CHECK' ? '*check-blocks*' : '*unitcheck-blocks*';
     $self->_with_bucket('definitions', sub {
       $self->_emit(";; $perl_code");
-      $self->_emit("(p-CHECK");
-      $self->indent_level($self->indent_level + 1);
+      $self->_emit("(push (lambda ()");
+      $self->indent_level($self->indent_level + 2);
       $process->();
-      $self->indent_level($self->indent_level - 1);
-      $self->_emit(")");
+      $self->indent_level($self->indent_level - 2);
+      $self->_emit("  ) $list)");
       $self->_emit("");
     });
   }
   elsif ($type eq 'INIT') {
-    # INIT runs just before main code starts — keep in runtime (source-order sensitive)
-    $self->_emit(";; $perl_code (runs at load time, before main)");
-    $process->();
-    $self->_emit("");
+    # Collected during load, run in SOURCE order at the compile->run
+    # boundary (after CHECKs), before any main runtime code — a mid-file
+    # INIT must not run at its source position.
+    $self->_with_bucket('definitions', sub {
+      $self->_emit(";; $perl_code");
+      $self->_emit("(push (lambda ()");
+      $self->indent_level($self->indent_level + 2);
+      $process->();
+      $self->indent_level($self->indent_level - 2);
+      $self->_emit("  ) *init-blocks*)");
+      $self->_emit("");
+    });
   }
   else {
     $self->_emit(";; $type { } (unrecognized scheduled block)");

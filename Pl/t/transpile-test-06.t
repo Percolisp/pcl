@@ -367,4 +367,17 @@ print "hasval=", (grep { $_ eq "v1" } values %ENV) ? 1 : 0, "\n";
 delete $ENV{PCL_T06_ENV};
 ');
 
+test_transpile("special-block phase order: UNITCHECK/CHECK reverse, INIT source order, eval too-late (s310)", '
+print ":main1";
+CHECK { print ":c1" }
+INIT { print ":i1" }
+UNITCHECK { print ":u1" }
+CHECK { print ":c2" }
+INIT { print ":i2" }
+UNITCHECK { print ":u2" }
+eval q{CHECK { print ":cE" } INIT { print ":iE" } 1} or die;
+END { print ":end\n" }
+print ":main2";
+');
+
 done_testing();

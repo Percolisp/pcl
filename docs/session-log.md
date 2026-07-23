@@ -206,6 +206,27 @@ Append new entries at the top. One section per session.
   (~23), lex.t null-ident/lexer edges (8), runenv PERL5OPT tails,
   qr/pack/hexfp singles.
 
+## Session 310g (2026-07-24, Fable) — UNITCHECK/CHECK/INIT phase order (gen v2-64).
+
+- **p-CHECK never ran**: it expanded to `(eval-when (:load-toplevel) …)`,
+  which does not execute under SOURCE load (needs :execute) — CHECK and
+  UNITCHECK bodies silently vanished.  INIT ran inline at its source
+  position (a mid-file INIT must run before ANY main code).
+- **Fix — the END-block thunk-collector pattern, generalized**: CHECK/
+  UNITCHECK/INIT push lambdas onto `*check-blocks*`/`*unitcheck-blocks*`/
+  `*init-blocks*` in the definitions bucket; new
+  `p-run-compile-phase-blocks` runs UNITCHECKs (reverse), CHECKs
+  (reverse), INITs (source order) once at the compile→run boundary —
+  emitted before the first non-empty runtime section by BOTH assemblers
+  (v1 `_assemble_output` and Parser2's section stitcher).  Eval-mode
+  never emits it, so blocks registered inside a runtime eval/require are
+  perl's "too late" case and never fire — probe matches perl exactly,
+  including `:u2:u1:c2:c1:i1:i2` ordering.
+- blocks.t 5 → 10 ok; remaining rows are exit-during-compile phase
+  semantics (`BEGIN{exit}` must still run UNITCHECK/CHECK/END but skip
+  INIT/main), warning-text, and a (?{}) regex row — deeper tiers.
+  Guard +1 (transpile-test-06.t, 31 tests).
+
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
 - **Both overnight desktop OOM kills root-caused**: the kernel killed a ~6 GB
