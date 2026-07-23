@@ -190,6 +190,21 @@ Append new entries at the top. One section per session.
   5/21 (child ~0.25s with core); run/runenv.t 0 emitted → 106 run
   (11 ok / 95 real divergences).  Old-sweep fully-passing baseline WILL
   drop — re-bless deliberately after the full-sweep measurement.
+- **Full-sweep measurement + re-bless (same session)**: 18329 pass /
+  1074 fail, **61 fully passing** (from 66 blessed — the honesty flip
+  cost only ~5 files; die.t/closure.t/chdir.t/warn.t/assignwarn.t KEPT
+  fully-passing with PCL children).  sweep-diff vs old baseline: 47 new
+  / 3 fixed; triage found ONE real in-process gap the perl children had
+  been hiding — `keys`/`values`/`each %ENV` returned nothing (marker
+  arms existed only for element ops).  Fixed (dd85cfa): p-keys/p-values
+  %ENV arms over sb-ext:posix-environ, p-each marker arm (a keys
+  snapshot keyed by the marker symbol, %INC covered too) — each.t
+  returned to fully-passing.  local.t #52740 checked = honest runperl
+  child (stash territory), NOT an s310d regression.  Baseline saved
+  (740 blessed fails, 3ff648d); CLAUDE.md count 66 → 61.  Remaining
+  honest families: blocks.t child BEGIN/CHECK/INIT/UNITCHECK ordering
+  (~23), lex.t null-ident/lexer edges (8), runenv PERL5OPT tails,
+  qr/pack/hexfp singles.
 
 ## Session 309 (2026-07-23, Fable) — desktop-OOM root cause (op/cond.t 20k ternary → pl2cl quadratic); suite runner hardened; #25 crash families classified.
 
