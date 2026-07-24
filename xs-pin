@@ -2,5 +2,5 @@
 # against.  Update deliberately, with tools/build-pclxs --pin-here, in the
 # same commit as the adapter change that needs it -- never point at an
 # unmerged pclxs branch.
-commit 6a497ec812142d2ce084b763b1465158d63a683c
+commit 598b10b6e1a2f0afb713af8253ba35d00b65b57c
 abi 2
