@@ -4,6 +4,15 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 311 (2026-07-25, Opus 5) — the XS bridge reaches PCL: CPAN XS modules run inside the runtime.
+
+- **`cl/pcl-xs.lisp` SHIPPED**: the host adapter for pclxs (sibling checkout, `xs-pin`, ABI 2).  ~50 sb-alien callables implementing the vtable, a handle table, and the trampoline that makes a shim-built XSUB an **ordinary PCL sub** — same name via `%pcl-cl-sub-name`, same calling convention, same wantarray, same die.  **Digest::MD5 computes identical digests to perl from inside PCL**; `Pl/t/xs-01.t` gates the whole chain (xsubpp -> cc -> libpclxs -> vtable -> PCL) and skips cleanly when the sibling checkout is absent or unbuilt.  Gate now 119 files / 4368 tests.
+- **Three runtime conventions learned the hard way** (each after a wrong guess, each now commented at the site): sub names must go through `%pcl-cl-sub-name` (PCL reads with `:invert`, so a hand-rolled `PL-`+upcase defines a symbol nobody looks up); packages through `perl-pkg-to-cl-pkg-name`; and **`$@` is ONE runtime variable, not a per-package global** — writing `"main::@"` meant `eval {}` never saw what an XSUB croaked with, and the croak text came back empty.
+- **Ownership rules that shaped the file**: a handle is an INDEX into `*xs-objects*`, never an address (SBCL GC moves objects); the table is not weak, so a live index IS C's strong reference; `WITH-XS-GUARD` wraps every callback so no CL condition can unwind into C (the two entries that can observe a Perl die report `PS_DIED` + `$@` instead).
+- pclxs side: the vtable is now built **by name** (`pclxs_vtable_set`) rather than by mirroring a 55-field struct in sb-alien, and `pclxs_init` refuses an incomplete table naming the first missing callback — the adapter's first boot had died with a memory fault at address zero from a null `define_xsub`.
+
+---
+
 ## Session 310 (2026-07-23, Fable) — #25 families: nil-not-real (qr-whitespace) + builtin arity CLEARED; string patterns in =~; gen v2-60.
 
 - **Fourth #25 family FIXED: "nil is not of type real" (op/inc, op/stash,

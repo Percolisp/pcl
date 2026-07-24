@@ -232,7 +232,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **118 test files, 4336 tests** (Pl/t gate, as of session 306b)
+- **119 test files, 4368 tests** (Pl/t gate, as of session 311 — includes Pl/t/xs-01.t, which skips without a built pclxs sibling)
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
