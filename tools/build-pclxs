@@ -1,0 +1,156 @@
+#!/usr/bin/env perl
+# build-pclxs — locate the pclxs sibling checkout, verify the pin, build it.
+#
+# pclxs (the CPAN-XS shim) is a separate PUBLIC repository, consumed here as
+# a plain sibling checkout rather than a submodule: during the phases where
+# both repos change every session, a submodule would demand a pin-bump
+# commit in pcl for every pclxs commit.  The explicit pin file below buys
+# the same reproducibility without that friction.
+#
+#   location:  $PCLXS_DIR, else ../pclxs relative to this checkout
+#   pin:       pcl/xs-pin  — two lines, "commit <sha>" and "abi <n>"
+#
+# THIS SCRIPT IS THE ONLY PLACE THAT KNOWS THE PATH RULE.  Anything else
+# needing the checkout (tools/pcl-xs-build, the runtime loader) calls
+# pclxs_dir() here rather than re-deriving it.
+#
+# Usage:
+#   tools/build-pclxs                # verify pin, build libpclxs + refhost
+#   tools/build-pclxs --check        # verify pin only
+#   tools/build-pclxs --pin-here     # rewrite xs-pin from the checkout's HEAD
+#   tools/build-pclxs --test         # build, then run pclxs's own test suite
+
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Basename qw(dirname);
+use Getopt::Long;
+
+my $PCL_ROOT = abs_path(dirname(abs_path($0)) . '/..');
+my $PIN_FILE = "$PCL_ROOT/xs-pin";
+
+my %opt;
+GetOptions(\%opt, 'check', 'pin-here', 'test', 'quiet')
+    or die "usage: $0 [--check] [--pin-here] [--test]\n";
+
+my $dir = pclxs_dir();
+if (! -d $dir) {
+    die <<"MSG";
+build-pclxs: no pclxs checkout at $dir
+
+pclxs is a separate public repository (the CPAN-XS shim).  Clone it as a
+sibling of this checkout, or point PCLXS_DIR at it:
+
+    git clone https://github.com/percolisp/pclxs $PCL_ROOT/../pclxs
+
+MSG
+}
+
+my ($pin_commit, $pin_abi) = read_pin();
+my $head = head_commit($dir);
+my $abi  = header_abi($dir);
+
+if ($opt{'pin-here'}) {
+    write_pin($head, $abi);
+    print "xs-pin updated: commit $head, abi $abi\n";
+    exit 0;
+}
+
+check_pin($head, $abi, $pin_commit, $pin_abi);
+exit 0 if $opt{check};
+
+# Build in the pclxs checkout, with its own %Config-derived toolchain.
+run_in($dir, $^X, 'build.pl', 'lib', 'headers', 'refhost');
+run_in($dir, $^X, 'build.pl', 'test') if $opt{test};
+
+print "pclxs built in $dir (abi $abi, commit $head)\n" if ! $opt{quiet};
+exit 0;
+
+# ---------------------------------------------------------------------------
+
+# The one path rule.  Callers: tools/pcl-xs-build, cl/pcl-xs.lisp's loader.
+sub pclxs_dir {
+    return abs_path($ENV{PCLXS_DIR}) if $ENV{PCLXS_DIR} && -d $ENV{PCLXS_DIR};
+    return $ENV{PCLXS_DIR} if $ENV{PCLXS_DIR};       # report it as-is if missing
+    my $sibling = "$PCL_ROOT/../pclxs";
+    return -d $sibling ? abs_path($sibling) : $sibling;
+}
+
+sub read_pin {
+    return (undef, undef) if ! -f $PIN_FILE;
+    open my $fh, '<', $PIN_FILE or die "$PIN_FILE: $!\n";
+    my ($commit, $abi);
+    while (my $line = <$fh>) {
+        $commit = $1 if $line =~ /^commit\s+(\S+)/;
+        $abi    = $1 if $line =~ /^abi\s+(\d+)/;
+    }
+    close $fh;
+    return ($commit, $abi);
+}
+
+sub write_pin {
+    my ($commit, $abi) = @_;
+    open my $fh, '>', $PIN_FILE or die "$PIN_FILE: $!\n";
+    print {$fh} <<"PIN";
+# The pclxs commit and ABI version this checkout is built and tested
+# against.  Update deliberately, with tools/build-pclxs --pin-here, in the
+# same commit as the adapter change that needs it -- never point at an
+# unmerged pclxs branch.
+commit $commit
+abi $abi
+PIN
+    close $fh;
+}
+
+sub head_commit {
+    my ($d) = @_;
+    my $sha = qx{git -C "$d" rev-parse HEAD 2>/dev/null};
+    chomp $sha;
+    return $sha || 'unknown';
+}
+
+sub header_abi {
+    my ($d) = @_;
+    my $h = "$d/include/pclxs/pclxs_host.h";
+    open my $fh, '<', $h or die "build-pclxs: cannot read $h: $!\n";
+    while (my $line = <$fh>) {
+        return $1 if $line =~ /^#define\s+PCLXS_ABI_VERSION\s+(\d+)/;
+    }
+    die "build-pclxs: no PCLXS_ABI_VERSION in $h\n";
+}
+
+sub check_pin {
+    my ($head, $abi, $pin_commit, $pin_abi) = @_;
+
+    if (! defined $pin_commit) {
+        die "build-pclxs: no $PIN_FILE yet - run --pin-here to create it\n";
+    }
+    if ($pin_abi != $abi) {
+        die <<"MSG";
+build-pclxs: ABI mismatch
+    xs-pin expects PCLXS_ABI_VERSION $pin_abi
+    checkout provides                $abi
+
+A vtable change bumps the ABI in pclxs and the pin here, in that order and
+in one pair of commits.  If that is what you are doing, land the pclxs side
+first, then run: tools/build-pclxs --pin-here
+MSG
+    }
+    if ($pin_commit ne $head) {
+        warn <<"MSG";
+build-pclxs: checkout is not at the pinned commit
+    xs-pin:   $pin_commit
+    HEAD:     $head
+    ABI matches ($abi), so this build should still work.  Update the pin
+    deliberately with --pin-here once the pcl side is adjusted.
+MSG
+    }
+    print "pin ok (abi $abi)\n" if $opt{check} && ! $opt{quiet};
+}
+
+sub run_in {
+    my ($d, @cmd) = @_;
+    my $rc = system('sh', '-c',
+                    'cd "$0" && exec "$@"', $d, @cmd);
+    die "build-pclxs: failed in $d: @cmd\n" if $rc != 0;
+}

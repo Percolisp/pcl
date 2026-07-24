@@ -1,0 +1,6 @@
+# The pclxs commit and ABI version this checkout is built and tested
+# against.  Update deliberately, with tools/build-pclxs --pin-here, in the
+# same commit as the adapter change that needs it -- never point at an
+# unmerged pclxs branch.
+commit 5d3767bb5ec37d2859e46b0cb0d0ca5974218f21
+abi 1

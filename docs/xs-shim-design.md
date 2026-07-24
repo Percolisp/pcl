@@ -10,6 +10,24 @@ phase; every phase has an acceptance test. Read §2 (how XS really works) and
 §4 (the architecture decision) before writing any code.
 **Supersedes:** the sketch in `XS_BRIDGE_DESIGN.md` (kept for history; its
 "wrap CL objects in C structs" approach is rejected here — see §4.2).
+**Superseded ON STRUCTURE by `docs/xs-shim-repo-plan.md` (2026-07-12) and,
+since 2026-07-24, by the pclxs repo itself** (sibling checkout `../pclxs`,
+`docs/design.md` there). Three places in this document still read as if
+everything lived under `pcl/`; the reasoning is unaffected, the layout is
+not:
+- **Paths** (§6, §9, §10.1, §13): `xs/include/pclxs/` → `include/pclxs/`,
+  `xs/src/` → `src/`, `xs/t/` → `t/`, `xs/census/` → `census/`, all at the
+  pclxs repo root.
+- **The build tool** (§9) is two tools: host-neutral `tools/xs-build` in
+  pclxs, and a thin `tools/pcl-xs-build` wrapper here that adds step 4
+  (transpiling the dist's `.pm` files).
+- **Artifact naming** (§9 step 3): `blib-pcl/…/Bar.pcl.so` is a *pcl*
+  choice, passed to the neutral tool as `--suffix`/`--out`; it is never a
+  default inside pclxs.
+Also folded in: `pclxs/xs-shim-prereview.md` (advisory review, 2026-07-24)
+and its findings — the boot handshake is a deliberate no-op, `ppport.h`
+needs six documented concessions from our `perl.h`, and perl's internal
+types must be named but never defined.
 **Related:** `docs/ir-spec.md` (the semantic contract every host callback must
 honor), `docs/extensions.md` (how the CL side gets loaded),
 `docs/shipped-modules.md` (module resolution), `docs/not-supported.md`
@@ -930,6 +948,26 @@ in `xs/census/` — it is the living prioritization list.
 ---
 
 ## 12. Phase plan (each phase ends green before the next starts)
+
+### 12.0 The ladder (the census input — §10.1 depends on this list)
+
+Build order, and what each module is meant to prove. `census/` in the pclxs
+repo is generated from exactly this list.
+
+| module | tier | proves |
+|---|---|---|
+| MIME::Base64 | 1 | smallest real dist: byte strings in and out, no objects |
+| Digest::MD5 | 1 | T_PTROBJ C-object pattern, byte strings, OO methods (Phase 3 target) |
+| Time::HiRes | 1 | syscall-shaped XS, almost no SV traffic (Phase 4 target) |
+| Cwd | 1 | alternate syscall-ish target if Time::HiRes goes native (§14.2) |
+| Params::Util | 1 | plain scalar/aggregate API, no magic — breadth check |
+| Storable | 2 | heavy aggregate + magic user; measures the Tier 2 boundary |
+| JSON::XS | 2 | stress test: buffer building, callbacks, blessed booleans (§14.3) |
+| List::Util | X | `MULTICALL` — the refusal reference case: must be *detected*, not built |
+
+First census (2026-07-24, perl 5.40.3): 187 distinct perlapi symbols across
+the installed seven; 26–40 per Tier 1 module, 110 for Storable, 119 for
+List::Util.
 
 **Phase 0 — census & skeleton.** Write `tools/xs-api-census.pl`; run it over
 the ladder modules built against real perl; check results into `xs/census/`.
