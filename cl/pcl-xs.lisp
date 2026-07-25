@@ -744,8 +744,14 @@
 (sb-alien:define-alien-callable xs-get-global sb-alien:long
   ((sigil sb-alien:char) (name (sb-alien:* sb-alien:char))
    (len sb-alien:unsigned-long) (create sb-alien:int))
+  ;; NO (declare ...) here: with-xs-guard wraps the body in a PROGN, and a
+  ;; declaration inside a progn is a compile-time ERROR, not a warning --
+  ;; SBCL compiles the form with errors and signals "Execution of a form
+  ;; compiled with errors" only when the callback is first CALLED.  The
+  ;; guard then turns that into its on-error value, so the symptom was a
+  ;; get_global that quietly answered 0 forever.  (create is used below
+  ;; anyway; the declaration was wrong twice over.)
   (with-xs-guard ()
-    (declare (ignorable create))
     (let* ((n (%xs-string-in name len 0))
            (c (code-char (ldb (byte 8 0) sigil))))
       ;; Package variables live in CL symbols named for the sigil+name; the
@@ -782,7 +788,12 @@
   (let* ((pos  (search "::" name :from-end t))
          (pkg  (if pos (subseq name 0 pos) "main"))
          (base (if pos (subseq name (+ pos 2)) name))
-         (package (%pcl-find-package pkg))
+         ;; GV_ADD vivifies the STASH too, not just the variable: perl's
+         ;; get_sv("New::Pkg::var", GV_ADD) creates the package on the way.
+         ;; Only finding an existing one made every probe of a fresh
+         ;; namespace answer NULL, which is what pclxs t/98-globals.t saw.
+         (package (or (%pcl-find-package pkg)
+                      (and (not (zerop create)) (%xs-ensure-package pkg))))
          (sym-name (concatenate 'string (string sigil) base)))
     (when package
       (let ((sym (find-symbol sym-name package)))

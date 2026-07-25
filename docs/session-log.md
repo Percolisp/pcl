@@ -124,6 +124,29 @@ Proof it works: `Digest::MD5::md5_hex("abc")` from inside PCL, reached by
 module name alone through `XSLoader::load`, returns
 `900150983cd24fb0d6963f7d28e17f72` — perl's answer.
 
+### get_global: two bugs, one hidden behind the other
+
+pclxs grew conformance cases for `get_sv`/`get_av`/`get_hv`/`get_cv`
+(`t/98-globals.t`) and PCL could not run the file at all:
+`pclxs: host callback error: Execution of a form compiled with errors.`
+
+1. `xs-get-global` opened with `(declare (ignorable create))` INSIDE
+   `with-xs-guard`, which wraps its body in a `PROGN` -- and a declaration
+   in a progn is a compile-time **error**, not a warning. SBCL compiled
+   the form with errors and signalled only when the callback was first
+   called; the guard then turned that into its on-error value. So
+   `get_global` answered 0 forever, silently. (`create` is used two lines
+   down anyway -- the declaration was wrong twice over.) That is the third
+   bug of this exact shape this session: **a guard that must swallow
+   conditions will swallow your mistakes too.**
+
+2. Underneath it, a real one: `GV_ADD` vivifies the **stash** as well as
+   the variable -- `get_sv("New::Pkg::var", GV_ADD)` creates the package on
+   the way -- and we only looked one up. Every probe of a fresh namespace
+   answered NULL.
+
+12/12 through PCL now.
+
 ### pclxs ABI 4: method_lookup
 
 One more callback, `xs-method-lookup`, routed straight to `p-can` -- the
