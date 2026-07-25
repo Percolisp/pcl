@@ -212,10 +212,25 @@
     (let ((v (unbox (%xs-deref h))))
       (if (or (null v) (eq v *p-undef*)) 0 1))))
 
+;; Perl's looks_like_number: a number is one, a string is one if the WHOLE
+;; string parses as one, undef and everything else is not.
+;;
+;; This called `p-looks-like-number` until pclxs's conformance corpus was
+;; first run against PCL, and there is no such function -- the runtime's is
+;; `looks-like-number`, and it takes a string.  WITH-XS-GUARD dutifully
+;; turned the undefined-function error into the on-error value, 0, so the
+;; shim was told "not a number" about every value in the program and the
+;; only symptom was four flag divergences.  A guard that must never let a
+;; condition reach C will also, by construction, turn a typo into a
+;; plausible answer; the corpus is what catches that.
 (sb-alien:define-alien-callable xs-looks-like-number sb-alien:int
   ((h sb-alien:long))
   (with-xs-guard ()
-    (if (p-looks-like-number (unbox (%xs-deref h))) 1 0)))
+    (let ((v (unbox (%xs-deref h))))
+      (cond ((or (null v) (eq v *p-undef*)) 0)
+            ((numberp v)                    1)
+            ((stringp v) (if (looks-like-number v) 1 0))
+            (t                              0)))))
 
 ;;; scalar_flags (pclxs ABI 3) -- "what IS this value", the question XS asks
 ;;; with SvIOK/SvNOK/SvPOK.  The shim calls it once for every argument

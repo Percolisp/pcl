@@ -39,6 +39,55 @@ because it is the designed one: `pclxs_init` refused the table and named
 the callback — `first missing callback: scalar_flags` — rather than
 crashing later in a null call.
 
+### PCL now runs pclxs's whole conformance corpus: 215 pass, 1 fail
+
+**New here: `tools/pcl-conform` and `Pl/t/pclxs-host.pl`.** Read this
+before touching either.
+
+*Why.* pclxs defines "a host is done" as "the conformance suite passes
+against it" — 216 cases with **real perl as the oracle**, covering
+coercions, aggregates, references, hash iteration, callbacks, buffer
+building and the SV flag table. PCL inherited none of it: our only XS
+test was `Pl/t/xs-01.t`, six cases on a synthetic dist, which asks *does
+the bridge work at all* rather than *does PCL answer like perl*. Every
+case that corpus contains is a question somebody has already worked out
+the right answer to; not running them was leaving that on the table.
+
+*How, without either repo naming the other.* pclxs's `t/` may not name a
+runtime (that project's one rule), so it grew an external-host hook and
+**we register ourselves**: `Pl/t/pclxs-host.pl` returns the three
+closures its harness wants (`available`/`build`/`run`), and
+`PCLXS_HOST_DEFS=<that file>` makes the suite pick us up.
+`tools/pcl-conform` is the wrapper. Nothing in pclxs knows PCL exists;
+nothing here is vendored from pclxs.
+
+*What the first run found — and this is the point of the exercise.*
+
+- **`xs-looks-like-number` was calling `p-looks-like-number`, which does
+  not exist.** The runtime's function is `looks-like-number`, and it
+  takes a string. `WITH-XS-GUARD` — which must exist, because no
+  condition may unwind into C — dutifully turned the undefined-function
+  error into the on-error value, `0`. So the shim was being told "not a
+  number" about *every value in the program*, since the adapter shipped.
+  The only symptom was four flag divergences in one case set. Fixed, and
+  the lesson is now a comment at the site: **a guard that cannot let
+  errors escape will also turn a typo into a plausible answer**, so the
+  host definition file treats any `pclxs: host callback error:` line on
+  stderr as a hard failure rather than noise.
+- **One divergence left, and it is a real semantic difference, not a
+  bug in the bridge**: `bless_and_class` builds a scalar ref, blesses it,
+  and reads the class back with `HvNAME(SvSTASH(SvRV(rv)))` — i.e. it
+  asks the **referent**. Perl blesses the referent (that is why two refs
+  to one hash are both objects); `p-bless` marks the *hash* for hash refs
+  (matching perl) but marks the **wrapper box** for scalar refs
+  (`cl/pcl-runtime.lisp` ~12426, deliberately, with a comment). So XS
+  code that asks the referent gets nothing. Not fixed here: moving where
+  a scalar-ref blessing is recorded is a runtime-core change with a wide
+  blast radius, and it deserves its own session. Filed.
+
+Everything else is green: 140/140 coercion cases, 29/30 aggregates,
+11/11 iteration and callbacks, 8/8 buffer building, 27/27 SV flags.
+
 ---
 
 ## Session 311 (2026-07-25, Opus 5) — the XS bridge reaches PCL: CPAN XS modules run inside the runtime.

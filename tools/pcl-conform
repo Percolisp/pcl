@@ -1,0 +1,72 @@
+#!/usr/bin/env perl
+# pcl-conform — run pclxs's conformance suite against PCL as a host.
+#
+# pclxs defines "a host is done" as "the conformance suite passes against
+# it".  This is how PCL answers that: the suite runs from the pclxs
+# checkout, and PCL registers itself through the suite's external-host hook.
+#
+#   tools/pcl-conform              # the whole corpus
+#   tools/pcl-conform 96-flags     # one file (substring match)
+#   tools/pcl-conform -v 70        # verbose
+#
+# Each case set costs one SBCL launch that loads the runtime from source, so
+# the full corpus is minutes, not seconds.  That is the price of running the
+# real runtime rather than a mock, and it is worth paying: the first run of
+# this found a callback that had been calling an undefined function since the
+# adapter shipped (see docs/session-log.md, session 312).
+
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Basename qw(dirname);
+
+my $PCL_ROOT = abs_path(dirname(abs_path($0)) . '/..');
+my $PCLXS    = $ENV{PCLXS_DIR} || abs_path("$PCL_ROOT/../pclxs");
+my $HOSTDEF  = "$PCL_ROOT/Pl/t/pclxs-host.pl";
+
+my @argv    = @ARGV;
+my $verbose = grep { $_ eq '-v' } @argv;
+@argv       = grep { $_ ne '-v' } @argv;
+my $filter  = shift @argv;
+
+die "pcl-conform: no pclxs checkout at $PCLXS (set PCLXS_DIR)\n" if ! -d $PCLXS;
+die "pcl-conform: libpclxs not built.  Run: tools/build-pclxs\n"
+    if ! -f "$PCLXS/build/libpclxs.so";
+die "pcl-conform: no host definition at $HOSTDEF\n" if ! -f $HOSTDEF;
+
+# Only the case-set files can run against a non-oracle host; the rest of
+# pclxs's suite tests pclxs itself.
+my @files = grep { ! defined $filter || /\Q$filter\E/ }
+            map  { (split m{/})[-1] }
+            grep { -f $_ }
+            glob("$PCLXS/t/*.t");
+@files = grep {
+    my $body = do { open my $fh, '<', "$PCLXS/t/$_" or return 0;
+                    local $/; <$fh> };
+    $body =~ /conform_ok/;
+} @files;
+
+die "pcl-conform: no conformance files matched"
+  . (defined $filter ? " '$filter'" : '') . "\n" if ! @files;
+
+print "pcl-conform: $PCLXS  (", scalar @files, " case-set files)\n";
+
+my ($pass, $fail, @bad) = (0, 0);
+for my $f (sort @files) {
+    printf "%-22s ", $f;
+    my $out = qx{cd $PCLXS && PCLXS_HOST_DEFS=$HOSTDEF $^X -I t/lib t/$f 2>&1};
+    my ($p, $x) = (0, 0);
+    for my $line (split /\n/, $out) {
+        $p++ if $line =~ /^ok .* pcl vs/;
+        $x++ if $line =~ /^not ok .* pcl vs/;
+        push @bad, "  $f: $line" if $line =~ /^not ok .* pcl vs/;
+    }
+    $pass += $p; $fail += $x;
+    printf "%3d pass %2d fail%s\n", $p, $x, ($p + $x == 0 ? "   (host skipped?)" : '');
+    print $out if $verbose;
+}
+
+print "\n";
+print "$_\n" for @bad;
+printf "TOTAL: %d pass, %d fail\n", $pass, $fail;
+exit($fail == 0 ? 0 : 1);

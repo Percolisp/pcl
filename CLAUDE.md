@@ -112,6 +112,15 @@ prove -v Pl/t/codegen-01.t
 
 # Quick transpile test
 echo 'my $x = 1 + 2;' | ./pl2cl
+
+# XS: run pclxs's CONFORMANCE CORPUS against PCL as a host.  This is the
+# pclxs project's definition of "a host is done", and it answers a
+# different question from Pl/t/xs-01.t: that file asks "does the bridge
+# work at all", this asks "does PCL answer every case the way real perl
+# does" -- 216 cases, with real perl as the oracle.  Minutes, not seconds
+# (one SBCL launch per case set), so it is not part of the Pl/t gate.
+tools/pcl-conform                # whole corpus
+tools/pcl-conform 96-flags       # one case-set file
 ```
 
 **Pipelines:** the v2 structured-emission pipeline (`Pl/Parser2.pm` +
@@ -233,6 +242,11 @@ func => -12         # 1 param before list
 ## Test Status
 
 - **119 test files, 4368 tests** (Pl/t gate, as of session 311 — includes Pl/t/xs-01.t, which skips without a built pclxs sibling)
+- **XS conformance: 215 pass, 1 fail** against pclxs's corpus with real perl
+  as oracle (`tools/pcl-conform`, session 312). The one failure is a known
+  semantic difference, not a bridge bug: scalar-ref blessing is recorded on
+  the wrapper box, so XS asking the REFERENT (`SvSTASH(SvRV(rv))`) finds
+  nothing. Not in the Pl/t gate — minutes, not seconds.
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
