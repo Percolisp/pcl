@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 312 (2026-07-25, Opus 5, from the pclxs side) — pclxs ABI 3: the adapter must answer "what IS this value".
+
+**Read this before touching `cl/pcl-xs.lisp`.** The work happened in the
+pclxs repo; one callback and the pin changed here, and the reason matters
+more than the diff.
+
+pclxs found a silent wrong-answer bug on its side: an XSUB argument is a
+proxy for one of OUR objects, and its perl flags (`SvIOK`/`SvNOK`/`SvPOK`)
+were only being filled in when something *read* the value. But real XS
+reads the flags **first** — Params::Util's entire API is
+`SvFLAGS(sv) & (SVf_OK & ~SVf_ROK)` with no read at all, and JSON::XS
+picks number-vs-string encoding the same way. Every such module was
+getting "this holds nothing".
+
+The fix needs the host, so the vtable gained **`scalar_flags`** (ABI 2 →
+3): *what is this value*, answered by inspection. Our implementation is a
+type dispatch over the unboxed value — integer → IOK, other real → NOK,
+string → POK (+UTF8 by the same rule `%xs-string-out` uses), anything
+else → the `p-reftype` check `xs-ref-type` already does, so the two
+callbacks cannot disagree.
+
+**The one thing not to do to it:** never implement `scalar_flags` by
+trying a coercion. `"12"` must answer POK and nothing else. Answer
+POK|IOK and every string in the program starts encoding as a number —
+and what perl does to those flags when the module later calls `SvIV` is
+the *shim's* job, which it now does properly (it reproduces perl's
+exactness rule: `SvIV("12")` becomes publicly IOK, `SvIV("1.5")` becomes
+NOK, `SvIV("12abc")` neither).
+
+Mechanics: `xs-pin` moved to pclxs `44e046a`, abi 3, and `Pl/t/xs-01.t`
+is green again (6/6). The failure mode before the fix is worth knowing
+because it is the designed one: `pclxs_init` refused the table and named
+the callback — `first missing callback: scalar_flags` — rather than
+crashing later in a null call.
+
+---
+
 ## Session 311 (2026-07-25, Opus 5) — the XS bridge reaches PCL: CPAN XS modules run inside the runtime.
 
 - **`cl/pcl-xs.lisp` SHIPPED**: the host adapter for pclxs (sibling checkout, `xs-pin`, ABI 2).  ~50 sb-alien callables implementing the vtable, a handle table, and the trampoline that makes a shim-built XSUB an **ordinary PCL sub** — same name via `%pcl-cl-sub-name`, same calling convention, same wantarray, same die.  **Digest::MD5 computes identical digests to perl from inside PCL**; `Pl/t/xs-01.t` gates the whole chain (xsubpp -> cc -> libpclxs -> vtable -> PCL) and skips cleanly when the sibling checkout is absent or unbuilt.  Gate now 119 files / 4368 tests.

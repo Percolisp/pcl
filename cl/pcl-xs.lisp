@@ -217,6 +217,40 @@
   (with-xs-guard ()
     (if (p-looks-like-number (unbox (%xs-deref h))) 1 0)))
 
+;;; scalar_flags (pclxs ABI 3) -- "what IS this value", the question XS asks
+;;; with SvIOK/SvNOK/SvPOK.  The shim calls it once for every argument
+;;; entering an XSUB, because modules read the flags BEFORE they read the
+;;; value (Params::Util's whole API is a raw flag test; JSON::XS picks
+;;; number-vs-string encoding from them).
+;;;
+;;; This is NOT a coercion, and implementing it as one would be a quiet
+;;; disaster: the string "12" must answer POK alone.  Answer POK|IOK and
+;;; every string in the program starts being encoded as a number.  What
+;;; perl then does to those flags when someone calls SvIV is the SHIM's
+;;; business, and it already does it.
+(sb-alien:define-alien-callable xs-scalar-flags sb-alien:unsigned-int
+  ((h sb-alien:long))
+  (with-xs-guard ()
+    (let* ((cell (%xs-deref h))
+           (v    (unbox cell)))
+      (cond ((or (null v) (eq v *p-undef*)) 0)
+            ((integerp v) #x0001)                        ; PS_SVF_IOK
+            ((realp v)    #x0002)                        ; PS_SVF_NOK
+            ((stringp v)
+             ;; PS_SVF_POK, plus PS_SVF_UTF8 on the same rule
+             ;; %xs-string-out uses when it hands the bytes over.
+             (logior #x0004
+                     (if (every (lambda (c) (< (char-code c) 256)) v)
+                         0 #x0010)))
+            ;; Anything else is a container, code, glob or scalar cell --
+            ;; a reference in Perl's terms.  Ask the same function
+            ;; xs-ref-type asks, so the two callbacks cannot disagree
+            ;; about whether the shim should treat this as an RV.
+            (t (let ((rt (p-reftype cell)))
+                 (if (or (null rt) (eq rt *p-undef*) (equal rt ""))
+                     0
+                     #x0008)))))))                       ; PS_SVF_ROK
+
 ;;; get_pvn hands the string out through a sink the SHIM provides, so the
 ;;; buffer's lifetime is the call (rule O5) and neither side guesses.
 (sb-alien:define-alien-callable xs-get-pvn sb-alien:void
@@ -317,6 +351,7 @@
     ("get_bool"          . xs-get-bool)
     ("is_defined"        . xs-is-defined)
     ("looks_like_number" . xs-looks-like-number)
+    ("scalar_flags"      . xs-scalar-flags)
     ("set_iv"            . xs-set-iv)
     ("set_nv"            . xs-set-nv)
     ("set_pvn"           . xs-set-pvn)
