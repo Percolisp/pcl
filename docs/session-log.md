@@ -88,6 +88,50 @@ nothing here is vendored from pclxs.
 Everything else is green: 140/140 coercion cases, 29/30 aggregates,
 11/11 iteration and callbacks, 8/8 buffer building, 27/27 SV flags.
 
+### `use Foo;` can now reach a shim-built XS module
+
+**New: `tools/pcl-xs-install`, the XS artifact cache, and a real
+`XSLoader::load`.** The reasoning is in `docs/xs-artifact-cache.md` —
+written as decisions with alternatives and revisit triggers, because this
+is unexplored ground and some of it will want changing.
+
+Until now nothing turned a module *name* into a loadable object:
+`XSLoader::load` died unconditionally (deliberately, so dual-life modules
+fall back to pure Perl), and `xs-build` was something you ran by hand with
+explicit paths. The four decisions, in brief:
+
+1. **Compile at install time, like perl** — not lazily on first `use`.
+   Predictable latency, and the unpacked distribution is still on disk,
+   which it is not at runtime. A lazy fallback slots into
+   `%p-xs-try-load` later if install turns out to be a step people forget.
+2. **The cache key is the pclxs ABI, encoded in the path**:
+   `~/.pcl-cache/xs/abi-3/auto/Digest/MD5/MD5.so`. An artifact built
+   against ABI 2 was compiled against a *different vtable*, so an ABI bump
+   has to make it unreachable — and a path that does not exist cannot be
+   loaded by anyone, whereas a version check is something somebody has to
+   remember to write. The ABI comes from `xs-pin` because the path must be
+   computed *before* deciding whether to load libpclxs at all.
+3. **Architecture by location, not by a path segment.** An archname
+   segment would need two derivations — `$Config{archname}` in Perl,
+   `machine-type` in Lisp — to agree exactly, forever, or the installer
+   writes where the loader does not look. `$PCL_XS_CACHE` covers the
+   shared-`$HOME` case that segment would have bought.
+4. **A missing artifact fails with perl's exact message**, verbatim,
+   because every dual-life module on CPAN keys its pure-Perl fallback off
+   that string. `Pl/t/xs-02.t` pins it.
+
+Proof it works: `Digest::MD5::md5_hex("abc")` from inside PCL, reached by
+module name alone through `XSLoader::load`, returns
+`900150983cd24fb0d6963f7d28e17f72` — perl's answer.
+
+One thing worth remembering from writing it: the helpers first landed in
+the **`:DynaLoader`** package, because the stubs above the insertion point
+end with an `(in-package :DynaLoader)` and never return. Everything looked
+fine — `check-parens` was happy, the file loaded — and the functions were
+simply not where anything looked for them. In a file this long, an
+`in-package` is action at a distance; the block now re-asserts `:pcl`
+explicitly rather than inheriting whatever the previous section left.
+
 ---
 
 ## Session 311 (2026-07-25, Opus 5) — the XS bridge reaches PCL: CPAN XS modules run inside the runtime.

@@ -14111,6 +14111,127 @@ buffer's fill-pointer; everything else falls back to file-length."
              pl-dl_undef_symbols))
   (setf (gethash s pcl::*p-declared-subs*) :defined))
 
+;; Back to :pcl — the DynaLoader stubs above left us in their package, and
+;; everything below is runtime machinery, not a Perl-visible stub.
+(in-package :pcl)
+
+;;; ---------------------------------------------------------------------------
+;;; XS artifact cache — finding the shared object built for an XS module.
+;;;
+;;; Perl compiles XS at INSTALL time and installs the .so into a tree whose
+;;; PATH encodes the perl version and architecture; loading is then a pure
+;;; lookup.  We copy that, because the alternative (check a version stamp at
+;;; load time) is a check somebody can forget, while a path that does not
+;;; exist cannot be loaded by accident.
+;;;
+;;;     ~/.pcl-cache/xs/abi-3/auto/Digest/MD5/MD5.so
+;;;                     └─┬─┘
+;;;             pclxs ABI, from xs-pin
+;;;
+;;; The ABI is the critical part of the key: an artifact built against ABI 2
+;;; was compiled against a DIFFERENT VTABLE, so loading it under ABI 3 is
+;;; undefined behaviour that would present as a crash inside the module.
+;;; Bumping the ABI changes the directory, so old artifacts simply stop
+;;; being found -- no invalidation logic, nothing to remember.
+;;;
+;;; Architecture is handled by LOCATION rather than by another path segment:
+;;; the cache lives under the user's home, which is per-machine in the
+;;; ordinary case.  A home directory shared across architectures needs
+;;; PCL_XS_CACHE set per machine.  See docs/xs-artifact-cache.md for why,
+;;; and for what would make us change it.
+;;; ---------------------------------------------------------------------------
+
+(defparameter *p-xs-cache-dir* nil
+  "XS artifact cache root; NIL means <*pcl-cache-dir*>/xs/.  $PCL_XS_CACHE
+   overrides, which is what a shared home directory needs.")
+
+(defparameter *p-xs-artifact-suffix* "so"
+  "Artifact extension.  Must match what tools/pcl-xs-install passes to
+   xs-build --suffix; both are ours, so they agree by construction.")
+
+(defun %p-xs-cache-root ()
+  "Where built XS artifacts live, honouring $PCL_XS_CACHE."
+  (let ((env (sb-posix:getenv "PCL_XS_CACHE")))
+    (cond (env (pathname (concatenate 'string env "/")))
+          (*p-xs-cache-dir* *p-xs-cache-dir*)
+          (t (merge-pathnames "xs/" *pcl-cache-dir*)))))
+
+(defun %p-xs-abi ()
+  "The pclxs ABI this checkout is pinned to, from xs-pin, or NIL.
+   Read from the pin rather than from libpclxs on purpose: the path has to
+   be computed BEFORE deciding whether to load the library at all, and
+   tools/build-pclxs already refuses to build when pin and checkout differ.
+   A pin that lies is caught later anyway -- pclxs_init rejects a vtable
+   whose abi_version does not match."
+  (let ((pin (and *pcl-runtime-directory*
+                  (merge-pathnames "../xs-pin" *pcl-runtime-directory*))))
+    (when (and pin (probe-file pin))
+      (with-open-file (in pin :if-does-not-exist nil)
+        (when in
+          (loop for line = (read-line in nil nil)
+                while line
+                do (let ((p (search "abi " line)))
+                     (when (and p (zerop p))
+                       (return (parse-integer (subseq line 4)
+                                              :junk-allowed t))))))))))
+
+(defun %p-xs-name-parts (module)
+  "\"Digest::MD5\" -> (\"Digest\" \"MD5\").  Perl's own auto/ layout rule."
+  (let ((parts '()) (start 0))
+    (loop for p = (search "::" module :start2 start)
+          while p
+          do (push (subseq module start p) parts)
+             (setf start (+ p 2)))
+    (push (subseq module start) parts)
+    (nreverse parts)))
+
+(defun %p-xs-artifact-path (module)
+  "MODULE (\"Digest::MD5\") -> the artifact path, or NIL without an ABI."
+  (let ((abi (%p-xs-abi)))
+    (when abi
+      (let* ((parts (%p-xs-name-parts module))
+             (leaf  (car (last parts)))
+             (rel   (format nil "abi-~D/auto/~{~A/~}~A.~A"
+                            abi parts leaf *p-xs-artifact-suffix*)))
+        (merge-pathnames rel (%p-xs-cache-root))))))
+
+(defun %p-xs-boot-symbol (module)
+  "Perl's rule: boot_Foo__Bar for Foo::Bar."
+  (with-output-to-string (out)
+    (write-string "boot_" out)
+    (loop for ch across module
+          do (if (char= ch #\:) (write-char #\_ out) (write-char ch out)))))
+
+(defun %p-xs-bridge-loaded-p ()
+  (let ((s (find-symbol "P-XS-BOOT" :pcl)))
+    (and s (fboundp s))))
+
+(defun %p-xs-ensure-bridge ()
+  "Load cl/pcl-xs.lisp on demand.  It is not loaded up front because it
+   needs libpclxs at load time, and a PCL program that never touches XS
+   must not need the shim built at all."
+  (or (%p-xs-bridge-loaded-p)
+      (let ((f (and *pcl-runtime-directory*
+                    (merge-pathnames "pcl-xs.lisp" *pcl-runtime-directory*))))
+        (when (and f (probe-file f))
+          (handler-case (progn (load f) (%p-xs-bridge-loaded-p))
+            (error (e)
+              (format *error-output*
+                      "~&pcl: XS bridge present but failed to load: ~A~%" e)
+              nil))))))
+
+(defun %p-xs-try-load (module)
+  "Boot MODULE's cached artifact.  T on success, NIL if there is nothing to
+   load -- and NIL must stay quiet, because the caller's fallback is the
+   error perl gives when a module has no .so, which is what makes
+   dual-life modules (Data::Dumper, Time::HiRes) fall back to pure Perl."
+  (let ((path (%p-xs-artifact-path module)))
+    (when (and path (probe-file path) (%p-xs-ensure-bridge))
+      (funcall (find-symbol "P-XS-BOOT" :pcl)
+               (namestring (truename path))
+               (%p-xs-boot-symbol module))
+      t)))
+
 (defpackage :XSLoader (:use :cl :pcl))
 (in-package :XSLoader)
 ;; XSLoader::load('Module', $version) — PCL cannot load XS, so this MUST fail
@@ -14121,7 +14242,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; the nonexistent XS sub (e.g. Data::Dumper::Dumpxs).
 (defun pl-load (&rest args)
   (let ((mod (if args (to-string (first args)) "this module")))
-    (p-die (format nil "Can't locate loadable object for module ~A in @INC" mod))))
+    ;; Try the XS bridge first: if this module has an artifact in the cache
+    ;; (built by tools/pcl-xs-install), boot it and we are done.
+    (unless (pcl::%p-xs-try-load mod)
+      ;; Nothing built.  Fail EXACTLY as perl does on a system where the
+      ;; loadable object is missing -- see the comment above; this message
+      ;; is load-bearing for every dual-life module on CPAN.
+      (p-die (format nil "Can't locate loadable object for module ~A in @INC"
+                     mod)))
+    1))
 (defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
 ;;; UNIVERSAL package methods — callable as UNIVERSAL::can($obj, $m) etc.
 (defpackage :UNIVERSAL (:use :cl :pcl))

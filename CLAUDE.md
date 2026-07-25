@@ -113,6 +113,15 @@ prove -v Pl/t/codegen-01.t
 # Quick transpile test
 echo 'my $x = 1 + 2;' | ./pl2cl
 
+# XS: build a distribution for PCL and put it where XSLoader::load looks.
+# Compile happens HERE, at install time, like perl — not at first use.
+# Cache key is the pclxs ABI from xs-pin, encoded in the PATH, so an ABI
+# bump makes old artifacts unreachable rather than merely stale.
+# See docs/xs-artifact-cache.md for the alternatives and revisit triggers.
+tools/pcl-xs-install ~/.cpan/build/Digest-MD5-2.59-0
+tools/pcl-xs-install --list      # what is cached, and for which ABIs
+tools/pcl-xs-install --clean     # drop artifacts built for other ABIs
+
 # XS: run pclxs's CONFORMANCE CORPUS against PCL as a host.  This is the
 # pclxs project's definition of "a host is done", and it answers a
 # different question from Pl/t/xs-01.t: that file asks "does the bridge

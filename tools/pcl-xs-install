@@ -1,0 +1,167 @@
+#!/usr/bin/env perl
+# pcl-xs-install — build an unpacked XS distribution for PCL and put the
+# artifact where PCL's loader will find it.
+#
+#   tools/pcl-xs-install ~/.cpan/build/Digest-MD5-2.59-0
+#   tools/pcl-xs-install --list             # what is in the cache
+#   tools/pcl-xs-install --clean            # drop artifacts for OTHER ABIs
+#
+# WHY THIS EXISTS, and why the compile is here rather than at first use:
+#
+# Perl compiles XS at INSTALL time, once, and installs the .so into a tree
+# whose path encodes the perl version and architecture.  Loading is then a
+# pure lookup — no compiler at runtime, no staleness check, no locking.  We
+# copy that model deliberately (docs/xs-artifact-cache.md), because the
+# alternative — compile lazily on first `use` — pays cc latency inside a
+# user's program, needs an atomic-rename dance for concurrent processes,
+# and has to keep the unpacked distribution around at runtime, which perl
+# does not.
+#
+# The cache key is the pclxs ABI, taken from xs-pin:
+#
+#     ~/.pcl-cache/xs/abi-3/auto/Digest/MD5/MD5.so
+#
+# An artifact built against ABI 2 was compiled against a DIFFERENT VTABLE,
+# so an ABI bump must make it unreachable.  Encoding the ABI in the path
+# does that by construction: nothing has to notice it is stale, because
+# nothing looks there any more.  cl/pcl-runtime.lisp derives exactly this
+# path in %p-xs-artifact-path — the two must agree, and both read xs-pin.
+#
+# What this does NOT do: install the distribution's .pm files.  They are
+# ordinary Perl and PCL transpiles them like any other module, so they
+# belong wherever your @INC points; this tool tells you which ones it saw.
+
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Basename qw(dirname basename);
+use File::Path qw(make_path);
+use File::Copy qw(copy);
+use Getopt::Long;
+
+my $PCL_ROOT = abs_path(dirname(abs_path($0)) . '/..');
+
+my %opt;
+GetOptions(\%opt, 'list', 'clean', 'cache=s', 'verbose', 'pclxs=s')
+    or die usage();
+
+my $PCLXS = $opt{pclxs} || $ENV{PCLXS_DIR} || abs_path("$PCL_ROOT/../pclxs");
+my $CACHE = $opt{cache} || $ENV{PCL_XS_CACHE}
+         || ($ENV{HOME} . '/.pcl-cache/xs');
+
+my $abi = read_pin_abi();
+my $dir = "$CACHE/abi-$abi";
+
+if ($opt{list})  { do_list();  exit 0 }
+if ($opt{clean}) { do_clean(); exit 0 }
+
+my $dist = shift @ARGV or die usage();
+die "pcl-xs-install: no such directory: $dist\n" if ! -d $dist;
+$dist = abs_path($dist);
+
+die "pcl-xs-install: no pclxs checkout at $PCLXS (set PCLXS_DIR)\n"
+    if ! -d $PCLXS;
+die "pcl-xs-install: libpclxs not built.  Run: tools/build-pclxs\n"
+    if ! -f "$PCLXS/build/libpclxs.so";
+
+# The ABI the artifact will actually be built against, straight from the
+# checkout.  If it disagrees with our pin, the pin is stale and every path
+# we compute is wrong -- refuse rather than fill the cache with artifacts
+# the loader will never look for.
+chomp(my $built_abi = `$^X $PCLXS/tools/xs-build --pclxs $PCLXS --print-abi`);
+die "pcl-xs-install: xs-pin says abi $abi but $PCLXS is abi $built_abi.\n"
+  . "  Run tools/build-pclxs --pin-here after checking the adapter.\n"
+    if $built_abi ne "$abi";
+
+make_path($dir) if ! -d $dir;
+
+# xs-build's own default layout under --out is auto/Foo/Bar/Bar.<suffix>,
+# which is perl's, so pointing --out at the ABI directory produces exactly
+# the path the loader derives.  --suffix must match
+# *p-xs-artifact-suffix* in the runtime; both are ours.
+my @cmd = ($^X, "$PCLXS/tools/xs-build", '--pclxs', $PCLXS,
+           '--out', $dir, '--suffix', '.so', $dist);
+print "@cmd\n" if $opt{verbose};
+my $log = qx{@cmd 2>&1};
+my ($so) = $log =~ /^built:\s*(\S+)/m;
+
+if (! $so) {
+    print $log;
+    die "pcl-xs-install: build failed for $dist\n";
+}
+
+printf "installed %s\n  -> %s\n", basename($dist), $so;
+
+my @pm = sort map { s{^\Q$dist\E/}{}r } grep { -f } glob_pm($dist);
+if (@pm) {
+    print "  the distribution's Perl side (put these on \@INC yourself):\n";
+    print "    $_\n" for @pm;
+}
+
+sub glob_pm {
+    my ($root) = @_;
+    my @out;
+    my @todo = ($root);
+    while (my $d = shift @todo) {
+        next if $d =~ m{/(?:blib-pclxs|t|\.git)$};
+        opendir my $dh, $d or next;
+        for my $e (readdir $dh) {
+            next if $e =~ /^\./;
+            my $p = "$d/$e";
+            push @todo, $p if -d $p;
+            push @out, $p  if -f $p && $e =~ /\.pm$/;
+        }
+        closedir $dh;
+    }
+    return @out;
+}
+
+sub read_pin_abi {
+    my $pin = "$PCL_ROOT/xs-pin";
+    open my $fh, '<', $pin or die "pcl-xs-install: $pin: $!\n";
+    while (<$fh>) { return $1 if /^abi\s+(\d+)/ }
+    die "pcl-xs-install: no 'abi N' line in $pin\n";
+}
+
+sub do_list {
+    if (! -d $CACHE) { print "cache is empty ($CACHE)\n"; return }
+    for my $d (sort glob("$CACHE/abi-*")) {
+        my $n = basename($d);
+        my @a = sort map { s{^\Q$d\E/auto/}{}r } find_so($d);
+        printf "%s%s  (%d artifact%s)\n", $n,
+               ($n eq "abi-$abi" ? '  <- current' : '  [stale]'),
+               scalar @a, (@a == 1 ? '' : 's');
+        print "    $_\n" for @a;
+    }
+}
+
+sub do_clean {
+    my $kept = 0;
+    for my $d (sort glob("$CACHE/abi-*")) {
+        if (basename($d) eq "abi-$abi") { $kept++; next }
+        print "removing $d\n";
+        system('rm', '-rf', $d) == 0 or warn "  failed\n";
+    }
+    print "kept abi-$abi\n" if $kept;
+}
+
+sub find_so {
+    my ($root) = @_;
+    my (@out, @todo) = ((), $root);
+    while (my $d = shift @todo) {
+        opendir my $dh, $d or next;
+        for my $e (readdir $dh) {
+            next if $e =~ /^\./;
+            my $p = "$d/$e";
+            push @todo, $p if -d $p;
+            push @out, $p  if -f $p && $e =~ /\.so$/;
+        }
+        closedir $dh;
+    }
+    return @out;
+}
+
+sub usage {
+    return "usage: pcl-xs-install [--cache DIR] [--pclxs DIR] [-v] <unpacked-dist>\n"
+         . "       pcl-xs-install --list | --clean\n";
+}
