@@ -124,6 +124,14 @@ Proof it works: `Digest::MD5::md5_hex("abc")` from inside PCL, reached by
 module name alone through `XSLoader::load`, returns
 `900150983cd24fb0d6963f7d28e17f72` — perl's answer.
 
+### pclxs ABI 4: method_lookup
+
+One more callback, `xs-method-lookup`, routed straight to `p-can` -- the
+question is "what CODE does CLS->NAME resolve to", which is exactly what
+`->can` answers, @ISA walk and all.  NIL is an answer, not a failure: XS
+asks this to decide whether an OPTIONAL hook exists.  `xs-pin` moved to
+abi 4 in the same session, so the bump never left this repo broken.
+
 ### Two adapter bugs of the same shape: unboxing at the boundary
 
 Running Digest::MD5's OO interface for the first time (which the loader

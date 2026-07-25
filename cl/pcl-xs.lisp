@@ -378,6 +378,7 @@
     ("bless"             . xs-bless)
     ("blessed_class"     . xs-blessed-class)
     ("isa"               . xs-isa)
+    ("method_lookup"     . xs-method-lookup)
     ("new_av"            . xs-new-av)
     ("av_count"          . xs-av-count)
     ("av_fetch"          . xs-av-fetch)
@@ -522,6 +523,22 @@
       (if (and (stringp r) (string/= r "") (not (equal r rt)))
           (progn (%xs-send-string sink ud r) 1)
           0))))
+
+;; method_lookup (pclxs ABI 4): what CODE does CLS->NAME resolve to?
+;; This is `->can`, and p-can is exactly that -- @ISA walk, UNIVERSAL,
+;; and NIL when the class has no such method.  NIL is an ANSWER: XS asks
+;; this to decide whether an optional hook exists (JSON::XS looks for
+;; TO_JSON and FREEZE) and must be able to take the other branch.
+(sb-alien:define-alien-callable xs-method-lookup sb-alien:long
+  ((cls (sb-alien:* sb-alien:char)) (clslen sb-alien:unsigned-long)
+   (name (sb-alien:* sb-alien:char)) (namelen sb-alien:unsigned-long)
+   (autoload-ok sb-alien:int))
+  (declare (ignore autoload-ok))
+  (with-xs-guard ()
+    (let* ((class  (%xs-string-in cls clslen 0))
+           (method (%xs-string-in name namelen 0))
+           (code   (p-can class method)))
+      (if code (%xs-intern code) 0))))
 
 (sb-alien:define-alien-callable xs-isa sb-alien:int
   ((h sb-alien:long) (cls (sb-alien:* sb-alien:char))
