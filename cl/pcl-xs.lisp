@@ -458,6 +458,24 @@
 ;;; unboxing -- which is why every class question goes through p-ref rather
 ;;; than reading a slot here.
 
+(defun %xs-own-copy (h)
+  "Rule O2 in one place: OUR OWN reference to the value behind H, because
+   the caller keeps its handle and may release it the moment we return.
+
+   Copies the value AND THE CLASS.  The class matters because PCL records
+   a scalar ref's blessing on the wrapper box, so a plain
+   `(make-p-box (unbox cell))` -- which is what av_store, av_push and
+   hv_store all did -- turns a blessed reference into a fresh box holding
+   its referent: the ref-ness and the class both gone.  That is the
+   T_PTROBJ object model, and it broke the moment an object crossed to the
+   host and came back, which is exactly what `Digest::MD5->new` followed by
+   `->add` does.  Every existing case passed because every existing case
+   stored a plain scalar.  Pinned now by pclxs's ptrobj_via_host."
+  (let ((cell (%xs-deref h)))
+    (if (p-box-p cell)
+        (make-p-box (unbox cell) (p-box-class cell))
+        (make-p-box (if (null cell) *p-undef* cell)))))
+
 (sb-alien:define-alien-callable xs-new-ref sb-alien:long
   ((target sb-alien:long))
   (with-xs-guard () (%xs-intern (p-backslash (%xs-deref target)))))
@@ -554,14 +572,14 @@
               do (vector-push-extend (make-p-box *p-undef*) a))
         ;; Rule O2: take our own reference to the VALUE; the caller keeps
         ;; its handle and may release it the moment we return.
-        (setf (aref a i) (make-p-box (unbox (%xs-deref v))))))
+        (setf (aref a i) (%xs-own-copy v))))
     (values)))
 
 (sb-alien:define-alien-callable xs-av-push sb-alien:void
   ((h sb-alien:long) (v sb-alien:long))
   (with-xs-guard ()
     (let ((a (%xs-av h)))
-      (when a (vector-push-extend (make-p-box (unbox (%xs-deref v))) a)))
+      (when a (vector-push-extend (%xs-own-copy v) a)))
     (values)))
 
 (sb-alien:define-alien-callable xs-av-pop sb-alien:long
@@ -640,7 +658,7 @@
     (let ((tbl (%xs-hv h)))
       (when tbl
         (setf (gethash (%xs-string-in k kl utf8) tbl)
-              (make-p-box (unbox (%xs-deref v))))))
+              (%xs-own-copy v))))
     (values)))
 
 (sb-alien:define-alien-callable xs-hv-exists sb-alien:int
@@ -823,7 +841,22 @@
   (declare (ignore ud))
   (with-xs-guard ()
     ;; Rule O1: this handle is ours now, so read the value and drop it.
-    (push (unbox (%xs-deref h)) *xs-results*)
+    ;;
+    ;; UNBOX ONLY A PLAIN SCALAR.  A result that is a REFERENCE has to come
+    ;; back as the reference itself: unboxing one yields its referent, which
+    ;; throws away both the ref-ness and -- since PCL records a scalar ref's
+    ;; blessing on the wrapper box -- the class.  That is how
+    ;; `Digest::MD5->new` returned undef while `md5_hex` worked: the
+    ;; functional interface returns a string, the OO one returns a blessed
+    ;; scalar ref built by sv_setref_pv, and only the second went through
+    ;; this line.  Nothing caught it for a phase because no test called an
+    ;; XSUB that returns a reference.
+    (let* ((cell (%xs-deref h))
+           (rt   (p-reftype cell)))
+      (push (if (or (null rt) (eq rt *p-undef*) (equal rt ""))
+                (unbox cell)
+                cell)
+            *xs-results*))
     (%xs-release h)
     (values)))
 

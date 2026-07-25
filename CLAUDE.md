@@ -251,7 +251,7 @@ func => -12         # 1 param before list
 ## Test Status
 
 - **119 test files, 4368 tests** (Pl/t gate, as of session 311 — includes Pl/t/xs-01.t, which skips without a built pclxs sibling)
-- **XS conformance: 215 pass, 1 fail** against pclxs's corpus with real perl
+- **XS conformance: 246 pass, 1 fail** against pclxs's corpus with real perl
   as oracle (`tools/pcl-conform`, session 312). The one failure is a known
   semantic difference, not a bridge bug: scalar-ref blessing is recorded on
   the wrapper box, so XS asking the REFERENT (`SvSTASH(SvRV(rv))`) finds

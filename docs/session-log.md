@@ -124,6 +124,44 @@ Proof it works: `Digest::MD5::md5_hex("abc")` from inside PCL, reached by
 module name alone through `XSLoader::load`, returns
 `900150983cd24fb0d6963f7d28e17f72` — perl's answer.
 
+### Two adapter bugs of the same shape: unboxing at the boundary
+
+Running Digest::MD5's OO interface for the first time (which the loader
+above made possible) found both. `md5_hex` worked; `Digest::MD5->new`
+returned undef, and after that `->add` said *Failed to get MD5_CTX
+pointer*.
+
+Both causes were the same line written twice, in different callbacks:
+
+```lisp
+(make-p-box (unbox (%xs-deref h)))      ; av_store, av_push, hv_store
+(unbox (%xs-deref h))                   ; xs-collect-result
+```
+
+**Unboxing a reference yields its referent.** For a blessed scalar ref —
+which is what every T_PTROBJ object is, including an MD5 context — that
+throws away the ref-ness *and*, because PCL records a scalar ref's
+blessing on the wrapper box, the class. Every existing test passed
+because every existing test moved a plain scalar across.
+
+Fixed: `xs-collect-result` returns the cell when it is a reference, and
+`%xs-own-copy` is now the single place that takes our own reference to a
+value (rule O2) while preserving both value and class. pclxs grew a
+conformance case for the shape — `ptrobj_via_host`, which stores a
+blessed ref into a host array and fetches it back — and PCL went from
+failing it to passing it.
+
+Conformance after: **246 pass, 1 fail** (was 215/1 before the corpus
+grew; the one failure is still the scalar-ref blessing divergence).
+
+**Still open, and filed rather than chased**: `Digest::MD5->new` now
+returns a real object (`ref($o)` is `Digest::MD5`, `->isa` works) but its
+*referent* is unreadable from PCL — `${ Digest::MD5->new }` is undef,
+with or without an intervening variable, so `->add` still cannot find its
+context pointer. That is PCL's own representation of a reference built by
+the bridge, not the adapter, and it belongs with the scalar-ref blessing
+question rather than with the XS work.
+
 One thing worth remembering from writing it: the helpers first landed in
 the **`:DynaLoader`** package, because the stubs above the insertion point
 end with an `(in-package :DynaLoader)` and never return. Everything looked
