@@ -55,14 +55,24 @@ my ($pass, $fail, @bad) = (0, 0);
 for my $f (sort @files) {
     printf "%-22s ", $f;
     my $out = qx{cd $PCLXS && PCLXS_HOST_DEFS=$HOSTDEF $^X -I t/lib t/$f 2>&1};
-    my ($p, $x) = (0, 0);
+    my ($p, $x, $why) = (0, 0);
     for my $line (split /\n/, $out) {
         $p++ if $line =~ /^ok .* pcl vs/;
         $x++ if $line =~ /^not ok .* pcl vs/;
         push @bad, "  $f: $line" if $line =~ /^not ok .* pcl vs/;
+        # A case set may declare `requires => <capability>`. A host that
+        # implements none of an OPTIONAL vtable group is CONFORMING, not
+        # broken (pclxs docs/decisions.md D4), so those cases skip -- and
+        # the reason gets printed, because "skipped?" with a question mark
+        # is exactly the ambiguity the capability mechanism removes.
+        $why = $1 if ! defined $why
+                  && $line =~ /^ok .*# skip (pcl does not implement:[^\n]*)/;
     }
     $pass += $p; $fail += $x;
-    printf "%3d pass %2d fail%s\n", $p, $x, ($p + $x == 0 ? "   (host skipped?)" : '');
+    printf "%3d pass %2d fail%s\n", $p, $x,
+          ($p + $x > 0)  ? q{}
+        : defined $why   ? "   ($why)"
+        :                  "   (no cases ran -- check the host definition)";
     print $out if $verbose;
 }
 
