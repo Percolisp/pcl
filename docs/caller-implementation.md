@@ -193,3 +193,51 @@ filename/subname; reading `(nth level stack)` is trivial on top.
   `scalar(caller)`, is correct).
 - It does **not** touch `p-get-class`/method dispatch — package *case* recovery
   for blessed objects already worked via literal strings.
+
+---
+
+## What pclxs needs from this, and what it will inherit
+
+*Added 2026-07-26, from the pclxs side. This section is here rather than in
+that repo because it is host-side knowledge: pclxs never names PCL.*
+
+XS asks `caller` too, and the first measured case is **Params::Validate**,
+whose `get_caller` walks perl's context stack for exactly one thing — the
+package and sub name to put in an error message:
+
+```c
+/* Params-Validate-1.31/lib/Params/Validate/XS.xs */
+while (cxix >= 0) {
+    ... CXt_SUB / CXt_EVAL ...
+    gv_efullname4(sv, CvGV(cx->blk_sub.cv), NULL, TRUE);   /* "Foo::bar" */
+}
+```
+
+pclxs classifies this **B, not D** (`tools/xs-classify`): the *mechanism* is
+perl's `cxstack`, which is interpreter guts, but the *question* is `caller`,
+and a host has an answer. So when pclxs implements it, it will be a vtable
+question answered by the host — which for PCL means this file's machinery.
+
+**And it inherits this file's limits, deliberately.** The pclxs side has
+been told to copy the behaviour rather than invent a better one:
+
+| field | PCL today | what XS sees through pclxs |
+|---|---|---|
+| package | correct (this document) | correct |
+| filename | `"-"` / unknown | `"-"` — error messages will say so |
+| line | `0` | `0` |
+| sub name (`(caller(N))[3]`) | not returned; the list-context 4-tuple has the `wantarray` gap above | pclxs cannot fill it in either |
+
+The consequence is narrow and worth writing down before someone reports it
+as a pclxs bug: **XS-generated diagnostics will carry `(unknown) line 0`
+and, where a module prints the calling sub's name, an incomplete one.**
+Params::Validate's message degrades from
+`Foo::bar(): the 'x' parameter is required` to something without the
+`Foo::bar` part. The validation itself is unaffected — no module measured
+so far *branches* on caller's filename or sub name, they only print them.
+
+**Where fixing it would pay twice.** A source map (this file's deferred
+item) would fix perl-side `caller` and XS-side diagnostics in one move,
+since the pclxs entry would just forward. That is the argument for doing
+it here rather than working around it in the shim: the shim cannot
+synthesise a filename it was never given.
