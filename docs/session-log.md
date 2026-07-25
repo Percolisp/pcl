@@ -4,6 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 313 (2026-07-25, Opus 5, from the pclxs side) — pclxs ABI 5: the pin moved, the adapter did not.
+
+**One line changed in this repo: `xs-pin`, abi 4 -> 5.** No adapter code,
+no runtime code. That is worth reading the reason for, because it is the
+first ABI bump where it was true, and it will be true again.
+
+pclxs ABI 5 adds eight vtable entries for filehandles. Every earlier bump
+made its new entries **mandatory** -- `pclxs_init` refuses a table with a
+hole -- so 2->3 and 3->4 each forced an adapter change here in the same
+session or `use Digest::MD5` stopped working at boot. ABI 5 introduced
+**optional capability groups**: `io_*` is all-or-nothing but may be absent
+entirely, so a host that implements none of it is accepted and simply
+reports no `PCLXS_CAP_IO`. XS that reaches for a filehandle croaks with a
+message naming the group; everything else is unaffected.
+
+The measurement behind that (pclxs `census/IO.tsv`): 49 of 79
+distributions never touch a filehandle at all, and the ones that do
+usually touch it in one function you have to ask for. Gating all of XS on
+a runtime is IO story was the wrong trade.
+
+**What DID fail, and why it should have.** `Pl/t/xs-01.t` passed
+throughout; `Pl/t/xs-02.t` failed all four cases with
+
+    pcl-xs-install: xs-pin says abi 4 but /home/bernt/pclxs is abi 5.
+
+That is the pin guard working. Remember the split for next time: **an ABI
+bump can leave the adapter working and the install tooling refusing**, and
+the refusal is the feature -- the artifact cache is keyed on ABI in the
+path, so a `.so` built against older headers can never be loaded against
+newer ones. `tools/build-pclxs --pin-here` was the entire fix.
+`tools/prove-core` 120 files / 4372 tests PASS after it.
+
+**The real item is DESTROY, and it needs no ABI bump.** pclxs can now run
+a `DESTROY` XSUB, but only when the host tells it an object died -- which
+is a host -> shim call through the exported API, not a vtable callback.
+PCL does not call it yet, so **every T_PTROBJ object still leaks its C
+side**: bounded in a script, unbounded in a long-lived image, which is the
+deployment that matters here.
+
+**Read `docs/xs-abi5-and-destroy.md` before doing any of it.** It has the
+finalizer contract (the destructor takes a REFERENCE while the class lives
+on the REFERENT -- getting that backwards was two separate bugs on the
+pclxs side), the note that this should be fixed together with the open
+scalar-ref blessing bug because they are the same question, and a
+performance section. The headline of that section: **cache
+`pclxs_has_destroy` per CLASS**, or every finalized object costs a method
+lookup across the bridge.
+
+---
+
 ## Session 312 (2026-07-25, Opus 5, from the pclxs side) — pclxs ABI 3: the adapter must answer "what IS this value".
 
 **Read this before touching `cl/pcl-xs.lisp`.** The work happened in the

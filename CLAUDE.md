@@ -118,6 +118,7 @@ echo 'my $x = 1 + 2;' | ./pl2cl
 # Cache key is the pclxs ABI from xs-pin, encoded in the PATH, so an ABI
 # bump makes old artifacts unreachable rather than merely stale.
 # See docs/xs-artifact-cache.md for the alternatives and revisit triggers.
+# See docs/xs-abi5-and-destroy.md for pclxs ABI 5 / DESTROY (not done here yet).
 tools/pcl-xs-install ~/.cpan/build/Digest-MD5-2.59-0
 tools/pcl-xs-install --list      # what is cached, and for which ABIs
 tools/pcl-xs-install --clean     # drop artifacts built for other ABIs
@@ -310,6 +311,7 @@ Not relevant now:
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.
 - `docs/xs-blessed-ref-referent-bug.md` - **OPEN BUG blocking XS OO**: a bridge-built blessed scalar ref keeps its class but its referent is unreadable (`$$obj` undef), so T_PTROBJ modules construct fine and then cannot find their C pointer. Ruled out: the shim, and the adapter. Start with the pure-Perl analogue.
+- `docs/xs-abi5-and-destroy.md` - **what pclxs ABI 5 changes here, and what it costs**: nothing is broken (filehandles are the first OPTIONAL vtable capability group, so the pin can stay at abi 4), but DESTROY is now callable and needs no ABI bump — an unimplemented destructor leaks the C side of every T_PTROBJ object, which is bounded in a script and unbounded in a long-lived image. Has the performance section: cache `pclxs_has_destroy` per CLASS or pay a bridge crossing per finalized object.
 - `docs/extensions.md` - **Extension loading**: `p-load-extension`, self-loading stubs, standalone binaries, adding new extensions
 
 ## Dependencies
