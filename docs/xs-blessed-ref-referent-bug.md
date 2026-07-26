@@ -175,3 +175,34 @@ and the two will be answered together or not at all.
 `docs/decisions.md` D10 (why, and the alternatives rejected), and
 `t/85-magic.t` (the case, which is Digest::MD5's exact shape and is green
 against real perl).
+
+## DONE: PCL implemented the group (session 315, task #115)
+
+Both callbacks live in `cl/pcl-xs.lisp`: `xs-magic-set` / `xs-magic-get`,
+one integer word per object in `*xs-magic-words*` — a weak-by-key `eq`
+table, so the word lives exactly as long as the object and is never
+copied on assignment (box identity is the key; `box-set` copies values,
+never identity).  `PCL_XS_MAGIC_DEBUG=1` traces the keying.
+
+Implementing it exposed the real last bug, which was OURS: **`xs-ref-target`
+returned the is-ref WRAPPER box, not the referent** — `p-backslash`
+builds `\$x` as a fresh wrapper box whose value is the referent box, and
+`unbox($obj)` stops at the wrapper.  perl's `SvRV` identity is what both
+magic and blessing (#99) key on, so ref_target now unwraps that one extra
+level for exactly the scalar-ref shape (array/hash/code wrappers pass
+through unchanged).  A write through SvRV also reaches the original
+variable now instead of severing the wrapper.
+
+Also fell out: `p-xs-invoke` had a fixed 64-slot argv ("more than 64
+arguments to an XSUB") — perl has no arity cap, and Digest::MD5's own
+`->add(split //, $msg)` reaches 250+ args.  Calls wider than 64 now
+heap-allocate their argv; the common case keeps the stack buffer.
+
+**Result**: `Digest::MD5->new->add(...)->hexdigest` works; the dist's own
+suite under PCL: md5-aaa.t 256/256, clone.t 6/6, align.t 1/1, bits.t 2/2.
+Remaining non-passes are OTHER families: files.t needs the `io` vtable
+capability group (cleanly reported, not implemented here yet), utf8.t t1 =
+unicode-limits family, badfile.t/warns.t = error/warning-text family.
+Conformance corpus 370/0 green.  Guard: `Pl/t/xs-03.t` (self-contained
+fixture with Digest::MD5's exact sv_magicext shape, driven through a
+transpiled program end to end).

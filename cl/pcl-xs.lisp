@@ -377,6 +377,10 @@
     ("ref_target"        . xs-ref-target)
     ("bless"             . xs-bless)
     ("blessed_class"     . xs-blessed-class)
+    ;; The magic group (ABI 6) is all-or-nothing: pclxs_init refuses a
+    ;; half-started group by name, so these two travel together.
+    ("magic_set"         . xs-magic-set)
+    ("magic_get"         . xs-magic-get)
     ("isa"               . xs-isa)
     ("method_lookup"     . xs-method-lookup)
     ("new_av"            . xs-new-av)
@@ -497,7 +501,17 @@
   ((h sb-alien:long))
   (with-xs-guard ()
     (let ((v (unbox (%xs-deref h))))
-      (%xs-intern v))))
+      ;; A SCALAR ref is a fresh is-ref WRAPPER around the referent box
+      ;; (p-backslash box->box) -- perl's SvRV is the REFERENT, and its
+      ;; IDENTITY is load-bearing: blessing (#99) and the magic word (#115)
+      ;; both live on the referent box, and a write through SvRV must reach
+      ;; the original variable, not the wrapper.  One more unwrap for
+      ;; exactly that shape; array/hash/code/glob wrappers pass through
+      ;; (their av_*/hv_* consumers unwrap the container themselves).
+      (%xs-intern (if (and (p-box-p v) (p-box-is-ref v)
+                           (p-box-p (p-box-value v)))
+                      (p-box-value v)
+                      v)))))
 
 (sb-alien:define-alien-callable xs-bless sb-alien:void
   ((h sb-alien:long) (cls (sb-alien:* sb-alien:char))
@@ -531,6 +545,50 @@
       (if cls
           (progn (%xs-send-string sink ud cls) 1)
           0))))
+
+;; magic (pclxs ABI 6, optional all-or-nothing group): one opaque word per
+;; scalar OBJECT -- pclxs's ext-magic chain head, how Digest::MD5 carries
+;; its MD5_CTX.  The rules (pclxs_host.h; the UNBLOCKED section of
+;; docs/xs-blessed-ref-referent-bug.md):
+;;   - hand back exactly what was given; NULL (0) when never set;
+;;   - never free it, never follow it;
+;;   - NEVER copy it on assignment -- perl attaches magic to the SV, not
+;;     the value.  Keying on the referent BOX's identity gives that for
+;;     free: box-set copies VALUES between boxes, never the box identity,
+;;     and a ref travels the referent box itself (task #99 made that box
+;;     the source of truth for blessing too).
+;; The table is weak by key, so the word lives exactly as long as the
+;; object -- the module's C state is reclaimed with the process (its magic
+;; `free` hook never runs on any host; same standing answer as DESTROY,
+;; docs/xs-abi5-and-destroy.md).  The word is stored as an integer
+;; (sap-int): a raw SAP in a table would be fine too, but an integer can
+;; never tempt anything into dereferencing it.
+(defvar *xs-magic-words* (make-hash-table :test 'eq :weakness :key))
+
+;; Set PCL_XS_MAGIC_DEBUG to trace the set/get keying (read once at load;
+;; a getenv per crossing would be a real cost on the hot object path).
+(defvar *xs-magic-debug* (sb-posix:getenv "PCL_XS_MAGIC_DEBUG"))
+
+(sb-alien:define-alien-callable xs-magic-set sb-alien:void
+  ((h sb-alien:long) (chain (sb-alien:* t)))
+  (with-xs-guard ()
+    (let ((o (%xs-deref h)))
+      (when *xs-magic-debug*
+        (format *error-output* "~&magic_set h=~D key=~D word=~D~%"
+                h (sxhash o) (sb-sys:sap-int (sb-alien:alien-sap chain))))
+      (when o
+        (setf (gethash o *xs-magic-words*)
+              (sb-sys:sap-int (sb-alien:alien-sap chain)))))
+    (values)))
+
+(sb-alien:define-alien-callable xs-magic-get sb-sys:system-area-pointer
+  ((h sb-alien:long))
+  (with-xs-guard (:on-error (sb-sys:int-sap 0))
+    (let ((o (%xs-deref h)))
+      (when *xs-magic-debug*
+        (format *error-output* "~&magic_get h=~D key=~D -> ~D~%"
+                h (sxhash o) (or (and o (gethash o *xs-magic-words*)) 0)))
+      (sb-sys:int-sap (or (and o (gethash o *xs-magic-words*)) 0)))))
 
 ;; method_lookup (pclxs ABI 4): what CODE does CLS->NAME resolve to?
 ;; This is `->can`, and p-can is exactly that -- @ISA walk, UNIVERSAL,
@@ -943,29 +1001,35 @@
                       (t 2)))
          (*xs-results* '())
          (handles '()))
-    (unwind-protect
-         (sb-alien:with-alien ((argv (sb-alien:array sb-alien:long 64)))
-           (when (> n 64)
-             (p-die "pclxs: more than 64 arguments to an XSUB"))
-           (loop for a in args
-                 for i from 0
-                 do (let ((h (%xs-intern (if (p-box-p a) a (make-p-box a)))))
-                      (push h handles)
-                      (setf (sb-alien:deref argv i) h)))
-           (let ((rc (%pclxs-invoke-xsub
-                      ctx fnptr
-                      (sb-alien:cast argv (sb-alien:* sb-alien:long))
-                      n gimme
-                      (sb-alien:alien-sap
-                       (sb-alien:alien-callable-function 'xs-collect-result))
-                      (sb-sys:int-sap 0))))
-             (unless (zerop rc)
-               ;; PS_DIED: $@ already holds what the XSUB croaked with, and
-               ;; re-dying with it is what makes eval {} behave (rule O4 --
-               ;; the C side never unwound through us to get here).
-               (p-die (to-string (unbox (%xs-errsv)))))
-             (nreverse *xs-results*)))
-      (dolist (h handles) (%xs-release h)))))
+    (flet ((invoke (argv)
+             (loop for a in args
+                   for i from 0
+                   do (let ((h (%xs-intern (if (p-box-p a) a (make-p-box a)))))
+                        (push h handles)
+                        (setf (sb-alien:deref argv i) h)))
+             (let ((rc (%pclxs-invoke-xsub
+                        ctx fnptr argv n gimme
+                        (sb-alien:alien-sap
+                         (sb-alien:alien-callable-function 'xs-collect-result))
+                        (sb-sys:int-sap 0))))
+               (unless (zerop rc)
+                 ;; PS_DIED: $@ already holds what the XSUB croaked with, and
+                 ;; re-dying with it is what makes eval {} behave (rule O4 --
+                 ;; the C side never unwound through us to get here).
+                 (p-die (to-string (unbox (%xs-errsv)))))
+               (nreverse *xs-results*))))
+      (unwind-protect
+           (if (<= n 64)
+               (sb-alien:with-alien ((argv (sb-alien:array sb-alien:long 64)))
+                 (invoke (sb-alien:cast argv (sb-alien:* sb-alien:long))))
+               ;; perl has no arity cap, so neither do we: a wider call
+               ;; (Digest::MD5's own ->add(split //, $msg) reaches 250+ args)
+               ;; heap-allocates its argv; the <=64 common case keeps the
+               ;; zero-cost stack buffer.
+               (let ((argv (sb-alien:make-alien sb-alien:long n)))
+                 (unwind-protect (invoke argv)
+                   (sb-alien:free-alien argv))))
+        (dolist (h handles) (%xs-release h))))))
 
 (sb-alien:define-alien-callable xs-define-xsub sb-alien:void
   ((name (sb-alien:* sb-alien:char)) (len sb-alien:unsigned-long)

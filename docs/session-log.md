@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 315c (2026-07-26, Fable) — XS OO UNBLOCKED: the magic group implemented (task #115); ref_target was the last bug, and it was ours.
+
+**`Digest::MD5->new->add(...)->hexdigest` works.**  The two ABI-6
+callbacks (`xs-magic-set`/`xs-magic-get`, cl/pcl-xs.lisp) store one
+integer word per object in a weak-by-key `eq` table — keyed on box
+IDENTITY, so "never copy on assignment" holds by construction and the
+word lives exactly as long as the object.  `PCL_XS_MAGIC_DEBUG=1`
+traces the keying (getenv read once at load, not per crossing).
+
+**The first run still croaked, and the debug trace showed set and get
+keying DIFFERENT boxes — the real bug was ours, in `xs-ref-target`:**
+`p-backslash` builds `\$x` as a fresh is-ref WRAPPER box whose value is
+the referent box, and `unbox($obj)` stops at the wrapper.  perl's SvRV
+identity is what magic AND blessing (#99) key on, and a write through
+SvRV must reach the original variable — so ref_target now unwraps that
+one extra level for exactly the scalar-ref shape (probe: `(unbox m)` eq
+wrapper, `(p-box-value wrapper)` eq referent; container wrappers pass
+through unchanged).
+
+**Second bug the dist's own suite exposed: a fixed 64-slot argv in
+`p-xs-invoke`** ("more than 64 arguments to an XSUB" — md5-aaa.t test 64
+is `->add(split //, "a" x 63)` and later rows reach 250+ args; perl has
+no arity cap).  Wider calls heap-allocate their argv; ≤64 keeps the
+stack buffer.
+
+**Verification:** conformance corpus **370/0 green** (up from 366 — four
+new pclxs-s10 cases — and unchanged by the ref_target fix);
+Digest::MD5's own suite under PCL: **md5-aaa.t 256/256** (functional +
+chained OO, the strongest oracle either project has), clone.t 6/6,
+align.t 1/1, bits.t 2/2; files.t blocked on the `io` capability group
+(cleanly reported, separate work), utf8.t t1 = unicode family,
+badfile.t/warns.t = error/warning-text family.  New guard
+**Pl/t/xs-03.t** (4 tests): self-contained fixture dist with
+Digest::MD5's exact sv_magicext shape (opaque-MGVTBL fallback struct,
+SvMAGIC chain walk), installed into a temp cache and driven through a
+TRANSPILED program — pins separate per-object state, shared state
+through a copied ref, and persistence across calls.  Gate now 122
+files/4382.
+
+---
+
 ## Session 315 (2026-07-26, Fable) — THE ROOT FLIP: the fallback seam hands forms through (task #78 step 2).
 
 **The emission change of E2.** `_lower_expr`'s fallback now calls
