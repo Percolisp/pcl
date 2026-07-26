@@ -251,9 +251,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **119 test files, 4368 tests** (Pl/t gate, as of session 311 — includes Pl/t/xs-01.t, which skips without a built pclxs sibling)
-- **XS conformance: 246 pass, 1 fail** against pclxs's corpus with real perl
-  as oracle (`tools/pcl-conform`, session 312). The one failure is a known
+- **120 test files, 4372 tests** (Pl/t gate, as of session 313 — includes Pl/t/xs-01.t and xs-02.t, which skip without a built pclxs sibling)
+- **XS conformance: 365 pass, 1 fail** against pclxs's corpus with real perl
+  as oracle (`tools/pcl-conform`, session 314). The one failure is a known
   semantic difference, not a bridge bug: scalar-ref blessing is recorded on
   the wrapper box, so XS asking the REFERENT (`SvSTASH(SvRV(rv))`) finds
   nothing. Not in the Pl/t gate — minutes, not seconds.
@@ -310,7 +310,7 @@ Not relevant now:
 - `docs/test-skip-registry.md` - **Marking not-supported tests**: declarative skip-registry (`cl/skip-registry.lisp`) instead of editing `perl-tests/*.t`; keyed on description (or test-number for unnamed); stale-detector; failure log + `tools/sweep-diff.pl`; crash/PARTIAL stay as fix targets, never auto-skipped
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.
-- `docs/xs-blessed-ref-referent-bug.md` - **OPEN BUG blocking XS OO**: a bridge-built blessed scalar ref keeps its class but its referent is unreadable (`$$obj` undef), so T_PTROBJ modules construct fine and then cannot find their C pointer. Ruled out: the shim, and the adapter. Start with the pure-Perl analogue.
+- `docs/xs-blessed-ref-referent-bug.md` - **OPEN BUG blocking XS OO, re-diagnosed s314**: ext-magic attached to a referent shim-side does not survive the round trip through the host (the referent's shim struct is mortal; proxies are rebuilt per crossing), so Digest::MD5's `->add` can't find its MD5_CTX. `$$obj` being undef matches real perl and was a red herring. Fix needs a pclxs vtable pair (`magic_set`/`magic_get` keyed on host identity) first, then two callbacks here.
 - `docs/xs-abi5-and-destroy.md` - **what pclxs ABI 5 changes here, and what it costs**: nothing is broken (filehandles are the first OPTIONAL vtable capability group, so the pin can stay at abi 4), but DESTROY is now callable and needs no ABI bump — an unimplemented destructor leaks the C side of every T_PTROBJ object, which is bounded in a script and unbounded in a long-lived image. Has the performance section: cache `pclxs_has_destroy` per CLASS or pay a bridge crossing per finalized object.
 - `docs/extensions.md` - **Extension loading**: `p-load-extension`, self-loading stubs, standalone binaries, adding new extensions
 

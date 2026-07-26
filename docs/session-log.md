@@ -4,6 +4,55 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 314 (2026-07-26, Fable) — review of the Opus XS work; the OO blocker re-diagnosed; get_cv + AUTOLOAD.
+
+**Review verdict on sessions 311–313 + the pclxs overnight grind: keep it
+all.** Both suites green, claims match the checked-in censuses, layer
+discipline holds. Five defects filed: pcl side task #112 (fixed this
+session, below) and the ignored `autoload_ok` flag (also fixed below);
+pclxs side task #113 (a real SV leak in the SAVESPTR path --
+`pclxs_newsvsv` returns refcnt 1, `pclxs_save_sptr` incs to 2, restore
+decs once; plus the `xsub_fnptr` header comment the ALIAS fix made false,
+and three smaller items).
+
+**The XS OO blocker was misdiagnosed, and the correction changes whose
+move it is.** `docs/xs-blessed-ref-referent-bug.md` claimed the referent
+of a bridge-built blessed ref was unreadable, with `$$obj` being undef as
+evidence. Real perl says undef there TOO: Digest::MD5 2.59 keeps its
+MD5_CTX pointer as PERL_MAGIC_ext on an undef referent (`sv_magicext` in
+`new_md5_ctx`), not as an IV. Instrumenting `xs-collect-result` showed
+PCL's wrapper crossing the boundary intact -- blessed, is-ref, inner box
+present. The actual bug: pclxs hangs magic on the shim SV STRUCT, the
+referent's struct is mortal (dies at FREETMPS), and `pclxs_sv_rv` builds
+a fresh proxy per crossing (`mortal_proxy` -> `pclxs_sv_import`), so by
+the time `->add` walks SvMAGIC the chain is empty. Host-independent --
+refhost cannot preserve it either; pclxs's own suite never attaches magic
+in one XSUB call and reads it in a later one. Fix: pclxs grows a vtable
+pair (`magic_set`/`magic_get` keyed on host identity -- interlocks with
+their MGVTBL-free and DESTROY items), then PCL implements two callbacks.
+Doc rewritten; task #100 re-scoped and blocked on pclxs.
+
+**get_cv now finds subs, including XSUBs (conformance 365/1).** The new
+98-globals case 13 (added upstream in pclxs f7a6eda, after the last PCL
+conform run) failed because `p-xs-global-symbol` only knew sigil-named
+variables. Fix per the reuse rule: one helper `%xs-named-sub` (pkg+name
+-> function via `%pcl-cl-sub-name`), used by both the new `&` branch of
+`p-xs-global-symbol` and `xs-call`'s by-name branch, which had the same
+lookup inline. GV_ADD is deliberately not honoured for subs: perl's stub
+CV would hide a missing sub behind a silent no-op. The one remaining
+conformance failure is `bless_and_class` (task #99), unchanged.
+
+**`autoload_ok` is no longer ignored.** `xs-method-lookup` now answers a
+failed lookup, when the flag allows, with the @ISA-walked AUTOLOAD
+wrapped in a closure that sets `$PKG::AUTOLOAD` to the full method name
+at CALL time -- the part of perl's contract a bare CV could not keep.
+DESTROY is never AUTOLOADed, matching perl and `%pcl-dispatch-autoload`.
+
+Numbers refreshed in CLAUDE.md: gate 120 files / 4372 tests; conformance
+365 pass / 1 fail.
+
+---
+
 ## Session 313 (2026-07-25, Opus 5, from the pclxs side) — pclxs ABI 5: the pin moved, the adapter did not.
 
 **One line changed in this repo: `xs-pin`, abi 4 -> 5.** No adapter code,

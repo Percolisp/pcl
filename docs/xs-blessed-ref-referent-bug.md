@@ -1,79 +1,87 @@
-# The referent of a bridge-built blessed scalar ref is unreadable
+# XS OO blocker: ext-magic does not survive the trip through the host
 
-**Status:** open. Blocks the OO half of every XS module that uses the
-T_PTROBJ idiom — which is most of them, Digest::MD5 included.
+**Status:** open, root cause found (session 314). Blocks the OO half of
+XS modules that keep their C state in MAGIC — Digest::MD5 included.
+The fix needs a pclxs vtable addition first (their side), then two small
+callbacks here (our side).
 
-**Not the XS adapter.** `cl/pcl-xs.lisp` had two bugs of this flavour and
-both are fixed (session 312, commit 1d776d8); the conformance case that
-catches them passes. What is left is PCL's own representation of a
-reference, so this is a runtime question, not a bridge question.
-
-## Reproducer
-
-Needs the artifact in a cache (`tools/pcl-xs-install
-~/.cpan/build/Digest-MD5-*`), then:
+**History.** This file used to claim "the referent of a bridge-built
+blessed scalar ref is unreadable (`$$obj` is undef)". That diagnosis was
+WRONG on both counts, and the reproducer's expected output was wrong too:
 
 ```perl
 use Digest::MD5;
 my $o = Digest::MD5->new;
-print "ref=",   ref($o),                        "\n";  # Digest::MD5   ✔
-print "isa=",   ($o->isa('Digest::MD5') ? 1:0), "\n";  # 1             ✔
-print "deref=", (defined($$o) ? "ok" : "undef"), "\n"; # undef         ✘
+print ref($o), "\n";                          # Digest::MD5   ✔
+print defined($$o) ? "ok" : "undef", "\n";    # undef — and real perl
+                                              # says undef TOO
 ```
 
-`${ Digest::MD5->new }` is undef too, so an intervening variable is not
-involved. Consequently `$o->add("x")` croaks **"Failed to get MD5_CTX
-pointer"**, which is Digest::MD5's own check:
+`$$o` is undef under real perl, because Digest::MD5 2.59 does not store
+its C pointer as an IV in the referent at all. `new_md5_ctx` (MD5.xs):
 
 ```c
-static MD5_CTX* get_md5_ctx(pTHX_ SV* sv) {
-    if (SvROK(sv)) {
-        SV* svp = SvRV(sv);
-        if (SvIOK(svp) && SvIV(svp))     /* the C pointer, as an IV */
-            return INT2PTR(MD5_CTX*, SvIV(svp));
-    }
-    croak("Failed to get MD5_CTX pointer");
-}
+SV *sv  = newSV(0);                 /* referent: UNDEF, and stays undef */
+SV *obj = newRV_noinc(sv);
+sv_bless(obj, gv_stashpv(klass, 0));
+sv_magicext(sv, NULL, PERL_MAGIC_ext, &vtbl_md5, (char *)context, 0);
 ```
 
-So: the reference survives, the class survives, the **referent's value**
-does not.
+and `get_md5_ctx` reads it back by walking `SvMAGIC(SvRV(sv))` for the
+entry whose `mg_virtual == &vtbl_md5`. The pointer travels as **ext-magic
+on the referent**, not as a value. (The old text quoted an
+`SvIOK`/`SvIV` version of `get_md5_ctx` — that is not what 2.59 ships.)
 
-## What is already ruled out
+So PCL's reference representation is fine: the wrapper box crosses the
+boundary blessed, is-ref, with its inner box intact (verified by
+instrumenting `xs-collect-result`), and the pure-Perl analogue
+(`bless \$x` then `$$r`) always worked.
 
-| checked | result |
-|---|---|
-| the shim (pclxs) | `refhost` passes every reference case, including the new `ptrobj_via_host` (blessed ref → host array → back) |
-| the XS adapter's store path | `%xs-own-copy` preserves value *and* class; `av_store`/`av_push`/`hv_store` no longer unbox |
-| the XS adapter's result path | `xs-collect-result` returns the cell for a reference instead of unboxing it |
-| PCL end to end | pclxs's corpus through `tools/pcl-conform`: **246 pass, 1 fail** — and the one failure is the *blessing* divergence below, not this |
+## The actual bug
 
-The object is built by `sv_setref_pv`, which on our side becomes:
-`new_iv(ptr)` → a `p-box` holding an integer, then `new_ref` → PCL's
-`p-backslash` of that box, then `bless`. Each step looks right in
-isolation; what comes out cannot be dereferenced from Perl code.
+pclxs magic (`src/magic.c`) hangs the chain on the **shim SV struct**
+(`sv->magic`). Two lifetimes conspire against it:
 
-## Where to start
+1. The referent shim SV is mortal: `newSV(0)` is owned by the RV, the RV
+   is `sv_2mortal`'d, and FREETMPS at the end of the `new` XSUB frees
+   both structs. Only the referent's **host identity** (the box exported
+   before `newRV`) survives, held alive by the wrapper the caller got.
+2. When `->add` later derefs the RV, `pclxs_sv_rv` wraps the host
+   referent in a **fresh** proxy (`mortal_proxy` → `pclxs_sv_import` —
+   a new struct every crossing). Its magic chain is empty, so
+   `get_md5_ctx` croaks **"Failed to get MD5_CTX pointer"**.
 
-1. **Try the pure-Perl analogue first.** Build the same shape without the
-   bridge — a box created by the runtime, `\$x`, blessed, then `$$ref` —
-   and see whether it derefs. If it does, the difference is in what
-   `new_iv`/`p-backslash` produce versus what the ordinary path produces,
-   and that difference is the bug. If it does *not*, the bug is older and
-   larger than the XS work.
-2. Compare `p-box-value` of the wrapper against what `$$` lowers to.
-   `p-backslash` over a box whose value is an integer is the exact case.
+This is host-independent: refhost cannot preserve it either. pclxs's own
+suite passes because no case attaches magic in one XSUB call and reads it
+back in a later one — the mechanism is only ever tested within a frame
+(an R28-shaped gap on their side).
 
-## The neighbour
+## The fix, split by repo
 
-Related but distinct, and also open: **PCL records a scalar ref's
-blessing on the wrapper box, not on the referent** (`p-bless`,
-`cl/pcl-runtime.lisp` ~12426, deliberate and commented). Perl blesses the
-referent, which is why `SvSTASH(SvRV(rv))` reads a class. XS code asking
-the referent therefore finds nothing — that is the single remaining
-conformance failure (`bless_and_class`).
+The only identity that survives is the host object (here: the p-box), so
+the magic chain must be keyed on it.
 
-The two are likely to be fixed by the same piece of thinking about what a
-scalar reference *is* here, which is why they are documented together.
-Neither is urgent for hash-based objects: those blessing on the inner hash
-matches perl, and the referent question does not arise.
+- **pclxs:** a vtable pair in the spirit of the existing design ("ask the
+  host"), e.g. `magic_set(h, void*)` / `magic_get(h) → void*` on
+  scalars: the shim stores its own `struct pclxs_magic*` chain head
+  there, and `pclxs_sv_import`/`sv_magicext`/`mg_find` consult it. An
+  optional capability group like ABI 5's `io_*` would let other hosts
+  opt out. **Interlocks with two of their open items:** the MGVTBL
+  `free` callback (HTML::Parser) and DESTROY — when the host box dies,
+  magic free hooks must run, which is the same finalizer question as
+  DESTROY (`docs/xs-abi5-and-destroy.md`).
+- **PCL (this repo):** implement the two callbacks — a slot or weak
+  `eq`-hash keyed on the referent box, storing an opaque integer the
+  shim owns. The referent box's lifetime is the object's lifetime, which
+  is exactly perl's contract for magic.
+
+## The neighbour (still real, still open — task #99)
+
+**PCL records a scalar ref's blessing on the wrapper box, not on the
+referent** (`p-bless`, `cl/pcl-runtime.lisp` ~12426, deliberate and
+commented). Perl blesses the referent, which is why
+`SvSTASH(SvRV(rv))` reads a class. XS asking the referent finds
+nothing — that is the `bless_and_class` conformance failure. Unlike the
+magic bug above, this one is entirely PCL's representation question.
+Neither matters for hash-based objects: those bless the inner hash,
+matching perl.
