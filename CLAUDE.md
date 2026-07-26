@@ -119,6 +119,9 @@ echo 'my $x = 1 + 2;' | ./pl2cl
 # bump makes old artifacts unreachable rather than merely stale.
 # See docs/xs-artifact-cache.md for the alternatives and revisit triggers.
 # See docs/xs-abi5-and-destroy.md for pclxs ABI 5 / DESTROY (not done here yet).
+# pclxs is at ABI 6 now (their session 10): additive, nothing breaks, and the
+# `magic` group is what unblocks XS OO here -- see the "UNBLOCKED" section of
+# docs/xs-blessed-ref-referent-bug.md.
 tools/pcl-xs-install ~/.cpan/build/Digest-MD5-2.59-0
 tools/pcl-xs-install --list      # what is cached, and for which ABIs
 tools/pcl-xs-install --clean     # drop artifacts built for other ABIs
@@ -309,7 +312,7 @@ Not relevant now:
 - `docs/test-skip-registry.md` - **Marking not-supported tests**: declarative skip-registry (`cl/skip-registry.lisp`) instead of editing `perl-tests/*.t`; keyed on description (or test-number for unnamed); stale-detector; failure log + `tools/sweep-diff.pl`; crash/PARTIAL stay as fix targets, never auto-skipped
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.
-- `docs/xs-blessed-ref-referent-bug.md` - **OPEN BUG blocking XS OO, re-diagnosed s314**: ext-magic attached to a referent shim-side does not survive the round trip through the host (the referent's shim struct is mortal; proxies are rebuilt per crossing), so Digest::MD5's `->add` can't find its MD5_CTX. `$$obj` being undef matches real perl and was a red herring. Fix needs a pclxs vtable pair (`magic_set`/`magic_get` keyed on host identity) first, then two callbacks here.
+- `docs/xs-blessed-ref-referent-bug.md` - **XS OO blocker: the pclxs half SHIPPED (their session 10, ABI 6) — read the "UNBLOCKED" section at the end of that file before doing anything with XS OO.** The diagnosis (s314) was right: ext-magic on a referent did not survive the trip, because the chain hung off the shim SV struct and proxies are rebuilt per crossing. pclxs now stores it with the HOST object via an optional capability group, and fixed a second bug it uncovered (`newRV_noinc` was freeing the referent it had just been handed). **Nothing here is broken by the ABI bump** — this adapter builds the vtable by NAME, so an untouched optional group is simply off: `tools/build-pclxs --pin-here` after pulling the sibling, relink, carry on. To get Digest::MD5's OO path working, add two callbacks (`magic_set`/`magic_get`) storing one opaque word per object on the referent box — rules and rationale in that section.
 - `docs/xs-abi5-and-destroy.md` - **what pclxs ABI 5 changes here, and what it costs**: nothing is broken (filehandles are the first OPTIONAL vtable capability group, so the pin can stay at abi 4), but DESTROY is now callable and needs no ABI bump — an unimplemented destructor leaks the C side of every T_PTROBJ object, which is bounded in a script and unbounded in a long-lived image. Has the performance section: cache `pclxs_has_destroy` per CLASS or pay a bridge crossing per finalized object.
 - `docs/extensions.md` - **Extension loading**: `p-load-extension`, self-loading stubs, standalone binaries, adding new extensions
 
