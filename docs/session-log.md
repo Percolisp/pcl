@@ -107,6 +107,19 @@ bucket machinery, so the flip needs that seam to hand forms through,
 not more emitters.  Design that against docs/v2-endgame-plan.md
 E2.final/E5 with fresh context.
 
+**Part 4 (b987cb4) closed the warmup early:** the only INDEPENDENT
+fixed-shape producers were the nested-package enter/exit triple (~58)
+and the legacy sub param bind (~20) — both single-line shapes the flat
+printer reproduces byte-for-byte (corpus identical, pure de-raw).  The
+other census rows (_auto_defined_raw, _alias_box_form, the g-match
+void wrap, _lower_local/_fallback_stmt echoes) are raw PROCESSORS or
+echoes of the fallback surface — they die WITH the flip, not before
+it.  **Session ends here by design: everything left in task #78 is the
+root flip, one design-heavy step, to be started with fresh context.
+Read THIS 314b section + v2-endgame-plan E2.final/E5 first; the meter
+is PCL_E2_RAW_CENSUS (provenance included), the verifier is the
+whole-file whitespace-stripped compare against a HEAD worktree.**
+
 ---
 
 ## Session 314 (2026-07-26, Fable) — review of the Opus XS work; the OO blocker re-diagnosed; get_cv + AUTOLOAD.
