@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 314b (2026-07-26, Fable) — task #78 opened: the E2.final distance, measured honestly.
+
+Back on v2 (user decision: pclxs is blocked on Opus's magic vtable; my
+side is green).  This session built the DISTANCE METER for task #78 and
+mapped the road; no emission changed (corpus-diff clean, parser2 guards
+green, commit fb0d3a4).
+
+**The wrong meter first, kept as a lesson.** Counting at the emit sites
+(gen_node_form's raw() fallback, gen_inline_lambda_form's declines)
+double-counts trees that are built and DISCARDED — the native attempt
+and analysis parses run the same emitters.  append.t "declined" three
+map bodies while its emitted maps were structural.  The honest meter
+walks the CLForm trees at to_string(depth 0) — what actually prints —
+behind PCL_E2_RAW_CENSUS.  (Also: pl2cl exits 0 with EMPTY output when
+a Pl module fails to compile; a census that suddenly reads zero is your
+own syntax error.)
+
+**The numbers (111-file corpus): 16,105 printed raw chunks** —
+15,326 raw:form-text (whole seam EXPRESSIONS, one text atom each,
+because _lower_expr's fallback still calls the text entry), 311
+raw:atom, 310 raw_wrap (v1 whole-statement fallback), 136
+comment-echo, 22 lambda-body.
+
+**The road to E2.final, in order:** (1) convert the still-DECLINING
+emitters — the emit-site census names them: inline_lambda bodies
+(expression-body + do{}/eval{} funcall embeds + subst-/e bodies +
+anon-sub raw_lambda) and the sort named/scalar-comparator wrappers,
+hash_init (131 hits), tree_val (34), progn (10), the four slice
+accessors, \x{FFFF}-class quote-double leaves; (2) FLIP THE ROOT —
+_lower_expr's fallback calls gen_node_form instead of the text entry,
+collapsing form-text to just the residue; (3) delete the text printer
+and raw/raw_wrap.  Byte-parity per step via corpus-diff; the flip in
+(2) is the emission-changing one and takes the cache-generation bump.
+The embedded-block machinery (lower_embedded_block/_lower_embedded_anon,
+s307–s308) is already mature — hook-declines are rare (28 corpus-wide);
+the missing piece is emitters, not block lowering.
+
+---
+
 ## Session 314 (2026-07-26, Fable) — review of the Opus XS work; the OO blocker re-diagnosed; get_cv + AUTOLOAD.
 
 **Review verdict on sessions 311–313 + the pclxs overnight grind: keep it
