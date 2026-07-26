@@ -565,16 +565,26 @@ sub gen_leaf_form {
     return $self->gen_symbol_form($node);
   }
 
-  # Pure atom leaves: string literals (Quote::Single/Double/Literal/Interpolate
-  # — NOT QuoteLike:: qr//, whose gen_leaf has non-idempotent regex side
-  # effects and returns a compound form), heredocs, barewords, and operator
-  # tokens.  gen_leaf for these is pure and its output is always an atom (a
-  # "…" literal, a bareword, a number, an operator string), so it never starts
-  # with "(" — the guard below is belt-and-braces only, and there is no
-  # double-run risk because these never decline.  An interpolated string is a
+  # String literals (Quote::Single/Double/Literal/Interpolate — NOT
+  # QuoteLike:: qr//, whose gen_leaf has non-idempotent regex side effects):
+  # the form entry, so a literal with surrogate/non-char codepoints comes
+  # back as the structural (concatenate 'string … (string (code-char N)) …)
+  # instead of raw text (task #78 residue).  Mirrors gen_leaf's Quote branch
+  # exactly (content → convert_perl_string).  An interpolated string is a
   # string_concat NODE (already converted), never one of these leaves.
-  if ($ref =~ /^PPI::Token::Quote::/
-      || $ref eq 'PPI::Token::HereDoc'
+  if ($ref =~ /^PPI::Token::Quote::/) {
+    my $f = $self->convert_perl_string_form($node->content());
+    # Unknown-format fallthrough returns the token text as-is; a paren-shaped
+    # ATOM there is not a form — decline to the text path (belt-and-braces).
+    return undef if !ref $f && $f =~ /^\(/;
+    return $f;
+  }
+  # Pure atom leaves: heredocs, barewords, and operator tokens.  gen_leaf for
+  # these is pure and its output is always an atom (a "…" literal, a
+  # bareword, a number, an operator string), so it never starts with "(" —
+  # the guard below is belt-and-braces only, and there is no double-run risk
+  # because these never decline.
+  if ($ref eq 'PPI::Token::HereDoc'
       || $ref eq 'PPI::Token::Word'
       || $ref eq 'PPI::Token::Operator'
       || $ref eq 'PPI::Token::Cast') {   # deref sigil (@/%/$/\/&/*): bare content atom
@@ -1488,7 +1498,13 @@ sub gen_binary_op_form {
   if ($op eq '=') {
     # keys(%h) = N — hash pre-sizing, a no-op in CL: just the RHS value.
     return $right if $left_flat =~ /^\(p-keys /;
-    # $#arr = N  →  (p-set-array-length @arr N)
+    # $#arr = N  →  (p-set-array-length @arr N).  The container comes out of
+    # the LHS FORM when there is one (task #78: no raw wrap around an atom);
+    # the text capture stays only for a raw LHS (declined subtree).
+    if (ref $left eq 'ARRAY' && @$left == 2 && !ref $left->[0]
+        && $left->[0] eq 'p-array-last-index') {
+      return ['p-set-array-length', $left->[1], $right];
+    }
     if ($left_flat =~ /^\(p-array-last-index (.+)\)$/) {
       return ['p-set-array-length', Pl::CLForm::raw($1), $right];
     }
@@ -1496,7 +1512,12 @@ sub gen_binary_op_form {
     if ($left_flat =~ /^\(p-make-typeglob "([^"]+)" "([^"]+)"\)$/) {
       return ['p-glob-assign', qq{"$1"}, qq{"$2"}, $right];
     }
-    # *$var = RHS  →  (p-glob-assign-dynamic name-expr rhs)
+    # *$var = RHS  →  (p-glob-assign-dynamic name-expr rhs); same form-first
+    # rule as $#arr above.
+    if (ref $left eq 'ARRAY' && @$left == 2 && !ref $left->[0]
+        && $left->[0] eq 'p-dynamic-typeglob') {
+      return ['p-glob-assign-dynamic', $left->[1], $right];
+    }
     if ($left_flat =~ /^\(p-dynamic-typeglob (.+)\)$/) {
       return ['p-glob-assign-dynamic', Pl::CLForm::raw($1), $right];
     }
@@ -3536,7 +3557,7 @@ sub gen_methodcall_form {
       $obj = $self->gen_node_form($kids->[0]);
     }
   } elsif ($self->_is_paren_scalar_base($kids->[0])) {
-    $obj = Pl::CLForm::raw($self->_gen_scalar_deref_base($kids->[0]));
+    $obj = $self->_gen_scalar_deref_base_form($kids->[0]);
   } else {
     $obj = $self->gen_node_form($kids->[0]);
   }
@@ -4298,6 +4319,19 @@ sub _gen_scalar_deref_base {
   return $cl;
 }
 
+# E2 form twin: same scalar-context/lvalue dance, structural child.
+sub _gen_scalar_deref_base_form {
+  my ($self, $base_id) = @_;
+  my $saved_ctx = $self->expr_o->get_node_context($base_id);
+  $self->expr_o->set_node_context($base_id, 0);   # SCALAR_CTX
+  my $saved_lv = $self->lvalue_context;
+  $self->lvalue_context(0);
+  my $f = $self->gen_node_form($base_id);
+  $self->lvalue_context($saved_lv);
+  $self->expr_o->set_node_context($base_id, $saved_ctx);
+  return $f;
+}
+
 # E2 form variant of gen_hash_access.  Container then key (order preserved);
 # multi-key $h{a,b,c} → (p-join |$;| (vector …)); bare-var sigil rewrite /
 # %# register / rename as strings, nested container structural.
@@ -4474,7 +4508,7 @@ sub gen_array_ref_access_form {
     $self->expr_o->set_node_context($kids->[0], 1);
   }
   my $ref = $paren_scalar_base
-            ? Pl::CLForm::raw($self->_gen_scalar_deref_base($kids->[0]))
+            ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
   my $idx = $self->gen_node_form($kids->[1]);
   my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
@@ -4486,7 +4520,7 @@ sub gen_array_ref_access_form {
 sub gen_hash_ref_access_form {
   my ($self, $node, $node_id, $kids) = @_;
   my $ref = $self->_is_paren_scalar_base($kids->[0])
-            ? Pl::CLForm::raw($self->_gen_scalar_deref_base($kids->[0]))
+            ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
   my $key_node = $self->expr_o->get_a_node($kids->[1]);
   my $key;
@@ -5625,18 +5659,19 @@ sub gen_substitution_form {
     $match_form = qq{"$m"};
   }
 
-  # s///e: replacement is Perl code — parse it and wrap in a lambda
+  # s///e: replacement is Perl code — parse it and wrap in a lambda.
+  # The body arrives as a CLForm (task #78); raw only inside declined subtrees.
   if ($mods->{e}) {
-    my $cl_expr = $self->_compile_subst_e_expr($subst);
-    return ['p-subst', $match_form, ['lambda', ['list'], Pl::CLForm::raw($cl_expr)],
+    return ['p-subst', $match_form,
+            ['lambda', ['list'], $self->_compile_subst_e_expr($subst)],
             @mod_strs];
   }
 
   # Replacement with variable interpolation: wrap in a lambda so $varname/$1..$9
   # evaluate at match time
   if (_has_regex_interpolation($subst)) {
-    my $interp_expr = _gen_interp_replacement($subst);
-    return ['p-subst', $match_form, ['lambda', ['list'], Pl::CLForm::raw($interp_expr)],
+    return ['p-subst', $match_form,
+            ['lambda', ['list'], _gen_interp_replacement($subst)],
             @mod_strs];
   }
 
@@ -5707,9 +5742,11 @@ sub _gen_interp_replacement {
     (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
     push @parts, qq{"$esc"};
   }
+  # Every part is an atom ("literal", $1..$9, $varname) — the multi-part
+  # case is a structural concat form (task #78: no raw text out of here).
   return @parts == 0 ? '""'
        : @parts == 1 ? $parts[0]
-       : "(p-string-concat " . join(" ", @parts) . ")";
+       : ['p-string-concat', @parts];
 }
 
 # Parse a s///e replacement string as Perl and return CL code
@@ -5757,16 +5794,19 @@ sub _compile_subst_e_expr {
         environment  => $self->environment,
         indent_level => $self->indent_level,
       );
-      my $cl = $gen->generate($node_id);
-      push @cl_parts, $cl if defined $cl && $cl ne '';
+      # task #78: statements come back as CLForms (raw only for genuinely-
+      # declining subtrees), assembled structurally below.
+      my $f = $gen->gen_node_form($node_id);
+      push @cl_parts, $f if defined $f && (ref $f || $f ne '');
     }
 
     return unless @cl_parts;
 
-    my $body = @cl_parts == 1 ? $cl_parts[0] : '(progn ' . join(' ', @cl_parts) . ')';
+    my $body = @cl_parts == 1 ? $cl_parts[0] : ['progn', @cl_parts];
     if (@let_vars) {
-      my $bindings = join(' ', map { "($_ (make-p-box nil))" } @let_vars);
-      $result = "(let ($bindings) $body)";
+      $result = ['let',
+                 ['list', map { ['list', $_, ['make-p-box', 'nil']] } @let_vars],
+                 $body];
     } else {
       $result = $body;
     }
@@ -5997,7 +6037,13 @@ sub _apply_mode {
 
 # Convert Perl string with escapes to CL string
 # Perl "\n" -> actual newline in CL string
+# E2: form twin — identical body, the compound case returns the CLForm.
+# The text entry is its exact flat print (all early cases are "…" atoms).
 sub convert_perl_string {
+  my $self = shift;
+  return Pl::CLForm::to_flat($self->convert_perl_string_form(@_));
+}
+sub convert_perl_string_form {
   my $self = shift;
   my $str = shift;
 
@@ -6059,12 +6105,17 @@ sub convert_perl_string {
   # Apply \U, \L, \u, \l, \Q, \F ... \E transformations (non-interpolated strings)
   $content = _apply_case_escapes($content);
 
-  return _cl_string_literal($content);
+  return _cl_string_literal_form($content);
 }
 
 # Build a CL string literal, escaping surrogate and non-character codepoints
-# that can't be embedded in a UTF-8 source file.
-sub _cl_string_literal {
+# that can't be embedded in a UTF-8 source file.  The form twin returns a
+# plain "…" atom, or ['concatenate', "'string", …] with ['string',
+# ['code-char', N]] parts for the bad codepoints; the text entry is its
+# exact flat print (E2: gen_leaf_form embeds the form, text callers keep
+# their bytes).
+sub _cl_string_literal { Pl::CLForm::to_flat(_cl_string_literal_form(shift)) }
+sub _cl_string_literal_form {
   my $content = shift;
   # Characters invalid in UTF-8: surrogates U+D800-U+DFFF, and non-chars U+FFFE/U+FFFF
   # (and the pattern repeats at every 0x10000 boundary: U+1FFFE, U+1FFFF, etc.)
@@ -6074,7 +6125,6 @@ sub _cl_string_literal {
     $content =~ s/"/\\"/g;
     return qq{"$content"};
   }
-  # Build a (concatenate 'string ...) form with code-char for bad chars
   my @parts;
   while (length $content) {
     if ($content =~ /\A((?:[^\x{D800}-\x{DFFF}\x{FFFE}\x{FFFF}])+)/s) {
@@ -6085,11 +6135,11 @@ sub _cl_string_literal {
       $content = substr($content, length($1));
     } else {
       my $ch = substr($content, 0, 1);
-      push @parts, "(string (code-char " . ord($ch) . "))";
+      push @parts, ['string', ['code-char', ord($ch)]];
       $content = substr($content, 1);
     }
   }
-  return @parts == 1 ? $parts[0] : "(concatenate 'string " . join(' ', @parts) . ")";
+  return @parts == 1 ? $parts[0] : ['concatenate', "'string", @parts];
 }
 
 

@@ -4778,7 +4778,8 @@ sub _lower_stmt {
   # level bare `...` (broken PARSE ERROR raw before task #78).
   if (@k == 1 && $k[0]->isa('PPI::Token::Operator') && $k[0]->content eq '...') {
     my $line = $k[0]->line_number // 0;
-    return raw(qq{(p-die "Unimplemented" :loc (format nil "~A line ~D" (to-string (unbox \$0)) $line))});
+    return ['p-die', '"Unimplemented"', ':loc',
+            ['format', 'nil', '"~A line ~D"', ['to-string', ['unbox', '$0']], $line]];
   }
 
   my ($expr, $mod, $cond) = _split_modifier(\@k);
@@ -5484,9 +5485,17 @@ sub _lower_embedded_anon {
   my $census = $ENV{PCL_E2_RAW_CENSUS};
   my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
               $block->schildren;
-  if (!@stmts) {   # empty: v1 emits "(lambda () )" — E2.final quirk
-    warn "pcl-raw\tanon-decl:empty\n" if $census;
-    return undef;
+  if (!@stmts) {
+    # Empty sub {}: v1's wrapper with the empty :void body (a body-less let
+    # prints "(let ((*wantarray* :void)))" — same nil value, whitespace-only
+    # vs v1's text).  Normalized structurally per task #78 E2.final.
+    return ['lambda', ['list', '&rest', '%_args'],
+            ['let', ['list',
+                     ['list', '@_', ['p-flatten-args', '%_args']],
+                     ['list', '*pcl-caller-wantarray*', '*wantarray*']],
+             ['catch', ':p-return',
+              ['block', 'nil',
+               ['let', ['list', ['list', '*wantarray*', ':void']]]]]]];
   }
 
   # Same conservative declines as the block form: package switches need v1's

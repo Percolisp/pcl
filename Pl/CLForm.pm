@@ -208,7 +208,8 @@ sub _raw_census {
             : $t =~ /^\s*\(/ ? 'raw:form-text'
             : 'raw:atom';
     my $prov = $RAW_PROV{Scalar::Util::refaddr($f)} // '?';
-    warn "pcl-rawout\t$cls\t$prov\n";
+    (my $snip = substr($t, 0, 100)) =~ s/\s+/ /g;
+    warn "pcl-rawout\t$cls\t$prov\t$snip\n";
     return;
   }
   if (is_raw_wrap($f)) {

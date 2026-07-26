@@ -73,6 +73,32 @@ the XS artifact cache under `~/.pcl-cache/xs/` — harmless (rebuilt by
 `tools/pcl-xs-install`), but don't read an xs test failure after a cache
 wipe as a flip regression; the real cause was the pin.
 
+**Part 2 (same session): the expression-decline list converted, simplest
+first — printed raws 607 → 510, expression residue 117 → 20.**
+In order: (A1) yada-yada `...` p-die raw → structural form; (A2) literal
+leaves — `_cl_string_literal`/`convert_perl_string` split into form twin
++ to_flat wrapper (one body each), Quote:: leaves route through
+`convert_perl_string_form` in gen_leaf_form, so surrogate/non-char
+string literals emit the structural `(concatenate 'string …)`;
+(B) `_gen_scalar_deref_base_form` (same context/lvalue dance, structural
+child) replaces the raw() at all three paren-scalar-base sites
+(array-ref/hash-ref/methodcall), and the `$#arr =`/`*$var =` assignment
+dispatch takes the container out of the LHS FORM (text capture kept only
+for raw LHS residue); (D1) s///e bodies — `_compile_subst_e_expr`
+generates per-statement via gen_node_form and assembles progn/let
+structurally, `_gen_interp_replacement` returns a concat FORM (its parts
+were always atoms), both raw() wraps dropped at the p-subst call sites;
+empty `sub {}` emits v1's wrapper with a body-less `(let ((*wantarray*
+:void)))` instead of declining.  Census gained a 100-char snippet per
+printed raw (census-only) — that's what made the shapes visible.
+**Corpus: whitespace-identical to HEAD across all 111 files** (the --ws
+verifier); gate 121/4378 PASS; spot-sweep of the 13 residue files = 0 new
+fails.  Generation v2-68 → v2-69.  **Remaining 20 expression raws are all
+tied to the v1 statement surface** (eval{}-bodies containing local/for-
+with-local → embed-unsafe hook declines ×12+5, package-in-anon ×2) plus 3
+niche `+{a=>$_}->{a}` map-body lambdas — they die WITH raw_wrap at E4,
+not before.  The emitter-conversion phase of #78 is DONE.
+
 Gate 121/4378 PASS (after the pin fix); census 111 v2-native / 0 gated.
 Full sweep: 61 fully-passing, 725 fails vs 733 blessed.  sweep-diff's "4
 NEW" (bless.t t29–32, join.t t36/40 tied-$,, blocks.t t24) are
