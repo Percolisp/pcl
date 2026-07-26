@@ -1900,13 +1900,16 @@ sub gen_funcall_form {
         return ['progn', @body_parts];
       }
       elsif ($arg_node->{type} eq 'inline_lambda') {
-        # do { BLOCK } parsed as inline_lambda: body_cl is a pre-generated CL
-        # string — embed it as a raw atom (structural conversion is E2's LAST
-        # step); the funcall node itself is now form-producing.
-        my $body = $arg_node->{body_cl} // 'nil';
+        # do { BLOCK } parsed as inline_lambda.  A Parser2-lowered body
+        # arrives structured (body_form, task #78); a declined one keeps
+        # v1's body_cl text as a raw atom.  The funcall node itself is
+        # form-producing either way.
         my $ctx  = $self->expr_o->get_node_context($node_id);
-        return ['progn', Pl::CLForm::raw($body)] if $ctx == INHERIT_CTX;
-        return $self->_ctx_wrap_form(['progn', Pl::CLForm::raw($body)], $ctx);
+        my @body = ($arg_node->{body_form})
+                 ? @{ $arg_node->{body_form} }
+                 : (Pl::CLForm::raw($arg_node->{body_cl} // 'nil'));
+        return ['progn', @body] if $ctx == INHERIT_CTX;
+        return $self->_ctx_wrap_form(['progn', @body], $ctx);
       }
     }
   }
