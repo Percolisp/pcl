@@ -5451,17 +5451,27 @@ sub lower_embedded_block {
 # decline (v1's parse_block_as_function text as before).
 sub _lower_embedded_anon {
   my ($self, $block) = @_;
+  my $census = $ENV{PCL_E2_RAW_CENSUS};
   my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
               $block->schildren;
-  return undef unless @stmts;   # empty: v1 emits "(lambda () )" — E2.final quirk
+  if (!@stmts) {   # empty: v1 emits "(lambda () )" — E2.final quirk
+    warn "pcl-raw\tanon-decl:empty\n" if $census;
+    return undef;
+  }
 
   # Same conservative declines as the block form: package switches need v1's
   # revert wrapper (the native nested-package branch relies on p-sub's
   # dynamic bind, absent in a bare lambda); a tail declaration converts when
   # the $decl_tail machinery covers its value semantics (s307).
-  return undef if @{ $block->find('PPI::Statement::Package') || [] };
-  return undef if $stmts[-1]->isa('PPI::Statement::Variable')
-               && !$self->_tail_decl_convertible($stmts[-1]);
+  if (@{ $block->find('PPI::Statement::Package') || [] }) {
+    warn "pcl-raw\tanon-decl:package\n" if $census;
+    return undef;
+  }
+  if ($stmts[-1]->isa('PPI::Statement::Variable')
+      && !$self->_tail_decl_convertible($stmts[-1])) {
+    warn "pcl-raw\tanon-decl:tail-decl\n" if $census;
+    return undef;
+  }
 
   my $env = $self->environment;
   my $ppi_snap    = _ppi_state_snapshot(@stmts);
@@ -5487,6 +5497,12 @@ sub _lower_embedded_anon {
   $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
 
   if (!$forms || !@$forms || grep { _embed_form_unsafe($_) } @$forms) {
+    if ($census) {
+      my $why = !$forms ? 'lower-died: ' . substr(($@ // '') =~ s/\s+/ /gr, 0, 60)
+              : !@$forms ? 'empty-forms'
+              : 'embed-unsafe';
+      warn "pcl-raw\tanon-decl:$why\n";
+    }
     for my $s (@side_snaps) {
       splice @{ $self->{$s->[0]} }, $s->[1] if $self->{$s->[0]};
     }

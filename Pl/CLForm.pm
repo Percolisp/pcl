@@ -21,11 +21,22 @@ use warnings;
 use Exporter 'import';
 our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_flat to_program);
 
+use Scalar::Util ();
 use constant ONE_LINE_MAX => 95;
 
+our %RAW_PROV;
 sub raw {
   my ($s) = @_;
-  return bless \$s, 'Pl::CLForm::Raw';
+  my $r = bless \$s, 'Pl::CLForm::Raw';
+  if ($ENV{PCL_E2_RAW_CENSUS}) {
+    # Provenance for the census: which frame MADE this raw.  Inside-out
+    # (keyed by refaddr) so the object itself stays a plain scalar ref for
+    # every other consumer.
+    my @c1 = caller(1);
+    $RAW_PROV{Scalar::Util::refaddr($r)} =
+      ($c1[3] // 'main') . ':' . ((caller(0))[2] // '?');
+  }
+  return $r;
 }
 
 sub is_raw { ref($_[0]) eq 'Pl::CLForm::Raw' }
@@ -178,12 +189,14 @@ sub _raw_census {
   return unless ref $f;
   if (is_raw($f)) {
     my $t = $$f // '';
-    my $cls = $t =~ /^\s*\(lambda\b/       ? 'raw:lambda-body'
-            : $t =~ /^\s*\(let \(\(\|sort--pkg\|/ ? 'raw:sort-cmp'
-            : $t =~ /^\s*;;/               ? 'raw:comment-echo'
-            : $t =~ /^\s*\(/               ? 'raw:form-text'
+    # Shape classes are secondary — a "lambda-looking" raw is usually just a
+    # whole-expression fallback whose text starts with (lambda (s314b).  The
+    # PROVENANCE (which frame called raw()) is the signal that locates work.
+    my $cls = $t =~ /^\s*;;/ ? 'raw:comment-echo'
+            : $t =~ /^\s*\(/ ? 'raw:form-text'
             : 'raw:atom';
-    warn "pcl-rawout\t$cls\n";
+    my $prov = $RAW_PROV{Scalar::Util::refaddr($f)} // '?';
+    warn "pcl-rawout\t$cls\t$prov\n";
     return;
   }
   if (is_raw_wrap($f)) {
