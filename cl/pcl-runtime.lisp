@@ -1695,9 +1695,15 @@
   (if (p-box-sv-ok box)
       (p-box-sv box)
       (let* ((inner (p-box-value box))
-             (class (or (p-box-class box)
-                        (when (hash-table-p inner)
-                          (gethash :__class__ inner))))
+             ;; Target class first, same rule as p-ref/p-get-class: "$a1"
+             ;; after `bless \$a1, "F"` must still stringify with the class
+             ;; of what $a1 HOLDS (A=HASH...), not the scalar's own stash
+             ;; (bless.t 30); and a plain-scalar payload never shows a
+             ;; class at all (join.t 36/40).
+             (class (or (%p-target-class box)
+                        (and (p-box-class box)
+                             (%p-ref-shaped-p inner)
+                             (p-box-class box))))
              (raw (cond
                     ;; Blessed typeglob ref: stringify as GLOB(0xADDR) not *PKG::NAME
                     ((p-typeglob-p inner)
@@ -11450,25 +11456,65 @@ buffer's fill-pointer; everything else falls back to file-length."
              (not (p-magic-cell-p rv))
              (p-box-class r))))))
 
+(defun %p-ref-shaped-p (v)
+  "Is V a REFERENCE payload -- a shape whose class may legitimately be
+   read off the VARIABLE box's slot (CODE/GLOB/raw-vector targets cannot
+   carry a class themselves)?  A plain scalar payload says NO: its box's
+   slot is the SCALAR's own SvSTASH (`bless \\$x` writes it), visible only
+   through a ref TO the box -- never through ref($x) or \"$x\" (join.t
+   36/40: a tied FETCH returning the live cell of a blessed \\$x must
+   stringify as the plain value, not \"SM=4\")."
+  (or (p-box-p v) (hash-table-p v) (functionp v)
+      (and (vectorp v) (not (stringp v)))
+      (p-typeglob-p v) (streamp v) (p-regex-match-p v)))
+
+(defun %p-target-class (box)
+  "The class recorded on what BOX's ref value POINTS TO: the referent box
+   of a plain scalar ref, a hash target's :__class__, or a classed target
+   box (aggregate constructor).  Perl's ref()/dispatch read
+   SvSTASH(SvRV(rv)) -- the TARGET's stash -- and that OUTRANKS the class
+   slot on the variable box itself, which doubles as the SCALAR's own
+   SvSTASH: `bless \\$a1, \"F\"` writes $a1's slot, and only a ref TO $a1
+   may read it -- ref($a1) still reports the class of what $a1 holds
+   (perl-tests/bless.t 29-32: blessing a ref to an object must not change
+   the object's class)."
+  (let ((v (p-box-value box)))
+    (cond
+      ;; Plain payloads first -- the overwhelmingly common case (every
+      ;; string/number variable): nothing a target class could live on,
+      ;; and the referent rule only applies through a box payload, so
+      ;; exit before any deeper walk (pack.t ran at 87s of a 90s budget;
+      ;; this lookup is on the box-sv/p-ref/p-get-class hot paths).
+      ((or (null v) (stringp v) (numberp v) (eq v *p-undef*)) nil)
+      ((hash-table-p v) (gethash :__class__ v))
+      ((p-box-p v) (or (%p-referent-class box) (p-box-class v)))
+      (t nil))))
+
 (defun p-ref (val)
   "Perl ref() function - get reference type or class name if blessed.
    Returns empty string for non-references."
   ;; Unbox the variable to get what it contains
   (let ((inner (unbox val)))
     (cond
-      ;; Blessed scalar reference: the referent's class is the truth
-      ;; (see %p-referent-class) -- checked BEFORE the wrapper cache so a
-      ;; re-bless through one alias is visible through every alias.
-      ((%p-referent-class val))
-      ;; Blessed value - return class name
-      ((and (p-box-p val) (p-box-class val))
+      ;; The TARGET's class is the truth (see %p-target-class): the
+      ;; referent of a scalar ref, a hash's :__class__, or a classed
+      ;; target box -- checked BEFORE the variable box's own slot so a
+      ;; re-bless through one alias shows through every alias, and so
+      ;; `bless \\$a1` (which writes $a1's OWN slot) cannot shadow the
+      ;; class of the object $a1 points to.  This also covers the
+      ;; `local $x = blessed_ref` re-wrap (target box carries the class).
+      ((and (p-box-p val) (%p-target-class val)))
+      ;; Blessed value on the variable box itself: the storage for ref
+      ;; kinds whose target cannot carry a class (raw CODE/GLOB values).
+      ;; Only for REF payloads -- a plain-scalar payload's slot is the
+      ;; scalar's own SvSTASH, and ref($x) on a non-ref is "".
+      ((and (p-box-p val) (p-box-class val) (%p-ref-shaped-p inner))
        (p-box-class val))
       ((and (hash-table-p inner) (gethash :__class__ inner))
        (gethash :__class__ inner))
       ;; Reference box: inner is a p-box - check what it wraps (ARRAY/HASH/SCALAR)
       ((p-box-p inner)
-       ;; Check inner box's class first: handles `local $x = blessed_ref` where
-       ;; the local `let` binding wraps the original box in a new make-p-box.
+       ;; (A classed inner was already answered by %p-target-class above.)
        (if (p-box-class inner)
            (p-box-class inner)
            (let ((inner2 (p-box-value inner)))
@@ -12468,14 +12514,25 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; Also set on box if ref is a box (so box-set can copy it)
        (when (p-box-p ref) (setf (p-box-class ref) class-name)))
       ((p-box-p inner)
-       ;; Scalar reference: perl blesses the REFERENT, so record the class
-       ;; there -- that is what makes a second \$x wrapper (which never met
-       ;; this bless) and a re-bless through an alias behave, and it is the
-       ;; SvSTASH(SvRV(rv)) that XS reads.  The wrapper/variable write below
-       ;; stays as a cache: box-set copies it to whatever variable holds the
-       ;; ref, and the fast "is this an object" checks read it.
-       (let ((referent (%p-scalar-ref-referent ref)))
-         (when referent (setf (p-box-class referent) class-name)))
+       ;; Perl blesses SvRV -- the TARGET the ref value denotes.
+       (let ((scalar-referent (%p-scalar-ref-referent ref)))
+         (if scalar-referent
+             ;; Scalar reference: the SCALAR's own stash, and ONLY that --
+             ;; what the scalar happens to HOLD (e.g. a hash ref) keeps its
+             ;; own class untouched (bless.t 25-32: blessing \$a1 as "F"
+             ;; must not change the class of the object in $a1).
+             (setf (p-box-class scalar-referent) class-name)
+             ;; Aggregate ref through a variable (double-boxed): `inner`
+             ;; IS the target box -- restamp it (and a hash target's
+             ;; :__class__), not just the variable's slot, or a re-bless
+             ;; would be invisible through other aliases.
+             (progn
+               (setf (p-box-class inner) class-name)
+               (let ((rv (p-box-value inner)))
+                 (when (hash-table-p rv)
+                   (setf (gethash :__class__ rv) class-name))))))
+       ;; The variable/wrapper write stays as the cache box-set copies
+       ;; around (fast "is this an object" checks read it).
        (when (p-box-p ref) (setf (p-box-class ref) class-name)))
       (t
        ;; Array, code, or other ref type - store class on the box
@@ -12493,16 +12550,18 @@ buffer's fill-pointer; everything else falls back to file-length."
     ((stringp obj) obj)  ;; Class name string (for Counter->new())
     ((hash-table-p obj) (gethash :__class__ obj))
     ((p-box-p obj)
-     ;; Referent class first (perl blesses the referent; the wrapper and
-     ;; variable-box slots are caches that go stale across aliases), then
-     ;; the cached slots.
-     (or (%p-referent-class obj)
-         (p-box-class obj)
-         (let ((val (p-box-value obj)))
-           (cond
-             ((hash-table-p val) (gethash :__class__ val))
-             ((p-box-p val) (p-box-class val))
-             (t nil)))))
+     ;; Target class first (perl reads SvSTASH(SvRV): the referent of a
+     ;; scalar ref, a hash's :__class__, a classed target box -- the
+     ;; variable box's own slot is the SCALAR's stash plus a cache, and
+     ;; must not shadow the target: bless.t 29-32), then the slot, but
+     ;; only when the payload is a REF shape (a plain scalar's slot is
+     ;; its own SvSTASH -- not the class of a value it doesn't hold).
+     ;; (class-slot check BEFORE the shape scan: the slot is almost always
+     ;; nil, the shape scan is 7 type tests -- hot-path order matters.)
+     (or (%p-target-class obj)
+         (and (p-box-class obj)
+              (%p-ref-shaped-p (p-box-value obj))
+              (p-box-class obj))))
     (t nil)))
 
 (defun %pcl-invocant-class (invocant)
@@ -13749,9 +13808,14 @@ buffer's fill-pointer; everything else falls back to file-length."
               ;; /r: return modified copy, leave original unchanged
               (if non-destructive-p
                   (make-p-box (if (stringp result) result str))
-                  ;; Normal: update the boxed string in place, return count
+                  ;; Normal: update the boxed string in place, return count.
+                  ;; ONLY on a match: perl leaves the variable untouched when
+                  ;; nothing matched -- writing the (stringified) original
+                  ;; back would replace a blessed object held in the variable
+                  ;; with its own print form (concat2.t 3: `$path =~ s|/\z||`
+                  ;; on an overloaded object must leave the object alone).
                   (progn
-                    (when (stringp result)
+                    (when (and (stringp result) (plusp count))
                       (if (p-box-p string-box)
                           (setf (p-box-value string-box) result
                                 (p-box-sv-ok string-box) nil

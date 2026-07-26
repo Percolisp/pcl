@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 315d (2026-07-27, Fable) — task #116: the drift group falls — one class-model rule and one case-inverted symbol.
+
+**bless.t 106/106, join.t 43/43, blocks.t t24 → TODO-skip.**  Two real
+bugs, both older than they looked:
+
+**1. The class-slot collision (bless.t 29-32, join.t 36/40).**  A
+variable box's `p-box-class` plays two roles: the CACHE of "class of the
+ref I hold" (box-set copies it), and — since #99 — the SCALAR's own
+SvSTASH (`bless \$a1, "F"` writes it).  Readers conflated them: `ref($a1)`
+/ `"$a1"` / dispatch returned the scalar's OWN stash instead of the class
+of what $a1 points to.  The rule, now in one place (`%p-target-class` +
+`%p-ref-shaped-p`, cl/pcl-runtime.lisp): **reads about the value a box
+HOLDS take the TARGET's class (referent box, hash :__class__, classed
+target box); the box's own slot answers only through a ref TO it, and for
+plain-scalar payloads never shows through ref()/"" at all** (a tied FETCH
+returning the live cell of a blessed \$x — join.t's SM — stringified as
+"SM=4").  Applied in p-ref, p-get-class, box-sv; write side: p-bless
+through a variable holding an aggregate ref now restamps the TARGET box
+(+hash :__class__), not just the variable's slot — a re-bless was
+invisible through other aliases under target-first reads.
+Guard: bless-referent-01.t 6→11 tests (t7-t11, perl-oracle-confirmed).
+
+**2. $TODO dead under :invert (blocks.t t24 and every TODO test).**  The
+s230 harness support reads `(find-symbol "$TODO" :main)` — but generated
+code is read under `(readtable-case :invert)`, so the symbol's NAME is
+"$todo".  Every `local $TODO` in the suite had silently stopped marking
+its tests since the :invert flip.  `%current-todo` now looks up via the
+same `%pcl-invert-case` transform every runtime name-builder uses
+(literal fallback kept).  blocks.t t24 was never a behavior bug: PCL
+prints '' exactly like real perl (RT #2917 is TODO upstream too).
+
+**3. What target-first UNMASKED: no-match s/// destroyed blessed
+objects (concat2.t 3).**  `do-regex-subst` wrote the substitution result
+back even when NOTHING matched — and cl-ppcre returns the original
+string on no-match, so `$path =~ s|/\z||` on an overloaded object
+replaced the object with its own print form ("HASH(0x1)").  The direct
+`(setf p-box-value)` bypasses box-set, so the stale class cache made
+ref()/overload keep "working" on the corpse — target-first reads
+exposed it.  Fix: write back only when count > 0 (perl leaves the
+variable untouched on no match).  OPEN family note: the s///-source
+stringification is `(to-string (unbox box))`, which skips box-sv's
+overload — matching happens against "HASH(0x1)" instead of the
+overloaded string; same pattern likely in m//.  Left for a dedicated
+pass (behavior unchanged from before).
+
+**Perf (USER s308 rule): net NEUTRAL-to-positive.**  The first sweep
+after the class fixes TIMEOUTed pack.t (90s cap; it ran 87s under
+jobs-8 BEFORE the change) — the class lookups sit on the box-sv/p-ref/
+p-get-class hot paths.  `%p-target-class` got a plain-payload fast exit
+(string/number/nil/undef answer nil in 2-4 type tests, no referent
+walk) and the class-slot check moved BEFORE the 7-test shape scan.
+Measured solo: pack.t 65-70s NEW vs 68s HEAD — slightly faster than
+before the fixes.  The in-sweep TIMEOUT is the pre-existing
+jobs-8-contention flakiness (pack.t was at 87/90 already); the re-bless
+sweep ran with --timeout 150 so pack.t's 90 blessed rows survive.
+
+Final: gate 122/4382 PASS ×2; sweep 63 fully-passing (bless.t, join.t,
+concat2.t joined; 0 new, ~23 fixed incl. the s310g-i blocks.t rows and
+TODO-remarked tests); baseline re-blessed from the 150s-timeout run.
+
+---
+
 ## Session 315c (2026-07-26, Fable) — XS OO UNBLOCKED: the magic group implemented (task #115); ref_target was the last bug, and it was ours.
 
 **`Digest::MD5->new->add(...)->hexdigest` works.**  The two ABI-6

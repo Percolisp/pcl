@@ -43,7 +43,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 6;
+plan tests => 11;
 
 # One SBCL launch for the whole family: each line prints one answer.
 my $prog = <<'EOF';
@@ -61,6 +61,18 @@ print "t4:", ref($r), "\n";
 my $y = $$r;
 print "t5:", (ref(\$y) eq 'SCALAR' ? 'plain' : ref(\$y)), "\n";
 print "t6:", ref(\$x), "\n";
+my $a1 = bless {}, "AA";
+my $f = bless \$a1, "FF";
+print "t7:", ref($a1), "\n";
+print "t8:", ref(\$a1), "\n";
+print "t9:", ("$a1" =~ /^AA=HASH/ ? "ok" : "$a1"), "\n";
+bless $a1, "A2";
+my $alias = $a1;
+print "t10:", ref($alias), "\n";
+my $plainstash = "v";
+bless \$plainstash, "PS";
+print "t11:", (ref($plainstash) eq "" ? "notref" : ref($plainstash)),
+      ":", "$plainstash", "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -77,3 +89,17 @@ like $out, qr/^t5:plain$/m,
     'copying the value out does not copy the blessing';
 like $out, qr/^t6:B$/m,
     'a fresh \\$x after the fact reports the class';
+
+# The other direction (s315, bless.t 29-32 / join.t 36-40): the class on a
+# variable box is the SCALAR's own SvSTASH -- ref($x)/"$x"/dispatch read the
+# class of what $x POINTS TO, never $x's own slot.
+like $out, qr/^t7:AA$/m,
+    'blessing \\$a1 does not change the class of the object $a1 holds';
+like $out, qr/^t8:FF$/m,
+    '...while ref(\\$a1) sees the scalar\'s own stash';
+like $out, qr/^t9:ok$/m,
+    '"$a1" stringifies with the held object\'s class, not the scalar\'s stash';
+like $out, qr/^t10:A2$/m,
+    're-bless through the variable restamps the target (visible via an alias)';
+like $out, qr/^t11:notref:v$/m,
+    'a blessed plain scalar is not a ref and stringifies as its plain value';

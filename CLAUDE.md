@@ -264,10 +264,13 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
-- Full `perl-tests/` sweep: 62 files fully passing (s310h honest baseline —
-  fresh_perl/runperl children now run under PCL via `tools/pclperl-for-tests`,
-  not real perl; `PCL_FRESH_PERL=real` restores the old compare mode); see
-  `docs/sweep-bug-catalog.md`
+- Full `perl-tests/` sweep: 63 files fully passing, 712 blessed fails
+  (s315d baseline — class-model target-first reads, $TODO honored again
+  under :invert, no-match s/// write gate; fresh_perl/runperl children run
+  under PCL via `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores
+  the old compare mode).  GOTCHA: pack.t runs ~90s under `--jobs 8` against
+  the 90s default timeout — re-bless runs need `--timeout 150` or pack.t's
+  90 rows vanish from the faillog.  See `docs/sweep-bug-catalog.md`
 - v2 pipeline census: 111 files v2-native / 0 gated to v1 — E1 complete
   (`perl tools/v2-census.pl` for the live numbers)
 

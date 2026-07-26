@@ -229,12 +229,17 @@
   "Return the active Test::More $TODO reason string, or NIL.
    Test files mark known-broken tests with `local $TODO = \"reason\"` (or the
    fully-qualified `local $::TODO`).  Both resolve to the symbol $TODO in package
-   MAIN (perl-tests run in main), so reading that symbol's dynamic value here lets
-   the harness honor TODO without any codegen change or variable hijacking.  When
-   the binding is out of scope the symbol holds its defvar'd undef box, which
-   test-undef-p rejects."
+   main (perl-tests run in main), so reading that symbol's dynamic value here lets
+   the harness honor TODO without any codegen change or variable hijacking.
+   Generated code is read under (readtable-case :invert), so the interned
+   symbol's NAME is the inverted \"$todo\" -- look that up via the same
+   %pcl-invert-case transform every runtime name-builder uses (the literal
+   \"$TODO\" fallback keeps this correct if the readtable ever reverts).
+   When the binding is out of scope the symbol holds its defvar'd undef box,
+   which test-undef-p rejects."
   (let* ((pkg (find-package :main))
-         (sym (and pkg (find-symbol "$TODO" pkg))))
+         (sym (and pkg (or (find-symbol (%pcl-invert-case "$TODO") pkg)
+                           (find-symbol "$TODO" pkg)))))
     (when (and sym (boundp sym))
       (let ((v (symbol-value sym)))
         (unless (test-undef-p v)
