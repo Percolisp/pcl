@@ -3885,7 +3885,8 @@ sub _lower_sub_inner {
     return ['p-sub', $clname, ['list', '&rest', '%_args'],
             ['p-args-body', ['block', 'nil',
               ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @$params],
-                raw('(let ((*wantarray* nil)) (p-list-= (vector ' . join(' ', @$params) . ') @_))'),
+                ['let', ['list', ['list', '*wantarray*', 'nil']],
+                  ['p-list-=', ['vector', @$params], '@_']],
                 $self->_lower_body_regime(\@body_stmts, $vi),
                 ($tail_param ? ($tail_param) : ())]]]];
   }
@@ -4526,10 +4527,11 @@ sub _lower_block {
     push @{ $self->{_captured_decls} },
       "(defvar ${sym}::\$a (make-p-box nil))",
       "(defvar ${sym}::\$b (make-p-box nil))";
-    my @enter = (raw("(p-defpackage $cl_pkg)"),
-                 raw("(defclass ${sym}::" . $fp->_pkg_to_clos_class($pkg) . " () ())"),
-                 raw("(p-set-current-package $cl_pkg \"$pkg\")"));
-    my $restore = raw("(p-set-current-package $cl_prev \"$prev\")");
+    my @enter = (['p-defpackage', $cl_pkg],
+                 ['defclass', "${sym}::" . $fp->_pkg_to_clos_class($pkg),
+                  ['list'], ['list']],
+                 ['p-set-current-package', $cl_pkg, "\"$pkg\""]);
+    my $restore = ['p-set-current-package', $cl_prev, "\"$prev\""];
     if ($blk) {
       $env->push_package($pkg);
       my @inner = $self->_lower_scope([grep { $_->significant } $blk->children], $vi, undef);
