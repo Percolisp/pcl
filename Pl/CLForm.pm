@@ -126,6 +126,7 @@ sub to_flat {
 sub to_string {
   my ($f, $depth) = @_;
   $depth //= 0;
+  _raw_census($f) if !$depth && $ENV{PCL_E2_RAW_CENSUS};
   return $f unless ref $f;
   # Raw chunks pass through verbatim: re-indenting would corrupt string
   # literals that contain newlines, and alignment is only cosmetic.
@@ -164,7 +165,33 @@ sub to_string {
 
 sub to_program {
   my (@forms) = @_;
+  if ($ENV{PCL_E2_RAW_CENSUS}) { _raw_census($_) for @forms }
   return join("\n", map { ref($_) || $_ ne '' ? to_string($_, 0) : '' } @forms) . "\n";
+}
+
+# E2.final distance meter (task #78): count the raw text actually PRINTED,
+# classified by shape.  Counting at emit sites overcounts — analysis parses
+# and the native attempt build trees that are discarded; only what reaches
+# to_program is real.
+sub _raw_census {
+  my ($f) = @_;
+  return unless ref $f;
+  if (is_raw($f)) {
+    my $t = $$f // '';
+    my $cls = $t =~ /^\s*\(lambda\b/       ? 'raw:lambda-body'
+            : $t =~ /^\s*\(let \(\(\|sort--pkg\|/ ? 'raw:sort-cmp'
+            : $t =~ /^\s*;;/               ? 'raw:comment-echo'
+            : $t =~ /^\s*\(/               ? 'raw:form-text'
+            : 'raw:atom';
+    warn "pcl-rawout\t$cls\n";
+    return;
+  }
+  if (is_raw_wrap($f)) {
+    warn "pcl-rawout\traw_wrap\n";
+    _raw_census($_) for @{ $f->{body} };
+    return;
+  }
+  _raw_census($_) for @$f;
 }
 
 # A form the FLAT printer cannot safely embed in an expression position

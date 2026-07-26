@@ -515,6 +515,7 @@ sub gen_node_form {
       my $form = $self->gen_binary_op_form($type, $kids, $node_id);
       return $form if defined $form;
     }
+    warn "pcl-raw\tnode:$type\n" if $ENV{PCL_E2_RAW_CENSUS};
     return Pl::CLForm::raw($self->gen_internal_node_text($node, $node_id, $kids));
   }
   # A PPI::Token::Operator/Word WITH children is a binary op (gen_node's
@@ -533,6 +534,12 @@ sub gen_node_form {
   }
   if (!@$kids && defined(my $lf = $self->gen_leaf_form($node))) {
     return $lf;
+  }
+  if ($ENV{PCL_E2_RAW_CENSUS}) {
+    my $desc = ref($node) ? ref($node) . ':' . (eval { $node->content } // '?')
+                          : "scratch:$node";
+    $desc = substr($desc, 0, 60);
+    warn "pcl-raw\t$desc\n";
   }
   return Pl::CLForm::raw($self->gen_node($node_id));
 }
@@ -5508,7 +5515,16 @@ sub gen_inline_lambda {
 # (`return` inside them must propagate to the enclosing sub's catch).
 sub gen_inline_lambda_form {
   my ($self, $node, $node_id, $kids) = @_;
-  my $bf = $node->{body_form} or return undef;
+  my $bf = $node->{body_form};
+  if ($ENV{PCL_E2_RAW_CENSUS} && (!$bf || $node->{comparator_name} || $node->{scalar_cmp})) {
+    my $why = $node->{comparator_name} ? 'named-cmp'
+            : $node->{scalar_cmp}      ? 'scalar-cmp'
+            : 'body_cl';
+    (my $snip = $node->{body_cl} // '') =~ s/\s+/ /g;
+    warn "pcl-raw\tlambda:" . ($node->{for_func} // '?') . ":$why\t"
+       . substr($snip, 0, 70) . "\n";
+  }
+  return undef unless $bf;
   return undef if $node->{comparator_name} || $node->{scalar_cmp};
   my $params = ['list', @{$node->{params} // []}];
   if (($node->{for_func} // '') eq 'sort') {

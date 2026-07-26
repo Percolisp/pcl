@@ -2072,16 +2072,36 @@ sub _attach_glob_slot {
 # Hash-constructor blocks keep their dedicated text route.
 sub _v2_embedded_body {
   my ($self, $block, $func_name) = @_;
-  return undef unless $self->has_parser;
-  my $hook = $self->parser->{_v2_embed} or return undef;
+  my $census = $ENV{PCL_E2_RAW_CENSUS};
+  if (!$self->has_parser) {
+    warn "pcl-raw\tdecl:no-parser\n" if $census;
+    return undef;
+  }
+  my $hook = $self->parser->{_v2_embed};
+  if (!$hook) {
+    if ($census) {
+      my @st;
+      for my $i (1 .. 25) {
+        my @c = caller($i) or last;
+        push @st, "$c[3]" if $c[3] =~ /Parser2?::|PExpr::parse_expr/;
+      }
+      warn "pcl-raw\tdecl:no-hook\t" . join('<', @st[0..($#st > 8 ? 8 : $#st)]) . "\n";
+    }
+    return undef;
+  }
   if (_block_is_hash_constructor($block)) {
     # `map { {k=>$_} } …`: the block is one hash-constructor EXPRESSION —
     # no statement lowering needed; the form twin of the v1 helper suffices.
     my $f = $self->parser->parse_hash_block_to_cl_form($block);
-    return undef if !$f || Pl::CLForm::embed_unsafe($f);
+    if (!$f || Pl::CLForm::embed_unsafe($f)) {
+      warn "pcl-raw\tdecl:hash-ctor\n" if $census;
+      return undef;
+    }
     return [$f];
   }
-  return $hook->($block, $func_name);
+  my $r = $hook->($block, $func_name);
+  warn "pcl-raw\tdecl:hook-declined\n" if $census && !$r;
+  return $r;
 }
 
 sub _block_is_hash_constructor {
