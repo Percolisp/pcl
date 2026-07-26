@@ -75,13 +75,28 @@ the magic chain must be keyed on it.
   shim owns. The referent box's lifetime is the object's lifetime, which
   is exactly perl's contract for magic.
 
-## The neighbour (still real, still open — task #99)
+## The neighbour — FIXED (s314, task #99)
 
-**PCL records a scalar ref's blessing on the wrapper box, not on the
-referent** (`p-bless`, `cl/pcl-runtime.lisp` ~12426, deliberate and
-commented). Perl blesses the referent, which is why
-`SvSTASH(SvRV(rv))` reads a class. XS asking the referent finds
-nothing — that is the `bless_and_class` conformance failure. Unlike the
-magic bug above, this one is entirely PCL's representation question.
-Neither matters for hash-based objects: those bless the inner hash,
-matching perl.
+PCL used to record a scalar ref's blessing on the wrapper box only.
+Perl blesses the referent, and the difference was observable in pure
+Perl, not just XS: a second `\$x` wrapper never saw the bless, a
+re-bless through one alias was invisible through another, and XS asking
+`SvSTASH(SvRV(rv))` found nothing (the `bless_and_class` conformance
+failure).
+
+Now the **referent box is the source of truth**: `p-bless` writes the
+class there (`%p-scalar-ref-referent` navigates wrapper-or-variable to
+the referent), `p-ref`/`p-get-class` consult it first
+(`%p-referent-class` — it declines unless the referent holds a plain
+scalar, so the REF/ARRAY/REGEXP arms keep winning), and the
+wrapper/variable slots remain as caches for the fast "is this an
+object" checks. The flip side went in with it: `box-set` copies a class
+only when the assigned value is itself a reference — copying a plain
+value out of a blessed referent yields an unblessed scalar, because
+perl's stash is attached to the SV, not the value.
+
+Guard: `Pl/t/bless-referent-01.t` (six behaviors, perl-verified).
+Conformance: **366/366** — the corpus is fully green.
+
+This mirrors how hash objects always worked (class in the hash itself,
+`:__class__`), which is why they never had these bugs.

@@ -1157,16 +1157,25 @@
           (p-box-sv-ok box) nil)
     ;; Perl: assigning to a scalar resets pos()
     (remhash box *p-match-pos*)
-    ;; Preserve class from blessed boxes
-    ;; Preserve class from blessed boxes.  Otherwise, CLEAR a stale class —
-    ;; but only when the box's OLD value was itself the reference (vector/
-    ;; hash/function/box): overwriting a blessed REFERENCE-holder with a plain
-    ;; value unblesses the variable (substr.t: a substr-lvalue write through
-    ;; an overloaded object leaves a plain string, else the stale class keeps
-    ;; firing overloaded "" on it).  A blessed scalar REFERENT (old value a
-    ;; plain scalar) keeps its class on assignment, like Perl's SV stash:
-    ;; qr.t `$$e = 'Fake!'` leaves $e blessed into Stew.
-    (if (and (p-box-p value) (p-box-class value))
+    ;; Preserve class from blessed boxes — but ONLY when the assigned value
+    ;; is itself a reference: perl's stash is attached to the source SV, so
+    ;; copying a plain VALUE out of a blessed scalar referent (`my $y = $$r`
+    ;; where \$r's referent is blessed) yields an ordinary unblessed scalar.
+    ;; Otherwise, CLEAR a stale class — but only when the box's OLD value was
+    ;; itself the reference (vector/hash/function/box): overwriting a blessed
+    ;; REFERENCE-holder with a plain value unblesses the variable (substr.t:
+    ;; a substr-lvalue write through an overloaded object leaves a plain
+    ;; string, else the stale class keeps firing overloaded "" on it).  A
+    ;; blessed scalar REFERENT (old value a plain scalar) keeps its class on
+    ;; assignment, like Perl's SV stash: qr.t `$$e = 'Fake!'` leaves $e
+    ;; blessed into Stew.
+    (if (and (p-box-p value) (p-box-class value)
+             (or (p-box-p v)
+                 (and (vectorp v) (not (stringp v)))
+                 (hash-table-p v)
+                 (functionp v)
+                 (p-typeglob-p v)
+                 (p-regex-match-p v)))
         (setf (p-box-class box) (p-box-class value))
         (when (and (p-box-class box)
                    (or (and (vectorp old-val) (not (stringp old-val)))
@@ -11410,12 +11419,47 @@ buffer's fill-pointer; everything else falls back to file-length."
              (p-typeglob-p u)                       ; holds a glob ref
              (and (p-box-p u) (p-box-is-ref u))))))  ; holds a scalar/ref wrapper
 
+(defun %p-scalar-ref-referent (val)
+  "The referent BOX of a scalar reference, or NIL.
+   VAL may be the is-ref wrapper itself or a variable box holding one."
+  (when (p-box-p val)
+    (let ((w (if (p-box-is-ref val)
+                 val
+                 (let ((v (p-box-value val)))
+                   (and (p-box-p v) v)))))
+      (let ((r (and w (p-box-value w))))
+        (and (p-box-p r) r)))))
+
+(defun %p-referent-class (val)
+  "The class recorded on the REFERENT of a plain scalar reference, or NIL.
+   Perl blesses the referent, not the reference, so when this answers it
+   OUTRANKS any class cached on a wrapper or variable box: a second \\$x
+   wrapper never met the bless, and a re-bless through one alias must show
+   through all of them.  Declines (NIL) when the referent holds anything
+   but a plain scalar -- those shapes are REF/ARRAY/REGEXP/... in ref()
+   terms and their arms must keep winning."
+  (let ((r (%p-scalar-ref-referent val)))
+    (when r
+      (let ((rv (p-box-value r)))
+        (and (not (p-box-p rv))
+             (not (and (vectorp rv) (not (stringp rv))))
+             (not (hash-table-p rv))
+             (not (functionp rv))
+             (not (p-typeglob-p rv))
+             (not (p-regex-match-p rv))
+             (not (p-magic-cell-p rv))
+             (p-box-class r))))))
+
 (defun p-ref (val)
   "Perl ref() function - get reference type or class name if blessed.
    Returns empty string for non-references."
   ;; Unbox the variable to get what it contains
   (let ((inner (unbox val)))
     (cond
+      ;; Blessed scalar reference: the referent's class is the truth
+      ;; (see %p-referent-class) -- checked BEFORE the wrapper cache so a
+      ;; re-bless through one alias is visible through every alias.
+      ((%p-referent-class val))
       ;; Blessed value - return class name
       ((and (p-box-p val) (p-box-class val))
        (p-box-class val))
@@ -12424,10 +12468,14 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; Also set on box if ref is a box (so box-set can copy it)
        (when (p-box-p ref) (setf (p-box-class ref) class-name)))
       ((p-box-p inner)
-       ;; Scalar reference: ref is the wrapper box (from p-backslash), inner is the
-       ;; variable box it points to. Bless sets the class on the wrapper (the reference
-       ;; itself), NOT on what it points to. Then box-set will copy the class to the
-       ;; variable that holds the blessed ref.
+       ;; Scalar reference: perl blesses the REFERENT, so record the class
+       ;; there -- that is what makes a second \$x wrapper (which never met
+       ;; this bless) and a re-bless through an alias behave, and it is the
+       ;; SvSTASH(SvRV(rv)) that XS reads.  The wrapper/variable write below
+       ;; stays as a cache: box-set copies it to whatever variable holds the
+       ;; ref, and the fast "is this an object" checks read it.
+       (let ((referent (%p-scalar-ref-referent ref)))
+         (when referent (setf (p-box-class referent) class-name)))
        (when (p-box-p ref) (setf (p-box-class ref) class-name)))
       (t
        ;; Array, code, or other ref type - store class on the box
@@ -12445,8 +12493,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     ((stringp obj) obj)  ;; Class name string (for Counter->new())
     ((hash-table-p obj) (gethash :__class__ obj))
     ((p-box-p obj)
-     ;; Check box's class slot first, then check the value inside
-     (or (p-box-class obj)
+     ;; Referent class first (perl blesses the referent; the wrapper and
+     ;; variable-box slots are caches that go stale across aliases), then
+     ;; the cached slots.
+     (or (%p-referent-class obj)
+         (p-box-class obj)
          (let ((val (p-box-value obj)))
            (cond
              ((hash-table-p val) (gethash :__class__ val))
@@ -14181,7 +14232,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (loop for p = (search "::" module :start2 start)
           while p
           do (push (subseq module start p) parts)
-             (setf start (+ p 2)))
+          (setf start (+ p 2)))
     (push (subseq module start) parts)
     (nreverse parts)))
 

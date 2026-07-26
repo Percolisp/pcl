@@ -51,6 +51,40 @@ DESTROY is never AUTOLOADed, matching perl and `%pcl-dispatch-autoload`.
 Numbers refreshed in CLAUDE.md: gate 120 files / 4372 tests; conformance
 365 pass / 1 fail.
 
+**Then task #99, and the corpus went fully green: scalar-ref blessing
+moved to the REFERENT (366/366).** The old model (class on the wrapper
+box, copied to variable boxes by box-set) was wrong in pure Perl, not
+just XS -- a probe against real perl showed four divergences: a second
+`\$x` wrapper reported SCALAR not the class, method calls through it
+died "unblessed reference", a re-bless through one alias was invisible
+through another, and `ref(\$x)` after a bless said SCALAR. The referent
+box is now the source of truth, mirroring how hash objects always kept
+`:__class__` in the hash itself (which is why THEY never had these
+bugs): `p-bless` writes the referent (navigation helper
+`%p-scalar-ref-referent`), `p-ref`/`p-get-class` consult
+`%p-referent-class` FIRST -- it declines unless the referent holds a
+plain scalar, so the REF/ARRAY/REGEXP/LVALUE arms keep winning -- and
+wrapper/variable class slots stay as caches for the fast is-object
+checks. The subtle flip side: `box-set` now copies a class only when
+the assigned VALUE is itself a reference; copying a plain value out of
+a blessed referent (`my $y = $$r`) must yield an unblessed scalar,
+because perl's stash is attached to the SV, not the value. (First cut
+regressed exactly that; the perl-oracle probe caught it.)
+`xs-blessed-class` answers a bare referent box's own class, which is
+the SvSTASH question -- bless_and_class was the last conformance
+failure, and it passes now.
+
+Guard: `Pl/t/bless-referent-01.t` (6 behaviors, one SBCL launch).
+Gate 121 files / 4378 tests PASS; conformance **366 pass / 0 fail**.
+
+Sweep guard: 61 fully passing, not the blessed 62 — range.t test 162
+(RT #130841, `1 .. 9223372036854775806` overflow message) fails 157+1.
+A/B against the PRE-change runtime (HEAD checkout of pcl-runtime.lisp,
+same machine, same session) fails identically, so it is NOT from the
+referent work — it drifted some time after s308 blessed range.t as
+fully passing. Left as an open pre-existing item; everything else in
+the sweep matches the s310h shape.
+
 ---
 
 ## Session 313 (2026-07-25, Opus 5, from the pclxs side) — pclxs ABI 5: the pin moved, the adapter did not.

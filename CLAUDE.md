@@ -251,12 +251,11 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **120 test files, 4372 tests** (Pl/t gate, as of session 313 — includes Pl/t/xs-01.t and xs-02.t, which skip without a built pclxs sibling)
-- **XS conformance: 365 pass, 1 fail** against pclxs's corpus with real perl
-  as oracle (`tools/pcl-conform`, session 314). The one failure is a known
-  semantic difference, not a bridge bug: scalar-ref blessing is recorded on
-  the wrapper box, so XS asking the REFERENT (`SvSTASH(SvRV(rv))`) finds
-  nothing. Not in the Pl/t gate — minutes, not seconds.
+- **121 test files, 4378 tests** (Pl/t gate, as of session 314 — includes Pl/t/xs-01.t and xs-02.t, which skip without a built pclxs sibling)
+- **XS conformance: 366 pass, 0 fail — fully green** against pclxs's corpus
+  with real perl as oracle (`tools/pcl-conform`, session 314; the last
+  failure fell when scalar-ref blessing moved to the referent, task #99).
+  Not in the Pl/t gate — minutes, not seconds.
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)

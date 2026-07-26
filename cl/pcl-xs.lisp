@@ -516,12 +516,20 @@
    (ud (sb-alien:* t)))
   (with-xs-guard ()
     ;; p-ref returns the CLASS for a blessed ref and the reftype otherwise,
-    ;; so "blessed" is "p-ref disagrees with p-reftype".
+    ;; so "blessed" is "p-ref disagrees with p-reftype".  A REFERENT box is
+    ;; not a ref at all, but perl records the stash ON it (SvSTASH), and
+    ;; since s314 so do we -- p-box-class on a plain-valued box is exactly
+    ;; that stash, which is what SvSTASH(SvRV(rv)) comes here asking.
     (let* ((obj (%xs-deref h))
            (r   (p-ref obj))
-           (rt  (p-reftype obj)))
-      (if (and (stringp r) (string/= r "") (not (equal r rt)))
-          (progn (%xs-send-string sink ud r) 1)
+           (rt  (p-reftype obj))
+           (cls (if (and (stringp r) (string/= r "") (not (equal r rt)))
+                    r
+                    (and (p-box-p obj)
+                         (not (p-box-p (p-box-value obj)))
+                         (p-box-class obj)))))
+      (if cls
+          (progn (%xs-send-string sink ud cls) 1)
           0))))
 
 ;; method_lookup (pclxs ABI 4): what CODE does CLS->NAME resolve to?
