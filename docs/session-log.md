@@ -41,6 +41,27 @@ The embedded-block machinery (lower_embedded_block/_lower_embedded_anon,
 s307–s308) is already mature — hook-declines are rare (28 corpus-wide);
 the missing piece is emitters, not block lowering.
 
+**Step 1 SHIPPED (b37e885): the empty-shape normalization.** Seven form
+emitters declined on EMPTY input only, each to preserve the text twin's
+trailing-space byte ("(p-hash )", "(vector )", "(progn )",
+"(p-aslice @a )"): gen_hash_init_form, gen_tree_val_form,
+gen_progn_form, and the four slice accessors.  They now emit the
+space-free forms.  252 changed lines corpus-wide, machine-verified all
+whitespace-only — after fixing the one that WASN'T: the assignment
+emitters detect a list-assign LHS with the TEXT test /^\(vector / (space
+included), so the normalized `() = caller(0)` silently flipped p-list-=
+to p-setf; both tests now /^\(vector[ )]/.  String-matching CL is
+exactly this fragile — those greps die with the text printer.  Stale
+guards flipped (clform-01.t ×3, bless-01.t ×2); generation v2-65→v2-66;
+gate 121/4378 PASS; sweep fully-passing 61, list identical.  The
+printed-raw meter reads 16,105 UNCHANGED — correct: these empties sat
+inside expressions whose root is still text; the meter moves at the
+root flip.  This step buys fewer declines under that flip.
+Remaining before the flip: the inline_lambda family (expression-body,
+do{}/eval{} funcall embeds at ExprToCL ~1795/1906/2585/2618, subst-/e
+bodies, anon-sub raw_lambda, sort named/scalar-cmp wrappers ×62) and
+the \x{FFFF}-class quote-double + 2 Number leaf declines.
+
 ---
 
 ## Session 314 (2026-07-26, Fable) — review of the Opus XS work; the OO blocker re-diagnosed; get_cv + AUTOLOAD.
