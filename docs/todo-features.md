@@ -9,6 +9,21 @@ Historical implementation notes live in `docs/session-log.md`.
 
 ---
 
+## Future idea (user, 2026-07-27): perl's own pack() as an XS (task #118)
+
+Instead of chasing full parity in the Lisp `pack`/`unpack` (the remaining
+gap is catalogued in `docs/pack-failure-groups.md`, with `cl/pack-impl.pl`
+as the oracle), compile perl's own implementation as an XS module through
+pclxs and route the builtins over the bridge — exact perl semantics by
+construction.  Possibly more hairy core builtins later, where the
+cost/benefit clears (a bridge crossing per call vs. the Lisp
+implementation; see task #74's memoization).  The open problem is the
+carrier: perl core's pp_pack.c is not an XS module, so it needs an XSUB
+shell extracted around it.  Explicitly NOT scheduled — noted so it isn't
+reinvented.
+
+---
+
 ## IR cleanups (deferred by user decision, 2026-07-07)
 
 ### Bare `print;`/`say;` should emit `(p-print $_)` explicitly
