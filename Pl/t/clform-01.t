@@ -291,8 +291,8 @@ like($in, qr/\(make-p-box \(make-array 0 :adjustable t :fill-pointer 0\)\)/,
      '[] → empty adjustable vector');
 like($in, qr/\(make-p-box \(p-hash "x" 1 "y" 2\)\)/,
      '{x=>1,y=>2} → (make-p-box (p-hash "x" 1 "y" 2))');
-like($in, qr/\(make-p-box \(p-hash \)\)/,
-     '{} declines to text (trailing-space byte preserved)');
+like($in, qr/\(make-p-box \(p-hash\)\)/,
+     '{} → (p-hash), empty shape normalized (task #78 E2.final)');
 
 # --- converted: a_acc / h_acc form handlers (E2.1 internal nodes) ------------
 
@@ -351,7 +351,7 @@ print "@a $s $out $line @lines @e";
 EOT
 
 like($ms, qr/\(vector 1 2 3\)/,            'list-context progn → (vector 1 2 3)');
-like($ms, qr/\(vector \)/,                 'empty () declines to text (trailing space)');
+like($ms, qr/\(vector\)/,                  'empty () → (vector), normalized (task #78)');
 like($ms, qr/\(p-print :fh 'STDERR /,      'filehandle marker → :fh \x27STDERR');
 like($ms, qr/\(p-backtick "echo hi"\)/,    'backtick → (p-backtick "echo hi")');
 like($ms, qr/\(let \(\(\*wantarray\* nil\)\) \(p-readline \$fh\)\)/,
@@ -518,9 +518,10 @@ like($tv, qr/\(p-array-= \@m6 \(vector \$x\)/,   'single non-regex child → (ve
 like($tv, qr/\(p-array-= \@m7 \(vector \$x \$x\)/,'multi child → (vector $x $x)');
 like($tv, qr/\(p-array-= \@m8 \(p-\.\. 10 12\)\)/,'single range child → bare (p-.. …), no vector');
 
-# empty () declines to the text emitter (trailing-space (vector )/(progn ) shape)
+# empty () emits structurally: (vector)/(progn), trailing space normalized
+# away (task #78 E2.final)
 my $tve = Pl::Parser2->parse_code('my @e = (); print scalar(@e);');
-like($tve, qr/\(vector \)/, 'empty () declines → text (vector ) trailing space');
+like($tve, qr/\(vector\)/, 'empty () → (vector), normalized shape');
 
 # --- converted: gen_ref_funcall_form (E2.1) ---------------------------------
 my $rf = Pl::Parser2->parse_code(<<'EOT');

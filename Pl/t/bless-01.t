@@ -72,7 +72,7 @@ output_contains('sub new { bless {}, shift; }',
                 'Constructor generates p-sub');
 
 output_contains('sub new { bless {}, shift; }',
-                '(p-bless (make-p-box (p-hash )) (p-shift @_))',
+                '(p-bless (make-p-box (p-hash)) (p-shift @_))',
                 'Constructor bless pattern');
 
 
@@ -152,7 +152,7 @@ output_contains('bless \$x, o::',
 {
     my $code = 'sub new { bless {}, shift; }';
     my $result = parse_code($code);
-    like($result, qr/\(p-bless \(make-p-box \(p-hash \)\) \(p-shift/,
+    like($result, qr/\(p-bless \(make-p-box \(p-hash\)\) \(p-shift/,
          'Regression: bless {}, shift generates shift call');
 }
 

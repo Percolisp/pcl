@@ -1288,7 +1288,7 @@ sub gen_binary_op {
       die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
         if $bad_lvalue;
     }
-    if ($left =~ /^\(vector /) {
+    if ($left =~ /^\(vector[ )]/) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = "(p-list-= $left $right)";
       return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $result)"
@@ -1526,7 +1526,7 @@ sub gen_binary_op_form {
       die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
         if $bad_lvalue;
     }
-    if ($left_flat =~ /^\(vector /) {
+    if ($left_flat =~ /^\(vector[ )]/) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = ['p-list-=', $left, $right];
       return $ctx == LIST_CTX
@@ -4506,7 +4506,7 @@ sub gen_hash_ref_access_form {
 # @a[i,j] → (p-aslice @a i j), context-wrapped.
 sub gen_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return undef if @$kids < 2;   # empty slice: text emits "(p-aslice @a )" (space)
+  return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $arr = $self->gen_node_form($kids->[0]);
   my @indices;
   for my $i (1 .. $#$kids) {
@@ -4519,7 +4519,7 @@ sub gen_array_slice_form {
 # @h{a,b} → (p-hslice %h a b), context-wrapped (bare Symbol @→% sigil rewrite).
 sub gen_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return undef if @$kids < 2;   # empty slice: text emits "(p-hslice %h )" (space)
+  return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol';
   my $hash = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
@@ -4537,7 +4537,7 @@ sub gen_hash_slice_form {
 # %h{a,b} → (p-kv-hslice %h a b)  (no context wrap).
 sub gen_kv_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return undef if @$kids < 2;   # empty slice: text emits "(p-kv-hslice %h )" (space)
+  return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $hash = $self->gen_node_form($kids->[0]);
   my @keys;
   for my $i (1 .. $#$kids) {
@@ -4550,7 +4550,7 @@ sub gen_kv_hash_slice_form {
 # %a[i,j] → (p-kv-aslice @a i j)  (%→@ sigil rewrite; $ref base → (unbox …)).
 sub gen_kv_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return undef if @$kids < 2;   # empty slice: text emits "(p-kv-aslice @a )" (space)
+  return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $arr = $self->gen_node($kids->[0]);
   $arr =~ s/(^|::)\%/${1}\@/;
   my $arr_form = $arr =~ /^\$/ ? ['unbox', $arr] : $arr;
@@ -4570,8 +4570,10 @@ sub gen_kv_array_slice_form {
 # reproduce.
 sub gen_progn_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return undef unless @$kids;
   my $ctx = $self->expr_o->get_node_context($node_id);
+  # Empty comma-list: same shapes as gen_tree_val_form's empty () — text
+  # twin's trailing space normalized away (task #78 E2.final).
+  return $ctx == 1 ? ['vector'] : ['progn'] unless @$kids;
   if ($ctx == 1) {  # LIST_CTX
     $self->expr_o->set_node_context($_, 1) for @$kids;
   }
@@ -5123,13 +5125,16 @@ sub gen_tree_val {
 # sound here: a nested inline_lambda embeds a pre-generated `body_cl` string
 # that may itself contain (p-=~; to_flat sees it, an AST walk would not.
 # Structuring regex emission is a separate roadmap item — until then this
-# single grep is the faithful bridge.)  Empty () declines (its text emitter
-# emits (vector )/(progn ) with a trailing space a form cannot reproduce).
+# single grep is the faithful bridge.)  Empty () now emits (vector)/(progn)
+# — the text twin's trailing space, normalized away (task #78 E2.final).
 sub gen_tree_val_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return undef unless @$kids;   # empty () — trailing-space text, decline
 
   my $ctx = $self->expr_o->get_node_context($node_id);
+
+  # Empty (): (vector) in list context, (progn) otherwise — the text twin's
+  # "(vector )"/"(progn )" trailing space normalized away (task #78 E2.final).
+  return $ctx == LIST_CTX ? ['vector'] : ['progn'] unless @$kids;
 
   if (scalar(@$kids) == 1) {
     if ($ctx == LIST_CTX || $ctx == INHERIT_CTX) {
@@ -5432,7 +5437,8 @@ sub gen_array_init_form {
 # the text path preserves v1's exact bytes for the rare empty-hash constructor.
 sub gen_hash_init_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return undef unless @$kids;
+  # Empty {} emits (p-hash) — the text twin printed "(p-hash )" (trailing
+  # space from join-interpolation); normalized here per task #78 E2.final.
   my @pairs = map { $self->gen_node_form($_) } @$kids;
   return ['make-p-box', ['p-hash', @pairs]];
 }
