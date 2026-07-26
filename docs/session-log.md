@@ -4,6 +4,87 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 315 (2026-07-26, Fable) — THE ROOT FLIP: the fallback seam hands forms through (task #78 step 2).
+
+**The emission change of E2.** `_lower_expr`'s fallback now calls
+`_parse_expression_form` — a new Parser.pm entry that parses and annotates
+exactly like `_parse_expression_internal` but generates through
+`gen_node_form` — so the seam returns a CLForm TREE whose raw residue is
+only the genuinely-declining subtrees, instead of one whole-expression
+text atom.  Error semantics mirrored via a shared `_shape_expr_error`
+(PARSE ERROR / no-output shapes come back as raw chunks).  Generation
+v2-67→v2-68.
+
+**Census: 16,105 → 607 printed raw chunks** (PCL_E2_RAW_CENSUS, whole
+corpus).  Residue by provenance: 310 raw_wrap + 149 `_fallback_stmt`
+echoes+code + 9 `_lower_local` (the STATEMENT fallback surface — dies with
+v1 at E4), 22 PARSE-ERROR/no-output roots, and ~117 genuine expression
+declines (binary-op 25, subst-/e bodies 26, func_ref 14, funcall 12,
+leaf/node 22, ref-access 10, methodcall 2, void-wrap 6).  That decline
+list is the whole remaining E2 conversion surface.
+
+**The three raw-text post-processors went structural:**
+- p-scalar-=→p-my-= boundary rewrite → `_seam_lex_assign_fix` walks the
+  tree (head swap in place; v1's regex still applied to raw residue).
+- void g-match wrap keyed on `is_raw` → keys on a `_expr_via_fallback`
+  flag set by `_lower_expr` (root-level, read immediately at the one
+  statement site); wrap emitted as a structural `let`.
+- `_auto_defined_raw` → the four v1 text rewrites decided structurally
+  (head checks + `_auto_defined_call` descending the wantarray-let wrap);
+  raw roots still delegate to v1's text matcher.
+
+**Two traps the flip exposed, both fixed:**
+- `_alias_box_form` only head-swapped at the ROOT; the substr/pos/vec
+  call now sits nested under the context-let.  Added preorder leftmost
+  descent (= v1's first-text-occurrence swap in prefix order).  Caught by
+  parser2-01 t144 as a die → gate.
+- **The oversize gates measured PRINTED length** — structural depth
+  indentation inflated it past thresholds calibrated on v1-flat text, so
+  hashassign/infnan/magic spuriously gated to v1 (64k gate) and
+  cmpchain/eval/concat/tr grew/lost `(locally (declare (notinline …)))`
+  wraps (20k capper).  Both deciders now take a whitespace-COLLAPSED
+  length from the v2 assembly (`_gate_oversized_run_form` /
+  `_cap_inlining_if_huge` optional $size arg; v1's own call sites keep
+  their original measure).  Net: concat.t/tr.t each LOSE one borderline
+  notinline wrap vs HEAD (collapsed just under 20k where printed was just
+  over) — verified compiling+running; content unchanged.
+
+**Verifier: `tools/corpus-diff.pl --ws`** (new flag: whitespace-stripped
+whole-file compare, comments dropped, quasi-lines for --show; caveat
+noted in the header — whitespace inside string literals is equated, so
+the test gate backs it up).  Final corpus verdict: **109/111 files
+whitespace-identical to HEAD; concat.t + tr.t differ only by the dropped
+notinline wrap** (explained above).  `to_string` also grew a `_close`
+guard: a closer after body text ending in a `;` comment drops to its own
+line (raw residue can now sit anywhere in a tree) — byte-identical unless
+it fires.
+
+**Stale guards flipped** (layout-pinning regexes → \s+ separators, v1
+detection via `;; ` echo instead of line shape): parser2-01 ×2,
+parser2-02 ×3, clform-01 ×11.  A scary-looking clform-01 t125 "missing
+wantarray-let" was the grep missing a line — HEAD-worktree compare showed
+the wrap present, whitespace-only.
+
+**Unrelated gate breakage fixed en route:** pclxs sibling moved to ABI 6;
+xs-02.t failed on the pin mismatch ("xs-pin says abi 5").  Ran
+`tools/build-pclxs --pin-here` per CLAUDE.md (pin now abi 6, commit
+7d4e691) — xs-01/xs-02 green.  NOTE: `rm -rf ~/.pcl-cache/*` also wipes
+the XS artifact cache under `~/.pcl-cache/xs/` — harmless (rebuilt by
+`tools/pcl-xs-install`), but don't read an xs test failure after a cache
+wipe as a flip regression; the real cause was the pin.
+
+Gate 121/4378 PASS (after the pin fix); census 111 v2-native / 0 gated.
+Full sweep: 61 fully-passing, 725 fails vs 733 blessed.  sweep-diff's "4
+NEW" (bless.t t29–32, join.t t36/40 tied-$,, blocks.t t24) are
+**pre-existing** — a HEAD-worktree sweep reproduces them byte-identically
+(plus 12 blocks.t baseline rows that now PASS: s310g–i phase fixes never
+re-blessed).  Recorded as task #116; NOT flip regressions.  **Task #78
+remaining: E2.final step 3 — the ~117 expression declines above, then
+delete the text printer + raw/raw_wrap once the statement fallback dies
+at E4.**
+
+---
+
 ## Session 314b (2026-07-26, Fable) — task #78 opened: the E2.final distance, measured honestly.
 
 Back on v2 (user decision: pclxs is blocked on Opus's magic vtable; my

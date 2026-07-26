@@ -374,8 +374,10 @@ EOF
 
   my $st = Pl::Parser2->parse_code(
     q{my @a = (3,1); my @s = sort { $a <=> $b } @a;});
+  # (\s+ between subforms: since the E2.final root flip the structural printer
+  # may break long forms across lines — layout is free, the shape is pinned.)
   like($st,
-       qr/\(p-sort \(lambda \(\$a \$b\) \(catch :p-return \(block nil \(let \(\(\*wantarray\* nil\)\) \(p-<=> \$a \$b\)\)\)\)\) \@a\)/,
+       qr/\(p-sort\s+\(lambda \(\$a \$b\)\s+\(catch :p-return \(block nil \(let \(\(\*wantarray\* nil\)\) \(p-<=> \$a \$b\)\)\)\)\)\s+\@a\)/,
        '#78: sort block keeps catch/block/wantarray wrappers, structurally');
 
   my $ev = Pl::Parser2->parse_code(q{my $e = eval { 42 };});
@@ -409,10 +411,12 @@ EOF
 
   my $an = Pl::Parser2->parse_code(q{my $s = sub { 42 };});
   like($an,
-       qr/\(lambda \(&rest %_args\) \(let \(\(\@_ \(p-flatten-args %_args\)\) \(\*pcl-caller-wantarray\* \*wantarray\*\)\) \(catch :p-return \(block nil 42\)\)\)\)/,
+       qr/\(lambda \(&rest %_args\)\s+\(let \(\(\@_ \(p-flatten-args %_args\)\) \(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(catch :p-return \(block nil 42\)\)\)\)/,
        '#78: anon sub emits v1 wrapper shape as one structured form');
-  unlike($an, qr/\(lambda \(&rest %_args\)\n/,
-         '#78: no v1 multiline anon-sub layout for a native body');
+  # Layout is no longer the v1-vs-native discriminator (the structural printer
+  # breaks lines too); v1's text body is marked by its `;; <src>` echo lines.
+  unlike($an, qr/;; 42/,
+         '#78: no v1 source-echo comment in a native anon-sub body');
 }
 
 done_testing();

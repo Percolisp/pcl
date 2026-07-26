@@ -17,6 +17,7 @@ use File::Spec;
 use Cwd qw(abs_path);
 
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
+use Pl::CLForm ();
 use Pl::ExprToCL;
 use Pl::Environment;
 
@@ -637,8 +638,13 @@ sub _notinline_ops_decl {
 
 my $HUGE_FORM_CHARS = 20000;
 sub _cap_inlining_if_huge {
-  my ($form) = @_;
-  return $form unless length($form) > $HUGE_FORM_CHARS;
+  my ($form, $size) = @_;
+  # $size: optional layout-invariant measure of the form (whitespace
+  # collapsed).  The v2 assembly passes it because the structural printer's
+  # depth indentation inflates length($form) far past the v1-flat text this
+  # threshold was calibrated against (E2.final root flip); SBCL's compile
+  # cost tracks the form's content, not its indentation.
+  return $form unless ($size // length($form)) > $HUGE_FORM_CHARS;
   # Only wrap plain expression forms; never wrap a top-level definition
   # (eval-when / p-sub / defvar / defpackage), since (locally ...) would strip
   # its top-level-ness and break compile-time visibility.
@@ -7908,22 +7914,64 @@ sub _parse_expression_internal {
   };
 
   if ($@) {
-    my $error = $@;
-    # Hard errors (e.g. unsupported features) must propagate — don't swallow.
-    # EXCEPT: assignment to a non-lvalue (user :lvalue) sub call.  That die is
-    # only *meant* to be hard in eval-string mode, where it makes a feature
-    # probe (CMM's `eval 'return 1; &_sub = 1'`) fail and return undef.  In
-    # whole-file mode it must degrade to a per-statement PARSE ERROR so one
-    # unsupported lvalue-sub assignment doesn't abort the entire file (e.g.
-    # perl-tests/substr.t defines `sub bar : lvalue` and does `bar = "XXX"`).
-    die $error if $error =~ /^PCL:/
-      && ($self->eval_mode || $error !~ /non-lvalue subroutine/);
-    $error =~ s/ at \/.*//s;  # Remove file/line info
-    $error =~ s/\n.*//s;      # First line only
+    my $error = $self->_shape_expr_error($@);
     return ("(progn ;; PARSE ERROR: $error\n nil)", []);
   }
 
   return ($result // ";; (no output)", \@decls);
+}
+
+# Shared by _parse_expression_internal and _parse_expression_form.
+# Hard errors (e.g. unsupported features) must propagate — don't swallow.
+# EXCEPT: assignment to a non-lvalue (user :lvalue) sub call.  That die is
+# only *meant* to be hard in eval-string mode, where it makes a feature
+# probe (CMM's `eval 'return 1; &_sub = 1'`) fail and return undef.  In
+# whole-file mode it must degrade to a per-statement PARSE ERROR so one
+# unsupported lvalue-sub assignment doesn't abort the entire file (e.g.
+# perl-tests/substr.t defines `sub bar : lvalue` and does `bar = "XXX"`).
+# Returns the shaped one-line message for the soft ones.
+sub _shape_expr_error {
+  my ($self, $error) = @_;
+  die $error if $error =~ /^PCL:/
+    && ($self->eval_mode || $error !~ /non-lvalue subroutine/);
+  $error =~ s/ at \/.*//s;  # Remove file/line info
+  $error =~ s/\n.*//s;      # First line only
+  return $error;
+}
+
+# E2.final root flip (task #78): identical parse + context annotation to
+# _parse_expression_internal, but generation goes through gen_node_form, so
+# the caller (Parser2's _lower_expr fallback seam) receives a CLForm TREE
+# whose raw residue is only the genuinely-declining subtrees — not the whole
+# expression as one text atom.  Error semantics mirror the text entry
+# exactly; the PARSE ERROR / no-output shapes come back as raw chunks.
+sub _parse_expression_form {
+  my ($self, $parts, $stmt, $context) = @_;
+
+  my $form;
+  eval {
+    my $expr_o = Pl::PExpr->new(
+      e           => $parts,
+      full_PPI    => $stmt,
+      environment => $self->environment,
+      parser      => $self,
+    );
+    my ($node_id) = $expr_o->parse_expr_to_tree($parts);
+    $expr_o->annotate_contexts($node_id, $context);
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => 0,
+    );
+    $form = $gen->gen_node_form($node_id);
+  };
+
+  if ($@) {
+    my $error = $self->_shape_expr_error($@);
+    return Pl::CLForm::raw("(progn ;; PARSE ERROR: $error\n nil)");
+  }
+
+  return $form // Pl::CLForm::raw(";; (no output)");
 }
 
 

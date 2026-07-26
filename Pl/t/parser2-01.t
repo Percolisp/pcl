@@ -176,7 +176,7 @@ like($use, qr/\(p-sub pl-PI/, 'use constant: captured declaration hoisted');
 # statements — same bucket ordering as the v1 assembly.)
 my $ord = Pl::Parser2->parse_code(
   'print "a\n"; require POSIX; print "b\n";');
-like($ord, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"\)\).*\(p-print "a/s,
+like($ord, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"\)\).*\(p-print\s+"a/s,
      'require hoisted as eval-always declaration (v1 parity)');
 
 # M-B session 3: a `require` NESTED in a block/sub stays INLINE (runtime
@@ -201,7 +201,9 @@ like($pfh, qr/\(p-print :fh \$fh "hi"\)/,
 # (a raw root — the slot unboxes); fancy interpolations stay on the fallback.
 my $interp = Pl::Parser2->parse_code(
   'my $x = 5; my $msg = "x is $x!\n"; print $msg;');
-like($interp, qr/\(p-string-concat "x is " \$x "!\s*\n?"\)/,
+# (\s+ separators: a newline-bearing string atom makes the structural printer
+# lay the concat out multiline since the E2.final root flip.)
+like($interp, qr/\(p-string-concat "x is "\s+\$x\s+"!\s*\n?"\)/,
      'simple $name interpolation lowers natively to p-string-concat');
 like($interp, qr/\(\$msg\s*\n?\s*\(p-string-concat/, 'interpolated-string slot binds raw');
 

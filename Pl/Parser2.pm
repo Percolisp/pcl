@@ -906,7 +906,17 @@ sub parse {
       # the sweep's 1 GB heap; the corpus' largest WORKING form is ~55k).
       # _oversized_top_decls flattens the common cause pre-emptively; this
       # gate is the by-construction backstop — die → v1, never an OOM crash.
-      run      => [map { $self->_gate_oversized_run_form(Pl::Parser::_cap_inlining_if_huge(Pl::CLForm::to_string($_, 0))) } @runtime],
+      # Both size deciders get the whitespace-COLLAPSED length: the structural
+      # printer's depth indentation would otherwise inflate the measure past
+      # thresholds calibrated on v1-flat text (compile cost tracks content,
+      # not layout) — three files spuriously gated at the E2.final root flip.
+      run      => [map {
+        my $text = Pl::CLForm::to_string($_, 0);
+        (my $collapsed = $text) =~ s/\s+/ /g;
+        $self->_gate_oversized_run_form(
+          Pl::Parser::_cap_inlining_if_huge($text, length $collapsed),
+          length $collapsed);
+      } @runtime],
       captured => [@{ $self->{_captured_decls} }],
       sched    => [@{ $self->{_sched_defs} }],
       # Source positions parallel to defs/sched — the #55 interleave assembly
@@ -2550,10 +2560,12 @@ sub _oversized_top_decls {
 # than emit a form that crashes SBCL at load.
 our $RUN_FORM_MAX = 64_000;
 sub _gate_oversized_run_form {
-  my ($self, $text) = @_;
-  if (length($text) > $RUN_FORM_MAX) {
+  my ($self, $text, $size) = @_;
+  # $size: layout-invariant (whitespace-collapsed) length — see the caller.
+  $size //= length($text);
+  if ($size > $RUN_FORM_MAX) {
     (my $head = substr($text, 0, 120)) =~ s/\s+/ /g;
-    die 'Parser2 TODO: oversized top-level run form (' . length($text)
+    die "Parser2 TODO: oversized top-level run form ($size"
       . " chars > $RUN_FORM_MAX) — would exhaust the SBCL compiler heap: $head\n";
   }
   return $text;
@@ -4865,9 +4877,11 @@ sub _lower_stmt {
   # only — wrapping EVERY void statement is both wrong (over-scopes wantarray)
   # and needless overhead (it perturbed `print $i;` shapes and every call).
   # Under an active sub-body :void regime the ambient is already :void.
-  if ($vctx eq ':void' && Pl::CLForm::is_raw($form) && _stmt_has_global_match($stmt)
+  if ($vctx eq ':void'
+      && ($self->{_expr_via_fallback} || Pl::CLForm::is_raw($form))
+      && _stmt_has_global_match($stmt)
       && !$self->environment->wa_void_active) {
-    $form = raw("(let ((*wantarray* :void))\n" . ${$form} . ")");
+    $form = ['let', ['list', ['list', '*wantarray*', ':void']], $form];
   }
   return $self->_restore_caller_wa($tail_ctx,
          _apply_modifier($form, $mod, $cond, $self, $stmt));
@@ -5243,13 +5257,27 @@ sub _foreach_range_split { Pl::VarAnnotator::foreach_range_split(@_) }
 # the emission) so the caller can gate cleanly rather than miscompile.
 sub _alias_box_form {
   my ($form, $from, $to) = @_;
-  if (ref($form) eq 'ARRAY' && @$form && $form->[0] eq $from) {
+  if (ref($form) eq 'ARRAY' && @$form && !ref $form->[0] && $form->[0] eq $from) {
     return [$to, @{$form}[1 .. $#$form]];
   }
   if (Pl::CLForm::is_raw($form)) {
     my $text = $$form;
     return undef unless $text =~ s/\(\Q$from\E /($to /;
     return Pl::CLForm::raw($text);
+  }
+  # Since the E2.final root flip the seam returns TREES, so the call head for
+  # substr/pos/vec sits NESTED under the (let ((*wantarray* t)) …) context
+  # wrap.  Preorder, leftmost-first descent = v1's first-text-occurrence swap
+  # in prefix notation.  Rebuilds only the spine above the swapped call.
+  if (ref($form) eq 'ARRAY') {
+    for my $i (1 .. $#$form) {
+      next unless ref $form->[$i];
+      my $sub = _alias_box_form($form->[$i], $from, $to);
+      next unless defined $sub;
+      my @copy = @$form;
+      $copy[$i] = $sub;
+      return \@copy;
+    }
   }
   return undef;
 }
@@ -5545,6 +5573,10 @@ sub _lower_expr {
   my ($self, $parts, $stmt, $ctx) = @_;
   my @parts = _strip_semi(@$parts);
   die "Parser2: empty expression" unless @parts;
+  # Whether THIS call's root lowered through the fallback seam — read by the
+  # statement site right after the call (the void g-match wrap can no longer
+  # key on is_raw: since the E2.final root flip the fallback returns trees).
+  $self->{_expr_via_fallback} = 0;
 
   my $native_ctx = !defined $ctx        ? undef
                  : "$ctx" eq '1'        ? 't'
@@ -5616,12 +5648,14 @@ sub _lower_expr {
   $p->_open_section('pcl');
   $p->_cur_bucket('definitions');
   $p->indent_level(0);
-  my $cl = do {
+  my $form = do {
     # task #78: embedded map/grep/sort/eval{} blocks in this REAL lowering
     # parse go structural (body_form via lower_embedded_block).  Analysis
     # parses and the native attempt above never see the hook.
     local $p->{_v2_embed} = $self->_embed_hook;
-    $p->_parse_expression(\@parts, $stmt, $fb_ctx);
+    # E2.final root flip: the form entry (gen_node_form) — the tree's raw
+    # residue is only the genuinely-declining subtrees.
+    $p->_parse_expression_form(\@parts, $stmt, $fb_ctx);
   };
   my @drained;
   for my $sec (@{ $p->_sections }) {
@@ -5646,28 +5680,86 @@ sub _lower_expr {
   }
   push @{ $self->{_captured_decls} }, @drained;
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
-    unless defined $cl;
-  # Legacy-boundary parity: the old pipeline rewrites (p-scalar-= $x …) to
-  # (p-my-= $x …) for let-bound names inside _emit, which the fallback path
-  # bypasses.  Apply the same conversion at the raw boundary (v2-native
-  # assignments never need this — they are lowered as p-my-=/setf forms).
+    unless defined $form;
+  $self->_seam_lex_assign_fix($form);
+  $self->{_expr_via_fallback} = 1;
+  return $form;
+}
+
+# Legacy-boundary parity: the old pipeline rewrites (p-scalar-= $x …) to
+# (p-my-= $x …) for let-bound names inside _emit, which the fallback seam
+# bypasses (v2-native assignments never need this — they are lowered as
+# p-my-=/setf forms).  Structural heads swap in place; raw residue chunks
+# (declined subtrees) get v1's own text rewrite.
+sub _seam_lex_assign_fix {
+  my ($self, $form) = @_;
   my $lb = $self->fallback_parser->{_let_bound_vars} // {};
-  for my $var (keys %$lb) {
-    my $pat = quotemeta("(p-scalar-= $var");
-    $cl =~ s/$pat(?=[\s)])/(p-my-= $var/g;
-  }
-  return raw($cl);
+  return unless %$lb;
+  my $walk;
+  $walk = sub {
+    my ($f) = @_;
+    if (Pl::CLForm::is_raw($f)) {
+      for my $var (keys %$lb) {
+        my $pat = quotemeta("(p-scalar-= $var");
+        $$f =~ s/$pat(?=[\s)])/(p-my-= $var/g;
+      }
+      return;
+    }
+    return unless ref $f eq 'ARRAY';
+    $f->[0] = 'p-my-='
+      if @$f >= 2 && !ref $f->[0] && $f->[0] eq 'p-scalar-='
+      && !ref $f->[1] && $lb->{$f->[1]};
+    $walk->($_) for @$f;
+  };
+  $walk->($form);
 }
 
 # Apply v1's _auto_defined_cond to a loop condition that lowered through the
 # fallback seam: `(p-scalar-= $x (p-each …))` → wrapped in (p-defined $x),
 # bare `(p-readline …)` → `(progn (p-setf $_ …) (p-defined $_))`, etc.
-# Native condition FORMS are returned untouched — the native subset cannot
-# produce each/readline/readdir/glob calls, so only raw text needs it.
+# Since the E2.final root flip the fallback returns TREES, so the four text
+# rewrites are decided structurally here; a raw root (PARSE ERROR shape)
+# still delegates to v1's text matcher.  Native condition forms fall through
+# the same head checks untouched — the native subset cannot produce
+# each/readline/readdir/glob calls.
+my %AUTO_DEFINED_HEAD = map { $_ => 1 } qw(p-each p-readdir p-readline p-glob);
 sub _auto_defined_raw {
   my ($self, $cond) = @_;
-  return $cond unless Pl::CLForm::is_raw($cond);
-  return raw($self->fallback_parser->_auto_defined_cond($$cond));
+  return raw($self->fallback_parser->_auto_defined_cond($$cond))
+    if Pl::CLForm::is_raw($cond);
+  return $cond unless ref $cond eq 'ARRAY' && @$cond && !ref $cond->[0];
+  my ($head, @a) = @$cond;
+  if ($head =~ /^p-(?:scalar|my)-=$/ && @a == 2 && !ref $a[0] && $a[0] =~ /^\$/
+      && _auto_defined_call($a[1])) {
+    return ['progn', $cond, ['p-defined', $a[0]]];
+  }
+  if ($head eq 'p-setf' && @a == 2 && ref $a[0] eq 'ARRAY'
+      && !ref $a[0][0] && $a[0][0] =~ /^p-(?:gethash|aref)$/
+      && _auto_defined_call($a[1])) {
+    return ['p-defined', $cond];
+  }
+  if ($head eq 'p-setf' && @a == 2 && !ref $a[0] && $a[0] eq '$_'
+      && _auto_defined_call($a[1])) {
+    return ['progn', $cond, ['p-defined', '$_']];
+  }
+  if (_auto_defined_call($cond)) {
+    return ['progn', ['p-setf', '$_', $cond], ['p-defined', '$_']];
+  }
+  return $cond;
+}
+
+# An each/readdir/readline/glob call form, possibly under the emitter's
+# (let ((*wantarray* …)) …) context wrap — or a raw chunk with that text
+# shape (a declined subtree in the RHS position).
+sub _auto_defined_call {
+  my ($f) = @_;
+  if (Pl::CLForm::is_raw($f)) {
+    return $$f =~ /^(?:\(let \(\(\*wantarray\* (?:nil|t)\)\) )?\(p-(?:each|readdir|readline|glob)\b/;
+  }
+  return 0 unless ref $f eq 'ARRAY' && @$f && !ref $f->[0];
+  return 1 if $AUTO_DEFINED_HEAD{$f->[0]};
+  return _auto_defined_call($f->[-1]) if $f->[0] eq 'let' && @$f >= 3;
+  return 0;
 }
 
 # ------------------------------------------------------- context sensitivity

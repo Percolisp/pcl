@@ -159,7 +159,8 @@ sub to_string {
   my ($head, @args) = @$f;
   my $ind1 = '  ' x ($depth + 1);
   if ($head eq 'list') {
-    return '(' . join("\n$ind1", map { to_string($_, $depth + 1) } @args) . ')';
+    return _close('(' . join("\n$ind1", map { to_string($_, $depth + 1) } @args),
+                  $depth);
   }
   # Keep short scrutinee args (var/list pairs of let/foreach) on the head line
   # when the first arg fits flat; body args go one per line.
@@ -167,11 +168,22 @@ sub to_string {
   if (defined $first && length($head) + length($first) + 2 * $depth < ONE_LINE_MAX) {
     my @rest = @args[1 .. $#args];
     return "($head $first)" unless @rest;
-    return "($head $first\n"
-      . join("\n", map { $ind1 . to_string($_, $depth + 1) } @rest) . ')';
+    return _close("($head $first\n"
+      . join("\n", map { $ind1 . to_string($_, $depth + 1) } @rest), $depth);
   }
-  return "($head\n"
-    . join("\n", map { $ind1 . to_string($_, $depth + 1) } @args) . ')';
+  return _close("($head\n"
+    . join("\n", map { $ind1 . to_string($_, $depth + 1) } @args), $depth);
+}
+
+# Append a form's closing paren, dropping it to its own line when the body
+# text ENDS inside a `;` comment — a raw residue chunk with a trailing
+# comment would otherwise swallow the paren (the guard raw_wrap always had;
+# with the E2.final root flip raw chunks can sit anywhere in a tree).
+# Byte-identical output whenever the last line is comment-free.
+sub _close {
+  my ($out, $depth) = @_;
+  $out .= "\n" . ('  ' x $depth) if _ends_in_comment($out);
+  return $out . ')';
 }
 
 sub to_program {

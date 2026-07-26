@@ -10,6 +10,13 @@
 #   tools/corpus-diff.pl --show ...         # also print the diff hunks
 #                                           # (first 60 lines/file; --show=all
 #                                           # for everything, --show=N to cap)
+#   tools/corpus-diff.pl --ws ...           # compare with ALL whitespace
+#                                           # stripped — the verifier for
+#                                           # whitespace-only emission steps
+#                                           # (E2 layout changes).  Caveat:
+#                                           # also equates whitespace-only
+#                                           # changes INSIDE string literals,
+#                                           # so back it up with the test gate.
 #
 # For an E1 de-gate session the acceptance is: ONLY the de-gated files
 # appear in the output, and each diff is explained.  Exit status: 0 when
@@ -38,7 +45,9 @@ my $root = abs_path("$RealBin/..");
 chdir $root or die "chdir $root: $!";
 
 my $show;   # undef = filenames only; 0 = unlimited; N = first N diff lines
+my $strip_ws = 0;
 for my $i (reverse 0 .. $#ARGV) {
+    if ($ARGV[$i] eq '--ws') { $strip_ws = 1; splice @ARGV, $i, 1; next }
     next unless $ARGV[$i] =~ /^--show(?:=(\w+))?$/;
     $show = !defined $1 ? 60 : $1 eq 'all' ? 0 : $1 + 0;
     splice @ARGV, $i, 1;
@@ -86,6 +95,16 @@ my $norm = sub {
     $t =~ s/^;;; pcl: pipeline=.*\n//m;
     $t =~ s/\Q$wt\E/ROOT/g;
     $t =~ s/\Q$root\E/ROOT/g;
+    if ($strip_ws) {
+        # `;` line comments must go BEFORE whitespace-stripping: their only
+        # terminator is the newline, and layout changes move/merge them.
+        # (Comment text inside string literals is over-stripped — acceptable
+        # for a whitespace-step verifier; the test gate backs this up.)
+        $t =~ s/^\s*;.*//mg;       # whole-line comments
+        $t =~ s/\s;;.*//g;         # trailing comments
+        $t =~ s/\s+//g;            # all whitespace
+        $t =~ s/\)\(/)\n(/g;       # quasi-lines so --show diffs stay readable
+    }
     return $t;
 };
 

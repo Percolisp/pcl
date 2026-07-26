@@ -45,7 +45,7 @@ like($cl, qr/\(p-if \$a \(let \(\(\*wantarray\* nil\)\) \(pl-foo 7\)\) \(make-p-
 my $sc = Pl::Parser2->parse_code(
   'my @arr = (1,2); my $a = 3; my $s = "x $a @arr @{[1+2]} @arr[0..1] y"; print $s;');
 
-like($sc, qr/\(p-string-concat "x " \$a " " \(p-join \|\$"\| \@arr\) " " \(p-join \|\$"\| \(p-cast-@ \(make-p-box \(p-array-init \(p-\+ 1 2\)\)\)\)\) " " \(p-join \|\$"\| \(p-aslice \@arr \(p-\.\. 0 1\)\)\) " y"\)/,
+like($sc, qr/\(p-string-concat "x "\s+\$a\s+" "\s+\(p-join \|\$"\| \@arr\)\s+" "\s+\(p-join \|\$"\| \(p-cast-@ \(make-p-box \(p-array-init \(p-\+ 1 2\)\)\)\)\)\s+" "\s+\(p-join \|\$"\| \(p-aslice \@arr \(p-\.\. 0 1\)\)\)\s+" y"\)/,
      'string_concat form: scalar, @arr join, @{[...]} cast, slice join, literals');
 
 # --- converted: gen_funcall_form (E2.1, generic path) ------------------------
@@ -310,7 +310,7 @@ like($ac, qr/\(p-aref \@a 0\)/,          'rvalue array access → (p-aref @a 0)'
 like($ac, qr/\(p-gethash %h "x"\)/,      'rvalue hash access → (p-gethash %h "x")');
 like($ac, qr/\(setf \(p-aref \@a 1\) 5\)/, 'lvalue array access → p-aref target');
 like($ac, qr/\(setf \(p-gethash %h "y"\) 6\)/, 'lvalue hash access → p-gethash target');
-like($ac, qr/\(p-gethash %h \(p-join \|\$;\| \(vector "p" "q"\)\)\)/,
+like($ac, qr/\(p-gethash %h\s+\(p-join\s+\|\$;\|\s+\(vector "p" "q"\)\)\)/,
      'multi-key $h{a,b} → (p-join |$;| (vector …))');
 like($ac, qr/\(p-aref \(p-aref-deref \$ref 0\) 1\)/,
      'nested container stays structural');
@@ -334,7 +334,7 @@ like($sl, qr/\(p-hslice %h "a" "b"\)/,       'hash slice → (p-hslice %h "a" "b
 like($sl, qr/\(p-kv-hslice %h "a" "b"\)/,    'kv hash slice → (p-kv-hslice %h "a" "b")');
 like($sl, qr/\(p-aref-deref \$ar 1\)/,       'array-ref access → (p-aref-deref $ar 1)');
 like($sl, qr/\(p-gethash-deref \$hr "x"\)/,  'hash-ref access → (p-gethash-deref $hr "x")');
-like($sl, qr/\(p-gethash-deref \$hr \(p-join \|\$;\| \(vector "p" "q"\)\)\)/,
+like($sl, qr/\(p-gethash-deref \$hr\s+\(p-join\s+\|\$;\|\s+\(vector "p" "q"\)\)\)/,
      'multi-key hash-ref → (p-join |$;| (vector …))');
 
 # --- converted: progn + small I/O nodes (E2.1) ------------------------------
@@ -352,7 +352,7 @@ EOT
 
 like($ms, qr/\(vector 1 2 3\)/,            'list-context progn → (vector 1 2 3)');
 like($ms, qr/\(vector\)/,                  'empty () → (vector), normalized (task #78)');
-like($ms, qr/\(p-print :fh 'STDERR /,      'filehandle marker → :fh \x27STDERR');
+like($ms, qr/\(p-print :fh 'STDERR\s/,      'filehandle marker → :fh \x27STDERR');
 like($ms, qr/\(p-backtick "echo hi"\)/,    'backtick → (p-backtick "echo hi")');
 like($ms, qr/\(let \(\(\*wantarray\* nil\)\) \(p-readline \$fh\)\)/,
      'readline <$fh> scalar-context bound');
@@ -374,7 +374,7 @@ like($gl, qr/\(let \(\(\*wantarray\* t\)\) \(p-glob "\*\.txt"\)\)/,
      'glob literal → (p-glob "*.txt") list-context bound');
 like($gl, qr/\(p-glob \(p-\. \$dir "\/\*\.c"\)\)/,
      'glob interpolated → (p-glob (p-. …))');
-like($gl, qr/\(remove-if \(lambda \(--f--\) \(let \(\(--name-- \(file-namestring \(pathname --f--\)\)\)\) \(and \(> \(length --name--\) 0\) \(find \(char --name-- 0\) "\._"\)\)\)\) \(p-glob "\?\*"\)\)/,
+like($gl, qr/\(remove-if\s+\(lambda \(--f--\)\s+\(let \(\(--name-- \(file-namestring \(pathname --f--\)\)\)\)\s+\(and \(> \(length --name--\) 0\) \(find \(char --name-- 0\) "\._"\)\)\)\)\s+\(p-glob "\?\*"\)\)/,
      'glob [!chars] → glob "?"-simplified + remove-if filter');
 like($gl, qr/\(let \(\(\*wantarray\* nil\)\) \(p-glob "\*\.log"\)\)/,
      'glob scalar-context → (let ((*wantarray* nil)) (p-glob …))');
@@ -467,7 +467,7 @@ like($po, qr/\(p-post-- \(p-aref-box \@a 0\)\)/,
      '$a[0]-- → (p-post-- (p-aref-box …)) lvalue container');
 like($po, qr/\(p-chain-cmp \$x '< 3 '< 10\)/,
      'chained comparison → (p-chain-cmp term \x27op …)');
-like($po, qr/\(let \(\(_prev \(p-array-last-index \@a\)\)\) \(p-set-array-length \@a \(1\+ _prev\)\) _prev\)/,
+like($po, qr/\(let \(\(_prev \(p-array-last-index \@a\)\)\)\s+\(p-set-array-length \@a \(1\+ _prev\)\)\s+_prev\)/,
      '$#a++ declines → arylen setter text form');
 
 # --- converted: gen_tree_val_form (E2.1) ------------------------------------
@@ -492,31 +492,31 @@ print "@m1";
 EOT
 
 # regex directly the single child → let-wrap, NEVER (vector …)
-like($tv, qr/\(p-array-= \@m1 \(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$x /,
+like($tv, qr/\(p-array-= \@m1\s+\(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$x /,
      'list-ctx ($x =~ /re/) → let-wrap, no vector');
 unlike($tv, qr/\@m1 \(vector/,
      '=~ as the sole child of @m1 is NOT wrapped in (vector …)');
 # !~ is boolean (emits p-!~), NOT a p-=~ match → IS vector-wrapped
-like($tv, qr/\(p-array-= \@m2 \(vector \(let \(\(\*wantarray\* t\)\) \(p-!~ \$x /,
+like($tv, qr/\(p-array-= \@m2\s+\(vector \(let \(\(\*wantarray\* t\)\) \(p-!~ \$x /,
      'list-ctx ($x !~ /re/) → (vector (p-!~ …)) — not the regex special case');
 # bare /foo/ lowers to (p-=~ $_ …) → let-wrap
-like($tv, qr/\(p-array-= \@m3 \(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$_ /,
+like($tv, qr/\(p-array-= \@m3\s+\(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$_ /,
      'list-ctx bare (/foo/) → let-wrap ($_ match)');
 # CRITICAL: regex NESTED inside a larger expression still suppresses vector —
 # a naive "child is a =~ node" AST predicate would wrongly emit (vector …) here.
-like($tv, qr/\(p-array-= \@m4 \(let \(\(\*wantarray\* t\)\) \(p-\+ 1 /,
+like($tv, qr/\(p-array-= \@m4\s+\(let \(\(\*wantarray\* t\)\)\s+\(p-\+ 1 /,
      'list-ctx (1 + ($x =~ /y/)) → let-wrap (regex nested in expression)');
 unlike($tv, qr/\(p-array-= \@m4 \(vector /,
      'nested-regex single child is NOT vector-wrapped');
 # multi-child with a regex element is a genuine multi-value list → (vector …);
 # the regex element is itself a single-child tree_val, so it keeps its own
 # (let ((*wantarray* t)) (p-=~ …)) let-wrap inside the vector.
-like($tv, qr/\(p-array-= \@m5 \(vector \(let \(\(\*wantarray\* t\)\) \(p-=~ /,
+like($tv, qr/\(p-array-= \@m5\s+\(vector \(let \(\(\*wantarray\* t\)\) \(p-=~ /,
      'multi-child list with a regex element → (vector (let … (p-=~ …)) …)');
 # plain single scalar / multi / range branches
-like($tv, qr/\(p-array-= \@m6 \(vector \$x\)/,   'single non-regex child → (vector $x)');
-like($tv, qr/\(p-array-= \@m7 \(vector \$x \$x\)/,'multi child → (vector $x $x)');
-like($tv, qr/\(p-array-= \@m8 \(p-\.\. 10 12\)\)/,'single range child → bare (p-.. …), no vector');
+like($tv, qr/\(p-array-= \@m6\s+\(vector \$x\)/,   'single non-regex child → (vector $x)');
+like($tv, qr/\(p-array-= \@m7\s+\(vector \$x \$x\)/,'multi child → (vector $x $x)');
+like($tv, qr/\(p-array-= \@m8\s+\(p-\.\. 10 12\)\)/,'single range child → bare (p-.. …), no vector');
 
 # empty () emits structurally: (vector)/(progn), trailing space normalized
 # away (task #78 E2.final)
@@ -571,7 +571,7 @@ like($bo, qr/\(p-isa \$o "Foo"\)/,              'isa bareword RHS → (p-isa $o 
 
 # flip-flop (scalar-context ..) still emits the p-flipflop macro with an id
 my $ff = Pl::Parser2->parse_code('while (<STDIN>) { my $f = /a/ .. /b/; print $f; }');
-like($ff, qr/\(p-flipflop \d+ /, 'scalar-context .. → (p-flipflop ID …)');
+like($ff, qr/\(p-flipflop \d+\s/, 'scalar-context .. → (p-flipflop ID …)');
 
 # `=` assignment: LHS-shape dispatch (@→p-array-=, %→p-hash-=, sigil-$→
 # p-scalar-=, element→p-setf) now runs through gen_binary_op_form at byte
