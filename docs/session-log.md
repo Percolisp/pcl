@@ -74,6 +74,21 @@ baseline 202+2/205; gate 121/4378 PASS; generation v2-66→v2-67.
 Still ahead in 1b: do{}/eval{} funcall embeds, expression-body
 lambdas, subst-/e bodies, anon raw_lambda, literal leaves.
 
+**Step 1b part 2 (5d0a503) — and the family turned out mostly done.**
+Reconnaissance corrected the worklist: eval{} and do{} creation sites
+in PExpr already route through _v2_embedded_body, and the eval funcall
+form-branch already consumes body_form; expression-form map/grep is
+already structural (ExprToCL ~1921).  The one real gap was the
+do-as-inline_lambda funcall branch reading body_cl only — a
+(progn nil) miscompile waiting for that route to be exercised; now it
+matches its eval sibling (byte-identical corpus, no generation bump).
+The remaining printed lambda-body raws are just 22 in 7 files —
+closure.t 11, do.t/magic.t 3 each — i.e. the anon-sub raw_lambda
+residue (task #65's carve-out) plus scattered hook-declines.  The
+lambda family is no longer the blocker for the root flip; the flip's
+real prerequisites are down to the anon-sub re-host and the literal
+leaves (\x{FFFF} quote-double, 2 Numbers).
+
 ---
 
 ## Session 314 (2026-07-26, Fable) — review of the Opus XS work; the OO blocker re-diagnosed; get_cv + AUTOLOAD.
