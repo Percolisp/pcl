@@ -533,12 +533,30 @@
   ((cls (sb-alien:* sb-alien:char)) (clslen sb-alien:unsigned-long)
    (name (sb-alien:* sb-alien:char)) (namelen sb-alien:unsigned-long)
    (autoload-ok sb-alien:int))
-  (declare (ignore autoload-ok))
   (with-xs-guard ()
     (let* ((class  (%xs-string-in cls clslen 0))
            (method (%xs-string-in name namelen 0))
            (code   (p-can class method)))
-      (if code (%xs-intern code) 0))))
+      (cond
+        (code (%xs-intern code))
+        ;; gv_fetchmethod_autoload: when the plain lookup fails and the
+        ;; caller allowed it, answer with the @ISA-walked AUTOLOAD --
+        ;; wrapped so that $PKG::AUTOLOAD is set at CALL time, which is
+        ;; the part of perl's contract a bare CV could not keep.  perl
+        ;; never AUTOLOADs DESTROY, and neither do we.
+        ((and (not (zerop autoload-ok))
+              (not (string= method "DESTROY")))
+         (let ((al (%pcl-find-autoload-in-isa class)))
+           (if al
+               (let ((al-pkg (car al))
+                     (al-fn  (cdr al))
+                     (full   (concatenate 'string class "::" method)))
+                 (%xs-intern
+                  (lambda (&rest args)
+                    (%pcl-set-autoload-var al-pkg full)
+                    (apply al-fn args))))
+               0)))
+        (t 0)))))
 
 (sb-alien:define-alien-callable xs-isa sb-alien:int
   ((h sb-alien:long) (cls (sb-alien:* sb-alien:char))
@@ -780,32 +798,50 @@
    sees what an XSUB croaked with.  (It did not, until this existed.)"
   pcl::$@)
 
+(defun %xs-named-sub (pkg base)
+  "The function behind Perl sub PKG::BASE, or NIL.  The one lookup rule for
+   subs by name -- get_cv and call-by-name both go through here, and the
+   mangling is the runtime's own %pcl-cl-sub-name (PCL reads with :invert),
+   so the symbol found is the one define_xsub or p-sub actually created."
+  (let* ((p   (%pcl-find-package pkg))
+         (sym (and p (find-symbol (%pcl-cl-sub-name base) p))))
+    (and sym (fboundp sym) (symbol-function sym))))
+
 (defun p-xs-global-symbol (sigil name create)
-  "The box/vector/table behind a package variable, e.g. ('$' \"Foo::bar\").
+  "The box/vector/table behind a package variable, e.g. ('$' \"Foo::bar\"),
+   or the function behind ('&' \"Foo::bar\") -- get_cv comes through here too.
    PCL names package variables with the sigil in the symbol -- $foo is the
    symbol |$foo| in the package -- so this is a find-symbol, not a new
    naming scheme."
   (let* ((pos  (search "::" name :from-end t))
          (pkg  (if pos (subseq name 0 pos) "main"))
-         (base (if pos (subseq name (+ pos 2)) name))
-         ;; GV_ADD vivifies the STASH too, not just the variable: perl's
-         ;; get_sv("New::Pkg::var", GV_ADD) creates the package on the way.
-         ;; Only finding an existing one made every probe of a fresh
-         ;; namespace answer NULL, which is what pclxs t/98-globals.t saw.
-         (package (or (%pcl-find-package pkg)
-                      (and (not (zerop create)) (%xs-ensure-package pkg))))
-         (sym-name (concatenate 'string (string sigil) base)))
-    (when package
-      (let ((sym (find-symbol sym-name package)))
-        (cond ((and sym (boundp sym)) (symbol-value sym))
-              ((zerop create) nil)
-              (t (let ((s (intern sym-name package)))
-                   (setf (symbol-value s)
-                         (case sigil
-                           (#\@ (make-array 0 :adjustable t :fill-pointer 0))
-                           (#\% (make-hash-table :test #'equal))
-                           (t   (make-p-box *p-undef*))))
-                   (symbol-value s))))))))
+         (base (if pos (subseq name (+ pos 2)) name)))
+    (if (char= sigil #\&)
+        ;; get_cv: subs are not sigil-named symbols but fbound mangled ones,
+        ;; and an XSUB registered by define_xsub is exactly such a sub.  The
+        ;; create flag is deliberately not honoured for subs: perl's GV_ADD
+        ;; makes an empty stub CV, and handing the shim a stub it can "call"
+        ;; would hide a missing sub behind a silent no-op.  NIL is the answer.
+        (%xs-named-sub pkg base)
+        (let* (;; GV_ADD vivifies the STASH too, not just the variable: perl's
+               ;; get_sv("New::Pkg::var", GV_ADD) creates the package on the
+               ;; way.  Only finding an existing one made every probe of a
+               ;; fresh namespace answer NULL, which is what pclxs
+               ;; t/98-globals.t saw.
+               (package (or (%pcl-find-package pkg)
+                            (and (not (zerop create)) (%xs-ensure-package pkg))))
+               (sym-name (concatenate 'string (string sigil) base)))
+          (when package
+            (let ((sym (find-symbol sym-name package)))
+              (cond ((and sym (boundp sym)) (symbol-value sym))
+                    ((zerop create) nil)
+                    (t (let ((s (intern sym-name package)))
+                         (setf (symbol-value s)
+                               (case sigil
+                                 (#\@ (make-array 0 :adjustable t :fill-pointer 0))
+                                 (#\% (make-hash-table :test #'equal))
+                                 (t   (make-p-box *p-undef*))))
+                         (symbol-value s))))))))))
 
 ;;; ============================================================
 ;;; Errors and warnings
@@ -984,10 +1020,8 @@
                      (t (let* ((full (%xs-string-in name namelen 0))
                                (pos (search "::" full :from-end t))
                                (pkg (if pos (subseq full 0 pos) "main"))
-                               (base (if pos (subseq full (+ pos 2)) full))
-                               (p (%pcl-find-package pkg))
-                               (sym (and p (find-symbol (%pcl-cl-sub-name base) p))))
-                          (and sym (fboundp sym) (symbol-function sym))))))
+                               (base (if pos (subseq full (+ pos 2)) full)))
+                          (%xs-named-sub pkg base)))))
            (argv (loop for i from 0 below nargs
                        collect (unbox (%xs-deref (sb-alien:deref args i))))))
       (declare (ignorable is-method))
