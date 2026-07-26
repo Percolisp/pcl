@@ -5521,19 +5521,62 @@ sub gen_inline_lambda {
 # (`return` inside them must propagate to the enclosing sub's catch).
 sub gen_inline_lambda_form {
   my ($self, $node, $node_id, $kids) = @_;
+  my $params   = ['list', @{$node->{params} // []}];
+  my $for_func = $node->{for_func} // '';
+
+  # Named comparator (sort NAME LIST) — form twin of the text branch:
+  # $a/$b dynamic bindings, ($$)-prototype subs get them as args too, and
+  # an undefined comparator dispatches to AUTOLOAD (Perl #30661) in the
+  # package captured at lambda creation.
+  if ($for_func eq 'sort' && $node->{comparator_name}) {
+    my $cl_func = $self->cl_name($node->{comparator_name});
+    my $proto;
+    if ($self->environment) {
+      my $cname = $node->{comparator_name};
+      $proto = $self->environment->get_prototype($cname)
+            // $self->environment->get_prototype($cname =~ s/^:://r)
+            // $self->environment->get_prototype($cname =~ s/.*:://r);
+    }
+    my $call = ($proto && $proto->{is_proto}
+                && ($proto->{proto_string} // '') eq '$$')
+             ? [$cl_func, '$a', '$b'] : [$cl_func];
+    return
+      ['let', ['list', ['list', '|sort--pkg|', '*package*']],
+        ['lambda', $params,
+          ['catch', ':p-return',
+            ['block', 'nil',
+              ['let', ['list', ['list', '*wantarray*', 'nil']],
+                ['handler-case', $call,
+                  ['undefined-function', ['list'],
+                    ['let', ['list',
+                             ['list', 'al',
+                              ['intern', '"PL-AUTOLOAD"', '|sort--pkg|']]],
+                      ['when', ['fboundp', 'al'],
+                        ['funcall', ['symbol-function', 'al']]]]]]]]]]];
+  }
+
+  # Scalar comparator (sort $var LIST) — resolved at runtime by
+  # p-sort-get-fn; *package* rebound to the creation-time package so string
+  # sub names resolve in USER code, not :pcl (p-sort's own package).
+  if ($for_func eq 'sort' && $node->{scalar_cmp}) {
+    my $scalar = ($kids && @$kids) ? $self->gen_node_form($kids->[0]) : 'nil';
+    return
+      ['let', ['list', ['list', '|sort--pkg|', '*package*']],
+        ['lambda', $params,
+          ['catch', ':p-return',
+            ['block', 'nil',
+              ['let', ['list', ['list', '*wantarray*', 'nil'],
+                               ['list', '*package*', '|sort--pkg|']],
+                ['funcall', ['p-sort-get-fn', $scalar], '$a', '$b']]]]]];
+  }
+
   my $bf = $node->{body_form};
-  if ($ENV{PCL_E2_RAW_CENSUS} && (!$bf || $node->{comparator_name} || $node->{scalar_cmp})) {
-    my $why = $node->{comparator_name} ? 'named-cmp'
-            : $node->{scalar_cmp}      ? 'scalar-cmp'
-            : 'body_cl';
+  if ($ENV{PCL_E2_RAW_CENSUS} && !$bf) {
     (my $snip = $node->{body_cl} // '') =~ s/\s+/ /g;
-    warn "pcl-raw\tlambda:" . ($node->{for_func} // '?') . ":$why\t"
-       . substr($snip, 0, 70) . "\n";
+    warn "pcl-raw\tlambda:$for_func:body_cl\t" . substr($snip, 0, 70) . "\n";
   }
   return undef unless $bf;
-  return undef if $node->{comparator_name} || $node->{scalar_cmp};
-  my $params = ['list', @{$node->{params} // []}];
-  if (($node->{for_func} // '') eq 'sort') {
+  if ($for_func eq 'sort') {
     return ['lambda', $params,
             ['catch', ':p-return',
              ['block', 'nil',
