@@ -89,6 +89,24 @@ lambda family is no longer the blocker for the root flip; the flip's
 real prerequisites are down to the anon-sub re-host and the literal
 leaves (\x{FFFF} quote-double, 2 Numbers).
 
+**Part 3 (a8f3499) — provenance ended the emitter hunt.** raw() now
+records its calling frame (census-only, inside-out by refaddr), and
+the "22 lambda-body raws" dissolved: ALL are made at
+_lower_expr:5657, the whole-expression fallback wrap — they merely
+START with "(lambda".  closure.t has exactly one genuine anon decline
+(empty sub{}).  The corrected provenance table (15,795 printed raws):
+**15,496 = _lower_expr:5657 (98%)**, 127 = _fallback_stmt comment
+echoes, ~170 = fixed-shape Parser2 raws (_auto_defined_raw 61,
+_lower_block package enter/exit 58, _lower_sub_inner params 20,
+_lower_stmt void-wrap 10, _lower_local 9, _alias_box_form 8, tail).
+STEP 1 OF #78 IS COMPLETE — no emitter tail exists.  The road is now:
+(a) convert the ~170 fixed shapes (mechanical, next session's warmup),
+(b) THE ROOT FLIP, which provenance reframed as a STATEMENT-ASSEMBLY
+question — v1's _parse_expression returns text into string-assembling
+bucket machinery, so the flip needs that seam to hand forms through,
+not more emitters.  Design that against docs/v2-endgame-plan.md
+E2.final/E5 with fresh context.
+
 ---
 
 ## Session 314 (2026-07-26, Fable) — review of the Opus XS work; the OO blocker re-diagnosed; get_cv + AUTOLOAD.
