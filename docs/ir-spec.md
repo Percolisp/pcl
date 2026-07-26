@@ -197,10 +197,22 @@ referenced structure. Stringification of a reference yields
 
 ### 2.6 Blessed objects, strings, numbers
 
-`bless` stores the class name in the reference box's `class` field
-(`(p-bless (make-p-box (p-hash …)) "Class")`); `ref($x)` reads it. The
-*identity* of the object is the underlying hash/array — two references to
-it share blessing.
+`bless` records the class on the thing all aliases share, mirroring
+perl's referent-attached stash: for a hash object the class rides in the
+hash itself (`:__class__` key); for a **scalar ref** it is written to the
+*referent box* (s314, `%p-scalar-ref-referent`), and `ref($x)` /
+`p-get-class` consult the referent first (`%p-referent-class`) before any
+class cached on a wrapper or variable box. Those cached `class` slots
+still exist — `p-bless` writes them and `box-set` copies them — but only
+as caches for fast is-object checks; the referent is the truth, which is
+what makes a second `\$x` wrapper and a re-bless through one alias
+behave, and what XS reads as `SvSTASH(SvRV(rv))`. Array/code/glob refs
+keep the class on the wrapper box (their raw referents cannot carry a
+slot). `box-set` copies a class only when the assigned *value* is itself
+a reference: copying a plain value out of a blessed referent yields an
+unblessed scalar, exactly as perl's SV-attached stash does not travel
+with the value. The *identity* of an object is the underlying
+hash/array/referent — two references to it share blessing.
 
 Strings are host Unicode strings (character, not byte, semantics — see
 `docs/not-supported.md` §Unicode for divergences). Numbers are host
