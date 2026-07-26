@@ -62,6 +62,18 @@ do{}/eval{} funcall embeds at ExprToCL ~1795/1906/2585/2618, subst-/e
 bodies, anon-sub raw_lambda, sort named/scalar-cmp wrappers ×62) and
 the \x{FFFF}-class quote-double + 2 Number leaf declines.
 
+**Step 1b part 1 SHIPPED (73957ea): sort comparator lambdas.** Both
+fixed multiline text layouts (named comparator with the PL-AUTOLOAD
+undefined-function handler and the ($$)-prototype arg pass; scalar
+comparator with the *package* rebind around p-sort-get-fn) now have
+form twins in gen_inline_lambda_form.  Only sort.t's emission changed,
+whitespace-only (whole-file stripped compare against a HEAD worktree —
+NOTE: corpus-diff --show truncates at 60 lines/file, so per-hunk
+whitespace checks lie; compare whole files).  sort.t sweep = blessed
+baseline 202+2/205; gate 121/4378 PASS; generation v2-66→v2-67.
+Still ahead in 1b: do{}/eval{} funcall embeds, expression-body
+lambdas, subst-/e bodies, anon raw_lambda, literal leaves.
+
 ---
 
 ## Session 314 (2026-07-26, Fable) — review of the Opus XS work; the OO blocker re-diagnosed; get_cv + AUTOLOAD.
