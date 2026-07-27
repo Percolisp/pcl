@@ -224,10 +224,24 @@ sub isa_ok {
 # pass, fail, note, diag - provided by pcl-test.lisp, do NOT define here or it will override
 
 # tempfile - returns a unique temp filename (used by I/O tests)
+#
+# The name must not already EXIST, exactly as in perl's own test.pl
+# (`if (!$tmpfiles{$try} && !-e $try)`).  PIDs recycle, and a test that
+# mkdir's a tempfile name (op/mkdir.t) leaves a DIRECTORY behind — a later
+# run whose pid collides then opened that directory and died with
+# "Is a directory", which is how io/paragraph_mode.t failed intermittently
+# (s316b).  Probing for a free name makes the fixture deterministic.
 my $tempfile_counter = 0;
+my %tempfiles;
 sub tempfile {
-    $tempfile_counter++;
-    return "/tmp/pcl-test-$$-$tempfile_counter";
+    while (1) {
+        $tempfile_counter++;
+        my $try = "/tmp/pcl-test-$$-$tempfile_counter";
+        if (! $tempfiles{$try} && ! -e $try) {
+            $tempfiles{$try} = 1;
+            return $try;
+        }
+    }
 }
 
 # object_ok - check if value is a blessed object (optionally of a specific class)

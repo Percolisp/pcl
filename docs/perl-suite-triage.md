@@ -1,7 +1,34 @@
-# perl-suite crash-family triage (s309, 2026-07-23)
+# perl-suite crash-family triage (s309, 2026-07-23; re-run s316b, 2026-07-27)
 
-Full `--all` sweep (433 files): 45 OK, 85 XDIFF (expected), 31 NOTAP,
-7 TIMEOUT, 265 DIFF.  The 167 crash-signature files were re-run with the
+**s316b re-run (433 files): 43 OK, 31 NOTAP, 91 XDIFF, 268 UNEXPLAINED**
+— snapshot in `docs/perl-suite-run.tsv`.  Per-file against the s309 row
+set: 372 unchanged, 39 DIFF→XDIFF (expected-tsv rows added since), 4
+DIFF→OK (the s310 fixes: mro/recursion_c3+dfs, op/groups, op/mkdir), 7
+OK→DIFF.  Of those 7, **five already failed at s315d** (A/B'd in a
+worktree at 810df31) and are task **#127**: op/stash_parse_gv.t,
+op/tr_latin1.t, re/reg_eval.t, run/fresh_perl.t, run/switchF2.t.  The
+other two were s316's own, and both were *false passes* being corrected:
+
+- **op/sigsystem.t** skips 4 tests `if not exists $SIG{CHLD}` — with the
+  old empty `%SIG` it emitted 4 skip-oks against perl's 4 oks and scored
+  OK.  With `%SIG` populated it runs for real and blocks on Time::HiRes
+  (XS) → expected-tsv row.
+- **io/paragraph_mode.t** was a HARNESS bug, not PCL: `tempfile()` in
+  `perl-tests/t/test.pl` returned `/tmp/pcl-test-$$-N` without checking
+  the name was free (perl's own does `!$tmpfiles{$try} && !-e $try`).
+  PIDs recycle and op/mkdir.t leaves *directories* with those names, so a
+  later run opened a directory and died "Is a directory".  Fixed by
+  probing for a free name — which also recovered **op/read.t,
+  op/sysio.t and run/script.t**, three silent victims of the same
+  collision (43 OK vs 39 in the run before the fix).
+
+Caveat on the s316b row for **op/cond.t**: it reads TIMEOUT rather than
+its expected-tsv XDIFF because the solo-phase memory cap killed it (see
+the deep-nesting section below) — that is the guard working, not a status
+change.
+
+Original s309 run for reference (433 files): 45 OK, 85 XDIFF (expected),
+31 NOTAP, 7 TIMEOUT, 265 DIFF.  The 167 crash-signature files were re-run with the
 message-level signatures (runner now appends the normalized condition
 message to `crash:*` sigs), giving the families below.  Raw data for this
 run: session scratchpad `suite-all.tsv` / `crash-final.tsv`; regenerate any
