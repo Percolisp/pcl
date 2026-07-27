@@ -37,6 +37,22 @@ Note for future runs: op/cond.t reads TIMEOUT in this snapshot because
 the solo-phase `MemoryMax=10G` scope killed it — the guard working as
 designed on the known quadratic-nesting file, not a status change.
 
+**PAUSED MID-TRIAGE — resume at task #127.**  Opening the first two of
+the five s310–s315 drifts showed the shape of the whole group: *every one
+of them drives its assertions through `fresh_perl_is`/`runperl`*, i.e.
+the s310f `pclperl-for-tests` family, so the child program now really
+runs under PCL instead of being compared trivially.  That makes honest
+newly-exposed failures the leading hypothesis — but each file still needs
+its own verdict (fix the gap vs. an expected-tsv row); the group must not
+be blessed wholesale.  Constructs already identified: op/stash_parse_gv.t
+= 100-char package names, the Perl-4 `'` separator, `&{"name"}`,
+`defined *{"name"}`, under `-w` (0 of 5 ⇒ one root cause); op/tr_latin1.t
+= malloc-sensitive `tr` with raw latin1 bytes (RT #134067) and
+`s~~00~-y~…~` (gh#17277), likely the byte/unicode string family.  Method
+to resume: lift the child program out of the `fresh_perl_is(qq[…])` call,
+run it standalone with `./runpl`, diff against real perl.  Task #127
+carries the per-file counts and the full plan.
+
 ---
 
 ## Session 316b (2026-07-27, Fable) — task #125: the interp rewrite learns about scopes; and the shipped pack() was 40 compiler generations stale.
