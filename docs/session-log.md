@@ -4,6 +4,60 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316 (2026-07-27, Fable) — task #124 (#25 / E4.0b): two general bugs behind the `(go :Arg_loop)` suite family.
+
+**io/msg.t + io/sem.t + io/shm.t crashed identically; neither cause had
+anything to do with SysV IPC.**  Both were found by following the
+crash to `lib/sigtrap.pm`, which every one of those files `use`s.
+
+**1. `goto LABEL` into a LABELED LOOP or BARE BLOCK had no tagbody at
+all (crash on BOTH pipelines).**  PPI glues a label onto exactly two
+statement shapes — a loop (`LBL: while (…) {…}`) and a bare block
+(`LBL: { … }`); for anything else (`LBL: if (…)`, `LBL: $x++;`) the
+label stays a standalone Compound.  Parser2's label handling only ever
+saw the standalone form, so for the two glued shapes the expression
+machinery emitted a bare `(go :LBL)` with nothing to jump to →
+`attempt to GO to nonexistent tag`.  Fix (`_lower_block`, ~30 lines
+beside the standalone case it reuses): when a labeled loop/block is
+targeted by a `goto LBL` anywhere in the same statement list, open
+`(tagbody :LBL …)` at that statement and lower the run unchanged
+inside — Perl's `goto LABEL` jumps to the labeled STATEMENT, i.e.
+re-runs the loop from the top, which is what the backward `(go)` now
+does.  A re-entry mark makes the second pass fall through to the normal
+statement path (the `_goto_caught` idiom).  In value position the run
+is bracketed in `(setf RET (progn …))` and RET read after the tagbody —
+the same regime as the bare block's task-#64 tail handling.  The
+label's own loop-control `block`/`catch` tags live in a different
+namespace, so `last LBL`/`next LBL` inside are untouched (guarded).
+
+**2. `%SIG` was an EMPTY hash; perl pre-populates every signal name.**
+`exists $SIG{HUP}` was false, so sigtrap's
+`grep(exists $SIG{$_}, qw(HUP INT PIPE TERM))` added nothing, `$saw_sig`
+stayed 0, and its `goto Arg_loop` retry loop span forever (the three
+files went from crash to TIMEOUT after fix 1 — the second bug was
+hiding behind the first).  One `*p-signal-numbers*` table (Config's
+sig_name/sig_num order, Linux/glibc) now seeds `%SIG` with 67
+undef-valued keys — matching perl exactly, ZERO excluded like perl —
+and also feeds `%p-resolve-signal`, whose hand-rolled 13-name `cond`
+answered **15 (TERM) for every other name**: `kill 'WINCH', $$` sent
+SIGTERM.  Both `%SIG` consumers already test `(functionp (unbox …))`,
+so undef values change nothing for them.
+
+With both fixed the three files reach their real blocker —
+`Can't locate loadable object for module IPC::SysV` — i.e. they join
+the known XS family (pclxs), and the crash family is closed.
+
+Verification: gate 122 files / **4391** tests green; `corpus-diff.pl
+--ws` **emission identical to HEAD across 111 files** (the new tagbody
+only fires on a shape the corpus does not contain); full perl-tests
+sweep unchanged.  Guards: 4 new cases in `Pl/t/transpile-test-06.t`
+(labeled-while tail value, labeled bare block, goto from inside the
+loop + `last`/`next` on the same label, `%SIG` key set).  Cache
+generation → **v2-70**.  NOTE: the goto fix is v2-only; v1 still
+crashes on the shape (it is deleted at E4.1 and v2 never gates here).
+
+---
+
 ## Session 315d (2026-07-27, Fable) — task #116: the drift group falls — one class-model rule and one case-inverted symbol.
 
 **bless.t 106/106, join.t 43/43, blocks.t t24 → TODO-skip.**  Two real

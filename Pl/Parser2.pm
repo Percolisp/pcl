@@ -4626,6 +4626,34 @@ sub _lower_block {
       return (['tagbody', ':' . $lbl,
                $self->_lower_block(\@rest, $vi, undef)]);
     }
+    # -- `LBL: while (…) {…}` / `LBL: { … }` targeted by a `goto LBL`: PPI glues
+    # a label onto a LOOP or a BARE BLOCK (only those two — `LBL: if (…)` and
+    # `LBL: $x++;` leave the label standalone), so the branch above never sees
+    # this shape and the `(go :LBL)` the expression machinery emits had no tag
+    # at all.  Perl's `goto LABEL` jumps to the labeled STATEMENT, i.e. re-runs
+    # the loop from the top: open the tagbody just before it and lower the run
+    # unchanged inside (the mark makes the re-entry fall through to the normal
+    # statement path).  The label's own loop-control block/catch tags are a
+    # different namespace, so `last LBL` inside is untouched.
+    if (@lk >= 2 && $lk[0]->isa('PPI::Token::Label')
+        && !delete $self->{_goto_tagged}{ refaddr($first) }) {
+      (my $lbl = $lk[0]->content) =~ s/\s*:\s*$//;
+      if ($lbl =~ /^\w+$/
+          && grep { $_->content =~ /\bgoto\s+\Q$lbl\E\b/ } @s) {
+        $self->{_goto_tagged}{ refaddr($first) } = 1;
+        my @inner = $self->_lower_block(\@s, $vi, $tail_ctx);
+        # A tagbody yields NIL, so in value position bracket the run in
+        # (setf RET (progn …)) and read RET after it — the same regime as the
+        # bare block's task-#64 tail handling.
+        return (['tagbody', ':' . $lbl, ['progn', @inner]])
+          if !defined $tail_ctx;
+        $self->{_blk_ret_counter} //= 0;
+        my $ret = '--pcl-blk-ret--' . $self->{_blk_ret_counter}++;
+        return (['let', ['list', ['list', $ret, 'nil']],
+                 ['tagbody', ':' . $lbl, ['setf', $ret, ['progn', @inner]]],
+                 $ret]);
+      }
+    }
   }
 
   # -- unlabeled `{ … } continue { … }`: PPI splits the continue off into an

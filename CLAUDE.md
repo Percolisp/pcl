@@ -256,7 +256,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **122 test files, 4382 tests** (Pl/t gate, as of session 315 — includes Pl/t/xs-01/02/03.t, which skip without a built pclxs sibling)
+- **122 test files, 4391 tests** (Pl/t gate, as of session 316 — includes Pl/t/xs-01/02/03.t, which skip without a built pclxs sibling)
 - **XS conformance: 370 pass, 0 fail — fully green** against pclxs's corpus
   with real perl as oracle (`tools/pcl-conform`, session 315; XS OO/magic
   works — Digest::MD5's own md5-aaa.t is 256/256 under PCL).

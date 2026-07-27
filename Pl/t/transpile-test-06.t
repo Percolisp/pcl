@@ -397,4 +397,58 @@ if ($s =~ /^(?<gid>\d+)\((?<gr_name>.+)\)$/x) { print "a=$+{gr_name},$+{gid}|" }
 if ("abcabc" =~ /(?<my_grp>abc)\k<my_grp>/) { print "b=$+{my_grp}\n" } else { print "b=no\n" }
 ');
 
+
+# `goto LABEL` where PPI glues the label onto a LOOP or a BARE BLOCK (only
+# those two shapes — `LBL: if (…)` / `LBL: $x++;` leave the label standalone).
+# Both crashed with "attempt to GO to nonexistent tag" before s316: the label
+# never reached the standalone-label tagbody path, so the `(go :LBL)` had no
+# tag at all.  sigtrap.pm's import loop is the real-world case.
+test_transpile("goto LABEL back into a labeled while loop (sub tail value)", '
+sub f {
+    my $n = 0;
+  Arg_loop:
+    while (@_) { my $x = shift; $n++; }
+    if (!$n) { @_ = (1,2); goto Arg_loop; }
+    return $n;
+}
+print f(), ",", f(5,6), "\n";
+');
+
+test_transpile("goto LABEL into a labeled bare block at top level", '
+my $tries = 0;
+RETRY: {
+    $tries++;
+    if ($tries < 3) { goto RETRY; }
+}
+print "tries=$tries\n";
+');
+
+test_transpile("goto LABEL from inside the labeled loop, and last/next on it", '
+sub g {
+    my $seen = 0;
+  L: foreach my $i (3,2,1) {
+        $seen++;
+        if ($i == 2 && $seen < 5) { goto L; }
+    }
+    return $seen;
+}
+sub h {
+    my $n = 0;
+  M: while (1) { $n++; next M if $n == 1; last M if $n > 2; }
+    if ($n < 10) { $n += 100; goto M if $n < 105; }
+    return $n;
+}
+print g(), ",", h(), "\n";
+');
+
+# %SIG is pre-populated with every signal name (values undef), like perl —
+# `exists $SIG{HUP}` is true before any handler is installed.  Without it
+# sigtrap.pm loops forever.  Count is platform-specific, so compare against
+# perl and check the named lookups explicitly.
+test_transpile("%SIG pre-populated with the platform signal names (s316)", '
+print scalar(keys %SIG), " ";
+print join(",", map { exists $SIG{$_} ? 1 : 0 } qw(HUP INT PIPE TERM SYS ALRM)), " ";
+print defined $SIG{HUP} ? "def" : "undef", "\n";
+');
+
 done_testing();

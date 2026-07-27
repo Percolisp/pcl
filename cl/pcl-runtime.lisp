@@ -1068,9 +1068,41 @@
 (defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")
 (defvar |$^M| (make-p-box *p-undef*) "emergency memory pool")
 (defvar |$^| (make-p-box "STDOUT_TOP") "FORMAT_TOP_NAME - top-of-page format name (defaults to <handle>_TOP, like Perl)")
+;; Signal names and numbers, in Perl's own order (Config's sig_name/sig_num on
+;; Linux/glibc).  ONE table serves both consumers: the pre-populated %SIG keys
+;; below and kill()'s name designators (%p-resolve-signal).
+(defparameter *p-signal-numbers*
+  '(("ZERO" . 0)   ("HUP" . 1)    ("INT" . 2)    ("QUIT" . 3)   ("ILL" . 4)
+    ("TRAP" . 5)   ("ABRT" . 6)   ("BUS" . 7)    ("FPE" . 8)    ("KILL" . 9)
+    ("USR1" . 10)  ("SEGV" . 11)  ("USR2" . 12)  ("PIPE" . 13)  ("ALRM" . 14)
+    ("TERM" . 15)  ("STKFLT" . 16)("CHLD" . 17)  ("CONT" . 18)  ("STOP" . 19)
+    ("TSTP" . 20)  ("TTIN" . 21)  ("TTOU" . 22)  ("URG" . 23)   ("XCPU" . 24)
+    ("XFSZ" . 25)  ("VTALRM" . 26)("PROF" . 27)  ("WINCH" . 28) ("IO" . 29)
+    ("PWR" . 30)   ("SYS" . 31)   ("NUM32" . 32) ("NUM33" . 33) ("RTMIN" . 34)
+    ("NUM35" . 35) ("NUM36" . 36) ("NUM37" . 37) ("NUM38" . 38) ("NUM39" . 39)
+    ("NUM40" . 40) ("NUM41" . 41) ("NUM42" . 42) ("NUM43" . 43) ("NUM44" . 44)
+    ("NUM45" . 45) ("NUM46" . 46) ("NUM47" . 47) ("NUM48" . 48) ("NUM49" . 49)
+    ("NUM50" . 50) ("NUM51" . 51) ("NUM52" . 52) ("NUM53" . 53) ("NUM54" . 54)
+    ("NUM55" . 55) ("NUM56" . 56) ("NUM57" . 57) ("NUM58" . 58) ("NUM59" . 59)
+    ("NUM60" . 60) ("NUM61" . 61) ("NUM62" . 62) ("NUM63" . 63) ("RTMAX" . 64)
+    ("IOT" . 6)    ("CLD" . 17)   ("POLL" . 29))
+  "Perl signal name -> signal number (Config sig_name/sig_num, Linux/glibc).")
+
 ;; %SIG: signal/exception handler hash
 ;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
-(defvar %SIG (make-hash-table :test 'equal) "Perl %SIG - signal handlers")
+;; Perl pre-populates %SIG with EVERY signal name the platform knows (values
+;; undef), so `exists $SIG{HUP}` is true before any handler is installed —
+;; sigtrap.pm's `grep(exists $SIG{$_}, qw(HUP INT PIPE TERM))` finds nothing
+;; without it and its import loop then spins forever.  ZERO is a valid kill()
+;; designator but is not a %SIG key, exactly as in perl.
+(defvar %SIG
+  (let ((h (make-hash-table :test 'equal)))
+    (loop for entry in *p-signal-numbers*
+          for name = (car entry)
+          unless (string= name "ZERO")
+          do (setf (gethash name h) (make-p-box *p-undef*)))
+    h)
+  "Perl %SIG - signal handlers")
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -9895,13 +9927,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                (name (if (and (> (length name) 3)
                               (string= (subseq name 0 3) "SIG"))
                          (subseq name 3) name)))
-          (cond ((string= name "HUP") 1)  ((string= name "INT") 2)
-                ((string= name "QUIT") 3) ((string= name "KILL") 9)
-                ((string= name "USR1") 10)((string= name "USR2") 12)
-                ((string= name "PIPE") 13)((string= name "ALRM") 14)
-                ((string= name "TERM") 15)((string= name "CONT") 18)
-                ((string= name "STOP") 19)((string= name "CHLD") 17)
-                ((string= name "ZERO") 0) (t 15)))
+          (or (cdr (assoc name *p-signal-numbers* :test #'string=)) 15))
         (truncate (to-number v)))))
 
 (defun p-exec (&rest args)
@@ -9993,7 +10019,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-69"
+(defparameter *pcl-cache-generation* "v2-70"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

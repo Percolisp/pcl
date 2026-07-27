@@ -600,6 +600,14 @@ Three source forms, three fates:
 - `goto &sub` (tail call) — supported; re-dispatches with the current `@_`.
 - `goto LABEL` to a **standalone label** in the same statement list —
   fully lowered (backward and forward; details below).
+- `goto LABEL` to a label PPI glues onto the statement it marks — a **loop**
+  (`LBL: while (…) {…}`) or a **bare block** (`LBL: { … }`), the only two
+  shapes that swallow their label (s316) — same lowering, with the tagbody
+  opening *at* that statement so the jump re-runs it from the top, as in
+  Perl.  In value position the run is bracketed in `(setf RET (progn …))`
+  and RET read after the tagbody (the §6.2 bare-block tail regime), since a
+  `tagbody` yields nil.  The label's own loop-control `block`/`catch` tags
+  are a separate namespace — `last LBL` inside is unaffected.
 - **Computed** `goto EXPR` (label name in a variable) — no-op, documented
   divergence (`docs/not-supported.md`).
 
@@ -721,6 +729,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `$1`…`$N`, `%+` | capture groups; set by the most recent successful match (`p-=~` family); dynamically saved/restored around scopes like Perl |
 | `$0`, `@ARGV`, `%ENV` | program name, args, environment (`%ENV` writes through to the process) |
 | `$!` | last OS error (dualvar: numifies to errno, stringifies to message) |
+| `%SIG` | signal handlers. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators. |
 | `$.` | line number of the last-read filehandle (per-handle) |
 | `$a`, `$b` | sort comparator operands (per-package defvars) |
 
