@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316c (2026-07-27, Fable) — E4.0b: the perl-suite re-run, and what it caught.
+
+**433 files: 43 OK / 31 NOTAP / 91 XDIFF / 268 UNEXPLAINED**
+(`tools/run-perl-suite.pl --all --jobs 8`; snapshot refreshed in
+`docs/perl-suite-run.tsv`).  Per-file against the s309 row set: 372
+unchanged, 39 DIFF→XDIFF (expected-tsv rows added since), 4 DIFF→OK (the
+s310 fixes), **7 OK→DIFF**.
+
+**The 7 were triaged, not assumed.**  A worktree at 810df31 (this
+session's starting commit) re-ran all 7: **five already failed there**, so
+they regressed during s310–s315 — task **#127**, with per-file counts and
+a working hypothesis (s310f's `pclperl-for-tests` made runperl children
+actually run under PCL, so run/fresh_perl.t and run/switchF2.t may be
+honest failures now; op/stash_parse_gv.t at 0-of-5 and re/reg_eval.t at
+1-of-8 look like genuine gaps).  The other two were s316's own, and both
+were **false passes being corrected**:
+
+- **op/sigsystem.t** — `skip 4 if not exists $SIG{CHLD}`.  Empty `%SIG`
+  made it skip, and skip-oks compare equal to perl's real oks, so it
+  scored OK while testing nothing.  With `%SIG` populated it runs and
+  blocks on Time::HiRes → expected-tsv row (XS).
+- **io/paragraph_mode.t** — a HARNESS bug, not PCL.  `tempfile()` in
+  `perl-tests/t/test.pl` returned `/tmp/pcl-test-$$-N` without checking
+  the name was free (perl's own does `!$tmpfiles{$try} && !-e $try`).
+  PIDs recycle and op/mkdir.t leaves *directories* with those names, so a
+  later run opened a directory and died "Is a directory".  Fixing it
+  recovered **four** files — op/read.t, op/sysio.t and run/script.t were
+  silent victims of the same collision (39 OK → 43 OK).
+
+Note for future runs: op/cond.t reads TIMEOUT in this snapshot because
+the solo-phase `MemoryMax=10G` scope killed it — the guard working as
+designed on the known quadratic-nesting file, not a status change.
+
+---
+
 ## Session 316b (2026-07-27, Fable) — task #125: the interp rewrite learns about scopes; and the shipped pack() was 40 compiler generations stale.
 
 **1. De-gate: "file lexical captured by sub" no longer refuses on a
