@@ -22,6 +22,18 @@ other two were s316's own, and both were *false passes* being corrected:
   op/sysio.t and run/script.t**, three silent victims of the same
   collision (43 OK vs 39 in the run before the fix).
 
+**s316e: run/fresh_perl.t 53→55 — the hole-aliasing gap is CLOSED**
+(task #127): `for (@a)` / grep/map `$_` / `@_` hole slots now alias via
+lazy *defelem-lite* boxes (`%p-defelem-box` in the runtime — reads undef
+and stay non-`exists`, first write vivifies the source slot; bare-array
+foreach also iterates the live array, so a mid-loop `push` extends the
+iteration).  Cases 29 (`for (@a) { $_ = 2 }` over holes) and 30 (defelem
+on `@_` + `local $_`) now match.  Remaining 36 fails = the fatal-error
+message-fidelity family, invalid-perl detection (out of scope, CLAUDE.md
+§9), and one `(?{})` case — see task #127.  Guards: 7 new tests in
+`Pl/t/transpile-test-06.t`; array.t skip-registry rows 174/179 dropped
+(stale — they pass now).  not-supported.md §sparse-arrays rewritten.
+
 **s316d: task #127 resolved for 4 of the 5 drift files** (per-file
 verdicts, not a group bless):
 

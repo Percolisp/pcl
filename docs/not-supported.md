@@ -975,34 +975,39 @@ element is an SV with its own identity: `\$_[0]` aliases the caller's element (s
 `\$_[0] == \undef` holds for the shared `&PL_sv_undef`), and reading/refgen of a
 not-yet-existing element can lazily create it as a *defelem* magical lvalue.
 
-**PCL behaviour:** A PCL array is a CL adjustable vector of boxes.  It has no
-hole/`undef`/defelem distinction (a missing slot reads as `undef` and may shift or
-drop when the vector is rebuilt), no shared read-only `&PL_sv_undef`, and no
-per-element SV identity that survives copying.  `@_` elements are copies, not aliases
-(see "`@_` argument aliasing"), so writing through `$_[$i]` does not autovivify the
-caller's element, and a hole passed to a sub loses its position.
+**PCL behaviour (updated s316e):** A PCL array is a CL adjustable vector of boxes
+with `nil` for holes.  **Hole ALIASING is now implemented** as *lazy defelem-lite*
+(`%p-defelem-box`, task #127): when foreach/grep/map/`@_` flattening visits a hole
+slot it binds a box whose `p-magic-cell` (`:kind :defelem`) reads undef, stays
+non-`exists`, and on first WRITE de-magics itself, stores itself into the source
+slot, and re-dispatches through `box-set`.  So `for (@a) { $_ = 2 }`,
+`grep { $_ = 5 } @a` and `$_[$i] = 5` vivify like perl, read-only iteration does
+NOT vivify, and a hole passed to a sub keeps its position in `@_`.  Still
+unsupported: per-element SV identity (`\$_[0] == \undef`, the shared read-only
+`&PL_sv_undef`), hole-vs-real `exists` after a whole-array COPY (`my @b = @a`
+keeps holes where perl vivifies on copy), general `@_` aliasing of NON-hole
+elements, and position tracking through `unshift`/`splice` of a live alias.
 
-**Rationale:** Emulating holes/defelem/SV-identity requires a sparse representation
-with per-element magical lvalues and Perl's SV/refcount lifecycle — a pervasive change
-to the box/vector model for behaviour real CPAN code does not rely on.
+**Rationale (remaining gaps):** Full defelem/SV-identity requires Perl's SV/refcount
+lifecycle — a pervasive change to the box/vector model for behaviour real CPAN code
+does not rely on.
 
-> **Revisit sketch (s295b, if ever needed):** the faithful middle path is a *lazy
-> defelem-lite* — when `map`/`grep`/`foreach` flattening visits a nil (hole) slot,
-> mint a **hole-flagged box**, store it into the slot, and alias `$_` to it.  The
-> box then travels with `unshift`/`splice` (position tracking for free), `exists`
-> reports false while flagged, and a write clears the flag.  Rejected because every
-> placement of the flag taxes a hot path: a value sentinel costs every `unbox`, a
-> clear-on-write costs every `box-set`, a side-table can't see writes without
-> hooking `box-set` anyway, and the `p-magic-cell` route collides with the
-> box-set-FETCHes-tie-proxy semantics.  Beneficiaries are only the perl #132729
-> regression rows (array.t t189/t190 and the holes-to-sub family) — decision
-> re-confirmed with the user 2026-07-19: not worth a hot-path tax (CLAUDE.md §2,
-> speed wins).
+> **History:** an eager hole-flagged-box sketch (s295b) was rejected 2026-07-19
+> as a hot-path tax (a value sentinel costs every `unbox`, clear-on-write costs
+> every `box-set`).  The s316e implementation avoids those placements: it rides
+> the magic-cell dispatch that `unbox`/`box-set`/`box-nv`/`box-sv` already
+> perform for arylen/`\substr`, creates boxes only for hole slots actually
+> visited by a flattening, and never stores a still-magic box into an array
+> (the setter de-magics before vivifying).  New hot-path cost is one `null`
+> test per flattened element and one `p-magic-cell-p` test in
+> `p-aref-unbox-elem`; the exec bench is unchanged (arrhash 0.268s before and
+> after, s316e).  Beneficiary: run/fresh_perl.t cases 29/30 and the CPAN
+> `for (@a) { $_ = … }` initialization idiom, which silently skipped holes.
 
 **Affected tests:** `perl-tests/array.t` — `&PL_sv_undef` exists/identity, `undef
-preserves identity`, `@_ alias to nonexistent elem`, `lazy element creation`,
-`map {} @a does not vivify elements`, and `holes passed to sub do not lose their
-position` (registered in `cl/skip-registry.lisp`).  Also covers the non-creatable
+preserves identity`, `@_ alias to nonexistent elem`, and the holes-through-subs
+position rows (registered in `cl/skip-registry.lisp`; the two `lazy element
+creation` rows were DROPPED s316e — they pass under defelem-lite).  Also covers the non-creatable
 negative-index error-detection cases (`$a[-1] = 0`), which fall under "Error
 compatibility for invalid Perl input".
 

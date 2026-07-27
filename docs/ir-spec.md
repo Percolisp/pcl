@@ -172,6 +172,19 @@ elements still boxed** (`p-aref-unbox-elem`) — so `==` on two references
 compares object identity, not content. An array in numeric/scalar position
 coerces to its length.
 
+**Hole aliasing (defelem, s316e):** when a hole slot is *aliased* — by a
+foreach/grep/map `$_` binding or by spreading the array into `@_` — the
+alias is a **deferred-element box** (`%p-defelem-box`): a box whose value
+is a `p-magic-cell` of `:kind :defelem`, getter → `undef`, setter →
+de-magic the box, store it into the source slot, re-dispatch through
+`box-set`.  Reads never vivify; the first write through the alias does,
+exactly perl's defelem magic.  Consequences for a port: array slots
+themselves never hold a still-magic defelem (the setter de-magics before
+storing), but *flattened views* (`@_`, a foreach binding) can —
+`p-exists-array` and `p-aref-unbox-elem` treat that state as a hole.  A
+bare lexical `@array` as the sole foreach list is iterated **live** (no
+copy): `push` during the loop extends the iteration, like perl.
+
 ### 2.4 Hashes
 
 A Perl hash is a string-keyed equality hash table. **All keys are

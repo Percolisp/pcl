@@ -514,4 +514,44 @@ sub aa::bb::cc { print "seg3(@_)\n" }
 &{"aa::bb::cc"}("k");
 ');
 
+# Deferred-element (defelem) aliasing of array HOLES (task #127, fresh_perl
+# case 28): a foreach alias over a hole reads undef, vivifies the source
+# slot only on WRITE — and read-only iteration must NOT vivify.
+test_transpile("foreach write through hole slots vivifies (defelem)", '
+my @a; $a[2] = 1;
+for (@a) { $_ = 2 }
+print "@a\n";
+');
+
+test_transpile("read-only foreach leaves holes unvivified", '
+my @b; $b[2] = 7;
+for (@b) { }
+print exists $b[0] ? "vivified\n" : "still hole\n";
+');
+
+test_transpile("multi-array foreach list ties holes to each source array", '
+my @c; my @d; $c[1] = 1; $d[1] = 2;
+for (@c, @d) { $_ = 9 }
+print "@c|@d\n";
+');
+
+test_transpile("\@_ hole slot: undef, non-exists, write vivifies caller array", '
+sub f { print defined $_[0] ? "def" : "undef",
+              exists $_[0] ? " exists" : " noexists", "\n";
+        $_[0] = 5 }
+my @e; $e[1] = 1; f(@e);
+print "@e\n";
+');
+
+test_transpile("push during foreach extends the live iteration", '
+my @e = (1,2);
+for (@e) { push @e, 9 if @e < 4 }
+print "@e\n";
+');
+
+test_transpile("grep/map \$_ writes vivify hole slots like foreach", '
+my @a; $a[1] = 1; grep { $_ = 5 } @a; print "g:@a\n";
+my @b; $b[1] = 1; map { $_ = 6 } @b; print "m:@b\n";
+');
+
 done_testing();

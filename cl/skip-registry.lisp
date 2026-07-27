@@ -301,12 +301,12 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ;; Lazy element creation / map-no-vivify — these share descriptions
                 ;; with PASSING siblings ('copying an array via =', extra refgen/map
                 ;; assertions), so keyed by current TAP number, not regex.
-                (174 :alias
-                     "lazy element creation via sub call must autovivify an array hole — sparse arrays/defelem not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ;; (174 …) DROPPED s316e: passes since %p-defelem-box gives
+                ;; @_ holes lazy defelem aliasing (stale-detector).
                 ;; (176 …) DROPPED s295b: passes since $#a++ extends with
                 ;; real holes (stale-detector).
-                (179 :alias
-                     "lazy element creation via foreach alias — sparse arrays/defelem. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ;; (179 …) DROPPED s316e: passes since the foreach alias is a
+                ;; write-through defelem box (stale-detector).
                 ;; (181 …) DROPPED s295b: passes since $#a++ extends with
                 ;; real holes (stale-detector).
                 ;; (184 …) DROPPED s295c: passes under the default (v2)

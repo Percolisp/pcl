@@ -5403,6 +5403,9 @@
   (if (null elem)
       *p-undef*
       (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
+        ;; magic slot (defelem @_ hole alias): read through the getter, like unbox
+        (when (p-magic-cell-p v)
+          (setf v (funcall (p-magic-cell-getter v))))
         (if (or (and (vectorp v) (not (stringp v)))  ; arrayref
                 (hash-table-p v)                      ; hashref
                 (functionp v)                          ; coderef
@@ -5616,16 +5619,57 @@
       ;; Complex place
       `(p-push-impl ,arr ,@items)))
 
+(defun %p-defelem-box (vec i)
+  "A deferred-element alias box for an array HOLE slot (perl's defelem magic).
+Aliasing a hole (foreach loop var, @_ slot) reads undef but leaves the hole
+in place (matching perl: `for (@a) {}` does not vivify); the first WRITE
+through the alias vivifies — the box de-magics itself, stores itself into
+(aref VEC I), and re-dispatches the assignment through box-set so every
+normal store rule applies.  Slots therefore never hold a still-magic
+defelem, only flattened views (@_, the foreach binding) do — p-exists-array
+checks %p-defelem-p for exactly that state.  If the array shrank under the
+loop and I is out of bounds (or was independently vivified), the write
+lands in the (now detached) box only."
+  (let ((box (make-p-box nil)))
+    (setf (p-box-value box)
+          (make-p-magic-cell
+           :kind :defelem
+           :getter (lambda () *p-undef*)
+           :setter (lambda (new)
+                     (setf (p-box-value box) nil
+                           (p-box-nv-ok box) nil
+                           (p-box-sv-ok box) nil)
+                     (when (and (array-in-bounds-p vec i)
+                                (null (aref vec i)))
+                       (setf (aref vec i) box))
+                     (box-set box new))))
+    box))
+
+(defun %p-defelem-p (slot)
+  "True when SLOT is an UNVIVIFIED deferred-element box (%p-defelem-box) —
+the state that still counts as an array hole for exists()."
+  (and (p-box-p slot)
+       (let ((v (p-box-value slot)))
+         (and (p-magic-cell-p v)
+              (eq (p-magic-cell-kind v) :defelem)))))
+
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
    This implements Perl's argument flattening: foo(@arr) and foo(%hash) spread their
-   elements as individual arguments."
+   elements as individual arguments.  HOLE slots (nil) spread as deferred-element
+   boxes tied to the SOURCE array (%p-defelem-box): they read undef and stay
+   non-exists, but a write through them (foreach alias, $_[N]) vivifies the
+   source slot, like perl."
   (let ((result (make-array (length args) :adjustable t :fill-pointer 0)))
     (dolist (arg args)
       (cond
         ((and (vectorp arg) (not (stringp arg)))
          ;; Raw vector = array passed in list context: spread its elements
-         (loop for elem across arg do (vector-push-extend elem result)))
+         (loop for j from 0
+               for elem across arg
+               do (vector-push-extend
+                   (if (null elem) (%p-defelem-box arg j) elem)
+                   result)))
         ((and (hash-table-p arg) (not (gethash :__class__ arg)))
          ;; Hash in argument context: spread to alternating key-value pairs.
          ;; But NOT blessed objects (which have :__class__) — those stay as-is.
@@ -6503,7 +6547,9 @@
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
     (and (vectorp a) (>= actual-idx 0) (< actual-idx len)
-         (p-box-p (aref a actual-idx)))))
+         (p-box-p (aref a actual-idx))
+         ;; an unvivified deferred-element alias (@_ hole) is still a hole
+         (not (%p-defelem-p (aref a actual-idx))))))
 
 (defun p-delete-hash-slice (hash &rest keys)
   "Perl delete for hash slices: delete @hash{k1, k2, ...}
@@ -6774,6 +6820,16 @@ Uses tagbody/go instead of loop — see p-while for rationale."
     ((listp val) (coerce val 'vector))
     (t (vector val))))
 
+(defun %p-foreach-elt (vec i)
+  "Bind the foreach alias var for slot I of VEC.  An existing box aliases
+directly; a raw value gets a fresh box (a temporary — writes are not
+aliased); a NIL slot is an array HOLE and aliases via a deferred-element
+box that vivifies (aref VEC I) on first write (%p-defelem-box)."
+  (let ((slot (aref vec i)))
+    (cond ((p-box-p slot) slot)
+          ((null slot) (%p-defelem-box vec i))
+          (t (make-p-box slot)))))
+
 (defun %p-flatten-for-list (raw)
   "Flatten a value for use as a foreach list.
    - p-box wrapping a vector (@array passed directly) -> iterate over elements
@@ -6790,6 +6846,12 @@ Uses tagbody/go instead of loop — see p-while for rationale."
       ((p-box-p raw)
        ;; @array box passed as a single list expression — iterate its elements directly
        val)
+      ((and (adjustable-array-p val) (array-has-fill-pointer-p val))
+       ;; Bare lexical @array (raw adjustable vector, not a codegen (vector ...)
+       ;; literal — those are simple vectors, same discrimination box-set uses).
+       ;; Iterate the LIVE array directly: hole slots alias via %p-foreach-elt,
+       ;; and a push during the loop extends the iteration, both like perl.
+       val)
       (t
        ;; CL vector from codegen (vector ...): items are scalars, p-flatten-markers,
        ;; or raw CL vectors (function return values).
@@ -6802,7 +6864,14 @@ Uses tagbody/go instead of loop — see p-while for rationale."
                  ((p-flatten-marker-p item)
                   (let ((src (p-flatten-marker-array item)))
                     (when (and (vectorp src) (not (stringp src)))
-                      (loop for x across src do (vector-push-extend x result)))))
+                      ;; HOLE slots (nil) alias through a deferred-element box
+                      ;; tied to the SOURCE array, not this flattened copy —
+                      ;; `for (@a, @b) { $_ = 1 }` must vivify @a's slot.
+                      (loop for j from 0
+                            for x across src
+                            do (vector-push-extend
+                                (if (null x) (%p-defelem-box src j) x)
+                                result)))))
                  ((and (not (p-box-p item)) (vectorp item) (not (stringp item)))
                   ;; Raw CL vector from function return (keys, grep, etc.) — spread
                   (loop for x across item do (vector-push-extend x result)))
@@ -6827,7 +6896,7 @@ Uses tagbody/go instead of loop -- see p-while for rationale."
                             (tagbody
                              :next
                                (when (>= ,i (length ,vec)) (return-from ,block-name ""))
-                               (let ((,var (ensure-boxed (aref ,vec ,i))))
+                               (let ((,var (%p-foreach-elt ,vec ,i)))
                                  (incf ,i)
                                  ,(make-loop-iteration-body label body)
                                  ,@(when continue-form (list continue-form)))
@@ -10634,12 +10703,23 @@ buffer's fill-pointer; everything else falls back to file-length."
     (dolist (item items)
       (cond
         ((p-flatten-marker-p item)
-         (loop for x across (p-flatten-marker-array item) do (vector-push-extend x result)))
+         (let ((src (p-flatten-marker-array item)))
+           (loop for j from 0
+                 for x across src
+                 ;; HOLE slots spread as defelem aliases tied to the source
+                 ;; array — grep/map write through $_ like perl (see p-flatten-args)
+                 do (vector-push-extend
+                     (if (null x) (%p-defelem-box src j) x)
+                     result))))
         (t
          (let ((val (unbox item)))
            (cond
              ((and (vectorp val) (not (stringp val)))
-              (loop for x across val do (vector-push-extend x result)))
+              (loop for j from 0
+                    for x across val
+                    do (vector-push-extend
+                        (if (null x) (%p-defelem-box val j) x)
+                        result)))
              ;; Raw %hash (not a ref): spread to key/value pairs in list context.
              ((and (hash-table-p val) (not (p-box-p item)))
               (dolist (kv (%p-hash-keyval-list val)) (vector-push-extend kv result)))

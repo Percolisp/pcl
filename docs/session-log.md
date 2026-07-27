@@ -4,6 +4,51 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316e (2026-07-28, Fable) — task #127: `for (@a)` hole aliasing — lazy defelem-lite in the runtime.
+
+The remaining *real gap* from the #127 fresh_perl triage: aliasing an array
+HOLE and writing through the alias must vivify the source slot (perl's
+defelem magic), while read-only aliasing must NOT vivify.  Implemented as
+**lazy defelem-lite**, runtime-only (no codegen change, no cache-gen bump):
+
+- **`%p-defelem-box vec i`** — a box whose value is a `p-magic-cell` of new
+  `:kind :defelem`: getter → undef; setter → de-magic the box, store it into
+  `(aref vec i)` (only if still a hole), re-dispatch through `box-set`.
+  Slots never hold a still-magic defelem; only flattened VIEWS do.
+- Wired into the closed set of hole-aliasing view builders:
+  **p-foreach** binds via `%p-foreach-elt`; **`%p-flatten-for-list`** gained
+  a direct-iteration branch for a bare lexical `@array` (adjustable+fill-
+  pointer discriminates it from a codegen `(vector …)` literal — same rule
+  box-set uses), which is also perl-correct live iteration (mid-loop `push`
+  extends it) and skips a copy; **`p-flatten-args`** (`@_`, multi-array
+  foreach lists via `(list @c @d)`) and **`%p-collect-list`**
+  (grep/map/sort) tie spread holes to their source arrays.
+- **`p-exists-array`**: an unvivified defelem still counts as a hole.
+  **`p-aref-unbox-elem`**: reads through a magic-cell getter (it used to
+  return the raw cell struct — `defined $_[0]` on a hole said "defined").
+
+**This revisits the 2026-07-19 sparse-array decision** (defelem-lite
+rejected as hot-path tax).  The shipped shape avoids the rejected
+placements — no per-`unbox` sentinel, no `box-set` hook; it rides the magic
+dispatch those chokepoints already do for arylen/`\substr`.  Added hot-path
+cost: a `null` test per flattened element + one `p-magic-cell-p` in
+`p-aref-unbox-elem`.  Bench: unchanged (arrhash 0.2686s vs 0.2683s
+recorded; every other bench ≥ recorded).  §sparse-arrays in
+not-supported.md rewritten with the history.
+
+Verification: Pl/t gate 122 files/4406 green ×2; sweep 0 new vs 709
+baseline (pack.t solo 5635/90 = baseline); fuzzer = the 4 known
+divergences only (3× `**` float, 1× split list-assign LIMIT); XS
+conformance 398/0; run/fresh_perl.t 53→55 (cases 29+30).  array.t
+skip-registry 174/179 went REGISTRY-STALE (now pass) → dropped.  Guards:
+7 new tests in Pl/t/transpile-test-06.t (foreach/multi-array/@_/read-only/
+live-push/grep/map).  ir-spec §2.3 updated.
+
+Still open in #127: the fatal-error message-fidelity family (~30 cases),
+invalid-perl detection (out of scope), one `(?{})` case.
+
+---
+
 ## Session 316d (2026-07-28, Fable) — task #127: four of the five suite drifts fixed for real; `&$ref` with no parens was never a call.
 
 Resumed the paused #127 triage (the five s310–s315 OK→DIFF files).  Per-file
