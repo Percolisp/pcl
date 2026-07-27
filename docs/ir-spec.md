@@ -611,6 +611,15 @@ Three source forms, three fates:
 - **Computed** `goto EXPR` (label name in a variable) — no-op, documented
   divergence (`docs/not-supported.md`).
 
+**Not a gap: `goto` INTO a construct.**  Jumping to a label that sits
+*inside* a loop/block body from outside it ("Use of `goto` to jump into a
+construct") has been deprecated since perl 5.12 and is a **fatal error as
+of perl 5.44**.  PCL does not implement it and must not grow support for
+it.  This is a different shape from the labeled-loop case above, where the
+label marks the *statement*: perl's own `lib/sigtrap.pm` still uses that
+one in blead (`Arg_loop:` + `goto Arg_loop;`), which is what motivated the
+s316 lowering.
+
 **The lowering has two regimes, chosen by the label's position relative to
 the goto.**  Both start from the same label lowering: a goto-target label
 statement (`again:`) turns the *remainder of its enclosing statement list*
