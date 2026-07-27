@@ -451,4 +451,17 @@ print join(",", map { exists $SIG{$_} ? 1 : 0 } qw(HUP INT PIPE TERM SYS ALRM)),
 print defined $SIG{HUP} ? "def" : "undef", "\n";
 ');
 
+
+# End-to-end for the s316 capture promotion: the outer sub must see the file
+# lexical's live value (the promoted cell) while the shadowing sub keeps its
+# own, both through interpolation and through plain symbol reads.
+test_transpile("captured file lexical + same-name shadow, interpolated (s316)", '
+my $v = "outer";
+sub show  { print "in-sub=$v/", $v, "\n"; }
+sub other { my $v = "inner"; print "shadow=$v\n"; }
+sub bump  { $v = $v . "+"; }
+show(); other(); bump(); show(); other();
+print "top=$v\n";
+');
+
 done_testing();

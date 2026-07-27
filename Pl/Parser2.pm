@@ -2391,6 +2391,14 @@ sub _rewrite_var_uses {
     }
     for my $t (@{ $stmt->find('PPI::Token') || [] }) {
       next if $within && !_elem_within($t, $within);
+      # Interpolated text obeys the SAME scoping as a symbol use: a string
+      # inside a shadow's scope names the shadow, not the variable being
+      # renamed (s316).  $skip is position-based (_ref_shadowed climbs the
+      # parents of any node, _symbol_is_declarator answers 0 for a string),
+      # so the one predicate serves both loops — before this, the interp
+      # rewrite was scope-blind, which is why _promote_captured had to
+      # refuse the whole promotion whenever an interpolated use met a shadow.
+      next if $skip && $skip->($t);
       _fix_interp_token($t, $interp_fix);
     }
     next unless $sigil eq '@';
@@ -2655,18 +2663,11 @@ sub _promote_captured {
   }
   my $shadows = $self->_count_name_decls($extent // $stmts, $bare,
                                          $sig eq '$' ? undef : $sig) > 1;
-  if ($shadows) {
-    # Interpolated text inside a shadow's scope must keep the original name,
-    # and the interp rewriter cannot skip scopes — refuse the combination
-    # (a shadow-aware interp rewrite would lift this).
-    my %ih;
-    for my $st (@$estmts) {
-      next unless ref $st && $st->isa('PPI::Node');
-      _interp_names($st, \%ih);
-      _interp_names($st, \%ih, '\@');
-    }
-    return if $ih{$bare} && _caprefuse($canon, 'interpolated use with shadows');
-  }
+  # (s316: the interp rewrite is shadow-aware — _rewrite_var_uses runs the
+  # same $skip predicate over interpolated tokens as over symbols — so an
+  # interpolated use alongside a shadow no longer refuses the promotion.
+  # The `${x}` deref-block refusal below still stands: that shape is a
+  # *text* form the token rewrites cannot reach at all, shadows or not.)
   my $etxt = $extent ? $extent->content : join("\n", map { $_->content } @$stmts);
   return if $etxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/          # ${x}/@{x}/%{x} deref-block → can't rewrite
     && _caprefuse($canon, '${x} deref-block');

@@ -419,4 +419,29 @@ EOF
          '#78: no v1 source-echo comment in a native anon-sub body');
 }
 
+# ---- s316: shadow-aware interp rewrite in capture promotion (task #125) ----
+# A file `my $x` captured by a named sub is promoted to a package cell; the
+# promotion used to REFUSE (→ whole-file v1) whenever the name was also used
+# in interpolated text and some other scope declared the same name, because
+# the interp rewrite was scope-blind.  It now runs the same shadow predicate
+# as the symbol rewrite: outer uses (symbol AND interpolated) take the cell,
+# the shadow's own scope keeps the plain name.
+{
+  my $code = q{sub tempfile { "t1" }
+               my $tmpfile = tempfile();
+               sub fresh { print "outer=$tmpfile\n"; }
+               sub other { my $tmpfile = tempfile(); print "inner=$tmpfile\n"; }
+               fresh(); other();};
+  my $cl = eval { Pl::Parser2->parse_code($code) };
+  is($@, '', 'captured file lexical with an interpolated use + shadow no longer gates');
+  like($cl, qr/\(defvar \$tmpfile__file__\d+ /,
+       'promotion happened: the captured lexical became a package cell');
+  # The OUTER sub's interpolated read takes the renamed cell …
+  like($cl, qr/"outer="\s*\$tmpfile__file__\d+/,
+       'interpolated use outside the shadow is rewritten to the cell');
+  # … and the shadow's own interpolated read keeps the let-bound name.
+  like($cl, qr/"inner="\s*\$tmpfile\b/,
+       'interpolated use inside the shadow keeps the original name');
+}
+
 done_testing();
