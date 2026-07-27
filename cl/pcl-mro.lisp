@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-52
+;;; pcl: pipeline=v2 gen=v2-71
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -11,6 +11,7 @@
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3" pcl::@INC)
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux" pcl::@INC)
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3" pcl::@INC)
+(setf pcl::*p-core-inc-dirs* (list "/home/bernt/pcl/lib" "/home/bernt/pcl" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3"))
 ;; Switch to main package (Perl's default for code without 'package' statement)
 (p-defpackage :main)
 (in-package :main)
@@ -68,7 +69,6 @@
     (block nil
       (let ((*wantarray* :void))
         (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
-        ;; no strict 'refs' (no-op)
         (p-foreach ($u (p-cast-@ "UNIVERSAL::ISA")) (p-if (p-str-eq $u $class) (p-return 1)))
         (p-return 0)))))
 
@@ -83,22 +83,34 @@
       (let (($class (make-p-box nil)) ($seen (make-p-box nil)))
         (let ((*wantarray* nil)) (p-list-= (vector $class $seen) @_))
         (let ((*wantarray* :void))
-          ;; no strict 'refs' (no-op)
-          (p-my-= $seen (make-p-box (p-hash (p-cast-% (p-|| $seen (make-p-box (p-hash )))))))
+          (p-my-= $seen (make-p-box (p-hash (p-cast-% (p-|| $seen (make-p-box (p-hash)))))))
           (p-if (p-post++ (p-gethash-deref-box $seen $class))
             (progn
-              (p-die :loc "lib/mro.pm line 69" (p-string-concat "Recursive inheritance detected in package '" $class "'
+              (p-die :loc
+                "lib/mro.pm line 69"
+                (p-string-concat "Recursive inheritance detected in package '"
+                  $class
+                  "'
 "))))
           (let ((@parents (make-array 0 :adjustable t :fill-pointer 0)))
             (p-array-= @parents (p-cast-@ (p-string-concat $class "::ISA")))
             (p-if (p-! @parents) (p-return (make-p-box (p-array-init $class))))
             (let ((@seqs (make-array 0 :adjustable t :fill-pointer 0)))
-              (p-array-= @seqs (let ((*wantarray* t)) (p-map (lambda ($_) (make-p-box (p-array-init (p-cast-@ (let ((*wantarray* t)) (mro::pl-_c3_linearize $_ $seen)))))) @parents)))
+              (p-array-= @seqs
+                (let ((*wantarray* t))
+                  (p-map
+                    (lambda ($_)
+                      (make-p-box
+                        (p-array-init
+                          (p-cast-@ (let ((*wantarray* t)) (mro::pl-_c3_linearize $_ $seen))))))
+                    @parents)))
               (p-push @seqs (make-p-box (p-array-init @parents)))
               (let ((@result (make-array 0 :adjustable t :fill-pointer 0)))
                 (p-array-= @result (vector $class))
                 (p-while 1
-                  (p-array-= @seqs (let ((*wantarray* t)) (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
+                  (p-array-= @seqs
+                    (let ((*wantarray* t))
+                      (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
                   (p-if (p-! @seqs) (p-last))
                   (let (($cand (make-p-box nil)))
                     (p-foreach ($seq @seqs)
@@ -112,7 +124,11 @@
                             (p-if $in_tail (p-last)))
                           (p-if (p-! $in_tail) (progn (p-my-= $cand $head) (p-last))))))
                     (p-if (p-! (p-defined $cand))
-                      (p-die :loc "lib/mro.pm line 99" (p-string-concat "Inconsistent hierarchy during C3 merge of '" $class "'
+                      (p-die :loc
+                        "lib/mro.pm line 99"
+                        (p-string-concat "Inconsistent hierarchy during C3 merge of '"
+                          $class
+                          "'
 ")))
                     (p-push @result $cand)
                     (p-foreach ($seq @seqs)
@@ -122,9 +138,7 @@
 
 (p-set-current-package :mro "mro")
 
-;; use strict (pragma)
-
-;; use warnings (pragma)
+(p-run-compile-phase-blocks)
 
 (p-scalar-= mro::$VERSION "1.29_01")
 

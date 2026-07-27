@@ -4,6 +4,64 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316b (2026-07-27, Fable) — task #125: the interp rewrite learns about scopes; and the shipped pack() was 40 compiler generations stale.
+
+**1. De-gate: "file lexical captured by sub" no longer refuses on a
+shadow.**  A file `my $x` captured by a named sub must become a
+package-level cell (the sub hoists outside the lexical `let`s).  That
+promotion refused — whole file to v1 — whenever the name *also* appeared
+in interpolated text and any other scope declared the same name, because
+`_rewrite_var_uses` ran its shadow predicate over Symbol tokens only and
+rewrote interpolated text scope-blind.  The predicate is position-based
+and works for any node, so the interp loop now runs the SAME `$skip`:
+outer uses (symbol and interpolated) take the cell, the shadow's own
+scope keeps the plain name.  The refusal then has no reason to exist and
+is gone; the `${x}` deref-block refusal stays (that shape is text the
+token rewrites cannot reach at all).
+
+**Why it matters beyond one shape:** the case came from perl's own
+`t/test.pl`, which gates on `my $tmpfile` captured by `fresh_perl`
+(another sub declares its own `$tmpfile`) — and the v1 fallback then
+**miscompiles** that file's forward `goto WATCHDOG_VIA_ALARM` into a
+tagless `(go)`, a compile error inside `watchdog()`.  v2 lowers the same
+goto correctly.  So the gate wasn't costing a lowering, it was costing
+correctness — every remaining v1 fallback is a latent bug of that kind,
+which is precisely the E4.1 argument.
+
+Verification: corpus-diff = **1 of 111** files differs (state.t: `$y` is
+now a promoted cell, with `p-alias-eval-cell` carrying its string-eval
+visibility — the designed M-F substitution for the capture-alist entry);
+gate 122 files / **4396**; fuzzer **1056/1060** (the 4 known-cluster
+mismatches: 3× parked `**` float, 1× documented `() = split` count);
+full sweep **0 new / 0 fixed**, 63 fully passing.  Guards: 4 emission
+cases in `parser2-02.t`, 1 perl-oracle case in `transpile-test-06.t`.
+Cache generation → **v2-71**.
+
+**2. `cl/pcl-pack.lisp` was built at gen v2-30 (user's catch).**  It is a
+CHECKED-IN TRANSPILED ARTIFACT — pack()/unpack() is Perl
+(`cl/pack-impl.pl`) compiled by PCL itself, plus a hand-written appendix
+(IEEE-754 helpers + the `p-pack`/`p-unpack` entry points).  With the
+compiler at v2-71, every pack.t run since v2-30 was measuring the OLD
+codegen, so it said almost nothing about current emission.  Regenerated:
+the current compiler emits a visibly more modern lowering for the same
+source (`p-raw-params` instead of the `&optional`/`(p-undef)` prologue,
+multi-value `(p-return 1 1 0)` instead of the
+`(if *wantarray* (vector …) (progn …))` trick).  **A/B on the same tree:
+old and new artifacts both give pack.t 5635 pass / 90 fail, 0 new vs the
+blessed baseline, 147s vs 140s wall.**  New `tools/rebuild-pack` turns
+the four-step procedure into a script (with an empty-output guard for the
+pl2cl-exits-0-on-module-error trap) — verified idempotent — so this
+cannot drift silently again; run it after any emission-changing commit.
+
+**Open, filed this session:** perl's `t/test.pl` `watchdog()` still ends
+up with a tagless `(go :WATCHDOG_VIA_ALARM)` — the sub carries a `($;$)`
+prototype, so its *body* is routed through v1's `_process_sub_statement`
+and v1's `_wrap_runtime_labels` fails to wrap that particular body (an
+isolated reconstruction of the shape wraps fine).  v1-seam residue, gone
+with E2.final/E4.1; the file itself is now v2-native.
+
+---
+
 ## Session 316 (2026-07-27, Fable) — task #124 (#25 / E4.0b): two general bugs behind the `(go :Arg_loop)` suite family.
 
 **io/msg.t + io/sem.t + io/shm.t crashed identically; neither cause had

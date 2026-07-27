@@ -155,6 +155,16 @@ triage).** `docs/v2-completion-plan.md` is the older W-phase plan
 (background). Verify emission changes with `tools/corpus-diff.pl`; track
 gates with `perl tools/v2-census.pl`.
 
+**Generated artifacts checked into the tree — regenerate them after an
+emission-changing commit, or they keep running on the codegen that built
+them.** `cl/pcl-pack.lisp` is `cl/pack-impl.pl` (pack/unpack, written in
+Perl) transpiled by PCL plus a hand-written appendix: run
+**`tools/rebuild-pack`**, then `perl sweep-perl-tests.pl --jobs 1
+--timeout 380 perl-tests/pack.t` and `tools/sweep-diff.pl` (expect 0 new;
+s316b: 5635 pass / 90 fail).  It was found at gen v2-30 against a v2-71
+compiler — 40 generations of drift, which made every pack.t run a test of
+the *old* emitter.  `cl/pcl-mro.lisp` comes from `lib/mro.pm` the same way.
+
 ## Architecture
 
 ### Core Pipeline
@@ -256,7 +266,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **122 test files, 4391 tests** (Pl/t gate, as of session 316 — includes Pl/t/xs-01/02/03.t, which skip without a built pclxs sibling)
+- **122 test files, 4396 tests** (Pl/t gate, as of session 316b — includes Pl/t/xs-01/02/03.t, which skip without a built pclxs sibling)
 - **XS conformance: 370 pass, 0 fail — fully green** against pclxs's corpus
   with real perl as oracle (`tools/pcl-conform`, session 315; XS OO/magic
   works — Digest::MD5's own md5-aaa.t is 256/256 under PCL).
