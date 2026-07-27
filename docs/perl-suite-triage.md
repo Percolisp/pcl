@@ -30,9 +30,12 @@ foreach also iterates the live array, so a mid-loop `push` extends the
 iteration).  Cases 29 (`for (@a) { $_ = 2 }` over holes) and 30 (defelem
 on `@_` + `local $_`) now match.  Remaining 36 fails = the fatal-error
 message-fidelity family, invalid-perl detection (out of scope, CLAUDE.md
-§9), and one `(?{})` case — see task #127.  Guards: 7 new tests in
+§9), and one `(?{})` case.  Guards: 7 new tests in
 `Pl/t/transpile-test-06.t`; array.t skip-registry rows 174/179 dropped
 (stale — they pass now).  not-supported.md §sparse-arrays rewritten.
+**File CLOSED as XDIFF** (expected-tsv row): the user confirmed
+2026-07-28 that matching perl's exact fatal-error TEXT is not a goal
+(not-supported.md §Error message text and format) — task #127 done.
 
 **s316d: task #127 resolved for 4 of the 5 drift files** (per-file
 verdicts, not a group bless):

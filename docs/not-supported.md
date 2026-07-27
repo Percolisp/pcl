@@ -135,6 +135,11 @@ on error strings, `fresh_perl_like(..., qr/error pattern/)`, or similar
 error-message pattern matching (e.g. `heredoc.t` tests 17–43, parts of
 `die.t`, `chop.t`, `anonsub.t`).
 
+**Re-confirmed by the user 2026-07-28 (s316e)** — also covers the perl-suite
+fatal-death rows (`run/fresh_perl.t` expected-tsv row).  If a CPAN module
+pattern-matches a specific message it actually triggers, fix that one message
+at the point that raises it.
+
 ---
 
 ## Error messages: no "at FILE line N" location info

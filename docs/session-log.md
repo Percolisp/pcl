@@ -44,8 +44,12 @@ skip-registry 174/179 went REGISTRY-STALE (now pass) → dropped.  Guards:
 7 new tests in Pl/t/transpile-test-06.t (foreach/multi-array/@_/read-only/
 live-push/grep/map).  ir-spec §2.3 updated.
 
-Still open in #127: the fatal-error message-fidelity family (~30 cases),
-invalid-perl detection (out of scope), one `(?{})` case.
+**#127 CLOSED**: the user confirmed matching perl's exact fatal-error
+TEXT is not a goal ("unless it is really cheap") — re-confirmation
+recorded in not-supported.md §Error message text and format, and
+run/fresh_perl.t blessed as an expected-tsv XDIFF row (verified: runner
+now reports XDIFF).  The invalid-perl-detection cases were already out
+of scope (CLAUDE.md §9), the `(?{})` case already §regex-code-blocks.
 
 ---
 
