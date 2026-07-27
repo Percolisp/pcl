@@ -4,6 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316f (2026-07-28, Fable) — task #126: pure-prototype subs lower natively + the watchdog forward-goto shape (gen v2-73).
+
+The #126 diagnosis held: v1's `_wrap_runtime_labels` loses the goto
+tagbody on t/test.pl's `sub watchdog ($;$)` — and whole-file v1 emits the
+same broken shape, so the only correct route was v2-native.  Three changes
+in `Pl/Parser2.pm`:
+
+- **Pure-prototype carve-out (`_is_pure_prototype`).**  An old-style
+  prototype (`($;$)`, `(&@)`, `()`) never binds params — v1 skips ALL
+  params when `is_proto` — so the definition body is a plain @_-consuming
+  body and `_lower_sub` handles it natively.  Only SIGNATURES (named
+  params) keep the v1 fallback.  Discriminator is textual
+  (`[\$\@\%]\w` = named params), mirroring v1's
+  parse_prototype_or_signature, because this PPI tokenizes BOTH shapes as
+  Token::Prototype; a real PPI::Structure::Signature is never pure.  All
+  four gate sites updated (top-level, nested-in-block, and the two
+  state-route exemptions).  Registration is unchanged: the prototype still
+  reaches the Environment for call-site parsing, and prototyped subs still
+  get NO sub_info (call sites take the fallback funcall path, which
+  honours imposed context).
+- **Standalone label in TAIL position** (`die if defined $tail_ctx`
+  removed): every sub body lowers with 'inherit', so ANY sub containing a
+  standalone label used to gate the whole file to v1 — including the
+  isolated watchdog probe (that "worked" only because v1 wraps small
+  bodies correctly).  Now bracket the remainder in the task-#64 regime:
+  `(let ((RET nil)) (tagbody :LBL (setf RET (progn …))) RET)`.
+- **Decl-hoist variant of the #63 forward-goto catch-wrap.**  The plain
+  catch-wrap refuses when the prefix contains declarations (the catch
+  would cut their let scope, which must survive past the label).  When
+  every prefix scope-statement is a simple single-scalar `my $x [= INIT];`
+  (no local/our/state, no modifiers, no self-init, no re-declaration, not
+  a promoted file lexical), pre-bind them all as nil boxes in ONE let
+  around both the catch and the label point — v1's flat-decl model,
+  structured — and lower each decl in place as its bare assignment
+  (`_goto_hoisted`, consulted by the Statement::Variable branch; names
+  forced boxed).  A goto that jumps over a hoisted decl leaves its box
+  nil = undef, perl's jumped-over-`my` behaviour.  Anything outside the
+  subset keeps the forward-goto gate as the safety net.
+
+Real t/test.pl now transpiles **whole-file v2** with watchdog's
+`goto WATCHDOG_VIA_ALARM` as catch/throw + tagbody; the watchdog-shaped
+repro and the tail-value label repro match perl exactly.
+
+**Gen bump v2-72 → v2-73** (emission change); `cl/pcl-pack.lisp`
+regenerated via tools/rebuild-pack, `cl/pcl-mro.lisp` regenerated
+(byte-identical except the gen header).  Census: 111/111 v2-native,
+0 gated (unchanged).  Guards: 2 new tests in Pl/t/transpile-test-06.t.
+
+---
+
 ## Session 316e (2026-07-28, Fable) — task #127: `for (@a)` hole aliasing — lazy defelem-lite in the runtime.
 
 The remaining *real gap* from the #127 fresh_perl triage: aliasing an array

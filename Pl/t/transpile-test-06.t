@@ -554,4 +554,30 @@ my @a; $a[1] = 1; grep { $_ = 5 } @a; print "g:@a\n";
 my @b; $b[1] = 1; map { $_ = 6 } @b; print "m:@b\n";
 ');
 
+# Task #126: a pure-prototype sub lowers natively (no v1 seam), and a
+# forward goto to a standalone label past `my` declarations works — the
+# t/test.pl watchdog shape.  The jumped-over `my` reads undef.
+test_transpile("prototyped sub: forward goto past my-decls (watchdog shape)", '
+sub w ($;$) {
+    my $timeout = shift;
+    my $method = shift || "";
+    my $msg = "T";
+    if ($method eq "alarm") { goto WVA; }
+    my $late = 5;
+    print "before:$late\n";
+    return;
+    WVA:
+    print "via:$timeout:$msg:", (defined $late ? $late : "undef"), "\n";
+}
+w(3, "alarm");
+w(7);
+');
+
+# The standalone-label-in-tail-position regime: the label remainder is the
+# sub return value (setf-RET tagbody bracket, task #64 regime).
+test_transpile("standalone label in tail position keeps the sub value", '
+sub tailval { my $x = shift; if ($x) { goto DONE; } my $y = 2; DONE: "tail-$x" }
+print tailval(1), "|", tailval(0), "\n";
+');
+
 done_testing();

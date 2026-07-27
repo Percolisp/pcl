@@ -852,11 +852,17 @@ sub parse {
     for my $child (@{ $seg->{stmts} }) {
       if ($child->isa('PPI::Statement::Sub') && $child->name
           && !$child->isa('PPI::Statement::Scheduled')) {
-        # Prototyped/signatured sub: v1 owns the whole definition.
-        # _fallback_stmt runs v1's _process_sub_statement, which emits the
-        # p-declare-sub + p-sub into its declaration/definition buckets (→
-        # _captured_decls).  Any runtime raw it returns (rare) goes to @defs.
-        if (defined $self->_proto_or_sig_str($child)) {
+        # SIGNATURED sub: v1 owns the whole definition (param binding,
+        # defaults, arity).  _fallback_stmt runs v1's _process_sub_statement,
+        # which emits the p-declare-sub + p-sub into its declaration/
+        # definition buckets (→ _captured_decls).  Any runtime raw it returns
+        # (rare) goes to @defs.  A PURE prototype (`($;$)`) binds nothing —
+        # its definition lowers natively below (task #126; the prototype
+        # itself was already registered for call-site parsing in the
+        # pre-pass, and call sites still take the fallback funcall path —
+        # no sub_info).
+        if (defined $self->_proto_or_sig_str($child)
+            && !$self->_is_pure_prototype($child)) {
           my @raw = $self->_fallback_stmt($child);
           push @defs, @raw;
           push @def_lines, (_src_pos($child)) x @raw;
@@ -1547,6 +1553,28 @@ sub _proto_or_sig_str {
   return $p if defined $p;
   my ($sig) = grep { $_->isa('PPI::Structure::Signature') } $sub->children;
   return $sig ? $sig->content : undef;
+}
+
+# A PURE old-style prototype (`($;$)`, `(&@)`, `()`) never binds parameters —
+# the body is a plain @_-consuming body, identical to a prototype-less sub's
+# (v1's _process_sub_statement skips ALL params when is_proto).  Only a
+# SIGNATURE (named params: `($x, $y = 5)`) needs v1's binding/default/arity
+# machinery, so only signatures keep the v1 fallback (task #126: v1's
+# _wrap_runtime_labels loses the goto tagbody in t/test.pl's
+# `sub watchdog ($;$)`; the v2-native lowering handles the same body
+# correctly).  The discriminator mirrors parse_prototype_or_signature's
+# is_proto test — this PPI tokenizes both shapes as Token::Prototype, so the
+# test is textual: a sigil followed by an identifier char means named params.
+# A real PPI::Structure::Signature (feature-signatures parse) is never pure,
+# even for anonymous shapes like `($)` — those carry arity checks.
+sub _is_pure_prototype {
+  my ($self, $sub) = @_;
+  return 0 if grep { $_->isa('PPI::Structure::Signature') } $sub->children;
+  my $p = $sub->prototype;
+  return 0 unless defined $p;
+  (my $inner = $p) =~ s/^\s*\(\s*//;
+  $inner =~ s/\s*\)\s*$//;
+  return $inner !~ /[\$\@\%]\w/;
 }
 
 # (The s280 `_check_interp_postderef` gate was removed in s299: postderef_qq
@@ -3104,7 +3132,10 @@ sub _state_route {
     }
     if ($n->isa('PPI::Statement::Sub') && !$n->isa('PPI::Statement::Scheduled')
         && $n->name) {
-      return { route => 'skip' } if defined $self->_proto_or_sig_str($n);
+      # 'skip' = the sub definition is v1-owned (signature); a pure-prototype
+      # sub lowers natively (#126), so its state decls route like any other.
+      return { route => 'skip' }
+        if defined $self->_proto_or_sig_str($n) && !$self->_is_pure_prototype($n);
       return { route => ($stmt_shaped && !$in_mgs) ? 'classic' : 'expr' };
     }
   }
@@ -3268,9 +3299,12 @@ sub _rename_state_vars {
       $sanc = $sanc->parent;
     }
     next if $insig;
+    # v1 owns SIGNATURED sub definitions, so their state decls are v1's
+    # problem; a pure-prototype sub lowers natively (#126) — no exemption.
     next if $sanc && $sanc->isa('PPI::Statement::Sub')
          && !$sanc->isa('PPI::Statement::Scheduled') && $sanc->name
-         && defined $self->_proto_or_sig_str($sanc);
+         && defined $self->_proto_or_sig_str($sanc)
+         && !$self->_is_pure_prototype($sanc);
     my $stmt = $w->parent;
     die "Parser2 TODO: state outside a block-level declaration\n"
       unless $stmt && $stmt->isa('PPI::Statement::Variable')
@@ -4138,6 +4172,53 @@ sub _lower_block {
         return (['catch', $tag, @pre_forms],
                 $self->_lower_block([@s[$k .. $#s]], $vi, $tail_ctx));
       }
+      # Decl-hoist variant (#126, t/test.pl watchdog): the prefix DOES contain
+      # declarations, whose let scope must survive past the label (the plain
+      # catch-wrap would cut it).  When every one of them is a simple
+      # single-scalar `my $x [= INIT];` (no local, no modifiers, no self-init,
+      # no re-declaration), pre-bind them all as nil boxes in ONE let around
+      # both the catch and the label point — v1's flat-decl model, structured —
+      # and lower each decl in place as its bare assignment (the
+      # _goto_hoisted flag, consulted by the Statement::Variable branch).  A
+      # goto that jumps over a hoisted decl leaves its box nil = undef,
+      # perl's jumped-over-my behaviour.  Anything outside the subset keeps
+      # the standalone-label forward-goto gate as the safety net.
+      elsif ($has_goto) {
+        my (%seen, @hoist);
+        my $ok = 1;
+        for my $st (@prefix) {
+          next unless $st->isa('PPI::Statement::Variable')
+                   || $self->_is_local_stmt($st);
+          if ($self->_is_local_stmt($st)) { $ok = 0; last }
+          my $kw = $st->schild(0);
+          if (!$kw || $kw->content ne 'my') { $ok = 0; last }
+          my ($nm, $init, $dmc) = $self->_single_scalar_decl($st);
+          if (!$nm || $dmc || $seen{$nm}++) { $ok = 0; last }
+          # a promoted file lexical is a DEFVAR — a let binding here would
+          # dynamically rebind the special; leave it to its own branch
+          if ($self->{_file_lex_renamed}{$nm}) { $ok = 0; last }
+          if (defined $init) {
+            my (undef, $imod) = _split_modifier($init);
+            if (defined $imod) { $ok = 0; last }
+            if (join('', map { $_->content } @$init) =~ /\Q$nm\E\b/) { $ok = 0; last }
+          }
+          push @hoist, $nm;
+        }
+        if ($ok && @hoist) {
+          my $tag = ':pcl-goto-' . $lbl;
+          my @pre_forms = do {
+            local $self->fallback_parser->{_catch_labels}{$lbl} = $tag;
+            local $self->{_goto_hoisted} = { map { $_ => 1 } @hoist };
+            $self->_lower_block(\@prefix, $vi, undef);
+          };
+          $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
+          my $vi2 = { %$vi, map { $_ => { unboxable => 0 } } @hoist };
+          return (['let',
+                   ['list', map { ['list', $_, '(make-p-box nil)'] } @hoist],
+                   ['catch', $tag, @pre_forms],
+                   $self->_lower_block([@s[$k .. $#s]], $vi2, $tail_ctx)]);
+        }
+      }
     }
   }
 
@@ -4210,6 +4291,19 @@ sub _lower_block {
               @reg,
               $self->_lower_block(\@rest, $vi, $tail_ctx),
               ($decl_tail ? ($name) : ()));
+    }
+    if ($name && $self->{_goto_hoisted} && $self->{_goto_hoisted}{$name}) {
+      # #126 decl-hoist: the binding was pre-opened by the forward-goto
+      # catch-wrap's outer let (a nil box) — emit only the assignment here.
+      # The name stays BOXED for the whole remainder (the binding cannot
+      # carry a raw verdict); the wrap's selection already refused
+      # modifiers, self-init, and re-declaration.
+      $self->_reg_lex($name);
+      my $vi2 = { %$vi, $name => { unboxable => 0 } };
+      return (@declmod_eval,
+              (defined $init
+                ? (['p-my-=', $name, $self->_lower_expr($init, $first)]) : ()),
+              $self->_lower_block(\@rest, $vi2, $tail_ctx));
     }
     if ($name) {
       # A postfix modifier on the init (`my $c = shift if @_ > 1`): Perl declares
@@ -4475,7 +4569,8 @@ sub _lower_block {
     # let-bound names, lower it with an EMPTY set (definitions bucket +
     # nested-sub hoist, the whole-file-v1 shape); a genuine reference keeps
     # the in-place capture behavior.
-    if ($first->block && defined $self->_proto_or_sig_str($first)) {
+    if ($first->block && defined $self->_proto_or_sig_str($first)
+        && !$self->_is_pure_prototype($first)) {
       my $p    = $self->fallback_parser;
       my $lb   = $p->{_let_bound_vars} // {};
       my $text = $first->content;
@@ -4609,12 +4704,12 @@ sub _lower_block {
     my @lk = $first->schildren;
     if (@lk == 1 && $lk[0]->isa('PPI::Token::Label')) {
       (my $lbl = $lk[0]->content) =~ s/\s*:\s*$//;
-      die "Parser2 TODO: standalone label\n"
-        if defined $tail_ctx || $lbl !~ /^\w+$/;
+      die "Parser2 TODO: standalone label\n" if $lbl !~ /^\w+$/;
       # Forward gotos handled by the #63 catch-wrap are marked; anything
       # else that textually targets this label from an earlier sibling is
-      # an unhandled forward shape (goto before a decl, goto from an outer
-      # level across an intervening label, …) → gate.
+      # an unhandled forward shape (goto before a decl outside the
+      # decl-hoist subset, goto from an outer level across an intervening
+      # label, …) → gate.
       unless (delete $self->{_goto_caught}{ refaddr($first) }) {
         for (my $p = $first->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
           die "Parser2 TODO: forward goto to a standalone label\n"
@@ -4623,7 +4718,19 @@ sub _lower_block {
         }
       }
       return (['tagbody', ':' . $lbl,
-               $self->_lower_block(\@rest, $vi, undef)]);
+               $self->_lower_block(\@rest, $vi, undef)])
+        if !defined $tail_ctx;
+      # Tail position (sub body / value block): a tagbody yields NIL, so
+      # bracket the remainder in (setf RET (progn …)) and read RET after —
+      # the labeled-loop/bare-block branch's task-#64 regime (#126: this die
+      # used to send every sub body containing a standalone label to v1).
+      $self->{_blk_ret_counter} //= 0;
+      my $ret = '--pcl-blk-ret--' . $self->{_blk_ret_counter}++;
+      return (['let', ['list', ['list', $ret, 'nil']],
+               ['tagbody', ':' . $lbl,
+                ['setf', $ret,
+                 ['progn', $self->_lower_block(\@rest, $vi, $tail_ctx)]]],
+               $ret]);
     }
     # -- `LBL: while (…) {…}` / `LBL: { … }` targeted by a `goto LBL`: PPI glues
     # a label onto a LOOP or a BARE BLOCK (only those two — `LBL: if (…)` and
