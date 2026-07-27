@@ -4,6 +4,96 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316d (2026-07-28, Fable) — task #127: four of the five suite drifts fixed for real; `&$ref` with no parens was never a call.
+
+Resumed the paused #127 triage (the five s310–s315 OK→DIFF files).  Per-file
+verdicts, no group bless; **four of five resolved, three by fixes**:
+
+**1. op/stash_parse_gv.t 0/5 → 5/5.**  Extracting the `fresh_perl_is`
+children and running them standalone showed the 100-char names were a red
+herring — three general bugs stacked:
+
+- **`&{"name"}` / `&$ref` / `&{$ref}` with NO argument list lowered to a
+  bare `(p-get-coderef …)` — a fetch, never a CALL — on BOTH pipelines.**
+  Perl calls with the current @_ (`&foo;` semantics); the leaf-Symbol form
+  already did this (`[$cl_func, '@_']`), only the Cast forms were broken.
+  `eval { &$code }` silently never ran `$code`.  Fix at the one shared
+  point: gen_prefix_op `&` (text + form) now emits
+  `(p-funcall-ref OPERAND @_)`; the closed set of parents that want the
+  coderef MENTION — `\`, `defined`, `exists`, `undef`, `goto` — reach past
+  it via the new `_amp_cast_operand_id` helper (AST node check, not
+  emitted-text matching; a head check would collide with `\&$f(1)`).
+  `defined`/`exists` already intercepted and needed nothing.
+- **The Perl-4 `'` package separator (`A'B` == `A::B`).  PPI cannot
+  tokenize it at all** — `sub x'y { 1 }` reads as Word(x) + a quoted
+  string, destroying everything to the next apostrophe.  Fix in two
+  string-safe layers: `_preprocess_source` rewrites the SUB-DECLARATION
+  shape only (`sub NAME'NAME` → `sub NAME::NAME`, $str_re-guarded, so
+  `don't` in code/regex/tr is never touched), and `%p-tick-package-seps`
+  normalizes `'`→`::` in runtime symbolic-name lookups (p-funcall-ref,
+  p-get-coderef, %p-resolve-sub-symbol).  Bareword calls `x'y()` remain
+  unsupported (would need regex context the preprocess can't know).
+- **p-funcall-ref's symbolic lookup used `%pcl-invert-case` on the package
+  name** — wrong for multi-segment packages, which keep case (`|aa::bb|`):
+  `sub aa::bb::cc` was unreachable as `&{"aa::bb::cc"}` (the sub landed in
+  `|aa::bb|`, the call looked in `AA::BB`).  Classic duplication drift —
+  p-get-coderef had already been fixed for exactly this; p-funcall-ref now
+  routes through the ONE shared resolver `%p-resolve-sub-symbol`.
+
+  **Bonus (caught by the new guard): `defined &$r` on a real coderef was
+  ALWAYS false.**  p-sub installs bodies as anonymous lambdas, so
+  p-coderef-defined-p's `%fun-name`→status check could never see
+  `:defined` for a user sub.  New rule: a function that is not a defun'd
+  `:stub` IS a body; p-backslash-sub's two lazy wrappers (stub trampoline,
+  AUTOLOAD fallback) register in the weak-key `*p-lazy-coderef-target*`
+  table and answer by their target's CURRENT status (perl's late-bound
+  glob).  exists on the AUTOLOAD fallback is likewise now false until the
+  name exists.
+
+**2. op/tr_latin1.t → OK.**  Count-only tr (empty replacement, no /d) on a
+read-only value warned "Cannot modify non-boxed value in tr///" — perl
+accepts it, nothing is modified.  Warn now gated on `(string/= result str)`.
+
+**3. run/switchF2.t 1/4 → OK.**  `tools/pclperl-for-tests` ignored `-F`
+entirely.  Added: `-F pattern` (strips one //, "" or '' wrap), `-F`
+implies `-a`, `-a` implies `-n` (perl 5.20; perl #116190 — exactly what
+the file tests), repeated `-F` keeps the last pattern.
+
+**4. re/reg_eval.t → expected-tsv row** (no new write-off): all 8 cases
+drive `(?{…})`/`(??{…})` regex code blocks — already-documented
+not-supported.md §regex-code-blocks, same family as the pat_re_eval.t row.
+
+**5. run/fresh_perl.t stays DIFF — 53/91 match after the above, 38 honest
+per-case failures**, now categorized (shadow re-run; recipe in task #127 —
+note the runner's core preloads cl/pcl-test.lisp, a manual repro must
+`--load` it or `require './test.pl'` leaves pl-plan undefined): the bulk is
+perl FATAL-ERROR FIDELITY (expected output is perl's exact death message;
+PCL prints an unhandled-SBCL-condition dump); plus a real aliasing gap
+(`for (@a)` does not alias hole slots — case 28 prints "  2" for perl's
+"2 2 2"); invalid-perl-detection cases (out of scope, CLAUDE.md §9); one
+regex-code-block case.
+
+**Guards:** 4 perl-oracle cases in Pl/t/transpile-test-06.t (&-call family
+incl. defined/exists/\&; tick separator; 3-segment symbolic call;
+count-only tr).  Harness fix there too: run_perl now shell-escapes
+embedded `'` — a tick in any snippet used to truncate the `perl -e` arg.
+
+**Verification:** gate 122 files / 4400 tests green (+4 new; one clform-01
+pin corrected: it asserted `(p-do (p-get-coderef $ref))` for `do &$cref`,
+but perl evaluates `do EXPR`'s EXPR — calling the sub — and does do-FILE
+on the RESULT, which is exactly the new `(p-do (p-funcall-ref $ref @_))`;
+verified against real perl); corpus-diff
+--ws = 4 of 111 differ (local.t, loopctl.t, postfixderef.t, ref.t), every
+hunk the &-call fix; full sweep **0 new / 3 fixed** (local.t "Underscore"
+rows — `eval { &$code }` finally runs), baseline re-blessed 712→709, still
+63 fully passing; pack.t spot 5635/90 = unchanged (its full-sweep TIMEOUT
+row was cold-cache contention at the fresh v2-72 generation, not a
+slowdown); fuzzer 1056/1060 with only the 4 known-cluster mismatches.
+Cache generation → v2-72.  Also removed the dead `$shadows` computation
+left in _promote_captured by s316b.
+
+---
+
 ## Session 316c (2026-07-27, Fable) — E4.0b: the perl-suite re-run, and what it caught.
 
 **433 files: 43 OK / 31 NOTAP / 91 XDIFF / 268 UNEXPLAINED**

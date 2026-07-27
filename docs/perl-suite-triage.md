@@ -22,6 +22,47 @@ other two were s316's own, and both were *false passes* being corrected:
   op/sysio.t and run/script.t**, three silent victims of the same
   collision (43 OK vs 39 in the run before the fix).
 
+**s316d: task #127 resolved for 4 of the 5 drift files** (per-file
+verdicts, not a group bless):
+
+- **op/stash_parse_gv.t 0/5 → OK.**  Three general bugs, none about long
+  names per se: (1) `&{"name"}` / `&$ref` / `&{$ref}` with *no argument
+  list* lowered to a bare `(p-get-coderef …)` — a fetch, never a call —
+  on BOTH pipelines; the `&` prefix now lowers to
+  `(p-funcall-ref … @_)` like the leaf `&foo;` form, and the mention
+  parents (`\`, `defined`, `exists`, `undef`, `goto`) reach past it via
+  `_amp_cast_operand_id`.  (2) The Perl-4 `'` package separator: PPI
+  cannot tokenize it at all, so `sub x'y {…}` is normalised to
+  `sub x::y` in `_preprocess_source` (string-guarded, sub-decl shape
+  only) and symbolic name strings normalise at runtime
+  (`%p-tick-package-seps`).  (3) `p-funcall-ref` resolved the package
+  with `%pcl-invert-case` — wrong for multi-segment packages
+  (`|aa::bb|` keeps case) — and now routes through the shared
+  `%p-resolve-sub-symbol`.  Guards: 4 perl-oracle cases in
+  `Pl/t/transpile-test-06.t`.
+- **op/tr_latin1.t → OK.**  Count-only `tr` (empty replacement, no /d)
+  on a read-only value warned "Cannot modify non-boxed value" — perl
+  accepts it since nothing changes; the warn is now gated on an actual
+  result difference.
+- **run/switchF2.t 1/4 → OK.**  `tools/pclperl-for-tests` ignored `-F`
+  entirely: it now parses `-F pattern` (strips a //, "" or '' wrap) and
+  applies the perl-5.20 implication chain `-F` → `-a` → `-n`
+  (perl #116190, which is exactly what the file tests).
+- **re/reg_eval.t → expected-tsv row.**  All 8 cases drive
+  `(?{…})`/`(??{…})` regex code blocks — already-documented
+  not-supported.md §regex-code-blocks, same family as the existing
+  pat_re_eval.t row.
+- **run/fresh_perl.t stays DIFF: 53/91 match, 38 honest per-case
+  failures** (shadow re-run after the fixes above).  Categories: perl
+  *fatal-error fidelity* is the big one (expected output is perl's exact
+  death message — `Can't call method "go" on an undefined value at -
+  line 1.` — where PCL emits an unhandled-SBCL-condition dump); plus a
+  real aliasing gap (`for (@a)` does not alias hole slots: case 28
+  prints "  2" for perl's "2 2 2"); invalid-perl-detection cases
+  (`local $lexical` must die at compile time — out of scope per
+  CLAUDE.md §9); and one regex-code-block case (45).  Each still needs
+  its own verdict; the shadow-repro recipe lives in task #127.
+
 Caveat on the s316b row for **op/cond.t**: it reads TIMEOUT rather than
 its expected-tsv XDIFF because the solo-phase memory cap killed it (see
 the deep-nesting section below) — that is the guard working, not a status
