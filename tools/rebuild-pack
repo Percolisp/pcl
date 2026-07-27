@@ -1,0 +1,52 @@
+#!/bin/sh
+# rebuild-pack — regenerate cl/pcl-pack.lisp from cl/pack-impl.pl.
+#
+# cl/pcl-pack.lisp is a CHECKED-IN TRANSPILED ARTIFACT: PCL's pack()/unpack()
+# is written in Perl (cl/pack-impl.pl) and compiled by PCL itself, plus a
+# hand-written appendix (IEEE-754 float helpers + the p-pack/p-unpack entry
+# points) that cannot be expressed in portable Perl.
+#
+# Run this after editing cl/pack-impl.pl — and after any emission-changing
+# compiler commit, or the shipped pack implementation silently keeps running
+# on whatever codegen built it (it was found at gen v2-30 while the compiler
+# was at v2-71, i.e. 40 generations of drift, in s316).  Testing pack against
+# a stale artifact measures the OLD compiler.
+#
+# The procedure (and why the appendix exists) is documented at the top of
+# cl/pack-impl.pl; this script is that procedure, so there is no excuse to
+# hand-run it wrong.  Verify afterwards with:
+#   perl sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t
+# and compare against the blessed baseline with tools/sweep-diff.pl (expect
+# 0 new failures; s316: 5635 pass / 90 fail).
+set -e
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+target=cl/pcl-pack.lisp
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+test -f "$target" || { echo "rebuild-pack: $target missing" >&2; exit 1; }
+
+# 1. Save the hand-written appendix (first float helper through EOF).
+sed -n '/^(defun pl-_pack_float32 /,$p' "$target" > "$tmp/appendix.lisp"
+test -s "$tmp/appendix.lisp" || {
+  echo "rebuild-pack: appendix marker '(defun pl-_pack_float32' not found in $target" >&2
+  exit 1
+}
+
+# 2. Transpile the Perl source — its output is the new header + body, verbatim.
+./pl2cl cl/pack-impl.pl > "$tmp/body.lisp"
+# pl2cl exits 0 with EMPTY output when a Pl module fails to compile — check.
+test -s "$tmp/body.lisp" || { echo "rebuild-pack: pl2cl produced no output" >&2; exit 1; }
+
+# 3. Reassemble: body, blank line, blank line, appendix.
+{ cat "$tmp/body.lisp"; echo; echo; cat "$tmp/appendix.lisp"; } > "$tmp/new.lisp"
+
+# 4. Parens must balance (SBCL's own reader) before the file is installed.
+sbcl --script tools/check-parens.lisp "$tmp/new.lisp"
+
+cp "$tmp/new.lisp" "$target"
+echo "rebuild-pack: wrote $target ($(sed -n 1p "$target"))"
+echo "rebuild-pack: now run  perl sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t"
