@@ -213,6 +213,23 @@ sub _preprocess_source {
       sprintf("%.17g", $mantissa * (2 ** $exp_str));
     }
   }gex;
+  # Perl-4 `'` package separator in a SUB DECLARATION name: `sub x'y {…}`
+  # → `sub x::y {…}` (A'B == A::B, valid through the 5.40 oracle).  PPI
+  # cannot tokenize the tick form at all — `sub x'y { 1 }` reads as
+  # Word(sub) Word(x) Quote::Single("'y { 1 }\nx'"), destroying everything
+  # up to the next apostrophe — so this must be normalised before PPI.
+  # Deliberately narrow: only after `sub\s+`, so `don't`/`can't` in code,
+  # comments, regex or tr content are never touched; the $str_re
+  # alternative passes quoted strings through untouched.  Symbolic uses of
+  # tick names in STRINGS (`&{"x'y"}`) are normalised at runtime instead
+  # (%p-tick-package-seps).  Bareword calls `x'y()` stay unsupported.
+  $src =~ s{($str_re)|\bsub(\s+)([A-Za-z_]\w*(?:'[A-Za-z_]\w*)+)}{
+    if (defined $1) { $1 } else {
+      my ($ws, $name) = ($2, $3);
+      $name =~ s/'/::/g;
+      "sub$ws$name";
+    }
+  }gex;
   # Strip type annotations from foreach loop variables: `for my Dog $spot` → `for my $spot`.
   # Perl allows `for my ClassName $var` but PPI can't parse the ClassName and stops,
   # producing a broken AST. PCL ignores type constraints anyway, so just drop them.

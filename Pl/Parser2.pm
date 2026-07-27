@@ -2661,8 +2661,6 @@ sub _promote_captured {
     }
     return if $fam && _caprefuse($canon, 'family use (@x/%x/$#x) in extent');
   }
-  my $shadows = $self->_count_name_decls($extent // $stmts, $bare,
-                                         $sig eq '$' ? undef : $sig) > 1;
   # (s316: the interp rewrite is shadow-aware — _rewrite_var_uses runs the
   # same $skip predicate over interpolated tokens as over symbols — so an
   # interpolated use alongside a shadow no longer refuses the promotion.

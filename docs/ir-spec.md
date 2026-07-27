@@ -494,6 +494,16 @@ flattens to key, value, key, value…
 **No aliasing:** `@_` holds copies; writing `$_[0]` does *not* modify the
 caller's variable (deliberate divergence, `docs/not-supported.md`).
 
+**`&`-sigil calls without an argument list** re-use the caller's `@_`
+(Perl's `&foo;` rule).  Named form: `&foo;` → `(pl-foo @_)`.  Deref forms:
+`&$ref;` / `&{expr};` / `&{"name"};` → `(p-funcall-ref EXPR @_)`;
+`p-funcall-ref` accepts a code ref OR a symbolic sub-name string
+(no-strict-refs, `'` = `::`).  The closed set of parents that want the
+coderef *mention* rather than a call — `\`, `defined`, `exists`, `undef`,
+`goto` — lower it themselves (`(p-backslash (p-get-coderef EXPR))`,
+`(p-coderef-defined-p EXPR)`, …), so `(p-get-coderef EXPR)` in emitted
+code always means "the coderef itself", never a suppressed call.
+
 ### 5.3 Return
 
 `(p-return V…)` throws to the nearest `:p-return` catch — normally the

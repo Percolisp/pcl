@@ -678,6 +678,13 @@
 (defvar *p-declared-subs* (make-hash-table :test 'eq)
   "Perl sub existence tracking for exists &sub and defined &sub")
 
+(defvar *p-lazy-coderef-target* (make-hash-table :test 'eq :weakness :key)
+  "Maps a LAZY code ref (p-backslash-sub's stub trampoline or AUTOLOAD
+   fallback lambda) to the sub symbol it stands for.  defined/exists on a
+   coderef consult this so \\&foo taken before `sub foo {...}` answers by
+   the symbol's CURRENT status, exactly like perl's late-bound glob slot.
+   Weak keys: an entry lives only as long as the coderef itself.")
+
 ;;; use overload — Operator Overloading Registry
 ;;; Maps (cons pkg-name op-string) -> handler (CL function or method-name string).
 ;;; Populated at class-definition time by p-register-overloads.
@@ -10019,7 +10026,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-71"
+(defparameter *pcl-cache-generation* "v2-72"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -10931,12 +10938,29 @@ buffer's fill-pointer; everything else falls back to file-length."
             do (vector-pop result)))
     result))
 
+(defun %p-tick-package-seps (name)
+  "Rewrite the Perl-4 `'` package separator to `::` in a symbolic name:
+   A'B == A::B (still valid in perl 5.40, the oracle; deprecated 5.38).
+   A `'` counts as a separator when a word character follows, matching
+   perl's toker; any other apostrophe passes through unchanged."
+  (if (find #\' name)
+      (with-output-to-string (s)
+        (loop for i from 0 below (length name)
+              for ch = (char name i)
+              do (if (and (char= ch #\')
+                          (< (1+ i) (length name))
+                          (let ((nx (char name (1+ i))))
+                            (or (alpha-char-p nx) (digit-char-p nx) (char= nx #\_))))
+                     (write-string "::" s)
+                     (write-char ch s))))
+      name))
+
 (defun %p-resolve-sub-symbol (name)
   "Resolve a Perl sub-name string (\"foo\" or \"Pkg::foo\") to its CL symbol
    PKG::PL-FOO, or NIL if the package/symbol does not exist.  Shared by the
    symbolic-code-ref paths: &{$name}(...), defined/exists &{$name}.  An
    unqualified name resolves against the current CL package (MAIN -> main)."
-  (let* ((name (to-string name))
+  (let* ((name (%p-tick-package-seps (to-string name)))
          (sep-pos (search "::" name :from-end t))
          (perl-pkg (if sep-pos
                        (subseq name 0 sep-pos)
@@ -10956,18 +10980,19 @@ buffer's fill-pointer; everything else falls back to file-length."
     (if (functionp fn)
         (apply fn args)
         ;; Not a function: treat as symbolic sub name (string/number).
-        ;; Look up PL-NAME in the current CL package (typeglob CODE slot or defun).
-        (let* ((name (to-string fn))
+        ;; Resolution is %p-resolve-sub-symbol's job — the ONE resolver all
+        ;; symbolic-code-ref paths share (it had the multi-segment package
+        ;; rule this function's inline copy lacked: |aa::bb| keeps case,
+        ;; single-segment upcases).  The pkg/name split here only feeds the
+        ;; die message.
+        (let* ((name (%p-tick-package-seps (to-string fn)))
                (sep-pos (search "::" name :from-end t))
                (perl-pkg (if sep-pos
                              (subseq name 0 sep-pos)
                              (let ((cpkg (package-name *package*)))
                                (if (string= cpkg "MAIN") "main" cpkg))))
                (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
-               (cl-pkg (find-package (%pcl-invert-case perl-pkg)))
-               (sym (when cl-pkg
-                      (find-symbol (%pcl-cl-sub-name bare-name)
-                                   cl-pkg)))
+               (sym (%p-resolve-sub-symbol name))
                (fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
           (if fn-val
               (apply fn-val args)
@@ -11144,16 +11169,21 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; at CALL time.  (Needed now that sub bodies stay in source order relative
     ;; to use/BEGIN — see docs/declaration-ordering-fix-plan.md.)
     ((fboundp sym)
-     (lambda (&rest args) (apply (symbol-function sym) args)))
+     (let ((tramp (lambda (&rest args) (apply (symbol-function sym) args))))
+       (setf (gethash tramp *p-lazy-coderef-target*) sym)
+       tramp))
     ;; Not declared at all: return a lambda that tries AUTOLOAD when called.
     (t
-     (let ((pkg *package*))
-       (lambda (&rest args)
-         (declare (ignore args))
-         (let ((al (intern (%pcl-cl-sub-name "AUTOLOAD") pkg)))
-           (if (fboundp al)
-               (funcall (symbol-function al))
-               (error 'undefined-function :name sym))))))))
+     (let* ((pkg *package*)
+            (fallback
+             (lambda (&rest args)
+               (declare (ignore args))
+               (let ((al (intern (%pcl-cl-sub-name "AUTOLOAD") pkg)))
+                 (if (fboundp al)
+                     (funcall (symbol-function al))
+                     (error 'undefined-function :name sym))))))
+       (setf (gethash fallback *p-lazy-coderef-target*) sym)
+       fallback))))
 
 (defun p-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
@@ -11165,7 +11195,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((functionp v) v)
       ;; String - look up by Perl function name
       (t
-       (let* ((s (stringify-value v))
+       (let* ((s (%p-tick-package-seps (stringify-value v)))
               (last-sep (search "::" s :from-end t)))
          (if last-sep
              ;; Package-qualified: "Pkg::name" -> Pkg::PL-NAME.  Multi-segment
@@ -12321,8 +12351,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (p-box-p v) (setf v (p-box-value v)))
     (cond
       ((functionp v)
-       ;; Any non-nil function object exists (declared stub or defined body).
-       (make-p-box 1))
+       ;; A lazy AUTOLOAD fallback stands for a sub that was never declared:
+       ;; exists is false until the symbol gains a status or a definition.
+       ;; Any other function object exists (declared stub or defined body).
+       (let ((lazy (gethash v *p-lazy-coderef-target*)))
+         (if (and lazy
+                  (not (gethash lazy *p-declared-subs*))
+                  (not (fboundp lazy)))
+             (make-p-box nil)
+             (make-p-box 1))))
       ;; Symbolic name: exists iff it resolves to a known sub (stub or defined).
       ((or (stringp v) (numberp v))
        (let ((sym (%p-resolve-sub-symbol v)))
@@ -12340,11 +12377,23 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (p-box-p v) (setf v (p-box-value v)))
     (cond
       ((functionp v)
-       (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
-              (status (and (symbolp fname) (gethash fname *p-declared-subs*))))
-         (if (eq status :defined)
-             (make-p-box 1)
-             (make-p-box nil))))
+       ;; A lazy wrapper (stub trampoline / AUTOLOAD fallback) answers by its
+       ;; TARGET's current status — perl's \\&foo is late-bound to the glob.
+       ;; Otherwise: p-sub installs bodies as ANONYMOUS lambdas (%fun-name is
+       ;; a (lambda ...) list, never the symbol), so any function that is not
+       ;; a lazy wrapper and not a defun'd :stub IS a body — status :defined
+       ;; can only ever be seen here for defun-defined (imported) subs.
+       (let ((lazy (gethash v *p-lazy-coderef-target*)))
+         (if lazy
+             (if (eq (gethash lazy *p-declared-subs*) :defined)
+                 (make-p-box 1)
+                 (make-p-box nil))
+             (let* ((fname (ignore-errors (sb-kernel:%fun-name v)))
+                    (status (and (symbolp fname)
+                                 (gethash fname *p-declared-subs*))))
+               (if (eq status :stub)
+                   (make-p-box nil)
+                   (make-p-box 1))))))
       ((or (stringp v) (numberp v))
        (let* ((sym (%p-resolve-sub-symbol v))
               (status (and sym (gethash sym *p-declared-subs*))))
@@ -13940,7 +13989,12 @@ buffer's fill-pointer; everything else falls back to file-length."
              (setf (p-box-value string-box) result
                    (p-box-sv-ok string-box) nil
                    (p-box-nv-ok string-box) nil)
-             (warn "Cannot modify non-boxed value in tr///"))
+             ;; A count-only tr (empty replacement, no /d) leaves the target
+             ;; untouched, and perl accepts that on a read-only value:
+             ;; `"\x8c" =~ y o…oo` just counts.  Complain only when the
+             ;; result actually differs from the input.
+             (when (string/= result str)
+               (warn "Cannot modify non-boxed value in tr///")))
          count)))))
 
 (defun p-=~ (string operation)

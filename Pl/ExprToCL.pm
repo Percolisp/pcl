@@ -390,6 +390,26 @@ sub _split_func_sym {
 }
 
 
+# Helper: if $arg_id is a prefix_op node whose operator is the `&` Cast
+# (`&$var` / `&{expr}`), return the node-id of the coderef expression inside;
+# undef otherwise.  Perl calls `&$f` (no parens) with the current @_, so the
+# `&` prefix lowers to a CALL by default; the closed set of parents that
+# instead want the coderef itself — \, defined, exists, undef, goto — use
+# this to reach past the call and lower the mention themselves.
+sub _amp_cast_operand_id {
+  my ($self, $arg_id) = @_;
+  my $arg_node = $self->expr_o->get_a_node($arg_id);
+  return undef unless $self->expr_o->is_internal_node_type($arg_node)
+    && ($arg_node->{type} // '') eq 'prefix_op';
+  my $k = $self->expr_o->get_node_children($arg_id);
+  return undef unless @$k >= 2;
+  my $op_node = $self->expr_o->get_a_node($k->[0]);
+  return undef unless ref($op_node) eq 'PPI::Token::Cast'
+    && $op_node->content() eq '&';
+  return $k->[1];
+}
+
+
 # Get context keyword for a node (:scalar or :list)
 sub get_context_keyword {
   my $self    = shift;
@@ -1869,15 +1889,9 @@ sub gen_funcall_form {
     }
 
     # goto &$scalar — tail-call via dynamic coderef (Cast '&' prefix_op).
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'prefix_op') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 1) {
-        my $op_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        if (ref($op_node) eq 'PPI::Token::Cast' && $op_node->content() eq '&') {
-          return ['p-goto-sub', $self->gen_node_form($kids->[1])];
-        }
-      }
+    # goto wants the coderef MENTION, not the call the `&` prefix lowers to.
+    if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
+      return ['p-goto-sub', ['p-get-coderef', $self->gen_node_form($amp_id)]];
     }
 
     # goto LABEL — forward (catch-wrapped) throw, else lexical (go).
@@ -2280,6 +2294,10 @@ sub gen_funcall_form {
         return ['p-undef-sub', "\"$pkg\"", "\"$name\""];
       }
     }
+    # undef &{expr} / undef &$cref — the coderef mention, not a call.
+    if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
+      return ['p-undef', ['p-get-coderef', $self->gen_node_form($amp_id)]];
+    }
   }
 
   # ---- from here on: the text emitter's generic tail, form-shaped ----
@@ -2533,18 +2551,12 @@ sub gen_funcall {
 
     # goto &$scalar — tail-call via dynamic coderef/name.
     # PPI tokenizes `goto &$cref` as Word('goto') + Cast('&') + Symbol('$cref').
-    # PExpr processes the Cast as a prefix_op, generating (p-get-coderef $cref).
+    # goto wants the coderef MENTION (the `&` prefix alone lowers to a call
+    # with @_), so reach past it and wrap the inner expression ourselves.
     if ($func_name eq 'goto' &&
-        $self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'prefix_op') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 1) {
-        my $op_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        if (ref($op_node) eq 'PPI::Token::Cast' && $op_node->content() eq '&') {
-          my $fn_expr = $self->gen_node($kids->[1]);  # (p-get-coderef ...)
-          return "(p-goto-sub $fn_expr)";
-        }
-      }
+        defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
+      my $fn_expr = $self->gen_node($amp_id);
+      return "(p-goto-sub (p-get-coderef $fn_expr))";
     }
 
     if ($self->expr_o->is_internal_node_type($arg_node) &&
@@ -3117,6 +3129,11 @@ sub gen_funcall {
         my ($pkg, $name) = $self->_split_func_sym($1);
         return "(p-undef-sub \"$pkg\" \"$name\")";
       }
+    }
+    # undef &{expr} / undef &$cref — the coderef mention, not a call.
+    if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
+      my $inner = $self->gen_node($amp_id);
+      return "(p-undef (p-get-coderef $inner))";
     }
   }
 
@@ -3692,6 +3709,16 @@ sub gen_prefix_op {
       my $cl_func = $self->cl_name($func_name, 1, 1);
       return "(p-backslash-sub '$cl_func)";
     }
+    # \&{expr} / \&$var — the coderef itself, not a call: reach past the
+    # `&` prefix (which alone would lower to a call with @_) and take the
+    # coderef mention.  p-backslash passes functions through unchanged.
+    if (defined(my $amp_id = $self->_amp_cast_operand_id($operand_id))) {
+      my $saved = $self->lvalue_context;
+      $self->lvalue_context(1);
+      my $inner = $self->gen_node($amp_id);
+      $self->lvalue_context($saved);
+      return "(p-backslash (p-get-coderef $inner))";
+    }
     # \(LIST) — distribute \\ over each element. PExpr marks the operand node
     # with 'backslash_paren_list' when the source had explicit parens.
     if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
@@ -3845,11 +3872,13 @@ sub gen_prefix_op {
   elsif ($op eq '@' || $op eq '%' || $op eq '$') {
     $cl_op = "p-cast-$op";
   }
-  # & Cast: &{expr} or &$var - dynamic coderef by name
-  # \&{expr} becomes (p-backslash (p-get-coderef expr)), which returns the
-  # function directly (p-backslash passes through non-box values).
+  # & Cast: &{expr} / &$var with no argument list is a CALL passing the
+  # current @_ (same rule as the leaf-Symbol `&foo;` form).  The parents
+  # that want the coderef itself — \, defined, exists, undef, goto — never
+  # reach this branch: they intercept via _amp_cast_operand_id and lower
+  # the mention themselves ((p-get-coderef expr) and friends).
   elsif ($op eq '&') {
-    return "(p-get-coderef $operand)";
+    return "(p-funcall-ref $operand @_)";
   }
   # * Cast: *$var (typeglob ref) — use distinct marker so assignment can detect it.
   # When on LHS of =, becomes (p-glob-assign-dynamic ...).
@@ -3883,6 +3912,15 @@ sub gen_prefix_op_form {
         && $operand_node->content() =~ /^&(.+)$/) {
       my $cl_func = $self->cl_name($1, 1, 1);
       return ['p-backslash-sub', "'$cl_func"];
+    }
+    # \&{expr} / \&$var — the coderef itself, not a call (mirrors the text
+    # emitter's intercept above the `&`-prefix call lowering).
+    if (defined(my $amp_id = $self->_amp_cast_operand_id($operand_id))) {
+      my $saved = $self->lvalue_context;
+      $self->lvalue_context(1);
+      my $inner = $self->gen_node_form($amp_id);
+      $self->lvalue_context($saved);
+      return ['p-backslash', ['p-get-coderef', $inner]];
     }
     # \(LIST) — the distribute-over-elements family.  Mirrors the text
     # emitter branch for branch: single-scalar tree_val → (p-backslash …),
@@ -4011,9 +4049,11 @@ sub gen_prefix_op_form {
   if ($op eq '@' || $op eq '%' || $op eq '$') {
     return ["p-cast-$op", $operand];
   }
-  # & Cast: &{expr} / &$var — dynamic coderef by name.
+  # & Cast: &{expr} / &$var with no argument list — a CALL with the current
+  # @_ (the coderef-mention parents intercept before this, as in the text
+  # emitter).
   if ($op eq '&') {
-    return ['p-get-coderef', $operand];
+    return ['p-funcall-ref', $operand, '@_'];
   }
   # * Cast: *$var — typeglob ref (distinct marker for lvalue detection).
   if ($op eq '*') {

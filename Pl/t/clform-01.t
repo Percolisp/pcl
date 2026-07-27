@@ -156,8 +156,11 @@ print $x + $z;
 EOT
 
 like($do, qr/\(funcall \(lambda \(\)/,   'do { BLOCK } → (funcall (lambda () …))');
-like($do, qr/\(p-do \(p-get-coderef \$ref\)\)/,
-     'do &$cref → generic tail (p-do (p-get-coderef $ref))');
+# s316d: `&$ref` with no parens is a CALL with @_ (perl evaluates `do EXPR`'s
+# EXPR — calling the sub — then does do-FILE on the RESULT; verified vs perl).
+# The old pin `(p-do (p-get-coderef $ref))` never called the sub at all.
+like($do, qr/\(p-do \(p-funcall-ref \$ref \@_\)\)/,
+     'do &$cref → generic tail (p-do (p-funcall-ref $ref @_))');
 like($do, qr/\(let \(\(\*wantarray\* nil\)\) \(funcall \(lambda/,
      'do block gets its scalar-context wantarray bind');
 

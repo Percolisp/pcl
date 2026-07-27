@@ -28,7 +28,10 @@ sub run_perl {
     my ($code) = @_;
     # Add common 'use' statements for features we support
     my $full_code = 'use feature "state"; use Cwd; ' . $code;
-    my $output = `perl -e '$full_code' 2>&1`;
+    # Shell-escape embedded single quotes ('…' -> '\''), or any tick in the
+    # snippet (e.g. the Perl-4 package separator tests) truncates the -e arg.
+    (my $sh_code = $full_code) =~ s/'/'\\''/g;
+    my $output = `perl -e '$sh_code' 2>&1`;
     return $output;
 }
 
@@ -462,6 +465,53 @@ sub other { my $v = "inner"; print "shadow=$v\n"; }
 sub bump  { $v = $v . "+"; }
 show(); other(); bump(); show(); other();
 print "top=$v\n";
+');
+
+# &$ref / &{expr} with NO argument list is a CALL passing the current @_
+# (same rule as `&name;`), not a coderef fetch — s316d.  The mention
+# parents (\, defined, exists) keep the coderef itself.
+test_transpile("&\$ref / &{expr} with no parens call with current \@_ (s316d)", '
+sub abc { print "got(@_)\n" }
+my $r = \&abc;
+&$r;
+&{$r};
+&{"abc"};
+sub outer { &abc; &$r; }
+outer(1,2);
+print "d=", (defined &$r ? 1 : 0), (exists &{"abc"} ? 1 : 0),
+      (defined &{"nope"} ? 1 : 0), "\n";
+my $q = \&{"abc"};
+print "q=", $q->("z"), "\n";
+sub abc2 { return "R(@_)" }
+my $v = &{"abc2"};
+print "v=$v\n";
+');
+
+# Perl-4 tick package separator: sub declarations are normalised before PPI
+# (which cannot tokenize them at all), symbolic name strings at runtime.
+test_transpile("Perl-4 ' package separator: sub decl + symbolic call (s316d)", '
+no warnings;
+sub x\'y { print "tick(@_)\n"; return "ty" }
+&{"x\'y"};
+my $w = &{"x\'y"}("a");
+print "w=$w\n";
+print "d=", (defined &{"x\'y"} ? 1 : 0), "\n";
+');
+
+# Count-only tr (empty replacement, no /d) on a read-only value: perl
+# accepts it and just counts — no "Cannot modify" warning may leak.
+test_transpile("count-only tr on a literal counts without warning (s316d)", '
+print "abcba" =~ tr/ab//, "\n";
+my @w; local $SIG{__WARN__} = sub { push @w, @_ };
+print "x" =~ tr/x//, " w=", scalar(@w), "\n";
+');
+
+# Symbolic call of a sub declared with a 3-segment qualified name: the
+# resolver must use the multi-segment package rule (|aa::bb| keeps case).
+test_transpile("symbolic call of 3-segment qualified sub name (s316d)", '
+sub aa::bb::cc { print "seg3(@_)\n" }
+&{"aa::bb::cc"};
+&{"aa::bb::cc"}("k");
 ');
 
 done_testing();

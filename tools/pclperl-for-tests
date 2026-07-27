@@ -10,7 +10,8 @@
 # it supports exactly the switch set the runperl call-site census uses.
 #
 # Supported: -e/-E CODE (repeatable), -I DIR, -M/-m MODULE[=args], -n, -p,
-# -a, -l[NNN], -0[NNN], -c (transpile-only check), -x, clustered bundles
+# -a, -F pattern (implies -a; -a implies -n, perl 5.20 semantics),
+# -l[NNN], -0[NNN], -c (transpile-only check), -x, clustered bundles
 # (-wl, -lXMfeature=:all), `--`, script file or stdin, trailing @ARGV.
 # Accepted and IGNORED (children exercising them fail their assertions but
 # must not crash the harness): -w/-W/-X/-s/-T/-t/-u/-U/-v/-V, -d[:Module]
@@ -36,7 +37,7 @@ my @args = @ARGV;
 unshift @args, split(' ', $ENV{PERL5OPT}) if defined $ENV{PERL5OPT} && length $ENV{PERL5OPT};
 
 my (@code, @incs, @uses, @rest);
-my ($opt_n, $opt_p, $opt_a, $opt_l, $opt_c, $opt_x, $l_arg, $zero_arg);
+my ($opt_n, $opt_p, $opt_a, $opt_l, $opt_c, $opt_x, $opt_F, $l_arg, $zero_arg);
 
 sub _q { my $s = shift // ""; $s =~ s/'/\\'/g; "'$s'" }
 
@@ -63,6 +64,8 @@ while (@args) {
       ($zero_arg) = $a =~ /^([0-7]*)/; $a =~ s/^[0-7]*//;
     } elsif ($c eq 'l') {
       $opt_l = 1; ($l_arg) = $a =~ /^([0-7]+)/; $a =~ s/^[0-7]+//;
+    } elsif ($c eq 'F') {
+      $opt_F = length($a) ? $a : shift(@args); $a = '';
     } elsif ($c eq 'n') { $opt_n = 1 }
       elsif ($c eq 'p') { $opt_p = 1 }
       elsif ($c eq 'a') { $opt_a = 1 }
@@ -110,8 +113,23 @@ if ($opt_l) {
     ? sprintf('$\ = chr(0%s);', $l_arg)
     : '$\ = $/;';
 }
+# perl 5.20+: -F implies -a, and -a implies -n (perl #116190).  A repeated
+# -F keeps the LAST pattern, like perl.
+$opt_a = 1 if defined $opt_F;
+$opt_n = 1 if $opt_a && !$opt_p;
 if ($opt_n || $opt_p) {
-  my $head = ($opt_l ? "chomp; " : "") . ($opt_a ? 'our @F = split; ' : "");
+  # -F pattern may come wrapped in //, "" or '' (perlrun); strip one layer,
+  # then use it as the split regex.
+  my $split_code = 'our @F = split; ';
+  if (defined $opt_F) {
+    my $pat = $opt_F;
+    if ($pat =~ m{^/(.*)/$}s || $pat =~ /^"(.*)"$/s || $pat =~ /^'(.*)'$/s) {
+      $pat = $1;
+    }
+    $pat =~ s{/}{\\/}g;
+    $split_code = "our \@F = split(/$pat/); ";
+  }
+  my $head = ($opt_l ? "chomp; " : "") . ($opt_a ? $split_code : "");
   my $cont = $opt_p ? " continue { print }" : "";
   $src = "LINE: while (<>) { $head\n$src\n}$cont";
 }

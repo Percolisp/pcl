@@ -92,6 +92,7 @@ mro/recursion_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant
 mro/recursion_dfs_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
 op/current_sub.t	not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)
 op/cond.t	not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)
+re/reg_eval.t	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t
 re/pat_re_eval.t	not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
 io/msg.t	not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
 io/sem.t	not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
