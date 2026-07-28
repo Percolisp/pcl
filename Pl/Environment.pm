@@ -65,6 +65,15 @@ has prototypes => (
     default => sub { _builtin_prototypes() },
 );
 
+# Names in the module's @EXPORT/@EXPORT_OK (set only on the throwaway env a
+# _extract_module_prototypes parse fills in).  Sub EXISTENCE is parse data:
+# a bareword before a comma is a call only for a KNOWN sub, so the caller's
+# merge imports exported plain subs even when they carry no prototype.
+has export_names => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 # Built-in function prototypes for functions that take bareword filehandles.
 # The '*' prototype means "accepts bareword as filehandle".
 # NOTE: We don't set min_params here - that's handled by Config.pm's known_no_of_params.

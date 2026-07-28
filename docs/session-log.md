@@ -4,6 +4,32 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316m (2026-07-29, Fable) — #25: op/signatures.t fixture unblocked — updir mirror + exported-sub EXISTENCE merge (gen v2-80).
+
+- **op/signatures.t 800→807 pass, crash gone** (was truncating at the
+  `catfile(updir,'regen','keywords.pl')` block).  Two independent causes:
+  - **Suite harness**: the shadow t/'s PARENT had no perl-source-root
+    entries, so `catfile(updir, …)` reads failed.  run-perl-suite.pl now
+    mirrors the source root next to the shadow (symlink everything except
+    `t`), so any `updir`-relative fixture read works (../regen, ../MANIFEST).
+  - **Bareword-before-comma = string for IMPORTED subs**: `updir` in
+    `catfile(updir, "x")` emitted the string "updir".  PExpr's binary-op
+    bareword rule is right — a bareword before `,` is a call only for a
+    KNOWN sub — but two gates hid the knowledge: (a) `File::` was in the
+    `_extract_module_prototypes` skip list (File::Spec[::Functions] now
+    exempted — sub existence is data, same lesson as List::Util s244);
+    (b) `_merge_module_prototypes` only merged prototypes "affecting
+    codegen" — a plain exported sub never merged.  The module env now
+    records `@EXPORT`/`@EXPORT_OK` names (new `export_names` attr, scanned
+    from the module doc's qw lists) and the merge imports exported plain
+    subs for their existence.
+- signatures.t's remaining 439 suite rows are TAP-number drift + genuine
+  diffs — the NEXT tap-diff triage item.  Corpus: 1/111 differs
+  (signatures.t, exactly the pl-updir call).  Gate 123/4423 green; spot
+  sweeps pack/signatures/sub 0 NEW.  Artifacts regenerated at v2-80.
+
+---
+
 ## Session 316l (2026-07-29, Fable) — #25 task #130: v-string family (op/ver.t 35→47) + s/// replacement dq-escapes + $| write magic (gen v2-79).
 
 - **op/ver.t 35→47 pass** (was DIFF with a crash at t42).  Four fixes:

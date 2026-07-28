@@ -213,6 +213,14 @@ for my $stub (qw(test.pl charset_tools.pl loc_tools.pl)) {
   unlink "$shadow/$stub";
   symlink $src, "$shadow/$stub" or die "symlink $src: $!\n";
 }
+# The shadow's PARENT mirrors the perl source root (everything except t/,
+# which IS the shadow) so `catfile(updir, ...)` fixture reads work — e.g.
+# op/signatures.t reads ../regen/keywords.pl, porting tests read ../MANIFEST.
+for my $e (glob "$tdir/../*") {
+  my $base = basename($e);
+  next if $base eq 't';
+  symlink $e, "$tmpdir/$base";   # EEXIST is fine (tempdir is fresh per run)
+}
 
 # Fresh per-test failure log each run (mirrors the sweep's .faillog).
 system("rm -rf \Q$faillog\E");

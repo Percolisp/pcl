@@ -7594,10 +7594,14 @@ sub _extract_module_prototypes {
   # Skip known core modules that don't have prototypes affecting codegen.
   # (List::Util is intentionally NOT skipped: its shim declares block
   # prototypes — first/any/reduce/pair* (&@) — that the block-form parser
-  # needs, so its prototypes must be extracted from lib/List/Util.pm.)
+  # needs, so its prototypes must be extracted from lib/List/Util.pm.
+  # File::Spec[::Functions] is NOT skipped either: sub-EXISTENCE is data too —
+  # a bareword before a comma is a call only for a KNOWN sub, so skipping the
+  # shim made `catfile(updir, ...)` read updir as the string "updir"
+  # (op/signatures.t keywords block, s316l — same lesson as List::Util.)
   if ($module =~ /^(Carp|Scalar::Util|Time::HiRes|Cwd|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
-                    utf8|bytes|overload|mro|B::|POSIX|File::|IO::|Data::Dumper)/x) {
+                    utf8|bytes|overload|mro|B::|POSIX|File::(?!Spec)|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;
   }
   # Skip the heavy Test2 stack and Test:: internals — EXCEPT Test::More, whose
@@ -7639,6 +7643,20 @@ sub _extract_module_prototypes {
     warn "Failed to extract prototypes from $module: $@";
     return $cache->{$module} = undef;
   }
+
+  # Record @EXPORT/@EXPORT_OK names: _merge_module_prototypes imports exported
+  # plain subs for their EXISTENCE (a bareword before a comma is a call only
+  # for a known sub — `catfile(updir, ...)`).  qw() lists only: that is the
+  # shape every shim (and nearly every real module) uses.
+  my %exported;
+  for my $st (@{ $doc->find('PPI::Statement::Variable') || [] }) {
+    my $content = $st->content;
+    next if $content !~ /\@EXPORT(?:_OK)?\b/;
+    while ($content =~ /qw\s*[\(\[\{<]\s*([^)\]\}>]*)/g) {
+      $exported{$_} = 1 for split ' ', $1;
+    }
+  }
+  $module_env->export_names(\%exported);
 
   return $cache->{$module} = $module_env;
 }
@@ -7756,6 +7774,10 @@ sub _merge_module_prototypes {
         }
       }
     }
+
+    # Exported plain sub: its EXISTENCE is the data — without it a bareword
+    # use before a comma (`catfile(updir, ...)`) reads as a string.
+    $needs_import = 1 if $module_env->export_names->{$name};
 
     if ($needs_import) {
       $self->environment->add_prototype($name, $proto);
