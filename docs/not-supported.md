@@ -215,6 +215,28 @@ diverge from Perl in several respects:
 `@chars` loop generating `start=N end=N` tests, the `pack('U',0)` utf8-NUL
 tests) are commented out.
 
+### `use bytes` — byte view of upgraded strings
+
+Perl's `use bytes` makes string ops (including `sprintf %vd`) see the UTF-8
+*bytes* of characters above 255 (`sprintf "%vd", v1.22.333.4444` under the
+pragma yields `1.22.197.141.225.133.156` — the 333 and 4444 expand to their
+UTF-8 byte sequences).  PCL strings are SBCL character vectors with no
+byte-view; the pragma is a no-op, so such characters format as their code
+points.  Affects `op/ver.t` tests 21/23/25 (the `use bytes` block).
+
+### `use vN` does not toggle default warnings
+
+Perl ≥ 5.35 as a `use VERSION` target enables warnings by default in that
+lexical scope (`op/ver.t` test 54).  PCL treats `use v5.x` purely as a
+version check.
+
+### Control-character glob names ("Mordor" v-strings)
+
+`*{"\3"} = *DATA; readline v3` — aliasing a glob under a control-character
+name and reading through a v-string handle designator (`op/ver.t` test 52)
+exercises symbolic-glob machinery PCL does not model for non-identifier
+names.
+
 ---
 
 ## `$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation

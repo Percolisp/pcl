@@ -221,6 +221,7 @@
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if #:p-local-dot
+   #:p-local-pipe
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
@@ -795,8 +796,23 @@
   "Perl $[ - array base.  Always 0 since perl 5.30 removed assigning to it;
    inert here so reads don't crash (uni/variables.t).")
 
+;;; A scalar holding a v-string literal (v1.2.3) remembers its v-string-ness:
+;;; ref \$v is "VSTRING" until the scalar is overwritten (s///, y/// and plain
+;;; assignment all flatten it, because the replacement value they store is a
+;;; plain string — no explicit clearing needed).  Copying propagates it, as in
+;;; perl.  S is the character payload: what the value stringifies as and what
+;;; sprintf %vd walks.  DISPLAY overrides stringification only — $^V is a
+;;; version object in perl, printing "v5.30.0" while %vd walks the payload.
+(defstruct p-vstring
+  (s "" :type string)
+  (display nil))
+
 ;;; Perl version ($^V) - we report as PCL
-(defvar |$^V| "v5.30.0" "Perl version (compatibility)")
+(defvar |$^V|
+  (make-p-vstring :s (coerce (list (code-char 5) (code-char 30) (code-char 0))
+                             'string)
+                  :display "v5.30.0")
+  "Perl version (compatibility).  Payload 5.30.0 matches $] = 5.030000.")
 
 ;;; Perl executable path ($^X) - point to perl so spawned subprocesses run Perl
 (defvar |$^X|
@@ -1058,8 +1074,24 @@
 (defvar |$\\| (make-p-box "") "Output record separator")
 ;;; List separator ($")
 (defvar |$"| (make-p-box " ") "List separator for array interpolation")
-;;; Output autoflush ($|)
-(defvar |$\|| (make-p-box 0) "Output autoflush flag")
+;;; Output autoflush ($|) — magic: every write clamps to 1/0 by truthiness
+;;; (assigning 5 stores 1; --$| toggles: 1-1=0 stores 0, 0-1=-1 is true so it
+;;; stores 1 — op/ver.t 48).  The value lives in the dynamic *p-autoflush* so
+;;; `local $|` (p-local-pipe) is a plain rebinding that keeps the magic box in
+;;; place, mirroring $.'s *p-last-read-handle* model.
+(defvar *p-autoflush* 0 "The value of $| (always 0 or 1).")
+(defvar |$\|| (make-p-box (make-p-magic-cell
+                           :getter (lambda () *p-autoflush*)
+                           :setter (lambda (new)
+                                     (setf *p-autoflush*
+                                           (if (p-true-p new) 1 0)))))
+  "Output autoflush flag (magic — writes clamp to 0/1)")
+(defmacro p-local-pipe (&body body)
+  "Localize $| (Perl `local $|`): rebind *p-autoflush* to the reset value 0
+   (local's undef, clamped); the magic box stays in place so the 0/1 write
+   clamp still applies inside the scope, and the old value reverts on exit."
+  `(let ((*p-autoflush* 0))
+     ,@body))
 ;;; Subscript separator ($;)
 (defvar |$;| (make-p-box (string (code-char #x1C))) "Subscript separator (default SUBSEP)")
 ;;; Output field separator ($,)
@@ -1637,6 +1669,7 @@
                    ((null v) 0)
                    ((eq v t) 1)  ; CL's T from comparisons - Perl true is 1
                    ((stringp v) (parse-perl-number v))
+                   ((p-vstring-p v) (parse-perl-number (p-vstring-s v)))
                    ((p-box-p v) (object-address v))  ; reference/blessed scalar ref: address
                    ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
                    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
@@ -1665,6 +1698,7 @@
     ((stringp v) v)
     ((eq v *p-undef*) "")
     ((null v) "")
+    ((p-vstring-p v) (or (p-vstring-display v) (p-vstring-s v)))
     ((integerp v) (write-to-string v))
     ((floatp v)
      ;; Format floats like Perl's %.15g (Gconvert)
@@ -1744,6 +1778,9 @@
     ((eq v t) "1")
     ;; Super-Unicode character (code > U+10FFFF) — no CL char representation; use U+FFFD
     ((p-superchar-p v) (string #\REPLACEMENT_CHARACTER))
+    ;; V-string: the character payload, unless a version object ($^V) carries
+    ;; a display string ("v5.30.0").
+    ((p-vstring-p v) (or (p-vstring-display v) (p-vstring-s v)))
     (t (format nil "~A" v))))
 
 (defun box-sv (box)
@@ -1921,6 +1958,7 @@
           ((and (numberp v) (not (%pcl-nan-p v)) (zerop v)) nil)
           ((and (stringp v) (string= v "")) nil)
           ((and (stringp v) (string= v "0")) nil)
+          ((p-vstring-p v) (p-true-p (p-vstring-s v)))  ; v48 = "0" is false
           (t t)))
       ;; Raw value: bare aggregate → count; scalar → normal truthiness.
       (cond
@@ -1929,6 +1967,7 @@
         ((and (numberp val) (not (%pcl-nan-p val)) (zerop val)) nil)
         ((and (stringp val) (string= val "")) nil)
         ((and (stringp val) (string= val "0")) nil)
+        ((p-vstring-p val) (p-true-p (p-vstring-s val)))
         ;; bare @array / %hash in boolean context: true iff non-empty
         ((and (vectorp val) (not (stringp val))) (> (length val) 0))
         ((hash-table-p val) (> (%p-hash-user-count val) 0))
@@ -2202,6 +2241,7 @@
     ;; CL's T from comparison operators - Perl true numifies to 1
     ((eq val t) 1)
     ((stringp val) (parse-perl-number val))
+    ((p-vstring-p val) (parse-perl-number (p-vstring-s val)))
     ;; Adjustable vector = Perl @array in scalar context → array length
     ((and (vectorp val) (adjustable-array-p val)) (length val))
     ;; Perl 5.26+: plain %hash in numeric context → key count
@@ -2676,15 +2716,18 @@
            (or pos -1))))))
 
 (defun p-version-string (&rest code-points)
-  "Build a Perl version string (v1.20.300) from integer code points.
-   Each code point becomes a character in the resulting string."
-  (coerce (mapcar (lambda (n)
-                    (let ((c (truncate (if (typep n 'number) n (to-number n)))))
-                      (if (or (< c 0) (> c #x10FFFF))
-                          #\REPLACEMENT_CHARACTER
-                          (code-char c))))
-                  code-points)
-          'string))
+  "Build a Perl v-string (v1.20.300) from integer code points.
+   Each code point becomes a character; the result is a p-vstring struct so a
+   scalar assigned from it answers ref \\$v = \"VSTRING\" until overwritten
+   (to-string / to-number / truthiness all read the payload)."
+  (make-p-vstring
+   :s (coerce (mapcar (lambda (n)
+                        (let ((c (truncate (if (typep n 'number) n (to-number n)))))
+                          (if (or (< c 0) (> c #x10FFFF))
+                              #\REPLACEMENT_CHARACTER
+                              (code-char c))))
+                      code-points)
+              'string)))
 
 ;;; Represents a Perl string whose single character has a code point > U+10FFFF.
 ;;; CL characters are limited to 0–U+10FFFF; this struct carries the raw integer
@@ -3330,7 +3373,10 @@
   "Format VAL (a string / v-string) as a vector: each character's ordinal is
    formatted with the given conversion and the results joined by SEP.
    Implements Perl's %vd / %*vd family."
-  (let ((s (to-string val)))
+  ;; A version object ($^V) stringifies via its display form ("v5.30.0"), but
+  ;; %vd walks the character PAYLOAD — pull it out before to-string.
+  (let* ((uv (unbox val))
+         (s (if (p-vstring-p uv) (p-vstring-s uv) (to-string val))))
     (if (zerop (length s))
         ""
         (with-output-to-string (out)
@@ -10292,7 +10338,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-78"
+(defparameter *pcl-cache-generation* "v2-79"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11863,6 +11909,12 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (and (p-magic-cell-p rv)
                        (eq (p-magic-cell-kind rv) :lvalue)))
                 "LVALUE")
+               ;; Referent scalar holds a v-string literal → "VSTRING" (op/ver.t).
+               ;; Same referent resolution as the LVALUE arm above.
+               ((let* ((referent (if (p-box-is-ref val) inner inner2))
+                       (rv (and (p-box-p referent) (p-box-value referent))))
+                  (p-vstring-p rv))
+                "VSTRING")
                ;; Direct aggregate referent (raw value held by the pointed-at
                ;; scalar): \$qr → REGEXP, \$aref → ARRAY, \$href → HASH. These
                ;; check inner2 (= the referent's held value for a direct `\$x`).

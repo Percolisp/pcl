@@ -227,4 +227,51 @@ my $none = sub () { 7 };
 print $pair->(1,2), " ", $blk->(sub { $_[0]*2 }, 3, 4), " ", $none->(), "\n";
 ');
 
+# V-string family (op/ver.t, s316l): underscores are digit separators;
+# a scalar holding a v-string answers ref \$v = "VSTRING" until any write
+# flattens it (s///, y///); dotless vNN is a bareword in autoquote position
+# (fat comma, hash subscript) and a CALL when such a sub is declared (the
+# "poetry optimization"), but dotted forms always engage v-stringness;
+# v48 is the string "0", which is FALSE.
+test_transpile("v-string literals: underscores, VSTRING ref, flatten, autoquote, poetry", '
+sub v77 { "ok" }
+my $x = v77;
+my $v = v1.2_3;
+print sprintf("%vd", $v), " ", ref(\$v), " ", $x, "\n";
+my %h = (v65 => 42);
+print( (exists $h{v65} ? "y" : "n"), (v48 ? "t" : "f") );
+%h = (v65.66 => 1);
+print exists $h{chr(65).chr(66)} ? "y" : "n";
+%h = (65.66.67 => 1);
+print( (exists $h{chr(65).chr(66).chr(67)} ? "y" : "n"), "\n" );
+$v = 1.2.3;
+print ref(\$v), "\n";
+$v =~ s/\x01/\x01/;
+print ref(\$v), " ", sprintf("%vd", $v), "\n";
+my $t = v102;
+$t =~ y/f/g/;
+print ref(\$t), " $t\n";
+');
+
+# $| write magic (op/ver.t 48): every write clamps to 0/1 by truthiness,
+# so --$| toggles; local $| resets to 0 and keeps the clamp in scope.
+test_transpile("\$| clamps writes to 0/1; local keeps the magic", '
+$| = 1; --$|; --$|; print "p:$|\n";
+$| = 5;  print "q:$|\n";
+{ local $|; print "r:$|\n"; $| = 2; print "s:$|\n"; }
+print "t:$|\n";
+');
+
+# s/// replacement is double-quoted context: \n / \x41 / \x{42} become
+# characters at transpile time; \1 stays a backref; \\ is one literal
+# backslash (was emitted raw, so PCL printed the escape text verbatim).
+test_transpile("s/// replacement processes dq escapes", '
+my $s = "ab"; $s =~ s/a/\n/;      print join(",", map { ord } split //, $s), "\n";
+$s = "cd";    $s =~ s/c/\x41/;    print $s, "\n";
+$s = "ef";    $s =~ s/e/\x{42}/;  print $s, "\n";
+$s = "gh";    $s =~ s/(g)/<$1\t>/; print $s, "\n";
+$s = "ij";    $s =~ s/(i)/\1\1/;  print $s, "\n";
+$s = "kl";    $s =~ s/k/\\\\/;    print $s, "\n";
+');
+
 done_testing();

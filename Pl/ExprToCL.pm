@@ -636,9 +636,10 @@ sub gen_leaf_form {
     my $num = $node->content();
 
     # Version strings: v1.20.300 / 256.65.258 → (p-version-string N N N).
-    if ($ref =~ /::Version$/ || $num =~ /^v(\d[\d.]*)$/) {
+    if ($ref =~ /::Version$/ || $num =~ /^v(\d[\d._]*)$/) {
       my $vpart = $num;
       $vpart =~ s/^v//;
+      $vpart =~ s/_//g;   # v1.2_3 == v1.23: underscores are digit separators
       return ['p-version-string', split /\./, $vpart];
     }
     # Radix literals → CL #x / #b / #o (optional leading - → (- …)).
@@ -5720,10 +5721,57 @@ sub gen_substitution_form {
             @mod_strs];
   }
 
-  # Normal case: escape replacement for CL string literal (perl-to-ppcre-replacement handles $1..$9)
-  (my $s = $subst) =~ s/\\/\\\\/g;
+  # Normal case: the replacement is double-quoted context, so its escapes
+  # (\n, \t, \x41, \x{263a}, …) are processed HERE, at transpile time — the
+  # runtime only rewrites $N backrefs for cl-ppcre.  \1-\9 are kept as $1-$9
+  # (perl reads both as backrefs in a replacement), and literal backslashes
+  # are doubled because cl-ppcre's replacement parser treats \ specially.
+  my $s = _unescape_subst_replacement($subst);
+  $s =~ s/\\/\\\\/g;    # CL string literal escaping
   $s =~ s/"/\\"/g;
   return ['p-subst', $match_form, qq{"$s"}, @mod_strs];
+}
+
+# One dq-escape token starting at the backslash at position I of STR — the
+# same alternation StringInterpolation::unescape_string feeds to
+# _process_dq_escape.  Returns (processed-characters, source-length).
+sub _take_dq_escape {
+  my ($str, $i) = @_;
+  my $rest = substr($str, $i + 1);
+  if ($rest =~ /^(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)/s) {
+    my $tok = $1;
+    return (_process_dq_escape($tok), 1 + length($tok));
+  }
+  return ('\\', 1);   # lone trailing backslash
+}
+
+# Escape-process a NON-interpolated s/// replacement (dq semantics).  \1-\9
+# become $1-$9 so the runtime's $N → ppcre-\N rewrite picks them up; every
+# literal backslash the escapes produce is doubled so cl-ppcre's replacement
+# parser (where \ introduces a register) reads it as a literal.
+sub _unescape_subst_replacement {
+  my ($str) = @_;
+  my $out = '';
+  my $i = 0;
+  while ($i < length($str)) {
+    my $c = substr($str, $i, 1);
+    if ($c eq '\\') {
+      my $next = $i + 1 < length($str) ? substr($str, $i + 1, 1) : '';
+      if ($next =~ /[1-9]/) {
+        $out .= "\$$next";
+        $i += 2;
+      } else {
+        my ($chars, $len) = _take_dq_escape($str, $i);
+        $chars =~ s/\\/\\\\/g;
+        $out .= $chars;
+        $i += $len;
+      }
+    } else {
+      $out .= $c;
+      $i++;
+    }
+  }
+  return $out;
 }
 
 # Build a CL expression that evaluates to the interpolated replacement string.
@@ -5747,8 +5795,11 @@ sub _gen_interp_replacement {
         push @parts, "\$$next";
         $i += 2;
       } else {
-        $literal .= substr($str, $i, 2);
-        $i += 2;
+        # dq escape (\n, \x41, \x{263a}, …) — process to its characters; the
+        # lambda's result is spliced in verbatim, so no cl-ppcre doubling here.
+        my ($chars, $len) = _take_dq_escape($str, $i);
+        $literal .= $chars;
+        $i += $len;
       }
     } elsif ($c eq '$' && $i+1 < length($str) && substr($str, $i+1, 1) =~ /[1-9]/) {
       # $1..$9 backreference — available as CL dynamic variable inside the lambda

@@ -335,8 +335,61 @@ sub _ppi_parse {
     my $redo  = PPI::Document->new(\$fixed);
     $doc = $redo if $redo;
   }
+  # AFTER any serialize+reparse: this pass swaps token classes in place with
+  # the text unchanged, so a reparse would just re-create the Version tokens.
+  _reclassify_bare_vwords($doc) if $doc;
   _merge_unicode_symbols($doc) if $doc;
   return $doc;
+}
+
+# Perl engages v-stringness for a DOTLESS `vNN` only in expression position
+# with no sub of that name declared (op/ver.t): `v65 => …` and `$h{v65}`
+# autoquote to the plain string "v65" ("v-stringness is not engaged for vX"),
+# and a declared `sub v77` wins over the v-string reading — `$x = v77` calls
+# it (the "poetry optimization").  PPI tokenizes ALL of these as
+# Token::Number::Version, so reclassify the affected tokens as ordinary Words
+# and let the existing bareword machinery (fat-comma autoquote, subscript
+# autoquote, no-parens sub call) decide the meaning.  Dotted forms
+# (v1.2 / 1.2.3) always stay v-strings — even when a sub of the leading name
+# exists — and `use`/`require` version statements are never touched.
+sub _reclassify_bare_vwords {
+  my ($doc) = @_;
+  my $verts = $doc->find('PPI::Token::Number::Version') || [];
+  return if !@$verts;
+  my %subs;
+  for my $s (@{ $doc->find('PPI::Statement::Sub') || [] }) {
+    my $n = $s->name;
+    $subs{$n} = 1 if defined $n;
+  }
+  for my $tok (@$verts) {
+    my $c = $tok->content;
+    next if $c !~ /^v\d+$/;   # dotless vNN only
+    my $stmt = $tok->statement;
+    next if $stmt && $stmt->isa('PPI::Statement::Include');
+    my $as_word = 0;
+    my $next = $tok->snext_sibling;
+    if ($next && $next->isa('PPI::Token::Operator') && $next->content eq '=>') {
+      $as_word = 1;   # fat-comma LHS autoquotes any bareword
+    }
+    else {
+      my $parent = $tok->parent;
+      my $gp = $parent && $parent->parent;
+      if ($parent && $parent->isa('PPI::Statement::Expression')
+          && $gp && $gp->isa('PPI::Structure::Subscript')
+          && $gp->start && $gp->start->content eq '{'
+          && scalar(grep { $_->significant } $parent->children) == 1) {
+        $as_word = 1;   # single-bareword hash subscript autoquotes
+      }
+      elsif ($subs{$c}) {
+        $as_word = 1;   # declared sub wins over the v-string reading
+      }
+    }
+    next if !$as_word;
+    my $word = PPI::Token::Word->new($c);
+    $tok->insert_before($word);
+    $tok->delete;
+  }
+  return;
 }
 
 
@@ -3434,6 +3487,17 @@ sub _process_local_declaration {
   # wraps the rest of the block; closed by _local_let_depth at block end.
   if (@vars == 1 && ($vars[0] eq '$.' || $vars[0] eq '|$.|') && $init_idx < 0) {
     $self->_emit("(p-local-dot");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+    return;
+  }
+
+  # local $| — same shape as $.: the autoflush value is magic (writes clamp to
+  # 0/1), so localizing must rebind the underlying dynamic value, not shadow
+  # the box (which would drop the clamp inside the scope).
+  if (@vars == 1 && ($vars[0] eq '$|' || $vars[0] eq '|$\\||') && $init_idx < 0) {
+    $self->_emit("(p-local-pipe");
     $self->indent_level($self->indent_level + 1);
     $self->{_local_let_depth} //= 0;
     $self->{_local_let_depth}++;

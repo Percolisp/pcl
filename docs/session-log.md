@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316l (2026-07-29, Fable) — #25 task #130: v-string family (op/ver.t 35→47) + s/// replacement dq-escapes + $| write magic (gen v2-79).
+
+- **op/ver.t 35→47 pass** (was DIFF with a crash at t42).  Four fixes:
+  - `v1.2_3` crashed (underscores emitted raw → unbound CL symbol `|2_3|`).
+    ExprToCL now strips `_` from v-string components (digit separators).
+  - **`ref \$v` = "VSTRING"**: `p-version-string` returns a `p-vstring`
+    struct (payload + optional display) flowing through the box model like
+    `p-superchar`; branches added to to-string / stringify-value / box-nv /
+    %to-number-raw / %p-true-p-slow (v48 = "0" is FALSE) / p-ref.
+    Flattening by s///·y///·assignment is automatic — the write stores a
+    plain string.  Copying propagates v-string-ness, as in perl.
+  - **$^V is a version object**: payload chr(5).chr(30).chr(0) with display
+    "v5.30.0" — `sprintf "%vd", $^V` walks the payload ("5.30.0", consistent
+    with $] = 5.030000, t40/41) while `"$^V"` still prints "v5.30.0"
+    (sprintf-vector unwraps the payload before to-string).
+  - **Dotless `vNN` reclassified** (`_reclassify_bare_vwords`, in `_ppi_parse`
+    AFTER the serialize+reparse — the text is unchanged, so a reparse would
+    re-create the Version token): fat-comma LHS and single-bareword hash
+    subscripts autoquote ("v-stringness is not engaged for vX"), and a
+    declared `sub v77` wins in expression position (poetry optimization).
+    Dotted forms always stay v-strings; use/require statements untouched.
+- **s/// replacement never processed dq escapes** (found via the ver.t
+  flatten probe): `s/a/\n/` emitted the raw two characters, so PCL inserted
+  literal `\n` TEXT — in BOTH the plain and interpolated paths, and the
+  interp path also split `\x{263a}` after two chars.  Replacements are
+  dq-context: `_unescape_subst_replacement` processes escapes at transpile
+  time (`\1-\9` → `$1-$9` for the runtime's ppcre rewrite; literal
+  backslashes doubled for cl-ppcre's replacement parser), and the interp
+  path's literal chunks route through the shared `_take_dq_escape`.
+  Corpus: only eval.t + magic.t differ, both exactly this (real newline in
+  the replacement operand).  pack.t 58 fails (~31 BETTER than baseline —
+  it normalizes with escape replacements; re-bless next full sweep).
+- **$| write magic** (t48): every write clamps to 0/1 by truthiness
+  (--$| toggles), value lives in dynamic `*p-autoflush*` behind a
+  p-magic-cell, `local $|` → `p-local-pipe` (mirrors `$.`/p-local-dot).
+- Residue blessed in `docs/perl-suite-expected.tsv` + 3 new
+  `docs/not-supported.md` sections: t21/23/25 `use bytes` byte view,
+  t52 control-char glob ("Mordor"), t54 `use v5.035` default warnings.
+  t51 = OPEN task #131 (general defelem gap: `sub {$_[0]=3}->($h{k})`
+  loses the write — plain values too, not just vstrings).
+- Gate 123 files / 4423 green (3 new in transpile-test-07.t: v-string
+  family, $| clamp, replacement escapes).  Artifacts pack/mro regenerated
+  at v2-79 (mro byte-identical).  Spot sweeps pack/eval/magic/substr:
+  0 NEW vs fail-baseline.
+
+---
+
 ## Session 316k (2026-07-29, Fable) — #25 task #129: anonymous-sub SIGNATURES desugared at the shared PPI entry (gen v2-78).
 
 - **`my $c = sub ($x, $y = 3, @rest) {…}` never bound anything.** With the
