@@ -3940,7 +3940,11 @@ sub op_info {
 
   my $operands  = $self->precedences();
 
-  return $operands->{lc $name};
+  # Exact match first: filetest operators are case-SENSITIVE (-M/-A have no
+  # lowercase twin, and -C/-T/-S/... only worked because the lc lookup hit
+  # the OTHER filetest's identical prec-52 entry).  lc stays as the fallback
+  # for whatever case-insensitive word-operator lookups relied on it.
+  return $operands->{$name} // $operands->{lc $name};
 }
 
 sub is_op_prefix {
@@ -3950,7 +3954,8 @@ sub is_op_prefix {
   my $name      = $self->is_token_operator($op) // '';
   my $prefix    = $self->prefix();
 
-  return $prefix->{lc $name};
+  # Exact-first for the same case-sensitivity reason as op_info above.
+  return $prefix->{$name} // $prefix->{lc $name};
 }
 
 # After "print $var TOKEN", determine if TOKEN starts a new term

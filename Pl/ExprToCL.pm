@@ -143,6 +143,7 @@ sub _build_form_handlers {
 # These get the p- prefix in generated code; user-defined subs get p-.
 my %RUNTIME_NAMES = map { $_ => 1 } qw(
   ! != !~ $ % %= && * ** **= *= + - -d -e -f -r -s -w -x -z . .. ... .= / // //= /= < << <<=
+  -l -p -S -b -c -t -u -g -k -o -O -R -W -X -T -B -M -A -C
   <= <=> == =~ > >= >> >>= abs and and-assign aref aref-box aref-deref array-= array-init
   array-last-index aslice atan2 backslash backtick binmode bit-and bit-and= bit-not bit-or
   bit-or= bit-xor bit-xor= bless box box-p box-value break caller can cast-$ cast-% cast-@
@@ -305,6 +306,8 @@ my %SPECIAL_VARS = (
   '$^M' => '|$^M|',   # emergency memory pool
   '$^R' => '|$^R|',   # last (?{...}) result
   '$^N' => '|$^N|',   # most-recently-closed participating capture group
+  '$^W' => '|$^W|',   # global warnings flag (inert 0)
+  '$['  => '|$[|',    # array base (always 0 since 5.30; inert)
 );
 
 # Generate CL operator/function name from Perl name

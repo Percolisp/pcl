@@ -95,4 +95,23 @@ eval { my @range = 1..($max_iv - 1); };
 print "err:", (($@ =~ /panic: memory wrap|Out of memory/) ? "wrap-family" : "other:$@"), "\n";
 ');
 
+# #25 suite family: the full filetest set (-l/-p/-u/-g/-k/-o/-O/-R/-W/-X/
+# -T/-B/-M/-A/-C/-t...), plus the op_info case-sensitivity fix: the
+# precedence lookup lowercased operators, so -M/-A (no lowercase twin in
+# the table) fell through as parse errors while -C/-T/-S only worked by
+# landing on the OTHER filetest's identical entry.
+test_transpile("filetest family incl. -M/-A case-sensitive lookup", '
+my $d = "/tmp/pcl-ft-$$";
+mkdir $d;
+open my $fh, ">", "$d/f.txt"; print $fh "hello\n"; close $fh;
+symlink("f.txt", "$d/ln");
+print "l:", (-l "$d/ln" ? 1 : 0), (-l "$d/f.txt" ? 1 : 0), "\n";
+print "TB:", (-T "$d/f.txt" ? 1 : 0), (-B "$d/f.txt" ? 1 : 0), "\n";
+print "own:", (-o "$d/f.txt" ? 1 : 0), (-O "$d/f.txt" ? 1 : 0), "\n";
+print "age:", int(-M "$d/f.txt"), int(-A "$d/f.txt"), int(-C "$d/f.txt"), "\n";
+print "miss:", (-l "$d/nosuch" ? 1 : 0), (-u "$d/nosuch" ? 1 : 0), "\n";
+print "W:$^W\n";
+unlink "$d/ln", "$d/f.txt"; rmdir $d;
+');
+
 done_testing();

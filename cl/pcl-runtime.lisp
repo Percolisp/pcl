@@ -190,6 +190,9 @@
    #:p-truncate #:p-stat #:p-lstat
    ;; File test operators
    #:p--e #:p--d #:p--f #:p--r #:p--w #:p--x #:p--s #:p--z
+   #:p--l #:p--p #:p--S #:p--b #:p--c #:p--u #:p--g #:p--k
+   #:p--o #:p--O #:p--R #:p--W #:p--X #:p--M #:p--A #:p--C
+   #:p--T #:p--B #:p--t
    #:p-unlink #:p-fileno #:p-getc #:p-readline #:*p-filehandles*
    ;; Directory I/O
    #:p-opendir #:p-readdir #:p-closedir #:p-rewinddir
@@ -244,7 +247,7 @@
    #:|$&| #:|$`| #:|$'| #:|$+| #:|$^N| #:|@-| #:|@+| #:|%-| #:|$^H| #:|%^H|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
-   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[|
    ;; Context
    #:*wantarray*
    #:*pcl-caller-wantarray*
@@ -783,6 +786,13 @@
 ;;; "use feature" hint-transmission tests). Nothing ever writes meaningful data.
 (defvar |$^H| 0 "Perl $^H - lexical hint bits (inert 0 in PCL)")
 (defvar |%^H| (make-hash-table :test 'equal) "Perl %^H - hints hash (inert empty in PCL)")
+(defvar |$^W| 0
+  "Perl $^W - global warnings flag.  Inert 0: PCL does not model runtime
+   warning-level switching; reads/writes must simply not crash (run/switcht.t,
+   uni/variables.t).")
+(defvar |$[| 0
+  "Perl $[ - array base.  Always 0 since perl 5.30 removed assigning to it;
+   inert here so reads don't crash (uni/variables.t).")
 
 ;;; Perl version ($^V) - we report as PCL
 (defvar |$^V| "v5.30.0" "Perl version (compatibility)")
@@ -8804,6 +8814,144 @@ buffer's fill-pointer; everything else falls back to file-length."
         (if (= size 0) 1 nil))
     (error () nil)))
 
+(defun %p--stat-test (file pred &key lstat)
+  "Shared body for the mode-bit filetests: stat (or lstat) FILE, apply PRED
+   to the stat struct, return Perl truth (1/nil); any stat error is nil."
+  (handler-case
+      (let ((stat (if lstat
+                      (sb-posix:lstat (to-string (unbox file)))
+                      (sb-posix:stat (to-string (unbox file))))))
+        (if (funcall pred stat) 1 nil))
+    (error () nil)))
+
+(defun p--l (file)
+  "Perl -l: test if file is a symbolic link (lstat, not stat)"
+  (%p--stat-test file
+                 (lambda (s) (sb-posix:s-islnk (sb-posix:stat-mode s)))
+                 :lstat t))
+
+(defun p--p (file)
+  "Perl -p: test if file is a named pipe (FIFO)"
+  (%p--stat-test file (lambda (s) (sb-posix:s-isfifo (sb-posix:stat-mode s)))))
+
+(defun p--S (file)
+  "Perl -S: test if file is a socket"
+  (%p--stat-test file (lambda (s) (sb-posix:s-issock (sb-posix:stat-mode s)))))
+
+(defun p--b (file)
+  "Perl -b: test if file is a block special file"
+  (%p--stat-test file (lambda (s) (sb-posix:s-isblk (sb-posix:stat-mode s)))))
+
+(defun p--c (file)
+  "Perl -c: test if file is a character special file"
+  (%p--stat-test file (lambda (s) (sb-posix:s-ischr (sb-posix:stat-mode s)))))
+
+(defun p--u (file)
+  "Perl -u: test if file has the setuid bit set"
+  (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o4000))))
+
+(defun p--g (file)
+  "Perl -g: test if file has the setgid bit set"
+  (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o2000))))
+
+(defun p--k (file)
+  "Perl -k: test if file has the sticky bit set"
+  (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o1000))))
+
+(defun p--o (file)
+  "Perl -o: test if file is owned by the effective uid"
+  (%p--stat-test file (lambda (s) (= (sb-posix:stat-uid s) (sb-posix:geteuid)))))
+
+(defun p--O (file)
+  "Perl -O: test if file is owned by the real uid"
+  (%p--stat-test file (lambda (s) (= (sb-posix:stat-uid s) (sb-posix:getuid)))))
+
+;; -R/-W/-X are the real-uid variants of -r/-w/-x.  perl uses access() vs
+;; eaccess(); the two differ only in setuid/setgid programs, which PCL
+;; programs are not, so the effective-uid tests stand in.
+(defun p--R (file)
+  "Perl -R: readable by the REAL uid (== -r for non-setuid programs)"
+  (p--r file))
+
+(defun p--W (file)
+  "Perl -W: writable by the REAL uid (== -w for non-setuid programs)"
+  (p--w file))
+
+(defun p--X (file)
+  "Perl -X: executable by the REAL uid (== -x for non-setuid programs)"
+  (p--x file))
+
+(defun %p--file-age (file accessor)
+  "Days between program start ($^T) and the ACCESSOR time of FILE (-M/-A/-C).
+   $^T is referenced via symbol-value: its defvar appears later in this file."
+  (handler-case
+      (let ((stat (sb-posix:stat (to-string (unbox file)))))
+        (/ (- (symbol-value '|$^T|) (funcall accessor stat)) 86400.0d0))
+    (error () nil)))
+
+(defun p--M (file)
+  "Perl -M: script start time minus file modification time, in days"
+  (%p--file-age file #'sb-posix:stat-mtime))
+
+(defun p--A (file)
+  "Perl -A: script start time minus file access time, in days"
+  (%p--file-age file #'sb-posix:stat-atime))
+
+(defun p--C (file)
+  "Perl -C: script start time minus file inode-change time, in days"
+  (%p--file-age file #'sb-posix:stat-ctime))
+
+(defun %p--text-scan (file)
+  "First-block scan for -T/-B (perl's heuristic): :empty, :text or :binary.
+   A NUL byte in the first 512 bytes means binary; else >30% odd bytes
+   (high-bit set, or controls outside TAB/LF/FF/CR/ESC) means binary."
+  (handler-case
+      (with-open-file (s (to-string (unbox file))
+                         :element-type '(unsigned-byte 8))
+        (let* ((buf (make-array 512 :element-type '(unsigned-byte 8)))
+               (n (read-sequence buf s)))
+          (if (zerop n)
+              :empty
+              (let ((odd 0))
+                (dotimes (i n)
+                  (let ((b (aref buf i)))
+                    (when (zerop b) (return-from %p--text-scan :binary))
+                    (when (or (> b 127)
+                              (and (< b 32)
+                                   (not (member b '(9 10 12 13 27)))))
+                      (incf odd))))
+                (if (> (* 10 odd) (* 3 n)) :binary :text)))))
+    (error () nil)))
+
+(defun p--T (file)
+  "Perl -T: heuristic text-file test (empty files are text)"
+  (case (%p--text-scan file)
+    ((:empty :text) 1)
+    (t nil)))
+
+(defun p--B (file)
+  "Perl -B: heuristic binary-file test (empty files are binary too, as in perl)"
+  (case (%p--text-scan file)
+    ((:empty :binary) 1)
+    (t nil)))
+
+(defun %p--t-impl (fh)
+  "Perl -t body: is the filehandle attached to a tty?  Undef/nil (a bare -t
+   whose inserted $_ is unset) falls back to STDIN, perl's default."
+  (handler-case
+      (let* ((handle (if (or (null fh) (and (p-box-p fh) (null (p-box-value fh))))
+                         'STDIN
+                         fh))
+             (fd (%p-fileno-impl handle)))
+        (if (and (integerp fd) (>= fd 0) (plusp (sb-unix:unix-isatty fd)))
+            1
+            nil))
+    (error () nil)))
+
+(defmacro p--t (&optional (fh ''STDIN))
+  "Perl -t: bareword filehandle is auto-quoted (like p-fileno)."
+  `(%p--t-impl (%p-fh-arg ,fh)))
+
 (defun p-unlink (&rest files)
   "Perl unlink - delete files. Returns count of files deleted."
   (let ((count 0))
@@ -10120,7 +10268,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-74"
+(defparameter *pcl-cache-generation* "v2-75"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
