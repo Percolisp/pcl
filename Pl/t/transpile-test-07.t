@@ -180,4 +180,51 @@ my $o = S->new;
 print "x:$o:done\n";
 ');
 
+# #25 / task #129: an ANONYMOUS sub's signature.  With the feature in
+# scope PPI hands `($x)` back as a Structure, so `sub` looked like a CALL
+# and the whole enclosing statement died "Fell through. Missing case"
+# (op/signatures.t).  Covers defaults (absent-only for `=`, undef/false
+# for //= and ||=), a slurpy tail, `()` arity 0, and both arity dies.
+test_transpile("anon sub signatures: binding, defaults, slurpy, arity", '
+use feature "signatures";
+my $f = sub ($x, $y = 3, @rest) { "$x/$y/[@rest]" };
+print $f->(1), ";", $f->(1,2), ";", $f->(1,2,3,4), "\n";
+my $g = sub ($a, $b //= "D", $c ||= "E") { "$a$b$c" };
+print $g->(1, undef, 0), ";", $g->(1, 2, 3), "\n";
+my $z = sub () { 42 };
+print $z->(), "\n";
+print eval { $f->() } ? "no-die" : ($@ =~ /^Too few arguments/ ? "few" : "?$@"), ";",
+      eval { $z->(9) } ? "no-die" : ($@ =~ /^Too many arguments/ ? "many" : "?$@"), "\n";
+');
+
+# Same signature reached through the OTHER parse routes: a glob
+# assignment inside a package block (the op/signatures.t killer), a
+# funcall argument, an array element, and a string eval — the eval
+# inherits the feature from a scope PPI never sees, so the desugar has
+# to read the Prototype token it gets there too.  A REAL prototype
+# ((&@), ($$)) binds nothing and must still be dropped.
+# (Signature syntax with the feature genuinely OFF is read as a
+# signature, not a prototype — a deliberate deviation shared with named
+# subs; see docs/not-supported.md §Signature syntax.)
+test_transpile("anon signature parse routes incl. eval; prototypes untouched", '
+use feature "signatures";
+package T200 { *t201 = sub ($x) { $x * 2 } }
+print T200::t201(21), "\n";
+sub apply { my ($c, @a) = @_; return $c->(@a) }
+print apply(sub ($p, $q) { "$p-$q" }, "a", "b"), "\n";
+my @subs = (sub ($n) { $n + 1 }, sub ($n) { $n * 10 });
+print join(",", map { $_->(4) } @subs), "\n";
+print eval q{my $e = sub ($v, $w = 9) { "$v/$w" }; $e->(1) . ";" . $e->(1,2)}, "\n";
+');
+
+# A real PROTOTYPE on an anon sub binds nothing and must stay untouched
+# (it is a syntax error to write one with signatures enabled, so this
+# runs in its own feature-free snippet).
+test_transpile("anon-sub prototypes are not signatures", '
+my $pair = sub ($$) { "$_[0]-$_[1]" };
+my $blk  = sub (&@) { my $f = shift; join ",", map { $f->($_) } @_ };
+my $none = sub () { 7 };
+print $pair->(1,2), " ", $blk->(sub { $_[0]*2 }, 3, 4), " ", $none->(), "\n";
+');
+
 done_testing();

@@ -329,13 +329,161 @@ sub _fix_spaced_sigils {
 sub _ppi_parse {
   my ($self, $src) = @_;
   my $doc = PPI::Document->new(\$src);
-  if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc))) {
+  if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc)
+               | $self->_desugar_anon_signatures($doc))) {
     my $fixed = $doc->serialize;
     my $redo  = PPI::Document->new(\$fixed);
     $doc = $redo if $redo;
   }
   _merge_unicode_symbols($doc) if $doc;
   return $doc;
+}
+
+
+# An ANONYMOUS sub's signature — `sub ($x, $y = 3, @rest) { BODY }` — is
+# desugared here, at the shared document entry, into the plain-Perl code that
+# binds it:
+#
+#   sub { die "Too few arguments…" if @_ < 1; my ($x,$y,@rest) = @_;
+#         $y = (3) if @_ <= 1; BODY }
+#
+# WHY HERE, and why source-level.  A named sub's signature is lowered by
+# _process_sub_statement (p-check-arity + a let* of p-copy-scalar-arg), but an
+# anonymous sub in expression position reaches PExpr's handle_subcalls, which
+# had no case for it at all: with `use feature "signatures"` in scope PPI hands
+# the `($x)` back as a Structure::List, so `sub` looked like a CALL and the
+# whole enclosing statement died "Fell through. Missing case" (op/signatures.t);
+# without the pragma PPI hands back a Token::Prototype, which handle_subcalls
+# silently DROPPED — the params never bound, which is worse than a parse error.
+# Both parse routes converge on the PPI tree, so the desugar sits before either
+# ever runs, and the resulting body binds its params through the ordinary
+# `my (...) = @_` machinery instead of a second signature lowering.
+#
+# The prologue is emitted on ONE line, so it occupies the line the signature
+# already occupied and every line of the body keeps its original number (die
+# and warn report source lines).  A `#` anywhere in the generated text — only
+# possible from inside a default expression — forces newline separation
+# instead, since a comment would otherwise swallow the rest of the line.
+sub _desugar_anon_signatures {
+  my ($self, $doc) = @_;
+  my $changed = 0;
+
+  for my $word (@{ $doc->find('PPI::Token::Word') || [] }) {
+    next unless $word->content eq 'sub';
+    my $sig = $word->snext_sibling or next;
+    # A NAMED sub has its name here instead, and keeps the named-sub path.
+    # PPI hands the parameter list back as a Structure when it saw the
+    # signatures feature enabled (`use feature "signatures"`, `use v5.36`,
+    # `use experimental "signatures"`) and as a Token::Prototype when it did
+    # not.  Both shapes arrive here because PPI's view is not the whole story:
+    # its pragma tracking only takes effect on the NEXT LINE (a one-liner
+    # `use feature "signatures"; my $c = sub ($x) {…}` yields a Prototype),
+    # and a string eval inherits the feature from a scope PPI never sees.
+    my $is_struct = $sig->isa('PPI::Structure::List')
+                 || $sig->isa('PPI::Structure::Signature');
+    next unless $is_struct || $sig->isa('PPI::Token::Prototype');
+    my $block = $sig->snext_sibling or next;
+    next unless $block->isa('PPI::Structure::Block');
+
+    # So the Structure shape is taken as authoritative — it IS a signature,
+    # including `()` (arity 0) and `($, $)` (anonymous mandatory slots) — and a
+    # Prototype is read with the SAME textual discriminator the named-sub path
+    # uses (parse_prototype_or_signature): a NAMED parameter means signature,
+    # anything else is a real prototype ((&@), ($$), ()) which binds nothing and
+    # is dropped downstream.  Consequence, shared with named subs: signature
+    # syntax with the feature genuinely off is read as a signature, where perl
+    # reads a prototype — see docs/not-supported.md §Signature syntax.
+    my $text = $sig->content;
+    next if !$is_struct && $text !~ /[\$\@\%]\w/;
+
+    my $prologue = $self->_anon_signature_prologue($text);
+    next unless defined $prologue;
+
+    my $pdoc = PPI::Document->new(\$prologue) or next;
+    my @pel  = $pdoc->children;
+    next unless @pel;
+    $_->remove for @pel;
+
+    # Prepend: detach the body, add the prologue, re-add the body.  add_element
+    # only accepts parentless elements, so the detach has to come first.
+    my @body = $block->children;
+    $_->remove for @body;
+    $block->add_element($_) for @pel, @body;
+    $sig->delete;
+    $changed = 1;
+  }
+
+  return $changed;
+}
+
+
+# The Perl source that binds one anonymous sub's signature, or undef if the
+# signature declares nothing at all.  Shares _signature_param_specs with the
+# named-sub lowering, so placeholder naming and default-operator handling
+# cannot drift between the two.
+sub _anon_signature_prologue {
+  my ($self, $sig_text) = @_;
+
+  my $inner = $sig_text;
+  $inner =~ s/^\s*\(\s*//;
+  $inner =~ s/\s*\)\s*$//;
+
+  my $specs = $self->_signature_param_specs($inner);
+  # Text that declares nothing recognisable is not a signature we can bind —
+  # e.g. `($$)`, which is a syntax error under the feature and an ordinary
+  # prototype without it.  Leave it to the prototype drop rather than emit an
+  # arity-0 check that would reject every call.
+  return undef if !@$specs && $inner ne '';
+  my @names = map { $_->{name} } @$specs;
+
+  # Arity bounds, mirroring p-check-arity: min counts the leading mandatory
+  # scalars, max is unbounded once a slurpy @/% param appears.
+  my $min = 0;
+  my $seen_optional = 0;
+  for my $spec (@$specs) {
+    $seen_optional = 1 if defined $spec->{default_expr};
+    $min++ if !$seen_optional && $spec->{name} !~ /^[\@\%]/;
+  }
+  my $slurpy = (@names && $names[-1] =~ /^[\@\%]/) ? 1 : 0;
+  my $max    = $slurpy ? undef : scalar(@names);
+  # Perl words a sub that can take a range of counts as "at least"/"at most".
+  my $flex   = ($slurpy || $seen_optional) ? 1 : 0;
+
+  my @stmts;
+  my $got = q{scalar(@_)};
+  my $who = q{"'" . __PACKAGE__ . "::__ANON__'"};
+  if ($min > 0) {
+    my $want = ($flex ? 'at least ' : '') . $min;
+    push @stmts, qq{die "Too few arguments for subroutine " . $who .}
+               . qq{ " (got " . $got . "; expected $want)" if \@_ < $min;};
+  }
+  if (defined $max) {
+    my $want = ($flex ? 'at most ' : '') . $max;
+    push @stmts, qq{die "Too many arguments for subroutine " . $who .}
+               . qq{ " (got " . $got . "; expected $want)" if \@_ > $max;};
+  }
+
+  push @stmts, 'my (' . join(', ', @names) . ') = @_;' if @names;
+
+  # Defaults.  `=` applies only when the argument is ABSENT (index test);
+  # `//=` and `||=` (perl 5.38+) additionally apply to an undef/false argument,
+  # which is exactly what the plain Perl operators already mean.
+  my $idx = 0;
+  for my $spec (@$specs) {
+    my $expr = $spec->{default_expr};
+    $idx++, next if !defined $expr;
+    my $name = $spec->{name};
+    if ($spec->{default_op} eq '=') {
+      push @stmts, "$name = ($expr) if \@_ <= $idx;";
+    } else {
+      push @stmts, "$name $spec->{default_op} ($expr);";
+    }
+    $idx++;
+  }
+
+  return undef if !@stmts;
+  my $sep = (grep { /#/ } @stmts) ? "\n" : ' ';
+  return join($sep, @stmts) . $sep;
 }
 
 # PPI's Symbol regex is ASCII-bounded: a unicode variable name splits into
@@ -8177,21 +8325,23 @@ sub _parse_old_prototype {
 }
 
 
-# Parse new-style signature like "$x, $y = 10, @rest"
-sub _parse_signature {
-  my $self      = shift;
-  my $sig_str   = shift;
-  my $context   = shift;
+# Split a signature string into its parameters, PURELY TEXTUALLY: no CL is
+# compiled and no environment state is touched.  Returns
+#   [ { name => '$y', default_op => '=' | '//=' | '||=', default_expr => '10' }, ... ]
+# with default_expr undef for a parameter that has no default.
+#
+# Two consumers share this: _parse_signature (named subs — compiles each
+# default to CL) and _desugar_anon_signatures (anonymous subs — rewrites the
+# signature back into Perl source).  Keeping the shape analysis here means the
+# two agree on placeholder naming and on which `=`-variant a default uses.
+sub _signature_param_specs {
+  my $self    = shift;
+  my $sig_str = shift;
 
-  my @params;
-  my $min_params = 0;
-  my $seen_optional = 0;
+  my @specs;
   my $anon_counter = 0;
 
-  # Split on commas, but be careful with nested parens in defaults
-  my @param_strs = $self->_split_signature_params($sig_str);
-
-  for my $param_str (@param_strs) {
+  for my $param_str ($self->_split_signature_params($sig_str)) {
     $param_str =~ s/^\s+//;
     $param_str =~ s/\s+$//;
     next if $param_str eq '';
@@ -8202,15 +8352,11 @@ sub _parse_signature {
     if ($param_str =~ m{^([\$\@\%]\w+)\s*(//=|\|\|=|=)\s*(.+)$}) {
       # Parameter with default: $x = 10, $x //= 10 (apply on absent/undef),
       # $x ||= 10 (apply on absent/false).  Perl 5.38+ allows //= and ||=.
-      $name = $1;
-      $default_op = $2;
-      $default_expr = $3;
-      $seen_optional = 1;
+      ($name, $default_op, $default_expr) = ($1, $2, $3);
     }
     elsif ($param_str =~ /^([\$\@\%]\w+)$/) {
       # Simple parameter: $x
       $name = $1;
-      $default_expr = undef;
     }
     elsif ($param_str =~ /^([\$\@\%])\s*=\s*(.*)$/) {
       # Anonymous placeholder with default: ($ = undef), ($ =)
@@ -8219,17 +8365,39 @@ sub _parse_signature {
       my $rhs = $2;
       $rhs =~ s/\s+$//;
       $default_expr = ($rhs eq '') ? 'undef' : $rhs;
-      $seen_optional = 1;
     }
     elsif ($param_str =~ /^([\$\@\%])$/) {
       # Anonymous mandatory placeholder: ($a, $) — the bare $ is a required slot.
       $name = $1 . '_sig_anon' . (++$anon_counter);
-      $default_expr = undef;
     }
     else {
       # Unknown format, skip
       next;
     }
+
+    push @specs, { name => $name, default_op => $default_op,
+                   default_expr => $default_expr };
+  }
+
+  return \@specs;
+}
+
+
+# Parse new-style signature like "$x, $y = 10, @rest"
+sub _parse_signature {
+  my $self      = shift;
+  my $sig_str   = shift;
+  my $context   = shift;
+
+  my @params;
+  my $min_params = 0;
+  my $seen_optional = 0;
+
+  for my $spec (@{ $self->_signature_param_specs($sig_str) }) {
+    my $name         = $spec->{name};
+    my $default_op   = $spec->{default_op};
+    my $default_expr = $spec->{default_expr};
+    $seen_optional = 1 if defined $default_expr;
 
     # A `local $G = RHS` default localises $G for the sub's dynamic extent (and
     # the param's value is RHS).  PExpr would drop the `local` in expression

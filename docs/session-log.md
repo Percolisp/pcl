@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316k (2026-07-29, Fable) — #25 task #129: anonymous-sub SIGNATURES desugared at the shared PPI entry (gen v2-78).
+
+- **`my $c = sub ($x, $y = 3, @rest) {…}` never bound anything.** With the
+  feature in scope PPI hands the `($x)` back as a `Structure::List`, so
+  PExpr's handle_subcalls saw `sub` as a CALL and the whole enclosing
+  statement died *"Fell through. Missing case"* — the op/signatures.t
+  killer (`*t201 = sub ($x) {…}` inside a package block took every sub in
+  the block with it).  With the feature off PPI gives a `Token::Prototype`,
+  which handle_subcalls silently DROPPED.
+- **Fix: `_desugar_anon_signatures` in `_ppi_parse`** — the document entry
+  every route shares (v1, v2, string eval) — rewrites `sub (SIG) { BODY }`
+  into `sub { <arity die>; my (PARAMS) = @_; <defaults>; BODY }` by
+  prepending parsed statements into the block, then letting the existing
+  serialize+reparse (the `_fix_spaced_sigils` mechanism) take over.  No
+  second signature lowering: the params bind through ordinary
+  `my (…) = @_`.  Prologue is emitted on ONE line, so every body line
+  keeps its number (`__LINE__`, die/warn locations verified against perl).
+- **`_signature_param_specs` factored out of `_parse_signature`** so the
+  named-sub lowering and the desugar cannot drift on placeholder naming
+  or on which `=`-variant a default uses (`=` absent-only via an index
+  test; `//=`/`||=` are the plain Perl operators).
+- **PPI's feature tracking only takes effect on the NEXT LINE** (a
+  one-liner `use feature "signatures"; my $c = sub ($x) {…}` yields a
+  Prototype), and a string eval is compiled with no view of the scope
+  that enabled the feature — so the Structure shape is honoured when
+  present but a Prototype is read with the SAME textual discriminator the
+  named-sub path uses (a NAMED param = signature).  Deliberate deviation
+  documented: `docs/not-supported.md` §Signature syntax is read as a
+  signature even with the feature off (signatures.t t1, already a blessed
+  fail for named subs).  Text with no recognisable param (`($$)`) falls
+  back to the prototype drop rather than emitting an arity-0 check.
+- perl-tests/signatures.t 796→804 pass, 182→174 fail, 0 new; perl's own
+  op/signatures.t 0→800 pass (next blocker is its `updir/regen/keywords.pl`
+  fixture read).  Corpus: only signatures.t differs.  Artifacts
+  regenerated at v2-78 (bodies byte-identical); pack.t 5636/89.  Guards:
+  `Pl/t/transpile-test-07.t` (3 new).
+
+---
+
 ## Session 316j (2026-07-28, Fable) — #25: real fileno + POSIX::dup, pwent family + grent context bugs, overload::constant stub (gen v2-77).
 
 - **fileno returns real fds** (%p-fd-of-stream behind the handle; std

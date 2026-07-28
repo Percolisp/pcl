@@ -685,12 +685,9 @@ The `\substr`/`\pos`/`\vec` lvalue-ref rows in `perl-tests/ref.t` now pass.
 (e.g. `"\$a"` for `sub foo ($a) { }` without `use feature 'signatures'`), or
 `undef` if the sub has no prototype.
 
-**PCL behaviour:** `prototype()` always returns `undef`.  The behavioral
-distinction is handled correctly: without `use feature 'signatures'`, `($a)` in
-a sub definition is ignored as a parameter binding (the body's `$a` refers to
-the outer scope, matching Perl's prototype semantics); with the pragma, `$a` is
-bound as a signature parameter.  Only the `prototype()` introspection value is
-missing.
+**PCL behaviour:** `prototype()` always returns `undef`.  (For how PCL reads a
+`($a)`-shaped parameter list at all, see *Signature syntax is read as a
+signature even with the feature off*, below.)
 
 **Rationale:** Storing prototype strings requires tracking them at parse time and
 threading them through to a runtime lookup table.  No maintained CPAN module
@@ -699,6 +696,39 @@ tools and test infrastructure.
 
 **Affected tests:** `perl-tests/signatures.t` test checking `prototype(\&t000) eq '"\$a"'`
 (commented out).
+
+---
+
+## Signature syntax is read as a signature even with the feature off
+
+**Perl behaviour:** a parameter list is a *signature* only where
+`use feature 'signatures'` (or `use v5.36`, `use experimental 'signatures'`) is
+lexically in scope.  Without it, `sub f ($a) { $a }` declares the *prototype*
+`($a)` — perl warns `Illegal character in prototype` and binds nothing, so the
+body's `$a` is the outer `$a`.
+
+**PCL behaviour:** any parameter list containing a NAMED parameter (a sigil
+immediately followed by a word character: `($a)`, `($x, $y = 1)`) is compiled as
+a signature, regardless of the pragma.  Real prototypes — `()`, `($$)`, `(&@)`,
+`(\@\@)`, `($;$)` — contain no named parameter, are unaffected, and keep their
+prototype meaning.  Named and anonymous subs share this rule, and the same
+textual test (`parse_prototype_or_signature`) implements both.
+
+**Rationale:** PCL's compiler is not lexically pragma-aware, and neither is its
+only source of that information.  PPI *does* track the feature and hands back a
+`PPI::Structure` instead of a `PPI::Token::Prototype` when it is enabled — that
+signal is honoured when present — but it is not sufficient: PPI's pragma
+tracking only takes effect on the NEXT LINE (so the one-liner
+`use feature "signatures"; my $c = sub ($x) {…}` yields a Prototype), and a
+string `eval` is compiled on its own, with no view of the enclosing scope that
+enabled the feature.  Treating a named parameter as a signature is right in
+every case where the code was written to run at all; the alternative silently
+binds nothing, which is the failure mode that is expensive to debug.  Signature
+syntax with the feature genuinely off is a construct perl itself warns about.
+
+**Affected tests:** `perl-tests/signatures.t` t1
+(`is &t000(456), 123, "(\$a) not signature when not enabled"`) — PCL returns
+456.  Guard for the intended behaviour: `Pl/t/transpile-test-07.t`.
 
 ---
 
