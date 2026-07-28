@@ -223,6 +223,42 @@ sub isa_ok {
 
 # pass, fail, note, diag - provided by pcl-test.lisp, do NOT define here or it will override
 
+# display - render scalars with control chars / Unicode visibly (perl's own
+# test.pl §display): >255 -> \x{...} (lowercase hex), the classic backslash
+# escapes, <space -> octal, everything else 32..255 appended RAW.  The raw
+# tail is BUG-COMPATIBLE on purpose: the real file writes
+# `chr $c =~ /[[:print:]]/a`, which parses as chr($c =~ ...) — always true —
+# so its \x%02X branch is dead code, and the oracle side runs that code.
+# The escape map is written literally (real test.pl builds it via string
+# eval).
+my %backslash_escape = (
+    7  => "\\a", 9  => "\\t", 10 => "\\n", 12 => "\\f", 13 => "\\r",
+    27 => "\\e", 34 => "\\\"", 39 => "\\'", 92 => "\\\\",
+);
+sub display {
+    my @result;
+    foreach my $x (@_) {
+        if (defined $x and not ref $x) {
+            my $y = '';
+            foreach my $c (map { ord } split //, $x) {
+                if ($c > 255) {
+                    $y = $y . sprintf "\\x{%x}", $c;
+                } elsif ($backslash_escape{$c}) {
+                    $y = $y . $backslash_escape{$c};
+                } elsif ($c < 32) {
+                    $y = $y . sprintf "\\%03o", $c;
+                } else {
+                    $y = $y . chr $c;
+                }
+            }
+            $x = $y;
+        }
+        return $x if (! wantarray);
+        push @result, $x;
+    }
+    return @result;
+}
+
 # tempfile - returns a unique temp filename (used by I/O tests)
 #
 # The name must not already EXIST, exactly as in perl's own test.pl
