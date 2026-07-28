@@ -580,4 +580,13 @@ sub tailval { my $x = shift; if ($x) { goto DONE; } my $y = 2; DONE: "tail-$x" }
 print tailval(1), "|", tailval(0), "\n";
 ');
 
+# Task #114 (range.t 162, RT #130841): a range whose byte size wraps
+# size_t must croak in perl's "panic: memory wrap|Out of memory" family,
+# not a PCL-specific overflow message.
+test_transpile("huge range croak speaks perl's memory-wrap family", '
+my $max_iv = (~0 >> 1);
+eval { my @range = 1..($max_iv - 1); };
+print "err:", (($@ =~ /panic: memory wrap|Out of memory/) ? "wrap-family" : "other:$@"), "\n";
+');
+
 done_testing();

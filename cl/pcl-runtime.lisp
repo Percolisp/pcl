@@ -4942,7 +4942,13 @@
         ;; Numeric range (materialized — only reached outside foreach)
         (progn
           (when (> (- b a) 100000000)
-            (error "Integer overflow in range (~A .. ~A): range too large" a b))
+            ;; perl croaks "panic: memory wrap" when the element count's
+            ;; byte size wraps size_t, and fails allocation ("Out of
+            ;; memory...") otherwise; range.t RT #130841 matches on these
+            ;; texts, so the refusal guard speaks them too.
+            (if (> (- b a) #.(expt 2 61))
+                (error "panic: memory wrap")
+                (error "Out of memory during list extend")))
           (if (<= a b)
               (coerce (loop for i from a to b collect i) 'vector)
               (make-array 0))))))
