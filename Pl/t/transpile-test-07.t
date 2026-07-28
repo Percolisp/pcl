@@ -274,4 +274,20 @@ $s = "ij";    $s =~ s/(i)/\1\1/;  print $s, "\n";
 $s = "kl";    $s =~ s/k/\\\\/;    print $s, "\n";
 ');
 
+# A signature's slurpy %hash must receive an EVEN number of leftover args —
+# perl dies "Odd name/value argument for subroutine" (op/signatures.t).
+# Both lowering paths: named (p-check-arity hash-start) and anon (desugar
+# prologue die).
+test_transpile("slurpy %hash signature dies on odd leftover args", '
+use feature "signatures"; no warnings;
+sub tC ($a, %h) { "C" . join(",", map { "$_=$h{$_}" } sort keys %h) }
+sub tD (%h) { "D" . scalar(keys %h) }
+my $c = sub ($a, %h) { "A" . scalar(keys %h) };
+for my $t ([\&tC,1], [\&tC,2], [\&tC,3], [\&tD,0], [\&tD,1], [\&tD,2], [$c,1], [$c,2]) {
+  my ($f, $n) = @$t;
+  my $r = eval { $f->(1..$n) };
+  print defined $r ? $r : "die", "\n";
+}
+');
+
 done_testing();

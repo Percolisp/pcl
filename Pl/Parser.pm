@@ -516,6 +516,14 @@ sub _anon_signature_prologue {
                . qq{ " (got " . $got . "; expected $want)" if \@_ > $max;};
   }
 
+  # A slurpy %hash must receive an EVEN number of leftover args (perl dies
+  # "Odd name/value argument ..."), mirroring p-check-arity's hash-start.
+  if ($slurpy && $names[-1] =~ /^\%/) {
+    my $hash_start = scalar(@names) - 1;
+    push @stmts, qq{die "Odd name/value argument for subroutine " . $who}
+               . qq{ if \@_ > $hash_start && (\@_ - $hash_start) % 2;};
+  }
+
   push @stmts, 'my (' . join(', ', @names) . ') = @_;' if @names;
 
   # Defaults.  `=` applies only when the argument is ABSENT (index test);
@@ -6495,6 +6503,11 @@ sub _process_sub_statement {
   my $sig_min  = scalar @sig_req;
   my $sig_max  = $sig_slurpy ? 'nil' : ($sig_min + scalar @sig_opt);
   my $sig_flex = (@sig_opt || $sig_slurpy) ? 't' : 'nil';
+  # A slurpy %hash must receive an EVEN number of leftover args (perl dies
+  # "Odd name/value argument for subroutine ..."): pass the index where the
+  # hash's args start so p-check-arity can verify evenness.
+  my $sig_hash_start = ($sig_slurpy && $sig_slurpy =~ /^\%/)
+                     ? ($sig_min + scalar @sig_opt) : 'nil';
 
   # Store in environment for later use by PExpr
   if ($name) {
@@ -6695,7 +6708,7 @@ sub _process_sub_statement {
     $self->indent_level($self->indent_level + 1);
     $sig_wrap_closes++;
     # Arity check BEFORE any binding (a too-few call must not index past @_).
-    $self->_emit("(p-check-arity \"$sig_qname\" (length \@_) $sig_min $sig_max $sig_flex)");
+    $self->_emit("(p-check-arity \"$sig_qname\" (length \@_) $sig_min $sig_max $sig_flex $sig_hash_start)");
     # Bind the named params positionally from @_ via a sequential let*
     # (so an optional default can reference an earlier param, e.g. $r = f($c)).
     #

@@ -4,6 +4,33 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316n (2026-07-29, Fable) — #25 signatures triage: odd-%hash arity die + ref_funcall args are LIST context (gen v2-81).
+
+- **op/signatures.t 807→859.**  Two fixes:
+  - **A slurpy `%hash` signature param must die on an ODD number of
+    leftover args** ("Odd name/value argument for subroutine") — PCL
+    accepted and bound the odd tail.  Named path: `p-check-arity` grew an
+    optional HASH-START arg (index where the hash's args begin; die when
+    the leftover count is odd); anon path: the desugar prologue emits the
+    same die.  Both derive hash-start from the shared param partition, so
+    the two lowerings cannot drift.
+  - **`$f->(1..$n)` parsed the range as a FLIP-FLOP**: `ref_funcall` had
+    no child_context rule, so args inherited scalar/void context.  Coderef
+    calls ignore prototypes — args are always LIST (the methodcall
+    sibling rule); added the `ref_funcall` rule.  Found by the new guard
+    (the odd-hash die exposed the flip-flop's wrong arg count).
+- Corpus 7/111 differ, all explained: coderef args now under
+  `*wantarray*` t (caller.t drops a runtime flipflop dispatch for a plain
+  `(p-.. 1 3)`).  Gate 123/4424 green (guard: slurpy-%hash odd-args in
+  transpile-test-07.t); spot sweeps array/caller/do/signatures/sub/substr
+  **0 NEW** vs fail-baseline.  Artifacts regenerated at v2-81.
+- signatures.t suite residue after this: ~294 rows are invalid-syntax
+  detection (`isnt $@ ""` on evals that must fail to parse — out of scope
+  per CLAUDE.md §9) + exact-error-text rows; ~90 real diffs remain for
+  the next triage pass.
+
+---
+
 ## Session 316m (2026-07-29, Fable) — #25: op/signatures.t fixture unblocked — updir mirror + exported-sub EXISTENCE merge (gen v2-80).
 
 - **op/signatures.t 800→807 pass, crash gone** (was truncating at the

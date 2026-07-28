@@ -4359,6 +4359,14 @@ sub child_context {
     if ($type eq 'methodcall') {
       return LIST_CTX if $child_index >= 2;
     }
+    # Code-ref call arguments likewise: $f->(...) / &$f(...) ignores
+    # prototypes, so every arg flattens into @_ and a context-sensitive arg
+    # (1..$n, split) must run as a list — without this, `..` inherited a
+    # non-list context and parsed as a FLIP-FLOP (op/signatures.t via
+    # coderef).  kids[0]=the code reference, kids[1+]=args.
+    if ($type eq 'ref_funcall') {
+      return LIST_CTX if $child_index >= 1;
+    }
     # progn (comma operator) forces list context
     if ($type eq 'progn') {
       return LIST_CTX;

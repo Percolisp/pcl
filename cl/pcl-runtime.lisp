@@ -5764,19 +5764,23 @@ the state that still counts as an array hole for exists()."
          (vector-push-extend arg result))))
     result))
 
-(defun p-check-arity (funcname got min max flexible)
+(defun p-check-arity (funcname got min max flexible &optional hash-start)
   "Perl subroutine-signature arity check.  Throws a Perl-formatted
    'Too few/many arguments for subroutine ...' error when GOT is outside
    [MIN, MAX].  MAX = nil means no upper bound (a slurpy @/% param).  FLEXIBLE
    non-nil selects the 'at least'/'at most' wording Perl uses when the sub has
-   optional or slurpy params (a fixed-arity sub uses the bare count)."
+   optional or slurpy params (a fixed-arity sub uses the bare count).
+   HASH-START non-nil marks a slurpy %hash consuming args from that index on:
+   an ODD number of leftover args dies, as in perl."
   (cond
     ((< got min)
      (error "Too few arguments for subroutine '~A' (got ~D; expected ~A~D)"
             funcname got (if flexible "at least " "") min))
     ((and max (> got max))
      (error "Too many arguments for subroutine '~A' (got ~D; expected ~A~D)"
-            funcname got (if flexible "at most " "") max))))
+            funcname got (if flexible "at most " "") max))
+    ((and hash-start (> got hash-start) (oddp (- got hash-start)))
+     (error "Odd name/value argument for subroutine '~A'" funcname))))
 
 (defun p-sig-rest-array (args start)
   "Slurpy @rest signature parameter: a fresh adjustable Perl array holding the
@@ -10338,7 +10342,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-80"
+(defparameter *pcl-cache-generation* "v2-81"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
