@@ -440,6 +440,12 @@ has known_no_of_params => (
       endgrent   => 0,
       getgrgid   => 1,
       getgrnam   => 1,
+      # Passwd database functions (sibling family)
+      getpwent   => 0,
+      setpwent   => 0,
+      endpwent   => 0,
+      getpwuid   => 1,
+      getpwnam   => 1,
 
       # Linux varants:
       # -*X*, binmode, chmod, chown, chroot, crypt, dbmclose,

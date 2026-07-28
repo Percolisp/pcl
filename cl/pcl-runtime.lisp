@@ -208,6 +208,7 @@
    #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
    #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
+   #:p-getpwent #:p-setpwent #:p-endpwent #:p-getpwuid #:p-getpwnam
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
@@ -10291,7 +10292,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-76"
+(defparameter *pcl-cache-generation* "v2-77"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -14594,7 +14595,7 @@ buffer's fill-pointer; everything else falls back to file-length."
      (make-p-box (sb-posix:group-gid g))
      (make-p-box (if members (format nil "~{~A~^ ~}" members) "")))))
 
-(defun p-setgrent (&key wantarray)
+(defun p-setgrent (&key (wantarray (eq *wantarray* t)))
   "Perl setgrent() — rewind the group file for getgrent iteration."
   (declare (ignore wantarray))
   (setf *p-group-list* nil)
@@ -14606,7 +14607,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (setf *p-group-pos* 0)
   (make-p-box 1))
 
-(defun p-getgrent (&key wantarray)
+(defun p-getgrent (&key (wantarray (eq *wantarray* t)))
   "Perl getgrent() — return next group entry from the group database."
   (when (null *p-group-list*)
     (p-setgrent))
@@ -14618,14 +14619,14 @@ buffer's fill-pointer; everything else falls back to file-length."
             entry
             (aref entry 0)))))   ; scalar context: group name only
 
-(defun p-endgrent (&key wantarray)
+(defun p-endgrent (&key (wantarray (eq *wantarray* t)))
   "Perl endgrent() — close the group database."
   (declare (ignore wantarray))
   (setf *p-group-list* nil)
   (setf *p-group-pos* 0)
   *p-undef*)
 
-(defun p-getgrgid (gid &key wantarray)
+(defun p-getgrgid (gid &key (wantarray (eq *wantarray* t)))
   "Perl getgrgid(GID) — look up group entry by numeric GID."
   (handler-case
       (let ((g (sb-posix:getgrgid (truncate (to-number gid)))))
@@ -14636,14 +14637,91 @@ buffer's fill-pointer; everything else falls back to file-length."
             *p-undef*))
     (sb-posix:syscall-error () *p-undef*)))
 
-(defun p-getgrnam (name &key wantarray)
+;;; ---------------------------------------------------------------------------
+;;; Passwd database functions (getpwent, setpwent, endpwent, getpwuid, getpwnam)
+;;; — the sibling family of the group functions above, same iteration model.
+;;; ---------------------------------------------------------------------------
+
+(defvar *p-passwd-list* nil "Cached list of passwd entries for getpwent iteration.")
+(defvar *p-passwd-pos*  0   "Current position in *p-passwd-list* for getpwent.")
+
+(defun p-passwd-struct-to-vec (pw)
+  "Convert sb-posix passwd struct to perl's 9-element getpw* list:
+   (name passwd uid gid quota comment gcos dir shell) — quota and comment
+   are empty strings on Linux, exactly as perl returns them."
+  (vector
+   (make-p-box (sb-posix:passwd-name pw))
+   (make-p-box (sb-posix:passwd-passwd pw))
+   (make-p-box (sb-posix:passwd-uid pw))
+   (make-p-box (sb-posix:passwd-gid pw))
+   (make-p-box "")
+   (make-p-box "")
+   (make-p-box (sb-posix:passwd-gecos pw))
+   (make-p-box (sb-posix:passwd-dir pw))
+   (make-p-box (sb-posix:passwd-shell pw))))
+
+(defun p-setpwent (&key (wantarray (eq *wantarray* t)))
+  "Perl setpwent() — rewind the passwd file for getpwent iteration."
+  (declare (ignore wantarray))
+  (setf *p-passwd-list* nil)
+  (handler-case
+      (sb-posix:do-passwds (pw)
+        (push (p-passwd-struct-to-vec pw) *p-passwd-list*))
+    (sb-posix:syscall-error ()))
+  (setf *p-passwd-list* (nreverse *p-passwd-list*))
+  (setf *p-passwd-pos* 0)
+  (make-p-box 1))
+
+(defun p-getpwent (&key (wantarray (eq *wantarray* t)))
+  "Perl getpwent() — return next passwd entry from the user database."
+  (when (null *p-passwd-list*)
+    (p-setpwent))
+  (if (>= *p-passwd-pos* (length *p-passwd-list*))
+      *p-undef*
+      (let ((entry (nth *p-passwd-pos* *p-passwd-list*)))
+        (incf *p-passwd-pos*)
+        (if wantarray
+            entry
+            (aref entry 0)))))   ; scalar context: user name only
+
+(defun p-endpwent (&key (wantarray (eq *wantarray* t)))
+  "Perl endpwent() — close the user database."
+  (declare (ignore wantarray))
+  (setf *p-passwd-list* nil)
+  (setf *p-passwd-pos* 0)
+  *p-undef*)
+
+(defun p-getpwuid (uid &key (wantarray (eq *wantarray* t)))
+  "Perl getpwuid(UID) — look up passwd entry by numeric UID."
+  (handler-case
+      (let ((pw (sb-posix:getpwuid (truncate (to-number uid)))))
+        (if pw
+            (if wantarray
+                (p-passwd-struct-to-vec pw)
+                (make-p-box (sb-posix:passwd-name pw)))
+            *p-undef*))
+    (sb-posix:syscall-error () *p-undef*)))
+
+(defun p-getpwnam (name &key (wantarray (eq *wantarray* t)))
+  "Perl getpwnam(NAME) — look up passwd entry by user name."
+  (handler-case
+      (let ((pw (sb-posix:getpwnam (to-string (unbox name)))))
+        (if pw
+            (if wantarray
+                (p-passwd-struct-to-vec pw)
+                (make-p-box (sb-posix:passwd-uid pw)))
+            *p-undef*))
+    (sb-posix:syscall-error () *p-undef*)))
+
+(defun p-getgrnam (name &key (wantarray (eq *wantarray* t)))
   "Perl getgrnam(NAME) — look up group entry by name."
   (handler-case
       (let ((g (sb-posix:getgrnam (to-string name))))
         (if g
             (if wantarray
                 (p-group-struct-to-vec g)
-                (make-p-box (sb-posix:group-name g)))
+                ;; scalar getgrnam = the GID (the name is what you passed in)
+                (make-p-box (sb-posix:group-gid g)))
             *p-undef*))
     (sb-posix:syscall-error () *p-undef*)))
 

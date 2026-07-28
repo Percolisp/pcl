@@ -151,4 +151,23 @@ my $fd2 = POSIX::dup(fileno(\*STDOUT));
 print "dup:", ($fd1 > 2 ? "y" : "n"), ($fd2 > $fd1 ? "y" : "n"), "\n";
 ');
 
+# #25: passwd-database family (new) + the grent family's latent context
+# bugs (wantarray was a &key nothing passed — list context never spread;
+# scalar getgrnam returned the name where perl returns the GID).
+test_transpile("getpw*/getgr* families are context-sensitive", '
+my @e = getpwuid($<);
+print "n:", scalar(@e), "|", ($e[2] == $< ? "uid-ok" : "uid-bad"), "\n";
+my $name = getpwuid($<);
+my $uid  = getpwnam($e[0]);
+print "scalar:", ($name eq $e[0] ? "y" : "n"), ($uid == $< ? "y" : "n"), "\n";
+setpwent();
+my @first = getpwent();
+my @second = getpwent();
+print "ent:", scalar(@first), ":", ($first[0] ne $second[0] ? "advances" : "stuck"), "\n";
+endpwent();
+my @g = getgrnam("root");
+my $gid = getgrnam("root");
+print "gr:", scalar(@g), ":$gid\n";
+');
+
 done_testing();
