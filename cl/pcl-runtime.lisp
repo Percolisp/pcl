@@ -7643,6 +7643,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  using (hash-value v)
                  when (and (symbolp k) (string= (symbol-name k) inv))
                  return v))))
+    ;; A typeglob is a filehandle designator (fileno(*STDOUT)): resolve by
+    ;; the glob's name.  p-make-typeglob stores the name ALREADY
+    ;; %pcl-invert-case'd (symbol case, "stdin"), so look up directly — the
+    ;; string branch would invert a second time.
+    ((p-typeglob-p fh)
+     (let* ((name (p-typeglob-name fh))
+            (sym  (find-symbol name :pcl)))
+       (or (and sym (gethash sym *p-filehandles*))
+           (loop for k being the hash-keys of *p-filehandles*
+                 using (hash-value v)
+                 when (and (symbolp k) (string= (symbol-name k) name))
+                 return v))))
     ((p-box-p fh)
      (let ((v (p-box-value fh)))
        (cond
@@ -7650,6 +7662,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          ((%p-socket-p v) v)
          ;; Scalar holding a handle NAME ('STDOUT', 'FOO'): resolve by name.
          ((stringp v) (%p-resolve-fh v))
+         ;; Ref-to-glob (\*STDOUT): unwrap to the glob designator.
+         ((p-typeglob-p v) (%p-resolve-fh v))
          (t nil))))
     (t nil)))
 
@@ -8967,13 +8981,17 @@ buffer's fill-pointer; everything else falls back to file-length."
     count))
 
 (defun %p-fileno-impl (fh)
-  "Perl fileno - get file descriptor number"
+  "Perl fileno - get file descriptor number.  Real fd via the fd-stream
+   behind the handle (following synonym streams); the std streams keep
+   their well-known numbers even when wrapped; -1 for in-memory handles
+   (perl's answer for scalar filehandles)."
   (let ((stream (p-get-stream fh)))
     (cond
+      ((%p-fd-of-stream stream))
       ((eq stream *standard-input*) 0)
       ((eq stream *standard-output*) 1)
       ((eq stream *error-output*) 2)
-      (t -1))))  ; CL doesn't expose fd numbers portably
+      (t -1))))
 
 (defmacro p-fileno (fh)
   "Perl fileno — bareword filehandle is auto-quoted."

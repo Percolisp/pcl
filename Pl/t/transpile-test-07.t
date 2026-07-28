@@ -139,4 +139,16 @@ my $x = 5;
 print lock($x) + 1, ":", scalar(@a), "\n";
 ');
 
+# #25: real fileno (fd-stream backed), glob/glob-ref filehandle
+# designators, and pure-perl POSIX::dup on top of them.
+test_transpile("fileno returns real fds; glob designators; POSIX::dup", '
+require POSIX;
+print "std:", fileno(\*STDIN), fileno(*STDOUT), fileno(STDERR), "\n";
+open my $fh, "<", "/etc/hostname" or die;
+print "real:", (fileno($fh) > 2 ? "y" : "n"), "\n";
+my $fd1 = POSIX::dup(fileno(\*STDOUT));
+my $fd2 = POSIX::dup(fileno(\*STDOUT));
+print "dup:", ($fd1 > 2 ? "y" : "n"), ($fd2 > $fd1 ? "y" : "n"), "\n";
+');
+
 done_testing();

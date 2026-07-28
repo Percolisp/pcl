@@ -45,6 +45,17 @@ sub pow   { $_[0] ** $_[1] }
 sub log2  { log($_[0]) / log(2) }
 sub log10 { log($_[0]) / log(10) }
 
+# File descriptors.  Pure-perl via the core dup-open: ">&" dups the fd and
+# wraps a handle; POSIX::dup returns a RAW fd that stays open, so the handle
+# is parked in @_dup_keep (dropping it would close the fd).
+our @_dup_keep;
+sub dup {
+    my $fd = shift;
+    open(my $fh, ">&", $fd) or return undef;
+    push @_dup_keep, $fh;
+    return fileno($fh);
+}
+
 # String conversion
 sub strtod { 0+$_[0] }
 sub strtol { (int($_[0]), 0) }
