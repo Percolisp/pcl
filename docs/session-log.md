@@ -4,6 +4,35 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316h (2026-07-28, Fable) — #25: hints.t blessed, full filetest family + $^W/$[ (gen v2-75), the lc-lookup parser bug, 6 GB server leak.
+
+- **comp/hints.t user-blessed not-supported** (lexical `$^H`/`%^H`
+  scoping; not-supported.md §Lexical compile-time hints + expected-tsv
+  row, verified XDIFF).
+- **Filetest family completed** (was only e/d/f/r/w/x/s/z): -l/-p/-S/
+  -b/-c/-u/-g/-k/-o/-O/-R/-W/-X/-M/-A/-C/-T/-B via sb-posix mode bits,
+  $^T age, perl's first-block text heuristic; `-t` is a `%p-fh-arg`
+  macro (undef → STDIN).  11-line oracle matrix matches perl exactly.
+- **Parser bug found by -M/-A**: `op_info`/`is_op_prefix` looked
+  operators up via `lc` — `-M`/`-A` are the only filetests with no
+  lowercase table twin, so they PARSE-ERRORED, and -C/-T/-S/-O/-R/-W/-X
+  only worked by landing on the other filetest's identical prec-52
+  entry.  Exact-match-first with lc fallback.
+- **$^W and $[** join %SPECIAL_VARS + inert runtime defvars ($^W = 1
+  used to write a phantom `$^w`; corpus-diff hit length.t only, A/B'd
+  vs HEAD = identical results).  Suite: op/filetest, op/tie_fetch_count,
+  run/switcht, uni/variables all run past their old file-killers.
+- **6 GB `pl2cl --server` leak (user spotted)**: two suite SBCLs wedged
+  in runaway regex compiles had DEFERRED TERM and outlived the run by
+  ~30 min; one held the p-eval transpiler server at 5.9 GB RSS after
+  ~1400 requests.  Runner now uses `timeout -k 10` (both legs); the
+  per-request memory growth is task #128.
+- Artifacts at v2-75; pack.t 5635/90 baseline; gate 123 files/4412
+  green (transpile-test-07.t new — per the user's rule, the biggest
+  test file bounds suite wall time, so new tests start a new file).
+
+---
+
 ## Session 316g (2026-07-28, Fable) — #25 suite work: post-s316f snapshot, range.t restored (#114), $^N + $10..$20 (gen v2-74).
 
 Full perl-suite re-run at s316f state: **45 OK / 31 NOTAP / 94 XDIFF /
