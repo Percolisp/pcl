@@ -14550,6 +14550,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun pl-WEXITSTATUS (status) (ash (logand (unbox status) #xff00) -8))
 (in-package :pcl)
 
+;; overload module stubs: overload::constant / overload::remove_constant
+;; install COMPILE-TIME constant-overloading handlers via %^H — the
+;; lexical-hints mechanism PCL does not model (user-blessed 2026-07-28:
+;; not-supported.md §Lexical compile-time hints).  Documented no-ops so a
+;; file using them runs its other tests instead of dying on an undefined
+;; function (re/overload.t).  Runtime `use overload` OPERATOR overloading
+;; is fully supported and unrelated (*p-overload-table*).
+(defpackage :overload (:use :cl :pcl))
+(in-package :overload)
+(defun pl-constant (&rest args) (declare (ignore args)) nil)
+(defun pl-remove_constant (&rest args) (declare (ignore args)) nil)
+(in-package :pcl)
+
 ;; Internals module stubs.  The package and the mixed-case function names MUST
 ;; match what the codegen emits under the :invert readtable: generated code uses
 ;; the package `Internals` (via p-defpackage, case-preserved — NOT the upcased

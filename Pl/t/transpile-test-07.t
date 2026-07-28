@@ -170,4 +170,14 @@ my $gid = getgrnam("root");
 print "gr:", scalar(@g), ":$gid\n";
 ');
 
+# overload::constant is the %^H compile-time mechanism (blessed
+# not-supported) — must be a harmless no-op, and runtime operator
+# overloading must be unaffected.
+test_transpile("overload::constant no-op; runtime overloading intact", '
+package S { use overload q{""} => sub { "STR" }; sub new { bless {}, shift } }
+overload::constant(integer => sub { $_[1] });
+my $o = S->new;
+print "x:$o:done\n";
+');
+
 done_testing();

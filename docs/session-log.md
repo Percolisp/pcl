@@ -4,6 +4,31 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316j (2026-07-28, Fable) — #25: real fileno + POSIX::dup, pwent family + grent context bugs, overload::constant stub (gen v2-77).
+
+- **fileno returns real fds** (%p-fd-of-stream behind the handle; std
+  streams keep 0/1/2; -1 stays the in-memory answer).  **Typeglobs and
+  \*GLOB refs are filehandle designators** in %p-resolve-fh — with the
+  trap that p-make-typeglob stores the name already :invert-cased, so
+  routing through the by-name string branch inverts twice (first
+  attempt resolved nil).  **POSIX::dup = pure perl in the shim** (core
+  dup-open + fileno, handles parked in @_dup_keep).  sselect.t 13→17.
+- **Passwd-database family** (getpwent/setpwent/endpwent/getpwuid/
+  getpwnam) mirroring grent — and the sibling exposed TWO LATENT grent
+  bugs: `&key wantarray` never passed by any call site (list context
+  never spread), and scalar getgrnam returned the name where perl
+  returns the GID.  All ten now default the key from `*wantarray*`.
+  **op/pwent.t AND op/grent.t fully OK** (were crash / silently wrong).
+- **overload::constant / remove_constant** = documented no-op stubs in
+  the runtime's package-stub section (they install %^H compile-time
+  handlers — the blessed-not-supported lexical-hints mechanism);
+  re/overload.t crash → runs (volume TIMEOUT).  op/ver.t runs 42/54
+  (residue: v-string alpha-version edge `unbound:|2_3|`).
+- Gate green throughout; artifacts v2-77; pack.t 5636/89.  Guards in
+  transpile-test-07.t (now 9 tests).
+
+---
+
 ## Session 316i (2026-07-28, Fable) — #25: Bareword:: package-string form, lock, fresh_perl stub (gen v2-76).
 
 - **`Pkg::` (trailing-:: bareword) = the package-name STRING** — every
