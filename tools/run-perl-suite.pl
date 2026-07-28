@@ -251,7 +251,7 @@ sub run_one {
   # Transpile with CWD = shadow so `require './test.pl'` prototype extraction
   # (cwd-first) reads the PCL stub, not perl's real harness.
   my $terr = system("ulimit -v 4194304 2>/dev/null; cd \Q$shadow\E && "
-                  . "timeout $timeout perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
+                  . "timeout -k 10 $timeout perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
                   . "> \Q$lisp\E 2>\Q$lisp\E.err");
   my $pcl = "";
   my $sbcl_exit = 0;
@@ -265,7 +265,10 @@ sub run_one {
     # fresh core doubles as the children's startup image.
     my $childenv = "PCLPERL=\Q$root\E/tools/pclperl-for-tests"
                  . ($core ? " PCL_TEST_CORE=\Q$core\E" : "");
-    system("cd \Q$shadow\E && $childenv timeout $timeout $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
+    # -k: an SBCL wedged in a runaway compile ignores/defers TERM and lives on
+    # PAST the run (s316h: two escaped SBCLs + their orphaned 6 GB pl2cl
+    # --server eval process); SIGKILL 10s after the TERM guarantees reaping.
+    system("cd \Q$shadow\E && $childenv timeout -k 10 $timeout $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
     $sbcl_exit = $? >> 8;
     $pcl = do { local $/; my $fh; open($fh, '<', $out) ? (<$fh> // '') : '' };
     $c_ok    = () = $pcl =~ /^ok /mg;
