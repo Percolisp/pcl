@@ -1245,3 +1245,43 @@ phase, nothing running beside it) and the sweep is contained in a
    cause (utf8cache dies after 2 tests on ordinary code; re/speed smells
    like cl-ppcre recursion on long strings).  Triage those separately as
    real bugs.
+
+## Lexical compile-time hints (`$^H` / `%^H` scoping)
+
+**Perl behavior:** `$^H` (hint bits) and `%^H` (the hints hash) are
+*compile-time lexically scoped*: a BEGIN block inside a `{ … }` scope can set
+`$^H |= bits` or `$^H{key} = val`, the values are visible while perl compiles
+the rest of that scope (including to `eval ""` at run time via the captured
+hints, and to `(caller)[8..10]`), and they are automatically RESTORED when
+compilation leaves the scope.  This is the mechanism every lexical pragma
+(`strict`, `warnings`, `feature`, user pragmas per perlpragma) is built on.
+`comp/hints.t` tests exactly this: set-inside-BEGIN, visibility during
+compilation, restoration at scope exit, `eval ""` capture, `%^H` not leaking
+into runtime.
+
+**PCL behavior:** `$^H` and `%^H` exist as inert always-bound GLOBALS (0 and
+an empty hash) so reads, writes, `\%^H` and `keys %^H` never crash — but
+there is no scoping: a write persists like any global write, nothing is
+restored at scope exit, and `eval ""` sees whatever the globals currently
+hold rather than a compile-time snapshot.
+
+**Why (user decision, 2026-07-28 s316h):** PCL transpiles a whole file ahead
+of time; it has no interleaved compile-run phase per scope, so honest `%^H`
+semantics would mean modeling per-scope compile-time state in the transpiler
+and threading captured hint snapshots into every sub, block and string-eval
+— deep machinery whose only real consumers are hand-rolled lexical pragmas.
+The pragmas real code uses (`strict`/`warnings`/`feature`) are handled by
+PCL directly (stubs/semantics), not via `%^H`, so the mechanism's absence
+does not block ordinary CPAN code.  Blessed as not-supported to keep the
+incompatibility-fix budget on families that do block CPAN code.
+
+**Effect:** `comp/hints.t` runs 17/31 (the passing rows are the unscoped
+reads/writes); expected-tsv row cites this section.  A CPAN module
+implementing its own lexical pragma via `%^H` + `(caller)[10]` would compile
+but its pragma would behave file-globally rather than lexically.
+
+**Revisit if:** a target CPAN module actually relies on `%^H` scoping
+(autodie, indirect, namespace::clean are the known heavy users) — at that
+point scope-tracked hint snapshots in the transpiler (a per-scope constant
+alist captured at transpile time, restored via unwind-protect at runtime
+scope exit) is the design sketch.
