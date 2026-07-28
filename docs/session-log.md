@@ -4,6 +4,32 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316i (2026-07-28, Fable) — #25: Bareword:: package-string form, lock, fresh_perl stub (gen v2-76).
+
+- **`Pkg::` (trailing-:: bareword) = the package-name STRING** — every
+  form (`tie $x, Pkg::`, `Pkg::->method`, `f(Pkg::)`, `$h{Pkg::}`,
+  `Pkg:: => 1`) lowered to a call to the undefined sub `pl-Pkg::`.
+  Normalized in `cleanup_for_parsing` — the point ALL parse routes
+  share; a parse()-level pre-pass missed the parse_list funcall-args
+  route — plus `_make_string_of_token_word` for the autoquote paths.
+  Guard: trailing-:: Word followed by a ::-leading Word is the s310c
+  split-qualified CALL shape (`Bear::::baz`), left for the merge pass —
+  the existing transpile-test-06 guard caught exactly this interaction.
+- **`lock`** = no-op builtin returning its arg (unthreaded perl);
+  **`fresh_perl`** added to the test.pl stub.  op/lock.t and
+  comp/parser_run.t (0→70 cases) now run; sselect/parser_run move to
+  next blockers (POSIX::dup shim gap; $00 invalid-perl cases).
+- **Reader-EOF crash family diagnosed** (alpha_assertions /
+  regex_sets_compat / regexp_normal, ~1858 cases in): the p-eval
+  SERVER's transpile response is read-from-string'd and hits EOF —
+  truncated/unbalanced response, suspect utf-8 char-count protocol
+  desync on surrogate-bearing regex evals.  Filed into task #128 with
+  the repro plan.
+- pack.t 5636/89 — one row BETTER than baseline.  Gate 123/4414 green,
+  corpus emission identical, artifacts v2-76.
+
+---
+
 ## Session 316h (2026-07-28, Fable) — #25: hints.t blessed, full filetest family + $^W/$[ (gen v2-75), the lc-lookup parser bug, 6 GB server leak.
 
 - **comp/hints.t user-blessed not-supported** (lexical `$^H`/`%^H`
