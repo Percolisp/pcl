@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316g (2026-07-28, Fable) — #25 suite work: post-s316f snapshot, range.t restored (#114), $^N + $10..$20 (gen v2-74).
+
+Full perl-suite re-run at s316f state: **45 OK / 31 NOTAP / 94 XDIFF /
+263 UNEXPLAINED** (from 43/31/91/268 at s316b) — the s316d–f fixes
+landed as expected (stash_parse_gv, tr_latin1, switchF2 → OK;
+fresh_perl, reg_eval, sigsystem → XDIFF rows).  20 TIMEOUT rows in that
+run overlapped my foreground test runs; a clean re-run is the
+authoritative snapshot (docs/perl-suite-run.tsv).  Three work items:
+
+- **#114 CLOSED — range.t fully passing again (62).**  The >100M
+  materialized-range guard in `p-..` died with PCL-specific text; perl
+  croaks `panic: memory wrap` when the count's byte size wraps size_t
+  and "Out of memory…" on allocation failure, and range.t's RT #130841
+  child (under PCL since s310f) matches on those texts.  The guard now
+  speaks them: past 2^61 elements → "panic: memory wrap", merely-huge →
+  "Out of memory during list extend".  The cheap error-text carve-out
+  (user 2026-07-28) applied.
+- **$^N + $10..$20 (gen v2-74)** — two unbound-variable FILE-KILLERS:
+  re/pat_advanced.t died at 58/1678 cases on `$^N`, re/pat_psycho.t on
+  `$10`.  High captures: defvar/export/clear/set beside $1..$9 (digits
+  are caseless under :invert, so no codegen change).  `$^N`: the
+  perlvar rule — participating capture with the RIGHTMOST CLOSING paren
+  (nested `/(a(b))/` → "ab" where $+ says "b") —
+  `%pcl-capture-closer-positions` parses the ppcre pattern once (escapes,
+  classes, /x comments, named-vs-(?: groups), lookbehind excluded), the
+  vector rides the scanner cache, set-match-vars picks max closer among
+  participants.  Codegen: `$^N` joins %SPECIAL_VARS pipe-quoted (the
+  documented $^P :invert trap).  7-case oracle repro exact;
+  pat_advanced now 684/334 (next blocker: `display` missing from the
+  test.pl stub); pat_psycho reaches cl-ppcre stack exhaustion (re/speed
+  family).  Artifacts regenerated at v2-74 (pack 5635/90 baseline, mro
+  byte-identical); corpus emission identical; gate green (4411).
+- **NEW Pl/t/transpile-test-07.t** (guards for all of the above) —
+  user rule this session: **the biggest test file bounds the parallel
+  suite's wall time; never grow the largest file** — test-06 is capped
+  at 50, new tests start -07.
+
+Also probed comp/hints.t (no longer the type-error crash family; runs
+17/14): the residue is genuine **lexical hint scoping** (`$^H`/`%^H`
+restore-on-scope-exit at compile time, eval-"" visibility) — PCL models
+hints as inert globals; needs a user decision (fix is deep) — and the
+old s309 "value N is not of type hash-table" family is stale in the
+triage doc.
+
+---
+
 ## Session 316f (2026-07-28, Fable) — task #126: pure-prototype subs lower natively + the watchdog forward-goto shape (gen v2-73).
 
 The #126 diagnosis held: v1's `_wrap_runtime_labels` loses the goto

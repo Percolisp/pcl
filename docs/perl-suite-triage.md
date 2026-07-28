@@ -1,4 +1,22 @@
-# perl-suite crash-family triage (s309, 2026-07-23; re-run s316b, 2026-07-27)
+# perl-suite crash-family triage (s309, 2026-07-23; re-runs s316b 2026-07-27, s316g 2026-07-28)
+
+**s316g re-runs (433 files, post-s316f then post-$^N/$10/display, gen
+v2-74): 45 OK, 31 NOTAP, 94 XDIFF, 20 TIMEOUT, 263 UNEXPLAINED** —
+snapshot in `docs/perl-suite-run.tsv` (the clean second run).  Moves vs
+s316b: io/errno.t and the s316d trio (stash_parse_gv/tr_latin1/switchF2)
+→ OK; fresh_perl/reg_eval/sigsystem → XDIFF rows; the $^N + $10..$20
+unlock (s316g) turned three early-crash files into full runs —
+re/charset.t 0→5497 cases (now TIMEOUT on volume), re/pat_advanced.t
+58→1630 cases (TIMEOUT on volume; `display` added to the test.pl stub
+was its second blocker — note perl's own display has a precedence bug,
+`chr $c =~ /…/` ≡ chr($c =~ …), so 32..255 print RAW and the stub is
+bug-compatible), re/pat_re_eval.t 32→524 cases (stays XDIFF,
+regex-code-blocks).  The 20 TIMEOUTs reproduce on a quiet machine —
+they are genuinely slow files (fold_grind*/regexp*/uni case-mapping
+families + the newly-unlocked volume runners), not contention.
+GOTCHA: a parallel run at a fresh cache generation can flake a row
+(op/stash_parse_gv.t read 1/4 in the full run, 5/0 OK solo) — solo
+re-run before believing a single-file drop.
 
 **s316b re-run (433 files): 43 OK, 31 NOTAP, 91 XDIFF, 268 UNEXPLAINED**
 — snapshot in `docs/perl-suite-run.tsv`.  Per-file against the s309 row
@@ -95,7 +113,7 @@ time with `tools/run-perl-suite.pl --all --tsv FILE`.
 | n | signature | files (sample) | verdict / next action |
 |---|-----------|----------------|----------------------|
 | 16 | `This Perl not built to support threads` | class/threads, op/*_thr, op/threads* | Oracle perl is unthreaded too (NOTAP both sides). Not a PCL gap; leave NOTAP. |
-| 10 | `type-error: The value N is not of type hash-table` | comp/hints, op/coreamp, re/reg_nc_tie, re/regex_sets | One runtime family: magic hashes (`%^H`, `%+`/`%-` named-capture ties) resolve to a number where a hash is expected. Investigate `%^H` first (comp/hints). |
+| 10 | `type-error: The value N is not of type hash-table` | comp/hints, op/coreamp, re/reg_nc_tie, re/regex_sets | **STALE (s316g)**: comp/hints.t no longer crashes — runs 17/14. Its residue is genuine LEXICAL HINT SCOPING (`$^H`/`%^H` restored at compile-time scope exit, eval-"" visibility); PCL models hints as inert globals — needs a user decision (deep fix vs not-supported bless). Re-triage the other three from the fresh faillogs. |
 | 8 | `sb-c::input-error-in-load: read error during load` | comp/require, op/groups, uni/attrs, uni/caller, uni/gv, uni/stash | **ELIMINATED s309–s310d** (never "in-harness only" — all reproduced standalone): unicode pkg pre-declaration + `for $main::x` (s309); trailing-:: package calls `Bear::::baz` via `_merge_split_qualified_words` (s310c); credential specials `$< $> $( $)` as pipe-quoted vars + gid strings via alien getgroups (s310d); `cl_name` reader-safety net — residual colons pipe-quote, bad shapes fail as ONE undef-fn, never a file-killer (s310d). Left: uni/gv = binding-stack-exhausted (separate); unicode stash access `$온ꪵ::{…}` parses wrong (PPI one-Symbol gap, §symbol-table-hashes deferred). |
 | 6 | `invalid number of arguments: N` | io/fs, op/current_sub, op/evalbytes, op/mkdir, op/sselect, op/sysio | **FIXED s310** (bare mkdir/rmdir `$_`, sysread/syswrite offsets+errors, chown(), 4-arg select, evalbytes named-unary). current_sub.t = deferred `__SUB__` → expected-tsv. Survivors show distinct next blockers (sysio unbound:I; sselect in-harness read-error; fs tempfile-vs-dir stub collision). |
 | 6 | `Can't locate loadable object for module this module` | op/coresubs, op/hash-*, op/svflags, run/locale | Tests loading XS at runtime (XS::APItest-style). XS gap → pclxs (docs/xs-shim-design.md). Expected-tsv rows once confirmed. |
