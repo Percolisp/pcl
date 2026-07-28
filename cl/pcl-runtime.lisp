@@ -240,7 +240,8 @@
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
-   #:|$&| #:|$`| #:|$'| #:|$+| #:|@-| #:|@+| #:|%-| #:|$^H| #:|%^H|
+   #:$10 #:$11 #:$12 #:$13 #:$14 #:$15 #:$16 #:$17 #:$18 #:$19 #:$20
+   #:|$&| #:|$`| #:|$'| #:|$+| #:|$^N| #:|@-| #:|@+| #:|%-| #:|$^H| #:|%^H|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M|
@@ -716,10 +717,28 @@
 (defvar $7 *p-undef* "Regex capture group 7")
 (defvar $8 *p-undef* "Regex capture group 8")
 (defvar $9 *p-undef* "Regex capture group 9")
+;; High capture groups.  Codegen emits $10.. as bare symbols (digits are
+;; caseless under :invert), so exporting these makes them resolve here.
+;; Patterns with more than 20 groups leave $21+ unbound (unseen in practice).
+(defvar $10 *p-undef* "Regex capture group 10")
+(defvar $11 *p-undef* "Regex capture group 11")
+(defvar $12 *p-undef* "Regex capture group 12")
+(defvar $13 *p-undef* "Regex capture group 13")
+(defvar $14 *p-undef* "Regex capture group 14")
+(defvar $15 *p-undef* "Regex capture group 15")
+(defvar $16 *p-undef* "Regex capture group 16")
+(defvar $17 *p-undef* "Regex capture group 17")
+(defvar $18 *p-undef* "Regex capture group 18")
+(defvar $19 *p-undef* "Regex capture group 19")
+(defvar $20 *p-undef* "Regex capture group 20")
 (defvar |$&| nil "Regex MATCH - the whole matched string")
 (defvar |$`| nil "Regex PREMATCH - everything before the match")
 (defvar |$'| nil "Regex POSTMATCH - everything after the match")
 (defvar |$+| nil "Regex - last (highest-numbered) capture group that matched")
+(defvar |$^N| nil
+  "Perl $^N - the participating capture group whose closing parenthesis is
+   rightmost in the pattern (perlvar).  Set by set-match-vars from the
+   closer-position vector cached with the scanner.")
 (defvar %+ (make-hash-table :test 'equal) "Perl %+ - named regex captures")
 (defvar |%-| (make-hash-table :test 'equal)
   "Perl %- - named regex captures, each value an ARRAY of all buffers with
@@ -10101,7 +10120,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-73"
+(defparameter *pcl-cache-generation* "v2-74"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -13592,15 +13611,69 @@ buffer's fill-pointer; everything else falls back to file-length."
    scan), so sharing one is safe.  The cache is per-process; PCL runs one program
    per image, so distinct patterns are bounded and there is no staleness.")
 
+(defun %pcl-capture-closer-positions (pattern &optional extended-p)
+  "Vector mapping capture group N-1 to the position of its closing paren in
+   PATTERN.  Drives $^N (perlvar: the participating group with the rightmost
+   closing parenthesis).  Skips escapes, char classes and, with EXTENDED-P,
+   #-comments; non-capturing (?…) groups pair up via a 0 marker."
+  (let ((opens nil)
+        (closers (make-array 4 :adjustable t :fill-pointer 0))
+        (in-class nil)
+        (i 0)
+        (len (length pattern)))
+    (loop
+     (when (>= i len) (return closers))
+     (let ((c (char pattern i)))
+       (cond
+         ((char= c #\\) (incf i))
+         (in-class (when (char= c #\]) (setf in-class nil)))
+         ((char= c #\[) (setf in-class t))
+         ((and extended-p (char= c #\#))
+          (loop while (and (< (1+ i) len)
+                           (char/= (char pattern (1+ i)) #\Newline))
+                do (incf i)))
+         ((char= c #\()
+          (if (%pcl-capturing-paren-p pattern i len)
+              (progn
+                (vector-push-extend -1 closers)
+                (push (fill-pointer closers) opens))
+              (push 0 opens)))
+         ((char= c #\))
+          (let ((g (pop opens)))
+            (when (and g (> g 0))
+              (setf (aref closers (1- g)) i))))))
+     (incf i))))
+
+(defun %pcl-capturing-paren-p (pattern i len)
+  "Is the ( at position I in PATTERN a capturing group opener?
+   Capturing: plain (, and the named forms (?<name> (?'name' (?P<name>.
+   Non-capturing: every other (?… — including lookbehind (?<= / (?<!."
+  (if (or (>= (1+ i) len) (char/= (char pattern (1+ i)) #\?))
+      t
+      (and (< (+ i 2) len)
+           (let ((c2 (char pattern (+ i 2))))
+             (or (char= c2 #\')
+                 (and (char= c2 #\<)
+                      (< (+ i 3) len)
+                      (char/= (char pattern (+ i 3)) #\=)
+                      (char/= (char pattern (+ i 3)) #\!))
+                 (and (char= c2 #\P)
+                      (< (+ i 3) len)
+                      (char= (char pattern (+ i 3)) #\<)))))))
+
 (defun %pcl-create-scanner (pattern options)
-  "Memoized %pcl-build-scanner.  Returns (values scanner reg-names)."
+  "Memoized %pcl-build-scanner.  Returns (values scanner reg-names closers);
+   CLOSERS is the %pcl-capture-closer-positions vector for $^N."
   (let* ((key (format nil "~A~C~{~A~^ ~}" pattern #\Nul options))
          (hit (gethash key *pcl-scanner-cache*)))
     (if hit
-        (values (car hit) (cdr hit))
+        (values (first hit) (second hit) (cddr hit))
         (multiple-value-bind (scanner reg-names) (%pcl-build-scanner pattern options)
-          (setf (gethash key *pcl-scanner-cache*) (cons scanner reg-names))
-          (values scanner reg-names)))))
+          (let ((closers (%pcl-capture-closer-positions
+                          pattern (getf options :extended-mode))))
+            (setf (gethash key *pcl-scanner-cache*)
+                  (list* scanner reg-names closers))
+            (values scanner reg-names closers))))))
 
 (defun build-ppcre-options (modifiers)
   "Convert Perl regex modifiers to CL-PPCRE options plist"
@@ -13621,13 +13694,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    into a list (%p-flatten-list treats raw nil as an empty-list/hole marker)."
   (setf $1 *p-undef* $2 *p-undef* $3 *p-undef* $4 *p-undef* $5 *p-undef*
         $6 *p-undef* $7 *p-undef* $8 *p-undef* $9 *p-undef*
-        |$&| nil |$`| nil |$'| nil |$+| nil)
+        $10 *p-undef* $11 *p-undef* $12 *p-undef* $13 *p-undef*
+        $14 *p-undef* $15 *p-undef* $16 *p-undef* $17 *p-undef*
+        $18 *p-undef* $19 *p-undef* $20 *p-undef*
+        |$&| nil |$`| nil |$'| nil |$+| nil |$^N| nil)
   (clrhash %+)
   (clrhash |%-|))
 
-(defun set-match-vars (str match-start match-end reg-starts reg-ends)
-  "Set the match position variables from a successful match:
-   $& (MATCH), $` (PREMATCH), $' (POSTMATCH), and $+ (last capture that matched)."
+(defun set-match-vars (str match-start match-end reg-starts reg-ends
+                       &optional closers)
+  "Set the match position variables from a successful match: $& (MATCH),
+   $` (PREMATCH), $' (POSTMATCH), $+ (last capture that matched) and
+   $^N (rightmost-closing participating capture, from the CLOSERS vector
+   cached by %pcl-create-scanner; without it, falls back to $+'s rule)."
   (when (and match-start match-end)
     (setf |$&| (subseq str match-start match-end)
           |$`| (subseq str 0 match-start)
@@ -13638,7 +13717,19 @@ buffer's fill-pointer; everything else falls back to file-length."
           do (let ((rs (aref reg-starts i)) (re (aref reg-ends i)))
                (when (and rs re)
                  (setf |$+| (subseq str rs re))
-                 (return)))))
+                 (return))))
+    ;; $^N = participating group with the rightmost closing paren (perlvar)
+    (let ((best -1)
+          (best-pos -1))
+      (dotimes (i (length reg-starts))
+        (when (and (aref reg-starts i) (aref reg-ends i))
+          (let ((pos (if (and closers (< i (length closers)))
+                         (aref closers i)
+                         i)))
+            (when (> pos best-pos)
+              (setf best-pos pos best i)))))
+      (when (>= best 0)
+        (setf |$^N| (subseq str (aref reg-starts best) (aref reg-ends best))))))
   ;; @- / @+ : offset arrays.  Element 0 is the whole-match start/end; element
   ;; N (1-based) is capture group N's start/end (nil for groups that did not
   ;; participate).  Perl truncates after the LAST participating group ($#- =
@@ -13688,6 +13779,17 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when (> num-groups 6) (%set-cap $7 str reg-starts reg-ends 6))
       (when (> num-groups 7) (%set-cap $8 str reg-starts reg-ends 7))
       (when (> num-groups 8) (%set-cap $9 str reg-starts reg-ends 8))
+      (when (> num-groups 9) (%set-cap $10 str reg-starts reg-ends 9))
+      (when (> num-groups 10) (%set-cap $11 str reg-starts reg-ends 10))
+      (when (> num-groups 11) (%set-cap $12 str reg-starts reg-ends 11))
+      (when (> num-groups 12) (%set-cap $13 str reg-starts reg-ends 12))
+      (when (> num-groups 13) (%set-cap $14 str reg-starts reg-ends 13))
+      (when (> num-groups 14) (%set-cap $15 str reg-starts reg-ends 14))
+      (when (> num-groups 15) (%set-cap $16 str reg-starts reg-ends 15))
+      (when (> num-groups 16) (%set-cap $17 str reg-starts reg-ends 16))
+      (when (> num-groups 17) (%set-cap $18 str reg-starts reg-ends 17))
+      (when (> num-groups 18) (%set-cap $19 str reg-starts reg-ends 18))
+      (when (> num-groups 19) (%set-cap $20 str reg-starts reg-ends 19))
       ;; Populate %+ with named captures
       ;; reg-names is a list from cl-ppcre:create-scanner, e.g. ("year" "month" NIL)
       (when reg-names
@@ -13730,7 +13832,7 @@ buffer's fill-pointer; everything else falls back to file-length."
               (t (write-char c out) (incf i)))))
     (get-output-stream-string out)))
 
-(defun %pcl-scan-anchored-list (scanner str reg-names start)
+(defun %pcl-scan-anchored-list (scanner str reg-names start &optional closers)
   "Emulate /\\G.../g in list context: collect contiguous matches starting at
    START, stopping at the first position where the pattern does not match exactly
    there.  Returns an adjustable vector of capture strings (whole matches when the
@@ -13755,7 +13857,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when any
         (clear-capture-groups)
         (set-capture-groups str last-rs last-re reg-names)
-        (set-match-vars str last-ms last-me last-rs last-re))
+        (set-match-vars str last-ms last-me last-rs last-re closers))
       result)))
 
 (defun do-regex-match (string op)
@@ -13779,7 +13881,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (global-p (getf modifiers :g))
          (cont-p (getf modifiers :c)))
     (handler-case
-        (multiple-value-bind (scanner reg-names)
+        (multiple-value-bind (scanner reg-names closers)
             (%pcl-create-scanner pattern options)
           ;; Perl clears %+/%- on every match attempt, even failures.
           ;; $1..$9 are only cleared/set on successful matches.
@@ -13790,7 +13892,8 @@ buffer's fill-pointer; everything else falls back to file-length."
             ((and global-p (eq *wantarray* t) anchored-g)
              (prog1
                  (%pcl-scan-anchored-list scanner str reg-names
-                                          (or (gethash string *p-match-pos*) 0))
+                                          (or (gethash string *p-match-pos*) 0)
+                                          closers)
                ;; Perl resets pos() after a list-context /g match exhausts.  This
                ;; path STARTS from pos, so leaving a stale pos would make a
                ;; `while (pos < len) { @m = /\G.../g }` loop never terminate;
@@ -13816,7 +13919,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (when items
                    (clear-capture-groups)
                    (set-capture-groups str last-rs last-re reg-names)
-                   (set-match-vars str last-ms last-me last-rs last-re))
+                   (set-match-vars str last-ms last-me last-rs last-re closers))
                  result)))
             ;; /g in scalar/void context: iterate from current pos
             ((and global-p (not (eq *wantarray* t)))
@@ -13831,7 +13934,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                        (setf (gethash string *p-match-pos*) match-end)
                        (clear-capture-groups)
                        (set-capture-groups str reg-starts reg-ends reg-names)
-                       (set-match-vars str match-start match-end reg-starts reg-ends)
+                       (set-match-vars str match-start match-end reg-starts reg-ends
+                                       closers)
                        t)
                      (progn
                        (unless cont-p
@@ -13849,7 +13953,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (progn
                        (clear-capture-groups)
                        (set-capture-groups str reg-starts reg-ends reg-names)
-                       (set-match-vars str match-start match-end reg-starts reg-ends)
+                       (set-match-vars str match-start match-end reg-starts reg-ends
+                                       closers)
                        (if (eq *wantarray* t)
                            (let* ((num-groups (length reg-starts))
                                   (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
@@ -13913,7 +14018,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                                 (when single-line '(:single-line-mode t))
                                 (when multi-line '(:multi-line-mode t))
                                 (when extended '(:extended-mode t)))))
-          (multiple-value-bind (scanner reg-names)
+          (multiple-value-bind (scanner reg-names closers)
               (%pcl-create-scanner pattern options)
             (let* ((count 0)
                    (result nil))
@@ -13955,7 +14060,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                       (when match-start
                         (clear-capture-groups)
                         (set-capture-groups str reg-starts reg-ends reg-names)
-                        (set-match-vars str match-start match-end reg-starts reg-ends)))
+                        (set-match-vars str match-start match-end reg-starts reg-ends
+                                        closers)))
                     ;; Perform the substitution
                     (setf result (if global-p
                                      (cl-ppcre:regex-replace-all scanner str replacement)

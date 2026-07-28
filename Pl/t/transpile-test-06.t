@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 # Transpile tests part 6: embedded-block structured lowering (task #78) and
-# onward.  NEW TESTS GO HERE (or a future -07) — 04b and earlier are large
-# and slow (one SBCL spawn per test); keep per-file test counts small.
+# onward.  FULL at 50 tests — new tests go in transpile-test-07.t: the
+# BIGGEST file bounds the parallel suite's wall time (one SBCL spawn per
+# test), so start a new file instead of growing the current largest.
 
 use v5.30;
 use strict;
@@ -578,15 +579,6 @@ w(7);
 test_transpile("standalone label in tail position keeps the sub value", '
 sub tailval { my $x = shift; if ($x) { goto DONE; } my $y = 2; DONE: "tail-$x" }
 print tailval(1), "|", tailval(0), "\n";
-');
-
-# Task #114 (range.t 162, RT #130841): a range whose byte size wraps
-# size_t must croak in perl's "panic: memory wrap|Out of memory" family,
-# not a PCL-specific overflow message.
-test_transpile("huge range croak speaks perl's memory-wrap family", '
-my $max_iv = (~0 >> 1);
-eval { my @range = 1..($max_iv - 1); };
-print "err:", (($@ =~ /panic: memory wrap|Out of memory/) ? "wrap-family" : "other:$@"), "\n";
 ');
 
 done_testing();

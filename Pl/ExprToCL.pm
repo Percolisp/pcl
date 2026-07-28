@@ -304,6 +304,7 @@ my %SPECIAL_VARS = (
   '$^F' => '|$^F|',   # SYSTEM_FD_MAX
   '$^M' => '|$^M|',   # emergency memory pool
   '$^R' => '|$^R|',   # last (?{...}) result
+  '$^N' => '|$^N|',   # most-recently-closed participating capture group
 );
 
 # Generate CL operator/function name from Perl name
