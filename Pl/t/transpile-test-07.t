@@ -114,4 +114,29 @@ print "W:$^W\n";
 unlink "$d/ln", "$d/f.txt"; rmdir $d;
 ');
 
+# #25 suite family: perl's `Bareword::` package-name-string form —
+# `Foo::` eq "Foo" in term position, as a method-call invocant, as a
+# funcall argument (a separate parse route), as a hash key, and after a
+# fat comma.  Normalized in cleanup_for_parsing (all parse routes) +
+# _make_string_of_token_word (the autoquote paths).
+test_transpile("Bareword:: package-name string form", '
+package Foo { sub new { bless {}, shift } sub who { ref($_[0]) || $_[0] } }
+print Foo::, "|", main::, "\n";
+print Foo::->new->who, "|", Foo::->who, "\n";
+sub takes { return $_[0] }
+print takes(Foo::), "\n";
+my %h = (Foo => 1, "Foo::" => 2);
+print $h{Foo::}, "|";
+my %g = (Foo:: => 5);
+print join(",", keys %g), "\n";
+');
+
+# lock: a no-op on unthreaded perl (op/lock.t crashed on undefined pl-lock)
+test_transpile("lock is a no-op that returns its argument", '
+my @a = (1,2,3);
+lock @a;
+my $x = 5;
+print lock($x) + 1, ":", scalar(@a), "\n";
+');
+
 done_testing();

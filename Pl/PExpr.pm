@@ -3981,6 +3981,34 @@ sub _merge_split_qualified_words {
   }
 }
 
+# Perl's `Bareword::` form: a bareword ENDING in :: evaluates to the package
+# name as a string ("Foo::" eq "Foo", "Foo::Bar::" eq "Foo::Bar") — used as
+# `tie $x, Pkg::` or `Pkg::->method` to name a class unambiguously.  Left
+# alone, handle_subcalls turns the Word into an (undefined) function call
+# pl-Foo::.  Replace it with the string literal up front; a method call on
+# the string ("Foo"->method) is exactly perl's semantics for `Foo::->method`.
+sub _stringify_trailing_colon_package {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e); $i++) {
+    my $tok = $e->[$i];
+    next unless ref($tok) eq 'PPI::Token::Word'
+             && $tok->content =~ /^(\w+(?:::\w+)*)::$/;
+    my $name = $1;
+    # Statement heads (sub/package Foo::) never parse through here, but a
+    # quoted class after them would be nonsense — guard anyway.
+    my $prev = $i > 0 ? $e->[$i - 1] : undef;
+    next if defined $prev && ref($prev) eq 'PPI::Token::Word'
+         && $prev->content =~ /^(?:sub|package)$/;
+    # `Bear::::baz` reaches PPI as Word "Bear::" + Word "::baz" — that pair
+    # is a CALL into the ::-suffixed package, glued later by
+    # _merge_split_qualified_words (which runs after cleanup).  Leave it.
+    my $next = $e->[$i + 1];
+    next if defined $next && ref($next) eq 'PPI::Token::Word'
+         && $next->content =~ /^::/;
+    splice @$e, $i, 1, PPI::Token::Quote::Single->new("'$name'");
+  }
+}
+
 sub _default_filetest_operand {
   my ($self, $e) = @_;
   for (my $i = 0; $i < scalar(@$e); $i++) {
@@ -4866,6 +4894,10 @@ sub cleanup_for_parsing {
   # instead of a glob. Reconstruct glob tokens from < PATTERN > sequences.
   @no_ws = $self->_fix_ppi_glob_after_block(\@no_ws);
 
+  # `Bareword::` = the package-name string; normalize here so EVERY parse
+  # route (parse() and parse_list()) sees the string literal.
+  $self->_stringify_trailing_colon_package(\@no_ws);
+
   for(my $i=0; $i < scalar(@no_ws); $i++) {
     my $part    = $no_ws[$i];
 
@@ -5142,6 +5174,9 @@ sub _make_string_of_token_word {
   my $tokenword = shift;
 
   my $str       = $tokenword->content();
+  # `Bareword::` is the package-name string even where autoquoting applies:
+  # $h{Foo::} and (Foo:: => 1) both mean the key "Foo", not "Foo::".
+  $str          =~ s/^(\w+(?:::\w+)*)::$/$1/;
   my $strobj    = PPI::Token::Quote::Double->new('"' . $str . '"');
   $strobj->{separator} = '"';      # Can't do that in the API?
   return $strobj;

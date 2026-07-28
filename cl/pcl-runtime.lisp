@@ -193,7 +193,7 @@
    #:p--l #:p--p #:p--S #:p--b #:p--c #:p--u #:p--g #:p--k
    #:p--o #:p--O #:p--R #:p--W #:p--X #:p--M #:p--A #:p--C
    #:p--T #:p--B #:p--t
-   #:p-unlink #:p-fileno #:p-getc #:p-readline #:*p-filehandles*
+   #:p-unlink #:p-lock #:p-fileno #:p-getc #:p-readline #:*p-filehandles*
    ;; Directory I/O
    #:p-opendir #:p-readdir #:p-closedir #:p-rewinddir
    ;; File glob
@@ -8952,6 +8952,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl -t: bareword filehandle is auto-quoted (like p-fileno)."
   `(%p--t-impl (%p-fh-arg ,fh)))
 
+(defun p-lock (x)
+  "Perl lock: a no-op returning its argument on an unthreaded perl (which
+   this is — 'This Perl not built to support threads')."
+  x)
+
 (defun p-unlink (&rest files)
   "Perl unlink - delete files. Returns count of files deleted."
   (let ((count 0))
@@ -10268,7 +10273,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-75"
+(defparameter *pcl-cache-generation* "v2-76"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

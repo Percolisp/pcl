@@ -90,6 +90,13 @@ sub _fresh_perl_run {
 }
 
 # fresh_perl_* run code in a real Perl subprocess for accurate results
+# fresh_perl - the bare runner (perl's own test.pl exposes it too):
+# run CODE in a fresh child, return its normalized output.
+sub fresh_perl {
+    my ($code, $opts) = @_;
+    return _fresh_perl_run($code, $opts // {});
+}
+
 sub fresh_perl_is {
     my ($code, $expected, $opts, $desc) = @_;
     $opts //= {};
