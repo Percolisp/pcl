@@ -4,6 +4,34 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316p (2026-07-30, Fable) — #25 CPAN-suite half: scoreboard tool, zero-regression verdict vs s304, Try::Tiny DESTROY-free shim.
+
+- **`tools/cpan-scoreboard.pl` (new)** — the release plan's phase-0 tool:
+  runs a dist's whole t/ through run-dist-t.pl in a fork pool, classifies
+  PASS/PARTIAL/FAIL mechanically.  Baseline table now in
+  `docs/cpan-module-log.md` (supersedes the hand-tallied s276b/s304 counts).
+- **Zero per-file regressions vs the s304 baseline compiler** (worktree at
+  57013d7): every Try-Tiny and Role-Tiny candidate file scores identically
+  there; the apparent PASS→PARTIAL drifts in the dist totals were tally
+  methodology.  Scalar-List-Utils 8/22/8→12/20/6 and Sub-Uplevel
+  2/2/6→2/5/3 both IMPROVED since s304.
+- **`lib/Try/Tiny.pm` shim** (user-noted idea from s2xx, now done): upstream
+  `finally` = scope-guard DESTROY, which PCL's GC never fires, so finallys
+  silently never ran.  Shim calls them directly on the success / failure /
+  catch-died paths; `$@` untouched after try (each internal eval{} clears
+  $@ — every non-die exit restores it); finally exceptions warned, not
+  propagated.  finally.t 11 ok / 4 notok → 29/1; context.t 13→25/0.  Known
+  limit (in the shim header): a non-local exit out of try (Test::More
+  `skip` = `last SKIP`) bypasses the direct calls — only DESTROY sees that
+  unwind (finally.t t30, the 1 residual).  Guard in transpile-test-07.t
+  (gate 123/4427).
+- Role-Tiny's 6 FAIL files all crash on role application not installing
+  composed methods (cluster C) → task #135, the measured top blocker.
+- Sequencing note: the tap_map lesson from s316o applied here too — verify
+  the MEASUREMENT before believing a drift.
+
+---
+
 ## Session 316o (2026-07-29, Fable) — #25 op/signatures.t CLOSED OUT: tap_map fix, :prototype attribute + real prototype(), __SUB__/nested-sig/comment-sig, file blessed XDIFF (gen v2-83).
 
 - **Suite runner tap_map bug (bc0490a):** `\s*` after the test number ate

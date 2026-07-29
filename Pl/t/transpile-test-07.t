@@ -352,4 +352,30 @@ print( (eval { t086() } // "die-few"), "\n");
 print( (eval { t086(1,2,3) } // "die-many"), "\n");
 ');
 
+# lib/Try/Tiny.pm shim: finally runs by DIRECT CALL (success path no args,
+# failure path gets the error, still runs when catch itself dies, exceptions
+# inside finally are warned not propagated), $@ is untouched after try, and
+# try/catch keep their context split.  Upstream runs finallys from a
+# DESTROY scope guard PCL cannot fire.
+test_transpile("Try::Tiny shim: finally direct-call semantics", '
+use Try::Tiny;
+my @log;
+my $r = try { "ok-val" } finally { push @log, "fin:@_" };
+push @log, "r=$r";
+try { die "boom\n" } catch { push @log, "caught:$_" } finally { push @log, "fin2:$_[0]" };
+$@ = "keepme";
+try { 42 };
+push @log, "at:$@";
+my $out = eval {
+  try { die "a\n" } catch { die "b\n" } finally { push @log, "fin3:$_[0]" };
+  1;
+};
+push @log, "rethrow:$@" if !$out;
+{
+  local $SIG{__WARN__} = sub { push @log, "warned" if $_[0] =~ /CAN NOT BE PROPAGATED/ };
+  try { 1 } finally { die "finboom\n" };
+}
+print map { s/\n/./gr . "\n" } @log;
+');
+
 done_testing();

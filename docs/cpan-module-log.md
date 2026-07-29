@@ -10,6 +10,32 @@ Status legend: ✅ works · 🟡 partial · ❌ blocked · 🔧 fixed-this-sessi
 
 ---
 
+## CPAN suite scoreboard 2026-07-30 (s316p, gen v2-83) — MECHANICAL BASELINE
+
+First run of `tools/cpan-scoreboard.pl` (new; wraps run-dist-t.pl over a
+dist's whole t/, classifies PASS = ok>0 && notok==0 && rc==0, PARTIAL = ok>0
+otherwise, FAIL = ok==0).  These counts supersede the hand-tallied s304/s276b
+baselines — per-file drift-checks against a worktree at the s304 commit
+(57013d7) showed **zero per-file regressions**; every count difference vs the
+old tallies is classification methodology (e.g. skip-all / 0-ok files).
+
+| dist | PASS | PARTIAL | FAIL | notes |
+|------|------|---------|------|-------|
+| Try-Tiny-0.32 (post-shim) | 4 | 4 | 3 | 🔧 `lib/Try/Tiny.pm` shim (below); finally.t 11 ok→29/1, context.t 13→25/0, basic.t 24/1. Residual: named.t (subname introspection), given_when (§given/when), global_destruction_load (GC DESTROY), 00-report-prereqs (CPAN::Meta), erroneous_usage t6 (misuse-detection parse shape), finally.t t30 (skip = non-local exit, see shim header). |
+| Role-Tiny-2.002004 | 9 | 8 | 6 | all 6 FAIL = role application not installing composed methods (cluster C, task #135) |
+| Scalar-List-Utils-1.70 | 12 | 20 | 6 | was 8/22/8 at s304 — improved; subname.t = timeout (rc 124) |
+| Sub-Uplevel-0.2800 | 2 | 5 | 3 | was 2/2/6 at s304 — improved (3 FAIL→PARTIAL) |
+
+**🔧 Try::Tiny shimmed (`lib/Try/Tiny.pm`)**: upstream runs `finally` from a
+scope-guard DESTROY that PCL's GC never fires — the finallys silently never
+ran.  The shim calls them directly (success/failure/catch-died paths, `$@`
+untouched after try, exceptions in finally warned not propagated).  Known
+limit: a non-local exit out of try (Test::More `skip` = `last SKIP`) skips
+the finallys — only DESTROY can see that unwind.  Guard test in
+`Pl/t/transpile-test-07.t`.
+
+---
+
 ## Module survey 2026-06-23 (session after s264) — 3 general bugs fixed
 
 Batch-tested core/CPAN modules through `./runpl`. Most work
