@@ -227,10 +227,14 @@ system("rm -rf \Q$faillog\E");
 mkdir $faillog;
 
 # TAP stream -> { test-number => [verb, description] }.
+# Horizontal whitespace ONLY after the number: \s there matches the newline of
+# a description-less line ("ok 3\n"), swallowing the NEXT TAP line as the
+# description and reporting its test number as (missing) — 421 phantom rows
+# on op/signatures.t (s316o).
 sub tap_map {
   my ($out) = @_;
   my %m;
-  while ($out =~ /^(not ok|ok)\s+(\d+)\s*[-#]?\s*([^\n]*)$/mg) {
+  while ($out =~ /^(not ok|ok)[ \t]+(\d+)[ \t]*[-#]?[ \t]*([^\n]*)$/mg) {
     $m{$2} = [$1, $3];
   }
   return \%m;
