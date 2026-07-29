@@ -12879,8 +12879,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; p-__pcl_set-prototype, which the transpiler's :prototype(...) attribute
 ;; desugar emits (and lib/Sub/Util.pm's set_prototype calls).  Subs without a
 ;; registered prototype report undef — signatures never register one, matching
-;; perl (a signature is not a prototype).
-(defvar %pcl-sub-prototypes (make-hash-table :test #'eq))
+;; perl (a signature is not a prototype).  Weak by key (like
+;; *p-lazy-coderef-target*): a dropped anon coderef must not be pinned by its
+;; prototype entry.
+(defvar %pcl-sub-prototypes (make-hash-table :test #'eq :weakness :key))
 
 (defun %p-code-function (val)
   "Unwrap a code-ref value (box / blessed double-box / symbolic name) to the
