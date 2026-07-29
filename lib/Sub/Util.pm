@@ -3,9 +3,10 @@
 # under the same terms as the Perl 5 programming language system itself.
 #
 # Pure-Perl shim for Sub::Util.  The real module is XS (it borrows
-# List::Util's compiled core).  PCL cannot rename a compiled CL closure or
-# read a Perl prototype off a code ref, but the *return contract* of these
-# functions is what callers actually depend on:
+# List::Util's compiled core).  PCL cannot rename a compiled CL closure;
+# prototypes ARE tracked (the runtime registry behind __pcl_set_prototype /
+# CORE::prototype), and the *return contract* of these functions is what
+# callers depend on:
 #
 #   set_subname / set_prototype return the SAME code ref back, so they can be
 #   chained (`set_subname name => set_prototype '&@' => sub {...}`).
@@ -35,14 +36,14 @@ sub prototype {
     return CORE::prototype($code);
 }
 
+sub set_prototype {
+    my ($proto, $code) = @_;
+    return __pcl_set_prototype($code, $proto);
+}
+
 # Renaming a CL closure is not supported; the name is cosmetic (it only
 # affects how the sub reports itself to caller()/debuggers).  Return the
 # code ref unchanged so chaining works.
-sub set_prototype {
-    my ($proto, $code) = @_;
-    return $code;
-}
-
 sub subname {
     my ($code) = @_;
     return '__ANON__';

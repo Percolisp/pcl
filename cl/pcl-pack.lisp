@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-81
+;;; pcl: pipeline=v2 gen=v2-82
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -2143,7 +2143,8 @@
                                     (p-while
                                       (p-&& (p-< $done $n) (p-< (p-cast-$ $si_ref) $slen))
                                       (p-funcall-ref $push_val
-                                        (pl-_unpack_utf8_char $s $si_ref))
+                                        (let ((*wantarray* t))
+                                          (pl-_unpack_utf8_char $s $si_ref)))
                                       (p-post++ $done))))))
                             (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "W"))
                               (setf --pcl-if-ret--2
@@ -2157,7 +2158,8 @@
                                             (p-< (p-cast-$ $si_ref) $slen)))
                                         ((p-incf-raw $i__cond__10))
                                         (p-funcall-ref $push_val
-                                          (p-ord (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1))))))))
+                                          (let ((*wantarray* t))
+                                            (p-ord (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1)))))))))
                               (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "w"))
                                 (setf --pcl-if-ret--2
                                   (progn
@@ -2490,11 +2492,12 @@
                                                                       $slen)))
                                                                 ((p-incf-raw $i__cond__11))
                                                                 (p-funcall-ref $push_val
-                                                                  (pl-_unpack_read_int $s
-                                                                    (p-cast-$ $si_ref)
-                                                                    $dnb
-                                                                    $dbe3
-                                                                    $dsig))
+                                                                  (let ((*wantarray* t))
+                                                                    (pl-_unpack_read_int $s
+                                                                      (p-cast-$ $si_ref)
+                                                                      $dnb
+                                                                      $dbe3
+                                                                      $dsig)))
                                                                 (p-incf (p-cast-$ $si_ref)
                                                                   $dnb)))))
                                                         (p-if
@@ -2694,11 +2697,12 @@
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (pl-_unpack_read_int $s
-                                                (p-cast-$ $si_ref)
-                                                $nb
-                                                $be2
-                                                $sig))
+                                              (let ((*wantarray* t))
+                                                (pl-_unpack_read_int $s
+                                                  (p-cast-$ $si_ref)
+                                                  $nb
+                                                  $be2
+                                                  $sig)))
                                             (p-incf (p-cast-$ $si_ref) $nb)))
                                         (p-next)))))
                                 (p-if (p-str-eq $ch "f")
@@ -2717,7 +2721,8 @@
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 4) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (pl-_unpack_float32 $s (p-cast-$ $si_ref) $be2))
+                                              (let ((*wantarray* t))
+                                                (pl-_unpack_float32 $s (p-cast-$ $si_ref) $be2)))
                                             (p-incf (p-cast-$ $si_ref) 4)))
                                         (p-next)))))
                                 (p-if (p-|| (p-str-eq $ch "d") (p-str-eq $ch "F"))
@@ -2736,7 +2741,8 @@
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 8) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (pl-_unpack_float64 $s (p-cast-$ $si_ref) $be2))
+                                              (let ((*wantarray* t))
+                                                (pl-_unpack_float64 $s (p-cast-$ $si_ref) $be2)))
                                             (p-incf (p-cast-$ $si_ref) 8)))
                                         (p-next)))))
                                 (p-if

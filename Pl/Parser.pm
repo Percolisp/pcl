@@ -329,7 +329,12 @@ sub _fix_spaced_sigils {
 sub _ppi_parse {
   my ($self, $src) = @_;
   my $doc = PPI::Document->new(\$src);
+  # _extract_prototype_attributes must run BEFORE _desugar_anon_signatures:
+  # it strips the `:prototype(...)` attribute (and wraps anon subs), and the
+  # signature desugar then finds the now-attribute-free `sub` it spliced in
+  # (its find() runs over the already-mutated tree).
   if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc)
+               | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc))) {
     my $fixed = $doc->serialize;
     my $redo  = PPI::Document->new(\$fixed);
@@ -392,6 +397,101 @@ sub _reclassify_bare_vwords {
   return;
 }
 
+
+# The `:prototype(...)` attribute (perl 5.20+) declares a sub's prototype
+# while the parenthesised list stays a signature.  PCL desugars it at the
+# shared PPI entry into plain Perl that registers the prototype at runtime
+# (p-__pcl_set_prototype, the registry p-prototype reads):
+#
+#   sub f :prototype($) ($a) { … }   →  sub f ($a) { … } __pcl_set_prototype(\&f, '$');
+#   sub :prototype($) ($a) { … }     →  __pcl_set_prototype(sub ($a) { … }, '$')
+#
+# The attribute tokens are stripped either way — an attribute between `sub`
+# and the signature otherwise derails the anon-sub signature desugar (the
+# sig is no longer `sub`'s snext_sibling), which broke `my $c = sub
+# :prototype($) ($a) {…}` wholesale (op/signatures.t t118).  Everything is
+# spliced as tokens on the SAME line, so line numbers are preserved; the
+# serialize+reparse in _ppi_parse rebuilds proper statement structure.
+# Other attributes (:method, :lvalue, …) are left untouched.
+sub _extract_prototype_attributes {
+  my ($self, $doc) = @_;
+  my $changed = 0;
+
+  for my $attr (@{ $doc->find('PPI::Token::Attribute') || [] }) {
+    next unless $attr->parent;                       # already spliced out
+    my $c = $attr->content;
+    next unless $c =~ /^prototype\((.*)\)$/s;
+    my $proto = $1;
+    (my $quoted = $proto) =~ s/([\\'])/\\$1/g;       # single-quote escape
+
+    my $stmt = $attr->statement or next;
+    if ($stmt->isa('PPI::Statement::Sub') && defined $stmt->name) {
+      # Named sub: needs a body (forward decls keep their attribute).
+      next unless grep { $_->isa('PPI::Structure::Block') } $stmt->schildren;
+      my $name = $stmt->name;
+      _delete_attribute_and_colon($attr);
+      my $text = " __pcl_set_prototype(\\&$name, '$quoted');";
+      my $ndoc = PPI::Document->new(\$text) or next;
+      my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }
+               $ndoc->children;
+      $_->remove for @el;
+      my $anchor = $stmt;
+      for my $e (@el) { $anchor->insert_after($e); $anchor = $e; }
+      $changed = 1;
+    }
+    else {
+      # Anonymous sub: walk back to the `sub` word, forward to its block.
+      my $sub;
+      for (my $p = $attr->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
+        if ($p->isa('PPI::Token::Word') && $p->content eq 'sub') { $sub = $p; last }
+        last unless $p->isa('PPI::Token::Attribute')
+                 || ($p->isa('PPI::Token::Operator') && $p->content eq ':');
+      }
+      next unless $sub;
+      my ($block, $ok) = (undef, 1);
+      for (my $p = $sub->snext_sibling; $p; $p = $p->snext_sibling) {
+        if ($p->isa('PPI::Structure::Block')) { $block = $p; last }
+        next if $p->isa('PPI::Token::Attribute')
+             || ($p->isa('PPI::Token::Operator') && $p->content eq ':')
+             || $p->isa('PPI::Structure::List')
+             || $p->isa('PPI::Structure::Signature')
+             || $p->isa('PPI::Token::Prototype');
+        $ok = 0; last;
+      }
+      next unless $ok && $block;
+      _delete_attribute_and_colon($attr);
+      my @span;
+      for (my $p = $sub; $p; $p = $p->next_sibling) {
+        push @span, $p;
+        last if $p == $block;
+      }
+      my $text = "__pcl_set_prototype("
+               . join('', map { $_->content } @span) . ", '$quoted')";
+      my $ndoc = PPI::Document->new(\$text) or next;
+      my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }
+               $ndoc->children;
+      $_->remove for @el;
+      $span[0]->insert_before($_) for @el;
+      $_->delete for @span;
+      $changed = 1;
+    }
+  }
+
+  return $changed;
+}
+
+# Remove one attribute token; its introducing `:` operator goes too unless
+# another attribute still follows it (`: prototype($) method` keeps the `:`).
+sub _delete_attribute_and_colon {
+  my ($attr) = @_;
+  my $prev = $attr->sprevious_sibling;
+  $attr->delete;
+  if ($prev && $prev->isa('PPI::Token::Operator') && $prev->content eq ':') {
+    my $after = $prev->snext_sibling;
+    $prev->delete unless $after && $after->isa('PPI::Token::Attribute');
+  }
+  return;
+}
 
 # An ANONYMOUS sub's signature — `sub ($x, $y = 3, @rest) { BODY }` — is
 # desugared here, at the shared document entry, into the plain-Perl code that

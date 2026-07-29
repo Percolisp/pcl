@@ -214,7 +214,7 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file #:p-require-version
    ;; Functions
-   #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype
+   #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -10342,7 +10342,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-81"
+(defparameter *pcl-cache-generation* "v2-82"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -12875,12 +12875,42 @@ buffer's fill-pointer; everything else falls back to file-length."
                     :adjustable t :fill-pointer t)
         (first frame-info))))  ; Scalar context: just package
 
+;; Prototype registry: function object -> prototype string.  Populated by
+;; p-__pcl_set-prototype, which the transpiler's :prototype(...) attribute
+;; desugar emits (and lib/Sub/Util.pm's set_prototype calls).  Subs without a
+;; registered prototype report undef — signatures never register one, matching
+;; perl (a signature is not a prototype).
+(defvar %pcl-sub-prototypes (make-hash-table :test #'eq))
+
+(defun %p-code-function (val)
+  "Unwrap a code-ref value (box / blessed double-box / symbolic name) to the
+   underlying CL function object, or nil."
+  (let ((fn (unbox val)))
+    (when (p-box-p fn)
+      (setf fn (p-box-value fn)))
+    (if (functionp fn)
+        fn
+        (when (or (stringp fn) (numberp fn))
+          (p-get-coderef fn)))))
+
+(defun p-__pcl_set_prototype (code proto)
+  "Register PROTO as the Perl prototype of the sub CODE refers to; returns CODE.
+   Perl-side spelling: __pcl_set_prototype($code, $proto) — emitted by the
+   :prototype(...) attribute desugar in Pl/Parser.pm."
+  (let ((fn (%p-code-function code)))
+    (when fn
+      (setf (gethash fn %pcl-sub-prototypes)
+            (if (%pcl-definedp proto) (to-string (unbox proto)) nil))))
+  code)
+
 (defun p-prototype (&optional ref)
   "Perl prototype() - returns the prototype string of a function, or undef.
-   PCL does not track Perl prototypes, so this always returns undef.
-   This is sufficient for the common guard pattern: 'if (defined prototype(...))'."
-  (declare (ignore ref))
-  *p-undef*)
+   Only prototypes declared via the :prototype(...) attribute (or
+   Sub::Util::set_prototype) are tracked; classic `sub f ($$)` prototypes are
+   consumed at transpile time and report undef here."
+  (let* ((fn (%p-code-function ref))
+         (proto (and fn (gethash fn %pcl-sub-prototypes))))
+    (or proto *p-undef*)))
 
 ;;; ============================================================
 ;;; OO Support

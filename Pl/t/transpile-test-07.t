@@ -290,4 +290,28 @@ for my $t ([\&tC,1], [\&tC,2], [\&tC,3], [\&tD,0], [\&tD,1], [\&tD,2], [$c,1], [
 }
 ');
 
+# The :prototype(...) attribute (perl 5.20+) declares a prototype while the
+# paren list stays a signature.  Desugared at the shared PPI entry into
+# __pcl_set_prototype registration; prototype()/Sub::Util::set_prototype read
+# the same runtime registry.  The anon form also guards attribute-skipping in
+# _desugar_anon_signatures (an attribute between `sub` and the signature used
+# to derail the whole statement — op/signatures.t t118).
+test_transpile(":prototype attribute on named and anon subs", '
+use feature "signatures"; no warnings;
+sub tP :prototype($) ($a) { $a || "z" }
+print( (prototype(\&tP) // "undef"), "\n");
+print tP(456), "\n";
+sub tQ :prototype(@) ($a) { $a }
+print( (prototype(\&tQ) // "undef"), "\n");
+print( (prototype(\&tR) // "undef"), "\n");
+sub tR ($a) { $a }
+my $c = sub :prototype($$) ($x, $y) { $x + $y };
+print( (prototype($c) // "undef"), "\n");
+print $c->(2, 3), "\n";
+use Sub::Util ();
+my $d = Sub::Util::set_prototype("\$\$", sub { 9 });
+print( (prototype($d) // "undef"), "\n");
+print $d->(), "\n";
+');
+
 done_testing();

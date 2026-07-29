@@ -172,6 +172,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
   while write xor ||
   overloaded overload-strval
+  __pcl_set_prototype
 );
 
 # Wantarray-sensitive built-ins: their RETURN VALUE depends on the caller's
