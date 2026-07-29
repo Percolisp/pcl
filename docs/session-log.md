@@ -4,6 +4,35 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316q (2026-07-30, Fable) — #135: use/require join the compile stream; use-parent package pre-declare (gen v2-84).
+
+- **Ordering bug behind Role-Tiny's crash files**: the v2 assembler sent a
+  `use`'s definitions to `_captured_decls` (section HEAD) while BEGIN
+  blocks interleave with sub defs by source position (#55) — every use
+  hoisted above every earlier BEGIN, inverting the %INC-seeding idiom
+  (`BEGIN { package My::X; $INC{'My/X.pm'} = 1 } use My::X;`).  Include
+  statements now route `sched => 1` through the same #55 interleave — the
+  `docs/declaration-ordering-fix-plan.md` invariant (one source-ordered
+  compile-time stream) now holds for use/BEGIN/subs on v2.
+- **Latent read-time dependency exposed and fixed generally**: `use base`
+  emitted `(defclass child (Parent::class))` relying on an earlier
+  hoisted use having CREATED Parent's package at read time (Tie::StdScalar
+  lives in Tie/Scalar.pm — p-require-parent can't create it).  Parent
+  packages are now pre-declared with idempotent p-defpackage before the
+  defclass; CL permits the forward-referenced superclass.
+- Verification: gate 123/4427; FULL sweep 0 new / 4 fixed (709→704);
+  corpus 30/111 differ = the expected use-repositioning; scoreboards:
+  **Role-Tiny 9/8/6 → 11/8/4** (role-basic-basic 0→PASS, create-hook
+  recovered), others unchanged.  Artifacts v2-84.  Residual Role-Tiny
+  FAILs: concrete-methods (stash-forms torture), subclass (subclassing
+  Role::Tiny itself), proto (unreadable emission), namespace-clean (XS
+  dep) — #135 stays open for those.
+- Minimal role application (`with 'MyRole'` installing methods) verified
+  WORKING before any of this — cluster C's basic form was already fixed;
+  the dist failures were these ordering/read-time bugs instead.
+
+---
+
 ## Session 316p (2026-07-30, Fable) — #25 CPAN-suite half: scoreboard tool, zero-regression verdict vs s304, Try::Tiny DESTROY-free shim.
 
 - **`tools/cpan-scoreboard.pl` (new)** — the release plan's phase-0 tool:
