@@ -334,6 +334,7 @@ sub _ppi_parse {
   # signature desugar then finds the now-attribute-free `sub` it spliced in
   # (its find() runs over the already-mutated tree).
   if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc)
+               | _rewrite_current_sub($doc)
                | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc))) {
     my $fixed = $doc->serialize;
@@ -397,6 +398,65 @@ sub _reclassify_bare_vwords {
   return;
 }
 
+
+# __SUB__ (feature "current_sub") inside a NAMED sub — body or signature
+# default (op/signatures.t t122: `sub f ($c = 5, $r = $c > 0 ?
+# __SUB__->($c-1) : "")` recurses through the default) — is statically the
+# enclosing sub, so rewrite the token to `(\&name)` at the shared PPI entry:
+# zero runtime cost, works in both pipelines, and p-backslash-sub's
+# late-binding keeps redefinition semantics.  Inside an ANONYMOUS sub the
+# self-reference has no name; those keep the runtime stub (documented gap —
+# a correct version needs a per-closure binding, which taxes every call).
+# The walk stops at the INNERMOST enclosing sub, so an anon sub nested in a
+# named one correctly refuses the rewrite.
+sub _rewrite_current_sub {
+  my ($doc) = @_;
+  my $changed = 0;
+
+  for my $word (@{ $doc->find('PPI::Token::Word') || [] }) {
+    next unless $word->parent && ($word->content // '') eq '__SUB__';
+    my $name;
+    for (my $el = $word->parent; $el; $el = $el->parent) {
+      # A signature/list directly under a sub statement, or the sub's block:
+      # both mean "lexically inside that sub".
+      my $par = $el->parent or last;
+      if ($el->isa('PPI::Structure::Block')) {
+        if ($par->isa('PPI::Statement::Sub') && defined $par->name) {
+          $name = $par->name;
+          last;
+        }
+        # Anon-sub block?  Walk back over sig/proto/attribute tokens to `sub`.
+        my $p = $el->sprevious_sibling;
+        while ($p && ($p->isa('PPI::Structure::List')
+                   || $p->isa('PPI::Structure::Signature')
+                   || $p->isa('PPI::Token::Prototype')
+                   || $p->isa('PPI::Token::Attribute')
+                   || ($p->isa('PPI::Token::Operator') && $p->content eq ':'))) {
+          $p = $p->sprevious_sibling;
+        }
+        last if $p && $p->isa('PPI::Token::Word') && $p->content eq 'sub';
+      }
+      elsif (($el->isa('PPI::Structure::Signature')
+              || $el->isa('PPI::Structure::List'))
+             && $par->isa('PPI::Statement::Sub') && defined $par->name) {
+        $name = $par->name;
+        last;
+      }
+    }
+    next unless defined $name;
+
+    my $text = "(\\&$name)";
+    my $ndoc = PPI::Document->new(\$text) or next;
+    my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }
+             $ndoc->children;
+    $_->remove for @el;
+    $word->insert_before($_) for @el;
+    $word->delete;
+    $changed = 1;
+  }
+
+  return $changed;
+}
 
 # The `:prototype(...)` attribute (perl 5.20+) declares a sub's prototype
 # while the parenthesised list stays a signature.  PCL desugars it at the
@@ -521,8 +581,31 @@ sub _desugar_anon_signatures {
   my ($self, $doc) = @_;
   my $changed = 0;
 
+  # Fixpoint: a desugared signature's DEFAULT EXPRESSION can itself contain a
+  # signatured anon sub (`sub ($a, $t = sub ($p) {…}) {…}`, op/signatures.t
+  # t132/t135).  The inner sub is spliced into the tree as new tokens AFTER
+  # find() snapshotted the word list, so one pass never sees it — its
+  # signature was silently dropped.  Re-scan until nothing changes; each round
+  # consumes at least one signature, so this terminates.
+  my $round_changed = 1;
+  while ($round_changed) {
+    $round_changed = $self->_desugar_anon_signatures_once($doc);
+    $changed ||= $round_changed;
+  }
+
+  return $changed;
+}
+
+sub _desugar_anon_signatures_once {
+  my ($self, $doc) = @_;
+  my $changed = 0;
+
   for my $word (@{ $doc->find('PPI::Token::Word') || [] }) {
-    next unless $word->content eq 'sub';
+    # An earlier iteration's $sig->delete destroys the signature's children —
+    # including a NESTED `sub` word from a default expression (its rewritten
+    # copy was spliced in as new tokens) — so a stale find-list entry can be a
+    # destroyed token: no parent, undef content.
+    next unless $word->parent && ($word->content // '') eq 'sub';
     my $sig = $word->snext_sibling or next;
     # A NAMED sub has its name here instead, and keeps the named-sub path.
     # PPI hands the parameter list back as a Structure when it saw the
@@ -8533,9 +8616,33 @@ sub _parse_old_prototype {
 # default to CL) and _desugar_anon_signatures (anonymous subs — rewrites the
 # signature back into Perl source).  Keeping the shape analysis here means the
 # two agree on placeholder naming and on which `=`-variant a default uses.
+# A signature's text may legally contain comments, newlines, spaced sigils
+# (`$ #cmt \n a` is the parameter $a) and repeated commas (op/signatures.t
+# t086/t087).  Normalize ONCE here, at the shared spec parser, so both the
+# named and anon lowerings see clean text: PPI-tokenize (string literals in
+# default expressions survive verbatim as single tokens), drop comments,
+# collapse whitespace, and merge a parameter-position sigil onto its name
+# (semantics-preserving anywhere: `$ y` IS $y).  Fast path: untouched unless
+# a comment or a spaced sigil is present.
+sub _normalize_signature_text {
+  my ($self, $text) = @_;
+  return $text unless $text =~ /#/ || $text =~ /[\$\@\%]\s/;
+  my $doc = PPI::Document->new(\$text) or return $text;
+  my $out = '';
+  for my $tok ($doc->tokens) {
+    next if $tok->isa('PPI::Token::Comment');
+    $out .= $tok->isa('PPI::Token::Whitespace') ? ' ' : $tok->content;
+  }
+  $out =~ s/ {2,}/ /g;
+  $out =~ s/(^|,)\s*([\$\@\%])\s+(?=\w)/$1$2/g;
+  return $out;
+}
+
 sub _signature_param_specs {
   my $self    = shift;
   my $sig_str = shift;
+
+  $sig_str = $self->_normalize_signature_text($sig_str);
 
   my @specs;
   my $anon_counter = 0;

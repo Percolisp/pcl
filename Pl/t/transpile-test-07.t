@@ -314,4 +314,42 @@ print( (prototype($d) // "undef"), "\n");
 print $d->(), "\n";
 ');
 
+# Three signature-family fixes (op/signatures.t):
+# - __SUB__ in a NAMED sub (body or sig default) rewrites to (\&name) at the
+#   shared PPI entry — the runtime pl-__SUB__ is a no-op stub, so the
+#   recursive-default t122 pattern silently returned "".
+# - A signatured anon sub NESTED in another signature's default desugars too
+#   (fixpoint loop; one pass missed tree-spliced inner subs — t135).
+# - Signature text may contain comments, spaced sigils and repeated commas
+#   (t086/t087) — normalized once in _signature_param_specs.
+test_transpile("signature defaults: __SUB__ recursion, nested sig subs, comments in sig", '
+use feature "signatures", "current_sub"; no warnings;
+sub t122 ($c = 5, $r = $c > 0 ? __SUB__->($c - 1) : "") { $c.$r }
+print t122(), "\n";
+print t122(1), "\n";
+sub body ($n) { $n > 0 ? $n . __SUB__->($n - 1) : "x" }
+print body(3), "\n";
+sub t135 ($a = sub ($a, $t = sub ($p) { $p."p" }) { $t->($a)."z" }) {
+    $a->("a")."/".$a->("b", sub { $_[0]."q" } )
+}
+print t135(), "\n";
+sub t086
+    ( #foo)))
+    $ #foo)))
+    a#foo)))
+    , #foo)))
+    ,#foo)))
+    $ #foo)))
+    b #foo)))
+    = #foo)))
+    333 #foo)))
+    , #foo)))
+    ) #foo)))
+    { $a.$b }
+print t086(456), "\n";
+print t086(456, 789), "\n";
+print( (eval { t086() } // "die-few"), "\n");
+print( (eval { t086(1,2,3) } // "die-many"), "\n");
+');
+
 done_testing();
