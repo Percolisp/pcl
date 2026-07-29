@@ -576,21 +576,26 @@ the `reset` / `?pat?` tests fail).
 
 ---
 
-## `__SUB__` (current sub reference)  [DEFERRED (non-eval case) — see roadmap]
+## `__SUB__` (current sub reference)  [PARTIAL — named subs work, anon subs do not]
 
 **Perl behaviour:** `use feature 'current_sub'; __SUB__` returns a
 reference to the currently executing subroutine, enabling anonymous subs
 to recurse without a named variable.
 
-**PCL behaviour:** Not implemented.  `__SUB__` is not recognized as a
-keyword.
+**PCL behaviour (since s316o):** Inside a NAMED sub — body or signature
+default — `__SUB__` is rewritten at the shared PPI entry to `(\&name)`
+(`_rewrite_current_sub` in `Pl/Parser.pm`): zero runtime cost, correct
+recursion (op/signatures.t t122), late-bound so redefinition is honored.
+Inside an ANONYMOUS sub it still resolves to the runtime stub
+`pl-__SUB__`, which returns a no-op lambda.
 
-**Rationale:** The same effect can be achieved with a named sub or by
-capturing `$self = \&{__SUB__}` before Perl 5.16.  Uncommon in CPAN code;
-implementing it would need a dynamic `*current-sub*` variable threaded
-through every function call.
+**Rationale for the anon gap:** an anonymous closure has no name to
+rewrite to; a correct version needs a per-closure self-binding
+(`my $self; $self = sub {…}` shape or a dynamic `*current-sub*`), which
+either changes closure shape or taxes every call.  Anon `__SUB__`
+recursion is rare in CPAN code.
 
-**Affected tests:** None in `perl-tests/` (no dedicated test file).
+**Affected tests:** anon-`__SUB__` uses only.
 
 ---
 
@@ -701,23 +706,30 @@ The `\substr`/`\pos`/`\vec` lvalue-ref rows in `perl-tests/ref.t` now pass.
 
 ---
 
-## `prototype()` does not return prototype strings
+## `prototype()` — returns only registered prototypes (attribute / Sub::Util)
 
 **Perl behaviour:** `prototype(\&foo)` returns the prototype string for `&foo`
 (e.g. `"\$a"` for `sub foo ($a) { }` without `use feature 'signatures'`), or
 `undef` if the sub has no prototype.
 
-**PCL behaviour:** `prototype()` always returns `undef`.  (For how PCL reads a
-`($a)`-shaped parameter list at all, see *Signature syntax is read as a
-signature even with the feature off*, below.)
+**PCL behaviour (since s316o):** a runtime registry (`%pcl-sub-prototypes`,
+keyed on the function object) backs `prototype()`.  It is populated by the
+`:prototype(...)` attribute (named and anonymous subs — desugared at the
+shared PPI entry into `__pcl_set_prototype` calls) and by
+`Sub::Util::set_prototype`, and `prototype()` accepts coderefs, blessed
+coderefs and symbolic names.  CLASSIC prototypes (`sub foo ($$) {…}`) are
+still consumed at transpile time only — `prototype()` reports `undef` for
+them, where perl reports the string.  (For how PCL reads a `($a)`-shaped
+parameter list at all, see *Signature syntax is read as a signature even
+with the feature off*, below.)
 
-**Rationale:** Storing prototype strings requires tracking them at parse time and
-threading them through to a runtime lookup table.  No maintained CPAN module
-calls `prototype()` on its own functions — it's used only for introspection
-tools and test infrastructure.
+**Rationale for the classic-prototype gap:** registering every prototyped
+sub is easy but changes `defined prototype(...)` guards in code that works
+today; do it deliberately (with a sweep) or not at all.  No maintained CPAN
+module reads its own classic prototypes back at runtime.
 
-**Affected tests:** `perl-tests/signatures.t` test checking `prototype(\&t000) eq '"\$a"'`
-(commented out).
+**Affected tests:** `perl-tests/signatures.t` rows reading classic
+prototypes back.
 
 ---
 

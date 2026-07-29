@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316o (2026-07-29, Fable) — #25 op/signatures.t CLOSED OUT: tap_map fix, :prototype attribute + real prototype(), __SUB__/nested-sig/comment-sig, file blessed XDIFF (gen v2-83).
+
+- **Suite runner tap_map bug (bc0490a):** `\s*` after the test number ate
+  the NEWLINE of a description-less TAP line ("ok 3\n"), swallowing the
+  NEXT line as the description — 421 phantom "(missing)" rows on
+  op/signatures.t (PCL's test.pl stub emits bare "ok N"; perl's own
+  appends "[at line N]", masking the bug on the perl side).  Horizontal
+  whitespace only now; the faillog is the true per-test diff.
+- **`:prototype(...)` attribute + real prototype() (f195497, gen v2-82):**
+  new `_extract_prototype_attributes` pre-pass at the shared PPI entry —
+  named subs get a spliced `__pcl_set_prototype(\&name,'…')` statement,
+  anon subs are wrapped in the call; attribute tokens stripped (an
+  attribute between `sub` and the sig derailed the anon desugar wholesale
+  — t118 PARSE ERROR).  Runtime `%pcl-sub-prototypes` eq-registry;
+  `p-prototype` (was an always-undef stub) reads it;
+  `Sub::Util::set_prototype` registers for real.
+- **Three more families (d7eeabe, gen v2-83):** `__SUB__` in a NAMED sub
+  (body or sig default) rewrites to `(\&name)` at the PPI entry (runtime
+  stub stays for anon subs — not-supported.md §__SUB__ updated to
+  PARTIAL); `_desugar_anon_signatures` loops to FIXPOINT (a signatured
+  anon sub nested in a sig default was spliced in after the find()
+  snapshot — its sig silently dropped, t132/t135) + destroyed-token guard;
+  `_signature_param_specs` normalizes text once (comments, spaced sigils
+  `$ #cmt \n a`, repeated commas — t086/t087 read as arity 0).
+- **op/signatures.t 859→881 ok**; residue 365 rows classified: 262
+  trailing-comma + ~100 more = must-fail-eval detection (CLAUDE.md §9),
+  error-text, warning fidelity, feature-off sig-vs-proto → file blessed
+  XDIFF in docs/perl-suite-expected.tsv.  8 rows stay OPEN fix targets in
+  the bless note: t017 parenless list-op swallowing the sig default (3),
+  state-in-default re-init (5, task #134).
+- Gate 123/4426 green; corpus diffs exactly signatures.t both commits,
+  fully explained; spot sweeps signatures/sub/attrs/pack 0 NEW; artifacts
+  regenerated v2-82 then v2-83.  GOTCHA (bit us via transpile-test-07,
+  whose run_cl merges pl2cl stderr into the .lisp): a "Use of
+  uninitialized value" warning from a parser pass lands IN the generated
+  file as a bare `Use` symbol — keep new passes warning-clean.
+
+---
+
 ## Session 316n (2026-07-29, Fable) — #25 signatures triage: odd-%hash arity die + ref_funcall args are LIST context (gen v2-81).
 
 - **op/signatures.t 807→859.**  Two fixes:
