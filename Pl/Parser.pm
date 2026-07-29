@@ -3168,6 +3168,16 @@ sub _process_use_base {
         $self->_emit("(p-eval-always (p-require-parent \"$parent\"))");
       }
     }
+    # Pre-declare each parent's PACKAGE regardless: the require can fail
+    # legitimately (a parent defined inside another module's file, e.g.
+    # Tie::StdScalar in Tie/Scalar.pm, whose `use Tie::Scalar` now runs at
+    # its source position in the compile stream, possibly AFTER this form) —
+    # the defclass below must still READ.  p-defpackage is idempotent, and
+    # CL allows a forward-referenced superclass at evaluation time.
+    for my $parent (@parents) {
+      $self->_emit("(p-eval-always (p-defpackage "
+                   . $self->_cl_pkg_designator($parent) . "))");
+    }
     $self->_emit("(defclass $cl_class ($parents_cl) ())");
   });
 

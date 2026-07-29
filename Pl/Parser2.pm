@@ -4539,10 +4539,21 @@ sub _lower_block {
     return ($self->_fallback_stmt($first, sched => 1),
             $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
-  # -- use/require/no, __END__/__DATA__: whole-statement fallback through the
-  # ORIGINAL parser (declarations hoisted to file top).
-  if ($first->isa('PPI::Statement::Include')
-      || $first->isa('PPI::Statement::End')
+  # -- use/require/no: whole-statement fallback through the ORIGINAL parser,
+  # but their definitions join the SAME source-ordered compile-time stream as
+  # BEGIN blocks and sub defs (the #55 interleave, sched => 1).  Perl runs
+  # use and BEGIN in source order; the plain route sent a use's definitions
+  # to _captured_decls (the section HEAD), hoisting EVERY use above EVERY
+  # earlier BEGIN — which inverted the %INC-seeding idiom
+  # `BEGIN { package My::X; $INC{'My/X.pm'} = 1 }  use My::X;`
+  # (Role-Tiny role-basic-basic.t) and violates the compile-stream invariant
+  # of docs/declaration-ordering-fix-plan.md.
+  if ($first->isa('PPI::Statement::Include')) {
+    return ($self->_fallback_stmt($first, sched => 1),
+            $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
+  # -- __END__/__DATA__: whole-statement fallback (declarations hoisted).
+  if ($first->isa('PPI::Statement::End')
       || $first->isa('PPI::Statement::Data')) {
     return ($self->_fallback_stmt($first), $self->_lower_block(\@rest, $vi, $tail_ctx));
   }
