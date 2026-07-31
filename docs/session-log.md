@@ -45,6 +45,25 @@ Append new entries at the top. One section per session.
   to the shadow t/), and re/regexp_* family truncates at ~case 38 on
   `Can't locate loadable object for module List::Util` (regexp_qr/
   noamp/notrie/trielist/normal, alpha_assertions, regex_sets_compat).
+- **#136 CLOSED same session — ONE harness root cause, both clusters.**
+  s316m's updir mirror symlinked perl's build MODULE trees (lib/ ext/
+  dist/ cpan/) next to the shadow t/, so the boilerplate
+  `@INC = '../lib'` stopped meaning "the modules matching the executing
+  perl" (= PCL's core-shim require fallback) and started serving real
+  5.40.3 modules: Config.pm died on its version check (run/-family) and
+  XS-backed List::Util died in XSLoader (re/-family).  Fix: exclude the
+  four module trees from the mirror, but `mkdir` an EMPTY `../lib` —
+  op/stat_errors.t opendirs it as a filesystem fixture, and an empty dir
+  on @INC finds nothing, so the fallback still serves every module.
+  Verified per-file: every cluster row back at or above its s316g level
+  (switchF2 → OK, runenv 11/95, alpha_assertions 1784/74,
+  regexp_normal 1850/8, regex_sets_compat 1600/258; the regexp_qr
+  family now runs 585-793 cases into honest 90s TIMEOUTs instead of
+  crashing at 38), the s316r improvements all keep (io/through OK,
+  stash_parse_gv OK, mro rows, stat_errors 305/333).  Snapshot totals:
+  **49 OK / 31 NOTAP / 97 XDIFF / 256 UNEXPLAINED.**  (comp/parser_run's
+  brief no-lib 53/41 reading was TAP over-count noise — 94 rows against
+  a 70-test plan; the empty-lib 29/41 is the sane row.)
 
 ---
 

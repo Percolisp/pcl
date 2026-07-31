@@ -35,7 +35,7 @@ comp/parser_run.t	70	0	29	41	DIFF	unbound:main::$00
 comp/parser.t	191	0	0	0	TRANSPILE	transpile-timeout
 comp/proto.t	216	0	47	14	DIFF	crash:simple-error: Undefined subroutine &main::N called at (eval N) line N.
 comp/redef.t	20	0	1	19	DIFF	
-comp/require.t	1750	0	31	16	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+comp/require.t	1750	0	34	16	DIFF	crash:simple-error: Can't locate loadable object for module Cwd in @INC
 comp/retainedlines.t	109	0	19	90	DIFF	
 comp/term.t	23	0	23	0	OK	
 comp/uproto.t	32	0	13	21	DIFF	
@@ -146,7 +146,7 @@ mro/overload_c3.t	7	0	7	0	OK
 mro/overload_c3_utf8.t	7	0	0	0	XDIFF	crash:simple-error: Can't locate object method "ネᚹ" via package "읺ҎꀀḮṆᵷꜰ롬ᵕveŔŁoad엗텟 | not-supported.md §Unicode — utf8 package-name variant (non-utf8 twin passes)
 mro/overload_dfs.t	7	0	7	0	OK	
 mro/package_aliases.t	54	0	96	39	XDIFF	crash:type-error: The value "phoo::blonk::" is not of type hash-table | not-supported.md §symbol-table hashes — glob package aliasing + isarev
-mro/package_aliases_utf8.t	52	0	54	28	XDIFF	timeout | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8)
+mro/package_aliases_utf8.t	52	0	72	34	XDIFF	crash:simple-error: Can't locate object method "Ｓᑊeಅḱ" via package "ቹऋ" at - line N. | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8)
 mro/pkg_gen.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 mro/pkg_gen_utf8.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
 mro/recursion_c3.t	8	0	8	0	OK	
@@ -238,7 +238,7 @@ op/protowarn.t	12	0	4	8	DIFF
 op/pwent.t	2	0	2	0	OK	
 op/quotemeta.t	60	0	58	2	DIFF	
 op/rand.t	263	0	260	3	DIFF	
-op/readdir.t	16	0	10	6	DIFF	
+op/readdir.t	16	0	11	5	DIFF	
 op/read.t	2116	0	2116	0	OK	
 op/refstack.t	0	0	0	0	NOTAP	
 op/ref.t	257	0	188	49	DIFF	
@@ -296,7 +296,7 @@ op/waitpid.t	1	0	0	0	DIFF	undef-fn:main::pl-WNOHANG
 op/warn.t	32	1	21	5	DIFF	undef-fn:Tie::pl-StdScalar
 op/while.t	26	0	11	4	TIMEOUT	timeout
 op/write.t	636	0	0	0	DIFF	
-re/alpha_assertions.t	2279	0	468	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/alpha_assertions.t	2279	0	1784	74	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
 re/anyof.t	1187	0	0	0	TIMEOUT	timeout
 re/begin-once.t	2	0	1	1	DIFF	
 re/bigfuzzy_not_utf8.t	1	0	1	0	OK	
@@ -311,7 +311,7 @@ re/fold_grind_u.t	213	0	0	0	TIMEOUT	timeout
 re/keep_tabs.t	14	0	12	2	DIFF	
 re/no_utf8_pm.t	1	0	1	0	OK	
 re/opt.t	639	17	0	0	DIFF	undef-fn:re::pl-optimization
-re/overload.t	87	0	3	0	DIFF	
+re/overload.t	87	0	3	0	TIMEOUT	timeout
 re/pat_advanced.t	1678	0	1071	598	DIFF	
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
@@ -335,18 +335,18 @@ re/reg_email.t	13	0	0	0	DIFF
 re/reg_email_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/reg_eval_scope.t	48	1	5	24	DIFF	crash:sb-c::input-error-in-load: read error during load:
 re/reg_eval.t	8	0	1	7	XDIFF	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t
-re/regexp_noamp.t	2169	0	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_noamp.t	2169	0	597	110	TIMEOUT	timeout
 re/regexp_nonull.t	2167	2	0	0	DIFF	
-re/regexp_normal.t	2169	0	965	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
-re/regexp_notrie.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
-re/regexp_qr_embed.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_normal.t	2169	0	1850	8	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
+re/regexp_notrie.t	2167	2	585	110	TIMEOUT	timeout
+re/regexp_qr_embed.t	2167	2	652	111	TIMEOUT	timeout
 re/regexp_qr_embed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/regexp_qr.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
-re/regexp.t	2167	2	39	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC
-re/regexp_trielist.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_qr.t	2167	2	793	112	TIMEOUT	timeout
+re/regexp.t	2167	2	611	111	TIMEOUT	timeout
+re/regexp_trielist.t	2167	2	608	111	TIMEOUT	timeout
 re/regexp_unicode_prop.t	1110	0	778	332	DIFF	
 re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/regex_sets_compat.t	2167	2	98	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regex_sets_compat.t	2167	2	1600	258	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
 re/regex_sets.t	96	0	21	32	DIFF	undef-fn:main::pl-capture_warnings
 re/reg_fold.t	6786	105	0	0	TIMEOUT	timeout
 re/reg_mesg.t	3348	0	0	0	DIFF	undef-fn:main::pl-display_rx
@@ -377,29 +377,29 @@ re/uniprops09.t	29848	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/
 re/uniprops10.t	26334	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/user_prop_race_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 run/cloexec.t	22	0	16	6	DIFF	
-run/exit.t	17	0	13	3	DIFF	
+run/exit.t	17	0	14	3	DIFF	
 run/fresh_perl.t	91	0	55	36	XDIFF	unbound:main::H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.
-run/locale.t	44	0	0	0	DIFF	
+run/locale.t	44	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 run/noswitch.t	3	0	2	1	DIFF	
-run/runenv_hashseed.t	278	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
-run/runenv_randseed.t	9	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
-run/runenv.t	106	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/runenv_hashseed.t	278	0	0	0	DIFF	crash:simple-error: Failed to extract seed: at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/run/ru
+run/runenv_randseed.t	9	0	0	9	DIFF	
+run/runenv.t	106	0	11	95	DIFF	
 run/script.t	3	0	3	0	OK	
 run/switch0.t	1	0	0	1	DIFF	
 run/switcha.t	2	0	0	1	DIFF	
 run/switchC.t	15	0	4	11	DIFF	
 run/switchd-78586.t	2	0	0	2	DIFF	
 run/switchd.t	21	0	2	19	DIFF	undef-fn:main::pl-ARRAY
-run/switchDx.t	0	0	0	0	NOTAP	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
-run/switches.t	140	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/switchDx.t	0	0	0	0	NOTAP	
+run/switches.t	140	0	6	99	DIFF	crash:simple-error: sbcl: Failed to open 'tmpswitches.bak': No such file or directory at /home/bernt/perlN/per
 run/switchF1.t	5	0	5	0	OK	
-run/switchF2.t	5	0	4	0	DIFF	
+run/switchF2.t	5	0	5	0	OK	
 run/switchF.t	2	0	0	1	DIFF	
 run/switchI.t	4	0	0	4	DIFF	
-run/switchM.t	5	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/switchM.t	5	0	2	3	DIFF	
 run/switchn.t	3	0	1	1	DIFF	
 run/switchp.t	3	0	1	0	DIFF	
-run/switcht.t	0	0	0	0	NOTAP	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/switcht.t	0	0	9	4	NOTAP	
 run/switchx.t	8	0	0	3	DIFF	
 uni/attrs.t	35	0	6	28	DIFF	
 uni/bless.t	84	0	83	1	DIFF	

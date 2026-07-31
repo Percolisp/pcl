@@ -216,11 +216,21 @@ for my $stub (qw(test.pl charset_tools.pl loc_tools.pl)) {
 # The shadow's PARENT mirrors the perl source root (everything except t/,
 # which IS the shadow) so `catfile(updir, ...)` fixture reads work — e.g.
 # op/signatures.t reads ../regen/keywords.pl, porting tests read ../MANIFEST.
+# Perl's build MODULE trees (lib/ ext/ dist/ cpan/) are NOT mirrored: the
+# boilerplate `@INC = '../lib'` means "the modules matching the executing
+# perl", which for PCL is the core-shim require fallback — mirroring them
+# shadowed that fallback with real 5.40.3 modules, so Config.pm died on its
+# version check (run/runenv* 0/0) and XS-backed modules (List::Util) died in
+# XSLoader with no loadable object (re/regexp_* truncated).  Task #136.
+# `../lib` is still created as an EMPTY directory: some tests need it to
+# exist as a filesystem fixture (op/stat_errors.t opendirs it), and an empty
+# dir on @INC finds nothing, so the shim fallback still serves every module.
 for my $e (glob "$tdir/../*") {
   my $base = basename($e);
-  next if $base eq 't';
+  next if $base eq 't' || $base =~ /^(?:lib|ext|dist|cpan)$/;
   symlink $e, "$tmpdir/$base";   # EEXIST is fine (tempdir is fresh per run)
 }
+mkdir "$tmpdir/lib";
 
 # Fresh per-test failure log each run (mirrors the sweep's .faillog).
 system("rm -rf \Q$faillog\E");
