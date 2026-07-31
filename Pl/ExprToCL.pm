@@ -1704,6 +1704,33 @@ sub gen_array_str_interp {
 
 
 # Function call: (p-FUNC args...)
+# A hash/array ELEMENT passed to a USER sub must reach @_ as an alias to
+# the element (perl's defelem magic; task #131).  lvalue_context carries a
+# third value, 'argbox', set around user-sub argument generation: the
+# named-container element sites pick the -argbox accessor — the live slot
+# box when the element exists, a lazy defelem cell when it does not, so a
+# read-only callee never vivifies.  Reuses lvalue_context's existing
+# set/clear discipline instead of a new flag (the deref element sites
+# treat 'argbox' as plain lvalue: aliasing with eager vivify).
+sub _elem_accessor {
+  my ($self, $base) = @_;
+  my $lv = $self->lvalue_context;
+  return $base unless $lv;
+  return "$base-argbox" if $lv eq 'argbox';
+  return "$base-box";
+}
+
+# True when the arg node itself IS a named-container element access — the
+# only shape 'argbox' applies to.  Gating per-arg keeps the context from
+# leaking into arbitrary subtrees (a `~$_` method arg once flipped from
+# string- to numeric-complement under a blanket 'argbox').
+sub _is_elem_arg {
+  my ($self, $kid_id) = @_;
+  my $an = $self->expr_o->get_a_node($kid_id);
+  return $self->expr_o->is_internal_node_type($an)
+      && ($an->{type} eq 'a_acc' || $an->{type} eq 'h_acc');
+}
+
 # ---- E2.1: form-producing funcall (the generic call path) ------------------
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
 # (word:is/ok/… = the seam frontier head) and non-special builtins —
@@ -2346,7 +2373,9 @@ sub gen_funcall_form {
     $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
 
     my $saved_lvalue = $self->lvalue_context;
-    $self->lvalue_context(1) if $needs_lvalue;
+    if    ($needs_lvalue)               { $self->lvalue_context(1) }
+    elsif (index($cl_func, 'pl-') >= 0
+           && $self->_is_elem_arg($kids->[$i])) { $self->lvalue_context('argbox') }
     my $arg = $self->gen_node_form($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
 
@@ -3195,9 +3224,12 @@ sub gen_funcall {
                          && $ref_params[$param_idx] eq '$');
     $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
 
-    # Set l-value context for functions that modify their arguments
+    # Set l-value context for functions that modify their arguments; user
+    # subs get 'argbox' — their element args alias through @_ (#131).
     my $saved_lvalue = $self->lvalue_context;
-    $self->lvalue_context(1) if $needs_lvalue;
+    if    ($needs_lvalue)               { $self->lvalue_context(1) }
+    elsif (index($cl_func, 'pl-') >= 0
+           && $self->_is_elem_arg($kids->[$i])) { $self->lvalue_context('argbox') }
     my $arg = $self->gen_node($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
 
@@ -3511,10 +3543,16 @@ sub gen_methodcall {
   }
 
   # Rest are arguments
+  # Method args alias through @_ like any user-sub call (defelem, #131);
+  # 'argbox' only when the arg itself is an element access.
+  my $saved_lvalue_mc = $self->lvalue_context;
   my @args;
   for my $i (2 .. $#$kids) {
+    $self->lvalue_context(
+      $self->_is_elem_arg($kids->[$i]) ? 'argbox' : $saved_lvalue_mc);
     push @args, $self->gen_node($kids->[$i]);
   }
+  $self->lvalue_context($saved_lvalue_mc);
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
 
@@ -3602,7 +3640,15 @@ sub gen_methodcall_form {
   }
 
   # --- arguments ---
-  my @args = map { $self->gen_node_form($kids->[$_]) } 2 .. $#$kids;
+  # Method args alias through @_ like any user-sub call (defelem, #131);
+  # 'argbox' only when the arg itself is an element access.
+  my $saved_lvalue_mc = $self->lvalue_context;
+  my @args = map {
+    $self->lvalue_context(
+      $self->_is_elem_arg($kids->[$_]) ? 'argbox' : $saved_lvalue_mc);
+    $self->gen_node_form($kids->[$_]);
+  } 2 .. $#$kids;
+  $self->lvalue_context($saved_lvalue_mc);
 
   # --- assemble the call form ---
   my $call;
@@ -3635,11 +3681,17 @@ sub gen_ref_funcall {
   # First child is the code reference
   my $ref = $self->gen_node($kids->[0]);
 
-  # Rest are arguments
+  # Rest are arguments.  A coderef call is always user code — element args
+  # alias through @_ (defelem, #131); 'argbox' only when the arg itself is
+  # an element access.
   my @args;
+  my $saved_lvalue = $self->lvalue_context;
   for my $i (1 .. $#$kids) {
+    $self->lvalue_context(
+      $self->_is_elem_arg($kids->[$i]) ? 'argbox' : $saved_lvalue);
     push @args, $self->gen_node($kids->[$i]);
   }
+  $self->lvalue_context($saved_lvalue);
 
   my $args_str = @args ? ' ' . join(' ', @args) : '';
   my $call = "(p-funcall-ref $ref$args_str)";
@@ -3656,7 +3708,16 @@ sub gen_ref_funcall {
 sub gen_ref_funcall_form {
   my ($self, $node, $node_id, $kids) = @_;
   my $ref  = $self->gen_node_form($kids->[0]);
-  my @args = map { $self->gen_node_form($kids->[$_]) } 1 .. $#$kids;
+  # A coderef call is always user code — element args alias through @_
+  # (defelem, #131), same as the named-user-sub tail in gen_funcall_form;
+  # 'argbox' only when the arg itself is an element access.
+  my $saved_lvalue = $self->lvalue_context;
+  my @args = map {
+    $self->lvalue_context(
+      $self->_is_elem_arg($kids->[$_]) ? 'argbox' : $saved_lvalue);
+    $self->gen_node_form($kids->[$_]);
+  } 1 .. $#$kids;
+  $self->lvalue_context($saved_lvalue);
   my $call = ['p-funcall-ref', $ref, @args];
 
   my $ctx = $self->expr_o->get_node_context($node_id);
@@ -4221,7 +4282,7 @@ sub gen_array_access {
   }
 
   # Use p-aref-box in l-value context for modifying operations
-  my $func = $self->lvalue_context ? 'p-aref-box' : 'p-aref';
+  my $func = $self->_elem_accessor('p-aref');
   return "($func $arr $idx)";
 }
 
@@ -4246,7 +4307,7 @@ sub gen_array_access_form {
       $arr = $renames->{$arr} if $renames && exists $renames->{$arr};
     }
   }
-  my $func = $self->lvalue_context ? 'p-aref-box' : 'p-aref';
+  my $func = $self->_elem_accessor('p-aref');
   return [$func, $arr, $idx];
 }
 
@@ -4331,7 +4392,7 @@ sub gen_hash_access {
   }
 
   # Use p-gethash-box in l-value context for modifying operations
-  my $func = $self->lvalue_context ? 'p-gethash-box' : 'p-gethash';
+  my $func = $self->_elem_accessor('p-gethash');
   return "($func $hash $key)";
 }
 
@@ -4413,7 +4474,7 @@ sub gen_hash_access_form {
       $hash = $renames->{$hash} if $renames && exists $renames->{$hash};
     }
   }
-  my $func = $self->lvalue_context ? 'p-gethash-box' : 'p-gethash';
+  my $func = $self->_elem_accessor('p-gethash');
   return [$func, $hash, $key];
 }
 

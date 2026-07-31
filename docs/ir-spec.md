@@ -504,8 +504,18 @@ call site just applies the function to the flattened values.
 hash arguments splice into one flat value list (`p-flatten-args`). A hash
 flattens to key, value, key, value…
 
-**No aliasing:** `@_` holds copies; writing `$_[0]` does *not* modify the
-caller's variable (deliberate divergence, `docs/not-supported.md`).
+**Aliasing (perl's defelem, task #131):** `@_` slots hold the caller's
+LIVE boxes for most argument shapes — globals/`our`/`$_`, array/hash
+spreads (holes as lazy `%p-defelem-box` cells), and named-container
+elements: `f($h{k})` / `f($a[i])` emit `p-gethash-argbox` /
+`p-aref-argbox` in argument position (all user-call shapes: named,
+coderef, method), which return the slot box when the element exists and
+a lazy defelem magic cell when it does not — reads see undef and never
+vivify; the first write through `$_[N]` creates the key / extends the
+array.  A plain `my` lexical scalar still COPIES (its slot may be raw
+under the VarAnnotator speed model — deliberate divergence,
+`docs/not-supported.md` §`@_` argument aliasing), as do deref-element
+args (`f($ref->{k})`).
 
 **`&`-sigil calls without an argument list** re-use the caller's `@_`
 (Perl's `&foo;` rule).  Named form: `&foo;` → `(pl-foo @_)`.  Deref forms:

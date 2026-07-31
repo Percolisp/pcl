@@ -378,6 +378,27 @@ push @log, "rethrow:$@" if !$out;
 print map { s/\n/./gr . "\n" } @log;
 ');
 
+# Task #131 (defelem arg-aliasing): a hash/array ELEMENT passed to a user
+# sub aliases through @_ — writes to $_[0] reach the caller's element, an
+# absent element vivifies only when written (never on a read-only call),
+# and a write past the end extends the array.  Named subs, coderef calls,
+# and method calls; ordinary copy idioms (my ($x) = @_, shift) still copy.
+test_transpile("element args alias through \@_ (defelem)", '
+no warnings;
+my %h = (k => 1, j => 2);
+my @a = (10, 20);
+sub w { $_[0] = 99 }
+w($h{k}); w($a[1]); print "w:$h{k},$a[1]\n";
+w($h{new}); print "viv:", (exists $h{new} ? $h{new} : "none"), "\n";
+sub r { my ($x) = @_; $x = 0; }
+r($h{ro}); print "ro:", (exists $h{ro} ? "BAD" : "ok"), ",$h{k}\n";
+my $c = sub { $_[0]++ };
+$c->($h{j}); $c->($h{j}); print "inc:$h{j}\n";
+$c->($a[5]); print "ext:", scalar(@a), ":$a[5]\n";
+package P { sub m2 { $_[1] = 7 } }
+P->m2($h{k}); print "meth:$h{k}\n";
+');
+
 # Task #134 (op/signatures.t t126/t127): `state $s = INIT` in a signature
 # default runs INIT only on the FIRST defaulted call; later defaulted calls
 # see $s's current value.  Both the whole-expression form and the do-block

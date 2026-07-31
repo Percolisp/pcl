@@ -109,6 +109,13 @@ sub gen_form {
         # An argument expression is flattened into @_ → LIST context.
         my $f = $self->gen_form($kid, 't');
         return undef unless defined $f;
+        # An element arg to a user sub aliases through @_ (defelem, #131):
+        # live slot box when the element exists, lazy defelem cell when
+        # not.  The seam paths do this via lvalue_context 'argbox'; here
+        # swap the lowered head (the _alias_box_form sibling).
+        $f = [$f->[0] . '-argbox', @{$f}[1 .. $#$f]]
+          if ref($f) eq 'ARRAY' && !ref($f->[0])
+             && ($f->[0] eq 'p-gethash' || $f->[0] eq 'p-aref');
         push @args, $f;
       }
       my $call = [$info->{cl_name}, @args];

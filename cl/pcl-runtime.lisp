@@ -159,7 +159,7 @@
    #:p-str-bit-and #:p-str-bit-or #:p-str-bit-xor #:p-str-bit-not
    #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
-   #:p-aref #:p-aref-box #:p-aref-deref #:p-aref-deref-box #:p-gethash #:p-gethash-box #:p-gethash-deref #:p-gethash-deref-box
+   #:p-aref #:p-aref-box #:p-aref-argbox #:p-gethash-argbox #:p-aref-deref #:p-aref-deref-box #:p-gethash #:p-gethash-box #:p-gethash-deref #:p-gethash-deref-box
    #:p-ensure-hashref #:p-ensure-arrayref
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
@@ -5721,9 +5721,19 @@ lands in the (now detached) box only."
                      (setf (p-box-value box) nil
                            (p-box-nv-ok box) nil
                            (p-box-sv-ok box) nil)
-                     (when (and (array-in-bounds-p vec i)
-                                (null (aref vec i)))
-                       (setf (aref vec i) box))
+                     (cond
+                       ((and (array-has-fill-pointer-p vec)
+                             (< i (fill-pointer vec)))
+                        (when (null (aref vec i))
+                          (setf (aref vec i) box)))
+                       ((and (adjustable-array-p vec)
+                             (array-has-fill-pointer-p vec))
+                        ;; Past-the-end index (p-aref-argbox on w($a[10])):
+                        ;; perl's defelem store av_fetches with lval=TRUE,
+                        ;; extending the array — mirror that here.
+                        (loop while (< (fill-pointer vec) i)
+                              do (vector-push-extend nil vec))
+                        (vector-push-extend box vec)))
                      (box-set box new))))
     box))
 
@@ -5734,6 +5744,67 @@ the state that still counts as an array hole for exists()."
        (let ((v (p-box-value slot)))
          (and (p-magic-cell-p v)
               (eq (p-magic-cell-kind v) :defelem)))))
+
+(defun p-aref-argbox (arr idx)
+  "Array element in USER-SUB ARGUMENT position (perl's @_ aliasing): the
+LIVE slot box when the element exists — a write to $_[N] in the callee
+reaches the caller's array — and a lazy defelem alias (%p-defelem-box)
+when it does not.  Read-only use must never vivify or extend, which is
+why p-aref-box (the eager lvalue accessor) is wrong here."
+  (let ((a (unbox arr)))
+    (if (not (and (vectorp a) (not (stringp a))))
+        (make-p-box *p-undef*)
+        (let* ((i (truncate (to-number idx)))
+               (len (length a))
+               (actual-idx (if (< i 0) (+ len i) i)))
+          (cond
+            ((< actual-idx 0) (make-p-box *p-undef*))
+            ((and (< actual-idx len) (aref a actual-idx))
+             (let ((elem (aref a actual-idx)))
+               (if (p-box-p elem)
+                   elem
+                   (setf (aref a actual-idx) (make-p-box elem)))))
+            (t (%p-defelem-box a actual-idx)))))))
+
+(defun p-gethash-argbox (hash key)
+  "Hash element in USER-SUB ARGUMENT position (perl's @_ aliasing): the
+LIVE slot box when the key exists, else a lazy defelem alias — reads look
+the key up live and stay undef/non-exists, the first write through the
+alias creates the key.  p-gethash-box (the eager lvalue accessor) would
+create the key on a read-only call, which perl does not."
+  (let ((h (unbox hash))
+        (k (to-string key)))
+    (if (or (not (hash-table-p h)) (gethash :__class__ h))
+        ;; undef container / special markers / symbolic-ref strings / blessed:
+        ;; keep plain value semantics, no aliasing.
+        (make-p-box (p-gethash hash key))
+        (multiple-value-bind (existing found) (gethash k h)
+          (if found
+              (if (p-box-p existing)
+                  existing
+                  (setf (gethash k h) (make-p-box existing)))
+              (let ((box (make-p-box nil)))
+                (setf (p-box-value box)
+                      (make-p-magic-cell
+                       :kind :defelem
+                       :getter (lambda ()
+                                 ;; live delegation: the key may have been
+                                 ;; created independently since the alias
+                                 (multiple-value-bind (v f) (gethash k h)
+                                   (if f (unbox v) *p-undef*)))
+                       :setter (lambda (new)
+                                 (setf (p-box-value box) nil
+                                       (p-box-nv-ok box) nil
+                                       (p-box-sv-ok box) nil)
+                                 (multiple-value-bind (v f) (gethash k h)
+                                   (if (and f (p-box-p v))
+                                       ;; created independently since: write the
+                                       ;; live slot; this alias detaches (the
+                                       ;; array sibling behaves the same way)
+                                       (box-set v new)
+                                       (setf (gethash k h) box)))
+                                 (box-set box new))))
+                box))))))
 
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
@@ -10342,7 +10413,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-85"
+(defparameter *pcl-cache-generation* "v2-86"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

@@ -220,8 +220,8 @@ print $r;
 EOT
 
 like($sm, qr/\(pl-f \$x\)/,             'scalar symbol atom: (pl-f $x)');
-like($sm, qr/\(pl-f \(p-aref \@a 0\)\)/, 'array-access child still lowers');
-like($sm, qr/\(pl-f \(p-gethash %h "k"\)\)/, 'hash-access child still lowers');
+like($sm, qr/\(pl-f \(p-aref-argbox \@a 0\)\)/, 'array-access child still lowers');
+like($sm, qr/\(pl-f \(p-gethash-argbox %h "k"\)\)/, 'hash-access child still lowers');
 like($sm, qr/\(pl-f \$\@\)/,            'magic $@ atom: (pl-f $@)');
 like($sm, qr/\(pl-f \|\$\.\|\)/,        'magic $. → |$.| atom');
 

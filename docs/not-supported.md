@@ -272,22 +272,31 @@ that used it are commented out).
 
 ---
 
-## `@_` argument aliasing
+## `@_` argument aliasing — PARTIAL (plain `my` lexicals only)
 
 **Perl behaviour:** Elements of `@_` are aliases to the caller's actual
 arguments.  `$_[0] = 42` modifies the caller's variable in place.  This
 is how many Perl idioms pass by reference without explicit `\`.
 
-**PCL behaviour:** PCL copies arguments into `@_` via `pl-flatten-args`.
-Modifications to `$_[0]` do not propagate back to the caller.
+**PCL behaviour (since task #131, 2026-08-01):** most argument shapes DO
+alias — the box already in play is passed through:
 
-**Rationale:** CL function arguments are values, not aliases.  Implementing
-Perl-style pass-by-alias would require wrapping every argument in a
-mutable cell and teaching the caller to read it back — a pervasive change
-with high cost and low gain for CPAN code (most modules don't use this
-trick).
+- package globals, `our` vars, `$_` and other magic globals;
+- array/hash spreads (`f(@a)` — element boxes, holes as lazy defelem);
+- named-container ELEMENTS (`f($h{k})`, `f($a[i])`): the live slot box
+  when the element exists, a lazy defelem cell when it does not (a
+  read-only callee never vivifies; the first write through `$_[N]`
+  creates the key / extends the array).  Named subs, coderef calls
+  (`$c->(...)`, `&$c(...)`), and method calls.
 
-**Affected tests:** `perl-tests/args.t` (all 4 tests).
+What still COPIES: a plain `my` lexical scalar (`f($x)`) whose slot the
+VarAnnotator proved raw — boxing every lexical ever passed to a sub
+would defeat the raw-slot speed model (Target A), so this stays a
+deliberate divergence.  Also deref elements (`f($ref->{k})`) and
+prototype-`$`-imposed element args (both copy today; extendable via the
+same argbox accessors if real code needs them).
+
+**Affected tests:** `perl-tests/args.t` rows touching plain-lexical args.
 
 ---
 

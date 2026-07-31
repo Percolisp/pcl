@@ -329,7 +329,7 @@ test_codegen('$x = $arr[0] + $hash{key}',
              'Sum of array and hash values');
 
 test_codegen('$result = $obj->method($arr[0])',
-             '(p-scalar-= $result (let ((*wantarray* nil)) (p-method-call $obj "method" (p-aref @arr 0))))',
+             '(p-scalar-= $result (let ((*wantarray* nil)) (p-method-call $obj "method" (p-aref-argbox @arr 0))))',
              'Method call with array element arg');
 
 test_codegen('$total = $prices->[$i] * $qty->{$item}',

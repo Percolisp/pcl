@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316s (2026-08-01, Fable) — #131: element args alias through @_ (defelem), gen v2-86.
+
+- **`f($h{k})` / `f($a[i])` now pass the ELEMENT, not a copy** — perl's
+  defelem semantics for @_ (writes to `$_[N]` reach the caller's
+  container; `not-supported.md §@_ aliasing` re-scoped to PARTIAL).  Two
+  new runtime accessors used ONLY in user-call argument position:
+  `p-aref-argbox` / `p-gethash-argbox` — the live slot box when the
+  element exists, a LAZY defelem magic cell when it does not (reads look
+  the key up live and never vivify; the first write creates the key /
+  extends the array — `%p-defelem-box`'s setter grew the extension arm).
+  The eager lvalue accessors (`p-*-box`) were wrong for this: they vivify
+  on read.
+- **Codegen = the lvalue_context mechanism, third value 'argbox'.**  The
+  four named-element accessor sites (text+form × aref/gethash) pick the
+  accessor via `_elem_accessor`; the six call-argument sites (funcall
+  text/form tails, ref_funcall ×2, methodcall ×2) set 'argbox' —
+  **gated PER-ARG on the arg node being a_acc/h_acc**.  The blanket
+  version leaked into arg SUBTREES: a `~$_` method arg flipped from
+  string- to numeric-complement (caught by the sweep as a bop.t "new"
+  fail; the row turned out pre-existing at HEAD — the gating is still
+  required, the leak was real).  ExprToCL2's native funcall path swaps
+  the lowered head instead (the _alias_box_form sibling).
+- **Verification:** probe battery vs real perl (named/coderef/&-call/
+  method calls, computed keys, `my ($x)=@_`+shift still copy, swap via
+  @_[0,1], `\$_[0]` ref identity, past-end write extends) all MATCH;
+  gate 123/4429; FULL sweep vs baseline: **1 new / 8 fixed** — the 8
+  include pos.t defelem-propagation rows and grent/hexfp/qr/range
+  drift-backs; the 1 new (pos.t "failed //g sets pos through defelem")
+  is a CORRECTED FALSE PASS: pos now propagates (t14/t17 fixed), so t16
+  exposes the pre-existing //g-pos-advance gap t15 already fails on.
+  Baseline re-blessed 709→702.  bop.t/ref.t PARTIAL rows = abort-window
+  drift (bop's vstring row fails identically at HEAD).  Artifacts
+  regenerated at v2-86 (header-only), pack.t solo 5636/89.
+- **Still copies (documented):** plain `my` lexical scalars (raw-slot
+  speed model, Target A), deref-element args (`f($ref->{k})`),
+  prototype-`$`-imposed elements.  ir-spec §calling-convention updated.
+
+---
+
 ## Session 316r (2026-07-31, Fable) — #134 state-in-signature-default + #25 full-suite re-run at v2-85.
 
 - **#134 CLOSED (8418680, gen v2-85): `state $v = INIT` in a signature
