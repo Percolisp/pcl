@@ -489,6 +489,16 @@ sub _extract_prototype_attributes {
       # Named sub: needs a body (forward decls keep their attribute).
       next unless grep { $_->isa('PPI::Structure::Block') } $stmt->schildren;
       my $name = $stmt->name;
+      # Register at PARSE time too: perl applies :prototype at compile
+      # time, so call-site parsing (unary vs list-op, signature-default
+      # swallowing) must see it — the runtime registry alone is invisible
+      # to the parser.  Marked from_attr so the definition's later default
+      # registration knows not to clobber it (both pipelines).
+      if ($self->environment) {
+        my $si = $self->parse_prototype_or_signature($proto, $stmt);
+        $si->{from_attr} = 1;
+        $self->environment->add_prototype($name, $si);
+      }
       _delete_attribute_and_colon($attr);
       my $text = " __pcl_set_prototype(\\&$name, '$quoted');";
       my $ndoc = PPI::Document->new(\$text) or next;
@@ -6702,9 +6712,15 @@ sub _process_sub_statement {
   my $sig_hash_start = ($sig_slurpy && $sig_slurpy =~ /^\%/)
                      ? ($sig_min + scalar @sig_opt) : 'nil';
 
-  # Store in environment for later use by PExpr
+  # Store in environment for later use by PExpr.  A :prototype-attribute
+  # proto (from_attr, registered by _extract_prototype_attributes) is
+  # applied at compile time in perl — keep it when this definition carries
+  # no inline prototype/signature of its own.
   if ($name) {
-    $self->environment->add_prototype($name, $sig_info);
+    my $prev = $self->environment->get_prototype($name);
+    if (!($prev && $prev->{from_attr} && !$prototype && !$is_signature_syntax)) {
+      $self->environment->add_prototype($name, $sig_info);
+    }
     # Also record for forward declarations
     my $pkg = $self->environment->current_package();
     $self->environment->add_declared_sub($name, $pkg);
@@ -8648,6 +8664,43 @@ sub _normalize_signature_text {
   return $out;
 }
 
+# True when a signature-default text contains, at paren/bracket depth 0 and
+# outside quotes, a PARENLESS call to a known non-prototyped sub.  Such a
+# call is a LIST OPERATOR: perl parses everything to its right — commas and
+# all — as its argument list, so the "params" after it are really part of
+# this default (`sub t017 ($p = t018 222, $a = 333)` has ONE param;
+# op/signatures.t t017).  Old-style prototypes limit the call's arity at
+# parse time, so those subs do not swallow.
+my %SIG_DEFAULT_KEYWORDS = map { $_ => 1 }
+  qw(do state my our local sub undef defined not and or xor eq ne lt gt
+     le ge cmp x if unless while until for foreach return);
+sub _sig_default_swallows {
+  my ($self, $text) = @_;
+  # Blank quoted spans and nested groups so only depth-0 unquoted barewords
+  # are considered.
+  my ($depth, $q, $masked) = (0, '', '');
+  for my $c (split //, $text) {
+    if ($q)               { $q = '' if $c eq $q; $masked .= ' '; next }
+    if ($c =~ /["']/)     { $q = $c; $masked .= ' '; next }
+    if ($c =~ /[\(\[\{]/) {
+      # keep a depth-0 opener visible: `f(...)` must NOT read as parenless
+      $masked .= $depth == 0 ? $c : ' ';
+      $depth++;
+      next;
+    }
+    if ($c =~ /[\)\]\}]/) { $depth--; $masked .= ' '; next }
+    $masked .= $depth == 0 ? $c : ' ';
+  }
+  while ($masked =~ /(?<![\$\@\%&>:\w])([a-zA-Z_]\w*)\b(?!\s*(?:\(|=>|::))/g) {
+    my $w = $1;
+    next if $SIG_DEFAULT_KEYWORDS{$w};
+    my $proto = $self->environment ? $self->environment->get_prototype($w)
+                                   : undef;
+    return 1 if $proto && !$proto->{is_proto};
+  }
+  return 0;
+}
+
 sub _signature_param_specs {
   my $self    = shift;
   my $sig_str = shift;
@@ -8657,7 +8710,18 @@ sub _signature_param_specs {
   my @specs;
   my $anon_counter = 0;
 
-  for my $param_str ($self->_split_signature_params($sig_str)) {
+  my @segs = $self->_split_signature_params($sig_str);
+  # Merge trailing segments into a default that ends in a parenless
+  # list-op call (see _sig_default_swallows).
+  for my $i (0 .. $#segs - 1) {
+    if ($segs[$i] =~ m{(?://=|\|\|=|=)\s*(.+)$}s
+        && $self->_sig_default_swallows($1)) {
+      splice @segs, $i, scalar(@segs) - $i, join(', ', @segs[$i .. $#segs]);
+      last;
+    }
+  }
+
+  for my $param_str (@segs) {
     $param_str =~ s/^\s+//;
     $param_str =~ s/\s+$//;
     next if $param_str eq '';

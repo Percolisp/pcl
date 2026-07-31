@@ -399,6 +399,27 @@ package P { sub m2 { $_[1] = 7 } }
 P->m2($h{k}); print "meth:$h{k}\n";
 ');
 
+# op/signatures.t t017/t021: a PARENLESS call to a known non-prototyped
+# sub in a signature default is a LIST OPERATOR — it swallows the rest of
+# the signature into its argument list (ONE param).  A :prototype($) sub
+# is unary and does NOT swallow (the attribute registers at parse time);
+# an explicitly parenthesized call does not either.
+test_transpile("parenless list-op call swallows the sig default", '
+use feature "signatures"; no warnings;
+our $a;
+sub t018 { join("/", @_) }
+sub t017 ($p = t018 222, $a = 333) { $p // "z" }
+print t017(), " a:$a\n";
+$a = 123;
+print t017(456), " a:$a\n";
+print( (defined eval("t017(456, 789)") ? "two-params" : "one-param"), "\n");
+sub t020 :prototype($) { $_[0]."z" }
+sub t021 ($p = t020 222, $a = 333) { "$p/$a" }
+print t021(), "|", t021(456,789), "\n";
+sub t019 ($p = t018(222), $a = 333) { "$p:$a" }
+print t019(1), "|", t019(1,2), "\n";
+');
+
 # Task #134 (op/signatures.t t126/t127): `state $s = INIT` in a signature
 # default runs INIT only on the FIRST defaulted call; later defaulted calls
 # see $s's current value.  Both the whole-expression form and the do-block

@@ -775,9 +775,14 @@ sub parse {
         $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}));
         # Same default signature v1's _process_sub_statement registers for a
         # prototype-less sub: PExpr consults get_prototype() to decide that a
-        # bareword `foo` is a CALL (pl-foo), not the string "foo".
-        $self->environment->add_prototype($sub->name,
-                                          { params => [], min_params => -1, is_proto => 0 });
+        # bareword `foo` is a CALL (pl-foo), not the string "foo".  A
+        # :prototype-attribute proto (from_attr) is compile-time in perl —
+        # never clobber it with the default.
+        my $prev_proto = $self->environment->get_prototype($sub->name);
+        if (!($prev_proto && $prev_proto->{from_attr})) {
+          $self->environment->add_prototype($sub->name,
+                                            { params => [], min_params => -1, is_proto => 0 });
+        }
         # Forward declaration `sub foo;` (no block) reserves the name only — v1
         # emits (p-declare-sub) and no definition.  No sub_info: there is
         # nothing to direct-call, so any call takes the fallback funcall path.
