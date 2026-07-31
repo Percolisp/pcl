@@ -40,6 +40,23 @@ Append new entries at the top. One section per session.
 - **Still copies (documented):** plain `my` lexical scalars (raw-slot
   speed model, Target A), deref-element args (`f($ref->{k})`),
   prototype-`$`-imposed elements.  ir-spec §calling-convention updated.
+- **t017 CLOSED same session (eb42b7e, gen v2-87) — the last signatures.t
+  fix-target rows.**  A parenless call to a known non-prototyped sub in
+  a signature default is a LIST OPERATOR: perl parses
+  `sub t017 ($p = t018 222, $a = 333)` as ONE param whose default is
+  `t018(222, $a = 333)` ($a = the GLOBAL).  `_signature_param_specs` now
+  merges trailing comma-segments into such a default
+  (`_sig_default_swallows`: quotes/nested groups masked, depth-0 openers
+  kept so `f(...)` never reads as parenless).  Companion fix the t021 row
+  caught: a `:prototype($)` ATTRIBUTE was runtime-only (s316o) —
+  invisible to parse-time callers, so t020 read as a swallowing list op.
+  `_extract_prototype_attributes` now registers it in the environment
+  (`from_attr`), and both pipelines' default sub registrations skip the
+  clobber.  op/signatures.t 886→891 (sweep harness 883→888, 5 rows:
+  t151/152/156 + 2 t021); the signatures fix-target list is EMPTY.
+  Oracle guard in transpile-test-07.t (t017/t019/t020/t021 shapes); gate
+  123/4429; spot sweeps 0 new; corpus = signatures.t only; artifacts
+  v2-87.
 
 ---
 
