@@ -378,4 +378,20 @@ push @log, "rethrow:$@" if !$out;
 print map { s/\n/./gr . "\n" } @log;
 ');
 
+# Task #134 (op/signatures.t t126/t127): `state $s = INIT` in a signature
+# default runs INIT only on the FIRST defaulted call; later defaulted calls
+# see $s's current value.  Both the whole-expression form and the do-block
+# form; passing an arg must not touch the state or run INIT.
+test_transpile("state in signature default initializes once", '
+use feature "signatures"; use feature "state"; no warnings;
+our $z;
+sub t126 ($c = (state $s = $z++)) { $c }
+sub t127 ($c = do { state $s = $z++; $s++ }) { $c }
+$z = 222;
+print t126(456), " ", t126(), " z=$z\n";
+print t126(), " z=$z\n";
+print t127(), " ", t127(), " z=$z\n";
+print t127(456), " ", t127(), " z=$z\n";
+');
+
 done_testing();

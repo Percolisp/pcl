@@ -8699,6 +8699,33 @@ sub _signature_param_specs {
 }
 
 
+# True iff every `(` in $str has a matching `)` (plain count, no string
+# awareness — inputs are the short default-expression texts of a signature).
+sub _paren_balanced {
+  my ($str) = @_;
+  my $depth = 0;
+  for my $c (split //, $str) {
+    $depth++ if $c eq '(';
+    if ($c eq ')') { $depth--; return 0 if $depth < 0 }
+  }
+  return $depth == 0;
+}
+
+# Longest prefix of a `state $v = INIT` init text that belongs to the decl:
+# stops before an unmatched `)` or `}` (a closer owned by an enclosing paren
+# group or do-block, not by the init expression).
+sub _init_prefix {
+  my ($str) = @_;
+  my $depth = 0;
+  my $i = 0;
+  for my $c (split //, $str) {
+    if    ($c eq '(' || $c eq '{') { $depth++ }
+    elsif ($c eq ')' || $c eq '}') { last if $depth == 0; $depth-- }
+    $i++;
+  }
+  return substr($str, 0, $i);
+}
+
 # Parse new-style signature like "$x, $y = 10, @rest"
 sub _parse_signature {
   my $self      = shift;
@@ -8748,10 +8775,94 @@ sub _parse_signature {
       }
     }
 
+    # `state $v = INIT` inside a default runs its init ONCE (the first call
+    # that hits the default) and evaluates to $v's current value thereafter
+    # (op/signatures.t t126/t127).  The statement-level state machinery never
+    # sees a default expression, so peel the decls here: each becomes a
+    # defvar'd per-sub cell + __init flag box, the decl in the source is
+    # replaced by the plain variable (renamed to the cell for the extent of
+    # the compile), and a once-guard per init is hoisted in front of the
+    # compiled default.  The flag is a p-box tested with Perl truthiness
+    # (p-!) — the forward-decl scans declare every name they see in emitted
+    # text as `(make-p-box nil)`, and this way that declaration is correct
+    # (v2 declares expression-position state cells the same way).  Cell
+    # names are DETERMINISTIC (pkg + sub name): a signatured sub is parsed
+    # twice — call-site registration and the v1 definition lowering — and
+    # both parses must agree on the cell.  Scalar state only; the cell is
+    # not visible to the sub body (nothing in the suite references it there).
+    my $default_src = $default_expr;
+    my (%sig_state_renames, @sig_state_inits);
+    if (defined $default_src && $default_src =~ /\bstate\s+\$\w/) {
+      my $sub_name = ($context && eval { $context->isa('PPI::Statement::Sub') })
+                   ? ($context->name // '') : '';
+      my $pkg = $self->environment->current_package // 'main';
+      # `(state $v = ...)` whole-default: strip the balanced outer parens so
+      # the init capture below never swallows the closing one.
+      if ($default_src =~ /^\s*\((.*)\)\s*$/s
+          && _paren_balanced($1)) {
+        $default_src = $1;
+      }
+      $default_src =~ s{\bstate\s+(\$\w+)(?:\s*=\s*([^;]*))?}{
+        my ($sv, $init) = ($1, $2);
+        my $tail = '';
+        if (defined $init) {
+          # Keep only the part of INIT belonging to the decl: stop at an
+          # unmatched paren/brace closer — the decl may sit inside a paren
+          # group or a do-block whose closer is not ours to consume.
+          my $keep = _init_prefix($init);
+          $tail = substr($init, length $keep);
+          $init = $keep;
+          $init =~ s/\s+$//;
+          push @sig_state_inits, [$sv, $init] if $init ne '';
+        }
+        if (!$sig_state_renames{$sv}) {
+          (my $bare = $sv) =~ s/^\$//;
+          (my $slug = "${pkg}_${sub_name}") =~ s/[^a-zA-Z0-9]/_/g;
+          $slug .= '_' . ++$state_var_counter if $sub_name eq '';
+          my $cell = "\$${bare}__state_sig__${slug}";
+          $sig_state_renames{$sv} = $cell;
+          # v1's forward-decl scan reads perl SOURCE, so it never sees these
+          # generated names — declare them here.  Under v2 its text scan also
+          # declares them; the duplicate defvars are identical no-ops.
+          $self->_with_bucket('declarations', sub {
+            $self->_emit("(defvar $cell (make-p-box nil))");
+            $self->_emit("(defvar ${cell}__init (make-p-box nil))");
+          });
+        }
+        # Substitute the cell name directly: the decl statement's value is
+        # the variable itself, and this keeps it correct even on paths that
+        # skip the rename lookup (lone-symbol statement in a do-block).
+        $sig_state_renames{$sv} . $tail;
+      }ge;
+    }
+
     my $default_cl = undef;
-    if (defined $default_expr) {
+    if (defined $default_src) {
       # Compile the default expression to CL
-      $default_cl = $self->_compile_default_expr($default_expr, $context);
+      if (%sig_state_renames) {
+        my $saved = $self->environment->state_var_renames // {};
+        $self->environment->state_var_renames({ %$saved, %sig_state_renames });
+        my @guards;
+        for my $st (@sig_state_inits) {
+          my ($sv, $init_src) = @$st;
+          my $cell    = $sig_state_renames{$sv};
+          my $init_cl = $self->_compile_default_expr($init_src, $context);
+          next unless defined $init_cl;
+          push @guards, "(p-if (p-! ${cell}__init) "
+                      . "(progn (box-set $cell $init_cl) "
+                      . "(p-scalar-= ${cell}__init 1)))";
+        }
+        my $rest_cl = $self->_compile_default_expr($default_src, $context);
+        $self->environment->state_var_renames($saved);
+        if (defined $rest_cl) {
+          $default_cl = @guards
+            ? '(progn ' . join(' ', @guards) . " $rest_cl)"
+            : $rest_cl;
+        }
+      }
+      else {
+        $default_cl = $self->_compile_default_expr($default_src, $context);
+      }
     }
 
     push @params, {
