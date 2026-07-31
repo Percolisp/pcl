@@ -13,7 +13,7 @@ class/phasers.t	3	0	1	2	XDIFF	not-supported.md §Perl 5.38 class/field/method �
 class/threads.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 class/utf8.t	4	0	0	0	XDIFF	unbound:STDOUT | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 cmd/elsif.t	4	0	4	0	OK	
-cmd/for.t	16	0	12	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)
+cmd/for.t	16	0	13	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)
 cmd/mod.t	15	0	15	0	OK	
 cmd/subval.t	36	0	26	2	DIFF	unbound:F
 cmd/switch.t	18	0	18	0	OK	
@@ -25,35 +25,35 @@ comp/filter_exception.t	4	0	2	2	DIFF
 comp/final_line_num.t	1	0	0	0	DIFF	
 comp/fold.t	35	0	15	8	DIFF	undef-fn:main::pl-INSTALL
 comp/form_scope.t	14	0	0	2	DIFF	
-comp/hints.t	31	0	17	14	DIFF	
+comp/hints.t	31	0	17	14	XDIFF	not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)
 comp/multiline.t	6	0	6	0	OK	
 comp/opsubs.t	36	0	31	5	DIFF	
 comp/our.t	7	0	0	7	DIFF	
-comp/package.t	14	0	0	0	DIFF	crash:sb-kernel::arg-count-error: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)
 comp/package_block.t	7	0	3	4	DIFF	
+comp/package.t	14	0	0	0	DIFF	crash:sb-kernel::arg-count-error: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)
+comp/parser_run.t	70	0	29	41	DIFF	unbound:main::$00
 comp/parser.t	191	0	0	0	TRANSPILE	transpile-timeout
-comp/parser_run.t	70	0	0	0	DIFF	undef-fn:main::pl-fresh_perl
 comp/proto.t	216	0	47	14	DIFF	crash:simple-error: Undefined subroutine &main::N called at (eval N) line N.
 comp/redef.t	20	0	1	19	DIFF	
-comp/require.t	1750	0	34	16	DIFF	crash:simple-error: Can't locate loadable object for module Cwd in @INC
+comp/require.t	1750	0	31	16	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
 comp/retainedlines.t	109	0	19	90	DIFF	
 comp/term.t	23	0	23	0	OK	
 comp/uproto.t	32	0	13	21	DIFF	
-comp/use.t	87	0	0	0	DIFF	crash:simple-error: Can't locate test_use.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N
+comp/use.t	87	0	40	47	DIFF	undef-fn:main::pl-true
 comp/utf.t	4216	0	12	4204	DIFF	
 io/argv.t	52	1	23	30	DIFF	unbound:main::<>
 io/binmode.t	9	0	9	0	OK	
 io/bom.t	3	0	0	3	DIFF	
 io/closepid.t	3	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-open $fhN "-|" $perl "-e" "sleep N") Co
 io/crlf.t	16421	0	16408	10	DIFF	undef-fn:PerlIO::pl-get_layers
-io/crlf_through.t	942	0	654	288	DIFF	
+io/crlf_through.t	942	0	726	216	DIFF	
 io/data.t	4	0	0	0	DIFF	
 io/defout.t	22	0	21	1	DIFF	
 io/dup.t	29	0	5	0	DIFF	
-io/eintr.t	0	0	0	0	NOTAP	
 io/eintr_print.t	0	0	0	0	NOTAP	crash:simple-error: Can't locate loadable object for module Time::HiRes in @INC
-io/errno.t	16	0	16	0	OK	
+io/eintr.t	0	0	0	0	NOTAP	
 io/errnosig.t	1	0	0	1	DIFF	
+io/errno.t	16	0	16	0	OK	
 io/fflush.t	7	0	2	2	DIFF	undef-fn:main::pl-_create_runperl
 io/fs.t	61	0	54	4	DIFF	crash:sb-ext:delete-file-error: Could not delete the file "/tmp/pcl-test-N-N": Is a directory
 io/getcwd.t	0	0	0	0	NOTAP	undef-fn:Internals::pl-getcwd
@@ -63,28 +63,27 @@ io/iprefix.t	2	0	0	2	DIFF
 io/layers.t	55	0	0	0	DIFF	unbound:STDIN
 io/msg.t	18	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
 io/nargv.t	7	0	11	2	DIFF	
-io/open.t	188	0	43	8	DIFF	unbound:$f
 io/openpid.t	10	0	6	2	TIMEOUT	timeout
+io/open.t	188	0	43	8	DIFF	unbound:$f
 io/paragraph_mode.t	80	0	80	0	OK	
-io/perlio.t	46	2	4	18	DIFF	crash:sb-int:simple-file-error: Error opening #P"/tmp/NtycNUeMNr/t/": Is a directory
 io/perlio_fail.t	15	0	8	7	DIFF	
 io/perlio_leaks.t	8	4	0	0	DIFF	crash:simple-error: No such file or directory at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/io/p
 io/perlio_open.t	10	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-open (p-my $fh "+>" (let ((*wantarray* 
-io/pipe.t	27	0	6	0	DIFF	crash:sb-int:broken-pipe: Couldn't write to #<sb-sys:fd-stream for "descriptor N" {NEANCN}>: Broken pipe
+io/perlio.t	46	2	4	18	DIFF	crash:sb-int:simple-file-error: Error opening #P"/tmp/TVChlNAZXa/t/": Is a directory
+io/pipe.t	27	0	8	0	DIFF	crash:sb-int:broken-pipe: Couldn't write to #<sb-sys:fd-stream for "descriptor N" {NAN}>: Broken pipe
 io/print.t	24	0	23	1	DIFF	
 io/pvbm.t	28	0	23	5	DIFF	
 io/read.t	2	0	2	0	OK	
 io/say.t	13	0	13	0	OK	
 io/scalar_ungetc.t	19	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module IO in @INC
+io/semctl.t	2	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
 io/sem.t	22	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
-io/semctl.t	2	0	0	0	DIFF	
 io/shm.t	21	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
+io/socketpair.t	8	0	0	0	DIFF	
 io/socket.t	45	0	0	0	DIFF	
-io/socketpair.t	8	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module IO in @INC
-io/tell.t	36	0	26	0	DIFF	crash:sb-int:simple-file-error: The path #P"/tmp/NtycNUeMNr/t/>/tmp/pcl-test-N-N" does not exist.
-io/through.t	942	0	708	234	DIFF	
+io/tell.t	36	0	26	0	DIFF	crash:sb-int:simple-file-error: The path #P"/tmp/TVChlNAZXa/t/>/tmp/pcl-test-N-N" does not exist.
+io/through.t	942	0	942	0	OK	
 io/utf8.t	62	0	0	13	DIFF	crash:simple-error: Bad file descriptor at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/io/utfN.t 
-mro/basic.t	66	0	12	13	XDIFF	crash:simple-error: Inconsistent hierarchy during CN merge of 'ISACLEAR' | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
 mro/basic_01_c3.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hello" via package "Diamond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_c3_utf8.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_dfs.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hello" via package "Diamond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
@@ -105,6 +104,7 @@ mro/basic_05_c3.t	2	0	0	1	XDIFF	crash:simple-error: No SUPER::foo found from Dia
 mro/basic_05_c3_utf8.t	2	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_05_dfs.t	2	0	0	1	XDIFF	crash:simple-error: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_05_dfs_utf8.t	2	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
+mro/basic.t	66	0	12	13	XDIFF	crash:simple-error: Inconsistent hierarchy during CN merge of 'ISACLEAR' | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
 mro/basic_utf8.t	53	0	10	10	XDIFF	crash:simple-error: Can't locate object method "new" via package "DESTROY_MRO_Ｄჷ및" (perhaps you forgot t | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/c3_with_overload.t	7	0	7	0	OK	
 mro/c3_with_overload_utf8.t	7	0	7	0	OK	
@@ -126,10 +126,8 @@ mro/isa_dfs.t	34	0	21	13	XDIFF	not-supported.md §mro — DFS ordering spec test
 mro/isa_dfs_utf8.t	34	0	19	15	XDIFF	not-supported.md §mro — DFS ordering spec tests (C3-only by design, utf8)
 mro/isarev.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally)
 mro/isarev_utf8.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally, utf8)
-mro/method_caching.t	36	0	0	0	XDIFF	crash:sb-c::input-error-in-load: read error during load: | not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)
-mro/method_caching_utf8.t	28	0	0	0	XDIFF	crash:sb-c::input-error-in-load: read error during load: | not-supported.md §mro — perl method-cache semantics (utf8)
-mro/next_NEXT.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "next::method" via package "Fuz" at - line N. | not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
-mro/next_NEXT_utf8.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "fಓ" via package "Fᶽ" (perhaps you forgot to load "Fᶽ"?)  | not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
+mro/method_caching.t	36	0	21	15	XDIFF	not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)
+mro/method_caching_utf8.t	28	0	10	0	XDIFF	undef-fn:ǎᔆɗF::pl-앗dƑ | not-supported.md §mro — perl method-cache semantics (utf8)
 mro/next_edgecases.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
 mro/next_edgecases_utf8.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 mro/next_goto.t	4	0	0	0	XDIFF	undef-fn:next::pl-method | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
@@ -140,13 +138,15 @@ mro/next_ineval.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API
 mro/next_ineval_utf8.t	1	0	0	0	XDIFF	crash:simple-error: Can't locate object method "ຟǫ" via package "ｂ" (perhaps you forgot to load "ｂ"?) a | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/next_method.t	5	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hello" via package "Diamond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/next_method_utf8.t	5	0	0	1	XDIFF	crash:simple-error: Can't locate object method "헬ฬ" via package "Diӑmond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
+mro/next_NEXT.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "next::method" via package "Fuz" at - line N. | not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
+mro/next_NEXT_utf8.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "fಓ" via package "Fᶽ" (perhaps you forgot to load "Fᶽ"?)  | not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 mro/next_skip.t	10	0	0	1	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/next_skip_utf8.t	10	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/overload_c3.t	7	0	7	0	OK	
 mro/overload_c3_utf8.t	7	0	0	0	XDIFF	crash:simple-error: Can't locate object method "ネᚹ" via package "읺ҎꀀḮṆᵷꜰ롬ᵕveŔŁoad엗텟 | not-supported.md §Unicode — utf8 package-name variant (non-utf8 twin passes)
 mro/overload_dfs.t	7	0	7	0	OK	
-mro/package_aliases.t	54	0	0	0	XDIFF	undef-fn:main::|pl-New::| | not-supported.md §symbol-table hashes — glob package aliasing + isarev
-mro/package_aliases_utf8.t	52	0	0	0	XDIFF	undef-fn:main::|pl-Ｎeẁ::| | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8)
+mro/package_aliases.t	54	0	96	39	XDIFF	crash:type-error: The value "phoo::blonk::" is not of type hash-table | not-supported.md §symbol-table hashes — glob package aliasing + isarev
+mro/package_aliases_utf8.t	52	0	54	28	XDIFF	timeout | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8)
 mro/pkg_gen.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 mro/pkg_gen_utf8.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
 mro/recursion_c3.t	8	0	8	0	OK	
@@ -162,9 +162,11 @@ op/alarm.t	5	0	5	0	OK
 op/anonconst.t	7	0	0	1	DIFF	crash:simple-error: Undefined subroutine &main:: called at (eval N) line N.
 op/anonsub.t	14	1	1	5	DIFF	
 op/attrhand.t	4	0	0	0	DIFF	
-op/attrproto.t	48	0	12	33	DIFF	
-op/attrs.t	157	2	25	104	DIFF	unbound:Tloop::$value
+op/attrproto.t	48	0	17	28	DIFF	
+op/attrs.t	157	2	25	64	DIFF	undef-fn:attributes::pl-_guess_stash
 op/avhv.t	40	0	0	10	DIFF	undef-fn:Tie::pl-StdHash
+opbasic/cmp.t	13280	0	12078	0	DIFF	
+opbasic/magic_phase.t	7	0	0	5	DIFF	
 op/bless.t	116	2	111	5	DIFF	
 op/catch.t	12	0	10	2	DIFF	
 op/chop.t	148	0	96	4	DIFF	
@@ -179,9 +181,9 @@ op/current_sub.t	22	0	0	0	XDIFF	crash:sb-int:simple-program-error: invalid numbe
 op/dbm.t	5	0	0	0	DIFF	
 op/decl-refs.t	402	0	187	197	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/decl-refs.t line N.
 op/defer.t	28	0	0	0	DIFF	undef-fn:main::pl-defer
-op/die.t	25	1	5	15	DIFF	
 op/die_except.t	12	0	12	0	OK	
 op/die_keeperr.t	24	0	9	15	DIFF	
+op/die.t	25	1	5	15	DIFF	
 op/die_unwind.t	13	0	8	5	DIFF	
 op/dor.t	34	0	31	3	DIFF	
 op/dump.t	0	0	0	0	NOTAP	crash:simple-error: Can't locate loadable object for module Cwd in @INC
@@ -189,11 +191,11 @@ op/evalbytes.t	9	0	5	4	DIFF
 op/exec.t	41	0	15	0	DIFF	crash:simple-error: Couldn't execute "lskdfj": No such file or directory
 op/fh.t	8	0	4	4	DIFF	
 op/filehandle.t	4	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module IO in @INC
-op/filetest.t	436	0	16	3	DIFF	undef-fn:main::pl--l
-op/filetest_stack_ok.t	136	0	61	75	DIFF	
+op/filetest_stack_ok.t	136	0	71	65	DIFF	
+op/filetest.t	436	0	16	6	DIFF	undef-fn:main::pl-f
 op/filetest_t.t	7	0	0	0	DIFF	crash:sb-int:simple-file-error: Error opening #P"/dev/tty": No such device or address
-op/for-many.t	71	0	16	17	DIFF	
 op/fork.t	28	0	1	0	DIFF	
+op/for-many.t	71	0	16	17	DIFF	
 op/fresh_perl_utf8.t	1	0	0	1	DIFF	
 op/getpid.t	0	0	0	1	NOTAP	crash:simple-error: Can't locate object method "new" via package "threads" at - line N.
 op/getppid.t	8	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w)) Compile-time error
@@ -205,10 +207,10 @@ op/gv.t	304	0	43	54	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash-rt85026.t	1	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hashwarn.t	20	0	3	17	DIFF	
-op/inc.t	93	0	60	15	DIFF	
-op/inccode-tie.t	89	0	0	0	DIFF	crash:simple-error: Can't locate BBBLPLASTN.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
 op/inccode.t	89	0	0	0	DIFF	crash:simple-error: Can't locate BBBLPLASTN.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
+op/inccode-tie.t	89	0	0	0	DIFF	crash:simple-error: Can't locate BBBLPLASTN.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
 op/incfilter.t	153	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Filter::Util::Call in @INC
+op/inc.t	93	0	60	15	DIFF	
 op/index.t	415	0	49	13	DIFF	parse-error
 op/index_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/kill0.t	9	0	4	5	DIFF	
@@ -217,31 +219,31 @@ op/leaky-magic.t	71	0	0	0	DIFF	crash:simple-error: Can't locate tests.pm in @INC
 op/lex_assign.t	353	0	346	7	DIFF	undef-fn:main::pl-getpgrp
 op/lexsub.t	156	0	7	10	DIFF	undef-fn:main::pl-F
 op/localref.t	64	0	63	1	DIFF	
-op/lock.t	5	0	0	0	DIFF	undef-fn:main::pl-lock
+op/lock.t	5	0	0	0	DIFF	crash:sb-int:simple-program-error: invalid number of arguments: N
 op/lvref.t	199	2	20	13	DIFF	unbound:@state__toplevel__a__1
 op/magic-27839.t	2	0	2	0	OK	
 op/mkdir.t	17	0	17	0	OK	
-op/my_stash.t	9	0	4	3	DIFF	undef-fn:Foo::pl-runperl
 op/mydef.t	2	0	0	2	DIFF	
+op/my_stash.t	9	0	4	3	DIFF	undef-fn:Foo::pl-runperl
 op/negate.t	48	0	48	0	OK	
 op/not.t	24	0	22	2	DIFF	
 op/numconvert.t	1446	0	0	0	DIFF	
-op/numify.t	32	0	32	0	OK	
 op/numify_chkflags.t	14	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/overload_integer.t	2	0	0	0	DIFF	crash:simple-error: Can't locate Foo.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/pe
-op/override.t	36	0	0	0	DIFF	crash:simple-error: Can't locate Foo.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/pe
+op/numify.t	32	0	32	0	OK	
+op/overload_integer.t	2	0	2	0	OK	
+op/override.t	36	0	0	0	DIFF	crash:sb-c::input-error-in-load: read error during load:
 op/packagev.t	307	0	22	0	DIFF	undef-fn:version::pl-is_strict
 op/pos.t	33	0	15	15	DIFF	
 op/protowarn.t	12	0	4	8	DIFF	
-op/pwent.t	2	0	0	0	DIFF	undef-fn:main::pl-setpwent
+op/pwent.t	2	0	2	0	OK	
 op/quotemeta.t	60	0	58	2	DIFF	
 op/rand.t	263	0	260	3	DIFF	
+op/readdir.t	16	0	10	6	DIFF	
 op/read.t	2116	0	2116	0	OK	
-op/readdir.t	16	0	1	0	DIFF	crash:simple-error: Can't open ../MANIFEST: No such file or directory at /home/bernt/perlN/perlbrew/build/perl
-op/ref.t	257	0	188	49	DIFF	
 op/refstack.t	0	0	0	0	NOTAP	
-op/repeat.t	50	0	46	4	DIFF	
-op/require_37033.t	10	0	2	1	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
+op/ref.t	257	0	188	49	DIFF	
+op/repeat.t	50	0	47	3	DIFF	
+op/require_37033.t	10	0	3	0	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
 op/require_gh20577.t	9	0	4	5	DIFF	
 op/require_override.t	10	0	7	3	DIFF	
 op/rt119311.t	22	0	0	1	DIFF	crash:sb-kernel::arg-count-error: Error while parsing arguments to defmacro push: too many elements in ((lambda () (p-undef 
@@ -250,17 +252,17 @@ op/select.t	9	0	2	7	DIFF
 op/setpgrpstack.t	3	0	1	1	DIFF	undef-fn:main::pl-setpgrp
 op/sigdispatch.t	29	0	25	4	DIFF	
 op/signame_canonical.t	15	0	0	0	DIFF	
-op/signatures.t	1245	1	792	155	DIFF	undef-fn:T200::pl-t201
+op/signatures.t	1245	1	886	360	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. The 3 rows NOT covered stay fix targets: t151/152/156 parenless list-op call swallowing the sig default (t017). t276-296 state-in-default re-init FIXED (task #134, s316r).
 op/sigsystem.t	4	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.
 op/smartkve.t	18	0	3	13	DIFF	
 op/smartmatch.t	353	0	143	210	DIFF	
 op/split_unicode.t	147	0	107	40	DIFF	
 op/srand.t	10	0	5	5	DIFF	
-op/sselect.t	23	0	12	3	DIFF	undef-fn:main::|pl-_131645::|
-op/stash.t	54	1	45	9	DIFF	undef-fn:main::pl-SUPER
-op/stash_parse_gv.t	5	0	1	4	DIFF	
+op/sselect.t	23	0	17	6	DIFF	
+op/stash_parse_gv.t	5	0	5	0	OK	
+op/stash.t	54	1	46	8	DIFF	undef-fn:main::pl-SUPER
+op/stat_errors.t	638	0	305	333	DIFF	
 op/stat.t	108	3	0	0	DIFF	undef-fn:main::pl-is_linux_container
-op/stat_errors.t	638	0	0	0	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/stat_errors.t line N.
 op/studytied.t	14	0	13	1	DIFF	
 op/sub_lval.t	211	0	12	58	DIFF	undef-fn:main::pl-rlv1t
 op/substr_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
@@ -270,13 +272,13 @@ op/switch.t	197	0	27	142	DIFF	undef-fn:main::pl-default
 op/symbolcache.t	8	0	0	0	DIFF	undef-fn:main::pl-removed
 op/sysio.t	45	0	45	0	OK	
 op/taint.t	0	0	0	0	NOTAP	crash:type-error: The value pcl::%ENV-MARKER% is not of type hash-table
-op/threads-dirh.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
+op/threads-dirh.t	0	0	0	0	NOTAP	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
 op/threads.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-op/tie.t	94	1	0	0	DIFF	
-op/tie_fetch_count.t	343	0	76	61	DIFF	undef-fn:main::pl--l
 op/tiearray.t	75	0	36	39	DIFF	
+op/tie_fetch_count.t	343	0	135	23	DIFF	crash:simple-error: Undefined subroutine &main::N called at (eval N) line N.
 op/tiehandle.t	67	0	0	0	DIFF	crash:type-error: The value "Symbol::" is not of type hash-table
 op/tiehash.t	27	0	20	7	DIFF	
+op/tie.t	94	1	0	0	DIFF	
 op/time_loop.t	2	0	2	0	OK	
 op/tr_latin1.t	2	0	2	0	OK	
 op/try.t	28	0	3	21	DIFF	
@@ -289,31 +291,28 @@ op/utf8decode.t	710	0	644	42	DIFF
 op/utf8magic.t	6	0	2	4	DIFF	
 op/utfhash.t	99	0	91	0	DIFF	
 op/utftaint.t	0	0	72	17	NOTAP	
-op/ver.t	54	0	35	7	DIFF	unbound:|2_3|
+op/ver.t	54	0	48	6	XDIFF	undef-fn:main::pl-gethostbyaddr | not-supported.md §use bytes / §use vN default warnings / §Control-character glob names — tests 21/23/25 (bytes view), 52 (Mordor), 54 (vN warnings); test 51 is the OPEN defelem arg-aliasing gap (task #131), a fix target
 op/waitpid.t	1	0	0	0	DIFF	undef-fn:main::pl-WNOHANG
 op/warn.t	32	1	21	5	DIFF	undef-fn:Tie::pl-StdScalar
 op/while.t	26	0	11	4	TIMEOUT	timeout
 op/write.t	636	0	0	0	DIFF	
-opbasic/cmp.t	13280	0	12078	0	DIFF	
-opbasic/magic_phase.t	7	0	0	5	DIFF	
-re/alpha_assertions.t	2279	0	1784	74	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
+re/alpha_assertions.t	2279	0	468	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
 re/anyof.t	1187	0	0	0	TIMEOUT	timeout
 re/begin-once.t	2	0	1	1	DIFF	
 re/bigfuzzy_not_utf8.t	1	0	1	0	OK	
-re/charset.t	8328	0	2748	2749	TIMEOUT	timeout
+re/charset.t	8328	0	2776	2776	DIFF	
 re/fold_grind_8.t	213	0	0	0	DIFF	
-re/fold_grind_T.t	0	0	0	0	NOTAP	
+re/fold_grind_aa.t	103	0	0	0	DIFF	
 re/fold_grind_a.t	31	0	0	0	TIMEOUT	timeout
-re/fold_grind_aa.t	103	0	0	0	TIMEOUT	timeout
-re/fold_grind_d.t	0	0	0	0	TIMEOUT	(killed)
+re/fold_grind_d.t	31	0	0	0	TIMEOUT	timeout
 re/fold_grind_l.t	113	0	0	0	DIFF	
-re/fold_grind_u.t	0	0	0	0	TIMEOUT	(killed)
+re/fold_grind_T.t	0	0	0	0	NOTAP	
+re/fold_grind_u.t	213	0	0	0	TIMEOUT	timeout
 re/keep_tabs.t	14	0	12	2	DIFF	
 re/no_utf8_pm.t	1	0	1	0	OK	
 re/opt.t	639	17	0	0	DIFF	undef-fn:re::pl-optimization
-re/overload.t	87	0	0	0	DIFF	undef-fn:overload::pl-constant
-re/pat.t	1263	4	0	0	DIFF	crash:sb-c::input-error-in-load: read error during load:
-re/pat_advanced.t	1678	0	1059	571	TIMEOUT	timeout
+re/overload.t	87	0	3	0	DIFF	
+re/pat_advanced.t	1678	0	1071	598	DIFF	
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
@@ -323,18 +322,32 @@ re/pat_rt_report.t	2513	1	175	13	DIFF	unbound:|$#-|
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_special_cc.t	9	0	9	0	OK	
 re/pat_special_cc_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
+re/pat.t	1263	4	0	0	DIFF	crash:sb-c::input-error-in-load: read error during load:
 re/pat_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pos.t	8	0	8	0	OK	
 re/qr-72922.t	14	0	12	2	DIFF	
-re/qr.t	4	0	3	1	DIFF	
 re/qr_gc.t	2	0	0	2	DIFF	
 re/qrstack.t	1	0	1	0	OK	
+re/qr.t	4	0	3	1	DIFF	
 re/recompile.t	48	0	0	48	DIFF	
 re/reg_60508.t	1	0	0	1	DIFF	
 re/reg_email.t	13	0	0	0	DIFF	
 re/reg_email_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/reg_eval.t	8	0	1	7	XDIFF	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t
 re/reg_eval_scope.t	48	1	5	24	DIFF	crash:sb-c::input-error-in-load: read error during load:
+re/reg_eval.t	8	0	1	7	XDIFF	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t
+re/regexp_noamp.t	2169	0	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_nonull.t	2167	2	0	0	DIFF	
+re/regexp_normal.t	2169	0	965	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_notrie.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_qr_embed.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_qr_embed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
+re/regexp_qr.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp.t	2167	2	39	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC
+re/regexp_trielist.t	2167	2	38	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regexp_unicode_prop.t	1110	0	778	332	DIFF	
+re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
+re/regex_sets_compat.t	2167	2	98	0	DIFF	crash:simple-error: Can't locate loadable object for module List::Util in @INC at (eval N) line N.
+re/regex_sets.t	96	0	21	32	DIFF	undef-fn:main::pl-capture_warnings
 re/reg_fold.t	6786	105	0	0	TIMEOUT	timeout
 re/reg_mesg.t	3348	0	0	0	DIFF	undef-fn:main::pl-display_rx
 re/reg_namedcapture.t	2	0	0	2	DIFF	
@@ -342,64 +355,51 @@ re/reg_nc_tie.t	37	0	6	7	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-FETCH
 re/reg_nocapture.t	25	0	14	11	DIFF	
 re/reg_pmod.t	88	0	58	30	DIFF	
 re/reg_posixcc.t	2560	0	1544	7646	DIFF	
-re/regex_sets.t	96	0	21	32	DIFF	undef-fn:main::pl-capture_warnings
-re/regex_sets_compat.t	2167	2	1600	258	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
-re/regexp.t	2167	2	318	55	TIMEOUT	timeout
-re/regexp_noamp.t	2169	0	311	54	TIMEOUT	timeout
-re/regexp_nonull.t	2167	2	0	0	DIFF	
-re/regexp_normal.t	2169	0	1850	8	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
-re/regexp_notrie.t	2167	2	326	58	TIMEOUT	timeout
-re/regexp_qr.t	2167	2	331	58	TIMEOUT	timeout
-re/regexp_qr_embed.t	0	0	0	0	TIMEOUT	(killed)
-re/regexp_qr_embed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/regexp_trielist.t	2167	2	358	67	TIMEOUT	timeout
-re/regexp_unicode_prop.t	1110	0	778	332	DIFF	
-re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/rt122747.t	3	0	3	0	OK	
 re/rxcode.t	42	0	25	16	DIFF	
 re/script_run.t	185	0	70	115	DIFF	
 re/speed.t	59	0	0	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
 re/speed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/stclass_threads.t	0	0	0	0	NOTAP	undef-fn:main::pl-fresh_perl
-re/subst.t	281	0	0	0	DIFF	crash:type-error: The value #<hash-table :TEST equal :COUNT N {NDANEN}> is not of type pcl:p-typeglob
-re/substT.t	0	0	0	0	NOTAP	
+re/stclass_threads.t	0	0	5	1	NOTAP	
 re/subst_amp.t	13	0	0	13	DIFF	
+re/subst.t	281	0	0	0	DIFF	crash:type-error: The value #<hash-table :TEST equal :COUNT N {NDNDN}> is not of type pcl:p-typeglob
+re/substT.t	0	0	0	0	NOTAP	
 re/subst_wamp.t	281	0	0	0	DIFF	
-re/uniprops01.t	39811	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops02.t	39961	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops03.t	39793	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops04.t	39759	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops05.t	17394	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops06.t	31724	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops07.t	29260	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops08.t	30492	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops09.t	29848	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops10.t	26334	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops01.t	39811	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops02.t	39961	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops03.t	39793	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops04.t	39759	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops05.t	17394	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops06.t	31724	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops07.t	29260	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops08.t	30492	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops09.t	29848	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
+re/uniprops10.t	26334	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: plNcl server: Failed to parse code at /home/bernt/p | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/user_prop_race_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-run/cloexec.t	22	0	8	14	DIFF	
-run/exit.t	17	0	14	3	DIFF	
+run/cloexec.t	22	0	16	6	DIFF	
+run/exit.t	17	0	13	3	DIFF	
 run/fresh_perl.t	91	0	55	36	XDIFF	unbound:main::H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.
-run/locale.t	44	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
+run/locale.t	44	0	0	0	DIFF	
 run/noswitch.t	3	0	2	1	DIFF	
-run/runenv.t	106	0	11	95	DIFF	
-run/runenv_hashseed.t	278	0	0	0	DIFF	crash:simple-error: Failed to extract seed: at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/run/ru
-run/runenv_randseed.t	9	0	0	9	DIFF	
+run/runenv_hashseed.t	278	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/runenv_randseed.t	9	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/runenv.t	106	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
 run/script.t	3	0	3	0	OK	
 run/switch0.t	1	0	0	1	DIFF	
-run/switchC.t	15	0	4	11	DIFF	
-run/switchDx.t	0	0	0	0	NOTAP	
-run/switchF.t	2	0	0	1	DIFF	
-run/switchF1.t	5	0	5	0	OK	
-run/switchF2.t	5	0	5	0	OK	
-run/switchI.t	4	0	0	4	DIFF	
-run/switchM.t	5	0	2	3	DIFF	
 run/switcha.t	2	0	0	1	DIFF	
+run/switchC.t	15	0	4	11	DIFF	
 run/switchd-78586.t	2	0	0	2	DIFF	
 run/switchd.t	21	0	2	19	DIFF	undef-fn:main::pl-ARRAY
-run/switches.t	140	0	6	99	DIFF	crash:simple-error: sbcl: Failed to open 'tmpswitches.bak': No such file or directory at /home/bernt/perlN/per
+run/switchDx.t	0	0	0	0	NOTAP	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/switches.t	140	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
+run/switchF1.t	5	0	5	0	OK	
+run/switchF2.t	5	0	4	0	DIFF	
+run/switchF.t	2	0	0	1	DIFF	
+run/switchI.t	4	0	0	4	DIFF	
+run/switchM.t	5	0	0	0	DIFF	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
 run/switchn.t	3	0	1	1	DIFF	
 run/switchp.t	3	0	1	0	DIFF	
-run/switcht.t	0	0	6	4	NOTAP	unbound:$^W
+run/switcht.t	0	0	0	0	NOTAP	crash:simple-error: sbcl: Perl lib version (N.N.N) doesn't match executable '/home/bernt/perlN/perlbrew/perls/
 run/switchx.t	8	0	0	3	DIFF	
 uni/attrs.t	35	0	6	28	DIFF	
 uni/bless.t	84	0	83	1	DIFF	
@@ -409,17 +409,17 @@ uni/class.t	12	0	0	12	DIFF
 uni/eval.t	5	0	5	0	OK	
 uni/fold.t	19128	104	0	0	TIMEOUT	timeout
 uni/goto.t	4	0	2	2	DIFF	undef-fn:common-lisp:nil
-uni/greek.t	0	0	0	0	NOTAP	crash:simple-error: Can't locate loadable object for module Storable in @INC
+uni/greek.t	0	0	0	0	NOTAP	
 uni/gv.t	206	0	36	39	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N.
 uni/labels.t	10	0	3	5	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (go :ここ) Compile-time error: attempt t
-uni/latin2.t	0	0	0	0	NOTAP	crash:simple-error: Can't locate loadable object for module Storable in @INC
+uni/latin2.t	0	0	0	0	NOTAP	
 uni/lex_utf8.t	16	0	6	10	DIFF	
 uni/lower.t	11720	0	0	0	TIMEOUT	timeout
 uni/method.t	62	0	0	0	DIFF	crash:simple-error: Can't locate object method "ｂ" via package "F" at - line N.
 uni/opcroak.t	5	0	0	5	DIFF	
 uni/overload.t	191	2	48	8	DIFF	crash:simple-error: No such file or directory at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/
 uni/package.t	18	0	1	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-scalar-= $압Ƈ 'd읯ⱪ N) Compile-tim
-uni/parser.t	58	0	20	38	DIFF	undef-fn:main::|pl-Ｆｏｏ::|
+uni/parser.t	58	0	20	38	DIFF	
 uni/readline.t	7	0	0	1	DIFF	unbound:Fʜ
 uni/select.t	3	2	0	0	DIFF	unbound:$ᛞ웊
 uni/sprintf.t	52	0	49	3	DIFF	
@@ -429,5 +429,5 @@ uni/title.t	5936	0	0	0	TIMEOUT	timeout
 uni/tr_utf8.t	8	0	6	2	DIFF	
 uni/universal.t	90	0	1	0	DIFF	undef-fn:main::pl-Àlìcè
 uni/upper.t	6230	0	0	0	TIMEOUT	timeout
-uni/variables.t	66880	0	1244	323	DIFF	unbound:$^W
+uni/variables.t	66880	0	1248	319	DIFF	unbound:$}
 uni/write.t	8	0	0	0	DIFF	crash:simple-error: Can't create Uni_write.tmp at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni

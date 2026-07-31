@@ -4,6 +4,50 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316r (2026-07-31, Fable) — #134 state-in-signature-default + #25 full-suite re-run at v2-85.
+
+- **#134 CLOSED (8418680, gen v2-85): `state $v = INIT` in a signature
+  default initializes ONCE.**  It compiled as a plain assignment to a
+  global — INIT re-ran every defaulted call, and two subs sharing a
+  `state $s` name shared one variable.  `_parse_signature` now peels each
+  decl from the default source: deterministic per-sub cell
+  (`$s__state_sig__<pkg>_<sub>` — deterministic because a signatured sub
+  is parsed twice, call-site registration + v1 definition lowering, and
+  both must agree), an `__init` flag box, a hoisted once-guard
+  `(p-if (p-! flag) (progn (box-set cell INIT) (p-scalar-= flag 1)))`,
+  and the decl replaced by the cell name with the rename active for the
+  rest of the default (do-block form included).  The flag is a p-box
+  tested with Perl truthiness so the forward-decl scans' `(make-p-box
+  nil)` declaration is CORRECT — the same pattern v2 uses for
+  expression-position state; explicit defvars cover pure-v1, whose scan
+  reads source, not emission.  Two dead ends worth remembering: an
+  instance-local `_current_state_vars` never reaches the do-block's
+  lowering (different parser instance), and a memoized defvar emission
+  loses the race when the first parse's buckets are discarded.
+  op/signatures.t 881→886 (the 5 t276-296 rows; expected-tsv note
+  updated); guard in transpile-test-07.t oracle-diffs both forms under
+  v2 AND PCL_V1.  Gate 123/4428; corpus diff = signatures.t only;
+  pack.t solo 5636/89 0 new; artifacts v2-85.
+- **#25 full perl-suite re-run (the E4.0b/R1 gate item): 48 OK / 31
+  NOTAP / 97 XDIFF / 257 UNEXPLAINED** (from 45/31/94/263 at s316g),
+  snapshot refreshed in docs/perl-suite-run.tsv.  Ran as foreground
+  per-dir chunks — a background `--all` is killed at the harness 10-min
+  cap before writing its tsv (known gotcha, reconfirmed).  Notable
+  gains: io/through.t, op/stash_parse_gv.t, op/pwent.t,
+  op/overload_integer.t → OK; signatures.t/ver.t/hints.t → XDIFF;
+  charset/pat_advanced complete instead of TIMEOUT.  t/mro + t/class are
+  in the snapshot (mro = the pre-seeded C3-only/next::method XDIFF rows,
+  class = 5.38-class XDIFF), closing the "never surveyed" item.
+- **Drift → task #136 (both clusters already present at v2-84, i.e.
+  s316h–q, NOT today's commit):** run/-family children die `Perl lib
+  version (N.N.N) doesn't match executable` (runenv*/switches/switchM →
+  0/0; suspect = s316m's updir mirror symlinking perl's build lib/ next
+  to the shadow t/), and re/regexp_* family truncates at ~case 38 on
+  `Can't locate loadable object for module List::Util` (regexp_qr/
+  noamp/notrie/trielist/normal, alpha_assertions, regex_sets_compat).
+
+---
+
 ## Session 316q (2026-07-30, Fable) — #135: use/require join the compile stream; use-parent package pre-declare (gen v2-84).
 
 - **Ordering bug behind Role-Tiny's crash files**: the v2 assembler sent a
