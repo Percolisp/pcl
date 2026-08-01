@@ -4,6 +4,44 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316v addendum 5 (2026-08-01, Opus 5) — op/rand.t 263/263 OK: perl's drand48; three more files classified.
+
+- **rand/srand FIXED (b056de3), op/rand.t is the first t/ file to reach OK
+  today.**  Two bugs in one builtin:
+  1. `p-rand` treated a SUPPLIED `0` as a zero range — perlfunc says "If
+     EXPR is omitted or zero, uses 1" (t260).
+  2. **`p-srand` discarded its seed entirely** (`(declare (ignore seed))`,
+     commented "CL doesn't have portable srand"), so `srand($n); rand` was
+     never reproducible (t262/t263).
+  Self-consistency was not enough: since **[perl #115928] perl ships its OWN
+  drand48**, precisely so a seed replays everywhere, and op/rand.t asserts
+  the exact values (`srand(1); int rand(1000)` == 41).  PCL now implements
+  the same 48-bit LCG (`X' = (0x5DEECE66D·X + 0xB) mod 2^48`, seed init
+  `X = (s<<16)|0x330E`), verified standalone against 41 before wiring in.
+  Value beyond the one file: seeded `rand` is how test suites and CPAN
+  modules get deterministic runs, so PCL now reproduces perl's sequences.
+  Gate 123/4439; sweep 0 new / 0 fixed; runtime-only, no gen bump.
+- **Three more files classified** (all with both failures fully explained by
+  an already-blessed non-support, so registered in
+  `docs/perl-suite-expected.tsv`): **op/not.t** t21/t22 → §"Interned boolean
+  constants (`!0`/`!1`)", which explicitly describes the read-only-modify
+  case; earlier the same round, **op/localref.t** → §DESTROY and
+  **io/defout.t** → §format/write.
+- **#146 filed — quotemeta is a real bug, not blessed.**
+  `quotemeta chr(0xe9)` is length 2 in perl (high byte escaped, byte
+  semantics) and 1 in PCL: `p-quotemeta` (runtime:2846) escapes non-ASCII
+  "unless Unicode alphanumeric", i.e. it applies the `unicode_strings` rule
+  UNCONDITIONALLY.  Not a one-liner — PCL has no per-scalar UTF8 flag to key
+  on.  The task also flags a **doc inaccuracy** this surfaced:
+  not-supported.md's Unicode section claims "Without the pragma, high bytes
+  stay Latin-1 (byte semantics), matching Perl", and quotemeta is a
+  counter-example.
+- Still open from this batch: op/64bitint.t t80/t81 (line 246-247),
+  op/dor.t t4 (`//` with a reference LHS) + t26/t28 (error-message text),
+  io/pvbm.t (5 rows, PVBM/Boyer-Moore scalar internals).
+
+---
+
 ## Session 316v addendum 4 (2026-08-01, Opus 5) — the five near-green files fully triaged; two registered, three real bugs filed.
 
 Applying the runbook order (read the test → grep `docs/not-supported.md` →
