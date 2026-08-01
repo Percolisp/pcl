@@ -38,6 +38,10 @@ calibrated against observed throughput, not guesses (§4).
 | `Pl/Parser.pm` | v1 statement layer | 8076 | **deleted** |
 
 Net: ~22k lines → ~14k, one dialect, one printer, zero text islands.
+(s316t reachability note: `Pl/Parser.pm`'s deletion is EARNED via the E5.3
+burn-down, not flipped at E4.1 — see the re-scoped E4.1/E5 below and
+`docs/v2-code-review.md` §4.  The target picture this table sketches is
+drawn in full, for new contributors, in `docs/v2-target-architecture.md`.)
 
 ### 1.2 Structural invariants (each is an acceptance test, not a wish)
 
@@ -128,18 +132,54 @@ bit-for-bit).  Keeps a per-eval v1 retry until E4.
   t/class); (2) the CPAN module suites, compared against their recorded
   baselines.  Divergences are E4-blocking fixes while v1 is still the
   oracle.  Detail in `docs/v2-opus48-execution-plan.md` §E4.
-- E4.1 gates → hard errors; delete `PCL_V1`, pipeline cache key,
-  `Pl/Parser.pm`, ExprToCL text emission; purge dual-dialect docs/tests;
-  re-baseline sweeps — **1–2 sessions**
+- E4.1 gates → hard errors; delete `PCL_V1`, `parse_with_fallback`, the
+  pipeline cache key, v1's file-level entry/assembly/forward-decl passes;
+  purge dual-dialect docs/tests; re-baseline sweeps — **1–2 sessions**.
+  **RE-SCOPED (s316t review, `docs/v2-code-review.md` §4): this step kills
+  the dual-pipeline PROPERTY (~600–700 lines), not `Pl/Parser.pm`.**  The
+  v1 statement layer stays live through the 12 intra-file `_fallback_stmt`
+  seams, ExprToCL through the expression seam, and
+  preprocessing/prototypes/naming are shared (ported, not deleted).
+  Pre-requisite found by reachability scan: bundle mode calls
+  `Pl::Parser->parse_file` directly (`pl2cl:283`) — port it first.
+  The line-count payoff moves to E5 steps 2–4 below.
 
 ### E5 — Post-deletion simplification (the finish the user asked for)
 
-- fold ExprToCL2 into EmitCL; prune PExpr/Environment v1-only paths
-- finish invariant 3 (retire the remaining bespoke rename loops in the
-  spanning pass, now provably equivalent to the shared engine)
-- rewrite `CODEGEN_DESIGN.md` against the final architecture; update
-  `docs/ir-spec.md` to single-dialect; CLAUDE.md module table
-- **2–4 sessions**
+**RESTRUCTURED (s316t review, `docs/v2-code-review.md` §8) into five
+independently-shippable steps, each verified by corpus-diff + full sweep.
+The target they converge on is `docs/v2-target-architecture.md`.**
+
+- **E5.1 seam object** — one `SeamSession` guard owning bucket
+  save/reset/drain/restore, `_v2_embed` arming, depth counters, and
+  `_let_bound_vars` scoping (replaces 8 hand-written save/restore pairs +
+  two copies of the bucket dance).  Biggest fragility payoff; do first —
+  every later step runs through the seam it hardens.  **1–2 sessions**
+- **E5.2 embedded-block totality** — `lower_embedded_block` stops
+  declining; deletes the `parse_block_*` text family + the 4 remaining
+  `body_cl`/`raw_lambda` raw sites (task #78's tail).  **1–2 sessions**
+- **E5.3 `_fallback_stmt` burn-down** — retire the 12 intra-file classes
+  (use/require/BEGIN-END, `local`, prototype/signature subs,
+  goto/next/last/redo, multi-element `return`, loop statement-modifiers,
+  anon-hash-as-block) one at a time; each retires its v1 `_process_*`
+  handler.  This is where `Pl/Parser.pm` actually shrinks.
+  **4–8 sessions** (12 classes at the calibrated 2–3 classes/session)
+- **E5.4 one expression brain** — fold ExprToCL2 into EmitCL as
+  early-return branches sharing ONE binop/ctx table (the #131 argbox
+  double-implementation is the cost being deleted); then delete
+  `gen_node` + the string emitters + `raw`/`raw_wrap` once the two
+  structural decline paths can no longer fire.  **2–3 sessions**
+- **E5.5 shared predicates + shape** — the statement splitter
+  (`_split_at_lowprec`, one precedence table — started pre-R1 as task
+  #138), the VarAnnotator↔Parser2 `native_root_write` shared predicate,
+  one context-constant set, and the Parser2 phase file-split
+  (prepass/facts/promotion/lowering/seam).  Finish invariant 3.  Rewrite
+  `CODEGEN_DESIGN.md` against the final architecture; update
+  `docs/ir-spec.md` to single-dialect; CLAUDE.md module table.
+  **1–2 sessions**
+
+**E5 subtotal: 9–17 sessions** (was 2–4 — the deletion work E4.1 was
+credited with lives here; the ~22k→14k arrives in E5.2–E5.4).
 
 ---
 
