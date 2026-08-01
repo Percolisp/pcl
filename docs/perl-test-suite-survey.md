@@ -515,6 +515,18 @@ blocked separately by `use IO` (XS module).
 `t/mro/` (73), `t/class/` (10), and the rest of `t/op/` not in `perl-tests/`.
 Import the highest-signal ones the same way.
 
+### Post-snapshot registrations (the tsv drifts from the registries)
+
+`docs/perl-suite-run.tsv` is a point-in-time artifact, taken at **b32825d**.
+Registrations made *after* it change a row's STATUS without re-measuring
+anything, so the file and the registries can disagree.  Do NOT hand-edit the
+snapshot to patch this — partial edits to a release signal are exactly what
+§6 forbids; record the delta here and let the next full regeneration absorb it.
+
+| file | in the snapshot | now | why |
+|---|---|---|---|
+| `uni/goto.t` | DIFF 2/2 | **XDIFF** | both rows are error-message matches; PCL's behaviour is correct in both (probed s321) |
+
 ## Near-green triage from the s321 snapshot (S3 input)
 
 Mined from the S2 chunks (ten dirs; `op` was re-running).  **Near-green means
