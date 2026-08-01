@@ -4,6 +4,60 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 318 (2026-08-01, Opus 5) — W1 queue: #142 tie bareword class, then #154 wrong-kind deref dies like perl. avhv.t 0/40 → 37/40.
+
+- **#142 DONE (35ce4f7, gen v2-91)**: `tie %fake, Tie::StdHash;` compiled to a
+  CALL and died.  Took the s317-approved bless route: bless's
+  class-name-bareword logic existed TWICE (form emitter + text emitter); both
+  copies are now one `_class_name_bareword` helper, and `tie`'s 2nd argument
+  routes through it.  An ARGUMENT-POSITION rule, so it cannot reach
+  `Foo::init` or a method invocant — the three killers of the s316v global
+  attempts, re-probed.  Only `tie` has a class-name slot (`tied`/`untie` take
+  a variable); only the TRAILING-bareword shape was broken, every other
+  spelling already arrived as a string.  corpus-diff: emission identical
+  across all 111 files.  op/warn.t 21→26 ok.
+- **#154 DONE (2d70df3)**: `$aryref->{k}` raised an SBCL type error naming a
+  P-BOX, and the siblings were worse — `exists $aryref->{k}` false, `keys
+  %$aryref` empty, `$hashref->[0] = 1` silently dropped.  Two helpers
+  (`%p-wrong-referent-p` / `%p-not-a-ref`) now guard 13 deref sites for
+  HASH/ARRAY/CODE with perl's exact text.  **t/op/avhv.t 0 pass/40 fail →
+  37/3**; postfixderef.t 95 → 99 over the same 121 rows (t61/t65 "Not a HASH
+  reference", t62/t66 "Not a CODE reference").
+- **Two design limits, both found by the gate/sweep AFTER probes said clean**
+  (recorded in the code and in #154 as do-not-retry):
+  - no SCALAR guard in `p-cast-$` — PCL COLLAPSES a scalar-ref-to-coderef, so
+    that site legitimately gets a raw function (Sub::Quote's generated
+    `${$_[1]->{'$name'}}`); guarding took Moo down, 6 rows of moo-01.t;
+  - **a remaining p-box is NOT a mismatch** — `\%h` is a DOUBLE box, so unbox
+    peeling one layer leaves a box the caller unboxes again (p-ensure-hashref
+    returns it, (setf p-gethash) unboxes it); counting it as a scalar-ref
+    mismatch broke `$refref->{k} = $v` and `$a->[0] = $x` through `\@fake`.
+    Every guarded site keeps its previous fallthrough for values the
+    predicate does not claim.
+  Consequently `$$aryref` / `$scalarref->{k}` keep old behaviour: separating
+  `\$x` from a representation layer needs a referent-kind tag on the box (an
+  ir-spec decision), not a deref-site type sniff.
+- **Speed (s308)**: the first pass put the predicate BEFORE the fast path — a
+  `string=` on every hash read.  Restructured so every guard is reached only
+  after the normal branch failed; `p-gethash` tests `hash-table-p`, the same
+  test GETHASH did internally.  Zero added cost on correct code.
+- **Diagnosis technique that worked** when probes couldn't see the fire:
+  `./runpl` aborts too early, so log from `%p-not-a-ref` to a FILE plus
+  `(sb-debug:print-backtrace :count 6)` and run the SWEEP — the backtrace
+  named `(SETF P-GETHASH-DEREF)` and the double-box argument immediately.
+- **PROCESS FAILURE worth remembering**: to compare against HEAD I saved the
+  runtime, `git checkout`ed, then `cp`ed the snapshot back — but the snapshot
+  pre-dated the p-box fix, so the fix was silently reverted and I committed
+  that while quoting the fixed version's numbers.  Caught by re-running
+  avhv.t.  Never `cp` a saved copy back over a live file to undo a
+  comparison; use `git show HEAD:file` (or a worktree) and leave the working
+  file alone.  1c9148e was amended to 2d70df3 after full re-verification.
+- New tasks: **#155** (tie on a HASH/ARRAY is a SILENT no-op — p-tie bails
+  when handed a non-box; scalar tie is correct end to end).  **#153** gained
+  an acceptance probe: `print "x=", Foo::init, "\n"` stringifies instead of
+  calling (pre-existing at HEAD, position-dependent — the reducer's job).
+- Gate 123 files / 4452 tests; sweep 0 new / 0 fixed vs 702; census 111/111.
+
 ## Session 317 (2026-08-01, Fable) — every s316v review ask ruled on; DECIDED.md + lookup order; Opus runway re-planned to ~12–20 sessions with one human gate.
 
 - **Root cause of the s316v knowledge misses named**: Opus 5 follows
