@@ -28,9 +28,14 @@
 #                      C ok/notok, status, signature) for diffing runs
 #   --faillog DIR      per-test failure log dir (default .suitelog, cleared
 #                      each run): for every DIFF/TIMEOUT file, one TSV row per
-#                      diverging TAP test — num, perl-verb, pcl-verb, desc —
-#                      by joining the two TAP streams on test number.  A PCL
-#                      run that produced NO TAP writes one summary row.
+#                      diverging TAP test — num, perl-verb, pcl-verb, desc.
+#                      The two streams are paired BY DESCRIPTION (PclTapAlign,
+#                      task #177), never by test number: PCL can emit extra or
+#                      missing rows mid-file, and a number join then blames
+#                      rows that PASS (op/do.t t67/t70) while crediting rows
+#                      that fail.  test# stays PERL's; PCL's own number is
+#                      shown when it differs.  A PCL run that produced NO TAP
+#                      writes one summary row.
 #
 # Expected divergences — marking not-supported dependencies:
 #   docs/perl-suite-expected.tsv maps `rel<TAB>reason` (reason should cite the
@@ -107,6 +112,10 @@ use File::Basename qw(basename dirname);
 use File::Temp qw(tempfile tempdir);
 use Cwd qw(abs_path);
 use POSIX qw(:sys_wait_h _exit);
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+# Description-based TAP pairing (task #177) — unit-tested in tools/t/tap-align.t.
+use PclTapAlign qw(tap_rows align_taps);
 
 # Contain the whole sweep in its own memory-capped cgroup: a runaway child
 # (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
@@ -339,19 +348,6 @@ printf $JOURNAL "# run-perl-suite %s: %d files, jobs=%d timeout=%d\n",
 print $JOURNAL "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
 print $JOURNAL "# queued\t$_\n" for @files;
 
-# TAP stream -> { test-number => [verb, description] }.
-# Horizontal whitespace ONLY after the number: \s there matches the newline of
-# a description-less line ("ok 3\n"), swallowing the NEXT TAP line as the
-# description and reporting its test number as (missing) — 421 phantom rows
-# on op/signatures.t (s316o).
-sub tap_map {
-  my ($out) = @_;
-  my %m;
-  while ($out =~ /^(not ok|ok)[ \t]+(\d+)[ \t]*[-#]?[ \t]*([^\n]*)$/mg) {
-    $m{$2} = [$1, $3];
-  }
-  return \%m;
-}
 
 # ---------------------------------------------------------------- worker
 sub run_one {
@@ -425,27 +421,37 @@ sub run_one {
           : ($p_ok == $c_ok && $p_notok == $c_notok && !$sig) ? 'OK'
           :                                                'DIFF';
 
-  # Per-test failure log: join the two TAP streams on test number and record
-  # every diverging test — the triage input for marking not-supported rows.
+  # Per-test failure log: pair the two TAP streams BY DESCRIPTION (align_taps
+  # — never by test number, see its comment) and record every diverging test.
+  # This is the triage input for marking not-supported rows, and the input the
+  # FIXTURE registry matches against, so a mis-pairing here costs real time.
   if ($status eq 'DIFF' || $status eq 'TIMEOUT') {
-    my ($pm, $cm) = (tap_map($perl), tap_map($pcl));
+    my ($prows, $crows) = (tap_rows($perl), tap_rows($pcl));
     if (open my $lf, '>', "$faillog/$safe.fails.tsv") {
-      print $lf "# file  test#  perl_result  pcl_result  description   [description = PERL's test line, values interpolated by perl — not PCL's output]\n";
-      if (!%$cm) {
+      print $lf "# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]\n";
+      if (!@$crows) {
         print $lf join("\t", $rel, 0, 'ok*', '(no TAP)',
                        "PCL produced no TAP output" . ($sig ? " ($sig)" : "")), "\n";
       } else {
+        my ($pairs, $extras) = align_taps($prows, $crows);
+        my $shifted = grep { $_->[1] && $_->[1]{num} != $_->[0]{num} } @$pairs;
+        print $lf join("\t", $rel, 0, '(none)', 'renumbered',
+                       "PCL's TAP numbering is offset from perl's for $shifted row(s)"
+                       . " — rows below are paired by description, not by number"), "\n"
+          if $shifted;
         my $rows = 0;
-        for my $n (sort { $a <=> $b } keys %$pm) {
-          my $pv = $pm->{$n}[0];
-          my $cv = $cm->{$n} ? $cm->{$n}[0] : '(missing)';
-          next if $pv eq $cv;
-          print $lf join("\t", $rel, $n, $pv, $cv, $pm->{$n}[1]), "\n";
+        for my $pair (@$pairs) {
+          my ($p, $c) = @$pair;
+          my $cv = $c ? $c->{verb} : '(missing)';
+          next if $p->{verb} eq $cv;
+          $cv .= " [PCL #$c->{num}]" if $c && $c->{num} != $p->{num};
+          print $lf join("\t", $rel, $p->{num}, $p->{verb}, $cv, $p->{desc}), "\n";
           last if ++$rows >= 500;
         }
-        my $extra = grep { !$pm->{$_} } keys %$cm;
-        print $lf join("\t", $rel, 0, '(none)', 'extra',
-                       "$extra PCL-only test numbers"), "\n" if $extra;
+        # PCL-only rows: named individually now.  They are evidence in their
+        # own right — do.t's two extras ARE the principle-9 divergence firing.
+        print $lf join("\t", $rel, 0, '(none)', "extra [PCL #$_->{num}]",
+                       $_->{desc}), "\n" for @$extras;
       }
       close $lf;
     }

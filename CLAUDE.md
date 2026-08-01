@@ -42,7 +42,9 @@ so the task says what NOT to retry.
 
 5. **Never Simplify Tests**: When a test fails, fix the code, not the test. This applies to both `perl-tests/` (authoritative Perl test suite) and `Pl/t/` (PCL regression tests). Do NOT weaken a `Pl/t/` test to a simpler form just because the original form fails due to an unrelated bug — keep the test semantically equivalent to what it's supposed to verify. Commenting out failing tests or replacing them with `ok(1, 'SKIP: ...')` hides bugs. If a feature is genuinely out of scope, discuss with the user first — then mark it via the **declarative skip-registry** (`cl/skip-registry.lisp`), NOT by editing the `perl-tests/*.t` file. The registry keys on the test description, cites a `docs/not-supported.md` reason, still runs the assertion, and flags itself stale if the test ever starts passing. See `docs/test-skip-registry.md`. Crashing/aborting tests are NEVER auto-skipped — they stay CRASH/PARTIAL as fix targets.
 
-6. **Add Regression Tests for Bug Fixes**: When fixing a bug, add a test case to an existing test file that covers the fixed behavior. This prevents regressions. Prefer adding to existing files over creating new ones. **Do NOT add to `transpile-test-01.t`** (118 tests) or other large `transpile-test-NN.t` files — each file spawns a new SBCL process, so file count matters less than test count per file. Add to the smallest `transpile-test-NN.t` file, or create a new one if needed.
+6. **Add Regression Tests for Bug Fixes**: When fixing a bug, add a test case to an existing test file that covers the fixed behavior. This prevents regressions.
+
+   **The constraint is a file's RUN TIME, not its test count** (user, 2026-07-28, restated and refined 2026-08-01). `prove -j8` parallelises across files, so the gate's wall time ≈ the *slowest single file* — a file with many fast rows is fine, a file with a few slow ones is not. What makes a row slow: `test_transpile` runs a perl oracle **and** an SBCL transpile+run; `run_cl` spawns SBCL. So before adding, ask *how long does this file take*, and measure with `prove --timer Pl/t/<file>`; if the answer is heading past the current slowest file, start the next `transpile-test-NN.t` instead (copy an existing file's header/helpers). `transpile-test-01.t` (118 rows) and `transpile-test-07.t` (45, closed by the user in s321) are the two to leave alone; as of s321 the files are 01, 01b, 02, 03, 04, 04b, 05, 06, 07, 08, so the next new one is **`-09`**.
 
 7. **Document Complex Semantics in `docs/`**: When solving a problem involving tricky Perl-vs-CL semantics, write a `docs/topic-name.md` file explaining the problem, the solution, and edge cases. Reference it from CLAUDE.md's "Key Files to Read" section. This prevents re-investigating the same issue in future sessions. Examples: declaration ordering, wantarray context, string escapes.
 
@@ -317,10 +319,13 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
-- Full `perl-tests/` sweep: **690 blessed fails** in `docs/fail-baseline.tsv`
-  (verified s321: `sweep-diff.pl diff docs/fail-baseline.tsv .faillog` = 0
-  new / 0 fixed); 65 files fully passing (count re-read s316u at `--jobs 8
-  --timeout 380`, not re-measured since).  Baseline from s315d —
+- Full `perl-tests/` sweep: **689 blessed fails** in `docs/fail-baseline.tsv`,
+  **66 files fully passing**, 12831 passing / 833 failing across 108 files
+  (all re-measured s321; `sweep-diff.pl diff docs/fail-baseline.tsv .faillog`
+  = 0 new / 0 fixed.  690 → 689 because the `do.t` "$! is EISDIR on do dir"
+  row was FIXED that session — removed by EDITING that one row out, never by
+  re-blessing from a run, which would silently absorb anything else that
+  moved).  Baseline from s315d —
   class-model target-first reads, $TODO honored again under :invert,
   no-match s/// write gate; fresh_perl/runperl children run under PCL via
   `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores the old compare
@@ -357,7 +362,7 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
-2b. `docs/opus5-review-requests-s318.md` - **OPEN asks awaiting Fable** (s318): the box carries no referent-kind/tied/read-only state for AGGREGATES — one cause behind #154's residue, #155 and #159; plus the #149 per-row rule, #158's fix layer, #156, and the suite-tsv regeneration question
+2b. `docs/opus5-review-requests-s321.md` - **OPEN asks awaiting Fable** (s321): #176 pack.t invisible to the sweep gate (bless its rows now or post-R1?), how far the #177 TAP-misjoin doubt reaches into existing registrations, and whether XDIFF reasons should carry a machine-checked row list like FIXTURE does. `docs/opus5-review-requests-s318.md` is the previous round — all ruled, see `fable-answers-s318.md`
 3. `CODEGEN_DESIGN.md` - Code generation design notes
 
 Not relevant now:

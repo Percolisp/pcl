@@ -534,8 +534,16 @@ a corpus file from another dir).  `--include-copied` overrides; `--tsv FILE`
 writes a per-file snapshot (`docs/perl-suite-run.tsv` = the s302 run).
 
 **Failure log + not-supported marking (s302b).**  Every DIFF/TIMEOUT file
-writes a per-test log to `.suitelog/<rel>.fails.tsv` (perl TAP joined to PCL
-TAP on test number: `rel, num, perl-verb, pcl-verb, desc`) — the triage input.
+writes a per-test log to `.suitelog/<rel>.fails.tsv`
+(`rel, num, perl-verb, pcl-verb, desc`) — the triage input.
+**The two TAP streams are paired BY DESCRIPTION, never by test number**
+(`tools/lib/PclTapAlign.pm`, task #177, s321): a file where PCL emits extra or
+missing rows mid-run otherwise mis-attributes every LATER row, in both
+directions — op/do.t's number join accused two rows that PASS and credited two
+that fail.  `num` stays PERL's number; PCL's own is shown when it differs, and
+a `renumbered` marker row says the streams drifted.  Re-syncing happens only on
+evidence (an exact description match ahead, confirmed by the next row), so
+unnamed and value-interpolated descriptions fall back to positional pairing.
 Divergences *explained by* `docs/not-supported.md` are marked in
 **`docs/perl-suite-expected.tsv`** (`rel<TAB>reason`, reason cites the §):
 those files become status **XDIFF** — they still run and print, but don't fail

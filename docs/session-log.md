@@ -4,6 +4,57 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 321b (2026-08-01, Opus 5) — the gate was inventing failures: TAP joined by NUMBER, not description (#177) — and op/do.t went XDIFF once it stopped
+
+Found while starting S2, by chasing what looked like two ordinary near-green
+rows in op/do.t.  Neither was a bug in PCL.
+
+- **The defect (#177).** The runner's per-test failure log joined perl's and
+  PCL's TAP streams **on the test number**.  Any file where PCL emits extra
+  or missing rows mid-file then mis-attributes every LATER row — and it is
+  wrong in *both* directions: rows that pass get reported as failures, and
+  rows that fail get silently credited.  op/do.t is the worked example: the
+  file guards each "`do subname()` is a syntax error" assertion with a
+  `fail()` that fires if the sub is actually called; PCL *does* call it (the
+  blessed principle-9 divergence), so PCL emits 2 extra rows and runs +2
+  ahead.  The log therefore accused **t67** ("result of delete(helem) is
+  copied") and **t70** ("`$@` is false on do dir") — **both pass**, confirmed
+  by isolating the exact test shapes and by reading PCL's raw TAP.
+- **The fix**: `tools/lib/PclTapAlign.pm` pairs by DESCRIPTION, re-syncing
+  only on positive evidence — an exact match found ahead within a 20-row
+  window, *confirmed* by a second match for the following perl row.  Empty
+  and value-interpolated descriptions (which legitimately differ exactly when
+  a test fails) find no match and fall back to positional pairing, i.e. the
+  old behaviour; the aligner never invents a pairing it cannot evidence.
+  Extracted to a module rather than left inline because it is subtle and now
+  load-bearing: **the FIXTURE registry matches per-ROW against this log**, so
+  this had to land *before* the S2 snapshot.  Unit tests
+  `tools/t/tap-align.t` (14 rows), four of them inverse guards.
+  A first attempt confirmed re-syncs by requiring the *immediately* next
+  descriptions to match — that mis-paired the first row of a run of extras
+  (do.t interleaves two); "somewhere in the window" is the rule that works.
+- **op/do.t → XDIFF.**  With the pairing honest, its residue was one real
+  bug: `do DIR` left `$!` at 0 where perl reports EISDIR.  PCL found the
+  file, failed the open, and dropped the reason — the handler assumed "errno
+  already set by OS", but `$!` reads PCL's own `*p-stored-errno*`.  Probed:
+  SBCL leaves the live C errno at 21 after the failed open, so `p-do` now
+  carries it across (a general pass-through, not a directory special case, so
+  EACCES/ELOOP are right for free).  That leaves 4 principle-9 rows + their 2
+  `fail()` side-effects + one DESTROY-by-GC row (`RT 124248` needs the
+  blessed temp freed at do-block exit) — all blessed categories, so the file
+  is registered and **leaves the UNEXPLAINED column**.
+- **S2 was stopped and will be re-run** on top of this: the tsv *counts* were
+  unaffected, but the triage log they ship with was not, and per-dir chunks
+  were also overwriting each other's faillog (the runner clears it per run).
+- **Verification**: gate 124 files / **4468** PASS; sweep **0 new / 1 fixed**,
+  the fixed row being `do.t "$! is EISDIR on do dir"` — the perl-tests copy
+  carried the same row, so the one runtime fix closed it in both signals.
+  Baseline 690 → **689** by editing that single row out (never a wholesale
+  re-bless — that silently absorbs whatever else moved).  Fully passing 66,
+  12831 passing / 833 failing across 108 files.
+
+---
+
 ## Session 321 (2026-08-01, Opus 5) — S1 gate hygiene: the five items, and the two registries now say *which kind* of "not PCL's fault" a row is
 
 Executing the S1 list from `fable-answers-s318.md`.  All five landed; the

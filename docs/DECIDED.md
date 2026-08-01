@@ -140,6 +140,14 @@ not-supported.md → only then probe.*
 - **Failed attempts are recorded IN the task** (what was tried, what killed
   it) — a task that says what NOT to retry outranks one that only states
   the goal.
+- **NEVER join two TAP streams by test NUMBER** — pair them by DESCRIPTION
+  (`tools/lib/PclTapAlign.pm`, unit-tested in `tools/t/tap-align.t`).  A
+  file where PCL emits extra or missing rows mid-run then mis-attributes
+  every LATER row, in both directions: op/do.t's number join accused two
+  rows that PASS and credited two that fail.  Re-sync only on evidence (an
+  exact desc match ahead, confirmed by the next row); value-interpolated
+  and unnamed descriptions must fall back to positional pairing →
+  task #177, s321.
 - **A dead run must not look like a run nobody asked for**: every requested
   file gets a row (KILLED / NOT-RUN when the run died), the exit code is
   nonzero, and a journal records rows as they arrive → task #157,

@@ -725,4 +725,30 @@ PERL
     like($out, qr/^scalar2=FETCHED:set$/m, 'SCALAR tie still STOREs');
 }
 
+# `do FILE` that FINDS the file but cannot READ it must report the reason in
+# $!, with $@ left false (op/do.t "$! is EISDIR on do dir").  PCL found the
+# file, failed the open, and left $! at 0 — the reason was simply dropped.  The
+# OS errno is live in the handler (opening a directory leaves EISDIR), so it is
+# passed through rather than special-cased, which gets EACCES etc. right too.
+# INVERSE GUARDS in the same snippet: the file-NOT-found path must still say
+# ENOENT, and the ordinary success path must still return the file's value.
+test_transpile("do FILE: \$! carries the read failure, \$\@ stays false", '
+use Errno qw(EISDIR ENOENT);
+my $dir = "/tmp/pcl-do-dir-$$";
+mkdir $dir;
+$! = 0;
+my $rv = do $dir;
+printf "dir: rv=%s at-empty=%d errno-is-EISDIR=%d\n",
+       (defined $rv ? "def" : "undef"), ($@ eq "" ? 1 : 0), ($!+0 == EISDIR ? 1 : 0);
+$! = 0;
+my $rv2 = do "/tmp/pcl-no-such-file-$$";
+printf "missing: rv=%s at-empty=%d errno-is-ENOENT=%d\n",
+       (defined $rv2 ? "def" : "undef"), ($@ eq "" ? 1 : 0), ($!+0 == ENOENT ? 1 : 0);
+my $f = "/tmp/pcl-do-ok-$$.pl";
+open my $fh, ">", $f or die; print $fh "40 + 2;\n"; close $fh;
+my $rv3 = do $f;
+printf "ok: rv=%s at-empty=%d\n", (defined $rv3 ? $rv3 : "undef"), ($@ eq "" ? 1 : 0);
+unlink $f; rmdir $dir;
+');
+
 done_testing();

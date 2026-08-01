@@ -7651,6 +7651,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 ;;; p-do - Perl's do FILE (block form is inlined by codegen as (progn ...))
 ;;; Called only for do EXPR where EXPR is not a bare block.
+
+(defun %p-do-io-failed ()
+  "`do FILE` could not READ the file it found: perl reports that in $!, and
+   leaves $@ false.  Must be called FIRST inside the handler, while the C
+   errno still belongs to the failed open."
+  (let ((err (sb-alien:extern-alien "errno" sb-alien:int)))
+    (setf *p-stored-errno* err))
+  (box-set $@ (make-p-box ""))
+  *p-undef*)
 (defun p-do (filename-val)
   "Perl do FILE - find file in @INC, transpile and eval it.
    Returns undef on I/O error (file not found), clears $@.
@@ -7685,16 +7694,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                        (with-open-file (f abs-path :direction :input)
                          (let ((s (make-string (file-length f))))
                            (read-sequence s f) s))
-                     ;; I/O error opening/reading (e.g. is-a-directory, permissions):
-                     ;; errno already set by OS; clear $@, return undef
+                     ;; I/O error opening/reading (is-a-directory, permissions,
+                     ;; …): perl leaves $@ FALSE and reports the reason in $!.
+                     ;; The OS errno is live at this point (probed s321: opening
+                     ;; a directory leaves errno=21/EISDIR), but $! reads PCL's
+                     ;; own *p-stored-errno*, so it has to be carried across —
+                     ;; without that, `do '/some/dir'` reported errno 0 and
+                     ;; op/do.t's "$! is EISDIR on do dir" failed.  Pass the
+                     ;; real errno through rather than special-casing
+                     ;; directories, so EACCES/ELOOP/… are right for free.
                      (stream-error (e)
                        (declare (ignore e))
-                       (return-from p-do
-                         (progn (box-set $@ (make-p-box "")) *p-undef*)))
+                       (return-from p-do (%p-do-io-failed)))
                      (file-error (e)
                        (declare (ignore e))
-                       (return-from p-do
-                         (progn (box-set $@ (make-p-box "")) *p-undef*))))))
+                       (return-from p-do (%p-do-io-failed))))))
               (p-eval (make-p-box content)))
           (error (e)
             (box-set $@ (make-p-box (format nil "~A" e)))
