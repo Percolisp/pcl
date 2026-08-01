@@ -219,6 +219,18 @@ just relocate the file.
   is that several *load-bearing rules* (embed-hook arming, verdict
   agreement, bucket dance order) exist **only** as comments.
 
+## 7b. Execution feedback (s316v)
+
+`docs/opus5-review-requests-s316v.md` carries four items back from
+execution.  The one that bears on this document: **both consolidations
+predicted here found live bugs — 2 for 2** (#138 a silently deleted
+statement and a zero-iteration loop; #140 two divergences from an operator
+set missing `&.= |.= ^.=`), which is an argument for pulling E5.5's shared
+predicates — or at least the non-mutating PExpr parse mode §2 depends on —
+earlier than last.  It also records three failed attempts at bareword class
+names, whose failure shape lands inside `pexpr-term-parsing-review.md`'s
+Option B region.
+
 ## 8. Recommended order
 
 **Before R1 (cheap, correctness):**

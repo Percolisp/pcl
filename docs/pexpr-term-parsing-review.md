@@ -4,6 +4,16 @@ Status: **Option A implemented** (session 237b, the `_term_end` helper).
 **Option B is the target architecture, NOT yet done** — this document records the
 design so a future session can pick it up without re-deriving it.
 
+**Evidence for Option B from s316v** (`docs/opus5-review-requests-s316v.md`
+§1): three attempts to make a bareword class name (`tie %h, Tie::StdHash`)
+work all failed inside this region.  The decision sits under
+`if ($end_pars < $i + 1)` at `PExpr.pm:3695` — the operand-boundary
+machinery this document calls the maze.  The third attempt, a guard on
+"next token is `->`", was a **complete no-op**: a method invocant reaches
+that decision without `->` at `$e->[$i+1]`, i.e. by a route that could not
+be traced from the call site.  Each guard attempted was another
+hand-derived boundary condition of exactly the kind Option B deletes.
+
 ---
 
 ## The problem area

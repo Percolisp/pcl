@@ -118,6 +118,17 @@ Original scope, kept for the record:
 5. Battery in -07 (decl comma, decl or-tail, param exact-arity incl. the
    g() shape, state-init comma).  Full checklist §2.  Est: 1 session.
 
+## 3b. Open review requests back to Fable
+
+**`docs/opus5-review-requests-s316v.md`** — four items raised from execution,
+each with the evidence: (1) bareword class names / task #142, where three
+attempts failed and the failure shape points at
+`pexpr-term-parsing-review.md` Option B — asks whether to take the
+`bless`-class-name route now or hold; (2) task #141, where the flip-flop
+constant-operand classifier should live; (3) a priority call on E5.5 given
+that both "one place" consolidations so far found live bugs 2-for-2;
+(4) task #138's residual (ambiguous comma in a `state` init).
+
 ## 4. W1 — the R1 window (until the user ships)
 
 - Stay on #25 support: if the user's release checks surface divergences,
