@@ -208,6 +208,33 @@ Dereference ops unwrap one level. Reference identity = identity of the
 referenced structure. Stringification of a reference yields
 `"HASH(0x…)"`-style text; numification yields the object address.
 
+**Ref identity is a monotonic id, deliberately NOT a machine address**
+(`object-address`, `cl/pcl-runtime.lisp`). A translator must reproduce the
+*invariants*, not the digits:
+
+- **Stable for the object's lifetime.** SBCL's compacting GC relocates
+  objects and PCL re-boxes refs on some paths, so the raw pointer is not an
+  identity. The failure this was built for: a coderef threaded through
+  Sub::Defer's coderef-keyed `%DEFERRED` presented two different
+  `CODE(0x…)` strings for one logical sub, breaking Moo's lazy/subclass
+  bootstrap.
+- **Never reused.** Ids come from a monotonic counter, so two distinct
+  objects can never share one — *stronger* than perl, which recycles freed
+  addresses. Code that relies on address reuse is relying on a defect.
+- **Non-leaking.** The object→id table is weak-on-key, so dead objects drop
+  out.
+- **Consistent between the two views.** `refaddr`, `==` on refs, and the
+  `0x…` in stringification are the same number, which is what
+  `t/op/bless.t`'s `expected()` checks (`hex($addr) == $ref+0`).
+
+The numbers are therefore small and dense (`ARRAY(0x1)`), not
+address-shaped, and that is correct rather than approximate. This is the
+worked example of the general rule: **match Perl's shape and invariants, not
+its bytes — and where Perl's bytes carry a defect, do better.** The
+deliberate exception is a value a program can legitimately branch on, e.g.
+the seeded `rand` sequence, where PCL reproduces perl's drand48 exactly
+(`p-srand`/`p-rand`).
+
 ### 2.6 Blessed objects, strings, numbers
 
 `bless` records the class on the thing all aliases share, mirroring

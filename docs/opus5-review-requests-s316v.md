@@ -358,17 +358,31 @@ satisfied "same seed replays" but failed t/op/rand.t).  I think that was
 right — seeded `rand` is how CPAN modules and test suites get determinism, so
 it is observable behaviour, not an implementation detail.
 
-But the same question recurs and I would rather have a rule than decide
-case-by-case.  Nearby instances, all currently divergent-but-plausible:
-`ARRAY(0x1)` synthetic ref addresses (PCL's are dense small integers — fine
-today because `hex($addr) == $ref+0` is *internally* consistent, which is
-what op/bless.t's `expected()` checks); `$$` at image boot; hash ordering.
-Contrast with `not-supported.md`'s stance that error-message *text* is
-explicitly not chased.
+**Ref addresses are NOT an open case — they are already decided, and they
+are the best worked example of the rule** (user correction; I had wrongly
+listed them here as an approximation).  `object-address`
+(cl/pcl-runtime.lisp:1477) deliberately does **not** use SBCL's raw pointer:
+the compacting GC relocates objects and PCL re-boxes refs on some paths, so
+the pointer is not a stable identity.  The concrete failure it was built for
+is recorded in the comment — a coderef threaded through Sub::Defer's
+coderef-keyed `%DEFERRED` presented two different `CODE(0x..)` strings for one
+logical sub, breaking Moo's lazy/subclass bootstrap.  Instead each object
+gets a monotonic id on first identity request, held in a weak-on-key table so
+dead objects do not leak, and **ids are never reused, so distinct objects can
+never collide** — explicitly "an improvement over reusable raw addresses",
+since perl recycles freed addresses.
 
-**Ask:** the dividing line.  My working rule is "match perl's bytes when a
-program can branch on them; match perl's *shape* otherwise" — does that hold,
-and does it extend to ref addresses if some CPAN module ever sorts on them?
+So the settled answer there was: **match perl's SHAPE (`ARRAY(0x…)`,
+`refaddr`, `==` on refs) and its invariants, not its bytes — and where
+perl's bytes carry a defect, do better.**  That is a stronger rule than the
+one I was about to propose, and it already covers the remaining examples:
+`$$` at image boot, hash ordering.
+
+**Ask:** confirm that as *the* rule, so it can go in `docs/ir-spec.md`
+alongside the data model rather than living in a code comment.  The drand48
+case then reads as the exception it should be — bytes matter there only
+because a program can branch on the sequence, which is exactly the test
+`t/op/rand.t` performs.
 
 ### 6i. Is the perl-tests/ vs t/ corpus split still earning its keep?
 
