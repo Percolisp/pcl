@@ -162,4 +162,37 @@ my @nested = (1, [%f], 2);
 print "anon-aryref n=", scalar(@nested), " inner=", scalar(@{$nested[1]}), "\n";
 ');
 
+# ---------------------------------------------------------------------------
+# open() must ACCEPT a PerlIO :layer on any mode (task #171).  Both the file
+# and the in-memory dispatchers compared the WHOLE mode string with string=,
+# so `<:utf8` matched no arm and the open FAILED — breaking ordinary code like
+# `open $fh, '<:encoding(UTF-8)', $file`.  Now one shared splitter dispatches
+# on the base mode; :raw/:bytes additionally select a byte-exact external
+# format, since decoding raw bytes as UTF-8 would corrupt or signal.
+#
+# NOT covered here (task #139 — needs the layer-model design call): :crlf,
+# layer stacking, PerlIO::get_layers introspection, and byte-exact round-trips
+# of MALFORMED utf8 through a :utf8 handle.
+# ---------------------------------------------------------------------------
+test_transpile('open accepts PerlIO layers on file and in-memory handles', '
+my $tmp = "/tmp/pcl-layer-test-$$.txt";
+open(my $w, ">", $tmp) or die "setup: $!"; print $w "hello\n"; close $w;
+for my $mode ("<", "<:utf8", "<:raw", "<:encoding(UTF-8)", "<:bytes") {
+  my $fh; my $ok = open($fh, $mode, $tmp);
+  my $l = $ok ? scalar(<$fh>) : undef; chomp $l if defined $l;
+  printf "file %-20s ok=%d line=[%s]\n", $mode, ($ok?1:0), (defined $l ? $l : "");
+  close $fh if $ok;
+}
+unlink $tmp;
+my $s = "abc\ndef\n";
+for my $mode ("<", "<:utf8", "<:raw") {
+  my $fh; my $ok = open($fh, $mode, \$s);
+  my $l = $ok ? scalar(<$fh>) : undef; chomp $l if defined $l;
+  printf "mem  %-20s ok=%d line=[%s]\n", $mode, ($ok?1:0), (defined $l ? $l : "");
+}
+my $out = ""; my $ok = open(my $mw, ">:utf8", \$out);
+print $mw "written" if $ok; close $mw if $ok;
+print "memwrite ok=", ($ok?1:0), " out=[$out]\n";
+');
+
 done_testing();

@@ -8128,9 +8128,37 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (loop for c across init do (vector-push-extend c buf))
     buf))
 
+(defun %p-split-open-mode (mode-str)
+  "Split a Perl open mode into its BASE mode and its PerlIO layer suffix:
+   `<:utf8` -> \"<\" + \":utf8\";  `>>:encoding(UTF-8)` -> \">>\" + the rest.
+
+   Perl accepts layers on EVERY mode, and an open that merely carries one must
+   SUCCEED.  Both dispatchers used to compare the whole mode string with
+   `string=`, so any layer fell through to the `Unknown open mode` arm and the
+   open FAILED — breaking ordinary code like
+   `open $fh, '<:encoding(UTF-8)', $file` (task #171).
+
+   Second value is the external format to read/write the FILE with: `:raw` and
+   `:bytes` mean no translation, and latin-1 is the CL spelling of that (each
+   octet maps to one character).  Decoding raw bytes as UTF-8 would corrupt or
+   signal, so this is not cosmetic.  Everything else keeps PCL's default.
+   NOTE: this ACCEPTS layers and honours the encoding ones; it is not a PerlIO
+   layer model — :crlf, layer stacking and PerlIO::get_layers introspection are
+   task #139, which needs the design call."
+  (let* ((colon (position #\: mode-str))
+         (base  (if colon (subseq mode-str 0 colon) mode-str))
+         (layers (if colon (subseq mode-str colon) "")))
+    (values base
+            layers
+            (if (or (search ":raw" layers) (search ":bytes" layers))
+                :latin-1
+                :default))))
+
 (defun %p-open-memory (fh mode target-box)
   "Open an in-memory string filehandle over TARGET-BOX (the scalar behind \\$s)."
-  (let ((mode-str (to-string mode))
+  ;; Layers are stripped for dispatch: the scalar already holds CL characters,
+  ;; so an encoding layer has nothing to translate here (task #171).
+  (let ((mode-str (%p-split-open-mode (to-string mode)))
         (cur (let ((v (p-box-value target-box)))
                (if (or (null v) (eq v *p-undef*)) "" (to-string v)))))
     (cond
@@ -8341,7 +8369,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (when (and (p-box-p filename) (p-box-p (p-box-value filename)))
     (return-from %p-open-impl
       (%p-open-memory fh mode (p-box-value filename))))
-  (let* ((mode-str (to-string mode))
+  (let* ((mode-ef  (multiple-value-list (%p-split-open-mode (to-string mode))))
+         ;; Dispatch on the BASE mode; a :layer suffix must not make the open
+         ;; fail (task #171).  EF honours :raw/:bytes as byte-exact.
+         (mode-str (first mode-ef))
+         (ef       (third mode-ef))
          (file-str (to-string filename))
          (stream
           (cond
@@ -8353,19 +8385,20 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                   (member mode-str '(">" ">>") :test #'string=))
              *standard-output*)
             ((string= mode-str "<")
-             (open file-str :direction :input :if-does-not-exist nil))
+             (open file-str :direction :input :if-does-not-exist nil
+                   :external-format ef))
             ((string= mode-str ">")
              (open file-str :direction :output :if-exists :supersede
-                   :if-does-not-exist :create))
+                   :if-does-not-exist :create :external-format ef))
             ((string= mode-str ">>")
              (open file-str :direction :output :if-exists :append
-                   :if-does-not-exist :create))
+                   :if-does-not-exist :create :external-format ef))
             ((string= mode-str "+<")
              (open file-str :direction :io :if-exists :overwrite
-                   :if-does-not-exist nil))
+                   :if-does-not-exist nil :external-format ef))
             ((string= mode-str "+>")
              (open file-str :direction :io :if-exists :supersede
-                   :if-does-not-exist :create))
+                   :if-does-not-exist :create :external-format ef))
             ((or (string= mode-str "|-") (string= mode-str "-|"))
              ;; Fork-pipe open (#70): bare when no command text, else the
              ;; child execs the command.  Returns pid/0/undef directly —
