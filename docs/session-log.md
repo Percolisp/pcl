@@ -4,6 +4,36 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 321d (2026-08-02, Opus 5) — S2 COMPLETE: the R1 snapshot is 523 rows, and the #177 correction backlog turned out to be empty
+
+- **`docs/perl-suite-run.tsv` regenerated in full** (05e7026), all eleven dirs
+  in one session at b32825d — deliberately *after* the #177 pairing fix,
+  because the FIXTURE registry matches per-ROW against that log.
+  433 → **523** rows: DIFF 235→291, XDIFF 97→107, OK 51→**83**, NOTAP 31→31,
+  TIMEOUT 18→7, NOT-RUN 0→**2** (the quarantine, carrying its reason),
+  FIXTURE 0→**1**, TRANSPILE 1→1.  The +90 rows are #150 part 1's unmasked
+  files, so old and new are not like-for-like — **the DIFF rise is coverage,
+  not regression.**
+- **`op` re-ran clean**: 218 rows in 9m52s at `--jobs 4` (42 OK, 14 XDIFF, 1
+  FIXTURE, 149 DIFF, 1 TIMEOUT, 9 NOTAP, 2 quarantined).
+- **The #177 cross-check, over the whole snapshot: 56 files renumber their
+  TAP** — 28 in `op`, 28 elsewhere.  Of those, four carry any registration
+  (`mro/package_aliases.t`, `..._utf8.t`, `re/pat_re_eval.t`, `op/do.t`) and
+  **exactly one — op/do.t — makes per-row claims**, which were re-verified and
+  rewritten earlier in the session.  So the backlog the fix implied is empty;
+  what remains for Fable is the forward-looking rule, not a cleanup.
+- **TIMEOUT 18→7 is NOT claimed as an improvement** (task #180).  The same dir
+  measured 58 files in 83 min once and all 218 in under 10 min this time, and a
+  `pl2cl --server` was caught holding **5 GB** with the box at 11/12 GB — so a
+  TIMEOUT row can be a statement about the machine, not about PCL.  #128
+  (server memory growth) now has its second sighting and is the prime suspect;
+  resolve that before those 7 rows are trusted.  Same family as #176.
+- **Near-green triage** for S3 is in `perl-test-suite-survey.md`; #179 (`/xx`
+  must ignore whitespace inside `[...]`) is diagnosed to the function with a
+  fix plan, deferred so the snapshot kept matching HEAD.
+
+---
+
 ## Session 321c (2026-08-01, Opus 5) — S2, the R1 snapshot: 9 of 11 dirs measured, and I killed the `op` chunk myself
 
 - **Where the snapshot stands.**  Per-dir foreground chunks at `--jobs 3`,
