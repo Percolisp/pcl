@@ -23,6 +23,7 @@ shippable.*
 | 6g | silent-wrong vs loud-fail | **policy: should a missing case DIE rather than return a default?** |
 | 6h | perl-parity vs "reasonable" for host-visible values | **policy: how far to chase perl's exact bytes?** |
 | 6i | suite corpus overlap (perl-tests/ vs t/) | policy: is the copied-file split still earning its keep? |
+| 6j | pack's character-vs-byte mode model (#148) | **scope: full mid-template U0/C0, or the common case?** |
 
 ---
 
@@ -384,6 +385,34 @@ original is authoritative and `perl-tests/` is only the fast sweep), and
 should the drifted copies be re-synced?  This affects what #25's scoreboard
 actually measures — a green sweep row can coexist with a failing real file
 of the same name, which is a misleading signal for a release gate.
+
+### 6j. `pack`'s character-vs-byte mode: how much of the model to build? (#148)
+
+`unpack("U*","\x{1234}")` gives 4 in PCL and 4660 in perl; `ord(pack("U",0x1234))`
+gives 225 (0xE1, the first UTF-8 byte) instead of 4660.  Diagnosed, **not
+attempted** — it is a mode model, not a coding slip, and pack is the highest-
+blast-radius area in the tree.
+
+Perl has two modes: **character** (the default — `U` packs the codepoint
+directly) and **byte** (entered by `U0`, left by `C0` — `U` encodes UTF-8),
+and the switches are **mid-template**.  `cl/pack-impl.pl` inverts this: the
+`U` letter *always* routes through `_pack_utf8_char`/`_unpack_utf8_char`
+(i.e. always byte behaviour), while `U0` is handled only as a template
+*prefix* whose effect is to pre-encode the whole input — so `U0` currently
+means "transform twice" rather than "switch mode".
+
+**Ask:** implement the real mode state threaded through
+`_pack_tmpl`/`_unpack_tmpl` with mid-template `U0`/`C0` toggles, or only fix
+the default-character-mode case (which is what the failing tests and almost
+all real code use) and leave mid-template switching unimplemented with a
+`docs/not-supported.md` note?  The full model is more code in the file whose
+regression suite is 5635 assertions; the partial fix is a smaller diff that
+still leaves a known hole.  Related: the same byte-vs-character question
+probably applies to `W` vs `C`.
+
+Constraint either way: `cl/pcl-pack.lisp` is a checked-in transpiled
+artifact, so `tools/rebuild-pack` must land in the same commit, verified with
+pack.t (blessed 5635/90) before the full gate+sweep.
 
 ## Verification standard used for the two shipped commits
 
