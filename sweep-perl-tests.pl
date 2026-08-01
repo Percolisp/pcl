@@ -1,7 +1,17 @@
 #!/usr/bin/env perl
 #
 # Parallel sweep of all Perl test files.
-# Usage: ./sweep-perl-tests.pl [--jobs N] [--timeout N] [file.t ...]
+# Usage: ./sweep-perl-tests.pl [--jobs N] [--timeout N] [--no-retry] [file.t ...]
+#
+# TIMEOUT RETRY (task #176).  A file that TIMEOUTs contributes NOTHING: no
+# pass rows, no fail rows, no baseline rows — so it is invisible to
+# tools/sweep-diff.pl and a regression inside it cannot be seen.  pack.t sat
+# in exactly that hole for the whole project's life (~89 failing rows that
+# were neither blessed nor "new"), because it is simply SLOWER than the
+# default timeout, not hung.  So a TIMEOUT is now retried ONCE at 3x the
+# timeout, alone at the end of the queue (by then the machine is quiet, which
+# is the other half of why a slow file times out: see task #180).  A truly
+# hung file costs 4x its timeout once and is still reported TIMEOUT.
 #
 # Each child writes results to a temp file; parent reads after wait.
 # Skips heredoc.t (137/138 tests are fresh_perl_is no-ops, produces no TAP output).
@@ -16,7 +26,8 @@ use Cwd qw(abs_path getcwd);
 use POSIX qw(:sys_wait_h _exit);
 
 my $JOBS    = 8;
-my $TIMEOUT = 90;  # seconds per test
+my $TIMEOUT = 90;  # seconds per test (first attempt)
+my $RETRY   = 3;   # TIMEOUT is retried once at $RETRY x $TIMEOUT; 0 = no retry
 # heredoc.t: 137/138 tests are fresh_perl_is no-ops (no TAP output)
 # list.t: builds 100k-nested "(1,(1,...))" string then evals it — PPI parse is O(n²+)
 #         on deeply-nested expressions; takes >8 min at 100% CPU (not OOM, just slow)
@@ -29,6 +40,7 @@ while (@ARGV) {
     my $arg = shift;
     if ($arg eq '--jobs')    { $JOBS    = shift; next; }
     if ($arg eq '--timeout') { $TIMEOUT = shift; next; }
+    if ($arg eq '--no-retry'){ $RETRY   = 0;     next; }
     push @test_files, $arg;
 }
 
@@ -87,20 +99,22 @@ $ENV{PCLPERL} = "$project_root/tools/pclperl-for-tests"
     unless ($ENV{PCL_FRESH_PERL} // '') eq 'real';
 $ENV{PCL_TEST_CORE} = $child_core if $child_core;
 
-print "Running $total tests with $JOBS parallel jobs (timeout=${TIMEOUT}s)\n";
+print "Running $total tests with $JOBS parallel jobs (timeout=${TIMEOUT}s"
+    . ($RETRY > 1 ? ", TIMEOUT retried once at ${\($TIMEOUT * $RETRY)}s" : ", no retry") . ")\n";
 print "Skipping: ", join(', ', @SKIP), "\n";
 print "Failure log: $log_dir/*.fails.tsv\n\n";
 
 # Worker function — runs in child process, writes results to a file
 sub run_one_test {
-    my ($file, $result_file) = @_;
+    my ($file, $result_file, $timeout) = @_;
     my $name = basename($file);
+    $timeout ||= $TIMEOUT;
 
     my $pass = 0; my $fail = 0; my $skip = 0; my $planned = -1; my $status = 'OK'; my $snippet = '';
 
     eval {
         local $SIG{ALRM} = sub { die "TIMEOUT\n" };
-        alarm($TIMEOUT);
+        alarm($timeout);
 
         my $orig = getcwd();
         chdir $perl_tests or die "chdir: $!\n";
@@ -132,7 +146,7 @@ sub run_one_test {
         # uncaught die in any single form, so one not-supported statement (e.g.
         # `pack "P"`, or `die if $@` after an unsatisfiable string eval) no longer
         # aborts the whole file and silently swallows every test after it.
-        system("timeout $TIMEOUT sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --eval \"(pcl::p-load-with-recovery \\\"$cl_file\\\")\" >$tmp_out 2>&1");
+        system("timeout $timeout sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --eval \"(pcl::p-load-with-recovery \\\"$cl_file\\\")\" >$tmp_out 2>&1");
         my $sbcl_exit = $? >> 8;
         my $out = do { local $/; my $f; open($f, '<', $tmp_out) ? do { my $c = <$f>; $c // '' } : '' };
         unlink $tmp_out;
@@ -199,7 +213,7 @@ sub run_one_test {
     if ($@) {
         chomp(my $err = $@);
         if ($err eq 'TIMEOUT') {
-            ($status, $snippet) = ('TIMEOUT', "(killed after ${TIMEOUT}s)");
+            ($status, $snippet) = ('TIMEOUT', "(killed after ${timeout}s)");
         } elsif ($err =~ /^TRANSPILE_FAIL\n(.*)/s) {
             ($status, $snippet) = ('TRANSPILE_FAIL', (split /\n/, $1)[0] // '');
         } else {
@@ -214,10 +228,14 @@ sub run_one_test {
     close $rf;
 }
 
-# Parallel dispatch
-my %children;  # pid => { name, result_file, start }
-my @queue = @test_files;
+# Parallel dispatch.  A queue entry is [file, timeout]: a file that TIMEOUTs is
+# re-queued once at $RETRY x its timeout (task #176).  Because the retry goes on
+# the END of the queue it also runs on a quieter machine, which is the other
+# half of why a merely-slow file times out.
+my %children;  # pid => { name, result_file, start, timeout, retried }
+my @queue = map { [$_, $TIMEOUT, 0] } @test_files;
 my %results;
+my $retries = 0;
 
 my $started = 0;
 my $finished = 0;
@@ -225,23 +243,25 @@ my $finished = 0;
 while (@queue || %children) {
     # Launch up to $JOBS children
     while (@queue && keys(%children) < $JOBS) {
-        my $file = shift @queue;
+        my ($file, $timeout, $retried) = @{ shift @queue };
         my $name = basename($file);
         my ($rf, $result_file) = tempfile(DIR => $tmpdir, SUFFIX => '.res', UNLINK => 0);
         close $rf;
 
-        $started++;
+        $started++ unless $retried;
         my $pid = fork();
         die "fork: $!" unless defined $pid;
 
         if ($pid == 0) {
             # Child — use _exit to skip END blocks (avoids tmpdir cleanup)
-            run_one_test($file, $result_file);
+            run_one_test($file, $result_file, $timeout);
             _exit(0);
         }
 
-        $children{$pid} = { name => $name, result_file => $result_file, start => time() };
-        printf "[%3d/%3d] %-22s started\n", $started, $total, $name;
+        $children{$pid} = { name => $name, file => $file, result_file => $result_file,
+                            start => time(), timeout => $timeout, retried => $retried };
+        if ($retried) { printf "[retry  ] %-22s started (timeout=${timeout}s)\n", $name }
+        else          { printf "[%3d/%3d] %-22s started\n", $started, $total, $name }
         STDOUT->flush();
     }
 
@@ -254,7 +274,6 @@ while (@queue || %children) {
 
     for my $pid (@done_pids) {
         my $info = $children{$pid};
-        $finished++;
 
         # Read result file
         my $r = { pass => 0, fail => 0, skip => 0, planned => -1, status => 'NO_RESULT', snippet => '' };
@@ -265,6 +284,22 @@ while (@queue || %children) {
             $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
                    status => $s // 'OK', snippet => $snip // '' };
         }
+
+        # TIMEOUT, first attempt: re-queue at $RETRY x the timeout instead of
+        # recording a result.  The killed run may already have appended rows to
+        # its .fails.tsv; drop that partial log so the retry's is the only one.
+        if ($r->{status} eq 'TIMEOUT' && $RETRY > 1 && !$info->{retried}) {
+            unlink "$log_dir/$info->{name}.fails.tsv";
+            push @queue, [$info->{file}, $info->{timeout} * $RETRY, 1];
+            $retries++;
+            printf "  TIMEOUT %-22s after %ds - re-queued at %ds\n",
+                   $info->{name}, $info->{timeout}, $info->{timeout} * $RETRY;
+            STDOUT->flush();
+            delete $children{$pid};
+            next;
+        }
+
+        $finished++;
         $results{$info->{name}} = $r;
 
         my $elapsed = time() - $info->{start};
@@ -286,18 +321,28 @@ while (@queue || %children) {
         delete $children{$pid};
     }
 
-    # Kill timed-out children
+    # Kill children that outlived their OWN timeout (the child's alarm should
+    # have fired first; this is the backstop) — and retry them like any TIMEOUT.
     my $now = time();
     for my $pid (keys %children) {
         my $info = $children{$pid};
-        if ($now - $info->{start} > $TIMEOUT + 5) {
+        if ($now - $info->{start} > $info->{timeout} + 5) {
             kill 'KILL', $pid;
             waitpid($pid, 0);
-            $results{$info->{name}} = { pass => 0, fail => 0, status => 'TIMEOUT', snippet => "(killed)" };
-            printf "  KILLED %-22s TIMEOUT\n", $info->{name};
-            STDOUT->flush();
-            $finished++;
             delete $children{$pid};
+            if ($RETRY > 1 && !$info->{retried}) {
+                unlink "$log_dir/$info->{name}.fails.tsv";
+                push @queue, [$info->{file}, $info->{timeout} * $RETRY, 1];
+                $retries++;
+                printf "  KILLED %-22s TIMEOUT - re-queued at %ds\n",
+                       $info->{name}, $info->{timeout} * $RETRY;
+            } else {
+                $results{$info->{name}} = { pass => 0, fail => 0, skip => 0, planned => -1,
+                                            status => 'TIMEOUT', snippet => "(killed)" };
+                printf "  KILLED %-22s TIMEOUT\n", $info->{name};
+                $finished++;
+            }
+            STDOUT->flush();
         }
     }
 
@@ -355,6 +400,10 @@ if (@partial_files) {
 print "\nZero passing    (" . scalar(@zero_pass)     . "): " . join(', ', sort @zero_pass)     . "\n";
 if (@timeouts) {
     print "\nTimeouts        (" . scalar(@timeouts)   . "): " . join(', ', sort @timeouts)      . "\n";
+}
+if ($retries) {
+    printf "\nRetried after TIMEOUT (%d): re-run at %ds each; see the per-file lines above\n",
+        $retries, $TIMEOUT * $RETRY;
 }
 print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 

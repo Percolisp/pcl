@@ -1815,13 +1815,21 @@
      ;; order m,s,i,x (e.g. qr/x/imsx -> "(?^msix:x)").  (The old code checked
      ;; :case-insensitive etc. — keys that are never present — so flags were
      ;; always dropped.)
+     ;; /xx is its own modifier and prints as two x's (task #181): perl gives
+     ;; (?^xx:…), and that wrapper is how the xx survives interpolation into a
+     ;; bigger pattern — printing one x silently demotes it to /x.
+     ;; The body is the SOURCE text, not the cl-ppcre rewrite: perl stringifies
+     ;; a qr from what was written.
      (let* ((mods (p-regex-match-modifiers v))
             (mod-str (concatenate 'string
                                   (if (getf mods :m) "m" "")
                                   (if (getf mods :s) "s" "")
                                   (if (getf mods :i) "i" "")
-                                  (if (getf mods :x) "x" ""))))
-       (format nil "(?^~A:~A)" mod-str (p-regex-match-pattern v))))
+                                  (cond ((getf mods :xx) "xx")
+                                        ((getf mods :x)  "x")
+                                        (t "")))))
+       (format nil "(?^~A:~A)" mod-str (or (p-regex-match-source v)
+                                           (p-regex-match-pattern v)))))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
@@ -10722,7 +10730,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-92"
+(defparameter *pcl-cache-generation* "v2-93"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -13992,9 +14000,17 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 ;; Regex operation types
 (defstruct p-regex-match
-  "Regex match operation m//"
+  "Regex match operation m//.
+   PATTERN is the cl-ppcre form (what the scanner compiles); SOURCE is the
+   PERL-side text the pattern was written as, kept because perl's REGEXP sv
+   stringifies from its source, not from anything a backend rewrote.  The two
+   differ wherever perl-regex-to-ppcre translates — notably `(?^flags:` (perl's
+   qr wrapper), which becomes `(?flags:` for cl-ppcre and would otherwise leak
+   into `\"$re\"` as a shape perl never prints (task #181).  SOURCE nil means
+   \"same as PATTERN\"."
   pattern
-  modifiers)
+  modifiers
+  source)
 
 (defstruct p-subst-op
   "Substitution operation s///"
@@ -14128,18 +14144,47 @@ buffer's fill-pointer; everything else falls back to file-length."
          (open-delim (char str start-delim))
          (close-delim (get-closing-delim open-delim))
          (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
-         (pattern (perl-regex-to-ppcre (subseq str (1+ start-delim) end-delim)))
+         (raw (subseq str (1+ start-delim) end-delim))
+         (pattern (perl-regex-to-ppcre raw))
          (modifiers (if (< end-delim (1- (length str)))
                         (subseq str (1+ end-delim))
                         "")))
     (make-p-regex-match :pattern pattern
+                        :source raw
                         :modifiers (parse-regex-modifiers modifiers))))
 
 (defun p-regex-from-parts (pattern modifiers)
   "Build a regex from a runtime-interpolated pattern string and modifier string.
-   Used when the regex contains variable interpolation (e.g. /$x/ or qr/$x/)."
-  (make-p-regex-match :pattern (perl-regex-to-ppcre (to-string pattern))
-                      :modifiers (parse-regex-modifiers (to-string modifiers))))
+   Used when the regex contains variable interpolation (e.g. /$x/ or qr/$x/).
+
+   A pattern that IS a single interpolated regex object — `qr/$re/`, `/$re/` —
+   is that same regex in perl: it keeps the inner qr's own flags and the outer
+   modifiers are IGNORED (`qr/$re/i` where `$re = qr/abc/` does NOT match
+   \"ABC\", and stringifies as `(?^:abc)`, not as a re-wrap).  Detect it HERE,
+   where the argument is still the object — by the time it has been stringified
+   the only test left is a regex over the wrapper text, which cannot tell
+   `qr/$re/` from `qr/(?^:a)(?^:b)/` (task #181)."
+  (let ((rx (unbox pattern)))
+    (if (p-regex-match-p rx)
+        ;; …but only the PATTERN's own flags come from the inner qr.  /g /c /e
+        ;; /r are flags of the MATCH OPERATION, not of the compiled pattern, so
+        ;; they must survive: dropping /g here turned `while ($t =~ /$re/g)`
+        ;; into an infinite loop (Pl/t/regex-gpos-01.t caught it).  With none of
+        ;; them present the object is returned unchanged, which is what keeps
+        ;; `qr/$re/` identical to `$re`.
+        (let* ((outer (parse-regex-modifiers (to-string modifiers)))
+               (op-flags (loop for k in '(:g :c :e :r)
+                               when (getf outer k) nconc (list k t))))
+          (if op-flags
+              (make-p-regex-match
+               :pattern   (p-regex-match-pattern rx)
+               :source    (p-regex-match-source rx)
+               :modifiers (append op-flags (p-regex-match-modifiers rx)))
+              rx))
+        (let ((raw (to-string pattern)))
+          (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
+                              :source raw
+                              :modifiers (parse-regex-modifiers (to-string modifiers)))))))
 
 (defun p-qr (pattern-string)
   "Parse qr/pattern/modifiers and return a compiled regex (regex-match struct).
@@ -14150,11 +14195,13 @@ buffer's fill-pointer; everything else falls back to file-length."
          (open-delim (char str start-delim))
          (close-delim (get-closing-delim open-delim))
          (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
-         (pattern (perl-regex-to-ppcre (subseq str (1+ start-delim) end-delim)))
+         (raw (subseq str (1+ start-delim) end-delim))
+         (pattern (perl-regex-to-ppcre raw))
          (modifiers (if (< end-delim (1- (length str)))
                         (subseq str (1+ end-delim))
                         "")))
     (make-p-regex-match :pattern pattern
+                        :source raw
                         :modifiers (parse-regex-modifiers modifiers))))
 
 (defun p-subst (pattern replacement &rest modifiers)

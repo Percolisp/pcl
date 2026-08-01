@@ -10,6 +10,43 @@ Status legend: ✅ works · 🟡 partial · ❌ blocked · 🔧 fixed-this-sessi
 
 ---
 
+## CPAN suite scoreboard 2026-08-02 (s322, gen v2-92) — RE-RUN: zero drift, and a finer baseline
+
+Re-run of the s316p baseline dists after 9 sessions of compiler work, most
+importantly s321's **#182** (every `s///` with an interpolated replacement now
+routes through the real dq-string parser — an emission change touching an
+idiom CPAN uses far harder than perl's own suite does).
+
+| dist | PASS | PARTIAL | FAIL | vs s316p |
+|------|------|---------|------|----------|
+| Try-Tiny-0.32 | 4 | 4 | 3 | **=** |
+| Role-Tiny-2.002004 | 11 | 8 | 4 | **=** |
+| Scalar-List-Utils-1.70 | 12 | 20 | 6 | **=** |
+| Sub-Uplevel-0.2800 | 2 | 5 | 3 | **=** |
+
+Command (`--no-dist-lib` must precede Scalar-List-Utils and applies to every
+dist after it):
+
+```
+perl tools/cpan-scoreboard.pl --jobs 4 --timeout 120 --tsv docs/cpan-scoreboard.tsv \
+  ~/.cpan/build/Try-Tiny-0.32-0 ~/.cpan/build/Role-Tiny-2.002004-0 \
+  ~/.cpan/build/Sub-Uplevel-0.2800-0 --no-dist-lib ~/.cpan/build/Scalar-List-Utils-1.70-0
+```
+
+**The per-dist tally is too coarse to be a gate, so it is no longer the
+baseline.**  A PARTIAL file can lose rows and keep its status: the whole
+class "this dist still fails the same number of *files*, but 4 more
+*assertions*" was invisible.  `docs/cpan-scoreboard.tsv` (new, `--tsv`) is now
+the artifact — one sorted line per t-file, `dist file status ok notok rc`,
+diffed with plain `diff`.  Same reasoning as #185 for the perl suite.
+(The committed s322 TSV was converted from this run's stdout, field for field,
+rather than re-run; every later one comes straight from `--tsv`.)
+
+Nothing here is a release verdict: it says the four dists did not move.  The
+widened scoreboard is the part that finds new bugs.
+
+---
+
 ## CPAN suite scoreboard 2026-07-30 (s316p, gen v2-83) — MECHANICAL BASELINE
 
 First run of `tools/cpan-scoreboard.pl` (new; wraps run-dist-t.pl over a

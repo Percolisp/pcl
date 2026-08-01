@@ -11,6 +11,14 @@
 # not-supported.md section — all-or-nothing.  A partially-explained file
 # stays UNEXPLAINED on purpose: it still contains a fix target, and a row
 # here would silence it.  Track the explained subset in the task instead.
+#
+# PER-ROW CLAIMS QUOTE THE DESCRIPTION, NEVER A BARE tNN (adopted s322,
+# fable-answers-s321.md §2).  #177 proved test NUMBERS are the unstable
+# coordinate: in any file where PCL's row count drifts from perl's, the
+# numbers on either side name different tests, and a reason that says "t63-t66"
+# can end up accusing rows that pass.  Descriptions survive renumbering; the
+# skip-registry keys on them for the same reason.  Number-only is acceptable
+# for genuinely unnamed tests, same fallback as the skip-registry.
 mro/basic_01_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_c3_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_dfs.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)

@@ -14,6 +14,14 @@
 #   tools/cpan-scoreboard.pl ~/.cpan/build/Try-Tiny-0.32-0 ...
 #   tools/cpan-scoreboard.pl --no-dist-lib ~/.cpan/build/Scalar-List-Utils-1.70-0
 #   tools/cpan-scoreboard.pl --jobs 8 --timeout 120 DIST...
+#   tools/cpan-scoreboard.pl --tsv docs/cpan-scoreboard.tsv DIST...
+#
+# --tsv writes a machine-diffable baseline: one sorted line per t-file,
+#   dist <TAB> file <TAB> status <TAB> ok <TAB> notok <TAB> rc
+# Diff two of those with plain diff(1).  This matters because the PASS/PARTIAL/
+# FAIL counts alone are too coarse to be a regression gate: a PARTIAL file can
+# lose rows and keep its status, so a whole class of regression is invisible in
+# the per-dist tally (the same asymmetry #185 closes for the perl suite).
 #
 # --no-dist-lib applies to every dist AFTER the flag (see run-dist-t.pl's
 # caveat: XS-stubbed dists like Scalar-List-Utils must NOT put their lib/ on
@@ -35,10 +43,12 @@ my $jobs = 8;
 my $timeout = 120;
 my @dists;           # [dir, no_dist_lib]
 my $no_dist_lib = 0;
+my $tsv;
 while (@ARGV) {
   my $a = shift @ARGV;
   if    ($a eq '--jobs')        { $jobs = shift @ARGV }
   elsif ($a eq '--timeout')     { $timeout = shift @ARGV }
+  elsif ($a eq '--tsv')         { $tsv = shift @ARGV }
   elsif ($a eq '--no-dist-lib') { $no_dist_lib = 1 }
   else                          { push @dists, [abs_path($a), $no_dist_lib] }
 }
@@ -122,5 +132,19 @@ for my $dist (sort keys %by_dist) {
   printf "  -- %d PASS / %d PARTIAL / %d FAIL of %d\n",
          $n{PASS}, $n{PARTIAL}, $n{FAIL}, $total;
   $grand_bad += $n{FAIL};
+}
+
+# Machine-diffable baseline: dist basename (NOT the path — it carries a build
+# dir), file, status, ok, notok, rc.  Sorted, so diff(1) is the whole gate.
+if (defined $tsv) {
+  open my $fh, '>', $tsv or die "open $tsv: $!\n";
+  for my $dist (sort keys %by_dist) {
+    for my $r (@{ $by_dist{$dist} }) {
+      my (undef, $file, $class, $ok, $notok, $rc) = @$r;
+      print $fh join("\t", basename($dist), $file, $class, $ok, $notok, $rc), "\n";
+    }
+  }
+  close $fh;
+  print "\nwrote $tsv\n";
 }
 exit 0;

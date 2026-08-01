@@ -146,6 +146,13 @@ not-supported.md → only then probe.*
   missing the cl-ppcre extended-mode workaround, and (s321) choking on the
   `/xx` option, with the `handler-case` turning the error into a quiet test
   FAILURE.  Route through `%pcl-create-scanner` → task #179, CLAUDE.md 11.
+- **A qr is an OBJECT, and its `(?^flags:…)` wrapper is load-bearing.**  A
+  pattern that is exactly one interpolated qr IS that qr (outer modifiers
+  ignored); as PART of a bigger pattern the wrapper embeds verbatim; `/xx`
+  prints two x's; and the stringification comes from the SOURCE text, not
+  from any cl-ppcre rewrite.  Therefore a variable holding a qr is never
+  frozen to text by the raw-slot verdict (`write-object`, `VarAnnotator`) →
+  `ir-spec.md` §10 regex rows, task #181, s322.
 - **NEVER join two TAP streams by test NUMBER** — pair them by DESCRIPTION
   (`tools/lib/PclTapAlign.pm`, unit-tested in `tools/t/tap-align.t`).  A
   file where PCL emits extra or missing rows mid-run then mis-attributes
@@ -170,10 +177,16 @@ not-supported.md → only then probe.*
   FOREGROUND chunks, `--jobs 2-4`) as the LAST pre-R1 act, after the
   FIXTURE/XDIFF hygiene lands; partial regeneration forbidden →
   `fable-answers-s318.md` §6.
-- **pack.t sweep hole (#176)**: measurement fix (per-file timeout) NOW,
-  bless the ~89 rows POST-R1 after triage — never land unreviewed baseline
-  rows in the release window → `fable-answers-s321.md` §1.  The 90→156 s
-  slowdown is a separate Target-A task.
+- **pack.t sweep hole (#176)**: DONE s322 — the sweep **retries a TIMEOUT
+  once at 3× the timeout** (`sweep-perl-tests.pl`, `--no-retry` disables).
+  Ruling was `fable-answers-s321.md` §1; its step 2 (bless ~89 rows post-R1)
+  turned out moot — **pack.t's 58 baseline rows were there all along** and the
+  run matches them exactly.  The "0 baseline rows" claim came from grepping a
+  NUL-containing tsv (grep goes binary-silent — use `grep -a`/perl).  The
+  90→166 s slowdown is a separate Target-A task (#184).
+- **A TIMEOUT is a measurement failure, not a result**: a timing-out file's
+  baseline rows come back "unverified", so a regression inside it is invisible
+  while the headline still reads "0 new" → task #176, s322.
 - **Mis-attributed-evidence registrations (#177 aftermath)**: a tainted
   registration must be RE-VERIFIED before R1; reason-text corrections gate
   R1, status changes only if re-verification fails.  In `renumbered` files,

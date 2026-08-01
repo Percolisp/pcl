@@ -386,6 +386,8 @@ sub _analyze_tree {
     ev             => {},   # $ev->{'$x'}{'write-incdec'}++  (boxing events only)
     decl_count     => {},
     init_bad       => {},   # a root write's RHS shape unproven → box
+    write_obj      => {},   # a root write whose RHS is an OBJECT (qr//) → never
+                            # freeze to text: see the B-regime gate below
     fallback_texts => [],   # statements whose parse died → text gates apply
     known_subs     => $known_subs // {},
     host           => $host,
@@ -419,6 +421,7 @@ sub _analyze_tree {
     push @reasons, 'eval-in-region' if $ctx->{has_eval};
     push @reasons, 'nested-sub-ref' if $ctx->{nested_sub}{$name};
     push @reasons, 'write-shape'    if $ctx->{init_bad}{$name};
+    push @reasons, 'write-object'   if $ctx->{write_obj}{$name};
     # Root `$x++;` statements are allowed on a raw slot ONLY when every
     # other write is numeric-valued (A-num): a str-family write could seed
     # a string, and perl's ++ on a non-numeric string is the MAGICAL
@@ -981,6 +984,7 @@ sub _tw_walk {
         my $fam = _tw_shape_ok($ctx, $xo, $kids->[1]);
         if ($fam) { $ctx->{write_fam}{$name}{$fam}++ }
         else      { $ctx->{init_bad}{$name} = 1 }
+        $ctx->{write_obj}{$name} = 1 if _tw_rhs_is_object($xo, $kids->[1]);
       }
       elsif ($ltype && ($ltype eq 'h_acc' || $ltype eq 'a_acc')) {
         # Container element write.  For a PLAIN container base (a Symbol
@@ -1156,6 +1160,26 @@ sub _tw_mark {
 # literal) or 'str' (string-op result / quote literal / interpolation) — or
 # 0 when the shape is unproven (may alias a box).  Truthiness is the old
 # ok/not-ok verdict; the family feeds the A-num root-incdec gate.
+# True when a root write's RHS produces an OBJECT whose string form is lossy —
+# today exactly `qr//`.  A Regexp carries flags and identity that its
+# stringification `(?^flags:…)` cannot round-trip: perl's rule is that a lone
+# interpolated qr IS that regex (`qr/$re/` keeps $re's own flags and ignores the
+# outer ones), which only holds while the value is still the object.  Freezing
+# such a variable to text at the write site turns every later use into a
+# re-parse of the wrapper, which is how `qr/$re/` came out double-wrapped and a
+# /xx pattern silently reverted to /x (task #181).  This is NOT the same as an
+# unproven shape: `write-shape` alone is liftable by the B regime, this is not.
+sub _tw_rhs_is_object {
+  my ($xo, $id) = @_;
+  my $node = $xo->get_a_node($id);
+  my $kids = $xo->get_node_children($id) || [];
+  if ($xo->is_internal_node_type($node)) {
+    return (($node->{type} // '') eq 'tree_val' && @$kids == 1)
+      ? _tw_rhs_is_object($xo, $kids->[0]) : 0;
+  }
+  return ref($node) eq 'PPI::Token::QuoteLike::Regexp' ? 1 : 0;
+}
+
 sub _tw_shape_ok {
   my ($ctx, $xo, $id) = @_;
   my $node = $xo->get_a_node($id);

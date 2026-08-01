@@ -4,6 +4,82 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 322 (2026-08-02, Opus 5) — the Fable s321 rulings executed, and a qr that was being frozen into a string
+
+- **#176 measurement fix (Fable §1 option c).** A file that TIMEOUTs contributes
+  NOTHING — no pass rows, no fail rows, no baseline rows — so it is invisible to
+  `sweep-diff.pl`.  pack.t sat in that hole for the project's whole life
+  (~89 failing rows, neither blessed nor "new") because it is merely SLOWER
+  than the timeout, not hung.  `sweep-perl-tests.pl` now **retries a TIMEOUT
+  once at 3× the timeout, at the end of the queue** (so it also re-runs on a
+  quieter machine — the other half of why a slow file times out, task #180);
+  `--no-retry` disables.  A truly hung file costs 4× its timeout once and is
+  still reported TIMEOUT.  Both inverse guards probed: a file that is still too
+  slow at 3× retries exactly ONCE and lands as TIMEOUT with the 3× number in
+  its snippet; `--no-retry` restores the old single attempt.
+- **…and the premise of #176 was itself a measurement artifact.**  The task
+  said pack.t has **0 rows in the blessed baseline**.  It has **58**, and
+  always did.  The false claim came from `grep`ping `docs/fail-baseline.tsv`,
+  which contains NUL bytes — grep then treats the file as binary and prints
+  *nothing*, which reads exactly like "no matches".  (The project already had
+  this gotcha written down for `./runpl`; it applies to every `.tsv` under
+  `.faillog/` and `docs/` — use `grep -a` or perl.)  The hole was narrower
+  than believed but real: a timing-out file's baseline rows come back
+  "DID NOT RUN — unverified", so a regression inside it is invisible while the
+  headline still reads "0 new".  With the retry, pack.t runs and its failures
+  are **identical to the baseline** (52 unique descriptions each side) — so
+  Fable's step 2 (triage + bless ~89 rows post-R1) is moot: there is nothing
+  unblessed.  Second session running in which a *measurement* artifact, not a
+  compiler bug, created a false belief about the corpus (#177 was the first).
+- **#181, and the bug under the bug.**  The task named two defects in the
+  `(?^flags:…)` qr wrapper (`/xx` printing one x; `qr/$re/` double-wrapping).
+  Both were real, but neither was the cause: **the VarAnnotator was freezing
+  the qr VARIABLE to its string form** — the B-regime raw-slot verdict, whose
+  uses were all "stringy" (`print "$re"` plus `qr/$re/`) — so the object was
+  already text before any regex saw it.  Three fixes, one family:
+  `write-object` (a root write whose RHS is a `qr//` is never liftable);
+  `p-regex-from-parts` returns the object itself when the pattern IS one
+  interpolated regex (perl's rule: `qr/$re/i` keeps $re's flags and ignores
+  the outer ones); and `p-regex-match` now carries the perl-side `source` text
+  and stringifies from it, so the cl-ppcre rewrite `(?^:` → `(?:` stops
+  leaking into `"$re"`.
+- **The first version of that fix broke `while ($t =~ /$re/g)` into an
+  infinite loop** — `/g /c /e /r` are flags of the MATCH OPERATION, not of the
+  compiled pattern, and returning the object verbatim dropped them.
+  `Pl/t/regex-gpos-01.t` t6 caught it (heap exhaustion, not a wrong answer);
+  the merged version keeps identity only when no match-time flag is present.
+  Both are now inverse guards in the test.
+- **#183 step 1 — the CPAN scoreboard re-run: zero drift.**  Try-Tiny 4/4/3 ·
+  Role-Tiny 11/8/4 · Scalar-List-Utils 12/20/6 · Sub-Uplevel 2/5/3, all
+  identical to s316p across 9 sessions of compiler work including #182.  But
+  **the per-dist tally is too coarse to be a gate** — a PARTIAL file can lose
+  rows and keep its status — so the baseline is now
+  `docs/cpan-scoreboard.tsv` (new `--tsv`): one sorted line per t-file with
+  ok/notok/rc, diffed with plain `diff`.  Same reasoning as #185 for the perl
+  suite.
+- **#183 step 2 — widened to 10 already-unpacked pure-Perl dists** (101 t-files:
+  23 PASS / 17 PARTIAL / 61 FAIL).  Findings and cause triage in
+  `docs/cpan-module-log.md`; the headline is that the FAILs cluster on missing
+  module shims (Capture::Tiny's 23 files are one `use IO` away), not on
+  codegen.  Whether R1's CPAN half means "no regressions on the small
+  baseline" or a widened board is still a USER decision (task #183).
+- **#177 forward rule adopted** (Fable §2): per-row claims in a
+  `perl-suite-expected.tsv` reason must quote the test DESCRIPTION, not a bare
+  tNN, because numbers are the unstable coordinate in any renumbering file.
+  Written into the tsv header.  Re-checked the one registration that landed
+  after s321's radius measurement (uni/goto.t): its log carries no
+  `renumbered` marker, so the backlog is still empty.
+- Verified: gate **125 files / 4471** PASS; sweep **0 new / 0 fixed** vs the
+  689-row baseline (now 108 files with pack.t actually running: 18451 pass /
+  913 fail; 11 rows unverified in blocks.t + postfixderef.t, both PARTIAL as
+  before); fully-passing **66**; corpus-diff **emission identical to
+  HEAD across 111 files** (the annotator gate is narrow — no corpus file
+  assigns a qr in a freezable position, which is exactly why it was never
+  caught); `re/qr-72922.t` **12/2 → 14/0 OK**, keep_tabs.t still 14/0; cache
+  generation → v2-93.
+
+---
+
 ## Session 321f (2026-08-02, Opus 5) — `s/…/$h{$k}/` emitted literal braces: the third duplicated mechanism, and the biggest correctness win of the session
 
 - **#182 (b3be060).** `s/(\w+)/$map{$1}/g` — an everyday Perl idiom — produced

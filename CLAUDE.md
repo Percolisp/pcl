@@ -330,13 +330,21 @@ func => -12         # 1 param before list
   no-match s/// write gate; fresh_perl/runperl children run under PCL via
   `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores the old compare
   mode.
-  **GOTCHA (pack.t, re-measured s321): `--timeout 150` is NOT enough any
-  more** — pack.t takes ~156 s at `--jobs 1` and TIMEOUTs at `--jobs 8`,
-  so use `--timeout 400` when its rows matter.  And note what that hides:
-  **pack.t has NO rows in the blessed baseline at all**, precisely because
-  it keeps timing out, so a normal sweep is *silent* about pack.t
-  regressions (its ~89 failing rows are neither blessed nor "new").  Task
-  #176.  See `docs/sweep-bug-catalog.md`
+  **pack.t and the TIMEOUT retry (#176, s322).**  A file that TIMEOUTs
+  contributes NO rows, so `sweep-diff.pl` can only report its baseline
+  failures as *unverified* — a regression inside a timing-out file is
+  invisible, and the headline "0 new" says nothing about it.  pack.t is
+  merely SLOWER than the timeout (~166 s), not hung, so the sweep now
+  **retries a TIMEOUT once at 3× the timeout, at the end of the queue**
+  (`--no-retry` disables); no operator has to remember `--timeout 400`.
+  Measured s322: pack.t completes at 5636 pass / 89 fail and its failures are
+  **identical to the blessed baseline** — 0 new, 0 fixed.
+  **CORRECTION (s322): the earlier claim here that "pack.t has NO rows in the
+  blessed baseline" was FALSE** — `docs/fail-baseline.tsv` has always carried
+  its 58 pack.t rows.  The claim came from `grep`ping that file, which
+  contains NUL bytes: grep then treats it as binary and prints nothing.  Use
+  `grep -a`, or perl, on any `.tsv` under `.faillog/` or `docs/`.
+  See `docs/sweep-bug-catalog.md`
 - v2 pipeline census: 111 files v2-native / 0 gated to v1 — E1 complete
   (`perl tools/v2-census.pl` for the live numbers)
 

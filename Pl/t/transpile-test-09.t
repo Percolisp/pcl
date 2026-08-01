@@ -137,4 +137,51 @@ $s = "a";  $s =~ s/(a)/$h{$1} . "!"/e; print "13 e-mode=$s\n";
 $s = "a";  $s =~ s/a/plain text/;  print "14 no-interp=$s\n";
 ');
 
+# Task #181: the `(?^flags:…)` wrapper — the form a qr// stringifies as, and
+# the form that carries its flags into a bigger pattern.  THREE defects, one
+# family:
+#   1. /xx printed as `(?^x:` — one x — so an interpolated /xx sub-pattern
+#      silently reverted to /x and class whitespace came back.
+#   2. `qr/$re/` DOUBLE-WRAPPED: `(?^:(?:abcdef))` where perl gives
+#      `(?^:abcdef)`.  In perl a pattern that is exactly one interpolated qr IS
+#      that qr — it keeps the inner flags and IGNORES the outer modifiers
+#      (`qr/$re/i` does not become case-insensitive).
+#   3. The variable holding a qr was FROZEN TO TEXT by the raw-string verdict
+#      whenever its uses were all stringy (`print "$re"` plus `qr/$re/`), so by
+#      the time the qr reached another regex it was already a string and rule 2
+#      could not see it.  That is the root of 1 and 2 both: the annotator now
+#      refuses to freeze a write whose RHS is an object (`write-object`).
+#
+# INVERSE GUARDS in the same snippet: a qr NOT interpolated anywhere must still
+# print its own flags; a qr used as PART of a larger pattern must still embed
+# (that is where a wrapper is correct, and perl embeds `(?^:` verbatim); the
+# inner flags must still apply through the embedding (`x$i` matches "xABC" only
+# under the inner /i); and a plain STRING interpolated with an outer /i must
+# still take the /i — the lone-qr rule must not leak to strings.
+test_transpile("qr wrapper: /xx keeps both x's, a lone interpolated qr is itself (#181)", '
+my $re = qr/abcdef/;
+my $i  = qr/abc/i;
+my $x  = qr/[a b]/xx;
+my $plain = "abc";
+print "1 plain-qr=$re\n";
+print "2 lone-interp=${\ qr/$re/}\n";
+print "3 lone-interp-i=${\ qr/$i/}\n";
+print "4 xx-str=$x\n";
+print "5 lone-interp-xx=${\ qr/$x/}\n";
+print "6 embedded=${\ qr/x$re/}\n";
+print "7 outer-i-ignored=", ("ABC" =~ qr/$i/ ? 1 : 0), " (want 1)\n";
+print "8 outer-i-ignored2=", ("ABC" =~ /$re/i ? 1 : 0), " (want 0)\n";
+print "9 embedded-inner-i=", ("xABC" =~ /x$i/ ? 1 : 0), " (want 1)\n";
+print "10 string-takes-i=", ("ABC" =~ /$plain/i ? 1 : 0), " (want 1)\n";
+my $xcopy = qr/$x/;
+print "11 xx-roundtrip=", (" " =~ /$xcopy/ ? 1 : 0), " (want 0)\n";
+print "12 xx-still-matches=", ("a" =~ /$xcopy/ ? 1 : 0), " (want 1)\n";
+print "13 ref=", ref($re), "\n";
+my @g; my $t = "abc"; my $w = qr/(\w)/;
+while ($t =~ /$w/g) { push @g, $1 }
+print "14 outer-g-survives=@g\n";
+my $r = "aXa"; (my $copy = $r) =~ s/$w/-/g;
+print "15 s-with-qr-g=$copy\n";
+');
+
 done_testing();
