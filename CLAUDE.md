@@ -339,6 +339,7 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2b. `docs/opus5-review-requests-s318.md` - **OPEN asks awaiting Fable** (s318): the box carries no referent-kind/tied/read-only state for AGGREGATES — one cause behind #154's residue, #155 and #159; plus the #149 per-row rule, #158's fix layer, #156, and the suite-tsv regeneration question
 3. `CODEGEN_DESIGN.md` - Code generation design notes
 
 Not relevant now:

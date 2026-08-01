@@ -141,6 +141,15 @@ Original scope, kept for the record:
 
 ## 3b. Review requests: ANSWERED (s317)
 
+**NEW, OPEN (s318): `docs/opus5-review-requests-s318.md`** — the asks raised
+while working this W1 queue.  Headline: three separate findings (#154's two
+un-fixable shapes, #155 aggregate tie, #159 read-only aggregates) turn out to
+be ONE missing thing — aggregates carry no state, so nothing can record
+referent-kind / tied / read-only.  §1 asks for the data-model call, §2 for
+the #159 fix among three costed options.  Also: confirm the #149 per-ROW
+reading (§3), the #158 fix layer (§4), whether #156 is worth a session (§5),
+and whether regenerating the now-incomplete suite tsv gates R1 (§6).
+
 Every ask in `docs/opus5-review-requests-s316v.md` is ruled on in
 **`docs/fable-answers-s316v.md`**; the one-liners are indexed in
 `docs/DECIDED.md`.  Highlights: #142 bless route APPROVED (W1); #141
