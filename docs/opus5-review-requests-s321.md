@@ -91,6 +91,17 @@ for the *reason text* (it is the release artifact's justification) but no for
 the *status* — a file whose failures are all explained stays XDIFF even if the
 row numbers in the prose were off by two.
 
+**MEASURED while S2 ran — the blast radius is nearly nil.**  Across the nine
+dirs measured so far, **28 files renumber their TAP**, so the old join was
+mis-attributing rows in every one of them.  But of those 28, only **four** are
+registered at all (`mro/package_aliases.t`, `mro/package_aliases_utf8.t`,
+`re/pat_re_eval.t`, `op/do.t`), and only **one** — `op/do.t` — carries per-row
+claims.  That one I re-verified and rewrote this session.  The other three have
+whole-file reasons, which renumbering cannot invalidate.  So unless the op
+re-run turns up more, the answer to this ask is "nothing to correct", and the
+question is only about the rule for next time.  (The 28 figure is still worth
+knowing on its own: it is how many files were feeding misleading triage input.)
+
 ---
 
 ## 3. Cheap rule change: should a registration REASON be required to name its rows?
