@@ -656,4 +656,27 @@ t("right kinds",       sub { my $r={a=>1}; my $s=[7,8]; my $c=sub{"c"}; my $x=5;
                              ($r->{a}, $s->[1], $c->(), $$sr) });
 ');
 
+# localtime must honour $ENV{TZ} AT THE CALL, like perl (t/op/time.t t7).
+# PCL used to resolve the zone once, from the environment the image started in
+# (SBCL's decode-universal-time), so setting $ENV{TZ} did nothing at all and any
+# TZ-setting program got silently wrong times.  Now routed through libc
+# tzset()+localtime_r(), which is what perl does — so named zones and their DST
+# rules work too, not just fixed offsets.  Checks list AND scalar context, and
+# that gmtime (TZ-independent) is unaffected.
+test_transpile("localtime honours \$ENV{TZ}: offsets, named zones, DST, gmtime", '
+my $t = 1000000000;
+for my $tz ("GMT-5", "GMT+5", "America/New_York", "UTC") {
+  $ENV{TZ} = $tz;
+  my @l = localtime($t);
+  printf "%-18s %02d:%02d:%02d mday=%d mon=%d yr=%d wday=%d yday=%d dst=%d | %s\n",
+         $tz, $l[2], $l[1], $l[0], $l[3], $l[4], $l[5], $l[6], $l[7], $l[8],
+         scalar(localtime($t));
+}
+$ENV{TZ} = "America/New_York";
+print "gmtime=", scalar(gmtime($t)), "\n";
+delete $ENV{TZ};
+my @n = localtime($t);
+print "no-tz-fields=", scalar(@n), "\n";
+');
+
 done_testing();

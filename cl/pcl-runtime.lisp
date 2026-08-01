@@ -10190,6 +10190,50 @@ buffer's fill-pointer; everything else falls back to file-length."
                           "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
           day hour minute sec year))
 
+;;; localtime must honour $ENV{TZ} AT THE CALL, exactly as perl does — a script
+;;; that sets $ENV{TZ} and then calls localtime gets that zone.  SBCL's
+;;; DECODE-UNIVERSAL-TIME resolves the zone once, from the environment the image
+;;; started in, so `$ENV{TZ} = "GMT+5"` had no effect at all (t/op/time.t t7,
+;;; and silently wrong times for any TZ-setting program).  Delegating to libc —
+;;; tzset() + localtime_r() — is what perl itself does, so the whole POSIX TZ
+;;; language comes for free: fixed offsets, named zones and their DST rules.
+;;; Verified against perl for GMT-5, GMT+5, America/New_York (isdst=1) and UTC.
+;;;
+;;; The struct MUST carry glibc's trailing tm_gmtoff/tm_zone: localtime_r writes
+;;; them, and a 9-int declaration would let it scribble past our allocation.
+;;; PCL's %ENV writes go through sb-posix:setenv, so libc sees the new TZ.
+(sb-alien:define-alien-type nil
+    (sb-alien:struct %pcl-c-tm
+                     (sec sb-alien:int) (min sb-alien:int) (hour sb-alien:int)
+                     (mday sb-alien:int) (mon sb-alien:int) (year sb-alien:int)
+                     (wday sb-alien:int) (yday sb-alien:int) (isdst sb-alien:int)
+                     (gmtoff sb-alien:long) (zone (sb-alien:* sb-alien:char))))
+
+(defun %p-libc-localtime (unix-time)
+  "Broken-down LOCAL time for UNIX-TIME via libc, honouring $ENV{TZ}.
+   Returns (values sec min hour mday perl-mon perl-year wday yday isdst) with
+   perl's conventions (mon 0-11, year since 1900, wday 0=Sunday)."
+  (sb-alien:alien-funcall
+   (sb-alien:extern-alien "tzset" (function sb-alien:void)))
+  (sb-alien:with-alien ((tm (sb-alien:struct %pcl-c-tm))
+                        (clock sb-alien:long))
+    (setf clock unix-time)
+    (let ((res (sb-alien:alien-funcall
+                (sb-alien:extern-alien "localtime_r"
+                                       (function (sb-alien:* (sb-alien:struct %pcl-c-tm))
+                                                 (sb-alien:* sb-alien:long)
+                                                 (sb-alien:* (sb-alien:struct %pcl-c-tm))))
+                (sb-alien:addr clock) (sb-alien:addr tm))))
+      ;; CLAUDE.md rule 12: a NULL return is a real failure, not a default.
+      (when (sb-alien:null-alien res)
+        (error "localtime_r failed for ~A (TZ=~A)"
+               unix-time (or (sb-posix:getenv "TZ") "unset")))
+      (values (sb-alien:slot tm 'sec) (sb-alien:slot tm 'min)
+              (sb-alien:slot tm 'hour) (sb-alien:slot tm 'mday)
+              (sb-alien:slot tm 'mon) (sb-alien:slot tm 'year)
+              (sb-alien:slot tm 'wday) (sb-alien:slot tm 'yday)
+              (if (plusp (sb-alien:slot tm 'isdst)) 1 0)))))
+
 (defun p-localtime (&optional time)
   "Perl localtime - convert time to local time components.
    In list context returns (sec min hour mday mon year wday yday isdst).
@@ -10206,22 +10250,17 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((< unix-time +gmtime-min+)
        (p-warn (make-p-box (format nil "localtime(~A) too small~%localtime(~A) failed" unix-time unix-time)))
        *p-undef*)
-      ;; Post-1900: use decode-universal-time (handles DST / TZ env vars)
+      ;; Post-1900: libc, so $ENV{TZ} is honoured at the call (see
+      ;; %p-libc-localtime).  wday/yday/isdst come from libc rather than being
+      ;; recomputed, which is also how the DST flag becomes correct.
       ((>= unix-time (- +unix-epoch-offset+))
-       (let ((universal (+ unix-time +unix-epoch-offset+)))
-         (multiple-value-bind (sec min hour day month year wday dst-p tz)
-             (decode-universal-time universal)
-           (declare (ignore tz))
-           (let ((perl-wday (mod (1+ wday) 7))
-                 (perl-year (- year 1900))
-                 (perl-mon  (1- month))
-                 (yday (- (floor (encode-universal-time 0 0 0 day month year) 86400)
-                          (floor (encode-universal-time 0 0 0 1 1 year) 86400))))
-             (if (eq *wantarray* t)
-                 (make-array 9 :initial-contents
-                             (list sec min hour day perl-mon perl-year perl-wday yday (if dst-p 1 0))
-                             :adjustable t :fill-pointer t)
-                 (%pcl-format-time perl-wday perl-mon day hour min sec year))))))
+       (multiple-value-bind (sec min hour day perl-mon perl-year wday yday isdst)
+           (%p-libc-localtime unix-time)
+         (if (eq *wantarray* t)
+             (make-array 9 :initial-contents
+                         (list sec min hour day perl-mon perl-year wday yday isdst)
+                         :adjustable t :fill-pointer t)
+             (%pcl-format-time wday perl-mon day hour min sec (+ perl-year 1900)))))
       ;; Pre-1900: use current TZ offset (no DST awareness for extreme dates)
       (t
        (let* ((tz-secs (* -3600 (nth-value 8 (decode-universal-time (get-universal-time)))))
