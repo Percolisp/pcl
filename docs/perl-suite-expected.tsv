@@ -5,6 +5,12 @@
 # file starts matching perl is flagged STALE and fails the run (same
 # philosophy as cl/skip-registry.lisp — see docs/test-skip-registry.md).
 # Do NOT add rows for unexplained crashes: those stay triage targets.
+#
+# REGISTRATION BAR (confirmed s317, fable-answers-s316v.md §6f): a file gets
+# a row ONLY when EVERY failing test in it is explained by a blessed
+# not-supported.md section — all-or-nothing.  A partially-explained file
+# stays UNEXPLAINED on purpose: it still contains a fix target, and a row
+# here would silence it.  Track the explained subset in the task instead.
 mro/basic_01_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_c3_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_dfs.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)

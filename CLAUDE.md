@@ -10,6 +10,26 @@ This file provides guidance to Claude Code when working with this repository.
 
 **Important:** This is a Perl project. Use Perl (not Python/Ruby/etc.) for any scripting, one-liners, or helper scripts. This includes searching log files, processing text, and any task where a Perl one-liner via Bash would work — don't use subagents for what Perl can do directly.
 
+## Before You Triage, Probe, or Decide — the lookup order (MANDATORY)
+
+Most questions in this project are already settled; the expensive failure
+mode is re-deriving (or contradicting) a settled answer. Before probing a
+failure or designing a fix, in this order:
+
+1. **`grep docs/DECIDED.md`** for your keywords — the one-grep index of
+   settled questions, each line pointing at the authoritative doc.
+2. **`grep docs/not-supported.md`** — deliberate non-support is blessed
+   there; a failing test may already be explained.
+3. **`docs/test-debugging-runbook.md`** — the FIX-vs-REGISTER decision tree
+   for perl-tests/suite failures.
+4. Only then probe (minimal scratch file, perl vs `./runpl`).
+
+And symmetrically, when work SETTLES a question: add a one-line pointer to
+`docs/DECIDED.md` in the same commit; put load-bearing semantic decisions
+in `docs/ir-spec.md` (a code comment may point at the spec, but must never
+be the only copy); record failed attempts and what killed them in the task,
+so the task says what NOT to retry.
+
 ## Design Principles
 
 1. **CPAN Compatibility**: Match Perl semantics exactly. The goal is to run real CPAN modules.
@@ -94,6 +114,18 @@ This file provides guidance to Claude Code when working with this repository.
     - **Smell test (hard stop):** if your diff adds the *same* logic in two
       places, or copies an existing branch with one token changed, stop and find
       the shared upstream point instead.
+
+12. **A missing case DIES — never falls through to a default.** A runtime
+    `cond`/`case`/dispatch over a closed set of legal values (bit widths,
+    format letters, type tags, …) ends in an explicit error naming the
+    unhandled value — never a `(t 0)`/`(t nil)` arm that swallows it. The
+    archetype: `p-vec`'s width dispatch listed 64 as legal in its docstring
+    but had no 64 branch, so `vec($x,1,64) = $q` silently wrote *nothing*
+    (all-zero output that looked plausible). Silent-wrong is the worst
+    failure mode in this codebase — same family as the #138 silently
+    deleted statement. This is the runtime's version of the "Parser2 TODO:"
+    discipline: anything not fully handled must say so loudly. (Adopted
+    s317; retroactive audit is task #152.)
 
 ## Quick Reference
 
@@ -304,7 +336,9 @@ Example: `*wantarray*` must be in the `:export` list, otherwise `(let ((*wantarr
 ## Key Files to Read
 
 When resuming work:
+0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
+2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
 3. `CODEGEN_DESIGN.md` - Code generation design notes
 
 Not relevant now:
@@ -314,6 +348,7 @@ Not relevant now:
 
 
 ### Semantic Deep-Dives (read before touching these areas)
+- `docs/pexpr-term-parsing-review.md` - **READ BEFORE TOUCHING PExpr.pm's operand/term machinery** (the `$end_pars` region, named-unary operands, postfix `->` chains, ~lines 2600-3700). The region is a maze of hand-derived boundary conditions; three s316v attempts to add a rule there all failed in ways probes did not catch (task #142 records them). The fix for that region is Option B (`_reduce_term`, task #153) — do not add guards there.
 - `docs/v2-target-architecture.md` - **THE TARGET SHAPE of the v2 compiler** (s316t): the pipeline as data transformations, the Stmt-classifier/Facts/CLForm data structures, the pass plug-in contract for optimizations, module map, and the calibrated cost to v2-final. Read this FIRST when joining the compiler work; the E5 steps in `docs/v2-endgame-plan.md` converge on it.
 - `docs/v2-code-review.md` - **The s316t design review** that produced the target: the token-splitter bug family (three precedence tables + probe-confirmed silent-drop), the seam-state inventory, the E4.1 reachability re-scope. Gap analysis behind the architecture doc.
 - `docs/ir-spec.md` - **THE TRANSLATOR'S MANUAL for the generated CL** (s277, normative): data model (box/undef-vs-nil/aggregates/refs), coercion + truthiness tables, the *wantarray* context protocol, p-sub calling convention, control flow + non-local exits, OO dispatch (C3, string method names), magic globals, load model, op-family rules. Read this to translate PCL output to another environment; runtime is the reference where the doc is silent.

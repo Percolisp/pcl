@@ -327,6 +327,7 @@ sub run_one {
   if ($status eq 'DIFF' || $status eq 'TIMEOUT') {
     my ($pm, $cm) = (tap_map($perl), tap_map($pcl));
     if (open my $lf, '>', "$faillog/$safe.fails.tsv") {
+      print $lf "# file  test#  perl_result  pcl_result  description   [description = PERL's test line, values interpolated by perl — not PCL's output]\n";
       if (!%$cm) {
         print $lf join("\t", $rel, 0, 'ok*', '(no TAP)',
                        "PCL produced no TAP output" . ($sig ? " ($sig)" : "")), "\n";
@@ -438,6 +439,9 @@ print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.f
 
 if ($tsv_file) {
   open my $tf, '>', $tsv_file or die "write $tsv_file: $!\n";
+  # Legend at the point of use — this has been misread twice (s316v).
+  print $tf "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
+  print $tf "# NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)\n";
   print $tf join("\t", @{ $results{$_} }), "\n" for sort keys %results;
   close $tf;
   print "wrote $tsv_file\n";

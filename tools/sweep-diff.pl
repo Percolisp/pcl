@@ -50,6 +50,7 @@ sub load {
         while (my $line = <$fh>) {
             chomp $line;
             next unless length $line;
+            next if $line =~ /^#/;   # legend/comment lines
             my ($file, $num, $desc, $got, $exp) = split /\t/, $line, 5;
             next unless defined $desc;
             $rec{"$file\t$desc"} = { file => $file, desc => $desc,

@@ -1,3 +1,5 @@
+# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]
+# NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)
 base/lex.t	120	0	20	1	DIFF	undef-fn:main::pl-FOO
 base/pat.t	2	0	2	0	OK	
 base/rs.t	41	0	26	15	DIFF	

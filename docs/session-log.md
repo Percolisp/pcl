@@ -4,6 +4,50 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 317 (2026-08-01, Fable) — every s316v review ask ruled on; DECIDED.md + lookup order; Opus runway re-planned to ~12–20 sessions with one human gate.
+
+- **Root cause of the s316v knowledge misses named**: Opus 5 follows
+  checklists faithfully (quadruple every commit, all 10 policy calls
+  correctly deferred) — the failures were knowledge OFF its path (code
+  comments, tool source, unlinked docs), not skipped reading.  Fix is
+  structural, not "read more docs".
+- **`docs/DECIDED.md` created** — one-grep index of settled questions,
+  hand-curated, one line + pointer each; maintenance rule in its header
+  (settle a question → add a line, same commit).
+- **CLAUDE.md**: mandatory lookup order near the top (DECIDED.md →
+  not-supported.md → runbook → only then probe); **new rule 12** (a
+  missing case in a closed-set dispatch DIES, never defaults — vec-64 is
+  the archetype); `pexpr-term-parsing-review.md` added to the deep-dive
+  list with a hard "do not add guards in the $end_pars region" warning.
+- **Point-of-use legends**: `tools/run-perl-suite.pl` now writes the
+  P=perl/C=PCL + NOTAP legend into the tsv it emits and a
+  description-is-perl's-text legend into each `.fails.tsv`; checked-in
+  `docs/perl-suite-run.tsv` got the legend; `perl-suite-expected.tsv`
+  header now states the all-or-nothing registration bar;
+  `sweep-diff.pl` skips `#` lines.
+- **`docs/fable-answers-s316v.md`** — rulings on all 15 asks.  Decided:
+  #142 bless route APPROVED (W1, probe battery = the three attempt-killers);
+  #141 classifier at the p-flipflop selection point; #146 byte-semantics
+  default; #148 full pack mode model with rule-12 loud-die fallback;
+  #147 + #138-residual BLOCKED on new task **#153 (E5.0 `_reduce_term`,
+  Fable-led steps 1–2)** — the "one place" 2-for-2 evidence pulled Option
+  B's reducer forward as E5.0; §6d error-text blanket category approved
+  (mechanizes the 2026-07-28 user ruling) → #149; §6f XDIFF bar
+  confirmed; §6h shape-not-bytes rule confirmed (already in ir-spec
+  §2.5); §6i copied-file skip dropped → #150.  **Left for the user
+  (ledger §1b in the exec plan): U1 R1-ship call, U2 %n
+  (recommend bless), U3 DESTROY-for-R2 sizing (recommend sizing doc,
+  no code), U4 #139, U5 #132.**
+- **Exec plan updated** (`v2-opus5-execution-plan.md`): §1b open-decision
+  ledger; W1 queue ordered (#142 → Tie shims → #151 NOTAP drift → #150
+  part 1 → #149 → near-green families); new §5b W2.5 decided backlog
+  (#150p2, #146, #141, #148, #152, #144); E5.0 insertion rules; runway
+  estimate ~12–20 sessions with U1 the only gate.
+- New tasks #149–#153; decisions appended to #141/#142/#143/#146/#147/#148
+  (originals' failed-attempt records preserved).
+- No code-emission changes this session (tools + docs only): no gen bump,
+  no artifact regen needed.  Tools syntax-checked.
+
 ## Session 316v addendum 6 (2026-08-01, Opus 5) — op/64bitint.t 425/425 OK: vec() 64-bit was broken BOTH ways.
 
 - **`vec` with BITS=64 (34e5715), t/op/64bitint.t t80/t81 → file OK.**  Both

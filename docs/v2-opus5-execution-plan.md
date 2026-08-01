@@ -21,19 +21,40 @@ baseline.**
 
 - Marking anything not-supported / adding a skip-registry row / weakening
   or simplifying ANY test (CLAUDE.md rules 4, 5; the registry cites a
-  blessed `docs/not-supported.md` entry or it doesn't exist).
-- Task #139 (:crlf layer model) and #132 (source-echo comments): design
-  decisions, user's call — do not start them.
+  blessed `docs/not-supported.md` entry or it doesn't exist).  Exception:
+  rows/entries a Fable answer in `fable-answers-s316v.md` explicitly
+  approves (e.g. the #149 error-text category) — those are pre-authorized.
 - Anything that adds complexity or slows generated code: flag it in the
   session summary (user directive s308).
-- Starting E4.1 (§4) before the user confirms R1 shipped.
+- Starting E4.1 (§5) before the user confirms R1 shipped.
 - `eval $str` must always work (hard requirement) — nothing may gate it.
+- Before writing ANY question up as open: run the CLAUDE.md lookup order
+  (grep `docs/DECIDED.md`, then `docs/not-supported.md`).  Most questions
+  are settled; the s316v review doc's §7 documents what re-deriving them
+  costs.
+
+## 1b. The open-decision ledger — ONLY these need a human; everything
+##     else in this plan is decided and executable
+
+| id | decision | state |
+|---|---|---|
+| U1 | R1 has shipped (gates E4.1 and all post-R1 work) | user call, expected ~2026-08-03 |
+| U2 | `printf %n` (#143): implement vs bless | user; Fable recommends bless |
+| U3 | deterministic DESTROY for R2 (§6c): commission sizing doc post-R1? | user; Fable recommends sizing doc, no code |
+| U4 | #139 :crlf layer model | user-held, do not start |
+| U5 | #132 source-echo comments | user-held, do not start |
+
+When you hit one of these, note it and move to the next queue item — do
+NOT stall the session on it.  Everything else that looks like a decision
+has an answer in `docs/fable-answers-s316v.md` (s317) or `docs/DECIDED.md`.
 
 ## 2. Per-session checklist (mechanical — run it in order)
 
 1. **Sync state**: read the STATE line in memory + the newest
    `docs/session-log.md` entry.  `git log --oneline -5`.  Task list =
-   the work queue; this doc = the order.
+   the work queue; this doc = the order.  Before probing or designing
+   anything: the CLAUDE.md lookup order (`docs/DECIDED.md`, then
+   `docs/not-supported.md`) — one grep each.
 2. **Baseline before touching anything**: for the shape you're about to
    change, record what HEAD emits (`./pl2cl < probe`) and what perl does
    (`perl probe`).  For divergences: **v1 is still the oracle until
@@ -118,30 +139,44 @@ Original scope, kept for the record:
 5. Battery in -07 (decl comma, decl or-tail, param exact-arity incl. the
    g() shape, state-init comma).  Full checklist §2.  Est: 1 session.
 
-## 3b. Open review requests back to Fable
+## 3b. Review requests: ANSWERED (s317)
 
-**`docs/opus5-review-requests-s316v.md`** — four items raised from execution,
-each with the evidence: (1) bareword class names / task #142, where three
-attempts failed and the failure shape points at
-`pexpr-term-parsing-review.md` Option B — asks whether to take the
-`bless`-class-name route now or hold; (2) task #141, where the flip-flop
-constant-operand classifier should live; (3) a priority call on E5.5 given
-that both "one place" consolidations so far found live bugs 2-for-2;
-(4) task #138's residual (ambiguous comma in a `state` init).
+Every ask in `docs/opus5-review-requests-s316v.md` is ruled on in
+**`docs/fable-answers-s316v.md`**; the one-liners are indexed in
+`docs/DECIDED.md`.  Highlights: #142 bless route APPROVED (W1); #141
+classifier placement decided (W2.5); the "one place" evidence created
+E5.0 (task #153, the `_reduce_term` reducer, Fable-led start); #147 and
+the #138 residual are BLOCKED on #153 — do not attempt them in place.
+Only the §1b ledger items still need a human.
 
-## 4. W1 — the R1 window (until the user ships)
+## 4. W1 — the R1 window (until the user says R1 shipped)
 
-- Stay on #25 support: if the user's release checks surface divergences,
-  they preempt everything.  Triage per `docs/test-debugging-runbook.md`.
-- Idle capacity goes to more suite families from
-  `docs/perl-suite-run.tsv` (the s310–s316t pattern: pick near-green
-  DIFF files, fix the family at the right layer).  Good next candidates:
-  the remaining `undef-fn` rows (`Tie::StdHash`/`Tie::StdScalar` shims →
-  op/avhv.t + op/warn.t; `Internals::getcwd` → io/getcwd.t).  Shim
-  layer, not runtime (CLAUDE.md 9a).
-- No structural work in this window.
+Order within the window; #25 support preempts everything (if the user's
+release checks surface divergences, triage those first, per
+`docs/test-debugging-runbook.md`).
 
-## 5. W2 — E4.1, only after R1 ships (1–2 sessions)
+1. **#142 — tie/tied/untie bareword class via the bless mechanism**
+   (APPROVED, see the task for the required probe battery: `Foo::init`,
+   `Count::DATA->getline`, quoted-vs-bareword).  Unblocks op/avhv.t +
+   op/warn.t.
+2. **Tie::StdHash / Tie::StdScalar shims** (`lib/Tie/…`) if #142 alone
+   doesn't clear those files; `Internals::getcwd` → io/getcwd.t.  Shim
+   layer, not runtime (CLAUDE.md 9a).
+3. **#151 — NOTAP drift**: find out why perl produces no TAP for
+   io/defout.t / op/localref.t / uni/bless.t under the runner; refresh
+   the rows.  Do this BEFORE picking new near-green targets from the
+   snapshot — the near-green list is only as real as its rows.
+4. **#150 part 1** — drop the copied-file skip in
+   `tools/run-perl-suite.pl` (tooling only; part 2 re-sync is post-R1).
+5. **#149 — error-text skip category** (pre-authorized, see task).
+6. **More near-green DIFF families** from the refreshed
+   `docs/perl-suite-run.tsv` (the s310–s316t pattern: fix the family at
+   the right layer).
+7. No structural work in this window.  #66 (forward-decl scan false
+   positives) is W1-eligible if the queue empties: it is a contained,
+   probe-verifiable fix.
+
+## 5. W2 — E4.1, only after R1 ships (U1) (1–2 sessions)
 
 Re-scoped in the plan (E4 section) and review §4.  Order:
 1. Port bundle mode off `Pl::Parser->parse_file` (`pl2cl:283`) — the one
@@ -162,11 +197,38 @@ Re-scoped in the plan (E4 section) and review §4.  Order:
    scoreboard vs `docs/cpan-module-log.md`.  Re-bless nothing without
    noting it in the ledger.
 
+## 5b. W2.5 — the decided post-R1 backlog (order within is free; each
+##     item is small enough to interleave with E5 steps; ~3–5 sessions)
+
+All decided s317 (`fable-answers-s316v.md`); each task carries its spec:
+
+- **#150 part 2**: re-sync the four drifted `perl-tests/` copies
+  (chop/dor/not/quotemeta) + re-bless.
+- **#146 quotemeta**: byte-semantics default, Unicode under
+  utf8/unicode_strings, transpile-time selection; fix the
+  `not-supported.md` Unicode sentence in the same commit.
+- **#141 flip-flop**: per-operand constant classifier at the existing
+  `p-flipflop*` selection point.
+- **#148 pack U modes**: full mode model; `cl/pack-impl.pl` under real
+  perl is the dev oracle; `tools/rebuild-pack` same commit; rule-12
+  loud-die for anything left out.
+- **#152 rule-12 audit**: sweep runtime dispatch defaults → explicit
+  errors.
+- **#144 `\$!` magic-cell box** (the remaining decided suite blocker for
+  op/bless.t + uni/bless.t; box-magic hook per
+  `reference_box_magic_hook`).
+
 ## 6. W3+ — E5 in plan order (specs in the plan's E5 section)
 
-Execute strictly in order E5.1 → E5.5; each step lands whole (green
-quadruple) before the next starts.  Summary of what each means
-operationally — details and acceptance in `docs/v2-endgame-plan.md` §E5:
+Execute in order E5.1 → E5.5; each step lands whole (green quadruple)
+before the next starts.  **E5.0 (task #153, the `_reduce_term`
+non-mutating term reducer) is a separate change set: Fable lands steps
+1–2 (hot path + indirect-object risk); Opus takes the mechanical
+migration steps 3–5 afterward.**  E5.0 may run before, between, or
+parallel to E5.1/E5.2 sessions but MUST land before E5.5; it unblocks
+#147, the #138 state-init residual, and the general bareword rule.
+Summary of what each step means operationally — details and acceptance
+in `docs/v2-endgame-plan.md` §E5:
 
 - **E5.1 SeamSession (1–2)**: one guard object replacing the two
   bucket-dance copies (Parser2 5826-5851, 6303-6363) and the eight
@@ -194,11 +256,20 @@ operationally — details and acceptance in `docs/v2-endgame-plan.md` §E5:
   with VarAnnotator; one context-constant set; Parser2 phase file-split;
   rewrite `CODEGEN_DESIGN.md`; ir-spec to single-dialect.
 
-## 7. Estimates and cadence
+## 7. Estimates and cadence — the runway
 
-W0 1; W2 1–2; E5 9–17; per the architecture doc the full v2-final is
-~16–29 post-R1.  Calibration: the burn-down families have historically
-run 2–3 classes/session when the checklist is followed and ~0 when a
-regression escapes to the next session — the quadruple is cheaper than
-any shortcut.  When a step stalls twice on the same cause, stop and
-write the failure up for Fable review instead of pushing a third time.
+W1 ~2–3 sessions; then the only gate is U1 (user says R1 shipped); then
+W2 (E4.1) 1–2 + W2.5 ~3–5 + E5.1/E5.2 2–4 + E5.3 4–8 — all decided and
+specced.  That is **roughly 12–20 sessions of executable work with
+exactly one human gate (U1) in the middle**; the next genuinely open
+decisions are the §1b ledger (U2/U3 can be answered any time without
+blocking the queue) and the E5.0 handback points (Fable lands the
+reducer, Opus continues).  Per the architecture doc the full v2-final
+remains ~16–29 post-R1.
+
+Calibration: the burn-down families have historically run 2–3
+classes/session when the checklist is followed and ~0 when a regression
+escapes to the next session — the quadruple is cheaper than any
+shortcut.  When a step stalls twice on the same cause, stop and write
+the failure up for Fable review instead of pushing a third time — #142's
+three recorded attempts are the model of what that write-up buys.
