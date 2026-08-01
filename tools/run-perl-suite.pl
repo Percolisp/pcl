@@ -2,24 +2,25 @@
 
 # run-perl-suite.pl — run Perl's own core test files (t/base, t/cmd, t/comp,
 # t/mro, t/class, …) through PCL and compare TAP results to real perl, with a
-# crash signature.  These are the distribution tests that were NOT copied into
-# PCL's perl-tests/ sweep corpus (which is almost entirely t/op/), so this is
-# the companion sweep for everything the sweep doesn't cover (task #25 / R1
-# gate; results catalogue: docs/perl-test-suite-survey.md — UPDATE that doc
+# crash signature.  The t/ ORIGINALS are authoritative and ALL of them run
+# here, including the ones PCL also keeps a copy of in perl-tests/ (task #150
+# part 1, s318): a passing corpus copy must never shadow a failing real file —
+# chop/dor/not/quotemeta read as fully passing in the sweep while their t/op
+# originals had 2-5 failures each.  Overlap with the sweep is harmless
+# duplication; a missing t/ row is a hole in the release signal.  (task #25 /
+# R1 gate; results catalogue: docs/perl-test-suite-survey.md — UPDATE that doc
 # when a row changes so we don't re-investigate the same files).
 #
 # Usage:
 #   tools/run-perl-suite.pl base/rs.t comp/our.t   # specific files (rel to t/)
 #   tools/run-perl-suite.pl --dir comp             # all runnable files in t/<dir>
-#   tools/run-perl-suite.pl --all                  # every default dir, NOT-copied files only
+#   tools/run-perl-suite.pl --all                  # every runnable file in the default dirs
 #   tools/run-perl-suite.pl                        # == --all
 #
 # Options:
 #   --tdir PATH        perl build t/ tree (default: the 5.40.3 build below)
-#   --dir D            add one subdir (repeatable); implies the copied-file filter
+#   --dir D            add one subdir (repeatable)
 #   --all              scan the default dir set (see @DEFAULT_DIRS)
-#   --include-copied   with --all/--dir: also run files whose basename exists
-#                      in perl-tests/ (default: skip them — the sweep owns those)
 #   --jobs N           parallel workers (default 8)
 #   --timeout N        per-file SBCL timeout seconds (default 90)
 #   --no-core          skip the saved-core fast path (source-load the runtime)
@@ -61,8 +62,8 @@
 # core, mirroring the sweep's `--load` of it.
 #
 # Still skipped as need-harness: files that fiddle @INC in BEGIN — they pull
-# build-tree modules from ../lib that PCL cannot load.  Dir scans report how
-# many files each filter dropped, so coverage is visible.
+# build-tree modules from ../lib that PCL cannot load.  That is now the ONLY
+# filter, and dir scans report its count, so coverage is visible.
 #
 # Output columns: P:perl_ok/notok  C:pcl_ok/notok  STATUS  [crash-signature]
 # STATUS: OK (counts match) | DIFF | TRANSPILE | TIMEOUT | NOTAP (perl itself
@@ -100,7 +101,7 @@ my $testlib = "$root/cl/pcl-test.lisp";
 my @DEFAULT_DIRS = qw(base cmd comp opbasic op mro class run uni re io);
 
 my $tdir = "/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t";
-my ($all, $include_copied, $no_core, $tsv_file);
+my ($all, $no_core, $tsv_file);
 my $jobs = 8;
 my $timeout = 90;
 my $faillog = "$root/.suitelog";
@@ -111,7 +112,6 @@ while (@ARGV) {
   if    ($a eq '--tdir')           { $tdir = shift @ARGV }
   elsif ($a eq '--dir')            { push @dirs, shift @ARGV }
   elsif ($a eq '--all')            { $all = 1 }
-  elsif ($a eq '--include-copied') { $include_copied = 1 }
   elsif ($a eq '--jobs')           { $jobs = shift @ARGV }
   elsif ($a eq '--timeout')        { $timeout = shift @ARGV }
   elsif ($a eq '--no-core')        { $no_core = 1 }
@@ -136,36 +136,23 @@ if (open my $ef, '<', $expected_tsv) {
 $all = 1 if !@files && !@dirs;
 push @dirs, @DEFAULT_DIRS if $all;
 
-# Files already in the sweep corpus — dir scans skip them by default.  Keyed
-# by basename PLUS matching head content (first 300 bytes): several t/ files
-# share a basename with a corpus file copied from a DIFFERENT dir (cmd/for.t
-# vs op/for.t, class/method.t vs op/method.t, most of uni/) and must still run
-# here.  A true copy whose head was locally edited would merely run in both
-# sweeps — harmless.
-my %corpus_head;
-for my $f (glob "$root/perl-tests/*.t") {
-  open my $fh, '<', $f or next;
-  read $fh, my $head, 300;
-  $corpus_head{ basename($f) } = $head // '';
-  close $fh;
-}
-sub in_corpus {
-  my ($f) = @_;
-  my $head = $corpus_head{ basename($f) };
-  return 0 unless defined $head;
-  open my $fh, '<', $f or return 0;
-  read $fh, my $h, 300;
-  close $fh;
-  return ($h // '') eq $head;
-}
-
 # Enumerate self-contained files in each requested dir.
+#
+# NO copied-file filter (task #150 part 1, decided s317 fable-answers §6i).
+# This scan used to skip any t/ file whose basename+head matched a
+# perl-tests/ corpus file, on the theory that the sweep already owned it.
+# That let a PASSING corpus copy shadow a FAILING real t/ file: the four
+# drifted copies (chop/dor/not/quotemeta) read as fully passing in the sweep
+# while the t/op originals had 2-5 failures each — a misleading signal for a
+# release gate.  The t/ ORIGINALS are authoritative, so they always run and
+# always report; a file being in both this run and the sweep is harmless
+# duplication.  (Re-syncing the drifted copies themselves is part 2, post-R1:
+# it churns the blessed fail-baseline.)
 for my $d (@dirs) {
-  my ($n_all, $n_harness, $n_copied) = (0, 0, 0);
+  my ($n_all, $n_harness) = (0, 0);
   for my $f (sort glob "$tdir/$d/*.t") {
     $n_all++;
     my $base = basename($f);
-    if (!$include_copied && in_corpus($f)) { $n_copied++; next }
     open my $fh, '<', $f or next;
     local $/; my $src = <$fh>; close $fh;
     # Skip files pulling build-tree modules via @INC fiddling in BEGIN.
@@ -173,9 +160,8 @@ for my $d (@dirs) {
     if ($src =~ m{BEGIN[^\n]*\@INC}) { $n_harness++; next }
     push @files, "$d/$base";
   }
-  printf STDERR "scan t/%-8s %3d files: %3d runnable, %3d need-harness%s\n",
-    $d, $n_all, $n_all - $n_harness - $n_copied, $n_harness,
-    $n_copied ? ", $n_copied in sweep corpus" : "";
+  printf STDERR "scan t/%-8s %3d files: %3d runnable, %3d need-harness\n",
+    $d, $n_all, $n_all - $n_harness, $n_harness;
 }
 @files or die "no files (give t-relative paths, --dir <subdir>, or --all)\n";
 
