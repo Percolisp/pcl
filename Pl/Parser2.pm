@@ -3179,20 +3179,28 @@ sub _state_rw_blocker {
 # (`state $c = \substr $tintin, $x, 1;`).
 sub _state_init_end {
   my ($self, $sym, $stmt_shaped) = @_;
-  my %stop = map { $_ => 1 } qw(or and xor not if unless while until for foreach when);
+  # Only statement-modifier WORDS are matched here; `or`/`and`/`xor`/`,`/`=>`
+  # are PPI Operators and come from the one shared below-assignment table
+  # (#138 — this scan used to list them as words, which never matched).  In a
+  # statement-shaped decl a depth-0 comma ends the init only when it is not a
+  # parenless list operator's argument separator; in expression position it
+  # always does (`foo(state $x = 5, $y)`).
+  my %stop = map { $_ => 1 } qw(if unless while until for foreach when);
+  my @toks;
   my $t = $sym->snext_sibling;                 # the `=`
   $t = $t && $t->snext_sibling;                # first init token
-  my $end;
   while ($t) {
     last if $t->isa('PPI::Token::Structure') && $t->content eq ';';
-    last if !$stmt_shaped
-      && $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:,|=>)$/;
-    last if $t->isa('PPI::Token::Word')      && $stop{ $t->content };
-    $end = $t;
+    last if $t->isa('PPI::Token::Word') && $stop{ $t->content };
+    push @toks, $t;
     $t = $t->snext_sibling;
   }
-  die "Parser2 TODO: empty state initializer\n" unless $end;
-  return $end;
+  if (defined(my $lp = _lowprec_idx(\@toks, 0))) {
+    splice(@toks, $lp)
+      if !$stmt_shaped || _lowprec_split_safe(\@toks, 0, $lp);
+  }
+  die "Parser2 TODO: empty state initializer\n" unless @toks;
+  return $toks[-1];
 }
 
 sub _state_rewrite_routes {
@@ -4057,11 +4065,16 @@ sub _src_pos {
 }
 
 # `my ($a, $b) = @_;` → ['$a','$b'] | undef
+#
+# EXACT arity (task #138): the caller DELETES the whole statement, so a `>= 4`
+# match silently deleted anything after `@_` — `my ($a) = @_, g();` lost the
+# g() call entirely (perl runs it; assignment binds tighter than the comma).
+# Anything longer falls through to ordinary statement lowering.
 sub _extract_params {
   my ($self, $stmt) = @_;
   return undef unless $stmt && $stmt->isa('PPI::Statement::Variable');
-  my @k = $stmt->schildren;
-  return undef unless @k >= 4
+  my @k = _strip_semi($stmt->schildren);
+  return undef unless @k == 4
     && $k[0]->content eq 'my'
     && $k[1]->isa('PPI::Structure::List')
     && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='
@@ -4267,10 +4280,55 @@ sub _lower_block {
         # Scalar: guarded box-set.  Container (@x/%x): the whole assignment
         # `@x__state__N = LIST` through the expression seam — v1 emits the
         # p-array-= / p-hash-= form (same path the my-container branch uses).
+        #
+        # #138: only the ASSIGNMENT is once-guarded, so a below-assignment
+        # tail (`state $s = 1, f();`) must sit OUTSIDE the guard and run on
+        # every call.  Unlike the `my` decl, this one cannot hand the whole
+        # run to PExpr — the guard has to be interposed between head and tail
+        # — so it splits, and _lowprec_split_safe decides whether the comma is
+        # ours or a parenless list operator's.
+        # When the comma is AMBIGUOUS (a parenless list operator may own it —
+        # `state $c = \substr $tintin, $x, 1`, state.t) the split is declined
+        # and the whole run stays the initializer, exactly as before: that is
+        # right whenever the operator really does own the comma, which is the
+        # only shape seen in practice.  The residual (`state $s = f 1, $t = 2`)
+        # needs PExpr's arity knowledge to resolve and is recorded in #138.
+        my ($lp, $tail_op, @tail_toks);
+        if ($name =~ /^\$/
+            && defined($lp = _lowprec_idx(\@sk, 3))
+            && _lowprec_split_safe(\@sk, 3, $lp)) {
+          $tail_op   = $sk[$lp]->content;
+          @tail_toks = @sk[$lp + 1 .. $#sk];
+        } else {
+          undef $lp;
+        }
+        my $init_end = defined $lp ? $lp - 1 : $#sk;
         my $assign = $name =~ /^\$/
-          ? ['box-set', $name, $self->_lower_expr([@sk[3 .. $#sk]], $first)]
+          ? ['box-set', $name, $self->_lower_expr([@sk[3 .. $init_end]], $first)]
           : $self->_lower_expr([@sk[1 .. $#sk]], $first);
         push @forms, ['unless', $flag, $assign, ['setf', $flag, 't']];
+        if (defined $tail_op) {
+          # `,`/`=>`: the tail is a separate statement — the cell is the head's
+          # value, the tail runs unconditionally and supplies the statement
+          # value.  `or`/`and`/`xor`: the tail is CONDITIONAL on the cell's
+          # current value (perl re-tests it on every call, init or not).
+          my $tail = $self->_lower_expr(\@tail_toks, $first,
+                                        ($decl_tail ? () : ':void'));
+          if ($tail_op =~ /^(?:or|and|xor)$/) {
+            return (['p-' . $tail_op, ['progn', @forms, $name], $tail],
+                    $self->_lower_block(\@rest, $vi, $tail_ctx));
+          }
+          # In TAIL position the comma expression is the sub's return value,
+          # and a comma yields BOTH operands in list context — the same shape
+          # PExpr emits for a bare `A, B` tail statement.
+          if ($decl_tail) {
+            return (['if', '*wantarray*',
+                     ['vector', ['progn', @forms, $name], $tail],
+                     ['progn', @forms, $name, $tail]],
+                    $self->_lower_block(\@rest, $vi, $tail_ctx));
+          }
+          return (@forms, $tail, $self->_lower_block(\@rest, $vi, $tail_ctx));
+        }
       }
       push @forms, $name;
       return (@forms, $self->_lower_block(\@rest, $vi, $tail_ctx));
@@ -4282,6 +4340,36 @@ sub _lower_block {
     # side effects, in void, BEFORE the let (the outer $x is what it sees).
     my @declmod_eval = $declmod_cond
       ? ($self->_lower_expr($declmod_cond, $first, ':void')) : ();
+    # -- `my $x = A, B;` / `my $x = A or B;` (task #138).  Assignment binds
+    # TIGHTER than `,`/`=>`/`or`/`and`/`xor`, so the tail is NOT part of the
+    # init — perl runs `(my $x = A), B`, leaving $x = A.  Splitting the tokens
+    # here would mean re-deciding the parenless list-operator ambiguity
+    # (`my $c = h 1, 2` DOES pass both args to h), and that knowledge lives in
+    # PExpr — so hand the WHOLE `$x = …` run to the expression machinery, the
+    # same move the `$x = RHS` statement fast path makes via
+    # _tail_below_assign_prec, and the same shape the `my $x <non-'='
+    # trailing>` branch below already uses.  The declaration then contributes
+    # only the (boxed) binding.  $x stays BOXED in the remainder: a comma/or
+    # write is not a native-root arithmetic event, so no raw slot is lost.
+    my $lowprec_run;
+    if (defined $init && defined _lowprec_idx($init, 0)
+        && !(_split_modifier($init))[1]) {
+      # Self-referencing init (`my $x = $x, …`) would read the fresh binding
+      # instead of the shadowed outer one — v1's let-binding dance does not
+      # compose with a tail, so refuse rather than miscompile.  Unlike the
+      # $self_init text scan below (where an over-fire is harmless), a false
+      # positive HERE costs a whole-file gate, so NON-INTERPOLATING literals
+      # are excluded: sprintf2.t's `my $s = sprintf '%*2$s', "abc", $i` has
+      # `$s` inside a single-quoted format, and perl does not read it.
+      die "Parser2 TODO: self-referential my-init with a below-assignment tail: "
+        . $first->content . "\n"
+        if join('', map { $_->content }
+                    grep { !$_->isa('PPI::Token::Quote::Single')
+                           && !$_->isa('PPI::Token::Quote::Literal') } @$init)
+           =~ /\Q$name\E\b/;
+      my @kd = _strip_semi($first->schildren);
+      $lowprec_run = [@kd[1 .. $#kd]];
+    }
     if ($name && $self->{_file_lex_renamed}{$name}) {
       # W5: a captured file lexical, rewritten to a fresh package-level name —
       # lower as `our` does: a defvar'd box hoisted to the section top (so the
@@ -4292,7 +4380,10 @@ sub _lower_block {
       # it) still resolves the original name to the OUTER variable.
       my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture($name) : ();
       return (@declmod_eval,
-              (defined $init ? (['p-scalar-=', $name, $self->_lower_expr($init, $first)]) : ()),
+              ($lowprec_run
+                ? ($self->_lower_expr($lowprec_run, $first, ':void'))
+                : defined $init
+                  ? (['p-scalar-=', $name, $self->_lower_expr($init, $first)]) : ()),
               @reg,
               $self->_lower_block(\@rest, $vi, $tail_ctx),
               ($decl_tail ? ($name) : ()));
@@ -4306,8 +4397,10 @@ sub _lower_block {
       $self->_reg_lex($name);
       my $vi2 = { %$vi, $name => { unboxable => 0 } };
       return (@declmod_eval,
-              (defined $init
-                ? (['p-my-=', $name, $self->_lower_expr($init, $first)]) : ()),
+              ($lowprec_run
+                ? ($self->_lower_expr($lowprec_run, $first, ':void'))
+                : defined $init
+                  ? (['p-my-=', $name, $self->_lower_expr($init, $first)]) : ()),
               $self->_lower_block(\@rest, $vi2, $tail_ctx));
     }
     if ($name) {
@@ -4339,6 +4432,19 @@ sub _lower_block {
         $self_init = ['p-box-init', $self->_lower_expr($init, $first)];
       }
       $self->_reg_lex($name);
+      # #138: the whole `$x = A, B` run as one expression inside the fresh
+      # boxed binding — see the $lowprec_run note above.  In tail position the
+      # expression IS the sub's return value and must see the CALLER's context
+      # ('inherit'): `sub f { my $t = 1, $u = 2 }` returns 2 in scalar context
+      # but the LIST (1, 2) in list context, because the comma operator does.
+      if ($lowprec_run) {
+        my $vi2 = { %$vi, $name => { unboxable => 0 } };
+        return (@declmod_eval,
+                ['let', ['list', ['list', $name, '(make-p-box nil)']],
+                 $self->_lower_expr($lowprec_run, $first,
+                                    ($decl_tail ? 'inherit' : ':void')),
+                 $self->_lower_block(\@rest, $vi2, $tail_ctx)]);
+      }
       # A conditional init MUST keep $c boxed (the assignment writes through the
       # box; a false cond leaves it undef) — never the unboxable raw-slot path.
       if (!$imod && $vi->{$name} && $vi->{$name}{unboxable}) {
@@ -5055,13 +5161,15 @@ sub _lower_stmt {
 # association, so VarAnnotator has already left such variables boxed.
 sub _tail_below_assign_prec {
   my ($expr) = @_;
-  for my $i (2 .. $#$expr) {
-    my $t = $expr->[$i];
-    return 1 if $t->isa('PPI::Token::Operator')
-      && $t->content =~ /^(?:,|=>|or|and|xor)$/;
-  }
-  return 0;
+  return defined _lowprec_idx($expr, 2) ? 1 : 0;
 }
+
+# The below-assignment precedence table itself lives in
+# Pl::PExpr::TokenUtils (task #138) — v1's `local` handler needs the same
+# classification, and neither statement parser may depend on the other.
+# These two are thin local names for it.
+sub _lowprec_idx        { Pl::PExpr::TokenUtils::lowprec_idx(@_) }
+sub _lowprec_split_safe { Pl::PExpr::TokenUtils::lowprec_split_safe(@_) }
 
 # Leaf-level tail wrap under the sub-body :void regime (task #60): the body
 # bound *wantarray* to :void once, but a tail (implicit-return) statement's
@@ -5275,6 +5383,20 @@ sub _lower_compound {
     my %saved_lex = %{ $self->{_live_lex} // {} };
     my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
     $self->_reg_lex($name) if $name;
+    # #138: a SINGLE `my` with a comma tail (`for (my $i = 0, $j = 9; …)`) —
+    # the tail is not part of $i's init (perl: `(my $i = 0), ($j = 9)`), and
+    # folding it made $i start at 9, so the loop ran zero times.  The >= 2
+    # branch above already documents the shape; this is its one-`my` sibling.
+    # As in the `my` statement branch, hand the whole `$i = …` run to the
+    # expression machinery instead of re-deciding the parenless list-operator
+    # ambiguity here, and pin the counter BOXED (a comma write is not a
+    # native-root arithmetic event, so no raw-slot verdict is applicable).
+    my $lowprec_run;
+    if ($name && defined $init && defined _lowprec_idx($init, 0)) {
+      my @ik = _strip_semi($init_s->schildren);
+      $lowprec_run = [@ik[1 .. $#ik]];
+      $vi = { %$vi, $name => { unboxable => 0 } };
+    }
 
     # (The s286b ++-step carve-out — re-analyze WITHOUT the step, emit
     # `(setf $i (p-± $i 1))` — is gone: the A-num root-incdec regime (task
@@ -5290,7 +5412,7 @@ sub _lower_compound {
     # step INCLUDED (A-num classifies it; the old carve-out had to exclude
     # it) — and adopt an approving verdict.  The loop var is loop-scoped
     # (let around p-for), so the loop region is the whole visibility span.
-    if ($name && !($vi->{$name} && $vi->{$name}{unboxable})) {
+    if ($name && !$lowprec_run && !($vi->{$name} && $vi->{$name}{unboxable})) {
       my $vi2 = Pl::VarAnnotator->analyze(
         [(grep { defined } $init_s, $cond_s, $step_s), $block->schildren],
         undef, $self->_cur_sub_info, $self);
@@ -5309,8 +5431,13 @@ sub _lower_compound {
 
     my $form;
     if ($name) {
-      my $initval = defined $init ? $self->_lower_expr($init, $stmt) : '(p-undef)';
-      if ($vi->{$name} && $vi->{$name}{unboxable}) {
+      my $initval = defined $init && !$lowprec_run
+        ? $self->_lower_expr($init, $stmt) : '(p-undef)';
+      if ($lowprec_run) {
+        $form = ['let', ['list', ['list', $name, '(make-p-box nil)']],
+                 ['p-for', ['list', $self->_lower_expr($lowprec_run, $stmt, ':void')],
+                  $cond, $step, _label_keys($label), @body]];
+      } elsif ($vi->{$name} && $vi->{$name}{unboxable}) {
         # a B-verdict/str-buffer counter must freeze/bufferize its init too
         $form = ['let', ['list', ['list', $name,
                                   _wrap_freeze($vi->{$name}, $name, $initval)]],

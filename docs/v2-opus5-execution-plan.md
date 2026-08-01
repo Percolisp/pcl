@@ -71,10 +71,25 @@ baseline.**
    memory STATE updated IN PLACE (no session log in MEMORY.md); found-
    but-not-fixed problems become tasks, never TODO comments.
 
-## 3. W0 — NEXT SESSION, pre-R1: task #138, the shared splitter
+## 3. W0 — DONE (s316u, gen v2-89): task #138, the shared splitter
 
-The one release-blocking item.  Review §2 has the full analysis; probes
-are reproduced there.  Scope precisely:
+Landed with one deviation from the scope below, and two sites the review
+had not found.  **Deviation:** step 1 asked for a span-returning
+`_split_at_lowprec`.  Splitting requires re-deciding the parenless
+list-operator ambiguity (`my $c = h 1, 2` really does pass both args to
+h), which is PExpr's knowledge — so the shipped fix hands the WHOLE
+`$x = …` run to the expression machinery at every site that can, exactly
+as the s316t statement fast path does, and splits only where code must be
+interposed between head and tail (the state once-guard).  The table itself
+now lives once, in `Pl::PExpr::TokenUtils::lowprec_idx` /
+`lowprec_split_safe` — plain subs, because v1's `local` needs them too and
+neither statement parser may depend on the other.  **Extra sites:** the
+single-`my` C-for init (`for (my $i = 0, $j = 9; …)` ran ZERO iterations)
+and v1's `local` handler (live in v2 as well — `local` routes through the
+v1 seam).  Residual recorded in review §2 and #138: an ambiguous comma in
+a *state* init still folds.
+
+Original scope, kept for the record:
 
 1. **Extract the helper.**  Generalize s316t's `_tail_below_assign_prec`
    (Parser2.pm ~5056) into ONE table-owning helper (suggested:

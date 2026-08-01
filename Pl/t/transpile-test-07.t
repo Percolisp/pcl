@@ -472,4 +472,69 @@ my $u = utime "pcl-nonexistent-file";
 print "utime:$u\n";
 ');
 
+# Task #138: assignment binds TIGHTER than `,`/`=>`/`or`/`and`/`xor`, so a
+# depth-0 tail after the init is a SEPARATE thing — `my $x = 1, $y = 2` is
+# `(my $x = 1), ($y = 2)`.  Every statement handler that sliced "everything
+# after the `=`" folded the tail into the value.  The discriminator in each
+# case is the parenless list operator, whose comma really IS part of the init
+# (`my $c = h 1, 2` passes both args) — hence the shared classifier rather
+# than a per-site scan.
+test_transpile("my-decl init stops at a depth-0 comma/or tail", '
+sub h { print "h(@_)\n"; return 7 }
+my $x = 1, $y = 2;
+print "x=$x y=$y\n";
+my $w = 0 or print "or-tail ran\n";
+print "w=$w\n";
+my $c = h 1, 2;
+print "c=$c\n";
+my $d = 3, h(9);
+print "d=$d\n";
+sub f { my $t = 1, $u = 2 }
+print "tailval=", f(), "\n";
+');
+
+# The worst one: _extract_params matched `my (LIST) = @_` with >= 4 tokens and
+# the caller DELETED the whole statement, so the tail vanished from the output
+# entirely — silent statement-text deletion, not merely a wrong value.
+test_transpile("my (LIST) = \@_ param fast path keeps its comma tail", '
+sub g { print "g ran\n"; return 9 }
+sub p1 { my ($a) = @_, g(); print "a=$a\n" }
+p1(5);
+sub p2 { my ($a, $b) = @_; print "ab=$a$b\n" }
+p2(1, 2);
+');
+
+# Only the ASSIGNMENT is once-guarded, so a state decl tail runs on EVERY
+# call; an `or` tail re-tests the cell each time.  A parenless list-op init
+# (`\substr $s, $i, 1`) must stay whole — both the named-sub route and the
+# anon-sub source-rewrite route.
+test_transpile("state init: comma tail runs every call, list-op init whole", '
+sub st { state $s = 1, print("tail ran\n"); $s++; print "s=$s\n" }
+st(); st();
+my $an = sub { state $t = 0 or print "or ran t=$t\n"; $t = 7 if !$t; print "t=$t\n" };
+$an->(); $an->();
+my $str = "hello"; my $i = 0;
+sub sb { state $c = \substr $str, $i, 1; print "c=$$c\n" }
+sb(); sb();
+');
+
+# `for (my $i = 0, $j = 9; ...)`: the folded init started $i at 9, so the loop
+# ran ZERO times.  The two-`my` form already had its own carve-out; this is
+# its one-`my` sibling.
+test_transpile("C-style for init stops at a depth-0 comma", '
+for (my $i = 0, $j = 9; $i < 2; $i++) { print "i=$i j=$j\n" }
+for (my $k = 0; $k < 2; $k++) { print "k=$k\n" }
+for (my $m = 0, my $n = 5; $m < 2; $m++) { print "m=$m n=$n\n" }
+');
+
+# `local $x = A, B` — the tail runs INSIDE the localization (perl evaluates it
+# after the local takes effect), and only the localized name is restored.
+test_transpile("local init stops at a depth-0 comma", '
+$l = "outer"; $m = "outerm";
+sub L { local $l = 1, $m = 2; print "in: l=$l m=$m\n" }
+L(); print "out: l=$l m=$m\n";
+sub L2 { local $n = join ",", 1, 2; print "n=$n\n" }
+L2();
+');
+
 done_testing();

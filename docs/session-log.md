@@ -4,6 +4,73 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316u (2026-08-01, Opus 5) — #138 W0 pre-R1: ONE below-assignment precedence table, six consumers, gen v2-89.
+
+- **The bug family.** Assignment binds TIGHTER than `,`/`=>`/`or`/`and`/
+  `xor`, so `my $x = 1, $y = 2` is `(my $x = 1), ($y = 2)`.  Every handler
+  that sliced "everything after the `=`" as the initializer folded the tail
+  into the value.  s316t fixed the `$lex = RHS` statement fast path; the
+  review (v2-code-review §2) found the same knowledge hand-rolled in three
+  places and MISSING from three more.  Two further sites turned up on probe:
+  | shape | HEAD | perl |
+  |---|---|---|
+  | `my ($a) = @_, g();` | **g() silently deleted** | g() runs |
+  | `my $x = 1, $y = 2;` | x=2 | x=1 |
+  | `my $x = 0 or print …;` | x=1 | x=0 |
+  | `state $s = 1, f();` | f() ran ONCE | f() runs every call |
+  | `for (my $i=0, $j=9; $i<2; $i++)` | **zero iterations** | 2 |
+  | `local $l = 1, $m = 2;` | l=2 | l=1 |
+  The `_extract_params` row is the worst: the caller DELETES the matched
+  statement, and the match was `@k >= 4` instead of exact arity, so the
+  tail vanished from the output — silent statement-text deletion.  The
+  C-for row is the next worst: the loop body never ran at all.  `local` is
+  a v1-side slice, but LIVE in v2 (v2 routes `local` through the v1 seam).
+- **The fix is not a splitter.**  A span-returning splitter would have to
+  re-decide the parenless list-operator ambiguity — `my $c = h 1, 2` really
+  does pass both args to h, `my $d = 3, h(9)` does not — and that knowledge
+  is PExpr's.  So every site that CAN hands the whole `$x = …` run to the
+  expression machinery (the same move the s316t fast path makes), and only
+  the state once-guard, which must interpose the flag test between head and
+  tail, actually splits.  The table lives once, in
+  `Pl::PExpr::TokenUtils::lowprec_idx` / `lowprec_split_safe` — plain subs,
+  not methods, because both statement parsers need it and neither may
+  depend on the other.  `lowprec_split_safe` encodes the one real
+  asymmetry: `or`/`and`/`xor` sit BELOW rightward-list-operator precedence
+  so they always terminate one and are always a safe split point; a comma
+  is safe only when no bare Word could be eating it (so
+  `state $c = \substr $s, $i, 1` stays whole, and v2-native).
+- **Six consumers:** `_tail_below_assign_prec` (the two statement fast
+  paths), the `my`-decl init in `_lower_block`, the state init peel, the
+  state source-rewrite `_state_init_end`, the single-`my` C-for init, and
+  v1's `local` handler.  `_extract_params` became an EXACT-arity match.
+  `_state_init_end` also lost dead code: its `or`/`and`/`xor`/`not` stops
+  were tested as `PPI::Token::Word` and PPI makes them Operators, so they
+  had never matched.
+- **Two context traps found by the new tests, both fixed:** a tail-position
+  `my $t = 1, $u = 2` is the sub's return value and a comma yields BOTH
+  operands in list context (`'inherit'`, not scalar — perl prints `12`);
+  the state comma tail needs the same, emitted as the
+  `(if *wantarray* (vector …) (progn …))` shape PExpr uses for a bare
+  `A, B` tail.  The self-init refusal also had to exclude non-interpolating
+  literals: sprintf2.t's `my $s = sprintf '%*2$s', "abc", $i` has `$s`
+  inside a single-quoted format, and a text scan gated the whole file.
+- **Verification:** corpus 5/111 files changed, all explained — concat.t /
+  heredoc.t / postfixderef.t / signatures.t are `my $x = eval {…} or die`
+  now associating like perl (`(p-or (p-my-= …) (p-die …))`), signatures.t
+  also gains a correct scalar-context bind on `warnings_from $code, 1`, and
+  sprintf2.t drops a false-positive `p-box-init` wrap (still native, all
+  sprintf args kept).  Gate 123/4437 (5 new -07 batteries).  Artifacts
+  regenerated at v2-89: pack + mro both header-only.
+- **Residuals recorded (#138 stays open as a note):** an AMBIGUOUS comma in
+  a *state* init (`state $s = f 1, $t = 2`) still folds — resolving it needs
+  PExpr's arity knowledge, i.e. the read-only classifier the review names as
+  the E5 endpoint.  The `return`-list comma gate (Parser2 ~4890) was
+  deliberately NOT routed through the shared table: it answers a different
+  question (does this return need v1's list spreading?) and adding
+  `or`/`and`/`xor` would gate returns that lower natively today.
+
+---
+
 ## Session 316t (2026-08-01, Fable) — #137: suite undef-fn family (process builtins) + v2 `$lex = A, B` reassociation, gen v2-88.
 
 - **v2 parity bug (the real find): Parser2's native `$x = RHS` statement

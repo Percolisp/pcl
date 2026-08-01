@@ -61,7 +61,13 @@ and **unguarded siblings of the fixed bug**, both confirmed by live probe:
   unguarded.
 - The C-for init site (5247) *documents* this exact bug class and guards it
   locally — the knowledge exists but lives at one call site instead of in
-  the shared helper.
+  the shared helper.  **(s316u: its guard covers only the `>= 2` multi-`my`
+  case; the single-`my` sibling `for (my $i = 0, $j = 9; …)` folded and the
+  loop ran ZERO times.  A local guard is not a shared one.)**
+- **(s316u, not in the original list)** v1's `local` handler
+  (`Pl/Parser.pm:3735`) slices the same "everything after `=`" run —
+  `local $l = 1, $m = 2` gave `$l == 2`.  It is a LIVE v2 bug too: v2 routes
+  `local` through `_lower_local` → the v1 seam.
 
 **Recommendation R1-a (small, do before release): one splitter.**  A single
 `_split_at_lowprec($toks, %opts)` owning the one table (with the
@@ -216,9 +222,31 @@ just relocate the file.
 ## 8. Recommended order
 
 **Before R1 (cheap, correctness):**
-- #138 extended: route `_single_scalar_decl`, the state init peel, and
-  `_extract_params` through the shared splitter (the `_extract_params`
-  silent-drop is the one true pre-release must-fix).
+- ~~#138 extended~~ **DONE (s316u).**  The table now lives once, in
+  `Pl::PExpr::TokenUtils::lowprec_idx` / `lowprec_split_safe` (plain subs —
+  both statement parsers need it and neither may depend on the other).
+  Six consumers: the two statement fast paths (via
+  `_tail_below_assign_prec`), the `my`-decl init, the state init peel,
+  `_state_init_end`, the single-`my` C-for init, and v1's `local` handler;
+  `_extract_params` became an EXACT-arity match.  Two sites found beyond the
+  review's list — the single-`my` C-for init (`for (my $i = 0, $j = 9; …)`
+  ran ZERO iterations) and v1's `local` (live in both pipelines, since v2
+  routes `local` through the v1 seam).
+  **Resolution note:** the fix is NOT a span-returning splitter.  Wherever
+  the caller can hand the whole `$x = …` run to PExpr it does, because PExpr
+  already owns the parenless list-op ambiguity (`my $c = h 1, 2` keeps both
+  args) and a span splitter would have to re-derive it.  Only the state
+  once-guard must interpose code between head and tail, so only it splits —
+  guarded by `lowprec_split_safe`, which declines an ambiguous comma and
+  leaves the run whole (keeping `state $c = \substr $s, $i, 1` v2-native).
+  **Residual:** `state $s = f 1, $t = 2` — an ambiguous comma after a
+  parenless list operator in a state init — still folds; resolving it needs
+  PExpr's arity knowledge, i.e. the read-only classifier this section
+  proposes as the E5 endpoint.
+- The `return`-list comma gate (4890) deliberately did NOT move to the
+  shared table: it is a *comma-list detector* answering a different question
+  (does this return need v1's list spreading?), and adding `or`/`and`/`xor`
+  to it would gate returns that lower natively today.
 
 **E4.1 (unchanged in spirit, re-scoped in expectation):** kill the dual
 pipeline (gate, PCL_V1, cache key, v1-only entry/assembly, bundle-mode

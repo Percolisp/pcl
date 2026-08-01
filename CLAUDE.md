@@ -266,7 +266,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **123 test files, 4432 tests** (Pl/t gate, as of session 316t — includes Pl/t/xs-01/02/03.t, which skip without a built pclxs sibling)
+- **123 test files, 4437 tests** (Pl/t gate, as of session 316u — includes Pl/t/xs-01/02/03.t, which skip without a built pclxs sibling)
 - **XS conformance: 370 pass, 0 fail — fully green** against pclxs's corpus
   with real perl as oracle (`tools/pcl-conform`, session 315; XS OO/magic
   works — Digest::MD5's own md5-aaa.t is 256/256 under PCL).
@@ -274,8 +274,9 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
-- Full `perl-tests/` sweep: 63 files fully passing, 712 blessed fails
-  (s315d baseline — class-model target-first reads, $TODO honored again
+- Full `perl-tests/` sweep: 65 files fully passing, 702 blessed fails
+  (count re-read s316u at `--jobs 8 --timeout 380`; blessed-fail baseline
+  from s315d — class-model target-first reads, $TODO honored again
   under :invert, no-match s/// write gate; fresh_perl/runperl children run
   under PCL via `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores
   the old compare mode).  GOTCHA: pack.t runs ~90s under `--jobs 8` against

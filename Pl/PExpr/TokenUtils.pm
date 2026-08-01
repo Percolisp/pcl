@@ -242,4 +242,54 @@ sub _is_block {
   return undef;
 }
 
+# ---- the ONE below-assignment precedence table (task #138) ----------------
+#
+# Plain subs, not methods: both statement parsers (Pl::Parser and
+# Pl::Parser2) need this classification, and neither holds a TokenUtils
+# object.  It lives here because it is token-classification knowledge, and
+# because the review (docs/v2-code-review.md §2) found it hand-rolled in
+# three places and MISSING from five more — each copy a separate bug.
+#
+# Perl parses `$x = A, B` / `$x = A or B` as `($x = A), B` / `($x = A) or B`:
+# assignment (and OP=) binds TIGHTER than `,`/`=>`/`or`/`and`/`xor`.  Any
+# statement handler that slices "everything after the `=`" as the initializer
+# folds such a tail into the value (op/lex_assign.t: `$a = readlink 'x','y'`
+# must leave $a undef).
+#
+# lowprec_idx: index of the first DEPTH-0 operator below assignment
+# precedence at or after $from, or undef when the run is clean.  Structures
+# (parens / braces / subscripts) are single PPI children, so a scan over a
+# statement's schildren only ever sees depth-0 operators.
+sub lowprec_idx {
+  my ($toks, $from) = @_;
+  for my $i (($from // 0) .. $#$toks) {
+    my $t = $toks->[$i];
+    return $i if $t->isa('PPI::Token::Operator')
+      && $t->content =~ /^(?:,|=>|or|and|xor)$/;
+  }
+  return undef;
+}
+
+# May the run $toks[$from .. $idx-1] be a PARENLESS list operator whose
+# argument list swallows the operator at $idx?  Only `,`/`=>` are ambiguous:
+# a rightward list operator's arguments run to the closing paren, the `;`, or
+# an operator BELOW list-operator precedence -- i.e. `not`/`and`/`or`/`xor`,
+# which are therefore always a safe split point.  For a comma the answer is
+# conservative: a bare Word not immediately followed by its own paren list may
+# be a list operator eating the comma (`state $c = \substr $s, 0, 1`), so the
+# split is declined.  A caller that can hand the WHOLE run to the expression
+# parser should do that instead of splitting -- PExpr owns the ambiguity, and
+# only a caller that must interpose code between head and tail needs to split.
+sub lowprec_split_safe {
+  my ($toks, $from, $idx) = @_;
+  return 1 if $toks->[$idx]->content =~ /^(?:or|and|xor)$/;
+  for my $i ($from .. $idx - 1) {
+    my $t = $toks->[$i];
+    next unless $t->isa('PPI::Token::Word');
+    my $nx = $toks->[$i + 1];
+    return 0 unless $nx && $nx->isa('PPI::Structure::List');
+  }
+  return 1;
+}
+
 1;

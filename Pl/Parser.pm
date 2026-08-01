@@ -3718,6 +3718,7 @@ sub _process_local_declaration {
   # Build let bindings
   my @bindings;
   my $use_let_star = 0;
+  my $local_tail_cl;          # #138: `local $x = A, B` — B, emitted in the let
   if ($init_idx >= 0 && @vars == 1) {
     # local $x = value
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
@@ -3725,6 +3726,26 @@ sub _process_local_declaration {
 
     # Strip a trailing `if`/`unless` statement modifier (see element branch).
     my ($lmod, $lcond) = $self->_split_local_init_modifier(\@rhs_parts);
+
+    # #138: `local $x = A, B;` is `(local $x = A), B` — assignment binds
+    # tighter than `,`/`=>`/`or`/`and`/`xor`, so the tail is NOT part of the
+    # initializer (it folded, and $x got B's value).  The `local` let wraps
+    # the block remainder, so the tail cannot simply be hoisted out: it is
+    # emitted as the first form INSIDE the let, where perl also runs it (the
+    # localization is already in effect by then).  When the comma may belong
+    # to a parenless list operator instead, the split is declined and the run
+    # stays whole — see Pl::PExpr::TokenUtils::lowprec_split_safe.
+    my $lp = $lmod ? undef : Pl::PExpr::TokenUtils::lowprec_idx(\@rhs_parts, 0);
+    if (defined $lp
+        && Pl::PExpr::TokenUtils::lowprec_split_safe(\@rhs_parts, 0, $lp)) {
+      # `or`/`and`/`xor` test the localized variable's NEW value, so they
+      # cannot become a separate statement — only a comma tail can.
+      if ($rhs_parts[$lp]->content =~ /^(?:,|=>)$/) {
+        my @tail = @rhs_parts[$lp + 1 .. $#rhs_parts];
+        splice(@rhs_parts, $lp);
+        $local_tail_cl = $self->_parse_expression(\@tail, $stmt) if @tail;
+      }
+    }
 
     my $var = $vars[0];
     # For qualified vars (e.g. A::@ISA), the sigil is embedded after '::'.
@@ -3850,6 +3871,10 @@ sub _process_local_declaration {
   # Track that we have an open let that needs closing
   $self->{_local_let_depth} //= 0;
   $self->{_local_let_depth}++;
+
+  # #138: the comma tail of `local $x = A, B;` — a plain statement that runs
+  # with the localization in effect, before the rest of the block.
+  $self->_emit($local_tail_cl) if defined $local_tail_cl;
 
   if ($rhs_tmp_cl) {
     my $lhs_cl = "(vector " . join(" ", @vars) . ")";
