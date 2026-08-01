@@ -2227,17 +2227,43 @@
       (error "Can't take sqrt of ~A" n))
     (sqrt (coerce n 'double-float))))
 
+;;; Perl's OWN drand48 (perl 5.20+, [perl #115928]): since that change perl
+;;; ships its implementation rather than the platform's, so a given seed
+;;; replays the same sequence everywhere — and t/op/rand.t asserts the exact
+;;; values (`srand(1); int rand(1000)` == 41).  Reproducing the algorithm is
+;;; the only way to match, and it is worth matching: seeded rand is how test
+;;; suites and CPAN modules get deterministic runs.
+;;;   X(n+1) = (0x5DEECE66D * X(n) + 0xB) mod 2^48,  seed init X = (s<<16)|0x330E
+(defconstant +p-drand48-mult+ #x5deece66d)
+(defconstant +p-drand48-add+  #xb)
+(defconstant +p-drand48-mask+ (ash 1 48))
+(defvar *p-drand48-state* (logior (ash 0 16) #x330e)
+  "48-bit drand48 state; seeded by p-srand, advanced by p-rand.")
+
+(defun %p-drand48 ()
+  "One drand48 draw in [0,1)."
+  (setf *p-drand48-state*
+        (mod (+ (* +p-drand48-mult+ *p-drand48-state*) +p-drand48-add+)
+             +p-drand48-mask+))
+  (/ (float *p-drand48-state* 1.0d0) +p-drand48-mask+))
+
 (defun p-rand (&optional max)
-  "Perl rand - random number"
-  (if max
-      (* (random 1.0d0) (to-number max))
-      (random 1.0d0)))
+  "Perl rand - random number in [0, EXPR).
+   perlfunc: \"If EXPR is omitted or zero, uses 1\" — a supplied 0 is NOT a
+   zero range (op/rand.t t260 'rand() without args is rand(1)').  Negative
+   EXPR is legal and yields a negative result, so the multiply is done on a
+   [0,1) draw rather than calling (random EXPR), which needs a positive bound."
+  (let ((m (if max (to-number max) 1)))
+    (when (zerop m) (setf m 1))
+    (* (%p-drand48) m)))
 
 (defun p-srand (&optional seed)
-  "Perl srand - seed random number generator"
-  (declare (ignore seed))
-  ;; CL doesn't have portable srand - just return a value
-  1)
+  "Perl srand - seed the RNG, returning the seed.
+   Previously a no-op that DISCARDED the seed, so `srand($n); rand` was not
+   reproducible at all (op/rand.t t262/t263)."
+  (let ((s (if seed (%pcl-to-integer (to-number seed)) (get-universal-time))))
+    (setf *p-drand48-state* (logior (ash (logand s #xffffffff) 16) #x330e))
+    s))
 
 (defun %to-number-raw (val)
   "Convert a raw non-number, non-box value to number (Perl semantics)."
