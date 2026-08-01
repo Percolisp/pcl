@@ -252,6 +252,59 @@ on #149 bookkeeping.
 
 ---
 
+## 8. (added s319) op/list.t eats 10 GB in SBCL — an ordinary 277-line file,
+##    and the transpiler is innocent.  Two t/op files are unmeasured.
+
+I fixed #157 first (commit e6f1277) — the reporting shape you were asked
+about above, plus two defects I did not expect: a forked WORKER inherited the
+parent's `$SIG{TERM}` handler and END blocks, so one signalled worker
+`rm -rf`'d the SHARED tmpdir and unlinked the shared core, killing the run;
+and `system()` in an END block overwrites `$?`, which after the last END block
+IS the exit status — so the tool's documented "Exit: nonzero iff any DIFF/…"
+contract **had never held for any run**, crash or not.  Both proven by probe
+and by a HEAD counterfactual; details in the session log.
+
+Then I used the fixed runner on the two files that have never produced a row,
+and it reported honestly instead of vanishing.  systemd's own log for the run:
+
+```
+run-p12204-i1223.scope: The kernel OOM killer killed some processes in this unit
+run-p12204-i1223.scope: Failed with result 'oom-kill'
+Consumed 53.318s CPU over 53.463s wall, 10G memory peak, 1G swap peak
+```
+
+`--jobs 1`, 9 GB free, idle machine.  So s318's reading ("the laptop was
+short on memory") was **wrong**: one file eats a 10 GB cgroup in 53 seconds.
+
+**The transpiler is not the problem** — `pl2cl --no-cache --lenient-ppi
+op/list.t` is 1.23 s and **64 MB** max RSS, emitting 564 lines of CL.  The
+blowup is entirely SBCL-side (compile or run — not yet split; the user
+time-boxed this and asked that these two files not be run again for now).
+And t/op/list.t is unremarkable: 277 lines, longest line 85 chars,
+`plan(tests => 73)`, plain list-assign/slice/split rows — nothing like
+op/cond.t's 20k-nested ternary, which is the one file already on the %HEAVY
+solo list.  So this looks like a scaling pathology reachable from **ordinary
+Perl**, which is what makes me want your eyes on it.
+
+**The asks.**
+1. Priority: does this gate R1?  It is two unmeasured files in the t/op
+   release signal (op/pack.t is NOT-RUN purely because it was queued behind
+   list.t), against a compiler that is otherwise 111/111 and 0-new.
+2. Where would you look first — compile-time (a macro or type-inference
+   blowup on some form in the 564 lines) or run-time (an allocation
+   pathology)?  I can bisect either way, but a guess from you about which
+   family of forms to suspect would save a session.
+3. Should `op/list.t` join `%HEAVY` in the runner meanwhile, so one
+   pathological file cannot OOM a whole run?  That is a measurement-hygiene
+   patch, not a fix, and I would rather you bless it than have me quietly
+   hide the file.
+
+Tracked as task #160 with the reproduction commands and a hard-capped probe
+recipe (`systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0`) so
+no future probe can take the desktop down.
+
+---
+
 ## Verification standard used for the seven commits
 
 corpus-diff (emission-changing commits only — four of the seven are
