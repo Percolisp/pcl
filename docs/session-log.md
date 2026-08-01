@@ -60,6 +60,52 @@ Append new entries at the top. One section per session.
   semantics — inherited END blocks and `$?` — that no amount of reasoning
   about systemd would have found.  Two 12-line probes did.
 
+### Then the fixed runner immediately paid for itself — **#160**
+
+- Re-ran the two files that have never produced a row.  The run died AGAIN,
+  but this time it SAID so: `KILLED` op/list.t, `NOT-RUN` op/pack.t, exit 130,
+  journal marked INCOMPLETE.  systemd's log for the scope:
+  `The kernel OOM killer killed some processes in this unit` /
+  `Consumed 53.3s CPU over 53.5s wall, 10G memory peak, 1G swap peak`.
+- `--jobs 1`, **9 GB free, idle machine** — so s318's "the laptop was short on
+  memory" was wrong twice over.  **One ordinary file eats a 10 GB cgroup in
+  53 seconds.**
+- **Bisected, and the transpiler is innocent**: `pl2cl` on op/list.t is
+  **1.23 s / 64 MB max RSS** for 564 lines of CL.  The blowup is entirely
+  SBCL-side; compile-vs-run not split (user time-boxed it).  t/op/list.t is
+  277 unremarkable lines — a scaling pathology reachable from ORDINARY Perl,
+  unlike op/cond.t's 20k-nested ternary.  **Two t/op files are missing from
+  the R1 signal** (op/pack.t only because it queued behind list.t).
+  Task #160 + review-requests §8 (priority / where to look / %HEAVY?).
+
+### Near-green triage — seven files → eleven rows, two disposed of
+
+- Method that worked: ONE `run-perl-suite` pass over several small files with
+  `--faillog` yields every diverging row with perl's own description — far
+  cheaper than per-file investigation.  Reuse it for the rest of #150's list.
+- **op/exists_sub.t → XDIFF.**  Its one failing row wants
+  `eval 'exists &t5()'` to die "not a subroutine name"; PCL **does** reject the
+  invalid form ("invalid number of arguments: 1"), only the text differs →
+  registration bar met (1 of 1 explained), user's error-text ruling applies.
+- **op/wantarray.t → task #161, and a stale doc corrected.**  not-supported.md
+  claimed `wantarray()` in a string eval cannot detect its context at all.
+  **Measured: scalar and list are CORRECT** (the dynamic `*wantarray*` binding
+  is inherited through `(load …)`); only **void** is wrong, reporting scalar,
+  because nothing binds `:void` at a void call site — confirmed by emission
+  (all three sites emit a bare `(p-eval …)`, no `let` anywhere).  The old text
+  would have sent someone to build AST context annotations for a gap that is
+  **one binding wide**.  NOT registered as XDIFF — it is a fix target, gated
+  behind the CLAUDE.md §8 VOID_CTX regression.
+- Remaining eight rows (op/args t23 `delete $_[0]`, op/context t8 BEGIN-in-block,
+  op/crypt t6 utf8 flag, op/delete t26/t54/t56, op/or t9/t10 lvaluish `||`)
+  recorded row-by-row with source lines in **task #162**, explicitly unprobed.
+- Skipped op/push/splice/unshift on purpose: that is the SvREADONLY family
+  (#159), which is waiting on a design call.
+- **Discovered while triaging**: `tools/run-perl-suite.pl` does NOT load
+  `cl/skip-registry.lisp` (only `runt` and the sweep do), so per-test skips do
+  not exist for t/ suite files — `perl-suite-expected.tsv` (per-file) is the
+  only mechanism there.  Left as-is; changing it is a design call.
+
 ---
 
 ## Session 318 (2026-08-01, Opus 5) — W1 queue: #142 tie bareword class, then #154 wrong-kind deref dies like perl. avhv.t 0/40 → 37/40.
