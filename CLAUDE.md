@@ -298,8 +298,8 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **123 test files, 4453 tests** with a built pclxs sibling; **4439 without**
-  (s319, measured).  The gate count is deterministic *per environment*, but it
+- **124 test files, 4467 tests** with a built pclxs sibling; **4453 without**
+  (s321, measured).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not
@@ -308,7 +308,7 @@ func => -12         # 1 param before list
   silently subtracts those 14**, because the worktree lives elsewhere and its
   sibling path does not exist.  A worktree is still the right way to compare
   against HEAD (never a stash-copy) — just set `PCLXS_DIR=~/pclxs`, or expect
-  and subtract the 14.  What must hold either way is `Result: PASS` and 123
+  and subtract the 14.  What must hold either way is `Result: PASS` and 124
   files.
 - **XS conformance: 370 pass, 0 fail — fully green** against pclxs's corpus
   with real perl as oracle (`tools/pcl-conform`, session 315; XS OO/magic
@@ -317,14 +317,21 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
-- Full `perl-tests/` sweep: 65 files fully passing, 702 blessed fails
-  (count re-read s316u at `--jobs 8 --timeout 380`; blessed-fail baseline
-  from s315d — class-model target-first reads, $TODO honored again
-  under :invert, no-match s/// write gate; fresh_perl/runperl children run
-  under PCL via `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores
-  the old compare mode).  GOTCHA: pack.t runs ~90s under `--jobs 8` against
-  the 90s default timeout — re-bless runs need `--timeout 150` or pack.t's
-  90 rows vanish from the faillog.  See `docs/sweep-bug-catalog.md`
+- Full `perl-tests/` sweep: **690 blessed fails** in `docs/fail-baseline.tsv`
+  (verified s321: `sweep-diff.pl diff docs/fail-baseline.tsv .faillog` = 0
+  new / 0 fixed); 65 files fully passing (count re-read s316u at `--jobs 8
+  --timeout 380`, not re-measured since).  Baseline from s315d —
+  class-model target-first reads, $TODO honored again under :invert,
+  no-match s/// write gate; fresh_perl/runperl children run under PCL via
+  `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores the old compare
+  mode.
+  **GOTCHA (pack.t, re-measured s321): `--timeout 150` is NOT enough any
+  more** — pack.t takes ~156 s at `--jobs 1` and TIMEOUTs at `--jobs 8`,
+  so use `--timeout 400` when its rows matter.  And note what that hides:
+  **pack.t has NO rows in the blessed baseline at all**, precisely because
+  it keeps timing out, so a normal sweep is *silent* about pack.t
+  regressions (its ~89 failing rows are neither blessed nor "new").  Task
+  #176.  See `docs/sweep-bug-catalog.md`
 - v2 pipeline census: 111 files v2-native / 0 gated to v1 — E1 complete
   (`perl tools/v2-census.pl` for the live numbers)
 

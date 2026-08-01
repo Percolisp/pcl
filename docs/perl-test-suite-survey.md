@@ -545,6 +545,22 @@ fixed feature).  Unexplained crashes must NOT be marked — they stay triage
 targets.  Seeded s302b: 41 `mro/*` (§mro), 10 `re/uniprops*` (§Unicode
 `\p{}`), `cmd/for.t` (§Internals::*).
 
+**Harness-fixture artifacts — a THIRD category (s320).**  When the divergence
+comes from the MEASUREMENT SETUP rather than from PCL, the row belongs in
+**`docs/perl-suite-fixture.tsv`** (`rel<TAB>rows<TAB>cause`) and the file
+becomes status **FIXTURE**.  It is deliberately not `perl-suite-expected.tsv`:
+that file's bar is "explained by a blessed `not-supported.md` section", so
+filing an artifact there would claim PCL lacks a feature it has.  Matching is
+per TEST NUMBER and all-or-nothing — one unregistered failing row keeps the
+file DIFF and names it — and a registered file that starts fully passing is
+STALE.  The bar is higher than expected.tsv's (every primitive probed
+identical in both, a named piece of differing setup, and *if the fix is in PCL
+it is not an artifact*); the file's RESOLVED list carries #151/#167 as the
+worked examples of that last rule.  Also s320: `%QUARANTINE` in the runner —
+files that take the whole machine down (`op/list.t`, `op/pack.t`, task #160)
+are never run and appear as NOT-RUN rows carrying the reason, which still
+counts as UNEXPLAINED and still fails the run.
+
 **Harness fixture — the shadow t/ (s303).**  The `require './test.pl'` /
 `chdir 't'` idiom no longer skips a file.  The runner builds a **shadow t/**
 in its temp dir: every top-level entry of the real tree symlinked in, then

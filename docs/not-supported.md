@@ -222,7 +222,33 @@ Perl's `use bytes` makes string ops (including `sprintf %vd`) see the UTF-8
 pragma yields `1.22.197.141.225.133.156` — the 333 and 4444 expand to their
 UTF-8 byte sequences).  PCL strings are SBCL character vectors with no
 byte-view; the pragma is a no-op, so such characters format as their code
-points.  Affects `op/ver.t` tests 21/23/25 (the `use bytes` block).
+points.  Affects `op/ver.t` tests 21/23/25 and `op/chr.t` tests 10-13 (both
+the `use bytes` block; chr.t asks for `chr(-1)` to be the single byte `\xFF`
+under the pragma, where PCL keeps the un-pragma'd `\x{FFFD}`).
+
+### Code points above U+10FFFF (perl's extended UTF-8)
+
+**Perl behaviour:** perl can hold and encode code points *beyond* Unicode's
+maximum using its own extended UTF-8 — `chr(0x110000)` encodes as
+`f4 90 80 80`, `chr(0x1FFFFF)` as `f7 bf bf bf`, and `chr(0x200000)` as the
+five-byte `f8 88 80 80 80`.
+
+**PCL behaviour:** the character is unrepresentable, and stringifies as
+`\x{FFFD}` (the Unicode replacement character) — which is already what perl
+itself gives for other unrepresentable arguments such as `chr(-1)`.
+
+**Why:** Perl strings are SBCL character vectors, and SBCL's `char-code-limit`
+is 1114112 (`#x110000`) — measured, s319/s320 — so the largest character that
+can exist in a CL string is `#x10FFFF` and `(code-char #x110000)` yields no
+character at all.  Supporting these would mean changing the representation of
+every Perl string away from a CL string, which is a data-model change of the
+same scale as boxed aggregates, for a perl-private extension: no CPAN module
+emits code points past U+10FFFF, and Unicode itself defines none.  Ruled a
+blessed gap in `docs/fable-answers-s318.md` §11.
+
+Affects `op/chr.t` tests 40-42.  (`ord` still round-trips the number — PCL
+carries the numeric value in the box — so only the *character/encoded* form
+is lost.)
 
 ### `use vN` does not toggle default warnings
 
@@ -1056,6 +1082,41 @@ adversarial code.  No CPAN module in scope uses it.
 
 **Affected tests:** `perl-tests/eval.t` — the block using `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 is commented out (6 tests).
+
+## `tie` on an ARRAY or HASH  [INTERIM — announced, not silent; scalar tie works]
+
+**Perl behaviour:** `tie @a, 'Tie::StdArray'` / `tie %h, 'Tie::StdHash'` route
+every element read and write through the tie object's `FETCH`/`STORE`/
+`EXISTS`/`DELETE`/… methods.
+
+**PCL behaviour:** the tie is **ignored**, and the program continues on the
+untied aggregate.  As of s320 this is no longer silent: `p-tie` prints one
+loud line to stderr —
+
+```
+PCL: tie on ARRAY/HASH is not implemented (task #155) — tie ignored (class Tie::StdHash)
+```
+
+— once per (kind, class) per process, and returns as before.  **`tie` on a
+SCALAR is fully implemented** (`p-tie-proxy`: `unbox` dispatches `FETCH`,
+`box-set` dispatches `STORE`) and is unaffected.
+
+**Why:** a scalar carries a `p-box` — a place with slots for `sv-ok`, `nv-ok`,
+class, magic — and installing a tie proxy is just writing that box's value
+slot.  An aggregate carries *nothing*: it arrives at `p-tie` as a raw CL
+hash-table or vector, with nowhere to hang the proxy.  This is the same one
+missing thing behind `Internals::SvREADONLY(@a,1)` being a no-op — see the
+`Internals::*` section — and the fix for both is the boxed-aggregate data
+model, which changes the representation every array/hash access compiles
+against.  That is an E5-era design item (Target A: it costs an indirection on
+the hottest paths), deliberately **not** started pre-R1.
+
+**Interim, not final.**  A `die` was considered and rejected for R1: it would
+turn files that tie a container mid-run (`op/avhv.t`, 38/2 today) into crashes,
+i.e. trade an announced wrong answer for an un-registrable one days before a
+release.  Announced-wrong is the CLAUDE.md rule 12 minimum; TAP output is
+unaffected by the stderr line.  Revisit die-vs-support when the boxed-aggregate
+design lands.  Tracked as task #155, ruled in `docs/fable-answers-s318.md` §1.
 
 ## Sparse arrays (holes), element aliasing, and SV identity
 

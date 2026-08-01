@@ -4,6 +4,76 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 321 (2026-08-01, Opus 5) — S1 gate hygiene: the five items, and the two registries now say *which kind* of "not PCL's fault" a row is
+
+Executing the S1 list from `fable-answers-s318.md`.  All five landed; the
+theme is that the release signal now distinguishes three different reasons a
+row can fail, instead of one bucket called UNEXPLAINED.
+
+- **FIXTURE status + `docs/perl-suite-fixture.tsv`** (#172, §10).  A third
+  category next to OK/XDIFF: the divergence is produced by the measurement
+  setup, not by PCL.  Kept OUT of `perl-suite-expected.tsv` deliberately —
+  that file's bar is "explained by a blessed `not-supported.md` section", so
+  filing an artifact there would claim PCL lacks a feature it has, and the
+  next reader would believe it.  Matching is **per test number and
+  all-or-nothing**: one unregistered failing row keeps the file DIFF *and
+  names the intruders*, so a real bug landing in a fixture-affected file
+  cannot hide behind the registration; a registered file that starts fully
+  passing is STALE and fails the run.  Registered: `op/chdir.t` 25,31.
+  **#151 and #167 are NOT in the list** — both were FIXED (a `cp` had
+  clobbered perl's real `t/test.pl`; PCL's `File::Spec` shim ignored
+  `splitpath`'s `no_file`), and the file's RESOLVED section keeps them as the
+  worked examples of its bar rule 3: *if the fix is in PCL, it is not an
+  artifact*.  Both inverse guards probed live (registering only row 25 →
+  DIFF "unregistered failing rows 31"; registering a passing file → STALE;
+  exit 1 both times), then reverted.
+- **op/chr.t → XDIFF** (#173, §11).  `### Code points above U+10FFFF` added
+  under §Unicode; `char-code-limit` = 1114112 re-measured, `(code-char
+  #x110000)` yields no character.  The `### use bytes` subsection now also
+  names chr.t t10-13.  All 7 failing rows explained, file verified XDIFF.
+  Side observation worth having: `ord` still round-trips the number (PCL
+  carries it in the box) — only the character/encoded form is lost.
+- **do.t registered, #158 closed with no fix** (§4).  Registration turned up
+  two facts the ruling did not have: the family is **four** rows (t63-t66,
+  one `foreach my $mode` loop, not two), and do.t's **2 "PCL-only extra test
+  numbers" are those same rows' `fail()` guard firing** when PCL calls the
+  sub — not a separate defect.  op/do.t still gets NO expected.tsv row
+  (all-or-nothing bar) and stays DIFF 65/8; its honest residue is t67
+  (delete-helem result copied), t68 (RT 124248 DESTROY-by-GC) and t70 (`$@`
+  false on `do DIR`) — S3 material.
+- **op/list.t + op/pack.t quarantined** (#160, §8) via a new `%QUARANTINE`,
+  deliberately **not** `%HEAVY`: %HEAVY only runs a file solo, which cannot
+  help a file that OOMs a 10 GB cgroup at `--jobs 1`.  Quarantined ≠ skipped
+  — each gets a NOT-RUN row carrying its reason, NOT-RUN stays an
+  UNEXPLAINED status, so they still fail the run and still read as a hole in
+  the tsv.  The summary line names them so the count is not misread as new
+  breakage.
+- **Verification**: gate 124 files / **4467** tests `Result: PASS` (the +6 are
+  the new tie guards); full sweep **0 new / 0 fixed** vs the 690-row
+  baseline, 2 unverified (postfixderef.t stops early — pre-existing, same
+  rows as s316v).  No `Pl/` file touched, so no corpus-diff and no
+  cache-generation bump.
+- **Found while verifying — `pack.t` is invisible to the sweep gate** (new
+  task #176).  It takes ~156 s at `--jobs 1` now and TIMEOUTs at `--jobs 8`
+  even with `--timeout 150` (CLAUDE.md's gotcha was stale), and the
+  consequence is worse than a slow file: `fail-baseline.tsv` has **zero**
+  pack.t rows *because* it always timed out, so its ~89 failing rows are
+  neither blessed nor reportable as "new" — a real pack/unpack regression
+  would not move the 0-new number at all.  Same family as #157, one signal
+  over.  Not fixed here: blessing 89 rows on the way into a release commit
+  is exactly the kind of baseline churn that hides things.
+- **#155 tie-on-aggregate now announces itself** (§1).
+  `%p-warn-aggregate-tie` on `p-tie`'s non-box early return, deduped per
+  (kind, class) per process so a tie in a loop is one line, not thousands.
+  Warning, not die, for the reason Fable gave: a die converts avhv.t-class
+  files into CRASH, which the gate treats as un-registrable.  Guarded in
+  `Pl/t/transpile-test-07.t` with three inverse guards — the second tie must
+  NOT re-warn, the *implemented* SCALAR tie must stay silent and keep
+  FETCHing/STOREing, and the ignored aggregate must still behave as a plain
+  hash.
+
+---
+
 ## Session 320 (2026-08-01, Fable) — rulings on the s318/s319 review requests; the S1/S2/S3+ worklist for the R1 window
 
 - **`docs/fable-answers-s318.md` written** — rules on every open ask in

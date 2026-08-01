@@ -679,4 +679,50 @@ my @n = localtime($t);
 print "no-tz-fields=", scalar(@n), "\n";
 ');
 
+# Task #155 (ruled s320, fable-answers-s318.md §1): `tie @a`/`tie %h` is a
+# no-op — an aggregate arrives at p-tie as a RAW hash-table/vector with no box
+# to hold the tie proxy — and it used to be a SILENT one, which is the failure
+# mode CLAUDE.md rule 12 exists to stop.  It must now ANNOUNCE itself on
+# stderr, once per (kind, class) so a tie in a loop stays one line.  NOT a die:
+# that would turn files that tie a container mid-run into crashes.
+#
+# Three INVERSE guards, because each is a way the warning could be wrong:
+#   * the second `tie %h` must NOT print again (dedup actually dedups),
+#   * SCALAR tie is IMPLEMENTED and must stay silent AND working (the warning
+#     must not have swallowed the working path),
+#   * the untied aggregate must still behave like a plain hash afterwards.
+{
+    my $out = run_cl(<<'PERL');
+package T::Agg;
+sub TIEHASH  { bless {}, shift }
+sub TIEARRAY { bless {}, shift }
+package T::Scalar;
+sub TIESCALAR { my ($c, $v) = @_; bless \$v, $c }
+sub FETCH     { my $s = shift; "FETCHED:$$s" }
+sub STORE     { my ($s, $v) = @_; $$s = $v }
+package main;
+my %h;
+tie %h, 'T::Agg';
+tie %h, 'T::Agg';            # same (kind, class): must NOT warn a second time
+my @a;
+tie @a, 'T::Agg';
+my $s;
+tie $s, 'T::Scalar', 'init'; # scalar tie: implemented, must stay silent
+$h{k} = 'plain';
+print "hash=$h{k}\n";
+print "scalar=$s\n";
+$s = 'set';
+print "scalar2=$s\n";
+PERL
+    my $hash_warns  = () = $out =~ /^PCL: tie on HASH is not implemented \(task #155\)/mg;
+    my $array_warns = () = $out =~ /^PCL: tie on ARRAY is not implemented \(task #155\)/mg;
+    is($hash_warns,  1, 'aggregate tie on a HASH announces itself exactly once (deduped)');
+    is($array_warns, 1, 'aggregate tie on an ARRAY announces itself exactly once');
+    unlike($out, qr/tie on (?:SCALAR|non-lvalue)/,
+           'implemented SCALAR tie is not announced as unimplemented');
+    like($out, qr/^hash=plain$/m,   'the ignored aggregate tie leaves a working plain hash');
+    like($out, qr/^scalar=FETCHED:init$/m, 'SCALAR tie still FETCHes');
+    like($out, qr/^scalar2=FETCHED:set$/m, 'SCALAR tie still STOREs');
+}
+
 done_testing();

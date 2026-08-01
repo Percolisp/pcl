@@ -60,16 +60,27 @@ not-supported.md → only then probe.*
 - **tie on ARRAY/HASH**: interim = loud stderr WARNING + not-supported
   subsection (NOT a die — would CRASH avhv.t-class files); real support
   waits for boxed aggregates → `fable-answers-s318.md` §1, task #155.
+  SHIPPED s320: `%p-warn-aggregate-tie` in `pcl-runtime.lisp`, one line per
+  (kind, class) per process so a tie in a loop stays one line.
 - **Read-only aggregates** (`Internals::SvREADONLY(@a,1)`): storage-swap to
   a simple vector, post-R1; never a weak-hash probe on the push path; do
   not bless as not-supported → `fable-answers-s318.md` §2, task #159.
 - **`do SUBNAME(LIST)`**: NO fix — pre-5.20 perl called the sub and PCL
   keeps that semantics; modern perl's rejection is principle-9 material
   (register do.t t63/t65, nothing near `$end_pars`) →
-  `fable-answers-s318.md` §4, task #158.
+  `fable-answers-s318.md` §4, task #158.  Measured s320: the family is
+  **four** rows, t63-t66 (one `foreach my $mode` over `subname("arg")`,
+  `subname()`, `$subref("arg")`, `$subref()`, each asserting
+  `$@ =~ /\Asyntax error/`), and do.t's **2 PCL-only extra TAP numbers are
+  those same rows' `fail()` guard firing** — not a separate defect.  op/do.t
+  still reads DIFF (65/8) and gets NO expected.tsv row: t67 (delete-helem
+  result copied), t68 (RT 124248 DESTROY-by-GC) and t70 (`$@` false on
+  `do DIR`) are unexplained, and the registration bar is all-or-nothing.
 - **chr() above U+10FFFF**: blessed — SBCL `char-code-limit` = #x110000,
   U+FFFD is the answer; op/chr.t → XDIFF → `fable-answers-s318.md` §11,
-  `not-supported.md` §Unicode, task #173.
+  `not-supported.md` §Unicode, task #173.  SHIPPED s320 (verified XDIFF:
+  t10-13 `use bytes` + t40-42 above-Unicode = all 7 rows).  `ord` still
+  round-trips the number — only the character/encoded form is lost.
 - **#149 application**: per-ROW; side-effect/value/behaviour assertions on
   VALID Perl never register; interleave, never a campaign →
   `fable-answers-s318.md` §3.
@@ -136,16 +147,23 @@ not-supported.md → only then probe.*
 - **Fixture artifacts get a FIXTURE status + registry in the runner** (not
   `perl-suite-expected.tsv` — a harness artifact is not a language gap):
   #151 stub-cp, #167 splitpath-skip, #172 shadow-symlink getcwd →
-  `fable-answers-s318.md` §10.
+  `fable-answers-s318.md` §10.  SHIPPED s320: `docs/perl-suite-fixture.tsv`
+  (`file<TAB>rows<TAB>cause`), matched per TEST NUMBER and all-or-nothing —
+  one unregistered failing row keeps the file DIFF and names it, a
+  fully-passing registered file is STALE.  #151/#167 were FIXED, not
+  registered; the file's RESOLVED list says why (its bar rule 3).
 - **The suite tsv snapshot GATES R1**: one full regeneration (per-dir
   FOREGROUND chunks, `--jobs 2-4`) as the LAST pre-R1 act, after the
   FIXTURE/XDIFF hygiene lands; partial regeneration forbidden →
   `fable-answers-s318.md` §6.
-- **op/list.t + op/pack.t are %HEAVY-quarantined** (op/list.t OOMs a 10 GB
+- **op/list.t + op/pack.t are QUARANTINED** (op/list.t OOMs a 10 GB
   cgroup in 53 s, transpiler innocent); they appear as NOT-RUN rows WITH
   the #160 reason, never silently absent; diagnosis post-R1, user
   re-authorization first, suspect SBCL compile time →
-  `fable-answers-s318.md` §8, task #160.
+  `fable-answers-s318.md` §8, task #160.  SHIPPED s320 as `%QUARANTINE` in
+  `run-perl-suite.pl` — a SEPARATE mechanism from `%HEAVY` (which only runs
+  a file solo).  Quarantined ≠ skipped: NOT-RUN is an UNEXPLAINED status,
+  so these still fail the run and still show as a hole in the tsv.
 - **Forked workers must never run the parent's END blocks or signal
   handlers** ($$ == $MAIN_PID guard): one signalled worker otherwise
   `rm -rf`s the SHARED tmpdir and kills its siblings → task #157, guard in

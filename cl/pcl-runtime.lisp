@@ -13156,12 +13156,39 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; unbox() intercepts reads (FETCH); box-set() intercepts writes (STORE).
 ;;; Phase 1: scalars only.  Arrays/hashes require boxing those types first.
 
+(defvar *p-tie-aggregate-warned* (make-hash-table :test 'equal)
+  "Keys already announced by %p-warn-aggregate-tie, so a tie in a loop
+   produces one line, not thousands.")
+
+(defun %p-warn-aggregate-tie (value classname)
+  "Announce an aggregate tie that PCL is about to DROP (task #155).
+   Silent-wrong is the failure mode CLAUDE.md rule 12 exists to stop: the
+   program runs on an UNTIED container and every FETCH/STORE the test was
+   written to observe simply never happens.  A die was rejected for R1 (it
+   converts mid-file tie users into crashes); see docs/not-supported.md
+   'tie on an ARRAY or HASH'.  Deduped per (kind, class) per process."
+  (let* ((kind (cond ((hash-table-p value) "HASH")
+                     ((and (vectorp value) (not (stringp value))) "ARRAY")
+                     (t "non-lvalue")))
+         (name (if (stringp classname) classname (format nil "~A" classname)))
+         (key  (concatenate 'string kind "/" name)))
+    (unless (gethash key *p-tie-aggregate-warned*)
+      (setf (gethash key *p-tie-aggregate-warned*) t)
+      (format *error-output*
+              "PCL: tie on ~A is not implemented (task #155) — tie ignored (class ~A)~%"
+              kind name)
+      (force-output *error-output*)))
+  nil)
+
 (defun p-tie (box classname &rest args)
   "Perl tie - bind a scalar variable to a class implementing TIESCALAR.
    Dispatches to TIEARRAY or TIEHASH when box holds a vector or hash-table
    (future: requires array/hash boxing for full correctness).
    Falls back gracefully if the tie class or method is not available."
   (unless (p-box-p box)
+    ;; An ARRAY/HASH arrives here RAW — a bare hash-table or vector, with no
+    ;; box to hold a tie proxy — so the tie is dropped.  Say so out loud.
+    (%p-warn-aggregate-tie box classname)
     (return-from p-tie *p-undef*))
   (let* ((current (p-box-value box))
          (constructor (cond

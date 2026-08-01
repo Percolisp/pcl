@@ -1,0 +1,41 @@
+# perl-suite-fixture.tsv — HARNESS-FIXTURE artifacts for tools/run-perl-suite.pl
+# One row per file: <rel-path><TAB><failing test numbers, comma-separated><TAB><cause>
+#
+# WHAT BELONGS HERE, and why it is not perl-suite-expected.tsv (ruled s320,
+# fable-answers-s318.md §10): a row here says the divergence is produced by the
+# MEASUREMENT SETUP, not by PCL.  perl-suite-expected.tsv's bar is "explained by
+# a blessed docs/not-supported.md section" — filing an artifact there would
+# claim PCL lacks a feature it actually has, and a future reader would believe
+# it.  So artifacts get their own status (FIXTURE) and their own file.
+#
+# THE BAR — higher than expected.tsv's, because "the harness did it" is the
+# easiest excuse in the codebase to reach for:
+#   1. Every primitive the failing rows exercise must be PROBED and shown to
+#      behave identically in PCL and in perl.  "PCL looks right" is not enough.
+#   2. The cause must name the specific piece of setup that differs, in one
+#      line, with the session that established it.
+#   3. If the fix is in PCL (a drifted shim, a missing builtin), it is NOT an
+#      artifact — fix it.  See the RESOLVED list below for two that were.
+#
+# ENFORCEMENT (runner): rows are matched per TEST NUMBER against the per-test
+# failure log, all-or-nothing.  One unregistered failing row and the file stays
+# DIFF, naming the intruders — a real bug landing in a fixture-affected file
+# can never hide behind the registration.  A registered file that starts fully
+# passing is flagged STALE and FAILS the run, same as expected.tsv.
+#
+# file	rows	cause
+op/chdir.t	25,31	Task #172 (s319): the shadow t/ SYMLINKS op/, and getcwd(3) returns the PHYSICAL path, so the test's `"$Cwd/op"` can never equal the post-chdir cwd. perl runs in the real tree, PCL in the shadow. Probed identical in both: bare chdir() honouring HOME *and* LOGDIR, delete $ENV{}, cwd() tracking a chdir, rel2abs(curdir), and chdir-into-a-symlink resolving to the physical path. Nothing in PCL is wrong; the two sides run in different trees.
+#
+# ---------------------------------------------------------------------------
+# RESOLVED — artifacts that were FIXED rather than registered.  Kept as the
+# worked examples of bar rule 3: neither of these belongs in the list above.
+#
+# #151 (s319)  io/defout.t, op/localref.t, uni/bless.t read NOTAP.  Cause: a
+#              `cp` had followed a symlink and overwritten perl's REAL
+#              t/test.pl with PCL's stub, so the perl BASELINE was broken for
+#              every file using it.  Fixed by restoring test.pl from the
+#              perl-5.40.3 tarball.  The measurement was wrong, not the setup.
+# #167 (s319)  op/chdir.t t1/t2.  Looked like a fixture skew; was PCL's own
+#              File::Spec shim ignoring splitpath's `no_file` argument, so the
+#              test's `skip` never fired and PCL RAN two tests perl SKIPS.
+#              Fixed in the shim — a real PCL bug wearing an artifact's coat.

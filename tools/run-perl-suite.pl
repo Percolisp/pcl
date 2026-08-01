@@ -65,10 +65,27 @@
 # build-tree modules from ../lib that PCL cannot load.  That is now the ONLY
 # filter, and dir scans report its count, so coverage is visible.
 #
+# Harness-fixture artifacts — a THIRD category, and not not-support:
+#   docs/perl-suite-fixture.tsv maps `rel<TAB>rows<TAB>cause` for rows that
+#   diverge because the two sides run in different trees, not because PCL
+#   lacks anything.  (Worked example, task #172: the shadow t/ SYMLINKS op/,
+#   and getcwd(3) returns the PHYSICAL path, so op/chdir.t's `"$Cwd/op"` can
+#   never equal the post-chdir cwd — PCL and perl were verified identical on
+#   every primitive involved.)  Such a file becomes status FIXTURE and stops
+#   counting as UNEXPLAINED.  Deliberately NOT perl-suite-expected.tsv: that
+#   file's bar is "explained by a blessed not-supported.md section", so filing
+#   an artifact there would claim PCL lacks something it has.
+#   Registration is per-ROW and all-or-nothing: the file's ENTIRE divergence
+#   must be registered rows or it stays DIFF with the intruders named, so a
+#   real bug landing in a fixture-affected file can never hide.  A registered
+#   file that starts fully passing is STALE and fails the run.
+#
 # Output columns: P:perl_ok/notok  C:pcl_ok/notok  STATUS  [crash-signature]
 # STATUS: OK (counts match) | DIFF | TRANSPILE | TIMEOUT | NOTAP (perl itself
 # produced no TAP — not comparable, doesn't fail the run; PCL result shown)
-# | KILLED / NOT-RUN (the RUN died before measuring this file — see below).
+# | XDIFF (expected divergence) | FIXTURE (harness artifact, see above)
+# | KILLED / NOT-RUN (the RUN died before measuring this file — see below;
+# also the status of a QUARANTINED file, which is never run at all).
 # Exit: nonzero iff any DIFF/TRANSPILE/TIMEOUT/MISSING/NO-RESULT/KILLED/NOT-RUN.
 #
 # EVERY requested file gets a row, including when the run itself dies (task
@@ -120,6 +137,7 @@ my $jobs = 8;
 my $timeout = 90;
 my $faillog = "$root/.suitelog";
 my $expected_tsv = "$root/docs/perl-suite-expected.tsv";
+my $fixture_tsv  = "$root/docs/perl-suite-fixture.tsv";
 my (@dirs, @files);
 while (@ARGV) {
   my $a = shift @ARGV;
@@ -145,6 +163,21 @@ if (open my $ef, '<', $expected_tsv) {
     $expected{$rel} = $reason // '';
   }
   close $ef;
+}
+
+# Fixture-artifact registry: rel -> { rows => {n=>1}, cause => text }.
+# A DIFFERENT category from %expected — see docs/perl-suite-fixture.tsv and
+# the FIXTURE paragraph in the header comment.  Keyed per ROW, not per file.
+my %fixture;
+if (open my $ff, '<', $fixture_tsv) {
+  while (<$ff>) {
+    chomp;
+    next if /^\s*(?:#|$)/;
+    my ($rel, $rows, $cause) = split /\t/, $_, 3;
+    $fixture{$rel} = { rows  => { map { $_ => 1 } grep { length } split /\s*,\s*/, ($rows // '') },
+                       cause => $cause // '' };
+  }
+  close $ff;
 }
 -d $tdir or die "perl t/ tree not found: $tdir (pass --tdir)\n";
 $all = 1 if !@files && !@dirs;
@@ -436,6 +469,29 @@ my %HEAVY = map { $_ => 1 } (
   'op/cond.t',   # 20k-nested-ternary eval: pl2cl server peaks ~6.6 GB
 );
 my @heavy = grep { $HEAVY{$_} } @files;
+
+# QUARANTINE (task #160, ruled s320): files that take the whole MACHINE down,
+# not just themselves.  op/list.t alone consumed a 10 GB cgroup in 53 s under
+# --jobs 1 on an idle box and got OOM-killed, taking the run with it and
+# leaving op/pack.t unmeasured behind it in the queue.  The transpiler is
+# innocent (pl2cl: 1.23 s, 64 MB, 564 lines of CL) — the blowup is SBCL-side,
+# diagnosis is POST-R1 and needs the user to re-authorize running these.
+#
+# Quarantine means NOT RUN, never "skipped": each gets a NOT-RUN row carrying
+# the reason, which is an UNEXPLAINED status, so the file still fails the run
+# and still shows up in the tsv as a hole in the release signal.  Hiding it
+# would be the one thing worse than not measuring it.
+my %QUARANTINE = (
+  'op/list.t' => 'task #160 — 10 GB SBCL blowup OOM-kills the run',
+  'op/pack.t' => 'task #160 — never measured; was queued behind op/list.t when it OOMed',
+);
+my @quarantined = grep { $QUARANTINE{$_} } @files;
+for my $rel (@quarantined) {
+  record_result([$rel, 0, 0, 0, 0, 'NOT-RUN', "QUARANTINED: $QUARANTINE{$rel}"]);
+  printf "%-24s %s\n", $rel, "NOT-RUN (QUARANTINED: $QUARANTINE{$rel})";
+}
+@files = grep { !$QUARANTINE{$_} } @files;
+@heavy = grep { !$QUARANTINE{$_} } @heavy;
 # Workers sit in their own process groups, so terminal SIGINT no longer
 # reaches them — forward it.  exit() still runs the END blocks, which is
 # now what PRINTS the report for everything unfinished (task #157); a
@@ -496,6 +552,29 @@ while (@queue || %children) {
         $r[6] = "expected-divergence row now PASSES — remove it from docs/perl-suite-expected.tsv";
       }
     }
+    # Fixture-artifact registry (task #172): per-ROW, and only ever applied to
+    # a file whose ENTIRE divergence is registered rows.  One unregistered row
+    # and the file stays DIFF — naming the intruders, so a real bug appearing
+    # inside a fixture-affected file can never hide behind the registration.
+    elsif (my $fx = $fixture{$r[0]}) {
+      if ($r[5] eq 'DIFF') {
+        my @diverging = read_diverging_rows($r[0]);
+        my @unreg = grep { !$fx->{rows}{$_} } @diverging;
+        if (!@diverging) {
+          $r[6] = join(' | ', grep { length } $r[6] // '',
+                       'fixture rows registered but no per-row log — left DIFF');
+        } elsif (@unreg) {
+          $r[6] = join(' | ', grep { length } $r[6] // '',
+                       "NOT a pure fixture artifact: unregistered failing rows @unreg");
+        } else {
+          $r[5] = 'FIXTURE';
+          $r[6] = join(' | ', grep { length } $r[6] // '', $fx->{cause});
+        }
+      } elsif ($r[5] eq 'OK') {
+        $r[5] = 'STALE';
+        $r[6] = "fixture-artifact row now PASSES — remove it from docs/perl-suite-fixture.tsv";
+      }
+    }
     record_result(\@r);
     printf "%-24s P:%4d/%-3d C:%4d/%-4d %-7s %s\n", @r[0 .. 5], $r[6] // '';
     STDOUT->flush();
@@ -519,6 +598,27 @@ exit(emit_report() ? 1 : 0);
 # One row per file requested, ALWAYS — see the crash-honest reporting note
 # near the top.  Called on the normal path and from the END block; the
 # $reported latch keeps it single-shot either way.
+# Which TAP test numbers diverged, read back from the per-test failure log the
+# worker just wrote.  Returns () when there is no log (e.g. PCL produced no TAP
+# at all — the summary-row case, which must never read as "nothing diverged").
+sub read_diverging_rows {
+  my ($rel) = @_;
+  (my $safe = $rel) =~ s{/}{_}g;
+  open my $lf, '<', "$faillog/$safe.fails.tsv" or return ();
+  my @rows;
+  while (<$lf>) {
+    next if /^\s*#/;
+    my (undef, $n) = split /\t/, $_, 3;
+    next unless defined $n;
+    # test# 0 is the log's summary row — "PCL produced no TAP" or "N PCL-only
+    # test numbers".  Both are divergences, and neither can ever match a
+    # numeric registry row, so they correctly keep such a file out of FIXTURE.
+    push @rows, ($n =~ /^[1-9][0-9]*$/ ? $n : "summary-row($n)");
+  }
+  close $lf;
+  return @rows;
+}
+
 sub record_result {
   my ($r) = @_;
   $results{$r->[0]} = $r;
@@ -555,10 +655,16 @@ sub emit_report {
     printf "%-8s %3d%s\n", $st, scalar @f,
       ($st eq 'OK' ? '' : ':  ' . join(', ', @f));
   }
-  my $n_bad = grep { $results{$_}[5] !~ /^(?:OK|NOTAP|XDIFF)$/ } keys %results;
-  printf "%d files: %d OK, %d NOTAP, %d XDIFF (expected, see docs/perl-suite-expected.tsv), %d UNEXPLAINED\n",
+  my $n_bad = grep { $results{$_}[5] !~ /^(?:OK|NOTAP|XDIFF|FIXTURE)$/ } keys %results;
+  printf "%d files: %d OK, %d NOTAP, %d XDIFF (expected, see docs/perl-suite-expected.tsv), %d FIXTURE (harness artifact, see docs/perl-suite-fixture.tsv), %d UNEXPLAINED\n",
     scalar(keys %results), scalar(@{ $by_status{OK} // [] }),
-    scalar(@{ $by_status{NOTAP} // [] }), scalar(@{ $by_status{XDIFF} // [] }), $n_bad;
+    scalar(@{ $by_status{NOTAP} // [] }), scalar(@{ $by_status{XDIFF} // [] }),
+    scalar(@{ $by_status{FIXTURE} // [] }), $n_bad;
+  # Quarantined files are NOT-RUN by construction, so they are already counted
+  # as UNEXPLAINED above — say so, so nobody reads the number as new breakage.
+  printf "%d of those UNEXPLAINED are QUARANTINED (never run this session): %s\n",
+    scalar(@quarantined), join(', ', map { "$_ ($QUARANTINE{$_})" } @quarantined)
+    if @quarantined;
   print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
 
   if ($JOURNAL) {
@@ -572,6 +678,9 @@ sub emit_report {
     # Legend at the point of use — this has been misread twice (s316v).
     print $tf "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
     print $tf "# NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)\n";
+    print $tf "# XDIFF = expected divergence, docs/perl-suite-expected.tsv (a blessed not-supported.md gap)\n";
+    print $tf "# FIXTURE = harness artifact, docs/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)\n";
+    print $tf "# NOT-RUN with QUARANTINED = deliberately not run this session; UNMEASURED, never passing\n";
     print $tf "# INCOMPLETE RUN — KILLED/NOT-RUN rows are unmeasured, not passing\n" if @lost;
     print $tf join("\t", @{ $results{$_} }), "\n" for sort keys %results;
     close $tf;
