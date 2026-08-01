@@ -195,4 +195,35 @@ print $mw "written" if $ok; close $mw if $ok;
 print "memwrite ok=", ($ok?1:0), " out=[$out]\n";
 ');
 
+# ---------------------------------------------------------------------------
+# `use Cwd` used to DIE outright (task #166) — there was no Cwd.pm, even though
+# cwd() was already a builtin.  Most of CPAN reaches for Cwd, so this was a
+# wall, and it only surfaced when removing a duplicate exposed File::Spec's own
+# `require Cwd`.  abs_path is implemented in the shim on top of readlink/-l/-e,
+# NOT aliased to cwd(): it must resolve symlinks, and a shim quietly returning
+# an unresolved path would be worse than a missing one.
+#
+# The test builds its own symlink tree so it does not depend on the checkout.
+# ---------------------------------------------------------------------------
+test_transpile('Cwd: use Cwd works; abs_path resolves symlinks, .. and missing tails', '
+use Cwd qw(cwd getcwd abs_path realpath);
+my $base = "/tmp/pcl-cwd-test-$$";
+mkdir $base; mkdir "$base/real";
+open(my $fh, ">", "$base/real/f.txt") or die "setup: $!"; print $fh "x\n"; close $fh;
+symlink("real", "$base/link");
+symlink("/tmp", "$base/abslink");
+print "cwd-eq-getcwd = ", (cwd() eq getcwd() ? 1 : 0), "\n";
+for my $p ("$base/.", "$base/link", "$base/link/f.txt", "$base/abslink",
+           "$base/real/../real", "$base/real/newfile", "$base/nope/x", "/") {
+  my $r = abs_path($p);
+  (my $show = $p) =~ s/\Q$base\E/BASE/;
+  my $got = defined $r ? $r : "UNDEF";
+  $got =~ s/\Q$base\E/BASE/;
+  printf "abs(%-22s) = %s\n", $show, $got;
+}
+print "realpath-eq-abs = ", (realpath("$base/link") eq abs_path("$base/link") ? 1 : 0), "\n";
+unlink "$base/real/f.txt", "$base/link", "$base/abslink";
+rmdir "$base/real"; rmdir $base;
+');
+
 done_testing();

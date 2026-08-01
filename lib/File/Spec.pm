@@ -89,11 +89,10 @@ sub rel2abs {
     my ($class, $path, $base) = @_;
     return $path if defined $path && $path =~ m{^/};
     unless (defined $base) {
-        # Real File::Spec::Unix does `require Cwd; Cwd::cwd()`.  PCL has no
-        # Cwd.pm yet (task #166) — `use Cwd` / `require Cwd` both die — but it
-        # does have cwd() as a builtin, which is what the working copy of this
-        # function in File::Spec::Functions always used.  Switch back to Cwd
-        # once the shim exists, so this file matches the real one.
+        # Real File::Spec::Unix does `require Cwd; Cwd::cwd()`.  lib/Cwd.pm now
+        # exists (task #166) so that would work, but it is deliberately NOT
+        # used: Cwd::cwd() is itself just the cwd() builtin, so requiring the
+        # module here would only add a load to every base-less rel2abs.
         $base = cwd();
     }
     # The no-op relative paths give back the BASE itself, not "$base/." —
