@@ -398,6 +398,52 @@ same in the 91 files #150 part 1 unmasked.
 
 ---
 
+## 11. (added s319) A blessed-gap I will not declare on my own: perl's
+##     above-Unicode code points exceed SBCL's character ceiling
+
+Small, but CLAUDE.md 4 says not to mark something a limitation without asking,
+so here it is rather than in `not-supported.md`.
+
+`t/op/chr.t` t40-t42 encode code points ABOVE Unicode's maximum using perl's
+own extended UTF-8:
+
+```
+chr(0x110000)  perl: f4 90 80 80        PCL: U+FFFD
+chr(0x1FFFFF)  perl: f7 bf bf bf        PCL: U+FFFD
+chr(0x200000)  perl: f8 88 80 80 80     PCL: U+FFFD
+```
+
+**Measured, not assumed:** SBCL's `char-code-limit` is 1114112 (`#x110000`),
+so the largest representable character is `#x10FFFF` and `(code-char #x110000)`
+signals a `SIMPLE-TYPE-ERROR`.  A CL string physically cannot hold these.
+
+So the options are:
+
+1. **Bless it** (my recommendation) — a `### Code points above U+10FFFF`
+   subsection under §Unicode.  Perl's extended UTF-8 is a non-standard perl
+   extension; no real CPAN module emits code points past U+10FFFF, and U+FFFD
+   is already the sane answer for an unrepresentable one.
+2. **Represent Perl strings as something other than CL strings** — this is the
+   only way to actually support it, and it is a representation change on the
+   scale of the boxed-aggregates question in §1, for a case nothing needs.
+3. Leave it UNEXPLAINED, which keeps 3 rows in the gate looking like defects.
+
+If you take (1), op/chr.t's other four rows are already covered by the existing
+`### use bytes` subsection, so the whole file becomes a clean XDIFF and three
+more phantom rows leave the R1 signal.
+
+**Separately and already done** (no decision needed, flagging so the number is
+not a surprise): `op/cmpchain.t` is registered XDIFF.  All **274** of its
+failing rows are the identical assertion
+`is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"` — invalid
+Perl that must fail to compile.  That is CLAUDE.md §9's *verbatim* example and
+task #149's approved category.  I counted every row (274 of 274 say
+"non-associative"; none asserts a value) and verified the legitimately
+CHAINABLE form `$a == $b == $c` works correctly in PCL, so this is exclusively
+the rejection category and not a comparison-operator bug.
+
+---
+
 ## Verification standard used for the seven commits
 
 corpus-diff (emission-changing commits only — four of the seven are
