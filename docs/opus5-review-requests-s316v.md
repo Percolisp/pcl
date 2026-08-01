@@ -136,35 +136,79 @@ is why it is the one site that has to split at all.
 
 ---
 
-## 5. Reading `docs/perl-suite-run.tsv` — a trap worth writing down
+## 5. Reading `docs/perl-suite-run.tsv` — I got this wrong twice; here it is
+##    from the source
 
-The row format (`run-perl-suite.pl:352`) is
+The row (`run-perl-suite.pl:352`) is
 
     rel  P_ok  P_notok  C_ok  C_notok  status  sig
 
-i.e. **PCL's pass/fail then perl's pass/fail**.  I misread `C_ok` as PCL's
-failure count while picking W1 targets and produced a "near-green" list that
-was nothing of the sort — `op/fork.t` is `P:28/0`, *zero* PCL failures, DIFF
-only because perl itself yielded 1 test under the runner.  The correct
-filter is `status eq 'DIFF' && P_notok` small && `P_ok` large:
+and the authoritative meaning is the file's own header (~line 69), confirmed
+by the assignments at 268 and 296:
 
-| file | P_ok/notok | blocker |
-|---|---|---|
-| op/tie.t | 94/1 | — |
-| op/warn.t | 32/1 | **#142** bareword `tie` |
-| op/stash.t | 54/1 | `undef-fn:main::pl-SUPER` |
-| uni/stash.t | 48/1 | — |
-| op/die.t | 25/1 | — |
-| op/bless.t | 116/2 | — |
-| op/universal.t | 142/2 | `Can't locate object method "" via package "Alice"` |
-| op/attrs.t | 157/2 | `attributes::_guess_stash` |
-| op/lvref.t | 199/2 | `unbound:@state__toplevel__a__1` |
-| io/argv.t | 52/1 | `unbound:main::<>` |
+    # Output columns: P:perl_ok/notok  C:pcl_ok/notok  STATUS  [crash-signature]
+    # NOTAP (perl itself produced no TAP — not comparable, doesn't fail the
+    #   run; PCL result shown).
 
-A `C_ok` of 0 (op/tie.t, op/stat.t, re/pat.t) means **perl produced no TAP
-under the runner**, so those rows are DIFF for a harness reason and their
-PCL numbers cannot be compared against anything — worth separating before
-anyone treats them as fix targets.
+**P is PERL. C is PCL** (C for CL).  Two consequences that are easy to get
+backwards, and I did — first treating `C_ok` as PCL's *failures*, then
+treating `P` as PCL:
+
+- **`NOTAP` is a statement about PERL, not PCL.**  It means perl produced no
+  TAP under the runner, so the row cannot be compared — the PCL numbers are
+  still shown and may be perfectly healthy.  `op/bless.t` reports
+  `P:0/0 C:111/5`: perl gave nothing, PCL passed 111.  Several files I first
+  read as "PCL produces no TAP" are the opposite.
+- **`op/fork.t` is NOT clean** (I said it was): the row is `P:28/0 C:1/0` —
+  perl 28, **PCL 1**.
+
+The correct near-green filter is `status eq 'DIFF'` (both sides produced
+TAP) with **`C_notok`** small and `C_ok` large:
+
+| file | perl | PCL | blocker |
+|---|---|---|---|
+| io/defout.t | 22/0 | 21/**1** | — |
+| io/print.t | 24/0 | 23/**1** | — |
+| op/localref.t | 64/0 | 63/**1** | — |
+| uni/bless.t | 84/0 | 83/**1** | — |
+| op/quotemeta.t | 60/0 | 58/2 | — |
+| op/not.t | 24/0 | 22/2 | — |
+| op/64bitint.t | 425/0 | 423/2 | — |
+| op/lex_assign.t | 353/0 | 351/2 | s316t: t3 DESTROY-on-reassign, t283 schop |
+| op/rand.t | 263/0 | 260/3 | — |
+| op/dor.t | 34/0 | 31/3 | — |
+| op/warn.t | 32/1 | 21/5 | **#142** bareword `tie` |
+| op/chop.t | 148/0 | 96/4 | — |
+
+The four one-failure rows at the top are the cheapest genuine W1 targets in
+the snapshot.
+
+**A second trap in the same tooling:** `.suitelog/<file>.fails.tsv` joins the
+two TAP streams on test number, and the *description* column comes from
+**perl's** line.  For io/print.t it read `printf with %n (got a5c)` — that
+`a5c` is PERL's value interpolated into perl's own test name, not PCL's.
+PCL's value was `abc`.  Read the description as perl's text, always.
+
+### What the four resolved to (triaged s316v)
+
+- **io/print.t — one real bug, now task #143.**  `printf "ok 22%n…", substr $n,1,1`:
+  perl writes the emitted-character count (5) through the lvalue `substr`, so
+  `$n` becomes `a5c`.  PCL has no `%n` at all — it emits the literal `%n`,
+  warns "Redundant argument in printf", and leaves `$n` as `abc`.  Test 22
+  passes only by luck (the runner's `/^ok /mg` matches the `ok 22` prefix of
+  the malformed line).  Ruled out first: the `x` operator with a false/empty
+  count is correct in all six forms probed.  Implementing needs an **lvalue
+  argument convention for one conversion**, routed through the existing
+  box-magic hook because the argument is an lvalue `substr` — so it is a
+  decision, not a drive-by; #143 states the alternative (bless as
+  not-supported, with the note that `%n` is the classic format-string-attack
+  primitive).
+- **io/defout.t, op/localref.t, uni/bless.t — not comparable right now.**
+  All three come back `NOTAP`, i.e. **perl** produced no TAP under the
+  runner, so the snapshot's PCL failure counts (21/1, 63/1, 83/1) cannot be
+  checked against anything today.  Whether that is runner drift since the
+  v2-85 snapshot or genuinely unrunnable files is unresolved and worth a
+  look before anyone treats these as fix targets.
 
 ## Verification standard used for the two shipped commits
 

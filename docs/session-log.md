@@ -4,6 +4,46 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316v addendum 2 (2026-08-01, Opus 5) — W1 triage: the suite-tsv columns, and printf `%n`.
+
+- **I read `docs/perl-suite-run.tsv` backwards, twice.**  The row is
+  `rel P_ok P_notok C_ok C_notok status sig`, and the authoritative meaning
+  is the runner's own header (~`tools/run-perl-suite.pl:69`), confirmed by
+  the assignments at 268/296: **`P` is PERL, `C` is PCL** (C for CL).  First
+  I filtered on `C_ok` as if it were PCL's failure count; then I corrected it
+  to "P is PCL", which is the opposite error.  Consequences worth keeping:
+  - **`NOTAP` is a statement about PERL, not PCL** — "perl itself produced no
+    TAP, not comparable, PCL result shown".  Rows like `op/bless.t`
+    `P:0/0 C:111/5` mean perl gave nothing while PCL passed 111.
+  - `op/fork.t` is **not** clean (I said it was): `P:28/0 C:1/0` is perl 28,
+    PCL 1.
+  - Second trap in the same tooling: `.suitelog/*.fails.tsv` takes its
+    *description* column from PERL's TAP line, so io/print.t's
+    `printf with %n (got a5c)` was perl's value, not PCL's.
+  The corrected near-green table + both traps are in
+  `docs/opus5-review-requests-s316v.md` §5.
+- **io/print.t triaged to a single real bug → task #143.**  perl 24/0 vs PCL
+  23/1, the one divergence being `printf "ok 22%n…", substr $n,1,1`.  perl
+  writes the emitted-char count (5) through the lvalue `substr`, giving
+  `$n = "a5c"`; **PCL has no `%n` at all** — emits the literal `%n`, warns
+  "Redundant argument in printf", leaves `$n` as `"abc"`.  Test 22 passes
+  only by luck (`/^ok /mg` matches the `ok 22` prefix of the malformed
+  line).  Ruled out first: `x` with a false/empty count is correct in all
+  six probed forms.  Not implemented here because it needs an **lvalue
+  argument convention for one conversion**, routed through the box-magic
+  hook (the argument is an lvalue `substr`) — #143 records that and the
+  alternative (bless as not-supported; `%n` is the classic format-string
+  attack primitive, so a deliberate refusal would be defensible but must be
+  explicit).
+- **io/defout.t / op/localref.t / uni/bless.t: not comparable today** — all
+  three come back NOTAP (perl produced nothing), so the snapshot's PCL
+  counts can't be checked.  Runner drift vs the v2-85 snapshot is unresolved.
+- Ruled out along the way: my `cl/pcl-test.lisp` change was **not** the cause
+  of the `P: 0/0` columns — verified by rebuilding the runner core from the
+  pre-change file and getting the same result.
+
+---
+
 ## Session 316v addendum (2026-08-01, Opus 5) — `plan skip_all => …`, and a bareword attempt that did NOT ship.
 
 - **`plan(skip_all => REASON)` was ignored** (`cl/pcl-test.lisp`).  perl's
