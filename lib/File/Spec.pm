@@ -45,8 +45,10 @@ sub catfile {
 
 sub catdir {
     my $class = shift if @_ > 0 && !ref($_[0]) && $_[0] eq 'File::Spec';
-    my @parts = grep { $_ ne '' } @_;
-    return '/' if @parts == 0;
+    my @parts = grep { defined $_ && $_ ne '' } @_;
+    # perl: catdir() is '' (join of nothing, canonpath'd), NOT '/'.
+    # Verified against real File::Spec 5.40.3.
+    return '' if @parts == 0;
     my $path = join('/', @parts);
     $path =~ s{//+}{/}g;
     return $path;
@@ -85,11 +87,20 @@ sub catpath {
 
 sub rel2abs {
     my ($class, $path, $base) = @_;
-    return $path if $path =~ m{^/};
+    return $path if defined $path && $path =~ m{^/};
     unless (defined $base) {
-        require Cwd;            # real File::Spec::Unix loads Cwd lazily here too
-        $base = Cwd::cwd();
+        # Real File::Spec::Unix does `require Cwd; Cwd::cwd()`.  PCL has no
+        # Cwd.pm yet (task #166) — `use Cwd` / `require Cwd` both die — but it
+        # does have cwd() as a builtin, which is what the working copy of this
+        # function in File::Spec::Functions always used.  Switch back to Cwd
+        # once the shim exists, so this file matches the real one.
+        $base = cwd();
     }
+    # The no-op relative paths give back the BASE itself, not "$base/." —
+    # perl canonpaths the result, so rel2abs('.') is '/tmp', not '/tmp/.'.
+    # t/op/chdir.t compares abs_path() against catdir(), so a stray "/."
+    # here silently fails those rows.
+    return $base if !defined $path || $path eq '' || $path eq '.';
     return $base . '/' . $path;
 }
 
@@ -108,7 +119,9 @@ sub tmpdir {
 
 sub file_name_is_absolute {
     my ($class, $path) = @_;
-    return $path =~ m{^/} ? 1 : 0;
+    # perl returns the raw match result: 1 or '' (NOT 0) — File::Spec::Unix is
+    # literally `$file =~ m{^/}`.  Verified against real File::Spec 5.40.3.
+    return (defined $path && $path =~ m{^/}) ? 1 : '';
 }
 
 sub no_upwards {

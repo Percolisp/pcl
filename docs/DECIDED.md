@@ -116,6 +116,18 @@ not-supported.md → only then probe.*
   handlers** ($$ == $MAIN_PID guard): one signalled worker otherwise
   `rm -rf`s the SHARED tmpdir and kills its siblings → task #157, guard in
   `run-perl-suite.pl` + `sweep-perl-tests.pl`.
+- **`File::Spec::Functions` DELEGATES to `File::Spec`** — it must never carry a
+  second implementation.  The two copies drifted apart in BOTH directions and
+  the `splitpath($p,1)` divergence silently changed test control flow
+  (op/chdir.t's `skip("Already in t/")` never fired, so PCL RAN two tests perl
+  skips) → task #167, `lib/File/Spec/Functions.pm` header.
+  Corollary when probing a shim: **probe the CALL FORM the caller uses** — the
+  method form was correct while the imported function form was broken.
+- **A phase block (`BEGIN`/`END`/`CHECK`/`INIT`/`UNITCHECK`) is NOT a runtime
+  statement**: it must be skipped when picking a block's TAIL statement, or a
+  trailing `BEGIN {}` silently demotes the real last statement to void context
+  → `docs/wantarray-context.md` §"a phase block is not a runtime statement",
+  task #164 (open; sequence after the CLAUDE.md §8 VOID_CTX regression).
 - **`system()`/backticks in an END block EAT the exit status** — `$?` at the
   end of the last END block IS the process exit code, so cleanup ENDs need
   `local $?`.  This silently zeroed run-perl-suite's exit code for every run
