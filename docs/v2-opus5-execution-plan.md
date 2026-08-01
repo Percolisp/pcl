@@ -162,6 +162,34 @@ Only the §1b ledger items still need a human.
 
 ## 4. W1 — the R1 window (until the user says R1 shipped)
 
+> **CURRENT POSITION (s321).**  The list below is the *original* W1 ordering;
+> items 1-5 are all DONE and the window is now driven by Fable's S1/S2/S3+
+> worklist at the end of `docs/fable-answers-s318.md`.  Where we are:
+>
+> - **S1 (gate hygiene) — DONE, commit `0758d5a`.**  FIXTURE status +
+>   `docs/perl-suite-fixture.tsv` (per-ROW, all-or-nothing, both inverse
+>   guards probed); op/chr.t → XDIFF; #158 closed no-fix; op/list.t +
+>   op/pack.t QUARANTINED as NOT-RUN-with-reason; #155 aggregate tie now
+>   announces itself on stderr.
+> - **Unplanned but blocking, DONE, commit `4a1bf98`: #177.**  The runner
+>   joined the two TAP streams BY TEST NUMBER, so any file where PCL emits
+>   extra/missing rows mid-file mis-attributed every later row — in both
+>   directions.  It accused two op/do.t rows that PASS.  Now paired by
+>   description (`tools/lib/PclTapAlign.pm` + `tools/t/tap-align.t`).  This
+>   had to precede S2 because the FIXTURE registry matches per-ROW against
+>   that log.  op/do.t went XDIFF once the pairing was honest, after fixing
+>   its one real bug (`do DIR` now reports `$!` = EISDIR).
+> - **S2 (the full `docs/perl-suite-run.tsv` regeneration, which GATES R1)
+>   — running.**  Per-dir foreground chunks, `--jobs 3`, each with its own
+>   faillog.  On completion: install the merged snapshot, then run the #177
+>   cross-check (files whose log carries a `renumbered` marker AND a
+>   registration whose reason makes per-row claims — those registrations
+>   were reasoned from the old, possibly mis-joined log).
+> - **S3+**: near-green silent-wrong families from the refreshed list.
+> - **Open asks for Fable**: `docs/opus5-review-requests-s321.md` (#176
+>   pack.t invisible to the sweep gate; the #177 blast radius; whether XDIFF
+>   reasons should carry machine-checked row lists like FIXTURE does).
+
 Order within the window; #25 support preempts everything (if the user's
 release checks surface divergences, triage those first, per
 `docs/test-debugging-runbook.md`).
