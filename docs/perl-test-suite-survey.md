@@ -515,6 +515,28 @@ blocked separately by `use IO` (XS module).
 `t/mro/` (73), `t/class/` (10), and the rest of `t/op/` not in `perl-tests/`.
 Import the highest-signal ones the same way.
 
+## Near-green triage from the s321 snapshot (S3 input)
+
+Mined from the S2 chunks (ten dirs; `op` was re-running).  **Near-green means
+PCL ran nearly all of perl's rows and failed a few** — a row reading
+`pcl 0/0` is a CRASHER, not a near-green file, and the two must not be
+confused when scanning the tsv.
+
+Diagnoses below are from reading the perl test source against the (now
+correctly paired, task #177) failure log.  Those marked PROBE are hypotheses
+that still need a live probe; the rest are identified.
+
+| file | rows | reading |
+|---|---|---|
+| `uni/bless.t` | 83/**1** | t81 is `bless \$!, "ḟ"` then reading `${$_[0]}` — the ref must see the CURRENT `$!`. Exactly **task #144** (`\$!` snapshots instead of aliasing; needs the `$.`/`$|` magic-cell box). Not new. |
+| `re/keep_tabs.t` | 12/**2** | `/xx` must ignore whitespace INSIDE `[...]`; PCL treats `xx` as `x`. **Diagnosed to the function, task #179** — runtime-only, fix plan written. Both rows are the same gap (flag form + `(?xx:)` group form). |
+| `uni/goto.t` | 2/**2** | t3 wants `goto &{"<utf8 bytes>"}` to FAIL because the byte string lacks the UTF-8 flag — PCL has no per-scalar UTF-8 flag (blessed §Unicode), so it finds the sub. t4 is an error-message match (#149 category). **Both blessed categories → registration candidate**, once probed. |
+| `re/qr-72922.t` | 12/**2** | Both rows are `copy2 equals original`: `my $c = qr/$re/` where `$re` is already a qr must stringify identically. PROBE — suspicion is re-wrapping (`(?^:(?^:…))`) on qr-into-qr interpolation. |
+| `uni/tr_utf8.t` | 6/**2** | Only the `s///go`-with-hash-replacement rows fail; the `tr///` rows over the SAME character ranges pass, so the range class is fine. PROBE — suspect `/o` plus per-match evaluation of `$h2k{$1}`. |
+| `uni/sprintf.t` | 49/**3** | **task #148** (pack/unpack `U` in UTF-8 bytes, not codepoints). Not new. |
+| `re/qr.t` | 3/**1** | `/$qr/` with `$'`/`$_` aliased to a match var. PROBE. |
+| `run/exit.t` | 14/**3** | PROBE. |
+
 ## How to re-run
 
 ```bash
