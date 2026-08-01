@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 321f (2026-08-02, Opus 5) — `s/…/$h{$k}/` emitted literal braces: the third duplicated mechanism, and the biggest correctness win of the session
+
+- **#182 (b3be060).** `s/(\w+)/$map{$1}/g` — an everyday Perl idiom — produced
+  **literal braces**.  The emitted CL said it plainly:
+  `(p-subst "(a)" (lambda () (p-string-concat $h "{" $1 "}")) :g)`.
+  `_gen_interp_replacement` was a hand-rolled mini-interpolator that knew
+  `\1..\9`, `$1..$9`, `${name}` and `$name` — with `name` required to start
+  with `[a-zA-Z_]` — and let **everything else through as literal text**.
+- **It was missing four classes, not one**, and two were live in the shipped
+  corpus: subscripts (`$h{$1}` → `{a}`), arrays (`@arr` → `@arr`; there was no
+  `@` branch at all), `${digit}` (`${1}x` → `${1}x`), and punctuation
+  variables (`$^O` → `$^O`).  `perl-tests/sprintf.t` emitted the last two as
+  text — corpus-diff is what surfaced them, not a failing test.
+- **The fix is CLAUDE.md 11**: `"$h{$1}"` in an ordinary string was always
+  correct, so the replacement now routes through the REAL double-quoted-string
+  parser.  The single rule a replacement has that a dq string does not is
+  `\1..\9` as backrefs, normalised to `$1..$9` first.  The old function
+  survives only for the one shape PPI cannot be handed (a trailing odd
+  backslash).
+- **Third duplicated-mechanism bug in one session** — after the TAP
+  number-join (#177) and `pl-like` building its own scanner (#179).  Three
+  times the correct implementation already existed a few files away.  That is
+  now a first thing to check when something is subtly wrong.
+- **How it was found is worth keeping.**  It came off the near-green list as
+  `uni/tr_utf8.t`, which *looked* like a Unicode `s///` problem.  My first
+  reading (UTF-8 byte expansion, 249 = 83×3) was wrong; the 3 was `{`, the
+  character, `}`.  Reading the emitted CL settled in seconds what probing had
+  not.
+- Verified: corpus-diff **3 of 111, every one explained**; gate 125 files /
+  **4470** PASS; sweep 0 new / 0 fixed vs 689; cache generation → v2-92.
+  Guard: `transpile-test-09.t`, 14 replacement forms in one 3 s snippet,
+  including every form the old path *did* handle.
+
+---
+
 ## Session 321e (2026-08-02, Opus 5) — first S3 item: /xx — and the fix that "made it worse" found the harness judging patterns by its own rules
 
 - **#179 `/xx`** (a389ab9): perl's `/xx` also ignores unescaped whitespace
