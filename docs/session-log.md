@@ -93,7 +93,24 @@ Append new entries at the top. One section per session.
   OOM-killed.  The DATA was re-verified on a quiet machine at --jobs 1 and is
   genuine (all four counts above reproduce exactly) — worth checking, since an
   OOM-killed SBCL yields partial TAP that reads as a DIFF.
-- Gate 123 files / 4452 tests; sweep 0 new / 0 fixed vs 702; census 111/111.
+- **#149 first instalment (a83a99a)**: do.t t64/66/67/68 registered
+  :principle9 — `do SUBROUTINE(LIST)` was removed in perl 5.20 and the only
+  assertion is `like $@, qr/\Asyntax error/`.  Baseline 702 → 698.
+  **The category is approved but its APPLICATION is per-ROW triage**: do.t
+  looked like 4 clean error-text rows and was 6 — t63/t65 are fail() guards
+  that fire because PCL EXECUTES the removed form (`eval 'do subname("arg")'`
+  prints CALLED under PCL; probe s317/do1.pl).  Registering those would have
+  buried a real behavioural divergence under an approved category
+  (CLAUDE.md 4), so they stay failing → task **#158**.  Most of the obvious
+  grep hits in the baseline do NOT qualify (they check values/behaviour, not
+  text), so expect several interleaved sessions, not one pass.
+- **Baseline discipline learned here**: when a registry entry removes rows,
+  EDIT fail-baseline.tsv to drop exactly those rows.  A wholesale re-bless
+  from the run would have written 695 and silently deleted the 3
+  eval.t/postfixderef.t rows that did not run (both files stop early) —
+  unverified, not fixed.
+- Gate 123 files / 4452 tests; sweep 0 new / 0 fixed vs 698 (was 702);
+  census 111/111.
 
 ## Session 317 (2026-08-01, Fable) — every s316v review ask ruled on; DECIDED.md + lookup order; Opus runway re-planned to ~12–20 sessions with one human gate.
 
