@@ -354,6 +354,50 @@ UNEXPLAINED with t26/t54 as the fix target.
 
 ---
 
+## 10. (added s319) THREE fixture artifacts now found in the #25 signal — the
+##     gate keeps containing failures that are not PCL's
+
+This is a process ask, not a code one, and it is the one I most want closed
+before R1 is called.
+
+Three separate times this session a "PCL failure" in the release signal turned
+out to be the harness:
+
+| # | file | looked like | actually was |
+|---|---|---|---|
+| #151 | io/defout, op/localref, uni/bless | PCL drift (NOTAP) | a `cp` had overwritten perl's real `t/test.pl` with PCL's stub |
+| #167 | op/chdir.t t1/t2 | PCL failing 2 tests | `splitpath` ignored `no_file`, so the test's own `skip` never fired and PCL RAN tests perl SKIPS |
+| #172 | op/chdir.t t25/t31 | PCL's chdir/abs_path wrong | the shadow t/ symlinks `op`, and `getcwd(3)` returns the PHYSICAL path — so `"$Cwd/op"` never equals the post-chdir cwd |
+
+For #172 I verified PCL and perl are **identical** on every primitive involved
+(bare `chdir()` honouring HOME *and* LOGDIR, `delete $ENV{}`, `cwd()` tracking
+a chdir, `rel2abs(curdir)`, and chdir-into-a-symlink resolving to the physical
+path).  Nothing in PCL is wrong; the two sides simply run in different trees.
+
+**The ask.**  Where should a fixture artifact be recorded?  It is not
+`perl-suite-expected.tsv` material — that file's bar is "explained by a blessed
+`not-supported.md` section", and a harness artifact is not a language gap, so
+filing it there would mislabel it and let a future reader think PCL lacks
+something it has.  Candidates:
+
+1. a distinct **FIXTURE** status in the runner (like NOTAP/XDIFF), with its own
+   registry, so these rows stop counting as UNEXPLAINED without pretending to
+   be non-support;
+2. make the shadow **copy** rather than symlink any directory a test may
+   `chdir` into (costs disk and time per run, and only fixes this class);
+3. run PCL in the real `t/` and inject the stub another way — but the shadow
+   exists precisely so `require './test.pl'` resolves to PCL's stub.
+
+I lean (1): it is cheap, it keeps the signal honest, and it makes the count of
+"artifacts" visible rather than buried.  But it adds a status to a tool that is
+the R1 gate, so I would rather you pick.
+
+**Does this gate R1?**  Today op/chdir.t reads 42/2 UNEXPLAINED and two of those
+rows are not real.  That is honest but misleading, and there may be more of the
+same in the 91 files #150 part 1 unmasked.
+
+---
+
 ## Verification standard used for the seven commits
 
 corpus-diff (emission-changing commits only — four of the seven are
