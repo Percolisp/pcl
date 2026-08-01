@@ -1016,6 +1016,50 @@
       val
       (make-p-box val)))
 
+(defun %p-wrong-referent-p (kind v)
+  "True when V is DEFINITELY a referent of the wrong kind for a KIND deref —
+   an array/code/scalar ref where a hash was asked for, or a hash/code ref
+   where an array was.  Deliberately narrow: undef, nil, strings (symbolic
+   refs) and typeglobs are NOT mismatches — each has its own established
+   behaviour at these sites (autovivify, symbolic lookup, glob slot), and
+   widening this predicate would change those instead of only replacing a
+   host-level failure with perl's.  A p-box here is a SCALAR ref: `unbox` has
+   already peeled the outer container, so a remaining box is \\$x.
+   Callers put this AFTER their fast path — it is a diagnosis of a failure
+   already reached, never a test a correct access has to pay for.
+
+   A REMAINING P-BOX IS NOT A MISMATCH, and that is the subtle one (s317).
+   PCL's `\\%h` is a DOUBLE box — box(box(hash-table)) — so `unbox` peeling one
+   layer legitimately leaves a box that the caller unboxes again:
+   p-ensure-hashref returns it and (setf p-gethash) unboxes it.  Counting it as
+   a scalar-ref mismatch broke `$refref->{k} = $v` and `$a->[0] = $x` through a
+   `\\@fake` (perl-tests/postfixderef.t stopped 4 tests early, t/op/avhv.t
+   crashed at test 7).  A scalar-ref-to-coderef collapses the same way — see
+   p-cast-$.  Telling \\$x from a representation layer needs a referent-kind tag
+   on the box, which PCL does not have; until it does, only the three
+   UNAMBIGUOUS container types below count as mismatches."
+  (let ((hash (hash-table-p v))
+        (ary  (and (vectorp v) (not (stringp v))))
+        (code (functionp v)))
+    (cond ((string= kind "HASH")  (or ary  code))
+          ((string= kind "ARRAY") (or hash code))
+          ((string= kind "CODE")  (or hash ary))
+          ;; SCALAR is deliberately absent — see the comment in p-cast-$.
+          (t (error "%p-wrong-referent-p: unknown ref kind ~S" kind)))))
+
+(defun %p-not-a-ref (kind)
+  "Perl's fatal wrong-kind dereference: `Not a HASH reference` and friends.
+   Raised where a deref site is handed a referent of the wrong kind — an array
+   ref used as a hash, a hash ref used as an array.  KIND is the kind the
+   SOURCE asked for (\"HASH\", \"ARRAY\", \"CODE\", \"SCALAR\"); the message is
+   perl's byte for byte (perl names only the wanted kind), so `$@ =~ /^Not a
+   HASH reference/` — which real code greps and t/op/avhv.t asserts 40 times —
+   matches.  Two things this replaces, both bad: an SBCL type error naming a
+   P-BOX (not catchable in Perl terms), and a SILENT wrong answer where the
+   site defaulted (`keys %$aryref` returned the empty list).  CLAUDE.md rule
+   12: a dispatch that cannot handle a value says so loudly."
+  (error "Not ~A ~A reference" (if (char= (char kind 0) #\A) "an" "a") kind))
+
 (defun p-copy-scalar-arg (val)
   "Copy a scalar argument/default into a FRESH p-box for a signature parameter.
    Perl signature params are copies of @_ (like `my ($x) = @_`), so a param must
@@ -5568,6 +5612,11 @@
          (p-aref-unbox-elem (aref a actual-idx)))
         ((and (listp a) (>= actual-idx 0) (< actual-idx len))
          (p-aref-unbox-elem (nth actual-idx a)))
+        ;; Out of range on a real array (or on nil, which is a list) is undef;
+        ;; anything else is a wrong-kind referent ($hashref->[0]) and is perl's
+        ;; fatal, not a silent undef.  Both tests sit AFTER the two fast paths,
+        ;; so an in-range read costs exactly what it did before.
+        ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
         (t *p-undef*)))))
 
 (defun (setf p-aref) (value arr idx)
@@ -5582,24 +5631,31 @@
     ;; unreachable stash slot rather than faulting on a CHARACTER type-error.
     (when (stringp a)
       (return-from p-aref
-        (setf (p-aref (p-ensure-arrayref arr) idx) value))))
+        (setf (p-aref (p-ensure-arrayref arr) idx) value)))
+    a)
   (let* ((a (unbox arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
-    (when (and (vectorp a) (>= actual-idx 0))
-      ;; Auto-extend array if needed (Perl autovivification)
-      ;; Intermediate slots get nil (deleted marker) so exists returns false for them.
-      (when (>= actual-idx len)
-        (dotimes (n (1+ (- actual-idx len)))
-          (vector-push-extend nil a)))
-      ;; Get or create box at this index
-      (let ((box (aref a actual-idx)))
-        (unless (p-box-p box)
-          (setf box (make-p-box nil))
-          (setf (aref a actual-idx) box))
-        ;; Set the box's value and return the box
-        (box-set box value)))))
+    (if (and (vectorp a) (>= actual-idx 0))
+        (progn
+          ;; Auto-extend array if needed (Perl autovivification)
+          ;; Intermediate slots get nil (deleted marker) so exists returns false for them.
+          (when (>= actual-idx len)
+            (dotimes (n (1+ (- actual-idx len)))
+              (vector-push-extend nil a)))
+          ;; Get or create box at this index
+          (let ((box (aref a actual-idx)))
+            (unless (p-box-p box)
+              (setf box (make-p-box nil))
+              (setf (aref a actual-idx) box))
+            ;; Set the box's value and return the box
+            (box-set box value)))
+        ;; Not a writable array.  A wrong-kind referent ($hashref->[0] = …) is
+        ;; perl's fatal — the write used to be silently dropped.  Anything else
+        ;; (nil/undef container, negative index past the front) keeps the old
+        ;; no-op.  Tested only when the fast path above already failed.
+        (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY")))))
 
 (defun p-aref-box (arr idx)
   "Get the BOX at array index (for l-value operations like chop, ++).
@@ -6093,11 +6149,20 @@ create the key on a read-only call, which perl does not."
            (if found
                (%p-hash-unbox-elem val)
                *p-undef*))))
-      (t
+      ((hash-table-p h)
        (multiple-value-bind (val found) (gethash k h)
          (if (not found)
              *p-undef*
-             (%p-hash-unbox-elem val)))))))
+             (%p-hash-unbox-elem val))))
+      ;; Wrong kind of referent ($aryref->{k}): perl's fatal, not SBCL's.
+      ;; This arm replaces a bare (t …) that handed a non-hash to GETHASH —
+      ;; the hash-table-p test above is the SAME test GETHASH did internally,
+      ;; so the fast path costs nothing extra.
+      ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
+      ;; Any OTHER non-hash keeps GETHASH's own error — a remaining p-box is a
+      ;; representation layer, not a wrong referent (see %p-wrong-referent-p).
+      (t (multiple-value-bind (val found) (gethash k h)
+           (if (not found) *p-undef* (%p-hash-unbox-elem val)))))))
 
 (defun (setf p-gethash) (value hash key)
   "Setf expander for p-gethash - allows assignment to hash elements.
@@ -6118,7 +6183,7 @@ create the key on a read-only call, which perl does not."
              (box (make-p-box nil)))
          (setf (gethash k sym-h) box)
          (box-set box value)))
-      (t
+      ((hash-table-p h)
        ;; Get or create box at this key
        (multiple-value-bind (existing found) (gethash k h)
          (let ((box (if (and found (p-box-p existing))
@@ -6127,7 +6192,17 @@ create the key on a read-only call, which perl does not."
            (unless (and found (p-box-p existing))
              (setf (gethash k h) box))
            ;; Set the box's value and return the box
-           (box-set box value)))))))
+           (box-set box value))))
+      ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
+      ;; Other non-hash values (a p-box representation layer) keep the previous
+      ;; path — see the note in p-gethash.
+      (t (multiple-value-bind (existing found) (gethash k h)
+           (let ((box (if (and found (p-box-p existing))
+                          existing
+                          (make-p-box nil))))
+             (unless (and found (p-box-p existing))
+               (setf (gethash k h) box))
+             (box-set box value)))))))
 
 (defun p-gethash-box (hash key)
   "Get the BOX at hash key (for l-value operations like chop, ++).
@@ -6176,6 +6251,11 @@ create the key on a read-only call, which perl does not."
          (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
            (setf (symbol-value sym) (make-hash-table :test 'equal)))
          (symbol-value sym)))
+      ((hash-table-p h) h)
+      ;; Wrong kind of referent ($aryref->{k} = …): perl's fatal.
+      ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
+      ;; Anything else (a p-box representation layer) is returned for the
+      ;; caller to unbox, exactly as before.
       (t h))))
 
 (defun p-ensure-arrayref (ref)
@@ -6209,6 +6289,9 @@ create the key on a read-only call, which perl does not."
            (setf (symbol-value sym)
                  (make-array 0 :adjustable t :fill-pointer 0)))
          (symbol-value sym)))
+      ((vectorp a) a)
+      ;; Wrong kind of referent ($hashref->[0] = …): perl's fatal.
+      ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
       (t a))))
 
 (defun p-autoviv-gethash (hash key)
@@ -6671,6 +6754,9 @@ create the key on a read-only call, which perl does not."
       ;; We don't autovivify the intermediate, but must return false, not crash
       ;; gethash on a non-hash-table.
       ((hash-table-p h) (nth-value 1 (gethash k h)))
+      ;; …but a DEFINITE wrong referent (exists $aryref->{k}) is perl's fatal,
+      ;; not a false: the undef-intermediate leniency above is for undef only.
+      ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
       (t nil))))
 
 (defvar *p-stash-pkg-table* (make-hash-table :test 'eq :weakness :key)
@@ -6694,6 +6780,7 @@ create the key on a read-only call, which perl does not."
        (multiple-value-bind (v found) (gethash k *p-inc-table*)
          (remhash k *p-inc-table*)
          (if found (unbox v) *p-undef*)))
+      ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
       (t
        ;; Stash write-through: deleting a sub entry from a package stash
        ;; (delete $Pkg::{name}) must really remove the sub from the package.
@@ -6720,6 +6807,7 @@ create the key on a read-only call, which perl does not."
          (old-val (if (and (>= actual-idx 0) (< actual-idx len))
                       (p-aref-unbox-elem (aref a actual-idx))
                       *p-undef*)))
+    (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
     (when (and (vectorp a) (>= actual-idx 0) (< actual-idx len))
       (setf (aref a actual-idx) nil)
       ;; Trim trailing nil slots (Perl semantics: deleting last element shrinks array)
@@ -6735,6 +6823,7 @@ create the key on a read-only call, which perl does not."
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
+    (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
     (and (vectorp a) (>= actual-idx 0) (< actual-idx len)
          (p-box-p (aref a actual-idx))
          ;; an unvivified deferred-element alias (@_ hole) is still a hole
@@ -11457,26 +11546,33 @@ buffer's fill-pointer; everything else falls back to file-length."
       (setf fn (p-box-value fn)))
     (if (functionp fn)
         (apply fn args)
-        ;; Not a function: treat as symbolic sub name (string/number).
-        ;; Resolution is %p-resolve-sub-symbol's job — the ONE resolver all
-        ;; symbolic-code-ref paths share (it had the multi-segment package
-        ;; rule this function's inline copy lacked: |aa::bb| keeps case,
-        ;; single-segment upcases).  The pkg/name split here only feeds the
-        ;; die message.
-        (let* ((name (%p-tick-package-seps (to-string fn)))
-               (sep-pos (search "::" name :from-end t))
-               (perl-pkg (if sep-pos
-                             (subseq name 0 sep-pos)
-                             (let ((cpkg (package-name *package*)))
-                               (if (string= cpkg "MAIN") "main" cpkg))))
-               (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
-               (sym (%p-resolve-sub-symbol name))
-               (fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
-          (if fn-val
-              (apply fn-val args)
-              (p-die (format nil
-                             "Undefined subroutine &~A::~A called at (eval 1) line 1.~%"
-                             perl-pkg bare-name)))))))
+        ;; Not a function.  A wrong-kind referent ($hashref->()) is perl's
+        ;; fatal — it used to reach the symbolic branch below and be reported
+        ;; as "Undefined subroutine &main::HASH(0x1) called", i.e. its own
+        ;; stringification read back as a sub name.  Off the fast path: a real
+        ;; coderef call never evaluates this.
+        (progn
+          (when (%p-wrong-referent-p "CODE" fn) (%p-not-a-ref "CODE"))
+          ;; Otherwise: treat as symbolic sub name (string/number).
+          ;; Resolution is %p-resolve-sub-symbol's job — the ONE resolver all
+          ;; symbolic-code-ref paths share (it had the multi-segment package
+          ;; rule this function's inline copy lacked: |aa::bb| keeps case,
+          ;; single-segment upcases).  The pkg/name split here only feeds the
+          ;; die message.
+          (let* ((name (%p-tick-package-seps (to-string fn)))
+                 (sep-pos (search "::" name :from-end t))
+                 (perl-pkg (if sep-pos
+                               (subseq name 0 sep-pos)
+                               (let ((cpkg (package-name *package*)))
+                                 (if (string= cpkg "MAIN") "main" cpkg))))
+                 (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
+                 (sym (%p-resolve-sub-symbol name))
+                 (fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
+            (if fn-val
+                (apply fn-val args)
+                (p-die (format nil
+                               "Undefined subroutine &~A::~A called at (eval 1) line 1.~%"
+                               perl-pkg bare-name))))))))
 
 ;;; ============================================================
 ;;; Type Functions
@@ -11733,6 +11829,10 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
          (box-set val (make-p-box new-arr))
          new-arr))
+      ;; Wrong kind of referent (@$hashref, keys @$coderef): perl's fatal.
+      ;; Previously fell into the catch-all below and the caller (p-keys,
+      ;; foreach, push) silently saw an empty list.
+      ((%p-wrong-referent-p "ARRAY" v) (%p-not-a-ref "ARRAY"))
       ;; Fallback: return whatever we have (may be *p-undef* if no box to write back)
       (t (or v *p-undef*)))))
 
@@ -11758,6 +11858,9 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; (t v) and \%{"Pkg::H"} backslashed the *string* (ref → SCALAR, not HASH),
       ;; which broke Exporter::Heavy's `*{...}=\%{"$pkg\::$name"}` %hash export.
       ((stringp v) (%p-symref-hash v))
+      ;; Wrong kind of referent (%$aryref, keys %$aryref): perl's fatal.
+      ;; Previously fell through to (t v) and the caller silently saw no keys.
+      ((%p-wrong-referent-p "HASH" v) (%p-not-a-ref "HASH"))
       (t v))))
 
 (defun %p-symref-box (name-str)
@@ -11868,6 +11971,14 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; into one struct (which numifies as an address, correct for the REF
       ;; level), so the deref site is where the referent view is produced.
       ((p-regex-match-p inner) (to-string inner))
+      ;; NO wrong-referent guard here, deliberately (s317, task #154): PCL's
+      ;; ref model COLLAPSES a scalar-ref-to-coderef, so this site legitimately
+      ;; receives a raw function — Sub::Quote's generated
+      ;; `my $x = ${$_[1]->{'$name'}};` is exactly that, and guarding here took
+      ;; Moo down (6 rows of Pl/t/moo-01.t).  `$$aryref` therefore still reads
+      ;; as the array instead of dying "Not a SCALAR reference"; that residue is
+      ;; recorded in #154 and needs a referent-kind tag on the box, not a
+      ;; type-sniff at the deref site.
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val)

@@ -618,4 +618,40 @@ my $obj = bless {}, Foo;
 print "class=", ref($obj), "\n";
 ');
 
+# Dereferencing a ref of the WRONG KIND is a perl fatal with a specific,
+# greppable message (task #154) — t/op/avhv.t asserts /^Not a HASH reference /
+# forty times.  PCL used to raise an SBCL type error naming a P-BOX for some of
+# these and, worse, answer SILENTLY for others: `exists $aryref->{k}` was false,
+# `keys %$aryref` was empty, `$hashref->[0] = 1` dropped the write, `$$aryref`
+# returned the array.  Second half of the battery pins what must NOT die: undef
+# stays lenient (autovivify on write, undef on read) and symbolic refs still
+# resolve.
+test_transpile("wrong-kind deref dies with perl's message; undef/symbolic unaffected", '
+sub t { my ($d,$c)=@_; my @r = eval { $c->() }; my $e=$@; $e =~ s/ at .*//s;
+        printf "%-22s %s\n", $d, ($e ? "DIED: $e" : "ok(@r)"); }
+my $ary = [1,2,3]; my $hsh = {a=>1}; my $cod = sub {1}; my $obj = bless [1], "K";
+t("ary as hash read",  sub { my $v = $ary->{k} });
+t("ary as hash write", sub { $ary->{k} = 1 });
+t("ary as hash slice", sub { my @v = @{$ary}{"a","b"} });
+t("ary as hash exists",sub { exists $ary->{k} });
+t("ary as hash delete",sub { delete $ary->{k} });
+t("ary as hash keys",  sub { my @k = keys %$ary });
+t("hash as ary read",  sub { my $v = $hsh->[0] });
+t("hash as ary write", sub { $hsh->[0] = 1 });
+t("hash as ary push",  sub { push @$hsh, 1 });
+t("code as hash",      sub { my $v = $cod->{k} });
+t("blessed ary as hash",sub { my $v = $obj->{k} });
+t("hash as code",      sub { $hsh->() });
+my ($u, %h);
+t("undef ref read",    sub { my $v = $u->{k}; defined $v ? "def" : "undef" });
+t("undef ref write",   sub { $u->{k} = 5; $u->{k} });
+t("undef ary read",    sub { my $x; my $v = $x->[3]; defined $v ? "def" : "undef" });
+t("undef intermediate",sub { exists $h{a}{b} ? 1 : 0 });
+t("keys undef ref",    sub { my $z; scalar keys %$z });
+t("symbolic hash",     sub { no strict "refs"; ${"main::SYMH"}{x}=7; my $n="main::SYMH"; $$n{x} });
+t("symbolic array",    sub { no strict "refs"; my $n="main::SYMA"; ${$n}[0]=9; $main::SYMA[0] });
+t("right kinds",       sub { my $r={a=>1}; my $s=[7,8]; my $c=sub{"c"}; my $x=5; my $sr=\\$x;
+                             ($r->{a}, $s->[1], $c->(), $$sr) });
+');
+
 done_testing();
