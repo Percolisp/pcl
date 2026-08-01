@@ -4005,9 +4005,15 @@
        (clrhash place)
        (loop for i from 0 below cnt by 2
              do (setf (gethash (to-string (aref flat i)) place)
-                      (if (< (1+ i) cnt)
-                          (%p-make-hash-entry (aref flat (1+ i)))
-                          *p-undef*)))))
+                      ;; The odd trailing key's padded value must be a real
+                      ;; ENTRY BOX like every other value, not a bare
+                      ;; *p-undef*: `$_++ foreach %h = (1,2,3)` returns the
+                      ;; hash's values as LVALUES, and a raw undef cannot be
+                      ;; written through (op/hashassign.t t304).  Same
+                      ;; mechanism as the sibling branch, not a copy of it.
+                      (%p-make-hash-entry (if (< (1+ i) cnt)
+                                              (aref flat (1+ i))
+                                              *p-undef*))))))
     cnt))
 
 (defmacro p-hash-= (place value)
@@ -4179,7 +4185,14 @@
                            (setf (symbol-value ',var) (make-p-box nil)))
                          (box-set ,var *p-undef*))
                       forms)))
-             ;; Collect: hash → maphash (empty after greedy), array → loop, scalar → undef
+             ;; Collect: hash → maphash (empty after greedy), array → loop,
+             ;; scalar → its BOX.  Perl returns every assigned target as an
+             ;; LVALUE, including the ones a greedy array/hash starved of
+             ;; values: `$_++ foreach ($x,$y,%h,$z) = (0)` must increment $z.
+             ;; Pushing *p-undef* here handed the caller a bare value, so the
+             ;; write went nowhere (op/hashassign.t t307-t309).  The box was
+             ;; just set to undef by the assign form above, so pushing the
+             ;; variable itself is both the right value and writable.
              (cond
                ((and (symbolp var)
                      (char= (char (symbol-name var) 0) #\%))
@@ -4192,7 +4205,7 @@
                 (push `(loop for v across ,var
                              do (vector-push-extend v ,result-var)) collect-forms))
                ((symbolp var)
-                (push `(vector-push-extend *p-undef* ,result-var) collect-forms))))
+                (push `(vector-push-extend ,var ,result-var) collect-forms))))
 
             ;; p-list-x on LHS: (p-list-x (vector ...) count)
             ((and (listp var)
