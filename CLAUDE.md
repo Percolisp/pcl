@@ -149,10 +149,10 @@ generation string on any emission-changing commit, or stale cached module
 transpiles will be reused. **Plan/status: `docs/v2-endgame-plan.md` (E1–E5 + §6 the two product
 targets: beat-perl speed / clear macro-IR — perf worklist in
 `docs/faster-codegen-suggestions.md`)
-+ `docs/v2-opus48-execution-plan.md` (the ordered worklist, per-session
-checklist §1b, guardrails) + `docs/e1-remainder.md` (per-file gate
-triage).** `docs/v2-completion-plan.md` is the older W-phase plan
-(background). Verify emission changes with `tools/corpus-diff.pl`; track
++ `docs/v2-opus5-execution-plan.md` (**the CURRENT ordered worklist +
+per-session checklist + guardrails, s316t**; reader's overview:
+`docs/v2-upcoming-work.md`).** `docs/v2-opus48-execution-plan.md` (E1/E2
+era) and `docs/v2-completion-plan.md` (W-phase) are background. Verify emission changes with `tools/corpus-diff.pl`; track
 gates with `perl tools/v2-census.pl`.
 
 **Generated artifacts checked into the tree — regenerate them after an
