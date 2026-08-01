@@ -1,11 +1,28 @@
 # Review requests for Fable — from Opus 5, s316v (2026-08-01)
 
 *Written at gen v2-90, gate 123/4439, sweep 0-new vs the 702 baseline,
-census 111/111 v2-native, tree clean at `e6c858b`.  Four items, each with
-the evidence that produced it.  Items 1 and 2 are asks for a design
-decision; items 3 and 4 are asks for a priority call.  Nothing here is
-blocking R1 — the two shipped commits are verified and the tree is
+census 111/111 v2-native.  Each item carries the evidence that produced it.
+Nothing here blocks R1 — every shipped commit is verified and the tree is
 shippable.*
+
+**Index — what each section wants from you**
+
+| § | topic | the ask |
+|---|---|---|
+| 1 | bareword class names (#142) | design: take the `bless` route now, or hold for Option B? |
+| 2 | flip-flop constant operands (#141) | design: which layer owns the classifier? |
+| 3 | "one place" hit rate | priority: pull E5.5 earlier? |
+| 4 | #138 state-init residual | is there a cheaper oracle? |
+| 5 | suite-tsv column traps | none — record, so it stops recurring |
+| 6a | `printf %n` (#143) | **policy: implement, or bless?** |
+| 6b | quotemeta / no per-scalar UTF8 flag (#146) | **policy: which global rule?** + doc is wrong |
+| 6c | deterministic `DESTROY` | **policy: is the blanket non-support still right for R2?** |
+| 6d | error-text / invalid-input rows | **policy: blanket skip category?** |
+| 6e | `$`-prototype arg parse (#147) | design: fix in place, or wait for Option B? |
+| 6f | XDIFF registration bar | policy: confirm the rule I have been applying |
+| 6g | silent-wrong vs loud-fail | **policy: should a missing case DIE rather than return a default?** |
+| 6h | perl-parity vs "reasonable" for host-visible values | **policy: how far to chase perl's exact bytes?** |
+| 6i | suite corpus overlap (perl-tests/ vs t/) | policy: is the copied-file split still earning its keep? |
 
 ---
 
@@ -209,6 +226,164 @@ PCL's value was `abc`.  Read the description as perl's text, always.
   checked against anything today.  Whether that is runner drift since the
   v2-85 snapshot or genuinely unrunnable files is unresolved and worth a
   look before anyone treats these as fix targets.
+
+---
+
+## 6. Decisions I am NOT taking — for the user + Fable to settle
+
+These came out of W1 triage.  Each is a *policy* call, not a missing
+implementation detail, so I have left them and recorded the evidence.
+
+### 6a. `printf`/`sprintf` `%n` — implement, or bless as not-supported? (#143)
+
+Sole blocker for t/io/print.t (perl 24/0, PCL 23/1).  `%n` writes the
+emitted-character count *through an lvalue argument*; the case in the wild
+is an lvalue `substr`, so it needs the box-magic hook and an **lvalue-argument
+convention for one conversion** — sprintf currently receives evaluated
+copies.  Against implementing: `%n` is the classic format-string-attack
+primitive and real code essentially never uses it.  For: it is a documented
+core feature, and CLAUDE.md 4 says a non-support must be an explicit,
+argued decision with a `docs/not-supported.md` entry — not an accident,
+which is what it is today (no entry, no handling, emits the literal `%n`).
+
+### 6b. `quotemeta` and the missing per-string UTF8 flag (#146)
+
+`p-quotemeta` escapes non-ASCII "unless Unicode alphanumeric", i.e. it
+applies the `unicode_strings` rule UNCONDITIONALLY; perl only does that
+under the pragma or for a UTF8-flagged string, so
+`quotemeta chr(0xe9)` is 2 chars in perl and 1 in PCL.  The real question is
+bigger than quotemeta: **PCL has no per-scalar UTF8 flag**, so any
+`\w`-sensitive builtin has to pick one rule globally.  Options: (i) make the
+default ASCII-only and Unicode-aware only under `use utf8`/`unicode_strings`
+(fixes the common case, risks the opposite divergence for utf8 code);
+(ii) bless the whole class in the Unicode section.  **Either way
+`docs/not-supported.md` needs correcting** — its Unicode section currently
+claims "Without the pragma, high bytes stay Latin-1 (byte semantics),
+matching Perl", and quotemeta is a counter-example.
+
+### 6c. Deterministic `DESTROY` — is the blessed non-support still right?
+
+`not-supported.md` §DESTROY is explicit and I have used it to classify rows
+(op/localref.t is now XDIFF on it).  Recording it here only because the
+probe was starker than the doc implies: **PCL fires `DESTROY` in NONE of the
+four common shapes** — lexical scope exit, `undef $x`, reassignment, sub
+return — where perl fires in all four.  It also blocks op/bless.t t117/t118
+and, per `project_cpan_pureperl_findings`, Try::Tiny.  If CPAN reach is the
+R2 goal, this may deserve re-opening as a scoped feature (refcount on
+blessed refs only?) rather than staying a blanket non-support.  Not a
+suggestion to change it now — a flag that its cost is larger than the
+section suggests.
+
+### 6d. Error-message text and invalid-input detection
+
+op/dor.t t26/t28 want `like($@, qr/^Search pattern not terminated/)` for
+*invalid* Perl.  That is doubly covered — §"Error message text and format"
+plus CLAUDE.md 9 ("PCL is a transpiler for functioning Perl code, not a
+validator") — and the user has already ruled exact fatal-error text out of
+scope.  Flagging only because such rows are scattered across many files and
+will keep surfacing in triage: **is a blanket skip-registry category
+warranted** so they stop consuming triage time one at a time?
+
+### 6e. `$`-prototype argument parse — fix in place, or wait for Option B? (#147)
+
+`like([] // 0, qr/^ARRAY/, '…')` (t/op/dor.t t4) passes **0** instead of the
+array ref.  Isolated with a hand-written prototype:
+
+| call | perl | PCL |
+|---|---|---|
+| `proto3([] // 0, …)` — `sub proto3 ($$@)` | ARRAY | **0** |
+| `plain3([] // 0, …)` — no prototype | ARRAY | ARRAY ✓ |
+| `proto3($n // "dflt", …)` | dflt | dflt ✓ |
+| `proto3(1 + 2, …)` | 3 | 3 ✓ |
+
+So a `$` slot handles expressions and `//` fine in general; the trigger is an
+**anonymous constructor followed by `//`** in a prototyped slot.  A `$`
+prototype imposes scalar *context* on a full expression — it does not end the
+argument at the `]`.  The unprototyped path gets this right, so this is a
+second parse route not sharing the `//`-vs-empty-pattern decision: the
+CLAUDE.md-11 "count the parse paths" smell, and the same region as §1.
+**Ask: is this fixable in place, or does it want the same non-mutating parse
+that §1 and Option B need?**  I did not attempt it — §1 is exactly where
+three attempts died.
+
+Impact is wider than one row: every `$`-prototyped sub, which includes
+test.pl's `is`/`like`/`isnt`/`cmp_ok`.  With #147 fixed, op/dor.t is
+otherwise fully explained (t26/t28 are error-text/invalid-input, §6d) and
+would register or pass.
+
+### 6f. Confirm the XDIFF registration bar I have been applying
+
+I registered four files in `docs/perl-suite-expected.tsv` this session
+(op/localref.t §DESTROY, io/defout.t §format/write, op/not.t §`!0`/`!1`, and
+earlier rows).  The rule I used: **register only when EVERY failing test in
+the file is explained by an already-blessed `not-supported.md` section** —
+so op/bless.t stayed unregistered because only 2 of its 6 failures are
+DESTROY, and op/dor.t stays unregistered because t4 is a real bug (#147).
+That follows the file's own header ("the reason MUST cite the
+docs/not-supported.md section"; "Do NOT add rows for unexplained crashes")
+and mirrors the skip-registry philosophy, but the all-or-nothing part is my
+inference, not something the header states.  **Ask: confirm, or should
+partially-explained files get rows too** (with the unexplained tests tracked
+separately)?  The trade-off is that a per-file row makes a file stop
+reporting UNEXPLAINED even while it still contains real bugs.
+
+### 6g. Should a missing case DIE rather than return a default?
+
+The `vec` bug this session is the archetype.  Both `p-vec` and `p-vec-set`
+had per-width branches for 1/2/4/8/16/32 and **no 64** — despite both
+docstrings listing 64 as legal.  The reader fell through to a `(t 0)`
+default; the writer's `cond` simply had no matching clause, so
+`vec($x,1,64) = $q` extended the string to the right length and wrote
+**nothing**.  Silent, plausible-looking, all-zero output.
+
+That is the same failure mode as #138's silently deleted statement and the
+`\$!` snapshot: a **default arm that swallows an unimplemented case**.  The
+alternative is a `t` arm that dies "Parser2 TODO"-style with the unhandled
+value in the message.  The two shipped consolidations (#138, #140) both
+argue the same way — a missing entry in a hand-rolled table produced a wrong
+value rather than a complaint.
+
+**Ask:** is a general rule wanted — *runtime `cond`s over a closed set of
+legal values end in an explicit error, not a default* — and is R1 the moment
+to sweep for such arms, or is that E5 hygiene?  My instinct is that the
+sweep should be a separate audit (it will find many), but that new code
+should adopt the rule immediately.
+
+### 6h. How far to chase perl's exact bytes for host-visible values?
+
+I implemented perl's **drand48** so `srand(1); int rand(1000)` is 41, matching
+perl exactly, rather than merely making PCL self-consistent (which would have
+satisfied "same seed replays" but failed t/op/rand.t).  I think that was
+right — seeded `rand` is how CPAN modules and test suites get determinism, so
+it is observable behaviour, not an implementation detail.
+
+But the same question recurs and I would rather have a rule than decide
+case-by-case.  Nearby instances, all currently divergent-but-plausible:
+`ARRAY(0x1)` synthetic ref addresses (PCL's are dense small integers — fine
+today because `hex($addr) == $ref+0` is *internally* consistent, which is
+what op/bless.t's `expected()` checks); `$$` at image boot; hash ordering.
+Contrast with `not-supported.md`'s stance that error-message *text* is
+explicitly not chased.
+
+**Ask:** the dividing line.  My working rule is "match perl's bytes when a
+program can branch on them; match perl's *shape* otherwise" — does that hold,
+and does it extend to ref addresses if some CPAN module ever sorts on them?
+
+### 6i. Is the perl-tests/ vs t/ corpus split still earning its keep?
+
+`tools/run-perl-suite.pl` skips any t/ file whose basename exists in
+`perl-tests/` ("the sweep owns those") unless `--include-copied`.  But the
+copies have drifted: `perl-tests/chop.t`, `dor.t`, `not.t`, `quotemeta.t` are
+all **fully passing** in the sweep, while the *real* t/ files behind the same
+names have 2-5 failures each — the ones I have been fixing this session
+(op/not.t, op/quotemeta.t, op/dor.t) were invisible to the default runner
+view precisely because a passing copy shadows them.
+
+**Ask:** should the copied-file skip be dropped (or inverted, so the t/
+original is authoritative and `perl-tests/` is only the fast sweep), and
+should the drifted copies be re-synced?  This affects what #25's scoreboard
+actually measures — a green sweep row can coexist with a failing real file
+of the same name, which is a misleading signal for a release gate.
 
 ## Verification standard used for the two shipped commits
 

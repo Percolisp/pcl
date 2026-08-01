@@ -562,4 +562,38 @@ for ($m += 1 .. 3) { print "m-iter\n" }
 for (1 .. 3) { print "plain\n" }
 ');
 
+# vec() with BITS=64: BOTH p-vec and p-vec-set had per-width branches for
+# 1/2/4/8/16/32 and no 64, so the reader fell through to a 0 default and the
+# writer extended the string to the right length then wrote NOTHING — an
+# all-zero result, silently, even though both docstrings listed 64 as legal
+# (t/op/64bitint.t t80/t81).  Each side is now one loop over bits/8 bytes, so
+# a missing width cannot recur; the other widths are asserted here too.
+test_transpile("vec 64-bit round-trip, and the narrower widths unchanged", '
+my $q = 0x1234567890abcdef;
+my $x = "";
+vec($x, 1, 64) = $q;
+printf "len=%d bytes=%s\n", length($x), join("", map { sprintf "%02x", ord } split //, $x);
+printf "r64=%s eq=%s\n", vec($x,1,64), (vec($x,1,64) == $q ? "YES" : "NO");
+printf "r0=%s r2=%s\n", vec($x,0,64), vec($x,2,64);
+my $y = "";
+vec($y,0,16) = 0xBEEF; vec($y,3,8) = 0x41; vec($y,9,4) = 0xC;
+printf "w16=%s w8=%s w4=%s w32=%s\n", vec($y,0,16), vec($y,3,8), vec($y,9,4), vec($y,0,32);
+');
+
+# rand/srand: perl ships its OWN drand48 since [perl #115928] so a seed
+# replays the same sequence everywhere — t/op/rand.t asserts the exact value.
+# PCL had discarded the seed entirely, and treated a supplied rand(0) as a
+# zero range instead of perlfunc\'s "omitted or zero, uses 1".
+test_transpile("srand replays perl\'s drand48 sequence; rand(0) is rand(1)", '
+srand(1);
+print "first=", int(rand(1000)), "\n";
+srand(42); my @a = map { sprintf "%.6f", rand } 1..3;
+srand(42); my @b = map { sprintf "%.6f", rand } 1..3;
+print "replay=", ("@a" eq "@b" ? "YES" : "NO"), "\n";
+srand(7); my $z = rand(0);
+srand(7); my $o = rand(1);
+print "zero_is_one=", ($z == $o ? "YES" : "NO"), "\n";
+print "in_range=", (do { srand(3); my $r = rand; $r >= 0 && $r < 1 }) ? "YES" : "NO", "\n";
+');
+
 done_testing();

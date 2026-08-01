@@ -9963,18 +9963,18 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; 8-bit aligned access (common case)
         ((and (= bits 8) (= bit-offset 0))
          (char-code (char s byte-offset)))
-        ;; 16-bit access (big-endian / network byte order)
-        ((and (= bits 16) (= bit-offset 0))
-         (let ((b0 (if (< byte-offset (length s)) (char-code (char s byte-offset)) 0))
-               (b1 (if (< (1+ byte-offset) (length s)) (char-code (char s (1+ byte-offset))) 0)))
-           (+ (ash b0 8) b1)))
-        ;; 32-bit access (big-endian / network byte order)
-        ((and (= bits 32) (= bit-offset 0))
-         (let ((b0 (if (< byte-offset (length s)) (char-code (char s byte-offset)) 0))
-               (b1 (if (< (+ 1 byte-offset) (length s)) (char-code (char s (+ 1 byte-offset))) 0))
-               (b2 (if (< (+ 2 byte-offset) (length s)) (char-code (char s (+ 2 byte-offset))) 0))
-               (b3 (if (< (+ 3 byte-offset) (length s)) (char-code (char s (+ 3 byte-offset))) 0)))
-           (+ (ash b0 24) (ash b1 16) (ash b2 8) b3)))
+        ;; Byte-aligned multi-byte access (16/32/64), big-endian / network
+        ;; order.  ONE loop rather than a branch per width: 64 was MISSING and
+        ;; fell through to the (t 0) default below, so `vec($x,1,64)` read back
+        ;; 0 even though p-vec-set writes it correctly and the docstring lists
+        ;; 64 as legal (op/64bitint.t t80/t81).  Bytes past the end read as 0,
+        ;; which is what the per-width branches did.
+        ((and (member bits '(16 32 64)) (= bit-offset 0))
+         (let ((n 0))
+           (dotimes (i (floor bits 8) n)
+             (let ((k (+ byte-offset i)))
+               (setf n (+ (ash n 8)
+                          (if (< k (length s)) (char-code (char s k)) 0)))))))
         ;; Sub-byte access (1, 2, 4 bits)
         ((and (<= bits 8) (< byte-offset (length s)))
          (let* ((byte-val (char-code (char s byte-offset)))
@@ -10011,16 +10011,16 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; 8-bit aligned
           ((and (= bits 8) (= bit-offset 0))
            (setf (char s-ext byte-offset) (code-char (logand val 255))))
-          ;; 16-bit aligned (big-endian, Perl stores MSB first)
-          ((and (= bits 16) (= bit-offset 0))
-           (setf (char s-ext byte-offset)       (code-char (logand (ash val -8) 255))
-                 (char s-ext (1+ byte-offset))  (code-char (logand val 255))))
-          ;; 32-bit aligned (big-endian)
-          ((and (= bits 32) (= bit-offset 0))
-           (setf (char s-ext byte-offset)       (code-char (logand (ash val -24) 255))
-                 (char s-ext (+ byte-offset 1)) (code-char (logand (ash val -16) 255))
-                 (char s-ext (+ byte-offset 2)) (code-char (logand (ash val -8)  255))
-                 (char s-ext (+ byte-offset 3)) (code-char (logand val           255))))
+          ;; Byte-aligned multi-byte (16/32/64), big-endian — Perl stores MSB
+          ;; first.  ONE loop rather than a branch per width: 64 was MISSING
+          ;; here exactly as in p-vec's reader, so `vec($x,1,64) = $q` extended
+          ;; the string to the right length and then wrote NOTHING — all-zero
+          ;; bytes, silently (op/64bitint.t t80/t81).
+          ((and (member bits '(16 32 64)) (= bit-offset 0))
+           (let ((nbytes (floor bits 8)))
+             (dotimes (i nbytes)
+               (setf (char s-ext (+ byte-offset i))
+                     (code-char (logand (ash val (* -8 (- nbytes 1 i))) 255))))))
           ;; Sub-byte access (1, 2, 4 bits)
           ((<= bits 8)
            (let* ((mask     (1- (ash 1 bits)))
