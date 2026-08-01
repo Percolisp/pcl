@@ -596,4 +596,26 @@ print "zero_is_one=", ($z == $o ? "YES" : "NO"), "\n";
 print "in_range=", (do { srand(3); my $r = rand; $r >= 0 && $r < 1 }) ? "YES" : "NO", "\n";
 ');
 
+# tie's CLASSNAME slot takes a BAREWORD class (task #142) — `tie $s,
+# Tie::StdScalar;` used to compile to a CALL of Tie::StdScalar and die.  The
+# rule is argument-position-local (bless's mechanism), so a bareword anywhere
+# else keeps its meaning: a call in expression position, a runtime-resolved
+# invocant before `->`.
+test_transpile("tie takes a bareword class name; other barewords unaffected", '
+require Tie::Scalar;
+package Foo; sub init { "CALLED" }
+package main;
+my $t;
+tie $t, Tie::StdScalar;
+$t = "hello";
+print "t=$t\n";
+print "tied=", (defined(tied $t) ? "yes" : "no"), "\n";
+untie $t;
+print "after=", (defined(tied $t) ? "yes" : "no"), "\n";
+my $called = Foo::init;
+print "call=$called\n";
+my $obj = bless {}, Foo;
+print "class=", ref($obj), "\n";
+');
+
 done_testing();

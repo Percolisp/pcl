@@ -1732,6 +1732,36 @@ sub _is_elem_arg {
       && ($an->{type} eq 'a_acc' || $an->{type} eq 'h_acc');
 }
 
+# A CLASS-NAME argument position (bless's 2nd arg, tie's 2nd arg): a bareword
+# there is a STRING, never a call — perl's own rule for those slots.  This is
+# a per-builtin ARGUMENT-POSITION rule on purpose: unlike a global
+# bareword-is-a-string rule it cannot reach `Foo::init` in expression position
+# or a method invocant (task #142 records three failed global attempts).
+# Returns the CL string literal, or undef when the argument is not a bareword —
+# then the caller generates it normally (quoted string, `shift`, expression…).
+sub _class_name_bareword {
+  my ($self, $kid_id) = @_;
+  my $class_node = $self->expr_o->get_a_node($kid_id);
+  return undef unless $self->expr_o->is_internal_node_type($class_node)
+                   && $class_node->{type} eq 'funcall';
+  # Bareword funcalls have exactly 1 child (the word itself, no arguments).
+  my $class_kids = $self->expr_o->get_node_children($kid_id);
+  return undef unless @$class_kids == 1;
+  my $word_node = $self->expr_o->get_a_node($class_kids->[0]);
+  return undef unless ref($word_node) eq 'PPI::Token::Word';
+  my $classname = $word_node->content();
+  if ($classname eq '__PACKAGE__') {
+    my $pkg = $self->environment ? $self->environment->current_package : 'main';
+    $pkg //= 'main';
+    return qq{"$pkg"};
+  }
+  # undef keyword: not a bareword class name — the caller's normal generation
+  # gives (p-undef), and the runtime handles an undef class.
+  return undef if $classname eq 'undef';
+  $classname =~ s/::$//;   # o:: -> o
+  return qq{"$classname"};
+}
+
 # ---- E2.1: form-producing funcall (the generic call path) ------------------
 # Form-producing (E2-converted).  Covers the GENERIC call path — user subs
 # (word:is/ok/… = the seam frontier head) and non-special builtins —
@@ -2010,34 +2040,21 @@ sub gen_funcall_form {
     my $cur_pkg = $self->environment ? $self->environment->current_package : 'main';
     my $class_arg = "\"$cur_pkg\"";
     if (@$kids >= 3) {
-      my $class_node = $self->expr_o->get_a_node($kids->[2]);
-      my $is_bareword = 0;
-      if ($self->expr_o->is_internal_node_type($class_node) &&
-          $class_node->{type} eq 'funcall') {
-        my $class_kids = $self->expr_o->get_node_children($kids->[2]);
-        if (@$class_kids == 1) {
-          my $word_node = $self->expr_o->get_a_node($class_kids->[0]);
-          if (ref($word_node) eq 'PPI::Token::Word') {
-            my $classname = $word_node->content();
-            if ($classname eq '__PACKAGE__') {
-              my $pkg = $self->environment
-                  ? $self->environment->current_package : 'main';
-              $pkg //= 'main';
-              $class_arg = qq{"$pkg"};
-              $is_bareword = 1;
-            } elsif ($classname eq 'undef') {
-              # fall through: gen_node_form gives (p-undef); runtime handles it
-            } else {
-              $classname =~ s/::$//;
-              $class_arg = qq{"$classname"};
-              $is_bareword = 1;
-            }
-          }
-        }
-      }
-      $class_arg = $self->gen_node_form($kids->[2]) if !$is_bareword;
+      $class_arg = $self->_class_name_bareword($kids->[2])
+                // $self->gen_node_form($kids->[2]);
     }
     return ['p-bless', $ref_arg, $class_arg];
+  }
+
+  # tie VARIABLE, CLASSNAME, LIST: same class-name argument position as bless.
+  # `tie %h, Tie::StdHash;` (trailing bareword, no LIST) parses as a funcall —
+  # every other shape already reaches here as a string (task #142).
+  if ($func_name eq 'tie' && @$kids >= 3) {
+    my $class_arg = $self->_class_name_bareword($kids->[2]);
+    if (defined $class_arg) {
+      my @rest = map { $self->gen_node_form($kids->[$_]) } 3 .. $#$kids;
+      return ['p-tie', $self->gen_node_form($kids->[1]), $class_arg, @rest];
+    }
   }
 
   # push/unshift: flatten @-sigiled / @-deref arguments.
@@ -2755,44 +2772,22 @@ sub gen_funcall {
     my $class_arg = "\"$cur_pkg\"";  # Default class is the package at point of bless call
 
     if (@$kids >= 3) {
-      my $class_node = $self->expr_o->get_a_node($kids->[2]);
-      my $is_bareword = 0;
-
-      # Check if it's a bareword (funcall with single word child that's just a Word)
-      if ($self->expr_o->is_internal_node_type($class_node) &&
-          $class_node->{type} eq 'funcall') {
-        my $class_kids = $self->expr_o->get_node_children($kids->[2]);
-        # Bareword funcalls have exactly 1 child (the word itself, no arguments)
-        if (@$class_kids == 1) {
-          my $word_node = $self->expr_o->get_a_node($class_kids->[0]);
-          if (ref($word_node) eq 'PPI::Token::Word') {
-            my $classname = $word_node->content();
-            # Handle special tokens: __PACKAGE__, __FILE__, __LINE__, undef
-            if ($classname eq '__PACKAGE__') {
-              my $pkg = $self->environment
-                  ? $self->environment->current_package : 'main';
-              $pkg //= 'main';
-              $class_arg = qq{"$pkg"};
-              $is_bareword = 1;
-            } elsif ($classname eq 'undef') {
-              # undef keyword: not a bareword class name — fall through to gen_node,
-              # which generates (p-undef); p-bless handles undef class at runtime
-            } else {
-              # Regular bareword class name - remove trailing :: if present (o:: -> o)
-              $classname =~ s/::$//;
-              $class_arg = qq{"$classname"};
-              $is_bareword = 1;
-            }
-          }
-        }
-      }
-
-      # Not a bareword - generate normally (could be string, shift, or other expression)
-      if (!$is_bareword) {
-        $class_arg = $self->gen_node($kids->[2]);
-      }
+      # Bareword class → string (_class_name_bareword); anything else generates
+      # normally (quoted string, shift, or other expression).
+      $class_arg = $self->_class_name_bareword($kids->[2])
+                // $self->gen_node($kids->[2]);
     }
     return "(p-bless $ref_arg $class_arg)";
+  }
+
+  # tie VARIABLE, CLASSNAME, LIST — the same class-name argument position.
+  if ($func_name eq 'tie' && @$kids >= 3) {
+    my $class_arg = $self->_class_name_bareword($kids->[2]);
+    if (defined $class_arg) {
+      my @args = ($self->gen_node($kids->[1]), $class_arg,
+                  map { $self->gen_node($kids->[$_]) } 3 .. $#$kids);
+      return "(p-tie " . join(' ', @args) . ")";
+    }
   }
 
   # Special handling for push/unshift: flatten @array arguments

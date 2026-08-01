@@ -706,6 +706,30 @@ EOF
        'chained my declarators collapse to chained assignments');
 }
 
+# s317 task #142 — tie's CLASSNAME slot is a class-name argument position,
+# exactly like bless's: a trailing bareword there is a STRING, not a call.
+# (Every other shape — quoted, or a bareword followed by a LIST — already
+# arrives as a string.)  The guard is that the two spellings emit the SAME
+# bytes, and that the rule stays position-local: a bareword in ordinary
+# expression position is still a CALL (`Foo::init`), and a bareword method
+# invocant still resolves at runtime (`Count::DATA->getline`).
+{
+  for my $sig ('$s', '@a', '%h') {
+    my $bare = Pl::Parser2->parse_code("my $sig; tie $sig, Tie::StdThing;");
+    my $quot = Pl::Parser2->parse_code("my $sig; tie $sig, 'Tie::StdThing';");
+    like($bare, qr/\(p-tie \Q$sig\E "Tie::StdThing"\)/,
+         "tie $sig, BAREWORD: class name is a string");
+    is($bare, $quot, "tie $sig: bareword and quoted class emit identical CL");
+  }
+  my $lst = Pl::Parser2->parse_code(q[my $s; tie $s, Tie::StdThing, 7, 8;]);
+  like($lst, qr/\(p-tie \$s "Tie::StdThing" 7 8\)/, 'tie LIST args pass through');
+  my $call = Pl::Parser2->parse_code(q[package Foo; sub init {1} package main; my $x = Foo::init;]);
+  like($call, qr/\(Foo::pl-init\)/, 'bareword in expression position is still a call');
+  my $inv = Pl::Parser2->parse_code(q[my $x = Count::DATA->getline;]);
+  like($inv, qr/p-method-call \(p-resolve-invocant "Count::DATA"\)/,
+       'bareword method invocant still resolves at runtime');
+}
+
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).
 # $in_str persists across lines: generated string literals contain newlines.
 sub paren_balance {
