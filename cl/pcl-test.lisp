@@ -165,7 +165,16 @@
         (format t "~A~%" line)
         (format t "# ~A~%" line))))
 
-;;; plan(N) or plan(tests => N) or plan('no_plan')
+;;; skip_all(reason)
+;;; Defined BEFORE pl-plan: `plan(skip_all => …)` calls it (perl's t/test.pl
+;;; does the same), and a forward reference would be a load-time style-warning.
+(defun pl-skip_all (&optional reason)
+  (if reason
+      (format t "1..0 # Skip ~A~%" reason)
+      (format t "1..0~%"))
+  (sb-ext:exit :code 0))
+
+;;; plan(N) or plan(tests => N) or plan(skip_all => REASON) or plan('no_plan')
 (defun pl-plan (&rest args)
   (setf *test-plan-pid* (sb-posix:getpid))
   ;; Unbox all args (test scripts pass boxed values)
@@ -178,14 +187,23 @@
       ;; plan('no_plan')
       ((and (= (length args) 1) (equal (first args) "no_plan"))
        (setf *test-no-plan* t))
-      ;; plan(tests => N)
+      ;; plan(tests => N) / plan(skip_all => REASON)
+      ;; perl's t/test.pl: `my %plan = @_; $plan{skip_all} and
+      ;; skip_all($plan{skip_all}); $n = $plan{tests};` — skip_all is checked
+      ;; FIRST and exits, so the rest of the file never runs.  Without it the
+      ;; feature-detection idiom
+      ;;     defined &Internals::getcwd or plan skip_all => "no ...";
+      ;; fell through and the next line called the missing sub (io/getcwd.t
+      ;; reported NOTAP `undef-fn:Internals::pl-getcwd` — a crash where perl
+      ;; cleanly skips).  Seven t/ files use this form.
       ((>= (length args) 2)
-       (let ((tests-value nil))
+       (let ((tests-value nil) (skip-reason nil))
          (loop for i from 0 below (length args) by 2
                for key = (nth i args)
                for val = (nth (1+ i) args)
-               do (when (equal key "tests")
-                    (setf tests-value val)))
+               do (cond ((equal key "tests")    (setf tests-value val))
+                        ((equal key "skip_all") (setf skip-reason val))))
+         (when skip-reason (pl-skip_all skip-reason))   ; exits
          (when tests-value
            (setf *test-planned* tests-value)
            (format t "1..~A~%" *test-planned*)))))))
@@ -195,13 +213,6 @@
   (let ((count (or n *test-count*)))
     (format t "1..~A~%" count)
     (setf *test-planned* count)))
-
-;;; skip_all(reason)
-(defun pl-skip_all (&optional reason)
-  (if reason
-      (format t "1..0 # Skip ~A~%" reason)
-      (format t "1..0~%"))
-  (sb-ext:exit :code 0))
 
 ;;; BAIL_OUT(reason)
 (defun pl-BAIL_OUT (reason)

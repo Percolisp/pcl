@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316v addendum (2026-08-01, Opus 5) — `plan skip_all => …`, and a bareword attempt that did NOT ship.
+
+- **`plan(skip_all => REASON)` was ignored** (`cl/pcl-test.lisp`).  perl's
+  `t/test.pl` does `my %plan = @_; $plan{skip_all} and
+  skip_all($plan{skip_all}); $n = $plan{tests};` — skip_all is checked FIRST
+  and exits.  PCL's key/value branch only looked for `tests`, so the
+  feature-detection idiom
+  `defined &Internals::getcwd or plan skip_all => "no ...";` fell through and
+  the next line called the missing sub: io/getcwd.t reported NOTAP
+  `undef-fn:Internals::pl-getcwd`, a CRASH where perl cleanly skips.  Seven
+  t/ files use the form.  `pl-skip_all` moved above `pl-plan` (its caller
+  now) to keep the load warning-clean.
+  **Honest scoreboard effect: none.**  io/getcwd.t cannot pass because THIS
+  perl build has no `Internals::getcwd` either (runner shows `C: 0/0`
+  matching `P: 0/0`); the four mro/recursion_*.t files are blocked on the
+  known C3/`next::method` gap.  The snapshot's `undef-fn:` annotation was
+  recording PCL's crash, not a missing feature.
+- **NOT SHIPPED — bareword class names (#142), three attempts, all reverted.**
+  `tie %h, Tie::StdHash` (t/op/avhv.t) compiles to a call and dies.  (1)
+  Stringifying any qualified bareword with no `has_prototype` broke
+  `package Foo; sub init` + `my $a = Foo::init` — silent call→string, the
+  same failure class as #138's silent statement deletion; the USER caught
+  it.  (2) With `strict_subs` excluded (an undeclared bareword there is a
+  COMPILE ERROR under strict, so by principle 9 anything that compiles is a
+  call) and `declared_subs` `{name,package}` as the properly qualified
+  oracle, every probe went green — and corpus-diff caught method.t: the
+  invocant `Count::DATA->getline` lost `(p-resolve-invocant …)`, deleting
+  perl's runtime class-vs-filehandle resolution ("file handles take
+  priority").  (3) An `->`-lookahead guard was a COMPLETE NO-OP.
+  The decision sits under `if ($end_pars < $i + 1)` at `PExpr.pm:3695` —
+  inside the operand-boundary machinery `pexpr-term-parsing-review.md`
+  calls the maze; that doc now carries this as evidence for Option B.
+  Correct route recorded in #142: reuse `bless`'s class-name branch
+  (`ExprToCL.pm` ~2007) for tie/tied/untie — an argument-position rule that
+  cannot reach `Foo::init` or an invocant by construction.
+- **Filed for Fable: `docs/opus5-review-requests-s316v.md`** (54aca56) —
+  #142's three failure modes, #141's layer question, a priority call on
+  E5.5 (both consolidations found live bugs, 2 for 2), and #138's residual.
+
+---
+
 ## Session 316v (2026-08-01, Opus 5) — #140: ONE compound-assignment operator set (the #138 audit's second finding), gen v2-90.
 
 - **Audit first.**  With the precedence table consolidated (#138), a sweep
