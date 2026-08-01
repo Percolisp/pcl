@@ -24,6 +24,7 @@ shippable.*
 | 6h | perl-parity vs "reasonable" for host-visible values | **policy: how far to chase perl's exact bytes?** |
 | 6i | suite corpus overlap (perl-tests/ vs t/) | policy: is the copied-file split still earning its keep? |
 | 6j | pack's character-vs-byte mode model (#148) | **scope: full mid-template U0/C0, or the common case?** |
+| 7 | discoverability of decided questions | **process: a `DECIDED.md` index + a triage order in CLAUDE.md?** |
 
 ---
 
@@ -427,6 +428,64 @@ probably applies to `W` vs `C`.
 Constraint either way: `cl/pcl-pack.lisp` is a checked-in transpiled
 artifact, so `tools/rebuild-pack` must land in the same commit, verified with
 pack.t (blessed 5635/90) before the full gate+sweep.
+
+---
+
+## 7. Discoverability of decided questions — a process proposal
+
+*Raised because this session wasted real time re-deriving things the project
+had already settled, and once mis-stated a good decision as an open one.
+The content is fine; the entry points are not.*
+
+Settled facts currently live in six places with no single index: `CLAUDE.md`,
+`docs/not-supported.md`, `docs/ir-spec.md`, the `*-review.md` design docs,
+task descriptions, and **code comments**.  All four failure modes below are
+from this session:
+
+| what happened | where the answer already was | why it was missed |
+|---|---|---|
+| Probed four `DESTROY` shapes before checking | `not-supported.md` §DESTROY | no rule saying "grep it FIRST" |
+| Wrote up ref addresses as an open question | a comment in `cl/pcl-runtime.lisp` | **not in `ir-spec.md` at all** |
+| Misread the suite scoreboard twice (P vs C) | `run-perl-suite.pl` header ~line 69 | nothing at the point of use said so |
+| Three failed attempts in PExpr's operand region | `pexpr-term-parsing-review.md` | not in CLAUDE.md's "Key Files to Read" |
+
+**Proposals, highest leverage first.**
+
+1. **`docs/DECIDED.md` — a one-line index of settled questions**, each with a
+   pointer, not prose: "DESTROY → not-supported §DESTROY.  Ref identity →
+   ir-spec §2.5.  Error-message text → not-supported §Error message text.
+   `!0`/`!1` → §Interned boolean constants."  The value is that it is ONE
+   grep before touching anything; today it takes knowing four files.
+2. **Put the triage order in `CLAUDE.md` itself**, as a numbered procedure
+   near the top: read the failing test → grep `DECIDED.md` → grep
+   `not-supported.md` → *only then* probe.  `test-debugging-runbook.md` has
+   the FIX-vs-REGISTER tree, but the ordering rule is not where someone
+   trips over it before starting.
+3. **Rule: a load-bearing design decision belongs in `ir-spec.md`, not only
+   in a comment.**  Ref identity is the proof — a genuinely good decision
+   (monotonic ids, never reused, stable across GC relocation; strictly better
+   than perl's reusable addresses) that was invisible to anyone reading the
+   normative manual.  Moved into §2.5 this session; the comment should point
+   at the spec rather than be the only copy.
+4. **A format legend where data is CONSUMED, not only where it is produced.**
+   `docs/perl-suite-run.tsv` has no header line, and the only authoritative
+   statement that `P`=perl / `C`=PCL is in the tool source.  One comment line
+   in the tsv would have prevented two wrong readings — and the second wrong
+   reading produced a "near-green" worklist that was entirely fictitious.
+5. **Record failed attempts in the task, not just the goal.**  #142 now
+   carries all three things tried and why each died; #148 records that the
+   root is a mode model rather than an encoding slip.  Tasks that say what
+   NOT to retry are worth more than tasks that only say what to do.
+
+**What already works and should not change:** `not-supported.md`'s entry
+style (Perl behaviour / PCL behaviour / rationale) is what made confident
+XDIFF classification possible once found, and the skip-registry +
+expected-tsv mechanism with stale-detection is the right design.  The gap is
+discovery, not content.
+
+**Ask:** are 1 and 2 worth doing (the rest are cheap follow-ons), and if so
+does `DECIDED.md` want to be hand-curated or generated from the section
+headings of `not-supported.md` + `ir-spec.md`?
 
 ## Verification standard used for the two shipped commits
 
