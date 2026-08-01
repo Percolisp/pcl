@@ -4,6 +4,64 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 319 (2026-08-01, Opus 5) — #157: the suite runner lost whole runs under memory pressure. Three defects, one of which had silently zeroed its exit code forever.
+
+- **The reported symptom** (#157, found s318 while the laptop was short on
+  memory): `run-perl-suite.pl op/list.t` printed no result row, no summary,
+  wrote no `--tsv`, and **exited 0** — a total failure and a run nobody asked
+  for were the same observation.  s318 guessed "the parent is OOM-killed and
+  systemd swallows the status".  That guess was **wrong**, and the real chain
+  is three independent bugs that compose:
+  1. **A forked WORKER inherited the parent's `$SIG{TERM}` handler AND its END
+     blocks.**  A signalled worker therefore ran `exit 130` → the parent's
+     `END { system("rm -rf $tmpdir") }` and `END { unlink $core }`, deleting
+     every SIBLING's result file and the shared saved core, and its inherited
+     `%children` copy made it `kill -KILL` its siblings' process groups too.
+  2. The parent, still alive, then **died** in `tempfile(DIR => $tmpdir)`
+     ("Parent directory does not exist") — hence no summary, no tsv.
+  3. **`system()` in an END block overwrites `$?`, and `$?` at the end of the
+     last END block IS the process exit status** — so the die's 255 became 0.
+     This one is not conditional on any crash: it zeroed the exit code of
+     **every run the tool ever made**, so the documented contract "Exit:
+     nonzero iff any DIFF/TRANSPILE/TIMEOUT/MISSING/NO-RESULT" never once
+     held.  A release gate keyed on that exit code read a fully failing run
+     as success.
+- **All three PROVEN, not inferred** — the s318 hypothesis is exactly what
+  probing replaced:
+  - a 12-line probe showed a TERMed child running the parent's END and wiping
+    the shared dir;
+  - `END { system("true") } exit(1)` → **exit 0**; same with `die` → **0**;
+  - the counterfactual: TERMing ONE worker under the HEAD version killed the
+    whole run at file 2 of 5 with `Error in tempfile() ... Parent directory
+    (/tmp/ASggE2BYP_/) does not exist`.  Under the fix, the same kill reports
+    that one file `NO-RESULT` and **the remaining three still run**.
+  - systemd probe worth keeping: a cgroup OOM stop arrives as **SIGTERM**
+    (scope exit 143), not SIGKILL, i.e. it IS catchable — only a direct
+    SIGKILL of the parent (exit 137) escapes an END block.
+- **The fix** (`tools/run-perl-suite.pl`): reporting moved into an END block
+  so a signal/die still emits **one row per requested file** — `KILLED` for
+  in-flight, `NOT-RUN` for never-started, both counted UNEXPLAINED so the
+  exit is nonzero and the tsv is complete (and headed `# INCOMPLETE RUN`);
+  workers reset INT/TERM to DEFAULT and every destructive END is guarded by
+  `$$ == $MAIN_PID`; cleanup ENDs take `local $?`; rows are appended to a
+  `run-journal.tsv` as they arrive (the only thing surviving SIGKILL, and it
+  makes a long run `tail -f`-able) with a `# complete` trailer whose absence
+  means the run died.
+- **Same guard applied to `sweep-perl-tests.pl`** — it already used
+  `_exit(0)` in children, but an UNCAUGHT die in a worker had the identical
+  shared-tmpdir wipe available to it.  Verified `local $?` cannot leak a
+  spurious nonzero exit: perl's normal fall-off is 0 regardless of `$?`.
+- **Verified**: exit 1 when a file DIFFs, exit 0 when all OK (both were 0
+  before); parent-kill → 3 OK + KILLED + NOT-RUN, exit 130; worker-kill →
+  NO-RESULT + run continues; sweep smoke test unchanged (lc.t 82/0).
+- **The lesson worth keeping**: the s318 note called this "a REPORTING bug,
+  not a MEASUREMENT bug" and reasoned about who OOM-kills whom.  Both halves
+  of that framing were right, but the mechanism was ordinary Perl process
+  semantics — inherited END blocks and `$?` — that no amount of reasoning
+  about systemd would have found.  Two 12-line probes did.
+
+---
+
 ## Session 318 (2026-08-01, Opus 5) — W1 queue: #142 tie bareword class, then #154 wrong-kind deref dies like perl. avhv.t 0/40 → 37/40.
 
 - **#142 DONE (35ce4f7, gen v2-91)**: `tie %fake, Tie::StdHash;` compiled to a

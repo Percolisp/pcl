@@ -67,8 +67,22 @@
 #
 # Output columns: P:perl_ok/notok  C:pcl_ok/notok  STATUS  [crash-signature]
 # STATUS: OK (counts match) | DIFF | TRANSPILE | TIMEOUT | NOTAP (perl itself
-# produced no TAP — not comparable, doesn't fail the run; PCL result shown).
-# Exit: nonzero iff any DIFF/TRANSPILE/TIMEOUT/MISSING/NO-RESULT.
+# produced no TAP — not comparable, doesn't fail the run; PCL result shown)
+# | KILLED / NOT-RUN (the RUN died before measuring this file — see below).
+# Exit: nonzero iff any DIFF/TRANSPILE/TIMEOUT/MISSING/NO-RESULT/KILLED/NOT-RUN.
+#
+# EVERY requested file gets a row, including when the run itself dies (task
+# #157).  It did not use to: under memory pressure the run produced no rows,
+# no summary, no --tsv and exit 0 — a total failure and a run nobody asked for
+# were the same observation.  Three separate defects, all fixed here:
+#   * a forked WORKER inherited the parent's SIGTERM handler and END blocks,
+#     so one signalled worker `rm -rf`'d the SHARED tmpdir and unlinked the
+#     shared core, after which the parent died in tempfile();
+#   * `system()` in an END block overwrites $?, and $? at the end of the last
+#     END block IS the process exit code — so the "Exit: nonzero" contract
+#     above silently never held, for any run;
+#   * nothing reported the files that never got measured.
+# Verified by killing a worker and by killing the parent mid-dispatch (s319).
 
 use strict;
 use warnings;
@@ -165,6 +179,36 @@ for my $d (@dirs) {
 }
 @files or die "no files (give t-relative paths, --dir <subdir>, or --all)\n";
 
+# ------------------------------------------------- crash-honest reporting
+# A run that DIES must never look like a run that was never asked for
+# (task #157).  It used to: an OOM under memory pressure produced no row,
+# no summary, no --tsv and a zero exit — indistinguishable from "nobody
+# asked", and a release gate reads that as nothing-to-see.
+#
+# TWO mechanisms, because they cover different deaths:
+#
+#  1. The report lives in an END block, so a SIGTERM (what a cgroup OOM
+#     stop actually sends — see the systemd-run wrapper above), a die, or
+#     a Ctrl-C still prints a row for EVERY file: KILLED for the ones in
+#     flight, NOT-RUN for the ones never started.  Both count as bad, so
+#     the exit code is nonzero and the tsv is complete.
+#  2. SIGKILL runs nothing, so rows are ALSO appended to a journal as they
+#     arrive.  A killed run leaves the rows it did get plus a missing
+#     "# complete" trailer, i.e. visibly partial rather than absent.
+#
+# $MAIN_PID guards it (and the cleanup ENDs below): a forked WORKER that
+# exits via die/exit would otherwise run the parent's END blocks and
+# `rm -rf` the shared tmpdir out from under its siblings — which is
+# precisely how the whole run's evidence used to vanish at once.
+my $MAIN_PID = $$;
+my (%children, %results);
+my ($dispatch_started, $reported) = (0, 0);
+END {
+  return if $$ != $MAIN_PID || !$dispatch_started || $reported;
+  my $bad = emit_report();
+  $? = 1 if $bad && !$?;
+}
+
 # Fresh saved core (tools/prove-core pattern): runtime compiled in ONCE,
 # rebuilt every invocation so it can never be stale; removed on exit.
 my $core = "";
@@ -178,13 +222,17 @@ unless ($no_core) {
     unlink $core; $core = "";
   }
 }
-END { unlink $core if $core }
+# `local $?` or the cleanup EATS THE EXIT STATUS: whatever $? holds when the
+# LAST END block finishes becomes the process exit code, and system()/`` set
+# $?.  That is why every run exited 0 no matter how many files diverged, i.e.
+# the "Exit: nonzero iff ..." contract above never actually held (task #157).
+END { local $?; unlink $core if $core && $$ == $MAIN_PID }
 # --core must precede all other toplevel sbcl options.
 my $sbcl = $core ? "sbcl --core \Q$core\E --noinform --non-interactive"
                  : "sbcl --noinform --non-interactive --load \Q$runtime\E --load \Q$testlib\E";
 
 my $tmpdir = tempdir(CLEANUP => 0);
-END { system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir }
+END { local $?; system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir && $$ == $MAIN_PID }
 
 # FIXTURE SANITY (s318, task #151).  The PERL side runs with CWD = the REAL
 # $tdir, so `require './test.pl'` there must find PERL's harness — the 2000-line
@@ -244,6 +292,19 @@ mkdir "$tmpdir/lib";
 # Fresh per-test failure log each run (mirrors the sweep's .faillog).
 system("rm -rf \Q$faillog\E");
 mkdir $faillog;
+
+# Append-as-you-go journal (task #157): the only record that survives a
+# SIGKILL of this process, and it makes a long run watchable from another
+# shell (`tail -f`).  A journal without its "# complete" trailer means the
+# run died — the rows above it are still valid, the missing ones are not
+# "nothing to report", they are unmeasured.
+my $journal_file = "$faillog/run-journal.tsv";
+open my $JOURNAL, '>', $journal_file or die "write $journal_file: $!\n";
+$JOURNAL->autoflush(1);
+printf $JOURNAL "# run-perl-suite %s: %d files, jobs=%d timeout=%d\n",
+  scalar(localtime), scalar(@files), $jobs, $timeout;
+print $JOURNAL "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
+print $JOURNAL "# queued\t$_\n" for @files;
 
 # TAP stream -> { test-number => [verb, description] }.
 # Horizontal whitespace ONLY after the number: \s there matches the newline of
@@ -375,12 +436,19 @@ my %HEAVY = map { $_ => 1 } (
   'op/cond.t',   # 20k-nested-ternary eval: pl2cl server peaks ~6.6 GB
 );
 my @heavy = grep { $HEAVY{$_} } @files;
-my (%children, %results);
 # Workers sit in their own process groups, so terminal SIGINT no longer
-# reaches them — forward it (exit() still runs the END tmpdir cleanup).
+# reaches them — forward it.  exit() still runs the END blocks, which is
+# now what PRINTS the report for everything unfinished (task #157); a
+# cgroup OOM stop arrives as SIGTERM, so this is the path an out-of-memory
+# run actually takes.
 for my $s ('INT', 'TERM') {
-  $SIG{$s} = sub { kill 'KILL', map { -$_ } keys %children; exit 130 };
+  $SIG{$s} = sub {
+    print "\n-- caught SIG$_[0] — killing workers and reporting what we have\n";
+    kill 'KILL', map { -$_ } keys %children;
+    exit 130;
+  };
 }
+$dispatch_started = 1;
 for my $phase ([[grep { !$HEAVY{$_} } @files], $jobs], [\@heavy, 1]) {
 my ($phase_files, $slots) = @$phase;
 my @queue = @$phase_files;
@@ -393,7 +461,21 @@ while (@queue || %children) {
     die "fork: $!" unless defined $pid;
     # Each worker leads its own process group so the group (worker + every
     # grandchild spawned via system/backticks) can be killed as a unit.
-    if ($pid == 0) { setpgrp(0, 0); run_one($rel, $result_file); _exit(0) }
+    # A WORKER must never run the parent's END blocks or its signal
+    # handler: `exit`/`die` in a child would `rm -rf` the SHARED tmpdir and
+    # unlink the shared core, destroying every SIBLING's result, and the
+    # inherited handler would KILL the siblings outright.  A scope-wide
+    # SIGTERM (cgroup OOM) hits workers and parent alike, so this used to
+    # erase the whole run's evidence at once — task #157.  $MAIN_PID guards
+    # the END blocks; DEFAULT here makes a signalled worker just die, which
+    # the parent then reports as NO-RESULT.
+    if ($pid == 0) {
+      setpgrp(0, 0);
+      $SIG{$_} = 'DEFAULT' for 'INT', 'TERM';
+      %children = ();
+      run_one($rel, $result_file);
+      _exit(0);
+    }
     $children{$pid} = { rel => $rel, result_file => $result_file, start => time() };
   }
   for my $pid (keys %children) {
@@ -414,7 +496,7 @@ while (@queue || %children) {
         $r[6] = "expected-divergence row now PASSES — remove it from docs/perl-suite-expected.tsv";
       }
     }
-    $results{$info->{rel}} = \@r;
+    record_result(\@r);
     printf "%-24s P:%4d/%-3d C:%4d/%-4d %-7s %s\n", @r[0 .. 5], $r[6] // '';
     STDOUT->flush();
   }
@@ -423,7 +505,7 @@ while (@queue || %children) {
     my $info = $children{$pid};
     next unless time() - $info->{start} > $timeout + 40;
     kill 'KILL', -$pid; waitpid($pid, 0);
-    $results{$info->{rel}} = [$info->{rel}, 0, 0, 0, 0, 'TIMEOUT', '(killed)'];
+    record_result([$info->{rel}, 0, 0, 0, 0, 'TIMEOUT', '(killed)']);
     printf "%-24s %s\n", $info->{rel}, 'TIMEOUT (killed)';
     delete $children{$pid};
   }
@@ -431,28 +513,69 @@ while (@queue || %children) {
 }
 }
 
-# ----------------------------------------------------------- summary
-my %by_status;
-push @{ $by_status{ $results{$_}[5] } }, $_ for keys %results;
-print "----\n";
-for my $st (sort keys %by_status) {
-  my @f = sort @{ $by_status{$st} };
-  printf "%-8s %3d%s\n", $st, scalar @f,
-    ($st eq 'OK' ? '' : ':  ' . join(', ', @f));
-}
-my $n_bad = grep { $results{$_}[5] !~ /^(?:OK|NOTAP|XDIFF)$/ } keys %results;
-printf "%d files: %d OK, %d NOTAP, %d XDIFF (expected, see docs/perl-suite-expected.tsv), %d UNEXPLAINED\n",
-  scalar(keys %results), scalar(@{ $by_status{OK} // [] }),
-  scalar(@{ $by_status{NOTAP} // [] }), scalar(@{ $by_status{XDIFF} // [] }), $n_bad;
-print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
+exit(emit_report() ? 1 : 0);
 
-if ($tsv_file) {
-  open my $tf, '>', $tsv_file or die "write $tsv_file: $!\n";
-  # Legend at the point of use — this has been misread twice (s316v).
-  print $tf "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
-  print $tf "# NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)\n";
-  print $tf join("\t", @{ $results{$_} }), "\n" for sort keys %results;
-  close $tf;
-  print "wrote $tsv_file\n";
+# ----------------------------------------------------------- summary
+# One row per file requested, ALWAYS — see the crash-honest reporting note
+# near the top.  Called on the normal path and from the END block; the
+# $reported latch keeps it single-shot either way.
+sub record_result {
+  my ($r) = @_;
+  $results{$r->[0]} = $r;
+  print $JOURNAL join("\t", @$r), "\n" if $JOURNAL;
+  return;
 }
-exit($n_bad ? 1 : 0);
+
+sub emit_report {
+  return 0 if $reported++;
+  # Files with no row: the run died before it got to them (task #157).
+  # KILLED/NOT-RUN are UNEXPLAINED statuses, so a died run exits nonzero and
+  # its tsv is complete — the release gate can see the hole instead of
+  # reading absence as "nothing to report".
+  my %inflight = map { $_->{rel} => 1 } values %children;
+  my @lost = grep { !$results{$_} } @files;
+  for my $rel (@lost) {
+    my ($st, $why) = $inflight{$rel}
+      ? ('KILLED',  '(run died with this file in flight)')
+      : ('NOT-RUN', '(run died before this file started)');
+    record_result([$rel, 0, 0, 0, 0, $st, $why]);
+  }
+  if (@lost) {
+    printf "\n!! RUN DID NOT COMPLETE — %d of %d files have no measurement.\n"
+         . "!! Most likely out of memory: re-run with --jobs 2-4 on a quiet\n"
+         . "!! machine.  Rows below are marked KILLED/NOT-RUN, never OK.\n",
+      scalar(@lost), scalar(@files);
+  }
+
+  my %by_status;
+  push @{ $by_status{ $results{$_}[5] } }, $_ for keys %results;
+  print "----\n";
+  for my $st (sort keys %by_status) {
+    my @f = sort @{ $by_status{$st} };
+    printf "%-8s %3d%s\n", $st, scalar @f,
+      ($st eq 'OK' ? '' : ':  ' . join(', ', @f));
+  }
+  my $n_bad = grep { $results{$_}[5] !~ /^(?:OK|NOTAP|XDIFF)$/ } keys %results;
+  printf "%d files: %d OK, %d NOTAP, %d XDIFF (expected, see docs/perl-suite-expected.tsv), %d UNEXPLAINED\n",
+    scalar(keys %results), scalar(@{ $by_status{OK} // [] }),
+    scalar(@{ $by_status{NOTAP} // [] }), scalar(@{ $by_status{XDIFF} // [] }), $n_bad;
+  print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
+
+  if ($JOURNAL) {
+    printf $JOURNAL "# %s\n", @lost ? "INCOMPLETE: @{[scalar @lost]} files unmeasured"
+                                    : "complete";
+    close $JOURNAL;
+    print "journal: $journal_file\n" if @lost;
+  }
+  if ($tsv_file) {
+    open my $tf, '>', $tsv_file or die "write $tsv_file: $!\n";
+    # Legend at the point of use — this has been misread twice (s316v).
+    print $tf "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
+    print $tf "# NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)\n";
+    print $tf "# INCOMPLETE RUN — KILLED/NOT-RUN rows are unmeasured, not passing\n" if @lost;
+    print $tf join("\t", @{ $results{$_} }), "\n" for sort keys %results;
+    close $tf;
+    print "wrote $tsv_file\n";
+  }
+  return $n_bad;
+}

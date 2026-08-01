@@ -108,3 +108,15 @@ not-supported.md → only then probe.*
 - **Failed attempts are recorded IN the task** (what was tried, what killed
   it) — a task that says what NOT to retry outranks one that only states
   the goal.
+- **A dead run must not look like a run nobody asked for**: every requested
+  file gets a row (KILLED / NOT-RUN when the run died), the exit code is
+  nonzero, and a journal records rows as they arrive → task #157,
+  `tools/run-perl-suite.pl` header.
+- **Forked workers must never run the parent's END blocks or signal
+  handlers** ($$ == $MAIN_PID guard): one signalled worker otherwise
+  `rm -rf`s the SHARED tmpdir and kills its siblings → task #157, guard in
+  `run-perl-suite.pl` + `sweep-perl-tests.pl`.
+- **`system()`/backticks in an END block EAT the exit status** — `$?` at the
+  end of the last END block IS the process exit code, so cleanup ENDs need
+  `local $?`.  This silently zeroed run-perl-suite's exit code for every run
+  it ever made → task #157.

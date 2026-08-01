@@ -51,7 +51,14 @@ my $total = scalar @test_files;
 # CLEANUP => 0 because child processes inherit the cleanup handler
 # and would delete the dir when they exit. We clean up manually at end.
 my $tmpdir = tempdir(CLEANUP => 0);
-END { system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir }
+# $MAIN_PID: workers _exit(0) to skip END blocks, but an UNCAUGHT die in a
+# child would still run this one and `rm -rf` the tmpdir out from under every
+# sibling.  That is exactly how run-perl-suite lost whole runs under memory
+# pressure (task #157) — same guard here so it cannot happen at all.
+# `local $?`: system() overwrites $?, and $? after the last END block is the
+# process exit status, so an unguarded cleanup silently zeroes any exit code.
+my $MAIN_PID = $$;
+END { local $?; system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir && $$ == $MAIN_PID }
 
 # Structured failure log (consumed by tools/sweep-diff.pl and tools/triage.pl).
 # Set PCL_TEST_LOG_DIR so child SBCL processes append one TSV line per FAILING
