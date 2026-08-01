@@ -635,6 +635,8 @@ t("ary as hash write", sub { $ary->{k} = 1 });
 t("ary as hash slice", sub { my @v = @{$ary}{"a","b"} });
 t("ary as hash exists",sub { exists $ary->{k} });
 t("ary as hash delete",sub { delete $ary->{k} });
+t("ary as hash del-slice",sub { my @d = delete @{$ary}{"foo","bar"} });
+t("ary as hash kv-slice",sub { my %d = delete %{$ary}{"foo"} });
 t("ary as hash keys",  sub { my @k = keys %$ary });
 t("hash as ary read",  sub { my $v = $hsh->[0] });
 t("hash as ary write", sub { $hsh->[0] = 1 });

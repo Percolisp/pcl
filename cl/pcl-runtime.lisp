@@ -6842,6 +6842,10 @@ create the key on a read-only call, which perl does not."
                           else
                           collect key)))
     (when (null flat-keys) (return-from p-delete-hash-slice nil))
+    ;; Wrong kind of referent (delete @{$aryref}{…}): perl's fatal.  The loop
+    ;; below calls GETHASH directly rather than going through p-gethash, so it
+    ;; needs its own guard (task #154; t/op/avhv.t t30).
+    (when (%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
     (let ((result (make-array (length flat-keys) :adjustable t :fill-pointer 0)))
       (dolist (key flat-keys)
         (let ((k (to-string key)))
@@ -6861,6 +6865,9 @@ create the key on a read-only call, which perl does not."
                           else
                           collect key))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
+    ;; Wrong kind of referent: perl's fatal (task #154) — this loop calls
+    ;; GETHASH directly rather than through p-gethash.
+    (when (%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
     (dolist (key flat-keys)
       (let ((k (to-string key)))
         (vector-push-extend k result)
