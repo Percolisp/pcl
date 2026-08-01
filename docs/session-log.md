@@ -23,6 +23,15 @@ Append new entries at the top. One section per session.
   HASH/ARRAY/CODE with perl's exact text.  **t/op/avhv.t 0 pass/40 fail →
   37/3**; postfixderef.t 95 → 99 over the same 121 rows (t61/t65 "Not a HASH
   reference", t62/t66 "Not a CODE reference").
+- **#154 tail (dc15cbb)**: triaging avhv.t's 3 survivors found the delete-SLICE
+  family (`delete @{$ref}{…}`, `delete %{$ref}{…}`) calls GETHASH directly
+  instead of going through p-gethash, so it still raised the host error — one
+  guard line each.  **avhv.t 37/3 → 38/2.**  The plain slice READ
+  (`@$ref{…}`) was already right: p-hslice loops through p-gethash.
+  The last two rows are **#156**: t13 (slice inside join inside eval) and t39
+  (`(%$avhv, @extra) = LIST`) BOTH produce perl's message when probed
+  standalone but not inside the file — context changes the answer, cause not
+  yet identified, left open rather than guessed.
 - **Two design limits, both found by the gate/sweep AFTER probes said clean**
   (recorded in the code and in #154 as do-not-retry):
   - no SCALAR guard in `p-cast-$` — PCL COLLAPSES a scalar-ref-to-coderef, so
