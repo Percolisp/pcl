@@ -305,6 +305,55 @@ no future probe can take the desktop down.
 
 ---
 
+## 9. (added s319) §1 has a third symptom, and it is the cleanest one yet:
+##    a reference's identity is its WRAPPER's, not its referent's
+
+While clearing the near-green queue I hit your §1 question from a fourth
+direction, and this one needs no interpretation at all.  Perl's rule is that a
+ref's address IS the referent's address, so two refs to the same element are
+`==` and stringify identically:
+
+```
+                          perl                      PCL
+\$h{k} twice              SCALAR(0x5f4d81a1a3b8)    SCALAR(0x1) / SCALAR(0x2)
+                          (equal)                   (NOT equal)   <-- op/delete.t t26
+\$a[0] twice              SCALAR(0x…) equal         REF(0x3) / REF(0x3)
+                                                    equal, but WRONG TYPE
+\(values %h) vs \$h{k}    equal                     not equal
+```
+
+**The cause is read from the source, not inferred.**  `object-address`
+(runtime:1521) is a deliberate EQ-serial table, stable across GC — correct.
+`p-aref-box`/`p-gethash-box` both store a box into the container and return
+that same box every call — correct and symmetric.  The break is that
+`p-backslash` (runtime:11627) allocates a **fresh wrapper box per `\`**, and
+the stringify/numify site (runtime:1799) takes `object-address` of that
+**wrapper**.  The array case only looks right because it lands in the deeper
+branch at ~1886 that unwraps one more level — and that same level-counting is
+why `\$a[0]` prints `REF` where perl prints `SCALAR`.
+
+**Why this is your call and not mine.**  The obvious patch — "if the wrapper is
+`is-ref` and holds a `p-box`, use the inner box's address" — is precisely the
+move that cost s318 a gate+sweep cycle in #154: a remaining `p-box` does *not*
+distinguish a scalar-ref from a representation layer, because `\%h` is a double
+box.  And identity and printed TYPE are decided by the same level count, so
+they cannot be fixed independently without regressing the type.  This is §1's
+model question with a sharper edge: **the wrapper needs to know what level its
+referent is at** — which is the referent-kind word §1 is about.
+
+**The ask.**  Does this change your preference among §1's (A)–(D)?  It is the
+first of the four symptoms where a referent-kind tag on the box (option A)
+would be sufficient on its own — #154's two shapes, #155 and #159 all wanted
+something else, but ref identity is purely a "which level is the referent"
+question.  If (A) is worth doing for R1, this row pair is its cheapest proof.
+
+Tracked as task #163.  Not registered as an expected divergence: op/delete.t's
+third failing row (t56) is a genuinely different, already-blessed gap
+(DESTROY-via-GC), so the file misses the all-or-nothing bar and correctly stays
+UNEXPLAINED with t26/t54 as the fix target.
+
+---
+
 ## Verification standard used for the seven commits
 
 corpus-diff (emission-changing commits only — four of the seven are
