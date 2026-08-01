@@ -553,7 +553,7 @@ core built per invocation (prove-core pattern, ~1.2s/file → ~0.003s), and
 `--all`/`--dir` scans exclude files already copied into the sweep corpus
 (matched by basename + head content — several `t/` files share a basename with
 a corpus file from another dir).  `--include-copied` overrides; `--tsv FILE`
-writes a per-file snapshot (`docs/perl-suite-run.tsv` = the s302 run).
+writes a per-file snapshot.  **`docs/perl-suite-run.tsv` is the R1 RELEASE SNAPSHOT, regenerated in full at s321** (523 rows, all 11 dirs, one session, per-dir foreground chunks) — see the fable-answers-s318.md §6 rule: one full regeneration, partial regeneration forbidden.
 
 **Failure log + not-supported marking (s302b).**  Every DIFF/TIMEOUT file
 writes a per-test log to `.suitelog/<rel>.fails.tsv`
