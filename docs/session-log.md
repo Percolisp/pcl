@@ -163,6 +163,61 @@ Append new entries at the top. One section per session.
   (aassign returning assigned values), op/flip.t t10/t11/t12 (#141 family +
   `\scalar($a..$b)` identity), op/print.t t3 (utf8 overlongs through a `:utf8`
   in-memory handle — Unicode-blessed, single row, an XDIFF candidate).
+
+### Four fixes, each found by the previous one's probe (#169 → #170 → #171 → #166)
+
+The chain is the point: every one of these was found while verifying the fix
+before it, and three of the four were **silent wrong values**, not errors.
+
+- **#169 (676a14c) — list assignment must return LVALUES.**  `$_++ foreach
+  (LIST) = (VALUES)` writes into the real variables.  Two sites returned a
+  VALUE where a box was required, so the write went to a temporary and the
+  variable silently kept its old value: `p-hash-fill` stored a hash's **odd
+  trailing key**'s padded value as a bare `*p-undef*` (every other value goes
+  through `%p-make-hash-entry`, which boxes), and `p-list-=`'s post-greedy
+  collect pushed `*p-undef*` for a scalar **starved by a greedy array/hash**
+  instead of that variable's own box.  Sweep: **0 new, 7 blessed rows fixed** —
+  hashassign.t t304 plus SIX aassign.t "lval: c post" rows, the same shape, so
+  the diagnosis generalised past the rows that prompted it.
+- **#170 (4c9fd75) — a `%hash` in a list literal was not flattened.**
+  `my @a = (1,%h,2)` stored the hash as ONE element (`HASH(0x..)`) with a wrong
+  count — value-corrupting, in an everyday idiom
+  (`my @pairs = (%defaults,%overrides)`), and **pre-existing** (verified at HEAD
+  before touching anything).  The flatten was missing in **TWO** places:
+  `p-array-fill`'s vector/list loops, and `p-array-init` — the anonymous ARRAY
+  constructor.  **The second only surfaced because the regression tests included
+  the inverse cases**; after the first fix `@a = (…)` was right while `[…]` was
+  still wrong.  perl-tests/hashassign.t went to ZERO failures (**fully-passing
+  65 → 66**), and t/op/hashassign.t is **309/0 OK**.
+- **#171 (42af0c6) — `open` rejected any mode carrying a PerlIO `:layer`.**
+  Found probing op/print.t t3, whose description points at Unicode output; the
+  real message was `Unsupported in-memory open mode: <:utf8` — the OPEN was
+  failing.  Both dispatchers compared the WHOLE mode with `string=`, so
+  `open $fh,'<:encoding(UTF-8)',$file` — ubiquitous CPAN code — returned false.
+  One shared `%p-split-open-mode` now dispatches on the base mode; `:raw`/
+  `:bytes` select latin-1, the CL spelling of "no translation" (decoding raw
+  bytes as UTF-8 would corrupt or signal).  **Acceptance, not a layer MODEL** —
+  `:crlf`, stacking, binmode interaction and `PerlIO::get_layers` stay with
+  **#139**, which already records that it needs a design call.
+- **#166 (cdb83ae) — `use Cwd` died; there was no Cwd.pm at all.**  Exposed by
+  #167: removing a duplicated shim revealed that File::Spec's `require Cwd`
+  path had NEVER worked.  `abs_path` is implemented in Perl over
+  `readlink`/`-l`/`-e`, deliberately **not** aliased to `cwd()` — it must
+  resolve symlinks, and a shim quietly returning an unresolved path is worse
+  than a missing module.  Semantics pinned against real perl FIRST; the
+  non-obvious ones: `abs_path("existing/newfile")` **succeeds** (only the
+  DIRECTORY part must exist), `abs_path("missing/x")` is undef, and an
+  ABSOLUTE symlink target discards everything resolved so far.
+
+**Scoreboard after the four**: gate 124 files / 4461 tests PASS · sweep 0 new ·
+fail-baseline 698 → 690 (surgical removals only) · fully-passing 65 → 66 ·
+t/ files now OK: op/time.t, op/hashassign.t; XDIFF-registered: op/args.t,
+op/crypt.t, op/exists_sub.t, op/print.t.
+
+**Method note worth keeping**: every one of these was caught by writing the
+regression test's INVERSE cases (hash REFERENCE must stay one element; padded
+key must still `exists`; returned values must NOT alias the RHS).  Two of the
+four bugs were only half-fixed until those guards failed.
 - Skipped op/push/splice/unshift on purpose: that is the SvREADONLY family
   (#159), which is waiting on a design call.
 - **Discovered while triaging**: `tools/run-perl-suite.pl` does NOT load
