@@ -65,6 +65,34 @@ Append new entries at the top. One section per session.
   when handed a non-box; scalar tie is correct end to end).  **#153** gained
   an acceptance probe: `print "x=", Foo::init, "\n"` stringifies instead of
   calling (pre-existing at HEAD, position-dependent — the reducer's job).
+- **#151 RESOLVED (c9fcb72) — not drift, a broken FIXTURE.**  io/defout.t,
+  op/localref.t, uni/bless.t all run today and reproduce the checked-in counts
+  EXACTLY (22/0 vs 21/1, 64/0 vs 63/1, 84/0 vs 83/1), so perl-suite-run.tsv
+  never needed refreshing.  The s316v NOTAP was collateral from the `cp` that
+  overwrote perl's real `t/test.pl` with PCL's stub: the perl side runs with
+  CWD = the REAL t/, and with the 416-line stub there real perl cannot even
+  COMPILE `plan tests => N` ("syntax error near \"plan tests\"") → zero TAP →
+  NOTAP for every file requiring test.pl.  Reproduced non-destructively in a
+  fake t/.  The runner now DIES on that fixture (must exist, say "most of
+  Test::More functionality", >1000 lines) instead of emitting a run whose
+  NOTAP rows look like data — that label ("says nothing about PCL") is what
+  kept the damage quiet.  Indexed in DECIDED.md.  uni/bless.t's one
+  UNEXPLAINED row is t81 = #144.
+- **#150 part 1 DONE (234afa3)**: the copied-file skip is gone; the t/
+  ORIGINALS always run.  91 files become visible (op 82, base 5, opbasic 3,
+  io 1).  It was hiding real failures — against copies the sweep calls clean:
+  op/tr.t 270/46, op/state.t 125/37, io/scalar.t 94/34, op/chop.t 96/4 (PCL
+  stops at 100 of perl's 148 rows).  88 of 90 ran: **29 OK, 59 DIFF**, with
+  **16 near-green files ≤4 rows off perl** (10 of them a single row) listed in
+  #150 as the worklist for the "more DIFF families" item; op/flip.t's 3 rows
+  are probably #141.  docs/perl-suite-run.tsv predates this and has no rows
+  for the 91 — incomplete, not wrong.
+- **#157 (new)**: a run the machine kills produces NO row, NO summary and exit
+  0 — indistinguishable from a run never asked for, against the tool's own
+  contract.  USER: the laptop was short on memory, so the parent was being
+  OOM-killed.  The DATA was re-verified on a quiet machine at --jobs 1 and is
+  genuine (all four counts above reproduce exactly) — worth checking, since an
+  OOM-killed SBCL yields partial TAP that reads as a DIFF.
 - Gate 123 files / 4452 tests; sweep 0 new / 0 fixed vs 702; census 111/111.
 
 ## Session 317 (2026-08-01, Fable) — every s316v review ask ruled on; DECIDED.md + lookup order; Opus runway re-planned to ~12–20 sessions with one human gate.
