@@ -96,9 +96,37 @@ Append new entries at the top. One section per session.
   would have sent someone to build AST context annotations for a gap that is
   **one binding wide**.  NOT registered as XDIFF — it is a fix target, gated
   behind the CLAUDE.md §8 VOID_CTX regression.
-- Remaining eight rows (op/args t23 `delete $_[0]`, op/context t8 BEGIN-in-block,
-  op/crypt t6 utf8 flag, op/delete t26/t54/t56, op/or t9/t10 lvaluish `||`)
-  recorded row-by-row with source lines in **task #162**, explicitly unprobed.
+- **#162 then finished — all eight rows probed and dispositioned.**  Two
+  registered as expected (each its file's ONLY failing row, both verified XDIFF
+  in the runner): **op/args.t t23** §DESTROY-via-GC (PCL agrees on t21/t22 and
+  misses only the scope-exit DESTROY) and **op/crypt.t t6** §Unicode (crypt's
+  VALUE is right — t5 passes — only `utf8::is_utf8` differs).  **Two of the
+  eight rows blamed the wrong feature outright**, which is the argument for
+  A/B-probing every row:
+  - **#163 — `delete` is NOT the bug.**  `\$h{k} != \$h{k}` *already*, before
+    delete is involved.  `object-address` (an EQ-serial table, GC-stable) and
+    `p-aref-box`/`p-gethash-box` (both store and return the same box) are all
+    correct; **`p-backslash` allocates a fresh WRAPPER box per `\`, and
+    stringify/numify keys on that wrapper instead of the referent**.  The array
+    case only *looks* right because it lands in a deeper branch that unwraps one
+    more level — which is also why `\$a[0]` prints `REF` where perl prints
+    `SCALAR`.  Identity and printed type are decided by the same level count, so
+    they cannot be fixed separately.  This is review §1's model question with a
+    sharper edge, and the obvious level-sniffing patch is exactly what cost a
+    gate+sweep cycle in #154 → **flagged in review-requests §9, not guessed at.**
+  - **#164 — op/context.t t8**: a trailing `BEGIN { }` steals the sub's tail
+    position, so the preceding statement gets VOID instead of scalar.  A/B probe:
+    the identical sub *without* the BEGIN is correct, so the classifier is right
+    in general; the rule wanted is "phase blocks are not runtime statements for
+    value/context purposes".
+  - **#165 — op/or.t t9/t10**: `||` doesn't propagate lvalue context to its
+    operands, so the foreach alias binds a copy.  Sibling rows t11/t12 assert it
+    must NOT propagate to a *subscript* (no autoviv) — that asymmetry is the
+    design constraint, and it is why a blanket "make || an lvalue" fix fails.
+- **Method worth reusing** for the rest of #150's near-green list: one
+  `run-perl-suite` pass over several small files with `--faillog` yields every
+  diverging row with perl's own description; then A/B-probe each row (with and
+  without the suspected trigger) before believing that description.
 - Skipped op/push/splice/unshift on purpose: that is the SvREADONLY family
   (#159), which is waiting on a design call.
 - **Discovered while triaging**: `tools/run-perl-suite.pl` does NOT load
