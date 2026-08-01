@@ -376,9 +376,15 @@ fix until cleared — when codegen changes affect a `require`d module, clear
 
 ## t/op extras (not in `perl-tests/`) — surveyed 2026-06-27
 
-`op/lex_assign.t` (353 perl ok) reached **348** after two fixes; remaining 5 are
-not-supported buckets (DESTROY-via-GC reassignment, `select`/`utime` arg-count
-error-message detection, `getpriority` — a niche unimplemented POSIX builtin).
+`op/lex_assign.t` (353 perl ok) reached **351** at s316t (was 348): the
+`getpgrp`/`setpgrp`/`getpriority` builtins now exist (sb-posix + a raw
+getpriority(2) alien call), one-arg `utime` is a plain short list, and —
+the real find — v2's native `$lex = RHS` statement split no longer folds a
+depth-0 `,`/`or` tail into the RHS (`$a = readlink 'x', 'y'` keeps $a
+undef; `_tail_below_assign_prec` in `Pl/Parser2.pm`).  Remaining 2 are
+not-supported buckets (t3 DESTROY-via-GC reassignment, t283 schop
+error-message detection).  `op/setpgrpstack.t` and `op/waitpid.t` (POSIX
+`WNOHANG` via the shim's new Exporter list) went OK the same session.
 Two genuinely fixable bugs found here:
 - 🐞→✅ **`$^T` (BASETIME) was unbound** → `localtime $^T` / `gmtime $^T` aborted.
   Added the special var: `|$^T|` defvar (program start, Unix seconds) in

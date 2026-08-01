@@ -45,7 +45,7 @@ io/argv.t	52	1	23	30	DIFF	unbound:main::<>
 io/binmode.t	9	0	9	0	OK	
 io/bom.t	3	0	0	3	DIFF	
 io/closepid.t	3	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-open $fhN "-|" $perl "-e" "sleep N") Co
-io/crlf.t	16421	0	16408	10	DIFF	undef-fn:PerlIO::pl-get_layers
+io/crlf.t	16421	0	16408	10	DIFF	:crlf layer + PerlIO::get_layers — task #139
 io/crlf_through.t	942	0	726	216	DIFF	
 io/data.t	4	0	0	0	DIFF	
 io/defout.t	22	0	21	1	DIFF	
@@ -216,7 +216,7 @@ op/index_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support 
 op/kill0.t	9	0	4	5	DIFF	
 op/kvaslice.t	38	0	22	16	DIFF	
 op/leaky-magic.t	71	0	0	0	DIFF	crash:simple-error: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/
-op/lex_assign.t	353	0	346	7	DIFF	undef-fn:main::pl-getpgrp
+op/lex_assign.t	353	0	351	2	DIFF	s316t: t3 DESTROY-on-reassign + t283 schop selfassign remain
 op/lexsub.t	156	0	7	10	DIFF	undef-fn:main::pl-F
 op/localref.t	64	0	63	1	DIFF	
 op/lock.t	5	0	0	0	DIFF	crash:sb-int:simple-program-error: invalid number of arguments: N
@@ -249,7 +249,7 @@ op/require_override.t	10	0	7	3	DIFF
 op/rt119311.t	22	0	0	1	DIFF	crash:sb-kernel::arg-count-error: Error while parsing arguments to defmacro push: too many elements in ((lambda () (p-undef 
 op/runlevel.t	24	0	0	0	DIFF	
 op/select.t	9	0	2	7	DIFF	
-op/setpgrpstack.t	3	0	1	1	DIFF	undef-fn:main::pl-setpgrp
+op/setpgrpstack.t	3	0	3	0	OK	
 op/sigdispatch.t	29	0	25	4	DIFF	
 op/signame_canonical.t	15	0	0	0	DIFF	
 op/signatures.t	1245	1	886	360	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. The 3 rows NOT covered stay fix targets: t151/152/156 parenless list-op call swallowing the sig default (t017). t276-296 state-in-default re-init FIXED (task #134, s316r).
@@ -292,7 +292,7 @@ op/utf8magic.t	6	0	2	4	DIFF
 op/utfhash.t	99	0	91	0	DIFF	
 op/utftaint.t	0	0	72	17	NOTAP	
 op/ver.t	54	0	48	6	XDIFF	undef-fn:main::pl-gethostbyaddr | not-supported.md §use bytes / §use vN default warnings / §Control-character glob names — tests 21/23/25 (bytes view), 52 (Mordor), 54 (vN warnings); test 51 is the OPEN defelem arg-aliasing gap (task #131), a fix target
-op/waitpid.t	1	0	0	0	DIFF	undef-fn:main::pl-WNOHANG
+op/waitpid.t	1	0	1	0	OK	
 op/warn.t	32	1	21	5	DIFF	undef-fn:Tie::pl-StdScalar
 op/while.t	26	0	11	4	TIMEOUT	timeout
 op/write.t	636	0	0	0	DIFF	

@@ -4,6 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316t (2026-08-01, Fable) — #137: suite undef-fn family (process builtins) + v2 `$lex = A, B` reassociation, gen v2-88.
+
+- **v2 parity bug (the real find): Parser2's native `$x = RHS` statement
+  split folded a depth-0 below-assignment tail into the RHS.**  Perl
+  parses `$a = readlink 'x', 'y'` as `($a = readlink 'x'), 'y'` and
+  `$a = 0 or f()` as `($a = 0) or f()`; the token split at the `=` gave
+  `$a = (readlink 'x', 'y')` (assigned 'y') and `$a = (0 or f())`
+  (assigned f()'s value).  v1 was already correct.  Fix:
+  `_tail_below_assign_prec` in `Pl/Parser2.pm` — any depth-0
+  `,`/`=>`/`or`/`and`/`xor` in the tail disqualifies the native split
+  (both the `=` branch and the OP=-raw branch); the statement lowers
+  through the generic expression machinery, which owns the parenless
+  list-op ambiguity (`$x = f 1, 2` keeps both args).  An unboxable var
+  can't be stranded: comma/or writes aren't native-root arithmetic
+  events, so VarAnnotator already leaves such vars boxed.  Corpus diff:
+  ONE file (closure.t, `$expected = $h{...} or die` now associates like
+  perl).  Gen bump v2-87→v2-88; pack/mro artifacts regenerated
+  (header-only).
+- **New builtins:** `p-getpgrp`/`p-setpgrp` (sb-posix getpgrp/getpgid/
+  setpgid; setpgrp returns 1/0 like perl), `p-getpriority` (raw
+  getpriority(2) via sb-alien — no sb-posix binding; errno cleared
+  first, -1 + $! on failure, matching perl).  `p-utime` both times now
+  optional (`utime 'x'` = short list → 0).  Config.pm entries +
+  %RUNTIME_NAMES; stale not-implemented comment rows dropped.
+- **POSIX shim:** Exporter + @EXPORT_OK (all existing names) +
+  `WNOHANG`/`WUNTRACED` + :sys_wait_h tag — `use POSIX qw(WNOHANG)`
+  works (op/waitpid.t).
+- **Saved-core PID bug (found by the new gate test):** a core saved by
+  tools/prove-core (or a standalone executable) booted with the core
+  BUILDER's pid in `$$` — `getpriority(0,$$)` under the core diverged.
+  Fix: `*init-hooks*` lambda re-sets $$ at image boot (same pattern as
+  the FP-modes hook; fork's child re-set already existed).
+- **Verification:** suite rows op/setpgrpstack.t 1/3→3/3 OK,
+  op/waitpid.t 0/1→1/1 OK, op/lex_assign.t 346→351/353 (t3
+  DESTROY-on-reassign + t283 schop remain, other families); gate
+  123/4432 (2 new -07 oracle tests); corpus 1 explained file; FULL
+  sweep 0 new / 0 fixed vs the 702 baseline (pack.t TIMEOUTs at
+  `--jobs 8 --timeout 150` even on an idle box now — verified solo
+  5636/89, matching s316s; full-run gotcha timeout should move to
+  ~380s).  Snapshot rows updated in docs/perl-suite-run.tsv.
+- **Filed:** #138 `my $c = readlink 'x','y'` — the DECLARATION path has
+  the same reassociation bug in BOTH pipelines (v1 too); rare shape,
+  not lex_assign-visible.  #139 io/crlf.t (16408/16421) needs a
+  PerlIO layer-model decision (:crlf translation + PerlIO::get_layers)
+  — runtime's documented "no layer model" stance, not a drive-by.
+
+---
+
 ## Session 316s (2026-08-01, Fable) — #131: element args alias through @_ (defelem), gen v2-86.
 
 - **`f($h{k})` / `f($a[i])` now pass the ELEMENT, not a copy** — perl's
