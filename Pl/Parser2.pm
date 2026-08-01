@@ -4960,7 +4960,8 @@ sub _lower_stmt {
   if (!$mod && @$expr >= 3
       && $expr->[0]->isa('PPI::Token::Symbol') && $expr->[0]->content =~ /^\$\w+$/
       && !$self->{_file_lex_renamed}{ $expr->[0]->content }
-      && $expr->[1]->isa('PPI::Token::Operator') && $expr->[1]->content eq '=') {
+      && $expr->[1]->isa('PPI::Token::Operator') && $expr->[1]->content eq '='
+      && !_tail_below_assign_prec($expr)) {
     my $name = $expr->[0]->content;
     my $rhs = [@$expr[2 .. $#$expr]];
     if ($vi->{$name} && $vi->{$name}{unboxable}) {
@@ -4981,7 +4982,8 @@ sub _lower_stmt {
   if (!$mod && @$expr >= 3
       && $expr->[0]->isa('PPI::Token::Symbol') && $expr->[0]->content =~ /^\$\w+$/
       && !$self->{_file_lex_renamed}{ $expr->[0]->content }
-      && $expr->[1]->isa('PPI::Token::Operator')) {
+      && $expr->[1]->isa('PPI::Token::Operator')
+      && !_tail_below_assign_prec($expr)) {
     my $name   = $expr->[0]->content;
     my $rawmac = Pl::VarAnnotator::raw_compound_macro($expr->[1]->content);
     if ($rawmac && $vi->{$name} && $vi->{$name}{unboxable}) {
@@ -5036,6 +5038,29 @@ sub _lower_stmt {
   }
   return $self->_restore_caller_wa($tail_ctx,
          _apply_modifier($form, $mod, $cond, $self, $stmt));
+}
+
+# Perl parses `$x = A, B` / `$x = A or B` as `($x = A), B` / `($x = A) or B`
+# — assignment (and OP=) binds TIGHTER than `,`/`=>`/`or`/`and`/`xor`.
+# Splitting the statement tokens at the operator would fold such a tail into
+# the RHS (op/lex_assign.t: `$a = readlink 'x', 'y'` must leave $a undef; a
+# folded `$a = 0 or f()` assigned f()'s value).  A depth-0 operator below
+# assignment precedence therefore disqualifies the native token split; the
+# generic expression machinery owns the whole statement instead — including
+# the parenless list-op ambiguity (`$x = f 1, 2`, where the comma DOES belong
+# to the call).  Structures (parens/braces) are single PPI children, so a
+# scan over the statement's schildren only sees depth-0 operators.  An
+# unboxable (raw-slot) $x cannot be stranded by this reroute: a comma/or
+# statement write is not an arithmetic native-root event under either token
+# association, so VarAnnotator has already left such variables boxed.
+sub _tail_below_assign_prec {
+  my ($expr) = @_;
+  for my $i (2 .. $#$expr) {
+    my $t = $expr->[$i];
+    return 1 if $t->isa('PPI::Token::Operator')
+      && $t->content =~ /^(?:,|=>|or|and|xor)$/;
+  }
+  return 0;
 }
 
 # Leaf-level tail wrap under the sub-body :void regime (task #60): the body

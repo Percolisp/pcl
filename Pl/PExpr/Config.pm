@@ -298,6 +298,9 @@ has known_no_of_params => (
       wait       => 0,          # wait() — reap any child, sets $?
       waitpid    => [1, 2],     # waitpid(PID, FLAGS)
       getppid    => 0,          # getppid()
+      getpgrp    => [0, 1],     # getpgrp or getpgrp PID
+      setpgrp    => [0, 1, 2],  # setpgrp / setpgrp PID / setpgrp PID, PGRP
+      getpriority => 2,         # getpriority WHICH, WHO
       kill       => -12,        # kill SIGNAL, LIST (1 before list)
       exec       => -1,         # exec LIST
       localtime  => [0,   1],
@@ -452,12 +455,12 @@ has known_no_of_params => (
       # dbmopen, dump, endhostent, endnetent, endprotoent,
       # endpwent, endservent, exec, fcntl, flock, fork,
       # gethostbyname, gethostent, getlogin, getnetbyaddr,
-      # getnetbyname, getnetent, getppid, getpgrp, getpriority,
+      # getnetbyname, getnetent, getppid,
       # getprotobynumber, getprotoent, getpwent, getpwnam, getpwuid,
       # getservbyport, getservent, getsockopt, glob, ioctl, kill,
       # link, lstat, msgctl, msgget, msgrcv, msgsnd, open, pipe,
       # readlink, rename, select, semctl, semget, semop,
-      # sethostent, setnetent, setpgrp, setpriority, setprotoent,
+      # sethostent, setnetent, setpriority, setprotoent,
       # setpwent, setservent, setsockopt, shmctl, shmget, shmread,
       # shmwrite, socket, socketpair, stat, symlink, syscall,
       # sysopen, system, times, truncate, umask, unlink, utime,

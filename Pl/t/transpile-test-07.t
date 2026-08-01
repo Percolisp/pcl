@@ -436,4 +436,40 @@ print t127(), " ", t127(), " z=$z\n";
 print t127(456), " ", t127(), " z=$z\n";
 ');
 
+# Task #137 (op/lex_assign.t t133): assignment binds TIGHTER than `,` and
+# `or` — `$a = readlink 'x', 'y'` is `($a = readlink 'x'), 'y'` (named
+# unary takes ONE arg; $a stays undef), and `$a = 0 or f()` is
+# `($a = 0) or f()` ($a must be 0, not f()'s value).  A parenless LIST-OP
+# call still swallows the comma: `$a = two 1, 2` passes both args.  The
+# v2 native statement split folded such tails into the RHS.
+test_transpile("assignment binds tighter than comma/or at statement level", '
+sub two { $_[0] + $_[1] }
+my $a; $a = readlink "pcl-nx", "pcl-ny";
+print "comma:", (defined $a ? "leaked" : "undef"), "\n";
+my $b; $b = 0 or print "short\n";
+print "or:$b\n";
+my $c; $c = two 1, 2;
+print "listop:$c\n";
+my $d; $d = 5, 7;
+print "plain:$d\n";
+');
+
+# Task #137 (op/lex_assign.t t144-146, op/waitpid.t): process-group
+# builtins + POSIX WNOHANG + short-list utime.  Values vary by process,
+# so assert relations, not absolutes; getpriority with a bogus WHICH is
+# perl-style -1 + $! (EINVAL), never a die.
+test_transpile("getpgrp/setpgrp/getpriority/WNOHANG/short utime", '
+use POSIX qw(WNOHANG);
+print "wnohang:", WNOHANG, "\n";
+print "wait:", waitpid(0, WNOHANG), "\n";
+print "pgrp:", (getpgrp() == getpgrp(0) ? "eq" : "ne"), "\n";
+print "setpgrp:", join("_", setpgrp(0)), "\n";
+print "prio:", (getpriority(0, 0) == getpriority(0, $$) ? "eq" : "ne"), "\n";
+$! = 0;
+my $bad = getpriority(12345, 0);
+print "prio-bad:$bad:", ($! ? "err" : "noerr"), "\n";
+my $u = utime "pcl-nonexistent-file";
+print "utime:$u\n";
+');
+
 done_testing();

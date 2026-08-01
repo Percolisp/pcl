@@ -6,6 +6,26 @@
 # Provides commonly-used POSIX constants and functions
 
 package POSIX;
+use Exporter q{import};
+
+# Explicit-request imports only (`use POSIX qw(WNOHANG)`).  Real POSIX
+# default-exports hundreds of names; mirroring that wholesale would shadow
+# user subs, so @EXPORT stays empty until something needs it.
+our @EXPORT_OK = qw(
+    DBL_MAX DBL_MIN FLT_MAX FLT_MIN LDBL_MAX
+    M_PI M_E M_SQRT2 M_LN2 M_LN10
+    ENOENT EACCES EINVAL ERANGE ENOSYS EISDIR EBADF
+    INT_MAX INT_MIN LONG_MAX LONG_MIN UINT_MAX
+    floor ceil fmod pow log2 log10 dup strtod strtol strtoul
+    SEEK_SET SEEK_CUR SEEK_END
+    O_RDONLY O_WRONLY O_RDWR O_CREAT O_TRUNC O_APPEND O_EXCL
+    WNOHANG WUNTRACED
+);
+our %EXPORT_TAGS = (sys_wait_h => [qw(WNOHANG WUNTRACED)]);
+
+# waitpid(2) flags (:sys_wait_h)
+use constant WNOHANG   => 1;
+use constant WUNTRACED => 2;
 
 # Floating-point limits
 use constant DBL_MAX => 1.7976931348623157e+308;

@@ -152,6 +152,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   delete-hash-slice delete-kv-hash-slice die do each ensure-arrayref ensure-hashref env-get
   env-set eof eval eval-block eval-direct exception exception-object exists exists-array exit
   exp fc fileno flatten flatten-args for foreach fork wait waitpid getppid kill exec
+  getpgrp setpgrp getpriority
   funcall-ref get-class get-coderef getc getcwd
   getgrent getgrgid getgrnam endgrent setgrent
   getpwent getpwuid getpwnam endpwent setpwent

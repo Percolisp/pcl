@@ -205,6 +205,7 @@
    #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
    #:p-exit #:p-system #:p-fork #:p-waitpid #:p-wait #:p-getppid #:p-kill #:p-exec
+   #:p-getpgrp #:p-setpgrp #:p-getpriority
    #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
    #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
@@ -1034,6 +1035,11 @@
 (defvar $_ (make-p-box nil) "Perl's $_ - default variable")
 ;;; Process ID ($$) - p-box so Perl-side `$$ = N` works (assignable since 5.16).
 (defvar $$ (make-p-box (sb-posix:getpid)) "Process ID")
+;;; A saved core (tools/prove-core, standalone executables) keeps the PID of
+;;; the process that BUILT it in $$ — refresh at image boot, like the FP-mode
+;;; hook above.  (fork re-sets $$ in the child separately.)
+(push (lambda () (box-set $$ (sb-posix:getpid)))
+      sb-ext:*init-hooks*)
 ;;; Input line number ($.) — Perl's $. is not a plain scalar: it reflects the
 ;;; line counter (IoLINES) of the *last-accessed* filehandle.  Reading $.
 ;;; returns that handle's counter; writing $. sets it; `tell`/`seek`/`eof`/a
@@ -9808,10 +9814,12 @@ buffer's fill-pointer; everything else falls back to file-length."
               (incf count))
           (error () (%pcl-save-errno) nil))))))
 
-(defun p-utime (atime mtime &rest files)
+(defun p-utime (&optional atime mtime &rest files)
   "Perl utime ATIME, MTIME, LIST — set access/modification times. Returns count.
    Times are Unix-epoch seconds (same convention as sb-posix:utime).  undef
-   ATIME/MTIME means 'now', which sb-posix:utime uses when the times are omitted."
+   ATIME/MTIME means 'now', which sb-posix:utime uses when the times are omitted.
+   Both times are optional: `utime 'x'` (op/lex_assign.t) is a plain
+   short list — 0 files touched, returns 0."
   (let ((a (unless (or (null atime) (eq atime *p-undef*))
              (%pcl-to-integer (to-number atime))))
         (m (unless (or (null mtime) (eq mtime *p-undef*))
@@ -10300,6 +10308,52 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl getppid - parent process id."
   (sb-posix:getppid))
 
+(defun p-getpgrp (&optional pid)
+  "Perl getpgrp PID - process group of PID (0 or omitted = current process).
+   Returns -1 and sets $! on failure, like perl."
+  (let ((p (if (and pid (not (eq pid *p-undef*)))
+               (truncate (to-number (if (p-box-p pid) (unbox pid) pid)))
+               0)))
+    (handler-case (if (zerop p) (sb-posix:getpgrp) (sb-posix:getpgid p))
+      (error ()
+        (%pcl-save-errno)
+        -1))))
+
+(defun p-setpgrp (&optional pid pgrp)
+  "Perl setpgrp PID, PGRP (both default 0 = current process/new group) -
+   setpgid(2).  Returns 1 on success, 0 on failure with $! set."
+  (let ((p (if (and pid (not (eq pid *p-undef*)))
+               (truncate (to-number (if (p-box-p pid) (unbox pid) pid)))
+               0))
+        (g (if (and pgrp (not (eq pgrp *p-undef*)))
+               (truncate (to-number (if (p-box-p pgrp) (unbox pgrp) pgrp)))
+               0)))
+    (handler-case
+        (progn
+          (sb-posix:setpgid p g)
+          1)
+      (error ()
+        (%pcl-save-errno)
+        0))))
+
+;; getpriority(2)/setpriority(2) have no sb-posix binding — raw libc calls.
+;; getpriority returns -1 both on error and as a legitimate nice value; perl
+;; clears errno first and lets $! disambiguate, so we do the same.
+(sb-alien:define-alien-routine ("getpriority" %c-getpriority) sb-alien:int
+  (which sb-alien:int)
+  (who sb-alien:int))
+
+(defun p-getpriority (which who)
+  "Perl getpriority WHICH, WHO - nice value via getpriority(2).  Returns the
+   priority (may be negative); on failure returns -1 with $! set, like perl."
+  (let ((wh (truncate (to-number (if (p-box-p which) (unbox which) which))))
+        (wo (truncate (to-number (if (p-box-p who) (unbox who) who)))))
+    (setf (sb-alien:extern-alien "errno" sb-alien:int) 0)
+    (let ((r (%c-getpriority wh wo)))
+      (when (= r -1)
+        (%pcl-save-errno))
+      r)))
+
 (defun p-kill (signal &rest pids)
   "Perl kill SIGNAL, LIST - send SIGNAL to each PID.  SIGNAL may be a number or
    a name (\"TERM\", \"SIGKILL\", \"KILL\", ...).  Returns the count of
@@ -10413,7 +10467,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-87"
+(defparameter *pcl-cache-generation* "v2-88"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
