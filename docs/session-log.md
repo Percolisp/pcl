@@ -109,6 +109,27 @@ Append new entries at the top. One section per session.
   from the run would have written 695 and silently deleted the 3
   eval.t/postfixderef.t rows that did not run (both files stop early) —
   unverified, not fixed.
+- **First near-green family from the #150 list: localtime + $ENV{TZ}
+  (be312cc)** — `op/time.t` 71/1 → **72/0 OK**.  Not really a test row:
+  `localtime` ignored `$ENV{TZ}` ENTIRELY (the code claimed otherwise in a
+  comment — SBCL's `decode-universal-time` resolves the zone once, from the
+  environment the image started in), so every TZ-setting program silently got
+  wrong times.  Now `tzset()` + `localtime_r()` via sb-alien, i.e. what perl
+  itself does, so named zones and DST rules work rather than being
+  reimplemented.  **HAZARD**: the `struct tm` MUST include glibc's trailing
+  `tm_gmtoff`/`tm_zone` — localtime_r writes them and a 9-int declaration
+  would scribble past the allocation.  Verified byte-identical to perl for
+  GMT-5 / GMT+5 / America/New_York (isdst=1) / UTC, list AND scalar context,
+  plus no-TZ and gmtime unchanged.
+- **#159 (new, needs a decision)**: `Internals::SvREADONLY` is a SILENT NO-OP
+  — it reports success and push/splice/unshift onto the "read-only" array all
+  succeed (perl croaks).  One mechanism behind three near-green rows
+  (op/push.t t32, op/splice.t t33, op/unshift.t t19), but every fix costs
+  something on the `push` HOT path, so the options + costs are written up in
+  the task rather than one being picked: (a) weak-hash check per push ~30%,
+  (b) SvREADONLY swaps in a non-adjustable vector — zero hot-path cost, right
+  behaviour, SBCL wording (which would then make the rows #149 material),
+  (c) bless not-supported (needs sign-off).  Recommend (b).
 - Gate 123 files / 4452 tests; sweep 0 new / 0 fixed vs 698 (was 702);
   census 111/111.
 
