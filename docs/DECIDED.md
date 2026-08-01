@@ -170,6 +170,18 @@ not-supported.md → only then probe.*
   FOREGROUND chunks, `--jobs 2-4`) as the LAST pre-R1 act, after the
   FIXTURE/XDIFF hygiene lands; partial regeneration forbidden →
   `fable-answers-s318.md` §6.
+- **pack.t sweep hole (#176)**: measurement fix (per-file timeout) NOW,
+  bless the ~89 rows POST-R1 after triage — never land unreviewed baseline
+  rows in the release window → `fable-answers-s321.md` §1.  The 90→156 s
+  slowdown is a separate Target-A task.
+- **Mis-attributed-evidence registrations (#177 aftermath)**: a tainted
+  registration must be RE-VERIFIED before R1; reason-text corrections gate
+  R1, status changes only if re-verification fails.  In `renumbered` files,
+  per-row claims must quote the DESCRIPTION, not bare tNN →
+  `fable-answers-s321.md` §2.  Measured radius s321: backlog empty.
+- **XDIFF rows column (machine-checked like FIXTURE)**: APPROVED, POST-R1
+  S3 item — backfill from the S2 snapshot, key by description, enforce
+  all-or-nothing → `fable-answers-s321.md` §3.
 - **op/list.t + op/pack.t are QUARANTINED** (op/list.t OOMs a 10 GB
   cgroup in 53 s, transpiler innocent); they appear as NOT-RUN rows WITH
   the #160 reason, never silently absent; diagnosis post-R1, user

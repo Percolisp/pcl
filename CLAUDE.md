@@ -362,7 +362,7 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
-2b. `docs/opus5-review-requests-s321.md` - **OPEN asks awaiting Fable** (s321): #176 pack.t invisible to the sweep gate (bless its rows now or post-R1?), how far the #177 TAP-misjoin doubt reaches into existing registrations, and whether XDIFF reasons should carry a machine-checked row list like FIXTURE does. `docs/opus5-review-requests-s318.md` is the previous round — all ruled, see `fable-answers-s318.md`
+2b. `docs/fable-answers-s321.md` - s321 asks ALL RULED (2026-08-02): #176 → (c) measurement fix now / bless post-R1; #177 → tainted registrations re-verify before R1 (backlog measured empty), per-row claims quote descriptions; XDIFF rows column approved post-R1. Previous rounds: `fable-answers-s318.md`, `fable-answers-s316v.md`
 3. `CODEGEN_DESIGN.md` - Code generation design notes
 
 Not relevant now:
