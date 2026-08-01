@@ -17,6 +17,13 @@ class name.  PCL compiles it to a call `(Tie::pl-StdHash)` and dies
 (suite row `undef-fn:Tie::pl-StdHash`).  The quoted form works, and
 Tie::StdHash itself loads fine from the system `@INC`.
 
+**It blocks two suite files, and both are otherwise close.**  `op/warn.t`
+(`P:32/1`, row `undef-fn:Tie::pl-StdScalar`) uses BOTH forms: line 156
+`tie $@, "Tie::StdScalar";` — quoted, works — and line 182
+`tie $t, Tie::StdScalar;` — bareword, dies.  So the two files differ only
+by quoting, which is a tidy confirmation that the class-name argument
+position is the whole problem and nothing else about `tie` is missing.
+
 **Three attempts, all reverted; main never carried any of them.**
 
 | # | change | killed by |
@@ -126,6 +133,38 @@ only the state once-guard must interpose code between head and tail, which
 is why it is the one site that has to split at all.
 
 ---
+
+---
+
+## 5. Reading `docs/perl-suite-run.tsv` — a trap worth writing down
+
+The row format (`run-perl-suite.pl:352`) is
+
+    rel  P_ok  P_notok  C_ok  C_notok  status  sig
+
+i.e. **PCL's pass/fail then perl's pass/fail**.  I misread `C_ok` as PCL's
+failure count while picking W1 targets and produced a "near-green" list that
+was nothing of the sort — `op/fork.t` is `P:28/0`, *zero* PCL failures, DIFF
+only because perl itself yielded 1 test under the runner.  The correct
+filter is `status eq 'DIFF' && P_notok` small && `P_ok` large:
+
+| file | P_ok/notok | blocker |
+|---|---|---|
+| op/tie.t | 94/1 | — |
+| op/warn.t | 32/1 | **#142** bareword `tie` |
+| op/stash.t | 54/1 | `undef-fn:main::pl-SUPER` |
+| uni/stash.t | 48/1 | — |
+| op/die.t | 25/1 | — |
+| op/bless.t | 116/2 | — |
+| op/universal.t | 142/2 | `Can't locate object method "" via package "Alice"` |
+| op/attrs.t | 157/2 | `attributes::_guess_stash` |
+| op/lvref.t | 199/2 | `unbound:@state__toplevel__a__1` |
+| io/argv.t | 52/1 | `unbound:main::<>` |
+
+A `C_ok` of 0 (op/tie.t, op/stat.t, re/pat.t) means **perl produced no TAP
+under the runner**, so those rows are DIFF for a harness reason and their
+PCL numbers cannot be compared against anything — worth separating before
+anyone treats them as fix targets.
 
 ## Verification standard used for the two shipped commits
 
