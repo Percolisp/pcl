@@ -45,6 +45,48 @@ rather than re-run; every later one comes straight from `--tsv`.)
 Nothing here is a release verdict: it says the four dists did not move.  The
 widened scoreboard is the part that finds new bugs.
 
+### The widened board (s322, task #183 step 2) — 10 pure-Perl dists
+
+Ten already-unpacked, dependency-light, regex-heavy dists (nothing installed):
+**101 t-files — 23 PASS / 17 PARTIAL / 61 FAIL.**
+
+| dist | PASS | PARTIAL | FAIL |
+|------|------|---------|------|
+| File-Which-1.27 | 3 | 0 | 0 |
+| Class-Method-Modifiers-2.15 | 13 | 4 | 12 |
+| Class-Inspector-1.36 | 2 | 3 | 1 |
+| Text-Balanced-2.07 | 2 | 6 | 6 |
+| Data-Dump-1.25 | 2 | 1 | 12 |
+| Safe-Isa-1.000010 | 1 | 1 | 0 |
+| Sort-Versions-1.62 | 0 | 1 | 0 |
+| Algorithm-Diff-1.201 | 0 | 0 | 2 |
+| Capture-Tiny-0.50 | 0 | 1 | 23 |
+| Mojo-DOM58-3.002 | 0 | 0 | 5 |
+
+**Every FAIL was re-run and its first cause line captured** — the point of a
+FAIL count is worthless without it.  The 61 group into far fewer causes:
+
+| n | cause | reading |
+|---|-------|---------|
+| 23 | `Can't locate loadable object for module IO` | **one missing shim.**  All of Capture-Tiny is behind `IO`/`IO::Handle`; nothing about its code has been tested yet |
+| 12 | `The variable Test::_ is unbound` | **a real PCL bug — task #186.**  `use Test` (the old harness) dies in `plan()`; minimal 3-line repro in the task.  Data-Dump + Algorithm-Diff score 0 for this reason alone |
+| 9 | `The function <Pkg>::pl-before/around is undefined` | Class::Method::Modifiers does not install its own subs — the dist under test is broken, so its whole suite is downstream of one bug |
+| 6 | Storable / Encode / "this module" / `File::Path::_IS_MSWIN32` | more missing shims + one conditionally-defined constant |
+| 8 | no TAP at all, no error line | undiagnosed; Text-Balanced is 5 of them |
+| 1 | `Can't locate object method "divide" via package "$var = do {…}"` | a package NAME that is a chunk of source text — smells like an emission bug, worth its own probe |
+
+**The shape of the result matters more than the number**: the failures cluster
+on *missing module shims and one harness bug*, not on codegen.  That is the
+opposite of what a 61/101 FAIL count suggests at a glance, and it is why the
+per-file cause line is now part of the procedure
+(`tools/cpan-scoreboard.pl` gives the counts; re-running each FAIL gives the
+causes).
+
+**Still a USER decision (task #183):** whether R1's CPAN half means "no
+regressions on the four-dist baseline" or a widened board — each new bug found
+this way becomes a release-blocking judgement call.  Installing NEW modules
+also needs an ask; everything above was already unpacked.
+
 ---
 
 ## CPAN suite scoreboard 2026-07-30 (s316p, gen v2-83) — MECHANICAL BASELINE

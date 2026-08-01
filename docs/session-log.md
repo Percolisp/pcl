@@ -58,10 +58,15 @@ Append new entries at the top. One section per session.
   ok/notok/rc, diffed with plain `diff`.  Same reasoning as #185 for the perl
   suite.
 - **#183 step 2 — widened to 10 already-unpacked pure-Perl dists** (101 t-files:
-  23 PASS / 17 PARTIAL / 61 FAIL).  Findings and cause triage in
-  `docs/cpan-module-log.md`; the headline is that the FAILs cluster on missing
-  module shims (Capture::Tiny's 23 files are one `use IO` away), not on
-  codegen.  Whether R1's CPAN half means "no regressions on the small
+  23 PASS / 17 PARTIAL / 61 FAIL).  **Every FAIL was re-run for its first cause
+  line** (`docs/cpan-widen-causes-s322.tsv`) — a FAIL count without causes is
+  not a finding, and the causes say the opposite of what 61/101 suggests: 23
+  are ONE missing shim (`use IO`, all of Capture-Tiny), 12 are one harness bug
+  (**new task #186: `use Test` dies "The variable Test::_ is unbound"**, 3-line
+  repro, only on the module-LOAD path — the standalone transpile of Test.pm
+  loads fine), 9 are Class::Method::Modifiers failing to install its own subs,
+  6 more are missing shims.  The cluster is **shims and one harness bug, not
+  codegen**.  Whether R1's CPAN half means "no regressions on the four-dist
   baseline" or a widened board is still a USER decision (task #183).
 - **#177 forward rule adopted** (Fable §2): per-row claims in a
   `perl-suite-expected.tsv` reason must quote the test DESCRIPTION, not a bare
