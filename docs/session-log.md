@@ -127,6 +127,42 @@ Append new entries at the top. One section per session.
   `run-perl-suite` pass over several small files with `--faillog` yields every
   diverging row with perl's own description; then A/B-probe each row (with and
   without the suspected trigger) before believing that description.
+
+### Four more near-green files → a SHIM bug that was faking failures (#167)
+
+- op/chdir.t's two failing rows were **not PCL defects**.  `File::Spec::
+  Functions::splitpath` ignored the `no_file` flag, so chdir.t's "am I in `t/`?"
+  test answered no, its `skip("Already in t/", 2)` **never fired**, and PCL RAN
+  two tests perl SKIPS and failed both — shim artifacts sitting in the #25
+  release signal.
+- **Cause: rule 11.**  `File::Spec.pm` and `Functions.pm` each implemented all
+  13 functions and had drifted **in both directions** — neither was the good
+  copy (`splitpath` right in one, `rel2abs('.')` right in the other, `catdir()`
+  and `file_name_is_absolute` wrong in both).  Now one implementation +
+  13 delegations, byte-identical to perl 5.40.3 on a 13-function probe.
+- **Diagnosis note**: the first probe used `File::Spec->splitpath`, the METHOD
+  form, which was **correct** — the bug only appears through the imported
+  function.  *Probe the call form the caller actually uses.*
+- **Fallout**: removing the duplicate exposed that `File::Spec.pm`'s `rel2abs`
+  did `require Cwd`, which has **never** worked under PCL — there is no
+  `Cwd.pm` at all, `use Cwd` dies, though `cwd()` is a builtin (**#166**; that
+  task warns NOT to alias `abs_path`/`realpath` to `cwd()` — they need symlink
+  resolution, and a silently-unresolved path is worse than a missing shim).
+- **#168 — a self-correction worth reading.**  I measured 4453 (working tree)
+  vs 4439 (HEAD in a worktree) and first wrote it up as run-to-run
+  nondeterminism.  **Wrong.**  `Pl/t/xs-01/02/03.t` resolve pclxs as
+  `$FindBin::Bin/../../../pclxs` — a sibling **of the checkout** — and
+  `skip_all` when it is absent, so a worktree elsewhere silently subtracts
+  exactly 6+4+4 = **14** rows.  The count is deterministic (4453 measured
+  twice); the File::Spec change costs **zero** tests.  A worktree is still the
+  right way to compare against HEAD (never a stash-copy, s318) — but set
+  `PCLXS_DIR`, or expect the 14.  CLAUDE.md's single-number baseline is
+  replaced by both values and their condition.  Same family as #151 and #157:
+  a number that looks like a baseline and is not.
+- Remaining rows from this batch, untriaged: op/hashassign.t t304/307/308/309
+  (aassign returning assigned values), op/flip.t t10/t11/t12 (#141 family +
+  `\scalar($a..$b)` identity), op/print.t t3 (utf8 overlongs through a `:utf8`
+  in-memory handle — Unicode-blessed, single row, an XDIFF candidate).
 - Skipped op/push/splice/unshift on purpose: that is the SvREADONLY family
   (#159), which is waiting on a design call.
 - **Discovered while triaging**: `tools/run-perl-suite.pl` does NOT load
