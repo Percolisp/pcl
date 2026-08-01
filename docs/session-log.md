@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316v addendum 6 (2026-08-01, Opus 5) — op/64bitint.t 425/425 OK: vec() 64-bit was broken BOTH ways.
+
+- **`vec` with BITS=64 (34e5715), t/op/64bitint.t t80/t81 → file OK.**  Both
+  sides were broken, and both silently:
+  - `p-vec` had branches for 1/2/4/8/16/32 and fell through to `(t 0)`;
+  - `p-vec-set` had the same gap, so its `cond` matched **no clause** — the
+    write extended the string to the right length and then wrote NOTHING.
+  Both docstrings already listed 64 as legal, and the assignment returned the
+  right value, so `vec($x,1,64) = $q` looked correct: right length, right
+  returned value, zeroed bytes.  Each side is now ONE loop over `bits/8`
+  bytes (big-endian) replacing the three near-identical per-width branches,
+  so a missing width cannot recur.  Verified 64-bit round-trip byte-for-byte
+  and 16/8/4/32 unchanged.  Gate 123/4441; sweep 0 new / 0 fixed.
+- **Fable list now carries §6a–6i** — the policy calls I am deliberately not
+  making, each from a real finding this session: `%n` implement-or-bless;
+  quotemeta and the absent per-scalar UTF8 flag (plus a doc sentence that is
+  now provably wrong); whether the blanket DESTROY non-support still fits R2;
+  a blanket category for error-text/invalid-input rows; #147's parse route;
+  the XDIFF registration bar I have been inferring; **whether a missing case
+  should DIE rather than return a default** (vec is the archetype); how far
+  to chase perl's exact bytes (drand48 said "far", but the rule needs
+  stating); and **whether the perl-tests/ vs t/ corpus split is hiding
+  failures** — `chop.t`/`dor.t`/`not.t`/`quotemeta.t` are fully passing in the
+  sweep while the real t/ files of the same name have 2–5 failures each,
+  which is a misleading signal for a release gate.
+- **Tooling gotcha, cost ~20 background jobs:** `until ! pgrep -f "<tool>";
+  do sleep; done` matches the wait loop's OWN command line, so it never
+  exits.  Use `run_in_background` + the harness completion notification and
+  chain follow-up steps into the same command.  Recorded in memory.
+
+---
+
 ## Session 316v addendum 5 (2026-08-01, Opus 5) — op/rand.t 263/263 OK: perl's drand48; three more files classified.
 
 - **rand/srand FIXED (b056de3), op/rand.t is the first t/ file to reach OK
