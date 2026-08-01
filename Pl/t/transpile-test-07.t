@@ -537,4 +537,29 @@ sub L2 { local $n = join ",", 1, 2; print "n=$n\n" }
 L2();
 ');
 
+# Task #140: the `OP=` operator set had four hand-rolled copies, and two of
+# them omitted the string-bitwise trio `&.= |.= ^.=` (feature 'bitwise').
+# Both omissions were live: the foreach-range split fired on
+# `for ($y |.= "a" .. 3)` — assignment binds LOOSER than `..`, so the range
+# is the assignment's RHS and the loop runs ONCE, not over 0..3 — and the
+# state-decl normalization never rewrote `state ($u) |.= "a"`.
+test_transpile("state (\$x) OP= covers the string-bitwise trio", '
+use feature "bitwise";
+sub s1 { state ($t) //= 3; print "t=$t\n"; $t++ }
+s1(); s1();
+sub s2 { state ($u) |.= "a"; print "u=$u\n" }
+s2(); s2();
+sub s3 { state ($v) .= "b"; print "v=$v\n" }
+s3(); s3();
+');
+
+test_transpile("foreach-range split stops at every assignment operator", '
+use feature "bitwise";
+my $n = 0;
+for ($n |.= "a" .. 3) { print "n-iter\n" }
+my $m = 0;
+for ($m += 1 .. 3) { print "m-iter\n" }
+for (1 .. 3) { print "plain\n" }
+');
+
 done_testing();

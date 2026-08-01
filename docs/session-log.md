@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316v (2026-08-01, Opus 5) — #140: ONE compound-assignment operator set (the #138 audit's second finding), gen v2-90.
+
+- **Audit first.**  With the precedence table consolidated (#138), a sweep
+  for remaining *precedence and operator-set* knowledge outside PExpr found
+  precedence itself genuinely single-sourced now (`TokenUtils::lowprec_*`
+  plus `Config.pm`'s `%precedences`, which only PExpr reads), but the `OP=`
+  set living in FOUR hand-rolled copies — and two of them incomplete:
+  | site | ops |
+  |---|---|
+  | `VarAnnotator:92` `%COMPOUND_ASSIGN` | 19 ✓ |
+  | `VarAnnotator:192` text regex | 19 ✓ |
+  | `VarAnnotator:541` `%RANGE_SPLIT_STOP` | 16 — no `&.= |.= ^.=` |
+  | `Parser2:3092` state-decl normalize | 16 — no `&.= |.= ^.=` |
+  The string-bitwise trio needs `use feature 'bitwise'`, which is why it was
+  missed twice.  **Both omissions were live divergences**, probe-confirmed:
+  `for ($y |.= "a" .. 3)` ran FOUR iterations (the foreach-range split fired,
+  but assignment binds LOOSER than `..`, so the range is the assignment's RHS
+  and perl runs ONE); `state ($u) |.= "a"` was never normalized to
+  `state $u ; $u |.= "a"` and yielded undef instead of `"a"`.
+- **Fix:** one definition in `Pl::PExpr::TokenUtils` —
+  `compound_assign_ops` (longest-first, so `**=` beats `*=` and `&.=` beats
+  `&=` in text matching), `is_compound_assign`, `is_assign_op`,
+  `compound_assign_text_re`.  All four sites derive from it.  The derived
+  text regex was checked equivalent to the hand-written one over 29 cases
+  BEFORE swapping (that site drives VarAnnotator's `write-compound` tag, so
+  a mismatch would have moved boxing verdicts).
+- **Verification:** corpus **emission identical across all 111 files** — the
+  consolidation changes nothing outside the trio; gate 123/4439 (2 new -07
+  batteries); sweep 0 new / 0 fixed vs 702; census 111/111.  Gen bumped
+  v2-89→v2-90 anyway (the rule is unconditional and a cached module could
+  use the trio); artifacts header-only.
+- **Filed #141, not fixed (R1 window):** the probes exposed a deeper,
+  pre-existing divergence underneath — perl's rule that a CONSTANT operand
+  of scalar `..` is compared against `$.` rather than taken as a boolean.
+  `my $a = ("x" .. 3)` is `1` in perl, `1E0` in PCL (PCL takes both operands
+  as booleans, so the flip-flop turns on and off in one step and appends the
+  final-value `E0` marker — the marker itself is correct perl).  The fix is a
+  codegen-side operand classifier with real regression risk; probes are in
+  the task.
+
+---
+
 ## Session 316u (2026-08-01, Opus 5) — #138 W0 pre-R1: ONE below-assignment precedence table, six consumers, gen v2-89.
 
 - **The bug family.** Assignment binds TIGHTER than `,`/`=>`/`or`/`and`/

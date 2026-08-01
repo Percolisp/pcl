@@ -3088,8 +3088,11 @@ sub _state_normalize_decls {
         && !grep { $_->isa('PPI::Token::Operator') && $_->content eq ',' }
             map { $_->tokens } $k[1];
       my $op = $k[1]->snext_sibling;
+      # #140: the one `OP=` set — the hand-rolled regex here omitted
+      # `&.= |.= ^.=`, so `state ($u) |.= "a"` was never normalized and
+      # yielded undef instead of perl's "a".
       if ($op && $op->isa('PPI::Token::Operator')
-          && $op->content =~ /^(?:\/\/|\|\||&&|<<|>>|[-+.*\/%x&|^]|\*\*)=$/) {
+          && Pl::PExpr::TokenUtils::is_compound_assign($op->content)) {
         $op->set_content('; ' . $syms[0]->content . ' ' . $op->content);
       }
       $k[1]->start->set_content('');

@@ -292,4 +292,43 @@ sub lowprec_split_safe {
   return 1;
 }
 
+# ---- the ONE compound-assignment operator set (task #140) -----------------
+#
+# Perl's `OP=` operators, complete.  This existed as FOUR hand-rolled copies
+# and two of them omitted the string-bitwise trio `&.= |.= ^.=` (feature
+# 'bitwise'); both omissions were live divergences (s316v):
+#   - %RANGE_SPLIT_STOP (VarAnnotator): `for ($y |.= "a" .. 3)` split at the
+#     `..` and ran 4 iterations — but assignment binds LOOSER than `..`, so
+#     the range is the assignment's RHS and perl runs ONE;
+#   - the state-decl normalization (Parser2): `state ($u) |.= "a"` never got
+#     rewritten to `state $u ; $u |.= "a"`, and yielded undef.
+# Order matters for text matching: longest first, so `**=` is tried before
+# `*=` and `&.=` before `&=`.
+my @COMPOUND_ASSIGN = sort { length($b) <=> length($a) || $a cmp $b }
+  qw(+= -= *= /= %= **= x= .=
+     ||= &&= //=
+     <<= >>= &= |= ^= &.= |.= ^.=);
+my %COMPOUND_ASSIGN = map { $_ => 1 } @COMPOUND_ASSIGN;
+my $COMPOUND_ASSIGN_ALT = join '|', map { quotemeta } @COMPOUND_ASSIGN;
+
+# The set itself, longest-first — for callers that need to build their own
+# lookup table (a stop-set, a hash keyed on more than these).
+sub compound_assign_ops { return @COMPOUND_ASSIGN }
+
+# Is this token content an `OP=` operator?  (`=` itself is NOT included —
+# ask is_assign_op for that.)
+sub is_compound_assign { return defined $_[0] && $COMPOUND_ASSIGN{ $_[0] } ? 1 : 0 }
+
+# Any assignment operator: `=` or an `OP=`.
+sub is_assign_op {
+  return 0 unless defined $_[0];
+  return 1 if $_[0] eq '=';
+  return is_compound_assign($_[0]);
+}
+
+# Alternation for scanning raw SOURCE TEXT (where there are no PPI tokens to
+# ask).  Callers must still exclude `==` themselves with a `(?!=)` tail — an
+# `OP=` never legally abuts another `=`.
+sub compound_assign_text_re { return qr/(?:$COMPOUND_ASSIGN_ALT)/ }
+
 1;

@@ -89,7 +89,7 @@ my %NUM_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=> !);
 my %NUM_COMPOUND = map { $_ => 1 } qw(+= -= *= /= %= **= <<= >>=);
 
 my %COMPOUND_ASSIGN = map { $_ => 1 }
-  qw(+= -= *= /= %= **= x= .= ||= &&= //= <<= >>= &= |= ^= &.= |.= ^.=);
+  Pl::PExpr::TokenUtils::compound_assign_ops();   # #140: the one set
 
 # Compound assigns whose macro COERCES the stored value (the new value is an
 # operator result — a raw number or string, never a box), so a statement-root
@@ -188,8 +188,8 @@ sub _text_gate_tags {
   push @tags, 'magic-ref'    if $text =~ /\\\s*(?:substr|vec|pos)\s*\(?\s*$bare\b/;
   push @tags, 'write-incdec' if $text =~ /$bare\s*(?:\+\+|--)/
                              || $text =~ /(?:\+\+|--)\s*$bare\b/;
-  push @tags, 'write-compound'
-    if $text =~ /$bare\s*(?:[-+*\/.%x&|^]|\*\*|\|\||&&|\/\/|<<|>>|[&|^]\.)=(?!=)/;
+  push @tags, 'write-compound'                   # #140: the one set
+    if $text =~ /$bare\s*${\ Pl::PExpr::TokenUtils::compound_assign_text_re() }(?!=)/;
   push @tags, 'regex-target' if $text =~ /$bare\s*=~/;
   push @tags, 'paren-assign' if $text =~ /\(\s*$bare\s*=[^=~]/;
   push @tags, 'local'        if $text =~ /\blocal\b[^;]*$bare\b/;
@@ -536,9 +536,11 @@ sub _ev {
 # method name (Word preceded by `->`).  Everything else rejects (including
 # and/or/not/xor): a bare-word miss is only a skipped optimization.
 my %RANGE_SPLIT_STOP = map { $_ => 1 }
-  (',', '=>', '?', ':',
-   '=', '+=', '-=', '*=', '/=', '.=', '%=', 'x=', '**=',
-   '//=', '||=', '&&=', '|=', '&=', '^=', '<<=', '>>=');
+  (',', '=>', '?', ':', '=',
+   # #140: every `OP=` from the one set.  The hand-listed copy this replaces
+   # omitted `&.= |.= ^.=`, so `for ($y |.= "a" .. 3)` split at the `..` and
+   # ran 4 iterations where perl runs ONE (the range is the assignment's RHS).
+   Pl::PExpr::TokenUtils::compound_assign_ops());
 sub foreach_range_split {
   my ($parts) = @_;
   my @p = @$parts;
