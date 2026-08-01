@@ -964,15 +964,29 @@ eval can call `wantarray()` and get the correct answer; built-ins such as `%hash
 emit a warning when the eval is called in scalar context (e.g. `scalar eval '...'` or
 `my $v = eval '...'`).
 
-**PCL behaviour:** `p-eval` calls the `pl2cl` subprocess to transpile the string, then
-calls `(load ...)` in the same SBCL process.  Because `*wantarray*` is a CL dynamic
-variable, `(load ...)` inherits whatever dynamic binding is in scope at the call site.
-However, PCL does not currently emit a `(let ((*wantarray* ctx)) (p-eval ...))` wrapper
-because the calling context is not known at code-generation time: determining it would
-require working AST-level context annotations (`docs/ast-annotation-plan.md`), which are
-deferred.  Without that wrapper, code inside string eval cannot reliably detect its calling
-context via `wantarray()`, and context-sensitive behaviour (e.g. the scalar-context warning
-from `%hash{keys}`) does not fire.
+**PCL behaviour (corrected s319 — MEASURED, the previous text overstated the gap):**
+`p-eval` calls the `pl2cl` subprocess to transpile the string, then calls `(load ...)`
+in the same SBCL process.  Because `*wantarray*` is a CL dynamic variable, `(load ...)`
+inherits whatever dynamic binding is in scope at the call site — and that turns out to
+be enough for two of the three contexts.  PCL still emits no explicit
+`(let ((*wantarray* ctx)) (p-eval ...))` wrapper, so what actually happens is:
+
+| call site | perl | PCL | |
+|---|---|---|---|
+| `eval $code;` (void) | `V` | **`S`** | **WRONG — the only real gap** |
+| `my $s = eval $code;` (scalar) | `S` | `S` | correct (inherits the ambient scalar binding) |
+| `my @l = eval $code;` (list) | `A` | `A` | correct (inherits the list binding) |
+
+So `wantarray()` inside a string eval IS reliable in scalar and list context; the
+remaining divergence is that a **void-context** eval reports scalar, because nothing
+binds `*wantarray*` to `:void` at a void call site and the ambient binding is `nil`
+(= scalar).  Context-sensitive behaviour keyed on void-ness (e.g. warnings that only
+fire in non-void context) therefore still misfires.
+
+Probe: `t/op/wantarray.t` (the `$qcontext` block, ~line 44) — one failing row out of 28.
+Tracked as a fix target, NOT a permanent limitation; it is gated behind the VOID_CTX
+sub-body-wrap regression named in CLAUDE.md §8, which must be fixed before further
+wantarray work.
 
 **Path to fix:** Once `docs/ast-annotation-plan.md` is implemented, `gen_funcall` can
 detect `eval "string"` calls annotated with a context and emit:
