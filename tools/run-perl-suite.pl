@@ -200,6 +200,29 @@ my $sbcl = $core ? "sbcl --core \Q$core\E --noinform --non-interactive"
 my $tmpdir = tempdir(CLEANUP => 0);
 END { system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir }
 
+# FIXTURE SANITY (s318, task #151).  The PERL side runs with CWD = the REAL
+# $tdir, so `require './test.pl'` there must find PERL's harness — the 2000-line
+# t/test.pl, not PCL's ~400-line transpilable stub.  In s316v a `cp` followed a
+# symlink out of the shadow and overwrote the real one with the stub; real perl
+# then could not even COMPILE files that say `plan tests => N` (the stub has no
+# prototype for plan), so the perl side emitted zero TAP and a whole run came
+# back NOTAP — rows that look like data but are only a broken fixture.  NOTAP is
+# labelled "says nothing about PCL", which made the damage quiet.  Two cheap
+# identifying checks, and we die instead of producing a misleading run.
+{
+  my $real = "$tdir/test.pl";
+  -f $real or die "run-perl-suite: perl's t/test.pl is MISSING at $real\n";
+  open my $fh, '<', $real or die "run-perl-suite: open $real: $!\n";
+  my $head = do { local $/; <$fh> };
+  close $fh;
+  my $lines = () = $head =~ /\n/g;
+  $head =~ /most of Test::More functionality/ && $lines > 1000
+    or die "run-perl-suite: $real is NOT perl's harness ($lines lines).\n"
+         . "  It was probably overwritten by PCL's stub (perl-tests/t/test.pl).\n"
+         . "  Every perl-side run would produce no TAP and the whole sweep would\n"
+         . "  read NOTAP.  Restore it from the perl source tarball before rerunning.\n";
+}
+
 # Shadow t/ (see header): real tree symlinked entry-by-entry, PCL stubs on top.
 my $shadow = "$tmpdir/t";
 mkdir $shadow or die "mkdir $shadow: $!\n";

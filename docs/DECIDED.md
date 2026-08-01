@@ -86,6 +86,14 @@ not-supported.md → only then probe.*
   `tools/run-perl-suite.pl`.
 - **`.suitelog/*.fails.tsv` description column is PERL's test line**, values
   interpolated by perl — never read it as PCL's output.
+- **A run that comes back all/mostly NOTAP means the FIXTURE is broken, not
+  the files**: the perl side runs with CWD = the real `t/`, so `require
+  './test.pl'` must find PERL's 2000-line harness; with PCL's ~400-line stub
+  there instead, real perl cannot even compile `plan tests => N` and emits
+  zero TAP.  This is what made io/defout.t / op/localref.t / uni/bless.t look
+  NOTAP in s316v (a `cp` had followed a symlink onto the real file).  The
+  runner now dies on that instead of producing the misleading run
+  → `tools/run-perl-suite.pl` fixture-sanity block, task #151.
 - **XDIFF registration bar**: a file gets an `perl-suite-expected.tsv` row
   ONLY when every failing test in it is explained by a blessed
   `not-supported.md` section — partially-explained files stay UNEXPLAINED
