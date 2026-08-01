@@ -4,6 +4,30 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 321c (2026-08-01, Opus 5) — S2, the R1 snapshot: 9 of 11 dirs measured, and I killed the `op` chunk myself
+
+- **Where the snapshot stands.**  Per-dir foreground chunks at `--jobs 3`,
+  each with its own `--faillog` (the runner clears that dir per invocation,
+  so the first attempt's chunks were overwriting each other).  Done: base 9,
+  cmd 5, comp 24, opbasic 5, mro 73, class 10, run 25, uni 30 rows — **mro
+  and class came back exit 0**, i.e. every file OK or XDIFF.  `re` and `io`
+  still running.
+- **`op` must be re-run — my fault.**  I wrapped each chunk in
+  `timeout 5400`; `op` needed longer, and I tried to lift the cap by killing
+  the `timeout` process.  **`timeout(1) forwards the signal to its child**, so
+  that killed the run at 1h23m with 58 of 218 files measured (34 DIFF, 15 OK,
+  7 XDIFF, 1 FIXTURE, 1 NOTAP; 160 KILLED/NOT-RUN).  The #157 machinery did
+  exactly its job — every requested file got an honest row and the exit was
+  143, so the loss is time, not evidence.  The killed `op.tsv` is to be
+  REPLACED, never merged: a partial chunk in a release snapshot is the thing
+  §6 forbids.  Rule recorded in memory.
+- **Sizing, for whoever runs this next**: 58 op files took 83 min at
+  `--jobs 3`, so budget **4-5 hours** for the op dir alone, and do not put an
+  external `timeout` on it — the runner already has a per-file `--timeout`
+  and a straggler killer.
+
+---
+
 ## Session 321b (2026-08-01, Opus 5) — the gate was inventing failures: TAP joined by NUMBER, not description (#177) — and op/do.t went XDIFF once it stopped
 
 Found while starting S2, by chasing what looked like two ordinary near-green
