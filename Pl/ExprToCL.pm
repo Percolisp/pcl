@@ -5775,7 +5775,7 @@ sub gen_substitution_form {
   # evaluate at match time
   if (_has_regex_interpolation($subst)) {
     return ['p-subst', $match_form,
-            ['lambda', ['list'], _gen_interp_replacement($subst)],
+            ['lambda', ['list'], $self->_gen_interp_replacement($subst)],
             @mod_strs];
   }
 
@@ -5834,7 +5834,74 @@ sub _unescape_subst_replacement {
 
 # Build a CL expression that evaluates to the interpolated replacement string.
 # Handles $varname, $1-$9 (Perl backreferences, available as CL dynamic vars in lambda context).
+# s/// replacement (non-/e) -> CL, via the REAL double-quoted-string
+# interpolator.
+#
+# It used to be a hand-rolled mini-interpolator (kept below as
+# _gen_interp_replacement_simple) whose loop understood exactly \1..\9,
+# $1..$9, ${name} and $name.  A SUBSCRIPT fell through as literal text, so
+# `s/(a)/$h{$1}/g` emitted (p-string-concat $h "{" $1 "}") and produced the
+# string "{a}" — plausible garbage, silently, for one of the most common
+# idioms in Perl (`s/(\w+)/$map{$1}/g`).  Task #182.
+#
+# The fix is CLAUDE.md 11: `"$h{$1}"` in an ordinary string was already
+# correct, so normalise into that path instead of teaching the copy new
+# tricks.  The ONE thing a replacement has that a dq string does not is
+# \1..\9 as backrefs, so those are rewritten to $1..$9 first.
 sub _gen_interp_replacement {
+  my ($self, $str) = @_;
+
+  my $norm = _subst_backrefs_to_dollars($str);
+  # PPI needs a well-formed "..." token; a trailing odd backslash would eat
+  # the closing quote.  That shape cannot be interpolated meaningfully anyway,
+  # so leave it to the simple path rather than hand PPI something broken.
+  my $trailing = ($norm =~ /(\\+)\z/) ? length($1) : 0;
+  unless ($trailing % 2) {
+    my $q = $norm;
+    $q =~ s/"/\\"/g;
+    my $form = eval {
+      require PPI::Token::Quote::Double;
+      require Pl::PExpr;
+      my $fake = PPI::Token::Quote::Double->new(qq{"$q"});
+      my $expr_o = Pl::PExpr->new(
+        e => [$fake],
+        ($self->environment ? (environment => $self->environment) : ()),
+      );
+      my $id = $expr_o->str_interpol->parse_interpolated_string($expr_o, $fake);
+      my $gen = Pl::ExprToCL->new(
+        expr_o       => $expr_o,
+        environment  => $self->environment,
+        indent_level => $self->indent_level,
+      );
+      $gen->gen_node_form($id);
+    };
+    return $form if defined $form && (ref $form || $form ne '');
+  }
+  return _gen_interp_replacement_simple($str);
+}
+
+# \1..\9 mean the same as $1..$9 in a replacement; the dq-string parser has no
+# such rule.  An escaped backslash (\\) is consumed as a pair so that \\1 keeps
+# its literal 1.
+sub _subst_backrefs_to_dollars {
+  my ($str) = @_;
+  my $out = '';
+  my $i = 0;
+  while ($i < length($str)) {
+    my $c = substr($str, $i, 1);
+    if ($c eq '\\' && $i + 1 < length($str)) {
+      my $n = substr($str, $i + 1, 1);
+      $out .= ($n =~ /[1-9]/) ? "\$$n" : "$c$n";
+      $i += 2;
+    } else {
+      $out .= $c;
+      $i++;
+    }
+  }
+  return $out;
+}
+
+sub _gen_interp_replacement_simple {
   my ($str) = @_;
   my @parts;
   my $literal = '';
