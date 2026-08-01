@@ -139,16 +139,18 @@ Original scope, kept for the record:
 5. Battery in -07 (decl comma, decl or-tail, param exact-arity incl. the
    g() shape, state-init comma).  Full checklist §2.  Est: 1 session.
 
-## 3b. Review requests: ANSWERED (s317)
+## 3b. Review requests: ANSWERED (s317, s320)
 
-**NEW, OPEN (s318): `docs/opus5-review-requests-s318.md`** — the asks raised
-while working this W1 queue.  Headline: three separate findings (#154's two
-un-fixable shapes, #155 aggregate tie, #159 read-only aggregates) turn out to
-be ONE missing thing — aggregates carry no state, so nothing can record
-referent-kind / tied / read-only.  §1 asks for the data-model call, §2 for
-the #159 fix among three costed options.  Also: confirm the #149 per-ROW
-reading (§3), the #158 fix layer (§4), whether #156 is worth a session (§5),
-and whether regenerating the now-incomplete suite tsv gates R1 (§6).
+**`docs/opus5-review-requests-s318.md` §1–§11 is now RULED ON in
+`docs/fable-answers-s318.md` (s320)** — one-liners indexed in
+`docs/DECIDED.md`.  Headlines: aggregate-state model split (side table
+REJECTED, boxed aggregates = E5-era Fable design, referent-kind tag
+APPROVED post-R1 → #163 + #154's shapes); #155 → loud WARN now (never a
+die pre-R1); #159 → storage-swap (b) post-R1; #158 → NO fix, principle 9
+(pre-5.20 semantics kept), register do.t t63/t65; chr.t >U+10FFFF blessed;
+FIXTURE status + registry approved; **the full tsv regeneration GATES R1**
+(last pre-R1 act, foreground chunks).  The ordered S1/S2/S3+ worklist is at
+the end of the answers doc — follow that over §4 below until it is spent.
 
 Every ask in `docs/opus5-review-requests-s316v.md` is ruled on in
 **`docs/fable-answers-s316v.md`**; the one-liners are indexed in

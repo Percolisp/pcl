@@ -52,6 +52,27 @@ not-supported.md → only then probe.*
   `fable-answers-s316v.md` §6j.
 - **`printf %n`**: OPEN — user policy call (recommendation: bless as
   not-supported) → task #143, `fable-answers-s316v.md` §6a.
+- **Aggregate state model** (tie/readonly/referent-kind — #154-residue,
+  #155, #159, #163): side table REJECTED (mutation-path tax); boxed
+  aggregates = E5-era Fable design, do NOT start; referent-kind tag on the
+  box APPROVED post-R1 (fixes #163 ref identity/printed type + #154's two
+  shapes) → `fable-answers-s318.md` §1.
+- **tie on ARRAY/HASH**: interim = loud stderr WARNING + not-supported
+  subsection (NOT a die — would CRASH avhv.t-class files); real support
+  waits for boxed aggregates → `fable-answers-s318.md` §1, task #155.
+- **Read-only aggregates** (`Internals::SvREADONLY(@a,1)`): storage-swap to
+  a simple vector, post-R1; never a weak-hash probe on the push path; do
+  not bless as not-supported → `fable-answers-s318.md` §2, task #159.
+- **`do SUBNAME(LIST)`**: NO fix — pre-5.20 perl called the sub and PCL
+  keeps that semantics; modern perl's rejection is principle-9 material
+  (register do.t t63/t65, nothing near `$end_pars`) →
+  `fable-answers-s318.md` §4, task #158.
+- **chr() above U+10FFFF**: blessed — SBCL `char-code-limit` = #x110000,
+  U+FFFD is the answer; op/chr.t → XDIFF → `fable-answers-s318.md` §11,
+  `not-supported.md` §Unicode, task #173.
+- **#149 application**: per-ROW; side-effect/value/behaviour assertions on
+  VALID Perl never register; interleave, never a campaign →
+  `fable-answers-s318.md` §3.
 - **:crlf layer model** (#139) and **source-echo comments** (#132):
   user-held design decisions — do not start.
 - **`**` float divergence**: parked → memory `project_power_op_float_divergence`.
@@ -112,6 +133,19 @@ not-supported.md → only then probe.*
   file gets a row (KILLED / NOT-RUN when the run died), the exit code is
   nonzero, and a journal records rows as they arrive → task #157,
   `tools/run-perl-suite.pl` header.
+- **Fixture artifacts get a FIXTURE status + registry in the runner** (not
+  `perl-suite-expected.tsv` — a harness artifact is not a language gap):
+  #151 stub-cp, #167 splitpath-skip, #172 shadow-symlink getcwd →
+  `fable-answers-s318.md` §10.
+- **The suite tsv snapshot GATES R1**: one full regeneration (per-dir
+  FOREGROUND chunks, `--jobs 2-4`) as the LAST pre-R1 act, after the
+  FIXTURE/XDIFF hygiene lands; partial regeneration forbidden →
+  `fable-answers-s318.md` §6.
+- **op/list.t + op/pack.t are %HEAVY-quarantined** (op/list.t OOMs a 10 GB
+  cgroup in 53 s, transpiler innocent); they appear as NOT-RUN rows WITH
+  the #160 reason, never silently absent; diagnosis post-R1, user
+  re-authorization first, suspect SBCL compile time →
+  `fable-answers-s318.md` §8, task #160.
 - **Forked workers must never run the parent's END blocks or signal
   handlers** ($$ == $MAIN_PID guard): one signalled worker otherwise
   `rm -rf`s the SHARED tmpdir and kills its siblings → task #157, guard in

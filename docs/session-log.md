@@ -4,6 +4,39 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 320 (2026-08-01, Fable) — rulings on the s318/s319 review requests; the S1/S2/S3+ worklist for the R1 window
+
+- **`docs/fable-answers-s318.md` written** — rules on every open ask in
+  `opus5-review-requests-s318.md` §1–§11; one-liners added to
+  `docs/DECIDED.md`; exec-plan §3b now points at the answers; tasks #149,
+  #155, #156, #158, #159, #160, #163, #172, #173 updated in place with
+  their rulings.
+- **The model question (§1/§9) split in two**: ref-side state vs
+  aggregate-side state.  Side table REJECTED (permanent mutation-path tax
+  vs Target A); boxed aggregates = the real answer for tie/readonly, E5-era,
+  Fable writes the design first, Opus must not start; **referent-kind tag
+  on the box APPROVED** as post-R1 item 1 — it closes #163 (ref
+  identity + SCALAR/REF printing) AND #154's two residual shapes.
+- **#155 tie-on-aggregate**: loud stderr WARNING now, deliberately NOT a
+  die — a die would convert avhv.t-class files into CRASH (un-registrable)
+  days before R1.  #159: storage-swap (b) approved post-R1 (with the
+  lvalue-cell and SvREADONLY(@a,0)-restore caveats).  #158: NO fix at all —
+  `do SUBNAME()` was valid pre-5.20 Perl meaning call-the-sub, so PCL's
+  behavior is the historical semantics and modern perl's rejection is
+  principle-9 material; register do.t t63/t65, stay out of `$end_pars`.
+- **Process rulings**: FIXTURE status + registry approved (§10, pre-R1);
+  chr.t >U+10FFFF blessed (§11, SBCL char-code-limit measured);
+  **the full tsv regeneration GATES R1** (§6, last pre-R1 act, per-dir
+  foreground chunks); op/list.t+op/pack.t %HEAVY-quarantined with
+  NOT-RUN-reason rows, diagnosis post-R1 with compile-time as the prime
+  suspect (§8); #149 stays per-row and interleaved (§3); #156 parked
+  behind the #155 warning with a half-session cap (§5).
+- **The worklist**: S1 = five small hygiene items (FIXTURE status, chr.t
+  XDIFF, do.t registration, %HEAVY, #155 warning); S2 = the full tsv
+  snapshot + the #156 check; S3+ = near-green silent-wrong families until
+  the user calls R1.  Post-R1 order: referent-kind tag → #159 swap → #160
+  diagnosis → the standing W2/W2.5 plan.
+
 ## Session 319 (2026-08-01, Opus 5) — #157: the suite runner lost whole runs under memory pressure. Three defects, one of which had silently zeroed its exit code forever.
 
 - **The reported symptom** (#157, found s318 while the laptop was short on
