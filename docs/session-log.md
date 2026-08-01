@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 321e (2026-08-02, Opus 5) — first S3 item: /xx — and the fix that "made it worse" found the harness judging patterns by its own rules
+
+- **#179 `/xx`** (a389ab9): perl's `/xx` also ignores unescaped whitespace
+  *inside* `[...]`; PCL treated it as plain `/x` because the modifier scan is
+  per character and a second `x` just re-set `:x`.  Four edits in the runtime
+  (count the x's → a PCL-private `:pcl-xx-mode` option → always take the
+  self-normalising path, since cl-ppcre has no /xx → an xx stack in the
+  normaliser, plus `(?xx:` and `-x`-cancels-xx in the flag-group parser).
+  Escaped whitespace survives untouched — it exits via the backslash branch
+  before the class branch sees it, which is exactly perl's rule.
+- **Applying that made `re/keep_tabs.t` WORSE — 12/2 → 8/6 — and that is how
+  the real bug surfaced.**  `pl-like`/`pl-unlike` in `cl/pcl-test.lisp` built
+  their own scanner with raw `ppcre:create-scanner`, bypassing
+  `%pcl-build-scanner`.  So `like`/`unlike` **judged patterns by different
+  rules than `=~` did**, silently, inside the harness that measures the entire
+  suite — it never had the cl-ppcre extended-mode workaround either.  The new
+  private option made `create-scanner` throw, and the `handler-case` turned
+  that into a quiet test *failure*.  Both now route through
+  `%pcl-create-scanner`.  Same family as #177: the apparatus disagreeing with
+  the thing it measures.  **`re/keep_tabs.t` 12/2 → 14/0 OK.**
+- **How it was found matters more than the fix.**  The isolated probes all
+  passed; an instrumented copy of the real file passed 14/14; only the file
+  *through the harness* failed.  That gap — same input, same regexes, only the
+  caller differing — is what pointed at the harness rather than at the regex
+  work.
+- Guard: **new `Pl/t/transpile-test-09.t`** (the user closed -07 this session),
+  one snippet, 3 s, inverse guards inline.  Verified gate 124/4468 PASS, sweep
+  0 new / 0 fixed vs 689 — the sweep being the real test here, since every
+  `like`/`unlike` row in the corpus now takes the corrected path.
+- **Also caught, filed as #181, not fixed**: PCL stringifies a `/xx` qr as
+  `(?^x:…)` where perl gives `(?^xx:…)`.  That wrapper is how an inner
+  pattern's flags survive interpolation into a bigger one, so an interpolated
+  `/xx` silently reverts to `/x`.
+- **And #128 caught live**: an orphaned `pl2cl --server`, reparented to
+  systemd, **4.95 GB, state R (spinning)**, still alive minutes after the run
+  that spawned it had exited, on a box at 11/12 GB.  That is almost certainly
+  the mechanism behind #180's wall-time swing — and therefore behind any
+  TIMEOUT row that is really a statement about the machine.
+
+---
+
 ## Session 321d (2026-08-02, Opus 5) — S2 COMPLETE: the R1 snapshot is 523 rows, and the #177 correction backlog turned out to be empty
 
 - **`docs/perl-suite-run.tsv` regenerated in full** (05e7026), all eleven dirs
