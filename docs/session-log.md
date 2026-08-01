@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316v addendum 3 (2026-08-01, Opus 5) — I clobbered perl's t/test.pl; restored. Five files triaged against a working oracle.
+
+- **DAMAGE, FOUND AND REPAIRED.** An ad-hoc shadow-t/ harness I built to
+  probe io/getcwd.t did `ln -sf` the real t/ entries into a scratch dir and
+  then `cp perl-tests/t/test.pl shadow/t/test.pl` — `shadow/t/test.pl` was a
+  SYMLINK to perl's real `t/test.pl`, so `cp` followed it and **overwrote
+  perl's test library with PCL's stub**.  Every perl-side measurement after
+  14:05 was against a broken oracle (perl died `Undefined subroutine
+  &main::plan`), which is what produced the wave of `NOTAP` rows I was about
+  to investigate as PCL bugs.  Restored from
+  `~/perl5/perlbrew/dists/perl-5.40.3.tar.gz`; `find -newermt` confirms
+  test.pl was the ONLY file touched in that tree.  **Rule: never `cp` onto a
+  path inside a symlinked shadow tree — write to a real copy, or `ln -sfn`
+  the replacement.**
+- **Re-triaged the five near-green files against the restored perl.**  All
+  five are DIFF (comparable), with precise per-test divergences from
+  `.suitelog`:
+  | file | perl | PCL | failing test(s) |
+  |---|---|---|---|
+  | io/defout.t | 22/0 | 21/1 | t7 `$-` (format lines-left) |
+  | io/print.t | 24/0 | 23/1 | t23 `printf %n` → **#143** |
+  | op/localref.t | 64/0 | 63/1 | t64 DESTROY-at-local-restore |
+  | uni/bless.t | 84/0 | 83/1 | t81 (twin of op/bless.t t81) |
+  | op/bless.t | 116/2 | 111/5 | t81, t110, t111, t115, t117, t118 |
+- **op/localref.t registered as XDIFF** in `docs/perl-suite-expected.tsv`,
+  citing the ALREADY-BLESSED `not-supported.md §DESTROY called by garbage
+  collector`.  Its single failure is fully explained, so the row is legal
+  under the registry's rules (still runs; flagged STALE if it ever passes).
+  op/bless.t deliberately NOT registered — only 2 of its 6 failures (t117,
+  t118, "DESTROY should be called on CODE ref") are DESTROY; the rest are
+  unexplained and stay triage targets.
+- **Process note (user, correctly): read `docs/not-supported.md` FIRST.**  I
+  probed four DESTROY shapes (lexical scope exit, `undef`, reassign, sub
+  return — PCL fires in NONE, perl in all four) before grepping the doc that
+  already blesses it at §846.  The grep is what turned the finding into an
+  XDIFF row instead of a filed bug, so the outcome was right, but the doc is
+  in CLAUDE.md's "Key Files to Read" for exactly this and should have been
+  step one.
+
+---
+
 ## Session 316v addendum 2 (2026-08-01, Opus 5) — W1 triage: the suite-tsv columns, and printf `%n`.
 
 - **I read `docs/perl-suite-run.tsv` backwards, twice.**  The row is
