@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 316v addendum 4 (2026-08-01, Opus 5) — the five near-green files fully triaged; two registered, three real bugs filed.
+
+Applying the runbook order (read the test → grep `docs/not-supported.md` →
+only then probe), every failing test in the five files now has a verdict:
+
+| file | test | verdict |
+|---|---|---|
+| op/localref.t | t64 | **XDIFF** — §DESTROY called by garbage collector |
+| io/defout.t | t7 `$-` | **XDIFF** — §format / write report formatting (`$-` is a static `(make-p-box 0)`; FORMAT_LINES_LEFT is only nonzero after a real `write()`) |
+| io/print.t | t23 | **#143** — `printf %n` unimplemented |
+| op/bless.t + uni/bless.t | t81 | **#144** — `\$!` snapshots instead of aliasing |
+| op/bless.t | t111 | blessed — §read-only flag on scalars is not emulated |
+| op/bless.t | t117, t118 | blessed — §DESTROY |
+| op/bless.t | t110, t115 | **#145** — the only unexplained rows |
+
+- **Two files registered XDIFF** (`docs/perl-suite-expected.tsv`):
+  op/localref.t and io/defout.t.  Both have exactly one failure, fully
+  explained by an already-blessed non-support, which is the registry's bar
+  (rows still run; flagged STALE if they ever pass).  op/bless.t and
+  uni/bless.t deliberately NOT registered — they contain real bugs.
+- **#144 `\$!` — analysis complete, not attempted.**  `$!` is
+  ACCESSOR-based, not box-based: `\$!` emits `(p-backslash
+  (p-errno-string))`, so it references the computed VALUE and the snapshot
+  is structural.  The mechanism to reuse already exists — `p-magic-cell`
+  (runtime:991), a getter/setter scalar lvalue intercepted at the
+  unbox/box-set chokepoints, with `$.` (1063) and `$|` (1089) already built
+  that way.  Giving `$!` the same shape is the fix, but it changes emission
+  for the most-used special in Perl (`open … or die $!`) plus the existing
+  `local $!` → `*p-stored-errno*` branch, so it is not R1-window work.
+- **#145 op/bless.t residue** — t110 (one-arg bless with the current stash
+  freed) and t115 (RT#3305 code-ref bless), the only rows without a verdict.
+  Note t115's description appears twice, the second under `local $TODO`, and
+  the faillog shows a TODO-row alignment difference worth checking against
+  `reference_tap_todo_support`.
+- Probes: scratchpad `w0/{r1..r4,g1}.pl`.  No code changed in this unit —
+  docs + the expected-registry only, so no gate/sweep/gen bump applies.
+
+---
+
 ## Session 316v addendum 3 (2026-08-01, Opus 5) — I clobbered perl's t/test.pl; restored. Five files triaged against a working oracle.
 
 - **DAMAGE, FOUND AND REPAIRED.** An ad-hoc shadow-t/ harness I built to
