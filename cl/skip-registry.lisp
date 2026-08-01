@@ -360,3 +360,28 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("intuit_method\\(\\) invalidates PL_bufptr"
                  :error-msg
                  "expects perl's exact 'Not enough arguments for flock' compile error for invalid input. not-supported.md: 'Error message text and format'."))
+
+;; do.t 64/66/67/68 — `do SUBROUTINE(LIST)` was REMOVED from perl in 5.20, so
+;; perl now rejects it at parse time and the test asserts only that rejection
+;; ("like $@, qr/\Asyntax error/", do.t:280).  Rejecting invalid Perl is out of
+;; scope (CLAUDE.md 9) and the exact wording is not a goal (user 2026-07-28), so
+;; the four rejection assertions are the #149 blanket category.
+;;
+;; NOT registered, deliberately: t63 and t65 ("do subname(arg) called", "do
+;; subname() called").  Those are the file's fail() guards, and they fire
+;; because PCL actually EXECUTES the removed pre-5.20 form — a behavioural
+;; divergence with a side effect, not a message mismatch, so it stays a visible
+;; failure and a fix target (task #158).
+(register-skips "do.t"
+                ("^do subname\\(\"arg\"\\) is syntax error$"
+                 :principle9
+                 "`do subname(\"arg\")` was removed in perl 5.20 and must now be a parse-time 'syntax error' -- rejection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ("^do subname\\(\\) is syntax error$"
+                 :principle9
+                 "`do subname()` was removed in perl 5.20 and must now be a parse-time 'syntax error' -- rejection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ("^do \\$subref\\(\"arg\"\\) is syntax error$"
+                 :principle9
+                 "`do $subref(\"arg\")` was removed in perl 5.20 and must now be a parse-time 'syntax error' -- rejection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ("^do \\$subref\\(\\) is syntax error$"
+                 :principle9
+                 "`do $subref()` was removed in perl 5.20 and must now be a parse-time 'syntax error' -- rejection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'."))
