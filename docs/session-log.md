@@ -218,6 +218,59 @@ op/crypt.t, op/exists_sub.t, op/print.t.
 regression test's INVERSE cases (hash REFERENCE must stay one element; padded
 key must still `exists`; returned values must NOT alias the RHS).  Two of the
 four bugs were only half-fixed until those guards failed.
+
+### The gate was over-reporting — three separate causes
+
+Alongside the fixes, a recurring theme: **a large share of what the #25 signal
+called PCL failures was not PCL.**
+
+- **#172 — op/chdir.t t25/t31 are a SHADOW-TREE artifact.**  The test does
+  `$ENV{$key} = catdir $Cwd, 'op'; chdir(); is(abs_path, $ENV{$key})`.  perl
+  runs in the REAL t/ where `op` is a directory; PCL runs in the shadow, where
+  `op` is a **symlink** — and `getcwd(3)` returns the PHYSICAL path.  Verified
+  PCL and perl identical on every primitive involved (bare `chdir()` honouring
+  HOME *and* LOGDIR, `delete $ENV{}`, `cwd()` tracking a chdir,
+  `rel2abs(curdir)`, chdir-into-symlink resolving).  **Do not "fix" chdir/cwd/
+  abs_path for these rows.**  Third fixture artifact after #151 and #167 →
+  review §10 asks where such rows should be recorded, since
+  `perl-suite-expected.tsv`'s bar ("explained by a blessed not-supported.md
+  section") would mislabel a harness artifact as a language gap.
+- **op/cmpchain.t — 274 rows, ALL the same principle-9 assertion.**  Every one
+  is `is eval("sub { $a <=> $b <=> $c }"), undef, "… non-associative"`, i.e.
+  invalid Perl must fail to compile — CLAUDE.md §9's *verbatim* example.
+  Counted all 274 (none asserts a value) and verified the legitimately
+  CHAINABLE `$a == $b == $c` works, so it is exclusively the rejection
+  category, not a comparison bug.  Registered XDIFF: the largest single block
+  of phantom failures in t/op.
+- **op/chr.t — deliberately NOT registered.**  4 of 7 rows are the blessed
+  `use bytes` gap; the other 3 encode code points ABOVE Unicode via perl's own
+  extended UTF-8.  Measured: SBCL's `char-code-limit` is 1114112, so `#x10FFFF`
+  is the largest character and `(code-char #x110000)` is a type error — a CL
+  string cannot hold them.  CLAUDE.md 4 forbids declaring that a limitation
+  unilaterally, so it is **review §11** with the alternatives (#173).
+
+### t/op survey — batch measurement beats per-file investigation
+
+Two batches of 12 t/op ORIGINALS (`--jobs 3`, ~3 min each): **batch 1 = 10 OK /
+2 DIFF**, **batch 2 = 5 OK / 7 DIFF**.  Ten files whose sweep copies pass also
+pass as originals — no drift there.  New findings recorded in **#175**, the
+useful one being that **op/cproto.t's 183 rows are ONE family** (`prototype
+("CORE::…")` for every builtin), second only to cmpchain's 274.
+
+**The one-liner that does the classifying** — collapses a faillog into its
+families so a 183-row file is recognised as one cause in seconds:
+`cut -f4- FILE.fails.tsv | sed 's/[0-9]\+/N/g' | sort | uniq -c | sort -rn`
+
+**#174 (op/catch.t t2/t6) — diagnosed, NOT fixed on purpose.**
+`eval 'UNITCHECK { die } 123'` returns 123 where perl returns undef; `BEGIN`,
+plain `die` and the no-op case are all correct, so it is exactly UNITCHECK.
+Cause: UNITCHECK thunks drain only at the MAIN program's compile→run boundary,
+and everything later is treated as perl's "too late to run" — right for a
+runtime `require`, wrong for a string eval, which is its own compilation unit.
+The obvious patch (drain at the end of p-eval's form loop) passes both rows but
+runs UNITCHECK **after** the eval'd runtime part where perl runs it **between**
+compile and run; p-eval reads-and-evaluates form by form deliberately, so there
+is no clean split to hang it on.  Flagged rather than approximated.
 - Skipped op/push/splice/unshift on purpose: that is the SvREADONLY family
   (#159), which is waiting on a design call.
 - **Discovered while triaging**: `tools/run-perl-suite.pl` does NOT load
