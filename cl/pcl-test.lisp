@@ -379,8 +379,18 @@
                         (to-string regex)))
          (pass (handler-case
                    (if (p-regex-match-p rx)
-                       (let* ((opts (build-ppcre-options (p-regex-match-modifiers rx)))
-                              (scanner (apply #'ppcre:create-scanner regex-str opts)))
+                       ;; %pcl-create-scanner, NOT raw ppcre:create-scanner —
+                       ;; the real match path carries workarounds this one used
+                       ;; to miss: cl-ppcre's unrestored extended-mode after an
+                       ;; inline (?x:) group, and /xx (task #179), which is a
+                       ;; PCL-private option cl-ppcre would choke on.  Building
+                       ;; a second scanner here meant `like`/`unlike` judged
+                       ;; patterns by different rules than `=~` did, silently,
+                       ;; inside the harness that measures the whole suite.
+                       (let ((scanner (%pcl-create-scanner
+                                       regex-str
+                                       (build-ppcre-options
+                                        (p-regex-match-modifiers rx)))))
                          (if (ppcre:scan scanner got-str) t nil))
                        (if (ppcre:scan regex-str got-str) t nil))
                  (error () nil))))
@@ -400,8 +410,18 @@
                         (to-string regex)))
          (pass (handler-case
                    (if (p-regex-match-p rx)
-                       (let* ((opts (build-ppcre-options (p-regex-match-modifiers rx)))
-                              (scanner (apply #'ppcre:create-scanner regex-str opts)))
+                       ;; %pcl-create-scanner, NOT raw ppcre:create-scanner —
+                       ;; the real match path carries workarounds this one used
+                       ;; to miss: cl-ppcre's unrestored extended-mode after an
+                       ;; inline (?x:) group, and /xx (task #179), which is a
+                       ;; PCL-private option cl-ppcre would choke on.  Building
+                       ;; a second scanner here meant `like`/`unlike` judged
+                       ;; patterns by different rules than `=~` did, silently,
+                       ;; inside the harness that measures the whole suite.
+                       (let ((scanner (%pcl-create-scanner
+                                       regex-str
+                                       (build-ppcre-options
+                                        (p-regex-match-modifiers rx)))))
                          (if (ppcre:scan scanner got-str) nil t))
                        (if (ppcre:scan regex-str got-str) nil t))
                  (error () t))))

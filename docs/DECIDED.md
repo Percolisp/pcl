@@ -140,6 +140,12 @@ not-supported.md → only then probe.*
 - **Failed attempts are recorded IN the task** (what was tried, what killed
   it) — a task that says what NOT to retry outranks one that only states
   the goal.
+- **The TAP layer must not build its own regex scanner.**  `pl-like`/
+  `pl-unlike` in `cl/pcl-test.lisp` called `ppcre:create-scanner` directly,
+  so `like`/`unlike` judged patterns by DIFFERENT rules than `=~` did —
+  missing the cl-ppcre extended-mode workaround, and (s321) choking on the
+  `/xx` option, with the `handler-case` turning the error into a quiet test
+  FAILURE.  Route through `%pcl-create-scanner` → task #179, CLAUDE.md 11.
 - **NEVER join two TAP streams by test NUMBER** — pair them by DESCRIPTION
   (`tools/lib/PclTapAlign.pm`, unit-tested in `tools/t/tap-align.t`).  A
   file where PCL emits extra or missing rows mid-run then mis-attributes

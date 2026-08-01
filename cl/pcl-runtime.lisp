@@ -14009,11 +14009,17 @@ buffer's fill-pointer; everything else falls back to file-length."
   modifiers)
 
 (defun parse-regex-modifiers (mod-string)
-  "Parse modifier string like 'gi' into plist (:g t :i t)"
-  (let ((result nil))
+  "Parse modifier string like 'gi' into plist (:g t :i t).
+   `xx` is its own modifier, not `x` written twice: /xx additionally ignores
+   unescaped whitespace INSIDE bracketed character classes (task #179).  The
+   per-character loop below cannot see that — a second x just re-sets :x — so
+   count them and set :xx as well."
+  (let ((result nil) (x-count 0))
     (loop for c across mod-string
-          do (let ((mod (intern (string-upcase (string c)) :keyword)))
-               (setf (getf result mod) t)))
+          do (when (char= c #\x) (incf x-count))
+          (let ((mod (intern (string-upcase (string c)) :keyword)))
+            (setf (getf result mod) t)))
+    (when (>= x-count 2) (setf (getf result :xx) t))
     result))
 
 (defun get-closing-delim (open-delim)
@@ -14178,10 +14184,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; x mode-modifier, so ordinary /x patterns keep using cl-ppcre's (correct)
 ;;; extended mode and never regress.
 ;;; ---------------------------------------------------------------------------
-(defun %pcl-parse-x-flag-group (pat i cur-x)
+(defun %pcl-parse-x-flag-group (pat i cur-x &optional cur-xx)
   "PAT[i] is #\(.  If this opens a (?flags:) / (?flags) MODE group, return
-   (values T end-index emit-string terminator newx); else (values NIL ...).
-   x is removed from the emitted flags; NEWX is the x state it selects."
+   (values T end-index emit-string terminator newx newxx); else (values NIL ...).
+   x is removed from the emitted flags; NEWX is the x state it selects, and
+   NEWXX the /xx state — `(?xx:` is TWO x's, and turning x off turns xx off
+   with it (task #179)."
   (let ((n (length pat)))
     (when (and (< (+ i 1) n) (char= (char pat (+ i 1)) #\?))
       (let ((j (+ i 2)) (caret nil) (on "") (off "") (seen-dash nil))
@@ -14199,15 +14207,21 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (or caret (> (length on) 0) (> (length off) 0)))
           (let* ((term (char pat j))
                  (base (if caret nil cur-x))
+                 (base-xx (if caret nil cur-xx))
                  (newx (cond ((find #\x on) t) ((find #\x off) nil) (t base)))
+                 (newxx (cond ((>= (count #\x on) 2) t)
+                              ((find #\x off) nil)   ; -x cancels xx too
+                              ((find #\x on) base-xx) ; a single x neither sets nor clears
+                              (t base-xx)))
                  (on2 (remove #\x on)) (off2 (remove #\x off))
                  (flags (concatenate 'string (if caret "^" "") on2
                                      (if (> (length off2) 0) (concatenate 'string "-" off2) "")))
                  (emit (if (char= term #\:)
                            (if (= 0 (length flags)) "(?:" (format nil "(?~a:" flags))
                            (if (= 0 (length flags)) "" (format nil "(?~a)" flags)))))
-            (return-from %pcl-parse-x-flag-group (values t (1+ j) emit term newx))))))
-    (values nil nil nil nil nil)))
+            (return-from %pcl-parse-x-flag-group
+              (values t (1+ j) emit term newx newxx))))))
+    (values nil nil nil nil nil nil)))
 
 (defun %pcl-has-x-modifier (pat)
   "True if PAT contains an x mode-modifier group, e.g. (?x:..)/(?-x:..)/(?ix:..)."
@@ -14242,12 +14256,17 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (t (return))))))
     nil))
 
-(defun %pcl-normalize-extended (pat base-x)
+(defun %pcl-normalize-extended (pat base-x &optional base-xx)
   "Strip insignificant whitespace/comments per /x scope and rewrite x mode
-   modifiers away.  BASE-X = is the whole pattern extended (/x flag set)?"
+   modifiers away.  BASE-X = is the whole pattern extended (/x flag set)?
+   BASE-XX = is /xx in force, which ALSO ignores unescaped whitespace inside
+   a bracketed character class (task #179).  Escaped whitespace (`[a\\<TAB>b]`)
+   is preserved under both — it leaves via the backslash branch below, before
+   the class branch ever sees it, which is exactly perl's rule."
   (let ((out (make-string-output-stream)) (i 0) (n (length pat))
-        (xstack (list base-x)) (in-class nil))
-    (flet ((curx () (car xstack)))
+        (xstack (list base-x)) (xxstack (list base-xx)) (in-class nil))
+    (flet ((curx () (car xstack))
+           (curxx () (car xxstack)))
       (loop while (< i n) do
             (let ((c (char pat i)))
               (cond
@@ -14256,9 +14275,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (when (< (1+ i) n) (write-char (char pat (1+ i)) out))
                  (incf i 2))
                 (in-class
-                 (write-char c out)
-                 (when (char= c #\]) (setf in-class nil))
-                 (incf i))
+                 (cond
+                   ;; /xx: unescaped whitespace inside [...] is insignificant.
+                   ((and (curxx)
+                         (member c '(#\Space #\Tab #\Newline #\Return #\Page)))
+                    (incf i))
+                   (t
+                    (write-char c out)
+                    (when (char= c #\]) (setf in-class nil))
+                    (incf i))))
                 ((char= c #\[)
                  (write-char c out) (incf i) (setf in-class t)
                  (when (and (< i n) (char= (char pat i) #\^)) (write-char #\^ out) (incf i))
@@ -14277,14 +14302,19 @@ buffer's fill-pointer; everything else falls back to file-length."
                        (when (< i n) (write-char (char pat i) out) (incf i)))
                  (when (< i n) (write-char #\) out) (incf i)))
                 ((char= c #\()
-                 (multiple-value-bind (flag-p end emit term newx)
-                     (%pcl-parse-x-flag-group pat i (curx))
+                 (multiple-value-bind (flag-p end emit term newx newxx)
+                     (%pcl-parse-x-flag-group pat i (curx) (curxx))
                    (cond
-                     ((not flag-p) (write-char #\( out) (incf i) (push (curx) xstack))
-                     ((char= term #\:) (write-string emit out) (setf i end) (push newx xstack))
-                     (t (write-string emit out) (setf i end) (setf (car xstack) newx)))))
+                     ((not flag-p) (write-char #\( out) (incf i)
+                      (push (curx) xstack) (push (curxx) xxstack))
+                     ((char= term #\:) (write-string emit out) (setf i end)
+                      (push newx xstack) (push newxx xxstack))
+                     (t (write-string emit out) (setf i end)
+                        (setf (car xstack) newx) (setf (car xxstack) newxx)))))
                 ((char= c #\))
-                 (write-char c out) (incf i) (when (cdr xstack) (pop xstack)))
+                 (write-char c out) (incf i)
+                 (when (cdr xstack) (pop xstack))
+                 (when (cdr xxstack) (pop xxstack)))
                 ((curx)
                  (cond
                    ((member c '(#\Space #\Tab #\Newline #\Return #\Page)) (incf i))
@@ -14305,15 +14335,24 @@ buffer's fill-pointer; everything else falls back to file-length."
    cl-ppcre a pattern that needs no extended-mode at all.  We only do this when
    the pattern actually contains an x mode-modifier; every other /x pattern keeps
    using cl-ppcre's (correct, faster) native extended-mode and is untouched.
-   See docs/clppcre-extended-mode-modifier-bug.md."
-  (if (%pcl-has-x-modifier pattern)
-      (apply #'cl-ppcre:create-scanner
-             (%pcl-normalize-extended pattern (getf options :extended-mode))
-             ;; drop :extended-mode (and its value) from the options plist —
-             ;; we have already applied it by hand, so cl-ppcre must not.
-             (loop for (k v) on options by #'cddr
-                   unless (eq k :extended-mode) nconc (list k v)))
-      (apply #'cl-ppcre:create-scanner pattern options)))
+   See docs/clppcre-extended-mode-modifier-bug.md.
+
+   SECOND reason to self-normalise (task #179): /xx.  cl-ppcre has no /xx at
+   all, and /xx additionally ignores unescaped whitespace INSIDE bracketed
+   character classes, so an xx pattern must always take this path.
+   :pcl-xx-mode is a PCL-private option — strip it before create-scanner."
+  (let ((xx (getf options :pcl-xx-mode)))
+    (if (or xx (%pcl-has-x-modifier pattern))
+        (apply #'cl-ppcre:create-scanner
+               (%pcl-normalize-extended pattern (getf options :extended-mode) xx)
+               ;; drop :extended-mode (we applied it by hand, so cl-ppcre must
+               ;; not) and :pcl-xx-mode (cl-ppcre would not know it).
+               (loop for (k v) on options by #'cddr
+                     unless (member k '(:extended-mode :pcl-xx-mode))
+                     nconc (list k v)))
+        (apply #'cl-ppcre:create-scanner pattern
+               (loop for (k v) on options by #'cddr
+                     unless (eq k :pcl-xx-mode) nconc (list k v))))))
 
 (defvar *pcl-scanner-cache* (make-hash-table :test 'equal)
   "Memoizes (pattern + options) -> (scanner . reg-names).  cl-ppcre compiles a
@@ -14399,6 +14438,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       (setf options (list* :multi-line-mode t options)))
     (when (getf modifiers :x)
       (setf options (list* :extended-mode t options)))
+    ;; cl-ppcre has no /xx, so it is carried as a PCL-private option that
+    ;; %pcl-build-scanner consumes and strips before calling create-scanner.
+    (when (getf modifiers :xx)
+      (setf options (list* :pcl-xx-mode t options)))
     options))
 
 (defun clear-capture-groups ()
