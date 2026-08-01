@@ -3910,6 +3910,18 @@
                         do (cond
                              ((p-flatten-marker-p item)
                               (add-items (p-flatten-marker-array item)))
+                             ;; A raw hash-table ELEMENT is a %hash interpolated
+                             ;; into a list literal — `@a = (1, %h, 2)` emits
+                             ;; (vector 1 %h 2) — and Perl flattens it to its
+                             ;; key/value pairs.  Without this it fell through to
+                             ;; the scalar branch and was stored as ONE element,
+                             ;; stringifying as HASH(0x..) and giving the wrong
+                             ;; element count (task #170).  Recurse into the
+                             ;; hash-table arm above rather than repeat it.
+                             ;; A hash REFERENCE is a p-box, not a raw table, so
+                             ;; it still reaches the scalar branch untouched.
+                             ((hash-table-p item)
+                              (add-items item))
                              ((and (vectorp item) (not (stringp item)))
                               (add-items item))
                              ;; Preserve nil as deleted-element marker (not undef-but-exists)
@@ -3922,6 +3934,18 @@
                         do (cond
                              ((p-flatten-marker-p item)
                               (add-items (p-flatten-marker-array item)))
+                             ;; A raw hash-table ELEMENT is a %hash interpolated
+                             ;; into a list literal — `@a = (1, %h, 2)` emits
+                             ;; (vector 1 %h 2) — and Perl flattens it to its
+                             ;; key/value pairs.  Without this it fell through to
+                             ;; the scalar branch and was stored as ONE element,
+                             ;; stringifying as HASH(0x..) and giving the wrong
+                             ;; element count (task #170).  Recurse into the
+                             ;; hash-table arm above rather than repeat it.
+                             ;; A hash REFERENCE is a p-box, not a raw table, so
+                             ;; it still reaches the scalar branch untouched.
+                             ((hash-table-p item)
+                              (add-items item))
                              ((and (vectorp item) (not (stringp item)))
                               (add-items item))
                              ;; Preserve nil as deleted-element marker (not undef-but-exists)
@@ -6601,6 +6625,16 @@ create the key on a read-only call, which perl does not."
                  ;; String - wrap in box and add
                  ((stringp e)
                   (vector-push-extend (make-p-box e) result))
+                 ;; A raw hash-table is a %hash written into the constructor —
+                 ;; `[1, %h, 2]` — and Perl flattens it to key/value pairs.  It
+                 ;; used to fall through to the scalar arm and become ONE
+                 ;; element stringifying as HASH(0x..) (task #170).  Route
+                 ;; through the canonical flatten and let the vector arm below
+                 ;; store the result, rather than repeating the maphash.
+                 ;; A hash REFERENCE is a p-box, not a raw table, so it still
+                 ;; reaches the scalar arm and stays one element.
+                 ((hash-table-p e)
+                  (add-element (%p-flatten-list e)))
                  ;; Vector (array) - flatten its contents, preserving bless class
                  ((vectorp e)
                   (loop for item across e do (%p-array-store-scalar result item)))
@@ -12908,6 +12942,18 @@ buffer's fill-pointer; everything else falls back to file-length."
                         do (cond
                              ((p-flatten-marker-p item)
                               (add-items (p-flatten-marker-array item)))
+                             ;; A raw hash-table ELEMENT is a %hash interpolated
+                             ;; into a list literal — `@a = (1, %h, 2)` emits
+                             ;; (vector 1 %h 2) — and Perl flattens it to its
+                             ;; key/value pairs.  Without this it fell through to
+                             ;; the scalar branch and was stored as ONE element,
+                             ;; stringifying as HASH(0x..) and giving the wrong
+                             ;; element count (task #170).  Recurse into the
+                             ;; hash-table arm above rather than repeat it.
+                             ;; A hash REFERENCE is a p-box, not a raw table, so
+                             ;; it still reaches the scalar branch untouched.
+                             ((hash-table-p item)
+                              (add-items item))
                              ((and (vectorp item) (not (stringp item)))
                               (add-items item))
                              ((null item)
@@ -12919,6 +12965,18 @@ buffer's fill-pointer; everything else falls back to file-length."
                         do (cond
                              ((p-flatten-marker-p item)
                               (add-items (p-flatten-marker-array item)))
+                             ;; A raw hash-table ELEMENT is a %hash interpolated
+                             ;; into a list literal — `@a = (1, %h, 2)` emits
+                             ;; (vector 1 %h 2) — and Perl flattens it to its
+                             ;; key/value pairs.  Without this it fell through to
+                             ;; the scalar branch and was stored as ONE element,
+                             ;; stringifying as HASH(0x..) and giving the wrong
+                             ;; element count (task #170).  Recurse into the
+                             ;; hash-table arm above rather than repeat it.
+                             ;; A hash REFERENCE is a p-box, not a raw table, so
+                             ;; it still reaches the scalar branch untouched.
+                             ((hash-table-p item)
+                              (add-items item))
                              ((and (vectorp item) (not (stringp item)))
                               (add-items item))
                              ((null item)

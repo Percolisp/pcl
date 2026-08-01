@@ -115,4 +115,51 @@ print "count=", scalar(keys %h), "\n";
 $h{3} = 9; print "after-write=$h{3}\n";
 ');
 
+# ---------------------------------------------------------------------------
+# A %hash interpolated into a PARENTHESISED list literal must flatten to its
+# key/value pairs (task #170).  `@a = (1,%h,2)` emits (vector 1 %h 2), and
+# p-array-fill's vector/list loops had no hash-table case, so the hash fell
+# through to the scalar branch and was stored as ONE element — stringifying as
+# HASH(0x..) with a wrong element COUNT.  Silent and value-corrupting, and
+# `my @pairs = (%defaults, %overrides)` is everyday Perl.  The BARE form
+# (@a = %h), push, sub args, count context and interpolation were all already
+# correct, which is why only the paren-literal shapes expose it.
+#
+# Output is sorted / count-based throughout: Perl hash order is undefined and
+# genuinely varies run to run, so an order-sensitive assertion would be flaky.
+# ---------------------------------------------------------------------------
+test_transpile('hash flattens inside a parenthesised list literal', '
+my %f = (k => 9);
+sub srt { join("|", sort @_) }
+my @a = %f;         print "bare   : n=", scalar(@a), " ", srt(@a), "\n";
+my @b = (%f);       print "parens : n=", scalar(@b), " ", srt(@b), "\n";
+my @c = (1, %f);    print "after  : n=", scalar(@c), " ", srt(@c), "\n";
+my @d = (%f, 2);    print "before : n=", scalar(@d), " ", srt(@d), "\n";
+my @e = (1, %f, 2); print "middle : n=", scalar(@e), " ", srt(@e), "\n";
+my @g = (1, (2, %f), 3); print "nested : n=", scalar(@g), " ", srt(@g), "\n";
+my @h; push @h, 1, %f, 2; print "push   : n=", scalar(@h), " ", srt(@h), "\n";
+');
+
+# An EMPTY hash contributes ZERO elements, not one.  This is the shape that
+# broke op/hashassign.t t307-309: ($x,$y,%h,$z) with %h empty must flatten to
+# three values, so [$x,$y,%h,$z] has 3 elements.
+test_transpile('empty hash contributes no elements to a list literal', '
+my %e; my @a = (1, %e, 2);
+print "mid   : n=", scalar(@a), " [", join("|",@a), "]\n";
+my @b = (%e);              print "alone : n=", scalar(@b), "\n";
+my ($x,$y,$z) = (1,2,3);
+my $r = [$x, $y, %e, $z];  print "aryref: n=", scalar(@$r), " [", join("|",@$r), "]\n";
+my $n = () = (1, %e, 2);   print "count : $n\n";
+');
+
+# A hash REFERENCE must NOT be flattened — it is a scalar.  Guards the fix
+# against over-reaching (the raw-table test must not catch boxed refs).
+test_transpile('hash REFERENCE in a list literal stays one element', '
+my %f = (k => 9); my $href = \%f;
+my @r = (1, $href, 2);
+print "n=", scalar(@r), " isref=", (ref($r[1]) ? 1 : 0), " deref=", $r[1]->{k}, "\n";
+my @nested = (1, [%f], 2);
+print "anon-aryref n=", scalar(@nested), " inner=", scalar(@{$nested[1]}), "\n";
+');
+
 done_testing();
