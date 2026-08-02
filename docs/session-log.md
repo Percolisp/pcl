@@ -29,6 +29,28 @@ on an otherwise idle machine, and the split is clean:
   doc gained the "TIMEOUT recovery (s325)" section.  The snapshot is now
   quotable for R1.
 
+Then **pre-R1 step 3, the R1 checklist pass** (§7; step 2 = #193 landed in
+s324), runs serialized so no gate poisons another's timings:
+
+- **Checked-in artifacts regenerated at gen v2-95** (`tools/rebuild-pack`,
+  `./pl2cl lib/mro.pm`): both bodies **byte-identical** under the post-#193
+  emitter — only the header stamps moved.  #193 changed neither artifact.
+- **Pl/t gate: `Result: PASS`, 125 files, 4479 tests** (`tools/prove-core`,
+  181 s wall; CLAUDE.md's stale 4475 corrected).
+- **Full sweep: 18461 pass / 926 fail across 108 files — `sweep-diff` says
+  0 new / 0 fixed** vs the 689-row baseline, plus the two documented
+  UNSTABLE crash-file rows (postfixderef.t, ref.t) — identical to s323/s324.
+- **Four-dist CPAN board vs `docs/cpan-scoreboard.tsv`: zero regressions,
+  one IMPROVEMENT** — Try-Tiny `00-report-prereqs.t` FAIL→PASS.  Cause is
+  on record (cpan-module-log cause row 3): its crash was
+  `File::Path::_IS_MSWIN32 is undefined`, i.e. exactly the #193
+  fallthrough.  New board installed as the baseline (the diff IS that one
+  row); Sub-Uplevel's `00-report-prereqs.t` still FAILs on its own residual.
+- Suite snapshot current per #195 above.
+
+**Every R1 checklist item is green.**  The R1 call itself is the user's;
+the numbers above are the hand-over.
+
 ## Session 324 (2026-08-02, Fable) — #193 landed, and the two bugs it was standing on
 
 Rulings for the s323 round went out first (`docs/fable-answers-s323.md`,

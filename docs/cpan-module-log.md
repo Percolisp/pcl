@@ -143,7 +143,7 @@ old tallies is classification methodology (e.g. skip-all / 0-ok files).
 
 | dist | PASS | PARTIAL | FAIL | notes |
 |------|------|---------|------|-------|
-| Try-Tiny-0.32 (post-shim) | 4 | 4 | 3 | 🔧 `lib/Try/Tiny.pm` shim (below); finally.t 11 ok→29/1, context.t 13→25/0, basic.t 24/1. Residual: named.t (subname introspection), given_when (§given/when), global_destruction_load (GC DESTROY), 00-report-prereqs (CPAN::Meta), erroneous_usage t6 (misuse-detection parse shape), finally.t t30 (skip = non-local exit, see shim header). |
+| Try-Tiny-0.32 (post-shim) | 5 | 4 | 2 | 🔧 `lib/Try/Tiny.pm` shim (below); finally.t 11 ok→29/1, context.t 13→25/0, basic.t 24/1. Residual: named.t (subname introspection), given_when (§given/when), global_destruction_load (GC DESTROY), erroneous_usage t6 (misuse-detection parse shape), finally.t t30 (skip = non-local exit, see shim header). **00-report-prereqs FAIL→PASS at s325** — its crash was the `File::Path::_IS_MSWIN32` fallthrough (cause row 3 above), closed by #193; Sub-Uplevel's copy still FAILs (different residual). |
 | Role-Tiny-2.002004 | 11 | 8 | 4 | 🔧 s316q: use/BEGIN compile-stream ordering fix recovered role-basic-basic (0→PASS) + create-hook; basic `with 'Role'` method install WORKS (cluster C's core was already fixed). Residual FAILs: concrete-methods (stash-forms torture), subclass (subclassing Role::Tiny itself), proto, namespace-clean (XS dep) — task #135 |
 | Scalar-List-Utils-1.70 | 12 | 20 | 6 | was 8/22/8 at s304 — improved; subname.t = timeout (rc 124) |
 | Sub-Uplevel-0.2800 | 2 | 5 | 3 | was 2/2/6 at s304 — improved (3 FAIL→PARTIAL) |
