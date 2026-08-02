@@ -308,8 +308,8 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **127 test files, 4516 tests** with a built pclxs sibling (s329, measured);
-  **4502 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
+- **128 test files, 4532 tests** with a built pclxs sibling (s330, measured);
+  **4518 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not
@@ -327,15 +327,18 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
-- Full `perl-tests/` sweep: **689 blessed fails** in `docs/fail-baseline.tsv`,
-  **66 files fully passing**, 18462 passing / 925 failing across 108 files
-  (re-measured s323 with pack.t running; `sweep-diff.pl diff
+- Full `perl-tests/` sweep: **683 blessed fails** in `docs/fail-baseline.tsv`,
+  **66 files fully passing**, 18469 passing / 918 failing across 108 files
+  (re-measured s330; `sweep-diff.pl diff
   docs/fail-baseline.tsv .faillog` = **0 new / 0 fixed**, plus 2 rows the tool
   itself flags UNSTABLE — new fails ABOVE the abort point of postfixderef.t and
-  ref.t, both already PARTIAL, so they are crash-file noise, not regressions.  690 → 689 because the `do.t` "$! is EISDIR on do dir"
-  row was FIXED that session — removed by EDITING that one row out, never by
-  re-blessing from a run, which would silently absorb anything else that
-  moved).  Baseline from s315d —
+  ref.t, both already PARTIAL, so they are crash-file noise, not regressions.
+  689 → 683 in s330: the `scalar()`-never-dereferences fix made 7 rows pass
+  (removed by EDITING them out, never by re-blessing from a run, which would
+  silently absorb anything else that moved) and exposed 1 row that had been
+  passing only because `scalar()` flattened both sides to undef — added by
+  hand with its cause.  s323 had removed the `do.t` "$! is EISDIR on do dir"
+  row the same way.)  Baseline from s315d —
   class-model target-first reads, $TODO honored again under :invert,
   no-match s/// write gate; fresh_perl/runperl children run under PCL via
   `tools/pclperl-for-tests`; `PCL_FRESH_PERL=real` restores the old compare
@@ -407,6 +410,7 @@ Not relevant now:
 - `docs/v1-implementation-plan.md` - **V1 feature plan** (prioritized, with full implementation details for each item including `local $hash{key}`, bare-if return, string eval, etc.)
 - `docs/test-infrastructure.md` - **Test infra notes**: why SBCL startup is slow, `fresh_perl_is` limitations, saved-core optimisation
 - `docs/test-skip-registry.md` - **Marking not-supported tests**: declarative skip-registry (`cl/skip-registry.lisp`) instead of editing `perl-tests/*.t`; keyed on description (or test-number for unnamed); stale-detector; failure log + `tools/sweep-diff.pl`; crash/PARTIAL stay as fix targets, never auto-skipped
+- `docs/tap-assertion-audit.md` - **What the TAP layer can and cannot claim** (#202, s330): the per-function inventory of reachable failure paths, the ten findings (unlike could not fail; eq_hash had never run; cmp_ok manufactured verdicts for `<=>`/`cmp`/`=~`/`!~`), the rule that **a claim that cannot be evaluated reports `not ok` naming the reason and only `plan()` dies**, why TAP descriptions must be Test::More's (they are join keys), and the two deliberate non-changes. Read before touching `cl/pcl-test.lisp`.
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.
 - `docs/xs-blessed-ref-referent-bug.md` - **XS OO: DONE end to end (s315, task #115).** The full history of the blocker (s314 diagnosis → pclxs ABI-6 magic group → PCL's `xs-magic-set`/`xs-magic-get` + the `xs-ref-target` referent-identity fix + the 64-arg argv cap removal) with the rules that made it correct. Read the DONE section before touching magic/ref_target; guard `Pl/t/xs-03.t`.

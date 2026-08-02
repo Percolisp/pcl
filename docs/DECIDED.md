@@ -505,3 +505,40 @@ not-supported.md → only then probe.*
   interpolations count as uses — Symbol-only scans cannot see them).
   Residual poisoned-name defvar hole (crashes loudly in every era) → task
   #205.
+
+## s330 (Opus, 2026-08-02): #202 — the TAP layer audited for unfalsifiable assertions
+
+- **An assertion that cannot EVALUATE its claim reports `not ok` naming the
+  reason — it does not die.**  Rule 12's "a verdict is a value" reading would
+  abort the file and cost every row after it (the s328 88-row lesson applied
+  to the instrument).  The one exception is `plan()`, which dies: there is no
+  row to attach a diagnostic to and the file's whole count claim is void.
+  Full argument + inventory → `docs/tap-assertion-audit.md`; ratification
+  asked in `opus5-review-requests-s330.md` §1.
+- **`unlike` could not fail**: a scanner error was swallowed into a PASS
+  (`(error () t)`).  `like`/`unlike` are now ONE function over one matcher,
+  and an unusable pattern is `not ok` in both directions.
+- **`eq_hash` had never worked** (double unwrap → type-error on every
+  hashref, killing the file).  **`cmp_ok` manufactured verdicts** for `<=>`,
+  `cmp`, `=~`, `!~` (all now implemented).
+- **TAP descriptions are join keys, so they must be Test::More's**: `use
+  Foo;` without the import list; isa_ok's four kinds get four wordings;
+  can_ok names the class and the single method.  Zero baseline rows keyed on
+  the old texts (checked).
+- **`skip_without_dynamic_extension` asks the loader** instead of skipping
+  unconditionally.  **A diagnostic the harness prints mid-run can split a TAP
+  row**: its first version cost undef.t 35/35 PASS → 30/35 PARTIAL with
+  nothing failing, because a failed load's stderr banner landed inside a row
+  (the sweep folds stderr into stdout).  Probe now runs with `*error-output*`
+  bound to a broadcast stream — a trap #152's announcements must avoid.
+- **`scalar()` never dereferences** (runtime, found by the audit's probes):
+  `p-scalar` unboxed first, so `scalar($aref)` was the element COUNT and
+  `scalar(\5)` was the referent.  An array variable is a raw adjustable
+  vector and is never boxed, so a box holding a vector is unambiguously a
+  ref; the hash branch already carried that guard.  +7 sweep rows; array.t
+  t128 was passing only because both sides flattened to undef (blessed, with
+  the cause, into `docs/fail-baseline.tsv`; 689 → 683).
+- **FILED**: #206 `UNIVERSAL::isa` ignores the reftype rule (gate on #163);
+  #207 `which_perl`/`run_perl` are unverified stubs; #208 the CPAN board
+  `.tsv` baselines drifted since s322 (verified NOT from this session — a
+  HEAD worktree gives identical boards).

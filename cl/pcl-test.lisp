@@ -145,10 +145,16 @@
 (defun test-display-value (x)
   (cond
     ((null x) nil)
+    ((stringp x) x)
     ((p-box-p x) (let ((v (p-box-value x)))
                    (if (eq v *p-undef*) nil (to-string x))))
     ((eq x *p-undef*) nil)
-    (t x)))
+    ;; A RAW host value (a bare function, hash-table, struct, …) reaches here
+    ;; whenever an argument arrives unboxed — is_deeply(sub{}, sub{}) is the
+    ;; live case.  Show it the way PERL sees it (CODE(0x…)), not the way SBCL
+    ;; prints it: the old `(t x)` arm published `#<function (lambda …) {B80…}>`
+    ;; into a TAP diagnostic.
+    (t (to-string x))))
 
 ;;; Helper: format a value for display
 (defun test-quote-value (x)
@@ -204,9 +210,14 @@
                do (cond ((equal key "tests")    (setf tests-value val))
                         ((equal key "skip_all") (setf skip-reason val))))
          (when skip-reason (pl-skip_all skip-reason))   ; exits
-         (when tests-value
-           (setf *test-planned* tests-value)
-           (format t "1..~A~%" *test-planned*)))))))
+         (unless (or tests-value skip-reason)
+           (error "plan(): no `tests` or `skip_all` key in ~S" args))
+         (setf *test-planned* tests-value)
+         (format t "1..~A~%" *test-planned*)))
+      ;; No recognized form.  The plan is the count the whole file is judged
+      ;; against, so a silent fall-through here means the run publishes TAP
+      ;; nobody can check — exactly the shape task #202 exists to remove.
+      (t (error "plan(): unrecognized plan form ~S" args)))))
 
 ;;; done_testing() or done_testing(N)
 (defun pl-done_testing (&optional n)
@@ -369,112 +380,127 @@
                  (format nil "got: ~A" (test-quote-value got))
                  "expected: anything else"))))
 
-;;; like(got, regex, name)
-(defun pl-like (got regex &optional name)
+;;; ─── The one regex matcher behind like / unlike / cmp_ok '=~' ───────────────
+;;; %pcl-create-scanner, NOT raw ppcre:create-scanner — the real match path
+;;; carries workarounds a second scanner misses: cl-ppcre's unrestored
+;;; extended-mode after an inline (?x:) group, and /xx (task #179), a
+;;; PCL-private option cl-ppcre would choke on.  Building a second scanner
+;;; here meant `like`/`unlike` judged patterns by different rules than `=~`
+;;; did, silently, inside the harness that measures the whole suite.
+;;;
+;;; A pattern may also arrive as a plain STRING: perl's t/test.pl passes
+;;; strings and interpolates them as patterns (`$got =~ /$expected/`), so the
+;;; harness must too.  (Test::More instead FAILS a non-qr pattern with
+;;; "doesn't look much like a regex to me"; PCL serves both callers from one
+;;; entry point and follows test.pl, which is the stricter requirement — see
+;;; docs/tap-assertion-audit.md §like-string-patterns.)
+(defun %test-regex-pattern-text (regex)
+  "The pattern text of REGEX (a qr// match object or a plain pattern string)."
+  (let ((rx (unbox regex)))
+    (if (p-regex-match-p rx) (p-regex-match-pattern rx) (to-string regex))))
+
+(defun %test-regex-match-p (got-str regex)
+  "T/NIL: does GOT-STR match REGEX?  SIGNALS whatever the scanner signals —
+   the CALLER must decide what an unusable pattern means, because silently
+   turning a scanner error into a verdict is how `unlike` became an assertion
+   that could not fail (task #202)."
+  (let ((rx (unbox regex)))
+    (if (p-regex-match-p rx)
+        (let ((scanner (%pcl-create-scanner
+                        (p-regex-match-pattern rx)
+                        (build-ppcre-options (p-regex-match-modifiers rx)))))
+          (if (ppcre:scan scanner got-str) t nil))
+        (if (ppcre:scan (to-string regex) got-str) t nil))))
+
+(defun %test-like (got regex name negated)
+  "Body of like (NEGATED nil) and unlike (NEGATED t) — one matcher, one
+   error policy: an unusable pattern is NOT a verdict in either direction."
   (let* ((got (test-to-scalar got))
          (got-str (if got (to-string got) ""))
-         (rx (unbox regex))
-         (regex-str (if (p-regex-match-p rx)
-                        (p-regex-match-pattern rx)
-                        (to-string regex)))
-         (pass (handler-case
-                   (if (p-regex-match-p rx)
-                       ;; %pcl-create-scanner, NOT raw ppcre:create-scanner —
-                       ;; the real match path carries workarounds this one used
-                       ;; to miss: cl-ppcre's unrestored extended-mode after an
-                       ;; inline (?x:) group, and /xx (task #179), which is a
-                       ;; PCL-private option cl-ppcre would choke on.  Building
-                       ;; a second scanner here meant `like`/`unlike` judged
-                       ;; patterns by different rules than `=~` did, silently,
-                       ;; inside the harness that measures the whole suite.
-                       (let ((scanner (%pcl-create-scanner
-                                       regex-str
-                                       (build-ppcre-options
-                                        (p-regex-match-modifiers rx)))))
-                         (if (ppcre:scan scanner got-str) t nil))
-                       (if (ppcre:scan regex-str got-str) t nil))
-                 (error () nil))))
-    (if pass
-        (test-ok t name)
-        (test-ok nil name
-                 (format nil "                  got: ~A" (test-quote-value got))
-                 (format nil "expected to match: ~A" regex-str)))))
+         (pattern (%test-regex-pattern-text regex))
+         (err nil)
+         (matched (handler-case (%test-regex-match-p got-str regex)
+                    (error (e) (setf err e) nil))))
+    (cond
+      ;; The claim could not be CHECKED.  Report `not ok` naming the reason:
+      ;; never a pass (`unlike`'s old (error () t) arm made every typo'd
+      ;; pattern an unfalsifiable assertion), and never a die (which would
+      ;; cost the file every row after this one).
+      (err (test-ok nil name
+                    (format nil "     got: ~A" (test-quote-value got))
+                    (format nil "expected: usable regex ~A" (test-quote-value pattern))
+                    (format nil "    Unusable regex: ~A" err)))
+      ((if negated (not matched) matched) (test-ok t name))
+      (negated (test-ok nil name
+                        (format nil "                      got: ~A" (test-quote-value got))
+                        (format nil "expected NOT to match: ~A" pattern)))
+      (t (test-ok nil name
+                  (format nil "                  got: ~A" (test-quote-value got))
+                  (format nil "expected to match: ~A" pattern))))))
+
+;;; like(got, regex, name)
+(defun pl-like (got regex &optional name)
+  (%test-like got regex name nil))
 
 ;;; unlike(got, regex, name)
 (defun pl-unlike (got regex &optional name)
-  (let* ((got (test-to-scalar got))
-         (got-str (if got (to-string got) ""))
-         (rx (unbox regex))
-         (regex-str (if (p-regex-match-p rx)
-                        (p-regex-match-pattern rx)
-                        (to-string regex)))
-         (pass (handler-case
-                   (if (p-regex-match-p rx)
-                       ;; %pcl-create-scanner, NOT raw ppcre:create-scanner —
-                       ;; the real match path carries workarounds this one used
-                       ;; to miss: cl-ppcre's unrestored extended-mode after an
-                       ;; inline (?x:) group, and /xx (task #179), which is a
-                       ;; PCL-private option cl-ppcre would choke on.  Building
-                       ;; a second scanner here meant `like`/`unlike` judged
-                       ;; patterns by different rules than `=~` did, silently,
-                       ;; inside the harness that measures the whole suite.
-                       (let ((scanner (%pcl-create-scanner
-                                       regex-str
-                                       (build-ppcre-options
-                                        (p-regex-match-modifiers rx)))))
-                         (if (ppcre:scan scanner got-str) nil t))
-                       (if (ppcre:scan regex-str got-str) nil t))
-                 (error () t))))
-    (if pass
-        (test-ok t name)
-        (test-ok nil name
-                 (format nil "                      got: ~A" (test-quote-value got))
-                 (format nil "expected NOT to match: ~A" regex-str)))))
+  (%test-like got regex name t))
 
 ;;; cmp_ok(got, op, expected, name)
+;;;
+;;; Test::More evaluates `$got $op $expect` in a string eval, so its operator
+;;; set is whatever perl parses.  Ours is a dispatch, i.e. a CLOSED set — and
+;;; a closed set needs a loud last arm (CLAUDE.md rule 12).  The old `(t nil)`
+;;; arm printed a comment and then reported a FAILURE, so `cmp_ok(1,'<=>',2)`
+;;; and `cmp_ok($s,'=~',qr/x/)` — both perfectly ordinary perl — were published
+;;; as test failures.  Those four operators are implemented below; anything
+;;; still unhandled reports `not ok` NAMING the operator, which is loud, cannot
+;;; be mistaken for a pass, and keeps the rest of the file's rows alive.
+(defun %test-num-compare (got expected fn)
+  "FN applied to the numifications of GOT and EXPECTED, with perl's NaN rule:
+   a NaN operand makes every ORDERED comparison false (!= is its own case)."
+  (let ((n1 (to-number got)) (n2 (to-number expected)))
+    (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) nil (funcall fn n1 n2))))
+
+(defun %test-cmp-ok (got op expected)
+  "The verdict of `GOT OP EXPECTED`.  Second value NIL means the verdict is
+   real; a STRING means the claim could not be evaluated and names why."
+  (cond
+    ((equal op "==")  (%test-num-compare got expected #'=))
+    ((equal op "!=")  (let ((n1 (to-number got)) (n2 (to-number expected)))
+                        (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) t (/= n1 n2))))
+    ((equal op "<")   (%test-num-compare got expected #'<))
+    ((equal op ">")   (%test-num-compare got expected #'>))
+    ((equal op "<=")  (%test-num-compare got expected #'<=))
+    ((equal op ">=")  (%test-num-compare got expected #'>=))
+    ;; <=> and cmp yield -1/0/1, so the TRUTH of the comparison is "unequal";
+    ;; <=> on a NaN operand yields undef, which is false.
+    ((equal op "<=>") (let ((n1 (to-number got)) (n2 (to-number expected)))
+                        (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) nil (/= n1 n2))))
+    ((equal op "cmp") (not (equal (to-string got) (to-string expected))))
+    ((equal op "eq")  (equal (to-string got) (to-string expected)))
+    ((equal op "ne")  (not (equal (to-string got) (to-string expected))))
+    ((equal op "lt")  (and (string< (to-string got) (to-string expected)) t))
+    ((equal op "gt")  (and (string> (to-string got) (to-string expected)) t))
+    ((equal op "le")  (and (string<= (to-string got) (to-string expected)) t))
+    ((equal op "ge")  (and (string>= (to-string got) (to-string expected)) t))
+    ((or (equal op "=~") (equal op "!~"))
+     (handler-case (let ((m (%test-regex-match-p (to-string got) expected)))
+                     (if (equal op "=~") m (not m)))
+       (error (e) (values nil (format nil "Unusable regex: ~A" e)))))
+    (t (values nil (format nil "cmp_ok() cannot evaluate the operator '~A'" op)))))
+
 (defun pl-cmp_ok (got op expected &optional name)
   (let* ((got (test-to-scalar got))
          (expected (test-to-scalar expected))
-         (pass
-          (cond
-            ((equal op "==")
-             (let ((n1 (to-number got)) (n2 (to-number expected)))
-               (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) nil (= n1 n2))))
-            ((equal op "!=")
-             (let ((n1 (to-number got)) (n2 (to-number expected)))
-               (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) t (/= n1 n2))))
-            ((equal op "<")
-             (let ((n1 (to-number got)) (n2 (to-number expected)))
-               (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) nil (< n1 n2))))
-            ((equal op ">")
-             (let ((n1 (to-number got)) (n2 (to-number expected)))
-               (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) nil (> n1 n2))))
-            ((equal op "<=")
-             (let ((n1 (to-number got)) (n2 (to-number expected)))
-               (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) nil (<= n1 n2))))
-            ((equal op ">=")
-             (let ((n1 (to-number got)) (n2 (to-number expected)))
-               (if (or (%pcl-nan-p n1) (%pcl-nan-p n2)) nil (>= n1 n2))))
-            ((equal op "eq")
-             (equal (to-string got) (to-string expected)))
-            ((equal op "ne")
-             (not (equal (to-string got) (to-string expected))))
-            ((equal op "lt")
-             (string< (to-string got) (to-string expected)))
-            ((equal op "gt")
-             (string> (to-string got) (to-string expected)))
-            ((equal op "le")
-             (string<= (to-string got) (to-string expected)))
-            ((equal op "ge")
-             (string>= (to-string got) (to-string expected)))
-            (t
-             (format t "# Unknown operator '~A'~%" op)
-             nil))))
-    (if pass
-        (test-ok t name)
-        (test-ok nil name
+         (op (to-string (unbox op))))
+    (multiple-value-bind (pass problem) (%test-cmp-ok got op expected)
+      (if (and pass (not problem))
+          (test-ok t name)
+          (apply #'test-ok nil name
                  (format nil "     got: ~A" (test-quote-value got))
-                 (format nil "expected: ~A ~A" op (test-quote-value expected))))))
+                 (format nil "expected: ~A ~A" op (test-quote-value expected))
+                 (when problem (list (format nil "    ~A" problem))))))))
 
 ;;; eq_array(\@a, \@b) - compare two array refs for element-wise equality
 (defun pl-eq_array (a b)
@@ -554,9 +580,11 @@
                            (and (plusp (length s))
                                 (every (lambda (c) (or (digit-char-p c) (char= c #\.)))
                                        s)))))
-         (desc (if (and vals (not version-p))
-                   (format nil "use ~A ~{~A~^ ~};" name (mapcar #'to-string vals))
-                   (format nil "use ~A;" name))))
+         ;; Test::More's description is "use $module;" for EVERY form — the
+         ;; import list and the version never appear in it.  Descriptions are
+         ;; join keys here (skip-registry, tools/sweep-diff.pl), so a prettier
+         ;; text is a different row (ruled s329, fable-answers-s328.md §3).
+         (desc (format nil "use ~A;" name)))
     (handler-case
         (progn (%test-load-module name
                                   :import-args (if (or version-p (null vals))
@@ -579,22 +607,80 @@
                  (format nil "    Error:  ~A" e))))))
 
 ;;; isa_ok(object, class, [name])
+;;;
+;;; The DEFAULT description is Test::More's, which names what the thing is —
+;;; "An object of class 'Foo' isa 'Bar'" / "A reference of type 'ARRAY' isa …"
+;;; / "The class (or class-like) 'Foo' isa …" / "undef isa …".  PCL used to
+;;; print "The object isa Bar" for all four, which is both wrong text and, more
+;;; importantly, the same KEY for four different assertions (descriptions are
+;;; join keys for the skip-registry and tools/sweep-diff.pl).
+(defun %test-thing-kind (thing)
+  "Test::More's four-way classification of an isa_ok/can_ok invocant."
+  (cond ((test-undef-p thing) :undef)
+        ((zerop (length (to-string (p-ref thing)))) :class)
+        ((p-get-class thing) :object)
+        (t :reference)))
+
+(defun %test-thing-name (thing)
+  "How Test::More names THING in an isa_ok description."
+  (let ((kind (%test-thing-kind thing)))
+    (case kind
+      (:undef     "undef")
+      (:object    (format nil "An object of class '~A'" (to-string (p-ref thing))))
+      (:reference (format nil "A reference of type '~A'" (to-string (p-ref thing))))
+      (:class     (format nil "The class (or class-like) '~A'" (to-string thing)))
+      (t (error "%test-thing-name: unhandled thing kind ~S" kind)))))
+
+(defun %test-isa-diag (thing class)
+  "Test::More's failure diagnostic for isa_ok."
+  (let ((kind (%test-thing-kind thing)))
+    (case kind
+      (:undef     "    undef isn't defined")
+      (:object    (format nil "    The object of class '~A' isn't a '~A'"
+                          (to-string (p-ref thing)) class))
+      (:reference (format nil "    The reference of type '~A' isn't a '~A'"
+                          (to-string (p-ref thing)) class))
+      (:class     (format nil "    The class (or class-like) '~A' isn't a '~A'"
+                          (to-string thing) class))
+      (t (error "%test-isa-diag: unhandled thing kind ~S" kind)))))
+
 (defun pl-isa_ok (object class &optional name)
   (let* ((cls (to-string (unbox class)))
-         (nm  (or name (format nil "The object isa ~A" cls))))
+         (nm  (or (test-display-value name)
+                  (format nil "~A isa '~A'" (%test-thing-name object) cls))))
     (if (p-true-p (p-isa object cls))
         (test-ok t nm)
-        (test-ok nil nm (format nil "The object isn't a '~A'" cls)))))
+        (test-ok nil nm (%test-isa-diag object cls)))))
 
 ;;; can_ok(object, methods...)
+;;; Test::More: the class is `ref $proto || $proto`, the description names the
+;;; single method when there is exactly one, and the two degenerate calls —
+;;; empty invocant, no methods — are FAILURES with their own diagnostics
+;;; (`can_ok('Foo')` used to emit "->can(...)" with an empty "method(s) not
+;;; found:" list, which named neither the class nor the mistake).
+(defun %test-can-ok-class (object)
+  (let ((r (to-string (p-ref object))))
+    (if (plusp (length r)) r (to-string (unbox object)))))
+
 (defun pl-can_ok (object &rest methods)
-  (let* ((names   (mapcar (lambda (m) (to-string (unbox m))) methods))
-         (missing (remove-if (lambda (m) (p-true-p (p-can object m))) names))
-         (cls     (to-string (p-ref object))))
-    (if (and names (null missing))
-        (test-ok t (format nil "~A->can(...)" cls))
-        (test-ok nil (format nil "~A->can(...)" cls)
-                 (format nil "method(s) not found: ~{~A~^ ~}" missing)))))
+  (let ((names (mapcar (lambda (m) (to-string (unbox m))) methods))
+        (cls   (%test-can-ok-class object)))
+    (cond
+      ((zerop (length cls))
+       (test-ok nil "->can(...)" "    can_ok() called with empty class or reference"))
+      ((null names)
+       (test-ok nil (format nil "~A->can(...)" cls)
+                "    can_ok() called with no methods"))
+      (t
+       (let ((missing (remove-if (lambda (m) (p-true-p (p-can object m))) names))
+             (desc (if (= 1 (length names))
+                       (format nil "~A->can('~A')" cls (first names))
+                       (format nil "~A->can(...)" cls))))
+         (if (null missing)
+             (test-ok t desc)
+             (apply #'test-ok nil desc
+                    (mapcar (lambda (m) (format nil "    ~A->can('~A') failed" cls m))
+                            missing))))))))
 
 ;;; explain(...) — Test::More returns a Data::Dumper-ish rendering for note/diag.
 ;;; Not byte-identical to Dumper, but readable and crash-free.
@@ -699,11 +785,27 @@
 (defun pl-utf8_to_byte (n) (pcl:unbox n))
 
 ;;; skip_without_dynamic_extension(module, count)
-;;; Perl test.pl stub: always skip since PCL cannot load XS dynamic extensions.
+;;; Perl's t/test.pl asks %Config whether the extension was BUILT and skips
+;;; only then.  PCL used to skip unconditionally — a claim about the
+;;; environment it never checked, and a false one for any module PCL can in
+;;; fact load (`IO` resolves to lib/IO.pm, so readline.t's four rows were
+;;; skipped on a false premise while Devel::Peek's two really are missing).
+;;; Ask the loader, which is our %Config.
 (export '(pl-skip_without_dynamic_extension))
 (defun pl-skip_without_dynamic_extension (module &optional (count 1))
-  (let ((mod (pcl:to-string (pcl:unbox module))))
-    (pl-skip (format nil "dynamic extension ~A not available" mod) count)))
+  (let* ((mod (pcl:to-string (pcl:unbox module)))
+         ;; The probe is deliberate, so its FAILURE is not news: a missing
+         ;; module's load banner on *error-output* would land in the middle of
+         ;; the TAP stream (the sweep folds stderr into stdout), splitting a
+         ;; row in half and costing the file its clean status.  Measured on
+         ;; undef.t, which went PASS 35/35 -> PARTIAL 30/35 on the noise alone.
+         (available (handler-case
+                        (let ((*error-output* (make-broadcast-stream)))
+                          (%test-load-module mod :do-import nil)
+                          t)
+                      (error () nil))))
+    (unless available
+      (pl-skip (format nil "~A was not built" mod) count))))
 
 ;;; next_test()
 ;;; Perl test.pl: allocate and return the next test number.
@@ -757,8 +859,13 @@
 (export '(pl-eq_hash))
 (defun pl-eq_hash (ref1 ref2 &rest rest)
   (declare (ignore rest))
-  (let ((h1 (pcl:p-box-value (pcl:unbox ref1)))
-        (h2 (pcl:p-box-value (pcl:unbox ref2))))
+  ;; UNWRAP ONCE.  This used to be (p-box-value (unbox ref)) — two unwraps for
+  ;; one box — so every real call type-errored on the hash-table `unbox`
+  ;; already returned, killing the whole test file.  The function had never
+  ;; worked; an inverse probe (task #202) was the first thing to run it.
+  ;; Same shape as pl-eq_array's unwrap, deliberately.
+  (let ((h1 (if (pcl:p-box-p ref1) (pcl:p-box-value ref1) ref1))
+        (h2 (if (pcl:p-box-p ref2) (pcl:p-box-value ref2) ref2)))
     (unless (and (hash-table-p h1) (hash-table-p h2))
       (return-from pl-eq_hash (pcl:make-p-box "")))
     (unless (= (hash-table-count h1) (hash-table-count h2))

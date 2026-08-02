@@ -4,6 +4,85 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 330 (2026-08-02, Opus) — #202: the TAP layer audited for assertions that cannot fail
+
+Ran task #202 as ruled (`fable-answers-s328.md` §3).  Method: one inverse
+probe per TAP-emitting function in `cl/pcl-test.lisp`, the same file run under
+real perl, compared row for row.  Ten findings, all fixed; full inventory and
+argument in **`docs/tap-assertion-audit.md`**.
+
+The three that were real holes rather than wording:
+
+- **`unlike` could not fail.**  Its scanner call ended in `(error () t)`, so
+  any pattern cl-ppcre refused to compile became a **PASS** — an assertion
+  with no reachable failure path, literally.  `like` and `unlike` are now one
+  function (`%test-like`) over one matcher (`%test-regex-match-p`), and an
+  unusable pattern is `not ok` naming the error in both directions.
+- **`eq_hash` had never worked**: `(p-box-value (unbox ref))` unwraps twice,
+  so every real hashref type-errored and killed the file.  The inverse probe
+  was the first code ever to call it.
+- **`cmp_ok` manufactured verdicts.**  Its dispatch knew twelve operators and
+  answered everything else with a comment and a **FAIL**, so `cmp_ok(1,'<=>',2)`
+  and `cmp_ok($s,'=~',qr/x/)` — ordinary perl — were published as failures.
+  `<=>`, `cmp`, `=~`, `!~` implemented; anything still unhandled is `not ok`
+  naming the operator.
+
+Wording fixes that matter because **descriptions are join keys**: use_ok drops
+the import list (ruled s329); isa_ok's four kinds (object / reference /
+class-like / undef) get Test::More's four distinct wordings instead of one
+shared "The object isa X"; can_ok names the class and, for a single method,
+the method.  Zero baseline rows keyed on the old texts.
+`skip_without_dynamic_extension` now asks the loader instead of skipping
+unconditionally, and `plan()` dies on a form it does not recognise instead of
+silently emitting no plan.
+
+**Policy call, flagged for review** (`opus5-review-requests-s330.md` §1): an
+assertion that cannot EVALUATE its claim reports `not ok` with the reason
+rather than dying.  Rule 12's literal reading (a verdict is a value) would
+abort the file and cost every row after it — the s328 88-row lesson applied to
+the instrument.  `plan()` is the exception: there is no row to carry the
+diagnostic and the file's whole count claim is void.
+
+**A runtime bug the probes found (separate commit): `scalar()` dereferenced.**
+`p-scalar` unboxed before classifying, so a box holding a vector answered with
+the ELEMENT COUNT (`ref(scalar($aref))` was `""`, `scalar([1,2])` was `2`) and
+a ref-wrapper answered with its referent (`ref(scalar(\5))` was `""`).  An
+array variable is a raw adjustable vector and is never boxed, so the
+distinction was always available — the hash branch directly below already
+carried the `(not (p-box-p val))` guard the array branch lacked, the
+second-copy-of-a-mechanism shape again.  It reached the audit because
+`isa_ok([1,2],'Bar')` lowers its argument through `p-scalar`: the harness was
+judging a number that used to be a reference.
+
+**One measurement worth remembering:** the first version of the
+skip-without-extension fix cost undef.t its clean status — **35/35 PASS →
+30/35 PARTIAL with nothing failing** — because the failed `Devel::Peek` load
+printed SBCL's banner on stderr, the sweep folds stderr into stdout, and the
+banner landed mid-row and split it.  The probe now binds `*error-output*` to a
+broadcast stream.  #152's announcements must not interleave with a TAP stream.
+
+Gates: **Pl/t PASS 128 files / 4532** (new guard `Pl/t/tap-assert-01.t`, 16
+inverse rows, 17 s).  Full sweep **18469 passing / 918 failing** across 108
+files (was 18462 / 925) — the +7 are all `scalar()`; fully-passing **66**,
+unchanged; `sweep-diff` **0 new / 0 fixed** after editing the baseline by hand
+(7 fixed rows removed, one added: array.t t128 "undef preserves identity in
+array", which had been passing only because `scalar()` flattened both `\$_[0]`
+and `\undef` to undef — 689 → 683).  No emission change (nothing under `Pl/`),
+so no corpus-diff and no cache-generation bump.  CPAN: the four-dist board and
+File-Which are **byte-identical between a HEAD worktree and this tree**;
+`File-Which/t/01_use.t` — the file that was nothing but the fake assertion —
+now really loads the module and passes.
+
+Filed: **#206** UNIVERSAL::isa ignores perl's reftype rule (gate on #163);
+**#207** `which_perl`/`run_perl` are unverified stubs; **#208** the two CPAN
+board `.tsv` baselines drifted since s322 (8 rows, verified not from this
+session; the one loss is Role-Tiny extend-role-tiny.t dying at load with
+"Package Role::Tiny does not exist").
+
+**NEXT:** #204 (sweep-diff LOST bucket), then #189.
+
+---
+
 ## Session 329 (2026-08-02, Fable) — s328 review: approved, two probe-found fixes; the four asks ruled
 
 Review of `599ab90` probed the seams, s327-style.  Verdict: **approved** —
