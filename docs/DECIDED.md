@@ -620,3 +620,35 @@ not-supported.md → only then probe.*
   Rule for any Symbol-keyed scan: **probe the spellings that produce NO
   Symbol token — implicit `$_` is the standing example.**  Guards:
   `Pl/t/writes-args-01.t` rows 14–15.  → `fable-answers-s331.md` §9.
+
+## s333 (Opus, 2026-08-03): #163 — a reference's type and address are the REFERENT's
+
+- **`%p-ref-referent` is the ONE rule** for "what does this reference point
+  at", and `is-ref` on the p-backslash wrapper is its only discriminator.
+  **No new box slot was needed**: the ruled referent-KIND tag would have
+  answered the same question the flag already answers, at one word per box
+  on every scalar in every program.  A value reaching a stringifier is
+  either the wrapper itself (`\$x` into `print`, an element, a raw param) or
+  a variable box holding one; box-sv counted levels instead, which is why the
+  same reference printed `SCALAR` through a variable and `REF` straight into
+  `print`.  → `docs/ir-spec.md` §2.5 (normative), guard
+  `Pl/t/ref-identity-01.t`.
+- **The address is the referent's, never the wrapper's** — a wrapper is fresh
+  per `\`, so `\$x == \$x` was false and one variable printed two addresses.
+  `p-ref`, `box-sv`, `stringify-value` and `box-nv` now read the one rule, so
+  the word and the number agree on every path.
+- **`ref(\$aref)` is `REF`, not `ARRAY`**: p-ref's aggregate arms read the
+  referent's *value* when handed a wrapper directly.  Fixing that widened
+  `\$aref`/`\$href`/`\$qr`/`\$cref` to REF; the INVERSE (`\@a`, `\%h`,
+  `$list[0]` holding an aggregate wrapper) is guarded row by row.
+- **A reference's string is NOT cached** on the holding box: `SCALAR` vs
+  `REF` depends on what the referent holds *now* (`my $r=\1; my $rr=\$r;` →
+  REF; `$r=5` → SCALAR), and the referent is a different box whose writes
+  cannot invalidate a cache here.  Same reason box-nv never caches an
+  address-based NV.
+- **#154's two shapes are closed** (`@$sref`, `$sref->{k}`, `%$sref`,
+  `$sref->[0]` → perl's fatal): `%p-scalar-referent-p` separates a ref to a
+  plain scalar from the representation layer #154 documented as
+  indistinguishable.  The ref-to-REF half stays lenient **because the parser
+  drops the outer level of `$$refref->{k}` (#211, filed s333)** — the runtime
+  leniency is a workaround for that parse bug, not a semantic choice.

@@ -208,6 +208,33 @@ Dereference ops unwrap one level. Reference identity = identity of the
 referenced structure. Stringification of a reference yields
 `"HASH(0x…)"`-style text; numification yields the object address.
 
+**The printed type and the address are properties of the REFERENT, never of
+the wrapper** (normative, task #163). `\` allocates a fresh wrapper on every
+evaluation, so any rule that reads the wrapper makes `\$x == \$x` false and
+prints two addresses for one variable. `%p-ref-referent` is the one rule that
+resolves the referent, and `is-ref` on the wrapper is its only discriminator:
+
+- the value handed to a stringifier is **either the wrapper itself** — `\$x`
+  reaching `print`, an array/hash element, or a raw (`p-raw-params`) parameter
+  — **or a variable box holding one** (`my $r = \$x`).  `is-ref` says which;
+  counting box levels cannot, and a level-counting box-sv is exactly why the
+  same reference used to print `SCALAR` through a variable and `REF` straight
+  into `print`.
+- `p-ref`, `box-sv`, `stringify-value` and `box-nv` all read that one rule, so
+  the word and the number agree no matter which path a reference took.
+- **`SCALAR` vs `REF` is dynamic**: it is decided by what the referent holds
+  *at that moment*, exactly as perl does. `my $r = \1; my $rr = \$r;` prints
+  `REF`; after `$r = 5` the same `$rr` prints `SCALAR`. A reference's string is
+  therefore **not cached** on the holding box — the referent is a different box
+  and writing to it cannot invalidate a cache there. (`box-nv` refuses to cache
+  address-based NVs for the same reason.)
+- A reference **to a plain scalar is not a container**: `@$sref`, `%$sref`,
+  `$sref->{k}`, `$sref->[0]` are perl's fatal `Not a(n) HASH/ARRAY reference`.
+  What PCL still tolerates is one *representation* layer (a box left over after
+  one unwrap) — see `%p-scalar-referent-p`; that leniency exists only because
+  the parser drops the outer level of `$$refref->{k}` (task #211), and goes
+  away when that is fixed.
+
 **Ref identity is a monotonic id, deliberately NOT a machine address**
 (`object-address`, `cl/pcl-runtime.lisp`). A translator must reproduce the
 *invariants*, not the digits:

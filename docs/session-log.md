@@ -4,6 +4,101 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 333 (2026-08-03, Opus) — #163: a reference's type and address are the REFERENT's, and no new box slot was needed
+
+Ran #163 from s331's storage-path diagnosis, in the ruled order: **find the
+third path first, then the tag, then the probe battery**.
+
+### The third path was not a third representation — it was a second CALLER LEVEL
+
+The diagnosis said the printed type is a property of the storage path.  It is,
+and the mechanism is smaller than a tag: `box-sv` guessed **which level it was
+at by counting boxes**, and a reference reaches it at two different levels.
+
+- through a variable — `my $r = \$x; print $r` — the box holds the wrapper;
+- **raw** — `\$x` straight into `print`, into an array/hash element, into a
+  `p-raw-params` parameter, or into the eager `%pcl-to-string-strict` slot the
+  annotator picks when a ref is only ever stringified — the value IS the
+  wrapper.
+
+Same reference, two shapes, so the level-counting `cond` printed `SCALAR` for
+the first and `REF` for the second.  `p-ref` never had the bug: it asks
+`(p-box-is-ref val)`.  So the fix is CLAUDE.md 11 — route the stringifiers
+through the rule that already worked — not a new slot:
+
+- **`%p-ref-referent`** (one definition) resolves the referent from `is-ref`;
+- `box-sv`, `stringify-value`, `box-nv`, `p-ref` and `overload::StrVal` all
+  read it, so the word and the number agree on every path.
+
+**No `ref-kind` slot was added.**  The ruled tag would have answered the same
+question `is-ref` already answers, at one word per box on every scalar in every
+program — and it would still have needed the level rule to know whose tag to
+read.  Recorded in `docs/DECIDED.md` s333 with the reasoning.
+
+### What was actually wrong (all measured against perl, both directions)
+
+1. **Identity**: the address printed and compared was the WRAPPER's, which is
+   fresh per `\`.  `\$x == \$x` was false; one variable printed two addresses;
+   `\$h{k}` twice looked like two references.  Now the referent's — all EQ.
+2. **`ref(\$aref)` answered `ARRAY`** (perl: `REF`).  p-ref's aggregate arms
+   read the referent's *value* when handed a wrapper directly.  Same for
+   `\$href`/`\$cref`/`\$qr`.
+3. **`\5` printed `REF`**, `\$vstring` printed `SCALAR` (perl: `VSTRING`).
+4. **A reference's string was CACHED** on the holding box, so the dynamic
+   `SCALAR`↔`REF` rule could not fire: `my $r=\1; my $rr=\$r;` printed REF and
+   still printed REF after `$r = 5`.  Refs are no longer sv-cached — the word
+   depends on a DIFFERENT box's content, whose writes cannot invalidate a cache
+   here.  (`box-nv` already refuses to cache address-based NVs; same reason.
+   Flagged as the one place this fix costs time: a repeated `"$ref"` now
+   re-formats.)
+5. **#154's two shapes closed**: `@$sref` returned the referent box and the
+   caller read it as a one-element list (silent wrong); `$sref->{k}` reached
+   SBCL's GETHASH and died with an uncatchable type error.  Both are perl's
+   `Not a(n) ARRAY/HASH reference` now, on the read AND write paths.
+   `%p-scalar-referent-p` makes the distinction #154 documented as impossible
+   without a tag — a ref to a plain scalar vs a representation layer.
+
+### Filed: the leniency #154 could not remove is a PARSER bug (#211)
+
+`$$refref->{k}` and `${$rr}->{k}` both emit `(p-gethash-deref $rr "k")` — the
+outer deref level is silently DROPPED, so the generated code says `$rr->{k}`,
+which is fatal in perl.  The runtime's "a leftover box is not a mismatch"
+leniency exists to absorb that lost level; that is why making it strict once
+broke postfixderef.t/avhv.t.  Pre-existing at HEAD (verified against
+`git show HEAD:cl/pcl-runtime.lisp`).  Fix the parser first, then the last
+lenient arm can go.
+
+### Gates
+
+- **Pl/t PASS 130 files / 4567** (`tools/prove-core`, PCLXS_DIR set): 4547 at
+  HEAD + the 20 rows of the new `Pl/t/ref-identity-01.t`, which is the whole
+  perl-vs-PCL table above **plus six INVERSE rows** (`\@a`/`\%h`/`\&f`, an
+  element holding an aggregate wrapper, `\@a == \@a`, refs to different scalars
+  stay distinct) — the widening of `\$aref` to REF is exactly the kind of rule
+  that could swallow them.
+- **perl-tests, per file, alone and deterministic**: `ref.t` **184 → 186**
+  (identical abort point; `[perl #109746] referential identity of \literal` and
+  `stringify for ref to vstring` now pass), `postfixderef.t` 96+25 **unchanged**
+  (the file #154 warned about), aassign/array/delete/hashassign unchanged.
+  HEAD comparison run in a `git worktree`, not a stash copy.
+- **Full sweep, run TWICE.**  Run 1: `GATE: NOT CLEAN`, `LOST ref.t -5
+  (184 → 179)`, TOTAL -1.  Run 2, same tree: **GATE clean**, ref.t **186+18**,
+  TOTAL 18469 → **18475 (+6)**, `0 new / 2 fixed` (`scalar.t` "ref to a ref",
+  "string gets appended to ref").  ref.t runs **23 `fresh_perl_is`/`runperl`
+  children**, which under `--jobs 8` compete with 8 SBCL transpiles: the count
+  is load-sensitive, the abort point is not.  Per-file at `--jobs 1` it is
+  186+18 twice, and HEAD is 184+20, so the change is +2 and run 1's LOST was
+  noise.  **That is a false gate failure from #204's LOST bucket** — raised as
+  a policy ask in `docs/opus5-review-requests-s333.md` §4 (my lean: reuse
+  #176's retry rule — re-run a LOST file once at `--jobs 1` before failing).
+- **Hot paths guarded**: the new `%p-scalar-referent-p` diagnosis sits behind a
+  `p-box-p` test (or after the raw vector/hash arm) at every deref site, so an
+  ordinary `$aref->[0]` / `$href->{k}` / `@$aref` / `%$href` never runs the
+  referent walk.  Re-verified after the reorder: gate PASS, and ref.t /
+  postfixderef.t / array.t / delete.t byte-identical counts.
+
+---
+
 ## Session 332 (2026-08-03, Fable) — review of the s330/s331 batch: 8 asks ruled, 4 probe-found false negatives in the writes_args scan fixed
 
 Batch **approved** (#202 + #204 + #189 + the scalar() fix).  All eight open

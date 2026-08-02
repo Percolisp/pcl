@@ -1718,15 +1718,13 @@
    Implements overload::StrVal($obj) — bypasses any '\"\"' overload."
   ;; use overload: get raw address representation ignoring any "" handler
   (if (p-box-p obj)
-      (let* ((inner (unbox obj))
-             (cls   (p-get-class obj))
-             (raw   (cond
-                      ((hash-table-p inner)
-                       (format nil "HASH(0x~(~X~))" (object-address inner)))
-                      ((and (vectorp inner) (not (stringp inner)))
-                       (format nil "ARRAY(0x~(~X~))" (object-address inner)))
-                      (t
-                       (format nil "SCALAR(0x~(~X~))" (object-address obj))))))
+      (let* ((cls   (p-get-class obj))
+             ;; Same words and the same REFERENT address the plain stringifier
+             ;; would print (#163) — StrVal only bypasses the '""' handler, it
+             ;; does not get its own address rule.  This was a third copy that
+             ;; printed the VARIABLE box's address for a scalar ref.
+             (raw   (or (%p-ref-string obj)
+                        (format nil "SCALAR(0x~(~X~))" (object-address obj)))))
         (make-p-box (if cls (format nil "~A=~A" cls raw) raw)))
       (make-p-box (to-string obj))))
 
@@ -1768,7 +1766,10 @@
                    ((eq v t) 1)  ; CL's T from comparisons - Perl true is 1
                    ((stringp v) (parse-perl-number v))
                    ((p-vstring-p v) (parse-perl-number (p-vstring-s v)))
-                   ((p-box-p v) (object-address v))  ; reference/blessed scalar ref: address
+                   ;; Reference: perl's numeric value is the REFERENT's address,
+                   ;; so `\$x == \$x` is true across two separate `\` wrappers
+                   ;; (#163).  Same rule as the stringifier, one helper.
+                   ((p-box-p v) (object-address (%p-ref-referent box)))
                    ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
                    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
                    ((functionp v) (object-address v))  ; code ref: address
@@ -1844,7 +1845,10 @@
                     ;; Fallback: just strip trailing zeros and dot
                     (string-right-trim "." (string-right-trim "0" s)))))))))
     ((numberp v) (write-to-string v))
-    ((p-box-p v) (format nil "SCALAR(0x~(~X~))" (object-address v)))
+    ;; A box in a RAW slot: the same reference box-sv would print, so it must
+    ;; print the same word and the same (referent) address — #163.
+    ((p-box-p v) (or (%p-ref-string v)
+                     (format nil "SCALAR(0x~(~X~))" (object-address v))))
     ((hash-table-p v) (format nil "HASH(0x~(~X~))" (object-address v)))
     ((vectorp v) (format nil "ARRAY(0x~(~X~))" (object-address v)))
     ((p-typeglob-p v) (format nil "*~A::~A"
@@ -1920,35 +1924,29 @@
                     ;; Blessed typeglob ref: stringify as GLOB(0xADDR) not *PKG::NAME
                     ((p-typeglob-p inner)
                      (format nil "GLOB(0x~(~X~))" (object-address inner)))
-                    ;; Nested p-box: look one level deeper to distinguish SCALAR from REF.
-                    ;; inner = ref-box; inner2 = what it points to.
-                    ;; If inner2 holds a reference type → outer is a ref-to-ref → "REF".
-                    ;; If inner2 holds a scalar value (nil/string/num) → "SCALAR".
+                    ;; A box holding a box is a reference.  Which box is the
+                    ;; referent — INNER, or what INNER points at — is decided by
+                    ;; %p-ref-referent (is-ref), never by counting levels: BOX is
+                    ;; the wrapper itself when `\$x` reaches print/an element/a
+                    ;; raw param, and the variable holding one after `my $r = \$x`.
+                    ;; Both must print the same word and the same address (#163).
                     ((p-box-p inner)
-                     (let* ((inner2 (p-box-value inner))
-                            (inner3 (when (p-box-p inner2) (p-box-value inner2))))
-                       (cond
-                         ;; \substr / \pos / \vec lvalue ref → "LVALUE(0x...)".
-                         ((and (p-magic-cell-p inner3)
-                               (eq (p-magic-cell-kind inner3) :lvalue))
-                          (format nil "LVALUE(0x~(~X~))" (object-address inner)))
-                         ;; inner2 is a box with a scalar payload → SCALAR ref
-                         ((and (p-box-p inner2)
-                               (not (or (p-box-p inner3)
-                                        (and (vectorp inner3) (not (stringp inner3)))
-                                        (hash-table-p inner3)
-                                        (functionp inner3)
-                                        (p-typeglob-p inner3)
-                                        (p-regex-match-p inner3))))
-                          (format nil "SCALAR(0x~(~X~))" (object-address inner)))
-                         ;; inner2 is a ref-type or a raw value → REF
-                         (t (format nil "REF(0x~(~X~))" (object-address inner))))))
+                     (or (%p-ref-string box)
+                         ;; No wrapper under BOX (a single-boxed legacy ref):
+                         ;; INNER is the referent.
+                         (format nil "SCALAR(0x~(~X~))" (object-address inner))))
                     (t (stringify-value inner))))
              (s (if class
                     (format nil "~A=~A" class raw)
                     raw)))
-        (setf (p-box-sv box) s
-              (p-box-sv-ok box) t)
+        ;; Don't cache a SCALAR-reference's string.  Its word is a property of
+        ;; the REFERENT's current content — `my $r = \1; my $rr = \$r;` prints
+        ;; REF, and `$r = 5` makes the same $rr print SCALAR — and the referent
+        ;; is a different box, so writing to it never invalidates this cache.
+        ;; box-nv refuses to cache address-based NVs for the same reason.
+        (unless (p-box-p inner)
+          (setf (p-box-sv box) s
+                (p-box-sv-ok box) t))
         s)))
 
 (defmacro p-let (bindings &body body)
@@ -5835,6 +5833,11 @@
              *p-undef*)))
       ((and (vectorp idx) (not (stringp idx)))
        (p-aslice arr idx))
+      ;; $scalarref->[0] on the READ path: perl's fatal, and the same arm the
+      ;; write path gets through p-ensure-arrayref (#163 referent rule).
+      ;; p-box-p guard as in p-gethash-deref: an ordinary `$aref->[0]` has a
+      ;; raw vector here and never runs the walk.
+      ((and (p-box-p arr) (%p-scalar-referent-p ref)) (%p-not-a-ref "ARRAY"))
       (t (p-aref arr idx)))))
 
 (defun p-array-last-index (arr)
@@ -6346,6 +6349,11 @@ create the key on a read-only call, which perl does not."
       ((hash-table-p h) h)
       ;; Wrong kind of referent ($aryref->{k} = …): perl's fatal.
       ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
+      ;; A ref to a plain SCALAR used as a hash ($scalarref->{k}): also perl's
+      ;; fatal, and the shape #154 had to leave alone — it looks exactly like
+      ;; the representation layer below until the referent rule separates them
+      ;; (#163).  Without this it reached SBCL's GETHASH as a P-BOX.
+      ((%p-scalar-referent-p ref) (%p-not-a-ref "HASH"))
       ;; Anything else (a p-box representation layer) is returned for the
       ;; caller to unbox, exactly as before.
       (t h))))
@@ -6368,6 +6376,10 @@ create the key on a read-only call, which perl does not."
       ((vectorp a) a)
       ;; Wrong kind of referent ($hashref->[0] = …): perl's fatal.
       ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
+      ;; A ref to a plain SCALAR used as an array ($$scalarref[0], @$scalarref).
+      ;; See p-ensure-hashref's arm — the referent rule (#163) is what makes
+      ;; this separable from the representation layer below.
+      ((%p-scalar-referent-p ref) (%p-not-a-ref "ARRAY"))
       (t a))))
 
 (defun p-autoviv-gethash (hash key)
@@ -6547,6 +6559,12 @@ create the key on a read-only call, which perl does not."
        (when (find #\Nul h) (return-from p-gethash-deref *p-undef*))
        (let ((sym-hash (p-ensure-hashref ref)))
          (p-gethash sym-hash key)))
+      ;; $scalarref->{k} on the READ path: perl's fatal.  Without it the box
+      ;; reached SBCL's GETHASH and the program died with a type error naming a
+      ;; P-BOX — uncatchable in Perl terms (#163 referent rule, #154's shape).
+      ;; Only a still-boxed H can be one, so the guard is all the hot path
+      ;; (an ordinary `$href->{k}`, where H is the hash) ever pays.
+      ((and (p-box-p h) (%p-scalar-referent-p ref)) (%p-not-a-ref "HASH"))
       (t (p-gethash h key)))))
 
 (defun (setf p-gethash-deref) (value ref key)
@@ -12197,10 +12215,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    Typeglob: @{*{...}} resolves to the glob's ARRAY slot (live, lvalue-capable)."
   (let ((v (unbox val)))
     (cond
+      ;; Direct vector — the overwhelmingly common `@$aref`, kept FIRST so the
+      ;; hot path pays nothing for the diagnosis below.
+      ((and v (vectorp v) (not (stringp v))) v)
+      ;; @$scalarref — a ref to a plain SCALAR is not an array ref: perl's
+      ;; fatal.  Checked BEFORE the layer-peel below, which would otherwise
+      ;; hand back the referent BOX and the caller would read it as a
+      ;; one-element list (silent wrong).  The referent rule (#163) is what
+      ;; separates this from a genuine \@arr layer — see %p-scalar-referent-p.
+      ;; The p-box-p guard is the whole cost when it does not apply: only a
+      ;; still-boxed value can be a scalar ref.
+      ((and (p-box-p v) (%p-scalar-referent-p val)) (%p-not-a-ref "ARRAY"))
       ;; Double-boxed: box(box(arr)) from \@arr — unwrap both layers
       ((p-box-p v) (unbox v))
-      ;; Direct vector
-      ((and v (vectorp v) (not (stringp v))) v)
       ;; Typeglob (from *{EXPR} or a glob ref): the glob's ARRAY slot
       ((p-typeglob-p v)
        (%p-glob-slot-place v "@" (make-array 0 :adjustable t :fill-pointer 0)))
@@ -12218,6 +12245,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Previously fell into the catch-all below and the caller (p-keys,
       ;; foreach, push) silently saw an empty list.
       ((%p-wrong-referent-p "ARRAY" v) (%p-not-a-ref "ARRAY"))
+      ;; @$scalarref — a ref to a plain SCALAR is not an array ref (#163's
+      ;; referent rule; see p-ensure-hashref).  This used to return the
+      ;; referent BOX and the caller treated it as a one-element list.
+      ((%p-scalar-referent-p val) (%p-not-a-ref "ARRAY"))
       ;; Fallback: return whatever we have (may be *p-undef* if no box to write back)
       (t (or v *p-undef*)))))
 
@@ -12230,6 +12261,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    so keys/values/exists over a package symbol table work (Class::Inspector etc.)."
   (let ((v (unbox val)))
     (cond
+      ;; Direct hash — the common `%$href`, first so the hot path is free.
+      ((hash-table-p v) v)
+      ;; %$scalarref — see p-cast-@'s arm (#163's referent rule); the p-box-p
+      ;; guard is the whole cost when it does not apply.
+      ((and (p-box-p v) (%p-scalar-referent-p val)) (%p-not-a-ref "HASH"))
       ((p-box-p v) (unbox v))
       ;; Typeglob (from *{EXPR} or a glob ref): the glob's HASH slot
       ((p-typeglob-p v)
@@ -12246,6 +12282,8 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Wrong kind of referent (%$aryref, keys %$aryref): perl's fatal.
       ;; Previously fell through to (t v) and the caller silently saw no keys.
       ((%p-wrong-referent-p "HASH" v) (%p-not-a-ref "HASH"))
+      ;; %$scalarref — see p-ensure-hashref's arm (#163's referent rule).
+      ((%p-scalar-referent-p val) (%p-not-a-ref "HASH"))
       (t v))))
 
 (defun %p-symref-box (name-str)
@@ -12455,6 +12493,81 @@ buffer's fill-pointer; everything else falls back to file-length."
              (p-typeglob-p u)                       ; holds a glob ref
              (and (p-box-p u) (p-box-is-ref u))))))  ; holds a scalar/ref wrapper
 
+(defun %p-referent-shaped-p (v)
+  "True when V can BE the thing a reference points at: a scalar box, or a raw
+   aggregate/code/glob/regexp object.  A plain scalar value cannot — reaching
+   one means the walk went a level too deep."
+  (or (p-box-p v)
+      (hash-table-p v)
+      (functionp v)
+      (p-typeglob-p v)
+      (p-regex-match-p v)
+      (and (vectorp v) (not (stringp v)))))
+
+(defun %p-ref-referent (val)
+  "The object a reference POINTS AT — the SV whose address perl prints and
+   whose identity `==` compares.  This is never the p-backslash wrapper: a
+   wrapper is fresh per `\\`, so using it would make `\\$x == \\$x` false and
+   print two different addresses for one variable (task #163).
+
+   VAL is either the wrapper itself — `\\$x` reaching a raw slot: a sub
+   argument under p-raw-params, an array/hash element, a print argument — or a
+   variable box holding one (`my $r = \\$x`).  `is-ref` on the wrapper is the
+   discriminator, the SAME one p-ref's LVALUE/VSTRING/REF arms use; box-sv used
+   to count levels instead, which is why the identical `\\$x` printed SCALAR
+   through a variable and REF straight into print.
+
+   Returns VAL's own value for a non-reference (callers guard), and declines to
+   walk past a shape that cannot be a referent (a single-boxed legacy ref)."
+  (when (p-box-p val)
+    (let ((inner (p-box-value val)))
+      (if (and (p-box-p inner) (not (p-box-is-ref val)))
+          ;; VAL is the variable: INNER is the wrapper, the referent is under it.
+          (let ((r (p-box-value inner)))
+            (if (%p-referent-shaped-p r) r inner))
+          ;; VAL is the wrapper itself (or holds a raw aggregate ref).
+          inner))))
+
+(defun %p-scalar-referent-p (val)
+  "True when VAL is a reference to a plain SCALAR — `\\$x` — and therefore
+   cannot be dereferenced as a container.  This is the distinction
+   %p-wrong-referent-p documents that it cannot make (#154): after one unbox a
+   `\\$x` and the representation layer of a `\\%h` reached through a ref-to-ref
+   both leave a p-box behind, so counting either as a mismatch broke the other.
+   The referent rule tells them apart — `\\$x`'s referent is a box holding a
+   plain scalar; a representation layer's holds the container."
+  (let ((r (%p-ref-referent val)))
+    (and (p-box-p r)
+         (not (%p-referent-shaped-p (p-box-value r))))))
+
+(defun %p-ref-string (val)
+  "How perl stringifies the reference held by VAL: TYPE(0xADDR), where TYPE is
+   p-ref's answer ignoring bless and ADDR is the REFERENT's address.  NIL when
+   VAL holds no recognizable reference, so each caller keeps its own fallback.
+
+   One definition, shared by box-sv (a ref in a variable) and stringify-value
+   (a ref in a raw slot) — they printed different words for the same reference
+   before (#163)."
+  (let ((referent (%p-ref-referent val)))
+    (cond
+      ((p-box-p referent)
+       (let ((rv (p-box-value referent)))
+         (cond
+           ((and (p-magic-cell-p rv) (eq (p-magic-cell-kind rv) :lvalue))
+            (format nil "LVALUE(0x~(~X~))" (object-address referent)))
+           ((p-vstring-p rv)
+            (format nil "VSTRING(0x~(~X~))" (object-address referent)))
+           ((or (p-box-is-ref referent) (%scalar-holds-ref-p referent))
+            (format nil "REF(0x~(~X~))" (object-address referent)))
+           (t (format nil "SCALAR(0x~(~X~))" (object-address referent))))))
+      ((and (vectorp referent) (not (stringp referent)))
+       (format nil "ARRAY(0x~(~X~))" (object-address referent)))
+      ((hash-table-p referent)
+       (format nil "HASH(0x~(~X~))" (object-address referent)))
+      ((functionp referent)
+       (format nil "CODE(0x~(~X~))" (object-address referent)))
+      (t nil))))
+
 (defun %p-scalar-ref-referent (val)
   "The referent BOX of a scalar reference, or NIL.
    VAL may be the is-ref wrapper itself or a variable box holding one."
@@ -12547,43 +12660,39 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; (A classed inner was already answered by %p-target-class above.)
        (if (p-box-class inner)
            (p-box-class inner)
-           (let ((inner2 (p-box-value inner)))
+           ;; The REFERENT — what the reference points at — is `inner` when VAL
+           ;; is itself the p-backslash wrapper (a literal `\$x` handed straight
+           ;; to ref()) and one level deeper when VAL is a variable holding one.
+           ;; %p-ref-referent is that rule, shared with the stringifiers (#163);
+           ;; every arm below reads the referent, so the same reference cannot
+           ;; answer two different words depending on how it arrived.
+           (let* ((referent (%p-ref-referent val))
+                  (rv (and (p-box-p referent) (p-box-value referent))))
              (cond
                ;; Magic lvalue ref (\substr / \pos / \vec): the referent box holds
                ;; a p-magic-cell with :lvalue kind → "LVALUE" (arylen's cell has
-               ;; kind nil and falls through to "SCALAR").  The referent is `inner`
-               ;; for a direct `\substr(...)` (is-ref wrapper) and `inner2` when the
-               ;; ref was stored through a variable (`my $r = \substr…; ref $r`),
-               ;; mirroring the ref-to-ref arm below.
-               ((let* ((referent (if (p-box-is-ref val) inner inner2))
-                       (rv (and (p-box-p referent) (p-box-value referent))))
-                  (and (p-magic-cell-p rv)
-                       (eq (p-magic-cell-kind rv) :lvalue)))
+               ;; kind nil and falls through to "SCALAR").
+               ((and (p-magic-cell-p rv) (eq (p-magic-cell-kind rv) :lvalue))
                 "LVALUE")
                ;; Referent scalar holds a v-string literal → "VSTRING" (op/ver.t).
-               ;; Same referent resolution as the LVALUE arm above.
-               ((let* ((referent (if (p-box-is-ref val) inner inner2))
-                       (rv (and (p-box-p referent) (p-box-value referent))))
-                  (p-vstring-p rv))
-                "VSTRING")
-               ;; Direct aggregate referent (raw value held by the pointed-at
-               ;; scalar): \$qr → REGEXP, \$aref → ARRAY, \$href → HASH. These
-               ;; check inner2 (= the referent's held value for a direct `\$x`).
-               ((and (vectorp inner2) (not (stringp inner2))) "ARRAY")
-               ((hash-table-p inner2) (or (gethash :__class__ inner2) "HASH"))
-               ((p-regex-match-p inner2) "REGEXP")
-               ;; Ref-to-ref → "REF".  The referent (the scalar pointed at) is
-               ;; `inner` when `val` is itself the ref-wrapper (is-ref set, e.g.
-               ;; a literal `\$x`), else `inner2` (when `val` is a variable whose
-               ;; value is the wrapper).  It is a ref-to-ref iff that referent is
-               ;; itself a ref-wrapper (\\1) or *holds* a reference (\$r, \$aref
-               ;; through a variable).  %scalar-holds-ref-p is non-recursive so a
-               ;; self-referential scalar ($x=\$x) does not loop, and a plain
-               ;; scalar — incl. undef (*p-undef*) and '' array elements — yields
-               ;; SCALAR, not REF.
-               ((let ((referent (if (p-box-is-ref val) inner inner2)))
-                  (or (and (p-box-p referent) (p-box-is-ref referent))
-                      (%scalar-holds-ref-p referent)))
+               ((p-vstring-p rv) "VSTRING")
+               ;; The referent IS a raw aggregate: a wrapper for `\@a`/`\%h`/…
+               ;; stored in a variable or element.  (When VAL is a ref TO a
+               ;; scalar that HOLDS such a value — `\$aref` — the referent is the
+               ;; scalar BOX, so these do not fire and the REF arm below wins,
+               ;; which is what perl answers.)
+               ((and (vectorp referent) (not (stringp referent))) "ARRAY")
+               ((hash-table-p referent) (or (gethash :__class__ referent) "HASH"))
+               ((p-regex-match-p referent) "REGEXP")
+               ((functionp referent) "CODE")
+               ((p-typeglob-p referent) "GLOB")
+               ;; Ref-to-ref → "REF": the referent is itself a ref-wrapper (\\1)
+               ;; or *holds* a reference (\$r, \$aref).  %scalar-holds-ref-p is
+               ;; non-recursive so a self-referential scalar ($x=\$x) does not
+               ;; loop, and a plain scalar — incl. undef (*p-undef*) and ''
+               ;; array elements — yields SCALAR, not REF.
+               ((or (and (p-box-p referent) (p-box-is-ref referent))
+                    (%scalar-holds-ref-p referent))
                 "REF")
                ;; Scalar reference: box containing box (from p-backslash $x)
                (t "SCALAR")))))
