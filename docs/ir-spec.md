@@ -539,10 +539,20 @@ elements: `f($h{k})` / `f($a[i])` emit `p-gethash-argbox` /
 coderef, method), which return the slot box when the element exists and
 a lazy defelem magic cell when it does not — reads see undef and never
 vivify; the first write through `$_[N]` creates the key / extends the
-array.  A plain `my` lexical scalar still COPIES (its slot may be raw
-under the VarAnnotator speed model — deliberate divergence,
-`docs/not-supported.md` §`@_` argument aliasing), as do deref-element
-args (`f($ref->{k})`).
+array.  A plain `my` lexical scalar is boxed **when the callee is known
+to write through `@_`** (task #189): the callee's body is scanned once,
+the fact rides `sub_info` as `writes_args`, and the VarAnnotator's
+`arg-to-writer` event boxes that call site's arguments — so
+`sub setit { $_[0] = "x" } setit($lex)` writes the caller's variable
+while a read-only callee's arguments stay raw slots.  What still COPIES:
+a lexical handed to a callee the scan cannot identify (coderef call,
+method dispatch, cross-file sub — the runtime's "Cannot modify non-boxed
+value" warning is the backstop there) and deref-element args
+(`f($ref->{k})`).  See `docs/not-supported.md` §`@_` argument aliasing.
+
+**Element targets of `s///` / `tr///`** are the element's BOX:
+`$a[0] =~ s/…/…/` emits `(p-=~ (p-aref-box @a 0) (p-subst …))`, not
+`p-aref`.  A plain match is a read and keeps `p-aref`.
 
 **`&`-sigil calls without an argument list** re-use the caller's `@_`
 (Perl's `&foo;` rule).  Named form: `&foo;` → `(pl-foo @_)`.  Deref forms:

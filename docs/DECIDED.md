@@ -559,3 +559,28 @@ not-supported.md → only then probe.*
   an explicit `--pass-baseline` that does not exist is FATAL, never a silent
   fall-back to the default file.  A check that goes quiet when it cannot run
   is indistinguishable from one that passed.
+
+## s330c (Opus): #189 writes_args — the `@_` aliasing divergence closed for known callees
+
+- **A sub that writes through `@_` is detected in its BODY** (`Parser2::
+  _sub_writes_args`), the fact rides `sub_info` as `writes_args`, and
+  VarAnnotator turns it into an `arg-to-writer` boxing event at that sub's
+  call sites — the same marking `chomp $x` already uses.  Only files with
+  such a sub pay.  Conservative by construction: an `@_`/`$_[N]` occurrence
+  the scan cannot prove is a read (including `\$_[N]`, `\@_`, `&callee;`,
+  `goto &sub`, handing `@_` to an unknown callee) sets the flag.  The runtime
+  "Cannot modify non-boxed value" warning STAYS as the backstop for coderef
+  calls, method dispatch and cross-file callees.
+- **`lib/File/Basename.pm` DELETED** — core's copy now answers `dirname`
+  correctly under PCL.  Guard `Pl/t/writes-args-01.t`.
+- **`s///` / `tr///` bound to an ARRAY or HASH ELEMENT write the element**
+  (`p-aref-box`, not `p-aref`).  Before: a silent no-op on an array element,
+  a "Cannot modify non-boxed value" warning on a hash element — for one of
+  perl's most common idioms.
+- **Element VIVIFICATION follows perl exactly**: taking the lvalue creates
+  the element, so only the ops that perl treats as lvalues take it — `s///`
+  and a MODIFYING `tr/x/y/` vivify; a count-only `tr/N/N/` (identical lists,
+  no d/s/c; an empty replacement replicates the search list), any `/r` form
+  and a plain match do not.  Getting this wrong cost `perl-tests/tr.t` two
+  passing rows — **caught by #204's LOST bucket on its first live run**,
+  which is what that gate is for.

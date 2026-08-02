@@ -315,24 +315,36 @@ alias — the box already in play is passed through:
   creates the key / extends the array).  Named subs, coderef calls
   (`$c->(...)`, `&$c(...)`), and method calls.
 
-What still COPIES: a plain `my` lexical scalar (`f($x)`) whose slot the
-VarAnnotator proved raw — boxing every lexical ever passed to a sub
-would defeat the raw-slot speed model (Target A), so this stays a
-deliberate divergence.  Also deref elements (`f($ref->{k})`) and
-prototype-`$`-imposed element args (both copy today; extendable via the
-same argbox accessors if real code needs them).
+**Plain `my` lexicals: CLOSED for KNOWN callees (task #189, s330).**  A sub
+whose body writes through `@_` is detected where the fact lives — the callee's
+body (`Parser2::_sub_writes_args`) — the fact rides `sub_info` as
+`writes_args`, and VarAnnotator turns it into an `arg-to-writer` boxing event
+at that sub's call sites.  So `sub setit { $_[0] = "x" } setit($lexical)` now
+writes the caller's variable, and only files containing such a sub pay for it.
+The scan is deliberately conservative: an `@_`/`$_[N]` occurrence it cannot
+prove is a read (including the escapes `\$_[N]`, `\@_`, `&callee;`,
+`goto &sub`, handing `@_` to an unknown callee) sets the flag.
 
-**Affected tests:** `perl-tests/args.t` rows touching plain-lexical args.
+What still COPIES:
 
-**What it costs in real code (s323, task #189):** perl's own `File::Basename`
+- calls the scan cannot see the callee of — **coderef calls (`$c->(…)`),
+  method dispatch, and cross-file callees** (the fact is same-file today).
+  The runtime's "Cannot modify non-boxed value" warning is the loud backstop
+  for exactly these, and must not be removed.
+- deref elements (`f($ref->{k})`) and prototype-`$`-imposed element args
+  (extendable via the same argbox accessors if real code needs them).
+- `substr($_[0],…)` as an lvalue and 4-arg `substr` — the ARGUMENT arrives
+  boxed, but the callee lowers substr's target as a value (task #209).
+
+**Affected tests:** `perl-tests/args.t` rows touching coderef/method-dispatch
+argument aliasing.
+
+**What it used to cost (s323 → closed s330):** perl's own `File::Basename`
 uses the in-place idiom — `sub _strip_trailing_sep { $_[0] =~ s{(.)/*\z}{$1}s }`
-called as `_strip_trailing_sep($dirname)`.  Under PCL the s/// warns
-"Cannot modify non-boxed value in s///" and does nothing, so `dirname("/a/b/c")`
-answered `/a/b/` and `basename("/a/b/")` answered `/a/b/` — wrong for every
-path.  Worked around by shipping `lib/File/Basename.pm` (core's file with that
-one sub also RETURNING the value).  **This divergence is deliberate but NOT
-free** — task #189 sketches the bounded fix (a `writes_args` fact on sub_info,
-so only call sites of subs that actually write `$_[N]` box their arguments).
+called as `_strip_trailing_sep($dirname)` — so `dirname("/a/b/c")` answered
+`/a/b/`, wrong for every path, and PCL shipped `lib/File/Basename.pm` to work
+around it.  **That shim is deleted**: core's File::Basename now runs correctly,
+guarded by `Pl/t/writes-args-01.t`.
 
 ---
 

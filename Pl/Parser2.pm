@@ -805,6 +805,10 @@ sub parse {
         $self->sub_info->{ $seg->{pkg} }{ $sub->name } = {
           cl_name     => $self->fallback_parser->_qualified_sub_to_cl($sub->name),
           insensitive => $self->_sub_ctx_insensitive($sub),
+          # #189: this sub writes through @_ to its caller's variables, so
+          # every argument handed to it must be a BOX (VarAnnotator turns the
+          # fact into an `arg-to-writer` boxing event at the call sites).
+          writes_args => $self->_sub_writes_args($sub),
         };
       }
     }
@@ -6183,6 +6187,209 @@ sub _auto_defined_call {
   return 0 unless ref $f eq 'ARRAY' && @$f && !ref $f->[0];
   return 1 if $AUTO_DEFINED_HEAD{$f->[0]};
   return _auto_defined_call($f->[-1]) if $f->[0] eq 'let' && @$f >= 3;
+  return 0;
+}
+
+# -------------------------------------------------- #189: writes through @_
+
+# perl's @_ elements are ALIASES of the caller's arguments, so `$_[0] = …`
+# inside a sub assigns the CALLER's variable.  PCL can only honour that when
+# the caller handed over a BOX, and boxing every call argument is off the table
+# (DECIDED: no blanket boxing of call arguments).  So the rare fact is detected
+# where it lives — the callee's body — carried on sub_info, and consumed at
+# call sites as one more VarAnnotator boxing event (`arg-to-writer`), exactly
+# the way `chomp $x` already forces $x boxed.
+#
+# CONSERVATIVE BY CONSTRUCTION (fable-answers-s323.md §1.1): every @_ / $_[N]
+# occurrence must be a PROVEN read, and the aliasing ESCAPES (\$_[N], \@_,
+# `&callee;`, `goto &sub`, handing @_ to an unknown callee) count as writes.
+# A false positive costs one boxed argument; a false negative re-creates the
+# silent dirname bug with only the runtime's "Cannot modify non-boxed value"
+# warning as a witness.  That warning stays as the backstop for what this
+# scan cannot see (coderef calls, method dispatch, cross-file callees).
+
+# Builtins that CONSUME values, so handing them @_ or $_[N] copies rather than
+# aliases.  Anything not listed is treated as a callee that may alias.
+my %ARG_VALUE_FN = map { $_ => 1 } qw(
+  scalar defined ref exists delete wantarray return
+  join sprintf printf print say die warn croak confess carp cluck
+  push unshift shift pop splice sort reverse grep map keys values each
+  split length uc lc ucfirst lcfirst sprintf index rindex sprintf abs int);
+
+# The Word whose argument list $node sits in — paren form `f(… $node …)` or
+# bare form `f $node`.  Undef when $node is not in an argument position.
+sub _arg_owner_word {
+  my ($node) = @_;
+  for (my $p = $node->parent; $p; $p = $p->parent) {
+    last if $p->isa('PPI::Structure::Block');       # a block is not an arg list
+    if ($p->isa('PPI::Structure::List')) {
+      my $w = $p->sprevious_sibling;
+      return ($w && $w->isa('PPI::Token::Word')) ? $w : undef;
+    }
+  }
+  # Bare form: walk left over the comma-separated list to its leading Word.
+  my $prev = $node->sprevious_sibling;
+  while ($prev) {
+    return $prev if $prev->isa('PPI::Token::Word');
+    last if $prev->isa('PPI::Token::Operator') && $prev->content ne ',';
+    $prev = $prev->sprevious_sibling;
+  }
+  return undef;
+}
+
+my $ASSIGN_OP_RE = qr/^(?:=|\*\*=|\|\|=|&&=|\/\/=|x=|<<=|>>=|[-+.*\/%|&^]=)$/;
+
+# `$_[N]` (SYM is the '$_' Symbol, SUB its '[…]' subscript): written?
+sub _args_elem_written {
+  my ($sym, $subscript) = @_;
+  my $next = $subscript->snext_sibling;
+  if ($next && $next->isa('PPI::Token::Operator')) {
+    my $c = $next->content;
+    return 1 if $c =~ $ASSIGN_OP_RE || $c eq '++' || $c eq '--' || $c eq '=~';
+  }
+  my $prev = $sym->sprevious_sibling;
+  if ($prev) {
+    return 1 if $prev->isa('PPI::Token::Cast') && $prev->content eq '\\';   # \$_[0]
+    return 1 if $prev->isa('PPI::Token::Operator')
+             && ($prev->content eq '++' || $prev->content eq '--');
+  }
+  my $w = _arg_owner_word($sym) or return 0;
+  my $n = $w->content;
+  return 1 if Pl::VarAnnotator::arg_writing_builtin($n);
+  return 1 if $n eq 'substr' || $n eq 'vec' || $n eq 'pos';   # lvalue-capable
+  return 0 if $ARG_VALUE_FN{$n};
+  return 1;                       # unknown callee: the alias travels onward
+}
+
+# `@_` itself: does this occurrence let the aliases escape?
+sub _args_array_escapes {
+  my ($sym) = @_;
+  my $prev = $sym->sprevious_sibling;
+  return 1 if $prev && $prev->isa('PPI::Token::Cast') && $prev->content eq '\\';
+  # RHS of an assignment COPIES (`my ($a,$b) = @_`), and so does a bare use in
+  # a numeric/boolean position (`@_ == 2`, `if (@_)`, `"@_"`).
+  return 0 if $prev && $prev->isa('PPI::Token::Operator')
+           && $prev->content =~ $ASSIGN_OP_RE;
+  my $w = _arg_owner_word($sym) or return 0;
+  my $n = $w->content;
+  return 1 if Pl::VarAnnotator::arg_writing_builtin($n);
+  return 0 if $ARG_VALUE_FN{$n};
+  return 1;
+}
+
+# A `foreach` over @_ ALIASES its loop variable to the arguments, so a write to
+# the loop variable is a write to the caller's variable.  Returns true when the
+# body writes it; a read-only iteration (`for my $x (@_) { push @o, $x }`) is
+# the common case and stays unflagged.
+sub _nodes_write_var {
+  my ($nodes, $var) = @_;
+  for my $root (@$nodes) {
+    next unless ref $root && $root->can('find');
+    my @syms = ($root->isa('PPI::Token::Symbol') ? ($root) : ());
+    push @syms, @{ $root->find('PPI::Token::Symbol') || [] };
+    for my $sym (@syms) {
+      next unless $sym->content eq $var;
+      my $next = $sym->snext_sibling;
+      if ($next && $next->isa('PPI::Token::Operator')) {
+        my $c = $next->content;
+        return 1 if $c =~ $ASSIGN_OP_RE || $c eq '++' || $c eq '--' || $c eq '=~';
+      }
+      my $prev = $sym->sprevious_sibling;
+      if ($prev) {
+        return 1 if $prev->isa('PPI::Token::Cast') && $prev->content eq '\\';
+        return 1 if $prev->isa('PPI::Token::Operator')
+                 && ($prev->content eq '++' || $prev->content eq '--');
+      }
+      my $w = _arg_owner_word($sym) or next;
+      my $n = $w->content;
+      return 1 if Pl::VarAnnotator::arg_writing_builtin($n)
+               || $n eq 'substr' || $n eq 'vec' || $n eq 'pos';
+      return 1 unless $ARG_VALUE_FN{$n};
+    }
+  }
+  return 0;
+}
+
+sub _foreach_over_args_writes {
+  my ($list) = @_;
+  my $compound = $list->parent or return 1;
+  return 1 unless $compound->isa('PPI::Statement::Compound');
+  my $block;
+  for my $c ($compound->schildren) { $block = $c if $c->isa('PPI::Structure::Block') }
+  return 1 unless $block;                       # shape not understood → write
+  # Loop variable: the Symbol before the list, else the implicit $_.
+  my $var = '$_';
+  for my $c ($compound->schildren) {
+    last if $c == $list;
+    $var = $c->content if $c->isa('PPI::Token::Symbol');
+  }
+  return _nodes_write_var([$block], $var);
+}
+
+# THE FACT: does SUB write through @_ to its caller's variables?
+sub _sub_writes_args {
+  my ($self, $sub) = @_;
+  my $block = $sub->block or return 0;
+
+  # (1) @_ PASSTHROUGH.  `&callee;` and `goto &sub` hand our LIVE @_ to another
+  #     sub, so ITS writes land on OUR caller.  `\&foo` (a code ref) and
+  #     `&foo(…)` (an explicit arg list) do not.
+  for my $sym (@{ $block->find('PPI::Token::Symbol') || [] }) {
+    next unless $sym->raw_type eq '&';
+    my $prev = $sym->sprevious_sibling;
+    next if $prev && $prev->isa('PPI::Token::Cast') && $prev->content eq '\\';
+    my $next = $sym->snext_sibling;
+    next if $next && $next->isa('PPI::Structure::List');
+    return 1;
+  }
+  for my $cast (@{ $block->find('PPI::Token::Cast') || [] }) {
+    next unless $cast->content eq '&';           # &$code / &{$code}
+    my $target = $cast->snext_sibling or next;
+    my $after  = $target->snext_sibling;
+    next if $after && $after->isa('PPI::Structure::List');
+    return 1;
+  }
+  for my $w (@{ $block->find('PPI::Token::Word') || [] }) {
+    next unless $w->content eq 'goto';
+    my $n = $w->snext_sibling or next;
+    return 1 unless $n->isa('PPI::Token::Word');   # `goto LABEL` carries nothing
+  }
+
+  # (2) Every @_ / $_[N] occurrence must be a proven read.  ($#_ is a count.)
+  for my $sym (@{ $block->find('PPI::Token::Symbol') || [] }) {
+    my $c = $sym->content;
+    if ($c eq '@_') {
+      my $p = $sym->parent;
+      # foreach list gets the alias rule, not the escape rule.
+      if ($p && $p->isa('PPI::Statement') && $p->parent
+          && $p->parent->isa('PPI::Structure::List')
+          && $p->parent->parent
+          && $p->parent->parent->isa('PPI::Statement::Compound')) {
+        return 1 if _foreach_over_args_writes($p->parent);
+        next;
+      }
+      # Statement-modifier form `EXPR for @_` — same aliasing, no block: the
+      # implicit $_ is the alias, so only a write to $_ in EXPR is a write.
+      my $prev = $sym->sprevious_sibling;
+      if ($prev && $prev->isa('PPI::Token::Word')
+          && ($prev->content eq 'for' || $prev->content eq 'foreach')) {
+        my @before;
+        for my $sib ($p ? $p->schildren : ()) {
+          last if $sib == $prev;
+          push @before, $sib;
+        }
+        return 1 if _nodes_write_var(\@before, '$_');
+        next;
+      }
+      return 1 if _args_array_escapes($sym);
+      next;
+    }
+    next unless $c eq '$_';
+    my $next = $sym->snext_sibling;
+    next unless $next && $next->isa('PPI::Structure::Subscript')
+             && ($next->start // '') eq '[';
+    return 1 if _args_elem_written($sym, $next);
+  }
   return 0;
 }
 

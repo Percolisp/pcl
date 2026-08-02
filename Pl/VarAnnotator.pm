@@ -155,6 +155,17 @@ my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
 # text step 1 never counted the inline decl, so $x wasn't in vi at all).
 my %TIE_FN        = map { $_ => 1 } qw(tie untie);
 
+# ONE membership test for "this builtin WRITES the argument you hand it",
+# shared with Parser2's #189 writes_args body scan so the two cannot drift.
+sub arg_writing_builtin {
+  my ($fname, $nargs) = @_;
+  return 0 unless defined $fname;
+  return 1 if $MUTATING_FN{$fname} || $HANDLE_VIV_FN{$fname} || $TIE_FN{$fname};
+  return 1 if $fname eq 'pos';
+  return 1 if $fname eq 'substr' && defined $nargs && $nargs >= 4;
+  return 0;
+}
+
 sub analyze {
   my ($class, $stmts, $extra_params, $known_subs, $host) = @_;
   if (!$host) {
@@ -881,6 +892,15 @@ sub _tw_walk {
         my @args = $MUTATING_FN{$fname} ? @$kids[1 .. $#$kids]
                  :                        ($kids->[1] // ());
         _tw_mark($ctx, $xo, $_, $mark) for @args;
+      }
+      # #189: a KNOWN user sub whose body writes through @_ aliases EVERY
+      # argument, exactly as chomp aliases its own — same marking, same
+      # mechanism, one more reason.  The fact rides sub_info (writes_args),
+      # computed once from the callee's body by Parser2's _sub_writes_args.
+      elsif ($fname
+             && ref $ctx->{known_subs}{$fname}
+             && $ctx->{known_subs}{$fname}{writes_args}) {
+        _tw_mark($ctx, $xo, $_, 'arg-to-writer') for @$kids[1 .. $#$kids];
       }
       _tw_walk_funcall_args($ctx, $xo, $fname, $kids);
       return;

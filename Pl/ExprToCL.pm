@@ -1495,7 +1495,24 @@ sub gen_binary_op_form {
     }
   }
 
-  my $left = $self->gen_node_form($kids->[0]);
+  # `$a[0] =~ s///` and `$h{k} =~ tr///` WRITE their target, so the target has
+  # to be the element's BOX — the same lvalue_context the mutating builtins
+  # already use, gated the same way (`_is_elem_arg`: only when the LHS itself
+  # IS an element access, so an index subexpression is untouched).  Without it
+  # the substitution ran against a COPY and did NOTHING: silent for an array
+  # element, a "Cannot modify non-boxed value" warning for a hash element.
+  # Found while building #189 — it is also what kept lib/File/Basename.pm on
+  # a shim, since core's _strip_trailing_sep is `$_[0] =~ s{…}{}`.
+  my $left = do {
+    my $saved_lv = $self->lvalue_context;
+    $self->lvalue_context(1)
+      if ($op eq '=~' || $op eq '!~')
+      && $self->_is_elem_arg($kids->[0])
+      && _rhs_writes_match_target($self, $kids->[1]);
+    my $l = $self->gen_node_form($kids->[0]);
+    $self->lvalue_context($saved_lv);
+    $l;
+  };
   # Flat text of the left form == v1's $left bytes (to_flat contract); used
   # only to make the `=` dispatch decisions below, mirroring gen_binary_op.
   my $left_flat = ($op eq '=') ? Pl::CLForm::to_flat($left) : undef;
@@ -1740,6 +1757,38 @@ sub gen_array_str_interp {
 # read-only callee never vivifies.  Reuses lvalue_context's existing
 # set/clear discipline instead of a new flag (the deref element sites
 # treat 'argbox' as plain lvalue: aliasing with eager vivify).
+# True when the RHS of a `=~` / `!~` MODIFIES the bound target.  Node-type
+# test, not a grep of the generated text (the same rule the *wantarray*
+# wrapper below already uses).  perl's own boundary, probed:
+#
+#   $a[2] =~ s/x/y/     modifies (and so VIVIFIES a missing element: @a == 3)
+#   $a[2] =~ tr/x/y/    modifies, vivifies
+#   $a[2] =~ tr/N/N/    COUNTS — identical lists, no d/s/c: @a stays empty
+#   $a[2] =~ s/x/y/r    builds a NEW string, target untouched
+#   $a[2] =~ /x/        a read
+#
+# The count-only case matters beyond tidiness: taking the lvalue there creates
+# the element, which perl-tests/tr.t checks by name ("doesn't extend the
+# array").  An empty tr replacement list replicates the search list, so it is
+# a count too — unless /d, where empty means DELETE.
+sub _rhs_writes_match_target {
+  my ($self, $rhs_id) = @_;
+  my $n = $self->expr_o->get_a_node($rhs_id);
+  my $r = ref $n;
+  return 0 unless $r eq 'PPI::Token::Regexp::Substitute'
+               || $r eq 'PPI::Token::Regexp::Transliterate';
+  my $mods = eval { $n->get_modifiers } || {};
+  return 0 if $mods->{r};
+  if ($r eq 'PPI::Token::Regexp::Transliterate') {
+    my $from = eval { $n->get_match_string };
+    my $to   = eval { $n->get_substitute_string };
+    return 1 unless defined $from && defined $to;
+    $to = $from if $to eq '' && !$mods->{d};
+    return 0 if $to eq $from && !$mods->{d} && !$mods->{s} && !$mods->{c};
+  }
+  return 1;
+}
+
 sub _elem_accessor {
   my ($self, $base) = @_;
   my $lv = $self->lvalue_context;
