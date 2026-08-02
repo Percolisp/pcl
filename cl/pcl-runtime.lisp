@@ -13521,10 +13521,21 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let* ((val (car (last args)))
          (v (unbox val)))
     (cond
+      ;; A REFERENCE is already a scalar and scalar() NEVER dereferences.
+      ;; `unbox` peels the ref-wrapper, so `scalar(\5)` used to answer with the
+      ;; referent (ref(scalar(\5)) = "" where perl says SCALAR).
+      ((and (p-box-p val) (p-box-is-ref val)) val)
       ;; Strings are scalars, return as-is
       ((stringp v) v)
-      ;; Arrays (non-string vectors) return length
-      ((and (vectorp v) (adjustable-array-p v)) (length v))
+      ;; Arrays (non-string vectors) return length — but a BOX holding a vector
+      ;; is an array REFERENCE, not an array: an array VARIABLE is a raw
+      ;; adjustable vector and is never boxed.  Unboxing first threw that
+      ;; distinction away, so `scalar($aref)` and `scalar([1,2])` both answered
+      ;; with the ELEMENT COUNT and `ref(scalar($aref))` was "" — a reference
+      ;; silently turned into a number.  The hash branch below already carries
+      ;; exactly this (not (p-box-p val)) guard; the array branch never got it.
+      ((and (vectorp v) (adjustable-array-p v))
+       (if (p-box-p val) val (length v)))
       ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count
       ((and (hash-table-p v) (not (p-box-p val))) (%p-hash-user-count v))
       ;; An undef result is the scalar undef: return the *p-undef* sentinel, not
