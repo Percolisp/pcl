@@ -4,6 +4,92 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 331 (2026-08-03, Opus) — #204 the TOTAL gate, then #189 writes_args; the gate caught its first regression
+
+Continued the ruled order after s330's #202: **#204 → #189**.  Both landed;
+#163 is diagnosed but NOT started (see below).
+
+### #204 — the sweep gates itself now (`aecebdf`)
+
+`sweep-diff` compares FAILING rows, so a change that makes a file abort EARLIER
+removes passing rows without adding failing ones and the headline reads
+`0 new, 0 fixed`.  Fourth bucket **LOST** added (per-file baseline passing rows
+the run did not produce, against a blessed `docs/pass-baseline.tsv`), plus a
+`TOTAL passing: baseline N, current M` line on EVERY run.  A **full** sweep now
+runs that diff itself and exits with its verdict (`--no-gate` opts out); a sweep
+of named files stays informational.
+
+Two anti-silence rules, because a quiet check reads exactly like a passed one:
+no pass baseline found prints `LOST: NOT CHECKED — …` instead of nothing, and an
+explicit `--pass-baseline` that does not exist is FATAL rather than a silent
+fall-back to the default file (the first cut had that fall-back; the probe
+caught it).  All four paths probed, including the doctored-baseline case that
+must exit 1.
+
+### #189 — `$_[0] = …` reaches the caller, and s/// writes its element (`f33c2ed`)
+
+Two silent wrongs, one mechanism apart.
+
+1. **A sub that writes through `@_` wrote nothing.**  The callee's body is
+   scanned once (`_sub_writes_args`), the fact rides `sub_info` as
+   `writes_args`, and VarAnnotator turns it into an `arg-to-writer` boxing
+   event at that sub's call sites — the same marking `chomp $x` already uses,
+   so only files containing such a sub pay.  Conservative by construction: an
+   `@_`/`$_[N]` occurrence the scan cannot prove is a read — including the
+   escapes `\$_[N]`, `\@_`, `&callee;`, `goto &sub`, handing `@_` to an unknown
+   callee, and a `foreach` over `@_` whose loop variable is written (block AND
+   statement-modifier form) — sets the flag.  The runtime's "Cannot modify
+   non-boxed value" warning STAYS as the backstop for coderef calls, method
+   dispatch and cross-file callees.  **`lib/File/Basename.pm` deleted.**
+
+2. **`s///` and `tr///` bound to an ELEMENT wrote nothing** — `$a[0] =~ s/X/-/`
+   a silent no-op, `$h{k} =~ s/X/-/` a warning and no-op, for one of perl's
+   most common idioms.  The `=~` LHS now takes the element BOX when the RHS
+   modifies, gated by `_is_elem_arg` exactly like the mutating builtins.  This
+   is also what kept File::Basename on a shim: core's `_strip_trailing_sep` is
+   `$_[0] =~ s{…}{}`, i.e. it needs BOTH halves.
+
+**Vivification follows perl exactly**, probed shape by shape: taking the lvalue
+creates the element, so `s///` and a MODIFYING `tr/x/y/` create it while a
+count-only `tr/N/N/` (identical lists, no d/s/c; an empty replacement replicates
+the search list), any `/r` form and a plain match do not.
+
+### The gate caught its first regression, on its first live run
+
+The first cut of the element fix boxed eagerly and cost `perl-tests/tr.t` two
+passing rows (`doesn't extend the array`) while `sweep-diff` reported **0 new /
+0 fixed** — the file is PARTIAL, so its two new failures were classified as
+crash-file noise.  **LOST caught it** (`tr.t -2 (240 -> 238)`, `TOTAL 18469 →
+18467`, `GATE: NOT CLEAN`, exit 1).  That is the entire justification for #204,
+demonstrated eight hours after it shipped.
+
+### #163 — diagnosed, not started
+
+Measured the full identity/printed-type table (in the task).  New finding worth
+the next session's time: **the printed type and address are a property of the
+STORAGE PATH, not of the reference** — driving `box-set` and `p-my-=` directly
+in SBCL yields the correct 3-level shape and prints SCALAR for both the
+`\$h{k}` and `\$x` cases, yet the same source in a real program prints REF for
+the element cases.  A third path in the generated code produces a different
+shape.  Find that path before touching the level-sniffing cond, which is the
+symptom.
+
+Gates: **Pl/t PASS 129 files / 4544** (new guards `writes-args-01.t` 13 rows,
+`tap-assert-01.t` 16 rows from s330).  Sweep **18469 / 918**, GATE clean, TOTAL
+18469 = 18469, 0 new / 0 fixed.  corpus-diff 5 files, each explained (args.t /
+join.t / lfs.t = #189 boxing — two of them the conservative flag on a sub that
+hands `@_` to an unknown callee; pos.t / sprintf2.t = the element box).  CPAN
+four-dist board byte-identical.  Artifacts regenerated, gen **v2-99**.
+
+Filed: **#209** substr-as-lvalue / 4-arg substr on an element still writes
+nothing (same missing box, one table further along: `%lvalue_funcs` has two
+copies and both omit substr/vec/read).
+
+**NEXT:** #163 (start from the diagnosis in the task), then #176.2 → #184 →
+#185 → #159 → #150 → #152 → E4.1/E5.
+
+---
+
 ## Session 330 (2026-08-02, Opus) — #202: the TAP layer audited for assertions that cannot fail
 
 Ran task #202 as ruled (`fable-answers-s328.md` §3).  Method: one inverse
