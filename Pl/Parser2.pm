@@ -6210,10 +6210,13 @@ sub _auto_defined_call {
 
 # Builtins that CONSUME values, so handing them @_ or $_[N] copies rather than
 # aliases.  Anything not listed is treated as a callee that may alias.
+# map/grep are NOT here: they alias $_ to their list elements, so they get the
+# same body-scan rule as a foreach (see _map_grep_topic_writes) — listing them
+# as value consumers was a probe-found false negative (s332).
 my %ARG_VALUE_FN = map { $_ => 1 } qw(
   scalar defined ref exists delete wantarray return
   join sprintf printf print say die warn croak confess carp cluck
-  push unshift shift pop splice sort reverse grep map keys values each
+  push unshift shift pop splice sort reverse keys values each
   split length uc lc ucfirst lcfirst sprintf index rindex sprintf abs int);
 
 # The Word whose argument list $node sits in — paren form `f(… $node …)` or
@@ -6257,6 +6260,7 @@ sub _args_elem_written {
   my $n = $w->content;
   return 1 if Pl::VarAnnotator::arg_writing_builtin($n);
   return 1 if $n eq 'substr' || $n eq 'vec' || $n eq 'pos';   # lvalue-capable
+  return _map_grep_topic_writes($w, $sym) if $n eq 'map' || $n eq 'grep';
   return 0 if $ARG_VALUE_FN{$n};
   return 1;                       # unknown callee: the alias travels onward
 }
@@ -6273,8 +6277,55 @@ sub _args_array_escapes {
   my $w = _arg_owner_word($sym) or return 0;
   my $n = $w->content;
   return 1 if Pl::VarAnnotator::arg_writing_builtin($n);
+  return _map_grep_topic_writes($w, $sym) if $n eq 'map' || $n eq 'grep';
   return 0 if $ARG_VALUE_FN{$n};
   return 1;
+}
+
+# A write to $_ that carries NO '$_' Symbol token: a bare `s///` or `tr///`
+# (binding implicitly to $_) or an argument-less chomp/chop.  Without this,
+# `s/x/y/ for @_` — the most common spelling of the aliasing loop — read as a
+# no-write body (probe-found, s332).  /r never writes; a form bound with
+# =~/!~ writes its explicit target, which the Symbol scan owns.
+sub _implicit_topic_write {
+  my ($root) = @_;
+  my @toks = $root->isa('PPI::Token') ? ($root)
+           : $root->can('find')       ? @{ $root->find('PPI::Token') || [] }
+           :                            ();
+  for my $t (@toks) {
+    if ($t->isa('PPI::Token::Regexp::Substitute')
+        || $t->isa('PPI::Token::Regexp::Transliterate')) {
+      my $prev = $t->sprevious_sibling;
+      next if $prev && $prev->isa('PPI::Token::Operator')
+           && ($prev->content eq '=~' || $prev->content eq '!~');
+      my $mods = eval { $t->get_modifiers } || {};
+      next if $mods->{r};
+      return 1;
+    }
+    if ($t->isa('PPI::Token::Word')
+        && ($t->content eq 'chomp' || $t->content eq 'chop')) {
+      my $next = $t->snext_sibling;
+      return 1 if !$next
+               || $next->isa('PPI::Token::Structure')
+               || ($next->isa('PPI::Token::Word')
+                   && $next->content =~ /^(?:for|foreach|if|unless|while|until|and|or)$/);
+    }
+  }
+  return 0;
+}
+
+# map/grep ALIAS $_ to their list elements, so handing them @_ (or an alias
+# variable) is a write exactly when the block/expr before the list writes $_ —
+# the same rule as a foreach over @_.  SYM is the list argument; the nodes
+# between the owner word and SYM are the block (block form) or the expression
+# (expr form), in both the bare and the parenthesised spelling.
+sub _map_grep_topic_writes {
+  my ($w, $sym) = @_;
+  my @before;
+  for (my $s = $sym->sprevious_sibling; $s && $s != $w; $s = $s->sprevious_sibling) {
+    push @before, $s;
+  }
+  return _nodes_write_var(\@before, '$_');
 }
 
 # A `foreach` over @_ ALIASES its loop variable to the arguments, so a write to
@@ -6284,9 +6335,10 @@ sub _args_array_escapes {
 sub _nodes_write_var {
   my ($nodes, $var) = @_;
   for my $root (@$nodes) {
-    next unless ref $root && $root->can('find');
-    my @syms = ($root->isa('PPI::Token::Symbol') ? ($root) : ());
-    push @syms, @{ $root->find('PPI::Token::Symbol') || [] };
+    next unless ref $root;
+    my @syms = $root->isa('PPI::Token::Symbol') ? ($root)
+             : $root->can('find')               ? @{ $root->find('PPI::Token::Symbol') || [] }
+             :                                    ();
     for my $sym (@syms) {
       next unless $sym->content eq $var;
       my $next = $sym->snext_sibling;
@@ -6304,8 +6356,13 @@ sub _nodes_write_var {
       my $n = $w->content;
       return 1 if Pl::VarAnnotator::arg_writing_builtin($n)
                || $n eq 'substr' || $n eq 'vec' || $n eq 'pos';
+      if ($n eq 'map' || $n eq 'grep') {
+        return 1 if _map_grep_topic_writes($w, $sym);
+        next;
+      }
       return 1 unless $ARG_VALUE_FN{$n};
     }
+    return 1 if $var eq '$_' && _implicit_topic_write($root);
   }
   return 0;
 }

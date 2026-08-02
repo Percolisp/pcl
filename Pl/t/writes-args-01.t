@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 15;
 
 sub transpile {
     my ($code) = @_;
@@ -122,6 +122,38 @@ print r1($p,"q"), r2($p,"q"), r3($p,"q"), r4($p,"q"), "\n";
 });
 like($ro2, qr/\(let \(\(\$p "p"\)\)/,
    'INVERSE: `my (…) = @_`, join(@_), scalar/$#_ and a read-only foreach stay reads');
+
+# The IMPLICIT-$_ writers (probe-found s332, all four were silent wrongs):
+# a bare `s///` has no '$_' Symbol token, so a Symbol scan alone misses
+# `s/b/X/ for @_` and `for (@_) { s/b/X/ }`; map/grep alias $_ to their list
+# elements exactly like foreach, so their blocks writing $_ write the caller;
+# and the statement-modifier `$_ = uc $_ for @_` was missed because plain
+# tokens have no ->find.
+is(run_cl(q{sub fmap  { map  { $_ = uc $_ } @_; return }
+sub fgrep { grep { $_ = "G" } @_; return }
+sub fmod  { s/b/X/ for @_; return }
+sub fblk  { for (@_) { tr/a-z/A-Z/ } return }
+sub fexpl { $_ = lc $_ for @_; return }
+sub fchmp { for (@_) { chomp } return }
+my $a = "abc"; fmap($a);
+my $b = "x";   fgrep($b);
+my $c = "abc"; fmod($c);
+my $d = "abc"; fblk($d);
+my $e = "ABC"; fexpl($e);
+my $f = "line\n"; fchmp($f);
+print "$a|$b|$c|$d|$e|[$f]\n";
+}), "ABC|G|aXc|ABC|abc|[line]\n",
+   'implicit-$_ writers reach the caller: map/grep blocks, s/// for @_, tr in for(@_), bare chomp');
+
+# INVERSE: read-only map/grep/foreach over @_ must stay reads.
+my $ro3 = transpile(q{sub m1 { return join "", map { uc $_ } @_ }
+sub g1 { return scalar grep { $_ eq "x" } @_ }
+sub m2 { return join "", map { $_ . "y" } @_ }
+my $p = "p";
+print m1($p), g1($p), m2($p), "\n";
+});
+like($ro3, qr/\(let \(\(\$p "p"\)\)/,
+   'INVERSE: read-only map/grep over @_ leave the caller a RAW slot');
 
 # ------------------------------------- 2. s/// and tr/// on an ELEMENT
 

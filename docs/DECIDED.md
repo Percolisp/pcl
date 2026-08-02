@@ -584,3 +584,39 @@ not-supported.md → only then probe.*
   and a plain match do not.  Getting this wrong cost `perl-tests/tr.t` two
   passing rows — **caught by #204's LOST bucket on its first live run**,
   which is what that gate is for.
+
+## s332 (Fable, 2026-08-03): the s330/s331 asks ruled + the writes_args scan's blind spot closed
+
+- **Harness verdict rule RATIFIED**: inside the TAP layer, an assertion that
+  cannot evaluate its claim reports `not ok` naming the reason; only
+  `plan()` dies.  Not an exception to the s328 §1 boundary — an adverse
+  verdict IS the produced value; a die in the instrument costs every row
+  after it.  #152 inherits this split: harness → adverse verdict, runtime
+  → s328 §1.  → `fable-answers-s331.md` §1.
+- **Announcements must never interleave with a TAP stream** (a mid-run
+  stderr banner SPLIT a row: undef.t 35/35 → 30/35 with nothing failing) —
+  hard rule for #152's `%p-announce-unsupported`: emit before the plan or
+  outside the folded stream.  → `fable-answers-s331.md` §2.
+- **`like`/`unlike` with a plain STRING pattern follows test.pl (interpolate),
+  both callers** — accepted divergence from Test::More; a dist that passed
+  upstream CI cannot contain the failing spelling.  Revisit on a real CPAN
+  cause line.  → `fable-answers-s331.md` §3.
+- **UNSTABLE + LOST stay independent buckets; no promotion rule** — UNSTABLE
+  is descriptive, not exculpatory; the TOTAL/LOST line decides, and it
+  already fails the gate.  → `fable-answers-s331.md` §5.
+- **No whitelisting non-core callees in the writes_args scan (9a stands);
+  the `writes_args => 0` provably-safe-callee refinement is approved in
+  principle, NOT scheduled** — revisit on measured boxing cost (R2).  →
+  `fable-answers-s331.md` §6.
+- **The element-vivification rule is probe-CONFIRMED** on all seven corners
+  incl. `/d`+empty replacement (DELETE → vivifies) and `/s`,`/c` on equal
+  lists (vivify); `_rhs_writes_match_target` is the normative statement.
+  → `fable-answers-s331.md` §7.
+- **writes_args scan: four probe-found FALSE NEGATIVES fixed (gen v2-100)**
+  — implicit-`$_` writers have NO Symbol token (`s/b/X/ for @_`,
+  `for (@_) { s/// }`), plain-token roots were skipped entirely (even
+  `$_ = uc $_ for @_`), and map/grep alias `$_` like foreach but sat in the
+  value-consumer list.  All were silent-wrong with no backstop warning.
+  Rule for any Symbol-keyed scan: **probe the spellings that produce NO
+  Symbol token — implicit `$_` is the standing example.**  Guards:
+  `Pl/t/writes-args-01.t` rows 14–15.  → `fable-answers-s331.md` §9.

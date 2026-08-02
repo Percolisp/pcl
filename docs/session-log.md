@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 332 (2026-08-03, Fable) — review of the s330/s331 batch: 8 asks ruled, 4 probe-found false negatives in the writes_args scan fixed
+
+Batch **approved** (#202 + #204 + #189 + the scalar() fix).  All eight open
+asks ruled in `docs/fable-answers-s331.md`: the harness `not ok`-not-die rule
+RATIFIED (§1, #152 inherits the split); TAP-interleave hard rule CONFIRMED
+(§2); like-string-pattern leniency ACCEPTED as documented divergence (§3);
+the in-session scalar() fix and the array.t t128 hand-bless CONFIRMED (§4);
+UNSTABLE/LOST stay independent, no promotion (§5); no whitelist, refinement
+approved-not-scheduled (§6); the vivification rule probe-CONFIRMED on all
+seven corners (§7); #163 stop-at-diagnosis AGREED, order stands (§8).
+
+### Probe-found: the "conservative by construction" scan had four silent-wrong holes (fixed, gen v2-100)
+
+Every probe printed wrong values with NO warning — the write lands on PCL's
+local `@_` copy and is lost, so the runtime backstop never fires:
+
+1. `for (@_) { s/b/X/ }` — a bare `s///` binds `$_` implicitly and has no
+   `$_` Symbol token; the Symbol scan saw a no-write body.
+2. `s/b/X/ for @_` — same hole, statement-modifier form.
+3. `$_ = uc $_ for @_` — even explicit: plain tokens have no `->find`, so
+   `_nodes_write_var` skipped token roots; its Token::Symbol branch was dead
+   code and the statement-modifier path had NEVER worked.
+4. `map { $_ = uc $_ } @_` / grep — map/grep alias `$_` to their list
+   elements like foreach, but sat in `%ARG_VALUE_FN` as value consumers.
+
+Fixes in `Pl/Parser2.pm`: `_implicit_topic_write` (unbound non-/r
+`s///`/`tr///`, argument-less chomp/chop = a `$_` write), token roots
+handled in `_nodes_write_var`, map/grep routed through
+`_map_grep_topic_writes` (the foreach body-scan rule) at all three
+owner-word checkpoints and REMOVED from `%ARG_VALUE_FN` so uncovered paths
+fail conservative.  Guards: `writes-args-01.t` 13 → 15 rows (six
+implicit-`$_` writers reach the caller; INVERSE: read-only map/grep stay
+RAW).  The lesson (now in DECIDED): a Symbol-keyed scan must be probed with
+the spellings that produce NO Symbol token; guard rows that all use explicit
+symbols test the happy path, not the blind spot.
+
+Gates: corpus-diff **emission identical across 111 files**; pcl-pack/pcl-mro
+regenerated at v2-100 (bodies byte-identical, stamps only); Pl/t **PASS 129
+files / 4547** — measured against a HEAD worktree in the SAME environment
+(PCLXS_DIR set, per #168): HEAD gives **4545**, so this change adds exactly
+the 2 new guard rows; the +1 vs s331's recorded 4544 exists at HEAD itself
+(environment-conditional row, both runs PASS).
+NEXT (Opus) = **#163** from the storage-path diagnosis (find the third path,
+THEN the tag, THEN the probe battery).
+
+---
+
 ## Session 331 (2026-08-03, Opus) — #204 the TOTAL gate, then #189 writes_args; the gate caught its first regression
 
 Continued the ruled order after s330's #202: **#204 → #189**.  Both landed;
