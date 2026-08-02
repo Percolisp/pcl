@@ -83,6 +83,13 @@ sub _build_fallback_parser {
   $p->_cur_bucket('runtime');
   $p->_open_section('pcl');
   $p->{_let_bound_vars} = {};
+  # Back-reference so the seam knows its sections are scratch: anything the
+  # v1 block-lowering HOISTS (a `use`, a BEGIN, an `our` defvar found inside a
+  # do{}/eval{}/anon-sub body) must land in THIS parser's buckets, not in the
+  # fallback's never-printed ones.  Weak, or parser and fallback keep each
+  # other alive for the life of the process.
+  $p->{_v2_owner} = $self;
+  Scalar::Util::weaken($p->{_v2_owner});
   return $p;
 }
 

@@ -324,6 +324,16 @@ same argbox accessors if real code needs them).
 
 **Affected tests:** `perl-tests/args.t` rows touching plain-lexical args.
 
+**What it costs in real code (s323, task #189):** perl's own `File::Basename`
+uses the in-place idiom — `sub _strip_trailing_sep { $_[0] =~ s{(.)/*\z}{$1}s }`
+called as `_strip_trailing_sep($dirname)`.  Under PCL the s/// warns
+"Cannot modify non-boxed value in s///" and does nothing, so `dirname("/a/b/c")`
+answered `/a/b/` and `basename("/a/b/")` answered `/a/b/` — wrong for every
+path.  Worked around by shipping `lib/File/Basename.pm` (core's file with that
+one sub also RETURNING the value).  **This divergence is deliberate but NOT
+free** — task #189 sketches the bounded fix (a `writes_args` fact on sub_info,
+so only call sites of subs that actually write `$_[N]` box their arguments).
+
 ---
 
 ## Regex code blocks: `(?{code})` and `(??{code})`

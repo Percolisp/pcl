@@ -87,6 +87,49 @@ regressions on the four-dist baseline" or a widened board — each new bug found
 this way becomes a release-blocking judgement call.  Installing NEW modules
 also needs an ask; everything above was already unpacked.
 
+### The same board re-run at s323 — 23→29 PASS, 61→48 FAIL
+
+Two of the s322 causes were PCL bugs, and both are fixed (#186 the `_` stat-cache
+filehandle, #187 the `use` silently dropped inside a `do { package … }` block).
+The board, same ten dists, same procedure:
+
+| dist | s322 P/PA/F | s323 P/PA/F |
+|------|-------------|-------------|
+| File-Which-1.27 | 3 / 0 / 0 | 2 / 1 / 0 |
+| Class-Method-Modifiers-2.15 | 13 / 4 / 12 | **18 / 4 / 7** |
+| Class-Inspector-1.36 | 2 / 3 / 1 | 2 / 3 / 1 |
+| Text-Balanced-2.07 | 2 / 6 / 6 | 2 / 6 / 6 |
+| Data-Dump-1.25 | 2 / 1 / 12 | **4 / 5 / 6** |
+| Safe-Isa-1.000010 | 1 / 1 / 0 | 1 / 1 / 0 |
+| Sort-Versions-1.62 | 0 / 1 / 0 | 0 / 1 / 0 |
+| Algorithm-Diff-1.201 | 0 / 0 / 2 | **0 / 2 / 0** |
+| Capture-Tiny-0.50 | 0 / 1 / 23 | 0 / 1 / 23 |
+| Mojo-DOM58-3.002 | 0 / 0 / 5 | 0 / 0 / 5 |
+| **total (101 files)** | 23 / 17 / 61 | **29 / 24 / 48** |
+
+**File-Which's PASS→PARTIAL is an improvement, not a regression** — and it is
+the sharpest illustration yet of why a status without a cause is worthless.
+Under s322 `file_which.t` CRASHED after its first assertion, which the
+classifier reads as PASS ("at least one ok, zero not-ok").  It now runs 19
+assertions with 7 honest failures.  Getting further LOWERED its grade.
+
+Causes for the remaining 48: `docs/cpan-widen-causes-s323.tsv`
+(supersedes the s322 file).  Per-file baseline: `docs/cpan-widen-scoreboard.tsv`.
+
+| n | cause | reading |
+|---|-------|---------|
+| 23 | `Can't locate loadable object for module IO` | unchanged — **all of Capture-Tiny is still behind one missing `IO`/`IO::Handle` shim**, and that shim needs real fd-dup/tee plumbing, not a stub |
+| 10 | no output at all | undiagnosed; author-only tests (`9x_*.t` pod/critic/pmv) are most of them |
+| 3 | `File::Path::_IS_MSWIN32 is undefined` | the three `00-report-prereqs.t` — one conditionally-defined constant deep in the ExtUtils chain |
+| 5 | Storable / Encode / "this module" | more missing shims |
+| 2 | `FINALIZE-INHERITANCE … forward referenced class` | new, Class::Method::Modifiers `110-namespace-clean` + `120-fresh` |
+| 5 | singles (`'orig'` method, `subtest`, `getlogin`, the package-name-is-source-text emission bug, one Data-Dump value diff) | one probe each |
+
+The 12 `use Test` deaths and the 9 "Class::Method::Modifiers installs no subs"
+rows are **gone** — they were the two PCL bugs, and the cluster reading from
+s322 ("shims and a harness bug, not codegen") held up: what is left is
+dominated by shims.
+
 ---
 
 ## CPAN suite scoreboard 2026-07-30 (s316p, gen v2-83) — MECHANICAL BASELINE

@@ -4,6 +4,84 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 323 (2026-08-02, Opus 5) — four bugs the widened CPAN board pointed at, two of them silent-wrong
+
+Every fix this session came from following the s322 cause list instead of the
+FAIL count.  Board: **23 PASS / 17 PARTIAL / 61 FAIL → 29 / 24 / 48** over the
+same 101 t-files.
+
+- **#186 `_`, perl's stat-cache filehandle.**  `-e $f and -f _ and -r _` is an
+  everyday idiom (perl's own `Test.pm` line 200 uses it) and PCL lowered the
+  bareword to a bare CL symbol with no binding — an unbound-variable CRASH, so
+  `use Test` died outright and took 12 t-files with it.  `_` is now a defvar in
+  `:pcl` holding a marker, and every filetest resolves its operand through ONE
+  funnel (`%p--path` → `%p-stat-arg`) that maintains the cache.  **Deliberate
+  divergence, documented in the docstring:** perl caches the stat BUFFER, PCL
+  caches the OPERAND and stats again — same answer outside a race, and it keeps
+  each test's own logic (access(2) for -r/-w/-x, lstat for -l, the block scan
+  for -T/-B) instead of reimplementing perl's buffer-vs-syscall table.  The
+  funnel also made `-s $fh` work (a stream resolves via /dev/fd/N).
+- **…and the second half of #186 was a MISSING CASE that two consumers
+  disagreed about.**  `p-glob-slot` had no `IO` branch, so `*STDOUT{IO}`
+  fell through to undef — and then `print $io …` treated the undef handle as
+  EBADF and printed NOTHING while `printf $io …` passed nil to `princ`, which
+  CL reads as `*standard-output*`.  Half of Test.pm's header appeared and half
+  vanished.  Both now resolve through `%p-resolve-fh`, and printf bails like
+  print instead of guessing.  (`*FH{NAME}`/`{PACKAGE}` also leaked the internal
+  case-inverted spelling: `*STDOUT{NAME}` said "stdout".)
+- **#187 a `use` inside `do { package P; … }` was SILENTLY DROPPED** — no
+  `p-use` in the output at all, so the module never loaded and the only symptom
+  was an undefined function at run time.  This is the shape 9 of
+  Class-Method-Modifiers' t-files use.  v1's block lowering HOISTS such a `use`
+  out of the block; when the current bucket is already `definitions` it takes a
+  DEFERRAL path whose buffer `_process_children` flushes — and v2 never calls
+  `_process_children`, so under the v2 seam the text went nowhere.  Fixed by
+  skipping the deferral when the parser has a (new, weak) `_v2_owner`
+  back-reference: the plain push lands in the scratch section `_lower_expr`
+  already drains, and an analysis-only parse still throws it away.
+  **Second defect under it:** even hoisted, the `use` imported into the
+  ENCLOSING package, because a `package` inside a do-block is only a runtime
+  switch (no CL section, so no `in-package`).  `p-use` now takes `:into "Pkg"`,
+  emitted only when the block's package differs from the section's — so corpus
+  emission is untouched.
+- **#188 an UNMATCHED capture group was raw CL nil** — and raw nil means "the
+  empty list" to `%p-flatten-list`, which is what a list ASSIGNMENT flattens
+  through.  So `my ($dir,$file) = $path =~ m{^(.*/)?(.*)}s` put the FILENAME in
+  `$dir` for every path without a slash: every later capture shifted up one
+  slot, silently.  The ARRAY target (`my @a = …`) was always correct, which is
+  what made the bug look impossible.  Both capture-collection sites (no-/g and
+  the /g list branch — the second copy again) now store `*p-undef*`.
+- **#189 filed, and `lib/File/Basename.pm` shipped as an explicit WORKAROUND.**
+  The #188 probe started from `dirname("/a/b/c")` answering `/a/b/`.  Cause:
+  core's `_strip_trailing_sep` writes through `$_[0]`, and `@_` aliasing does
+  not reach a plain `my` lexical — a deliberate divergence for the raw-slot
+  speed model (docs/not-supported.md).  It is deliberate but NOT free: it made
+  one of the most-used functions in core wrong for every path.  Our copy is
+  core's file with that one sub also RETURNING the value; the task sketches the
+  bounded real fix (a `writes_args` fact on sub_info so only call sites of subs
+  that actually write `$_[N]` box their arguments) and the shim says to delete
+  itself when that lands.
+- **The board's own lesson, sharpened.**  File-Which went PASS → PARTIAL, which
+  reads like a regression and is the opposite: under s322 `file_which.t`
+  CRASHED after its first assertion, and "at least one ok, zero not-ok" is
+  exactly the classifier's definition of PASS.  It now runs 19 assertions with
+  7 honest failures.  **Getting further lowered its grade.**
+- **Corpus emission: 1 file of 111 differs, and the diff REMOVES a duplicate.**
+  context.t's `BEGIN { }` (inside an anon sub) was previously emitted TWICE —
+  once in source position and once nested inside an unrelated earlier BEGIN's
+  body, because v1's never-flushed `_pending_hoisted_defs` buffer leaked into a
+  later statement that fell back to v1.  It is now emitted once.
+- Verified: gate **125 files / 4475** PASS; sweep **0 new / 0 fixed** vs the
+  689-row baseline (18461 pass / 926 fail across 108 files; the 2 rows the tool
+  flags UNSTABLE are new fails ABOVE the abort point of postfixderef.t and
+  ref.t, both already PARTIAL); fully-passing **66**; cache generation →
+  **v2-94**.  The four-dist R1 CPAN baseline moved only FORWARD — Role-Tiny
+  `method-conflicts.t` PARTIAL 2/2 → **PASS 4/0** and Scalar-List-Utils
+  `openhan.t` 8/3 → 9/2 — and `docs/cpan-scoreboard.tsv` is re-blessed to that,
+  so the three recovered rows are now themselves guarded.
+
+---
+
 ## Session 322 (2026-08-02, Opus 5) — the Fable s321 rulings executed, and a qr that was being frozen into a string
 
 - **#176 measurement fix (Fable §1 option c).** A file that TIMEOUTs contributes

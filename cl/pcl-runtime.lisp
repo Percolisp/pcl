@@ -193,6 +193,9 @@
    #:p--l #:p--p #:p--S #:p--b #:p--c #:p--u #:p--g #:p--k
    #:p--o #:p--O #:p--R #:p--W #:p--X #:p--M #:p--A #:p--C
    #:p--T #:p--B #:p--t
+   ;; `_` — perl's stat-cache filehandle (`-e $f and -f _`).  A bare CL symbol,
+   ;; deliberately: that is exactly what the emitter produces for the bareword.
+   #:_ #:*pcl-stat-cache-path*
    #:p-unlink #:p-lock #:p-fileno #:p-getc #:p-readline #:*p-filehandles*
    ;; Directory I/O
    #:p-opendir #:p-readdir #:p-closedir #:p-rewinddir
@@ -3715,10 +3718,19 @@
   (let ((fh *standard-output*)
         (fmt nil)
         (fmt-args nil))
-    ;; Check for :fh keyword
+    ;; Check for :fh keyword.  Same rules as p-print, including the bail: a
+    ;; named-but-unopened handle resolves to nil, and (princ … nil) would print
+    ;; to *standard-output* — output silently going to the wrong place.  perl
+    ;; sets EBADF, prints nothing and returns false.
     (when (and (>= (length args) 2) (eq (first args) :fh))
-      (setf fh (p-get-stream (second args)))
-      (setf args (cddr args)))
+      (let ((desig (second args)))
+        (setf args (cddr args))
+        (cond
+          ((null desig) (setf fh *standard-output*))
+          ((p-get-stream desig) (setf fh (p-get-stream desig)))
+          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
+             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+             (return-from p-printf *p-undef*)))))
     ;; printf takes a LIST (FORMAT, LIST): flatten raw @array/%hash args so the
     ;; format comes from the first flattened element, e.g. `printf @a` where
     ;; @a = ("%d\n", 5).  A p-box-wrapped ref stays scalar (printf "%s", $aref).
@@ -7475,7 +7487,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           ;; errno EBADF, prints nothing, and returns false.
           (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
              (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
-             (return-from p-print "")))))
+             (return-from p-print *p-undef*)))))
     ;; The bare-form $_ default (`print;` / `print FH;` / `say;` / `printf;`)
     ;; is supplied EXPLICITLY by the codegen (ExprToCL gen_funcall emits
     ;; `(p-print … $_)`), so the generated CL is self-describing and there is no
@@ -7509,7 +7521,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           ((p-get-stream desig) (setf fh (p-get-stream desig)))
           (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
              (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
-             (return-from p-say "")))))
+             (return-from p-say *p-undef*)))))
     (apply #'p-print args)
     (terpri fh)
     t))
@@ -9073,16 +9085,54 @@ buffer's fill-pointer; everything else falls back to file-length."
           4096
           (ceiling (sb-posix:stat-size st) 512)))
 
+;;; `_` — perl's stat-cache filehandle.  `-e $f and -f _ and -r _` is an
+;;; everyday idiom meaning "reuse the buffer from the last stat, do not stat
+;;; again"; it saves two stat(2) calls.  The emitter lowers the bareword to a
+;;; bare CL symbol, so `_` must be a BOUND variable that every generated
+;;; package sees — hence a defvar in :pcl, exported.  Nothing else claims the
+;;; bare symbol: Perl subs emit as `pl-*` and Perl scalars keep their `$`.
+;;;
+;;; DELIBERATE DIVERGENCE from perl: perl caches the stat BUFFER and answers
+;;; from it with no syscall; PCL caches the OPERAND (path or stream) and stats
+;;; again.  Same answer outside a race, and it keeps each test's own logic —
+;;; access(2) for -r/-w/-x, lstat for -l, the first-block scan for -T/-B —
+;;; instead of reimplementing perl's buffer-vs-syscall table.
+(defvar _ '%pcl-stat-cache
+  "Perl's stat-cache filehandle `_`.  Its value is a marker: a filetest or
+   stat receiving it re-uses the previous operand instead of its own.")
+
+(defvar *pcl-stat-cache-path* nil
+  "Operand of the most recent stat/lstat/filetest — a path string or a stream.
+   nil before the first one, which makes a premature `_` test false.")
+
 (defun %p-stat-arg (file-or-fh)
   "Resolve a stat/lstat argument to either a CL stream (filehandle) or a path
    string.  Accepts a stream, a box holding a stream, a bareword/symbol or
-   string naming a filehandle, or a plain path string."
+   string naming a filehandle, or a plain path string.  Also maintains the `_`
+   stat cache: the marker reads the remembered operand, anything else becomes
+   the remembered operand."
   (let ((v (if (p-box-p file-or-fh) (p-box-value file-or-fh) file-or-fh)))
+    (when (eq v '%pcl-stat-cache)
+      (setf v *pcl-stat-cache-path*))
+    (setf *pcl-stat-cache-path* v)
     (cond
       ((streamp v) v)
+      ((null v) "")                         ; `_` before any stat: no operand
       ((or (symbolp v) (stringp v))
-       (or (p-get-stream v) (to-string v)))  ; FH name → stream, else path
+       (let ((s (p-get-stream v)))          ; FH name → stream, else path
+         (cond (s (setf *pcl-stat-cache-path* s) s)
+               (t (to-string v)))))
       (t (to-string v)))))
+
+(defun %p--path (file)
+  "Resolve a FILETEST operand to a path string, through the one stat-argument
+   funnel (so `_` and filehandle names work the same as for stat).  A stream
+   resolves through /dev/fd/N, which lets `-s $fh` stat the open handle."
+  (let ((arg (%p-stat-arg file)))
+    (if (streamp arg)
+        (handler-case (format nil "/dev/fd/~D" (sb-sys:fd-stream-fd arg))
+          (error () ""))
+        arg)))
 
 (defun p-stat (file-or-fh)
   "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
@@ -9111,18 +9161,22 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p--e (file)
   "Perl -e: test if file exists"
-  (let* ((path (to-string (unbox file)))
-         (exists (or (probe-file path)
-                     ;; probe-file may fail on directories in some implementations
-                     (ignore-errors
-                       (sb-posix:stat path)
-                       t))))
+  (let* ((path (%p--path file))
+         ;; The empty path is ENOENT in perl, but (probe-file "") answers the
+         ;; CWD in SBCL — so reject it before probing.  It reaches here from
+         ;; undef and from `_` used before any stat.
+         (exists (and (plusp (length path))
+                      (or (probe-file path)
+                          ;; probe-file may fail on directories in some implementations
+                          (ignore-errors
+                            (sb-posix:stat path)
+                            t)))))
     (if exists 1 nil)))
 
 (defun p--d (file)
   "Perl -d: test if file is a directory"
   (handler-case
-      (let ((stat (sb-posix:stat (to-string (unbox file)))))
+      (let ((stat (sb-posix:stat (%p--path file))))
         (if (sb-posix:s-isdir (sb-posix:stat-mode stat))
             1
             nil))
@@ -9131,7 +9185,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p--f (file)
   "Perl -f: test if file is a regular file"
   (handler-case
-      (let ((stat (sb-posix:stat (to-string (unbox file)))))
+      (let ((stat (sb-posix:stat (%p--path file))))
         (if (sb-posix:s-isreg (sb-posix:stat-mode stat))
             1
             nil))
@@ -9139,7 +9193,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p--r (file)
   "Perl -r: test if file is readable"
-  (let ((path (to-string (unbox file))))
+  (let ((path (%p--path file)))
     (handler-case
         (progn
           (sb-posix:access path sb-posix:r-ok)
@@ -9148,7 +9202,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p--w (file)
   "Perl -w: test if file is writable"
-  (let ((path (to-string (unbox file))))
+  (let ((path (%p--path file)))
     (handler-case
         (progn
           (sb-posix:access path sb-posix:w-ok)
@@ -9157,7 +9211,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p--x (file)
   "Perl -x: test if file is executable"
-  (let ((path (to-string (unbox file))))
+  (let ((path (%p--path file)))
     (handler-case
         (progn
           (sb-posix:access path sb-posix:x-ok)
@@ -9167,7 +9221,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p--s (file)
   "Perl -s: return file size if non-zero, nil otherwise"
   (handler-case
-      (let* ((stat (sb-posix:stat (to-string (unbox file))))
+      (let* ((stat (sb-posix:stat (%p--path file)))
              (size (sb-posix:stat-size stat)))
         (if (> size 0) size nil))
     (error () nil)))
@@ -9175,7 +9229,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p--z (file)
   "Perl -z: test if file has zero size"
   (handler-case
-      (let* ((stat (sb-posix:stat (to-string (unbox file))))
+      (let* ((stat (sb-posix:stat (%p--path file)))
              (size (sb-posix:stat-size stat)))
         (if (= size 0) 1 nil))
     (error () nil)))
@@ -9185,8 +9239,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    to the stat struct, return Perl truth (1/nil); any stat error is nil."
   (handler-case
       (let ((stat (if lstat
-                      (sb-posix:lstat (to-string (unbox file)))
-                      (sb-posix:stat (to-string (unbox file))))))
+                      (sb-posix:lstat (%p--path file))
+                      (sb-posix:stat (%p--path file)))))
         (if (funcall pred stat) 1 nil))
     (error () nil)))
 
@@ -9251,7 +9305,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Days between program start ($^T) and the ACCESSOR time of FILE (-M/-A/-C).
    $^T is referenced via symbol-value: its defvar appears later in this file."
   (handler-case
-      (let ((stat (sb-posix:stat (to-string (unbox file)))))
+      (let ((stat (sb-posix:stat (%p--path file))))
         (/ (- (symbol-value '|$^T|) (funcall accessor stat)) 86400.0d0))
     (error () nil)))
 
@@ -9272,7 +9326,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    A NUL byte in the first 512 bytes means binary; else >30% odd bytes
    (high-bit set, or controls outside TAB/LF/FF/CR/ESC) means binary."
   (handler-case
-      (with-open-file (s (to-string (unbox file))
+      (with-open-file (s (%p--path file)
                          :element-type '(unsigned-byte 8))
         (let* ((buf (make-array 512 :element-type '(unsigned-byte 8)))
                (n (read-sequence buf s)))
@@ -10730,7 +10784,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-93"
+(defparameter *pcl-cache-generation* "v2-94"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11173,13 +11227,19 @@ buffer's fill-pointer; everything else falls back to file-length."
         (load path))))
   (setf *pcl-test-lib-loaded* t))
 
-(defun p-use (module-name &key (import-args :default) (do-import t))
+(defun p-use (module-name &key (import-args :default) (do-import t) into)
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
    IMPORT-ARGS: the evaluated import list (a vector) — `use Foo X` makes X a Perl
    list — or :default for a bare `use Foo;` (import with no args).
    DO-IMPORT: when NIL, load the module but do NOT call its ->import (this is the
-   `require Foo` semantics — load only, no symbol import)."
+   `require Foo` semantics — load only, no symbol import).
+   INTO: Perl package name to import INTO.  Normally the import target is the
+   package the form is read in (*package*), which is right because a top-level
+   `package Foo;` opens its own section.  A `package` inside a do{}/eval{} block
+   is only a RUNTIME switch, though, so a `use` hoisted out of such a block would
+   import into the enclosing package instead — the codegen names the package
+   explicitly there."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
     (return-from p-use t))
@@ -11194,7 +11254,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (when (member module-name *p-pragma-modules* :test #'string-equal)
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
-        (caller-pkg *package*))
+        (caller-pkg (or (and into (%pcl-find-package into)) *package*)))
     ;; Already loaded?
     (when (gethash rel-path *p-inc-table*)
       ;; Still import for repeated use statements (but not for bare require)
@@ -12659,9 +12719,27 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; Returns \%foo — a hash reference (box containing the hash-table).
          (let ((sym (find-sym "%")))
            (when (boundp sym) (make-p-box (symbol-value sym)))))
-        ((string= slot-s "NAME")    (make-p-box (p-typeglob-name glob)))
-        ((string= slot-s "PACKAGE") (make-p-box (package-name (p-typeglob-package glob))))
+        ((string= slot-s "IO")
+         ;; *FH{IO} is the handle itself — the idiom Test.pm uses to stash
+         ;; STDOUT ($TESTOUT = *STDOUT{IO}) before anything can reopen it.
+         ;; Resolve through the ONE filehandle resolver and hand back a box
+         ;; holding the stream, which every print/printf/read path already
+         ;; accepts.  perl yields undef when the glob has no IO slot.
+         (let ((h (%p-resolve-fh glob)))
+           (if h (make-p-box h) *p-undef*)))
+        ;; NAME/PACKAGE are the only slots that hand a name back to PERL, so
+        ;; they must undo the case inversion the glob stores it under (*STDOUT
+        ;; is kept as "stdout").  %pcl-invert-case is its own inverse in every
+        ;; branch — all-upper flips, all-lower flips, mixed is identity — so
+        ;; one call restores the source spelling.
+        ((string= slot-s "NAME")
+         (make-p-box (%pcl-invert-case (p-typeglob-name glob))))
+        ((string= slot-s "PACKAGE")
+         (make-p-box (%pcl-invert-case (package-name (p-typeglob-package glob)))))
         ((string= slot-s "GLOB")    glob)
+        ;; Every other slot name (FORMAT, or a bareword that is no slot at all)
+        ;; is undef in perl too — `*STDOUT{XYZZY}` yields undef, it does not
+        ;; die — so this default IS the Perl semantics, not a swallowed case.
         (t *p-undef*)))))
 
 (defun %p-glob-syms (pkg-str name-str)
@@ -14711,9 +14789,13 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (setf last-rs rs last-re re last-ms ms last-me me)
                  (if (> (length rs) 0)
                      (dotimes (i (length rs))
+                       ;; An unmatched group is perl UNDEF, never raw nil: raw
+                       ;; nil means "empty list" to %p-flatten-list, so a list
+                       ;; ASSIGNMENT would silently shift every later capture
+                       ;; up one slot (see the no-/g branch below).
                        (push (if (and (aref rs i) (aref re i))
                                  (subseq str (aref rs i) (aref re i))
-                                 nil)
+                                 *p-undef*)
                              all-results))
                      (push (subseq str ms me) all-results)))
                (let* ((items (nreverse all-results))
@@ -14765,10 +14847,17 @@ buffer's fill-pointer; everything else falls back to file-length."
                                  ;; No capture groups: Perl returns (1) in list context on success
                                  (setf (aref captures 0) 1)
                                  (dotimes (i num-groups)
+                                   ;; An unmatched group is perl UNDEF.  It was
+                                   ;; raw nil, which %p-flatten-list drops as
+                                   ;; "empty list" — so `my ($d,$f) = $p =~
+                                   ;; m{^(.*/)?(.*)}` put the FILENAME in $d and
+                                   ;; undef in $f whenever the path had no slash.
+                                   ;; That is the shape File::Basename::fileparse
+                                   ;; uses, so dirname("c.txt") answered "c.txt".
                                    (setf (aref captures i)
                                          (if (and (aref reg-starts i) (aref reg-ends i))
                                              (subseq str (aref reg-starts i) (aref reg-ends i))
-                                             nil))))
+                                             *p-undef*))))
                              captures)
                            t))
                      ;; No match: scalar/void context returns Perl's '' (defined

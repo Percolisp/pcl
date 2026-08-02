@@ -5048,6 +5048,12 @@ sub parse_block_as_function {
   # pre-passes, even into code BEFORE it (task #49: `do { package X8; 1 }`
   # made an unrelated earlier call emit as X8::pl-f5).
   my $saved_pkg_stack = [@{$self->environment->package_stack}];
+  # The package this block's emitted text will be READ in — i.e. the enclosing
+  # section's `in-package`.  A `package Foo;` INSIDE the block is only a
+  # RUNTIME switch, so anything hoisted out of here (a `use`, whose import
+  # target is *package*) must name its package explicitly once the two
+  # diverge.  See the `:into` branch in _process_include_statement.
+  local $self->{_seam_outer_pkg} = $saved_pkg_stack->[-1];
   # Bump _block_depth so a named sub defined after the inline switch gets a
   # fully-qualified p-sub name (the emitted form is read in the ENCLOSING
   # section's CL package, where a bare name would intern) — matching the
@@ -5139,7 +5145,17 @@ sub parse_block_as_function {
     # references — also in `definitions`, earlier in source — already exist).
     if (@hoisted_defs) {
       my $section = $self->_sections->[$self->_cur_section];
-      if ($self->_cur_bucket eq 'definitions') {
+      # …but that DEFERRAL is a v1-only mechanism: it relies on
+      # _process_children flushing the buffer once the enclosing top-level
+      # statement is emitted, and under v2 this parser is only the expression
+      # SEAM — nothing ever flushes it, so the hoist was silently DROPPED.
+      # `do { package P; use M; … }` lost its `use` entirely that way: the
+      # module never loaded and the only symptom was an undefined function at
+      # run time.  The interleaving hazard does not exist under v2 either: the
+      # seam runs with a FRESH scratch section that _lower_expr drains whole
+      # (and an analysis-only parse throws away), so the plain push is both
+      # correct and picked up by the existing drain.
+      if ($self->_cur_bucket eq 'definitions' && !$self->{_v2_owner}) {
         push @{$self->{_pending_hoisted_defs} //= []}, @hoisted_defs;
       } else {
         push @{$section->{'definitions'}}, @hoisted_defs;
@@ -5201,6 +5217,9 @@ sub parse_block_to_cl_string {
   # not undef, when nothing matches.)
   my $has_pkg_stmt = @{$block->find('PPI::Statement::Package') || []};
   my $saved_pkg_stack = [@{$self->environment->package_stack}];
+  # See parse_block_as_function: the package this block's text is READ in, so a
+  # hoisted `use` can name its import target when an inline `package` diverges.
+  local $self->{_seam_outer_pkg} = $saved_pkg_stack->[-1];
   $self->_block_depth($self->_block_depth + 1) if $has_pkg_stmt;
 
   # Per-iteration closure capture: if a `my` var declared in this block is
@@ -7580,11 +7599,23 @@ sub _process_include_statement {
       my $args_cl = @arg_tokens
                   ? $self->_parse_expression(\@arg_tokens, $stmt, 1)  # LIST ctx
                   : undef;
+      # A `package Foo;` inside a do{}/eval{}/anon-sub body is only a RUNTIME
+      # switch (no CL section, so no `in-package`), and this `use` hoists out
+      # of the block to the definitions bucket — where *package* is the
+      # ENCLOSING package.  Perl imports into the package in effect at the use,
+      # so name it explicitly.  _block_depth is bumped exactly for blocks that
+      # carry a package statement, so nothing else changes emission.
+      my $cur_pkg = $self->environment->current_package // 'main';
+      my $into = ($self->_block_depth > 0
+                  && defined $self->{_seam_outer_pkg}
+                  && $self->{_seam_outer_pkg} ne $cur_pkg)
+               ? qq{ :into "$cur_pkg"}
+               : '';
       $self->_emit("(p-eval-always");
       if (defined $args_cl && $args_cl ne '') {
-        $self->_emit("  (p-use \"$module\" :import-args $args_cl))");
+        $self->_emit("  (p-use \"$module\" :import-args $args_cl$into))");
       } else {
-        $self->_emit("  (p-use \"$module\"))");
+        $self->_emit("  (p-use \"$module\"$into))");
       }
     }
     elsif ($type eq 'require') {

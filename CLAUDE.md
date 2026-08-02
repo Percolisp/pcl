@@ -300,8 +300,8 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **125 test files, 4470 tests** with a built pclxs sibling; **4456 without**
-  (s321, measured).  The gate count is deterministic *per environment*, but it
+- **125 test files, 4475 tests** with a built pclxs sibling; **4461 without**
+  (s323, measured).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not
@@ -320,9 +320,11 @@ func => -12         # 1 param before list
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
 - Full `perl-tests/` sweep: **689 blessed fails** in `docs/fail-baseline.tsv`,
-  **66 files fully passing**, 12831 passing / 833 failing across 108 files
-  (all re-measured s321; `sweep-diff.pl diff docs/fail-baseline.tsv .faillog`
-  = 0 new / 0 fixed.  690 → 689 because the `do.t` "$! is EISDIR on do dir"
+  **66 files fully passing**, 18461 passing / 926 failing across 108 files
+  (re-measured s323 with pack.t running; `sweep-diff.pl diff
+  docs/fail-baseline.tsv .faillog` = **0 new / 0 fixed**, plus 2 rows the tool
+  itself flags UNSTABLE — new fails ABOVE the abort point of postfixderef.t and
+  ref.t, both already PARTIAL, so they are crash-file noise, not regressions.  690 → 689 because the `do.t` "$! is EISDIR on do dir"
   row was FIXED that session — removed by EDITING that one row out, never by
   re-blessing from a run, which would silently absorb anything else that
   moved).  Baseline from s315d —

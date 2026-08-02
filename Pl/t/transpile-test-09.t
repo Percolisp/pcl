@@ -184,4 +184,142 @@ my $r = "aXa"; (my $copy = $r) =~ s/$w/-/g;
 print "15 s-with-qr-g=$copy\n";
 ');
 
+# Task #186: `_` is perl's STAT-CACHE FILEHANDLE — `-e $f and -f _ and -r _`
+# reuses the last stat's answer instead of calling stat(2) three times.  PCL
+# emitted the bareword as a bare CL symbol `(p--f _)`, which was unbound: an
+# internal crash ("The variable Test::_ is unbound"), and it took every module
+# using the idiom with it — perl's own Test.pm line 200 does, so `use Test`
+# died outright (12 t-files in the widened CPAN board).  `_` is now a defvar
+# in :pcl holding a marker, and every filetest resolves its operand through
+# ONE funnel (%p--path -> %p-stat-arg) that maintains the cache.
+#
+# INVERSE GUARDS in the same snippet:
+#   * `_` BEFORE any stat must be false, not "the cwd" — (probe-file "")
+#     answers the cwd in SBCL, so -e needed an explicit empty-path reject,
+#   * a filetest that does NOT take `_` must still stat its own operand, and
+#     must UPDATE the cache for the next `_`,
+#   * a FAILED test leaves `_` false rather than answering from a stale entry,
+#   * an explicit stat()/lstat() must feed the cache too (perl's rule),
+#   * a real filehandle operand must keep working (it resolves via /dev/fd).
+# NOT tested against the oracle: `_` in a PRISTINE process.  perl answers from
+# whatever its own last internal stat was — loading any module stats the file
+# it found in @INC — so the "before any stat" state is a property of the
+# harness, not of the language.  PCL's answer there is false (%p--path yields
+# the empty path, and -e rejects it explicitly).
+test_transpile("`_` stat-cache filehandle (#186)", '
+my $tmp = "/tmp/pcl-statcache-$$.txt";
+open(my $o, ">", $tmp) or die "open: $!"; print $o "hello\n"; close $o;
+print "1 chain=", ((-e $tmp and -f _ and -r _) ? 1 : 0), " (want 1)\n";
+print "2 cached-d=", (-d _ ? 1 : 0), " (want 0)\n";
+print "3 cached-size=", (-s _), " (want 6)\n";
+print "4 dir-then-cache=", ((-e "/tmp" and -d _) ? 1 : 0), " (want 1)\n";
+print "5 dir-not-file=", (-f _ ? 1 : 0), " (want 0)\n";
+stat($tmp);
+print "6 after-stat-f=", (-f _ ? 1 : 0), " (want 1)\n";
+print "7 after-stat-s=", (-s _), " (want 6)\n";
+lstat("/tmp");
+print "8 after-lstat-d=", (-d _ ? 1 : 0), " (want 1)\n";
+open(my $in, "<", $tmp) or die "open: $!";
+print "9 fh-operand=", (-f $in ? 1 : 0), " (want 1)\n";
+print "10 fh-size=", (-s $in), " (want 6)\n";
+close $in;
+print "11 own-operand-still-works=", (-d "/tmp" ? 1 : 0), " (want 1)\n";
+print "12 cache-followed-it=", (-d _ ? 1 : 0), " (want 1)\n";
+print "13 failed-stat=", (-e "/pcl-no-such-path" ? 1 : 0), " (want 0)\n";
+print "14 cache-after-failure=", (-f _ ? 1 : 0), " (want 0)\n";
+unlink $tmp;
+');
+
+# Task #186, second half: `*STDOUT{IO}` had NO branch in p-glob-slot, so it fell
+# through to undef — and the two consumers then disagreed SILENTLY.  `print $io
+# ...` treated the undef handle as EBADF and printed NOTHING, while `printf $io
+# ...` passed nil to princ, which CL reads as *standard-output* — so half of
+# Test.pm''s header appeared and half vanished.  Both now resolve through
+# %p-resolve-fh, and printf bails like print instead of guessing.
+test_transpile("*FH{IO} is a real handle; print and printf agree (#186)", '
+my $out = *STDOUT{IO};
+print $out "1 print-via-glob-IO\n";
+printf $out "2 printf-via-glob-IO %d\n", 42;
+print {$out} "3 block-form\n";
+my $err = *STDERR{IO};
+print "4 stderr-io-defined=", (defined $err ? 1 : 0), " (want 1)\n";
+print "5 no-such-glob-io=", (defined *pcl_no_such_handle{IO} ? 1 : 0), " (want 0)\n";
+print "6 glob-name=", *STDOUT{NAME}, "\n";
+print "6b glob-package=", *STDOUT{PACKAGE}, "\n";
+my $tmp = "/tmp/pcl-globio-$$.txt";
+open(my $c, ">", $tmp) or die "open: $!"; close $c;
+open(my $r, "<", $tmp) or die "open: $!"; close $r;
+my $rc = printf $r "SHOULD NOT APPEAR\n";
+print "7 printf-closed-rc=", (defined $rc ? "def" : "undef"), " (want undef)\n";
+my $rc2 = print $r "SHOULD NOT APPEAR EITHER\n";
+print "8 print-closed-rc=", (defined $rc2 ? "def" : "undef"), " (want undef)\n";
+unlink $tmp;
+');
+
+# Task #187: a `use` inside an EXPRESSION BLOCK (do{}/eval{}/anon-sub) was
+# silently DROPPED under v2 — no p-use in the output at all, so the module
+# never loaded and the only symptom was an undefined function at run time
+# (`use Class::Method::Modifiers` inside `do { package Class; … }`, the shape
+# 9 of that dist''s t-files use).  Two defects, one family:
+#   1. v1''s block lowering HOISTS a use/BEGIN/our out of the block into the
+#      `definitions` bucket.  Under v2 that parser is only the expression
+#      SEAM, and its hoist took the v1-only DEFERRAL path (a buffer flushed by
+#      _process_children, which v2 never calls) — the text went nowhere.
+#   2. Even hoisted, the use landed in the ENCLOSING package: a `package Foo;`
+#      inside a do-block is only a runtime switch, so *package* at the hoisted
+#      form is the outer one.  p-use now takes an explicit `:into`.
+#
+# INVERSE GUARDS in the same snippet: the import must NOT leak into main when
+# the use is inside `package PkgA` (row 2 — the whole point of `:into`); a
+# main-level do-block use must still import into main (row 3); the do-block
+# must keep its VALUE (row 4 — the hoist must not eat the tail); the imported
+# sub must actually work (row 5); and eval{} takes the same path as do{}
+# (row 6).
+test_transpile("`use` inside a do/eval block is not dropped (#187)", '
+do { package PkgA; use File::Basename; sub w { defined &basename ? "yes" : "no" } };
+print "1 pkg-import=", PkgA::w(), " (want yes)\n";
+print "2 not-leaked-to-main=", (defined &basename ? "yes" : "no"), " (want no)\n";
+do { use List::Util qw(first); };
+print "3 main-import=", (defined &first ? "yes" : "no"), " (want yes)\n";
+my $v = do { use List::Util qw(sum); 42 };
+print "4 do-value=$v (want 42)\n";
+print "5 sum=", sum(1,2,3), " (want 6)\n";
+eval { package PkgB; use List::Util qw(max); sub w2 { defined &max ? "yes" : "no" } };
+print "6 eval-block-pkg=", PkgB::w2(), " (want yes)\n";
+');
+
+# Task #188: an UNMATCHED capture group came back as raw CL nil, and raw nil
+# means "the empty list" to %p-flatten-list — which is what a list ASSIGNMENT
+# flattens through.  So `my ($dir,$file) = $path =~ m{^(.*/)?(.*)}` put the
+# FILENAME in $dir and undef in $file for every path without a slash: every
+# later capture shifted up one slot, silently.  That is verbatim the shape
+# File::Basename::fileparse uses, so `dirname("c.txt")` answered "c.txt".
+# An unmatched group is perl UNDEF; it now stores *p-undef*.
+#
+# INVERSE GUARDS: the ARRAY target was always right (it keeps the hole) and
+# must stay right; a middle and a trailing unmatched group must land in their
+# own slots; /g list context has its own capture loop (the second copy) and
+# gets the same treatment; a group that DID match must be unaffected.
+test_transpile("an unmatched capture is undef, not an empty list (#188)", '
+sub d { join ",", map { defined $_ ? "[$_]" : "U" } @_ }
+my ($a1,$b1) = ("c.txt" =~ m{^(.*/)?(.*)}s);
+print "1 leading=", d($a1,$b1), " (want U,[c.txt])\n";
+my ($a2,$b2) = ("/x/c.txt" =~ m{^(.*/)?(.*)}s);
+print "2 matched=", d($a2,$b2), " (want [/x/],[c.txt])\n";
+my ($j,$k,$m) = ("xy" =~ /(a)?(x)(b)?/);
+print "3 middle+trailing=", d($j,$k,$m), " (want U,[x],U)\n";
+my @arr = ("xy" =~ /(a)?(x)(b)?/);
+print "4 array-target=", scalar(@arr), " ", d(@arr), " (want 3 U,[x],U)\n";
+my @g = ("ab ab" =~ /(a)?(b)/g);
+print "5 g-list=", scalar(@g), " ", d(@g), " (want 4 [a],[b],[a],[b])\n";
+my @g2 = ("b b" =~ /(a)?(b)/g);
+print "6 g-list-unmatched=", scalar(@g2), " ", d(@g2), " (want 4 U,[b],U,[b])\n";
+my ($p,$q) = ("zz" =~ /(a)?(b)?/);
+print "7 both-unmatched=", d($p,$q), " (want U,U)\n";
+use File::Basename;
+print "8 dirname=", dirname("c.txt"), " (want .)\n";
+print "9 dirname2=", dirname("/a/b/c.txt"), " (want /a/b)\n";
+print "10 basename=", basename("/a/b/"), " (want b)\n";
+');
+
 done_testing();

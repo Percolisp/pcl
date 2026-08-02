@@ -1,8 +1,10 @@
-# s322 (task #183 step 2): first cause line for every FAIL file in the widened
-# CPAN scoreboard.  dist <TAB> t-file <TAB> cause.  Regenerate by re-running each
-# FAIL through tools/run-dist-t.pl -- a FAIL count without causes is not a finding.
-Algorithm-Diff-1.201-0	base.t	The variable Test::_ is unbound.
-Algorithm-Diff-1.201-0	oo.t	The variable Test::_ is unbound.
+# s323 (task #183 step 3): first cause line for every FAIL file in the widened
+# CPAN scoreboard, after #186 (`-f _`) and #187 (`use` dropped in a do-block).
+# dist <TAB> t-file <TAB> cause.  Supersedes cpan-widen-causes-s322.tsv.
+# Regenerate: re-run each FAIL through tools/run-dist-t.pl — a FAIL count
+# without causes is not a finding.  The cause is the message that FOLLOWS
+# SBCL's "Unhandled … in thread" banner (it wraps onto a second line), else
+# the first diagnostic-looking line.
 Capture-Tiny-0.50-0	00-report-prereqs.t	The function |File::Path|::pl-_IS_MSWIN32 is undefined.
 Capture-Tiny-0.50-0	02-capture.t	Can't locate loadable object for module IO in @INC
 Capture-Tiny-0.50-0	03-tee.t	Can't locate loadable object for module IO in @INC
@@ -26,39 +28,28 @@ Capture-Tiny-0.50-0	22-stdin-badtie.t	Can't locate loadable object for module IO
 Capture-Tiny-0.50-0	23-all-tied.t	Can't locate loadable object for module IO in @INC
 Capture-Tiny-0.50-0	24-all-badtied.t	Can't locate loadable object for module IO in @INC
 Capture-Tiny-0.50-0	25-cap-fork.t	Can't locate loadable object for module IO in @INC
-Class-Inspector-1.36-0	class_inspector__devel_hide.t	# PCL Test library loaded
+Class-Inspector-1.36-0	class_inspector__devel_hide.t	(no output)
 Class-Method-Modifiers-2.15-0	00-report-prereqs.t	The function |File::Path|::pl-_IS_MSWIN32 is undefined.
-Class-Method-Modifiers-2.15-0	000-load.t	The function Class::pl-before is undefined.
-Class-Method-Modifiers-2.15-0	001-error.t	# PCL Test library loaded
-Class-Method-Modifiers-2.15-0	002-cache.t	The function Class::pl-before is undefined.
-Class-Method-Modifiers-2.15-0	003-basic.t	The function MyParent::pl-before is undefined.
-Class-Method-Modifiers-2.15-0	004-around.t	The function Class::pl-around is undefined.
-Class-Method-Modifiers-2.15-0	010-before-args.t	# PCL Test library loaded
-Class-Method-Modifiers-2.15-0	041-modify-parent.t	The function Child::pl-around is undefined.
+Class-Method-Modifiers-2.15-0	002-cache.t	FINALIZE-INHERITANCE was called on a forward referenced class:
+Class-Method-Modifiers-2.15-0	003-basic.t	FINALIZE-INHERITANCE was called on a forward referenced class:
+Class-Method-Modifiers-2.15-0	010-before-args.t	(no output)
 Class-Method-Modifiers-2.15-0	081-sub-and-modifier.t	The method 'orig' is not found in the inheritance hierarchy for class MyParent2
 Class-Method-Modifiers-2.15-0	110-namespace-clean.t	Can't locate loadable object for module this module in @INC
 Class-Method-Modifiers-2.15-0	120-fresh.t	Can't locate loadable object for module this module in @INC
-Class-Method-Modifiers-2.15-0	130-clean-underscore.t	The function |Child::Before|::pl-before is undefined.
-Data-Dump-1.25-0	dd.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	dump.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	filtered.t	The variable Test::_ is unbound.
+Data-Dump-1.25-0	dd.t	The function main::pl-getlogin is undefined.
 Data-Dump-1.25-0	glob.t	Can't locate loadable object for module IO in @INC
-Data-Dump-1.25-0	hash.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	quote-unicode.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	quote.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	ref.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	regexp.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	scalar.t	1..3
-Data-Dump-1.25-0	tied.t	The variable Test::_ is unbound.
-Data-Dump-1.25-0	vstring.t	The variable Test::_ is unbound.
+Data-Dump-1.25-0	quote.t	(no output)
+Data-Dump-1.25-0	regexp.t	(no output)
+Data-Dump-1.25-0	scalar.t	(42, 42, \42, \\42, 42, 42, [\42]);
+Data-Dump-1.25-0	vstring.t	(no output)
 Mojo-DOM58-3.002-0	00-report-prereqs.t	The function |File::Path|::pl-_IS_MSWIN32 is undefined.
 Mojo-DOM58-3.002-0	collection.t	The function main::pl-subtest is undefined.
 Mojo-DOM58-3.002-0	dom.t	Can't locate loadable object for module Storable in @INC
 Mojo-DOM58-3.002-0	entities.t	Can't locate loadable object for module Encode in @INC
 Mojo-DOM58-3.002-0	roles.t	Can't locate loadable object for module Storable in @INC
-Text-Balanced-2.07-0	05_extmul.t	Can't locate object method "divide" via package "$var = do {"val" && $val;};" (perhaps you forgot to load "$var = do {"val" && $va
-Text-Balanced-2.07-0	94_changes.t	# PCL Test library loaded
-Text-Balanced-2.07-0	95_critic.t	# PCL Test library loaded
-Text-Balanced-2.07-0	96_pmv.t	# PCL Test library loaded
-Text-Balanced-2.07-0	97_pod.t	# PCL Test library loaded
-Text-Balanced-2.07-0	98_pod_coverage.t	# PCL Test library loaded
+Text-Balanced-2.07-0	05_extmul.t	Can't locate object method "divide" via package "$var = do {"val" && $val;};" (perhaps you forgot to load "$va
+Text-Balanced-2.07-0	94_changes.t	(no output)
+Text-Balanced-2.07-0	95_critic.t	(no output)
+Text-Balanced-2.07-0	96_pmv.t	(no output)
+Text-Balanced-2.07-0	97_pod.t	(no output)
+Text-Balanced-2.07-0	98_pod_coverage.t	(no output)

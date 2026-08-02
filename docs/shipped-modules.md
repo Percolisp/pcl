@@ -25,6 +25,11 @@ This split already exists in practice — it just isn't named:
 - **`lib/`** (pure-Perl shims, transpiled on demand): `Config`, `POSIX`,
   `Errno`, `version`, `File::Spec`, `File::Spec::Functions`,
   `Scalar::Util`, `List::Util`, `Carp`, `Sub::Util`, `Fcntl`, `mro`,
+  `File::Basename` (**a WORKAROUND, not a shim by choice** — core's file is
+  correct Perl that PCL mis-runs: `_strip_trailing_sep` writes through `$_[0]`,
+  which does not reach a plain `my` lexical, so `dirname` kept the trailing
+  slash.  Our copy is core's file with that one sub also RETURNING the value.
+  Delete it when task #189 lands),
   `Math::BigInt::Calc`, `Test::More` (prototype-only).
   (`Cwd` and `Test::Simple` shims were **removed** session 259 — the real CPAN
   `Cwd` works under PCL, and `Test::Simple` is supplied by the internal TAP

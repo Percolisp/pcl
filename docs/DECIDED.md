@@ -223,3 +223,29 @@ not-supported.md → only then probe.*
   end of the last END block IS the process exit code, so cleanup ENDs need
   `local $?`.  This silently zeroed run-perl-suite's exit code for every run
   it ever made → task #157.
+- **A `use` inside an expression block (`do{}`/`eval{}`/anon-sub) HOISTS, and
+  under v2 the hoist must not take v1's DEFERRAL path** — `_pending_hoisted_defs`
+  is flushed by `_process_children`, which v2 never calls, so the `use` was
+  silently dropped and only surfaced as an undefined function at run time →
+  task #187, `Pl/Parser.pm` `parse_block_as_function` teardown
+  (`_v2_owner`), guard `Pl/t/transpile-test-09.t`.
+- **A `package` inside a do/eval block is a RUNTIME switch only** — it opens no
+  CL section, so a hoisted `use` would import into the enclosing package.
+  `p-use` therefore takes `:into "Pkg"`, emitted whenever the block's package
+  differs from the section's → task #187.
+- **An unmatched capture group is perl UNDEF, never raw CL nil** — raw nil means
+  "the empty list" to `%p-flatten-list`, so a list ASSIGNMENT (`p-list-=`)
+  silently shifted every later capture up a slot, while the ARRAY target
+  (`p-array-=`) was correct.  `my ($d,$f) = $p =~ m{^(.*/)?(.*)}` put the
+  filename in `$d` → task #188, both capture-collection sites in
+  `cl/pcl-runtime.lisp`.
+- **`_` is perl's stat-cache filehandle, and it is a BOUND VARIABLE in :pcl** —
+  `-e $f and -f _` lowers the bareword to the bare symbol `_`, so `:pcl`
+  exports a defvar holding a marker; every filetest resolves its operand
+  through ONE funnel (`%p--path` → `%p-stat-arg`) that maintains the cache.
+  PCL caches the PATH and re-stats where perl caches the stat BUFFER — a
+  deliberate divergence, same answer outside a race → task #186.
+- **`lib/File/Basename.pm` is a SHIM ONLY because `$_[N]` writes do not reach a
+  plain `my` lexical** (`_strip_trailing_sep($dirname)` did nothing, so
+  `dirname("/a/b/c")` answered "/a/b/").  Delete the shim when task #189 lands;
+  do NOT "fix" it by blanket-boxing every lexical passed to a sub.

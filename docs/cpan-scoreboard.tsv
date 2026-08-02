@@ -5,7 +5,7 @@ Role-Tiny-2.002004-0	extend-role-tiny.t	PASS	1	0	0
 Role-Tiny-2.002004-0	extend.t	PARTIAL	2	2	0
 Role-Tiny-2.002004-0	load-module.t	PARTIAL	1	3	0
 Role-Tiny-2.002004-0	make-role.t	PASS	7	0	0
-Role-Tiny-2.002004-0	method-conflicts.t	PARTIAL	2	2	0
+Role-Tiny-2.002004-0	method-conflicts.t	PASS	4	0	0
 Role-Tiny-2.002004-0	namespace-clean.t	FAIL	0	0	0
 Role-Tiny-2.002004-0	overload.t	PARTIAL	2	13	0
 Role-Tiny-2.002004-0	proto.t	FAIL	0	0	0
@@ -36,7 +36,7 @@ Scalar-List-Utils-1.70-0	maxstr.t	PASS	1	0	0
 Scalar-List-Utils-1.70-0	mesh.t	PASS	3	0	0
 Scalar-List-Utils-1.70-0	min.t	PASS	5	0	0
 Scalar-List-Utils-1.70-0	minstr.t	PASS	1	0	0
-Scalar-List-Utils-1.70-0	openhan.t	PARTIAL	8	3	0
+Scalar-List-Utils-1.70-0	openhan.t	PARTIAL	9	2	0
 Scalar-List-Utils-1.70-0	pair.t	PARTIAL	12	7	0
 Scalar-List-Utils-1.70-0	product.t	PARTIAL	11	1	0
 Scalar-List-Utils-1.70-0	prototype.t	PARTIAL	9	4	0
