@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 327 (2026-08-02, Fable) — s326 review: approved, two probe-found fixes; post-#197 order ruled
+
+Review of `5ad21fa` probed the seams the diff touched rather than re-reading
+its narrative, and two divergences fell out (fixed, `87f23f6`):
+
+- **close() on a name-string handle cleared the scalar** — the new
+  %p-forget-fh box arm fired for a box holding "FOO"; perl keeps the string.
+  (Before s326 that same close was a silent no-op — the old box branch only
+  knew streams — so both eras were wrong differently.)  %p-forget-fh now
+  mirrors %p-install-fh's name-string case: drop the by-name entry, keep the
+  string.
+- **`use Foo VERSION LIST` emitted a PARSE ERROR progn** for its import args,
+  and `use Foo 1.0 ()` therefore called import: the version-skip keyed on
+  PPI's `$stmt->version`, which is only filled for PERL-version statements —
+  dead code for module versions all along (pre-existing; s326's empty-list
+  branch merely sat behind it).  The version is now recognized positionally —
+  a Number as the first arg token, unless an operator follows it
+  (`use TVer 1.5, "x"` keeps the number a list element; probed as the
+  breaking case).
+
++4 guard rows in `Pl/t/io-shim-01.t` (gate 126 files / 4499); targeted prove
+PASS; corpus-diff emission identical across 111 files.
+
+**Verdict on s326**: approved.  The seven fixes all went into shared
+mechanisms (one designator resolver, one flush registry, one install/forget
+pair), inverse guards throughout, croak-not-lie for the unimplementable
+IO::Handle methods, and both workaround shims carry their own deletion
+conditions.  The two misses were classic seam bugs — a forget path not
+mirroring its install, a new branch trusting a dead check upstream.
+
+**Order ruled** (DECIDED.md §s327): **#199 BEFORE #189** — the Capture-Tiny
+string-eval pair is the completion of post-R1 item 1, not a detour; then #189
+per the s323 §1 amendments; then the standing backlog (#163 first).  **#198
+(DESTROY at scope exit) parked, design-first**, until after #163 lands.
+
 ## Session 326 (2026-08-02, Opus) — post-R1 item 1: the IO/IO::Handle shim, and the seven bugs under it
 
 First post-R1 item (`fable-answers-s323.md` §7 step 4, task #197).  The task

@@ -400,3 +400,24 @@ not-supported.md → only then probe.*
   `eval "sub NAME(&;@){…}"` is never installed, and a p-eval-thunk reaches CL's
   `push` with too many arguments.  The "23 of 48" estimate in #197 assumed one
   blocker; there were three.
+
+## s327 (Fable, 2026-08-02): s326 review + the post-#197 order
+
+- **s326 APPROVED with two review fixes (`87f23f6`)** — both found by probing
+  the seams the diff touched: close() on a name-string handle cleared the
+  scalar (%p-forget-fh now mirrors %p-install-fh's name-string case), and the
+  `use Foo VERSION LIST` version-skip was dead code (PPI's `$stmt->version` is
+  empty for module versions) so the import args emitted a PARSE ERROR progn —
+  version now recognized positionally, with the no-operator-follows guard
+  (`use Foo 1.5, "x"` keeps the number a list element; probed).
+- **ORDER RULING: #199 runs BEFORE #189** — the two Capture-Tiny string-eval
+  bugs are the COMPLETION of post-R1 item 1, whose justification was those 23
+  board FAILs.  Fix the eval-string prototyped-sub install first (the
+  API-existence bug, a silent-nothing), then the p-eval-thunk→push arity;
+  both are #79's area; the #142/#153 stop-rule applies if a trace lands in
+  `$end_pars`.  Exit criterion: Capture-Tiny board re-run with per-file causes.
+- **#198 (DESTROY at scope exit) is PARKED, design-first** — it interacts with
+  #163's referent-kind tag and E5 boxed aggregates; Fable designs it after
+  #163 lands (or a CPAN cause line forces it earlier).  Payoff when done:
+  delete `lib/IO/Handle.pm`, unblock Try::Tiny/Scope::Guard/File::Temp
+  /SelectSaver.
