@@ -549,6 +549,31 @@ that still need a live probe; the rest are identified.
 | `re/qr.t` | 3/**1** | `/$qr/` with `$'`/`$_` aliased to a match var. PROBE. |
 | `run/exit.t` | 14/**3** | PROBE. |
 
+## TIMEOUT recovery (s325, task #195) — the 7 s323e TIMEOUTs re-run at `--timeout 300`
+
+The s323e regeneration left 7 files TIMEOUT that had been DIFF at the same
+90 s in s321.  Re-run idle at `--timeout 300` (task #195), they split:
+
+- **The 4 `uni/*` case files (fold/lower/title/upper) fully recovered** — DIFF
+  with the identical counts and `Storable` loadable-object crash sig they had
+  in s321.  Their s323e TIMEOUTs were load artifacts (#180), nothing more.
+- **The 3 `re/regexp_{noamp,notrie,qr}.t` are NOT load artifacts.**  They
+  still time out at 300 s, having emitted exactly the TAP they emitted in s321
+  (793-794 ok / 111-112 notok) — i.e. they stop at the same test where s321
+  ABORTED with `unbound:$1y`.  That abort was fixed by the s322/s323 fixes,
+  which unmasked what sits right behind it: **`re_tests` ~line 906 is the
+  catastrophic-backtracking block (`.X(.+)+X` against `bbbbXcX…`)** — perl's
+  optimizer defeats it, cl-ppcre backtracks exponentially.  Probed directly:
+  a one-line `$s =~ /.X(.+)+X/` hangs under PCL past 20 s where perl answers
+  instantly.  So the status change DIFF→TIMEOUT is *progress* (a crash fixed)
+  plus a *known engine gap* (cf. task #71, the PCRE2-backend investigation;
+  task #196 records the row-level finding).
+- **Family note:** the chronic TIMEOUTs `re/regexp.t`, `re/regexp_trielist.t`,
+  `re/regexp_qr_embed.t` show the SAME 793/112 stop point in both snapshots —
+  same block, they just never had the `$1y` abort in front of it (that abort
+  was specific to the string-eval drivers).  Not re-measured this pass; their
+  rows keep the plain `timeout` sig.
+
 ## How to re-run
 
 ```bash

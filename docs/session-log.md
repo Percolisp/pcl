@@ -4,6 +4,31 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 325 (2026-08-02, Fable) — #195 TIMEOUT recovery: 4 load artifacts, 3 real hangs (unmasked, diagnosed)
+
+Pre-R1 step 1 from `fable-answers-s323.md` §7.  The 7 files that flipped
+DIFF→TIMEOUT between the s321 and s323e snapshots re-run at `--timeout 300`
+on an otherwise idle machine, and the split is clean:
+
+- **uni/{fold,lower,title,upper}.t recovered** — DIFF with counts and the
+  `Storable` loadable-object crash sig byte-identical to s321.  Load
+  artifacts (#180), nothing regressed.
+- **re/regexp_{noamp,notrie,qr}.t are real**: still TIMEOUT at 300 s, TAP
+  stopping at exactly the row where s321 aborted with `unbound:$1y`
+  (793-794/111-112).  The abort was fixed in s322/s323, which unmasked
+  what sat behind it: `re_tests` ~line 906 is the catastrophic-backtracking
+  block (`.X(.+)+X` vs `bbbbXcX…`).  Probed: that one-liner hangs >20 s
+  under PCL, instant in perl — cl-ppcre has no superlinear-backtracking
+  defense.  DIFF→TIMEOUT here is a fixed crash plus a known engine gap
+  (cf. #71 PCRE2); filed as **task #196** with the family note that the
+  chronic `re/regexp{,_trielist,_qr_embed}.t` TIMEOUTs stop at the same
+  793/112 point — same cause, never had the abort shield.
+- `docs/perl-suite-run.tsv`: 7 rows replaced, the 3 regexp sigs annotated
+  with the cause, and the **`# taken-at:` header stamped** (bulk at
+  `1e7c4d7`, the 7 rows at `410184b`) per the §4 staleness rule.  Survey
+  doc gained the "TIMEOUT recovery (s325)" section.  The snapshot is now
+  quotable for R1.
+
 ## Session 324 (2026-08-02, Fable) — #193 landed, and the two bugs it was standing on
 
 Rulings for the s323 round went out first (`docs/fable-answers-s323.md`,

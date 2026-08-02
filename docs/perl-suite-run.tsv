@@ -1,4 +1,5 @@
 # file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]
+# taken-at: 1e7c4d7 (full --all run, s323e); 7 TIMEOUT rows re-measured at 410184b with --timeout 300 (s325, task #195)
 # NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)
 # XDIFF = expected divergence, docs/perl-suite-expected.tsv (a blessed not-supported.md gap)
 # FIXTURE = harness artifact, docs/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)
@@ -430,13 +431,13 @@ re/reg_email.t	13	0	0	0	DIFF
 re/reg_email_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/reg_eval_scope.t	48	1	5	24	DIFF	crash:sb-c::input-error-in-load: read error during load:
 re/reg_eval.t	8	0	1	7	XDIFF	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t
-re/regexp_noamp.t	2169	0	794	111	TIMEOUT	timeout
+re/regexp_noamp.t	2169	0	794	111	TIMEOUT	timeout@300s: hangs at re_tests catastrophic-backtracking block (~line 906, .X(.+)+X) — cl-ppcre exponential; unmasked when the unbound:$1y abort was fixed (s322/s323); cf. task #71
 re/regexp_nonull.t	2167	2	0	0	DIFF	
 re/regexp_normal.t	2169	0	1850	8	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
-re/regexp_notrie.t	2167	2	793	112	TIMEOUT	timeout
+re/regexp_notrie.t	2167	2	793	112	TIMEOUT	timeout@300s: hangs at re_tests catastrophic-backtracking block (~line 906, .X(.+)+X) — cl-ppcre exponential; unmasked when the unbound:$1y abort was fixed (s322/s323); cf. task #71
 re/regexp_qr_embed.t	2167	2	793	112	TIMEOUT	timeout
 re/regexp_qr_embed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/regexp_qr.t	2167	2	793	112	TIMEOUT	timeout
+re/regexp_qr.t	2167	2	793	112	TIMEOUT	timeout@300s: hangs at re_tests catastrophic-backtracking block (~line 906, .X(.+)+X) — cl-ppcre exponential; unmasked when the unbound:$1y abort was fixed (s322/s323); cf. task #71
 re/regexp.t	2167	2	793	112	TIMEOUT	timeout
 re/regexp_trielist.t	2167	2	793	112	TIMEOUT	timeout
 re/regexp_unicode_prop.t	1110	0	778	332	DIFF	
@@ -502,14 +503,14 @@ uni/caller.t	18	0	1	3	DIFF	crash:simple-error: Undefined subroutine &main:: call
 uni/chomp.t	446	0	446	0	OK	
 uni/class.t	12	0	0	12	DIFF	
 uni/eval.t	5	0	5	0	OK	
-uni/fold.t	19128	104	0	0	TIMEOUT	timeout
+uni/fold.t	19128	104	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).
 uni/greek.t	0	0	0	0	NOTAP	
 uni/gv.t	206	0	36	39	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N.
 uni/labels.t	10	0	3	5	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (go :ここ) Compile-time error: attempt t
 uni/latin2.t	0	0	0	0	NOTAP	
 uni/lex_utf8.t	16	0	6	10	DIFF	
-uni/lower.t	11720	0	0	0	TIMEOUT	timeout
+uni/lower.t	11720	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
 uni/method.t	62	0	0	0	DIFF	crash:simple-error: Can't locate object method "ｂ" via package "F" at - line N.
 uni/opcroak.t	5	0	0	5	DIFF	
 uni/overload.t	191	2	177	14	DIFF	undef-fn:main::pl-todo_skip
@@ -520,9 +521,9 @@ uni/select.t	3	2	0	0	DIFF	unbound:$ᛞ웊
 uni/sprintf.t	52	0	49	3	DIFF	
 uni/stash.t	48	1	41	8	DIFF	
 uni/tie.t	9	1	9	1	OK	
-uni/title.t	5936	0	0	0	TIMEOUT	timeout
+uni/title.t	5936	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
 uni/tr_utf8.t	8	0	8	0	OK	
 uni/universal.t	90	0	1	0	DIFF	undef-fn:main::pl-Àlìcè
-uni/upper.t	6230	0	0	0	TIMEOUT	timeout
+uni/upper.t	6230	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
 uni/variables.t	66880	0	1248	319	DIFF	unbound:$}
 uni/write.t	8	0	0	0	DIFF	crash:simple-error: Could not close OUTN: at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/writ
