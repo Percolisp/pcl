@@ -1,0 +1,4 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+cmd/for.t	13	ok	not ok	freed value in iteration
+cmd/for.t	14	ok	not ok	double destroy, x=1
+cmd/for.t	16	ok	not ok	[perl #78194] Lone C-style for in a block

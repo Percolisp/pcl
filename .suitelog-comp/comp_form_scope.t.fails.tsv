@@ -1,0 +1,16 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+comp/form_scope.t	0	(none)	renumbered	PCL's TAP numbering is offset from perl's for 2 row(s) — rows below are paired by description, not by number
+comp/form_scope.t	1	ok	not ok [PCL #5]	
+comp/form_scope.t	2	ok	not ok [PCL #9]	
+comp/form_scope.t	3	ok	(missing)	
+comp/form_scope.t	4	ok	(missing)	
+comp/form_scope.t	5	ok	(missing)	closure var not available when outer sub is inactive
+comp/form_scope.t	6	ok	(missing)	
+comp/form_scope.t	7	ok	(missing)	
+comp/form_scope.t	8	ok	(missing)	
+comp/form_scope.t	9	ok	(missing)	closure var not available when outer sub is undefined
+comp/form_scope.t	10	ok	(missing)	closure inside forma
+comp/form_scope.t	11	ok	(missing)	recursive formats
+comp/form_scope.t	12	ok	(missing)	recursive formats
+comp/form_scope.t	13	ok	(missing)	formats closing over redefined subs (got SCALAR)
+comp/form_scope.t	14	ok	(missing)	

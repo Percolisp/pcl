@@ -1,0 +1,24 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+comp/uproto.t	0	(none)	renumbered	PCL's TAP numbering is offset from perl's for 10 row(s) — rows below are paired by description, not by number
+comp/uproto.t	3	ok	not ok	
+comp/uproto.t	4	ok	not ok	
+comp/uproto.t	5	ok	not ok	
+comp/uproto.t	6	ok	not ok	
+comp/uproto.t	7	ok	not ok	
+comp/uproto.t	8	ok	not ok	
+comp/uproto.t	9	ok	not ok	
+comp/uproto.t	10	ok	not ok	
+comp/uproto.t	11	ok	not ok	
+comp/uproto.t	12	ok	not ok	
+comp/uproto.t	13	ok	not ok	
+comp/uproto.t	14	ok	not ok	
+comp/uproto.t	15	ok	not ok	
+comp/uproto.t	19	ok	not ok	
+comp/uproto.t	20	ok	not ok	wrong1
+comp/uproto.t	22	ok	not ok	
+comp/uproto.t	25	ok	not ok [PCL #27]	mymkdir
+comp/uproto.t	28	ok	not ok [PCL #30]	mylist
+comp/uproto.t	30	ok	not ok [PCL #32]	mylist2
+comp/uproto.t	32	ok	not ok [PCL #34]	$_ is modifiable
+comp/uproto.t	0	(none)	extra [PCL #23]	wrong2
+comp/uproto.t	0	(none)	extra [PCL #24]	

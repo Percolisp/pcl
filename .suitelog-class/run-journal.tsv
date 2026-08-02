@@ -1,0 +1,23 @@
+# run-perl-suite Sun Aug  2 13:28:13 2026: 10 files, jobs=4 timeout=90
+# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]
+# queued	class/accessor.t
+# queued	class/class.t
+# queued	class/construct.t
+# queued	class/destruct.t
+# queued	class/field.t
+# queued	class/inherit.t
+# queued	class/method.t
+# queued	class/phasers.t
+# queued	class/threads.t
+# queued	class/utf8.t
+class/destruct.t	4	0	0	0	XDIFF	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/construct.t	10	0	0	0	XDIFF	crash:simple-error: Can't call method x on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/accessor.t	10	0	0	0	XDIFF	crash:simple-error: Can't call method s on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/class.t	10	0	0	1	XDIFF	crash:simple-error: Can't call method hello on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/phasers.t	3	0	1	2	XDIFF	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/method.t	8	0	0	0	XDIFF	crash:simple-error: Can't call method retself on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/inherit.t	19	0	0	3	XDIFF	crash:simple-error: Can't call method initb on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/field.t	33	0	0	0	XDIFF	crash:simple-error: Can't call method incr on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/utf8.t	4	0	0	0	XDIFF	unbound:STDOUT | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/threads.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
+# complete

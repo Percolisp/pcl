@@ -1,0 +1,3 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+comp/filter_exception.t	2	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/comp/filter_exception.t line 28]
+comp/filter_exception.t	4	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/comp/filter_exception.t line 30]

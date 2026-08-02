@@ -1,0 +1,170 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+comp/proto.t	7	ok	not ok	
+comp/proto.t	13	ok	not ok	
+comp/proto.t	14	ok	not ok	
+comp/proto.t	19	ok	not ok	
+comp/proto.t	20	ok	not ok	
+comp/proto.t	22	ok	not ok	
+comp/proto.t	29	ok	not ok	
+comp/proto.t	34	ok	not ok	
+comp/proto.t	41	ok	not ok	
+comp/proto.t	46	ok	not ok	
+comp/proto.t	52	ok	not ok	
+comp/proto.t	53	ok	not ok	
+comp/proto.t	54	ok	not ok	
+comp/proto.t	58	ok	not ok	
+comp/proto.t	62	ok	(missing)	
+comp/proto.t	63	ok	(missing)	
+comp/proto.t	64	ok	(missing)	
+comp/proto.t	65	ok	(missing)	
+comp/proto.t	66	ok	(missing)	
+comp/proto.t	67	ok	(missing)	
+comp/proto.t	68	ok	(missing)	
+comp/proto.t	69	ok	(missing)	
+comp/proto.t	70	ok	(missing)	
+comp/proto.t	71	ok	(missing)	\& prohibits &foo()
+comp/proto.t	72	ok	(missing)	\& prohibits foo()
+comp/proto.t	73	ok	(missing)	\& prohibits foo where foo is an existing sub
+comp/proto.t	74	ok	(missing)	
+comp/proto.t	75	ok	(missing)	
+comp/proto.t	76	ok	(missing)	
+comp/proto.t	77	ok	(missing)	@_ = (CODE(0x580bceef39f8),O,K, ,78)
+comp/proto.t	78	ok	(missing)	
+comp/proto.t	79	ok	(missing)	
+comp/proto.t	80	ok	(missing)	
+comp/proto.t	81	ok	(missing)	
+comp/proto.t	82	ok	(missing)	
+comp/proto.t	83	ok	(missing)	
+comp/proto.t	84	ok	(missing)	
+comp/proto.t	85	ok	(missing)	
+comp/proto.t	86	ok	(missing)	
+comp/proto.t	87	ok	(missing)	
+comp/proto.t	88	ok	(missing)	
+comp/proto.t	89	ok	(missing)	
+comp/proto.t	90	ok	(missing)	
+comp/proto.t	91	ok	(missing)	
+comp/proto.t	92	ok	(missing)	
+comp/proto.t	93	ok	(missing)	
+comp/proto.t	94	ok	(missing)	
+comp/proto.t	95	ok	(missing)	
+comp/proto.t	96	ok	(missing)	
+comp/proto.t	97	ok	(missing)	
+comp/proto.t	98	ok	(missing)	$1 containing CORE::Foo
+comp/proto.t	99	ok	(missing)	
+comp/proto.t	100	ok	(missing)	
+comp/proto.t	101	ok	(missing)	
+comp/proto.t	102	ok	(missing)	
+comp/proto.t	103	ok	(missing)	star FOO
+comp/proto.t	104	ok	(missing)	star(FOO)
+comp/proto.t	105	ok	(missing)	star "FOO"
+comp/proto.t	106	ok	(missing)	star("FOO")
+comp/proto.t	107	ok	(missing)	star $star
+comp/proto.t	108	ok	(missing)	star($star)
+comp/proto.t	109	ok	(missing)	star *FOO
+comp/proto.t	110	ok	(missing)	star(*FOO)
+comp/proto.t	111	ok	(missing)	star \*FOO
+comp/proto.t	112	ok	(missing)	star(\*FOO)
+comp/proto.t	113	ok	(missing)	star2 FOO, BAR
+comp/proto.t	114	ok	(missing)	star2(Bar::BAZ, FOO)
+comp/proto.t	115	ok	(missing)	star2 BAR(), FOO
+comp/proto.t	116	ok	(missing)	star2(FOO, BAR())
+comp/proto.t	117	ok	(missing)	star2 "FOO", "BAR"
+comp/proto.t	118	ok	(missing)	star2("FOO", "BAR")
+comp/proto.t	119	ok	(missing)	star2 $star, $star
+comp/proto.t	120	ok	(missing)	star2($star, $star)
+comp/proto.t	121	ok	(missing)	star2 *FOO, *BAR
+comp/proto.t	122	ok	(missing)	star2(*FOO, *BAR)
+comp/proto.t	123	ok	(missing)	star2 *FOO, *BAR
+comp/proto.t	124	ok	(missing)	star2(*FOO, *BAR)
+comp/proto.t	125	ok	(missing)	star3 STDERR
+comp/proto.t	126	ok	(missing)	star4 STDERR
+comp/proto.t	127	ok	(missing)	prototype checking not done within initial definition
+comp/proto.t	128	ok	(missing)	prototype checking done if sub pre-declared
+comp/proto.t	129	ok	(missing)	sreftest
+comp/proto.t	130	ok	(missing)	sreftest
+comp/proto.t	131	ok	(missing)	sreftest
+comp/proto.t	132	ok	(missing)	sreftest
+comp/proto.t	133	ok	(missing)	sreftest
+comp/proto.t	134	ok	(missing)	\$ with invalid argument
+comp/proto.t	135	ok	(missing)	non container test
+comp/proto.t	136	ok	(missing)	non container test
+comp/proto.t	137	ok	(missing)	non container test
+comp/proto.t	138	ok	(missing)	non container test
+comp/proto.t	139	ok	(missing)	non container test
+comp/proto.t	140	ok	(missing)	non container test
+comp/proto.t	141	ok	(missing)	
+comp/proto.t	142	ok	(missing)	
+comp/proto.t	143	ok	(missing)	
+comp/proto.t	144	ok	(missing)	
+comp/proto.t	145	ok	(missing)	
+comp/proto.t	146	ok	(missing)	
+comp/proto.t	147	ok	(missing)	
+comp/proto.t	148	ok	(missing)	
+comp/proto.t	149	ok	(missing)	
+comp/proto.t	150	ok	(missing)	
+comp/proto.t	151	ok	(missing)	
+comp/proto.t	152	ok	(missing)	
+comp/proto.t	153	ok	(missing)	
+comp/proto.t	154	ok	(missing)	
+comp/proto.t	155	ok	(missing)	
+comp/proto.t	156	ok	(missing)	
+comp/proto.t	157	ok	(missing)	
+comp/proto.t	158	ok	(missing)	
+comp/proto.t	159	ok	(missing)	
+comp/proto.t	160	ok	(missing)	
+comp/proto.t	161	ok	(missing)	
+comp/proto.t	162	ok	(missing)	
+comp/proto.t	163	ok	(missing)	
+comp/proto.t	164	ok	(missing)	
+comp/proto.t	165	ok	(missing)	
+comp/proto.t	166	ok	(missing)	
+comp/proto.t	167	ok	(missing)	
+comp/proto.t	168	ok	(missing)	
+comp/proto.t	169	ok	(missing)	
+comp/proto.t	170	ok	(missing)	
+comp/proto.t	171	ok	(missing)	
+comp/proto.t	172	ok	(missing)	
+comp/proto.t	173	ok	(missing)	
+comp/proto.t	174	ok	(missing)	
+comp/proto.t	175	ok	(missing)	
+comp/proto.t	176	ok	(missing)	checking badproto - (@bar)
+comp/proto.t	177	ok	(missing)	checking badproto2 - (bar)
+comp/proto.t	178	ok	(missing)	checking badproto3 - (&$bar$@)
+comp/proto.t	179	ok	(missing)	checking badproto4 - (@ $b ar) - illegal character
+comp/proto.t	180	ok	(missing)	checking badproto4 - (@ $b ar) - prototype after '@'
+comp/proto.t	181	ok	(missing)	checking badproto5 - ($_$) - illegal character after '_'
+comp/proto.t	182	ok	(missing)	checking badproto5 - ($_$) - but not just illegal character
+comp/proto.t	183	ok	(missing)	checking badproto6 - (bar_) - illegal character
+comp/proto.t	184	ok	(missing)	checking badproto6 - (bar_) - shouldn't add "after '_'"
+comp/proto.t	185	ok	(missing)	checking badproto7 - (_;bar) - illegal character
+comp/proto.t	186	ok	(missing)	checking badproto7 - (_;bar) - shouldn't add "after '_'"
+comp/proto.t	187	ok	(missing)	checking badproto8 - (_b) - illegal character after '_'
+comp/proto.t	188	ok	(missing)	checking badproto8 - (_b) - just illegal character
+comp/proto.t	189	ok	(missing)	checking for matching bracket
+comp/proto.t	190	ok	(missing)	checking badproto10 - ([_]) - shouldn't trigger matching bracket
+comp/proto.t	191	ok	(missing)	checking badproto10 - ([_]) - should trigger after '_' warnings
+comp/proto.t	192	ok	(missing)	
+comp/proto.t	193	ok	(missing)	Check that ckproto ignores spaces in comparisons
+comp/proto.t	194	ok	(missing)	
+comp/proto.t	195	ok	(missing)	
+comp/proto.t	196	ok	(missing)	
+comp/proto.t	197	ok	(missing)	
+comp/proto.t	198	ok	(missing)	
+comp/proto.t	199	ok	(missing)	
+comp/proto.t	200	ok	(missing)	
+comp/proto.t	201	ok	(missing)	
+comp/proto.t	202	ok	(missing)	
+comp/proto.t	203	ok	(missing)	
+comp/proto.t	204	ok	(missing)	uniproto10 (;;;*)
+comp/proto.t	205	ok	(missing)	uniproto11 ( ; ; ;  *)
+comp/proto.t	206	ok	(missing)	uniproto12 (;;;*)
+comp/proto.t	207	ok	(missing)	uniproto13 ( ; ; ; * )
+comp/proto.t	208	ok	(missing)	
+comp/proto.t	209	ok	(missing)	
+comp/proto.t	210	ok	(missing)	
+comp/proto.t	211	ok	(missing)	
+comp/proto.t	212	ok	(missing)	
+comp/proto.t	213	ok	(missing)	
+comp/proto.t	214	ok	(missing)	
+comp/proto.t	215	ok	(missing)	[perl #123514] (got 1 2 3 $$$$$$$ 4 5 6)
+comp/proto.t	216	ok	(missing)	anonsub passed to \$

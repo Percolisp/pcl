@@ -1,0 +1,102 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+base/lex.t	0	(none)	renumbered	PCL's TAP numbering is offset from perl's for 11 row(s) — rows below are paired by description, not by number
+base/lex.t	20	ok	not ok [PCL #19]	
+base/lex.t	22	ok	(missing)	
+base/lex.t	23	ok	(missing)	
+base/lex.t	24	ok	(missing)	
+base/lex.t	25	ok	(missing)	
+base/lex.t	26	ok	(missing)	
+base/lex.t	27	ok	(missing)	
+base/lex.t	28	ok	(missing)	
+base/lex.t	29	ok	(missing)	
+base/lex.t	30	ok	(missing)	
+base/lex.t	31	ok	(missing)	
+base/lex.t	32	ok	(missing)	
+base/lex.t	33	ok	(missing)	
+base/lex.t	34	ok	(missing)	
+base/lex.t	35	ok	(missing)	
+base/lex.t	36	ok	(missing)	
+base/lex.t	37	ok	(missing)	
+base/lex.t	38	ok	(missing)	
+base/lex.t	39	ok	(missing)	
+base/lex.t	40	ok	(missing)	
+base/lex.t	41	ok	(missing)	
+base/lex.t	42	ok	(missing)	
+base/lex.t	43	ok	(missing)	
+base/lex.t	44	ok	(missing)	
+base/lex.t	45	ok	(missing)	
+base/lex.t	46	ok	(missing)	
+base/lex.t	47	ok	(missing)	
+base/lex.t	48	ok	(missing)	
+base/lex.t	49	ok	(missing)	
+base/lex.t	50	ok	(missing)	
+base/lex.t	51	ok	(missing)	
+base/lex.t	52	ok	(missing)	
+base/lex.t	53	ok	(missing)	
+base/lex.t	54	ok	(missing)	
+base/lex.t	55	ok	(missing)	
+base/lex.t	56	ok	(missing)	
+base/lex.t	57	ok	(missing)	
+base/lex.t	58	ok	(missing)	
+base/lex.t	59	ok	(missing)	
+base/lex.t	60	ok	(missing)	
+base/lex.t	61	ok	(missing)	
+base/lex.t	62	ok	(missing)	
+base/lex.t	63	ok	(missing)	heredoc after "" in s/// in eval
+base/lex.t	64	ok	(missing)	heredoc in "" in multiline s///e in eval
+base/lex.t	65	ok	(missing)	null on same line as heredoc in s/// in eval
+base/lex.t	66	ok	(missing)	heredoc in "" in single-line s///e in eval
+base/lex.t	67	ok	(missing)	heredoc in "" in multiline s///e outside eval
+base/lex.t	68	ok	(missing)	s/// in s/// pattern
+base/lex.t	69	ok	(missing)	here-doc in re-eval
+base/lex.t	70	ok	(missing)	here-doc in re-eval in string eval
+base/lex.t	71	ok	(missing)	eval ending with semicolon
+base/lex.t	72	ok	(missing)	here-doc in single-line re-eval
+base/lex.t	73	ok	(missing)	here-doc in quotes in multiline re-eval
+base/lex.t	74	ok	(missing)	eval 's//<<END/' does not leave extra newlines
+base/lex.t	75	ok	(missing)	# after null in s/// repl
+base/lex.t	76	ok	(missing)	s//'#' . <<END/e
+base/lex.t	77	ok	(missing)	s//3}->{3/e
+base/lex.t	78	ok	(missing)	s//${\%x}{3}/e
+base/lex.t	79	ok	(missing)	s/${foo#}//e
+base/lex.t	80	ok	(missing)	listop({ok 78 => 1} + 1)
+base/lex.t	81	ok	(missing)	[perl #105924] require WORD << ...
+base/lex.t	82	ok	(missing)	[perl #105924] goto WORD << ...
+base/lex.t	83	ok	(missing)	[perl #105924] last WORD << ...
+base/lex.t	84	ok	(missing)	[perl #105924] next WORD << ...
+base/lex.t	85	ok	(missing)	[perl #105924] redo WORD << ...
+base/lex.t	86	ok	(missing)	[perl #105924] CORE::dump WORD << ...
+base/lex.t	87	ok	(missing)	Use v[0-9]+ as a label
+base/lex.t	88	ok	(missing)	Use v[0-9]+ as a label with space before colon
+base/lex.t	89	ok	(missing)	call a function in package v10::foo
+base/lex.t	90	ok	(missing)	colon detection after vstring does not break ? vstring :
+base/lex.t	91	ok	(missing)	print vstring prints the vstring
+base/lex.t	92	ok	(missing)	q <comment> <newline> ...
+base/lex.t	93	ok	(missing)	qq <comment> <newline> ...
+base/lex.t	94	ok	(missing)	qw <comment> <newline> ...
+base/lex.t	95	ok	(missing)	m <comment> <newline> ...
+base/lex.t	96	ok	(missing)	qr <comment> <newline> ...
+base/lex.t	97	ok	(missing)	s <comment> <newline> ...
+base/lex.t	98	ok	(missing)	tr <comment> <newline> ...
+base/lex.t	99	ok	(missing)	y <comment> <newline> ...
+base/lex.t	100	ok	(missing)	=> quotes keywords across lines
+base/lex.t	101	ok	(missing)	[perl #80368] qq <a\U=>
+base/lex.t	102	ok	(missing)	${...} where {...} looks like hash
+base/lex.t	103	ok	(missing)	map{BEGIN...
+base/lex.t	104	ok	(missing)	map{BEGIN...
+base/lex.t	105	ok	(missing)	${ <newline> =pod
+base/lex.t	106	ok	(missing)	map{ <newline> =pod
+base/lex.t	107	ok	(missing)	${...} (literal triple-dot)
+base/lex.t	108	ok	(missing)	map{...} (literal triple-dot)
+base/lex.t	109	ok	(missing)	&{sub :lvalue...}
+base/lex.t	110	ok	(missing)	map{sub :lvalue...}
+base/lex.t	111	ok	(missing)	124385
+base/lex.t	112	ok	(missing)	125350
+base/lex.t	113	ok	(missing)	128171
+base/lex.t	114	ok	(missing)	132640
+base/lex.t	115	ok	(missing)	125351
+base/lex.t	116	ok	(missing)	126192
+base/lex.t	117	ok	(missing)	[perl #128478] "$foo::$bar"
+base/lex.t	118	ok	(missing)	[perl #128478] "$foo::@bar"
+base/lex.t	119	ok	(missing)	first constant in 'const1 const2' is not upgraded
+base/lex.t	120	ok	(missing)	second constant in 'const1 const2' is not upgraded

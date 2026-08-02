@@ -1,0 +1,11 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+cmd/subval.t	27	ok	not ok	
+cmd/subval.t	28	ok	not ok	
+cmd/subval.t	29	ok	(missing)	
+cmd/subval.t	30	ok	(missing)	
+cmd/subval.t	31	ok	(missing)	
+cmd/subval.t	32	ok	(missing)	
+cmd/subval.t	33	ok	(missing)	
+cmd/subval.t	34	ok	(missing)	
+cmd/subval.t	35	ok	(missing)	
+cmd/subval.t	36	ok	(missing)	

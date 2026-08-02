@@ -1,0 +1,3 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+class/phasers.t	1	ok	not ok	both ADJUST blocks run in order
+class/phasers.t	2	ok	not ok	value of __CLASS__ in ADJUST block

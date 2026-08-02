@@ -1,0 +1,5 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+comp/package_block.t	2	ok	not ok	
+comp/package_block.t	4	ok	not ok	
+comp/package_block.t	6	ok	not ok	
+comp/package_block.t	7	ok	not ok	

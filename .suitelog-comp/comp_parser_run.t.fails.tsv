@@ -1,0 +1,42 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+comp/parser_run.t	1	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/comp/parser_run.t line 21]
+comp/parser_run.t	2	ok	not ok	check $00 is illegal
+comp/parser_run.t	3	ok	not ok	check $00 is illegal under strict
+comp/parser_run.t	4	ok	not ok	check $00 is illegal under utf8
+comp/parser_run.t	5	ok	not ok	check $00 is illegal under utf8 under strict
+comp/parser_run.t	6	ok	not ok	check ${00} is illegal
+comp/parser_run.t	7	ok	not ok	check ${00} is illegal under strict
+comp/parser_run.t	8	ok	not ok	check ${00} is illegal under utf8
+comp/parser_run.t	9	ok	not ok	check ${00} is illegal under utf8 under strict
+comp/parser_run.t	10	ok	not ok	check $001 is illegal
+comp/parser_run.t	11	ok	not ok	check $001 is illegal under strict
+comp/parser_run.t	12	ok	not ok	check $001 is illegal under utf8
+comp/parser_run.t	13	ok	not ok	check $001 is illegal under utf8 under strict
+comp/parser_run.t	14	ok	not ok	check ${001} is illegal
+comp/parser_run.t	15	ok	not ok	check ${001} is illegal under strict
+comp/parser_run.t	16	ok	not ok	check ${001} is illegal under utf8
+comp/parser_run.t	17	ok	not ok	check ${001} is illegal under utf8 under strict
+comp/parser_run.t	18	ok	not ok	check $01 is illegal
+comp/parser_run.t	19	ok	not ok	check $01 is illegal under strict
+comp/parser_run.t	20	ok	not ok	check $01 is illegal under utf8
+comp/parser_run.t	21	ok	not ok	check $01 is illegal under utf8 under strict
+comp/parser_run.t	22	ok	not ok	check ${01} is illegal
+comp/parser_run.t	23	ok	not ok	check ${01} is illegal under strict
+comp/parser_run.t	24	ok	not ok	check ${01} is illegal under utf8
+comp/parser_run.t	25	ok	not ok	check ${01} is illegal under utf8 under strict
+comp/parser_run.t	26	ok	not ok	check $09324 is illegal
+comp/parser_run.t	27	ok	not ok	check $09324 is illegal under strict
+comp/parser_run.t	28	ok	not ok	check $09324 is illegal under utf8
+comp/parser_run.t	29	ok	not ok	check $09324 is illegal under utf8 under strict
+comp/parser_run.t	30	ok	not ok	check ${09324} is illegal
+comp/parser_run.t	31	ok	not ok	check ${09324} is illegal under strict
+comp/parser_run.t	32	ok	not ok	check ${09324} is illegal under utf8
+comp/parser_run.t	33	ok	not ok	check ${09324} is illegal under utf8 under strict
+comp/parser_run.t	58	ok	not ok	check $9324 is legal
+comp/parser_run.t	59	ok	not ok	check $9324 is legal under strict
+comp/parser_run.t	60	ok	not ok	check $9324 is legal under utf8
+comp/parser_run.t	61	ok	not ok	check $9324 is legal under utf8 under strict
+comp/parser_run.t	66	ok	not ok	linestart before bufptr
+comp/parser_run.t	67	ok	not ok	use after free (\#131836)
+comp/parser_run.t	69	ok	not ok	ambiguous unary operator check doesn't crash (\#132433)
+comp/parser_run.t	70	ok	not ok	many blank lines doesn't crash

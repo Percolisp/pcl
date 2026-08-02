@@ -1,0 +1,16 @@
+# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
+base/rs.t	11	ok	not ok	$/ = \0; should die
+base/rs.t	12	ok	not ok	$/ = \0; produced expected error message
+base/rs.t	13	ok	not ok	$/ = \-1; should die
+base/rs.t	14	ok	not ok	$/ = \-1; produced expected error message
+base/rs.t	15	ok	not ok	$/ = []; should die
+base/rs.t	16	ok	not ok	$/ = []; produced expected error message
+base/rs.t	17	ok	not ok	$/ = {}; should die
+base/rs.t	18	ok	not ok	$/ = {}; produced expected error message
+base/rs.t	19	ok	not ok	$/ = \\1; should die
+base/rs.t	20	ok	not ok	$/ = \\1; produced expected error message
+base/rs.t	21	ok	not ok	$/ = qr/foo/; should die
+base/rs.t	22	ok	not ok	$/ = qr/foo/; produced expected error message
+base/rs.t	23	ok	not ok	$/ = \*STDOUT; should die
+base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
+base/rs.t	25	ok	not ok	$/ preserved when set to bad value
