@@ -212,7 +212,7 @@
    #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
    #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
-   #:p-getpwent #:p-setpwent #:p-endpwent #:p-getpwuid #:p-getpwnam
+   #:p-getpwent #:p-setpwent #:p-endpwent #:p-getpwuid #:p-getpwnam #:p-getlogin
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
@@ -15473,6 +15473,17 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (make-p-box (sb-posix:group-gid g)))
             *p-undef*))
     (sb-posix:syscall-error () *p-undef*)))
+
+(defun p-getlogin ()
+  "Perl getlogin — the login name of the controlling terminal's user.  perl
+   documents it as unreliable and tells you to prefer getpwuid($<); PCL takes
+   that advice, because SBCL exposes no getlogin(3) and the effective-uid
+   lookup is what every real caller (Data::Dump's dd.t) actually wants.
+   undef when the uid has no passwd entry, as in perl."
+  (handler-case
+      (let ((pw (sb-posix:getpwuid (sb-posix:getuid))))
+        (if pw (make-p-box (sb-posix:passwd-name pw)) *p-undef*))
+    (error () *p-undef*)))
 
 ;; the function instead of using fboundp. Stubs ensure those calls don't crash.
 (defpackage :DynaLoader (:use :cl :pcl))

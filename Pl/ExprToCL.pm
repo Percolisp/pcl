@@ -155,7 +155,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   getpgrp setpgrp getpriority
   funcall-ref get-class get-coderef getc getcwd
   getgrent getgrgid getgrnam endgrent setgrent
-  getpwent getpwuid getpwnam endpwent setpwent
+  getpwent getpwuid getpwnam endpwent setpwent getlogin
   gethash gethash-box gethash-deref glob glob-assign glob-copy glob-slot glob-undef-name gmtime
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
   link symlink readlink chown utime lock

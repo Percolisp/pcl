@@ -298,6 +298,7 @@ has known_no_of_params => (
       wait       => 0,          # wait() — reap any child, sets $?
       waitpid    => [1, 2],     # waitpid(PID, FLAGS)
       getppid    => 0,          # getppid()
+      getlogin   => 0,          # getlogin()
       getpgrp    => [0, 1],     # getpgrp or getpgrp PID
       setpgrp    => [0, 1, 2],  # setpgrp / setpgrp PID / setpgrp PID, PGRP
       getpriority => 2,         # getpriority WHICH, WHO
