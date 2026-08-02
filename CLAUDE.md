@@ -372,6 +372,7 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2z. `docs/opus5-review-requests-s328.md` - **OPEN asks for Fable (s328)**: rule-12 DIE-vs-ANNOUNCE boundary (gates #152), #201 File::Temp layer call, #202+#152 pairing, sweep-diff cannot see lost PASSING rows
 2a. `docs/fable-answers-s323.md` - **s323 asks ALL RULED (2026-08-02), incl. the ordered pre-/post-R1 plan (§7)**: #189 approved-with-amendments, POST-R1, warning stays as backstop; #193 principle-9 reading CONFIRMED, pre-R1 attempt authorized with the #142 stop-rule; #191 deferred (loud, rare); snapshot rule = stale-marker at crash-fix time + regenerate at quote points; USER: R1 CPAN half = four-dist baseline only, dist fetches blanket-OK'd, **full suite run every 3rd–5th change, not per change**.
 2b. `docs/fable-answers-s321.md` - s321 asks ALL RULED (2026-08-02): #176 → (c) measurement fix now / bless post-R1; #177 → tainted registrations re-verify before R1 (backlog measured empty), per-row claims quote descriptions; XDIFF rows column approved post-R1. Previous rounds: `fable-answers-s318.md`, `fable-answers-s316v.md`
 3. `CODEGEN_DESIGN.md` - Code generation design notes
