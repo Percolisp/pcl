@@ -271,3 +271,38 @@ not-supported.md → only then probe.*
   same constants are then USED as barewords, and under `use strict` an
   undeclared bareword is a compile error, so by principle 9 anything that
   compiles is a CALL — PCL still emits some of them as strings (always true).
+
+## s323 Fable rulings (2026-08-02, `fable-answers-s323.md`)
+
+- **#189 `writes_args`: shape APPROVED, POST-R1** — detect in the callee body
+  (lvalue set PLUS `foreach` over `@_`, lvalue substr/vec/pos, and ESCAPES:
+  `\$_[N]`, `\@_`, `&callee;`, `goto &sub`, `@_` passed on — anything not
+  provably read-only sets the flag), carry on `sub_info`, consume as a
+  VarAnnotator `arg-to-writer` boxing reason at same-file call sites first.
+  The "Cannot modify non-boxed value" warning STAYS as the backstop for
+  undetected writers.  NO blanket boxing of call args, ever.  Delete
+  `lib/File/Basename.pm` when it lands → `fable-answers-s323.md` §1.
+- **#193 strict-subs bareword = a CALL, CONFIRMED (principle 9)** — fix at
+  the string-FALLTHROUGH point, gated on strict-subs; pre-R1 attempt
+  authorized, time-boxed, corpus-diff with every changed row examined;
+  **stop-rule: if the trace lands in the #142 `$end_pars` region, STOP**
+  (that fix is #153 `_reduce_term`) → `fable-answers-s323.md` §2.
+- **#191 indirect-method-in-brackets: DEFERRED** — loud failure, rare
+  syntax; re-raise on a real CPAN cause line → `fable-answers-s323.md` §3.
+- **Suite-snapshot staleness rule**: a crash-fixing commit MARKS the snapshot
+  stale (one session-log line, write-side); regeneration is required at
+  QUOTE points (review round, release number, the R1 call), not per commit;
+  next regeneration adds a `# taken-at: <commit>` header
+  → `fable-answers-s323.md` §4.
+- **USER (2026-08-02): R1's CPAN half gates on the FOUR-DIST baseline only**
+  (`docs/cpan-scoreboard.tsv`, no regressions); the widened board is the
+  post-R1 worklist, `IO`/`IO::Handle` shim first (23 of 48 FAILs)
+  → `fable-answers-s323.md` §5.
+- **USER (2026-08-02): fetching/unpacking CPAN dists for measurement is
+  blanket-OK'd**; system-level installs still ask → `fable-answers-s323.md` §5.
+- **USER (2026-08-02): the full `tools/run-perl-suite.pl --all` run (~15 min)
+  runs every 3rd–5th change, NOT per change** — per change it is
+  `tools/prove-core` + a targeted single-file suite run (positional
+  t-relative paths); full run always once before committing a batch or
+  quoting numbers.  Same shape as the s323 sweep cadence
+  → `fable-answers-s323.md` §6, memory `feedback_sweep_cadence`.
