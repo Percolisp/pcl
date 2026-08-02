@@ -329,3 +329,19 @@ not-supported.md → only then probe.*
   implicit defined() applies; emitted as `(box-set (p-if …) V)` via
   `_sole_ternary_lvalue_id` in BOTH '=' emitters, with box-set arms in both
   auto-defined matchers → defins.t t10, session-log s324.
+
+## R1 (2026-08-02)
+
+- **R1 IS CALLED (user, 2026-08-02, session s325) at `dc6ce64`, tag `R1`.**
+  R1 = correctness-by-gate.  The checklist that grounds it: Pl/t gate
+  `Result: PASS` 125 files / 4479 tests; full sweep 18461/926 with
+  sweep-diff 0 new / 0 fixed vs the 689-row baseline; four-dist CPAN board
+  zero regressions (one improvement, Try-Tiny `00-report-prereqs.t`
+  FAIL→PASS via #193, baseline advanced); suite snapshot current and
+  stamped (`# taken-at:` in `docs/perl-suite-run.tsv`; the 7 TIMEOUT rows
+  re-verified at `--timeout 300`, task #195); artifacts regenerated at gen
+  v2-95 (bodies byte-identical) → numbers in `docs/session-log.md` s325.
+  **The post-R1 backlog is now ACTIVE in its ruled order**
+  (`fable-answers-s323.md` §7): IO/`IO::Handle` shim → #189 `writes_args`
+  (+ delete `lib/File/Basename.pm`) → #163 → #176 step 2 → #184 → #185 →
+  #159 → #150 → #152 → E4.1/E5 per `docs/v2-opus5-execution-plan.md`.

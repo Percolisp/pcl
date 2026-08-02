@@ -51,6 +51,13 @@ s324), runs serialized so no gate poisons another's timings:
 **Every R1 checklist item is green.**  The R1 call itself is the user's;
 the numbers above are the hand-over.
 
+**And the user made the call: R1 IS CALLED (2026-08-02), tagged `R1` at
+`dc6ce64`.**  DECIDED.md §R1 records it with the grounding numbers.  The
+post-R1 backlog is now active in its ruled order (`fable-answers-s323.md`
+§7): IO/`IO::Handle` shim first (task #197), then #189, then the standing
+backlog, then E4.1/E5.  Task #25 (the R1 release gate) closes with this
+entry; v1 deletion (E4.1) proceeds as its own post-R1 work.
+
 ## Session 324 (2026-08-02, Fable) — #193 landed, and the two bugs it was standing on
 
 Rulings for the s323 round went out first (`docs/fable-answers-s323.md`,
