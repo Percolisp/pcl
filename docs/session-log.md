@@ -80,6 +80,51 @@ same 101 t-files.
   `openhan.t` 8/3 → 9/2 — and `docs/cpan-scoreboard.tsv` is re-blessed to that,
   so the three recovered rows are now themselves guarded.
 
+### s323b–s323d — three more, all from the same cause list
+
+- **The `redefining pcl:pl-unicode_to_native` warning the user spotted on
+  print.t was one duplicate, hit 17 times.**  `utf8::unicode_to_native` and
+  `native_to_unicode` were defined in BOTH `cl/pcl-runtime.lisp` and
+  `cl/pcl-test.lisp` (for charset_tools.pl).  The TAP layer loads AFTER the
+  runtime, so its copy silently won — the function behaved differently
+  depending on whether Test::More was loaded (the test copy unboxed, the
+  runtime one did not).  One definition now, keeping the unboxing body the
+  corpus has actually been running.  pl2cl/runtime stderr must stay clean:
+  test harnesses merge it into the generated CL.
+  (**blocks.t, asked about in the same breath, does NOT die** — 16 pass / 9
+  fail / 1 skip of 26, and all 9 are exactly its blessed baseline rows.  The
+  word "die" is in the row NAMES: `BEGIN{die} should exit`.)
+- **#190 a DECLARED sub beats indirect-object syntax.**  `divide $text => 4`
+  is `divide($text, 4)` — Perl resolves the bareword at compile time and a
+  known sub wins.  PCL agreed at statement level and DISAGREED inside `( … )`
+  or `[ … ]`, because only the nested form reaches PExpr's indirect-object
+  pre-pass, which had no notion of "this name is already a sub".  So the same
+  call parsed two ways depending on nesting, and `[ divide $stdtext => 4 ]`
+  died with `Can't locate object method "divide" via package "$var = do {…}"`
+  — a package name that was a chunk of source text.  Text-Balanced
+  05_extmul.t: 0 ok → 59.  **The breaking case, probed:** the first version
+  used the UNQUALIFIED declared-sub list and broke `[ show $w ]` where
+  `Widget::show` is a method; a sub declared in another package is not visible
+  as a bare word from main, so that really IS indirect syntax.  Hence the
+  package-qualified question — which the prototype table cannot answer at all,
+  being keyed by bare name.  Residue filed as #191 (pre-existing at HEAD).
+- **#192 an unqualified DYNAMIC glob name installed into main.**  perl's own
+  File::Path builds its platform constants with
+  `*{"_IS_\U$_"} = $^O eq $_ ? sub(){1} : sub(){0}` in a BEGIN loop; all four
+  landed in `main::`, and the next line of that same BEGIN block died with
+  "The function |File::Path|::pl-_IS_MSWIN32 is undefined" — the cause on three
+  `00-report-prereqs.t` files.  An unqualified symbolic name resolves in the
+  package IN EFFECT.  Follow-on #193 filed, not fixed: those constants are then
+  used as BAREWORDS, and 8 sites emit them as STRINGS (always true), so
+  `remove_tree` takes the VMS branch on Linux.
+- **#194 `getlogin`** added as a builtin (Data-Dump dd.t).  Four edits, and the
+  ExprToCL builtin-name list is the one that decides `p-` vs `pl-` emission —
+  the other three alone still emitted a user-sub call.
+- **Cadence change (USER):** stop running the full perl-tests sweep after every
+  single change.  Per change it is `tools/prove-core` plus a targeted
+  single-file sweep; the full sweep runs every ~5 changes and always once
+  before committing a batch.  Recorded in memory.
+
 ---
 
 ## Session 322 (2026-08-02, Opus 5) — the Fable s321 rulings executed, and a qr that was being frozen into a string
