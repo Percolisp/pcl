@@ -15,9 +15,9 @@ Design references: `docs/pcl-command-plan.md` (command interface),
 
 ## Where we're starting from
 
-The transpile-and-run mechanics already exist as dev helpers: `runpl` (transpile
+The transpile-and-run mechanics already exist as dev helpers: `runpcl` (transpile
 + run a snippet/file through the full pipeline, runtime + test lib loaded) and
-`runt`/`clt` (per-test-file). **`pcl` is essentially `runpl` productionised** —
+`runt`/`clt` (per-test-file). **`pcl` is essentially `runpcl` productionised** —
 argument handling, `@ARGV` injection, a clean exit code, and the caching tiers.
 So Phase 1 is polish around proven plumbing, not new ground.
 

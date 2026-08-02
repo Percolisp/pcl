@@ -63,7 +63,7 @@ update docs (§6). Never batch two work items into one commit.
   anchor is given as a function name or a unique grep string.
 - **`--no-cache` on every experimental pl2cl invocation.** Cached module
   transpiles will otherwise mix pipelines mid-experiment.
-- **grep runpl output with `grep -a`** (it can contain NUL bytes).
+- **grep runpcl output with `grep -a`** (it can contain NUL bytes).
 - Commands run from the repo root (`/home/bernt/pcl`). The Bash tool resets
   CWD between calls — do not rely on a `cd` from a previous call.
 
@@ -377,7 +377,7 @@ a bare block, keep the gate and record the decision; only if one of them
 is trivial (e.g. package statement as the last thing in a block) consider
 more. Do not sink more than an hour here — 2 files.
 
-**Verification programs** (run each under `PCL_V2=1 ./runpl` and `perl`,
+**Verification programs** (run each under `PCL_V2=1 ./runpcl` and `perl`,
 diff output):
 
 ```perl
@@ -993,7 +993,7 @@ Original steps below for reference.
 4. Perf check — v2 exists for speed. Recreate the benches from
    `docs/parser2-prototype.md` (fib(29) recursive, fib loop, intmath 2M
    iterations) as small .pl files in the scratchpad; time
-   `./runpl bench.pl` under both pipelines and `perl bench.pl`; subtract a
+   `./runpcl bench.pl` under both pipelines and `perl bench.pl`; subtract a
    null-program baseline run. Expected ballpark from s268: v2 fib(29)
    ≈0.08 s vs perl 0.138 s. Record the fresh numbers in
    `docs/parser2-prototype.md`. A regression here blocks the flip.
@@ -1091,7 +1091,7 @@ keys/values/each native iteration NOT done (bench first if ever).  Original belo
    print "$s\n";
    ```
 
-   Time perl vs v1 vs v2-today (`./runpl` both pipelines). Only proceed
+   Time perl vs v1 vs v2-today (`./runpcl` both pipelines). Only proceed
    if the v2 gap is real (expect yes: every element access round-trips
    the expression fallback and its `(let ((*wantarray* nil)) …)` wraps).
 2. ExprToCL2: add native READ lowering for `$h{k}` / `$a[$i]` where the
@@ -1523,18 +1523,18 @@ anywhere).
 | `The function main::pl-foo is undefined` at runtime | The sub definition never landed: nested sub not hoisted, prototype path not registered, or defs bucket ordering. Grep the generated .lisp for `p-sub pl-foo`. |
 | `Package FOO does not exist` at LOAD time | A qualified symbol was READ before its package existed. The pre-declaration set in `parse()` missed it — check `_referenced_pkgs`, `get_undeclared_packages`, and whether the emission happens before the `(pcl:p-defpackage :FOO)` line. |
 | `unbound variable $x` at load/run | Either a raw references a closed-scope lexical (W3 scoping), or `_forward_global_decls` skipped a name it shouldn't have (check its exclusion sets), or a defvar-poisoning case (a let-bound name got defvar'd — grep for `(defvar $x`). |
-| Wrong VALUE, no error | The worst class. Transpile the file under BOTH pipelines (`--no-cache --lenient-ppi`), `diff` the outputs, and read the first semantic divergence. Then shrink: copy the construct into a ≤10-line repro, run `PCL_V2=1 ./runpl repro.pl` vs `perl repro.pl` vs `./runpl repro.pl`. If v1 also differs from perl, it is a pre-existing v1 bug — record it, do NOT fix it in this workstream. |
+| Wrong VALUE, no error | The worst class. Transpile the file under BOTH pipelines (`--no-cache --lenient-ppi`), `diff` the outputs, and read the first semantic divergence. Then shrink: copy the construct into a ≤10-line repro, run `PCL_V2=1 ./runpcl repro.pl` vs `perl repro.pl` vs `./runpcl repro.pl`. If v1 also differs from perl, it is a pre-existing v1 bug — record it, do NOT fix it in this workstream. |
 | Test file hangs under v2 | `timeout 120` everything. A dropped continue/step → infinite loop; diff the loop forms between pipelines. See also `docs/debugging-hangs-crashes.md`. |
 | Value differs only in FULL file, not in your repro | Runtime state built up by earlier statements (last-accessed filehandle, `$.`; flip-flop state; `%ENV`). Instrument by inserting prints into a COPY of the generated .lisp (not the .t) and loading it via `sbcl --load cl/pcl-runtime.lisp --load copy.lisp`. |
 | Census says a previously-native file fell back | Your new gate over-fires. The census line shows the die message; loosen the precondition or accept the loss consciously (write it down). |
-| `./runt <name>` can't find helpers / `pl-plan undefined` | `runt` loads `cl/pcl-test.lisp` and runs from the right CWD; `runpl` does neither. Anything calling plan()/ok() needs `runt` and the file under `perl-tests/`. |
+| `./runt <name>` can't find helpers / `pl-plan undefined` | `runt` loads `cl/pcl-test.lisp` and runs from the right CWD; `runpcl` does neither. Anything calling plan()/ok() needs `runt` and the file under `perl-tests/`. |
 
 ### 5.5 Runner cheat-sheet
 
 ```bash
 echo '…' | PCL_V2=1 perl -I. pl2cl --no-cache      # transpile stdin, v2
 PCL_V2=1 ./pl2cl --no-cache --lenient-ppi F.t      # transpile a test file
-PCL_V2=1 ./runpl file.pl                           # transpile+run (CWD=repo root, no test.pl)
+PCL_V2=1 ./runpcl file.pl                           # transpile+run (CWD=repo root, no test.pl)
 PCL_V2=1 ./runt <name>                             # run perl-tests/<name>.t with TAP harness
 PCL_V2=1 perl sweep-perl-tests.pl --jobs 8 [files] # sweep (writes .faillog/)
 PCL_V2_VERBOSE=1                                   # print fallback reasons to stderr

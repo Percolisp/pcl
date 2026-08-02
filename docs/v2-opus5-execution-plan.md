@@ -60,7 +60,7 @@ has an answer in `docs/fable-answers-s316v.md` (s317) or `docs/DECIDED.md`.
    (`perl probe`).  For divergences: **v1 is still the oracle until
    E4.1** — check `PCL_V1=1 ./pl2cl` and copy its shape when it is
    correct; do not invent one.
-3. **Probes first**: minimal scratch files, perl vs `./runpl`, BEFORE
+3. **Probes first**: minimal scratch files, perl vs `./runpcl`, BEFORE
    editing (the s316t bugs were all found/verified this way, minutes
    each).
 4. **Implement.**  Reuse the sibling mechanism (CLAUDE.md 11) — grep for

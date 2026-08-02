@@ -22,7 +22,7 @@ failure or designing a fix, in this order:
    there; a failing test may already be explained.
 3. **`docs/test-debugging-runbook.md`** — the FIX-vs-REGISTER decision tree
    for perl-tests/suite failures.
-4. Only then probe (minimal scratch file, perl vs `./runpl`).
+4. Only then probe (minimal scratch file, perl vs `./runpcl`).
 
 And symmetrically, when work SETTLES a question: add a one-line pointer to
 `docs/DECIDED.md` in the same commit; put load-bearing semantic decisions

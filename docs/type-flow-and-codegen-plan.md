@@ -434,7 +434,7 @@ both string and bool is safe to store as a native CL string. The bool use
 compiles to the trivial `(or (string= s "") (string= s "0"))` test — exactly
 "is it the empty/zero string", nothing representation-sensitive.
 
-**Empirically verified** (`./runpl`, 2026-06-11):
+**Empirically verified** (`./runpcl`, 2026-06-11):
 
 | Perl expr | stringifies to | bool |
 |-----------|----------------|------|

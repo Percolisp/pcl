@@ -3,7 +3,7 @@
 # for operator precedence / associativity / ternary nesting / named-unary forms.
 #
 # For each generated snippet:  run it through real `perl` AND through PCL
-# (./runpl), normalize, and report only the MISMATCHES (incl. PCL parse errors).
+# (./runpcl), normalize, and report only the MISMATCHES (incl. PCL parse errors).
 # Every mismatch is a bug; the snippet doubles as a ready-made regression test.
 #
 # Usage:  perl tools/difftest-ops.pl [--jobs N] [--limit N] [--show-ok]
@@ -21,7 +21,7 @@ my $SHOW_OK = 0;
 GetOptions('jobs=i' => \$JOBS, 'limit=i' => \$LIMIT, 'show-ok' => \$SHOW_OK);
 
 my $ROOT  = abs_path(dirname(abs_path($0)) . "/..");
-my $RUNPL = "$ROOT/runpl";
+my $RUNPL = "$ROOT/runpcl";
 my $WORK  = "/tmp/difftest_$$";
 make_path($WORK);
 
@@ -868,7 +868,7 @@ print STDERR scalar(@active), " valid (", $n - @active, " skipped as invalid Per
 print STDERR "Running PCL on $JOBS workers...\n";
 
 # ---------------------------------------------------------------------------
-# Run PCL (./runpl) over the active snippets with a simple fork pool.
+# Run PCL (./runpcl) over the active snippets with a simple fork pool.
 # ---------------------------------------------------------------------------
 my %pid2i;
 my @queue = @active;

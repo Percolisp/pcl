@@ -20,7 +20,7 @@ infinite-loop fix holds — this is a *separate* downstream bug. The s250
 string-eval lexical-capture work did **not** fix it.
 
 Repro: `/tmp/moo_probe.pl` (recreate from the snippet above, with `print`s for
-`name`/`breed`). Run `perl -I lib FILE` (oracle) vs `./runpl FILE` (PCL).
+`name`/`breed`). Run `perl -I lib FILE` (oracle) vs `./runpcl FILE` (PCL).
 
 ## The failure chain (verified)
 
@@ -82,7 +82,7 @@ either:
       build that still runs the bootstrap body but is a different object than the
       load-time `\&new`).
 
-MGC's bootstrap `new` body (from `SUB_QUOTE_DEBUG=1 ./runpl` → `/tmp/sqdump.txt`,
+MGC's bootstrap `new` body (from `SUB_QUOTE_DEBUG=1 ./runpcl` → `/tmp/sqdump.txt`,
 lines ~9–52) is the chicken-and-egg constructor: it has the
 `if ($class ne "Method::Generate::Constructor")` subconstructor branch and an
 inline `my $args = ... {@_}` (no `BUILDARGS` hook), then the
@@ -123,7 +123,7 @@ through a different (deferred/2nd-body) path with a different calling convention
   `cp $(perl -MMethod::Generate::Constructor -e 'print $INC{"Method/Generate/Constructor.pm"}') lib/Method/Generate/Constructor.pm`,
   `chmod u+w`, add `warn`s. **REMOVE the copies afterwards** — they shadow
   site_perl and will break everything (and the gate) if left.
-- **Dump generated subs**: `SUB_QUOTE_DEBUG=1 ./runpl /tmp/moo_probe.pl > /tmp/sqdump.txt 2>&1`.
+- **Dump generated subs**: `SUB_QUOTE_DEBUG=1 ./runpcl /tmp/moo_probe.pl > /tmp/sqdump.txt 2>&1`.
   Host pl2cl's own Moo pollutes the dump — grep your package / the MGC `new`.
 - Run perl with `-I lib` to make perl honor the instrumented copies as the oracle.
 

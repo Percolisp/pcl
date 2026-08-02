@@ -4,12 +4,12 @@
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as the Perl 5 programming language system itself.
 
-# runpl — transpile and run an arbitrary Perl file through PCL.
+# runpcl — transpile and run an arbitrary Perl file through PCL.
 #
-# Usage:  ./runpl file.pl          # run a Perl file
-#         echo 'print 1+2' | ./runpl   # run from stdin
+# Usage:  ./runpcl file.pl          # run a Perl file
+#         echo 'print 1+2' | ./runpcl   # run from stdin
 #
-# Generates /tmp/runpl_N.lisp (transpiled CL code)
+# Generates /tmp/runpcl_N.lisp (transpiled CL code)
 # Prints filtered output to stdout.
 
 use strict;
@@ -19,7 +19,7 @@ use Cwd qw(abs_path);
 use File::Temp qw(tempfile);
 
 my $root = abs_path(dirname($0));
-my $lisp = "/tmp/runpl_$$.lisp";
+my $lisp = "/tmp/runpcl_$$.lisp";
 
 # Get input: file arg or stdin
 my $input_file;
@@ -28,18 +28,18 @@ if (@ARGV) {
     -f $input_file or die "File not found: $input_file\n";
 } else {
     # Read stdin to temp file
-    my ($fh, $fname) = tempfile('/tmp/runpl_stdin_XXXX', SUFFIX => '.pl', UNLINK => 1);
+    my ($fh, $fname) = tempfile('/tmp/runpcl_stdin_XXXX', SUFFIX => '.pl', UNLINK => 1);
     print $fh $_ while <STDIN>;
     close $fh;
     $input_file = $fname;
 }
 
 # Transpile
-system("perl -I$root $root/pl2cl --no-cache --lenient-ppi $input_file >$lisp 2>/tmp/runpl_$$.err");
+system("perl -I$root $root/pl2cl --no-cache --lenient-ppi $input_file >$lisp 2>/tmp/runpcl_$$.err");
 if ($? != 0) {
-    my $err = do { local $/; open(my $f,'<',"/tmp/runpl_$$.err") or die; <$f> };
+    my $err = do { local $/; open(my $f,'<',"/tmp/runpcl_$$.err") or die; <$f> };
     print STDERR "Transpile failed:\n$err";
-    unlink $lisp, "/tmp/runpl_$$.err";
+    unlink $lisp, "/tmp/runpcl_$$.err";
     exit 1;
 }
 
@@ -51,7 +51,7 @@ if ($? != 0) {
 my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $lisp 2>&1`;
 
 # Cleanup
-unlink $lisp, "/tmp/runpl_$$.err";
+unlink $lisp, "/tmp/runpcl_$$.err";
 
 # Filter SBCL noise and print
 $raw =~ s/^;[^\n]*\n//gm;

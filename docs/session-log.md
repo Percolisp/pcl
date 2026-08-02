@@ -54,7 +54,7 @@ failing predicate under perl vs PCL first; the layer follows from who
 diverges.  §3 #202 runs FIRST, then re-verify the four-dist PASSes that
 contained fake assertions.  §4 sweep TOTAL-passing becomes a machine-checked
 gate — sweep-diff grows a LOST bucket (task #204), landing before #152.
-#200 (runpl rename) stays parked by the user.
+#200 rename runpl→runpcl: ruled by the user after this entry (clean cut, no symlink) and DONE in the follow-up commit.
 
 Gates: corpus-diff identical (111 files); `Pl/t` gate PASS **127 files /
 4516** (2 new rows); state.t targeted 157/166 unchanged; gen bumped
@@ -538,7 +538,7 @@ started and killed at session end; it has not been measured yet.
   always did.  The false claim came from `grep`ping `docs/fail-baseline.tsv`,
   which contains NUL bytes — grep then treats the file as binary and prints
   *nothing*, which reads exactly like "no matches".  (The project already had
-  this gotcha written down for `./runpl`; it applies to every `.tsv` under
+  this gotcha written down for `./runpcl`; it applies to every `.tsv` under
   `.faillog/` and `docs/` — use `grep -a` or perl.)  The hole was narrower
   than believed but real: a timing-out file's baseline rows come back
   "DID NOT RUN — unverified", so a regression inside it is invisible while the
@@ -1208,7 +1208,7 @@ is no clean split to hang it on.  Flagged rather than approximated.
   after the normal branch failed; `p-gethash` tests `hash-table-p`, the same
   test GETHASH did internally.  Zero added cost on correct code.
 - **Diagnosis technique that worked** when probes couldn't see the fire:
-  `./runpl` aborts too early, so log from `%p-not-a-ref` to a FILE plus
+  `./runpcl` aborts too early, so log from `%p-not-a-ref` to a FILE plus
   `(sb-debug:print-backtrace :count 6)` and run the SWEEP — the backtrace
   named `(SETF P-GETHASH-DEREF)` and the double-box argument immediately.
 - **PROCESS FAILURE worth remembering**: to compare against HEAD I saved the
@@ -2437,7 +2437,7 @@ be blessed wholesale.  Constructs already identified: op/stash_parse_gv.t
 = malloc-sensitive `tr` with raw latin1 bytes (RT #134067) and
 `s~~00~-y~…~` (gh#17277), likely the byte/unicode string family.  Method
 to resume: lift the child program out of the `fresh_perl_is(qq[…])` call,
-run it standalone with `./runpl`, diff against real perl.  Task #127
+run it standalone with `./runpcl`, diff against real perl.  Task #127
 carries the per-file counts and the full plan.
 
 ---
@@ -3487,7 +3487,7 @@ explicitly rather than inheriting whatever the previous section left.
   names nothing writes) + 7 registry rows (5 NUL, 2 under the settled
   §error-text).  **lex.t FULLY PASSING → 62 fully passing**; baseline
   rows dropped; CLAUDE.md updated.
-- runpl NOTE: the wrapper swallows child exit codes generally
+- runpcl NOTE: the wrapper swallows child exit codes generally
   (pre-existing); pclperl-for-tests propagates them correctly.
 
 ## Session 310j (2026-07-24, Fable) — underscore in named-capture group names; op/groups.t OK.
@@ -6609,7 +6609,7 @@ plan below is ready to execute.**
   %h/@a Symbol (PPI `->symbol`).  Regression tests in
   `Pl/t/transpile-test-16.t`.
 - Gotchas re-learned: sweep parallel flakiness (verify with --jobs 1);
-  v1-baseline sweep run overwrites `.faillog/`; runpl can't run
+  v1-baseline sweep run overwrites `.faillog/`; runpcl can't run
   test.pl-based perl-tests (use the sweep's sbcl line).
 
 ---
@@ -6889,7 +6889,7 @@ default (see checklist below), run the full plain gates, ONE commit.
 - `pl2cl`: `$PARSER_CLASS` defaults to `Pl::Parser2`; `PCL_V1=1` = escape
   hatch to v1; `PCL_V2=1` accepted as a no-op. begin-end-01's pipeline-aware
   branch re-keyed `$ENV{PCL_V2}` → `!$ENV{PCL_V1}`.
-- Bench (startup-subtracted, runpl): fib(29) v2 ≈0.05 s / v1 ≈0.15 s /
+- Bench (startup-subtracted, runpcl): fib(29) v2 ≈0.05 s / v1 ≈0.15 s /
   perl 0.14 s — v2 beats perl; intloop noise-level fast. No regression.
 - Gates re-run clean-env (v2 default) and `PCL_V1=1` (v1 baseline): both
   green (114 files). CLAUDE.md + parser2-prototype.md + completion plan
@@ -7179,7 +7179,7 @@ statement-form `package Foo;`.
   (`_check_sub_captures`) — named subs hoist outside the nested lets, so
   `my $test; sub is { $test++ }` (qq.t) compiled a free symbol.  Anonymous
   subs unaffected (lower in place).
-- **`PCL_V2=1` never reached v2 in ANY runner** (runpl/runt/clt/sweep all
+- **`PCL_V2=1` never reached v2 in ANY runner** (runpcl/runt/clt/sweep all
   pass `--lenient-ppi`, which parse_with_fallback routed straight to v1) —
   prior sweep "parity" numbers silently measured v1.  Fixed: the flag is
   ignored for the v2 attempt (it only matters when PPI can't parse, and
@@ -7869,7 +7869,7 @@ caller's box, `sort{$a<=>$b}` still rebinds. **foreach loop var:** added to
 `_let_bound_vars` for the body (it lived only in `_lexical_foreach_vars`).
 
 **Method = differential fuzzing vs real perl** (write snippet to file, `perl
-file` vs `./runpl file` — NEVER inline `perl -e`, the shell mangles `$`). Two
+file` vs `./runpcl file` — NEVER inline `perl -e`, the shell mangles `$`). Two
 hand batteries found 5 bugs; fixed the 3 that were the feature's
 (`my $a` capture, closure-rename key, foreach var), 2 are PRE-EXISTING (fail on
 clean HEAD): named-sort-comparator-defined-after-use-inside-a-sub; and
@@ -7970,7 +7970,7 @@ Continued to Moo after the list-flatten work. **Two fixes, both general:**
    Sub::Quote evals `{ my $default_for_b = ${$_[1]->{...}}; sub new { ...
    $default_for_b->($new) ... } }` — the named `sub new` read the unset
    global.  `has b => (default => sub {"cb"})` now works (moo8.pl GREEN).
-   Diagnosis trick: `SUB_QUOTE_DEBUG=1 ./runpl ...` dumps every generated
+   Diagnosis trick: `SUB_QUOTE_DEBUG=1 ./runpcl ...` dumps every generated
    sub (note: host-perl pl2cl also uses Moo, so most of the dump is the
    transpiler's own Sub::Quote — grep for your package).
 
@@ -8550,7 +8550,7 @@ transitive, correct case). Gate **91/3309**, sweep-diff **0 new / 0 fixed**, 69 
 Tests `misc-fixes-01.t` 118→120. **Class::Inspector is now fully working.**
 
 **Methodology note (answered for the user):** CPAN modules are currently tested by **smoke probes**
-— tiny `use Mod; …` drivers through `./runpl`, each output diffed **byte-for-byte against stock
+— tiny `use Mod; …` drivers through `./runpcl`, each output diffed **byte-for-byte against stock
 perl** — NOT by running the modules' own `t/*.t` suites. Reason: a dist's `t/` uses `use Test::More`,
 which PCL resolves to the real site-perl Test2 stack → `%Config` unbound → crash (the `perl-tests/`
 files dodge this by using perl-core's `require './test.pl'` instead). **Gateway to running real
@@ -8601,7 +8601,7 @@ default. See [[project_cpan_module_survey]].
 ## Session 238b (2026-06-07) — CPAN survey of installed pure-Perl modules; symbolic-ref/stash introspection fixed
 
 User asked to go back to CPAN modules and find **simpler-than-Moo** targets, *"ask before
-installing"*. Surveyed the **already-installed** pure-Perl modules (no CPAN fetch) via `./runpl`
+installing"*. Surveyed the **already-installed** pure-Perl modules (no CPAN fetch) via `./runpcl`
 smoke probes. Findings: `oo.pm` loads (trivial); **Class::Inspector** & **Sub::Override** load and
 their *cores* nearly work but hit symbol-table introspection gaps; `Test::Deep` hit
 `Scalar::Util::@EXPORT_FAIL` unbound; `YAML::PP` = compile-file failure; `Sub::Uplevel` = `uplevel`

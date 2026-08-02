@@ -131,7 +131,7 @@ sub run {
     return \%tag;
 }
 my $perl = run('perl', $prog);
-my $pcl  = run('./runpl', $prog);
+my $pcl  = run('./runpcl', $prog);
 
 # Compare per tag.
 my (%pass, %fail, @miss);

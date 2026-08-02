@@ -1,6 +1,6 @@
 # CPAN Module Test Log
 
-A running log of CPAN / core modules tried through PCL (`./runpl`), the outcome,
+A running log of CPAN / core modules tried through PCL (`./runpcl`), the outcome,
 and the bugs each one surfaced. Newest entries first. The point is twofold:
 (1) track which modules work end-to-end, and (2) test the "do problems converge
 to a finite shared bucket of bugs?" hypothesis — see
@@ -160,7 +160,7 @@ the finallys — only DESTROY can see that unwind.  Guard test in
 
 ## Module survey 2026-06-23 (session after s264) — 3 general bugs fixed
 
-Batch-tested core/CPAN modules through `./runpl`. Most work
+Batch-tested core/CPAN modules through `./runpcl`. Most work
 (List::Util incl. `pairs`/`reduce`/`uniq`, Scalar::Util, POSIX, Getopt::Long,
 overload, `use constant`, Data::Dump). Surfaced **three general bugs**, all
 fixed (none module-specific):
@@ -235,9 +235,9 @@ branch is live and exercised.
 
 ```
 echo 'use Some::Module; ...' > /tmp/m.pl
-./runpl /tmp/m.pl                 # PCL
+./runpcl /tmp/m.pl                 # PCL
 perl /tmp/m.pl                    # oracle
-diff <(./runpl /tmp/m.pl) <(perl /tmp/m.pl)
+diff <(./runpcl /tmp/m.pl) <(perl /tmp/m.pl)
 ```
 
 Record: module, status, what worked, what broke, and whether the bug was

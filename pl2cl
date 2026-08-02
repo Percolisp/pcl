@@ -55,7 +55,7 @@ sub parse_with_fallback {
     # lenient_ppi only changes behaviour when PPI can't parse the whole file —
     # and in that case Parser2 dies ("PPI parse failed") and we land in v1
     # (with the flag) below anyway.  So v2 may safely ignore it; blocking on
-    # it would disable v2 for every runner (runpl/runt/sweep all pass it).
+    # it would disable v2 for every runner (runpcl/runt/sweep all pass it).
     delete $opts{lenient_ppi};
     # E3: eval-string mode is v2-native (Parser2 eval_mode/eval_pkg); any
     # other special mode still routes to v1.

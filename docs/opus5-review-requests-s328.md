@@ -157,7 +157,7 @@ memory note is not a gate.
 
 1. **#200 — rename `./runpl` → `./runpcl`** (user, this session).  Mechanical
    but wide: the script, CLAUDE.md, `docs/*.md`, `tools/*`, `Pl/t` helpers,
-   memory files.  Open sub-question I did not decide: keep a `runpl` symlink
+   memory files.  Open sub-question I did not decide: keep a `runpcl` symlink
    for one release, or cut it clean?  And do `./runt` / `./clt` deserve the
    same pass while we are in there?
 2. **Cadence is unchanged** and I followed it: per change `tools/prove-core` +

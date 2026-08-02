@@ -2,7 +2,7 @@
 
 A **proactive** bug-finding tool: it generates small Perl snippets over
 enumerable language axes, runs each through real `perl` (the *oracle*) **and**
-through PCL (`./runpl`), and reports only the mismatches. Every mismatch is a
+through PCL (`./runpcl`), and reports only the mismatches. Every mismatch is a
 PCL bug (or a deliberately-documented divergence); the snippet doubles as a
 ready-made regression test.
 
@@ -54,8 +54,8 @@ RESULT: 761 valid snippets, 757 match, 4 MISMATCH in 2 clusters
    (`$? != 0`), the snippet is **skipped** — PCL is a transpiler for *valid*
    Perl, not a validator (CLAUDE.md principle 9), so invalid input is out of
    scope.
-3. **PCL**: run the same file through `./runpl` in a fork pool (parallel-safe —
-   `runpl` uses `$$`-based temp names).
+3. **PCL**: run the same file through `./runpcl` in a fork pool (parallel-safe —
+   `runpcl` uses `$$`-based temp names).
 4. **Normalize** each program's stdout to its `[...]` payload via `extract()`,
    which also collapses reference hex addresses (`ARRAY(0x55f..)` → `0xADDR`) so
    only the ref *type* is compared, and maps PCL parse/runtime failures to the

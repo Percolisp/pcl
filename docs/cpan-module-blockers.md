@@ -204,7 +204,7 @@ fbinds the symbol but does NOT register it in `*p-declared-subs*` as `:defined`,
 ## Quick re-survey command
 
 ```
-for m in moo m_rt m_lu3 ; do echo "== $m =="; timeout 90 ./runpl /tmp/$m.pl 2>&1 \
+for m in moo m_rt m_lu3 ; do echo "== $m =="; timeout 90 ./runpcl /tmp/$m.pl 2>&1 \
   | grep -avE '^;|Runtime loaded|PCL Test' | head -4; done
 ```
 (Recreate the tiny drivers from the survey memory if `/tmp` was cleared.)

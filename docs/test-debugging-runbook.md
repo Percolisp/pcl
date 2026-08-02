@@ -20,14 +20,14 @@ cat .faillog/<file>.fails.tsv                # file⇥num⇥description⇥got⇥
 ```
 For **each** failing line, read `got` vs `expected` and route it with the decision tree (§2).
 The got/expected column usually tells you the cause without opening anything else. If you
-need the generated CL: `./clt <file>` (no SBCL) or `./runpl` for a snippet.
+need the generated CL: `./clt <file>` (no SBCL) or `./runpcl` for a snippet.
 
 ## 2. Decision tree: FIX the bug, or REGISTER it as not-supported?
 
 Route each failure by what `got`/`expected` shows:
 
 - **`got` is a Perl-plausible wrong value** (wrong number/string/order) → **real bug → FIX it.**
-  Reproduce minimally with `./runpl`, fix in `Pl/*.pm` or `cl/pcl-runtime.lisp`, add a
+  Reproduce minimally with `./runpcl`, fix in `Pl/*.pm` or `cl/pcl-runtime.lisp`, add a
   `Pl/t/*-01.t` regression test (CLAUDE.md principle 6).
 - **`got` leaks an SBCL artifact** (`#S(P-BOX …`, `… is not an array with a fill pointer`,
   `The function … is undefined`) → PCL crashed where Perl would error cleanly. Usually a

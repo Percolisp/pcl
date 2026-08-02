@@ -155,7 +155,7 @@ s252 targeted fix left open.
   exported keywords).
 - **Load orchestration**: cl-ppcre/ASDF must load *first* under the standard
   readtable; `:invert` must be bound only while reading PCL files. Every entry
-  point (`pl2cl` load + FASL compile, `runpl`, `cl/test-runtime.lisp`, the `pcl`
+  point (`pl2cl` load + FASL compile, `runpcl`, `cl/test-runtime.lisp`, the `pcl`
   runner) needs the scoped binding.
 - `:invert` is bijective and round-trips on print, and `ref()`/method-name
   strings are already orig-case out-of-band, so **user-visible output is

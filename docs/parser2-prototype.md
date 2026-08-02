@@ -15,7 +15,7 @@ items #1/#2/#3 + a first cut of Phase-4 unboxing), reviewed in
 ```bash
 ./pl2cl < prog.pl              # v2 (default since W9)
 PCL_V1=1 ./pl2cl < prog.pl     # v1 escape hatch
-PCL_V1=1 ./runpl prog.pl       # runs through the same env switch
+PCL_V1=1 ./runpcl prog.pl       # runs through the same env switch
 ```
 
 (Older sections below still say "opt-in via PCL_V2" — they describe the
@@ -245,7 +245,7 @@ section model:
 - **Octal-literal fix in ExprToCL2**: the native number gate accepted
   `0100`, which CL reads as decimal 100 (perl: octal 64).  Leading-zero
   integers now route to the fallback (`#o100`).  Found by num.t under v2.
-- **`PCL_V2=1` now actually reaches v2 in every runner**: runpl/runt/clt/
+- **`PCL_V2=1` now actually reaches v2 in every runner**: runpcl/runt/clt/
   sweep all pass `--lenient-ppi`, which `parse_with_fallback` treated as a
   "special mode → v1" — so prior sweep "parity" runs silently measured v1.
   The flag only matters when PPI can't parse the file, and Parser2 dies to

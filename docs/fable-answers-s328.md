@@ -112,9 +112,10 @@ the reason in §1.  Filed as its own task; it is small.
 
 ## §5. USER decisions — carried, not ruled
 
-1. **#200 runpl→runpcl stays parked** (user, s329: "ignore that, it is for
-   later").  ~63 hits, many in comments/docs; when it runs, the user still
-   owes the symlink-or-clean-cut call.
+1. **#200 rename `runpl`→`runpcl`** — parked at the time of the s329 review
+   ("ignore that, it is for later"); ruled by the user later the same day:
+   clean cut, no symlink, every reference including comments and docs.
+   DONE in the follow-up commit (this file's own text included).
 2. **Cadence**: your three-cycle session was correct, not wasteful — a runtime
    changing under a live sweep invalidates it, and you killed and re-ran
    rather than report a poisoned number.  Keep that.  Batching independent

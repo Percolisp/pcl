@@ -140,7 +140,7 @@ diag '-------- Scalar::Util::dualvar:';
 
 # Test 9: Scalar::Util::dualvar builds a real dualvar (numeric AND string), and
 # the two halves survive arrays, hashes and @_ (regression: the shim used to
-# return only the string).  Uses ./runpl because `use Scalar::Util` needs the
+# return only the string).  Uses ./runpcl because `use Scalar::Util` needs the
 # module-loading path that the bare run_lisp helper does not set up.
 {
     my $code = <<'PERL';
@@ -157,7 +157,7 @@ PERL
     my ($cfh, $cfile) = tempfile(SUFFIX => '.pl');
     print $cfh $code;
     close $cfh;
-    my $result = `./runpl "$cfile" 2>&1`;
+    my $result = `./runpcl "$cfile" 2>&1`;
     unlink $cfile;
     like($result, qr/n:42 s:forty-two/,   'dualvar: direct numeric + string');
     like($result, qr/an:42 as:forty-two/, 'dualvar: survives array storage');

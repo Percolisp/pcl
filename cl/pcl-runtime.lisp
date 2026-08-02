@@ -44,7 +44,7 @@
             If cl-ppcre was installed via Quicklisp, note that `sbcl --script` ~
             skips ~~/.sbclrc, so Quicklisp never registers with ASDF in that ~
             mode.  Run via `sbcl --noinform --non-interactive --load ~
-            cl/pcl-runtime.lisp --load FILE` (what ./runpl does) instead of ~
+            cl/pcl-runtime.lisp --load FILE` (what ./runpcl does) instead of ~
             --script, or make cl-ppcre visible to plain ASDF." e)))
 
 ;;; Load sb-posix for process ID

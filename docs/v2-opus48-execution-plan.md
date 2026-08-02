@@ -248,7 +248,7 @@ pre-existing failure).
    (`PCL_V1=1 ./pl2cl`)?  Copy v1's emitted shape — do not invent one.
 4. **Implement**, gating everything you cannot lower fully correctly
    (`die "Parser2 TODO: <precise reason>"`).  Minimal probes first
-   (perl vs `./runpl` on scratch files), then the real file.
+   (perl vs `./runpcl` on scratch files), then the real file.
 5. **Verification triple** (§1 rule 1): `tools/corpus-diff.pl`, sweeps of
    changed files, `tools/prove-core`.
 6. **Regression guards**: emission shapes → `Pl/t/parser2-01.t`

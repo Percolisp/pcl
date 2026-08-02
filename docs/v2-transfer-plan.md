@@ -241,7 +241,7 @@
 >   suspicious per-file result with `--jobs 1` before debugging it.
 > - The v1-comparison sweep run **overwrites `.faillog/`** — capture v2's
 >   faillog before running the v1 baseline.
-> - `./runpl perl-tests/foo.t` cannot run test.pl-based files (BEGIN
+> - `./runpcl perl-tests/foo.t` cannot run test.pl-based files (BEGIN
 >   `require './test.pl'` needs CWD=perl-tests and the sweep's pcl-test.lisp
 >   provides plan/is/ok) — reproduce sweep failures with the sweep line:
 >   `timeout 60 sbcl --control-stack-size 512 --noinform --non-interactive
