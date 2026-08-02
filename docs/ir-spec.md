@@ -676,8 +676,17 @@ Four source forms, four fates:
   are a separate namespace — `last LBL` inside is unaffected.
 - **Computed** `goto EXPR` where EXPR is a **label name string** — a CL
   tagbody tag is not a first-class value, so this cannot be expressed.
-  `%p-goto-target` DIES naming the operand rather than doing nothing
-  (rule 12); documented divergence in `docs/not-supported.md`.
+  `%p-goto-target` ANNOUNCES the operand on stderr and execution falls
+  through past the goto (announced-not-silent; a die measurably aborts
+  whole files — the rule-12 boundary ruling, `fable-answers-s328.md` §1);
+  documented divergence in `docs/not-supported.md`.
+
+Context: every goto tail call restores `*wantarray*` to the goto-ing sub's
+`*pcl-caller-wantarray*` around the apply (s329) — the target inherits the
+ORIGINAL caller's context, exactly as `p-return` restores context for its
+argument.  The frame replacement is throw-based, so a goto CHAIN still
+nests dynamic bindings: bounded at ~10^5 in practice where perl is
+constant-depth (`not-supported.md` §goto depth note).
 
 **Not a gap: `goto` INTO a construct.**  Jumping to a label that sits
 *inside* a loop/block body from outside it ("Use of `goto` to jump into a

@@ -7452,11 +7452,18 @@ and never for $_, which must stay a box (s///, chomp write through it)."
    The TARGET expression is evaluated FIRST, in the CURRENT (un-popped) frame:
    `goto &{EXPR}` runs EXPR before the frame is replaced, so Exporter's
    `goto &{as_heavy()}` lets as_heavy read (caller(1))[3] off the real stack to
-   choose heavy_import vs heavy_export.  Only then pop and apply."
+   choose heavy_import vs heavy_export.  Only then pop and apply.
+
+   *wantarray* must be restored to *pcl-caller-wantarray* around the apply:
+   the goto statement itself runs in per-statement context (usually void), but
+   the target inherits the ORIGINAL caller's context — `sub f { goto &g }` in
+   list context must run g in list context (s329 review; same restore p-return
+   does for its argument)."
   (let ((target (gensym "GOTO-TARGET")))
     `(let ((,target ,fn))
        (throw :p-return
-         (let ((*pcl-current-package*
+         (let ((*wantarray* *pcl-caller-wantarray*)
+               (*pcl-current-package*
                 (if *pcl-caller-pkg-stack*
                     (car *pcl-caller-pkg-stack*) *pcl-current-package*))
                (*pcl-caller-pkg-stack*
@@ -10954,7 +10961,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-97"
+(defparameter *pcl-cache-generation* "v2-98"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

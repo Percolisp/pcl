@@ -4816,7 +4816,12 @@ sub _lower_block {
           #   sub s1 { my $fh; … }                 # its own lexical
           #   sub nf { open my $fh, '>', …; … }    # vetoed → free var, CRASH
           # (Capture-Tiny's t/lib/Utils.pm, task #199: `Utils::$fh is unbound`.)
-          next if $self->_sub_declares_name($sub, $n);
+          # The declaration must cover EVERY use, though: a sub can reference
+          # the file-level cell AND declare its own shadow in an inner block —
+          # `sub t { my $l = <$fh>; { my $fh; } }` — and exempting on the
+          # shadow alone strands the outer reference (s329 review probe).
+          next if $self->_sub_declares_name($sub, $n)
+               && !$self->_sub_freely_references_name($sub, $n);
           $vetoed = 1; last SUBSCAN;
         }
       }
@@ -4984,6 +4989,75 @@ sub _sub_declares_name {
     return 1 if $self->_symbol_is_declarator($sym);
   }
   return 0;
+}
+
+# Does $sub contain a FREE reference to $name — a use not covered by any of
+# the sub's own declarations of that name?  A use is covered when some
+# declarator of the exact name precedes it in document order AND the block the
+# declaration scopes over contains the use (a declarator in a compound header
+# — `foreach my $fh` — scopes over the compound's BODY only, not the block
+# holding the compound).  Perl scopes a `my` from the END of its statement, so
+# a same-statement use (`my $fh = f($fh)`) really refers to the outer cell;
+# that shape warns in perl and is not distinguished here — it stays covered,
+# which errs toward exempting.  Everything else errs toward VETO, the old
+# conservative behavior.
+sub _sub_freely_references_name {
+  my ($self, $sub, $name) = @_;
+  my $sigil = substr($name, 0, 1);
+  my $base  = substr($name, 1);
+  my $pat   = qr/\Q$sigil\E\Q$base\E\b/;
+  my @decls;    # find() returns document order, so earlier index = earlier decl
+  my @refs;     # [$token, #decls seen before it] — only EARLIER decls can cover
+  for my $tok (@{ $sub->find('PPI::Token') || [] }) {
+    if ($tok->isa('PPI::Token::Symbol')) {
+      next if $tok->content ne $name;
+      if ($self->_symbol_is_declarator($tok)) { push @decls, $tok }
+      else { push @refs, [$tok, scalar @decls] }
+    }
+    else {
+      # The name can hide inside tokens that are not Symbols: `<$fh>` is one
+      # QuoteLike::Readline token, and "$fh"/regex bodies interpolate.  Those
+      # are always USES, never declarators.  Single-quoted strings don't
+      # interpolate; comments/POD are noise.
+      next if $tok->isa('PPI::Token::Quote::Single')
+           || $tok->isa('PPI::Token::Comment')
+           || $tok->isa('PPI::Token::Pod');
+      next if $tok->content !~ $pat;
+      push @refs, [$tok, scalar @decls];
+    }
+  }
+  REF: for my $r (@refs) {
+    my ($tok, $ndecl) = @$r;
+    for my $i (0 .. $ndecl - 1) {
+      my $scope = $self->_decl_scope_block($decls[$i], $sub);
+      my $b = $tok;
+      while ($b && $b != $sub) {
+        next REF if $b == $scope;
+        $b = $b->parent;
+      }
+    }
+    return 1;
+  }
+  return 0;
+}
+
+# The block a declarator's `my` scopes over, within $sub: the nearest
+# enclosing Structure::Block — unless the declarator sits in a compound
+# HEADER (`foreach my $x (…)`, `if (my $x = …)`), in which case it scopes
+# over that compound's body block only.
+sub _decl_scope_block {
+  my ($self, $decl, $sub) = @_;
+  my $node = $decl;
+  while ($node && $node != $sub) {
+    my $parent = $node->parent or last;
+    return $parent if $parent->isa('PPI::Structure::Block');
+    if ($parent->isa('PPI::Statement::Compound')) {
+      my ($blk) = grep { $_->isa('PPI::Structure::Block') } $parent->schildren;
+      return $blk if $blk;
+    }
+    $node = $parent;
+  }
+  return $sub;
 }
 
 sub _lower_stmt {

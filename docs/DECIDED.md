@@ -468,3 +468,40 @@ not-supported.md → only then probe.*
   4 PARTIAL / 16 FAIL of 24**; the 16 residual causes are measured per file
   in task #201 (File::Temp template check, tie-on-glob arity, closed-stream
   writes, `local $ENV{...}`).
+
+## s329 (Fable, 2026-08-02): s328 review + rulings on its asks
+
+- **Rule-12 boundary RULED: DIE vs ANNOUNCE is decided by whether a VALUE
+  flows onward.**  A missing case that should have produced/written a value
+  the program consumes → DIE naming it.  An EFFECT-ONLY missing case (jump,
+  tie, attribute) in code that otherwise runs correctly → ANNOUNCE on stderr
+  + `not-supported.md` entry; unclassifiable-in-a-minute counts as
+  value-producing.  De-dup announcements once per (site, operand) per
+  process via ONE shared helper, introduced at the start of #152 — not
+  per-site hashes.  → `fable-answers-s328.md` §1; gates how #152 runs.
+- **Sweep TOTAL-passing is a GATE, machine-checked**: the total must not
+  fall vs baseline; any fall explained per file.  `sweep-diff` grows a
+  fourth bucket (LOST = baseline-passing rows the run did not produce),
+  non-empty LOST = not clean.  Must land BEFORE #152.  →
+  `fable-answers-s328.md` §4, task #204.
+- **#202 runs FIRST (before #189)** as harness-trust calibration; after it,
+  re-verify the four-dist baseline PASSes that contained fake assertions
+  (File-Which 01_use.t is nothing but one).  use_ok's TAP description must
+  match Test::More's (`use Foo;` — no import list).  →
+  `fable-answers-s328.md` §3.
+- **#201 File::Temp layer: probe the failing PREDICATE, not the module** —
+  run the exact template check under perl and PCL; PCL-only divergence →
+  fix the core mechanism (no File::Temp name under `Pl/`/`cl/`), both-fail →
+  fix the shim.  Same procedure for the rest of #201.  →
+  `fable-answers-s328.md` §2.
+- **`goto` restores the ORIGINAL caller's `*wantarray*`** (s329 review fix;
+  pre-existing hole in `p-goto-sub`, both spellings ran the target in the
+  goto statement's own context).  Guard `goto-sub-phase-01.t` (17 rows).
+- **Deep `goto &sub` chains are BOUNDED under PCL** (binding-stack, ~10^5),
+  where perl is constant-depth → `not-supported.md` §goto-trampolines.
+- **Embedded-`my` veto exemption requires NO FREE REFERENCE** — declaring an
+  inner shadow is not enough (`_sub_freely_references_name`: doc-order +
+  block-containment; compound-header `my` scopes to the body; `<$fh>` and
+  interpolations count as uses — Symbol-only scans cannot see them).
+  Residual poisoned-name defvar hole (crashes loudly in every era) → task
+  #205.

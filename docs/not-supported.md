@@ -699,6 +699,13 @@ site.
 **Rationale:** Runtime-computed `goto LABEL` has no clean CL target (tags are lexical,
 not first-class).  It is rare and discouraged in modern Perl.
 
+**Depth note (s329):** `goto &sub` replaces the frame in perl, so an unbounded
+goto CHAIN (a goto-based trampoline) runs at constant stack.  PCL's frame
+replacement is throw-based and still nests dynamic bindings, so a chain is
+BOUNDED — ~10^5 chained gotos exhaust SBCL's binding stack.  Every CPAN use
+seen so far is a bounded chain (usually depth 1: `unshift @_, …; goto \&impl`),
+which is fully supported; a true trampoline loop is not.
+
 **Affected tests:** `perl-tests/state.t` "computed goto" rows (70–73).
 
 ---

@@ -4,6 +4,63 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 329 (2026-08-02, Fable) — s328 review: approved, two probe-found fixes; the four asks ruled
+
+Review of `599ab90` probed the seams, s327-style.  Verdict: **approved** —
+all four fixes sit in shared mechanisms with inverse guards.  Two divergences
+fell out, both one level UNDER the diff rather than in it (fixed here):
+
+- **`p-goto-sub` never restored `*wantarray*`** — the target ran in the goto
+  *statement's* context, so `sub f { goto &t }` called in list context ran t
+  in scalar context.  Both spellings, pre-existing (s328 only widened the
+  blast radius by routing Capture::Tiny's whole API through it).  Fixed with
+  the same restore `p-return` does; +2 guard rows
+  (`goto-sub-phase-01.t`, 15 → 17).
+- **The embedded-`my` veto exemption had a scope hole**: it keyed on "ANY
+  occurrence in the sibling sub is a declarator", so a sub that references
+  the outer `$fh` AND declares an inner shadow was exempted — stranding the
+  outer reference unbound.  Root cause is a scanner blindness: `$fh` inside
+  `<$fh>` is a QuoteLike::Readline token, not a Symbol, so Symbol-only scans
+  (the exemption AND the forward-defvar scan) never see those uses.  Fixed:
+  exempt only when the sub declares the name and has **no free reference**
+  (`_sub_freely_references_name`: document order + block containment,
+  compound-header `my` scopes to its body only, non-Symbol interpolating
+  tokens count as uses).  Corpus emission identical across all 111 files —
+  the shapes that change sit outside the corpus.
+
+**Residual filed (task #205), not fixed:** when the name is ALSO
+section-let-bound anywhere (`_reg_lex` — a shadow, a loop var),
+`_forward_global_decls` rightly refuses to defvar it, so the veto-fallback
+global never exists and the file dies `$fh is unbound` at load.  Probed: that
+shape crashed pre-s328, at s328 (via the exemption, differently), and now —
+loudly in every era, so it is a fix target, not a regression.  It is the
+poisoned-name rename case missing hidden-use shapes.
+
+Also measured: a 200k `goto &sub` chain exhausts the binding stack where perl
+runs constant-depth (throw-based frame replacement still nests) — registered
+in `not-supported.md` §goto depth note.  One doc divergence caught: s328's
+`ir-spec.md` §6.4 said the label form "DIES naming the operand" while the
+shipped (and correct) behavior announces and falls through — the normative
+doc now matches the code.  Probes that matched perl exactly:
+label announce+fall-through, nested phase-block locals, use_ok/require_ok
+load+import+failure rows, version arg, builder singleton + handles + unknown
+method dying by name.
+
+**Rulings** (full text `docs/fable-answers-s328.md`, index in DECIDED.md):
+§1 rule-12 boundary RATIFIED and sharpened — DIE when a VALUE flows onward,
+ANNOUNCE (+ not-supported.md) when effect-only; de-dup once per (site,
+operand) via one shared helper at #152 start.  §2 File::Temp: probe the
+failing predicate under perl vs PCL first; the layer follows from who
+diverges.  §3 #202 runs FIRST, then re-verify the four-dist PASSes that
+contained fake assertions.  §4 sweep TOTAL-passing becomes a machine-checked
+gate — sweep-diff grows a LOST bucket (task #204), landing before #152.
+#200 (runpl rename) stays parked by the user.
+
+Gates: corpus-diff identical (111 files); `Pl/t` gate PASS **127 files /
+4516** (2 new rows); state.t targeted 157/166 unchanged; gen bumped
+**v2-98**, both artifacts regenerated (stamp-only).  Order for Opus:
+**#202 → #204 → #189** → #163 → #176.2 → #184 → #185 → #159 → #150 → #152.
+
 ## Session 328 (2026-08-02, Opus) — #199: four Capture-Tiny blockers, every one of them silent
 
 Task #199 named two bugs.  Following the causes found **four**, and the two

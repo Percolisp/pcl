@@ -33,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 17;
 
 sub run_cl {
     my ($code) = @_;
@@ -96,6 +96,23 @@ die $@ if $@;
 print g(sub {1}, 9), "\n";
 }), "impl(5,CODE,9)\n",
    'a string-eval-defined sub whose body is goto \\&NAME runs (Capture::Tiny shape)');
+
+# goto replaces the FRAME, so the target inherits the ORIGINAL caller's
+# context — not the goto statement's own (void) statement context.  Before
+# s329 both spellings ran the target as if in scalar context: p-goto-sub
+# restored the caller's package/subname stacks but never *wantarray*
+# (found by the s329 review probe; fix mirrors p-return's restore).
+is(run_cl(q{sub t { return wantarray ? "L" : "S" }
+sub g { goto &t }
+my @r = g(); my $s = g();
+print "@r $s\n";
+}), "L S\n", 'goto &NAME target sees the original caller wantarray');
+
+is(run_cl(q{sub t { return wantarray ? "L" : "S" }
+sub g { goto \&t }
+my @r = g(); my $s = g();
+print "@r $s\n";
+}), "L S\n", 'goto \&NAME target sees the original caller wantarray');
 
 # ------------------------------------------------- 2. local in a phase block
 
