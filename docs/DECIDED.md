@@ -264,3 +264,10 @@ not-supported.md → only then probe.*
   Test::More was loaded — and SBCL printed "redefining …" on stderr for 17
   files of the perl-tests sweep.  pl2cl/runtime stderr must stay clean: test
   harnesses merge it into the generated CL.
+- **An UNQUALIFIED dynamic glob name resolves in the package IN EFFECT, not
+  main** — `*{"_IS_\U$_"} = …` inside `package File::Path` installs
+  `File::Path::_IS_MSWIN32`.  Both `p-glob-assign-dynamic` and
+  `p-dynamic-typeglob` hardcoded "main" → task #192.  Follow-on #193: those
+  same constants are then USED as barewords, and under `use strict` an
+  undeclared bareword is a compile error, so by principle 9 anything that
+  compiles is a CALL — PCL still emits some of them as strings (always true).

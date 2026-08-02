@@ -12621,7 +12621,14 @@ buffer's fill-pointer; everything else falls back to file-length."
         (%p-glob-assign-slots (p-typeglob-package inner) (p-typeglob-name inner) rhs)
         (let* ((name-str (to-string name-box))
                (sep-pos (search "::" name-str :from-end t))
-               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
+               ;; An UNQUALIFIED symbolic name resolves in the package in
+               ;; effect, not in main — `*{"_IS_\U$_"} = …` inside
+               ;; `package File::Path` installs File::Path::_IS_MSWIN32.  A
+               ;; hardcoded "main" put it in the wrong stash, and the very next
+               ;; line of that BEGIN block (`!(_IS_MSWIN32())`) then died with
+               ;; "The function |File::Path|::pl-_IS_MSWIN32 is undefined".
+               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos)
+                             *pcl-current-package*))
                (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str)))
           (p-glob-assign pkg-str bare-str rhs)))))
 
@@ -12634,7 +12641,9 @@ buffer's fill-pointer; everything else falls back to file-length."
         inner
         (let* ((name-str (to-string name-box))
                (sep-pos (search "::" name-str :from-end t))
-               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos) "main"))
+               ;; Unqualified → the package in effect, as in p-glob-assign-dynamic.
+               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos)
+                             *pcl-current-package*))
                (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
                (pkg (or (%pcl-find-package pkg-str)
                         (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
