@@ -8167,9 +8167,20 @@ sub _use_import_arg_tokens {
     }
     next if $c->isa('PPI::Token::Structure') && $c->content eq ';';
     # Skip the module VERSION number sitting right after the module name.
-    next if !@args && defined $ver && $ver ne ''
-         && ($c->isa('PPI::Token::Number') || $c->isa('PPI::Token::Number::Version'))
-         && $c->content eq $ver;
+    # PPI's $stmt->version is only filled for PERL-version statements
+    # (`use 5.030`), never for `use Module 1.0 LIST` — so the $ver comparison
+    # below was dead for module versions and every `use Foo 1.0 LIST` sent
+    # "1.0 LIST" through the expression parser (a PARSE ERROR progn, s327).
+    # Recognize the version positionally instead: a Number as the FIRST arg
+    # token is a VERSION unless an operator follows it (`use Foo 1.0, 'x'`
+    # makes it a plain list element — perl separates VERSION from LIST by the
+    # absence of a comma).
+    if (!@args
+        && ($c->isa('PPI::Token::Number') || $c->isa('PPI::Token::Number::Version'))) {
+      next if defined $ver && $ver ne '' && $c->content eq $ver;
+      my $next = $c->snext_sibling;
+      next if !$next || !$next->isa('PPI::Token::Operator');
+    }
     push @args, $c;
   }
   return @args;

@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -162,6 +162,38 @@ test_cl('open on a blessed globref does not overwrite the object',
        "done\n", 'use Foo () loads without calling import');
     is(run_cl(qq{use lib "$lib";\nuse TImp;\nprint "done\\n";\n}),
        "IMPORTED\ndone\n", 'INVERSE: bare use Foo still calls import');
+}
+
+# ── s327 review findings ──────────────────────────────────────────────────
+# close() on a symbolic (name-string) handle must mirror open(): the by-name
+# entry goes away, the SCALAR keeps its string ($fh still reads "FOO").
+test_cl('close on a name-string handle keeps the string in the scalar',
+        qq{no strict;\n}
+      . qq{my \$fh = 'FOO';\n}
+      . qq{open(\$fh, ">", "$dir/namestr.txt") or die;\n}
+      . qq{print \$fh "x\\n";\n}
+      . qq{close(\$fh);\n}
+      . qq{print "fh=[", (defined \$fh ? \$fh : "undef"), "]\\n";\n},
+        "fh=[FOO]\n");
+
+# `use Foo VERSION ...`: PPI's \$stmt->version is empty for MODULE versions,
+# so the version token must be recognized positionally — and only when no
+# operator follows (`use Foo 1.5, 'x'` makes the number a list element).
+{
+    my $lib = "$dir/lib2";
+    mkdir $lib;
+    open my $m, '>', "$lib/TVer.pm" or die $!;
+    print $m "package TVer;\nour \$VERSION = 9;\n"
+           . "sub import { shift; print \@_ ? \"ARGS(\@_)\\n\" : \"NOARGS\\n\" }\n1;\n";
+    close $m;
+    is(run_cl(qq{use lib "$lib";\nuse TVer 1.0 ();\nprint "done\\n";\n}),
+       "done\n", 'use Foo VERSION () still skips import');
+    is(run_cl(qq{use lib "$lib";\nuse TVer 1.0 qw(a b);\nprint "done\\n";\n}),
+       "ARGS(a b)\ndone\n",
+       'use Foo VERSION qw(...) imports the LIST, version dropped');
+    is(run_cl(qq{use lib "$lib";\nuse TVer 1.5, "x";\nprint "done\\n";\n}),
+       "ARGS(1.5 x)\ndone\n",
+       'INVERSE: a comma after the number makes it a plain list element');
 }
 
 # ── a statement modifier gates require ────────────────────────────────────

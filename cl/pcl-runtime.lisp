@@ -8567,6 +8567,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (let ((glob (p-box-value fh)))
            (remhash (intern (p-typeglob-name glob) (p-typeglob-package glob))
                     *p-filehandles*)))
+        ;; Symbolic handle: the box holds a NAME string ($fh = 'FOO').  The
+        ;; install side registered by name and left the box alone; close must
+        ;; mirror that — drop the by-name entry, keep the string ($fh still
+        ;; reads "FOO" after close in perl).  Box-clearing here wiped the name
+        ;; (s327 review probe).
+        ((and (p-box-p fh)
+              (stringp (p-box-value fh))
+              (plusp (length (p-box-value fh))))
+         (let* ((nm  (p-box-value fh))
+                (sep (search "::" nm :from-end t))
+                (name (if sep (subseq nm (+ sep 2)) nm)))
+           (remhash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)))
         ((p-box-p fh) (box-set fh *p-undef*))
         ((symbolp fh) (remhash fh *p-filehandles*))))
 
