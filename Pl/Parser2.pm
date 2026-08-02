@@ -4808,7 +4808,16 @@ sub _lower_block {
         my $t = $sub->content;
         for my $n (@emb) {
           my $b = substr($n, 1);
-          if ($t =~ /(?:[\$\@\%]|\$\#)\Q$b\E\b/) { $vetoed = 1; last SUBSCAN }
+          next unless $t =~ /(?:[\$\@\%]|\$\#)\Q$b\E\b/;
+          # A sub that DECLARES the same name has its own lexical and cannot
+          # be sharing this statement's cell — vetoing on it left BOTH sides
+          # unbound, because the "old forward-defvar'd global" the veto falls
+          # back to is never emitted when every mention is a declaration.
+          #   sub s1 { my $fh; … }                 # its own lexical
+          #   sub nf { open my $fh, '>', …; … }    # vetoed → free var, CRASH
+          # (Capture-Tiny's t/lib/Utils.pm, task #199: `Utils::$fh is unbound`.)
+          next if $self->_sub_declares_name($sub, $n);
+          $vetoed = 1; last SUBSCAN;
         }
       }
       if (!$vetoed) {
@@ -4961,6 +4970,20 @@ sub _embedded_my_names {
   }
   my %seen;
   return grep { !$seen{$_}++ } @names;
+}
+
+# Does named sub $sub declare $name (sigil-qualified) itself — i.e. does it
+# own a lexical of that name rather than referring to someone else's cell?
+# Used by the embedded-`my` veto above; deliberately checks the EXACT name, so
+# a sub that mentions a different sigil of the same base ($fh vs @fh) still
+# vetoes.
+sub _sub_declares_name {
+  my ($self, $sub, $name) = @_;
+  for my $sym (@{ $sub->find(sub {
+        $_[1]->isa('PPI::Token::Symbol') && $_[1]->content eq $name }) || [] }) {
+    return 1 if $self->_symbol_is_declarator($sym);
+  }
+  return 0;
 }
 
 sub _lower_stmt {

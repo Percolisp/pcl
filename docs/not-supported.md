@@ -677,7 +677,15 @@ jump to a label held in a state variable.
 
 **PCL behaviour:** Not implemented for the label form.  CL has no first-class labels,
 so a label name computed at runtime cannot be resolved to a `tagbody` tag.
-`p-goto-computed` is a no-op.  (`goto &sub` — the tail-call form — *is* supported.)
+`p-goto-computed` now NAMES the label on stderr and falls through
+(`%p-goto-target`); it used to be a silent no-op returning undef.  Announced,
+not fatal (the #155 tie shape): a die aborts a whole file over one rare
+construct — measured, `state.t` runs 157 of 166 rows with the warning and 69
+with a die.  Fixed s328.  **Only the label form is unsupported**: `goto &sub`
+AND `goto EXPR` where EXPR evaluates to a **code ref** (`goto \&NAME`,
+`goto $coderef`) are both real tail calls and both supported — `goto \&NAME`
+was also silently doing nothing before s328, which is what hid Capture::Tiny's
+entire public API (task #199).
 
 **Scope note (s295):** this entry covers only the *computed-name* form.  `goto
 LABEL` with a **literal** label is fully supported — backward gotos as lexical

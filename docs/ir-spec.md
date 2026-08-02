@@ -655,9 +655,15 @@ to string messages (documented divergence).
 
 ### 6.4 goto
 
-Three source forms, three fates:
+Four source forms, four fates:
 
 - `goto &sub` (tail call) — supported; re-dispatches with the current `@_`.
+- `goto EXPR` **where EXPR evaluates to a code ref** (`goto \&NAME`,
+  `goto $coderef`, `goto $h->{cb}`) — Perl treats this as the *same* tail
+  call, and so does PCL: it lowers to `(p-goto-computed EXPR)`, a macro over
+  `(p-goto-sub (%p-goto-target EXPR))`, so the frame-replacement semantics
+  (caller package/`@_` handling) are the ones §6.4's `goto &sub` describes.
+  Before s328 this lowered to a runtime no-op that returned undef silently.
 - `goto LABEL` to a **standalone label** in the same statement list —
   fully lowered (backward and forward; details below).
 - `goto LABEL` to a label PPI glues onto the statement it marks — a **loop**
@@ -668,8 +674,10 @@ Three source forms, three fates:
   and RET read after the tagbody (the §6.2 bare-block tail regime), since a
   `tagbody` yields nil.  The label's own loop-control `block`/`catch` tags
   are a separate namespace — `last LBL` inside is unaffected.
-- **Computed** `goto EXPR` (label name in a variable) — no-op, documented
-  divergence (`docs/not-supported.md`).
+- **Computed** `goto EXPR` where EXPR is a **label name string** — a CL
+  tagbody tag is not a first-class value, so this cannot be expressed.
+  `%p-goto-target` DIES naming the operand rather than doing nothing
+  (rule 12); documented divergence in `docs/not-supported.md`.
 
 **Not a gap: `goto` INTO a construct.**  Jumping to a label that sits
 *inside* a loop/block body from outside it ("Use of `goto` to jump into a

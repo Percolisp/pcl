@@ -4,6 +4,93 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 328 (2026-08-02, Opus) — #199: four Capture-Tiny blockers, every one of them silent
+
+Task #199 named two bugs.  Following the causes found **four**, and the two
+named ones were both mis-diagnosed — worth recording, because in each case the
+stated diagnosis would have sent the fix to the wrong layer.
+
+**1. `goto \&NAME` was a documented no-op.**  Task #199 called bug (a) "a
+prototyped sub defined by string eval is never installed".  It is installed:
+`Capture::Tiny->can('capture')` is true.  What was missing is that its body is
+`unshift @_, …; goto \&_capture_tee;`, and PCL lowered any `goto` that was not
+`&NAME`/LABEL to `p-goto-computed`, whose docstring read *"not implementable in
+CL; silently ignore"*.  The sub ran, returned undef, printed nothing, raised
+nothing.  Perl's `goto EXPR` is a **tail call when EXPR is a code ref** and a
+computed label otherwise; only the second half is inexpressible.  So
+`p-goto-computed` is now a macro over the existing `p-goto-sub` via
+`%p-goto-target`.  Probed all four spellings against perl.
+
+**The rule-12 die for the label form was WRONG, and the sweep said so.**  My
+first version made a non-coderef operand fatal.  Total passing dropped 88
+across the sweep with `sweep-diff` still reporting 0 new / 0 fixed — because
+`sweep-diff` tracks failures, and what had happened was that
+`perl-tests/state.t` went **157/166 → 69/166**: its one `goto state $flower =
+$f` sits two thirds up a file that is otherwise about `state`, so a die
+truncated the rest.  Any CPAN module with a computed goto anywhere would abort
+entirely.  Now it NAMES the label on stderr and falls through — the #155 tie
+shape, announced but not fatal.  state.t is back to 157/166 exactly.  **The
+old behaviour's sin was the silence, not the fall-through**, and a headline
+"0 new / 0 fixed" would have hidden this if the total-passing line had not
+moved.
+
+**2. The `push` arity crash was a MISSING PAREN in a phase block, not an
+eval-thunk.**  Bug (b) was filed as "a p-eval-thunk in argument position gets
+spliced".  The real form is `File::Temp`'s
+`END { local($.,$@,$!,$^E,$?); cleanup(at_exit=>1) }`:
+`_process_special_block`'s `$process` closure calls `_process_children`, which
+— unlike `_process_block` and the sub-body path — never closes the `(let …)` a
+`local` opens.  v1 emitted one paren too few, so `(push (lambda …)
+*end-blocks*)` swallowed **every following top-level form** and the module died
+at load.  (v2 refuses the shape loudly, "statement fallback left 1 open
+scope(s)", and falls back to v1 — so v1 was where it landed.)  Fixed by giving
+`$process` the same start/end depth bookkeeping `_process_block` has; all five
+phase-block kinds go through it.
+
+**3. `require_ok`/`use_ok` reported ok and loaded NOTHING.**  With File::Temp
+loading again, `01-Capture-Tiny.t` still failed 8 of its 9 `can_ok` rows — and
+the probe that explained it was that the *same* file passed when I inserted a
+`Capture::Tiny->can(...)` call before them.  `cl/pcl-test.lisp` claimed "the
+transpiler resolves `use` at compile time, so the module is already loaded";
+nothing under `Pl/` mentions either name, so both were pure lies.  They now
+load for real (`%test-load-module`), import into `*pcl-current-package*`, and
+report the actual result — the missing-module row is `not ok`, which is the
+inverse guard.  This one is not Capture-Tiny-specific: **every `require_ok` in
+every CPAN suite was a fake pass**, with the rows behind it failing for no
+visible cause.
+
+**4. `Test::More->builder` did not exist**, and 22 of the 24 t-files open with
+`binmode($builder->failure_output, ':utf8')`.  Added a `Test::Builder`
+singleton answering ONLY the three output handles — as PCL handle-name
+designators, which `binmode`/`print {…}`/`fileno` all accept.  Every other
+Test::Builder method is deliberately absent so dispatch dies naming it; a stub
+would corrupt a file's counts silently.
+
+**5. (found underneath) the embedded-`my` veto stranded both sides.**  With the
+above in place, `t/lib/Utils.pm` died `Utils::$fh is unbound`.  `open my $fh,
+…` gets a let-binding unless a sibling named sub mentions the name, in which
+case v2 vetoes and falls back to "the old forward-defvar'd global" — which is
+never emitted when the sibling's mention is *itself a declaration*.  Two subs
+each with their own `my $fh` therefore left both unbound.  `_sub_declares_name`
+now exempts that case (exact name, so a different sigil still vetoes); a
+sibling that only *references* the name still vetoes, probed as the breaking
+case.
+
+**Board.**  Capture-Tiny **1 PASS / 0 PARTIAL / 23 FAIL → 4 PASS / 4 PARTIAL /
+16 FAIL of 24** (01-Capture-Tiny 17/0, 03-tee 10/0, 11-stderr-string,
+12-stdin-string).  The 16 residual FAILs are measured per file in **task
+#201** — File::Temp's template check rejecting `/tmp/XXXXXXXXXX` (2 files, the
+capture path itself), `tie *STDOUT` arity (8 files), writes to a Perl-closed
+stream (2), `local $ENV{...}` (1).  A status without a cause is worthless, so
+they are all recorded with theirs.
+
+**Gates.**  Pl/t `Result: PASS`, 127 files / 4514 (new guard
+`Pl/t/goto-sub-phase-01.t`, 15 rows / 23 s, inverse rows throughout);
+`tools/corpus-diff.pl` reports **one** changed file, `readline.t`, and the
+change is exactly the intended one (`open my $fh` gains its `let`, everything
+after it re-indents); full sweep 0 new / 0 fixed; gen bumped to **v2-97** and
+both checked-in artifacts regenerated.
+
 ## Session 327 (2026-08-02, Fable) — s326 review: approved, two probe-found fixes; post-#197 order ruled
 
 Review of `5ad21fa` probed the seams the diff touched rather than re-reading

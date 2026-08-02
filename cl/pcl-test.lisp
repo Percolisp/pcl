@@ -523,15 +523,60 @@
                (format nil "     got: ~A" (test-quote-value got))
                (format nil "expected: ~A" (test-quote-value expected)))))
 
-;;; use_ok(module, ...) / require_ok(module) — the transpiler resolves `use` at
-;;; compile time, so by the time this runs the module is already loaded (a load
-;;; failure would have aborted the program).  Report success.
+;;; use_ok(module, ...) / require_ok(module) — these must ACTUALLY load the
+;;; module; nothing else in the pipeline does.  The transpiler resolves a
+;;; LITERAL `use Foo` at compile time, but `use_ok('Foo')` is an ordinary
+;;; funcall it never sees (nothing under Pl/ mentions either name), so the old
+;;; "already loaded, report success" shortcut was a silent lie: every
+;;; require_ok/use_ok in every suite passed while the module stayed unloaded,
+;;; and each later row that used it failed with no visible cause.  Found via
+;;; Capture-Tiny's 01-Capture-Tiny.t, where require_ok said ok and the eight
+;;; can_ok rows behind it all said "method(s) not found" (task #199).
+(defun %test-load-module (name &key import-args (do-import t))
+  "Load NAME as `use`/`require` would.  A path-ish NAME ('t/lib/Foo.pm') goes
+   through p-require-file, a bareword through p-use — matching Test::More,
+   which accepts both."
+  (if (or (find #\/ name) (and (> (length name) 3)
+                               (string= ".pm" name :start2 (- (length name) 3))))
+      (p-require-file name)
+      (p-use name :import-args import-args :do-import do-import
+             :into *pcl-current-package*)))
+
 (defun pl-use_ok (module &rest args)
-  (declare (ignore args))
-  (test-ok t (format nil "use ~A;" (to-string (unbox module)))))
+  (let* ((name (to-string (unbox module)))
+         (vals (mapcar #'unbox args))
+         ;; Test::More: a lone numeric argument is a VERSION, not an import
+         ;; list — `use_ok('Foo', 1.23)` means `use Foo 1.23;`, which imports
+         ;; the defaults.  PCL does not verify module versions anywhere, so
+         ;; this only picks the right import shape.
+         (version-p (and (= (length vals) 1)
+                         (let ((s (to-string (first vals))))
+                           (and (plusp (length s))
+                                (every (lambda (c) (or (digit-char-p c) (char= c #\.)))
+                                       s)))))
+         (desc (if (and vals (not version-p))
+                   (format nil "use ~A ~{~A~^ ~};" name (mapcar #'to-string vals))
+                   (format nil "use ~A;" name))))
+    (handler-case
+        (progn (%test-load-module name
+                                  :import-args (if (or version-p (null vals))
+                                                   :default
+                                                   (coerce vals 'vector)))
+               (test-ok t desc))
+      (error (e)
+        (test-ok nil desc
+                 (format nil "    Tried to use '~A'." name)
+                 (format nil "    Error:  ~A" e))))))
 
 (defun pl-require_ok (module)
-  (test-ok t (format nil "require ~A;" (to-string (unbox module)))))
+  (let* ((name (to-string (unbox module)))
+         (desc (format nil "require ~A;" name)))
+    (handler-case
+        (progn (%test-load-module name :do-import nil) (test-ok t desc))
+      (error (e)
+        (test-ok nil desc
+                 (format nil "    Tried to require '~A'." name)
+                 (format nil "    Error:  ~A" e))))))
 
 ;;; isa_ok(object, class, [name])
 (defun pl-isa_ok (object class &optional name)
@@ -768,5 +813,56 @@
         (format *error-output*
                 "~&; PCL recovery: ~D top-level form(s) aborted in ~A~%" errs path))
       (values))))
+
+;;; ----- Test::More->builder / Test::Builder ------------------------------
+;;;
+;;; PCL's TAP layer *is* the builder — there is no Test::Builder object behind
+;;; it — but essentially every CPAN suite opens with
+;;;   my $builder = Test::More->builder;
+;;;   binmode($builder->failure_output, ':utf8') if $] >= 5.008;
+;;; so with no `builder` method at all the file dies before its first
+;;; assertion.  That was the single cause of 22 of Capture-Tiny's 24 t-files
+;;; (task #199).  Only the three output-handle accessors are answered, and
+;;; they answer with PCL's own filehandle designators (handle NAME strings,
+;;; which p-get-stream/%p-resolve-fh accept everywhere a handle is taken), so
+;;; `binmode`, `print {…}` and `fileno` on them all work for real.
+;;;
+;;; Every OTHER Test::Builder method is deliberately absent: method dispatch
+;;; then dies "Can't locate object method \"X\" via package \"Test::Builder\"",
+;;; naming the gap, instead of a stub returning a plausible wrong value that
+;;; would silently corrupt a file's counts (CLAUDE.md rule 12).
+(p-defpackage |Test::Builder|)
+(p-defpackage |Test::More|)
+
+(defvar *test-builder-singleton* nil
+  "The one Test::Builder object.  Test::Builder->new is a singleton in real
+   Test::Builder too, and test files compare identity.")
+
+(defun %test-builder ()
+  (or *test-builder-singleton*
+      (setf *test-builder-singleton*
+            (p-bless (p-backslash (make-hash-table :test #'equal)) "Test::Builder"))))
+
+(defun |Test::Builder|::pl-new (&rest args)
+       (declare (ignore args))
+       (%test-builder))
+
+(defun |Test::More|::pl-builder (&rest args)
+       (declare (ignore args))
+       (%test-builder))
+
+;; Real Test::Builder: output = STDOUT, failure_output = STDERR,
+;; todo_output = STDOUT.
+(defun |Test::Builder|::pl-output (self &rest args)
+       (declare (ignore self args))
+       (make-p-box "STDOUT"))
+
+(defun |Test::Builder|::pl-failure_output (self &rest args)
+       (declare (ignore self args))
+       (make-p-box "STDERR"))
+
+(defun |Test::Builder|::pl-todo_output (self &rest args)
+       (declare (ignore self args))
+       (make-p-box "STDOUT"))
 
 (format t "# PCL Test library loaded~%")

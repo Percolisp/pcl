@@ -7693,11 +7693,28 @@ sub _process_scheduled_block {
   my $prev_pkg        = $self->environment->current_package();
   my $process = sub {
     $self->_block_depth($self->_block_depth + 1);
+    # A `local` inside the block opens a (let …) that wraps the rest of the
+    # block and is closed by whoever owns the scope.  _process_children does
+    # NOT close them — only _process_block and the sub-body path do — so
+    # without this the block emits one paren too few and swallows whatever
+    # follows it.  For END that was catastrophic and silent at transpile time:
+    # File::Temp's `END { local($.,$@,$!,$^E,$?); cleanup(at_exit=>1) }` made
+    # the emitted `(push (lambda () …) *end-blocks*)` absorb every later
+    # top-level form, so the module died at load with "too many elements in
+    # (push …)" — and with it every consumer (Capture::Tiny, task #199).
+    my $start_depth = $self->{_local_let_depth} // 0;
     $self->_process_children($block);
     if ($self->environment->current_package() ne $prev_pkg) {
       my $cl_prev = $self->_cl_pkg_designator($prev_pkg);
       $self->_emit("(in-package $cl_prev)");
       $self->_emit("(p-set-current-package $cl_prev \"$prev_pkg\")");
+    }
+    my $end_depth = $self->{_local_let_depth} // 0;
+    while ($end_depth > $start_depth) {
+      $self->indent_level($self->indent_level - 1);
+      $self->_emit(")  ;; end local");
+      $self->{_local_let_depth}--;
+      $end_depth--;
     }
     $self->_block_depth($self->_block_depth - 1);
     $self->environment->package_stack($saved_pkg_stack);

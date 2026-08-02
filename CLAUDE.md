@@ -300,8 +300,8 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **126 test files, 4495 tests** with a built pclxs sibling (s326, measured);
-  **4481 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
+- **127 test files, 4514 tests** with a built pclxs sibling (s328, measured);
+  **4500 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not
@@ -310,7 +310,7 @@ func => -12         # 1 param before list
   silently subtracts those 14**, because the worktree lives elsewhere and its
   sibling path does not exist.  A worktree is still the right way to compare
   against HEAD (never a stash-copy) — just set `PCLXS_DIR=~/pclxs`, or expect
-  and subtract the 14.  What must hold either way is `Result: PASS` and 125
+  and subtract the 14.  What must hold either way is `Result: PASS` and 127
   files.
 - **XS conformance: 370 pass, 0 fail — fully green** against pclxs's corpus
   with real perl as oracle (`tools/pcl-conform`, session 315; XS OO/magic

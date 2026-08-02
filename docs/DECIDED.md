@@ -421,3 +421,50 @@ not-supported.md → only then probe.*
   #163 lands (or a CPAN cause line forces it earlier).  Payoff when done:
   delete `lib/IO/Handle.pm`, unblock Try::Tiny/Scope::Guard/File::Temp
   /SelectSaver.
+
+## s328 (Opus, 2026-08-02): #199 — four Capture-Tiny blockers, all silent
+
+- **`goto EXPR` where EXPR is a CODE REF is a TAIL CALL, not a computed
+  label** — `goto \&NAME`, `goto $coderef`, `goto $h->{cb}` all route through
+  `p-goto-sub` via `%p-goto-target`.  `p-goto-computed` used to be a `defun`
+  documented as "not implementable in CL; silently ignore": the sub returned
+  undef with no error and no output.  A NON-coderef operand (a real computed
+  LABEL) now **names itself on stderr and falls through** — announced-not-
+  silent, the #155 tie shape, deliberately NOT the rule-12 die: measured, a
+  die costs `perl-tests/state.t` 88 verified passing rows (157/166 → 69/166),
+  because its one computed goto sits two thirds up an otherwise-passing file,
+  and any CPAN module using one would abort entirely.  The old behaviour's sin
+  was the silence, not the fall-through.  Guard `Pl/t/goto-sub-phase-01.t`
+  rows 1-6.
+- **A `local(...)` inside a BEGIN/END/CHECK/INIT/UNITCHECK block must close
+  its `let` before the block does** — `_process_special_block`'s `$process`
+  closure calls `_process_children`, which (unlike `_process_block` and the
+  sub-body path) does NOT close local-lets.  v1 therefore emitted ONE PAREN
+  TOO FEW and the block's `(push (lambda …) *end-blocks*)` swallowed every
+  later top-level form; File::Temp's `END { local($.,$@,$!,$^E,$?); … }` made
+  the whole module fail to load ("too many elements in (push …)"), taking
+  Capture::Tiny with it.  v2 refuses this shape loudly ("statement fallback
+  left 1 open scope(s)") and falls back to v1 — that gate is unchanged.
+- **`require_ok`/`use_ok` must actually LOAD the module.**  The old
+  `cl/pcl-test.lisp` comment claimed the transpiler had already resolved the
+  `use` at compile time; nothing under `Pl/` mentions either name, so they
+  reported ok and loaded nothing — every row after them failed for no visible
+  cause.  Both now load (`%test-load-module`, path-ish name → `p-require-file`)
+  and report the real result; `use_ok` imports `:into *pcl-current-package*`,
+  with Test::More's "lone numeric arg is a VERSION" rule.
+- **`Test::More->builder` exists and answers ONLY the output handles**
+  (`output`/`failure_output`/`todo_output` → PCL handle-name designators
+  "STDOUT"/"STDERR"/"STDOUT", which `binmode`/`print {…}`/`fileno` accept).
+  Every other Test::Builder method is deliberately absent so dispatch dies
+  naming it — a stub would corrupt a file's counts.  22 of Capture-Tiny's 24
+  t-files died on the missing `builder` alone.
+- **The embedded-`my` veto does not fire for a sibling sub that DECLARES the
+  same name** (`Pl/Parser2.pm` `_sub_declares_name`).  The veto falls back to
+  "the old forward-defvar'd global", which is never emitted when every other
+  mention is itself a declaration — so `sub s1 { my $fh; … }` next to
+  `sub nf { open my $fh, … }` left BOTH unbound (`Utils::$fh is unbound`).
+  A sub that only REFERENCES the name still vetoes (probed; inverse guard).
+- **Board result**: Capture-Tiny 1 PASS / 0 PARTIAL / 23 FAIL → **4 PASS /
+  4 PARTIAL / 16 FAIL of 24**; the 16 residual causes are measured per file
+  in task #201 (File::Temp template check, tie-on-glob arity, closed-stream
+  writes, `local $ENV{...}`).

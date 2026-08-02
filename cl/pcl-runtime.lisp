@@ -7409,10 +7409,33 @@ and never for $_, which must stay a box (s///, chomp write through it)."
    void/list and nil for scalar."
   (if *wantarray* val (p-list-scalar val)))
 
-(defun p-goto-computed (label)
-  "Perl goto EXPR (computed goto) — not implementable in CL; silently ignore."
-  (declare (ignore label))
-  nil)
+(defun %p-goto-target (val)
+  "Resolve the operand of `goto EXPR` to the function to tail-call.
+   Perl's goto EXPR takes EITHER a code ref — a tail call that replaces the
+   frame, exactly like `goto &NAME` — or a label name for a computed goto.
+   Only the code-ref half is expressible in CL (a tagbody tag is not a first-
+   class value).  Returns the function, or NIL for the label form AFTER
+   naming it on stderr.  Before this, `goto \\&sub` — the form Capture::Tiny's
+   whole API is built on — lowered to a silent no-op: the caller got undef,
+   with no error and no output (task #199).
+
+   Announced-not-silent rather than fatal (the #155 tie shape, not the rule-12
+   die): a die here aborts the whole program over one unimplementable
+   construct, and measurably does — `perl-tests/state.t` runs 157 of its 166
+   rows with the warning and stops at 69 with a die, because its computed goto
+   sits two thirds of the way up a file that is otherwise about `state`.  The
+   old no-op's sin was the silence, not the fall-through."
+  (let ((fn (unbox val)))
+    ;; Blessed coderefs are stored as box(inner-box(lambda)) — same double
+    ;; unbox p-funcall-ref does.
+    (when (p-box-p fn) (setf fn (p-box-value fn)))
+    (if (functionp fn)
+        fn
+        (progn
+          (format *error-output*
+                  "PCL: goto to the computed LABEL ~S is not supported — execution falls through (docs/not-supported.md).~%"
+                  (to-string fn))
+          nil))))
 
 (defmacro p-goto-sub (fn)
   "Perl goto &func — tail-call the target function with the current @_.
@@ -7443,6 +7466,18 @@ and never for $_, which must stay a box (s///, chomp write through it)."
                 (if *pcl-caller-subname-stack*
                     (cdr *pcl-caller-subname-stack*) *pcl-caller-subname-stack*)))
            (apply ,target (coerce @_ 'list)))))))
+
+(defmacro p-goto-computed (expr)
+  "Perl `goto EXPR` — the shape codegen emits when the operand is neither
+   `&NAME` nor a bare label: `goto \\&NAME`, `goto $coderef`, `goto $h->{cb}`.
+   All of those are TAIL CALLS in perl, so route them through the one
+   mechanism that already implements the frame-replacing semantics.
+   %p-goto-target answers NIL for the one shape CL cannot express — a computed
+   LABEL name — having named it on stderr first; execution then falls through
+   past the goto, which is what the old silent no-op did."
+  (let ((target (gensym "GOTO-FN")))
+    `(let ((,target (%p-goto-target ,expr)))
+       (when ,target (p-goto-sub ,target)))))
 
 (defmacro p-return (&rest values)
   "Perl return - returns single value or list depending on args.
@@ -10919,7 +10954,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-96"
+(defparameter *pcl-cache-generation* "v2-97"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
