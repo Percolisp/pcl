@@ -322,4 +322,36 @@ print "9 dirname2=", dirname("/a/b/c.txt"), " (want /a/b)\n";
 print "10 basename=", basename("/a/b/"), " (want b)\n";
 ');
 
+# Task #190: `divide $text => 4` is a call to the DECLARED sub `divide`, not
+# indirect method syntax — Perl resolves the bareword at compile time and a
+# known sub wins.  PCL agreed at statement level and DISAGREED inside a
+# `( … )` or `[ … ]`, because only the nested form reaches PExpr''s
+# indirect-object pre-pass, which had no notion of "this name is already a
+# sub".  `[ divide $stdtext => 4 ]` therefore died with `Can''t locate object
+# method "divide" via package "<the string value of $stdtext>"` — the whole of
+# Text-Balanced''s 05_extmul.t (0 ok before, 59 after).
+#
+# INVERSE GUARDS in the same snippet: the paren-form call must be unchanged;
+# `WORD $obj` where WORD is NOT a sub of the CURRENT package must keep whatever
+# it did (rows 6/7 — `Widget::show` is not visible as a bare `show` from main,
+# so the guard asks the package-QUALIFIED question; the unqualified version of
+# this fix broke exactly that); and the fat comma must still autoquote.
+test_transpile("a declared sub beats indirect-object syntax (#190)", '
+sub divide { my ($t, @i) = @_; return ("d", $t, @i) }
+sub tag    { return "T(" . join("|", @_) . ")" }
+my $s = "TEXT";
+print "1 stmt=", join(",", divide $s => 4), "\n";
+my @a = (divide $s => 4);
+print "2 in-parens=", join(",", @a), "\n";
+my $r = [ divide $s => 4 ];
+print "3 in-brackets=", join(",", @$r), "\n";
+my $r2 = [ divide $s, 4 ];
+print "4 comma-form=", join(",", @$r2), "\n";
+my $r3 = [ divide($s => 4) ];
+print "5 call-parens=", join(",", @$r3), "\n";
+my %h = ( tag => 1 );
+print "6 fat-comma-autoquote=", join(",", sort keys %h), "\n";
+print "7 nested=", join(",", @{[ tag $s => divide $s => 2 ]}), "\n";
+');
+
 done_testing();

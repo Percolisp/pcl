@@ -249,3 +249,18 @@ not-supported.md → only then probe.*
   plain `my` lexical** (`_strip_trailing_sep($dirname)` did nothing, so
   `dirname("/a/b/c")` answered "/a/b/").  Delete the shim when task #189 lands;
   do NOT "fix" it by blanket-boxing every lexical passed to a sub.
+- **A sub Perl already knows about beats INDIRECT-OBJECT syntax** — `divide
+  $text => 4` is `divide($text, 4)`, never `$text->divide(4)`.  PExpr's
+  indirect pre-pass asks `_is_known_callable($name, 1)`, the same compile-time
+  question `_bareword_subscript_autoquotes` asks for bareword array subscripts.
+  The question must be PACKAGE-QUALIFIED there (`Widget::show` is not visible
+  as a bare `show` from main — probed, the unqualified version broke it), and
+  the prototype table cannot answer it because it is keyed by bare name →
+  task #190; residue #191.
+- **`utf8::unicode_to_native` / `native_to_unicode` are defined ONCE**, in
+  `cl/pcl-runtime.lisp`.  `cl/pcl-test.lisp` used to define the same two names
+  again for charset_tools.pl; since the TAP layer loads AFTER the runtime its
+  copy silently won, so the function behaved differently depending on whether
+  Test::More was loaded — and SBCL printed "redefining …" on stderr for 17
+  files of the perl-tests sweep.  pl2cl/runtime stderr must stay clean: test
+  harnesses merge it into the generated CL.

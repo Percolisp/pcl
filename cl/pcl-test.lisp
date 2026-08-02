@@ -640,12 +640,16 @@
 ;;; Perl test files require './charset_tools.pl' to get these, but since
 ;;; BEGIN-block require doesn't reliably define functions at the right time,
 ;;; we provide them here (test-only; not in the production runtime).
-(export '(pl-uni_to_native pl-native_to_uni pl-unicode_to_native pl-native_to_unicode
+;;; `unicode_to_native` and `native_to_unicode` are NOT here: they are real
+;;; utf8:: builtins, defined once in cl/pcl-runtime.lisp.  Defining them again
+;;; here redefined the same :pcl symbol — the TAP layer loads after the runtime,
+;;; so this copy silently won and the function behaved differently depending on
+;;; whether Test::More was loaded, with a "redefining …" warning on stderr for
+;;; 17 sweep files.  Only the four names with no runtime twin belong here.
+(export '(pl-uni_to_native pl-native_to_uni
           pl-byte_utf8a_to_utf8n pl-utf8_to_byte))
 (defun pl-uni_to_native (n) (pcl:unbox n))
 (defun pl-native_to_uni (n) (pcl:unbox n))
-(defun pl-unicode_to_native (n) (pcl:unbox n))
-(defun pl-native_to_unicode (n) (pcl:unbox n))
 (defun pl-byte_utf8a_to_utf8n (n) (pcl:unbox n))
 (defun pl-utf8_to_byte (n) (pcl:unbox n))
 

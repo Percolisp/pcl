@@ -2214,6 +2214,16 @@ sub handle_subcalls {
       # Skip known builtin functions
       next if exists $self->known_no_of_params->{$method_name};
 
+      # Skip anything Perl already knows is CALLABLE here — a sub declared in
+      # this file, a constant, an imported/prototyped name.  Perl resolves the
+      # bareword at compile time and a known sub wins: `divide $text => 4` is
+      # `divide($text, 4)`, never `$text->divide(4)`.  Without this the same
+      # call parsed one way at statement level and the OTHER way inside a
+      # `( … )` or `[ … ]` (only the nested form reaches this pre-pass), so
+      # `[ divide $stdtext => 4 ]` died with "Can't locate object method
+      # "divide" via package "<the string value>"" — Text-Balanced 05_extmul.t.
+      next if $self->_is_known_callable($method_name, 1);
+
       # Skip all-uppercase words: they are filehandles (STDIN/STDOUT/STDERR)
       # or constants, never method names in indirect-object syntax
       next if $method_name =~ /^[A-Z][A-Z0-9_]*$/;
@@ -4749,15 +4759,40 @@ sub get_node_children {
 # $self->[P_ALLOW_NONREF]); otherwise (no strict subs) an unknown bareword is
 # just the string "bar" → numeric 0.  So we autoquote unless it's a known
 # callable, mirroring Perl's compile-time decision.
+# Is NAME something Perl already knows is callable at this point — a declared
+# sub, a constant, or a prototyped/imported one?  Perl's compile-time decision
+# for a bareword hangs on exactly this, so the two places that need the answer
+# (bareword array subscripts, and the indirect-object pre-pass) must ask it the
+# same way.
+# SAME_PKG_ONLY restricts the answer to subs declared in the package the call
+# sits in.  `Widget::show` is NOT visible as a bare `show` from main, so
+# `[ show $w ]` there really IS indirect method syntax — probed, and the
+# unqualified answer broke it.  The PROTOTYPE table cannot answer that
+# question at all: it is keyed by bare name with no package, so `Widget::show`
+# registers as plain `show`.  Under SAME_PKG_ONLY it is therefore not
+# consulted, which makes the qualified answer conservative — an IMPORTED sub
+# (`use List::Util qw(first); [ first $obj ]`) still reads as indirect method
+# syntax, exactly as it did before.  Narrowing that needs the import list as a
+# per-package fact, not the flat prototype table.
+sub _is_known_callable {
+  my ($self, $name, $same_pkg_only) = @_;
+  return 0 unless $self->has_parser;
+  my $env = $self->parser->environment;
+  return 1 if !$same_pkg_only && $env->has_prototype($name);
+  my $cur = $same_pkg_only ? ($env->current_package // 'main') : undef;
+  for my $s (@{ $env->get_declared_subs || [] }) {
+    next unless defined $s->{name} && $s->{name} eq $name;
+    return 1 if !defined $cur;
+    return 1 if defined $s->{package} && $s->{package} eq $cur;
+  }
+  return 0;
+}
+
 sub _bareword_subscript_autoquotes {
   my ($self, $name, $is_array) = @_;
   return 1 unless $is_array;                       # hash subscript: always quote
   return 1 unless $self->has_parser;               # no environment: fall back to quote
-  my $env = $self->parser->environment;
-  return 0 if $env->has_prototype($name);          # constant or prototyped/known sub
-  for my $s (@{ $env->get_declared_subs || [] }) {
-    return 0 if defined $s->{name} && $s->{name} eq $name;
-  }
+  return 0 if $self->_is_known_callable($name);    # constant or prototyped/known sub
   # In eval-string mode the prototype table is empty, but constants/subs from the
   # enclosing program DO exist at runtime as zero-arg subs. Perl only autoquotes
   # barewords in HASH subscripts — `$a[FOO]` is always a sub call — so an ALL-CAPS

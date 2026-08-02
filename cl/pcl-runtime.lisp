@@ -15215,12 +15215,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; all PCL ever targets — both are the identity.  JSON::PP builds its
 ;; invalid-char regex with chr(utf8::unicode_to_native($i)), so these must exist
 ;; in the production runtime (not just the test library).  Defined in :pcl and
-;; exported so the :utf8 package (which (:use :pcl)) inherits them — this also
-;; avoids a name-conflict with cl/pcl-test.lisp, which defines the same names in
-;; :pcl for charset_tools.pl (it then just redefines the same symbol).
+;; exported so the :utf8 package (which (:use :pcl)) inherits them.
+;;
+;; THE ONLY DEFINITION.  cl/pcl-test.lisp used to define these two names again
+;; for charset_tools.pl, and since the TAP layer loads AFTER the runtime its
+;; copy silently won — so `utf8::unicode_to_native` behaved DIFFERENTLY
+;; depending on whether Test::More had been loaded (the test copy unboxed, this
+;; one did not), and SBCL printed "redefining pcl:pl-unicode_to_native" on
+;; stderr for 17 files of the perl-tests sweep.  The unboxing body is the one
+;; the whole corpus has actually been running, so it is the one that stays; the
+;; other four charset_tools names have no runtime twin and remain there.
 (in-package :pcl)
-(defun pl-unicode_to_native (&optional cp) cp)
-(defun pl-native_to_unicode (&optional cp) cp)
+(defun pl-unicode_to_native (&optional cp) (unbox cp))
+(defun pl-native_to_unicode (&optional cp) (unbox cp))
 (export '(pl-unicode_to_native pl-native_to_unicode))
 
 ;; utf8 module stub - on non-EBCDIC systems, uni_to_native/native_to_uni are identity.
