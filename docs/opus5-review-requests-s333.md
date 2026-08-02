@@ -92,15 +92,36 @@ Run 1 of the full sweep exited 1: `LOST: ref.t -5 (184 → 179)`,
 `TOTAL 18469 → 18468`.  **Run 2, same tree, no edits in between: GATE clean,
 ref.t 186+18, TOTAL 18475 (+6), 0 new / 2 fixed.**  Per-file at `--jobs 1` the
 tree gives 186+18 twice and HEAD (worktree) gives 184+20 — identical abort
-point (237 of 245), so the change is +2 and run 1's 179 was a load artifact.
-ref.t runs **23 `fresh_perl_is`/`runperl` children**; under `--jobs 8` those
-compete with 8 SBCL transpiles.  This is the #180 family (wall-time swings),
-now cashing out as a **gate failure** rather than a footnote.
+point (237 of 245), so the change is +2 and run 1's 179 was an artifact.
+
+**The artifact is MEMORY, not CPU** — measured after the user suggested it:
+
+```
+Aug 03 02:04:43 kernel: systemd-journal invoked oom-killer: ...
+Aug 03 02:04:43 kernel: Out of memory: Killed process 432648 (Isolated Web Co)
+                        total-vm:4239956kB, anon-rss:1054148kB
+```
+
+System-wide, no cgroup cap.  Run 1 was executing ref.t at that moment (file
+84/108, 91 s; the run ended 02:08:15); run 2 started 02:08 with that gigabyte
+freed and was clean.  **Control:** 8 heavy files including ref.t at `--jobs 8`
+*now* give ref.t 186+18 with **8.9 GB minimum available** — the concurrency by
+itself does not reproduce the drop.  ref.t is the sensitive file because it
+forks **23 `fresh_perl_is`/`runperl` children**, each a fresh PCL transpile +
+SBCL: under memory pressure those are exactly what gets starved, and starved
+children fail rows without aborting the file.  This is the #180 family
+(wall-time swings) cashing out as a **gate failure** rather than a footnote —
+and #128 (the leaking `pl2cl --server`, caught at 4.95 GB) is the same failure
+mode with a cause that lives in our own tree, though it was not running here.
 
 The tension is exactly the one #204 was built to remove: a per-file passing-row
 count is the *right* regression signal and a *noisy* one for files that spawn
 children.  Options I can see, none of which I want to pick unilaterally:
 
+0. **Record the machine state with the verdict** — sample available memory
+   during the run and print it next to a LOST report, so "this run was under
+   memory pressure" is data in the report rather than an archaeology exercise
+   in `journalctl`.  Orthogonal to 1–3; cheap; I would do this regardless.
 1. **LOST tolerance for child-spawning files** — a named list (ref.t and the
    other `fresh_perl` users), tolerance only, still reported.  Cheapest, but it
    is a whitelist, and whitelists rot.

@@ -85,12 +85,21 @@ lenient arm can go.
   (184 → 179)`, TOTAL -1.  Run 2, same tree: **GATE clean**, ref.t **186+18**,
   TOTAL 18469 → **18475 (+6)**, `0 new / 2 fixed` (`scalar.t` "ref to a ref",
   "string gets appended to ref").  ref.t runs **23 `fresh_perl_is`/`runperl`
-  children**, which under `--jobs 8` compete with 8 SBCL transpiles: the count
-  is load-sensitive, the abort point is not.  Per-file at `--jobs 1` it is
-  186+18 twice, and HEAD is 184+20, so the change is +2 and run 1's LOST was
-  noise.  **That is a false gate failure from #204's LOST bucket** — raised as
-  a policy ask in `docs/opus5-review-requests-s333.md` §4 (my lean: reuse
-  #176's retry rule — re-run a LOST file once at `--jobs 1` before failing).
+  children**, and the cause of run 1's drop was **MEMORY, not CPU** (user's
+  hypothesis, then measured): `journalctl` shows the kernel **invoked
+  oom-killer at 02:04:43** and killed a 1 GB Firefox renderer — system-wide,
+  no cgroup cap — while run 1 was executing ref.t (file 84/108, 91 s; run 1
+  ended 02:08:15).  Run 2 started 02:08 with that gigabyte freed and was
+  clean.  Control: 8 heavy files incl. ref.t at `--jobs 8` **now** give ref.t
+  186+18 with **8.9 GB minimum available** — the contention alone does not
+  reproduce it.  Per-file at `--jobs 1` it is 186+18 twice and HEAD is
+  184+20, so the change is +2.
+  **That is a false gate failure from #204's LOST bucket, caused by a
+  desktop-wide OOM** — policy ask in `docs/opus5-review-requests-s333.md` §4
+  (my lean: reuse #176's retry rule — re-run a LOST file once at `--jobs 1`
+  before failing; it costs one serial run and it MEASURES instead of
+  excusing).  No stray `pl2cl --server` was involved this time (#128), but
+  that leak is the same failure mode with a resident cause.
 - **Hot paths guarded**: the new `%p-scalar-referent-p` diagnosis sits behind a
   `p-box-p` test (or after the raw vector/hash arm) at every deref site, so an
   ordinary `$aref->[0]` / `$href->{k}` / `@$aref` / `%$href` never runs the
