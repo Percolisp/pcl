@@ -30,7 +30,17 @@ This split already exists in practice — it just isn't named:
   which does not reach a plain `my` lexical, so `dirname` kept the trailing
   slash.  Our copy is core's file with that one sub also RETURNING the value.
   Delete it when task #189 lands),
-  `Math::BigInt::Calc`, `Test::More` (prototype-only).
+  `Math::BigInt::Calc`, `Test::More` (prototype-only),
+  `IO` (**the XS half of `IO::Handle` written in plain Perl** — core's `IO.pm`
+  is only a loader plus `XSLoader::load 'IO'`, and without that half
+  `use IO::Handle` died "Can't locate loadable object for module IO".  Ours
+  supplies the constants, `flush`, `getline`/`getlines`, `setbuf`/`setvbuf`
+  and the error/taint answers, and CROAKS by name for `sync`/`blocking`/
+  `ungetc`, which need fsync/fcntl/pushback PCL does not have.  Task #197),
+  `IO::Handle` (**a WORKAROUND, not a shim by choice** — core's file with
+  exactly `autoflush` and `printflush` rewritten to save/restore the selected
+  handle explicitly instead of via `SelectSaver`, which restores from DESTROY
+  and PCL never calls DESTROY.  Delete it when task #198 lands).
   (`Cwd` and `Test::Simple` shims were **removed** session 259 — the real CPAN
   `Cwd` works under PCL, and `Test::Simple` is supplied by the internal TAP
   layer (`cl/pcl-test.lisp`), so neither shim was needed. Verified: full gate

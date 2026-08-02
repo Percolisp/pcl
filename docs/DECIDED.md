@@ -345,3 +345,58 @@ not-supported.md → only then probe.*
   (`fable-answers-s323.md` §7): IO/`IO::Handle` shim → #189 `writes_args`
   (+ delete `lib/File/Basename.pm`) → #163 → #176 step 2 → #184 → #185 →
   #159 → #150 → #152 → E4.1/E5 per `docs/v2-opus5-execution-plan.md`.
+
+## s326 (Opus, 2026-08-02): the IO/IO::Handle shim (#197) and the seven bugs under it
+
+- **`use IO::Handle` works: `lib/IO.pm` supplies the XS half in plain Perl**
+  (constants, `flush` via the `$|` idiom, `getline`/`getlines`/`gets`,
+  `setbuf`/`setvbuf` mapped onto autoflush, `error`/`clearerr`/`untaint`
+  answering 0 because PCL latches no error flag and has no taint), and core's
+  own pure-Perl `IO/Handle.pm` runs on top of it.  `sync`/`blocking`/`ungetc`
+  CROAK by name — no fsync, no fcntl, no pushback — rather than returning a
+  plausible value (rule 12).
+- **`lib/IO/Handle.pm` is a WORKAROUND, not a shim by choice** — core's file
+  with exactly `autoflush` and `printflush` rewritten to save/restore the
+  selection explicitly instead of via `SelectSaver`, whose contract is
+  restore-on-DESTROY and PCL never calls DESTROY.  **Delete it when
+  DESTROY-at-scope-exit lands (task #198).**  Same pattern as
+  `lib/File/Basename.pm`.
+- **`use Foo ()` and `use Foo qw()` must NOT call import** (verified against
+  perl both ways); a bare `use Foo;` still imports with no args.  Decided
+  BEFORE the import-args branch, because an empty list still parses to
+  `(vector)` → `Pl/Parser.pm` `_use_has_empty_import_list`.
+- **A statement modifier on `require` gates it** — `require Foo if COND;` is a
+  runtime conditional, not an unconditional hoisted require.  PCL dropped the
+  modifier, so `require VMS::Stdio if $^O eq 'VMS'` (File::Temp) died on Linux
+  → `_include_statement_modifier`; if/unless only.
+- **Perl flushes EVERY handle at exit and before fork, not just the standard
+  three** — an unclosed `open my $fh,'>',$f; print {$fh} …` silently lost its
+  buffer.  Registry `*p-open-output-streams*` (weak), flushed from the exit
+  hook AFTER the END blocks and from `p-fork`.
+- **`select(FH)` is real and `$|` is per-handle** — one-arg select sets the
+  default output handle and returns the previous designator (so
+  `select((select($fh), $|=1)[0])` works); setting `$|` true flushes that
+  handle immediately and makes later writes flush.  Both were stubs: select
+  returned a constant string and `$|` was one global flag nothing consumed.
+- **open() on a GLOB handle must not overwrite the scalar** — `IO::Handle->new`
+  / `\*FH` / `Symbol::gensym` produce a (usually blessed) globref; the stream
+  belongs in the glob's IO slot, keyed by the glob's name.  PCL box-set the
+  stream over it, so `ref($io)` stopped being `IO::Handle` and later method
+  calls went elsewhere.  `%p-close-impl` now resolves through `%p-resolve-fh`
+  (one resolver, every handle shape) with `%p-forget-fh` mirroring
+  `%p-install-fh`.
+- **A symbolic container designator resolves in `exists`/`delete` too** —
+  `$$p{k}` and `$$p[i]` (and `"Pkg::"` stashes) were resolved on the
+  read/write paths only, so `exists $$p{k}` silently answered NO and
+  `delete $$p{k}` crashed SBCL's GETHASH.  One resolver:
+  `%p-designator-hash`/`%p-designator-array`, and `p-ensure-hashref`/
+  `p-ensure-arrayref` delegate their string branch to `p-cast-%`/
+  `%p-symref-array` instead of keeping a second copy.
+- **`delete $ref->[i]` lowers to `p-delete-array`** — `exists` had both ref
+  arms all along, `delete` only the hash one, so the array form fell through
+  to a one-argument `p-delete` and crashed on arity (both pipelines).
+- **Capture-Tiny is NOT cleared by the shim**: its 23 FAILs move off the IO
+  cause onto two string-eval bugs (task #199) — a prototyped sub defined by
+  `eval "sub NAME(&;@){…}"` is never installed, and a p-eval-thunk reaches CL's
+  `push` with too many arguments.  The "23 of 48" estimate in #197 assumed one
+  blocker; there were three.

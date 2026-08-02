@@ -917,12 +917,16 @@
   (setf *init-blocks* (reverse *init-blocks*))
   (loop while *init-blocks* do (funcall (pop *init-blocks*))))
 
-;; Register exit hook to run END blocks
+;; Register exit hook to run END blocks, then flush every open Perl output
+;; handle — perl closes (hence flushes) all handles at exit, so a program that
+;; prints to a handle and never closes it must still see its output.  The flush
+;; runs AFTER the END blocks because an END block may still print.
 (pushnew (lambda ()
            (dolist (fn *end-blocks*)
              (handler-case (funcall fn)
                (error (e)
-                 (format *error-output* "Error in END block: ~A~%" e)))))
+                 (format *error-output* "Error in END block: ~A~%" e))))
+           (%p-flush-open-streams))
          sb-ext:*exit-hooks*)
 
 ;;; ============================================================
@@ -1132,19 +1136,60 @@
 ;;; stores 1 — op/ver.t 48).  The value lives in the dynamic *p-autoflush* so
 ;;; `local $|` (p-local-pipe) is a plain rebinding that keeps the magic box in
 ;;; place, mirroring $.'s *p-last-read-handle* model.
-(defvar *p-autoflush* 0 "The value of $| (always 0 or 1).")
-(defvar |$\|| (make-p-box (make-p-magic-cell
-                           :getter (lambda () *p-autoflush*)
-                           :setter (lambda (new)
-                                     (setf *p-autoflush*
-                                           (if (p-true-p new) 1 0)))))
-  "Output autoflush flag (magic — writes clamp to 0/1)")
+(defvar *p-selected-out* nil
+  "The handle select() made the default for print/printf/say, kept as the
+   DESIGNATOR the program passed (box, glob, symbol or name); NIL means STDOUT.
+   $| is per-handle and applies to whatever is selected — which is why the
+   classic autoflush idiom `select((select($fh), $|=1)[0])` needs BOTH select
+   and $| to be real, not stubs.")
+
+(defun %p-default-out ()
+  "The stream print/printf/say write to when no filehandle is given: the
+   select()ed one, else STDOUT."
+  (or (and *p-selected-out* (p-get-stream *p-selected-out*))
+      *standard-output*))
+
+(defvar *p-autoflush-handles* (make-hash-table :test 'eq :weakness :key)
+  "Streams whose $| is 1.  ONLY autoflushing handles get an entry, so
+   `(zerop (hash-table-count …))` is a one-fixnum fast path on every print —
+   $| is set in a vanishing fraction of programs and must cost nothing in the
+   rest.  Weak keys: an abandoned handle must not be pinned here.")
+
+(defun %p-maybe-autoflush (stream)
+  "Flush STREAM if its $| is on."
+  (when (and (plusp (hash-table-count *p-autoflush-handles*))
+             (gethash stream *p-autoflush-handles*))
+    (ignore-errors (finish-output stream))))
+
+(defvar |$\|| (make-p-box
+               (make-p-magic-cell
+                :getter (lambda ()
+                          (if (gethash (%p-default-out) *p-autoflush-handles*) 1 0))
+                :setter (lambda (new)
+                          ;; Perl: $| is the SELECTED handle's flag, writes clamp
+                          ;; to 0/1 by truthiness (assigning 5 stores 1; --$|
+                          ;; toggles — op/ver.t 48), and turning it ON flushes
+                          ;; that handle right away.  The flush is what makes
+                          ;; IO::Handle::flush and printflush work in plain Perl.
+                          (let ((s (%p-default-out)))
+                            (cond ((p-true-p new)
+                                   (setf (gethash s *p-autoflush-handles*) t)
+                                   (ignore-errors (finish-output s)))
+                                  (t (remhash s *p-autoflush-handles*)))))))
+  "Output autoflush flag (magic — per selected handle, writes clamp to 0/1)")
+
 (defmacro p-local-pipe (&body body)
-  "Localize $| (Perl `local $|`): rebind *p-autoflush* to the reset value 0
-   (local's undef, clamped); the magic box stays in place so the 0/1 write
-   clamp still applies inside the scope, and the old value reverts on exit."
-  `(let ((*p-autoflush* 0))
-     ,@body))
+  "Localize $| (Perl `local $|`) for the handle selected at entry: local's undef
+   clamps to 0 inside, and the previous flag comes back on exit — including on a
+   non-local exit (die/last), which the old dynamic rebinding also gave us."
+  (let ((s (gensym "STREAM")) (old (gensym "OLD")))
+    `(let* ((,s (%p-default-out))
+            (,old (gethash ,s *p-autoflush-handles*)))
+       (remhash ,s *p-autoflush-handles*)
+       (unwind-protect (progn ,@body)
+         (if ,old
+             (setf (gethash ,s *p-autoflush-handles*) t)
+             (remhash ,s *p-autoflush-handles*))))))
 ;;; Subscript separator ($;)
 (defvar |$;| (make-p-box (string (code-char #x1C))) "Subscript separator (default SUBSEP)")
 ;;; Output field separator ($,)
@@ -3715,7 +3760,7 @@
 
 (defun p-printf (&rest args)
   "Perl printf - formatted print (with optional filehandle)"
-  (let ((fh *standard-output*)
+  (let ((fh (%p-default-out))
         (fmt nil)
         (fmt-args nil))
     ;; Check for :fh keyword.  Same rules as p-print, including the bail: a
@@ -3726,7 +3771,7 @@
       (let ((desig (second args)))
         (setf args (cddr args))
         (cond
-          ((null desig) (setf fh *standard-output*))
+          ((null desig) (setf fh (%p-default-out)))
           ((p-get-stream desig) (setf fh (p-get-stream desig)))
           (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
              (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
@@ -3740,6 +3785,7 @@
     (setf fmt-args (rest args))
     (let ((*p-sprintf-caller* "printf"))
       (princ (apply #'p-sprintf fmt fmt-args) fh))
+    (%p-maybe-autoflush fh)
     1))
 
 ;;; ============================================================
@@ -6291,23 +6337,12 @@ create the key on a read-only call, which perl does not."
          ;; Wrap in make-p-box so box-set does not treat it as scalar-context %hash.
          (box-set ref (make-p-box new-hash))
          new-hash))
-      ;; Symbolic reference: string used as hash name (no strict refs)
-      ((stringp h)
-       (when (find #\Nul h) (return-from p-ensure-hashref
-                              (make-hash-table :test 'equal)))
-       (let* ((pos (search "::" h :from-end t))
-              (pkg-str (if pos (%pcl-invert-case (subseq h 0 pos)) nil))
-              (var-str (if pos (subseq h (+ pos 2)) h))
-              (pkg     (if pkg-str
-                           (or (find-package pkg-str)
-                               (make-package pkg-str :use '(:cl :pcl)))
-                           *package*))
-              (sym-name (concatenate 'string "%" (%pcl-invert-case var-str)))
-              (sym      (or (find-symbol sym-name pkg) (intern sym-name pkg))))
-         (proclaim `(special ,sym))
-         (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
-           (setf (symbol-value sym) (make-hash-table :test 'equal)))
-         (symbol-value sym)))
+      ;; Symbolic reference: string used as hash name (no strict refs).
+      ;; ONE resolver — p-cast-% (%{"name"}) already decides between a package
+      ;; hash and a STASH ("Pkg::" → p-stash).  This used to be a second copy
+      ;; that knew nothing about stashes, so `$$p{k}` with $p="Foo::" read a
+      ;; package hash named "" instead of Foo's symbol table.
+      ((stringp h) (p-cast-% h))
       ((hash-table-p h) h)
       ;; Wrong kind of referent ($aryref->{k} = …): perl's fatal.
       ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
@@ -6326,26 +6361,10 @@ create the key on a read-only call, which perl does not."
          ;; Wrap in make-p-box so box-set does not treat it as scalar-context @arr.
          (box-set ref (make-p-box new-arr))
          new-arr))
-      ;; Symbolic reference: string used as array name
-      ((stringp a)
-       ;; Null bytes can't be CL symbols — return a transient dummy array
-       (when (find #\Nul a)
-         (return-from p-ensure-arrayref
-           (make-array 0 :adjustable t :fill-pointer 0)))
-       (let* ((pos (search "::" a :from-end t))
-              (pkg-str (if pos (%pcl-invert-case (subseq a 0 pos)) nil))
-              (var-str (if pos (subseq a (+ pos 2)) a))
-              (pkg     (if pkg-str
-                           (or (find-package pkg-str)
-                               (make-package pkg-str :use '(:cl :pcl)))
-                           *package*))
-              (sym-name (concatenate 'string "@" (%pcl-invert-case var-str)))
-              (sym      (or (find-symbol sym-name pkg) (intern sym-name pkg))))
-         (proclaim `(special ,sym))
-         (unless (and (boundp sym) (vectorp (symbol-value sym)))
-           (setf (symbol-value sym)
-                 (make-array 0 :adjustable t :fill-pointer 0)))
-         (symbol-value sym)))
+      ;; Symbolic reference: string used as array name (no strict refs).
+      ;; ONE resolver — %p-symref-array, the same one @{"name"} goes through
+      ;; (p-cast-@); this was a second copy of it.
+      ((stringp a) (%p-symref-array a))
       ((vectorp a) a)
       ;; Wrong kind of referent ($hashref->[0] = …): perl's fatal.
       ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
@@ -6809,9 +6828,28 @@ create the key on a read-only call, which perl does not."
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
+(defun %p-designator-hash (hash)
+  "The hash-table behind a Perl hash DESIGNATOR, resolving the symbolic form.
+   Under `no strict refs` a STRING in container position is a hash NAME
+   (`$$p{k}`, and \"Pkg::\" is a stash).  The element read/write paths already
+   resolve it (p-gethash / p-gethash-deref → p-ensure-hashref → p-cast-%);
+   exists/delete used the raw string instead, so `exists $$p{k}` silently
+   answered NO and `delete $$p{k}` crashed SBCL's GETHASH on a string.  One
+   resolver for every element primitive.  Everything else — hash tables, the
+   %ENV/%INC markers, a wrong referent — comes back unchanged, so the caller
+   keeps its own dispatch."
+  (let ((h (unbox hash)))
+    (if (stringp h) (p-ensure-hashref hash) h)))
+
+(defun %p-designator-array (arr)
+  "The vector behind a Perl array DESIGNATOR — the array-side twin of
+   %p-designator-hash (`exists $$p[0]` / `delete $$p[0]` under no strict refs)."
+  (let ((a (unbox arr)))
+    (if (stringp a) (p-ensure-arrayref arr) a)))
+
 (defun p-exists (hash key)
   "Perl exists function"
-  (let ((h (unbox hash))
+  (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (cond
       ((eq h '%ENV-MARKER%) (not (null (sb-posix:getenv k))))
@@ -6836,7 +6874,7 @@ create the key on a read-only call, which perl does not."
 
 (defun p-delete (hash key)
   "Perl delete function for hashes - returns unboxed value"
-  (let ((h (unbox hash))
+  (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (cond
       ((eq h '%ENV-MARKER%)
@@ -6867,7 +6905,7 @@ create the key on a read-only call, which perl does not."
   "Perl delete function for arrays.
    Sets element to nil (deleted marker) and returns the old value.
    Trims trailing nil slots (Perl shrinks array when last element deleted)."
-  (let* ((a (unbox arr))
+  (let* ((a (%p-designator-array arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i))
@@ -6886,7 +6924,7 @@ create the key on a read-only call, which perl does not."
 (defun p-exists-array (arr idx)
   "Perl exists function for arrays.
    Returns true only if element is within bounds AND is a box (assigned, not deleted)."
-  (let* ((a (unbox arr))
+  (let* ((a (%p-designator-array arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
@@ -7472,15 +7510,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-print (&rest args)
   "Perl print - prints args then appends $\\ (output record separator)"
-  (let ((fh *standard-output*))
+  (let ((fh (%p-default-out)))
     ;; Check for :fh keyword
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (let ((desig (second args)))
         (setf args (cddr args))
         (cond
           ;; :fh nil = bare `print { }`/empty filehandle node → the default
-          ;; (currently-selected) output handle, i.e. STDOUT.
-          ((null desig) (setf fh *standard-output*))
+          ;; (currently-selected) output handle.
+          ((null desig) (setf fh (%p-default-out)))
           ;; A named/lexical handle that resolves to a real stream.
           ((p-get-stream desig) (setf fh (p-get-stream desig)))
           ;; A handle was named but is not open: Perl print/say fails with
@@ -7507,23 +7545,25 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (let ((ors (unbox |$\\|)))
       (when (and (stringp ors) (plusp (length ors)))
         (princ ors fh)))
+    (%p-maybe-autoflush fh)
     t))
 
 (defun p-say (&rest args)
   "Perl say (print with newline)"
-  (let ((fh *standard-output*))
+  (let ((fh (%p-default-out)))
     ;; Resolve the target handle once (same rules as p-print); bail with EBADF
     ;; on a named-but-unopened handle so we don't emit a stray newline.
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (let ((desig (second args)))
         (cond
-          ((null desig) (setf fh *standard-output*))
+          ((null desig) (setf fh (%p-default-out)))
           ((p-get-stream desig) (setf fh (p-get-stream desig)))
           (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
              (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
              (return-from p-say *p-undef*)))))
     (apply #'p-print args)
     (terpri fh)
+    (%p-maybe-autoflush fh)
     t))
 
 (defun p-warn-is-reference (val)
@@ -8138,6 +8178,28 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (when (> (psos-pos s) 0) (decf (psos-pos s)))
   nil)
 
+(defvar *p-open-output-streams* (make-hash-table :test 'eq :weakness :key)
+  "Every OUTPUT stream that open() has bound to a Perl filehandle, weakly held
+   so an abandoned handle is still collectable.  Perl flushes (closes, in fact)
+   every handle at program exit and before fork/exec; PCL flushed only the three
+   standard streams, so `open my $fh,'>',$f; print {$fh} …;` with no explicit
+   close silently LOST the buffer — and so did a dup-opened handle
+   (`open $d,'>&=STDOUT'`), which is how Capture::Tiny tees.")
+
+(defun %p-flush-open-streams ()
+  "finish-output every still-open registered handle.  Called from the exit hook
+   (after the END blocks, which may still print) and before fork/exec."
+  (maphash (lambda (s v)
+             (declare (ignore v))
+             (ignore-errors (when (open-stream-p s) (finish-output s))))
+           *p-open-output-streams*))
+
+(defun %p-register-open-stream (stream)
+  "Record STREAM for the exit/fork flush if it can be written to."
+  (when (and (streamp stream) (output-stream-p stream))
+    (setf (gethash stream *p-open-output-streams*) t))
+  stream)
+
 (defun %p-install-fh (fh stream)
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
    Symbolic filehandle: when FH is a box already holding a non-empty handle-NAME
@@ -8145,16 +8207,29 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    and leaves $fh holding the string — it does NOT autovivify a lexical handle.
    Register under the by-name :pcl symbol so BOTH the bareword form (<TST>/eof(TST))
    and the scalar form (<$TST>) resolve it via %p-resolve-fh."
-  (cond ((and (p-box-p fh)
-              (stringp (p-box-value fh))
-              (plusp (length (p-box-value fh))))
-         (let* ((nm  (p-box-value fh))
-                (sep (search "::" nm :from-end t))
-                (name (if sep (subseq nm (+ sep 2)) nm)))
-           (setf (gethash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)
-                 stream)))
-        ((p-box-p fh) (box-set fh stream))
-        (t            (setf (gethash fh *p-filehandles*) stream))))
+  (%p-register-open-stream stream)
+  (cond ;; The box holds a GLOB (Symbol::gensym, \*FH, IO::Handle->new — often
+    ;; blessed).  Perl attaches the stream to the glob's IO slot and leaves
+    ;; the scalar itself alone; overwriting the box with the stream
+    ;; DESTROYED the object, so ref($io) stopped being IO::Handle and every
+    ;; later method call on it went elsewhere (task #197).  Key it by the
+    ;; glob's own name, which is how %p-resolve-fh reaches a glob handle.
+    ((and (p-box-p fh) (p-typeglob-p (p-box-value fh)))
+     (let ((glob (p-box-value fh)))
+       (setf (gethash (intern (p-typeglob-name glob)
+                              (p-typeglob-package glob))
+                      *p-filehandles*)
+             stream)))
+    ((and (p-box-p fh)
+          (stringp (p-box-value fh))
+          (plusp (length (p-box-value fh))))
+     (let* ((nm  (p-box-value fh))
+            (sep (search "::" nm :from-end t))
+            (name (if sep (subseq nm (+ sep 2)) nm)))
+       (setf (gethash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)
+             stream)))
+    ((p-box-p fh) (box-set fh stream))
+    (t            (setf (gethash fh *p-filehandles*) stream))))
 
 (defun %p-fresh-adjustable-string (&optional (init ""))
   (let ((buf (make-array (length init) :element-type 'character
@@ -8386,14 +8461,22 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                            (make-synonym-stream 'sb-sys:*stderr*))
                      (setf (gethash 'STDERR *p-filehandles*) *error-output*)))
                 t)
-              (let* ((new-fd  (if eq-form src-fd (sb-posix:dup src-fd)))
-                     (stream  (if (char= (char mode-str 0) #\>)
-                                  (sb-sys:make-fd-stream new-fd :output t
-                                                         :external-format :utf-8)
-                                  (sb-sys:make-fd-stream new-fd :input t
-                                                         :external-format :utf-8))))
-                (%p-install-fh fh stream)
-                t))
+              ;; ">&=SRC" is fdopen, NOT dup: the new handle IS the same fd.  When
+              ;; SRC is a handle we already have a stream for, share that stream
+              ;; object rather than opening a second buffer on the same fd —
+              ;; otherwise two buffers race and interleaved writes come out
+              ;; reordered (perl keeps program order here).  A raw fd number
+              ;; ("<&=3") has no stream to share and still gets a fresh one.
+              (if (and eq-form (streamp src))
+                  (progn (%p-install-fh fh src) t)
+                  (let* ((new-fd  (if eq-form src-fd (sb-posix:dup src-fd)))
+                         (stream  (if (char= (char mode-str 0) #\>)
+                                      (sb-sys:make-fd-stream new-fd :output t
+                                                             :external-format :utf-8)
+                                      (sb-sys:make-fd-stream new-fd :input t
+                                                             :external-format :utf-8))))
+                    (%p-install-fh fh stream)
+                    t)))
         (error () (%pcl-save-errno) nil)))))
 
 (defun %p-open-impl (fh mode filename)
@@ -8477,24 +8560,28 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (ignore-errors (sb-bsd-sockets:socket-close sock))))
   t)
 
+(defun %p-forget-fh (fh)
+  "Undo %p-install-fh: drop FH's binding to its stream.  Mirrors that function's
+   cases exactly, so every handle shape it can open, this can close."
+  (cond ((and (p-box-p fh) (p-typeglob-p (p-box-value fh)))
+         (let ((glob (p-box-value fh)))
+           (remhash (intern (p-typeglob-name glob) (p-typeglob-package glob))
+                    *p-filehandles*)))
+        ((p-box-p fh) (box-set fh *p-undef*))
+        ((symbolp fh) (remhash fh *p-filehandles*))))
+
 (defun %p-close-impl (fh)
-  "Implementation of Perl close (file or socket handle)."
-  (cond
-    ((p-box-p fh)
-     (let ((v (p-box-value fh)))
-       (cond
-         ((%p-socket-p v) (%p-close-socket v) (box-set fh *p-undef*) t)
-         ((streamp v)     (prog1 (%p-close-maybe-pipe v)
-                            (box-set fh *p-undef*)))
-         (t nil))))
-    (t
-     (let ((v (%p-resolve-fh fh)))
-       (cond
-         ((%p-socket-p v) (%p-close-socket v)
-          (when (symbolp fh) (remhash fh *p-filehandles*)) t)
-         ((streamp v)     (prog1 (%p-close-maybe-pipe v)
-                            (when (symbolp fh) (remhash fh *p-filehandles*))))
-         (t nil))))))
+  "Implementation of Perl close (file or socket handle).
+   Resolves through %p-resolve-fh — the ONE resolver that knows every handle
+   shape.  Reading the box directly instead missed a handle whose box holds a
+   GLOB (IO::Handle->new / \\*FH), so close() quietly did nothing and the
+   buffered output was lost."
+  (let ((v (%p-resolve-fh fh)))
+    (cond
+      ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh) t)
+      ((streamp v)     (prog1 (%p-close-maybe-pipe v)
+                         (%p-forget-fh fh)))
+      (t nil))))
 
 (defmacro p-close (&optional fh)
   "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box.
@@ -10564,12 +10651,18 @@ buffer's fill-pointer; everything else falls back to file-length."
           (error () 0)))))
 
 (defun p-select (&optional (fh nil) (wbits nil) (ebits nil) (timeout nil timeout-p))
-  "Perl select - one-arg form sets the default output filehandle (stub that
-   returns the previous handle's *name*, always a true value — never undef,
-   see %p-flatten-list); four-arg form is select(2) (%p-select-4arg)."
+  "Perl select - the one-arg form makes FH the default output handle for
+   print/printf/say and the handle $| applies to, and returns the PREVIOUS
+   selection so `my $old = select($fh); …; select($old)` restores it (the
+   returned value is a designator %p-resolve-fh accepts; with nothing selected
+   it is the name \"main::STDOUT\", always true — never undef, see
+   %p-flatten-list).  No argument returns the current selection unchanged.
+   Four-arg form is select(2) (%p-select-4arg)."
   (if timeout-p
       (%p-select-4arg fh wbits ebits timeout)
-      "main::STDOUT"))
+      (let ((prev (or *p-selected-out* "main::STDOUT")))
+        (when fh (setf *p-selected-out* fh))
+        prev)))
 
 (defun p-write (&optional fh)
   "Perl write - emit a report via the current `format` (stub).
@@ -10626,6 +10719,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    single-threaded Perl fork/exec and fork/exit works.)"
   (finish-output *standard-output*)
   (finish-output *error-output*)
+  (%p-flush-open-streams)                ; perl flushes EVERY handle, not just the std three
   (handler-case (sb-posix:fork)          ; 0 in child, >0 in parent
     (error ()
       (%pcl-save-errno)
@@ -10813,7 +10907,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-95"
+(defparameter *pcl-cache-generation* "v2-96"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

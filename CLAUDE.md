@@ -300,8 +300,8 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **125 test files, 4479 tests** with a built pclxs sibling (s325, measured);
-  **4465 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
+- **126 test files, 4495 tests** with a built pclxs sibling (s326, measured);
+  **4481 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not
@@ -320,7 +320,7 @@ func => -12         # 1 param before list
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
 - Full `perl-tests/` sweep: **689 blessed fails** in `docs/fail-baseline.tsv`,
-  **66 files fully passing**, 18461 passing / 926 failing across 108 files
+  **66 files fully passing**, 18462 passing / 925 failing across 108 files
   (re-measured s323 with pack.t running; `sweep-diff.pl diff
   docs/fail-baseline.tsv .faillog` = **0 new / 0 fixed**, plus 2 rows the tool
   itself flags UNSTABLE — new fails ABOVE the abort point of postfixderef.t and

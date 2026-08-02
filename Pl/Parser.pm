@@ -7414,6 +7414,26 @@ sub _process_include_statement {
   my $type = $stmt->type // 'use';    # 'use', 'require', 'no'
   my $module = $stmt->module // '';
 
+  # `require Foo if COND;` / `require Foo unless COND;` — the statement
+  # modifier is part of the statement, and require is a RUNTIME op, so the
+  # condition must gate it.  PCL used to hoist every require into the
+  # definitions bucket and drop the modifier entirely, so a platform-guarded
+  # require ran on every platform: File::Temp's `require VMS::Stdio if $^O eq
+  # 'VMS'` died with "Can't locate VMS/Stdio.pm" on Linux, taking all of
+  # Capture-Tiny with it (task #197).  Same family as #187, where a `use`
+  # inside do{} was dropped.
+  if ($type eq 'require' && $module ne '') {
+    my ($mod_word, $cond_cl) = $self->_include_statement_modifier($stmt);
+    if (defined $mod_word) {
+      $self->_emit(";; $perl_code");
+      $self->_emit($mod_word eq 'if'
+                   ? "(p-if $cond_cl (p-require \"$module\"))"
+                   : "(p-unless $cond_cl (p-require \"$module\"))");
+      $self->_emit("");
+      return;
+    }
+  }
+
   # Handle 'use constant' specially
   if ($module eq 'constant') {
     $self->_process_use_constant($stmt, $perl_code);
@@ -7618,7 +7638,16 @@ sub _process_include_statement {
                ? qq{ :into "$cur_pkg"}
                : '';
       $self->_emit("(p-eval-always");
-      if (defined $args_cl && $args_cl ne '') {
+      # `use Foo ()` / `use Foo qw()` — an EXPLICIT empty list means "load it,
+      # do NOT call import", which is the only reason anyone writes it (both
+      # spellings verified against perl).  This must be decided BEFORE the
+      # import-args branch, because an empty list still parses to `(vector)`.
+      # Calling import anyway is how core's IO/Handle.pm — whose `use IO ()`
+      # exists precisely to skip IO.pm's loader — dragged in IO::Socket and
+      # friends behind its back (task #197).
+      if ($self->_use_has_empty_import_list($stmt)) {
+        $self->_emit("  (p-use \"$module\" :do-import nil$into))");
+      } elsif (defined $args_cl && $args_cl ne '') {
         $self->_emit("  (p-use \"$module\" :import-args $args_cl$into))");
       } else {
         $self->_emit("  (p-use \"$module\"$into))");
@@ -8075,6 +8104,54 @@ sub _merge_module_prototypes {
 # LIST in `use Module LIST`), so the caller runs them through the normal list
 # parser.  The optional module VERSION (use Foo 1.2 …) is NOT an import arg
 # (Perl calls Foo->VERSION(1.2)), so it's skipped.
+sub _include_statement_modifier {
+  # An include statement carrying a trailing `if`/`unless` modifier:
+  # returns (MODIFIER-WORD, CONDITION-AS-CL) or () when there is none.
+  # Only if/unless are recognised — a loop modifier on an include is not
+  # something real Perl writes, and guessing at one would be worse than
+  # leaving it on the existing (unconditional) path.
+  my ($self, $stmt) = @_;
+  my @kids = $stmt->schildren;
+  my ($mod_i, $mod_word);
+  for my $i (0 .. $#kids) {
+    next unless $kids[$i]->isa('PPI::Token::Word');
+    my $c = $kids[$i]->content;
+    next unless $c eq 'if' || $c eq 'unless';
+    # The modifier is the LAST such word (a module named `if` is a real
+    # pragma, so only a word that has an expression after it counts).
+    ($mod_i, $mod_word) = ($i, $c);
+  }
+  return () unless defined $mod_i;
+  my @cond = grep { !($_->isa('PPI::Token::Structure') && $_->content eq ';') }
+             @kids[$mod_i + 1 .. $#kids];
+  return () unless @cond;
+  my $cl = $self->_parse_expression(\@cond, $stmt);
+  return () unless defined $cl && $cl ne '';
+  return ($mod_word, $cl);
+}
+
+sub _use_has_empty_import_list {
+  # True for `use Foo ()` / `use Foo ( )` — an explicitly EMPTY import list,
+  # which Perl reads as "load the module, do not call its import".  A bare
+  # `use Foo;` (no list at all) is a different thing: import with no arguments.
+  my ($self, $stmt) = @_;
+  my @args = $self->_use_import_arg_tokens($stmt);
+  return 0 unless @args == 1;
+  my $list = $args[0];
+  # qw() with no words is the same statement to perl: import is not called.
+  return (($list->literal)[0] ? 0 : 1)
+    if $list->isa('PPI::Token::QuoteLike::Words');
+  return 0 unless $list->isa('PPI::Structure::List');
+  # Empty either way PPI spells it: no children at all, or one expression with
+  # no significant children.
+  my @kids = $list->schildren;
+  return 1 if !@kids;
+  return 1 if @kids == 1
+           && $kids[0]->isa('PPI::Statement::Expression')
+           && !$kids[0]->schildren;
+  return 0;
+}
+
 sub _use_import_arg_tokens {
   my ($self, $stmt) = @_;
   my $ver = $stmt->version;

@@ -4,6 +4,76 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 326 (2026-08-02, Opus) — post-R1 item 1: the IO/IO::Handle shim, and the seven bugs under it
+
+First post-R1 item (`fable-answers-s323.md` §7 step 4, task #197).  The task
+scoped it as "one missing shim"; the shim itself is ~200 lines, and getting
+`use IO::Handle` to work end to end took **seven core fixes** first, each one
+probed against real perl.
+
+**The shim.**  `lib/IO.pm` supplies the XS half of `IO::Handle` in plain Perl
+(constants, `flush` via the `$|` idiom, `getline`/`getlines`/`gets`,
+`setbuf`/`setvbuf` mapped onto autoflush, and `error`/`clearerr`/`untaint`
+answering 0 — PCL latches no error flag and has no taint), so core's own
+pure-Perl `IO/Handle.pm` runs on top of it.  `sync`/`blocking`/`ungetc` CROAK
+by name rather than returning a plausible value (rule 12): no fsync, no fcntl,
+no pushback.  `lib/IO/Handle.pm` is a second, smaller delta and a **WORKAROUND**
+— core's file with exactly `autoflush` and `printflush` rewritten to save and
+restore the selection explicitly, because `SelectSaver` restores from DESTROY
+and PCL never calls DESTROY (task #198 carries the deletion condition).
+
+**The seven bugs, in the order they surfaced** (all guarded by
+`Pl/t/io-shim-01.t`, 16 rows / 23 s, inverse rows included):
+
+1. **`exists`/`delete` did not resolve a symbolic container designator.**
+   `$$p{k}` read and wrote fine, but `exists $$p{k}` silently answered NO and
+   `delete $$p{k}` crashed SBCL's GETHASH on the string.  One resolver now:
+   `%p-designator-hash`/`%p-designator-array`; and `p-ensure-hashref`/
+   `p-ensure-arrayref` delegate their string branch to `p-cast-%`/
+   `%p-symref-array`, which is also what taught them that `"Pkg::"` is a STASH
+   — they were a second copy that had never heard of stashes.
+2. **`delete $ref->[i]` crashed on arity** — `exists` had both ref arms all
+   along, `delete` only the hash one, so the array form fell through to a
+   one-argument `p-delete`.  Fixed in both pipelines.
+3. **Buffered output of any unclosed handle was LOST at exit.**  Perl flushes
+   (closes) every handle; PCL flushed only the standard three.  Weak registry
+   `*p-open-output-streams*`, flushed from the exit hook AFTER the END blocks
+   (they may still print) and from `p-fork`.
+4. **`select(FH)` was a stub** returning a constant string, so the default
+   output handle never changed.
+5. **`$|` was one global flag nothing consumed** — no per-handle state, no
+   flush on assignment, no autoflush on write.  All three now real; the cost on
+   the print path is one `hash-table-count` test, because only autoflushing
+   handles get an entry.
+6. **open() on a GLOB handle destroyed the object.**  `IO::Handle->new` is a
+   blessed globref; PCL box-set the stream over it, so `ref($io)` stopped being
+   `IO::Handle` and later method calls went elsewhere.  The stream now goes to
+   the glob's slot keyed by its name, and `%p-close-impl` resolves through
+   `%p-resolve-fh` (one resolver, every handle shape) with `%p-forget-fh`
+   mirroring `%p-install-fh` — reading the box directly had made `close()` on a
+   glob handle a silent no-op.
+7. **`use Foo ()` called import anyway** (perl skips import for both `()` and
+   `qw()` — verified), and **`require Foo if COND` dropped the modifier**, so
+   File::Temp's `require VMS::Stdio if $^O eq 'VMS'` ran on Linux and died.
+   The second is the same family as #187.
+
+**Capture-Tiny is NOT cleared by the shim, and that is the finding.**  Its 23
+FAILs move off `Can't locate loadable object for module IO` onto two
+string-eval causes (task #199): a prototyped sub defined by
+`eval "sub NAME(&;@){…}"` is never installed — and Capture::Tiny builds its
+entire public API that way — and a p-eval-thunk reaches CL's `push` with too
+many arguments.  The "23 of 48 FAILs" estimate in #197 assumed one blocker;
+there were three.
+
+**Gates.**  Pl/t `Result: PASS`, 125 files / 4479 tests (plus the new
+`io-shim-01.t`, 16 rows); full sweep **18462 pass / 925 fail across 108 files,
+`sweep-diff` 0 new / 0 fixed** vs the 689-row baseline plus the two documented
+UNSTABLE crash-file rows (postfixderef.t, ref.t) — identical to s323/s324/s325;
+`tools/corpus-diff.pl` reports **emission identical to HEAD across 111 files**
+(the three emission changes fire nowhere in that corpus); gen bumped to
+**v2-96** and both checked-in artifacts regenerated — bodies byte-identical,
+stamps only.
+
 ## Session 325 (2026-08-02, Fable) — #195 TIMEOUT recovery: 4 load artifacts, 3 real hangs (unmasked, diagnosed)
 
 Pre-R1 step 1 from `fable-answers-s323.md` §7.  The 7 files that flipped

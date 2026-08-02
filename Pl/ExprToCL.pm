@@ -2278,6 +2278,19 @@ sub gen_funcall_form {
         return ['p-delete', ['unbox', $ref], $key];
       }
     }
+    # Array-ref access: delete $ref->[i] / delete $$ref[i].  Without this the
+    # element lowered as a VALUE and delete got one argument — an arity crash,
+    # not a wrong answer.  exists has had both ref arms all along; delete had
+    # only the hash one.
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'a_ref_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $ref = $self->gen_node_form($arg_kids->[0]);
+        my $idx = $self->gen_node_form($arg_kids->[1]);
+        return ['p-delete-array', ['unbox', $ref], $idx];
+      }
+    }
   }
 
   # exists on array/hash elements, refs, and sub/coderef existence.
@@ -3075,6 +3088,17 @@ sub gen_funcall {
         my $ref = $self->gen_node($arg_kids->[0]);
         my $key = $self->gen_node($arg_kids->[1]);
         return "(p-delete (unbox $ref) $key)";
+      }
+    }
+    # Array ref access: delete $ref->[i] -> (p-delete-array (unbox ref) i).
+    # Mirrors the exists a_ref_acc arm; its absence made delete arity-crash.
+    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
+           $arg_node->{type} eq 'a_ref_acc') {
+      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
+      if (@$arg_kids >= 2) {
+        my $ref = $self->gen_node($arg_kids->[0]);
+        my $idx = $self->gen_node($arg_kids->[1]);
+        return "(p-delete-array (unbox $ref) $idx)";
       }
     }
   }
