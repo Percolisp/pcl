@@ -10,34 +10,91 @@
 #
 # Usage:
 #   tools/sweep-diff.pl <current>                 # summarize a fail DB (per-file counts)
-#   tools/sweep-diff.pl diff <baseline> <current> # NEW (regressions) + FIXED (newly passing)
+#   tools/sweep-diff.pl diff <baseline> <current> # NEW + FIXED + LOST (see below)
 #   tools/sweep-diff.pl save <current> <dest.tsv>  # write a sorted baseline to commit
+#   tools/sweep-diff.pl save-status <current-dir> <dest.tsv>   # bless the PASS baseline
 #
 # <current>/<baseline> may each be a directory (globs *.fails.tsv) or a single .tsv file.
-# `diff` exits nonzero if there are NEW failures (regressions) — usable as a CI gate.
+#
+# THE FOURTH BUCKET — LOST (task #204, ruled in docs/fable-answers-s328.md §4).
+# This tool compares FAILING rows, so a change that makes a file abort EARLIER
+# removes PASSING rows without adding failing ones: the headline reads
+# "0 new, 0 fixed" while the run silently lost coverage.  Measured live in s328
+# (a die in `goto LABEL` cost perl-tests/state.t 88 verified rows, 157 -> 69,
+# with a clean diff), so the total passing count is now a MACHINE-CHECKED gate,
+# not an operator habit:
+#
+#   LOST = per file, baseline passing rows the current run did not produce.
+#   Non-empty LOST = the run is NOT clean, same severity as NEW.
+#
+# The pass baseline is a blessed copy of a clean run's <dir>/_status.tsv
+# (name <TAB> status <TAB> pass <TAB> fail <TAB> planned).  It is found, in
+# order: --pass-baseline PATH; <baseline>/_status.tsv when <baseline> is a
+# directory; else pass-baseline.tsv beside the fail baseline.  When none
+# exists the LOST check SAYS SO on its own line — an unchecked gate must never
+# look like a passed one.
+#
+# `diff` exits nonzero if there are NEW failures or any LOST rows — usable as a
+# CI gate.
 
 use strict;
 use warnings;
 
-# Read the per-file run status the sweep writes to <dir>/_status.tsv
-# (name <TAB> status <TAB> pass <TAB> fail <TAB> planned).  Returns a hash
-# file => status.  Only meaningful for a directory (a live .faillog); a single
-# committed baseline .tsv has no status, so we treat every file as having run OK.
-sub load_status {
-    my ($path) = @_;
+# Read a per-file run status table: one line of
+#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned [<TAB> note]
+# as the sweep writes to <dir>/_status.tsv and as `save-status` blesses.
+# Returns file => { status, pass, fail, planned }.  An absent table is an empty
+# hash, and every caller treats "no entry" as "no information", never as zero.
+sub read_status_file {
+    my ($sf) = @_;
     my %st;
-    return \%st unless defined $path && -d $path;
-    my $sf = "$path/_status.tsv";
-    return \%st unless -e $sf;
+    return \%st unless defined $sf && -e $sf;
     open my $fh, '<', $sf or return \%st;
     while (my $line = <$fh>) {
         chomp $line;
         next unless length $line;
-        my ($file, $status) = split /\t/, $line;
-        $st{$file} = $status // 'OK' if defined $file;
+        next if $line =~ /^#/;
+        my ($file, $status, $pass, $fail, $planned) = split /\t/, $line;
+        next unless defined $file;
+        $st{$file} = { status  => $status  // 'OK',
+                       pass    => defined $pass    ? $pass    : -1,
+                       fail    => defined $fail    ? $fail    : -1,
+                       planned => defined $planned ? $planned : -1 };
     }
     close $fh;
     return \%st;
+}
+
+# The status of the run under <path>: only a directory (a live .faillog) has one.
+sub load_status {
+    my ($path) = @_;
+    return {} unless defined $path && -d $path;
+    return read_status_file("$path/_status.tsv");
+}
+
+# Where the BASELINE's pass counts live.  Returns (path, records) — path is
+# undef when no table could be found, which the LOST bucket reports out loud.
+sub load_pass_baseline {
+    my ($base_path, $explicit) = @_;
+    # An EXPLICIT path that does not exist is an operator error, never a
+    # reason to quietly use a different file: falling back would answer a
+    # question nobody asked and call the run clean.
+    if (defined $explicit) {
+        die "--pass-baseline: no such file: $explicit\n" unless -e $explicit;
+        return ($explicit, read_status_file($explicit));
+    }
+    my @try;
+    push @try, "$base_path/_status.tsv" if -d $base_path;
+    if (!-d $base_path) {
+        my $dir = $base_path;
+        $dir =~ s{/[^/]*$}{};
+        $dir = '.' if $dir eq $base_path;
+        push @try, "$dir/pass-baseline.tsv";
+    }
+    for my $p (@try) {
+        return ($p, read_status_file($p)) if -e $p;
+    }
+    return (undef, {});
 }
 
 sub load {
@@ -62,7 +119,40 @@ sub load {
     return \%rec;
 }
 
-my $mode = (@ARGV && ($ARGV[0] eq 'diff' || $ARGV[0] eq 'save')) ? shift @ARGV : 'summary';
+my $pass_baseline_opt;
+{   # --pass-baseline PATH may appear anywhere
+    my @keep;
+    while (@ARGV) {
+        my $a = shift @ARGV;
+        if ($a eq '--pass-baseline') { $pass_baseline_opt = shift @ARGV; next }
+        if ($a =~ /^--pass-baseline=(.*)$/) { $pass_baseline_opt = $1; next }
+        push @keep, $a;
+    }
+    @ARGV = @keep;
+}
+
+my %modes = map { $_ => 1 } qw(diff save save-status);
+my $mode = (@ARGV && $modes{$ARGV[0]}) ? shift @ARGV : 'summary';
+
+if ($mode eq 'save-status') {
+    # Bless a clean run's per-file pass counts as the LOST-bucket baseline.
+    # The sweep's `note` column (crash-localization snippet) is DROPPED: it
+    # changes run to run and this file is a gate, not a report.
+    my $cur  = shift @ARGV or die "usage: $0 save-status <current-dir> <dest.tsv>\n";
+    my $dest = shift @ARGV or die "usage: $0 save-status <current-dir> <dest.tsv>\n";
+    my $st = load_status($cur);
+    die "no _status.tsv under $cur (a live .faillog directory is required)\n" unless %$st;
+    open my $out, '>', $dest or die "open $dest: $!\n";
+    my $total = 0;
+    for my $f (sort keys %$st) {
+        my $r = $st->{$f};
+        print $out join("\t", $f, $r->{status}, $r->{pass}, $r->{fail}, $r->{planned}), "\n";
+        $total += $r->{pass} if $r->{pass} > 0;
+    }
+    close $out;
+    printf "saved %d files / %d passing rows -> %s\n", scalar(keys %$st), $total, $dest;
+    exit 0;
+}
 
 if ($mode eq 'summary') {
     my $cur = shift @ARGV or die "usage: $0 <current>\n";
@@ -104,7 +194,43 @@ sub ran_clean {
     my ($file) = @_;
     my $s = $cur_status->{$file};
     return 1 unless defined $s;   # no status info (single-file baseline) → assume ran
-    return $s eq 'OK';
+    return $s->{status} eq 'OK';
+}
+sub cur_status_name {
+    my ($file) = @_;
+    my $s = $cur_status->{$file};
+    return defined $s ? $s->{status} : 'NOT RUN';
+}
+
+# ── LOST: baseline PASSING rows this run did not produce (task #204) ─────────
+# The three buckets above all read FAILING rows, so none of them can see a file
+# that simply stopped earlier.  This one compares per-file pass counts.
+my ($pass_base_path, $pass_base) = load_pass_baseline($base_path, $pass_baseline_opt);
+my @lost;              # [file, lost_rows, why]
+my ($base_total, $cur_total) = (0, 0);
+if (%$pass_base && %$cur_status) {
+    for my $file (sort keys %$pass_base) {
+        my $pb = $pass_base->{$file}{pass};
+        next if $pb < 0;                       # no count recorded → nothing to check
+        $base_total += $pb;
+        my $cs = $cur_status->{$file};
+        if (!defined $cs) {
+            push @lost, [$file, $pb, 'DID NOT RUN this sweep'] if $pb > 0;
+            next;
+        }
+        my $pc = $cs->{pass};
+        $cur_total += $pc if $pc > 0;
+        next if $pc < 0 || $pc >= $pb;
+        push @lost, [$file, $pb - $pc,
+                     sprintf("%d -> %d passing, status %s (was %s)",
+                             $pb, $pc, $cs->{status}, $pass_base->{$file}{status})];
+    }
+    # Files the current run produced that the baseline never had still count
+    # toward the current total, so the headline compares like with like.
+    for my $file (keys %$cur_status) {
+        next if exists $pass_base->{$file};
+        $cur_total += $cur_status->{$file}{pass} if $cur_status->{$file}{pass} > 0;
+    }
 }
 
 my @new_all = sort grep { !exists $base->{$_} } keys %$cur;
@@ -140,7 +266,7 @@ if (@new_unstable) {
         scalar(@new_unstable), "\n";
     for my $file (sort keys %by_file) {
         printf "  ~ %-14s %d new fail(s) above abort point — %s\n",
-            $file, $by_file{$file}, ($cur_status->{$file} // 'NOT RUN');
+            $file, $by_file{$file}, cur_status_name($file);
     }
     print "\n";
 }
@@ -160,14 +286,40 @@ if (@notrun) {
         scalar(@notrun), "\n";
     for my $file (sort keys %by_file) {
         printf "  ? %-14s %d baseline fail(s) absent — %s\n",
-            $file, $by_file{$file}, ($cur_status->{$file} // 'NOT RUN');
+            $file, $by_file{$file}, cur_status_name($file);
     }
     print "\n";
 }
-printf "summary: %d new, %d fixed%s%s (baseline %d fails, current %d fails)\n",
+if (@lost) {
+    my $rows = 0; $rows += $_->[1] for @lost;
+    print "LOST passing rows (baseline rows this run did not produce): $rows\n";
+    for my $l (sort { $b->[1] <=> $a->[1] || $a->[0] cmp $b->[0] } @lost) {
+        printf "  ! %-14s -%d  (%s)\n", $l->[0], $l->[1], $l->[2];
+    }
+    print "\n";
+}
+
+# The TOTAL line is the gate itself: it must be printed on EVERY run, including
+# the runs where nothing was lost, and it must say so when it could not be
+# computed.  A check that goes quiet when it cannot run is indistinguishable
+# from a check that passed — which is the failure this whole bucket exists for.
+if (!%$pass_base) {
+    print "LOST: NOT CHECKED — no pass baseline found",
+          (defined $pass_baseline_opt ? " at $pass_baseline_opt" : ''),
+          " (bless one with: $0 save-status .faillog docs/pass-baseline.tsv)\n";
+} elsif (!%$cur_status) {
+    print "LOST: NOT CHECKED — the current run has no _status.tsv (needs a live .faillog directory)\n";
+} else {
+    printf "TOTAL passing: baseline %d, current %d (%+d)%s\n",
+        $base_total, $cur_total, $cur_total - $base_total,
+        (@lost ? '  <-- LOST is non-empty: this run is NOT clean' : '');
+}
+
+printf "summary: %d new, %d fixed%s%s%s (baseline %d fails, current %d fails)\n",
     scalar(@new), scalar(@fixed),
+    (@lost ? sprintf(", %d LOST", scalar(@lost)) : ''),
     (@new_unstable ? sprintf(", %d unstable (crash-file noise)", scalar(@new_unstable)) : ''),
     (@notrun ? sprintf(", %d unverified (did not run)", scalar(@notrun)) : ''),
     scalar(keys %$base), scalar(keys %$cur);
 
-exit(@new ? 1 : 0);
+exit((@new || @lost) ? 1 : 0);

@@ -207,11 +207,16 @@ the full sweep and eyeball ~900 lines to confirm no regression" step (e.g. after
 session-216 preprocessing change) with "2 tests changed: both newly passing."
 
 ```sh
-perl sweep-perl-tests.pl --jobs 8                       # writes .faillog/*.fails.tsv
+perl sweep-perl-tests.pl --jobs 8                       # writes .faillog/*, THEN runs the gate itself
 tools/sweep-diff.pl .faillog                            # summary: per-file fail counts
-tools/sweep-diff.pl diff docs/fail-baseline.tsv .faillog # regressions + fixes (exit!=0 if regressions)
-tools/sweep-diff.pl save .faillog docs/fail-baseline.tsv # re-bless the baseline after intended changes
+tools/sweep-diff.pl diff docs/fail-baseline.tsv .faillog # NEW + FIXED + LOST (exit!=0 if NEW or LOST)
+tools/sweep-diff.pl save .faillog docs/fail-baseline.tsv        # re-bless the FAIL baseline
+tools/sweep-diff.pl save-status .faillog docs/pass-baseline.tsv # re-bless the PASS baseline
 ```
+
+A **full** sweep (no file arguments) ends by running that `diff` itself and exits
+with its verdict — `--no-gate` opts out.  A sweep of named files stays
+informational: a partial run is not comparable to a whole-corpus baseline.
 
 **Caveat:** if a file with real failures *flaky-crashes* in the parallel sweep (transient
 `SIMPLE-FILE-ERROR` under `-j8` — see grent.t note), its failures are absent that run, so
@@ -228,6 +233,24 @@ assertions) made all ~89 of its baseline fails look fixed. Regressions (NEW) are
 a crashed file emits no failures, so it can never manufacture a false regression. (PARTIAL is
 treated like CRASH: its post-stop assertions did not run, so a "fix" there is unverifiable
 until the early-stop crash is localized — see #3 below.)
+
+### 3b. LOST passing rows — BUILT (task #204, s330)
+The three buckets above all read **failing** rows, so none of them can see a change
+that makes a file **stop earlier**: passing rows vanish, no failing row appears, and
+the headline says `0 new, 0 fixed`.  Measured live in s328 — a `die` in `goto LABEL`
+took `perl-tests/state.t` from 157 to 69 passing rows while the diff stayed clean.
+
+`docs/pass-baseline.tsv` (blessed with `save-status` from a clean run) records
+`name⇥status⇥pass⇥fail⇥planned` per file.  `diff` compares the current run's pass
+counts against it and prints **LOST** — per file, baseline passing rows this run did
+not produce — plus a `TOTAL passing: baseline N, current M (+/-D)` line on **every**
+run.  Non-empty LOST = the run is NOT clean, same exit code as NEW.
+
+Two rules the implementation follows, both because a quiet check reads exactly like
+a passed one: when no pass baseline can be found the tool prints
+`LOST: NOT CHECKED — …` instead of nothing, and an explicitly-given
+`--pass-baseline` that does not exist is a fatal error rather than a silent fall-back
+to the default file.
 
 ### 3. Crash localization (which statement aborted) — BUILT (session 217)
 `cl/pcl-test.lisp` tracks `*last-test-name*` (set in `test-ok` for every assertion) and its

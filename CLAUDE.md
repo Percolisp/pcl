@@ -327,6 +327,17 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
+- **The full sweep RUNS ITS OWN GATE (s330, #204)**: `perl sweep-perl-tests.pl
+  --jobs 8` with no file arguments ends by running `tools/sweep-diff.pl diff
+  docs/fail-baseline.tsv .faillog` and **exits with that verdict** (`--no-gate`
+  opts out; a sweep of named files stays informational).  The diff now has a
+  **fourth bucket, LOST** — baseline PASSING rows the run did not produce,
+  compared against `docs/pass-baseline.tsv` (`sweep-diff.pl save-status .faillog
+  docs/pass-baseline.tsv` re-blesses it).  The first three buckets read failing
+  rows only, so a change that makes a file abort EARLIER used to report
+  `0 new / 0 fixed` while coverage evaporated (s328: state.t 157 → 69).  Every
+  run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
+  is found it prints `LOST: NOT CHECKED` rather than nothing.
 - Full `perl-tests/` sweep: **683 blessed fails** in `docs/fail-baseline.tsv`,
   **66 files fully passing**, 18469 passing / 918 failing across 108 files
   (re-measured s330; `sweep-diff.pl diff

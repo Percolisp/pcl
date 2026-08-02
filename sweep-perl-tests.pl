@@ -35,14 +35,17 @@ my $RETRY   = 3;   # TIMEOUT is retried once at $RETRY x $TIMEOUT; 0 = no retry
 #        self-skips (1..0) anyway. Permanently skipped (not-supported, no recoverable tests).
 my @SKIP    = qw(heredoc.t list.t lfs.t);
 
+my $GATE    = 1;   # a FULL sweep ends by running tools/sweep-diff.pl (--no-gate off)
 my @test_files;
 while (@ARGV) {
     my $arg = shift;
     if ($arg eq '--jobs')    { $JOBS    = shift; next; }
     if ($arg eq '--timeout') { $TIMEOUT = shift; next; }
     if ($arg eq '--no-retry'){ $RETRY   = 0;     next; }
+    if ($arg eq '--no-gate') { $GATE    = 0;     next; }
     push @test_files, $arg;
 }
+my $full_sweep = @test_files ? 0 : 1;   # no file arguments = the whole corpus
 
 my $project_root = abs_path(dirname($0));
 my $pl2cl      = "$project_root/pl2cl";
@@ -424,4 +427,25 @@ if (open my $sf, '>', "$log_dir/_status.tsv") {
                        $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1, $note) . "\n";
     }
     close $sf;
+}
+
+# ── The gate runs itself (task #204) ────────────────────────────────────────
+# A FULL sweep ends by diffing against the blessed baselines and EXITS WITH
+# THAT VERDICT.  Leaving it to the operator made two things possible that both
+# happened: reading "0 new / 0 fixed" as "clean" while the TOTAL fell (s328's
+# 88 evaporated state.t rows), and not running the comparison at all.  A
+# partial sweep (explicit files) is not comparable to a whole-corpus baseline,
+# so it stays informational.
+if ($full_sweep && $GATE) {
+    my $fail_base = "$project_root/docs/fail-baseline.tsv";
+    my $differ    = "$project_root/tools/sweep-diff.pl";
+    if (-e $fail_base && -x $differ) {
+        print "\n" . ("=" x 72) . "\nGATE: tools/sweep-diff.pl vs docs/fail-baseline.tsv + docs/pass-baseline.tsv\n"
+            . ("=" x 72) . "\n";
+        my $rc = system($^X, $differ, 'diff', $fail_base, $log_dir);
+        my $code = $rc == -1 ? 127 : ($rc >> 8);
+        print $code == 0 ? "GATE: clean\n" : "GATE: NOT CLEAN (sweep-diff exit $code)\n";
+        exit $code;
+    }
+    print "\nGATE: NOT RUN — missing $fail_base or $differ\n";
 }

@@ -542,3 +542,20 @@ not-supported.md → only then probe.*
   #207 `which_perl`/`run_perl` are unverified stubs; #208 the CPAN board
   `.tsv` baselines drifted since s322 (verified NOT from this session — a
   HEAD worktree gives identical boards).
+
+## s330b (Opus): #204 — the sweep's TOTAL-passing gate is machine-checked
+
+- **`tools/sweep-diff.pl` has a fourth bucket, LOST**: per file, baseline
+  PASSING rows the current run did not produce, read from a blessed
+  `docs/pass-baseline.tsv` (`save-status` writes it).  Non-empty LOST = the
+  run is NOT clean, same exit code as NEW.  Every run prints
+  `TOTAL passing: baseline N, current M`.
+- **A FULL sweep runs the gate itself and exits with its verdict**
+  (`sweep-perl-tests.pl` with no file arguments; `--no-gate` opts out).  A
+  sweep of named files stays informational — a partial run is not comparable
+  to a whole-corpus baseline.
+- **Two anti-silence rules in the implementation**: when no pass baseline can
+  be found the tool prints `LOST: NOT CHECKED — …` rather than nothing, and
+  an explicit `--pass-baseline` that does not exist is FATAL, never a silent
+  fall-back to the default file.  A check that goes quiet when it cannot run
+  is indistinguishable from one that passed.
