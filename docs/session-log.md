@@ -125,6 +125,48 @@ same 101 t-files.
   single-file sweep; the full sweep runs every ~5 changes and always once
   before committing a batch.  Recorded in memory.
 
+### s323e — the R1 release snapshot, regenerated
+
+`docs/perl-suite-run.tsv` was taken at `05e7026` (s321) and **7 compiler/runtime
+commits had landed since**, four of them CRASH fixes — which move whole files,
+not just counts.  Fable's s318 ruling makes tsv regeneration an R1 gate, so the
+snapshot it gated no longer described the tree.  Regenerated in full: eleven
+per-dir chunks, `--jobs 4`, each with its own `--faillog` (the runner clears it
+per invocation), `re/` re-run at `--timeout 300`.
+
+**523 rows.  Nothing regressed.**  Every status move, in full:
+
+| move | n | files |
+|------|---|-------|
+| DIFF → **OK** | 4 | op/mkdir.t, re/keep_tabs.t (#179), re/qr-72922.t (#181), uni/tr_utf8.t |
+| DIFF → XDIFF | 1 | uni/goto.t (a registration that landed) |
+| DIFF → TIMEOUT | 7 | re/regexp_noamp.t, re/regexp_notrie.t, re/regexp_qr.t, uni/fold.t, uni/lower.t, uni/title.t, uni/upper.t |
+
+Totals: OK 83 → **87**, DIFF 291 → **279**, XDIFF 107 → **108**, TIMEOUT 7 →
+**14**, everything else unchanged.
+
+**The 7 TIMEOUTs are a MEASUREMENT LOSS, not a regression — and they are a
+hole, in exactly the shape of #176.**  All seven were DIFF in the s321 run at
+the same 90 s timeout; they are borderline-slow files whose wall time swings
+with machine load (task #180).  A TIMEOUT file contributes no rows, so those 7
+are now *unverified* rather than *failing*.  A recovery pass at `--timeout 300`
+on those seven was started and killed at session end — **that is the first
+thing to do next session**, before the snapshot is quoted as a release number.
+(`re/` already got its 300 s pass: 6 of its 13 timeouts came back as DIFF.)
+
+### s323e — CPAN board scope, decided by the user
+
+The user chose **all five** proposed dists for the widened board: **Math::BigInt
+(54 t-files), Pod::Simple (74), Sub::Quote (15), Path::Tiny (30), URI (63)** —
+195 new t-files across five distinct language areas (numeric/`overload`, a large
+string state machine, `eval STRING`, file IO, regex/OO).  All already unpacked,
+so no install ask was triggered.  Chosen against **PPI** (its chain is Clone +
+Storable + Params::Util, all XS — failures would report missing `.so`, not PCL
+bugs), **Archive::Tar** and **IO-Compress** (Compress::Raw is XS), and the
+toolchain dists (EU::MM, Module::Build, CPAN, Test::Harness — filesystem and
+subprocess heavy, poor signal per minute).  The scoreboard run for the five was
+started and killed at session end; it has not been measured yet.
+
 ---
 
 ## Session 322 (2026-08-02, Opus 5) — the Fable s321 rulings executed, and a qr that was being frozen into a string
