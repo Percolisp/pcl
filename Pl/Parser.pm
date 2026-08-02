@@ -6327,6 +6327,12 @@ sub _auto_defined_cond {
     return "(p-defined $cond_cl)";
   } elsif ($cond_cl =~ /^\(p-setf\s+\$_\s+$waw\((?:$auto_pat)\b/) {
     return "(progn $cond_cl (p-defined \$_))";
+  } elsif ($cond_cl =~ /^\(box-set\s+\(p-if\b.*$waw\((?:$auto_pat)\b/) {
+    # `($c ? $a : $b) = readdir(D)` — a scalar assignment through the ternary
+    # lvalue (ExprToCL's _sole_ternary_lvalue_id branch); box-set returns the
+    # TARGET BOX, whose value is the just-assigned value, so defined() applies
+    # to it directly (defins.t t10).
+    return "(p-defined $cond_cl)";
   } elsif ($cond_cl =~ /^$waw\((?:$auto_pat)\b/) {
     return "(progn (p-setf \$_ $cond_cl) (p-defined \$_))";
   }

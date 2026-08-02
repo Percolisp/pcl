@@ -354,4 +354,67 @@ print "6 fat-comma-autoquote=", join(",", sort keys %h), "\n";
 print "7 nested=", join(",", @{[ tag $s => divide $s => 2 ]}), "\n";
 ');
 
+# #193: under strict-subs an undeclared bareword in operator context is a
+# CALL, never a string — a sub installed via a dynamic glob in BEGIN is
+# invisible to the transpiler but real at runtime (File::Path's _IS_MSWIN32,
+# whose leading underscore also slips the ALL-CAPS funcall escape).  Covers
+# the operator-loop shapes that used to string-ify: ternary, &&, ||,
+# non-final list element.  INVERSE GUARD in row 4: `=>` autoquotes its left
+# word even under strict, even when a sub of that name exists.
+test_transpile("strict-subs bareword before a binary operator is a call (#193)", '
+use strict;
+BEGIN { no strict "refs";
+        for (qw(aaa bbb)) { *{"_T_\U$_"} = $_ eq "aaa" ? sub(){1} : sub(){0} } }
+print "1 ternary=", (_T_AAA ? "y" : "n"), (_T_BBB ? "y" : "n"), "\n";
+print "2 and=", (_T_AAA && "yes"), "\n";
+print "3 list=", join(",", (_T_AAA, _T_BBB, 9)), "\n";
+my %h = (_T_AAA => 5);
+print "4 fatcomma=", join(",", sort keys %h), "\n";
+my $r = _T_BBB || "fallback";
+print "5 or=$r\n";
+');
+
+# INVERSE of #193: with NO strict in effect the old reading stands — an
+# unknown bareword in operator context is the string of its own name.
+test_transpile("no-strict bareword before a binary operator stays a string (#193 inverse)", '
+my $v = Bare_word && "t";
+print "1 and=$v\n";
+print "2 ternary=", (Bare_word ? "y" : "n"), "\n";
+print "3 val=", join(",", (Bare_word, 9)), "\n";
+');
+
+# readdir/opendir semantics (found under #193, separate runtime bug):
+# opendir on a path WITHOUT a trailing slash used to list the PARENT
+# directory (the last component parsed as a file name and the "*.*" wildcard
+# replaced it); a subdirectory's entry came back as "" (file-namestring of a
+# directory pathname), which is what File::Path's remove_tree then tried to
+# unlink; "." and ".." were missing; and list-context readdir returned only
+# ONE entry (no drain).  End-to-end guard: make_path + remove_tree.
+test_transpile("readdir: list drain, subdir names, dot entries, right directory", '
+use strict;
+use File::Path qw(make_path remove_tree);
+my $d = "/tmp/pcl-t09-rd-$$";
+make_path("$d/sub1/sub2");
+open my $fh, ">", "$d/file1" or die "open: $!"; print $fh "x"; close $fh;
+opendir my $dh, $d or die "opendir: $!";
+my @all = sort(readdir($dh));
+closedir $dh;
+print "1 list=", join(",", @all), "\n";
+opendir my $dh2, $d or die "opendir2: $!";
+my @loop;
+while (my $e = readdir $dh2) { push @loop, $e }
+closedir $dh2;
+print "2 loop=", join(",", sort @loop), "\n";
+open my $fh0, ">", "$d/0" or die; close $fh0;
+my ($seen, $dummy, $name) = (0, "", "");
+opendir my $dh3, $d or die "opendir3: $!";
+while (($seen ? $dummy : $name) = readdir $dh3) {
+  $seen++ if $name eq "0";
+}
+closedir $dh3;
+print "3 ternary-lvalue-seen=", ($seen > 0 ? "yes" : "no"), "\n";
+remove_tree($d);
+print "4 removed=", (-d $d ? "no" : "yes"), "\n";
+');
+
 done_testing();

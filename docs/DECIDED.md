@@ -306,3 +306,26 @@ not-supported.md → only then probe.*
   t-relative paths); full run always once before committing a batch or
   quoting numbers.  Same shape as the s323 sweep cadence
   → `fable-answers-s323.md` §6, memory `feedback_sweep_cadence`.
+
+## s324 (Fable, 2026-08-02): #193 + the two bugs under it
+
+- **#193 DONE: under strict-subs an undeclared bareword before a BINARY
+  operator is a CALL** — the strict gate the end-of-expression branch already
+  had, added to its second copy (the followed-by-binary-operator branch in
+  `handle_subcalls`; the #142 `$end_pars` branch untouched).  `=>` and `->`
+  keep the string reading even under strict (fat-comma autoquote; class-name
+  invocant — probed).  No-strict behavior unchanged.  Guard:
+  `transpile-test-09.t` (#193 row + inverse row).
+- **readdir/opendir semantics**: opendir treats its path as a DIRECTORY even
+  without a trailing slash (merge-pathnames used to list the PARENT); entries
+  are the child's OWN last component (a subdir used to come back as `""`);
+  `.`/`..` are included; symlinks unresolved; **readdir is
+  wantarray-sensitive** (`%WANTARRAY_SENSITIVE`, list context drains to a
+  vector) → `cl/pcl-runtime.lisp` `%p-opendir-impl`/`%p-readdir-impl`,
+  session-log s324.
+- **A sole-ternary parenthesized lvalue is a SCALAR assignment** —
+  `($c ? $a : $b) = V` gives V scalar context and the expression's value is
+  the assigned value (never the list-assignment COUNT), so while-loop
+  implicit defined() applies; emitted as `(box-set (p-if …) V)` via
+  `_sole_ternary_lvalue_id` in BOTH '=' emitters, with box-set arms in both
+  auto-defined matchers → defins.t t10, session-log s324.

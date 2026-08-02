@@ -3313,10 +3313,8 @@ sub handle_subcalls {
         if (!$is_unary) {
           # Binary-only operator - treat bareword as zero-arg function.
           # BUT: if the word is not a known function (not in known_no_of_params,
-          # not declared in Environment), it's an unknown bareword string literal.
-          # e.g., !Bare || $x — Bare is the string "Bare", not a function call.
-          # Unknown barewords before binary operators are strings in no-strict Perl;
-          # in strict Perl they'd be a compile error (so CPAN modules never have them).
+          # not declared in Environment), it's an unknown bareword string literal
+          # in NO-STRICT code: e.g., !Bare || $x — Bare is the string "Bare".
           my $is_known_bop = exists $self->known_no_of_params->{$sub_name}
               || ($self->has_environment
                   && $self->environment->has_prototype($sub_name));
@@ -3324,7 +3322,19 @@ sub handle_subcalls {
           # constants — leave them as funcalls so %p-fh-arg can identify them.
           # Only mixed-case unknown words (like Bare in !Bare) are string literals.
           my $is_all_caps_bop = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
-          unless ($is_known_bop || $is_all_caps_bop) {
+          # Under strict-subs an undeclared bareword is a COMPILE ERROR, so by
+          # principle 9 anything that compiles here is a CALL, never a string —
+          # a sub installed through a dynamic glob in a BEGIN loop is invisible
+          # to the transpiler but real at runtime (task #193: File::Path's
+          # `_IS_MSWIN32`, which also slips the ALL-CAPS escape via its leading
+          # underscore).  Two operators autoquote the word to their left even
+          # under strict and keep the string reading: `=>` (fat comma) and
+          # `->` (class-name invocant).  This is the same strict_subs gate the
+          # end-of-expression branch below already applies.
+          my $strict_call_bop = $next_op ne '=>' && $next_op ne '->'
+              && $self->has_environment
+              && $self->environment->has_pragma('strict_subs');
+          if (!($is_known_bop || $is_all_caps_bop || $strict_call_bop)) {
             $now->{_bareword_string} = 1;
             next;
           }

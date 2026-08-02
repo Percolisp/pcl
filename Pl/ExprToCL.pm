@@ -191,7 +191,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # (readline `<FH>` and the file-glob `<pat>` are separate PPI node types, not
 # funcalls — they apply the same wrapper in gen_readline / gen_glob.)
 my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
-  reverse localtime gmtime caller unpack each splice
+  reverse localtime gmtime caller unpack each splice readdir
 );
 
 # Only exceptions that need different CL names than p-<perl-op>
@@ -1326,6 +1326,22 @@ sub gen_binary_op {
       die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
         if $bad_lvalue;
     }
+    # Perl: `($c ? $a : $b) = V` is a SCALAR assignment to the chosen side
+    # (perlop: the ternary is an lvalue), NOT a one-element list assignment —
+    # V gets SCALAR context and the expression's value is the assigned value,
+    # so a while-loop's implicit defined() applies to it.  The vector branch
+    # below would evaluate V in LIST context (defins.t t10: draining readdir
+    # on the first iteration) and return a COUNT (1 even for an undef RHS,
+    # so the loop would never terminate).
+    if (defined $node_id) {
+      my $tern_id = $self->_sole_ternary_lvalue_id($kids->[0]);
+      if (defined $tern_id) {
+        $self->expr_o->set_node_context($kids->[1], SCALAR_CTX);
+        my $tern = $self->gen_node($tern_id);
+        my $rhs  = $self->gen_node($kids->[1]);
+        return "(box-set $tern $rhs)";
+      }
+    }
     if ($left =~ /^\(vector[ )]/) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = "(p-list-= $left $right)";
@@ -1575,6 +1591,17 @@ sub gen_binary_op_form {
       die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
         if $bad_lvalue;
     }
+    # Sole-ternary parenthesized lvalue = SCALAR assignment (see the string
+    # emitter's twin branch above for the full rationale — defins.t t10).
+    if (defined $node_id) {
+      my $tern_id = $self->_sole_ternary_lvalue_id($kids->[0]);
+      if (defined $tern_id) {
+        $self->expr_o->set_node_context($kids->[1], SCALAR_CTX);
+        my $tern = $self->gen_node_form($tern_id);
+        my $rhs  = $self->gen_node_form($kids->[1]);
+        return ['box-set', $tern, $rhs];
+      }
+    }
     if ($left_flat =~ /^\(vector[ )]/) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = ['p-list-=', $left, $right];
@@ -1739,6 +1766,23 @@ sub _is_elem_arg {
 # or a method invocant (task #142 records three failed global attempts).
 # Returns the CL string literal, or undef when the argument is not a bareword —
 # then the caller generates it normally (quoted string, `shift`, expression…).
+# The LHS of `(EXPR) = …` when EXPR is a sole TERNARY: `($c ? $a : $b) = V`
+# is a SCALAR assignment in perl (the ternary is an lvalue, perlop), not a
+# one-element list assignment.  Returns the ternary node's id, or undef when
+# the LHS is anything else.  Shared by the string and CLForm '=' handlers.
+sub _sole_ternary_lvalue_id {
+  my ($self, $lhs_id) = @_;
+  my $lnode = $self->expr_o->get_a_node($lhs_id);
+  return undef unless $self->expr_o->is_internal_node_type($lnode)
+      && ($lnode->{type} eq 'tree_val' || $lnode->{type} eq 'progn');
+  my $ch = $self->expr_o->get_node_children($lhs_id) || [];
+  return undef unless @$ch == 1;
+  my $c = $self->expr_o->get_a_node($ch->[0]);
+  return undef unless $self->expr_o->is_internal_node_type($c)
+      && $c->{type} eq 'ternary';
+  return $ch->[0];
+}
+
 sub _class_name_bareword {
   my ($self, $kid_id) = @_;
   my $class_node = $self->expr_o->get_a_node($kid_id);

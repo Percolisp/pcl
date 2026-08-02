@@ -9664,17 +9664,38 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; Directory handle storage
 (defvar *p-dirhandles* (make-hash-table :test 'eq))
 
+(defun %p-dirent-name (path)
+  "The entry's OWN name: file-namestring for a file, the last directory
+   component for a subdirectory (whose file-namestring is \"\" — that
+   emptiness is what File::Path's remove_tree used to try to unlink)."
+  (let ((fn (file-namestring path)))
+    (if (and fn (string/= fn ""))
+        fn
+        (let ((d (pathname-directory path)))
+          (if (and (consp d) (stringp (car (last d))))
+              (car (last d))
+              (namestring path))))))
+
 (defun %p-opendir-impl (dh dir)
-  "Perl opendir - open directory for reading"
-  (let ((dir-str (to-string dir)))
-    (when (probe-file dir-str)
-      (let ((entries (directory (merge-pathnames "*.*" dir-str))))
+  "Perl opendir - open directory for reading.
+   DIR is always treated as a DIRECTORY even without a trailing slash:
+   merging \"*.*\" onto \"/a/b/rd\" parses rd as a file NAME, so the wild
+   card replaced it and the listing was of /a/b/ — the PARENT, silently.
+   Symlinks are not resolved (readdir reports the link's own name), and
+   the entry list starts with \".\" and \"..\" as perl's does."
+  (let* ((dir-str (to-string dir))
+         (dir-path (if (and (plusp (length dir-str))
+                            (char= (char dir-str (1- (length dir-str))) #\/))
+                       dir-str
+                       (concatenate 'string dir-str "/"))))
+    (when (probe-file dir-path)
+      (let* ((entries (directory (merge-pathnames "*.*" dir-path)
+                                 :resolve-symlinks nil))
+             (names (list* "." ".." (mapcar #'%p-dirent-name entries))))
         (if (symbolp dh)
-            (setf (gethash dh *p-dirhandles*)
-                  (cons 0 (mapcar #'file-namestring entries)))
+            (setf (gethash dh *p-dirhandles*) (cons 0 names))
             (when (p-box-p dh)
-              (setf (p-box-value dh)
-                    (cons 0 (mapcar #'file-namestring entries)))))
+              (setf (p-box-value dh) (cons 0 names))))
         t))))
 
 (defmacro p-opendir (dh &rest args)
@@ -9682,18 +9703,26 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-opendir-impl (%p-fh-arg ,dh) ,@args))
 
 (defun %p-readdir-impl (dh)
-  "Perl readdir - read next directory entry"
+  "Perl readdir - next entry in scalar context; in LIST context all the
+   remaining entries, leaving the handle exhausted.  Call sites bind
+   *wantarray* explicitly (readdir is in ExprToCL's %WANTARRAY_SENSITIVE),
+   so an ambient list binding cannot leak in."
   (let ((handle (if (symbolp dh)
                     (gethash dh *p-dirhandles*)
                     (when (p-box-p dh) (p-box-value dh)))))
     (when handle
       (let ((idx (car handle))
             (entries (cdr handle)))
-        (if (< idx (length entries))
-            (progn
-              (setf (car handle) (1+ idx))
-              (nth idx entries))
-            nil)))))
+        (if (eq *wantarray* t)
+            (let ((rest (nthcdr idx entries)))
+              (setf (car handle) (length entries))
+              (make-array (length rest) :initial-contents rest
+                          :adjustable t :fill-pointer t))
+            (if (< idx (length entries))
+                (progn
+                  (setf (car handle) (1+ idx))
+                  (nth idx entries))
+                nil))))))
 
 (defmacro p-readdir (dh)
   "Perl readdir — bareword dirhandle is auto-quoted."
@@ -10784,7 +10813,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-94"
+(defparameter *pcl-cache-generation* "v2-95"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

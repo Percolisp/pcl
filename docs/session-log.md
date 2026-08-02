@@ -4,7 +4,55 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 323 (2026-08-02, Opus 5) — four bugs the widened CPAN board pointed at, two of them silent-wrong
+## Session 324 (2026-08-02, Fable) — #193 landed, and the two bugs it was standing on
+
+Rulings for the s323 round went out first (`docs/fable-answers-s323.md`,
+commit `8465204`) — including the ordered pre-/post-R1 plan, the USER
+decisions (R1 CPAN half = four-dist baseline; full-suite cadence every
+3rd–5th change), and the authorization for a pre-R1 #193 attempt with the
+#142 stop-rule.  Then the attempt, which turned into three fixes deep:
+
+- **#193 DONE: under strict-subs an undeclared bareword before a binary
+  operator is a CALL, never a string.**  The trace found a second-copy pair
+  in `handle_subcalls`: the END-of-expression bareword decision (the burned
+  #142 branch at ~3705) already consulted `strict_subs`, but the
+  FOLLOWED-BY-binary-operator decision (~3313) never did — and that is the
+  path `_IS_VMS ? …`, `_IS_MSWIN32 && …`, and non-final list elements take.
+  (`_IS_*` also slips the ALL-CAPS funcall escape via its leading
+  underscore.)  The fix adds the SAME strict gate to the second copy — the
+  #142 branch itself is untouched, honoring the stop-rule.  Probed breaking
+  cases: `=>` and `->` keep the string reading even under strict (fat-comma
+  autoquote; class-name invocant) — the guard-probe file's emission is
+  byte-identical.  File::Path now takes the Linux branch, not VMS.
+- **readdir/opendir was silently WRONG four ways** (pre-existing; unmasked
+  because remove_tree used to die in the VMS branch before ever reading a
+  directory): `opendir` on a path without a trailing slash listed the
+  PARENT (merge-pathnames parsed the last component as a file NAME and the
+  "*.*" wildcard replaced it); a SUBDIRECTORY's entry came back as `""`
+  (file-namestring of a directory pathname) — the `unlink ""` remove_tree
+  then attempted; `.`/`..` were missing; and list context returned ONE
+  entry.  Rewrote `%p-opendir-impl` (always-directory path, `:resolve-
+  symlinks nil`, own-name extraction, dot entries) and made `readdir`
+  wantarray-sensitive (`%WANTARRAY_SENSITIVE` + list drain returning a
+  vector, the localtime shape).
+- **…and the drain exposed a THIRD bug, caught by the targeted sweep:
+  `($c ? $a : $b) = readdir(D)` was emitted as a LIST assignment** (RHS in
+  list context → drained on the first iteration; value = element COUNT,
+  which is 1 even for an undef RHS).  In perl a sole-ternary parenthesized
+  lvalue is a SCALAR assignment (perlop) with implicit defined() in a while
+  condition — defins.t t10 exists to prove exactly this, and it had passed
+  only because the old readdir ignored context and raw-nil-on-exhaustion
+  flattened to "0 elements".  New `_sole_ternary_lvalue_id` branch in BOTH
+  '=' emitters → `(box-set (p-if …) RHS)`, plus a box-set arm in both
+  auto-defined matchers (v1 text, Parser2 form).  defins.t back to 27/27
+  fully-passing.
+- End-to-end: `make_path`/`remove_tree` work under PCL; the readdir probe
+  matrix (bareword/lexical × list/scalar-loop) matches perl exactly.
+- Verified: transpile-test-09.t 12 rows (three new: #193 + no-strict
+  inverse + readdir family incl. the ternary shape and a file named "0");
+  corpus emission: defins.t is the ONLY file of 111 that differs, and its
+  diff is this fix; targeted sweeps defins.t 27/27, chdir.t fully passing;
+  full gate + numbers in the commit.  Cache generation → **v2-95**.
 
 Every fix this session came from following the s322 cause list instead of the
 FAIL count.  Board: **23 PASS / 17 PARTIAL / 61 FAIL → 29 / 24 / 48** over the

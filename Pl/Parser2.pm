@@ -6063,6 +6063,12 @@ sub _auto_defined_raw {
       && _auto_defined_call($a[1])) {
     return ['progn', $cond, ['p-defined', '$_']];
   }
+  if ($head eq 'box-set' && @a == 2 && _auto_defined_call($a[1])) {
+    # Ternary-lvalue scalar assignment (`($c ? $a : $b) = readdir(D)`,
+    # defins.t t10) — box-set returns the TARGET BOX, so defined() reads the
+    # just-assigned value.
+    return ['p-defined', $cond];
+  }
   if (_auto_defined_call($cond)) {
     return ['progn', ['p-setf', '$_', $cond], ['p-defined', '$_']];
   }
