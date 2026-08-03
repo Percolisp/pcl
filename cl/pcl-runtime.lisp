@@ -1067,6 +1067,98 @@
    12: a dispatch that cannot handle a value says so loudly."
   (error "Not ~A ~A reference" (if (char= (char kind 0) #\A) "an" "a") kind))
 
+;;; ---------------------------------------------------------------------------
+;;; Read-only arrays — Internals::SvREADONLY(@a, 1)   (task #159)
+;;; ---------------------------------------------------------------------------
+;;; A read-only array is stored as a SIMPLE vector: the same element boxes as
+;;; before (so in-bounds element writes — `$a[0] = 9`, a foreach alias write —
+;;; still land, exactly as in perl, where a read-only AV is FIXED SIZE but its
+;;; elements are not read-only), but with no fill pointer and not adjustable.
+;;; Every size-changing operation therefore fails BY CONSTRUCTION; the checks
+;;; below exist only to replace SBCL's message with perl's, and to catch the
+;;; few cases perl kills that a simple vector would otherwise tolerate (unshift
+;;; with an empty list, a no-op splice).  Reading costs nothing — LENGTH and
+;;; AREF work on either storage — which is why this representation was chosen
+;;; over a per-array flag consulted on the push hot path (fable-answers-s318
+;;; §2 option (b)).
+(declaim (inline %p-array-readonly-p))
+(defun %p-array-readonly-p (a)
+  "True when A is an array whose STORAGE is read-only, i.e. fixed size.
+   Strings are excluded: they are vectors too, and a literal string has no fill
+   pointer either, but string writes are not this mechanism's business."
+  (and (vectorp a) (not (stringp a)) (not (array-has-fill-pointer-p a))))
+
+(defun %p-readonly-modification ()
+  "Perl's fatal for a write to read-only storage, byte for byte — push.t,
+   unshift.t, splice.t and sort.t all match /^Modification of a read-only
+   value/."
+  (error "Modification of a read-only value attempted"))
+
+(declaim (inline %p-check-array-writable))
+(defun %p-check-array-writable (a)
+  "Die perl's death if A is a read-only array.  Call at the head of any
+   operation that changes an array's SIZE."
+  (when (%p-array-readonly-p a) (%p-readonly-modification)))
+
+(defvar *p-svreadonly-warned* (make-hash-table :test 'equal)
+  "Dedup set for the Internals::SvREADONLY not-implemented announcements.")
+
+(defun %p-warn-svreadonly (what)
+  "Announce a read-only-flag effect PCL cannot honour (WHAT names it).  These
+   are effect-only — nothing produces a value the program then consumes — so
+   they announce rather than die, per the rule-12 boundary ruled in
+   docs/fable-answers-s328.md §1.  Deduped per WHAT."
+  (unless (gethash what *p-svreadonly-warned*)
+    (setf (gethash what *p-svreadonly-warned*) t)
+    (format *error-output*
+            "PCL: ~A is not implemented (task #159) — ignored~%" what)
+    (force-output *error-output*))
+  nil)
+
+(defun %p-array-set-readonly (a flag)
+  "Return the storage @A must have for perl's SvREADONLY flag FLAG.
+   Read-only: a simple vector over the SAME element boxes.  Writable: a fresh
+   adjustable vector with a fill pointer.  A is returned unchanged when it
+   already has the requested storage, and announced-and-returned when it is not
+   an array at all.  The caller (the Internals::SvREADONLY macro) stores the
+   result back into the variable's cell — which is why the macro needs the
+   variable, not its value."
+  (cond
+    ((not (and (vectorp a) (not (stringp a))))
+     (%p-warn-svreadonly
+      (cond ((hash-table-p a) "Internals::SvREADONLY on a HASH (perl's restricted hash)")
+            (t "Internals::SvREADONLY on a non-array value")))
+     a)
+    ((p-true-p (unbox flag))
+     (if (%p-array-readonly-p a)
+         a
+         (let ((ro (make-array (length a))))
+           (replace ro a)
+           ro)))
+    (t
+     (if (%p-array-readonly-p a)
+         (let ((rw (make-array (max 8 (length a))
+                               :adjustable t :fill-pointer (length a))))
+           (replace rw a)
+           rw)
+         a))))
+
+(defun %p-svreadonly-other (thing &optional (flag nil flag-p))
+  "Internals::SvREADONLY on anything that is not a named array variable: a
+   scalar, a hash (perl's restricted hashes — a different feature), or an
+   aggregate reached through a reference (whose storage cell the call site does
+   not have).  As a GETTER it answers honestly for an array and \"\" otherwise;
+   as a SETTER it announces and does nothing.  Perl returns 1/\"\", not 1/0."
+  (declare (ignore flag))
+  (let ((v (unbox thing)))
+    (when flag-p
+      (%p-warn-svreadonly
+       (cond ((hash-table-p v) "Internals::SvREADONLY on a HASH (perl's restricted hash)")
+             ((and (vectorp v) (not (stringp v)))
+              "Internals::SvREADONLY on an array reached through a reference")
+             (t "Internals::SvREADONLY on a SCALAR"))))
+    (make-p-box (if (%p-array-readonly-p v) 1 ""))))
+
 (defun p-copy-scalar-arg (val)
   "Copy a scalar argument/default into a FRESH p-box for a signature parameter.
    Perl signature params are copies of @_ (like `my ($x) = @_`), so a param must
@@ -2000,6 +2092,8 @@
   (when val
     (cond
       ((and (vectorp val) (not (stringp val)))
+       ;; `undef @ro` dies in perl — emptying is a size change (task #159)
+       (%p-check-array-writable val)
        (setf (fill-pointer val) 0))
       ((hash-table-p val)
        (clrhash val))
@@ -3952,6 +4046,9 @@
    Shared by the p-array-= macro and the closure-capture lexical array-init path
    (which cannot use p-array='s boundp/proclaim-special guard — that would make a
    let-bound lexical special and break the closure)."
+  ;; `@ro = (…)` — even `@ro = sort @ro`, which sort.t asserts — dies in perl:
+  ;; a whole-array assignment resets the size (task #159).
+  (%p-check-array-writable place)
   ;; Snapshot any adjustable vector (including PLACE itself) BEFORE we clear PLACE,
   ;; to prevent aliasing. %p-snapshot-array-rhs recursively copies nested
   ;; adjustable vectors and preserves nil.
@@ -5743,6 +5840,9 @@
           ;; Auto-extend array if needed (Perl autovivification)
           ;; Intermediate slots get nil (deleted marker) so exists returns false for them.
           (when (>= actual-idx len)
+            ;; …but never past the end of a read-only array: perl allows
+            ;; `$ro[0] = 9` (in bounds) and dies on `$ro[5] = 9` (task #159).
+            (%p-check-array-writable a)
             (dotimes (n (1+ (- actual-idx len)))
               (vector-push-extend nil a)))
           ;; Get or create box at this index
@@ -5771,6 +5871,7 @@
       (when (and (vectorp a) (>= actual-idx 0))
         ;; Auto-extend array if needed (intermediate slots are nil = non-existent)
         (when (>= actual-idx len)
+          (%p-check-array-writable a)          ; task #159
           (dotimes (n (1+ (- actual-idx len)))
             (vector-push-extend nil a)))
         ;; Ensure box exists at this index
@@ -5875,12 +5976,20 @@
          (cur-len (length a)))
     (cond
       ((> new-len cur-len)
-       ;; Grow: extend with holes (nil), NOT boxes — see docstring
+       ;; Grow: extend with holes (nil), NOT boxes — see docstring.
+       ;; `$#ro = 5` dies in perl (it extends a fixed-size AV) — task #159.
+       (%p-check-array-writable a)
        (dotimes (i (- new-len cur-len))
          (vector-push-extend nil a)))
       ((< new-len cur-len)
-       ;; Shrink: adjust fill-pointer (minimum 0)
-       (setf (fill-pointer a) (max 0 new-len))))
+       ;; Shrink: adjust fill-pointer (minimum 0).
+       ;; Perl does NOT guard the shrinking case on a read-only array — `$#ro = 0`
+       ;; truncates it.  PCL's read-only storage is a simple vector, which cannot
+       ;; be truncated in place and whose variable cell is not reachable from
+       ;; here, so the truncation is announced and skipped rather than faked.
+       (if (%p-array-readonly-p a)
+           (%p-warn-svreadonly "$#a= on a read-only array (perl truncates)")
+           (setf (fill-pointer a) (max 0 new-len)))))
     nli))
 
 (defmacro p-push (arr &rest items)
@@ -5916,8 +6025,10 @@ lands in the (now detached) box only."
                            (p-box-nv-ok box) nil
                            (p-box-sv-ok box) nil)
                      (cond
-                       ((and (array-has-fill-pointer-p vec)
-                             (< i (fill-pointer vec)))
+                       ;; In bounds: vivify the hole in place.  LENGTH, not
+                       ;; FILL-POINTER — a read-only array (task #159) has no
+                       ;; fill pointer, and perl allows the ELEMENT write.
+                       ((< i (length vec))
                         (when (null (aref vec i))
                           (setf (aref vec i) box)))
                        ((and (adjustable-array-p vec)
@@ -6076,19 +6187,49 @@ create the key on a read-only call, which perl does not."
    Called at code-gen time for @array arguments."
   (make-p-flatten-marker :array (unbox arr)))
 
-(defun p-push-impl (arr &rest items)
-  "Implementation of push - stores values in boxes for l-value semantics.
-   Recognizes p-flatten-marker to flatten @array arguments.
-   Also spreads raw CL vectors (e.g. from qw!...! or list-context expressions)."
-  ;; push's first arg must be a real array.  Without this guard, pushing onto a
-  ;; non-array (a literal, or a scalar/ref) reaches %p-array-store-scalar / length
-  ;; and leaks a raw CL type error (a Lisp struct dump) into $@.  Perl dies
-  ;; "...must be array" for a literal and "Experimental push on scalar is now
-  ;; forbidden" for the removed experimental autoderef on a scalar/ref.
+(defun %p-push-stores-anything-p (items)
+  "True when pushing ITEMS would actually store at least one element.
+   `push @a, ()` and `push @a, @empty` store nothing — and perl lets those
+   through even on a read-only array (push.t asserts it), while ANY real
+   element dies.  Mirrors p-push-impl's own spreading rules."
+  (dolist (item items nil)
+    (let ((val (unbox item)))
+      (cond
+        ((p-flatten-marker-p val)
+         (let ((src (p-flatten-marker-array val)))
+           (when (and (vectorp src) (> (length src) 0)) (return t))))
+        ((and (vectorp val) (not (stringp val)) (not (p-box-p item)))
+         (when (> (length val) 0) (return t)))
+        ((and (hash-table-p val) (not (p-box-p item)) (not (gethash :__class__ val)))
+         (when (> (hash-table-count val) 0) (return t)))
+        (t (return t))))))
+
+(defun %p-push-cold (arr items)
+  "The cold half of push: ARR is not a plain growable array.  Either it is not
+   an array at all — perl dies \"...must be array\" for a literal and
+   \"Experimental push on scalar is now forbidden\" for the removed autoderef
+   on a scalar/ref; without this the raw CL type error from
+   %p-array-store-scalar leaked a Lisp struct dump into $@ — or it is a
+   READ-ONLY array (task #159), where perl dies unless the push would store
+   nothing.  Returns the unchanged length in that one legal no-op case."
   (unless (and (vectorp arr) (not (stringp arr)))
     (if (p-box-p arr)
         (error "Experimental push on scalar is now forbidden")
         (error "Type of arg 1 to push must be array (not constant item)")))
+  (when (%p-push-stores-anything-p items)
+    (%p-readonly-modification))
+  (length arr))
+
+(defun p-push-impl (arr &rest items)
+  "Implementation of push - stores values in boxes for l-value semantics.
+   Recognizes p-flatten-marker to flatten @array arguments.
+   Also spreads raw CL vectors (e.g. from qw!...! or list-context expressions)."
+  ;; ONE type test covers both cold cases — a target that is not a real array
+  ;; (a literal, a scalar/ref), and a READ-ONLY array (task #159), whose storage
+  ;; has no fill pointer.  %p-push-cold decides which and what perl says;
+  ;; everything real falls straight through.
+  (unless (and (vectorp arr) (not (stringp arr)) (array-has-fill-pointer-p arr))
+    (return-from p-push-impl (%p-push-cold arr items)))
   (dolist (item items)
     (let ((val (unbox item)))
       (cond
@@ -6113,6 +6254,7 @@ create the key on a read-only call, which perl does not."
 
 (defun p-pop (arr)
   "Perl pop - removes from end, returns the element as-is (preserving references)."
+  (%p-check-array-writable arr)              ; task #159
   (if (and (vectorp arr) (> (length arr) 0))
       (vector-pop arr)
       *p-undef*))
@@ -6120,6 +6262,7 @@ create the key on a read-only call, which perl does not."
 (defun p-shift (arr)
   "Perl shift - removes from front, returns the element as-is (preserving references).
    Like p-aref, does NOT unbox: box-set handles plain vs reference boxes correctly."
+  (%p-check-array-writable arr)              ; task #159
   (cond
     ((and (vectorp arr) (> (length arr) 0))
      (let ((first (aref arr 0)))
@@ -6135,6 +6278,9 @@ create the key on a read-only call, which perl does not."
 (defun p-unshift (arr &rest items)
   "Perl unshift - adds to front. Stores values in boxes for l-value semantics.
    Recognizes p-flatten-marker to flatten @array arguments."
+  ;; A read-only array dies here even for an EMPTY list — perl is asymmetric
+  ;; with push, and unshift.t t19 tests exactly that (task #159).
+  (%p-check-array-writable arr)
   ;; Expand into a flat array of properly-boxed elements (preserving bless class)
   (let ((flat-arr (make-array 8 :adjustable t :fill-pointer 0)))
     (dolist (item items)
@@ -6174,6 +6320,9 @@ create the key on a read-only call, which perl does not."
 (defun p-splice-impl (arr &optional (offset 0) (length nil length-p) &rest replacements)
   "Perl splice: remove and/or replace elements in an array.
    Returns removed elements as a vector."
+  ;; A read-only array dies on ANY splice, even one that would change nothing
+  ;; (`splice @ro, 1, 0, ()` — splice.t's RT#131000 row).  Task #159.
+  (%p-check-array-writable (unbox arr))
   (let* ((a (unbox arr))
          (alen (length a))
          (offset (truncate (to-number offset)))
@@ -6422,6 +6571,7 @@ create the key on a read-only call, which perl does not."
          (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
+      (%p-check-array-writable a)          ; task #159
       (loop for j from (length a) to i
             do (vector-push-extend nil a)))
     (let* ((stored (aref a i))
@@ -6441,6 +6591,7 @@ create the key on a read-only call, which perl does not."
          (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
+      (%p-check-array-writable a)          ; task #159
       (loop for j from (length a) to i
             do (vector-push-extend nil a)))
     (let* ((stored (aref a i))
@@ -6460,6 +6611,7 @@ create the key on a read-only call, which perl does not."
          (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (when (>= i (length a))
+      (%p-check-array-writable a)          ; task #159
       (loop for j from (length a) to i
             do (vector-push-extend nil a)))
     ;; Get or create box at this index
@@ -6930,6 +7082,7 @@ create the key on a read-only call, which perl does not."
          (old-val (if (and (>= actual-idx 0) (< actual-idx len))
                       (p-aref-unbox-elem (aref a actual-idx))
                       *p-undef*)))
+    (%p-check-array-writable a)                        ; task #159
     (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
     (when (and (vectorp a) (>= actual-idx 0) (< actual-idx len))
       (setf (aref a actual-idx) nil)
@@ -7001,6 +7154,7 @@ create the key on a read-only call, which perl does not."
 (defun p-delete-array-slice (arr &rest indices)
   "Perl delete for array slices: delete @arr[i1, i2, ...]
    Sets elements to nil (deleted marker), trims trailing nils, and returns old values."
+  (%p-check-array-writable (unbox arr))                  ; task #159
   (let* ((a (unbox arr))
          (result (make-array (length indices) :adjustable t :fill-pointer 0)))
     (dolist (idx indices)
@@ -7022,6 +7176,7 @@ create the key on a read-only call, which perl does not."
 (defun p-delete-kv-array-slice (arr &rest indices)
   "Perl delete for KV array slices: delete %arr[i1, i2, ...]
    Deletes elements at given indices and returns key-value pairs (index, value, ...)."
+  (%p-check-array-writable (unbox arr))                  ; task #159
   (let* ((a (unbox arr))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (idx indices)
@@ -12473,6 +12628,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                      new-arr)))))
     (unless (and (vectorp arr) (not (stringp arr)))
       (setf arr (make-array 0 :adjustable t :fill-pointer 0)))
+    (%p-check-array-writable arr)          ; @$ref = (…) on a read-only array, task #159
     (setf (fill-pointer arr) 0)
     (let ((flat (%p-flatten-list value)))
       (loop for item across flat
@@ -15607,12 +15763,30 @@ buffer's fill-pointer; everything else falls back to file-length."
 (in-package :Internals)
 ;; Returns 0 — PCL is not a reference-counted stack build
 (defun pl-stack_refcounted () (make-p-box 0))
-;; Internals::SvREADONLY($ref, $flag) — marks a scalar read-only.
-;; PCL has no read-only box semantics; this is a documented no-op.
-;; Returns 0 (not read-only) when called as a getter (1 arg).
-(defun pl-SvREADONLY (&rest args)
-  (declare (ignore args))
-  (make-p-box 0))
+;; Internals::SvREADONLY(THING [, FLAG]) — perl's read-only flag (task #159).
+;;
+;; A MACRO, not a function, for one reason: marking an ARRAY read-only swaps its
+;; STORAGE (see %p-array-set-readonly), so it needs the variable's cell, and the
+;; call site is the only place that has it — the codegen already emits the array
+;; variable itself, `(Internals::pl-SvREADONLY @a 1)`.  CLAUDE.md 11: use the
+;; place that already exists rather than teaching Pl/ a special case.  Nothing
+;; calls this through #', so a plain macro (deterministic) beats a
+;; compiler-macro.
+;;
+;; Everything else — a scalar, a hash (perl's restricted hashes are a different
+;; feature), an aggregate reached through a reference — routes to
+;; %p-svreadonly-other, which announces and no-ops.
+(defmacro pl-SvREADONLY (&rest args)
+  (let ((target (first args)))
+    (if (and (symbolp target) target (not (keywordp target))
+             (let ((n (symbol-name target)))
+               (and (> (length n) 1) (char= (char n 0) #\@))))
+        (let ((state `(pcl::make-p-box (if (pcl::%p-array-readonly-p ,target) 1 ""))))
+          (if (rest args)
+              `(progn (setf ,target (pcl::%p-array-set-readonly ,target ,(second args)))
+                      ,state)
+              state))
+        `(pcl::%p-svreadonly-other ,@args))))
 ;; Internals::SvREFCNT($ref) — reference count; always 1 in a GC runtime.
 (defun pl-SvREFCNT (&rest args)
   (declare (ignore args))

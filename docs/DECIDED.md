@@ -69,6 +69,17 @@ not-supported.md → only then probe.*
 - **Read-only aggregates** (`Internals::SvREADONLY(@a,1)`): storage-swap to
   a simple vector, post-R1; never a weak-hash probe on the push path; do
   not bless as not-supported → `fable-answers-s318.md` §2, task #159.
+  **SHIPPED s337**: `Internals::pl-SvREADONLY` is now a MACRO (the call site
+  is the only place that has the variable's storage cell — no `Pl/` change),
+  the flag IS the storage (simple vector = fixed size = perl's read-only AV,
+  whose ELEMENTS stay writable), and the runtime checks only supply perl's
+  message.  Rows: push.t/unshift.t/splice.t fully pass, sort.t's in-place
+  row passes, both skip-registry entries deleted, the splice.t + sort.t
+  hand-edited `ok(1,"SKIP")` stubs restored from the t/op originals.  Guard
+  `Pl/t/readonly-array-01.t`.  Three announced divergences (shrinking
+  `$#ro=N`, a ref taken BEFORE the swap, `SvREADONLY(@$ref,1)`) and the
+  still-unimplemented SCALAR/HASH forms are in `not-supported.md`
+  §`Internals::*`.
 - **`do SUBNAME(LIST)`**: NO fix — pre-5.20 perl called the sub and PCL
   keeps that semantics; modern perl's rejection is principle-9 material
   (register do.t t63/t65, nothing near `$end_pars`) →

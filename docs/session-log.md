@@ -4,6 +4,76 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 337 (2026-08-03, Opus) — #159 read-only arrays: the FLAG IS THE STORAGE
+
+`Internals::SvREADONLY(@a, 1)` was a silent no-op.  Fable ruled option (b) in
+`fable-answers-s318.md` §2 — swap the storage for a non-adjustable,
+no-fill-pointer vector so every size change fails *by construction*, at zero
+cost on the push hot path — post-R1.  R1 is called, so it shipped.
+
+### What perl actually specifies (measured, not assumed)
+
+A read-only AV is **fixed size**; its ELEMENTS are not read-only.  So
+`$ro[0] = 99` and a foreach-alias write are legal, while push/unshift/pop/
+shift/splice/delete/`@ro = (…)`/`undef @ro`/an out-of-bounds element write all
+die `Modification of a read-only value attempted`.  Two spellings look like
+typos and are not: **`push @ro, ()` is allowed** (nothing would be stored) while
+**`unshift @ro, ()` dies anyway**, and **`$#ro = 0` TRUNCATES** rather than
+dying (only *growing* dies).  Every row of `Pl/t/readonly-array-01.t` (18) was
+taken from perl 5.40 running the same program.
+
+### The implementation, and why it is where it is
+
+- **`Internals::pl-SvREADONLY` is now a MACRO** in the `Internals` package.
+  The swap needs the *variable's storage cell*, and the codegen already hands
+  the runtime the array variable itself (`(Internals::pl-SvREADONLY @a 1)`) —
+  so the call site is the only place that has it.  CLAUDE.md 11: use the
+  mechanism that already exists instead of teaching `Pl/` a special case; zero
+  parser/codegen change.  A symbol whose name starts with `@` expands to
+  `(setf @a (%p-array-set-readonly @a FLAG))`; anything else routes to
+  `%p-svreadonly-other`, which announces and no-ops.
+- **The predicate is the storage** — `%p-array-readonly-p` = a non-string
+  vector with no fill pointer.  No flag, no side table, no per-element cost.
+- **Guards only supply perl's message.**  The size-changing entry points
+  (push/unshift/pop/shift/splice, whole-array assign incl. the `@$ref =` path,
+  `undef @a`, the three autoviv/element extend branches, delete + both
+  delete-slices, `$#a=`) check it.  `p-push-impl` got *cheaper*: one
+  `array-has-fill-pointer-p` test now joins its non-array guard, and both cold
+  cases (not an array / read-only) are decided in `%p-push-cold` — which is
+  also where the `push @ro, ()` exemption lives, mirroring push's own
+  spreading rules.
+- One real bug fell out: the defelem hole-vivify setter tested
+  `(< i (fill-pointer vec))`, which is `length` for every array that HAS a fill
+  pointer and simply skips the in-bounds branch for one that does not.  Now
+  `length` — the element write perl allows lands.
+
+### Divergences, all announced (rule-12 boundary, effect-only → announce)
+
+`$#ro = 0` (perl truncates; a simple vector cannot be truncated in place and
+the cell is not reachable there), a ref taken BEFORE the swap (still points at
+the old adjustable storage — CL cannot un-adjust an array), and
+`SvREADONLY(@$ref, 1)`.  Read-only **scalars** and restricted **hashes** stay
+unimplemented but now say so once per kind instead of lying silently.  All in
+`not-supported.md` §`Internals::*`.
+
+### Tests
+
+`push.t` 32/0, `unshift.t` 19/0, `splice.t` 34/0 all fully passing; `sort.t`'s
+in-place-sort row passes (its one failure, t177 AUTOLOAD, is exactly the
+blessed baseline row).  **Both skip-registry entries deleted**, and the two
+hand-edited `ok(1, "SKIP: …")` stubs in `perl-tests/splice.t` and
+`perl-tests/sort.t` were **restored from the t/op originals** (CLAUDE.md 5) —
+the sort.t one was not in the task, it was found while grepping for the
+feature.
+
+Gate **PASS 131 files / 4594 tests** (HEAD 130/4576 + the new file's 18 rows).
+Full sweep **18477 passing / 679 fails, GATE clean — 0 new, 2 fixed** (the two
+scalar.t rows s333 left un-blessed), 66 files fully passing, TOTAL passing up
+from baseline 18469.  Emission is byte-identical by construction (no `Pl/`
+change), so no cache-generation bump and no artifact regeneration.
+
+---
+
 ## Session 336 (2026-08-03, Opus) — #214 fuzzer clean (4 known residuals, both now written up) + #185: XDIFF is granted PER ROW, machine-checked
 
 ### #214 — the fuzzer, first run since the s324 era

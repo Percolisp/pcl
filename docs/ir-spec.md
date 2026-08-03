@@ -172,6 +172,19 @@ elements still boxed** (`p-aref-unbox-elem`) — so `==` on two references
 compares object identity, not content. An array in numeric/scalar position
 coerces to its length.
 
+**Read-only arrays (s337, task #159):** the ONE case where the storage is not
+adjustable.  `Internals::SvREADONLY(@a, 1)` replaces the variable's storage
+with a **simple vector** — same element boxes, no fill pointer, not adjustable
+— because perl's read-only AV is precisely a *fixed-size* array whose elements
+remain writable.  The predicate is therefore the storage itself
+(`%p-array-readonly-p` = a non-string vector with no fill pointer), and every
+size-changing entry point (push/unshift/pop/shift/splice/delete, whole-array
+assignment, `undef @a`, the out-of-bounds extend inside element writes, and
+growth via `$#a`) checks it and raises perl's `Modification of a read-only
+value attempted`.  A port that has no equivalent of "fixed-size vector" needs
+an explicit per-array flag consulted at those same points; nothing else in this
+spec changes.
+
 **Hole aliasing (defelem, s316e):** when a hole slot is *aliased* — by a
 foreach/grep/map `$_` binding or by spreading the array into `@_` — the
 alias is a **deferred-element box** (`%p-defelem-box`): a box whose value

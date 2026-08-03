@@ -112,10 +112,9 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 (18 :read-only
                     "undef &constant_sub must die 'Can't modify constant item' — constant/read-only slots not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' (undef.t 16-18)."))
 
-(register-skips "unshift.t"
-                ("croak when unshifting onto readonly array"
-                 :read-only
-                 "unshift onto an Internals::SvREADONLY array must die 'Modification of a read-only value' — read-only arrays not marked. not-supported.md: 'Internals::* C-level introspection'."))
+;; unshift.t's "croak when unshifting onto readonly array" was registered here
+;; until task #159 (s337) made Internals::SvREADONLY(@a,1) swap the array's
+;; storage for a fixed-size one.  The row PASSES now — do not re-register it.
 
 ;; chop.t 48-51 are UNNAMED `ok($@ =~ /Can't modify.../)` -> keyed by number.
 (register-skips "chop.t"
@@ -253,16 +252,12 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  :xs
                  "unpack(...,pack 'p'/'P',$inf_or_nan) roundtrips a raw pointer -- no stable addresses under a moving GC; PCL throws 'Invalid type'. not-supported.md: 'pack/unpack — pointer types (p/P)'."))
 
-;; push.t — push onto an Internals::SvREADONLY array must croak "Modification of
-;; a read-only value".  PCL emulates neither Internals::SvREADONLY nor a per-array
-;; read-only flag, so the push succeeds and $@ stays empty.  This is the file's
-;; only failure.  not-supported.md: 'Internals::* C-level introspection' /
-;; 'Read-only constants'.  (The sibling "can push empty list onto readonly array"
-;; legitimately passes — a no-op push raises nothing — and is excluded by the regex.)
-(register-skips "push.t"
-                ("croak when pushing onto readonly array"
-                 :read-only
-                 "push onto an Internals::SvREADONLY array must die 'Modification of a read-only value' -- read-only arrays / Internals::* not emulated. not-supported.md: 'Internals::* C-level introspection'."))
+;; push.t's "croak when pushing onto readonly array" was registered here until
+;; task #159 (s337): Internals::SvREADONLY(@a,1) now swaps the array's storage
+;; for a fixed-size one, so the push dies with perl's message and the row
+;; PASSES.  Its sibling "can push empty list onto readonly array" passes too —
+;; a push that would store nothing is legal even on a read-only array.  Do not
+;; re-register either.
 
 ;; array.t — documented not-supported failures (sparse arrays / @_ aliasing / SV
 ;; identity / error-detection). HELD BACK as fix targets, deliberately NOT registered:

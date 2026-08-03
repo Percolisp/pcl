@@ -899,8 +899,12 @@ SKIP:
     {
         package Doc;
         ::refcount_is \&::sportello, $refcnt, "sort sub refcnt";
-        ## PCL: Internals::SvREADONLY not implemented — read-only arrays not supported
-        ok(1, "SKIP: in-place sort of read-only array — Internals::SvREADONLY not in PCL");
+        $fail_msg = q(Modification of a read-only value attempted);
+        # Sorting a read-only array in-place shouldn't be allowed
+        my @readonly = (1..10);
+        Internals::SvREADONLY(@readonly, 1);
+        eval { @readonly = sort @readonly; };
+        ::cmp_ok(substr($@,0,length($fail_msg)),'eq',$fail_msg,'in-place sort of read-only array');
     }
 }
 

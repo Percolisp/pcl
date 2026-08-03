@@ -398,16 +398,41 @@ one fail is `$-`, which only changes once a real `write()` has run).
 read-only; `Internals::SvREFCNT($ref)` returns the reference count of an
 SV.  These are direct windows into Perl's C-level runtime.
 
-**PCL behaviour:** Not implemented.  CL's garbage collector and box model
-have no equivalent reference-count or read-only flag concept.
+**PCL behaviour:** split, since task #159 (s337):
 
-**Rationale:** Application code does not use `Internals::*`; only Perl's
-own test suite and low-level XS modules call it.  Faking it would require
-a per-box read-only flag and reference counting, with no benefit for
-running CPAN modules.
+- **`Internals::SvREADONLY(@array, FLAG)` — IMPLEMENTED.**  Perl's read-only
+  AV is a *fixed-size* array whose elements stay writable, and PCL gets that
+  by swapping the variable's storage for a simple CL vector (no fill pointer,
+  not adjustable) over the same element boxes.  Every size change then fails
+  by construction and reports perl's `Modification of a read-only value
+  attempted`; in-bounds element writes and foreach-alias writes still work.
+  Clearing the flag restores an adjustable copy.  Guard: `Pl/t/readonly-array-01.t`.
+- **`Internals::SvREADONLY($scalar, FLAG)` and `(%hash, FLAG)` — still not
+  implemented**, and now say so: one deduped stderr line per kind
+  (`PCL: Internals::SvREADONLY on a SCALAR is not implemented (task #159) —
+  ignored`).  A read-only *scalar* needs a per-box flag; a read-only *hash* is
+  a different perl feature entirely (a **restricted hash**, whose error is
+  `Attempt to access disallowed key '…' in a restricted hash`), not the same
+  fixed-size rule.
+- `Internals::SvREFCNT` still returns 1 — a GC runtime has no refcount.
 
-**Affected tests:** `perl-tests/undef.t` (read-only checks),
-`perl-tests/unshift.t` (read-only constant checks).
+**Three known divergences of the array implementation**, all announced or
+strictly better than the old silent no-op:
+
+1. `$#ro = N` where N would *shrink* the array: perl does not guard this — it
+   truncates.  PCL announces and does nothing, because a simple vector cannot
+   be truncated in place and the runtime does not have the variable's cell at
+   that point.  (Growing correctly dies, as in perl.)
+2. A reference taken **before** the flag was set still points at the old
+   adjustable storage, so `push @$r, 1` through it succeeds where perl dies.
+   CL cannot un-adjust an existing array, so storage identity cannot be
+   preserved across the swap.
+3. `Internals::SvREADONLY(@$ref, 1)` — through a reference rather than a named
+   array — cannot reach the storage cell, so it announces and no-ops.
+
+**Affected tests:** `perl-tests/undef.t` 16–18 (read-only **scalars**, still
+registered).  `push.t`, `unshift.t`, `splice.t` and `sort.t`'s in-place-sort
+row now pass and are no longer in the skip registry.
 
 ---
 
@@ -1141,11 +1166,12 @@ SCALAR is fully implemented** (`p-tie-proxy`: `unbox` dispatches `FETCH`,
 **Why:** a scalar carries a `p-box` — a place with slots for `sv-ok`, `nv-ok`,
 class, magic — and installing a tie proxy is just writing that box's value
 slot.  An aggregate carries *nothing*: it arrives at `p-tie` as a raw CL
-hash-table or vector, with nowhere to hang the proxy.  This is the same one
-missing thing behind `Internals::SvREADONLY(@a,1)` being a no-op — see the
-`Internals::*` section — and the fix for both is the boxed-aggregate data
-model, which changes the representation every array/hash access compiles
-against.  That is an E5-era design item (Target A: it costs an indirection on
+hash-table or vector, with nowhere to hang the proxy.  (Read-only *arrays*
+escaped that limit — task #159 encodes the flag in the STORAGE rather than on
+the container, which works because "read-only" is exactly "fixed size"; a tie
+proxy has no such representation trick available.)  The fix here is the
+boxed-aggregate data model, which changes the representation every array/hash
+access compiles against.  That is an E5-era design item (Target A: it costs an indirection on
 the hottest paths), deliberately **not** started pre-R1.
 
 **Interim, not final.**  A `die` was considered and rejected for R1: it would

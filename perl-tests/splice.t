@@ -105,8 +105,12 @@ is sprintf("%s", splice @a, 0, 1, undef), "",
 
 # RT#131000
 {
-    ## PCL: Internals::SvREADONLY not implemented; read-only arrays not supported
-    ok(1, "SKIP: croak when splicing into readonly array — Internals::SvREADONLY not in PCL");
+    local $@;
+    my @readonly_array = 10..11;
+    Internals::SvREADONLY(@readonly_array, 1);
+    eval { splice @readonly_array, 1, 0, () };
+    like $@, qr/^Modification of a read-only value/,
+        "croak when splicing into readonly array";
 }
 
 # GH#18667 - av_extend_guts must zero duplicate SV*s
