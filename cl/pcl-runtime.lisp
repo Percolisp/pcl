@@ -1100,20 +1100,48 @@
    operation that changes an array's SIZE."
   (when (%p-array-readonly-p a) (%p-readonly-modification)))
 
-(defvar *p-svreadonly-warned* (make-hash-table :test 'equal)
-  "Dedup set for the Internals::SvREADONLY not-implemented announcements.")
+;;; ---------------------------------------------------------------------------
+;;; The two rule-12 endings for a case PCL does not implement   (task #152)
+;;; ---------------------------------------------------------------------------
+;;; CLAUDE.md rule 12: a dispatch over a closed set never falls through to a
+;;; default that swallows the value.  Which ending applies was ruled in
+;;; docs/fable-answers-s328.md §1 by ONE test — does the missing case produce or
+;;; write a VALUE the program then consumes?
+;;;
+;;;   VALUE-PRODUCING → %p-unsupported-value: DIE, naming the operand.  Silent
+;;;     wrong values are the worst failure mode in this codebase (p-vec's
+;;;     missing 64-bit width wrote nothing and returned plausible zeros).
+;;;   EFFECT-ONLY (a jump, a tie, a flag — the data is unchanged and the program
+;;;     otherwise runs) → %p-announce-unsupported: one stderr line, then carry
+;;;     on.  Measured s328: making computed-label `goto` die cost state.t 88
+;;;     verified rows while sweep-diff still reported "0 new".  The sin is the
+;;;     silence, not the fall-through.
+;;;
+;;; Unclassifiable in a minute counts as value-producing.  Both helpers take the
+;;; same (SITE, OPERAND) pair so a grep for either finds the whole family, and
+;;; the announce side dedups on that pair — ONE table, not a hash per site.
+(defvar *p-unsupported-announced* (make-hash-table :test 'equal)
+  "Dedup set for %p-announce-unsupported: one line per (SITE, OPERAND) per
+   process, so an unimplemented case inside a loop stays one line.")
 
-(defun %p-warn-svreadonly (what)
-  "Announce a read-only-flag effect PCL cannot honour (WHAT names it).  These
-   are effect-only — nothing produces a value the program then consumes — so
-   they announce rather than die, per the rule-12 boundary ruled in
-   docs/fable-answers-s328.md §1.  Deduped per WHAT."
-  (unless (gethash what *p-svreadonly-warned*)
-    (setf (gethash what *p-svreadonly-warned*) t)
-    (format *error-output*
-            "PCL: ~A is not implemented (task #159) — ignored~%" what)
-    (force-output *error-output*))
+(defun %p-announce-unsupported (site operand &optional detail)
+  "Say on stderr that SITE cannot honour OPERAND, once per pair per process.
+   For EFFECT-ONLY cases only — the caller carries on afterwards.  Returns NIL
+   so a dispatch arm can simply end with this call.  DETAIL, when given,
+   replaces the default \"ignored\" tail."
+  (let ((key (format nil "~A/~A" site operand)))
+    (unless (gethash key *p-unsupported-announced*)
+      (setf (gethash key *p-unsupported-announced*) t)
+      (format *error-output* "PCL: ~A: ~A is not implemented — ~A~%"
+              site operand (or detail "ignored"))
+      (force-output *error-output*)))
   nil)
+
+(defun %p-unsupported-value (site operand)
+  "Perl-visible fatal for a VALUE-PRODUCING case SITE does not implement.
+   Never returns: the point is that no plausible-looking value escapes."
+  (error "PCL: ~A: ~A is not implemented" site operand))
+
 
 (defun %p-array-set-readonly (a flag)
   "Return the storage @A must have for perl's SvREADONLY flag FLAG.
@@ -1125,9 +1153,9 @@
    variable, not its value."
   (cond
     ((not (and (vectorp a) (not (stringp a))))
-     (%p-warn-svreadonly
-      (cond ((hash-table-p a) "Internals::SvREADONLY on a HASH (perl's restricted hash)")
-            (t "Internals::SvREADONLY on a non-array value")))
+     (%p-announce-unsupported "Internals::SvREADONLY"
+                              (if (hash-table-p a) "a HASH (perl's restricted hash is a different feature)"
+                                  "a non-array value"))
      a)
     ((p-true-p (unbox flag))
      (if (%p-array-readonly-p a)
@@ -1152,11 +1180,11 @@
   (declare (ignore flag))
   (let ((v (unbox thing)))
     (when flag-p
-      (%p-warn-svreadonly
-       (cond ((hash-table-p v) "Internals::SvREADONLY on a HASH (perl's restricted hash)")
-             ((and (vectorp v) (not (stringp v)))
-              "Internals::SvREADONLY on an array reached through a reference")
-             (t "Internals::SvREADONLY on a SCALAR"))))
+      (%p-announce-unsupported "Internals::SvREADONLY"
+                               (cond ((hash-table-p v) "a HASH (perl's restricted hash is a different feature)")
+                                     ((and (vectorp v) (not (stringp v)))
+                                      "an array reached through a reference")
+                                     (t "a SCALAR"))))
     (make-p-box (if (%p-array-readonly-p v) 1 ""))))
 
 (defun p-copy-scalar-arg (val)
@@ -3862,12 +3890,9 @@
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (let ((desig (second args)))
         (setf args (cddr args))
-        (cond
-          ((null desig) (setf fh (%p-default-out)))
-          ((p-get-stream desig) (setf fh (p-get-stream desig)))
-          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
-             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
-             (return-from p-printf *p-undef*)))))
+        (let ((resolved (%p-out-fh-or-fail desig "printf")))
+          (unless resolved (return-from p-printf *p-undef*))
+          (setf fh resolved))))
     ;; printf takes a LIST (FORMAT, LIST): flatten raw @array/%hash args so the
     ;; format comes from the first flattened element, e.g. `printf @a` where
     ;; @a = ("%d\n", 5).  A p-box-wrapped ref stays scalar (printf "%s", $aref).
@@ -5988,7 +6013,8 @@
        ;; be truncated in place and whose variable cell is not reachable from
        ;; here, so the truncation is announced and skipped rather than faked.
        (if (%p-array-readonly-p a)
-           (%p-warn-svreadonly "$#a= on a read-only array (perl truncates)")
+           (%p-announce-unsupported "$#a =" "shrinking a read-only array"
+                                    "perl truncates; PCL cannot shrink fixed storage")
            (setf (fill-pointer a) (max 0 new-len)))))
     nli))
 
@@ -7723,6 +7749,48 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; I/O Functions
 ;;; ============================================================
 
+(defun %p-out-fh-or-fail (desig site)
+  "Resolve DESIG — the explicit filehandle of print/printf/say, SITE naming
+   which — to a stream, or return NIL after doing what PERL does with a handle
+   it cannot write to.  Callers return false when this returns NIL.
+
+   Task #152 (CLAUDE.md rule 12) — and a case the audit MEASURED and then did
+   NOT convert.  Both halves of the obvious \"stop being silent\" fix were tried
+   and both are wrong; the record is here so they are not retried:
+
+     * WARN \"print() on unopened filehandle NAME\"?  No — that warning is
+       `use warnings`-GATED in perl, not default-on.  Measured (scratchpad
+       w1.pl vs w2.pl): plain `perl` prints NOTHING and returns undef, exactly
+       like PCL.  PCL's silence is perl's silence.  Emitting it unconditionally
+       broke fileio-02.t and transpile-test-09.t, which assert the default
+       quiet.  Re-adding it needs a real `use warnings` model — PCL tracks no
+       warnings state anywhere today.
+
+     * DIE \"Can't use an undefined value as a symbol reference\" on an
+       undefined designator?  Perl does exactly that for a handle that was
+       never opened — but NOT for one that was closed, where it returns undef.
+       PCL cannot tell the two apart: %p-forget-fh leaves the variable
+       UNDEFINED after close, so `print $closed_fh …` and
+       `my $u; print {$u} …` arrive here identical.  Dying would break the
+       closed-handle rows of transpile-test-09.t (#186), which are right.
+       Separating them needs close() to leave a closed-handle value behind
+       instead of nothing — a representation change, not a dispatch fix.
+
+   So this arm stays as perl-without-warnings behaves: no output, $! = EBADF,
+   return false.  What the audit DID fix here is the duplication — print,
+   printf and say each carried their own copy of this arm (CLAUDE.md 11), so a
+   change like the above had to be made, and measured, three times."
+  (declare (ignore site))
+  (cond
+    ;; `:fh nil` is the EMPTY filehandle node (bare `print`), not an undef
+    ;; scalar — it means the currently-selected handle.
+    ((null desig) (%p-default-out))
+    ((p-get-stream desig))
+    (t
+     (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
+     (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+     nil)))
+
 (defun p-print (&rest args)
   "Perl print - prints args then appends $\\ (output record separator)"
   (let ((fh (%p-default-out)))
@@ -7730,17 +7798,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (let ((desig (second args)))
         (setf args (cddr args))
-        (cond
-          ;; :fh nil = bare `print { }`/empty filehandle node → the default
-          ;; (currently-selected) output handle.
-          ((null desig) (setf fh (%p-default-out)))
-          ;; A named/lexical handle that resolves to a real stream.
-          ((p-get-stream desig) (setf fh (p-get-stream desig)))
-          ;; A handle was named but is not open: Perl print/say fails with
-          ;; errno EBADF, prints nothing, and returns false.
-          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
-             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
-             (return-from p-print *p-undef*)))))
+        (let ((resolved (%p-out-fh-or-fail desig "print")))
+          ;; NIL = perl already warned (or died); the write does not happen.
+          (unless resolved (return-from p-print *p-undef*))
+          (setf fh resolved))))
     ;; The bare-form $_ default (`print;` / `print FH;` / `say;` / `printf;`)
     ;; is supplied EXPLICITLY by the codegen (ExprToCL gen_funcall emits
     ;; `(p-print … $_)`), so the generated CL is self-describing and there is no
@@ -7770,12 +7831,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; on a named-but-unopened handle so we don't emit a stray newline.
     (when (and (>= (length args) 2) (eq (first args) :fh))
       (let ((desig (second args)))
-        (cond
-          ((null desig) (setf fh (%p-default-out)))
-          ((p-get-stream desig) (setf fh (p-get-stream desig)))
-          (t (setf *p-stored-errno* 9)                            ; EBADF (Linux)
-             (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
-             (return-from p-say *p-undef*)))))
+        (let ((resolved (%p-out-fh-or-fail desig "say")))
+          (unless resolved (return-from p-say *p-undef*))
+          (setf fh resolved))))
     (apply #'p-print args)
     (terpri fh)
     (%p-maybe-autoflush fh)

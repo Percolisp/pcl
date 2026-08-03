@@ -106,6 +106,46 @@ Sweep after the re-sync: **18498 passing / 681 fails, GATE clean — 0 new**.
 Fully-passing 66 → 64 is the point of the exercise: chop.t and quotemeta.t
 stopped over-claiming.
 
+### #152 rule-12 audit — the runtime is already clean, and the one finding is blocked
+
+Same session.  Step 1 of the ruling first: **ONE shared pair of helpers**,
+one dedup table — `%p-announce-unsupported (site operand)` for EFFECT-ONLY and
+`%p-unsupported-value (site operand)` for VALUE-PRODUCING — and the per-site
+hash #159 had just added was folded into it (the ruling says one table, not a
+hash per site).
+
+Then every `(t …)`/`(otherwise …)` arm in `cl/pcl-runtime.lisp` whose body is a
+bare `nil`/`0`/`""`/`*p-undef*`/`t`: **38 sites, classified**.
+
+- **~33 are Perl's own TOTAL rules**, not swallowed cases: truthiness
+  ("anything not explicitly false is true"), numification ("anything else is
+  0"), `ref()` of a non-reference is `""`, `wantarray`'s third arm, "read past
+  the end is 0", sprintf's "no flag applies → no prefix", `-T`/`-B` over a
+  closed scan.  Several already carry an explicit "this IS the Perl semantics"
+  comment.
+- **The archetype is already fixed**: `p-vec`'s width dispatch handles 16/32/64
+  in one loop and *dies* on an illegal width; the surviving `(t 0)` is
+  sub-byte-past-the-end, which is correct perl.
+- **One family had a real smell** — and measuring killed both fixes.
+
+`print`/`printf`/`say` each carried **their own copy** of "unresolvable handle →
+EBADF, write nothing, return false, say nothing".  Three copies (CLAUDE.md 11),
+now one `%p-out-fh-or-fail`.  But:
+
+- **Warning** "print() on unopened filehandle" is `use warnings`-GATED in perl,
+  not default-on — measured: plain `perl` prints nothing, exactly like PCL.
+  Emitting it unconditionally broke `fileio-02.t` and `transpile-test-09.t`,
+  which assert the default quiet.  PCL tracks no warnings state at all.
+- **Dying** "Can't use an undefined value as a symbol reference" is right for a
+  handle never opened — but perl returns undef for a CLOSED one, and PCL cannot
+  tell them apart: `%p-forget-fh` leaves the variable undefined after `close`.
+  Dying broke transpile-test-09.t's closed-handle rows (#186), which are right.
+
+Both measurements are recorded **in the function** so they are not retried, and
+both asks (audit scope; whether a closed-handle value is worth a task) went to
+`docs/opus5-review-requests-s337.md` for Fable rather than being decided here.
+Gate **131/4594 PASS**.
+
 ---
 
 ## Session 336 (2026-08-03, Opus) — #214 fuzzer clean (4 known residuals, both now written up) + #185: XDIFF is granted PER ROW, machine-checked
