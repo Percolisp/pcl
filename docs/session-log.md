@@ -146,6 +146,18 @@ both asks (audit scope; whether a closed-handle value is worth a task) went to
 `docs/opus5-review-requests-s337.md` for Fable rather than being decided here.
 Gate **131/4594 PASS**.
 
+**Sweep: a LOST report, and its actual mechanism (→ #215).**  The first sweep of
+this commit came back `GATE: NOT CLEAN` — `do.t` **-60 rows** (65 → 5, note
+"undefined."), TOTAL 18498 → 18438.  Not a shrug, a cause: that run started on a
+**cold `~/.pcl-cache`** (cleared during the #152 probes) with `--jobs 8`, so
+eight workers raced to populate the same cache entries.  Two decisive
+measurements: `do.t` alone, same commit → **65/3/5, exactly the baseline**; and
+the whole sweep re-run with the cache now warm → **do.t 65/3/5, TOTAL 18498,
+GATE clean, 0 new** — identical to the pre-#152 number.  #215's ruling (serial
+re-run of a LOST file) catches this, but it now has a named cause and a cheaper
+fix than detection: warm the cache with one file before fanning out, or give
+each worker its own cache dir.
+
 ---
 
 ## Session 336 (2026-08-03, Opus) — #214 fuzzer clean (4 known residuals, both now written up) + #185: XDIFF is granted PER ROW, machine-checked
