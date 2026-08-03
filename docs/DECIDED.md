@@ -56,7 +56,11 @@ not-supported.md → only then probe.*
   #155, #159, #163): side table REJECTED (mutation-path tax); boxed
   aggregates = E5-era Fable design, do NOT start; referent-kind tag on the
   box APPROVED post-R1 (fixes #163 ref identity/printed type + #154's two
-  shapes) → `fable-answers-s318.md` §1.
+  shapes) → `fable-answers-s318.md` §1.  **The tag half is SUPERSEDED
+  (s333 measurement, CONFIRMED s335)**: no slot was added — `is-ref` on the
+  wrapper already discriminates, and a sticky tag would be *wrong* where it
+  differs from the flag (perl re-decides SCALAR↔REF from the referent's
+  current content) → `fable-answers-s334.md` §s333-1, DECIDED §s333 below.
 - **tie on ARRAY/HASH**: interim = loud stderr WARNING + not-supported
   subsection (NOT a die — would CRASH avhv.t-class files); real support
   waits for boxed aggregates → `fable-answers-s318.md` §1, task #155.
@@ -108,7 +112,23 @@ not-supported.md → only then probe.*
   (`eq $canon`, "the fixer matched the name"), then ask.  s316b's one
   `$skip->($t)` per `PPI::Token` cost pack.t 5.8 s → 74 s of transpile for
   BYTE-IDENTICAL output → task #184, session-log s334, guard
-  `Pl/t/parser2-02.t` (counts the calls, not the seconds).
+  `Pl/t/parser2-02.t` (counts the calls, not the seconds).  **Corollary
+  (s335): when the fix is "normalise into the sibling's discipline", grep
+  for the OTHER siblings before closing** — the same predicate had two more
+  per-token callers in the W10 spanning-rename loops (86.6 s → 0.98 s on a
+  two-package 200-statement file) → `fable-answers-s334.md` §5.
+- **#213's TIME was the printer, not the recursion**: `_close` asked
+  `_ends_in_comment` (pure-Perl char scan) about the WHOLE accumulated
+  subtree text at every nesting level — 93% of a nested file's transpile.
+  Fixed byte-identically s335 (a terminal comment needs a `;` after the
+  last newline — `rindex`/`index` guard).  What remains of #213 is bytes +
+  recursion depth: clamp-indent (a) approved cosmetic, `let*` runs (b) is
+  the real fix at E5, depth-keyed defvar flattening (c) REJECTED →
+  `fable-answers-s334.md` §1.
+- **A "suspect X" task carries the cheap discriminating measurement** (or
+  names it and why it was skipped) — #184's suspicion was carried 13
+  sessions when "time the two phases" was 3 minutes → CLAUDE.md lookup-order
+  block, `fable-answers-s334.md` §2.
 - **Never simplify a failing test**; skip only via the registry →
   CLAUDE.md 5, `test-skip-registry.md`.
 - **Checked-in transpiled artifacts** (`cl/pcl-pack.lisp`, `cl/pcl-mro.lisp`):
@@ -659,3 +679,27 @@ not-supported.md → only then probe.*
   indistinguishable.  The ref-to-REF half stays lenient **because the parser
   drops the outer level of `$$refref->{k}` (#211, filed s333)** — the runtime
   leniency is a workaround for that parse bug, not a semantic choice.
+
+## s335 (Fable, 2026-08-03): s333+s334 asks ruled; two byte-identical compile-time fixes shipped
+
+- **s333 §1 CONFIRMED**: no `ref-kind` slot — the s318/s320 tag ruling is
+  superseded by the better measurement (see the annotated bullet under
+  "Aggregate state model" above).  §2 ACCEPTED: ref strings stay uncached.
+- **#211 is parked behind #153** (term-machinery region, no guard-patches);
+  its leniency covers exactly the two measured spellings — a NEW shape
+  wanting leniency needs its own probe and task, #211 is not a blanket
+  citation → `fable-answers-s334.md` §s333-3.
+- **Sweep gate vs load noise (#204 follow-up)**: record min MemAvailable
+  beside any LOST report, AND re-run a LOST file once at `--jobs 1`; the
+  serial numbers REPLACE that file's rows for the verdict, the report prints
+  both.  Whitelisting noisy files REJECTED; "operator re-runs" REJECTED →
+  `fable-answers-s334.md` §s333-4, task #215.
+- **#213 re-scoped**: the TIME was `_ends_in_comment` (fixed s335,
+  byte-identical); remaining = cosmetic bytes (clamp approved, bump
+  generation) + recursion depth (real fix = `let*` runs at E5; depth-keyed
+  defvar flattening REJECTED) → `fable-answers-s334.md` §1, and the Coding
+  rules bullet above.
+- **W10 spanning-rename loops converted to the #184 rule** (the two
+  remaining per-token `_ref_shadowed` callers): 86.6 s → 0.98 s on a
+  two-package 200-statement file, emission byte-identical, guard rows in
+  `Pl/t/parser2-02.t` → `fable-answers-s334.md` §5.

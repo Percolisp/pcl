@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 335 (2026-08-03, Fable) — s334 review: the #184 fix was right, and one grep short; two more byte-identical compile-time quadratics shipped
+
+Review of s334's #184 commit (b3ede60), plus rulings on ALL open asks (s333's
+four + s334's two) in `docs/fable-answers-s334.md`.
+
+### The #184 fix verified — and its own rule applied one file wider
+
+The fix is correct: guard counts 2 predicate calls, pack.t transpile ~5.5 s
+here, scoping verdicts hold.  But the commit's own discipline ("normalise
+into the sibling's discipline") stopped one grep early: `_ref_shadowed` had
+**two more per-token callers** in the same file — the W10 spanning-rename
+loops (declaring-segment interp fix and later-segment qualified fix).  A
+two-package file with ONE spanning lexical triggers them:
+
+```
+span-200 (200 noise stmts):   86.6 s  →  0.98 s
+span-400:                    >300 s   →  3.0 s     (_ref_shadowed was 9.38 of 11.45 s at N=100)
+```
+
+Converted to the exact mechanism s334 built (`_interp_token_candidate`
+pre-filter + `$skip` handed down to `_fix_interp_token`).  Shadow semantics
+probed against perl (cross-package interp takes the qualified cell, shadowed
+interp keeps its name) and guarded: `parser2-02.t` +4 rows, call-count ≤ 40
+(measured 3).  DECIDED.md corollary: **when the fix is "normalise into the
+sibling", grep for the OTHER siblings before closing.**
+
+### #213's TIME was the printer, not the recursion
+
+Profiling the nest-200 case Opus filed: **93% of the wall (4.19 of 4.52 s)
+was `CLForm::_ends_in_comment`** — `_close` asks it about the WHOLE
+accumulated subtree text at every nesting level, and it is a pure-Perl
+`split //` char loop (27.8 M chars on 200 statements).  A terminal `;`
+comment can only start after the LAST newline, so a `rindex`/`index` guard
+answers 0 without the scan when no `;` follows it — exact, byte-identical.
+nest-200: **4.7 s → 0.40 s**; pack.t gains ~0.4 s.  #213 re-scoped to what
+remains: cosmetic bytes (clamp approved, with generation bump) + recursion
+depth (real fix = `let*` runs at E5; depth-keyed defvar flattening REJECTED).
+
+### Verification (both fixes together)
+
+corpus-diff: **emission identical to HEAD across 111 files**.  Gate:
+**130 files / 4576 PASS** (4572 + 4 new guard rows).  Probe outputs equal
+perl's on both shadow shapes; span/nest emissions byte-identical to HEAD
+modulo the path preamble.
+
+### Rulings (details in `docs/fable-answers-s334.md`)
+
+- s333 §1 **no `ref-kind` slot CONFIRMED** (s318 tag ruling superseded — a
+  sticky tag would be wrong where it differs from `is-ref`); §2 **ref
+  strings uncached ACCEPTED**; §3 **#211 parked behind #153**, leniency
+  scoped to the two measured spellings; §4 **gate vs load noise = (0)+(2)**:
+  min MemAvailable printed beside LOST + serial re-run of a LOST file,
+  serial verdict replaces, report shows both → **task #215**.
+- s334 §1 (#213) as above; §2 **adopted**: a "suspect X" task carries the
+  cheap discriminating measurement (CLAUDE.md lookup-order block).
+
+USER note (s335): checked-in transpiled artifacts embed BUILD-MACHINE
+absolute paths (`/home/bernt/…`) in their preamble — an installation /
+packaging process must regenerate them on the target machine → task #217.
+
+Queue unchanged: **#214 (fuzzer) stays next**, then #185 → #159 → #150 →
+#152 → E4.1/E5.
+
+---
+
 ## Session 334 (2026-08-03, Opus) — #184: pack.t's lost minute was a compile-time regression, and the artifact was innocent
 
 Task #184 said "pack.t went ~90 s → ~156 s, suspect the `cl/pcl-pack.lisp`

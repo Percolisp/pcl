@@ -486,4 +486,38 @@ fresh(); other();};
        '#184: shadowed interpolated use still keeps the original name');
 }
 
+# ---- #184 residue (s335): the W10 spanning-lexical rename loops obey the
+# same rule — the shadow predicate is asked about REWRITE CANDIDATES only ----
+# _promote_captured was converted in s334, but the two W10 cross-package
+# rename loops still asked _ref_shadowed about every PPI::Token of every
+# later-segment statement.  Measured before this fix: a two-package file
+# with ONE spanning lexical and 200 noise statements transpiled in 86 s
+# (0.98 s after).  Same guard shape: count the calls on a padded file, and
+# re-assert the scoping the predicate exists to protect.
+{
+  my $noise = join('', map { "my \$w$_ = $_ + 1; print \"w=\$w$_\\n\" if \$w$_ > $_;\n" } 1..30);
+  my $code = qq{package A;
+my \$tmpx = 5;
+print "A=\$tmpx\\n";
+package B;
+$noise
+{ my \$tmpx = 9; print "inner=\$tmpx\\n"; }
+print "B=\$tmpx\\n";};
+  my $calls = 0;
+  my $cl;
+  {
+    no warnings 'redefine';
+    my $orig = \&Pl::Parser2::_ref_shadowed;
+    local *Pl::Parser2::_ref_shadowed = sub { $calls++; $orig->(@_) };
+    $cl = eval { Pl::Parser2->parse_code($code) };
+  }
+  is($@, '', '#184/W10: padded spanning-lexical file still parses');
+  cmp_ok($calls, '<=', 40,
+         "#184/W10: shadow predicate asked $calls times, not once per token");
+  like($cl, qr/"B="\s*A::\$tmpx__file__\d+/,
+       '#184/W10: cross-package interpolated use still takes the qualified cell');
+  like($cl, qr/"inner="\s*\$tmpx\b/,
+       '#184/W10: shadowed interpolated use still keeps the original name');
+}
+
 done_testing();

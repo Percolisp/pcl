@@ -2138,11 +2138,14 @@ sub _rename_spanning_lexicals {
       }
       # Mangled path: interp text must follow the rename (identity keeps the
       # name, so same-package interp needs nothing).  Shadow scopes keep the
-      # outer text: their $bare is a different variable.
+      # outer text: their $bare is a different variable.  The shadow
+      # predicate is handed DOWN so it is asked only about tokens the fixer
+      # matched — per token it is a tree walk, i.e. quadratic (#184).
       if ($decl_fix) {
+        my $dskip = sub { $self->_ref_shadowed($_[0], "\$$bare", $stmts, $dsp) };
         for my $t (@{ $stmts->[$j]->find('PPI::Token') || [] }) {
-          next if $self->_ref_shadowed($t, "\$$bare", $stmts, $dsp);
-          _fix_interp_token($t, $decl_fix);
+          next unless _interp_token_candidate($t);
+          _fix_interp_token($t, $decl_fix, $dskip);
         }
       }
     }
@@ -2163,6 +2166,9 @@ sub _rename_spanning_lexicals {
       # global under the unchanged name — leave the text byte-untouched.
       my $do_interp = !$unique
         || $segments->[$j]{pkg} ne $segments->[$di]{pkg};
+      # As in _rewrite_var_uses (#184): the shadow predicate goes DOWN to
+      # _fix_interp_token so only matched tokens pay its tree walk.
+      my $qskip = sub { $self->_ref_shadowed($_[0], "\$$bare", $seg_stmts, $sp) };
       for my $stmt (@$seg_stmts) {
         next unless ref $stmt && $stmt->isa('PPI::Node');
         for my $s (@{ $stmt->find('PPI::Token::Symbol') || [] }) {
@@ -2172,8 +2178,8 @@ sub _rename_spanning_lexicals {
         }
         if ($do_interp) {
           for my $t (@{ $stmt->find('PPI::Token') || [] }) {
-            next if $self->_ref_shadowed($t, "\$$bare", $seg_stmts, $sp);
-            _fix_interp_token($t, $qual_fix);
+            next unless _interp_token_candidate($t);
+            _fix_interp_token($t, $qual_fix, $qskip);
           }
         }
       }

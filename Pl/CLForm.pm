@@ -83,6 +83,15 @@ sub _no_flat {
 # character literals like the paren checker; comment state resets at newline.
 sub _ends_in_comment {
   my ($s) = @_;
+  # A `;` comment ends at the next newline, so the text can only END inside
+  # one if a `;` occurs AFTER the last newline.  No `;` there → 0, without
+  # the char scan.  This guard is load-bearing for compile time, not just a
+  # shortcut: _close asks about the WHOLE accumulated subtree text at every
+  # nesting level, so on a deeply nested file the full scan is quadratic —
+  # 93% of a 200-statement file's transpile wall (#213, s335).  When a `;`
+  # IS present the full scan still runs: whether it opens a comment depends
+  # on string state carried from the start of the text.
+  return 0 if index($s, ';', rindex($s, "\n") + 1) < 0;
   my @c = split //, $s;
   my ($in_str, $com, $ahb, $i) = (0, 0, 0, 0);
   while ($i < @c) {

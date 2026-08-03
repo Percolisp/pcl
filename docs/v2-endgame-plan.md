@@ -158,6 +158,11 @@ The target they converge on is `docs/v2-target-architecture.md`.**
 - **E5.2 embedded-block totality** — `lower_embedded_block` stops
   declining; deletes the `parse_block_*` text family + the 4 remaining
   `body_cl`/`raw_lambda` raw sites (task #78's tail).  **1–2 sessions**
+  Owns the #213 real fix (RULED s335, `fable-answers-s334.md` §1): lower a
+  RUN of sibling `my` declarations into ONE `let*` frame instead of one
+  nested `let` per statement — removes the per-statement recursion depth
+  (the `Deep recursion on _lower_block` warnings) and the quadratic
+  indentation.  Emission flag-day: generation bump + corpus-diff.
 - **E5.3 `_fallback_stmt` burn-down** — retire the 12 intra-file classes
   (use/require/BEGIN-END, `local`, prototype/signature subs,
   goto/next/last/redo, multi-element `return`, loop statement-modifiers,

@@ -28,7 +28,11 @@ And symmetrically, when work SETTLES a question: add a one-line pointer to
 `docs/DECIDED.md` in the same commit; put load-bearing semantic decisions
 in `docs/ir-spec.md` (a code comment may point at the spec, but must never
 be the only copy); record failed attempts and what killed them in the task,
-so the task says what NOT to retry.
+so the task says what NOT to retry.  A **"suspect X" task carries the cheap
+discriminating measurement** that would confirm or kill X — or names it and
+says why it was not taken (ruled s335: #184's suspicion was carried 13
+sessions when "time the two phases separately" was 3 minutes and would have
+retargeted the task at filing).
 
 ## Design Principles
 
@@ -199,7 +203,11 @@ gates with `perl tools/v2-census.pl`.
 
 **Generated artifacts checked into the tree — regenerate them after an
 emission-changing commit, or they keep running on the codegen that built
-them.** `cl/pcl-pack.lisp` is `cl/pack-impl.pl` (pack/unpack, written in
+them.** They also embed the BUILD machine's absolute paths in their preamble
+(`*pcl-pl2cl-path*`, the @INC pushes, perlbrew dirs), so any future
+INSTALLATION process must regenerate them on the target machine — or make
+the preamble relocatable first (task #217, user note s335).
+`cl/pcl-pack.lisp` is `cl/pack-impl.pl` (pack/unpack, written in
 Perl) transpiled by PCL plus a hand-written appendix: run
 **`tools/rebuild-pack`**, then `perl sweep-perl-tests.pl --jobs 1
 --timeout 380 perl-tests/pack.t` and `tools/sweep-diff.pl` (expect 0 new;
@@ -399,6 +407,7 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2x. `docs/fable-answers-s334.md` - **s333+s334 asks ALL RULED (s335, 2026-08-03)**: no `ref-kind` slot CONFIRMED (s318 tag ruling superseded); ref strings uncached ACCEPTED; #211 parked behind #153 (leniency covers only the two measured spellings); sweep gate vs load noise = MemAvailable note + serial re-run of a LOST file, serial verdict replaces, report shows both (#215); #213 re-scoped — its TIME was `_ends_in_comment` (fixed s335 byte-identically, with the two W10 per-token `_ref_shadowed` loops), remaining = clamp-indent (a) cosmetic + `let*` runs (b) at E5, (c) REJECTED; "suspect X" tasks carry the discriminating measurement
 2y. `docs/fable-answers-s331.md` - **s330+s331 asks ALL RULED (s332, 2026-08-03)**: harness `not ok`-not-die RATIFIED (#152 inherits the harness/runtime split); TAP-interleave hard rule; like-string-pattern = accepted divergence; UNSTABLE/LOST independent, no promotion; writes_args no-whitelist + refinement not scheduled; vivification rule probe-confirmed; #163 order = third path → tag → probes; §9 = the four probe-found writes_args false negatives (implicit-`$_` spellings) fixed s332
 2z. `docs/fable-answers-s328.md` - **s328 asks ALL RULED (s329, 2026-08-02)**: rule-12 DIE-vs-ANNOUNCE = value-flows-onward test (gates #152); #201 File::Temp = probe the predicate, layer follows from who diverges; #202 first, then #204 (sweep TOTAL gate / LOST bucket), then #189; s329 review fixes: goto restores caller *wantarray*, veto exemption requires no free reference (residual → #205)
 2a. `docs/fable-answers-s323.md` - **s323 asks ALL RULED (2026-08-02), incl. the ordered pre-/post-R1 plan (§7)**: #189 approved-with-amendments, POST-R1, warning stays as backstop; #193 principle-9 reading CONFIRMED, pre-R1 attempt authorized with the #142 stop-rule; #191 deferred (loud, rare); snapshot rule = stale-marker at crash-fix time + regenerate at quote points; USER: R1 CPAN half = four-dist baseline only, dist fetches blanket-OK'd, **full suite run every 3rd–5th change, not per change**.
