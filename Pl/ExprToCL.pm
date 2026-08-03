@@ -167,7 +167,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   sprintf sqrt srand stat str-cmp str-eq str-ge str-gt str-le str-lt str-ne str-x str-x=
   string-concat study sub sub-defined sub-exists subst substr super-call sysread sysseek system syswrite
   socket socketpair bind connect listen accept send recv shutdown getsockname getpeername
-  getprotobyname setsockopt getsockopt
+  getprotobyname getprotobynumber setsockopt getsockopt
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst umask undef undef-sub unless
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
@@ -192,6 +192,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # funcalls — they apply the same wrapper in gen_readline / gen_glob.)
 my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
   reverse localtime gmtime caller unpack each splice readdir
+  getprotobyname getprotobynumber
 );
 
 # Only exceptions that need different CL names than p-<perl-op>

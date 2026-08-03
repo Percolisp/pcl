@@ -231,6 +231,32 @@ sub run_one_test {
     close $rf;
 }
 
+# Min MemAvailable seen during the run (task #215).  A LOST report has two
+# possible causes — a real regression, or the machine going short of memory and
+# killing/starving a worker — and the number that tells them apart is free
+# memory at the time.  Sampled once a second from /proc/meminfo; undef on a
+# platform without it, which is reported as "not measured", never as "fine".
+my $min_mem_kb;
+my $last_mem_sample = 0;
+sub mem_available_kb {
+    open my $mfh, '<', '/proc/meminfo' or return undef;
+    while (my $l = <$mfh>) { return $1 if $l =~ /^MemAvailable:\s+(\d+)/ }
+    return undef;
+}
+sub sample_mem {
+    my $now = time();
+    return if $now == $last_mem_sample;
+    $last_mem_sample = $now;
+    my $kb = mem_available_kb();
+    return if !defined $kb;
+    $min_mem_kb = $kb if !defined $min_mem_kb || $kb < $min_mem_kb;
+}
+sub mem_report {
+    return "min MemAvailable during the run: not measured (no /proc/meminfo)"
+        if !defined $min_mem_kb;
+    return sprintf("min MemAvailable during the run: %.1f GB", $min_mem_kb / 1048576);
+}
+
 # Parallel dispatch.  A queue entry is [file, timeout]: a file that TIMEOUTs is
 # re-queued once at $RETRY x its timeout (task #176).  Because the retry goes on
 # the END of the queue it also runs on a quieter machine, which is the other
@@ -243,9 +269,25 @@ my $retries = 0;
 my $started = 0;
 my $finished = 0;
 
+# WARM-FIRST (task #215, ruled fable-answers-s337.md §5c).  The FIRST file runs
+# ALONE; the fan-out starts only once it has finished.  Eight workers starting
+# on a cold ~/.pcl-cache all transpile-and-write the same module entries at the
+# same moment, and s337c measured the result: do.t loaded a half-written module
+# and aborted after 6 of 73 rows, costing 60 passing rows with the failure diff
+# still reading "0 new".  One file's wall time buys a populated cache for the
+# common modules.  (The write itself is atomic since s339 — see p-load-module-
+# cached — so this is belt-and-braces, and it also stops N workers duplicating
+# the same transpile work.)
+my $warm_first = ($JOBS > 1);
+if ($warm_first) {
+    print "Warm-first: running " . basename($test_files[0])
+        . " alone to populate the module cache, then fanning out to $JOBS jobs\n";
+}
+
 while (@queue || %children) {
-    # Launch up to $JOBS children
-    while (@queue && keys(%children) < $JOBS) {
+    sample_mem();
+    # Launch up to $JOBS children — but only ONE until the warm-first file is done
+    while (@queue && keys(%children) < ($warm_first ? 1 : $JOBS)) {
         my ($file, $timeout, $retried) = @{ shift @queue };
         my $name = basename($file);
         my ($rf, $result_file) = tempfile(DIR => $tmpdir, SUFFIX => '.res', UNLINK => 0);
@@ -277,6 +319,7 @@ while (@queue || %children) {
 
     for my $pid (@done_pids) {
         my $info = $children{$pid};
+        $warm_first = 0;   # the cache is populated (or the first file failed) — fan out
 
         # Read result file
         my $r = { pass => 0, fail => 0, skip => 0, planned => -1, status => 'NO_RESULT', snippet => '' };
@@ -333,6 +376,7 @@ while (@queue || %children) {
             kill 'KILL', $pid;
             waitpid($pid, 0);
             delete $children{$pid};
+            $warm_first = 0;   # do not stay single-file behind a hung warm-up
             if ($RETRY > 1 && !$info->{retried}) {
                 unlink "$log_dir/$info->{name}.fails.tsv";
                 push @queue, [$info->{file}, $info->{timeout} * $RETRY, 1];
@@ -418,7 +462,8 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 #   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> note
 # where `note` carries the crash-localization snippet (# ABORTED after test N ...)
 # for CRASH/PARTIAL files.
-if (open my $sf, '>', "$log_dir/_status.tsv") {
+sub write_status_file {
+    open my $sf, '>', "$log_dir/_status.tsv" or return;
     for my $name (sort keys %results) {
         my $r = $results{$name};
         my $note = ($r->{status} // 'OK') eq 'OK' ? '' : ($r->{snippet} // '');
@@ -428,6 +473,9 @@ if (open my $sf, '>', "$log_dir/_status.tsv") {
     }
     close $sf;
 }
+write_status_file();
+
+print "\n" . mem_report() . "\n";
 
 # ── The gate runs itself (task #204) ────────────────────────────────────────
 # A FULL sweep ends by diffing against the blessed baselines and EXITS WITH
@@ -436,14 +484,74 @@ if (open my $sf, '>', "$log_dir/_status.tsv") {
 # 88 evaporated state.t rows), and not running the comparison at all.  A
 # partial sweep (explicit files) is not comparable to a whole-corpus baseline,
 # so it stays informational.
+#
+# LOAD-NOISE POLICY (task #215, ruled fable-answers-s334.md §s333-4).  A LOST
+# report has two possible causes that look identical on paper: a real
+# regression, or the machine going short of memory and starving a worker
+# (s333's mechanism).  So a LOST file is RE-RUN SERIALLY — alone, on a quiet
+# machine — and the serial verdict REPLACES the parallel one.  The report shows
+# BOTH, next to the min MemAvailable seen during the parallel phase, so nothing
+# is quietly overwritten.  One round only; a file that is still LOST serially is
+# a regression, not noise.
+sub run_gate {
+    my ($fail_base, $differ, $label) = @_;
+    print "\n" . ("=" x 72) . "\nGATE$label: tools/sweep-diff.pl vs docs/fail-baseline.tsv + docs/pass-baseline.tsv\n"
+        . ("=" x 72) . "\n";
+    my $cmd = join(' ', map { quotemeta } ($^X, $differ, 'diff', $fail_base, $log_dir));
+    my $out = `$cmd 2>&1`;
+    my $code = $? == -1 ? 127 : ($? >> 8);
+    print $out;
+    my @lost = ($out =~ /^  ! (\S+)\s+-\d+/mg);
+    return ($code, \@lost);
+}
+
+sub rerun_serially {
+    my (@names) = @_;
+    my %by_name = map { basename($_) => $_ } @test_files;
+    for my $name (@names) {
+        my $file = $by_name{$name};
+        if (!defined $file) {
+            print "  (cannot re-run $name — not in this sweep's file list)\n";
+            next;
+        }
+        unlink "$log_dir/$name.fails.tsv";
+        my ($rf, $result_file) = tempfile(DIR => $tmpdir, SUFFIX => '.res', UNLINK => 0);
+        close $rf;
+        my $start = time();
+        my $pid = fork();
+        die "fork: $!" unless defined $pid;
+        if ($pid == 0) { run_one_test($file, $result_file, $TIMEOUT * $RETRY); _exit(0) }
+        waitpid($pid, 0);
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, status => 'NO_RESULT', snippet => '' };
+        if (open my $in, '<', $result_file) {
+            chomp(my $line = <$in>);
+            close $in;
+            my ($n, $p, $f, $sk, $pl, $s, $snip) = split /\t/, $line, 7;
+            $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
+                   status => $s // 'OK', snippet => $snip // '' };
+        }
+        printf "  serial %-22s pass=%d fail=%d planned=%s status=%s  [%ds]  (parallel run: pass=%d status=%s)\n",
+               $name, $r->{pass}, $r->{fail},
+               ($r->{planned} >= 0 ? $r->{planned} : '?'), $r->{status}, time() - $start,
+               $results{$name}{pass} // 0, $results{$name}{status} // '?';
+        $results{$name} = $r;
+    }
+    write_status_file();
+}
+
 if ($full_sweep && $GATE) {
     my $fail_base = "$project_root/docs/fail-baseline.tsv";
     my $differ    = "$project_root/tools/sweep-diff.pl";
     if (-e $fail_base && -x $differ) {
-        print "\n" . ("=" x 72) . "\nGATE: tools/sweep-diff.pl vs docs/fail-baseline.tsv + docs/pass-baseline.tsv\n"
-            . ("=" x 72) . "\n";
-        my $rc = system($^X, $differ, 'diff', $fail_base, $log_dir);
-        my $code = $rc == -1 ? 127 : ($rc >> 8);
+        my ($code, $lost) = run_gate($fail_base, $differ, '');
+        if (@$lost) {
+            print "\nLOST files re-run SERIALLY (task #215) — " . mem_report() . "\n";
+            print "The serial verdict REPLACES the parallel one; both are shown.\n";
+            rerun_serially(@$lost);
+            ($code, $lost) = run_gate($fail_base, $differ, ' (after serial re-run)');
+            print "\nStill LOST after a serial re-run: " . (@$lost ? join(', ', @$lost)
+                  . " — NOT load noise\n" : "none — the parallel LOST was load noise\n");
+        }
         print $code == 0 ? "GATE: clean\n" : "GATE: NOT CLEAN (sweep-diff exit $code)\n";
         exit $code;
     }

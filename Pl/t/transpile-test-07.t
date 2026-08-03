@@ -714,11 +714,11 @@ print "scalar=$s\n";
 $s = 'set';
 print "scalar2=$s\n";
 PERL
-    my $hash_warns  = () = $out =~ /^PCL: tie on HASH is not implemented \(task #155\)/mg;
-    my $array_warns = () = $out =~ /^PCL: tie on ARRAY is not implemented \(task #155\)/mg;
+    my $hash_warns  = () = $out =~ /^PCL: tie: a HASH \(class T::Agg\) is not implemented/mg;
+    my $array_warns = () = $out =~ /^PCL: tie: an ARRAY \(class T::Agg\) is not implemented/mg;
     is($hash_warns,  1, 'aggregate tie on a HASH announces itself exactly once (deduped)');
     is($array_warns, 1, 'aggregate tie on an ARRAY announces itself exactly once');
-    unlike($out, qr/tie on (?:SCALAR|non-lvalue)/,
+    unlike($out, qr/PCL: tie: a (?:SCALAR|non-lvalue)/,
            'implemented SCALAR tie is not announced as unimplemented');
     like($out, qr/^hash=plain$/m,   'the ignored aggregate tie leaves a working plain hash');
     like($out, qr/^scalar=FETCHED:init$/m, 'SCALAR tie still FETCHes');

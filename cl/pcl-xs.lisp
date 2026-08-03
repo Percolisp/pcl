@@ -191,6 +191,11 @@
   (with-xs-guard ()
     (let ((n (to-number (unbox (%xs-deref h)))))
       (cond ((not (realp n)) 0)
+            ;; NaN is a legal Perl value and SvIV(NaN) is 0.  Without this arm
+            ;; it reached (truncate NaN), which SIGNALS in SBCL — WITH-XS-GUARD
+            ;; then printed a host-callback-error line and returned 0 anyway,
+            ;; so the answer was right and the diagnosis was noise (s339 audit).
+            ((%pcl-nan-p n) 0)
             ;; Perl's IV is 64-bit and saturates; PCL integers are bignums.
             ((> n 9223372036854775807) 9223372036854775807)
             ((< n -9223372036854775808) -9223372036854775808)
@@ -495,7 +500,19 @@
             ((equal rt "HASH")   3)
             ((equal rt "CODE")   4)
             ((equal rt "GLOB")   5)
-            (t 1)))))
+            ((or (equal rt "SCALAR") (equal rt "LVALUE")) 1)
+            ;; Anything else — "REGEXP" today, an exotic referent tomorrow —
+            ;; has NO code in the contract's enum.  Answer the nearest true
+            ;; thing (the shim's SvROK sees a scalar ref) but SAY SO: rule 12's
+            ;; DIE ending does not exist inside a callback, because
+            ;; WITH-XS-GUARD turns every condition into the on-error constant
+            ;; BY DESIGN (rule O4, nothing unwinds into C).  In this file the
+            ;; loud ending IS the announce.  Deduped per reftype by the helper.
+            (t (%p-announce-unsupported
+                "XS ref_type"
+                (format nil "a ~A reference" (to-string rt))
+                "answered as a scalar reference — the contract enum has no code for it")
+               1)))))
 
 (sb-alien:define-alien-callable xs-ref-target sb-alien:long
   ((h sb-alien:long))

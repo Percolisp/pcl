@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 339 (2026-08-03, Opus) — task #222 small-items batch; the cold-cache race had a CAUSE
+
+Four ruled items from `docs/fable-answers-s337.md`, plus the cause behind the
+one that was described as a race.
+
+### #215 — the sweep race was a NON-ATOMIC CACHE WRITE, not just scheduling
+
+s337c measured the symptom (cold cache + `--jobs 8` → do.t loads a half-written
+module, aborts after 6 of 73 rows, LOST -60) and Fable ruled *warm-first*.  The
+upstream cause turned out to be one line of `p-load-module-cached`: the
+**`.lisp` cache branch — the DEFAULT — wrote `cache-path` in place**, while the
+FASL branch three lines above already did the pid-temp + `rename-file` dance and
+even carried the comment explaining why.  Measured, not assumed: SBCL's
+`:supersede` truncates and writes the real file, and a concurrent reader sees
+the partial content (scratch probe).  `p-cache-valid-p` then says "fresh mtime,
+valid" and `load`s it.  Fixed by mirroring the sibling branch — the second copy
+of a mechanism, one copy right.
+
+Both halves of #215 shipped as ruled on top of that:
+
+- **warm-first**: the sweep runs the FIRST file alone, then fans out.
+- **reporting**: min MemAvailable sampled once a second from `/proc/meminfo`
+  and printed in the summary and beside every LOST report; a LOST file is
+  **re-run serially** and the serial verdict REPLACES the parallel one, with
+  both shown, then the gate re-runs.  One round; still-LOST is a regression.
+
+Verified end to end by *forcing* a LOST (arith.t's pass-baseline count bumped
+to 184 for the run, restored after): warm-first line printed, LOST detected,
+serial re-run reported `pass=183 … (parallel run: pass=183)`, second gate ran,
+`Still LOST after a serial re-run: arith.t — NOT load noise`, exit 1.
+
+**The real measurement**: `rm -rf ~/.pcl-cache/*` then a full `--jobs 8` sweep
+— the exact s337c repro — gives **do.t 65/3/5** (baseline), TOTAL 18498, and
+with the baseline restored the gate is **0 new, 0 LOST, 2 fixed** (the known
+un-blessed scalar.t pair), 681 fails.  Identical to s337b's warm numbers.
+
+### The other three
+
+- **tie warning folded** into `%p-announce-unsupported` (§5b): its own dedup
+  table is gone, the class rides in the operand, so the per-(kind, class) dedup
+  is the helper's.  New text `PCL: tie: a HASH (class Foo) is not implemented —
+  the container is left untied (task #155)`; the two quotes (`not-supported.md`,
+  task #155) updated in the same commit, guard row in transpile-test-07.t.
+- **getprotobyname/getprotobynumber read `/etc/protocols`** (§4-secondary),
+  lazily, with the old four-entry table only as the unreadable-file fallback.
+  Both are now wantarray-sensitive and match perl on 11 probes byte for byte,
+  including the two asymmetries: the lookup is EXACT (`TCP` hits tcp's alias,
+  `Tcp` misses) and scalar context gives the NUMBER by name but the NAME by
+  number.  `getprotobynumber` is new (the 4-edit builtin family).
+- **`cl/pcl-xs.lisp` rule-12 grep** (§3.1): 11 dispatch sites read, two fixed,
+  and one structural finding for Fable — **rule 12's DIE ending does not exist
+  inside a callback**, because `with-xs-guard` turns every condition into the
+  on-error constant BY DESIGN (rule O4: nothing unwinds into C).  In that file
+  the loud ending is necessarily the announce.  Fixed: `xs-ref-type`'s `(t 1)`
+  now enumerates SCALAR/LVALUE and announces anything else (REGEXP today) as
+  "answered as a scalar reference"; `xs-get-iv` gained a NaN arm (NaN reached
+  `truncate`, which SIGNALS — the guard printed a callback-error line and
+  returned 0, so the answer was right and the diagnosis was noise).
+
+Gate **131 files / 4595 tests PASS** (+1 row: the getproto guard in
+transpile-test-09.t, file still ~20 s).  XS conformance re-run because
+pcl-xs.lisp changed.  Cache generation **v2-101** (getproto* is emission-
+visible via `%WANTARRAY_SENSITIVE`).
+
+---
+
 ## Session 338 (2026-08-03, Fable) — s337 review: all three commits approved; the asks ruled
 
 Reviewed `1b0a7e4` / `73d43ac` / `6c5ece9` + the s337 ask doc.  **All approved

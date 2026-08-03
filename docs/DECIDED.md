@@ -65,7 +65,10 @@ not-supported.md → only then probe.*
   subsection (NOT a die — would CRASH avhv.t-class files); real support
   waits for boxed aggregates → `fable-answers-s318.md` §1, task #155.
   SHIPPED s320: `%p-warn-aggregate-tie` in `pcl-runtime.lisp`, one line per
-  (kind, class) per process so a tie in a loop stays one line.
+  (kind, class) per process so a tie in a loop stays one line.  **s339: folded
+  into the shared `%p-announce-unsupported`** (ruled `fable-answers-s337.md`
+  §5b) — the class rides in the OPERAND, which is what keeps the per-class
+  dedup: `PCL: tie: a HASH (class Foo) is not implemented — …`.
 - **Read-only aggregates** (`Internals::SvREADONLY(@a,1)`): storage-swap to
   a simple vector, post-R1; never a weak-hash probe on the push path; do
   not bless as not-supported → `fable-answers-s318.md` §2, task #159.
@@ -748,3 +751,23 @@ not-supported.md → only then probe.*
 - **#215 gains a warm-first half** (transpile one file before fanning out;
   per-worker cache dirs REJECTED); serial re-run stays as backstop →
   `fable-answers-s337.md` §5c, task #222.
+  **SHIPPED s339, and the race had a CAUSE**: `p-load-module-cached`'s
+  **`.lisp` branch (the DEFAULT) wrote the cache file IN PLACE** while the
+  FASL branch beside it already used pid-temp + atomic `rename-file`.
+  Measured: SBCL's `:supersede` truncates and writes the real file, so a
+  worker whose `p-cache-valid-p` saw the fresh mtime `load`ed a half-written
+  module.  Both branches are atomic now; the sweep also warms one file first
+  and reports min MemAvailable + a serial re-run of any LOST file (the serial
+  verdict replaces, both shown).  Cold-cache `--jobs 8` repro now gives
+  do.t 65/3/5 and a clean gate.
+- **XS callbacks cannot DIE — the announce IS rule 12's loud ending there**
+  (s339 audit of `cl/pcl-xs.lisp`, task #222): `with-xs-guard` converts every
+  condition into the on-error constant BY DESIGN (pclxs rule O4, nothing
+  unwinds into C), so `%p-unsupported-value` in a callback would be silently
+  downgraded.  `xs-ref-type` now enumerates SCALAR/LVALUE and announces any
+  other reftype (REGEXP today) as "answered as a scalar reference"; the
+  contract enum has no code for it.
+- **getprotobyname/getprotobynumber read `/etc/protocols`** (lazy, four-entry
+  table only when unreadable), wantarray-sensitive, EXACT name-or-alias match
+  (`Tcp` misses), scalar context = number by name / NAME by number →
+  `fable-answers-s337.md` §4-secondary, s339.

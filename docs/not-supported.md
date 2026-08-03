@@ -1172,10 +1172,12 @@ untied aggregate.  As of s320 this is no longer silent: `p-tie` prints one
 loud line to stderr —
 
 ```
-PCL: tie on ARRAY/HASH is not implemented (task #155) — tie ignored (class Tie::StdHash)
+PCL: tie: a HASH (class Tie::StdHash) is not implemented — the container is left untied (task #155)
 ```
 
-— once per (kind, class) per process, and returns as before.  **`tie` on a
+— once per (kind, class) per process, and returns as before.  (The line comes
+from the shared `%p-announce-unsupported` helper since s339, which is why the
+class rides in the operand: that is what keeps the per-class dedup.)  **`tie` on a
 SCALAR is fully implemented** (`p-tie-proxy`: `unbox` dispatches `FETCH`,
 `box-set` dispatches `STORE`) and is unaffected.
 

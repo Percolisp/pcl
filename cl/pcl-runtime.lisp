@@ -186,7 +186,7 @@
    ;; Socket builtins
    #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
    #:p-send #:p-recv #:p-shutdown #:p-getsockname #:p-getpeername
-   #:p-getprotobyname #:p-setsockopt #:p-getsockopt
+   #:p-getprotobyname #:p-getprotobynumber #:p-setsockopt #:p-getsockopt
    #:p-truncate #:p-stat #:p-lstat
    ;; File test operators
    #:p--e #:p--d #:p--f #:p--r #:p--w #:p--x #:p--s #:p--z
@@ -9360,15 +9360,108 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl getpeername — bareword filehandle is auto-quoted."
   `(%p-getpeername-impl (%p-fh-arg ,fh)))
 
+;;; --- getprotobyname / getprotobynumber -------------------------------------
+;;; perl answers both from /etc/protocols, so PCL reads the same file (task
+;;; #222, ruled docs/fable-answers-s337.md §4-secondary).  The old four-entry
+;;; static table made "a protocol PCL never heard of" and "a protocol this host
+;;; does not have" the same undef; reading the real file removes the ambiguity
+;;; instead of announcing it.  Read once, lazily, at the first call.
+
+(defparameter +p-protocols-fallback+
+  '(("ip" ("IP") 0) ("icmp" ("ICMP") 1) ("tcp" ("TCP") 6) ("udp" ("UDP") 17))
+  "Entries used ONLY when /etc/protocols is unreadable (non-Linux, chroot).
+   Each is (NAME ALIAS-LIST NUMBER), the same shape %p-protocols-parse-line
+   produces.")
+
+(defvar *p-protocols-by-name* nil
+  "Protocol NAME or ALIAS -> (NAME ALIAS-LIST NUMBER).  NIL until first use.")
+
+(defvar *p-protocols-by-number* nil
+  "Protocol NUMBER -> (NAME ALIAS-LIST NUMBER).  NIL until first use.")
+
+(defun %p-protocols-parse-line (line)
+  "One /etc/protocols line -> (NAME ALIAS-LIST NUMBER), or NIL for a blank,
+   comment or malformed line.  Fields are NAME NUMBER [ALIAS...]; a '#' starts
+   a comment anywhere on the line."
+  (flet ((blankp (c) (or (char= c #\Space) (char= c #\Tab))))
+    (let* ((hash (position #\# line))
+           (body (if hash (subseq line 0 hash) line))
+           (len (length body))
+           (fields '())
+           (i 0))
+      (loop
+       (let ((start (position-if-not #'blankp body :start i)))
+         (unless start (return))
+         (let ((end (or (position-if #'blankp body :start start) len)))
+           (push (subseq body start end) fields)
+           (setf i end))))
+      (setf fields (nreverse fields))
+      (when (>= (length fields) 2)
+        (let ((num (parse-integer (second fields) :junk-allowed t)))
+          (when num
+            (list (first fields) (cddr fields) num)))))))
+
+(defun %p-load-protocols ()
+  "Fill both protocol tables from /etc/protocols, or from the fallback list
+   when that file is missing or unreadable."
+  (let ((by-name (make-hash-table :test 'equal))
+        (by-number (make-hash-table :test 'eql))
+        (entries '()))
+    (handler-case
+        (with-open-file (in "/etc/protocols" :direction :input
+                            :if-does-not-exist nil)
+          (when in
+            (loop for line = (read-line in nil nil)
+                  while line
+                  do (let ((e (%p-protocols-parse-line line)))
+                       (when e (push e entries))))))
+      (error () (setf entries '())))
+    (setf entries (or (nreverse entries) +p-protocols-fallback+))
+    (dolist (e entries)
+      ;; perl matches the name or ANY alias, exactly — getprotobyname("TCP")
+      ;; hits tcp's alias, getprotobyname("Tcp") misses.  For a number the
+      ;; FIRST line wins: number 0 reports "ip", not the later "hopopt".
+      (destructuring-bind (name aliases number) e
+        (unless (gethash name by-name) (setf (gethash name by-name) e))
+        (dolist (a aliases)
+          (unless (gethash a by-name) (setf (gethash a by-name) e)))
+        (unless (gethash number by-number) (setf (gethash number by-number) e))))
+    (setf *p-protocols-by-name* by-name
+          *p-protocols-by-number* by-number)))
+
+(defun %p-protocol-result (entry scalar-slot)
+  "perl's return shape: (NAME, ALIASES, NUMBER) in list context; in SCALAR
+   context \"you get the name, unless the lookup WAS by name, in which case you
+   get the other thing\" (perlfunc) — so SCALAR-SLOT is :number for
+   getprotobyname and :name for getprotobynumber.  A miss is the empty list in
+   list context, undef in scalar context."
+  (if (eq *wantarray* t)
+      (if entry
+          (make-array 3 :initial-contents
+                      (list (first entry)
+                            (format nil "~{~A~^ ~}" (second entry))
+                            (third entry))
+                      :adjustable t :fill-pointer t)
+          (make-array 0 :adjustable t :fill-pointer t))
+      (if entry
+          (ecase scalar-slot
+            (:number (third entry))
+            (:name (first entry)))
+          *p-undef*)))
+
 (defun p-getprotobyname (name)
-  "Perl getprotobyname(NAME): the protocol number.  Real code only ever asks for
-   tcp/udp/icmp; a tiny static table suffices."
-  (let ((n (string-downcase (to-string name))))
-    (cond ((string= n "tcp") 6)
-          ((string= n "udp") 17)
-          ((string= n "icmp") 1)
-          ((string= n "ip") 0)
-          (t *p-undef*))))
+  "Perl getprotobyname(NAME) — looked up in /etc/protocols by name or alias.
+   perl matches exactly: \"TCP\" hits tcp's alias, \"Tcp\" is a miss."
+  (unless *p-protocols-by-name* (%p-load-protocols))
+  (%p-protocol-result (gethash (to-string name) *p-protocols-by-name*)
+                      :number))
+
+(defun p-getprotobynumber (number)
+  "Perl getprotobynumber(NUM) — the first /etc/protocols line carrying NUM."
+  (unless *p-protocols-by-number* (%p-load-protocols))
+  (%p-protocol-result
+   (gethash (truncate (to-number number)) *p-protocols-by-number*)
+   :name))
 
 (defun %p-setsockopt-impl (fh level optname optval)
   "Perl setsockopt(SOCK, LEVEL, OPTNAME, OPTVAL).  Only SO_REUSEADDR (the one real
@@ -11192,7 +11285,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-100"
+(defparameter *pcl-cache-generation* "v2-101"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11446,12 +11539,24 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (handler-bind ((warning #'muffle-warning))
                    (load cache-path))
                  t))
-             ;; Lisp mode: just cache .lisp
-             (progn
-               (with-open-file (out cache-path
+             ;; Lisp mode: cache .lisp — via a PID-unique temp + atomic rename,
+             ;; exactly like the FASL branch above.  This is the DEFAULT branch
+             ;; and it used to write cache-path in place: SBCL's :supersede
+             ;; truncates and writes the real file (measured s339), so a second
+             ;; worker whose p-cache-valid-p saw the fresh mtime would `load` a
+             ;; HALF-WRITTEN module and die.  That is the cold-cache sweep race
+             ;; of task #215 — one non-atomic copy of a mechanism its sibling
+             ;; already got right.
+             (let* ((pid       (sb-posix:getpid))
+                    (temp-lisp (make-pathname
+                                :defaults cache-path
+                                :name (format nil "~A-~A"
+                                              (pathname-name cache-path) pid))))
+               (with-open-file (out temp-lisp
                                     :direction :output
                                     :if-exists :supersede)
                  (write-string lisp-code out))
+               (rename-file temp-lisp cache-path)
                (p-cleanup-old-cache)
                (handler-bind ((warning #'muffle-warning))
                  (load cache-path))
@@ -13765,29 +13870,24 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; unbox() intercepts reads (FETCH); box-set() intercepts writes (STORE).
 ;;; Phase 1: scalars only.  Arrays/hashes require boxing those types first.
 
-(defvar *p-tie-aggregate-warned* (make-hash-table :test 'equal)
-  "Keys already announced by %p-warn-aggregate-tie, so a tie in a loop
-   produces one line, not thousands.")
-
 (defun %p-warn-aggregate-tie (value classname)
   "Announce an aggregate tie that PCL is about to DROP (task #155).
    Silent-wrong is the failure mode CLAUDE.md rule 12 exists to stop: the
    program runs on an UNTIED container and every FETCH/STORE the test was
    written to observe simply never happens.  A die was rejected for R1 (it
    converts mid-file tie users into crashes); see docs/not-supported.md
-   'tie on an ARRAY or HASH'.  Deduped per (kind, class) per process."
-  (let* ((kind (cond ((hash-table-p value) "HASH")
-                     ((and (vectorp value) (not (stringp value))) "ARRAY")
-                     (t "non-lvalue")))
-         (name (if (stringp classname) classname (format nil "~A" classname)))
-         (key  (concatenate 'string kind "/" name)))
-    (unless (gethash key *p-tie-aggregate-warned*)
-      (setf (gethash key *p-tie-aggregate-warned*) t)
-      (format *error-output*
-              "PCL: tie on ~A is not implemented (task #155) — tie ignored (class ~A)~%"
-              kind name)
-      (force-output *error-output*)))
-  nil)
+   'tie on an ARRAY or HASH'.
+
+   EFFECT-ONLY, so it routes through the shared %p-announce-unsupported helper
+   (ruled docs/fable-answers-s337.md §5b) — the CLASS rides in the OPERAND,
+   which keeps the old per-(kind, class) dedup with no table of its own."
+  (let ((kind (cond ((hash-table-p value) "a HASH")
+                    ((and (vectorp value) (not (stringp value))) "an ARRAY")
+                    (t "a non-lvalue")))
+        (name (if (stringp classname) classname (format nil "~A" classname))))
+    (%p-announce-unsupported "tie"
+                             (format nil "~A (class ~A)" kind name)
+                             "the container is left untied (task #155)")))
 
 (defun p-tie (box classname &rest args)
   "Perl tie - bind a scalar variable to a class implementing TIESCALAR.

@@ -396,6 +396,7 @@ has known_no_of_params => (
       getsockname => 1,           # getsockname SOCK
       getpeername => 1,           # getpeername SOCK
       getprotobyname => 1,        # getprotobyname NAME
+      getprotobynumber => 1,      # getprotobynumber NUMBER
       setsockopt => 4,            # setsockopt SOCK, LEVEL, OPTNAME, OPTVAL
       getsockopt => 3,            # getsockopt SOCK, LEVEL, OPTNAME
 
@@ -457,7 +458,7 @@ has known_no_of_params => (
       # endpwent, endservent, exec, fcntl, flock, fork,
       # gethostbyname, gethostent, getlogin, getnetbyaddr,
       # getnetbyname, getnetent, getppid,
-      # getprotobynumber, getprotoent, getpwent, getpwnam, getpwuid,
+      # getprotoent, getpwent, getpwnam, getpwuid,
       # getservbyport, getservent, getsockopt, glob, ioctl, kill,
       # link, lstat, msgctl, msgget, msgrcv, msgsnd, open, pipe,
       # readlink, rename, select, semctl, semget, semop,

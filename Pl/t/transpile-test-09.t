@@ -417,4 +417,31 @@ remove_tree($d);
 print "4 removed=", (-d $d ? "no" : "yes"), "\n";
 ');
 
+# getprotobyname/getprotobynumber answer from /etc/protocols (s339, task #222).
+# They used to answer from a four-entry static table, so "a protocol PCL never
+# heard of" and "a protocol this host does not have" were the same undef.
+# The INVERSE guards are the interesting half: the lookup is EXACT (an alias
+# hits, a mis-cased name MISSES), a miss is the empty list, and the scalar
+# return is asymmetric — by-name gives the number, by-number gives the NAME.
+test_transpile("getproto*: /etc/protocols, exact match, both scalar shapes", '
+my @tcp = getprotobyname("tcp");
+print "1 list=@tcp\n";
+print "2 scalar=", scalar(getprotobyname("tcp")), "\n";
+my @alias = getprotobyname("TCP");
+print "3 alias=@alias\n";
+my @miscase = getprotobyname("Tcp");
+print "4 miscase-count=", scalar(@miscase), "\n";
+my @gre = getprotobyname("gre");
+print "5 beyond-old-table=@gre\n";
+my @miss = getprotobyname("nosuchprotocol");
+print "6 miss-count=", scalar(@miss), "\n";
+my @byn = getprotobynumber(6);
+print "7 bynum=@byn\n";
+print "8 bynum-scalar=", scalar(getprotobynumber(17)), "\n";
+my @dup = getprotobynumber(0);
+print "9 first-line-wins=@dup\n";
+my @nonum = getprotobynumber(60000);
+print "10 nonum-count=", scalar(@nonum), "\n";
+');
+
 done_testing();
