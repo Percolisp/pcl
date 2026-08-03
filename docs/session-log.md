@@ -64,6 +64,17 @@ USER note (s335): checked-in transpiled artifacts embed BUILD-MACHINE
 absolute paths (`/home/bernt/…`) in their preamble — an installation /
 packaging process must regenerate them on the target machine → task #217.
 
+Readability review (USER ask, s335): pcl-pack.lisp reads OK in the small,
+not in the large — elsif staircase filed as **#218**; then Try::Tiny /
+Data::Dump / File::Which transpiled to see idiomatic CPAN code.  Five
+shapes, catalogued in `generated-cl-ir-review.md` **§4c** with owners:
+flat one-liner expression lambdas (#78 tail — verify at close), anon-sub /
+sub-prologue boilerplate (`p-lambda`/`p-my-params` → #75), void-position
+comma-expr dual emission + empty-my no-op init (**NEW → #219**), v1-raw
+double-spacing (dies with E5.2).  File::Which is already presentable end
+to end; Data::Dump is the nesting pair's (#213/#218) worst case (39% of
+lines past column 40).
+
 Queue unchanged: **#214 (fuzzer) stays next**, then #185 → #159 → #150 →
 #152 → E4.1/E5.
 

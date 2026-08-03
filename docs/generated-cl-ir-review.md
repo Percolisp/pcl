@@ -435,3 +435,72 @@ each item are specified in **`docs/ir-spec.md`** (the translator's manual):
 
 Everything not on that list should be — and after items 2–4 above, would
 be — expressible in the `p-*` vocabulary alone.
+
+## 4c. Addendum (s335) — findings from transpiling idiomatic CPAN code
+
+pack-impl.pl is near-C Perl; the s335 review (USER ask) transpiled
+Try::Tiny, Data::Dump and File::Which to see what *idiomatic* CPAN Perl
+does to the output.  Headline: statement-level bodies read fine (File::Which
+is genuinely presentable end to end); the damage clusters in five shapes.
+Each is tagged with its owner.
+
+### 4c.1 Expression-position anon subs print as one-liners (owner: #78 tail — VERIFY on completion)
+
+`sub { $_[1] }` inside a ternary/glob-assign emits as a single 326-column
+line: the whole `(lambda (&rest %_args) (let ((@_ (p-flatten-args …))
+(*pcl-caller-wantarray* …)) (catch :p-return (block nil …))))` chain flat.
+Cause: expression-position lambdas still cross the E2 `to_flat` boundary
+(exact-flat is the parity contract there).  #78's inline_lambda re-host
+should make them structured and therefore pretty-printed — when #78
+closes, re-transpile Try::Tiny and CHECK this actually became multi-line.
+
+### 4c.2 The anon-sub calling-convention boilerplate (owner: #75 — add `p-lambda`)
+
+Every anon sub — including a `sort { lc($a) cmp lc($b) }` comparator —
+carries `%_args`/`p-flatten-args`/`*pcl-caller-wantarray*`/`catch
+:p-return`/`block nil` in full.  ~110 chars of wrapper around a body that
+is often one form.  This is the single biggest vocabulary win available:
+a `p-lambda (params) body` macro hides the whole convention.  Same for the
+sub prologue: `(p-args-body (block nil (let ((*wantarray* :void)) …` plus
+`(let ((*wantarray* nil)) (p-list-= (vector $x @rest) @_))` for
+`my ($x, @rest) = @_;` → one `p-my-params` form.  (§3.5's context macros
+are the same family; this names the two highest-frequency instances.)
+
+### 4c.3 Statement-position comma expressions emit BOTH context versions (NEW — task #219)
+
+`$n++, last if $cond;` lowers to `(if *wantarray* (vector …both ops…)
+(progn …both ops…))` — the same two side-effects duplicated under a
+RUNTIME context test, in a position whose context is statically void.
+Reader cost (every such statement doubles) and a pointless runtime branch.
+Fix in the v2 lowering: statement position is void, emit the progn only.
+
+### 4c.4 Empty `my` lists emit a no-op assignment (NEW — task #219)
+
+`my ($catch, @finally);` → the let-binding (correct) PLUS
+`(let ((*wantarray* nil)) (p-list-= (vector $catch @finally) (vector)))` —
+an assignment of nothing to fresh boxes.  Drop the init when the RHS list
+is empty.
+
+### 4c.5 v1-raw regions are double-spaced and double-echoed (owner: E5.2/#78 deletion; do not spot-fix)
+
+BEGIN bodies (still v1-shaped) print one blank line between every line,
+echo the same source twice (`;; unless (…) { … }` then `;; unless (…)`),
+and leave `nil` else-arms and bare `)` on their own lines.  Embedded raws
+also reset indentation to column 0 mid-tree (the pcl-pack.lisp `;; return`
+finding, same family).  All of it dies with the raw path — record, don't
+polish v1.
+
+### Measured (s335, pl2cl at gen v2-100)
+
+| file | src lines | out lines | indent>40 cols | leading-ws bytes |
+|---|---|---|---|---|
+| File::Which | 398 | 218 | 0% | 21% |
+| Try::Tiny | 820 | 321 | 0% | 19% |
+| Data::Dump | 730 | 1132 | 39% | 57% |
+
+Data::Dump's 39%/57% is the #213/#218 nesting pair (long subs, many `my`s,
+deep elsif chains); the other two show the baseline is already close once
+nesting is fixed.  Also visible everywhere, already catalogued: §3.5
+context binds, §3.4/§4b.1 mixed assignment spellings (`p-my-=` /
+`p-scalar-=` / `p-list-=` / `setf` / `box-set` on one screen), duplicate
+`defvar $a/$b` + qualified/unqualified `$VERSION` pairs (#66 family).
