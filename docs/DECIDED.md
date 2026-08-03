@@ -796,3 +796,17 @@ not-supported.md → only then probe.*
   baseline row was taken from a memory-pressured run (the s337 ref.t
   184-vs-186 oom measurement).  **Rule that follows: a baseline blessed
   without a `taken-at` stamp cannot be attributed later, only re-measured.**
+- **`our $x OP= …` is a legal `our` declaration** — the initialiser may use any
+  assignment operator (perl's Exporter.pm opens `our $Verbose ||= 0;`); the
+  gate asks `TokenUtils::is_assign_op` (the #140 one-true set), s341b.
+- **The rule-2 live-v1 audit has two traps** (s341b): a `git worktree` at an
+  older commit SHARES `~/.pcl-cache`, so its entries pollute a `pipeline=v1`
+  grep — filter on the current `gen=`; and `PCL_V2_VERBOSE=1` goes to stderr,
+  which a sweep folds into TAP, so the eval-mode half needs a file
+  side-channel, not a global env var → `session-log.md` s341b, task #225.
+- **The v1 fallback is MASKING a v2 defect in Math::BigInt** (#224, s341b): the
+  v2-compiled module recurses (tie `STORE` → `round_mode` → symbolic-ref write
+  → `STORE`) until the binding stack dies, costing pack.t everything (~70 s →
+  not finishing at 600 s).  The cond-my poison narrowing that would move it to
+  v2 is correct, probe-verified, and parked on `wip/s341-condmy-narrowing`; it
+  lands WITH #224, never before.

@@ -6651,9 +6651,15 @@ sub _lower_our_decl {
     @names = map  { $_->content }
              grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
   }
+  # The initialiser may use ANY assignment operator, not just `=`: perl's
+  # `our $Verbose ||= 0;` (Exporter.pm) declares the package cell and then
+  # runs a compound assignment on it.  Ask the #140 one-true set rather than
+  # matching `=` by hand — the tail below lowers `NAMES OP RHS` through the
+  # ordinary expression machinery either way.
   my $bad = !@names
     || (grep { !/^[\$\@\%]\w+$/ } @names)
-    || (@k > 2 && !($k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='));
+    || (@k > 2 && !($k[2]->isa('PPI::Token::Operator')
+                    && Pl::PExpr::TokenUtils::is_assign_op($k[2]->content)));
   die "Parser2 TODO: unsupported our declaration: " . $stmt->content if $bad;
   for my $n (@names) {
     # A defvar of a let-bound name would proclaim it special and poison the

@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 341b (2026-08-04, Opus) — E4.1 pre-work: the rule-2 audit found two live v1 fallbacks, one shipped, one blocked
+
+Guardrail §5a.2 says the live v1 share must be ZERO before the gate flip, and
+that **every `pipeline=v1` marker found is pre-work, never an acceptable loss.**
+Doing that audit is what this half-session bought.
+
+**The audit.**  File-by-file with `PCL_V2_VERBOSE=1`: `perl-tests/*.t` (111
+files) → **0** fall back; `lib/**.pm` (21) → **0**.  Then a cold-cache full
+sweep plus `grep -ar pipeline=v1 ~/.pcl-cache` → **exactly two** live hits, both
+perl CORE modules the sweep loads at runtime, invisible to `v2-census.pl`:
+
+- **`Exporter.pm`** — `our $Verbose ||= 0;`.  The `our`-decl gate accepted `=`
+  and nothing else, so one line routed the whole file to v1.  **FIXED**: the
+  gate now asks `Pl::PExpr::TokenUtils::is_assign_op` — the #140 one-true set —
+  instead of matching `=` by hand.  Emission across the corpus is **identical
+  to HEAD (111 files)**; only files with an `our $x OP= …` change at all.
+- **`Math/BigInt.pm`** — `poisoned condition-my $i (string eval)`.  Cause: the
+  poison test counted `foreach my $i (…)` uses as evidence that a GLOBAL `$i`
+  is live.  BigInt has five C-for `my $i` loops and four `for my $i` loops, so
+  the name looked poisoned, and a poisoned construct holding a string eval
+  gates.  The narrowing (a foreach-my BINDS the name → its uses are lexical) is
+  written, probe-verified against perl *including the case it could break*, and
+  its only corpus effect is sort.t (`$i__cond__0` → `$i`).
+
+**It is parked on `wip/s341-condmy-narrowing` (d0e8247), NOT on main** — and
+that is the finding.  Moving BigInt off v1 exposes a **pre-existing v2 defect
+the fallback had been masking**: the v2-compiled module recurses until SBCL's
+binding stack is exhausted.  `tie $rnd_mode` → `STORE` → `round_mode` →
+`${"${class}::round_mode"} = $m` → re-enters `STORE`.  Measured cost:
+**pack.t goes from ~70 s to not finishing at a 600 s cap** (gate LOST −5636;
+the #215 serial re-run says "NOT load noise").  Filed as **#224**, an E4.1
+blocker; **#225** carries the rest of the audit (CPAN board half, eval-mode
+fallbacks).
+
+Two things worth keeping from the mechanics: a `git worktree` at an older
+commit **shares `~/.pcl-cache`**, so its entries contaminate a marker grep —
+filter on the current `gen=` string.  And `PCL_V2_VERBOSE=1` writes to stderr,
+which a sweep folds into TAP, so the eval-mode half of the audit needs a file
+side-channel rather than a global env var.
+
+Gate PASS 131 files / **4599** (+4 inverse-guarded rows in parser2-02.t);
+corpus-diff identical; gen v2-101 → **v2-102** with both checked-in artifacts
+regenerated (marker-line only).
+
+---
+
 ## Session 341 (2026-08-04, Opus) — #223 baseline hygiene: the `+8` was a stale bless, measured
 
 First item of the session per the s340 queue.  Both baselines are clean again
