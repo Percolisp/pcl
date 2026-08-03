@@ -2398,13 +2398,38 @@ sub _interp_fixer {
     };
 }
 
+# Could this token's text possibly BE interpolating text?  A cheap superset of
+# the exact class list in _fix_interp_token (four isa calls, no tree walk), so
+# a caller can drop the ~95% of tokens that are whitespace/operators/words
+# before doing anything expensive to them.
+sub _interp_token_candidate {
+  my ($t) = @_;
+  return $t->isa('PPI::Token::Quote')
+      || $t->isa('PPI::Token::QuoteLike')
+      || $t->isa('PPI::Token::Regexp')
+      || $t->isa('PPI::Token::HereDoc');
+}
+
 # Apply an _interp_fixer closure to ONE token, iff it is interpolating text
 # (double/qq/backtick/qx/regex/readline, or an interpolating heredoc's body).
+#
+# $skip (optional, same predicate as the symbol loop's) is consulted ONLY once
+# the token is known to be a real rewrite candidate — the fixer has already
+# matched the name.  That ordering is load-bearing for compile time, not just
+# tidiness: $skip is position-based and walks the parent chain and its
+# preceding siblings, so asking it about every token in the file is quadratic
+# (#184 — it cost pack.t 5.8 s → 74 s of transpile when s316b added it).
 sub _fix_interp_token {
-  my ($t, $fix) = @_;
+  my ($t, $fix, $skip) = @_;
   if ($t->isa('PPI::Token::HereDoc')) {
     return if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;  # non-interpolating
-    $fix->($_) for @{ $t->{_heredoc} || [] };
+    my $lines = $t->{_heredoc} || [];
+    my @new = @$lines;                       # rewrite a copy, so $skip can veto
+    my $hit = 0;
+    $hit += ($fix->($_) || 0) for @new;
+    return unless $hit;
+    return if $skip && $skip->($t);
+    @$lines = @new;
   } elsif ($t->isa('PPI::Token::Quote::Double')
         || $t->isa('PPI::Token::Quote::Interpolate')
         || $t->isa('PPI::Token::QuoteLike::Backtick')
@@ -2414,7 +2439,9 @@ sub _fix_interp_token {
         || $t->isa('PPI::Token::Regexp::Match')
         || $t->isa('PPI::Token::Regexp::Substitute')) {
     my $c = $t->content;
-    $t->set_content($c) if $fix->($c);
+    return unless $fix->($c);
+    return if $skip && $skip->($t);
+    $t->set_content($c);
   }
   return;
 }
@@ -2434,7 +2461,6 @@ sub _rewrite_var_uses {
       $s->set_content($c);
     }
     for my $t (@{ $stmt->find('PPI::Token') || [] }) {
-      next if $within && !_elem_within($t, $within);
       # Interpolated text obeys the SAME scoping as a symbol use: a string
       # inside a shadow's scope names the shadow, not the variable being
       # renamed (s316).  $skip is position-based (_ref_shadowed climbs the
@@ -2442,8 +2468,13 @@ sub _rewrite_var_uses {
       # so the one predicate serves both loops — before this, the interp
       # rewrite was scope-blind, which is why _promote_captured had to
       # refuse the whole promotion whenever an interpolated use met a shadow.
-      next if $skip && $skip->($t);
-      _fix_interp_token($t, $interp_fix);
+      # It is handed DOWN rather than applied here so that it is asked only
+      # about tokens the fixer actually matched: the symbol loop above filters
+      # on `eq $canon` before calling it, and this loop needs the same
+      # discipline — a per-token $skip call is a tree walk per token (#184).
+      next unless _interp_token_candidate($t);
+      next if $within && !_elem_within($t, $within);
+      _fix_interp_token($t, $interp_fix, $skip);
     }
     next unless $sigil eq '@';
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {

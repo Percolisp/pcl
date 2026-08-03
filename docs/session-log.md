@@ -4,6 +4,87 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 334 (2026-08-03, Opus) — #184: pack.t's lost minute was a compile-time regression, and the artifact was innocent
+
+Task #184 said "pack.t went ~90 s → ~156 s, suspect the `cl/pcl-pack.lisp`
+regeneration".  **Both halves of that premise were wrong**, and the measurement
+that showed it took four numbers.
+
+### Split the file's wall time before bisecting anything
+
+`--jobs 1` on pack.t is two phases with a shared bill:
+
+| phase | HEAD | after |
+|---|---|---|
+| transpile (`pl2cl`, Pl/ only) | **78.5 s** | **7.0 s** |
+| run (SBCL: runtime + generated CL) | 54.7 s | 54.7 s |
+| sweep wall | ~156 s | **68.7 s** |
+
+The suspect artifact accounts for **3.7 s** of the run, total: loading
+`cl/pcl-pack.lisp` costs 4.9 s against 1.2 s for the runtime alone, once per
+process, and it is `load`ed lazily on the first pack/unpack.  s316b had already
+A/B'd old vs new artifact (147 s vs 140 s — the NEW one was faster) and the
+session log said so; the task filed the suspicion anyway.
+
+### The regression is in the COMPILER, and it is one line
+
+Transpile time across the s315d→s316b window, same input file (`perl-tests/pack.t`
+is unchanged since), same emitted bytes:
+
+```
+810df31 (s315d, #116)   5.74 s     ← 206428 bytes, gen v2-69
+1ac4718 (s316,  #124)   5.80 s     ← 206428 bytes, gen v2-70
+797a1a9 (s316b, #125)  73.76 s     ← 206428 bytes, gen v2-71   ← 12.7x, IDENTICAL OUTPUT
+11b1ab4 (s316b, regen) 75.56 s
+HEAD                   78.49 s
+```
+
+#125's de-gate added one line to `_rewrite_var_uses` — `next if $skip && $skip->($t)`
+inside the loop over **every `PPI::Token` in every statement**.  The predicate is
+`_symbol_is_declarator` + `_ref_shadowed`, and `_ref_shadowed` climbs the parent
+chain and scans each parent's preceding siblings: its cost is proportional to
+the FILE, not to the token.  Per token × per promoted lexical = quadratic.  The
+symbol loop three lines above had always filtered (`$s->symbol eq $canon`)
+BEFORE asking; the interp loop did not.
+
+**Fix (CLAUDE.md 11 — normalise into the sibling's discipline, don't branch
+beside it):** hand `$skip` DOWN to `_fix_interp_token`, which consults it only
+after the fixer has actually matched the name, plus a cheap class pre-filter
+(`_interp_token_candidate`, four `isa` calls) so the ~95% of tokens that are
+whitespace/operators/words never reach `_elem_within` either.  The heredoc arm
+rewrites a copy of the body lines so the veto can still refuse.  Semantics are
+unchanged: the predicate's ANSWER is consulted at exactly the sites where a
+rewrite happens.
+
+**Verification:** `tools/corpus-diff.pl` = **emission identical to HEAD across
+all 111 files**; gate **130 files / 4572 PASS** (4567 + the 5 new guard rows);
+pack.t sweep 5636 pass / 89 fail, `sweep-diff` **0 new / 0 fixed** vs its 58
+blessed baseline keys.  Six other large corpus files (signatures/sprintf2/sort/
+tr/magic/ref) are unchanged within noise — pack.t was the outlier, because the
+cost needs a promoted lexical AND a big token count in the same file.
+
+**Consequence for the gate:** pack.t at 68.7 s is now under the sweep's 90 s
+default timeout, so the #176 TIMEOUT-retry stops being load-bearing for it (it
+stays as the backstop for contention).
+
+**Guard:** `Pl/t/parser2-02.t` +5 rows — count the predicate's CALLS, not the
+seconds: the padded file asks it **2** times, the per-token version asked **610**
+on the same input, and that number grows with the padding.  The three s316
+scoping verdicts are re-asserted on the padded file so the speed-up cannot be
+bought with scoping.
+
+**Filed while measuring (#213, the user caught the tell):** the `Deep recursion
+on subroutine "Pl::Parser2::_lower_block"` warnings in every pack.t transpile
+are real.  Each file-level `my` nests the segment remainder in another `let`, so
+lowering recurses once per statement and indentation grows 2 columns per
+statement: at 100 trivial `my` statements the emitted CL is 48 KB of which
+**45 KB (94%) is leading whitespace**, at 200 it is 203 KB and 5 s.  Output and
+time are both ~quadratic in nesting depth, and the existing "oversized-extent
+flattening" escape keys on SOURCE bytes, so this shape never trips it.  Options
+in the task; asked in `docs/opus5-review-requests-s334.md`.
+
+---
+
 ## Session 333 (2026-08-03, Opus) — #163: a reference's type and address are the REFERENT's, and no new box slot was needed
 
 Ran #163 from s331's storage-path diagnosis, in the ruled order: **find the

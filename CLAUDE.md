@@ -357,12 +357,17 @@ func => -12         # 1 param before list
   **pack.t and the TIMEOUT retry (#176, s322).**  A file that TIMEOUTs
   contributes NO rows, so `sweep-diff.pl` can only report its baseline
   failures as *unverified* — a regression inside a timing-out file is
-  invisible, and the headline "0 new" says nothing about it.  pack.t is
-  merely SLOWER than the timeout (~166 s), not hung, so the sweep now
+  invisible, and the headline "0 new" says nothing about it.  pack.t was
+  merely SLOWER than the timeout (~166 s at s322), not hung, so the sweep now
   **retries a TIMEOUT once at 3× the timeout, at the end of the queue**
   (`--no-retry` disables); no operator has to remember `--timeout 400`.
   Measured s322: pack.t completes at 5636 pass / 89 fail and its failures are
   **identical to the blessed baseline** — 0 new, 0 fixed.
+  **s334 (#184): pack.t is now ~69 s — under the 90 s default.**  Its minute
+  was COMPILE time, not run time (78.5 s transpile → 7.0 s; the run is 54.7 s
+  either way), and the cause was a per-token tree-walking predicate in
+  `_rewrite_var_uses`, not the regenerated artifact the task suspected.  The
+  retry stays as the backstop for contention.
   **CORRECTION (s322): the earlier claim here that "pack.t has NO rows in the
   blessed baseline" was FALSE** — `docs/fail-baseline.tsv` has always carried
   its 58 pack.t rows.  The claim came from `grep`ping that file, which

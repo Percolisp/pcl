@@ -102,6 +102,13 @@ not-supported.md → only then probe.*
   parser; core semantics → runtime → CLAUDE.md 9a.
 - **Reuse, don't duplicate**: find the sibling mechanism; same logic in two
   places = hard stop → CLAUDE.md 11.
+- **A tree-walking predicate is asked about CANDIDATES, never about every
+  node**: `_ref_shadowed`-class predicates (climb parents + scan siblings)
+  cost O(file) per call, so a per-token call is quadratic — filter first
+  (`eq $canon`, "the fixer matched the name"), then ask.  s316b's one
+  `$skip->($t)` per `PPI::Token` cost pack.t 5.8 s → 74 s of transpile for
+  BYTE-IDENTICAL output → task #184, session-log s334, guard
+  `Pl/t/parser2-02.t` (counts the calls, not the seconds).
 - **Never simplify a failing test**; skip only via the registry →
   CLAUDE.md 5, `test-skip-registry.md`.
 - **Checked-in transpiled artifacts** (`cl/pcl-pack.lisp`, `cl/pcl-mro.lisp`):

@@ -444,4 +444,46 @@ EOF
        'interpolated use inside the shadow keeps the original name');
 }
 
+# ---- #184 (s334): that shadow predicate is asked only about REWRITE
+# CANDIDATES, never about every token ----
+# The predicate above walks the parent chain and each parent's preceding
+# siblings, so its cost is proportional to the file, not to the token.  s316b
+# called it once per PPI::Token, which made the cost quadratic: pack.t's
+# transpile went 5.8 s → 74 s for BYTE-IDENTICAL output.  The symbol loop had
+# always filtered (`eq $canon`) before asking; the interp loop now does the
+# same by handing the predicate down to _fix_interp_token, which consults it
+# only after the fixer has matched the name.
+#
+# Guard the invariant, not the seconds: count the calls with the same file
+# padded by unrelated statements.  Two calls here (one interpolated use, one
+# symbol use); the per-token version made 610 on this input, and that number
+# grows with the padding.
+{
+  my $noise = join('', map { "my \$q$_ = $_ + 1; \$q$_ = \$q$_ * 2;\n" } 1..30);
+  my $code = qq{sub tempfile { "t1" }
+my \$tmpfile = tempfile();
+$noise
+sub fresh { print "outer=\$tmpfile\\n"; }
+sub other { my \$tmpfile = tempfile(); print "inner=\$tmpfile\\n"; }
+fresh(); other();};
+  my $calls = 0;
+  my $cl;
+  {
+    no warnings 'redefine';
+    my $orig = \&Pl::Parser2::_ref_shadowed;
+    local *Pl::Parser2::_ref_shadowed = sub { $calls++; $orig->(@_) };
+    $cl = eval { Pl::Parser2->parse_code($code) };
+  }
+  is($@, '', '#184: padded capture-promotion file still parses');
+  cmp_ok($calls, '<=', 20,
+         "#184: shadow predicate asked $calls times, not once per token");
+  # …and the padding did not change what the rewrite DID (same three verdicts
+  # as the unpadded case above) — the speed-up must not cost the scoping.
+  like($cl, qr/\(defvar \$tmpfile__file__\d+ /, '#184: promotion still happens');
+  like($cl, qr/"outer="\s*\$tmpfile__file__\d+/,
+       '#184: outer interpolated use still takes the cell');
+  like($cl, qr/"inner="\s*\$tmpfile\b/,
+       '#184: shadowed interpolated use still keeps the original name');
+}
+
 done_testing();
