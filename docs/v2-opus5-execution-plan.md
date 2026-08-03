@@ -229,7 +229,21 @@ release checks surface divergences, triage those first, per
 ## 5. W2 — E4.1 (R1 shipped 2026-08-02 → authorized; 1–2 sessions)
 
 **Read §5a (the s340 guardrails) before starting.**  Re-scoped in the plan
-(E4 section) and review §4.  Order:
+(E4 section) and review §4.
+
+> **BLOCKED as of s341: do step 0 first.**  The §5a.2 audit ran (s341b,
+> `11d1e08`) and found exactly two live `pipeline=v1` markers.  One is fixed
+> (Exporter.pm, `our $x OP=`).  The other, Math/BigInt.pm, cannot be moved to
+> v2 until **task #224** is fixed: the v2-compiled module recurses until the
+> binding stack dies (tie `STORE` → `round_mode` → symbolic-ref write →
+> `STORE`), taking pack.t from ~70 s to not finishing at a 600 s cap.  The
+> narrowing that de-gates BigInt is written and probe-verified on branch
+> `wip/s341-condmy-narrowing` (`d0e8247`) — re-apply it *after* #224, never
+> before.  **Task #225** carries the audit's unfinished halves (CPAN board
+> marker grep, eval-mode fallbacks); §5a.2 is not satisfied until both are
+> done and the live v1 count is 0.
+
+Order:
 1. Port bundle mode off `Pl::Parser->parse_file` (`pl2cl:283`) — the one
    v1-only bypass.
 2. Flip gates to hard errors: remove `parse_with_fallback` (`pl2cl:51`),
