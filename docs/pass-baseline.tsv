@@ -1,3 +1,4 @@
+# taken-at: 6e2c9fb 2026-08-04
 aassign.t	OK	169	19	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -74,17 +75,17 @@ pos.t	OK	16	14	30
 postfixderef.t	PARTIAL	96	25	128
 pow.t	OK	268	0	268
 print.t	OK	2	1	3
-push.t	OK	31	0	32
+push.t	OK	32	0	32
 qq.t	OK	30	0	30
 qr.t	OK	23	14	37
 quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
 readline.t	PARTIAL	23	5	36
 recurse.t	OK	27	1	28
-ref.t	PARTIAL	184	20	245
+ref.t	PARTIAL	186	18	245
 reset.t	PARTIAL	41	0	45
 reverse.t	OK	25	0	25
-scalar.t	OK	82	34	128
+scalar.t	OK	84	32	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
 sort.t	OK	203	1	205
@@ -92,15 +93,15 @@ splice.t	OK	34	0	34
 split.t	OK	184	9	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1619	23	1678
-state.t	PARTIAL	157	0	166
+state.t	PARTIAL	158	0	166
 study.t	OK	43	0	43
 sub.t	OK	62	2	65
 substr.t	OK	374	8	397
 time.t	OK	72	0	72
-tr.t	PARTIAL	240	4	317
+tr.t	PARTIAL	241	3	317
 translate.t	OK	257	0	257
 undef.t	OK	30	0	35
-unshift.t	OK	18	0	19
+unshift.t	OK	19	0	19
 vec.t	OK	76	0	78
 wantarray.t	OK	27	1	28
 warn.t	OK	11	0	11

@@ -143,6 +143,15 @@ if ($mode eq 'save-status') {
     my $st = load_status($cur);
     die "no _status.tsv under $cur (a live .faillog directory is required)\n" unless %$st;
     open my $out, '>', $dest or die "open $dest: $!\n";
+    # Provenance stamp (task #223, ruled fable-answers-s339.md §5b): a generated
+    # baseline must say WHICH tree it was taken from, so a later "+8 drift" can be
+    # bisected instead of guessed at.  Readers skip `#` lines (read_status_file,
+    # load).  A missing/failing git is not fatal — the stamp degrades to unknown.
+    my $sha = `git rev-parse --short HEAD 2>/dev/null`;
+    chomp $sha;
+    $sha = 'unknown' unless length $sha;
+    my @t = localtime;
+    printf $out "# taken-at: %s %04d-%02d-%02d\n", $sha, $t[5]+1900, $t[4]+1, $t[3];
     my $total = 0;
     for my $f (sort keys %$st) {
         my $r = $st->{$f};

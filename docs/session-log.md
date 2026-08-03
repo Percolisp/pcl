@@ -4,6 +4,44 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 341 (2026-08-04, Opus) — #223 baseline hygiene: the `+8` was a stale bless, measured
+
+First item of the session per the s340 queue.  Both baselines are clean again
+and the gate reads **0 new / 0 fixed / 0 LOST** on a COLD-cache full sweep
+(18498 passing / 915 failing, 64 fully passing, min MemAvailable 6.0 GB).
+
+**The finding: the `+8` was never drift.**  The ruling asked for the +8 to be
+attributed before `save-status` ran.  Log archaeology could not do it (the
+arithmetic 18469 → 18477 → 18498 vs a baseline of 18490 fits several stories),
+so it was measured instead: a worktree at **`73d43ac`** — the commit that
+installed `docs/pass-baseline.tsv` — running the six drifting files gives the
+**current** numbers, not the baseline's.  The blessed `_status.tsv` was
+therefore taken from a run OLDER than its own commit.  Per-file:
+
+- **push.t +1, unshift.t +1** → #159 read-only arrays.  Measured at
+  `1b0a7e4~1`: 31 (+1 skip) and 18 (+1 skip); the row is SKIP before the fix
+  and PASS after.  Both files were already at 32/19 by `73d43ac`.
+- **scalar.t +2** → the s333 `scalar()`-never-dereferences fix; these are the
+  two rows s333 left in the fail baseline.  They are exactly what `sweep-diff`
+  reported as FIXED, and are now **edited out** (685 → 683 rows), never
+  re-blessed from a run.
+- **ref.t +2, state.t +1, tr.t +1** → **no code cause.**  All three are
+  PARTIAL (abort) files, and all three gave the higher count at every commit
+  tested (`c4a128e`, `73d43ac`, HEAD).  The baseline rows are the low side of
+  the s337 measurement — the run whose ref.t read 184 was the one the kernel
+  oom-killer was active during (s337 measured 186 on the clean re-run).
+
+No file went DOWN, so `save-status` ran and `docs/pass-baseline.tsv` is
+re-blessed at 18498 from this cold gate-green run.
+
+**`# taken-at: <sha> <date>` shipped** in `sweep-diff.pl save-status` (both
+readers already skip `#` lines, so no reader change was needed).  The rule it
+buys, recorded in `docs/DECIDED.md`: *a baseline blessed without a taken-at
+stamp cannot be attributed later, only re-measured* — which is what this
+session had to do.
+
+---
+
 ## Session 340 (2026-08-03, Fable) — review of s339: both commits approved, all asks ruled
 
 Review of `2fff5c4` (task #222) + `4c5e85b` (artifact regen).  **Approved as

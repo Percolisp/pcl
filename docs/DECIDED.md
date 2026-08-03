@@ -784,3 +784,15 @@ not-supported.md → only then probe.*
   delta attributed, no file down, an unexplained delta is a finding.
   `save-status` stamps `# taken-at: <sha> <date>`; readers skip `#` lines →
   `fable-answers-s339.md` §5, s340.
+- **The `+8` was a STALE BLESS, not drift (#223 executed s341).**  Measured,
+  not inferred: at `73d43ac` — the commit that installed
+  `docs/pass-baseline.tsv` — the six drifting files already produced the
+  CURRENT numbers, so the blessed `_status.tsv` came from a run older than its
+  own commit.  Attribution: push.t/unshift.t +1 each = **#159** read-only
+  arrays (measured across `1b0a7e4`, where the row goes SKIP→PASS); scalar.t
+  +2 = the **s333** `scalar()` fix (the two rows s333 left un-edited);
+  ref.t +2 / state.t +1 / tr.t +1 = **no code cause** — all three are PARTIAL
+  (abort) files that gave the higher count at every commit tested, i.e. the
+  baseline row was taken from a memory-pressured run (the s337 ref.t
+  184-vs-186 oom measurement).  **Rule that follows: a baseline blessed
+  without a `taken-at` stamp cannot be attributed later, only re-measured.**

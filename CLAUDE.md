@@ -348,11 +348,18 @@ func => -12         # 1 param before list
   run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
   is found it prints `LOST: NOT CHECKED` rather than nothing.
 - Full `perl-tests/` sweep: **683 blessed fails** in `docs/fail-baseline.tsv`,
-  **66 files fully passing**, 18469 passing / 918 failing across 108 files
-  (re-measured s330; `sweep-diff.pl diff
-  docs/fail-baseline.tsv .faillog` = **0 new / 0 fixed**, plus 2 rows the tool
+  **64 files fully passing**, 18498 passing / 915 failing across 108 files
+  (re-measured s341 on a COLD cache; `sweep-diff.pl diff
+  docs/fail-baseline.tsv .faillog` = **0 new / 0 fixed / 0 LOST**, plus 2 rows
+  the tool
   itself flags UNSTABLE — new fails ABOVE the abort point of postfixderef.t and
   ref.t, both already PARTIAL, so they are crash-file noise, not regressions.
+  **Both baselines were re-hygiened in s341 (#223)**: the two now-passing
+  scalar.t rows edited out of the fail baseline, and `docs/pass-baseline.tsv`
+  re-blessed from that run after a per-file audit — it had been blessed at
+  s337b from a run OLDER than its own commit, which is why every later session
+  read a phantom `+8`.  `save-status` now stamps `# taken-at: <sha> <date>` so
+  a stale bless is visible instead of inferred.
   689 → 683 in s330: the `scalar()`-never-dereferences fix made 7 rows pass
   (removed by EDITING them out, never by re-blessing from a run, which would
   silently absorb anything else that moved) and exposed 1 row that had been
