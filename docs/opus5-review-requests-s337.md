@@ -120,3 +120,47 @@ Secondary, much smaller: `p-getprotobyname` answers from a **four-entry static
 table** (tcp/udp/icmp/ip) and returns undef for anything else, where perl reads
 `/etc/protocols`.  Unknown-protocol → undef is indistinguishable from a real
 miss.  Announce, implement properly, or leave?
+
+---
+
+## 5. Other things that surfaced — no decision needed unless you want one
+
+Not asks; things I noticed while in these files and would rather you saw than
+found later.
+
+**(a) PCL has NO `use warnings` model at all.**  Grepped `Pl/` and `cl/`:
+nothing tracks warnings state, lexically or globally.  §4 hit this from one
+direction (a default-off warning cannot be emitted correctly), but it is
+broader — every perl diagnostic PCL might want to add has to be either
+unconditional or absent, and the unconditional choice is wrong for anything in
+a default-off category.  Whether that deserves a design item of its own, or
+stays a documented non-goal, is a call I did not want to make inside a
+dispatch-audit task.
+
+**(b) `%p-warn-aggregate-tie` (#155) was left OUTSIDE the new shared helper.**
+The #152 ruling said one announce helper, and I folded the SvREADONLY one in —
+but the tie warning has its own dedup table and its own message shape
+("…tie ignored (class X)").  It is a genuine EFFECT-ONLY announce and would fit
+`%p-announce-unsupported "tie" "an ARRAY/HASH"`.  I did not touch it because
+its text is quoted in `not-supported.md` and the #155 task, and rewording a
+message during an audit felt like the wrong moment.  Fold it in, or leave the
+two?
+
+**(c) The sweep's LOST detector caught a real thing, but the cheap fix is
+upstream of it** (#215, updated with the measurement): warming
+`~/.pcl-cache` with one file before fanning out — or a per-worker cache dir —
+removes the race at source, rather than detecting it after the fact and
+re-running serially.  Worth pulling in front of the reporting half?
+
+**(d) `docs/perl-suite-run.tsv` is still pre-#150-part-1** — it has no rows for
+the 91 files that became visible when the copied-file skip was dropped, so the
+#25 release signal is incomplete-not-wrong.  A full re-run grows it by ~91
+rows.  Not started; it wants a foreground per-dir run (the background cap kills
+`--all` before the summary).
+
+**(e) #150's near-green list is still unmined.**  From the s318 data, and
+minus the three that #159 just cleared: `op/args.t`, `op/context.t`,
+`op/crypt.t`, `op/exists_sub.t`, `op/print.t`, `op/wantarray.t`, `op/time.t`
+are each **1 row** off perl, and `op/delete.t` / `op/flip.t` / `op/or.t` are 3
+(flip.t is probably #141, or.t is #165).  Each is likely one small family.
+Good "between big items" material if you want a low-risk queue filler.
