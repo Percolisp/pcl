@@ -35,6 +35,17 @@ hand to Fable** for #153/E5.0 steps 1–2, Opus steps 3–5 after.  Fillers:
 near-green queue + utf8::encode probe (not started); suite-run regrow waits
 on a user foreground day; CPAN board re-run on cadence (#208 rows waiting).
 
+**s340b (same session, user ask): binding guardrails for the E4.1 window
+written into `docs/v2-opus5-execution-plan.md` §5a**, and the doc's stale
+gates refreshed (U1 marked DONE — R1 shipped 2026-08-02; the hard stop moved
+from "don't start E4.1" to "STOP after E4.1"; gate count 123→131; test-file
+rule -07→-10; W2.5's #150/#152 struck as done).  The two non-obvious
+guardrails came from reading `parse_with_fallback` during the review: an
+eval-string Parser2 TODO currently lands in v1 SILENTLY (and `eval $str` is
+a hard requirement — the flip must be preceded by a marker/verbose audit
+proving the live v1 share is zero), and `--lenient-ppi` only ever worked via
+the v1 route (it must die loudly after the flip, never become a no-op flag).
+
 ## Session 339 (2026-08-03, Opus) — task #222 small-items batch; the cold-cache race had a CAUSE
 
 Four ruled items from `docs/fable-answers-s337.md`, plus the cause behind the

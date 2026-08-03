@@ -26,8 +26,17 @@ baseline.**
   approves (e.g. the #149 error-text category) — those are pre-authorized.
 - Anything that adds complexity or slows generated code: flag it in the
   session summary (user directive s308).
-- Starting E4.1 (§5) before the user confirms R1 shipped.
+- ~~Starting E4.1 (§5) before the user confirms R1 shipped.~~ **R1 SHIPPED
+  (user, 2026-08-02, tag `R1`) — E4.1 is authorized.  The hard stop moved
+  to the OTHER end: after E4.1's step 4 verification, STOP.**  #153/E5.0
+  steps 1–2 are Fable-led — do not start them, do not "warm up" E5, and do
+  not touch PExpr's `$end_pars` term region for any reason
+  (`docs/pexpr-term-parsing-review.md`; the #142 history).  Time left in a
+  session → §5a rule 8's filler list.
 - `eval $str` must always work (hard requirement) — nothing may gate it.
+  **E4.1-specific**: today an eval-string Parser2 TODO silently lands in
+  v1; removing the fallback turns it into a user-visible `$@`.  See §5a
+  rule 3 before touching `parse_with_fallback`.
 - Before writing ANY question up as open: run the CLAUDE.md lookup order
   (grep `docs/DECIDED.md`, then `docs/not-supported.md`).  Most questions
   are settled; the s316v review doc's §7 documents what re-deriving them
@@ -38,7 +47,7 @@ baseline.**
 
 | id | decision | state |
 |---|---|---|
-| U1 | R1 has shipped (gates E4.1 and all post-R1 work) | user call, expected ~2026-08-03 |
+| U1 | R1 has shipped (gates E4.1 and all post-R1 work) | **DONE — user called R1 2026-08-02, tag `R1`** |
 | U2 | `printf %n` (#143): implement vs bless | user; Fable recommends bless |
 | U3 | deterministic DESTROY for R2 (§6c): commission sizing doc post-R1? | user; Fable recommends sizing doc, no code |
 | U4 | #139 :crlf layer model | user-held, do not start |
@@ -69,7 +78,8 @@ has an answer in `docs/fable-answers-s316v.md` (s317) or `docs/DECIDED.md`.
    silent wrong shape.
 5. **Verification quadruple**, in this order, all green before commit:
    a. `perl tools/corpus-diff.pl` — every changed file EXPLAINED;
-   b. `tools/prove-core` — full gate (123 files), not a subset;
+   b. `tools/prove-core` — full gate (131 files / 4595 with a built pclxs
+      sibling), not a subset;
    c. full sweep `perl sweep-perl-tests.pl --jobs 8 --timeout 380` then
       `perl tools/sweep-diff.pl diff docs/fail-baseline.tsv .faillog` —
       0 new (pack.t needs the 380; at 150 it TIMEOUTs even idle);
@@ -77,10 +87,11 @@ has an answer in `docs/fable-answers-s316v.md` (s317) or `docs/DECIDED.md`.
    **Never run two sweeps concurrently — a sweep CLEARS `.faillog` at
    start** (s316t lost a run to this).  Don't run prove-core while a
    sweep runs either (pack.t contention).
-6. **Regression guards**: behavior → a `test_transpile` battery in the
-   smallest `transpile-test-NN.t` (currently -07; cap ~50/file, never
-   -01); emission shapes → `Pl/t/parser2-01.t` (grep it first for stale
-   guards your change flips).
+6. **Regression guards**: behavior → a `test_transpile` battery in a
+   `transpile-test-NN.t` picked by WALL TIME (`prove --timer`), never
+   -01/-07; -09 exists, the next new file is -10.  Emission shapes →
+   `Pl/t/parser2-01.t` (grep it first for stale guards your change
+   flips).
 7. **If emission changed**: bump `*pcl-cache-generation*`
    (cl/pcl-runtime.lisp), regenerate artifacts (`tools/rebuild-pack`;
    `./pl2cl lib/mro.pm > cl/pcl-mro.lisp` — non-empty check: pl2cl exits
@@ -215,9 +226,10 @@ release checks surface divergences, triage those first, per
    positives) is W1-eligible if the queue empties: it is a contained,
    probe-verifiable fix.
 
-## 5. W2 — E4.1, only after R1 ships (U1) (1–2 sessions)
+## 5. W2 — E4.1 (R1 shipped 2026-08-02 → authorized; 1–2 sessions)
 
-Re-scoped in the plan (E4 section) and review §4.  Order:
+**Read §5a (the s340 guardrails) before starting.**  Re-scoped in the plan
+(E4 section) and review §4.  Order:
 1. Port bundle mode off `Pl::Parser->parse_file` (`pl2cl:283`) — the one
    v1-only bypass.
 2. Flip gates to hard errors: remove `parse_with_fallback` (`pl2cl:51`),
@@ -236,13 +248,71 @@ Re-scoped in the plan (E4 section) and review §4.  Order:
    scoreboard vs `docs/cpan-module-log.md`.  Re-bless nothing without
    noting it in the ledger.
 
+## 5a. Guardrails for the E4.1 window (Fable, s340 — binding)
+
+E4.1 deletes a whole pipeline.  The failure mode to defend against is not
+"the deletion breaks something visibly" — it is a consumer of v1 that
+nobody listed, discovered as a silent behavior change three sessions
+later.  Hence:
+
+1. **Enter clean: #223 first.**  The deletion window needs an EXACT gate —
+   0 new / 0 fixed / 0 LOST — so that any drift during E4.1 is
+   attributable to E4.1.  If #223's audit cannot attribute the whole +8,
+   that is a finding; stop and write it up, do not bless it away.
+2. **Measure before you delete: the live v1 share must be ZERO.**
+   `tools/v2-census.pl` (111/111) covers the corpus files only.  The
+   pipeline marker exists for exactly this audit: wipe `~/.pcl-cache`,
+   run the full sweep + the CPAN board, then (a) grep everything the run
+   cached/emitted for `pipeline=v1` (`grep -ar` — NUL gotcha) and (b)
+   re-run with `PCL_V2_VERBOSE=1` to catch fallbacks that never reach the
+   cache (eval-strings, subprocess loads).  **Every v1 hit found is
+   PRE-WORK to fix before step 2 — never an acceptable loss.**  Two hits
+   with the same `Parser2 TODO:` text are one family; fix the family.
+3. **`eval $str` is load-bearing (hard requirement, memory + §1).**
+   `parse_with_fallback` currently catches an eval-mode Parser2 TODO and
+   silently retries v1; after step 2 that same TODO becomes a user-visible
+   `$@`.  The rule-2 audit must show ZERO eval-mode fallbacks before the
+   flip; after the flip, an eval-mode TODO must surface as perl-shaped
+   `$@` text (never a host/SBCL error), and nothing may gate `eval $str`.
+4. **`--lenient-ppi` only ever worked via the v1 route** (v2 deletes the
+   flag from %opts and PPI-failure lands in v1).  After the flip it must
+   DIE loudly naming the file — never become a silent no-op flag.  All
+   runners (`runpcl`/`runt`/sweep) pass it; verify they still run.  If any
+   live file turns out to depend on lenient truncation, that is an ASK,
+   not a judgement call.
+5. **One commit per step, in the §5 order, each fully verified.**  The
+   port (1), the gate flip (2), the deletion (3), the re-verification (4)
+   never share a commit — a bisect must be able to tell "the port broke
+   it" from "the deletion broke it".  Steps 1–2 keep v1 present and
+   passing: until step 3 lands, `PCL_V1=1` comparisons are still your
+   cheapest oracle — run any you'll want BEFORE deleting.
+6. **Deletion needs three proofs per sub, not one**: (a) zero grep
+   callers; (b) the reachability table in `docs/v2-code-review.md` §4
+   consulted by name — it lists lookalikes that are STILL LIVE; (c) gate +
+   sweep green after.  All deletions in the one step-3 commit, so one
+   revert restores the whole pipeline.
+7. **Cache-key discipline**: removing `PCL_V1` changes
+   `p-compute-cache-path`'s pipeline component.  Bump
+   `*pcl-cache-generation*`, regenerate both checked-in artifacts, expect
+   marker-only diffs and explain anything more.
+8. **Verification cadence override + the stop rules.**  The
+   every-3rd–5th-change sweep cadence does NOT apply inside E4.1: every
+   step ends with the full quadruple, and step 4 adds the full suite +
+   CPAN board.  Stop rules: (a) if the bundle-mode port turns out to need
+   v1's file-level machinery structurally (more than ~a session of
+   unplanned work), stop and write the ask; (b) two failed attempts at
+   the same fix → record what killed them (the #142 discipline) and move
+   on; (c) after step 4: STOP — the next queue item (#153/E5.0 steps 1–2)
+   is Fable-led.  Remaining session time goes to the §5(e) near-green
+   filler (half-session cap), the utf8::encode probe, or W2.5 items that
+   do not touch PExpr's term machinery.
+
 ## 5b. W2.5 — the decided post-R1 backlog (order within is free; each
 ##     item is small enough to interleave with E5 steps; ~3–5 sessions)
 
 All decided s317 (`fable-answers-s316v.md`); each task carries its spec:
 
-- **#150 part 2**: re-sync the four drifted `perl-tests/` copies
-  (chop/dor/not/quotemeta) + re-bless.
+- ~~**#150 part 2**~~ DONE s337b (73d43ac).
 - **#146 quotemeta**: byte-semantics default, Unicode under
   utf8/unicode_strings, transpile-time selection; fix the
   `not-supported.md` Unicode sentence in the same commit.
@@ -251,8 +321,7 @@ All decided s317 (`fable-answers-s316v.md`); each task carries its spec:
 - **#148 pack U modes**: full mode model; `cl/pack-impl.pl` under real
   perl is the dev oracle; `tools/rebuild-pack` same commit; rule-12
   loud-die for anything left out.
-- **#152 rule-12 audit**: sweep runtime dispatch defaults → explicit
-  errors.
+- ~~**#152 rule-12 audit**~~ DONE s337c (6c5ece9) + the s339 pcl-xs grep.
 - **#144 `\$!` magic-cell box** (the remaining decided suite blocker for
   op/bless.t + uni/bless.t; box-magic hook per
   `reference_box_magic_hook`).

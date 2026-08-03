@@ -115,6 +115,10 @@ needed.
    + taken-at stamp; ~half an hour), then **starts E4.1** (W2, 1–2 sessions)
    per `docs/v2-opus5-execution-plan.md` §5 — bundle-mode
    `Pl::Parser->parse_file` prereq first, then the ~600–700 lines.
+   **Binding guardrails for the whole E4.1 window are in that doc's §5a**
+   (added s340): zero live v1 share proven by marker audit before the flip,
+   eval-mode and `--lenient-ppi` are hidden fallback consumers, one commit
+   per step, and the stop rules.
 2. **After E4.1: STOP and hand to Fable** — #153/E5.0 steps 1–2
    (`_reduce_term` design) are Fable-led; Opus executes steps 3–5 after.
 3. **Interleave:** the §5(e) near-green filler queue + the utf8::encode/
