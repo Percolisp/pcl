@@ -48,6 +48,17 @@
 #   marked only when the crash itself is the documented gap; everything
 #   UNEXPLAINED stays a fix/triage target.
 #
+#   XDIFF IS GRANTED PER ROW, all-or-nothing (task #185), exactly like FIXTURE:
+#   docs/perl-suite-expected-rows.tsv holds the blessed multiset of diverging
+#   rows for each registered file, keyed by PERL's test DESCRIPTION (#177 —
+#   numbers are the unstable coordinate).  A file whose divergence grows a row
+#   that is not in the baseline stays DIFF and names the intruder; a row that
+#   stops diverging makes the file STALE.  Without this the file-level reason
+#   excused the WHOLE file forever: a new bug landing anywhere inside op/
+#   signatures.t (355 blessed rows) was indistinguishable from the blessed gap.
+#   The baseline is generated — `--bless-rows` rewrites it from the current
+#   run, touching only the files that run measured.
+#
 # Speed: like tools/prove-core, a FRESH SBCL core with the runtime compiled in
 # is built once per invocation (never stale, removed on exit); each test then
 # starts from the core (~0.003s) instead of recompiling the runtime (~1.2s).
@@ -146,11 +157,14 @@ my $jobs = 8;
 my $timeout = 90;
 my $faillog = "$root/.suitelog";
 my $expected_tsv = "$root/docs/perl-suite-expected.tsv";
+my $expected_rows_tsv = "$root/docs/perl-suite-expected-rows.tsv";
 my $fixture_tsv  = "$root/docs/perl-suite-fixture.tsv";
+my $bless_rows;
 my (@dirs, @files);
 while (@ARGV) {
   my $a = shift @ARGV;
-  if    ($a eq '--tdir')           { $tdir = shift @ARGV }
+  if    ($a eq '--bless-rows')     { $bless_rows = 1 }
+  elsif ($a eq '--tdir')           { $tdir = shift @ARGV }
   elsif ($a eq '--dir')            { push @dirs, shift @ARGV }
   elsif ($a eq '--all')            { $all = 1 }
   elsif ($a eq '--jobs')           { $jobs = shift @ARGV }
@@ -172,6 +186,27 @@ if (open my $ef, '<', $expected_tsv) {
     $expected{$rel} = $reason // '';
   }
   close $ef;
+}
+
+# Expected-divergence ROW baseline (task #185): rel -> sorted arrayref of the
+# rowkeys the file is allowed to diverge on.  MACHINE-maintained (--bless-rows),
+# kept out of perl-suite-expected.tsv so the ~1900 generated rows never drown
+# the 108 hand-written reasons there.  A rowkey is PERL's test DESCRIPTION —
+# never a test number (#177: numbers are the unstable coordinate) — with three
+# fallbacks: "#N" for a genuinely unnamed test, "*summary*" for the log's
+# test#-0 summary rows (no-TAP / renumbered), "*no-log*" when the file produced
+# no per-test log at all (TRANSPILE).  Compared as a MULTISET, so a description
+# that repeats inside a file must be registered as many times as it diverges.
+my %expected_rows;
+if (open my $rf, '<', $expected_rows_tsv) {
+  while (<$rf>) {
+    chomp;
+    next if /^\s*(?:#|$)/;
+    my ($rel, $key) = split /\t/, $_, 2;
+    push @{ $expected_rows{$rel} }, $key if defined $key;
+  }
+  close $rf;
+  @{ $expected_rows{$_} } = sort @{ $expected_rows{$_} } for keys %expected_rows;
 }
 
 # Fixture-artifact registry: rel -> { rows => {n=>1}, cause => text }.
@@ -549,10 +584,41 @@ while (@queue || %children) {
     @r = ($info->{rel}, 0, 0, 0, 0, 'NO-RESULT', '') if @r < 6;
     # Expected-divergence registry: divergent+expected -> XDIFF (doesn't fail
     # the run); OK+expected -> STALE (fails the run: remove the stale row).
+    #
+    # XDIFF is granted per ROW, all-or-nothing (task #185), exactly like
+    # FIXTURE: the file's diverging rows must MATCH the blessed multiset in
+    # docs/perl-suite-expected-rows.tsv.  An unregistered diverging row keeps
+    # the file DIFF and is named — so a new bug landing inside a file whose
+    # feature gap is blessed can never hide behind the file-level reason.  A
+    # registered row that stopped diverging is STALE, same as a whole file
+    # that starts passing.
     if (my $reason = $expected{$r[0]}) {
       if ($r[5] =~ /^(?:DIFF|TRANSPILE|TIMEOUT)$/) {
-        $r[5] = 'XDIFF';
-        $r[6] = join(' | ', grep { length } $r[6] // '', $reason);
+        my @actual = diverging_rowkeys($r[0]);
+        my @reg    = @{ $expected_rows{$r[0]} || [] };
+        # A file whose row set is MEASURED nondeterministic (see the
+        # *rows-unstable* paragraph in the rows baseline) opts out of the row
+        # check — the file-level reason covers it wholesale, as before #185.
+        # One entry, never mixed with real rows, and it has to be put there by
+        # hand: --bless-rows will not invent it.
+        my ($new, $gone) = (@reg == 1 && $reg[0] eq '*rows-unstable*')
+                           ? ([], []) : multiset_diff(\@actual, \@reg);
+        if (@$new) {
+          $r[6] = join(' | ', grep { length } $r[6] // '',
+                       sprintf("NOT fully registered: %d unregistered diverging row(s): %s",
+                               scalar(@$new), row_list_excerpt($new)),
+                       $reason);
+        } elsif (@$gone) {
+          $r[5] = 'STALE';
+          $r[6] = sprintf("%d registered row(s) no longer diverge (%s) — re-bless with --bless-rows",
+                          scalar(@$gone), row_list_excerpt($gone));
+        } else {
+          $r[5] = 'XDIFF';
+          $r[6] = join(' | ', grep { length } $r[6] // '',
+                       (@reg == 1 && $reg[0] eq '*rows-unstable*'
+                        ? 'rows NOT checked (*rows-unstable*)' : ()),
+                       $reason);
+        }
       } elsif ($r[5] eq 'OK') {
         $r[5] = 'STALE';
         $r[6] = "expected-divergence row now PASSES — remove it from docs/perl-suite-expected.tsv";
@@ -598,6 +664,7 @@ while (@queue || %children) {
 }
 }
 
+bless_expected_rows() if $bless_rows;
 exit(emit_report() ? 1 : 0);
 
 # ----------------------------------------------------------- summary
@@ -623,6 +690,128 @@ sub read_diverging_rows {
   }
   close $lf;
   return @rows;
+}
+
+# The ROW-level identity of a file's divergence, for the #185 expected-rows
+# baseline.  Keys are PERL's descriptions, never numbers (#177) — see the
+# %expected_rows comment for the three fallbacks.  Returns a SORTED list, so
+# callers can compare it as a multiset.
+sub diverging_rowkeys {
+  my ($rel) = @_;
+  (my $safe = $rel) =~ s{/}{_}g;
+  open my $lf, '<', "$faillog/$safe.fails.tsv" or return ('*no-log*');
+  my @keys;
+  while (<$lf>) {
+    next if /^\s*#/;
+    chomp;
+    my (undef, $n, undef, $cv, $desc) = split /\t/, $_, 5;
+    next unless defined $n;
+    $desc = '' unless defined $desc;
+    $desc =~ s/\s+\z//;
+    $desc =~ s{\Q$tdir\E/}{t/}g;
+    # test# 0 is not a paired test: either a summary row (no TAP at all / PCL
+    # renumbered), whose text carries an unstable crash signature and so
+    # normalizes to one sentinel, or a PCL-ONLY row, which is real evidence
+    # (do.t's two extras ARE the principle-9 divergence) and keeps its text.
+    if ($n !~ /^[1-9][0-9]*$/) {
+      push @keys, (defined $cv && $cv =~ /^extra\b/)
+                  ? '*extra* ' . (length $desc ? $desc : '(unnamed)')
+                  : '*summary*';
+      next;
+    }
+    # An UNNAMED test's description is perl's "[at <file> line N]" marker (the
+    # $tdir strip above keeps the stable line number and drops this machine's
+    # absolute perl-build path — the task #217 family: a generated artifact
+    # must not bake in build paths).
+    push @keys, (length $desc ? $desc : "#$n");
+  }
+  close $lf;
+  return @keys ? (sort @keys) : ('*empty-log*');
+}
+
+# (in A not in B, in B not in A) over two SORTED lists, counting duplicates.
+sub multiset_diff {
+  my ($a, $b) = @_;
+  my %count;
+  $count{$_}++ for @$a;
+  $count{$_}-- for @$b;
+  my (@only_a, @only_b);
+  for my $k (sort keys %count) {
+    push @only_a, ($k) x  $count{$k} if $count{$k} > 0;
+    push @only_b, ($k) x -$count{$k} if $count{$k} < 0;
+  }
+  return (\@only_a, \@only_b);
+}
+
+sub row_list_excerpt {
+  my ($rows) = @_;
+  my @show = @$rows > 3 ? (@$rows[0 .. 2], sprintf("+%d more", @$rows - 3)) : @$rows;
+  return join('; ', map { my $s = $_; $s =~ s/\s+/ /g;
+                          length($s) > 60 ? substr($s, 0, 57) . '...' : $s } @show);
+}
+
+# --bless-rows: rewrite docs/perl-suite-expected-rows.tsv from THIS run.  Only
+# files this run actually measured are touched — a partial run must never erase
+# the baseline for files it did not look at (same reasoning as the sweep's
+# save-status).  A registered file that came back OK loses its rows here, which
+# is what clears a STALE row after a fix.
+sub bless_expected_rows {
+  my %rows;
+  if (open my $rf, '<', $expected_rows_tsv) {
+    while (<$rf>) {
+      chomp;
+      next if /^\s*(?:#|$)/;
+      my ($rel, $key) = split /\t/, $_, 2;
+      push @{ $rows{$rel} }, $key if defined $key;
+    }
+    close $rf;
+  }
+  my $touched = 0;
+  for my $rel (keys %results) {
+    next unless exists $expected{$rel};
+    my $st = $results{$rel}[5];
+    next unless $st =~ /^(?:DIFF|TRANSPILE|TIMEOUT|XDIFF|STALE|OK)$/;
+    # A hand-placed *rows-unstable* opt-out survives re-blessing: it is a
+    # measured claim about the file (its row set is nondeterministic), not
+    # something a single run may overwrite with that run's rows.
+    next if @{ $rows{$rel} || [] } == 1 && $rows{$rel}[0] eq '*rows-unstable*';
+    delete $rows{$rel};
+    $touched++;
+    next if $st eq 'OK';
+    my @keys = diverging_rowkeys($rel);
+    $rows{$rel} = \@keys if @keys;
+  }
+  open my $out, '>', $expected_rows_tsv or die "write $expected_rows_tsv: $!";
+  print $out <<'HDR';
+# perl-suite-expected-rows.tsv — the ROW baseline behind XDIFF (task #185).
+# GENERATED: `tools/run-perl-suite.pl --bless-rows` rewrites the files that run
+# measured.  Do not hand-edit; edit docs/perl-suite-expected.tsv (the reasons)
+# and re-bless.
+#
+# One line per DIVERGING ROW of a registered file: <rel-path><TAB><rowkey>.
+# rowkey = PERL's test description (never a test number — task #177 proved
+# numbers are the unstable coordinate), with four fallbacks: "#N" for a
+# genuinely unnamed test, "*extra* <desc>" for a PCL-ONLY TAP row, "*summary*"
+# for the log's test#-0 summary rows, and "*no-log*" for a file that produced
+# no per-test log at all (TRANSPILE).
+#
+# ENFORCEMENT: the multiset here must EQUAL the run's diverging rows.  An extra
+# row keeps the file DIFF and names the intruder (a new bug cannot hide inside
+# a blessed feature gap); a row that stopped diverging makes the file STALE.
+#
+# *rows-unstable* — a file whose ONLY entry is this opts OUT of the row check
+# (the file-level reason covers it wholesale, as before #185).  It must be
+# hand-placed and justified by a MEASUREMENT that the row set is
+# nondeterministic; --bless-rows never invents it and never overwrites it.
+HDR
+  for my $rel (sort keys %rows) {
+    print $out "$rel\t$_\n" for @{ $rows{$rel} };
+  }
+  close $out;
+  my $n = 0; $n += scalar @{ $rows{$_} } for keys %rows;
+  printf "blessed expected-rows: %d rows over %d files (%d files re-measured) -> %s\n",
+    $n, scalar(keys %rows), $touched, $expected_rows_tsv;
+  return;
 }
 
 sub record_result {

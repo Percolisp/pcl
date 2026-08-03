@@ -1334,6 +1334,39 @@ split /,/, $s` → perl `[1]`, PCL `[3]`.  Logged as a deliberate divergence.
 
 ---
 
+## `**` returns an exact integer where Perl returns a float (NV)
+
+**Perl behaviour:** `**` is always C `pow()`, so its result is an NV even when
+both operands are integers.  Printing an NV goes through `%.15g`, and above
+`2**53` the NV cannot represent consecutive integers at all:
+
+```perl
+print 2**53;      # perl: 9.00719925474099e+15   (display only — value exact)
+print 2**53 + 1;  # perl: 9.00719925474099e+15   (value: precision LOST)
+print 2 ** 3 ** 4;# perl: 2.41785163922926e+24
+```
+
+**PCL behaviour:** `p-**` (`cl/pcl-runtime.lisp`) returns an **exact** bignum
+when base and exponent are non-negative integers within ~1000 bits, so the
+three lines above print `9007199254740992`, `9007199254740993` and
+`2417851639229258349412352`.  Results agree with perl up to ~`2**49` (≤ 15
+significant digits); past that the divergence is *display* below `2**53` and
+*value* (PCL is the more accurate one) above it.
+
+**Rationale:** the exactness is load-bearing for our own transpiled code —
+`cl/pack-impl.pl` needs an exact `2**($nbytes*8)` and `2**$checksum_width`, and
+`lib/Math/BigInt/Calc.pm` builds its masks with `2**$AND_BITS`.  Making `**`
+faithful means making it always return a double-float *and* giving those
+callers an explicit integer-power helper; both files are ours and editable, so
+the fix is possible, just not free (pack.t and bigint are the risk).  **The
+user parked it 2026-06-26** ("put that number formatting on the stack").
+
+**Found by:** `tools/difftest-ops.pl` (session ~241, still the standing
+residual — s336 re-run: 3 of the 4 remaining mismatches are this one cause).
+Memory: `project_power_op_float_divergence`.
+
+---
+
 ## Perl 5.38 `class` / `field` / `method` syntax  [DEFERRED — future version]
 
 **Perl behaviour:** Perl 5.38 introduced native object-oriented syntax as an

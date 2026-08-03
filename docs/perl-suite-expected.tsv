@@ -6,6 +6,16 @@
 # philosophy as cl/skip-registry.lisp — see docs/test-skip-registry.md).
 # Do NOT add rows for unexplained crashes: those stay triage targets.
 #
+# THE ROWS ARE MACHINE-CHECKED (task #185, s336).  A reason here excuses only
+# the rows blessed in docs/perl-suite-expected-rows.tsv — the generated
+# multiset of this file's diverging TAP rows, keyed by PERL's description.  A
+# divergence that grows a row not in that baseline keeps the file DIFF and
+# names the intruder; a row that stops diverging makes the file STALE.  So
+# adding a line HERE is not enough: run
+#     tools/run-perl-suite.pl --bless-rows <the file>
+# in the same change, and read the rows it blesses — they are the per-row
+# claim your reason is making.
+#
 # REGISTRATION BAR (confirmed s317, fable-answers-s316v.md §6f): a file gets
 # a row ONLY when EVERY failing test in it is explained by a blessed
 # not-supported.md section — all-or-nothing.  A partially-explained file
@@ -99,7 +109,7 @@ mro/next_edgecases.t	not-supported.md §mro — next::method family (Tier 3, def
 mro/next_edgecases_utf8.t	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 mro/overload_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant (non-utf8 twin passes)
 mro/package_aliases.t	not-supported.md §symbol-table hashes — glob package aliasing + isarev
-mro/package_aliases_utf8.t	not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8)
+mro/package_aliases_utf8.t	not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.
 mro/pkg_gen.t	not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 mro/pkg_gen_utf8.t	not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
 mro/recursion_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)

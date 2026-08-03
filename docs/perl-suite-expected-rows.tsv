@@ -1,0 +1,1740 @@
+# perl-suite-expected-rows.tsv — the ROW baseline behind XDIFF (task #185).
+# GENERATED: `tools/run-perl-suite.pl --bless-rows` rewrites the files that run
+# measured.  Do not hand-edit; edit docs/perl-suite-expected.tsv (the reasons)
+# and re-bless.
+#
+# One line per DIVERGING ROW of a registered file: <rel-path><TAB><rowkey>.
+# rowkey = PERL's test description (never a test number — task #177 proved
+# numbers are the unstable coordinate), with four fallbacks: "#N" for a
+# genuinely unnamed test, "*extra* <desc>" for a PCL-ONLY TAP row, "*summary*"
+# for the log's test#-0 summary rows, and "*no-log*" for a file that produced
+# no per-test log at all (TRANSPILE).
+#
+# ENFORCEMENT: the multiset here must EQUAL the run's diverging rows.  An extra
+# row keeps the file DIFF and names the intruder (a new bug cannot hide inside
+# a blessed feature gap); a row that stopped diverging makes the file STALE.
+#
+# *rows-unstable* — a file whose ONLY entry is this opts OUT of the row check
+# (the file-level reason covers it wholesale, as before #185).  It must be
+# hand-placed and justified by a MEASUREMENT that the row set is
+# nondeterministic; --bless-rows never invents it and never overwrites it.
+class/accessor.t	*summary*
+class/class.t	*summary*
+class/construct.t	*summary*
+class/destruct.t	*summary*
+class/field.t	*summary*
+class/inherit.t	:isa attribute trims whitespace
+class/inherit.t	:isa() version test can throw
+class/inherit.t	@Testcase1B::ISA is set correctly
+class/inherit.t	Constructor params passed through to superclass
+class/inherit.t	Exception thrown from :isa version test
+class/inherit.t	Object has base class ADJUSTed field
+class/inherit.t	Object has base class initialised field
+class/inherit.t	Object has derived class ADJUSTed field
+class/inherit.t	Object has derived class initialised field
+class/inherit.t	Object is also its base class
+class/inherit.t	Object is its own class
+class/inherit.t	Testcase1B->can('adja')
+class/inherit.t	Testcase1B->can('inita')
+class/inherit.t	Testcase6B inherits Testcase6B
+class/inherit.t	Testcase6B sets VERSION
+class/inherit.t	Unit class syntax allows :isa
+class/inherit.t	__CLASS__ yields correct class name for subclass
+class/inherit.t	__CLASS__ yields runtime instance class name
+class/inherit.t	hierarchical base class loaded
+class/method.t	*summary*
+class/phasers.t	both ADJUST blocks run in order
+class/phasers.t	value of __CLASS__ in ADJUST block
+class/utf8.t	*summary*
+cmd/for.t	[perl #78194] Lone C-style for in a block
+cmd/for.t	double destroy, x=1
+cmd/for.t	freed value in iteration
+comp/hints.t	#16
+comp/hints.t	$^H contains HINT_LOCALIZE_HH at eval""-time
+comp/hints.t	$^H contains HINT_LOCALIZE_HH while compiling
+comp/hints.t	$^H correct after require
+comp/hints.t	$^H correct before require
+comp/hints.t	$^H{foo} cleared for require
+comp/hints.t	$^H{foo} correct after /unicode/i (res=foo-foo-)
+comp/hints.t	$^H{foo} doesn't exist at runtime
+comp/hints.t	$^H{foo} doesn't exist when compilation complete
+comp/hints.t	$^H{foo} doesn't exist while finishing compilation
+comp/hints.t	$^H{foo} is 'a' at eval-"" time
+comp/hints.t	$^H{foo} restored to 'a'
+comp/hints.t	%^H does not leak when autovivified in destructor
+comp/hints.t	setting ${^WARNING_BITS} to its own value has no effect
+io/defout.t	$-
+io/msg.t	*summary*
+io/sem.t	*summary*
+io/shm.t	*summary*
+mro/basic.t	@main::ISA is magical
+mro/basic.t	Changes to UNIVERSAL::DESTROY invalidate DESTROY caches
+mro/basic.t	Q3->can('bar')
+mro/basic.t	Q3->can('foo')
+mro/basic.t	Q3->can('foo')
+mro/basic.t	[at t/mro/basic.t line 108]
+mro/basic.t	[at t/mro/basic.t line 112]
+mro/basic.t	[at t/mro/basic.t line 141]
+mro/basic.t	[at t/mro/basic.t line 145]
+mro/basic.t	[at t/mro/basic.t line 163]
+mro/basic.t	[at t/mro/basic.t line 167]
+mro/basic.t	[at t/mro/basic.t line 178]
+mro/basic.t	[at t/mro/basic.t line 179]
+mro/basic.t	[at t/mro/basic.t line 182]
+mro/basic.t	[at t/mro/basic.t line 183]
+mro/basic.t	[at t/mro/basic.t line 191]
+mro/basic.t	[at t/mro/basic.t line 196]
+mro/basic.t	[at t/mro/basic.t line 210]
+mro/basic.t	[at t/mro/basic.t line 210]
+mro/basic.t	[at t/mro/basic.t line 210]
+mro/basic.t	[at t/mro/basic.t line 210]
+mro/basic.t	[at t/mro/basic.t line 233]
+mro/basic.t	[at t/mro/basic.t line 237]
+mro/basic.t	[at t/mro/basic.t line 239]
+mro/basic.t	[at t/mro/basic.t line 286]
+mro/basic.t	[at t/mro/basic.t line 294]
+mro/basic.t	[at t/mro/basic.t line 33]
+mro/basic.t	[at t/mro/basic.t line 34]
+mro/basic.t	[at t/mro/basic.t line 38]
+mro/basic.t	[at t/mro/basic.t line 41]
+mro/basic.t	[at t/mro/basic.t line 49]
+mro/basic.t	[at t/mro/basic.t line 52]
+mro/basic.t	[at t/mro/basic.t line 55]
+mro/basic.t	[at t/mro/basic.t line 63]
+mro/basic.t	[at t/mro/basic.t line 71]
+mro/basic.t	a case with multiple refs to ISA
+mro/basic.t	a case with multiple refs to ISA
+mro/basic.t	a isa b after undef *a::ISA and @a::ISA modification
+mro/basic.t	autovivifying @ISA via *{@ISA}
+mro/basic.t	can bark now
+mro/basic.t	can't call foo method any longer
+mro/basic.t	delete $package::{ISA}
+mro/basic.t	don't crash when deleting ISA
+mro/basic.t	local *ISA
+mro/basic.t	local *ISA = []
+mro/basic.t	local *ISA unwinding
+mro/basic.t	local *ISA=[] unwinding
+mro/basic.t	localising gv-with-cv belonging to detached package
+mro/basic.t	magical *ISA = arrayref elements
+mro/basic.t	no bark method
+mro/basic.t	no crash when ISA contains nonexistent elements
+mro/basic.t	obliterating @ISA via glob assignment
+mro/basic.t	undef %package:: updates subclasses
+mro/basic.t	unmagicalize *ISA elements
+mro/basic_01_c3.t	... can(method) resolved itself as expected
+mro/basic_01_c3.t	... can(method) resolved itself as expected
+mro/basic_01_c3.t	... got the right MRO for Diamond_D
+mro/basic_01_c3.t	... method resolved itself as expected
+mro/basic_01_c3_utf8.t	... can(method) resolved itself as expected
+mro/basic_01_c3_utf8.t	... can(method) resolved itself as expected
+mro/basic_01_c3_utf8.t	... got the right MRO for Ｄiᚪၚd_D
+mro/basic_01_c3_utf8.t	... method resolved itself as expected
+mro/basic_01_dfs.t	... can(method) resolved itself as expected
+mro/basic_01_dfs.t	... can(method) resolved itself as expected
+mro/basic_01_dfs.t	... got the right MRO for Diamond_D
+mro/basic_01_dfs.t	... method resolved itself as expected
+mro/basic_01_dfs_utf8.t	... can(method) resolved itself as expected
+mro/basic_01_dfs_utf8.t	... can(method) resolved itself as expected
+mro/basic_01_dfs_utf8.t	... got the right MRO for Ｄiᚪၚd_D
+mro/basic_01_dfs_utf8.t	... method resolved itself as expected
+mro/basic_02_c3.t	... can got the expected method output
+mro/basic_02_c3.t	... can got the expected method output
+mro/basic_02_c3.t	... got the expected method output
+mro/basic_02_c3.t	... got the expected method output
+mro/basic_02_c3.t	... got the right MRO for Test::A
+mro/basic_02_c3.t	... got the right MRO for Test::B
+mro/basic_02_c3.t	... got the right MRO for Test::C
+mro/basic_02_c3_utf8.t	... can got the expected method output
+mro/basic_02_c3_utf8.t	... can got the expected method output
+mro/basic_02_c3_utf8.t	... got the expected method output
+mro/basic_02_c3_utf8.t	... got the expected method output
+mro/basic_02_c3_utf8.t	... got the right MRO for 텟ţ::ƈ
+mro/basic_02_c3_utf8.t	... got the right MRO for 텟ţ::ଅ
+mro/basic_02_c3_utf8.t	... got the right MRO for 텟ţ::ᛒ
+mro/basic_02_dfs.t	... can got the expected method output
+mro/basic_02_dfs.t	... can got the expected method output
+mro/basic_02_dfs.t	... got the expected method output
+mro/basic_02_dfs.t	... got the expected method output
+mro/basic_02_dfs.t	... got the right MRO for Test::A
+mro/basic_02_dfs.t	... got the right MRO for Test::B
+mro/basic_02_dfs.t	... got the right MRO for Test::C
+mro/basic_02_dfs_utf8.t	... can got the expected method output
+mro/basic_02_dfs_utf8.t	... can got the expected method output
+mro/basic_02_dfs_utf8.t	... got the expected method output
+mro/basic_02_dfs_utf8.t	... got the expected method output
+mro/basic_02_dfs_utf8.t	... got the right MRO for 텟ţ::ƈ
+mro/basic_02_dfs_utf8.t	... got the right MRO for 텟ţ::ଅ
+mro/basic_02_dfs_utf8.t	... got the right MRO for 텟ţ::ᛒ
+mro/basic_03_c3.t	... got the right MRO for Test::A
+mro/basic_03_c3.t	... got the right method dispatch
+mro/basic_03_c3.t	... got the right method dispatch
+mro/basic_03_c3.t	... got the right method dispatch
+mro/basic_03_c3_utf8.t	... got the right MRO for 텟ţ::ଅ
+mro/basic_03_c3_utf8.t	... got the right method dispatch
+mro/basic_03_c3_utf8.t	... got the right method dispatch
+mro/basic_03_c3_utf8.t	... got the right method dispatch
+mro/basic_03_dfs.t	... got the right MRO for Test::A
+mro/basic_03_dfs.t	... got the right method dispatch
+mro/basic_03_dfs.t	... got the right method dispatch
+mro/basic_03_dfs.t	... got the right method dispatch
+mro/basic_03_dfs_utf8.t	... got the right MRO for 텟ţ::ଅ
+mro/basic_03_dfs_utf8.t	... got the right method dispatch
+mro/basic_03_dfs_utf8.t	... got the right method dispatch
+mro/basic_03_dfs_utf8.t	... got the right method dispatch
+mro/basic_04_c3.t	... got the right MRO for t::lib::F
+mro/basic_04_c3_utf8.t	... got the right MRO for Ƭ::ŁiƁ::Ḟ
+mro/basic_04_dfs.t	... got the right MRO for t::lib::F
+mro/basic_04_dfs_utf8.t	... got the right MRO for Ƭ::ŁiƁ::Ḟ
+mro/basic_05_c3.t	... got the right MRO for Diamond_D
+mro/basic_05_c3.t	... got the right next::method dispatch path
+mro/basic_05_c3_utf8.t	... got the right MRO for Ｄiᚪၚd_D
+mro/basic_05_c3_utf8.t	... got the right next::method dispatch path
+mro/basic_05_dfs.t	... got the right MRO for Diamond_D
+mro/basic_05_dfs.t	... got the right next::method dispatch path
+mro/basic_05_dfs_utf8.t	... got the right MRO for Ｄiᚪၚd_D
+mro/basic_05_dfs_utf8.t	... got the right next::method dispatch path
+mro/basic_utf8.t	@main::ISA is magical
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 103]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 121]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 125]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 132]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 136]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 149]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 154]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 158]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 169]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 170]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 173]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 174]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 182]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 187]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 201]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 201]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 201]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 201]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 224]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 228]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 230]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 247]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 278]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 286]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 29]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 30]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 34]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 37]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 45]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 48]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 53]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 62]
+mro/basic_utf8.t	[at t/mro/basic_utf8.t line 99]
+mro/basic_utf8.t	a isa b after undef *a::ISA and @a::ISA modification
+mro/basic_utf8.t	can ɓᛅƘ now
+mro/basic_utf8.t	can't call Ｆஓ method any longer
+mro/basic_utf8.t	delete $package::{ISA}
+mro/basic_utf8.t	no ɓᛅƘ method
+mro/basic_utf8.t	undef %package:: updates subclasses
+mro/basic_utf8.t	ㄑ3->can('ƚ')
+mro/basic_utf8.t	ㄑ3->can('Ｆஓ')
+mro/basic_utf8.t	ㄑ3->can('Ｆஓ')
+mro/complex_c3.t	next::method working ok
+mro/complex_c3_utf8.t	next::method working ok
+mro/complex_dfs.t	... got the right DFS merge order for Test::I
+mro/complex_dfs.t	... got the right DFS merge order for Test::K
+mro/complex_dfs_utf8.t	... got the right DFS merge order for 텟Ṱ::ᶦ
+mro/complex_dfs_utf8.t	... got the right DFS merge order for 텟Ṱ::Ḵ
+mro/dbic_dfs.t	... got the right DFS merge order for xx::DBIx::Class::Core
+mro/dbic_dfs_utf8.t	... got the right DFS merge order for Ẋẋ::ḐʙIＸ::Cl았::Coﾚ
+mro/inconsistent_c3.t	*summary*
+mro/inconsistent_c3_utf8.t	*summary*
+mro/isa_aliases.t	!isa after glob-to-ref assignment on another stash when *ISA is shared
+mro/isa_aliases.t	isa after glob-to-ref assignment on another stash when *ISA is shared
+mro/isa_aliases.t	localised *ISA=$ref assignment
+mro/isa_aliases_utf8.t	!isa after glob-to-ref assignment on another stash when *ISA is shared
+mro/isa_aliases_utf8.t	isa after glob-to-ref assignment on another stash when *ISA is shared
+mro/isa_c3.t	kapow isa UNIVERSAL
+mro/isa_c3.t	kayo isa UNIVERSAL
+mro/isa_c3.t	klonk isa UNIVERSAL
+mro/isa_c3.t	thwacke isa UNIVERSAL
+mro/isa_c3.t	urkkk isa UNIVERSAL
+mro/isa_c3.t	urkkk isa kapow
+mro/isa_c3.t	urkkk isa klonk
+mro/isa_c3.t	whamm isa UNIVERSAL
+mro/isa_c3.t	whamm isa kapow
+mro/isa_c3.t	whamm isa thwacke
+mro/isa_c3.t	zzzzzwap isa UNIVERSAL
+mro/isa_c3.t	zzzzzwap isa kapow
+mro/isa_c3.t	zzzzzwap isa thwacke
+mro/isa_c3_utf8.t	@ISA for urḲḵｋ
+mro/isa_c3_utf8.t	@ISA for Ẁ함Ｍ
+mro/isa_c3_utf8.t	kഌoんḰ isa UNIVERSAL
+mro/isa_c3_utf8.t	urḲḵｋ isa UNIVERSAL
+mro/isa_c3_utf8.t	urḲḵｋ isa kഌoんḰ
+mro/isa_c3_utf8.t	urḲḵｋ isa 캎oẃ
+mro/isa_c3_utf8.t	Źzzzዟᑉ isa UNIVERSAL
+mro/isa_c3_utf8.t	Źzzzዟᑉ isa ṭ화ckэ
+mro/isa_c3_utf8.t	Źzzzዟᑉ isa 캎oẃ
+mro/isa_c3_utf8.t	к isa UNIVERSAL
+mro/isa_c3_utf8.t	ṭ화ckэ isa UNIVERSAL
+mro/isa_c3_utf8.t	Ẁ함Ｍ isa UNIVERSAL
+mro/isa_c3_utf8.t	Ẁ함Ｍ isa ṭ화ckэ
+mro/isa_c3_utf8.t	Ẁ함Ｍ isa 캎oẃ
+mro/isa_c3_utf8.t	캎oẃ isa UNIVERSAL
+mro/isa_dfs.t	kapow isa UNIVERSAL
+mro/isa_dfs.t	kayo isa UNIVERSAL
+mro/isa_dfs.t	klonk isa UNIVERSAL
+mro/isa_dfs.t	thwacke isa UNIVERSAL
+mro/isa_dfs.t	urkkk isa UNIVERSAL
+mro/isa_dfs.t	urkkk isa kapow
+mro/isa_dfs.t	urkkk isa klonk
+mro/isa_dfs.t	whamm isa UNIVERSAL
+mro/isa_dfs.t	whamm isa kapow
+mro/isa_dfs.t	whamm isa thwacke
+mro/isa_dfs.t	zzzzzwap isa UNIVERSAL
+mro/isa_dfs.t	zzzzzwap isa kapow
+mro/isa_dfs.t	zzzzzwap isa thwacke
+mro/isa_dfs_utf8.t	@ISA for urḲḵｋ
+mro/isa_dfs_utf8.t	@ISA for Ẁ함Ｍ
+mro/isa_dfs_utf8.t	kഌoんḰ isa UNIVERSAL
+mro/isa_dfs_utf8.t	urḲḵｋ isa UNIVERSAL
+mro/isa_dfs_utf8.t	urḲḵｋ isa kഌoんḰ
+mro/isa_dfs_utf8.t	urḲḵｋ isa 캎oẃ
+mro/isa_dfs_utf8.t	Źzzzዟᑉ isa UNIVERSAL
+mro/isa_dfs_utf8.t	Źzzzዟᑉ isa ṭ화ckэ
+mro/isa_dfs_utf8.t	Źzzzዟᑉ isa 캎oẃ
+mro/isa_dfs_utf8.t	к isa UNIVERSAL
+mro/isa_dfs_utf8.t	ṭ화ckэ isa UNIVERSAL
+mro/isa_dfs_utf8.t	Ẁ함Ｍ isa UNIVERSAL
+mro/isa_dfs_utf8.t	Ẁ함Ｍ isa ṭ화ckэ
+mro/isa_dfs_utf8.t	Ẁ함Ｍ isa 캎oẃ
+mro/isa_dfs_utf8.t	캎oẃ isa UNIVERSAL
+mro/isarev.t	assigning to an empty spot updates isarev
+mro/isarev.t	assigning to an empty spot updates isarev of nested packages
+mro/isarev.t	deleting a doubly nested stash elem updates isarev entries
+mro/isarev.t	deleting a nested stash elem updates isarev entries
+mro/isarev.t	deleting a stash elem updates isarev entries
+mro/isarev.t	deleting an alias to a package updates isarev entries
+mro/isarev.t	deleting an alias to a package updates isarev entries of nested stashes
+mro/isarev.t	deleting an stash alias updates isarev entries of doubly nested stashes
+mro/isarev.t	isarev includes subclasses of aliases
+mro/isarev.t	replacing a stash updates isarev entries
+mro/isarev.t	replacing an alias of a stash containing another updates isarev entries
+mro/isarev.t	replacing an alias of a stash updates isarev entries
+mro/isarev.t	replacing an alias updates isarev of stashes nested in the replacement
+mro/isarev.t	replacing nested stashes updates isarev entries
+mro/isarev.t	single deletion from isarev
+mro/isarev.t	subclasses and subsubclasses are added to isarev
+mro/isarev.t	subclasses of the deleted alias become part of its isarev
+mro/isarev_utf8.t	assigning to an empty spot updates isarev
+mro/isarev_utf8.t	assigning to an empty spot updates isarev of nested packages
+mro/isarev_utf8.t	deleting a doubly nested stash elem updates isarev entries
+mro/isarev_utf8.t	deleting a nested stash elem updates isarev entries
+mro/isarev_utf8.t	deleting a stash elem updates isarev entries
+mro/isarev_utf8.t	deleting an alias to a package updates isarev entries
+mro/isarev_utf8.t	deleting an alias to a package updates isarev entries of nested stashes
+mro/isarev_utf8.t	deleting an stash alias updates isarev entries of doubly nested stashes
+mro/isarev_utf8.t	isarev includes subclasses of aliases
+mro/isarev_utf8.t	replacing a stash updates isarev entries
+mro/isarev_utf8.t	replacing an alias of a stash containing another updates isarev entries
+mro/isarev_utf8.t	replacing an alias of a stash updates isarev entries
+mro/isarev_utf8.t	replacing an alias updates isarev of stashes nested in the replacement
+mro/isarev_utf8.t	replacing nested stashes updates isarev entries
+mro/isarev_utf8.t	single deletion from isarev
+mro/isarev_utf8.t	subclasses and subsubclasses are added to isarev
+mro/isarev_utf8.t	subclasses of the deleted alias become part of its isarev
+mro/method_caching.t	[at t/mro/method_caching.t line 49]
+mro/method_caching.t	[at t/mro/method_caching.t line 51]
+mro/method_caching.t	[at t/mro/method_caching.t line 52]
+mro/method_caching.t	[at t/mro/method_caching.t line 54]
+mro/method_caching.t	[at t/mro/method_caching.t line 57]
+mro/method_caching.t	[at t/mro/method_caching.t line 59]
+mro/method_caching.t	[at t/mro/method_caching.t line 61]
+mro/method_caching.t	[at t/mro/method_caching.t line 63]
+mro/method_caching.t	[at t/mro/method_caching.t line 66]
+mro/method_caching.t	[at t/mro/method_caching.t line 68]
+mro/method_caching.t	redef sub through glob alias via local cv-to-glob assign
+mro/method_caching.t	redef sub through glob alias via localisation unwinding
+mro/method_caching.t	redefining sub through glob alias via cv-to-glob assign
+mro/method_caching.t	redefining sub through glob alias via decl
+mro/method_caching.t	redefining sub through glob alias via stub vivification
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 40]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 41]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 42]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 43]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 44]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 46]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 47]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 48]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 49]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 51]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 52]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 53]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 54]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 55]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 56]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 59]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 60]
+mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 61]
+mro/next_NEXT.t	... got the right value from Bar->foo
+mro/next_NEXT.t	... got the right value from Fuz->foo
+mro/next_NEXT.t	... got the right value using NEXT in a subclass of a C3 class
+mro/next_NEXT_utf8.t	... got the right value from Bᛆ->fಓ
+mro/next_NEXT_utf8.t	... got the right value from Fᶽ->fಓ
+mro/next_NEXT_utf8.t	... got the right value using NEXT in a subclass of a C3 class
+mro/next_edgecases.t	->next::can on non-existing package name
+mro/next_edgecases.t	The object isa Foo
+mro/next_edgecases.t	The object isa Foo
+mro/next_edgecases_utf8.t	->next::can on non-existing package name
+mro/next_edgecases_utf8.t	The object isa ᕘ
+mro/next_edgecases_utf8.t	The object isa ᕘ
+mro/next_goto.t	*summary*
+mro/next_goto_utf8.t	*summary*
+mro/next_inanon.t	*summary*
+mro/next_inanon_utf8.t	*summary*
+mro/next_ineval.t	method resolved inside eval{}
+mro/next_ineval_utf8.t	*summary*
+mro/next_method.t	... can(method) resolved itself as expected
+mro/next_method.t	... can(method) resolved itself as expected
+mro/next_method.t	... got the right MRO for Diamond_D
+mro/next_method.t	... method foo resolved itself as expected
+mro/next_method.t	... method resolved itself as expected
+mro/next_method_utf8.t	... can(method) resolved itself as expected
+mro/next_method_utf8.t	... can(method) resolved itself as expected
+mro/next_method_utf8.t	... got the right MRO for Diӑmond_D
+mro/next_method_utf8.t	... method fಓ resolved itself as expected
+mro/next_method_utf8.t	... method resolved itself as expected
+mro/next_skip.t	... called B method, skipped C and went to A correctly
+mro/next_skip.t	... called D method dispatched to , different method correctly
+mro/next_skip.t	... can re-dispatch figured out correctly
+mro/next_skip.t	... cannot re-dispatch figured out correctly
+mro/next_skip.t	... cannot re-dispatch to a method which is not there
+mro/next_skip.t	... got the right MRO for Diamond_D
+mro/next_skip.t	... quietly failed redispatch from D
+mro/next_skip.t	... redispatched D to C when it exists
+mro/next_skip.t	... skipped B & C and went to A correctly
+mro/next_skip.t	... skipped B and went to C correctly
+mro/next_skip_utf8.t	... called B method, skipped C and went to A correctly
+mro/next_skip_utf8.t	... called D method dispatched to , different method correctly
+mro/next_skip_utf8.t	... can re-dispatch figured out correctly
+mro/next_skip_utf8.t	... cannot re-dispatch figured out correctly
+mro/next_skip_utf8.t	... cannot re-dispatch to a method which is not there
+mro/next_skip_utf8.t	... got the right MRO for Ｄiᚪၚd_D
+mro/next_skip_utf8.t	... quietly failed redispatch from D
+mro/next_skip_utf8.t	... redispatched D to C when it exists
+mro/next_skip_utf8.t	... skipped B & C and went to A correctly
+mro/next_skip_utf8.t	... skipped B and went to C correctly
+mro/overload_c3_utf8.t	*summary*
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* '
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* (unnamed)
+mro/package_aliases.t	*extra* Assigning a nameless package over one w/subclasses updates isa caches
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x8){name} (inner)
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x8){name} (inner::)
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x8){name} (inner:::)
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x8){name} (inner::::)
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x9){name} (inner)
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x9){name} (inner::)
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x9){name} (inner:::)
+mro/package_aliases.t	*extra* Giving nonexistent packages multiple effective names by HASH(0x9){name} (inner::::)
+mro/package_aliases.t	*extra* deleting a stash from its parent stash invalidates the isa caches
+mro/package_aliases.t	*extra* deleting a stash from its parent stash resets caches of substashes
+mro/package_aliases.t	*extra* mro_package_moved and self-referential packages
+mro/package_aliases.t	*extra* nested classes deleted & added simultaneously
+mro/package_aliases.t	*extra* replacing nonexistent nested packages by HASH(0x8){name} updates isa caches (inner::)
+mro/package_aliases.t	*extra* replacing nonexistent nested packages by HASH(0x8){name} updates isa caches (inner:::)
+mro/package_aliases.t	*extra* replacing nonexistent nested packages by HASH(0x8){name} updates isa caches (inner::::)
+mro/package_aliases.t	*extra* replacing nonexistent nested packages by HASH(0x9){name} updates isa caches (inner)
+mro/package_aliases.t	*extra* replacing nonexistent nested packages by HASH(0x9){name} updates isa caches (inner::)
+mro/package_aliases.t	*extra* replacing nonexistent nested packages by HASH(0x9){name} updates isa caches (inner:::)
+mro/package_aliases.t	*extra* replacing nonexistent nested packages by HASH(0x9){name} updates isa caches (inner::::)
+mro/package_aliases.t	*extra* the deleted stash is gone completely when freed
+mro/package_aliases.t	*extra* the deleted substash is gone completely when freed
+mro/package_aliases.t	*summary*
+mro/package_aliases.t	Giving nonexistent packages multiple effective names by assigning a glob to a glob (inner:::)
+mro/package_aliases.t	Giving nonexistent packages multiple effective names by assigning a string to a glob (inner::::)
+mro/package_aliases.t	New inherits from Old
+mro/package_aliases.t	New object isa Old
+mro/package_aliases.t	Old inherits from New
+mro/package_aliases.t	Old object isa New
+mro/package_aliases.t	class isa "class:"
+mro/package_aliases.t	isa(foo) when inheriting from "class:" after hash-to-glob assignment
+mro/package_aliases.t	mro_package_moved and self-referential packages
+mro/package_aliases.t	replacing nested packages by assigning a glob to a glob updates isa caches
+mro/package_aliases.t	replacing nested packages by assigning a stashref to a glob updates isa caches
+mro/package_aliases.t	replacing nested packages by assigning a string to a glob updates isa caches
+mro/package_aliases.t	replacing nonexistent nested packages by assigning a glob to a glob updates isa caches (inner)
+mro/package_aliases.t	replacing nonexistent nested packages by assigning a stashref to a glob updates isa caches (inner:::)
+mro/package_aliases.t	replacing nonexistent nested packages by assigning a string to a glob updates isa caches (inner::)
+mro/package_aliases.t	replacing packages by assigning a glob to a glob updates isa caches
+mro/package_aliases.t	replacing packages by assigning a stashref to a glob updates isa caches
+mro/package_aliases.t	replacing packages by assigning a string to a glob updates isa caches
+mro/package_aliases.t	the deleted stash is gone completely when freed
+mro/package_aliases_utf8.t	*rows-unstable*
+mro/pkg_gen.t	*summary*
+mro/pkg_gen_utf8.t	*summary*
+mro/recursion_c3_utf8.t	Graceful exception thrown
+mro/recursion_c3_utf8.t	Graceful exception thrown
+mro/recursion_c3_utf8.t	Graceful exception thrown
+mro/recursion_c3_utf8.t	Graceful exception thrown
+mro/recursion_c3_utf8.t	Graceful exception thrown
+mro/recursion_c3_utf8.t	Graceful exception thrown
+mro/recursion_c3_utf8.t	Graceful exception thrown
+mro/recursion_dfs_utf8.t	Graceful exception thrown
+mro/recursion_dfs_utf8.t	Graceful exception thrown
+mro/recursion_dfs_utf8.t	Graceful exception thrown
+mro/recursion_dfs_utf8.t	Graceful exception thrown
+mro/recursion_dfs_utf8.t	Graceful exception thrown
+mro/recursion_dfs_utf8.t	Graceful exception thrown
+mro/recursion_dfs_utf8.t	Graceful exception thrown
+mro/vulcan_c3.t	... got the right MRO for the Vulcan Dylan Example
+mro/vulcan_c3_utf8.t	... got the right MRO for the ቩᓪ찬 Dylan Example
+mro/vulcan_dfs.t	... got the right MRO for the Vulcan Dylan Example
+mro/vulcan_dfs_utf8.t	... got the right MRO for the ቩᓪ찬 Dylan Example
+op/args.t	delete $_[0] : outside block
+op/chr.t	[at t/op/chr.t line 28]
+op/chr.t	[at t/op/chr.t line 29]
+op/chr.t	[at t/op/chr.t line 30]
+op/chr.t	[at t/op/chr.t line 31]
+op/chr.t	[at t/op/chr.t line 80]
+op/chr.t	[at t/op/chr.t line 81]
+op/chr.t	[at t/op/chr.t line 82]
+op/cmpchain.t	!= != <=> non-associative
+op/cmpchain.t	!= != cmp non-associative
+op/cmpchain.t	!= != ~~ non-associative
+op/cmpchain.t	!= <=> non-associative
+op/cmpchain.t	!= == <=> non-associative
+op/cmpchain.t	!= == cmp non-associative
+op/cmpchain.t	!= == ~~ non-associative
+op/cmpchain.t	!= cmp non-associative
+op/cmpchain.t	!= eq <=> non-associative
+op/cmpchain.t	!= eq cmp non-associative
+op/cmpchain.t	!= eq ~~ non-associative
+op/cmpchain.t	!= ne <=> non-associative
+op/cmpchain.t	!= ne cmp non-associative
+op/cmpchain.t	!= ne ~~ non-associative
+op/cmpchain.t	!= ~~ non-associative
+op/cmpchain.t	< < isa non-associative
+op/cmpchain.t	< <= isa non-associative
+op/cmpchain.t	< > isa non-associative
+op/cmpchain.t	< >= isa non-associative
+op/cmpchain.t	< ge isa non-associative
+op/cmpchain.t	< gt isa non-associative
+op/cmpchain.t	< isa non-associative
+op/cmpchain.t	< le isa non-associative
+op/cmpchain.t	< lt isa non-associative
+op/cmpchain.t	<= < isa non-associative
+op/cmpchain.t	<= <= isa non-associative
+op/cmpchain.t	<= > isa non-associative
+op/cmpchain.t	<= >= isa non-associative
+op/cmpchain.t	<= ge isa non-associative
+op/cmpchain.t	<= gt isa non-associative
+op/cmpchain.t	<= isa non-associative
+op/cmpchain.t	<= le isa non-associative
+op/cmpchain.t	<= lt isa non-associative
+op/cmpchain.t	<=> != != non-associative
+op/cmpchain.t	<=> != == non-associative
+op/cmpchain.t	<=> != eq non-associative
+op/cmpchain.t	<=> != ne non-associative
+op/cmpchain.t	<=> != non-associative
+op/cmpchain.t	<=> <=> non-associative
+op/cmpchain.t	<=> == != non-associative
+op/cmpchain.t	<=> == == non-associative
+op/cmpchain.t	<=> == eq non-associative
+op/cmpchain.t	<=> == ne non-associative
+op/cmpchain.t	<=> == non-associative
+op/cmpchain.t	<=> cmp non-associative
+op/cmpchain.t	<=> eq != non-associative
+op/cmpchain.t	<=> eq == non-associative
+op/cmpchain.t	<=> eq eq non-associative
+op/cmpchain.t	<=> eq ne non-associative
+op/cmpchain.t	<=> eq non-associative
+op/cmpchain.t	<=> ne != non-associative
+op/cmpchain.t	<=> ne == non-associative
+op/cmpchain.t	<=> ne eq non-associative
+op/cmpchain.t	<=> ne ne non-associative
+op/cmpchain.t	<=> ne non-associative
+op/cmpchain.t	<=> ~~ non-associative
+op/cmpchain.t	== != <=> non-associative
+op/cmpchain.t	== != cmp non-associative
+op/cmpchain.t	== != ~~ non-associative
+op/cmpchain.t	== <=> non-associative
+op/cmpchain.t	== == <=> non-associative
+op/cmpchain.t	== == cmp non-associative
+op/cmpchain.t	== == ~~ non-associative
+op/cmpchain.t	== cmp non-associative
+op/cmpchain.t	== eq <=> non-associative
+op/cmpchain.t	== eq cmp non-associative
+op/cmpchain.t	== eq ~~ non-associative
+op/cmpchain.t	== ne <=> non-associative
+op/cmpchain.t	== ne cmp non-associative
+op/cmpchain.t	== ne ~~ non-associative
+op/cmpchain.t	== ~~ non-associative
+op/cmpchain.t	> < isa non-associative
+op/cmpchain.t	> <= isa non-associative
+op/cmpchain.t	> > isa non-associative
+op/cmpchain.t	> >= isa non-associative
+op/cmpchain.t	> ge isa non-associative
+op/cmpchain.t	> gt isa non-associative
+op/cmpchain.t	> isa non-associative
+op/cmpchain.t	> le isa non-associative
+op/cmpchain.t	> lt isa non-associative
+op/cmpchain.t	>= < isa non-associative
+op/cmpchain.t	>= <= isa non-associative
+op/cmpchain.t	>= > isa non-associative
+op/cmpchain.t	>= >= isa non-associative
+op/cmpchain.t	>= ge isa non-associative
+op/cmpchain.t	>= gt isa non-associative
+op/cmpchain.t	>= isa non-associative
+op/cmpchain.t	>= le isa non-associative
+op/cmpchain.t	>= lt isa non-associative
+op/cmpchain.t	cmp != != non-associative
+op/cmpchain.t	cmp != == non-associative
+op/cmpchain.t	cmp != eq non-associative
+op/cmpchain.t	cmp != ne non-associative
+op/cmpchain.t	cmp != non-associative
+op/cmpchain.t	cmp <=> non-associative
+op/cmpchain.t	cmp == != non-associative
+op/cmpchain.t	cmp == == non-associative
+op/cmpchain.t	cmp == eq non-associative
+op/cmpchain.t	cmp == ne non-associative
+op/cmpchain.t	cmp == non-associative
+op/cmpchain.t	cmp cmp non-associative
+op/cmpchain.t	cmp eq != non-associative
+op/cmpchain.t	cmp eq == non-associative
+op/cmpchain.t	cmp eq eq non-associative
+op/cmpchain.t	cmp eq ne non-associative
+op/cmpchain.t	cmp eq non-associative
+op/cmpchain.t	cmp ne != non-associative
+op/cmpchain.t	cmp ne == non-associative
+op/cmpchain.t	cmp ne eq non-associative
+op/cmpchain.t	cmp ne ne non-associative
+op/cmpchain.t	cmp ne non-associative
+op/cmpchain.t	cmp ~~ non-associative
+op/cmpchain.t	eq != <=> non-associative
+op/cmpchain.t	eq != cmp non-associative
+op/cmpchain.t	eq != ~~ non-associative
+op/cmpchain.t	eq <=> non-associative
+op/cmpchain.t	eq == <=> non-associative
+op/cmpchain.t	eq == cmp non-associative
+op/cmpchain.t	eq == ~~ non-associative
+op/cmpchain.t	eq cmp non-associative
+op/cmpchain.t	eq eq <=> non-associative
+op/cmpchain.t	eq eq cmp non-associative
+op/cmpchain.t	eq eq ~~ non-associative
+op/cmpchain.t	eq ne <=> non-associative
+op/cmpchain.t	eq ne cmp non-associative
+op/cmpchain.t	eq ne ~~ non-associative
+op/cmpchain.t	eq ~~ non-associative
+op/cmpchain.t	ge < isa non-associative
+op/cmpchain.t	ge <= isa non-associative
+op/cmpchain.t	ge > isa non-associative
+op/cmpchain.t	ge >= isa non-associative
+op/cmpchain.t	ge ge isa non-associative
+op/cmpchain.t	ge gt isa non-associative
+op/cmpchain.t	ge isa non-associative
+op/cmpchain.t	ge le isa non-associative
+op/cmpchain.t	ge lt isa non-associative
+op/cmpchain.t	gt < isa non-associative
+op/cmpchain.t	gt <= isa non-associative
+op/cmpchain.t	gt > isa non-associative
+op/cmpchain.t	gt >= isa non-associative
+op/cmpchain.t	gt ge isa non-associative
+op/cmpchain.t	gt gt isa non-associative
+op/cmpchain.t	gt isa non-associative
+op/cmpchain.t	gt le isa non-associative
+op/cmpchain.t	gt lt isa non-associative
+op/cmpchain.t	isa < < non-associative
+op/cmpchain.t	isa < <= non-associative
+op/cmpchain.t	isa < > non-associative
+op/cmpchain.t	isa < >= non-associative
+op/cmpchain.t	isa < ge non-associative
+op/cmpchain.t	isa < gt non-associative
+op/cmpchain.t	isa < le non-associative
+op/cmpchain.t	isa < lt non-associative
+op/cmpchain.t	isa < non-associative
+op/cmpchain.t	isa <= < non-associative
+op/cmpchain.t	isa <= <= non-associative
+op/cmpchain.t	isa <= > non-associative
+op/cmpchain.t	isa <= >= non-associative
+op/cmpchain.t	isa <= ge non-associative
+op/cmpchain.t	isa <= gt non-associative
+op/cmpchain.t	isa <= le non-associative
+op/cmpchain.t	isa <= lt non-associative
+op/cmpchain.t	isa <= non-associative
+op/cmpchain.t	isa > < non-associative
+op/cmpchain.t	isa > <= non-associative
+op/cmpchain.t	isa > > non-associative
+op/cmpchain.t	isa > >= non-associative
+op/cmpchain.t	isa > ge non-associative
+op/cmpchain.t	isa > gt non-associative
+op/cmpchain.t	isa > le non-associative
+op/cmpchain.t	isa > lt non-associative
+op/cmpchain.t	isa > non-associative
+op/cmpchain.t	isa >= < non-associative
+op/cmpchain.t	isa >= <= non-associative
+op/cmpchain.t	isa >= > non-associative
+op/cmpchain.t	isa >= >= non-associative
+op/cmpchain.t	isa >= ge non-associative
+op/cmpchain.t	isa >= gt non-associative
+op/cmpchain.t	isa >= le non-associative
+op/cmpchain.t	isa >= lt non-associative
+op/cmpchain.t	isa >= non-associative
+op/cmpchain.t	isa ge < non-associative
+op/cmpchain.t	isa ge <= non-associative
+op/cmpchain.t	isa ge > non-associative
+op/cmpchain.t	isa ge >= non-associative
+op/cmpchain.t	isa ge ge non-associative
+op/cmpchain.t	isa ge gt non-associative
+op/cmpchain.t	isa ge le non-associative
+op/cmpchain.t	isa ge lt non-associative
+op/cmpchain.t	isa ge non-associative
+op/cmpchain.t	isa gt < non-associative
+op/cmpchain.t	isa gt <= non-associative
+op/cmpchain.t	isa gt > non-associative
+op/cmpchain.t	isa gt >= non-associative
+op/cmpchain.t	isa gt ge non-associative
+op/cmpchain.t	isa gt gt non-associative
+op/cmpchain.t	isa gt le non-associative
+op/cmpchain.t	isa gt lt non-associative
+op/cmpchain.t	isa gt non-associative
+op/cmpchain.t	isa isa non-associative
+op/cmpchain.t	isa le < non-associative
+op/cmpchain.t	isa le <= non-associative
+op/cmpchain.t	isa le > non-associative
+op/cmpchain.t	isa le >= non-associative
+op/cmpchain.t	isa le ge non-associative
+op/cmpchain.t	isa le gt non-associative
+op/cmpchain.t	isa le le non-associative
+op/cmpchain.t	isa le lt non-associative
+op/cmpchain.t	isa le non-associative
+op/cmpchain.t	isa lt < non-associative
+op/cmpchain.t	isa lt <= non-associative
+op/cmpchain.t	isa lt > non-associative
+op/cmpchain.t	isa lt >= non-associative
+op/cmpchain.t	isa lt ge non-associative
+op/cmpchain.t	isa lt gt non-associative
+op/cmpchain.t	isa lt le non-associative
+op/cmpchain.t	isa lt lt non-associative
+op/cmpchain.t	isa lt non-associative
+op/cmpchain.t	le < isa non-associative
+op/cmpchain.t	le <= isa non-associative
+op/cmpchain.t	le > isa non-associative
+op/cmpchain.t	le >= isa non-associative
+op/cmpchain.t	le ge isa non-associative
+op/cmpchain.t	le gt isa non-associative
+op/cmpchain.t	le isa non-associative
+op/cmpchain.t	le le isa non-associative
+op/cmpchain.t	le lt isa non-associative
+op/cmpchain.t	lt < isa non-associative
+op/cmpchain.t	lt <= isa non-associative
+op/cmpchain.t	lt > isa non-associative
+op/cmpchain.t	lt >= isa non-associative
+op/cmpchain.t	lt ge isa non-associative
+op/cmpchain.t	lt gt isa non-associative
+op/cmpchain.t	lt isa non-associative
+op/cmpchain.t	lt le isa non-associative
+op/cmpchain.t	lt lt isa non-associative
+op/cmpchain.t	ne != <=> non-associative
+op/cmpchain.t	ne != cmp non-associative
+op/cmpchain.t	ne != ~~ non-associative
+op/cmpchain.t	ne <=> non-associative
+op/cmpchain.t	ne == <=> non-associative
+op/cmpchain.t	ne == cmp non-associative
+op/cmpchain.t	ne == ~~ non-associative
+op/cmpchain.t	ne cmp non-associative
+op/cmpchain.t	ne eq <=> non-associative
+op/cmpchain.t	ne eq cmp non-associative
+op/cmpchain.t	ne eq ~~ non-associative
+op/cmpchain.t	ne ne <=> non-associative
+op/cmpchain.t	ne ne cmp non-associative
+op/cmpchain.t	ne ne ~~ non-associative
+op/cmpchain.t	ne ~~ non-associative
+op/cmpchain.t	~~ != != non-associative
+op/cmpchain.t	~~ != == non-associative
+op/cmpchain.t	~~ != eq non-associative
+op/cmpchain.t	~~ != ne non-associative
+op/cmpchain.t	~~ != non-associative
+op/cmpchain.t	~~ <=> non-associative
+op/cmpchain.t	~~ == != non-associative
+op/cmpchain.t	~~ == == non-associative
+op/cmpchain.t	~~ == eq non-associative
+op/cmpchain.t	~~ == ne non-associative
+op/cmpchain.t	~~ == non-associative
+op/cmpchain.t	~~ cmp non-associative
+op/cmpchain.t	~~ eq != non-associative
+op/cmpchain.t	~~ eq == non-associative
+op/cmpchain.t	~~ eq eq non-associative
+op/cmpchain.t	~~ eq ne non-associative
+op/cmpchain.t	~~ eq non-associative
+op/cmpchain.t	~~ ne != non-associative
+op/cmpchain.t	~~ ne == non-associative
+op/cmpchain.t	~~ ne eq non-associative
+op/cmpchain.t	~~ ne ne non-associative
+op/cmpchain.t	~~ ne non-associative
+op/cmpchain.t	~~ ~~ non-associative
+op/cond.t	SEGV in Perl_scalar
+op/crypt.t	crypt turns off utf8 on its target
+op/current_sub.t	*summary*
+op/do.t	*extra* do subname() called
+op/do.t	*extra* do subname(arg) called
+op/do.t	*summary*
+op/do.t	RT 124248
+op/do.t	do $subref("arg") is syntax error
+op/do.t	do $subref() is syntax error
+op/do.t	do subname("arg") is syntax error
+op/do.t	do subname() is syntax error
+op/exists_sub.t	exists takes subroutine names with no argument list
+op/localref.t	old value not visible during restore
+op/not.t	!0 returns the same value each time [perl \#114838]
+op/not.t	!1 returns the same value each time [perl \#114838]
+op/not.t	not 0 is read-only
+op/not.t	not 1 is read-only
+op/print.t	print doesn't launder utf8 overlongs
+op/signatures.t	($a) interpreted as protoype when not enabled
+op/signatures.t	($a) not signature when not enabled
+op/signatures.t	ADJUST does not swallow trailing comma
+op/signatures.t	AUTOLOAD does not swallow trailing comma
+op/signatures.t	BEGIN does not swallow trailing comma
+op/signatures.t	CHECK does not swallow trailing comma
+op/signatures.t	DESTROY does not swallow trailing comma
+op/signatures.t	END does not swallow trailing comma
+op/signatures.t	INIT does not swallow trailing comma
+op/signatures.t	RT 132760 err 0
+op/signatures.t	RT 132760 expect 1 error
+op/signatures.t	RT \#130661
+op/signatures.t	RT \#132141
+op/signatures.t	UNITCHECK does not swallow trailing comma
+op/signatures.t	Warns of experimental @_ in param default
+op/signatures.t	Warns of experimental @_ in param default
+op/signatures.t	[at t/op/signatures.t line 1016]
+op/signatures.t	[at t/op/signatures.t line 1019]
+op/signatures.t	[at t/op/signatures.t line 1114]
+op/signatures.t	[at t/op/signatures.t line 1120]
+op/signatures.t	[at t/op/signatures.t line 1126]
+op/signatures.t	[at t/op/signatures.t line 1129]
+op/signatures.t	[at t/op/signatures.t line 1132]
+op/signatures.t	[at t/op/signatures.t line 1139]
+op/signatures.t	[at t/op/signatures.t line 1146]
+op/signatures.t	[at t/op/signatures.t line 1153]
+op/signatures.t	[at t/op/signatures.t line 1160]
+op/signatures.t	[at t/op/signatures.t line 1167]
+op/signatures.t	[at t/op/signatures.t line 1170]
+op/signatures.t	[at t/op/signatures.t line 1175]
+op/signatures.t	[at t/op/signatures.t line 1179]
+op/signatures.t	[at t/op/signatures.t line 1181]
+op/signatures.t	[at t/op/signatures.t line 1187]
+op/signatures.t	[at t/op/signatures.t line 1191]
+op/signatures.t	[at t/op/signatures.t line 1193]
+op/signatures.t	[at t/op/signatures.t line 1265]
+op/signatures.t	[at t/op/signatures.t line 1269]
+op/signatures.t	[at t/op/signatures.t line 1271]
+op/signatures.t	[at t/op/signatures.t line 1287]
+op/signatures.t	[at t/op/signatures.t line 1290]
+op/signatures.t	[at t/op/signatures.t line 450]
+op/signatures.t	[at t/op/signatures.t line 593]
+op/signatures.t	[at t/op/signatures.t line 596]
+op/signatures.t	[at t/op/signatures.t line 626]
+op/signatures.t	[at t/op/signatures.t line 629]
+op/signatures.t	[at t/op/signatures.t line 644]
+op/signatures.t	[at t/op/signatures.t line 647]
+op/signatures.t	[at t/op/signatures.t line 666]
+op/signatures.t	[at t/op/signatures.t line 669]
+op/signatures.t	[at t/op/signatures.t line 688]
+op/signatures.t	[at t/op/signatures.t line 691]
+op/signatures.t	[at t/op/signatures.t line 924]
+op/signatures.t	[at t/op/signatures.t line 927]
+op/signatures.t	[at t/op/signatures.t line 930]
+op/signatures.t	[at t/op/signatures.t line 933]
+op/signatures.t	[at t/op/signatures.t line 936]
+op/signatures.t	[at t/op/signatures.t line 939]
+op/signatures.t	[at t/op/signatures.t line 942]
+op/signatures.t	[at t/op/signatures.t line 945]
+op/signatures.t	[at t/op/signatures.t line 948]
+op/signatures.t	[at t/op/signatures.t line 951]
+op/signatures.t	[at t/op/signatures.t line 954]
+op/signatures.t	[at t/op/signatures.t line 957]
+op/signatures.t	[at t/op/signatures.t line 960]
+op/signatures.t	[at t/op/signatures.t line 963]
+op/signatures.t	[at t/op/signatures.t line 966]
+op/signatures.t	[at t/op/signatures.t line 969]
+op/signatures.t	[at t/op/signatures.t line 972]
+op/signatures.t	[at t/op/signatures.t line 975]
+op/signatures.t	[at t/op/signatures.t line 978]
+op/signatures.t	[at t/op/signatures.t line 981]
+op/signatures.t	[at t/op/signatures.t line 984]
+op/signatures.t	__CLASS__ does not swallow trailing comma
+op/signatures.t	__DATA__ does not swallow trailing comma
+op/signatures.t	__END__ does not swallow trailing comma
+op/signatures.t	__FILE__ does not swallow trailing comma
+op/signatures.t	__LINE__ does not swallow trailing comma
+op/signatures.t	__PACKAGE__ does not swallow trailing comma
+op/signatures.t	__SUB__ does not swallow trailing comma
+op/signatures.t	`$_[0]` warns of experimental @_
+op/signatures.t	`&SUB` warns of experimental @_
+op/signatures.t	`each @_` warns of experimental @_
+op/signatures.t	`eval q( $_[0] )` warns of experimental @_
+op/signatures.t	`func("a", @_, "z")` warns of experimental @_
+op/signatures.t	`goto &SUB` warns of experimental @_
+op/signatures.t	`keys @_` warns of experimental @_
+op/signatures.t	`my $one = 1; $_[$one]` warns of experimental @_
+op/signatures.t	`pop @_` warns of experimental @_
+op/signatures.t	`pop` warns of experimental @_
+op/signatures.t	`print "a", @_, "z"` warns of experimental @_
+op/signatures.t	`push @_, 1` warns of experimental @_
+op/signatures.t	`shift @_` warns of experimental @_
+op/signatures.t	`shift` warns of experimental @_
+op/signatures.t	`splice @_, 1, 2, 3` warns of experimental @_
+op/signatures.t	`unshift @_, 9` warns of experimental @_
+op/signatures.t	`values @_` warns of experimental @_
+op/signatures.t	abs does not swallow trailing comma
+op/signatures.t	accept does not swallow trailing comma
+op/signatures.t	alarm does not swallow trailing comma
+op/signatures.t	and does not swallow trailing comma
+op/signatures.t	atan2 does not swallow trailing comma
+op/signatures.t	bind does not swallow trailing comma
+op/signatures.t	binmode does not swallow trailing comma
+op/signatures.t	bless does not swallow trailing comma
+op/signatures.t	break does not swallow trailing comma
+op/signatures.t	caller does not swallow trailing comma
+op/signatures.t	catch does not swallow trailing comma
+op/signatures.t	chdir does not swallow trailing comma
+op/signatures.t	chmod does not swallow trailing comma
+op/signatures.t	chomp does not swallow trailing comma
+op/signatures.t	chop does not swallow trailing comma
+op/signatures.t	chown does not swallow trailing comma
+op/signatures.t	chr does not swallow trailing comma
+op/signatures.t	chroot does not swallow trailing comma
+op/signatures.t	class does not swallow trailing comma
+op/signatures.t	close does not swallow trailing comma
+op/signatures.t	closedir does not swallow trailing comma
+op/signatures.t	cmp does not swallow trailing comma
+op/signatures.t	connect does not swallow trailing comma
+op/signatures.t	continue does not swallow trailing comma
+op/signatures.t	cos does not swallow trailing comma
+op/signatures.t	crypt does not swallow trailing comma
+op/signatures.t	dbmclose does not swallow trailing comma
+op/signatures.t	dbmopen does not swallow trailing comma
+op/signatures.t	default does not swallow trailing comma
+op/signatures.t	defer does not swallow trailing comma
+op/signatures.t	defined does not swallow trailing comma
+op/signatures.t	delete does not swallow trailing comma
+op/signatures.t	die does not swallow trailing comma
+op/signatures.t	do does not swallow trailing comma
+op/signatures.t	dump does not swallow trailing comma
+op/signatures.t	duplicate sig var names
+op/signatures.t	each does not swallow trailing comma
+op/signatures.t	else does not swallow trailing comma
+op/signatures.t	elsif does not swallow trailing comma
+op/signatures.t	endgrent does not swallow trailing comma
+op/signatures.t	endhostent does not swallow trailing comma
+op/signatures.t	endnetent does not swallow trailing comma
+op/signatures.t	endprotoent does not swallow trailing comma
+op/signatures.t	endpwent does not swallow trailing comma
+op/signatures.t	endservent does not swallow trailing comma
+op/signatures.t	eof does not swallow trailing comma
+op/signatures.t	eq does not swallow trailing comma
+op/signatures.t	error when not enabled 1
+op/signatures.t	error when not enabled 2
+op/signatures.t	eval does not swallow trailing comma
+op/signatures.t	evalbytes does not swallow trailing comma
+op/signatures.t	exec does not swallow trailing comma
+op/signatures.t	exists does not swallow trailing comma
+op/signatures.t	exit does not swallow trailing comma
+op/signatures.t	exp does not swallow trailing comma
+op/signatures.t	f($1)
+op/signatures.t	f($_)
+op/signatures.t	f(%_)
+op/signatures.t	f(@_)
+op/signatures.t	fc does not swallow trailing comma
+op/signatures.t	fcntl does not swallow trailing comma
+op/signatures.t	field does not swallow trailing comma
+op/signatures.t	fileno does not swallow trailing comma
+op/signatures.t	finally does not swallow trailing comma
+op/signatures.t	flock does not swallow trailing comma
+op/signatures.t	for does not swallow trailing comma
+op/signatures.t	foreach does not swallow trailing comma
+op/signatures.t	fork does not swallow trailing comma
+op/signatures.t	format does not swallow trailing comma
+op/signatures.t	formline does not swallow trailing comma
+op/signatures.t	ge does not swallow trailing comma
+op/signatures.t	getc does not swallow trailing comma
+op/signatures.t	getgrent does not swallow trailing comma
+op/signatures.t	getgrgid does not swallow trailing comma
+op/signatures.t	getgrnam does not swallow trailing comma
+op/signatures.t	gethostbyaddr does not swallow trailing comma
+op/signatures.t	gethostbyname does not swallow trailing comma
+op/signatures.t	gethostent does not swallow trailing comma
+op/signatures.t	getlogin does not swallow trailing comma
+op/signatures.t	getnetbyaddr does not swallow trailing comma
+op/signatures.t	getnetbyname does not swallow trailing comma
+op/signatures.t	getnetent does not swallow trailing comma
+op/signatures.t	getpeername does not swallow trailing comma
+op/signatures.t	getpgrp does not swallow trailing comma
+op/signatures.t	getppid does not swallow trailing comma
+op/signatures.t	getpriority does not swallow trailing comma
+op/signatures.t	getprotobyname does not swallow trailing comma
+op/signatures.t	getprotobynumber does not swallow trailing comma
+op/signatures.t	getprotoent does not swallow trailing comma
+op/signatures.t	getpwent does not swallow trailing comma
+op/signatures.t	getpwnam does not swallow trailing comma
+op/signatures.t	getpwuid does not swallow trailing comma
+op/signatures.t	getservbyname does not swallow trailing comma
+op/signatures.t	getservbyport does not swallow trailing comma
+op/signatures.t	getservent does not swallow trailing comma
+op/signatures.t	getsockname does not swallow trailing comma
+op/signatures.t	getsockopt does not swallow trailing comma
+op/signatures.t	given does not swallow trailing comma
+op/signatures.t	glob does not swallow trailing comma
+op/signatures.t	gmtime does not swallow trailing comma
+op/signatures.t	goto does not swallow trailing comma
+op/signatures.t	grep does not swallow trailing comma
+op/signatures.t	gt does not swallow trailing comma
+op/signatures.t	handle commonality in scalar parms # TODO can't handle commonaility
+op/signatures.t	hex does not swallow trailing comma
+op/signatures.t	if does not swallow trailing comma
+op/signatures.t	index does not swallow trailing comma
+op/signatures.t	int does not swallow trailing comma
+op/signatures.t	ioctl does not swallow trailing comma
+op/signatures.t	isa does not swallow trailing comma
+op/signatures.t	join does not swallow trailing comma
+op/signatures.t	keys does not swallow trailing comma
+op/signatures.t	kill does not swallow trailing comma
+op/signatures.t	last does not swallow trailing comma
+op/signatures.t	lc does not swallow trailing comma
+op/signatures.t	lcfirst does not swallow trailing comma
+op/signatures.t	le does not swallow trailing comma
+op/signatures.t	length does not swallow trailing comma
+op/signatures.t	link does not swallow trailing comma
+op/signatures.t	listen does not swallow trailing comma
+op/signatures.t	local does not swallow trailing comma
+op/signatures.t	localtime does not swallow trailing comma
+op/signatures.t	lock does not swallow trailing comma
+op/signatures.t	log does not swallow trailing comma
+op/signatures.t	lstat does not swallow trailing comma
+op/signatures.t	lt does not swallow trailing comma
+op/signatures.t	m does not swallow trailing comma
+op/signatures.t	map does not swallow trailing comma
+op/signatures.t	masking warning
+op/signatures.t	method does not swallow trailing comma
+op/signatures.t	mkdir does not swallow trailing comma
+op/signatures.t	msgctl does not swallow trailing comma
+op/signatures.t	msgget does not swallow trailing comma
+op/signatures.t	msgrcv does not swallow trailing comma
+op/signatures.t	msgsnd does not swallow trailing comma
+op/signatures.t	multiline1: $b
+op/signatures.t	multiline1: $c
+op/signatures.t	multiline1: $d
+op/signatures.t	multiline1: $e
+op/signatures.t	my does not swallow trailing comma
+op/signatures.t	ne does not swallow trailing comma
+op/signatures.t	next does not swallow trailing comma
+op/signatures.t	no does not swallow trailing comma
+op/signatures.t	not does not swallow trailing comma
+op/signatures.t	oct does not swallow trailing comma
+op/signatures.t	open does not swallow trailing comma
+op/signatures.t	opendir does not swallow trailing comma
+op/signatures.t	or does not swallow trailing comma
+op/signatures.t	ord does not swallow trailing comma
+op/signatures.t	our does not swallow trailing comma
+op/signatures.t	pack does not swallow trailing comma
+op/signatures.t	pipe does not swallow trailing comma
+op/signatures.t	pop does not swallow trailing comma
+op/signatures.t	pos does not swallow trailing comma
+op/signatures.t	print does not swallow trailing comma
+op/signatures.t	printf does not swallow trailing comma
+op/signatures.t	prototype does not swallow trailing comma
+op/signatures.t	push does not swallow trailing comma
+op/signatures.t	qq does not swallow trailing comma
+op/signatures.t	qr does not swallow trailing comma
+op/signatures.t	quotemeta does not swallow trailing comma
+op/signatures.t	qw does not swallow trailing comma
+op/signatures.t	qx does not swallow trailing comma
+op/signatures.t	rand does not swallow trailing comma
+op/signatures.t	read does not swallow trailing comma
+op/signatures.t	readdir does not swallow trailing comma
+op/signatures.t	readline does not swallow trailing comma
+op/signatures.t	readlink does not swallow trailing comma
+op/signatures.t	readpipe does not swallow trailing comma
+op/signatures.t	recv does not swallow trailing comma
+op/signatures.t	redo does not swallow trailing comma
+op/signatures.t	ref does not swallow trailing comma
+op/signatures.t	rename does not swallow trailing comma
+op/signatures.t	require does not swallow trailing comma
+op/signatures.t	reset does not swallow trailing comma
+op/signatures.t	return does not swallow trailing comma
+op/signatures.t	reverse does not swallow trailing comma
+op/signatures.t	rewinddir does not swallow trailing comma
+op/signatures.t	rindex does not swallow trailing comma
+op/signatures.t	rmdir does not swallow trailing comma
+op/signatures.t	s does not swallow trailing comma
+op/signatures.t	say does not swallow trailing comma
+op/signatures.t	scalar does not swallow trailing comma
+op/signatures.t	seek does not swallow trailing comma
+op/signatures.t	seekdir does not swallow trailing comma
+op/signatures.t	select does not swallow trailing comma
+op/signatures.t	semctl does not swallow trailing comma
+op/signatures.t	semget does not swallow trailing comma
+op/signatures.t	semop does not swallow trailing comma
+op/signatures.t	send does not swallow trailing comma
+op/signatures.t	setgrent does not swallow trailing comma
+op/signatures.t	sethostent does not swallow trailing comma
+op/signatures.t	setnetent does not swallow trailing comma
+op/signatures.t	setpgrp does not swallow trailing comma
+op/signatures.t	setpriority does not swallow trailing comma
+op/signatures.t	setprotoent does not swallow trailing comma
+op/signatures.t	setpwent does not swallow trailing comma
+op/signatures.t	setservent does not swallow trailing comma
+op/signatures.t	setsockopt does not swallow trailing comma
+op/signatures.t	shift does not swallow trailing comma
+op/signatures.t	shmctl does not swallow trailing comma
+op/signatures.t	shmget does not swallow trailing comma
+op/signatures.t	shmread does not swallow trailing comma
+op/signatures.t	shmwrite does not swallow trailing comma
+op/signatures.t	shutdown does not swallow trailing comma
+op/signatures.t	sin does not swallow trailing comma
+op/signatures.t	sleep does not swallow trailing comma
+op/signatures.t	socket does not swallow trailing comma
+op/signatures.t	socketpair does not swallow trailing comma
+op/signatures.t	sort does not swallow trailing comma
+op/signatures.t	splice does not swallow trailing comma
+op/signatures.t	split does not swallow trailing comma
+op/signatures.t	sprintf does not swallow trailing comma
+op/signatures.t	sqrt does not swallow trailing comma
+op/signatures.t	srand does not swallow trailing comma
+op/signatures.t	stat does not swallow trailing comma
+op/signatures.t	state does not swallow trailing comma
+op/signatures.t	study does not swallow trailing comma
+op/signatures.t	sub does not swallow trailing comma
+op/signatures.t	substr does not swallow trailing comma
+op/signatures.t	symlink does not swallow trailing comma
+op/signatures.t	syscall does not swallow trailing comma
+op/signatures.t	sysopen does not swallow trailing comma
+op/signatures.t	sysread does not swallow trailing comma
+op/signatures.t	sysseek does not swallow trailing comma
+op/signatures.t	system does not swallow trailing comma
+op/signatures.t	syswrite does not swallow trailing comma
+op/signatures.t	tell does not swallow trailing comma
+op/signatures.t	telldir does not swallow trailing comma
+op/signatures.t	tie does not swallow trailing comma
+op/signatures.t	tied does not swallow trailing comma
+op/signatures.t	time does not swallow trailing comma
+op/signatures.t	times does not swallow trailing comma
+op/signatures.t	tr does not swallow trailing comma
+op/signatures.t	truncate does not swallow trailing comma
+op/signatures.t	try does not swallow trailing comma
+op/signatures.t	uc does not swallow trailing comma
+op/signatures.t	ucfirst does not swallow trailing comma
+op/signatures.t	umask does not swallow trailing comma
+op/signatures.t	undef does not swallow trailing comma
+op/signatures.t	unless does not swallow trailing comma
+op/signatures.t	unlink does not swallow trailing comma
+op/signatures.t	unpack does not swallow trailing comma
+op/signatures.t	unshift does not swallow trailing comma
+op/signatures.t	untie does not swallow trailing comma
+op/signatures.t	until does not swallow trailing comma
+op/signatures.t	use does not swallow trailing comma
+op/signatures.t	utime does not swallow trailing comma
+op/signatures.t	values does not swallow trailing comma
+op/signatures.t	vec does not swallow trailing comma
+op/signatures.t	wait does not swallow trailing comma
+op/signatures.t	waitpid does not swallow trailing comma
+op/signatures.t	wantarray does not swallow trailing comma
+op/signatures.t	warn does not swallow trailing comma
+op/signatures.t	when does not swallow trailing comma
+op/signatures.t	while does not swallow trailing comma
+op/signatures.t	write does not swallow trailing comma
+op/signatures.t	x does not swallow trailing comma
+op/signatures.t	xor does not swallow trailing comma
+op/signatures.t	y does not swallow trailing comma
+op/sigsystem.t	*summary*
+op/ver.t	ASCII sprintf("%*vb", "\#\#", v1.22.333.4444)
+op/ver.t	ASCII sprintf("%vX", v1.22.333.4444)
+op/ver.t	ASCII sprintf("%vd", v1.22.333.4444 w/use bytes
+op/ver.t	Warnings are enabled by default post 5.35
+op/ver.t	at t/op/ver.t line 20
+op/ver.t	at t/op/ver.t line 59
+op/ver.t	v-strings even work in Mordor
+re/pat_re_eval.t	(*{ ... }) ctl_n 1
+re/pat_re_eval.t	(*{ ... }) ctl_n 2
+re/pat_re_eval.t	(*{ ... }) ctl_n 3
+re/pat_re_eval.t	(*{ ... }) ctl_n 4
+re/pat_re_eval.t	(*{ ... }) ctl_n 5
+re/pat_re_eval.t	(*{ ... }) match 1
+re/pat_re_eval.t	(*{ ... }) match 2
+re/pat_re_eval.t	(*{ ... }) match 3
+re/pat_re_eval.t	(*{ ... }) match 4
+re/pat_re_eval.t	(*{ ... }) match 5
+re/pat_re_eval.t	(*{ ... }) plus 1
+re/pat_re_eval.t	(*{ ... }) plus 2
+re/pat_re_eval.t	(*{ ... }) plus 3
+re/pat_re_eval.t	(*{ ... }) plus 4
+re/pat_re_eval.t	(*{ ... }) plus 5
+re/pat_re_eval.t	(?(*{ ... })yes|no) works as expected
+re/pat_re_eval.t	(?(*{ ... })yes|no) works as expected
+re/pat_re_eval.t	(?(?{})|) in scalar context
+re/pat_re_eval.t	(??{ ref })
+re/pat_re_eval.t	(??{$tied_former_overload}) sees the right $1 in FETCH
+re/pat_re_eval.t	(??{$x}) does not leak cached qr to (??{\$x}) (match)
+re/pat_re_eval.t	(??{$x}) does not leak cached qr to (??{\$x}) (no match)
+re/pat_re_eval.t	(??{}) in scalar context
+re/pat_re_eval.t	(?{}) BEGIN and $1
+re/pat_re_eval.t	(?{}) BEGIN and $1 mark 2
+re/pat_re_eval.t	(?{}) in scalar context: $^R
+re/pat_re_eval.t	*summary*
+re/pat_re_eval.t	?pat? with (??{a,a,a})
+re/pat_re_eval.t	?pat? with (??{a,b,c})
+re/pat_re_eval.t	?pat? with a,a,a
+re/pat_re_eval.t	?pat? with a,b,c
+re/pat_re_eval.t	ACCEPT/CURLYX/EVAL - pattern should match
+re/pat_re_eval.t	Bug 121070 - use of (?&Char) should not clobber $^R
+re/pat_re_eval.t	Bug 56194
+re/pat_re_eval.t	Bug 56194
+re/pat_re_eval.t	Bug 56194
+re/pat_re_eval.t	Bug 56194
+re/pat_re_eval.t	Bug 56194 ($^R tweaked by 121070)
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr //
+re/pat_re_eval.t	Call code from qr // norun 1
+re/pat_re_eval.t	Call code from qr // norun 2
+re/pat_re_eval.t	GH \#19390
+re/pat_re_eval.t	GH \#19680
+re/pat_re_eval.t	Interpolated qr // preserves UTF-8
+re/pat_re_eval.t	Make sure that ACCEPT works in CURLYX by using EVAL
+re/pat_re_eval.t	Postponed UTF-8 string in UTF-8 re matches UTF-8
+re/pat_re_eval.t	Postponed UTF-8 string in non-UTF-8 re matches UTF-8
+re/pat_re_eval.t	Postponed interpolation of qr // preserves UTF-8
+re/pat_re_eval.t	Postponed non-UTF-8 string in UTF-8 re matches non-UTF8
+re/pat_re_eval.t	Postponed non-UTF-8 string in non-UTF-8 re matches non-UTF8
+re/pat_re_eval.t	RT \#126697
+re/pat_re_eval.t	RT \#130650
+re/pat_re_eval.t	RT \#132772 -  compile time qr// compound
+re/pat_re_eval.t	RT \#132772 -  run time qr//
+re/pat_re_eval.t	RT \#132772 - compile time
+re/pat_re_eval.t	RT \#132772 - compile time qr//
+re/pat_re_eval.t	RT \#132772 - run time
+re/pat_re_eval.t	RT \#133687 yes
+re/pat_re_eval.t	RT \#133687 yes|no
+re/pat_re_eval.t	Reblessed qr // stringifies
+re/pat_re_eval.t	UTF8 sytax error
+re/pat_re_eval.t	[a-d] literal qr + r5
+re/pat_re_eval.t	[a-d] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[a-d] literal qr + r5, outside
+re/pat_re_eval.t	[a-d] literal qr + r6
+re/pat_re_eval.t	[a-d] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[a-d] literal qr + r6, outside
+re/pat_re_eval.t	[a-e] literal qr + r5
+re/pat_re_eval.t	[a-e] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[a-e] literal qr + r5, outside
+re/pat_re_eval.t	[a-e] literal qr + r6
+re/pat_re_eval.t	[a-e] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[a-e] literal qr + r6, outside
+re/pat_re_eval.t	[a-f] literal qr + r5
+re/pat_re_eval.t	[a-f] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[a-f] literal qr + r5, outside
+re/pat_re_eval.t	[a-f] literal qr + r6
+re/pat_re_eval.t	[a-f] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[a-f] literal qr + r6, outside
+re/pat_re_eval.t	[a] literal code
+re/pat_re_eval.t	[a] literal code UTF8
+re/pat_re_eval.t	[a] literal qr embedded text
+re/pat_re_eval.t	[a] literal qr embedded text + lit code
+re/pat_re_eval.t	[a] literal qr embedded text + run code
+re/pat_re_eval.t	[a] literal qr embedded text + run code
+re/pat_re_eval.t	[a] literal qr naked
+re/pat_re_eval.t	[a] literal qr once embedded text
+re/pat_re_eval.t	[a] literal qr once embedded text + lit code
+re/pat_re_eval.t	[a] literal qr once embedded text + run code
+re/pat_re_eval.t	[a] literal qr once embedded text + run code norun
+re/pat_re_eval.t	[a] literal qr once naked
+re/pat_re_eval.t	[a] literal+runtime AA
+re/pat_re_eval.t	[a] literal+runtime AA norun
+re/pat_re_eval.t	[a] literal+runtime AU
+re/pat_re_eval.t	[a] literal+runtime AU norun
+re/pat_re_eval.t	[a] literal+runtime UA
+re/pat_re_eval.t	[a] literal+runtime UA norun
+re/pat_re_eval.t	[a] literal+runtime UU
+re/pat_re_eval.t	[a] literal+runtime UU norun
+re/pat_re_eval.t	[a] unvarying runtime code AA
+re/pat_re_eval.t	[a] unvarying runtime code AA norun
+re/pat_re_eval.t	[a] unvarying runtime code AU
+re/pat_re_eval.t	[a] unvarying runtime code AU norun
+re/pat_re_eval.t	[a] unvarying runtime code UA
+re/pat_re_eval.t	[a] unvarying runtime code UA norun
+re/pat_re_eval.t	[a] unvarying runtime code UU
+re/pat_re_eval.t	[a] unvarying runtime code UU norun
+re/pat_re_eval.t	[b-d] literal qr + r5
+re/pat_re_eval.t	[b-d] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[b-d] literal qr + r5, outside
+re/pat_re_eval.t	[b-d] literal qr + r6
+re/pat_re_eval.t	[b-d] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[b-d] literal qr + r6, outside
+re/pat_re_eval.t	[b-e] literal qr + r5
+re/pat_re_eval.t	[b-e] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[b-e] literal qr + r5, outside
+re/pat_re_eval.t	[b-e] literal qr + r6
+re/pat_re_eval.t	[b-e] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[b-e] literal qr + r6, outside
+re/pat_re_eval.t	[b-f] literal qr + r5
+re/pat_re_eval.t	[b-f] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[b-f] literal qr + r5, outside
+re/pat_re_eval.t	[b-f] literal qr + r6
+re/pat_re_eval.t	[b-f] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[b-f] literal qr + r6, outside
+re/pat_re_eval.t	[b] literal code
+re/pat_re_eval.t	[b] literal code UTF8
+re/pat_re_eval.t	[b] literal qr embedded text
+re/pat_re_eval.t	[b] literal qr embedded text + lit code
+re/pat_re_eval.t	[b] literal qr embedded text + run code
+re/pat_re_eval.t	[b] literal qr embedded text + run code
+re/pat_re_eval.t	[b] literal qr naked
+re/pat_re_eval.t	[b] literal qr once embedded text
+re/pat_re_eval.t	[b] literal qr once embedded text + lit code
+re/pat_re_eval.t	[b] literal qr once embedded text + run code
+re/pat_re_eval.t	[b] literal qr once embedded text + run code norun
+re/pat_re_eval.t	[b] literal qr once naked
+re/pat_re_eval.t	[b] literal+runtime AA
+re/pat_re_eval.t	[b] literal+runtime AA norun
+re/pat_re_eval.t	[b] literal+runtime AU
+re/pat_re_eval.t	[b] literal+runtime AU norun
+re/pat_re_eval.t	[b] literal+runtime UA
+re/pat_re_eval.t	[b] literal+runtime UA norun
+re/pat_re_eval.t	[b] literal+runtime UU
+re/pat_re_eval.t	[b] literal+runtime UU norun
+re/pat_re_eval.t	[b] unvarying runtime code AA
+re/pat_re_eval.t	[b] unvarying runtime code AA norun
+re/pat_re_eval.t	[b] unvarying runtime code AU
+re/pat_re_eval.t	[b] unvarying runtime code AU norun
+re/pat_re_eval.t	[b] unvarying runtime code UA
+re/pat_re_eval.t	[b] unvarying runtime code UA norun
+re/pat_re_eval.t	[b] unvarying runtime code UU
+re/pat_re_eval.t	[b] unvarying runtime code UU norun
+re/pat_re_eval.t	[c-d] literal qr + r5
+re/pat_re_eval.t	[c-d] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[c-d] literal qr + r5, outside
+re/pat_re_eval.t	[c-d] literal qr + r6
+re/pat_re_eval.t	[c-d] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[c-d] literal qr + r6, outside
+re/pat_re_eval.t	[c-e] literal qr + r5
+re/pat_re_eval.t	[c-e] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[c-e] literal qr + r5, outside
+re/pat_re_eval.t	[c-e] literal qr + r6
+re/pat_re_eval.t	[c-e] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[c-e] literal qr + r6, outside
+re/pat_re_eval.t	[c-f] literal qr + r5
+re/pat_re_eval.t	[c-f] literal qr + r5 + lit, outside
+re/pat_re_eval.t	[c-f] literal qr + r5, outside
+re/pat_re_eval.t	[c-f] literal qr + r6
+re/pat_re_eval.t	[c-f] literal qr + r6 +lit, outside
+re/pat_re_eval.t	[c-f] literal qr + r6, outside
+re/pat_re_eval.t	[c] literal code
+re/pat_re_eval.t	[c] literal code UTF8
+re/pat_re_eval.t	[c] literal qr embedded text
+re/pat_re_eval.t	[c] literal qr embedded text + lit code
+re/pat_re_eval.t	[c] literal qr embedded text + run code
+re/pat_re_eval.t	[c] literal qr embedded text + run code
+re/pat_re_eval.t	[c] literal qr naked
+re/pat_re_eval.t	[c] literal qr once embedded text
+re/pat_re_eval.t	[c] literal qr once embedded text + lit code
+re/pat_re_eval.t	[c] literal qr once embedded text + run code
+re/pat_re_eval.t	[c] literal qr once embedded text + run code norun
+re/pat_re_eval.t	[c] literal qr once naked
+re/pat_re_eval.t	[c] literal+runtime AA
+re/pat_re_eval.t	[c] literal+runtime AA norun
+re/pat_re_eval.t	[c] literal+runtime AU
+re/pat_re_eval.t	[c] literal+runtime AU norun
+re/pat_re_eval.t	[c] literal+runtime UA
+re/pat_re_eval.t	[c] literal+runtime UA norun
+re/pat_re_eval.t	[c] literal+runtime UU
+re/pat_re_eval.t	[c] literal+runtime UU norun
+re/pat_re_eval.t	[c] unvarying runtime code AA
+re/pat_re_eval.t	[c] unvarying runtime code AA norun
+re/pat_re_eval.t	[c] unvarying runtime code AU
+re/pat_re_eval.t	[c] unvarying runtime code AU norun
+re/pat_re_eval.t	[c] unvarying runtime code UA
+re/pat_re_eval.t	[c] unvarying runtime code UA norun
+re/pat_re_eval.t	[c] unvarying runtime code UU
+re/pat_re_eval.t	[c] unvarying runtime code UU norun
+re/pat_re_eval.t	\#\# in qr // doesn't corrupt memory; Bug 17776
+re/pat_re_eval.t	\Q(?{1})\E
+re/pat_re_eval.t	^\L(??{"$B\Ea"})$
+re/pat_re_eval.t	^\L(??{"$B\Ea"})$ norun
+re/pat_re_eval.t	^\U(??{"$a\Ea"})$
+re/pat_re_eval.t	^\U(??{"$a\Ea"})$ norun
+re/pat_re_eval.t	after scope exit
+re/pat_re_eval.t	bare interpolated array match
+re/pat_re_eval.t	bare interpolated global array match
+re/pat_re_eval.t	bare interpolated ref array match
+re/pat_re_eval.t	bare interpolated tied array match
+re/pat_re_eval.t	cascaded qr
+re/pat_re_eval.t	cascaded qr loop
+re/pat_re_eval.t	cascaded qr loop
+re/pat_re_eval.t	cascaded qr mix 1
+re/pat_re_eval.t	cascaded qr mix 2
+re/pat_re_eval.t	cascaded qr mix 3
+re/pat_re_eval.t	cascaded qr mix 4
+re/pat_re_eval.t	ctl_n 1
+re/pat_re_eval.t	ctl_n 10
+re/pat_re_eval.t	ctl_n 10; Bug 56194
+re/pat_re_eval.t	ctl_n 11
+re/pat_re_eval.t	ctl_n 11; Bug 56194
+re/pat_re_eval.t	ctl_n 12
+re/pat_re_eval.t	ctl_n 12; Bug 56194
+re/pat_re_eval.t	ctl_n 13
+re/pat_re_eval.t	ctl_n 13; Bug 56194
+re/pat_re_eval.t	ctl_n 1; Bug 56194
+re/pat_re_eval.t	ctl_n 2
+re/pat_re_eval.t	ctl_n 2; Bug 56194
+re/pat_re_eval.t	ctl_n 3
+re/pat_re_eval.t	ctl_n 3; Bug 56194
+re/pat_re_eval.t	ctl_n 4
+re/pat_re_eval.t	ctl_n 4; Bug 56194
+re/pat_re_eval.t	ctl_n 5
+re/pat_re_eval.t	ctl_n 5; Bug 56194
+re/pat_re_eval.t	ctl_n 6
+re/pat_re_eval.t	ctl_n 6; Bug 56194
+re/pat_re_eval.t	ctl_n 7
+re/pat_re_eval.t	ctl_n 7; Bug 56194
+re/pat_re_eval.t	ctl_n 8
+re/pat_re_eval.t	ctl_n 8; Bug 56194
+re/pat_re_eval.t	ctl_n 9
+re/pat_re_eval.t	ctl_n 9; Bug 56194
+re/pat_re_eval.t	empty array match
+re/pat_re_eval.t	empty array match with \Q
+re/pat_re_eval.t	empty array match with \Q
+re/pat_re_eval.t	empty array pattern
+re/pat_re_eval.t	empty array pattern with \Q
+re/pat_re_eval.t	empty global array match
+re/pat_re_eval.t	empty global array pattern
+re/pat_re_eval.t	empty global array pattern with \Q
+re/pat_re_eval.t	empty tied array match
+re/pat_re_eval.t	empty tied array match with \Q
+re/pat_re_eval.t	empty tied pattern
+re/pat_re_eval.t	empty tied pattern with \Q
+re/pat_re_eval.t	forward qr compiletime
+re/pat_re_eval.t	forward qr runtime
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\\\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\\\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\\\\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\\\\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code         blank  [<0x9>'A\x429\] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\\\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\\\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\\\\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\\\\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code         double [<0x100><0x9>'A\x429\] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\\\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\\\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\\\\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\\\\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code         single [<0x100><0x9>'A\x429\] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\\\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\\\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\\\\'] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\\\\'] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\] =~ /^(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code   norun blank  [<0x9>'A\x429\] =~ /^(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\\\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\\\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\\\\'] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\\\\'] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\] =~ /^<0x100>(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code   norun double [<0x100><0x9>'A\x429\] =~ /^<0x100>(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\\\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\\\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\\\\'] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\\\\'] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\\\\\\\'/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\] =~ /^\x{100}(??{my $z='{';"\\t\'\\x41\\\\x42". $nine})\\/
+re/pat_re_eval.t	hairy backslashes code   norun single [<0x100><0x9>'A\x429\] =~ /^\x{100}(??{my $z='{';qr"\t\'\x41\\x42". $nine})\\/
+re/pat_re_eval.t	interpolated array match
+re/pat_re_eval.t	interpolated array match with \Q
+re/pat_re_eval.t	interpolated array match with local sep
+re/pat_re_eval.t	interpolated global array match
+re/pat_re_eval.t	interpolated global array match with \Q
+re/pat_re_eval.t	interpolated global array match with local sep
+re/pat_re_eval.t	interpolated ref array match
+re/pat_re_eval.t	interpolated ref array match with \Q
+re/pat_re_eval.t	interpolated tied array match
+re/pat_re_eval.t	interpolated tied array match with \Q
+re/pat_re_eval.t	interpolated tied array match with local sep
+re/pat_re_eval.t	match 1
+re/pat_re_eval.t	match 10
+re/pat_re_eval.t	match 10; Bug 56194
+re/pat_re_eval.t	match 11
+re/pat_re_eval.t	match 12
+re/pat_re_eval.t	match 13; Bug 56194
+re/pat_re_eval.t	match 1; Bug 56194
+re/pat_re_eval.t	match 2
+re/pat_re_eval.t	match 2; Bug 56194
+re/pat_re_eval.t	match 3
+re/pat_re_eval.t	match 3; Bug 56194
+re/pat_re_eval.t	match 4
+re/pat_re_eval.t	match 4; Bug 56194
+re/pat_re_eval.t	match 5; Bug 56194
+re/pat_re_eval.t	match 6
+re/pat_re_eval.t	match 6; Bug 56194
+re/pat_re_eval.t	match 7
+re/pat_re_eval.t	match 7; Bug 56194
+re/pat_re_eval.t	match 8
+re/pat_re_eval.t	match 8; Bug 56194
+re/pat_re_eval.t	match 9
+re/pat_re_eval.t	match 9; Bug 56194
+re/pat_re_eval.t	match while in scope
+re/pat_re_eval.t	non-pattern literal code
+re/pat_re_eval.t	non-pattern literal code norun
+re/pat_re_eval.t	optimise: '/(?{$a[0]})/'
+re/pat_re_eval.t	optimise: 'q() =~ qr/(?{$a[0]})/'
+re/pat_re_eval.t	optimise: 'use re q(eval); $c = q{(?{$a[0]})}; /$c/'
+re/pat_re_eval.t	optimise: 'use re q(eval); $c = q{(?{$a[0]})}; /(?{1;})$c/'
+re/pat_re_eval.t	optimise: 'use re q(eval); q() =~ q{(?{$a[0]})}'
+re/pat_re_eval.t	padtmp swiping does not affect "$a$b" =~ /(??{})/
+re/pat_re_eval.t	plus 1
+re/pat_re_eval.t	plus 10
+re/pat_re_eval.t	plus 10; Bug 56194
+re/pat_re_eval.t	plus 11
+re/pat_re_eval.t	plus 11; Bug 56194
+re/pat_re_eval.t	plus 12
+re/pat_re_eval.t	plus 12; Bug 56194
+re/pat_re_eval.t	plus 13
+re/pat_re_eval.t	plus 13; Bug 56194
+re/pat_re_eval.t	plus 1; Bug 56194
+re/pat_re_eval.t	plus 2
+re/pat_re_eval.t	plus 2; Bug 56194
+re/pat_re_eval.t	plus 3
+re/pat_re_eval.t	plus 3; Bug 56194
+re/pat_re_eval.t	plus 4
+re/pat_re_eval.t	plus 4; Bug 56194
+re/pat_re_eval.t	plus 5
+re/pat_re_eval.t	plus 5; Bug 56194
+re/pat_re_eval.t	plus 6
+re/pat_re_eval.t	plus 6; Bug 56194
+re/pat_re_eval.t	plus 7
+re/pat_re_eval.t	plus 7; Bug 56194
+re/pat_re_eval.t	plus 8
+re/pat_re_eval.t	plus 8; Bug 56194
+re/pat_re_eval.t	plus 9
+re/pat_re_eval.t	plus 9; Bug 56194
+re/pat_re_eval.t	qr bare interpolated array match
+re/pat_re_eval.t	qr bare interpolated global array match
+re/pat_re_eval.t	qr bare interpolated ref array match
+re/pat_re_eval.t	qr bare interpolated tied array match
+re/pat_re_eval.t	qr empty array match
+re/pat_re_eval.t	qr empty array pattern
+re/pat_re_eval.t	qr empty array pattern with \Q
+re/pat_re_eval.t	qr empty global array match
+re/pat_re_eval.t	qr empty global array match with \Q
+re/pat_re_eval.t	qr empty global array pattern
+re/pat_re_eval.t	qr empty global array pattern with \Q
+re/pat_re_eval.t	qr empty tied array match
+re/pat_re_eval.t	qr empty tied array match with \Q
+re/pat_re_eval.t	qr empty tied pattern
+re/pat_re_eval.t	qr empty tied pattern with \Q
+re/pat_re_eval.t	qr interpolated array match
+re/pat_re_eval.t	qr interpolated array match with \Q
+re/pat_re_eval.t	qr interpolated array match with local sep
+re/pat_re_eval.t	qr interpolated global array match
+re/pat_re_eval.t	qr interpolated global array match with \Q
+re/pat_re_eval.t	qr interpolated global array match with local sep
+re/pat_re_eval.t	qr interpolated ref array match
+re/pat_re_eval.t	qr interpolated ref array match with \Q
+re/pat_re_eval.t	qr interpolated tied array match
+re/pat_re_eval.t	qr interpolated tied array match with \Q
+re/pat_re_eval.t	qr interpolated tied array match with local sep
+re/pat_re_eval.t	qr magic is not cached on refs
+re/pat_re_eval.t	qr with run-time elements and code block
+re/pat_re_eval.t	r6 norun
+re/pat_re_eval.t	r6 norun
+re/pat_re_eval.t	r6 norun
+re/pat_re_eval.t	re eval propagated compile-time
+re/pat_re_eval.t	re eval propagated run-time
+re/pat_re_eval.t	recurse(0)
+re/pat_re_eval.t	recurse(1)
+re/pat_re_eval.t	recurse(2)
+re/pat_re_eval.t	recurse3(0)
+re/pat_re_eval.t	recurse3(1)
+re/pat_re_eval.t	recurse3(2)
+re/pat_re_eval.t	recurse3(3)
+re/pat_re_eval.t	recurse4
+re/pat_re_eval.t	recurse5
+re/pat_re_eval.t	related to 121070 - use of (?&Char) should not clobber $^R
+re/pat_re_eval.t	reparse
+re/pat_re_eval.t	reparse embedded unicode
+re/pat_re_eval.t	reparse embedded unicode norun
+re/pat_re_eval.t	runtime code with unbalanced {}
+re/pat_re_eval.t	runtime code with unbalanced {} norun
+re/pat_re_eval.t	str 10; Bug 56194
+re/pat_re_eval.t	str 11; Bug 56194
+re/pat_re_eval.t	str 12; Bug 56194
+re/pat_re_eval.t	str 13; Bug 56194
+re/pat_re_eval.t	str 1; Bug 56194
+re/pat_re_eval.t	str 2; Bug 56194
+re/pat_re_eval.t	str 3; Bug 56194
+re/pat_re_eval.t	str 4; Bug 56194
+re/pat_re_eval.t	str 5; Bug 56194
+re/pat_re_eval.t	str 6; Bug 56194
+re/pat_re_eval.t	str 7; Bug 56194
+re/pat_re_eval.t	str 8; Bug 56194
+re/pat_re_eval.t	str 9; Bug 56194
+re/pat_re_eval.t	syntax error
+re/pat_re_eval.t	syntax error
+re/pat_re_eval.t	uninit
+re/pat_re_eval.t	warning eval A
+re/pat_re_eval.t	warning eval B
+re/pat_re_eval.t	warning main file
+re/reg_eval.t	'42' =~ /4(?{ 'foo' =~ m{(foo)} })2/
+re/reg_eval.t	RT\#33936
+re/reg_eval.t	match vars are localized
+re/reg_eval.t	regex distillation 1
+re/reg_eval.t	regex distillation 2
+re/reg_eval.t	regex distillation 3
+re/reg_eval.t	regex distillation 4
+re/uniprops01.t	*summary*
+re/uniprops02.t	*summary*
+re/uniprops03.t	*summary*
+re/uniprops04.t	*summary*
+re/uniprops05.t	*summary*
+re/uniprops06.t	*summary*
+re/uniprops07.t	*summary*
+re/uniprops08.t	*summary*
+re/uniprops09.t	*summary*
+re/uniprops10.t	*summary*
+run/fresh_perl.t	$foo=undef; $foo->go;
+run/fresh_perl.t	$ren = 'joy';
+run/fresh_perl.t	$stimpy = 'happy';
+run/fresh_perl.t	$x=0x0eabcd; print $x->ref;
+run/fresh_perl.t	$| = 1;
+run/fresh_perl.t	/(?{"{"}})/	\# Check it outside of eval too
+run/fresh_perl.t	@list = ([ 'one', 1 ], [ 'two', 2 ]);
+run/fresh_perl.t	BEGIN {
+run/fresh_perl.t	BEGIN { 1/$zero }
+run/fresh_perl.t	BEGIN { die "phooey\n" }
+run/fresh_perl.t	BEGIN { undef = 0 }
+run/fresh_perl.t	[perl \#112312] crash on syntax error
+run/fresh_perl.t	[perl \#112312] crash on syntax error - another test
+run/fresh_perl.t	[perl \#20667] unicode regex vs non-unicode regex
+run/fresh_perl.t	\# 20001210.003 (\#4893) mjd@plover.com
+run/fresh_perl.t	\# David Dyck
+run/fresh_perl.t	\# [ID 20001202.002 (\#4821)] and change \#8066 added...
+run/fresh_perl.t	\# core dump in 20000716.007 (\#3516)
+run/fresh_perl.t	\# fdopen from a system descriptor to a system desc...
+run/fresh_perl.t	for ("ABCDE") {
+run/fresh_perl.t	if (@ARGV) { print "" }
+run/fresh_perl.t	my $foo = Bar->new();
+run/fresh_perl.t	open(H,'run/fresh_perl.t'); \# must be in the 't' d...
+run/fresh_perl.t	package FOO;sub new {bless {FOO => BAR}};
+run/fresh_perl.t	package X;
+run/fresh_perl.t	package X;
+run/fresh_perl.t	package X;
+run/fresh_perl.t	package X;
+run/fresh_perl.t	package X;
+run/fresh_perl.t	package X;
+run/fresh_perl.t	package p;
+run/fresh_perl.t	sub NewShell
+run/fresh_perl.t	sub f { my $a = 1; my $b = 2; my $c = 3; my $d = 4...
+run/fresh_perl.t	sub testme { my $a = "test"; { local $a = "new tes...
+run/fresh_perl.t	{
+run/fresh_perl.t	{
+uni/goto.t	But does NOT find the softref sub when it's lacking the UTF-8 flag
+uni/goto.t	goto undefined sub gets the right error message

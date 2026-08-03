@@ -26,22 +26,30 @@ perl tools/difftest-ops.pl [--jobs N] [--limit N] [--show-ok]
 - `--limit N`  — only run the first N generated snippets (fast smoke test).
 - `--show-ok`  — also print the matching snippets (default: mismatches only).
 
-Exit code is non-zero iff there were mismatches. A full run is ~760 snippets and
-takes a few minutes at `--jobs 8` (each PCL run spawns a fresh SBCL).
+Exit code is non-zero iff there were mismatches. A full run is ~1060 snippets and
+takes ~15 minutes at `--jobs 8` (each PCL run spawns a fresh SBCL).
 
-Typical output:
+**The standing clean result** — reproduced verbatim s336 (2026-08-03), and what
+a run must be compared against.  Both clusters are blessed divergences with a
+`docs/not-supported.md` section; ANY other mismatch is a bug:
 
 ```
-RESULT: 761 valid snippets, 757 match, 4 MISMATCH in 2 clusters
+RESULT: 1060 valid snippets, 1056 match, 4 MISMATCH in 2 clusters
 
-### [3] numeric format (float vs int/precision)
-  length-plus            perl=[1]   pcl=[5]
-  ctx-count split /,/,$s perl=[1]   pcl=[3]
-  num 0.1 + 0.2          perl=[0.3] pcl=[0.30000000000000004]
+### [3] float (**) vs exact bigint
+  binop  2 ** 3 ** 4     perl=[2.41785163922926e+24] pcl=[2417851639229258349412352]
+  ns 2**53               perl=[9.00719925474099e+15] pcl=[9007199254740992]
+  ns 2**53 + 1           perl=[9.00719925474099e+15] pcl=[9007199254740993]
 
-### [1] float (**) vs exact bigint
-  binop 2 ** 3 ** 4      perl=[2.41785163922926e+24] pcl=[2417851639229258349412352]
+### [1] numeric format (float vs int/precision)
+  ctx-count  split /,/, $s   perl=[1] pcl=[3]
 ```
+
+- the three `**` rows are one cause: perl's `**` is always an NV, PCL's is an
+  exact bignum — not-supported.md §`**` returns an exact integer, user-parked.
+- `() = split` is the implicit LHS-arity `LIMIT` — not-supported.md §`split`
+  implicit LHS-arity limit.  (`() = @list` counts 3 on both sides; only a
+  *directly assigned* `split` differs.)
 
 ---
 

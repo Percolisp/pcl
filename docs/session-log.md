@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 336 (2026-08-03, Opus) — #214 fuzzer clean (4 known residuals, both now written up) + #185: XDIFF is granted PER ROW, machine-checked
+
+### #214 — the fuzzer, first run since the s324 era
+
+`tools/difftest-ops.pl --jobs 8`: **1060 valid snippets, 1056 match, 4
+MISMATCH in 2 clusters** — the expected clean result.  Nothing new after
+#137/#138/#140/#142/#163/#184/#189/#193/#199.
+
+Both clusters triaged to a cause by probe, not read off the cluster label:
+
+- **3 rows are ONE cause** (`2 ** 3 ** 4`, `2**53`, `2**53 + 1`): perl's `**`
+  is always an NV (C `pow` → `%.15g`), PCL's `p-**` is an exact bignum.
+  User-parked 2026-06-26 — and it lived only in a memory file, so it now has a
+  `docs/not-supported.md` section next to its sibling, including why the
+  exactness is load-bearing (`cl/pack-impl.pl`'s `2**($nbytes*8)`,
+  `Math::BigInt::Calc`'s masks) and what a faithful fix would cost.
+- **1 row** `ctx-count split /,/, $s` (perl 1, PCL 3) = the implicit LHS-arity
+  `LIMIT`, already blessed.  Probe: `() = @list` counts 3 on BOTH sides, so it
+  is specifically a *directly assigned* split, exactly as the section claims.
+
+`docs/difftest-fuzzer.md`'s "Typical output" was stale (761 snippets;
+`length-plus` and `0.1 + 0.2` have since been FIXED and match now) — replaced
+with the real s336 output, labelled as the standing result to compare against.
+
+### #185 — a blessed file no longer excuses rows nobody blessed
+
+`perl-suite-expected.tsv` said "this file may diverge, here is why".  It said
+nothing about *which rows*, so a new bug landing anywhere inside op/
+signatures.t (355 divergent rows) read exactly like the blessed gap.  XDIFF is
+now granted per ROW, all-or-nothing, the same shape as FIXTURE:
+
+- **`docs/perl-suite-expected-rows.tsv`** (new, generated) — 1720 rows over
+  108 files, one line per diverging row, keyed by **perl's test DESCRIPTION**
+  (#177: numbers are the unstable coordinate; `#N` only for genuinely unnamed
+  tests, `*extra* <desc>` for a PCL-ONLY TAP row, `*summary*`, `*no-log*`).
+  Compared as a MULTISET, so a description that repeats must be registered as
+  often as it diverges.  Deliberately a SIDECAR, not a column: 1720 generated
+  rows inside the reason registry would drown its 108 hand-written reasons.
+- **Enforcement**: an unregistered diverging row keeps the file DIFF and names
+  the intruder; a registered row that stops diverging makes the file STALE.
+  Both directions verified by breaking the baseline on purpose (op/crypt.t:
+  drop its row → `DIFF … NOT fully registered: 1 unregistered diverging row`;
+  add a fictional row → `STALE … 1 registered row(s) no longer diverge`).
+- **`--bless-rows`** regenerates it, touching ONLY the files that run measured
+  (a partial run must never erase the baseline for files it did not look at).
+
+**Stability was measured, not assumed** — four full runs of the 108 registered
+files.  Runs A and B agreed on **107 of 108**.  The one exception,
+`mro/package_aliases_utf8.t`, is nondeterministic two ways: the number of
+PCL-only TAP rows after its crash went **54 / 34 / 34**, and run C came back
+TIMEOUT where the others were DIFF.  The test tortures the stash with growing
+`인ንʵ::`-style names, so hash order decides where PCL gives up.  That file gets
+the one `*rows-unstable*` opt-out (hand-placed, never invented or overwritten
+by `--bless-rows`, justified in its reason line); the other **107 are
+row-checked**.  Final verification run D: **108 files, 108 XDIFF, 0
+UNEXPLAINED**.
+
+Fixed while blessing: an unnamed test's rowkey is perl's `[at <file> line N]`
+marker, which baked this machine's absolute perl-build path into a checked-in
+artifact — the #217 family.  The `$tdir` prefix is stripped to `t/`, keeping
+the stable line number.
+
 ## Session 335 (2026-08-03, Fable) — s334 review: the #184 fix was right, and one grep short; two more byte-identical compile-time quadratics shipped
 
 Review of s334's #184 commit (b3ede60), plus rulings on ALL open asks (s333's
