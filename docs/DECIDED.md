@@ -731,3 +731,20 @@ not-supported.md → only then probe.*
   remaining per-token `_ref_shadowed` callers): 86.6 s → 0.98 s on a
   two-package 200-statement file, emission byte-identical, guard rows in
   `Pl/t/parser2-02.t` → `fable-answers-s334.md` §5.
+- **#152 audit scope is CLOSED at the runtime** (s338): pcl-test done under
+  #202; skip-registry is data; pack/mro artifacts are audited via their Perl
+  sources' oracles; ONE bounded extension = constant-default grep of
+  `cl/pcl-xs.lisp` (task #222).  Widening to non-constant default arms
+  REJECTED — rule 12 is prospective; fuzzer + sweep TOTAL are the net →
+  `fable-answers-s337.md` §3.
+- **Default-off perl diagnostics are ABSENT, never unconditional** — PCL has
+  no `use warnings` model (grepped s337c); minimal design filed UNSCHEDULED
+  as task #221, triggered by the first concrete consumer →
+  `fable-answers-s337.md` §5a.  The print-on-unopened measurement lives in
+  `%p-out-fh-or-fail`'s docstring; do not retry it.
+- **Closed-handle value APPROVED** (defined not-writable value left by
+  `close`), queued behind #153/E4.1 as task #220; same magic-cell family as
+  #144, shrinks #198 → `fable-answers-s337.md` §4.
+- **#215 gains a warm-first half** (transpile one file before fanning out;
+  per-worker cache dirs REJECTED); serial re-run stays as backstop →
+  `fable-answers-s337.md` §5c, task #222.

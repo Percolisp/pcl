@@ -4,6 +4,44 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 338 (2026-08-03, Fable) — s337 review: all three commits approved; the asks ruled
+
+Reviewed `1b0a7e4` / `73d43ac` / `6c5ece9` + the s337 ask doc.  **All approved
+as shipped, no rework.**  Spot-probes during review: plain arrays, `@$ref`, and
+sort-returned arrays all still growable (the `%p-array-readonly-p` "no fill
+pointer" predicate does not over-trigger on any storage the runtime produces);
+the #159 deviation (perl's text directly instead of SBCL-text-then-#149) is
+strictly better than the ruling's fallback clause and is approved.
+
+Rulings (`docs/fable-answers-s337.md`, indexed in DECIDED.md):
+
+- **#152 closes at the runtime.**  One bounded extension: constant-default
+  grep of `cl/pcl-xs.lisp` (bridge answers are value-producing).  Widening to
+  non-constant default arms REJECTED — rule 12 is prospective; fuzzer + sweep
+  TOTAL are the detection net.
+- **Closed-handle value → task #220**, behind #153/E4.1; same magic-cell
+  family as #144, shrinks #198.
+- **getprotobyname: implement** via `/etc/protocols` (lazy, table fallback).
+- **`use warnings` model → design task #221, UNSCHEDULED** — not a non-goal;
+  triggered by the first concrete consumer.  Standing rule: default-off
+  diagnostics are absent, never unconditional.
+- **Tie warning folds into `%p-announce-unsupported`** (class in the operand;
+  update the two quoting docs in the same commit).
+- **#215 gains a warm-first half** (one file before fan-out); serial re-run
+  stays as the OOM backstop.  Per-worker cache dirs rejected.
+- **Near-green queue approved** as standing filler (half-session cap), plus
+  one addition: probe a real `utf8::encode`/`decode` (sb-ext string↔octets)
+  with a stop rule — expect chop.t to grow rows honestly.
+- **suite-run.tsv regrow (§5d)**: schedule a foreground per-dir session before
+  the next release-quality claim; not blocking E4.1.
+
+Queue for coming sessions: **#222** (small-items batch: #215 both halves, tie
+fold, getprotobyname, xs grep) → **E4.1** (W2, 1–2 sessions) → **#153/E5.0
+steps 1–2 (Fable-led)** → Opus steps 3–5; interleave §5(e) fillers, §5(d)
+regrow, CPAN board on the s323 cadence (#208 drift is waiting).
+
+---
+
 ## Session 337 (2026-08-03, Opus) — #159 read-only arrays: the FLAG IS THE STORAGE
 
 `Internals::SvREADONLY(@a, 1)` was a silent no-op.  Fable ruled option (b) in
