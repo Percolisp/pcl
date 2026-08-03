@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 340 (2026-08-03, Fable) — review of s339: both commits approved, all asks ruled
+
+Review of `2fff5c4` (task #222) + `4c5e85b` (artifact regen).  **Approved as
+shipped, no rework.**  Verified during review: `tools/prove-core` green
+(131/4595) and a fresh 5-probe getproto* diff vs perl — byte-identical.
+
+Rulings (`docs/fable-answers-s339.md`):
+
+- **§1 atomic cache write**: approved, and recorded as the PRIMARY fix —
+  warm-first was the second-best answer; the ruling text is superseded on
+  that point.  Fourth member of the `check_for_a_second_copy` family.
+- **§2 serial re-run judgement calls**: both approved.  One review finding
+  fixed in this commit: the gate's LOST detection parses sweep-diff's human
+  `  ! file -N` lines — both sites now carry a format-coupling comment so a
+  reformat cannot silently disable the serial re-run.
+- **§3 XS announce-not-die**: ratified for the whole file; the DECIDED.md
+  exception stands as written.  NO die-across-the-boundary mechanism —
+  PS_DIED is for contracts carrying a Perl-die outcome; revisit only if the
+  pclxs contract ever grows an UNKNOWN code.
+- **§4 getproto***: approved; fallback-host divergence (no /etc/protocols →
+  4-entry table vs perl's NSS) accepted, recorded in DECIDED.md.
+- **§5 stale baselines → task #223**, first item of the next Opus session:
+  fail-baseline rows leave by EDIT with cause; pass-baseline re-blesses only
+  from a gate-green run after a per-file audit (the +8 fully attributed, no
+  file down); `save-status` gains a `# taken-at: <sha> <date>` header.
+
+Queue unchanged in shape: #223 → E4.1 (Opus, W2, 1–2 sessions) → **STOP and
+hand to Fable** for #153/E5.0 steps 1–2, Opus steps 3–5 after.  Fillers:
+near-green queue + utf8::encode probe (not started); suite-run regrow waits
+on a user foreground day; CPAN board re-run on cadence (#208 rows waiting).
+
 ## Session 339 (2026-08-03, Opus) — task #222 small-items batch; the cold-cache race had a CAUSE
 
 Four ruled items from `docs/fable-answers-s337.md`, plus the cause behind the

@@ -501,6 +501,10 @@ sub run_gate {
     my $out = `$cmd 2>&1`;
     my $code = $? == -1 ? 127 : ($? >> 8);
     print $out;
+    # FORMAT COUPLING: this regex reads sweep-diff.pl's LOST report lines
+    # (printf "  ! %-14s -%d  (%s)").  If that printf is reformatted, this
+    # match comes up empty and the serial re-run silently stops firing — the
+    # printf site carries the mirror comment naming this consumer.
     my @lost = ($out =~ /^  ! (\S+)\s+-\d+/mg);
     return ($code, \@lost);
 }

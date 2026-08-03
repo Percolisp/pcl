@@ -294,6 +294,10 @@ if (@lost) {
     my $rows = 0; $rows += $_->[1] for @lost;
     print "LOST passing rows (baseline rows this run did not produce): $rows\n";
     for my $l (sort { $b->[1] <=> $a->[1] || $a->[0] cmp $b->[0] } @lost) {
+        # FORMAT CONSUMER: sweep-perl-tests.pl's run_gate() parses these lines
+        # (/^  ! (\S+)\s+-\d+/) to pick the files for its serial re-run.  If
+        # you reformat this printf, update that regex or the re-run silently
+        # stops firing.
         printf "  ! %-14s -%d  (%s)\n", $l->[0], $l->[1], $l->[2];
     }
     print "\n";

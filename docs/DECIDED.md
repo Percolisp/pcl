@@ -770,4 +770,17 @@ not-supported.md → only then probe.*
 - **getprotobyname/getprotobynumber read `/etc/protocols`** (lazy, four-entry
   table only when unreadable), wantarray-sensitive, EXACT name-or-alias match
   (`Tcp` misses), scalar context = number by name / NAME by number →
-  `fable-answers-s337.md` §4-secondary, s339.
+  `fable-answers-s337.md` §4-secondary, s339.  **Fallback-host divergence
+  ACCEPTED** (no `/etc/protocols` → the 4-entry table may differ from perl's
+  NSS answer; not a validated host class) → `fable-answers-s339.md` §4.
+- **XS announce-not-die RATIFIED for the whole of `cl/pcl-xs.lisp`; NO
+  die-across-the-boundary mechanism** (PS_DIED stays the only die channel —
+  it is for contracts that carry a Perl-die outcome, not for answerable
+  cases; revisit only if the pclxs contract grows an UNKNOWN code) →
+  `fable-answers-s339.md` §3, s340.
+- **Baseline hygiene (task #223): fail-baseline rows leave by EDIT with the
+  cause named, NEVER by regeneration; pass-baseline (a generated file)
+  re-blesses ONLY from a gate-green run after a per-file audit** — every
+  delta attributed, no file down, an unexplained delta is a finding.
+  `save-status` stamps `# taken-at: <sha> <date>`; readers skip `#` lines →
+  `fable-answers-s339.md` §5, s340.
