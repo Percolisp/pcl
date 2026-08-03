@@ -179,6 +179,15 @@ not-supported.md → only then probe.*
 - **Copied-file corpus split**: t/ originals are authoritative; the runner
   no longer hides a t/ file behind a `perl-tests/` copy of the same name;
   drifted copies re-sync post-R1 → task #150, `fable-answers-s316v.md` §6i.
+  **PART 2 DONE s337**: `perl-tests/{chop,dor,not,quotemeta}.t` restored
+  byte-identical to `t/op/` (they had hand-lowered plans, commented-out
+  assertions, and a hand-written `dor.t` substitute).  Each newly-visible
+  failure got a CAUSE: not.t 21–24 → registry `:read-only` (interned
+  booleans), dor.t 26/28 → registry `:principle9` (assert rejection of
+  invalid Perl), quotemeta.t 30/31 → honest baseline fails owned by #146,
+  chop.t → PARTIAL 96/148 because **`utf8::encode` is a no-op**, so the
+  file's own `next` guard skips 48 rows (not skip-registrable — they never
+  run).  A hand-lowered plan had been masking exactly that shortfall.
 - **v1 is the emission ORACLE until E4.1** (`PCL_V1=1 ./pl2cl`) — copy its
   shape when correct, don't invent one → `v2-opus5-execution-plan.md` §2.
 - **New Pl/t tests** → smallest `transpile-test-NN.t`, cap ~50/file, never

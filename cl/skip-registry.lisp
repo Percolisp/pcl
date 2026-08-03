@@ -112,6 +112,43 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 (18 :read-only
                     "undef &constant_sub must die 'Can't modify constant item' — constant/read-only slots not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' (undef.t 16-18)."))
 
+;; not.t 21-24 — perl's `!0`/`!1` are ONE globally-shared read-only scalar, so
+;; writing through `for (!0) { $_ = 43 }` dies and `\!0` is the same address every
+;; time.  PCL's `pl-!`/`pl-not` return a fresh 1/"" per call: mutable, distinct
+;; addresses.  (Task #159 gave ARRAYS a read-only representation; a read-only
+;; SCALAR still has nowhere to carry the flag, and interning would need a global
+;; constant table besides.)  These four were COMMENTED OUT of perl-tests/not.t
+;; until s337 (#150 part 2) — the file is now byte-identical to t/op/not.t and the
+;; assertions run.  not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.
+(register-skips "not.t"
+                ("^not 0 is read-only"
+                 :read-only
+                 "for (!0) { $_ = 43 } must die 'Modification of a read-only value attempted' -- PCL's ! returns a fresh mutable value, not the shared read-only scalar. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.")
+                ("^not 1 is read-only"
+                 :read-only
+                 "for (!1) { $_ = 43 } must die 'Modification of a read-only value attempted' -- PCL's ! returns a fresh mutable value. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.")
+                ("^!0 returns the same value each time"
+                 :read-only
+                 "\\!0 must be the same address every call [perl #114838] -- PCL allocates a fresh value per negation. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.")
+                ("^!1 returns the same value each time"
+                 :read-only
+                 "\\!1 must be the same address every call [perl #114838] -- PCL allocates a fresh value per negation. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'."))
+
+;; dor.t 26/28 — `f $x /2` and `print $fh /2` must be COMPILE ERRORS in perl
+;; ("Search pattern not terminated": the `/` starts a match that never closes).
+;; PCL parses them as division and raises nothing, so `$@` is empty.  Both rows
+;; assert that INVALID Perl is rejected — CLAUDE.md principle 9, the same category
+;; as cmpchain's 274 rows and do.t t63/t65 (ruled fable-answers-s318.md §4).  The
+;; sibling rows either side (the same shapes with `/ 2`, which ARE valid) pass and
+;; are deliberately not matched by these regexes.
+(register-skips "dor.t"
+                ("^Caught unterminated search pattern error message: empty subroutine"
+                 :principle9
+                 "`sub f ($) { } f $x /2` must die 'Search pattern not terminated' -- error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ("^Caught unterminated search pattern error message: sub with built-in function"
+                 :principle9
+                 "`sub { print $fh /2 }` must die 'Search pattern not terminated' -- error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'."))
+
 ;; unshift.t's "croak when unshifting onto readonly array" was registered here
 ;; until task #159 (s337) made Internals::SvREADONLY(@a,1) swap the array's
 ;; storage for a fixed-size one.  The row PASSES now — do not re-register it.

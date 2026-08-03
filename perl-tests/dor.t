@@ -1,50 +1,100 @@
-# Simplified from Perl's t/op/dor.t
-# Test // (defined-or) and //=
+#!./perl
 
-my $x;
+# Test // and friends.
 
-# // operator
-$x = 1;
-is($x // 0, 1, '// : left-hand operand defined');
+BEGIN {
+    chdir 't' if -d 't';
+    require "./test.pl";
+    set_up_inc('../lib');
+}
+
+package main;
+
+plan( tests => 34 );
+
+my($x);
+
+$x=1;
+is($x // 0, 1,		'	// : left-hand operand defined');
 
 $x = undef;
-is($x // 1, 1, '// : left-hand operand undef');
+is($x // 1, 1, 		'	// : left-hand operand undef');
 
-$x = '';
-is($x // 0, '', '// : left-hand operand defined but empty');
+$x='';
+is($x // 0, '',		'	// : left-hand operand defined but empty');
 
-$x = 0;
-is($x // 1, 0, '// : left-hand operand is zero');
+like([] // 0, qr/^ARRAY/,	'	// : left-hand operand a reference');
 
-# //= operator
-$x = undef;
+$x=undef;
 $x //= 1;
-is($x, 1, '//=: left-hand operand undefined');
+is($x, 1, 		'	//=: left-hand operand undefined');
 
 $x //= 0;
-is($x, 1, '//=: left-hand operand defined');
+is($x, 1, 		'//=: left-hand operand defined');
 
 $x = '';
 $x //= 0;
-is($x, '', '//=: left-hand operand defined but empty');
+is($x, '', 		'//=: left-hand operand defined but empty');
 
-$x = 0;
-$x //= 5;
-is($x, 0, '//=: left-hand operand is zero');
+@ARGV = (undef, 0, 3);
+is(shift       // 7, 7,	'shift // ... works');
+is(shift()     // 7, 0,	'shift() // ... works');
+is(shift @ARGV // 7, 3,	'shift @array // ... works');
 
-# Chained //
-$x = undef;
-my $y = undef;
-my $z = 3;
-is($x // $y // $z, 3, 'chained //');
+@ARGV = (3, 0, undef);
+is(pop         // 7, 7,	'pop // ... works');
+is(pop()       // 7, 0,	'pop() // ... works');
+is(pop @ARGV   // 7, 3,	'pop @array // ... works');
 
-$y = 2;
-is($x // $y // $z, 2, 'chained // stops at first defined');
+# Test that various syntaxes are allowed
 
-# // with expressions
-my @arr = (undef, 0, 3);
-is($arr[0] // 7, 7, 'array element undef // default');
-is($arr[1] // 7, 0, 'array element zero // default');
-is($arr[2] // 7, 3, 'array element defined // default');
+for (qw(getc pos readline readlink undef umask <> <FOO> <$foo> -f)) {
+    eval "sub { $_ // 0 }";
+    is($@, '', "$_ // ... compiles");
+}
 
-done_testing();
+# Test for some ambiguous syntaxes
+
+eval q# sub f ($) { } f $x / 2; #;
+is( $@, '', "'/' correctly parsed as arithmetic operator" );
+eval q# sub f ($):lvalue { $y } f $x /= 2; #;
+is( $@, '', "'/=' correctly parsed as assignment operator" );
+eval q# sub f ($) { } f $x /2; #;
+like( $@, qr/^Search pattern not terminated/,
+    "Caught unterminated search pattern error message: empty subroutine" );
+eval q# sub { print $fh / 2 } #;
+is( $@, '',
+    "'/' correctly parsed as arithmetic operator in sub with built-in function" );
+eval q# sub { print $fh /2 } #;
+like( $@, qr/^Search pattern not terminated/,
+    "Caught unterminated search pattern error message: sub with built-in function" );
+
+# [perl #28123] Perl optimizes // away incorrectly
+
+is(0 // 2, 0, 		'	// : left-hand operand not optimized away');
+is('' // 2, '',		'	// : left-hand operand not optimized away');
+is(undef // 2, 2, 	'	// : left-hand operand optimized away');
+
+# Test that OP_DORs other branch isn't run when arg is defined
+# // returns the value if its defined, and we must test its
+# truthness after
+my $x = 0;
+my $y = 0;
+
+$x // 1 and $y = 1;
+is($y, 0, 'y is still 0 after "$x // 1 and $y = 1"');
+
+$y = 0;
+# $x is defined, so its value 0 is returned to the if block
+# and the block is skipped
+if ($x // 1) {
+    $y = 1;
+}
+is($y, 0, 'if ($x // 1) exited out early since $x is defined and 0');
+
+# This is actually (($x // $z) || 'cat'), so 0 from first dor
+# evaluates false, we should see 'cat'.
+$y = undef;
+
+$y = $x // $z || 'cat';
+is($y, 'cat', 'chained or/dor behaves correctly');

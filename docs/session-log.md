@@ -72,6 +72,40 @@ scalar.t rows s333 left un-blessed), 66 files fully passing, TOTAL passing up
 from baseline 18469.  Emission is byte-identical by construction (no `Pl/`
 change), so no cache-generation bump and no artifact regeneration.
 
+### #150 part 2 — four sweep files that were lying, restored
+
+Same session.  `perl-tests/{chop,dor,not,quotemeta}.t` had been **edited in
+place** — the CLAUDE.md-5 violation the skip registry exists to replace: plan
+counts hand-lowered, assertions commented out, and `dor.t` replaced outright by
+a hand-written "Simplified from Perl's t/op/dor.t".  All four are now
+byte-identical to `t/op/` (diffable), and each newly-visible failure was
+triaged to a cause, never to a count:
+
+- **not.t 21–24** → skip registry (`:read-only`): perl's `!0`/`!1` are one
+  shared read-only scalar, PCL's `!` returns a fresh mutable value.  #159 gave
+  ARRAYS a read-only representation; a read-only SCALAR still has nowhere to
+  carry the flag, and interning needs a constant table besides.
+- **dor.t 26/28** → skip registry (`:principle9`): `f $x /2` and
+  `print $fh /2` must be *compile errors* ("Search pattern not terminated").
+  Both rows assert rejection of INVALID Perl — the do.t t63/t65 category.  The
+  sibling rows with `/ 2` (valid) pass and are deliberately unmatched.
+- **quotemeta.t 30/31** → honest fails in `fail-baseline.tsv`, rows taken
+  verbatim from the faillog.  Already owned by task **#146**.
+- **chop.t** → **PARTIAL 96+0/148, and that is the real finding.**  The old
+  copy's plan said 100, exactly masking the shortfall.  Cause, by probe:
+  **`utf8::encode` is a no-op** (`\x{100}` stays 1 char of ord 256 where perl
+  gives bytes 196,128 — already blessed for index.t), so the file's own
+  `next if $end_utf8 eq $end` guard always fires and 48 rows are never emitted.
+  Not skip-registrable: the rows do not run at all.
+
+Also confirmed: #159 turned **op/push.t, op/splice.t, op/unshift.t** from DIFF
+to **OK** in the perl suite — three of #150's own near-green candidates, whose
+single divergent row was the read-only one.
+
+Sweep after the re-sync: **18498 passing / 681 fails, GATE clean — 0 new**.
+Fully-passing 66 → 64 is the point of the exercise: chop.t and quotemeta.t
+stopped over-claiming.
+
 ---
 
 ## Session 336 (2026-08-03, Opus) — #214 fuzzer clean (4 known residuals, both now written up) + #185: XDIFF is granted PER ROW, machine-checked

@@ -8,7 +8,7 @@ BEGIN {
     require "./loc_tools.pl";
 }
 
-plan tests => 56;
+plan tests => 60;
 
 if ($Config{ebcdic} eq 'define') {
     $_ = join "", map chr($_), 129..233;
@@ -75,11 +75,10 @@ is(length(quotemeta($char)), 1, "quotemeta '\\N{U+DF}'  in UTF-8 length");
 
     # BF is chosen because it is NOt alphanumeric in both Latin1 and EBCDIC
     # DF is chosen because it IS alphanumeric in both Latin1 and EBCDIC
-    # PCL: no feature 'unicode_strings' not implemented — PCL always uses Unicode semantics
-    # is(quotemeta("\x{bf}"), "\\\x{bf}", "quotemeta Latin1 no unicode_strings quoted");
-    # is(length(quotemeta("\x{bf}")), 2, "quotemeta Latin1 no unicode_strings quoted length");
-    # is(quotemeta("\x{df}"), "\\\x{df}", "quotemeta Latin1 no unicode_strings quoted");
-    # is(length(quotemeta("\x{df}")), 2, "quotemeta Latin1 no unicode_strings quoted length");
+    is(quotemeta("\x{bf}"), "\\\x{bf}", "quotemeta Latin1 no unicode_strings quoted");
+    is(length(quotemeta("\x{bf}")), 2, "quotemeta Latin1 no unicode_strings quoted length");
+    is(quotemeta("\x{df}"), "\\\x{df}", "quotemeta Latin1 no unicode_strings quoted");
+    is(length(quotemeta("\x{df}")), 2, "quotemeta Latin1 no unicode_strings quoted length");
 
   SKIP: {
     skip 'Locales not available', 8 unless locales_enabled('LC_CTYPE');

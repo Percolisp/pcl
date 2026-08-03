@@ -33,7 +33,13 @@ new scalar for every negation.  Replicating it in CL would require a global
 constant table and read-only box semantics, with no practical benefit for
 running CPAN modules.
 
-**Affected tests:** `perl-tests/not.t` tests 21–24 (commented out).
+**Affected tests:** `perl-tests/not.t` tests 21–24.  They were **commented out
+of the .t file** until s337 (#150 part 2); the file is now byte-identical to
+`t/op/not.t` and the four assertions run, matched by the skip registry
+(`cl/skip-registry.lisp`, `:read-only`).  Note task #159 gave read-only
+*arrays* a real representation — the storage itself is fixed-size — but a
+read-only **scalar** has nowhere to carry the flag, and interning would need a
+global constant table besides.
 
 ---
 
@@ -191,8 +197,18 @@ diverge from Perl in several respects:
 
 - **`utf8::encode` / `utf8::decode`**: Perl has an internal UTF-8 flag per
   scalar that can be toggled.  CL strings are always Unicode; the flag does not
-  exist.  Tests that call `utf8::encode` and then compare the *byte* encoding to
-  the *character* string are not meaningful in PCL.
+  exist.  `utf8::encode` is therefore a **no-op** — measured s337:
+  `utf8::encode("\x{100}")` leaves a 1-character string of ord 256, where perl
+  produces the 2 bytes 196,128.  Tests that call `utf8::encode` and then compare
+  the *byte* encoding to the *character* string are not meaningful in PCL.
+  **Second-order consequence (s337, #150 part 2):** a test file can *skip its own
+  rows* over this.  `t/op/chop.t` guards a 4-assertion block with
+  `next if $end_utf8 eq $end` after encoding; under PCL the two are always equal,
+  so the block never runs and the file emits **100 of perl's 148 rows** —
+  `perl-tests/chop.t` is PARTIAL/INCOMPLETE for this reason and not because
+  anything failed.  (Until s337 that copy had its plan hand-lowered to 100, which
+  made the shortfall read as a clean pass.)  Nothing can be skip-registered here:
+  the rows are never emitted at all.
 
 - **Multi-character case mappings**: `uc("\x{DF}")` in Perl returns `"SS"` (two
   characters).  SBCL's `string-upcase` returns `"SS"` too, but `uc("\x{587}")`
