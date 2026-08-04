@@ -67,6 +67,19 @@ sub audit_v1_route {
     print $fh join("\t", $why, $method, $what, substr($err, 0, 200)), "\n";
     close $fh;
   }
+  # Some v1 routes are on files that do not outlive the run — `fresh_perl`
+  # writes /tmp/pcl_fp_*.pl and unlinks it as soon as the child exits, so by
+  # the time the audit is read the evidence is gone.  With PCL_V2_AUDIT_KEEP
+  # naming a directory, copy the source aside while it still exists.
+  if (my $dir = $ENV{PCL_V2_AUDIT_KEEP}) {
+    return unless $method eq 'parse_file' && defined $subject && -r $subject;
+    (my $base = $subject) =~ s{.*/}{};
+    if (open my $in, '<', $subject) {
+      my $src = do { local $/; <$in> };
+      close $in;
+      if (open my $out, '>', "$dir/$base") { print {$out} $src; close $out }
+    }
+  }
 }
 
 sub parse_with_fallback {

@@ -67,9 +67,24 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
   binds the name, exactly as `foreach my` does after s342b (`our` still
   counts — it *does* create the global).  Board re-measured: 36 → **31**
   events, output byte-identical.
-- **F4 is guardrail §5a.4's subject.** These are PPI failures, not v2 gaps:
-  today they land in v1 (which runs with `--lenient-ppi`), and after the flip
-  they must die loudly naming the file — never become a silent no-op.
+- **F4 is guardrail §5a.4's subject, and it is DIAGNOSED (s342d, #228) —
+  5 of the 6 need no work, the 6th is an ASK.**  All six children contain a
+  literal **NUL byte**: they are perl's own "sigil `\0` ident" lexer tests in
+  `lex.t` (`print $\0eq`, `@\0eq`, `%\0eq`, `&\0eq`, `${*\0eq{SCALAR}}`) plus
+  `do\0000000` (`[perl #129069]`).  PPI cannot tokenize a NUL — verified:
+  `PPI::Document->new` fails with "Encountered unexpected character '0'" and
+  parses the identical source with the NUL stripped; perl runs it and prints
+  `ok`.  Five of the six are **already registered skips** keyed on their
+  descriptions (`cl/skip-registry.lisp` → `docs/not-supported.md`, "NUL bytes
+  (and other control characters) in identifiers"), so the flip changes nothing
+  for them: the die is loud, the row still reports skip.
+  **The ASK is the sixth**, `[perl #129069] - no output and valgrind clean`.
+  It currently PASSES, and it passes *because* v1's `--lenient-ppi` truncates
+  the unparseable source to nothing and the assertion expects empty output.
+  After the flip v2 dies, the child prints an error, and the row fails.  That
+  is a live dependency on lenient truncation — which §5a.4 says is **an ASK,
+  not a judgement call**: register it beside its five siblings, or make v2
+  tolerate NUL in source.
 - **F7 needs no work.** It is worth recording only because it shows
   `parse_with_fallback` catches *every* die, so a raw fallback count
   over-states the gap. The audit's TODO/DIE split is what corrects for it.

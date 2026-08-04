@@ -37,6 +37,20 @@ renames.  Also caught by the gate: my *first* regression test was wrong, not
 the code — it used `$err` outside the constructs, which correctly poisons.  It
 became an extra INVERSE row.
 
+**#228 diagnosed in the same session, no code change.**  The six
+`Parser2: PPI parse failed` children are unlinked the moment the child exits,
+so the audit side-channel gained `PCL_V2_AUDIT_KEEP=<dir>` (copy a `parse_file`
+subject aside while it still exists).  All six contain a literal **NUL byte** —
+perl's own "sigil `\0` ident" tests in lex.t plus `do\0000000`.  PPI cannot
+tokenize a NUL (verified: it fails, and parses the identical source with the
+NUL stripped; perl runs it and prints `ok`), so this is a PPI limitation, not a
+v2 lowering gap.  **Five of the six are already registered skips** under
+`docs/not-supported.md`'s "NUL bytes … in identifiers", so the flip changes
+nothing for them.  **The sixth is an ASK**: `[perl #129069]` passes today
+*because* `--lenient-ppi` truncates the source to nothing and the assertion
+expects empty output — a live dependency on lenient truncation, which §5a.4
+says is an ASK, not a judgement call.
+
 Audit re-measured: CPAN board **36 → 31** v1 events with byte-identical output;
 sweep still 24, of which 11 are now correctly classified DIE (the classifier
 keyed on `Parser2 TODO:` and so put F4's `Parser2: PPI parse failed` on the
