@@ -854,3 +854,15 @@ not-supported.md → only then probe.*
   at either site multiplies across the whole image — the first attempt made
   SBCL exhaust a 1 GB heap compiling `Pl/t/socket-01.t`.  The macro has exactly
   three callers, all `defun`s.
+- **The CPAN board's FAIL rule is "zero ok", so it counts files perl itself
+  SKIPS as failures** (s343, `docs/cpan-board14-survey-s343.md`): 12 of 53
+  FAILs on the 14-dist board are author-only tests (`1..0 # SKIP`) or files
+  perl cannot run either.  **Always run the perl oracle beside the board** —
+  real failures were 41, not 53.
+- **There is no module called `XSLoader` to support — it is the XS boundary**
+  (s343).  `Can't locate loadable object for module …` is PCL dying *exactly*
+  as perl would without the `.so`, which is deliberate and load-bearing (it is
+  what makes dual-life modules fall back to pure Perl).  The literal
+  "module **this module**" is `XSLoader::load()` called with NO arguments —
+  perl 5.10+ infers the caller's package, PCL's shim does not; worth fixing for
+  diagnosis, not a blocker.

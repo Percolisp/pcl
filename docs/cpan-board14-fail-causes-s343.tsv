@@ -1,0 +1,57 @@
+# s343: first-cause line per FAIL file of the 14-dist board (docs/cpan-board14-s343.tsv),
+# joined with what REAL PERL does with the same file (the discriminator: a file
+# perl skips or cannot run is not a PCL failure).
+# dist <TAB> t-file <TAB> perl-verdict <TAB> pcl-cause
+Capture-Tiny-0.50-0	00-report-prereqs.t	PERL-PASS	(no diagnostic)
+Capture-Tiny-0.50-0	02-capture.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	06-stdout-closed.t	PERL-PASS	#<synonym-stream :SYMBOL sb-sys:*stdout* {12000396F3}> is closed
+Capture-Tiny-0.50-0	07-stderr-closed.t	PERL-PASS	A nested error within --disable-debugger error handling prevents printing the backtrace. Sorry, exiting.
+Capture-Tiny-0.50-0	08-stdin-closed.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	10-stdout-string.t	PERL-PASS	#<synonym-stream :SYMBOL sb-sys:*stdout* {12000396F3}> is closed
+Capture-Tiny-0.50-0	13-stdout-tied.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	14-stderr-tied.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	15-stdin-tied.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	16-catch-errors.t	PERL-PASS	Error in tempfile() using template /tmp/XXXXXXXXXX: The template must end with at least 4 'X' characters
+Capture-Tiny-0.50-0	18-custom-capture.t	PERL-PASS	Error getting name to temp file from template /tmp/XXXXXXXXXX: The template must end with at least 4 'X' characters
+Capture-Tiny-0.50-0	20-stdout-badtie.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	21-stderr-badtie.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	22-stdin-badtie.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	23-all-tied.t	PERL-PASS	invalid number of arguments: 1
+Capture-Tiny-0.50-0	24-all-badtied.t	PERL-PASS	invalid number of arguments: 1
+Class-Inspector-1.36-0	class_inspector__devel_hide.t	PERL-SKIPALL	(no diagnostic)
+Class-Method-Modifiers-2.15-0	002-cache.t	PERL-PASS	FINALIZE-INHERITANCE was called on a forward referenced class:
+Class-Method-Modifiers-2.15-0	003-basic.t	PERL-PASS	FINALIZE-INHERITANCE was called on a forward referenced class:
+Class-Method-Modifiers-2.15-0	010-before-args.t	PERL-PASS	not ok 1 - before affected orig's args a little
+Class-Method-Modifiers-2.15-0	081-sub-and-modifier.t	PERL-PASS	The method 'orig' is not found in the inheritance hierarchy for class MyParent2
+Class-Method-Modifiers-2.15-0	110-namespace-clean.t	PERL-PASS	Can't locate loadable object for module this module in @INC
+Class-Method-Modifiers-2.15-0	120-fresh.t	PERL-PASS	Can't locate loadable object for module this module in @INC
+Data-Dump-1.25-0	dd.t	PERL-PASS	Can't take sqrt of -171.125
+Data-Dump-1.25-0	glob.t	PERL-PASS	The function |IO::Socket::UNIX|::pl-AF_UNIX is undefined.
+Data-Dump-1.25-0	quote.t	PERL-PASS	(no diagnostic)
+Data-Dump-1.25-0	regexp.t	PERL-PASS	not ok 1
+Data-Dump-1.25-0	scalar.t	PERL-PASS	not ok 1
+Mojo-DOM58-3.002-0	00-report-prereqs.t	PERL-PASS	(no diagnostic)
+Mojo-DOM58-3.002-0	collection.t	PERL-PASS	The function main::pl-subtest is undefined.
+Mojo-DOM58-3.002-0	dom.t	PERL-PASS	Can't locate loadable object for module Storable in @INC
+Mojo-DOM58-3.002-0	entities.t	PERL-PASS	Can't locate loadable object for module Encode in @INC
+Mojo-DOM58-3.002-0	roles.t	PERL-PASS	Can't locate loadable object for module Storable in @INC
+Role-Tiny-2.002004-0	concrete-methods.t	PERL-PASS	The function MyRole1::pl-before_constant_deflate is undefined.
+Role-Tiny-2.002004-0	extend-role-tiny.t	PERL-PASS	read error during load:
+Role-Tiny-2.002004-0	namespace-clean.t	PERL-PASS	Can't locate loadable object for module this module in @INC
+Role-Tiny-2.002004-0	proto.t	PERL-PASS	read error during load:
+Role-Tiny-2.002004-0	subclass.t	PERL-PASS	Can't locate object method "apply_roles_to_package" via package "RoleExtension" at - line 1.
+Scalar-List-Utils-1.70-0	exotic_names.t	PERL-NOTAP	Can't locate loadable object for module this module in @INC
+Scalar-List-Utils-1.70-0	reductions.t	PERL-NOTAP	List::Util::reductions is not yet implemented in PCL
+Scalar-List-Utils-1.70-0	sample.t	PERL-NOTAP	List::Util::sample is not yet implemented in PCL
+Scalar-List-Utils-1.70-0	subname.t	PERL-NOTAP	Can't locate loadable object for module this module in @INC
+Scalar-List-Utils-1.70-0	undefined-block.t	PERL-NOTAP	not ok 1 - reduce(undef, ...) croaks
+Sub-Uplevel-0.2800-0	00-report-prereqs.t	PERL-PASS	(no diagnostic)
+Sub-Uplevel-0.2800-0	01_die_check.t	PERL-PASS	not ok 1
+Sub-Uplevel-0.2800-0	08_exporter.t	PERL-PASS	The value
+Text-Balanced-2.07-0	94_changes.t	PERL-SKIPALL	(no diagnostic)
+Text-Balanced-2.07-0	95_critic.t	PERL-SKIPALL	(no diagnostic)
+Text-Balanced-2.07-0	96_pmv.t	PERL-SKIPALL	(no diagnostic)
+Text-Balanced-2.07-0	97_pod.t	PERL-SKIPALL	(no diagnostic)
+Text-Balanced-2.07-0	98_pod_coverage.t	PERL-SKIPALL	(no diagnostic)
+Try-Tiny-0.32-0	global_destruction_load.t	PERL-SKIPALL	(no diagnostic)
+Try-Tiny-0.32-0	named.t	PERL-PASS	not ok 1 - try name
