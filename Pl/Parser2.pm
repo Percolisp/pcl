@@ -658,6 +658,19 @@ sub parse {
   # E3: an eval string that switches package at top level would need the full
   # multi-section assembly (head/body split across in-package switches) — the
   # per-eval v1 retry owns that shape until it proves common.
+  #
+  # s342g (task #226) narrowed WHY, so the next attempt starts from facts:
+  # 23 of the family's 24 measured events are ONE LEADING `package X;` and no
+  # further switch, i.e. an EMPTY first segment plus X's — not a real
+  # multi-section assembly.  Dropping the empty head makes it a single segment
+  # and the assembler accepts it, but the result is SILENTLY WRONG: the body's
+  # `sub f` still emits as `pl-f` (read in :pcl) while the caller looks up
+  # `X::pl-f`.  The missing piece is making the section's symbols resolve in X.
+  # `(in-package |X|)` only works when the body is at top level — with free
+  # variables it sits inside the thunk's lambda, where a reader-level switch
+  # cannot reach.  The reuse path is the OTHER mechanism, already built for
+  # nested packages by E1.5/D1-lite: emit the symbols QUALIFIED (see
+  # _lower_our_decl's "Inside a nested-`package X;` region … qualify it").
   die "Parser2 TODO: eval-mode multi-segment (top-level package statement)\n"
     if $self->eval_mode && @segments > 1;
   # E3: `eval '...; my $x = EXPR'` — the eval's VALUE is the trailing

@@ -58,8 +58,13 @@ if ($ENV{PCL_V1}) {
 sub audit_v1_route {
   my ($why, $method, $subject, $err) = @_;
   my $log = $ENV{PCL_V2_AUDIT_LOG} or return;
-  my $what = (defined $subject && $subject !~ /\n/ && length($subject) < 200)
-             ? $subject : '(inline code)';
+  # Keep the line one line: squash whitespace and truncate.  A bare
+  # "(inline code)" hid what the eval-mode families actually were (s342g).
+  my $what = defined $subject ? $subject : '';
+  $what =~ s/\s+/ /g;
+  $what =~ s/^\s+|\s+$//g;
+  $what = substr($what, 0, 160) . ' …' if length($what) > 160;
+  $what = '(empty)' unless length $what;
   $err = defined $err ? $err : '';
   $err =~ s/\s+/ /g;
   $err =~ s/^\s+|\s+$//g;

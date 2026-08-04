@@ -43,7 +43,7 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
 
 | # | Family | Events (sweep + board) | Kind | Where it shows |
 |---|---|---|---|---|
-| F1 | `eval-mode multi-segment (top-level package statement)` | 6 + 18 = **24** | TODO | `eval 'package X; …'` |
+| F1 | `eval-mode multi-segment (top-level package statement)` — **NARROWED s342g** | 6 + 18 = **24** | TODO | the **Role::Tiny idiom**: `eval "package X; use Role::Tiny; …"` (all 18 board events) |
 | F2 | `eval-mode trailing my/our declaration (value-losing let)` — **CLEARED s342f** except one shape | 6 + 4 = **10** | TODO | `eval "our $VERSION = '1.01'"` (the whole CPAN half); `eval 'my ()'`; perl-syntax-error probes |
 | F3 | `block-form arg body captures live lexical` | 0 + 8 = **8** | TODO | Try-Tiny `basic/finally/named/when.t`, S-L-U `first/pair/reduce/rt-96343.t` |
 | F4 | `Parser2: PPI parse failed` | 6 + 0 = **6** | TODO | `/tmp/pcl_fp_*.pl` — `fresh_perl`/`runperl` children |
@@ -53,6 +53,18 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
 
 ### Notes per family
 
+- **F1 is NARROWED (s342g, task #226) to one missing piece, and it is NOT what
+  the E3 comment assumed.**  All 18 board events are the Role::Tiny idiom
+  (`eval "package X; use Role::Tiny; …"`); **23 of the 24 are exactly one
+  LEADING `package` statement with no further switch** — an EMPTY first segment
+  plus X's, not a real multi-section assembly.  Dropping the empty head makes
+  the assembler accept it, and that was **tried and reverted**: the result is
+  silently wrong (`sub f` emits as `pl-f`, read in `:pcl`, while the caller
+  looks up `X::pl-f`).  The missing piece is making the section's symbols
+  resolve in X.  `(in-package |X|)` reaches only the free-variable-free case
+  (otherwise the body is inside the thunk's lambda); the reuse path is the
+  QUALIFIED emission E1.5/D1-lite already built for nested packages.  Needs a
+  design call on that blast radius before implementing.
 - **F2 is CLEARED (s342f, task #227) except one shape**, and its CPAN half was
   never a syntax probe: all four board events are `eval "our $VERSION = '…'"`,
   a routine module idiom.  The gate refused **every** `our`, though

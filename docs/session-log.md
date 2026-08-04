@@ -4,6 +4,46 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 342g (2026-08-05, Opus) — #226 narrowed: F1 is the Role::Tiny idiom, and one piece is missing
+
+No compiler change — an attempt made, measured wrong, and reverted, which is
+the point of writing it down.
+
+**What the family actually is.**  The audit logged these as `(inline code)`
+because the side-channel refused any multi-line subject; taught to keep a
+squashed 160-char prefix, it says: all 18 CPAN-board events are the
+**Role::Tiny idiom** — `eval "package X; use Role::Tiny; …"`,
+`eval "package X; use Role::Tiny::With; with '…'; …"` — and the 6 sweep events
+are `eval "package T121::Z; ::t121(…)"`.  **23 of the 24 are exactly one
+LEADING `package` statement with no further switch.**
+
+So the E3 comment's premise ("would need the full multi-section assembly") is
+wrong for the measured cases: a leading `package X;` splits into an EMPTY first
+segment (the caller's package, nothing in it) plus X's.
+
+**Tried and reverted.**  Dropping the empty head makes `@segments == 1` and
+`_assemble_eval_mode` accepts it — but the output is **silently wrong**:
+`eval "package X; sub f { 42 } our $V = 7; 1"` emits `(p-sub pl-f …)`, read in
+`:pcl`, while the caller looks up `X::pl-f` ("The function X::pl-f is
+undefined"; perl gives X::f=42, X::V=7, and no `main::f`).  Reverted, and the
+finding written into the gate's comment so the next attempt starts from it.
+
+**The one missing piece** is making the section's symbols resolve in X.
+`(in-package |X|)` reaches only the case with no free variables — otherwise the
+body sits inside the thunk's lambda, where a reader-level switch cannot go.
+The reuse path is the *other* mechanism, already built for nested packages by
+E1.5/D1-lite: emit the symbols QUALIFIED (`_lower_our_decl`'s "Inside a
+nested-`package X;` region … qualify it", which also registers the our-variable
+so unqualified uses qualify identically).  That needs a design call on its
+blast radius — sub definition path, unqualified globals, method resolution —
+so #226 goes back to pending with the analysis attached.
+
+Also here: the audit side-channel keeps a usable prefix instead of
+`(inline code)` (that truncation is what hid this family's identity for two
+sessions).  Gate 131 / 4629 PASS; corpus emission identical to HEAD.
+
+---
+
 ## Session 342f (2026-08-05, Opus) — #227: the CPAN half of F2 was `our $VERSION`, not a syntax probe
 
 The task said to check each row before assuming work was needed, and that paid:
